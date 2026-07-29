@@ -111,7 +111,8 @@ Ya implementado y funcionando:
 - **RF-01:** Consultar datos de un cliente por ID de servicio.
 - **RF-02:** Consultar datos de un cliente por número de cédula (endpoint `api/clientes/?cedula=`).
 - **RF-03:** Consultar facturas de un cliente y su estado (pagada/pendiente).
-- **RF-04:** Consultar estado de un ticket de soporte.
+- **RF-04:** Consultar estado de un ticket de soporte por su número.
+- **RF-04b:** Consultar los tickets **abiertos de un cliente**, por ID de servicio o por cédula.
 - **RF-05:** Registrar un pago (acción sensible, requiere confirmación humana).
 - **RF-06:** Responder en español, en tercera persona sobre el cliente.
 - **RF-07:** No inventar datos; si no existe, indicarlo explícitamente.
@@ -278,7 +279,10 @@ Documentación oficial: <https://wisphub.net/api-docs/> (el spec OpenAPI está e
 
 - `/api/facturas/` filtra por `estado` (1 Pendiente de Pago, 2 Pagada, 3 Cancelada, 4 En Revisión, 5 Se Transfirió), `zona`, `cajero`, `facturadas`, y rangos `fecha_emision__range_0/_1`, `fecha_vencimiento__range_*`, `fecha_pago__range_*`. **Si no se pasa filtro de fecha, aplica por defecto los últimos 3 meses de emisión.**
 - `/api/clientes/` filtra por `estado` (1 Activo, 2 Suspendido, 3 Cancelado, 4 Gratis), `plan_internet`, `router`, `sectorial`, `tecnico`, `asesor`, `ciudad`, `localidad`, y variantes `__contains`. **No** tiene filtro por zona.
-- Endpoints aún no usados que sirven al norte: `/api/clientes/{id}/saldo/`, `/api/zonas/`, `/api/plan-internet/`, `/api/staff/`, `/api/gastos/`, `/api/tickets/` (lista).
+- `/api/tickets/` filtra por `estado` (**numérico**: 1 Nuevo, 2 En Progreso, 4 Cerrado; `?estado=Nuevo` devuelve 0 sin error), `fecha_creacion_0/_1` y `mis_tickets`. Volumen real: 268 nuevos, 13 en progreso, 2.255 cerrados.
+- **`/api/tickets/` NO tiene filtro por cliente.** Probados 8 nombres de parámetro (`servicio`, `cliente`, `id_servicio`, `usuario`, `search`, `cliente__usuario`…): todos ignorados, devuelven los 2.536. El cliente tampoco expone sus tickets (`/clientes/{id}/` y `/clientes/{id}/perfil/` no tienen ningún campo de soporte; `informacion_adicional` viene vacío). Solución: filtrar por estado en el API y cruzar por cliente en código — solo los abiertos (~280, 3 páginas, ~6 s); barrer los 2.255 cerrados no vale una consulta interactiva.
+- **El `next` del paginado viene en `http://`** (`http://api.wisphub.io/api/tickets/?...`). Seguirlo enviaría la clave del API en texto plano: se pagina con `offset` propio sobre HTTPS y no se sigue nunca esa URL.
+- Endpoints aún no usados que sirven al norte: `/api/clientes/{id}/saldo/`, `/api/zonas/`, `/api/plan-internet/`, `/api/staff/`, `/api/gastos/`.
 - Sandbox: `https://sandbox-api.wisphub.net` (según doc; no probado).
 
 ---
@@ -404,5 +408,7 @@ Es la misma fortaleza que el modelo ya demostró (traducir intención a parámet
    - **Un total truncado es una respuesta incorrecta silenciosa.** Si se entregan menos filas que el total, el paquete debe declararlo (campo `aviso`) y el `total` debe ser siempre el `count` del API, nunca el número de filas traídas.
 3. **Lista blanca de agregación**: qué campos se pueden filtrar, cuáles agrupar, qué métricas existen, qué rango máximo de periodo. Es el principio de siempre —el modelo propone, el código dispone— aplicado ahora a la *forma* de la consulta, no solo a sus argumentos.
 4. **La respuesta debe declarar cómo se interpretó la pregunta.** Nunca *"hay 143"*; siempre *"Clientes morosos en zona NORTE, julio 2026: 143"*.
+
+**Confirmación empírica de la regla 2 (julio 2026).** Al implementar `consultar_tickets_de_cliente` se le entregaron al modelo 50 tickets (~14.000 caracteres). Resultado: `qwen3:4b` **dejó de seguir el prompt** —respondió en inglés—, se puso a "analizar" la lista y concluyó que *"50 nuevas instalaciones están activas en la zona CORTE 15"*, una afirmación que nadie le pidió y que no se deduce del dato. Con el mismo caso reducido a conteo + desglose por estado + los 5 más recientes (1.283 caracteres), la respuesta volvió a ser correcta, en español y breve. No es una cuestión de eficiencia: **un modelo pequeño saturado de datos deja de obedecer las reglas de comportamiento**, y ahí el riesgo deja de ser la latencia y pasa a ser la exactitud.
 
 **Por qué la regla 4 no es cosmética.** Esta decisión no elimina el error del modelo: lo traslada de la aritmética a la *interpretación*. El modelo ya no suma mal, pero puede componer un filtro equivocado —entender "zona norte" como `NORTE` cuando en WispHub se llama `ZONA 1`— y devolver un número impecablemente calculado sobre la pregunta incorrecta. Ese error es más peligroso que uno evidente, porque nadie lo nota. Declarar la interpretación permite que el asesor, que sí conoce los nombres reales, lo detecte de inmediato. Misma filosofía que el filtro fail-closed: no confiar, hacer visible.

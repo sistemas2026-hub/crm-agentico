@@ -106,6 +106,7 @@ def _headers():
 EP_CLIENTES = "/api/clientes/"      # filtros: ?cedula=  |  ?id_servicio=
 EP_FACTURAS = "/api/facturas/"      # filtro por cliente: ?cliente=<usuario>  (NO el id)
 EP_TICKET   = "/api/tickets/{id}/"
+EP_TICKETS  = "/api/tickets/"       # filtros: ?estado= (numerico), fecha_creacion_0/_1
 EP_PAGO     = "/api/facturas/{id}/registrar-pago/"
 
 # Maximo de filas que se le entregan al modelo en una consulta de lista.
@@ -116,6 +117,22 @@ EP_PAGO     = "/api/facturas/{id}/registrar-pago/"
 # Para CONTAR no hace falta traer filas: el paginado del API ya devuelve 'count'.
 # Una consulta agregada debe pedir limit=1 y leer ese numero (ver PRD 12.5).
 LIMITE_FILAS = 50
+
+# Estados de ticket (valores del filtro ?estado=, verificados en produccion).
+# El filtro es NUMERICO: ?estado=Nuevo devuelve 0 resultados, sin error.
+ESTADOS_TICKET = {1: "Nuevo", 2: "En Progreso", 4: "Cerrado"}
+ESTADOS_ABIERTOS = (1, 2)
+
+# Tope de paginas al barrer tickets. Los abiertos son ~280 (3 paginas de 100,
+# medido en 5.3 s); los cerrados son 2.255 y por eso NO se barren en vivo.
+MAX_PAGINAS = 10
+
+# Cuantos tickets se le muestran al modelo al listar los de un cliente.
+# MEDIDO: con 50 tickets en el contexto, qwen3:4b dejo de seguir el prompt
+# (respondio en ingles), se puso a "analizar" la lista y saco una conclusion
+# inventada. El asesor no necesita la lista: necesita cuantos hay, de que tipo,
+# y los ultimos. El conteo lo hace Python (PRD 12.5).
+TOPE_TICKETS_LISTA = 5
 
 # Accion al registrar un pago (campo 'accion' del API):
 #   0 = solo registrar el pago
@@ -174,12 +191,22 @@ CAMPOS_PERMITIDOS = {
         "fecha_creacion", "fecha_inicio", "fecha_fin",
         "servicio.id_servicio", "servicio.plan_internet", "servicio.zona",
     ],
+    # Mismos campos para el ticket suelto y para la lista de tickets del cliente.
+    # (la entrada se asigna despues de definir el diccionario)
     # El API responde {task_id, messages}; el modo simulado, {resultado, ...}.
     "registrar_pago": ["resultado", "id_factura", "total_cobrado",
                        "mensajes", "messages", "task_id", "errors"],
 }
-# Las dos consultas de cliente devuelven la misma forma: comparten lista blanca.
+# Herramientas que devuelven la misma forma comparten lista blanca.
 CAMPOS_PERMITIDOS["consultar_cliente_por_cedula"] = CAMPOS_PERMITIDOS["consultar_cliente"]
+
+# La LISTA de tickets de un cliente es mas pobre a proposito que el ticket
+# suelto: sin 'descripcion' (texto libre largo, y multiplicado por N filas
+# desborda el contexto) y sin 'servicio' (redundante: ya sabemos de que cliente
+# son). Para el detalle de uno, el asesor pide ese ticket por su numero.
+CAMPOS_PERMITIDOS["consultar_tickets_de_cliente"] = [
+    "id_ticket", "asunto", "estado", "prioridad", "tecnico", "fecha_creacion",
+]
 
 def _compilar_permitidos(permitidos):
     """Separa la lista blanca en campos de primer nivel y campos anidados."""
@@ -261,8 +288,15 @@ def filtrar_campos(nombre, datos):
 
     if isinstance(datos, dict):
         if isinstance(datos.get("results"), list):
-            return _empaquetar_lista(permitidos, datos["results"],
-                                     datos.get("count", len(datos["results"])))
+            paquete = _empaquetar_lista(permitidos, datos["results"],
+                                        datos.get("count", len(datos["results"])))
+            # Estas claves las pone NUESTRO codigo, no el API: el alcance de la
+            # busqueda y los totales ya calculados. Se dejan pasar para que el
+            # modelo los repita en vez de deducirlos contando filas.
+            for clave in ("alcance", "por_estado"):
+                if clave in datos:
+                    paquete[clave] = datos[clave]
+            return paquete
         return _solo_permitidos(permitidos, datos)
 
     return {"error": "Formato de respuesta no reconocido. Resultado descartado."}
@@ -300,6 +334,16 @@ HERRAMIENTAS = [
             "id_ticket": {"type": "string", "description": "Numero del ticket."}
         }, "required": ["id_ticket"]}}},
     {"type": "function", "function": {
+        "name": "consultar_tickets_de_cliente",
+        "description": ("Lista los tickets de soporte ABIERTOS (Nuevo o En Progreso) de un "
+                        "cliente. Usar cuando el asesor pregunte si un cliente tiene tickets, "
+                        "reportes o casos abiertos. Acepta el ID de servicio o la cedula: "
+                        "basta con uno de los dos. No incluye tickets cerrados."),
+        "parameters": {"type": "object", "properties": {
+            "id_cliente": {"type": "string", "description": "ID de servicio del cliente."},
+            "cedula": {"type": "string", "description": "Cedula del cliente."}
+        }, "required": []}}},
+    {"type": "function", "function": {
         "name": "registrar_pago",
         "description": "Registra un pago sobre una factura. ACCION SENSIBLE: requiere confirmacion.",
         "parameters": {"type": "object", "properties": {
@@ -313,6 +357,13 @@ HERRAMIENTAS = [
 #  2) CAPA DE VALIDACION
 # ==============================================================================
 
+def _limpiar_cedula(valor):
+    """Quita los separadores con que suele escribirse una cedula (1.098.765.432)."""
+    cedula = str(valor or "").strip()
+    for sobra in (".", " ", "-"):
+        cedula = cedula.replace(sobra, "")
+    return cedula
+
 def validar_argumentos(nombre, args):
     if nombre in ("consultar_cliente", "consultar_facturas"):
         idc = str(args.get("id_cliente", "")).strip()
@@ -320,10 +371,7 @@ def validar_argumentos(nombre, args):
             return False, "Falta el ID de servicio del cliente."
         return True, {"id_cliente": idc}
     if nombre == "consultar_cliente_por_cedula":
-        # Se limpian separadores comunes (puntos, espacios, guiones) antes de buscar.
-        cedula = str(args.get("cedula", "")).strip()
-        for sobra in (".", " ", "-"):
-            cedula = cedula.replace(sobra, "")
+        cedula = _limpiar_cedula(args.get("cedula"))
         if not cedula:
             return False, "Falta el numero de cedula."
         if not cedula.isdigit() or len(cedula) > 15:
@@ -334,6 +382,17 @@ def validar_argumentos(nombre, args):
         if not idt:
             return False, "Falta el numero de ticket."
         return True, {"id_ticket": idt}
+    if nombre == "consultar_tickets_de_cliente":
+        # Acepta ID de servicio O cedula. Resolver la cedula aqui, en codigo,
+        # evita que el modelo tenga que encadenar dos herramientas: hoy
+        # responder() ejecuta una sola ronda por turno (ver PRD 12.3).
+        idc = str(args.get("id_cliente") or "").strip()
+        cedula = _limpiar_cedula(args.get("cedula"))
+        if not idc and not cedula:
+            return False, "Falta el ID de servicio o la cedula del cliente."
+        if cedula and not cedula.isdigit():
+            return False, "La cedula no es un numero valido."
+        return True, {"id_cliente": idc, "cedula": cedula}
     if nombre == "registrar_pago":
         idf = str(args.get("id_factura", "")).strip()
         try:
@@ -462,6 +521,65 @@ def _facturas_de_cliente(cliente):
     # filtro. Si se devolviera solo la lista, el total seria el de la pagina.
     return {"count": total, "results": filas}
 
+def _tickets_de_cliente(id_servicio):
+    """
+    Tickets ABIERTOS de un cliente.
+
+    El API de tickets NO tiene filtro por cliente: probados 8 nombres de
+    parametro (servicio, cliente, id_servicio, usuario, search...), todos son
+    ignorados y devuelven los 2.536 tickets de la empresa. Tampoco el cliente
+    expone sus tickets (ni /clientes/{id}/ ni /clientes/{id}/perfil/).
+
+    Asi que se filtra por estado en el API -unico filtro que si funciona- y el
+    cruce por cliente se hace AQUI, en codigo. Solo se barren los estados
+    abiertos (~280 tickets, 3 paginas): los 2.255 cerrados serian ~23 paginas
+    y no valen una consulta interactiva.
+
+    NO se sigue el campo 'next' del paginado: el API lo devuelve en http://
+    (verificado: 'http://api.wisphub.io/api/tickets/?...'). Seguirlo mandaria la
+    clave del API en texto plano. Se pagina con offset propio, sobre HTTPS.
+    """
+    encontrados, barridos = [], 0
+    url = WISPHUB_BASE_URL + EP_TICKETS
+    for estado in ESTADOS_ABIERTOS:
+        offset = 0
+        for _ in range(MAX_PAGINAS):
+            r = requests.get(url, headers=_headers(), timeout=25,
+                             params={"estado": estado, "limit": 100, "offset": offset})
+            r.raise_for_status()
+            pagina = r.json()
+            filas = pagina.get("results") or []
+            barridos += len(filas)
+            encontrados += [
+                f for f in filas
+                if str((f.get("servicio") or {}).get("id_servicio")) == str(id_servicio)
+            ]
+            offset += len(filas)
+            if not filas or offset >= pagina.get("count", 0):
+                break
+
+    # Mas recientes primero: si hay que recortar, que sobrevivan los utiles.
+    encontrados.sort(key=lambda f: str(f.get("fecha_creacion") or ""), reverse=True)
+
+    # 'count' es el total real encontrado; se entregan como mucho LIMITE_FILAS.
+    # El filtro avisa solo si recorto (ver _empaquetar_lista).
+    # El desglose se calcula AQUI, no se le pide al modelo que cuente filas.
+    por_estado = {}
+    for f in encontrados:
+        clave = str(f.get("estado") or "sin estado")
+        por_estado[clave] = por_estado.get(clave, 0) + 1
+
+    abiertos = ", ".join(ESTADOS_TICKET[e] for e in ESTADOS_ABIERTOS)
+    return {
+        "count": len(encontrados),
+        "por_estado": por_estado,
+        "results": encontrados[:TOPE_TICKETS_LISTA],
+        # Se declara el alcance de la busqueda: una respuesta correcta sobre una
+        # pregunta mal entendida es el error mas dificil de detectar (RF-15).
+        "alcance": (f"Solo tickets abiertos ({abiertos}); los cerrados no se "
+                    f"consultaron. Se revisaron {barridos} tickets."),
+    }
+
 def ejecutar_herramienta(nombre, args):
     """Devuelve la respuesta CRUDA (sin filtrar todavia)."""
     if not USAR_WISPHUB_REAL:
@@ -476,6 +594,16 @@ def ejecutar_herramienta(nombre, args):
             return _SIMULADO["facturas"].get(args["id_cliente"], [])
         if nombre == "consultar_ticket":
             return _SIMULADO["tickets"].get(args["id_ticket"], {"error": "Ticket no encontrado"})
+        if nombre == "consultar_tickets_de_cliente":
+            idc = args["id_cliente"]
+            if not idc:
+                for c in _SIMULADO["clientes"].values():
+                    if c.get("cedula") == args["cedula"]:
+                        idc = c["id_servicio"]
+            propios = [t for t in _SIMULADO["tickets"].values()
+                       if str((t.get("servicio") or {}).get("id_servicio")) == str(idc)]
+            return {"count": len(propios), "results": propios,
+                    "alcance": "Solo tickets abiertos (simulado)."}
         if nombre == "registrar_pago":
             return {"resultado": "ok", "id_factura": args["id_factura"],
                     "total_cobrado": args["monto"],
@@ -494,6 +622,15 @@ def ejecutar_herramienta(nombre, args):
             if "error" in cliente:
                 return cliente
             return _facturas_de_cliente(cliente)
+
+        if nombre == "consultar_tickets_de_cliente":
+            if args["id_cliente"]:
+                cliente = _buscar_cliente("id_servicio", args["id_cliente"])
+            else:
+                cliente = _buscar_cliente("cedula", args["cedula"])
+            if "error" in cliente:
+                return cliente
+            return _tickets_de_cliente(cliente["id_servicio"])
 
         if nombre == "consultar_ticket":
             url = WISPHUB_BASE_URL + EP_TICKET.format(id=args["id_ticket"])
@@ -544,6 +681,10 @@ SYSTEM = (
     "- Usa SIEMPRE las herramientas para consultar datos reales antes de responder. Nunca inventes ni supongas datos.\n"
     "- Si el asesor da un numero de cedula (documento), usa consultar_cliente_por_cedula; "
     "si da un ID de servicio, usa consultar_cliente.\n"
+    "- Si pregunta por tickets DE UN CLIENTE, usa consultar_tickets_de_cliente (acepta "
+    "cedula o ID de servicio). Si te da un NUMERO DE TICKET, usa consultar_ticket.\n"
+    "- Cuando un resultado traiga un campo 'alcance' o 'aviso', repiteselo al asesor: "
+    "indica que se consulto y que no. No lo omitas.\n"
     "- Si una herramienta no devuelve un dato, dilo explicitamente ('No se encontro esa informacion') en vez de rellenar.\n"
     "- Si el asesor pide algo para lo que no tienes herramienta, indica que no puedes consultarlo, no improvises.\n"
     "- Presenta la informacion de forma ordenada (puedes usar una lista corta si son varios campos).\n"
