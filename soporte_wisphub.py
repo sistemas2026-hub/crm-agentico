@@ -152,61 +152,136 @@ ACCION_PAGO = int(os.environ.get("WISPHUB_ACCION_PAGO", "0"))
 # Para las herramientas que devuelven una LISTA (facturas, busquedas), la lista
 # blanca se aplica a CADA elemento de la lista.
 
-# Nombres de campo VERIFICADOS contra la API en produccion (no inventados).
-# El endpoint de clientes devuelve 54 campos; aqui pasan 13.
-# Deliberadamente FUERA de la lista blanca:
-#   - 'usuario': identificador interno (nombre-completo@empresa). El codigo lo
-#     necesita para consultar facturas, pero el modelo no tiene por que verlo.
-#   - red y credenciales (ip, mac_cpe, password_*, sn_onu, router, ssid...):
-#     nunca, para ningun area salvo Tecnica.
-#   - financieros del plan (precio_plan, costo_instalacion, descuento): area de
-#     Facturacion, no de Soporte (ver tabla de areas del PRD, seccion 3).
-CAMPOS_PERMITIDOS = {
-    "consultar_cliente": [
-        "id_servicio", "nombre", "cedula", "estado",
-        "estado_facturas", "saldo", "fecha_corte",
-        "plan_internet", "zona", "fecha_instalacion",
-        # Contacto: el asesor los necesita para ubicar al cliente o coordinar
-        # una visita. Son PII: cuando exista control por area (Fase 2), revisar
-        # si todas las areas deben verlos.
-        "email", "telefono", "direccion",
-    ],
-    "consultar_facturas": [
-        "id_factura", "estado", "total", "saldo",
-        "fecha_emision", "fecha_vencimiento", "fecha_pago",
-    ],
-    # 'servicio' NO se deja pasar entero: trae la IP del cliente y el router con
-    # sus credenciales. Solo se abren sus campos inofensivos, con notacion punto.
-    # Fuera a proposito: 'respuestas' (hilo del ticket, util pero de tamano
-    # imprevisible; revisar al implementar el tope de volumen) y 'email_tecnico',
-    # 'creado_por', 'tickets_mensual/anual' (datos internos que no ayudan a
-    # responder por el estado de un ticket).
-    # OJO con 'descripcion': es TEXTO LIBRE. Visto en produccion, puede traer
-    # embebidos nombre, telefono, email, direccion, GPS, documento y enlaces.
-    # La lista blanca filtra campos, no el contenido de un campo. Se conserva
-    # porque es el contenido del ticket, pero es un limite real (ver PRD 7.4).
-    "consultar_ticket": [
-        "id_ticket", "asunto", "descripcion", "razon_falla",
-        "estado", "prioridad", "tecnico", "departamento", "origen_reporte",
-        "fecha_creacion", "fecha_inicio", "fecha_fin",
-        "servicio.id_servicio", "servicio.plan_internet", "servicio.zona",
-    ],
-    # Mismos campos para el ticket suelto y para la lista de tickets del cliente.
-    # (la entrada se asigna despues de definir el diccionario)
-    # El API responde {task_id, messages}; el modo simulado, {resultado, ...}.
-    "registrar_pago": ["resultado", "id_factura", "total_cobrado",
-                       "mensajes", "messages", "task_id", "errors"],
-}
-# Herramientas que devuelven la misma forma comparten lista blanca.
-CAMPOS_PERMITIDOS["consultar_cliente_por_cedula"] = CAMPOS_PERMITIDOS["consultar_cliente"]
+# --- Grupos de campos ---------------------------------------------------------
+# Nombres VERIFICADOS contra la API en produccion (el endpoint de clientes
+# devuelve 54 campos). Se agrupan por naturaleza para componer cada area sin
+# repetir listas y sin que una se desactualice respecto de la otra.
 
-# La LISTA de tickets de un cliente es mas pobre a proposito que el ticket
-# suelto: sin 'descripcion' (texto libre largo, y multiplicado por N filas
-# desborda el contexto) y sin 'servicio' (redundante: ya sabemos de que cliente
-# son). Para el detalle de uno, el asesor pide ese ticket por su numero.
-CAMPOS_PERMITIDOS["consultar_tickets_de_cliente"] = [
-    "id_ticket", "asunto", "estado", "prioridad", "tecnico", "fecha_creacion",
+_CLIENTE_IDENTIDAD = ["id_servicio", "nombre", "cedula", "estado"]
+_CLIENTE_CONTACTO  = ["email", "telefono", "direccion", "localidad", "ciudad"]
+_CLIENTE_SERVICIO  = ["plan_internet", "zona", "fecha_instalacion"]
+_CLIENTE_PAGO      = ["estado_facturas", "saldo", "fecha_corte"]
+_CLIENTE_FINANCIERO = ["precio_plan", "costo_instalacion", "descuento"]
+_CLIENTE_RED       = ["ip", "mac_cpe", "sn_onu", "modelo_antena",
+                      "modelo_router_wifi", "ssid_router_wifi", "interfaz_lan",
+                      "sectorial", "router.nombre", "router.id"]
+
+# NUNCA, para NINGUN area:
+#   password_servicio, password_cpe, password_router_wifi,
+#   password_ssid_router_wifi, usuario_router_wifi
+# Un tecnico que necesite una credencial la saca de WispHub. Pasarla por el
+# modelo no le ahorra nada y la deja escrita en el historial de la conversacion.
+#
+# Tampoco 'usuario' (identificador interno nombre@empresa): el codigo lo usa
+# para consultar facturas, el modelo no tiene por que verlo.
+
+# 'servicio' dentro de un ticket NO se abre entero: trae la IP y el router.
+_TICKET_BASE = [
+    "id_ticket", "asunto", "descripcion", "razon_falla",
+    "estado", "prioridad", "tecnico", "departamento", "origen_reporte",
+    "fecha_creacion", "fecha_inicio", "fecha_fin",
+    "servicio.id_servicio", "servicio.plan_internet", "servicio.zona",
 ]
+# OJO con 'descripcion': es TEXTO LIBRE. Visto en produccion, puede traer
+# embebidos nombre, telefono, email, direccion, GPS, documento y enlaces.
+# La lista blanca filtra campos, no el contenido de un campo (ver PRD 7.4).
+
+# La LISTA de tickets es mas pobre a proposito que el ticket suelto: sin
+# 'descripcion' (texto libre largo, multiplicado por N filas desborda el
+# contexto) y sin 'servicio' (redundante: ya sabemos de que cliente son).
+_TICKET_LISTA = ["id_ticket", "asunto", "estado", "prioridad",
+                 "tecnico", "fecha_creacion"]
+
+_FACTURA = ["id_factura", "estado", "total", "saldo",
+            "fecha_emision", "fecha_vencimiento", "fecha_pago"]
+
+# El API responde {task_id, messages}; el modo simulado, {resultado, ...}.
+_PAGO_RESULTADO = ["resultado", "id_factura", "total_cobrado",
+                   "mensajes", "messages", "task_id", "errors"]
+
+
+# ==============================================================================
+#  CATALOGO POR AREA  —  quien pregunta determina que herramientas y que campos
+# ==============================================================================
+# El motor (validacion, tool calling, filtrado, confirmacion) NO cambia entre
+# areas: solo recibe distintas herramientas y distintos campos.
+#
+# Regla: una herramienta que no aparece en 'herramientas' no se le muestra al
+# modelo, y una que no tiene entrada en 'campos' no devuelve nada (fail-closed).
+# Las dos condiciones deben cumplirse; no alcanza con una.
+
+AREAS = {
+    "soporte": {
+        "descripcion": "Soporte: atiende al cliente, revisa su estado y sus tickets.",
+        "herramientas": ["consultar_cliente", "consultar_cliente_por_cedula",
+                         "consultar_ticket", "consultar_tickets_de_cliente"],
+        "campos": {
+            "consultar_cliente": (_CLIENTE_IDENTIDAD + _CLIENTE_CONTACTO +
+                                  _CLIENTE_SERVICIO + _CLIENTE_PAGO),
+            "consultar_ticket": _TICKET_BASE,
+            "consultar_tickets_de_cliente": _TICKET_LISTA,
+        },
+    },
+    "tecnica": {
+        "descripcion": "Tecnica: diagnostica la conectividad y el equipo del cliente.",
+        "herramientas": ["consultar_cliente", "consultar_cliente_por_cedula",
+                         "consultar_ticket", "consultar_tickets_de_cliente"],
+        "campos": {
+            # Unica area que ve datos de red. Sin contacto: para diagnosticar no
+            # hace falta el telefono, y si hay que llamar al cliente lo hace
+            # Soporte. Credenciales, ninguna (ver arriba).
+            "consultar_cliente": (_CLIENTE_IDENTIDAD + _CLIENTE_SERVICIO +
+                                  _CLIENTE_RED),
+            "consultar_ticket": _TICKET_BASE + ["servicio.ip"],
+            "consultar_tickets_de_cliente": _TICKET_LISTA,
+        },
+    },
+    "facturacion": {
+        "descripcion": "Facturacion: revisa facturas, saldos y registra pagos.",
+        "herramientas": ["consultar_cliente", "consultar_cliente_por_cedula",
+                         "consultar_facturas", "registrar_pago"],
+        "campos": {
+            # Sin datos de red ni tickets: no hacen a su trabajo.
+            "consultar_cliente": (_CLIENTE_IDENTIDAD + _CLIENTE_CONTACTO +
+                                  _CLIENTE_PAGO + _CLIENTE_FINANCIERO +
+                                  ["plan_internet"]),
+            "consultar_facturas": _FACTURA,
+            "registrar_pago": _PAGO_RESULTADO,
+        },
+    },
+    "administracion": {
+        "descripcion": "Administracion: consulta consolidada, sin datos personales.",
+        "herramientas": ["consultar_cliente", "consultar_cliente_por_cedula",
+                         "consultar_tickets_de_cliente"],
+        "campos": {
+            # Sin PII: ni cedula, ni contacto. Ve el estado y el servicio.
+            # Su verdadero caso de uso son los informes agregados, que aun no
+            # existen (PRD 12.5); mientras tanto, el minimo indispensable.
+            "consultar_cliente": (["id_servicio", "nombre", "estado"] +
+                                  _CLIENTE_SERVICIO + ["estado_facturas"]),
+            "consultar_tickets_de_cliente": _TICKET_LISTA,
+        },
+    },
+}
+
+# Las dos consultas de cliente devuelven la misma forma: comparten campos.
+for _area in AREAS.values():
+    if "consultar_cliente" in _area["campos"]:
+        _area["campos"]["consultar_cliente_por_cedula"] = _area["campos"]["consultar_cliente"]
+
+AREA_POR_DEFECTO = "soporte"
+
+def area_valida(area):
+    return (area or "").strip().lower() in AREAS
+
+def campos_de(area, herramienta):
+    """Lista blanca de esa herramienta PARA ESA AREA. None si no le corresponde."""
+    return AREAS.get(area, {}).get("campos", {}).get(herramienta)
+
+def herramientas_de(area):
+    """Definiciones de las herramientas que el area puede usar."""
+    permitidas = AREAS.get(area, {}).get("herramientas", [])
+    return [h for h in HERRAMIENTAS if h["function"]["name"] in permitidas]
 
 def _compilar_permitidos(permitidos):
     """Separa la lista blanca en campos de primer nivel y campos anidados."""
@@ -258,9 +333,9 @@ def _empaquetar_lista(permitidos, filas, total):
         )
     return paquete
 
-def filtrar_campos(nombre, datos):
+def filtrar_campos(nombre, datos, area=AREA_POR_DEFECTO):
     """
-    Deja solo los campos de la lista blanca. Descarta IP, MAC, passwords, etc.
+    Deja solo los campos que ESA AREA puede ver. Descarta IP, MAC, passwords...
 
     Maneja las tres formas en que responde WispHub:
       - dict suelto            -> {"campo": valor, ...}
@@ -270,13 +345,14 @@ def filtrar_campos(nombre, datos):
     Las dos ultimas se normalizan a {"total": N, "resultados": [...]} para que
     el modelo siempre reciba la misma forma.
 
-    IMPORTANTE (fail-closed): si una herramienta no tiene lista blanca definida,
-    NO se deja pasar nada. Antes se devolvia el dato crudo, lo que abria un hueco
-    en la capa de seguridad al agregar herramientas nuevas.
+    IMPORTANTE (fail-closed): si esa area no tiene lista blanca para esa
+    herramienta, NO se deja pasar nada. Vale tanto para una herramienta nueva sin
+    configurar como para un area que no deberia estar consultando eso.
     """
-    permitidos = CAMPOS_PERMITIDOS.get(nombre)
+    permitidos = campos_de(area, nombre)
     if permitidos is None:
-        return {"error": f"Sin lista blanca de campos para '{nombre}'. Resultado descartado."}
+        return {"error": f"El area '{area}' no tiene permitido consultar "
+                         f"'{nombre}'. Resultado descartado."}
     permitidos = set(permitidos)
 
     # Los errores propios del codigo pasan tal cual (no traen datos del cliente).
@@ -669,27 +745,56 @@ def requiere_confirmacion(nombre, args):
 #  5) BUCLE DE CONVERSACION CON TOOL CALLING
 # ==============================================================================
 
-SYSTEM = (
-    "Eres un asistente interno de soporte para los asesores de un proveedor de internet (ISP). "
-    "IMPORTANTE: quien te escribe SIEMPRE es un ASESOR de la empresa, NUNCA el cliente final. "
+_SYSTEM_BASE = (
+    "Eres un asistente interno para los colaboradores de un proveedor de internet (ISP). "
+    "IMPORTANTE: quien te escribe SIEMPRE es un COLABORADOR de la empresa, NUNCA el cliente final. "
     "Por lo tanto, habla del cliente en TERCERA PERSONA y nunca lo saludes ni te dirijas a el. "
     "Ejemplo correcto: 'El cliente 7553 (Joan Nieto) esta activo, plan PLAN HOGAR, sin facturas pendientes.' "
     "Ejemplo incorrecto: 'Hola Joan, tu servicio esta activo.' "
     "\n\n"
     "REGLAS DE COMPORTAMIENTO:\n"
-    "- Responde en espanol, de forma breve, clara y profesional. Ve al grano; el asesor quiere datos rapidos.\n"
+    "- Responde en espanol, de forma breve, clara y profesional. Ve al grano; quien pregunta quiere datos rapidos.\n"
     "- Usa SIEMPRE las herramientas para consultar datos reales antes de responder. Nunca inventes ni supongas datos.\n"
-    "- Si el asesor da un numero de cedula (documento), usa consultar_cliente_por_cedula; "
-    "si da un ID de servicio, usa consultar_cliente.\n"
-    "- Si pregunta por tickets DE UN CLIENTE, usa consultar_tickets_de_cliente (acepta "
-    "cedula o ID de servicio). Si te da un NUMERO DE TICKET, usa consultar_ticket.\n"
-    "- Cuando un resultado traiga un campo 'alcance' o 'aviso', repiteselo al asesor: "
+    "- Si te dan un numero de cedula (documento), usa consultar_cliente_por_cedula; "
+    "si te dan un ID de servicio, usa consultar_cliente.\n"
+    "- Cuando un resultado traiga un campo 'alcance' o 'aviso', repiteselo al colaborador: "
     "indica que se consulto y que no. No lo omitas.\n"
     "- Si una herramienta no devuelve un dato, dilo explicitamente ('No se encontro esa informacion') en vez de rellenar.\n"
-    "- Si el asesor pide algo para lo que no tienes herramienta, indica que no puedes consultarlo, no improvises.\n"
+    "- Si te piden algo para lo que no tienes herramienta, di que no puedes consultarlo, no improvises. "
+    "Puede ser que ese dato le corresponda a otra area; en ese caso, indicalo.\n"
     "- Presenta la informacion de forma ordenada (puedes usar una lista corta si son varios campos).\n"
-    "- Para acciones que modifican datos (como registrar un pago), confirma primero con el asesor lo que vas a hacer.\n"
+    "- Para acciones que modifican datos, confirma primero lo que vas a hacer.\n"
 )
+
+# Instrucciones propias de cada area. El motor no cambia; cambia el encuadre.
+_SYSTEM_AREA = {
+    "soporte": (
+        "\nAREA: SOPORTE. Atiendes a los asesores que hablan con el cliente.\n"
+        "- Si preguntan por tickets DE UN CLIENTE, usa consultar_tickets_de_cliente "
+        "(acepta cedula o ID de servicio). Si te dan un NUMERO DE TICKET, usa consultar_ticket.\n"
+        "- No tienes acceso a datos de red (IP, MAC, router) ni a montos del plan. "
+        "Si los piden, indica que corresponden a Tecnica o a Facturacion.\n"
+    ),
+    "tecnica": (
+        "\nAREA: TECNICA. Diagnosticas conectividad y equipos.\n"
+        "- Tienes acceso a los datos de red del cliente (IP, MAC, ONU, antena, router).\n"
+        "- NO tienes acceso a contrasenas de equipos, ni a datos de contacto o de facturacion.\n"
+    ),
+    "facturacion": (
+        "\nAREA: FACTURACION. Revisas facturas, saldos y cobros.\n"
+        "- Registrar un pago es una accion sensible: explica antes que factura y que monto vas a registrar.\n"
+        "- No tienes acceso a datos de red ni a tickets de soporte.\n"
+    ),
+    "administracion": (
+        "\nAREA: ADMINISTRACION. Consultas consolidadas.\n"
+        "- Trabajas sin datos personales del cliente: no ves cedula ni datos de contacto.\n"
+        "- Si te piden un dato individual identificable, indica que no te corresponde.\n"
+    ),
+}
+
+def construir_system(area):
+    """Arma el prompt del sistema para el area indicada."""
+    return _SYSTEM_BASE + _SYSTEM_AREA.get(area, "")
 
 # --- Razonamiento interno del modelo ("thinking") -----------------------------
 # Qwen3 razona antes de responder y Ollama entrega ese razonamiento en un campo
@@ -731,9 +836,9 @@ def _limpiar_mensaje(msg):
     return limpio
 
 
-def responder(mensaje_cliente, historial):
+def responder(mensaje_cliente, historial, area=AREA_POR_DEFECTO):
     historial.append({"role": "user", "content": mensaje_cliente})
-    resp = ollama.chat(model=MODELO, messages=historial, tools=HERRAMIENTAS)
+    resp = ollama.chat(model=MODELO, messages=historial, tools=herramientas_de(area))
     msg = resp["message"]
     historial.append(_limpiar_mensaje(msg))
 
@@ -745,13 +850,18 @@ def responder(mensaje_cliente, historial):
             args = json.loads(args)
 
         ok, resultado = validar_argumentos(nombre, args)
-        if not ok:
+        if nombre not in AREAS.get(area, {}).get("herramientas", []):
+            # El modelo solo recibio las herramientas de su area, pero puede
+            # inventar un nombre. Se corta aqui: la lista de herramientas es una
+            # sugerencia para el modelo; el permiso lo decide el codigo.
+            salida = {"error": f"El area '{area}' no tiene la herramienta '{nombre}'."}
+        elif not ok:
             salida = {"error": resultado}
         elif not requiere_confirmacion(nombre, resultado):
             salida = {"error": "Accion cancelada por el operador."}
         else:
             crudo = ejecutar_herramienta(nombre, resultado)
-            salida = filtrar_campos(nombre, crudo)   # filtra antes de pasarlo al modelo
+            salida = filtrar_campos(nombre, crudo, area)   # filtra segun el area
             print(f"     [herramienta {nombre} -> {salida}]")
 
         # 'name' (y el id, si lo hay) permiten al modelo asociar cada resultado
@@ -778,21 +888,56 @@ def responder(mensaje_cliente, historial):
 #  6) EJECUCION INTERACTIVA
 # ==============================================================================
 
+def identificar_area():
+    """
+    Identifica el area del colaborador.
+
+    OJO: esto es IDENTIFICACION, no AUTENTICACION. No hay contrasena: quien abre
+    la consola elige su area. Sirve para acotar lo que cada uno ve por defecto y
+    para probar el catalogo por area, pero no impide que alguien elija otra.
+    La autenticacion real llega con la interfaz web (Fase 5 del PRD).
+
+    Se puede fijar en el .env (AREA_COLABORADOR) para pruebas no interactivas.
+    """
+    del_entorno = (os.environ.get("AREA_COLABORADOR") or "").strip().lower()
+    if area_valida(del_entorno):
+        return del_entorno
+
+    print("\n  Areas disponibles:")
+    for nombre, cfg in AREAS.items():
+        print(f"    - {nombre:<15} {cfg['descripcion']}")
+    while True:
+        try:
+            elegida = input(f"\n  Tu area [{AREA_POR_DEFECTO}]: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            return AREA_POR_DEFECTO
+        if not elegida:
+            return AREA_POR_DEFECTO
+        if area_valida(elegida):
+            return elegida
+        print(f"  '{elegida}' no es un area valida.")
+
+
 if __name__ == "__main__":
     print("=" * 60)
-    print(f"  Asistente de soporte  ({MODELO})")
+    print(f"  Asistente interno  ({MODELO})")
     print(f"  Modo: {'WISPHUB REAL -> ' + WISPHUB_BASE_URL if USAR_WISPHUB_REAL else 'SIMULADO (sin tocar la API)'}")
+    print("=" * 60)
+
+    area = identificar_area()
+    disponibles = [h["function"]["name"] for h in herramientas_de(area)]
+    print(f"\n  Area: {area.upper()}  |  Herramientas: {', '.join(disponibles) or 'ninguna'}")
     print("  Escribe 'salir' para terminar.")
     print("=" * 60)
 
-    historial = [{"role": "system", "content": SYSTEM}]
+    historial = [{"role": "system", "content": construir_system(area)}]
     while True:
         try:
-            entrada = input("Asesor > ").strip()
+            entrada = input(f"{area} > ").strip()
         except (EOFError, KeyboardInterrupt):
             break
         if entrada.lower() in ("salir", "exit", "quit"):
             break
         if not entrada:
             continue
-        print(f"\nAsistente > {responder(entrada, historial)}\n")
+        print(f"\nAsistente > {responder(entrada, historial, area)}\n")

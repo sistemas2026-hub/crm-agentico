@@ -293,11 +293,34 @@ Documentación oficial: <https://wisphub.net/api-docs/> (el spec OpenAPI está e
 |------|-----------|--------|
 | **0** | Prototipo de soporte en consola contra WispHub | ✅ Hecho |
 | **1** | Consolidar soporte: prompt de asesor, filtro PII, consulta por cédula | ✅ Hecho |
-| **2** | Login + identidad de área; parametrizar herramientas y filtros por rol | Pendiente |
-| **3** | Replicar patrón a Facturación y Técnica | Pendiente |
+| **2** | Identidad de área; parametrizar herramientas y filtros por rol | ✅ Hecho (login real pendiente, ver §8.1) |
+| **3** | Replicar patrón a Facturación y Técnica | ✅ Catálogo definido y verificado |
 | **4** | Generación de informes + exportación (Excel/PDF) | Pendiente |
 | **5** | Interfaz web interna (reemplaza la consola) | Pendiente |
 | **6** | Auditoría/logs y despliegue en servidor on-premise | Pendiente |
+
+---
+
+### 8.1 Estado de la Fase 2 — qué quedó hecho y qué no
+
+**Hecho.** El motor está parametrizado por área: `construir_system(area)`, `herramientas_de(area)` y `campos_de(area, herramienta)`. El mismo cliente devuelve distintos campos según quién pregunte (verificado contra la API real, 54 campos crudos):
+
+| Área | Campos | Ve |
+|---|---|---|
+| Soporte | 15 | Identidad, contacto, servicio, estado de pago |
+| Técnica | 16 | Identidad, servicio, **red** (IP, MAC, ONU, antena, router) |
+| Facturación | 16 | Identidad, contacto, pago, **precios** |
+| Administración | 7 | Estado y servicio, **sin PII** |
+
+El control es doble y se aplica en código: una herramienta que no está en `herramientas` del área no se le muestra al modelo **y** se rechaza si igual la invoca; una que no tiene entrada en `campos` no devuelve nada (fail-closed). Ambas condiciones se verifican; no alcanza con una.
+
+**Credenciales: ningún área.** `password_servicio`, `password_cpe`, `password_router_wifi`, `password_ssid_router_wifi` y `usuario_router_wifi` están fuera de todas las listas, incluida Técnica. Un técnico que necesite una credencial la saca de WispHub; pasarla por el modelo no le ahorra un paso y la deja escrita en el historial de la conversación.
+
+**NO hecho — pendiente para la interfaz web (Fase 5):**
+
+- **Es identificación, no autenticación.** No hay contraseña: quien abre la consola elige su área de una lista. Sirve para acotar lo que cada uno ve y para probar el catálogo, pero no impide que alguien elija otra área. La autenticación real requiere la capa web.
+- **Una sola clave de API para todos.** La clave de WispHub pertenece a un usuario del staff y hereda sus permisos, así que WispHub ve todas las consultas como si fueran de esa misma persona. **La separación por área es nuestra, no de WispHub.** Para que el control fuera real de punta a punta harían falta claves por colaborador.
+- **Sin auditoría** (RF-13): no queda registro de quién consultó qué. Con la identidad ya disponible, es el paso natural siguiente.
 
 ---
 
