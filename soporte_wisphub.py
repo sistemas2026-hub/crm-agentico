@@ -29,6 +29,9 @@ import os
 import re
 import sys
 import json
+import time
+from datetime import datetime
+
 import requests
 import ollama
 
@@ -376,6 +379,63 @@ def filtrar_campos(nombre, datos, area=AREA_POR_DEFECTO):
         return _solo_permitidos(permitidos, datos)
 
     return {"error": "Formato de respuesta no reconocido. Resultado descartado."}
+
+
+# ==============================================================================
+#  AUDITORIA  —  quien consulto que, sin volcar datos sensibles
+# ==============================================================================
+# RF-13. Registra cada ACCESO A DATOS (una linea JSON por ejecucion de
+# herramienta), no la conversacion. Lo que se guarda es el hecho de la consulta:
+# area, herramienta, a que registro y con que resultado. NUNCA el dato devuelto.
+#
+# Un log de auditoria que copia los datos que vigila deja de ser un control y
+# pasa a ser una segunda base de datos sin proteger.
+
+ARCHIVO_AUDITORIA = os.environ.get("ARCHIVO_AUDITORIA", "auditoria.log")
+AUDITORIA_ACTIVA = _env_bool("AUDITORIA_ACTIVA", True)
+
+# Enmascara identificadores largos: cedulas (8-10 digitos) y telefonos quedan
+# ocultos; los IDs cortos (servicio 4, ticket 5, factura 6) se conservan porque
+# son los que hacen util la auditoria y no identifican a una persona por si solos.
+_RE_ID_LARGO = re.compile(r"\d{8,}")
+
+def _enmascarar(texto):
+    return _RE_ID_LARGO.sub(lambda m: "*" * (len(m.group()) - 4) + m.group()[-4:],
+                            str(texto))
+
+def registrar_auditoria(area, herramienta, args, estado, registros=None, ms=None):
+    """Agrega una linea al log. Nunca interrumpe la atencion si falla."""
+    if not AUDITORIA_ACTIVA:
+        return
+    entrada = {
+        "ts": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "area": area,
+        "herramienta": herramienta,
+        "args": {k: _enmascarar(v) for k, v in (args or {}).items() if v not in (None, "")},
+        "estado": estado,
+        "sensible": herramienta in ACCIONES_SENSIBLES,
+    }
+    if registros is not None:
+        entrada["registros"] = registros
+    if ms is not None:
+        entrada["ms"] = ms
+    try:
+        with open(ARCHIVO_AUDITORIA, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entrada, ensure_ascii=False) + "\n")
+    except OSError as e:
+        # Que no se pueda auditar no debe dejar sin servicio al colaborador,
+        # pero tiene que verse: se avisa en pantalla en vez de fallar en silencio.
+        print(f"     [aviso] no se pudo escribir la auditoria: {e}")
+
+def _cuantos_registros(salida):
+    """Cuantos registros devolvio la consulta (para el log, no el contenido)."""
+    if isinstance(salida, dict):
+        if "total" in salida:
+            return salida["total"]
+        if "error" in salida:
+            return 0
+        return 1
+    return None
 
 
 # ==============================================================================
@@ -850,19 +910,32 @@ def responder(mensaje_cliente, historial, area=AREA_POR_DEFECTO):
             args = json.loads(args)
 
         ok, resultado = validar_argumentos(nombre, args)
+        # Lo que se audita son los argumentos YA VALIDADOS cuando los hay; si la
+        # validacion fallo, los crudos que propuso el modelo.
+        auditables = resultado if ok else args
+        inicio = time.monotonic()
+
         if nombre not in AREAS.get(area, {}).get("herramientas", []):
             # El modelo solo recibio las herramientas de su area, pero puede
             # inventar un nombre. Se corta aqui: la lista de herramientas es una
             # sugerencia para el modelo; el permiso lo decide el codigo.
             salida = {"error": f"El area '{area}' no tiene la herramienta '{nombre}'."}
+            estado = "rechazado_por_area"
         elif not ok:
             salida = {"error": resultado}
+            estado = "argumentos_invalidos"
         elif not requiere_confirmacion(nombre, resultado):
             salida = {"error": "Accion cancelada por el operador."}
+            estado = "cancelado_por_operador"
         else:
             crudo = ejecutar_herramienta(nombre, resultado)
             salida = filtrar_campos(nombre, crudo, area)   # filtra segun el area
+            estado = "error_api" if isinstance(salida, dict) and "error" in salida else "ok"
             print(f"     [herramienta {nombre} -> {salida}]")
+
+        registrar_auditoria(area, nombre, auditables, estado,
+                            registros=_cuantos_registros(salida),
+                            ms=int((time.monotonic() - inicio) * 1000))
 
         # 'name' (y el id, si lo hay) permiten al modelo asociar cada resultado
         # con la herramienta que lo pidio cuando hay varias llamadas en un turno.

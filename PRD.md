@@ -297,7 +297,7 @@ Documentación oficial: <https://wisphub.net/api-docs/> (el spec OpenAPI está e
 | **3** | Replicar patrón a Facturación y Técnica | ✅ Catálogo definido y verificado |
 | **4** | Generación de informes + exportación (Excel/PDF) | Pendiente |
 | **5** | Interfaz web interna (reemplaza la consola) | Pendiente |
-| **6** | Auditoría/logs y despliegue en servidor on-premise | Pendiente |
+| **6** | Auditoría/logs y despliegue en servidor on-premise | Auditoría ✅ (§8.2) · despliegue pendiente |
 
 ---
 
@@ -321,6 +321,24 @@ El control es doble y se aplica en código: una herramienta que no está en `her
 - **Es identificación, no autenticación.** No hay contraseña: quien abre la consola elige su área de una lista. Sirve para acotar lo que cada uno ve y para probar el catálogo, pero no impide que alguien elija otra área. La autenticación real requiere la capa web.
 - **Una sola clave de API para todos.** La clave de WispHub pertenece a un usuario del staff y hereda sus permisos, así que WispHub ve todas las consultas como si fueran de esa misma persona. **La separación por área es nuestra, no de WispHub.** Para que el control fuera real de punta a punta harían falta claves por colaborador.
 - **Sin auditoría** (RF-13): no queda registro de quién consultó qué. Con la identidad ya disponible, es el paso natural siguiente.
+
+### 8.2 Auditoría (RF-13) — implementada
+
+Una línea JSON por **acceso a datos** (ejecución de herramienta), no por mensaje de la conversación. Archivo `auditoria.log`, fuera del repositorio.
+
+```json
+{"ts":"2026-07-28T21:56:29-05:00","area":"soporte",
+ "herramienta":"consultar_cliente_por_cedula","args":{"cedula":"******1347"},
+ "estado":"ok","sensible":false,"registros":1,"ms":762}
+```
+
+**Qué se registra:** cuándo, qué área, qué herramienta, sobre qué registro, con qué resultado, cuántos registros devolvió y cuánto tardó. Los `estado` posibles distinguen los cuatro caminos: `ok`, `error_api`, `argumentos_invalidos`, `rechazado_por_area`, `cancelado_por_operador`. Este último es el que deja constancia de que un humano **negó** una acción sensible.
+
+**Qué NO se registra:** ningún dato devuelto. Ni nombre, ni email, ni dirección, ni IP, ni plan. *Un log de auditoría que copia los datos que vigila deja de ser un control y pasa a ser una segunda base de datos sin proteger.*
+
+**Enmascaramiento:** los identificadores de 8 dígitos o más se ocultan salvo los últimos 4 (`1044601347` → `******1347`). Cubre cédulas y teléfonos. Los IDs cortos —servicio (4), ticket (5), factura (6)— se conservan: son los que hacen útil la auditoría y no identifican a una persona por sí solos.
+
+**Pendiente:** el log registra el **área**, no la persona — porque hoy no hay autenticación (§8.1). Cuando exista login real, el campo `area` debe acompañarse del identificador del colaborador; el resto de la estructura no cambia. Tampoco hay rotación del archivo.
 
 ---
 

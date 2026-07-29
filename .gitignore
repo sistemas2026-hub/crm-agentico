@@ -2,6 +2,10 @@
 .env
 *.key
 
+# Auditoría: registro de accesos, no va al repositorio
+auditoria.log
+*.log
+
 # Python
 __pycache__/
 *.py[cod]
