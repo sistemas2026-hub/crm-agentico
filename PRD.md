@@ -209,7 +209,20 @@ Colaborador (respuesta / informe)
   - El **filtro de campos** (lista blanca por herramienta/área) impide técnicamente que IP, MAC o credenciales lleguen al modelo.
   - El filtro es **fail-closed**: si una herramienta nueva se agrega sin lista blanca, su resultado se descarta entero en vez de pasar crudo. Al extender el sistema, el olvido falla del lado seguro.
   - El filtro se aplica a **cualquier forma** de respuesta (objeto, lista, paginado). Un filtro que solo entienda objetos sueltos deja pasar listas completas con PII.
+  - El filtro alcanza los **objetos anidados** (notación `servicio.id_servicio`). Dejar pasar un objeto entero porque su nombre está en la lista blanca es una fuga: el `servicio` que viene dentro de un ticket incluye la IP del cliente y el router con sus credenciales.
   - La **confirmación manual** impide ejecutar un pago sin aprobación humana.
+
+#### Límite conocido: los campos de texto libre
+
+El filtro controla **qué campos** pasan, no **qué contiene** cada campo. Un campo de texto libre puede traer embebido cualquier dato, y la lista blanca no lo ve.
+
+Caso real detectado en producción: la `descripcion` de un ticket de instalación contenía nombre completo, teléfono, email, dirección, coordenadas GPS, número de documento, plan contratado con precio y un enlace público al PDF de la solicitud — todo en un solo string de 419 caracteres.
+
+Se decidió **mantener `descripcion`**: es el contenido del ticket y Soporte no puede trabajar sin él. Pero conviene tenerlo presente:
+
+- La minimización de datos que da la lista blanca **no aplica** a los campos de texto libre. Ahí llega lo que el operador haya escrito.
+- Si en algún momento se exige minimización estricta (auditoría legal, área con acceso restringido), un campo así necesita **redacción por patrón** (regex de cédulas, teléfonos, emails, URLs) además de la lista blanca. No está implementado.
+- Al agregar un campo nuevo a una lista blanca, preguntarse si es texto libre. Si lo es, la decisión no es solo "¿este campo sirve?" sino "¿qué puede venir escrito adentro?".
 
 ### 7.5 Parametrización por área (guía para extender)
 

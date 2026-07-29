@@ -158,7 +158,22 @@ CAMPOS_PERMITIDOS = {
         "id_factura", "estado", "total", "saldo",
         "fecha_emision", "fecha_vencimiento", "fecha_pago",
     ],
-    "consultar_ticket": ["id_ticket", "id", "estado", "asunto", "tecnico", "fecha"],
+    # 'servicio' NO se deja pasar entero: trae la IP del cliente y el router con
+    # sus credenciales. Solo se abren sus campos inofensivos, con notacion punto.
+    # Fuera a proposito: 'respuestas' (hilo del ticket, util pero de tamano
+    # imprevisible; revisar al implementar el tope de volumen) y 'email_tecnico',
+    # 'creado_por', 'tickets_mensual/anual' (datos internos que no ayudan a
+    # responder por el estado de un ticket).
+    # OJO con 'descripcion': es TEXTO LIBRE. Visto en produccion, puede traer
+    # embebidos nombre, telefono, email, direccion, GPS, documento y enlaces.
+    # La lista blanca filtra campos, no el contenido de un campo. Se conserva
+    # porque es el contenido del ticket, pero es un limite real (ver PRD 7.4).
+    "consultar_ticket": [
+        "id_ticket", "asunto", "descripcion", "razon_falla",
+        "estado", "prioridad", "tecnico", "departamento", "origen_reporte",
+        "fecha_creacion", "fecha_inicio", "fecha_fin",
+        "servicio.id_servicio", "servicio.plan_internet", "servicio.zona",
+    ],
     # El API responde {task_id, messages}; el modo simulado, {resultado, ...}.
     "registrar_pago": ["resultado", "id_factura", "total_cobrado",
                        "mensajes", "messages", "task_id", "errors"],
@@ -166,11 +181,37 @@ CAMPOS_PERMITIDOS = {
 # Las dos consultas de cliente devuelven la misma forma: comparten lista blanca.
 CAMPOS_PERMITIDOS["consultar_cliente_por_cedula"] = CAMPOS_PERMITIDOS["consultar_cliente"]
 
+def _compilar_permitidos(permitidos):
+    """Separa la lista blanca en campos de primer nivel y campos anidados."""
+    top, anidados = set(), {}
+    for campo in permitidos:
+        if "." in campo:
+            padre, hijo = campo.split(".", 1)
+            anidados.setdefault(padre, set()).add(hijo)
+        else:
+            top.add(campo)
+    return top, anidados
+
 def _solo_permitidos(permitidos, dato):
-    """Aplica la lista blanca a un dict suelto."""
+    """
+    Aplica la lista blanca a un dict suelto.
+
+    Soporta notacion con punto ('servicio.id_servicio') para filtrar DENTRO de un
+    objeto anidado. Es imprescindible: el 'servicio' que viene dentro de un ticket
+    incluye la IP del cliente y el router con sus credenciales. Dejar pasar el
+    objeto entero porque su nombre esta en la lista blanca seria una fuga.
+    Un objeto anidado solo se entrega completo si se lo nombra sin punto, y eso
+    debe reservarse a objetos inofensivos (plan_internet, zona).
+    """
     if not isinstance(dato, dict):
         return {}
-    return {k: v for k, v in dato.items() if k in permitidos}
+    top, anidados = _compilar_permitidos(permitidos)
+    salida = {k: v for k, v in dato.items() if k in top}
+    for padre, hijos in anidados.items():
+        sub = dato.get(padre)
+        if isinstance(sub, dict):
+            salida[padre] = {k: v for k, v in sub.items() if k in hijos}
+    return salida
 
 def _empaquetar_lista(permitidos, filas, total):
     """
@@ -334,8 +375,22 @@ _SIMULADO = {
                               "telefono": "3000000000"}}],
     },
     "tickets": {
-        "T-300": {"id_ticket": "T-300", "estado": "en proceso",
-                  "asunto": "Sin servicio de internet", "tecnico": "asignado"},
+        "88754": {"id_ticket": "88754", "asunto": "Sin servicio de internet",
+                  "descripcion": "El cliente reporta que no navega desde ayer.",
+                  "razon_falla": "", "estado": "Nuevo", "prioridad": "Normal",
+                  "tecnico": "Rapilink SAS", "email_tecnico": "tecnico@empresa-demo",
+                  "departamento": "Soporte", "origen_reporte": "Portal Cliente",
+                  "fecha_creacion": "2026-07-28T16:25:24-05:00",
+                  "fecha_inicio": None, "fecha_fin": None,
+                  "creado_por": "admin@empresa-demo",
+                  "tickets_mensual": 198, "tickets_anual": 1576,
+                  # 'servicio' anidado, tal como lo devuelve el API: con IP y router
+                  "servicio": {"id_servicio": "7001", "ip": "10.0.0.5",
+                               "comentarios": "", "fecha_instalacion": "10/03/2023",
+                               "plan_internet": {"id": 1, "nombre": "PLAN HOGAR"},
+                               "zona": {"id": 3, "nombre": "NORTE"},
+                               "router": {"id": 9, "nombre": "RB-1",
+                                          "password": "secreta"}}},
     },
 }
 
