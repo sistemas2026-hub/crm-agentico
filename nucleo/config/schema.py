@@ -206,9 +206,48 @@ class TipoDocumento(Base):
     metadatos_dominio: list[str] = Field(default_factory=list)
 
 
+class PerfilDocumento(Base):
+    """
+    Como esta ARMADA la documentacion de esta empresa. No de que trata.
+
+    Cada organizacion maqueta distinto, y no es un detalle cosmetico: define
+    donde empieza una seccion y que bloque es contenido. Solo en el corpus de
+    referencia conviven tres plantillas — una marca las secciones con estilos
+    de Word, otra las mete dentro de tablas de una celda, y una tercera usa
+    estilo de titulo para los items de una lista.
+
+    Sin este perfil, el criterio de la primera empresa se aplicaria a los
+    documentos de la segunda, y sus procesos se mezclarian en el corpus.
+    """
+    marcas_callout: list[str] = Field(default_factory=lambda: [
+        "⚠", "📝", "❗", "ℹ", "✅", "🔴", "atencion", "nota", "importante",
+        "advertencia", "precaucion", "recuerde", "ojo"])
+    encabezados_pie: list[str] = Field(default_factory=lambda: [
+        "registro de cambio", "aprobacion", "elaborado", "revisado por",
+        "aprobado por", "control de cambios"])
+    campos_metadatos: list[str] = Field(
+        default_factory=lambda: ["codigo", "version", "fecha"])
+    # Una tabla de una celda con '1 OBJETIVO' abre seccion.
+    titulo_un_nivel_en_tabla: bool = True
+    # Sin estilo de titulo, solo cuenta la numeracion multinivel ('1.1'). Es lo
+    # que separa un titulo de un paso de lista numerada.
+    exigir_multinivel_sin_estilo: bool = True
+    max_largo_titulo: int = Field(default=120, ge=20, le=400)
+    # 'seccion_vacia' no viene por defecto: en el corpus de referencia dio 26
+    # falsos positivos y 0 aciertos. Un detector que grita en falso deja de
+    # leerse, y entonces tampoco sirve para los casos en que acierta.
+    defectos_a_reportar: list[Literal[
+        "numeracion_duplicada", "referencia_rota", "seccion_vacia"]] = Field(
+        default_factory=lambda: ["numeracion_duplicada", "referencia_rota"])
+    # Deja constancia de las imagenes en el fragmento. No las lee: evita que su
+    # contenido desaparezca EN SILENCIO.
+    anotar_imagenes: bool = True
+
+
 class Corpus(Base):
     tipos_documento: list[TipoDocumento] = Field(default_factory=list)
     reportar_defectos: bool = True
+    perfil_documento: PerfilDocumento = Field(default_factory=PerfilDocumento)
 
 
 class RAG(Base):

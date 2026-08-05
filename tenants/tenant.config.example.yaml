@@ -112,6 +112,37 @@ autenticacion:
 # -----------------------------------------------------------------------------
 corpus:
   reportar_defectos: true            # numeraciones duplicadas, refs rotas
+
+  # COMO ESTA MAQUETADA la documentacion de esta empresa. Es lo primero que hay
+  # que revisar al dar de alta un ISP: define donde empieza una seccion y que
+  # bloque es contenido. Si se deja el de otra empresa, sus criterios se aplican
+  # a estos documentos y el corpus sale mal fragmentado.
+  #
+  # Abre uno o dos documentos del cliente y responde:
+  #   - ¿usan estilos de titulo de Word, o los titulos son texto normal?
+  #   - ¿los titulos van dentro de tablas?
+  #   - ¿como se ven los recuadros de aviso?
+  #   - ¿que bloques se repiten al pie de cada documento?
+  perfil_documento:
+    marcas_callout: ["⚠", "NOTA", "IMPORTANTE"]
+    encabezados_pie: ["REGISTRO DE CAMBIOS", "APROBACIÓN"]
+    campos_metadatos: [Código, Versión, Fecha]
+    # true si una tabla de una celda con '1 OBJETIVO' abre seccion.
+    titulo_un_nivel_en_tabla: true
+    # true exige numeracion multinivel ('1.1') para tomar un parrafo sin estilo
+    # como titulo. Ponerlo en false hace que cada paso de una lista numerada se
+    # tome como seccion nueva: solo desactivalo si el cliente numera sus
+    # secciones con un solo nivel Y no usa listas numeradas.
+    exigir_multinivel_sin_estilo: true
+    max_largo_titulo: 120
+    # 'seccion_vacia' esta disponible pero no viene activo: en plantillas que
+    # usan estilo de titulo para lineas que ya son el contenido, produce solo
+    # ruido. Activalo si el cliente tiene secciones realmente vacias.
+    defectos_a_reportar: [numeracion_duplicada, referencia_rota]
+    # Marca donde habia una imagen. No la lee, pero evita que su contenido
+    # desaparezca sin dejar rastro.
+    anotar_imagenes: true
+
   tipos_documento:
     - tipo: guia_tecnica
       estrategia_chunking: por_seccion

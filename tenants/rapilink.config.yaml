@@ -215,6 +215,29 @@ autenticacion:
 # -----------------------------------------------------------------------------
 corpus:
   reportar_defectos: true
+
+  # Como esta maquetada la documentacion de ESTA empresa. Verificado sobre 19
+  # documentos reales, donde conviven tres plantillas distintas:
+  #   G-GO-04..13        secciones con Heading 2 + tabla Codigo|Version
+  #   Procedimiento V2   secciones dentro de tablas de una celda, 0 estilos
+  #   Perfiles y Guias   Heading 1 + List Paragraph, prosa y listas
+  # Otra empresa describe la suya aqui y el motor no se toca.
+  perfil_documento:
+    marcas_callout: ["⚠", "📝", "ℹ", "ATENCIÓN", "NOTA", "IMPORTANTE"]
+    encabezados_pie: ["REGISTRO DE CAMBIOS", "APROBACIÓN", "ELABORADO"]
+    campos_metadatos: [Código, Versión, Fecha]
+    # 'Procedimiento V2' pone '1 OBJETIVO' dentro de una tabla de una celda.
+    titulo_un_nivel_en_tabla: true
+    # Sin esto, cada paso de una lista numerada ('3. Abre un navegador') se
+    # tomaba como titulo de seccion: rompia el procedimiento en secciones
+    # falsas y se tragaba las referencias cruzadas de esos pasos.
+    exigir_multinivel_sin_estilo: true
+    # 'seccion_vacia' queda fuera: dio 26 falsos positivos y 0 aciertos, porque
+    # estas plantillas usan estilo de titulo para lineas que YA son el contenido
+    # ("4.3 Procurar el cuidado integral de su salud.").
+    defectos_a_reportar: [numeracion_duplicada, referencia_rota]
+    anotar_imagenes: true
+
   tipos_documento:
     - tipo: guia_tecnica
       estrategia_chunking: por_seccion
