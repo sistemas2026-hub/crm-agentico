@@ -248,6 +248,15 @@ class Corpus(Base):
     tipos_documento: list[TipoDocumento] = Field(default_factory=list)
     reportar_defectos: bool = True
     perfil_documento: PerfilDocumento = Field(default_factory=PerfilDocumento)
+    # Documentos que NO deben vectorizarse. Patrones tipo glob sobre el nombre
+    # del archivo. El caso tipico es un documento con credenciales: si entra al
+    # corpus, el asistente puede recuperarlo y mostrarselo a quien pregunte.
+    excluir: list[str] = Field(default_factory=list)
+    # Versiones superadas. Se cargan igual pero marcadas 'obsoleto', asi que no
+    # se recuperan en las busquedas y a la vez queda registro de que existieron.
+    # Sin esto, el asistente recupera la version vieja tanto como la vigente y
+    # no tiene forma de saber cual manda.
+    obsoletos: list[str] = Field(default_factory=list)
 
 
 class RAG(Base):

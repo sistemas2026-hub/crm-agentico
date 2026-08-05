@@ -184,6 +184,9 @@ class Documento:
     titulo: str = ""
     version: str = ""
     fecha: str = ""
+    # vigente | obsoleto. Un obsoleto se carga pero no se recupera:
+    # queda constancia de que existio y de con cual se respondio en su momento.
+    estado: str = "vigente"
     fragmentos: list[Fragmento] = field(default_factory=list)
     defectos: list[dict] = field(default_factory=list)
 

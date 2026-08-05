@@ -216,6 +216,21 @@ autenticacion:
 corpus:
   reportar_defectos: true
 
+  # Fuera del corpus. Lleva credenciales en el propio titulo: vectorizarlo
+  # permitiria que el asistente las recuperara y se las mostrara a quien
+  # pregunte, incluido un cliente final por WhatsApp. Choca de frente con la
+  # regla absoluta de seguridad declarada mas abajo.
+  excluir:
+    - "*Contraseñas*"
+
+  # Versiones superadas del mismo procedimiento. Se cargan marcadas como
+  # obsoletas: no se recuperan en las busquedas, pero queda constancia de que
+  # existieron y de con cual se respondio en su momento. La vigente es
+  # 'Procedimiento_Soporte_Tecnico_V2 (Final).docx'.
+  obsoletos:
+    - "Procedimiento de Soporte Técnico V1 OLD.docx"
+    - "Procedimiento_Soporte_Tecnico_V2.docx"
+
   # Como esta maquetada la documentacion de ESTA empresa. Verificado sobre 19
   # documentos reales, donde conviven tres plantillas distintas:
   #   G-GO-04..13        secciones con Heading 2 + tabla Codigo|Version
