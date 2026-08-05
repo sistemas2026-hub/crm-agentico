@@ -17,3 +17,7 @@ venv/
 .idea/
 Thumbs.db
 desktop.ini
+
+# Salida generada por los informes — se regenera con el comando
+informe_materiales_*.json
+informe_materiales_*_redactado.txt
