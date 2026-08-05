@@ -40,6 +40,23 @@ TENANTS = RAIZ / "tenants"
 # Se ignora la plantilla: su slug es de ejemplo y no corresponde a nadie.
 SLUGS_EXENTOS = {"mi-isp"}
 
+# Hosts de PROVEEDORES DE MODELO. Son infraestructura de la plataforma, no de
+# un cliente: identicos para todos los tenants, como el endpoint de cualquier
+# libreria. Moverlos a la configuracion obligaria a repetir la misma URL en el
+# YAML de cada empresa — mas fragil, no menos.
+#
+# La distincion no es de conveniencia: el endpoint de un sistema de GESTION
+# (WispHub y equivalentes) SI es de un cliente, porque otra empresa puede usar
+# otro sistema. Esos siguen prohibidos aqui.
+HOSTS_DE_PLATAFORMA = {
+    "api.deepseek.com",
+    "dashscope-intl.aliyuncs.com",
+    "open.bigmodel.cn",
+    "api.moonshot.cn",
+    "api.openai.com",
+    "api.anthropic.com",
+}
+
 # Formas de meter logica por cliente sin escribir su nombre.
 PATRONES_SOSPECHOSOS = [
     (re.compile(r"\bif\s+tenant(_id|_slug)?\s*==", re.I),
@@ -138,9 +155,16 @@ def revisar() -> list[str]:
                         f"{rel}:{n}  menciona el tenant '{slug}'\n"
                         f"      -> {linea.strip()[:90]}")
             for patron, motivo in PATRONES_SOSPECHOSOS:
-                if patron.search(linea):
-                    fallas.append(f"{rel}:{n}  {motivo}\n"
-                                  f"      -> {linea.strip()[:90]}")
+                m = patron.search(linea)
+                if not m:
+                    continue
+                # Un endpoint de proveedor de modelo es infraestructura de la
+                # plataforma, no conocimiento de un cliente.
+                if "URL" in motivo and any(h in m.group(0)
+                                           for h in HOSTS_DE_PLATAFORMA):
+                    continue
+                fallas.append(f"{rel}:{n}  {motivo}\n"
+                              f"      -> {linea.strip()[:90]}")
     return fallas
 
 

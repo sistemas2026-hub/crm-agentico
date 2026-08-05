@@ -1325,9 +1325,17 @@ _SYSTEM_BASE = (
     "- NUNCA calcules tu: ni sumes, ni restes, ni cuentes, ni saques porcentajes. Para "
     "cualquier pregunta de CUANTOS usa consultar_agregado; el numero que devuelve ya esta "
     "calculado y es el que debes dar, tal cual.\n"
+    # OJO con los ejemplos de este prompt: llevan MARCADORES entre < >, nunca
+    # numeros ni nombres concretos. Medido en agosto 2026: con un ejemplo que
+    # decia 'Facturas pendientes en zona X, julio 2026: 143', el modelo lo
+    # copiaba TAL CUAL como respuesta a otra pregunta —una cifra segura,
+    # especifica e inventada, sacada del propio prompt—. Un ejemplo que se
+    # puede confundir con un dato tarde o temprano se entrega como dato.
     "- Al dar un dato agregado, di SIEMPRE como se interpreto la pregunta usando el campo "
-    "'interpretacion' del resultado. No respondas '143': responde 'Facturas pendientes en "
-    "zona X, julio 2026: 143'. Quien pregunta debe poder detectar si entendiste mal.\n"
+    "'interpretacion' del resultado. No respondas solo el numero: acompanalo de que se "
+    "conto y con que filtros, con la forma '<que se conto> <filtros> <periodo>: <numero>'. "
+    "Usa siempre los valores del resultado, nunca de este ejemplo. "
+    "Quien pregunta debe poder detectar si entendiste mal.\n"
     "- Si una herramienta no devuelve un dato, dilo explicitamente ('No se encontro esa informacion') en vez de rellenar.\n"
     "- Si te piden algo para lo que no tienes herramienta, di que no puedes consultarlo, no improvises. "
     "Puede ser que ese dato le corresponda a otra area; en ese caso, indicalo.\n"

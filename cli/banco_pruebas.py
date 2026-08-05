@@ -38,9 +38,12 @@ import sys
 import json
 import time
 
-import ollama
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
 
 import soporte_wisphub as sw
+from nucleo.modelo import cliente as mc
 
 
 # ==============================================================================
@@ -124,7 +127,11 @@ CASOS_DATO = [
                             "varias veces."),
         },
         "debe_contener": ["3427"],
-        "rf15": ["pendiente", "clientes morosos"],   # debe transmitir el aviso
+        # Se busca la RAIZ, no la frase exacta: el modelo puede escribir
+        # "cliente moroso" en singular y estaria transmitiendo el aviso igual.
+        # Comparar prosa libre contra frases literales falla por una 's' y
+        # convierte un acierto en un falso negativo.
+        "rf15": ["pendiente", "moros"],
         "no_debe": [],
     },
 ]
@@ -134,51 +141,41 @@ CASOS_DATO = [
 #  MEDICION
 # ==============================================================================
 
-def _metricas(resp, transcurrido):
-    """
-    Extrae el desglose que devuelve Ollama.
+# Precios por millon de tokens, agosto 2026. INDICATIVOS: este mercado se
+# mueve semanalmente, hay que verificarlos con el proveedor antes de
+# presupuestar. Local = 0: no hay costo por token.
+PRECIOS = {
+    "deepseek-v4-flash": (0.14, 0.28),
+    "deepseek-v4-pro":   (0.28, 0.87),
+}
 
-    'prompt_eval' es el prefill (leer la pregunta) y 'eval' la generacion.
-    Se separan porque escalan distinto: el prefill crece con el historial y
-    con las herramientas; la generacion, con lo que se responde.
-    """
-    n_out = resp.get("eval_count") or 0
-    t_out = (resp.get("eval_duration") or 0) / 1e9
-    n_in = resp.get("prompt_eval_count") or 0
-    t_in = (resp.get("prompt_eval_duration") or 0) / 1e9
-    pensado = len((resp.get("message", {}) or {}).get("thinking") or "")
-    return {
-        "s": round(transcurrido, 2),
-        "tok_out": n_out,
-        "tok_s": round(n_out / t_out, 1) if t_out else 0.0,
-        "tok_in": n_in,
-        "s_prefill": round(t_in, 2),
-        "chars_think": pensado,
-    }
+
+def _costo(resp) -> float:
+    """USD de esta llamada. 0 si el modelo corre local."""
+    p = PRECIOS.get(resp.modelo)
+    if not p:
+        return 0.0
+    return resp.tokens_entrada / 1e6 * p[0] + resp.tokens_salida / 1e6 * p[1]
 
 
 def probar_herramientas(modelo):
     aciertos = herramienta_ok = args_ok = 0
-    tiempos, tokens, pensados, velocidades = [], [], [], []
+    tiempos, tokens, pensados, velocidades, costos = [], [], [], [], []
 
     for caso in CASOS_HERRAMIENTA:
         mensajes = [{"role": "system", "content": sw.construir_system(caso["area"])},
                     {"role": "user", "content": caso["pregunta"]}]
-        t0 = time.monotonic()
         try:
-            resp = ollama.chat(model=modelo, messages=mensajes,
-                               tools=sw.herramientas_de(caso["area"]))
-        except Exception as e:                      # modelo caido, OOM, etc.
-            print(f"    ! {caso['pregunta'][:40]}: {e}")
+            r = mc.chat(modelo, mensajes, tools=sw.herramientas_de(caso["area"]))
+        except Exception as e:                      # modelo caido, OOM, red
+            print(f"    ! {caso['pregunta'][:40]}: {str(e)[:70]}")
             continue
-        m = _metricas(resp, time.monotonic() - t0)
-        tiempos.append(m["s"]); tokens.append(m["tok_out"])
-        pensados.append(m["chars_think"])
-        if m["tok_s"]:
-            velocidades.append(m["tok_s"])
+        tiempos.append(r.segundos); tokens.append(r.tokens_salida)
+        pensados.append(r.razonamiento_chars); costos.append(_costo(r))
+        if r.tok_s:
+            velocidades.append(r.tok_s)
 
-        llamadas = resp["message"].get("tool_calls") or []
-        nombre = llamadas[0]["function"]["name"] if llamadas else None
+        nombre = r.llamadas[0].nombre if r.llamadas else None
 
         if nombre == caso["espera"]:
             herramienta_ok += 1
@@ -186,12 +183,7 @@ def probar_herramientas(modelo):
                 args_ok += 1
                 aciertos += 1
             else:
-                crudos = llamadas[0]["function"]["arguments"]
-                if isinstance(crudos, str):
-                    try:
-                        crudos = json.loads(crudos)
-                    except ValueError:
-                        crudos = {}
+                crudos = r.llamadas[0].argumentos
                 bien = all(str(crudos.get(k, "")).strip().lower() == str(v).lower()
                            for k, v in caso["args"].items())
                 args_ok += bien
@@ -205,35 +197,41 @@ def probar_herramientas(modelo):
         "s_medio": round(sum(tiempos) / len(tiempos), 2) if tiempos else 0,
         "tok_s": round(sum(velocidades) / len(velocidades), 1) if velocidades else 0,
         "think_medio": int(sum(pensados) / len(pensados)) if pensados else 0,
+        "costo": sum(costos),
     }
 
 
 def probar_respeto(modelo):
     """Segunda llamada: ya tiene el dato, solo debe redactarlo."""
     respeta = rf15 = invento = 0
-    tiempos, pensados = [], []
+    tiempos, pensados, costos = [], [], []
     total_rf15 = sum(1 for c in CASOS_DATO if c.get("rf15"))
 
     for caso in CASOS_DATO:
         mensajes = [
             {"role": "system", "content": sw.construir_system(caso["area"])},
             {"role": "user", "content": caso["pregunta"]},
+            # Formato canonico (el de OpenAI). nucleo/modelo/cliente.py lo
+            # adapta a lo que exija cada proveedor: Ollama quiere 'arguments'
+            # como diccionario, la API como cadena, y los modelos de
+            # razonamiento exigen ademas 'reasoning_content'.
             {"role": "assistant", "content": "",
-             "tool_calls": [{"function": {"name": caso["herramienta"],
-                                          "arguments": {}}}]},
-            {"role": "tool", "name": caso["herramienta"],
+             "tool_calls": [{"id": "call_1", "type": "function",
+                             "function": {"name": caso["herramienta"],
+                                          "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": "call_1",
+             "name": caso["herramienta"],
              "content": json.dumps(caso["resultado"], ensure_ascii=False)},
         ]
-        t0 = time.monotonic()
         try:
-            resp = ollama.chat(model=modelo, messages=mensajes)
+            r = mc.chat(modelo, mensajes)
         except Exception as e:
-            print(f"    ! {caso['pregunta'][:40]}: {e}")
+            print(f"    ! {caso['pregunta'][:40]}: {str(e)[:70]}")
             continue
-        m = _metricas(resp, time.monotonic() - t0)
-        tiempos.append(m["s"]); pensados.append(m["chars_think"])
+        tiempos.append(r.segundos); pensados.append(r.razonamiento_chars)
+        costos.append(_costo(r))
 
-        texto = (resp["message"].get("content") or "").lower()
+        texto = (r.contenido or "").lower()
         # Se quitan separadores de miles: '127.543' y '127,543' son el dato.
         plano = texto.replace(".", "").replace(",", "").replace(" ", "")
 
@@ -252,6 +250,7 @@ def probar_respeto(modelo):
         "rf15_pct": round(100 * rf15 / total_rf15, 1) if total_rf15 else 0,
         "s_medio": round(sum(tiempos) / len(tiempos), 2) if tiempos else 0,
         "think_medio": int(sum(pensados) / len(pensados)) if pensados else 0,
+        "costo": sum(costos),
     }
 
 
@@ -282,14 +281,18 @@ if __name__ == "__main__":
               f"respeta {r['respeta_pct']}%  {h['tok_s']} tok/s")
 
     print("\n" + "=" * 96)
-    print(f"  {'modelo':<24} {'herram':>7} {'args':>6} {'respeta':>8} {'inv':>4} "
-          f"{'RF-15':>6} {'tok/s':>7} {'s/turno':>8} {'think':>7}")
+    print(f"  {'modelo':<26} {'herram':>7} {'args':>6} {'respeta':>8} {'inv':>4} "
+          f"{'RF-15':>6} {'tok/s':>7} {'s/turno':>8} {'think':>7} {'US$/1k':>8}")
     print("=" * 96)
     for modelo, h, r in filas:
-        print(f"  {modelo:<24} {h['herramienta_pct']:>6.1f}% {h['args_pct']:>5.1f}% "
+        # Costo extrapolado a 1.000 consultas, para que sea comparable con el
+        # volumen real (~300/dia) y no con los 11 casos de la prueba.
+        n_casos = h["casos"] + 3
+        por_mil = (h["costo"] + r["costo"]) / n_casos * 1000
+        print(f"  {modelo:<26} {h['herramienta_pct']:>6.1f}% {h['args_pct']:>5.1f}% "
               f"{r['respeta_pct']:>7.1f}% {r['invento']:>4} {r['rf15_pct']:>5.1f}% "
               f"{h['tok_s']:>7.1f} {h['s_medio'] + r['s_medio']:>8.2f} "
-              f"{h['think_medio']:>7}")
+              f"{h['think_medio']:>7} {por_mil:>8.2f}")
     print("=" * 96)
     print("""
   herram  : eligio la herramienta correcta (o ninguna, cuando corresponde)
@@ -298,4 +301,5 @@ if __name__ == "__main__":
   inv     : veces que INVENTO un dato. Tiene que ser 0. No hay margen aqui
   RF-15   : transmitio la interpretacion y la advertencia al colaborador
   think   : caracteres de razonamiento por turno, que se generan y se tiran
+  US$/1k  : costo extrapolado a 1.000 consultas. 0 = corre local
 """)
