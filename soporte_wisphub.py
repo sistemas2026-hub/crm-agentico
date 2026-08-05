@@ -30,6 +30,7 @@ import re
 import sys
 import json
 import time
+import calendar
 from datetime import datetime
 
 import requests
@@ -111,6 +112,7 @@ EP_FACTURAS = "/api/facturas/"      # filtro por cliente: ?cliente=<usuario>  (N
 EP_TICKET   = "/api/tickets/{id}/"
 EP_TICKETS  = "/api/tickets/"       # filtros: ?estado= (numerico), fecha_creacion_0/_1
 EP_PAGO     = "/api/facturas/{id}/registrar-pago/"
+EP_ZONAS    = "/api/zonas/"         # 5 zonas; se usa para agrupar y para nombrarlas
 
 # Maximo de filas que se le entregan al modelo en una consulta de lista.
 # No es un limite de la API sino del modelo: volcarle cientos de registros
@@ -142,6 +144,11 @@ TOPE_TICKETS_LISTA = 5
 #   1 = registrar el pago Y reactivar el servicio
 # Se usa 0 por defecto: reactivar es un efecto adicional que el asesor no pidio.
 ACCION_PAGO = int(os.environ.get("WISPHUB_ACCION_PAGO", "0"))
+
+# Tope de grupos al agrupar un conteo. Agrupar cuesta UNA llamada por valor:
+# por estado son 3-5 (barato), por plan serian 55 (no). Si el campo tiene mas
+# valores que este tope, se rechaza la consulta en vez de disparar 55 requests.
+TOPE_GRUPOS = 12
 
 
 # ==============================================================================
@@ -202,6 +209,12 @@ _FACTURA = ["id_factura", "estado", "total", "saldo",
 _PAGO_RESULTADO = ["resultado", "id_factura", "total_cobrado",
                    "mensajes", "messages", "task_id", "errors"]
 
+# Una consulta agregada NO devuelve registros: devuelve numeros ya calculados por
+# Python mas la declaracion de como se calcularon. No hay PII que filtrar, pero la
+# entrada en la lista blanca es obligatoria igual (fail-closed): sin ella la
+# herramienta no devolveria nada.
+_AGREGADO = ["total", "desglose", "interpretacion", "advertencia"]
+
 
 # ==============================================================================
 #  CATALOGO POR AREA  —  quien pregunta determina que herramientas y que campos
@@ -213,16 +226,169 @@ _PAGO_RESULTADO = ["resultado", "id_factura", "total_cobrado",
 # modelo, y una que no tiene entrada en 'campos' no devuelve nada (fail-closed).
 # Las dos condiciones deben cumplirse; no alcanza con una.
 
+# ==============================================================================
+#  CATALOGO DE AGREGACION  —  la lista blanca aplicada a la FORMA de la consulta
+# ==============================================================================
+# El modelo COMPONE la consulta; Python la CALCULA (PRD 12.5). El modelo nunca ve
+# filas ni suma nada: propone entidad + filtros + agrupacion, y el codigo traduce
+# eso a parametros del API y lee el 'count' del paginado.
+#
+# TODO lo que hay aqui esta VERIFICADO contra la API en produccion (julio 2026)
+# con el metodo del valor imposible: se prueba cada parametro con un valor que no
+# puede existir y se compara el total con el de la consulta sin filtro. Si son
+# iguales, el API esta IGNORANDO el parametro y no puede entrar a este catalogo.
+# Un filtro ignorado no da error: devuelve el universo entero disfrazado de
+# respuesta exacta. Lo que sigue son los que sobrevivieron esa prueba.
+#
+# Verificado que el API IGNORA (y por eso NO estan aqui):
+#   clientes: zona, estado_facturas, saldo, fecha_instalacion (en cualquier forma)
+#   facturas: facturadas
+#   tickets:  departamento, tecnico, prioridad
+
+_FECHA_ISO = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+AGREGACIONES = {
+    "clientes": {
+        "endpoint": EP_CLIENTES,
+        "etiqueta": "clientes",
+        # Verificado: 4260+811+2093+88 = 7252 = total sin filtro. Cuadra exacto.
+        "filtros": {
+            "estado": {"param": "estado",
+                       "valores": {"activo": 1, "suspendido": 2,
+                                   "cancelado": 3, "gratis": 4}},
+            "plan_internet": {"param": "plan_internet", "tipo": "id",
+                              "ayuda": "ID numerico del plan (hay 55 planes)."},
+            "ciudad": {"param": "ciudad", "tipo": "texto"},
+            "localidad": {"param": "localidad", "tipo": "texto"},
+        },
+        "agrupar_por": ["estado"],
+        # Clientes NO tiene ningun filtro de fecha: su conteo es absoluto y no
+        # depende de un periodo. Es la unica entidad de la que se puede decir
+        # "hay N" sin fechar la afirmacion.
+        "periodo": None,
+        "no_soportado": {
+            "zona": "El API de clientes ignora el filtro por zona. Las facturas "
+                    "SI se pueden contar por zona.",
+            "estado_facturas": "El API de clientes ignora este filtro. Para saber "
+                               "quien debe, se cuentan facturas en estado "
+                               "'pendiente' (cuenta facturas, no clientes).",
+            "saldo": "El API de clientes ignora el filtro por saldo.",
+            "periodo": "El API de clientes no filtra por fecha: no se pueden "
+                       "contar altas de un mes.",
+        },
+    },
+    "facturas": {
+        "endpoint": EP_FACTURAS,
+        "etiqueta": "facturas",
+        # Verificado: 3606+5087+7 = 8700 = total. Y las 5 zonas suman 8700 exacto.
+        "filtros": {
+            "estado": {"param": "estado",
+                       "valores": {"pendiente": 1, "pagada": 2, "cancelada": 3,
+                                   "en_revision": 4, "transferida": 5}},
+            "zona": {"param": "zona", "tipo": "id", "catalogo": "zonas"},
+        },
+        "agrupar_por": ["estado", "zona"],
+        "periodo": {
+            "campos": {"emision": "fecha_emision__range",
+                       "vencimiento": "fecha_vencimiento__range",
+                       "pago": "fecha_pago__range"},
+            "por_defecto": "emision",
+            "sufijos": ("_0", "_1"),
+            "max_meses": 3,      # verificado: 4 meses -> HTTP 400 del API
+            # Sin periodo explicito el API aplica el suyo. MEDIDO: el total base
+            # (8700) es exactamente junio+julio 2026, o sea los ~2 ultimos meses,
+            # no el historico. Por eso el periodo se declara SIEMPRE.
+            # Dos textos y no uno: la 'nota' entra en la frase que describe la
+            # consulta y debe ser corta; la 'advertencia' explica el riesgo.
+            "nota_defecto": "periodo por defecto del API (~2 ultimos meses de emision)",
+            "advertencia_defecto": (
+                "Sin periodo explicito, el API cuenta solo sus ultimos ~2 meses "
+                "de emision, no el historico completo."),
+        },
+        "no_soportado": {
+            "cliente": "Para las facturas de UN cliente usa consultar_facturas, "
+                       "no la consulta agregada.",
+        },
+    },
+    "tickets": {
+        "endpoint": EP_TICKETS,
+        "etiqueta": "tickets",
+        # Verificado: 266+18+2351 = 2635 = total devuelto sin filtro de fecha.
+        "filtros": {
+            "estado": {"param": "estado",
+                       "valores": {"nuevo": 1, "en_progreso": 2, "cerrado": 4}},
+        },
+        "agrupar_por": ["estado"],
+        "periodo": {
+            # Tickets usa UN solo guion bajo: fecha_creacion_0/_1 (no '__range').
+            "campos": {"creacion": "fecha_creacion"},
+            "por_defecto": "creacion",
+            "sufijos": ("_0", "_1"),
+            "max_meses": 2,      # verificado: 3 meses -> HTTP 400 del API
+            # CUIDADO. Aqui el default del API es engañoso de verdad: sin filtro
+            # de fecha devuelve 2635, pero SOLO julio ya da 2637 y junio da 3341.
+            # Un subconjunto no puede superar al conjunto: ese 2635 es un recorte
+            # temporal propio del API, no el total historico de tickets.
+            # Por eso un conteo de tickets sin periodo es un numero sin
+            # significado, y la advertencia lo dice sin adornos.
+            "nota_defecto": "sin periodo: recorte temporal propio del API, "
+                            "no el historico",
+            "advertencia_defecto": (
+                "SIN PERIODO: el API aplica un recorte temporal propio. Este "
+                "total NO es el historico y no sirve para comparar. Para un "
+                "dato fiable hay que pedir un periodo explicito (max 2 meses)."),
+        },
+        "no_soportado": {
+            "cliente": "El API de tickets no filtra por cliente. Para los tickets "
+                       "de UN cliente usa consultar_tickets_de_cliente.",
+            "tecnico": "El API de tickets ignora el filtro por tecnico.",
+            "prioridad": "El API de tickets ignora el filtro por prioridad.",
+            "departamento": "El API de tickets ignora el filtro por departamento.",
+        },
+    },
+}
+
+# Los nombres de zona se leen del API la primera vez y se recuerdan: son 5 y no
+# cambian en una sesion. Sirven para agrupar y para poder decir "CORTE 30 -
+# SERVIDOR 1" en vez de "zona 20049".
+_CACHE_ZONAS = {}
+
+def _zonas():
+    """{id: nombre} de las zonas. Cachea; ante un fallo devuelve {} (no rompe)."""
+    if _CACHE_ZONAS:
+        return _CACHE_ZONAS
+    if not USAR_WISPHUB_REAL:
+        _CACHE_ZONAS.update({3: "NORTE", 4: "SUR"})
+        return _CACHE_ZONAS
+    try:
+        r = requests.get(WISPHUB_BASE_URL + EP_ZONAS, headers=_headers(),
+                         params={"limit": 100}, timeout=15)
+        r.raise_for_status()
+        payload = r.json()
+        filas = payload.get("results", payload) if isinstance(payload, dict) else payload
+        for z in filas or []:
+            if isinstance(z, dict) and z.get("id") is not None:
+                _CACHE_ZONAS[z["id"]] = z.get("nombre") or str(z["id"])
+    except (requests.RequestException, ValueError):
+        pass
+    return _CACHE_ZONAS
+
+
 AREAS = {
     "soporte": {
         "descripcion": "Soporte: atiende al cliente, revisa su estado y sus tickets.",
         "herramientas": ["consultar_cliente", "consultar_cliente_por_cedula",
-                         "consultar_ticket", "consultar_tickets_de_cliente"],
+                         "consultar_ticket", "consultar_tickets_de_cliente",
+                         "consultar_agregado"],
+        # Que entidades puede CONTAR el area. Es una segunda lista blanca: una
+        # entidad ausente se rechaza aunque la herramienta este permitida.
+        "agregados": ["tickets", "clientes"],
         "campos": {
             "consultar_cliente": (_CLIENTE_IDENTIDAD + _CLIENTE_CONTACTO +
                                   _CLIENTE_SERVICIO + _CLIENTE_PAGO),
             "consultar_ticket": _TICKET_BASE,
             "consultar_tickets_de_cliente": _TICKET_LISTA,
+            "consultar_agregado": _AGREGADO,
         },
     },
     "tecnica": {
@@ -242,7 +408,9 @@ AREAS = {
     "facturacion": {
         "descripcion": "Facturacion: revisa facturas, saldos y registra pagos.",
         "herramientas": ["consultar_cliente", "consultar_cliente_por_cedula",
-                         "consultar_facturas", "registrar_pago"],
+                         "consultar_facturas", "registrar_pago",
+                         "consultar_agregado"],
+        "agregados": ["facturas", "clientes"],
         "campos": {
             # Sin datos de red ni tickets: no hacen a su trabajo.
             "consultar_cliente": (_CLIENTE_IDENTIDAD + _CLIENTE_CONTACTO +
@@ -250,19 +418,22 @@ AREAS = {
                                   ["plan_internet"]),
             "consultar_facturas": _FACTURA,
             "registrar_pago": _PAGO_RESULTADO,
+            "consultar_agregado": _AGREGADO,
         },
     },
     "administracion": {
         "descripcion": "Administracion: consulta consolidada, sin datos personales.",
         "herramientas": ["consultar_cliente", "consultar_cliente_por_cedula",
-                         "consultar_tickets_de_cliente"],
+                         "consultar_tickets_de_cliente", "consultar_agregado"],
+        # Es la unica area que puede contar las tres entidades: su trabajo son
+        # los consolidados, y un agregado no expone a ningun cliente concreto.
+        "agregados": ["clientes", "facturas", "tickets"],
         "campos": {
             # Sin PII: ni cedula, ni contacto. Ve el estado y el servicio.
-            # Su verdadero caso de uso son los informes agregados, que aun no
-            # existen (PRD 12.5); mientras tanto, el minimo indispensable.
             "consultar_cliente": (["id_servicio", "nombre", "estado"] +
                                   _CLIENTE_SERVICIO + ["estado_facturas"]),
             "consultar_tickets_de_cliente": _TICKET_LISTA,
+            "consultar_agregado": _AGREGADO,
         },
     },
 }
@@ -285,6 +456,10 @@ def herramientas_de(area):
     """Definiciones de las herramientas que el area puede usar."""
     permitidas = AREAS.get(area, {}).get("herramientas", [])
     return [h for h in HERRAMIENTAS if h["function"]["name"] in permitidas]
+
+def agregados_de(area):
+    """Entidades que ESA AREA puede contar. Vacio = ninguna (fail-closed)."""
+    return AREAS.get(area, {}).get("agregados", [])
 
 def _compilar_permitidos(permitidos):
     """Separa la lista blanca en campos de primer nivel y campos anidados."""
@@ -480,6 +655,33 @@ HERRAMIENTAS = [
             "cedula": {"type": "string", "description": "Cedula del cliente."}
         }, "required": []}}},
     {"type": "function", "function": {
+        "name": "consultar_agregado",
+        "description": (
+            "CUENTA cuantos registros cumplen unas condiciones. Usar para preguntas "
+            "de CUANTOS, totales, o comparaciones entre grupos. NO sirve para "
+            "consultar un cliente concreto. "
+            "Ejemplos: 'cuantos clientes suspendidos hay' -> entidad=clientes, "
+            "filtros={estado:suspendido}. 'cuantas facturas pendientes por zona' -> "
+            "entidad=facturas, filtros={estado:pendiente}, agrupar_por=zona. "
+            "IMPORTANTE: no calcules tu el resultado, la herramienta ya devuelve "
+            "el numero contado."),
+        "parameters": {"type": "object", "properties": {
+            "entidad": {"type": "string", "enum": ["clientes", "facturas", "tickets"],
+                        "description": "Que se cuenta."},
+            "filtros": {"type": "object", "description": (
+                "Condiciones. clientes: estado (activo|suspendido|cancelado|gratis), "
+                "plan_internet, ciudad, localidad. facturas: estado "
+                "(pendiente|pagada|cancelada), zona. tickets: estado "
+                "(nuevo|en_progreso|cerrado).")},
+            "agrupar_por": {"type": "string", "description": (
+                "Opcional. Devuelve el conteo desglosado por este campo: 'estado' "
+                "en cualquier entidad, o 'zona' en facturas.")},
+            "periodo": {"type": "string", "description": (
+                "Opcional, solo facturas y tickets. Un mes 'AAAA-MM' o un rango "
+                "'AAAA-MM-DD a AAAA-MM-DD'. Facturas admite hasta 3 meses; "
+                "tickets hasta 2.")},
+        }, "required": ["entidad"]}}},
+    {"type": "function", "function": {
         "name": "registrar_pago",
         "description": "Registra un pago sobre una factura. ACCION SENSIBLE: requiere confirmacion.",
         "parameters": {"type": "object", "properties": {
@@ -499,6 +701,138 @@ def _limpiar_cedula(valor):
     for sobra in (".", " ", "-"):
         cedula = cedula.replace(sobra, "")
     return cedula
+
+def _ultimo_dia(anio, mes):
+    return calendar.monthrange(anio, mes)[1]
+
+def _parsear_periodo(texto, max_meses):
+    """
+    Acepta 'AAAA-MM' (mes completo) o 'AAAA-MM-DD a AAAA-MM-DD'.
+
+    Devuelve (ok, (desde, hasta)) o (False, motivo).
+
+    La amplitud se valida AQUI y no se delega al API: el API la rechaza con un
+    HTTP 400 que el asesor veria como 'fallo al llamar a WispHub'. Verificado en
+    produccion: facturas corta en 3 meses, tickets en 2.
+    """
+    texto = str(texto or "").strip()
+    if not texto:
+        return False, "Periodo vacio."
+
+    if re.fullmatch(r"\d{4}-\d{2}", texto):          # un mes completo
+        anio, mes = int(texto[:4]), int(texto[5:7])
+        if not 1 <= mes <= 12:
+            return False, f"Mes invalido en '{texto}'."
+        desde = f"{anio:04d}-{mes:02d}-01"
+        hasta = f"{anio:04d}-{mes:02d}-{_ultimo_dia(anio, mes):02d}"
+    else:
+        partes = re.split(r"\s+a\s+|\.\.|\s+hasta\s+", texto)
+        if len(partes) != 2:
+            return False, (f"No entiendo el periodo '{texto}'. Usa 'AAAA-MM' "
+                           f"o 'AAAA-MM-DD a AAAA-MM-DD'.")
+        desde, hasta = partes[0].strip(), partes[1].strip()
+
+    for f in (desde, hasta):
+        if not _FECHA_ISO.match(f):
+            return False, f"La fecha '{f}' no tiene el formato AAAA-MM-DD."
+    try:
+        d0 = datetime.strptime(desde, "%Y-%m-%d")
+        d1 = datetime.strptime(hasta, "%Y-%m-%d")
+    except ValueError:
+        return False, f"Fecha inexistente en el periodo '{texto}'."
+    if d1 < d0:
+        return False, f"El periodo empieza despues de terminar ({desde} a {hasta})."
+
+    # Se topa en dias porque el limite real del API es por amplitud, no por mes
+    # calendario. Verificado: 92 dias pasa en facturas, 122 no.
+    if (d1 - d0).days > max_meses * 31:
+        return False, (f"El periodo {desde} a {hasta} es demasiado amplio: "
+                       f"el API no acepta mas de {max_meses} meses por consulta.")
+    return True, (desde, hasta)
+
+
+def _validar_agregado(args):
+    """
+    Traduce la consulta que propuso el modelo a algo ejecutable, o la rechaza.
+
+    Esta es la lista blanca de PRD 12.5 regla 3, aplicada a la forma de la
+    consulta: que se puede filtrar, por que se puede agrupar y con que rango.
+    Un filtro que el API ignora no se 'intenta igual': se rechaza con el motivo,
+    porque intentarlo devolveria el universo entero como si fuera la respuesta.
+    """
+    entidad = str(args.get("entidad") or "").strip().lower()
+    if entidad not in AGREGACIONES:
+        return False, (f"No se puede contar '{entidad}'. Entidades disponibles: "
+                       f"{', '.join(AGREGACIONES)}.")
+    cfg = AGREGACIONES[entidad]
+
+    # --- filtros ---
+    crudos = args.get("filtros") or {}
+    if isinstance(crudos, str):
+        try:
+            crudos = json.loads(crudos)
+        except ValueError:
+            return False, "El campo 'filtros' no es un objeto valido."
+    if not isinstance(crudos, dict):
+        return False, "El campo 'filtros' debe ser un objeto."
+
+    filtros = {}
+    for clave, valor in crudos.items():
+        clave = str(clave).strip().lower()
+        if valor in (None, ""):
+            continue
+        if clave in cfg.get("no_soportado", {}):
+            return False, cfg["no_soportado"][clave]
+        if clave not in cfg["filtros"]:
+            return False, (f"No se puede filtrar {entidad} por '{clave}'. "
+                           f"Disponibles: {', '.join(cfg['filtros'])}.")
+        spec = cfg["filtros"][clave]
+        if "valores" in spec:
+            v = str(valor).strip().lower().replace(" ", "_")
+            if v not in spec["valores"]:
+                return False, (f"'{valor}' no es un valor de {clave} para "
+                               f"{entidad}. Validos: {', '.join(spec['valores'])}.")
+            filtros[clave] = v
+        elif spec.get("tipo") == "id":
+            if not str(valor).strip().isdigit():
+                return False, (f"El filtro '{clave}' espera un ID numerico, "
+                               f"no '{valor}'.")
+            filtros[clave] = int(valor)
+        else:
+            filtros[clave] = str(valor).strip()
+
+    # --- agrupacion ---
+    agrupar = str(args.get("agrupar_por") or "").strip().lower() or None
+    if agrupar and agrupar not in cfg["agrupar_por"]:
+        return False, (f"No se puede agrupar {entidad} por '{agrupar}'. "
+                       f"Disponibles: {', '.join(cfg['agrupar_por']) or 'ninguno'}.")
+    # Agrupar por un campo que YA se esta filtrando es una contradiccion, y de las
+    # peligrosas: el desglose recorre todos los valores de ese campo y sobreescribe
+    # el filtro, asi que el numero saldria del universo completo mientras la
+    # interpretacion seguiria anunciando el filtro. Un total exacto respondiendo
+    # otra pregunta es peor que un error, por eso se rechaza en vez de corregirse
+    # en silencio: el modelo pidio dos cosas incompatibles y debe elegir una.
+    if agrupar and agrupar in filtros:
+        return False, (f"No se puede filtrar {entidad} por {agrupar}='{filtros[agrupar]}' "
+                       f"y a la vez desglosar por {agrupar}. Elige una: o el conteo "
+                       f"de ese valor, o el desglose de todos.")
+
+    # --- periodo ---
+    periodo = None
+    pedido = args.get("periodo")
+    if pedido:
+        if not cfg.get("periodo"):
+            return False, cfg.get("no_soportado", {}).get(
+                "periodo", f"Las {entidad} no se pueden filtrar por fecha.")
+        ok, resultado = _parsear_periodo(pedido, cfg["periodo"]["max_meses"])
+        if not ok:
+            return False, resultado
+        periodo = resultado
+
+    return True, {"entidad": entidad, "filtros": filtros,
+                  "agrupar_por": agrupar,
+                  "periodo": f"{periodo[0]}..{periodo[1]}" if periodo else ""}
+
 
 def validar_argumentos(nombre, args):
     if nombre in ("consultar_cliente", "consultar_facturas"):
@@ -529,6 +863,8 @@ def validar_argumentos(nombre, args):
         if cedula and not cedula.isdigit():
             return False, "La cedula no es un numero valido."
         return True, {"id_cliente": idc, "cedula": cedula}
+    if nombre == "consultar_agregado":
+        return _validar_agregado(args)
     if nombre == "registrar_pago":
         idf = str(args.get("id_factura", "")).strip()
         try:
@@ -716,6 +1052,147 @@ def _tickets_de_cliente(id_servicio):
                     f"consultaron. Se revisaron {barridos} tickets."),
     }
 
+# ==============================================================================
+#  MOTOR DE AGREGACION  —  el modelo compone, ESTE codigo calcula (PRD 12.5)
+# ==============================================================================
+
+def _contar(endpoint, params):
+    """
+    Cuantos registros cumplen 'params'. UNA llamada, CERO filas.
+
+    El paginado del API ya trae el total en 'count': se pide limit=1 y se lee ese
+    numero. Contar 8.700 facturas cuesta lo mismo que contar 3, y el modelo no ve
+    ni una fila. Pedirle a un SLM que cuente 8.700 filas no es lento: es imposible.
+    """
+    p = dict(params)
+    p["limit"] = 1
+    r = requests.get(WISPHUB_BASE_URL + endpoint, headers=_headers(),
+                     params=p, timeout=30)
+    if r.status_code == 400:
+        # El API explica bien sus rechazos (rango muy amplio, formato de fecha).
+        # Se propaga ese motivo en vez de un generico: el asesor puede corregir.
+        try:
+            motivo = r.json().get("error") or r.text[:120]
+        except ValueError:
+            motivo = r.text[:120]
+        raise ValueError(f"WispHub rechazo la consulta: {motivo}")
+    r.raise_for_status()
+    payload = r.json()
+    if isinstance(payload, dict) and "count" in payload:
+        return payload["count"]
+    if isinstance(payload, list):
+        return len(payload)
+    raise ValueError("El API no devolvio un conteo reconocible.")
+
+
+def _params_de(cfg, filtros, periodo):
+    """Traduce los filtros del catalogo a parametros reales del API."""
+    params = {}
+    for clave, valor in filtros.items():
+        spec = cfg["filtros"][clave]
+        params[spec["param"]] = spec["valores"][valor] if "valores" in spec else valor
+    if periodo and cfg.get("periodo"):
+        desde, hasta = periodo.split("..")
+        p = cfg["periodo"]
+        base = p["campos"][p["por_defecto"]]
+        s0, s1 = p["sufijos"]
+        params[base + s0] = desde
+        params[base + s1] = hasta
+    return params
+
+
+def _describir(cfg, entidad, filtros, periodo):
+    """
+    Redacta EN CODIGO como se interpreto la pregunta (RF-15).
+
+    No se le pide al modelo que describa su propia consulta: describiria lo que
+    creyo pedir, no lo que se ejecuto. Esta frase se arma con los filtros que de
+    verdad se enviaron al API.
+    """
+    partes = []
+    for clave, valor in filtros.items():
+        if clave == "zona":
+            partes.append(f"zona {_zonas().get(valor, valor)}")
+        else:
+            partes.append(f"{clave} '{valor}'")
+    texto = f"{cfg['etiqueta'].capitalize()}"
+    if partes:
+        texto += " con " + ", ".join(partes)
+    else:
+        texto += " (sin filtros)"
+
+    if periodo:
+        desde, hasta = periodo.split("..")
+        campo = cfg["periodo"]["por_defecto"]
+        texto += f", por fecha de {campo} entre {desde} y {hasta}"
+    elif cfg.get("periodo"):
+        texto += f", {cfg['periodo']['nota_defecto']}"
+    return texto + "."
+
+
+def _valores_para_agrupar(cfg, campo):
+    """Los valores por los que se va a agrupar: (clave_api, etiqueta legible)."""
+    if campo == "zona":
+        return [(zid, nombre) for zid, nombre in _zonas().items()]
+    spec = cfg["filtros"][campo]
+    return [(num, nom) for nom, num in spec["valores"].items()]
+
+
+def consultar_agregado(entidad, filtros, agrupar_por, periodo):
+    """
+    Cuenta registros. Devuelve numeros ya calculados, nunca filas.
+
+    Sin agrupacion: una llamada. Con agrupacion: una por valor del grupo (3-5),
+    y el total es la SUMA que hace Python, no una cuenta que hace el modelo.
+    """
+    cfg = AGREGACIONES[entidad]
+    base = _params_de(cfg, filtros, periodo)
+    interpretacion = _describir(cfg, entidad, filtros, periodo)
+
+    # Avisos que el asesor necesita para juzgar si el numero responde su pregunta.
+    avisos = []
+    if not periodo and cfg.get("periodo"):
+        avisos.append(cfg["periodo"]["advertencia_defecto"])
+    if entidad == "facturas" and filtros.get("estado") == "pendiente":
+        # El error mas probable de esta herramienta, y el mas dificil de notar.
+        avisos.append("Cuenta FACTURAS pendientes, no clientes morosos: un "
+                      "cliente con varias facturas vencidas cuenta varias veces.")
+    if any(AGREGACIONES[entidad]["filtros"].get(k, {}).get("tipo") == "texto"
+           for k in filtros):
+        avisos.append("Los filtros de texto (ciudad, localidad) se escriben libre "
+                      "en WispHub y admiten variantes: 'SABANAGRANDE' y 'SABANA "
+                      "GRANDE' son registros distintos.")
+
+    if not agrupar_por:
+        total = _contar(cfg["endpoint"], base)
+        salida = {"total": total, "interpretacion": interpretacion}
+        if avisos:
+            salida["advertencia"] = " ".join(avisos)
+        return salida
+
+    valores = _valores_para_agrupar(cfg, agrupar_por)
+    if len(valores) > TOPE_GRUPOS:
+        return {"error": f"Agrupar por '{agrupar_por}' daria {len(valores)} grupos "
+                         f"y el tope es {TOPE_GRUPOS}. Consulta un valor concreto."}
+
+    desglose = {}
+    for clave_api, etiqueta in valores:
+        params = dict(base)
+        params[cfg["filtros"].get(agrupar_por, {}).get("param", agrupar_por)] = clave_api
+        desglose[str(etiqueta)] = _contar(cfg["endpoint"], params)
+
+    # El total lo SUMA Python. Que lo sume el modelo es exactamente lo que
+    # prohibe la regla 1 de PRD 12.5.
+    salida = {
+        "total": sum(desglose.values()),
+        "desglose": desglose,
+        "interpretacion": f"{interpretacion[:-1]}, desglosado por {agrupar_por}.",
+    }
+    if avisos:
+        salida["advertencia"] = " ".join(avisos)
+    return salida
+
+
 def ejecutar_herramienta(nombre, args):
     """Devuelve la respuesta CRUDA (sin filtrar todavia)."""
     if not USAR_WISPHUB_REAL:
@@ -740,6 +1217,24 @@ def ejecutar_herramienta(nombre, args):
                        if str((t.get("servicio") or {}).get("id_servicio")) == str(idc)]
             return {"count": len(propios), "results": propios,
                     "alcance": "Solo tickets abiertos (simulado)."}
+        if nombre == "consultar_agregado":
+            # Conteos fijos, con la MISMA forma que la ruta real (incluidas la
+            # interpretacion y la advertencia): si divergen, lo que se prueba
+            # aqui no es lo que corre en produccion.
+            cfg = AGREGACIONES[args["entidad"]]
+            fijos = {"clientes": 7252, "facturas": 8700, "tickets": 2635}
+            interpretacion = _describir(cfg, args["entidad"],
+                                        args["filtros"], args["periodo"])
+            if args["agrupar_por"]:
+                valores = _valores_para_agrupar(cfg, args["agrupar_por"])
+                desglose = {str(et): (i + 1) * 100 for i, (_, et) in enumerate(valores)}
+                return {"total": sum(desglose.values()), "desglose": desglose,
+                        "interpretacion": f"{interpretacion[:-1]}, desglosado por "
+                                          f"{args['agrupar_por']} (simulado).",
+                        "advertencia": "Datos simulados."}
+            return {"total": fijos[args["entidad"]],
+                    "interpretacion": interpretacion,
+                    "advertencia": "Datos simulados."}
         if nombre == "registrar_pago":
             return {"resultado": "ok", "id_factura": args["id_factura"],
                     "total_cobrado": args["monto"],
@@ -768,6 +1263,10 @@ def ejecutar_herramienta(nombre, args):
                 return cliente
             return _tickets_de_cliente(cliente["id_servicio"])
 
+        if nombre == "consultar_agregado":
+            return consultar_agregado(args["entidad"], args["filtros"],
+                                      args["agrupar_por"], args["periodo"])
+
         if nombre == "consultar_ticket":
             url = WISPHUB_BASE_URL + EP_TICKET.format(id=args["id_ticket"])
             r = requests.get(url, headers=_headers(), timeout=15)
@@ -784,8 +1283,12 @@ def ejecutar_herramienta(nombre, args):
         return r.json()
     except requests.RequestException as e:
         return {"error": f"Fallo al llamar a WispHub: {e}"}
-    except ValueError:
-        return {"error": "WispHub devolvio una respuesta que no es JSON valido."}
+    except ValueError as e:
+        # _contar() usa ValueError para propagar el motivo que da el API en un
+        # 400 (rango muy amplio, formato de fecha). Ese motivo es accionable
+        # para el asesor: se conserva en vez de taparlo con un generico.
+        return {"error": str(e) if str(e)
+                else "WispHub devolvio una respuesta que no es JSON valido."}
 
 
 # ==============================================================================
@@ -817,8 +1320,14 @@ _SYSTEM_BASE = (
     "- Usa SIEMPRE las herramientas para consultar datos reales antes de responder. Nunca inventes ni supongas datos.\n"
     "- Si te dan un numero de cedula (documento), usa consultar_cliente_por_cedula; "
     "si te dan un ID de servicio, usa consultar_cliente.\n"
-    "- Cuando un resultado traiga un campo 'alcance' o 'aviso', repiteselo al colaborador: "
-    "indica que se consulto y que no. No lo omitas.\n"
+    "- Cuando un resultado traiga un campo 'alcance', 'aviso' o 'advertencia', repiteselo al "
+    "colaborador: indica que se consulto y que no. No lo omitas.\n"
+    "- NUNCA calcules tu: ni sumes, ni restes, ni cuentes, ni saques porcentajes. Para "
+    "cualquier pregunta de CUANTOS usa consultar_agregado; el numero que devuelve ya esta "
+    "calculado y es el que debes dar, tal cual.\n"
+    "- Al dar un dato agregado, di SIEMPRE como se interpreto la pregunta usando el campo "
+    "'interpretacion' del resultado. No respondas '143': responde 'Facturas pendientes en "
+    "zona X, julio 2026: 143'. Quien pregunta debe poder detectar si entendiste mal.\n"
     "- Si una herramienta no devuelve un dato, dilo explicitamente ('No se encontro esa informacion') en vez de rellenar.\n"
     "- Si te piden algo para lo que no tienes herramienta, di que no puedes consultarlo, no improvises. "
     "Puede ser que ese dato le corresponda a otra area; en ese caso, indicalo.\n"
@@ -849,6 +1358,8 @@ _SYSTEM_AREA = {
         "\nAREA: ADMINISTRACION. Consultas consolidadas.\n"
         "- Trabajas sin datos personales del cliente: no ves cedula ni datos de contacto.\n"
         "- Si te piden un dato individual identificable, indica que no te corresponde.\n"
+        "- Es tu herramienta principal consultar_agregado: puedes contar clientes, "
+        "facturas y tickets, y desglosar por estado o por zona.\n"
     ),
 }
 
@@ -920,6 +1431,15 @@ def responder(mensaje_cliente, historial, area=AREA_POR_DEFECTO):
             # inventar un nombre. Se corta aqui: la lista de herramientas es una
             # sugerencia para el modelo; el permiso lo decide el codigo.
             salida = {"error": f"El area '{area}' no tiene la herramienta '{nombre}'."}
+            estado = "rechazado_por_area"
+        elif (nombre == "consultar_agregado" and ok
+              and resultado["entidad"] not in agregados_de(area)):
+            # Tener la herramienta no da acceso a todas las entidades: Soporte
+            # cuenta tickets, no facturas. Se verifica aparte porque la entidad
+            # viaja como ARGUMENTO, y un permiso que solo mira el nombre de la
+            # herramienta no la ve.
+            salida = {"error": f"El area '{area}' no puede contar "
+                               f"'{resultado['entidad']}'."}
             estado = "rechazado_por_area"
         elif not ok:
             salida = {"error": resultado}
