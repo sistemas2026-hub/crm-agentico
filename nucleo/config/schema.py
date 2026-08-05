@@ -1,0 +1,575 @@
+# -*- coding: utf-8 -*-
+"""
+================================================================================
+ VALIDACION DE tenant.config.yaml
+ Entregable 2 de 9. Agosto 2026.
+================================================================================
+
+Por que existe este archivo
+---------------------------
+La restriccion arquitectonica dice que dar de alta un ISP nuevo es escribir un
+YAML, sin tocar codigo. Eso convierte al YAML en la superficie donde ocurren
+los errores: un rol mal escrito, un filtro que la API no soporta, una clave
+pegada por descuido. Sin validacion, esos errores se descubren en produccion
+con un cliente adelante.
+
+Este modulo los caza al cargar, no al ejecutar.
+
+Las tres validaciones que no son de tipos
+-----------------------------------------
+1. NINGUN SECRETO. Los campos '*_ref' deben ser NOMBRES de variable de entorno
+   o de Vault, no valores. Ademas se barre el archivo entero buscando cosas con
+   pinta de credencial.
+
+2. FILTROS VERIFICADOS vs IGNORADOS. La API de WispHub ignora filtros en
+   SILENCIO: pides ?zona=3 y te devuelve los 7.272 clientes como si fuera la
+   respuesta filtrada. No da error. Por eso el catalogo separa los que pasaron
+   la prueba del valor imposible de los que se sabe que la API ignora, y este
+   modulo verifica que un filtro no este en las dos listas y que no se pueda
+   agrupar por algo que no esta verificado.
+
+   Un filtro ignorado no se "intenta igual": se rechaza con el motivo. Un total
+   preciso que responde otra pregunta es peor que un error.
+
+3. COHERENCIA DE ROLES. Una herramienta no puede permitir un rol que no existe,
+   y un rol no puede declarar campos de una herramienta que no puede usar.
+
+Uso
+---
+    from nucleo.config import cargar_config
+    cfg = cargar_config("tenants/<slug>.config.yaml")
+
+    # o por linea de comandos, para validar todos los tenants:
+    py -3.13 nucleo/config/schema.py
+================================================================================
+"""
+
+from __future__ import annotations
+
+import re
+from datetime import date
+from pathlib import Path
+from typing import Annotated, Any, Literal
+
+import yaml
+from pydantic import (BaseModel, ConfigDict, Field, ValidationError,
+                      field_validator, model_validator)
+
+
+# =============================================================================
+#  DETECCION DE SECRETOS
+# =============================================================================
+# Un '*_ref' es el NOMBRE de donde vive el secreto, nunca el secreto.
+RE_NOMBRE_REF = re.compile(r"^[A-Z][A-Z0-9_]{2,}$")
+
+# Heuristicas de credencial pegada por error. No pretenden ser exhaustivas:
+# atrapan el descuido tipico, que es copiar la clave en vez de su nombre.
+PATRONES_SECRETO = [
+    (re.compile(r"^sk-[A-Za-z0-9_\-]{16,}$"), "clave estilo OpenAI"),
+    (re.compile(r"^ey[A-Za-z0-9_\-]{20,}\."), "JSON Web Token"),
+    (re.compile(r"^[A-Za-z0-9+/]{40,}={0,2}$"), "cadena base64 larga"),
+    (re.compile(r"^[a-f0-9]{32,}$", re.I), "hash o clave hexadecimal"),
+]
+
+
+def _parece_secreto(valor: str) -> str | None:
+    for patron, descripcion in PATRONES_SECRETO:
+        if patron.match(valor):
+            return descripcion
+    return None
+
+
+class Base(BaseModel):
+    # Campo desconocido = error. Si alguien escribe 'tono_respuesta' en vez de
+    # 'tono', tiene que enterarse al cargar y no cuando el asistente conteste
+    # con el tono por defecto sin avisar a nadie.
+    model_config = ConfigDict(extra="forbid")
+
+
+# =============================================================================
+#  IDENTIDAD Y PRESENTACION
+# =============================================================================
+
+class Identidad(Base):
+    slug: Annotated[str, Field(pattern=r"^[a-z][a-z0-9\-]{1,30}$")]
+    nombre_legal: str
+    nombre_comercial: str | None = None
+    sector: str = "isp"
+    zona_horaria: str = "America/Bogota"
+    idioma: str = "es"
+
+
+class Marca(Base):
+    logo_url: str | None = None
+    color_primario: str | None = None
+    firma_mensajes: str | None = None
+
+
+class Persona(Base):
+    nombre_asistente: str
+    tono: Literal["formal", "cercano", "tecnico"] = "cercano"
+    longitud_respuesta: Literal["breve", "media", "extensa"] = "breve"
+    instrucciones_adicionales: str = ""
+
+
+class TerminoGlosario(Base):
+    """
+    Normaliza el vocabulario del sector para la expansion de consulta.
+
+    Sirve para que "no le llega internet" recupere fragmentos que hablan de
+    "perdida de senal optica". Sin esto, el usuario y el manual usan idiomas
+    distintos y la busqueda no cruza.
+    """
+    termino_canonico: str
+    sinonimos: list[str] = Field(min_length=1)
+
+
+# =============================================================================
+#  ROLES  -  lista blanca, nunca lista negra
+# =============================================================================
+
+class Rol(Base):
+    """
+    Que puede hacer y VER un rol.
+
+    'campos_permitidos' es lista BLANCA por herramienta: un campo sin entrada
+    explicita no se entrega. Es deliberado y no es lo mismo que enumerar los
+    prohibidos: el registro de cliente de WispHub trae 54 campos, entre ellos
+    cuatro de contrasena y las coordenadas GPS del domicilio. Con lista negra,
+    un campo nuevo que agregue el proveedor queda expuesto por defecto; con
+    lista blanca, queda bloqueado por defecto.
+    """
+    descripcion: str = ""
+    puede_consultar: list[str] = Field(default_factory=list)
+    campos_permitidos: dict[str, list[str]] = Field(default_factory=dict)
+    # Documental y de defensa en profundidad. NO sustituye a la lista blanca:
+    # lo que protege de verdad es 'campos_permitidos'.
+    nunca_revelar: list[str] = Field(default_factory=list)
+
+
+# =============================================================================
+#  SEGURIDAD
+# =============================================================================
+
+class Seguridad(Base):
+    """
+    Reglas duras. Se inyectan en el prompt Y se validan en codigo (§8).
+
+    El sistema queda expuesto a usuarios finales por WhatsApp, asi que hay que
+    asumir intentos de inyeccion de prompt. La seguridad real esta en la
+    validacion de permisos en codigo y en el alcance limitado de cada
+    herramienta; las reglas del prompt son una capa adicional, nunca la unica.
+    """
+    reglas_absolutas: list[str] = Field(default_factory=list)
+    # Nivel de verificacion exigido por recurso (ver 'autenticacion').
+    #   0 = ninguno   1 = posesion del canal   2 = reto adicional   3 = humano
+    requiere_verificacion: dict[str, Literal[0, 1, 2, 3]] = Field(default_factory=dict)
+
+
+class Autenticacion(Base):
+    """
+    Como se identifica a quien escribe.
+
+    Medido en la base de Rapilink (600 clientes): 98.7% tienen al menos un
+    movil registrado, 50% tienen dos, y solo el 0.4% de los numeros apunta a
+    mas de un cliente. Por eso el numero del canal sirve como factor de
+    POSESION.
+
+    La cedula NO sirve para autenticar: identifica pero no autentica, porque es
+    publica — esta en la factura, el contrato y el documento. Cualquiera que
+    conozca la cedula de un vecino podria pedir su saldo.
+    """
+    campo_identidad: str = "telefono"
+    # El campo 'telefono' de WispHub guarda varios numeros en uno solo en el
+    # 55% de los casos ("3001234567, 3109876543"). Hay que extraerlos todos:
+    # leerlo como valor unico baja la cobertura de 98.7% a 43%.
+    patron_extraccion: str = r"(?<!\d)3\d{9}(?!\d)"
+    # Cuando el numero no coincide (celular nuevo). Ninguno debe ser publico.
+    retos_nivel_2: list[str] = Field(default_factory=list)
+    # Un numero que apunta a varios clientes no es fallo de autenticacion:
+    # es que hay que preguntar cual servicio.
+    desambiguar_si_multiple: bool = True
+    ofrecer_actualizar_numero: bool = True
+
+
+# =============================================================================
+#  CORPUS  (ingesta y RAG)
+# =============================================================================
+
+class TipoDocumento(Base):
+    tipo: str
+    estrategia_chunking: Literal["por_seccion", "por_parrafo", "fijo"] = "por_seccion"
+    # Una tabla partida a la mitad pierde todo su sentido: una que mapea
+    # servidores a VLAN y segmentos IP es inutil si se corta.
+    preservar_tablas: bool = True
+    tamano_objetivo_tokens: int = Field(default=500, ge=100, le=2000)
+    metadatos_dominio: list[str] = Field(default_factory=list)
+
+
+class Corpus(Base):
+    tipos_documento: list[TipoDocumento] = Field(default_factory=list)
+    reportar_defectos: bool = True
+
+
+class RAG(Base):
+    modelo_embeddings: str
+    # 1024 = bge-m3, y coincide con vector(1024) del esquema SQL.
+    # Cambiar esto obliga a re-vectorizar TODO el corpus y a migrar la columna.
+    dimensiones: Literal[384, 768, 1024, 1536] = 1024
+    top_k: int = Field(default=8, ge=1, le=50)
+    umbral_similitud: float = Field(default=0.35, ge=0.0, le=1.0)
+    busqueda_hibrida: bool = True
+    rrf_k: int = 60
+    reranking_activo: bool = False
+    expandir_con_glosario: bool = True
+    # Si nada supera el umbral NO se llama al modelo: se responde esto y se
+    # registra en unanswered_queries. Llamar al modelo sin contexto es pedirle
+    # que invente.
+    mensaje_sin_resultados: str
+
+
+# =============================================================================
+#  MODELOS
+# =============================================================================
+
+class LLM(Base):
+    """
+    Un modelo por defecto, con sustituciones por canal o por rol.
+
+    Las sustituciones existen por una tension medida: el modelo elegido tarda
+    42.6 s por turno, y un tecnico en campo esperando 40 s por WhatsApp
+    probablemente abandone. Que la estructura lo contemple desde el diseno
+    cuesta cero; agregarlo despues obliga a tocar el motor.
+    """
+    proveedor: Literal["ollama", "openai", "anthropic"] = "ollama"
+    modelo_por_defecto: str
+    # El modelo que ELIGE herramienta y el que REDACTA pueden ser distintos.
+    # Medido: phi4-mini acierta 100% repitiendo un dato y 12.5% eligiendo
+    # herramienta. Son habilidades distintas y conviene medirlas por separado.
+    modelo_seleccion: str | None = None
+    modelo_redaccion: str | None = None
+    modelo_informes: str | None = None
+    overrides: dict[str, str] = Field(default_factory=dict)  # 'canal:whatsapp' -> modelo
+    temperatura: float = Field(default=0.1, ge=0.0, le=2.0)
+    max_tokens: int = Field(default=1024, ge=64)
+    # Un bucle de agente puede multiplicar la factura de la noche a la manana,
+    # y aqui cada iteracion cuesta un turno completo, no milisegundos.
+    limite_iteraciones_agente: int = Field(default=4, ge=1, le=10)
+    descartar_thinking: bool = True
+
+
+# =============================================================================
+#  HERRAMIENTAS
+# =============================================================================
+
+class FiltroVerificado(Base):
+    """
+    Un filtro que PASO la prueba del valor imposible.
+
+    Metodo: se consulta con un valor que no puede existir y se compara el total
+    contra la consulta sin filtro. Si son iguales, la API esta ignorando el
+    parametro y NO puede entrar aqui.
+    """
+    param: str
+    tipo: Literal["enum", "id", "texto"] = "enum"
+    valores: dict[str, int] | None = None
+    verificado_el: date | None = None
+
+    @model_validator(mode="after")
+    def _enum_necesita_valores(self):
+        if self.tipo == "enum" and not self.valores:
+            raise ValueError(f"el filtro '{self.param}' es enum y no declara 'valores'")
+        return self
+
+
+class Periodo(Base):
+    campos: dict[str, str]
+    por_defecto: str
+    sufijos: tuple[str, str] = ("_0", "_1")
+    max_meses: int = Field(ge=1, le=12)
+    nota_defecto: str = ""
+    advertencia_defecto: str = ""
+
+    @model_validator(mode="after")
+    def _defecto_existe(self):
+        if self.por_defecto not in self.campos:
+            raise ValueError(
+                f"periodo.por_defecto '{self.por_defecto}' no esta en campos "
+                f"({', '.join(self.campos)})")
+        return self
+
+
+class Herramienta(Base):
+    nombre: str
+    tipo: Literal["http", "agregado", "sql", "webhook", "batch"]
+    descripcion: str = ""
+    solo_lectura: bool = True
+    roles_permitidos: list[str] = Field(min_length=1)
+    requiere_confirmacion: bool = False
+
+    # --- http / agregado ---
+    endpoint: str | None = None
+    metodo: Literal["GET", "POST", "PUT", "PATCH"] = "GET"
+    auth_ref: str | None = None
+
+    # --- agregado ---
+    entidad: str | None = None
+    etiqueta: str | None = None
+    filtros_verificados: dict[str, FiltroVerificado] = Field(default_factory=dict)
+    # Filtros que la API ANUNCIA pero IGNORA. No se intentan: se rechazan con
+    # este texto como motivo. Intentarlos devolveria el universo entero
+    # disfrazado de respuesta exacta.
+    filtros_ignorados_por_api: dict[str, str] = Field(default_factory=dict)
+    agrupar_por: list[str] = Field(default_factory=list)
+    periodo: Periodo | None = None
+    tope_grupos: int = Field(default=12, ge=1, le=50)
+
+    @field_validator("auth_ref")
+    @classmethod
+    def _ref_es_nombre_no_valor(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if not RE_NOMBRE_REF.match(v):
+            raise ValueError(
+                f"auth_ref='{v}' parece un VALOR. Debe ser el NOMBRE de la "
+                f"variable de entorno o del secreto en Vault, en MAYUSCULAS "
+                f"(ej. WISPHUB_API_KEY). Ningun secreto vive en este archivo.")
+        return v
+
+    @model_validator(mode="after")
+    def _coherencia(self):
+        if self.tipo in ("http", "agregado") and not self.endpoint:
+            raise ValueError(f"'{self.nombre}': tipo {self.tipo} exige 'endpoint'")
+
+        if not self.solo_lectura and not self.requiere_confirmacion:
+            raise ValueError(
+                f"'{self.nombre}' escribe y no exige confirmacion. Toda accion "
+                f"de escritura requiere confirmacion humana explicita.")
+
+        if self.tipo == "agregado":
+            if not self.entidad:
+                raise ValueError(f"'{self.nombre}': tipo agregado exige 'entidad'")
+
+            # Un filtro no puede estar verificado E ignorado a la vez.
+            choque = set(self.filtros_verificados) & set(self.filtros_ignorados_por_api)
+            if choque:
+                raise ValueError(
+                    f"'{self.nombre}': {sorted(choque)} aparece(n) como "
+                    f"verificado Y como ignorado por la API. Decide cual.")
+
+            # Agrupar por un campo cuesta UNA llamada por valor. Si el campo no
+            # esta verificado, cada llamada devolveria el universo entero y el
+            # desglose seria basura con aspecto de dato.
+            especiales = {"zona"}      # se resuelven contra un catalogo aparte
+            for campo in self.agrupar_por:
+                if campo not in self.filtros_verificados and campo not in especiales:
+                    raise ValueError(
+                        f"'{self.nombre}': agrupar_por '{campo}' no esta en "
+                        f"filtros_verificados. Agrupar por un filtro que la API "
+                        f"ignora produce un desglose sin sentido.")
+        return self
+
+
+# =============================================================================
+#  CANALES, ESCALAMIENTO, LIMITES
+# =============================================================================
+
+class CanalWhatsApp(Base):
+    activo: bool = False
+    phone_number_id_ref: str | None = None
+    token_ref: str | None = None
+    plantillas: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("phone_number_id_ref", "token_ref")
+    @classmethod
+    def _ref_es_nombre(cls, v: str | None) -> str | None:
+        if v is not None and not RE_NOMBRE_REF.match(v):
+            raise ValueError(f"'{v}' debe ser el NOMBRE del secreto, no su valor")
+        return v
+
+
+class Canales(Base):
+    whatsapp: CanalWhatsApp = Field(default_factory=CanalWhatsApp)
+    web: dict[str, Any] = Field(default_factory=lambda: {"activo": True})
+
+
+class Escalamiento(Base):
+    activar_si: list[str] = Field(default_factory=list)
+    destino_rol: str | None = None
+    mensaje: str = ""
+    # Un escape a humano SIEMPRE disponible, no solo por deteccion automatica.
+    siempre_disponible: bool = True
+
+
+class Limites(Base):
+    max_conversaciones_dia: int | None = None
+    max_costo_usd_mes: float | None = None
+    alerta_al_porcentaje: int = Field(default=80, ge=1, le=100)
+    retencion_conversaciones_dias: int = Field(default=365, ge=1)
+
+
+class Evaluacion(Base):
+    """
+    Criterio de aceptacion para produccion.
+
+    Dos umbrales, no uno. Medido en este proyecto: gemma3:4b "respondia bien"
+    pero ignoraba el dato de la herramienta e inventaba cliente, plan y factura.
+    Un sistema con 92% de acierto que inventa el 3% restante es peligroso; uno
+    con 88% que dice "no se" el 12% es utilizable. El promedio no distingue,
+    por eso la invencion se mide aparte y su tope es CERO.
+    """
+    minimo_acierto_pct: float = Field(default=90.0, ge=0, le=100)
+    maximo_invenciones: int = Field(default=0, ge=0, le=0)
+    minimo_casos: int = Field(default=50, ge=1)
+
+
+# =============================================================================
+#  RAIZ
+# =============================================================================
+
+class TenantConfig(Base):
+    version: int = 1
+    identidad: Identidad
+    marca: Marca = Field(default_factory=Marca)
+    persona: Persona
+    glosario: list[TerminoGlosario] = Field(default_factory=list)
+    roles: dict[str, Rol]
+    seguridad: Seguridad = Field(default_factory=Seguridad)
+    autenticacion: Autenticacion = Field(default_factory=Autenticacion)
+    corpus: Corpus = Field(default_factory=Corpus)
+    rag: RAG
+    llm: LLM
+    herramientas: list[Herramienta] = Field(default_factory=list)
+    canales: Canales = Field(default_factory=Canales)
+    escalamiento: Escalamiento = Field(default_factory=Escalamiento)
+    limites: Limites = Field(default_factory=Limites)
+    evaluacion: Evaluacion = Field(default_factory=Evaluacion)
+
+    @model_validator(mode="after")
+    def _coherencia_global(self):
+        nombres_rol = set(self.roles)
+        nombres_herr = {h.nombre for h in self.herramientas}
+
+        # Una herramienta no puede permitir un rol inexistente.
+        for h in self.herramientas:
+            desconocidos = set(h.roles_permitidos) - nombres_rol
+            if desconocidos:
+                raise ValueError(
+                    f"herramienta '{h.nombre}' permite rol(es) inexistente(s): "
+                    f"{sorted(desconocidos)}. Roles definidos: {sorted(nombres_rol)}")
+
+        for nombre_rol, rol in self.roles.items():
+            # Un rol no puede usar una herramienta que no existe.
+            faltantes = set(rol.puede_consultar) - nombres_herr
+            if faltantes:
+                raise ValueError(
+                    f"rol '{nombre_rol}' declara herramienta(s) inexistente(s): "
+                    f"{sorted(faltantes)}")
+
+            # FAIL-CLOSED: una herramienta permitida sin lista blanca de campos
+            # no devolveria nada. Mejor avisarlo al cargar que descubrirlo con
+            # un asesor esperando una respuesta vacia.
+            for herr in rol.puede_consultar:
+                obj = next((h for h in self.herramientas if h.nombre == herr), None)
+                if obj and obj.tipo in ("http", "agregado", "sql"):
+                    if herr not in rol.campos_permitidos:
+                        raise ValueError(
+                            f"rol '{nombre_rol}' puede usar '{herr}' pero no "
+                            f"declara 'campos_permitidos[{herr}]'. Sin lista "
+                            f"blanca la herramienta no devuelve nada "
+                            f"(fail-closed): declarala aunque sea completa.")
+
+            # Los campos declarados deben ser de herramientas que el rol tiene.
+            sobrantes = set(rol.campos_permitidos) - set(rol.puede_consultar)
+            if sobrantes:
+                raise ValueError(
+                    f"rol '{nombre_rol}' declara campos de {sorted(sobrantes)}, "
+                    f"herramienta(s) que no puede consultar")
+
+        # El destino del escalamiento tiene que existir.
+        destino = self.escalamiento.destino_rol
+        if destino and destino not in nombres_rol:
+            raise ValueError(
+                f"escalamiento.destino_rol '{destino}' no es un rol definido")
+
+        # Las sustituciones de modelo deben apuntar a canales o roles reales.
+        for clave in self.llm.overrides:
+            if ":" not in clave:
+                raise ValueError(
+                    f"llm.overrides['{clave}'] debe tener la forma "
+                    f"'canal:whatsapp' o 'rol:tecnico'")
+            ambito, valor = clave.split(":", 1)
+            if ambito == "rol" and valor not in nombres_rol:
+                raise ValueError(f"llm.overrides: rol '{valor}' no existe")
+            if ambito not in ("rol", "canal"):
+                raise ValueError(
+                    f"llm.overrides['{clave}']: ambito debe ser 'rol' o 'canal'")
+        return self
+
+
+# =============================================================================
+#  CARGA
+# =============================================================================
+
+def _barrer_secretos(nodo: Any, ruta: str = "") -> list[str]:
+    """Recorre el arbol buscando valores con pinta de credencial."""
+    hallazgos: list[str] = []
+    if isinstance(nodo, dict):
+        for k, v in nodo.items():
+            hallazgos += _barrer_secretos(v, f"{ruta}.{k}" if ruta else str(k))
+    elif isinstance(nodo, list):
+        for i, v in enumerate(nodo):
+            hallazgos += _barrer_secretos(v, f"{ruta}[{i}]")
+    elif isinstance(nodo, str):
+        que = _parece_secreto(nodo)
+        if que:
+            hallazgos.append(f"{ruta}: {que}")
+    return hallazgos
+
+
+def cargar_config(ruta: str | Path) -> TenantConfig:
+    """
+    Lee y valida un tenant.config.yaml. Lanza ValueError con TODOS los
+    problemas juntos, no solo el primero: corregirlos de a uno es tedioso.
+    """
+    ruta = Path(ruta)
+    crudo = yaml.safe_load(ruta.read_text(encoding="utf-8")) or {}
+
+    secretos = _barrer_secretos(crudo)
+    if secretos:
+        raise ValueError(
+            f"{ruta.name}: hay valores con pinta de credencial. Ningun secreto "
+            f"vive en este archivo, solo referencias por nombre:\n  - "
+            + "\n  - ".join(secretos))
+
+    try:
+        return TenantConfig(**crudo)
+    except ValidationError as e:
+        lineas = [f"{'.'.join(str(x) for x in err['loc'])}: {err['msg']}"
+                  for err in e.errors()]
+        raise ValueError(
+            f"{ruta.name}: {len(lineas)} problema(s) de configuracion:\n  - "
+            + "\n  - ".join(lineas)) from None
+
+
+if __name__ == "__main__":
+    import sys
+    # Sin argumentos, valida TODOS los tenants. No se nombra ninguno: el nucleo
+    # no conoce clientes (ver nucleo/__init__.py y la guarda en tests/).
+    objetivos = sys.argv[1:] or sorted(
+        str(p) for p in Path(__file__).resolve().parents[2].glob("tenants/*.yaml"))
+    if not objetivos:
+        raise SystemExit("No hay ningun tenants/*.yaml que validar.")
+    for archivo in objetivos:
+        try:
+            cfg = cargar_config(archivo)
+        except ValueError as e:
+            print(f"[FALLA] {e}\n")
+            continue
+        print(f"[OK] {archivo}")
+        print(f"      tenant      : {cfg.identidad.slug} ({cfg.identidad.nombre_legal})")
+        print(f"      roles       : {', '.join(cfg.roles)}")
+        print(f"      herramientas: {len(cfg.herramientas)}")
+        print(f"      modelo      : {cfg.llm.modelo_por_defecto}")
+        print(f"      embeddings  : {cfg.rag.modelo_embeddings} "
+              f"({cfg.rag.dimensiones} dim)\n")

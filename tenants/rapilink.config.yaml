@@ -1,0 +1,501 @@
+# =============================================================================
+#  RAPILINK S.A.S  -  configuracion del tenant
+#  Primer despliegue. Sirve de caso de referencia para los demas ISP.
+# =============================================================================
+#  TODO lo especifico de esta empresa vive en este archivo. El codigo no la
+#  conoce. Dar de alta otro ISP = copiar tenant.config.example.yaml, llenarlo
+#  y correr el sondeo de API para generar la seccion 'herramientas'.
+#
+#  NINGUN SECRETO AQUI. Los campos '*_ref' son NOMBRES de variable de entorno
+#  o de secreto en Vault. El validador rechaza el archivo si detecta un valor
+#  con pinta de credencial.
+# =============================================================================
+
+version: 1
+
+identidad:
+  slug: rapilink
+  nombre_legal: Rapilink S.A.S
+  nombre_comercial: Rapilink
+  sector: isp
+  zona_horaria: America/Bogota
+  idioma: es
+
+marca:
+  firma_mensajes: "Rapilink - Soporte"
+
+persona:
+  nombre_asistente: Dexter
+  tono: cercano
+  # Los tecnicos consultan desde el celular en campo (ver seccion 14 del
+  # diseno). Respuestas largas en WhatsApp no se leen.
+  longitud_respuesta: breve
+  instrucciones_adicionales: >
+    Responde en espanol, en tercera persona y sin tecnicismos innecesarios.
+    Si un dato viene de una herramienta, repitelo LITERAL: no lo redondees,
+    no lo reformules y no calcules sobre el.
+
+# -----------------------------------------------------------------------------
+#  GLOSARIO  -  para que el usuario y el manual hablen el mismo idioma
+# -----------------------------------------------------------------------------
+#  Sin esto, "no me llega internet" no recupera el fragmento que dice
+#  "perdida de senal optica", que es donde esta el procedimiento.
+glosario:
+  - termino_canonico: ONT
+    sinonimos: [modem optico, roseta, equipo del cliente, terminal, ont, onu]
+  - termino_canonico: perdida de senal optica
+    sinonimos: [no llega internet, sin internet, se cayo el servicio,
+                luz roja, los, senal perdida]
+  - termino_canonico: cable drop
+    sinonimos: [cable de acometida, fibra del poste, acometida]
+  - termino_canonico: suspension por mora
+    sinonimos: [me cortaron, esta cortado, suspendido, sin servicio por pago]
+  - termino_canonico: red WiFi del cliente
+    sinonimos: [clave del wifi, contrasena wifi, ssid, nombre de la red]
+
+# -----------------------------------------------------------------------------
+#  ROLES  -  lista BLANCA de campos, nunca lista negra
+# -----------------------------------------------------------------------------
+#  Un campo sin entrada explicita NO se entrega. El registro de cliente de
+#  WispHub trae 54 campos, incluidas cuatro contrasenas y las coordenadas GPS
+#  del domicilio: con lista negra, un campo nuevo del proveedor quedaria
+#  expuesto por defecto.
+roles:
+
+  soporte:
+    descripcion: Atiende al cliente, revisa su estado y sus tickets.
+    puede_consultar: [consultar_cliente, consultar_cliente_por_cedula,
+                      consultar_ticket, consultar_tickets_de_cliente,
+                      contar_tickets, contar_clientes]
+    campos_permitidos:
+      consultar_cliente: [id_servicio, nombre, cedula, estado,
+                          email, telefono, direccion, localidad, ciudad,
+                          plan_internet, zona, fecha_instalacion,
+                          estado_facturas, saldo, fecha_corte]
+      consultar_cliente_por_cedula: [id_servicio, nombre, cedula, estado,
+                                     email, telefono, direccion, localidad, ciudad,
+                                     plan_internet, zona, fecha_instalacion,
+                                     estado_facturas, saldo, fecha_corte]
+      consultar_ticket: [id_ticket, asunto, descripcion, razon_falla, estado,
+                         prioridad, tecnico, departamento, origen_reporte,
+                         fecha_creacion, fecha_inicio, fecha_fin,
+                         servicio.id_servicio, servicio.plan_internet, servicio.zona]
+      consultar_tickets_de_cliente: [id_ticket, asunto, estado, prioridad,
+                                     tecnico, fecha_creacion]
+      contar_tickets: [total, desglose, interpretacion, advertencia]
+      contar_clientes: [total, desglose, interpretacion, advertencia]
+    nunca_revelar: [password_servicio, password_cpe, password_router_wifi,
+                    password_ssid_router_wifi, usuario_router_wifi, coordenadas]
+
+  tecnica:
+    descripcion: Configuracion y diagnostico de red en campo.
+    puede_consultar: [consultar_cliente, consultar_cliente_por_cedula,
+                      consultar_ticket, consultar_tickets_de_cliente,
+                      contar_tickets]
+    campos_permitidos:
+      # Ve la red; no ve plata ni datos de contacto que no necesita.
+      consultar_cliente: [id_servicio, nombre, estado,
+                          plan_internet, zona, fecha_instalacion,
+                          direccion, localidad, ciudad,
+                          ip, mac_cpe, sn_onu, modelo_antena,
+                          modelo_router_wifi, ssid_router_wifi, interfaz_lan,
+                          sectorial, router.nombre, router.id]
+      consultar_cliente_por_cedula: [id_servicio, nombre, estado,
+                                     plan_internet, zona, ip, mac_cpe, sn_onu,
+                                     modelo_antena, modelo_router_wifi,
+                                     ssid_router_wifi, sectorial]
+      consultar_ticket: [id_ticket, asunto, descripcion, razon_falla, estado,
+                         prioridad, tecnico, departamento, origen_reporte,
+                         fecha_creacion, fecha_inicio, fecha_fin,
+                         servicio.id_servicio, servicio.plan_internet, servicio.zona]
+      consultar_tickets_de_cliente: [id_ticket, asunto, estado, prioridad,
+                                     tecnico, fecha_creacion]
+      contar_tickets: [total, desglose, interpretacion, advertencia]
+    nunca_revelar: [password_servicio, password_cpe, password_router_wifi,
+                    password_ssid_router_wifi, usuario_router_wifi]
+
+  facturacion:
+    descripcion: Revisa facturas, saldos y registra pagos.
+    puede_consultar: [consultar_cliente, consultar_cliente_por_cedula,
+                      consultar_facturas, registrar_pago,
+                      contar_facturas, contar_clientes]
+    campos_permitidos:
+      # Sin datos de red ni tickets: no hacen a su trabajo.
+      consultar_cliente: [id_servicio, nombre, cedula, estado,
+                          email, telefono, direccion, localidad, ciudad,
+                          estado_facturas, saldo, fecha_corte, plan_internet]
+      consultar_cliente_por_cedula: [id_servicio, nombre, cedula, estado,
+                                     email, telefono, estado_facturas, saldo,
+                                     fecha_corte, plan_internet]
+      consultar_facturas: [id_factura, estado, total, saldo,
+                           fecha_emision, fecha_vencimiento, fecha_pago]
+      registrar_pago: [resultado, id_factura, total_cobrado,
+                       mensajes, messages, task_id, errors]
+      contar_facturas: [total, desglose, interpretacion, advertencia]
+      contar_clientes: [total, desglose, interpretacion, advertencia]
+    nunca_revelar: [password_servicio, password_cpe, password_router_wifi,
+                    password_ssid_router_wifi, ip, mac_cpe]
+
+  administracion:
+    descripcion: Consultas consolidadas, sin datos personales.
+    puede_consultar: [consultar_cliente, consultar_tickets_de_cliente,
+                      contar_clientes, contar_facturas, contar_tickets,
+                      informe_materiales]
+    campos_permitidos:
+      # Sin PII: ni cedula, ni contacto. Ve estado y servicio.
+      consultar_cliente: [id_servicio, nombre, estado, plan_internet, zona,
+                          fecha_instalacion, estado_facturas]
+      consultar_tickets_de_cliente: [id_ticket, asunto, estado, prioridad,
+                                     tecnico, fecha_creacion]
+      contar_clientes: [total, desglose, interpretacion, advertencia]
+      contar_facturas: [total, desglose, interpretacion, advertencia]
+      contar_tickets: [total, desglose, interpretacion, advertencia]
+      informe_materiales: [periodo, totales, tickets_cerrados,
+                           con_registro_de_material, registros_en_cero,
+                           cobertura_por_categoria, sin_normalizar,
+                           interpretacion, advertencia]
+    nunca_revelar: [cedula, email, telefono, direccion, coordenadas, saldo]
+
+  cliente_final:
+    descripcion: El suscriptor, por WhatsApp. Solo ve SU propio servicio.
+    puede_consultar: [consultar_mi_servicio]
+    campos_permitidos:
+      # Lo minimo para autoservicio. El id_cliente NO lo propone el modelo:
+      # lo inyecta el codigo desde la sesion autenticada.
+      consultar_mi_servicio: [estado, plan_internet, estado_facturas, saldo,
+                              fecha_corte, ssid_router_wifi]
+    nunca_revelar: [password_servicio, password_cpe, password_router_wifi,
+                    usuario_router_wifi, cedula, direccion, coordenadas,
+                    ip, mac_cpe, sn_onu, sectorial, router.nombre]
+
+# -----------------------------------------------------------------------------
+#  SEGURIDAD
+# -----------------------------------------------------------------------------
+seguridad:
+  reglas_absolutas:
+    - "Las credenciales de administrador de la ONT NUNCA se comparten con un
+       cliente final. Al cliente solo se le entrega la contrasena de SU red WiFi."
+    - "Nunca inventar direcciones IP, VLAN, credenciales, procedimientos ni
+       valores numericos. Si el dato no esta en el contexto, decirlo."
+    - "Un dato que viene de una herramienta se muestra literal: no se reformula,
+       no se redondea y no se calcula sobre el."
+    - "Nunca entregar datos de un cliente a quien no ha sido verificado como
+       titular de ese servicio."
+  # 0 ninguno / 1 posesion del canal / 2 reto adicional / 3 humano
+  requiere_verificacion:
+    estado_red_general: 0
+    procedimiento_documental: 0
+    estado_servicio: 1
+    saldo: 1
+    factura: 1
+    clave_wifi: 1
+    datos_contrato: 2
+    registrar_pago: 3
+    cambio_datos: 3
+
+autenticacion:
+  campo_identidad: telefono
+  # El campo 'telefono' de WispHub guarda VARIOS numeros en uno solo en el 55%
+  # de los casos. Medido sobre 600 clientes: extrayendo todos los moviles la
+  # cobertura es 98.7%; leyendolo como valor unico, 43%.
+  patron_extraccion: '(?<!\d)3\d{9}(?!\d)'
+  # Para cuando el numero no coincide (celular nuevo). Ninguno es publico:
+  # la cedula NO sirve como reto porque esta en la factura y el contrato.
+  retos_nivel_2:
+    - monto de la ultima factura
+    - fecha del ultimo pago
+    - nombre del plan contratado
+  # Medido: solo el 0.4% de los numeros apunta a mas de un cliente. No es
+  # fallo de autenticacion, es que hay que preguntar cual servicio.
+  desambiguar_si_multiple: true
+  ofrecer_actualizar_numero: true
+
+# -----------------------------------------------------------------------------
+#  CORPUS
+# -----------------------------------------------------------------------------
+corpus:
+  reportar_defectos: true
+  tipos_documento:
+    - tipo: guia_tecnica
+      estrategia_chunking: por_seccion
+      # Una tabla que mapea servidores a VLAN y segmentos IP es inutil si se
+      # parte a la mitad.
+      preservar_tablas: true
+      tamano_objetivo_tokens: 500
+      metadatos_dominio: [marca_equipo, tipo_procedimiento, servidor]
+    - tipo: politica
+      estrategia_chunking: por_seccion
+      preservar_tablas: true
+      tamano_objetivo_tokens: 700
+      metadatos_dominio: [area]
+
+rag:
+  modelo_embeddings: bge-m3
+  # Coincide con vector(1024) del esquema SQL. Cambiarlo obliga a re-vectorizar
+  # todo el corpus Y a migrar la columna.
+  dimensiones: 1024
+  top_k: 8
+  umbral_similitud: 0.35
+  busqueda_hibrida: true
+  rrf_k: 60
+  expandir_con_glosario: true
+  # Si nada supera el umbral NO se llama al modelo: se responde esto y se
+  # registra en unanswered_queries.
+  mensaje_sin_resultados: >
+    No encontre eso en la documentacion disponible. Lo estoy registrando para
+    que lo revisen. Si es urgente, te paso con un companero.
+
+# -----------------------------------------------------------------------------
+#  MODELOS  -  medido con banco_pruebas.py, agosto 2026
+# -----------------------------------------------------------------------------
+#  modelo                herram   args  respeta  inventa  RF-15  tok/s  s/turno
+#  qwen3:30b-a3b-q4_K_M   100%   100%    100%       0     100%   11.2    42.6
+#  qwen3:4b               100%   100%    100%       0     100%   52.0    51.8
+#  phi4-mini             12.5%  12.5%    100%       0     100%   57.9     3.1
+#  gemma3:4b              NO USAR: ignora el dato de la herramienta y lo inventa
+llm:
+  proveedor: ollama
+  modelo_por_defecto: qwen3:30b-a3b-q4_K_M
+  modelo_informes: qwen3:30b-a3b-q4_K_M
+  temperatura: 0.1
+  max_tokens: 1024
+  # Cada iteracion cuesta un TURNO COMPLETO (~43 s), no milisegundos.
+  limite_iteraciones_agente: 4
+  # El razonamiento se descarta del historial: reenviarlo acumula 2.500-5.400
+  # caracteres inutiles por turno.
+  descartar_thinking: true
+  overrides: {}
+  # Si el piloto muestra que 43 s es demasiado para un tecnico en un poste,
+  # aqui se corrige sin tocar codigo:
+  #   'canal:whatsapp': phi4-mini:latest
+
+# -----------------------------------------------------------------------------
+#  HERRAMIENTAS
+# -----------------------------------------------------------------------------
+#  Los filtros de la seccion 'agregado' estan VERIFICADOS contra la API en
+#  produccion con el metodo del valor imposible: se consulta con un valor que
+#  no puede existir y se compara el total con el de la consulta sin filtro. Si
+#  coinciden, la API esta IGNORANDO el parametro y no entra al catalogo.
+#
+#  Un filtro ignorado no da error: devuelve el universo entero disfrazado de
+#  respuesta exacta. Por eso los ignorados se listan aparte y se RECHAZAN con
+#  su motivo, en vez de intentarse.
+herramientas:
+
+  - nombre: consultar_cliente
+    tipo: http
+    descripcion: Datos de un cliente por su ID de servicio.
+    solo_lectura: true
+    roles_permitidos: [soporte, tecnica, facturacion, administracion]
+    endpoint: /api/clientes/
+    metodo: GET
+    auth_ref: WISPHUB_API_KEY
+
+  - nombre: consultar_cliente_por_cedula
+    tipo: http
+    descripcion: Datos de un cliente por su cedula.
+    solo_lectura: true
+    roles_permitidos: [soporte, tecnica, facturacion]
+    endpoint: /api/clientes/
+    metodo: GET
+    auth_ref: WISPHUB_API_KEY
+
+  - nombre: consultar_mi_servicio
+    tipo: http
+    descripcion: >
+      Estado del servicio del cliente autenticado. El id_cliente NO viaja como
+      argumento del modelo: lo inyecta el codigo desde la sesion. Si viniera
+      del modelo, una inyeccion de prompt bastaria para pedir el de otro.
+    solo_lectura: true
+    roles_permitidos: [cliente_final]
+    endpoint: /api/clientes/
+    metodo: GET
+    auth_ref: WISPHUB_API_KEY
+
+  - nombre: consultar_ticket
+    tipo: http
+    solo_lectura: true
+    roles_permitidos: [soporte, tecnica]
+    endpoint: /api/tickets/
+    metodo: GET
+    auth_ref: WISPHUB_API_KEY
+
+  - nombre: consultar_tickets_de_cliente
+    tipo: http
+    descripcion: >
+      La API de tickets NO filtra por cliente (probados 8 nombres de parametro,
+      todos ignorados). Se filtra por estado y se cruza por cliente en codigo,
+      solo sobre los abiertos.
+    solo_lectura: true
+    roles_permitidos: [soporte, tecnica, administracion]
+    endpoint: /api/tickets/
+    metodo: GET
+    auth_ref: WISPHUB_API_KEY
+
+  - nombre: consultar_facturas
+    tipo: http
+    solo_lectura: true
+    roles_permitidos: [facturacion]
+    endpoint: /api/facturas/
+    metodo: GET
+    auth_ref: WISPHUB_API_KEY
+
+  - nombre: registrar_pago
+    tipo: http
+    descripcion: ACCION SENSIBLE. Registra un pago sobre una factura.
+    solo_lectura: false
+    requiere_confirmacion: true
+    roles_permitidos: [facturacion]
+    endpoint: /api/facturas/{id}/registrar-pago/
+    metodo: POST
+    auth_ref: WISPHUB_API_KEY
+
+  # --- agregados -------------------------------------------------------------
+
+  - nombre: contar_clientes
+    tipo: agregado
+    entidad: clientes
+    etiqueta: clientes
+    solo_lectura: true
+    roles_permitidos: [soporte, facturacion, administracion]
+    endpoint: /api/clientes/
+    auth_ref: WISPHUB_API_KEY
+    # Verificado: 4260+811+2093+88 = 7252 = total sin filtro. Cuadra exacto.
+    filtros_verificados:
+      estado:
+        param: estado
+        tipo: enum
+        valores: {activo: 1, suspendido: 2, cancelado: 3, gratis: 4}
+        verificado_el: 2026-07-29
+      plan_internet: {param: plan_internet, tipo: id, verificado_el: 2026-07-29}
+      ciudad: {param: ciudad, tipo: texto, verificado_el: 2026-07-29}
+      localidad: {param: localidad, tipo: texto, verificado_el: 2026-07-29}
+      # Hallados en el sondeo de agosto. 'router' es la via para agrupar por
+      # zona geografica: en una red WISP el router ES la zona fisica.
+      router: {param: router, tipo: id, verificado_el: 2026-08-04}
+      tecnico: {param: tecnico, tipo: id, verificado_el: 2026-08-04}
+    filtros_ignorados_por_api:
+      zona: >
+        La API de clientes IGNORA el filtro por zona (devuelve los 7.272).
+        Para agrupar clientes geograficamente usa 'router'. Las facturas si
+        se pueden contar por zona.
+      estado_facturas: >
+        La API de clientes ignora este filtro. Para saber quien debe se cuentan
+        facturas en estado 'pendiente' (cuenta facturas, no clientes).
+      saldo: La API de clientes ignora el filtro por saldo.
+      periodo: >
+        La API de clientes no filtra por fecha en ninguna forma: no se pueden
+        contar altas de un mes.
+    agrupar_por: [estado, router, tecnico]
+
+  - nombre: contar_facturas
+    tipo: agregado
+    entidad: facturas
+    etiqueta: facturas
+    solo_lectura: true
+    roles_permitidos: [facturacion, administracion]
+    endpoint: /api/facturas/
+    auth_ref: WISPHUB_API_KEY
+    # Verificado: 3606+5087+7 = 8700 = total. Las 5 zonas suman 8700 exacto.
+    filtros_verificados:
+      estado:
+        param: estado
+        tipo: enum
+        valores: {pendiente: 1, pagada: 2, cancelada: 3,
+                  en_revision: 4, transferida: 5}
+        verificado_el: 2026-07-29
+      zona: {param: zona, tipo: id, verificado_el: 2026-07-29}
+    filtros_ignorados_por_api:
+      facturadas: La API ignora este filtro.
+      cliente: Para las facturas de UN cliente usa consultar_facturas.
+    agrupar_por: [estado, zona]
+    periodo:
+      campos:
+        emision: fecha_emision__range
+        vencimiento: fecha_vencimiento__range
+        pago: fecha_pago__range
+      por_defecto: emision
+      max_meses: 3          # verificado: 4 meses -> HTTP 400
+      nota_defecto: periodo por defecto del API (~2 ultimos meses de emision)
+      advertencia_defecto: >
+        Sin periodo explicito, el API cuenta solo sus ultimos ~2 meses de
+        emision, no el historico completo.
+
+  - nombre: contar_tickets
+    tipo: agregado
+    entidad: tickets
+    etiqueta: tickets
+    solo_lectura: true
+    roles_permitidos: [soporte, tecnica, administracion]
+    endpoint: /api/tickets/
+    auth_ref: WISPHUB_API_KEY
+    # Verificado: 266+18+2351 = 2635 = total sin filtro de fecha.
+    filtros_verificados:
+      estado:
+        param: estado
+        tipo: enum
+        # NUMERICO: ?estado=Nuevo devuelve 0 resultados, sin error.
+        valores: {nuevo: 1, en_progreso: 2, cerrado: 4}
+        verificado_el: 2026-07-29
+    filtros_ignorados_por_api:
+      cliente: >
+        La API de tickets no filtra por cliente. Para los tickets de UN cliente
+        usa consultar_tickets_de_cliente.
+      tecnico: La API de tickets ignora el filtro por tecnico.
+      prioridad: La API de tickets ignora el filtro por prioridad.
+      departamento: La API de tickets ignora el filtro por departamento.
+    agrupar_por: [estado]
+    periodo:
+      campos: {creacion: fecha_creacion}    # UN solo guion bajo, no '__range'
+      por_defecto: creacion
+      max_meses: 2          # verificado: 3 meses -> HTTP 400
+      nota_defecto: "sin periodo: recorte temporal propio del API, no el historico"
+      advertencia_defecto: >
+        SIN PERIODO: el API aplica un recorte temporal propio. Sin filtro
+        devuelve 2.635, pero solo julio da 2.637 y junio 3.341 — un subconjunto
+        no puede superar al conjunto. Este total NO es el historico y no sirve
+        para comparar.
+
+  - nombre: informe_materiales
+    tipo: batch
+    descripcion: >
+      Consumo de materiales de un periodo. El dato NO esta en un modulo de
+      inventario (/api/gastos/ existe pero esta vacio): vive en el formulario
+      'Firma de Ticket' dentro de las respuestas del ticket. Se parsea con
+      codigo determinista; el modelo solo redacta sobre los totales.
+      Coste ~2.700 llamadas por mes: es proceso POR LOTES, no interactivo.
+    solo_lectura: true
+    roles_permitidos: [administracion]
+
+# -----------------------------------------------------------------------------
+#  CANALES
+# -----------------------------------------------------------------------------
+canales:
+  whatsapp:
+    activo: false           # se activa cuando el piloto interno pase la evaluacion
+    phone_number_id_ref: WHATSAPP_PHONE_NUMBER_ID
+    token_ref: WHATSAPP_TOKEN
+    plantillas: {}
+  web:
+    activo: true
+
+escalamiento:
+  activar_si: [frustracion_detectada, tres_fallos_seguidos, solicitud_explicita,
+               duda_de_identidad]
+  destino_rol: soporte
+  mensaje: Te paso con un companero del equipo para que te ayude mejor.
+  siempre_disponible: true
+
+limites:
+  max_conversaciones_dia: 500
+  max_costo_usd_mes: 0.0    # modelo local: sin costo por token
+  alerta_al_porcentaje: 80
+  # Cubre depuracion, auditoria y analisis; mas alla es solo superficie de riesgo.
+  retencion_conversaciones_dias: 365
+
+evaluacion:
+  minimo_acierto_pct: 90.0
+  # CERO, no "bajo". gemma3:4b respondia bien e inventaba cliente, plan y
+  # factura: un sistema con 92% de acierto que inventa el 3% es peligroso.
+  maximo_invenciones: 0
+  minimo_casos: 50

@@ -1,0 +1,235 @@
+# =============================================================================
+#  PLANTILLA DE ALTA DE UN ISP
+# =============================================================================
+#  Copia este archivo a  config/<slug>.config.yaml  y llenalo. Dar de alta una
+#  empresa nueva es: (1) fila en 'tenants', (2) este archivo, (3) cargar sus
+#  documentos. Nada mas. Si aparece la necesidad de tocar codigo por un cliente,
+#  ese comportamiento va aqui.
+#
+#  Valida antes de usarlo:
+#      py -3.13 config/schema.py config/<slug>.config.yaml
+#
+#  REGLA ABSOLUTA: ningun secreto en este archivo. Los campos '*_ref' llevan el
+#  NOMBRE de la variable de entorno o del secreto en Vault, nunca su valor. El
+#  validador rechaza el archivo si detecta algo con pinta de credencial.
+# =============================================================================
+
+version: 1
+
+identidad:
+  slug: mi-isp                       # minusculas, sin espacios. Es la clave.
+  nombre_legal: Mi ISP S.A.S
+  nombre_comercial: Mi ISP
+  sector: isp
+  zona_horaria: America/Bogota
+  idioma: es
+
+marca:
+  firma_mensajes: "Mi ISP - Soporte"
+
+persona:
+  nombre_asistente: Asistente
+  tono: cercano                      # formal | cercano | tecnico
+  longitud_respuesta: breve          # breve | media | extensa
+  instrucciones_adicionales: >
+    Si un dato viene de una herramienta, repitelo LITERAL: no lo redondees,
+    no lo reformules y no calcules sobre el.
+
+# -----------------------------------------------------------------------------
+#  GLOSARIO
+# -----------------------------------------------------------------------------
+#  Traduce como habla el usuario a como habla el manual. Sin esto, "no me llega
+#  internet" no recupera el fragmento que dice "perdida de senal optica", que es
+#  donde esta el procedimiento. Es de lo que mas rinde por linea escrita.
+glosario:
+  - termino_canonico: ONT
+    sinonimos: [modem optico, roseta, equipo del cliente]
+
+# -----------------------------------------------------------------------------
+#  ROLES  -  lista BLANCA de campos, jamas lista negra
+# -----------------------------------------------------------------------------
+#  'campos_permitidos' enumera lo que SI se entrega. Un campo sin entrada no
+#  sale. Es deliberado: la API del ISP puede devolver decenas de campos, y con
+#  lista negra uno nuevo del proveedor queda expuesto por defecto. Con lista
+#  blanca queda bloqueado por defecto.
+#
+#  'nunca_revelar' es documental y de defensa en profundidad. NO sustituye a la
+#  lista blanca: lo que protege de verdad es 'campos_permitidos'.
+roles:
+
+  soporte:
+    descripcion: Atiende al cliente y revisa su estado.
+    puede_consultar: [consultar_cliente, contar_clientes]
+    campos_permitidos:
+      consultar_cliente: [id_servicio, nombre, estado, plan_internet]
+      contar_clientes: [total, desglose, interpretacion, advertencia]
+    nunca_revelar: [password_servicio, coordenadas]
+
+  cliente_final:
+    descripcion: El suscriptor. Solo ve SU propio servicio.
+    puede_consultar: [consultar_mi_servicio]
+    campos_permitidos:
+      consultar_mi_servicio: [estado, plan_internet, saldo]
+    nunca_revelar: [cedula, direccion, coordenadas, password_servicio]
+
+# -----------------------------------------------------------------------------
+#  SEGURIDAD
+# -----------------------------------------------------------------------------
+#  Las reglas se inyectan en el prompt Y se validan en codigo. El sistema queda
+#  expuesto a usuarios finales por WhatsApp: hay que asumir intentos de
+#  inyeccion de prompt. La seguridad real esta en la validacion de permisos en
+#  codigo y en el alcance limitado de cada herramienta, nunca en el prompt.
+seguridad:
+  reglas_absolutas:
+    - "Nunca inventar IP, VLAN, credenciales, procedimientos ni valores
+       numericos. Si el dato no esta en el contexto, decirlo."
+    - "Un dato de una herramienta se muestra literal: no se reformula ni se
+       calcula sobre el."
+  # 0 ninguno / 1 posesion del canal / 2 reto adicional / 3 humano
+  requiere_verificacion:
+    procedimiento_documental: 0
+    estado_servicio: 1
+    saldo: 1
+    registrar_pago: 3
+
+autenticacion:
+  campo_identidad: telefono
+  # OJO: revisa como guarda los telefonos la base del cliente. En Rapilink el
+  # 55% tiene VARIOS numeros en un solo campo; extraerlos todos subio la
+  # cobertura del 43% al 98.7%.
+  patron_extraccion: '(?<!\d)3\d{9}(?!\d)'
+  # Retos para cuando el numero no coincide (celular nuevo). NINGUNO puede ser
+  # publico: la cedula NO sirve, esta en la factura y en el contrato. Identifica
+  # pero no autentica.
+  retos_nivel_2:
+    - monto de la ultima factura
+    - fecha del ultimo pago
+  desambiguar_si_multiple: true
+  ofrecer_actualizar_numero: true
+
+# -----------------------------------------------------------------------------
+#  CORPUS
+# -----------------------------------------------------------------------------
+corpus:
+  reportar_defectos: true            # numeraciones duplicadas, refs rotas
+  tipos_documento:
+    - tipo: guia_tecnica
+      estrategia_chunking: por_seccion
+      preservar_tablas: true         # una tabla partida no sirve para nada
+      tamano_objetivo_tokens: 500
+      metadatos_dominio: [marca_equipo, tipo_procedimiento]
+
+rag:
+  modelo_embeddings: bge-m3
+  # DEBE coincidir con vector(N) del esquema SQL. Cambiarlo obliga a
+  # re-vectorizar todo el corpus Y a migrar la columna. Decidelo una vez.
+  dimensiones: 1024
+  top_k: 8
+  umbral_similitud: 0.35
+  busqueda_hibrida: true
+  expandir_con_glosario: true
+  # Si nada supera el umbral NO se llama al modelo: se responde esto y se
+  # registra en unanswered_queries. Llamar al modelo sin contexto es pedirle
+  # que invente.
+  mensaje_sin_resultados: >
+    No encontre eso en la documentacion disponible. Lo registro para que lo
+    revisen. Si es urgente, te paso con un companero.
+
+# -----------------------------------------------------------------------------
+#  MODELOS
+# -----------------------------------------------------------------------------
+#  Antes de fijar un modelo, mide. Un modelo que no maneja el rol 'tool' no
+#  falla con error: responde con datos inventados y tono seguro. Elegir y
+#  redactar son habilidades DISTINTAS y hay que medirlas por separado.
+llm:
+  proveedor: ollama
+  modelo_por_defecto: qwen3:30b-a3b-q4_K_M
+  temperatura: 0.1
+  max_tokens: 1024
+  limite_iteraciones_agente: 4       # cada iteracion es un TURNO completo
+  descartar_thinking: true
+  # Sustituciones por canal o rol, si un canal necesita ir mas rapido:
+  #   overrides: {'canal:whatsapp': phi4-mini:latest}
+  overrides: {}
+
+# -----------------------------------------------------------------------------
+#  HERRAMIENTAS
+# -----------------------------------------------------------------------------
+#  Los 'filtros_verificados' NO se escriben a mano ni se copian de otro tenant:
+#  los genera el sondeo de la API en el onboarding.
+#
+#  Por que importa: la API puede IGNORAR un filtro en silencio y devolver el
+#  universo entero como si fuera la respuesta filtrada. No da error. El metodo
+#  es consultar con un valor imposible y comparar contra el total sin filtro:
+#  si coinciden, la API lo esta ignorando y NO puede entrar al catalogo.
+#
+#  Lo que la API ignora va en 'filtros_ignorados_por_api' con su motivo, y se
+#  RECHAZA en vez de intentarse. Un total preciso que responde otra pregunta es
+#  peor que un error.
+herramientas:
+
+  - nombre: consultar_cliente
+    tipo: http
+    solo_lectura: true
+    roles_permitidos: [soporte]
+    endpoint: /api/clientes/
+    metodo: GET
+    auth_ref: NOMBRE_DE_LA_VARIABLE_CON_LA_CLAVE   # el NOMBRE, no la clave
+
+  - nombre: consultar_mi_servicio
+    tipo: http
+    descripcion: >
+      El id del cliente NO viaja como argumento del modelo: lo inyecta el codigo
+      desde la sesion autenticada. Si viniera del modelo, una inyeccion de
+      prompt bastaria para pedir el de otro cliente.
+    solo_lectura: true
+    roles_permitidos: [cliente_final]
+    endpoint: /api/clientes/
+    metodo: GET
+    auth_ref: NOMBRE_DE_LA_VARIABLE_CON_LA_CLAVE
+
+  - nombre: contar_clientes
+    tipo: agregado
+    entidad: clientes
+    etiqueta: clientes
+    solo_lectura: true
+    roles_permitidos: [soporte]
+    endpoint: /api/clientes/
+    auth_ref: NOMBRE_DE_LA_VARIABLE_CON_LA_CLAVE
+    filtros_verificados:
+      estado:
+        param: estado
+        tipo: enum
+        valores: {activo: 1, suspendido: 2}
+        verificado_el: 2026-01-01
+    filtros_ignorados_por_api: {}
+    agrupar_por: [estado]            # solo campos VERIFICADOS
+
+canales:
+  whatsapp:
+    activo: false
+    phone_number_id_ref: WHATSAPP_PHONE_NUMBER_ID
+    token_ref: WHATSAPP_TOKEN
+  web:
+    activo: true
+
+escalamiento:
+  activar_si: [frustracion_detectada, tres_fallos_seguidos, solicitud_explicita,
+               duda_de_identidad]
+  destino_rol: soporte
+  mensaje: Te paso con un companero para que te ayude mejor.
+  siempre_disponible: true           # el escape a humano nunca se esconde
+
+limites:
+  max_conversaciones_dia: 500
+  max_costo_usd_mes: 0.0             # 0 = modelo local, sin costo por token
+  alerta_al_porcentaje: 80
+  retencion_conversaciones_dias: 365
+
+evaluacion:
+  minimo_acierto_pct: 90.0
+  # CERO, y no es negociable. Un sistema con 92% de acierto que inventa el 3%
+  # restante es peligroso; uno con 88% que dice "no se" el 12% es utilizable.
+  # El promedio no distingue, por eso la invencion se mide aparte.
+  maximo_invenciones: 0
+  minimo_casos: 50
