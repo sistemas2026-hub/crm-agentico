@@ -131,10 +131,28 @@ Ya implementado y funcionando:
 
 ## 6. Requisitos no funcionales
 
-- **RNF-01 · Privacidad:** los datos de clientes no salen de la infraestructura de la empresa. El SLM corre local/on-premise. Cumplimiento con la Ley 1581 de 2012 (protección de datos personales, Colombia). *Validar con el área legal.*
+- **RNF-01 · Privacidad:** cumplimiento con la Ley 1581 de 2012 (protección de datos personales, Colombia).
+  - **El modelo corre local** (Ollama, on-premise). Los datos de clientes **nunca** se envían a un proveedor de LLM externo. Esta parte no se negocia: es lo que permite consultar un cliente por nombre y cédula sin exportar nada.
+  - **La persistencia se reparte** (decisión de agosto 2026, al adoptar Supabase hospedado para la arquitectura multi-tenant). El criterio es uno solo: *sale a la nube lo que no identifica a una persona*.
+
+| Dato | Dónde | Por qué |
+|---|---|---|
+| Corpus documental, fragmentos, embeddings | Supabase | Una guía de configuración de ONT no menciona a ningún cliente |
+| Configuración, roles, sets de evaluación | Supabase | Sin PII |
+| Agregados de consumo (`usage_daily`) | Supabase | Cifras, no personas |
+| **Respuestas de la API de WispHub** | **No se persisten** | El registro de cliente trae 54 campos: cédula, dirección, coordenadas GPS y **cuatro contraseñas**. Nadie autorizó replicar eso, y el sistema no lo necesita para funcionar |
+| Bitácora de acceso (`tool_calls`, `audit_log`) | Supabase, **solo metadatos** | Qué se consultó, quién y cuándo — nunca qué decía la respuesta |
+| Contenido de conversaciones y número de WhatsApp | Supabase, **en claro** | Decidido en agosto 2026. Ver abajo |
+
+  - **`tool_calls` guarda un resumen, no el payload:** `exito`, `n_registros`, `duracion_ms`, `codigo_error`. Es el mismo criterio que ya aplica `registrar_auditoria()` en el sistema actual, y cumple el propósito de auditoría sin replicar la base de clientes fuera del país.
+  - **Conversaciones en claro, sin anonimizar** (decidido agosto 2026). Se evaluó anonimizar por patrones y se descartó: es fiable con cédulas y teléfonos pero imperfecta con nombres y direcciones, así que **no garantizaba cumplimiento y sí degradaba el historial de depuración** — lo peor de los dos mundos. La base legal correcta no es técnica sino la **autorización de tratamiento** que el cliente firma al contratar.
+  - 🔴 **Tarea legal bloqueante:** verificar que la autorización de tratamiento vigente de Rapilink contemple **tratamiento por terceros / transferencia internacional**. Es cláusula estándar en cualquier empresa que use proveedores en el exterior (AWS, Google, Microsoft), pero hay que confirmarlo antes de producción. Si no la cubre: actualizarla para clientes nuevos y decidir qué hacer con los existentes.
+  - **Retención sugerida: 12 meses** para conversaciones. Cubre depuración, auditoría y análisis; más allá es solo superficie de riesgo. Es configuración, no estructura.
+  - ⚠️ **La región del proyecto Supabase se define una sola vez y no se puede cambiar sin migrar.** Elegirla es un paso previo a crear el proyecto, no posterior.
+  - ⚠️ **Validación legal ahora obligatoria antes de producción**, no opcional: la adopción de infraestructura hospedada cambia el análisis que motivó este requisito.
 - **RNF-02 · Seguridad en capas:** las reglas duras (filtrado de PII, confirmación de acciones sensibles) se aplican en **código**, no solo en el prompt. El prompt guía el comportamiento; el código garantiza los límites no negociables.
 - **RNF-03 · Costo:** volumen bajo (~300 consultas/día). Un SLM local elimina el costo por token de proveedores externos.
-- **RNF-04 · Rendimiento:** consultas de lectura con respuesta ágil. Modelo principal de 4B suficiente para las tareas actuales; escalar a 8–14B solo si un área requiere razonamiento más complejo.
+- **RNF-04 · Rendimiento:** **prima la calidad de la respuesta sobre la latencia** (decisión de agosto 2026). Se usa el mejor modelo disponible aunque tarde: `qwen3:30b-a3b`, medido en 42.6 s por turno. ⚠️ **Tensión conocida:** los técnicos consultan desde el celular en campo (§14 del diseño multi-tenant), y 40 s de espera por WhatsApp puede volver el sistema inusable en terreno. Es un supuesto **a validar en el piloto**, no un hecho. La mitigación existe y no requiere tocar código —modelo distinto por canal o por rol vía configuración—, pero la estructura debe contemplarla desde el diseño.
 - **RNF-05 · Mantenibilidad:** herramientas, filtros y prompts parametrizados por área, para replicar el patrón sin reescribir el motor.
 
 ---
@@ -145,26 +163,55 @@ Ya implementado y funcionando:
 
 | Componente | Tecnología |
 |-----------|-----------|
-| Modelo (motor) | Qwen3 4B vía **Ollama** (local) |
+| Modelo (motor) | **Qwen3 30B-A3B** (MoE, Q4_K_M) vía **Ollama** (local) |
 | Lenguaje | Python 3.13 |
 | Cliente del modelo | librería `ollama` |
 | Llamadas HTTP | `requests` |
 | Configuración y credenciales | `python-dotenv` (archivo `.env`) |
 | API de datos | WispHub REST API (JSON, auth por API Key) |
 
-**Reparto por tarea — medido sobre el flujo real (julio 2026):**
+**Motor elegido: `qwen3:30b-a3b-q4_K_M`.** Es un modelo **MoE** (mezcla de expertos): 30B de parámetros totales pero solo **~3B activos por token**. Esa es la razón de la elección y no el tamaño: ocupa memoria como un 30B pero **calcula como un 3B**, que es lo único que lo hace viable sin GPU dedicada. Un denso equivalente daría ~2-3 tok/s en el equipo actual — inservible.
 
-| Modelo | 1ª llamada (elegir herramienta) | 2ª llamada (redactar el dato) |
-|---|---|---|
-| **qwen3:4b** | ✅ El fiable en tool calling. En uso. | ✅ Correcto, 15.6 s (razona antes de responder) |
-| **phi4-mini** | Sin evaluar aquí | ✅ Correcto, 6.9 s (~2× más rápido) |
-| **gemma3:4b** | Sin evaluar aquí | ❌ **No usar.** Su plantilla no maneja el rol `tool`: ignoró el dato entregado e **inventó** cliente, plan y factura. Viola RF-07. |
+**Reparto por tarea — medido con `banco_pruebas.py` (agosto 2026):**
 
-Configurable por `.env`: `MODELO_SLM` (decide) y `MODELO_REDACCION` (redacta). Por defecto ambos son `qwen3:4b`.
+| Modelo | Elegir herramienta | Argumentos | Respeta el dato | Inventa | RF-15 | tok/s | `thinking` |
+|---|---|---|---|---|---|---|---|
+| **qwen3:30b-a3b** | ✅ 100% | ✅ 100% | ✅ 100% | 0 | ✅ 100% | 11.2 | 658 car. |
+| **qwen3:4b** | ✅ 100% | ✅ 100% | ✅ 100% | 0 | ✅ 100% | 52.0 | 2.154 car. |
+| **phi4-mini** | ❌ **12.5%** — no sirve para decidir | ❌ 12.5% | ✅ 100% | 0 | ✅ 100% | 57.9 | **0** |
+| **gemma3:4b** | ❌ **No usar.** Su plantilla no maneja el rol `tool`: ignoró el dato entregado e **inventó** cliente, plan y factura. Viola RF-07. | | | | | | |
 
-> **Lección:** un modelo que no soporta el rol `tool` no falla con error — responde con datos inventados y tono seguro. Antes de cambiar de modelo hay que verificar que respeta el dato de la herramienta, no solo que "responde bien".
+Configurable por `.env`: `MODELO_SLM` (decide) y `MODELO_REDACCION` (redacta).
 
-**Sobre el razonamiento de Qwen3:** el modelo razona antes de responder y Ollama devuelve eso en un campo `thinking` separado. Medido: `think=False` **no** lo apaga (solo hace que el razonamiento crudo caiga en `content`, a la vista del asesor), y el interruptor `/no_think` tampoco. La estrategia es dejar que Ollama lo separe y **descartarlo del historial** — reenviarlo acumula 2.500–5.400 caracteres inútiles por turno. Un turno completo (dos llamadas + herramienta) toma ~25 s.
+> **Lección 1:** un modelo que no soporta el rol `tool` no falla con error — responde con datos inventados y tono seguro. Antes de cambiar de modelo hay que verificar que respeta el dato de la herramienta, no solo que "responde bien". Esto se comprueba con `banco_pruebas.py`, que **no llama a la API**: entrega resultados de herramienta fijos e inventados a propósito y verifica si el modelo los repite.
+
+> **Lección 2 — decidir y redactar son habilidades distintas.** phi4-mini acierta el **100%** repitiendo el dato y el **12.5%** eligiendo la herramienta. Un modelo puede ser excelente en la segunda llamada e inútil en la primera, así que hay que medir las dos por separado. Es lo que justifica que `MODELO_SLM` y `MODELO_REDACCION` sean variables independientes.
+
+**Sobre el razonamiento de Qwen3:** el modelo razona antes de responder y Ollama devuelve eso en un campo `thinking` separado. Medido: `think=False` **no** lo apaga (solo hace que el razonamiento crudo caiga en `content`, a la vista del asesor), y el interruptor `/no_think` tampoco. La estrategia es dejar que Ollama lo separe y **descartarlo del historial** — reenviarlo acumula 2.500–5.400 caracteres inútiles por turno.
+
+> **Lección 3 — la latencia es el `thinking`, no el hardware.** Medido en la misma máquina: qwen3:4b genera 2.154 caracteres de razonamiento por turno y tarda 51.8 s; phi4-mini genera **0** y tarda 3.1 s. Son ~16× de diferencia y ambos van a la misma velocidad bruta (52 vs 58 tok/s). El tiempo no se va en calcular: se va **generando tokens que después se descartan**. Ninguna GPU corrige eso — solo los generaría más rápido. Por eso la 2ª llamada, donde el dato ya está resuelto y no hay nada que razonar, debe usar un modelo sin `thinking`.
+
+> **Lección 4 — tok/s no es la métrica; el tiempo por turno sí.** El 30B-A3B genera a **11.2 tok/s contra 52 del 4B (4.6× más lento por token) y aun así responde antes**: 42.6 s contra 51.8 s. Razona con 658 caracteres donde el 4B necesita 2.154. Un modelo más grande puede ser **más rápido en la práctica** porque llega a la respuesta con menos rodeos. Comparar modelos por tok/s lleva a la conclusión contraria a la correcta.
+
+*(Nota: la cifra histórica de ~25 s por turno se midió antes; las 51.8 s de agosto salen de una corrida con el modelo de 18 GB cargado en memoria. Las comparaciones entre modelos son válidas —misma corrida, mismas condiciones— pero el absoluto conviene remedirlo en frío.)*
+
+### 7.1.1 Equipo de desarrollo y por qué MoE
+
+| | |
+|---|---|
+| Equipo | ASUS TUF Dash F15 (portátil) |
+| CPU | Intel i5-12450H, 12 hilos |
+| RAM | **32 GB** |
+| GPU | RTX 3050 Laptop — **4 GB de VRAM real** |
+
+La VRAM es el límite: el panel de Windows reporta "20 GB totales", pero son 4 GB dedicados + 16 GB compartidos con la RAM del sistema, que van por el bus y no sirven para inferencia rápida. **Con 4 GB de VRAM no cabe ningún modelo grande en la tarjeta**, así que el peso recae en CPU + RAM — y ahí es donde MoE deja de ser una preferencia y pasa a ser la única opción viable:
+
+| Modelo | Memoria | Cómputo/token | Estimado en este equipo |
+|---|---|---|---|
+| Denso 27B | ~17 GB | 27B | ~2-3 tok/s — inservible |
+| **30B-A3B (MoE)** | ~18 GB | **3B** | **usable** |
+
+Este equipo sirve para **construir y evaluar**, no para producción: es un portátil (hace throttling en cargas sostenidas como el informe de materiales) y no aguanta clientes concurrentes. La máquina de producción se decide **con los datos de `banco_pruebas.py`**, no con estimaciones.
 
 ### 7.2 Componentes y flujo
 
