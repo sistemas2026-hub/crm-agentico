@@ -1,0 +1,412 @@
+openapi: 3.0.0
+servers:
+  - url: //api.wisphub.net/api/
+    description: Production Server
+  - url: //sandbox-api.wisphub.net/api/
+    description: Sandbox Server
+info:
+  title: Wisphub API
+  description: |
+    # Introducción
+
+    Bienvenido(a) a la Documentación del **API de WispHub**. Basado en los principios REST, 
+    los endpoints de esta API devuelven metadatos JSON sobre la información de la cuenta de su empresa en la 
+    plataforma Wisphub, y se usan códigos de respuesta HTTP para indicar los errores en la API.
+
+    La V1 de esta API le permitirá obtener información de los siguientes apartados:
+
+    - Clientes
+    - Facturas
+    - Tickets (Soporte Técnico)
+
+    Y le permitirá realizar las siguientes acciones:
+
+    - Activar y Desactivar a uno o más clientes.
+    - Registrar un Pago
+
+    # API Endpoints
+
+    La API REST de Wisphub tiene un ambiente de pruebas (sandbox) y un ambiente de producción. Usa las 
+    respectivas credenciales de cada entorno.
+
+    La siguientes URIs forman la base de los endpoints para los ambientes soportados:
+
+    - **Pruebas**, URI base:
+        `https://sandbox-api.wisphub.net`
+
+    - **Producción**, URI base:
+        `https://api.wisphub.net`
+
+    Un endpoint completo esta formado por la URI base del ambiente y el recurso.
+    Por ejemplo, si queremos consultar la lista de clientes, el endpoint sería:
+
+    `POST https://sandbox-api.wisphub.net/api/clientes/`
+
+    Para crear una petición completa es necesaria envíar las cabeceras HTTP correctas y la información en formato 
+    JSON.
+
+    # Errores
+
+    ## Codigo de Error
+
+    | Error HTTP  | Causa  |
+    |---|---|
+    | 400 Bad Request | El formato de la petición no es JSON, los campos no tienen el formato correcto, o la petición no tiene campos que son requeridos. |
+    | 401 Unauthorized  | La llamada no esta autenticada o la autenticación es incorrecta.  |
+    | 403 Forbidden  | El recurso no puede ser accedido por falta de permisos.  |
+    | 404 Not Found  | El recurso solicitado no existe.  |
+    | 422 Unprocessable Entity  | El formato y sintaxis de la petición es correcta, pero no pudo procesar las instrucciones contenidas. |
+    | 500 Internal Server Error  | Ocurrió un error interno en el servidor de WispHub |
+    
+    # Autenticación
+    
+    ## ApiKey
+    
+    La Autenticación se refiere al proceso de conceder a un usuario o aplicación permisos de acceso a los 
+    datos y funciones del API de WispHub.
+
+    El API de WispHub implementa la autorización por claves de API. Esto le permite generar claves API 
+    a su personal desde la Plataforma de WispHub en la 
+    <strong><a href="https://wisphub.net/staff/">Lista de Personal</a></strong>.
+
+    Para realizar tus peticiones al API de Wisphub, es necesario enviar su clave de API (`Api-Key`) en 
+    todas las llamadas a nuestros servidores.
+  version: 1.2.0
+  termsOfService: https://wisphub.net/documentacion/terminos-y-condiciones-de-uso-50/
+  contact:
+    name: WispHub
+    url: https://wisphub.net/
+    email: soporte@wisphub.net
+  x-logo:
+    altText: WispHub logo
+    url: "/static/img/logo.png"
+security:
+  - Api_Key: [ ]
+externalDocs:
+  description: El API de WispHub es para llevar a cabo las tareas o acciones existentes en el sistema.
+  url: 'https://wisphub.net/documentacion/home-1/'
+consumes:
+  - application/json
+# Secciones
+tags:
+  - name: Clientes
+    description: |
+      En este apartado podrá obtener la misma información que la sección de Clientes de la plataforma de WispHub.
+      
+      Podrá realizar lo siguiente:
+      
+      - Obtener información de todos sus clientes.
+      - Consultar el servicio y la información adicional de un cliente.
+      - Consultar el saldo de un cliente.
+      - Activar y Desactivar servicios.
+
+  - name: Facturas
+    description: |
+      En este apartado podrá obtener la misma información que la sección de Facturas de la plataforma de WispHub
+      
+      Podrá realizar lo siguiente:
+      
+      - Obtener la información de todas las facturas desde el inicio de su empresa a tráves de multiples consultas
+      con paginación.
+      - Obtener la información en especifico de una factura y sus articulos
+      - Registrar un pago
+
+  - name: Gastos
+    description: |
+      En este apartado podrá obtener la misma información que la sección de Gastos de la plataforma de WispHub
+      
+      Podrá realizar lo siguiente:
+      
+      - Obtener la información de todos los gastos desde el inicio de su empresa a tráves de multiples consultas
+      con paginación.
+      - Obtener la información en especifico de un gasto.
+      - Agregar, editar o eliminar un gasto.
+
+  - name: Tickets
+    description: |
+      En este apartado podrá obtener la misma información que la sección de Soporte Tecnico de la plataforma de WispHub
+      
+      Podrá realizar lo siguiente:
+      
+      - Obtener la información de todos los Tickets de Soporte Técnico desde el inicio de su empresa a tráves de 
+      multiples consultas con paginación.
+      - Obtener la información en especifico de un Ticket y sus respuestas y archivos.
+  - name: Tarea
+    description: |
+      Una tarea es el procesamiento en segundo plano de acciones dentro de la plataforma y el API de Wisphub. Alguno de 
+      los Endpoints devolveran un `task_id` parecido a este: `c6416125-3c77-4f1e-9fb2-7fffac8f3ec9`
+      
+      Eso significa que el servidor estará realizando su petición, el cual puede ser consultado para saber el estado
+      de la tarea.
+  - name: Fichas Hotspot
+    description: |
+      En este apartado podrá obtener la información relacionada a las fichas hotspot.
+      
+      Podrá realizar lo siguiente:
+      
+      - Obtener lista de fichas hotspot.
+      - Consultar la información de una ficha hotspot.
+      - Eliminar fichas hotspot.
+      - Crear fichas hotspot.
+
+  - name: Sistema
+    description: |
+      En esta seccion podrá consultar información referente al sistema tal como lo haria en WispHub, podrá consultar 
+      la siguiente informacion:
+      
+      - Router Wifi
+      - Plan de Internet
+      - Zonas
+      - Sectoriales
+      - Antenas
+      - Usuarios Staff
+
+  - name: Tarjetas de Cobranza
+    description: |
+      En esta seccion podrá consultar información referente a las Tarjetas de Cobranza
+
+# Agrupacion
+x-tagGroups:
+  - name: Clientes
+    tags:
+      - Clientes
+      - Tarjetas de Cobranza
+  - name: Finanzas
+    tags:
+      - Facturas
+      - Gastos
+  - name: Soporte Tecnico
+    tags:
+      - Tickets
+  - name: Tareas y Acciones
+    tags:
+      - Tarea
+  - name: Hotspot
+    tags:
+      - Fichas Hotspot
+  - name: Sistema
+    tags:
+      - Sistema
+      - Planes de Internet
+  - name: Wisphub API # Se agrega grupo de ayuda para que no oculte el ultimo grupo agregado
+    tags:
+      - API
+# Endpoints
+paths:
+  # Clientes
+  /clientes/:
+    $ref: 'Clientes/paths/list_clientes.yaml'
+  /clientes/{id_servicio}/:
+    $ref: 'Clientes/paths/retrieve_servicio.yaml'
+  /instalaciones/:
+    $ref: 'Instalaciones/paths/list_instalaciones.yaml'
+  /solicitar-instalacion/:
+    $ref: 'Clientes/paths/request_preinstallation.yaml'
+  /servicios-adicionales/:
+    $ref: 'Clientes/paths/list_additional_services.yaml'
+  /agregar-servicio-telefonia/:
+    $ref: 'Clientes/paths/add_additional_telephone_service.yaml'
+  /agregar-servicio-television/:
+    $ref: 'Clientes/paths/add_additional_television_service.yaml'
+  /servicio-adicional/{accion}/:
+    $ref: 'Clientes/paths/action_enable_disable_additional_service.yaml'
+  /clientes/{id_servicio}/perfil/:
+    $ref: 'Clientes/paths/retrieve_perfil.yaml'
+  /clientes/{id_servicio}/saldo/:
+    $ref: 'Clientes/paths/retrieve_saldo.yaml'
+  /clientes/{accion}/:
+    $ref: 'Clientes/paths/action_activar_o_desactivar_servicio.yaml'
+  /clientes/agregar-cliente/{id_zona}/:
+    $ref: 'Clientes/paths/create_clientes.yaml'
+  /clientes/eliminar-clientes/:
+    $ref: 'Clientes/paths/delete_clientes.yaml'
+  /clientes/{id_servicio}/ping/:
+    $ref: 'Clientes/paths/ping_clientes.yaml'
+  # Facturas
+  /_/:
+    $ref: 'Facturas/paths/sugerencias.yaml'
+  /formas-de-pago/:
+    $ref: 'Facturas/paths/list_forma_de_pago.yaml'
+  /facturas/:
+    $ref: 'Facturas/paths/list_facturas.yaml'
+  /facturas/{id_factura}/:
+    $ref: 'Facturas/paths/retrieve_facturas.yaml'
+  /facturas/{id_factura}/registrar-pago/:
+    $ref: 'Facturas/paths/action_registrar_pago.yaml'
+  /promesa-pago/:
+    $ref: 'Facturas/paths/action_promesa_pago.yaml'
+  /facturas/eliminar-facturas/:
+    $ref: 'Facturas/paths/eliminar_facturas.yaml'
+  /facturas/servicios-internet-prorrateo/:
+    $ref: 'Facturas/paths/prorrateo.yaml'
+  /facturas/lista-articulos/:
+    $ref: 'Facturas/paths/lista_articulos.yaml'
+  /facturas/reportar-pago/{id_factura}/:
+    $ref: 'Facturas/paths/reportar_pago_factura.yaml'
+  # Gastos
+  /gastos/:
+    $ref: 'Gastos/paths/list_gastos.yaml'
+  /gastos/{id_gasto}/:
+    $ref: 'Gastos/paths/retrieve_gasto.yaml'
+  /gastos/editar/{folio}/:
+    $ref: 'Gastos/paths/editar_gasto.yaml'
+  /gastos/eliminar/{folio}/:
+    $ref: 'Gastos/paths/eliminar_gasto.yaml'
+  # Tickets
+  /tickets/:
+    $ref: 'Tickets/paths/list_tickets.yaml'
+  /tickets/{id_ticket}/:
+    $ref: 'Tickets/paths/retrieve_tickets.yaml'
+  /tickets/asuntos-tickets/:
+    $ref: 'Tickets/paths/lista_asuntos_tickets.yaml'
+  /tickets/{id_ticket}/respuesta/:
+    $ref: 'Tickets/paths/respuesta_tickets.yaml'
+  # Tasks
+  /tasks/{task_id}/:
+    $ref: 'Tasks/paths/retrieve_task.yaml'
+  # Fichas Hotspot
+  /fichas/:
+    $ref: 'FichasHotspot/paths/list_fichas.yaml'
+  /fichas/{id_ficha}/:
+    $ref: 'FichasHotspot/paths/detalle_ficha.yaml'
+  /fichas/ficha-prefijo/:
+    $ref: 'FichasHotspot/paths/ficha_prefijo.yaml'
+  /fichas/puntos-venta/:
+    $ref: 'FichasHotspot/paths/lista_puntos_venta.yaml'
+  /fichas/eliminar/:
+    $ref: 'FichasHotspot/paths/eliminar_fichas.yaml'
+  # Sistema
+  /modelo-antena/:
+    $ref: 'Sistema/paths/list_modelo_antena.yaml'
+  /plan-internet/:
+    $ref: 'Sistema/paths/list_plan_internet.yaml'
+  /router/:
+    $ref: 'Sistema/paths/list_router.yaml'
+  /zonas/:
+    $ref: 'Sistema/paths/list_zonas.yaml'
+  /proveedores/:
+    $ref: 'Sistema/paths/list_proveedores.yaml'
+  /categorias-gastos/:
+    $ref: 'Sistema/paths/list_categorias_gastos.yaml'
+  /staff/:
+    $ref: 'Sistema/paths/list_usuarios_staff.yaml'
+  /sectorial/:
+    $ref: 'Sistema/paths/list_sectorial.yaml'
+  /plan-internet/queue/agregar/:
+    $ref: 'Sistema/paths/create_plan_queue.yaml'
+  /plan-internet/queue/{id_plan}/:
+    $ref: 'Sistema/paths/get_update_delete_plan_queue.yaml'
+  /plan-internet/pppoe/agregar/:
+    $ref: 'Sistema/paths/create_plan_pppoe.yaml'
+  /plan-internet/pppoe/{id_plan}/:
+    $ref: 'Sistema/paths/get_update_delete_plan_pppoe.yaml'
+  /planes-adicionales/:
+    $ref: 'Sistema/paths/list_additional_plans.yaml'
+  # Tarjetas de Cobranza
+  /tarjeta-cobranza/:
+    $ref: 'TarjetaCobranza/paths/list_tarjeta_cobranza.yaml'
+  /clientes/{id_servicio}/qr-codi/:
+    $ref: 'TarjetaCobranza/paths/get_qr_codi_cliente.yaml'
+  /clientes/tarjetas-cobranza/codi/:
+    $ref: 'TarjetaCobranza/paths/list_tarjetas_cobranza_codi.yaml'
+
+# Responses and examples
+components:
+  securitySchemes:
+    Api_Key:
+      description: | 
+          La Autenticación se refiere al proceso de conceder a un usuario o aplicación permisos de acceso a los 
+          datos y funciones del API de WispHub.
+
+          El API de WispHub implementa la autorización por claves de API. Esto le permite generar claves API 
+          a su personal desde la Plataforma de WispHub en la Lista de Personal.
+
+          Para realizar tus peticiones al API de Wisphub, es necesario enviar su clave de API (`Api-Key`) en 
+          todas las llamadas a nuestros servidores.
+      in: header
+      name: Authorization
+      type: apiKey
+  schemas:
+    # Formato de lo que aparece en los responses
+    SimpleModeloAntena:
+      $ref: 'ModeloAntena/components/SimpleModeloAntena.yaml'
+    SimplePlanInternet:
+      $ref: 'PlanInternet/components/SimplePlanInternet.yaml'
+    SimpleZona:
+      $ref: 'Zona/components/SimpleZona.yaml'
+    SimpleRouter:
+      $ref: 'Router/components/SimpleRouter.yaml'
+    SimpleApCliente:
+      $ref: 'ApCliente/components/SimpleApCliente.yaml'
+    SimpleUser:
+      $ref: 'User/components/SimpleUser.yaml'
+    SimpleFormaPago:
+      $ref: 'FormaPago/components/SimpleFormaPago.yaml'
+    # /clientes/
+    SimpleService:
+      $ref: 'Clientes/components/SimpleService.yaml'
+    SimpleServiceTicket:
+      $ref: 'Clientes/components/SimpleServiceTicket.yaml'
+    SimpleCliente:
+      $ref: 'Clientes/components/SimpleCliente.yaml'
+    Cliente:
+      $ref: 'Clientes/components/Clientes.yaml'
+    Instalaciones:
+      $ref: 'Instalaciones/components/Instalaciones.yaml'
+    # /clientes/<id_servicio>/
+    ServiceRetrieve:
+      $ref: 'Clientes/components/ServicesRetrieve.yaml'
+    # /servicios-adicionales/
+    AdditionalService:
+      $ref: 'Clientes/components/AdditionalServices.yaml'
+    # /clientes/<id_servicio>/perfil/
+    ClienteRetrieve:
+      $ref: 'Clientes/components/ClientesRetrieve.yaml'
+    # /clientes/<id_servicio>/saldo/
+    SaldoRetrieve:
+      $ref: 'Clientes/components/SaldoRetrieve.yaml'
+    SimpleInvoice:
+      $ref: 'Clientes/components/SimpleInvoice.yaml'
+    Article:
+      $ref: 'Facturas/components/Article.yaml'
+    # /formas-de-pago/
+    PaymentMethod:
+      $ref: 'Facturas/components/PaymentMethod.yaml'
+    # /facturas/
+    Invoice:
+      $ref: 'Facturas/components/Invoice.yaml'
+    # /facturas/<id_factura>/
+    InvoiceRetrieve:
+      $ref: 'Facturas/components/InvoiceRetrieve.yaml'
+    # /facturas/<id_factura>/registrar-pago/
+    PaymentRegister:
+      $ref: 'Facturas/components/PaymentRegister.yaml'
+    ReportPayment:
+      $ref: 'Facturas/components/ReportPayment.yaml'
+    # /facturas/reportar-pago/<id_factura>/
+    # /gastos/
+    Gasto:   
+      $ref: 'Gastos/components/Gasto.yaml' 
+    ObtenerGasto:
+      $ref: 'Gastos/components/ObtenerGasto.yaml'
+    # /tickets/
+    Ticket:
+      $ref: 'Tickets/components/Ticket.yaml'
+    TicketRespuestas:
+      $ref: 'Tickets/components/TicketRespuestas.yaml'
+    # /tickets/<id_ticket>/
+    TicketRetrieve:
+      $ref: 'Tickets/components/TicketRetrieve.yaml'
+    # /task/<uuid>/
+    RetrieveTask:
+      $ref: 'Tasks/components/RetrieveTask.yaml'
+    ListaFichas:
+      $ref: 'FichasHotspot/components/ListaFichas.yaml'
+    DetalleFicha:
+      $ref: 'FichasHotspot/components/DetalleFicha.yaml'
+    FichaPrefijo:
+      $ref: 'FichasHotspot/components/FichaPrefijo.yaml'
+    ListaPuntosVenta:
+      $ref: 'FichasHotspot/components/ListaPuntosVenta.yaml'
+    CrearFicha:
+      $ref: 'FichasHotspot/components/CrearFicha.yaml'

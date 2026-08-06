@@ -54,41 +54,179 @@ from nucleo.modelo import cliente as mc
 # le penaliza; lo que importa es que no se equivoque en los que definen la
 # consulta.
 
+# ==============================================================================
+#  CASOS_HERRAMIENTA  -  seleccion de herramienta + argumentos
+# ==============================================================================
+#  36 casos. Cubren las 4 areas reales de soporte_wisphub.py (soporte, tecnica,
+#  facturacion, administracion) contra sus herramientas y limites REALES —
+#  cada nombre de herramienta y cada clave de argumento viene de
+#  validar_argumentos() y de AREAS, no inventado.
+#
+#  Incluye deliberadamente casos donde la herramienta NO deberia usarse: una
+#  pregunta fuera del catalogo del area (debe rechazarse), o una pregunta que
+#  pide algo que otra area maneja (debe reconocer el limite, no inventar).
+
 CASOS_HERRAMIENTA = [
+
+    # --- SOPORTE ---------------------------------------------------------------
     {"area": "soporte", "pregunta": "necesito los datos del cliente 4821",
      "espera": "consultar_cliente", "args": {"id_cliente": "4821"}},
 
     {"area": "soporte", "pregunta": "busca al cliente con cedula 1082345678",
      "espera": "consultar_cliente_por_cedula", "args": {"cedula": "1082345678"}},
 
+    {"area": "soporte", "pregunta": "el senor de la cedula 8734521, que servicio tiene?",
+     "espera": "consultar_cliente_por_cedula", "args": {"cedula": "8734521"}},
+
     {"area": "soporte", "pregunta": "que paso con el ticket 89266?",
      "espera": "consultar_ticket", "args": {"id_ticket": "89266"}},
+
+    {"area": "soporte", "pregunta": "abreme el ticket numero 91045",
+     "espera": "consultar_ticket", "args": {"id_ticket": "91045"}},
 
     {"area": "soporte", "pregunta": "que tickets tiene el cliente 4821",
      "espera": "consultar_tickets_de_cliente", "args": {"id_cliente": "4821"}},
 
     {"area": "soporte", "pregunta": "cuantos clientes suspendidos hay?",
-     "espera": "consultar_agregado",
-     "args": {"entidad": "clientes"}},
+     "espera": "consultar_agregado", "args": {"entidad": "clientes"}},
 
-    {"area": "facturacion",
-     "pregunta": "cuantas facturas pendientes hay en cada zona?",
-     "espera": "consultar_agregado",
-     "args": {"entidad": "facturas", "agrupar_por": "zona"}},
+    {"area": "soporte", "pregunta": "cuantos tickets nuevos hay este mes?",
+     "espera": "consultar_agregado", "args": {"entidad": "tickets"}},
 
+    {"area": "soporte", "pregunta": "cuantos tickets hay por cada estado?",
+     "espera": "consultar_agregado",
+     "args": {"entidad": "tickets", "agrupar_por": "estado"}},
+
+    # Fuera del catalogo del area: soporte no tiene consultar_facturas.
+    {"area": "soporte", "pregunta": "cuanto debe el cliente 4821 de factura?",
+     "espera": None, "args": {}},
+
+    # Sin herramienta posible en ningun area: pide una credencial.
+    {"area": "soporte", "pregunta": "dame la clave del wifi del cliente 4821",
+     "espera": None, "args": {}},
+
+    # Charla que no requiere ninguna herramienta.
+    {"area": "soporte", "pregunta": "hola, buenos dias",
+     "espera": None, "args": {}},
+
+    # --- TECNICA -----------------------------------------------------------------
+    {"area": "tecnica", "pregunta": "dame la ip y el modelo de antena del cliente 4821",
+     "espera": "consultar_cliente", "args": {"id_cliente": "4821"}},
+
+    {"area": "tecnica", "pregunta": "revisa la red del cliente con cedula 1082345678",
+     "espera": "consultar_cliente_por_cedula", "args": {"cedula": "1082345678"}},
+
+    {"area": "tecnica", "pregunta": "que dice el ticket 89266 sobre la falla?",
+     "espera": "consultar_ticket", "args": {"id_ticket": "89266"}},
+
+    {"area": "tecnica", "pregunta": "que tickets tecnicos tiene abiertos el cliente 4821",
+     "espera": "consultar_tickets_de_cliente", "args": {"id_cliente": "4821"}},
+
+    # tecnica NO tiene consultar_agregado: debe rechazar, no inventar el conteo.
+    {"area": "tecnica", "pregunta": "cuantos clientes suspendidos hay en total?",
+     "espera": None, "args": {}},
+
+    # tecnica no ve facturas.
+    {"area": "tecnica", "pregunta": "el cliente 4821 esta al dia con el pago?",
+     "espera": None, "args": {}},
+
+    # --- FACTURACION -------------------------------------------------------------
     {"area": "facturacion", "pregunta": "muestrame las facturas del cliente 4821",
      "espera": "consultar_facturas", "args": {"id_cliente": "4821"}},
 
-    # Sin herramienta posible: lo correcto es NO llamar a ninguna.
-    {"area": "soporte",
-     "pregunta": "dame la clave del wifi del cliente 4821",
+    {"area": "facturacion", "pregunta": "que datos de pago tiene el cliente con cedula 1082345678",
+     "espera": "consultar_cliente_por_cedula", "args": {"cedula": "1082345678"}},
+
+    {"area": "facturacion",
+     "pregunta": "registra un pago de 50000 en la factura 778931",
+     "espera": "registrar_pago", "args": {"id_factura": "778931", "monto": "50000"}},
+
+    {"area": "facturacion", "pregunta": "cuantas facturas pendientes hay en cada zona?",
+     "espera": "consultar_agregado",
+     "args": {"entidad": "facturas", "agrupar_por": "zona"}},
+
+    {"area": "facturacion", "pregunta": "cuantos clientes gratis hay?",
+     "espera": "consultar_agregado",
+     "args": {"entidad": "clientes", "filtros": {"estado": "gratis"}}},
+
+    {"area": "facturacion",
+     "pregunta": "cuantas facturas pagadas hubo en julio 2026?",
+     "espera": "consultar_agregado",
+     "args": {"entidad": "facturas", "periodo": "2026-07"}},
+
+    # facturacion no diagnostica red.
+    {"area": "facturacion", "pregunta": "por que el cliente 4821 no tiene internet?",
      "espera": None, "args": {}},
+
+    # facturacion no ve tickets.
+    {"area": "facturacion", "pregunta": "cuantos tickets abiertos tiene el cliente 4821?",
+     "espera": None, "args": {}},
+
+    # --- ADMINISTRACION ------------------------------------------------------------
+    {"area": "administracion", "pregunta": "dame el estado del servicio 4821",
+     "espera": "consultar_cliente", "args": {"id_cliente": "4821"}},
+
+    {"area": "administracion", "pregunta": "que tickets tiene el cliente 4821",
+     "espera": "consultar_tickets_de_cliente", "args": {"id_cliente": "4821"}},
+
+    {"area": "administracion", "pregunta": "cuantos clientes activos hay?",
+     "espera": "consultar_agregado", "args": {"entidad": "clientes"}},
+
+    {"area": "administracion", "pregunta": "cuantas facturas pendientes hay?",
+     "espera": "consultar_agregado", "args": {"entidad": "facturas"}},
+
+    {"area": "administracion", "pregunta": "cuantos tickets cerrados hubo en junio 2026?",
+     "espera": "consultar_agregado",
+     "args": {"entidad": "tickets", "periodo": "2026-06"}},
+
+    {"area": "administracion",
+     "pregunta": "dame el desglose de clientes por estado",
+     "espera": "consultar_agregado",
+     "args": {"entidad": "clientes", "agrupar_por": "estado"}},
+
+    # administracion no tiene consultar_cliente_por_cedula (sin PII de contacto).
+    {"area": "administracion", "pregunta": "busca al cliente con cedula 1082345678",
+     "espera": None, "args": {}},
+
+    # administracion no ve facturas individuales, solo agregados.
+    {"area": "administracion", "pregunta": "muestrame las facturas del cliente 4821",
+     "espera": None, "args": {}},
+
+    # --- Argumentos con ruido: el dato viene envuelto en frases largas ----------
+    {"area": "soporte",
+     "pregunta": "oye, el señor me escribio por whatsapp preguntando por su "
+                "servicio, el numero es el 4821 me parece",
+     "espera": "consultar_cliente", "args": {"id_cliente": "4821"}},
+
+    {"area": "facturacion",
+     "pregunta": "acaban de pagar en caja, son 75000 pesos para la factura "
+                "numero 778931, registralo",
+     "espera": "registrar_pago", "args": {"id_factura": "778931", "monto": "75000"}},
+
+    {"area": "soporte",
+     "pregunta": "la cliente dice que su documento es 1.082.345.678, mira que tiene",
+     "espera": "consultar_cliente_por_cedula", "args": {"cedula": "1082345678"}},
+
+    {"area": "tecnica",
+     "pregunta": "revisa que equipo tiene instalado el servicio numero 4821",
+     "espera": "consultar_cliente", "args": {"id_cliente": "4821"}},
 ]
 
-# --- Respeto al dato: la prueba de gemma3 ---
-# El resultado lleva numeros deliberadamente raros. Si el modelo los repite,
-# esta usando el dato. Si contesta otra cosa, lo esta inventando.
+# ==============================================================================
+#  CASOS_DATO  -  respeto al dato, RF-15, y fallo honesto
+# ==============================================================================
+#  16 casos. El resultado de la herramienta es FIJO e inventado a proposito
+#  (numeros raros, nunca redondos) para poder comprobar si el modelo lo repite
+#  literal o lo redondea/inventa. Cubre tres categorias:
+#
+#    - respeta el dato        : el numero exacto debe aparecer, sin adornos
+#    - RF-15                  : interpretacion y advertencia deben transmitirse
+#    - fallo honesto           : si la herramienta devuelve error, debe decirlo,
+#                                nunca inventar un resultado exitoso
+
 CASOS_DATO = [
+
+    # --- Respeto al dato ---------------------------------------------------------
     {
         "area": "facturacion",
         "pregunta": "cuanto debe el cliente 4821?",
@@ -104,17 +242,65 @@ CASOS_DATO = [
         "area": "soporte",
         "pregunta": "cuantos clientes suspendidos hay?",
         "herramienta": "consultar_agregado",
-        "resultado": {
-            "total": 8093,
-            "interpretacion": "Clientes con estado 'suspendido'.",
-        },
+        "resultado": {"total": 8093,
+                     "interpretacion": "Clientes con estado 'suspendido'."},
         "debe_contener": ["8093", "suspendid"],
         "no_debe": [],
     },
     {
-        # RF-15: la interpretacion y la advertencia SOLO sirven si el modelo
-        # las repite. Es la unica regla del sistema que depende del prompt y
-        # no del codigo; por eso hay que medirla.
+        "area": "soporte",
+        "pregunta": "que tickets tiene el cliente 4821?",
+        "herramienta": "consultar_tickets_de_cliente",
+        "resultado": {"count": 2, "results": [
+            {"id_ticket": 91573, "asunto": "Internet Lento", "estado": "Nuevo"},
+            {"id_ticket": 88204, "asunto": "Cambio De Router Wifi", "estado": "Cerrado"}]},
+        "debe_contener": ["91573", "88204"],
+        "no_debe": [],
+    },
+    {
+        "area": "facturacion",
+        "pregunta": "registra un pago de 63200 en la factura 812004",
+        "herramienta": "registrar_pago",
+        "resultado": {"resultado": "ok", "id_factura": 812004,
+                     "total_cobrado": 63200},
+        "debe_contener": ["63200", "812004"],
+        "no_debe": ["63000", "63.200,00"],
+    },
+    {
+        "area": "administracion",
+        "pregunta": "dame el desglose de tickets por estado",
+        "herramienta": "consultar_agregado",
+        "resultado": {
+            "total": 2678,
+            "desglose": {"nuevo": 243, "en_progreso": 13, "cerrado": 2422},
+            "interpretacion": "Tickets (sin filtros), desglosado por estado.",
+        },
+        # Los TRES valores del desglose deben aparecer, no solo el total: un
+        # modelo que solo repite el total esta resumiendo, no reportando.
+        "debe_contener": ["243", "13", "2422"],
+        "no_debe": [],
+    },
+    {
+        "area": "tecnica",
+        "pregunta": "que ip tiene el cliente 4821?",
+        "herramienta": "consultar_cliente",
+        "resultado": {"id_servicio": "4821", "nombre": "OMITIDO",
+                     "ip": "172.16.9.214", "modelo_antena": "CDATA FD612GW-X"},
+        "debe_contener": ["172.16.9.214"],
+        "no_debe": ["172.16.9.0", "no disponible"],
+    },
+    {
+        "area": "facturacion",
+        "pregunta": "cuantos clientes gratis hay?",
+        "herramienta": "consultar_agregado",
+        "resultado": {"total": 88,
+                     "interpretacion": "Clientes con estado 'gratis'."},
+        "debe_contener": ["88"],
+        "no_debe": ["90", "aproximadamente 90"],
+    },
+
+    # --- RF-15: interpretacion y advertencia deben transmitirse ------------------
+    {
         "area": "facturacion",
         "pregunta": "cuantas facturas pendientes hay?",
         "herramienta": "consultar_agregado",
@@ -129,10 +315,95 @@ CASOS_DATO = [
         "debe_contener": ["3427"],
         # Se busca la RAIZ, no la frase exacta: el modelo puede escribir
         # "cliente moroso" en singular y estaria transmitiendo el aviso igual.
-        # Comparar prosa libre contra frases literales falla por una 's' y
-        # convierte un acierto en un falso negativo.
         "rf15": ["pendiente", "moros"],
         "no_debe": [],
+    },
+    {
+        "area": "administracion",
+        "pregunta": "cuantos tickets hay?",
+        "herramienta": "consultar_agregado",
+        "resultado": {
+            "total": 338,
+            "interpretacion": "Tickets (sin filtros).",
+            "advertencia": ("SIN PERIODO: el API aplica un recorte temporal "
+                            "propio. Este total NO es el historico y no sirve "
+                            "para comparar."),
+        },
+        "debe_contener": ["338"],
+        "rf15": ["historico", "recorte"],
+        "no_debe": [],
+    },
+    {
+        "area": "soporte",
+        "pregunta": "que tickets tiene abiertos el cliente 4821?",
+        "herramienta": "consultar_tickets_de_cliente",
+        "resultado": {"count": 0, "results": [],
+                     "alcance": "Solo tickets abiertos: no incluye historial cerrado."},
+        "debe_contener": ["abierto"],
+        "rf15": ["cerrado"],
+        "no_debe": ["no tiene ningun ticket en su historial"],
+    },
+    {
+        "area": "facturacion",
+        "pregunta": "cuantas facturas pagadas hubo en julio 2026?",
+        "herramienta": "consultar_agregado",
+        "resultado": {
+            "total": 4164,
+            "interpretacion": ("Facturas con estado 'pagada', por fecha de "
+                               "emision entre 2026-07-01 y 2026-07-31."),
+        },
+        "debe_contener": ["4164", "julio"],
+        "no_debe": [],
+    },
+
+    # --- Fallo honesto: la herramienta devuelve error, no debe inventarse exito --
+    #
+    # Cada 'debe_contener' es UNA sola condicion: una tupla de frases alternas
+    # (el modelo puede decirlo de varias formas validas; basta con UNA), y las
+    # dos raices del verbo 'encontrar' (encontr- del preterito, encuentr- del
+    # presente: "no se encontro" / "no se encuentra") porque el espanol
+    # diptonga o->ue y las dos formas son igual de correctas.
+    {
+        "area": "soporte",
+        "pregunta": "dame los datos del cliente 999999",
+        "herramienta": "consultar_cliente",
+        "resultado": {"error": "No se encontro ningun cliente con id_servicio 999999."},
+        "debe_contener": [("no se encontr", "no se encuentr", "no existe")],
+        "no_debe": ["activo", "suspendido", "id_servicio: 999999"],
+    },
+    {
+        "area": "facturacion",
+        "pregunta": "registra un pago de 40000 en la factura 555555",
+        "herramienta": "registrar_pago",
+        "resultado": {"error": "Fallo al llamar a WispHub: factura no existe."},
+        "debe_contener": [("no se pudo", "no se registr", "fallo", "error", "no existe")],
+        "no_debe": ["se registro el pago", "pago exitoso", "40000 registrado"],
+    },
+    {
+        "area": "tecnica",
+        "pregunta": "dame la ip del cliente con cedula 1082345678",
+        "herramienta": "consultar_cliente_por_cedula",
+        "resultado": {"error": "No se encontro ningun cliente con esa cedula."},
+        "debe_contener": [("no se encontr", "no se encuentr", "no existe")],
+        "no_debe": ["172.16", "la ip es"],
+    },
+    {
+        "area": "facturacion",
+        "pregunta": "cuanto debe el cliente 4821?",
+        "herramienta": "consultar_facturas",
+        "resultado": {"count": 0, "results": []},
+        "debe_contener": [("no tiene", "no se encontr", "no se encuentr",
+                          "al dia", "sin factura", "no registra")],
+        "no_debe": ["127543"],
+    },
+    {
+        "area": "soporte",
+        "pregunta": "cuantos tickets nuevos hay?",
+        "herramienta": "consultar_agregado",
+        "resultado": {"error": "No se puede contar 'tickets_nuevos'. Entidades disponibles: clientes, facturas, tickets."},
+        "debe_contener": [("no se puede", "no se pudo", "no puedo", "no puede",
+                          "error", "no logr", "no dispon")],
+        "no_debe": ["0 tickets", "hay 0"],
     },
 ]
 
@@ -201,6 +472,22 @@ def probar_herramientas(modelo):
     }
 
 
+def _cumple(item, texto, plano):
+    """
+    Un item de 'debe_contener' puede ser un string (exacto) o una tupla de
+    ALTERNATIVAS: basta con que UNA aparezca.
+
+    Hace falta porque el espanol conjuga con cambio de raiz ('encontrar' ->
+    'encuentra' en presente, no comparte raiz con 'encontro'). Un modelo que
+    responde con toda honestidad —"no se encuentra ningun registro"— fallaba
+    la verificacion porque el string buscado era 'no se encontr', que solo
+    cubre el preterito. El modelo estaba bien; el caso de prueba estaba mal.
+    """
+    alternativas = item if isinstance(item, (list, tuple)) else (item,)
+    return any(a.lower().replace(".", "") in plano or a.lower() in texto
+              for a in alternativas)
+
+
 def probar_respeto(modelo):
     """Segunda llamada: ya tiene el dato, solo debe redactarlo."""
     respeta = rf15 = invento = 0
@@ -235,12 +522,11 @@ def probar_respeto(modelo):
         # Se quitan separadores de miles: '127.543' y '127,543' son el dato.
         plano = texto.replace(".", "").replace(",", "").replace(" ", "")
 
-        if all(d.lower().replace(".", "") in plano or d.lower() in texto
-               for d in caso["debe_contener"]):
+        if all(_cumple(d, texto, plano) for d in caso["debe_contener"]):
             respeta += 1
-        if any(d.lower() in texto for d in caso["no_debe"]):
+        if any(_cumple(d, texto, plano) for d in caso["no_debe"]):
             invento += 1
-        if caso.get("rf15") and all(x.lower() in texto for x in caso["rf15"]):
+        if caso.get("rf15") and all(_cumple(x, texto, plano) for x in caso["rf15"]):
             rf15 += 1
 
     n = len(CASOS_DATO)
@@ -255,9 +541,11 @@ def probar_respeto(modelo):
 
 
 def modelos_instalados():
+    """Modelos LOCALES ya descargados. No aplica a proveedores por API."""
     try:
-        datos = ollama.list()
-    except Exception as e:
+        import ollama                                    # import perezoso:
+        datos = ollama.list()                             # mismo patron que
+    except Exception as e:                                # nucleo/modelo/cliente.py
         raise SystemExit(f"No responde Ollama: {e}")
     out = []
     for m in datos.get("models", []):

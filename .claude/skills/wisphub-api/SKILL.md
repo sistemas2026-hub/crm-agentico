@@ -5,6 +5,31 @@ description: Integrar o ampliar la conexion con la API de WispHub (o la de cualq
 
 # API de WispHub — integrar sin que te mienta
 
+## Como leer TODA la documentacion sin un navegador
+
+`wisphub.net/api-docs/` es una pagina renderizada con ReDoc: el HTML que se
+descarga esta practicamente vacio (solo un titulo), y el contenido real lo
+inyecta JavaScript en el navegador. Herramientas que solo piden el HTML (sin
+ejecutar JS) ven la pagina vacia y concluyen —erroneamente— que no hay nada
+que leer ahi.
+
+**No hace falta un navegador ni Playwright.** ReDoc se inicializa apuntando a
+un archivo YAML estatico que contiene TODA la especificacion, sin renderizar:
+
+```python
+# el HTML crudo de /api-docs/ contiene esta linea:
+#   Redoc.init("/static/yaml/api/api-main.yaml", {...}, ...)
+import requests, yaml
+r = requests.get("https://wisphub.net/static/yaml/api/api-main.yaml")
+spec = yaml.safe_load(r.text)          # OpenAPI 3.0 completo, 54 rutas
+```
+
+El archivo bajado queda en `reference/openapi.yaml` de esta skill. Aun asi,
+sigue aplicando la regla de siempre: **el spec dice que existe, no que
+funcione como dice.** El propio archivo trae un error verificado — su bloque
+`servers:` apunta a `api.wisphub.net`, y la produccion real es `api.wisphub.io`.
+Ni el dominio del spec se da por bueno sin comprobar.
+
 ## La regla, antes que nada
 
 > **La documentacion de la API es una HIPOTESIS, no una fuente de verdad.
@@ -85,18 +110,19 @@ OPTIONS /api/tickets/   ->  Allow: GET, POST, HEAD, OPTIONS
 | `/api/clientes/` | GET | La coleccion NO acepta POST — pero ver el endpoint de accion, abajo |
 | `/api/clientes/agregar-cliente/{id_zona}/` | POST | **SI se pueden crear clientes.** No vive en la coleccion: hay que sondear tambien endpoints de accion, no solo colecciones y recursos |
 | `/api/clientes/agregar-cliente/{id_zona}/?instalacion` | POST | Crea una INSTALACION en vez de un cliente. Habilita `costo_instalacion` y `estado_instalacion`, y fuerza `firewall=true` |
-| `/api/clientes/{id}/` | GET, PUT, PATCH, **DELETE** | Ver aviso abajo |
+| `/api/clientes/{id}/` | GET, PUT, PATCH, DELETE (segun `OPTIONS`) | **`DELETE` aqui NO funciona** — da HTTP 500. Ver aviso abajo |
+| `/api/clientes/{id}/perfil/` | DELETE | **El borrado real.** Verificado end-to-end contra produccion — ver aviso abajo |
 | `/api/tickets/` | GET, POST | Se pueden crear tickets |
 | `/api/tickets/{id}/` | GET, PUT, PATCH | Se pueden actualizar |
 | `/api/facturas/` | GET, POST | |
 | `/api/gastos/` | GET, POST | Vacio, pero **acepta escritura** |
 | `/api/zonas/`, `/api/plan-internet/`, `/api/staff/` | GET | Catalogos de solo lectura |
 
-> **AVISO — `DELETE /api/clientes/{id}/` existe.**
+> **AVISO — se puede borrar un cliente (por `/perfil/`, ver mas abajo).**
 > La misma clave que usa el asistente para consultar puede borrar un cliente. La
 > proteccion es que ninguna herramienta declare esa operacion: el catalogo del
 > tenant es lista blanca y solo existe lo declarado. Ninguna herramienta debe
-> exponer DELETE, y toda escritura exige `requiere_confirmacion: true` (el
+> exponer el borrado, y toda escritura exige `requiere_confirmacion: true` (el
 > validador lo obliga).
 
 > **`/api/gastos/` acepta POST.** Esta vacio hoy, y por eso el informe de
@@ -143,6 +169,62 @@ Campos opcionales relevantes para operar: `nombre`, `apellidos`, `email`,
 `forma_contratacion` (1-7, enum), `tipo_persona` (1 moral, 2 fisica).
 Exclusivos de instalacion: `costo_instalacion`, `estado_instalacion`
 (1 nueva, 2 en progreso, 7 pendiente, 8 planificacion, 3 activada, 4 terminada).
+
+### Verificado en produccion: crear un cliente de prueba (agosto 2026)
+
+Se creo y se intento retirar un cliente de prueba real, con autorizacion
+explicita, para validar el flujo completo. Hallazgos:
+
+**El `usuario_rb` que se envia NO es el campo que se lee de vuelta.** Al leer el
+cliente creado, el texto enviado aparece en `servicio`, no en `usuario_rb`.
+Ademas WispHub genera solo un `usuario` interno con formato
+`slug-del-texto@rapilink-sas`. Es la misma dualidad escritura/lectura que ya se
+veia en otros campos — nunca asumir que el nombre de un campo de escritura es
+el mismo al leer.
+
+**La zona debe corresponder a la red real de la IP, o el alta puede fallar.**
+No hay forma de saberlo de antemano sin conocer la topologia: el catalogo de
+zonas trae el numero de servidor en el NOMBRE (`CORTE 15 - SERVIDOR 1`,
+`CORTE 30 - SERVIDOR 1`, etc.), y hay que cruzarlo contra los segmentos IP
+documentados en la guia de configuracion de ONT del cliente, no adivinar.
+
+**`interfaz_lan` en blanco es NORMAL, no un dato faltante.** Verificado
+comparando contra 15 clientes reales y activos: varios de los mas recientes lo
+tienen vacio, y valores como `ether2` o `vlan300_clientes_S1` SI aparecen en
+clientes reales — no son un relleno del serializador. El campo se completa en
+un paso posterior (conexion/sincronizacion del router), no al crear el cliente
+por API. Una herramienta de creacion NO necesita enviarlo.
+
+> **Borrar un cliente NO es `DELETE /api/clientes/{id}/` — es un sub-recurso.**
+>
+> El endpoint que documenta `OPTIONS` (`Allow: ..., DELETE`) sobre
+> `/api/clientes/{id}/` **no funciona**: devuelve HTTP 500 (error interno,
+> pagina HTML) y el cliente sigue existiendo. Es el mismo patron enganoso que
+> `OPTIONS` mostro con otros campos: que un metodo aparezca permitido no
+> significa que el endpoint lo implemente de verdad.
+>
+> El que SI funciona, verificado end-to-end contra produccion:
+>
+> ```
+> DELETE /api/clientes/{id}/perfil/
+> ```
+>
+> Sigue el mismo patron asincrono que crear: responde `202` con un `task_id`,
+> y hay que consultar `/api/tasks/{task_id}/` para confirmar `SUCCESS`. Una
+> vez creido eso, se verifico ADEMAS con un `GET /api/clientes/{id}/` aparte
+> —no basta con el mensaje de la tarea— y dio `404`: confirmado, se elimino
+> de verdad.
+>
+> **Leccion que vale para toda esta API**: no asumir el endpoint por analogia
+> REST estandar (`DELETE` sobre el recurso). Las operaciones no estandar
+> —crear, borrar— viven en sub-rutas de accion (`/agregar-cliente/{zona}/`,
+> `/{id}/perfil/`), no en el CRUD obvio de la coleccion o el recurso.
+>
+> **Sobre `PATCH {"estado": 3}` para cancelar en vez de borrar**: sigue sin
+> confirmarse que funcione — dio `200` con eco de exito pero la lectura
+> posterior no reflejo el cambio (verificado con 3 reintentos espaciados).
+> No descartado del todo: podria requerir otro formato de valor o un endpoint
+> de accion propio, igual que borrar. Sin verificar todavia.
 
 ## Trampas que ya costaron tiempo
 
@@ -257,15 +339,63 @@ poblados, y su API puede ignorar cosas distintas.
 El paso obligatorio del onboarding es correr el sondeo contra SU instancia y
 generar su seccion `herramientas` con lo que sobreviva.
 
-## Endpoints aun sin explorar
+## Catalogos nuevos: verificados por lectura (agosto 2026)
+
+Descubiertos en `reference/openapi.yaml` (ver arriba como conseguirlo) y
+confirmados contra produccion `.io` con un `GET` real:
+
+| Endpoint | Registros | Nota |
+|---|---|---|
+| `/api/router/` | 5 | **Singular**, no `routers`. Traduce ID de router a nombre — ver aviso critico abajo |
+| `/api/sectorial/` | 1 | **Singular**, no `sectoriales` |
+| `/api/proveedores/` | 5 | |
+| `/api/modelo-antena/` | 72 | |
+| `/api/formas-de-pago/` | 4 | |
+| `/api/categorias-gastos/` | 40 | Relevante si algun dia se puebla `/api/gastos/` |
+| `/api/planes-adicionales/` | 1 | |
+| `/api/servicios-adicionales/` | 3704 | |
+| `/api/instalaciones/` | 1 | Trae un registro con forma de cliente completo (nombre, cedula, direccion, email). Parece ser instalaciones PENDIENTES actuales, no historico — sin confirmar del todo |
+| `/api/fichas/` | 0 | Sistema de fichas/hotspot; Rapilink no lo usa |
+| `/api/tarjeta-cobranza/` | 0 | Sin uso en esta instancia |
+| `/api/tickets/asuntos-tickets/` | — | Catalogo completo de ~140 asuntos. Confirma el hallazgo de otro proyecto: `"Instalacion Nueva"` y `"Instatalacion Nueva"` (typo) conviven como valores DISTINTOS del catalogo de origen |
+| `/api/promesa-pago/` | — | `GET` con `limit=1` da `405`. Probablemente solo `POST`, o exige otros parametros — sin confirmar |
+
+> **CRITICO — `zona` y `router` son catalogos con IDs INDEPENDIENTES, aunque
+> compartan nombre.**
+>
+> ```
+> ZONAS (/api/zonas/)              ROUTER (/api/router/)
+> 32278  SABANAGRANDE              32229  SABANAGRANDE
+> 20053  CORTE 15 - SERVIDOR 1     20044  CORTE 15 - SERVIDOR 1
+> ```
+>
+> El mismo nombre, IDs distintos. Usar un `id_zona` donde se espera un
+> `id_router` (o al reves) es un entero valido que la API aceptaria sin
+> quejarse, apuntando a algo que no es. **Nunca asumir que el ID de una zona
+> sirve para el filtro `router`, ni viceversa** — son dos catalogos que hay
+> que consultar por separado.
+
+## Endpoints de escritura/accion sin verificar — no probar sin autorizacion explicita
 
 ```
-/api/clientes/{id}/saldo/     /api/zonas/        /api/plan-internet/
-/api/staff/                   /api/gastos/  (verificado: existe, vacio)
+/api/clientes/eliminar-clientes/        posible borrado MASIVO
+/api/facturas/eliminar-facturas/        posible borrado masivo
+/api/gastos/eliminar/{folio}/           /api/gastos/editar/{folio}/
+/api/fichas/eliminar/
+/api/clientes/{accion}/                 patron generico de accion, sin mapear
+/api/servicio-adicional/{accion}/       idem
+/api/agregar-servicio-telefonia/        /api/agregar-servicio-television/
+/api/solicitar-instalacion/             distinto de /api/instalaciones/ y de
+                                         ?instalacion en agregar-cliente
+/api/facturas/reportar-pago/{id}/       distinto de .../registrar-pago/,
+                                         sin diferenciar aun
 ```
 
-Mas las operaciones de escritura: crear tickets, actualizar clientes. La unica
-escritura verificada hasta hoy es `POST /api/facturas/{id}/registrar-pago/`.
+Los que llevan "eliminar" en el nombre son candidatos a **borrado masivo**, no
+de un solo registro. Con el antecedente de esta sesion —un `DELETE` en el
+recurso obvio que fallaba con 500 mientras la via real era un sub-recurso
+distinto— cualquiera de estos puede comportarse distinto a lo que el nombre
+sugiere. Ninguno se prueba sin plan concreto y autorizacion explicita.
 
 ## Antes de dar por buena una integracion
 
