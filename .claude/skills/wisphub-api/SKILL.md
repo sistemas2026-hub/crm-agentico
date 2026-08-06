@@ -82,7 +82,9 @@ OPTIONS /api/tickets/   ->  Allow: GET, POST, HEAD, OPTIONS
 
 | Endpoint | Metodos | Nota |
 |---|---|---|
-| `/api/clientes/` | GET | **No se pueden crear clientes por API** |
+| `/api/clientes/` | GET | La coleccion NO acepta POST — pero ver el endpoint de accion, abajo |
+| `/api/clientes/agregar-cliente/{id_zona}/` | POST | **SI se pueden crear clientes.** No vive en la coleccion: hay que sondear tambien endpoints de accion, no solo colecciones y recursos |
+| `/api/clientes/agregar-cliente/{id_zona}/?instalacion` | POST | Crea una INSTALACION en vez de un cliente. Habilita `costo_instalacion` y `estado_instalacion`, y fuerza `firewall=true` |
 | `/api/clientes/{id}/` | GET, PUT, PATCH, **DELETE** | Ver aviso abajo |
 | `/api/tickets/` | GET, POST | Se pueden crear tickets |
 | `/api/tickets/{id}/` | GET, PUT, PATCH | Se pueden actualizar |
@@ -101,6 +103,46 @@ OPTIONS /api/tickets/   ->  Allow: GET, POST, HEAD, OPTIONS
 > materiales tuvo que salir del texto de los tickets. Pero es escribible: si en
 > algun momento se decide poblarlo, el informe dejaria de depender de parsear
 > formularios en HTML.
+
+### Crear cliente / instalacion — esquema confirmado (documentacion oficial, agosto 2026)
+
+```
+POST /api/clientes/agregar-cliente/{id_zona}/[?instalacion]
+```
+
+Requeridos — SOLO estos tres, confirmado por dos vias independientes: la
+documentacion oficial Y un `POST` vacio, que devolvio el mismo trio como error
+de validacion. Cuando dos fuentes independientes coinciden, sube la confianza
+mucho mas que confiar en una sola:
+
+| Campo | Tipo | Que es |
+|---|---|---|
+| `usuario_rb` | string | Nombre de usuario en el router. Equivalente a Simple Queue / Secret PPPoE / PCQ / User Hotspot **segun el tipo de cliente** — el formato varia; confirmar contra un cliente real antes de automatizar |
+| `ip` | string | IP del cliente (Remote Address para PPPoE) |
+| `plan_internet` | integer | ID del plan, consultado en `/api/plan-internet/` |
+
+**La respuesta es asincrona**: devuelve un ID de tarea, no el cliente creado.
+El proceso corre en segundo plano — mismo patron que `registrar_pago`, que
+tambien devuelve `task_id`. Hay que consultar el resultado de la tarea aparte
+para confirmar que se creo de verdad.
+
+**Campos opcionales de escritura que NUNCA debe proponer el modelo**, aunque el
+esquema los acepte: `password_servicio`, `password_cpe`, `password_router_wifi`,
+`password_ssid_router_wifi`, `coordenadas`. Mismo criterio que en lectura —lista
+blanca por rol— pero aplicado a lo que se ESCRIBE. Una herramienta de "crear
+cliente" debe fijar estos campos en codigo (vacios o ausentes), nunca dejar que
+el modelo los complete.
+
+**Descuido de la documentacion de WispHub, no nuestro**: `mac_cpe` aparece
+descrito como "Coordenadas" —copiado del campo `coordenadas`, al que si le
+corresponde esa descripcion—. Otra razon para no confiar en las descripciones
+de campo sin verificar contra datos reales.
+
+Campos opcionales relevantes para operar: `nombre`, `apellidos`, `email`,
+`direccion`, `telefono`, `cedula`, `sectorial`, `sn_onu`, `comentarios`,
+`forma_contratacion` (1-7, enum), `tipo_persona` (1 moral, 2 fisica).
+Exclusivos de instalacion: `costo_instalacion`, `estado_instalacion`
+(1 nueva, 2 en progreso, 7 pendiente, 8 planificacion, 3 activada, 4 terminada).
 
 ## Trampas que ya costaron tiempo
 
