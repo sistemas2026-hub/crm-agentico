@@ -1,0 +1,15 @@
+#!/bin/sh
+# Avisa cuando un `git pull` trae cambios en los documentos de contexto del
+# proyecto, para no tener que acordarse de revisarlos a mano.
+CAMBIADOS=$(git diff --name-only ORIG_HEAD HEAD -- PRD.md ARQUITECTURA.md 2>/dev/null)
+
+if [ -n "$CAMBIADOS" ]; then
+    echo ""
+    echo "================================================================"
+    echo "  Cambiaron documentos de contexto del proyecto:"
+    echo "$CAMBIADOS" | sed 's/^/    - /'
+    echo "  Revisalos antes de seguir trabajando (o pedile a Claude que"
+    echo "  te resuma que cambio: 'que cambio en PRD.md desde el ultimo pull')."
+    echo "================================================================"
+    echo ""
+fi
