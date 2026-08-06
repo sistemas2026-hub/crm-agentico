@@ -1,0 +1,6 @@
+# Cualquier cambio a los documentos de contexto del proyecto pide revision
+# automatica y notifica por GitHub. Para que ademas BLOQUEE el merge sin
+# aprobacion, hay que activar en GitHub: Settings -> Branches -> Branch
+# protection rule -> "Require review from Code Owners".
+PRD.md @sistemas2026-hub
+ARQUITECTURA.md @sistemas2026-hub

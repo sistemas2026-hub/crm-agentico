@@ -1,0 +1,19 @@
+#!/bin/sh
+# Mismo aviso que post-merge, pero al cambiar de rama (git checkout / switch).
+PREV=$1
+NUEVO=$2
+ES_CAMBIO_DE_RAMA=$3
+
+[ "$ES_CAMBIO_DE_RAMA" = "1" ] || exit 0
+
+CAMBIADOS=$(git diff --name-only "$PREV" "$NUEVO" -- PRD.md ARQUITECTURA.md 2>/dev/null)
+
+if [ -n "$CAMBIADOS" ]; then
+    echo ""
+    echo "================================================================"
+    echo "  Esta rama tiene una version distinta de:"
+    echo "$CAMBIADOS" | sed 's/^/    - /'
+    echo "  Revisalos antes de seguir trabajando."
+    echo "================================================================"
+    echo ""
+fi
