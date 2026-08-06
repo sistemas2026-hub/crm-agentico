@@ -69,6 +69,39 @@ los campos que vienen anidados (`{"id": 12, "nombre": "..."}`): se prueba con el
 | tickets | `departamento`, `tecnico`, `prioridad` | — |
 | tickets | cliente (8 nombres probados) | Filtrar por estado y cruzar en codigo, solo sobre los abiertos |
 
+## Descubrir endpoints: GET no basta, usar OPTIONS
+
+Un sondeo por GET marca como inexistente todo endpoint de solo escritura. `OPTIONS`
+devuelve la cabecera `Allow` y revela lo que de verdad se puede hacer:
+
+```bash
+OPTIONS /api/tickets/   ->  Allow: GET, POST, HEAD, OPTIONS
+```
+
+### Mapa de lectura/escritura (verificado, agosto 2026)
+
+| Endpoint | Metodos | Nota |
+|---|---|---|
+| `/api/clientes/` | GET | **No se pueden crear clientes por API** |
+| `/api/clientes/{id}/` | GET, PUT, PATCH, **DELETE** | Ver aviso abajo |
+| `/api/tickets/` | GET, POST | Se pueden crear tickets |
+| `/api/tickets/{id}/` | GET, PUT, PATCH | Se pueden actualizar |
+| `/api/facturas/` | GET, POST | |
+| `/api/gastos/` | GET, POST | Vacio, pero **acepta escritura** |
+| `/api/zonas/`, `/api/plan-internet/`, `/api/staff/` | GET | Catalogos de solo lectura |
+
+> **AVISO — `DELETE /api/clientes/{id}/` existe.**
+> La misma clave que usa el asistente para consultar puede borrar un cliente. La
+> proteccion es que ninguna herramienta declare esa operacion: el catalogo del
+> tenant es lista blanca y solo existe lo declarado. Ninguna herramienta debe
+> exponer DELETE, y toda escritura exige `requiere_confirmacion: true` (el
+> validador lo obliga).
+
+> **`/api/gastos/` acepta POST.** Esta vacio hoy, y por eso el informe de
+> materiales tuvo que salir del texto de los tickets. Pero es escribible: si en
+> algun momento se decide poblarlo, el informe dejaria de depender de parsear
+> formularios en HTML.
+
 ## Trampas que ya costaron tiempo
 
 **Los filtros de estado son NUMERICOS.** `?estado=Nuevo` devuelve 0 resultados
@@ -100,6 +133,48 @@ del proveedor queda expuesto por defecto.
 
 **Un endpoint puede existir y estar vacio.** `/api/gastos/` responde 200 con 0
 registros. "Existe" no significa "tiene datos".
+
+## Hallazgos de otra integracion con la misma API
+
+Provienen de `isp-reports-app`, otro desarrollo sobre WispHub. **No estan
+verificados contra esta instancia** salvo donde se indica, pero son cicatrices
+reales de produccion y conviene tenerlas presentes antes de tropezar con ellas.
+
+**El tecnico puede venir en `email_tecnico` y no en `tecnico`.** En ciertos
+tickets —sobre todo instalaciones asignadas automaticamente— la API devuelve
+`tecnico: null` mientras la asignacion real vive en `email_tecnico`
+(ej. `instalaciones@rapilink-sas`). Quien lea solo el campo obvio concluye que
+el ticket no tiene tecnico. El campo existe en la respuesta cruda (confirmado
+aqui); lo no verificado es la frecuencia del caso.
+
+**Desfase horario de +5 horas en fechas de cierre.** Un ticket cerrado a las
+7 PM aparece con fecha del dia siguiente a las 00:00. Afecta cualquier metrica
+diaria y hace "desaparecer" los cierres de la tarde.
+
+**Formatos de fecha mezclados: MM/DD y DD/MM en la misma API.** Causo un bug de
+"43.201 minutos" al interpretar `02/09/2026` como septiembre en vez de febrero.
+Heuristica usada alla: si el primer numero es >12 es DD/MM; si el segundo es >12
+es MM/DD; si ambos son <=12, asumir MM/DD.
+**Para nosotros:** al FILTRAR enviamos ISO (`AAAA-MM-DD`), que es inequivoco. El
+riesgo esta al PARSEAR respuestas — las fechas vienen como `08/04/2026 11:14:56`
+y son ambiguas.
+
+**Trailing slash inconsistente.** Unos endpoints exigen barra final y otros
+fallan con ella. Conviene reintentar con la variante contraria ante un 404.
+(Probado aqui sobre los endpoints ausentes: dan 404 en ambas formas.)
+
+**`do_not_notify_client: true`** en `/api/tickets/comentarios/` permite dejar
+notas internas sin enviar correo al cliente. Es un flag no documentado
+oficialmente. Ese endpoint da 404 en esta instancia — puede ser diferencia de
+version o de plan.
+
+**El asunto se guarda como `"Asunto - Cliente"`**, y el catalogo de origen trae
+errores de tipeo (`INSTATALACION NUEVA`). Al categorizar hay que cortar en
+` - ` y contemplar los typos tal como vienen.
+
+**La URL correcta es `api.wisphub.io`.** `www.wisphub.io` devuelve 403 en `/api/`
+y `wisphub.net` es solo documentacion. Si la respuesta trae `<!DOCTYPE html>`,
+la URL base esta mal.
 
 ## Como se traduce un hallazgo al catalogo
 

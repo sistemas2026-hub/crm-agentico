@@ -74,9 +74,35 @@ ENDPOINTS = [
     ("/api/mapas/",         "candidato"),
 ]
 
+# El detalle de un recurso expone metodos que la lista no: el DELETE de cliente
+# vive ahi, no en /api/clientes/. Se prueban aparte porque necesitan un ID REAL:
+# con uno inventado la API devuelve 404 y el endpoint parece no existir.
+DETALLES = [
+    ("/api/clientes/", "id_servicio"),
+    ("/api/tickets/",  "id_ticket"),
+]
+
 # Campos que NUNCA deben entrar a una lista blanca, en ninguna entidad.
 # Se marcan aqui para que salten a la vista al disenar el catalogo.
 PELIGROSOS = ("password", "clave", "coordenada", "gps", "token", "secret")
+
+
+def metodos(ruta: str) -> str:
+    """
+    Que se puede HACER en el endpoint, no solo que devuelve.
+
+    Un sondeo por GET marca como inexistente cualquier endpoint de solo
+    escritura. OPTIONS devuelve la cabecera 'Allow' y evita ese punto ciego.
+
+    Fue asi como se descubrio que /api/tickets/ acepta POST (se pueden crear
+    tickets) y que /api/clientes/{id}/ acepta DELETE — una capacidad
+    destructiva viviendo en la misma clave que usa el asistente.
+    """
+    try:
+        r = requests.options(BASE + ruta, headers=HEADERS, timeout=20)
+        return r.headers.get("Allow", "—") if r.status_code < 400 else "—"
+    except requests.RequestException:
+        return "—"
 
 
 def sondear(ruta: str) -> dict:
@@ -115,19 +141,50 @@ def sondear(ruta: str) -> dict:
 
 def main(ver_campos: bool) -> None:
     print(f"Sondeando {BASE}  ({len(ENDPOINTS)} endpoints)\n")
-    print(f"  {'endpoint':<24} {'estado':<12} {'registros':>10}  nota")
-    print("  " + "-" * 76)
+    print(f"  {'endpoint':<24} {'estado':<10} {'registros':>10}  {'metodos':<32} nota")
+    print("  " + "-" * 100)
 
-    hallazgos = []
+    hallazgos, escrituras = [], []
     for ruta, nota in ENDPOINTS:
         r = sondear(ruta)
         n = r.get("n", "—")
         marca = r["estado"]
         if marca == "ok" and n == 0:
             marca = "vacio"
-        print(f"  {ruta:<24} {marca:<12} {str(n):>10}  {nota}")
+        allow = metodos(ruta) if marca not in ("no existe", "red") else "—"
+        if any(m in allow for m in ("POST", "PUT", "PATCH", "DELETE")):
+            escrituras.append((ruta, allow))
+        print(f"  {ruta:<24} {marca:<10} {str(n):>10}  {allow:<32} {nota}")
         if r["estado"] == "ok":
             hallazgos.append((ruta, r))
+
+    # --- detalle de recurso, con un ID real tomado de la propia lista ---
+    for ruta, campo_id in DETALLES:
+        try:
+            r = requests.get(BASE + ruta, headers=HEADERS,
+                             params={"limit": 1}, timeout=25)
+            filas = r.json().get("results") or [] if r.status_code == 200 else []
+        except (requests.RequestException, ValueError):
+            filas = []
+        if not filas or campo_id not in filas[0]:
+            continue
+        detalle = f"{ruta}{filas[0][campo_id]}/"
+        allow = metodos(detalle)
+        etiqueta = f"{ruta}{{id}}/"
+        if any(m in allow for m in ("POST", "PUT", "PATCH", "DELETE")):
+            escrituras.append((etiqueta, allow))
+        print(f"  {etiqueta:<24} {'detalle':<10} {'—':>10}  {allow:<32} "
+              f"metodos del recurso individual")
+
+    if escrituras:
+        print("\n" + "=" * 80)
+        print("  ENDPOINTS QUE ACEPTAN ESCRITURA")
+        print("=" * 80)
+        print("  Toda herramienta que use uno de estos debe declarar")
+        print("  'requiere_confirmacion: true'. DELETE no debe exponerse nunca.\n")
+        for ruta, allow in escrituras:
+            aviso = "   <-- DESTRUCTIVO" if "DELETE" in allow else ""
+            print(f"  {ruta:<26} {allow}{aviso}")
 
     # --- campos, y sobre todo los que no deben exponerse ---
     if ver_campos:
