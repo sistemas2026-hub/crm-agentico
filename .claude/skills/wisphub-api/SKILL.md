@@ -5,6 +5,31 @@ description: Integrar o ampliar la conexion con la API de WispHub (o la de cualq
 
 # API de WispHub — integrar sin que te mienta
 
+## Como leer TODA la documentacion sin un navegador
+
+`wisphub.net/api-docs/` es una pagina renderizada con ReDoc: el HTML que se
+descarga esta practicamente vacio (solo un titulo), y el contenido real lo
+inyecta JavaScript en el navegador. Herramientas que solo piden el HTML (sin
+ejecutar JS) ven la pagina vacia y concluyen —erroneamente— que no hay nada
+que leer ahi.
+
+**No hace falta un navegador ni Playwright.** ReDoc se inicializa apuntando a
+un archivo YAML estatico que contiene TODA la especificacion, sin renderizar:
+
+```python
+# el HTML crudo de /api-docs/ contiene esta linea:
+#   Redoc.init("/static/yaml/api/api-main.yaml", {...}, ...)
+import requests, yaml
+r = requests.get("https://wisphub.net/static/yaml/api/api-main.yaml")
+spec = yaml.safe_load(r.text)          # OpenAPI 3.0 completo, 54 rutas
+```
+
+El archivo bajado queda en `reference/openapi.yaml` de esta skill. Aun asi,
+sigue aplicando la regla de siempre: **el spec dice que existe, no que
+funcione como dice.** El propio archivo trae un error verificado — su bloque
+`servers:` apunta a `api.wisphub.net`, y la produccion real es `api.wisphub.io`.
+Ni el dominio del spec se da por bueno sin comprobar.
+
 ## La regla, antes que nada
 
 > **La documentacion de la API es una HIPOTESIS, no una fuente de verdad.
@@ -314,15 +339,63 @@ poblados, y su API puede ignorar cosas distintas.
 El paso obligatorio del onboarding es correr el sondeo contra SU instancia y
 generar su seccion `herramientas` con lo que sobreviva.
 
-## Endpoints aun sin explorar
+## Catalogos nuevos: verificados por lectura (agosto 2026)
+
+Descubiertos en `reference/openapi.yaml` (ver arriba como conseguirlo) y
+confirmados contra produccion `.io` con un `GET` real:
+
+| Endpoint | Registros | Nota |
+|---|---|---|
+| `/api/router/` | 5 | **Singular**, no `routers`. Traduce ID de router a nombre — ver aviso critico abajo |
+| `/api/sectorial/` | 1 | **Singular**, no `sectoriales` |
+| `/api/proveedores/` | 5 | |
+| `/api/modelo-antena/` | 72 | |
+| `/api/formas-de-pago/` | 4 | |
+| `/api/categorias-gastos/` | 40 | Relevante si algun dia se puebla `/api/gastos/` |
+| `/api/planes-adicionales/` | 1 | |
+| `/api/servicios-adicionales/` | 3704 | |
+| `/api/instalaciones/` | 1 | Trae un registro con forma de cliente completo (nombre, cedula, direccion, email). Parece ser instalaciones PENDIENTES actuales, no historico — sin confirmar del todo |
+| `/api/fichas/` | 0 | Sistema de fichas/hotspot; Rapilink no lo usa |
+| `/api/tarjeta-cobranza/` | 0 | Sin uso en esta instancia |
+| `/api/tickets/asuntos-tickets/` | — | Catalogo completo de ~140 asuntos. Confirma el hallazgo de otro proyecto: `"Instalacion Nueva"` y `"Instatalacion Nueva"` (typo) conviven como valores DISTINTOS del catalogo de origen |
+| `/api/promesa-pago/` | — | `GET` con `limit=1` da `405`. Probablemente solo `POST`, o exige otros parametros — sin confirmar |
+
+> **CRITICO — `zona` y `router` son catalogos con IDs INDEPENDIENTES, aunque
+> compartan nombre.**
+>
+> ```
+> ZONAS (/api/zonas/)              ROUTER (/api/router/)
+> 32278  SABANAGRANDE              32229  SABANAGRANDE
+> 20053  CORTE 15 - SERVIDOR 1     20044  CORTE 15 - SERVIDOR 1
+> ```
+>
+> El mismo nombre, IDs distintos. Usar un `id_zona` donde se espera un
+> `id_router` (o al reves) es un entero valido que la API aceptaria sin
+> quejarse, apuntando a algo que no es. **Nunca asumir que el ID de una zona
+> sirve para el filtro `router`, ni viceversa** — son dos catalogos que hay
+> que consultar por separado.
+
+## Endpoints de escritura/accion sin verificar — no probar sin autorizacion explicita
 
 ```
-/api/clientes/{id}/saldo/     /api/zonas/        /api/plan-internet/
-/api/staff/                   /api/gastos/  (verificado: existe, vacio)
+/api/clientes/eliminar-clientes/        posible borrado MASIVO
+/api/facturas/eliminar-facturas/        posible borrado masivo
+/api/gastos/eliminar/{folio}/           /api/gastos/editar/{folio}/
+/api/fichas/eliminar/
+/api/clientes/{accion}/                 patron generico de accion, sin mapear
+/api/servicio-adicional/{accion}/       idem
+/api/agregar-servicio-telefonia/        /api/agregar-servicio-television/
+/api/solicitar-instalacion/             distinto de /api/instalaciones/ y de
+                                         ?instalacion en agregar-cliente
+/api/facturas/reportar-pago/{id}/       distinto de .../registrar-pago/,
+                                         sin diferenciar aun
 ```
 
-Mas las operaciones de escritura: crear tickets, actualizar clientes. La unica
-escritura verificada hasta hoy es `POST /api/facturas/{id}/registrar-pago/`.
+Los que llevan "eliminar" en el nombre son candidatos a **borrado masivo**, no
+de un solo registro. Con el antecedente de esta sesion —un `DELETE` en el
+recurso obvio que fallaba con 500 mientras la via real era un sub-recurso
+distinto— cualquiera de estos puede comportarse distinto a lo que el nombre
+sugiere. Ninguno se prueba sin plan concreto y autorizacion explicita.
 
 ## Antes de dar por buena una integracion
 

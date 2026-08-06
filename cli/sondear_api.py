@@ -59,19 +59,24 @@ HEADERS = {"Authorization": f"Api-Key {CLAVE}", "Content-Type": "application/jso
 # '/api/gastos/' es el caso ya conocido, y por eso el informe de materiales
 # tuvo que salir del texto de los tickets.
 ENDPOINTS = [
-    ("/api/clientes/",      "en uso"),
-    ("/api/facturas/",      "en uso"),
-    ("/api/tickets/",       "en uso"),
-    ("/api/zonas/",         "en uso (catalogo de zonas)"),
-    ("/api/gastos/",        "verificado: existe, vacio"),
-    ("/api/plan-internet/", "sin explorar"),
-    ("/api/staff/",         "sin explorar"),
-    ("/api/routers/",       "candidato: 'router' es filtro valido en clientes"),
-    ("/api/sectoriales/",   "candidato"),
-    ("/api/servicios/",     "candidato"),
-    ("/api/pagos/",         "candidato"),
-    ("/api/cajas/",         "candidato"),
-    ("/api/mapas/",         "candidato"),
+    ("/api/clientes/",         "en uso"),
+    ("/api/facturas/",         "en uso"),
+    ("/api/tickets/",          "en uso"),
+    ("/api/zonas/",            "en uso (catalogo de zonas)"),
+    ("/api/gastos/",           "verificado: existe, vacio"),
+    ("/api/plan-internet/",    "en uso"),
+    ("/api/staff/",            "en uso"),
+    # Confirmados via reference/openapi.yaml (el YAML detras de ReDoc) + GET
+    # real. OJO: son SINGULARES. Las versiones en plural que se probaron antes
+    # de tener el spec ('routers', 'sectoriales') daban 404 y no existen.
+    ("/api/router/",           "verificado: 5 registros. ID != id_zona aunque comparta nombre"),
+    ("/api/sectorial/",        "verificado: 1 registro"),
+    ("/api/proveedores/",      "verificado: 5 registros"),
+    ("/api/modelo-antena/",    "verificado: 72 registros"),
+    ("/api/formas-de-pago/",   "verificado: 4 registros"),
+    ("/api/categorias-gastos/","verificado: 40 registros"),
+    ("/api/instalaciones/",    "verificado: 1 registro, forma de cliente completo"),
+    ("/api/tickets/asuntos-tickets/", "verificado: catalogo de ~140 asuntos, con typos de origen"),
 ]
 
 # El detalle de un recurso expone metodos que la lista no: el DELETE de cliente
