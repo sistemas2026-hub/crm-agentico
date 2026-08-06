@@ -132,7 +132,9 @@ Ya implementado y funcionando:
 ## 6. Requisitos no funcionales
 
 - **RNF-01 · Privacidad:** cumplimiento con la Ley 1581 de 2012 (protección de datos personales, Colombia).
-  - **El modelo corre local** (Ollama, on-premise). Los datos de clientes **nunca** se envían a un proveedor de LLM externo. Esta parte no se negocia: es lo que permite consultar un cliente por nombre y cédula sin exportar nada.
+  - **El modelo por defecto es local** (Ollama, on-premise). Sigue siendo el resguardo: cualquier rol no enrutado explícitamente, o un `override` mal escrito, se queda en casa.
+  - **Excepción aprobada (agosto 2026): DeepSeek (`deepseek-v4-flash`) para todos los roles**, incluidos los que llevan PII (`soporte`, `facturacion`, `cliente_final`). Base legal: la autorización de tratamiento que firma el cliente al contratar **cubre transferencia internacional de datos** (Ley 1581, art. 26 — la transferencia a países sin nivel adecuado de protección es lícita con autorización expresa e inequívoca del titular). Confirmado sobre el texto vigente de Rapilink; los ~7.272 clientes activos ya lo firmaron.
+  - Motivación medida, no solo de costo: el modelo local tarda 42.6 s por turno (~180 s si estaba descargado de memoria); DeepSeek, 4.7-12 s — hasta 17× más rápido en la misma tarea real (`cli/prueba_velocidad.py`). A ~$0.24 por cada 1.000 consultas, resuelve directamente la tensión de RNF-04 con el técnico en campo.
   - **La persistencia se reparte** (decisión de agosto 2026, al adoptar Supabase hospedado para la arquitectura multi-tenant). El criterio es uno solo: *sale a la nube lo que no identifica a una persona*.
 
 | Dato | Dónde | Por qué |
@@ -146,13 +148,13 @@ Ya implementado y funcionando:
 
   - **`tool_calls` guarda un resumen, no el payload:** `exito`, `n_registros`, `duracion_ms`, `codigo_error`. Es el mismo criterio que ya aplica `registrar_auditoria()` en el sistema actual, y cumple el propósito de auditoría sin replicar la base de clientes fuera del país.
   - **Conversaciones en claro, sin anonimizar** (decidido agosto 2026). Se evaluó anonimizar por patrones y se descartó: es fiable con cédulas y teléfonos pero imperfecta con nombres y direcciones, así que **no garantizaba cumplimiento y sí degradaba el historial de depuración** — lo peor de los dos mundos. La base legal correcta no es técnica sino la **autorización de tratamiento** que el cliente firma al contratar.
-  - 🔴 **Tarea legal bloqueante:** verificar que la autorización de tratamiento vigente de Rapilink contemple **tratamiento por terceros / transferencia internacional**. Es cláusula estándar en cualquier empresa que use proveedores en el exterior (AWS, Google, Microsoft), pero hay que confirmarlo antes de producción. Si no la cubre: actualizarla para clientes nuevos y decidir qué hacer con los existentes.
+  - ✅ **Tarea legal resuelta** (agosto 2026): la autorización de tratamiento vigente de Rapilink contempla transferencia internacional. Es la misma base legal que habilita el uso de DeepSeek arriba.
   - **Retención sugerida: 12 meses** para conversaciones. Cubre depuración, auditoría y análisis; más allá es solo superficie de riesgo. Es configuración, no estructura.
   - ⚠️ **La región del proyecto Supabase se define una sola vez y no se puede cambiar sin migrar.** Elegirla es un paso previo a crear el proyecto, no posterior.
   - ⚠️ **Validación legal ahora obligatoria antes de producción**, no opcional: la adopción de infraestructura hospedada cambia el análisis que motivó este requisito.
 - **RNF-02 · Seguridad en capas:** las reglas duras (filtrado de PII, confirmación de acciones sensibles) se aplican en **código**, no solo en el prompt. El prompt guía el comportamiento; el código garantiza los límites no negociables.
-- **RNF-03 · Costo:** volumen bajo (~300 consultas/día). Un SLM local elimina el costo por token de proveedores externos.
-- **RNF-04 · Rendimiento:** **prima la calidad de la respuesta sobre la latencia** (decisión de agosto 2026). Se usa el mejor modelo disponible aunque tarde: `qwen3:30b-a3b`, medido en 42.6 s por turno. ⚠️ **Tensión conocida:** los técnicos consultan desde el celular en campo (§14 del diseño multi-tenant), y 40 s de espera por WhatsApp puede volver el sistema inusable en terreno. Es un supuesto **a validar en el piloto**, no un hecho. La mitigación existe y no requiere tocar código —modelo distinto por canal o por rol vía configuración—, pero la estructura debe contemplarla desde el diseño.
+- **RNF-03 · Costo:** volumen bajo (~300 consultas/día). El modelo local no tiene costo por token; el `override` a DeepSeek (agosto 2026) agrega ~$0.24 por cada 1.000 consultas — a este volumen, unos pocos dólares al mes.
+- **RNF-04 · Rendimiento:** originalmente se priorizó calidad sobre latencia, aceptando los 42.6 s/turno de `qwen3:30b-a3b`. La tensión con el técnico en campo (§14 del diseño multi-tenant) queda **resuelta por el `override` a DeepSeek** (RNF-01): 4.7-12 s por turno con calidad de texto equivalente, medido sobre la misma tarea de producción. El modelo local sigue siendo el resguardo para roles no enrutados o si `overrides` falla.
 - **RNF-05 · Mantenibilidad:** herramientas, filtros y prompts parametrizados por área, para replicar el patrón sin reescribir el motor.
 
 ---

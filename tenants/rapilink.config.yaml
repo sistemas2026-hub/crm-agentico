@@ -286,26 +286,47 @@ rag:
 # -----------------------------------------------------------------------------
 #  MODELOS  -  medido con banco_pruebas.py, agosto 2026
 # -----------------------------------------------------------------------------
-#  modelo                herram   args  respeta  inventa  RF-15  tok/s  s/turno
-#  qwen3:30b-a3b-q4_K_M   100%   100%    100%       0     100%   11.2    42.6
-#  qwen3:4b               100%   100%    100%       0     100%   52.0    51.8
-#  phi4-mini             12.5%  12.5%    100%       0     100%   57.9     3.1
-#  gemma3:4b              NO USAR: ignora el dato de la herramienta y lo inventa
+#  modelo                    herram   args  respeta  inventa  RF-15  tok/s  s/turno  US$/1k
+#  qwen3:30b-a3b-q4_K_M       100%   100%    100%       0     100%   11.2    42.6      0.00
+#  deepseek:deepseek-v4-flash 100%   100%   66.7%*      0     100%   69.7     4.7      0.24
+#  qwen3:4b                   100%   100%    100%       0     100%   52.0    51.8      0.00
+#  phi4-mini                 12.5%  12.5%    100%       0     100%   57.9     3.1      0.00
+#  gemma3:4b                  NO USAR: ignora el dato de la herramienta y lo inventa
+#
+#  * muestra de 3 casos: no es un veredicto, ver evaluacion.minimo_casos abajo.
+#    Verificado por streaming (cli/prueba_velocidad.py) contra la misma tarea
+#    de produccion: modelo local en caliente, ~22s hasta la primera palabra
+#    (7.6 tok/s); DeepSeek, ~8s (115 tok/s). Calidad de texto equivalente.
 llm:
   proveedor: ollama
   modelo_por_defecto: qwen3:30b-a3b-q4_K_M
   modelo_informes: qwen3:30b-a3b-q4_K_M
   temperatura: 0.1
   max_tokens: 1024
-  # Cada iteracion cuesta un TURNO COMPLETO (~43 s), no milisegundos.
+  # Cada iteracion cuesta un TURNO COMPLETO (~43 s local, ~5 s API), no
+  # milisegundos.
   limite_iteraciones_agente: 4
   # El razonamiento se descarta del historial: reenviarlo acumula 2.500-5.400
   # caracteres inutiles por turno.
   descartar_thinking: true
-  overrides: {}
-  # Si el piloto muestra que 43 s es demasiado para un tecnico en un poste,
-  # aqui se corrige sin tocar codigo:
-  #   'canal:whatsapp': phi4-mini:latest
+  # DeepSeek para TODOS los roles, incluidos los que llevan PII (soporte,
+  # facturacion, cliente_final). Aprobado: la autorizacion de tratamiento que
+  # firma el cliente cubre transferencia internacional de datos (Ley 1581,
+  # art. 26). Sin esa cobertura, el override tendria que limitarse a
+  # 'rol:administracion' y al RAG documental, que no llevan PII.
+  #
+  # Se enruta TODO por rol y no por canal: mas rapido y mas barato en todos
+  # lados, y la base legal ya cubre la transferencia, asi que no hace falta
+  # mantener el local como opcion mas segura para ningun rol.
+  overrides:
+    'rol:soporte': deepseek:deepseek-v4-flash
+    'rol:tecnica': deepseek:deepseek-v4-flash
+    'rol:facturacion': deepseek:deepseek-v4-flash
+    'rol:administracion': deepseek:deepseek-v4-flash
+    'rol:cliente_final': deepseek:deepseek-v4-flash
+  # Si algun rol necesita quedarse en local (ej. si se restringe la
+  # autorizacion mas adelante), se quita su linea de aqui: el modelo_por_
+  # defecto de arriba sigue siendo local y actua como resguardo.
 
 # -----------------------------------------------------------------------------
 #  HERRAMIENTAS
