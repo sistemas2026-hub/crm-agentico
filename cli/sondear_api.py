@@ -181,9 +181,15 @@ def main(ver_campos: bool) -> None:
         print("  ENDPOINTS QUE ACEPTAN ESCRITURA")
         print("=" * 80)
         print("  Toda herramienta que use uno de estos debe declarar")
-        print("  'requiere_confirmacion: true'. DELETE no debe exponerse nunca.\n")
+        print("  'requiere_confirmacion: true'. DELETE no debe exponerse nunca.")
+        print()
+        print("  AVISO: verificado en produccion que OPTIONS puede listar un")
+        print("  metodo que el endpoint NO implementa de verdad. Un DELETE")
+        print("  'permitido' aqui devolvio HTTP 500 en la practica; el borrado")
+        print("  real vivia en un sub-recurso aparte (/{id}/perfil/). Confirmar")
+        print("  SIEMPRE con una llamada real antes de dar un metodo por bueno.\n")
         for ruta, allow in escrituras:
-            aviso = "   <-- DESTRUCTIVO" if "DELETE" in allow else ""
+            aviso = "   <-- DESTRUCTIVO (verificar con llamada real)" if "DELETE" in allow else ""
             print(f"  {ruta:<26} {allow}{aviso}")
 
     # --- campos, y sobre todo los que no deben exponerse ---

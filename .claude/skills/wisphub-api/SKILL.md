@@ -85,18 +85,19 @@ OPTIONS /api/tickets/   ->  Allow: GET, POST, HEAD, OPTIONS
 | `/api/clientes/` | GET | La coleccion NO acepta POST — pero ver el endpoint de accion, abajo |
 | `/api/clientes/agregar-cliente/{id_zona}/` | POST | **SI se pueden crear clientes.** No vive en la coleccion: hay que sondear tambien endpoints de accion, no solo colecciones y recursos |
 | `/api/clientes/agregar-cliente/{id_zona}/?instalacion` | POST | Crea una INSTALACION en vez de un cliente. Habilita `costo_instalacion` y `estado_instalacion`, y fuerza `firewall=true` |
-| `/api/clientes/{id}/` | GET, PUT, PATCH, **DELETE** | Ver aviso abajo |
+| `/api/clientes/{id}/` | GET, PUT, PATCH, DELETE (segun `OPTIONS`) | **`DELETE` aqui NO funciona** — da HTTP 500. Ver aviso abajo |
+| `/api/clientes/{id}/perfil/` | DELETE | **El borrado real.** Verificado end-to-end contra produccion — ver aviso abajo |
 | `/api/tickets/` | GET, POST | Se pueden crear tickets |
 | `/api/tickets/{id}/` | GET, PUT, PATCH | Se pueden actualizar |
 | `/api/facturas/` | GET, POST | |
 | `/api/gastos/` | GET, POST | Vacio, pero **acepta escritura** |
 | `/api/zonas/`, `/api/plan-internet/`, `/api/staff/` | GET | Catalogos de solo lectura |
 
-> **AVISO — `DELETE /api/clientes/{id}/` existe.**
+> **AVISO — se puede borrar un cliente (por `/perfil/`, ver mas abajo).**
 > La misma clave que usa el asistente para consultar puede borrar un cliente. La
 > proteccion es que ninguna herramienta declare esa operacion: el catalogo del
 > tenant es lista blanca y solo existe lo declarado. Ninguna herramienta debe
-> exponer DELETE, y toda escritura exige `requiere_confirmacion: true` (el
+> exponer el borrado, y toda escritura exige `requiere_confirmacion: true` (el
 > validador lo obliga).
 
 > **`/api/gastos/` acepta POST.** Esta vacio hoy, y por eso el informe de
@@ -169,24 +170,36 @@ clientes reales — no son un relleno del serializador. El campo se completa en
 un paso posterior (conexion/sincronizacion del router), no al crear el cliente
 por API. Una herramienta de creacion NO necesita enviarlo.
 
-> **CRITICO — Ni `DELETE` ni cambiar `estado` por `PATCH` funcionan de forma
-> confiable para retirar un cliente.**
+> **Borrar un cliente NO es `DELETE /api/clientes/{id}/` — es un sub-recurso.**
 >
-> - `DELETE /api/clientes/{id}/` devolvio **HTTP 500** (error interno, pagina
->   HTML) en vez de un rechazo limpio. El cliente siguio existiendo.
-> - `PATCH /api/clientes/{id}/` con `{"estado": 3}` (cancelado) devolvio
->   **HTTP 200** y ECOO `"estado": "3"` en la respuesta, pero una lectura
->   posterior —confirmada con tres reintentos espaciados, para descartar
->   demora de propagacion— siguio mostrando `Activo`. La escritura no se
->   aplico pese a la respuesta de exito.
+> El endpoint que documenta `OPTIONS` (`Allow: ..., DELETE`) sobre
+> `/api/clientes/{id}/` **no funciona**: devuelve HTTP 500 (error interno,
+> pagina HTML) y el cliente sigue existiendo. Es el mismo patron enganoso que
+> `OPTIONS` mostro con otros campos: que un metodo aparezca permitido no
+> significa que el endpoint lo implemente de verdad.
 >
-> Es el mismo patron de esta API —una respuesta que aparenta funcionar sin
-> serlo— extendido por primera vez a una escritura, no solo a una lectura o un
-> filtro. Cualquier herramienta que necesite cancelar o retirar un cliente NO
-> puede confiar en que un 200/202 signifique que el cambio se aplico: hay que
-> verificar con una lectura posterior, y aun asi puede fallar en silencio.
-> Hasta que se identifique la via correcta, esta operacion se hace por el
-> panel web de WispHub, no por API.
+> El que SI funciona, verificado end-to-end contra produccion:
+>
+> ```
+> DELETE /api/clientes/{id}/perfil/
+> ```
+>
+> Sigue el mismo patron asincrono que crear: responde `202` con un `task_id`,
+> y hay que consultar `/api/tasks/{task_id}/` para confirmar `SUCCESS`. Una
+> vez creido eso, se verifico ADEMAS con un `GET /api/clientes/{id}/` aparte
+> —no basta con el mensaje de la tarea— y dio `404`: confirmado, se elimino
+> de verdad.
+>
+> **Leccion que vale para toda esta API**: no asumir el endpoint por analogia
+> REST estandar (`DELETE` sobre el recurso). Las operaciones no estandar
+> —crear, borrar— viven en sub-rutas de accion (`/agregar-cliente/{zona}/`,
+> `/{id}/perfil/`), no en el CRUD obvio de la coleccion o el recurso.
+>
+> **Sobre `PATCH {"estado": 3}` para cancelar en vez de borrar**: sigue sin
+> confirmarse que funcione — dio `200` con eco de exito pero la lectura
+> posterior no reflejo el cambio (verificado con 3 reintentos espaciados).
+> No descartado del todo: podria requerir otro formato de valor o un endpoint
+> de accion propio, igual que borrar. Sin verificar todavia.
 
 ## Trampas que ya costaron tiempo
 
