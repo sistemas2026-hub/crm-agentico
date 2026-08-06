@@ -144,6 +144,50 @@ Campos opcionales relevantes para operar: `nombre`, `apellidos`, `email`,
 Exclusivos de instalacion: `costo_instalacion`, `estado_instalacion`
 (1 nueva, 2 en progreso, 7 pendiente, 8 planificacion, 3 activada, 4 terminada).
 
+### Verificado en produccion: crear un cliente de prueba (agosto 2026)
+
+Se creo y se intento retirar un cliente de prueba real, con autorizacion
+explicita, para validar el flujo completo. Hallazgos:
+
+**El `usuario_rb` que se envia NO es el campo que se lee de vuelta.** Al leer el
+cliente creado, el texto enviado aparece en `servicio`, no en `usuario_rb`.
+Ademas WispHub genera solo un `usuario` interno con formato
+`slug-del-texto@rapilink-sas`. Es la misma dualidad escritura/lectura que ya se
+veia en otros campos — nunca asumir que el nombre de un campo de escritura es
+el mismo al leer.
+
+**La zona debe corresponder a la red real de la IP, o el alta puede fallar.**
+No hay forma de saberlo de antemano sin conocer la topologia: el catalogo de
+zonas trae el numero de servidor en el NOMBRE (`CORTE 15 - SERVIDOR 1`,
+`CORTE 30 - SERVIDOR 1`, etc.), y hay que cruzarlo contra los segmentos IP
+documentados en la guia de configuracion de ONT del cliente, no adivinar.
+
+**`interfaz_lan` en blanco es NORMAL, no un dato faltante.** Verificado
+comparando contra 15 clientes reales y activos: varios de los mas recientes lo
+tienen vacio, y valores como `ether2` o `vlan300_clientes_S1` SI aparecen en
+clientes reales — no son un relleno del serializador. El campo se completa en
+un paso posterior (conexion/sincronizacion del router), no al crear el cliente
+por API. Una herramienta de creacion NO necesita enviarlo.
+
+> **CRITICO — Ni `DELETE` ni cambiar `estado` por `PATCH` funcionan de forma
+> confiable para retirar un cliente.**
+>
+> - `DELETE /api/clientes/{id}/` devolvio **HTTP 500** (error interno, pagina
+>   HTML) en vez de un rechazo limpio. El cliente siguio existiendo.
+> - `PATCH /api/clientes/{id}/` con `{"estado": 3}` (cancelado) devolvio
+>   **HTTP 200** y ECOO `"estado": "3"` en la respuesta, pero una lectura
+>   posterior —confirmada con tres reintentos espaciados, para descartar
+>   demora de propagacion— siguio mostrando `Activo`. La escritura no se
+>   aplico pese a la respuesta de exito.
+>
+> Es el mismo patron de esta API —una respuesta que aparenta funcionar sin
+> serlo— extendido por primera vez a una escritura, no solo a una lectura o un
+> filtro. Cualquier herramienta que necesite cancelar o retirar un cliente NO
+> puede confiar en que un 200/202 signifique que el cambio se aplico: hay que
+> verificar con una lectura posterior, y aun asi puede fallar en silencio.
+> Hasta que se identifique la via correcta, esta operacion se hace por el
+> panel web de WispHub, no por API.
+
 ## Trampas que ya costaron tiempo
 
 **Los filtros de estado son NUMERICOS.** `?estado=Nuevo` devuelve 0 resultados
