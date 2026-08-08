@@ -1,11 +1,107 @@
-# Pensado para combinarse con el compose de django-crm, no para correr solo:
+# Un solo compose para toda la plataforma: el motor (nucleo/) y la
+# plataforma CRM (django-crm/, vendorizada sin su historial -- ver
+# ARQUITECTURA.md). Antes eran dos archivos a proposito, para no pisar
+# actualizaciones de upstream de django-crm; ese motivo ya no aplica: al
+# unificar sin historial, no queda una relacion de git con el proyecto
+# original para sincronizar.
 #
-#   docker compose -f ../django-crm/docker-compose.yml -f docker-compose.yml up
-#
-# No se toca el docker-compose.yml de django-crm (evita pisar sus
-# actualizaciones de upstream) -- este archivo solo agrega el servicio del
-# motor a la misma red por defecto que ya arma ese compose.
+# Arriba: docker compose up
 services:
+  db:
+    image: postgres:16-alpine
+    env_file:
+      - django-crm/.env.docker
+      - path: django-crm/.env.docker.local
+        required: false
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./django-crm/docker/postgres/init-rls-user.sql:/docker-entrypoint-initdb.d/init-rls-user.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    ports:
+      - "6379:6379"
+
+  backend:
+    build:
+      context: ./django-crm
+      dockerfile: Dockerfile
+    env_file:
+      - django-crm/.env.docker
+      - path: django-crm/.env.docker.local
+        required: false
+    volumes:
+      - ./django-crm/backend:/app
+      - ./django-crm/docker/backend/entrypoint.sh:/entrypoint.sh:ro
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: /bin/bash /entrypoint.sh
+
+  celery-worker:
+    build:
+      context: ./django-crm
+      dockerfile: Dockerfile
+    env_file:
+      - django-crm/.env.docker
+      - path: django-crm/.env.docker.local
+        required: false
+    volumes:
+      - ./django-crm/backend:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery -A crm worker --loglevel=info
+
+  celery-beat:
+    build:
+      context: ./django-crm
+      dockerfile: Dockerfile
+    env_file:
+      - django-crm/.env.docker
+      - path: django-crm/.env.docker.local
+        required: false
+    volumes:
+      - ./django-crm/backend:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery -A crm beat --loglevel=info
+
+  frontend:
+    build:
+      context: ./django-crm/frontend
+      dockerfile: Dockerfile
+    env_file:
+      - django-crm/.env.docker
+      - path: django-crm/.env.docker.local
+        required: false
+    volumes:
+      - ./django-crm/frontend:/app
+      - frontend_node_modules:/app/node_modules
+    ports:
+      - "5173:5173"
+
   motor:
     build:
       context: .
@@ -17,3 +113,13 @@ services:
     volumes:
       - ./nucleo:/app/nucleo
       - ./tenants:/app/tenants
+
+volumes:
+  # external: reusa el volumen que ya existia cuando django-crm corria como
+  # proyecto de compose aparte (carpeta django-crm/), en vez de que Compose
+  # arme uno nuevo vacio con el nombre de proyecto "crm-agentico". Compose no
+  # gestiona su ciclo de vida (no lo crea ni lo borra con "down -v").
+  postgres_data:
+    name: django-crm_postgres_data
+    external: true
+  frontend_node_modules:

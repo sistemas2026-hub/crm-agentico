@@ -49,9 +49,24 @@ supabase/                  migraciones SQL
 cli/                       utilidades operativas
 evaluacion/                sets dorados por tenant
 tests/                     incluye la guarda del núcleo
+
+django-crm/                LA PLATAFORMA — CRM (BottleCRM/Django-CRM)
+  backend/                 Django + DRF
+  frontend/                SvelteKit — incluye /agentes, /asistente,
+                            /simulador-whatsapp (hablan con nucleo/canales/api.py)
 ```
 
 **`tenants/` no contiene código a propósito.** El validador vive en `nucleo/config/schema.py`: la configuración es dato, y lo que la interpreta es motor.
+
+### `django-crm/`
+
+Es el proyecto [Django-CRM/Django-CRM](https://github.com/Django-CRM/Django-CRM) (BottleCRM), **vendorizado sin su historial de git** — se copió el estado del código, no se clonó ni se agregó como submódulo. Motivo: unificar todo en un solo repo (`sistemas2026-hub/crm-agentico`) para que cloná-y-arrancá alcance con un solo `docker compose up`, sin manejar dos remotos.
+
+Costo de esa decisión: **actualizar del proyecto original a futuro es manual** (no hay `git pull` que traiga cambios de upstream — hay que copiar lo que corresponda a mano). A cambio, no se carga el historial de miles de commits ajenos dentro de este repo.
+
+Sigue siendo, en espíritu, la misma separación núcleo/tenant: `django-crm/` es la plataforma (genérica, de terceros), y lo que le agregamos encima para hablarle al motor (`frontend/src/routes/(app)/agentes/`, `/asistente/`, `/simulador-whatsapp/`, y sus proxies en `frontend/src/routes/api/`) es la integración específica de este producto — no se tocó el resto del CRM.
+
+`docker-compose.yml` (en la raíz) levanta todo junto: `db`, `redis`, `backend`, `celery-worker`, `celery-beat`, `frontend` (de `django-crm/`) y `motor` (`nucleo/`), en la misma red — el frontend le habla al motor por `http://motor:5000`, igual que le habla a Postgres por `db:5432`.
 
 ## Dónde aterriza lo que ya existía
 

@@ -1,0 +1,307 @@
+name: CI
+
+on:
+  push:
+    # Every branch, not just master. `pull_request` below already gates the
+    # merge, so the branch filter here only decided whether work-in-progress
+    # got feedback before a PR existed, and the answer was no. `'**'` matches
+    # branch names containing slashes; naming `branches` at all is also what
+    # keeps tag pushes from triggering a second run of the same commit.
+    branches: ['**']
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - '.readthedocs.yaml'
+      - '.coveragerc'
+      - '.github/workflows/tests.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - '.readthedocs.yaml'
+      - '.coveragerc'
+      - '.github/workflows/tests.yml'
+
+# Running on every branch push means a branch with an open PR would otherwise
+# bill two identical runs per push, and a rapid series of pushes would queue
+# runs for commits nobody is waiting on any more. One group per ref, newest
+# wins.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: 'backend/uv.lock'
+
+      - name: Install system dependencies (WeasyPrint)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libpango-1.0-0 \
+            libpangocairo-1.0-0 \
+            libgdk-pixbuf-2.0-0 \
+            libffi-dev \
+            shared-mime-info
+
+      - name: Install Python dependencies
+        working-directory: backend
+        run: uv sync --frozen
+
+      # The suite runs with --no-migrations for speed, so nothing else would
+      # catch a model change that is missing its migration.
+      - name: Check for missing migrations
+        working-directory: backend
+        env:
+          DJANGO_SETTINGS_MODULE: crm.test_settings
+          SECRET_KEY: test-secret-key-for-ci
+          ADMIN_EMAIL: admin@test.com
+        run: uv run python manage.py makemigrations --check --dry-run
+
+      - name: Run tests with coverage
+        working-directory: backend
+        env:
+          DJANGO_SETTINGS_MODULE: crm.test_settings
+          SECRET_KEY: test-secret-key-for-ci
+          ADMIN_EMAIL: admin@test.com
+        run: uv run pytest -m "not postgres_only" --tb=short -v
+
+      - name: Generate coverage badge
+        if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+        working-directory: backend
+        run: uvx --from "genbadge[coverage]" genbadge coverage -i coverage.xml -o ../coverage-badge.svg
+
+      - name: Commit coverage badge
+        if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add coverage-badge.svg || true
+          git diff --staged --quiet || git commit -m "Update coverage badge [skip ci]"
+          git push || true
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: backend/htmlcov/
+          retention-days: 14
+
+  # The job above runs on SQLite, which is fast and blind to a whole class of
+  # defect: declared varchar lengths, RLS policies, and every test carrying the
+  # `postgres_only` marker (which the SQLite job deselects, so they had never
+  # run in CI at all). Two shipped bugs were invisible to a green suite for
+  # exactly this reason; see crm/test_settings_postgres.py.
+  backend-tests-postgres:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: 'backend/uv.lock'
+
+      - name: Install system dependencies (WeasyPrint)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libpango-1.0-0 \
+            libpangocairo-1.0-0 \
+            libgdk-pixbuf-2.0-0 \
+            libffi-dev \
+            shared-mime-info
+
+      # A superuser bypasses RLS, and the policies use FORCE ROW LEVEL
+      # SECURITY so even the owning role is subject to them. Running the
+      # RLS tests as `postgres` makes every isolation assertion vacuously
+      # true, the same trap RLS_SETUP.md warns about for local development.
+      # CREATEDB is what lets pytest-django build the test database.
+      - name: Create a non-superuser role for the RLS tests
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -U postgres -c \
+            "CREATE ROLE crm_ci WITH LOGIN CREATEDB PASSWORD 'crm_ci' NOSUPERUSER NOBYPASSRLS;"
+
+      - name: Install Python dependencies
+        working-directory: backend
+        run: uv sync --frozen
+
+      # Run 1: the whole suite, for what SQLite cannot see. Declared varchar
+      # lengths, integrity constraints, real type coercion. It runs as the
+      # superuser, so RLS is inert here; run 2 is where isolation is tested.
+      # The reason for the split is that the shared fixtures insert rows with
+      # no `app.current_org` set, which a policy-enforcing role refuses. That
+      # is a real gap in the fixtures rather than a CI setting, and closing it
+      # is a change to almost every test file, so it is deliberately not
+      # bundled into this one. Until then the split says plainly which run
+      # covers which.
+      - name: Run the full suite against PostgreSQL
+        working-directory: backend
+        env:
+          DJANGO_SETTINGS_MODULE: crm.test_settings_postgres
+          SECRET_KEY: test-secret-key-for-ci
+          ADMIN_EMAIL: admin@test.com
+          DBNAME: crm_db
+          DBUSER: postgres
+          DBPASSWORD: postgres
+          DBHOST: localhost
+          DBPORT: '5432'
+        # `postgres_only` is deselected here for the same reason it runs in
+        # the next step instead: those tests assert that RLS hides rows, and
+        # this run's superuser role is not subject to any policy, so they fail
+        # here for a reason that is about the role rather than the code.
+        # No coverage: the SQLite job produces the report and the badge.
+        run: uv run pytest --no-cov --tb=short -q -m "not postgres_only"
+
+      # Run 2: the `postgres_only` tests, as a role that RLS actually binds.
+      # The SQLite job deselects these, so before this step they had never
+      # executed in CI at all. They also have to run as `crm_ci` to mean
+      # anything: as a superuser they pass whether or not a single policy
+      # exists.
+      - name: Run the RLS tests as a policy-bound role
+        working-directory: backend
+        env:
+          DJANGO_SETTINGS_MODULE: crm.test_settings_postgres
+          SECRET_KEY: test-secret-key-for-ci
+          ADMIN_EMAIL: admin@test.com
+          DBNAME: crm_db
+          DBUSER: crm_ci
+          DBPASSWORD: crm_ci
+          DBHOST: localhost
+          DBPORT: '5432'
+        run: uv run pytest --no-cov --tb=short -q -m postgres_only
+
+      # Bare `ruff check .`, so the gate is whatever `backend/ruff.toml` selects
+      # (E, F, I with E501 ignored) rather than a CLI override that can silently
+      # drift from the file every editor and pre-commit hook reads.
+      #
+      # F is the half that catches defects rather than style: F811 is how
+      # `ActivitySerializer` came to be declared twice, with the second silently
+      # shadowing the first for both of its consumers, and F401 found three
+      # imports left behind by the timezone sweep plus two `# noqa` comments
+      # that suppressed nothing.
+      #
+      # `uv run`, not `uvx`: ruff is a locked dev dependency, so CI and a
+      # developer's machine check against the same version and a ruff release
+      # cannot turn this red overnight.
+      - name: Lint
+        working-directory: backend
+        run: uv run ruff check .
+
+      # `ruff format` rather than black: it is a reimplementation of black with
+      # the same output, `ruff.toml` already carried the `[format]` section, and
+      # one tool cannot disagree with itself the way black and ruff format can
+      # at the edges. `ruff check` above covers isort's job through the I rules.
+      # The tree was formatted in full when this step was added, so the gate
+      # starts green rather than as a warning nobody acts on.
+      - name: Format check
+        working-directory: backend
+        run: uv run ruff format --check .
+
+  frontend-checks:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Prettier format check
+        working-directory: frontend
+        run: pnpm prettier --check . || echo "::warning::Prettier found formatting issues in $(pnpm prettier --check . 2>&1 | grep -c '^\[warn\]') files. Run 'pnpm format' to fix."
+
+      - name: ESLint
+        working-directory: frontend
+        run: pnpm eslint .
+
+      - name: Type check (svelte-check)
+        working-directory: frontend
+        run: pnpm check
+
+      - name: Run tests
+        working-directory: frontend
+        run: pnpm test
+
+      - name: Build
+        working-directory: frontend
+        run: pnpm build
+
+  docs-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: 'backend/uv.lock'
+
+      - name: Install docs dependencies
+        working-directory: backend
+        run: uv sync --frozen --group docs
+
+      # --strict fails on broken internal links and nav entries pointing at
+      # files that do not exist.
+      - name: Build docs
+        working-directory: backend
+        run: uv run mkdocs build --strict -f ../mkdocs.yml -d site
+
+      # These two tests skip when mkdocs is absent, so the backend-tests job
+      # (which installs no docs group) cannot run them. Without this step the
+      # "no internal artifacts published" guard would silently never execute
+      # in CI. A skip reads as a pass.
+      - name: Check docs build guards
+        working-directory: backend
+        env:
+          DJANGO_SETTINGS_MODULE: crm.test_settings
+          SECRET_KEY: test-secret-key-for-ci
+          ADMIN_EMAIL: admin@test.com
+        run: uv run pytest common/tests/test_docs_build_excludes_internal.py --no-cov -v

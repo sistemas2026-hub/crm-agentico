@@ -1,1 +1,6 @@
 .githooks/* text eol=lf
+
+# Scripts que corren DENTRO de un contenedor Linux. Con core.autocrlf=true
+# en Windows, un checkout normal les pega \r\n y el contenedor los rechaza
+# ("$'\r': command not found") -- ya paso una vez con entrypoint.sh.
+*.sh text eol=lf
