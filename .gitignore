@@ -6,6 +6,10 @@
 auditoria.log
 *.log
 
+# Persistencia local (SQLite) -- conversaciones, PII. Nunca al repositorio.
+datos/
+*.db
+
 # Python
 __pycache__/
 *.py[cod]

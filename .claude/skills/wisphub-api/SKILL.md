@@ -78,6 +78,7 @@ los campos que vienen anidados (`{"id": 12, "nombre": "..."}`): se prueba con el
 | clientes | `estado` | **NUMERICO**: 1 activo, 2 suspendido, 3 cancelado, 4 gratis |
 | clientes | `plan_internet`, `ciudad`, `localidad` | |
 | clientes | `router`, `tecnico` | Hallados en agosto. `router` es la via para agrupar por zona geografica: en una red WISP el router ES la zona fisica |
+| clientes | `telefono__contains` | Verificado agosto 2026 (metodo del valor imposible: `telefono__contains=9999999999` -> 0). `telefono=<valor>` (sin `__contains`) NO sirve para buscar un numero individual: el campo guarda varios numeros separados por coma (`"3242124123,3002687147"`) y el match es EXACTO contra la cadena completa, asi que un solo numero da 0. `__contains` si matchea un numero suelto dentro de la cadena. Es la via para identificar a un cliente de WhatsApp por su numero (ver `Autenticacion.patron_extraccion` en `nucleo/config/schema.py`) — probar primero con `__contains`, nunca asumir que el filtro exacto alcanza. |
 | facturas | `estado` | 1 pendiente, 2 pagada, 3 cancelada, 4 en revision, 5 transferida |
 | facturas | `zona` | Las 5 zonas suman exacto el total |
 | tickets | `estado` | 1 nuevo, 2 en progreso, 4 cerrado |

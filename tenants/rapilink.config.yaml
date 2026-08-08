@@ -44,8 +44,7 @@ glosario:
   - termino_canonico: ONT
     sinonimos: [modem optico, roseta, equipo del cliente, terminal, ont, onu]
   - termino_canonico: perdida de senal optica
-    sinonimos: [no llega internet, sin internet, se cayo el servicio,
-                luz roja, los, senal perdida]
+    sinonimos: [no llega internet, sin internet, se cayo el servicio, luz roja, los, senal perdida]
   - termino_canonico: cable drop
     sinonimos: [cable de acometida, fibra del poste, acometida]
   - termino_canonico: suspension por mora
@@ -64,123 +63,147 @@ roles:
 
   soporte:
     descripcion: Atiende al cliente, revisa su estado y sus tickets.
-    puede_consultar: [consultar_cliente, consultar_cliente_por_cedula,
-                      consultar_ticket, consultar_tickets_de_cliente,
-                      contar_tickets, contar_clientes]
+    area: Atención al Cliente
+    cargo: Agente de Soporte
+    puede_consultar: [consultar_cliente, consultar_cliente_por_cedula, consultar_ticket, 
+          consultar_tickets_de_cliente, contar_tickets, contar_clientes, consultar_casos_bottlecrm]
     campos_permitidos:
-      consultar_cliente: [id_servicio, nombre, cedula, estado,
-                          email, telefono, direccion, localidad, ciudad,
-                          plan_internet, zona, fecha_instalacion,
-                          estado_facturas, saldo, fecha_corte]
-      consultar_cliente_por_cedula: [id_servicio, nombre, cedula, estado,
-                                     email, telefono, direccion, localidad, ciudad,
-                                     plan_internet, zona, fecha_instalacion,
-                                     estado_facturas, saldo, fecha_corte]
-      consultar_ticket: [id_ticket, asunto, descripcion, razon_falla, estado,
-                         prioridad, tecnico, departamento, origen_reporte,
-                         fecha_creacion, fecha_inicio, fecha_fin,
-                         servicio.id_servicio, servicio.plan_internet, servicio.zona]
-      consultar_tickets_de_cliente: [id_ticket, asunto, estado, prioridad,
-                                     tecnico, fecha_creacion]
+      consultar_cliente: [id_servicio, nombre, cedula, estado, email, telefono, direccion, localidad,
+        ciudad, plan_internet, zona, fecha_instalacion, estado_facturas, saldo, fecha_corte]
+      consultar_cliente_por_cedula: [id_servicio, nombre, cedula, estado, email, telefono, direccion,
+        localidad, ciudad, plan_internet, zona, fecha_instalacion, estado_facturas, saldo, 
+            fecha_corte]
+      # BottleCRM: nombres reales verificados en vivo (ver skill bottlecrm-api),
+      # no los que sugeriria la doc. 'account'/'assigned_to'/'tags' completos
+      # NO se listan -- son objetos pesados con datos de cuenta que nadie pidio;
+      # 'account.name' alcanza para identificar de que cliente es el caso.
+      consultar_casos_bottlecrm: [id, name, status, priority, case_type, description, created_at, 
+            closed_on, account.name]
+      consultar_ticket: [id_ticket, asunto, descripcion, razon_falla, estado, prioridad, tecnico, 
+            departamento, origen_reporte, fecha_creacion, fecha_inicio, fecha_fin, 
+            servicio.id_servicio, servicio.plan_internet, servicio.zona]
+      consultar_tickets_de_cliente: [id_ticket, asunto, estado, prioridad, tecnico, fecha_creacion]
       contar_tickets: [total, desglose, interpretacion, advertencia]
       contar_clientes: [total, desglose, interpretacion, advertencia]
-    nunca_revelar: [password_servicio, password_cpe, password_router_wifi,
-                    password_ssid_router_wifi, usuario_router_wifi, coordenadas]
+    nunca_revelar: [password_servicio, password_cpe, password_router_wifi, password_ssid_router_wifi,
+      usuario_router_wifi, coordenadas]
 
   tecnica:
     descripcion: Configuracion y diagnostico de red en campo.
-    puede_consultar: [consultar_cliente, consultar_cliente_por_cedula,
-                      consultar_ticket, consultar_tickets_de_cliente,
-                      contar_tickets]
+    area: Operaciones
+    cargo: Técnico de Campo
+    puede_consultar: [consultar_cliente, consultar_cliente_por_cedula, consultar_ticket, 
+          consultar_tickets_de_cliente, contar_tickets]
     campos_permitidos:
       # Ve la red; no ve plata ni datos de contacto que no necesita.
-      consultar_cliente: [id_servicio, nombre, estado,
-                          plan_internet, zona, fecha_instalacion,
-                          direccion, localidad, ciudad,
-                          ip, mac_cpe, sn_onu, modelo_antena,
-                          modelo_router_wifi, ssid_router_wifi, interfaz_lan,
-                          sectorial, router.nombre, router.id]
-      consultar_cliente_por_cedula: [id_servicio, nombre, estado,
-                                     plan_internet, zona, ip, mac_cpe, sn_onu,
-                                     modelo_antena, modelo_router_wifi,
-                                     ssid_router_wifi, sectorial]
-      consultar_ticket: [id_ticket, asunto, descripcion, razon_falla, estado,
-                         prioridad, tecnico, departamento, origen_reporte,
-                         fecha_creacion, fecha_inicio, fecha_fin,
-                         servicio.id_servicio, servicio.plan_internet, servicio.zona]
-      consultar_tickets_de_cliente: [id_ticket, asunto, estado, prioridad,
-                                     tecnico, fecha_creacion]
+      consultar_cliente: [id_servicio, nombre, estado, plan_internet, zona, fecha_instalacion, 
+            direccion, localidad, ciudad, ip, mac_cpe, sn_onu, modelo_antena, modelo_router_wifi, 
+            ssid_router_wifi, interfaz_lan, sectorial, router.nombre, router.id]
+      consultar_cliente_por_cedula: [id_servicio, nombre, estado, plan_internet, zona, ip, mac_cpe, 
+            sn_onu, modelo_antena, modelo_router_wifi, ssid_router_wifi, sectorial]
+      consultar_ticket: [id_ticket, asunto, descripcion, razon_falla, estado, prioridad, tecnico, 
+            departamento, origen_reporte, fecha_creacion, fecha_inicio, fecha_fin, 
+            servicio.id_servicio, servicio.plan_internet, servicio.zona]
+      consultar_tickets_de_cliente: [id_ticket, asunto, estado, prioridad, tecnico, fecha_creacion]
       contar_tickets: [total, desglose, interpretacion, advertencia]
-    nunca_revelar: [password_servicio, password_cpe, password_router_wifi,
-                    password_ssid_router_wifi, usuario_router_wifi]
+    nunca_revelar: [password_servicio, password_cpe, password_router_wifi, password_ssid_router_wifi,
+      usuario_router_wifi]
 
   facturacion:
     descripcion: Revisa facturas, saldos y registra pagos.
-    puede_consultar: [consultar_cliente, consultar_cliente_por_cedula,
-                      consultar_facturas, registrar_pago,
-                      contar_facturas, contar_clientes]
+    area: Facturación
+    cargo: Agente de Facturación
+    puede_consultar: [consultar_cliente, consultar_cliente_por_cedula, consultar_facturas, 
+          registrar_pago, contar_facturas, contar_clientes]
     campos_permitidos:
       # Sin datos de red ni tickets: no hacen a su trabajo.
-      consultar_cliente: [id_servicio, nombre, cedula, estado,
-                          email, telefono, direccion, localidad, ciudad,
-                          estado_facturas, saldo, fecha_corte, plan_internet]
-      consultar_cliente_por_cedula: [id_servicio, nombre, cedula, estado,
-                                     email, telefono, estado_facturas, saldo,
-                                     fecha_corte, plan_internet]
-      consultar_facturas: [id_factura, estado, total, saldo,
-                           fecha_emision, fecha_vencimiento, fecha_pago]
-      registrar_pago: [resultado, id_factura, total_cobrado,
-                       mensajes, messages, task_id, errors]
+      consultar_cliente: [id_servicio, nombre, cedula, estado, email, telefono, direccion, localidad,
+        ciudad, estado_facturas, saldo, fecha_corte, plan_internet]
+      consultar_cliente_por_cedula: [id_servicio, nombre, cedula, estado, email, telefono, 
+            estado_facturas, saldo, fecha_corte, plan_internet]
+      consultar_facturas: [id_factura, estado, total, saldo, fecha_emision, fecha_vencimiento, 
+            fecha_pago]
+      registrar_pago: [resultado, id_factura, total_cobrado, mensajes, messages, task_id, errors]
       contar_facturas: [total, desglose, interpretacion, advertencia]
       contar_clientes: [total, desglose, interpretacion, advertencia]
-    nunca_revelar: [password_servicio, password_cpe, password_router_wifi,
-                    password_ssid_router_wifi, ip, mac_cpe]
+    nunca_revelar: [password_servicio, password_cpe, password_router_wifi, password_ssid_router_wifi,
+      ip, mac_cpe]
 
   administracion:
     descripcion: Consultas consolidadas, sin datos personales.
-    puede_consultar: [consultar_cliente, consultar_tickets_de_cliente,
-                      contar_clientes, contar_facturas, contar_tickets,
-                      informe_materiales]
+    area: Administración
+    cargo: Analista
+    puede_consultar: [consultar_cliente, consultar_tickets_de_cliente, contar_clientes, 
+          contar_facturas, contar_tickets, informe_materiales]
     campos_permitidos:
       # Sin PII: ni cedula, ni contacto. Ve estado y servicio.
-      consultar_cliente: [id_servicio, nombre, estado, plan_internet, zona,
-                          fecha_instalacion, estado_facturas]
-      consultar_tickets_de_cliente: [id_ticket, asunto, estado, prioridad,
-                                     tecnico, fecha_creacion]
+      consultar_cliente: [id_servicio, nombre, estado, plan_internet, zona, fecha_instalacion, 
+            estado_facturas]
+      consultar_tickets_de_cliente: [id_ticket, asunto, estado, prioridad, tecnico, fecha_creacion]
       contar_clientes: [total, desglose, interpretacion, advertencia]
       contar_facturas: [total, desglose, interpretacion, advertencia]
       contar_tickets: [total, desglose, interpretacion, advertencia]
-      informe_materiales: [periodo, totales, tickets_cerrados,
-                           con_registro_de_material, registros_en_cero,
-                           cobertura_por_categoria, sin_normalizar,
-                           interpretacion, advertencia]
+      informe_materiales: [periodo, totales, tickets_cerrados, con_registro_de_material, 
+            registros_en_cero, cobertura_por_categoria, sin_normalizar, interpretacion, advertencia]
     nunca_revelar: [cedula, email, telefono, direccion, coordenadas, saldo]
 
   cliente_final:
-    descripcion: El suscriptor, por WhatsApp. Solo ve SU propio servicio.
-    puede_consultar: [consultar_mi_servicio]
+    area: Atención al Cliente
+    cargo: Recepcionista Virtual
+    descripcion: |
+      El suscriptor, por WhatsApp. Solo ve SU propio servicio.
+
+      Tono: cercano, como espera el cliente en WhatsApp (tuteo, sin "usted").
+      Los guiones institucionales son una base -- se adaptan con naturalidad
+      en cada respuesta, nunca se repiten igual palabra por palabra (protocolo
+      de atencion al cliente de la empresa, S7 y S9).
+
+      Frases a evitar y su alternativa (protocolo real de la empresa, S7):
+      - Nunca "no se puede" -> decir que SI se puede hacer.
+      - Nunca "no se" -> "dejame confirmar eso y te digo".
+      - Nunca "calmate" en seco ante un reclamo -> "entiendo, lo resolvemos".
+      - Nunca "espera" sin explicar por que -> "dejame revisar tu cuenta un momento".
+
+      Lo que resolves VOS, al instante (protocolo de atencion al cliente, S6):
+      consultas de saldo, estado de factura y estado del servicio.
+
+      Lo que NO resolves y derivas a un colaborador humano: fallas del
+      servicio, traslados, reconexion, instalaciones nuevas, reclamos
+      formales, y cambio de contrasena (el protocolo dice que esto se
+      resuelve al instante, pero todavia no existe esa herramienta aqui --
+      hasta que exista, se deriva). Al derivar, decile al cliente que un
+      colaborador humano sigue el caso.
+
+      Verificacion de identidad: normalmente ya queda resuelta por el numero
+      de WhatsApp desde el que escribe (no tenes que pedir nada). Si el
+      sistema todavia no lo verifico, pedile su NUMERO DE CEDULA (no el ID de
+      servicio, eso no lo sabe la mayoria de los clientes) y llama a
+      verificar_identidad_por_cedula con ese dato. Si te dice que es
+      ambiguo, pedile ademas su nombre completo o direccion para descartar.
+    orientado_a: cliente_final
+    puede_consultar: [consultar_mi_servicio, verificar_identidad_por_cedula]
     campos_permitidos:
       # Lo minimo para autoservicio. El id_cliente NO lo propone el modelo:
       # lo inyecta el codigo desde la sesion autenticada.
-      consultar_mi_servicio: [estado, plan_internet, estado_facturas, saldo,
-                              fecha_corte, ssid_router_wifi]
-    nunca_revelar: [password_servicio, password_cpe, password_router_wifi,
-                    usuario_router_wifi, cedula, direccion, coordenadas,
-                    ip, mac_cpe, sn_onu, sectorial, router.nombre]
+      consultar_mi_servicio: [estado, plan_internet, estado_facturas, saldo, fecha_corte, 
+            ssid_router_wifi]
+    nunca_revelar: [password_servicio, password_cpe, password_router_wifi, usuario_router_wifi,
+          cedula, direccion, coordenadas, ip, mac_cpe, sn_onu, sectorial, router.nombre]
 
 # -----------------------------------------------------------------------------
 #  SEGURIDAD
 # -----------------------------------------------------------------------------
 seguridad:
   reglas_absolutas:
-    - "Las credenciales de administrador de la ONT NUNCA se comparten con un
-       cliente final. Al cliente solo se le entrega la contrasena de SU red WiFi."
-    - "Nunca inventar direcciones IP, VLAN, credenciales, procedimientos ni
-       valores numericos. Si el dato no esta en el contexto, decirlo."
-    - "Un dato que viene de una herramienta se muestra literal: no se reformula,
-       no se redondea y no se calcula sobre el."
-    - "Nunca entregar datos de un cliente a quien no ha sido verificado como
-       titular de ese servicio."
+    - "Las credenciales de administrador de la ONT NUNCA se comparten con un cliente final. Al cliente
+      solo se le entrega la contrasena de SU red WiFi."
+    - "Nunca inventar direcciones IP, VLAN, credenciales, procedimientos ni valores numericos. Si el dato
+      no esta en el contexto, decirlo."
+    - "Un dato que viene de una herramienta se muestra literal: no se reformula, no se redondea y no se
+      calcula sobre el."
+    - "Nunca entregar datos de un cliente a quien no ha sido verificado como titular de ese servicio."
+    - "Nunca prometer plazos, descuentos o beneficios que no esten confirmados por el area correspondiente
+      (protocolo de atencion al cliente, S6)."
   # 0 ninguno / 1 posesion del canal / 2 reto adicional / 3 humano
   requiere_verificacion:
     estado_red_general: 0
@@ -346,18 +369,22 @@ herramientas:
     descripcion: Datos de un cliente por su ID de servicio.
     solo_lectura: true
     roles_permitidos: [soporte, tecnica, facturacion, administracion]
+    base_url: https://api.wisphub.io
     endpoint: /api/clientes/
     metodo: GET
     auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
 
   - nombre: consultar_cliente_por_cedula
     tipo: http
     descripcion: Datos de un cliente por su cedula.
     solo_lectura: true
     roles_permitidos: [soporte, tecnica, facturacion]
+    base_url: https://api.wisphub.io
     endpoint: /api/clientes/
     metodo: GET
     auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
 
   - nombre: consultar_mi_servicio
     tipo: http
@@ -367,17 +394,41 @@ herramientas:
       del modelo, una inyeccion de prompt bastaria para pedir el de otro.
     solo_lectura: true
     roles_permitidos: [cliente_final]
+    base_url: https://api.wisphub.io
     endpoint: /api/clientes/
     metodo: GET
     auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    inyectar_sesion:
+      id_servicio: id_cliente
+
+  - nombre: verificar_identidad_por_cedula
+    tipo: http
+    descripcion: >
+      Verifica la identidad del cliente por su numero de cedula, cuando el
+      numero de WhatsApp no alcanzo para verificarlo solo. Filtro verificado
+      contra la API real (metodo del valor imposible, agosto 2026 -- ver
+      .claude/skills/wisphub-api/SKILL.md). NUNCA devuelve datos del cliente:
+      solo confirma si quedo verificado, ambiguo o no encontrado.
+    solo_lectura: true
+    roles_permitidos: [cliente_final]
+    verifica_identidad: true
+    campo_busqueda: cedula
+    base_url: https://api.wisphub.io
+    endpoint: /api/clientes/
+    metodo: GET
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
 
   - nombre: consultar_ticket
     tipo: http
     solo_lectura: true
     roles_permitidos: [soporte, tecnica]
+    base_url: https://api.wisphub.io
     endpoint: /api/tickets/
     metodo: GET
     auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
 
   - nombre: consultar_tickets_de_cliente
     tipo: http
@@ -387,17 +438,21 @@ herramientas:
       solo sobre los abiertos.
     solo_lectura: true
     roles_permitidos: [soporte, tecnica, administracion]
+    base_url: https://api.wisphub.io
     endpoint: /api/tickets/
     metodo: GET
     auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
 
   - nombre: consultar_facturas
     tipo: http
     solo_lectura: true
     roles_permitidos: [facturacion]
+    base_url: https://api.wisphub.io
     endpoint: /api/facturas/
     metodo: GET
     auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
 
   - nombre: registrar_pago
     tipo: http
@@ -405,9 +460,40 @@ herramientas:
     solo_lectura: false
     requiere_confirmacion: true
     roles_permitidos: [facturacion]
+    base_url: https://api.wisphub.io
     endpoint: /api/facturas/{id}/registrar-pago/
     metodo: POST
     auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+
+  # --- BottleCRM (verificado en vivo, ver skill bottlecrm-api) ---------------
+
+  - nombre: consultar_casos_bottlecrm
+    tipo: http
+    descripcion: >
+      Casos/tickets registrados en BottleCRM. Se puede buscar por texto libre
+      (nombre o descripcion del caso) o filtrar por estado.
+    solo_lectura: true
+    roles_permitidos: [soporte]
+    base_url: http://localhost:8000
+    endpoint: /api/cases/
+    metodo: GET
+    auth_ref: BOTTLECRM_API_TOKEN
+    auth_esquema: Bearer
+    # Verificados en vivo, agosto 2026 (ver skill bottlecrm-api): impossible
+    # value = 0, valor real = cuenta esperada.
+    filtros_verificados:
+      buscar:
+        param: search
+        tipo: texto
+        verificado_el: 2026-08-07
+      estado:
+        param: status
+        tipo: enum
+        valores: {nuevo: New, asignado: Assigned, pendiente: Pending, cerrado: Closed, rechazado: 
+            Rejected, duplicado: Duplicate}
+        verificado_el: 2026-08-07
+    extraer_de: cases
 
   # --- agregados -------------------------------------------------------------
 
@@ -417,8 +503,10 @@ herramientas:
     etiqueta: clientes
     solo_lectura: true
     roles_permitidos: [soporte, facturacion, administracion]
+    base_url: https://api.wisphub.io
     endpoint: /api/clientes/
     auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
     # Verificado: 4260+811+2093+88 = 7252 = total sin filtro. Cuadra exacto.
     filtros_verificados:
       estado:
@@ -453,15 +541,16 @@ herramientas:
     etiqueta: facturas
     solo_lectura: true
     roles_permitidos: [facturacion, administracion]
+    base_url: https://api.wisphub.io
     endpoint: /api/facturas/
     auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
     # Verificado: 3606+5087+7 = 8700 = total. Las 5 zonas suman 8700 exacto.
     filtros_verificados:
       estado:
         param: estado
         tipo: enum
-        valores: {pendiente: 1, pagada: 2, cancelada: 3,
-                  en_revision: 4, transferida: 5}
+        valores: {pendiente: 1, pagada: 2, cancelada: 3, en_revision: 4, transferida: 5}
         verificado_el: 2026-07-29
       zona: {param: zona, tipo: id, verificado_el: 2026-07-29}
     filtros_ignorados_por_api:
@@ -486,8 +575,10 @@ herramientas:
     etiqueta: tickets
     solo_lectura: true
     roles_permitidos: [soporte, tecnica, administracion]
+    base_url: https://api.wisphub.io
     endpoint: /api/tickets/
     auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
     # Verificado: 266+18+2351 = 2635 = total sin filtro de fecha.
     filtros_verificados:
       estado:
@@ -539,8 +630,7 @@ canales:
     activo: true
 
 escalamiento:
-  activar_si: [frustracion_detectada, tres_fallos_seguidos, solicitud_explicita,
-               duda_de_identidad]
+  activar_si: [frustracion_detectada, tres_fallos_seguidos, solicitud_explicita, duda_de_identidad]
   destino_rol: soporte
   mensaje: Te paso con un companero del equipo para que te ayude mejor.
   siempre_disponible: true

@@ -67,7 +67,11 @@ roles:
 
   cliente_final:
     descripcion: El suscriptor. Solo ve SU propio servicio.
-    puede_consultar: [consultar_mi_servicio]
+    orientado_a: cliente_final   # segunda persona + exige verificacion de identidad
+    # 'verificar_identidad_por_cedula' no necesita entrada en campos_permitidos:
+    # es verifica_identidad=true, su respuesta nunca pasa por la lista blanca
+    # (el motor la interpreta el mismo, ver nucleo/config/schema.py).
+    puede_consultar: [consultar_mi_servicio, verificar_identidad_por_cedula]
     campos_permitidos:
       consultar_mi_servicio: [estado, plan_internet, saldo]
     nunca_revelar: [cedula, direccion, coordenadas, password_servicio]
@@ -203,18 +207,41 @@ herramientas:
     tipo: http
     solo_lectura: true
     roles_permitidos: [soporte]
+    base_url: https://api.tu-proveedor.example   # dato de tenant, no secreto
     endpoint: /api/clientes/
     metodo: GET
     auth_ref: NOMBRE_DE_LA_VARIABLE_CON_LA_CLAVE   # el NOMBRE, no la clave
+    auth_esquema: Bearer   # o el que exija tu proveedor (ej. WispHub: Api-Key)
 
   - nombre: consultar_mi_servicio
     tipo: http
     descripcion: >
       El id del cliente NO viaja como argumento del modelo: lo inyecta el codigo
-      desde la sesion autenticada. Si viniera del modelo, una inyeccion de
-      prompt bastaria para pedir el de otro cliente.
+      desde la sesion autenticada (ver 'inyectar_sesion'). Si viniera del
+      modelo, una inyeccion de prompt bastaria para pedir el de otro cliente.
     solo_lectura: true
     roles_permitidos: [cliente_final]
+    base_url: https://api.tu-proveedor.example
+    endpoint: /api/clientes/
+    metodo: GET
+    auth_ref: NOMBRE_DE_LA_VARIABLE_CON_LA_CLAVE
+    inyectar_sesion:
+      id_servicio: id_cliente
+
+  - nombre: verificar_identidad_por_cedula
+    tipo: http
+    descripcion: >
+      Verifica la identidad del cliente por un dato que el CLIENTE da en el
+      chat (no la sesion) -- por eso 'verifica_identidad' en vez de
+      'inyectar_sesion'. NUNCA sondear el filtro de campo_busqueda sin
+      confirmarlo antes contra la API real (metodo del valor imposible, ver
+      skill wisphub-api): un filtro ignorado en silencio dejaria "verificar"
+      con cualquier cosa.
+    solo_lectura: true
+    roles_permitidos: [cliente_final]
+    verifica_identidad: true
+    campo_busqueda: cedula   # el campo real de tu proveedor -- verificalo primero
+    base_url: https://api.tu-proveedor.example
     endpoint: /api/clientes/
     metodo: GET
     auth_ref: NOMBRE_DE_LA_VARIABLE_CON_LA_CLAVE
@@ -225,6 +252,7 @@ herramientas:
     etiqueta: clientes
     solo_lectura: true
     roles_permitidos: [soporte]
+    base_url: https://api.tu-proveedor.example
     endpoint: /api/clientes/
     auth_ref: NOMBRE_DE_LA_VARIABLE_CON_LA_CLAVE
     filtros_verificados:

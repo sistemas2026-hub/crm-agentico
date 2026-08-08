@@ -145,6 +145,18 @@ class Rol(Base):
     # Documental y de defensa en profundidad. NO sustituye a la lista blanca:
     # lo que protege de verdad es 'campos_permitidos'.
     nunca_revelar: list[str] = Field(default_factory=list)
+    # A quien le habla este rol. Cambia el prompt de raiz: un colaborador
+    # habla de "el cliente" en tercera persona y no requiere verificar
+    # identidad (ya esta autorizado por trabajar ahi); un cliente_final habla
+    # en segunda persona de SU PROPIO servicio y es un desconocido hasta que
+    # se verifique (nucleo/seguridad/verificacion.py). No es un 'if' por rol
+    # en el motor: es este campo el que decide.
+    orientado_a: Literal["colaborador", "cliente_final"] = "colaborador"
+    # Solo organizativas -- para mostrar el agente ordenado en un diagrama
+    # (que area, que cargo). NO cambian que puede hacer o ver el rol; eso lo
+    # sigue decidiendo unicamente 'puede_consultar'/'campos_permitidos'.
+    area: str | None = None
+    cargo: str | None = None
 
 
 # =============================================================================
@@ -320,7 +332,9 @@ class FiltroVerificado(Base):
     """
     param: str
     tipo: Literal["enum", "id", "texto"] = "enum"
-    valores: dict[str, int] | None = None
+    # int para APIs con codigo numerico (WispHub: estado=1/2/3); str para
+    # APIs que ya reciben el valor en texto (BottleCRM: status=Assigned).
+    valores: dict[str, int | str] | None = None
     verificado_el: date | None = None
 
     @model_validator(mode="after")
@@ -354,11 +368,45 @@ class Herramienta(Base):
     solo_lectura: bool = True
     roles_permitidos: list[str] = Field(min_length=1)
     requiere_confirmacion: bool = False
+    # Argumento_de_la_llamada -> atributo de la sesion verificada. El modelo
+    # NUNCA propone estos valores (aunque los pida en el mensaje): el motor
+    # los sobrescribe siempre con lo que haya en la sesion. Existe para que
+    # un cliente_final no pueda pedir, via inyeccion de prompt, el servicio
+    # de otro id_cliente -- la identidad la resuelve la verificacion, no el
+    # modelo. Ej.: {'id_servicio': 'id_cliente'}.
+    inyectar_sesion: dict[str, str] = Field(default_factory=dict)
+    # Marca esta herramienta como un METODO DE VERIFICACION DE IDENTIDAD, no
+    # una consulta de datos. Cambia el comportamiento del motor:
+    #   - se ofrece SIEMPRE, aunque la sesion no este verificada todavia (es
+    #     justamente como se verifica) -- nunca pasa por el filtro de nivel.
+    #   - el modelo SI propone el argumento en 'campo_busqueda' (viene del
+    #     cliente, ej. su cedula) -- es la unica excepcion a que el modelo
+    #     nunca proponga identificadores.
+    #   - la respuesta NO se filtra ni se muestra como dato: el motor la usa
+    #     para decidir verificado/ambiguo/no-encontrado y arma el mensaje el
+    #     mismo, nunca deja pasar el registro crudo hacia el modelo.
+    verifica_identidad: bool = False
+    # Campo de la API por el que se busca (ej. 'cedula'). Requerido si
+    # verifica_identidad=True.
+    campo_busqueda: str | None = None
 
     # --- http / agregado ---
+    # No es secreto (no dispara el barrido de _barrer_secretos): es dato de
+    # tenant igual que 'endpoint', solo que compartido por varias
+    # herramientas del mismo proveedor.
+    base_url: str | None = None
     endpoint: str | None = None
     metodo: Literal["GET", "POST", "PUT", "PATCH"] = "GET"
     auth_ref: str | None = None
+    # El esquema del header Authorization varia por proveedor (WispHub usa
+    # 'Api-Key', no el 'Bearer' habitual) -- es dato del tenant, no del motor.
+    auth_esquema: str = "Bearer"
+    # Algunas APIs envuelven la respuesta en una clave en vez de devolver el
+    # dato directo (ej. {"cases_obj": {...}} o {"cases": [...], "cases_count": N}
+    # en vez de {"results": [...], "count": N}). Si se declara, el ejecutor
+    # extrae esa clave antes de pasar el dato al filtro de campos -- generico,
+    # no sabe que proveedor la necesita.
+    extraer_de: str | None = None
 
     # --- agregado ---
     entidad: str | None = None
@@ -388,6 +436,13 @@ class Herramienta(Base):
     def _coherencia(self):
         if self.tipo in ("http", "agregado") and not self.endpoint:
             raise ValueError(f"'{self.nombre}': tipo {self.tipo} exige 'endpoint'")
+
+        if self.tipo in ("http", "agregado") and not self.base_url:
+            raise ValueError(f"'{self.nombre}': tipo {self.tipo} exige 'base_url'")
+
+        if self.verifica_identidad and not self.campo_busqueda:
+            raise ValueError(
+                f"'{self.nombre}': verifica_identidad exige 'campo_busqueda'")
 
         if not self.solo_lectura and not self.requiere_confirmacion:
             raise ValueError(
@@ -498,6 +553,16 @@ class TenantConfig(Base):
         nombres_rol = set(self.roles)
         nombres_herr = {h.nombre for h in self.herramientas}
 
+        # Mismo patron para un rol creado por la UI de edicion o a mano en el
+        # YAML: el nombre es una clave que despues viaja como slug (URL de la
+        # API, identificador_sesion, 'rol:<nombre>' en llm.overrides).
+        for nombre_rol in nombres_rol:
+            if not re.match(r"^[a-z][a-z0-9_]{1,29}$", nombre_rol):
+                raise ValueError(
+                    f"rol '{nombre_rol}': el nombre debe ser minuscula, "
+                    f"empezar con letra y usar solo letras/numeros/guion bajo "
+                    f"(2-30 caracteres)")
+
         # Una herramienta no puede permitir un rol inexistente.
         for h in self.herramientas:
             desconocidos = set(h.roles_permitidos) - nombres_rol
@@ -519,7 +584,10 @@ class TenantConfig(Base):
             # un asesor esperando una respuesta vacia.
             for herr in rol.puede_consultar:
                 obj = next((h for h in self.herramientas if h.nombre == herr), None)
-                if obj and obj.tipo in ("http", "agregado", "sql"):
+                # Una herramienta de verificacion nunca deja pasar su
+                # respuesta cruda hacia el modelo (el motor la interpreta el
+                # mismo) -- no necesita lista blanca de campos.
+                if obj and obj.tipo in ("http", "agregado", "sql") and not obj.verifica_identidad:
                     if herr not in rol.campos_permitidos:
                         raise ValueError(
                             f"rol '{nombre_rol}' puede usar '{herr}' pero no "

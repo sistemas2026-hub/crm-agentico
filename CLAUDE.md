@@ -34,3 +34,14 @@ py -3.13 tests/test_nucleo_sin_tenants.py   # guarda de arquitectura
 py -3.13 cli/banco_pruebas.py               # compara modelos contra el prompt real
 py -3.13 cli/sondear_api.py                 # descubre endpoints de WispHub (solo lectura)
 ```
+
+## Configuración de una sola vez por máquina (cada colaborador)
+
+Git no versiona hooks ni alias — hay que activarlos a mano una vez por copia local del repo:
+
+```
+git config core.hooksPath .githooks
+git config alias.novedades '!git fetch origin && echo "--- commits nuevos ---" && git log HEAD..origin/fix/integracion-wisphub --oneline && echo "--- archivos que cambiaron ---" && git diff --stat HEAD origin/fix/integracion-wisphub'
+```
+
+`git novedades` trae del remoto (sin mezclar nada localmente) y muestra qué commits y qué archivos cambió el otro colaborador desde la última vez — para revisar antes de hacer `git pull`.
