@@ -53,8 +53,17 @@ services:
       # variables de entorno, o sea las credenciales- en cualquier error.
       DEBUG: "False"
       ENV_TYPE: prod
-      ALLOWED_HOSTS: ${ALLOWED_HOSTS:?dominios del backend, separados por coma}
-      DOMAIN_NAME: ${DOMAIN_NAME:?URL publica del backend}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:?dominio del backend, SIN https://}
+      DOMAIN_NAME: ${DOMAIN_NAME:?URL publica del backend, CON https://}
+      # El navegador carga la interfaz desde el dominio del FRONTEND y de ahi
+      # llama al backend: son origenes distintos, asi que sin esto el navegador
+      # bloquea cada peticion. Su valor por defecto es http://localhost:5173
+      # (settings.py), o sea que si no se define, en el servidor no funciona
+      # nada -- y el error de CORS que se ve en consola no menciona la causa.
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?URL del frontend, CON https://}
+      # Para el admin de Django y cualquier formulario: sobre HTTPS exige que
+      # el origen este declarado o rechaza el POST con 403.
+      CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:?ambos dominios, CON https://}
       # --- Base: el Supabase de este mismo servidor ---
       DBHOST: ${DBHOST:?}
       DBPORT: ${DBPORT:?}
