@@ -14,20 +14,40 @@
 --    - si algo sale mal:  drop schema asistente cascade;  y no queda rastro
 --
 --  NO SE MODIFICA NINGUNA TABLA EXISTENTE. La identidad de empresa se toma de
---  public.organizations, que ya existe; la configuracion del asistente se
+--  public.organization, que es la tabla del CRM (django-crm/, modelo
+--  common.Org con db_table='organization'); la configuracion del asistente se
 --  guarda aparte, en asistente.tenant_config, para no alterar esa tabla.
+--
+--  POR QUE 'organization' Y NO UNA TABLA PROPIA  (decision de agosto 2026)
+--  ----------------------------------------------------------------------
+--  La v2 de este esquema referenciaba public.organizations, la tabla de la
+--  aplicacion de reportes de ISP, porque el asistente iba a convivir dentro de
+--  esa base. Eso dejo de ser cierto: el asistente vive ahora en su propio
+--  Supabase junto al CRM de este mismo repositorio, y esa aplicacion se queda
+--  donde estaba. El dueño de la identidad de empresa pasa a ser el CRM.
+--
+--  Se referencia su tabla en vez de crear una propia por una sola razon: dos
+--  tablas de organizaciones en la misma base son dos fuentes de verdad que se
+--  desincronizan. El CRM la crea y la mantiene con sus migraciones de Django;
+--  el asistente solo lee de ella. NUNCA escribir ahi desde este esquema: la
+--  siguiente migracion de Django no sabe de nosotros.
 --
 --  TERMINOLOGIA
 --  ------------
---  Lo que la configuracion llama "tenant" es una fila de public.organizations.
+--  Lo que la configuracion llama "tenant" es una fila de public.organization.
 --  En SQL se usa 'organization_id' porque es lo que referencia; en los YAML se
 --  sigue diciendo tenant. Es la misma entidad.
 --
+--  El slug ('rapilink') NO existe en public.organization -- esa tabla solo
+--  tiene 'name'. Vive en asistente.tenant_config.slug, que es donde le
+--  corresponde: es un identificador de NUESTRA configuracion, no del CRM.
+--
 --  PRINCIPIO RECTOR
 --  ----------------
---  Dar de alta un ISP = fila en organizations + tenant.config.yaml + cargar sus
---  documentos. Cero cambios de codigo. Por eso NADA aqui conoce a un cliente
---  concreto: lo especifico vive en tenant_config.config (JSONB).
+--  Dar de alta un ISP = fila en organization (se crea desde el CRM) +
+--  tenant.config.yaml + cargar sus documentos. Cero cambios de codigo. Por eso
+--  NADA aqui conoce a un cliente concreto: lo especifico vive en
+--  tenant_config.config (JSONB).
 --
 --  RESIDENCIA DE DATOS (RNF-01)
 --  ----------------------------
@@ -79,7 +99,7 @@ end $$;
 
 grant usage on schema asistente to app_backend;
 -- Solo lectura de la identidad de empresa. El asistente nunca escribe ahi.
-grant select on public.organizations to app_backend;
+grant select on public.organization to app_backend;
 
 -- El tenant activo viaja en una variable de sesion que el backend fija al
 -- inicio de cada peticion:
@@ -98,14 +118,21 @@ $$;
 -- =============================================================================
 --  1) CONFIGURACION DEL TENANT
 -- =============================================================================
---  public.organizations ya existe y aporta id/name/slug. Aqui se le cuelga lo
+--  public.organization la crea el CRM y aporta id/name. Aqui se le cuelga lo
 --  que necesita el asistente, SIN alterar esa tabla: una fila por empresa que
 --  tenga el asistente activo. Una organizacion sin fila aqui simplemente no lo
 --  tiene habilitado.
 
 create table if not exists asistente.tenant_config (
   organization_id uuid primary key
-                  references public.organizations(id) on delete cascade,
+                  references public.organization(id) on delete cascade,
+  -- Identificador estable de la empresa DENTRO del asistente: nombra el
+  -- archivo tenants/<slug>.config.yaml, la carpeta corpus/<slug>/ y el
+  -- argumento de las utilidades de cli/. Vive aqui y no en el CRM porque es
+  -- nuestro: la tabla organization solo tiene 'name', que es texto editable
+  -- por el usuario ("Rapilink S.A.S.") y no sirve como clave.
+  slug            text not null unique
+                  check (slug ~ '^[a-z][a-z0-9_-]*$'),
   -- El tenant.config.yaml validado y serializado. Se guarda en la base, y no
   -- en un archivo del servidor, para que cambiar la configuracion no exija
   -- redeploy.
@@ -125,14 +152,14 @@ comment on column asistente.tenant_config.config is
 -- =============================================================================
 --  2) USUARIOS DEL ASISTENTE
 -- =============================================================================
---  Distinta de public.profiles: aqui viven las identidades de CANAL (numero de
---  WhatsApp) y el rol frente al asistente, que no tienen por que coincidir con
---  los usuarios de la aplicacion existente.
+--  Distinta de public.profile (la del CRM): aqui viven las identidades de CANAL
+--  (numero de WhatsApp) y el rol frente al asistente, que no tienen por que
+--  coincidir con los usuarios del CRM.
 
 create table if not exists asistente.tenant_users (
   id              uuid primary key default gen_random_uuid(),
-  organization_id uuid not null references public.organizations(id) on delete cascade,
-  profile_id      uuid,                            -- enlace opcional a public.profiles
+  organization_id uuid not null references public.organization(id) on delete cascade,
+  profile_id      uuid,                            -- enlace opcional a public.profile
   rol             text not null,                   -- admin|coordinador|tecnico|cliente_final
   nombre          text,
   -- Identificador del canal EN CLARO. Se hasheaba en el primer borrador, pero
@@ -165,7 +192,7 @@ comment on column asistente.tenant_users.canal_identidad is
 
 create table if not exists asistente.documents (
   id              uuid primary key default gen_random_uuid(),
-  organization_id uuid not null references public.organizations(id) on delete cascade,
+  organization_id uuid not null references public.organization(id) on delete cascade,
   codigo          text not null,                   -- 'G-GO-06'
   titulo          text not null,
   version         text not null,                   -- '01'
@@ -187,7 +214,7 @@ create index if not exists documents_org_idx
 
 create table if not exists asistente.document_chunks (
   id              uuid primary key default gen_random_uuid(),
-  organization_id uuid not null references public.organizations(id) on delete cascade,
+  organization_id uuid not null references public.organization(id) on delete cascade,
   document_id     uuid not null references asistente.documents(id) on delete cascade,
   orden           integer not null,
   -- Dos versiones del texto, a proposito:
@@ -233,7 +260,7 @@ create index if not exists document_chunks_meta_idx
 
 create table if not exists asistente.conversations (
   id              uuid primary key default gen_random_uuid(),
-  organization_id uuid not null references public.organizations(id) on delete cascade,
+  organization_id uuid not null references public.organization(id) on delete cascade,
   canal           text not null,
   usuario_externo text,                            -- en claro, ver tenant_users
   tenant_user_id  uuid references asistente.tenant_users(id),
@@ -252,7 +279,7 @@ create index if not exists conversations_usuario_idx
 
 create table if not exists asistente.messages (
   id              uuid primary key default gen_random_uuid(),
-  organization_id uuid not null references public.organizations(id) on delete cascade,
+  organization_id uuid not null references public.organization(id) on delete cascade,
   conversation_id uuid not null references asistente.conversations(id) on delete cascade,
   rol             text not null,                   -- user|assistant|tool|system
   contenido       text,
@@ -294,7 +321,7 @@ create index if not exists messages_org_fecha_idx
 
 create table if not exists asistente.tool_calls (
   id              uuid primary key default gen_random_uuid(),
-  organization_id uuid not null references public.organizations(id) on delete cascade,
+  organization_id uuid not null references public.organization(id) on delete cascade,
   message_id      uuid references asistente.messages(id) on delete set null,
   conversation_id uuid references asistente.conversations(id) on delete cascade,
   herramienta     text not null,
@@ -330,7 +357,7 @@ create index if not exists tool_calls_escritura_idx
 
 create table if not exists asistente.unanswered_queries (
   id              uuid primary key default gen_random_uuid(),
-  organization_id uuid not null references public.organizations(id) on delete cascade,
+  organization_id uuid not null references public.organization(id) on delete cascade,
   conversation_id uuid references asistente.conversations(id) on delete set null,
   pregunta        text not null,
   mejor_similitud real,
@@ -350,7 +377,7 @@ create index if not exists unanswered_org_idx
 
 create table if not exists asistente.evaluation_sets (
   id              uuid primary key default gen_random_uuid(),
-  organization_id uuid not null references public.organizations(id) on delete cascade,
+  organization_id uuid not null references public.organization(id) on delete cascade,
   nombre          text not null,
   casos           jsonb not null default '[]'::jsonb,
   activo          boolean not null default true,
@@ -360,7 +387,7 @@ create table if not exists asistente.evaluation_sets (
 
 create table if not exists asistente.evaluation_runs (
   id              uuid primary key default gen_random_uuid(),
-  organization_id uuid not null references public.organizations(id) on delete cascade,
+  organization_id uuid not null references public.organization(id) on delete cascade,
   evaluation_set_id uuid not null
                     references asistente.evaluation_sets(id) on delete cascade,
   modelo          text not null,
@@ -388,7 +415,7 @@ create index if not exists evaluation_runs_idx
 -- =============================================================================
 
 create table if not exists asistente.usage_daily (
-  organization_id uuid not null references public.organizations(id) on delete cascade,
+  organization_id uuid not null references public.organization(id) on delete cascade,
   dia             date not null,
   n_conversaciones integer not null default 0,
   n_mensajes      integer not null default 0,
@@ -423,7 +450,7 @@ $$;
 
 create table if not exists asistente.audit_log (
   id              uuid primary key default gen_random_uuid(),
-  organization_id uuid not null references public.organizations(id) on delete cascade,
+  organization_id uuid not null references public.organization(id) on delete cascade,
   actor           text not null,
   accion          text not null,                   -- consulta|escritura|export
   recurso         text,                            -- 'cliente:4821'

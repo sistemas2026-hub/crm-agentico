@@ -50,20 +50,56 @@ def _conectar():
     return psycopg.connect(URL, connect_timeout=40)
 
 
-def cargar(ruta: Path) -> None:
+def _organizacion(cur, slug: str, org_id: str | None = None) -> str:
+    """
+    Resuelve slug -> organization_id.
+
+    El slug no existe en public.organization: esa tabla es del CRM y solo tiene
+    'name'. El vinculo vive en asistente.tenant_config.slug, y esta funcion es
+    la que lo establece la primera vez.
+
+    Tres caminos, en orden. El ultimo falla ruidosamente a proposito: vincular
+    la configuracion a la empresa equivocada mezcla los datos de dos ISP, y es
+    un error que nadie nota hasta que es tarde.
+    """
+    cur.execute("select organization_id from asistente.tenant_config where slug = %s",
+                (slug,))
+    fila = cur.fetchone()
+    if fila:
+        return fila[0]                            # ya vinculado
+
+    if org_id:
+        cur.execute("select id from public.organization where id = %s", (org_id,))
+        if not cur.fetchone():
+            raise SystemExit(f"No existe public.organization con id '{org_id}'.")
+        return org_id
+
+    cur.execute("select id, name from public.organization order by created_at")
+    orgs = cur.fetchall()
+    if len(orgs) == 1:
+        org, nombre = orgs[0]
+        print(f"    vinculando '{slug}' a la unica organizacion del CRM: {nombre}")
+        return org
+    if not orgs:
+        raise SystemExit(
+            f"El CRM no tiene ninguna organizacion todavia.\n"
+            f"Crearla primero desde el CRM: el asistente no inventa "
+            f"organizaciones, esa tabla la mantiene django-crm.")
+    listado = "\n".join(f"      {i}  {n}" for i, n in orgs)
+    raise SystemExit(
+        f"Hay {len(orgs)} organizaciones en el CRM y '{slug}' no esta vinculado "
+        f"a ninguna. Indicar cual:\n\n"
+        f"      py -3.13 cli/cargar_config.py tenants/{slug}.config.yaml --org-id <id>\n\n"
+        f"{listado}")
+
+
+def cargar(ruta: Path, org_id: str | None = None) -> None:
     cfg = cargar_config(ruta)                     # valida o revienta
     slug = cfg.identidad.slug
     datos = cfg.model_dump(mode="json")
 
     with _conectar() as con, con.cursor() as cur:
-        cur.execute("select id from public.organizations where slug = %s", (slug,))
-        fila = cur.fetchone()
-        if not fila:
-            raise SystemExit(
-                f"No existe public.organizations con slug '{slug}'.\n"
-                f"Crearla primero: el asistente no inventa organizaciones, "
-                f"porque esa tabla es de la aplicacion y no suya.")
-        org = fila[0]
+        org = _organizacion(cur, slug, org_id)
 
         # Si el contenido no cambio, no se sube la version: asi 'config_version'
         # cuenta cambios reales y no ejecuciones del comando.
@@ -87,8 +123,9 @@ def cargar(ruta: Path) -> None:
             print(f"[^] {slug}: actualizada a v{version}")
         else:
             cur.execute("""insert into asistente.tenant_config
-                             (organization_id, config, config_version)
-                           values (%s, %s, 1)""", (org, json.dumps(datos)))
+                             (organization_id, slug, config, config_version)
+                           values (%s, %s, %s, 1)""",
+                        (org, slug, json.dumps(datos)))
             print(f"[+] {slug}: cargada v1")
         con.commit()
 
@@ -102,8 +139,7 @@ def ver(slug: str) -> None:
         cur.execute("""select tc.config_version, tc.plan, tc.activo,
                               tc.actualizado_en, tc.config
                        from asistente.tenant_config tc
-                       join public.organizations o on o.id = tc.organization_id
-                       where o.slug = %s""", (slug,))
+                       where tc.slug = %s""", (slug,))
         fila = cur.fetchone()
     if not fila:
         raise SystemExit(f"'{slug}' no tiene configuracion cargada.")
@@ -122,6 +158,14 @@ if __name__ == "__main__":
     if not args:
         raise SystemExit(__doc__.split("Uso\n---")[1].strip())
 
+    # --org-id <uuid>: vincula un slug nuevo a una organizacion concreta del CRM.
+    # Solo hace falta la primera vez, y solo si hay mas de una.
+    org_id = None
+    if "--org-id" in args:
+        i = args.index("--org-id")
+        org_id = args[i + 1]
+        del args[i:i + 2]
+
     if args[0] == "--ver":
         ver(args[1])
     elif args[0] == "--todos":
@@ -133,4 +177,4 @@ if __name__ == "__main__":
             except SystemExit as e:
                 print(f"[!] {y.name}: {e}")
     else:
-        cargar(Path(args[0]))
+        cargar(Path(args[0]), org_id)

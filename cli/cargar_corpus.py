@@ -94,12 +94,19 @@ def _conectar():
 
 
 def _organizacion(cur, slug: str) -> str:
-    cur.execute("select id from public.organizations where slug = %s", (slug,))
+    """
+    El slug se resuelve contra asistente.tenant_config, no contra el CRM: la
+    tabla public.organization solo tiene 'name'. Quien establece ese vinculo es
+    cli/cargar_config.py, asi que si falta aqui es que falta el paso anterior.
+    """
+    cur.execute("select organization_id from asistente.tenant_config where slug = %s",
+                (slug,))
     fila = cur.fetchone()
     if not fila:
         raise SystemExit(
-            f"No existe public.organizations con slug '{slug}'. "
-            f"El asistente no inventa organizaciones.")
+            f"'{slug}' no tiene configuracion cargada, asi que no se sabe a que "
+            f"organizacion del CRM pertenece.\n"
+            f"Cargarla primero:  py -3.13 cli/cargar_config.py tenants/{slug}.config.yaml")
     return fila[0]
 
 
