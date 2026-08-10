@@ -32,9 +32,10 @@ nada y cada fragmento es una llamada real al modelo de embeddings.
 
 Conexion
 --------
-Mismo patron que cli/cargar_config.py: conexion directa por DATABASE_URL, sin
-cambiar a app_backend. Es una herramienta de operacion (como una migracion),
-no el backend que sirve peticiones — ese si debe usar app_backend siempre.
+Mismo patron que cli/cargar_config.py: conexion directa con el usuario del
+.env (ver nucleo/persistencia/conexion.py), sin cambiar a app_backend. Es una
+herramienta de operacion (como una migracion), no el backend que sirve
+peticiones — ese si debe usar app_backend siempre.
 
 Uso
 ---
@@ -47,7 +48,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import sys
 import time
 from pathlib import Path
@@ -62,12 +62,10 @@ from dotenv import load_dotenv                                 # noqa: E402
 
 from nucleo.config import cargar_config                        # noqa: E402
 from nucleo.ingesta.docx import procesar                       # noqa: E402
+from nucleo.persistencia.conexion import dsn                   # noqa: E402
 from ingerir import clasificar, perfil_de                      # noqa: E402  (reutiliza lo ya construido)
 
 load_dotenv(RAIZ / ".env", override=True)
-URL = os.environ.get("DATABASE_URL")
-if not URL:
-    raise SystemExit("Falta DATABASE_URL en el .env")
 
 MODELO_EMBEDDINGS = "bge-m3"
 DIMENSIONES = 1024
@@ -90,7 +88,7 @@ def _vectorizar(texto: str) -> list[float]:
 
 
 def _conectar():
-    return psycopg.connect(URL, connect_timeout=40)
+    return psycopg.connect(dsn(), connect_timeout=40)
 
 
 def _organizacion(cur, slug: str) -> str:

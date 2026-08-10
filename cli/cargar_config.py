@@ -28,7 +28,6 @@ Uso
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -39,15 +38,13 @@ RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ))
 
 from nucleo.config import cargar_config          # noqa: E402
+from nucleo.persistencia.conexion import dsn     # noqa: E402
 
 load_dotenv(RAIZ / ".env", override=True)
-URL = os.environ.get("DATABASE_URL")
-if not URL:
-    raise SystemExit("Falta DATABASE_URL en el .env")
 
 
 def _conectar():
-    return psycopg.connect(URL, connect_timeout=40)
+    return psycopg.connect(dsn(), connect_timeout=40)
 
 
 def _organizacion(cur, slug: str, org_id: str | None = None) -> str:

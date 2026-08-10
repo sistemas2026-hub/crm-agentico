@@ -1,0 +1,179 @@
+# =============================================================================
+#  PRODUCCION  --  el que despliega Dokploy en el VPS
+# =============================================================================
+#  Se mantiene aparte de docker-compose.yml (desarrollo) en vez de
+#  parametrizar uno solo: dos archivos explicitos se auditan de un vistazo,
+#  y un default mal puesto en un archivo unico es lo que conecta la maquina de
+#  alguien contra la base real sin que se note.
+#
+#  DIFERENCIAS CON EL DE DESARROLLO
+#  --------------------------------
+#  - NO existe el servicio 'db'. La base es el Supabase del mismo servidor.
+#    Ademas el compose de desarrollo publica 5432, que en el VPS ya lo ocupa
+#    el pooler del Supabase viejo: levantarlo ahi da 'address already in use'.
+#  - NADIE publica puertos. Dokploy enruta por dominio con su Traefik, que
+#    habla con los contenedores por la red interna. Publicar puertos aqui los
+#    expondria a internet sin pasar por TLS.
+#  - Sin bind mounts del codigo. En produccion manda la imagen construida, no
+#    lo que haya en el disco del servidor.
+#  - Las variables NO salen de archivos .env, que no viajan en el repositorio.
+#    Se declaran aca y Dokploy las inyecta desde la seccion Environment del
+#    servicio. Explicito y auditable: lo que no este listado, no llega.
+#
+#  PENDIENTE ANTES DE EXPONERLO A INTERNET
+#  ---------------------------------------
+#  1. El backend corre con 'manage.py runserver', que Django documenta como
+#     NO apto para produccion (un solo hilo, sin endurecer). Lo correcto es
+#     gunicorn, que hoy no esta en django-crm/backend/requirements.txt.
+#  2. El frontend corre 'pnpm dev', el servidor de desarrollo: recompila en
+#     caliente y consume bastante mas memoria. El proyecto ya tiene
+#     @sveltejs/adapter-node configurado, asi que 'pnpm build' + 'node build'
+#     es cuestion de ajustar su Dockerfile.
+#  Ambos archivos son de django-crm/ y conviene acordarlos antes de tocarlos.
+# =============================================================================
+
+services:
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build:
+      context: ./django-crm
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      # --- Django ---
+      SECRET_KEY: ${SECRET_KEY:?definir en Dokploy, no reusar la de dev}
+      # False: con DEBUG=True Django muestra la traza completa -incluidas las
+      # variables de entorno, o sea las credenciales- en cualquier error.
+      DEBUG: "False"
+      ENV_TYPE: prod
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:?dominios del backend, separados por coma}
+      DOMAIN_NAME: ${DOMAIN_NAME:?URL publica del backend}
+      # --- Base: el Supabase de este mismo servidor ---
+      DBHOST: ${DBHOST:?}
+      DBPORT: ${DBPORT:?}
+      DBNAME: ${DBNAME:?}
+      DBUSER: ${DBUSER:?}
+      DBPASSWORD: ${DBPASSWORD:?}
+      # --- Celery ---
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      # --- Correo ---
+      DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-noreply@rapilinksas.co}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?}
+      CORS_ALLOW_ALL: "False"
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: /bin/bash /entrypoint.sh
+    volumes:
+      - ./django-crm/docker/backend/entrypoint.sh:/entrypoint.sh:ro
+
+  celery-worker:
+    build:
+      context: ./django-crm
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      SECRET_KEY: ${SECRET_KEY:?}
+      DEBUG: "False"
+      DBHOST: ${DBHOST:?}
+      DBPORT: ${DBPORT:?}
+      DBNAME: ${DBNAME:?}
+      DBUSER: ${DBUSER:?}
+      DBPASSWORD: ${DBPASSWORD:?}
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: celery -A crm worker --loglevel=info
+
+  celery-beat:
+    build:
+      context: ./django-crm
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      SECRET_KEY: ${SECRET_KEY:?}
+      DEBUG: "False"
+      DBHOST: ${DBHOST:?}
+      DBPORT: ${DBPORT:?}
+      DBNAME: ${DBNAME:?}
+      DBUSER: ${DBUSER:?}
+      DBPASSWORD: ${DBPASSWORD:?}
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: celery -A crm beat --loglevel=info
+
+  frontend:
+    build:
+      context: ./django-crm/frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      # PUBLIC_ lo usa el NAVEGADOR: tiene que ser el dominio publico del
+      # backend, no un nombre de la red interna que el navegador no resuelve.
+      PUBLIC_DJANGO_API_URL: ${PUBLIC_DJANGO_API_URL:?dominio publico del backend}
+      # PRIVATE_ lo usa el codigo que corre DENTRO del contenedor: ahi si vale
+      # el nombre del servicio.
+      PRIVATE_DJANGO_API_URL: http://backend:8000
+    depends_on:
+      - backend
+
+  # Solo embeddings (bge-m3). El LLM va a la API de DeepSeek: los cinco roles
+  # estan redirigidos en tenants/rapilink.config.yaml.
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    environment:
+      # Sin esto el modelo se descarga de memoria tras 5 minutos ocioso y la
+      # primera consulta despues de una pausa paga la recarga (RNF-04).
+      OLLAMA_KEEP_ALIVE: "-1"
+    volumes:
+      - ollama_models:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  motor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      # Conexion: las mismas cinco que el CRM. nucleo/persistencia/conexion.py
+      # compone la cadena con ellas.
+      DBHOST: ${DBHOST:?}
+      DBPORT: ${DBPORT:?}
+      DBNAME: ${DBNAME:?}
+      DBUSER: ${DBUSER:?}
+      DBPASSWORD: ${DBPASSWORD:?}
+      OLLAMA_HOST: http://ollama:11434
+      WISPHUB_API_KEY: ${WISPHUB_API_KEY:?}
+      WISPHUB_BASE_URL: ${WISPHUB_BASE_URL:-https://api.wisphub.io}
+      WISPHUB_MODO_REAL: ${WISPHUB_MODO_REAL:-true}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?}
+    depends_on:
+      ollama:
+        condition: service_healthy
+
+volumes:
+  # Los modelos descargados. Sin esto, cada redespliegue vuelve a bajar 1.2 GB
+  # y la primera consulta espera a que termine.
+  ollama_models:

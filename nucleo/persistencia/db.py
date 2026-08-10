@@ -35,8 +35,9 @@ no de modelo. Dos diferencias reales:
 
 POR QUE SE BAJA A app_backend  (no es opcional)
 -----------------------------------------------
-El usuario que conecta (DATABASE_URL) es 'postgres', y en esta instalacion
-tiene BYPASSRLS: verificado contra la base, rolbypassrls = true. Con ese rol
+El usuario que conecta (DBUSER, ver nucleo/persistencia/conexion.py) es
+'postgres', y en esta instalacion tiene BYPASSRLS: verificado contra la base,
+rolbypassrls = true. Con ese rol
 las politicas de aislamiento NO se evaluan y un olvido de filtro expondria
 las conversaciones de otro ISP.
 
@@ -60,24 +61,16 @@ igual que ya decidia el PRD para 'messages'.
 
 from __future__ import annotations
 
-import os
 from contextlib import contextmanager
 
 import psycopg
 from psycopg.rows import dict_row
 
+from nucleo.persistencia.conexion import dsn
+
 # Cache de slug -> organization_id. El vinculo lo crea cli/cargar_config.py y
 # no cambia en caliente: si cambiara, el proceso se reinicia igual.
 _ORGS: dict[str, str] = {}
-
-
-def _url() -> str:
-    url = os.environ.get("DATABASE_URL")
-    if not url:
-        raise RuntimeError(
-            "Falta DATABASE_URL en el entorno. La persistencia del motor "
-            "escribe en Postgres (Supabase), no en un archivo local.")
-    return url
 
 
 def _organizacion(cur, tenant: str) -> str:
@@ -110,7 +103,7 @@ def sesion(tenant: str):
 
     Entrega (cursor, organization_id). Commit al salir sin excepcion.
     """
-    con = psycopg.connect(_url(), connect_timeout=30, row_factory=dict_row)
+    con = psycopg.connect(dsn(), connect_timeout=30, row_factory=dict_row)
     try:
         with con.cursor() as cur:
             org = _organizacion(cur, tenant)         # antes de bajar de rol

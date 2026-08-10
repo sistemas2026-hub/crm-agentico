@@ -42,6 +42,17 @@ services:
       - django-crm/.env.docker
       - path: django-crm/.env.docker.local
         required: false
+    environment:
+      # Traduccion del .env de la raiz a los nombres que usa Django
+      # (settings.py lee DBNAME/DBUSER/DBPASSWORD/DBHOST/DBPORT). Una sola
+      # fuente: si el .env apunta a Supabase, el CRM y el motor van los dos
+      # a Supabase; si no define nada, ambos se quedan en el 'db' local.
+      # Los valores por defecto reproducen lo que traia .env.docker.
+      DBHOST: ${DBHOST:-db}
+      DBPORT: ${DBPORT:-5432}
+      DBNAME: ${DBNAME:-crm_db}
+      DBUSER: ${DBUSER:-crm_user}
+      DBPASSWORD: ${DBPASSWORD:-crm_password}
     volumes:
       - ./django-crm/backend:/app
       - ./django-crm/docker/backend/entrypoint.sh:/entrypoint.sh:ro
@@ -62,6 +73,17 @@ services:
       - django-crm/.env.docker
       - path: django-crm/.env.docker.local
         required: false
+    environment:
+      # Traduccion del .env de la raiz a los nombres que usa Django
+      # (settings.py lee DBNAME/DBUSER/DBPASSWORD/DBHOST/DBPORT). Una sola
+      # fuente: si el .env apunta a Supabase, el CRM y el motor van los dos
+      # a Supabase; si no define nada, ambos se quedan en el 'db' local.
+      # Los valores por defecto reproducen lo que traia .env.docker.
+      DBHOST: ${DBHOST:-db}
+      DBPORT: ${DBPORT:-5432}
+      DBNAME: ${DBNAME:-crm_db}
+      DBUSER: ${DBUSER:-crm_user}
+      DBPASSWORD: ${DBPASSWORD:-crm_password}
     volumes:
       - ./django-crm/backend:/app
     depends_on:
@@ -79,6 +101,17 @@ services:
       - django-crm/.env.docker
       - path: django-crm/.env.docker.local
         required: false
+    environment:
+      # Traduccion del .env de la raiz a los nombres que usa Django
+      # (settings.py lee DBNAME/DBUSER/DBPASSWORD/DBHOST/DBPORT). Una sola
+      # fuente: si el .env apunta a Supabase, el CRM y el motor van los dos
+      # a Supabase; si no define nada, ambos se quedan en el 'db' local.
+      # Los valores por defecto reproducen lo que traia .env.docker.
+      DBHOST: ${DBHOST:-db}
+      DBPORT: ${DBPORT:-5432}
+      DBNAME: ${DBNAME:-crm_db}
+      DBUSER: ${DBUSER:-crm_user}
+      DBPASSWORD: ${DBPASSWORD:-crm_password}
     volumes:
       - ./django-crm/backend:/app
     depends_on:
