@@ -99,13 +99,35 @@ VITE_SUPABASE_URL          proyecto
 VITE_SUPABASE_ANON_KEY     pública por diseño — protegida por RLS
 SUPABASE_SERVICE_ROLE_KEY  ⚠️  solo migraciones (ver abajo)
 
-DATABASE_URL               ⏳ pendiente: conexión como rol app_backend
+DATABASE_URL               conexión al Postgres del Supabase propio
+POSTGRES_PASSWORD          la usa DATABASE_URL; separada para poder rearmarla
+POOLER_TENANT_ID           lo exige Supavisor en el usuario: postgres.<id>
 ```
 
-### ⚠️ Sobre `SUPABASE_SERVICE_ROLE_KEY`
+`django-crm/.env.docker.local` (ignorado por git) apunta Django al mismo Postgres, sobreescribiendo el bloque de base de datos de `.env.docker`. El servicio `db` del compose sigue existiendo pero ya no se usa.
+
+### ⚠️ `BYPASSRLS` no es solo de `SUPABASE_SERVICE_ROLE_KEY`
 
 Ese rol tiene `BYPASSRLS`: **las políticas de aislamiento no se evalúan para él**. Comprobado en la prueba del esquema — como superusuario se ven los datos de todos los tenants.
 
-Por eso el backend **no** debe usarlo para consultar datos de tenant. Se conecta como `app_backend`, que sí respeta RLS, fijando `set local app.current_tenant` en cada petición. `SUPABASE_SERVICE_ROLE_KEY` queda para migraciones y mantenimiento.
+**Y el rol `postgres` de esta instalación también lo tiene.** Verificado contra la base: `select rolbypassrls from pg_roles where rolname='postgres'` devuelve `true`. Como `DATABASE_URL` conecta justamente como `postgres`, cualquier consulta que se quede en ese rol ve los datos de todas las organizaciones sin que nada lo impida.
 
-Falta agregar `DATABASE_URL` con esa conexión.
+Por eso `DATABASE_URL` tiene **dos usos que no hay que confundir**:
+
+| Uso | Rol efectivo | Quién |
+|---|---|---|
+| Operación: migraciones, carga de configuración y corpus | `postgres` | `cli/`, `supabase/01_schema.sql` |
+| Servir peticiones | `app_backend` | `nucleo/persistencia/db.py` |
+
+El motor abre transacción, hace `set local role app_backend` y fija `set local app.current_tenant` en cada operación — ver el encabezado de `nucleo/persistencia/db.py`. Ambos `local`, para que una petición no herede el tenant de otra al reutilizarse la conexión.
+
+Medido sobre `asistente.conversations` con una fila cargada:
+
+| Conexión | Filas visibles |
+|---|---|
+| `postgres` (BYPASSRLS), sin fijar tenant | 1 |
+| `app_backend` + tenant correcto | 1 |
+| `app_backend` + tenant de otra empresa | 0 |
+| `app_backend` **sin** fijar tenant | 0 |
+
+La última fila es la propiedad que importa: olvidar fijar el tenant no devuelve todo, devuelve nada. Falla cerrado.
