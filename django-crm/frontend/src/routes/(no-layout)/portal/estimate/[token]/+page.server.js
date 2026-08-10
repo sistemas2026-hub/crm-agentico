@@ -6,19 +6,21 @@
  */
 
 import { error, fail } from '@sveltejs/kit';
-import { env } from '$env/dynamic/public';
+import { env } from '$env/dynamic/private';
+import { env as publicEnv } from '$env/dynamic/public';
 
-// The Django API, reached server-to-server. Absolute (not a relative `/api/...`
-// that only resolves behind a production reverse proxy) so the anonymous portal
+// The Django API, reached server-to-server -- PRIVATE_ over PUBLIC_ (see
+// lib/api-helpers.js). Absolute (not a relative `/api/...` that only
+// resolves behind a production reverse proxy) so the anonymous portal
 // works the same in dev and prod. The CSAT loader takes the same approach.
-const API_BASE_URL = `${env.PUBLIC_DJANGO_API_URL}/api`;
+const API_BASE_URL = `${env.PRIVATE_DJANGO_API_URL || publicEnv.PUBLIC_DJANGO_API_URL}/api`;
 
 /** @type {import('./$types').PageServerLoad} */
 export async function load({ params, fetch }) {
   const { token } = params;
 
   if (!token) {
-    throw error(400, 'Estimate token is required');
+    throw error(400, 'Se requiere el token de la cotización');
   }
 
   try {
@@ -29,9 +31,9 @@ export async function load({ params, fetch }) {
 
     if (!response.ok) {
       if (response.status === 404) {
-        throw error(404, 'Estimate not found or link has expired');
+        throw error(404, 'No se encontró la cotización o el enlace venció');
       }
-      throw error(response.status, 'Failed to load estimate');
+      throw error(response.status, 'No se pudo cargar la cotización');
     }
 
     const estimate = await response.json();
@@ -40,7 +42,7 @@ export async function load({ params, fetch }) {
   } catch (err) {
     if (err.status) throw err;
     console.error('Error loading public estimate:', err);
-    throw error(500, 'Failed to load estimate');
+    throw error(500, 'No se pudo cargar la cotización');
   }
 }
 
@@ -59,7 +61,7 @@ export const actions = {
 
     if (!name || !email) {
       return fail(400, {
-        error: 'Please enter your name and email to accept this estimate.',
+        error: 'Por favor ingresá tu nombre y correo para aceptar esta cotización.',
         values: { name, email }
       });
     }
@@ -78,7 +80,7 @@ export const actions = {
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
         return fail(response.status, {
-          error: data.message || 'Failed to accept estimate',
+          error: data.message || 'No se pudo aceptar la cotización',
           values: { name, email }
         });
       }
@@ -86,7 +88,7 @@ export const actions = {
       return { success: true, action: 'accepted' };
     } catch (err) {
       console.error('Error accepting estimate:', err);
-      return fail(500, { error: 'Failed to accept estimate' });
+      return fail(500, { error: 'No se pudo aceptar la cotización' });
     }
   },
 
@@ -103,13 +105,13 @@ export const actions = {
 
       if (!response.ok) {
         const data = await response.json();
-        return fail(response.status, { error: data.message || 'Failed to decline estimate' });
+        return fail(response.status, { error: data.message || 'No se pudo rechazar la cotización' });
       }
 
       return { success: true, action: 'declined' };
     } catch (err) {
       console.error('Error declining estimate:', err);
-      return fail(500, { error: 'Failed to decline estimate' });
+      return fail(500, { error: 'No se pudo rechazar la cotización' });
     }
   }
 };

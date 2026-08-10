@@ -47,12 +47,12 @@ export const actions = {
   publish: async ({ cookies, request }) => {
     const form = await request.formData();
     const id = form.get('id')?.toString();
-    if (!id) return fail(400, { error: 'No article to publish.' });
+    if (!id) return fail(400, { error: 'No hay artículo para publicar.' });
 
     try {
       await setPublished({ cookies }, id, true);
     } catch (/** @type {any} */ err) {
-      return fail(400, { error: readableError(err, 'Could not publish this article.') });
+      return fail(400, { error: readableError(err, 'No se pudo publicar este artículo.') });
     }
     return { published: true };
   }

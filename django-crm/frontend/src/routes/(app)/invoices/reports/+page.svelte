@@ -33,31 +33,31 @@
 
   /** "2026-07" → "Jul". The year only appears where it changes. */
   const MONTH = [
-    'Jan',
+    'Ene',
     'Feb',
     'Mar',
-    'Apr',
+    'Abr',
     'May',
     'Jun',
     'Jul',
-    'Aug',
+    'Ago',
     'Sep',
     'Oct',
     'Nov',
-    'Dec'
+    'Dic'
   ];
   const monthLabel = (period) => MONTH[Number(period.slice(5, 7)) - 1];
 
   let collected = $derived(Math.round((d.total_paid / d.total_invoiced) * 100));
 </script>
 
-<PageHeader title="Invoices">
+<PageHeader title="Facturas">
   {#snippet sub()}
     {#if canView}
-      Last <span class="v2-num">{d.window_months}</span> months ·
-      <span class="v2-num">{count(d.invoice_count)}</span> invoices
+      Últimos <span class="v2-num">{d.window_months}</span> meses ·
+      <span class="v2-num">{count(d.invoice_count)}</span> facturas
     {:else}
-      Financial reports
+      Reportes financieros
     {/if}
   {/snippet}
 </PageHeader>
@@ -67,36 +67,36 @@
 {#if !canView}
   <div class="v2-pad" style="padding-top:40px">
     <div class="v2-card rep-locked">
-      <strong>These reports are for administrators.</strong>
+      <strong>Estos reportes son para administradores.</strong>
       <p>
-        Invoiced and collected totals, revenue by month and accounts-receivable aging cover the
-        whole organisation's money, so they are limited to admins. Your own invoices and estimates
-        are on the <a href="/invoices">Invoices</a> and
-        <a href="/invoices/estimates">Estimates</a> tabs.
+        Los totales facturados y cobrados, los ingresos por mes y la antigüedad de cuentas por
+        cobrar cubren el dinero de toda la organización, así que están limitados a administradores.
+        Tus propias facturas y cotizaciones están en las pestañas <a href="/invoices">Facturas</a> y
+        <a href="/invoices/estimates">Cotizaciones</a>.
       </p>
     </div>
   </div>
 {:else}
   <div class="v2-pad" style="padding-top:16px;flex:none">
     <div class="v2-stats">
-      <StatCard label="Invoiced" value={money(d.total_invoiced, data.org.currency)} tone="ink" />
+      <StatCard label="Facturado" value={money(d.total_invoiced, data.org.currency)} tone="ink" />
       <StatCard
-        label="Collected"
+        label="Cobrado"
         value={money(d.total_paid, data.org.currency)}
         tone="moss"
-        detail="{collected}% of invoiced"
+        detail="{collected}% de lo facturado"
       />
       <StatCard
-        label="Overdue"
+        label="Vencido"
         value={money(d.overdue_amount, data.org.currency)}
         tone={d.overdue_amount > 0 ? 'rust' : 'slate'}
-        detail="{count(aging.overdue_count)} invoices past their due date"
+        detail="{count(aging.overdue_count)} facturas pasaron su vencimiento"
       />
       <StatCard
-        label="Average time to pay"
+        label="Tiempo promedio de cobro"
         value={`${d.average_days_to_pay}d`}
         tone="slate"
-        detail="From issue to payment"
+        detail="Desde la emisión hasta el pago"
       />
     </div>
   </div>
@@ -105,7 +105,7 @@
     <div class="v2-pad" style="padding-bottom:32px">
       <div class="v2-split-wide">
         <div>
-          <div class="v2-label" style="margin-bottom:12px">Invoiced and collected, by month</div>
+          <div class="v2-label" style="margin-bottom:12px">Facturado y cobrado, por mes</div>
           <div class="v2-card" style="padding:16px 18px 14px">
             <!-- Side by side, never stacked: a stacked column's height would
                read as invoiced + paid, which is not a quantity anyone has. -->
@@ -116,7 +116,7 @@
                   title="{monthLabel(r.period)}: {money(
                     r.invoiced,
                     data.org.currency
-                  )} invoiced, {money(r.paid, data.org.currency)} collected"
+                  )} facturado, {money(r.paid, data.org.currency)} cobrado"
                 >
                   <i class="in" style="height:{(r.invoiced / peak) * 100}%"></i>
                   <i class="out" style="height:{(r.paid / peak) * 100}%"></i>
@@ -130,20 +130,21 @@
             </div>
 
             <div class="v2-sub" style="font-size:11.5px;margin-top:12px">
-              <i class="v2-swatch v2-swatch-in"></i>invoiced
-              <i class="v2-swatch" style="margin-left:10px"></i>collected
+              <i class="v2-swatch v2-swatch-in"></i>facturado
+              <i class="v2-swatch" style="margin-left:10px"></i>cobrado
             </div>
 
             <!-- Said once, here, rather than left to be misread every month. -->
             <p class="v2-sub" style="font-size:11.5px;margin:11px 0 0;line-height:1.5">
-              Each is counted in the month it happened, so they do not line up: the gap in the most
-              recent month is earlier invoices still being paid, not a drop in sales.
+              Cada uno se cuenta en el mes en que ocurrió, así que no coinciden: la brecha en el mes
+              más reciente es facturas anteriores que todavía se están cobrando, no una caída en las
+              ventas.
             </p>
           </div>
         </div>
 
         <div>
-          <div class="v2-label" style="margin-bottom:12px">How late the overdue money is</div>
+          <div class="v2-label" style="margin-bottom:12px">Qué tan atrasado está el dinero vencido</div>
           <div class="v2-card" style="padding:16px 18px">
             <div style="display:flex;flex-direction:column;gap:13px">
               {#each aging.buckets as b (b.key)}
@@ -152,7 +153,7 @@
                     <span style="font-size:12.5px">{b.label}</span>
                     <span class="v2-sub" style="font-size:11px">
                       <span class="v2-num">{count(b.count)}</span>
-                      {b.count === 1 ? 'invoice' : 'invoices'}
+                      {b.count === 1 ? 'factura' : 'facturas'}
                     </span>
                     <span class="v2-num" style="margin-left:auto;font-size:13px;font-weight:600">
                       {money(b.amount, data.org.currency)}
@@ -175,12 +176,12 @@
             one it dwarfs the rest and makes late money look small.
           -->
             <div class="v2-aging-note">
-              <span class="v2-sub">Not yet due</span>
+              <span class="v2-sub">Todavía no vence</span>
               <span class="v2-num" style="font-size:13px"
                 >{money(aging.not_yet_due.amount, data.org.currency)}</span
               >
               <span class="v2-sub" style="font-size:11px">
-                across {count(aging.not_yet_due.count)} invoices, not late, not shown above
+                en {count(aging.not_yet_due.count)} facturas, no está atrasado, no se muestra arriba
               </span>
             </div>
           </div>
@@ -191,15 +192,15 @@
          enough in height to sit side by side; adding the table to either
          column left the other one blank for a third of the page. -->
       <div>
-        <div class="v2-label" style="margin:22px 0 10px">Who owes it</div>
+        <div class="v2-label" style="margin:22px 0 10px">Quién debe</div>
         <div class="v2-table-wrap">
           <table class="v2-table">
             <thead>
               <tr>
-                <th>Account</th>
-                <th style="text-align:right">Invoices</th>
-                <th style="text-align:right">Oldest</th>
-                <th style="text-align:right">Overdue</th>
+                <th>Cuenta</th>
+                <th style="text-align:right">Facturas</th>
+                <th style="text-align:right">Más antigua</th>
+                <th style="text-align:right">Vencido</th>
               </tr>
             </thead>
             <tbody>
@@ -226,8 +227,8 @@
           </table>
         </div>
         <p class="v2-sub" style="font-size:11.5px;margin-top:10px">
-          These {data.overdueByAccount.length} accounts are the whole overdue balance, not the top few
-          of a longer list.
+          Estas {data.overdueByAccount.length} cuentas son todo el saldo vencido, no las primeras de
+          una lista más larga.
         </p>
       </div>
     </div>

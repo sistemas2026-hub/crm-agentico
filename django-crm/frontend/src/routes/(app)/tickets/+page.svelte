@@ -7,7 +7,7 @@
   import Avatar from '$lib/v2/components/Avatar.svelte';
   import EmptyState from '$lib/v2/components/EmptyState.svelte';
   import { count, shortAge } from '$lib/v2/format.js';
-  import { PRIORITY_TONE, CASE_STATUS_TONE } from '$lib/v2/enums.js';
+  import { PRIORITY_TONE, CASE_STATUS_TONE, CASE_PRIORITY_LABEL, CASE_STATUS_LABEL } from '$lib/v2/enums.js';
   import { Plus, LifeBuoy } from '@lucide/svelte';
 
   /** @type {{ data: any }} */
@@ -35,22 +35,22 @@
     if (t.first_response_at) {
       const took =
         (new Date(t.first_response_at).getTime() - new Date(t.opened_at).getTime()) / 6e4;
-      return { state: 'met', label: `Met in ${fmtMins(took)}`, tone: 'moss' };
+      return { state: 'met', label: `Cumplido en ${fmtMins(took)}`, tone: 'moss' };
     }
     if (!t.first_response_deadline) {
-      return { state: 'none', label: 'No target', tone: 'slate' };
+      return { state: 'none', label: 'Sin objetivo', tone: 'slate' };
     }
     const now = Date.now();
     const opened = new Date(t.opened_at).getTime();
     const due = new Date(t.first_response_deadline).getTime();
     if (now >= due) {
-      return { state: 'breached', label: `${fmtMins((now - due) / 6e4)} over`, tone: 'rust' };
+      return { state: 'breached', label: `${fmtMins((now - due) / 6e4)} de más`, tone: 'rust' };
     }
     const pct = Math.max(0, Math.min(100, Math.round(((now - opened) / (due - opened)) * 100)));
     return {
       state: 'running',
       pct,
-      label: `${fmtMins((due - now) / 6e4)} left`,
+      label: `${fmtMins((due - now) / 6e4)} restantes`,
       tone: pct >= 75 ? 'rust' : pct >= 50 ? 'clay' : 'slate'
     };
   }
@@ -73,20 +73,20 @@
 
 <PageHeader title="Tickets">
   {#snippet sub()}
-    <span class="v2-num">{count(totals.open)}</span> open ·
-    <span class="v2-num" style="color:var(--v2-rust)">{totals.urgent}</span> urgent ·
+    <span class="v2-num">{count(totals.open)}</span> abiertos ·
+    <span class="v2-num" style="color:var(--v2-rust)">{totals.urgent}</span> urgentes ·
     <!-- Not "breaching today". A breach depends on the org's business calendar
          and is a per-row calculation; nobody having replied yet is a fact the
          queue can establish, and it is the one that decides what to open. -->
-    <span class="v2-num">{count(totals.awaiting_reply)}</span> with no reply yet
+    <span class="v2-num">{count(totals.awaiting_reply)}</span> sin respuesta todavía
   {/snippet}
   {#snippet actions()}
-    <a class="v2-btn v2-btn-primary" href="/tickets/new"><Plus />New ticket</a>
+    <a class="v2-btn v2-btn-primary" href="/tickets/new"><Plus />Nuevo ticket</a>
   {/snippet}
 </PageHeader>
 
 {#if page.url.search}
-  <p class="v2-sub" style="font-size:11.5px;margin:8px 0 0">These numbers describe the filtered queue.</p>
+  <p class="v2-sub" style="font-size:11.5px;margin:8px 0 0">Estos números describen la cola filtrada.</p>
 {/if}
 
 <!-- Approvals and Analytics were buttons in this header that went nowhere.
@@ -100,25 +100,25 @@
   people={data.people}
   tags={data.tags}
   meId={data.meId}
-  meta="First-reply targets come from each ticket's SLA hours"
+  meta="Los objetivos de primera respuesta vienen de las horas de SLA de cada ticket"
 />
 
 <div class="v2-scroll">
   {#if tickets.length === 0}
     <!-- An empty queue is good news, so it does not read like a failure. -->
     <EmptyState
-      title={data.showAll ? 'No tickets here yet' : 'The queue is clear'}
+      title={data.showAll ? 'Todavía no hay tickets acá' : 'La cola está despejada'}
       body={data.showAll
-        ? 'Nothing has been raised in this workspace. Tickets arrive here from email, the portal, and anyone who replies to a closed one.'
-        : 'Nothing is waiting on your team right now. Closed and rejected tickets are still here. They are just not in the way.'}
+        ? 'No se creó nada en este espacio de trabajo. Los tickets llegan acá por correo, el portal, y cualquiera que responda a uno cerrado.'
+        : 'Nada está esperando a tu equipo ahora mismo. Los tickets cerrados y rechazados siguen acá. Simplemente no estorban.'}
     >
       {#snippet icon()}<LifeBuoy size={21} />{/snippet}
       {#snippet actions()}
-        <a class="v2-btn v2-btn-primary" href="/tickets/new">New ticket</a>
+        <a class="v2-btn v2-btn-primary" href="/tickets/new">Nuevo ticket</a>
         {#if !data.showAll}
-          <a class="v2-btn" href="/tickets?all=1">Show closed too</a>
+          <a class="v2-btn" href="/tickets?all=1">Mostrar los cerrados también</a>
         {/if}
-        <a class="v2-btn" href="/solutions">Knowledge base</a>
+        <a class="v2-btn" href="/solutions">Base de conocimiento</a>
       {/snippet}
     </EmptyState>
   {:else}
@@ -126,14 +126,14 @@
       <table class="v2-table">
         <thead>
           <tr>
-            <th>Subject</th>
-            <th>Priority</th>
-            <th>Status</th>
-            <th>Type</th>
-            <th>Account</th>
-            <th>Assignee</th>
-            <th class="v2-r">Age</th>
-            <th style="width:130px">First reply</th>
+            <th>Asunto</th>
+            <th>Prioridad</th>
+            <th>Estado</th>
+            <th>Tipo</th>
+            <th>Cuenta</th>
+            <th>Asignado a</th>
+            <th class="v2-r">Antigüedad</th>
+            <th style="width:130px">Primera respuesta</th>
           </tr>
         </thead>
         <tbody>
@@ -145,8 +145,8 @@
                   <span class="v2-table-primary">{t.name}</span>
                 </a>
               </td>
-              <td><Pill tone={PRIORITY_TONE[t.priority]}>{t.priority}</Pill></td>
-              <td data-m="tag"><Pill tone={CASE_STATUS_TONE[t.status]}>{t.status}</Pill></td>
+              <td><Pill tone={PRIORITY_TONE[t.priority]}>{CASE_PRIORITY_LABEL[t.priority] ?? t.priority}</Pill></td>
+              <td data-m="tag"><Pill tone={CASE_STATUS_TONE[t.status]}>{CASE_STATUS_LABEL[t.status] ?? t.status}</Pill></td>
               <!-- Nullable on the model and null on plenty of rows, so it says
                    so rather than printing an empty cell. -->
               <td class="v2-muted" data-m="hide" style="font-size:12.5px">
@@ -156,14 +156,14 @@
                 {#if t.account}
                   <a class="v2-row-link" href="/accounts/{t.account.id}">{t.account.name}</a>
                 {:else}
-                  No account
+                  Sin cuenta
                 {/if}
               </td>
               <td data-m="hide">
                 {#if t.assignee}
                   <Avatar name={t.assignee} size={22} />
                 {:else}
-                  <span class="v2-muted" style="font-size:12.5px">Unassigned</span>
+                  <span class="v2-muted" style="font-size:12.5px">Sin asignar</span>
                 {/if}
               </td>
               <td class="v2-r v2-num v2-muted" data-m="meta">{shortAge(t.opened_at)}</td>
@@ -199,12 +199,12 @@
       </table>
     </div>
     <p class="v2-sub v2-pad" style="font-size:12px;padding-bottom:24px">
-      Showing <span class="v2-num">{tickets.length}</span> of
+      Mostrando <span class="v2-num">{tickets.length}</span> de
       <span class="v2-num">{count(totals.count)}</span>
       {#if !data.showAll}
-        · <a href="/tickets?all=1" style="color:inherit">include closed</a>
+        · <a href="/tickets?all=1" style="color:inherit">incluir cerrados</a>
       {:else}
-        · <a href="/tickets" style="color:inherit">open only</a>
+        · <a href="/tickets" style="color:inherit">solo abiertos</a>
       {/if}
     </p>
   {/if}

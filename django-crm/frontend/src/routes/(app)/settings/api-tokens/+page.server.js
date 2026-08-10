@@ -61,7 +61,7 @@ export const actions = {
     const name = form.get('name')?.toString().trim();
     const expires_at = expiryFromChoice(form.get('expiry')?.toString());
     const scopes = scopesFromChoice(form.get('access')?.toString());
-    if (!name) return fail(400, { create: { error: 'Give the token a name.' } });
+    if (!name) return fail(400, { create: { error: 'Ponele un nombre al token.' } });
 
     try {
       const res = await createToken({ cookies }, { name, expires_at, scopes });
@@ -80,8 +80,8 @@ export const actions = {
         create: {
           error:
             err?.status === 403
-              ? 'You do not have permission to create tokens here.'
-              : readableError(err, 'Could not create that token.')
+              ? 'No tenés permiso para crear tokens acá.'
+              : readableError(err, 'No se pudo crear ese token.')
         }
       });
     }
@@ -91,15 +91,15 @@ export const actions = {
   revoke: async ({ cookies, request }) => {
     const form = await request.formData();
     const id = form.get('id')?.toString();
-    if (!id) return fail(400, { error: 'Which token?' });
+    if (!id) return fail(400, { error: '¿Qué token?' });
     try {
       await revokeToken({ cookies }, id);
     } catch (/** @type {any} */ err) {
       return fail(err?.status === 403 ? 403 : 400, {
         error:
           err?.status === 403
-            ? 'Only an admin can revoke tokens.'
-            : readableError(err, 'Could not revoke that token.')
+            ? 'Solo un administrador puede revocar tokens.'
+            : readableError(err, 'No se pudo revocar ese token.')
       });
     }
     return { revoked: id };
@@ -118,8 +118,8 @@ export const actions = {
       return fail(err?.status === 403 ? 403 : 400, {
         error:
           err?.status === 403
-            ? 'Only an admin can revoke tokens.'
-            : readableError(err, 'Could not load tokens to revoke.')
+            ? 'Solo un administrador puede revocar tokens.'
+            : readableError(err, 'No se pudieron cargar los tokens para revocar.')
       });
     }
     if (!ids?.length) return { revokedOrphaned: 0 };

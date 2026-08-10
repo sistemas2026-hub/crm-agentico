@@ -204,14 +204,14 @@
   }
 </script>
 
-<PageHeader title="New schedule">
+<PageHeader title="Nueva factura recurrente">
   {#snippet sub()}
-    Nothing generates until the first run date arrives. Saving creates the schedule
+    No genera nada hasta que llegue la primera fecha de ejecución. Guardar crea la factura recurrente
   {/snippet}
   {#snippet actions()}
-    <a class="v2-btn" href="/invoices/recurring">Cancel</a>
+    <a class="v2-btn" href="/invoices/recurring">Cancelar</a>
     <button type="submit" form="recurring-form" class="v2-btn v2-btn-primary" disabled={!ready}>
-      Save schedule
+      Guardar
     </button>
   {/snippet}
 </PageHeader>
@@ -236,13 +236,13 @@
       <!-- the form -->
       <div>
         <div class="v2-card" style="padding:16px 18px">
-          <div class="v2-label" style="margin-bottom:12px">Who and what</div>
+          <div class="v2-label" style="margin-bottom:12px">Quién y qué</div>
 
           <div class="grid2">
             <label class="f">
-              <span>Account</span>
+              <span>Cuenta</span>
               <select bind:value={accountId} onchange={() => (contactId = '')}>
-                <option value="">Choose an account</option>
+                <option value="">Elegí una cuenta</option>
                 {#each data.accounts as a (a.id)}
                   <option value={a.id}>{a.name}</option>
                 {/each}
@@ -250,9 +250,9 @@
             </label>
 
             <label class="f">
-              <span>Contact</span>
+              <span>Contacto</span>
               <select bind:value={contactId} disabled={!accountId}>
-                <option value="">{accountId ? 'Choose a contact' : 'Pick an account first'}</option>
+                <option value="">{accountId ? 'Elegí un contacto' : 'Primero elegí una cuenta'}</option>
                 {#each contactOptions as c (c.id)}
                   <option value={c.id}
                     >{c.name}{c.account_name ? ` · ${c.account_name}` : ''}</option
@@ -262,18 +262,18 @@
             </label>
 
             <label class="f" style="grid-column:1/-1">
-              <span>Title</span>
-              <input bind:value={title} placeholder="What this schedule is for" required />
+              <span>Título</span>
+              <input bind:value={title} placeholder="Para qué es esta factura recurrente" required />
             </label>
           </div>
         </div>
 
         <div class="v2-card" style="padding:16px 18px;margin-top:14px">
-          <div class="v2-label" style="margin-bottom:12px">Cadence</div>
+          <div class="v2-label" style="margin-bottom:12px">Periodicidad</div>
 
           <div class="grid2">
             <label class="f">
-              <span>Frequency</span>
+              <span>Frecuencia</span>
               <select bind:value={frequency}>
                 {#each Object.entries(RECURRING_FREQUENCY_LABEL) as [value, label] (value)}
                   <option {value}>{label}</option>
@@ -283,28 +283,28 @@
 
             {#if frequency === 'CUSTOM'}
               <label class="f">
-                <span>Every N days</span>
+                <span>Cada cuántos días</span>
                 <input type="number" min="1" step="1" bind:value={customDays} required />
               </label>
             {/if}
 
             <label class="f">
-              <span>Start date</span>
+              <span>Fecha de inicio</span>
               <input type="date" bind:value={startDate} />
             </label>
 
             <label class="f">
-              <span>Next generation date</span>
+              <span>Próxima fecha de generación</span>
               <input type="date" bind:value={nextGenerationDate} />
             </label>
 
             <label class="f">
-              <span>End date <span class="opt">(optional)</span></span>
+              <span>Fecha de fin <span class="opt">(opcional)</span></span>
               <input type="date" bind:value={endDate} />
             </label>
 
             <label class="f">
-              <span>Payment terms</span>
+              <span>Condiciones de pago</span>
               <select bind:value={paymentTerms}>
                 {#each Object.entries(PAYMENT_TERMS_LABEL) as [value, label] (value)}
                   <option {value}>{label}</option>
@@ -313,7 +313,7 @@
             </label>
 
             <label class="f">
-              <span>Currency</span>
+              <span>Moneda</span>
               <select bind:value={currency}>
                 {#each CURRENCIES as c (c)}
                   <option value={c}>{c}</option>
@@ -325,15 +325,15 @@
           <label class="check">
             <input type="checkbox" bind:checked={autoSend} />
             <span>
-              Send automatically when generated
-              <span class="hint-inline">off leaves a draft for you to review and send</span>
+              Enviar automáticamente al generarse
+              <span class="hint-inline">si está apagado, queda como borrador para que la revises y la envíes</span>
             </span>
           </label>
         </div>
 
         <div class="v2-card" style="padding:16px 18px;margin-top:14px">
           <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
-            <div class="v2-label">Lines <span class="opt">(optional)</span></div>
+            <div class="v2-label">Ítems <span class="opt">(opcional)</span></div>
             <select
               class="catalogue"
               value=""
@@ -342,7 +342,7 @@
                 e.currentTarget.value = '';
               }}
             >
-              <option value="">Add from catalogue…</option>
+              <option value="">Agregar del catálogo…</option>
               {#each data.products as p (p.id)}
                 <option value={p.id}>{p.name}, {money(p.price, currency)}</option>
               {/each}
@@ -352,19 +352,19 @@
           {#each items as item, i (i)}
             <div class="line">
               <div class="line-main">
-                <input class="line-name" bind:value={item.name} placeholder="Description" />
+                <input class="line-name" bind:value={item.name} placeholder="Descripción" />
                 <input
                   class="line-desc"
                   bind:value={item.description}
-                  placeholder="Detail the customer sees under the name (optional)"
+                  placeholder="Detalle que ve el cliente debajo del nombre (opcional)"
                 />
               </div>
               <label class="line-n">
-                <span>Qty</span>
+                <span>Cant.</span>
                 <input type="number" min="0" step="1" bind:value={item.quantity} />
               </label>
               <label class="line-n">
-                <span>Unit price</span>
+                <span>Precio unitario</span>
                 <input type="number" min="0" step="0.01" bind:value={item.unit_price} />
               </label>
               <div class="line-total v2-num">
@@ -373,8 +373,8 @@
               <button
                 class="line-del"
                 onclick={() => removeLine(i)}
-                aria-label="Remove this line"
-                title="Remove this line"
+                aria-label="Eliminar este ítem"
+                title="Eliminar este ítem"
               >
                 <Trash2 size={14} />
               </button>
@@ -382,41 +382,41 @@
           {/each}
 
           <button class="v2-btn v2-btn-sm" style="margin-top:10px" onclick={addLine}>
-            <Plus size={13} />Add a line
+            <Plus size={13} />Agregar ítem
           </button>
         </div>
 
         <div class="v2-card" style="padding:16px 18px;margin-top:14px">
-          <div class="v2-label" style="margin-bottom:12px">Adjustments</div>
+          <div class="v2-label" style="margin-bottom:12px">Ajustes</div>
           <div class="grid2">
             <label class="f">
-              <span>Discount</span>
+              <span>Descuento</span>
               <select bind:value={discountType}>
-                <option value="">None</option>
-                <option value="PERCENTAGE">Percentage</option>
-                <option value="FIXED">Fixed amount</option>
+                <option value="">Ninguno</option>
+                <option value="PERCENTAGE">Porcentaje</option>
+                <option value="FIXED">Monto fijo</option>
               </select>
             </label>
             {#if discountType}
               <label class="f">
-                <span>{discountType === 'PERCENTAGE' ? 'Percent off' : 'Amount off'}</span>
+                <span>{discountType === 'PERCENTAGE' ? 'Porcentaje de descuento' : 'Monto de descuento'}</span>
                 <input type="number" min="0" step="0.01" bind:value={discountValue} />
               </label>
             {/if}
             <label class="f">
-              <span>Tax rate %</span>
+              <span>Alícuota de impuesto %</span>
               <input type="number" min="0" step="0.01" bind:value={taxRate} />
             </label>
           </div>
-          <p class="hint">Tax applies to the subtotal after the discount, on every invoice raised.</p>
+          <p class="hint">El impuesto se aplica al subtotal después del descuento, en cada factura generada.</p>
         </div>
 
         <div class="v2-card" style="padding:16px 18px;margin-top:14px">
-          <div class="v2-label" style="margin-bottom:8px">Notes to the customer</div>
-          <textarea rows="3" bind:value={notes} placeholder="Appears on every invoice raised"
+          <div class="v2-label" style="margin-bottom:8px">Notas para el cliente</div>
+          <textarea rows="3" bind:value={notes} placeholder="Aparece en cada factura generada"
           ></textarea>
-          <div class="v2-label" style="margin:14px 0 8px">Terms</div>
-          <textarea rows="3" bind:value={terms} placeholder="Payment terms and conditions"
+          <div class="v2-label" style="margin:14px 0 8px">Términos</div>
+          <textarea rows="3" bind:value={terms} placeholder="Condiciones y términos de pago"
           ></textarea>
         </div>
       </div>
@@ -425,7 +425,7 @@
       <div>
         <div class="v2-card preview">
           <div class="v2-card-head">
-            <span class="v2-label">Each invoice this schedule raises</span>
+            <span class="v2-label">Cada factura que genere esta recurrencia</span>
           </div>
           <div style="padding:14px 16px 16px">
             {#if usableLines.length}
@@ -442,23 +442,24 @@
               />
             {:else}
               <p class="empty">
-                Lines are optional here. Add one to preview what each generated invoice will total, or
-                save the schedule without pricing it yet.
+                Los ítems son opcionales acá. Agregá uno para previsualizar el total de cada factura
+                generada, o guardá la factura recurrente sin ponerle precio todavía.
               </p>
             {/if}
           </div>
         </div>
 
         <div class="v2-card" style="padding:15px 16px;margin-top:14px">
-          <div class="v2-label" style="margin-bottom:9px">On save</div>
+          <div class="v2-label" style="margin-bottom:9px">Al guardar</div>
           <dl class="derived">
             <dt>Subtotal, total</dt>
-            <dd>Recalculated by the server on every save and every generated invoice</dd>
-            <dt>Visibility</dt>
+            <dd>El servidor los recalcula en cada guardado y en cada factura generada</dd>
+            <dt>Visibilidad</dt>
             <dd>
-              Any signed-in teammate may create one. After that only the creator, an assignee, or
-              an admin can see or change it, and this form has no way to add an assignee, so only
-              you and an admin will see this schedule
+              Cualquier compañero que haya iniciado sesión puede crear una. Después solo quien la
+              creó, un asignado o un administrador pueden verla o cambiarla, y este formulario no
+              tiene forma de agregar un asignado, así que solo vos y un administrador van a ver esta
+              factura recurrente
             </dd>
           </dl>
         </div>

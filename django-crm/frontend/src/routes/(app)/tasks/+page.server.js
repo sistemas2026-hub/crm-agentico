@@ -59,7 +59,7 @@ export const actions = {
     const form = await event.request.formData();
     const id = form.get('id')?.toString();
     const done = form.get('done')?.toString() === 'true';
-    if (!id) return fail(400, { error: 'Which task?' });
+    if (!id) return fail(400, { error: '¿Qué tarea?' });
 
     try {
       await setTaskDone(event, id, done);
@@ -69,8 +69,8 @@ export const actions = {
       return fail(err?.status === 403 ? 403 : 400, {
         error:
           err?.status === 403
-            ? 'That task is not yours to change.'
-            : (err?.body?.errors ?? 'That did not save. Try again.')
+            ? 'Esa tarea no es tuya para cambiarla.'
+            : (err?.body?.errors ?? 'No se guardó. Intentá de nuevo.')
       });
     }
     return { done };

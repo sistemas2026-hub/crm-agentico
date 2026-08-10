@@ -5,9 +5,16 @@
  * Used by SvelteKit server files during migration from Prisma to API.
  */
 
-import { env } from '$env/dynamic/public';
+import { env } from '$env/dynamic/private';
+import { env as publicEnv } from '$env/dynamic/public';
 
-const API_BASE_URL = `${env.PUBLIC_DJANGO_API_URL}/api`;
+// This helper runs server-side (inside the frontend container in Docker),
+// so it must reach the backend by its compose service name, not by the
+// PUBLIC_ URL the browser uses (localhost:8000 resolves to the frontend
+// container itself from in here). Falls back to PUBLIC_DJANGO_API_URL for
+// non-Docker setups where frontend and backend both run on the host and
+// "localhost" means the same machine either way.
+const API_BASE_URL = `${env.PRIVATE_DJANGO_API_URL || publicEnv.PUBLIC_DJANGO_API_URL}/api`;
 
 /**
  * @typedef {import('@sveltejs/kit').Cookies} Cookies

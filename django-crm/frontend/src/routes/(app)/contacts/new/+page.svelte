@@ -41,17 +41,17 @@
   let errors = $derived.by(() => {
     /** @type {Record<string, string>} */
     const e = {};
-    if (!form.first_name.trim()) e.first_name = 'A person needs a first name.';
-    if (!form.last_name.trim()) e.last_name = 'A person needs a last name.';
+    if (!form.first_name.trim()) e.first_name = 'Una persona necesita un nombre.';
+    if (!form.last_name.trim()) e.last_name = 'Una persona necesita un apellido.';
 
     if (form.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.email))
-      e.email = 'That does not look like an email address.';
+      e.email = 'Eso no parece una dirección de correo.';
 
     // The exact regex from `flexible_phone_validator`. Extensions like "x123"
     // are rejected by the model, so they are caught at the field rather than
     // as an opaque whole-form refusal after the save.
     if (form.phone && !/^[\d\s\-()+.]{7,25}$/.test(form.phone))
-      e.phone = '7 to 25 characters: digits, spaces, brackets, dots, dashes. No extensions.';
+      e.phone = 'De 7 a 25 caracteres: números, espacios, paréntesis, puntos, guiones. Sin extensiones.';
 
     return e;
   });
@@ -76,14 +76,14 @@
   );
 </script>
 
-<PageHeader title="New contact" center>
+<PageHeader title="Nuevo contacto" center>
   {#snippet crumb()}
-    <a href="/contacts">Contacts</a>
+    <a href="/contacts">Contactos</a>
     <ChevronRight size={12} />
-    <span>New</span>
+    <span>Nuevo</span>
   {/snippet}
   {#snippet sub()}
-    A person at an account. Everything optional can wait until they exist.
+    Una persona en una cuenta. Todo lo opcional puede esperar hasta que exista.
   {/snippet}
 </PageHeader>
 
@@ -97,7 +97,7 @@
       >
         <TriangleAlert size={17} style="color:var(--v2-rust);flex:none" />
         <div class="v2-next-body">
-          <div style="font-weight:600">The server refused this contact</div>
+          <div style="font-weight:600">El servidor rechazó este contacto</div>
           <div class="v2-sub" style="margin-top:2px">{result.error}</div>
         </div>
       </div>
@@ -112,20 +112,17 @@
         <TriangleAlert size={17} style="color:var(--v2-rust);flex:none" />
         <div class="v2-next-body">
           <div style="font-weight:600">
-            {Object.keys(errors).length} field{Object.keys(errors).length === 1 ? '' : 's'} still need{Object.keys(
-              errors
-            ).length === 1
-              ? 's'
-              : ''} you
+            Todavía {Object.keys(errors).length === 1 ? 'falta' : 'faltan'} {Object.keys(errors).length}
+            {Object.keys(errors).length === 1 ? 'campo' : 'campos'}
           </div>
-          <div class="v2-sub" style="margin-top:2px">Nothing has been created.</div>
+          <div class="v2-sub" style="margin-top:2px">No se creó nada.</div>
         </div>
       </div>
     {/if}
 
     <div class="pair">
       <div class="v2-field">
-        <label for="f-first">First name</label>
+        <label for="f-first">Nombre</label>
         <input
           id="f-first"
           name="first_name"
@@ -137,7 +134,7 @@
         {#if show('first_name')}<p class="v2-error">{errors.first_name}</p>{/if}
       </div>
       <div class="v2-field">
-        <label for="f-last">Last name</label>
+        <label for="f-last">Apellido</label>
         <input
           id="f-last"
           name="last_name"
@@ -152,7 +149,7 @@
 
     <div class="pair">
       <div class="v2-field">
-        <label for="f-email">Email</label>
+        <label for="f-email">Correo</label>
         <input
           id="f-email"
           name="email"
@@ -165,11 +162,11 @@
         {#if show('email')}
           <p class="v2-error">{errors.email}</p>
         {:else}
-          <p class="v2-hint">Has to be unique in this organisation, ignoring capitals.</p>
+          <p class="v2-hint">Tiene que ser única en esta organización, sin distinguir mayúsculas.</p>
         {/if}
       </div>
       <div class="v2-field">
-        <label for="f-phone">Phone</label>
+        <label for="f-phone">Teléfono</label>
         <input
           id="f-phone"
           name="phone"
@@ -184,39 +181,39 @@
 
     <div class="pair">
       <div class="v2-field">
-        <label for="f-title">Job title</label>
+        <label for="f-title">Cargo</label>
         <input id="f-title" name="title" class="v2-input" bind:value={form.title} />
       </div>
       <div class="v2-field">
-        <label for="f-dept">Department</label>
+        <label for="f-dept">Departamento</label>
         <input id="f-dept" name="department" class="v2-input" bind:value={form.department} />
       </div>
     </div>
 
     <div class="pair">
       <div class="v2-field">
-        <label for="f-account">Account</label>
+        <label for="f-account">Cuenta</label>
         <select id="f-account" name="account" class="v2-input" bind:value={form.account}>
-          <option value="">Not linked</option>
+          <option value="">Sin vincular</option>
           {#each data.accounts as a (a.id)}
             <option value={a.id}>{a.name}</option>
           {/each}
         </select>
         {#if chosenAccount}
-          <p class="v2-hint">Also adds them to {chosenAccount.name}'s people.</p>
+          <p class="v2-hint">También lo agrega a las personas de {chosenAccount.name}.</p>
         {:else if data.account_total > data.accounts.length}
           <p class="v2-hint">
-            Showing <span class="v2-num">{data.accounts.length}</span> of
-            <span class="v2-num">{data.account_total}</span> accounts.
+            Mostrando <span class="v2-num">{data.accounts.length}</span> de
+            <span class="v2-num">{data.account_total}</span> cuentas.
           </p>
         {:else}
-          <p class="v2-hint">Can be left empty and set later.</p>
+          <p class="v2-hint">Se puede dejar vacío y definir después.</p>
         {/if}
       </div>
       <div class="v2-field">
-        <label for="f-owner">Owner</label>
+        <label for="f-owner">Responsable</label>
         <select id="f-owner" name="assigned_to" class="v2-input" bind:value={form.assigned_to}>
-          <option value="">Nobody</option>
+          <option value="">Nadie</option>
           {#each data.owners as o (o.id)}
             <option value={o.id}>{o.name}</option>
           {/each}
@@ -225,25 +222,25 @@
     </div>
 
     <div class="v2-field">
-      <label for="f-org">Company typed in</label>
+      <label for="f-org">Empresa escrita a mano</label>
       <input id="f-org" name="organization" class="v2-input" bind:value={form.organization} />
       <p class="v2-hint">
-        Only needed when there is no account to link, an imported record, or a company nobody has
-        created yet.
+        Solo hace falta cuando no hay una cuenta para vincular, es un registro importado, o una
+        empresa que todavía nadie creó.
       </p>
     </div>
 
     <label class="flag">
       <input type="checkbox" name="do_not_call" bind:checked={form.do_not_call} />
       <span>
-        <strong>Do not call</strong>
-        <span class="v2-sub">Tick if they have already asked not to be phoned.</span>
+        <strong>No llamar</strong>
+        <span class="v2-sub">Marcá si ya pidió que no lo llamen.</span>
       </span>
     </label>
 
     <div class="actions">
-      <button class="v2-btn v2-btn-primary" type="submit">Create contact</button>
-      <a class="v2-btn" href="/contacts">Cancel</a>
+      <button class="v2-btn v2-btn-primary" type="submit">Crear contacto</button>
+      <a class="v2-btn" href="/contacts">Cancelar</a>
     </div>
   </form>
 </div>

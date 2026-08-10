@@ -36,22 +36,22 @@
   // A compact country list. Every value is a real code in the backend COUNTRIES
   // set, so the select can never offer one the serializer rejects.
   const countryOptions = [
-    { value: 'US', label: 'United States' },
-    { value: 'GB', label: 'United Kingdom' },
-    { value: 'CA', label: 'Canada' },
+    { value: 'US', label: 'Estados Unidos' },
+    { value: 'GB', label: 'Reino Unido' },
+    { value: 'CA', label: 'Canadá' },
     { value: 'AU', label: 'Australia' },
-    { value: 'DE', label: 'Germany' },
-    { value: 'FR', label: 'France' },
+    { value: 'DE', label: 'Alemania' },
+    { value: 'FR', label: 'Francia' },
     { value: 'IN', label: 'India' },
-    { value: 'JP', label: 'Japan' },
-    { value: 'SG', label: 'Singapore' },
-    { value: 'AE', label: 'United Arab Emirates' },
-    { value: 'BR', label: 'Brazil' },
-    { value: 'MX', label: 'Mexico' },
-    { value: 'CH', label: 'Switzerland' },
-    { value: 'NL', label: 'Netherlands' },
-    { value: 'ES', label: 'Spain' },
-    { value: 'IT', label: 'Italy' }
+    { value: 'JP', label: 'Japón' },
+    { value: 'SG', label: 'Singapur' },
+    { value: 'AE', label: 'Emiratos Árabes Unidos' },
+    { value: 'BR', label: 'Brasil' },
+    { value: 'MX', label: 'México' },
+    { value: 'CH', label: 'Suiza' },
+    { value: 'NL', label: 'Países Bajos' },
+    { value: 'ES', label: 'España' },
+    { value: 'IT', label: 'Italia' }
   ];
 
   const org = untrack(() => data.org ?? {});
@@ -89,11 +89,11 @@
     /** @type {Record<string, string>} */
     const e = {};
     if (form.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.email))
-      e.email = 'That does not look like an email address.';
+      e.email = 'Eso no parece una dirección de correo.';
     // The model stores this in a URLField, which wants a real URL. A light check
     // here saves a server round-trip; the serializer is the actual rule.
     if (form.website && !/^https?:\/\/.+\..+/.test(form.website))
-      e.website = 'Include the full address, starting with http:// or https://.';
+      e.website = 'Incluí la dirección completa, empezando con http:// o https://.';
     return e;
   });
 
@@ -124,21 +124,21 @@
 </script>
 
 {#if data.forbidden}
-  <PageHeader title="Organization">
+  <PageHeader title="Organización">
     {#snippet crumb()}<SettingsCrumb />{/snippet}
   </PageHeader>
   <div class="v2-pad" style="padding-top:40px">
     <NextAction
-      label="Admins only"
-      text="Editing organization details is limited to admins. Ask an admin on your team if a company detail, currency, or survey setting needs changing."
+      label="Solo administradores"
+      text="Editar los datos de la organización está limitado a administradores. Pedile a un administrador de tu equipo si hay que cambiar un dato de la empresa, la moneda o la configuración de encuestas."
     />
   </div>
 {:else}
-  <PageHeader title="Edit organization" center>
+  <PageHeader title="Editar organización" center>
     {#snippet crumb()}
-      <a href="/settings">Settings</a>
+      <a href="/settings">Configuración</a>
       <ChevronRight size={12} />
-      <a href="/settings/organization">Organization</a>
+      <a href="/settings/organization">Organización</a>
     {/snippet}
   </PageHeader>
 
@@ -152,7 +152,7 @@
         >
           <TriangleAlert size={17} style="color:var(--v2-rust);flex:none" />
           <div class="v2-next-body">
-            <div style="font-weight:600">The server refused this change</div>
+            <div style="font-weight:600">El servidor rechazó este cambio</div>
             <div class="v2-sub" style="margin-top:2px">{result.error}</div>
           </div>
         </div>
@@ -166,20 +166,20 @@
         >
           <TriangleAlert size={17} style="color:var(--v2-rust);flex:none" />
           <div class="v2-next-body">
-            <div style="font-weight:600">Two fields to check</div>
-            <div class="v2-sub" style="margin-top:2px">Nothing has been saved yet.</div>
+            <div style="font-weight:600">Hay dos campos para revisar</div>
+            <div class="v2-sub" style="margin-top:2px">Todavía no se guardó nada.</div>
           </div>
         </div>
       {/if}
 
-      <div class="v2-label" style="margin-bottom:12px">What customers see</div>
+      <div class="v2-label" style="margin-bottom:12px">Lo que ven los clientes</div>
       <p class="v2-hint" style="margin-top:-4px;margin-bottom:14px">
-        Printed on every invoice and estimate. Changes apply from now on; documents already sent
-        keep what they were sent with.
+        Se imprime en cada factura y cotización. Los cambios aplican de ahora en adelante; los
+        documentos ya enviados mantienen con lo que se enviaron.
       </p>
 
       <div class="v2-field">
-        <label for="f-company">Legal name</label>
+        <label for="f-company">Razón social</label>
         <input
           id="f-company"
           name="company_name"
@@ -187,18 +187,18 @@
           maxlength="255"
           bind:value={form.company_name}
         />
-        <p class="v2-hint">The registered company name, as it should appear on a document.</p>
+        <p class="v2-hint">El nombre legal registrado de la empresa, como debe aparecer en un documento.</p>
       </div>
 
       <div class="v2-field">
-        <label for="f-name">Trading name</label>
+        <label for="f-name">Nombre comercial</label>
         <input id="f-name" name="name" class="v2-input" maxlength="100" bind:value={form.name} />
-        <p class="v2-hint">What this organisation is called across the app.</p>
+        <p class="v2-hint">Cómo se llama esta organización en toda la aplicación.</p>
       </div>
 
       <div class="pair">
         <div class="v2-field">
-          <label for="f-tax">Tax ID</label>
+          <label for="f-tax">Identificación fiscal</label>
           <input
             id="f-tax"
             name="tax_id"
@@ -208,7 +208,7 @@
           />
         </div>
         <div class="v2-field">
-          <label for="f-phone">Phone</label>
+          <label for="f-phone">Teléfono</label>
           <input
             id="f-phone"
             name="phone"
@@ -221,7 +221,7 @@
 
       <div class="pair">
         <div class="v2-field">
-          <label for="f-email">Email</label>
+          <label for="f-email">Correo</label>
           <input
             id="f-email"
             name="email"
@@ -234,7 +234,7 @@
           {#if show('email')}<p class="v2-error">{errors.email}</p>{/if}
         </div>
         <div class="v2-field">
-          <label for="f-website">Website</label>
+          <label for="f-website">Sitio web</label>
           <input
             id="f-website"
             name="website"
@@ -249,7 +249,7 @@
       </div>
 
       <div class="v2-field">
-        <label for="f-address">Address</label>
+        <label for="f-address">Dirección</label>
         <input
           id="f-address"
           name="address_line"
@@ -261,11 +261,11 @@
 
       <div class="triple">
         <div class="v2-field">
-          <label for="f-city">City</label>
+          <label for="f-city">Ciudad</label>
           <input id="f-city" name="city" class="v2-input" maxlength="100" bind:value={form.city} />
         </div>
         <div class="v2-field">
-          <label for="f-state">State</label>
+          <label for="f-state">Provincia</label>
           <input
             id="f-state"
             name="state"
@@ -275,7 +275,7 @@
           />
         </div>
         <div class="v2-field">
-          <label for="f-postcode">Postcode</label>
+          <label for="f-postcode">Código postal</label>
           <input
             id="f-postcode"
             name="postcode"
@@ -287,19 +287,19 @@
       </div>
 
       <div class="v2-field">
-        <label for="f-country">Country</label>
+        <label for="f-country">País</label>
         <select id="f-country" name="country" class="v2-input" bind:value={form.country}>
-          <option value="">Not recorded</option>
+          <option value="">No registrado</option>
           {#each countryOptions as c (c.value)}
             <option value={c.value}>{c.label}</option>
           {/each}
         </select>
       </div>
 
-      <div class="v2-label" style="margin:24px 0 12px">Defaults</div>
+      <div class="v2-label" style="margin:24px 0 12px">Valores por defecto</div>
       <div class="pair">
         <div class="v2-field">
-          <label for="f-currency">Currency</label>
+          <label for="f-currency">Moneda</label>
           <select
             id="f-currency"
             name="default_currency"
@@ -310,72 +310,72 @@
               <option value={c.value}>{c.label}</option>
             {/each}
           </select>
-          <p class="v2-hint">Applied to new invoices and estimates. Existing ones keep theirs.</p>
+          <p class="v2-hint">Se aplica a facturas y cotizaciones nuevas. Las existentes mantienen la suya.</p>
         </div>
         <div class="v2-field">
-          <label for="f-defcountry">Country default</label>
+          <label for="f-defcountry">País por defecto</label>
           <select
             id="f-defcountry"
             name="default_country"
             class="v2-input"
             bind:value={form.default_country}
           >
-            <option value="">Not set</option>
+            <option value="">Sin definir</option>
             {#each countryOptions as c (c.value)}
               <option value={c.value}>{c.label}</option>
             {/each}
           </select>
-          <p class="v2-hint">Pre-filled on new addresses.</p>
+          <p class="v2-hint">Se precarga en direcciones nuevas.</p>
         </div>
       </div>
 
       <div class="v2-field">
-        <label for="f-timezone">Time zone</label>
+        <label for="f-timezone">Zona horaria</label>
         <select id="f-timezone" name="timezone" class="v2-input" bind:value={form.timezone}>
           {#each timezones as zone (zone.name)}
             <option value={zone.name}>{zone.label}</option>
           {/each}
         </select>
         <p class="v2-hint">
-          When a day starts for this organisation. Changing it moves what counts as due
-          today and overdue, for everyone here.
+          Cuándo empieza el día para esta organización. Cambiarlo mueve qué cuenta como vencido hoy
+          y atrasado, para todos acá.
         </p>
       </div>
 
-      <div class="v2-label" style="margin:24px 0 12px">Behaviour</div>
+      <div class="v2-label" style="margin:24px 0 12px">Comportamiento</div>
 
       <div class="v2-field">
-        <label for="f-csat">Satisfaction surveys</label>
+        <label for="f-csat">Encuestas de satisfacción</label>
         <select id="f-csat" name="csat_enabled" class="v2-input" bind:value={form.csat_enabled}>
-          <option value="true">Sending. A survey goes out after a ticket closes</option>
-          <option value="false">Off, no surveys, org-wide</option>
+          <option value="true">Enviando. Se manda una encuesta después de cerrar un ticket</option>
+          <option value="false">Apagado, sin encuestas, en toda la organización</option>
         </select>
         <p class="v2-hint">
-          Off stops every survey org-wide. There is no per-team exception and no notice on the
-          ticket.
+          Apagado detiene todas las encuestas en toda la organización. No hay excepción por equipo
+          ni aviso en el ticket.
         </p>
       </div>
 
       <div class="v2-field">
-        <label for="f-cascade">Close child tickets with the parent</label>
+        <label for="f-cascade">Cerrar tickets hijos junto con el padre</label>
         <select
           id="f-cascade"
           name="auto_close_children_on_parent_close"
           class="v2-input"
           bind:value={form.auto_close_children_on_parent_close}
         >
-          <option value="true">Offer it on. The close prompt starts ticked</option>
-          <option value="false">Offer it off. The close prompt starts unticked</option>
+          <option value="true">Ofrecerlo activado. La pregunta de cierre arranca marcada</option>
+          <option value="false">Ofrecerlo apagado. La pregunta de cierre arranca sin marcar</option>
         </select>
         <p class="v2-hint">
-          Only sets how the prompt starts. Closing a parent never closes a child on its own, the
-          person still confirms.
+          Solo define cómo arranca la pregunta. Cerrar un ticket padre nunca cierra un hijo por su
+          cuenta, la persona siempre lo confirma.
         </p>
       </div>
 
       <div class="actions">
-        <button class="v2-btn v2-btn-primary" type="submit">Save changes</button>
-        <a class="v2-btn" href="/settings/organization">Cancel</a>
+        <button class="v2-btn v2-btn-primary" type="submit">Guardar cambios</button>
+        <a class="v2-btn" href="/settings/organization">Cancelar</a>
       </div>
     </form>
   </div>

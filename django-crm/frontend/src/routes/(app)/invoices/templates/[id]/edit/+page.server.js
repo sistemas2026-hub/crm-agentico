@@ -23,7 +23,7 @@ export async function load(event) {
   try {
     return await getInvoiceTemplateForEdit(event, event.params.id);
   } catch (/** @type {any} */ err) {
-    if (err?.status === 404) error(404, 'Template not found');
+    if (err?.status === 404) error(404, 'Plantilla no encontrada');
     throw err;
   }
 }
@@ -60,7 +60,7 @@ export const actions = {
     const values = readValues(form);
 
     if (!values.name.trim()) {
-      return fail(400, { values, error: 'Give the template a name.' });
+      return fail(400, { values, error: 'Ponele un nombre a la plantilla.' });
     }
 
     try {
@@ -69,11 +69,11 @@ export const actions = {
       if (err?.status === 403) {
         return fail(403, {
           values,
-          error: 'Only an administrator can change invoice templates.'
+          error: 'Solo un administrador puede cambiar plantillas de factura.'
         });
       }
-      if (err?.status === 404) error(404, 'Template not found');
-      return fail(400, { values, error: readableError(err, 'Could not save this template.') });
+      if (err?.status === 404) error(404, 'Plantilla no encontrada');
+      return fail(400, { values, error: readableError(err, 'No se pudo guardar esta plantilla.') });
     }
 
     redirect(303, '/invoices/templates');

@@ -33,27 +33,27 @@
   const CAP = 4; // chips per cell before it collapses to "+N more"
 </script>
 
-<PageHeader title="Tasks">
+<PageHeader title="Tareas">
   {#snippet sub()}
-    {data.monthLabel} · <span class="v2-num">{count(data.datedCount)}</span> scheduled
+    {data.monthLabel} · <span class="v2-num">{count(data.datedCount)}</span> programadas
   {/snippet}
   {#snippet actions()}
     <div class="v2-cal-nav">
       <a
         class="v2-btn v2-btn-icon"
         href="?month={data.prevMonth}"
-        aria-label="Previous month"
+        aria-label="Mes anterior"
         data-sveltekit-noscroll
       >
         <ChevronLeft size={15} />
       </a>
       {#if !data.isThisMonth}
-        <a class="v2-btn v2-btn-sm" href="?month={data.thisMonth}" data-sveltekit-noscroll>Today</a>
+        <a class="v2-btn v2-btn-sm" href="?month={data.thisMonth}" data-sveltekit-noscroll>Hoy</a>
       {/if}
       <a
         class="v2-btn v2-btn-icon"
         href="?month={data.nextMonth}"
-        aria-label="Next month"
+        aria-label="Mes siguiente"
         data-sveltekit-noscroll
       >
         <ChevronRight size={15} />
@@ -101,7 +101,7 @@
                 </a>
               {/each}
               {#if cell.tasks.length > CAP}
-                <span class="v2-cal-more">+{cell.tasks.length - CAP} more</span>
+                <span class="v2-cal-more">+{cell.tasks.length - CAP} más</span>
               {/if}
             </div>
           </div>
@@ -115,22 +115,22 @@
     {#if data.agenda.length === 0}
       <div class="v2-state" style="padding:34px 0">
         <div class="v2-state-icon"><CalendarDays size={22} /></div>
-        <h3>Nothing scheduled</h3>
-        <p>No tasks fall due in {data.monthLabel}.</p>
+        <h3>Nada programado</h3>
+        <p>Ninguna tarea vence en {data.monthLabel}.</p>
       </div>
     {:else}
       {#each data.agenda as day (day.date)}
         <div class="v2-cal-agenda-day">
           <div class="v2-cal-agenda-date" class:v2-cal-agenda-today={day.isToday}>
             <span class="v2-num">{day.day}</span>
-            {#if day.isToday}<span class="v2-cal-agenda-todaytag">Today</span>{/if}
+            {#if day.isToday}<span class="v2-cal-agenda-todaytag">Hoy</span>{/if}
           </div>
           <div class="v2-cal-agenda-list">
             {#each day.tasks as t (t.id)}
               <a class="v2-cal-chip" class:v2-cal-chip-done={t.is_done} href="/tasks/{t.id}">
                 <i class="v2-cal-dot" style="background:{dot(t)}"></i>
                 <span class="v2-cal-chip-text">{t.title}</span>
-                {#if t.overdue}<span class="v2-cal-overdue">overdue</span>{/if}
+                {#if t.overdue}<span class="v2-cal-overdue">vencida</span>{/if}
               </a>
             {/each}
           </div>
@@ -140,10 +140,11 @@
   </div>
 
   <p class="v2-sub v2-pad v2-cal-foot">
-    Tasks without a due date don't appear here,
-    <a href="/tasks" style="color:inherit">see the task list</a>.
+    Las tareas sin fecha límite no aparecen acá,
+    <a href="/tasks" style="color:inherit">mirá la lista de tareas</a>.
     {#if data.truncated}
-      This month has more scheduled tasks than fit on the calendar; the list shows them all.
+      Este mes tiene más tareas programadas de las que entran en el calendario; la lista las
+      muestra todas.
     {/if}
   </p>
 </div>

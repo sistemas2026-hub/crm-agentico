@@ -94,25 +94,25 @@
   function reportSummary(report) {
     const created = report?.created?.length ?? 0;
     const skipped = report?.skipped?.length ?? 0;
-    if (!created && !skipped) return 'Nothing to add. This org already has all of it.';
-    if (!skipped) return `Created ${created} item${created === 1 ? '' : 's'}.`;
+    if (!created && !skipped) return 'Nada para agregar. Esta organización ya tiene todo esto.';
+    if (!skipped) return `Se ${created === 1 ? 'creó' : 'crearon'} ${created} elemento${created === 1 ? '' : 's'}.`;
     if (!created) {
-      return `Already had everything from this pack, skipped ${skipped} item${skipped === 1 ? '' : 's'} you already had.`;
+      return `Ya tenía todo de este paquete, se ${skipped === 1 ? 'omitió' : 'omitieron'} ${skipped} elemento${skipped === 1 ? '' : 's'} que ya tenías.`;
     }
-    return `Created ${created} item${created === 1 ? '' : 's'}, skipped ${skipped} you already had.`;
+    return `Se ${created === 1 ? 'creó' : 'crearon'} ${created} elemento${created === 1 ? '' : 's'}, se ${skipped === 1 ? 'omitió' : 'omitieron'} ${skipped} que ya tenías.`;
   }
 </script>
 
-<PageHeader title="Organization">
+<PageHeader title="Organización">
   {#snippet crumb()}<SettingsCrumb />{/snippet}
   {#snippet sub()}
-    <span class="v2-num">{count(org.member_count)}</span> members · created
+    <span class="v2-num">{count(org.member_count)}</span> miembros · creada el
     {shortDate(org.created_at)}
   {/snippet}
   {#snippet actions()}
     {#if data.can_edit}
       <a class="v2-btn v2-btn-primary" href="/settings/organization/edit">
-        <Pencil size={13} />Edit details
+        <Pencil size={13} />Editar datos
       </a>
     {/if}
   {/snippet}
@@ -122,25 +122,25 @@
   <div class="v2-pad" style="padding-top:18px;padding-bottom:32px">
     <div class="v2-split">
       <div>
-        <div class="v2-label" style="margin-bottom:10px">What customers see</div>
+        <div class="v2-label" style="margin-bottom:10px">Lo que ven los clientes</div>
         <div class="v2-card" style="padding:16px 18px;margin-bottom:12px">
           <dl class="v2-kv">
-            <dt>Legal name</dt>
+            <dt>Razón social</dt>
             <dd>{org.company_name || '—'}</dd>
-            <dt>Trading as</dt>
+            <dt>Nombre comercial</dt>
             <dd>{org.name}</dd>
-            <dt>Address</dt>
+            <dt>Dirección</dt>
             <dd>{address || '—'}</dd>
-            <dt>Tax ID</dt>
+            <dt>Identificación fiscal</dt>
             <dd class="v2-num" style="font-size:12px">{org.tax_id || '—'}</dd>
-            <dt>Email</dt>
+            <dt>Correo</dt>
             <dd>{org.email || '—'}</dd>
-            <dt>Phone</dt>
+            <dt>Teléfono</dt>
             <dd class="v2-num" style="font-size:12px">{org.phone || '—'}</dd>
-            <dt>Website</dt>
+            <dt>Sitio web</dt>
             <dd>{org.website || '—'}</dd>
             <dt>Logo</dt>
-            <dd>{org.logo_url ? 'Set' : 'Not set'}</dd>
+            <dd>{org.logo_url ? 'Configurado' : 'Sin configurar'}</dd>
           </dl>
         </div>
 
@@ -148,74 +148,74 @@
           <div style="display:flex;gap:10px;align-items:flex-start">
             <FileText size={16} style="color:var(--v2-slate);flex:none;margin-top:2px" />
             <p class="v2-sub" style="font-size:12.5px;margin:0;line-height:1.5">
-              These fields are printed on every invoice and estimate. Changing one changes documents
-              from that moment on; PDFs already sent keep what they were sent with. How they are
-              laid out is set in
-              <a href="/invoices/templates" style="color:inherit">invoice templates</a>.
+              Estos campos se imprimen en cada factura y cotización. Cambiar uno afecta a los
+              documentos de ahí en adelante; los PDF ya enviados mantienen con lo que se enviaron.
+              Cómo se ven se configura en
+              <a href="/invoices/templates" style="color:inherit">plantillas de factura</a>.
             </p>
           </div>
         </div>
       </div>
 
       <div>
-        <div class="v2-label" style="margin-bottom:10px">Defaults</div>
+        <div class="v2-label" style="margin-bottom:10px">Valores por defecto</div>
         <div class="v2-card" style="overflow:hidden;margin-bottom:20px">
           <div class="v2-setting">
             <div class="v2-setting-body">
-              <b>Currency</b>
+              <b>Moneda</b>
               <span class="v2-sub" style="font-size:11.5px">
-                Applied to new invoices and estimates. Existing ones keep theirs.
+                Se aplica a facturas y cotizaciones nuevas. Las existentes mantienen la suya.
               </span>
             </div>
             <span class="v2-num" style="font-size:13px">{org.default_currency || '—'}</span>
           </div>
           <div class="v2-setting">
             <div class="v2-setting-body">
-              <b>Country</b>
-              <span class="v2-sub" style="font-size:11.5px">Default for new addresses.</span>
+              <b>País</b>
+              <span class="v2-sub" style="font-size:11.5px">Por defecto para direcciones nuevas.</span>
             </div>
             <span style="font-size:13px">{org.default_country || '—'}</span>
           </div>
           <div class="v2-setting">
             <div class="v2-setting-body">
-              <b>Time zone</b>
+              <b>Zona horaria</b>
               <span class="v2-sub" style="font-size:11.5px">
-                When a day starts here, so "due today" and "overdue" mean what your team
-                expects.
+                Cuándo empieza el día acá, así "vence hoy" y "vencido" significan lo que tu equipo
+                espera.
               </span>
             </div>
             <span style="font-size:13px">{(org.timezone || 'UTC').replace(/_/g, ' ')}</span>
           </div>
         </div>
 
-        <div class="v2-label" style="margin-bottom:10px">Behaviour</div>
+        <div class="v2-label" style="margin-bottom:10px">Comportamiento</div>
         <div class="v2-card" style="overflow:hidden">
           <div class="v2-setting">
             <div class="v2-setting-body">
-              <b>Satisfaction surveys</b>
+              <b>Encuestas de satisfacción</b>
               <!-- Org-level kill switch: the post-close signal short-circuits
                    before any email is sent. Off is silent, everywhere. -->
               <span class="v2-sub" style="font-size:11.5px">
-                Off stops every survey org-wide, with no per-team exception and no notice on the
-                ticket.
+                Apagado detiene todas las encuestas en toda la organización, sin excepción por
+                equipo y sin aviso en el ticket.
               </span>
             </div>
             <Pill tone={org.csat_enabled ? 'moss' : 'slate'}>
-              {org.csat_enabled ? 'Sending' : 'Off'}
+              {org.csat_enabled ? 'Enviando' : 'Apagado'}
             </Pill>
           </div>
           <div class="v2-setting">
             <div class="v2-setting-body">
-              <b>Close child tickets with the parent</b>
+              <b>Cerrar tickets hijos junto con el padre</b>
               <!-- Only the DEFAULT state of the prompt; the endpoint still
                    requires explicit confirmation either way. -->
               <span class="v2-sub" style="font-size:11.5px">
-                Sets how the prompt starts when you close a parent. It never closes a child on its
-                own. You still confirm.
+                Define cómo arranca la pregunta al cerrar un ticket padre. Nunca cierra un hijo por
+                su cuenta. Siempre lo confirmás vos.
               </span>
             </div>
             <Pill tone={org.auto_close_children_on_parent_close ? 'clay' : 'slate'}>
-              {org.auto_close_children_on_parent_close ? 'Offered on' : 'Offered off'}
+              {org.auto_close_children_on_parent_close ? 'Se ofrece activado' : 'Se ofrece apagado'}
             </Pill>
           </div>
         </div>
@@ -224,12 +224,12 @@
           <div style="display:flex;gap:10px;align-items:flex-start">
             <ShieldAlert size={16} style="color:var(--v2-slate);flex:none;margin-top:2px" />
             <div>
-              <div style="font-weight:600;font-size:13px">The organisation API key is not here</div>
+              <div style="font-weight:600;font-size:13px">La clave de API de la organización no está acá</div>
               <p class="v2-sub" style="font-size:12.5px;margin:5px 0 0;line-height:1.5">
-                It authenticates as the whole organisation, so it is never rendered on a page you
-                can reach by browsing. For per-person programmatic access, use
-                <a href="/settings/api-tokens" style="color:inherit">API tokens</a>, which can be
-                revoked one at a time.
+                Se autentica como toda la organización, así que nunca se renderiza en una página a
+                la que se puede llegar navegando. Para acceso programático por persona, usá
+                <a href="/settings/api-tokens" style="color:inherit">Tokens de API</a>, que se pueden
+                revocar de a uno.
               </p>
             </div>
           </div>
@@ -238,34 +238,35 @@
     </div>
 
     <div style="margin-top:24px">
-      <div class="v2-label" style="margin-bottom:10px">Vertical pack</div>
+      <div class="v2-label" style="margin-bottom:10px">Paquete de rubro</div>
       <div class="v2-card" style="padding:16px 18px">
         <p class="v2-sub" style="font-size:12.5px;margin:0 0 14px;line-height:1.5">
-          A pack adds starter pipelines, tags, custom fields, products and a set of sample
-          records (accounts, contacts, deals, tickets, tasks and leads) for one kind of
-          business. Applying one only fills in what this org is missing. Anything already set up
-          is left exactly as it is, and applying the same pack twice is safe.
+          Un paquete agrega pipelines iniciales, etiquetas, campos personalizados, productos y un
+          conjunto de registros de ejemplo (cuentas, contactos, negociaciones, tickets, tareas y
+          prospectos) para un tipo de negocio. Aplicarlo solo completa lo que le falta a esta
+          organización. Lo que ya esté configurado se deja exactamente como está, y aplicar el mismo
+          paquete dos veces es seguro.
         </p>
 
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
-          <span class="v2-sub" style="font-size:11.5px">First pack applied</span>
+          <span class="v2-sub" style="font-size:11.5px">Primer paquete aplicado</span>
           {#if appliedPack}
             <Pill tone="moss">{appliedPack.name}</Pill>
           {:else if org.vertical}
             <Pill tone="slate">{org.vertical}</Pill>
           {:else}
-            <span class="v2-sub" style="font-size:12.5px">None yet</span>
+            <span class="v2-sub" style="font-size:12.5px">Todavía ninguno</span>
           {/if}
         </div>
 
         {#if !data.can_edit}
           <p class="v2-sub" style="font-size:12px;margin:0">
-            Applying a pack or clearing sample data is limited to administrators.
+            Aplicar un paquete o borrar datos de ejemplo está limitado a administradores.
           </p>
         {:else}
           {#if form?.error}
             <div style="margin-bottom:14px">
-              <NextAction label="That did not work" text={form.error} tone="rust" />
+              <NextAction label="Eso no funcionó" text={form.error} tone="rust" />
             </div>
           {/if}
 
@@ -279,12 +280,12 @@
               class="v2-card"
               style="padding:14px 16px;margin-bottom:16px;border-color:color-mix(in srgb, var(--v2-moss) 40%, var(--v2-line))"
             >
-              <div style="font-weight:650;font-size:13px">Applied “{appliedName}”</div>
+              <div style="font-weight:650;font-size:13px">Se aplicó “{appliedName}”</div>
               <p class="v2-sub" style="font-size:12.5px;margin:4px 0 10px">
                 {reportSummary(form.report)}
               </p>
               {#if skipped.length}
-                <div class="v2-label" style="margin-bottom:4px">Skipped, already had these</div>
+                <div class="v2-label" style="margin-bottom:4px">Omitidos, ya los tenías</div>
                 <ul style="margin:0 0 10px;padding-left:18px;font-size:12.5px;line-height:1.7">
                   {#each skipped as item (item.type + ':' + item.name)}
                     <li>
@@ -297,7 +298,7 @@
                 </ul>
               {/if}
               {#if created.length}
-                <div class="v2-label" style="margin-bottom:4px">Created</div>
+                <div class="v2-label" style="margin-bottom:4px">Creados</div>
                 <ul style="margin:0;padding-left:18px;font-size:12.5px;line-height:1.7">
                   {#each created as item (item.type + ':' + item.name)}
                     <li>
@@ -323,17 +324,17 @@
                   </span>
                 </div>
                 {#if pack.id === org.vertical}
-                  <Pill tone="moss">Applied</Pill>
+                  <Pill tone="moss">Aplicado</Pill>
                 {/if}
                 <form method="POST" action="?/apply" use:enhance={applySubmit}>
                   <input type="hidden" name="pack_id" value={pack.id} />
-                  <button class="v2-btn v2-btn-sm" disabled={busy}>Apply</button>
+                  <button class="v2-btn v2-btn-sm" disabled={busy}>Aplicar</button>
                 </form>
               </div>
             {/each}
             {#if !packs.length}
               <div class="v2-setting">
-                <span class="v2-sub" style="font-size:12.5px">No packs available right now.</span>
+                <span class="v2-sub" style="font-size:12.5px">No hay paquetes disponibles ahora.</span>
               </div>
             {/if}
           </div>
@@ -347,12 +348,12 @@
                 style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"
               >
                 <span class="v2-sub" style="font-size:12px">
-                  Permanently delete every sample record a pack created for this org? This cannot
-                  be undone. Your real records are never touched, and any sample record you have
-                  since attached real work to is kept.
+                  ¿Eliminar permanentemente todos los registros de ejemplo que un paquete creó para
+                  esta organización? Esto no se puede deshacer. Tus registros reales nunca se tocan,
+                  y todo registro de ejemplo al que ya le hayas sumado trabajo real se conserva.
                 </span>
                 <button class="v2-btn danger-btn" type="submit" disabled={busy}>
-                  <Trash2 size={14} /> Clear sample data
+                  <Trash2 size={14} /> Borrar datos de ejemplo
                 </button>
                 <button
                   class="v2-btn"
@@ -360,17 +361,17 @@
                   disabled={busy}
                   onclick={() => (confirmingClear = false)}
                 >
-                  Cancel
+                  Cancelar
                 </button>
               </form>
             {:else if form?.cleared !== undefined}
               <span class="v2-sub" style="font-size:12.5px">
                 {form.cleared
-                  ? `Deleted ${form.cleared} sample ${form.cleared === 1 ? 'record' : 'records'}.`
-                  : 'No sample data to clear.'}
+                  ? `Se ${form.cleared === 1 ? 'eliminó' : 'eliminaron'} ${form.cleared} ${form.cleared === 1 ? 'registro' : 'registros'} de ejemplo.`
+                  : 'No hay datos de ejemplo para borrar.'}
                 {#if form.retained}
-                  Kept {form.retained}
-                  {form.retained === 1 ? 'record' : 'records'} you have since attached real work to.
+                  Se {form.retained === 1 ? 'conservó' : 'conservaron'} {form.retained}
+                  {form.retained === 1 ? 'registro' : 'registros'} al que ya le sumaste trabajo real.
                 {/if}
               </span>
             {:else}
@@ -379,11 +380,11 @@
                 type="button"
                 onclick={() => (confirmingClear = true)}
               >
-                <Trash2 size={14} /> Clear sample data
+                <Trash2 size={14} /> Borrar datos de ejemplo
               </button>
               <span class="v2-sub" style="font-size:11.5px">
-                Removes only the records a pack created as samples. Your real records are never
-                touched.
+                Elimina solo los registros que un paquete creó como ejemplo. Tus registros reales
+                nunca se tocan.
               </span>
             {/if}
           </div>

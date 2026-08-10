@@ -10,10 +10,13 @@
 
   let loading = $state(false);
   let selectedOrgId = $state(null);
+
+  const ROLE_LABELS = { admin: 'administrador', user: 'miembro' };
+  const roleLabel = (role) => ROLE_LABELS[role?.toLowerCase()] || 'miembro';
 </script>
 
 <svelte:head>
-  <title>Choose organisation · BottleCRM</title>
+  <title>Elegir organización · BottleCRM</title>
 </svelte:head>
 
 <div class="v2-root v2-auth">
@@ -25,11 +28,11 @@
 
     <div class="v2-auth-card">
       <div class="v2-auth-head">
-        <h1>Choose an organisation</h1>
+        <h1>Elegí una organización</h1>
         <p>
           {orgs.length
-            ? "Pick the workspace you'd like to open."
-            : 'Create your first workspace to get started.'}
+            ? 'Elegí el espacio de trabajo que querés abrir.'
+            : 'Creá tu primer espacio de trabajo para empezar.'}
         </p>
       </div>
 
@@ -57,7 +60,7 @@
               <span class="v2-auth-org-body">
                 <b>{org.name}</b>
                 <span class="v2-sub" style="display:block;text-transform:capitalize">
-                  {org.role?.toLowerCase() || 'member'}
+                  {roleLabel(org.role)}
                 </span>
               </span>
               {#if loading && selectedOrgId === org.id}
@@ -71,16 +74,16 @@
 
         <a href="/org/new" class="v2-auth-add">
           <Plus />
-          Create new organisation
+          Crear nueva organización
         </a>
       {:else}
         <div class="v2-state" style="padding:22px 0 8px">
           <div class="v2-state-icon"><Building2 size={22} /></div>
-          <h3>No organisations yet</h3>
-          <p>Create your first workspace to start using BottleCRM.</p>
+          <h3>Todavía no hay organizaciones</h3>
+          <p>Creá tu primer espacio de trabajo para empezar a usar BottleCRM.</p>
           <a href="/org/new" class="v2-btn v2-btn-primary">
             <Plus size={15} />
-            Create organisation
+            Crear organización
           </a>
         </div>
       {/if}
@@ -88,7 +91,7 @@
 
     <div class="v2-auth-foot">
       <a href="/logout" style="display:inline-flex;align-items:center;gap:5px">
-        <LogOut size={13} /> Sign out
+        <LogOut size={13} /> Cerrar sesión
       </a>
     </div>
   </div>

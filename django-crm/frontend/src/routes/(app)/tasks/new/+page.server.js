@@ -79,7 +79,7 @@ function readParent(form) {
   const id = form.get(`parent_${kind}`)?.toString() ?? '';
   if (!id) {
     return {
-      error: 'Pick which record this is attached to, or set "Attached to" back to Nothing.'
+      error: 'Elegí a qué registro está vinculada, o volvé a poner "Vinculada a" en Nada.'
     };
   }
   return { parent: { [kind]: id } };
@@ -116,7 +116,7 @@ export const actions = {
     } catch (/** @type {any} */ err) {
       return fail(400, {
         values: { ...values, parent_kind: kind },
-        error: readableError(err, 'Could not save this task.')
+        error: readableError(err, 'No se pudo guardar esta tarea.')
       });
     }
 

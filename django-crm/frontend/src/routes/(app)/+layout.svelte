@@ -29,10 +29,10 @@
    * purpose. A tab bar that scrolls is a menu wearing a tab bar's clothes.
    */
   const TABS = [
-    { href: '/', label: 'Today', icon: Sun, exact: true },
-    { href: '/pipeline', label: 'Pipeline', icon: Columns3 },
+    { href: '/', label: 'Hoy', icon: Sun, exact: true },
+    { href: '/pipeline', label: 'Negociaciones', icon: Columns3 },
     { href: '/tickets', label: 'Tickets', icon: LifeBuoy },
-    { href: '/invoices', label: 'Invoices', icon: Receipt }
+    { href: '/invoices', label: 'Facturas', icon: Receipt }
   ];
 
   const isActive = (href, exact) =>
@@ -71,7 +71,7 @@
         class="v2-btn v2-btn-quiet"
         type="button"
         onclick={() => (menuOpen = true)}
-        aria-label="Open menu"
+        aria-label="Abrir menú"
         aria-expanded={menuOpen}
       >
         <Menu />
@@ -83,7 +83,7 @@
         type="button"
         style="margin-left:auto"
         onclick={() => (paletteOpen = true)}
-        aria-label="Search"
+        aria-label="Buscar"
       >
         <Search />
       </button>
@@ -91,7 +91,7 @@
 
     {@render children()}
 
-    <nav class="v2-tabbar" aria-label="Sections">
+    <nav class="v2-tabbar" aria-label="Secciones">
       {#each TABS as tab (tab.href)}
         <a href={tab.href} aria-current={isActive(tab.href, tab.exact) ? 'page' : undefined}>
           <tab.icon />
@@ -103,7 +103,7 @@
 
   <!-- Both live inside .v2-root so they inherit the scoped tokens; both are
        position:fixed, so the shell's overflow:hidden does not clip them. -->
-  <a class="v2-fab" href="/pipeline/new" aria-label="New deal"><Plus size={21} /></a>
+  <a class="v2-fab" href="/pipeline/new" aria-label="Nueva negociación"><Plus size={21} /></a>
 
   <!-- Mobile navigation drawer. Only openable from the mobile top bar, so it
        never surfaces on desktop; a backdrop click, Escape, or navigating all
@@ -120,7 +120,7 @@
         class="v2-drawer"
         role="dialog"
         aria-modal="true"
-        aria-label="Navigation"
+        aria-label="Navegación"
         tabindex="-1"
         use:autofocus
         onkeydown={(e) => {

@@ -38,21 +38,21 @@ export const actions = {
     // Mirror the server's required-field checks so an obvious miss does not cost
     // a round trip. The serializer enforces both regardless.
     if (!title) {
-      return fail(400, { values, error: 'Give the document a title.' });
+      return fail(400, { values, error: 'Ponele un título al documento.' });
     }
     if (!(file instanceof File) || file.size === 0) {
-      return fail(400, { values, error: 'Choose a file to upload.' });
+      return fail(400, { values, error: 'Elegí un archivo para subir.' });
     }
 
     try {
       await uploadDocument(event.cookies, { title, status, file, shared_to, teams });
     } catch (/** @type {any} */ err) {
       if (err?.status === 401 || err?.status === 403) {
-        return fail(err.status, { values, error: 'You do not have permission to upload here.' });
+        return fail(err.status, { values, error: 'No tenés permiso para subir archivos acá.' });
       }
       return fail(400, {
         values,
-        error: readableError(err, 'Could not upload this document.')
+        error: readableError(err, 'No se pudo subir este documento.')
       });
     }
 

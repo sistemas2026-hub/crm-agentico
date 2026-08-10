@@ -17,29 +17,29 @@
   let showLinks = $derived(showQuickLinks ?? isNotFound);
 
   let title = $derived.by(() => {
-    if (isNotFound) return 'Page not found';
-    if (status === 403) return "You don't have access to this page";
-    if (status === 401) return 'Please sign in to continue';
-    if (status >= 500) return 'Something went wrong';
-    return 'Unable to open this page';
+    if (isNotFound) return 'Página no encontrada';
+    if (status === 403) return 'No tenés acceso a esta página';
+    if (status === 401) return 'Por favor iniciá sesión para continuar';
+    if (status >= 500) return 'Algo salió mal';
+    return 'No se pudo abrir esta página';
   });
 
   let description = $derived.by(() => {
     if (message) return message;
-    if (isNotFound) return "The page you're looking for doesn't exist or may have been moved.";
-    if (status === 403) return 'Your account does not have permission to view this resource.';
-    if (status === 401) return 'Your session may have expired. Sign in again to continue.';
+    if (isNotFound) return 'La página que buscás no existe o puede haberse movido.';
+    if (status === 403) return 'Tu cuenta no tiene permiso para ver este recurso.';
+    if (status === 401) return 'Tu sesión puede haber vencido. Iniciá sesión de nuevo para continuar.';
     if (status >= 500)
-      return "An unexpected error occurred on our end. We've been notified. Please try again in a moment.";
-    return 'Please check the URL or try going back to where you came from.';
+      return 'Ocurrió un error inesperado de nuestro lado. Ya nos enteramos. Por favor intentá de nuevo en un momento.';
+    return 'Por favor revisá la URL o intentá volver a donde estabas.';
   });
 
   const quickLinks = [
-    { href: '/', label: 'Dashboard', icon: BarChart3 },
-    { href: '/leads', label: 'Leads', icon: Users },
-    { href: '/contacts', label: 'Contacts', icon: Users },
+    { href: '/', label: 'Panel', icon: BarChart3 },
+    { href: '/leads', label: 'Prospectos', icon: Users },
+    { href: '/contacts', label: 'Contactos', icon: Users },
     { href: '/tickets', label: 'Tickets', icon: Ticket },
-    { href: '/tasks', label: 'Tasks', icon: FileText }
+    { href: '/tasks', label: 'Tareas', icon: FileText }
   ];
 
   function goBack() {
@@ -78,11 +78,11 @@
     <div class="flex flex-col items-center justify-center gap-3 sm:flex-row">
       <Button onclick={() => goto('/')} class="gap-2">
         <Home class="h-4 w-4" />
-        Go to dashboard
+        Ir al panel
       </Button>
       <Button variant="outline" onclick={goBack} class="gap-2">
         <ArrowLeft class="h-4 w-4" />
-        Go back
+        Volver
       </Button>
     </div>
 
@@ -92,7 +92,7 @@
         <div class="mb-4 flex items-center justify-center gap-2">
           <Compass class="text-muted-foreground h-4 w-4" />
           <span class="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-            Try one of these
+            Probá alguno de estos
           </span>
         </div>
         <div class="flex flex-wrap items-center justify-center gap-2">

@@ -222,7 +222,7 @@ function buildActivity(response) {
       type: 'file',
       at: a.created_at,
       by: null,
-      body: a.file_name || 'Attachment',
+      body: a.file_name || 'Adjunto',
       href: fileUrl(a.file_path)
     });
   }
@@ -232,7 +232,7 @@ function buildActivity(response) {
     type: 'status',
     at: response.lead_obj.created_at,
     by: response.lead_obj.created_by?.email ?? null,
-    body: 'Lead created'
+    body: 'Prospecto creado'
   });
 
   return events.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
@@ -456,10 +456,10 @@ async function fetchDetail(cookies, id) {
     // and Django's message for a missing lead is "No Lead matches the given
     // query.", so opening a deleted lead answered 500. See `api-helpers.js`.
     if (err?.status === 404) {
-      error(404, 'That lead does not exist, or it belongs to another team.');
+      error(404, 'Ese prospecto no existe, o pertenece a otro equipo.');
     }
     if (err?.status === 403) {
-      error(403, 'This lead is assigned to somebody else. Ask an admin if you need it.');
+      error(403, 'Este prospecto está asignado a otra persona. Pedile a un administrador si lo necesitás.');
     }
     throw err;
   }
@@ -550,7 +550,7 @@ export async function myProfileId(cookies) {
  *   `account_id`, and `contact_id` / `opportunity_id` that may each be null.
  */
 export async function convertLead({ cookies }, id) {
-  if (!id) throw new Error('A lead id is required to convert.');
+  if (!id) throw new Error('Se necesita un id de prospecto para convertirlo.');
   return await apiRequest(
     `/leads/${id}/`,
     { method: 'PATCH', body: { status: 'converted' } },

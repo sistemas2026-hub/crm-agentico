@@ -27,17 +27,17 @@
   let totals = $derived(data.totals);
 </script>
 
-<PageHeader title="Knowledge base">
+<PageHeader title="Base de conocimiento">
   {#snippet sub()}
     <!-- "1 customers can see" is what the mock's phrasing produced the moment
          the number was real. Stable at every count, and it still says what
          published means rather than just naming the flag. -->
     <span class="v2-num">{count(totals.count)}</span>
-    {totals.count === 1 ? 'article' : 'articles'} ·
-    <span class="v2-num">{count(totals.published)}</span> visible to customers
+    {totals.count === 1 ? 'artículo' : 'artículos'} ·
+    <span class="v2-num">{count(totals.published)}</span> visibles para los clientes
   {/snippet}
   {#snippet actions()}
-    <a class="v2-btn v2-btn-primary" href="/solutions/new"><Plus />New article</a>
+    <a class="v2-btn v2-btn-primary" href="/solutions/new"><Plus />Nuevo artículo</a>
   {/snippet}
 </PageHeader>
 
@@ -48,23 +48,23 @@
      four reading zero. True whether or not a filter is applied, so it always
      renders. -->
 <p class="v2-sub" style="font-size:11.5px;margin:8px 0 0">
-  These numbers cover every article, not just the ones shown.
+  Estos números cubren todos los artículos, no solo los que se muestran.
 </p>
 
 <div class="v2-pad" style="padding-top:14px;flex:none">
   <div class="v2-stats">
     <StatCard
-      label="Approved, not published"
+      label="Aprobados, sin publicar"
       value={count(totals.approved_unpublished)}
       tone={totals.approved_unpublished ? 'clay' : 'slate'}
       detail={totals.approved_unpublished
         ? data.canRelease
-          ? 'Ready to go live'
-          : 'Waiting on an admin'
-        : 'Nothing waiting'}
+          ? 'Listos para publicar'
+          : 'Esperando a un administrador'
+        : 'No hay nada esperando'}
     />
-    <StatCard label="Published" value={count(totals.published)} tone="moss" />
-    <StatCard label="Draft" value={count(totals.draft)} tone="slate" />
+    <StatCard label="Publicados" value={count(totals.published)} tone="moss" />
+    <StatCard label="Borrador" value={count(totals.draft)} tone="slate" />
     <StatCard label="Total" value={count(totals.count)} tone="ink" />
   </div>
 </div>
@@ -72,7 +72,7 @@
 <FilterBar
   page="solutions"
   url={page.url}
-  meta="Published means customers can be shown it. Approving it is a separate step"
+  meta="Publicado significa que se le puede mostrar al cliente. Aprobarlo es un paso aparte"
 />
 
 {#if form?.error}
@@ -82,18 +82,18 @@
 <div class="v2-scroll">
   {#if articles.length === 0}
     <EmptyState
-      title={page.url.search ? 'No articles match that' : 'No articles yet'}
+      title={page.url.search ? 'Ningún artículo coincide' : 'Todavía no hay artículos'}
       body={page.url.search
-        ? 'Nothing in the knowledge base matches those filters. Clearing them shows everything.'
-        : 'Write the answer once, link it from the tickets that ask for it, and stop retyping it. The first one usually comes straight out of a ticket you just resolved.'}
+        ? 'Nada en la base de conocimiento coincide con esos filtros. Si los limpiás, se muestra todo.'
+        : 'Escribí la respuesta una sola vez, enlazala desde los tickets que la piden, y dejá de tipearla de nuevo. El primero suele salir directo de un ticket que acabás de resolver.'}
     >
       {#snippet icon()}<BookOpen size={21} />{/snippet}
       {#snippet actions()}
         {#if page.url.search}
-          <a class="v2-btn" href="/solutions">Clear filters</a>
+          <a class="v2-btn" href="/solutions">Limpiar filtros</a>
         {/if}
-        <a class="v2-btn v2-btn-primary" href="/solutions/new">New article</a>
-        <a class="v2-btn" href="/tickets">Go to tickets</a>
+        <a class="v2-btn v2-btn-primary" href="/solutions/new">Nuevo artículo</a>
+        <a class="v2-btn" href="/tickets">Ir a tickets</a>
       {/snippet}
     </EmptyState>
   {:else}
@@ -101,12 +101,12 @@
       <table class="v2-table">
         <thead>
           <tr>
-            <th>Article</th>
-            <th>Status</th>
-            <th>Visibility</th>
-            <th class="v2-r">Tickets solved</th>
-            <th>Author</th>
-            <th class="v2-r">Edited</th>
+            <th>Artículo</th>
+            <th>Estado</th>
+            <th>Visibilidad</th>
+            <th class="v2-r">Tickets resueltos</th>
+            <th>Autor</th>
+            <th class="v2-r">Editado</th>
             <th style="width:110px"></th>
           </tr>
         </thead>
@@ -128,14 +128,14 @@
                   <span
                     style="display:inline-flex;gap:5px;align-items:center;color:var(--v2-slate);font-size:12.5px"
                   >
-                    <Eye size={13} />Customers can see it
+                    <Eye size={13} />Los clientes lo ven
                   </span>
                 {:else}
                   <span
                     style="display:inline-flex;gap:5px;align-items:center;font-size:12.5px"
                     style:color={s.awaiting_release ? 'var(--v2-clay)' : 'var(--v2-slate)'}
                   >
-                    <EyeOff size={13} />Internal only
+                    <EyeOff size={13} />Solo interno
                   </span>
                 {/if}
               </td>
@@ -156,7 +156,7 @@
                 {#if s.awaiting_release && data.canRelease}
                   <form method="POST" action="?/publish" use:enhance>
                     <input type="hidden" name="id" value={s.id} />
-                    <button class="v2-btn v2-btn-sm" type="submit">Publish</button>
+                    <button class="v2-btn v2-btn-sm" type="submit">Publicar</button>
                   </form>
                 {/if}
               </td>
@@ -166,10 +166,10 @@
       </table>
     </div>
     <p class="v2-sub v2-pad" style="font-size:12px;padding-bottom:24px">
-      Showing <span class="v2-num">{articles.length}</span> of
+      Mostrando <span class="v2-num">{articles.length}</span> de
       <span class="v2-num">{count(totals.matched)}</span>
       {#if page.url.search}
-        · <a href="/solutions" style="color:inherit">clear filters</a>
+        · <a href="/solutions" style="color:inherit">limpiar filtros</a>
       {/if}
     </p>
   {/if}

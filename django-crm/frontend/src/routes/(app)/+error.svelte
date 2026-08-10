@@ -18,23 +18,23 @@
     status === 404
       ? {
           icon: FileQuestion,
-          title: 'That record is not here',
+          title: 'Ese registro no está acá',
           body:
             page.error?.message ||
-            'It may have been deleted, or it belongs to a team you are not part of.'
+            'Puede que se haya borrado, o que pertenezca a un equipo del que no formás parte.'
         }
       : status === 403
         ? {
             icon: Lock,
-            title: 'You do not have access to this',
-            body: 'Ask an admin in your organisation to give you access, or head back to Today.'
+            title: 'No tenés acceso a esto',
+            body: 'Pedile a un administrador de tu organización que te dé acceso, o volvé a Hoy.'
           }
         : {
             icon: TriangleAlert,
-            title: 'That did not load',
+            title: 'Eso no cargó',
             body:
               page.error?.message ||
-              'The server did not answer. Nothing you did caused this, and nothing was saved or lost.'
+              'El servidor no respondió. No hiciste nada que causara esto, y no se guardó ni se perdió nada.'
           }
   );
 </script>
@@ -46,9 +46,9 @@
     {/snippet}
     {#snippet actions()}
       {#if status >= 500}
-        <button class="v2-btn v2-btn-primary" onclick={() => location.reload()}>Try again</button>
+        <button class="v2-btn v2-btn-primary" onclick={() => location.reload()}>Reintentar</button>
       {/if}
-      <a class="v2-btn" href="/">Back to Today</a>
+      <a class="v2-btn" href="/">Volver a Hoy</a>
     {/snippet}
   </EmptyState>
 

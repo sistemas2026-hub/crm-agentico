@@ -57,8 +57,8 @@
    * "sla breached" and not `case.sla_breached`.
    */
   function verbPhrase(n) {
-    if (n.verb === 'case.mentioned') return 'mentioned you on';
-    if (n.verb === 'case.commented') return 'commented on';
+    if (n.verb === 'case.mentioned') return 'te mencionó en';
+    if (n.verb === 'case.commented') return 'comentó en';
     return `${n.verb.replace(/^[^.]+\./, '').replace(/_/g, ' ')}, `;
   }
 
@@ -100,12 +100,12 @@
   }
 </script>
 
-<PageHeader title="Notifications">
+<PageHeader title="Notificaciones">
   {#snippet sub()}
     {#if unread.length}
-      <span class="v2-num">{unread.length}</span> unread
+      <span class="v2-num">{unread.length}</span> sin leer
     {:else}
-      Nothing unread
+      Nada sin leer
     {/if}
   {/snippet}
   {#snippet actions()}
@@ -114,10 +114,10 @@
       type="button"
       onclick={() => (filter = filter === 'unread' ? 'all' : 'unread')}
     >
-      {filter === 'unread' ? 'Show read too' : 'Unread only'}
+      {filter === 'unread' ? 'Mostrar leídas también' : 'Solo sin leer'}
     </button>
     <button class="v2-btn" type="button" disabled={!unread.length} onclick={markAllRead}>
-      <Check />Mark all read
+      <Check />Marcar todo como leído
     </button>
   {/snippet}
 </PageHeader>
@@ -126,19 +126,19 @@
   <div class="v2-pad" style="padding-top:16px;padding-bottom:32px">
     {#if visible.length === 0}
       <EmptyState
-        title={filter === 'unread' ? 'Nothing unread' : 'No notifications'}
+        title={filter === 'unread' ? 'Nada sin leer' : 'No hay notificaciones'}
         body={filter === 'unread'
-          ? 'Everything here has been read. Notifications arrive when somebody @mentions you on a ticket, or comments on one you are watching.'
-          : 'Notifications arrive when somebody @mentions you on a ticket, or comments on one you are watching. Watching happens automatically the first time you are mentioned.'}
+          ? 'Ya leíste todo. Las notificaciones llegan cuando alguien te menciona con @ en un ticket, o comenta en uno que estás siguiendo.'
+          : 'Las notificaciones llegan cuando alguien te menciona con @ en un ticket, o comenta en uno que estás siguiendo. El seguimiento empieza automáticamente la primera vez que te mencionan.'}
       >
         {#snippet icon()}<BellOff size={21} />{/snippet}
         {#snippet actions()}
           {#if filter === 'unread' && rows.length}
             <button class="v2-btn" type="button" onclick={() => (filter = 'all')}>
-              Show read too
+              Mostrar leídas también
             </button>
           {/if}
-          <a class="v2-btn" href="/tickets">Go to tickets</a>
+          <a class="v2-btn" href="/tickets">Ir a Tickets</a>
         {/snippet}
       </EmptyState>
     {:else}
@@ -158,7 +158,7 @@
                   <Avatar name={n.actor.name} size={17} />
                   <b>{n.actor.name}</b>
                 {:else}
-                  <b class="system">The system</b>
+                  <b class="system">El sistema</b>
                 {/if}
                 {verbPhrase(n)}
                 {#if n.entity_name}
@@ -168,7 +168,7 @@
                     <span class="entity">{n.entity_name}</span>
                   {/if}
                 {:else}
-                  <span class="entity v2-muted">a ticket that no longer has a name</span>
+                  <span class="entity v2-muted">un ticket que ya no tiene nombre</span>
                 {/if}
               </p>
 
@@ -188,14 +188,14 @@
                        The broken link is NOT flagged per row: it is true of
                        every row, so a badge on each one is a badge that says
                        nothing. It is counted once, below the list. -->
-                  <span class="tag"><code>{n.verb}</code> has no producer</span>
+                  <span class="tag"><code>{n.verb}</code> no tiene productor</span>
                 {/if}
               </p>
             </div>
 
             {#if n.read_at === null}
               <button class="v2-btn v2-btn-sm read-btn" type="button" onclick={() => markRead(n)}>
-                Mark read
+                Marcar como leída
               </button>
             {/if}
           </li>
@@ -208,10 +208,10 @@
           become the loudest thing on a page about other people's messages.
         -->
         <p class="footnote">
-          <span class="v2-num">{data.totals.broken_links}</span> of these were written before the
-          producer was fixed and still carry a <code>/cases/…</code> link, which no client serves.
-          They open as <code>/v2/tickets/…</code> here. New ones are written correctly at source by
-          <code>cases/notifications.py</code>.
+          <span class="v2-num">{data.totals.broken_links}</span> de estas se escribieron antes de que
+          se corrigiera el productor y todavía tienen un link <code>/cases/…</code>, que ningún
+          cliente sirve. Acá se abren como <code>/v2/tickets/…</code>. Las nuevas se escriben
+          correctamente desde el origen en <code>cases/notifications.py</code>.
         </p>
       {/if}
     {/if}

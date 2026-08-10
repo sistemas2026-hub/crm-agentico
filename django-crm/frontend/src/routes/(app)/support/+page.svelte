@@ -37,20 +37,20 @@
     {
       href: '/solutions',
       icon: BookOpen,
-      title: 'Knowledge base',
-      body: 'The answers your team has already written down, including the ones customers can read.'
+      title: 'Base de conocimiento',
+      body: 'Las respuestas que tu equipo ya escribió, incluidas las que pueden leer los clientes.'
     },
     {
       href: '/tickets',
       icon: LifeBuoy,
-      title: 'Your tickets',
-      body: 'Everything open, and who it is waiting on. Most "no one replied" turns out to be a ticket assigned to nobody.'
+      title: 'Tus tickets',
+      body: 'Todo lo que está abierto, y quién lo tiene pendiente. La mayoría de los "nadie respondió" resultan ser un ticket sin asignar.'
     },
     {
       href: '/settings',
       icon: ClipboardList,
-      title: 'Settings',
-      body: 'Routing, escalation, business hours and inbound email. Each page reports what its rules are actually doing, not just what they are set to.'
+      title: 'Configuración',
+      body: 'Enrutamiento, escalamiento, horario laboral y correo entrante. Cada página muestra lo que sus reglas realmente están haciendo, no solo cómo están configuradas.'
     }
   ];
 
@@ -58,21 +58,21 @@
     {
       href: 'https://github.com/django-crm/Django-CRM/issues',
       icon: Bug,
-      title: 'Report a bug',
-      body: 'Public issue tracker. Fastest route for anything reproducible.',
+      title: 'Reportar un error',
+      body: 'Rastreador público de incidencias. La ruta más rápida para cualquier cosa reproducible.',
       external: true
     },
     {
       href: 'mailto:support@bottlecrm.example',
       icon: Mail,
-      title: 'Email support',
-      body: 'For anything involving your data, billing or an account you cannot get into.'
+      title: 'Soporte por correo',
+      body: 'Para cualquier cosa que involucre tus datos, facturación o una cuenta a la que no podés entrar.'
     },
     {
       href: 'https://status.bottlecrm.example',
       icon: Activity,
-      title: 'Service status',
-      body: 'Check here first if something that worked this morning stopped working this afternoon.',
+      title: 'Estado del servicio',
+      body: 'Revisá acá primero si algo que funcionaba esta mañana dejó de funcionar a la tarde.',
       external: true
     }
   ];
@@ -88,14 +88,14 @@
   $effect(() => {
     const ua = navigator.userAgent;
     const m = ua.match(/(Firefox|Edg|Chrome|Safari)\/([\d.]+)/);
-    browser = m ? `${m[1] === 'Edg' ? 'Edge' : m[1]} ${m[2].split('.')[0]}` : 'Unknown browser';
+    browser = m ? `${m[1] === 'Edg' ? 'Edge' : m[1]} ${m[2].split('.')[0]}` : 'Navegador desconocido';
     screen = `${window.innerWidth}×${window.innerHeight}`;
   });
 </script>
 
-<PageHeader title="Help" center width="840px">
+<PageHeader title="Ayuda" center width="840px">
   {#snippet sub()}
-    Fix it yourself, or reach someone who can
+    Solucionalo vos mismo, o contactá a alguien que pueda
   {/snippet}
 </PageHeader>
 
@@ -104,7 +104,7 @@
        share one 840px column down the middle (same pattern as the form pages).
        max-width caps it; margin-inline centres it. -->
   <div class="v2-pad" style="padding-top:18px;padding-bottom:32px;max-width:840px;margin-inline:auto">
-    <div class="v2-label" style="margin-bottom:10px">Start here</div>
+    <div class="v2-label" style="margin-bottom:10px">Empezá acá</div>
     <div class="cards">
       {#each SELF_SERVE as c (c.href)}
         <a class="v2-card card" href={c.href}>
@@ -117,7 +117,7 @@
       {/each}
     </div>
 
-    <div class="v2-label" style="margin:26px 0 10px">If that did not do it</div>
+    <div class="v2-label" style="margin:26px 0 10px">Si eso no lo resolvió</div>
     <div class="cards">
       {#each CONTACT as c (c.href)}
         <a
@@ -137,27 +137,29 @@
       {/each}
     </div>
 
-    <div class="v2-label" style="margin:26px 0 10px">What to include when you write</div>
+    <div class="v2-label" style="margin:26px 0 10px">Qué incluir cuando escribas</div>
     <div class="v2-card" style="padding:16px 18px">
       <p class="lead">
-        Four things turn a two-day exchange into one message. The first two are already known.
+        Cuatro cosas convierten un intercambio de dos días en un solo mensaje. Las primeras dos ya
+        se conocen.
       </p>
       <dl class="facts">
-        <dt>Browser</dt>
+        <dt>Navegador</dt>
         <dd class="v2-num">{browser}</dd>
-        <dt>Window size</dt>
+        <dt>Tamaño de ventana</dt>
         <dd class="v2-num">{screen}</dd>
-        <dt>What you expected</dt>
-        <dd>The thing you were trying to do, in one sentence.</dd>
-        <dt>What happened instead</dt>
+        <dt>Qué esperabas</dt>
+        <dd>Lo que estabas tratando de hacer, en una oración.</dd>
+        <dt>Qué pasó en cambio</dt>
         <dd>
-          The exact wording of any error. "It didn't work" and "Something went wrong" are the same
-          message to us.
+          El texto exacto de cualquier error. "No funcionó" y "Algo salió mal" son el mismo
+          mensaje para nosotros.
         </dd>
       </dl>
       <p class="fine">
-        Please do not paste screenshots containing an invoice link, an API token or a survey URL.
-        Each of those is a working credential for whoever ends up holding it.
+        Por favor no pegues capturas de pantalla que contengan un enlace de factura, un token de
+        API o una URL de encuesta. Cada uno de esos es una credencial funcional para quien termine
+        teniéndola.
       </p>
     </div>
   </div>

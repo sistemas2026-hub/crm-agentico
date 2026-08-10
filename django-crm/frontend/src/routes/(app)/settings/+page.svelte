@@ -39,12 +39,12 @@
    */
   let hoursSummary = $derived.by(() => {
     const open = data.calendar.days.filter((d) => d.open);
-    if (!open.length) return 'No open hours set';
+    if (!open.length) return 'Sin horario configurado';
     const first = open[0];
     const uniform = open.every((d) => d.open === first.open && d.close === first.close);
     return uniform
-      ? `${open.length} days, ${first.open}-${first.close}`
-      : `${open.length} days, hours vary`;
+      ? `${open.length} días, ${first.open}-${first.close}`
+      : `${open.length} días, horario variable`;
   });
 
   /** An approval rule set to MANAGER with no named approvers matches nobody. */
@@ -56,81 +56,81 @@
 
   let groups = $derived([
     {
-      label: 'People and access',
+      label: 'Personas y acceso',
       items: [
         {
           href: '/team',
-          title: 'Team and access',
-          body: 'Who can sign in, and what their role lets them do.',
+          title: 'Equipo y acceso',
+          body: 'Quién puede iniciar sesión, y qué le permite hacer su rol.',
           // People counts are admin-only oversight; a member's fan-out gets no
           // totals (the endpoint 403s), so the row lists the destination with
           // no value rather than a misleading zero.
           value: data.peopleTotals
-            ? `${data.peopleTotals.count} people · ${data.peopleTotals.admins} admins`
+            ? `${data.peopleTotals.count} personas · ${data.peopleTotals.admins} administradores`
             : null,
           warn: data.peopleTotals ? data.peopleTotals.tokens_on_deactivated > 0 : false
         },
         {
           href: '/settings/api-tokens',
-          title: 'API tokens',
-          body: 'Personal access tokens for scripts, integrations and AI agents.',
-          value: data.tokenTotals ? `${data.tokenTotals.live} live` : null,
+          title: 'Tokens de API',
+          body: 'Tokens de acceso personal para scripts, integraciones y agentes de IA.',
+          value: data.tokenTotals ? `${data.tokenTotals.live} activos` : null,
           warn: data.tokenTotals
             ? data.tokenTotals.orphaned > 0 || data.tokenTotals.unused_90d > 0
             : false
         },
         {
           href: '/settings/organization',
-          title: 'Organization',
-          body: 'The company details printed on every invoice and estimate.',
+          title: 'Organización',
+          body: 'Los datos de la empresa que se imprimen en cada factura y cotización.',
           value: org.company_name,
           warn: false
         }
       ]
     },
     {
-      label: 'How tickets are handled',
+      label: 'Cómo se gestionan los tickets',
       items: [
         {
           href: '/settings/routing',
-          title: 'Ticket routing',
-          body: 'Who a new ticket lands on, in the order the rules are tried.',
-          value: `${data.routingTotals.active} rules`,
+          title: 'Enrutamiento de tickets',
+          body: 'A quién le llega un ticket nuevo, en el orden en que se prueban las reglas.',
+          value: `${data.routingTotals.active} reglas`,
           warn: data.routingTotals.unrouted_last_30d > 0
         },
         {
           href: '/settings/escalation',
-          title: 'Escalation',
-          body: 'What happens when a ticket misses its response target.',
-          value: `${data.escalationTotals.active} of ${data.escalationTotals.count} priorities`,
+          title: 'Escalamiento',
+          body: 'Qué pasa cuando un ticket no cumple su objetivo de respuesta.',
+          value: `${data.escalationTotals.active} de ${data.escalationTotals.count} prioridades`,
           warn: data.escalationTotals.breaches_unhandled_30d > 0
         },
         {
           href: '/settings/business-hours',
-          title: 'Business hours',
-          body: 'The clock every response target is measured against.',
+          title: 'Horario laboral',
+          body: 'El reloj contra el que se mide cada objetivo de respuesta.',
           value: `${data.calendar.name} · ${hoursSummary}`,
           warn: false
         },
         {
           href: '/settings/ticket-approvals',
-          title: 'Approval rules',
-          body: 'What gates a ticket close, and who can clear it.',
-          value: `${data.approvalTotals.active} active`,
+          title: 'Reglas de aprobación',
+          body: 'Qué bloquea el cierre de un ticket, y quién puede destrabarlo.',
+          value: `${data.approvalTotals.active} activas`,
           warn: stuckApprovalRules > 0
         },
         {
           href: '/settings/reopen',
-          title: 'Reopen policy',
-          body: 'Whether a customer reply brings a closed ticket back.',
+          title: 'Política de reapertura',
+          body: 'Si la respuesta de un cliente vuelve a abrir un ticket cerrado.',
           // Admin-only, like people and tokens above: a member's fan-out gets
           // null (the endpoint 403s), so the row lists the destination without
           // a value rather than guessing at the policy.
           value: !data.reopen
             ? null
             : data.reopen.is_enabled
-              ? `Within ${data.reopen.reopen_window_days} days`
-              : 'Off. Closed stays closed',
+              ? `Dentro de ${data.reopen.reopen_window_days} días`
+              : 'Apagada. Lo cerrado sigue cerrado',
           // Replies arriving outside the window are normal for any window, so
           // that number belongs on the page, not on a warning here. Off is the
           // state worth flagging: it makes every reply to a closed ticket
@@ -139,9 +139,9 @@
         },
         {
           href: '/settings/inbound-email',
-          title: 'Inbound email',
-          body: 'The addresses that turn email into tickets.',
-          value: `${data.mailboxTotals.active} of ${data.mailboxTotals.count} active`,
+          title: 'Correo entrante',
+          body: 'Las direcciones que convierten un correo en un ticket.',
+          value: `${data.mailboxTotals.active} de ${data.mailboxTotals.count} activas`,
           // Off AND still receiving, not merely off. An address switched off
           // and left alone is a decision; one still getting mail and creating
           // nothing is a customer being ignored.
@@ -150,36 +150,36 @@
       ]
     },
     {
-      label: 'Shared words and fields',
+      label: 'Palabras y campos compartidos',
       items: [
         {
           href: '/settings/macros',
           title: 'Macros',
-          body: 'Canned replies, and the placeholders they substitute.',
-          value: `${data.macroTotals.org} shared`,
+          body: 'Respuestas predefinidas, y los placeholders que reemplazan.',
+          value: `${data.macroTotals.org} compartidas`,
           warn: data.macroTotals.with_unknown_placeholders > 0
         },
         {
           href: '/settings/tags',
-          title: 'Tags',
-          body: 'Labels shared across accounts, leads, deals and tickets.',
-          value: `${data.tagTotals.active} in use`,
+          title: 'Etiquetas',
+          body: 'Etiquetas compartidas entre cuentas, prospectos, negociaciones y tickets.',
+          value: `${data.tagTotals.active} en uso`,
           // Unused tags are housekeeping, not a fault, the tags page lists
           // them without needing the hub to raise an alarm about tidiness.
           warn: false
         },
         {
           href: '/settings/custom-fields',
-          title: 'Custom fields',
-          body: 'Fields this organisation added to records.',
-          value: `${data.fieldTotals.active} across ${data.fieldTotals.models_extended} record types`,
+          title: 'Campos personalizados',
+          body: 'Campos que esta organización agregó a los registros.',
+          value: `${data.fieldTotals.active} en ${data.fieldTotals.models_extended} tipos de registro`,
           warn: data.fieldTotals.required_with_gaps > 0
         },
         {
           href: '/invoices/templates',
-          title: 'Invoice templates',
-          body: 'How an invoice looks when a customer receives it.',
-          value: 'Under Invoices',
+          title: 'Plantillas de factura',
+          body: 'Cómo se ve una factura cuando la recibe un cliente.',
+          value: 'Dentro de Facturas',
           warn: false
         }
       ]
@@ -189,12 +189,12 @@
   let warnings = $derived(groups.flatMap((g) => g.items).filter((i) => i.warn).length);
 </script>
 
-<PageHeader title="Settings">
+<PageHeader title="Configuración">
   {#snippet sub()}
-    {org.name} · <span class="v2-num">{count(org.member_count)}</span> members · since
+    {org.name} · <span class="v2-num">{count(org.member_count)}</span> miembros · desde
     {shortDate(org.created_at)}
     {#if warnings}
-      · <span class="v2-num">{count(warnings)}</span> need a look
+      · <span class="v2-num">{count(warnings)}</span> necesitan revisión
     {/if}
   {/snippet}
 </PageHeader>
@@ -230,9 +230,10 @@
       index anyone with the URL can load.
     -->
     <p class="v2-sub" style="font-size:11.5px;margin-top:18px;max-width:64ch">
-      The organisation API key is not shown here. Credentials are never rendered on a page you can
-      arrive at by browsing. See
-      <a href="/settings/api-tokens" style="color:inherit">API tokens</a> for how token values are handled.
+      La clave de API de la organización no se muestra acá. Las credenciales nunca se renderizan en
+      una página a la que se puede llegar navegando. Mirá
+      <a href="/settings/api-tokens" style="color:inherit">Tokens de API</a> para saber cómo se manejan
+      los valores de los tokens.
     </p>
   </div>
 </div>

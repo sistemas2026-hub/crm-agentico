@@ -59,21 +59,21 @@
   let errors = $derived.by(() => {
     /** @type {Record<string, string>} */
     const e = {};
-    if (!form.name.trim()) e.name = 'Give the deal a name you would recognise in a list.';
-    if (!form.account) e.account = 'Pick the account this deal belongs to.';
+    if (!form.name.trim()) e.name = 'Ponele a la negociación un nombre que reconocerías en una lista.';
+    if (!form.account) e.account = 'Elegí la cuenta a la que pertenece esta negociación.';
 
     const amount = Number(form.amount);
-    if (form.amount === '') e.amount = 'How much is it worth?';
+    if (form.amount === '') e.amount = '¿Cuánto vale?';
     else if (!Number.isFinite(amount) || amount <= 0)
-      e.amount = 'Amount has to be a number greater than zero.';
+      e.amount = 'El monto tiene que ser un número mayor que cero.';
 
-    if (!form.closed_on) e.closed_on = 'When do you expect this to close?';
+    if (!form.closed_on) e.closed_on = '¿Cuándo esperás que se cierre?';
     else if (new Date(form.closed_on).getTime() < Date.now() - 86400000)
-      e.closed_on = 'That date has passed. Pick the date you now expect.';
+      e.closed_on = 'Esa fecha ya pasó. Elegí la fecha que esperás ahora.';
 
     const p = Number(form.probability);
     if (form.probability !== '' && (!Number.isFinite(p) || p < 0 || p > 100))
-      e.probability = 'Probability is a percentage between 0 and 100.';
+      e.probability = 'La probabilidad es un porcentaje entre 0 y 100.';
 
     return e;
   });
@@ -104,12 +104,12 @@
   };
 </script>
 
-<PageHeader title="New deal" center>
+<PageHeader title="Nueva negociación" center>
   {#snippet crumb()}
-    <a href="/pipeline">Pipeline</a> ›
+    <a href="/pipeline">Negociaciones</a> ›
   {/snippet}
   {#snippet sub()}
-    Five fields to start. Everything else can wait until you know it.
+    Cinco campos para empezar. El resto puede esperar hasta que lo sepas.
   {/snippet}
 </PageHeader>
 
@@ -123,7 +123,7 @@
       >
         <TriangleAlert size={17} style="color:var(--v2-rust);flex:none" />
         <div class="v2-next-body">
-          <div style="font-weight:600">The server refused this deal</div>
+          <div style="font-weight:600">El servidor rechazó esta negociación</div>
           <div class="v2-sub" style="margin-top:2px">{result.error}</div>
         </div>
       </div>
@@ -138,21 +138,18 @@
         <TriangleAlert size={17} style="color:var(--v2-rust);flex:none" />
         <div class="v2-next-body">
           <div style="font-weight:600">
-            {Object.keys(errors).length} field{Object.keys(errors).length === 1 ? '' : 's'} still need{Object.keys(
-              errors
-            ).length === 1
-              ? 's'
-              : ''} you
+            Todavía {Object.keys(errors).length === 1 ? 'falta' : 'faltan'} {Object.keys(errors).length}
+            {Object.keys(errors).length === 1 ? 'campo' : 'campos'}
           </div>
           <div class="v2-sub" style="margin-top:2px">
-            They are marked below. Nothing has been saved.
+            Están marcados abajo. No se guardó nada.
           </div>
         </div>
       </div>
     {/if}
 
     <div class="v2-field">
-      <label for="f-name">Deal name</label>
+      <label for="f-name">Nombre de la negociación</label>
       <input
         id="f-name"
         name="name"
@@ -161,19 +158,19 @@
         onblur={() => (touched.name = true)}
         aria-invalid={show('name') ? 'true' : undefined}
         aria-describedby={show('name') ? 'e-name' : 'h-name'}
-        placeholder="Platform renewal"
+        placeholder="Renovación de plataforma"
       />
       {#if show('name')}
         <p class="v2-error" id="e-name">{errors.name}</p>
       {:else}
         <p class="v2-hint" id="h-name">
-          What you would say out loud, “40 seats plus onboarding”, not “Opportunity 118”.
+          Lo que dirías en voz alta, "40 puestos más implementación", no "Negociación 118".
         </p>
       {/if}
     </div>
 
     <div class="v2-field">
-      <label for="f-account">Account</label>
+      <label for="f-account">Cuenta</label>
       <select
         id="f-account"
         name="account"
@@ -183,7 +180,7 @@
         aria-invalid={show('account') ? 'true' : undefined}
         aria-describedby={show('account') ? 'e-account' : undefined}
       >
-        <option value="">Choose an account…</option>
+        <option value="">Elegí una cuenta…</option>
         {#each data.accounts as a (a.id)}
           <option value={a.id}>{a.name}</option>
         {/each}
@@ -193,7 +190,7 @@
 
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
       <div class="v2-field">
-        <label for="f-amount">Amount</label>
+        <label for="f-amount">Monto</label>
         <input
           id="f-amount"
           name="amount"
@@ -218,7 +215,7 @@
       </div>
 
       <div class="v2-field">
-        <label for="f-close">Expected close</label>
+        <label for="f-close">Cierre esperado</label>
         <input
           id="f-close"
           name="closed_on"
@@ -234,15 +231,15 @@
     </div>
 
     <div class="v2-field">
-      <label for="f-stage">Stage</label>
+      <label for="f-stage">Etapa</label>
       <select id="f-stage" name="stage" class="v2-input" bind:value={form.stage}>
         {#each STAGES.filter((s) => !s.startsWith('CLOSED_')) as s (s)}
           <option value={s}>{STAGE_LABEL[s]}</option>
         {/each}
       </select>
       <p class="v2-hint">
-        A new deal cannot start closed. Won and lost are things you do to a deal that exists, so
-        they are not offered here.
+        Una negociación nueva no puede arrancar cerrada. Ganada y perdida son cosas que le pasan a
+        una negociación que ya existe, así que no se ofrecen acá.
       </p>
     </div>
 
@@ -270,15 +267,15 @@
         aria-controls="more-fields"
       >
         {#if more}<ChevronDown />{:else}<ChevronRight />{/if}
-        More fields
-        <span class="v2-sub" style="font-size:12px">. Type, probability, source, owner, notes</span>
+        Más campos
+        <span class="v2-sub" style="font-size:12px">. Tipo, probabilidad, origen, responsable, notas</span>
       </button>
 
       {#if more}
         <div id="more-fields" style="margin-top:14px">
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
             <div class="v2-field">
-              <label for="f-type">Type</label>
+              <label for="f-type">Tipo</label>
               <select
                 id="f-type"
                 name="opportunity_type"
@@ -291,7 +288,7 @@
               </select>
             </div>
             <div class="v2-field">
-              <label for="f-prob">Probability</label>
+              <label for="f-prob">Probabilidad</label>
               <input
                 id="f-prob"
                 name="probability"
@@ -308,30 +305,31 @@
           </div>
 
           <div class="v2-field">
-            <label for="f-owner">Owner</label>
+            <label for="f-owner">Responsable</label>
             <select id="f-owner" name="assigned_to" class="v2-input" bind:value={form.assigned_to}>
               {#each data.owners as o (o.id)}
                 <option value={o.id}>{o.name}</option>
               {/each}
             </select>
             <p class="v2-hint">
-              Defaults to you. Who created the deal is recorded separately and is not editable.
+              Por defecto sos vos. Quién creó la negociación se registra por separado y no es
+              editable.
             </p>
           </div>
 
           <div class="v2-field">
-            <label for="f-source">Source</label>
+            <label for="f-source">Origen</label>
             <input
               id="f-source"
               name="lead_source"
               class="v2-input"
               bind:value={form.lead_source}
-              placeholder="Existing customer"
+              placeholder="Cliente existente"
             />
           </div>
 
           <div class="v2-field">
-            <label for="f-notes">Notes</label>
+            <label for="f-notes">Notas</label>
             <textarea
               id="f-notes"
               name="description"
@@ -344,11 +342,11 @@
     </div>
 
     <div style="display:flex;gap:8px;align-items:center;margin-top:22px">
-      <button class="v2-btn v2-btn-primary" type="submit">Create deal</button>
-      <a class="v2-btn" href="/pipeline">Cancel</a>
+      <button class="v2-btn v2-btn-primary" type="submit">Crear negociación</button>
+      <a class="v2-btn" href="/pipeline">Cancelar</a>
       <span class="v2-sub" style="margin-left:auto;font-size:12px">
         <span class="v2-num">{REQUIRED.filter((f) => !errors[f]).length}</span>
-        of <span class="v2-num">{REQUIRED.length}</span> required fields done
+        de <span class="v2-num">{REQUIRED.length}</span> campos obligatorios completos
       </span>
     </div>
   </form>

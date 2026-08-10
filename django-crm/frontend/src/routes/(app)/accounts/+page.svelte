@@ -27,10 +27,10 @@
   );
 </script>
 
-<PageHeader title="Accounts">
+<PageHeader title="Cuentas">
   {#snippet sub()}
     <!-- The count is the size of the whole result set, not of this page. -->
-    <span class="v2-num">{count(totals.count)}</span> accounts
+    <span class="v2-num">{count(totals.count)}</span> cuentas
     <!-- `customers` is counted from the rows actually loaded, because the
          accounts endpoint returns no aggregate for it (see the note in
          `lib/server/v2/accounts.js`). Printing it beside a whole-set count
@@ -38,17 +38,17 @@
          covered everything, so it is shown only when this page IS the whole
          set. A figure that disappears beats a figure that is wrong. -->
     {#if (totals.shown ?? 0) >= (totals.count ?? 0)}
-      · <span class="v2-num">{count(totals.customers)}</span> with a deal won
+      · <span class="v2-num">{count(totals.customers)}</span> con una negociación ganada
     {/if}
   {/snippet}
   {#snippet actions()}
-    <a class="v2-btn v2-btn-primary" href="/accounts/new"><Plus />New account</a>
+    <a class="v2-btn v2-btn-primary" href="/accounts/new"><Plus />Nueva cuenta</a>
   {/snippet}
 </PageHeader>
 
 {#if isFiltered}
   <p class="v2-sub" style="font-size:11.5px;margin:8px 0 0">
-    These numbers describe the filtered list.
+    Estos números describen la lista filtrada.
   </p>
 {/if}
 
@@ -58,19 +58,19 @@
   people={data.people}
   tags={data.tags}
   meId={data.meId}
-  meta="Sorted by revenue won"
+  meta="Ordenado por ingresos ganados"
 />
 
 <div class="v2-scroll">
   {#if accounts.length === 0}
     <EmptyState
-      title="No accounts yet"
-      body="An account is a company you sell to. One appears automatically the first time you convert a lead, or you can add one directly."
+      title="Todavía no hay cuentas"
+      body="Una cuenta es una empresa a la que le vendés. Aparece una automáticamente la primera vez que convertís un prospecto, o podés agregar una directamente."
     >
       {#snippet icon()}<Building2 size={21} />{/snippet}
       {#snippet actions()}
-        <a class="v2-btn v2-btn-primary" href="/accounts/new">New account</a>
-        <a class="v2-btn" href="/leads">Go to leads</a>
+        <a class="v2-btn v2-btn-primary" href="/accounts/new">Nueva cuenta</a>
+        <a class="v2-btn" href="/leads">Ir a prospectos</a>
       {/snippet}
     </EmptyState>
   {:else}
@@ -78,11 +78,11 @@
       <table class="v2-table">
         <thead>
           <tr>
-            <th>Account</th>
-            <th>Industry</th>
-            <th class="v2-r">Won</th>
-            <th class="v2-r">Open pipeline</th>
-            <th class="v2-r">Past due</th>
+            <th>Cuenta</th>
+            <th>Rubro</th>
+            <th class="v2-r">Ganado</th>
+            <th class="v2-r">Pipeline abierto</th>
+            <th class="v2-r">Vencido</th>
             <th>Tickets</th>
           </tr>
         </thead>
@@ -93,7 +93,7 @@
                 <a class="v2-row-link" href="/accounts/{a.id}">
                   <div class="v2-table-primary">{a.name}</div>
                   <div class="v2-table-secondary">
-                    {[a.city, a.country_display].filter(Boolean).join(', ') || 'No address'}
+                    {[a.city, a.country_display].filter(Boolean).join(', ') || 'Sin dirección'}
                   </div>
                 </a>
               </td>
@@ -119,7 +119,7 @@
               </td>
               <td>
                 {#if a.open_tickets}
-                  <Pill tone="slate">{a.open_tickets} open</Pill>
+                  <Pill tone="slate">{a.open_tickets} abiertos</Pill>
                 {:else}
                   <span class="v2-muted">—</span>
                 {/if}
@@ -131,13 +131,13 @@
     </div>
     <p class="v2-sub v2-pad" style="font-size:12px;padding-bottom:24px">
       {#if totals.shown < totals.count}
-        Showing <span class="v2-num">{totals.shown}</span> of
+        Mostrando <span class="v2-num">{totals.shown}</span> de
         <span class="v2-num">{count(totals.count)}</span>
       {:else}
-        Showing all <span class="v2-num">{count(totals.count)}</span>
+        Mostrando todas, <span class="v2-num">{count(totals.count)}</span>
       {/if}
       {#if totals.inactive}
-        · <span class="v2-num">{totals.inactive}</span> inactive not shown
+        · <span class="v2-num">{totals.inactive}</span> inactivas no mostradas
       {/if}
     </p>
   {/if}

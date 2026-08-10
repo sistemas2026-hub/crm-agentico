@@ -982,6 +982,13 @@ class MagicLinkVerifyCodeSerializer(serializers.Serializer):
     code = serializers.RegexField(r"^\d{6}$", required=True, max_length=6)
 
 
+class PasswordLoginSerializer(serializers.Serializer):
+    """Serializer for email+password login."""
+
+    email = serializers.EmailField(required=True)
+    password = serializers.CharField(required=True, write_only=True, trim_whitespace=False)
+
+
 class UserDetailSerializer(serializers.ModelSerializer):
     """Detailed user serializer with profile and organizations"""
 

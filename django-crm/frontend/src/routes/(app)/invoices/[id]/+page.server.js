@@ -27,8 +27,8 @@ export const actions = {
       return fail(err?.status === 403 ? 403 : 400, {
         error:
           err?.status === 403
-            ? 'This invoice is not yours to send.'
-            : readableError(err, 'Could not send this invoice.')
+            ? 'Esa factura no es tuya para enviarla.'
+            : readableError(err, 'No se pudo enviar esta factura.')
       });
     }
     return { sent: true };
@@ -52,8 +52,8 @@ export const actions = {
       return fail(err?.status === 403 ? 403 : 400, {
         error:
           err?.status === 403
-            ? 'This invoice is not yours to settle.'
-            : readableError(err, 'Could not record that payment.')
+            ? 'Esa factura no es tuya para saldarla.'
+            : readableError(err, 'No se pudo registrar ese pago.')
       });
     }
     return { paid: true };
@@ -67,8 +67,8 @@ export const actions = {
       return fail(err?.status === 403 ? 403 : 400, {
         error:
           err?.status === 403
-            ? 'This invoice is not yours to cancel.'
-            : readableError(err, 'Could not cancel this invoice.')
+            ? 'Esa factura no es tuya para cancelarla.'
+            : readableError(err, 'No se pudo cancelar esta factura.')
       });
     }
     return { cancelled: true };
@@ -86,8 +86,8 @@ export const actions = {
       return fail(err?.status === 403 ? 403 : 400, {
         error:
           err?.status === 403
-            ? 'This invoice is not yours to duplicate.'
-            : readableError(err, 'Could not duplicate this invoice.')
+            ? 'Esa factura no es tuya para duplicarla.'
+            : readableError(err, 'No se pudo duplicar esta factura.')
       });
     }
     const newId = created?.invoice?.id;

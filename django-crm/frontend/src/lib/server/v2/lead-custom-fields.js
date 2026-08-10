@@ -73,7 +73,7 @@ export function displayValue(definition, value) {
 
   switch (definition.field_type) {
     case 'checkbox':
-      return value ? 'Yes' : 'No';
+      return value ? 'Sí' : 'No';
     case 'number':
       return typeof value === 'number' ? value.toLocaleString() : String(value);
     case 'dropdown': {

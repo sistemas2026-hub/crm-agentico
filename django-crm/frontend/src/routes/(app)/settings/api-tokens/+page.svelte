@@ -97,59 +97,59 @@
    * @returns {{ label: string, tone: 'ink'|'slate'|'clay'|'rust'|'moss' }}
    */
   function statusOf(t) {
-    if (t.revoked_at) return { label: 'Revoked', tone: 'slate' };
-    if (!t.is_live) return { label: 'Expired', tone: 'slate' };
-    return { label: 'Live', tone: 'moss' };
+    if (t.revoked_at) return { label: 'Revocado', tone: 'slate' };
+    if (!t.is_live) return { label: 'Vencido', tone: 'slate' };
+    return { label: 'Activo', tone: 'moss' };
   }
 
   /** Never used, or not for a long time. Either way it is a key under a mat. */
   function staleness(t) {
     if (!t.is_live) return null;
-    if (!t.last_used_at) return 'never used';
+    if (!t.last_used_at) return 'nunca usado';
     const n = daysSince(t.last_used_at) ?? 0;
-    return n > 90 ? `unused for ${n} days` : null;
+    return n > 90 ? `sin usar hace ${n} días` : null;
   }
 </script>
 
 {#if data.forbidden}
-  <PageHeader title="API tokens">
+  <PageHeader title="Tokens de API">
     {#snippet crumb()}<SettingsCrumb />{/snippet}
   </PageHeader>
   <div class="v2-pad" style="padding-top:40px">
     <NextAction
-      label="Admins only"
-      text="Reviewing every token in the organization is limited to admins, because a token authenticates as its owner. Ask an admin if one needs issuing or revoking."
+      label="Solo administradores"
+      text="Revisar todos los tokens de la organización está limitado a administradores, porque un token se autentica como su dueño. Pedile a un administrador si hace falta emitir o revocar uno."
     />
   </div>
 {:else}
-  <PageHeader title="API tokens">
+  <PageHeader title="Tokens de API">
     {#snippet crumb()}<SettingsCrumb />{/snippet}
     {#snippet sub()}
-      <span class="v2-num">{count(totals.live)}</span> live of
-      <span class="v2-num">{count(totals.count)}</span> ever issued
+      <span class="v2-num">{count(totals.live)}</span> activos de
+      <span class="v2-num">{count(totals.count)}</span> emitidos en total
     {/snippet}
     {#snippet actions()}
       <button class="v2-btn v2-btn-primary" onclick={() => (creating = !creating)}>
-        <Plus />New token
+        <Plus />Nuevo token
       </button>
     {/snippet}
   </PageHeader>
 
   <div class="v2-pad" style="padding-top:16px;flex:none">
     <div class="v2-stats">
-      <StatCard label="Live tokens" value={count(totals.live)} tone="ink" />
+      <StatCard label="Tokens activos" value={count(totals.live)} tone="ink" />
       <StatCard
-        label="Owner deactivated"
+        label="Dueño desactivado"
         value={count(totals.orphaned)}
         tone={totals.orphaned ? 'clay' : 'slate'}
-        detail={totals.orphaned ? 'Rejected at login, not revoked' : 'None'}
+        detail={totals.orphaned ? 'Rechazado al iniciar sesión, no revocado' : 'Ninguno'}
       />
       <StatCard
-        label="Unused 90+ days"
+        label="Sin usar hace 90+ días"
         value={count(totals.unused_90d)}
         tone={totals.unused_90d ? 'clay' : 'slate'}
       />
-      <StatCard label="Issued in total" value={count(totals.count)} tone="slate" />
+      <StatCard label="Emitidos en total" value={count(totals.count)} tone="slate" />
     </div>
   </div>
 
@@ -163,11 +163,11 @@
           style="padding:15px 16px;margin-bottom:18px;border-color:color-mix(in srgb, var(--v2-moss) 40%, var(--v2-line))"
         >
           <div style="font-weight:650;font-size:13px">
-            “{form.created.name}” created, copy it now
+            “{form.created.name}” creado, copialo ahora
           </div>
           <p class="v2-sub" style="font-size:12px;margin:4px 0 10px">
-            This is the only time the full token is shown. Store it somewhere safe; it cannot be
-            retrieved again.
+            Esta es la única vez que se muestra el token completo. Guardalo en un lugar seguro; no
+            se puede volver a recuperar.
           </p>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
             <code
@@ -177,7 +177,7 @@
               {form.created.token}
             </code>
             <button class="v2-btn v2-btn-sm" onclick={() => copyToken(form.created.token)}>
-              {#if copied}<Check size={13} />Copied{:else}<Copy size={13} />Copy{/if}
+              {#if copied}<Check size={13} />Copiado{:else}<Copy size={13} />Copiar{/if}
             </button>
           </div>
         </div>
@@ -188,12 +188,12 @@
           class="v2-sub"
           style="color:var(--v2-moss);font-size:12.5px;margin:0 0 16px;font-weight:550"
         >
-          Revoked {form.revokedOrphaned}
-          {form.revokedOrphaned === 1 ? 'token' : 'tokens'} on deactivated accounts.
+          Se {form.revokedOrphaned === 1 ? 'revocó' : 'revocaron'} {form.revokedOrphaned}
+          {form.revokedOrphaned === 1 ? 'token' : 'tokens'} de cuentas desactivadas.
         </p>
       {:else if form?.error}
         <div style="margin-bottom:16px">
-          <NextAction label="That did not work" text={form.error} tone="rust" />
+          <NextAction label="Eso no funcionó" text={form.error} tone="rust" />
         </div>
       {/if}
 
@@ -207,7 +207,7 @@
         >
           <div style="flex:1;min-width:220px">
             <label class="v2-label" for="token-name" style="display:block;margin-bottom:4px">
-              What is this token for?
+              ¿Para qué es este token?
             </label>
             <input
               id="token-name"
@@ -216,32 +216,32 @@
               maxlength="255"
               class="v2-input"
               style="width:100%"
-              placeholder="e.g. Nightly export job"
+              placeholder="ej. Exportación nocturna"
             />
           </div>
           <div>
             <label class="v2-label" for="token-access" style="display:block;margin-bottom:4px">
-              Access
+              Acceso
             </label>
             <select id="token-access" name="access" class="v2-input" style="width:180px">
-              <option value="read" selected>Read only</option>
-              <option value="full">Everything the owner can</option>
+              <option value="read" selected>Solo lectura</option>
+              <option value="full">Todo lo que puede hacer el dueño</option>
             </select>
           </div>
           <div>
             <label class="v2-label" for="token-expiry" style="display:block;margin-bottom:4px">
-              Expires
+              Vence
             </label>
             <select id="token-expiry" name="expiry" class="v2-input" style="width:150px">
-              <option value="90" selected>In 90 days</option>
-              <option value="30">In 30 days</option>
-              <option value="365">In 1 year</option>
-              <option value="never">Never</option>
+              <option value="90" selected>En 90 días</option>
+              <option value="30">En 30 días</option>
+              <option value="365">En 1 año</option>
+              <option value="never">Nunca</option>
             </select>
           </div>
-          <button class="v2-btn v2-btn-primary" disabled={busy}>Create token</button>
+          <button class="v2-btn v2-btn-primary" disabled={busy}>Crear token</button>
           <button type="button" class="v2-btn" disabled={busy} onclick={() => (creating = false)}>
-            Cancel
+            Cancelar
           </button>
           {#if form?.create?.error}
             <p
@@ -257,8 +257,8 @@
       {#if totals.orphaned}
         <div style="margin-bottom:18px">
           <NextAction
-            label="Loose end"
-            text={`${totals.orphaned} live ${totals.orphaned === 1 ? 'token belongs' : 'tokens belong'} to a deactivated account. Deactivating already stops them at login, but they are not revoked. Reactivating the account would bring them back.`}
+            label="Cabo suelto"
+            text={`${totals.orphaned} ${totals.orphaned === 1 ? 'token activo pertenece' : 'tokens activos pertenecen'} a una cuenta desactivada. Desactivarla ya los frena al iniciar sesión, pero no están revocados. Si se reactiva la cuenta, volverían a funcionar.`}
           />
           <form
             method="POST"
@@ -267,7 +267,7 @@
             style="margin-top:10px"
           >
             <button class="v2-btn v2-btn-primary" disabled={busy}>
-              Revoke {totals.orphaned === 1 ? 'it' : 'them all'}
+              Revocar{totals.orphaned === 1 ? 'lo' : 'los todos'}
             </button>
           </form>
         </div>
@@ -278,11 +278,11 @@
           <thead>
             <tr>
               <th>Token</th>
-              <th>Owner</th>
-              <th data-m="hide">Can do</th>
-              <th data-m="hide">Last used</th>
-              <th data-m="hide">Expires</th>
-              <th class="v2-r">State</th>
+              <th>Dueño</th>
+              <th data-m="hide">Puede hacer</th>
+              <th data-m="hide">Último uso</th>
+              <th data-m="hide">Vence</th>
+              <th class="v2-r">Estado</th>
             </tr>
           </thead>
           <tbody>
@@ -310,9 +310,9 @@
                 <td data-m="hide">
                   <span class="v2-sub" style="font-size:12px">
                     {#if (t.scopes ?? []).length === 0}
-                      Everything {(owner.name ?? '').split(' ')[0]} can
+                      Todo lo que puede {(owner.name ?? '').split(' ')[0]}
                     {:else if (t.scopes ?? []).every((/** @type {string} */ s) => s.endsWith(':read'))}
-                      Read only
+                      Solo lectura
                     {:else}
                       {(t.scopes ?? []).join(', ')}
                     {/if}
@@ -322,7 +322,7 @@
                   {#if t.last_used_at}
                     {relativeDays(t.last_used_at)}
                   {:else}
-                    <span class="v2-muted">never</span>
+                    <span class="v2-muted">nunca</span>
                   {/if}
                   {#if stale}
                     <span
@@ -337,7 +337,7 @@
                   {#if t.expires_at}
                     {shortDate(t.expires_at)}
                   {:else}
-                    <span class="v2-sub">never expires</span>
+                    <span class="v2-sub">nunca vence</span>
                   {/if}
                 </td>
                 <td class="v2-r">
@@ -346,7 +346,7 @@
                     {#if t.is_live}
                       <form method="POST" action="?/revoke" use:enhance={working}>
                         <input type="hidden" name="id" value={t.id} />
-                        <button class="v2-btn v2-btn-sm" disabled={busy}>Revoke</button>
+                        <button class="v2-btn v2-btn-sm" disabled={busy}>Revocar</button>
                       </form>
                     {/if}
                   </span>
@@ -362,12 +362,13 @@
       >
         <ShieldAlert size={16} style="color:var(--v2-clay);flex:none;margin-top:1px" />
         <div>
-          <div style="font-weight:600;font-size:13px">A token is the whole account</div>
+          <div style="font-weight:600;font-size:13px">Un token es la cuenta entera</div>
           <p class="v2-sub" style="font-size:12px;margin:4px 0 0">
-            A token authenticates as its owner and inherits their role and organisation. There is
-            no narrower permission to give it. Issue one per integration so a single revocation
-            stops a single thing, set an expiry, and revoke anything you cannot name a use for. The
-            value is shown once when the token is created and cannot be recovered afterwards.
+            Un token se autentica como su dueño y hereda su rol y su organización. No hay un
+            permiso más acotado para darle. Emití uno por integración para que una sola revocación
+            frene una sola cosa, ponele vencimiento, y revocá cualquiera del que no puedas nombrar
+            un uso. El valor se muestra una vez cuando se crea el token y no se puede recuperar
+            después.
           </p>
         </div>
       </div>

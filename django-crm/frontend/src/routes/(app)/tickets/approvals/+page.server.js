@@ -25,12 +25,12 @@ export const actions = {
   approve: async ({ cookies, request }) => {
     const form = await request.formData();
     const id = form.get('id')?.toString();
-    if (!id) return fail(400, { error: 'Which approval? None was given.' });
+    if (!id) return fail(400, { error: '¿Qué aprobación? No se indicó ninguna.' });
     try {
       await approveApproval({ cookies }, id, form.get('note')?.toString() || '');
     } catch (/** @type {any} */ err) {
       return fail(err?.status === 403 ? 403 : 400, {
-        error: readableError(err, 'Could not approve this request.')
+        error: readableError(err, 'No se pudo aprobar esta solicitud.')
       });
     }
     return { approved: true };
@@ -40,13 +40,13 @@ export const actions = {
     const form = await request.formData();
     const id = form.get('id')?.toString();
     const reason = form.get('reason')?.toString()?.trim();
-    if (!id) return fail(400, { error: 'Which approval? None was given.' });
-    if (!reason) return fail(400, { error: 'A rejection needs a reason.' });
+    if (!id) return fail(400, { error: '¿Qué aprobación? No se indicó ninguna.' });
+    if (!reason) return fail(400, { error: 'Un rechazo necesita un motivo.' });
     try {
       await rejectApproval({ cookies }, id, reason);
     } catch (/** @type {any} */ err) {
       return fail(err?.status === 403 ? 403 : 400, {
-        error: readableError(err, 'Could not reject this request.')
+        error: readableError(err, 'No se pudo rechazar esta solicitud.')
       });
     }
     return { rejected: true };
@@ -55,12 +55,12 @@ export const actions = {
   cancel: async ({ cookies, request }) => {
     const form = await request.formData();
     const id = form.get('id')?.toString();
-    if (!id) return fail(400, { error: 'Which approval? None was given.' });
+    if (!id) return fail(400, { error: '¿Qué aprobación? No se indicó ninguna.' });
     try {
       await cancelApproval({ cookies }, id);
     } catch (/** @type {any} */ err) {
       return fail(err?.status === 403 ? 403 : 400, {
-        error: readableError(err, 'Could not withdraw this request.')
+        error: readableError(err, 'No se pudo retirar esta solicitud.')
       });
     }
     return { cancelled: true };

@@ -92,7 +92,7 @@ function viewerClaims(cookies) {
 /** A person's display name from a nested ProfileSerializer row. */
 function personName(profile) {
   const d = profile?.user_details ?? {};
-  return d.name || d.email || 'Unnamed';
+  return d.name || d.email || 'Sin nombre';
 }
 
 /**
@@ -140,7 +140,7 @@ function toDoc(d, viewer) {
     })),
     created_by: {
       id: createdById,
-      name: d.created_by?.name || d.created_by?.email || 'Unknown'
+      name: d.created_by?.name || d.created_by?.email || 'Desconocido'
     },
     created_at: d.created_at,
     can_write: viewer.role === 'ADMIN' || (createdById != null && createdById === viewer.userId)

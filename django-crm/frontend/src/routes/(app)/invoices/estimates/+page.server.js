@@ -39,7 +39,7 @@ export const actions = {
   convert: async ({ cookies, request }) => {
     const form = await request.formData();
     const id = form.get('id')?.toString();
-    if (!id) return fail(400, { error: 'Which estimate? None was given.' });
+    if (!id) return fail(400, { error: '¿Qué cotización? No se indicó ninguna.' });
 
     let created;
     try {
@@ -48,8 +48,8 @@ export const actions = {
       return fail(err?.status === 403 ? 403 : 400, {
         error:
           err?.status === 403
-            ? 'This estimate is not yours to convert.'
-            : readableError(err, 'Could not raise an invoice from this estimate.')
+            ? 'Esa cotización no es tuya para convertirla.'
+            : readableError(err, 'No se pudo emitir una factura a partir de esta cotización.')
       });
     }
 

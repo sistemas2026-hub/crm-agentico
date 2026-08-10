@@ -20,12 +20,12 @@ export const actions = {
   read: async ({ cookies, request }) => {
     const form = await request.formData();
     const id = form.get('id')?.toString() ?? '';
-    if (!id) return fail(400, { error: 'Missing notification id.' });
+    if (!id) return fail(400, { error: 'Falta el id de la notificación.' });
 
     try {
       await markNotificationRead({ cookies }, id);
     } catch (/** @type {any} */ err) {
-      return fail(err?.status === 404 ? 404 : 500, { error: 'Could not mark that read.' });
+      return fail(err?.status === 404 ? 404 : 500, { error: 'No se pudo marcar esa notificación como leída.' });
     }
     return { ok: true };
   },
@@ -35,7 +35,7 @@ export const actions = {
     try {
       await markAllNotificationsRead({ cookies });
     } catch {
-      return fail(500, { error: 'Could not mark everything read.' });
+      return fail(500, { error: 'No se pudo marcar todo como leído.' });
     }
     return { ok: true };
   }

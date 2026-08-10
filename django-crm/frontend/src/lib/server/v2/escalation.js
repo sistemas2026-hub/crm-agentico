@@ -99,14 +99,14 @@ function buildBody(allowed, values) {
 export async function createEscalationPolicy({ cookies }, values) {
   const body = buildBody(CREATE_FIELDS, values);
   if (!ESCALATION_PRIORITIES.includes(body.priority)) {
-    throw new Error('Pick a priority for the policy.');
+    throw new Error('Elegí una prioridad para la política.');
   }
   return await apiRequest('/cases/escalation-policies/', { method: 'POST', body }, { cookies });
 }
 
 /** @param {{ cookies: import('@sveltejs/kit').Cookies }} event */
 export async function updateEscalationPolicy({ cookies }, id, values) {
-  if (!id) throw new Error('Which policy? No policy id was given.');
+  if (!id) throw new Error('¿Qué política? No se indicó un id de política.');
   const body = buildBody(UPDATE_FIELDS, values);
   return await apiRequest(
     `/cases/escalation-policies/${id}/`,
@@ -123,6 +123,6 @@ export async function updateEscalationPolicy({ cookies }, id, values) {
  * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
  */
 export async function deleteEscalationPolicy({ cookies }, id) {
-  if (!id) throw new Error('Which policy? No policy id was given.');
+  if (!id) throw new Error('¿Qué política? No se indicó un id de política.');
   return await apiRequest(`/cases/escalation-policies/${id}/`, { method: 'DELETE' }, { cookies });
 }

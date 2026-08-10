@@ -54,9 +54,9 @@ export const actions = {
       await createCustomField(event, values);
     } catch (/** @type {any} */ err) {
       if (err?.status === 403) {
-        return fail(403, { create: { error: 'Only an admin can add custom fields.' } });
+        return fail(403, { create: { error: 'Solo un administrador puede agregar campos personalizados.' } });
       }
-      return fail(400, { create: { error: readableError(err, 'Could not add the field.') } });
+      return fail(400, { create: { error: readableError(err, 'No se pudo agregar el campo.') } });
     }
     return { created: true };
   },
@@ -69,9 +69,9 @@ export const actions = {
       await updateCustomField(event, id, values);
     } catch (/** @type {any} */ err) {
       if (err?.status === 403) {
-        return fail(403, { update: { error: 'Only an admin can change custom fields.' } });
+        return fail(403, { update: { error: 'Solo un administrador puede cambiar campos personalizados.' } });
       }
-      return fail(400, { update: { error: readableError(err, 'Could not save the field.') } });
+      return fail(400, { update: { error: readableError(err, 'No se pudo guardar el campo.') } });
     }
     return { updated: true };
   },
@@ -83,10 +83,10 @@ export const actions = {
       await deactivateCustomField(event, id);
     } catch (/** @type {any} */ err) {
       if (err?.status === 403) {
-        return fail(403, { deactivate: { error: 'Only an admin can turn custom fields off.' } });
+        return fail(403, { deactivate: { error: 'Solo un administrador puede apagar campos personalizados.' } });
       }
       return fail(400, {
-        deactivate: { error: readableError(err, 'Could not turn the field off.') }
+        deactivate: { error: readableError(err, 'No se pudo apagar el campo.') }
       });
     }
     return { deactivated: true };
@@ -108,10 +108,10 @@ export const actions = {
       await updateCustomField(event, id, { is_active: true });
     } catch (/** @type {any} */ err) {
       if (err?.status === 403) {
-        return fail(403, { activate: { error: 'Only an admin can turn custom fields on.' } });
+        return fail(403, { activate: { error: 'Solo un administrador puede encender campos personalizados.' } });
       }
       return fail(400, {
-        activate: { error: readableError(err, 'Could not turn the field on.') }
+        activate: { error: readableError(err, 'No se pudo encender el campo.') }
       });
     }
     return { activated: true };

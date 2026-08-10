@@ -50,7 +50,7 @@ export const actions = {
     if (!user) {
       return {
         error: {
-          name: 'You must be logged in to create an organization'
+          name: 'Tenés que iniciar sesión para crear una organización'
         }
       };
     }
@@ -65,7 +65,7 @@ export const actions = {
     if (!orgName || orgName.trim().length === 0) {
       return {
         error: {
-          name: 'Organization name is required'
+          name: 'El nombre de la organización es obligatorio'
         }
       };
     }
@@ -75,12 +75,14 @@ export const actions = {
       if (!jwtAccess) {
         return {
           error: {
-            name: 'Authentication required'
+            name: 'Se requiere autenticación'
           }
         };
       }
 
-      const apiUrl = publicEnv.PUBLIC_DJANGO_API_URL;
+      // PRIVATE_: this action runs server-side, inside the frontend
+      // container, and must reach the backend by its compose service name.
+      const apiUrl = env.PRIVATE_DJANGO_API_URL || publicEnv.PUBLIC_DJANGO_API_URL;
 
       // Create organization and profile via Django API
       // Django's OrgProfileCreateView creates both org and profile
@@ -201,14 +203,14 @@ export const actions = {
             name:
               err.response.data?.name?.[0] ||
               err.response.data?.error ||
-              'Organization with this name may already exist'
+              'Puede que ya exista una organización con este nombre'
           }
         };
       }
 
       return {
         error: {
-          name: 'An unexpected error occurred while creating the organization.'
+          name: 'Ocurrió un error inesperado al crear la organización.'
         }
       };
     }

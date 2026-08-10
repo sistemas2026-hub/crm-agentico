@@ -58,10 +58,10 @@ const EDITABLE_FIELDS = [
 export async function updateReopenPolicy({ cookies }, values) {
   const days = Number(values.reopen_window_days);
   if (!Number.isInteger(days) || days < 1 || days > 365) {
-    throw new Error('The reopen window must be a whole number of days between 1 and 365.');
+    throw new Error('El plazo de reapertura tiene que ser un número entero de días entre 1 y 365.');
   }
   if (!REOPEN_TO_STATUSES.includes(values.reopen_to_status)) {
-    throw new Error('A reopened ticket has to come back as New, Assigned or Pending.');
+    throw new Error('Un ticket reabierto tiene que volver como Nuevo, Asignado o Pendiente.');
   }
 
   /** @type {Record<string, any>} */

@@ -31,7 +31,7 @@ export const actions = {
     } catch (/** @type {any} */ err) {
       return fail(err?.status === 400 ? 400 : 500, {
         values: body,
-        message: readableError(err, 'Could not save your profile.')
+        message: readableError(err, 'No se pudo guardar tu perfil.')
       });
     }
 
@@ -50,7 +50,7 @@ export const actions = {
     const orgId = form.get('org_id')?.toString() ?? '';
 
     if (!UUID_RE.test(orgId)) {
-      return fail(400, { scope: 'switch', message: 'Invalid organisation.' });
+      return fail(400, { scope: 'switch', message: 'Organización inválida.' });
     }
 
     // Sent so the backend retires the token we are replacing; it belongs to the
@@ -72,8 +72,8 @@ export const actions = {
       // 403 is the honest one: you asked for an org you are not a member of.
       const message =
         err?.status === 403
-          ? 'You are not a member of that organisation.'
-          : readableError(err, 'Could not switch organisation.');
+          ? 'No sos miembro de esa organización.'
+          : readableError(err, 'No se pudo cambiar de organización.');
       return fail(err?.status === 403 ? 403 : 500, { scope: 'switch', message });
     }
 

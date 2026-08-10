@@ -13,7 +13,7 @@
   import { ChevronLeft } from '@lucide/svelte';
 </script>
 
-<a href="/settings"><ChevronLeft size={13} />Settings</a>
+<a href="/settings"><ChevronLeft size={13} />Configuración</a>
 
 <style>
   a {

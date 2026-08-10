@@ -57,17 +57,17 @@
    * take on faith. When the server says PERCENTAGE, say the percentage.
    */
   let discountLabel = $derived(
-    discountType === 'PERCENTAGE' ? `Discount (${discountValue}%)` : 'Discount'
+    discountType === 'PERCENTAGE' ? `Descuento (${discountValue}%)` : 'Descuento'
   );
 </script>
 
 <table class="v2-doc-items">
   <thead>
     <tr>
-      <th>Item</th>
-      <th class="v2-r">Qty</th>
-      <th class="v2-r">Unit price</th>
-      <th class="v2-r">Amount</th>
+      <th>Ítem</th>
+      <th class="v2-r">Cant.</th>
+      <th class="v2-r">Precio unitario</th>
+      <th class="v2-r">Monto</th>
     </tr>
   </thead>
   <tbody>
@@ -107,14 +107,14 @@
 
     {#if taxAmount}
       <div>
-        <dt>Tax ({taxRate}%)</dt>
+        <dt>Impuesto ({taxRate}%)</dt>
         <dd class="v2-num">{money(taxAmount, currency)}</dd>
       </div>
     {/if}
 
     {#if shippingAmount}
       <div>
-        <dt>Shipping</dt>
+        <dt>Envío</dt>
         <dd class="v2-num">{money(shippingAmount, currency)}</dd>
       </div>
     {/if}

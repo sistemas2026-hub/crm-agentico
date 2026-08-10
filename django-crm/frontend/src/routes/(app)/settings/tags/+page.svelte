@@ -100,10 +100,11 @@
   });
 </script>
 
-<PageHeader title="Tags">
+<PageHeader title="Etiquetas">
   {#snippet crumb()}<SettingsCrumb />{/snippet}
   {#snippet sub()}
-    <span class="v2-num">{count(totals.active)}</span> in use across accounts, leads, deals and tickets
+    <span class="v2-num">{count(totals.active)}</span> en uso entre cuentas, prospectos, negociaciones
+    y tickets
   {/snippet}
   {#snippet actions()}
     {#if data.can_edit}
@@ -132,19 +133,19 @@
           <input
             class="v2-input"
             name="name"
-            placeholder="Tag name"
+            placeholder="Nombre de la etiqueta"
             required
             autofocus
             disabled={busy}
           />
-          <button class="v2-btn v2-btn-primary" type="submit" disabled={busy}>Create</button>
+          <button class="v2-btn v2-btn-primary" type="submit" disabled={busy}>Crear</button>
           <button class="v2-btn" type="button" disabled={busy} onclick={() => (adding = false)}>
-            Cancel
+            Cancelar
           </button>
         </form>
       {:else}
         <button class="v2-btn v2-btn-primary" onclick={() => (adding = true)}
-          ><Plus />New tag</button
+          ><Plus />Nueva etiqueta</button
         >
       {/if}
     {/if}
@@ -153,14 +154,14 @@
 
 <div class="v2-pad" style="padding-top:16px;flex:none">
   <div class="v2-stats">
-    <StatCard label="Active" value={count(totals.active)} tone="ink" />
+    <StatCard label="Activas" value={count(totals.active)} tone="ink" />
     <StatCard
-      label="Applied to nothing"
+      label="Sin aplicar a nada"
       value={count(totals.unused)}
       tone={totals.unused > 0 ? 'clay' : 'slate'}
-      detail="Counts accounts, leads, deals and tickets only"
+      detail="Solo cuenta cuentas, prospectos, negociaciones y tickets"
     />
-    <StatCard label="Turned off" value={count(totals.count - totals.active)} tone="slate" />
+    <StatCard label="Apagadas" value={count(totals.count - totals.active)} tone="slate" />
   </div>
 </div>
 
@@ -171,11 +172,11 @@
         <Merge size={16} style="color:var(--v2-clay);flex:none;margin-top:1px" />
         <div>
           <div style="font-weight:600;font-size:13px">
-            {group.all.map((t) => t.name).join(' and ')} look like the same tag
+            {group.all.map((t) => t.name).join(' y ')} parecen la misma etiqueta
           </div>
           <p class="v2-sub" style="font-size:12px;margin:4px 0 0;line-height:1.5">
-            {group.all.map((t) => `${t.name} is on ${used(t)} records`).join('; ')}. Anyone
-            filtering by one of them misses the other.
+            {group.all.map((t) => `${t.name} está en ${used(t)} registros`).join('; ')}. Quien
+            filtre por una se pierde la otra.
           </p>
         </div>
         {#if data.can_edit}
@@ -189,9 +190,9 @@
             {#each group.merge as loser (loser.id)}
               <ConfirmAction
                 action="?/merge"
-                label={group.merge.length > 1 ? `Merge ${loser.name}` : 'Merge'}
-                confirmLabel="Merge"
-                explain={`${used(loser)} ${used(loser) === 1 ? 'record moves' : 'records move'} from ${loser.name} to ${group.keep.name}, and ${loser.name} is turned off. Records already on ${group.keep.name} are untouched. This cannot be undone by merging back.`}
+                label={group.merge.length > 1 ? `Combinar ${loser.name}` : 'Combinar'}
+                confirmLabel="Combinar"
+                explain={`${used(loser)} ${used(loser) === 1 ? 'registro se mueve' : 'registros se mueven'} de ${loser.name} a ${group.keep.name}, y ${loser.name} se apaga. Los registros que ya están en ${group.keep.name} quedan intactos. Esto no se puede deshacer combinando al revés.`}
                 hidden={{ id: loser.id, into: group.keep.id }}
               />
             {/each}
@@ -205,8 +206,9 @@
     {/if}
     {#if form?.merged}
       <p class="v2-sub" style="margin-bottom:12px">
-        Merged into {form.merged.name}. {count(form.merged.moved)}
-        {form.merged.moved === 1 ? 'record' : 'records'} moved.
+        Combinada en {form.merged.name}. Se {form.merged.moved === 1 ? 'movió' : 'movieron'}
+        {count(form.merged.moved)}
+        {form.merged.moved === 1 ? 'registro' : 'registros'}.
       </p>
     {/if}
 
@@ -217,18 +219,18 @@
       <p class="v2-error" style="margin-bottom:12px">{form.restore.error}</p>
     {/if}
 
-    <div class="v2-label" style="margin-bottom:10px">All tags</div>
+    <div class="v2-label" style="margin-bottom:10px">Todas las etiquetas</div>
     <div class="v2-table-wrap">
       <table class="v2-table">
         <thead>
           <tr>
-            <th>Tag</th>
-            <th style="text-align:right">Accounts</th>
-            <th style="text-align:right">Contacts</th>
-            <th style="text-align:right">Leads</th>
-            <th style="text-align:right">Deals</th>
+            <th>Etiqueta</th>
+            <th style="text-align:right">Cuentas</th>
+            <th style="text-align:right">Contactos</th>
+            <th style="text-align:right">Prospectos</th>
+            <th style="text-align:right">Negociaciones</th>
             <th style="text-align:right">Tickets</th>
-            <th style="text-align:right">Tasks</th>
+            <th style="text-align:right">Tareas</th>
             <th style="text-align:right">Total</th>
             <th></th>
             {#if data.can_edit}<th></th>{/if}
@@ -254,9 +256,9 @@
               <td class="v2-num" style="text-align:right;font-weight:600">{used(t) || '—'}</td>
               <td style="text-align:right">
                 {#if !t.is_active}
-                  <Pill tone="slate">Off</Pill>
+                  <Pill tone="slate">Apagada</Pill>
                 {:else if used(t) === 0}
-                  <Pill tone="clay">Unused</Pill>
+                  <Pill tone="clay">Sin usar</Pill>
                 {/if}
               </td>
               {#if data.can_edit}
@@ -270,11 +272,11 @@
                          not a vague warning. -->
                     <ConfirmAction
                       action="?/archive"
-                      label="Turn off"
-                      confirmLabel="Turn off"
+                      label="Apagar"
+                      confirmLabel="Apagar"
                       explain={used(t) > 0
-                        ? `${used(t)} ${used(t) === 1 ? 'record keeps' : 'records keep'} this tag. Turning it off stops it being offered on new records, and keeps it on the ones that have it. You can turn it back on.`
-                        : 'Nothing carries this tag. Turning it off stops it being offered on new records. You can turn it back on.'}
+                        ? `${used(t)} ${used(t) === 1 ? 'registro mantiene' : 'registros mantienen'} esta etiqueta. Apagarla deja de ofrecerla en registros nuevos, y la mantiene en los que ya la tienen. Se puede volver a encender.`
+                        : 'Nada tiene esta etiqueta. Apagarla deja de ofrecerla en registros nuevos. Se puede volver a encender.'}
                       hidden={{ id: t.id }}
                     />
                   {:else}
@@ -283,7 +285,7 @@
                          two-click confirm. -->
                     <form method="POST" action="?/restore" use:enhance>
                       <input type="hidden" name="id" value={t.id} />
-                      <button class="v2-btn v2-btn-sm" type="submit">Turn back on</button>
+                      <button class="v2-btn v2-btn-sm" type="submit">Volver a encender</button>
                     </form>
                   {/if}
                 </td>
@@ -293,8 +295,8 @@
             <tr>
               <td colspan={data.can_edit ? 8 : 7}>
                 <EmptyState
-                  title="No tags yet"
-                  body="Tags are shared across every record type, so the first one is worth naming carefully."
+                  title="Todavía no hay etiquetas"
+                  body="Las etiquetas se comparten entre todos los tipos de registro, así que vale la pena nombrar bien la primera."
                 >
                   {#snippet icon()}<TagsIcon size={21} />{/snippet}
                 </EmptyState>
@@ -306,8 +308,8 @@
     </div>
 
     <p class="v2-sub" style="font-size:11.5px;margin-top:14px;max-width:64ch">
-      Turning a tag off hides it from the pickers and leaves it on the records that already carry
-      it. Nothing is removed, and you can turn a tag back on at any time.
+      Apagar una etiqueta la oculta de los selectores y la deja en los registros que ya la tienen.
+      No se elimina nada, y se puede volver a encender en cualquier momento.
     </p>
   </div>
 </div>

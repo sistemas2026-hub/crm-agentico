@@ -53,7 +53,7 @@ export const actions = {
     try {
       await updateArticle({ cookies }, params.id, values);
     } catch (/** @type {any} */ err) {
-      return fail(400, { values, error: readableError(err, 'Could not save this article.') });
+      return fail(400, { values, error: readableError(err, 'No se pudo guardar este artículo.') });
     }
 
     redirect(303, `/solutions/${params.id}`);

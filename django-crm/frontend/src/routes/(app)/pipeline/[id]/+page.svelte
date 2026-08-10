@@ -33,7 +33,7 @@
 
 <PageHeader title={deal.name} record>
   {#snippet crumb()}
-    <a href="/pipeline">Pipeline</a>
+    <a href="/pipeline">Negociaciones</a>
     <ChevronRight size={12} />
     <a href="/accounts/{deal.account.id}">{deal.account.name}</a>
   {/snippet}
@@ -41,7 +41,7 @@
     <!-- "Move stage" was a second button that did nothing. Stage is edited on
          the form below, where the page can show what moving it costs, the
          aging clock resets, instead of moving it in one anonymous click. -->
-    <a class="v2-btn" href="/pipeline/{deal.id}/edit">Edit</a>
+    <a class="v2-btn" href="/pipeline/{deal.id}/edit">Editar</a>
   {/snippet}
 </PageHeader>
 
@@ -66,7 +66,7 @@
       {/each}
       <span style="margin-left:auto">
         <Pill tone={AGING_TONE[deal.aging_status]} dot>
-          {`${AGING_LABEL[deal.aging_status]} · ${deal.days_in_current_stage} days in ${STAGE_LABEL[deal.stage]}`}
+          {`${AGING_LABEL[deal.aging_status]} · ${deal.days_in_current_stage} días en ${STAGE_LABEL[deal.stage]}`}
         </Pill>
       </span>
     </div>
@@ -79,19 +79,19 @@
           nothing to render. A suggestion the system invented is worse than no
           suggestion, because people act on it.
         -->
-        <div class="v2-label" style="margin-bottom:12px">Activity</div>
+        <div class="v2-label" style="margin-bottom:12px">Actividad</div>
         <Timeline events={activity} />
 
         {#if lineItems.length}
-          <div class="v2-label" style="margin:22px 0 10px">Line items</div>
+          <div class="v2-label" style="margin:22px 0 10px">Ítems</div>
           <div class="v2-card" style="overflow:hidden">
             <table class="v2-table">
               <thead>
                 <tr>
-                  <th>Product</th>
-                  <th class="v2-r">Qty</th>
-                  <th class="v2-r">Unit price</th>
-                  <th class="v2-r">Discount</th>
+                  <th>Producto</th>
+                  <th class="v2-r">Cant.</th>
+                  <th class="v2-r">Precio unitario</th>
+                  <th class="v2-r">Descuento</th>
                   <th class="v2-r">Total</th>
                 </tr>
               </thead>
@@ -117,7 +117,7 @@
               {#if discount > 0}
                 <span class="v2-muted">Subtotal</span>
                 <span class="v2-num v2-muted">{money(subtotal, deal.currency)}</span>
-                <span class="v2-muted">Discounts</span>
+                <span class="v2-muted">Descuentos</span>
                 <span class="v2-num v2-muted">−{money(discount, deal.currency)}</span>
               {/if}
               <span style="font-weight:650">Total</span>
@@ -131,33 +131,33 @@
   </div>
 
   <aside class="v2-rail">
-    <div class="v2-label v2-rail-head">Deal</div>
+    <div class="v2-label v2-rail-head">Negociación</div>
     <dl class="v2-kv">
-      <dt>Stage</dt>
+      <dt>Etapa</dt>
       <dd>{STAGE_LABEL[deal.stage]}</dd>
-      <dt>Value</dt>
+      <dt>Valor</dt>
       <dd class="v2-num">{money(deal.amount, deal.currency)}</dd>
-      <dt>Probability</dt>
+      <dt>Probabilidad</dt>
       <dd class="v2-num">{deal.probability}%</dd>
-      <dt>Expected close</dt>
+      <dt>Cierre esperado</dt>
       <dd>{longDate(deal.closed_on)}</dd>
-      <dt>Type</dt>
+      <dt>Tipo</dt>
       <dd>{OPPORTUNITY_TYPE_LABEL[deal.opportunity_type]}</dd>
-      <dt>Source</dt>
+      <dt>Origen</dt>
       <dd style="text-transform:lowercase">{deal.lead_source || '—'}</dd>
-      <dt>Owner</dt>
-      <dd>{deal.assigned_to || 'Unassigned'}</dd>
+      <dt>Responsable</dt>
+      <dd>{deal.assigned_to || 'Sin asignar'}</dd>
       <!--
         "Last activity" used to be here, reading a `last_activity_at` the model
         does not have. Aging is measured from the last stage change, a
         narrower claim, and the one the board is actually coloured by, so that
         is what this row says now.
       -->
-      <dt>Stage since</dt>
+      <dt>En esta etapa desde</dt>
       <dd>{longDate(deal.stage_changed_at)}</dd>
     </dl>
 
-    <div class="v2-label v2-rail-head">People</div>
+    <div class="v2-label v2-rail-head">Personas</div>
     {#each contacts as c (c.id)}
       <!-- A link now that `/contacts/<uuid>` resolves. These names were
            plain text because the contacts module was still fixtures. -->
@@ -168,13 +168,13 @@
           <!-- `relationship` (Champion, Blocker) was a fixture field. Contact
                has `title` and `department`, so the line says those. -->
           <div class="v2-sub" style="font-size:11px">
-            {[c.title, c.department].filter(Boolean).join(' · ') || 'No title recorded'}
+            {[c.title, c.department].filter(Boolean).join(' · ') || 'Sin cargo registrado'}
           </div>
         </div>
       </a>
     {:else}
       <p class="v2-sub" style="font-size:12px">
-        Nobody is linked to this deal yet. Add the person who signs it.
+        Todavía nadie está vinculado a esta negociación. Agregá a la persona que la firma.
       </p>
     {/each}
 

@@ -40,16 +40,16 @@ export const actions = {
   // against re-submitting the currently-applied pack.
   apply: async ({ cookies, request }) => {
     const packId = (await request.formData()).get('pack_id')?.toString();
-    if (!packId) return fail(400, { error: 'Choose a pack to apply.' });
+    if (!packId) return fail(400, { error: 'Elegí un paquete para aplicar.' });
 
     try {
       const { report } = await applyPack(cookies, packId);
       return { appliedPackId: packId, report };
     } catch (/** @type {any} */ err) {
       if (err?.status === 403) {
-        return fail(403, { error: 'Only an administrator can apply a vertical pack.' });
+        return fail(403, { error: 'Solo un administrador puede aplicar un paquete de rubro.' });
       }
-      return fail(400, { error: readableError(err, 'Could not apply this pack.') });
+      return fail(400, { error: readableError(err, 'No se pudo aplicar este paquete.') });
     }
   },
 
@@ -64,9 +64,9 @@ export const actions = {
       return { cleared: deleted ?? 0, retained };
     } catch (/** @type {any} */ err) {
       if (err?.status === 403) {
-        return fail(403, { error: 'Only an administrator can clear sample data.' });
+        return fail(403, { error: 'Solo un administrador puede borrar los datos de ejemplo.' });
       }
-      return fail(400, { error: readableError(err, 'Could not clear sample data.') });
+      return fail(400, { error: readableError(err, 'No se pudieron borrar los datos de ejemplo.') });
     }
   }
 };

@@ -28,7 +28,7 @@
     exact ? page.url.pathname === href : page.url.pathname.startsWith(href);
 </script>
 
-<nav class="v2-tabs" aria-label="Section">
+<nav class="v2-tabs" aria-label="Sección">
   {#each tabs as tab (tab.href)}
     <a href={tab.href} aria-current={isActive(tab.href, tab.exact) ? 'page' : undefined}>
       {tab.label}

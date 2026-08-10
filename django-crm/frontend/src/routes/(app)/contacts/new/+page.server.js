@@ -35,7 +35,7 @@ export const actions = {
     try {
       created = await createContact({ cookies }, values);
     } catch (/** @type {any} */ err) {
-      return fail(400, { values, error: readableError(err, 'Could not create this contact.') });
+      return fail(400, { values, error: readableError(err, 'No se pudo crear este contacto.') });
     }
 
     // The API returns the new id. Landing on the person is the point of adding

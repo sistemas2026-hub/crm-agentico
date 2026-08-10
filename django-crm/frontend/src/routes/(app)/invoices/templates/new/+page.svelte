@@ -30,11 +30,11 @@
   let values = $derived(form?.values ?? {});
 </script>
 
-<PageHeader title="New template" record center width="62ch">
+<PageHeader title="Nueva plantilla" record center width="62ch">
   {#snippet crumb()}
-    <a href="/invoices/templates">Templates</a>
+    <a href="/invoices/templates">Plantillas</a>
     <ChevronRight size={12} />
-    <span>New</span>
+    <span>Nueva</span>
   {/snippet}
 </PageHeader>
 
@@ -44,15 +44,15 @@
       <div class="v2-next" role="note">
         <Lock size={17} style="flex:none" />
         <div class="v2-next-body">
-          <div style="font-weight:600">Admins only</div>
+          <div style="font-weight:600">Solo administradores</div>
           <div class="v2-sub" style="margin-top:2px">
-            Invoice templates are shared config for the whole org, every invoice's look, so only an
-            administrator can create one. You can still see how existing templates look on the
-            templates page.
+            Las plantillas de factura son configuración compartida de toda la organización, el
+            aspecto de cada factura, así que solo un administrador puede crear una. Igual podés ver
+            cómo lucen las plantillas existentes en la página de plantillas.
           </div>
         </div>
       </div>
-      <a class="v2-btn" href="/invoices/templates" style="margin-top:16px">Back to templates</a>
+      <a class="v2-btn" href="/invoices/templates" style="margin-top:16px">Volver a plantillas</a>
     </div>
   {:else}
     <form
@@ -70,20 +70,20 @@
       {/if}
 
       <label class="v2-field">
-        <span class="v2-label">Name</span>
+        <span class="v2-label">Nombre</span>
         <input
           class="v2-input"
           name="name"
           required
           maxlength="100"
           value={values.name ?? ''}
-          placeholder="Standard invoice"
+          placeholder="Factura estándar"
         />
       </label>
 
       <div class="color-row">
         <label class="color-field">
-          <span class="v2-label">Primary colour</span>
+          <span class="v2-label">Color primario</span>
           <input
             class="color-swatch"
             type="color"
@@ -92,7 +92,7 @@
           />
         </label>
         <label class="color-field">
-          <span class="v2-label">Secondary colour</span>
+          <span class="v2-label">Color secundario</span>
           <input
             class="color-swatch"
             type="color"
@@ -102,39 +102,39 @@
         </label>
       </div>
       <p class="v2-sub" style="font-size:11.5px;margin:-6px 0 16px">
-        Picked, not typed, so the value sent is always a valid six digit hex. The API stores
-        whatever it is given here with no format check.
+        Se elige, no se escribe, así el valor enviado siempre es un hexadecimal válido de seis
+        dígitos. La API guarda lo que se le dé acá sin verificar el formato.
       </p>
 
       <label class="v2-field">
-        <span class="v2-label">Logo <span class="opt">(optional)</span></span>
+        <span class="v2-label">Logo <span class="opt">(opcional)</span></span>
         <input class="v2-input" type="file" name="logo" accept="image/*" />
       </label>
 
       <label class="v2-field">
-        <span class="v2-label">Default notes <span class="opt">(optional)</span></span>
+        <span class="v2-label">Notas predeterminadas <span class="opt">(opcional)</span></span>
         <textarea
           class="v2-input"
           name="default_notes"
           rows="3"
-          placeholder="Thanks for your business."
+          placeholder="Gracias por tu compra."
           >{values.default_notes ?? ''}</textarea
         >
       </label>
 
       <label class="v2-field">
-        <span class="v2-label">Default terms <span class="opt">(optional)</span></span>
+        <span class="v2-label">Condiciones predeterminadas <span class="opt">(opcional)</span></span>
         <textarea
           class="v2-input"
           name="default_terms"
           rows="3"
-          placeholder="Payment due within 30 days."
+          placeholder="Pago dentro de los 30 días."
           >{values.default_terms ?? ''}</textarea
         >
       </label>
 
       <label class="v2-field">
-        <span class="v2-label">Footer text <span class="opt">(optional)</span></span>
+        <span class="v2-label">Texto de pie de página <span class="opt">(opcional)</span></span>
         <textarea class="v2-input" name="footer_text" rows="2"
           >{values.footer_text ?? ''}</textarea
         >
@@ -143,17 +143,17 @@
       <label class="flag">
         <input type="checkbox" name="is_default" checked={values.is_default === true} />
         <span>
-          <strong>Make this the default template</strong>
+          <strong>Convertir esta en la plantilla predeterminada</strong>
           <span class="v2-sub">
-            Only one template can be the default at a time. Turning this on replaces whichever
-            template holds it now, new invoices will print with this one instead.
+            Solo una plantilla puede ser la predeterminada a la vez. Activar esto reemplaza a la que
+            la tenga ahora; las facturas nuevas se van a imprimir con esta en su lugar.
           </span>
         </span>
       </label>
 
       <div style="display:flex;gap:9px;margin-top:6px">
-        <button class="v2-btn v2-btn-primary" type="submit">Create template</button>
-        <a class="v2-btn" href="/invoices/templates">Cancel</a>
+        <button class="v2-btn v2-btn-primary" type="submit">Crear plantilla</button>
+        <a class="v2-btn" href="/invoices/templates">Cancelar</a>
       </div>
     </form>
   {/if}

@@ -80,8 +80,8 @@
   let errors = $derived.by(() => {
     /** @type {Record<string, string>} */
     const e = {};
-    if (!form.name.trim()) e.name = 'Give the deal a name you would recognise in a list.';
-    if (!form.account) e.account = 'A deal has to belong to an account.';
+    if (!form.name.trim()) e.name = 'Ponele a la negociación un nombre que reconocerías en una lista.';
+    if (!form.account) e.account = 'Una negociación tiene que pertenecer a una cuenta.';
 
     /* Only validate what the form can actually send. When the amount is
        server-calculated the input is disabled, so a complaint about it would
@@ -89,18 +89,18 @@
     if (!amountIsCalculated) {
       const n = Number(form.amount);
       if (form.amount === '' || form.amount === null) {
-        if (isClosedWon) e.amount = 'A won deal has to record what it was worth.';
-      } else if (!Number.isFinite(n)) e.amount = 'Amount has to be a number.';
-      else if (n < 0) e.amount = 'Amount cannot be negative.';
-      else if (n === 0 && isClosedWon) e.amount = 'A won deal has to record what it was worth.';
+        if (isClosedWon) e.amount = 'Una negociación ganada tiene que registrar cuánto valió.';
+      } else if (!Number.isFinite(n)) e.amount = 'El monto tiene que ser un número.';
+      else if (n < 0) e.amount = 'El monto no puede ser negativo.';
+      else if (n === 0 && isClosedWon) e.amount = 'Una negociación ganada tiene que registrar cuánto valió.';
     }
 
     if (isClosed && !form.closed_on)
-      e.closed_on = `${STAGE_LABEL[form.stage]} needs the date it closed.`;
+      e.closed_on = `${STAGE_LABEL[form.stage]} necesita la fecha en que se cerró.`;
 
     const p = Number(form.probability);
     if (form.probability !== '' && (!Number.isFinite(p) || p < 0 || p > 100))
-      e.probability = 'Probability is a percentage between 0 and 100.';
+      e.probability = 'La probabilidad es un porcentaje entre 0 y 100.';
 
     return e;
   });
@@ -138,15 +138,15 @@
   };
 </script>
 
-<PageHeader title="Edit {deal.name}" center>
+<PageHeader title="Editar {deal.name}" center>
   {#snippet crumb()}
-    <a href="/pipeline">Pipeline</a>
+    <a href="/pipeline">Negociaciones</a>
     <ChevronRight size={12} />
     <a href="/pipeline/{deal.id}">{deal.name}</a>
   {/snippet}
   {#snippet sub()}
     {deal.account.name} · <span class="v2-num">{money(deal.amount, deal.currency)}</span> ·
-    {STAGE_LABEL[originalStage]} for <span class="v2-num">{server.days_in_current_stage}</span> days
+    {STAGE_LABEL[originalStage]} hace <span class="v2-num">{server.days_in_current_stage}</span> días
   {/snippet}
 </PageHeader>
 
@@ -155,12 +155,12 @@
     {#if saved}
       <div class="v2-next" style="margin-bottom:18px" role="status">
         <div class="v2-next-body">
-          <div class="v2-next-text">Saved.</div>
+          <div class="v2-next-text">Guardado.</div>
           <div class="v2-sub" style="margin-top:3px">
-            “{deal.name}” has been updated.
+            "{deal.name}" se actualizó.
           </div>
         </div>
-        <a class="v2-btn" href="/pipeline/{deal.id}">Back to the deal</a>
+        <a class="v2-btn" href="/pipeline/{deal.id}">Volver a la negociación</a>
       </div>
     {/if}
 
@@ -172,7 +172,7 @@
       >
         <TriangleAlert size={17} style="color:var(--v2-rust);flex:none" />
         <div class="v2-next-body">
-          <div style="font-weight:600">The server refused this change</div>
+          <div style="font-weight:600">El servidor rechazó este cambio</div>
           <div class="v2-sub" style="margin-top:2px">{result.error}</div>
         </div>
       </div>
@@ -187,19 +187,16 @@
         <TriangleAlert size={17} style="color:var(--v2-rust);flex:none" />
         <div class="v2-next-body">
           <div style="font-weight:600">
-            {Object.keys(errors).length} field{Object.keys(errors).length === 1 ? '' : 's'} still need{Object.keys(
-              errors
-            ).length === 1
-              ? 's'
-              : ''} you
+            Todavía {Object.keys(errors).length === 1 ? 'falta' : 'faltan'} {Object.keys(errors).length}
+            {Object.keys(errors).length === 1 ? 'campo' : 'campos'}
           </div>
-          <div class="v2-sub" style="margin-top:2px">Nothing has been saved.</div>
+          <div class="v2-sub" style="margin-top:2px">No se guardó nada.</div>
         </div>
       </div>
     {/if}
 
     <div class="v2-field">
-      <label for="f-name">Deal name</label>
+      <label for="f-name">Nombre de la negociación</label>
       <input
         id="f-name"
         name="name"
@@ -213,7 +210,7 @@
 
     <div class="pair">
       <div class="v2-field">
-        <label for="f-account">Account</label>
+        <label for="f-account">Cuenta</label>
         <select
           id="f-account"
           name="account"
@@ -228,7 +225,7 @@
         {#if show('account')}<p class="v2-error">{errors.account}</p>{/if}
       </div>
       <div class="v2-field">
-        <label for="f-type">Type</label>
+        <label for="f-type">Tipo</label>
         <select
           id="f-type"
           name="opportunity_type"
@@ -243,7 +240,7 @@
     </div>
 
     <div class="v2-field">
-      <label for="f-stage">Stage</label>
+      <label for="f-stage">Etapa</label>
       <select
         id="f-stage"
         name="stage"
@@ -267,12 +264,13 @@
             {STAGE_LABEL[originalStage]} → {STAGE_LABEL[form.stage]}
           </div>
           <p>
-            The stage clock restarts. This deal currently reads
+            El reloj de la etapa se reinicia. Esta negociación hoy figura como
             <Pill tone={AGING_TONE[server.aging_status]} dot>
-              {AGING_LABEL[server.aging_status]} · {server.days_in_current_stage} days
+              {AGING_LABEL[server.aging_status]} · {server.days_in_current_stage} días
             </Pill>
-            on the board; after saving it reads 0 days and On&nbsp;pace, because aging is measured from
-            the last stage change and not from the last time anyone did anything.
+            en el tablero; después de guardar figura con 0 días y A&nbsp;tiempo, porque la
+            antigüedad se mide desde el último cambio de etapa y no desde la última vez que alguien
+            hizo algo.
           </p>
         </div>
       {/if}
@@ -281,8 +279,8 @@
     <div class="pair">
       <div class="v2-field">
         <label for="f-amount">
-          Amount
-          {#if amountIsCalculated}<span class="locked"><Lock size={10} />From line items</span>{/if}
+          Monto
+          {#if amountIsCalculated}<span class="locked"><Lock size={10} />De los ítems</span>{/if}
         </label>
         <input
           id="f-amount"
@@ -301,20 +299,20 @@
           <p class="v2-error">{errors.amount}</p>
         {:else if amountIsCalculated}
           <p class="v2-hint" id="h-amount">
-            <a href="/pipeline/{deal.id}">{server.line_item_count} line items</a> add up to
-            <span class="v2-num">{money(server.line_item_total, deal.currency)}</span>. The server
-            refuses a different figure on a deal with line items, so this cannot be typed over. Edit
-            the line items instead.
+            <a href="/pipeline/{deal.id}">{server.line_item_count} ítems</a> suman
+            <span class="v2-num">{money(server.line_item_total, deal.currency)}</span>. El servidor
+            rechaza un valor distinto en una negociación con ítems, así que esto no se puede
+            escribir encima. Editá los ítems en su lugar.
           </p>
         {:else}
           <p class="v2-hint">
-            Typed by hand. Adding line items to this deal would take the field over.
+            Escrito a mano. Agregar ítems a esta negociación tomaría el control del campo.
           </p>
         {/if}
       </div>
 
       <div class="v2-field">
-        <label for="f-prob">Probability</label>
+        <label for="f-prob">Probabilidad</label>
         <input
           id="f-prob"
           name="probability"
@@ -332,8 +330,8 @@
     <div class="pair">
       <div class="v2-field">
         <label for="f-closed">
-          {isClosed ? 'Closed on' : 'Expected close'}
-          {#if isClosed}<span class="req">required</span>{/if}
+          {isClosed ? 'Cerrada el' : 'Cierre esperado'}
+          {#if isClosed}<span class="req">obligatorio</span>{/if}
         </label>
         <input
           id="f-closed"
@@ -347,18 +345,18 @@
         {#if show('closed_on')}
           <p class="v2-error">{errors.closed_on}</p>
         {:else if isClosed}
-          <p class="v2-hint">The date it actually closed, not the date you are recording it.</p>
+          <p class="v2-hint">La fecha en que realmente se cerró, no la fecha en que lo estás registrando.</p>
         {/if}
       </div>
       <div class="v2-field">
-        <label for="f-owner">Owner</label>
+        <label for="f-owner">Responsable</label>
         <!-- What the select was rendered with. The action compares against it
              so an untouched owner is not sent at all; `assigned_to` is a
              many-to-many and this select is single, so sending it always would
              cut a two-person deal down to one on every save. -->
         <input type="hidden" name="assigned_to_original" value={data.form.assigned_to} />
         <select id="f-owner" name="assigned_to" class="v2-input" bind:value={form.assigned_to}>
-          <option value="">Nobody</option>
+          <option value="">Nadie</option>
           {#each data.owners as o (o.id)}
             <!-- The value is the Profile id. The mock used the display name,
                  which looks identical on screen and cannot be saved. -->
@@ -369,12 +367,12 @@
     </div>
 
     <div class="v2-field">
-      <label for="f-source">Source</label>
+      <label for="f-source">Origen</label>
       <input id="f-source" name="lead_source" class="v2-input" bind:value={form.lead_source} />
     </div>
 
     <div class="v2-field">
-      <label for="f-notes">Notes</label>
+      <label for="f-notes">Notas</label>
       <textarea
         id="f-notes"
         name="description"
@@ -384,10 +382,10 @@
     </div>
 
     <div class="actions">
-      <button class="v2-btn v2-btn-primary" type="submit">Save changes</button>
-      <a class="v2-btn" href="/pipeline/{deal.id}">Cancel</a>
+      <button class="v2-btn v2-btn-primary" type="submit">Guardar cambios</button>
+      <a class="v2-btn" href="/pipeline/{deal.id}">Cancelar</a>
       <span class="v2-sub" style="margin-left:auto;font-size:12px">
-        Last stage change {longDate(server.stage_changed_at)}
+        Último cambio de etapa {longDate(server.stage_changed_at)}
       </span>
     </div>
   </form>

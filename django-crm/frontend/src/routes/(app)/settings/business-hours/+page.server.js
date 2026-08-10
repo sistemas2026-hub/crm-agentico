@@ -46,7 +46,7 @@ function readDays(form) {
 }
 
 /** The one 403 body all three admin-only writes share, turned into a sentence. */
-const FORBIDDEN = 'Only admins can update business hours.';
+const FORBIDDEN = 'Solo los administradores pueden actualizar el horario laboral.';
 
 /**
  * All three actions below are admin-only, enforced server-side by
@@ -77,7 +77,7 @@ export const actions = {
         return fail(403, { updateHours: { error: FORBIDDEN } });
       }
       return fail(400, {
-        updateHours: { error: readableError(err, 'Could not save business hours.') }
+        updateHours: { error: readableError(err, 'No se pudo guardar el horario laboral.') }
       });
     }
     return { hoursUpdated: true };
@@ -94,7 +94,7 @@ export const actions = {
       if (err?.status === 403) {
         return fail(403, { addHoliday: { error: FORBIDDEN } });
       }
-      return fail(400, { addHoliday: { error: readableError(err, 'Could not add the holiday.') } });
+      return fail(400, { addHoliday: { error: readableError(err, 'No se pudo agregar el feriado.') } });
     }
     // Adding a date already on the calendar is idempotent (200, the existing
     // row, no duplicate): not an error, so this path is the same "success"
@@ -113,7 +113,7 @@ export const actions = {
         return fail(403, { removeHoliday: { error: FORBIDDEN } });
       }
       return fail(400, {
-        removeHoliday: { error: readableError(err, 'Could not remove the holiday.') }
+        removeHoliday: { error: readableError(err, 'No se pudo quitar el feriado.') }
       });
     }
     return { holidayRemoved: true };

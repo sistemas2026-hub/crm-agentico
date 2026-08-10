@@ -109,27 +109,27 @@
 <PageHeader title="Macros">
   {#snippet crumb()}<SettingsCrumb />{/snippet}
   {#snippet sub()}
-    <span class="v2-num">{count(totals.org)}</span> shared ·
-    <span class="v2-num">{count(totals.personal)}</span> yours
+    <span class="v2-num">{count(totals.org)}</span> compartidas ·
+    <span class="v2-num">{count(totals.personal)}</span> tuyas
   {/snippet}
   {#snippet actions()}
     {#if !editing}
-      <button class="v2-btn v2-btn-primary" onclick={openCreate}><Plus />New macro</button>
+      <button class="v2-btn v2-btn-primary" onclick={openCreate}><Plus />Nueva macro</button>
     {/if}
   {/snippet}
 </PageHeader>
 
 <div class="v2-pad" style="padding-top:16px;flex:none">
   <div class="v2-stats">
-    <StatCard label="Shared with everyone" value={count(totals.org)} tone="ink" />
-    <StatCard label="Only yours" value={count(totals.personal)} tone="slate" />
+    <StatCard label="Compartidas con todos" value={count(totals.org)} tone="ink" />
+    <StatCard label="Solo tuyas" value={count(totals.personal)} tone="slate" />
     <StatCard
-      label="Broken placeholders"
+      label="Placeholders rotos"
       value={count(totals.with_unknown_placeholders)}
       tone={totals.with_unknown_placeholders > 0 ? 'rust' : 'slate'}
-      detail="Sent to customers as typed"
+      detail="Enviados a clientes tal como se escribieron"
     />
-    <StatCard label="Turned off" value={count(totals.inactive)} tone="slate" />
+    <StatCard label="Apagadas" value={count(totals.inactive)} tone="slate" />
   </div>
 </div>
 
@@ -137,10 +137,10 @@
   <div class="v2-pad" style="padding-bottom:32px">
     {#if editing}
       <SettingsFormPanel
-        title={editing === 'new' ? 'New macro' : `Edit ${editing.title}`}
+        title={editing === 'new' ? 'Nueva macro' : `Editar ${editing.title}`}
         action={editing === 'new' ? '?/create' : '?/update'}
         error={editing === 'new' ? form?.create?.error : form?.update?.error}
-        submitLabel={editing === 'new' ? 'Add macro' : 'Save macro'}
+        submitLabel={editing === 'new' ? 'Agregar macro' : 'Guardar macro'}
         oncancel={() => (editing = null)}
         ondone={() => (editing = null)}
       >
@@ -150,7 +150,7 @@
           {/if}
 
           <div class="v2-field">
-            <label for="m-title">Title</label>
+            <label for="m-title">Título</label>
             <input
               id="m-title"
               class="v2-input"
@@ -162,27 +162,27 @@
           </div>
 
           <div class="v2-field">
-            <label for="m-scope">Who sees it</label>
+            <label for="m-scope">Quién la ve</label>
             <select id="m-scope" class="v2-input" name="scope" bind:value={scope}>
-              <option value="personal">Just me</option>
+              <option value="personal">Solo yo</option>
               {#if data.can_create_org}
-                <option value="org">Everyone in the org</option>
+                <option value="org">Todos en la organización</option>
               {/if}
             </select>
             {#if !data.can_create_org}
-              <p class="v2-hint">Only an admin can share a macro with everyone.</p>
+              <p class="v2-hint">Solo un administrador puede compartir una macro con todos.</p>
             {/if}
           </div>
 
           <div class="v2-field v2-sfp-wide">
-            <label for="m-body">Body</label>
+            <label for="m-body">Contenido</label>
             <textarea id="m-body" class="v2-input" name="body" rows="5" required
               >{editing === 'new' ? '' : editing.body}</textarea
             >
             <p class="v2-hint">
-              Placeholders like %customer_name% are substituted when the macro is sent. The seven
-              supported tokens are listed to the right; anything else goes to the customer exactly
-              as typed.
+              Los placeholders como %customer_name% se reemplazan cuando se envía la macro. Los
+              siete tokens soportados están listados a la derecha; cualquier otra cosa le llega al
+              cliente exactamente como se escribió.
             </p>
           </div>
         {/snippet}
@@ -198,27 +198,27 @@
 
     <div class="v2-split-wide">
       <div>
-        <div class="v2-label" style="margin-bottom:10px">Shared with everyone</div>
+        <div class="v2-label" style="margin-bottom:10px">Compartidas con todos</div>
         <div style="display:flex;flex-direction:column;gap:9px;margin-bottom:24px">
           {#each orgMacros as m (m.id)}
             {@render macro(m)}
           {/each}
         </div>
 
-        <div class="v2-label" style="margin-bottom:10px">Only yours</div>
+        <div class="v2-label" style="margin-bottom:10px">Solo tuyas</div>
         <div style="display:flex;flex-direction:column;gap:9px">
           {#each personalMacros as m (m.id)}
             {@render macro(m)}
           {/each}
         </div>
         <p class="v2-sub" style="font-size:11.5px;margin-top:11px">
-          Personal macros are visible only to you. Nobody else in the organisation, admins included,
-          sees this list.
+          Las macros personales solo son visibles para vos. Nadie más en la organización, ni
+          siquiera los administradores, ve esta lista.
         </p>
       </div>
 
       <div>
-        <div class="v2-label" style="margin-bottom:10px">Placeholders that work</div>
+        <div class="v2-label" style="margin-bottom:10px">Placeholders que funcionan</div>
         <div class="v2-card" style="overflow:hidden">
           {#each data.placeholders as p (p.token)}
             <div class="v2-setting" style="padding:10px 15px">
@@ -230,9 +230,10 @@
           {/each}
         </div>
         <p class="v2-sub" style="font-size:11.5px;margin-top:11px;line-height:1.5">
-          These seven are the whole set. Anything else between percent signs is left exactly as
-          written and goes out that way. The server does not guess, on purpose, so a typo is
-          visible in the composer rather than a blank in the customer's inbox.
+          Estos siete son todo el conjunto. Cualquier otra cosa entre signos de porcentaje se deja
+          exactamente como se escribió y se envía así. El servidor no adivina, a propósito, así que
+          un error de tipeo se ve en el compositor en vez de quedar en blanco en la bandeja del
+          cliente.
         </p>
       </div>
     </div>
@@ -243,10 +244,11 @@
   <div class="v2-card" style="padding:14px 16px;opacity:{m.is_active ? 1 : 0.62}">
     <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">
       <b style="font-size:13.5px">{m.title}</b>
-      {#if !m.is_active}<Pill tone="slate">Off</Pill>{/if}
-      {#if m.unknown_placeholders.length}<Pill tone="rust">Broken placeholder</Pill>{/if}
+      {#if !m.is_active}<Pill tone="slate">Apagada</Pill>{/if}
+      {#if m.unknown_placeholders.length}<Pill tone="rust">Placeholder roto</Pill>{/if}
       <span class="v2-sub" style="font-size:11.5px;margin-left:auto">
-        used <span class="v2-num">{count(m.usage_count)}</span> times · {relativeDays(m.updated_at)}
+        usada <span class="v2-num">{count(m.usage_count)}</span> veces ·
+        {relativeDays(m.updated_at)}
       </span>
     </div>
 
@@ -266,12 +268,13 @@
       <div class="v2-macro-flag">
         <TriangleAlert size={14} style="color:var(--v2-rust);flex:none" />
         <span>
-          {m.unknown_placeholders.join(' and ')}
-          {m.unknown_placeholders.length === 1 ? 'is not a placeholder' : 'are not placeholders'},
-          {m.unknown_placeholders.length === 1 ? 'it goes' : 'they go'} to the customer exactly as written.
+          {m.unknown_placeholders.join(' y ')}
+          {m.unknown_placeholders.length === 1 ? 'no es un placeholder' : 'no son placeholders'},
+          {m.unknown_placeholders.length === 1 ? 'le llega' : 'le llegan'} al cliente exactamente como
+          se escribieron.
           {#if m.usage_count > 0}
-            This macro has been sent
-            <span class="v2-num">{count(m.usage_count)}</span> times.
+            Esta macro se envió
+            <span class="v2-num">{count(m.usage_count)}</span> veces.
           {/if}
         </span>
       </div>
@@ -285,7 +288,7 @@
 
     {#if canWrite(m)}
       <div style="display:flex;gap:6px;align-items:center;justify-content:flex-end;margin-top:10px">
-        <button class="v2-btn v2-btn-sm" type="button" onclick={() => openEdit(m)}>Edit</button>
+        <button class="v2-btn v2-btn-sm" type="button" onclick={() => openEdit(m)}>Editar</button>
         {#if !m.is_active}
           <!-- Turning a macro back on restores nothing that was destroyed, so
                unlike "Turn off"/"Delete" this doesn't need the two-click
@@ -300,7 +303,7 @@
                this can never write a row `canWrite` above disagrees with. -->
           <form method="POST" action="?/activate" use:enhance>
             <input type="hidden" name="id" value={m.id} />
-            <button class="v2-btn v2-btn-sm" type="submit">Turn on</button>
+            <button class="v2-btn v2-btn-sm" type="submit">Encender</button>
           </form>
         {:else if m.scope === 'org'}
           <!-- `MacroDetailView.delete` soft-deletes an org macro: it flips
@@ -308,9 +311,9 @@
                "Turn off", not "Delete", says what actually happens. -->
           <ConfirmAction
             action="?/delete"
-            label="Turn off"
-            confirmLabel="Turn off"
-            explain="Turns it off for everyone. It stops appearing in the picker."
+            label="Apagar"
+            confirmLabel="Apagar"
+            explain="La apaga para todos. Deja de aparecer en el selector."
             hidden={{ id: m.id }}
           />
         {:else}
@@ -319,9 +322,9 @@
                nothing left to turn back on. -->
           <ConfirmAction
             action="?/delete"
-            label="Delete"
-            confirmLabel="Delete"
-            explain="Deletes it permanently."
+            label="Eliminar"
+            confirmLabel="Eliminar"
+            explain="La elimina de forma permanente."
             hidden={{ id: m.id }}
           />
         {/if}

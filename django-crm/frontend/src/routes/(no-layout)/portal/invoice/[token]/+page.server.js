@@ -6,19 +6,21 @@
  */
 
 import { error } from '@sveltejs/kit';
-import { env } from '$env/dynamic/public';
+import { env } from '$env/dynamic/private';
+import { env as publicEnv } from '$env/dynamic/public';
 
-// The Django API, reached server-to-server. Absolute (not a relative `/api/...`
-// that only resolves behind a production reverse proxy) so the anonymous portal
+// The Django API, reached server-to-server -- PRIVATE_ over PUBLIC_ (see
+// lib/api-helpers.js). Absolute (not a relative `/api/...` that only
+// resolves behind a production reverse proxy) so the anonymous portal
 // works the same in dev and prod. The CSAT loader takes the same approach.
-const API_BASE_URL = `${env.PUBLIC_DJANGO_API_URL}/api`;
+const API_BASE_URL = `${env.PRIVATE_DJANGO_API_URL || publicEnv.PUBLIC_DJANGO_API_URL}/api`;
 
 /** @type {import('./$types').PageServerLoad} */
 export async function load({ params, fetch }) {
   const { token } = params;
 
   if (!token) {
-    throw error(400, 'Invoice token is required');
+    throw error(400, 'Se requiere el token de la factura');
   }
 
   try {
@@ -27,9 +29,9 @@ export async function load({ params, fetch }) {
 
     if (!response.ok) {
       if (response.status === 404) {
-        throw error(404, 'Invoice not found or link has expired');
+        throw error(404, 'No se encontró la factura o el enlace venció');
       }
-      throw error(response.status, 'Failed to load invoice');
+      throw error(response.status, 'No se pudo cargar la factura');
     }
 
     // The v2 portal renders the Django shape directly (snake_case, template
@@ -40,6 +42,6 @@ export async function load({ params, fetch }) {
   } catch (err) {
     if (err.status) throw err;
     console.error('Error loading public invoice:', err);
-    throw error(500, 'Failed to load invoice');
+    throw error(500, 'No se pudo cargar la factura');
   }
 }

@@ -65,7 +65,7 @@ export async function getTimesheet({ cookies }, { start, end } = {}) {
  * @returns {Promise<any>} the stopped entry
  */
 export async function stopTimer({ cookies }, entryId) {
-  if (!entryId) throw new Error('Which time entry? No entry id was given.');
+  if (!entryId) throw new Error('¿Qué registro de horas? No se indicó un id de registro.');
 
   return await apiRequest(`/time-entries/${entryId}/stop/`, { method: 'POST' }, { cookies });
 }

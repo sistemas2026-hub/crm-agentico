@@ -27,16 +27,16 @@
 
   const frequency = (s) =>
     s.frequency === 'CUSTOM'
-      ? `Every ${s.custom_days} days`
+      ? `Cada ${s.custom_days} días`
       : RECURRING_FREQUENCY_LABEL[s.frequency];
 
   /** Next run, or why there isn't one. A paused schedule has no next run. */
   function nextRun(s) {
-    if (!s.is_active) return { text: 'Paused', tone: 'muted' };
+    if (!s.is_active) return { text: 'Pausada', tone: 'muted' };
     const n = daysSince(s.next_generation_date);
-    if (n > 0) return { text: `${n}d overdue`, tone: 'late' };
-    if (n === 0) return { text: 'Today', tone: 'soon' };
-    if (Math.abs(n) <= 7) return { text: `in ${Math.abs(n)}d`, tone: 'soon' };
+    if (n > 0) return { text: `${n}d de atraso`, tone: 'late' };
+    if (n === 0) return { text: 'Hoy', tone: 'soon' };
+    if (Math.abs(n) <= 7) return { text: `en ${Math.abs(n)}d`, tone: 'soon' };
     return { text: shortDate(s.next_generation_date), tone: 'normal' };
   }
 
@@ -48,13 +48,13 @@
   };
 </script>
 
-<PageHeader title="Recurring">
+<PageHeader title="Facturas recurrentes">
   {#snippet sub()}
-    <span class="v2-num">{count(totals.active)}</span> active schedules ·
-    <span class="v2-num">{money(totals.monthly_run_rate, data.org.currency)}</span> a month
+    <span class="v2-num">{count(totals.active)}</span> activas ·
+    <span class="v2-num">{money(totals.monthly_run_rate, data.org.currency)}</span> por mes
   {/snippet}
   {#snippet actions()}
-    <a class="v2-btn v2-btn-primary" href="/invoices/recurring/new"><Plus />New schedule</a>
+    <a class="v2-btn v2-btn-primary" href="/invoices/recurring/new"><Plus />Nueva factura recurrente</a>
   {/snippet}
 </PageHeader>
 
@@ -62,7 +62,7 @@
 
 {#if page.url.search}
   <p class="v2-sub" style="font-size:11.5px;margin:8px 0 0">
-    These numbers describe the filtered list.
+    Estos números describen la lista filtrada.
   </p>
 {/if}
 
@@ -75,33 +75,33 @@
 <div class="v2-pad" style="padding-top:16px;flex:none">
   <div class="v2-stats">
     <StatCard
-      label="Monthly run rate"
+      label="Ritmo mensual"
       value={money(totals.monthly_run_rate, data.org.currency)}
       tone="ink"
-      detail="Every active schedule, normalised to a month"
+      detail="Todas las facturas recurrentes activas, normalizadas a un mes"
     />
-    <StatCard label="Active" value={count(totals.active)} tone="moss" />
+    <StatCard label="Activas" value={count(totals.active)} tone="moss" />
     <StatCard
-      label="Generating within 7 days"
+      label="Generan dentro de 7 días"
       value={count(totals.due_within_7d)}
       tone="clay"
-      detail="Drafts to check before they send"
+      detail="Borradores para revisar antes de que se envíen"
     />
-    <StatCard label="Schedules" value={count(totals.count)} tone="slate" />
+    <StatCard label="Facturas recurrentes" value={count(totals.count)} tone="slate" />
   </div>
 </div>
 
-<FilterBar page="recurring" url={page.url} meta="Active first, then soonest to generate" />
+<FilterBar page="recurring" url={page.url} meta="Activas primero, después las más próximas a generarse" />
 
 <div class="v2-scroll">
   {#if data.schedules.length === 0}
     <EmptyState
-      title="Nothing on a schedule"
-      body="A recurring invoice is a template plus a cadence. Set one up for anything you bill on the same day every month and stop retyping it."
+      title="Todavía no hay ninguna factura recurrente"
+      body="Una factura recurrente es una plantilla más una frecuencia. Configurá una para cualquier cosa que factures el mismo día todos los meses y dejá de volver a escribirla."
     >
       {#snippet icon()}<RefreshCw size={21} />{/snippet}
       {#snippet actions()}
-        <a class="v2-btn v2-btn-primary" href="/invoices/recurring/new">New schedule</a>
+        <a class="v2-btn v2-btn-primary" href="/invoices/recurring/new">Nueva factura recurrente</a>
       {/snippet}
     </EmptyState>
   {:else}
@@ -109,12 +109,12 @@
       <table class="v2-table">
         <thead>
           <tr>
-            <th>Schedule</th>
-            <th>Account</th>
-            <th>Every</th>
-            <th>When it generates</th>
-            <th class="v2-r">Amount</th>
-            <th class="v2-r">Next</th>
+            <th>Factura recurrente</th>
+            <th>Cuenta</th>
+            <th>Cada</th>
+            <th>Cuando genera</th>
+            <th class="v2-r">Monto</th>
+            <th class="v2-r">Próxima</th>
           </tr>
         </thead>
         <tbody>
@@ -125,7 +125,7 @@
                 <span class="v2-table-primary">{s.title}</span>
                 <span class="v2-table-secondary" style="display:block">
                   {PAYMENT_TERMS_LABEL[s.payment_terms]} ·
-                  <span class="v2-num">{s.invoices_generated}</span> raised so far
+                  <span class="v2-num">{s.invoices_generated}</span> generadas hasta ahora
                 </span>
               </td>
               <td>
@@ -137,16 +137,16 @@
                 <!-- Sends itself, or waits for a person. Two different jobs,
                      and the row says which one this is. -->
                 {#if s.auto_send}
-                  <Pill tone="moss" dot>Sends automatically</Pill>
+                  <Pill tone="moss" dot>Se envía automáticamente</Pill>
                 {:else}
                   <span style="display:inline-flex;gap:6px;align-items:center">
                     <Hand size={13} style="color:var(--v2-clay)" />
-                    <span style="font-size:12.5px">Drafts, waits for you</span>
+                    <span style="font-size:12.5px">Genera borrador, espera que la envíes</span>
                   </span>
                 {/if}
                 {#if endingSoon(s)}
                   <span class="v2-table-secondary" style="display:block;color:var(--v2-clay)">
-                    Ends {shortDate(s.end_date)}, last invoice after that
+                    Termina {shortDate(s.end_date)}, después esa es la última factura
                   </span>
                 {/if}
               </td>
@@ -172,7 +172,7 @@
                   <form method="POST" action="?/toggle" use:enhance>
                     <input type="hidden" name="id" value={s.id} />
                     <button class="v2-btn v2-btn-sm rec-toggle" type="submit">
-                      {#if s.is_active}<Pause size={12} />Pause{:else}<Play size={12} />Resume{/if}
+                      {#if s.is_active}<Pause size={12} />Pausar{:else}<Play size={12} />Reanudar{/if}
                     </button>
                   </form>
                 </div>
@@ -183,7 +183,7 @@
       </table>
     </div>
     <p class="v2-sub v2-pad" style="font-size:12px;padding-bottom:24px">
-      Showing <span class="v2-num">{data.schedules.length}</span> of
+      Mostrando <span class="v2-num">{data.schedules.length}</span> de
       <span class="v2-num">{count(totals.count)}</span>
     </p>
   {/if}

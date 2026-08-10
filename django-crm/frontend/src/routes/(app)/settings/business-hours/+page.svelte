@@ -40,6 +40,21 @@
   let weekly = $derived(calendar.days.reduce((a, d) => a + hours(d), 0));
   const todayName = new Intl.DateTimeFormat('en-GB', { weekday: 'long' }).format(new Date());
 
+  // Display only. `d.day`/`row.day` stay the English weekday name from the
+  // server (`business-hours.js`'s `WEEKDAYS`), because `key: d.day.toLowerCase()`
+  // below derives the wire field prefix from it and `d.day === todayName` compares
+  // it against `Intl.DateTimeFormat('en-GB', …)`. Translating the data itself
+  // would break both; this only relabels what is shown.
+  const DAY_LABEL = {
+    Monday: 'Lunes',
+    Tuesday: 'Martes',
+    Wednesday: 'Miércoles',
+    Thursday: 'Jueves',
+    Friday: 'Viernes',
+    Saturday: 'Sábado',
+    Sunday: 'Domingo'
+  };
+
   // `null` when the panel is closed. One panel for the week, so only one
   // edit can be in flight at a time.
   let editingHours = $state(false);
@@ -69,15 +84,15 @@
   let addingHoliday = $state(false);
 </script>
 
-<PageHeader title="Business hours">
+<PageHeader title="Horario laboral">
   {#snippet crumb()}<SettingsCrumb />{/snippet}
   {#snippet sub()}
     {calendar.name} · {calendar.timezone} ·
-    <span class="v2-num">{weekly}</span> hours a week
+    <span class="v2-num">{weekly}</span> horas semanales
   {/snippet}
   {#snippet actions()}
     {#if data.can_edit && !editingHours}
-      <button class="v2-btn v2-btn-primary" onclick={openHoursEdit}>Edit hours</button>
+      <button class="v2-btn v2-btn-primary" onclick={openHoursEdit}>Editar horario</button>
     {/if}
   {/snippet}
 </PageHeader>
@@ -86,20 +101,20 @@
   <div class="v2-pad" style="padding-top:18px;padding-bottom:32px">
     <div class="v2-split">
       <div>
-        <div class="v2-label" style="margin-bottom:10px">Open hours</div>
+        <div class="v2-label" style="margin-bottom:10px">Horario de apertura</div>
 
         {#if editingHours}
           <SettingsFormPanel
-            title="Edit business hours"
+            title="Editar horario laboral"
             action="?/updateHours"
             error={form?.updateHours?.error}
-            submitLabel="Save hours"
+            submitLabel="Guardar horario"
             oncancel={() => (editingHours = false)}
             ondone={() => (editingHours = false)}
           >
             {#snippet fields()}
               <div class="v2-field">
-                <label for="bh-name">Name</label>
+                <label for="bh-name">Nombre</label>
                 <input
                   id="bh-name"
                   class="v2-input"
@@ -111,7 +126,7 @@
               </div>
 
               <div class="v2-field">
-                <label for="bh-timezone">Timezone</label>
+                <label for="bh-timezone">Zona horaria</label>
                 <input
                   id="bh-timezone"
                   class="v2-input"
@@ -121,14 +136,14 @@
                   value={calendar.timezone}
                   placeholder="America/New_York"
                 />
-                <p class="v2-hint">IANA timezone name.</p>
+                <p class="v2-hint">Nombre de zona horaria IANA.</p>
               </div>
 
               <div class="v2-field v2-sfp-wide">
-                <label for="bh-day-0-open">Week</label>
+                <label for="bh-day-0-open">Semana</label>
                 {#each hourRows as row, i (row.key)}
                   <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px">
-                    <span style="width:84px;font-size:13px;flex:none">{row.day}</span>
+                    <span style="width:84px;font-size:13px;flex:none">{DAY_LABEL[row.day] ?? row.day}</span>
                     <label
                       style="display:flex;gap:6px;align-items:center;font-size:12px;font-weight:400;flex:none"
                     >
@@ -138,7 +153,7 @@
                         value="true"
                         bind:checked={row.closed}
                       />
-                      Closed
+                      Cerrado
                     </label>
                     <input
                       id={i === 0 ? 'bh-day-0-open' : undefined}
@@ -149,7 +164,7 @@
                       disabled={row.closed}
                       style="width:auto"
                     />
-                    <span class="v2-sub">to</span>
+                    <span class="v2-sub">a</span>
                     <input
                       class="v2-input"
                       type="time"
@@ -169,16 +184,16 @@
           {#each calendar.days as d (d.day)}
             <div class="v2-setting" style={d.day === todayName ? 'background:var(--v2-hover)' : ''}>
               <div class="v2-setting-body">
-                <b>{d.day}</b>
+                <b>{DAY_LABEL[d.day] ?? d.day}</b>
                 {#if d.day === todayName}
-                  <span class="v2-sub" style="font-size:11px">today</span>
+                  <span class="v2-sub" style="font-size:11px">hoy</span>
                 {/if}
               </div>
               {#if d.open && d.close}
                 <span class="v2-num" style="font-size:13px">{d.open} - {d.close}</span>
               {:else}
                 <!-- Named, not blank. A blank cell reads as missing data. -->
-                <span class="v2-sub" style="font-size:12.5px">Closed</span>
+                <span class="v2-sub" style="font-size:12.5px">Cerrado</span>
               {/if}
             </div>
           {/each}
@@ -186,49 +201,49 @@
 
         {#if calendar.is_default}
           <p class="v2-sub" style="font-size:11.5px;margin-top:11px">
-            This is the default calendar, so it applies to every ticket that does not have a more
-            specific one.
+            Este es el calendario por defecto, así que aplica a todo ticket que no tenga uno más
+            específico.
           </p>
         {/if}
       </div>
 
       <div>
         <div style="display:flex;align-items:baseline;margin-bottom:10px">
-          <div class="v2-label">Holidays</div>
+          <div class="v2-label">Feriados</div>
           {#if data.can_edit && !addingHoliday}
             <button
               class="v2-btn v2-btn-sm"
               style="margin-left:auto"
               onclick={() => (addingHoliday = true)}
             >
-              <Plus size={12} />Add
+              <Plus size={12} />Agregar
             </button>
           {/if}
         </div>
 
         {#if addingHoliday}
           <SettingsFormPanel
-            title="Add holiday"
+            title="Agregar feriado"
             action="?/addHoliday"
             error={form?.addHoliday?.error}
-            submitLabel="Add holiday"
+            submitLabel="Agregar feriado"
             oncancel={() => (addingHoliday = false)}
             ondone={() => (addingHoliday = false)}
           >
             {#snippet fields()}
               <div class="v2-field">
-                <label for="bh-holiday-date">Date</label>
+                <label for="bh-holiday-date">Fecha</label>
                 <input id="bh-holiday-date" class="v2-input" type="date" name="date" required />
               </div>
               <div class="v2-field">
-                <label for="bh-holiday-name">Name</label>
+                <label for="bh-holiday-name">Nombre</label>
                 <input
                   id="bh-holiday-name"
                   class="v2-input"
                   name="name"
                   maxlength="100"
                   required
-                  placeholder="Christmas"
+                  placeholder="Navidad"
                 />
               </div>
             {/snippet}
@@ -250,16 +265,16 @@
               {#if data.can_edit}
                 <ConfirmAction
                   action="?/removeHoliday"
-                  label="Remove"
-                  confirmLabel="Remove"
-                  explain="Deletes it. The day counts as working time again."
+                  label="Quitar"
+                  confirmLabel="Quitar"
+                  explain="Lo elimina. El día vuelve a contar como tiempo laboral."
                   hidden={{ holiday_id: h.id }}
                 />
               {/if}
             </div>
           {:else}
             <p class="v2-sub" style="padding:14px 16px;font-size:12.5px;margin:0">
-              No holidays set. Targets will keep running on public holidays.
+              No hay feriados configurados. Los objetivos van a seguir corriendo en los feriados.
             </p>
           {/each}
         </div>
@@ -269,23 +284,24 @@
         >
           <Clock size={16} style="color:var(--v2-slate);flex:none;margin-top:1px" />
           <div>
-            <div style="font-weight:600;font-size:13px">What this changes</div>
+            <div style="font-weight:600;font-size:13px">Qué cambia esto</div>
             <p class="v2-sub" style="font-size:12px;margin:4px 0 0">
-              Response and resolution targets count only the time inside these hours. A ticket
-              opened at 17:20 on Friday
+              Los objetivos de respuesta y resolución solo cuentan el tiempo dentro de este
+              horario. Un ticket abierto a las 17:20 del viernes
               {#if calendar.days[0].open}
-                starts its clock at <span class="v2-num">{calendar.days[0].open}</span> on Monday,
+                arranca su reloj a las <span class="v2-num">{calendar.days[0].open}</span> del
+                lunes,
               {:else}
                 <!-- Monday can be marked closed from this page now, so the
                      fixed "Monday morning" framing can no longer assume an
                      open time exists to quote. -->
-                starts its clock whenever the week next opens,
+                arranca su reloj cuando vuelva a abrir la semana,
               {/if}
-              so the weekend does not spend a four-hour target.
+              así el fin de semana no consume un objetivo de cuatro horas.
             </p>
             <p class="v2-sub" style="font-size:12px;margin:8px 0 0">
-              <a href="/tickets/analytics" style="color:inherit">Service analytics</a> is measured on
-              this calendar.
+              <a href="/tickets/analytics" style="color:inherit">Analítica de servicio</a> se mide con
+              este calendario.
             </p>
           </div>
         </div>

@@ -38,6 +38,14 @@ class Command(BaseCommand):
             action="store_true",
             help="Create the user if it doesn't exist (with a random password).",
         )
+        parser.add_argument(
+            "--password",
+            help=(
+                "Set this as the user's real password (via set_password), so "
+                "they can also log in through the /login password form -- "
+                "Google/magic-link users otherwise get an unusable random one."
+            ),
+        )
 
     def handle(self, *args, **options):
         if not settings.DEBUG:
@@ -49,6 +57,7 @@ class Command(BaseCommand):
         email = options["email"]
         org_arg = options["org"]
         create = options["create"]
+        password = options["password"]
 
         try:
             user = User.objects.get(email=email)
@@ -63,8 +72,12 @@ class Command(BaseCommand):
             )
             self.stdout.write(self.style.SUCCESS(f"Created user {email}"))
 
+        if password:
+            user.set_password(password)
+            self.stdout.write(self.style.SUCCESS(f"Password set for {email}"))
+
         user.last_login = timezone.now()
-        user.save(update_fields=["last_login"])
+        user.save(update_fields=["last_login"] + (["password"] if password else []))
 
         org = None
         profile = None

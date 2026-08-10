@@ -22,10 +22,10 @@ export async function load({ cookies }) {
   ]);
 
   return {
-    accounts: accounts.results.map((a) => ({ id: a.id, name: a.name || 'Unnamed account' })),
+    accounts: accounts.results.map((a) => ({ id: a.id, name: a.name || 'Cuenta sin nombre' })),
     contacts: contacts.results.map((c) => ({
       id: c.id,
-      name: c.name || c.email || 'Unnamed contact',
+      name: c.name || c.email || 'Contacto sin nombre',
       account_id: c.account?.id ?? null,
       account_name: c.account?.name ?? ''
     })),
@@ -49,13 +49,13 @@ export const actions = {
     try {
       body = JSON.parse(form.get('payload')?.toString() || '{}');
     } catch {
-      return fail(400, { error: 'The invoice form could not be read. Please try again.' });
+      return fail(400, { error: 'No se pudo leer el formulario de la factura. Intentá de nuevo.' });
     }
 
-    if (!body.account_id) return fail(400, { error: 'Choose an account.' });
-    if (!body.contact_id) return fail(400, { error: 'Choose a contact.' });
+    if (!body.account_id) return fail(400, { error: 'Elegí una cuenta.' });
+    if (!body.contact_id) return fail(400, { error: 'Elegí un contacto.' });
     if (!Array.isArray(body.line_items) || body.line_items.length === 0) {
-      return fail(400, { error: 'Add at least one line with a description and an amount.' });
+      return fail(400, { error: 'Agregá al menos un ítem con una descripción y un monto.' });
     }
 
     let created;
@@ -63,7 +63,7 @@ export const actions = {
       created = await createInvoice({ cookies }, body);
     } catch (/** @type {any} */ err) {
       return fail(err?.status === 403 ? 403 : 400, {
-        error: readableError(err, 'Could not create the invoice.')
+        error: readableError(err, 'No se pudo crear la factura.')
       });
     }
 

@@ -34,7 +34,7 @@
     title,
     action,
     error = null,
-    submitLabel = 'Save',
+    submitLabel = 'Guardar',
     oncancel,
     ondone,
     fields
@@ -73,7 +73,7 @@
 
     <div class="v2-sfp-foot">
       <button class="v2-btn v2-btn-primary" type="submit" disabled={busy}>{submitLabel}</button>
-      <button class="v2-btn" type="button" disabled={busy} onclick={oncancel}>Cancel</button>
+      <button class="v2-btn" type="button" disabled={busy} onclick={oncancel}>Cancelar</button>
     </div>
   </form>
 </div>

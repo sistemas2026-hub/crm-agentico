@@ -28,13 +28,13 @@ export const actions = {
       picked && typeof picked === 'object' && 'size' in picked && picked.size > 0 ? picked : null;
 
     if (!comment && !file) {
-      return fail(400, { message: 'Write a note or attach a file before you save.' });
+      return fail(400, { message: 'Escribí una nota o adjuntá un archivo antes de guardar.' });
     }
 
     try {
       await addContactNote({ cookies }, params.id, comment, file);
     } catch (/** @type {any} */ err) {
-      return fail(400, { message: String(err?.message ?? 'Could not save that note.') });
+      return fail(400, { message: String(err?.message ?? 'No se pudo guardar esa nota.') });
     }
 
     return { noted: true };

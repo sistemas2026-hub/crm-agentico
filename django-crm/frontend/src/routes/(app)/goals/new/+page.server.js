@@ -34,11 +34,11 @@ export const actions = {
       await createGoal(event, values);
     } catch (/** @type {any} */ err) {
       if (err?.status === 403) {
-        return fail(403, { values, error: 'Only an admin can create goals.' });
+        return fail(403, { values, error: 'Solo un administrador puede crear metas.' });
       }
       return fail(400, {
         values,
-        error: readableError(err, 'Could not create this goal.')
+        error: readableError(err, 'No se pudo crear esta meta.')
       });
     }
 

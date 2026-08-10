@@ -35,16 +35,16 @@
 
 <PageHeader title={invoice.invoice_number} record>
   {#snippet crumb()}
-    <a href="/invoices">Invoices</a>
+    <a href="/invoices">Facturas</a>
     <ChevronRight size={12} />
     <a href="/accounts/{invoice.account.id}">{invoice.account.name}</a>
   {/snippet}
   {#snippet actions()}
     <a class="v2-btn" href="/invoices/{invoice.id}/pdf" target="_blank" rel="noopener">
-      Download PDF
+      Descargar PDF
     </a>
     <form method="POST" action="?/duplicate" use:enhance={working} style="display:inline">
-      <button class="v2-btn" disabled={busy}>Duplicate</button>
+      <button class="v2-btn" disabled={busy}>Duplicar</button>
     </form>
     {#if !invoice.is_settled}
       <!-- In the header, not the rail: the rail is hidden below 1180px, and a
@@ -55,7 +55,7 @@
            InvoiceCancelView refuses, so a second `status !== 'Cancelled'`
            test here could never change the answer. It used to be there. -->
       <form method="POST" action="?/cancel" use:enhance={working} style="display:inline">
-        <button class="v2-btn" disabled={busy} style="color:var(--v2-rust)">Cancel</button>
+        <button class="v2-btn" disabled={busy} style="color:var(--v2-rust)">Cancelar</button>
       </form>
     {/if}
   {/snippet}
@@ -67,7 +67,7 @@
       <div class="v2-pad" style="padding-top:16px;padding-bottom:32px">
         {#if form?.error}
           <div style="margin-bottom:16px">
-            <NextAction label="That did not work" text={form.error} tone="rust" />
+            <NextAction label="Eso no funcionó" text={form.error} tone="rust" />
           </div>
         {:else if form?.sent}
           <!-- The re-send has no other visible effect: it updates sent_at and
@@ -77,32 +77,32 @@
             class="v2-sub"
             style="color:var(--v2-moss);font-size:12.5px;margin:0 0 16px;font-weight:550"
           >
-            Sent to the client.
+            Enviada al cliente.
           </p>
         {/if}
 
         {#if invoice.is_overdue}
           <div style="margin-bottom:20px">
             <NextAction
-              label="{daysLate} days past due"
+              label="{daysLate} días de atraso"
               text={invoice.reminder_count
-                ? `${invoice.reminder_count} reminder${invoice.reminder_count === 1 ? '' : 's'} sent${
+                ? `${invoice.reminder_count} recordatorio${invoice.reminder_count === 1 ? '' : 's'} enviado${invoice.reminder_count === 1 ? '' : 's'}${
                     invoice.last_reminder_sent
-                      ? `, last ${relativeDays(invoice.last_reminder_sent)}`
+                      ? `, el último ${relativeDays(invoice.last_reminder_sent)}`
                       : ''
                   }.`
-                : 'No reminder sent yet.'}
+                : 'Todavía no se envió ningún recordatorio.'}
               tone="rust"
             />
             <form method="POST" action="?/send" use:enhance={working} style="margin-top:8px">
-              <button class="v2-btn v2-btn-sm" disabled={busy}>Send a reminder</button>
+              <button class="v2-btn v2-btn-sm" disabled={busy}>Enviar recordatorio</button>
             </form>
           </div>
         {:else if invoice.status === 'Draft'}
           <div style="margin-bottom:20px">
-            <NextAction text="This invoice has never been sent." />
+            <NextAction text="Esta factura todavía no se envió." />
             <form method="POST" action="?/send" use:enhance={working} style="margin-top:8px">
-              <button class="v2-btn v2-btn-sm" disabled={busy}>Send it</button>
+              <button class="v2-btn v2-btn-sm" disabled={busy}>Enviarla</button>
             </form>
           </div>
         {/if}
@@ -116,18 +116,18 @@
                 ? `color:var(--v2-ink);background:color-mix(in srgb, var(--v2-ink) 9%, transparent)`
                 : 'color:var(--v2-slate);background:var(--v2-line-soft)'}
             >
-              {step}
+              {invoiceStatusLabel(step)}
             </span>
           {/each}
           {#if invoice.is_overdue}
             <ChevronRight size={12} style="color:var(--v2-slate)" />
-            <Pill tone="rust">Overdue</Pill>
+            <Pill tone="rust">{invoiceStatusLabel('Overdue')}</Pill>
           {:else if invoice.status === 'Cancelled'}
             <ChevronRight size={12} style="color:var(--v2-slate)" />
-            <Pill tone="slate">Cancelled</Pill>
+            <Pill tone="slate">{invoiceStatusLabel('Cancelled')}</Pill>
           {/if}
           <span class="v2-sub" style="margin-left:10px">
-            Issued {longDate(invoice.issued_date)} · due {longDate(invoice.due_date)}
+            Emitida {longDate(invoice.issued_date)} · vence {longDate(invoice.due_date)}
           </span>
         </div>
 
@@ -135,11 +135,11 @@
           <table class="v2-table">
             <thead>
               <tr>
-                <th>Item</th>
-                <th class="v2-r">Qty</th>
-                <th class="v2-r">Rate</th>
-                <th class="v2-r">Tax</th>
-                <th class="v2-r">Amount</th>
+                <th>Ítem</th>
+                <th class="v2-r">Cant.</th>
+                <th class="v2-r">Precio</th>
+                <th class="v2-r">Impuesto</th>
+                <th class="v2-r">Monto</th>
               </tr>
             </thead>
             <tbody>
@@ -157,7 +157,7 @@
               {:else}
                 <tr>
                   <td colspan="5" class="v2-sub" style="padding:14px 15px;font-size:12.5px">
-                    No line items on this invoice.
+                    Esta factura no tiene ítems.
                   </td>
                 </tr>
               {/each}
@@ -172,26 +172,26 @@
               {money(invoice.subtotal, invoice.currency)}
             </dd>
             {#if invoice.discount_amount > 0}
-              <dt>Discount</dt>
+              <dt>Descuento</dt>
               <dd class="v2-num" style="text-align:right">
                 −{money(invoice.discount_amount, invoice.currency)}
               </dd>
             {/if}
-            <dt>Tax</dt>
+            <dt>Impuesto</dt>
             <dd class="v2-num" style="text-align:right">
               {money(invoice.tax_amount, invoice.currency)}
             </dd>
             {#if invoice.shipping_amount > 0}
-              <dt>Shipping</dt>
+              <dt>Envío</dt>
               <dd class="v2-num" style="text-align:right">
                 {money(invoice.shipping_amount, invoice.currency)}
               </dd>
             {/if}
-            <dt>Paid</dt>
+            <dt>Pagado</dt>
             <dd class="v2-num" style="text-align:right">
               {money(invoice.amount_paid, invoice.currency)}
             </dd>
-            <dt style="color:var(--v2-ink);font-weight:600">Outstanding</dt>
+            <dt style="color:var(--v2-ink);font-weight:600">Pendiente</dt>
             <dd
               class="v2-num"
               style="text-align:right;font-weight:700;font-size:16px;color:{invoice.amount_due > 0
@@ -213,7 +213,7 @@
             >
               <div>
                 <label class="v2-label" for="amount" style="display:block;margin-bottom:4px">
-                  Record a payment
+                  Registrar un pago
                 </label>
                 <input
                   id="amount"
@@ -224,11 +224,11 @@
                   inputmode="decimal"
                 />
               </div>
-              <button class="v2-btn v2-btn-primary" disabled={busy}>Record</button>
+              <button class="v2-btn v2-btn-primary" disabled={busy}>Registrar</button>
             </form>
           </div>
           <p class="v2-sub" style="text-align:right;font-size:11.5px;margin-top:6px">
-            Leave the amount blank to settle the full {money(invoice.amount_due, invoice.currency)} balance.
+            Dejá el monto en blanco para saldar el total pendiente de {money(invoice.amount_due, invoice.currency)}.
           </p>
         {/if}
       </div>
@@ -236,25 +236,25 @@
   </div>
 
   <aside class="v2-rail">
-    <div class="v2-label v2-rail-head">Invoice</div>
+    <div class="v2-label v2-rail-head">Factura</div>
     <dl class="v2-kv">
-      <dt>Status</dt>
+      <dt>Estado</dt>
       <dd>
         <Pill tone={INVOICE_STATUS_TONE[invoice.status]}>{invoiceStatusLabel(invoice.status)}</Pill>
       </dd>
-      <dt>Number</dt>
+      <dt>Número</dt>
       <dd class="v2-num">{invoice.invoice_number}</dd>
-      <dt>Issued</dt>
+      <dt>Emitida</dt>
       <dd>{longDate(invoice.issued_date)}</dd>
-      <dt>Due</dt>
+      <dt>Vence</dt>
       <dd>{longDate(invoice.due_date)}</dd>
-      <dt>Terms</dt>
+      <dt>Condiciones</dt>
       <dd>{invoiceStatusLabel(invoice.payment_terms)}</dd>
-      <dt>Currency</dt>
+      <dt>Moneda</dt>
       <dd>{invoice.currency}</dd>
     </dl>
 
-    <div class="v2-label v2-rail-head">Bill to</div>
+    <div class="v2-label v2-rail-head">Facturar a</div>
     <a
       href="/accounts/{invoice.account.id}"
       class="v2-sub"
@@ -263,14 +263,14 @@
       {invoice.account.name}
     </a>
 
-    <div class="v2-label v2-rail-head">Reminders</div>
+    <div class="v2-label v2-rail-head">Recordatorios</div>
     <dl class="v2-kv">
-      <dt>Automatic</dt>
-      <dd>{invoice.reminder_enabled ? (invoice.reminder_frequency ?? 'On') : 'Off'}</dd>
-      <dt>Sent</dt>
+      <dt>Automático</dt>
+      <dd>{invoice.reminder_enabled ? (invoice.reminder_frequency ?? 'Activado') : 'Desactivado'}</dd>
+      <dt>Enviados</dt>
       <dd class="v2-num">{invoice.reminder_count}</dd>
       {#if invoice.last_reminder_sent}
-        <dt>Last</dt>
+        <dt>Último</dt>
         <dd>{relativeDays(invoice.last_reminder_sent)}</dd>
       {/if}
     </dl>

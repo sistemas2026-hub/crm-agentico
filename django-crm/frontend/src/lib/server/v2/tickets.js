@@ -70,7 +70,7 @@ function fileUrl(path) {
  * @param {any} profile
  */
 function profileName(profile) {
-  return profile?.user_details?.email || profile?.user?.email || 'Unknown';
+  return profile?.user_details?.email || profile?.user?.email || 'Desconocido';
 }
 
 /**
@@ -189,7 +189,7 @@ function toConversation(response) {
       id: `c-${comment.id}`,
       kind: 'comment',
       direction: author ? 'out' : 'in',
-      author: author ? author.user_details?.email || 'Support' : 'The customer',
+      author: author ? author.user_details?.email || 'Soporte' : 'El cliente',
       at: comment.commented_on,
       body: comment.comment ?? ''
     });
@@ -200,7 +200,7 @@ function toConversation(response) {
       id: `n-${note.id}`,
       kind: 'note',
       direction: 'note',
-      author: note.commented_by?.user_details?.email || 'Support',
+      author: note.commented_by?.user_details?.email || 'Soporte',
       at: note.commented_on,
       body: note.comment ?? ''
     });
@@ -211,7 +211,7 @@ function toConversation(response) {
       id: `e-${message.id}`,
       kind: 'email',
       direction: message.direction === 'outbound' ? 'out' : 'in',
-      author: message.from_address ?? 'Unknown sender',
+      author: message.from_address ?? 'Remitente desconocido',
       at: message.received_at,
       subject: message.subject ?? '',
       body: message.body_text ?? ''
@@ -512,10 +512,10 @@ async function fetchDetail(cookies, id) {
   } catch (/** @type {any} */ err) {
     // On the status, not on the wording.
     if (err?.status === 404) {
-      error(404, 'That ticket does not exist, or it belongs to another team.');
+      error(404, 'Ese ticket no existe, o pertenece a otro equipo.');
     }
     if (err?.status === 403) {
-      error(403, 'This ticket belongs to somebody else. Ask an admin if you need it.');
+      error(403, 'Este ticket pertenece a otra persona. Pedile a un administrador si lo necesitás.');
     }
     throw err;
   }

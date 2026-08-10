@@ -73,7 +73,7 @@
   // it, filtering by a colleague would light up "Mine".
   let activeKey = $derived(activePresetKey(page, url, meId));
   let activeLabel = $derived(
-    descriptor.presets.find((/** @type {any} */ p) => p.key === activeKey)?.label ?? 'All'
+    descriptor.presets.find((/** @type {any} */ p) => p.key === activeKey)?.label ?? 'Todos'
   );
 
   /**
@@ -140,7 +140,7 @@
     <span class="v2-chip">
       <b>{chip.label}</b>
       {chip.value}
-      <a href={chip.href} aria-label="Remove the {chip.label} filter"><X size={12} /></a>
+      <a href={chip.href} aria-label="Quitar el filtro {chip.label}"><X size={12} /></a>
     </span>
   {/each}
 
@@ -148,7 +148,7 @@
     <details class="v2-filter-menu">
       <summary class="v2-chip v2-chip-add">
         <Plus size={12} />
-        Filter
+        Filtrar
       </summary>
       <form class="v2-menu v2-filter-form" method="GET">
         <!-- Params the form does not own (the preset's own, plus paging) would
@@ -193,7 +193,7 @@
                   min="0"
                   name={field.gteKey}
                   value={url.searchParams.get(field.gteKey) ?? ''}
-                  placeholder="Min"
+                  placeholder="Mín."
                 />
                 <input
                   class="v2-input"
@@ -201,14 +201,14 @@
                   min="0"
                   name={field.lteKey}
                   value={url.searchParams.get(field.lteKey) ?? ''}
-                  placeholder="Max"
+                  placeholder="Máx."
                 />
               </span>
             {:else if field.type === 'boolean'}
               <select class="v2-input" name={field.key}>
-                <option value="">Any</option>
+                <option value="">Cualquiera</option>
                 <option value="true" selected={url.searchParams.get(field.key) === 'true'}
-                  >Yes</option
+                  >Sí</option
                 >
                 <option value="false" selected={url.searchParams.get(field.key) === 'false'}
                   >No</option
@@ -220,11 +220,11 @@
                 type="text"
                 name={field.key}
                 value={url.searchParams.get(field.key) ?? ''}
-                placeholder="Any"
+                placeholder="Cualquiera"
               />
             {:else}
               <select class="v2-input" name={field.key}>
-                <option value="">Any</option>
+                <option value="">Cualquiera</option>
                 {#each optionsFor(field) as option (option.id)}
                   <option
                     value={option.id}
@@ -239,8 +239,8 @@
         {/each}
 
         <div class="v2-filter-actions">
-          <button class="v2-btn v2-btn-primary v2-btn-sm" type="submit">Apply</button>
-          <a class="v2-btn v2-btn-sm" href={url.pathname}>Clear all</a>
+          <button class="v2-btn v2-btn-primary v2-btn-sm" type="submit">Aplicar</button>
+          <a class="v2-btn v2-btn-sm" href={url.pathname}>Borrar todo</a>
         </div>
       </form>
     </details>

@@ -9,7 +9,8 @@
  */
 
 import { redirect } from '@sveltejs/kit';
-import { env } from '$env/dynamic/public';
+import { env } from '$env/dynamic/private';
+import { env as publicEnv } from '$env/dynamic/public';
 
 const AUTH_COOKIES = ['jwt_access', 'jwt_refresh', 'org', 'oauth_state', 'oauth_code_verifier'];
 
@@ -48,7 +49,8 @@ export async function load({ locals, cookies, fetch }) {
 async function revokeRefreshToken(refresh, fetch) {
   if (!refresh) return;
   try {
-    await fetch(`${env.PUBLIC_DJANGO_API_URL}/api/auth/logout/`, {
+    const apiUrl = env.PRIVATE_DJANGO_API_URL || publicEnv.PUBLIC_DJANGO_API_URL;
+    await fetch(`${apiUrl}/api/auth/logout/`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refresh })

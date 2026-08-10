@@ -106,12 +106,12 @@ function buildBody(allowed, values) {
       }))
       .filter((/** @type {any} */ o) => o.label && o.value);
     if (!rows.length) {
-      throw new Error('A dropdown needs at least one option.');
+      throw new Error('Una lista desplegable necesita al menos una opción.');
     }
     const seen = new Set();
     for (const row of rows) {
       if (seen.has(row.value)) {
-        throw new Error(`Two options would both be stored as "${row.value}". Rename one.`);
+        throw new Error(`Dos opciones quedarían guardadas como "${row.value}". Renombrá una.`);
       }
       seen.add(row.value);
     }
@@ -129,7 +129,7 @@ export async function createCustomField({ cookies }, values) {
 
 /** @param {{ cookies: import('@sveltejs/kit').Cookies }} event */
 export async function updateCustomField({ cookies }, id, values) {
-  if (!id) throw new Error('Which field? No field id was given.');
+  if (!id) throw new Error('¿Qué campo? No se indicó un id de campo.');
   const body = buildBody(UPDATE_FIELDS, values);
   return await apiRequest(`/custom-fields/${id}/`, { method: 'PUT', body }, { cookies });
 }
@@ -145,6 +145,6 @@ export async function updateCustomField({ cookies }, id, values) {
  * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
  */
 export async function deactivateCustomField({ cookies }, id) {
-  if (!id) throw new Error('Which field? No field id was given.');
+  if (!id) throw new Error('¿Qué campo? No se indicó un id de campo.');
   return await apiRequest(`/custom-fields/${id}/`, { method: 'DELETE' }, { cookies });
 }

@@ -26,6 +26,7 @@
   import PortalShell from '$lib/v2/components/PortalShell.svelte';
   import PortalLineItems from '$lib/v2/components/PortalLineItems.svelte';
   import { money, longDate } from '$lib/v2/format.js';
+  import { ESTIMATE_STATUS_LABEL } from '$lib/v2/enums.js';
   import { Download, CheckCircle2, XCircle, AlertTriangle } from '@lucide/svelte';
 
   /** @type {{ data: { estimate: any, token: string }, form: any }} */
@@ -72,7 +73,7 @@
 </script>
 
 <svelte:head>
-  <title>{est.estimate_number} from {est.org.name}</title>
+  <title>{est.estimate_number} de {est.org.name}</title>
 </svelte:head>
 
 <PortalShell>
@@ -82,7 +83,7 @@
         <div class="from">{est.org.name}</div>
         <h1>{est.title}</h1>
         <div class="ref">
-          Estimate <span class="v2-num">{est.estimate_number}</span> · issued
+          Cotización <span class="v2-num">{est.estimate_number}</span> · emitida
           {longDate(est.issue_date)}
         </div>
       </div>
@@ -93,7 +94,7 @@
         class="v2-btn v2-btn-sm"
         href="/api/public/estimate/{token}/pdf/"
         rel="external"
-        aria-label="Download this estimate as a PDF"
+        aria-label="Descargar esta cotización como PDF"
       >
         <Download size={13} />PDF
       </a>
@@ -101,18 +102,18 @@
 
     <section class="amount">
       <div>
-        <div class="amount-label">Total if accepted</div>
+        <div class="amount-label">Total si se acepta</div>
         <div class="amount-value v2-num">{money(est.total_amount, est.currency)}</div>
         <div class="amount-sub">
           {#if expired}
-            Expired {longDate(est.expiry_date)}
+            Venció {longDate(est.expiry_date)}
           {:else if daysToExpiry === 0}
-            Valid until end of today
+            Válida hasta el final de hoy
           {:else if daysToExpiry !== null}
-            Valid until {longDate(est.expiry_date)} · {daysToExpiry}
-            {daysToExpiry === 1 ? 'day' : 'days'} left
+            Válida hasta {longDate(est.expiry_date)} · quedan {daysToExpiry}
+            {daysToExpiry === 1 ? 'día' : 'días'}
           {:else}
-            No expiry date set
+            Sin fecha de vencimiento definida
           {/if}
         </div>
       </div>
@@ -130,16 +131,16 @@
       <section class="decided" class:no={est.status === 'Declined'}>
         {#if est.status === 'Accepted'}<CheckCircle2 size={18} />{:else}<XCircle size={18} />{/if}
         <div>
-          <b>{est.status}</b>
+          <b>{ESTIMATE_STATUS_LABEL[est.status] ?? est.status}</b>
           {#if est.status === 'Accepted'}
             <p>
-              {est.org.name} has been notified and will raise an invoice for
-              {money(est.total_amount, est.currency)}. A copy has been sent to {est.client_email}.
+              Se notificó a {est.org.name} y va a emitir una factura por
+              {money(est.total_amount, est.currency)}. Se envió una copia a {est.client_email}.
             </p>
           {:else}
             <p>
-              {est.org.name} has been notified. If you declined by mistake, reply to the email this link
-              came from. This page cannot undo it.
+              Se notificó a {est.org.name}. Si rechazaste por error, respondé al correo del que
+              vino este enlace. Esta página no puede deshacerlo.
             </p>
           {/if}
         </div>
@@ -150,10 +151,10 @@
       <section class="expired">
         <AlertTriangle size={17} />
         <div>
-          <b>This estimate has expired</b>
+          <b>Esta cotización venció</b>
           <p>
-            Prices were held until {longDate(est.expiry_date)}. Reply to the email this link came
-            from and {est.org.name} can send a current quote.
+            Los precios se mantuvieron hasta el {longDate(est.expiry_date)}. Respondé al correo del
+            que vino este enlace y {est.org.name} puede mandarte una cotización actualizada.
           </p>
         </div>
       </section>
@@ -161,56 +162,57 @@
       <section class="decide">
         {#if !confirming}
           <div class="decide-copy">
-            <b>Ready to go ahead?</b>
-            <p>Accepting authorises {est.org.name} to invoice you for the amounts above.</p>
+            <b>¿Lista para avanzar?</b>
+            <p>Aceptar autoriza a {est.org.name} a facturarte los montos de arriba.</p>
           </div>
           <div class="decide-actions">
             <button class="v2-btn v2-btn-primary" onclick={() => (confirming = true)}>
-              Accept this estimate
+              Aceptar esta cotización
             </button>
             <form method="POST" action="?/decline" use:enhance={respond}>
-              <button class="v2-btn" type="submit" disabled={submitting}>Decline</button>
+              <button class="v2-btn" type="submit" disabled={submitting}>Rechazar</button>
             </form>
           </div>
         {:else}
           <!-- Step two. The total is repeated here on purpose: it is the number
                being agreed to, and it should be under the thumb that agrees. -->
           <form class="confirm" method="POST" action="?/accept" use:enhance={respond}>
-            <b>Confirm acceptance of {money(est.total_amount, est.currency)}</b>
+            <b>Confirmar aceptación de {money(est.total_amount, est.currency)}</b>
             <p>
-              This tells {est.org.name} to raise an invoice. It cannot be undone from this page.
+              Esto le indica a {est.org.name} que emita una factura. No se puede deshacer desde
+              esta página.
             </p>
             <label class="field">
-              <span>Your name</span>
+              <span>Tu nombre</span>
               <input
                 name="name"
                 bind:value={acceptedByName}
-                placeholder="Who is accepting"
+                placeholder="Quién está aceptando"
                 autocomplete="name"
                 required
               />
             </label>
             <label class="field">
-              <span>Your email</span>
+              <span>Tu correo</span>
               <input
                 name="email"
                 type="email"
                 bind:value={acceptedByEmail}
-                placeholder="name@company.com"
+                placeholder="nombre@empresa.com"
                 autocomplete="email"
                 required
               />
             </label>
             <p class="field-note">
-              Recorded with your acceptance: {est.org.name} keeps this as the record of who authorised
-              the invoice.
+              Se registra junto con tu aceptación: {est.org.name} guarda esto como el registro de
+              quién autorizó la factura.
             </p>
             <div class="decide-actions">
               <button class="v2-btn v2-btn-primary" type="submit" disabled={submitting}>
-                {submitting ? 'Accepting…' : 'Yes, accept'}
+                {submitting ? 'Aceptando…' : 'Sí, aceptar'}
               </button>
               <button class="v2-btn" type="button" onclick={() => (confirming = false)}>
-                Go back
+                Volver
               </button>
             </div>
           </form>
@@ -219,7 +221,7 @@
     {/if}
 
     <section class="block">
-      <div class="v2-label">Prepared for</div>
+      <div class="v2-label">Preparada para</div>
       <div class="addr">
         <div class="addr-name">{est.client_name}</div>
         {#each addressLines as line, i (i)}
@@ -229,7 +231,7 @@
     </section>
 
     <section class="block">
-      <div class="v2-label">What is included</div>
+      <div class="v2-label">Qué incluye</div>
       <PortalLineItems
         items={est.line_items}
         currency={est.currency}
@@ -245,20 +247,20 @@
 
     {#if est.notes}
       <section class="block">
-        <div class="v2-label">Notes</div>
+        <div class="v2-label">Notas</div>
         <p class="note">{est.notes}</p>
       </section>
     {/if}
 
     {#if est.terms}
       <section class="block">
-        <div class="v2-label">Terms</div>
+        <div class="v2-label">Condiciones</div>
         <p class="note">{est.terms}</p>
       </section>
     {/if}
 
     <footer class="doc-foot">
-      <p>Questions? Reply to the email this estimate arrived with.</p>
+      <p>¿Preguntas? Respondé al correo con el que llegó esta cotización.</p>
       {#if est.template?.footer_text}
         <p class="foot-org">{est.template.footer_text}</p>
       {/if}

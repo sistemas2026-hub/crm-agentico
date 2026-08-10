@@ -83,7 +83,7 @@ export async function getTags({ cookies }) {
  */
 export async function createTag({ cookies }, values) {
   const name = (values.name ?? '').trim();
-  if (!name) throw new Error('A tag needs a name.');
+  if (!name) throw new Error('Una etiqueta necesita un nombre.');
 
   const resp = await apiRequest('/tags/', { method: 'POST', body: { name } }, { cookies });
   return resp.tag ?? resp;
@@ -113,7 +113,7 @@ export async function createTag({ cookies }, values) {
  * @returns {Promise<any>}
  */
 export async function archiveTag({ cookies }, id) {
-  if (!id) throw new Error('A tag id is required to turn a tag off.');
+  if (!id) throw new Error('Se necesita un id de etiqueta para apagarla.');
   return await apiRequest(`/tags/${id}/`, { method: 'DELETE' }, { cookies });
 }
 
@@ -127,7 +127,7 @@ export async function archiveTag({ cookies }, id) {
  * @returns {Promise<any>}
  */
 export async function restoreTag({ cookies }, id) {
-  if (!id) throw new Error('A tag id is required to turn a tag back on.');
+  if (!id) throw new Error('Se necesita un id de etiqueta para volver a encenderla.');
   return await apiRequest(`/tags/${id}/restore/`, { method: 'POST' }, { cookies });
 }
 
@@ -153,7 +153,7 @@ export async function restoreTag({ cookies }, id) {
  *   many records changed hands, which is what the page reports back.
  */
 export async function mergeTags({ cookies }, id, into) {
-  if (!id || !into) throw new Error('Two tags are required to merge.');
+  if (!id || !into) throw new Error('Se necesitan dos etiquetas para fusionar.');
   const resp = await apiRequest(
     `/tags/${id}/merge/`,
     { method: 'POST', body: { into } },

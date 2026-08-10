@@ -15,23 +15,23 @@
   let totals = $derived(data.totals);
 </script>
 
-<PageHeader title="Contacts">
+<PageHeader title="Contactos">
   {#snippet sub()}
-    <span class="v2-num">{count(totals.count)}</span> people
+    <span class="v2-num">{count(totals.count)}</span> personas
     {#if !data.includeInactive && totals.inactive}
-      · <span class="v2-num">{count(totals.inactive)}</span> inactive hidden
+      · <span class="v2-num">{count(totals.inactive)}</span> inactivos ocultos
     {/if}
     {#if totals.do_not_call}
-      · <span class="v2-num">{count(totals.do_not_call)}</span> do not call
+      · <span class="v2-num">{count(totals.do_not_call)}</span> no llamar
     {/if}
   {/snippet}
   {#snippet actions()}
     {#if data.includeInactive}
-      <a class="v2-btn" href="/contacts">Hide inactive</a>
+      <a class="v2-btn" href="/contacts">Ocultar inactivos</a>
     {:else}
-      <a class="v2-btn" href="/contacts?inactive=1">Show inactive</a>
+      <a class="v2-btn" href="/contacts?inactive=1">Mostrar inactivos</a>
     {/if}
-    <a class="v2-btn v2-btn-primary" href="/contacts/new"><Plus />New contact</a>
+    <a class="v2-btn v2-btn-primary" href="/contacts/new"><Plus />Nuevo contacto</a>
   {/snippet}
 </PageHeader>
 
@@ -41,19 +41,19 @@
   people={data.people}
   tags={data.tags}
   meId={data.meId}
-  meta="Most recently added first"
+  meta="Los agregados más recientemente primero"
 />
 
 <div class="v2-scroll">
   {#if contacts.length === 0}
     <EmptyState
-      title="No contacts yet"
-      body="A contact is a person at an account. Convert a lead, or add one directly and attach them to the account they work for."
+      title="Todavía no hay contactos"
+      body="Un contacto es una persona en una cuenta. Convertí un prospecto, o agregá uno directamente y vinculalo a la cuenta para la que trabaja."
     >
       {#snippet icon()}<Users size={21} />{/snippet}
       {#snippet actions()}
-        <a class="v2-btn v2-btn-primary" href="/contacts/new">New contact</a>
-        <a class="v2-btn" href="/leads">Go to leads</a>
+        <a class="v2-btn v2-btn-primary" href="/contacts/new">Nuevo contacto</a>
+        <a class="v2-btn" href="/leads">Ir a prospectos</a>
       {/snippet}
     </EmptyState>
   {:else}
@@ -61,12 +61,12 @@
       <table class="v2-table">
         <thead>
           <tr>
-            <th>Name</th>
-            <th>Account</th>
-            <th>Reachable on</th>
-            <th>Email</th>
-            <th data-m="hide">Owner</th>
-            <th class="v2-r">Updated</th>
+            <th>Nombre</th>
+            <th>Cuenta</th>
+            <th>Se lo puede contactar en</th>
+            <th>Correo</th>
+            <th data-m="hide">Responsable</th>
+            <th class="v2-r">Actualizado</th>
           </tr>
         </thead>
         <tbody>
@@ -82,7 +82,7 @@
                   <span>
                     <span class="v2-table-primary">{c.name}</span>
                     <span class="v2-table-secondary" style="display:block">
-                      {c.title || 'No title recorded'}
+                      {c.title || 'Sin cargo registrado'}
                     </span>
                   </span>
                 </a>
@@ -100,7 +100,7 @@
                     <span class="v2-sub" style="font-size:11px">+{c.other_accounts.length}</span>
                   {/if}
                 {:else if c.organization}
-                  <span class="v2-muted" title="Typed in, not linked to an account">
+                  <span class="v2-muted" title="Escrito a mano, no vinculado a una cuenta">
                     {c.organization}
                   </span>
                 {:else}
@@ -115,14 +115,14 @@
                 -->
                 <span style="display:inline-flex;gap:6px;align-items:center">
                   {#if c.do_not_call}
-                    <Pill tone="rust"><PhoneOff size={11} />Do not call</Pill>
+                    <Pill tone="rust"><PhoneOff size={11} />No llamar</Pill>
                   {:else if c.phone}
                     <span class="v2-num" style="font-size:12px">{c.phone}</span>
                   {:else}
-                    <span class="v2-muted">No phone</span>
+                    <span class="v2-muted">Sin teléfono</span>
                   {/if}
                   {#if !c.is_active}
-                    <Pill tone="slate">Inactive</Pill>
+                    <Pill tone="slate">Inactivo</Pill>
                   {/if}
                 </span>
               </td>
@@ -130,10 +130,10 @@
                 {#if c.email}
                   <a href="mailto:{c.email}" style="color:inherit">{c.email}</a>
                 {:else}
-                  <span class="v2-muted">No email</span>
+                  <span class="v2-muted">Sin correo</span>
                 {/if}
               </td>
-              <td data-m="hide">{c.owner ?? 'Unassigned'}</td>
+              <td data-m="hide">{c.owner ?? 'Sin asignar'}</td>
               <td class="v2-r v2-muted">
                 <!--
                   When the record was last edited, which is all the CRM knows.
@@ -148,7 +148,7 @@
       </table>
     </div>
     <p class="v2-sub v2-pad" style="font-size:12px;padding-bottom:24px">
-      Showing <span class="v2-num">{contacts.length}</span> of
+      Mostrando <span class="v2-num">{contacts.length}</span> de
       <span class="v2-num">{count(totals.count)}</span>
     </p>
   {/if}

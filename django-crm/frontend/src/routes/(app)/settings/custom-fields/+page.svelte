@@ -72,30 +72,30 @@
   let gaps = $derived(data.fields.filter((f) => f.is_required && f.records_missing_value > 0));
 </script>
 
-<PageHeader title="Custom fields">
+<PageHeader title="Campos personalizados">
   {#snippet crumb()}<SettingsCrumb />{/snippet}
   {#snippet sub()}
-    <span class="v2-num">{count(totals.active)}</span> fields across
-    <span class="v2-num">{count(totals.models_extended)}</span> record types
+    <span class="v2-num">{count(totals.active)}</span> campos en
+    <span class="v2-num">{count(totals.models_extended)}</span> tipos de registro
   {/snippet}
   {#snippet actions()}
     {#if data.can_edit && !editing}
-      <button class="v2-btn v2-btn-primary" onclick={openCreate}><Plus />New field</button>
+      <button class="v2-btn v2-btn-primary" onclick={openCreate}><Plus />Nuevo campo</button>
     {/if}
   {/snippet}
 </PageHeader>
 
 <div class="v2-pad" style="padding-top:16px;flex:none">
   <div class="v2-stats">
-    <StatCard label="Active fields" value={count(totals.active)} tone="ink" />
-    <StatCard label="Record types extended" value={count(totals.models_extended)} tone="slate" />
+    <StatCard label="Campos activos" value={count(totals.active)} tone="ink" />
+    <StatCard label="Tipos de registro extendidos" value={count(totals.models_extended)} tone="slate" />
     <StatCard
-      label="Required with gaps"
+      label="Obligatorios con vacíos"
       value={count(totals.required_with_gaps)}
       tone={totals.required_with_gaps > 0 ? 'clay' : 'slate'}
-      detail="Records that predate the rule"
+      detail="Registros anteriores a la regla"
     />
-    <StatCard label="Turned off" value={count(totals.count - totals.active)} tone="slate" />
+    <StatCard label="Desactivados" value={count(totals.count - totals.active)} tone="slate" />
   </div>
 </div>
 
@@ -103,10 +103,10 @@
   <div class="v2-pad" style="padding-bottom:32px">
     {#if editing}
       <SettingsFormPanel
-        title={editing === 'new' ? 'New custom field' : `Edit ${editing.label}`}
+        title={editing === 'new' ? 'Nuevo campo personalizado' : `Editar ${editing.label}`}
         action={editing === 'new' ? '?/create' : '?/update'}
         error={editing === 'new' ? form?.create?.error : form?.update?.error}
-        submitLabel={editing === 'new' ? 'Add field' : 'Save field'}
+        submitLabel={editing === 'new' ? 'Agregar campo' : 'Guardar campo'}
         oncancel={() => (editing = null)}
         ondone={() => (editing = null)}
       >
@@ -116,7 +116,7 @@
           {/if}
 
           <div class="v2-field">
-            <label for="f-label">Label</label>
+            <label for="f-label">Etiqueta</label>
             <input
               id="f-label"
               class="v2-input"
@@ -128,7 +128,7 @@
           </div>
 
           <div class="v2-field">
-            <label for="f-key">Key</label>
+            <label for="f-key">Clave</label>
             {#if editing === 'new'}
               <input
                 id="f-key"
@@ -140,20 +140,20 @@
                 placeholder="severity"
               />
               <p class="v2-hint">
-                Lowercase letters, numbers and underscores, starting with a letter. No hyphens.
-                Cannot be changed later.
+                Letras minúsculas, números y guiones bajos, empezando con una letra. Sin guiones
+                medios. No se puede cambiar después.
               </p>
             {:else}
               <code class="v2-cf-key">{editing.key}</code>
               <p class="v2-hint">
-                Fixed after creation. Every value already stored is filed under this key, and
-                changing it would leave them all behind.
+                Fija después de crearla. Todo valor ya guardado está archivado bajo esta clave, y
+                cambiarla los dejaría a todos atrás.
               </p>
             {/if}
           </div>
 
           <div class="v2-field">
-            <label for="f-target">On record type</label>
+            <label for="f-target">En tipo de registro</label>
             {#if editing === 'new'}
               <select id="f-target" class="v2-input" name="target_model" required>
                 {#each Object.entries(TARGET_MODEL_LABEL) as [value, label] (value)}
@@ -164,12 +164,12 @@
               <div style="font-size:13px">
                 {TARGET_MODEL_LABEL[editing.target_model] ?? editing.target_model}
               </div>
-              <p class="v2-hint">Fixed after creation.</p>
+              <p class="v2-hint">Fijo después de crearlo.</p>
             {/if}
           </div>
 
           <div class="v2-field">
-            <label for="f-type">Type</label>
+            <label for="f-type">Tipo</label>
             {#if editing === 'new'}
               <select id="f-type" class="v2-input" name="field_type" bind:value={fieldType}>
                 {#each Object.entries(FIELD_TYPE_LABEL) as [value, label] (value)}
@@ -187,15 +187,15 @@
               <input type="hidden" name="field_type" value={fieldType} />
               <div style="font-size:13px">{FIELD_TYPE_LABEL[editing.field_type]}</div>
               <p class="v2-hint">
-                Fixed after creation. Values already stored were written and checked against this
-                type.
+                Fijo después de crearlo. Los valores ya guardados se escribieron y validaron contra
+                este tipo.
               </p>
             {/if}
           </div>
 
           {#if fieldType === 'dropdown'}
             <div class="v2-field v2-sfp-wide">
-              <label for="f-choices">Choices</label>
+              <label for="f-choices">Opciones</label>
               {#each optionRows as row, i (i)}
                 <div style="display:flex;gap:7px;align-items:center;margin-bottom:6px">
                   <input type="hidden" name="option_value" value={row.value} />
@@ -211,7 +211,7 @@
                     type="button"
                     onclick={() => (optionRows = optionRows.filter((_, j) => j !== i))}
                   >
-                    Remove
+                    Quitar
                   </button>
                 </div>
               {/each}
@@ -221,17 +221,17 @@
                 style="align-self:flex-start"
                 onclick={() => (optionRows = [...optionRows, { value: '', label: '' }])}
               >
-                Add a choice
+                Agregar una opción
               </button>
               <p class="v2-hint">
-                Renaming a choice keeps the values already stored against it. Removing one leaves
-                the records that hold it showing a value the list no longer offers.
+                Renombrar una opción mantiene los valores ya guardados con ella. Quitar una deja a
+                los registros que la tienen mostrando un valor que la lista ya no ofrece.
               </p>
             </div>
           {/if}
 
           <div class="v2-field">
-            <label for="f-order">Order</label>
+            <label for="f-order">Orden</label>
             <input
               id="f-order"
               class="v2-input"
@@ -243,7 +243,7 @@
           </div>
 
           <div class="v2-field">
-            <label for="f-required">Required</label>
+            <label for="f-required">Obligatorio</label>
             <label style="display:flex;gap:8px;align-items:center;font-weight:400">
               <input
                 id="f-required"
@@ -252,12 +252,12 @@
                 value="true"
                 checked={editing !== 'new' && editing.is_required}
               />
-              Binds new writes only. Records saved before this keep their gap.
+              Solo aplica a escrituras nuevas. Los registros guardados antes mantienen su vacío.
             </label>
           </div>
 
           <div class="v2-field">
-            <label for="f-filterable">Filterable</label>
+            <label for="f-filterable">Filtrable</label>
             <label style="display:flex;gap:8px;align-items:center;font-weight:400">
               <input
                 id="f-filterable"
@@ -266,7 +266,7 @@
                 value="true"
                 checked={editing !== 'new' && editing.is_filterable}
               />
-              Can be used to narrow a list, not just read on the record.
+              Se puede usar para acotar una lista, no solo leerse en el registro.
             </label>
           </div>
         {/snippet}
@@ -278,16 +278,16 @@
         <TriangleAlert size={16} style="color:var(--v2-clay);flex:none;margin-top:1px" />
         <div>
           <div style="font-weight:600;font-size:13px">
-            Required does not mean every record has one
+            Obligatorio no significa que todo registro lo tenga
           </div>
           <p class="v2-sub" style="font-size:12px;margin:4px 0 0;line-height:1.5">
             {gaps
               .map(
                 (f) =>
-                  `${f.label} is missing on ${f.records_missing_value} ${(TARGET_MODEL_LABEL[f.target_model] ?? f.target_model).toLowerCase()}`
+                  `A ${f.label} le falta en ${f.records_missing_value} ${(TARGET_MODEL_LABEL[f.target_model] ?? f.target_model).toLowerCase()}`
               )
-              .join('; ')}. Marking a field required binds new writes only, nothing goes back and
-            fills in what was saved before.
+              .join('; ')}. Marcar un campo como obligatorio solo aplica a escrituras nuevas, nada
+            retrocede a completar lo que ya se había guardado.
           </p>
         </div>
       </div>
@@ -303,7 +303,7 @@
     <div class="v2-cf-groups">
       {#each groups as g (g.model)}
         <div>
-          <div class="v2-label" style="margin-bottom:10px">On {g.label.toLowerCase()}</div>
+          <div class="v2-label" style="margin-bottom:10px">En {g.label.toLowerCase()}</div>
           <div class="v2-card" style="overflow:hidden">
             {#each g.fields as f (f.id)}
               <div class="v2-setting" style="opacity:{f.is_active ? 1 : 0.6}">
@@ -318,7 +318,7 @@
                     {/if}
                     {#if f.is_required && f.records_missing_value > 0}
                       · <span style="color:var(--v2-clay)">
-                        {count(f.records_missing_value)} without a value
+                        {count(f.records_missing_value)} sin valor
                       </span>
                     {/if}
                   </span>
@@ -331,22 +331,22 @@
                   <Filter size={13} style="color:var(--v2-slate);flex:none" />
                 {/if}
                 {#if !f.is_active}
-                  <Pill tone="slate">Off</Pill>
+                  <Pill tone="slate">Apagado</Pill>
                 {:else if f.is_required}
-                  <Pill tone="clay">Required</Pill>
+                  <Pill tone="clay">Obligatorio</Pill>
                 {/if}
 
                 {#if data.can_edit}
                   <div style="display:flex;gap:6px;align-items:center;flex:none">
                     <button class="v2-btn v2-btn-sm" type="button" onclick={() => openEdit(f)}>
-                      Edit
+                      Editar
                     </button>
                     {#if f.is_active}
                       <ConfirmAction
                         action="?/deactivate"
-                        label="Turn off"
-                        confirmLabel="Turn off"
-                        explain="Stops being collected. Stored values stay."
+                        label="Apagar"
+                        confirmLabel="Apagar"
+                        explain="Deja de recolectarse. Los valores guardados se mantienen."
                         hidden={{ id: f.id }}
                       />
                     {:else}
@@ -359,7 +359,7 @@
                            action rather than a bare `update` submit. -->
                       <form method="POST" action="?/activate" use:enhance>
                         <input type="hidden" name="id" value={f.id} />
-                        <button class="v2-btn v2-btn-sm" type="submit">Turn on</button>
+                        <button class="v2-btn v2-btn-sm" type="submit">Encender</button>
                       </form>
                     {/if}
                   </div>
@@ -372,9 +372,9 @@
     </div>
 
     <p class="v2-sub" style="font-size:11.5px;margin-top:16px;max-width:66ch">
-      A field marked with the filter icon can be used to narrow a list; the rest are readable only
-      on the record itself. Turning a field off stops it being collected and hides it, and leaves
-      the values already stored on each record untouched.
+      Un campo marcado con el ícono de filtro se puede usar para acotar una lista; el resto solo se
+      puede leer en el registro mismo. Apagar un campo deja de recolectarlo y lo oculta, y deja
+      intactos los valores ya guardados en cada registro.
     </p>
   </div>
 </div>

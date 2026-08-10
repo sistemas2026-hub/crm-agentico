@@ -7,9 +7,11 @@
  */
 
 import { fail } from '@sveltejs/kit';
-import { env } from '$env/dynamic/public';
+import { env } from '$env/dynamic/private';
+import { env as publicEnv } from '$env/dynamic/public';
 
-const API_BASE_URL = `${env.PUBLIC_DJANGO_API_URL}/api`;
+// PRIVATE_ over PUBLIC_: this runs server-side (see lib/api-helpers.js).
+const API_BASE_URL = `${env.PRIVATE_DJANGO_API_URL || publicEnv.PUBLIC_DJANGO_API_URL}/api`;
 
 /** @type {import('./$types').PageServerLoad} */
 export async function load({ params, fetch }) {
@@ -21,7 +23,7 @@ export async function load({ params, fetch }) {
     return { invalid: true, token: params.token };
   }
   if (!res.ok) {
-    return { error: `Server returned ${res.status}`, token: params.token };
+    return { error: `El servidor respondió ${res.status}`, token: params.token };
   }
   const data = await res.json();
   return {
@@ -46,7 +48,7 @@ export const actions = {
     const rating = Number(form.get('rating'));
     const comment = (form.get('comment')?.toString() || '').trim();
     if (!Number.isFinite(rating) || rating < 1 || rating > 5) {
-      return fail(400, { error: 'Please pick a rating between 1 and 5.' });
+      return fail(400, { error: 'Por favor elegí una calificación entre 1 y 5.' });
     }
     const res = await fetch(`${API_BASE_URL}/public/csat/${params.token}/`, {
       method: 'POST',
@@ -54,15 +56,15 @@ export const actions = {
       body: JSON.stringify({ rating, comment })
     });
     if (res.status === 410) {
-      return fail(410, { error: 'This survey link has expired.' });
+      return fail(410, { error: 'Este enlace de encuesta venció.' });
     }
     if (res.status === 409) {
-      return fail(409, { error: 'This survey is locked. The edit window has closed.' });
+      return fail(409, { error: 'Esta encuesta está bloqueada. El plazo para editar se cerró.' });
     }
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       return fail(res.status, {
-        error: body?.error || `Server returned ${res.status}`
+        error: body?.error || `El servidor respondió ${res.status}`
       });
     }
     return { success: true, rating, comment };

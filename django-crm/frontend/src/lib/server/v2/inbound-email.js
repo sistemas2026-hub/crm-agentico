@@ -111,13 +111,13 @@ function buildBody(allowed, values) {
 /** @param {{ cookies: import('@sveltejs/kit').Cookies }} event */
 export async function createMailbox({ cookies }, values) {
   const body = buildBody(CREATE_FIELDS, values);
-  if (!body.address) throw new Error('A mailbox needs an address.');
+  if (!body.address) throw new Error('Una casilla necesita una dirección.');
   return await apiRequest('/cases/mailboxes/', { method: 'POST', body }, { cookies });
 }
 
 /** @param {{ cookies: import('@sveltejs/kit').Cookies }} event */
 export async function updateMailbox({ cookies }, id, values) {
-  if (!id) throw new Error('Which mailbox? No mailbox id was given.');
+  if (!id) throw new Error('¿Qué casilla? No se indicó un id de casilla.');
   const body = buildBody(UPDATE_FIELDS, values);
   return await apiRequest(`/cases/mailboxes/${id}/`, { method: 'PUT', body }, { cookies });
 }
@@ -132,6 +132,6 @@ export async function updateMailbox({ cookies }, id, values) {
  * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
  */
 export async function deleteMailbox({ cookies }, id) {
-  if (!id) throw new Error('Which mailbox? No mailbox id was given.');
+  if (!id) throw new Error('¿Qué casilla? No se indicó un id de casilla.');
   return await apiRequest(`/cases/mailboxes/${id}/`, { method: 'DELETE' }, { cookies });
 }

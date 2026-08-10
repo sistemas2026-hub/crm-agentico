@@ -71,24 +71,24 @@
     // floor, not the boundary; an empty lead would otherwise save silently
     // and be unfindable in the list a moment later.
     if (!form.first_name.trim() && !form.last_name.trim())
-      e.last_name = 'A lead needs a name to be findable. First or last will do.';
+      e.last_name = 'Un prospecto necesita un nombre para poder encontrarlo. Nombre o apellido alcanza.';
 
     if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email))
-      e.email = 'That does not look like an email address.';
+      e.email = 'Eso no parece una dirección de correo.';
 
     // The exact regex from `flexible_phone_validator`. Extensions like "x123"
     // are rejected by the model, so they are caught here rather than as an
     // opaque whole-form refusal after the save.
     if (form.phone && !/^[\d\s\-()+.]{7,25}$/.test(form.phone))
-      e.phone = '7 to 25 characters: digits, spaces, brackets, dots, dashes. No extensions.';
+      e.phone = 'De 7 a 25 caracteres: números, espacios, paréntesis, puntos, guiones. Sin extensiones.';
 
     // `createLead` runs `Number(amount)` and the body is JSON-encoded, and
     // `JSON.stringify` turns `NaN` into `null`. Without this check, typing
     // "abc" would not error, it would silently save as no value at all.
     if (form.opportunity_amount !== '') {
       const n = Number(form.opportunity_amount);
-      if (!Number.isFinite(n)) e.opportunity_amount = 'Estimated value has to be a number.';
-      else if (n < 0) e.opportunity_amount = 'Estimated value cannot be negative.';
+      if (!Number.isFinite(n)) e.opportunity_amount = 'El valor estimado tiene que ser un número.';
+      else if (n < 0) e.opportunity_amount = 'El valor estimado no puede ser negativo.';
     }
 
     return e;
@@ -125,12 +125,12 @@
   };
 </script>
 
-<PageHeader title="New lead" center>
+<PageHeader title="Nuevo prospecto" center>
   {#snippet crumb()}
-    <a href="/leads">Leads</a> ›
+    <a href="/leads">Prospectos</a> ›
   {/snippet}
   {#snippet sub()}
-    A name and a company is enough to start. The rest can wait.
+    Un nombre y una empresa alcanzan para empezar. El resto puede esperar.
   {/snippet}
 </PageHeader>
 
@@ -144,7 +144,7 @@
       >
         <TriangleAlert size={17} style="color:var(--v2-rust);flex:none" />
         <div class="v2-next-body">
-          <div style="font-weight:600">The server refused this lead</div>
+          <div style="font-weight:600">El servidor rechazó este prospecto</div>
           <div class="v2-sub" style="margin-top:2px">{result.error}</div>
         </div>
       </div>
@@ -159,19 +159,16 @@
         <TriangleAlert size={17} style="color:var(--v2-rust);flex:none" />
         <div class="v2-next-body">
           <div style="font-weight:600">
-            {Object.keys(errors).length} field{Object.keys(errors).length === 1 ? '' : 's'} still need{Object.keys(
-              errors
-            ).length === 1
-              ? 's'
-              : ''} you
+            Todavía {Object.keys(errors).length === 1 ? 'falta' : 'faltan'} {Object.keys(errors).length}
+            {Object.keys(errors).length === 1 ? 'campo' : 'campos'}
           </div>
-          <div class="v2-sub" style="margin-top:2px">Nothing has been saved.</div>
+          <div class="v2-sub" style="margin-top:2px">No se guardó nada.</div>
         </div>
       </div>
     {/if}
 
     <div class="v2-field">
-      <label for="f-first">First name</label>
+      <label for="f-first">Nombre</label>
       <input
         id="f-first"
         name="first_name"
@@ -181,7 +178,7 @@
       />
     </div>
     <div class="v2-field">
-      <label for="f-last">Last name</label>
+      <label for="f-last">Apellido</label>
       <input
         id="f-last"
         name="last_name"
@@ -194,11 +191,11 @@
       {#if show('last_name')}<p class="v2-error" id="e-last">{errors.last_name}</p>{/if}
     </div>
     <div class="v2-field">
-      <label for="f-company">Company</label>
+      <label for="f-company">Empresa</label>
       <input id="f-company" name="company_name" class="v2-input" bind:value={form.company_name} />
     </div>
     <div class="v2-field">
-      <label for="f-email">Email</label>
+      <label for="f-email">Correo</label>
       <input
         id="f-email"
         name="email"
@@ -212,20 +209,20 @@
       {#if show('email')}<p class="v2-error" id="e-email">{errors.email}</p>{/if}
     </div>
     <div class="v2-field">
-      <label for="f-owner">Owner</label>
+      <label for="f-owner">Responsable</label>
       <select id="f-owner" name="assigned_to" class="v2-input" bind:value={form.assigned_to}>
-        <option value="">Unassigned</option>
+        <option value="">Sin asignar</option>
         {#each data.owners as o (o.id)}
           <option value={o.id}>{o.name}</option>
         {/each}
       </select>
     </div>
     <div class="v2-field">
-      <label for="f-jobtitle">Job title</label>
+      <label for="f-jobtitle">Cargo</label>
       <input id="f-jobtitle" name="job_title" class="v2-input" bind:value={form.job_title} />
     </div>
     <div class="v2-field">
-      <label for="f-phone">Phone</label>
+      <label for="f-phone">Teléfono</label>
       <input
         id="f-phone"
         name="phone"
@@ -238,43 +235,43 @@
       {#if show('phone')}<p class="v2-error" id="e-phone">{errors.phone}</p>{/if}
     </div>
     <div class="v2-field">
-      <label for="f-website">Website</label>
+      <label for="f-website">Sitio web</label>
       <input id="f-website" name="website" class="v2-input" bind:value={form.website} />
     </div>
     <div class="v2-field">
-      <label for="f-status">Status</label>
+      <label for="f-status">Estado</label>
       <select id="f-status" name="status" class="v2-input" bind:value={form.status}>
         {#each LEAD_STATUSES.filter((s) => s !== 'converted') as s (s)}
           <option value={s}>{LEAD_STATUS_LABEL[s]}</option>
         {/each}
       </select>
       <p class="v2-hint">
-        Converting is a significant, largely irreversible step: it creates an Account, a Contact and
-        an Opportunity that nothing undoes if the status changes back, and it requires an email
-        address that nothing else here does. Set the status here to something else, and convert once
-        the lead is real.
+        Convertir es un paso importante, en gran parte irreversible: crea una Cuenta, un Contacto y
+        una Negociación que nada deshace si el estado vuelve para atrás, y requiere una dirección de
+        correo que ningún otro campo acá exige. Dejá el estado en otra cosa, y convertí cuando el
+        prospecto sea real.
       </p>
     </div>
     <div class="v2-field">
-      <label for="f-source">Source</label>
+      <label for="f-source">Origen</label>
       <select id="f-source" name="source" class="v2-input" bind:value={form.source}>
-        <option value="">Not specified</option>
+        <option value="">No especificado</option>
         {#each LEAD_SOURCES as s (s)}
           <option value={s}>{LEAD_SOURCE_LABEL[s]}</option>
         {/each}
       </select>
     </div>
     <div class="v2-field">
-      <label for="f-industry">Industry</label>
+      <label for="f-industry">Rubro</label>
       <select id="f-industry" name="industry" class="v2-input" bind:value={form.industry}>
-        <option value="">Not specified</option>
+        <option value="">No especificado</option>
         {#each INDUSTRIES as ind (ind)}
           <option value={ind}>{industryLabel(ind)}</option>
         {/each}
       </select>
     </div>
     <div class="v2-field">
-      <label for="f-amount">Estimated value</label>
+      <label for="f-amount">Valor estimado</label>
       <input
         id="f-amount"
         name="opportunity_amount"
@@ -292,12 +289,12 @@
         <p class="v2-hint" id="h-amount">
           {Number(form.opportunity_amount) > 0
             ? money(Number(form.opportunity_amount), data.org.currency)
-            : 'What the deal would be worth if it lands.'}
+            : 'Cuánto valdría la negociación si se concreta.'}
         </p>
       {/if}
     </div>
     <div class="v2-field">
-      <label for="f-notes">Notes</label>
+      <label for="f-notes">Notas</label>
       <textarea
         id="f-notes"
         name="description"
@@ -307,8 +304,8 @@
     </div>
 
     <div class="actions">
-      <button class="v2-btn v2-btn-primary" type="submit" disabled={busy}>Create lead</button>
-      <a class="v2-btn" href="/leads">Cancel</a>
+      <button class="v2-btn v2-btn-primary" type="submit" disabled={busy}>Crear prospecto</button>
+      <a class="v2-btn" href="/leads">Cancelar</a>
     </div>
   </form>
 </div>

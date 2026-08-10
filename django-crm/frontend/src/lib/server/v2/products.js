@@ -94,7 +94,7 @@ function toProduct(p) {
     description: p.description ?? '',
     price: Number(p.price) || 0,
     currency: p.currency ?? null,
-    category: (p.category && String(p.category).trim()) || 'Uncategorised',
+    category: (p.category && String(p.category).trim()) || 'Sin categoría',
     is_active: !!p.is_active,
     used_on: typeof p.used_on === 'number' ? p.used_on : 0
   };
@@ -167,7 +167,7 @@ export async function getProductForEdit({ cookies }, id) {
       description: p.description,
       price: p.price,
       currency: p.currency,
-      category: p.category === 'Uncategorised' ? '' : p.category,
+      category: p.category === 'Sin categoría' ? '' : p.category,
       is_active: p.is_active,
       used_on: p.used_on
     }

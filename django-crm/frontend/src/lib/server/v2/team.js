@@ -85,7 +85,7 @@ function toMember(p, teamsByProfile, viewerId) {
   return {
     id: p.id,
     user_id: details.id,
-    name: details.name || details.email || 'Unnamed',
+    name: details.name || details.email || 'Sin nombre',
     email: details.email,
     role: p.role,
     is_active: p.is_active,

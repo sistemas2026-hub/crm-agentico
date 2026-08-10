@@ -4,9 +4,11 @@
  * because DRF's content negotiation eats `?format=`.
  */
 
-import { env } from '$env/dynamic/public';
+import { env } from '$env/dynamic/private';
+import { env as publicEnv } from '$env/dynamic/public';
 
-const API_BASE_URL = `${env.PUBLIC_DJANGO_API_URL}/api`;
+// PRIVATE_ over PUBLIC_: this runs server-side (see lib/api-helpers.js).
+const API_BASE_URL = `${env.PRIVATE_DJANGO_API_URL || publicEnv.PUBLIC_DJANGO_API_URL}/api`;
 
 /** @type {import('./$types').RequestHandler} */
 export async function GET({ cookies, request, url }) {

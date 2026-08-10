@@ -36,23 +36,23 @@
   let locked = $derived(data.article.is_published);
 </script>
 
-<PageHeader title="Edit article" record center width="760px">
+<PageHeader title="Editar artículo" record center width="760px">
   {#snippet crumb()}
     <a href="/solutions/{data.article.id}"><ChevronLeft size={13} />{data.article.title}</a>
   {/snippet}
   {#snippet sub()}
-    {data.article.author || 'Unknown author'} · used on
+    {data.article.author || 'Autor desconocido'} · usado en
     <span class="v2-num">{data.article.use_count}</span> tickets
   {/snippet}
   {#snippet actions()}
-    <a class="v2-btn" href="/solutions/{data.article.id}">Cancel</a>
+    <a class="v2-btn" href="/solutions/{data.article.id}">Cancelar</a>
     <button
       class="v2-btn v2-btn-primary"
       type="submit"
       form="article-form"
       disabled={!ready || saving}
     >
-      {saving ? 'Saving…' : 'Save changes'}
+      {saving ? 'Guardando…' : 'Guardar cambios'}
     </button>
   {/snippet}
 </PageHeader>
@@ -80,27 +80,27 @@
 
       {#if data.article.is_published}
         <p class="notice">
-          This article is published. Anything saved here is what customers are shown.
+          Este artículo está publicado. Lo que se guarde acá es lo que ven los clientes.
         </p>
       {/if}
 
       <div class="v2-card" style="padding:18px 20px">
         <label class="f">
-          <span>Title</span>
+          <span>Título</span>
           <input name="title" bind:value={title} />
-          <em>Say the symptom the way a customer would report it, not the fix.</em>
+          <em>Contá el síntoma como lo reportaría un cliente, no la solución.</em>
         </label>
 
         <label class="f" style="margin-top:18px">
-          <span>Answer</span>
+          <span>Respuesta</span>
           <textarea name="description" rows="12" bind:value={description}></textarea>
-          <em>This is pasted into replies as-is.</em>
+          <em>Esto se pega en las respuestas tal cual.</em>
         </label>
       </div>
 
       <div class="v2-card" style="padding:18px 20px;margin-top:14px">
         <label class="f" style="max-width:240px">
-          <span>Review status</span>
+          <span>Estado de revisión</span>
           <select name="status" bind:value={status} disabled={locked}>
             {#each statuses as s (s)}
               <option value={s}>{SOLUTION_STATUS_LABEL[s]}</option>
@@ -108,11 +108,12 @@
           </select>
           <em>
             {#if locked}
-              A published article cannot move back down the workflow. Unpublish it first.
+              Un artículo publicado no puede retroceder en el flujo. Despublicalo primero.
             {:else if !data.canRelease}
-              Approving is an admin's call. It is what lets an article go to customers.
+              Aprobar es decisión de un administrador. Es lo que permite que un artículo llegue a
+              los clientes.
             {:else}
-              Approving does not publish it. That is a separate button on the article.
+              Aprobarlo no lo publica. Eso es un botón aparte en el artículo.
             {/if}
           </em>
         </label>

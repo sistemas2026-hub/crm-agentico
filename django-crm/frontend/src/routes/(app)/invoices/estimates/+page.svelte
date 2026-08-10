@@ -17,7 +17,7 @@
   import EmptyState from '$lib/v2/components/EmptyState.svelte';
   import { enhance } from '$app/forms';
   import { money, count, daysSince } from '$lib/v2/format.js';
-  import { ESTIMATE_STATUS_TONE } from '$lib/v2/enums.js';
+  import { ESTIMATE_STATUS_TONE, ESTIMATE_STATUS_LABEL } from '$lib/v2/enums.js';
   import { Plus, FileText } from '@lucide/svelte';
 
   /** @type {{ data: any, form: any }} */
@@ -32,30 +32,30 @@
     if (!e.valid_until) return null;
     if (!LIVE.includes(e.status)) return null;
     const n = daysSince(e.valid_until);
-    if (n > 0) return { text: `expired ${n}d ago`, urgent: true };
-    if (n === 0) return { text: 'expires today', urgent: true };
-    return { text: `${Math.abs(n)}d left`, urgent: Math.abs(n) <= 7 };
+    if (n > 0) return { text: `venció hace ${n}d`, urgent: true };
+    if (n === 0) return { text: 'vence hoy', urgent: true };
+    return { text: `${Math.abs(n)}d restantes`, urgent: Math.abs(n) <= 7 };
   }
 
   const needsBilling = (e) => e.status === 'Accepted' && !e.converted_invoice;
 </script>
 
-<PageHeader title="Estimates">
+<PageHeader title="Cotizaciones">
   {#snippet sub()}
-    <span class="v2-num">{count(totals.count)}</span> estimates ·
-    <span class="v2-num">{money(totals.awaiting_reply, data.org.currency)}</span> awaiting a reply
+    <span class="v2-num">{count(totals.count)}</span> cotizaciones ·
+    <span class="v2-num">{money(totals.awaiting_reply, data.org.currency)}</span> esperando respuesta
   {/snippet}
   {#snippet actions()}
     <!-- An estimate is raised from a deal, not typed from scratch here. The
          empty state has always said so. Send the button where estimates are
          born rather than to a form this page does not own. -->
-    <a class="v2-btn v2-btn-primary" href="/pipeline"><Plus />New estimate</a>
+    <a class="v2-btn v2-btn-primary" href="/pipeline"><Plus />Nueva cotización</a>
   {/snippet}
 </PageHeader>
 
 {#if page.url.search}
   <p class="v2-sub" style="font-size:11.5px;margin:8px 0 0">
-    These numbers describe the filtered list.
+    Estos números describen la lista filtrada.
   </p>
 {/if}
 
@@ -70,22 +70,22 @@
 <div class="v2-pad" style="padding-top:16px;flex:none">
   <div class="v2-stats">
     <StatCard
-      label="Accepted, not billed"
+      label="Aceptadas, sin facturar"
       value={money(totals.accepted_unconverted, data.org.currency)}
       tone="clay"
-      detail="Agreed and waiting on an invoice"
+      detail="Acordadas y esperando una factura"
     />
     <StatCard
-      label="Awaiting a reply"
+      label="Esperando respuesta"
       value={money(totals.awaiting_reply, data.org.currency)}
       tone="ink"
     />
     <StatCard
-      label="Expiring within 7 days"
+      label="Vencen en 7 días"
       value={count(totals.expiring_within_7d)}
       tone={totals.expiring_within_7d ? 'clay' : 'slate'}
     />
-    <StatCard label="Estimates" value={count(totals.count)} tone="slate" />
+    <StatCard label="Cotizaciones" value={count(totals.count)} tone="slate" />
   </div>
 </div>
 
@@ -93,18 +93,18 @@
   page="estimates"
   url={page.url}
   accounts={data.accounts}
-  meta="Accepted but unbilled first, then most recently sent"
+  meta="Aceptadas sin facturar primero, después las enviadas más recientemente"
 />
 
 <div class="v2-scroll">
   {#if data.estimates.length === 0}
     <EmptyState
-      title="No estimates yet"
-      body="An estimate is a priced proposal you can turn into an invoice once the customer accepts it. Most start from a deal that already has the amount and the account."
+      title="Todavía no hay cotizaciones"
+      body="Una cotización es una propuesta con precio que podés convertir en factura una vez que el cliente la acepta. La mayoría arranca desde una negociación que ya tiene el monto y la cuenta."
     >
       {#snippet icon()}<FileText size={21} />{/snippet}
       {#snippet actions()}
-        <a class="v2-btn v2-btn-primary" href="/pipeline">Start from a deal</a>
+        <a class="v2-btn v2-btn-primary" href="/pipeline">Arrancar desde una negociación</a>
       {/snippet}
     </EmptyState>
   {:else}
@@ -112,12 +112,12 @@
       <table class="v2-table">
         <thead>
           <tr>
-            <th>Estimate</th>
-            <th>Account</th>
-            <th>Status</th>
-            <th>Billed</th>
-            <th class="v2-r">Amount</th>
-            <th class="v2-r">Valid</th>
+            <th>Cotización</th>
+            <th>Cuenta</th>
+            <th>Estado</th>
+            <th>Facturada</th>
+            <th class="v2-r">Monto</th>
+            <th class="v2-r">Vigencia</th>
           </tr>
         </thead>
         <tbody>
@@ -136,7 +136,7 @@
                   <span class="v2-table-secondary" style="display:block">{e.opportunity.name}</span>
                 {/if}
               </td>
-              <td><Pill tone={ESTIMATE_STATUS_TONE[e.status]}>{e.status}</Pill></td>
+              <td><Pill tone={ESTIMATE_STATUS_TONE[e.status]}>{ESTIMATE_STATUS_LABEL[e.status] ?? e.status}</Pill></td>
               <td>
                 {#if e.converted_invoice}
                   <a href="/invoices/{e.converted_invoice.id}" class="v2-num" style="color:inherit">
@@ -149,7 +149,7 @@
                   <form method="POST" action="?/convert" use:enhance>
                     <input type="hidden" name="id" value={e.id} />
                     <button class="v2-btn v2-btn-sm v2-btn-primary" type="submit">
-                      Raise invoice
+                      Generar factura
                     </button>
                   </form>
                 {:else}
@@ -172,7 +172,7 @@
       </table>
     </div>
     <p class="v2-sub v2-pad" style="font-size:12px;padding-bottom:24px">
-      Showing <span class="v2-num">{data.estimates.length}</span> of
+      Mostrando <span class="v2-num">{data.estimates.length}</span> de
       <span class="v2-num">{count(totals.count)}</span>
     </p>
   {/if}

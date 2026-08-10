@@ -20,6 +20,7 @@
   import StatCard from '$lib/v2/components/StatCard.svelte';
   import Avatar from '$lib/v2/components/Avatar.svelte';
   import { count, shortDate } from '$lib/v2/format.js';
+  import { CASE_PRIORITY_LABEL, CASE_TYPE_LABEL } from '$lib/v2/enums.js';
   import { Clock } from '@lucide/svelte';
 
   /** @type {{ data: any }} */
@@ -66,15 +67,15 @@
   let net = $derived(totals.opened - totals.closed);
 </script>
 
-<PageHeader title="Service analytics">
+<PageHeader title="Análisis del servicio">
   {#snippet sub()}
     {#if canView}
-      Last <span class="v2-num">{totals.window_days}</span> days
+      Últimos <span class="v2-num">{totals.window_days}</span> días
       {#if totals.business_hours_applied}
-        · measured in business hours ({totals.calendar_name})
+        · medido en horario laboral ({totals.calendar_name})
       {/if}
     {:else}
-      Service health
+      Salud del servicio
     {/if}
   {/snippet}
 </PageHeader>
@@ -87,35 +88,34 @@
          so a capped card pinned to the left leaves the rest of a wide screen
          empty. margin-inline centres the column. -->
     <div class="v2-card" style="padding:20px 22px;max-width:520px;margin-inline:auto">
-      <strong>This dashboard is for administrators.</strong>
+      <strong>Este panel es para administradores.</strong>
       <p>
-        Opened and closed volume, first-response attainment and the queue breakdown are
-        whole-organisation figures, so they are limited to admins. Your own tickets are on the <a
-          href="/tickets">Tickets</a
-        > tab.
+        El volumen de abiertos y cerrados, el cumplimiento de primera respuesta y el desglose de la
+        cola son cifras de toda la organización, así que están limitadas a administradores. Tus
+        propios tickets están en la pestaña <a href="/tickets">Tickets</a>.
       </p>
     </div>
   </div>
 {:else}
   <div class="v2-pad" style="padding-top:16px;flex:none">
     <div class="v2-stats">
-      <StatCard label="Opened" value={count(totals.opened)} tone="ink" />
-      <StatCard label="Closed" value={count(totals.closed)} tone="moss" />
+      <StatCard label="Abiertos" value={count(totals.opened)} tone="ink" />
+      <StatCard label="Cerrados" value={count(totals.closed)} tone="moss" />
       <StatCard
         label="Backlog"
         value={count(totals.open_now)}
         tone={net > 0 ? 'clay' : 'slate'}
         detail={net > 0
-          ? `Grew by ${net} over the window`
+          ? `Creció ${net} en el período`
           : net < 0
-            ? `Shrank by ${Math.abs(net)} over the window`
-            : 'Level over the window'}
+            ? `Bajó ${Math.abs(net)} en el período`
+            : 'Estable en el período'}
       />
       <StatCard
-        label="Median resolution"
+        label="Resolución mediana"
         value={`${totals.median_resolution_hours}h`}
         tone="slate"
-        detail="Median, not mean. One three-week ticket should not move it"
+        detail="Mediana, no promedio. Un ticket de tres semanas no debería moverla"
       />
     </div>
   </div>
@@ -125,15 +125,15 @@
       <!-- Volume -->
       <div class="v2-card" style="padding:16px 18px 14px;margin-bottom:18px">
         <div style="display:flex;align-items:baseline;gap:14px;margin-bottom:14px">
-          <div class="v2-label">Opened and closed, per day</div>
+          <div class="v2-label">Abiertos y cerrados, por día</div>
           <span class="v2-sub" style="font-size:11.5px;margin-left:auto">
-            <i class="v2-swatch v2-swatch-in"></i>opened
-            <i class="v2-swatch" style="margin-left:10px"></i>closed
+            <i class="v2-swatch v2-swatch-in"></i>abiertos
+            <i class="v2-swatch" style="margin-left:10px"></i>cerrados
           </span>
         </div>
         <div class="v2-cols">
           {#each data.volume as d (d.date)}
-            <div class="v2-col" title="{shortDate(d.date)}, {d.opened} opened, {d.closed} closed">
+            <div class="v2-col" title="{shortDate(d.date)}, {d.opened} abiertos, {d.closed} cerrados">
               <i class="in" style="height:{(d.opened / peak) * 100}%"></i>
               <i class="out" style="height:{(d.closed / peak) * 100}%"></i>
             </div>
@@ -150,10 +150,10 @@
       <div class="v2-split" style="margin-bottom:18px">
         <!-- First response -->
         <div class="v2-card" style="padding:16px 18px">
-          <div class="v2-label" style="margin-bottom:4px">First response, against target</div>
+          <div class="v2-label" style="margin-bottom:4px">Primera respuesta, contra el objetivo</div>
           <p class="v2-sub" style="font-size:11.5px;margin:0 0 14px">
-            Each priority carries its own target from the escalation policy, so each one is scored
-            against its own promise.
+            Cada prioridad tiene su propio objetivo según la política de escalamiento, así que cada
+            una se mide contra su propia promesa.
           </p>
           {#each data.firstResponse as r (r.priority)}
             {@const pct = attainment(r)}
@@ -161,9 +161,9 @@
               <div
                 style="display:flex;align-items:baseline;gap:8px;font-size:12.5px;margin-bottom:5px"
               >
-                <b style="font-weight:600">{r.priority}</b>
+                <b style="font-weight:600">{CASE_PRIORITY_LABEL[r.priority] ?? r.priority}</b>
                 <span class="v2-sub" style="font-size:11.5px">
-                  target {duration(r.target_minutes)} · median {duration(r.median_minutes)}
+                  objetivo {duration(r.target_minutes)} · mediana {duration(r.median_minutes)}
                 </span>
                 <span
                   class="v2-num"
@@ -178,12 +178,12 @@
                 <i style="width:{pct ?? 0}%;background:{barColor(pct)}"></i>
               </div>
               <div class="v2-bar-legend">
-                <span><span class="v2-num">{r.met}</span> in time</span>
+                <span><span class="v2-num">{r.met}</span> a tiempo</span>
                 <span>
                   {#if r.missed}
-                    <span class="v2-num" style="color:var(--v2-rust)">{r.missed}</span> late
+                    <span class="v2-num" style="color:var(--v2-rust)">{r.missed}</span> tarde
                   {:else}
-                    none late
+                    ninguno tarde
                   {/if}
                 </span>
               </div>
@@ -193,9 +193,10 @@
 
         <!-- Mix -->
         <div class="v2-card" style="padding:16px 18px">
-          <div class="v2-label" style="margin-bottom:4px">What the queue is made of</div>
+          <div class="v2-label" style="margin-bottom:4px">De qué está hecha la cola</div>
           <p class="v2-sub" style="font-size:11.5px;margin:0 0 14px">
-            Incidents and problems are work; questions are usually a gap in the knowledge base.
+            Incidentes y problemas son trabajo; las preguntas suelen ser un vacío en la base de
+            conocimiento.
           </p>
           {#each data.byType as t (t.case_type)}
             {@const share = Math.round(
@@ -203,7 +204,7 @@
             )}
             <div style="margin-bottom:13px">
               <div style="display:flex;align-items:baseline;font-size:12.5px;margin-bottom:5px">
-                <span>{t.case_type}</span>
+                <span>{CASE_TYPE_LABEL[t.case_type] ?? t.case_type}</span>
                 <span class="v2-sub v2-num" style="margin-left:auto;font-size:12px">
                   {t.count} · {share}%
                 </span>
@@ -215,25 +216,25 @@
           {#if data.byType.find((t) => t.case_type === 'Question')}
             <p class="v2-sub" style="font-size:11.5px;margin:16px 0 0">
               <a href="/solutions" style="color:inherit">
-                {data.byType.find((t) => t.case_type === 'Question').count} questions in this window
+                {data.byType.find((t) => t.case_type === 'Question').count} preguntas en este período
               </a>.
-              The ones that repeat belong in the knowledge base.
+              Las que se repiten pertenecen a la base de conocimiento.
             </p>
           {/if}
         </div>
       </div>
 
       <!-- Per agent -->
-      <div class="v2-label" style="margin-bottom:10px">Who is carrying it</div>
+      <div class="v2-label" style="margin-bottom:10px">Quién lo está llevando</div>
       <div class="v2-table-wrap">
         <table class="v2-table">
           <thead>
             <tr>
-              <th>Agent</th>
-              <th class="v2-r">Open now</th>
-              <th class="v2-r">Closed this week</th>
-              <th class="v2-r">Median first response</th>
-              <th class="v2-r">Missed target</th>
+              <th>Agente</th>
+              <th class="v2-r">Abiertos ahora</th>
+              <th class="v2-r">Cerrados esta semana</th>
+              <th class="v2-r">Primera respuesta mediana</th>
+              <th class="v2-r">Objetivo incumplido</th>
             </tr>
           </thead>
           <tbody>
@@ -277,13 +278,13 @@
         <Clock size={15} style="color:var(--v2-slate);flex:none;margin-top:2px" />
         <p class="v2-sub" style="font-size:12px;margin:0">
           {#if totals.business_hours_applied}
-            Elapsed time is counted inside {totals.calendar_name}, so evenings, weekends and
-            holidays do not count against a target.
-            <a href="/settings/business-hours" style="color:inherit">Change the calendar</a>.
+            El tiempo transcurrido se cuenta dentro de {totals.calendar_name}, así que las tardes,
+            fines de semana y feriados no cuentan contra un objetivo.
+            <a href="/settings/business-hours" style="color:inherit">Cambiar el calendario</a>.
           {:else}
-            Elapsed time is counted around the clock, no business-hours calendar is set, so
-            evenings and weekends count against a target.
-            <a href="/settings/business-hours" style="color:inherit">Set up a calendar</a>.
+            El tiempo transcurrido se cuenta las 24 horas, no hay un calendario de horario laboral
+            configurado, así que las tardes y fines de semana cuentan contra un objetivo.
+            <a href="/settings/business-hours" style="color:inherit">Configurar un calendario</a>.
           {/if}
         </p>
       </div>

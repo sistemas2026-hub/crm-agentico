@@ -21,7 +21,12 @@
   import Pill from '$lib/v2/components/Pill.svelte';
   import Avatar from '$lib/v2/components/Avatar.svelte';
   import { relativeDays, longDate, shortDate, daysSince } from '$lib/v2/format.js';
-  import { TASK_PRIORITY_TONE, TASK_STATUS_TONE } from '$lib/v2/enums.js';
+  import {
+    TASK_PRIORITY_TONE,
+    TASK_STATUS_TONE,
+    TASK_PRIORITY_LABEL,
+    TASK_STATUS_LABEL
+  } from '$lib/v2/enums.js';
   import { enhance } from '$app/forms';
   import {
     ChevronRight,
@@ -55,14 +60,14 @@
     if (task.is_done) return null;
     if (late) {
       return {
-        label: `${late} ${late === 1 ? 'day' : 'days'} late`,
-        text: `This was due ${longDate(task.due_date)}. Finish it or move the date. Leaving it late does neither.`
+        label: `${late} ${late === 1 ? 'día' : 'días'} de atraso`,
+        text: `Vencía el ${longDate(task.due_date)}. Terminala o movele la fecha. Dejarla atrasada no hace ninguna de las dos.`
       };
     }
     if (!task.due_date) {
       return {
-        label: 'No due date',
-        text: 'Nothing will bring this back to your attention. Give it a date, or close it if it is not really a task.'
+        label: 'Sin fecha límite',
+        text: 'Nada la va a traer de vuelta a tu atención. Poné una fecha, o cerrala si no es realmente una tarea.'
       };
     }
     return null;
@@ -114,7 +119,7 @@
    */
   function metaFor(e) {
     const parts = [];
-    if (e.type === 'file') parts.push('Attached');
+    if (e.type === 'file') parts.push('Adjuntado');
     if (e.by) parts.push(e.by);
     parts.push(relativeDays(e.at));
     return parts.join(' · ');
@@ -123,8 +128,8 @@
   /** @param {string} iso */
   function dayGroup(iso) {
     const n = daysSince(iso);
-    if (n === 0) return 'Today';
-    if (n === 1) return 'Yesterday';
+    if (n === 0) return 'Hoy';
+    if (n === 1) return 'Ayer';
     return shortDate(iso);
   }
 
@@ -156,30 +161,30 @@
         class="done-toggle"
         class:done={task.is_done}
         type="submit"
-        aria-label={task.is_done ? 'Reopen task' : 'Mark task done'}
-        title={task.is_done ? 'Reopen task' : 'Mark done'}
+        aria-label={task.is_done ? 'Reabrir tarea' : 'Marcar tarea como hecha'}
+        title={task.is_done ? 'Reabrir tarea' : 'Marcar como hecha'}
       >
         {#if task.is_done}<CircleCheck size={24} />{:else}<Circle size={24} />{/if}
       </button>
     </form>
   {/snippet}
   {#snippet crumb()}
-    <a href="/tasks">Tasks</a>
+    <a href="/tasks">Tareas</a>
     <ChevronRight size={12} />
-    <span>{task.status}</span>
+    <span>{TASK_STATUS_LABEL[task.status] ?? task.status}</span>
   {/snippet}
   {#snippet sub()}
     {[
-      task.related ? `on ${task.related.name}` : 'not attached to a record',
-      task.due_date ? `due ${relativeDays(task.due_date)}` : 'no due date',
-      task.assigned_names.length ? task.assigned_names.join(', ') : 'nobody assigned'
+      task.related ? `en ${task.related.name}` : 'no vinculada a un registro',
+      task.due_date ? `vence ${relativeDays(task.due_date)}` : 'sin fecha límite',
+      task.assigned_names.length ? task.assigned_names.join(', ') : 'sin asignar'
     ].join(' · ')}
   {/snippet}
   {#snippet actions()}
-    <a class="v2-btn" href="/tasks/{task.id}/edit">Edit</a>
+    <a class="v2-btn" href="/tasks/{task.id}/edit">Editar</a>
     {#if canDelete}
       <form method="POST" action="?/delete" use:enhance>
-        <button class="v2-btn" type="submit">Delete</button>
+        <button class="v2-btn" type="submit">Eliminar</button>
       </form>
     {/if}
   {/snippet}
@@ -202,7 +207,7 @@
         {/if}
 
         {#if task.description}
-          <div class="v2-label" style="margin-bottom:10px">Note</div>
+          <div class="v2-label" style="margin-bottom:10px">Nota</div>
           <article
             class="v2-card"
             style="padding:16px 18px;max-width:70ch;font-size:13.5px;line-height:1.65;white-space:pre-wrap"
@@ -211,21 +216,21 @@
           </article>
         {:else}
           <p class="v2-sub" style="font-size:12.5px;max-width:70ch;margin:0">
-            No note on this task. The title is all anyone else has to go on.
+            Esta tarea no tiene nota. El título es todo lo que tiene cualquier otra persona.
           </p>
         {/if}
 
         <div class="act-head">
-          <div class="v2-label">Activity</div>
+          <div class="v2-label">Actividad</div>
           {#if hasFiles}
             <!-- Only real kinds. There is no status/started/moved split because
                  a Task has no history table to draw one from. -->
-            <div class="seg" role="tablist" aria-label="Filter activity">
-              <button class:on={filter === 'all'} onclick={() => (filter = 'all')}>All</button>
+            <div class="seg" role="tablist" aria-label="Filtrar actividad">
+              <button class:on={filter === 'all'} onclick={() => (filter = 'all')}>Todo</button>
               <button class:on={filter === 'comments'} onclick={() => (filter = 'comments')}
-                >Comments</button
+                >Comentarios</button
               >
-              <button class:on={filter === 'files'} onclick={() => (filter = 'files')}>Files</button
+              <button class:on={filter === 'files'} onclick={() => (filter = 'files')}>Archivos</button
               >
             </div>
           {/if}
@@ -251,27 +256,27 @@
             };
           }}
         >
-          <label class="v2-sr-only" for="comment">Add a comment</label>
+          <label class="v2-sr-only" for="comment">Agregar un comentario</label>
           <textarea
             id="comment"
             name="comment"
             rows="3"
             bind:value={comment}
             class="note-input"
-            placeholder="What happened? Anyone on this task will see it."></textarea>
+            placeholder="¿Qué pasó? Cualquiera en esta tarea lo va a ver."></textarea>
           <div class="note-actions">
             <button class="v2-btn v2-btn-primary" type="submit" disabled={saving || !canSubmit}>
               {saving
-                ? 'Saving…'
+                ? 'Guardando…'
                 : comment.trim()
-                  ? 'Comment'
+                  ? 'Comentar'
                   : fileName
-                    ? 'Attach file'
-                    : 'Comment'}
+                    ? 'Adjuntar archivo'
+                    : 'Comentar'}
             </button>
             <label class="v2-btn" class:has-file={fileName}>
               <Paperclip size={14} />
-              <span class="attach-label">{fileName || 'Attach file'}</span>
+              <span class="attach-label">{fileName || 'Adjuntar archivo'}</span>
               <input
                 bind:this={fileInput}
                 type="file"
@@ -285,7 +290,7 @@
                 type="button"
                 class="v2-btn-quiet clear-file"
                 onclick={clearFile}
-                title="Remove file"
+                title="Quitar archivo"
               >
                 <X size={13} />
               </button>
@@ -319,7 +324,7 @@
             {/if}
           {:else}
             <p class="v2-sub" style="font-size:12.5px">
-              Nothing logged yet. The first comment you add shows up here.
+              Todavía no se registró nada. El primer comentario que agregues aparece acá.
             </p>
           {/each}
         </div>
@@ -328,42 +333,42 @@
   </div>
 
   <aside class="v2-rail">
-    <div class="v2-label v2-rail-head">Task</div>
+    <div class="v2-label v2-rail-head">Tarea</div>
     <dl class="v2-kv">
-      <dt>Status</dt>
-      <dd><Pill tone={TASK_STATUS_TONE[task.status]}>{task.status}</Pill></dd>
-      <dt>Priority</dt>
-      <dd><Pill tone={TASK_PRIORITY_TONE[task.priority]}>{task.priority}</Pill></dd>
-      <dt>Due</dt>
+      <dt>Estado</dt>
+      <dd><Pill tone={TASK_STATUS_TONE[task.status]}>{TASK_STATUS_LABEL[task.status] ?? task.status}</Pill></dd>
+      <dt>Prioridad</dt>
+      <dd><Pill tone={TASK_PRIORITY_TONE[task.priority]}>{TASK_PRIORITY_LABEL[task.priority] ?? task.priority}</Pill></dd>
+      <dt>Vence</dt>
       <dd style={late ? 'color:var(--v2-rust);font-weight:600' : ''}>
         {#if !task.due_date}
-          <span class="v2-muted">not set</span>
+          <span class="v2-muted">sin definir</span>
         {:else if late}
-          {longDate(task.due_date)} · {late}d late
+          {longDate(task.due_date)} · {late}d de atraso
         {:else}
           {longDate(task.due_date)}
         {/if}
       </dd>
-      <dt>Attached to</dt>
+      <dt>Vinculada a</dt>
       <dd>
         {#if task.related}
           <a href={task.related.href}>{task.related.name}</a>
           <span class="v2-sub" style="display:block;font-size:11.5px">{task.related.kind}</span>
         {:else}
-          <span class="v2-muted">nothing</span>
+          <span class="v2-muted">nada</span>
         {/if}
       </dd>
-      <dt>Created</dt>
+      <dt>Creada</dt>
       <dd>{longDate(task.created_at)}</dd>
     </dl>
 
-    <div class="v2-label v2-rail-head">Assigned to</div>
+    <div class="v2-label v2-rail-head">Asignada a</div>
     <!-- A multi-select, not a single one. `assigned_to` is many-to-many and
          the API rewrites the whole list on every save, so a one-owner picker
          would silently drop co-assignees, and the seeded org has tasks with
          two. -->
     <form method="POST" action="?/assign" use:enhance style="padding:0 16px 16px">
-      <label class="v2-sr-only" for="assigned_to">Assigned to</label>
+      <label class="v2-sr-only" for="assigned_to">Asignada a</label>
       <select
         id="assigned_to"
         name="assigned_to"
@@ -378,13 +383,14 @@
         {/each}
       </select>
       <p class="v2-sub" style="font-size:11px;margin:6px 0 8px">
-        Hold ⌘ or Ctrl to pick more than one. Clearing the list leaves the task with nobody on it.
+        Mantené presionado ⌘ o Ctrl para elegir más de uno. Vaciar la lista deja la tarea sin
+        nadie.
       </p>
-      <button class="v2-btn" type="submit">Save</button>
+      <button class="v2-btn" type="submit">Guardar</button>
     </form>
 
     {#if contacts.length}
-      <div class="v2-label v2-rail-head">People</div>
+      <div class="v2-label v2-rail-head">Personas</div>
       <div style="padding:0 16px 16px;display:flex;flex-direction:column;gap:8px">
         {#each contacts as person (person.id)}
           <a

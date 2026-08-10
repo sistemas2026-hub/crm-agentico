@@ -27,8 +27,8 @@ export const actions = {
     const form = await request.formData();
     const email = form.get('email')?.toString().trim();
     const role = form.get('role')?.toString() || 'USER';
-    if (!email) return fail(400, { invite: { error: 'Enter an email address.' } });
-    if (!ROLES.includes(role)) return fail(400, { invite: { error: 'Pick a valid role.' } });
+    if (!email) return fail(400, { invite: { error: 'Ingresá un correo electrónico.' } });
+    if (!ROLES.includes(role)) return fail(400, { invite: { error: 'Elegí un rol válido.' } });
 
     try {
       await inviteUser({ cookies }, { email, role });
@@ -37,8 +37,8 @@ export const actions = {
         invite: {
           error:
             err?.status === 403
-              ? 'Only an admin can invite people.'
-              : readableError(err, 'Could not send that invite.')
+              ? 'Solo un administrador puede invitar personas.'
+              : readableError(err, 'No se pudo enviar esa invitación.')
         }
       });
     }
@@ -56,7 +56,7 @@ export const actions = {
     const userId = form.get('userId')?.toString();
     const role = form.get('role')?.toString();
     if (!userId || !role || !ROLES.includes(role)) {
-      return fail(400, { error: 'Which person, and to what role?' });
+      return fail(400, { error: '¿Qué persona, y a qué rol?' });
     }
     try {
       await setRole({ cookies }, userId, role);
@@ -64,8 +64,8 @@ export const actions = {
       return fail(err?.status === 403 ? 403 : 400, {
         error:
           err?.status === 403
-            ? 'That is not yours to change.'
-            : readableError(err, 'Could not change that role.')
+            ? 'Eso no es tuyo para cambiarlo.'
+            : readableError(err, 'No se pudo cambiar ese rol.')
       });
     }
     return { roleChanged: userId };
@@ -80,7 +80,7 @@ export const actions = {
     const userId = form.get('userId')?.toString();
     const status = form.get('status')?.toString();
     if (!userId || (status !== 'Active' && status !== 'Inactive')) {
-      return fail(400, { error: 'Which person, and active or not?' });
+      return fail(400, { error: '¿Qué persona, y activa o no?' });
     }
     try {
       await setStatus({ cookies }, userId, status);
@@ -88,8 +88,8 @@ export const actions = {
       return fail(err?.status === 403 ? 403 : 400, {
         error:
           err?.status === 403
-            ? 'Only an admin can change who is active.'
-            : readableError(err, 'Could not change that status.')
+            ? 'Solo un administrador puede cambiar quién está activo.'
+            : readableError(err, 'No se pudo cambiar ese estado.')
       });
     }
     return { statusChanged: userId };

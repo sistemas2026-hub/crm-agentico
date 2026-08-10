@@ -34,14 +34,14 @@ export const actions = {
       return fail(400, {
         body,
         internal,
-        error: 'Write something or attach a file before sending.'
+        error: 'Escribí algo o adjuntá un archivo antes de enviar.'
       });
     }
 
     try {
       await replyToTicket({ cookies }, params.id, { body, internal, file });
     } catch (/** @type {any} */ err) {
-      return fail(400, { body, internal, error: readableError(err, 'Could not post this reply.') });
+      return fail(400, { body, internal, error: readableError(err, 'No se pudo publicar esta respuesta.') });
     }
 
     if (status) {
@@ -50,7 +50,7 @@ export const actions = {
       } catch (/** @type {any} */ err) {
         return fail(400, {
           sent: true,
-          error: readableError(err, `Reply posted, but the status stayed put.`)
+          error: readableError(err, `Se publicó la respuesta, pero el estado no cambió.`)
         });
       }
     }
@@ -69,7 +69,7 @@ export const actions = {
   setStatus: async ({ cookies, params, request }) => {
     const form = await request.formData();
     const status = form.get('status')?.toString().trim() ?? '';
-    if (!status) return fail(400, { error: 'No status was chosen.' });
+    if (!status) return fail(400, { error: 'No se eligió ningún estado.' });
 
     /** @type {Record<string, any>} */
     const values = { status };
@@ -78,7 +78,7 @@ export const actions = {
     try {
       await updateTicket({ cookies }, params.id, values);
     } catch (/** @type {any} */ err) {
-      return fail(400, { error: readableError(err, 'Could not change the status.') });
+      return fail(400, { error: readableError(err, 'No se pudo cambiar el estado.') });
     }
 
     return { moved: status };

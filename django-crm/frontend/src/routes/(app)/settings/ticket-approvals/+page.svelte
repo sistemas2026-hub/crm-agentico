@@ -25,7 +25,7 @@
   import SettingsFormPanel from '$lib/v2/components/SettingsFormPanel.svelte';
   import ConfirmAction from '$lib/v2/components/ConfirmAction.svelte';
   import { count } from '$lib/v2/format.js';
-  import { ROLE_LABEL } from '$lib/v2/enums.js';
+  import { ROLE_LABEL, CASE_PRIORITY_LABEL, CASE_TYPE_LABEL } from '$lib/v2/enums.js';
   import { missingOptions, inactiveOptionLabel } from '$lib/v2/pickers.js';
   import { Plus, TriangleAlert, ChevronRight } from '@lucide/svelte';
 
@@ -43,7 +43,7 @@
   // `Profile.role` value (see the module docstring), so it has no entry in
   // that map and would render as `undefined`. Labelled here instead.
   function approverRoleLabel(role) {
-    return role === 'MANAGER' ? 'Manager' : (ROLE_LABEL[role] ?? role);
+    return role === 'MANAGER' ? 'Gerente' : (ROLE_LABEL[role] ?? role);
   }
 
   // `null` when the panel is closed, `'new'` when adding, or the rule object
@@ -78,23 +78,23 @@
   /** What the rule matches, as the sentence a person would say. */
   function matches(r) {
     const parts = [
-      r.match_priority ? `${r.match_priority} priority` : null,
-      r.match_case_type ? r.match_case_type.toLowerCase() : null,
-      r.match_team ? `${r.match_team.name} team` : null
+      r.match_priority ? `prioridad ${CASE_PRIORITY_LABEL[r.match_priority] ?? r.match_priority}` : null,
+      r.match_case_type ? (CASE_TYPE_LABEL[r.match_case_type] ?? r.match_case_type).toLowerCase() : null,
+      r.match_team ? `equipo ${r.match_team.name}` : null
     ].filter(Boolean);
-    return parts.length ? parts.join(' · ') : 'Every ticket';
+    return parts.length ? parts.join(' · ') : 'Todo ticket';
   }
 </script>
 
-<PageHeader title="Approval rules">
+<PageHeader title="Reglas de aprobación">
   {#snippet crumb()}<SettingsCrumb />{/snippet}
   {#snippet sub()}
-    <span class="v2-num">{count(totals.active)}</span> active ·
-    <span class="v2-num">{count(totals.pending)}</span> approvals waiting on them right now
+    <span class="v2-num">{count(totals.active)}</span> activas ·
+    <span class="v2-num">{count(totals.pending)}</span> aprobaciones esperando por ellas ahora mismo
   {/snippet}
   {#snippet actions()}
     {#if data.can_edit && !editing}
-      <button class="v2-btn v2-btn-primary" onclick={openCreate}><Plus />New rule</button>
+      <button class="v2-btn v2-btn-primary" onclick={openCreate}><Plus />Nueva regla</button>
     {/if}
   {/snippet}
 </PageHeader>
@@ -103,10 +103,10 @@
   <div class="v2-pad" style="padding-top:18px;padding-bottom:32px">
     {#if editing}
       <SettingsFormPanel
-        title={editing === 'new' ? 'New rule' : `Edit ${editing.name}`}
+        title={editing === 'new' ? 'Nueva regla' : `Editar ${editing.name}`}
         action={editing === 'new' ? '?/create' : '?/update'}
         error={editing === 'new' ? form?.create?.error : form?.update?.error}
-        submitLabel={editing === 'new' ? 'Add rule' : 'Save rule'}
+        submitLabel={editing === 'new' ? 'Agregar regla' : 'Guardar regla'}
         oncancel={() => (editing = null)}
         ondone={() => (editing = null)}
       >
@@ -116,7 +116,7 @@
           {/if}
 
           <div class="v2-field">
-            <label for="a-name">Name</label>
+            <label for="a-name">Nombre</label>
             <input
               id="a-name"
               class="v2-input"
@@ -128,7 +128,7 @@
           </div>
 
           <div class="v2-field">
-            <label for="a-role">Approver role</label>
+            <label for="a-role">Rol del aprobador</label>
             <select id="a-role" class="v2-input" name="approver_role">
               {#each ['ADMIN', 'MANAGER'] as role (role)}
                 <option
@@ -142,7 +142,7 @@
           </div>
 
           <div class="v2-field v2-sfp-wide">
-            <label for="a-approvers">Named approvers</label>
+            <label for="a-approvers">Aprobadores nombrados</label>
             <select
               id="a-approvers"
               class="v2-input"
@@ -167,50 +167,50 @@
               {/each}
             </select>
             <p class="v2-hint">
-              Named approvers are in addition to the role above. Leave this empty and anyone with
-              that role can clear the approval.
+              Los aprobadores nombrados se suman al rol de arriba. Dejá esto vacío y cualquiera con
+              ese rol puede destrabar la aprobación.
             </p>
             {#if missingApprovers.length}
               <p class="v2-hint">
                 {missingApprovers.length === 1
-                  ? 'One approver is'
-                  : `${missingApprovers.length} approvers are`}
-                no longer active. They stay named until you deselect them, and they cannot clear an approval
-                while their account is off.
+                  ? 'Un aprobador ya no está activo.'
+                  : `${missingApprovers.length} aprobadores ya no están activos.`}
+                Se mantienen nombrados hasta que los desmarques, y no pueden destrabar una aprobación
+                mientras su cuenta esté apagada.
               </p>
             {/if}
           </div>
 
           <div class="v2-field">
-            <label for="a-priority">Priority</label>
+            <label for="a-priority">Prioridad</label>
             <select id="a-priority" class="v2-input" name="match_priority">
-              <option value="" selected={editing === 'new' || !editing.match_priority}>Any</option>
+              <option value="" selected={editing === 'new' || !editing.match_priority}>Cualquiera</option>
               {#each MATCH_PRIORITIES as p (p)}
                 <option value={p} selected={editing !== 'new' && editing.match_priority === p}>
-                  {p}
+                  {CASE_PRIORITY_LABEL[p] ?? p}
                 </option>
               {/each}
             </select>
           </div>
 
           <div class="v2-field">
-            <label for="a-type">Ticket type</label>
+            <label for="a-type">Tipo de ticket</label>
             <select id="a-type" class="v2-input" name="match_case_type">
               <option value="" selected={editing === 'new' || !editing.match_case_type}>
-                Any
+                Cualquiera
               </option>
               {#each MATCH_CASE_TYPES as t (t)}
                 <option value={t} selected={editing !== 'new' && editing.match_case_type === t}>
-                  {t}
+                  {CASE_TYPE_LABEL[t] ?? t}
                 </option>
               {/each}
             </select>
           </div>
 
           <div class="v2-field">
-            <label for="a-team">Team</label>
+            <label for="a-team">Equipo</label>
             <select id="a-team" class="v2-input" name="match_team_id">
-              <option value="" selected={editing === 'new' || !editing.match_team}>Any team</option>
+              <option value="" selected={editing === 'new' || !editing.match_team}>Cualquier equipo</option>
               {#each data.teams as t (t.id)}
                 <option value={t.id} selected={editing !== 'new' && editing.match_team?.id === t.id}>
                   {t.name}
@@ -218,16 +218,16 @@
               {/each}
             </select>
             {#if !data.teams.length}
-              <p class="v2-hint">No teams in this org yet.</p>
+              <p class="v2-hint">Todavía no hay equipos en esta organización.</p>
             {/if}
           </div>
 
           {#if editing === 'new'}
             <div class="v2-field">
-              <label for="a-active">Active</label>
+              <label for="a-active">Activa</label>
               <label style="display:flex;gap:8px;align-items:center;font-weight:400">
                 <input id="a-active" type="checkbox" name="is_active" value="true" checked />
-                Starts gating matching ticket closes as soon as it is saved.
+                Empieza a bloquear los cierres de tickets que coincidan apenas se guarde.
               </label>
             </div>
           {/if}
@@ -252,14 +252,14 @@
       <div class="v2-rule-flag" style="margin-bottom:12px">
         <TriangleAlert size={14} style="color:var(--v2-clay);flex:none" />
         <span>
-          That rule had approval history, so it was turned off instead of deleted. The approvals it
-          already gated have to keep pointing at it. It is still in the list below, marked Off, and
-          gates nothing.
+          Esa regla tenía historial de aprobaciones, así que se apagó en vez de eliminarse. Las
+          aprobaciones que ya bloqueó tienen que seguir apuntando a ella. Sigue en la lista de abajo,
+          marcada Apagada, y no bloquea nada.
         </span>
       </div>
     {/if}
 
-    <div class="v2-label" style="margin-bottom:10px">Rules</div>
+    <div class="v2-label" style="margin-bottom:10px">Reglas</div>
     <div style="display:flex;flex-direction:column;gap:9px">
       {#each rules as r (r.id)}
         <div class="v2-card" style="padding:14px 16px;opacity:{r.is_active ? 1 : 0.62}">
@@ -267,19 +267,19 @@
             <div style="flex:1;min-width:0">
               <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
                 <b style="font-size:13.5px">{r.name}</b>
-                {#if !r.is_active}<Pill tone="slate">Off</Pill>{/if}
-                {#if clearableByNobody(r)}<Pill tone="rust">Nobody can clear</Pill>{/if}
+                {#if !r.is_active}<Pill tone="slate">Apagada</Pill>{/if}
+                {#if clearableByNobody(r)}<Pill tone="rust">Nadie puede destrabarla</Pill>{/if}
               </div>
 
               <div class="v2-sub" style="font-size:12.5px;margin-top:5px;white-space:normal">
-                <b style="font-weight:600;color:var(--v2-ink)">Gates</b>
+                <b style="font-weight:600;color:var(--v2-ink)">Bloquea</b>
                 {matches(r)}
                 <b style="font-weight:600;color:var(--v2-ink)">→</b>
-                cleared by
+                se destraba con
                 {#if r.approvers.length}
-                  {r.approvers.map((a) => a.email).join(' or ')}
+                  {r.approvers.map((a) => a.email).join(' o ')}
                 {:else}
-                  any {r.approver_role.toLowerCase()}
+                  cualquier {approverRoleLabel(r.approver_role).toLowerCase()}
                 {/if}
               </div>
 
@@ -287,9 +287,9 @@
                 <div class="v2-rule-flag">
                   <TriangleAlert size={14} style="color:var(--v2-rust);flex:none" />
                   <span>
-                    This organisation has admins and members. There is no manager role. With no
-                    named approvers, the first ticket this gates cannot be closed by anyone. Name
-                    approvers, or set it to admin.
+                    Esta organización tiene administradores y miembros. No existe el rol de gerente.
+                    Sin aprobadores nombrados, el primer ticket que bloquee esto no lo puede cerrar
+                    nadie. Nombrá aprobadores, o cambiala a administrador.
                   </span>
                 </div>
               {/if}
@@ -302,7 +302,7 @@
                   class="v2-sub"
                   style="font-size:12px;display:inline-flex;align-items:center;gap:2px"
                 >
-                  <span class="v2-num">{count(r.pending_count)}</span> waiting
+                  <span class="v2-num">{count(r.pending_count)}</span> esperando
                   <ChevronRight size={13} />
                 </a>
               {/if}
@@ -311,20 +311,20 @@
             {#if data.can_edit}
               <div style="display:flex;gap:6px;align-items:center;flex:none">
                 <button class="v2-btn v2-btn-sm" type="button" onclick={() => openEdit(r)}>
-                  Edit
+                  Editar
                 </button>
                 {#if r.is_active}
                   <ConfirmAction
                     action="?/deactivate"
-                    label="Turn off"
-                    confirmLabel="Turn off"
-                    explain="Stops gating new ticket closes. It stays in the list, off, until turned back on."
+                    label="Apagar"
+                    confirmLabel="Apagar"
+                    explain="Deja de bloquear cierres de tickets nuevos. Se mantiene en la lista, apagada, hasta que se vuelva a encender."
                     hidden={{ id: r.id }}
                   />
                 {:else}
                   <form method="POST" action="?/activate" use:enhance>
                     <input type="hidden" name="id" value={r.id} />
-                    <button class="v2-btn v2-btn-sm" type="submit">Turn on</button>
+                    <button class="v2-btn v2-btn-sm" type="submit">Encender</button>
                   </form>
                 {/if}
                 <!-- Not "deleted permanently". The backend destroys a rule
@@ -337,11 +337,11 @@
                      actually happened afterwards. -->
                 <ConfirmAction
                   action="?/remove"
-                  label="Delete"
-                  confirmLabel="Delete"
+                  label="Eliminar"
+                  confirmLabel="Eliminar"
                   explain={r.pending_count > 0
-                    ? `${r.pending_count} approvals are waiting on this rule. A rule that has ever gated a close is turned off rather than deleted, because the record has to be kept.`
-                    : 'A rule that has never gated a close is deleted for good. One with any approval history is turned off instead, because the record has to be kept.'}
+                    ? `${r.pending_count} aprobaciones están esperando por esta regla. Una regla que alguna vez bloqueó un cierre se apaga en vez de eliminarse, porque el registro tiene que conservarse.`
+                    : 'Una regla que nunca bloqueó un cierre se elimina para siempre. Una con historial de aprobaciones se apaga en cambio, porque el registro tiene que conservarse.'}
                   hidden={{ id: r.id }}
                 />
               </div>

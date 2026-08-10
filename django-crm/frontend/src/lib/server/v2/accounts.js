@@ -493,10 +493,10 @@ async function fetchDetail(cookies, id) {
     // On the status, not on the wording. Django answers a missing record with
     // "No Account matches the given query.", no "404" in it anywhere.
     if (err?.status === 404) {
-      error(404, 'That account does not exist, or it belongs to another team.');
+      error(404, 'Esa cuenta no existe, o pertenece a otro equipo.');
     }
     if (err?.status === 403) {
-      error(403, 'This account belongs to somebody else. Ask an admin if you need it.');
+      error(403, 'Esta cuenta pertenece a otra persona. Pedile a un administrador si la necesitás.');
     }
     throw err;
   }

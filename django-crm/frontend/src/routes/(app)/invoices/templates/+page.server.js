@@ -27,7 +27,7 @@ export const actions = {
   setDefault: async ({ cookies, request }) => {
     const form = await request.formData();
     const id = form.get('id')?.toString();
-    if (!id) return fail(400, { error: 'Which template? None was given.' });
+    if (!id) return fail(400, { error: '¿Qué plantilla? No se indicó ninguna.' });
 
     try {
       await setDefaultTemplate({ cookies }, id);
@@ -35,8 +35,8 @@ export const actions = {
       return fail(err?.status === 403 ? 403 : 400, {
         error:
           err?.status === 403
-            ? 'Only an administrator can change invoice templates.'
-            : readableError(err, 'Could not change the default template.')
+            ? 'Solo un administrador puede cambiar plantillas de factura.'
+            : readableError(err, 'No se pudo cambiar la plantilla predeterminada.')
       });
     }
     return { defaulted: true };

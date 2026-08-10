@@ -23,7 +23,7 @@ export const actions = {
     try {
       await stopTimer(event, entryId);
     } catch (/** @type {any} */ err) {
-      return fail(400, { error: readableError(err, 'Could not stop the timer.') });
+      return fail(400, { error: readableError(err, 'No se pudo detener el cronómetro.') });
     }
 
     return { stopped: true };

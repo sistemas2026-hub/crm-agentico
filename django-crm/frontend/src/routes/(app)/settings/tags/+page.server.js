@@ -23,10 +23,10 @@ export const actions = {
       await createTag(event, { name });
     } catch (/** @type {any} */ err) {
       if (err?.status === 403) {
-        return fail(403, { create: { name, error: 'Only an admin can create tags.' } });
+        return fail(403, { create: { name, error: 'Solo un administrador puede crear etiquetas.' } });
       }
       return fail(400, {
-        create: { name, error: readableError(err, 'Could not create the tag.') }
+        create: { name, error: readableError(err, 'No se pudo crear la etiqueta.') }
       });
     }
 
@@ -44,16 +44,16 @@ export const actions = {
   async archive(event) {
     const form = await event.request.formData();
     const id = form.get('id')?.toString() ?? '';
-    if (!id) return fail(400, { archive: { error: 'That tag could not be identified.' } });
+    if (!id) return fail(400, { archive: { error: 'No se pudo identificar esa etiqueta.' } });
 
     try {
       await archiveTag(event, id);
     } catch (/** @type {any} */ err) {
       if (err?.status === 403) {
-        return fail(403, { archive: { error: 'Only an admin can turn a tag off.' } });
+        return fail(403, { archive: { error: 'Solo un administrador puede apagar una etiqueta.' } });
       }
       return fail(400, {
-        archive: { error: readableError(err, 'Could not turn that tag off.') }
+        archive: { error: readableError(err, 'No se pudo apagar esa etiqueta.') }
       });
     }
     return { archived: true };
@@ -63,16 +63,16 @@ export const actions = {
   async restore(event) {
     const form = await event.request.formData();
     const id = form.get('id')?.toString() ?? '';
-    if (!id) return fail(400, { restore: { error: 'That tag could not be identified.' } });
+    if (!id) return fail(400, { restore: { error: 'No se pudo identificar esa etiqueta.' } });
 
     try {
       await restoreTag(event, id);
     } catch (/** @type {any} */ err) {
       if (err?.status === 403) {
-        return fail(403, { restore: { error: 'Only an admin can turn a tag back on.' } });
+        return fail(403, { restore: { error: 'Solo un administrador puede volver a encender una etiqueta.' } });
       }
       return fail(400, {
-        restore: { error: readableError(err, 'Could not turn that tag back on.') }
+        restore: { error: readableError(err, 'No se pudo volver a encender esa etiqueta.') }
       });
     }
     return { restored: true };
@@ -90,7 +90,7 @@ export const actions = {
     const id = form.get('id')?.toString() ?? '';
     const into = form.get('into')?.toString() ?? '';
     if (!id || !into) {
-      return fail(400, { merge: { error: 'Those tags could not be identified.' } });
+      return fail(400, { merge: { error: 'No se pudieron identificar esas etiquetas.' } });
     }
 
     let result;
@@ -98,10 +98,10 @@ export const actions = {
       result = await mergeTags(event, id, into);
     } catch (/** @type {any} */ err) {
       if (err?.status === 403) {
-        return fail(403, { merge: { error: 'Only an admin can merge tags.' } });
+        return fail(403, { merge: { error: 'Solo un administrador puede fusionar etiquetas.' } });
       }
       return fail(400, {
-        merge: { error: readableError(err, 'Could not merge those tags.') }
+        merge: { error: readableError(err, 'No se pudieron fusionar esas etiquetas.') }
       });
     }
 

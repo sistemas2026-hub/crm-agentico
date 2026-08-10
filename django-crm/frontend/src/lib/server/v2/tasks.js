@@ -236,7 +236,7 @@ export async function getTask({ cookies }, id) {
     response = await apiRequest(`/tasks/${id}/`, {}, { cookies });
   } catch (/** @type {any} */ err) {
     if (err?.status === 404) {
-      error(404, 'That task does not exist, or it belongs to another team.');
+      error(404, 'Esa tarea no existe, o pertenece a otro equipo.');
     }
     if (err?.status === 403) error(403);
     throw err;
@@ -290,7 +290,7 @@ function buildTaskActivity(response) {
       type: 'file',
       at: a.created_at,
       by: null,
-      body: a.file_name || 'Attachment',
+      body: a.file_name || 'Adjunto',
       href: fileUrl(a.file_path)
     });
   }
@@ -302,7 +302,7 @@ function buildTaskActivity(response) {
       type: 'status',
       at: task.created_at,
       by: null,
-      body: 'Task created'
+      body: 'Tarea creada'
     });
   }
 

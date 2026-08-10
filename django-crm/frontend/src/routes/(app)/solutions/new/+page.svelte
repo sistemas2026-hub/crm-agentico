@@ -62,40 +62,40 @@
    */
   let consequence = $derived.by(() => {
     if (isPublished && status === 'approved')
-      return { tone: 'moss', text: 'Customers can read this, and someone has checked it.' };
+      return { tone: 'moss', text: 'Los clientes pueden leer esto, y alguien ya lo revisó.' };
     if (isPublished)
       return {
         tone: 'clay',
-        text: 'This will be refused: an article has to be approved before it can be published. Set the status to Approved, or leave it internal for now.'
+        text: 'Esto se va a rechazar: un artículo tiene que estar aprobado antes de poder publicarse. Poné el estado en Aprobado, o dejalo interno por ahora.'
       };
     if (status === 'approved')
       return {
         tone: 'clay',
-        text: 'Checked, but nobody outside the team can see it. It will not reach the customer knowledge base until it is published.'
+        text: 'Revisado, pero nadie fuera del equipo puede verlo. No va a llegar a la base de conocimiento del cliente hasta que se publique.'
       };
     return {
       tone: 'slate',
-      text: 'Internal only. Agents can attach it to tickets; customers cannot find it.'
+      text: 'Solo interno. Los agentes pueden adjuntarlo a tickets; los clientes no pueden encontrarlo.'
     };
   });
 </script>
 
-<PageHeader title="New article" center width="760px">
+<PageHeader title="Nuevo artículo" center width="760px">
   {#snippet crumb()}
-    <a href="/solutions"><ChevronLeft size={13} />Knowledge base</a>
+    <a href="/solutions"><ChevronLeft size={13} />Base de conocimiento</a>
   {/snippet}
   {#snippet sub()}
-    Write the answer once, attach it to every ticket that asks
+    Escribí la respuesta una sola vez, adjuntala a cada ticket que la pida
   {/snippet}
   {#snippet actions()}
-    <a class="v2-btn" href="/solutions">Cancel</a>
+    <a class="v2-btn" href="/solutions">Cancelar</a>
     <button
       class="v2-btn v2-btn-primary"
       type="submit"
       form="article-form"
       disabled={!ready || saving}
     >
-      {saving ? 'Saving…' : 'Save article'}
+      {saving ? 'Guardando…' : 'Guardar artículo'}
     </button>
   {/snippet}
 </PageHeader>
@@ -126,63 +126,63 @@
 
       <div class="v2-card" style="padding:18px 20px">
         <label class="f">
-          <span>Title</span>
+          <span>Título</span>
           <input
             name="title"
             bind:value={title}
-            placeholder="Fixing an SSO login loop after an identity provider change"
+            placeholder="Solucionar un loop de inicio de sesión SSO tras un cambio del proveedor de identidad"
           />
           <!-- The title is what an agent scans in a list of forty under time
                pressure, so the guidance is about scanning, not SEO. -->
-          <em>Say the symptom the way a customer would report it, not the fix.</em>
+          <em>Contá el síntoma como lo reportaría un cliente, no la solución.</em>
         </label>
 
         <label class="f" style="margin-top:18px">
-          <span>Answer</span>
+          <span>Respuesta</span>
           <textarea
             name="description"
             rows="9"
             bind:value={description}
-            placeholder="What is happening, why, and the steps that resolve it."></textarea>
+            placeholder="Qué está pasando, por qué, y los pasos que lo resuelven."></textarea>
           <em>
             {#if description.trim().length && description.trim().length <= 20}
-              A few more words: this is the text an agent will paste to a customer.
+              Unas palabras más: este es el texto que un agente le va a pegar a un cliente.
             {:else}
-              This is pasted into replies as-is, so write it to be read by the person with the
-              problem.
+              Esto se pega en las respuestas tal cual, así que escribilo para que lo lea la persona
+              con el problema.
             {/if}
           </em>
         </label>
       </div>
 
       <div class="v2-card" style="padding:18px 20px;margin-top:14px">
-        <div class="v2-label" style="margin-bottom:4px">Review and visibility</div>
+        <div class="v2-label" style="margin-bottom:4px">Revisión y visibilidad</div>
         <p class="lead">
-          These are two separate facts about the article and this form keeps them separate.
+          Son dos datos separados sobre el artículo y este formulario los mantiene separados.
         </p>
 
         <div class="switches">
           <label class="f" style="max-width:220px">
-            <span>Review status</span>
+            <span>Estado de revisión</span>
             <select name="status" bind:value={status}>
               {#each statuses as s (s)}
                 <option value={s}>{SOLUTION_STATUS_LABEL[s]}</option>
               {/each}
             </select>
             {#if !data.canRelease}
-              <em>Approving is an admin's call. It is what lets an article go to customers.</em>
+              <em>Aprobar es decisión de un administrador. Es lo que permite que un artículo llegue a los clientes.</em>
             {/if}
           </label>
 
           {#if data.canRelease}
             <div class="pub">
-              <span class="pub-label">Customer visibility</span>
+              <span class="pub-label">Visibilidad para el cliente</span>
               <div class="seg">
                 <button type="button" class:on={!isPublished} onclick={() => (isPublished = false)}>
-                  <EyeOff size={13} />Internal
+                  <EyeOff size={13} />Interno
                 </button>
                 <button type="button" class:on={isPublished} onclick={() => (isPublished = true)}>
-                  <Eye size={13} />Published
+                  <Eye size={13} />Publicado
                 </button>
               </div>
               <!-- A segmented control cannot post a value on its own. The

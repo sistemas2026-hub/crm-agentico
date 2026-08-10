@@ -42,18 +42,18 @@
   let errors = $derived.by(() => {
     /** @type {Record<string, string>} */
     const e = {};
-    if (!String(form.name).trim()) e.name = 'Give the goal a name you would recognise in a list.';
+    if (!String(form.name).trim()) e.name = 'Ponele a la meta un nombre que reconozcas en una lista.';
 
     const target = Number(form.target_value);
     if (form.target_value === '' || form.target_value === null)
-      e.target_value = 'What is the target?';
+      e.target_value = '¿Cuál es el objetivo?';
     else if (!Number.isFinite(target) || target <= 0)
-      e.target_value = 'Target has to be a number greater than zero.';
+      e.target_value = 'El objetivo tiene que ser un número mayor que cero.';
 
-    if (!form.period_start) e.period_start = 'When does the period start?';
-    if (!form.period_end) e.period_end = 'When does the period end?';
+    if (!form.period_start) e.period_start = '¿Cuándo empieza el período?';
+    if (!form.period_end) e.period_end = '¿Cuándo termina el período?';
     else if (form.period_start && form.period_end <= form.period_start)
-      e.period_end = 'The end has to be after the start.';
+      e.period_end = 'El fin tiene que ser posterior al inicio.';
 
     return e;
   });
@@ -77,18 +77,18 @@
 </script>
 
 {#if !data.can_edit}
-  <PageHeader title="Edit goal">
-    {#snippet crumb()}<a href="/goals">Goals</a> ›{/snippet}
+  <PageHeader title="Editar meta">
+    {#snippet crumb()}<a href="/goals">Metas</a> ›{/snippet}
   </PageHeader>
   <div class="v2-pad" style="padding-top:40px">
     <NextAction
-      label="Admins only"
-      text="Changing goals is limited to admins. Ask an admin on your team to adjust a quota or target."
+      label="Solo administradores"
+      text="Modificar metas está limitado a administradores. Pedile a un administrador de tu equipo que ajuste una cuota o un objetivo."
     />
   </div>
 {:else}
-  <PageHeader title="Edit goal" center>
-    {#snippet crumb()}<a href="/goals">Goals</a> ›{/snippet}
+  <PageHeader title="Editar meta" center>
+    {#snippet crumb()}<a href="/goals">Metas</a> ›{/snippet}
     {#snippet sub()}{data.goal.name}{/snippet}
   </PageHeader>
 
@@ -102,14 +102,14 @@
         >
           <TriangleAlert size={17} style="color:var(--v2-rust);flex:none" />
           <div class="v2-next-body">
-            <div style="font-weight:600">The server refused this change</div>
+            <div style="font-weight:600">El servidor rechazó este cambio</div>
             <div class="v2-sub" style="margin-top:2px">{result.error}</div>
           </div>
         </div>
       {/if}
 
       <div class="v2-field">
-        <label for="f-name">Goal name</label>
+        <label for="f-name">Nombre de la meta</label>
         <input
           id="f-name"
           name="name"
@@ -124,7 +124,7 @@
 
       <div class="v2-pair">
         <div class="v2-field">
-          <label for="f-type">Measured in</label>
+          <label for="f-type">Medido en</label>
           <select id="f-type" name="goal_type" class="v2-input" bind:value={form.goal_type}>
             {#each Object.entries(GOAL_TYPE_LABEL) as [key, label] (key)}
               <option value={key}>{label}</option>
@@ -133,7 +133,7 @@
         </div>
 
         <div class="v2-field">
-          <label for="f-target">Target</label>
+          <label for="f-target">Objetivo</label>
           <input
             id="f-target"
             name="target_value"
@@ -156,7 +156,7 @@
       </div>
 
       <div class="v2-field">
-        <label for="f-period">Period</label>
+        <label for="f-period">Período</label>
         <select id="f-period" name="period_type" class="v2-input" bind:value={form.period_type}>
           {#each Object.entries(PERIOD_TYPE_LABEL) as [key, label] (key)}
             <option value={key}>{label}</option>
@@ -166,7 +166,7 @@
 
       <div class="v2-pair">
         <div class="v2-field">
-          <label for="f-start">Period start</label>
+          <label for="f-start">Inicio del período</label>
           <input
             id="f-start"
             name="period_start"
@@ -180,7 +180,7 @@
         </div>
 
         <div class="v2-field">
-          <label for="f-end">Period end</label>
+          <label for="f-end">Fin del período</label>
           <input
             id="f-end"
             name="period_end"
@@ -196,18 +196,18 @@
 
       <div class="v2-pair">
         <div class="v2-field">
-          <label for="f-owner">Whose goal</label>
+          <label for="f-owner">De quién es la meta</label>
           <select id="f-owner" name="target" class="v2-input" bind:value={form.target}>
-            <option value="org">Whole org</option>
+            <option value="org">Toda la organización</option>
             {#if data.people?.length}
-              <optgroup label="Person">
+              <optgroup label="Persona">
                 {#each data.people as p (p.id)}
                   <option value="profile:{p.id}">{p.name}</option>
                 {/each}
               </optgroup>
             {/if}
             {#if data.teams?.length}
-              <optgroup label="Team">
+              <optgroup label="Equipo">
                 {#each data.teams as t (t.id)}
                   <option value="team:{t.id}">{t.name}</option>
                 {/each}
@@ -217,20 +217,20 @@
         </div>
 
         <div class="v2-field">
-          <label for="f-active">Status</label>
+          <label for="f-active">Estado</label>
           <select id="f-active" name="is_active" class="v2-input" bind:value={form.is_active}>
-            <option value="true">Active. Counts towards totals</option>
-            <option value="false">Paused, kept, but not counted</option>
+            <option value="true">Activa. Cuenta para los totales</option>
+            <option value="false">Pausada, se conserva, pero no cuenta</option>
           </select>
         </div>
       </div>
 
       <div style="display:flex;gap:8px;align-items:center;margin-top:22px">
-        <button class="v2-btn v2-btn-primary" type="submit">Save goal</button>
-        <a class="v2-btn" href="/goals">Cancel</a>
+        <button class="v2-btn v2-btn-primary" type="submit">Guardar meta</button>
+        <a class="v2-btn" href="/goals">Cancelar</a>
         <span class="v2-sub" style="margin-left:auto;font-size:12px">
           <span class="v2-num">{REQUIRED.filter((f) => !errors[f]).length}</span>
-          of <span class="v2-num">{REQUIRED.length}</span> required fields done
+          de <span class="v2-num">{REQUIRED.length}</span> campos obligatorios completos
         </span>
       </div>
     </form>
@@ -246,21 +246,21 @@
           class="v2-btn"
           type="button"
           style="color:var(--v2-rust)"
-          onclick={() => (confirmingDelete = true)}>Delete this goal</button
+          onclick={() => (confirmingDelete = true)}>Eliminar esta meta</button
         >
         <p class="v2-sub" style="font-size:12px;margin-top:8px">
-          A finished goal is usually better paused than deleted. Paused keeps its history. Delete
-          only when it was created by mistake.
+          Una meta terminada normalmente es mejor pausarla que eliminarla. Pausada conserva su
+          historial. Eliminá solo si se creó por error.
         </p>
       {:else}
         <form method="POST" action="?/delete" use:enhance>
           <div style="display:flex;gap:8px;align-items:center">
-            <span class="v2-sub" style="font-size:13px">Delete “{data.goal.name}” for good?</span>
+            <span class="v2-sub" style="font-size:13px">¿Eliminar “{data.goal.name}” definitivamente?</span>
             <button class="v2-btn v2-btn-primary" type="submit" style="background:var(--v2-rust)"
-              >Yes, delete</button
+              >Sí, eliminar</button
             >
             <button class="v2-btn" type="button" onclick={() => (confirmingDelete = false)}
-              >Keep it</button
+              >Conservarla</button
             >
           </div>
         </form>

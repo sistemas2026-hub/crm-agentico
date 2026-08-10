@@ -66,33 +66,33 @@
   });
 </script>
 
-<PageHeader title="Pipeline">
+<PageHeader title="Negociaciones">
   {#snippet sub()}
     <!-- Totals come from the API aggregate, never from the rows on screen.
          Not "open deals": the default view is now the pipeline's own "All
          deals" preset (empty params), which includes closed stages, so a word
          that was only ever true under the old hardcoded ?open=true would lie
          here as soon as somebody switched presets. -->
-    <span class="v2-num">{count(totals.count)}</span> deals ·
+    <span class="v2-num">{count(totals.count)}</span> negociaciones ·
     <span class="v2-num">{money(totals.amount_sum, data.org.currency)}</span> ·
-    <span class="v2-num">{money(totals.weighted_sum, data.org.currency)}</span> weighted ·
-    <span class="v2-num" style="color:var(--v2-rust)">{totals.stalled_count}</span> stalled
+    <span class="v2-num">{money(totals.weighted_sum, data.org.currency)}</span> ponderado ·
+    <span class="v2-num" style="color:var(--v2-rust)">{totals.stalled_count}</span> estancadas
   {/snippet}
   {#snippet actions()}
     {#if view === 'board'}
-      <a class="v2-btn v2-btn-quiet" href={listHref}><List />List</a>
-      <span class="v2-btn" aria-current="true"><Columns3 />Board</span>
+      <a class="v2-btn v2-btn-quiet" href={listHref}><List />Lista</a>
+      <span class="v2-btn" aria-current="true"><Columns3 />Tablero</span>
     {:else}
-      <span class="v2-btn" aria-current="true"><List />List</span>
-      <a class="v2-btn v2-btn-quiet" href={boardHref}><Columns3 />Board</a>
+      <span class="v2-btn" aria-current="true"><List />Lista</span>
+      <a class="v2-btn v2-btn-quiet" href={boardHref}><Columns3 />Tablero</a>
     {/if}
-    <a class="v2-btn v2-btn-primary" href="/pipeline/new"><Plus />New deal</a>
+    <a class="v2-btn v2-btn-primary" href="/pipeline/new"><Plus />Nueva negociación</a>
   {/snippet}
 </PageHeader>
 
 {#if isFiltered}
   <p class="v2-sub" style="font-size:11.5px;margin:8px 0 0">
-    These numbers describe the filtered pipeline.
+    Estos números describen el pipeline filtrado.
   </p>
 {/if}
 
@@ -109,8 +109,8 @@
   onlyFields={data.onlyFields}
   onlyPresets={data.onlyPresets}
   meta={view === 'board'
-    ? 'Open stages only. Open a deal to change its stage'
-    : 'Sorted by value'}
+    ? 'Solo etapas abiertas. Abrí una negociación para cambiar su etapa'
+    : 'Ordenado por valor'}
 />
 
 {#if view === 'board'}
@@ -127,8 +127,8 @@
                  that silently stops. The header count would not match the
                  cards under it and there would be nothing to explain why. -->
             <p class="v2-sub" style="padding:6px 2px;font-size:11.5px">
-              Showing the first <span class="v2-num">{lane.rows.length}</span>. Filter to see the
-              rest.
+              Mostrando las primeras <span class="v2-num">{lane.rows.length}</span>. Filtrá para ver
+              el resto.
             </p>
           {/if}
           {#each lane.rows as d (d.id)}
@@ -150,7 +150,7 @@
               </div>
             </a>
           {:else}
-            <p class="v2-sub" style="padding:10px 2px;font-size:12px">Nothing in this stage.</p>
+            <p class="v2-sub" style="padding:10px 2px;font-size:12px">Nada en esta etapa.</p>
           {/each}
         </div>
       </section>
@@ -159,13 +159,13 @@
 {:else if deals.length === 0}
   <div class="v2-scroll">
     <EmptyState
-      title="No deals here"
-      body="Nothing matches this view. Start a deal from an account you are already talking to, convert a lead that is ready, or clear a filter to see more."
+      title="No hay negociaciones acá"
+      body="Nada coincide con esta vista. Iniciá una negociación desde una cuenta con la que ya estás hablando, convertí un prospecto que esté listo, o limpiá un filtro para ver más."
     >
       {#snippet icon()}<Columns3 size={21} />{/snippet}
       {#snippet actions()}
-        <a class="v2-btn v2-btn-primary" href="/pipeline/new">New deal</a>
-        <a class="v2-btn" href="/leads">Go to leads</a>
+        <a class="v2-btn v2-btn-primary" href="/pipeline/new">Nueva negociación</a>
+        <a class="v2-btn" href="/leads">Ir a prospectos</a>
       {/snippet}
     </EmptyState>
   </div>
@@ -175,13 +175,13 @@
       <table class="v2-table">
         <thead>
           <tr>
-            <th>Deal</th>
-            <th>Stage</th>
-            <th>Health</th>
-            <th class="v2-r">Value</th>
-            <th>Closing</th>
-            <th class="v2-r">In stage</th>
-            <th>Owner</th>
+            <th>Negociación</th>
+            <th>Etapa</th>
+            <th>Salud</th>
+            <th class="v2-r">Valor</th>
+            <th>Cierre</th>
+            <th class="v2-r">En la etapa</th>
+            <th>Responsable</th>
           </tr>
         </thead>
         <tbody>
@@ -218,7 +218,7 @@
       </table>
     </div>
     <p class="v2-sub v2-pad" style="font-size:12px;padding-bottom:24px">
-      Showing <span class="v2-num">{deals.length}</span> of
+      Mostrando <span class="v2-num">{deals.length}</span> de
       <span class="v2-num">{count(totals.count)}</span>
     </p>
   </div>

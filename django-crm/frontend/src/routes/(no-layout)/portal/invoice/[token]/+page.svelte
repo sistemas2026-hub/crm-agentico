@@ -62,11 +62,11 @@
 
   /** "in 5 days" / "today" / "9 days ago". A date alone makes people count. */
   let duePhrase = $derived.by(() => {
-    if (daysToDue === null) return 'on receipt';
-    if (daysToDue === 0) return 'today';
-    if (daysToDue > 0) return `in ${daysToDue} ${daysToDue === 1 ? 'day' : 'days'}`;
+    if (daysToDue === null) return 'al recibirla';
+    if (daysToDue === 0) return 'hoy';
+    if (daysToDue > 0) return `en ${daysToDue} ${daysToDue === 1 ? 'día' : 'días'}`;
     const n = Math.abs(daysToDue);
-    return `${n} ${n === 1 ? 'day' : 'days'} ago`;
+    return `hace ${n} ${n === 1 ? 'día' : 'días'}`;
   });
 
   let addr = $derived(inv.billing_address || {});
@@ -77,7 +77,7 @@
 
 <svelte:head>
   <!-- The number is the thing a customer searches their inbox for. -->
-  <title>{inv.invoice_number} from {inv.org.name}</title>
+  <title>{inv.invoice_number} de {inv.org.name}</title>
 </svelte:head>
 
 <PortalShell>
@@ -87,9 +87,9 @@
     <header class="doc-head">
       <div>
         <div class="from">{inv.org.name}</div>
-        <h1>{inv.invoice_title || 'Invoice'}</h1>
+        <h1>{inv.invoice_title || 'Factura'}</h1>
         <div class="ref">
-          Invoice <span class="v2-num">{inv.invoice_number}</span> · issued
+          Factura <span class="v2-num">{inv.invoice_number}</span> · emitida
           {longDate(inv.issue_date)}
         </div>
       </div>
@@ -100,7 +100,7 @@
         class="v2-btn v2-btn-sm"
         href="/api/public/invoice/{token}/pdf/"
         rel="external"
-        aria-label="Download this invoice as a PDF"
+        aria-label="Descargar esta factura como PDF"
       >
         <Download size={13} />PDF
       </a>
@@ -111,24 +111,24 @@
       {#if state === 'paid'}
         <div class="paid-mark"><CheckCircle2 size={20} /></div>
         <div>
-          <div class="amount-label">Paid in full</div>
+          <div class="amount-label">Pagada en su totalidad</div>
           <div class="amount-sub">
-            Nothing is outstanding on this invoice. It is here for your records.
+            No queda nada pendiente en esta factura. Está acá para tu registro.
           </div>
         </div>
       {:else}
         <div>
-          <div class="amount-label">Amount due</div>
+          <div class="amount-label">Monto adeudado</div>
           <div class="amount-value v2-num">{money(inv.amount_due, inv.currency)}</div>
           <div class="amount-sub">
             {#if state === 'overdue'}
-              Due {longDate(inv.due_date)}, {duePhrase}
+              Vence {longDate(inv.due_date)}, {duePhrase}
             {:else}
-              Due {longDate(inv.due_date)}, {duePhrase}
+              Vence {longDate(inv.due_date)}, {duePhrase}
             {/if}
             {#if state === 'part-paid'}
-              · {money(inv.amount_paid, inv.currency)} of {money(inv.total_amount, inv.currency)} already
-              received
+              · {money(inv.amount_paid, inv.currency)} de {money(inv.total_amount, inv.currency)} ya
+              recibidos
             {/if}
           </div>
         </div>
@@ -139,12 +139,12 @@
       <!-- How to pay. This is the action, in the absence of a payment
            processor, so it gets the weight a button would have had. -->
       <section class="pay">
-        <div class="v2-label">How to pay</div>
+        <div class="v2-label">Cómo pagar</div>
         <p>{inv.terms}</p>
         <dl class="pay-ref">
-          <dt>Reference</dt>
+          <dt>Referencia</dt>
           <dd class="v2-num">{inv.invoice_number}</dd>
-          <dt>Amount</dt>
+          <dt>Monto</dt>
           <dd class="v2-num">{money(inv.amount_due, inv.currency)}</dd>
         </dl>
       </section>
@@ -152,7 +152,7 @@
 
     <!-- Evidence. -->
     <section class="block">
-      <div class="v2-label">Billed to</div>
+      <div class="v2-label">Facturado a</div>
       <div class="addr">
         <div class="addr-name">{inv.client_name}</div>
         {#each addressLines as line, i (i)}
@@ -162,7 +162,7 @@
     </section>
 
     <section class="block">
-      <div class="v2-label">What this covers</div>
+      <div class="v2-label">Qué cubre esto</div>
       <PortalLineItems
         items={inv.line_items}
         currency={inv.currency}
@@ -181,7 +181,7 @@
       <!-- What they have already sent. Without this the page asserts a balance
            with nothing behind it, and the first reply is always "we paid that". -->
       <section class="block">
-        <div class="v2-label">Payments received</div>
+        <div class="v2-label">Pagos recibidos</div>
         <ul class="payments">
           {#each inv.payments as p, i (i)}
             <li>
@@ -191,7 +191,7 @@
           {/each}
           <li class="payments-balance">
             <span class="v2-num">{money(inv.amount_due, inv.currency)}</span>
-            <span class="pay-meta">remaining</span>
+            <span class="pay-meta">restante</span>
           </li>
         </ul>
       </section>
@@ -199,7 +199,7 @@
 
     {#if inv.notes}
       <section class="block">
-        <div class="v2-label">Notes</div>
+        <div class="v2-label">Notas</div>
         <p class="note">{inv.notes}</p>
       </section>
     {/if}
@@ -210,7 +210,7 @@
            words "write to us" opens a message addressed to the person reading
            the page. The org's address is in `footer_text`, put there by
            whoever wrote the template, and that is the one to use. -->
-      <p>Questions about this invoice? Reply to the email it arrived with.</p>
+      <p>¿Preguntas sobre esta factura? Respondé al correo con el que llegó.</p>
       {#if inv.template?.footer_text}
         <p class="foot-org">{inv.template.footer_text}</p>
       {/if}

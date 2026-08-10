@@ -60,7 +60,7 @@ function toRow(deal) {
     name: deal.name ?? '',
     account: {
       id: deal.account?.id ?? null,
-      name: deal.account?.name ?? 'No account'
+      name: deal.account?.name ?? 'Sin cuenta'
     },
     stage: deal.stage,
     amount: num(deal.amount) ?? 0,
@@ -277,7 +277,7 @@ function buildActivity(response) {
       by: null,
       // Deliberately not "moved from X to Y". The previous stage is not
       // recorded anywhere, and inventing it would be inventing history.
-      body: 'Moved into this stage'
+      body: 'Movida a esta etapa'
     });
   }
 
@@ -286,7 +286,7 @@ function buildActivity(response) {
     type: 'stage',
     at: deal.created_at,
     by: deal.created_by?.email ?? null,
-    body: 'Deal created'
+    body: 'Negociación creada'
   });
 
   return events.sort(
@@ -529,10 +529,10 @@ async function fetchDetail(cookies, id) {
   } catch (/** @type {any} */ err) {
     // On the status, not on the wording. See `api-helpers.js`.
     if (err?.status === 404) {
-      error(404, 'That deal does not exist, or it belongs to another team.');
+      error(404, 'Esa negociación no existe, o pertenece a otro equipo.');
     }
     if (err?.status === 403) {
-      error(403, 'This deal belongs to somebody else. Ask an admin if you need it.');
+      error(403, 'Esta negociación pertenece a otra persona. Pedile a un administrador si la necesitás.');
     }
     throw err;
   }

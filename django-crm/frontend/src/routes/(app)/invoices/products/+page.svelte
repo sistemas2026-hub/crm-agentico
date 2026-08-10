@@ -42,14 +42,14 @@
   });
 </script>
 
-<PageHeader title="Products">
+<PageHeader title="Productos">
   {#snippet sub()}
-    <span class="v2-num">{count(totals.active)}</span> sellable ·
-    <span class="v2-num">{count(totals.count - totals.active)}</span> retired
+    <span class="v2-num">{count(totals.active)}</span> vendibles ·
+    <span class="v2-num">{count(totals.count - totals.active)}</span> retirados
   {/snippet}
   {#snippet actions()}
     {#if canManage}
-      <a class="v2-btn v2-btn-primary" href="/invoices/products/new"><Plus />New product</a>
+      <a class="v2-btn v2-btn-primary" href="/invoices/products/new"><Plus />Nuevo producto</a>
     {/if}
   {/snippet}
 </PageHeader>
@@ -60,15 +60,15 @@
   <div class="v2-pad" style="padding-top:18px;padding-bottom:32px">
     {#if data.products.length === 0}
       <EmptyState
-        title="Nothing in the catalogue"
-        body="Add the things you sell and their list prices. Line items on invoices and estimates pick from here, so the price is right without anyone remembering it."
+        title="Todavía no hay nada en el catálogo"
+        body="Agregá lo que vendés y sus precios de lista. Los ítems de facturas y cotizaciones se eligen de acá, así el precio siempre está bien sin que nadie tenga que recordarlo."
       >
         {#snippet icon()}<Package size={21} />{/snippet}
         {#snippet actions()}
           {#if canManage}
-            <a class="v2-btn v2-btn-primary" href="/invoices/products/new">New product</a>
+            <a class="v2-btn v2-btn-primary" href="/invoices/products/new">Nuevo producto</a>
           {:else}
-            <span class="v2-sub" style="font-size:12px">Ask an admin to add products.</span>
+            <span class="v2-sub" style="font-size:12px">Pedile a un administrador que agregue productos.</span>
           {/if}
         {/snippet}
       </EmptyState>
@@ -82,19 +82,19 @@
                 <b>{p.name}</b>
                 <span class="v2-sub" style="font-size:11.5px">
                   <span class="v2-num">{p.sku}</span>
-                  · on <span class="v2-num">{p.used_on}</span>
-                  {p.used_on === 1 ? 'invoice' : 'invoices'}
+                  · en <span class="v2-num">{p.used_on}</span>
+                  {p.used_on === 1 ? 'factura' : 'facturas'}
                 </span>
               </div>
               {#if !p.is_active}
                 <!-- Retired, not gone. Says why it is still listed. -->
-                <Pill tone="slate">Retired</Pill>
+                <Pill tone="slate">Retirado</Pill>
               {/if}
               <span class="v2-num" style="font-weight:600;font-size:13px">
                 {money(p.price, p.currency)}
               </span>
               {#if canManage}
-                <a class="prod-edit" href="/invoices/products/{p.id}/edit" title="Edit {p.name}">
+                <a class="prod-edit" href="/invoices/products/{p.id}/edit" title="Editar {p.name}">
                   <Pencil size={14} />
                 </a>
               {/if}
@@ -104,8 +104,8 @@
       {/each}
 
       <p class="v2-sub" style="font-size:11.5px">
-        Retired products stay listed because they appear on invoices already issued. Removing one
-        would change what those invoices say was sold.
+        Los productos retirados siguen listados porque aparecen en facturas ya emitidas. Eliminar uno
+        cambiaría lo que esas facturas dicen que se vendió.
       </p>
     {/if}
   </div>

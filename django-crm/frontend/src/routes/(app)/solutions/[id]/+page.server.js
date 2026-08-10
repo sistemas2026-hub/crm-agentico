@@ -24,12 +24,12 @@ export const actions = {
   setStatus: async ({ cookies, params, request }) => {
     const form = await request.formData();
     const status = form.get('status')?.toString() ?? '';
-    if (!status) return fail(400, { error: 'No status to set.' });
+    if (!status) return fail(400, { error: 'No hay estado para asignar.' });
 
     try {
       await updateArticle({ cookies }, params.id, { status });
     } catch (/** @type {any} */ err) {
-      return fail(400, { error: readableError(err, 'Could not change the status.') });
+      return fail(400, { error: readableError(err, 'No se pudo cambiar el estado.') });
     }
     return { status };
   },
@@ -51,7 +51,7 @@ export const actions = {
       return fail(400, {
         error: readableError(
           err,
-          published ? 'Could not publish this article.' : 'Could not unpublish this article.'
+          published ? 'No se pudo publicar este artículo.' : 'No se pudo despublicar este artículo.'
         )
       });
     }

@@ -22,8 +22,8 @@
      to the literal, so an org with no terminology sees exactly what it saw
      before. The values are tenant text and render as plain text. */
   let terms = $derived(data.org?.terminology);
-  let plural = $derived(t(terms, 'lead.plural', 'Leads'));
-  let singular = $derived(t(terms, 'lead.singular', 'lead'));
+  let plural = $derived(t(terms, 'lead.plural', 'Prospectos'));
+  let singular = $derived(t(terms, 'lead.singular', 'prospecto'));
 
   /**
    * The same rule the API counts with, so the highlighted rows and the
@@ -37,15 +37,15 @@
 
 <PageHeader title={plural}>
   {#snippet sub()}
-    <span class="v2-num">{count(totals.count)}</span> open ·
-    <span class="v2-num">{totals.unworked_over_a_week}</span> unworked for more than a week
+    <span class="v2-num">{count(totals.count)}</span> abiertos ·
+    <span class="v2-num">{totals.unworked_over_a_week}</span> sin trabajar hace más de una semana
   {/snippet}
   {#snippet actions()}
     <!-- Import stays unwired: /api/leads/import/ does not exist yet. Contacts
          and cases both have import/preview/ and import/commit/; leads does not.
          Tracked in the phase 2 plan. -->
-    <button class="v2-btn"><Upload />Import</button>
-    <a class="v2-btn v2-btn-primary" href="/leads/new"><Plus />New {singular}</a>
+    <button class="v2-btn"><Upload />Importar</button>
+    <a class="v2-btn v2-btn-primary" href="/leads/new"><Plus />Nuevo {singular}</a>
   {/snippet}
 </PageHeader>
 
@@ -55,19 +55,19 @@
   people={data.people}
   tags={data.tags}
   meId={data.meId}
-  meta="Least recently touched first"
+  meta="Menos recientemente contactados primero"
 />
 
 <div class="v2-scroll">
   {#if leads.length === 0}
     <EmptyState
-      title="No {plural.toLowerCase()} yet"
-      body="A lead is somebody who might buy, before you know enough to call it a deal. Import a list, or add the last person who emailed you."
+      title="Todavía no hay {plural.toLowerCase()}"
+      body="Un prospecto es alguien que podría comprar, antes de saber lo suficiente como para llamarlo negociación. Importá una lista, o agregá a la última persona que te escribió."
     >
       {#snippet icon()}<Target size={21} />{/snippet}
       {#snippet actions()}
-        <a class="v2-btn v2-btn-primary" href="/leads/new">New {singular}</a>
-        <button class="v2-btn">Import</button>
+        <a class="v2-btn v2-btn-primary" href="/leads/new">Nuevo {singular}</a>
+        <button class="v2-btn">Importar</button>
       {/snippet}
     </EmptyState>
   {:else}
@@ -75,13 +75,13 @@
       <table class="v2-table">
         <thead>
           <tr>
-            <th>Lead</th>
-            <th>Company</th>
-            <th>Status</th>
-            <th>Source</th>
-            <th class="v2-r">Est. value</th>
-            <th>Last touch</th>
-            <th>Owner</th>
+            <th>Prospecto</th>
+            <th>Empresa</th>
+            <th>Estado</th>
+            <th>Origen</th>
+            <th class="v2-r">Valor est.</th>
+            <th>Último contacto</th>
+            <th>Responsable</th>
           </tr>
         </thead>
         <tbody>
@@ -114,11 +114,11 @@
                 {#if l.last_contacted}
                   {relativeDays(l.last_contacted)}
                 {:else}
-                  <div>Not contacted</div>
+                  <div>Sin contactar</div>
                   <!-- Stacked, matching the Company cell. Inline, these two ran
                        together into "Not contactedadded 64 days ago". -->
                   <div class="v2-table-secondary" data-m="hide">
-                    added {relativeDays(l.created_at)}
+                    agregado {relativeDays(l.created_at)}
                   </div>
                 {/if}
               </td>
@@ -129,7 +129,7 @@
       </table>
     </div>
     <p class="v2-sub v2-pad" style="font-size:12px;padding-bottom:24px">
-      Showing <span class="v2-num">{leads.length}</span> of
+      Mostrando <span class="v2-num">{leads.length}</span> de
       <span class="v2-num">{count(totals.count)}</span>
     </p>
   {/if}

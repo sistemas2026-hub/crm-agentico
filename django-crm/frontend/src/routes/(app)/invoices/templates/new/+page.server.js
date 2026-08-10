@@ -51,8 +51,8 @@ export const actions = {
         values,
         error:
           err?.status === 403
-            ? 'Only an admin can create an invoice template.'
-            : readableError(err, 'Could not create the template.')
+            ? 'Solo un administrador puede crear una plantilla de factura.'
+            : readableError(err, 'No se pudo crear la plantilla.')
       });
     }
 

@@ -255,7 +255,7 @@ function buildContactActivity(response) {
       type: 'file',
       at: a.created_at,
       by: null,
-      body: a.file_name || 'Attachment',
+      body: a.file_name || 'Adjunto',
       href: fileUrl(a.file_path)
     });
   }
@@ -267,7 +267,7 @@ function buildContactActivity(response) {
       type: 'status',
       at: contact.created_at,
       by: null,
-      body: 'Contact added'
+      body: 'Contacto agregado'
     });
   }
 
@@ -512,10 +512,10 @@ async function fetchDetail(cookies, id) {
     // On the status, not on the wording. Django answers a missing record with
     // "No Contact matches the given query.", no "404" in it anywhere.
     if (err?.status === 404) {
-      error(404, 'That contact does not exist, or they belong to another team.');
+      error(404, 'Ese contacto no existe, o pertenece a otro equipo.');
     }
     if (err?.status === 403) {
-      error(403, 'This contact belongs to somebody else. Ask an admin if you need them.');
+      error(403, 'Este contacto pertenece a otra persona. Pedile a un administrador si lo necesitás.');
     }
     throw err;
   }

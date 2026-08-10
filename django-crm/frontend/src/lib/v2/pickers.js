@@ -62,5 +62,5 @@ export function missingOption(options, stored) {
  * @returns {string}
  */
 export function inactiveOptionLabel(name) {
-  return `${name || 'Unnamed'} (no longer active)`;
+  return `${name || 'Sin nombre'} (ya no está activo)`;
 }

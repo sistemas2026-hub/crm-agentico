@@ -111,7 +111,7 @@ function toRow(row) {
 function toLineItem(item) {
   return {
     id: item.id,
-    name: item.name || item.product_name || 'Item',
+    name: item.name || item.product_name || 'Ítem',
     detail: item.description ?? '',
     quantity: num(item.quantity),
     rate: num(item.unit_price),
@@ -217,7 +217,7 @@ export async function getInvoice({ cookies }, id) {
     response = await apiRequest(`/invoices/${id}/`, {}, { cookies });
   } catch (/** @type {any} */ err) {
     if (err?.status === 404 || err?.status === 403) {
-      error(404, 'That invoice does not exist, or it belongs to another team.');
+      error(404, 'Esa factura no existe, o pertenece a otro equipo.');
     }
     throw err;
   }

@@ -44,10 +44,10 @@ export const actions = {
     } catch (/** @type {any} */ err) {
       if (err?.status === 403) {
         return fail(403, {
-          create: { error: 'Only an admin can create a macro shared with everyone.' }
+          create: { error: 'Solo un administrador puede crear una macro compartida con todos.' }
         });
       }
-      return fail(400, { create: { error: readableError(err, 'Could not add the macro.') } });
+      return fail(400, { create: { error: readableError(err, 'No se pudo agregar la macro.') } });
     }
     return { created: true };
   },
@@ -61,15 +61,15 @@ export const actions = {
     } catch (/** @type {any} */ err) {
       if (err?.status === 403) {
         return fail(403, {
-          update: { error: 'Only an admin can change a macro shared with everyone.' }
+          update: { error: 'Solo un administrador puede cambiar una macro compartida con todos.' }
         });
       }
       if (err?.status === 404) {
         // A personal macro belonging to someone else answers 404 on purpose:
         // a 403 would confirm the row exists. Say the same thing back.
-        return fail(404, { update: { error: 'That macro is not yours to change.' } });
+        return fail(404, { update: { error: 'Esa macro no es tuya para cambiarla.' } });
       }
-      return fail(400, { update: { error: readableError(err, 'Could not save the macro.') } });
+      return fail(400, { update: { error: readableError(err, 'No se pudo guardar la macro.') } });
     }
     return { updated: true };
   },
@@ -82,15 +82,15 @@ export const actions = {
     } catch (/** @type {any} */ err) {
       if (err?.status === 403) {
         return fail(403, {
-          delete: { error: 'Only an admin can remove a macro shared with everyone.' }
+          delete: { error: 'Solo un administrador puede quitar una macro compartida con todos.' }
         });
       }
       if (err?.status === 404) {
         // Same reasoning as `update`: the row not being yours reads the same
         // as the row not existing, on purpose.
-        return fail(404, { delete: { error: 'That macro is not yours to remove.' } });
+        return fail(404, { delete: { error: 'Esa macro no es tuya para quitarla.' } });
       }
-      return fail(400, { delete: { error: readableError(err, 'Could not remove the macro.') } });
+      return fail(400, { delete: { error: readableError(err, 'No se pudo quitar la macro.') } });
     }
     return { deleted: true };
   },
@@ -111,15 +111,15 @@ export const actions = {
     } catch (/** @type {any} */ err) {
       if (err?.status === 403) {
         return fail(403, {
-          activate: { error: 'Only an admin can turn on a macro shared with everyone.' }
+          activate: { error: 'Solo un administrador puede encender una macro compartida con todos.' }
         });
       }
       if (err?.status === 404) {
         // Same reasoning as `update`/`delete`: the row not being yours reads
         // the same as the row not existing, on purpose.
-        return fail(404, { activate: { error: 'That macro is not yours to turn on.' } });
+        return fail(404, { activate: { error: 'Esa macro no es tuya para encenderla.' } });
       }
-      return fail(400, { activate: { error: readableError(err, 'Could not turn the macro on.') } });
+      return fail(400, { activate: { error: readableError(err, 'No se pudo encender la macro.') } });
     }
     return { activated: true };
   }

@@ -17,7 +17,7 @@ export async function load(event) {
     return await getGoalForEdit(event, event.params.id);
   } catch (/** @type {any} */ err) {
     if (err?.status === 404) {
-      error(404, 'That goal does not exist, or it belongs to another org.');
+      error(404, 'Esa meta no existe, o pertenece a otra organización.');
     }
     throw err;
   }
@@ -41,11 +41,11 @@ export const actions = {
       await updateGoal(event, event.params.id, values);
     } catch (/** @type {any} */ err) {
       if (err?.status === 403) {
-        return fail(403, { values, error: 'Only an admin can change goals.' });
+        return fail(403, { values, error: 'Solo un administrador puede cambiar metas.' });
       }
       return fail(400, {
         values,
-        error: readableError(err, 'Could not save this goal.')
+        error: readableError(err, 'No se pudo guardar esta meta.')
       });
     }
 
@@ -57,11 +57,11 @@ export const actions = {
       await deleteGoal(event, event.params.id);
     } catch (/** @type {any} */ err) {
       if (err?.status === 403) {
-        return fail(403, { error: 'Only an admin can delete goals.' });
+        return fail(403, { error: 'Solo un administrador puede eliminar metas.' });
       }
       // Already gone is the outcome the caller wanted; treat 404 as done.
       if (err?.status === 404) redirect(303, '/goals');
-      return fail(400, { error: readableError(err, 'Could not delete this goal.') });
+      return fail(400, { error: readableError(err, 'No se pudo eliminar esta meta.') });
     }
 
     redirect(303, '/goals');

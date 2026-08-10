@@ -207,12 +207,12 @@ export const UPDATE_FIELDS = [
  */
 export async function createInvoiceTemplate({ cookies }, values, logoFile = null) {
   const name = (values.name ?? '').toString().trim();
-  if (!name) throw new Error('Give the template a name.');
+  if (!name) throw new Error('Ponele un nombre a la plantilla.');
 
   for (const key of ['primary_color', 'secondary_color']) {
     const colour = values[key];
     if (colour !== undefined && colour !== '' && !HEX_COLOR.test(String(colour))) {
-      throw new Error('Colours must be a six digit hex value, for example #3B82F6.');
+      throw new Error('Los colores tienen que ser un valor hexadecimal de seis dígitos, por ejemplo #3B82F6.');
     }
   }
 
@@ -305,12 +305,12 @@ export async function getInvoiceTemplateForEdit({ cookies }, id) {
  */
 export async function updateInvoiceTemplate({ cookies }, id, values, logoFile = null) {
   const name = (values.name ?? '').toString().trim();
-  if (!name) throw new Error('Give the template a name.');
+  if (!name) throw new Error('Ponele un nombre a la plantilla.');
 
   for (const key of ['primary_color', 'secondary_color']) {
     const colour = values[key];
     if (colour !== undefined && colour !== '' && !HEX_COLOR.test(String(colour))) {
-      throw new Error('Colours must be a six digit hex value, for example #3B82F6.');
+      throw new Error('Los colores tienen que ser un valor hexadecimal de seis dígitos, por ejemplo #3B82F6.');
     }
   }
 

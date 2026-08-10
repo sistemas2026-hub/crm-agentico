@@ -15,16 +15,18 @@ import { redirect } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { env as publicEnv } from '$env/dynamic/public';
 
+// PRIVATE_ over PUBLIC_: this runs server-side (see lib/api-helpers.js).
+
 /** @type {import('@sveltejs/kit').ServerLoad} */
 export async function load({ url, cookies }) {
   const token = url.searchParams.get('token');
 
   if (!token) {
-    return { error: 'Missing verification token.' };
+    return { error: 'Falta el token de verificación.' };
   }
 
   try {
-    const apiUrl = publicEnv.PUBLIC_DJANGO_API_URL;
+    const apiUrl = env.PRIVATE_DJANGO_API_URL || publicEnv.PUBLIC_DJANGO_API_URL;
     const response = await axios.post(
       `${apiUrl}/api/auth/magic-link/verify/`,
       { token },
@@ -53,7 +55,7 @@ export async function load({ url, cookies }) {
       maxAge: 60 * 60 * 24 * 365 // 1 year
     });
   } catch (error) {
-    const errorMessage = error.response?.data?.error || 'Verification failed';
+    const errorMessage = error.response?.data?.error || 'Falló la verificación';
     return { error: errorMessage };
   }
 

@@ -40,37 +40,37 @@
       fact on this page: a stalled deal, or an invoice past its due date. */
   let headline = $derived(
     stalled.length && pastDue.length
-      ? `${stalled[0].name} is stalled and ${pastDue[0].invoice_number} is past due, same account, two problems.`
+      ? `${stalled[0].name} está estancada y ${pastDue[0].invoice_number} está vencida, misma cuenta, dos problemas.`
       : stalled.length
-        ? `${stalled[0].name} has not moved in ${stalled[0].days_in_current_stage} days.`
+        ? `${stalled[0].name} no se mueve hace ${stalled[0].days_in_current_stage} días.`
         : pastDue.length
-          ? `${pastDue[0].invoice_number} is past due, ${money(pastDue[0].amount_due, pastDue[0].currency)}.`
+          ? `${pastDue[0].invoice_number} está vencida, ${money(pastDue[0].amount_due, pastDue[0].currency)}.`
           : null
   );
 </script>
 
 <PageHeader title={account.name} record>
   {#snippet crumb()}
-    <a href="/accounts">Accounts</a>
+    <a href="/accounts">Cuentas</a>
     <ChevronRight size={12} />
-    <span>{account.industry || 'No industry'}</span>
+    <span>{account.industry || 'Sin rubro'}</span>
   {/snippet}
   {#snippet sub()}
     {[
       account.industry,
-      account.number_of_employees ? `${account.number_of_employees} staff` : null,
+      account.number_of_employees ? `${account.number_of_employees} empleados` : null,
       /* Derived: the close date of the first deal won here. There is no
          contract model, so this is what "customer since" can honestly mean. */
       account.first_won_on
-        ? `customer since ${longDate(account.first_won_on)}`
-        : 'No deals won yet',
-      owners.length ? `owned by ${owners[0]}` : null
+        ? `cliente desde ${longDate(account.first_won_on)}`
+        : 'Todavía sin negociaciones ganadas',
+      owners.length ? `a cargo de ${owners[0]}` : null
     ]
       .filter(Boolean)
       .join(' · ')}
   {/snippet}
   {#snippet actions()}
-    <a class="v2-btn" href="/accounts/{account.id}/edit">Edit</a>
+    <a class="v2-btn" href="/accounts/{account.id}/edit">Editar</a>
   {/snippet}
 </PageHeader>
 
@@ -78,33 +78,33 @@
   <div class="v2-pad" style="padding-bottom:32px">
     <div class="v2-stats" style="margin-bottom:16px">
       <StatCard
-        label="Revenue won"
+        label="Ingresos ganados"
         value={account.won_amount ? money(account.won_amount, data.org.currency) : '—'}
         tone={account.won_amount ? 'moss' : 'slate'}
         detail={account.won_count
-          ? `${account.won_count} deal${account.won_count === 1 ? '' : 's'} won`
-          : 'Nothing won yet'}
+          ? `${account.won_count} negociación${account.won_count === 1 ? '' : 'es'} ganada${account.won_count === 1 ? '' : 's'}`
+          : 'Todavía nada ganado'}
       />
       <StatCard
-        label="Open pipeline"
+        label="Pipeline abierto"
         value={account.open_pipeline ? money(account.open_pipeline, data.org.currency) : '—'}
         detail={account.open_deal_count
-          ? `${account.open_deal_count} open deal${account.open_deal_count === 1 ? '' : 's'}`
-          : 'No open deals'}
+          ? `${account.open_deal_count} negociación${account.open_deal_count === 1 ? '' : 'es'} abierta${account.open_deal_count === 1 ? '' : 's'}`
+          : 'Sin negociaciones abiertas'}
       />
       <StatCard
-        label="Past due"
+        label="Vencido"
         value={account.overdue_amount ? money(account.overdue_amount, data.org.currency) : '—'}
         tone={account.overdue_amount ? 'rust' : 'slate'}
         detail={pastDue.length
           ? pastDue.map((/** @type {any} */ i) => i.invoice_number).join(', ')
-          : 'Nothing past due'}
+          : 'Nada vencido'}
       />
       <StatCard
-        label="Open tickets"
+        label="Tickets abiertos"
         value={String(account.open_tickets ?? 0)}
         tone={tickets.some((/** @type {any} */ t) => t.priority === 'Urgent') ? 'rust' : 'slate'}
-        detail={tickets.length ? `${tickets[0].name} · ${tickets[0].priority}` : 'None open'}
+        detail={tickets.length ? `${tickets[0].name} · ${tickets[0].priority}` : 'Ninguno abierto'}
       />
     </div>
 
@@ -123,9 +123,9 @@
           own. It comes back when invoices is.
         -->
         <NextAction
-          label="Needs you"
+          label="Te necesita"
           text={headline}
-          action={stalled.length ? 'Open the deal' : null}
+          action={stalled.length ? 'Abrir la negociación' : null}
           href={stalled.length ? `/pipeline/${stalled[0].id}` : null}
           tone="rust"
         />
@@ -142,8 +142,8 @@
       <!-- Deals -->
       <section class="v2-card" style="overflow:hidden">
         <div class="v2-card-head">
-          <span class="v2-label">Deals</span>
-          <a href="/pipeline">View all</a>
+          <span class="v2-label">Negociaciones</span>
+          <a href="/pipeline">Ver todas</a>
         </div>
         {#each deals as d (d.id)}
           <a
@@ -158,8 +158,8 @@
               <div class="v2-sub" style="font-size:11.5px">
                 {STAGE_LABEL[d.stage]}{d.closed_on
                   ? d.stage.startsWith('CLOSED_')
-                    ? ` · closed ${shortDate(d.closed_on)}`
-                    : ` · due ${shortDate(d.closed_on)}`
+                    ? ` · cerrada ${shortDate(d.closed_on)}`
+                    : ` · vence ${shortDate(d.closed_on)}`
                   : ''}
               </div>
             </div>
@@ -172,7 +172,7 @@
           </a>
         {:else}
           <p class="v2-sub" style="padding:14px 15px;font-size:12.5px">
-            No deals yet. Create one when there is something real to sell.
+            Todavía sin negociaciones. Creá una cuando haya algo real para vender.
           </p>
         {/each}
       </section>
@@ -180,8 +180,8 @@
       <!-- People -->
       <section class="v2-card" style="overflow:hidden">
         <div class="v2-card-head">
-          <span class="v2-label">People</span>
-          <a href="/contacts">View all</a>
+          <span class="v2-label">Personas</span>
+          <a href="/contacts">Ver todas</a>
         </div>
         {#each contacts as c (c.id)}
           <div
@@ -199,24 +199,24 @@
               <!-- title and department. The mock showed a "relationship"
                    (Champion / Blocker); Contact has no such field. -->
               <div class="v2-sub" style="font-size:11.5px">
-                {[c.title, c.department].filter(Boolean).join(' · ') || 'No title recorded'}
+                {[c.title, c.department].filter(Boolean).join(' · ') || 'Sin cargo registrado'}
               </div>
             </a>
             {#if c.email}
-              <a class="v2-btn v2-btn-sm" href="mailto:{c.email}" aria-label="Email {c.first_name}">
+              <a class="v2-btn v2-btn-sm" href="mailto:{c.email}" aria-label="Enviar correo a {c.first_name}">
                 <Mail size={13} />
               </a>
             {/if}
             {#if c.phone && !c.do_not_call}
-              <a class="v2-btn v2-btn-sm" href="tel:{c.phone}" aria-label="Call {c.first_name}">
+              <a class="v2-btn v2-btn-sm" href="tel:{c.phone}" aria-label="Llamar a {c.first_name}">
                 <Phone size={13} />
               </a>
             {/if}
           </div>
         {:else}
           <p class="v2-sub" style="padding:14px 15px;font-size:12.5px">
-            Nobody here yet. <a href="/contacts/new?account={account.id}">Add the person</a> you actually
-            talk to.
+            Todavía no hay nadie acá. <a href="/contacts/new?account={account.id}">Agregá a la persona</a> con
+            la que realmente hablás.
           </p>
         {/each}
       </section>
@@ -225,7 +225,7 @@
       <section class="v2-card" style="overflow:hidden">
         <div class="v2-card-head">
           <span class="v2-label">Tickets</span>
-          <a href="/tickets">View all</a>
+          <a href="/tickets">Ver todos</a>
         </div>
         {#each tickets as t (t.id)}
           <!-- A link again: tickets is wired, so a real id sent to
@@ -240,7 +240,7 @@
           </a>
         {:else}
           <p class="v2-sub" style="padding:14px 15px;font-size:12.5px">
-            No tickets. <a href="/tickets/new?account={account.id}">Raise one</a> if something is wrong.
+            Sin tickets. <a href="/tickets/new?account={account.id}">Creá uno</a> si algo anda mal.
           </p>
         {/each}
       </section>
@@ -248,8 +248,8 @@
       <!-- Invoices -->
       <section class="v2-card" style="overflow:hidden">
         <div class="v2-card-head">
-          <span class="v2-label">Invoices</span>
-          <a href="/invoices">View all</a>
+          <span class="v2-label">Facturas</span>
+          <a href="/invoices">Ver todas</a>
         </div>
         {#each invoices as inv (inv.id)}
           <!-- A link now: invoices is wired, so a real id sent to
@@ -260,14 +260,14 @@
           >
             <span class="v2-num" style="font-size:12.5px">{inv.invoice_number}</span>
             <Pill tone={inv.past_due ? 'rust' : INVOICE_STATUS_TONE[inv.status]}>
-              {inv.past_due ? 'Past due' : invoiceStatusLabel(inv.status)}
+              {inv.past_due ? 'Vencida' : invoiceStatusLabel(inv.status)}
             </Pill>
             <span class="v2-num" style="margin-left:auto;font-weight:600;font-size:13px">
               {money(inv.past_due ? inv.amount_due : inv.total_amount, inv.currency)}
             </span>
           </a>
         {:else}
-          <p class="v2-sub" style="padding:14px 15px;font-size:12.5px">Nothing billed yet.</p>
+          <p class="v2-sub" style="padding:14px 15px;font-size:12.5px">Todavía nada facturado.</p>
         {/each}
       </section>
     </div>

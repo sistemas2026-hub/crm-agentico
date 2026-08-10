@@ -53,12 +53,12 @@ export const actions = {
       if (err?.status === 403) {
         return fail(403, {
           values: body,
-          error: 'Only an admin can change organization settings.'
+          error: 'Solo un administrador puede cambiar la configuración de la organización.'
         });
       }
       return fail(400, {
         values: body,
-        error: readableError(err, 'Could not save these settings.')
+        error: readableError(err, 'No se pudo guardar esta configuración.')
       });
     }
 

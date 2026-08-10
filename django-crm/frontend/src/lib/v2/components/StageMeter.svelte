@@ -15,7 +15,7 @@
 </script>
 
 {#if !closed}
-  <div class="v2-meter" role="img" aria-label="Stage: {STAGE_LABEL[stage]}">
+  <div class="v2-meter" role="img" aria-label="Etapa: {STAGE_LABEL[stage]}">
     {#each OPEN_STAGES as stageKey, i (stageKey)}
       <i class={i <= index ? 'on' : ''}></i>
     {/each}

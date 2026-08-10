@@ -29,12 +29,12 @@
   // list the sentence had just promised to lead with.
   let subText = $derived(
     summary.count === 0
-      ? 'Nothing needs you right now: you’re all clear for today.'
+      ? 'No necesitás hacer nada por ahora: estás al día.'
       : summary.quiet_deals === 0
-        ? `${plural(summary.count, 'thing wants', 'things want')} you today.`
-        : `${plural(summary.count, 'thing wants', 'things want')} you today. ` +
-          `${plural(summary.quiet_deals, 'deal', 'deals')} worth ${money(summary.quiet_value, data.org.currency)} ` +
-          `${summary.quiet_deals === 1 ? 'has' : 'have'} gone quiet.`
+        ? `${plural(summary.count, 'cosa te necesita', 'cosas te necesitan')} hoy.`
+        : `${plural(summary.count, 'cosa te necesita', 'cosas te necesitan')} hoy. ` +
+          `${plural(summary.quiet_deals, 'negociación', 'negociaciones')} por ${money(summary.quiet_value, data.org.currency)} ` +
+          `${summary.quiet_deals === 1 ? 'se enfrió' : 'se enfriaron'}.`
   );
 
   // The queue shows the most urgent 8. Everything past that is real work with
@@ -43,7 +43,7 @@
   let hidden = $derived(Math.max(0, summary.count - summary.shown));
 </script>
 
-<PageHeader title="Today">
+<PageHeader title="Hoy">
   {#snippet sub()}{subText}{/snippet}
 </PageHeader>
 
@@ -75,11 +75,11 @@
     {/each}
 
     {#if queue.length && hidden === 0}
-      <p class="v2-sub" style="margin:15px 0 21px;font-size:12.5px">That’s everything due today.</p>
+      <p class="v2-sub" style="margin:15px 0 21px;font-size:12.5px">Eso es todo lo que vence hoy.</p>
     {:else if queue.length}
       <p class="v2-sub" style="margin:15px 0 21px;font-size:12.5px">
         <span class="v2-num">{hidden}</span>
-        {hidden === 1 ? 'more is' : 'more are'} waiting:
+        {hidden === 1 ? 'más está esperando' : 'más están esperando'}:
         {#each summary.sources as source, i (source.href)}<a
             href={source.href}
             style="color:inherit">{source.count} {source.label}</a
@@ -88,16 +88,17 @@
     {:else}
       <div class="v2-card" style="margin-bottom:8px">
         <div class="v2-pad" style="padding:20px;text-align:center">
-          <div style="font-weight:640;letter-spacing:-0.012em">Inbox zero for today</div>
+          <div style="font-weight:640;letter-spacing:-0.012em">Nada pendiente por hoy</div>
           <div class="v2-sub" style="margin-top:3px">
-            No overdue tickets, invoices, quiet deals or tasks. Anything coming up is below.
+            Sin tickets vencidos, facturas, negociaciones frías ni tareas pendientes. Lo que se
+            viene está abajo.
           </div>
         </div>
       </div>
     {/if}
 
     {#if later.length}
-      <div class="v2-label" style="margin:6px 0 9px">Later this week</div>
+      <div class="v2-label" style="margin:6px 0 9px">Más adelante esta semana</div>
       {#each later as row (row.id)}
         <div
           style="display:flex;gap:13px;align-items:baseline;padding:9px 3px;border-bottom:1px solid var(--v2-line-soft)"
@@ -114,7 +115,7 @@
 
     {#if summary.cleared_yesterday > 0}
       <p class="v2-sub" style="margin-top:20px;font-size:12px">
-        Yesterday you cleared <span class="v2-num">{summary.cleared_yesterday}</span>.
+        Ayer resolviste <span class="v2-num">{summary.cleared_yesterday}</span>.
       </p>
     {/if}
   </div>

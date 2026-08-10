@@ -1,5 +1,6 @@
 import { error } from '@sveltejs/kit';
-import { env } from '$env/dynamic/public';
+import { env } from '$env/dynamic/private';
+import { env as publicEnv } from '$env/dynamic/public';
 
 /**
  * Stream an invoice PDF from the API.
@@ -15,9 +16,10 @@ import { env } from '$env/dynamic/public';
  */
 export async function GET({ params, cookies }) {
   const token = cookies.get('jwt_access');
-  if (!token) error(401, 'Not signed in.');
+  if (!token) error(401, 'No iniciaste sesión.');
 
-  const upstream = await fetch(`${env.PUBLIC_DJANGO_API_URL}/api/invoices/${params.id}/pdf/`, {
+  const apiUrl = env.PRIVATE_DJANGO_API_URL || publicEnv.PUBLIC_DJANGO_API_URL;
+  const upstream = await fetch(`${apiUrl}/api/invoices/${params.id}/pdf/`, {
     headers: { Authorization: `Bearer ${token}` }
   });
 
@@ -25,9 +27,9 @@ export async function GET({ params, cookies }) {
     // 403/404 collapse to 404: do not confirm an invoice exists to someone who
     // may not read it. 503 means WeasyPrint is missing on the server.
     if (upstream.status === 403 || upstream.status === 404) {
-      error(404, 'That invoice does not exist, or it belongs to another team.');
+      error(404, 'Esa factura no existe, o pertenece a otro equipo.');
     }
-    error(502, 'Could not generate the PDF.');
+    error(502, 'No se pudo generar el PDF.');
   }
 
   const body = await upstream.arrayBuffer();

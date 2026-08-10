@@ -55,7 +55,7 @@ export const actions = {
   send: async ({ cookies, request }) => {
     const form = await request.formData();
     const id = form.get('id')?.toString();
-    if (!id) return fail(400, { error: 'Which invoice?' });
+    if (!id) return fail(400, { error: '¿Qué factura?' });
 
     try {
       await sendInvoice({ cookies }, id);
@@ -63,8 +63,8 @@ export const actions = {
       return fail(err?.status === 403 ? 403 : 400, {
         error:
           err?.status === 403
-            ? 'That invoice is not yours to send.'
-            : readableError(err, 'Could not send that invoice.')
+            ? 'Esa factura no es tuya para enviarla.'
+            : readableError(err, 'No se pudo enviar esa factura.')
       });
     }
     return { sent: id };

@@ -65,9 +65,9 @@ export const actions = {
       await createRoutingRule(event, values);
     } catch (/** @type {any} */ err) {
       if (err?.status === 403) {
-        return fail(403, { create: { error: 'Only an admin can add routing rules.' } });
+        return fail(403, { create: { error: 'Solo un administrador puede agregar reglas de enrutamiento.' } });
       }
-      return fail(400, { create: { error: readableError(err, 'Could not add the rule.') } });
+      return fail(400, { create: { error: readableError(err, 'No se pudo agregar la regla.') } });
     }
     return { created: true };
   },
@@ -80,9 +80,9 @@ export const actions = {
       await updateRoutingRule(event, id, values);
     } catch (/** @type {any} */ err) {
       if (err?.status === 403) {
-        return fail(403, { update: { error: 'Only an admin can change routing rules.' } });
+        return fail(403, { update: { error: 'Solo un administrador puede cambiar reglas de enrutamiento.' } });
       }
-      return fail(400, { update: { error: readableError(err, 'Could not save the rule.') } });
+      return fail(400, { update: { error: readableError(err, 'No se pudo guardar la regla.') } });
     }
     return { updated: true };
   },
@@ -94,10 +94,10 @@ export const actions = {
       await updateRoutingRule(event, id, { is_active: false });
     } catch (/** @type {any} */ err) {
       if (err?.status === 403) {
-        return fail(403, { deactivate: { error: 'Only an admin can turn routing rules off.' } });
+        return fail(403, { deactivate: { error: 'Solo un administrador puede apagar reglas de enrutamiento.' } });
       }
       return fail(400, {
-        deactivate: { error: readableError(err, 'Could not turn the rule off.') }
+        deactivate: { error: readableError(err, 'No se pudo apagar la regla.') }
       });
     }
     return { deactivated: true };
@@ -118,10 +118,10 @@ export const actions = {
       await updateRoutingRule(event, id, { is_active: true });
     } catch (/** @type {any} */ err) {
       if (err?.status === 403) {
-        return fail(403, { activate: { error: 'Only an admin can turn routing rules on.' } });
+        return fail(403, { activate: { error: 'Solo un administrador puede encender reglas de enrutamiento.' } });
       }
       return fail(400, {
-        activate: { error: readableError(err, 'Could not turn the rule on.') }
+        activate: { error: readableError(err, 'No se pudo encender la regla.') }
       });
     }
     return { activated: true };
@@ -136,9 +136,9 @@ export const actions = {
       await deleteRoutingRule(event, id);
     } catch (/** @type {any} */ err) {
       if (err?.status === 403) {
-        return fail(403, { remove: { error: 'Only an admin can delete routing rules.' } });
+        return fail(403, { remove: { error: 'Solo un administrador puede eliminar reglas de enrutamiento.' } });
       }
-      return fail(400, { remove: { error: readableError(err, 'Could not delete the rule.') } });
+      return fail(400, { remove: { error: readableError(err, 'No se pudo eliminar la regla.') } });
     }
     return { removed: true };
   }

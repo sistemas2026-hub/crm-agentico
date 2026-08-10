@@ -11,9 +11,8 @@
  */
 
 import axios from 'axios';
-import { redirect } from '@sveltejs/kit';
+import { fail, redirect } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
-import { env as publicEnv } from '$env/dynamic/public';
 import { generateCodeVerifier, generateCodeChallenge, generateState } from '$lib/utils/pkce.js';
 import { describeError } from '$lib/server/log-safe.js';
 
@@ -52,7 +51,7 @@ export async function load({ url, cookies }) {
     console.error('Google OAuth error:', error, errorDescription);
     return {
       google_url: null,
-      error: errorDescription || `OAuth error: ${error}`
+      error: errorDescription || `Error de OAuth: ${error}`
     };
   }
 
@@ -104,8 +103,10 @@ async function handleOAuthCallback(code, returnedState, cookies) {
 
   try {
     // Exchange code for tokens via Django backend
-    // The backend handles the actual token exchange with Google using the client secret
-    const apiUrl = publicEnv.PUBLIC_DJANGO_API_URL;
+    // The backend handles the actual token exchange with Google using the client secret.
+    // PRIVATE_ (not PUBLIC_): this runs server-side, inside the frontend
+    // container, so it must reach the backend by its compose service name.
+    const apiUrl = env.PRIVATE_DJANGO_API_URL;
     console.log('Using API URL:', apiUrl);
     const response = await axios.post(
       `${apiUrl}/api/auth/google/callback/`,
@@ -193,16 +194,19 @@ async function generateOAuthUrl(cookies) {
 
 /** @type {import('@sveltejs/kit').Actions} */
 export const actions = {
-  default: async ({ request }) => {
+  // SvelteKit forbids mixing a `default` action with named ones, so both
+  // forms on this page use named actions -- this one keeps its original
+  // behavior, just under an explicit name instead of `default`.
+  magicLink: async ({ request }) => {
     const formData = await request.formData();
     const email = formData.get('email');
 
     if (!email) {
-      return { success: false, error: 'Email is required' };
+      return { success: false, error: 'El correo electrónico es obligatorio' };
     }
 
     try {
-      const apiUrl = publicEnv.PUBLIC_DJANGO_API_URL;
+      const apiUrl = env.PRIVATE_DJANGO_API_URL;
       await axios.post(
         `${apiUrl}/api/auth/magic-link/request/`,
         { email },
@@ -213,5 +217,50 @@ export const actions = {
       // Always show success to user (backend also returns 200 always)
       return { success: true };
     }
+  },
+
+  // Email+password sign-in. Unlike the magic-link action above, a failure
+  // HAS to reach the user -- there is no "always say success" cover here,
+  // since a wrong password needs to be told apart from a wrong email so
+  // someone can tell what to fix.
+  password: async ({ request, cookies }) => {
+    const formData = await request.formData();
+    const email = formData.get('email');
+    const password = formData.get('password');
+
+    if (!email || !password) {
+      return fail(400, { error: 'El correo y la contraseña son obligatorios' });
+    }
+
+    try {
+      const apiUrl = env.PRIVATE_DJANGO_API_URL;
+      const response = await axios.post(
+        `${apiUrl}/api/auth/login/`,
+        { email, password },
+        { headers: { 'Content-Type': 'application/json' }, timeout: 10000 }
+      );
+
+      const { access_token, refresh_token } = response.data;
+      const secure = env.NODE_ENV === 'production';
+      cookies.set('jwt_access', access_token, {
+        path: '/',
+        httpOnly: true,
+        sameSite: 'lax',
+        secure,
+        maxAge: 60 * 60 * 24 // 1 day
+      });
+      cookies.set('jwt_refresh', refresh_token, {
+        path: '/',
+        httpOnly: true,
+        sameSite: 'lax',
+        secure,
+        maxAge: 60 * 60 * 24 * 365 // 1 year
+      });
+    } catch (/** @type {any} */ error) {
+      const errorMessage = error.response?.data?.error || 'Correo o contraseña incorrectos';
+      return fail(error.response?.status === 401 ? 401 : 400, { error: errorMessage });
+    }
+
+    throw redirect(307, '/org');
   }
 };

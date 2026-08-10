@@ -41,14 +41,14 @@
   let current = $derived(templates.find((t) => t.is_default));
 </script>
 
-<PageHeader title="Invoices">
+<PageHeader title="Facturas">
   {#snippet sub()}
-    <span class="v2-num">{count(totals.count)}</span> templates ·
-    {current ? `${current.name} is used for new invoices` : 'no default set'}
+    <span class="v2-num">{count(totals.count)}</span> plantillas ·
+    {current ? `${current.name} se usa para facturas nuevas` : 'sin plantilla predeterminada'}
   {/snippet}
   {#snippet actions()}
     {#if canManage}
-      <a class="v2-btn v2-btn-primary" href="/invoices/templates/new"><Plus />New template</a>
+      <a class="v2-btn v2-btn-primary" href="/invoices/templates/new"><Plus />Nueva plantilla</a>
     {/if}
   {/snippet}
 </PageHeader>
@@ -65,7 +65,8 @@
   <div class="v2-pad" style="padding-top:18px;padding-bottom:32px">
     {#if !current}
       <p class="v2-sub" style="font-size:12.5px;margin:0 0 16px">
-        No template is the default, so new invoices print with the built-in layout.
+        Ninguna plantilla es la predeterminada, así que las facturas nuevas se imprimen con el diseño
+        integrado.
       </p>
     {/if}
 
@@ -83,25 +84,25 @@
           <div style="padding:14px 16px 15px">
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
               <b style="font-size:13.5px">{t.name}</b>
-              {#if t.is_default}<Pill tone="moss" dot>Default</Pill>{/if}
-              {#if t.has_custom_html}<Pill tone="clay">Custom layout</Pill>{/if}
+              {#if t.is_default}<Pill tone="moss" dot>Predeterminada</Pill>{/if}
+              {#if t.has_custom_html}<Pill tone="clay">Diseño personalizado</Pill>{/if}
             </div>
 
             <div class="v2-sub" style="font-size:11.5px;margin-top:5px">
               {#if t.used_on_invoices}
-                on <span class="v2-num">{count(t.used_on_invoices)}</span> invoices
+                en <span class="v2-num">{count(t.used_on_invoices)}</span> facturas
               {:else}
-                never used
+                nunca usada
               {/if}
-              · {t.has_logo ? 'logo set' : 'no logo'} · edited {relativeDays(t.updated_at)} by {t.updated_by}
+              · {t.has_logo ? 'con logo' : 'sin logo'} · editada {relativeDays(t.updated_at)} por {t.updated_by}
             </div>
 
             <dl class="v2-kv" style="margin-top:12px">
-              <dt>Terms</dt>
+              <dt>Condiciones</dt>
               <dd>{t.default_terms || '—'}</dd>
-              <dt>Notes</dt>
+              <dt>Notas</dt>
               <dd>{t.default_notes || '—'}</dd>
-              <dt>Footer</dt>
+              <dt>Pie</dt>
               <dd>{t.footer_text || '—'}</dd>
             </dl>
 
@@ -111,10 +112,10 @@
               <div class="v2-tpl-flag">
                 <FileCode size={13} style="flex:none;margin-top:1px" />
                 <span>
-                  Replaces the whole document with
-                  <span class="v2-num">{(t.custom_html_bytes / 1024).toFixed(1)}</span> kB of custom markup,
-                  including the line-item table and the totals. Nothing checks that it still prints an
-                  amount due.
+                  Reemplaza todo el documento con
+                  <span class="v2-num">{(t.custom_html_bytes / 1024).toFixed(1)}</span> kB de marcado personalizado,
+                  incluida la tabla de ítems y los totales. Nada verifica que siga imprimiendo un
+                  monto a pagar.
                 </span>
               </div>
             {/if}
@@ -129,7 +130,7 @@
                      could not show what was saved and saving would have
                      blanked it. The editor route serves those two fields on an
                      admin-only path, leaving this page's own fetch unchanged. -->
-                <a class="v2-btn v2-btn-sm" href="/invoices/templates/{t.id}/edit">Edit</a>
+                <a class="v2-btn v2-btn-sm" href="/invoices/templates/{t.id}/edit">Editar</a>
                 {#if !t.is_default}
                   <!-- Named as the swap it is: one default exists at a time.
                        `is_default` is a singleton the model enforces, so this
@@ -137,7 +138,7 @@
                   <form method="POST" action="?/setDefault" use:enhance>
                     <input type="hidden" name="id" value={t.id} />
                     <button type="submit" class="v2-btn v2-btn-sm">
-                      Use instead of {current?.name ?? 'the built-in'}
+                      Usar en vez de {current?.name ?? 'la integrada'}
                     </button>
                   </form>
                 {/if}
@@ -151,9 +152,9 @@
     {#if totals.unused > 0}
       <p class="v2-sub" style="font-size:11.5px;margin-top:16px">
         <span class="v2-num">{count(totals.unused)}</span>
-        {totals.unused === 1 ? 'template has' : 'templates have'} never been used and
-        {totals.unused === 1 ? 'is' : 'are'} not the default, deleting
-        {totals.unused === 1 ? 'it' : 'them'} changes no existing invoice.
+        {totals.unused === 1 ? 'plantilla nunca se usó y no es' : 'plantillas nunca se usaron y no son'}
+        la predeterminada; eliminar
+        {totals.unused === 1 ? 'la' : 'las'} no cambia ninguna factura existente.
       </p>
     {/if}
 
@@ -161,11 +162,11 @@
       <div style="display:flex;gap:10px;align-items:flex-start">
         <ShieldAlert size={16} style="color:var(--v2-slate);flex:none;margin-top:2px" />
         <div>
-          <div style="font-weight:600;font-size:13px">Custom markup is not previewed here</div>
+          <div style="font-weight:600;font-size:13px">El marcado personalizado no se previsualiza acá</div>
           <p class="v2-sub" style="font-size:12.5px;margin:5px 0 0;line-height:1.5">
-            A template's HTML and CSS are rendered into a PDF on the server, never into this page.
-            The only way to see a custom layout is to generate a document from it, which is also the
-            only way to see what a customer will actually receive.
+            El HTML y el CSS de una plantilla se renderizan en un PDF en el servidor, nunca en esta
+            página. La única forma de ver un diseño personalizado es generar un documento a partir de
+            él, que también es la única forma de ver lo que un cliente va a recibir realmente.
           </p>
         </div>
       </div>

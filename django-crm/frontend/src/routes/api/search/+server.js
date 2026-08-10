@@ -13,6 +13,6 @@ export async function GET({ url, cookies }) {
   try {
     return json(await search({ cookies }, q));
   } catch (/** @type {any} */ err) {
-    return json({ results: [], error: err?.message || 'Search failed' }, { status: 400 });
+    return json({ results: [], error: err?.message || 'Falló la búsqueda' }, { status: 400 });
   }
 }

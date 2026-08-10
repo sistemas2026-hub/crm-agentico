@@ -26,7 +26,7 @@ export const actions = {
     try {
       created = await createAccount({ cookies }, values);
     } catch (/** @type {any} */ err) {
-      return fail(400, { values, error: readableError(err, 'Could not create this account.') });
+      return fail(400, { values, error: readableError(err, 'No se pudo crear esta cuenta.') });
     }
 
     // The API returns the new id. Landing on the account is the point of

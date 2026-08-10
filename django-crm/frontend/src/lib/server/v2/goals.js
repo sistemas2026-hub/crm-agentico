@@ -88,7 +88,7 @@ function viewerRole(cookies) {
 /** A person's display name from a nested ProfileSerializer row. */
 function personName(detail) {
   const d = detail?.user_details ?? {};
-  return d.name || d.email || 'Unnamed';
+  return d.name || d.email || 'Sin nombre';
 }
 
 /**
@@ -126,7 +126,7 @@ function toLeaderRow(r) {
   return {
     rank: r.rank,
     goal_id: r.goal_id,
-    user: r.user?.name || r.user?.email || 'Unknown',
+    user: r.user?.name || r.user?.email || 'Desconocido',
     target: Number(r.target ?? 0),
     achieved: Number(r.achieved ?? 0),
     percent: r.percent ?? 0

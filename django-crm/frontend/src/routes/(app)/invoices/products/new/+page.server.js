@@ -38,16 +38,16 @@ export const actions = {
     const values = { name, sku, price, currency, category, description, is_active };
 
     // UX-side mirrors of the serializer's rules. The API enforces both again.
-    if (!name) return fail(400, { values, error: 'Give the product a name.' });
-    if (!priceOk(price)) return fail(400, { values, error: 'Enter a list price of 0 or more.' });
+    if (!name) return fail(400, { values, error: 'Ponele un nombre al producto.' });
+    if (!priceOk(price)) return fail(400, { values, error: 'Ingresá un precio de lista de 0 o más.' });
 
     try {
       await createProduct(event, values);
     } catch (/** @type {any} */ err) {
       if (err?.status === 403) {
-        return fail(403, { values, error: 'Only an administrator can add products.' });
+        return fail(403, { values, error: 'Solo un administrador puede agregar productos.' });
       }
-      return fail(400, { values, error: readableError(err, 'Could not create this product.') });
+      return fail(400, { values, error: readableError(err, 'No se pudo crear este producto.') });
     }
 
     redirect(303, '/invoices/products');

@@ -65,26 +65,26 @@
 
   const GROUPS = [
     {
-      label: 'Sell',
+      label: 'Vender',
       items: [
-        { href: '/', label: 'Today', icon: Sun, exact: true },
+        { href: '/', label: 'Hoy', icon: Sun, exact: true },
         {
           href: '/pipeline',
-          label: 'Pipeline',
+          label: 'Negociaciones',
           icon: Columns3,
           count: 'pipeline',
           termKey: 'opportunity.plural'
         },
-        { href: '/leads', label: 'Leads', icon: Target, count: 'leads', termKey: 'lead.plural' },
-        { href: '/accounts', label: 'Accounts', icon: Building2, termKey: 'account.plural' },
-        { href: '/contacts', label: 'Contacts', icon: Users, termKey: 'contact.plural' },
-        { href: '/goals', label: 'Goals', icon: Trophy }
+        { href: '/leads', label: 'Prospectos', icon: Target, count: 'leads', termKey: 'lead.plural' },
+        { href: '/accounts', label: 'Cuentas', icon: Building2, termKey: 'account.plural' },
+        { href: '/contacts', label: 'Contactos', icon: Users, termKey: 'contact.plural' },
+        { href: '/goals', label: 'Objetivos', icon: Trophy }
       ]
     },
     {
-      label: 'Serve',
+      label: 'Atender',
       items: [
-        { href: '/tasks', label: 'Tasks', icon: CircleCheck, count: 'tasks' },
+        { href: '/tasks', label: 'Tareas', icon: CircleCheck, count: 'tasks' },
         // Approvals and Analytics live under Tickets as section tabs. They are
         // not separate destinations, so they do not get separate nav entries,
         // one level of navigation, and the tab strip carries the rest.
@@ -92,21 +92,21 @@
         { href: '/asistente', label: 'Asistente', icon: Sparkles },
         { href: '/simulador-whatsapp', label: 'Simulador WhatsApp', icon: Smartphone },
         { href: '/agentes', label: 'Agentes', icon: Network },
-        { href: '/solutions', label: 'Knowledge base', icon: BookOpen },
-        { href: '/documents', label: 'Documents', icon: FileText }
+        { href: '/solutions', label: 'Base de conocimiento', icon: BookOpen },
+        { href: '/documents', label: 'Documentos', icon: FileText }
       ]
     },
     {
-      label: 'Bill',
+      label: 'Facturar',
       items: [
         {
           href: '/invoices',
-          label: 'Invoices',
+          label: 'Facturas',
           icon: Receipt,
           count: 'invoices',
           termKey: 'invoice.plural'
         },
-        { href: '/timesheet', label: 'Timesheet', icon: Clock }
+        { href: '/timesheet', label: 'Registro de horas', icon: Clock }
       ]
     },
     {
@@ -116,10 +116,10 @@
       // Team is admin-only. A member reaches it only to be told so. Settings
       // is not: the hub is readable by any member (it just omits admin-only
       // counts), so it stays for everyone.
-      label: 'Run',
+      label: 'Administrar',
       items: [
-        { href: '/team', label: 'Team and access', icon: UserCog, admin: true },
-        { href: '/settings', label: 'Settings', icon: SlidersHorizontal }
+        { href: '/team', label: 'Equipo y accesos', icon: UserCog, admin: true },
+        { href: '/settings', label: 'Configuración', icon: SlidersHorizontal }
       ]
     }
   ];
@@ -141,7 +141,7 @@
     exact ? page.url.pathname === href : page.url.pathname.startsWith(href);
 </script>
 
-<nav class="v2-nav" aria-label="Main">
+<nav class="v2-nav" aria-label="Principal">
   <div class="v2-org">
     <span class="v2-mark">{org.name.slice(0, 1)}</span>
     <b>{org.name}</b>
@@ -172,7 +172,7 @@
   <div class="v2-nav-foot">
     <button class="v2-link v2-nav-search" type="button" onclick={onsearch}>
       <Search />
-      Search
+      Buscar
       <span class="v2-count">⌘K</span>
     </button>
     <!-- Personal, not work: your own feed sits with your own profile rather
@@ -183,18 +183,18 @@
       aria-current={isActive('/notifications', false) ? 'page' : undefined}
     >
       <Bell />
-      Notifications
+      Notificaciones
       {#if counts.notifications}
         <span class="v2-count">{counts.notifications}</span>
       {/if}
     </a>
     <a class="v2-link" href="/profile">
       <CircleUser />
-      Your profile
+      Tu perfil
     </a>
     <a class="v2-link" href="/support">
       <CircleHelp />
-      Help
+      Ayuda
     </a>
     <!-- The phone app for people on the hosted service. No pulsing dot. A
          download link is not something that needs you right now, and v2 keeps
@@ -206,14 +206,14 @@
       rel="noopener noreferrer"
     >
       <Smartphone />
-      Download app
+      Descargar app
     </a>
     <!-- Leaving the app. Last in the list, and a plain link. /logout is a
          server load that clears the auth cookies and redirects to /login, so a
          GET navigation is all it takes and no data-fetching component follows. -->
     <a class="v2-link" href="/logout" data-sveltekit-reload>
       <LogOut />
-      Sign out
+      Cerrar sesión
     </a>
   </div>
 </nav>

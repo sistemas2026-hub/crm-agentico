@@ -45,23 +45,23 @@
   let errors = $derived.by(() => {
     /** @type {Record<string, string>} */
     const e = {};
-    if (!form.name.trim()) e.name = 'Give the account the name you would search for.';
+    if (!form.name.trim()) e.name = 'Ponele a la cuenta el nombre por el que la buscarías.';
 
     if (form.annual_revenue !== '') {
       const n = Number(form.annual_revenue);
-      if (!Number.isFinite(n)) e.annual_revenue = 'Annual revenue has to be a number.';
-      else if (n < 0) e.annual_revenue = 'Annual revenue cannot be negative.';
+      if (!Number.isFinite(n)) e.annual_revenue = 'Los ingresos anuales tienen que ser un número.';
+      else if (n < 0) e.annual_revenue = 'Los ingresos anuales no pueden ser negativos.';
     }
     if (form.number_of_employees !== '') {
       const n = Number(form.number_of_employees);
-      if (!Number.isInteger(n)) e.number_of_employees = 'Headcount is a whole number.';
-      else if (n < 0) e.number_of_employees = 'Headcount cannot be negative.';
+      if (!Number.isInteger(n)) e.number_of_employees = 'La cantidad de empleados es un número entero.';
+      else if (n < 0) e.number_of_employees = 'La cantidad de empleados no puede ser negativa.';
     }
     if (form.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.email))
-      e.email = 'That does not look like an email address.';
+      e.email = 'Eso no parece una dirección de correo.';
     // The exact regex from `flexible_phone_validator`.
     if (form.phone && !/^[\d\s\-()+.]{7,25}$/.test(form.phone))
-      e.phone = '7 to 25 characters: digits, spaces, brackets, dots, dashes. No extensions.';
+      e.phone = 'De 7 a 25 caracteres: números, espacios, paréntesis, puntos, guiones. Sin extensiones.';
 
     return e;
   });
@@ -92,14 +92,14 @@
   };
 </script>
 
-<PageHeader title="New account" center>
+<PageHeader title="Nueva cuenta" center>
   {#snippet crumb()}
-    <a href="/accounts">Accounts</a>
+    <a href="/accounts">Cuentas</a>
     <ChevronRight size={12} />
-    <span>New</span>
+    <span>Nueva</span>
   {/snippet}
   {#snippet sub()}
-    A company you sell to. Everything else attaches to it later.
+    Una empresa a la que le vendés. Todo lo demás se vincula después.
   {/snippet}
 </PageHeader>
 
@@ -113,14 +113,14 @@
       >
         <TriangleAlert size={17} style="color:var(--v2-rust);flex:none" />
         <div class="v2-next-body">
-          <div style="font-weight:600">The server refused this</div>
+          <div style="font-weight:600">El servidor rechazó esto</div>
           <div class="v2-sub" style="margin-top:2px">{result.error}</div>
         </div>
       </div>
     {/if}
 
     <div class="v2-field">
-      <label for="f-name">Account name</label>
+      <label for="f-name">Nombre de la cuenta</label>
       <input
         id="f-name"
         name="name"
@@ -132,24 +132,24 @@
       {#if show('name')}
         <p class="v2-error">{errors.name}</p>
       {:else}
-        <p class="v2-hint">Has to be unique in this organisation, ignoring capitals.</p>
+        <p class="v2-hint">Tiene que ser único en esta organización, sin distinguir mayúsculas.</p>
       {/if}
     </div>
 
     <div class="pair">
       <div class="v2-field">
-        <label for="f-industry">Industry</label>
+        <label for="f-industry">Rubro</label>
         <select id="f-industry" name="industry" class="v2-input" bind:value={form.industry}>
-          <option value="">Not recorded</option>
+          <option value="">No registrado</option>
           {#each data.industries as i (i.value)}
             <option value={i.value}>{i.label}</option>
           {/each}
         </select>
       </div>
       <div class="v2-field">
-        <label for="f-owner">Owner</label>
+        <label for="f-owner">Responsable</label>
         <select id="f-owner" name="assigned_to" class="v2-input" bind:value={form.assigned_to}>
-          <option value="">Nobody</option>
+          <option value="">Nadie</option>
           {#each data.owners as o (o.id)}
             <!-- The value is the Profile id, not the display name. -->
             <option value={o.id}>{o.name}</option>
@@ -160,7 +160,7 @@
 
     <div class="pair">
       <div class="v2-field">
-        <label for="f-email">Email</label>
+        <label for="f-email">Correo</label>
         <input
           id="f-email"
           name="email"
@@ -173,7 +173,7 @@
         {#if show('email')}<p class="v2-error">{errors.email}</p>{/if}
       </div>
       <div class="v2-field">
-        <label for="f-phone">Phone</label>
+        <label for="f-phone">Teléfono</label>
         <input
           id="f-phone"
           name="phone"
@@ -187,13 +187,13 @@
     </div>
 
     <div class="v2-field">
-      <label for="f-website">Website</label>
+      <label for="f-website">Sitio web</label>
       <input id="f-website" name="website" class="v2-input" type="url" bind:value={form.website} />
     </div>
 
     <div class="pair">
       <div class="v2-field">
-        <label for="f-staff">Headcount</label>
+        <label for="f-staff">Cantidad de empleados</label>
         <input
           id="f-staff"
           name="number_of_employees"
@@ -207,7 +207,7 @@
         {#if show('number_of_employees')}<p class="v2-error">{errors.number_of_employees}</p>{/if}
       </div>
       <div class="v2-field">
-        <label for="f-revenue">Annual revenue</label>
+        <label for="f-revenue">Ingresos anuales</label>
         <input
           id="f-revenue"
           name="annual_revenue"
@@ -224,13 +224,13 @@
 
     <div class="pair">
       <div class="v2-field">
-        <label for="f-city">City</label>
+        <label for="f-city">Ciudad</label>
         <input id="f-city" name="city" class="v2-input" bind:value={form.city} />
       </div>
       <div class="v2-field">
-        <label for="f-country">Country</label>
+        <label for="f-country">País</label>
         <select id="f-country" name="country" class="v2-input" bind:value={form.country}>
-          <option value="">Not recorded</option>
+          <option value="">No registrado</option>
           {#each data.countries as c (c.value)}
             <option value={c.value}>{c.label}</option>
           {/each}
@@ -239,7 +239,7 @@
     </div>
 
     <div class="v2-field">
-      <label for="f-notes">Notes</label>
+      <label for="f-notes">Notas</label>
       <textarea
         id="f-notes"
         name="description"
@@ -249,8 +249,8 @@
     </div>
 
     <div class="actions">
-      <button class="v2-btn v2-btn-primary" type="submit">Create account</button>
-      <a class="v2-btn" href="/accounts">Cancel</a>
+      <button class="v2-btn v2-btn-primary" type="submit">Crear cuenta</button>
+      <a class="v2-btn" href="/accounts">Cancelar</a>
     </div>
   </form>
 </div>

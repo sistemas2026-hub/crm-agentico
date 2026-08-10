@@ -113,7 +113,7 @@
    */
   function metaFor(e) {
     const parts = [];
-    if (e.type === 'file') parts.push('Attached');
+    if (e.type === 'file') parts.push('Adjuntado');
     if (e.by) parts.push(e.by);
     parts.push(relativeDays(e.at));
     return parts.join(' · ');
@@ -122,8 +122,8 @@
   /** @param {string} iso */
   function dayGroup(iso) {
     const n = daysSince(iso);
-    if (n === 0) return 'Today';
-    if (n === 1) return 'Yesterday';
+    if (n === 0) return 'Hoy';
+    if (n === 1) return 'Ayer';
     return shortDate(iso);
   }
 
@@ -153,13 +153,13 @@
    */
   let headline = $derived(
     !contact.is_active
-      ? `${contact.first_name} is marked inactive${contact.account ? ` at ${contact.account.name}` : ''}. Find out who replaced them before the next conversation.`
+      ? `${contact.first_name} está marcado como inactivo${contact.account ? ` en ${contact.account.name}` : ''}. Averiguá quién lo reemplazó antes de la próxima conversación.`
       : !contact.email && (!contact.phone || contact.do_not_call)
-        ? `There is no way to reach ${contact.first_name} on this record: no email${contact.do_not_call ? ', and they asked not to be called' : ' and no phone'}.`
+        ? `No hay forma de contactar a ${contact.first_name} con este registro: sin correo${contact.do_not_call ? ', y pidió que no lo llamen' : ' y sin teléfono'}.`
         : openDeals.length && !contact.owner
-          ? `${contact.first_name} is on ${openDeals.length === 1 ? openDeals[0].name : `${openDeals.length} open deals`} worth ${money(openPipeline, data.org.currency)}, and nobody owns this record.`
+          ? `${contact.first_name} está en ${openDeals.length === 1 ? openDeals[0].name : `${openDeals.length} negociaciones abiertas`} por ${money(openPipeline, data.org.currency)}, y nadie tiene asignado este registro.`
           : overdueTasks.length
-            ? `${overdueTasks.length === 1 ? 'A task' : `${overdueTasks.length} tasks`} naming ${contact.first_name} ${overdueTasks.length === 1 ? 'is' : 'are'} past due.`
+            ? `${overdueTasks.length === 1 ? 'Una tarea' : `${overdueTasks.length} tareas`} que nombra${overdueTasks.length === 1 ? '' : 'n'} a ${contact.first_name} está${overdueTasks.length === 1 ? '' : 'n'} vencida${overdueTasks.length === 1 ? '' : 's'}.`
             : null
   );
 </script>
@@ -169,36 +169,36 @@
     <Avatar name={contact.name} size={42} />
   {/snippet}
   {#snippet crumb()}
-    <a href="/contacts">Contacts</a>
+    <a href="/contacts">Contactos</a>
     <ChevronRight size={12} />
     {#if contact.account}
       <a href="/accounts/{contact.account.id}">{contact.account.name}</a>
     {:else if contact.organization}
       <span>{contact.organization}</span>
     {:else}
-      <span>No account</span>
+      <span>Sin cuenta</span>
     {/if}
   {/snippet}
   {#snippet sub()}
-    {[contact.title, contact.department].filter(Boolean).join(' · ') || 'No title recorded'}
+    {[contact.title, contact.department].filter(Boolean).join(' · ') || 'Sin cargo registrado'}
     {#if contact.updated_at}
-      · updated {relativeDays(contact.updated_at)}
+      · actualizado {relativeDays(contact.updated_at)}
     {/if}
   {/snippet}
   {#snippet actions()}
     {#if contact.email}
-      <a class="v2-btn" href="mailto:{contact.email}"><Mail />Email</a>
+      <a class="v2-btn" href="mailto:{contact.email}"><Mail />Correo</a>
     {/if}
     {#if contact.do_not_call}
       <!-- Disabled rather than removed: the reason has to stay visible, or
            somebody just looks up the number somewhere else. -->
-      <button class="v2-btn" type="button" disabled title="This person asked not to be called">
-        <PhoneOff />Do not call
+      <button class="v2-btn" type="button" disabled title="Esta persona pidió que no la llamen">
+        <PhoneOff />No llamar
       </button>
     {:else if contact.phone}
-      <a class="v2-btn" href="tel:{contact.phone}"><Phone />Call</a>
+      <a class="v2-btn" href="tel:{contact.phone}"><Phone />Llamar</a>
     {/if}
-    <a class="v2-btn v2-btn-primary" href="/contacts/{contact.id}/edit"><Pencil />Edit</a>
+    <a class="v2-btn v2-btn-primary" href="/contacts/{contact.id}/edit"><Pencil />Editar</a>
   {/snippet}
 </PageHeader>
 
@@ -209,9 +209,9 @@
         {#if headline}
           <div style="margin-bottom:20px">
             <NextAction
-              label={contact.is_active ? 'Needs you' : 'Out of date'}
+              label={contact.is_active ? 'Te necesita' : 'Desactualizado'}
               text={headline}
-              action="Edit this contact"
+              action="Editar este contacto"
               href="/contacts/{contact.id}/edit"
               tone={contact.is_active ? 'ember' : 'rust'}
             />
@@ -219,9 +219,9 @@
         {/if}
 
         <div class="v2-label" style="margin-bottom:10px">
-          Deals they are named on
+          Negociaciones donde aparece
           {#if openDeals.length}
-            <span class="v2-num" style="margin-left:6px">{money(openPipeline, data.org.currency)}</span> open
+            <span class="v2-num" style="margin-left:6px">{money(openPipeline, data.org.currency)}</span> abiertas
           {/if}
         </div>
         <div class="v2-card" style="overflow:hidden;margin-bottom:22px">
@@ -238,8 +238,8 @@
                 <div class="v2-sub" style="font-size:11.5px">
                   {STAGE_LABEL[d.stage]}{d.closed_on
                     ? d.stage.startsWith('CLOSED_')
-                      ? ` · closed ${shortDate(d.closed_on)}`
-                      : ` · due ${shortDate(d.closed_on)}`
+                      ? ` · cerrada ${shortDate(d.closed_on)}`
+                      : ` · vence ${shortDate(d.closed_on)}`
                     : ''}
                 </div>
               </div>
@@ -247,17 +247,17 @@
             </a>
           {:else}
             <p class="v2-sub" style="padding:14px 15px;font-size:12.5px">
-              No deals name this person. Add them to the deal they are actually involved in. The
-              account having deals is a different fact.
+              Ninguna negociación nombra a esta persona. Agregala a la negociación en la que
+              realmente participa. Que la cuenta tenga negociaciones es otro dato.
             </p>
           {/each}
         </div>
 
         <div class="v2-label" style="margin-bottom:10px">
-          Tasks
+          Tareas
           {#if overdueTasks.length}
             <span style="margin-left:6px;color:var(--v2-rust);font-weight:600"
-              >· {overdueTasks.length} overdue</span
+              >· {overdueTasks.length} vencidas</span
             >
           {/if}
         </div>
@@ -283,17 +283,17 @@
                   : 'font-size:11.5px;white-space:nowrap'}
               >
                 {t.status === 'Completed'
-                  ? 'done'
+                  ? 'hecha'
                   : late
-                    ? `${late}d late`
+                    ? `${late}d de atraso`
                     : t.due_date
                       ? relativeDays(t.due_date)
-                      : 'no due date'}
+                      : 'sin vencimiento'}
               </span>
             </a>
           {:else}
             <p class="v2-sub" style="padding:14px 15px;font-size:12.5px">
-              Nothing outstanding that names this person.
+              No hay nada pendiente que nombre a esta persona.
             </p>
           {/each}
         </div>
@@ -301,7 +301,7 @@
         <div class="v2-label" style="margin-bottom:10px">
           Tickets
           {#if openTickets.length}
-            <span class="v2-num" style="margin-left:6px">{openTickets.length}</span> open
+            <span class="v2-num" style="margin-left:6px">{openTickets.length}</span> abiertos
           {/if}
         </div>
         <div class="v2-card" style="overflow:hidden;margin-bottom:22px">
@@ -317,25 +317,25 @@
               <Pill tone={PRIORITY_TONE[t.priority]}>{t.priority}</Pill>
             </a>
           {:else}
-            <p class="v2-sub" style="padding:14px 15px;font-size:12.5px">No tickets.</p>
+            <p class="v2-sub" style="padding:14px 15px;font-size:12.5px">Sin tickets.</p>
           {/each}
         </div>
 
         {#if contact.description}
-          <div class="v2-label" style="margin:0 0 10px">About</div>
+          <div class="v2-label" style="margin:0 0 10px">Acerca de</div>
           <div class="v2-card about">{contact.description}</div>
         {/if}
 
         <div class="act-head">
-          <div class="v2-label">Activity</div>
+          <div class="v2-label">Actividad</div>
           {#if hasFiles}
             <!-- Only real kinds. There is no calls/emails/meetings split because
                  there are no such records to split on. -->
-            <div class="seg" role="tablist" aria-label="Filter activity">
-              <button class:on={filter === 'all'} onclick={() => (filter = 'all')}>All</button>
-              <button class:on={filter === 'notes'} onclick={() => (filter = 'notes')}>Notes</button
+            <div class="seg" role="tablist" aria-label="Filtrar actividad">
+              <button class:on={filter === 'all'} onclick={() => (filter = 'all')}>Todo</button>
+              <button class:on={filter === 'notes'} onclick={() => (filter = 'notes')}>Notas</button
               >
-              <button class:on={filter === 'files'} onclick={() => (filter = 'files')}>Files</button
+              <button class:on={filter === 'files'} onclick={() => (filter = 'files')}>Archivos</button
               >
             </div>
           {/if}
@@ -366,20 +366,20 @@
             rows="2"
             bind:value={note}
             class="note-input"
-            placeholder="Log a call, a reply, what they said…"></textarea>
+            placeholder="Registrá una llamada, una respuesta, lo que dijeron…"></textarea>
           <div class="note-actions">
             <button class="v2-btn v2-btn-primary" type="submit" disabled={saving || !canSubmit}>
               {saving
-                ? 'Saving…'
+                ? 'Guardando…'
                 : note.trim()
-                  ? 'Add note'
+                  ? 'Agregar nota'
                   : fileName
-                    ? 'Attach file'
-                    : 'Add note'}
+                    ? 'Adjuntar archivo'
+                    : 'Agregar nota'}
             </button>
             <label class="v2-btn" class:has-file={fileName}>
               <Paperclip size={14} />
-              <span class="attach-label">{fileName || 'Attach file'}</span>
+              <span class="attach-label">{fileName || 'Adjuntar archivo'}</span>
               <input
                 bind:this={fileInput}
                 type="file"
@@ -393,7 +393,7 @@
                 type="button"
                 class="v2-btn-quiet clear-file"
                 onclick={clearFile}
-                title="Remove file"
+                title="Quitar archivo"
               >
                 <X size={13} />
               </button>
@@ -430,7 +430,7 @@
             {/if}
           {:else}
             <p class="v2-sub" style="font-size:12.5px">
-              Nothing logged yet. The first note you add shows up here.
+              Todavía no hay nada registrado. La primera nota que agregues aparece acá.
             </p>
           {/each}
         </div>
@@ -439,20 +439,20 @@
   </div>
 
   <aside class="v2-rail">
-    <div class="v2-label v2-rail-head">Contact</div>
+    <div class="v2-label v2-rail-head">Contacto</div>
     <dl class="v2-kv">
-      <dt>Title</dt>
+      <dt>Cargo</dt>
       <dd>{contact.title || '—'}</dd>
-      <dt>Department</dt>
+      <dt>Departamento</dt>
       <dd>{contact.department || '—'}</dd>
-      <dt>Account</dt>
+      <dt>Cuenta</dt>
       <dd>
         {#if contact.account}
           <a href="/accounts/{contact.account.id}" style="color:inherit">{contact.account.name}</a>
         {:else}, {/if}
       </dd>
       {#if contact.other_accounts.length}
-        <dt>Also at</dt>
+        <dt>También en</dt>
         <dd>
           {#each contact.other_accounts as other, i (other.id)}
             {i > 0 ? ', ' : ''}<a href="/accounts/{other.id}" style="color:inherit">{other.name}</a>
@@ -463,15 +463,15 @@
         <!-- Typed into the contact rather than linked, and often a different
              company from the account. Shown as what it is instead of being
              quietly presented as the account. -->
-        <dt>Company typed in</dt>
+        <dt>Empresa escrita a mano</dt>
         <dd>{contact.organization}</dd>
       {/if}
-      <dt>Email</dt>
+      <dt>Correo</dt>
       <dd style="font-size:12px;word-break:break-all">
         {#if contact.email}<a href="mailto:{contact.email}" style="color:inherit">{contact.email}</a
           >{:else}, {/if}
       </dd>
-      <dt>Phone</dt>
+      <dt>Teléfono</dt>
       <dd class="v2-num" style="font-size:12px">
         {#if contact.phone}<a href="tel:{contact.phone}" style="color:inherit">{contact.phone}</a
           >{:else}, {/if}
@@ -479,33 +479,33 @@
       {#if contact.linkedin_url}
         <dt>LinkedIn</dt>
         <dd style="font-size:12px;word-break:break-all">
-          <a href={contact.linkedin_url} rel="noreferrer noopener" target="_blank">Profile</a>
+          <a href={contact.linkedin_url} rel="noreferrer noopener" target="_blank">Perfil</a>
         </dd>
       {/if}
-      <dt>Owner</dt>
+      <dt>Responsable</dt>
       <dd>
-        {owners.length ? owners.join(', ') : 'Unassigned'}
+        {owners.length ? owners.join(', ') : 'Sin asignar'}
       </dd>
-      <dt>Status</dt>
+      <dt>Estado</dt>
       <dd>
         <span style="display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap">
           <Pill tone={contact.is_active ? 'moss' : 'slate'}>
-            {contact.is_active ? 'Active' : 'Inactive'}
+            {contact.is_active ? 'Activo' : 'Inactivo'}
           </Pill>
           {#if contact.do_not_call}
-            <Pill tone="rust"><PhoneOff size={11} />Do not call</Pill>
+            <Pill tone="rust"><PhoneOff size={11} />No llamar</Pill>
           {/if}
         </span>
       </dd>
-      <dt>Added</dt>
+      <dt>Agregado</dt>
       <dd>{shortDate(contact.created_at)}</dd>
-      <dt>Updated</dt>
+      <dt>Actualizado</dt>
       <dd>{contact.updated_at ? relativeDays(contact.updated_at) : '—'}</dd>
     </dl>
 
     {#if colleagues.length}
       <div class="v2-label v2-rail-head">
-        Also at {contact.account?.name ?? 'this account'}
+        También en {contact.account?.name ?? 'esta cuenta'}
       </div>
       {#each colleagues as c (c.id)}
         <a
@@ -516,7 +516,7 @@
           <Avatar name={c.name} size={27} />
           <div style="min-width:0">
             <div style="font-size:12.5px;font-weight:550">{c.name}</div>
-            <div class="v2-sub" style="font-size:11.5px">{c.title || 'No title recorded'}</div>
+            <div class="v2-sub" style="font-size:11.5px">{c.title || 'Sin cargo registrado'}</div>
           </div>
         </a>
       {/each}

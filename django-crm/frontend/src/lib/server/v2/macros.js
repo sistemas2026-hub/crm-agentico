@@ -97,10 +97,10 @@ function buildBody(values) {
 
   body.title = String(body.title ?? '').trim();
   body.body = String(body.body ?? '').trim();
-  if (!body.title) throw new Error('A macro needs a title.');
-  if (!body.body) throw new Error('A macro needs a body.');
+  if (!body.title) throw new Error('Una macro necesita un título.');
+  if (!body.body) throw new Error('Una macro necesita un contenido.');
   if (body.scope !== 'org' && body.scope !== 'personal') {
-    throw new Error("scope must be 'org' or 'personal'.");
+    throw new Error("scope tiene que ser 'org' o 'personal'.");
   }
   if (body.is_active !== undefined) body.is_active = Boolean(body.is_active);
 
@@ -122,7 +122,7 @@ export async function createMacro({ cookies }, values) {
  * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
  */
 export async function updateMacro({ cookies }, id, values) {
-  if (!id) throw new Error('Which macro? No macro id was given.');
+  if (!id) throw new Error('¿Qué macro? No se indicó un id de macro.');
   const body = buildBody(values);
   return await apiRequest(`/macros/${id}/`, { method: 'PATCH', body }, { cookies });
 }
@@ -136,7 +136,7 @@ export async function updateMacro({ cookies }, id, values) {
  * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
  */
 export async function deleteMacro({ cookies }, id) {
-  if (!id) throw new Error('Which macro? No macro id was given.');
+  if (!id) throw new Error('¿Qué macro? No se indicó un id de macro.');
   return await apiRequest(`/macros/${id}/`, { method: 'DELETE' }, { cookies });
 }
 
@@ -155,7 +155,7 @@ export async function deleteMacro({ cookies }, id) {
  * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
  */
 export async function activateMacro({ cookies }, id) {
-  if (!id) throw new Error('Which macro? No macro id was given.');
+  if (!id) throw new Error('¿Qué macro? No se indicó un id de macro.');
   return await apiRequest(
     `/macros/${id}/`,
     { method: 'PATCH', body: { is_active: true } },

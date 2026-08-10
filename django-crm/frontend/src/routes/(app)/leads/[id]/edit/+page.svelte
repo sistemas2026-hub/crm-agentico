@@ -90,7 +90,7 @@
   /** The API's own refusal, when it disagrees with the checks below. */
   let serverMessage = $derived(result?.message ?? '');
 
-  const displayName = `${lead.first_name ?? ''} ${lead.last_name ?? ''}`.trim() || 'Lead';
+  const displayName = `${lead.first_name ?? ''} ${lead.last_name ?? ''}`.trim() || 'Prospecto';
 
   /* Mirrors `LeadCreateSerializer.validate_status`: converted is the one
      status you can neither re-enter nor leave. Everything else can change. */
@@ -106,15 +106,15 @@
     /** @type {Record<string, string>} */
     const e = {};
     if (!form.first_name.trim() && !form.last_name.trim())
-      e.last_name = 'A lead needs a name to be findable. First or last will do.';
+      e.last_name = 'Un prospecto necesita un nombre para poder encontrarlo. Nombre o apellido alcanza.';
 
     const email = form.email.trim().toLowerCase();
     if (emailRequired && !email)
-      e.email = 'Converting creates a Contact, and a contact without an email cannot be reached.';
+      e.email = 'Convertir crea un Contacto, y un contacto sin correo no se puede contactar.';
     else if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
-      e.email = 'That does not look like an email address.';
+      e.email = 'Eso no parece una dirección de correo.';
     else if (email && server.taken_emails.includes(email))
-      e.email = 'Another lead in this org already uses that address.';
+      e.email = 'Otro prospecto en esta organización ya usa esa dirección.';
 
     /* Mirrors `flexible_phone_validator` in common/validators.py exactly.
        The check here used to be a length test, which passes plenty of values
@@ -124,15 +124,15 @@
     if (form.phone && !/^[\d\s\-()+.]{7,25}$/.test(form.phone)) {
       e.phone =
         form.phone.length > 25
-          ? `Phone is stored in 25 characters; this is ${form.phone.length}.`
-          : 'Digits and separators only. The API rejects letters, so "x123" extensions have to go in the notes.';
+          ? `El teléfono se guarda en 25 caracteres; esto tiene ${form.phone.length}.`
+          : 'Solo números y separadores. La API rechaza letras, así que las extensiones "x123" tienen que ir en las notas.';
     }
 
     const amount = form.opportunity_amount;
     if (amount !== '' && amount !== null) {
       const n = Number(amount);
-      if (!Number.isFinite(n)) e.opportunity_amount = 'Estimated value has to be a number.';
-      else if (n < 0) e.opportunity_amount = 'Estimated value cannot be negative.';
+      if (!Number.isFinite(n)) e.opportunity_amount = 'El valor estimado tiene que ser un número.';
+      else if (n < 0) e.opportunity_amount = 'El valor estimado no puede ser negativo.';
     }
 
     /* Mirrors the required-field loop at the end of
@@ -144,7 +144,7 @@
        exempt: false is a value, so a required one can never be unsatisfied. */
     for (const f of customFields) {
       if (!f.is_required || f.field_type === 'checkbox') continue;
-      if (String(f.value ?? '').trim() === '') e[`cf_${f.key}`] = `${f.label} is required.`;
+      if (String(f.value ?? '').trim() === '') e[`cf_${f.key}`] = `${f.label} es obligatorio.`;
     }
 
     return e;
@@ -179,17 +179,17 @@
   };
 </script>
 
-<PageHeader title="Edit {displayName}" center>
+<PageHeader title="Editar {displayName}" center>
   {#snippet crumb()}
-    <a href="/leads">Leads</a>
+    <a href="/leads">Prospectos</a>
     <ChevronRight size={12} />
     <a href="/leads/{lead.id}">{displayName}</a>
   {/snippet}
   {#snippet sub()}
-    Currently <Pill tone={LEAD_STATUS_TONE[originalStatus]}
+    Actualmente <Pill tone={LEAD_STATUS_TONE[originalStatus]}
       >{LEAD_STATUS_LABEL[originalStatus]}</Pill
     >
-    · created {longDate(lead.created_at)}
+    · creado {longDate(lead.created_at)}
   {/snippet}
 </PageHeader>
 
@@ -199,31 +199,31 @@
       <div class="v2-next" style="margin-bottom:18px" role="status">
         <div class="v2-next-body">
           {#if result?.account_id}
-            <div class="v2-next-text">Converted.</div>
+            <div class="v2-next-text">Convertido.</div>
             <div class="v2-sub" style="margin-top:3px">
-              The account, contact and deal are ready. Converting is handled on its own, so only
-              custom fields from this save were applied; every other edit on this form was not.
-              Reopen the lead and redo them.
+              La cuenta, el contacto y la negociación están listos. Convertir se maneja por
+              separado, así que solo se aplicaron los campos personalizados de este guardado; el
+              resto de los cambios en este formulario no. Volvé a abrir el prospecto y rehacelos.
             </div>
           {:else}
-            <div class="v2-next-text">Saved.</div>
+            <div class="v2-next-text">Guardado.</div>
             <div class="v2-sub" style="margin-top:3px">
-              Changes to “{displayName}” are on the record.
+              Los cambios en "{displayName}" quedaron guardados.
             </div>
           {/if}
           {#if result?.account_id}
             <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
-              <a class="v2-btn" href="/accounts/{result.account_id}">View account</a>
+              <a class="v2-btn" href="/accounts/{result.account_id}">Ver cuenta</a>
               {#if result.contact_id}
-                <a class="v2-btn" href="/contacts/{result.contact_id}">View contact</a>
+                <a class="v2-btn" href="/contacts/{result.contact_id}">Ver contacto</a>
               {/if}
               {#if result.opportunity_id}
-                <a class="v2-btn" href="/pipeline/{result.opportunity_id}">View deal</a>
+                <a class="v2-btn" href="/pipeline/{result.opportunity_id}">Ver negociación</a>
               {/if}
             </div>
           {/if}
         </div>
-        <a class="v2-btn" href="/leads/{lead.id}">Back to the lead</a>
+        <a class="v2-btn" href="/leads/{lead.id}">Volver al prospecto</a>
       </div>
     {/if}
 
@@ -235,7 +235,7 @@
       >
         <TriangleAlert size={17} style="color:var(--v2-rust);flex:none" />
         <div class="v2-next-body">
-          <div style="font-weight:600">The server refused this change</div>
+          <div style="font-weight:600">El servidor rechazó este cambio</div>
           <div class="v2-sub" style="margin-top:2px">{serverMessage}</div>
         </div>
       </div>
@@ -250,26 +250,23 @@
         <TriangleAlert size={17} style="color:var(--v2-rust);flex:none" />
         <div class="v2-next-body">
           <div style="font-weight:600">
-            {Object.keys(errors).length} field{Object.keys(errors).length === 1 ? '' : 's'} still need{Object.keys(
-              errors
-            ).length === 1
-              ? 's'
-              : ''} you
+            Todavía {Object.keys(errors).length === 1 ? 'falta' : 'faltan'} {Object.keys(errors).length}
+            {Object.keys(errors).length === 1 ? 'campo' : 'campos'}
           </div>
-          <div class="v2-sub" style="margin-top:2px">Nothing has been saved.</div>
+          <div class="v2-sub" style="margin-top:2px">No se guardó nada.</div>
         </div>
       </div>
     {/if}
 
-    <div class="v2-section-label v2-label">Person</div>
+    <div class="v2-section-label v2-label">Persona</div>
 
     <div class="pair">
       <div class="v2-field">
-        <label for="f-first">First name</label>
+        <label for="f-first">Nombre</label>
         <input id="f-first" name="first_name" class="v2-input" bind:value={form.first_name} />
       </div>
       <div class="v2-field">
-        <label for="f-last">Last name</label>
+        <label for="f-last">Apellido</label>
         <input
           id="f-last"
           name="last_name"
@@ -284,8 +281,8 @@
 
     <div class="v2-field">
       <label for="f-email">
-        Email
-        {#if emailRequired}<span class="req">required to convert</span>{/if}
+        Correo
+        {#if emailRequired}<span class="req">obligatorio para convertir</span>{/if}
       </label>
       <input
         id="f-email"
@@ -301,15 +298,16 @@
         <p class="v2-error" id="e-email">{errors.email}</p>
       {:else}
         <p class="v2-hint" id="h-email">
-          One lead per address per org, ignoring case. The database enforces it, so a duplicate
-          comes back as a rejected save rather than a second record.
+          Un prospecto por dirección por organización, sin distinguir mayúsculas. La base de datos
+          lo exige, así que un duplicado vuelve como un guardado rechazado en vez de un segundo
+          registro.
         </p>
       {/if}
     </div>
 
     <div class="pair">
       <div class="v2-field">
-        <label for="f-phone">Phone</label>
+        <label for="f-phone">Teléfono</label>
         <input
           id="f-phone"
           name="phone"
@@ -321,22 +319,22 @@
         {#if show('phone')}<p class="v2-error">{errors.phone}</p>{/if}
       </div>
       <div class="v2-field">
-        <label for="f-jobtitle">Job title</label>
+        <label for="f-jobtitle">Cargo</label>
         <input id="f-jobtitle" name="job_title" class="v2-input" bind:value={form.job_title} />
       </div>
     </div>
 
-    <div class="v2-section-label v2-label">Company</div>
+    <div class="v2-section-label v2-label">Empresa</div>
 
     <div class="pair">
       <div class="v2-field">
-        <label for="f-company">Company</label>
+        <label for="f-company">Empresa</label>
         <input id="f-company" name="company_name" class="v2-input" bind:value={form.company_name} />
       </div>
       <div class="v2-field">
-        <label for="f-industry">Industry</label>
+        <label for="f-industry">Rubro</label>
         <select id="f-industry" name="industry" class="v2-input" bind:value={form.industry}>
-          <option value="">Not specified</option>
+          <option value="">No especificado</option>
           {#each INDUSTRIES as ind (ind)}
             <option value={ind}>{industryLabel(ind)}</option>
           {/each}
@@ -345,7 +343,7 @@
     </div>
 
     <div class="v2-field">
-      <label for="f-website">Website</label>
+      <label for="f-website">Sitio web</label>
       <input id="f-website" name="website" class="v2-input" bind:value={form.website} />
     </div>
 
@@ -354,8 +352,8 @@
     <div class="pair">
       <div class="v2-field">
         <label for="f-status">
-          Status
-          {#if isConverted}<span class="locked"><Lock size={10} />Settled</span>{/if}
+          Estado
+          {#if isConverted}<span class="locked"><Lock size={10} />Resuelto</span>{/if}
         </label>
         <!--
           Disabled rather than absent once the lead is converted. Removing the
@@ -389,9 +387,9 @@
         -->
       </div>
       <div class="v2-field">
-        <label for="f-source">Source</label>
+        <label for="f-source">Origen</label>
         <select id="f-source" name="source" class="v2-input" bind:value={form.source}>
-          <option value="">Not specified</option>
+          <option value="">No especificado</option>
           {#each LEAD_SOURCES as s (s)}
             <option value={s}>{LEAD_SOURCE_LABEL[s]}</option>
           {/each}
@@ -405,42 +403,43 @@
     -->
     {#if isConverted}
       <div class="consequence" style="--edge:var(--v2-moss)" id="status-locked">
-        <div style="font-weight:600">This lead has already been converted</div>
+        <div style="font-weight:600">Este prospecto ya fue convertido</div>
         <p>
-          Its account, contact and opportunity exist and carry the work now. The status stays where
-          it is: reopening the lead would not remove any of them, and converting it again would
-          build a second opportunity against the same account. The API refuses both.
+          Su cuenta, contacto y negociación existen y llevan el trabajo ahora. El estado se queda
+          como está: reabrir el prospecto no eliminaría ninguno de ellos, y convertirlo de nuevo
+          crearía una segunda negociación contra la misma cuenta. La API rechaza ambas cosas.
         </p>
         <p style="margin-top:6px">
-          Everything else on this form is still editable. A converted lead is a record, not a
-          read-only one.
+          Todo lo demás en este formulario sigue siendo editable. Un prospecto convertido es un
+          registro, no uno de solo lectura.
         </p>
       </div>
     {:else if enteringConverted}
       <div class="consequence" style="--edge:var(--v2-clay)">
-        <div style="font-weight:600">Converting creates three records</div>
+        <div style="font-weight:600">Convertir crea tres registros</div>
         <p>
-          An Account, a Contact and an Opportunity, with this lead's comments and attachments moved
-          across. The lead stays as a converted record, and this is the last time you can change its
-          status. There is no endpoint that undoes any of it.
+          Una Cuenta, un Contacto y una Negociación, moviendo los comentarios y adjuntos de este
+          prospecto. El prospecto queda como registro convertido, y esta es la última vez que
+          podés cambiar su estado. No hay forma de deshacer nada de esto.
         </p>
         <p style="margin-top:6px">
-          Any other change on this form, aside from custom fields, is dropped when it saves
-          alongside a conversion. Reopen the lead afterwards to redo it.
+          Cualquier otro cambio en este formulario, aparte de los campos personalizados, se
+          descarta cuando se guarda junto con una conversión. Volvé a abrir el prospecto después
+          para rehacerlo.
         </p>
       </div>
     {:else if statusChanged}
       <p class="v2-hint" style="margin:-6px 0 4px">
         {LEAD_STATUS_LABEL[originalStatus]} → {LEAD_STATUS_LABEL[form.status]}
         {#if form.status === 'closed'}
-          · reversible, nothing is created
+          · reversible, no crea nada
         {/if}
       </p>
     {/if}
 
     <div class="pair">
       <div class="v2-field">
-        <label for="f-amount">Estimated value</label>
+        <label for="f-amount">Valor estimado</label>
         <input
           id="f-amount"
           name="opportunity_amount"
@@ -457,12 +456,12 @@
           <p class="v2-hint">
             {Number(form.opportunity_amount) > 0
               ? money(Number(form.opportunity_amount), lead.currency)
-              : 'What the deal would be worth if it lands.'}
+              : 'Cuánto valdría la negociación si se concreta.'}
           </p>
         {/if}
       </div>
       <div class="v2-field">
-        <label for="f-owner">Owner</label>
+        <label for="f-owner">Responsable</label>
         <!-- Bound to the Profile id. The mock bound this to a display name,
              which reads identically on screen and cannot be saved. -->
         <!-- What the select was rendered with. The action compares against it
@@ -471,7 +470,7 @@
              cut a two-person lead down to one on every save. -->
         <input type="hidden" name="assigned_to_original" value={data.form.assigned_to} />
         <select id="f-owner" name="assigned_to" class="v2-input" bind:value={form.assigned_to}>
-          <option value="">Nobody</option>
+          <option value="">Nadie</option>
           {#each data.owners as o (o.id)}
             <option value={o.id}>{o.name}</option>
           {/each}
@@ -480,7 +479,7 @@
     </div>
 
     <div class="v2-field">
-      <label for="f-notes">Notes</label>
+      <label for="f-notes">Notas</label>
       <textarea
         id="f-notes"
         name="description"
@@ -493,7 +492,7 @@
          type follows field_type; every one submits a string (or nothing, for
          an unchecked box) and `_coerce_value` converts on the way in. -->
     {#if customFields.length > 0}
-      <div class="v2-label v2-section-label">Details</div>
+      <div class="v2-label v2-section-label">Detalles</div>
       {#each customFields as f (f.key)}
         <div class="v2-field">
           {#if f.field_type === 'checkbox'}
@@ -504,7 +503,7 @@
           {:else}
             <label for="f-cf-{f.key}">
               {f.label}
-              {#if f.is_required}<span class="req">required</span>{/if}
+              {#if f.is_required}<span class="req">obligatorio</span>{/if}
             </label>
             {#if f.field_type === 'dropdown'}
               <select
@@ -551,9 +550,9 @@
 
     <div class="actions">
       <button class="v2-btn v2-btn-primary" type="submit" disabled={saving}>
-        {saving ? 'Saving…' : 'Save changes'}
+        {saving ? 'Guardando…' : 'Guardar cambios'}
       </button>
-      <a class="v2-btn" href="/leads/{lead.id}">Cancel</a>
+      <a class="v2-btn" href="/leads/{lead.id}">Cancelar</a>
     </div>
   </form>
 </div>

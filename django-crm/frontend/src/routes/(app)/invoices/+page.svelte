@@ -31,26 +31,26 @@
     if (SETTLED.includes(inv.status)) return '—';
     if (!inv.due_date) return '—';
     const n = daysSince(inv.due_date);
-    if (n > 0) return `${n}d late`;
-    if (n === 0) return 'due today';
-    return `${Math.abs(n)}d left`;
+    if (n > 0) return `${n}d de atraso`;
+    if (n === 0) return 'vence hoy';
+    return `${Math.abs(n)}d restantes`;
   }
 
   const isLate = (inv) =>
     !SETTLED.includes(inv.status) && inv.due_date && daysSince(inv.due_date) > 0;
 </script>
 
-<PageHeader title="Invoices">
+<PageHeader title="Facturas">
   {#snippet sub()}
     <!--
       These aggregates come from the API over the whole result set. v1 summed
       the loaded page, so a 50-row list showed pills adding up to 10.
     -->
-    <span class="v2-num">{count(totals.count)}</span> invoices ·
-    <span class="v2-num">{money(totals.outstanding, data.org.currency)}</span> outstanding
+    <span class="v2-num">{count(totals.count)}</span> facturas ·
+    <span class="v2-num">{money(totals.outstanding, data.org.currency)}</span> pendiente
   {/snippet}
   {#snippet actions()}
-    <a class="v2-btn v2-btn-primary" href="/invoices/new"><Plus />New invoice</a>
+    <a class="v2-btn v2-btn-primary" href="/invoices/new"><Plus />Nueva factura</a>
   {/snippet}
 </PageHeader>
 
@@ -62,26 +62,26 @@
 <div class="v2-pad" style="padding-top:16px;flex:none">
   <div class="v2-stats">
     <StatCard
-      label="Overdue"
+      label="Vencido"
       value={money(totals.overdue, data.org.currency)}
       tone="rust"
-      detail="Chase these first"
+      detail="Cobrá esto primero"
     />
     <StatCard
-      label="Due this month"
+      label="Vence este mes"
       value={money(totals.due_this_month, data.org.currency)}
       tone="clay"
     />
     <StatCard
-      label="Paid this quarter"
+      label="Pagado este trimestre"
       value={money(totals.paid_this_quarter, data.org.currency)}
       tone="moss"
     />
     <StatCard
-      label="Draft"
+      label="Borrador"
       value={money(totals.draft, data.org.currency)}
       tone="slate"
-      detail="Not sent yet"
+      detail="Todavía no se envió"
     />
   </div>
 </div>
@@ -97,7 +97,7 @@
   people={data.people}
   accounts={data.accounts}
   meId={data.meId}
-  meta="Oldest due first"
+  meta="Vencimiento más antiguo primero"
 />
 
 {#if form?.error}
@@ -109,13 +109,13 @@
 <div class="v2-scroll">
   {#if invoices.length === 0}
     <EmptyState
-      title="Nothing billed yet"
-      body="Invoices show up here once you raise one. A won deal is usually the place to start. The amount and the account are already there."
+      title="Todavía no facturaste nada"
+      body="Las facturas aparecen acá cuando generás una. Lo más habitual es arrancar desde una negociación ganada: el monto y la cuenta ya están cargados."
     >
       {#snippet icon()}<Receipt size={21} />{/snippet}
       {#snippet actions()}
-        <a class="v2-btn v2-btn-primary" href="/invoices/new">New invoice</a>
-        <a class="v2-btn" href="/pipeline">Go to pipeline</a>
+        <a class="v2-btn v2-btn-primary" href="/invoices/new">Nueva factura</a>
+        <a class="v2-btn" href="/pipeline">Ir al pipeline</a>
       {/snippet}
     </EmptyState>
   {:else}
@@ -123,12 +123,12 @@
       <table class="v2-table">
         <thead>
           <tr>
-            <th>Invoice</th>
-            <th>Account</th>
-            <th>Status</th>
-            <th class="v2-r">Amount</th>
-            <th>Due</th>
-            <th class="v2-r">Age</th>
+            <th>Factura</th>
+            <th>Cuenta</th>
+            <th>Estado</th>
+            <th class="v2-r">Monto</th>
+            <th>Vence</th>
+            <th class="v2-r">Antigüedad</th>
             <th style="width:130px"></th>
           </tr>
         </thead>
@@ -173,8 +173,8 @@
                   >
                     <input type="hidden" name="id" value={inv.id} />
                     <button class="v2-btn v2-btn-sm" disabled={sending[inv.id]}>
-                      {#if sending[inv.id]}Sending…{:else if inv.status === 'Overdue'}Send a
-                        reminder{:else}Send{/if}
+                      {#if sending[inv.id]}Enviando…{:else if inv.status === 'Overdue'}Enviar
+                        recordatorio{:else}Enviar{/if}
                     </button>
                   </form>
                 {/if}
@@ -185,7 +185,7 @@
       </table>
     </div>
     <p class="v2-sub v2-pad" style="font-size:12px;padding-bottom:24px">
-      Showing <span class="v2-num">{invoices.length}</span> of
+      Mostrando <span class="v2-num">{invoices.length}</span> de
       <span class="v2-num">{count(totals.count)}</span>
     </p>
   {/if}

@@ -45,6 +45,18 @@ const WEEKDAYS = [
   ['Sunday', 'sunday']
 ];
 
+/** Display-only Spanish name for the validation error below. The English
+ *  label above is never shown; it only derives the field prefix. */
+const WEEKDAY_LABEL_ES = {
+  Monday: 'El lunes',
+  Tuesday: 'El martes',
+  Wednesday: 'El miércoles',
+  Thursday: 'El jueves',
+  Friday: 'El viernes',
+  Saturday: 'El sábado',
+  Sunday: 'El domingo'
+};
+
 /** "09:00:00" → "09:00"; null/"" stays null (a closed day). */
 function toHm(value) {
   return value ? value.slice(0, 5) : null;
@@ -103,7 +115,7 @@ function unfoldDays(days) {
     const open = entry?.open || null;
     const close = entry?.close || null;
     if (Boolean(open) !== Boolean(close)) {
-      throw new Error(`${label} needs both an opening and a closing time, or neither.`);
+      throw new Error(`${WEEKDAY_LABEL_ES[label]} necesita hora de apertura y de cierre, o ninguna de las dos.`);
     }
     flat[`${key}_open`] = open;
     flat[`${key}_close`] = close;
@@ -127,7 +139,7 @@ function unfoldDays(days) {
  *   `name` and `timezone` are ever read out of it
  */
 export async function updateBusinessHours({ cookies }, calendarId, days, meta) {
-  if (!calendarId) throw new Error('Which calendar? No calendar id was given.');
+  if (!calendarId) throw new Error('¿Qué calendario? No se indicó un id de calendario.');
   const body = { ...unfoldDays(days), name: meta.name, timezone: meta.timezone };
   return await apiRequest(
     `/business-hours/calendar/${calendarId}/`,
@@ -150,7 +162,7 @@ export async function updateBusinessHours({ cookies }, calendarId, days, meta) {
  * @param {{ date: string, name: string }} values
  */
 export async function addHoliday({ cookies }, calendarId, values) {
-  if (!values?.date) throw new Error('A holiday needs a date.');
+  if (!values?.date) throw new Error('Un feriado necesita una fecha.');
   const body = { date: values.date, name: values.name };
   return await apiRequest(
     `/business-hours/calendar/${calendarId}/holidays/`,
@@ -171,7 +183,7 @@ export async function addHoliday({ cookies }, calendarId, values) {
  * @param {string} holidayId
  */
 export async function removeHoliday({ cookies }, calendarId, holidayId) {
-  if (!holidayId) throw new Error('Which holiday? No holiday id was given.');
+  if (!holidayId) throw new Error('¿Qué feriado? No se indicó un id de feriado.');
   return await apiRequest(
     `/business-hours/calendar/${calendarId}/holidays/${holidayId}/`,
     { method: 'DELETE' },

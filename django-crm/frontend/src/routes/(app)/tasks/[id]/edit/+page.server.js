@@ -107,7 +107,7 @@ export const actions = {
     } catch (/** @type {any} */ err) {
       return fail(400, {
         values: { ...values, parent_kind: kind, parent_id: id },
-        error: readableError(err, 'Could not save this task.')
+        error: readableError(err, 'No se pudo guardar esta tarea.')
       });
     }
 

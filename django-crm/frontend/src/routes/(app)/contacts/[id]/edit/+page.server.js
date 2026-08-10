@@ -51,7 +51,7 @@ export const actions = {
     try {
       await updateContact({ cookies }, params.id, values);
     } catch (/** @type {any} */ err) {
-      return fail(400, { values, error: readableError(err, 'Could not save this contact.') });
+      return fail(400, { values, error: readableError(err, 'No se pudo guardar este contacto.') });
     }
 
     redirect(303, `/contacts/${params.id}`);

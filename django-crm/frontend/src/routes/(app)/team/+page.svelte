@@ -56,42 +56,42 @@
 </script>
 
 {#if data.forbidden}
-  <PageHeader title="Team and access" />
+  <PageHeader title="Equipo y acceso" />
   <div class="v2-pad" style="padding-top:40px">
     <NextAction
-      label="Admins only"
-      text="Managing people, roles and access is limited to organization admins. Ask an admin on your team if you need someone added or a role changed."
+      label="Solo administradores"
+      text="Gestionar personas, roles y accesos está limitado a administradores de la organización. Pedile a un administrador de tu equipo si necesitás agregar a alguien o cambiar un rol."
     />
   </div>
 {:else}
-  <PageHeader title="Team and access">
+  <PageHeader title="Equipo y acceso">
     {#snippet sub()}
-      <span class="v2-num">{count(data.totals.count)}</span> people ·
-      <span class="v2-num">{count(data.totals.admins)}</span> admins
+      <span class="v2-num">{count(data.totals.count)}</span> personas ·
+      <span class="v2-num">{count(data.totals.admins)}</span> administradores
     {/snippet}
     {#snippet actions()}
       <button class="v2-btn v2-btn-primary" onclick={() => (inviting = !inviting)}>
-        <UserPlus />Invite
+        <UserPlus />Invitar
       </button>
     {/snippet}
   </PageHeader>
 
   <div class="v2-pad" style="padding-top:16px;flex:none">
     <div class="v2-stats">
-      <StatCard label="Active people" value={count(data.totals.count)} tone="ink" />
+      <StatCard label="Personas activas" value={count(data.totals.count)} tone="ink" />
       <StatCard
-        label="Admins"
+        label="Administradores"
         value={count(data.totals.admins)}
         tone="clay"
-        detail="Can change roles and org settings"
+        detail="Pueden cambiar roles y configuración de la organización"
       />
       <StatCard
-        label="Never signed in"
+        label="Nunca inició sesión"
         value={count(data.totals.never_signed_in)}
         tone={data.totals.never_signed_in ? 'clay' : 'slate'}
-        detail={data.totals.never_signed_in ? 'Invited, seat unclaimed' : 'Everyone has signed in'}
+        detail={data.totals.never_signed_in ? 'Invitado, cupo sin reclamar' : 'Todos iniciaron sesión'}
       />
-      <StatCard label="Deactivated" value={count(data.totals.deactivated)} tone="slate" />
+      <StatCard label="Desactivados" value={count(data.totals.deactivated)} tone="slate" />
     </div>
   </div>
 
@@ -107,7 +107,7 @@
         >
           <div style="flex:1;min-width:220px">
             <label class="v2-label" for="invite-email" style="display:block;margin-bottom:4px">
-              Invite by email
+              Invitar por correo
             </label>
             <input
               id="invite-email"
@@ -116,21 +116,21 @@
               required
               class="v2-input"
               style="width:100%"
-              placeholder="name@company.com"
+              placeholder="nombre@empresa.com"
             />
           </div>
           <div>
             <label class="v2-label" for="invite-role" style="display:block;margin-bottom:4px">
-              Role
+              Rol
             </label>
             <select id="invite-role" name="role" class="v2-input" style="width:130px">
-              <option value="USER">Member</option>
-              <option value="ADMIN">Admin</option>
+              <option value="USER">Miembro</option>
+              <option value="ADMIN">Administrador</option>
             </select>
           </div>
-          <button class="v2-btn v2-btn-primary" disabled={busy}>Send invite</button>
+          <button class="v2-btn v2-btn-primary" disabled={busy}>Enviar invitación</button>
           <button type="button" class="v2-btn" disabled={busy} onclick={() => (inviting = false)}>
-            Cancel
+            Cancelar
           </button>
           {#if form?.invite?.error}
             <p
@@ -148,12 +148,12 @@
           class="v2-sub"
           style="color:var(--v2-moss);font-size:12.5px;margin:0 0 16px;font-weight:550"
         >
-          {form.invited} is a member now. They show below as “never” signed in until they log in with
-          that email.
+          {form.invited} ya es miembro. Aparece abajo como “nunca” inició sesión hasta que entre con
+          ese correo.
         </p>
       {:else if form?.error}
         <div style="margin-bottom:16px">
-          <NextAction label="That did not work" text={form.error} tone="rust" />
+          <NextAction label="Eso no funcionó" text={form.error} tone="rust" />
         </div>
       {/if}
 
@@ -167,25 +167,25 @@
         -->
         <div style="margin-bottom:20px">
           <NextAction
-            label="Loose end"
-            text={`${data.totals.tokens_on_deactivated} API ${data.totals.tokens_on_deactivated === 1 ? 'token belongs' : 'tokens belong'} to a deactivated account. Deactivating already stops them at login, but they are not revoked. Reactivating the account would bring them back. Revoke to close that off.`}
-            action="Review tokens"
+            label="Cabo suelto"
+            text={`${data.totals.tokens_on_deactivated} ${data.totals.tokens_on_deactivated === 1 ? 'token de API pertenece' : 'tokens de API pertenecen'} a una cuenta desactivada. Desactivarla ya los detiene al iniciar sesión, pero no quedan revocados. Reactivar la cuenta los volvería a habilitar. Revocalos para cerrar ese cabo suelto.`}
+            action="Revisar tokens"
             href="/settings/api-tokens"
           />
         </div>
       {/if}
 
-      <div class="v2-label" style="margin-bottom:10px">People</div>
+      <div class="v2-label" style="margin-bottom:10px">Personas</div>
       <div class="v2-table-wrap" style="margin-bottom:26px">
         <table class="v2-table">
           <thead>
             <tr>
-              <th>Person</th>
-              <th>Role</th>
-              <th>Teams</th>
+              <th>Persona</th>
+              <th>Rol</th>
+              <th>Equipos</th>
               <th data-m="hide">Tokens</th>
-              <th class="v2-r">Last signed in</th>
-              <th class="v2-r">Manage</th>
+              <th class="v2-r">Último inicio de sesión</th>
+              <th class="v2-r">Gestionar</th>
             </tr>
           </thead>
           <tbody>
@@ -198,7 +198,7 @@
                     <span style="min-width:0">
                       <span class="v2-table-primary">
                         {m.name}{#if m.is_you}<span class="v2-sub" style="font-weight:400">,
-                            you</span
+                            vos</span
                           >{/if}
                       </span>
                       <span class="v2-table-secondary" style="display:block">{m.email}</span>
@@ -208,7 +208,7 @@
                 <td data-m="tag">
                   <Pill tone={m.is_active ? ROLE_TONE[m.role] : 'slate'}>{ROLE_LABEL[m.role]}</Pill>
                   {#if !m.is_active}
-                    <span class="v2-table-secondary" style="display:block">Deactivated</span>
+                    <span class="v2-table-secondary" style="display:block">Desactivado</span>
                   {/if}
                 </td>
                 <td>
@@ -237,7 +237,7 @@
                   {#if m.last_login}
                     {relativeDays(m.last_login)}
                   {:else}
-                    <span style="color:var(--v2-clay);font-weight:600">never</span>
+                    <span style="color:var(--v2-clay);font-weight:600">nunca</span>
                   {/if}
                 </td>
                 <td class="v2-r">
@@ -261,10 +261,10 @@
                           class="v2-btn v2-btn-sm"
                           disabled={busy || (m.role === 'ADMIN' && isLastAdmin)}
                           title={m.role === 'ADMIN' && isLastAdmin
-                            ? 'The org must keep at least one admin'
+                            ? 'La organización debe mantener al menos un administrador'
                             : ''}
                         >
-                          {m.role === 'ADMIN' ? 'Make member' : 'Make admin'}
+                          {m.role === 'ADMIN' ? 'Hacer miembro' : 'Hacer administrador'}
                         </button>
                       </form>
                       <!-- Activate / deactivate. The last active admin cannot
@@ -280,11 +280,11 @@
                           class="v2-btn v2-btn-sm"
                           disabled={busy || (m.is_active && isLastAdmin)}
                           title={m.is_active && isLastAdmin
-                            ? 'The org must keep at least one active admin'
+                            ? 'La organización debe mantener al menos un administrador activo'
                             : ''}
                           style={m.is_active ? 'color:var(--v2-rust)' : ''}
                         >
-                          {m.is_active ? 'Deactivate' : 'Reactivate'}
+                          {m.is_active ? 'Desactivar' : 'Reactivar'}
                         </button>
                       </form>
                     </span>
@@ -296,7 +296,7 @@
         </table>
       </div>
 
-      <div class="v2-label" style="margin-bottom:10px">Teams</div>
+      <div class="v2-label" style="margin-bottom:10px">Equipos</div>
       <div class="v2-card" style="overflow:hidden;margin-bottom:14px">
         {#each data.teams as t (t.id)}
           <div class="v2-setting">
@@ -306,20 +306,21 @@
             </div>
             <span class="v2-sub v2-num" style="font-size:12px">
               {t.member_count}
-              {t.member_count === 1 ? 'member' : 'members'}
+              {t.member_count === 1 ? 'miembro' : 'miembros'}
             </span>
           </div>
         {:else}
           <div class="v2-setting">
-            <span class="v2-sub" style="font-size:12px">No teams yet.</span>
+            <span class="v2-sub" style="font-size:12px">Todavía no hay equipos.</span>
           </div>
         {/each}
       </div>
 
       <p class="v2-sub" style="font-size:11.5px">
-        Roles are Admin and Member, the only two the API recognises. Admins can invite people,
-        change roles and edit org settings; the server refuses to let anyone change their own role
-        or deactivate the last admin. Editing team membership is not available here yet.
+        Los roles son Administrador y Miembro, los únicos dos que reconoce la API. Los
+        administradores pueden invitar personas, cambiar roles y editar la configuración de la
+        organización; el servidor no permite que nadie cambie su propio rol ni desactive al último
+        administrador. Editar la membresía de los equipos todavía no está disponible acá.
       </p>
     </div>
   </div>

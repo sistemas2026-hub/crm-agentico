@@ -35,7 +35,12 @@
   import SettingsFormPanel from '$lib/v2/components/SettingsFormPanel.svelte';
   import ConfirmAction from '$lib/v2/components/ConfirmAction.svelte';
   import { count } from '$lib/v2/format.js';
-  import { ESCALATION_ACTION_LABEL, ESCALATION_PRIORITIES, PRIORITY_TONE } from '$lib/v2/enums.js';
+  import {
+    ESCALATION_ACTION_LABEL,
+    ESCALATION_PRIORITIES,
+    PRIORITY_TONE,
+    CASE_PRIORITY_LABEL
+  } from '$lib/v2/enums.js';
   import { missingOption, inactiveOptionLabel } from '$lib/v2/pickers.js';
   import { TriangleAlert, BellOff, Plus } from '@lucide/svelte';
 
@@ -68,15 +73,15 @@
     const target = policy[`${kind}_target`];
     const team = policy.notify_team;
 
-    if (!policy.is_active) return { text: 'Nothing. The policy is off', dead: true };
+    if (!policy.is_active) return { text: 'Nada. La política está apagada', dead: true };
 
     if (action === 'reassign' && !target)
-      return { text: 'Reassign to nobody, no target is set', dead: true };
+      return { text: 'Reasigna a nadie, no hay ningún destino configurado', dead: true };
 
     if (action === 'notify' && !target && !team)
-      return { text: 'Notify nobody, no person and no team', dead: true };
+      return { text: 'No notifica a nadie, no hay persona ni equipo', dead: true };
 
-    const who = [target?.name, team ? `the ${team.name} team` : null].filter(Boolean).join(' and ');
+    const who = [target?.name, team ? `el equipo ${team.name}` : null].filter(Boolean).join(' y ');
     return { text: `${ESCALATION_ACTION_LABEL[action]} ${who}`, dead: false };
   }
 
@@ -147,18 +152,18 @@
   );
 </script>
 
-<PageHeader title="Escalation">
+<PageHeader title="Escalamiento">
   {#snippet crumb()}<SettingsCrumb />{/snippet}
   {#snippet sub()}
     {#if allConfigured}
-      One policy per priority · all four are configured
+      Una política por prioridad · las cuatro están configuradas
     {:else}
-      One policy per priority · <span class="v2-num">{count(policies.length)}</span> configured
+      Una política por prioridad · <span class="v2-num">{count(policies.length)}</span> configuradas
     {/if}
   {/snippet}
   {#snippet actions()}
     {#if data.can_edit && !editing && availablePriorities.length > 0}
-      <button class="v2-btn v2-btn-primary" onclick={openCreate}><Plus />New policy</button>
+      <button class="v2-btn v2-btn-primary" onclick={openCreate}><Plus />Nueva política</button>
     {/if}
   {/snippet}
 </PageHeader>
@@ -167,10 +172,10 @@
   <div class="v2-pad" style="padding-top:18px;padding-bottom:32px">
     {#if editing}
       <SettingsFormPanel
-        title={editing === 'new' ? 'New policy' : `Edit ${editing.priority} policy`}
+        title={editing === 'new' ? 'Nueva política' : `Editar política de ${CASE_PRIORITY_LABEL[editing.priority] ?? editing.priority}`}
         action={editing === 'new' ? '?/create' : '?/update'}
         error={editing === 'new' ? form?.create?.error : form?.update?.error}
-        submitLabel={editing === 'new' ? 'Add policy' : 'Save policy'}
+        submitLabel={editing === 'new' ? 'Agregar política' : 'Guardar política'}
         oncancel={() => (editing = null)}
         ondone={() => (editing = null)}
       >
@@ -180,21 +185,21 @@
           {/if}
 
           <div class="v2-field">
-            <label for="e-priority">Priority</label>
+            <label for="e-priority">Prioridad</label>
             {#if editing === 'new'}
               <select id="e-priority" class="v2-input" name="priority" required>
                 {#each availablePriorities as p (p)}
-                  <option value={p}>{p}</option>
+                  <option value={p}>{CASE_PRIORITY_LABEL[p] ?? p}</option>
                 {/each}
               </select>
             {:else}
-              <div style="font-size:13px">{editing.priority}</div>
-              <p class="v2-hint">Fixed after creation. One policy per priority.</p>
+              <div style="font-size:13px">{CASE_PRIORITY_LABEL[editing.priority] ?? editing.priority}</div>
+              <p class="v2-hint">Fija después de crearla. Una política por prioridad.</p>
             {/if}
           </div>
 
           <div class="v2-field">
-            <label for="e-fr-action">First response action</label>
+            <label for="e-fr-action">Acción de primera respuesta</label>
             <select
               id="e-fr-action"
               class="v2-input"
@@ -206,19 +211,19 @@
               {/each}
             </select>
             {#if firstResponseAction === 'reassign' && !firstResponseTarget}
-              <p class="v2-hint">Reassigns to nobody until a target is picked below.</p>
+              <p class="v2-hint">Reasigna a nadie hasta que se elija un destino abajo.</p>
             {/if}
           </div>
 
           <div class="v2-field">
-            <label for="e-fr-target">First response target</label>
+            <label for="e-fr-target">Destino de primera respuesta</label>
             <select
               id="e-fr-target"
               class="v2-input"
               name="first_response_target_id"
               bind:value={firstResponseTarget}
             >
-              <option value="">Nobody</option>
+              <option value="">Nadie</option>
               {#if missingFirstTarget}
                 <option value={missingFirstTarget.id}>
                   {inactiveOptionLabel(missingFirstTarget.name)}
@@ -230,14 +235,14 @@
             </select>
             {#if missingFirstTarget}
               <p class="v2-hint">
-                This target's account is no longer active. It stays set until you change it, and a
-                breach reassigned there waits for someone who cannot sign in.
+                La cuenta de este destino ya no está activa. Se mantiene así hasta que lo cambies, y
+                un incumplimiento reasignado ahí espera a alguien que no puede iniciar sesión.
               </p>
             {/if}
           </div>
 
           <div class="v2-field">
-            <label for="e-res-action">Resolution action</label>
+            <label for="e-res-action">Acción de resolución</label>
             <select
               id="e-res-action"
               class="v2-input"
@@ -249,19 +254,19 @@
               {/each}
             </select>
             {#if resolutionAction === 'reassign' && !resolutionTarget}
-              <p class="v2-hint">Reassigns to nobody until a target is picked below.</p>
+              <p class="v2-hint">Reasigna a nadie hasta que se elija un destino abajo.</p>
             {/if}
           </div>
 
           <div class="v2-field">
-            <label for="e-res-target">Resolution target</label>
+            <label for="e-res-target">Destino de resolución</label>
             <select
               id="e-res-target"
               class="v2-input"
               name="resolution_target_id"
               bind:value={resolutionTarget}
             >
-              <option value="">Nobody</option>
+              <option value="">Nadie</option>
               {#if missingResolutionTarget}
                 <option value={missingResolutionTarget.id}>
                   {inactiveOptionLabel(missingResolutionTarget.name)}
@@ -273,16 +278,16 @@
             </select>
             {#if missingResolutionTarget}
               <p class="v2-hint">
-                This target's account is no longer active. It stays set until you change it, and a
-                breach reassigned there waits for someone who cannot sign in.
+                La cuenta de este destino ya no está activa. Se mantiene así hasta que lo cambies, y
+                un incumplimiento reasignado ahí espera a alguien que no puede iniciar sesión.
               </p>
             {/if}
           </div>
 
           <div class="v2-field">
-            <label for="e-team">Notify team</label>
+            <label for="e-team">Notificar equipo</label>
             <select id="e-team" class="v2-input" name="notify_team_id">
-              <option value="" selected={editing === 'new' || !editing.notify_team}>No team</option>
+              <option value="" selected={editing === 'new' || !editing.notify_team}>Sin equipo</option>
               {#each data.teams as t (t.id)}
                 <option value={t.id} selected={editing !== 'new' && editing.notify_team?.id === t.id}>
                   {t.name}
@@ -290,16 +295,16 @@
               {/each}
             </select>
             {#if !data.teams.length}
-              <p class="v2-hint">No teams in this org yet.</p>
+              <p class="v2-hint">Todavía no hay equipos en esta organización.</p>
             {/if}
           </div>
 
           {#if editing === 'new'}
             <div class="v2-field">
-              <label for="e-active">Active</label>
+              <label for="e-active">Activa</label>
               <label style="display:flex;gap:8px;align-items:center;font-weight:400">
                 <input id="e-active" type="checkbox" name="is_active" value="true" checked />
-                Starts escalating breaches at this priority as soon as it is saved.
+                Empieza a escalar incumplimientos en esta prioridad apenas se guarde.
               </label>
             </div>
           {/if}
@@ -323,8 +328,8 @@
            note hangs alone. The empty state says what a policy is and what its
            absence means, and centres itself like every other empty state. -->
       <EmptyState
-        title="No escalation policies yet"
-        body="An escalation policy decides what happens when a ticket misses its first-response or resolution target. One per priority. None are set for this organisation, so a breach currently escalates to nobody."
+        title="Todavía no hay políticas de escalamiento"
+        body="Una política de escalamiento decide qué pasa cuando un ticket no cumple su objetivo de primera respuesta o de resolución. Una por prioridad. Ninguna está configurada para esta organización, así que un incumplimiento hoy no escala a nadie."
       >
         {#snippet icon()}<BellOff size={21} />{/snippet}
       </EmptyState>
@@ -337,14 +342,14 @@
           <BellOff size={17} style="color:var(--v2-clay);flex:none;margin-top:1px" />
           <div>
             <div style="font-weight:600;font-size:13px">
-              <span class="v2-num">{count(breachesGoingNowhere)}</span> breaches in the last 30 days told
-              nobody
+              <span class="v2-num">{count(breachesGoingNowhere)}</span> incumplimientos en los últimos
+              30 días no le avisaron a nadie
             </div>
             <p class="v2-sub" style="font-size:12px;margin:4px 0 0">
               {deadCount === 0
-                ? 'Some halves of these policies resolve to no recipient.'
-                : `${deadCount} of ${policies.length} policies do nothing at all when a ticket breaches.`}
-              A policy that exists is not the same as a policy that fires.
+                ? 'Algunas mitades de estas políticas no resuelven a ningún destinatario.'
+                : `${deadCount} de ${policies.length} políticas no hacen nada cuando un ticket incumple.`}
+              Que exista una política no es lo mismo que una política que se dispara.
             </p>
           </div>
         </div>
@@ -359,34 +364,34 @@
               style="display:flex;gap:9px;align-items:center;margin-bottom:12px;justify-content:space-between"
             >
               <div style="display:flex;gap:9px;align-items:center">
-                <Pill tone={PRIORITY_TONE[p.priority]}>{p.priority}</Pill>
-                {#if !p.is_active}<Pill tone="slate">Off</Pill>{/if}
+                <Pill tone={PRIORITY_TONE[p.priority]}>{CASE_PRIORITY_LABEL[p.priority] ?? p.priority}</Pill>
+                {#if !p.is_active}<Pill tone="slate">Apagada</Pill>{/if}
               </div>
 
               {#if data.can_edit}
                 <div style="display:flex;gap:6px;align-items:center;flex:none">
                   <button class="v2-btn v2-btn-sm" type="button" onclick={() => openEdit(p)}>
-                    Edit
+                    Editar
                   </button>
                   {#if p.is_active}
                     <ConfirmAction
                       action="?/deactivate"
-                      label="Turn off"
-                      confirmLabel="Turn off"
-                      explain="Stops escalating breaches at this priority. It stays in the list, off, until turned back on."
+                      label="Apagar"
+                      confirmLabel="Apagar"
+                      explain="Deja de escalar incumplimientos en esta prioridad. Se mantiene en la lista, apagada, hasta que se vuelva a encender."
                       hidden={{ id: p.id }}
                     />
                   {:else}
                     <form method="POST" action="?/activate" use:enhance>
                       <input type="hidden" name="id" value={p.id} />
-                      <button class="v2-btn v2-btn-sm" type="submit">Turn on</button>
+                      <button class="v2-btn v2-btn-sm" type="submit">Encender</button>
                     </form>
                   {/if}
                   <ConfirmAction
                     action="?/remove"
-                    label="Delete"
-                    confirmLabel="Delete"
-                    explain="Deleted permanently. Breaches at this priority will escalate to nobody."
+                    label="Eliminar"
+                    confirmLabel="Eliminar"
+                    explain="Se elimina de forma permanente. Los incumplimientos en esta prioridad no van a escalar a nadie."
                     hidden={{ id: p.id }}
                   />
                 </div>
@@ -394,7 +399,7 @@
             </div>
 
             <div class="v2-escalation-halves">
-              {#each [{ label: 'Missed first response', o: first, n: p.breaches_last_30d.first_response }, { label: 'Missed resolution', o: res, n: p.breaches_last_30d.resolution }] as half (half.label)}
+              {#each [{ label: 'Primera respuesta incumplida', o: first, n: p.breaches_last_30d.first_response }, { label: 'Resolución incumplida', o: res, n: p.breaches_last_30d.resolution }] as half (half.label)}
                 <div class="v2-escalation-half">
                   <div class="v2-label" style="font-size:10px;margin-bottom:5px">{half.label}</div>
                   <div style="display:flex;gap:7px;align-items:flex-start">
@@ -410,7 +415,7 @@
                   </div>
                   <div class="v2-sub" style="font-size:11.5px;margin-top:6px">
                     <span class="v2-num">{count(half.n)}</span>
-                    in the last 30 days{half.o.dead && half.n > 0 ? ', none of them acted on' : ''}
+                    en los últimos 30 días{half.o.dead && half.n > 0 ? ', ninguno atendido' : ''}
                   </div>
                 </div>
               {/each}
@@ -420,10 +425,10 @@
       </div>
 
       <p class="v2-sub" style="font-size:11.5px;margin-top:16px;max-width:64ch">
-        Targets are measured on
-        <a href="/settings/business-hours" style="color:inherit">business hours</a>, so a breach
-        counts working time only. What counts as breached for each priority is set with the target
-        itself, not here.
+        Los objetivos se miden con el
+        <a href="/settings/business-hours" style="color:inherit">horario laboral</a>, así que un
+        incumplimiento solo cuenta tiempo laboral. Qué cuenta como incumplido para cada prioridad se
+        configura con el objetivo en sí, no acá.
       </p>
     {/if}
   </div>

@@ -95,14 +95,14 @@ function buildBody(allowed, values) {
 /** @param {{ cookies: import('@sveltejs/kit').Cookies }} event */
 export async function createApprovalRule({ cookies }, values) {
   const body = buildBody(CREATE_FIELDS, values);
-  if (!body.name) throw new Error('A rule needs a name.');
+  if (!body.name) throw new Error('Una regla necesita un nombre.');
   body.trigger_event = TRIGGER_EVENT;
   return await apiRequest('/cases/approval-rules/', { method: 'POST', body }, { cookies });
 }
 
 /** @param {{ cookies: import('@sveltejs/kit').Cookies }} event */
 export async function updateApprovalRule({ cookies }, id, values) {
-  if (!id) throw new Error('Which rule? No rule id was given.');
+  if (!id) throw new Error('¿Qué regla? No se indicó un id de regla.');
   const body = buildBody(UPDATE_FIELDS, values);
   return await apiRequest(`/cases/approval-rules/${id}/`, { method: 'PUT', body }, { cookies });
 }
@@ -145,7 +145,7 @@ export async function updateApprovalRule({ cookies }, id, values) {
  *   rule had history and was disabled rather than destroyed.
  */
 export async function deleteApprovalRule({ cookies }, id) {
-  if (!id) throw new Error('Which rule? No rule id was given.');
+  if (!id) throw new Error('¿Qué regla? No se indicó un id de regla.');
   const resp = await apiRequest(`/cases/approval-rules/${id}/`, { method: 'DELETE' }, { cookies });
   return { turned_off: resp?.is_active === false };
 }

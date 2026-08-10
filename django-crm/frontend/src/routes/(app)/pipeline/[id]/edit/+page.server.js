@@ -44,7 +44,7 @@ export const actions = {
     } catch (/** @type {any} */ err) {
       // The API's field errors are the ones that count: this form's own
       // checks are a UX hint and the serializer is the rule.
-      return fail(400, { values, error: String(err?.message ?? 'Could not save the deal.') });
+      return fail(400, { values, error: String(err?.message ?? 'No se pudo guardar la negociación.') });
     }
 
     return { saved: true };

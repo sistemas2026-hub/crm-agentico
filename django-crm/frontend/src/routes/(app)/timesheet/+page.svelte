@@ -57,7 +57,7 @@
     return h ? `${h}h ${m % 60}m` : `${m}m`;
   }
 
-  const WEEKDAY = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const WEEKDAY = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
   const todayISO = new Date().toISOString().slice(0, 10);
 
   /** Jump `deltaDays` from the current week's Mon..Sun and reload. */
@@ -110,16 +110,16 @@
   );
 </script>
 
-<PageHeader title="Timesheet">
+<PageHeader title="Registro de horas">
   {#snippet sub()}
     {shortDate(week.start)} - {shortDate(week.end)} · {week.profile.name}
   {/snippet}
   {#snippet actions()}
-    <button class="v2-btn" aria-label="Previous week" onclick={() => shiftWeek(-7)}>
+    <button class="v2-btn" aria-label="Semana anterior" onclick={() => shiftWeek(-7)}>
       <ChevronLeft />
     </button>
-    <button class="v2-btn" onclick={thisWeek}>This week</button>
-    <button class="v2-btn" aria-label="Next week" onclick={() => shiftWeek(7)}>
+    <button class="v2-btn" onclick={thisWeek}>Esta semana</button>
+    <button class="v2-btn" aria-label="Semana siguiente" onclick={() => shiftWeek(7)}>
       <ChevronRight />
     </button>
   {/snippet}
@@ -127,24 +127,24 @@
 
 <div class="v2-pad" style="padding-top:16px;flex:none">
   <div class="v2-stats">
-    <StatCard label="Logged this week" value={hm(weekMinutes)} tone="ink" />
+    <StatCard label="Registrado esta semana" value={hm(weekMinutes)} tone="ink" />
     <StatCard
-      label="Billable"
+      label="Facturable"
       value={hm(billableMinutes)}
       tone="moss"
-      detail="{Math.round((billableMinutes / Math.max(1, weekMinutes)) * 100)}% of logged time"
+      detail="{Math.round((billableMinutes / Math.max(1, weekMinutes)) * 100)}% del tiempo registrado"
     />
     <StatCard
-      label="Billable value"
+      label="Valor facturable"
       value={money(billableValue, data.org.currency)}
       tone="slate"
-      detail="At the rate saved on each entry"
+      detail="Según la tarifa guardada en cada entrada"
     />
     <StatCard
-      label="Not yet invoiced"
+      label="Aún no facturado"
       value={count(unbilled)}
       tone={unbilled ? 'clay' : 'slate'}
-      detail={unbilled ? 'Billable entries with no invoice' : 'Everything billable is billed'}
+      detail={unbilled ? 'Entradas facturables sin factura' : 'Todo lo facturable ya está facturado'}
     />
   </div>
 </div>
@@ -156,7 +156,9 @@
       <div class="v2-next" style="margin-bottom:16px">
         <div class="v2-next-body">
           <div class="v2-label" style="color:var(--v2-ember)">
-            {week.running_count === 1 ? 'Timer running' : `${week.running_count} timers running`}
+            {week.running_count === 1
+              ? 'Cronómetro en marcha'
+              : `${week.running_count} cronómetros en marcha`}
           </div>
           {#if form?.error}
             <!-- Stop can fail (ownership check, network). Silent failure here
@@ -177,7 +179,7 @@
                   <form method="POST" action="?/stop" use:enhance={stopping}>
                     <input type="hidden" name="entry_id" value={e.id} />
                     <button class="v2-btn v2-btn-primary" type="submit" disabled={busy}>
-                      <Square size={13} />Stop timer
+                      <Square size={13} />Detener cronómetro
                     </button>
                   </form>
                 </div>
@@ -208,9 +210,9 @@
                   {hm(liveMinutes(e))}
                 </span>
                 {#if e.is_running}
-                  <Pill tone="clay" dot>running</Pill>
+                  <Pill tone="clay" dot>en curso</Pill>
                 {:else if !e.billable}
-                  <span class="v2-sub" style="font-size:10.5px">internal</span>
+                  <span class="v2-sub" style="font-size:10.5px">interno</span>
                 {:else if e.invoice}
                   <!-- Already billed. Links out rather than offering to bill
                        it again. Double-billing an hour is a refund, not an
@@ -219,9 +221,9 @@
                     href="/invoices/{e.invoice.id}"
                     class="v2-sub"
                     style="font-size:10.5px;display:inline-flex;gap:3px;align-items:center;color:var(--v2-moss)"
-                    title="Billed on {e.invoice.invoice_number}"
+                    title="Facturado en {e.invoice.invoice_number}"
                   >
-                    <Receipt size={10} />billed
+                    <Receipt size={10} />facturado
                   </a>
                 {/if}
               </div>
@@ -239,7 +241,7 @@
             </div>
           {:else}
             <div style="flex:1;display:grid;place-items:center;padding:12px">
-              <span class="v2-sub" style="font-size:11px">Nothing logged</span>
+              <span class="v2-sub" style="font-size:11px">Nada registrado</span>
             </div>
           {/each}
         </div>
@@ -247,9 +249,9 @@
     </div>
 
     <p class="v2-sub" style="font-size:11.5px;margin-top:14px">
-      Time is logged against a ticket, so every hour here is attached to something a customer can be
-      shown. Rates are saved on each entry when it is logged. Changing your rate does not rewrite
-      what past weeks were worth.
+      El tiempo se registra contra un ticket, así que cada hora acá está asociada a algo que se le
+      puede mostrar a un cliente. Las tarifas se guardan en cada entrada al momento de registrarla.
+      Cambiar tu tarifa no reescribe lo que valieron las semanas pasadas.
     </p>
   </div>
 </div>

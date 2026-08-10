@@ -29,33 +29,33 @@
 
   const ACTIONS = [
     {
-      kind: 'Actions',
+      kind: 'Acciones',
       id: 'act-deal',
-      title: 'New deal',
-      meta: 'Pipeline',
+      title: 'Nueva negociación',
+      meta: 'Negociaciones',
       href: '/pipeline/new',
       icon: Plus
     },
     {
-      kind: 'Actions',
+      kind: 'Acciones',
       id: 'act-today',
-      title: 'Go to Today',
+      title: 'Ir a Hoy',
       meta: '',
       href: '/',
       icon: Columns3
     },
     {
-      kind: 'Actions',
+      kind: 'Acciones',
       id: 'act-tasks',
-      title: 'Go to Tasks',
+      title: 'Ir a Tareas',
       meta: '',
       href: '/tasks',
       icon: Columns3
     },
     {
-      kind: 'Actions',
+      kind: 'Acciones',
       id: 'act-invoices',
-      title: 'Go to Invoices',
+      title: 'Ir a Facturas',
       meta: '',
       href: '/invoices',
       icon: Receipt
@@ -63,14 +63,14 @@
   ];
 
   const ICON = {
-    Deals: Columns3,
-    Accounts: Building2,
-    Contacts: Users,
-    Leads: Target,
+    Negociaciones: Columns3,
+    Cuentas: Building2,
+    Contactos: Users,
+    Prospectos: Target,
     Tickets: LifeBuoy,
-    Invoices: Receipt,
-    'Knowledge base': BookOpen,
-    Actions: Plus
+    Facturas: Receipt,
+    'Base de conocimiento': BookOpen,
+    Acciones: Plus
   };
 
   let query = $state('');
@@ -163,7 +163,7 @@
       class="v2-palette"
       role="dialog"
       aria-modal="true"
-      aria-label="Search"
+      aria-label="Buscar"
       tabindex="-1"
       {onkeydown}
     >
@@ -173,8 +173,8 @@
           bind:this={input}
           bind:value={query}
           type="text"
-          placeholder="Search deals, accounts, people, tickets, invoices…"
-          aria-label="Search"
+          placeholder="Buscar negociaciones, cuentas, personas, tickets, facturas…"
+          aria-label="Buscar"
           aria-autocomplete="list"
           autocomplete="off"
           spellcheck="false"
@@ -182,7 +182,7 @@
         <kbd class="v2-kbd">esc</kbd>
       </div>
 
-      <div class="v2-palette-list" role="listbox" aria-label="Results">
+      <div class="v2-palette-list" role="listbox" aria-label="Resultados">
         {#each groups as group (group.kind)}
           <div class="v2-palette-group v2-label">{group.kind}</div>
           {#each group.rows as row (row.id)}
@@ -205,17 +205,18 @@
           {/each}
         {:else}
           <p class="v2-sub" style="padding:22px 15px;text-align:center;margin:0">
-            Nothing matches “{query}”. Try an account name, a deal, or an invoice number.
+            Nada coincide con “{query}”. Probá el nombre de una cuenta, una negociación, o un
+            número de factura.
           </p>
         {/each}
       </div>
 
       <div class="v2-palette-foot">
-        <span><kbd class="v2-kbd">↑</kbd> <kbd class="v2-kbd">↓</kbd> move</span>
-        <span><CornerDownLeft size={11} style="vertical-align:-1px" /> open</span>
-        <span><kbd class="v2-kbd">esc</kbd> close</span>
+        <span><kbd class="v2-kbd">↑</kbd> <kbd class="v2-kbd">↓</kbd> mover</span>
+        <span><CornerDownLeft size={11} style="vertical-align:-1px" /> abrir</span>
+        <span><kbd class="v2-kbd">esc</kbd> cerrar</span>
         {#if query.trim()}
-          <span style="margin-left:auto" class="v2-num">{hits.length} found</span>
+          <span style="margin-left:auto" class="v2-num">{hits.length} encontrados</span>
         {/if}
       </div>
     </div>

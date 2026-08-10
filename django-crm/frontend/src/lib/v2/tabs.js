@@ -14,9 +14,9 @@
  */
 export const TAB_SETS = {
   tickets: [
-    { href: '/tickets', label: 'Queue', exact: true, count: 'tickets' },
-    { href: '/tickets/approvals', label: 'Approvals', count: 'approvals' },
-    { href: '/tickets/analytics', label: 'Analytics', admin: true }
+    { href: '/tickets', label: 'Cola', exact: true, count: 'tickets' },
+    { href: '/tickets/approvals', label: 'Aprobaciones', count: 'approvals' },
+    { href: '/tickets/analytics', label: 'Análisis', admin: true }
   ],
   /**
    * These two are NOT two views of one list. `tasks.Task` and
@@ -26,17 +26,17 @@ export const TAB_SETS = {
    * says the rest out loud, because nothing about the word suggests it.
    */
   tasks: [
-    { href: '/tasks', label: 'Task list', exact: true, count: 'tasks' },
-    { href: '/tasks/board', label: 'Boards' },
-    { href: '/tasks/calendar', label: 'Calendar' }
+    { href: '/tasks', label: 'Lista de tareas', exact: true, count: 'tasks' },
+    { href: '/tasks/board', label: 'Tableros' },
+    { href: '/tasks/calendar', label: 'Calendario' }
   ],
   invoices: [
-    { href: '/invoices', label: 'Invoices', exact: true, count: 'invoices' },
-    { href: '/invoices/estimates', label: 'Estimates' },
-    { href: '/invoices/recurring', label: 'Recurring' },
-    { href: '/invoices/products', label: 'Products' },
-    { href: '/invoices/reports', label: 'Reports', admin: true },
-    { href: '/invoices/templates', label: 'Templates' }
+    { href: '/invoices', label: 'Facturas', exact: true, count: 'invoices' },
+    { href: '/invoices/estimates', label: 'Cotizaciones' },
+    { href: '/invoices/recurring', label: 'Recurrentes' },
+    { href: '/invoices/products', label: 'Productos' },
+    { href: '/invoices/reports', label: 'Informes', admin: true },
+    { href: '/invoices/templates', label: 'Plantillas' }
   ]
 };
 

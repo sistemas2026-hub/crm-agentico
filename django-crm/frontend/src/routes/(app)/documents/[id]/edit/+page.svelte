@@ -49,7 +49,7 @@
   let errors = $derived.by(() => {
     /** @type {Record<string, string>} */
     const e = {};
-    if (!title.trim()) e.title = 'A document needs a title.';
+    if (!title.trim()) e.title = 'Un documento necesita un título.';
     return e;
   });
 
@@ -77,18 +77,18 @@
 </script>
 
 {#if !data.can_edit}
-  <PageHeader title="Manage document">
-    {#snippet crumb()}<a href="/documents">Documents</a> ›{/snippet}
+  <PageHeader title="Gestionar documento">
+    {#snippet crumb()}<a href="/documents">Documentos</a> ›{/snippet}
   </PageHeader>
   <div class="v2-pad" style="padding-top:40px">
     <NextAction
-      label="Owner or admin only"
-      text="Changing a document is limited to the person who uploaded it and admins. You can open a document shared with you, but not edit it."
+      label="Solo el propietario o un administrador"
+      text="Cambiar un documento está limitado a quien lo subió y a los administradores. Podés abrir un documento compartido con vos, pero no editarlo."
     />
   </div>
 {:else}
-  <PageHeader title="Manage document" center>
-    {#snippet crumb()}<a href="/documents">Documents</a> ›{/snippet}
+  <PageHeader title="Gestionar documento" center>
+    {#snippet crumb()}<a href="/documents">Documentos</a> ›{/snippet}
     {#snippet sub()}{data.document.title}{/snippet}
   </PageHeader>
 
@@ -102,14 +102,14 @@
         >
           <TriangleAlert size={17} style="color:var(--v2-rust);flex:none" />
           <div class="v2-next-body">
-            <div style="font-weight:600">The server refused this change</div>
+            <div style="font-weight:600">El servidor rechazó este cambio</div>
             <div class="v2-sub" style="margin-top:2px">{result.error}</div>
           </div>
         </div>
       {/if}
 
       <div class="v2-field">
-        <label for="f-title">Title</label>
+        <label for="f-title">Título</label>
         <input
           id="f-title"
           name="title"
@@ -123,32 +123,32 @@
       </div>
 
       <div class="v2-field">
-        <span class="pseudo-label">File</span>
+        <span class="pseudo-label">Archivo</span>
         <p class="v2-input v2-file-static">{data.document.document_file}</p>
-        <p class="v2-hint">The file is not replaced here, upload a new document to change it.</p>
+        <p class="v2-hint">El archivo no se reemplaza acá, subí un documento nuevo para cambiarlo.</p>
       </div>
 
       <div class="v2-field">
-        <label for="f-status">Status</label>
+        <label for="f-status">Estado</label>
         <select id="f-status" name="status" class="v2-input" bind:value={status}>
-          <option value="active">Active, appears in the list</option>
-          <option value="inactive">Archived, kept, hidden from the default view</option>
+          <option value="active">Activo, aparece en la lista</option>
+          <option value="inactive">Archivado, se conserva, oculto de la vista predeterminada</option>
         </select>
       </div>
 
       <fieldset class="v2-field share">
-        <legend>Who can open it</legend>
+        <legend>Quién puede abrirlo</legend>
         <p class="v2-hint" style="margin-top:0">
           {#if reach === 0}
-            <span class="unshared"><Lock size={11} /> Only the owner and admins.</span>
+            <span class="unshared"><Lock size={11} /> Solo el propietario y los administradores.</span>
           {:else}
-            Reaches <span class="v2-num">{reach}</span>
-            {reach === 1 ? 'person or team' : 'people and teams'}, plus admins.
+            Llega a <span class="v2-num">{reach}</span>
+            {reach === 1 ? 'persona o equipo' : 'personas y equipos'}, más los administradores.
           {/if}
         </p>
 
         {#if data.people?.length}
-          <div class="share-label">People</div>
+          <div class="share-label">Personas</div>
           <div class="share-grid">
             {#each data.people as p (p.id)}
               <label class="share-opt">
@@ -166,7 +166,7 @@
         {/if}
 
         {#if data.teams?.length}
-          <div class="share-label"><Users size={12} /> Teams</div>
+          <div class="share-label"><Users size={12} /> Equipos</div>
           <div class="share-grid">
             {#each data.teams as t (t.id)}
               <label class="share-opt">
@@ -185,8 +185,8 @@
       </fieldset>
 
       <div style="display:flex;gap:8px;align-items:center;margin-top:22px">
-        <button class="v2-btn v2-btn-primary" type="submit">Save changes</button>
-        <a class="v2-btn" href="/documents">Cancel</a>
+        <button class="v2-btn v2-btn-primary" type="submit">Guardar cambios</button>
+        <a class="v2-btn" href="/documents">Cancelar</a>
       </div>
     </form>
 
@@ -201,23 +201,23 @@
           class="v2-btn"
           type="button"
           style="color:var(--v2-rust)"
-          onclick={() => (confirmingDelete = true)}>Delete this document</button
+          onclick={() => (confirmingDelete = true)}>Eliminar este documento</button
         >
         <p class="v2-sub" style="font-size:12px;margin-top:8px">
-          Archiving keeps the document and its history; delete removes it for everyone who could
-          open it. Delete only when it was uploaded by mistake.
+          Archivar conserva el documento y su historial; eliminar lo quita para todos los que
+          podían abrirlo. Eliminá solo cuando se subió por error.
         </p>
       {:else}
         <form method="POST" action="?/delete" use:enhance>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
             <span class="v2-sub" style="font-size:13px"
-              >Delete “{data.document.title}” for good?</span
+              >¿Eliminar “{data.document.title}” definitivamente?</span
             >
             <button class="v2-btn v2-btn-primary" type="submit" style="background:var(--v2-rust)"
-              >Yes, delete</button
+              >Sí, eliminar</button
             >
             <button class="v2-btn" type="button" onclick={() => (confirmingDelete = false)}
-              >Keep it</button
+              >Conservarlo</button
             >
           </div>
         </form>

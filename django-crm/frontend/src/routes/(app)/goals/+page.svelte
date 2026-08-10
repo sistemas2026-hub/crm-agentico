@@ -51,7 +51,11 @@
    * finished period is reported as met or missed instead.
    */
   const statusLabel = (g) =>
-    isOver(g) ? (g.progress_percent >= 100 ? 'Target met' : 'Missed') : GOAL_STATUS_LABEL[g.status];
+    isOver(g)
+      ? g.progress_percent >= 100
+        ? 'Meta cumplida'
+        : 'No cumplida'
+      : GOAL_STATUS_LABEL[g.status];
 
   const statusTone = (g) =>
     isOver(g) ? (g.progress_percent >= 100 ? 'moss' : 'slate') : GOAL_STATUS_TONE[g.status];
@@ -71,15 +75,15 @@
   const value = (g, n) => (g.goal_type === 'REVENUE' ? money(n, data.org.currency) : count(n));
 </script>
 
-<PageHeader title="Goals">
+<PageHeader title="Metas">
   {#snippet sub()}
-    <span class="v2-num">{money(totals.achieved, data.org.currency)}</span> of
-    <span class="v2-num">{money(totals.target, data.org.currency)}</span> across
-    <span class="v2-num">{count(totals.active)}</span> active goals
+    <span class="v2-num">{money(totals.achieved, data.org.currency)}</span> de
+    <span class="v2-num">{money(totals.target, data.org.currency)}</span> en
+    <span class="v2-num">{count(totals.active)}</span> metas activas
   {/snippet}
   {#snippet actions()}
     {#if data.can_edit}
-      <a class="v2-btn v2-btn-primary" href="/goals/new"><Plus />New goal</a>
+      <a class="v2-btn v2-btn-primary" href="/goals/new"><Plus />Nueva meta</a>
     {/if}
   {/snippet}
 </PageHeader>
@@ -87,24 +91,24 @@
 <div class="v2-pad" style="padding-top:16px;flex:none">
   <div class="v2-stats">
     <StatCard
-      label="Committed"
+      label="Comprometido"
       value={money(totals.target, data.org.currency)}
       tone="ink"
-      detail="Active goals only"
+      detail="Solo metas activas"
     />
     <StatCard
-      label="Booked"
+      label="Logrado"
       value={money(totals.achieved, data.org.currency)}
       tone="moss"
-      detail="Closed-won in period"
+      detail="Ganado en el período"
     />
     <StatCard
-      label="Behind pace"
+      label="Atrasadas"
       value={count(totals.behind)}
       tone={totals.behind ? 'rust' : 'slate'}
-      detail={totals.behind ? 'Slower than the calendar' : 'Everyone is on pace'}
+      detail={totals.behind ? 'Más lento que el calendario' : 'Todos van al ritmo'}
     />
-    <StatCard label="Active goals" value={count(totals.active)} tone="slate" />
+    <StatCard label="Metas activas" value={count(totals.active)} tone="slate" />
   </div>
 </div>
 
@@ -112,20 +116,20 @@
   <div class="v2-pad" style="padding-bottom:32px">
     {#if data.goals.length === 0}
       <EmptyState
-        title="No goals set"
-        body="A goal is a target and a period. Once one exists, closed-won deals count towards it automatically. Nobody has to update a number."
+        title="No hay metas configuradas"
+        body="Una meta es un objetivo y un período. Una vez que existe, las negociaciones ganadas cuentan automáticamente para ella. Nadie tiene que actualizar un número."
       >
         {#snippet icon()}<Target size={21} />{/snippet}
         {#snippet actions()}
           {#if data.can_edit}
-            <a class="v2-btn v2-btn-primary" href="/goals/new">New goal</a>
+            <a class="v2-btn v2-btn-primary" href="/goals/new">Nueva meta</a>
           {/if}
         {/snippet}
       </EmptyState>
     {:else}
       <div class="v2-split v2-split-wide">
         <div>
-          <div class="v2-label" style="margin-bottom:10px">This period</div>
+          <div class="v2-label" style="margin-bottom:10px">Este período</div>
           <div style="display:flex;flex-direction:column;gap:10px">
             {#each data.goals as g (g.id)}
               {@const elapsed = elapsedPercent(g)}
@@ -144,7 +148,7 @@
                     {#if data.can_edit}
                       <a
                         href="/goals/{g.id}/edit"
-                        style="font-size:11px;color:var(--v2-slate);text-decoration:none">Edit</a
+                        style="font-size:11px;color:var(--v2-slate);text-decoration:none">Editar</a
                       >
                     {/if}
                   </div>
@@ -155,7 +159,7 @@
                     {value(g, g.progress_value)}
                   </span>
                   <span class="v2-sub" style="font-size:12px">
-                    of {value(g, g.target_value)}
+                    de {value(g, g.target_value)}
                   </span>
                   <!-- The server's progress_percent, not a division done here.
                        SalesGoal floors it (int()) and caps it at 100, so
@@ -179,7 +183,7 @@
                     <span
                       class="v2-bar-pace"
                       style="left:calc({elapsed}% - 1px)"
-                      title="{elapsed}% through the period"
+                      title="{elapsed}% del período transcurrido"
                     ></span>
                   {/if}
                 </div>
@@ -188,16 +192,16 @@
                     {#if g.assigned_to}
                       {g.assigned_to.name}
                     {:else if g.team}
-                      {g.team.name} (team)
+                      {g.team.name} (equipo)
                     {:else}
-                      Whole org
+                      Toda la organización
                     {/if}
                   </span>
                   <span>
                     {#if over}
-                      Period ended {shortDate(g.period_end)}
+                      Período terminado el {shortDate(g.period_end)}
                     {:else}
-                      <span class="v2-num">{elapsed}%</span> through the period
+                      <span class="v2-num">{elapsed}%</span> del período
                     {/if}
                   </span>
                 </div>
@@ -209,7 +213,7 @@
         <div>
           <div class="v2-label" style="margin-bottom:10px">
             <Trophy size={12} style="vertical-align:-1px;margin-right:4px" />
-            Leaderboard
+            Clasificación
           </div>
           <div class="v2-card" style="overflow:hidden">
             {#each data.leaderboard as row (row.goal_id)}
@@ -224,7 +228,7 @@
                 <div style="flex:1;min-width:0">
                   <div style="font-size:12.5px;font-weight:550">{row.user}</div>
                   <div class="v2-sub v2-num" style="font-size:11px">
-                    {money(row.achieved, data.org.currency)} of {money(row.target, data.org.currency)}
+                    {money(row.achieved, data.org.currency)} de {money(row.target, data.org.currency)}
                   </div>
                 </div>
                 <!-- Uncapped on purpose: 104% is the interesting number, and
@@ -243,8 +247,9 @@
           </div>
 
           <p class="v2-sub" style="font-size:11.5px;margin-top:11px">
-            Ranked on attainment against each person's own target, not on raw revenue. Otherwise
-            the biggest patch wins every quarter regardless of who worked hardest.
+            Clasificado según el cumplimiento del objetivo propio de cada persona, no según ingresos
+            brutos. De lo contrario, el territorio más grande gana cada trimestre sin importar quién
+            trabajó más duro.
           </p>
         </div>
       </div>

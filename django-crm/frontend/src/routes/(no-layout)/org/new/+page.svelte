@@ -40,7 +40,7 @@
 </script>
 
 <svelte:head>
-  <title>Create organisation · BottleCRM</title>
+  <title>Crear organización · BottleCRM</title>
 </svelte:head>
 
 <div class="v2-root v2-auth">
@@ -52,8 +52,8 @@
 
     <div class="v2-auth-card">
       <div class="v2-auth-head">
-        <h1>Create organisation</h1>
-        <p>Set up a new workspace for your team.</p>
+        <h1>Crear organización</h1>
+        <p>Configurá un nuevo espacio de trabajo para tu equipo.</p>
       </div>
 
       <form
@@ -68,21 +68,21 @@
         }}
       >
         <div class="v2-field">
-          <label for="org_name">Organisation name</label>
+          <label for="org_name">Nombre de la organización</label>
           <input
             type="text"
             id="org_name"
             name="org_name"
             class="v2-input"
-            placeholder="e.g. Acme Inc."
+            placeholder="ej. Acme Inc."
             required
             disabled={isSubmitting || !!form?.data}
           />
-          <p class="v2-hint">This becomes your workspace name in BottleCRM.</p>
+          <p class="v2-hint">Este va a ser el nombre de tu espacio de trabajo en BottleCRM.</p>
         </div>
 
         <div class="v2-field">
-          <label for="timezone">Time zone</label>
+          <label for="timezone">Zona horaria</label>
           <select
             id="timezone"
             name="timezone"
@@ -95,17 +95,17 @@
             {/each}
           </select>
           <p class="v2-hint">
-            Sets when a day starts here, so "due today" and "overdue" mean what your team
-            expects. You can change it later in Settings.
+            Define cuándo empieza el día acá, para que "vence hoy" y "vencido" signifiquen lo que
+            tu equipo espera. Lo podés cambiar después en Configuración.
           </p>
         </div>
 
         {#if packs.length > 0}
           <fieldset class="v2-field pack-choice">
-            <legend>What kind of business is this?</legend>
+            <legend>¿Qué tipo de negocio es?</legend>
             <p class="v2-hint" style="margin-top:0">
-              Sets up a starter pipeline, tags and fields for your industry. You can change
-              everything later.
+              Configura un pipeline inicial, etiquetas y campos para tu rubro. Podés cambiar
+              todo después.
             </p>
 
             <label class="pack-opt">
@@ -117,8 +117,8 @@
                 disabled={isSubmitting || !!form?.data}
               />
               <span class="pack-opt-body">
-                <b>Skip for now</b>
-                <span class="v2-hint" style="margin:0">Start with a blank workspace.</span>
+                <b>Omitir por ahora</b>
+                <span class="v2-hint" style="margin:0">Empezar con un espacio en blanco.</span>
               </span>
             </label>
 
@@ -145,9 +145,9 @@
           <div class="v2-auth-note v2-auth-note-bad" style="margin-bottom:14px">
             <AlertCircle />
             <div>
-              <b>Couldn't create organisation</b>
+              <b>No se pudo crear la organización</b>
               <div style="font-weight:400;margin-top:2px">
-                {form.error.name || 'Please try again.'}
+                {form.error.name || 'Probá de nuevo.'}
               </div>
             </div>
           </div>
@@ -157,8 +157,8 @@
           <div class="v2-auth-note v2-auth-note-ok" style="margin-bottom:14px">
             <Check />
             <div>
-              <b>Organisation created</b>
-              <div style="font-weight:400;margin-top:2px">Taking you to your workspaces…</div>
+              <b>Organización creada</b>
+              <div style="font-weight:400;margin-top:2px">Te estamos llevando a tus espacios de trabajo…</div>
             </div>
           </div>
         {/if}
@@ -170,12 +170,12 @@
         >
           {#if isSubmitting}
             <span class="v2-spin"></span>
-            <span>Creating…</span>
+            <span>Creando…</span>
           {:else if form?.data}
             <Check size={15} />
-            <span>Created</span>
+            <span>Creada</span>
           {:else}
-            <span>Create organisation</span>
+            <span>Crear organización</span>
           {/if}
         </button>
       </form>
@@ -183,7 +183,7 @@
 
     <div class="v2-auth-foot">
       <a href="/org" style="display:inline-flex;align-items:center;gap:5px">
-        <ArrowLeft size={13} /> Back to organisations
+        <ArrowLeft size={13} /> Volver a organizaciones
       </a>
     </div>
   </div>

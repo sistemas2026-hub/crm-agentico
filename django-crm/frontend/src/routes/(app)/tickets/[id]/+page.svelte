@@ -5,7 +5,13 @@
   import Pill from '$lib/v2/components/Pill.svelte';
   import Avatar from '$lib/v2/components/Avatar.svelte';
   import { relativeDays, shortAge, longDate, relativeTime } from '$lib/v2/format.js';
-  import { PRIORITY_TONE, CASE_STATUS_TONE } from '$lib/v2/enums.js';
+  import {
+    PRIORITY_TONE,
+    CASE_STATUS_TONE,
+    CASE_PRIORITY_LABEL,
+    CASE_STATUS_LABEL,
+    CASE_TYPE_LABEL
+  } from '$lib/v2/enums.js';
   import { ChevronRight, Lock, Paperclip, Pencil, Ticket, X } from '@lucide/svelte';
 
   /** @type {{ data: any, form: any }} */
@@ -76,13 +82,13 @@
       return ticket.first_response_breached
         ? {
             tone: 'rust',
-            label: 'First reply overdue',
-            text: 'Past its first-reply target and still unanswered. A reply below is the first response. It stops the clock.'
+            label: 'Primera respuesta atrasada',
+            text: 'Pasó su objetivo de primera respuesta y sigue sin contestar. Una respuesta abajo es la primera respuesta. Detiene el reloj.'
           }
         : {
             tone: 'ember',
-            label: 'Needs a first reply',
-            text: 'Nobody has replied yet. A reply below is the first response. It is what stops the first-reply clock.'
+            label: 'Necesita una primera respuesta',
+            text: 'Todavía nadie respondió. Una respuesta abajo es la primera respuesta. Es lo que detiene el reloj de primera respuesta.'
           };
     }
     // Waiting on the customer is not something we can act on, so it is not a
@@ -91,8 +97,8 @@
     if (!ticket.assignee) {
       return {
         tone: 'ember',
-        label: 'No owner',
-        text: 'Answered, but nobody owns it. Assign someone so it does not stall between people.'
+        label: 'Sin responsable',
+        text: 'Ya se respondió, pero nadie está a cargo. Asigná a alguien para que no se estanque entre personas.'
       };
     }
     return null;
@@ -121,17 +127,17 @@
     {/if}
   {/snippet}
   {#snippet actions()}
-    <a class="v2-btn" href="/tickets/{ticket.id}/edit"><Pencil size={12} />Edit</a>
+    <a class="v2-btn" href="/tickets/{ticket.id}/edit"><Pencil size={12} />Editar</a>
     {#if ticket.is_open}
       <form method="POST" action="?/setStatus" use:enhance style="display:contents">
         {#if ticket.status !== 'Pending'}
-          <button class="v2-btn" name="status" value="Pending">Set to pending</button>
+          <button class="v2-btn" name="status" value="Pending">Poner en espera</button>
         {/if}
-        <button class="v2-btn v2-btn-primary" name="status" value="Closed">Close</button>
+        <button class="v2-btn v2-btn-primary" name="status" value="Closed">Cerrar</button>
       </form>
     {:else}
       <form method="POST" action="?/setStatus" use:enhance style="display:contents">
-        <button class="v2-btn" name="status" value="New">Reopen</button>
+        <button class="v2-btn" name="status" value="New">Reabrir</button>
       </form>
     {/if}
   {/snippet}
@@ -143,18 +149,18 @@
       class="v2-pad"
       style="padding-top:12px;display:flex;gap:7px;align-items:center;flex-wrap:wrap;flex:none"
     >
-      <Pill tone={PRIORITY_TONE[ticket.priority]}>{ticket.priority}</Pill>
-      <Pill tone={CASE_STATUS_TONE[ticket.status]}>{ticket.status}</Pill>
-      {#if ticket.case_type}<Pill tone="slate">{ticket.case_type}</Pill>{/if}
+      <Pill tone={PRIORITY_TONE[ticket.priority]}>{CASE_PRIORITY_LABEL[ticket.priority] ?? ticket.priority}</Pill>
+      <Pill tone={CASE_STATUS_TONE[ticket.status]}>{CASE_STATUS_LABEL[ticket.status] ?? ticket.status}</Pill>
+      {#if ticket.case_type}<Pill tone="slate">{CASE_TYPE_LABEL[ticket.case_type] ?? ticket.case_type}</Pill>{/if}
       <span class="v2-sub">
         <!-- There is no ticket number. `Case` has a UUID and a subject, so the
              subject is the identifier and the age is the useful fact. -->
-        Opened {shortAge(ticket.opened_at)} ago
+        Abierto hace {shortAge(ticket.opened_at)}
         {#if ticket.first_response_at}
-          · first reply {relativeTime(ticket.first_response_at)}
+          · primera respuesta {relativeTime(ticket.first_response_at)}
         {/if}
         {#if ticket.escalation_count > 0}
-          · <span style="color:var(--v2-rust)">escalated {ticket.escalation_count}×</span>
+          · <span style="color:var(--v2-rust)">escalado {ticket.escalation_count}×</span>
         {/if}
       </span>
     </div>
@@ -176,13 +182,13 @@
           </div>
         {:else if waiting}
           <p class="v2-sub" style="margin:0 0 18px;font-size:12.5px">
-            Waiting on the customer: the first-reply clock is paused while it sits in Pending.
+            Esperando al cliente: el reloj de primera respuesta está en pausa mientras está en Pendiente.
           </p>
         {/if}
 
         {#if ticket.description}
           <div class="v2-card" style="padding:13px 15px;margin-bottom:18px">
-            <div class="v2-label" style="margin-bottom:7px">What was reported</div>
+            <div class="v2-label" style="margin-bottom:7px">Qué se reportó</div>
             <div style="font-size:13.5px;line-height:1.55;white-space:pre-wrap">
               {ticket.description}
             </div>
@@ -191,8 +197,8 @@
 
         {#if conversation.length === 0}
           <p class="v2-sub" style="margin:0 0 18px;font-size:12.5px">
-            Nothing has been said on this ticket yet. A reply below is the first response. It is
-            what stops the first-reply clock.
+            Todavía no se dijo nada en este ticket. Una respuesta abajo es la primera respuesta. Es
+            lo que detiene el reloj de primera respuesta.
           </p>
         {/if}
 
@@ -210,7 +216,7 @@
               >
                 <Lock size={11} />
                 <b style="color:var(--v2-ink);font-weight:600">{m.author}</b>
-                · internal note · {shortAge(m.at)} ago
+                · nota interna · hace {shortAge(m.at)}
               </div>
               <div style="font-size:13.5px;line-height:1.55;white-space:pre-wrap">{m.body}</div>
             </div>
@@ -229,8 +235,8 @@
               >
                 <div class="v2-sub" style="font-size:11.5px;margin-bottom:5px">
                   <b style="color:var(--v2-ink);font-weight:600">{m.author}</b>
-                  {#if m.kind === 'email'}· email{/if}
-                  · {shortAge(m.at)} ago
+                  {#if m.kind === 'email'}· correo{/if}
+                  · hace {shortAge(m.at)}
                 </div>
                 {#if m.subject}
                   <div style="font-size:12.5px;font-weight:600;margin-bottom:4px">{m.subject}</div>
@@ -248,7 +254,7 @@
                 name="body"
                 bind:value={body}
                 rows="3"
-                placeholder={internal ? 'Note for the team…' : 'Write a reply…'}
+                placeholder={internal ? 'Nota para el equipo…' : 'Escribir una respuesta…'}
                 style="width:100%;border:none;background:transparent;resize:vertical;font:inherit;font-size:13.5px;line-height:1.55;color:var(--v2-ink);outline:none"
               ></textarea>
               <div
@@ -259,13 +265,13 @@
                   style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer"
                 >
                   <input type="checkbox" name="internal" bind:checked={internal} />
-                  Internal note
+                  Nota interna
                 </label>
                 <!-- The whole chip is the click target: a label wrapping a hidden
                      input. A file may ride with the reply or go on its own. -->
                 <label class="attach" class:has-file={fileName}>
                   <Paperclip size={13} />
-                  <span class="attach-label">{fileName || 'Attach'}</span>
+                  <span class="attach-label">{fileName || 'Adjuntar'}</span>
                   <input
                     bind:this={fileInput}
                     type="file"
@@ -275,43 +281,43 @@
                   />
                 </label>
                 {#if fileName}
-                  <button type="button" class="clear-file" onclick={clearFile} title="Remove file">
+                  <button type="button" class="clear-file" onclick={clearFile} title="Quitar archivo">
                     <X size={12} />
                   </button>
                 {/if}
-                <span class="v2-sub" style="margin-left:auto;font-size:11.5px">Status on send</span>
+                <span class="v2-sub" style="margin-left:auto;font-size:11.5px">Estado al enviar</span>
                 <!-- Answering and moving the ticket is one decision, so it is
                      one submit. Empty means "leave the status alone". -->
                 <select name="status" class="v2-input" style="width:auto;font-size:12px">
-                  <option value="">Unchanged</option>
-                  <option value="Assigned">Assigned</option>
-                  <option value="Pending">Pending</option>
+                  <option value="">Sin cambios</option>
+                  <option value="Assigned">Asignado</option>
+                  <option value="Pending">Pendiente</option>
                 </select>
                 <button class="v2-btn v2-btn-primary" disabled={sending || !canSend}>
                   {sending
-                    ? 'Sending…'
+                    ? 'Enviando…'
                     : body.trim()
                       ? internal
-                        ? 'Add note'
-                        : 'Send reply'
+                        ? 'Agregar nota'
+                        : 'Enviar respuesta'
                       : fileName
-                        ? 'Attach file'
+                        ? 'Adjuntar archivo'
                         : internal
-                          ? 'Add note'
-                          : 'Send reply'}
+                          ? 'Agregar nota'
+                          : 'Enviar respuesta'}
                 </button>
               </div>
             </div>
             {#if internal}
               <p class="v2-sub" style="margin:8px 2px 0;font-size:11.5px">
-                A note stays inside the team and does not stop the first-reply clock.
+                Una nota queda dentro del equipo y no detiene el reloj de primera respuesta.
               </p>
             {/if}
           </form>
         {:else}
           <p class="v2-sub" style="margin-top:18px;font-size:12.5px">
-            You can read this ticket but not reply to it. Ask an admin, or whoever it is assigned
-            to.
+            Podés leer este ticket pero no responderlo. Pedile a un administrador, o a quien esté
+            asignado.
           </p>
         {/if}
       </div>
@@ -321,45 +327,45 @@
   <aside class="v2-rail">
     <div class="v2-label v2-rail-head">Ticket</div>
     <dl class="v2-kv">
-      <dt>Priority</dt>
-      <dd><Pill tone={PRIORITY_TONE[ticket.priority]}>{ticket.priority}</Pill></dd>
-      <dt>Status</dt>
-      <dd><Pill tone={CASE_STATUS_TONE[ticket.status]}>{ticket.status}</Pill></dd>
-      <dt>Type</dt>
-      <dd>{ticket.case_type ?? 'Not set'}</dd>
-      <dt>Assignee</dt>
+      <dt>Prioridad</dt>
+      <dd><Pill tone={PRIORITY_TONE[ticket.priority]}>{CASE_PRIORITY_LABEL[ticket.priority] ?? ticket.priority}</Pill></dd>
+      <dt>Estado</dt>
+      <dd><Pill tone={CASE_STATUS_TONE[ticket.status]}>{CASE_STATUS_LABEL[ticket.status] ?? ticket.status}</Pill></dd>
+      <dt>Tipo</dt>
+      <dd>{ticket.case_type ? (CASE_TYPE_LABEL[ticket.case_type] ?? ticket.case_type) : 'Sin definir'}</dd>
+      <dt>Asignado a</dt>
       <dd>
-        {ticket.assignee ?? 'Unassigned'}
+        {ticket.assignee ?? 'Sin asignar'}
         {#if ticket.assignee_count > 1}
           <span class="v2-sub">+{ticket.assignee_count - 1}</span>
         {/if}
       </dd>
-      <dt>Opened</dt>
+      <dt>Abierto</dt>
       <dd>{longDate(ticket.opened_at)}</dd>
-      <dt>First reply</dt>
+      <dt>Primera respuesta</dt>
       <dd>
         {#if ticket.first_response_at}
           {relativeTime(ticket.first_response_at)}
         {:else if ticket.first_response_deadline}
           <span style={ticket.first_response_breached ? 'color:var(--v2-rust)' : ''}>
-            due {relativeTime(ticket.first_response_deadline)}
+            vence {relativeTime(ticket.first_response_deadline)}
           </span>
         {:else}
-          No target
+          Sin objetivo
         {/if}
       </dd>
       {#if ticket.resolved_at}
-        <dt>Resolved</dt>
+        <dt>Resuelto</dt>
         <dd>{longDate(ticket.resolved_at)}</dd>
       {/if}
       {#if ticket.paused_at}
         <dt>SLA</dt>
-        <dd>Paused while pending</dd>
+        <dd>Pausado mientras está pendiente</dd>
       {/if}
     </dl>
 
     {#if ticket.account}
-      <div class="v2-label v2-rail-head">Account</div>
+      <div class="v2-label v2-rail-head">Cuenta</div>
       <a
         class="v2-rail-row"
         href="/accounts/{ticket.account.id}"
@@ -370,11 +376,11 @@
           <div style="font-size:12.5px;font-weight:550">{ticket.account.name}</div>
           <div class="v2-sub" style="font-size:11px">
             {#if contacts.length === 1}
-              Reported by {contacts[0].name}
+              Reportado por {contacts[0].name}
             {:else if contacts.length > 1}
-              {contacts.length} people on this ticket
+              {contacts.length} personas en este ticket
             {:else}
-              Nobody named on this ticket
+              Nadie identificado en este ticket
             {/if}
           </div>
         </div>
@@ -382,7 +388,7 @@
     {/if}
 
     {#if contacts.length}
-      <div class="v2-label v2-rail-head">People</div>
+      <div class="v2-label v2-rail-head">Personas</div>
       {#each contacts as c (c.id)}
         <a class="v2-rail-row" href="/contacts/{c.id}" style="color:inherit;text-decoration:none">
           <Avatar name={c.name} size={26} />
@@ -394,13 +400,13 @@
     {#if articles.length}
       <!-- Articles filed against this ticket, not keyword guesses. The mock
            called these "suggested"; suggestions are a different endpoint. -->
-      <div class="v2-label v2-rail-head">Linked articles</div>
+      <div class="v2-label v2-rail-head">Artículos vinculados</div>
       {#each articles as a (a.id)}
         <a class="v2-rail-row" href="/solutions/{a.id}" style="color:inherit;text-decoration:none">
           <div>
             <div style="font-size:12.5px;font-weight:550;line-height:1.35">{a.title}</div>
             <div class="v2-sub" style="font-size:11px">
-              {a.is_published ? 'Published' : 'Not published'} · updated {relativeDays(
+              {a.is_published ? 'Publicado' : 'No publicado'} · actualizado {relativeDays(
                 a.updated_at
               )}
             </div>
@@ -410,7 +416,7 @@
     {/if}
 
     {#if attachments.length}
-      <div class="v2-label v2-rail-head">Attachments</div>
+      <div class="v2-label v2-rail-head">Adjuntos</div>
       {#each attachments as f (f.id)}
         {#if f.url}
           <!-- A download now, not dead text: the path was always in the payload
@@ -435,13 +441,13 @@
     {/if}
 
     {#if alsoOpen.length}
-      <div class="v2-label v2-rail-head">Also open here</div>
+      <div class="v2-label v2-rail-head">También abiertos acá</div>
       {#each alsoOpen as t (t.id)}
         <a class="v2-rail-row" href="/tickets/{t.id}" style="color:inherit;text-decoration:none">
           <div>
             <div style="font-size:12.5px;font-weight:550;line-height:1.35">{t.name}</div>
             <div class="v2-sub" style="font-size:11px">
-              {t.priority} · {shortAge(t.opened_at)} old
+              {CASE_PRIORITY_LABEL[t.priority] ?? t.priority} · {shortAge(t.opened_at)} de antigüedad
             </div>
           </div>
         </a>
@@ -449,13 +455,13 @@
     {/if}
 
     {#if activity.length}
-      <div class="v2-label v2-rail-head">History</div>
+      <div class="v2-label v2-rail-head">Historial</div>
       {#each activity.slice(0, 8) as a (a.id)}
         <div class="v2-rail-row">
           <div>
             <div style="font-size:12.5px;font-weight:550;line-height:1.35">{a.label}</div>
             <div class="v2-sub" style="font-size:11px">
-              {a.by ?? 'System'} · {shortAge(a.at)} ago
+              {a.by ?? 'Sistema'} · hace {shortAge(a.at)}
             </div>
           </div>
         </div>

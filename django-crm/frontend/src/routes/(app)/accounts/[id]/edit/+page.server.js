@@ -37,7 +37,7 @@ export const actions = {
     try {
       await updateAccount({ cookies }, params.id, values);
     } catch (/** @type {any} */ err) {
-      return fail(400, { values, error: readableError(err, 'Could not save this account.') });
+      return fail(400, { values, error: readableError(err, 'No se pudo guardar esta cuenta.') });
     }
 
     redirect(303, `/accounts/${params.id}`);

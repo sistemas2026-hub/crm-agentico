@@ -74,7 +74,7 @@ def _disabled_account_response():
     Google and magic-link flows so clients can handle one shape.
     """
     return Response(
-        {"error": "User account is disabled"},
+        {"error": "La cuenta está deshabilitada"},
         status=status.HTTP_403_FORBIDDEN,
     )
 
@@ -419,7 +419,7 @@ class OrgAwareTokenRefreshView(APIView):
 
             if not user.is_active:
                 return Response(
-                    {"error": "User account is disabled"},
+                    {"error": "La cuenta está deshabilitada"},
                     status=status.HTTP_403_FORBIDDEN,
                 )
 
@@ -842,6 +842,91 @@ class MagicLinkVerifyView(APIView):
             from common.tasks import send_welcome_email
 
             send_welcome_email.delay(str(user.id))
+
+        # Update last_login
+        user.last_login = timezone.now()
+        user.save(update_fields=["last_login"])
+
+        # Get user's organizations
+        profiles = Profile.objects.filter(user=user, is_active=True)
+        default_org = None
+        profile = None
+
+        if profiles.exists():
+            profile = profiles.first()
+            default_org = profile.org
+
+        if default_org:
+            token = OrgAwareRefreshToken.for_user_and_org(user, default_org, profile)
+        else:
+            token = OrgAwareRefreshToken.for_user_and_org(user, None)
+
+        audit_log.login_success(user, default_org, request)
+
+        user_serializer = serializer.UserDetailSerializer(user)
+        response_data = {
+            "access_token": str(token.access_token),
+            "refresh_token": str(token),
+            "user": user_serializer.data,
+        }
+
+        if default_org:
+            response_data["current_org"] = _org_payload(default_org)
+
+        return Response(response_data, status=status.HTTP_200_OK)
+
+
+class PasswordLoginView(APIView):
+    """
+    Verify email+password and return JWT tokens.
+
+    Does not create a user -- unlike the magic-link/Google flows, a password
+    login for an email nobody has provisioned is exactly the case that must
+    fail, not silently provision an account.
+    """
+
+    permission_classes = []
+    authentication_classes = []
+
+    @extend_schema(
+        tags=["auth"],
+        request=serializer.PasswordLoginSerializer,
+        responses={
+            200: inline_serializer(
+                name="PasswordLoginResponse",
+                fields={
+                    "access_token": serializers.CharField(),
+                    "refresh_token": serializers.CharField(),
+                    "user": serializers.DictField(),
+                },
+            )
+        },
+    )
+    def post(self, request):
+        from django.contrib.auth import authenticate
+
+        from common.audit_log import audit_log
+
+        serializer_obj = serializer.PasswordLoginSerializer(data=request.data)
+        if not serializer_obj.is_valid():
+            return Response(
+                {"error": "Solicitud inválida"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        email = serializer_obj.validated_data["email"]
+        password = serializer_obj.validated_data["password"]
+
+        user = authenticate(request, username=email, password=password)
+        if user is None:
+            audit_log.login_failure(email, "invalid_credentials", request)
+            return Response(
+                {"error": "Correo o contraseña incorrectos"},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        if not user.is_active:
+            return _disabled_account_response()
 
         # Update last_login
         user.last_login = timezone.now()

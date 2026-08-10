@@ -22,10 +22,10 @@ export async function load({ cookies }) {
   ]);
 
   return {
-    accounts: accounts.results.map((a) => ({ id: a.id, name: a.name || 'Unnamed account' })),
+    accounts: accounts.results.map((a) => ({ id: a.id, name: a.name || 'Cuenta sin nombre' })),
     contacts: contacts.results.map((c) => ({
       id: c.id,
-      name: c.name || c.email || 'Unnamed contact',
+      name: c.name || c.email || 'Contacto sin nombre',
       account_id: c.account?.id ?? null,
       account_name: c.account?.name ?? ''
     })),
@@ -50,14 +50,14 @@ export const actions = {
     try {
       values = JSON.parse(form.get('payload')?.toString() || '{}');
     } catch {
-      return fail(400, { error: 'The schedule form could not be read. Please try again.' });
+      return fail(400, { error: 'No se pudo leer el formulario de la programación. Intentá de nuevo.' });
     }
 
     try {
       await createRecurringInvoice({ cookies }, values);
     } catch (/** @type {any} */ err) {
       return fail(err?.status === 403 ? 403 : 400, {
-        error: readableError(err, 'Could not create the schedule.')
+        error: readableError(err, 'No se pudo crear la programación.')
       });
     }
 

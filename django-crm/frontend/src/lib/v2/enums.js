@@ -33,12 +33,12 @@ export const STAGES = [
 export const OPEN_STAGES = STAGES.slice(0, 4);
 
 export const STAGE_LABEL = {
-  PROSPECTING: 'Prospecting',
-  QUALIFICATION: 'Qualification',
-  PROPOSAL: 'Proposal',
-  NEGOTIATION: 'Negotiation',
-  CLOSED_WON: 'Closed Won',
-  CLOSED_LOST: 'Closed Lost'
+  PROSPECTING: 'Prospección',
+  QUALIFICATION: 'Calificación',
+  PROPOSAL: 'Propuesta',
+  NEGOTIATION: 'Negociación',
+  CLOSED_WON: 'Ganada',
+  CLOSED_LOST: 'Perdida'
 };
 
 export const STAGE_TONE = {
@@ -51,16 +51,16 @@ export const STAGE_TONE = {
 };
 
 export const OPPORTUNITY_TYPE_LABEL = {
-  NEW_BUSINESS: 'New Business',
-  EXISTING_BUSINESS: 'Existing Business',
-  RENEWAL: 'Renewal',
-  UPSELL: 'Upsell',
-  CROSS_SELL: 'Cross-sell'
+  NEW_BUSINESS: 'Nuevo negocio',
+  EXISTING_BUSINESS: 'Negocio existente',
+  RENEWAL: 'Renovación',
+  UPSELL: 'Venta adicional',
+  CROSS_SELL: 'Venta cruzada'
 };
 
 /** Opportunity.aging_status. The API returns these three strings verbatim. */
 export const AGING_TONE = { green: 'slate', yellow: 'clay', red: 'rust' };
-export const AGING_LABEL = { green: 'On pace', yellow: 'Past expected', red: 'Stalled' };
+export const AGING_LABEL = { green: 'A tiempo', yellow: 'Atrasada', red: 'Estancada' };
 
 export const LEAD_STATUS_TONE = {
   assigned: 'slate',
@@ -82,11 +82,11 @@ export const LEAD_STATUS_TONE = {
 export const LEAD_STATUSES = ['assigned', 'in process', 'converted', 'recycled', 'closed'];
 
 export const LEAD_STATUS_LABEL = {
-  assigned: 'Assigned',
-  'in process': 'In process',
-  converted: 'Converted',
-  recycled: 'Recycled',
-  closed: 'Closed'
+  assigned: 'Asignado',
+  'in process': 'En proceso',
+  converted: 'Convertido',
+  recycled: 'Reciclado',
+  closed: 'Cerrado'
 };
 
 /**
@@ -109,13 +109,13 @@ export const LEAD_SOURCES = [
 ];
 
 export const LEAD_SOURCE_LABEL = {
-  call: 'Call',
-  email: 'Email',
-  'existing customer': 'Existing customer',
-  partner: 'Partner',
-  'public relations': 'Public relations',
-  compaign: 'Campaign',
-  other: 'Other'
+  call: 'Llamada',
+  email: 'Correo',
+  'existing customer': 'Cliente existente',
+  partner: 'Socio',
+  'public relations': 'Relaciones públicas',
+  compaign: 'Campaña',
+  other: 'Otro'
 };
 
 /**
@@ -162,10 +162,44 @@ export const INDUSTRIES = [
   'VENTURE CAPITAL'
 ];
 
-/** "FOOD & BEVERAGE" → "Food & beverage". The value sent to the API is unchanged. */
-export const industryLabel = (v) => (!v ? '' : v.charAt(0) + v.slice(1).toLowerCase());
+/** Display text for each INDUSTRIES value. The value sent to the API is unchanged. */
+export const INDUSTRY_LABEL = {
+  ADVERTISING: 'Publicidad',
+  AGRICULTURE: 'Agricultura',
+  'APPAREL & ACCESSORIES': 'Ropa y accesorios',
+  AUTOMOTIVE: 'Automotriz',
+  BANKING: 'Banca',
+  BIOTECHNOLOGY: 'Biotecnología',
+  'BUILDING MATERIALS & EQUIPMENT': 'Materiales y equipos de construcción',
+  CHEMICAL: 'Química',
+  COMPUTER: 'Informática',
+  EDUCATION: 'Educación',
+  ELECTRONICS: 'Electrónica',
+  ENERGY: 'Energía',
+  'ENTERTAINMENT & LEISURE': 'Entretenimiento y ocio',
+  FINANCE: 'Finanzas',
+  'FOOD & BEVERAGE': 'Alimentos y bebidas',
+  GROCERY: 'Supermercado',
+  HEALTHCARE: 'Salud',
+  INSURANCE: 'Seguros',
+  LEGAL: 'Legal',
+  MANUFACTURING: 'Manufactura',
+  PUBLISHING: 'Editorial',
+  'REAL ESTATE': 'Bienes raíces',
+  SERVICE: 'Servicios',
+  SOFTWARE: 'Software',
+  SPORTS: 'Deportes',
+  TECHNOLOGY: 'Tecnología',
+  TELECOMMUNICATIONS: 'Telecomunicaciones',
+  TELEVISION: 'Televisión',
+  TRANSPORTATION: 'Transporte',
+  'VENTURE CAPITAL': 'Capital de riesgo'
+};
+
+export const industryLabel = (v) => (!v ? '' : (INDUSTRY_LABEL[v] ?? v));
 
 export const PRIORITY_TONE = { Urgent: 'rust', High: 'clay', Normal: 'slate', Low: 'slate' };
+export const CASE_PRIORITY_LABEL = { Urgent: 'Urgente', High: 'Alta', Normal: 'Normal', Low: 'Baja' };
 
 export const CASE_STATUS_TONE = {
   New: 'ink',
@@ -175,6 +209,15 @@ export const CASE_STATUS_TONE = {
   Rejected: 'rust',
   Duplicate: 'slate'
 };
+export const CASE_STATUS_LABEL = {
+  New: 'Nuevo',
+  Assigned: 'Asignado',
+  Pending: 'Pendiente',
+  Closed: 'Cerrado',
+  Rejected: 'Rechazado',
+  Duplicate: 'Duplicado'
+};
+export const CASE_TYPE_LABEL = { Question: 'Pregunta', Incident: 'Incidente', Problem: 'Problema' };
 
 export const INVOICE_STATUS_TONE = {
   Draft: 'slate',
@@ -188,7 +231,18 @@ export const INVOICE_STATUS_TONE = {
 };
 
 /** INVOICE_STATUS uses an underscore on the wire; never show it to a person. */
-export const invoiceStatusLabel = (s) => String(s ?? '').replace(/_/g, ' ');
+export const INVOICE_STATUS_LABEL = {
+  Draft: 'Borrador',
+  Sent: 'Enviada',
+  Viewed: 'Vista',
+  Paid: 'Pagada',
+  Partially_Paid: 'Parcialmente pagada',
+  Overdue: 'Vencida',
+  Pending: 'Pendiente',
+  Cancelled: 'Cancelada'
+};
+export const invoiceStatusLabel = (s) =>
+  INVOICE_STATUS_LABEL[s] ?? String(s ?? '').replace(/_/g, ' ');
 
 /**
  * tasks.Task.STATUS_CHOICES / PRIORITY_CHOICES.
@@ -200,9 +254,11 @@ export const invoiceStatusLabel = (s) => String(s ?? '').replace(/_/g, ' ');
  */
 export const TASK_STATUS = ['New', 'In Progress', 'Completed'];
 export const TASK_STATUS_TONE = { New: 'slate', 'In Progress': 'ink', Completed: 'moss' };
+export const TASK_STATUS_LABEL = { New: 'Nueva', 'In Progress': 'En progreso', Completed: 'Completada' };
 
 export const TASK_PRIORITY = ['Low', 'Medium', 'High'];
 export const TASK_PRIORITY_TONE = { Low: 'slate', Medium: 'slate', High: 'clay' };
+export const TASK_PRIORITY_LABEL = { Low: 'Baja', Medium: 'Media', High: 'Alta' };
 
 /**
  * cases.Solution.STATUS_CHOICES, plus the separate is_published flag.
@@ -212,7 +268,7 @@ export const TASK_PRIORITY_TONE = { Low: 'slate', Medium: 'slate', High: 'clay' 
  * customers could not see looked live. Both are surfaced here.
  */
 export const SOLUTION_STATUS = ['draft', 'reviewed', 'approved'];
-export const SOLUTION_STATUS_LABEL = { draft: 'Draft', reviewed: 'Reviewed', approved: 'Approved' };
+export const SOLUTION_STATUS_LABEL = { draft: 'Borrador', reviewed: 'Revisado', approved: 'Aprobado' };
 export const SOLUTION_STATUS_TONE = { draft: 'slate', reviewed: 'clay', approved: 'moss' };
 
 /**
@@ -222,20 +278,20 @@ export const SOLUTION_STATUS_TONE = { draft: 'slate', reviewed: 'clay', approved
  * what they mean rather than repeating the wire value: "behind" alone does not
  * tell you behind on what. They are pace judgements, not percentages.
  */
-export const GOAL_TYPE_LABEL = { REVENUE: 'Revenue', DEALS_CLOSED: 'Deals closed' };
+export const GOAL_TYPE_LABEL = { REVENUE: 'Ingresos', DEALS_CLOSED: 'Negociaciones cerradas' };
 
 export const PERIOD_TYPE_LABEL = {
-  MONTHLY: 'Monthly',
-  QUARTERLY: 'Quarterly',
-  YEARLY: 'Yearly',
-  CUSTOM: 'Custom'
+  MONTHLY: 'Mensual',
+  QUARTERLY: 'Trimestral',
+  YEARLY: 'Anual',
+  CUSTOM: 'Personalizado'
 };
 
 export const GOAL_STATUS_LABEL = {
-  completed: 'Target met',
-  on_track: 'On pace',
-  at_risk: 'Slipping',
-  behind: 'Behind pace'
+  completed: 'Meta cumplida',
+  on_track: 'A tiempo',
+  at_risk: 'Atrasándose',
+  behind: 'Atrasada'
 };
 
 export const GOAL_STATUS_TONE = {
@@ -247,10 +303,10 @@ export const GOAL_STATUS_TONE = {
 
 /** cases.approvals: APPROVAL_STATE_CHOICES. */
 export const APPROVAL_STATE_LABEL = {
-  pending: 'Waiting',
-  approved: 'Approved',
-  rejected: 'Rejected',
-  cancelled: 'Withdrawn'
+  pending: 'Esperando',
+  approved: 'Aprobado',
+  rejected: 'Rechazado',
+  cancelled: 'Retirado'
 };
 
 export const APPROVAL_STATE_TONE = {
@@ -278,24 +334,33 @@ export const ESTIMATE_STATUS_TONE = {
   Expired: 'clay'
 };
 
+export const ESTIMATE_STATUS_LABEL = {
+  Draft: 'Borrador',
+  Sent: 'Enviada',
+  Viewed: 'Vista',
+  Accepted: 'Aceptada',
+  Declined: 'Rechazada',
+  Expired: 'Vencida'
+};
+
 /** invoices.RECURRING_FREQUENCIES; CUSTOM carries its interval in custom_days. */
 export const RECURRING_FREQUENCY_LABEL = {
-  WEEKLY: 'Weekly',
-  BIWEEKLY: 'Every 2 weeks',
-  MONTHLY: 'Monthly',
-  QUARTERLY: 'Quarterly',
-  SEMI_ANNUALLY: 'Every 6 months',
-  YEARLY: 'Yearly',
-  CUSTOM: 'Custom'
+  WEEKLY: 'Semanal',
+  BIWEEKLY: 'Cada 2 semanas',
+  MONTHLY: 'Mensual',
+  QUARTERLY: 'Trimestral',
+  SEMI_ANNUALLY: 'Cada 6 meses',
+  YEARLY: 'Anual',
+  CUSTOM: 'Personalizado'
 };
 
 export const PAYMENT_TERMS_LABEL = {
-  DUE_ON_RECEIPT: 'Due on receipt',
-  NET_15: 'Net 15',
-  NET_30: 'Net 30',
-  NET_45: 'Net 45',
-  NET_60: 'Net 60',
-  CUSTOM: 'Custom'
+  DUE_ON_RECEIPT: 'A la recepción',
+  NET_15: 'A 15 días',
+  NET_30: 'A 30 días',
+  NET_45: 'A 45 días',
+  NET_60: 'A 60 días',
+  CUSTOM: 'Personalizado'
 };
 
 /**
@@ -303,7 +368,7 @@ export const PAYMENT_TERMS_LABEL = {
  * Role is server-derived from the profile; nothing the browser sends decides
  * it. This map exists to label a value the API gave us, never to offer one.
  */
-export const ROLE_LABEL = { ADMIN: 'Admin', USER: 'Member' };
+export const ROLE_LABEL = { ADMIN: 'Administrador', USER: 'Miembro' };
 export const ROLE_TONE = { ADMIN: 'clay', USER: 'slate' };
 
 /* ── ticket handling configuration ──────────────────────────────────────── */
@@ -315,44 +380,44 @@ export const ROLE_TONE = { ADMIN: 'clay', USER: 'slate' };
  * completes them.
  */
 export const ROUTING_STRATEGY_LABEL = {
-  direct: 'Always to',
-  round_robin: 'Round-robin between',
-  least_busy: 'Whoever has fewest open, of',
-  by_team: 'Anyone on'
+  direct: 'Siempre a',
+  round_robin: 'Por turnos entre',
+  least_busy: 'A quien tenga menos abiertos, de',
+  by_team: 'Cualquiera en'
 };
 
 /** Standalone names for the strategy select. `ROUTING_STRATEGY_LABEL` above
  *  is a sentence fragment that runs into the target names on the rule card,
  *  so it cannot double as an option label. */
 export const ROUTING_STRATEGY_NAME = {
-  direct: 'Direct',
-  round_robin: 'Round robin',
-  least_busy: 'Least busy',
-  by_team: 'By team'
+  direct: 'Directo',
+  round_robin: 'Por turnos',
+  least_busy: 'Menos ocupado',
+  by_team: 'Por equipo'
 };
 
 /** Fields a routing condition can test, in the words the rest of the app uses. */
 export const CONDITION_FIELD_LABEL = {
-  priority: 'Priority',
-  case_type: 'Type',
-  account: 'Account',
-  tags: 'Tags',
-  from_email_domain: 'Sender domain',
-  mailbox_id: 'Mailbox'
+  priority: 'Prioridad',
+  case_type: 'Tipo',
+  account: 'Cuenta',
+  tags: 'Etiquetas',
+  from_email_domain: 'Dominio del remitente',
+  mailbox_id: 'Casilla de correo'
 };
 
 export const CONDITION_OP_LABEL = {
-  eq: 'is',
-  in: 'is one of',
-  contains: 'includes',
-  regex: 'matches'
+  eq: 'es',
+  in: 'es uno de',
+  contains: 'incluye',
+  regex: 'coincide con'
 };
 
 /** cases.EscalationPolicy.ACTION_CHOICES. */
 export const ESCALATION_ACTION_LABEL = {
-  notify: 'Notify',
-  reassign: 'Reassign to',
-  notify_and_reassign: 'Notify and reassign to'
+  notify: 'Notificar',
+  reassign: 'Reasignar a',
+  notify_and_reassign: 'Notificar y reasignar a'
 };
 
 /** cases.EscalationPolicy priorities, worst first. This is the display order
@@ -373,12 +438,12 @@ export const MAILBOX_PROVIDER_LABEL = {
 
 /** common.CustomFieldDefinition.FIELD_TYPE_CHOICES. */
 export const FIELD_TYPE_LABEL = {
-  text: 'Text',
-  textarea: 'Long text',
-  number: 'Number',
-  dropdown: 'Dropdown',
-  date: 'Date',
-  checkbox: 'Checkbox'
+  text: 'Texto',
+  textarea: 'Texto largo',
+  number: 'Número',
+  dropdown: 'Lista desplegable',
+  date: 'Fecha',
+  checkbox: 'Casilla de verificación'
 };
 
 /** The statuses a reopened ticket may come back as.
@@ -393,18 +458,18 @@ export const REOPEN_TO_STATUSES = ['New', 'Assigned', 'Pending'];
 
 /** Plural forms for the target model, for reading in a heading. */
 export const TARGET_MODEL_LABEL = {
-  Account: 'Accounts',
+  Account: 'Cuentas',
   Case: 'Tickets',
-  Contact: 'Contacts',
-  Estimate: 'Estimates',
-  Invoice: 'Invoices',
-  Lead: 'Leads',
-  Opportunity: 'Deals',
-  RecurringInvoice: 'Recurring invoices',
-  Task: 'Tasks'
+  Contact: 'Contactos',
+  Estimate: 'Cotizaciones',
+  Invoice: 'Facturas',
+  Lead: 'Prospectos',
+  Opportunity: 'Negociaciones',
+  RecurringInvoice: 'Facturas recurrentes',
+  Task: 'Tareas'
 };
 
-export const MACRO_SCOPE_LABEL = { org: 'Everyone', personal: 'Just you' };
+export const MACRO_SCOPE_LABEL = { org: 'Todos', personal: 'Solo vos' };
 
 /* ── board ──────────────────────────────────────────────────────────────── */
 
@@ -414,10 +479,10 @@ export const MACRO_SCOPE_LABEL = { org: 'Everyone', personal: 'Just you' };
  * Three enums for one word across three models; keep them apart.
  */
 export const BOARD_PRIORITY_LABEL = {
-  low: 'Low',
-  medium: 'Medium',
-  high: 'High',
-  urgent: 'Urgent'
+  low: 'Baja',
+  medium: 'Media',
+  high: 'Alta',
+  urgent: 'Urgente'
 };
 export const BOARD_PRIORITY_TONE = {
   low: 'slate',
@@ -427,7 +492,7 @@ export const BOARD_PRIORITY_TONE = {
 };
 
 /** tasks.BoardMember.ROLE_CHOICES, board-local, unrelated to Profile.role. */
-export const BOARD_ROLE_LABEL = { owner: 'Owner', admin: 'Admin', member: 'Member' };
+export const BOARD_ROLE_LABEL = { owner: 'Propietario', admin: 'Administrador', member: 'Miembro' };
 
 /**
  * Option lists for the list-page filters. Values are what goes on the wire;

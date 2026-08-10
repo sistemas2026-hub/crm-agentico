@@ -24,7 +24,7 @@ export const actions = {
       created = await createLead(event, values);
     } catch (/** @type {any} */ err) {
       // Values go back so a rejected form is not a blank form.
-      return fail(400, { values, error: readableError(err, 'Could not create the lead.') });
+      return fail(400, { values, error: readableError(err, 'No se pudo crear el prospecto.') });
     }
 
     redirect(303, created?.id ? `/leads/${created.id}` : '/leads');

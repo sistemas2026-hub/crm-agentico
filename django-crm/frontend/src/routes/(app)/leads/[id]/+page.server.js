@@ -31,15 +31,15 @@ export const actions = {
     if (!comment) {
       return fail(400, {
         message: file
-          ? 'Add a note to save alongside the file.'
-          : 'Write something before you save the note.'
+          ? 'Agregá una nota para guardarla junto con el archivo.'
+          : 'Escribí algo antes de guardar la nota.'
       });
     }
 
     try {
       await addLeadNote({ cookies }, params.id, comment, file);
     } catch (/** @type {any} */ err) {
-      return fail(400, { message: String(err?.message ?? 'Could not save that note.') });
+      return fail(400, { message: String(err?.message ?? 'No se pudo guardar esa nota.') });
     }
 
     return { noted: true };
@@ -61,7 +61,7 @@ export const actions = {
       };
     } catch (/** @type {any} */ err) {
       return fail(err?.status === 403 ? 403 : 400, {
-        error: readableError(err, 'Could not convert this lead.')
+        error: readableError(err, 'No se pudo convertir este prospecto.')
       });
     }
   }

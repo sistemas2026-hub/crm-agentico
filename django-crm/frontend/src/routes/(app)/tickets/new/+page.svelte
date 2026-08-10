@@ -38,11 +38,11 @@
     /** @type {Record<string, string>} */
     const e = {};
     const name = form.name.trim();
-    if (!name) e.name = 'A ticket needs a subject.';
+    if (!name) e.name = 'Un ticket necesita un asunto.';
     // `Case.name` is max_length=64, short for a subject line, but it is the
     // column, and a 65th character is a 400 from the serializer.
     else if (name.length > 64)
-      e.name = `Subjects are capped at 64 characters (this is ${name.length}).`;
+      e.name = `El asunto tiene un máximo de 64 caracteres (esto tiene ${name.length}).`;
     return e;
   });
 
@@ -62,14 +62,14 @@
   };
 </script>
 
-<PageHeader title="New ticket" center>
+<PageHeader title="Nuevo ticket" center>
   {#snippet crumb()}
     <a href="/tickets">Tickets</a>
     <ChevronRight size={12} />
-    <span>New</span>
+    <span>Nuevo</span>
   {/snippet}
   {#snippet sub()}
-    What happened, how urgent it is, and who it is for.
+    Qué pasó, qué tan urgente es, y para quién es.
   {/snippet}
 </PageHeader>
 
@@ -83,14 +83,14 @@
       >
         <TriangleAlert size={17} style="color:var(--v2-rust);flex:none" />
         <div class="v2-next-body">
-          <div style="font-weight:600">The server refused this ticket</div>
+          <div style="font-weight:600">El servidor rechazó este ticket</div>
           <div class="v2-sub" style="margin-top:2px">{result.error}</div>
         </div>
       </div>
     {/if}
 
     <div class="v2-field">
-      <label for="f-name">Subject</label>
+      <label for="f-name">Asunto</label>
       <input
         id="f-name"
         name="name"
@@ -105,31 +105,31 @@
         <!-- Worth saying up front, because it is an unusual rule for a
              helpdesk and the refusal is otherwise baffling: two tickets in one
              organisation cannot share a subject, ignoring capitals. -->
-        <p class="v2-hint">Has to be unique in this organisation, ignoring capitals.</p>
+        <p class="v2-hint">Tiene que ser único en esta organización, sin distinguir mayúsculas.</p>
       {/if}
     </div>
 
     <div class="triple">
       <div class="v2-field">
-        <label for="f-priority">Priority</label>
+        <label for="f-priority">Prioridad</label>
         <select id="f-priority" name="priority" class="v2-input" bind:value={form.priority}>
           {#each data.priorities as p (p.value)}
             <option value={p.value}>{p.label}</option>
           {/each}
         </select>
-        <p class="v2-hint">Sets the first-reply target.</p>
+        <p class="v2-hint">Define el objetivo de primera respuesta.</p>
       </div>
       <div class="v2-field">
-        <label for="f-type">Type</label>
+        <label for="f-type">Tipo</label>
         <select id="f-type" name="case_type" class="v2-input" bind:value={form.case_type}>
-          <option value="">Not set</option>
+          <option value="">Sin definir</option>
           {#each data.caseTypes as t (t.value)}
             <option value={t.value}>{t.label}</option>
           {/each}
         </select>
       </div>
       <div class="v2-field">
-        <label for="f-status">Status</label>
+        <label for="f-status">Estado</label>
         <select id="f-status" name="status" class="v2-input" bind:value={form.status}>
           {#each data.statuses as s (s.value)}
             <option value={s.value}>{s.label}</option>
@@ -140,39 +140,39 @@
 
     <div class="pair">
       <div class="v2-field">
-        <label for="f-account">Account</label>
+        <label for="f-account">Cuenta</label>
         <select id="f-account" name="account" class="v2-input" bind:value={form.account}>
-          <option value="">Not linked</option>
+          <option value="">Sin vincular</option>
           {#each data.accounts as a (a.id)}
             <option value={a.id}>{a.name}</option>
           {/each}
         </select>
-        <p class="v2-hint">Cannot be changed later. The API makes it read-only after creation.</p>
+        <p class="v2-hint">No se puede cambiar después. La API lo deja de solo lectura tras la creación.</p>
       </div>
       <div class="v2-field">
-        <label for="f-owner">Assignee</label>
+        <label for="f-owner">Asignado a</label>
         <select id="f-owner" name="assigned_to" class="v2-input" bind:value={form.assigned_to}>
-          <option value="">Nobody</option>
+          <option value="">Nadie</option>
           {#each data.owners as o (o.id)}
             <option value={o.id}>{o.name}</option>
           {/each}
         </select>
-        <p class="v2-hint">Unassigned tickets still count against the clock.</p>
+        <p class="v2-hint">Los tickets sin asignar igual cuentan contra el reloj.</p>
       </div>
     </div>
 
     <div class="v2-field">
-      <label for="f-contacts">People affected</label>
+      <label for="f-contacts">Personas afectadas</label>
       <select id="f-contacts" name="contacts" class="v2-input" multiple size="4">
         {#each data.contacts as c (c.id)}
           <option value={c.id}>{c.name}</option>
         {/each}
       </select>
-      <p class="v2-hint">Optional. Hold ctrl or cmd to pick more than one.</p>
+      <p class="v2-hint">Opcional. Mantené presionado ctrl o cmd para elegir más de uno.</p>
     </div>
 
     <div class="v2-field">
-      <label for="f-desc">What happened</label>
+      <label for="f-desc">Qué pasó</label>
       <textarea
         id="f-desc"
         name="description"
@@ -182,8 +182,8 @@
     </div>
 
     <div class="actions">
-      <button class="v2-btn v2-btn-primary" type="submit">Raise ticket</button>
-      <a class="v2-btn" href="/tickets">Cancel</a>
+      <button class="v2-btn v2-btn-primary" type="submit">Crear ticket</button>
+      <a class="v2-btn" href="/tickets">Cancelar</a>
     </div>
   </form>
 </div>

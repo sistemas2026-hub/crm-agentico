@@ -176,10 +176,10 @@ function cleanConditions(rows) {
     .filter((r) => r.field)
     .map((r) => {
       if (!(CONDITION_FIELDS.includes(r.field) || r.field.startsWith('custom_fields.'))) {
-        throw new Error(`"${r.field}" is not a field a rule can match on.`);
+        throw new Error(`"${r.field}" no es un campo que una regla pueda evaluar.`);
       }
       if (!CONDITION_OPS.includes(r.op)) {
-        throw new Error(`"${r.op}" is not an operator a rule can use.`);
+        throw new Error(`"${r.op}" no es un operador que una regla pueda usar.`);
       }
       return r;
     });
@@ -241,7 +241,7 @@ function buildBody(allowed, values) {
 /** @param {{ cookies: import('@sveltejs/kit').Cookies }} event */
 export async function createRoutingRule({ cookies }, values) {
   const body = buildBody(CREATE_FIELDS, values);
-  if (!body.name) throw new Error('A rule needs a name.');
+  if (!body.name) throw new Error('Una regla necesita un nombre.');
   return await apiRequest('/cases/routing-rules/', { method: 'POST', body }, { cookies });
 }
 
@@ -256,7 +256,7 @@ const PEOPLE_STRATEGIES = Object.keys(ROUTING_STRATEGY_NAME).filter((s) => s !==
 
 /** @param {{ cookies: import('@sveltejs/kit').Cookies }} event */
 export async function updateRoutingRule({ cookies }, id, values) {
-  if (!id) throw new Error('Which rule? No rule id was given.');
+  if (!id) throw new Error('¿Qué regla? No se indicó un id de regla.');
   const body = buildBody(UPDATE_FIELDS, values);
 
   // The one rule the backend enforces on create and cannot enforce on edit.
@@ -280,7 +280,7 @@ export async function updateRoutingRule({ cookies }, id, values) {
     PEOPLE_STRATEGIES.includes(body.strategy)
   ) {
     const name = ROUTING_STRATEGY_NAME[body.strategy].toLowerCase();
-    throw new Error(`A ${name} rule needs at least one assignee.`);
+    throw new Error(`Una regla de "${name}" necesita al menos un responsable.`);
   }
 
   return await apiRequest(`/cases/routing-rules/${id}/`, { method: 'PUT', body }, { cookies });
@@ -296,6 +296,6 @@ export async function updateRoutingRule({ cookies }, id, values) {
  * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
  */
 export async function deleteRoutingRule({ cookies }, id) {
-  if (!id) throw new Error('Which rule? No rule id was given.');
+  if (!id) throw new Error('¿Qué regla? No se indicó un id de regla.');
   return await apiRequest(`/cases/routing-rules/${id}/`, { method: 'DELETE' }, { cookies });
 }

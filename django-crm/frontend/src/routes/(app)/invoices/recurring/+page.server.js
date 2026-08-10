@@ -28,7 +28,7 @@ export const actions = {
   toggle: async ({ cookies, request }) => {
     const form = await request.formData();
     const id = form.get('id')?.toString();
-    if (!id) return fail(400, { error: 'Which schedule? None was given.' });
+    if (!id) return fail(400, { error: '¿Qué programación? No se indicó ninguna.' });
 
     try {
       await toggleRecurring({ cookies }, id);
@@ -36,8 +36,8 @@ export const actions = {
       return fail(err?.status === 403 ? 403 : 400, {
         error:
           err?.status === 403
-            ? 'This schedule is not yours to pause or resume.'
-            : readableError(err, 'Could not change this schedule.')
+            ? 'Esa programación no es tuya para pausarla o reanudarla.'
+            : readableError(err, 'No se pudo cambiar esta programación.')
       });
     }
     return { toggled: true };

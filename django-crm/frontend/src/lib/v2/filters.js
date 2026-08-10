@@ -52,105 +52,105 @@ import {
 export const FILTERS = {
   tickets: {
     presets: [
-      { key: 'open', label: 'Open, newest first', params: {} },
-      { key: 'mine', label: 'Mine', params: { assigned_to: '@me' } },
-      { key: 'breaching', label: 'Breaching SLA', params: { sla_breached: 'true' } },
-      { key: 'all', label: 'Everything', params: { all: '1' } }
+      { key: 'open', label: 'Abiertos, más nuevos primero', params: {} },
+      { key: 'mine', label: 'Míos', params: { assigned_to: '@me' } },
+      { key: 'breaching', label: 'Incumpliendo SLA', params: { sla_breached: 'true' } },
+      { key: 'all', label: 'Todos', params: { all: '1' } }
     ],
     fields: [
-      { key: 'assigned_to', label: 'Owner', type: 'person' },
-      { key: 'priority', label: 'Priority', type: 'select', options: CASE_PRIORITIES },
-      { key: 'case_type', label: 'Type', type: 'select', options: CASE_TYPES },
-      { key: 'sla_breached', label: 'Breaching SLA', type: 'boolean' },
-      { key: 'tags', label: 'Tag', type: 'tag' }
+      { key: 'assigned_to', label: 'Responsable', type: 'person' },
+      { key: 'priority', label: 'Prioridad', type: 'select', options: CASE_PRIORITIES },
+      { key: 'case_type', label: 'Tipo', type: 'select', options: CASE_TYPES },
+      { key: 'sla_breached', label: 'Incumpliendo SLA', type: 'boolean' },
+      { key: 'tags', label: 'Etiqueta', type: 'tag' }
     ]
   },
 
   leads: {
     presets: [
-      { key: 'open', label: 'Open leads', params: {} },
-      { key: 'mine', label: 'Mine', params: { assigned_to: '@me' } }
+      { key: 'open', label: 'Prospectos abiertos', params: {} },
+      { key: 'mine', label: 'Míos', params: { assigned_to: '@me' } }
     ],
     fields: [
-      { key: 'assigned_to', label: 'Owner', type: 'person' },
+      { key: 'assigned_to', label: 'Responsable', type: 'person' },
       {
         key: 'status',
-        label: 'Status',
+        label: 'Estado',
         type: 'select',
         options: LEAD_LIST_STATUSES,
         labelFor: (v) => LEAD_STATUS_LABEL[v] ?? v
       },
       {
         key: 'source',
-        label: 'Source',
+        label: 'Origen',
         type: 'select',
         options: LEAD_SOURCES,
         labelFor: (v) => LEAD_SOURCE_LABEL[v] ?? v
       },
-      { key: 'tags', label: 'Tag', type: 'tag' }
+      { key: 'tags', label: 'Etiqueta', type: 'tag' }
     ]
   },
 
   contacts: {
     presets: [
-      { key: 'mine', label: 'Mine', params: { assigned_to: '@me' } },
-      { key: 'inactive', label: 'Including inactive', params: { inactive: '1' } },
-      { key: 'active', label: 'Active contacts', params: {} }
+      { key: 'mine', label: 'Míos', params: { assigned_to: '@me' } },
+      { key: 'inactive', label: 'Incluyendo inactivos', params: { inactive: '1' } },
+      { key: 'active', label: 'Contactos activos', params: {} }
     ],
     fields: [
-      { key: 'assigned_to', label: 'Owner', type: 'person' },
-      { key: 'tags', label: 'Tag', type: 'tag' },
-      { key: 'city', label: 'City', type: 'text' }
+      { key: 'assigned_to', label: 'Responsable', type: 'person' },
+      { key: 'tags', label: 'Etiqueta', type: 'tag' },
+      { key: 'city', label: 'Ciudad', type: 'text' }
     ]
   },
 
   pipeline: {
     presets: [
-      { key: 'open', label: 'Open deals', params: { open: 'true' } },
-      { key: 'mine', label: 'Mine', params: { assigned_to: '@me' } },
-      { key: 'stalled', label: 'Stalled', params: { rotten: 'true' } },
-      { key: 'all', label: 'All deals', params: {} }
+      { key: 'open', label: 'Negociaciones abiertas', params: { open: 'true' } },
+      { key: 'mine', label: 'Mías', params: { assigned_to: '@me' } },
+      { key: 'stalled', label: 'Estancadas', params: { rotten: 'true' } },
+      { key: 'all', label: 'Todas las negociaciones', params: {} }
     ],
     fields: [
-      { key: 'assigned_to', label: 'Owner', type: 'person' },
+      { key: 'assigned_to', label: 'Responsable', type: 'person' },
       {
         key: 'stage',
-        label: 'Stage',
+        label: 'Etapa',
         type: 'select',
         options: STAGES,
         labelFor: (v) => STAGE_LABEL[v] ?? v
       },
       {
         key: 'lead_source',
-        label: 'Source',
+        label: 'Origen',
         type: 'select',
         options: LEAD_SOURCES,
         labelFor: (v) => LEAD_SOURCE_LABEL[v] ?? v
       },
       {
         key: 'amount',
-        label: 'Value',
+        label: 'Valor',
         type: 'number-range',
         gteKey: 'amount__gte',
         lteKey: 'amount__lte'
       },
-      { key: 'tags', label: 'Tag', type: 'tag' }
+      { key: 'tags', label: 'Etiqueta', type: 'tag' }
     ]
   },
 
   tasks: {
     presets: [
-      { key: 'open', label: 'Open tasks', params: {} },
-      { key: 'mine', label: 'My tasks', params: { assigned_to: '@me' } },
-      { key: 'all', label: 'All tasks', params: { all: '1' } }
+      { key: 'open', label: 'Tareas abiertas', params: {} },
+      { key: 'mine', label: 'Mis tareas', params: { assigned_to: '@me' } },
+      { key: 'all', label: 'Todas las tareas', params: { all: '1' } }
     ],
     fields: [
-      { key: 'assigned_to', label: 'Owner', type: 'person' },
-      { key: 'priority', label: 'Priority', type: 'select', options: TASK_PRIORITY },
-      { key: 'status', label: 'Status', type: 'select', options: TASK_STATUS },
+      { key: 'assigned_to', label: 'Responsable', type: 'person' },
+      { key: 'priority', label: 'Prioridad', type: 'select', options: TASK_PRIORITY },
+      { key: 'status', label: 'Estado', type: 'select', options: TASK_STATUS },
       {
         key: 'due_date',
-        label: 'Due date',
+        label: 'Fecha límite',
         type: 'date-range',
         gteKey: 'due_date__gte',
         lteKey: 'due_date__lte'
@@ -160,39 +160,39 @@ export const FILTERS = {
 
   accounts: {
     presets: [
-      { key: 'mine', label: 'Mine', params: { assigned_to: '@me' } },
-      { key: 'all', label: 'All accounts', params: {} }
+      { key: 'mine', label: 'Mías', params: { assigned_to: '@me' } },
+      { key: 'all', label: 'Todas las cuentas', params: {} }
     ],
     fields: [
-      { key: 'assigned_to', label: 'Owner', type: 'person' },
-      { key: 'tags', label: 'Tag', type: 'tag' },
+      { key: 'assigned_to', label: 'Responsable', type: 'person' },
+      { key: 'tags', label: 'Etiqueta', type: 'tag' },
       {
         key: 'industry',
-        label: 'Industry',
+        label: 'Industria',
         type: 'select',
         options: INDUSTRIES,
         labelFor: industryLabel
       },
-      { key: 'city', label: 'City', type: 'text' }
+      { key: 'city', label: 'Ciudad', type: 'text' }
     ]
   },
 
   invoices: {
     presets: [
-      { key: 'overdue', label: 'Overdue', params: { status: 'Overdue' } },
-      { key: 'draft', label: 'Draft', params: { status: 'Draft' } },
-      { key: 'all', label: 'All invoices', params: {} }
+      { key: 'overdue', label: 'Vencidas', params: { status: 'Overdue' } },
+      { key: 'draft', label: 'Borrador', params: { status: 'Draft' } },
+      { key: 'all', label: 'Todas las facturas', params: {} }
     ],
     fields: [
       {
         key: 'status',
-        label: 'Status',
+        label: 'Estado',
         type: 'select',
         options: INVOICE_STATUSES,
         labelFor: invoiceStatusLabel
       },
-      { key: 'account', label: 'Account', type: 'account' },
-      { key: 'assigned_to', label: 'Owner', type: 'person' },
+      { key: 'account', label: 'Cuenta', type: 'account' },
+      { key: 'assigned_to', label: 'Responsable', type: 'person' },
       // Invoices uses a SINGLE underscore (`due_date_gte`/`due_date_lte`,
       // `backend/invoices/api_views.py:149-152`). Every other date-range field
       // in this file uses a DOUBLE underscore. Never build this key by
@@ -200,7 +200,7 @@ export const FILTERS = {
       // unfiltered list here while working everywhere else.
       {
         key: 'due_date',
-        label: 'Due date',
+        label: 'Fecha límite',
         type: 'date-range',
         gteKey: 'due_date_gte',
         lteKey: 'due_date_lte'
@@ -210,12 +210,12 @@ export const FILTERS = {
 
   estimates: {
     presets: [
-      { key: 'accepted', label: 'Accepted', params: { status: 'Accepted' } },
-      { key: 'all', label: 'All estimates', params: {} }
+      { key: 'accepted', label: 'Aceptadas', params: { status: 'Accepted' } },
+      { key: 'all', label: 'Todas las cotizaciones', params: {} }
     ],
     fields: [
-      { key: 'status', label: 'Status', type: 'select', options: ESTIMATE_STATUSES },
-      { key: 'account', label: 'Account', type: 'account' }
+      { key: 'status', label: 'Estado', type: 'select', options: ESTIMATE_STATUSES },
+      { key: 'account', label: 'Cuenta', type: 'account' }
       // No Owner field: `EstimateListView.get` (backend/invoices/api_views.py
       // :1028-1036) reads only `status` and `account`, never `assigned_to`.
       // Offering one here would draw a chip that filters nothing underneath it.
@@ -224,14 +224,14 @@ export const FILTERS = {
 
   solutions: {
     presets: [
-      { key: 'published', label: 'Published', params: { visibility: 'published' } },
-      { key: 'drafts', label: 'Drafts', params: { status: 'draft' } },
-      { key: 'all', label: 'All articles, last edited first', params: {} }
+      { key: 'published', label: 'Publicados', params: { visibility: 'published' } },
+      { key: 'drafts', label: 'Borradores', params: { status: 'draft' } },
+      { key: 'all', label: 'Todos los artículos, editados más recientemente primero', params: {} }
     ],
     fields: [
       {
         key: 'status',
-        label: 'Status',
+        label: 'Estado',
         type: 'select',
         options: SOLUTION_STATUS,
         labelFor: (v) => SOLUTION_STATUS_LABEL[v] ?? v
@@ -247,8 +247,8 @@ export const FILTERS = {
     // archived documents come back alongside the live ones on a bare URL,
     // which undoes the only thing archiving does.
     presets: [
-      { key: 'active', label: 'Active documents', params: {} },
-      { key: 'all', label: 'Including archived', params: { archived: '1' } }
+      { key: 'active', label: 'Documentos activos', params: {} },
+      { key: 'all', label: 'Incluyendo archivados', params: { archived: '1' } }
     ],
     // `tags` and `created_by` are deliberately absent: `DocumentListView.get`
     // (backend/common/views/document_views.py:71-79) reads only `title`,
@@ -256,15 +256,15 @@ export const FILTERS = {
     // `shared_to` is passed straight to `json.loads`, so a plain
     // `?shared_to=<uuid>` throws `JSONDecodeError` and answers 500. Status is
     // the only filter this endpoint actually honours.
-    fields: [{ key: 'status', label: 'Status', type: 'select', options: DOCUMENT_STATUSES }]
+    fields: [{ key: 'status', label: 'Estado', type: 'select', options: DOCUMENT_STATUSES }]
   },
 
   recurring: {
     presets: [
-      { key: 'active', label: 'Active schedules', params: { is_active: 'true' } },
-      { key: 'all', label: 'All schedules', params: {} }
+      { key: 'active', label: 'Programaciones activas', params: { is_active: 'true' } },
+      { key: 'all', label: 'Todas las programaciones', params: {} }
     ],
-    fields: [{ key: 'is_active', label: 'Active', type: 'boolean' }]
+    fields: [{ key: 'is_active', label: 'Activa', type: 'boolean' }]
   }
 };
 
@@ -370,15 +370,15 @@ export function activeChips(
       const value =
         field.type === 'number-range'
           ? from && to
-            ? `${from} to ${to}`
+            ? `${from} a ${to}`
             : from
-              ? `over ${from}`
-              : `under ${to}`
+              ? `más de ${from}`
+              : `menos de ${to}`
           : from && to
-            ? `${from} to ${to}`
+            ? `${from} a ${to}`
             : from
-              ? `from ${from}`
-              : `up to ${to}`;
+              ? `desde ${from}`
+              : `hasta ${to}`;
       chips.push({
         key: field.key,
         label: field.label,
@@ -397,7 +397,7 @@ export function activeChips(
     if (field.type === 'person') value = nameFrom(lookups.people ?? [], raw);
     else if (field.type === 'tag') value = nameFrom(lookups.tags ?? [], raw);
     else if (field.type === 'account') value = nameFrom(lookups.accounts ?? [], raw);
-    else if (field.type === 'boolean') value = raw === 'true' ? 'Yes' : 'No';
+    else if (field.type === 'boolean') value = raw === 'true' ? 'Sí' : 'No';
     else if (field.labelFor) value = field.labelFor(raw);
 
     chips.push({ key: field.key, label: field.label, value, href: withoutParam(url, field.key) });

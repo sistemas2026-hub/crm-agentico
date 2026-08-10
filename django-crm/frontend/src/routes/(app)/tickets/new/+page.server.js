@@ -24,7 +24,7 @@ export const actions = {
     if (contacts.length) values.contacts = contacts;
 
     if (!values.name) {
-      return fail(400, { values, error: 'A ticket needs a subject.' });
+      return fail(400, { values, error: 'Un ticket necesita un asunto.' });
     }
 
     /** @type {any} */
@@ -32,7 +32,7 @@ export const actions = {
     try {
       created = await createTicket({ cookies }, values);
     } catch (/** @type {any} */ err) {
-      return fail(400, { values, error: readableError(err, 'Could not raise this ticket.') });
+      return fail(400, { values, error: readableError(err, 'No se pudo crear este ticket.') });
     }
 
     // `CaseListView.post` returns the new id, so this lands on the ticket

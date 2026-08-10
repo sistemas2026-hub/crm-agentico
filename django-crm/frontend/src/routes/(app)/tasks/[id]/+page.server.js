@@ -30,7 +30,7 @@ export const actions = {
     try {
       await setTaskDone({ cookies }, params.id, done);
     } catch (/** @type {any} */ err) {
-      return fail(400, { error: readableError(err, 'Could not change the status.') });
+      return fail(400, { error: readableError(err, 'No se pudo cambiar el estado.') });
     }
     return { done };
   },
@@ -54,13 +54,13 @@ export const actions = {
       picked && typeof picked === 'object' && 'size' in picked && picked.size > 0 ? picked : null;
 
     if (!body && !file) {
-      return fail(400, { error: 'Write a comment or attach a file first.' });
+      return fail(400, { error: 'Escribí un comentario o adjuntá un archivo primero.' });
     }
 
     try {
       await addTaskNote({ cookies }, params.id, body, file);
     } catch (/** @type {any} */ err) {
-      return fail(400, { error: readableError(err, 'Could not post that comment.') });
+      return fail(400, { error: readableError(err, 'No se pudo publicar ese comentario.') });
     }
     return { commented: true };
   },
@@ -82,7 +82,7 @@ export const actions = {
     try {
       await updateTask({ cookies }, params.id, { assigned_to: ids });
     } catch (/** @type {any} */ err) {
-      return fail(400, { error: readableError(err, 'Could not reassign this task.') });
+      return fail(400, { error: readableError(err, 'No se pudo reasignar esta tarea.') });
     }
     return { assigned: true };
   },
@@ -101,8 +101,8 @@ export const actions = {
       return fail(err?.status === 403 ? 403 : 400, {
         error:
           err?.status === 403
-            ? 'Only an admin or whoever created this task can delete it.'
-            : readableError(err, 'Could not delete this task.')
+            ? 'Solo un administrador o quien creó esta tarea puede eliminarla.'
+            : readableError(err, 'No se pudo eliminar esta tarea.')
       });
     }
     redirect(303, '/tasks');

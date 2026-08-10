@@ -45,10 +45,10 @@ const EMPTY = {
   aging: {
     not_yet_due: { amount: 0, count: 0 },
     buckets: [
-      { key: '1_30', label: '1-30 days', amount: 0, count: 0 },
-      { key: '31_60', label: '31-60 days', amount: 0, count: 0 },
-      { key: '61_90', label: '61-90 days', amount: 0, count: 0 },
-      { key: '90_plus', label: 'Over 90 days', amount: 0, count: 0 }
+      { key: '1_30', label: '1-30 días', amount: 0, count: 0 },
+      { key: '31_60', label: '31-60 días', amount: 0, count: 0 },
+      { key: '61_90', label: '61-90 días', amount: 0, count: 0 },
+      { key: '90_plus', label: 'Más de 90 días', amount: 0, count: 0 }
     ],
     overdue_count: 0
   },
@@ -105,25 +105,25 @@ export async function listReports({ cookies }) {
       buckets: [
         {
           key: '1_30',
-          label: '1-30 days',
+          label: '1-30 días',
           amount: num(aging['1_30_days']?.amount),
           count: aging['1_30_days']?.count ?? 0
         },
         {
           key: '31_60',
-          label: '31-60 days',
+          label: '31-60 días',
           amount: num(aging['31_60_days']?.amount),
           count: aging['31_60_days']?.count ?? 0
         },
         {
           key: '61_90',
-          label: '61-90 days',
+          label: '61-90 días',
           amount: num(aging['61_90_days']?.amount),
           count: aging['61_90_days']?.count ?? 0
         },
         {
           key: '90_plus',
-          label: 'Over 90 days',
+          label: 'Más de 90 días',
           amount: num(aging['over_90_days']?.amount),
           count: aging['over_90_days']?.count ?? 0
         }

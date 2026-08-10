@@ -273,11 +273,11 @@ export function buildBody(allowed, values) {
  * @returns {Promise<any>}
  */
 export async function createRecurringInvoice({ cookies }, values) {
-  if (!values.account_id) throw new Error('Choose an account.');
-  if (!values.contact_id) throw new Error('Choose a contact.');
-  if (!(values.title ?? '').toString().trim()) throw new Error('Give the schedule a title.');
+  if (!values.account_id) throw new Error('Elegí una cuenta.');
+  if (!values.contact_id) throw new Error('Elegí un contacto.');
+  if (!(values.title ?? '').toString().trim()) throw new Error('Ponele un título a la programación.');
   if (values.frequency === 'CUSTOM' && !values.custom_days) {
-    throw new Error('A custom frequency needs an interval in days.');
+    throw new Error('Una frecuencia personalizada necesita un intervalo en días.');
   }
 
   const body = buildBody(CREATE_FIELDS, values);

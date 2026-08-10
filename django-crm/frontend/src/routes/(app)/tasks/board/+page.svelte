@@ -137,22 +137,22 @@
       } else {
         moveError =
           (result.type === 'failure' && /** @type {any} */ (result.data)?.error) ||
-          'Could not move the card; reverted.';
+          'No se pudo mover la tarjeta; se revirtió.';
         await invalidateAll();
       }
     } catch {
-      moveError = 'Could not move the card, reverted.';
+      moveError = 'No se pudo mover la tarjeta, se revirtió.';
       await invalidateAll();
     }
   }
 </script>
 
-<PageHeader title="Tasks">
+<PageHeader title="Tareas">
   {#snippet sub()}
     {#if data.board}
       {data.board.name}{data.board.description ? ` · ${data.board.description}` : ''}
     {:else}
-      Boards
+      Tableros
     {/if}
   {/snippet}
   {#snippet actions()}
@@ -191,10 +191,10 @@
   <div class="v2-pad" style="padding-top:32px">
     <div class="v2-empty">
       <Plus size={22} style="opacity:0.4" />
-      <p class="v2-empty-title">No boards yet</p>
+      <p class="v2-empty-title">Todavía no hay tableros</p>
       <p class="v2-sub" style="max-width:34ch;text-align:center">
-        A board organises work into columns you drag cards between. It starts with To Do, In
-        Progress and Done, and you can rename them later.
+        Un tablero organiza el trabajo en columnas entre las que arrastrás tarjetas. Empieza con
+        Por hacer, En progreso y Hecho, y podés renombrarlas después.
       </p>
       <form
         class="v2-lane-add-form"
@@ -210,9 +210,9 @@
               await invalidateAll();
             } else if (result.type === 'failure') {
               createBoardError =
-                /** @type {any} */ (result.data)?.error || 'Could not create the board.';
+                /** @type {any} */ (result.data)?.error || 'No se pudo crear el tablero.';
             } else if (result.type === 'error') {
-              createBoardError = 'Could not create the board.';
+              createBoardError = 'No se pudo crear el tablero.';
             }
           };
         }}
@@ -221,13 +221,13 @@
         <input
           class="v2-input"
           name="name"
-          placeholder="Board name"
+          placeholder="Nombre del tablero"
           maxlength="255"
           required
           autofocus
         />
         <button class="v2-btn v2-btn-primary" type="submit" disabled={createBoardBusy}>
-          {createBoardBusy ? 'Creating…' : 'Create board'}
+          {createBoardBusy ? 'Creando…' : 'Crear tablero'}
         </button>
       </form>
       {#if createBoardError}
@@ -247,23 +247,23 @@
 
   <div class="v2-pad" style="padding-top:16px;flex:none">
     <div class="v2-stats">
-      <StatCard label="Open cards" value={count(totals.open)} tone="ink" />
+      <StatCard label="Tarjetas abiertas" value={count(totals.open)} tone="ink" />
       <StatCard
-        label="Overdue"
+        label="Vencidas"
         value={count(totals.overdue)}
         tone={totals.overdue > 0 ? 'rust' : 'slate'}
-        detail="Past due and not marked done"
+        detail="Vencidas y no marcadas como hechas"
       />
       <StatCard
-        label="Unassigned"
+        label="Sin asignar"
         value={count(totals.unassigned)}
         tone={totals.unassigned > 0 ? 'clay' : 'slate'}
       />
       <StatCard
-        label="Columns over limit"
+        label="Columnas sobre el límite"
         value={count(totals.over_limit)}
         tone={totals.over_limit > 0 ? 'clay' : 'slate'}
-        detail="More cards than the column allows"
+        detail="Más tarjetas de las que permite la columna"
       />
     </div>
   </div>
@@ -284,7 +284,7 @@
         {#if over}
           <div class="v2-lane-over">
             <TriangleAlert size={12} style="flex:none" />
-            <span>{lane.cards.length - lane.limit} over the limit of {lane.limit}</span>
+            <span>{lane.cards.length - lane.limit} sobre el límite de {lane.limit}</span>
           </div>
         {/if}
 
@@ -314,7 +314,7 @@
                   >{BOARD_PRIORITY_LABEL[t.priority]}</Pill
                 >
                 {#if overdue}
-                  <Pill tone="rust">{daysSince(t.due_date)}d late</Pill>
+                  <Pill tone="rust">{daysSince(t.due_date)}d de atraso</Pill>
                 {/if}
               </div>
 
@@ -325,11 +325,11 @@
                   {/each}
                 {:else}
                   <!-- Named, not an empty slot. A blank reads as a rendering gap. -->
-                  <span class="v2-sub" style="font-size:11.5px">Unassigned</span>
+                  <span class="v2-sub" style="font-size:11.5px">Sin asignar</span>
                 {/if}
                 {#if t.due_date}
                   <span class="v2-sub" style="margin-left:auto;font-size:11.5px">
-                    {done ? 'done ' : ''}{shortDate(done ? t.completed_at : t.due_date)}
+                    {done ? 'hecha ' : ''}{shortDate(done ? t.completed_at : t.due_date)}
                   </span>
                 {/if}
               </div>
@@ -339,14 +339,14 @@
                      work by every count on this page, and by the API's. -->
                 <div class="v2-card-flag">
                   <TriangleAlert size={12} style="flex:none" />
-                  <span>In Done, never marked complete, still counted as open</span>
+                  <span>En Hecho, nunca marcada como completa, sigue contando como abierta</span>
                 </div>
               {/if}
             </div>
           {/each}
         </div>
         {#if lane.cards.length === 0}
-          <p class="v2-sub v2-lane-empty">Drop a card here</p>
+          <p class="v2-sub v2-lane-empty">Soltá una tarjeta acá</p>
         {/if}
 
         <!-- Add a card. Any board member can, so it sits on every lane. Kept
@@ -365,9 +365,9 @@
                   await invalidateAll();
                 } else if (result.type === 'failure') {
                   addCardError =
-                    /** @type {any} */ (result.data)?.error || 'Could not add the card.';
+                    /** @type {any} */ (result.data)?.error || 'No se pudo agregar la tarjeta.';
                 } else if (result.type === 'error') {
-                  addCardError = 'Could not add the card.';
+                  addCardError = 'No se pudo agregar la tarjeta.';
                 }
               };
             }}
@@ -377,7 +377,7 @@
             <input
               class="v2-input v2-lane-add-input"
               name="title"
-              placeholder="Card title"
+              placeholder="Título de la tarjeta"
               required
               autofocus
               disabled={addCardBusy}
@@ -385,7 +385,7 @@
             <textarea
               class="v2-input v2-lane-add-input"
               name="description"
-              placeholder="Description (optional)"
+              placeholder="Descripción (opcional)"
               rows="2"
               disabled={addCardBusy}></textarea>
             <select class="v2-input v2-lane-add-input" name="priority" disabled={addCardBusy}>
@@ -398,7 +398,7 @@
             {/if}
             <div class="v2-lane-add-actions">
               <button type="submit" class="v2-btn v2-btn-primary v2-btn-sm" disabled={addCardBusy}>
-                {addCardBusy ? 'Adding…' : 'Add card'}
+                {addCardBusy ? 'Agregando…' : 'Agregar tarjeta'}
               </button>
               <button
                 type="button"
@@ -406,13 +406,13 @@
                 onclick={closeCardForm}
                 disabled={addCardBusy}
               >
-                Cancel
+                Cancelar
               </button>
             </div>
           </form>
         {:else}
           <button class="v2-lane-add" onclick={() => openCardForm(lane.id)}>
-            <Plus size={13} /> Add card
+            <Plus size={13} /> Agregar tarjeta
           </button>
         {/if}
       </section>
@@ -438,9 +438,9 @@
                   await invalidateAll();
                 } else if (result.type === 'failure') {
                   addColumnError =
-                    /** @type {any} */ (result.data)?.error || 'Could not add the column.';
+                    /** @type {any} */ (result.data)?.error || 'No se pudo agregar la columna.';
                 } else if (result.type === 'error') {
-                  addColumnError = 'Could not add the column.';
+                  addColumnError = 'No se pudo agregar la columna.';
                 }
               };
             }}
@@ -458,7 +458,7 @@
               <input
                 class="v2-input v2-lane-add-input"
                 name="name"
-                placeholder="Column name"
+                placeholder="Nombre de la columna"
                 required
                 autofocus
                 disabled={addColumnBusy}
@@ -468,7 +468,7 @@
                 type="color"
                 name="color"
                 value="#6b7280"
-                aria-label="Column colour"
+                aria-label="Color de la columna"
                 disabled={addColumnBusy}
               />
             </div>
@@ -481,7 +481,7 @@
                 class="v2-btn v2-btn-primary v2-btn-sm"
                 disabled={addColumnBusy}
               >
-                {addColumnBusy ? 'Adding…' : 'Add column'}
+                {addColumnBusy ? 'Agregando…' : 'Agregar columna'}
               </button>
               <button
                 type="button"
@@ -492,13 +492,13 @@
                 }}
                 disabled={addColumnBusy}
               >
-                Cancel
+                Cancelar
               </button>
             </div>
           </form>
         {:else}
           <button class="v2-lane-add v2-lane-add-lane" onclick={() => (showAddColumn = true)}>
-            <Plus size={14} /> Add column
+            <Plus size={14} /> Agregar columna
           </button>
         {/if}
       </section>
@@ -510,9 +510,9 @@
      word "task" suggests that, and everyone assumes a card here is also a task
      there, so it is said once, in the open. -->
 <p class="v2-sub v2-pad" style="font-size:11.5px;padding-bottom:14px;flex:none;margin:0">
-  Cards on a board are separate records from the
-  <a href="/tasks" style="color:inherit">task list</a>. A card here does not appear there, and completing
-  one does not complete the other.
+  Las tarjetas de un tablero son registros distintos de la
+  <a href="/tasks" style="color:inherit">lista de tareas</a>. Una tarjeta acá no aparece ahí, y completar
+  una no completa la otra.
 </p>
 
 <style>

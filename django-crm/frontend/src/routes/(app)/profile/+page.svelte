@@ -65,11 +65,11 @@
 
 <PageHeader title={name} record>
   {#snippet sub()}
-    {ROLE_LABEL[p.role]} · {data.org.name} · joined {shortDate(p.joined_at)}
+    {ROLE_LABEL[p.role]} · {data.org.name} · ingresó el {shortDate(p.joined_at)}
   {/snippet}
   {#snippet actions()}
     {#if !editing}
-      <button class="v2-btn v2-btn-primary" onclick={openEdit}>Edit details</button>
+      <button class="v2-btn v2-btn-primary" onclick={openEdit}>Editar datos</button>
     {/if}
   {/snippet}
 </PageHeader>
@@ -78,7 +78,7 @@
   <div class="v2-pad" style="padding-top:18px;padding-bottom:32px">
     <div class="v2-split">
       <div>
-        <div class="v2-label" style="margin-bottom:10px">You</div>
+        <div class="v2-label" style="margin-bottom:10px">Vos</div>
 
         {#if editing}
           <form
@@ -89,7 +89,7 @@
             style="padding:17px 18px;margin-bottom:20px"
           >
             <div class="v2-field">
-              <label for="f-name">Full name</label>
+              <label for="f-name">Nombre completo</label>
               <input
                 id="f-name"
                 name="name"
@@ -99,7 +99,7 @@
               />
             </div>
             <div class="v2-field" style="margin-top:12px">
-              <label for="f-phone">Phone</label>
+              <label for="f-phone">Teléfono</label>
               <input
                 id="f-phone"
                 name="phone"
@@ -107,14 +107,14 @@
                 bind:value={editPhone}
                 placeholder="+44 20 7946 0100"
               />
-              <p class="v2-hint">Digits and separators only. Leave blank to remove it.</p>
+              <p class="v2-hint">Solo dígitos y separadores. Dejalo en blanco para quitarlo.</p>
             </div>
             {#if editError}
               <p class="v2-error" style="margin-top:10px">{editError}</p>
             {/if}
             <div style="display:flex;gap:8px;margin-top:16px">
-              <button class="v2-btn v2-btn-primary" type="submit">Save</button>
-              <button class="v2-btn" type="button" onclick={() => (editing = false)}>Cancel</button>
+              <button class="v2-btn v2-btn-primary" type="submit">Guardar</button>
+              <button class="v2-btn" type="button" onclick={() => (editing = false)}>Cancelar</button>
             </div>
           </form>
         {:else}
@@ -127,37 +127,37 @@
               </div>
             </div>
             <dl class="v2-kv">
-              <dt>Phone</dt>
+              <dt>Teléfono</dt>
               <dd class="v2-num" style="font-size:12px">{p.phone || '—'}</dd>
-              <dt>Teams</dt>
+              <dt>Equipos</dt>
               <dd>{p.teams.join(', ') || '—'}</dd>
-              <dt>Joined</dt>
+              <dt>Ingresó</dt>
               <dd>{shortDate(p.joined_at)}</dd>
-              <dt>Last signed in</dt>
+              <dt>Último inicio de sesión</dt>
               <dd>{relativeDays(p.last_login)}</dd>
             </dl>
           </div>
         {/if}
 
-        <div class="v2-label" style="margin-bottom:10px">Organisations</div>
+        <div class="v2-label" style="margin-bottom:10px">Organizaciones</div>
         <div class="v2-card" style="overflow:hidden">
           {#each p.orgs as o (o.id)}
             <div class="v2-setting">
               <div class="v2-setting-body">
                 <b>{o.name}</b>
                 <span class="v2-sub" style="font-size:11.5px">
-                  You are {ROLE_LABEL[o.role] === 'Admin' ? 'an admin' : 'a member'} here
+                  Sos {o.role === 'ADMIN' ? 'administrador' : 'miembro'} acá
                 </span>
               </div>
               {#if o.is_current}
-                <Pill tone="ink" dot>Current</Pill>
+                <Pill tone="ink" dot>Actual</Pill>
               {:else}
                 <!-- Switching org re-issues the token; it does not edit a field
                      on this page. The action swaps the cookies and reloads. -->
                 <form method="POST" action="?/switchOrg" use:enhance class="v2-inline-form">
                   <input type="hidden" name="org_id" value={o.id} />
                   <button class="v2-btn v2-btn-sm" type="submit">
-                    <ArrowLeftRight size={12} />Switch
+                    <ArrowLeftRight size={12} />Cambiar
                   </button>
                 </form>
               {/if}
@@ -168,20 +168,21 @@
           <p class="v2-error" style="margin-top:9px">{switchError}</p>
         {/if}
         <p class="v2-sub" style="font-size:11.5px;margin-top:11px">
-          Switching organisation signs you in again with a new token. Which org you are in decides
-          which records exist for you at all, so it is not a filter you can toggle.
+          Cambiar de organización te vuelve a iniciar sesión con un token nuevo. La organización en
+          la que estás decide qué registros existen para vos, así que no es un filtro que puedas
+          activar y desactivar.
         </p>
       </div>
 
       <div>
-        <div class="v2-label" style="margin-bottom:10px">Access</div>
+        <div class="v2-label" style="margin-bottom:10px">Acceso</div>
         <div class="v2-card" style="overflow:hidden;margin-bottom:20px">
           <div class="v2-setting">
             <div class="v2-setting-body">
-              <b>Role</b>
+              <b>Rol</b>
               <!-- Displayed, never editable from here. -->
               <span class="v2-sub" style="font-size:11.5px">
-                Set by an admin. You cannot change your own role.
+                Lo define un administrador. No podés cambiar tu propio rol.
               </span>
             </div>
             <Lock size={14} style="color:var(--v2-slate);flex:none" />
@@ -189,9 +190,9 @@
           </div>
           <a class="v2-setting" href="/settings/api-tokens">
             <div class="v2-setting-body">
-              <b>API tokens</b>
+              <b>Tokens de API</b>
               <span class="v2-sub" style="font-size:11.5px">
-                Each one signs in as you, with your role.
+                Cada uno inicia sesión como vos, con tu rol.
               </span>
             </div>
             <KeyRound size={14} style="color:var(--v2-slate);flex:none" />
@@ -201,32 +202,32 @@
           </a>
           <div class="v2-setting">
             <div class="v2-setting-body">
-              <b>Sign-in method</b>
+              <b>Método de inicio de sesión</b>
               <span class="v2-sub" style="font-size:11.5px">
-                Google, on {p.user_details.email}. There is no password to change.
+                Google, con {p.user_details.email}. No hay contraseña para cambiar.
               </span>
             </div>
           </div>
         </div>
 
-        <div class="v2-label" style="margin-bottom:10px">Where your work shows up</div>
+        <div class="v2-label" style="margin-bottom:10px">Dónde aparece tu trabajo</div>
         <div class="v2-card" style="overflow:hidden">
           <a class="v2-setting" href="/goals">
             <div class="v2-setting-body">
-              <b>Goals</b>
-              <span class="v2-sub" style="font-size:11.5px">Your quota and how it is pacing</span>
+              <b>Metas</b>
+              <span class="v2-sub" style="font-size:11.5px">Tu cuota y cómo va el ritmo</span>
             </div>
           </a>
           <a class="v2-setting" href="/timesheet">
             <div class="v2-setting-body">
-              <b>Timesheet</b>
-              <span class="v2-sub" style="font-size:11.5px">Hours you have logged this week</span>
+              <b>Registro de horas</b>
+              <span class="v2-sub" style="font-size:11.5px">Horas que registraste esta semana</span>
             </div>
           </a>
           <a class="v2-setting" href="/tasks">
             <div class="v2-setting-body">
-              <b>Tasks</b>
-              <span class="v2-sub" style="font-size:11.5px">What is assigned to you</span>
+              <b>Tareas</b>
+              <span class="v2-sub" style="font-size:11.5px">Lo que tenés asignado</span>
             </div>
           </a>
         </div>

@@ -15,11 +15,11 @@
   let { data, form } = $props();
 
   const KINDS = [
-    { key: '', label: 'Nothing' },
-    { key: 'account', label: 'An account' },
-    { key: 'opportunity', label: 'A deal' },
-    { key: 'case', label: 'A ticket' },
-    { key: 'lead', label: 'A lead' }
+    { key: '', label: 'Nada' },
+    { key: 'account', label: 'Una cuenta' },
+    { key: 'opportunity', label: 'Una negociación' },
+    { key: 'case', label: 'Un ticket' },
+    { key: 'lead', label: 'Un prospecto' }
   ];
 
   let values = $derived(form?.values ?? data.form);
@@ -28,13 +28,13 @@
   let currentId = $derived(form?.values?.parent_id ?? data.form.parent_id ?? '');
 </script>
 
-<PageHeader title="Edit task" record center width="62ch">
+<PageHeader title="Editar tarea" record center width="62ch">
   {#snippet crumb()}
-    <a href="/tasks">Tasks</a>
+    <a href="/tasks">Tareas</a>
     <ChevronRight size={12} />
     <a href="/tasks/{data.task.id}">{data.task.title}</a>
     <ChevronRight size={12} />
-    <span>Edit</span>
+    <span>Editar</span>
   {/snippet}
 </PageHeader>
 
@@ -54,35 +54,35 @@
     <input type="hidden" name="parent_id_original" value={data.form.parent_id} />
 
     <label class="v2-field">
-      <span class="v2-label">Task</span>
+      <span class="v2-label">Tarea</span>
       <input class="v2-input" name="title" required maxlength="200" value={values.title ?? ''} />
     </label>
 
     <div style="display:flex;gap:12px;flex-wrap:wrap">
       <label class="v2-field" style="flex:1;min-width:150px">
-        <span class="v2-label">Priority</span>
+        <span class="v2-label">Prioridad</span>
         <select class="v2-input" name="priority" value={values.priority ?? 'Medium'}>
-          <option value="Low">Low</option>
-          <option value="Medium">Medium</option>
-          <option value="High">High</option>
+          <option value="Low">Baja</option>
+          <option value="Medium">Media</option>
+          <option value="High">Alta</option>
         </select>
       </label>
       <label class="v2-field" style="flex:1;min-width:150px">
-        <span class="v2-label">Status</span>
+        <span class="v2-label">Estado</span>
         <select class="v2-input" name="status" value={values.status ?? 'New'}>
-          <option value="New">New</option>
-          <option value="In Progress">In Progress</option>
-          <option value="Completed">Completed</option>
+          <option value="New">Nueva</option>
+          <option value="In Progress">En progreso</option>
+          <option value="Completed">Completada</option>
         </select>
       </label>
       <label class="v2-field" style="flex:1;min-width:150px">
-        <span class="v2-label">Due</span>
+        <span class="v2-label">Vence</span>
         <input class="v2-input" type="date" name="due_date" value={values.due_date ?? ''} />
       </label>
     </div>
 
     <label class="v2-field">
-      <span class="v2-label">Attached to</span>
+      <span class="v2-label">Vinculada a</span>
       <select class="v2-input" name="parent_kind" bind:value={kind}>
         {#each KINDS as k (k.key)}
           <option value={k.key}>{k.label}</option>
@@ -92,9 +92,9 @@
 
     {#if kind}
       <label class="v2-field">
-        <span class="v2-label">Which one</span>
+        <span class="v2-label">Cuál</span>
         <select class="v2-input" name="parent_{kind}" required>
-          <option value="">Choose…</option>
+          <option value="">Elegir…</option>
           {#each options as option (option.id)}
             <option value={option.id} selected={currentId === option.id}>{option.name}</option>
           {/each}
@@ -103,7 +103,7 @@
     {/if}
 
     <label class="v2-field">
-      <span class="v2-label">Assign to</span>
+      <span class="v2-label">Asignar a</span>
       <select
         class="v2-input"
         name="assigned_to"
@@ -117,18 +117,18 @@
         {/each}
       </select>
       <span class="v2-sub" style="font-size:11.5px">
-        Everyone selected here is on the task. Deselecting a name takes them off it.
+        Todos los seleccionados acá quedan en la tarea. Deseleccionar un nombre lo saca.
       </span>
     </label>
 
     <label class="v2-field">
-      <span class="v2-label">Note</span>
+      <span class="v2-label">Nota</span>
       <textarea class="v2-input" name="description" rows="4">{values.description ?? ''}</textarea>
     </label>
 
     <div style="display:flex;gap:9px;margin-top:6px">
-      <button class="v2-btn v2-btn-primary" type="submit">Save</button>
-      <a class="v2-btn" href="/tasks/{data.task.id}">Cancel</a>
+      <button class="v2-btn v2-btn-primary" type="submit">Guardar</button>
+      <a class="v2-btn" href="/tasks/{data.task.id}">Cancelar</a>
     </div>
   </form>
 </div>

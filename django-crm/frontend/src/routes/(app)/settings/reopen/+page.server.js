@@ -29,10 +29,10 @@ export const actions = {
       await updateReopenPolicy(event, values);
     } catch (/** @type {any} */ err) {
       if (err?.status === 403) {
-        return fail(403, { update: { error: 'Only an admin can change the reopen policy.' } });
+        return fail(403, { update: { error: 'Solo un administrador puede cambiar la política de reapertura.' } });
       }
       return fail(400, {
-        update: { error: readableError(err, 'Could not save the reopen policy.') }
+        update: { error: readableError(err, 'No se pudo guardar la política de reapertura.') }
       });
     }
 

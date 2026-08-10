@@ -31,7 +31,7 @@ import { apiRequest } from '$lib/api-helpers.js';
 /** A profile as the pickers label it. */
 function personName(profile) {
   const d = profile?.user_details ?? {};
-  return d.name || d.email || 'Unnamed';
+  return d.name || d.email || 'Sin nombre';
 }
 
 /**

@@ -82,15 +82,15 @@ export function daysSince(iso, now = new Date()) {
   return Math.floor((now.getTime() - d.getTime()) / 86400000);
 }
 
-/** "12 days ago" / "today" / "in 4 days", for a person, not a machine. */
+/** "hace 12 días" / "hoy" / "en 4 días", for a person, not a machine. */
 export function relativeDays(iso, now = new Date()) {
   const n = daysSince(iso, now);
   if (n === null) return '—';
-  if (n === 0) return 'today';
-  if (n === 1) return 'yesterday';
-  if (n > 1) return `${n} days ago`;
-  if (n === -1) return 'tomorrow';
-  return `in ${Math.abs(n)} days`;
+  if (n === 0) return 'hoy';
+  if (n === 1) return 'ayer';
+  if (n > 1) return `hace ${n} días`;
+  if (n === -1) return 'mañana';
+  return `en ${Math.abs(n)} días`;
 }
 
 /**
@@ -107,10 +107,10 @@ export function relativeTime(iso, now = new Date()) {
   if (!d) return '—';
   const mins = Math.floor((now.getTime() - d.getTime()) / 60000);
   if (mins < 0) return relativeDays(iso, now);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins} minute${mins === 1 ? '' : 's'} ago`;
+  if (mins < 1) return 'justo ahora';
+  if (mins < 60) return `hace ${mins} minuto${mins === 1 ? '' : 's'}`;
   const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs} hour${hrs === 1 ? '' : 's'} ago`;
+  if (hrs < 24) return `hace ${hrs} hora${hrs === 1 ? '' : 's'}`;
   return relativeDays(iso, now);
 }
 
