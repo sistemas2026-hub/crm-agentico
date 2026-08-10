@@ -125,6 +125,9 @@ services:
     build:
       context: ./django-crm/frontend
       dockerfile: Dockerfile
+      # Servidor de Vite con recarga en caliente. El codigo entra por el bind
+      # mount de abajo; el destino 'prod' compila y no lo necesita.
+      target: dev
     env_file:
       - django-crm/.env.docker
       - path: django-crm/.env.docker.local

@@ -20,16 +20,14 @@
 #    Se declaran aca y Dokploy las inyecta desde la seccion Environment del
 #    servicio. Explicito y auditable: lo que no este listado, no llega.
 #
-#  PENDIENTE ANTES DE EXPONERLO A INTERNET
-#  ---------------------------------------
-#  1. El backend corre con 'manage.py runserver', que Django documenta como
-#     NO apto para produccion (un solo hilo, sin endurecer). Lo correcto es
-#     gunicorn, que hoy no esta en django-crm/backend/requirements.txt.
-#  2. El frontend corre 'pnpm dev', el servidor de desarrollo: recompila en
-#     caliente y consume bastante mas memoria. El proyecto ya tiene
-#     @sveltejs/adapter-node configurado, asi que 'pnpm build' + 'node build'
-#     es cuestion de ajustar su Dockerfile.
-#  Ambos archivos son de django-crm/ y conviene acordarlos antes de tocarlos.
+#  SERVIDORES DE PRODUCCION, NO DE DESARROLLO
+#  ------------------------------------------
+#  - El backend arranca gunicorn y no 'manage.py runserver' (un solo hilo, y
+#    Django documenta que no se use fuera de desarrollo). Lo decide ENV_TYPE
+#    en docker/backend/entrypoint.sh; gunicorn ya venia en las dependencias.
+#    Los estaticos los sirve whitenoise, que ya estaba en MIDDLEWARE.
+#  - El frontend usa el destino 'prod' de su Dockerfile: compila con
+#    'pnpm build' y sirve con adapter-node, en vez del servidor de Vite.
 # =============================================================================
 
 services:
@@ -122,6 +120,9 @@ services:
     build:
       context: ./django-crm/frontend
       dockerfile: Dockerfile
+      # Compila con 'pnpm build' y sirve el resultado con adapter-node, en vez
+      # del servidor de desarrollo. Escucha en el puerto 3000.
+      target: prod
     restart: unless-stopped
     environment:
       # PUBLIC_ lo usa el NAVEGADOR: tiene que ser el dominio publico del

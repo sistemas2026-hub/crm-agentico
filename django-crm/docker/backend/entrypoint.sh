@@ -29,5 +29,20 @@ python manage.py create_default_admin
 echo "Collecting static files..."
 python manage.py collectstatic --noinput
 
-echo "Starting development server..."
-exec python manage.py runserver 0.0.0.0:8000
+# runserver es de un solo hilo y la propia documentacion de Django dice que no
+# se use fuera de desarrollo. gunicorn ya viene en las dependencias
+# (backend/pyproject.toml), asi que en produccion solo hay que usarlo.
+# Los estaticos los sigue sirviendo whitenoise, que ya esta en MIDDLEWARE, asi
+# que no hace falta un servidor aparte para ellos.
+if [ "$ENV_TYPE" = "prod" ]; then
+    echo "Starting gunicorn..."
+    exec gunicorn crm.wsgi:application \
+        --bind 0.0.0.0:8000 \
+        --workers "${GUNICORN_WORKERS:-3}" \
+        --timeout "${GUNICORN_TIMEOUT:-120}" \
+        --access-logfile - \
+        --error-logfile -
+else
+    echo "Starting development server..."
+    exec python manage.py runserver 0.0.0.0:8000
+fi
