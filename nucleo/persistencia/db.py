@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 ================================================================================
- PERSISTENCIA  --  SQLite local, mismo esquema que supabase/01_schema.sql
+ PERSISTENCIA  --  Postgres (Supabase), esquema asistente.*
 ================================================================================
 
 Por que existe
@@ -12,19 +12,41 @@ persistencia no hay forma de saber "cuando fue el ultimo contacto con este
 lead", que es el prerrequisito de cualquier agente proactivo (seguimiento
 de ventas, recordatorios).
 
-Por que SQLite y no Supabase
-------------------------------
-Las credenciales de Supabase en .env no son reales: son los JWT de
-demostracion publicos que trae cualquier instalacion self-hosted sin
-configurar (`iss: "supabase-demo"`), y DATABASE_URL tiene el placeholder
-'your-tenant-id' sin rellenar. Provisionar un proyecto real es una decision
-de ustedes (la region se elige una sola vez, antes de crear el proyecto).
+De SQLite a Postgres
+--------------------
+La version anterior escribia en un SQLite local y lo justificaba asi: "las
+credenciales de Supabase en .env no son reales... DATABASE_URL tiene el
+placeholder 'your-tenant-id' sin rellenar". Ese impedimento ya no existe --
+el proyecto tiene su Supabase propio, con el esquema aplicado y el CRM en la
+misma base-- asi que esto pasa a escribir donde siempre debio.
 
-Las tablas de aca reproducen a proposito las columnas de
-asistente.conversations/asistente.messages (supabase/01_schema.sql) --
-sin RLS, sin roles de Postgres, sin pgvector, eso es exclusivo de la
-migracion futura. Migrar de esto a Supabase real deberia ser sobre todo
-un volcado de datos, no una reescritura.
+Las tablas de SQLite se habian escrito replicando a proposito las columnas
+de asistente.conversations/messages, asi que la migracion fue de dialecto,
+no de modelo. Dos diferencias reales:
+
+  - El tenant deja de ser texto ('rapilink') y pasa a ser organization_id,
+    un uuid que referencia public.organization -la tabla del CRM-. El slug
+    se resuelve contra asistente.tenant_config.
+  - SQLite tenia UNIQUE(tenant, canal, usuario_externo): una sola
+    conversacion por usuario, para siempre. El esquema de Postgres permite
+    varias y las distingue por 'estado', que es lo que hace falta para
+    cerrar una conversacion y abrir otra despues. Aqui se reusa la
+    conversacion ABIERTA mas reciente, y si no hay, se crea.
+
+POR QUE SE BAJA A app_backend  (no es opcional)
+-----------------------------------------------
+El usuario que conecta (DATABASE_URL) es 'postgres', y en esta instalacion
+tiene BYPASSRLS: verificado contra la base, rolbypassrls = true. Con ese rol
+las politicas de aislamiento NO se evaluan y un olvido de filtro expondria
+las conversaciones de otro ISP.
+
+Por eso cada operacion abre transaccion, hace 'set local role app_backend'
+-que si esta sujeto a RLS- y fija app.current_tenant. El 'local' de ambos es
+lo que impide que una peticion herede el tenant de otra si se reutiliza la
+conexion.
+
+El orden importa: el slug se resuelve ANTES de bajar de rol, porque leer
+tenant_config ya requiere el tenant fijado y seria circular.
 
 Que NO guarda
 --------------
@@ -39,57 +61,66 @@ igual que ya decidia el PRD para 'messages'.
 from __future__ import annotations
 
 import os
-import sqlite3
 from contextlib import contextmanager
-from pathlib import Path
 
-RUTA_DB_POR_DEFECTO = "datos/asistente.db"
+import psycopg
+from psycopg.rows import dict_row
 
-_ESQUEMA = """
-CREATE TABLE IF NOT EXISTS conversations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    tenant TEXT NOT NULL,
-    canal TEXT NOT NULL,
-    usuario_externo TEXT NOT NULL,
-    rol_efectivo TEXT,
-    estado TEXT NOT NULL DEFAULT 'abierta',
-    escalada_a_humano INTEGER NOT NULL DEFAULT 0,
-    motivo_escalamiento TEXT,
-    creado_en TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    actualizado_en TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    UNIQUE (tenant, canal, usuario_externo)
-);
-
-CREATE INDEX IF NOT EXISTS conversations_tenant_idx
-    ON conversations (tenant, estado, actualizado_en DESC);
-
-CREATE TABLE IF NOT EXISTS messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-    rol TEXT NOT NULL,
-    contenido TEXT,
-    creado_en TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-
-CREATE INDEX IF NOT EXISTS messages_conv_idx
-    ON messages (conversation_id, creado_en);
-"""
+# Cache de slug -> organization_id. El vinculo lo crea cli/cargar_config.py y
+# no cambia en caliente: si cambiara, el proceso se reinicia igual.
+_ORGS: dict[str, str] = {}
 
 
-def _ruta_db() -> Path:
-    ruta = Path(os.environ.get("RUTA_DB", RUTA_DB_POR_DEFECTO))
-    ruta.parent.mkdir(parents=True, exist_ok=True)
-    return ruta
+def _url() -> str:
+    url = os.environ.get("DATABASE_URL")
+    if not url:
+        raise RuntimeError(
+            "Falta DATABASE_URL en el entorno. La persistencia del motor "
+            "escribe en Postgres (Supabase), no en un archivo local.")
+    return url
+
+
+def _organizacion(cur, tenant: str) -> str:
+    """
+    slug -> organization_id, contra asistente.tenant_config.
+
+    Se ejecuta como el usuario que conecta (con BYPASSRLS), a proposito: es
+    la consulta que AVERIGUA que tenant fijar, asi que no puede depender de
+    que ya este fijado.
+    """
+    if tenant in _ORGS:
+        return _ORGS[tenant]
+    cur.execute("select organization_id from asistente.tenant_config where slug = %s",
+                (tenant,))
+    fila = cur.fetchone()
+    if not fila:
+        raise RuntimeError(
+            f"El tenant '{tenant}' no tiene configuracion cargada, asi que no "
+            f"se sabe a que organizacion pertenece. "
+            f"Cargarla con: py -3.13 cli/cargar_config.py tenants/{tenant}.config.yaml")
+    org = fila[0] if not isinstance(fila, dict) else fila["organization_id"]
+    _ORGS[tenant] = str(org)
+    return _ORGS[tenant]
 
 
 @contextmanager
-def conectar():
-    con = sqlite3.connect(_ruta_db())
-    con.execute("PRAGMA foreign_keys = ON")
-    con.executescript(_ESQUEMA)
+def sesion(tenant: str):
+    """
+    Conexion con el tenant fijado y el rol degradado a app_backend.
+
+    Entrega (cursor, organization_id). Commit al salir sin excepcion.
+    """
+    con = psycopg.connect(_url(), connect_timeout=30, row_factory=dict_row)
     try:
-        yield con
+        with con.cursor() as cur:
+            org = _organizacion(cur, tenant)         # antes de bajar de rol
+            cur.execute("set local role app_backend")
+            cur.execute("select set_config('app.current_tenant', %s, true)", (org,))
+            yield cur, org
         con.commit()
+    except BaseException:
+        con.rollback()
+        raise
     finally:
         con.close()
 
@@ -101,38 +132,58 @@ def registrar_mensaje(tenant: str, canal: str, usuario_externo: str,
     mensaje, y actualiza 'actualizado_en' -- es la unica señal que necesita
     un scheduler para saber "hace cuanto no le escribimos a este usuario".
     """
-    with conectar() as con:
-        con.execute(
-            """INSERT INTO conversations (tenant, canal, usuario_externo, rol_efectivo)
-               VALUES (?, ?, ?, ?)
-               ON CONFLICT (tenant, canal, usuario_externo) DO UPDATE SET
-                   actualizado_en = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
-                   rol_efectivo = excluded.rol_efectivo""",
-            (tenant, canal, usuario_externo, rol_efectivo))
-        conv_id = con.execute(
-            """SELECT id FROM conversations
-               WHERE tenant = ? AND canal = ? AND usuario_externo = ?""",
-            (tenant, canal, usuario_externo)).fetchone()[0]
-        con.execute(
-            "INSERT INTO messages (conversation_id, rol, contenido) VALUES (?, ?, ?)",
-            (conv_id, rol, contenido))
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select id from asistente.conversations
+               where organization_id = %s and canal = %s and usuario_externo = %s
+                 and estado = 'abierta'
+               order by actualizado_en desc limit 1""",
+            (org, canal, usuario_externo))
+        fila = cur.fetchone()
+
+        if fila:
+            conv = fila["id"]
+            cur.execute(
+                """update asistente.conversations
+                   set actualizado_en = now(), rol_efectivo = %s
+                   where id = %s""",
+                (rol_efectivo, conv))
+        else:
+            cur.execute(
+                """insert into asistente.conversations
+                     (organization_id, canal, usuario_externo, rol_efectivo)
+                   values (%s, %s, %s, %s) returning id""",
+                (org, canal, usuario_externo, rol_efectivo))
+            conv = cur.fetchone()["id"]
+
+        cur.execute(
+            """insert into asistente.messages
+                 (organization_id, conversation_id, rol, contenido)
+               values (%s, %s, %s, %s)""",
+            (org, conv, rol, contenido))
 
 
 def ultima_actividad(tenant: str, canal: str | None = None) -> list[dict]:
-    """Una fila por conversacion: usuario_externo + cuando fue la ultima vez
-    que se le escribio o respondio. Insumo del detector de seguimientos."""
-    with conectar() as con:
-        con.row_factory = sqlite3.Row
+    """
+    Una fila por conversacion: usuario_externo + cuando fue la ultima vez
+    que se le escribio o respondio. Insumo del detector de seguimientos.
+
+    'actualizado_en' viene como datetime con zona horaria, no como texto:
+    es timestamptz en la base y quien consume ya no tiene que parsearlo.
+    """
+    with sesion(tenant) as (cur, org):
         if canal:
-            filas = con.execute(
-                """SELECT canal, usuario_externo, rol_efectivo, estado, actualizado_en
-                   FROM conversations WHERE tenant = ? AND canal = ?
-                   ORDER BY actualizado_en DESC""",
-                (tenant, canal)).fetchall()
+            cur.execute(
+                """select canal, usuario_externo, rol_efectivo, estado, actualizado_en
+                   from asistente.conversations
+                   where organization_id = %s and canal = %s
+                   order by actualizado_en desc""",
+                (org, canal))
         else:
-            filas = con.execute(
-                """SELECT canal, usuario_externo, rol_efectivo, estado, actualizado_en
-                   FROM conversations WHERE tenant = ?
-                   ORDER BY actualizado_en DESC""",
-                (tenant,)).fetchall()
-        return [dict(f) for f in filas]
+            cur.execute(
+                """select canal, usuario_externo, rol_efectivo, estado, actualizado_en
+                   from asistente.conversations
+                   where organization_id = %s
+                   order by actualizado_en desc""",
+                (org,))
+        return [dict(f) for f in cur.fetchall()]

@@ -38,17 +38,15 @@ load_dotenv(override=True)
 from nucleo.persistencia import db as persistencia
 
 
-def _parsear_fecha(texto: str) -> datetime:
-    # SQLite guarda 'AAAA-MM-DDTHH:MM:SS.ffffffZ' (strftime %Y-%m-%dT%H:%M:%fZ).
-    return datetime.strptime(texto, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc)
-
-
 def main(tenant: str, dias: int, canal: str | None) -> None:
     ahora = datetime.now(timezone.utc)
     corte = ahora - timedelta(days=dias)
 
+    # 'actualizado_en' llega como datetime con zona: es timestamptz en Postgres.
+    # Antes venia como texto porque la persistencia era SQLite y habia que
+    # parsearlo a mano.
     conversaciones = persistencia.ultima_actividad(tenant, canal)
-    pendientes = [c for c in conversaciones if _parsear_fecha(c["actualizado_en"]) < corte]
+    pendientes = [c for c in conversaciones if c["actualizado_en"] < corte]
 
     print(f"Tenant: {tenant}  |  Umbral: {dias} dia(s) sin contacto"
          f"{f'  |  Canal: {canal}' if canal else ''}")
@@ -61,11 +59,11 @@ def main(tenant: str, dias: int, canal: str | None) -> None:
         return
 
     for c in pendientes:
-        inactivo_desde = ahora - _parsear_fecha(c["actualizado_en"])
+        inactivo_desde = ahora - c["actualizado_en"]
         print(f"  - {c['usuario_externo']:<20} canal={c['canal']:<10} "
              f"rol={c['rol_efectivo'] or '?':<15} "
              f"ultimo contacto hace {inactivo_desde.days} dia(s) "
-             f"({c['actualizado_en']})")
+             f"({c['actualizado_en']:%Y-%m-%d %H:%M})")
 
 
 if __name__ == "__main__":
