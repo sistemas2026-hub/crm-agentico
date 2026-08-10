@@ -84,6 +84,9 @@ services:
     command: /bin/bash /entrypoint.sh
     volumes:
       - ./django-crm/docker/backend/entrypoint.sh:/entrypoint.sh:ro
+      # Adjuntos y archivos subidos. Van al disco porque este despliegue no usa
+      # S3; sin el volumen, cada redespliegue se los lleva.
+      - media:/app/media
 
   celery-worker:
     build:
@@ -93,6 +96,10 @@ services:
     environment:
       SECRET_KEY: ${SECRET_KEY:?}
       DEBUG: "False"
+      # Sin esto corren en modo 'dev' (settings.py usa "dev" por defecto) y no
+      # cargan server_settings: misma imagen, configuracion distinta a la del
+      # backend, y las diferencias aparecen en produccion.
+      ENV_TYPE: prod
       DBHOST: ${DBHOST:?}
       DBPORT: ${DBPORT:?}
       DBNAME: ${DBNAME:?}
@@ -104,6 +111,8 @@ services:
       redis:
         condition: service_healthy
     command: celery -A crm worker --loglevel=info
+    volumes:
+      - media:/app/media
 
   celery-beat:
     build:
@@ -113,6 +122,10 @@ services:
     environment:
       SECRET_KEY: ${SECRET_KEY:?}
       DEBUG: "False"
+      # Sin esto corren en modo 'dev' (settings.py usa "dev" por defecto) y no
+      # cargan server_settings: misma imagen, configuracion distinta a la del
+      # backend, y las diferencias aparecen en produccion.
+      ENV_TYPE: prod
       DBHOST: ${DBHOST:?}
       DBPORT: ${DBPORT:?}
       DBNAME: ${DBNAME:?}
@@ -124,6 +137,8 @@ services:
       redis:
         condition: service_healthy
     command: celery -A crm beat --loglevel=info
+    volumes:
+      - media:/app/media
 
   frontend:
     build:
@@ -184,6 +199,8 @@ services:
         condition: service_healthy
 
 volumes:
+  # Archivos subidos por los usuarios. Sin S3, viven en disco.
+  media:
   # Los modelos descargados. Sin esto, cada redespliegue vuelve a bajar 1.2 GB
   # y la primera consulta espera a que termine.
   ollama_models:

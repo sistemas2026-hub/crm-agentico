@@ -1,48 +1,65 @@
-import os
+"""
+================================================================================
+ OVERRIDES DE PRODUCCION  --  para ESTE despliegue, auto-hospedado
+================================================================================
 
-import sentry_sdk
-from sentry_sdk.integrations.django import DjangoIntegration
+crm/settings.py hace 'from .server_settings import *' cuando ENV_TYPE == "prod",
+y su comentario lo describe como un archivo que provee el operador. El que traia
+el proyecto original describia el despliegue SaaS de bottlecrm.io y no servia
+aca:
+
+  - Exigia AWS_BUCKET_NAME, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
+    AWS_SES_REGION_NAME, AWS_SES_REGION_ENDPOINT y SENTRY_DSN con
+    os.environ[...] -- sin valor por defecto, asi que el contenedor moria con
+    KeyError antes de levantar.
+  - Fijaba SESSION_COOKIE_DOMAIN = ".bottlecrm.io". Eso es peor que el
+    KeyError, porque no rompe el arranque: rompe el LOGIN. El navegador no
+    manda a agent.rapilinksas.co una cookie acotada a otro dominio, y el
+    sintoma seria "inicio sesion y me devuelve al login", sin ningun error.
+
+Aqui no hay S3 ni SES: los archivos van al disco del contenedor y el correo se
+configura por SMTP con variables de entorno. Sentry solo se activa si le pasan
+un DSN.
+================================================================================
+"""
+
+import os
 
 DEBUG = False
 
-AWS_STORAGE_BUCKET_NAME = AWS_BUCKET_NAME = os.environ["AWS_BUCKET_NAME"]
-AWS_ACCESS_KEY_ID = os.environ["AWS_ACCESS_KEY_ID"]
-AWS_SECRET_ACCESS_KEY = os.environ["AWS_SECRET_ACCESS_KEY"]
-S3_DOMAIN = AWS_S3_CUSTOM_DOMAIN = str(AWS_BUCKET_NAME) + ".s3.amazonaws.com"
-AWS_SES_REGION_NAME = os.environ["AWS_SES_REGION_NAME"]
-AWS_SES_REGION_ENDPOINT = os.environ["AWS_SES_REGION_ENDPOINT"]
+# --- Archivos subidos ---------------------------------------------------------
+# Al disco, no a S3. Necesita volumen en el compose: sin el, cada redespliegue
+# se lleva los adjuntos que hayan subido los usuarios.
+MEDIA_ROOT = os.environ.get("MEDIA_ROOT", "/app/media")
+MEDIA_URL = "/media/"
 
-AWS_S3_OBJECT_PARAMETERS = {
-    "CacheControl": "max-age=86400",
-}
+# --- Cookies ------------------------------------------------------------------
+# Sin dominio fijo: la cookie queda acotada al host que la emite, que es lo
+# correcto cuando el dominio lo elige quien despliega. Se puede fijar por
+# entorno si algun dia hace falta compartirla entre subdominios.
+_dominio_cookie = os.environ.get("SESSION_COOKIE_DOMAIN", "").strip()
+if _dominio_cookie:
+    SESSION_COOKIE_DOMAIN = _dominio_cookie
 
-DEFAULT_FILE_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
-DEFAULT_S3_PATH = "media"
+# Traefik termina TLS delante, asi que todo viaja por HTTPS.
+SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SECURE = True
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
-MEDIA_ROOT = f"/{DEFAULT_S3_PATH}/"
-MEDIA_URL = f"//{S3_DOMAIN}/{DEFAULT_S3_PATH}/"
-# STATIC_URL = "https://%s/" % (S3_DOMAIN)
-# ADMIN_MEDIA_PREFIX = STATIC_URL + "admin/"
+# --- Sentry -------------------------------------------------------------------
+# Opcional. El archivo original lo exigia siempre; aca solo se inicia si hay DSN,
+# para que no reporte a un proyecto ajeno ni impida arrancar sin cuenta.
+_sentry_dsn = os.environ.get("SENTRY_DSN", "").strip()
+if _sentry_dsn:
+    import sentry_sdk
+    from sentry_sdk.integrations.django import DjangoIntegration
 
-AWS_IS_GZIPPED = True
-AWS_ENABLED = True
-AWS_S3_SECURE_URLS = True
-
-EMAIL_BACKEND = "django_ses.SESBackend"
-
-SESSION_COOKIE_DOMAIN = ".bottlecrm.io"
-SESSION_COOKIE_SECURE = True  # Only send session cookie over HTTPS
-CSRF_COOKIE_SECURE = True  # Only send CSRF cookie over HTTPS
-
-sentry_sdk.init(
-    dsn=os.environ["SENTRY_DSN"],
-    integrations=[DjangoIntegration()],
-    traces_sample_rate=1.0,
-    # If you wish to associate users to errors (assuming you are using
-    # django.contrib.auth) you may enable sending PII data.
-    send_default_pii=True,
-)
-
-RAVEN_CONFIG = {
-    "dsn": os.environ["SENTRY_DSN"],
-}
+    sentry_sdk.init(
+        dsn=_sentry_dsn,
+        integrations=[DjangoIntegration()],
+        traces_sample_rate=float(os.environ.get("SENTRY_TRACES_SAMPLE_RATE", "0.1")),
+        # send_default_pii queda en False a proposito: este CRM guarda datos de
+        # clientes de un ISP -cedula, direccion, telefono- y mandarlos a un
+        # tercero con cada traza no lo cubre ninguna autorizacion.
+        send_default_pii=False,
+    )

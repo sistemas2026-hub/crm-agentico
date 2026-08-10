@@ -6,3 +6,7 @@ PyYAML
 ruamel.yaml
 streamlit
 flask
+# nucleo/persistencia/db.py, desde que la persistencia dejo de ser SQLite.
+# El extra [binary] trae la libpq compilada: sin el, la imagen necesitaria
+# gcc y libpq-dev para construirlo, que no estan en python:3.13-slim.
+psycopg[binary]
