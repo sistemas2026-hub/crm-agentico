@@ -44,7 +44,15 @@ if _dominio_cookie:
 # Traefik termina TLS delante, asi que todo viaja por HTTPS.
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
-SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+# SECURE_PROXY_SSL_HEADER NO se fija aqui a proposito. settings.py lo hace
+# opt-in con TRUST_PROXY_SSL_HEADER y explica por que: la cabecera
+# X-Forwarded-Proto la puede falsificar cualquiera que alcance a gunicorn sin
+# pasar por el proxy, y entonces request.is_secure() miente. Fijarlo desde este
+# archivo -que se importa antes- se saltaria esa decision en silencio.
+# Se activa con TRUST_PROXY_SSL_HEADER=True en el entorno, que es legitimo en
+# este despliegue porque Traefik es el unico ingreso: el compose de produccion
+# no publica ningun puerto.
 
 # --- Sentry -------------------------------------------------------------------
 # Opcional. El archivo original lo exigia siempre; aca solo se inicia si hay DSN,

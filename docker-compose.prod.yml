@@ -64,6 +64,18 @@ services:
       # Para el admin de Django y cualquier formulario: sobre HTTPS exige que
       # el origen este declarado o rechaza el POST con 403.
       CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:?ambos dominios, CON https://}
+      # De aqui sale CADA enlace que el sistema manda por correo: el de
+      # inicio de sesion por magic link, el portal de facturas del cliente y
+      # la encuesta. Con el valor por defecto (localhost:5173) el sistema
+      # arranca bien y le manda a los clientes enlaces a su propia maquina,
+      # sin que nada falle visiblemente. settings.py aborta el arranque antes
+      # que permitirlo, y hace bien.
+      FRONTEND_URL: ${FRONTEND_URL:?URL publica del frontend, CON https://}
+      # Traefik es el unico ingreso -este compose no publica ningun puerto- y
+      # reescribe X-Forwarded-Proto, que son las dos condiciones que settings.py
+      # exige para confiar en esa cabecera. Sin esto, Django cree que las
+      # peticiones son HTTP y las cookies marcadas Secure no viajan.
+      TRUST_PROXY_SSL_HEADER: "True"
       # --- Base: el Supabase de este mismo servidor ---
       DBHOST: ${DBHOST:?}
       DBPORT: ${DBPORT:?}
@@ -100,6 +112,18 @@ services:
       # cargan server_settings: misma imagen, configuracion distinta a la del
       # backend, y las diferencias aparecen en produccion.
       ENV_TYPE: prod
+      # De aqui sale CADA enlace que el sistema manda por correo: el de
+      # inicio de sesion por magic link, el portal de facturas del cliente y
+      # la encuesta. Con el valor por defecto (localhost:5173) el sistema
+      # arranca bien y le manda a los clientes enlaces a su propia maquina,
+      # sin que nada falle visiblemente. settings.py aborta el arranque antes
+      # que permitirlo, y hace bien.
+      FRONTEND_URL: ${FRONTEND_URL:?URL publica del frontend, CON https://}
+      # Traefik es el unico ingreso -este compose no publica ningun puerto- y
+      # reescribe X-Forwarded-Proto, que son las dos condiciones que settings.py
+      # exige para confiar en esa cabecera. Sin esto, Django cree que las
+      # peticiones son HTTP y las cookies marcadas Secure no viajan.
+      TRUST_PROXY_SSL_HEADER: "True"
       DBHOST: ${DBHOST:?}
       DBPORT: ${DBPORT:?}
       DBNAME: ${DBNAME:?}
@@ -126,6 +150,18 @@ services:
       # cargan server_settings: misma imagen, configuracion distinta a la del
       # backend, y las diferencias aparecen en produccion.
       ENV_TYPE: prod
+      # De aqui sale CADA enlace que el sistema manda por correo: el de
+      # inicio de sesion por magic link, el portal de facturas del cliente y
+      # la encuesta. Con el valor por defecto (localhost:5173) el sistema
+      # arranca bien y le manda a los clientes enlaces a su propia maquina,
+      # sin que nada falle visiblemente. settings.py aborta el arranque antes
+      # que permitirlo, y hace bien.
+      FRONTEND_URL: ${FRONTEND_URL:?URL publica del frontend, CON https://}
+      # Traefik es el unico ingreso -este compose no publica ningun puerto- y
+      # reescribe X-Forwarded-Proto, que son las dos condiciones que settings.py
+      # exige para confiar en esa cabecera. Sin esto, Django cree que las
+      # peticiones son HTTP y las cookies marcadas Secure no viajan.
+      TRUST_PROXY_SSL_HEADER: "True"
       DBHOST: ${DBHOST:?}
       DBPORT: ${DBPORT:?}
       DBNAME: ${DBNAME:?}

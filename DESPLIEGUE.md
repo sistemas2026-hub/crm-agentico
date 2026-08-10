@@ -62,6 +62,7 @@ DOMAIN_NAME=https://agent-api.rapilinksas.co
 PUBLIC_DJANGO_API_URL=https://agent-api.rapilinksas.co
 CORS_ALLOWED_ORIGINS=https://agent.rapilinksas.co
 CSRF_TRUSTED_ORIGINS=https://agent.rapilinksas.co,https://agent-api.rapilinksas.co
+FRONTEND_URL=https://agent.rapilinksas.co
 
 ADMIN_EMAIL=
 ADMIN_PASSWORD=
