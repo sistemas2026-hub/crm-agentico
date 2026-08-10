@@ -9,6 +9,10 @@ Antes de proponer o hacer cualquier cambio, lee completos:
 - [PRD.md](PRD.md) — producto, requisitos, decisiones y su motivo. Fuente de verdad de **qué** se construye y **por qué**.
 - [ARQUITECTURA.md](ARQUITECTURA.md) — estructura del repo y la regla de separación núcleo/tenant. Fuente de verdad de **cómo** se organiza el código.
 
+Y antes de tocar el servidor, el despliegue o la conexión a la base:
+
+- [DESPLIEGUE.md](DESPLIEGUE.md) — cómo se pone a andar en el VPS, qué falta, y los errores que ya costaron tiempo una vez. Consultar su sección de diagnóstico **antes** de depurar un fallo de conexión o de despliegue: varios de esos errores señalan a la causa equivocada.
+
 Estos dos archivos cambian seguido y son la fuente de verdad — no un resumen de este archivo. Léelos del disco en cada sesión, no asumas que el contenido sigue igual a la última vez. Si `git log -5 -- PRD.md ARQUITECTURA.md` muestra commits que no reconoces, son cambios de otro colaborador: revísalos antes de tocar nada relacionado.
 
 ## La única regla de arquitectura
