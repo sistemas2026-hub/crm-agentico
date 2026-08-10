@@ -66,7 +66,9 @@ Costo de esa decisión: **actualizar del proyecto original a futuro es manual** 
 
 Sigue siendo, en espíritu, la misma separación núcleo/tenant: `django-crm/` es la plataforma (genérica, de terceros), y lo que le agregamos encima para hablarle al motor (`frontend/src/routes/(app)/agentes/`, `/asistente/`, `/simulador-whatsapp/`, y sus proxies en `frontend/src/routes/api/`) es la integración específica de este producto — no se tocó el resto del CRM.
 
-`docker-compose.yml` (en la raíz) levanta todo junto: `db`, `redis`, `backend`, `celery-worker`, `celery-beat`, `frontend` (de `django-crm/`) y `motor` (`nucleo/`), en la misma red — el frontend le habla al motor por `http://motor:5000`, igual que le habla a Postgres por `db:5432`.
+`docker-compose.yml` (en la raíz) levanta todo junto: `db`, `redis`, `backend`, `celery-worker`, `celery-beat`, `frontend` (de `django-crm/`), `motor` (`nucleo/`) y `ollama`, en la misma red — el frontend le habla al motor por `http://motor:5000`, igual que le habla a Postgres por `db:5432`.
+
+`ollama` sirve **solo los embeddings** (`bge-m3`), no el LLM: los cinco roles están redirigidos a `deepseek-v4-flash`, así que pide ~2-3 GB de RAM y no los 18 GB del qwen3. Tampoco puede reemplazarse por DeepSeek — su API expone `/models` y `/chat/completions`, pero `/embeddings` devuelve 404 (verificado); un modelo de chat no produce vectores. El motor lo alcanza por `OLLAMA_HOST=http://ollama:11434`, que la librería resuelve sola sin código de por medio.
 
 ## Dónde aterriza lo que ya existía
 

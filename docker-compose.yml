@@ -102,17 +102,52 @@ services:
     ports:
       - "5173:5173"
 
+  # Embeddings. NO sirve el LLM: los cinco roles estan redirigidos a
+  # deepseek-v4-flash en tenants/rapilink.config.yaml, asi que aca solo corre
+  # bge-m3 (~1.2 GB en disco, ~2-3 GB residente) y no el qwen3:30b, que pedia
+  # 18 GB. Tampoco se puede resolver con DeepSeek: su API expone /models y
+  # /chat/completions, pero /embeddings responde 404 -- verificado. Un modelo
+  # de chat no devuelve vectores; es otro tipo de modelo, no una opcion del
+  # mismo.
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    environment:
+      # Por defecto Ollama descarga el modelo de memoria tras 5 minutos
+      # ocioso. Los embeddings estan en el camino critico de CADA pregunta,
+      # no solo de la carga del corpus: sin esto, la primera consulta despues
+      # de una pausa paga la recarga entera (RNF-04, el tecnico esperando en
+      # campo).
+      OLLAMA_KEEP_ALIVE: "-1"
+    volumes:
+      - ollama_models:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
   motor:
     build:
       context: .
       dockerfile: Dockerfile
     env_file:
       - .env
+    environment:
+      # Redirige ollama.embed() al contenedor de arriba. La libreria resuelve
+      # el host con os.getenv('OLLAMA_HOST'), asi que no hay codigo que tocar.
+      # Se declara aca y no en .env para que no dependa de que cada quien lo
+      # copie: dentro del compose SIEMPRE es este.
+      OLLAMA_HOST: http://ollama:11434
     ports:
       - "5000:5000"
     volumes:
       - ./nucleo:/app/nucleo
       - ./tenants:/app/tenants
+    depends_on:
+      ollama:
+        condition: service_healthy
 
 volumes:
   # external: reusa el volumen que ya existia cuando django-crm corria como
@@ -123,3 +158,6 @@ volumes:
     name: django-crm_postgres_data
     external: true
   frontend_node_modules:
+  # Los modelos descargados. Sin volumen, cada redespliegue vuelve a bajar
+  # 1.2 GB y la primera consulta espera a que termine.
+  ollama_models:
