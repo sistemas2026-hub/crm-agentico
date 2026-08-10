@@ -155,6 +155,12 @@ Si el contenedor nuevo muestra `5432/tcp` sin `0.0.0.0:`, no es alcanzable desde
 
 **La interfaz carga pero ninguna llamada funciona** — CORS. El valor por defecto de `CORS_ALLOWED_ORIGINS` es `http://localhost:5173`, así que sin definirlo el despliegue arranca bien y falla en cada clic. El error en la consola del navegador habla de CORS y no menciona la variable.
 
+**"Correo o contraseña incorrectos" con credenciales correctas** — Ese texto es el **valor por defecto** del frontend (`login/+page.server.js`), no una respuesta del backend: aparece ante cualquier fallo de la petición. La causa real suele estar en los logs del backend. Ya pasó una vez con `DisallowedHost`: el frontend llama a Django por la red interna (`http://backend:8000`), así que las peticiones llegan con `Host: backend:8000` y `ALLOWED_HOSTS` tiene que incluir `backend` además del dominio público. Ante este mensaje, mirar siempre:
+
+```
+docker logs <contenedor-backend> --tail 20
+```
+
 **El backend no arranca y habla del `SECRET_KEY`** — Con `ENV_TYPE=prod`, Django rechaza cualquier clave que empiece por `django-insecure` y exige mínimo 32 bytes, porque esa clave firma todos los JWT. Es deliberado: falla el despliegue en vez de firmar tokens débiles.
 
 **`Permission denied ... 403` al hacer push** — Credenciales de GitHub, no del repositorio. Suele aparecer después de tocar la instalación de la GitHub App de Dokploy.

@@ -53,7 +53,16 @@ services:
       # variables de entorno, o sea las credenciales- en cualquier error.
       DEBUG: "False"
       ENV_TYPE: prod
-      ALLOWED_HOSTS: ${ALLOWED_HOSTS:?dominio del backend, SIN https://}
+      # Se le agrega 'backend' al dominio publico, y no es opcional: el
+      # frontend llama a Django POR DENTRO de la red, con
+      # PRIVATE_DJANGO_API_URL=http://backend:8000, asi que esas peticiones
+      # llegan con 'Host: backend:8000'. Si no esta en la lista, Django las
+      # rechaza con 400 DisallowedHost -- y el frontend, que solo ve un 400 sin
+      # cuerpo, muestra "correo o contraseña incorrectos". Se depura el login
+      # durante horas por un problema que no tiene que ver con credenciales.
+      # Va aqui y no en la variable de Dokploy porque 'backend' es el nombre
+      # del servicio en ESTE archivo: lo sabe el compose, no quien despliega.
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:?dominio del backend, SIN https://},backend
       DOMAIN_NAME: ${DOMAIN_NAME:?URL publica del backend, CON https://}
       # El navegador carga la interfaz desde el dominio del FRONTEND y de ahi
       # llama al backend: son origenes distintos, asi que sin esto el navegador
