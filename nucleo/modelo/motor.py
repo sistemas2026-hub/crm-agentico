@@ -43,6 +43,8 @@ from nucleo.herramientas import agregado as ejecutor_agregado
 from nucleo.herramientas import http as ejecutor_http
 from nucleo.modelo import cliente
 from nucleo.recuperacion.prompt import construir_system
+from nucleo.recuperacion.busqueda import (recuperar, bloque_de_contexto,
+                                          registrar_sin_resultados)
 from nucleo.seguridad import listas_blancas
 from nucleo.seguridad.verificacion import nivel_requerido
 
@@ -230,6 +232,36 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict], sesi
 
     herramientas = herramientas_del_rol(config, rol_cfg)
     catalogo_openai = [_esquema_openai(h) for h in herramientas]
+
+    # --- RAG: que dice la documentacion interna sobre esto ---------------------
+    # Va DESPUES del catalogo de herramientas porque la decision de que hacer
+    # cuando el corpus no responde depende de si el rol tiene con que buscar el
+    # dato en otro lado.
+    #
+    # Nunca rompe el turno: si Ollama no responde o la base falla, se sigue sin
+    # contexto documental. Peor es no atender.
+    try:
+        fragmentos, mejor = recuperar(config, config.identidad.slug, mensaje)
+    except Exception as e:
+        print(f"[rag] no se pudo recuperar contexto: {e}")
+        fragmentos, mejor = [], None
+
+    if fragmentos:
+        historial.append({"role": "system", "content": bloque_de_contexto(fragmentos)})
+    else:
+        registrar_sin_resultados(config.identidad.slug, mensaje, nombre_rol, mejor)
+        # Solo se corta el turno si NO hay herramientas: ahi no queda nada con
+        # que responder y llamar al modelo es pedirle que invente (RF-07).
+        #
+        # Con herramientas se sigue: "cuanto debe el cliente 1234" no esta en
+        # ninguna guia y se responde consultando WispHub. Aplicar el corte a
+        # todo dejaria al asistente mudo para la mayoria de las preguntas
+        # reales, que es lo contrario de lo que busca la regla. El mensaje
+        # configurado lo confirma: habla de "la documentacion disponible".
+        if not herramientas:
+            respuesta = config.rag.mensaje_sin_resultados.strip()
+            historial.append({"role": "assistant", "content": respuesta})
+            return respuesta
 
     referencia_decision = config.llm.overrides.get(f"rol:{nombre_rol}",
                                                     config.llm.modelo_por_defecto)
