@@ -242,6 +242,23 @@ services:
     depends_on:
       ollama:
         condition: service_healthy
+    # UN SOLO worker, y no es por memoria: nucleo/canales/api.py guarda el
+    # historial de cada conversacion en '_sesiones', un diccionario en memoria
+    # del proceso. Con varios workers -que son procesos, no hilos- cada uno
+    # tendria su copia, y el segundo mensaje de una persona podria caer en otro
+    # worker que no sabe nada de los anteriores: el asistente "olvidaria" a
+    # mitad de conversacion, de forma intermitente y dificil de reproducir.
+    # Los hilos si comparten memoria, asi que la concurrencia va por ahi.
+    # Cuando el historial viva en asistente.conversations en vez de en RAM,
+    # esto puede subir a varios workers.
+    command: >
+      gunicorn nucleo.canales.api:app
+      --bind 0.0.0.0:5000
+      --workers 1
+      --threads 8
+      --timeout 180
+      --access-logfile -
+      --error-logfile -
 
 volumes:
   # Archivos subidos por los usuarios. Sin S3, viven en disco.

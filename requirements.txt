@@ -10,3 +10,16 @@ flask
 # El extra [binary] trae la libpq compilada: sin el, la imagen necesitaria
 # gcc y libpq-dev para construirlo, que no estan en python:3.13-slim.
 psycopg[binary]
+
+# DeepSeek, qwen, glm y kimi hablan la API de OpenAI: nucleo/modelo/cliente.py
+# los atiende a todos con ClienteCompatibleOpenAI. El import es PEREZOSO, dentro
+# del constructor, asi que faltando el paquete el motor arranca igual y solo
+# revienta cuando alguien hace la primera consulta.
+openai
+
+# nucleo/ingesta/docx.py, que fragmenta el corpus.
+python-docx
+
+# Servidor WSGI. El de Flask ('app.run') avisa el mismo que no es para
+# produccion; ver el comando del servicio 'motor' en docker-compose.prod.yml.
+gunicorn
