@@ -107,6 +107,14 @@
 {:else if !data.agentes || data.agentes.length === 0}
   <p class="chat-vacio">No hay agentes configurados.</p>
 {:else}
+  <!--
+    El shell de la app recorta con overflow:hidden (ver (app)/+layout.svelte),
+    asi que cada pantalla tiene que pedir su propio scroll. Sin este envoltorio
+    la grilla se corta en el borde de la ventana en vez de dejar bajar --
+    mismo patron que /settings y sus subpaginas.
+  -->
+  <div class="v2-scroll">
+  <div class="v2-pad grilla-envoltorio">
   <div class="grilla">
     {#each data.agentes as agente}
       {@const nodos = nodosDe(agente.herramientas)}
@@ -183,9 +191,15 @@
       </div>
     {/each}
   </div>
+  </div>
+  </div>
 {/if}
 
 <style>
+  .grilla-envoltorio {
+    padding-top: 12px;
+    padding-bottom: 32px;
+  }
   .aviso-error {
     color: #991b1b;
     font-size: 14px;
@@ -198,7 +212,6 @@
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
     gap: 16px;
-    margin-top: 12px;
   }
   .tarjeta {
     border: 1px solid var(--v2-border, #e5e5e5);
