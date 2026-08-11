@@ -85,10 +85,49 @@ El patrón que más confunde: todas miran al **backend** excepto `CORS_ALLOWED_O
 
 ### 4. Dominios
 
+**Uno por servicio.** Traefik enruta por nombre de host, así que dos servicios no pueden compartir dominio.
+
 | Dominio | Servicio | Puerto |
 |---|---|---|
 | `agent.rapilinksas.co` | `frontend` | **3000** |
 | `agent-api.rapilinksas.co` | `backend` | 8000 |
+
+⚠️ **Después de crear o editar un dominio hay que redesplegar.** Dokploy escribe las etiquetas de Traefik al recrear los contenedores, no al guardar el formulario. Guardar y quedarse esperando es media hora perdida — y el síntoma es un 404 de Traefik que parece un problema de DNS.
+
+⚠️ **Si sale `UNAUTHORIZED` en rojo al guardar**, es la sesión de Dokploy caducada, no la configuración. Recargar la página, volver a entrar, repetir.
+
+**Cómo leer los errores de Traefik**, que es lo que más tiempo ahorra:
+
+| Respuesta | Significa |
+|---|---|
+| `404 page not found` en texto plano, sin cabecera `Server` | Traefik no tiene ruta para ese host: falta el dominio, o falta redesplegar |
+| `502 Bad Gateway` | Sí hay ruta, pero el destino no responde: contenedor caído, puerto equivocado, o el contenedor no comparte red con Traefik |
+| Respuesta con `server: gunicorn` | Ya llegó a la aplicación; el problema, si lo hay, es de la aplicación |
+
+Para saber qué contenedor reclama un dominio y en qué redes está:
+
+```
+docker ps --format '{{.Names}}' | while read c; do
+  if docker inspect "$c" --format '{{json .Config.Labels}}' 2>/dev/null | grep -q 'TU-DOMINIO'; then
+    echo "=== $c ==="
+    docker inspect "$c" --format '{{json .Config.Labels}}' | tr ',' '\n' \
+      | grep -iE 'rule|loadbalancer.server.port|docker.network'
+    echo "  redes: $(docker inspect "$c" --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}')"
+  fi
+done
+```
+
+### 4.b El Studio de Supabase
+
+Va aparte, en el proyecto del Supabase (`automatizacion-rp-supabase-dgimpk`), no en el nuestro:
+
+| Dominio | Servicio | Puerto |
+|---|---|---|
+| `crm.rapilinksas.co` | **`kong`** | 8000 |
+
+El servicio es `kong`, la pasarela de API — **no `db`**. Apuntarlo a `db` da 502 permanente: Postgres escucha en 5432 y no tiene nada en el 8000. Ya pasó una vez.
+
+Al entrar pide usuario y contraseña: son `DASHBOARD_USERNAME` y `DASHBOARD_PASSWORD` de las variables de ese proyecto.
 
 `motor`, `ollama` y `redis` **no llevan dominio**. El frontend alcanza al motor por la red interna (`http://motor:5000`); exponerlo sería abrir el asistente a internet sin autenticación.
 
@@ -111,9 +150,41 @@ Una sola vez: queda en el volumen `ollama_models` y sobrevive a los redespliegue
 
 Y **recargar el corpus contra ese Ollama** — ver la primera entrada de pendientes, porque no es opcional.
 
+### 6. Comprobar que quedó bien
+
+En este orden, porque cada paso descarta el anterior:
+
+```
+# 1. Los siete contenedores arriba, ninguno en Restarting
+docker ps --filter "name=crm-agentico" --format "table {{.Names}}\t{{.Status}}"
+
+# 2. Desde fuera: la interfaz, la API y el Studio
+curl -s -o /dev/null -w "%{http_code}\n" https://agent.rapilinksas.co/login      # 200
+curl -s -o /dev/null -w "%{http_code}\n" https://agent-api.rapilinksas.co/admin/ # 302
+curl -s -o /dev/null -w "%{http_code}\n" https://crm.rapilinksas.co/             # 401
+
+# 3. El circuito completo del asistente: embeddings, base, modelo y persistencia
+docker exec <contenedor-motor> python -c "
+import json, urllib.request, time
+cuerpo = json.dumps({'tenant':'rapilink','rol':'tecnica',
+                     'identificador_sesion':'prueba','mensaje':'hola'}).encode()
+req = urllib.request.Request('http://127.0.0.1:5000/chat', data=cuerpo,
+                             headers={'Content-Type':'application/json'})
+t=time.time()
+with urllib.request.urlopen(req, timeout=180) as r: d=json.load(r)
+print(f'{time.time()-t:.1f}s'); print(d.get('respuesta','')[:300])
+"
+```
+
+El paso 3 es el que vale: un 500 ahí no lo detecta ningún healthcheck, porque varios imports del motor son perezosos y solo fallan en la primera consulta real.
+
 ## Pendientes
 
 Cosas sabidas que faltan. Cada una dice por qué importa, que es lo que no se deduce del código.
+
+**Conectar el RAG.** El asistente no lee el corpus. `motor.responder()` solo usa `construir_system()` de `nucleo/recuperacion/`: no vectoriza la pregunta ni llama a `match_chunks`. Todo lo demás ya está en pie —106 fragmentos vectorizados, la función en la base, `bge-m3` corriendo, el aislamiento verificado— así que falta únicamente el paso que los une. Hoy, preguntarle a un técnico cómo diagnosticar una falla devuelve una respuesta razonable del prompt, no el procedimiento de `G-GO-04` que está cargado.
+
+**La configuración tiene que venir de la base, no de archivos.** `nucleo/canales/api.py` hace `cargar_config(f"tenants/{tenant}.config.yaml")`, y `nucleo/config/editor.py` edita esos mismos archivos. Pero en producción `tenants/` viaja dentro de la imagen: **lo que un cliente cambie desde la interfaz se pierde en el siguiente despliegue.** `asistente.tenant_config` ya tiene la configuración cargada y nadie la lee. Para un producto SaaS donde cada empresa se autogestiona, la base debe ser la fuente de verdad y el YAML solo la semilla inicial.
 
 **Recargar el corpus con el Ollama del servidor.** Los 106 fragmentos actuales se vectorizaron con el `bge-m3` de una máquina de desarrollo. Si la versión del modelo que baja el contenedor no es idéntica, los vectores dejan de ser comparables con los de las consultas — y esto **no da error**: simplemente empieza a devolver fragmentos peores. Es la clase de degradación que nadie nota hasta que alguien dice que "el asistente ya no responde bien". `py -3.13 cli/cargar_corpus.py rapilink --forzar` con `OLLAMA_HOST` apuntando al servidor.
 
