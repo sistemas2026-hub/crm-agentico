@@ -179,9 +179,15 @@ services:
     environment:
       # Redirige ollama.embed() al contenedor de arriba. La libreria resuelve
       # el host con os.getenv('OLLAMA_HOST'), asi que no hay codigo que tocar.
-      # Se declara aca y no en .env para que no dependa de que cada quien lo
-      # copie: dentro del compose SIEMPRE es este.
-      OLLAMA_HOST: http://ollama:11434
+      #
+      # Configurable, no fijo: quien ya tiene Ollama nativo en su maquina
+      # (Windows/Mac, el uso habitual de este equipo de desarrollo -- ver
+      # PRD.md 7.1.1) puede apuntar aca a 'http://host.docker.internal:11434'
+      # desde su .env y saltarse el contenedor -- y con el, la descarga de
+      # ~4-5 GB (imagen + bge-m3) que ese Ollama ya tiene resuelta. Sin
+      # override en el .env, el default sigue siendo el contenedor de abajo:
+      # a nadie mas le cambia nada.
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://ollama:11434}
     ports:
       - "5000:5000"
     volumes:

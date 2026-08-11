@@ -35,6 +35,21 @@ Con esas cinco variables presentes en `.env`, `backend`, `celery-worker`, `celer
 - **Dos personas trabajando así a la vez chocan.** Dos entornos locales corriendo migraciones o escribiendo conversaciones contra la misma base al mismo tiempo compiten por las mismas filas — ver la nota sobre colaboración en la rama compartida. Avisar antes de usarlo, no asumir que nadie más está.
 - El backend se conecta como `postgres`, que tiene `BYPASSRLS` (ver ARQUITECTURA.md). Local o en el VPS, la separación por tenant no lo protege: ve todo.
 
+**Si ya tenés Ollama nativo en la máquina** (el uso habitual del equipo de desarrollo, ver PRD.md 7.1.1 — `banco_pruebas.py` habla contra ese, no contra Docker), el servicio `ollama` del compose es un contenedor aparte con un volumen vacío: no ve los modelos que ya tenés instalados, y `docker compose up` los vuelve a bajar (~4-5 GB, imagen + `bge-m3`). Se evita apuntando `OLLAMA_HOST` al Ollama del host desde tu `.env`:
+
+```
+OLLAMA_HOST=http://host.docker.internal:11434
+```
+
+Y arrancando `motor` con `--no-deps`, para que no arrastre al contenedor `ollama` por el `depends_on`:
+
+```
+docker compose up -d --build backend celery-worker celery-beat frontend
+docker compose up -d --build --no-deps motor
+```
+
+Verificar que tiene `bge-m3` antes: `curl localhost:11434/api/tags`. Sin override, el default sigue siendo el contenedor — a nadie más le cambia nada.
+
 ## Procedimiento
 
 ### 1. Antes de nada: swap
