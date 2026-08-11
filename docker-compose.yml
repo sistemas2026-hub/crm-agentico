@@ -8,7 +8,12 @@
 # Arriba: docker compose up
 services:
   db:
-    image: postgres:16-alpine
+    # pgvector/pgvector, no la postgres:16-alpine de antes: el esquema
+    # 'asistente' (supabase/01_schema.sql) necesita la extension 'vector'
+    # para los embeddings del corpus, que la imagen oficial no trae. Misma
+    # version mayor de Postgres (16), asi que el volumen existente sigue
+    # sirviendo tal cual -- no hace falta reinicializar la base.
+    image: pgvector/pgvector:pg16
     env_file:
       - django-crm/.env.docker
       - path: django-crm/.env.docker.local

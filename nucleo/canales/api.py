@@ -37,6 +37,7 @@ from flask import Flask, jsonify, request
 from nucleo.config import editor, fuente
 from nucleo.modelo import motor
 from nucleo.persistencia import db as persistencia
+from nucleo.seguimiento import escalamiento
 from nucleo.seguridad.verificacion import Sesion
 
 app = Flask(__name__)
@@ -116,7 +117,8 @@ def chat():
 
     clave = (tenant, id_sesion)
     if clave not in _sesiones:
-        _sesiones[clave] = {"sesion": Sesion(identificador_canal=id_sesion), "historial": []}
+        _sesiones[clave] = {"sesion": Sesion(identificador_canal=id_sesion),
+                            "historial": [], "escalada": False}
     estado = _sesiones[clave]
 
     try:
@@ -124,11 +126,34 @@ def chat():
     except motor.ErrorMotor as e:
         return jsonify({"error": str(e)}), 400
 
+    conversation_id = None
     try:
         persistencia.registrar_mensaje(tenant, canal, id_sesion, rol, "user", mensaje)
-        persistencia.registrar_mensaje(tenant, canal, id_sesion, rol, "assistant", respuesta)
+        conversation_id = persistencia.registrar_mensaje(
+            tenant, canal, id_sesion, rol, "assistant", respuesta)
     except Exception as e:  # nunca se rompe el turno por un fallo de persistencia
         print(f"[persistencia] no se pudo guardar el turno: {e}")
+
+    # Solo conversaciones con un cliente final pueden terminar en un ticket
+    # humano -- escalar la sesion de un colaborador no tiene destino. 'ya
+    # escalada' vive en memoria del proceso (no en la base) porque evita una
+    # lectura extra en cada turno; si el proceso se reinicia, en el peor caso
+    # se re-evalua una vez mas, y escalar() es idempotente en la practica
+    # (crea un ticket nuevo, pero no revienta nada).
+    rol_cfg = config.roles.get(rol)
+    if (conversation_id and rol_cfg and rol_cfg.orientado_a == "cliente_final"
+            and not estado["escalada"]):
+        try:
+            evaluacion = escalamiento.evaluar(config, rol, estado["historial"])
+        except Exception as e:
+            print(f"[escalamiento] fallo al evaluar: {type(e).__name__}: {e}")
+            evaluacion = None
+        if evaluacion and evaluacion.get("escalar"):
+            escalamiento.escalar(
+                config, tenant, id_sesion, conversation_id, estado["historial"],
+                evaluacion.get("motivo", ""), evaluacion.get("etiqueta", ""))
+            estado["escalada"] = True
+            respuesta = f"{respuesta}\n\n{config.escalamiento.mensaje}".strip()
 
     return jsonify({"respuesta": respuesta, "verificado": estado["sesion"].verificado})
 
@@ -289,6 +314,75 @@ def configuracion_persona():
 
     olvidar_config(tenant)
     return jsonify({"persona": config.persona.model_dump(mode="json")})
+
+
+# =============================================================================
+#  CONVERSACIONES  -  solo lectura, la bandeja de chats con clientes finales
+# =============================================================================
+
+@app.get("/conversaciones")
+def conversaciones():
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+
+    try:
+        salida = persistencia.ultima_actividad(tenant, canal=request.args.get("canal"))
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:
+        print(f"[conversaciones] fallo al listar: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo leer las conversaciones."}), 500
+
+    return jsonify({"tenant": tenant, "conversaciones": salida})
+
+
+@app.get("/conversaciones/<id_conversacion>/mensajes")
+def conversaciones_mensajes(id_conversacion):
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+
+    try:
+        resultado = persistencia.mensajes_de(tenant, id_conversacion)
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:
+        print(f"[conversaciones] fallo al leer mensajes: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo leer la conversacion."}), 500
+
+    if resultado["conversacion"] is None:
+        return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+
+    return jsonify(resultado)
+
+
+@app.post("/conversaciones/<id_conversacion>/mensajes")
+def conversaciones_responder_humano(id_conversacion):
+    """
+    Un agente humano responde directo en una conversacion ya escalada -- sin
+    pasar por el modelo. Distinto de /chat: eso simula al cliente escribiendo
+    y le contesta el bot; esto es la respuesta de la persona que tomo el
+    caso, tal cual la tipeo.
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    contenido = cuerpo.get("mensaje")
+    if not tenant or not contenido:
+        return jsonify({"error": "Faltan campos: tenant, mensaje"}), 400
+
+    try:
+        existe = persistencia.agregar_mensaje_humano(tenant, id_conversacion, contenido)
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:
+        print(f"[conversaciones] fallo al guardar respuesta humana: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo guardar la respuesta."}), 500
+
+    if not existe:
+        return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+
+    return jsonify({"ok": True}), 201
 
 
 @app.get("/salud")

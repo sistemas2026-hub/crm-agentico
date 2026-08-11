@@ -119,11 +119,15 @@ def sesion(tenant: str):
 
 
 def registrar_mensaje(tenant: str, canal: str, usuario_externo: str,
-                      rol_efectivo: str, rol: str, contenido: str) -> None:
+                      rol_efectivo: str, rol: str, contenido: str) -> str:
     """
     Une una fila de conversacion (crea si no existe) con una fila de
     mensaje, y actualiza 'actualizado_en' -- es la unica señal que necesita
     un scheduler para saber "hace cuanto no le escribimos a este usuario".
+
+    Devuelve el id de la conversacion: nucleo/seguimiento/escalamiento.py lo
+    necesita para poder marcarla despues, y evita una consulta aparte para
+    algo que esta funcion ya resolvio.
     """
     with sesion(tenant) as (cur, org):
         cur.execute(
@@ -155,6 +159,8 @@ def registrar_mensaje(tenant: str, canal: str, usuario_externo: str,
                values (%s, %s, %s, %s)""",
             (org, conv, rol, contenido))
 
+        return str(conv)
+
 
 def ultima_actividad(tenant: str, canal: str | None = None) -> list[dict]:
     """
@@ -167,16 +173,97 @@ def ultima_actividad(tenant: str, canal: str | None = None) -> list[dict]:
     with sesion(tenant) as (cur, org):
         if canal:
             cur.execute(
-                """select canal, usuario_externo, rol_efectivo, estado, actualizado_en
+                """select id, canal, usuario_externo, rol_efectivo, estado,
+                          escalada_a_humano, motivo_escalamiento, caso_id, etiqueta,
+                          actualizado_en
                    from asistente.conversations
                    where organization_id = %s and canal = %s
                    order by actualizado_en desc""",
                 (org, canal))
         else:
             cur.execute(
-                """select canal, usuario_externo, rol_efectivo, estado, actualizado_en
+                """select id, canal, usuario_externo, rol_efectivo, estado,
+                          escalada_a_humano, motivo_escalamiento, caso_id, etiqueta,
+                          actualizado_en
                    from asistente.conversations
                    where organization_id = %s
                    order by actualizado_en desc""",
                 (org,))
         return [dict(f) for f in cur.fetchall()]
+
+
+def mensajes_de(tenant: str, conversation_id: str) -> dict:
+    """
+    El encabezado de una conversacion puntual (para el detalle de la
+    bandeja) mas su hilo de mensajes en orden. `conversacion` viene None si
+    el id no existe o no es de este tenant -- el llamador decide si eso es
+    un 404.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select id, canal, usuario_externo, rol_efectivo, estado,
+                      escalada_a_humano, motivo_escalamiento, caso_id, etiqueta,
+                      actualizado_en
+               from asistente.conversations
+               where organization_id = %s and id = %s""",
+            (org, conversation_id))
+        conversacion = cur.fetchone()
+        if not conversacion:
+            return {"conversacion": None, "mensajes": []}
+
+        cur.execute(
+            """select rol, contenido, creado_en
+               from asistente.messages
+               where organization_id = %s and conversation_id = %s
+               order by creado_en asc""",
+            (org, conversation_id))
+        return {"conversacion": dict(conversacion), "mensajes": [dict(f) for f in cur.fetchall()]}
+
+
+def marcar_escalada(tenant: str, conversation_id: str, motivo: str,
+                    caso_id: str | None, etiqueta: str | None) -> None:
+    """
+    Registra que la conversacion paso a un humano: la marca escalada, guarda
+    por que (una de escalamiento.activar_si) y el caso/etiqueta que resulto
+    -- ver nucleo/seguimiento/escalamiento.py, el unico llamador. Filtra
+    tambien por organization_id aunque 'id' ya es unico: mismo estilo
+    defensivo que el resto de este archivo.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """update asistente.conversations
+               set escalada_a_humano = true, motivo_escalamiento = %s,
+                   caso_id = %s, etiqueta = %s, actualizado_en = now()
+               where organization_id = %s and id = %s""",
+            (motivo, caso_id, etiqueta, org, conversation_id))
+
+
+def agregar_mensaje_humano(tenant: str, conversation_id: str, contenido: str) -> bool:
+    """
+    Un agente humano responde directo en el hilo, sin pasar por el modelo --
+    para una conversacion ya escalada (marcar_escalada le puso caso_id), que
+    a partir de ahi la sigue una persona, no el bot. 'rol' se guarda como
+    'assistant' a proposito: es el mismo lado del canal que el cliente ya
+    viene viendo, humano o bot no cambia esa columna, solo quien redacto.
+
+    Devuelve False si la conversacion no existe o no es de este tenant -- el
+    llamador (nucleo/canales/api.py) decide si eso es un 404.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select 1 from asistente.conversations
+               where organization_id = %s and id = %s""",
+            (org, conversation_id))
+        if not cur.fetchone():
+            return False
+
+        cur.execute(
+            """insert into asistente.messages
+                 (organization_id, conversation_id, rol, contenido)
+               values (%s, %s, 'assistant', %s)""",
+            (org, conversation_id, contenido))
+        cur.execute(
+            """update asistente.conversations set actualizado_en = now()
+               where id = %s""",
+            (conversation_id,))
+        return True

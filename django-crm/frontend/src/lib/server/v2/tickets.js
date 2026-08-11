@@ -106,6 +106,7 @@ function toRow(row) {
       name: [contact.first_name, contact.last_name].filter(Boolean).join(' ').trim()
     })),
     assignee: assignees.length ? profileName(assignees[0]) : null,
+    assignee_id: assignees.length ? assignees[0].id : null,
     assignee_count: assignees.length,
     opened_at: row.created_at,
     closed_on: row.closed_on ?? null,
@@ -424,6 +425,9 @@ function toBody(values) {
   }
   if ('contacts' in values) {
     body.contacts = values.contacts ?? [];
+  }
+  if ('tags' in values) {
+    body.tags = values.tags ?? [];
   }
   return body;
 }

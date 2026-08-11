@@ -523,6 +523,18 @@ class Limites(Base):
     retencion_conversaciones_dias: int = Field(default=365, ge=1)
 
 
+class Conversaciones(Base):
+    """
+    Configuracion de la bandeja de conversaciones con clientes finales.
+
+    'etiquetas' es la taxonomia fija que el modelo puede elegir al escalar
+    una conversacion a un humano (nucleo/seguimiento/escalamiento.py) -- vía
+    tool-calling forzado, igual que cualquier otra herramienta, así que
+    nunca inventa una categoria fuera de esta lista.
+    """
+    etiquetas: list[str] = Field(default_factory=list)
+
+
 class Evaluacion(Base):
     """
     Criterio de aceptacion para produccion.
@@ -557,6 +569,7 @@ class TenantConfig(Base):
     herramientas: list[Herramienta] = Field(default_factory=list)
     canales: Canales = Field(default_factory=Canales)
     escalamiento: Escalamiento = Field(default_factory=Escalamiento)
+    conversaciones: Conversaciones = Field(default_factory=Conversaciones)
     limites: Limites = Field(default_factory=Limites)
     evaluacion: Evaluacion = Field(default_factory=Evaluacion)
 

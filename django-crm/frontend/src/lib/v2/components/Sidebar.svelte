@@ -22,7 +22,8 @@
     Smartphone,
     LogOut,
     Sparkles,
-    Network
+    Network,
+    MessageCircle
   } from '@lucide/svelte';
   import { t } from '$lib/terminology.js';
 
@@ -90,6 +91,7 @@
         // one level of navigation, and the tab strip carries the rest.
         { href: '/tickets', label: 'Tickets', icon: LifeBuoy, count: 'tickets' },
         { href: '/asistente', label: 'Asistente', icon: Sparkles },
+        { href: '/conversaciones', label: 'Conversaciones', icon: MessageCircle },
         { href: '/simulador-whatsapp', label: 'Simulador WhatsApp', icon: Smartphone },
         { href: '/agentes', label: 'Agentes', icon: Network },
         { href: '/solutions', label: 'Base de conocimiento', icon: BookOpen },
