@@ -5,7 +5,14 @@
   import Pill from '$lib/v2/components/Pill.svelte';
   import Avatar from '$lib/v2/components/Avatar.svelte';
   import { relativeTime } from '$lib/v2/format.js';
-  import { TriangleAlert, ChevronDown, ArrowRight, CircleCheck, CircleX } from '@lucide/svelte';
+  import {
+    TriangleAlert,
+    ChevronDown,
+    ArrowRight,
+    CircleCheck,
+    CircleX,
+    Send
+  } from '@lucide/svelte';
 
   /** @type {{ data: any }} */
   let { data } = $props();
@@ -53,6 +60,45 @@
   // si BottleCRM esta caido en ese momento, la conversacion sigue escalada
   // igual y no hay que volver a simular al cliente por eso.
   let escalada = $derived(!!conversacion.caso_id);
+
+  /** Clave de dia local, para agrupar el hilo. */
+  function diaDe(/** @type {string} */ iso) {
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? '' : d.toDateString();
+  }
+
+  function etiquetaDia(/** @type {string} */ iso) {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    const hoy = new Date();
+    const ayer = new Date();
+    ayer.setDate(hoy.getDate() - 1);
+    if (d.toDateString() === hoy.toDateString()) return 'Hoy';
+    if (d.toDateString() === ayer.toDateString()) return 'Ayer';
+    return new Intl.DateTimeFormat('es', { day: 'numeric', month: 'long' }).format(d);
+  }
+
+  function hora(/** @type {string} */ iso) {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    return new Intl.DateTimeFormat('es', { hour: '2-digit', minute: '2-digit' }).format(d);
+  }
+
+  /** El hilo con separadores de dia intercalados: un chat largo sin ellos
+      obliga a pasar el mouse por cada burbuja para ubicarse en el tiempo. */
+  let hilo = $derived.by(() => {
+    const salida = [];
+    let dia = null;
+    for (const m of mensajes) {
+      const d = diaDe(m.creado_en);
+      if (d !== dia) {
+        salida.push({ tipo: 'dia', clave: `d-${d}-${salida.length}`, texto: etiquetaDia(m.creado_en) });
+        dia = d;
+      }
+      salida.push({ tipo: 'msg', clave: `m-${salida.length}`, m });
+    }
+    return salida;
+  });
 
   // --- copiloto documental -------------------------------------------------
   // Lo que dice la documentacion interna sobre lo ultimo que pregunto el
@@ -391,11 +437,15 @@
 
 <div class="v2-scroll v2-pad" style="padding-top:12px">
   <div class="chat-mensajes">
-    {#each mensajes as m}
-      <div class="chat-burbuja {burbujaClase(m.rol)}">
-        <div>{m.contenido}</div>
-        <div class="chat-hora">{relativeTime(m.creado_en)}</div>
-      </div>
+    {#each hilo as item (item.clave)}
+      {#if item.tipo === 'dia'}
+        <div class="dia"><span>{item.texto}</span></div>
+      {:else}
+        <div class="chat-burbuja {burbujaClase(item.m.rol)}">
+          <div>{item.m.contenido}</div>
+          <div class="chat-hora v2-num">{hora(item.m.creado_en)}</div>
+        </div>
+      {/if}
     {/each}
     {#if enviando && !escalada}
       <div class="chat-burbuja chat-asistente chat-escribiendo" aria-label="Escribiendo…">
@@ -411,15 +461,35 @@
       </p>
     {/if}
     {#if error}<p class="v2-error" style="max-width:720px">{error}</p>{/if}
-    <form class="chat-form" onsubmit={alEnviar} style="max-width:720px">
-      <input
-        class="v2-input"
-        type="text"
+    <form class="compositor" onsubmit={alEnviar}>
+      <textarea
+        class="compositor-texto"
         bind:value={entrada}
+        rows="2"
         placeholder={escalada ? 'Escribí tu respuesta…' : 'Continuar la conversación…'}
         disabled={enviando}
-      />
-      <button class="v2-btn v2-btn-primary" type="submit" disabled={enviando}>Enviar</button>
+        onkeydown={(e) => {
+          // Enter envia, Shift+Enter hace salto de linea: es lo que la mano
+          // ya espera de un chat.
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            enviar();
+          }
+        }}
+      ></textarea>
+      <div class="compositor-pie">
+        <span class="compositor-nota">
+          {#if escalada}
+            Le llega al cliente tal cual
+          {:else}
+            Responde el asistente
+          {/if}
+          · <kbd class="v2-kbd">Enter</kbd> envía
+        </span>
+        <button class="v2-btn v2-btn-primary" type="submit" disabled={enviando || !entrada.trim()}>
+          <Send size={14} />{enviando ? 'Enviando…' : 'Enviar'}
+        </button>
+      </div>
     </form>
   {/if}
 </div>
@@ -623,6 +693,23 @@
     gap: 10px;
     max-width: 720px;
   }
+  .dia {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 6px 0;
+    color: var(--v2-slate);
+    font-size: 11.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .dia::before,
+  .dia::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--v2-line);
+  }
   .chat-burbuja {
     padding: 10px 14px;
     border-radius: 12px;
@@ -684,14 +771,45 @@
       transform: translateY(-2px);
     }
   }
-  .chat-form {
+  .compositor {
     display: flex;
+    flex-direction: column;
     gap: 8px;
     margin-top: 14px;
     padding-top: 12px;
-    border-top: 1px solid var(--v2-border, #e5e5e5);
+    border-top: 1px solid var(--v2-line);
   }
-  .chat-form input {
-    flex: 1;
+  .compositor-texto {
+    width: 100%;
+    resize: vertical;
+    min-height: 44px;
+    border: 1px solid var(--v2-line);
+    border-radius: 8px;
+    padding: 9px 11px;
+    background: var(--v2-card);
+    color: var(--v2-ink);
+    font-family: inherit;
+    font-size: calc(var(--v2-fs) - 0.5px);
+    line-height: 1.4;
+  }
+  .compositor-texto:focus {
+    outline: 2px solid var(--v2-ember);
+    outline-offset: -1px;
+    border-color: transparent;
+  }
+  .compositor-texto:disabled {
+    background: var(--v2-line-soft);
+    color: var(--v2-slate);
+    cursor: not-allowed;
+  }
+  .compositor-pie {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .compositor-nota {
+    font-size: 11.5px;
+    color: var(--v2-slate);
   }
 </style>

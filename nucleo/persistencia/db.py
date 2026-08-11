@@ -166,29 +166,54 @@ def registrar_mensaje(tenant: str, canal: str, usuario_externo: str,
 def ultima_actividad(tenant: str, canal: str | None = None) -> list[dict]:
     """
     Una fila por conversacion: usuario_externo + cuando fue la ultima vez
-    que se le escribio o respondio. Insumo del detector de seguimientos.
+    que se le escribio o respondio. Insumo del detector de seguimientos y de
+    la bandeja.
+
+    Trae dos datos que no estan en la tabla y que la bandeja necesita para ser
+    legible de un vistazo:
+
+      ultimo_mensaje / ultimo_rol
+          Sin el texto del ultimo turno todas las filas se ven iguales y hay
+          que abrir cada una para saber de que va.
+
+      atendida
+          Si algun humano ya escribio en el hilo. Es la diferencia entre
+          "nadie tomo esto" y "alguien esta en eso", que es lo que decide a
+          cual entrar primero. 'escalada_a_humano' sola no alcanza: una
+          escalada hace dos horas y ya contestada no necesita a nadie.
 
     'actualizado_en' viene como datetime con zona horaria, no como texto:
     es timestamptz en la base y quien consume ya no tiene que parsearlo.
     """
+    columnas = """c.id, c.canal, c.usuario_externo, c.rol_efectivo, c.estado,
+                  c.escalada_a_humano, c.motivo_escalamiento, c.caso_id, c.etiqueta,
+                  c.actualizado_en,
+                  ultimo.contenido as ultimo_mensaje,
+                  ultimo.rol       as ultimo_rol,
+                  exists (select 1 from asistente.messages h
+                           where h.conversation_id = c.id
+                             and h.rol = 'humano') as atendida"""
+    desde = """from asistente.conversations c
+               left join lateral (
+                   select contenido, rol
+                     from asistente.messages
+                    where conversation_id = c.id and contenido is not null
+                    order by creado_en desc
+                    limit 1
+               ) ultimo on true"""
+
     with sesion(tenant) as (cur, org):
         if canal:
             cur.execute(
-                """select id, canal, usuario_externo, rol_efectivo, estado,
-                          escalada_a_humano, motivo_escalamiento, caso_id, etiqueta,
-                          actualizado_en
-                   from asistente.conversations
-                   where organization_id = %s and canal = %s
-                   order by actualizado_en desc""",
+                f"""select {columnas} {desde}
+                    where c.organization_id = %s and c.canal = %s
+                    order by c.actualizado_en desc""",
                 (org, canal))
         else:
             cur.execute(
-                """select id, canal, usuario_externo, rol_efectivo, estado,
-                          escalada_a_humano, motivo_escalamiento, caso_id, etiqueta,
-                          actualizado_en
-                   from asistente.conversations
-                   where organization_id = %s
-                   order by actualizado_en desc""",
+                f"""select {columnas} {desde}
+                    where c.organization_id = %s
+                    order by c.actualizado_en desc""",
                 (org,))
         return [dict(f) for f in cur.fetchall()]
 
