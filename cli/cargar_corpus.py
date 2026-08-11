@@ -47,6 +47,7 @@ Uso
 from __future__ import annotations
 
 import hashlib
+from fnmatch import fnmatch
 import json
 import sys
 import time
@@ -73,6 +74,21 @@ DIMENSIONES = 1024
 
 def _hash(ruta: Path) -> str:
     return hashlib.sha256(ruta.read_bytes()).hexdigest()
+
+
+def _roles_de_respaldo(cfg, ruta: Path) -> list[str] | None:
+    """
+    Los roles que el YAML declara para este archivo, cuando el documento no
+    los trae adentro. Primer patron que coincide, en el orden del YAML.
+
+    Es un respaldo, no la fuente: lo que manda siempre es la tabla de
+    metadatos del .docx -- ver Corpus.roles_por_defecto en
+    nucleo/config/schema.py para por que hace falta igual.
+    """
+    for patron, roles in (cfg.corpus.roles_por_defecto or {}).items():
+        if fnmatch(ruta.name, patron):
+            return list(roles) or None
+    return None
 
 
 def _roles_validos(cfg, roles_texto: str, ruta: Path) -> list[str] | None:
@@ -133,7 +149,7 @@ def _organizacion(cur, slug: str) -> str:
 def _cargar_obsoleto(cur, org_id: str, ruta: Path, hash_: str, cfg) -> bool:
     """Solo la fila de metadatos. Sin fragmentar, sin vectorizar."""
     doc = procesar(ruta)                      # solo para leer codigo/titulo/version
-    roles = _roles_validos(cfg, doc.roles, ruta)
+    roles = _roles_validos(cfg, doc.roles, ruta) or _roles_de_respaldo(cfg, ruta)
     cur.execute("""select id, hash from asistente.documents
                    where organization_id = %s and codigo = %s and version = %s""",
                (org_id, doc.codigo, doc.version))
@@ -190,7 +206,7 @@ def cargar_tenant(slug: str, forzar: bool = False) -> None:
 
             # --- vigente: fragmentar, vectorizar, cargar ---
             doc = procesar(ruta, perfil=perfil, max_tokens=tokens)
-            roles = _roles_validos(cfg, doc.roles, ruta)
+            roles = _roles_validos(cfg, doc.roles, ruta) or _roles_de_respaldo(cfg, ruta)
 
             cur.execute("""select id, hash from asistente.documents
                            where organization_id = %s and codigo = %s and version = %s""",
