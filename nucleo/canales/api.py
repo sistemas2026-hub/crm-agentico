@@ -34,7 +34,7 @@ import os
 
 from flask import Flask, jsonify, request
 
-from nucleo.config import cargar_config
+from nucleo.config import cargar_config, fuente
 from nucleo.config import editor
 from nucleo.modelo import motor
 from nucleo.persistencia import db as persistencia
@@ -47,9 +47,19 @@ _sesiones: dict = {}   # (tenant, id_sesion) -> {"sesion": Sesion, "historial": 
 
 
 def _config_de(tenant: str):
+    # La base manda; el YAML es semilla y respaldo. Ver nucleo/config/fuente.py:
+    # en el servidor, 'tenants/' viaja dentro de la imagen y lo que se edite
+    # desde la interfaz se pierde en el siguiente despliegue.
     if tenant not in _configs:
-        _configs[tenant] = cargar_config(f"tenants/{tenant}.config.yaml")
+        _configs[tenant] = fuente.cargar(tenant)
     return _configs[tenant]
+
+
+def olvidar_config(tenant: str) -> None:
+    """Descarta la copia cacheada para que el proximo turno relea de la base.
+    Lo llama el editor tras guardar: sin esto, un cambio hecho desde la
+    interfaz no se veria hasta reiniciar el proceso."""
+    _configs.pop(tenant, None)
 
 
 def _agente_json(nombre: str, rol, config) -> dict:
