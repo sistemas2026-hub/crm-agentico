@@ -20,6 +20,19 @@ s.close()
 done
 echo "PostgreSQL is ready."
 
+# 'db' es el unico host que el compose de desarrollo levanta el mismo; todo lo
+# demas (en la practica, siempre el Supabase de produccion -- ver
+# DESPLIEGUE.md, "Desarrollo local contra la base real") es una base de
+# verdad, y las migraciones de aca abajo se le aplican igual que si esto
+# corriera en el VPS.
+if [ "$DBHOST" != "db" ] && [ "$DBHOST" != "localhost" ] && [ "$DBHOST" != "127.0.0.1" ]; then
+    echo ""
+    echo "  ATENCION: DBHOST=$DBHOST no es la base local del compose."
+    echo "  Las migraciones y el superusuario de arranque van contra esa base"
+    echo "  de verdad, no contra una copia. Ver DESPLIEGUE.md."
+    echo ""
+fi
+
 echo "Running migrations..."
 python manage.py migrate --noinput
 

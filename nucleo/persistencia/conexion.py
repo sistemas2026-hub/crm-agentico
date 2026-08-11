@@ -34,6 +34,19 @@ from urllib.parse import quote
 
 _PARTES = ("DBHOST", "DBPORT", "DBNAME", "DBUSER", "DBPASSWORD")
 
+# Nombres de host que son inequivocamente locales: el servicio 'db' del
+# compose de desarrollo, o localhost fuera de Docker. Cualquier otro valor de
+# DBHOST es una base remota -- hoy, en la practica, siempre el Supabase de
+# produccion, porque es el unico Postgres que corre fuera de un contenedor
+# local (ver DESPLIEGUE.md, "Desarrollo local contra la base real").
+_HOSTS_LOCALES = {"db", "localhost", "127.0.0.1"}
+
+# Se avisa UNA vez por proceso, no en cada conexion: el motor abre una por
+# turno (nucleo/persistencia/db.py), y repetir el aviso en cada mensaje lo
+# volveria ruido que se deja de leer -- justo lo que no debe pasar con esta
+# advertencia en particular.
+_avisado_remoto = False
+
 
 def dsn() -> str:
     """
@@ -42,12 +55,26 @@ def dsn() -> str:
     La contraseña se codifica: las de Supabase traen '+' y '/' con frecuencia,
     y sin codificar rompen la URL de formas que no se notan hasta que fallan.
     """
+    global _avisado_remoto
     if os.environ.get("DBHOST"):
         faltan = [v for v in _PARTES if not os.environ.get(v)]
         if faltan:
             raise SystemExit(
                 f"Conexion incompleta: falta {', '.join(faltan)} en el entorno. "
                 f"Se necesitan las cinco: {', '.join(_PARTES)}.")
+
+        host = os.environ["DBHOST"]
+        if not _avisado_remoto and host not in _HOSTS_LOCALES:
+            # No se puede distinguir en codigo "Supabase de produccion" de
+            # "Supabase de otro entorno": el motor solo ve un host y cinco
+            # credenciales. Avisar siempre que no sea local es la version
+            # fail-safe -- ver DESPLIEGUE.md antes de asumir que es inofensivo.
+            print(f"[conexion] DBHOST={host}: esto NO es la base local del "
+                  f"compose. Cada escritura de este proceso (mensajes, "
+                  f"tool_calls, config editada desde /agentes) va a esa base "
+                  f"de verdad, no a una copia.")
+            _avisado_remoto = True
+
         usuario = quote(os.environ["DBUSER"], safe="")
         clave = quote(os.environ["DBPASSWORD"], safe="")
         return (f"postgresql://{usuario}:{clave}"

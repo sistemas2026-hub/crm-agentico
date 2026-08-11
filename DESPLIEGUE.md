@@ -14,6 +14,27 @@ Un solo VPS (`86.48.18.185`) gestionado con **Dokploy**, con varios proyectos qu
 
 De Supabase esta plataforma usa **solo Postgres**. Ni Kong, ni GoTrue, ni Storage, ni Realtime: el CRM tiene su propia autenticación en Django y el motor habla a la base con psycopg. Si algún día pesa la complejidad operativa, esa es la pregunta a hacerse.
 
+## Desarrollo local contra la base real
+
+Para probar un cambio sin pasar por Dokploy: `docker compose up` (el compose de **desarrollo**, no el de producción) ya puede apuntar el CRM y el motor al Supabase real del VPS en vez de al Postgres local del propio compose. No hace falta tocar código ni el compose — la traducción ya está armada, ver el comentario en el servicio `backend` de `docker-compose.yml`. Lo único que decide a cuál base se conecta es **el `.env` de la raíz**.
+
+```
+DBHOST=crm.rapilinksas.co
+DBPORT=5433
+DBNAME=postgres
+DBUSER=postgres.<tenant-id-del-pooler>
+DBPASSWORD=
+```
+
+Con esas cinco variables presentes en `.env`, `backend`, `celery-worker`, `celery-beat` y `motor` se conectan al Supabase real — Compose interpola `${DBHOST:-db}` desde ese archivo antes de levantar los contenedores. El servicio `db` del compose se sigue levantando (nadie lo quitó del `depends_on`) pero queda sin usar; es ruido, no un problema. Para volver a la base local, basta con comentar o borrar esas cinco líneas del `.env` — sin `DBHOST` en el entorno, el default `db` de cada servicio vuelve a mandar.
+
+**Esto no es una copia. Es la base de producción**, la misma que atiende `agent-api.rapilinksas.co`. Antes de usarlo:
+
+- **Las migraciones corren solas al arrancar** (`entrypoint.sh`, `python manage.py migrate --noinput`). Un cambio de esquema que no esté listo para producción no se prueba así — se aplica ahí mismo, en caliente, contra la base real. Tanto el motor como el backend imprimen un aviso cuando `DBHOST` no es local, para que esto no pase desapercibido.
+- **`WISPHUB_MODO_REAL=true` en el `.env` de la raíz** significa que el motor llama a la API real de WispHub, no a datos simulados. Una herramienta de lectura no hace daño; `registrar_pago` sigue exigiendo confirmación humana, pero esa confirmación pasa a ser sobre un pago de verdad.
+- **Dos personas trabajando así a la vez chocan.** Dos entornos locales corriendo migraciones o escribiendo conversaciones contra la misma base al mismo tiempo compiten por las mismas filas — ver la nota sobre colaboración en la rama compartida. Avisar antes de usarlo, no asumir que nadie más está.
+- El backend se conecta como `postgres`, que tiene `BYPASSRLS` (ver ARQUITECTURA.md). Local o en el VPS, la separación por tenant no lo protege: ve todo.
+
 ## Procedimiento
 
 ### 1. Antes de nada: swap
