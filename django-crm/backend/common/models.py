@@ -473,6 +473,16 @@ def document_path(self, filename):
 class Document(BaseModel):
     DOCUMENT_STATUS_CHOICE = (("active", "active"), ("inactive", "inactive"))
 
+    # Ingesta al corpus del asistente. Un documento entra al RAG solo si se
+    # marca explicitamente: aqui tambien viven contratos y archivos
+    # administrativos que no tienen por que alimentar al asistente.
+    INGESTA_ESTADO_CHOICE = (
+        ("pendiente", "pendiente"),
+        ("procesando", "procesando"),
+        ("ok", "ok"),
+        ("error", "error"),
+    )
+
     title = models.TextField(blank=True, null=True)
     document_file = models.FileField(upload_to=document_path, max_length=5000)
     status = models.CharField(
@@ -485,6 +495,28 @@ class Document(BaseModel):
         on_delete=models.CASCADE,
         related_name="documents",
     )
+
+    # --- asistente -------------------------------------------------------
+    # Fail-closed, como el resto del proyecto: sin marcar, no pasa nada.
+    usar_en_asistente = models.BooleanField(default=False)
+    # Que roles del asistente pueden recuperarlo por RAG. Se guarda separado
+    # por comas y termina en asistente.documents.roles_permitidos. NO es lo
+    # mismo que shared_to/teams, que deciden quien ve el ARCHIVO dentro del
+    # CRM: esto decide a quien puede citarselo el asistente al responder.
+    roles_asistente = models.CharField(max_length=255, blank=True, default="")
+    # El vinculo con asistente.documents. Hace falta porque el codigo y la
+    # version salen de ADENTRO del .docx, no de este registro: sin guardar el
+    # id no habria forma de retirar despues el documento correcto.
+    corpus_document_id = models.UUIDField(blank=True, null=True)
+    estado_ingesta = models.CharField(
+        choices=INGESTA_ESTADO_CHOICE, max_length=16, blank=True, default=""
+    )
+    # Los defectos que ya detecta el fragmentador ("3 secciones sin titulo
+    # detectable"), o el motivo del error. Hoy eso solo lo ve quien corre el
+    # CLI en su consola.
+    ingesta_detalle = models.TextField(blank=True, null=True)
+    ingesta_fragmentos = models.IntegerField(blank=True, null=True)
+    ingesta_actualizada_en = models.DateTimeField(blank=True, null=True)
 
     class Meta:
         verbose_name = "Document"

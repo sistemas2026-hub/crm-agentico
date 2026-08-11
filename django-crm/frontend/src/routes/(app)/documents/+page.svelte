@@ -26,7 +26,17 @@
   import FilterBar from '$lib/v2/components/FilterBar.svelte';
   import EmptyState from '$lib/v2/components/EmptyState.svelte';
   import { count, relativeDays } from '$lib/v2/format.js';
-  import { FileText, FileSpreadsheet, File, Users, Upload, Lock, Pencil } from '@lucide/svelte';
+  import {
+    FileText,
+    FileSpreadsheet,
+    File,
+    Users,
+    Upload,
+    Lock,
+    Pencil,
+    Sparkles,
+    TriangleAlert
+  } from '@lucide/svelte';
 
   /** @type {{ data: any }} */
   let { data } = $props();
@@ -134,6 +144,30 @@
                          in the client is how a private file becomes a public
                          one; the server decides who gets bytes. -->
                     <span class="v2-table-secondary path">{d.document_file}</span>
+
+                    <!-- Estado en el corpus del asistente. Solo aparece en los
+                         documentos marcados: la mayoria son archivos comunes y
+                         una fila que dijera "no lo usa el asistente" seria
+                         ruido repetido en toda la tabla. -->
+                    {#if d.usar_en_asistente}
+                      <span
+                        class="ia"
+                        class:malo={d.estado_ingesta === 'error'}
+                        class:esperando={d.estado_ingesta === 'pendiente' ||
+                          d.estado_ingesta === 'procesando'}
+                      >
+                        {#if d.estado_ingesta === 'error'}
+                          <TriangleAlert size={11} /> No se pudo indexar
+                        {:else if d.estado_ingesta === 'ok'}
+                          <Sparkles size={11} />
+                          {d.ingesta_fragmentos ?? 0}
+                          {d.ingesta_fragmentos === 1 ? 'fragmento' : 'fragmentos'}
+                          {#if d.roles_asistente}· {d.roles_asistente}{/if}
+                        {:else}
+                          <Sparkles size={11} /> Indexando…
+                        {/if}
+                      </span>
+                    {/if}
                   </span>
                 </span>
               </td>
@@ -195,6 +229,24 @@
   .path {
     font-family: var(--v2-mono);
     font-size: 11px;
+  }
+
+  /* Que sabe el asistente de este documento. Queda en tinta apagada, no en
+     ember: es un hecho del archivo, no algo sobre lo que haya que actuar. */
+  .ia {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--v2-slate);
+    margin-top: 2px;
+  }
+  .ia.esperando {
+    font-style: italic;
+  }
+  /* El error si pide algo: se marco para el asistente y no quedo indexado. */
+  .ia.malo {
+    color: var(--v2-rust);
   }
 
   .reach {

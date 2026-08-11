@@ -251,7 +251,8 @@ export async function getDocumentForEdit({ cookies }, id) {
  * writes the multipart boundary itself. Admin-only server-side.
  *
  * @param {import('@sveltejs/kit').Cookies} cookies
- * @param {{ title: string, status: string, file: File, shared_to: string[], teams: string[] }} values
+ * @param {{ title: string, status: string, file: File, shared_to: string[], teams: string[],
+ *          usar_en_asistente?: boolean, roles_asistente?: string }} values
  */
 export async function uploadDocument(cookies, values) {
   const body = new FormData();
@@ -260,6 +261,9 @@ export async function uploadDocument(cookies, values) {
   body.append('document_file', values.file);
   body.append('shared_to', JSON.stringify(values.shared_to));
   body.append('teams', JSON.stringify(values.teams));
+  // Fail-closed: si no vienen, el documento NO entra al corpus del asistente.
+  body.append('usar_en_asistente', values.usar_en_asistente ? 'true' : 'false');
+  body.append('roles_asistente', values.roles_asistente ?? '');
 
   /** @type {Record<string, string>} */
   const headers = {};

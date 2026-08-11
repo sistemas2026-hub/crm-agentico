@@ -35,8 +35,11 @@ import os
 from flask import Flask, jsonify, request
 
 from nucleo.config import editor, fuente
+from nucleo.ingesta import corpus as ingesta
+from nucleo.ingesta.docx import procesar
 from nucleo.modelo import motor
 from nucleo.persistencia import db as persistencia
+from nucleo.recuperacion.busqueda import recuperar
 from nucleo.seguimiento import escalamiento
 from nucleo.seguridad.verificacion import Sesion
 
@@ -118,8 +121,32 @@ def chat():
     clave = (tenant, id_sesion)
     if clave not in _sesiones:
         _sesiones[clave] = {"sesion": Sesion(identificador_canal=id_sesion),
-                            "historial": [], "escalada": False}
+                            "historial": [], "escalada": False, "caso_id": None}
     estado = _sesiones[clave]
+
+    # --- si ya se escalo, el bot NO contesta ---------------------------------
+    # Va antes de motor.responder() a proposito. Marcar la conversacion como
+    # escalada y despues dejar que el modelo siga respondiendo deja al cliente
+    # hablando con un bot justo despues de que se le dijo que lo iba a atender
+    # una persona. Se verifica contra el CRM en vez de confiar en la marca:
+    # cuando el humano cierra el caso, el asistente retoma solo.
+    if estado["escalada"]:
+        if escalamiento.caso_sigue_abierto(config, estado["caso_id"]):
+            respuesta = (config.escalamiento.mensaje or "").strip() or \
+                "Tu caso ya esta con un companero del equipo."
+            estado["historial"].append({"role": "user", "content": mensaje})
+            estado["historial"].append({"role": "assistant", "content": respuesta})
+            try:
+                persistencia.registrar_mensaje(tenant, canal, id_sesion, rol, "user", mensaje)
+                persistencia.registrar_mensaje(tenant, canal, id_sesion, rol, "assistant", respuesta)
+            except Exception as e:
+                print(f"[persistencia] no se pudo guardar el turno pausado: {e}")
+            return jsonify({"respuesta": respuesta,
+                            "verificado": estado["sesion"].verificado,
+                            "pausada": True})
+        # El caso se cerro: el asistente vuelve a atender desde este turno.
+        estado["escalada"] = False
+        estado["caso_id"] = None
 
     try:
         respuesta, registro_herramientas = motor.responder(
@@ -156,6 +183,13 @@ def chat():
                 config, tenant, id_sesion, conversation_id, estado["historial"],
                 evaluacion.get("motivo", ""), evaluacion.get("etiqueta", ""))
             estado["escalada"] = True
+            # El caso queda guardado para poder consultarlo despues: es lo que
+            # permite que la pausa de arriba sepa cuando el humano lo cerro y
+            # el asistente pueda retomar solo.
+            try:
+                estado["caso_id"] = persistencia.caso_de_conversacion(tenant, conversation_id)
+            except Exception as e:
+                print(f"[escalamiento] no se pudo leer el caso de la conversacion: {e}")
             respuesta = f"{respuesta}\n\n{config.escalamiento.mensaje}".strip()
 
     return jsonify({"respuesta": respuesta, "verificado": estado["sesion"].verificado})
@@ -408,6 +442,181 @@ def conversaciones_herramientas(id_conversacion):
         return jsonify({"error": "No se pudo leer el registro de herramientas."}), 500
 
     return jsonify({"herramientas": llamadas})
+
+
+@app.post("/sugerencias")
+def sugerencias():
+    """
+    Copiloto documental: que dice la documentacion interna sobre este texto.
+
+    Recupera fragmentos y NO llama al modelo -- no redacta una respuesta, le
+    acerca al colaborador lo que ya esta escrito, con su procedencia, y la
+    persona decide. Cuesta un embedding y una consulta; el LLM no se toca.
+
+    POST y no GET a proposito: 'texto' suele ser el mensaje del cliente y
+    puede traer datos personales. En GET viajaria en la URL y quedaria escrito
+    en el log de acceso del servidor, que es justo lo que el resto del sistema
+    evita (PRD RNF-01).
+
+    El 'rol' decide que documentos se pueden ver (documents.roles_permitidos).
+    Por defecto 'soporte': quien abre esta pantalla esta autenticado en el CRM
+    y atiende, no es un cliente. Es un default deliberado -- si esto se
+    expusiera a un canal de cliente, habria que mandar el rol siempre.
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    texto = (cuerpo.get("texto") or "").strip()
+    rol = cuerpo.get("rol") or "soporte"
+
+    if not tenant or not texto:
+        return jsonify({"error": "Faltan campos: tenant, texto"}), 400
+
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+
+    if rol not in config.roles:
+        return jsonify({"error": f"El rol '{rol}' no existe."}), 400
+
+    try:
+        fragmentos, mejor = recuperar(config, tenant, rol, texto)
+    except Exception as e:
+        # Nunca rompe la pantalla del colaborador: es una ayuda lateral, no el
+        # contenido principal. Mismo criterio que el RAG dentro de motor.py.
+        print(f"[sugerencias] no se pudo recuperar: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo consultar la documentacion."}), 502
+
+    return jsonify({
+        "sugerencias": [
+            {"codigo": f.codigo, "titulo": f.titulo, "version": f.version,
+             "contenido": f.contenido, "similitud": round(f.similitud, 3)}
+            for f in fragmentos
+        ],
+        # Cuanto se acerco lo mejor que habia, aunque no pasara el umbral.
+        # Distingue "no hay nada de este tema" de "hay algo casi util".
+        "mejor_similitud": round(mejor, 3) if mejor is not None else None,
+    })
+
+
+# =============================================================================
+#  CORPUS  -  cargar documentacion sin pasar por la consola
+# =============================================================================
+#  Hasta ahora, meter un documento al corpus exigia un desarrollador con el
+#  repo, el .env y Ollama: dejar el .docx en corpus/<slug>/ y correr
+#  cli/cargar_corpus.py. Eso contradice la regla de ARQUITECTURA.md ("dar de
+#  alta un ISP nuevo = ... cargar sus documentos. Cero cambios en nucleo/"):
+#  de los tres pasos, ese era el unico que la empresa no podia hacer sola.
+#
+#  La escritura es la MISMA que usa el CLI (nucleo/ingesta/corpus.py); lo unico
+#  que cambia es de donde viene el archivo y con que rol se escribe.
+
+EXTENSIONES_SOPORTADAS = (".docx",)
+
+
+@app.post("/corpus/documentos")
+def corpus_ingerir():
+    """
+    Recibe un documento y lo deja fragmentado, vectorizado y buscable.
+
+    Multipart (el unico endpoint del motor que recibe un archivo; los demas son
+    JSON): 'tenant', 'archivo', y opcionalmente 'roles' (lista separada por
+    comas), 'storage_path' y 'forzar'.
+
+    Escribe con sesion(), que baja a 'app_backend' y aplica RLS. El CLI, en
+    cambio, se conecta como 'postgres' con BYPASSRLS porque es herramienta de
+    operacion -- esa diferencia es deliberada, y por eso el modulo de ingesta
+    recibe el cursor en vez de abrirlo.
+    """
+    import hashlib
+    import tempfile
+    from pathlib import Path
+
+    tenant = request.form.get("tenant")
+    archivo = request.files.get("archivo")
+    if not tenant or archivo is None or not archivo.filename:
+        return jsonify({"error": "Faltan campos: tenant, archivo"}), 400
+
+    nombre = Path(archivo.filename).name
+    if Path(nombre).suffix.lower() not in EXTENSIONES_SOPORTADAS:
+        # Explicito y no en silencio: el fragmentador es especifico de Word, y
+        # un PDF aceptado "a medias" quedaria como un documento vacio dentro
+        # del corpus, que es peor que un rechazo.
+        return jsonify({"error": f"Solo se admite {', '.join(EXTENSIONES_SOPORTADAS)}. "
+                                 f"'{nombre}' no se puede fragmentar."}), 400
+
+    forzar = str(request.form.get("forzar", "")).lower() in ("1", "true", "si", "on")
+
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+
+    try:
+        roles = ingesta.roles_validos(config, request.form.get("roles"))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    datos = archivo.read()
+    hash_ = hashlib.sha256(datos).hexdigest()
+
+    try:
+        # El temporal CONSERVA EL NOMBRE ORIGINAL. procesar() usa 'ruta.stem'
+        # como respaldo del codigo y el titulo cuando el documento no los
+        # declara adentro; con un nombre aleatorio, ese documento quedaria
+        # registrado con el nombre del temporal y nadie lo notaria.
+        with tempfile.TemporaryDirectory() as carpeta:
+            ruta = Path(carpeta) / nombre
+            ruta.write_bytes(datos)
+
+            perfil, tokens = ingesta.perfil_desde_config(config)
+            doc = procesar(ruta, perfil=perfil, max_tokens=tokens)
+
+            # Si el .docx trae su propia tabla de roles, manda esa: el valor
+            # viaja con el documento. El del formulario es el respaldo para
+            # los que todavia no la tienen.
+            roles_doc = ingesta.roles_validos(config, getattr(doc, "roles", None))
+
+            with persistencia.sesion(tenant) as (cur, org):
+                resultado = ingesta.ingerir(
+                    cur, org, doc, hash_,
+                    modelo_embeddings=config.rag.modelo_embeddings,
+                    roles_permitidos=roles_doc or roles,
+                    storage_path=request.form.get("storage_path"),
+                    forzar=forzar)
+    except ValueError as e:
+        return jsonify({"error": f"El documento declara {e}"}), 400
+    except Exception as e:
+        print(f"[corpus] fallo la ingesta de '{nombre}': {type(e).__name__}: {e}")
+        return jsonify({"error": f"No se pudo procesar el documento: {e}"}), 500
+
+    return jsonify(resultado), 201
+
+
+@app.post("/corpus/documentos/<id_documento>/retirar")
+def corpus_retirar(id_documento):
+    """
+    Saca un documento del corpus: pasa a 'obsoleto', que es lo que
+    match_chunks() excluye. No se borra -- deshacer tiene que ser posible, y
+    hay que poder reconstruir con que version se respondio algo.
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+
+    try:
+        with persistencia.sesion(tenant) as (cur, org):
+            ok = ingesta.retirar(cur, org, id_documento)
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:
+        print(f"[corpus] fallo el retiro de '{id_documento}': {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo retirar el documento."}), 500
+
+    if not ok:
+        return jsonify({"error": f"El documento '{id_documento}' no existe."}), 404
+    return jsonify({"retirado": True})
 
 
 @app.get("/salud")

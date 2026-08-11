@@ -799,6 +799,16 @@ class DocumentSerializer(serializers.ModelSerializer):
             "created_at",
             "created_by",
             "org",
+            # Ingesta al corpus del asistente. Se exponen para que la interfaz
+            # pueda decir en que estado quedo: la ingesta es asincrona, y sin
+            # esto un documento marcado se veria igual antes y despues de que
+            # el asistente pudiera usarlo (o de que fallara).
+            "usar_en_asistente",
+            "roles_asistente",
+            "estado_ingesta",
+            "ingesta_detalle",
+            "ingesta_fragmentos",
+            "ingesta_actualizada_en",
         ]
 
 
@@ -826,9 +836,48 @@ class DocumentCreateSerializer(serializers.ModelSerializer):
                 )
         return title
 
+    def validate(self, attrs):
+        """Un documento destinado al asistente tiene que poder fragmentarse.
+
+        El fragmentador es especifico de Word (nucleo/ingesta/docx.py). Sin
+        esta comprobacion, subir un PDF marcado se aceptaria y recien fallaria
+        minutos despues, en una tarea de fondo, dejando el documento en estado
+        de error sin que nadie entienda por que. Mejor decirlo en el formulario.
+        """
+        attrs = super().validate(attrs)
+
+        usar = attrs.get(
+            "usar_en_asistente", getattr(self.instance, "usar_en_asistente", False)
+        )
+        if not usar:
+            return attrs
+
+        archivo = attrs.get("document_file") or getattr(
+            self.instance, "document_file", None
+        )
+        nombre = getattr(archivo, "name", "") or ""
+        if not nombre.lower().endswith(".docx"):
+            visible = nombre.rsplit("/", 1)[-1] or "el archivo"
+            raise serializers.ValidationError(
+                {
+                    "usar_en_asistente": (
+                        "Por ahora el asistente solo puede leer archivos .docx. "
+                        f"'{visible}' no se puede usar como documentacion."
+                    )
+                }
+            )
+        return attrs
+
     class Meta:
         model = Document
-        fields = ["title", "document_file", "status", "org"]
+        fields = [
+            "title",
+            "document_file",
+            "status",
+            "org",
+            "usar_en_asistente",
+            "roles_asistente",
+        ]
         read_only_fields = ["org"]
 
 

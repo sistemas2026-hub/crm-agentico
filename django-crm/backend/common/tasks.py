@@ -406,3 +406,158 @@ def flush_expired_refresh_tokens():
         expired.delete()
         logger.info("Flushed %s expired refresh token records", count)
     return count
+
+
+# =============================================================================
+#  INGESTA AL CORPUS DEL ASISTENTE
+# =============================================================================
+#  Un documento entra al RAG solo si alguien marca `usar_en_asistente`. Aqui
+#  tambien viven contratos y archivos administrativos, y no tienen por que
+#  alimentar al asistente.
+#
+#  Por que el trabajo lo hace el worker y no el motor solo: el motor no ve el
+#  directorio de medios (docker-compose le monta unicamente ./nucleo, ./tenants,
+#  ./corpus y ./cli), mientras que backend, worker y beat comparten /app/media.
+#  El worker tiene los bytes, asi que los empuja por HTTP. Ademas asi sigue
+#  funcionando el dia que el almacenamiento sea S3 en vez de disco local.
+
+
+def _motor():
+    """(url, tenant) del motor, o (None, None) si no esta configurado."""
+    import os
+
+    return os.environ.get("ASISTENTE_URL"), os.environ.get("ASISTENTE_TENANT")
+
+
+@shared_task
+def ingerir_documento_en_asistente(document_id, org_id):
+    """
+    Fragmenta, vectoriza y publica un documento en el corpus del asistente.
+
+    Es asincrona porque no es barata: un documento se parte en 2-12 fragmentos
+    y cada uno es una llamada al modelo de embeddings. Dejar eso dentro de la
+    peticion colgaria el formulario de subida.
+    """
+    import requests
+
+    from common.models import Document
+
+    set_rls_context(org_id)
+
+    try:
+        doc = Document.objects.get(id=document_id, org_id=org_id)
+    except Document.DoesNotExist:
+        logger.warning("Ingesta: el documento %s ya no existe", document_id)
+        return
+
+    url, tenant = _motor()
+    if not url or not tenant:
+        # Configuracion faltante, no un fallo del documento: se dice tal cual
+        # en vez de dejarlo en "procesando" para siempre.
+        doc.estado_ingesta = "error"
+        doc.ingesta_detalle = (
+            "El asistente no esta configurado: faltan ASISTENTE_URL / "
+            "ASISTENTE_TENANT en el entorno del backend."
+        )
+        doc.ingesta_actualizada_en = timezone.now()
+        doc.save(update_fields=["estado_ingesta", "ingesta_detalle",
+                                "ingesta_actualizada_en"])
+        return
+
+    doc.estado_ingesta = "procesando"
+    doc.ingesta_actualizada_en = timezone.now()
+    doc.save(update_fields=["estado_ingesta", "ingesta_actualizada_en"])
+
+    try:
+        with doc.document_file.open("rb") as f:
+            datos = f.read()
+        nombre = doc.document_file.name.rsplit("/", 1)[-1]
+
+        r = requests.post(
+            f"{url.rstrip('/')}/corpus/documentos",
+            files={"archivo": (nombre, datos)},
+            data={
+                "tenant": tenant,
+                # Respaldo: si el .docx trae su propia tabla de roles, esa
+                # manda -- el valor viaja con el documento.
+                "roles": doc.roles_asistente or "",
+                "storage_path": doc.document_file.name,
+                # Reingesta explicita: si alguien vuelve a marcar un documento
+                # ya cargado, se espera que se rehaga.
+                "forzar": "true",
+            },
+            timeout=900,
+        )
+        cuerpo = r.json()
+        if not r.ok:
+            raise RuntimeError(cuerpo.get("error") or f"HTTP {r.status_code}")
+    except Exception as e:
+        logger.exception("Ingesta: fallo el documento %s", document_id)
+        doc.estado_ingesta = "error"
+        doc.ingesta_detalle = str(e)[:2000]
+        doc.ingesta_actualizada_en = timezone.now()
+        doc.save(update_fields=["estado_ingesta", "ingesta_detalle",
+                                "ingesta_actualizada_en"])
+        return
+
+    defectos = cuerpo.get("defectos") or []
+    roles = cuerpo.get("roles_permitidos") or []
+    doc.corpus_document_id = cuerpo.get("document_id")
+    doc.estado_ingesta = "ok"
+    doc.ingesta_fragmentos = cuerpo.get("fragmentos")
+    if roles:
+        doc.roles_asistente = ", ".join(roles)
+    # Los defectos son del documento, no del proceso: sirven para que quien lo
+    # subio sepa que partes no se detectaron bien y pueda arreglar el archivo.
+    notas = [
+        f"{d.get('tipo')}: {d.get('seccion') or ''} {d.get('detalle') or ''}".strip()
+        for d in defectos
+    ]
+    if not roles:
+        notas.insert(0, "Sin roles asignados: el asistente todavia no lo va a "
+                        "recuperar para nadie.")
+    doc.ingesta_detalle = "\n".join(notas)[:2000] or None
+    doc.ingesta_actualizada_en = timezone.now()
+    doc.save(update_fields=["corpus_document_id", "estado_ingesta",
+                            "ingesta_fragmentos", "ingesta_detalle",
+                            "roles_asistente", "ingesta_actualizada_en"])
+    logger.info("Ingesta: %s -> %s (%s fragmentos, roles=%s)",
+                document_id, cuerpo.get("codigo"), cuerpo.get("fragmentos"), roles)
+
+
+@shared_task
+def retirar_documento_del_asistente(corpus_document_id, org_id, document_id=None):
+    """
+    Saca un documento del corpus cuando se desmarca o se borra.
+
+    No borra: el motor lo pasa a 'obsoleto', que es lo que la busqueda excluye.
+    Asi deshacer es posible y se conserva con que version se respondio antes.
+    """
+    import requests
+
+    from common.models import Document
+
+    set_rls_context(org_id)
+
+    url, tenant = _motor()
+    if not url or not tenant:
+        logger.warning("Retiro: el asistente no esta configurado")
+        return
+
+    try:
+        r = requests.post(
+            f"{url.rstrip('/')}/corpus/documentos/{corpus_document_id}/retirar",
+            json={"tenant": tenant},
+            timeout=60,
+        )
+        r.raise_for_status()
+    except Exception:
+        logger.exception("Retiro: fallo el documento de corpus %s", corpus_document_id)
+        return
+
+    if document_id:
+        Document.objects.filter(id=document_id, org_id=org_id).update(
+            estado_ingesta="", corpus_document_id=None,
+            ingesta_fragmentos=None, ingesta_detalle=None,
+            ingesta_actualizada_en=timezone.now(),
+        )

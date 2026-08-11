@@ -58,6 +58,11 @@ services:
       DBNAME: ${DBNAME:-crm_db}
       DBUSER: ${DBUSER:-crm_user}
       DBPASSWORD: ${DBPASSWORD:-crm_password}
+      # Para la ingesta de documentos al corpus: la vista encola la tarea y el
+      # worker le manda el archivo al motor. Sin estas dos, un documento
+      # marcado "usar en el asistente" queda en estado de error diciendolo.
+      ASISTENTE_URL: ${ASISTENTE_URL:-http://motor:5000}
+      ASISTENTE_TENANT: ${ASISTENTE_TENANT:-rapilink}
     volumes:
       - ./django-crm/backend:/app
       - ./django-crm/docker/backend/entrypoint.sh:/entrypoint.sh:ro
@@ -89,6 +94,10 @@ services:
       DBNAME: ${DBNAME:-crm_db}
       DBUSER: ${DBUSER:-crm_user}
       DBPASSWORD: ${DBPASSWORD:-crm_password}
+      # El worker es quien de verdad manda el archivo al motor: tiene los
+      # bytes (comparte /app/media con el backend) y el motor no.
+      ASISTENTE_URL: ${ASISTENTE_URL:-http://motor:5000}
+      ASISTENTE_TENANT: ${ASISTENTE_TENANT:-rapilink}
     volumes:
       - ./django-crm/backend:/app
     depends_on:

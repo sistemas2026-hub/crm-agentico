@@ -34,6 +34,15 @@
   let sharedTo = new SvelteSet((previous.shared_to ?? []).map(String));
   let sharedTeams = new SvelteSet((previous.teams ?? []).map(String));
 
+  // El asistente solo lee lo que se marca aca. En Documentos tambien viven
+  // contratos y archivos administrativos que no tienen por que alimentarlo.
+  let usarEnAsistente = $state(previous.usar_en_asistente ?? false);
+  let rolesAsistente = new SvelteSet(
+    (previous.roles_asistente ?? '').split(',').map((r) => r.trim()).filter(Boolean)
+  );
+  // El fragmentador es especifico de Word (nucleo/ingesta/docx.py).
+  let esDocx = $derived(fileName.toLowerCase().endsWith('.docx'));
+
   let touched = $state(/** @type {Record<string, boolean>} */ ({}));
   let submitted = $state(false);
 
@@ -149,6 +158,55 @@
       {/if}
     </div>
 
+    {#if data.rolesAsistente?.length}
+      <fieldset class="v2-field asistente">
+        <legend>El asistente</legend>
+        <label class="marca">
+          <input type="checkbox" name="usar_en_asistente" bind:checked={usarEnAsistente} />
+          <span>
+            <b>Usarlo como documentación del asistente</b>
+            <span class="v2-hint">
+              Se parte en fragmentos y se indexa para que el asistente pueda citarlo al
+              responder. Sin marcar, queda guardado como cualquier otro archivo.
+            </span>
+          </span>
+        </label>
+
+        {#if usarEnAsistente && fileName && !esDocx}
+          <p class="v2-error">
+            <TriangleAlert size={13} />
+            El asistente solo puede leer archivos <b>.docx</b>, y «{fileName}» no lo es. Podés
+            subirlo igual, sin marcarlo.
+          </p>
+        {/if}
+
+        {#if usarEnAsistente}
+          <div class="share-label">Qué agentes pueden citarlo</div>
+          <p class="v2-hint" style="margin:0 0 6px">
+            Si el documento trae su propia tabla de roles adentro, esa manda. Sin ninguno
+            marcado, no lo va a recuperar nadie.
+          </p>
+          <div class="share-grid">
+            {#each data.rolesAsistente as r (r.nombre)}
+              <label class="share-opt" class:cliente={r.esCliente}>
+                <input
+                  type="checkbox"
+                  name="roles_asistente"
+                  value={r.nombre}
+                  checked={rolesAsistente.has(r.nombre)}
+                  onchange={() => toggle(rolesAsistente, r.nombre)}
+                />
+                <span>
+                  {r.cargo || r.nombre}
+                  {#if r.esCliente}<b class="ojo">· lo ve el cliente</b>{/if}
+                </span>
+              </label>
+            {/each}
+          </div>
+        {/if}
+      </fieldset>
+    {/if}
+
     <fieldset class="v2-field share">
       <legend>Quién puede abrirlo</legend>
       <p class="v2-hint" style="margin-top:0">
@@ -216,6 +274,41 @@
 </div>
 
 <style>
+  .asistente {
+    border: 1px solid var(--v2-line-soft);
+    border-radius: 8px;
+    padding: 14px 16px;
+  }
+  .asistente legend {
+    font-weight: 600;
+    padding: 0 6px;
+  }
+  .marca {
+    display: flex;
+    gap: 9px;
+    align-items: flex-start;
+    cursor: pointer;
+    padding: 4px 0;
+  }
+  .marca input {
+    margin-top: 2px;
+    flex: none;
+  }
+  .marca b {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .marca .v2-hint {
+    display: block;
+    margin-top: 2px;
+  }
+  /* Marcar un documento como visible para el cliente final es la decision
+     con mas consecuencias del formulario: se avisa, no se decora. */
+  .ojo {
+    color: var(--v2-clay);
+    font-weight: 600;
+  }
   .share {
     border: 1px solid var(--v2-line-soft);
     border-radius: 8px;

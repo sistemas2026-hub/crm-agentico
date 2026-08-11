@@ -1,3 +1,5 @@
+import logging
+
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import extend_schema, inline_serializer
@@ -17,7 +19,51 @@ from common.serializer import (
     DocumentSerializer,
     ProfileSerializer,
 )
+from common.tasks import (
+    ingerir_documento_en_asistente,
+    retirar_documento_del_asistente,
+)
 from common.validators import payload_id_list
+
+logger = logging.getLogger(__name__)
+
+
+def _encolar_ingesta(doc, org_id):
+    """Marca el documento como pendiente y encola su ingesta al corpus.
+
+    El try/except es el patron defensivo que ya usa cases/signals.py al
+    encolar: que el broker este caido no puede hacer fracasar una subida que
+    ya se guardo bien. Queda en 'pendiente' y se puede reintentar.
+    """
+    doc.estado_ingesta = "pendiente"
+    doc.save(update_fields=["estado_ingesta"])
+    try:
+        ingerir_documento_en_asistente.delay(str(doc.id), str(org_id))
+    except Exception:
+        logger.exception("No se pudo encolar la ingesta del documento %s", doc.id)
+
+
+def _sincronizar_asistente(doc, org_id, *, usaba_antes, corpus_id_antes,
+                           archivo_nuevo=False, roles_cambiaron=False):
+    """Aplica al corpus lo que cambio en el documento.
+
+    Solo reingiere cuando hace falta: marcar por primera vez, reemplazar el
+    archivo, o cambiar los roles. Un cambio de titulo no dispara nada, porque
+    volver a vectorizar cuesta una llamada al modelo por fragmento.
+    """
+    if doc.usar_en_asistente:
+        if not usaba_antes or archivo_nuevo or roles_cambiaron:
+            _encolar_ingesta(doc, org_id)
+        return
+
+    # Se desmarco: sale del corpus, sin borrarse (pasa a 'obsoleto').
+    if usaba_antes and corpus_id_antes:
+        try:
+            retirar_documento_del_asistente.delay(
+                str(corpus_id_antes), str(org_id), str(doc.id)
+            )
+        except Exception:
+            logger.exception("No se pudo encolar el retiro del documento %s", doc.id)
 
 
 def _visible_to(profile):
@@ -209,8 +255,19 @@ class DocumentListView(APIView, LimitOffsetPagination):
                 if teams:
                     doc.teams.add(*teams)
 
+            if doc.usar_en_asistente:
+                # Fragmentar y vectorizar cuesta una llamada al modelo de
+                # embeddings por fragmento: va a segundo plano.
+                _encolar_ingesta(doc, request.profile.org_id)
+
             return Response(
-                {"error": False, "message": "Document Created Successfully"},
+                {
+                    "error": False,
+                    "message": "Document Created Successfully",
+                    # El id hacia falta para que la interfaz pueda seguir el
+                    # estado de la ingesta despues de subir.
+                    "id": str(doc.id),
+                },
                 status=status.HTTP_201_CREATED,
             )
         return Response(
@@ -336,7 +393,21 @@ class DocumentDetailView(APIView):
         document = self.get_object(pk)
         if not self._may_delete(document):
             return self._forbidden()
+        # Se lee antes de borrar: despues no hay de donde sacar el id del
+        # documento en el corpus.
+        corpus_id = document.corpus_document_id
+        org_id = document.org_id
+
         document.delete()
+
+        if corpus_id:
+            try:
+                retirar_documento_del_asistente.delay(str(corpus_id), str(org_id))
+            except Exception:
+                logger.exception(
+                    "No se pudo encolar el retiro del documento de corpus %s", corpus_id
+                )
+
         return Response(
             {"error": False, "message": "Document deleted Successfully"},
             status=status.HTTP_200_OK,
@@ -366,6 +437,14 @@ class DocumentDetailView(APIView):
             data=params, instance=self.object, request_obj=request, partial=True
         )
         if serializer.is_valid():
+            # El estado previo se lee ANTES de guardar: es lo que distingue
+            # "se acaba de marcar" de "ya estaba marcado", y sin esa
+            # diferencia cada edicion volveria a vectorizar el documento.
+            usaba_antes = self.object.usar_en_asistente
+            corpus_id_antes = self.object.corpus_document_id
+            roles_antes = self.object.roles_asistente
+            archivo_nuevo = bool(request.FILES.get("document_file"))
+
             save_kwargs = {
                 "org": request.profile.org,
             }
@@ -374,6 +453,15 @@ class DocumentDetailView(APIView):
             if params.get("status"):
                 save_kwargs["status"] = params.get("status")
             doc = serializer.save(**save_kwargs)
+
+            _sincronizar_asistente(
+                doc, request.profile.org_id,
+                usaba_antes=usaba_antes,
+                corpus_id_antes=corpus_id_antes,
+                archivo_nuevo=archivo_nuevo,
+                roles_cambiaron=doc.roles_asistente != roles_antes,
+            )
+
             doc.shared_to.clear()
             if params.get("shared_to"):
                 assinged_to_list = params.get("shared_to")
@@ -425,9 +513,21 @@ class DocumentDetailView(APIView):
             data=params, instance=self.object, request_obj=request, partial=True
         )
         if serializer.is_valid():
-            serializer.save(
+            usaba_antes = self.object.usar_en_asistente
+            corpus_id_antes = self.object.corpus_document_id
+            roles_antes = self.object.roles_asistente
+
+            doc = serializer.save(
                 org=request.profile.org,
             )
+
+            _sincronizar_asistente(
+                doc, request.profile.org_id,
+                usaba_antes=usaba_antes,
+                corpus_id_antes=corpus_id_antes,
+                roles_cambiaron=doc.roles_asistente != roles_antes,
+            )
+
             return Response(
                 {"error": False, "message": "Document Updated Successfully"},
                 status=status.HTTP_200_OK,
