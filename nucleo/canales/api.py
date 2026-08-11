@@ -34,8 +34,7 @@ import os
 
 from flask import Flask, jsonify, request
 
-from nucleo.config import cargar_config, fuente
-from nucleo.config import editor
+from nucleo.config import editor, fuente
 from nucleo.modelo import motor
 from nucleo.persistencia import db as persistencia
 from nucleo.seguridad.verificacion import Sesion
@@ -47,9 +46,10 @@ _sesiones: dict = {}   # (tenant, id_sesion) -> {"sesion": Sesion, "historial": 
 
 
 def _config_de(tenant: str):
-    # La base manda; el YAML es semilla y respaldo. Ver nucleo/config/fuente.py:
-    # en el servidor, 'tenants/' viaja dentro de la imagen y lo que se edite
-    # desde la interfaz se pierde en el siguiente despliegue.
+    # La base manda; el YAML es semilla y respaldo. Ver nucleo/config/fuente.py.
+    # Es la misma fila que escribe el editor (nucleo/config/editor.py), asi que
+    # leer y guardar apuntan al mismo lugar -- por eso alcanza con vaciar este
+    # cache para que un cambio de la interfaz se vea en el turno siguiente.
     if tenant not in _configs:
         _configs[tenant] = fuente.cargar(tenant)
     return _configs[tenant]
@@ -57,9 +57,23 @@ def _config_de(tenant: str):
 
 def olvidar_config(tenant: str) -> None:
     """Descarta la copia cacheada para que el proximo turno relea de la base.
-    Lo llama el editor tras guardar: sin esto, un cambio hecho desde la
-    interfaz no se veria hasta reiniciar el proceso."""
+    Se llama tras cada guardado del editor: sin esto, un cambio hecho desde la
+    interfaz no se veria hasta reiniciar el proceso.
+
+    Se descarta en vez de reemplazarse por lo que devolvio el editor, aunque
+    sea el mismo objeto: asi lo que se sirve es siempre lo que quedo ESCRITO,
+    y un guardado que no llego a la base se nota en el siguiente turno en vez
+    de quedar tapado por una copia en memoria que dice lo contrario."""
     _configs.pop(tenant, None)
+
+
+def _error_al_guardar(e: Exception):
+    """Todo lo que no sea un problema de la configuracion en si (la base
+    inalcanzable, el tenant sin cargar) es un fallo del servidor, no del
+    formulario: no se devuelve 400 porque no hay nada que el usuario pueda
+    corregir escribiendo distinto."""
+    print(f"[editor] fallo al guardar la configuracion: {type(e).__name__}: {e}")
+    return jsonify({"error": f"No se pudo guardar en la base: {type(e).__name__}: {e}"}), 500
 
 
 def _agente_json(nombre: str, rol, config) -> dict:
@@ -167,10 +181,9 @@ def agentes_crear():
     if not tenant or not nombre:
         return jsonify({"error": "Faltan campos: tenant, nombre"}), 400
 
-    ruta = f"tenants/{tenant}.config.yaml"
     try:
         config = editor.crear_rol(
-            ruta, nombre,
+            tenant, nombre,
             area=cuerpo.get("area"), cargo=cuerpo.get("cargo"),
             descripcion=cuerpo.get("descripcion", ""),
             orientado_a=cuerpo.get("orientado_a", "colaborador"),
@@ -178,8 +191,10 @@ def agentes_crear():
         )
     except editor.ErrorEdicion as e:
         return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
 
-    _configs[tenant] = config
+    olvidar_config(tenant)
     return jsonify({"agente": _agente_json(nombre, config.roles[nombre], config)}), 201
 
 
@@ -190,10 +205,9 @@ def agentes_editar(nombre):
     if not tenant:
         return jsonify({"error": "Falta el campo 'tenant'"}), 400
 
-    ruta = f"tenants/{tenant}.config.yaml"
     try:
         config = editor.editar_rol(
-            ruta, nombre,
+            tenant, nombre,
             area=cuerpo.get("area"), cargo=cuerpo.get("cargo"),
             descripcion=cuerpo.get("descripcion", ""),
             orientado_a=cuerpo.get("orientado_a", "colaborador"),
@@ -201,8 +215,10 @@ def agentes_editar(nombre):
         )
     except editor.ErrorEdicion as e:
         return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
 
-    _configs[tenant] = config
+    olvidar_config(tenant)
     return jsonify({"agente": _agente_json(nombre, config.roles[nombre], config)})
 
 
@@ -212,14 +228,67 @@ def agentes_borrar(nombre):
     if not tenant:
         return jsonify({"error": "Falta el parametro 'tenant'."}), 400
 
-    ruta = f"tenants/{tenant}.config.yaml"
     try:
-        config = editor.borrar_rol(ruta, nombre)
+        editor.borrar_rol(tenant, nombre)
     except editor.ErrorEdicion as e:
         return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
 
-    _configs[tenant] = config
+    olvidar_config(tenant)
     return "", 204
+
+
+# =============================================================================
+#  CONFIGURACION  -  lo que el cliente ajusta sin tocar permisos
+# =============================================================================
+#  Separado de /agentes a proposito. Ahi se decide QUE PUEDE VER cada rol, que
+#  es superficie de seguridad; aca se decide como habla el asistente. Mezclar
+#  las dos en una pantalla haria que cambiar el tono se sintiera tan riesgoso
+#  como abrirle una herramienta nueva a un area.
+
+@app.get("/configuracion")
+def configuracion():
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+
+    return jsonify({
+        "persona": config.persona.model_dump(mode="json"),
+        # Contexto de solo lectura para la pantalla: el modelo y cuantos
+        # agentes hay se deciden en otro lado, pero quien ajusta el tono
+        # merece verlos sin abrir otra pestana.
+        "modelo": config.llm.modelo_por_defecto,
+        "roles": sorted(config.roles),
+    })
+
+
+@app.put("/configuracion/persona")
+def configuracion_persona():
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+
+    try:
+        config = editor.guardar_persona(
+            tenant,
+            nombre_asistente=cuerpo.get("nombre_asistente", ""),
+            tono=cuerpo.get("tono", "cercano"),
+            longitud_respuesta=cuerpo.get("longitud_respuesta", "breve"),
+            instrucciones_adicionales=cuerpo.get("instrucciones_adicionales", ""),
+        )
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
+
+    olvidar_config(tenant)
+    return jsonify({"persona": config.persona.model_dump(mode="json")})
 
 
 @app.get("/salud")

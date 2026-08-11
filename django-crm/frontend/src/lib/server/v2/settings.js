@@ -17,6 +17,7 @@
  * member cannot count. Every other destination is readable by any member, so a
  * throw from one of those is a real failure and is left to propagate.
  */
+import { leerConfiguracionAsistente } from './asistente-config.js';
 import { getBusinessHours } from './business-hours.js';
 import { getCustomFields } from './custom-fields.js';
 import { getEscalationPolicies } from './escalation.js';
@@ -106,7 +107,8 @@ export async function getSettingsHub(event) {
     approval,
     macro,
     tag,
-    field
+    field,
+    asistente
   ] = await Promise.all([
     getOrgSettings(event),
     getBusinessHours(event),
@@ -119,7 +121,11 @@ export async function getSettingsHub(event) {
     getApprovalRules(event),
     getMacros(event),
     getTags(event),
-    getCustomFields(event)
+    getCustomFields(event),
+    // No lanza nunca (ver asistente-config.js): el asistente es otro servicio
+    // y puede no estar desplegado. Si tirara, se caeria el hub entero y el
+    // sintoma seria "no puedo entrar a configuracion".
+    leerConfiguracionAsistente()
   ]);
 
   const now = Date.now();
@@ -141,6 +147,9 @@ export async function getSettingsHub(event) {
     approvalTotals: approval.totals,
     macroTotals: macro.totals,
     tagTotals: tag.totals,
-    fieldTotals: field.totals
+    fieldTotals: field.totals,
+    // null = no hay asistente, o no contesta. El hub lista igual sus destinos,
+    // sin valor, como ya hace con lo que un miembro no puede contar.
+    asistente
   };
 }

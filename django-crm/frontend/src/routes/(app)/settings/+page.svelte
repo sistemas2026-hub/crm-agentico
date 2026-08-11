@@ -150,6 +150,36 @@
       ]
     },
     {
+      // El asistente es otro servicio, no una app de Django, y sus dos
+      // destinos ya viven en el sidebar. Aparecen igual aca, como /team y las
+      // plantillas de factura: el hub es donde se viene a saber que se puede
+      // configurar, y omitirlos obligaria a saber de antemano que existen.
+      //
+      // Los valores quedan en null cuando el motor no contesta. No lleva
+      // warn: en una instalacion sin asistente desplegado eso no es una falla
+      // que nadie tenga que ir a arreglar, y una advertencia que no se puede
+      // atender ensena a ignorar las advertencias.
+      label: 'Asistente',
+      items: [
+        {
+          href: '/agentes',
+          title: 'Agentes y permisos',
+          body: 'Que puede consultar cada agente, y que campos le devuelve cada consulta.',
+          value: data.asistente ? `${count(data.asistente.roles.length)} agentes` : null,
+          warn: false
+        },
+        {
+          href: '/settings/asistente',
+          title: 'Personalidad del asistente',
+          body: 'Con que nombre se presenta, en que tono habla y cuanto se extiende.',
+          value: data.asistente
+            ? `${data.asistente.persona.nombre_asistente} · ${data.asistente.persona.tono}`
+            : null,
+          warn: false
+        }
+      ]
+    },
+    {
       label: 'Palabras y campos compartidos',
       items: [
         {

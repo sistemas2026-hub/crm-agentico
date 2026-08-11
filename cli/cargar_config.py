@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 ================================================================================
- CARGAR tenant.config.yaml A LA BASE
+ SINCRONIZAR tenant.config.yaml CON LA BASE  (los dos sentidos)
 ================================================================================
 
 El YAML es la fuente que se versiona en git; la base es de donde LEE el sistema
@@ -17,10 +17,32 @@ API ignora se rechaza aqui, no en produccion con un cliente adelante.
 'config_version' sube en cada carga efectiva. Queda en evaluation_runs para
 poder decir "esta corrida se hizo con la config v3", y no adivinarlo despues.
 
+POR QUE EL VIAJE DE VUELTA  (--exportar)
+----------------------------------------
+Los roles ya no se editan solo aca: el cliente crea y modifica sus agentes
+desde la interfaz, y eso escribe en la base (nucleo/config/editor.py). El
+archivo del repositorio no se entera. Sin un camino de vuelta pasan dos cosas,
+las dos malas:
+
+  - cargar el YAML encima BORRA los agentes que creo el cliente, sin aviso;
+  - no hay forma de revisar en git que cambio, ni de reconstruir el tenant sin
+    devolverlo a como estaba el dia del alta.
+
+'--exportar' baja la configuracion vigente al YAML, y la carga se NIEGA a pisar
+roles que solo existen en la base salvo que se le pase '--forzar'. El archivo
+deja de ser una foto vieja y vuelve a ser el respaldo legible que dice ser.
+
+Se conservan los comentarios. No es cosmetico: en tenants/ hay 133 lineas de
+notas de verificacion en vivo, motivos de cada exclusion y advertencias, que
+son informacion de produccion. Por eso la exportacion FUSIONA sobre el archivo
+existente con ruamel.yaml en modo round-trip, en vez de volcarlo de cero.
+
 Uso
 ---
     py -3.13 cli/cargar_config.py tenants/rapilink.config.yaml
+    py -3.13 cli/cargar_config.py tenants/rapilink.config.yaml --forzar
     py -3.13 cli/cargar_config.py --todos
+    py -3.13 cli/cargar_config.py --exportar rapilink
     py -3.13 cli/cargar_config.py --ver rapilink
 ================================================================================
 """
@@ -28,19 +50,32 @@ Uso
 from __future__ import annotations
 
 import json
+import os
 import sys
+import tempfile
+from datetime import date, datetime
+from io import StringIO
 from pathlib import Path
 
 import psycopg
+import yaml
 from dotenv import load_dotenv
+from ruamel.yaml import YAML
 
 RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ))
 
-from nucleo.config import cargar_config          # noqa: E402
-from nucleo.persistencia.conexion import dsn     # noqa: E402
+from nucleo.config import TenantConfig, cargar_config   # noqa: E402
+from nucleo.persistencia.conexion import dsn            # noqa: E402
 
 load_dotenv(RAIZ / ".env", override=True)
+
+_yaml_rt = YAML(typ="rt")
+_yaml_rt.preserve_quotes = True
+_yaml_rt.width = 100
+# Mismo estilo que ya usan los archivos escritos a mano: el guion de una lista
+# va indentado 2 espacios respecto de su clave padre, no pegado a la izquierda.
+_yaml_rt.indent(mapping=2, sequence=4, offset=2)
 
 
 def _conectar():
@@ -90,7 +125,36 @@ def _organizacion(cur, slug: str, org_id: str | None = None) -> str:
         f"{listado}")
 
 
-def cargar(ruta: Path, org_id: str | None = None) -> None:
+def _lo_que_pisaria(guardado: dict, nuevo: dict) -> list[str]:
+    """
+    Que se PERDERIA de la base al cargar 'nuevo' encima.
+
+    Solo mira lo que el editor de la interfaz puede escribir -- roles y sus
+    overrides de modelo. Un rol que esta en el archivo y no en la base es una
+    incorporacion, no una perdida, y no se reporta: lo que hay que frenar es
+    borrar el trabajo de otro, no agregar el propio.
+    """
+    lineas: list[str] = []
+
+    roles_g = guardado.get("roles") or {}
+    roles_n = nuevo.get("roles") or {}
+    for nombre, definicion in roles_g.items():
+        if nombre not in roles_n:
+            lineas.append(f"el rol '{nombre}' esta en la base y no en el archivo: "
+                          f"se BORRARIA")
+        elif definicion != roles_n[nombre]:
+            lineas.append(f"el rol '{nombre}' es distinto en la base: se PISARIA")
+
+    ov_g = ((guardado.get("llm") or {}).get("overrides") or {})
+    ov_n = ((nuevo.get("llm") or {}).get("overrides") or {})
+    for clave, valor in ov_g.items():
+        if clave.startswith("rol:") and ov_n.get(clave) != valor:
+            lineas.append(f"llm.overrides['{clave}'] = '{valor}' se perderia")
+
+    return lineas
+
+
+def cargar(ruta: Path, org_id: str | None = None, forzar: bool = False) -> None:
     cfg = cargar_config(ruta)                     # valida o revienta
     slug = cfg.identidad.slug
     datos = cfg.model_dump(mode="json")
@@ -107,6 +171,21 @@ def cargar(ruta: Path, org_id: str | None = None) -> None:
         if actual and actual[0] == datos:
             print(f"[=] {slug}: sin cambios (v{actual[1]})")
             return
+
+        # El archivo ya no es el unico que escribe roles. Antes de pisar la
+        # base hay que saber si lo que hay ahi lo puso una persona desde la
+        # interfaz, porque eso no esta en git y no se recupera.
+        if actual and not forzar:
+            perdidas = _lo_que_pisaria(actual[0], datos)
+            if perdidas:
+                raise SystemExit(
+                    f"'{slug}': la base (v{actual[1]}) tiene roles que este "
+                    f"archivo no trae.\n\n  - " + "\n  - ".join(perdidas) +
+                    f"\n\nLos roles se editan desde la interfaz y se guardan en "
+                    f"la base, no aqui. Bajarlos al archivo primero:\n\n"
+                    f"      py -3.13 cli/cargar_config.py --exportar {slug}\n\n"
+                    f"o pisarlos a proposito, si es lo que se quiere:\n\n"
+                    f"      py -3.13 cli/cargar_config.py {ruta} --forzar")
 
         if actual:
             cur.execute("""update asistente.tenant_config
@@ -129,6 +208,184 @@ def cargar(ruta: Path, org_id: str | None = None) -> None:
     print(f"    roles: {', '.join(cfg.roles)}")
     print(f"    herramientas: {len(cfg.herramientas)}   modelo: "
           f"{cfg.llm.modelo_por_defecto}")
+
+
+# =============================================================================
+#  EXPORTAR  -  de la base al archivo, sin perder los comentarios
+# =============================================================================
+
+def _nombrados(x) -> bool:
+    """Una lista de objetos identificables por 'nombre' (herramientas)."""
+    return bool(x) and all(isinstance(i, dict) and "nombre" in i for i in x)
+
+
+def _como_json(valor):
+    """
+    El valor del YAML expresado como lo expresa model_dump(mode='json'), para
+    poder compararlos.
+
+    Hace falta por las fechas: 'verificado_el: 2026-08-07' se carga como un
+    date y la base lo guarda como la cadena '2026-08-07'. Sin esta conversion
+    parecen distintos, y cada exportacion reescribiria la fecha entrecomillada
+    -- catorce lineas de diff que no cambian nada.
+    """
+    return valor.isoformat() if isinstance(valor, (date, datetime)) else valor
+
+
+def _fusionar(destino, completo, minimo):
+    """
+    Copia lo que dice la base sobre 'destino' (el documento round-trip, con
+    sus comentarios), en el sitio.
+
+    Llegan DOS versiones de lo mismo y la diferencia es la que evita que el
+    archivo se degrade a cada exportacion:
+
+      completo  el volcado entero, con cada campo del esquema
+      minimo    solo lo que difiere de su valor por defecto (exclude_defaults)
+
+    Se BORRA lo que no este en 'completo' (desaparecio de verdad) y se AGREGA
+    solo lo que este en 'minimo'. Sin esa distincion, la primera exportacion
+    escribiria 170 lineas de 'logo_url:', 'orientado_a: colaborador' y
+    'reranking_activo: false' que el archivo omitia a proposito -- fiel, pero
+    con el cambio real enterrado en el ruido.
+
+    Lo que decide que comentarios y que estilo sobreviven:
+
+      - Un valor que no cambio devuelve el nodo original, no una copia. Asi los
+        bloques '>' y '|' conservan su corte de linea y sus comillas, en vez de
+        reescribirse con el ancho de este volcador.
+      - Los diccionarios se recorren clave por clave, asi que el comentario
+        sobre 'campos_permitidos.consultar_cliente' sigue pegado a esa clave
+        aunque cambie la lista de al lado.
+      - Las listas de objetos con 'nombre' (herramientas) se emparejan por ese
+        nombre y no por posicion.
+
+    Limite conocido: los comentarios DENTRO de una lista se indexan por
+    posicion, asi que quitar o agregar un elemento en medio desalinea los que
+    vienen despues. No pasa hoy -- desde la interfaz se editan roles, no
+    herramientas -- pero si un dia pasa, es lo primero que hay que mirar en el
+    diff.
+    """
+    if not isinstance(completo, (dict, list)) and _como_json(destino) == completo:
+        return destino
+
+    if isinstance(destino, dict) and isinstance(completo, dict):
+        minimo = minimo if isinstance(minimo, dict) else {}
+        for clave in [k for k in destino if k not in completo]:
+            del destino[clave]
+        for clave, valor in completo.items():
+            if clave in destino:
+                fusionado = _fusionar(destino[clave], valor, minimo.get(clave))
+                if fusionado is not destino[clave]:
+                    destino[clave] = fusionado
+            elif clave in minimo:
+                destino[clave] = minimo[clave]
+        return destino
+
+    if isinstance(destino, list) and isinstance(completo, list):
+        if _nombrados(destino) and _nombrados(completo):
+            minimos = {i["nombre"]: i for i in (minimo or [])
+                       if isinstance(i, dict) and "nombre" in i}
+            # Si estan los mismos y en el mismo orden -- el caso normal, porque
+            # las herramientas no se editan desde la interfaz -- se entra en
+            # cada una sin tocar la lista. Rearmarla desprende los comentarios
+            # y las lineas en blanco que separan una herramienta de la
+            # siguiente, y eso saldria en el diff de cada exportacion.
+            actuales = {i["nombre"]: i for i in destino}
+            if [i["nombre"] for i in destino] == [i["nombre"] for i in completo]:
+                for nodo, item in zip(destino, completo):
+                    _fusionar(nodo, item, minimos.get(item["nombre"]))
+                return destino
+            destino[:] = [
+                _fusionar(actuales[i["nombre"]], i, minimos.get(i["nombre"]))
+                if i["nombre"] in actuales
+                else minimos.get(i["nombre"], i)
+                for i in completo
+            ]
+            return destino
+
+        if [_como_json(v) for v in destino] == list(completo):
+            return destino
+        # Se reemplaza el CONTENIDO, no el nodo: asi una lista escrita en linea
+        # ([a, b, c]) sigue en linea despues de agregarle un elemento, en vez de
+        # estallar en una lista de guiones que reescribe el bloque entero.
+        destino[:] = completo
+        return destino
+
+    return completo
+
+
+def _resumen_de_roles(antes: dict, despues: dict) -> list[str]:
+    """Que le cambia al archivo. Es lo que hay que mirar en el diff, dicho en
+    una linea, para no leer 650 lineas de YAML buscando la diferencia."""
+    a, d = (antes.get("roles") or {}), (despues.get("roles") or {})
+    lineas = [f"+ rol '{n}' (creado desde la interfaz)" for n in d if n not in a]
+    lineas += [f"- rol '{n}' (ya no esta en la base)" for n in a if n not in d]
+    lineas += [f"~ rol '{n}' cambio" for n in d if n in a and a[n] != d[n]]
+    return lineas or ["(los roles ya coincidian; puede haber cambiado otra cosa)"]
+
+
+def _escribir_atomico(ruta: Path, texto: str) -> None:
+    """Temporal + replace: un fallo a mitad de escritura no deja el YAML
+    corrupto, que es el archivo con el que se da de alta el tenant."""
+    fd, tmp = tempfile.mkstemp(dir=ruta.parent, prefix=f".{ruta.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+            f.write(texto)
+        os.replace(tmp, ruta)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        raise
+
+
+def exportar(slug: str) -> None:
+    with _conectar() as con, con.cursor() as cur:
+        cur.execute("""select config, config_version from asistente.tenant_config
+                       where slug = %s""", (slug,))
+        fila = cur.fetchone()
+    if not fila or not fila[0]:
+        raise SystemExit(f"'{slug}' no tiene configuracion cargada en la base.")
+
+    guardado, version = fila
+    # Se valida ANTES de escribir: si lo que hay en la base no pasa el
+    # esquema, el archivo bueno no se sacrifica por copiar uno roto.
+    cfg = TenantConfig(**guardado)
+    datos = cfg.model_dump(mode="json")
+    minimo = cfg.model_dump(mode="json", exclude_defaults=True)
+
+    ruta = RAIZ / "tenants" / f"{slug}.config.yaml"
+    if ruta.exists():
+        anterior = cargar_config(ruta).model_dump(mode="json")
+        doc = _yaml_rt.load(ruta.read_text(encoding="utf-8"))
+        _fusionar(doc, datos, minimo)
+    else:
+        anterior, doc = {}, minimo     # tenant nuevo: no hay comentarios que cuidar
+
+    buf = StringIO()
+    _yaml_rt.dump(doc, buf)
+    texto = buf.getvalue()
+
+    # El archivo tiene que releerse como EXACTAMENTE lo que hay en la base.
+    # Una fusion que se coma una clave produciria un YAML valido y distinto, y
+    # el error aparecería mucho despues, al reconstruir el tenant desde el.
+    try:
+        releido = TenantConfig(**(yaml.safe_load(texto) or {})).model_dump(mode="json")
+    except Exception as e:
+        raise SystemExit(f"{slug}: el archivo fusionado no valida ({e}). No se escribio.")
+    if releido != datos:
+        distintas = sorted(k for k in set(releido) | set(datos)
+                           if releido.get(k) != datos.get(k))
+        raise SystemExit(
+            f"{slug}: la fusion no quedo fiel a la base en {distintas}. "
+            f"No se escribio nada.")
+
+    _escribir_atomico(ruta, texto)
+
+    print(f"[v] {slug}: v{version} de la base -> {ruta.relative_to(RAIZ)}")
+    for linea in _resumen_de_roles(anterior, datos):
+        print(f"    {linea}")
+    print(f"    Revisar con: git diff -- {ruta.relative_to(RAIZ).as_posix()}")
 
 
 def ver(slug: str) -> None:
@@ -163,15 +420,21 @@ if __name__ == "__main__":
         org_id = args[i + 1]
         del args[i:i + 2]
 
+    forzar = "--forzar" in args
+    if forzar:
+        args.remove("--forzar")
+
     if args[0] == "--ver":
         ver(args[1])
+    elif args[0] == "--exportar":
+        exportar(args[1])
     elif args[0] == "--todos":
         for y in sorted((RAIZ / "tenants").glob("*.config.yaml")):
             if y.name.startswith("tenant.config.example"):
                 continue                          # la plantilla no es un tenant
             try:
-                cargar(y)
+                cargar(y, forzar=forzar)
             except SystemExit as e:
                 print(f"[!] {y.name}: {e}")
     else:
-        cargar(Path(args[0]), org_id)
+        cargar(Path(args[0]), org_id, forzar=forzar)

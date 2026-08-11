@@ -23,7 +23,9 @@
   const esAdmin = $derived(data.role === 'ADMIN');
 
   let dialogoAbierto = $state(false);
-  let modoDialogo = $state('crear');
+  // Anotado, no inferido: sin esto $state lo ensancha a 'string' y no encaja
+  // en el prop del dialogo, que solo acepta estos dos.
+  let modoDialogo = $state(/** @type {'crear' | 'editar'} */ ('crear'));
   let agenteEnEdicion = $state(/** @type {any} */ (null));
 
   function abrirCrear() {

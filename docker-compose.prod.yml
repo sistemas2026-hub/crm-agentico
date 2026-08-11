@@ -200,6 +200,16 @@ services:
       # PRIVATE_ lo usa el codigo que corre DENTRO del contenedor: ahi si vale
       # el nombre del servicio.
       PRIVATE_DJANGO_API_URL: http://backend:8000
+      # El motor. Nunca lleva dominio publico -- no tiene autenticacion propia,
+      # asi que la unica forma de llegarle es desde el frontend por la red
+      # interna, y quien pide se autentico antes contra Django.
+      #
+      # Sin estas dos, /agentes y /settings/asistente cargan pero muestran
+      # "Asistente no configurado": el CRM anda y la mitad del producto no, sin
+      # que nada falle visiblemente. Por eso el tenant es obligatorio y el
+      # despliegue se detiene nombrandolo, igual que el resto.
+      PRIVATE_ASISTENTE_URL: http://motor:5000
+      PRIVATE_ASISTENTE_TENANT: ${ASISTENTE_TENANT:?slug del tenant, el mismo de tenants/<slug>.config.yaml}
     depends_on:
       - backend
 

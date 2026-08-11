@@ -3,6 +3,9 @@ requests
 python-dotenv
 pydantic
 PyYAML
+# Solo cli/cargar_config.py --exportar, para bajar la configuracion de la base
+# al YAML sin borrarle los comentarios (PyYAML los perderia: son 133 lineas de
+# notas de verificacion en vivo). El motor no lo usa.
 ruamel.yaml
 streamlit
 flask

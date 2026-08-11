@@ -132,6 +132,12 @@ services:
       - django-crm/.env.docker
       - path: django-crm/.env.docker.local
         required: false
+    environment:
+      # Igual que en produccion, pero con valor por defecto: en desarrollo se
+      # levanta el stack entero y el tenant es el unico que hay. Ver el mismo
+      # bloque en docker-compose.prod.yml para por que van aca y no en un .env.
+      PRIVATE_ASISTENTE_URL: http://motor:5000
+      PRIVATE_ASISTENTE_TENANT: ${ASISTENTE_TENANT:-rapilink}
     volumes:
       - ./django-crm/frontend:/app
       - frontend_node_modules:/app/node_modules

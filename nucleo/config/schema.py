@@ -106,10 +106,22 @@ class Marca(Base):
 
 
 class Persona(Base):
-    nombre_asistente: str
+    """
+    Como se presenta y como escribe el asistente. Es lo unico de la
+    configuracion que el cliente edita sin que cambie QUE puede ver nadie:
+    'instrucciones_adicionales' entra al prompt, y el prompt es guia, no
+    garantia -- el filtro de campos y la confirmacion de acciones sensibles
+    viven en codigo y no se pueden aflojar desde aca (PRD 7.4).
+    """
+    nombre_asistente: str = Field(min_length=1, max_length=60)
     tono: Literal["formal", "cercano", "tecnico"] = "cercano"
     longitud_respuesta: Literal["breve", "media", "extensa"] = "breve"
-    instrucciones_adicionales: str = ""
+    # El tope existe porque este texto viaja en CADA turno, delante de la
+    # pregunta. Sin limite, un pegado largo desde una pantalla de edicion se
+    # come el contexto del modelo y degrada las respuestas sin dar ningun
+    # error: se nota como "el asistente empeoro", que es lo que nadie sabe
+    # diagnosticar. 2.000 caracteres son ~10x lo que usa un tenant real.
+    instrucciones_adicionales: str = Field(default="", max_length=2000)
 
 
 class TerminoGlosario(Base):

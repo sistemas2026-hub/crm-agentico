@@ -46,7 +46,7 @@ sysctl -w vm.swappiness=10 && echo 'vm.swappiness=10' >> /etc/sysctl.conf
 
 ### 3. Variables
 
-Van en la sección **Environment** del servicio. Quince son obligatorias; el despliegue se detiene nombrando la que falte, antes de construir nada. Péguelas todas de una vez — Compose se para en la primera.
+Van en la sección **Environment** del servicio. Dieciséis son obligatorias; el despliegue se detiene nombrando la que falte, antes de construir nada. Péguelas todas de una vez — Compose se para en la primera.
 
 ```
 DBHOST=crm.rapilinksas.co
@@ -72,8 +72,12 @@ WISPHUB_BASE_URL=https://api.wisphub.io
 WISPHUB_MODO_REAL=true
 DEEPSEEK_API_KEY=
 
+ASISTENTE_TENANT=rapilink
+
 DEFAULT_FROM_EMAIL=noreply@rapilinksas.co
 ```
+
+`ASISTENTE_TENANT` es el slug del `tenants/<slug>.config.yaml`, y es de quién habla el frontend cuando alguien abre `/agentes` o `/settings/asistente`. Se declara acá y no en el código porque es lo único que ata esa interfaz a una empresa concreta. La URL del motor no está en esta lista: la fija el compose (`http://motor:5000`), que es quien conoce el nombre del servicio.
 
 Los valores vacíos salen del `.env` local, salvo `SECRET_KEY`, que se genera nuevo y **nunca** se reutiliza el de desarrollo:
 
@@ -178,13 +182,52 @@ print(f'{time.time()-t:.1f}s'); print(d.get('respuesta','')[:300])
 
 El paso 3 es el que vale: un 500 ahí no lo detecta ningún healthcheck, porque varios imports del motor son perezosos y solo fallan en la primera consulta real.
 
+Y un cuarto, la primera vez que se despliega el editor de agentes — que crea y borra un rol de verdad contra la base, porque es el único camino que las pruebas locales no cubren (`tests/test_editor_config.py` valida las mutaciones sin Postgres):
+
+```
+docker exec <contenedor-motor> python -c "
+import json, urllib.request, urllib.error
+def pedir(metodo, ruta, cuerpo=None):
+    datos = json.dumps(cuerpo).encode() if cuerpo else None
+    req = urllib.request.Request(f'http://127.0.0.1:5000{ruta}', data=datos,
+                                 headers={'Content-Type':'application/json'}, method=metodo)
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r: return r.status, r.read()[:200]
+    except urllib.error.HTTPError as e: return e.code, e.read()[:300]
+print(pedir('POST', '/agentes', {'tenant':'rapilink','nombre':'prueba_editor',
+      'descripcion':'Borrar despues.','orientado_a':'colaborador','herramientas':[]}))
+print(pedir('DELETE', '/agentes/prueba_editor?tenant=rapilink'))
+"
+```
+
+Se espera `201` y después `204`. Un `500` que mencione `psycopg` o `app_backend` es la base; un `400` es la configuración, y el texto dice cuál. Después, `py -3.13 cli/cargar_config.py --ver rapilink` debe mostrar la versión subida en dos.
+
+### 7. Cambiar la configuración después
+
+La configuración vive en `asistente.tenant_config` y se edita en dos lugares, así que la sincronización va en **dos sentidos**:
+
+| Qué cambia | Dónde se hace | Cómo llega al otro lado |
+|---|---|---|
+| Roles y agentes | La interfaz (`/agentes`) | Ya está en la base. Bajarlo al repo con `--exportar` |
+| Nombre, tono y largo del asistente | La interfaz (`/settings/asistente`) | Ídem |
+| Herramientas, prompts, RAG, filtros | El YAML, en git | `cli/cargar_config.py tenants/<slug>.config.yaml` |
+
+Lo que se edita desde la interfaz necesita `PRIVATE_ASISTENTE_URL=http://motor:5000` y `PRIVATE_ASISTENTE_TENANT=<slug>` en el servicio `frontend`. Sin esas dos, las pantallas cargan pero no encuentran al asistente — y el hub de configuración las lista igual, sin valor, en vez de caerse.
+
+```
+py -3.13 cli/cargar_config.py --exportar rapilink   # base  -> archivo
+py -3.13 cli/cargar_config.py tenants/rapilink.config.yaml   # archivo -> base
+```
+
+**La carga se niega a pisar roles que solo existen en la base.** Es la protección que importa: un agente creado desde la interfaz no está en git y no se recupera. Cuando pasa, el comando dice exactamente qué se perdería y sale sin tocar nada; `--exportar` primero, revisar el `git diff`, y recién ahí cargar. Si de verdad hay que descartar lo de la base, `--forzar`.
+
+La exportación conserva los comentarios del YAML — son notas de verificación en vivo, no adorno — y es idempotente: exportar dos veces seguidas no cambia el archivo, así que lo que salga en el diff es cambio real.
+
 ## Pendientes
 
 Cosas sabidas que faltan. Cada una dice por qué importa, que es lo que no se deduce del código.
 
 **Conectar el RAG.** El asistente no lee el corpus. `motor.responder()` solo usa `construir_system()` de `nucleo/recuperacion/`: no vectoriza la pregunta ni llama a `match_chunks`. Todo lo demás ya está en pie —106 fragmentos vectorizados, la función en la base, `bge-m3` corriendo, el aislamiento verificado— así que falta únicamente el paso que los une. Hoy, preguntarle a un técnico cómo diagnosticar una falla devuelve una respuesta razonable del prompt, no el procedimiento de `G-GO-04` que está cargado.
-
-**Terminar el editor de configuración contra la base.** El motor ya lee de `asistente.tenant_config` (`nucleo/config/fuente.py`), pero `nucleo/config/editor.py` todavía escribe en `tenants/<slug>.config.yaml`. O sea que hoy **la interfaz edita un archivo que el motor ya no lee**. Falta que el editor escriba el JSONB en esa tabla, incremente `config_version` y llame a `olvidar_config(tenant)` de `nucleo/canales/api.py` para que el cambio se vea sin reiniciar el contenedor. El validador ya se aplica venga de donde venga.
 
 **Calibrar `umbral_similitud`.** Está en 0.35 y una pregunta deliberadamente ajena ("la receta del ajiaco santafereño") todavía arrastra un fragmento con 0.350. `bge-m3` da similitudes altas de base; 0.45 parece más sano, pero subirlo puede dejar fuera preguntas legítimas mal formuladas. Decidirlo midiendo con preguntas reales de los técnicos.
 
