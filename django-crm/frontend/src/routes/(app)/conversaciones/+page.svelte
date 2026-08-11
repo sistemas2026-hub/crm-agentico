@@ -26,7 +26,7 @@
   import Pill from '$lib/v2/components/Pill.svelte';
   import Avatar from '$lib/v2/components/Avatar.svelte';
   import { relativeTime, shortAge } from '$lib/v2/format.js';
-  import { MessagesSquare, TriangleAlert, Search, X } from '@lucide/svelte';
+  import { MessagesSquare, TriangleAlert, Search, X, Phone, User } from '@lucide/svelte';
 
   /** @type {{ data: any }} */
   let { data } = $props();
@@ -52,6 +52,22 @@
   const pendiente = (/** @type {any} */ c) => c.escalada_a_humano && !c.atendida;
 
   const AUTOR = { user: 'Cliente', assistant: 'Asistente', humano: 'Vos', tool: 'Herramienta' };
+
+  // Quien escribe por WhatsApp se identifica con un telefono, y quien prueba
+  // desde el CRM con un uuid. Ninguno de los dos tiene iniciales: initials()
+  // devuelve '3' o 'B', un circulo con una letra que no significa nada. Un
+  // icono dice mas y no finge ser un nombre.
+  const esTelefono = (/** @type {string} */ v) => !!v && /^\+?\d[\d\s-]{5,}$/.test(v);
+  const esUuid = (/** @type {string} */ v) =>
+    !!v && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+
+  /** '3007778899' -> '300 777 8899'. Diez digitos seguidos no se leen. */
+  function quien(/** @type {string} */ v) {
+    if (!v) return 'Sin identificar';
+    const d = v.replace(/\D/g, '');
+    if (esTelefono(v) && d.length === 10) return `${d.slice(0, 3)} ${d.slice(3, 6)} ${d.slice(6)}`;
+    return v;
+  }
 
   let filtro = $state('todas');
   let busqueda = $state('');
@@ -159,11 +175,18 @@
     <div class="lista v2-pad">
       {#each visibles as c (c.id)}
         <a class="fila" class:pide={pendiente(c)} href="/conversaciones/{c.id}">
-          <Avatar name={c.usuario_externo || '?'} size={34} />
+          {#if esTelefono(c.usuario_externo)}
+            <span class="ident" aria-hidden="true"><Phone size={14} /></span>
+          {:else if !c.usuario_externo || esUuid(c.usuario_externo)}
+            <span class="ident" aria-hidden="true"><User size={14} /></span>
+          {:else}
+            <Avatar name={c.usuario_externo} size={30} />
+          {/if}
 
           <div class="cuerpo">
             <div class="alta">
-              <span class="quien">{c.usuario_externo || 'Sin identificar'}</span>
+              <span class="quien">{quien(c.usuario_externo)}</span>
+              <span class="canal">{canalLabel(c.canal)}</span>
               <span class="cuando v2-num">{shortAge(c.actualizado_en)}</span>
             </div>
 
@@ -174,23 +197,24 @@
               {c.ultimo_mensaje || 'Sin mensajes todavía'}
             </p>
 
-            <div class="baja">
-              {#if pendiente(c)}
-                <span class="marca" title={c.motivo_escalamiento || 'Escalada a un humano'}>
-                  Sin atender
-                </span>
-              {:else if c.escalada_a_humano}
-                <Pill tone="clay" dot>En curso</Pill>
-              {:else}
-                <Pill tone="slate" dot>Asistente</Pill>
-              {/if}
+            <!-- Solo se dibuja si hay algo que decir. "El bot la está llevando"
+                 es el caso normal: ponerle una píldora a cada fila agrega una
+                 línea y un rectángulo por conversación para no informar nada. -->
+            {#if c.escalada_a_humano || c.etiqueta}
+              <div class="baja">
+                {#if pendiente(c)}
+                  <span class="marca" title={c.motivo_escalamiento || 'Escalada a un humano'}>
+                    Sin atender
+                  </span>
+                {:else if c.escalada_a_humano}
+                  <Pill tone="clay" dot>En curso</Pill>
+                {/if}
 
-              {#if c.etiqueta}
-                <Pill tone={etiquetaTone(c.etiqueta)}>{etiquetaLabel(c.etiqueta)}</Pill>
-              {/if}
-
-              <span class="canal">{canalLabel(c.canal)}</span>
-            </div>
+                {#if c.etiqueta}
+                  <Pill tone={etiquetaTone(c.etiqueta)}>{etiquetaLabel(c.etiqueta)}</Pill>
+                {/if}
+              </div>
+            {/if}
           </div>
         </a>
       {/each}
@@ -295,30 +319,48 @@
   }
 
   /* ── filas ──────────────────────────────────────────────────────────── */
+  /* Lista continua con filetes, no tarjetas apiladas. Una bandeja se recorre
+     de arriba abajo: con borde y sombra por fila cada conversación se vuelve
+     una isla y el ojo tiene que saltar entre ocho rectángulos en vez de
+     deslizarse por una columna. */
   .lista {
-    padding-top: 12px;
+    padding-top: 2px;
     padding-bottom: 4px;
-    max-width: 900px;
+    max-width: 820px;
   }
   .fila {
     display: flex;
-    gap: 12px;
-    padding: 12px 13px;
-    margin-bottom: 7px;
-    border: 1px solid var(--v2-line);
-    border-radius: var(--v2-radius);
-    background: var(--v2-card);
+    gap: 11px;
+    padding: 10px 10px 11px;
+    border-bottom: 1px solid var(--v2-line-soft);
     color: inherit;
     text-decoration: none;
   }
-  .fila:hover {
-    border-color: var(--v2-slate);
+  .fila:last-child {
+    border-bottom: 0;
   }
-  /* Lo único que pide algo lleva ember, y como fondo + borde completo (el
-     patrón de .v2-next), nunca como franja lateral. */
+  .fila:hover {
+    background: var(--v2-hover);
+  }
+  /* Un tinte apenas perceptible, no un bloque. Lo que marca "sin atender" es
+     el punto ember de abajo; el fondo solo tiene que hacer que la fila salte
+     al pasar la vista, no gritar. */
   .fila.pide {
-    background: var(--v2-ember-soft);
-    border-color: var(--v2-ember-line);
+    background: color-mix(in srgb, var(--v2-ember) 4%, transparent);
+  }
+  .fila.pide:hover {
+    background: color-mix(in srgb, var(--v2-ember) 7%, transparent);
+  }
+  /* Círculo para quien no tiene nombre: un teléfono o un uuid no dan iniciales. */
+  .ident {
+    flex: none;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: var(--v2-line-soft);
+    color: var(--v2-slate);
   }
   .cuerpo {
     flex: 1;
@@ -331,7 +373,7 @@
   }
   .quien {
     font-weight: 620;
-    font-size: 13.6px;
+    font-size: 13.4px;
     letter-spacing: -0.01em;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -343,32 +385,33 @@
     font-size: 11px;
     color: var(--v2-slate);
   }
+  /* Una sola línea: el preview orienta, no se lee. Dos líneas hacen que la
+     altura de cada fila dependa de lo largo que fue el último mensaje. */
   .avance {
-    margin: 3px 0 8px;
+    margin: 2px 0 0;
     font-size: 12.5px;
     color: var(--v2-slate);
-    line-height: 1.45;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
-    -webkit-box-orient: vertical;
+    line-height: 1.4;
+    white-space: nowrap;
     overflow: hidden;
+    text-overflow: ellipsis;
   }
   .avance-quien {
     font-weight: 600;
     color: var(--v2-ink);
-    opacity: 0.65;
+    opacity: 0.6;
   }
   .baja {
     display: flex;
     align-items: center;
     gap: 7px;
     flex-wrap: wrap;
+    margin-top: 6px;
   }
   .canal {
+    flex: none;
     font-size: 11px;
     color: var(--v2-slate);
-    margin-left: auto;
     white-space: nowrap;
   }
   /* No es un Pill: Pill.svelte excluye ember a propósito porque ember no es
