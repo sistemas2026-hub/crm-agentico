@@ -38,6 +38,7 @@ Alcance de esta version (ver plan)
 from __future__ import annotations
 
 import json
+import time
 
 from nucleo.herramientas import agregado as ejecutor_agregado
 from nucleo.herramientas import http as ejecutor_http
@@ -163,6 +164,7 @@ def _ejecutar_verificacion(herramienta, sesion, argumentos_modelo: dict) -> dict
         sesion.verificado = True
         sesion.nivel = max(sesion.nivel, 1)
         sesion.id_cliente = str(filas[0]["id_servicio"])
+        sesion.interfaz_lan = filas[0].get("interfaz_lan") or None
         sesion.candidatos = []
     return {"verificado": True}
 
@@ -194,15 +196,36 @@ def _ejecutar_tool(herramienta, sesion, argumentos_modelo: dict) -> dict | list:
         else:
             argumentos[filtro.param] = valor
 
+    # Constantes del tenant, nunca decididas por el modelo (ver el comentario
+    # de 'argumentos_fijos' en schema.py).
+    argumentos.update(herramienta.argumentos_fijos)
+
     # El modelo puede proponer estas claves; se sobrescriben siempre con la
     # sesion verificada -- ver el comentario de 'inyectar_sesion' en schema.py.
     for arg_llamada, atributo_sesion in herramienta.inyectar_sesion.items():
         argumentos[arg_llamada] = getattr(sesion, atributo_sesion, None)
 
     if herramienta.tipo == "http":
+        if herramienta.asincrona:
+            return ejecutor_http.ejecutar_asincrono(herramienta, argumentos)
         return ejecutor_http.ejecutar(herramienta, argumentos)
     raise NotImplementedError(
         f"Tipo de herramienta '{herramienta.tipo}' aun no tiene ejecutor en nucleo/.")
+
+
+def _enmascarar(argumentos: dict) -> dict:
+    """
+    Para asistente.tool_calls.parametros -- deja ver QUE se consulto (nombre
+    de la clave) sin guardar el dato completo (cedula, id_servicio...). Los
+    ultimos 4 caracteres alcanzan para que un supervisor reconozca "es el
+    mismo cliente de siempre" sin que la auditoria termine siendo una copia
+    de los datos del cliente.
+    """
+    out = {}
+    for clave, valor in (argumentos or {}).items():
+        texto = str(valor)
+        out[clave] = f"...{texto[-4:]}" if len(texto) > 4 else texto
+    return out
 
 
 def _tool_call_a_dict(nombre: str, argumentos: dict, id_llamada: str) -> dict:
@@ -216,15 +239,27 @@ def _redactar(referencia_modelo: str, historial: list[dict], temperatura: float)
     return resp.contenido
 
 
-def responder(config, nombre_rol: str, mensaje: str, historial: list[dict], sesion) -> str:
+def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
+              sesion) -> tuple[str, list[dict]]:
     """
     'sesion' es una nucleo.seguridad.verificacion.Sesion (o None si el rol no
     exige verificacion). 'historial' se muta in-place -- el llamador lo
     conserva entre turnos.
+
+    Devuelve (respuesta, registro_herramientas). El registro es una fila por
+    herramienta invocada este turno -- nombre, parametros enmascarados,
+    exito, duracion -- para que nucleo/canales/api.py lo guarde en
+    asistente.tool_calls despues de resolver el conversation_id (que todavia
+    no existe en este punto: la conversacion se crea/reusa recien al
+    persistir el turno). Es la base de "ver proceso" en /conversaciones: que
+    hizo el agente, en que orden, sin que el motor sepa que existe esa
+    pantalla.
     """
     rol_cfg = config.roles.get(nombre_rol)
     if rol_cfg is None:
         raise ErrorMotor(f"Rol '{nombre_rol}' no existe en la configuracion del tenant.")
+
+    registro: list[dict] = []
 
     if not historial:
         historial.append({"role": "system", "content": construir_system(config, nombre_rol)})
@@ -241,13 +276,15 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict], sesi
     # Nunca rompe el turno: si Ollama no responde o la base falla, se sigue sin
     # contexto documental. Peor es no atender.
     try:
-        fragmentos, mejor = recuperar(config, config.identidad.slug, mensaje)
+        fragmentos, mejor = recuperar(config, config.identidad.slug, nombre_rol, mensaje)
     except Exception as e:
         print(f"[rag] no se pudo recuperar contexto: {e}")
         fragmentos, mejor = [], None
 
     if fragmentos:
-        historial.append({"role": "system", "content": bloque_de_contexto(fragmentos)})
+        citar_fuente = rol_cfg.orientado_a != "cliente_final"
+        historial.append({"role": "system",
+                          "content": bloque_de_contexto(fragmentos, citar_fuente)})
     else:
         registrar_sin_resultados(config.identidad.slug, mensaje, nombre_rol, mejor)
         # Solo se corta el turno si NO hay herramientas: ahi no queda nada con
@@ -261,7 +298,7 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict], sesi
         if not herramientas:
             respuesta = config.rag.mensaje_sin_resultados.strip()
             historial.append({"role": "assistant", "content": respuesta})
-            return respuesta
+            return respuesta, registro
 
     referencia_decision = config.llm.overrides.get(f"rol:{nombre_rol}",
                                                     config.llm.modelo_por_defecto)
@@ -279,7 +316,7 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict], sesi
         if not resp.llamadas:
             if not hubo_llamadas:
                 historial.append({"role": "assistant", "content": resp.contenido})
-                return resp.contenido
+                return resp.contenido, registro
             break  # ya no pide mas herramientas: pasa a redaccion final
 
         hubo_llamadas = True
@@ -290,12 +327,15 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict], sesi
 
         for i, llamada in enumerate(resp.llamadas):
             herramienta = next((h for h in herramientas if h.nombre == llamada.nombre), None)
+            t0 = time.monotonic()
+            codigo_error = None
 
             if herramienta is None:
                 # El catalogo que vio el modelo ya estaba acotado al rol, pero
                 # puede inventar un nombre -- el permiso lo decide el codigo.
                 salida = {"error": f"El rol '{nombre_rol}' no tiene la "
                                    f"herramienta '{llamada.nombre}'."}
+                codigo_error = "HERRAMIENTA_DESCONOCIDA"
             elif herramienta.verifica_identidad:
                 # Se ofrece SIEMPRE, este o no verificada la sesion todavia --
                 # es justamente como se verifica. Nunca pasa por el gate.
@@ -305,14 +345,37 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict], sesi
                          "instruccion_interna": "No muestres ningun dato. "
                              "Pedile al cliente el dato que falta para "
                              "verificar su identidad antes de continuar."}
+                codigo_error = "IDENTIDAD_NO_VERIFICADA"
             else:
-                crudo = _ejecutar_tool(herramienta, sesion, llamada.argumentos)
-                salida = listas_blancas.filtrar_campos(rol_cfg, herramienta.nombre, crudo)
+                try:
+                    crudo = _ejecutar_tool(herramienta, sesion, llamada.argumentos)
+                    salida = listas_blancas.filtrar_campos(rol_cfg, herramienta.nombre, crudo)
+                except Exception as e:
+                    # No tumba el turno: el modelo recibe un error legible y
+                    # puede decirle al cliente que hubo un problema, en vez de
+                    # que /chat completo se caiga con un 500.
+                    salida = {"error": "No se pudo completar la consulta en este momento."}
+                    codigo_error = f"{type(e).__name__}: {e}"[:200]
+
+            # asistente.tool_calls: fila por invocacion, para la auditoria en
+            # /conversaciones (nucleo/canales/api.py la persiste despues, una
+            # vez resuelto el conversation_id). n_registros solo tiene
+            # sentido para una lista (results de una consulta); para
+            # cualquier otra forma queda None a proposito, no un 0 enganoso.
+            registro.append({
+                "herramienta": llamada.nombre,
+                "parametros": _enmascarar(llamada.argumentos),
+                "exito": codigo_error is None,
+                "n_registros": len(salida) if isinstance(salida, list) else None,
+                "codigo_error": codigo_error,
+                "duracion_ms": int((time.monotonic() - t0) * 1000),
+                "es_escritura": bool(herramienta and not herramienta.solo_lectura),
+            })
 
             historial.append({"role": "tool", "name": llamada.nombre,
                               "tool_call_id": f"call_{i}",
                               "content": json.dumps(salida, ensure_ascii=False)})
 
     if hubo_llamadas:
-        return _redactar(referencia_redaccion, historial, config.llm.temperatura)
-    return "No pude completar la consulta en el numero de pasos permitido."
+        return _redactar(referencia_redaccion, historial, config.llm.temperatura), registro
+    return "No pude completar la consulta en el numero de pasos permitido.", registro

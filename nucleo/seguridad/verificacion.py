@@ -43,6 +43,10 @@ class Sesion:
     verificado: bool = False
     nivel: int = 0
     id_cliente: str | None = None
+    # Capturada al verificar (nunca la propone el modelo): la necesita
+    # ping_cliente para el parametro 'interfaz' de WispHub. Puede quedar
+    # vacia -- normal en clientes nuevos, ver nucleo/herramientas/http.py.
+    interfaz_lan: str | None = None
     candidatos: list[str] = field(default_factory=list)  # si el numero es ambiguo
 
 

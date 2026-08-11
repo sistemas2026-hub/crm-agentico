@@ -198,6 +198,8 @@ services:
     volumes:
       - ./nucleo:/app/nucleo
       - ./tenants:/app/tenants
+      - ./corpus:/app/corpus
+      - ./cli:/app/cli
     depends_on:
       ollama:
         condition: service_healthy

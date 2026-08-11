@@ -419,6 +419,15 @@ class Herramienta(Base):
     # extrae esa clave antes de pasar el dato al filtro de campos -- generico,
     # no sabe que proveedor la necesita.
     extraer_de: str | None = None
+    # La API responde 202 + {"task_id": ...} y hay que consultar el resultado
+    # aparte (ej. WispHub en ping_cliente, verificado en vivo agosto 2026) --
+    # ver nucleo/herramientas/http.py:ejecutar_asincrono().
+    asincrona: bool = False
+    # Valores constantes que el motor manda SIEMPRE con la llamada, nunca
+    # visibles para el modelo (a diferencia de filtros_verificados, que el
+    # modelo si propone). Ej.: ping_cliente necesita 'pings'/'arp_ping' fijos
+    # -- no son un dato de negocio que el modelo deba decidir cada vez.
+    argumentos_fijos: dict[str, Any] = Field(default_factory=dict)
 
     # --- agregado ---
     entidad: str | None = None

@@ -58,7 +58,8 @@ def vectorizar(pregunta: str, modelo: str) -> list[float]:
     return ollama.embed(model=modelo, input=pregunta)["embeddings"][0]
 
 
-def recuperar(config, tenant: str, pregunta: str) -> tuple[list[Fragmento], float | None]:
+def recuperar(config, tenant: str, rol: str,
+              pregunta: str) -> tuple[list[Fragmento], float | None]:
     """
     Devuelve (fragmentos que superan el umbral, mejor similitud vista).
 
@@ -68,16 +69,24 @@ def recuperar(config, tenant: str, pregunta: str) -> tuple[list[Fragmento], floa
     respuesta sin diagnostico: no se distingue un tema que no esta documentado
     de un umbral mal calibrado.
 
-    Lista vacia = el corpus no cubre eso. Es informacion, no un fallo: quien
-    llama decide que hacer con ese silencio.
+    'rol' filtra por documents.roles_permitidos (ver
+    supabase/03_documentos_roles.sql): un documento sin roles asignados no lo
+    recupera NADIE, fail-closed -- no es opcional, cada rol solo ve el corpus
+    que alguien le asigno a proposito.
+
+    Lista vacia = el corpus no cubre eso (o no hay nada asignado a este rol
+    todavia). Es informacion, no un fallo: quien llama decide que hacer con
+    ese silencio.
     """
     vector = vectorizar(pregunta, config.rag.modelo_embeddings)
 
     with sesion(tenant) as (cur, org):
         cur.execute(
             """select codigo, titulo, version, contenido, similitud
-               from asistente.match_chunks(%s, %s::vector, %s, 0.0)""",
-            (org, str(vector), config.rag.top_k))
+               from asistente.match_chunks(
+                 p_org => %s, p_query_embedding => %s::vector,
+                 p_match_count => %s, p_umbral => 0.0, p_rol => %s)""",
+            (org, str(vector), config.rag.top_k, rol))
         filas = cur.fetchall()
 
     if not filas:
@@ -119,17 +128,35 @@ def registrar_sin_resultados(tenant: str, pregunta: str, rol: str,
         print(f"[recuperacion] no se pudo registrar la pregunta sin respuesta: {e}")
 
 
-def bloque_de_contexto(fragmentos: list[Fragmento]) -> str:
+def bloque_de_contexto(fragmentos: list[Fragmento], citar_fuente: bool = True) -> str:
     """
-    El texto que se le inyecta al modelo. Lleva instruccion explicita de citar
-    y de no rellenar huecos: el prompt es guia y no garantia (PRD 7.4), pero
-    cuesta poco y ayuda.
+    El texto que se le inyecta al modelo. Lleva instruccion explicita de no
+    rellenar huecos: el prompt es guia y no garantia (PRD 7.4), pero cuesta
+    poco y ayuda.
+
+    'citar_fuente' separa dos publicos que necesitan lo opuesto: un
+    colaborador (soporte, facturacion) SI quiere saber "esto sale de
+    G-GO-06 v01" para poder verificarlo o citarlo el mismo. Un cliente_final
+    no -- nombrar el codigo/version de un documento interno en medio de la
+    charla suena a bot leyendo un manual, justo lo que rompe la idea de que
+    hable como una persona del equipo (ver conversaciones con clientes:
+    "la guia que uso para esto es MANUAL-001 v01" no es como habla alguien
+    real). El motor decide esto por rol_cfg.orientado_a, nunca lo pide el
+    modelo.
     """
     cuerpo = "\n\n".join(f.citar() for f in fragmentos)
+    instruccion = (
+        "Responde usando esta documentacion y menciona de que guia sale. "
+        if citar_fuente else
+        "Responde usando esta documentacion, con naturalidad, como lo diria "
+        "una persona del equipo. NUNCA menciones el nombre, codigo o version "
+        "del documento interno de donde sale esto -- el cliente no tiene que "
+        "notar que estas citando una guia. "
+    )
     return (
         "DOCUMENTACION INTERNA RECUPERADA PARA ESTA PREGUNTA:\n\n"
         f"{cuerpo}\n\n"
-        "Responde usando esta documentacion y menciona de que guia sale. "
+        f"{instruccion}"
         "Si no alcanza para responder del todo, di que parte falta en vez de "
         "completarla por tu cuenta."
     )

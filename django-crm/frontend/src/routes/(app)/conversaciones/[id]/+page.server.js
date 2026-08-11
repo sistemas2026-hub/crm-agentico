@@ -47,7 +47,20 @@ export async function load({ fetch, cookies, params }) {
     }
   }
 
-  return { conversacion: datos.conversacion, mensajes: datos.mensajes, caso, owners };
+  // "Ver proceso": que herramientas uso el agente, para que un supervisor
+  // pueda revisar el caso sin tener que leer todo el hilo. No corta la
+  // pagina si falla -- es un panel mas, no el contenido principal.
+  let herramientas = [];
+  try {
+    const respHerr = await fetch(
+      `${baseUrl}/conversaciones/${encodeURIComponent(params.id)}/herramientas?tenant=${encodeURIComponent(tenant)}`
+    );
+    if (respHerr.ok) herramientas = (await respHerr.json()).herramientas;
+  } catch {
+    // idem: el panel de proceso queda vacio, no se cae la conversacion.
+  }
+
+  return { conversacion: datos.conversacion, mensajes: datos.mensajes, caso, owners, herramientas };
 }
 
 /** @type {import('./$types').Actions} */

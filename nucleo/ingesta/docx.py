@@ -184,6 +184,12 @@ class Documento:
     titulo: str = ""
     version: str = ""
     fecha: str = ""
+    # Nombres de rol separados por coma, tal cual los declara la tabla de
+    # metadatos del documento (ej. 'soporte, facturacion') -- cli/cargar_corpus.py
+    # los valida contra los roles reales del tenant y los sube a
+    # asistente.documents.roles_permitidos. Vacio = el documento no se carga
+    # visible para ningun rol (fail-closed, ver supabase/03_documentos_roles.sql).
+    roles: str = ""
     # vigente | obsoleto. Un obsoleto se carga pero no se recupera:
     # queda constancia de que existio y de con cual se respondio en su momento.
     estado: str = "vigente"
@@ -366,7 +372,7 @@ def _extraer_metadatos(bloque: Bloque) -> dict:
     cab = [_norm(c) for c in bloque.filas[0]]
     val = bloque.filas[1]
     out = {}
-    for campo in ("codigo", "version", "fecha"):
+    for campo in ("codigo", "version", "fecha", "roles"):
         if campo in cab:
             i = cab.index(campo)
             if i < len(val) and val[i].strip():
@@ -400,6 +406,7 @@ def procesar(ruta: Path,
             doc.codigo = m.get("codigo", "")
             doc.version = m.get("version", "")
             doc.fecha = m.get("fecha", "")
+            doc.roles = m.get("roles", "")
         elif b.tipo == "tabla" and b.dimensiones == (1, 1) and not doc.titulo:
             # Solo la primera linea: la celda del titulo suele traer debajo el
             # area y la razon social, y eso repetido en cada fragmento

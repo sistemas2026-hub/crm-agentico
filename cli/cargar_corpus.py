@@ -75,6 +75,28 @@ def _hash(ruta: Path) -> str:
     return hashlib.sha256(ruta.read_bytes()).hexdigest()
 
 
+def _roles_validos(cfg, roles_texto: str, ruta: Path) -> list[str] | None:
+    """
+    'soporte, facturacion' -> ['soporte', 'facturacion'], validado contra los
+    roles reales del tenant -- un typo en la tabla de metadatos del documento
+    no debe pasar en silencio y dejar el proceso invisible para todo el mundo
+    sin que nadie se entere.
+
+    None (columna NULL) si el documento no declara 'roles': fail-closed, ver
+    supabase/03_documentos_roles.sql -- sin roles asignados, match_chunks no
+    lo recupera para ningun rol hasta que alguien lo asigne a proposito.
+    """
+    if not roles_texto:
+        return None
+    nombres = [r.strip() for r in roles_texto.split(",") if r.strip()]
+    desconocidos = [r for r in nombres if r not in cfg.roles]
+    if desconocidos:
+        raise SystemExit(
+            f"{ruta.name}: declara rol(es) inexistente(s) en 'roles': "
+            f"{', '.join(desconocidos)}. Roles del tenant: {', '.join(sorted(cfg.roles))}")
+    return nombres or None
+
+
 def _vectorizar(texto: str) -> list[float]:
     """
     Un fragmento -> un vector de 1024 numeros.
@@ -108,9 +130,10 @@ def _organizacion(cur, slug: str) -> str:
     return fila[0]
 
 
-def _cargar_obsoleto(cur, org_id: str, ruta: Path, hash_: str) -> bool:
+def _cargar_obsoleto(cur, org_id: str, ruta: Path, hash_: str, cfg) -> bool:
     """Solo la fila de metadatos. Sin fragmentar, sin vectorizar."""
     doc = procesar(ruta)                      # solo para leer codigo/titulo/version
+    roles = _roles_validos(cfg, doc.roles, ruta)
     cur.execute("""select id, hash from asistente.documents
                    where organization_id = %s and codigo = %s and version = %s""",
                (org_id, doc.codigo, doc.version))
@@ -119,13 +142,15 @@ def _cargar_obsoleto(cur, org_id: str, ruta: Path, hash_: str) -> bool:
         return False                          # sin cambios
     if fila:
         cur.execute("""update asistente.documents
-                       set titulo=%s, estado='obsoleto', hash=%s where id=%s""",
-                    (doc.titulo, hash_, fila[0]))
+                       set titulo=%s, estado='obsoleto', hash=%s, roles_permitidos=%s
+                       where id=%s""",
+                    (doc.titulo, hash_, roles, fila[0]))
     else:
         cur.execute("""insert into asistente.documents
-                       (organization_id, codigo, titulo, version, tipo, estado, hash)
-                       values (%s,%s,%s,%s,'guia_tecnica','obsoleto',%s)""",
-                    (org_id, doc.codigo, doc.titulo, doc.version, hash_))
+                       (organization_id, codigo, titulo, version, tipo, estado, hash,
+                        roles_permitidos)
+                       values (%s,%s,%s,%s,'guia_tecnica','obsoleto',%s,%s)""",
+                    (org_id, doc.codigo, doc.titulo, doc.version, hash_, roles))
     return True
 
 
@@ -156,7 +181,7 @@ def cargar_tenant(slug: str, forzar: bool = False) -> None:
             hash_ = _hash(ruta)
 
             if estado == "obsoleto":
-                cambio = _cargar_obsoleto(cur, org_id, ruta, hash_)
+                cambio = _cargar_obsoleto(cur, org_id, ruta, hash_, cfg)
                 con.commit()
                 total_obsoletos += 1
                 print(f"  [obsoleto] {ruta.name[:55]}  "
@@ -165,6 +190,7 @@ def cargar_tenant(slug: str, forzar: bool = False) -> None:
 
             # --- vigente: fragmentar, vectorizar, cargar ---
             doc = procesar(ruta, perfil=perfil, max_tokens=tokens)
+            roles = _roles_validos(cfg, doc.roles, ruta)
 
             cur.execute("""select id, hash from asistente.documents
                            where organization_id = %s and codigo = %s and version = %s""",
@@ -179,9 +205,11 @@ def cargar_tenant(slug: str, forzar: bool = False) -> None:
             if fila:
                 doc_id = fila[0]
                 cur.execute("""update asistente.documents
-                               set titulo=%s, estado='vigente', hash=%s, defectos=%s
+                               set titulo=%s, estado='vigente', hash=%s, defectos=%s,
+                                   roles_permitidos=%s
                                where id=%s""",
-                            (doc.titulo, hash_, json.dumps(doc.defectos, ensure_ascii=False), doc_id))
+                            (doc.titulo, hash_, json.dumps(doc.defectos, ensure_ascii=False),
+                             roles, doc_id))
                 # Los fragmentos viejos quedan obsoletos, NUNCA se borran: es
                 # lo que permite reconstruir con que version se respondio algo.
                 cur.execute("""update asistente.document_chunks
@@ -190,11 +218,11 @@ def cargar_tenant(slug: str, forzar: bool = False) -> None:
             else:
                 cur.execute("""insert into asistente.documents
                                (organization_id, codigo, titulo, version, tipo,
-                                estado, hash, defectos)
-                               values (%s,%s,%s,%s,'guia_tecnica','vigente',%s,%s)
+                                estado, hash, defectos, roles_permitidos)
+                               values (%s,%s,%s,%s,'guia_tecnica','vigente',%s,%s,%s)
                                returning id""",
                             (org_id, doc.codigo, doc.titulo, doc.version,
-                             hash_, json.dumps(doc.defectos, ensure_ascii=False)))
+                             hash_, json.dumps(doc.defectos, ensure_ascii=False), roles))
                 doc_id = cur.fetchone()[0]
 
             n = 0
@@ -213,7 +241,8 @@ def cargar_tenant(slug: str, forzar: bool = False) -> None:
                 n += 1
             con.commit()
             total_frag += n
-            print(f"  [cargado] {ruta.name[:55]}  {n} fragmentos vectorizados")
+            destino = f"roles: {', '.join(roles)}" if roles else "SIN ROL ASIGNADO -- no lo va a recuperar nadie"
+            print(f"  [cargado] {ruta.name[:55]}  {n} fragmentos vectorizados  ({destino})")
 
         elapsed = time.monotonic() - t0
 

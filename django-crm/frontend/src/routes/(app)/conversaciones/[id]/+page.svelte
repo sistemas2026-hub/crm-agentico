@@ -1,12 +1,11 @@
 <script>
   import { untrack } from 'svelte';
-  import { Select } from 'bits-ui';
   import { enhance } from '$app/forms';
   import PageHeader from '$lib/v2/components/PageHeader.svelte';
   import Pill from '$lib/v2/components/Pill.svelte';
   import Avatar from '$lib/v2/components/Avatar.svelte';
   import { relativeTime } from '$lib/v2/format.js';
-  import { TriangleAlert, ChevronDown, ArrowRight } from '@lucide/svelte';
+  import { TriangleAlert, ChevronDown, ArrowRight, CircleCheck, CircleX } from '@lucide/svelte';
 
   /** @type {{ data: any }} */
   let { data } = $props();
@@ -18,6 +17,7 @@
   let mensajes = $state(untrack(() => data.mensajes ?? []));
   let caso = $state(untrack(() => data.caso));
   let owners = $state(untrack(() => data.owners ?? []));
+  let herramientas = $state(untrack(() => data.herramientas ?? []));
 
   let entrada = $state('');
   let enviando = $state(false);
@@ -34,8 +34,9 @@
 
   let asignadoA = $state(caso?.assignee_id ?? '');
   let ownerActual = $derived(owners.find((o) => o.id === asignadoA) ?? null);
+  let listaAbierta = $state(false);
   /** @type {HTMLFormElement} */
-  let formularioAsignar;
+  let formularioAsignar = $state();
 
   /** El esquema admite user|assistant|tool|system; solo los dos primeros
    *  aparecen hoy (nucleo/persistencia/db.py solo registra esos), pero un
@@ -154,15 +155,12 @@
       >
         <input type="hidden" name="caso_id" value={caso.id} />
         <input type="hidden" name="assigned_to" value={asignadoA} />
-        <Select.Root
-          type="single"
-          value={asignadoA}
-          onValueChange={(v) => {
-            asignadoA = v;
-            formularioAsignar.requestSubmit();
-          }}
-        >
-          <Select.Trigger class="v2-btn asignado-trigger">
+        <div class="asignado-picker">
+          <button
+            type="button"
+            class="v2-btn asignado-trigger"
+            onclick={() => (listaAbierta = !listaAbierta)}
+          >
             {#if ownerActual}
               <Avatar name={ownerActual.name} size={18} />
               <span>{ownerActual.name}</span>
@@ -170,23 +168,49 @@
               <span class="v2-muted">Sin asignar</span>
             {/if}
             <ChevronDown size={14} style="margin-left:auto;opacity:0.6" />
-          </Select.Trigger>
-          <Select.Portal>
-            <Select.Content class="asignado-content" sideOffset={4}>
-              <Select.Viewport>
-                <Select.Item value="" label="Sin asignar" class="asignado-item">
+          </button>
+          {#if listaAbierta}
+            <!-- Fondo invisible: cerrar al hacer clic afuera, patron estandar
+                 sin depender de ninguna libreria de popover. -->
+            <button
+              type="button"
+              class="asignado-fondo"
+              aria-label="Cerrar"
+              onclick={() => (listaAbierta = false)}
+            ></button>
+            <ul class="asignado-content">
+              <li>
+                <button
+                  type="button"
+                  class="asignado-item"
+                  onclick={() => {
+                    asignadoA = '';
+                    listaAbierta = false;
+                    formularioAsignar.requestSubmit();
+                  }}
+                >
                   <span class="v2-muted">Sin asignar</span>
-                </Select.Item>
-                {#each owners as o (o.id)}
-                  <Select.Item value={o.id} label={o.name} class="asignado-item">
+                </button>
+              </li>
+              {#each owners as o (o.id)}
+                <li>
+                  <button
+                    type="button"
+                    class="asignado-item"
+                    onclick={() => {
+                      asignadoA = o.id;
+                      listaAbierta = false;
+                      formularioAsignar.requestSubmit();
+                    }}
+                  >
                     <Avatar name={o.name} size={18} />
                     <span>{o.name}</span>
-                  </Select.Item>
-                {/each}
-              </Select.Viewport>
-            </Select.Content>
-          </Select.Portal>
-        </Select.Root>
+                  </button>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        </div>
       </form>
     </div>
 
@@ -194,6 +218,36 @@
       Ver ticket completo <ArrowRight size={14} />
     </a>
   </div>
+{/if}
+
+{#if herramientas.length > 0}
+  <details class="proceso v2-pad">
+    <summary class="proceso-resumen">
+      Ver proceso
+      <span class="v2-muted">
+        ({herramientas.length} paso{herramientas.length === 1 ? '' : 's'}{#if herramientas.some((h) => h.es_escritura)}, con escritura{/if})
+      </span>
+    </summary>
+    <ol class="proceso-lista">
+      {#each herramientas as h}
+        <li class="proceso-item">
+          {#if h.exito}
+            <CircleCheck size={15} style="color:var(--v2-moss);flex:none" />
+          {:else}
+            <CircleX size={15} style="color:var(--v2-rust);flex:none" />
+          {/if}
+          <span class="proceso-nombre">{h.herramienta}</span>
+          {#if h.n_registros !== null}
+            <span class="v2-muted">{h.n_registros} resultado{h.n_registros === 1 ? '' : 's'}</span>
+          {/if}
+          {#if h.codigo_error}
+            <span class="v2-muted" title={h.codigo_error}>{h.codigo_error.split(':')[0]}</span>
+          {/if}
+          <span class="v2-muted proceso-duracion">{h.duracion_ms} ms</span>
+        </li>
+      {/each}
+    </ol>
+  </details>
 {/if}
 
 <div class="v2-scroll v2-pad" style="padding-top:12px">
@@ -205,7 +259,9 @@
       </div>
     {/each}
     {#if enviando && !escalada}
-      <div class="chat-burbuja chat-asistente chat-pensando">Pensando…</div>
+      <div class="chat-burbuja chat-asistente chat-escribiendo" aria-label="Escribiendo…">
+        <span class="punto"></span><span class="punto"></span><span class="punto"></span>
+      </div>
     {/if}
   </div>
 
@@ -253,13 +309,68 @@
     align-items: center;
     gap: 6px;
   }
-  :global(.asignado-trigger) {
+  .proceso {
+    padding-top: 0;
+    padding-bottom: 14px;
+    max-width: 720px;
+  }
+  .proceso-resumen {
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    user-select: none;
+  }
+  .proceso-resumen .v2-muted {
+    font-weight: 400;
+  }
+  .proceso-lista {
+    list-style: none;
+    margin: 10px 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .proceso-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12.5px;
+    padding: 4px 0;
+  }
+  .proceso-nombre {
+    font-family: var(--v2-mono, monospace);
+  }
+  .proceso-duracion {
+    margin-left: auto;
+  }
+  .asignado-picker {
+    position: relative;
+  }
+  .asignado-trigger {
     display: inline-flex;
     align-items: center;
     gap: 8px;
     min-width: 160px;
   }
-  :global(.asignado-content) {
+  /* Fondo invisible a pantalla completa: clic afuera cierra la lista. Es el
+     patron sin dependencias -- ver por que se saco bits-ui mas arriba. */
+  .asignado-fondo {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    background: transparent;
+    border: none;
+    cursor: default;
+    padding: 0;
+  }
+  .asignado-content {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
     background: var(--v2-surface, #fff);
     border: 1px solid var(--v2-border, #e5e5e5);
     border-radius: 10px;
@@ -267,19 +378,28 @@
     padding: 6px;
     min-width: 200px;
     z-index: 50;
+    list-style: none;
+    margin: 0;
   }
-  :global(.asignado-item) {
+  .asignado-item {
     display: flex;
     align-items: center;
     gap: 8px;
+    width: 100%;
     padding: 7px 10px;
     border-radius: 7px;
     font-size: 13.5px;
     cursor: pointer;
-    outline: none;
+    background: none;
+    border: none;
+    text-align: left;
+    color: inherit;
+    font-family: inherit;
   }
-  :global(.asignado-item[data-highlighted]) {
+  .asignado-item:hover,
+  .asignado-item:focus-visible {
     background: var(--v2-surface-2, #f1f1f1);
+    outline: none;
   }
 
   .chat-mensajes {
@@ -317,9 +437,37 @@
     font-size: 11px;
     opacity: 0.65;
   }
-  .chat-pensando {
-    opacity: 0.6;
-    font-style: italic;
+  .chat-escribiendo {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 13px 16px;
+  }
+  .chat-escribiendo .punto {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: 0.35;
+    animation: chat-parpadeo 1.2s infinite ease-in-out;
+  }
+  .chat-escribiendo .punto:nth-child(2) {
+    animation-delay: 0.2s;
+  }
+  .chat-escribiendo .punto:nth-child(3) {
+    animation-delay: 0.4s;
+  }
+  @keyframes chat-parpadeo {
+    0%,
+    60%,
+    100% {
+      opacity: 0.3;
+      transform: translateY(0);
+    }
+    30% {
+      opacity: 1;
+      transform: translateY(-2px);
+    }
   }
   .chat-form {
     display: flex;

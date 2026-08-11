@@ -160,13 +160,20 @@ roles:
       verificar_identidad_por_cedula con ese dato. Si te dice que es
       ambiguo, pedile ademas su nombre completo o direccion para descartar.
     orientado_a: cliente_final
-    puede_consultar: [consultar_mi_servicio, verificar_identidad_por_cedula]
+    puede_consultar: [consultar_mi_servicio, verificar_identidad_por_cedula, ping_cliente]
     campos_permitidos:
       # Lo minimo para autoservicio. El id_cliente NO lo propone el modelo:
       # lo inyecta el codigo desde la sesion autenticada.
-      consultar_mi_servicio: [estado, plan_internet, estado_facturas, saldo, fecha_corte, 
+      consultar_mi_servicio: [estado, plan_internet, estado_facturas, saldo, fecha_corte,
             ssid_router_wifi]
-    nunca_revelar: [password_servicio, password_cpe, password_router_wifi, usuario_router_wifi, 
+      # 'ping-N' (N=1..pings, ver argumentos_fijos de la herramienta) y
+      # 'ping-exitoso' son las claves reales que devuelve WispHub -- no hay
+      # forma de agruparlas bajo un nombre generico sin perder la lista
+      # blanca por campo (ver nucleo/seguridad/listas_blancas.py). 'host' es
+      # la MAC del equipo, no un dato de contacto -- se deja pasar porque
+      # ayuda a confirmar que respondio el equipo correcto.
+      ping_cliente: ["ping-1", "ping-2", "ping-3", "ping-exitoso"]
+    nunca_revelar: [password_servicio, password_cpe, password_router_wifi, usuario_router_wifi,
           cedula, direccion, coordenadas, ip, mac_cpe, sn_onu, sectorial, router.nombre]
 
 # -----------------------------------------------------------------------------
@@ -397,6 +404,44 @@ herramientas:
     metodo: GET
     auth_ref: WISPHUB_API_KEY
     auth_esquema: Api-Key
+
+  - nombre: ping_cliente
+    tipo: http
+    asincrona: true
+    descripcion: >
+      Ping en tiempo real al equipo del cliente autenticado, via WispHub --
+      confirma si hay comunicacion real con la red, mas alla de lo que diga
+      el estado de facturacion. Verificado en vivo (agosto 2026, cliente de
+      prueba id_servicio=5832): responde en pocos segundos, 3 intentos.
+
+      Si 'ping-exitoso' dice que todos respondieron: el corte NO es de
+      conectividad a nivel de red -- no sugieras reiniciar el router por eso,
+      la causa es otra (revisar plan/facturacion, o escalar para revision
+      mas profunda). Si no responde ninguno o la mayoria: segui el
+      procedimiento del manual (luces del router, reinicio de 30 segundos,
+      escalar si persiste).
+    solo_lectura: true
+    roles_permitidos: [cliente_final]
+    # base_url incluye '/api' a proposito (a diferencia del resto de
+    # herramientas de WispHub en este archivo, que lo ponen en 'endpoint'):
+    # ejecutar_asincrono() arma la URL de la tarea como base_url + '/tasks/
+    # {id}/', y esta es la unica herramienta asincrona hoy -- que quede
+    # autocontenida evita tener que inventar un campo de configuracion
+    # nuevo para un solo caso.
+    base_url: https://api.wisphub.io/api
+    endpoint: /clientes/{id_servicio}/ping/
+    metodo: POST
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    # Fijos, nunca decididos por el modelo (ver argumentos_fijos en
+    # schema.py). arp_ping=true: funciona aunque el cliente este detras de
+    # firewall, pero exige 'interfaz' -- por eso se inyecta interfaz_lan.
+    argumentos_fijos:
+      pings: 3
+      arp_ping: true
+    inyectar_sesion:
+      id_servicio: id_cliente
+      interfaz: interfaz_lan
 
   - nombre: consultar_ticket
     tipo: http

@@ -122,7 +122,8 @@ def chat():
     estado = _sesiones[clave]
 
     try:
-        respuesta = motor.responder(config, rol, mensaje, estado["historial"], estado["sesion"])
+        respuesta, registro_herramientas = motor.responder(
+            config, rol, mensaje, estado["historial"], estado["sesion"])
     except motor.ErrorMotor as e:
         return jsonify({"error": str(e)}), 400
 
@@ -131,6 +132,8 @@ def chat():
         persistencia.registrar_mensaje(tenant, canal, id_sesion, rol, "user", mensaje)
         conversation_id = persistencia.registrar_mensaje(
             tenant, canal, id_sesion, rol, "assistant", respuesta)
+        for llamada in registro_herramientas:
+            persistencia.registrar_llamada_herramienta(tenant, conversation_id, rol, llamada)
     except Exception as e:  # nunca se rompe el turno por un fallo de persistencia
         print(f"[persistencia] no se pudo guardar el turno: {e}")
 
@@ -383,6 +386,28 @@ def conversaciones_responder_humano(id_conversacion):
         return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
 
     return jsonify({"ok": True}), 201
+
+
+@app.get("/conversaciones/<id_conversacion>/herramientas")
+def conversaciones_herramientas(id_conversacion):
+    """
+    Que hizo el agente en esta conversacion -- para el panel "Ver proceso"
+    de un supervisor. Solo lectura, mismo criterio de auditoria que el
+    resto: nombre de la herramienta y resultado, nunca el dato consultado.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+
+    try:
+        llamadas = persistencia.herramientas_de(tenant, id_conversacion)
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:
+        print(f"[conversaciones] fallo al leer herramientas: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo leer el registro de herramientas."}), 500
+
+    return jsonify({"herramientas": llamadas})
 
 
 @app.get("/salud")

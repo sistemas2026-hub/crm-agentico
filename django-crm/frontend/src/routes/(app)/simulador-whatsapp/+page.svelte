@@ -90,7 +90,9 @@
         <div class="chat-burbuja chat-{m.rol}">{m.texto}</div>
       {/each}
       {#if enviando}
-        <div class="chat-burbuja chat-asistente chat-pensando">Pensando…</div>
+        <div class="chat-burbuja chat-asistente chat-escribiendo" aria-label="Escribiendo…">
+          <span class="punto"></span><span class="punto"></span><span class="punto"></span>
+        </div>
       {/if}
     </div>
 
@@ -176,9 +178,37 @@
     background: #fee2e2;
     color: #991b1b;
   }
-  .chat-pensando {
-    opacity: 0.6;
-    font-style: italic;
+  .chat-escribiendo {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 13px 16px;
+  }
+  .chat-escribiendo .punto {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: 0.35;
+    animation: chat-parpadeo 1.2s infinite ease-in-out;
+  }
+  .chat-escribiendo .punto:nth-child(2) {
+    animation-delay: 0.2s;
+  }
+  .chat-escribiendo .punto:nth-child(3) {
+    animation-delay: 0.4s;
+  }
+  @keyframes chat-parpadeo {
+    0%,
+    60%,
+    100% {
+      opacity: 0.3;
+      transform: translateY(0);
+    }
+    30% {
+      opacity: 1;
+      transform: translateY(-2px);
+    }
   }
   .chat-form {
     display: flex;
