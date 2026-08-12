@@ -59,15 +59,34 @@ seguir sin autenticacion -- es el mismo criterio de dos capas del PRD §7.4.
 from __future__ import annotations
 
 import os
+import time
 
 _CLAVE_ENV = "SECRETOS_CLAVE_MAESTRA"
 
-# tenant -> {nombre: valor en claro}. La alternativa es una consulta y un
-# descifrado por cada llamada a una herramienta, en el camino caliente del
-# turno. Se vacia con olvidar(), igual que el cache de configuracion de
-# nucleo/canales/api.py, para que un cambio desde la interfaz se vea en el
-# turno siguiente sin reiniciar el proceso.
-_CACHE: dict[str, dict[str, str]] = {}
+# Cuanto vale una copia cacheada antes de releer de la base.
+#
+# NO ALCANZA CON olvidar()  (esto costo un rato de depuracion)
+# ------------------------------------------------------------
+# olvidar() solo vacia el cache DEL PROCESO QUE ESCRIBE. Pero hay mas de un
+# proceso leyendo estos secretos: el motor de produccion, el de desarrollo de
+# cada quien, y manana varios workers. Guardar una credencial desde una
+# pantalla invalida el cache de SU motor y deja a los demas con la copia vieja,
+# para siempre.
+#
+# Paso de verdad: se roto el verify_token de WhatsApp desde una maquina y el
+# motor de produccion siguio comparando contra el anterior. Meta mandaba el
+# token nuevo, el motor tenia el viejo, y el 403 resultante era
+# indistinguible de un token mal escrito -- se reviso la clave maestra, las
+# variables y el dominio antes de mirar aca.
+#
+# Un minuto acota el problema sin devolver el costo que el cache evita: en el
+# peor caso una credencial recien rotada tarda un minuto en tomar efecto, y
+# el camino caliente del turno hace como mucho una consulta por minuto y por
+# empresa en vez de una por cada llamada a una herramienta.
+VIGENCIA_CACHE_SEG = 60
+
+# tenant -> (momento en que se leyo, {nombre: valor en claro}).
+_CACHE: dict[str, tuple[float, dict[str, str]]] = {}
 
 
 class ErrorSecreto(RuntimeError):
@@ -148,9 +167,11 @@ def obtener(tenant: str | None, nombre: str) -> str | None:
     utilidad de cli/, un arranque): en ese caso solo se mira el entorno.
     """
     if tenant:
-        if tenant not in _CACHE:
-            _CACHE[tenant] = _cargar(tenant)
-        valor = _CACHE[tenant].get(nombre)
+        entrada = _CACHE.get(tenant)
+        if entrada is None or (time.monotonic() - entrada[0]) > VIGENCIA_CACHE_SEG:
+            entrada = (time.monotonic(), _cargar(tenant))
+            _CACHE[tenant] = entrada
+        valor = entrada[1].get(nombre)
         if valor:
             return valor
     return os.environ.get(nombre)

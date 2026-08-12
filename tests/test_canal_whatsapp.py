@@ -32,6 +32,7 @@ import hashlib
 import hmac
 import json
 import sys
+import time
 from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parent.parent
@@ -80,10 +81,12 @@ def main():
     # ejercita el MISMO camino de produccion (resolver por empresa) sin
     # necesitar conexion. Es lo que permite correr esta guarda en cualquier
     # maquina, incluido un CI sin base.
-    secretos._CACHE[TENANT] = {
+    # (momento, valores) -- el cache guarda cuando se leyo para poder
+    # vencer solo. time.monotonic() de ahora lo deja recien leido.
+    secretos._CACHE[TENANT] = (time.monotonic(), {
         "WHATSAPP_APP_SECRET": APP_SECRET,
         "WHATSAPP_VERIFY_TOKEN": VERIFY_TOKEN,
-    }
+    })
 
     config = _ConfigFalsa()
     cuerpo = json.dumps({"object": "whatsapp_business_account"}).encode()
@@ -111,10 +114,43 @@ def main():
           not whatsapp.firma_valida(config, TENANT, cuerpo, "sha256=nada"))
 
     print("\nfalla cerrado: sin poder resolver el secreto, NO se acepta")
-    guardado = secretos._CACHE[TENANT].pop("WHATSAPP_APP_SECRET")
+    guardado = secretos._CACHE[TENANT][1].pop("WHATSAPP_APP_SECRET")
     check("sin el app_secret cargado, una firma valida tampoco pasa",
           not whatsapp.firma_valida(config, TENANT, cuerpo, firmar(cuerpo)))
-    secretos._CACHE[TENANT]["WHATSAPP_APP_SECRET"] = guardado
+    secretos._CACHE[TENANT][1]["WHATSAPP_APP_SECRET"] = guardado
+
+    print("\nel cache vence solo (una credencial rotada en OTRO proceso)")
+    # Es el fallo que costo una tarde: se roto el verify_token desde una
+    # maquina y el motor de produccion siguio comparando contra el anterior,
+    # porque olvidar() solo vacia el cache del proceso que escribe. Sin
+    # vencimiento, esa copia vieja quedaba para siempre.
+    # Se sustituye la lectura de la base por una que devuelve el valor NUEVO,
+    # y se siembra el cache con el VIEJO. Asi la prueba no necesita conexion y
+    # mide exactamente lo que importa: si se releyo o si se devolvio la copia
+    # rancia.
+    lecturas = []
+    original = secretos._cargar
+    secretos._cargar = lambda t: (lecturas.append(t),
+                                  {"WHATSAPP_VERIFY_TOKEN": "el-token-NUEVO"})[1]
+    try:
+        secretos._CACHE[TENANT] = (time.monotonic(),
+                                   {"WHATSAPP_VERIFY_TOKEN": "el-token-viejo"})
+        check("una entrada fresca no vuelve a la base",
+              secretos.obtener(TENANT, "WHATSAPP_VERIFY_TOKEN") == "el-token-viejo"
+              and lecturas == [])
+
+        secretos._CACHE[TENANT] = (time.monotonic() - secretos.VIGENCIA_CACHE_SEG - 1,
+                                   {"WHATSAPP_VERIFY_TOKEN": "el-token-viejo"})
+        check("una vencida se relee y devuelve el valor NUEVO",
+              secretos.obtener(TENANT, "WHATSAPP_VERIFY_TOKEN") == "el-token-NUEVO"
+              and lecturas == [TENANT])
+    finally:
+        secretos._cargar = original
+
+    secretos._CACHE[TENANT] = (time.monotonic(), {
+        "WHATSAPP_APP_SECRET": APP_SECRET,
+        "WHATSAPP_VERIFY_TOKEN": VERIFY_TOKEN,
+    })
 
     print("\nhandshake de alta")
     check("el verify_token correcto pasa",
