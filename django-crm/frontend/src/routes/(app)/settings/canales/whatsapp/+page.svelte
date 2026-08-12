@@ -2,12 +2,19 @@
   /**
    * WhatsApp: las credenciales que hacen falta para prender el canal.
    *
-   * NUNCA se ve un valor GUARDADO. Esta pantalla solo sabe si algo esta
-   * cargado (una pista de 4 caracteres y cuando) -- los valores reales viven
+   * NUNCA se ve un valor GUARDADO ENTERO. Esta pantalla solo sabe si algo
+   * esta cargado y sus ultimos 4 caracteres -- los valores reales viven
    * cifrados en la base y ni siquiera salen de ella (ver
    * nucleo/seguridad/secretos.py::listar). La unica excepcion es el
    * verify_token recien generado: ese SI se muestra una vez, porque hay que
    * copiarlo a Meta, y despues de esa carga se pierde igual que los demas.
+   *
+   * El campo muestra esa pista enmascarada ('••••••••0688') como marcador de
+   * posicion. Es la misma informacion que ya estaba unas lineas mas abajo,
+   * pero puesta DONDE SE LA BUSCA: una caja vacia dice "aca no hay nada", y
+   * la gente termina preguntando si se guardo, o recargando un valor que ya
+   * estaba. Que el dato exista en la pantalla no alcanza si esta lejos de la
+   * pregunta que responde.
    *
    * El ojo de cada campo es OTRA cosa y no contradice lo anterior: muestra lo
    * que la persona acaba de escribir o pegar, que ya esta en su navegador.
@@ -366,7 +373,11 @@
                       type={aLaVista[c.clave] ? 'text' : 'password'}
                       name="valor"
                       autocomplete="off"
-                      placeholder={secreto ? 'Reemplazar…' : 'Pegar valor…'}
+                      placeholder={secreto
+                        ? secreto.pista
+                          ? `••••••••••••${secreto.pista}`
+                          : 'Cargado — pegá otro para reemplazar'
+                        : 'Pegar valor…'}
                       required
                       bind:value={pegado[c.clave]}
                     />
