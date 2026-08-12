@@ -1162,6 +1162,46 @@ def whatsapp_plantillas(tenant):
     })
 
 
+@app.post("/conversaciones/<id_conversacion>/conservar")
+def conversaciones_conservar(id_conversacion):
+    """
+    Marca o desmarca una conversacion para que la purga por retencion no la
+    borre.
+
+    NO es lo mismo que marcar un ejemplo (ver /mensajes/<id>/marcar): un
+    ejemplo dice "esta respuesta del asistente fue buena" y alimenta el manual
+    de procedimientos; esto dice "no la borres todavia" -- un reclamo, un
+    incidente, algo que puede terminar en disputa, que es justo lo que NO hay
+    que copiar como ejemplo.
+
+    Cuerpo: {tenant, conservar: bool, motivo?, por?}
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+
+    conservar = bool(cuerpo.get("conservar", True))
+    motivo = (cuerpo.get("motivo") or "").strip() or None
+
+    # Al conservar se exige un motivo: dentro de seis meses nadie va a saber
+    # si la marca sigue teniendo sentido, y sin eso no hay forma de decidir si
+    # se puede soltar. Al desmarcar no hace falta.
+    if conservar and not motivo:
+        return jsonify({"error": "Hay que decir por que se conserva."}), 400
+
+    try:
+        existe = persistencia.marcar_conservar(
+            tenant, id_conversacion, conservar, motivo, cuerpo.get("por"))
+    except Exception as e:
+        print(f"[conversaciones] fallo al marcar conservar: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo guardar."}), 500
+
+    if not existe:
+        return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+    return jsonify({"conservar": conservar, "motivo": motivo})
+
+
 @app.get("/conversaciones/<id_conversacion>/media")
 def conversaciones_media(id_conversacion):
     """Que adjuntos tiene una conversacion, SIN los bytes -- la bandeja pide

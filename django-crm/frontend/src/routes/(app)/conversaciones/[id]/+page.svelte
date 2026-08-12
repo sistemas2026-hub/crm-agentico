@@ -39,6 +39,47 @@
       al lado y pasa a abrirse como panel. */
   let contextoAbierto = $state(false);
 
+  // --- conservar: sacar la conversacion de la purga por retencion ----------
+  // Distinto de marcar un ejemplo: eso dice "esta respuesta fue buena" y
+  // alimenta el manual; esto dice "no la borres todavia" -- un reclamo, un
+  // incidente. Justo lo que NO hay que copiar como ejemplo.
+  let conservada = $state(untrack(() => !!data.conversacion?.conservar));
+  let motivoConservar = $state(untrack(() => data.conversacion?.conservar_motivo ?? ''));
+  let pidiendoMotivo = $state(false);
+  let guardandoConservar = $state(false);
+  let errorConservar = $state('');
+
+  async function guardarConservar(/** @type {boolean} */ valor) {
+    if (guardandoConservar) return;
+    // El motivo es obligatorio al conservar: dentro de seis meses nadie va a
+    // saber si la marca sigue teniendo sentido sin el.
+    if (valor && !motivoConservar.trim()) {
+      pidiendoMotivo = true;
+      return;
+    }
+    guardandoConservar = true;
+    errorConservar = '';
+    try {
+      const resp = await fetch(`/api/conversaciones/${conversacion.id}/conservar`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conservar: valor, motivo: motivoConservar.trim() })
+      });
+      const datos = await resp.json();
+      if (!resp.ok) {
+        errorConservar = datos.error || 'No se pudo guardar.';
+        return;
+      }
+      conservada = valor;
+      if (!valor) motivoConservar = '';
+      pidiendoMotivo = false;
+    } catch (/** @type {any} */ err) {
+      errorConservar = err?.message || 'No se pudo guardar.';
+    } finally {
+      guardandoConservar = false;
+    }
+  }
+
   const CANAL_LABEL = { whatsapp: 'WhatsApp', 'whatsapp-simulado': 'Simulador' };
   const canalLabel = (c) => CANAL_LABEL[c] ?? c;
   const canalTone = (c) => (c === 'whatsapp' ? 'moss' : 'slate');
@@ -505,6 +546,48 @@
   </div>
   {/if}
 
+  <!-- Conservar. Va arriba de todo y fuera de cualquier plegable: es una
+       decisión sobre si esta conversación va a seguir existiendo, y hay que
+       poder verla sin abrir nada. -->
+  <div class="conservar" class:activa={conservada}>
+    <label class="conservar-linea">
+      <input
+        type="checkbox"
+        checked={conservada}
+        disabled={guardandoConservar}
+        onchange={(e) => guardarConservar(/** @type {HTMLInputElement} */ (e.currentTarget).checked)}
+      />
+      <span>
+        <b>Conservar</b>
+        <span class="v2-muted">— no borrar al vencer la retención</span>
+      </span>
+    </label>
+
+    {#if pidiendoMotivo && !conservada}
+      <div class="conservar-motivo">
+        <input
+          class="v2-input"
+          type="text"
+          bind:value={motivoConservar}
+          placeholder="¿Por qué? Ej: reclamo en curso"
+          onkeydown={(e) => { if (e.key === 'Enter') guardarConservar(true); }}
+        />
+        <button
+          class="v2-btn v2-btn-sm"
+          type="button"
+          disabled={guardandoConservar || !motivoConservar.trim()}
+          onclick={() => guardarConservar(true)}
+        >
+          Guardar
+        </button>
+      </div>
+    {:else if conservada && motivoConservar}
+      <p class="conservar-nota">{motivoConservar}</p>
+    {/if}
+
+    {#if errorConservar}<p class="conservar-mal">{errorConservar}</p>{/if}
+  </div>
+
   {#if herramientas.length > 0}
   <details class="proceso">
     <summary class="proceso-resumen">
@@ -733,6 +816,56 @@
   .proceso,
   .docs {
     padding: 14px 0 0;
+  }
+
+  /* ── conservar ──────────────────────────────────────────────────────── */
+  /* Sin recuadro mientras está apagada: es una casilla más, no una alerta.
+     Al encenderla toma superficie, porque a partir de ahí sí es un estado
+     que hay que poder ver de un vistazo. */
+  .conservar {
+    padding: 0 0 14px;
+    border-bottom: 1px solid var(--v2-line-soft);
+  }
+  .conservar.activa {
+    background: var(--v2-line-soft);
+    border-radius: 8px;
+    padding: 10px;
+    margin-bottom: 14px;
+    border-bottom: 0;
+  }
+  .conservar-linea {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 12.5px;
+    line-height: 1.4;
+    cursor: pointer;
+  }
+  .conservar-linea input {
+    margin-top: 2px;
+    flex: none;
+    accent-color: var(--v2-ink);
+  }
+  .conservar-motivo {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+  }
+  .conservar-motivo input {
+    flex: 1;
+    min-width: 0;
+    font-size: 12.5px;
+  }
+  .conservar-nota {
+    margin: 6px 0 0 22px;
+    font-size: 11.5px;
+    color: var(--v2-slate);
+    line-height: 1.4;
+  }
+  .conservar-mal {
+    margin: 6px 0 0;
+    font-size: 11.5px;
+    color: var(--v2-rust);
   }
 
   /* ── copiloto documental ────────────────────────────────────────────── */

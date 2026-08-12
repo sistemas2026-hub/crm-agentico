@@ -232,7 +232,7 @@ def mensajes_de(tenant: str, conversation_id: str) -> dict:
         cur.execute(
             """select id, canal, usuario_externo, rol_efectivo, estado,
                       escalada_a_humano, motivo_escalamiento, caso_id, etiqueta,
-                      actualizado_en
+                      actualizado_en, conservar, conservar_motivo, conservar_por
                from asistente.conversations
                where organization_id = %s and id = %s""",
             (org, conversation_id))
@@ -456,6 +456,32 @@ def purgar_media(tenant: str, dias: int) -> int:
         return cur.rowcount
 
 
+def marcar_conservar(tenant: str, conversation_id: str, conservar: bool,
+                     motivo: str | None = None,
+                     por: str | None = None) -> bool:
+    """
+    Saca (o vuelve a meter) una conversacion en la purga por retencion.
+
+    Distinto de marcar un ejemplo: eso dice "esta respuesta fue buena" y
+    alimenta el manual; esto dice "no la borres todavia" y no aparece en
+    ningun lado mas. Ver supabase/10_conservar_conversacion.sql.
+
+    Devuelve False si la conversacion no existe o no es de este tenant.
+
+    Al desmarcar se limpian motivo y autor: dejarlos colgados haria creer que
+    la conversacion sigue protegida cuando ya no lo esta.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """update asistente.conversations
+               set conservar = %s,
+                   conservar_motivo = case when %s then %s else null end,
+                   conservar_por    = case when %s then %s else null end
+               where organization_id = %s and id = %s""",
+            (conservar, conservar, motivo, conservar, por, org, conversation_id))
+        return cur.rowcount > 0
+
+
 def purgar_conversaciones(tenant: str, dias: int) -> int:
     """
     Borra las conversaciones mas viejas que 'dias'. Devuelve cuantas.
@@ -463,12 +489,20 @@ def purgar_conversaciones(tenant: str, dias: int) -> int:
     Los mensajes, las llamadas a herramientas y los adjuntos se van en cascada
     con ellas -- estan declarados 'on delete cascade'.
 
-    LO QUE NO SE BORRA: una conversacion que tenga alguna respuesta marcada
-    como ejemplo valido. Esas alimentan el manual de procedimientos
-    (supabase/05_ejemplos_validados.sql), y tambien cuelgan en cascada, asi que
-    sin esta excepcion la purga nocturna destruiria en silencio el material que
-    alguien marco a mano. Una conversacion que un colaborador senalo como buena
-    dejo de ser historial descartable.
+    DOS EXCEPCIONES, por dos razones distintas:
+
+    1. 'conservar' -- alguien dijo explicitamente "no borres esto todavia": un
+       reclamo, un incidente, algo que puede terminar en disputa. Ver
+       supabase/10_conservar_conversacion.sql.
+
+    2. Tener alguna respuesta marcada como ejemplo valido. Esas alimentan el
+       manual de procedimientos (supabase/05_ejemplos_validados.sql) y cuelgan
+       en cascada, asi que sin la excepcion la purga nocturna destruiria en
+       silencio el material que alguien marco a mano.
+
+    No son lo mismo y por eso son dos condiciones: un ejemplo dice "esta
+    respuesta fue buena", conservar dice "no la borres". Una conversacion
+    puede necesitar lo segundo siendo justo lo que NO hay que imitar.
 
     Se limpia el evento de webhook por separado (no cuelga de la conversacion)
     y con un plazo mucho mas corto: los reintentos de la plataforma ocurren en
@@ -479,6 +513,7 @@ def purgar_conversaciones(tenant: str, dias: int) -> int:
             """delete from asistente.conversations c
                where c.organization_id = %s
                  and c.actualizado_en < now() - make_interval(days => %s)
+                 and not c.conservar
                  and not exists (
                    select 1 from asistente.ejemplos_validados e
                    where e.conversation_id = c.id)""",
