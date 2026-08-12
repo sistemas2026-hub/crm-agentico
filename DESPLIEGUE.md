@@ -82,7 +82,7 @@ sysctl -w vm.swappiness=10 && echo 'vm.swappiness=10' >> /etc/sysctl.conf
 
 ### 3. Variables
 
-Van en la sección **Environment** del servicio. Dieciséis son obligatorias; el despliegue se detiene nombrando la que falte, antes de construir nada. Péguelas todas de una vez — Compose se para en la primera.
+Van en la sección **Environment** del servicio. **Diecinueve** son obligatorias; el despliegue se detiene nombrando la que falte, antes de construir nada. Péguelas todas de una vez — **Compose se para en la primera**, así que ir agregándolas de a una es un redespliegue por variable.
 
 ```
 DBHOST=crm.rapilinksas.co
@@ -107,6 +107,9 @@ WISPHUB_API_KEY=
 WISPHUB_BASE_URL=https://api.wisphub.io
 WISPHUB_MODO_REAL=true
 DEEPSEEK_API_KEY=
+BOTTLECRM_API_TOKEN=
+
+SECRETOS_CLAVE_MAESTRA=
 
 ASISTENTE_TENANT=rapilink
 
@@ -114,6 +117,16 @@ DEFAULT_FROM_EMAIL=noreply@rapilinksas.co
 ```
 
 `ASISTENTE_TENANT` es el slug del `tenants/<slug>.config.yaml`, y es de quién habla el frontend cuando alguien abre `/agentes` o `/settings/asistente`. Se declara acá y no en el código porque es lo único que ata esa interfaz a una empresa concreta. La URL del motor no está en esta lista: la fija el compose (`http://motor:5000`), que es quien conoce el nombre del servicio.
+
+`SECRETOS_CLAVE_MAESTRA` descifra las credenciales por empresa (`asistente.tenant_secrets`). Tiene que ser **la misma** que la del `.env` de desarrollo, o lo que se cargue desde una máquina no se descifra en la otra. Se genera una vez con:
+
+```
+py -3.13 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+**Si se pierde, no hay forma de recuperar los valores**: hay que volver a cargar todas las credenciales a mano. Es la propiedad buscada, no un descuido — guardala donde guardes las demás.
+
+`BOTTLECRM_API_TOKEN` lo usa el motor para abrir el ticket al escalar una conversación y para comprobar si ese caso sigue abierto. Sin él, el bot escala y el ticket nunca se crea.
 
 Los valores vacíos salen del `.env` local, salvo `SECRET_KEY`, que se genera nuevo y **nunca** se reutiliza el de desarrollo:
 

@@ -100,7 +100,7 @@ services:
       # registran "el asistente no esta configurado" y no hacen nada, que es
       # peor porque no se nota.
       ASISTENTE_URL: ${ASISTENTE_URL:-http://motor:5000}
-      ASISTENTE_TENANT: ${ASISTENTE_TENANT:-rapilink}
+      ASISTENTE_TENANT: ${ASISTENTE_TENANT:?slug del tenant, el mismo de tenants/<slug>.config.yaml}
       # --- Correo ---
       DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-noreply@rapilinksas.co}
       ADMIN_EMAIL: ${ADMIN_EMAIL:?}
@@ -153,7 +153,7 @@ services:
       # registran "el asistente no esta configurado" y no hacen nada, que es
       # peor porque no se nota.
       ASISTENTE_URL: ${ASISTENTE_URL:-http://motor:5000}
-      ASISTENTE_TENANT: ${ASISTENTE_TENANT:-rapilink}
+      ASISTENTE_TENANT: ${ASISTENTE_TENANT:?slug del tenant, el mismo de tenants/<slug>.config.yaml}
     depends_on:
       redis:
         condition: service_healthy
@@ -198,7 +198,7 @@ services:
       # registran "el asistente no esta configurado" y no hacen nada, que es
       # peor porque no se nota.
       ASISTENTE_URL: ${ASISTENTE_URL:-http://motor:5000}
-      ASISTENTE_TENANT: ${ASISTENTE_TENANT:-rapilink}
+      ASISTENTE_TENANT: ${ASISTENTE_TENANT:?slug del tenant, el mismo de tenants/<slug>.config.yaml}
     depends_on:
       redis:
         condition: service_healthy
