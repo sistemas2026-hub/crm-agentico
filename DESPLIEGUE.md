@@ -181,6 +181,8 @@ Meta necesita una URL pública HTTPS para entregar los mensajes, así que el mot
 
 ⚠️ **El `PathPrefix` no es opcional.** Sin él, el mismo dominio publica `/chat`, `/agentes` y `/agentes/catalogo`, que no piden autenticación de ninguna clase: cualquiera podría conversar con el asistente a costa de la empresa y leer cómo está configurado cada agente. La regla tiene que restringirse a `/canales/whatsapp` y nada más.
 
+⚠️ **Y por eso el envío proactivo vive FUERA de ese prefijo.** `POST /avisos/whatsapp/<tenant>` (mandar una plantilla) y `GET /plantillas/whatsapp/<tenant>` están deliberadamente en otra ruta: la firma de Meta no los protege —quien llama no es Meta, es una tarea interna del CRM por la red del compose— así que si cayeran bajo `/canales/whatsapp` quedarían expuestos a internet **sin autenticación de ninguna clase**, y cualquiera podría mandarle mensajes a los clientes de la empresa desde su número. Si algún día hay que exponerlos, necesitan autenticación propia primero.
+
 La autenticación de esa ruta no es un token de sesión sino **la firma del cuerpo**: Meta firma cada entrega con el App Secret (`X-Hub-Signature-256`) y el motor rechaza con 401 lo que no valide. Falla cerrado — si no puede resolver el secreto (base caída incluida), tampoco procesa.
 
 En Meta, la URL de callback se registra como `https://wa.rapilinksas.co/canales/whatsapp/rapilink` (el último segmento es el slug del tenant, así que un segundo ISP entra por la misma infraestructura sin tocar nada).
@@ -215,7 +217,21 @@ La única que sigue en el `.env` (y en las variables de Dokploy) es `SECRETOS_CL
 py -3.13 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
-Permisos que el System User necesita: `whatsapp_business_messaging` y `whatsapp_business_management`. Sin la **verificación del negocio** en Business Manager el número queda limitado a 250 conversaciones/día y no se aprueban plantillas. Y el número **no puede estar en uso en la app normal de WhatsApp**: hay que borrarlo de ahí o migrarlo, no se puede tener en los dos lados.
+Permisos que el System User necesita: `whatsapp_business_messaging` y `whatsapp_business_management`.
+
+### Plantillas y avisos proactivos
+
+Fuera de las 24 h desde el último mensaje del cliente, WhatsApp solo acepta **plantillas aprobadas por Meta**. La configuración mapea una clave interna al nombre registrado (`plantillas: {aviso_mora: recordatorio_pago_v3}`) para que el código diga `aviso_mora` y cada empresa lo resuelva a lo suyo.
+
+Antes de confiar en una plantilla, comprobar que Meta la aprobó de verdad — devuelve `declaradas_sin_aprobar`, que es lo único que hay que mirar:
+
+```
+curl "http://motor:5000/plantillas/whatsapp/rapilink"   # desde dentro de la red del compose
+```
+
+Una plantilla declarada en el YAML que Meta nunca aprobó falla recién al mandar el primer aviso, y a esa altura ya hay un cliente que no se enteró de su corte.
+
+**Baja de avisos.** Un cliente que escribe `baja` (o `stop`, configurable) deja de recibir mensajes proactivos; `alta` lo revierte. No es cortesía: la Ley 1581 le da al titular el derecho a revocar la autorización, y por el lado de WhatsApp, un número que quiere dejar de recibir y no puede **bloquea** — y los bloqueos le bajan la reputación al número de la empresa, y con ella el límite de envío. La baja **no** corta la atención: si después escribe, se le contesta. Sin la **verificación del negocio** en Business Manager el número queda limitado a 250 conversaciones/día y no se aprueban plantillas. Y el número **no puede estar en uso en la app normal de WhatsApp**: hay que borrarlo de ahí o migrarlo, no se puede tener en los dos lados.
 
 El puerto del frontend es 3000, no 5173: con el build de producción manda adapter-node. El 5173 es del servidor de Vite, que quedó solo en desarrollo.
 

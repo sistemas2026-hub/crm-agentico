@@ -202,6 +202,39 @@ def main():
     except Exception:
         check("un VALOR donde va un NOMBRE se rechaza", True)
 
+    print("\nplantillas: la indireccion clave -> nombre en Meta")
+    con_plantillas = _ConfigFalsa(plantillas={"aviso_mora": "recordatorio_pago_v3"})
+    try:
+        whatsapp.enviar_plantilla(con_plantillas, TENANT, "573001112233", "no_declarada")
+        check("una plantilla no declarada se rechaza ANTES de llamar a Meta", False)
+    except whatsapp.ErrorWhatsApp as e:
+        check("una plantilla no declarada se rechaza ANTES de llamar a Meta",
+              "no esta declarada" in str(e))
+        check("y el error dice cuales SI estan", "aviso_mora" in str(e))
+
+    print("\nbaja de avisos: se compara el mensaje COMPLETO, no 'contiene'")
+    from nucleo.canales import api as api_mod
+
+    # Un set, no una lista: dar_de_baja de verdad es idempotente (upsert), y
+    # una lista acumularia duplicados que la prueba confundiria con un fallo.
+    bajas = set()
+    api_mod.persistencia.dar_de_baja = lambda t, u, c="whatsapp", m=None: bajas.add(u)
+    api_mod.persistencia.dar_de_alta = lambda t, u, c="whatsapp": bajas.discard(u)
+    api_mod.whatsapp.enviar_texto = lambda cfg, t, para, texto: None
+
+    def pidio(texto):
+        return api_mod._atendio_baja_o_alta(config, TENANT, "573001112233", texto)
+
+    check("'baja' da de baja", pidio("baja") and bajas == {"573001112233"})
+    check("'BAJA.' tambien (mayusculas y punto final)", pidio("BAJA."))
+    check("pedirla dos veces no rompe", bajas == {"573001112233"})
+    check("'alta' revierte", pidio("alta") and bajas == set())
+    check("una frase que CONTIENE 'baja' no da de baja",
+          not pidio("no me llega nada, doy de baja el servicio?"))
+    check("una consulta normal no da de baja",
+          not pidio("hola, tengo problemas con el internet"))
+    check("un mensaje vacio no hace nada", not pidio(""))
+
     probar_rutas(config)
 
     print("\n" + "=" * 70)

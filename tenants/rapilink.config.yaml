@@ -780,7 +780,18 @@ canales:
     version_api: v23.0
     # Solo para mostrarlo en los ajustes. No participa de ninguna llamada.
     numero_visible: null
+    # clave interna -> nombre aprobado en Meta. La indireccion existe para que
+    # el codigo diga 'aviso_mora' y cada empresa lo mapee al nombre que
+    # registro. Se llenan cuando Meta apruebe las plantillas; comprobar el
+    # cruce con GET /plantillas/whatsapp/rapilink antes de confiar en ellas.
     plantillas: {}
+    # Baja de avisos: derecho del titular (Ley 1581) y ademas necesidad
+    # practica -- un numero que quiere dejar de recibir y no puede, bloquea, y
+    # los bloqueos le bajan la reputacion al numero de la empresa.
+    # Se compara el mensaje COMPLETO, no si lo contiene: "no me llega nada, doy
+    # de baja el servicio?" no es una solicitud de baja del canal.
+    palabras_baja: [baja, stop, no molestar, cancelar avisos]
+    palabras_alta: [alta, start, reactivar avisos]
   web:
     activo: true
 

@@ -840,6 +840,42 @@ _AVISO_ADJUNTO = {
 }
 
 
+def _atendio_baja_o_alta(config, tenant: str, de: str, texto: str) -> bool:
+    """
+    Si el mensaje es una solicitud de baja o alta de avisos, la resuelve y
+    devuelve True (el turno termina ahi).
+
+    Se compara el mensaje COMPLETO, no si lo contiene: "no me llega nada, doy
+    de baja el servicio?" no es una solicitud de baja del canal, y tratarla
+    como tal seria dejar de avisarle justo a quien tiene un problema.
+    """
+    cfg = getattr(config.canales, "whatsapp", None)
+    if not cfg:
+        return False
+
+    limpio = (texto or "").strip().lower().rstrip(".!")
+    if not limpio:
+        return False
+
+    try:
+        if limpio in [p.lower() for p in cfg.palabras_baja]:
+            persistencia.dar_de_baja(tenant, de, "whatsapp", limpio)
+            whatsapp.enviar_texto(config, tenant, de, cfg.respuesta_baja)
+            print(f"[whatsapp] baja de avisos: {de}")
+            return True
+        if limpio in [p.lower() for p in cfg.palabras_alta]:
+            persistencia.dar_de_alta(tenant, de, "whatsapp")
+            whatsapp.enviar_texto(config, tenant, de, cfg.respuesta_alta)
+            print(f"[whatsapp] alta de avisos: {de}")
+            return True
+    except Exception as e:
+        # Si falla, se deja seguir al modelo: peor que no registrar la baja
+        # seria dejar el mensaje sin ninguna respuesta.
+        print(f"[whatsapp] fallo al procesar baja/alta de {de}: "
+              f"{type(e).__name__}: {e}")
+    return False
+
+
 def _guardar_adjunto(config, tenant: str, entrante: dict,
                      conversacion_id: str | None) -> None:
     """
@@ -877,6 +913,14 @@ def _procesar_mensaje_whatsapp(config, tenant: str, rol: str, entrante: dict) ->
     try:
         if wamid:
             whatsapp.marcar_leido(config, tenant, wamid)
+
+        # Baja/alta de avisos ANTES del modelo. No es una consulta que haya que
+        # interpretar: es un derecho del titular (Ley 1581) y tiene que
+        # funcionar aunque el modelo este caido. Ademas, un numero que quiere
+        # dejar de recibir y no puede, bloquea -- y los bloqueos le bajan la
+        # reputacion al numero de la empresa.
+        if _atendio_baja_o_alta(config, tenant, de, entrante.get("texto", "")):
+            return
 
         texto = entrante.get("texto", "")
         descripcion = entrante.get("descripcion", "")
@@ -1031,6 +1075,91 @@ def corpus_fragmentos(id_documento):
         return jsonify({"error": "No se pudieron leer los fragmentos."}), 500
 
     return jsonify({"fragmentos": fragmentos})
+
+
+@app.post("/avisos/whatsapp/<tenant>")
+def whatsapp_avisar(tenant):
+    """
+    Un aviso PROACTIVO por plantilla: cobro, corte, mantenimiento.
+
+    Es la unica forma de escribirle primero a alguien -- fuera de las 24 h
+    desde su ultimo mensaje, WhatsApp solo acepta plantillas aprobadas.
+
+    NO va detras del webhook publico: esto lo llama un proceso interno (una
+    tarea programada del CRM cruzando facturas vencidas), por la red interna.
+    Si algun dia se expone, necesita autenticacion propia -- la firma de Meta
+    no aplica aca porque el que llama no es Meta.
+
+    Cuerpo: {para, plantilla, variables?, idioma?}
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    para = cuerpo.get("para")
+    plantilla = cuerpo.get("plantilla")
+    if not para or not plantilla:
+        return jsonify({"error": "Faltan campos: para, plantilla"}), 400
+
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+
+    # La baja se consulta ANTES de armar nada. Escribirle a quien pidio que no
+    # le escribamos no es solo un problema legal: los bloqueos que genera le
+    # bajan la reputacion al numero y con ella el limite de envio de TODA la
+    # empresa. Falla cerrado: si no se puede comprobar, no se manda.
+    try:
+        if persistencia.esta_de_baja(tenant, para, "whatsapp"):
+            return jsonify({"enviado": False, "motivo": "el numero pidio no recibir avisos"}), 200
+    except Exception as e:
+        print(f"[whatsapp] no se pudo comprobar la baja de {para}: {e}")
+        return jsonify({"error": "No se pudo comprobar si el numero acepta avisos."}), 503
+
+    try:
+        wamid = whatsapp.enviar_plantilla(
+            config, tenant, para, plantilla,
+            cuerpo.get("variables"), cuerpo.get("idioma", "es"))
+    except whatsapp.ErrorWhatsApp as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        print(f"[whatsapp] fallo el aviso a {para}: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo enviar el aviso."}), 502
+
+    return jsonify({"enviado": True, "wamid": wamid}), 200
+
+
+@app.get("/plantillas/whatsapp/<tenant>")
+def whatsapp_plantillas(tenant):
+    """
+    Que plantillas tiene aprobadas la empresa en Meta, cruzadas con las que
+    declara su configuracion.
+
+    Existe porque hoy esas dos listas se mantienen a ciegas: una plantilla
+    declarada en el YAML que Meta nunca aprobo falla recien al mandar el primer
+    aviso, y a esa altura ya hay un cliente sin enterarse de su corte.
+    """
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+
+    try:
+        en_meta = whatsapp.plantillas_aprobadas(config, tenant)
+    except whatsapp.ErrorWhatsApp as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        print(f"[whatsapp] fallo al leer plantillas: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudieron leer las plantillas."}), 502
+
+    declaradas = config.canales.whatsapp.plantillas
+    aprobadas = {p["nombre"] for p in en_meta if p["estado"] == "APPROVED"}
+    return jsonify({
+        "en_meta": en_meta,
+        "declaradas": declaradas,
+        # Lo unico que hay que mirar: lo que el codigo puede pedir y Meta no
+        # va a aceptar.
+        "declaradas_sin_aprobar": sorted(
+            clave for clave, nombre in declaradas.items() if nombre not in aprobadas),
+    })
 
 
 @app.get("/conversaciones/<id_conversacion>/media")

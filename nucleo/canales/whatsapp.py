@@ -282,6 +282,81 @@ def enviar_texto(config, tenant: str, para: str, texto: str) -> str | None:
     return mensajes[0].get("id") if mensajes else None
 
 
+def enviar_plantilla(config, tenant: str, para: str, plantilla: str,
+                     variables: list[str] | None = None,
+                     idioma: str = "es") -> str | None:
+    """
+    Un mensaje de PLANTILLA, que es la unica forma de escribirle primero a
+    alguien o de contestar pasadas las 24 h.
+
+    'plantilla' es la clave declarada en canales.whatsapp.plantillas del
+    tenant, no el nombre que tiene en Meta: asi el codigo que avisa de una mora
+    dice 'aviso_mora' y cada empresa mapea eso al nombre que registro.
+
+    'variables' llena los {{1}}, {{2}}... del cuerpo, EN ORDEN. Meta rechaza el
+    envio si la cantidad no coincide con la plantilla aprobada, y ese error
+    llega como un rechazo generico -- por eso se valida antes lo que se puede.
+
+    ⚠️ El texto de una plantilla lo aprueba Meta, no nosotros. Cambiarlo exige
+    volver a pasar por su revision (dias). Lo que se puede cambiar sin tramite
+    son las variables.
+    """
+    cfg = _cfg(config)
+    nombre_real = cfg.plantillas.get(plantilla)
+    if not nombre_real:
+        raise ErrorWhatsApp(
+            f"La plantilla '{plantilla}' no esta declarada en "
+            f"canales.whatsapp.plantillas. Declaradas: "
+            f"{', '.join(sorted(cfg.plantillas)) or 'ninguna'}.")
+
+    componentes = []
+    if variables:
+        componentes.append({
+            "type": "body",
+            "parameters": [{"type": "text", "text": str(v)} for v in variables],
+        })
+
+    emisor = _secreto(tenant, cfg.phone_number_id_ref,
+                      "del numero emisor (phone_number_id_ref)")
+    respuesta = _post(config, tenant, f"{emisor}/messages", {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": para,
+        "type": "template",
+        "template": {
+            "name": nombre_real,
+            "language": {"code": idioma},
+            **({"components": componentes} if componentes else {}),
+        },
+    })
+    mensajes = respuesta.get("messages") or []
+    return mensajes[0].get("id") if mensajes else None
+
+
+def plantillas_aprobadas(config, tenant: str) -> list[dict]:
+    """
+    Que plantillas tiene aprobadas la empresa en Meta, con su estado.
+
+    Sirve para dos cosas que hoy se hacen a ciegas: ver si lo declarado en el
+    YAML existe de verdad del otro lado, y saber si una que se mando a aprobar
+    ya paso. Necesita el waba_id (el phone_number_id NO sirve aca).
+    """
+    cfg = _cfg(config)
+    waba = _secreto(tenant, cfg.waba_id_ref, "de la cuenta (waba_id_ref)")
+    token = _secreto(tenant, cfg.token_ref, "de envio (token_ref)")
+
+    r = requests.get(_url(config, f"{waba}/message_templates"),
+                     headers={"Authorization": f"Bearer {token}"},
+                     params={"limit": 100}, timeout=TIMEOUT_SEGUNDOS)
+    if r.status_code >= 400:
+        raise ErrorWhatsApp(
+            f"No se pudieron leer las plantillas: {r.status_code} {r.text[:200]}")
+
+    return [{"nombre": p.get("name"), "estado": p.get("status"),
+             "idioma": p.get("language"), "categoria": p.get("category")}
+            for p in (r.json().get("data") or [])]
+
+
 # =============================================================================
 #  MULTIMEDIA  -  bajar lo que mando el cliente
 # =============================================================================

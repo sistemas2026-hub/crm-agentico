@@ -340,6 +340,44 @@ def agregar_mensaje_humano(tenant: str, conversation_id: str,
         return {"canal": fila["canal"], "usuario_externo": fila["usuario_externo"]}
 
 
+def dar_de_baja(tenant: str, usuario_externo: str, canal: str = "whatsapp",
+                motivo: str | None = None) -> None:
+    """Registra que este numero no quiere mensajes proactivos. Idempotente:
+    pedir baja dos veces no es un error."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """insert into asistente.canal_bajas
+                 (organization_id, canal, usuario_externo, motivo)
+               values (%s,%s,%s,%s)
+               on conflict (organization_id, canal, usuario_externo)
+                 do update set creado_en = now(), motivo = excluded.motivo""",
+            (org, canal, usuario_externo, motivo))
+
+
+def dar_de_alta(tenant: str, usuario_externo: str, canal: str = "whatsapp") -> bool:
+    """Revierte la baja. Devuelve si habia una."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """delete from asistente.canal_bajas
+               where organization_id = %s and canal = %s and usuario_externo = %s""",
+            (org, canal, usuario_externo))
+        return cur.rowcount > 0
+
+
+def esta_de_baja(tenant: str, usuario_externo: str, canal: str = "whatsapp") -> bool:
+    """Si este numero pidio no recibir mensajes proactivos.
+
+    Se consulta ANTES de cualquier envio que inicie el sistema. Nunca antes de
+    responderle a alguien que escribio: la baja bloquea la interrupcion, no la
+    atencion -- ver supabase/09_bajas_canal.sql."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select 1 from asistente.canal_bajas
+               where organization_id = %s and canal = %s and usuario_externo = %s""",
+            (org, canal, usuario_externo))
+        return cur.fetchone() is not None
+
+
 def guardar_media(tenant: str, conversation_id: str, media_id: str, tipo: str,
                   contenido: bytes, mime: str | None = None,
                   descripcion: str | None = None,

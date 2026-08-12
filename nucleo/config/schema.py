@@ -573,7 +573,23 @@ class CanalWhatsApp(Base):
     # vez de por Meta directo: ahi cambia el host, no el resto.
     api_base: str | None = None
 
+    # clave interna -> nombre aprobado en Meta. La indireccion existe para que
+    # el codigo diga 'aviso_mora' y cada empresa lo mapee al nombre que
+    # registro; el texto lo aprueba Meta y cambiarlo exige volver a su revision.
     plantillas: dict[str, str] = Field(default_factory=dict)
+
+    # Lo que un cliente escribe para dejar de recibir avisos. Se compara contra
+    # el mensaje completo en minusculas y sin espacios -- no "contiene", porque
+    # "no me llega nada, doy de baja el servicio?" no es una solicitud de baja
+    # del canal.
+    palabras_baja: list[str] = Field(
+        default_factory=lambda: ["baja", "stop", "no molestar", "cancelar avisos"])
+    palabras_alta: list[str] = Field(
+        default_factory=lambda: ["alta", "start", "reactivar avisos"])
+    respuesta_baja: str = (
+        "Listo, no te vamos a escribir mas por este medio. "
+        "Si necesitas algo, escribinos cuando quieras y te atendemos.")
+    respuesta_alta: str = "Listo, vas a volver a recibir nuestros avisos."
 
     @field_validator("phone_number_id_ref", "token_ref", "waba_id_ref",
                      "app_secret_ref", "verify_token_ref")
