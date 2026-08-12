@@ -213,3 +213,48 @@ def escalar(config, tenant: str, usuario_externo: str, conversation_id: str,
     except Exception as e:
         print(f"[escalamiento] fallo al escalar la conversacion "
               f"{conversation_id}: {type(e).__name__}: {e}")
+
+
+# Estados en los que BottleCRM considera un caso terminado. 'Closed' es el
+# unico que cases/signals.py trata como resuelto (RESOLVED_STATUSES); los
+# demas siguen siendo trabajo abierto.
+ESTADOS_CERRADOS = ("Closed", "Rejected", "Duplicate")
+
+
+def caso_sigue_abierto(config, caso_id: str) -> bool:
+    """
+    Un GET al caso del CRM para saber si el humano ya lo resolvio.
+
+    Existe para que el bot pueda PAUSARSE de verdad: sin esto, despues de
+    escalar el asistente le sigue contestando al cliente al que se le acaba de
+    decir que lo iba a atender una persona. El prompt puede pedirle que no lo
+    haga, pero eso es guia y no garantia (PRD 7.4) -- la misma razon por la
+    que el filtro de campos y la confirmacion de acciones sensibles viven en
+    codigo.
+
+    FAIL-SAFE: cualquier error de red, credencial o forma de la respuesta se
+    interpreta como "sigue abierto". Nunca se asume resuelto sin confirmarlo:
+    equivocarse hacia el lado de la pausa deja a un cliente esperando a una
+    persona que ya viene; hacia el otro, lo deja hablando con un bot que le
+    dijeron que no lo iba a atender.
+    """
+    if not caso_id:
+        return False
+
+    herramienta = _herramienta(config, NOMBRE_HERRAMIENTA_CASO_CREAR)
+    if herramienta is None:
+        return True
+
+    try:
+        import requests
+
+        url = f"{herramienta.base_url.rstrip('/')}{herramienta.endpoint}{caso_id}/"
+        r = requests.get(url, headers=herramientas_http.headers_de(herramienta), timeout=10)
+        r.raise_for_status()
+        cuerpo = r.json()
+        caso = cuerpo.get("cases_obj", cuerpo) if isinstance(cuerpo, dict) else {}
+        return caso.get("status") not in ESTADOS_CERRADOS
+    except Exception as e:
+        print(f"[escalamiento] no se pudo verificar el caso {caso_id}, "
+              f"se mantiene pausado: {type(e).__name__}: {e}")
+        return True

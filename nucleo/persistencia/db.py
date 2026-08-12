@@ -262,6 +262,21 @@ def cerrar_conversacion(tenant: str, conversation_id: str) -> None:
             (org, conversation_id))
 
 
+def caso_de_conversacion(tenant: str, conversation_id: str) -> str | None:
+    """
+    El caso del CRM al que se derivo esta conversacion, o None si no se
+    derivo. Lo usa nucleo/canales/api.py para saber contra que caso preguntar
+    si el humano ya termino, y asi poder despausar al asistente.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select caso_id from asistente.conversations
+               where organization_id = %s and id = %s""",
+            (org, conversation_id))
+        fila = cur.fetchone()
+        return str(fila["caso_id"]) if fila and fila["caso_id"] else None
+
+
 def agregar_mensaje_humano(tenant: str, conversation_id: str, contenido: str) -> bool:
     """
     Un agente humano responde directo en el hilo, sin pasar por el modelo --

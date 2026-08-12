@@ -289,6 +289,22 @@ class Corpus(Base):
     # Sin esto, el asistente recupera la version vieja tanto como la vigente y
     # no tiene forma de saber cual manda.
     obsoletos: list[str] = Field(default_factory=list)
+    # RESPALDO de 'roles' para los documentos que todavia no declaran la
+    # columna en su tabla de metadatos. Patron glob -> lista de roles.
+    #
+    # Lo que manda siempre es el documento: si el .docx trae 'roles', ese gana
+    # y esto ni se mira. La razon de que exista es operativa -- de los 19
+    # documentos de Rapilink, 12 tienen tabla de metadatos sin columna de
+    # roles y 7 no tienen tabla, asi que hoy una recarga los dejaria a todos
+    # sin roles, o sea invisibles para el asistente, hasta rellenarlos a mano
+    # en la base.
+    #
+    # Agregarles la columna a los 19 no es solo un dato: a los 7 sin tabla les
+    # cambiaria el codigo y la version (procesar() los deduce del nombre de
+    # archivo cuando no hay tabla), y con eso su identidad en el corpus.
+    # Cuando la empresa actualice sus plantillas, este respaldo deja de
+    # usarse solo, sin tocar codigo.
+    roles_por_defecto: dict[str, list[str]] = Field(default_factory=dict)
 
 
 class RAG(Base):

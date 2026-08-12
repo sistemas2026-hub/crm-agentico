@@ -145,10 +145,33 @@ def _rol_sin_exclusivas(doc: dict, excepto: str | None = None) -> str:
     Un rol al que se le puedan quitar herramientas sin dejar ninguna huerfana
     -- o sea, que no sea el unico que usa alguna. Ese otro caso se prueba
     aparte, en prueba_herramienta_huerfana().
+
+    Puede que NINGUN rol del tenant cumpla eso: paso el 11/08/2026 al quitarse
+    el rol 'tecnica', que dejo a los cuatro restantes como unicos dueños de
+    alguna herramienta. Antes eso reventaba con un StopIteration a mitad de la
+    corrida, que no dice nada de lo que se estaba probando.
+
+    En ese caso se fabrica la condicion en el documento de trabajo (que es una
+    copia y no toca la configuracion real): se le presta una herramienta
+    exclusiva a otro rol para que deje de serlo. La prueba sigue midiendo lo
+    mismo -- editar un rol sin dejar herramientas huerfanas -- en vez de
+    depender de que el tenant tenga por casualidad un rol que sirva.
     """
-    exclusivas = {h["roles_permitidos"][0] for h in doc["herramientas"]
-                  if len(h["roles_permitidos"]) == 1}
-    return next(n for n in doc["roles"] if n not in exclusivas and n != excepto)
+    def sin_exclusivas() -> list[str]:
+        exclusivas = {h["roles_permitidos"][0] for h in doc["herramientas"]
+                      if len(h["roles_permitidos"]) == 1}
+        return [n for n in doc["roles"] if n not in exclusivas and n != excepto]
+
+    libres = sin_exclusivas()
+    if libres:
+        return libres[0]
+
+    candidato = next(n for n in doc["roles"] if n != excepto)
+    for h in doc["herramientas"]:
+        if h["roles_permitidos"] == [candidato]:
+            otro = next(n for n in doc["roles"] if n != candidato)
+            h["roles_permitidos"] = [candidato, otro]
+    return candidato
 
 
 def prueba_editar() -> None:

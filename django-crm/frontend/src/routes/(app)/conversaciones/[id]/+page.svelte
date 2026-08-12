@@ -56,6 +56,82 @@
   // igual y no hay que volver a simular al cliente por eso.
   let escalada = $derived(!!conversacion.caso_id);
 
+  // --- copiloto documental -------------------------------------------------
+  // Lo que dice la documentacion interna sobre lo ultimo que pregunto el
+  // cliente. Recupera, no genera: son fragmentos reales con su procedencia, y
+  // el agente decide que hacer con ellos. Cuesta un embedding, no una llamada
+  // al modelo.
+  let sugerencias = $state([]);
+  let buscandoDocs = $state(false);
+  let errorDocs = $state('');
+  let mejorSimilitud = $state(null);
+  let docsAbierto = $state(false);
+  let expandido = $state(null);
+  let copiado = $state(null);
+  // La ultima pregunta del cliente es la mejor consulta de arranque; si no
+  // sirve, el agente la reescribe.
+  let consultaDocs = $state(
+    untrack(() => [...(data.mensajes ?? [])].reverse().find((m) => m.rol === 'user')?.contenido ?? '')
+  );
+
+  async function buscarDocs() {
+    const texto = consultaDocs.trim();
+    if (!texto || buscandoDocs) return;
+    buscandoDocs = true;
+    errorDocs = '';
+    expandido = null;
+    try {
+      const resp = await fetch('/api/sugerencias', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ texto })
+      });
+      const datos = await resp.json();
+      if (resp.ok) {
+        sugerencias = datos.sugerencias ?? [];
+        mejorSimilitud = datos.mejor_similitud ?? null;
+      } else {
+        errorDocs = datos.error || 'No se pudo consultar la documentacion.';
+      }
+    } catch (/** @type {any} */ err) {
+      errorDocs = err?.message || 'No se pudo consultar la documentacion.';
+    } finally {
+      buscandoDocs = false;
+    }
+  }
+
+  /** Busca la primera vez que se abre el panel, no al cargar la pagina: si
+      nadie lo mira, no se gasta el embedding. */
+  function alAbrirDocs(/** @type {Event} */ ev) {
+    docsAbierto = /** @type {HTMLDetailsElement} */ (ev.currentTarget).open;
+    if (docsAbierto && sugerencias.length === 0 && !buscandoDocs && !errorDocs) buscarDocs();
+  }
+
+  /** @param {SubmitEvent} ev */
+  function alBuscarDocs(ev) {
+    ev.preventDefault();
+    buscarDocs();
+  }
+
+  /**
+   * Copiar, nunca insertar en el compositor: la documentacion esta escrita en
+   * lenguaje interno y mandarsela cruda a un cliente seria peor que no
+   * tenerla. El agente lee y redacta.
+   *
+   * @param {string} texto
+   * @param {number} i
+   */
+  async function copiarFragmento(texto, i) {
+    try {
+      await navigator.clipboard.writeText(texto);
+      copiado = i;
+      setTimeout(() => (copiado = null), 1600);
+    } catch {
+      // Portapapeles bloqueado (sin https o sin permiso). El texto esta a la
+      // vista para seleccionarlo a mano; no hay nada que avisar.
+    }
+  }
+
   async function enviar() {
     const texto = entrada.trim();
     if (!texto || enviando) return;
@@ -254,6 +330,69 @@
   </details>
 {/if}
 
+<!-- Copiloto documental. Mismo patron plegable que "Ver proceso": es ayuda
+     lateral, no el contenido de la pantalla, y no debe empujar el hilo. -->
+<details class="docs v2-pad" ontoggle={alAbrirDocs}>
+  <summary class="proceso-resumen">
+    Documentación
+    <span class="v2-muted">
+      {#if sugerencias.length}
+        ({sugerencias.length} fragmento{sugerencias.length === 1 ? '' : 's'})
+      {:else}
+        (buscar en las guías internas)
+      {/if}
+    </span>
+  </summary>
+
+  <form class="docs-buscar" onsubmit={alBuscarDocs}>
+    <input
+      class="v2-input"
+      type="text"
+      bind:value={consultaDocs}
+      placeholder="¿Qué necesitás buscar?"
+      aria-label="Buscar en la documentación interna"
+    />
+    <button class="v2-btn v2-btn-sm" type="submit" disabled={buscandoDocs}>Buscar</button>
+  </form>
+
+  {#if buscandoDocs}
+    <p class="v2-muted docs-nota">Buscando…</p>
+  {:else if errorDocs}
+    <p class="docs-nota docs-malo">{errorDocs}</p>
+  {:else if sugerencias.length === 0}
+    <p class="v2-muted docs-nota">
+      La documentación no cubre esta consulta.
+      {#if mejorSimilitud !== null}
+        Lo más parecido quedó en <span class="v2-num">{mejorSimilitud}</span>, por debajo del umbral.
+      {/if}
+    </p>
+  {:else}
+    {#each sugerencias as s, i}
+      <article class="doc" class:abierto={expandido === i}>
+        <button
+          type="button"
+          class="doc-head"
+          onclick={() => (expandido = expandido === i ? null : i)}
+          aria-expanded={expandido === i}
+        >
+          <span class="doc-codigo v2-num">{s.codigo || '—'}{#if s.version} v{s.version}{/if}</span>
+          <span class="doc-titulo">{s.titulo || 'Sin título'}</span>
+        </button>
+        <p class="doc-texto">{s.contenido}</p>
+        <div class="doc-pie">
+          <button
+            class="v2-btn v2-btn-sm"
+            type="button"
+            onclick={() => copiarFragmento(s.contenido, i)}
+          >
+            {copiado === i ? 'Copiado' : 'Copiar'}
+          </button>
+        </div>
+      </article>
+    {/each}
+  {/if}
+</details>
+
 <div class="v2-scroll v2-pad" style="padding-top:12px">
   <div class="chat-mensajes">
     {#each mensajes as m}
@@ -321,10 +460,86 @@
     align-items: center;
     gap: 6px;
   }
-  .proceso {
+  .proceso,
+  .docs {
     padding-top: 0;
     padding-bottom: 14px;
     max-width: 720px;
+  }
+
+  /* ── copiloto documental ────────────────────────────────────────────── */
+  .docs-buscar {
+    display: flex;
+    gap: 6px;
+    margin: 10px 0 4px;
+  }
+  .docs-buscar input {
+    flex: 1;
+    min-width: 0;
+    font-size: 13px;
+  }
+  .docs-nota {
+    font-size: 12.5px;
+    line-height: 1.5;
+    margin: 8px 0 0;
+  }
+  .docs-malo {
+    color: var(--v2-rust);
+  }
+  /* Sin tarjeta: son citas de un documento, no objetos que se manipulan. */
+  .doc {
+    border-top: 1px solid var(--v2-line-soft);
+    padding: 9px 0;
+  }
+  .doc-head {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: 0;
+    padding: 0;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+  }
+  .doc-codigo {
+    font-size: 10.5px;
+    color: var(--v2-slate);
+  }
+  .doc-titulo {
+    font-size: 12.5px;
+    font-weight: 620;
+    letter-spacing: -0.01em;
+    line-height: 1.35;
+  }
+  .doc-head:hover .doc-titulo {
+    text-decoration: underline;
+  }
+  .doc-texto {
+    font-size: 12.2px;
+    color: var(--v2-slate);
+    line-height: 1.5;
+    margin: 5px 0 0;
+    white-space: pre-wrap;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  /* Abierto: el fragmento entero, con su propio scroll para que un documento
+     largo no empuje el hilo fuera de la vista. */
+  .doc.abierto .doc-texto {
+    display: block;
+    max-height: 320px;
+    overflow-y: auto;
+  }
+  .doc-pie {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 6px;
   }
   .proceso-resumen {
     cursor: pointer;

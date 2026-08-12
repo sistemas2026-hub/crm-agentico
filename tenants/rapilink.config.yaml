@@ -251,6 +251,37 @@ corpus:
     - "Procedimiento de Soporte Técnico V1 OLD.docx"
     - "Procedimiento_Soporte_Tecnico_V2.docx"
 
+  # RESPALDO de roles, para los documentos que todavia no declaran la columna
+  # 'roles' en su tabla de metadatos. Si el .docx la trae, esa manda y esto ni
+  # se mira -- ver Corpus.roles_por_defecto en nucleo/config/schema.py.
+  #
+  # Hoy hace falta para los 19: 12 tienen tabla sin columna de roles y 7 no
+  # tienen tabla. Sin esto, una recarga los deja a todos sin roles, o sea
+  # invisibles para el asistente.
+  #
+  # Ninguno va a 'cliente_final': son guias tecnicas operativas,
+  # procedimientos internos y perfiles de cargo de RRHH. El dia que Rapilink
+  # arme material de cara al cliente (FAQ, instructivos de auto-gestion), ese
+  # si lleva cliente_final -- preferentemente declarandolo en el documento.
+  # Todos los colaboradores, que es como venia funcionando: hasta ahora la
+  # audiencia era binaria (interno / cliente) y cualquier colaborador veia
+  # todo el corpus. Acotarlo por area es posible desde que existe
+  # roles_permitidos, pero es una decision de politica de informacion de la
+  # empresa y no se toma desde aca: sacarle a facturacion las guias que hoy
+  # puede leer es un cambio que alguien tiene que querer.
+  #
+  # Cuando se quiera afinar, esto es lo que hay que editar (o mejor: declarar
+  # la columna 'roles' dentro del propio documento, que es donde manda).
+  # 'cliente_final' NO aparece en ninguna linea: son guias tecnicas
+  # operativas, procedimientos internos y perfiles de cargo de RRHH.
+  roles_por_defecto:
+    "G-GO-*": [soporte, facturacion, administracion]
+    "Gu*a para la*": [soporte, facturacion, administracion]
+    "Instructivo de Gestion*": [soporte, facturacion, administracion]
+    "Procedimiento_Soporte_Tecnico*": [soporte, facturacion, administracion]
+    "Auxiliar de Redes*": [soporte, facturacion, administracion]
+    "T*cnico de Redes*": [soporte, facturacion, administracion]
+
   # Como esta maquetada la documentacion de ESTA empresa. Verificado sobre 19
   # documentos reales, donde conviven tres plantillas distintas:
   #   G-GO-04..13        secciones con Heading 2 + tabla Codigo|Version
