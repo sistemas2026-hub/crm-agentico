@@ -241,7 +241,19 @@ def mensajes_de(tenant: str, conversation_id: str) -> dict:
             return {"conversacion": None, "mensajes": []}
 
         cur.execute(
-            """select m.id, m.rol, m.contenido, m.creado_en, e.caso as caso_marcado
+            """select m.id, m.rol, m.contenido, m.creado_en, e.caso as caso_marcado,
+                      -- Los adjuntos de ESA burbuja, sin los bytes: la interfaz
+                      -- los pide despues por su id (/media/<id>). Devolverlos
+                      -- aca serian varios MB de base64 en cada carga del hilo.
+                      coalesce((
+                        select json_agg(json_build_object(
+                                 'id', a.id, 'tipo', a.tipo, 'mime', a.mime,
+                                 'bytes', a.bytes, 'descripcion', a.descripcion)
+                               order by a.creado_en)
+                        from asistente.media a
+                        where a.mensaje_id = m.id
+                          and a.organization_id = m.organization_id
+                      ), '[]'::json) as adjuntos
                from asistente.messages m
                left join asistente.ejemplos_validados e
                  on e.mensaje_id = m.id and e.organization_id = m.organization_id

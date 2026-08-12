@@ -16,7 +16,8 @@
     Phone,
     User,
     PanelRight,
-    X
+    X,
+    Paperclip
   } from '@lucide/svelte';
 
   /** @type {{ data: any }} */
@@ -373,6 +374,26 @@
             class:sin-entregar={item.m.sinEntregar}
           >
             <div>{item.m.contenido}</div>
+            <!-- Lo que el cliente mando junto al mensaje. Para un ISP la foto
+                 de las luces del router dice en un segundo lo que al cliente
+                 le cuesta tres mensajes explicar: va EN el hilo, donde la
+                 mandó, no en una lista aparte al final. -->
+            {#each item.m.adjuntos ?? [] as a (a.id)}
+              {#if a.tipo === 'image'}
+                <a class="adjunto" href="/api/media/{a.id}" target="_blank" rel="noreferrer">
+                  <img src="/api/media/{a.id}" alt={a.descripcion || 'Foto del cliente'} loading="lazy" />
+                </a>
+              {:else if a.tipo === 'audio' || a.tipo === 'voice'}
+                <!-- svelte-ignore a11y_media_has_caption -->
+                <audio class="adjunto-audio" controls src="/api/media/{a.id}"></audio>
+              {:else}
+                <a class="adjunto-otro" href="/api/media/{a.id}" target="_blank" rel="noreferrer">
+                  <Paperclip size={13} />
+                  {a.tipo || 'archivo'} · <span class="v2-num">{Math.round(a.bytes / 1024)} KB</span>
+                </a>
+              {/if}
+            {/each}
+
             {#if item.m.sinEntregar}
               <div class="no-llego">
                 <TriangleAlert size={12} />
@@ -1088,6 +1109,38 @@
     outline: 1px solid var(--v2-rust);
     outline-offset: -1px;
   }
+  /* La foto ocupa el ancho de la burbuja y se abre a tamano completo al
+     hacer clic. Alto acotado: una foto vertical de telefono empujaria el
+     resto del hilo fuera de la pantalla. */
+  .adjunto {
+    display: block;
+    margin-top: 6px;
+    border-radius: 8px;
+    overflow: hidden;
+    line-height: 0;
+  }
+  .adjunto img {
+    display: block;
+    width: 100%;
+    max-height: 320px;
+    object-fit: cover;
+  }
+  .adjunto-audio {
+    display: block;
+    width: 100%;
+    margin-top: 6px;
+    height: 34px;
+  }
+  .adjunto-otro {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 6px;
+    font-size: 11.5px;
+    color: inherit;
+    opacity: 0.85;
+  }
+
   .no-llego {
     display: flex;
     align-items: center;

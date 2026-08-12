@@ -151,8 +151,13 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
 
     conversation_id = None
     mensaje_id = None
+    mensaje_usuario_id = None
     try:
-        persistencia.registrar_mensaje(tenant, canal, id_sesion, rol, "user", mensaje)
+        # El id del turno del CLIENTE se conserva: es a esa burbuja a la que
+        # hay que colgarle la foto que mando, para que aparezca en el hilo
+        # donde la mando y no en una lista aparte al final.
+        _, mensaje_usuario_id = persistencia.registrar_mensaje(
+            tenant, canal, id_sesion, rol, "user", mensaje)
         conversation_id, mensaje_id = persistencia.registrar_mensaje(
             tenant, canal, id_sesion, rol, "assistant", respuesta)
         for llamada in registro_herramientas:
@@ -202,7 +207,8 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
 
     return {"respuesta": respuesta, "verificado": estado["sesion"].verificado,
             "cerrada": cerrada, "conversacion_id": conversation_id,
-            "mensaje_id": mensaje_id, "pausada": False}
+            "mensaje_id": mensaje_id, "mensaje_usuario_id": mensaje_usuario_id,
+            "pausada": False}
 
 
 @app.post("/chat")
@@ -877,7 +883,8 @@ def _atendio_baja_o_alta(config, tenant: str, de: str, texto: str) -> bool:
 
 
 def _guardar_adjunto(config, tenant: str, entrante: dict,
-                     conversacion_id: str | None) -> None:
+                     conversacion_id: str | None,
+                     mensaje_id: str | None = None) -> None:
     """
     Baja el archivo, lo comprime y lo guarda colgado de la conversacion.
 
@@ -893,7 +900,7 @@ def _guardar_adjunto(config, tenant: str, entrante: dict,
         contenido, mime = media.preparar(crudo, entrante.get("tipo", ""), mime)
         persistencia.guardar_media(
             tenant, conversacion_id, media_id, entrante.get("tipo", ""),
-            contenido, mime, entrante.get("descripcion") or None)
+            contenido, mime, entrante.get("descripcion") or None, mensaje_id)
         print(f"[whatsapp] adjunto {media_id} guardado "
               f"({len(crudo) // 1024} KB -> {len(contenido) // 1024} KB)")
     except Exception as e:
@@ -946,7 +953,8 @@ def _procesar_mensaje_whatsapp(config, tenant: str, rol: str, entrante: dict) ->
         # creada: es lo que le da el conversation_id al que colgarlo. Va
         # aparte del turno y en su propio try porque una foto que no se pudo
         # bajar no puede dejar al cliente sin respuesta.
-        _guardar_adjunto(config, tenant, entrante, salida.get("conversacion_id"))
+        _guardar_adjunto(config, tenant, entrante, salida.get("conversacion_id"),
+                         salida.get("mensaje_usuario_id"))
 
         whatsapp.enviar_texto(config, tenant, de, salida["respuesta"])
     except Exception as e:
