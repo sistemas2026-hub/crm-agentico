@@ -355,6 +355,22 @@ ssh -L 5434:<ip-del-contenedor-db>:5432 root@86.48.18.185
 
 La forma es un token de servicio compartido entre el frontend y el motor: una variable más en los dos lados y una comprobación en `nucleo/canales/api.py` que rechace sin ella. No es urgente mientras la regla esté bien —por eso está acá y no bloqueando el piloto— pero conviene hacerlo antes de sumar un segundo ISP, cuando haya más manos tocando dominios. El webhook seguiría exento: su credencial es la firma de Meta, no un token nuestro.
 
+**Dar de alta un segundo ISP: el motor está listo, el pegamento no.** El motor ya es multi-empresa de verdad —la URL del webhook lleva el tenant (`/canales/whatsapp/<slug>`), las credenciales van cifradas por empresa en `asistente.tenant_secrets`, y el aislamiento está medido: `app_backend` sin fijar empresa ve **0 filas**, no todas—. BottleCRM, por su lado, ya es multi-organización.
+
+Lo que no acompaña es lo que los une: **`PRIVATE_ASISTENTE_TENANT` es una variable de entorno usada en 23 lugares del frontend, y nunca se deriva de la organización del usuario logueado**. Con una sola empresa no se nota; con dos, hay que elegir:
+
+| Camino | Qué implica | Costo |
+|---|---|---|
+| Un despliegue por ISP | Cada uno con su CRM y su frontend | Cero código, más contenedores que mantener |
+| Una plataforma, N ISPs | Que esos 23 lugares saquen el tenant de `locals.org` | Trabajo acotado y mecánico, toca todas las pantallas del asistente |
+
+Es una decisión de producto —¿se vende una instalación por ISP, o una plataforma donde entran varios?— y conviene tomarla **antes** de escribir el código, no después.
+
+Dos cosas que se deciden junto con eso:
+
+- **El nombre del dominio del webhook.** `wa.rapilinksas.co` es la marca del primer cliente; el segundo ISP estaría pegando el dominio de otra empresa en su configuración de Meta. Si el camino es "una plataforma", conviene un dominio neutro desde el principio: cambiarlo después obliga a que **cada** cliente reconfigure su webhook en Meta a mano.
+- **El motor corre con `--workers 1`** (ver el comentario en `docker-compose.prod.yml`). No es por memoria: `_sesiones` guarda el historial caliente en RAM del proceso. Aguanta bien con hilos, pero es un techo real con varios ISPs, y se levanta el día que ese historial viva en `asistente.conversations` en vez de en memoria.
+
 **El 502 de `crm.rapilinksas.co`.** Ese dominio tiene ruta en Traefik apuntando a algo que no responde. No afecta a la base —el pooler escucha en TCP directo, sin pasar por Traefik— pero quien espere llegar al Studio de Supabase por ahí, hoy no puede.
 
 **Variables muertas en `.env`.** `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` no las usa nadie en este repositorio. Probablemente son residuo del proyecto de reportes. Confunden más de lo que ayudan.
