@@ -1,7 +1,6 @@
 <script>
   import { untrack } from 'svelte';
   import { enhance } from '$app/forms';
-  import PageHeader from '$lib/v2/components/PageHeader.svelte';
   import Pill from '$lib/v2/components/Pill.svelte';
   import Avatar from '$lib/v2/components/Avatar.svelte';
   import { relativeTime } from '$lib/v2/format.js';
@@ -9,9 +8,14 @@
     TriangleAlert,
     ChevronDown,
     ArrowRight,
+    ArrowLeft,
     CircleCheck,
     CircleX,
-    Send
+    Send,
+    Phone,
+    User,
+    PanelRight,
+    X
   } from '@lucide/svelte';
 
   /** @type {{ data: any }} */
@@ -29,6 +33,9 @@
   let entrada = $state('');
   let enviando = $state(false);
   let error = $state('');
+  /** Solo se usa por debajo de 1240px, donde la columna de contexto no cabe
+      al lado y pasa a abrirse como panel. */
+  let contextoAbierto = $state(false);
 
   const CANAL_LABEL = { whatsapp: 'WhatsApp', 'whatsapp-simulado': 'Simulador' };
   const canalLabel = (c) => CANAL_LABEL[c] ?? c;
@@ -38,6 +45,18 @@
   const ETIQUETA_TONE = { soporte_tecnico: 'clay', facturacion: 'moss', comercial: 'slate', queja: 'rust' };
   const etiquetaTone = (e) => ETIQUETA_TONE[e] ?? 'ink';
   const etiquetaLabel = (e) => (e ? e.replaceAll('_', ' ') : '');
+
+  // Mismo criterio que la lista del layout: un telefono o un uuid no dan
+  // iniciales, y diez digitos seguidos no se leen.
+  const esTelefono = (/** @type {string} */ v) => !!v && /^\+?\d[\d\s-]{5,}$/.test(v);
+  const esUuid = (/** @type {string} */ v) =>
+    !!v && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+  function quien(/** @type {string} */ v) {
+    if (!v) return 'Sin identificar';
+    const d = v.replace(/\D/g, '');
+    if (esTelefono(v) && d.length === 10) return `${d.slice(0, 3)} ${d.slice(3, 6)} ${d.slice(6)}`;
+    return v;
+  }
 
   let asignadoA = $state(caso?.assignee_id ?? '');
   let ownerActual = $derived(owners.find((o) => o.id === asignadoA) ?? null);
@@ -242,22 +261,132 @@
   }
 </script>
 
-<PageHeader title={conversacion.usuario_externo} record>
-  {#snippet crumb()}<a href="/conversaciones">Conversaciones</a> ›{/snippet}
-  {#snippet sub()}
-    <Pill tone={canalTone(conversacion.canal)}>{canalLabel(conversacion.canal)}</Pill>
-    <Pill tone={estadoTone(conversacion.estado)}>{conversacion.estado}</Pill>
-    {#if conversacion.escalada_a_humano}
-      <span class="v2-sub" style="color:var(--v2-rust);display:inline-flex;align-items:center;gap:4px">
-        <TriangleAlert size={14} />
-        {conversacion.motivo_escalamiento || 'Escalada a un humano'}
-      </span>
-    {/if}
-  {/snippet}
-</PageHeader>
+<!-- ── CENTRO: la conversación ────────────────────────────────────────────── -->
+<section class="centro">
+  <header class="centro-top">
+    <a class="volver" href="/conversaciones" aria-label="Volver a la lista">
+      <ArrowLeft size={16} />
+    </a>
 
-{#if caso}
-  <div class="caso-panel v2-pad">
+    {#if esTelefono(conversacion.usuario_externo)}
+      <span class="ident" aria-hidden="true"><Phone size={15} /></span>
+    {:else if !conversacion.usuario_externo || esUuid(conversacion.usuario_externo)}
+      <span class="ident" aria-hidden="true"><User size={15} /></span>
+    {:else}
+      <Avatar name={conversacion.usuario_externo} size={32} />
+    {/if}
+
+    <div class="centro-quien">
+      <h2>{quien(conversacion.usuario_externo)}</h2>
+      <div class="centro-meta">
+        <Pill tone={canalTone(conversacion.canal)}>{canalLabel(conversacion.canal)}</Pill>
+        <Pill tone={estadoTone(conversacion.estado)}>{conversacion.estado}</Pill>
+      </div>
+    </div>
+
+    <!-- Solo aparece cuando la columna de contexto no cabe al lado. Ahí se
+         abre como panel, no se pierde: el ticket y la documentación siguen a
+         un clic. -->
+    <button
+      type="button"
+      class="v2-btn v2-btn-sm contexto-toggle"
+      onclick={() => (contextoAbierto = !contextoAbierto)}
+      aria-expanded={contextoAbierto}
+    >
+      <PanelRight size={14} /> Contexto
+    </button>
+  </header>
+
+  {#if conversacion.escalada_a_humano}
+    <p class="aviso">
+      <TriangleAlert size={14} />
+      {conversacion.motivo_escalamiento || 'Escalada a un humano'}
+    </p>
+  {/if}
+
+  <div class="hilo">
+    <div class="chat-mensajes">
+      {#each hilo as item (item.clave)}
+        {#if item.tipo === 'dia'}
+          <div class="dia"><span>{item.texto}</span></div>
+        {:else}
+          <div class="chat-burbuja {burbujaClase(item.m.rol)}">
+            <div>{item.m.contenido}</div>
+            <div class="chat-hora v2-num">{hora(item.m.creado_en)}</div>
+          </div>
+        {/if}
+      {/each}
+      {#if enviando && !escalada}
+        <div class="chat-burbuja chat-asistente chat-escribiendo" aria-label="Escribiendo…">
+          <span class="punto"></span><span class="punto"></span><span class="punto"></span>
+        </div>
+      {/if}
+    </div>
+  </div>
+
+  {#if conversacion.estado === 'abierta'}
+    <div class="pie">
+      {#if error}<p class="v2-error" style="margin:0 0 6px">{error}</p>{/if}
+      <form class="compositor" onsubmit={alEnviar}>
+        <textarea
+          class="compositor-texto"
+          bind:value={entrada}
+          rows="2"
+          placeholder={escalada ? 'Escribí tu respuesta…' : 'Continuar la conversación…'}
+          disabled={enviando}
+          onkeydown={(e) => {
+            // Enter envia, Shift+Enter hace salto de linea: es lo que la mano
+            // ya espera de un chat.
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              enviar();
+            }
+          }}
+        ></textarea>
+        <div class="compositor-pie">
+          <span class="compositor-nota">
+            {#if escalada}
+              Le llega al cliente tal cual, sin pasar por el asistente
+            {:else}
+              Responde el asistente
+            {/if}
+            · <kbd class="v2-kbd">Enter</kbd> envía
+          </span>
+          <button class="v2-btn v2-btn-primary" type="submit" disabled={enviando || !entrada.trim()}>
+            <Send size={14} />{enviando ? 'Enviando…' : 'Enviar'}
+          </button>
+        </div>
+      </form>
+    </div>
+  {/if}
+</section>
+
+<!-- ── DERECHA: el contexto de la conversación ────────────────────────────
+     Todo lo que ayuda a contestar pero no es la conversación: el ticket, qué
+     hizo el asistente y qué dice la documentación. Antes vivía apilado encima
+     del hilo y lo empujaba fuera de la vista. -->
+{#if contextoAbierto}
+  <!-- Fondo para cerrar el panel al hacer clic afuera. Solo existe mientras el
+       panel está desplegado sobre el hilo. -->
+  <button
+    type="button"
+    class="info-fondo"
+    aria-label="Cerrar contexto"
+    onclick={() => (contextoAbierto = false)}
+  ></button>
+{/if}
+
+<aside class="info" class:abierto={contextoAbierto} aria-label="Contexto de la conversación">
+  <button
+    type="button"
+    class="v2-btn v2-btn-sm info-cerrar"
+    onclick={() => (contextoAbierto = false)}
+  >
+    <X size={14} /> Cerrar
+  </button>
+
+  {#if caso}
+  <div class="caso-panel">
     <div class="caso-campo">
       <span class="v2-sub">Etiqueta</span>
       {#if conversacion.etiqueta}
@@ -340,10 +469,10 @@
       Ver ticket completo <ArrowRight size={14} />
     </a>
   </div>
-{/if}
+  {/if}
 
-{#if herramientas.length > 0}
-  <details class="proceso v2-pad">
+  {#if herramientas.length > 0}
+  <details class="proceso">
     <summary class="proceso-resumen">
       Ver proceso
       <span class="v2-muted">
@@ -370,11 +499,11 @@
       {/each}
     </ol>
   </details>
-{/if}
+  {/if}
 
-<!-- Copiloto documental. Mismo patron plegable que "Ver proceso": es ayuda
-     lateral, no el contenido de la pantalla, y no debe empujar el hilo. -->
-<details class="docs v2-pad" ontoggle={alAbrirDocs}>
+  <!-- Copiloto documental. Mismo patron plegable que "Ver proceso": es ayuda
+       lateral, no el contenido de la pantalla. -->
+  <details class="docs" ontoggle={alAbrirDocs}>
   <summary class="proceso-resumen">
     Documentación
     <span class="v2-muted">
@@ -433,96 +562,143 @@
       </article>
     {/each}
   {/if}
-</details>
-
-<div class="v2-scroll v2-pad" style="padding-top:12px">
-  <div class="chat-mensajes">
-    {#each hilo as item (item.clave)}
-      {#if item.tipo === 'dia'}
-        <div class="dia"><span>{item.texto}</span></div>
-      {:else}
-        <div class="chat-burbuja {burbujaClase(item.m.rol)}">
-          <div>{item.m.contenido}</div>
-          <div class="chat-hora v2-num">{hora(item.m.creado_en)}</div>
-        </div>
-      {/if}
-    {/each}
-    {#if enviando && !escalada}
-      <div class="chat-burbuja chat-asistente chat-escribiendo" aria-label="Escribiendo…">
-        <span class="punto"></span><span class="punto"></span><span class="punto"></span>
-      </div>
-    {/if}
-  </div>
-
-  {#if conversacion.estado === 'abierta'}
-    {#if escalada}
-      <p class="v2-sub" style="max-width:720px;font-size:12px;margin-bottom:6px">
-        Estás respondiendo como agente humano — esto no pasa por el asistente.
-      </p>
-    {/if}
-    {#if error}<p class="v2-error" style="max-width:720px">{error}</p>{/if}
-    <form class="compositor" onsubmit={alEnviar}>
-      <textarea
-        class="compositor-texto"
-        bind:value={entrada}
-        rows="2"
-        placeholder={escalada ? 'Escribí tu respuesta…' : 'Continuar la conversación…'}
-        disabled={enviando}
-        onkeydown={(e) => {
-          // Enter envia, Shift+Enter hace salto de linea: es lo que la mano
-          // ya espera de un chat.
-          if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            enviar();
-          }
-        }}
-      ></textarea>
-      <div class="compositor-pie">
-        <span class="compositor-nota">
-          {#if escalada}
-            Le llega al cliente tal cual
-          {:else}
-            Responde el asistente
-          {/if}
-          · <kbd class="v2-kbd">Enter</kbd> envía
-        </span>
-        <button class="v2-btn v2-btn-primary" type="submit" disabled={enviando || !entrada.trim()}>
-          <Send size={14} />{enviando ? 'Enviando…' : 'Enviar'}
-        </button>
-      </div>
-    </form>
-  {/if}
-</div>
+  </details>
+</aside>
 
 <style>
-  .caso-panel {
+  /* ── columna del centro: la conversación ────────────────────────────── */
+  .centro {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .centro-top {
+    flex: none;
     display: flex;
     align-items: center;
-    gap: 28px;
-    padding-top: 0;
+    gap: 10px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--v2-line);
+  }
+  .centro-quien {
+    min-width: 0;
+  }
+  .centro-top h2 {
+    margin: 0;
+    font-size: 14.5px;
+    font-weight: 640;
+    letter-spacing: -0.01em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .centro-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 3px;
+  }
+  .ident {
+    flex: none;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: var(--v2-line-soft);
+    color: var(--v2-slate);
+  }
+  /* Volver sólo tiene sentido cuando la lista no está al lado. */
+  .volver {
+    display: none;
+    color: var(--v2-slate);
+  }
+  .aviso {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    padding: 8px 16px;
+    font-size: 12.5px;
+    color: var(--v2-rust);
+    background: color-mix(in srgb, var(--v2-rust) 6%, transparent);
+    border-bottom: 1px solid var(--v2-line);
+  }
+  /* El hilo es lo único que scrollea acá: el encabezado y el compositor
+     quedan fijos, para no tener que bajar hasta el fondo para escribir. */
+  .hilo {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 14px 16px;
+  }
+  .pie {
+    flex: none;
+    padding: 0 16px 14px;
+  }
+
+  /* ── columna de la derecha: el contexto ─────────────────────────────── */
+  .info {
+    width: 310px;
+    flex: none;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 14px 16px 20px;
+    border-left: 1px solid var(--v2-line);
+  }
+  /* Por encima de 1240px la columna está siempre a la vista: ni botón para
+     abrirla, ni botón para cerrarla, ni fondo que interceptar. */
+  .contexto-toggle,
+  .info-cerrar,
+  .info-fondo {
+    display: none;
+  }
+  .info-fondo {
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+    background: rgba(28, 25, 23, 0.18);
+    border: 0;
+    padding: 0;
+    cursor: default;
+  }
+  @media (max-width: 1240px) {
+    .info-fondo {
+      display: block;
+    }
+  }
+
+  /* En la columna angosta los campos del ticket se apilan; en fila no
+     entraban ni el nombre del responsable. */
+  .caso-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
     padding-bottom: 16px;
-    flex-wrap: wrap;
+    border-bottom: 1px solid var(--v2-line-soft);
   }
   .caso-campo {
     display: flex;
-    align-items: center;
-    gap: 8px;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 5px;
   }
   .caso-campo > .v2-sub {
-    font-size: 12px;
+    font-size: 11.5px;
     white-space: nowrap;
   }
   .caso-link {
-    margin-left: auto;
     display: inline-flex;
     align-items: center;
     gap: 6px;
+    align-self: flex-start;
   }
   .proceso,
   .docs {
-    padding-top: 0;
-    padding-bottom: 14px;
-    max-width: 720px;
+    padding: 14px 0 0;
   }
 
   /* ── copiloto documental ────────────────────────────────────────────── */
@@ -636,10 +812,10 @@
     position: relative;
   }
   .asignado-trigger {
-    display: inline-flex;
+    display: flex;
     align-items: center;
     gap: 8px;
-    min-width: 160px;
+    width: 100%;
   }
   /* Fondo invisible a pantalla completa: clic afuera cierra la lista. Es el
      patron sin dependencias -- ver por que se saco bits-ui mas arriba. */
@@ -811,5 +987,42 @@
   .compositor-nota {
     font-size: 11.5px;
     color: var(--v2-slate);
+  }
+
+  /* Debajo de 1240px las tres columnas ahogan el hilo. El contexto deja de
+     estar fijo al lado y pasa a abrirse con el botón del encabezado -- no
+     desaparece: el ticket y la documentación siguen estando a un clic. */
+  @media (max-width: 1240px) {
+    .contexto-toggle {
+      display: inline-flex;
+      margin-left: auto;
+      flex: none;
+    }
+    .info {
+      display: none;
+    }
+    .info.abierto {
+      display: block;
+      position: fixed;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: min(340px, 88vw);
+      z-index: 60;
+      background: var(--v2-paper);
+      box-shadow: -8px 0 24px rgba(0, 0, 0, 0.12);
+    }
+    .info-cerrar {
+      display: inline-flex;
+      margin-bottom: 12px;
+    }
+  }
+  /* Y debajo de 1000px la lista deja de estar al lado (ver el layout), así que
+     hace falta una forma de volver. */
+  @media (max-width: 1000px) {
+    .volver {
+      display: grid;
+      place-items: center;
+    }
   }
 </style>
