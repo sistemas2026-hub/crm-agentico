@@ -10,7 +10,12 @@ __pycache__/
 # Django
 db.sqlite3
 *.log
-media/
+# Anclada a 'backend/': es MEDIA_ROOT (settings.py: BASE_DIR/media), la carpeta
+# donde Django escribe los archivos que suben los usuarios en tiempo de
+# ejecucion. Sin anclar, el patron se traga CUALQUIER carpeta llamada 'media'
+# bajo django-crm/ -- incluida src/routes/api/media/ del frontend, que es
+# codigo fuente y no una subida.
+backend/media/
 media-images/
 cache/
 static/CACHE

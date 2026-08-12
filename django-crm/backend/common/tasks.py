@@ -561,3 +561,50 @@ def retirar_documento_del_asistente(corpus_document_id, org_id, document_id=None
             ingesta_fragmentos=None, ingesta_detalle=None,
             ingesta_actualizada_en=timezone.now(),
         )
+
+
+@shared_task
+def purgar_retencion_asistente():
+    """
+    Aplica la retencion declarada por el tenant: borra las conversaciones y los
+    adjuntos vencidos del asistente.
+
+    POR QUE LLAMA AL MOTOR Y NO BORRA DESDE AQUI
+    Es la leccion que dejo escrita purge_read_notifications() unos cientos de
+    lineas mas arriba: aquella purga borro CERO filas todas las noches durante
+    meses porque un worker de Celery no pasa por el middleware que fija el
+    contexto de aislamiento, y la politica filtra contra un valor vacio que no
+    coincide con ninguna fila. No fallaba: no hacia nada, y no lo registraba.
+
+    Las tablas del asistente viven en el esquema 'asistente' con esa misma
+    clase de politica. Repetir el patron aca seria repetir el error. El motor
+    ya abre cada operacion fijando la empresa (nucleo/persistencia/db.py::
+    sesion()), asi que se le delega a el y esta ruta no puede quedarse callada
+    borrando nada.
+
+    Cadencia sugerida: diaria, de madrugada. No es urgente ni caro -- son dos
+    DELETE por empresa.
+    """
+    import requests
+
+    url, tenant = _motor()
+    if not url or not tenant:
+        logger.warning("Purga: el asistente no esta configurado")
+        return
+
+    try:
+        r = requests.post(
+            f"{url.rstrip('/')}/mantenimiento/{tenant}/purgar", timeout=120)
+        r.raise_for_status()
+        datos = r.json()
+    except Exception:
+        logger.exception("Purga: fallo la purga de retencion del asistente")
+        return
+
+    # Se registra SIEMPRE, tambien cuando no borro nada. Una purga silenciosa
+    # es indistinguible de una purga rota -- que es exactamente como el fallo
+    # de las notificaciones paso meses sin que nadie lo viera.
+    logger.info(
+        "Purga del asistente: %s archivos (>%s dias), %s conversaciones (>%s dias)",
+        datos.get("media_borrada"), datos.get("retencion_multimedia_dias"),
+        datos.get("conversaciones_borradas"), datos.get("retencion_conversaciones_dias"))

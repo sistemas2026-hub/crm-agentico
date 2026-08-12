@@ -344,6 +344,29 @@ def _mutar_identidad_descripcion(doc: dict, descripcion: str) -> None:
     doc.setdefault("identidad", {})["descripcion"] = descripcion
 
 
+def _mutar_canal_whatsapp(doc: dict, activo: bool, numero_visible: str | None) -> None:
+    """
+    Prender/apagar el canal y el numero que se muestra en la pantalla de
+    ajustes ("estas atendiendo desde el 300...").
+
+    NO toca los '*_ref' (phone_number_id_ref, token_ref, etc): esos son los
+    NOMBRES de los secretos y ya vienen declarados desde el alta del tenant,
+    siguiendo la convencion de la plataforma (WHATSAPP_PHONE_NUMBER_ID...).
+    Lo que carga el cliente desde la interfaz son los VALORES, que van
+    aparte, cifrados, en asistente.tenant_secrets -- nunca en este documento
+    (ver nucleo/seguridad/secretos.py).
+
+    Pydantic exige que los cuatro refs indispensables esten DECLARADOS para
+    poner 'activo: true' (CanalWhatsApp._activo_exige_lo_indispensable), pero
+    eso no confirma que haya un VALOR cargado para cada uno -- ese chequeo es
+    de la pantalla, no de este documento, porque este documento nunca ve
+    valores de secretos.
+    """
+    doc.setdefault("canales", {}).setdefault("whatsapp", {})
+    doc["canales"]["whatsapp"]["activo"] = activo
+    doc["canales"]["whatsapp"]["numero_visible"] = numero_visible or None
+
+
 def _mutar_borrar(doc: dict, nombre: str) -> None:
     if nombre not in doc.get("roles", {}):
         raise ErrorEdicion(f"el rol '{nombre}' no existe")
@@ -408,3 +431,8 @@ def guardar_plazo_visita_tecnica(tenant: str, dias: int) -> TenantConfig:
     if dias < 1 or dias > 30:
         raise ErrorEdicion("el plazo tiene que ser entre 1 y 30 dias.")
     return _editar(tenant, lambda doc: _mutar_plazo_visita_tecnica(doc, dias))
+
+
+def guardar_canal_whatsapp(tenant: str, activo: bool,
+                           numero_visible: str | None) -> TenantConfig:
+    return _editar(tenant, lambda doc: _mutar_canal_whatsapp(doc, activo, numero_visible))

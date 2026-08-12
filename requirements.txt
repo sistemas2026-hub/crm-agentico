@@ -31,3 +31,14 @@ python-docx
 # Servidor WSGI. El de Flask ('app.run') avisa el mismo que no es para
 # produccion; ver el comando del servicio 'motor' en docker-compose.prod.yml.
 gunicorn
+
+# nucleo/seguridad/secretos.py, para cifrar las credenciales por empresa
+# (Fernet). El import es PEREZOSO: sin el paquete el motor arranca igual y solo
+# falla cuando alguien pide un secreto guardado en la base -- lo que sigue
+# resolviendose contra el entorno no lo necesita.
+cryptography
+
+# nucleo/canales/media.py, para achicar las fotos que manda el cliente antes de
+# guardarlas (3-8 MB de un telefono moderno -> ~200 KB). El import es PEREZOSO:
+# sin el paquete la foto se guarda tal cual, pesa mas y nada se rompe.
+Pillow

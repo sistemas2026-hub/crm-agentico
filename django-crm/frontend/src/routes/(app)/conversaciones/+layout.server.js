@@ -6,7 +6,14 @@ import { env } from '$env/dynamic/private';
  * directo del motor -- mismo patron que agentes/+page.server.js. Es una
  * bandeja de solo lectura: no hay acciones que POSTear desde acá.
  *
- * @type {import('./$types').PageServerLoad}
+ * POR QUE ES UN LAYOUT Y NO UN PAGE
+ * La bandeja es master-detail: la columna de la izquierda acompaña siempre,
+ * tambien mientras se lee una conversacion. Si esta carga viviera en el page
+ * del indice, entrar a /conversaciones/<id> la desmontaria y habria que
+ * volver atras para elegir la siguiente. Como layout, SvelteKit la carga una
+ * sola vez y la comparte con la pantalla hija.
+ *
+ * @type {import('./$types').LayoutServerLoad}
  */
 export async function load({ fetch }) {
   const baseUrl = env.PRIVATE_ASISTENTE_URL;

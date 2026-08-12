@@ -176,6 +176,20 @@
             ? `${data.asistente.persona.nombre_asistente} · ${data.asistente.persona.tono}`
             : null,
           warn: false
+        },
+        {
+          href: '/settings/canales/whatsapp',
+          title: 'WhatsApp',
+          body: 'Las credenciales de Meta que activan el canal, y la URL del webhook.',
+          value: data.canalWhatsapp
+            ? data.canalWhatsapp.activo
+              ? 'Activo'
+              : 'Apagado'
+            : null,
+          // Avisa cuando esta apagado Y ya tiene numero visible cargado -- es
+          // la senal de que alguien empezo la carga y no llego a activarlo,
+          // no el estado de "todavia nadie lo toco".
+          warn: !!data.canalWhatsapp && !data.canalWhatsapp.activo && !!data.canalWhatsapp.numero_visible
         }
       ]
     },

@@ -1,12 +1,24 @@
 <script>
   import { untrack } from 'svelte';
   import { enhance } from '$app/forms';
-  import PageHeader from '$lib/v2/components/PageHeader.svelte';
   import Pill from '$lib/v2/components/Pill.svelte';
   import Avatar from '$lib/v2/components/Avatar.svelte';
   import MarcarEjemplo from '$lib/components/manual/MarcarEjemplo.svelte';
   import { relativeTime } from '$lib/v2/format.js';
-  import { TriangleAlert, ChevronDown, ArrowRight, CircleCheck, CircleX } from '@lucide/svelte';
+  import {
+    TriangleAlert,
+    ChevronDown,
+    ArrowRight,
+    ArrowLeft,
+    CircleCheck,
+    CircleX,
+    Send,
+    Phone,
+    User,
+    PanelRight,
+    X,
+    Paperclip
+  } from '@lucide/svelte';
 
   /** @type {{ data: any }} */
   let { data } = $props();
@@ -24,6 +36,50 @@
   let entrada = $state('');
   let enviando = $state(false);
   let error = $state('');
+  /** Solo se usa por debajo de 1240px, donde la columna de contexto no cabe
+      al lado y pasa a abrirse como panel. */
+  let contextoAbierto = $state(false);
+
+  // --- conservar: sacar la conversacion de la purga por retencion ----------
+  // Distinto de marcar un ejemplo: eso dice "esta respuesta fue buena" y
+  // alimenta el manual; esto dice "no la borres todavia" -- un reclamo, un
+  // incidente. Justo lo que NO hay que copiar como ejemplo.
+  let conservada = $state(untrack(() => !!data.conversacion?.conservar));
+  let motivoConservar = $state(untrack(() => data.conversacion?.conservar_motivo ?? ''));
+  let pidiendoMotivo = $state(false);
+  let guardandoConservar = $state(false);
+  let errorConservar = $state('');
+
+  async function guardarConservar(/** @type {boolean} */ valor) {
+    if (guardandoConservar) return;
+    // El motivo es obligatorio al conservar: dentro de seis meses nadie va a
+    // saber si la marca sigue teniendo sentido sin el.
+    if (valor && !motivoConservar.trim()) {
+      pidiendoMotivo = true;
+      return;
+    }
+    guardandoConservar = true;
+    errorConservar = '';
+    try {
+      const resp = await fetch(`/api/conversaciones/${conversacion.id}/conservar`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conservar: valor, motivo: motivoConservar.trim() })
+      });
+      const datos = await resp.json();
+      if (!resp.ok) {
+        errorConservar = datos.error || 'No se pudo guardar.';
+        return;
+      }
+      conservada = valor;
+      if (!valor) motivoConservar = '';
+      pidiendoMotivo = false;
+    } catch (/** @type {any} */ err) {
+      errorConservar = err?.message || 'No se pudo guardar.';
+    } finally {
+      guardandoConservar = false;
+    }
+  }
 
   const CANAL_LABEL = { whatsapp: 'WhatsApp', 'whatsapp-simulado': 'Simulador' };
   const canalLabel = (c) => CANAL_LABEL[c] ?? c;
@@ -33,6 +89,18 @@
   const ETIQUETA_TONE = { soporte_tecnico: 'clay', facturacion: 'moss', comercial: 'slate', queja: 'rust' };
   const etiquetaTone = (e) => ETIQUETA_TONE[e] ?? 'ink';
   const etiquetaLabel = (e) => (e ? e.replaceAll('_', ' ') : '');
+
+  // Mismo criterio que la lista del layout: un telefono o un uuid no dan
+  // iniciales, y diez digitos seguidos no se leen.
+  const esTelefono = (/** @type {string} */ v) => !!v && /^\+?\d[\d\s-]{5,}$/.test(v);
+  const esUuid = (/** @type {string} */ v) =>
+    !!v && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+  function quien(/** @type {string} */ v) {
+    if (!v) return 'Sin identificar';
+    const d = v.replace(/\D/g, '');
+    if (esTelefono(v) && d.length === 10) return `${d.slice(0, 3)} ${d.slice(3, 6)} ${d.slice(6)}`;
+    return v;
+  }
 
   let asignadoA = $state(caso?.assignee_id ?? '');
   let ownerActual = $derived(owners.find((o) => o.id === asignadoA) ?? null);
@@ -55,6 +123,45 @@
   // si BottleCRM esta caido en ese momento, la conversacion sigue escalada
   // igual y no hay que volver a simular al cliente por eso.
   let escalada = $derived(!!conversacion.caso_id);
+
+  /** Clave de dia local, para agrupar el hilo. */
+  function diaDe(/** @type {string} */ iso) {
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? '' : d.toDateString();
+  }
+
+  function etiquetaDia(/** @type {string} */ iso) {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    const hoy = new Date();
+    const ayer = new Date();
+    ayer.setDate(hoy.getDate() - 1);
+    if (d.toDateString() === hoy.toDateString()) return 'Hoy';
+    if (d.toDateString() === ayer.toDateString()) return 'Ayer';
+    return new Intl.DateTimeFormat('es', { day: 'numeric', month: 'long' }).format(d);
+  }
+
+  function hora(/** @type {string} */ iso) {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    return new Intl.DateTimeFormat('es', { hour: '2-digit', minute: '2-digit' }).format(d);
+  }
+
+  /** El hilo con separadores de dia intercalados: un chat largo sin ellos
+      obliga a pasar el mouse por cada burbuja para ubicarse en el tiempo. */
+  let hilo = $derived.by(() => {
+    const salida = [];
+    let dia = null;
+    for (const m of mensajes) {
+      const d = diaDe(m.creado_en);
+      if (d !== dia) {
+        salida.push({ tipo: 'dia', clave: `d-${d}-${salida.length}`, texto: etiquetaDia(m.creado_en) });
+        dia = d;
+      }
+      salida.push({ tipo: 'msg', clave: `m-${salida.length}`, m });
+    }
+    return salida;
+  });
 
   // --- copiloto documental -------------------------------------------------
   // Lo que dice la documentacion interna sobre lo ultimo que pregunto el
@@ -143,16 +250,29 @@
     if (escalada) {
       // Una sola burbuja: lo que el agente escribio ES la respuesta, no hay
       // nada que "contestar" del otro lado.
-      mensajes.push({ rol: 'assistant', contenido: texto, creado_en: new Date().toISOString() });
+      const burbuja = {
+        rol: 'assistant',
+        contenido: texto,
+        creado_en: new Date().toISOString(),
+        /** @type {string|null} */ sinEntregar: null
+      };
+      mensajes.push(burbuja);
       try {
         const resp = await fetch(`/api/conversaciones/${conversacion.id}/humano`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ mensaje: texto })
         });
+        const datos = await resp.json();
         if (!resp.ok) {
-          const datos = await resp.json();
           error = datos.error || 'No se pudo guardar la respuesta.';
+        } else if (datos.aviso) {
+          // Se guardo pero NO salio por el canal. El caso mas comun es la
+          // ventana de 24 h de WhatsApp. Va marcado en la burbuja y no solo
+          // como error suelto: dentro de un rato el aviso de arriba ya no
+          // esta, y la burbuja sigue ahi pareciendo entregada.
+          burbuja.sinEntregar = datos.aviso;
+          error = datos.aviso;
         }
       } catch (/** @type {any} */ err) {
         error = err?.message || 'No se pudo guardar la respuesta.';
@@ -200,22 +320,169 @@
   }
 </script>
 
-<PageHeader title={conversacion.usuario_externo} record>
-  {#snippet crumb()}<a href="/conversaciones">Conversaciones</a> ›{/snippet}
-  {#snippet sub()}
-    <Pill tone={canalTone(conversacion.canal)}>{canalLabel(conversacion.canal)}</Pill>
-    <Pill tone={estadoTone(conversacion.estado)}>{conversacion.estado}</Pill>
-    {#if conversacion.escalada_a_humano}
-      <span class="v2-sub" style="color:var(--v2-rust);display:inline-flex;align-items:center;gap:4px">
-        <TriangleAlert size={14} />
-        {conversacion.motivo_escalamiento || 'Escalada a un humano'}
-      </span>
-    {/if}
-  {/snippet}
-</PageHeader>
+<!-- ── CENTRO: la conversación ────────────────────────────────────────────── -->
+<section class="centro">
+  <header class="centro-top">
+    <a class="volver" href="/conversaciones" aria-label="Volver a la lista">
+      <ArrowLeft size={16} />
+    </a>
 
-{#if caso}
-  <div class="caso-panel v2-pad">
+    {#if esTelefono(conversacion.usuario_externo)}
+      <span class="ident" aria-hidden="true"><Phone size={15} /></span>
+    {:else if !conversacion.usuario_externo || esUuid(conversacion.usuario_externo)}
+      <span class="ident" aria-hidden="true"><User size={15} /></span>
+    {:else}
+      <Avatar name={conversacion.usuario_externo} size={32} />
+    {/if}
+
+    <div class="centro-quien">
+      <h2>{quien(conversacion.usuario_externo)}</h2>
+      <div class="centro-meta">
+        <Pill tone={canalTone(conversacion.canal)}>{canalLabel(conversacion.canal)}</Pill>
+        <Pill tone={estadoTone(conversacion.estado)}>{conversacion.estado}</Pill>
+      </div>
+    </div>
+
+    <!-- Solo aparece cuando la columna de contexto no cabe al lado. Ahí se
+         abre como panel, no se pierde: el ticket y la documentación siguen a
+         un clic. -->
+    <button
+      type="button"
+      class="v2-btn v2-btn-sm contexto-toggle"
+      onclick={() => (contextoAbierto = !contextoAbierto)}
+      aria-expanded={contextoAbierto}
+    >
+      <PanelRight size={14} /> Contexto
+    </button>
+  </header>
+
+  {#if conversacion.escalada_a_humano}
+    <p class="aviso">
+      <TriangleAlert size={14} />
+      {conversacion.motivo_escalamiento || 'Escalada a un humano'}
+    </p>
+  {/if}
+
+  <div class="hilo">
+    <div class="chat-mensajes">
+      {#each hilo as item (item.clave)}
+        {#if item.tipo === 'dia'}
+          <div class="dia"><span>{item.texto}</span></div>
+        {:else}
+          <div
+            class="chat-burbuja {burbujaClase(item.m.rol)}"
+            class:sin-entregar={item.m.sinEntregar}
+          >
+            <div>{item.m.contenido}</div>
+            <!-- Lo que el cliente mando junto al mensaje. Para un ISP la foto
+                 de las luces del router dice en un segundo lo que al cliente
+                 le cuesta tres mensajes explicar: va EN el hilo, donde la
+                 mandó, no en una lista aparte al final. -->
+            {#each item.m.adjuntos ?? [] as a (a.id)}
+              {#if a.tipo === 'image'}
+                <a class="adjunto" href="/api/media/{a.id}" target="_blank" rel="noreferrer">
+                  <img src="/api/media/{a.id}" alt={a.descripcion || 'Foto del cliente'} loading="lazy" />
+                </a>
+              {:else if a.tipo === 'audio' || a.tipo === 'voice'}
+                <!-- svelte-ignore a11y_media_has_caption -->
+                <audio class="adjunto-audio" controls src="/api/media/{a.id}"></audio>
+              {:else}
+                <a class="adjunto-otro" href="/api/media/{a.id}" target="_blank" rel="noreferrer">
+                  <Paperclip size={13} />
+                  {a.tipo || 'archivo'} · <span class="v2-num">{Math.round(a.bytes / 1024)} KB</span>
+                </a>
+              {/if}
+            {/each}
+
+            {#if item.m.sinEntregar}
+              <div class="no-llego">
+                <TriangleAlert size={12} />
+                No le llegó al cliente — {item.m.sinEntregar}
+              </div>
+            {/if}
+            <div class="chat-hora v2-num">{hora(item.m.creado_en)}</div>
+            {#if item.m.rol === 'assistant' && casos.length > 0}
+              <MarcarEjemplo
+                conversacionId={conversacion.id}
+                mensajeId={item.m.id}
+                casoInicial={item.m.caso_marcado}
+                {casos}
+              />
+            {/if}
+          </div>
+        {/if}
+      {/each}
+      {#if enviando && !escalada}
+        <div class="chat-burbuja chat-asistente chat-escribiendo" aria-label="Escribiendo…">
+          <span class="punto"></span><span class="punto"></span><span class="punto"></span>
+        </div>
+      {/if}
+    </div>
+  </div>
+
+  {#if conversacion.estado === 'abierta'}
+    <div class="pie">
+      {#if error}<p class="v2-error" style="margin:0 0 6px">{error}</p>{/if}
+      <form class="compositor" onsubmit={alEnviar}>
+        <textarea
+          class="compositor-texto"
+          bind:value={entrada}
+          rows="2"
+          placeholder={escalada ? 'Escribí tu respuesta…' : 'Continuar la conversación…'}
+          disabled={enviando}
+          onkeydown={(e) => {
+            // Enter envia, Shift+Enter hace salto de linea: es lo que la mano
+            // ya espera de un chat.
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              enviar();
+            }
+          }}
+        ></textarea>
+        <div class="compositor-pie">
+          <span class="compositor-nota">
+            {#if escalada}
+              Le llega al cliente tal cual, sin pasar por el asistente
+            {:else}
+              Responde el asistente
+            {/if}
+            · <kbd class="v2-kbd">Enter</kbd> envía
+          </span>
+          <button class="v2-btn v2-btn-primary" type="submit" disabled={enviando || !entrada.trim()}>
+            <Send size={14} />{enviando ? 'Enviando…' : 'Enviar'}
+          </button>
+        </div>
+      </form>
+    </div>
+  {/if}
+</section>
+
+<!-- ── DERECHA: el contexto de la conversación ────────────────────────────
+     Todo lo que ayuda a contestar pero no es la conversación: el ticket, qué
+     hizo el asistente y qué dice la documentación. Antes vivía apilado encima
+     del hilo y lo empujaba fuera de la vista. -->
+{#if contextoAbierto}
+  <!-- Fondo para cerrar el panel al hacer clic afuera. Solo existe mientras el
+       panel está desplegado sobre el hilo. -->
+  <button
+    type="button"
+    class="info-fondo"
+    aria-label="Cerrar contexto"
+    onclick={() => (contextoAbierto = false)}
+  ></button>
+{/if}
+
+<aside class="info" class:abierto={contextoAbierto} aria-label="Contexto de la conversación">
+  <button
+    type="button"
+    class="v2-btn v2-btn-sm info-cerrar"
+    onclick={() => (contextoAbierto = false)}
+  >
+    <X size={14} /> Cerrar
+  </button>
+
+  {#if caso}
+  <div class="caso-panel">
     <div class="caso-campo">
       <span class="v2-sub">Etiqueta</span>
       {#if conversacion.etiqueta}
@@ -298,10 +565,52 @@
       Ver ticket completo <ArrowRight size={14} />
     </a>
   </div>
-{/if}
+  {/if}
 
-{#if herramientas.length > 0}
-  <details class="proceso v2-pad">
+  <!-- Conservar. Va arriba de todo y fuera de cualquier plegable: es una
+       decisión sobre si esta conversación va a seguir existiendo, y hay que
+       poder verla sin abrir nada. -->
+  <div class="conservar" class:activa={conservada}>
+    <label class="conservar-linea">
+      <input
+        type="checkbox"
+        checked={conservada}
+        disabled={guardandoConservar}
+        onchange={(e) => guardarConservar(/** @type {HTMLInputElement} */ (e.currentTarget).checked)}
+      />
+      <span>
+        <b>Conservar</b>
+        <span class="v2-muted">— no borrar al vencer la retención</span>
+      </span>
+    </label>
+
+    {#if pidiendoMotivo && !conservada}
+      <div class="conservar-motivo">
+        <input
+          class="v2-input"
+          type="text"
+          bind:value={motivoConservar}
+          placeholder="¿Por qué? Ej: reclamo en curso"
+          onkeydown={(e) => { if (e.key === 'Enter') guardarConservar(true); }}
+        />
+        <button
+          class="v2-btn v2-btn-sm"
+          type="button"
+          disabled={guardandoConservar || !motivoConservar.trim()}
+          onclick={() => guardarConservar(true)}
+        >
+          Guardar
+        </button>
+      </div>
+    {:else if conservada && motivoConservar}
+      <p class="conservar-nota">{motivoConservar}</p>
+    {/if}
+
+    {#if errorConservar}<p class="conservar-mal">{errorConservar}</p>{/if}
+  </div>
+
+  {#if herramientas.length > 0}
+  <details class="proceso">
     <summary class="proceso-resumen">
       Ver proceso
       <span class="v2-muted">
@@ -328,11 +637,11 @@
       {/each}
     </ol>
   </details>
-{/if}
+  {/if}
 
-<!-- Copiloto documental. Mismo patron plegable que "Ver proceso": es ayuda
-     lateral, no el contenido de la pantalla, y no debe empujar el hilo. -->
-<details class="docs v2-pad" ontoggle={alAbrirDocs}>
+  <!-- Copiloto documental. Mismo patron plegable que "Ver proceso": es ayuda
+       lateral, no el contenido de la pantalla. -->
+  <details class="docs" ontoggle={alAbrirDocs}>
   <summary class="proceso-resumen">
     Documentación
     <span class="v2-muted">
@@ -391,80 +700,193 @@
       </article>
     {/each}
   {/if}
-</details>
-
-<div class="v2-scroll v2-pad" style="padding-top:12px">
-  <div class="chat-mensajes">
-    {#each mensajes as m}
-      <div class="chat-burbuja {burbujaClase(m.rol)}">
-        <div>{m.contenido}</div>
-        <div class="chat-hora">{relativeTime(m.creado_en)}</div>
-        {#if m.rol === 'assistant' && casos.length > 0}
-          <MarcarEjemplo
-            conversacionId={conversacion.id}
-            mensajeId={m.id}
-            casoInicial={m.caso_marcado}
-            {casos}
-          />
-        {/if}
-      </div>
-    {/each}
-    {#if enviando && !escalada}
-      <div class="chat-burbuja chat-asistente chat-escribiendo" aria-label="Escribiendo…">
-        <span class="punto"></span><span class="punto"></span><span class="punto"></span>
-      </div>
-    {/if}
-  </div>
-
-  {#if conversacion.estado === 'abierta'}
-    {#if escalada}
-      <p class="v2-sub" style="max-width:720px;font-size:12px;margin-bottom:6px">
-        Estás respondiendo como agente humano — esto no pasa por el asistente.
-      </p>
-    {/if}
-    {#if error}<p class="v2-error" style="max-width:720px">{error}</p>{/if}
-    <form class="chat-form" onsubmit={alEnviar} style="max-width:720px">
-      <input
-        class="v2-input"
-        type="text"
-        bind:value={entrada}
-        placeholder={escalada ? 'Escribí tu respuesta…' : 'Continuar la conversación…'}
-        disabled={enviando}
-      />
-      <button class="v2-btn v2-btn-primary" type="submit" disabled={enviando}>Enviar</button>
-    </form>
-  {/if}
-</div>
+  </details>
+</aside>
 
 <style>
-  .caso-panel {
+  /* ── columna del centro: la conversación ────────────────────────────── */
+  .centro {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .centro-top {
+    flex: none;
     display: flex;
     align-items: center;
-    gap: 28px;
-    padding-top: 0;
+    gap: 10px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--v2-line);
+  }
+  .centro-quien {
+    min-width: 0;
+  }
+  .centro-top h2 {
+    margin: 0;
+    font-size: 14.5px;
+    font-weight: 640;
+    letter-spacing: -0.01em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .centro-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 3px;
+  }
+  .ident {
+    flex: none;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: var(--v2-line-soft);
+    color: var(--v2-slate);
+  }
+  /* Volver sólo tiene sentido cuando la lista no está al lado. */
+  .volver {
+    display: none;
+    color: var(--v2-slate);
+  }
+  .aviso {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    padding: 8px 16px;
+    font-size: 12.5px;
+    color: var(--v2-rust);
+    background: color-mix(in srgb, var(--v2-rust) 6%, transparent);
+    border-bottom: 1px solid var(--v2-line);
+  }
+  /* El hilo es lo único que scrollea acá: el encabezado y el compositor
+     quedan fijos, para no tener que bajar hasta el fondo para escribir. */
+  .hilo {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 14px 16px;
+  }
+  .pie {
+    flex: none;
+    padding: 0 16px 14px;
+  }
+
+  /* ── columna de la derecha: el contexto ─────────────────────────────── */
+  .info {
+    width: 310px;
+    flex: none;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 14px 16px 20px;
+    border-left: 1px solid var(--v2-line);
+  }
+  /* Por encima de 1240px la columna está siempre a la vista: ni botón para
+     abrirla, ni botón para cerrarla, ni fondo que interceptar. */
+  .contexto-toggle,
+  .info-cerrar,
+  .info-fondo {
+    display: none;
+  }
+  .info-fondo {
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+    background: rgba(28, 25, 23, 0.18);
+    border: 0;
+    padding: 0;
+    cursor: default;
+  }
+  @media (max-width: 1240px) {
+    .info-fondo {
+      display: block;
+    }
+  }
+
+  /* En la columna angosta los campos del ticket se apilan; en fila no
+     entraban ni el nombre del responsable. */
+  .caso-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
     padding-bottom: 16px;
-    flex-wrap: wrap;
+    border-bottom: 1px solid var(--v2-line-soft);
   }
   .caso-campo {
     display: flex;
-    align-items: center;
-    gap: 8px;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 5px;
   }
   .caso-campo > .v2-sub {
-    font-size: 12px;
+    font-size: 11.5px;
     white-space: nowrap;
   }
   .caso-link {
-    margin-left: auto;
     display: inline-flex;
     align-items: center;
     gap: 6px;
+    align-self: flex-start;
   }
   .proceso,
   .docs {
-    padding-top: 0;
-    padding-bottom: 14px;
-    max-width: 720px;
+    padding: 14px 0 0;
+  }
+
+  /* ── conservar ──────────────────────────────────────────────────────── */
+  /* Sin recuadro mientras está apagada: es una casilla más, no una alerta.
+     Al encenderla toma superficie, porque a partir de ahí sí es un estado
+     que hay que poder ver de un vistazo. */
+  .conservar {
+    padding: 0 0 14px;
+    border-bottom: 1px solid var(--v2-line-soft);
+  }
+  .conservar.activa {
+    background: var(--v2-line-soft);
+    border-radius: 8px;
+    padding: 10px;
+    margin-bottom: 14px;
+    border-bottom: 0;
+  }
+  .conservar-linea {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 12.5px;
+    line-height: 1.4;
+    cursor: pointer;
+  }
+  .conservar-linea input {
+    margin-top: 2px;
+    flex: none;
+    accent-color: var(--v2-ink);
+  }
+  .conservar-motivo {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+  }
+  .conservar-motivo input {
+    flex: 1;
+    min-width: 0;
+    font-size: 12.5px;
+  }
+  .conservar-nota {
+    margin: 6px 0 0 22px;
+    font-size: 11.5px;
+    color: var(--v2-slate);
+    line-height: 1.4;
+  }
+  .conservar-mal {
+    margin: 6px 0 0;
+    font-size: 11.5px;
+    color: var(--v2-rust);
   }
 
   /* ── copiloto documental ────────────────────────────────────────────── */
@@ -578,10 +1000,10 @@
     position: relative;
   }
   .asignado-trigger {
-    display: inline-flex;
+    display: flex;
     align-items: center;
     gap: 8px;
-    min-width: 160px;
+    width: 100%;
   }
   /* Fondo invisible a pantalla completa: clic afuera cierra la lista. Es el
      patron sin dependencias -- ver por que se saco bits-ui mas arriba. */
@@ -635,6 +1057,23 @@
     gap: 10px;
     max-width: 720px;
   }
+  .dia {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 6px 0;
+    color: var(--v2-slate);
+    font-size: 11.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .dia::before,
+  .dia::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--v2-line);
+  }
   .chat-burbuja {
     padding: 10px 14px;
     border-radius: 12px;
@@ -663,6 +1102,55 @@
     margin-top: 4px;
     font-size: 11px;
     opacity: 0.65;
+  }
+  /* Una respuesta guardada que nunca salio tiene que verse distinta de una
+     entregada. El aviso de arriba desaparece al rato; la burbuja se queda. */
+  .chat-burbuja.sin-entregar {
+    outline: 1px solid var(--v2-rust);
+    outline-offset: -1px;
+  }
+  /* La foto ocupa el ancho de la burbuja y se abre a tamano completo al
+     hacer clic. Alto acotado: una foto vertical de telefono empujaria el
+     resto del hilo fuera de la pantalla. */
+  .adjunto {
+    display: block;
+    margin-top: 6px;
+    border-radius: 8px;
+    overflow: hidden;
+    line-height: 0;
+  }
+  .adjunto img {
+    display: block;
+    width: 100%;
+    max-height: 320px;
+    object-fit: cover;
+  }
+  .adjunto-audio {
+    display: block;
+    width: 100%;
+    margin-top: 6px;
+    height: 34px;
+  }
+  .adjunto-otro {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 6px;
+    font-size: 11.5px;
+    color: inherit;
+    opacity: 0.85;
+  }
+
+  .no-llego {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 6px;
+    padding-top: 5px;
+    border-top: 1px solid color-mix(in srgb, var(--v2-rust) 35%, transparent);
+    font-size: 11px;
+    color: var(--v2-rust);
+    line-height: 1.35;
   }
   .chat-escribiendo {
     display: flex;
@@ -696,14 +1184,82 @@
       transform: translateY(-2px);
     }
   }
-  .chat-form {
+  .compositor {
     display: flex;
+    flex-direction: column;
     gap: 8px;
     margin-top: 14px;
     padding-top: 12px;
-    border-top: 1px solid var(--v2-border, #e5e5e5);
+    border-top: 1px solid var(--v2-line);
   }
-  .chat-form input {
-    flex: 1;
+  .compositor-texto {
+    width: 100%;
+    resize: vertical;
+    min-height: 44px;
+    border: 1px solid var(--v2-line);
+    border-radius: 8px;
+    padding: 9px 11px;
+    background: var(--v2-card);
+    color: var(--v2-ink);
+    font-family: inherit;
+    font-size: calc(var(--v2-fs) - 0.5px);
+    line-height: 1.4;
+  }
+  .compositor-texto:focus {
+    outline: 2px solid var(--v2-ember);
+    outline-offset: -1px;
+    border-color: transparent;
+  }
+  .compositor-texto:disabled {
+    background: var(--v2-line-soft);
+    color: var(--v2-slate);
+    cursor: not-allowed;
+  }
+  .compositor-pie {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .compositor-nota {
+    font-size: 11.5px;
+    color: var(--v2-slate);
+  }
+
+  /* Debajo de 1240px las tres columnas ahogan el hilo. El contexto deja de
+     estar fijo al lado y pasa a abrirse con el botón del encabezado -- no
+     desaparece: el ticket y la documentación siguen estando a un clic. */
+  @media (max-width: 1240px) {
+    .contexto-toggle {
+      display: inline-flex;
+      margin-left: auto;
+      flex: none;
+    }
+    .info {
+      display: none;
+    }
+    .info.abierto {
+      display: block;
+      position: fixed;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: min(340px, 88vw);
+      z-index: 60;
+      background: var(--v2-paper);
+      box-shadow: -8px 0 24px rgba(0, 0, 0, 0.12);
+    }
+    .info-cerrar {
+      display: inline-flex;
+      margin-bottom: 12px;
+    }
+  }
+  /* Y debajo de 1000px la lista deja de estar al lado (ver el layout), así que
+     hace falta una forma de volver. */
+  @media (max-width: 1000px) {
+    .volver {
+      display: grid;
+      place-items: center;
+    }
   }
 </style>

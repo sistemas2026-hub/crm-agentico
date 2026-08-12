@@ -31,9 +31,11 @@ y se verifica DURANTE la conversacion, con una herramienta como
 from __future__ import annotations
 
 import os
+import threading
 
 from flask import Flask, jsonify, request
 
+from nucleo.canales import media, whatsapp
 from nucleo.config import editor, fuente
 from nucleo.ingesta import corpus as ingesta
 from nucleo.ingesta.docx import procesar
@@ -42,6 +44,7 @@ from nucleo.persistencia import db as persistencia
 from nucleo.recuperacion.busqueda import recuperar
 from nucleo.seguimiento import escalamiento
 from nucleo.seguimiento import supervisor
+from nucleo.seguridad import secretos
 from nucleo.seguridad.verificacion import Sesion
 
 app = Flask(__name__)
@@ -126,26 +129,22 @@ def _agente_json(nombre: str, rol, config) -> dict:
     }
 
 
-@app.post("/chat")
-def chat():
-    cuerpo = request.get_json(force=True, silent=True) or {}
-    tenant = cuerpo.get("tenant")
-    rol = cuerpo.get("rol")
-    id_sesion = cuerpo.get("identificador_sesion")
-    mensaje = cuerpo.get("mensaje")
-    canal = cuerpo.get("canal", "api")
+def atender_turno(config, tenant: str, rol: str, id_sesion: str,
+                  mensaje: str, canal: str) -> dict:
+    """
+    Un turno completo de conversacion: pausa por escalamiento, modelo,
+    persistencia y evaluacion de escalamiento.
 
-    faltantes = [nombre for nombre, valor in
-                {"tenant": tenant, "rol": rol, "identificador_sesion": id_sesion,
-                 "mensaje": mensaje}.items() if not valor]
-    if faltantes:
-        return jsonify({"error": f"Faltan campos: {', '.join(faltantes)}"}), 400
+    Se extrajo de /chat sin cambiarle el comportamiento para que el webhook de
+    WhatsApp (mas abajo) haga lo MISMO en vez de una copia parecida. Un canal
+    con su propia version de esta logica se desincroniza: es exactamente como
+    aparecio el bot que seguia contestando despues de escalar.
 
-    try:
-        config = _config_de(tenant)
-    except FileNotFoundError:
-        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
-
+    Devuelve {'respuesta', 'verificado', 'pausada'}. Levanta motor.ErrorMotor
+    si el rol o el mensaje no son atendibles -- quien llama decide si eso es un
+    400 (HTTP) o una linea de registro (webhook, donde no hay a quien
+    devolverle un error).
+    """
     clave = (tenant, id_sesion)
     if clave not in _sesiones:
         _sesiones[clave] = {"sesion": Sesion(identificador_canal=id_sesion),
@@ -169,23 +168,25 @@ def chat():
                 persistencia.registrar_mensaje(tenant, canal, id_sesion, rol, "assistant", respuesta)
             except Exception as e:
                 print(f"[persistencia] no se pudo guardar el turno pausado: {e}")
-            return jsonify({"respuesta": respuesta,
-                            "verificado": estado["sesion"].verificado,
-                            "pausada": True})
+            return {"respuesta": respuesta,
+                    "verificado": estado["sesion"].verificado,
+                    "pausada": True}
         # El caso se cerro: el asistente vuelve a atender desde este turno.
         estado["escalada"] = False
         estado["caso_id"] = None
 
-    try:
-        respuesta, registro_herramientas = motor.responder(
-            config, rol, mensaje, estado["historial"], estado["sesion"])
-    except motor.ErrorMotor as e:
-        return jsonify({"error": str(e)}), 400
+    respuesta, registro_herramientas = motor.responder(
+        config, rol, mensaje, estado["historial"], estado["sesion"])
 
     conversation_id = None
     mensaje_id = None
+    mensaje_usuario_id = None
     try:
-        persistencia.registrar_mensaje(tenant, canal, id_sesion, rol, "user", mensaje)
+        # El id del turno del CLIENTE se conserva: es a esa burbuja a la que
+        # hay que colgarle la foto que mando, para que aparezca en el hilo
+        # donde la mando y no en una lista aparte al final.
+        _, mensaje_usuario_id = persistencia.registrar_mensaje(
+            tenant, canal, id_sesion, rol, "user", mensaje)
         conversation_id, mensaje_id = persistencia.registrar_mensaje(
             tenant, canal, id_sesion, rol, "assistant", respuesta)
         for llamada in registro_herramientas:
@@ -243,9 +244,42 @@ def chat():
             except Exception as e:
                 print(f"[supervisor] fallo al revisar la conversacion: {e}")
 
-    return jsonify({"respuesta": respuesta, "verificado": estado["sesion"].verificado,
-                    "cerrada": cerrada, "conversacion_id": conversation_id,
-                    "mensaje_id": mensaje_id})
+    return {"respuesta": respuesta, "verificado": estado["sesion"].verificado,
+            "cerrada": cerrada, "conversacion_id": conversation_id,
+            "mensaje_id": mensaje_id, "mensaje_usuario_id": mensaje_usuario_id,
+            "pausada": False}
+
+
+@app.post("/chat")
+def chat():
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    rol = cuerpo.get("rol")
+    id_sesion = cuerpo.get("identificador_sesion")
+    mensaje = cuerpo.get("mensaje")
+    canal = cuerpo.get("canal", "api")
+
+    faltantes = [nombre for nombre, valor in
+                {"tenant": tenant, "rol": rol, "identificador_sesion": id_sesion,
+                 "mensaje": mensaje}.items() if not valor]
+    if faltantes:
+        return jsonify({"error": f"Faltan campos: {', '.join(faltantes)}"}), 400
+
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+
+    try:
+        salida = atender_turno(config, tenant, rol, id_sesion, mensaje, canal)
+    except motor.ErrorMotor as e:
+        return jsonify({"error": str(e)}), 400
+
+    # 'pausada' solo viaja cuando es cierto: es la forma que ya devolvia /chat
+    # antes de que existiera el webhook, y el simulador depende de ella.
+    if not salida.get("pausada"):
+        salida.pop("pausada", None)
+    return jsonify(salida)
 
 
 @app.get("/agentes")
@@ -464,6 +498,134 @@ def configuracion_plazo_visita_tecnica():
     return jsonify({"dias": herramienta.fechas_automaticas.get("fecha_final")})
 
 
+@app.get("/configuracion/canales")
+def configuracion_canales():
+    """
+    Estado del canal de WhatsApp para la pantalla de ajustes: si esta activo,
+    los NOMBRES de los secretos que declara (nunca sus valores -- esos se
+    consultan aparte en /secretos) y que plantillas tiene mapeadas.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+
+    w = config.canales.whatsapp
+    return jsonify({"whatsapp": {
+        # El slug tal cual se lo paso quien llamo -- es el mismo valor con el
+        # que se arma la URL del webhook (/canales/whatsapp/<tenant_slug>), y
+        # la pantalla de ajustes lo necesita para armar esa URL sin adivinar.
+        "tenant_slug": tenant,
+        "activo": w.activo,
+        "version_api": w.version_api,
+        "numero_visible": w.numero_visible,
+        "plantillas": w.plantillas,
+        # Los NOMBRES declarados -- la pantalla cruza esto contra /secretos
+        # para saber cuales de los cuatro indispensables ya tienen un valor.
+        "refs": {
+            "phone_number_id": w.phone_number_id_ref,
+            "token": w.token_ref,
+            "waba_id": w.waba_id_ref,
+            "app_secret": w.app_secret_ref,
+            "verify_token": w.verify_token_ref,
+        },
+    }})
+
+
+@app.put("/configuracion/canales/whatsapp")
+def configuracion_canal_whatsapp():
+    """
+    Prender/apagar el canal y el numero visible. Los valores de las
+    credenciales NO pasan por aca -- ver POST /secretos.
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+
+    try:
+        config = editor.guardar_canal_whatsapp(
+            tenant, activo=bool(cuerpo.get("activo", False)),
+            numero_visible=cuerpo.get("numero_visible") or None)
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
+
+    olvidar_config(tenant)
+    w = config.canales.whatsapp
+    return jsonify({"activo": w.activo, "numero_visible": w.numero_visible})
+
+
+# =============================================================================
+#  SECRETOS  -  credenciales por empresa (WhatsApp, WispHub...), cifradas
+# =============================================================================
+#  Nunca se devuelve un valor. Ver nucleo/seguridad/secretos.py: la pantalla
+#  de ajustes solo necesita saber SI algo esta cargado (pista + fecha), no QUE
+#  es. Distinto del resto de este archivo, que sirve datos de negocio: aca lo
+#  que se sirve es metadata de una llave, nunca la llave.
+
+@app.get("/secretos")
+def secretos_listar():
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        return jsonify({"secretos": secretos.listar(tenant)})
+    except secretos.ErrorSecreto as e:
+        return jsonify({"error": str(e)}), 500
+    except Exception as e:
+        print(f"[secretos] fallo al listar: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudieron leer los secretos."}), 500
+
+
+@app.post("/secretos")
+def secretos_guardar():
+    """
+    Cifra y guarda (o actualiza) un secreto de la empresa.
+
+    'nombre' llega libre y no contra una lista cerrada a proposito: este
+    endpoint es generico (sirve para WHATSAPP_* y para cualquier otro
+    auth_ref que declare una Herramienta, ej. WISPHUB_API_KEY). Lo que decide
+    QUE secretos hacen falta es la configuracion del tenant, no este archivo.
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    nombre = (cuerpo.get("nombre") or "").strip()
+    valor = cuerpo.get("valor") or ""
+    if not tenant or not nombre:
+        return jsonify({"error": "Faltan campos: tenant, nombre"}), 400
+
+    try:
+        secretos.guardar(tenant, nombre, valor, cuerpo.get("descripcion"))
+    except secretos.ErrorSecreto as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        print(f"[secretos] fallo al guardar '{nombre}': {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo guardar el secreto."}), 500
+
+    return jsonify({"ok": True})
+
+
+@app.delete("/secretos/<nombre>")
+def secretos_borrar(nombre):
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant") or request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+
+    try:
+        borrado = secretos.borrar(tenant, nombre)
+    except Exception as e:
+        print(f"[secretos] fallo al borrar '{nombre}': {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo borrar el secreto."}), 500
+
+    return jsonify({"borrado": borrado})
+
+
 # =============================================================================
 #  CONVERSACIONES  -  solo lectura, la bandeja de chats con clientes finales
 # =============================================================================
@@ -512,6 +674,18 @@ def conversaciones_responder_humano(id_conversacion):
     pasar por el modelo. Distinto de /chat: eso simula al cliente escribiendo
     y le contesta el bot; esto es la respuesta de la persona que tomo el
     caso, tal cual la tipeo.
+
+    GUARDAR NO ES ENTREGAR
+    ----------------------
+    Se guarda primero y se entrega despues, y el resultado de la entrega viaja
+    en la respuesta ('entregado' / 'aviso'). Una respuesta que se ve en la
+    bandeja pero nunca salio es peor que un error visible: el agente cree que
+    ya atendio y el cliente sigue esperando. El caso mas comun no es una caida
+    sino la ventana de 24 h de WhatsApp -- ver nucleo/canales/whatsapp.py.
+
+    El orden importa: si se enviara primero y guardara despues, un fallo al
+    guardar dejaria un mensaje que el cliente recibio y que no figura en
+    ningun lado.
     """
     cuerpo = request.get_json(force=True, silent=True) or {}
     tenant = cuerpo.get("tenant")
@@ -520,17 +694,37 @@ def conversaciones_responder_humano(id_conversacion):
         return jsonify({"error": "Faltan campos: tenant, mensaje"}), 400
 
     try:
-        existe = persistencia.agregar_mensaje_humano(tenant, id_conversacion, contenido)
+        destino = persistencia.agregar_mensaje_humano(tenant, id_conversacion, contenido)
     except RuntimeError as e:
         return jsonify({"error": str(e)}), 404
     except Exception as e:
         print(f"[conversaciones] fallo al guardar respuesta humana: {type(e).__name__}: {e}")
         return jsonify({"error": "No se pudo guardar la respuesta."}), 500
 
-    if not existe:
+    if destino is None:
         return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
 
-    return jsonify({"ok": True}), 201
+    salida = {"ok": True, "entregado": False}
+
+    if destino["canal"] != "whatsapp":
+        # El simulador y la API no tienen a donde entregar: la conversacion se
+        # lee desde la misma pantalla. No es un fallo.
+        salida["entregado"] = None
+        return jsonify(salida), 201
+
+    try:
+        config = _config_de(tenant)
+        whatsapp.enviar_texto(config, tenant, destino["usuario_externo"], contenido)
+        salida["entregado"] = True
+    except Exception as e:
+        # 201 igual: el mensaje SI quedo guardado, y el agente tiene que verlo
+        # en el hilo. Lo que no ocurrio es la entrega, y eso se dice con todas
+        # las letras en vez de devolver un error que sugiera que se perdio todo.
+        print(f"[conversaciones] no se pudo entregar la respuesta humana de "
+              f"'{id_conversacion}': {type(e).__name__}: {e}")
+        salida["aviso"] = str(e)
+
+    return jsonify(salida), 201
 
 
 @app.get("/conversaciones/<id_conversacion>/herramientas")
@@ -859,6 +1053,252 @@ def corpus_retirar(id_documento):
     return jsonify({"retirado": True})
 
 
+# =============================================================================
+#  WEBHOOK DE WHATSAPP  -  la unica ruta de este servicio expuesta a internet
+# =============================================================================
+#  El resto del motor NO lleva dominio publico a proposito (ver DESPLIEGUE.md):
+#  exponer /chat seria dejar el asistente abierto sin autenticacion. La regla
+#  de Traefik tiene que restringirse al prefijo '/canales/whatsapp'.
+#
+#  Aca la autenticacion es la FIRMA del cuerpo, no un token de sesion: Meta
+#  firma cada entrega con el App Secret y sin esa firma no se procesa nada.
+
+def _rol_de_cliente(config) -> str | None:
+    """El rol con el que se atiende a quien escribe por un canal publico.
+
+    Se busca por 'orientado_a', no por nombre: el nucleo no puede saber como
+    llamo cada empresa a su rol de autoservicio (PRD 3 / ARQUITECTURA.md), y
+    fijar 'cliente_final' como literal seria conocimiento de un tenant."""
+    for nombre, rol in config.roles.items():
+        if rol.orientado_a == "cliente_final":
+            return nombre
+    return None
+
+
+# Lo que se le dice al MODELO cuando el cliente manda un archivo sin escribir
+# nada. Es una descripcion del hecho, no del contenido: nadie miro la foto. Sin
+# esto el turno arrancaria con un mensaje vacio y el modelo saludaria como si
+# fuera el primer contacto.
+_AVISO_ADJUNTO = {
+    "image": "[El cliente envio una foto]",
+    "audio": "[El cliente envio un audio]",
+    "voice": "[El cliente envio una nota de voz]",
+    "video": "[El cliente envio un video]",
+    "document": "[El cliente envio un documento]",
+    "sticker": "[El cliente envio un sticker]",
+    "location": "[El cliente compartio su ubicacion]",
+}
+
+
+def _atendio_baja_o_alta(config, tenant: str, de: str, texto: str) -> bool:
+    """
+    Si el mensaje es una solicitud de baja o alta de avisos, la resuelve y
+    devuelve True (el turno termina ahi).
+
+    Se compara el mensaje COMPLETO, no si lo contiene: "no me llega nada, doy
+    de baja el servicio?" no es una solicitud de baja del canal, y tratarla
+    como tal seria dejar de avisarle justo a quien tiene un problema.
+    """
+    cfg = getattr(config.canales, "whatsapp", None)
+    if not cfg:
+        return False
+
+    limpio = (texto or "").strip().lower().rstrip(".!")
+    if not limpio:
+        return False
+
+    try:
+        if limpio in [p.lower() for p in cfg.palabras_baja]:
+            persistencia.dar_de_baja(tenant, de, "whatsapp", limpio)
+            whatsapp.enviar_texto(config, tenant, de, cfg.respuesta_baja)
+            print(f"[whatsapp] baja de avisos: {de}")
+            return True
+        if limpio in [p.lower() for p in cfg.palabras_alta]:
+            persistencia.dar_de_alta(tenant, de, "whatsapp")
+            whatsapp.enviar_texto(config, tenant, de, cfg.respuesta_alta)
+            print(f"[whatsapp] alta de avisos: {de}")
+            return True
+    except Exception as e:
+        # Si falla, se deja seguir al modelo: peor que no registrar la baja
+        # seria dejar el mensaje sin ninguna respuesta.
+        print(f"[whatsapp] fallo al procesar baja/alta de {de}: "
+              f"{type(e).__name__}: {e}")
+    return False
+
+
+def _guardar_adjunto(config, tenant: str, entrante: dict,
+                     conversacion_id: str | None,
+                     mensaje_id: str | None = None) -> None:
+    """
+    Baja el archivo, lo comprime y lo guarda colgado de la conversacion.
+
+    Nunca levanta: es informacion de apoyo. Si falla, el cliente igual recibe
+    su respuesta y el agente ve el mensaje sin la foto -- que es peor que
+    tenerla, pero muchisimo mejor que un turno caido.
+    """
+    media_id = entrante.get("media_id")
+    if not media_id or not conversacion_id:
+        return
+    try:
+        crudo, mime = whatsapp.descargar_media(config, tenant, media_id)
+        contenido, mime = media.preparar(crudo, entrante.get("tipo", ""), mime)
+        persistencia.guardar_media(
+            tenant, conversacion_id, media_id, entrante.get("tipo", ""),
+            contenido, mime, entrante.get("descripcion") or None, mensaje_id)
+        print(f"[whatsapp] adjunto {media_id} guardado "
+              f"({len(crudo) // 1024} KB -> {len(contenido) // 1024} KB)")
+    except Exception as e:
+        print(f"[whatsapp] no se pudo guardar el adjunto {media_id}: "
+              f"{type(e).__name__}: {e}")
+
+
+def _procesar_mensaje_whatsapp(config, tenant: str, rol: str, entrante: dict) -> None:
+    """
+    Un mensaje entrante, de punta a punta. Corre FUERA del ciclo de respuesta
+    del webhook (ver la nota de ACK abajo), asi que no puede devolver error a
+    nadie: todo lo que falle se registra y se corta ahi.
+    """
+    de = entrante.get("de")
+    wamid = entrante.get("wamid")
+
+    try:
+        if wamid:
+            whatsapp.marcar_leido(config, tenant, wamid)
+
+        # Baja/alta de avisos ANTES del modelo. No es una consulta que haya que
+        # interpretar: es un derecho del titular (Ley 1581) y tiene que
+        # funcionar aunque el modelo este caido. Ademas, un numero que quiere
+        # dejar de recibir y no puede, bloquea -- y los bloqueos le bajan la
+        # reputacion al numero de la empresa.
+        if _atendio_baja_o_alta(config, tenant, de, entrante.get("texto", "")):
+            return
+
+        texto = entrante.get("texto", "")
+        descripcion = entrante.get("descripcion", "")
+        tipo = entrante.get("tipo", "")
+
+        # Lo que el modelo lee de un adjunto es lo que el cliente ESCRIBIO al
+        # mandarlo, mas el hecho de que mando algo. No se le pasa la foto: no
+        # hay modelo de vision configurado, e inventar una descripcion seria
+        # exactamente lo que el PRD RF-07 prohibe.
+        if not texto.strip():
+            texto = descripcion.strip() or _AVISO_ADJUNTO.get(tipo, "")
+
+        if not texto:
+            whatsapp.enviar_texto(
+                config, tenant, de,
+                "Recibí tu mensaje, pero no puedo leer ese tipo de archivo. "
+                "Contame en palabras qué necesitás y te ayudo.")
+            return
+
+        salida = atender_turno(config, tenant, rol, de, texto, "whatsapp")
+
+        # El adjunto se guarda DESPUES del turno, con la conversacion ya
+        # creada: es lo que le da el conversation_id al que colgarlo. Va
+        # aparte del turno y en su propio try porque una foto que no se pudo
+        # bajar no puede dejar al cliente sin respuesta.
+        _guardar_adjunto(config, tenant, entrante, salida.get("conversacion_id"),
+                         salida.get("mensaje_usuario_id"))
+
+        whatsapp.enviar_texto(config, tenant, de, salida["respuesta"])
+    except Exception as e:
+        print(f"[whatsapp] fallo al atender a {de} ({wamid}): "
+              f"{type(e).__name__}: {e}")
+
+
+@app.get("/canales/whatsapp/<tenant>")
+def whatsapp_handshake(tenant):
+    """
+    Alta del webhook. Meta llama una sola vez con GET y espera que le devuelvan
+    'hub.challenge' TAL CUAL, en texto plano, solo si el verify_token coincide.
+    """
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+
+    recibido = request.args.get("hub.verify_token")
+    if not whatsapp.token_de_verificacion_valido(config, tenant, recibido):
+        print(f"[whatsapp] handshake rechazado para '{tenant}': token invalido")
+        return jsonify({"error": "verify_token invalido"}), 403
+
+    return request.args.get("hub.challenge", ""), 200, {"Content-Type": "text/plain"}
+
+
+@app.post("/canales/whatsapp/<tenant>")
+def whatsapp_webhook(tenant):
+    """
+    Mensajes entrantes.
+
+    ACK INMEDIATO, TRABAJO APARTE
+    -----------------------------
+    Meta espera un 200 en pocos segundos y reintenta si no lo recibe. Un turno
+    con DeepSeek tarda 4.7-12 s (PRD 7.1) y el modelo local hasta 42 s: si se
+    contesta despues de atender, Meta reintenta y el cliente recibe la misma
+    respuesta dos veces. Por eso se responde 200 antes de pensar, y el turno
+    corre en un hilo.
+
+    El hilo es suficiente y una cola seria de mas: el trabajo es una llamada
+    HTTP con espera, no calculo, y si el proceso se cae en el medio el mensaje
+    se pierde -- que es lo mismo que pasaria con una cola sin persistencia. El
+    dia que el volumen lo pida, esto es lo que se reemplaza.
+    """
+    crudo = request.get_data()          # CRUDO: la firma es sobre estos bytes
+
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+
+    # --- la firma es la autenticacion de esta ruta, y falla cerrado ----------
+    if not whatsapp.firma_valida(config, tenant, crudo,
+                                 request.headers.get("X-Hub-Signature-256")):
+        print(f"[whatsapp] firma invalida en el webhook de '{tenant}'")
+        return jsonify({"error": "firma invalida"}), 401
+
+    cuerpo = request.get_json(force=True, silent=True) or {}
+
+    rol = _rol_de_cliente(config)
+    if not rol:
+        print(f"[whatsapp] '{tenant}' no tiene ningun rol orientado a "
+              f"cliente_final: no hay con que atender el mensaje")
+        return jsonify({"recibido": True}), 200
+
+    atendidos = 0
+    for entrante in whatsapp.mensajes_entrantes(cuerpo):
+        wamid = entrante.get("wamid")
+        de = entrante.get("de")
+        if not wamid or not de:
+            continue
+
+        # Antes de gastar un turno del modelo: si este wamid ya se atendio, es
+        # un reintento de Meta y contestar de nuevo seria cobrar y responder
+        # dos veces. Ver supabase/07_webhook_eventos.sql.
+        try:
+            if persistencia.evento_ya_visto(tenant, wamid):
+                continue
+        except Exception as e:
+            # Sin poder deduplicar se prefiere NO atender: un mensaje perdido
+            # se recupera cuando el cliente insiste; uno duplicado ya le llego
+            # dos veces y no hay vuelta atras.
+            print(f"[whatsapp] no se pudo verificar duplicado de {wamid}, "
+                  f"se descarta por precaucion: {type(e).__name__}: {e}")
+            continue
+
+        hilo = threading.Thread(
+            target=_procesar_mensaje_whatsapp,
+            args=(config, tenant, rol, entrante), daemon=True)
+        hilo.start()
+        atendidos += 1
+
+    # Los acuses de entrega llegan por este mismo webhook y NO son
+    # conversacion: sin separarlos, el bot contestaria a su propio "entregado".
+    for estado in whatsapp.estados_entrantes(cuerpo):
+        if estado.get("estado") == "failed":
+            print(f"[whatsapp] no se pudo entregar {estado.get('wamid')} a "
+                  f"{estado.get('de')}: {estado.get('error')}")
+
+    return jsonify({"recibido": True, "atendidos": atendidos}), 200
 @app.get("/corpus/documentos")
 def corpus_documentos():
     tenant = request.args.get("tenant")
@@ -887,6 +1327,218 @@ def corpus_fragmentos(id_documento):
         return jsonify({"error": "No se pudieron leer los fragmentos."}), 500
 
     return jsonify({"fragmentos": fragmentos})
+
+
+@app.post("/avisos/whatsapp/<tenant>")
+def whatsapp_avisar(tenant):
+    """
+    Un aviso PROACTIVO por plantilla: cobro, corte, mantenimiento.
+
+    Es la unica forma de escribirle primero a alguien -- fuera de las 24 h
+    desde su ultimo mensaje, WhatsApp solo acepta plantillas aprobadas.
+
+    NO va detras del webhook publico: esto lo llama un proceso interno (una
+    tarea programada del CRM cruzando facturas vencidas), por la red interna.
+    Si algun dia se expone, necesita autenticacion propia -- la firma de Meta
+    no aplica aca porque el que llama no es Meta.
+
+    Cuerpo: {para, plantilla, variables?, idioma?}
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    para = cuerpo.get("para")
+    plantilla = cuerpo.get("plantilla")
+    if not para or not plantilla:
+        return jsonify({"error": "Faltan campos: para, plantilla"}), 400
+
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+
+    # La baja se consulta ANTES de armar nada. Escribirle a quien pidio que no
+    # le escribamos no es solo un problema legal: los bloqueos que genera le
+    # bajan la reputacion al numero y con ella el limite de envio de TODA la
+    # empresa. Falla cerrado: si no se puede comprobar, no se manda.
+    try:
+        if persistencia.esta_de_baja(tenant, para, "whatsapp"):
+            return jsonify({"enviado": False, "motivo": "el numero pidio no recibir avisos"}), 200
+    except Exception as e:
+        print(f"[whatsapp] no se pudo comprobar la baja de {para}: {e}")
+        return jsonify({"error": "No se pudo comprobar si el numero acepta avisos."}), 503
+
+    try:
+        wamid = whatsapp.enviar_plantilla(
+            config, tenant, para, plantilla,
+            cuerpo.get("variables"), cuerpo.get("idioma", "es"))
+    except whatsapp.ErrorWhatsApp as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        print(f"[whatsapp] fallo el aviso a {para}: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo enviar el aviso."}), 502
+
+    return jsonify({"enviado": True, "wamid": wamid}), 200
+
+
+@app.get("/plantillas/whatsapp/<tenant>")
+def whatsapp_plantillas(tenant):
+    """
+    Que plantillas tiene aprobadas la empresa en Meta, cruzadas con las que
+    declara su configuracion.
+
+    Existe porque hoy esas dos listas se mantienen a ciegas: una plantilla
+    declarada en el YAML que Meta nunca aprobo falla recien al mandar el primer
+    aviso, y a esa altura ya hay un cliente sin enterarse de su corte.
+    """
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+
+    try:
+        en_meta = whatsapp.plantillas_aprobadas(config, tenant)
+    except whatsapp.ErrorWhatsApp as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        print(f"[whatsapp] fallo al leer plantillas: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudieron leer las plantillas."}), 502
+
+    declaradas = config.canales.whatsapp.plantillas
+    aprobadas = {p["nombre"] for p in en_meta if p["estado"] == "APPROVED"}
+    return jsonify({
+        "en_meta": en_meta,
+        "declaradas": declaradas,
+        # Lo unico que hay que mirar: lo que el codigo puede pedir y Meta no
+        # va a aceptar.
+        "declaradas_sin_aprobar": sorted(
+            clave for clave, nombre in declaradas.items() if nombre not in aprobadas),
+    })
+
+
+@app.post("/conversaciones/<id_conversacion>/conservar")
+def conversaciones_conservar(id_conversacion):
+    """
+    Marca o desmarca una conversacion para que la purga por retencion no la
+    borre.
+
+    NO es lo mismo que marcar un ejemplo (ver /mensajes/<id>/marcar): un
+    ejemplo dice "esta respuesta del asistente fue buena" y alimenta el manual
+    de procedimientos; esto dice "no la borres todavia" -- un reclamo, un
+    incidente, algo que puede terminar en disputa, que es justo lo que NO hay
+    que copiar como ejemplo.
+
+    Cuerpo: {tenant, conservar: bool, motivo?, por?}
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+
+    conservar = bool(cuerpo.get("conservar", True))
+    motivo = (cuerpo.get("motivo") or "").strip() or None
+
+    # Al conservar se exige un motivo: dentro de seis meses nadie va a saber
+    # si la marca sigue teniendo sentido, y sin eso no hay forma de decidir si
+    # se puede soltar. Al desmarcar no hace falta.
+    if conservar and not motivo:
+        return jsonify({"error": "Hay que decir por que se conserva."}), 400
+
+    try:
+        existe = persistencia.marcar_conservar(
+            tenant, id_conversacion, conservar, motivo, cuerpo.get("por"))
+    except Exception as e:
+        print(f"[conversaciones] fallo al marcar conservar: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo guardar."}), 500
+
+    if not existe:
+        return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+    return jsonify({"conservar": conservar, "motivo": motivo})
+
+
+@app.get("/conversaciones/<id_conversacion>/media")
+def conversaciones_media(id_conversacion):
+    """Que adjuntos tiene una conversacion, SIN los bytes -- la bandeja pide
+    cada archivo aparte por su id."""
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        return jsonify({"media": persistencia.media_de(tenant, id_conversacion)})
+    except Exception as e:
+        print(f"[media] fallo al listar: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudieron leer los adjuntos."}), 500
+
+
+@app.get("/media/<id_media>")
+def media_archivo(id_media):
+    """
+    El archivo en si. Sale con los bytes crudos y su mime, para que la interfaz
+    lo use directo en un <img> sin pasarlo por base64.
+
+    El aislamiento por empresa lo hace la politica de la base, no un if: pedir
+    el id de otra empresa devuelve 404 porque la fila sencillamente no se ve.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        encontrado = persistencia.media_bytes(tenant, id_media)
+    except Exception as e:
+        print(f"[media] fallo al leer {id_media}: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo leer el archivo."}), 500
+
+    if not encontrado:
+        return jsonify({"error": "No existe."}), 404
+
+    contenido, mime = encontrado
+    # Cache larga: el contenido de un id nunca cambia (se inserta una vez y se
+    # borra por antiguedad), asi que revalidar seria trafico puro.
+    return contenido, 200, {"Content-Type": mime,
+                            "Cache-Control": "private, max-age=86400"}
+
+
+@app.post("/mantenimiento/<tenant>/purgar")
+def mantenimiento_purgar(tenant):
+    """
+    Aplica la retencion declarada por la empresa: borra lo vencido.
+
+    Vive en el motor y no en el CRM por una razon concreta, y hay una leccion
+    ajena que la respalda: la purga de notificaciones del CRM estuvo borrando
+    CERO filas todas las noches durante meses, porque un worker de Celery no
+    pasa por el middleware que fija el contexto de aislamiento, y la politica
+    filtra contra un valor vacio que no coincide con nada. Nunca fallo; solo no
+    hizo nada, y no lo registraba.
+
+    Aca eso no puede pasar: db.sesion() fija la empresa en cada operacion --
+    es la misma funcion que usa el resto del motor, no una ruta especial.
+
+    NO va bajo /canales/whatsapp: ese prefijo es el que se expone a internet.
+    Esto lo llama una tarea programada por la red interna.
+    """
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+
+    dias_media = config.limites.retencion_multimedia_dias
+    dias_conv = config.limites.retencion_conversaciones_dias
+
+    salida = {"retencion_multimedia_dias": dias_media,
+              "retencion_conversaciones_dias": dias_conv}
+    try:
+        # Multimedia primero: tiene el plazo mas corto, y borrarla antes deja
+        # menos trabajo en cascada al borrar conversaciones.
+        salida["media_borrada"] = persistencia.purgar_media(tenant, dias_media)
+        salida["conversaciones_borradas"] = persistencia.purgar_conversaciones(
+            tenant, dias_conv)
+    except Exception as e:
+        print(f"[mantenimiento] fallo la purga de '{tenant}': "
+              f"{type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo completar la purga."}), 500
+
+    print(f"[mantenimiento] purga de '{tenant}': "
+          f"{salida['media_borrada']} archivos (>{dias_media}d), "
+          f"{salida['conversaciones_borradas']} conversaciones (>{dias_conv}d)")
+    return jsonify(salida)
 
 
 @app.get("/salud")

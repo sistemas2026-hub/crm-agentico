@@ -82,7 +82,7 @@ sysctl -w vm.swappiness=10 && echo 'vm.swappiness=10' >> /etc/sysctl.conf
 
 ### 3. Variables
 
-Van en la sección **Environment** del servicio. Dieciséis son obligatorias; el despliegue se detiene nombrando la que falte, antes de construir nada. Péguelas todas de una vez — Compose se para en la primera.
+Van en la sección **Environment** del servicio. **Diecinueve** son obligatorias; el despliegue se detiene nombrando la que falte, antes de construir nada. Péguelas todas de una vez — **Compose se para en la primera**, así que ir agregándolas de a una es un redespliegue por variable.
 
 ```
 DBHOST=crm.rapilinksas.co
@@ -107,6 +107,9 @@ WISPHUB_API_KEY=
 WISPHUB_BASE_URL=https://api.wisphub.io
 WISPHUB_MODO_REAL=true
 DEEPSEEK_API_KEY=
+BOTTLECRM_API_TOKEN=
+
+SECRETOS_CLAVE_MAESTRA=
 
 ASISTENTE_TENANT=rapilink
 
@@ -114,6 +117,16 @@ DEFAULT_FROM_EMAIL=noreply@rapilinksas.co
 ```
 
 `ASISTENTE_TENANT` es el slug del `tenants/<slug>.config.yaml`, y es de quién habla el frontend cuando alguien abre `/agentes` o `/settings/asistente`. Se declara acá y no en el código porque es lo único que ata esa interfaz a una empresa concreta. La URL del motor no está en esta lista: la fija el compose (`http://motor:5000`), que es quien conoce el nombre del servicio.
+
+`SECRETOS_CLAVE_MAESTRA` descifra las credenciales por empresa (`asistente.tenant_secrets`). Tiene que ser **la misma** que la del `.env` de desarrollo, o lo que se cargue desde una máquina no se descifra en la otra. Se genera una vez con:
+
+```
+py -3.13 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+**Si se pierde, no hay forma de recuperar los valores**: hay que volver a cargar todas las credenciales a mano. Es la propiedad buscada, no un descuido — guardala donde guardes las demás.
+
+`BOTTLECRM_API_TOKEN` lo usa el motor para abrir el ticket al escalar una conversación y para comprobar si ese caso sigue abierto. Sin él, el bot escala y el ticket nunca se crea.
 
 Los valores vacíos salen del `.env` local, salvo `SECRET_KEY`, que se genera nuevo y **nunca** se reutiliza el de desarrollo:
 
@@ -170,6 +183,104 @@ El servicio es `kong`, la pasarela de API — **no `db`**. Apuntarlo a `db` da 5
 Al entrar pide usuario y contraseña: son `DASHBOARD_USERNAME` y `DASHBOARD_PASSWORD` de las variables de ese proyecto.
 
 `motor`, `ollama` y `redis` **no llevan dominio**. El frontend alcanza al motor por la red interna (`http://motor:5000`); exponerlo sería abrir el asistente a internet sin autenticación.
+
+### 4.c El webhook de WhatsApp — la única excepción
+
+Meta necesita una URL pública HTTPS para entregar los mensajes, así que el motor **sí** necesita un dominio. Pero solo para esa ruta:
+
+| Dominio | Servicio | Puerto | Regla de Traefik |
+|---|---|---|---|
+| `motor.rapilinksas.co` | `motor` | 5000 | `Host(...) && PathPrefix(/canales/whatsapp)` |
+
+⚠️ **No sirve reusar `agent.rapilinksas.co`.** Ese dominio apunta al **frontend** (puerto 3000), que no tiene esa ruta: la petición de Meta cae en el guardia de sesión de SvelteKit y sale un **307 a `/login`**. Meta espera el `hub.challenge` en texto plano, recibe una redirección, y muestra *«No se pudo validar la URL de devolución de llamada o el token de verificación»* — un mensaje que hace pensar en el verify token cuando el problema es que la URL nunca llegó al motor. Ya pasó una vez.
+
+**Pasos, en este orden** (saltarse el primero hace fallar el tercero):
+
+1. **DNS**: registro A de `motor.rapilinksas.co` → `86.48.18.185`. Comprobar con `dig +short motor.rapilinksas.co` antes de seguir; sin esto Traefik no puede emitir certificado.
+2. **Variables** en Dokploy, servicio `motor`: `SECRETOS_CLAVE_MAESTRA` (obligatoria — sin ella no se descifra ninguna credencial) y `BOTTLECRM_API_TOKEN`. En `backend`, `celery-worker` y `celery-beat`: `ASISTENTE_URL` y `ASISTENTE_TENANT`.
+3. **Dominio** en Dokploy sobre el servicio `motor`. La regla de arriba no se escribe a mano: Dokploy la arma con los campos del formulario.
+
+| Campo del formulario | Valor |
+|---|---|
+| Service Name | `motor` |
+| Host | `motor.rapilinksas.co` |
+| **Path** | **`/canales/whatsapp`** ← acá va el `PathPrefix`, no en un campo de regla |
+| Internal Path | `/` (el valor por defecto) |
+| **Strip Path** | **apagado** |
+| Container Port | `5000` |
+
+⚠️ **Strip Path tiene que quedar apagado.** Encendido, Traefik le quita `/canales/whatsapp` a la petición antes de pasarla y al motor le llega `/rapilink`, que no existe: da **404 con todo lo demás bien configurado**, y el síntoma no señala la causa. El motor espera la ruta completa, que es justo lo que `Internal Path: /` significa.
+
+**Redesplegar después de guardar** — Dokploy escribe las etiquetas de Traefik al recrear el contenedor, no al guardar el formulario. Lo avisa él mismo en el formulario, y es el paso que más veces se olvida.
+
+⚠️ **El `PathPrefix` no es opcional.** Sin él, el mismo dominio publica `/chat`, `/agentes` y `/agentes/catalogo`, que no piden autenticación de ninguna clase: cualquiera podría conversar con el asistente a costa de la empresa y leer cómo está configurado cada agente. La regla tiene que restringirse a `/canales/whatsapp` y nada más.
+
+⚠️ **Y por eso el envío proactivo vive FUERA de ese prefijo.** `POST /avisos/whatsapp/<tenant>` (mandar una plantilla) y `GET /plantillas/whatsapp/<tenant>` están deliberadamente en otra ruta: la firma de Meta no los protege —quien llama no es Meta, es una tarea interna del CRM por la red del compose— así que si cayeran bajo `/canales/whatsapp` quedarían expuestos a internet **sin autenticación de ninguna clase**, y cualquiera podría mandarle mensajes a los clientes de la empresa desde su número. Si algún día hay que exponerlos, necesitan autenticación propia primero.
+
+La autenticación de esa ruta no es un token de sesión sino **la firma del cuerpo**: Meta firma cada entrega con el App Secret (`X-Hub-Signature-256`) y el motor rechaza con 401 lo que no valide. Falla cerrado — si no puede resolver el secreto (base caída incluida), tampoco procesa.
+
+En Meta, la URL de callback se registra como `https://motor.rapilinksas.co/canales/whatsapp/rapilink` (el último segmento es el slug del tenant, así que un segundo ISP entra por la misma infraestructura sin tocar nada).
+
+**Cómo saber en qué paso se quedó**, sin adivinar. Medido el 12/08/2026 con el dominio creado a medias:
+
+```
+curl -sk -o /dev/null -w "%{http_code} %{remote_ip}\n" https://motor.rapilinksas.co/salud
+```
+
+| Lo que sale | Dónde está el problema |
+|---|---|
+| `curl: (6)` no resuelve | Falta el DNS (paso 1) |
+| IP correcta, pero **`404` y falla el certificado** | DNS ok, Traefik **sin ruta para ese host**: falta crear el dominio, o falta **redesplegar**. El certificado no existe porque Traefik solo lo pide cuando el router existe — el fallo de TLS es consecuencia, no causa |
+| `404` con certificado válido | Hay ruta y `PathPrefix` está bien: `/salud` **debe** dar 404. Probar el handshake de abajo |
+| `502` | Hay ruta pero el contenedor no responde: puerto equivocado (tiene que ser 5000) o el motor está caído |
+
+El `404` de Traefik se reconoce por el cuerpo `404 page not found` en texto plano, `Content-Length: 19` y **sin cabecera `Server`**. Si viniera del motor sería un JSON.
+
+Comprobar el alta antes de darla en Meta — tiene que devolver `12345` en texto plano:
+
+```
+curl "https://motor.rapilinksas.co/canales/whatsapp/rapilink?hub.mode=subscribe&hub.verify_token=<el-verify-token>&hub.challenge=12345"
+```
+
+Y que lo demás **no** esté publicado (404 de Traefik, no una respuesta del motor):
+
+```
+curl -s -o /dev/null -w "%{http_code}\n" https://motor.rapilinksas.co/salud   # 404 esperado
+```
+
+### Credenciales de WhatsApp
+
+Se cargan **por empresa y cifradas** en `asistente.tenant_secrets` (ver `nucleo/seguridad/secretos.py`), no en el `.env`. El YAML solo guarda los nombres:
+
+| Nombre | De dónde sale en Meta |
+|---|---|
+| `WHATSAPP_PHONE_NUMBER_ID` | WhatsApp → API Setup. Es el ID del emisor, **no el teléfono** |
+| `WHATSAPP_TOKEN` | System User → token **permanente**. El de la consola dura 24 h |
+| `WHATSAPP_WABA_ID` | WhatsApp Business Account ID. Solo hace falta para plantillas |
+| `WHATSAPP_APP_SECRET` | App → Settings → Basic. Firma los webhooks |
+| `WHATSAPP_VERIFY_TOKEN` | **Lo inventa la empresa.** Solo se usa en el handshake de alta |
+
+La única que sigue en el `.env` (y en las variables de Dokploy) es `SECRETOS_CLAVE_MAESTRA`, que es la que descifra las demás. **Si se pierde hay que volver a cargar todos los secretos a mano** — no hay forma de recuperarlos, y esa es la propiedad buscada. Generarla con:
+
+```
+py -3.13 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Permisos que el System User necesita: `whatsapp_business_messaging` y `whatsapp_business_management`.
+
+### Plantillas y avisos proactivos
+
+Fuera de las 24 h desde el último mensaje del cliente, WhatsApp solo acepta **plantillas aprobadas por Meta**. La configuración mapea una clave interna al nombre registrado (`plantillas: {aviso_mora: recordatorio_pago_v3}`) para que el código diga `aviso_mora` y cada empresa lo resuelva a lo suyo.
+
+Antes de confiar en una plantilla, comprobar que Meta la aprobó de verdad — devuelve `declaradas_sin_aprobar`, que es lo único que hay que mirar:
+
+```
+curl "http://motor:5000/plantillas/whatsapp/rapilink"   # desde dentro de la red del compose
+```
+
+Una plantilla declarada en el YAML que Meta nunca aprobó falla recién al mandar el primer aviso, y a esa altura ya hay un cliente que no se enteró de su corte.
+
+**Baja de avisos.** Un cliente que escribe `baja` (o `stop`, configurable) deja de recibir mensajes proactivos; `alta` lo revierte. No es cortesía: la Ley 1581 le da al titular el derecho a revocar la autorización, y por el lado de WhatsApp, un número que quiere dejar de recibir y no puede **bloquea** — y los bloqueos le bajan la reputación al número de la empresa, y con ella el límite de envío. La baja **no** corta la atención: si después escribe, se le contesta. Sin la **verificación del negocio** en Business Manager el número queda limitado a 250 conversaciones/día y no se aprueban plantillas. Y el número **no puede estar en uso en la app normal de WhatsApp**: hay que borrarlo de ahí o migrarlo, no se puede tener en los dos lados.
 
 El puerto del frontend es 3000, no 5173: con el build de producción manda adapter-node. El 5173 es del servidor de Vite, que quedó solo en desarrollo.
 
@@ -279,7 +390,27 @@ ssh -L 5434:<ip-del-contenedor-db>:5432 root@86.48.18.185
 
 **Un rol `crm_user` para Django.** Hoy el CRM se conecta como `postgres`, que tiene `BYPASSRLS` — las políticas de aislamiento no se evalúan. Con una sola organización no hay consecuencia visible, y por eso es fácil de olvidar. El motor ya baja a `app_backend` (ver `nucleo/persistencia/db.py`); el CRM todavía no.
 
-**El webhook de WhatsApp.** `nucleo/canales/api.py` expone `/chat`, `/agentes` y `/salud`. No hay ruta de entrada para WhatsApp, y cuando la haya necesita dominio público por Traefik.
+**El webhook de WhatsApp — falta el dominio, no el código.** Las rutas ya existen (`GET`/`POST /canales/whatsapp/<tenant>`, ver §4.c) y sus guardas pasan (`py -3.13 tests/test_canal_whatsapp.py`). Lo que falta para el piloto: el DNS de `motor.rapilinksas.co`, crear el dominio en Dokploy con el `PathPrefix`, cargar las variables del §4.c, y cargar los secretos de Meta desde **Ajustes → WhatsApp**. Lo único de producto que sigue dependiendo de terceros son las plantillas para avisos proactivos, que las aprueba Meta.
+
+**Autenticar `/chat` y `/agentes` en el motor.** Hoy no piden nada: lo que impide que se usen desde fuera es que el motor no sea alcanzable, y desde que exista el dominio del webhook (§4.c) lo único que los separa de internet es el `PathPrefix` de una regla de Traefik. Funciona, pero es **una sola capa**, y el resto del proyecto usa dos por principio (PRD §7.4: las reglas duras se aplican en código, no solo en la configuración de alrededor). Una regla mal escrita al agregar un dominio, y cualquiera puede conversar con el asistente a costa de la empresa y leer cómo está configurado cada agente.
+
+La forma es un token de servicio compartido entre el frontend y el motor: una variable más en los dos lados y una comprobación en `nucleo/canales/api.py` que rechace sin ella. No es urgente mientras la regla esté bien —por eso está acá y no bloqueando el piloto— pero conviene hacerlo antes de sumar un segundo ISP, cuando haya más manos tocando dominios. El webhook seguiría exento: su credencial es la firma de Meta, no un token nuestro.
+
+**Dar de alta un segundo ISP: el motor está listo, el pegamento no.** El motor ya es multi-empresa de verdad —la URL del webhook lleva el tenant (`/canales/whatsapp/<slug>`), las credenciales van cifradas por empresa en `asistente.tenant_secrets`, y el aislamiento está medido: `app_backend` sin fijar empresa ve **0 filas**, no todas—. BottleCRM, por su lado, ya es multi-organización.
+
+Lo que no acompaña es lo que los une: **`PRIVATE_ASISTENTE_TENANT` es una variable de entorno usada en 23 lugares del frontend, y nunca se deriva de la organización del usuario logueado**. Con una sola empresa no se nota; con dos, hay que elegir:
+
+| Camino | Qué implica | Costo |
+|---|---|---|
+| Un despliegue por ISP | Cada uno con su CRM y su frontend | Cero código, más contenedores que mantener |
+| Una plataforma, N ISPs | Que esos 23 lugares saquen el tenant de `locals.org` | Trabajo acotado y mecánico, toca todas las pantallas del asistente |
+
+Es una decisión de producto —¿se vende una instalación por ISP, o una plataforma donde entran varios?— y conviene tomarla **antes** de escribir el código, no después.
+
+Dos cosas que se deciden junto con eso:
+
+- **El nombre del dominio del webhook.** `motor.rapilinksas.co` está bajo la marca del primer cliente; el segundo ISP estaría pegando el dominio de otra empresa en su configuración de Meta. Si el camino es "una plataforma", conviene un dominio neutro desde el principio: cambiarlo después obliga a que **cada** cliente reconfigure su webhook en Meta a mano.
+- **El motor corre con `--workers 1`** (ver el comentario en `docker-compose.prod.yml`). No es por memoria: `_sesiones` guarda el historial caliente en RAM del proceso. Aguanta bien con hilos, pero es un techo real con varios ISPs, y se levanta el día que ese historial viva en `asistente.conversations` en vez de en memoria.
 
 **El 502 de `crm.rapilinksas.co`.** Ese dominio tiene ruta en Traefik apuntando a algo que no responde. No afecta a la base —el pooler escucha en TCP directo, sin pasar por Traefik— pero quien espere llegar al Studio de Supabase por ahí, hoy no puede.
 

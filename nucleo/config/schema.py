@@ -546,17 +546,97 @@ class Herramienta(Base):
 # =============================================================================
 
 class CanalWhatsApp(Base):
+    """
+    Canal de WhatsApp Business (Cloud API de Meta).
+
+    Los campos '*_ref' guardan el NOMBRE de la credencial, nunca su valor --
+    misma regla que 'auth_ref' en Herramienta. Se resuelven contra los secretos
+    de la empresa y despues contra el entorno (nucleo/seguridad/secretos.py),
+    que es lo que permite que cada ISP cargue los suyos desde la plataforma.
+
+    Cual es cual, porque los nombres de Meta se confunden:
+      phone_number_id   el ID del numero EMISOR. No es el telefono.
+      waba_id           la cuenta de WhatsApp Business. Hace falta para
+                        plantillas, no para conversar.
+      token             token permanente de un System User. El de prueba de la
+                        consola dura 24 h y deja de servir sin aviso.
+      app_secret        firma cada webhook entrante (X-Hub-Signature-256). Sin
+                        el no hay forma de saber si quien golpea es Meta.
+      verify_token      cadena que elige la empresa; Meta la devuelve una sola
+                        vez, en el handshake de alta del webhook.
+    """
     activo: bool = False
     phone_number_id_ref: str | None = None
     token_ref: str | None = None
+    waba_id_ref: str | None = None
+    app_secret_ref: str | None = None
+    verify_token_ref: str | None = None
+
+    # Se fija a proposito: que Meta publique una version nueva no puede cambiar
+    # el comportamiento del canal sin que alguien lo decida.
+    version_api: str = "v23.0"
+
+    # Solo para mostrarlo en los ajustes ("estas atendiendo desde el 300...").
+    # No participa de ninguna llamada: el emisor lo determina phone_number_id.
+    numero_visible: str | None = None
+
+    # Por defecto vacio, y entonces manda la constante del modulo del canal.
+    # Existe para el dia que un tenant entre por un BSP (Twilio, 360dialog) en
+    # vez de por Meta directo: ahi cambia el host, no el resto.
+    api_base: str | None = None
+
+    # clave interna -> nombre aprobado en Meta. La indireccion existe para que
+    # el codigo diga 'aviso_mora' y cada empresa lo mapee al nombre que
+    # registro; el texto lo aprueba Meta y cambiarlo exige volver a su revision.
     plantillas: dict[str, str] = Field(default_factory=dict)
 
-    @field_validator("phone_number_id_ref", "token_ref")
+    # Lo que un cliente escribe para dejar de recibir avisos. Se compara contra
+    # el mensaje completo en minusculas y sin espacios -- no "contiene", porque
+    # "no me llega nada, doy de baja el servicio?" no es una solicitud de baja
+    # del canal.
+    palabras_baja: list[str] = Field(
+        default_factory=lambda: ["baja", "stop", "no molestar", "cancelar avisos"])
+    palabras_alta: list[str] = Field(
+        default_factory=lambda: ["alta", "start", "reactivar avisos"])
+    respuesta_baja: str = (
+        "Listo, no te vamos a escribir mas por este medio. "
+        "Si necesitas algo, escribinos cuando quieras y te atendemos.")
+    respuesta_alta: str = "Listo, vas a volver a recibir nuestros avisos."
+
+    @field_validator("phone_number_id_ref", "token_ref", "waba_id_ref",
+                     "app_secret_ref", "verify_token_ref")
     @classmethod
     def _ref_es_nombre(cls, v: str | None) -> str | None:
         if v is not None and not RE_NOMBRE_REF.match(v):
             raise ValueError(f"'{v}' debe ser el NOMBRE del secreto, no su valor")
         return v
+
+    @model_validator(mode="after")
+    def _activo_exige_lo_indispensable(self):
+        """
+        Un canal marcado activo sin sus referencias no falla al arrancar: falla
+        en el primer mensaje de un cliente real, que es el peor momento
+        posible. Se rechaza al validar la configuracion.
+
+        'waba_id_ref' NO entra: solo hace falta para plantillas, y se puede
+        conversar sin ellas. Los otros tres son indispensables -- sin
+        app_secret no hay forma de verificar que quien golpea el webhook es
+        Meta, y aceptar sin verificar seria confiar en el prompt de la red.
+        """
+        if not self.activo:
+            return self
+        faltan = [nombre for nombre, valor in {
+            "phone_number_id_ref": self.phone_number_id_ref,
+            "token_ref": self.token_ref,
+            "app_secret_ref": self.app_secret_ref,
+            "verify_token_ref": self.verify_token_ref,
+        }.items() if not valor]
+        if faltan:
+            raise ValueError(
+                f"canales.whatsapp esta 'activo' pero no declara: "
+                f"{', '.join(faltan)}. Son los nombres de los secretos, no sus "
+                f"valores; los valores se cargan aparte.")
+        return self
 
 
 class Canales(Base):
@@ -577,6 +657,11 @@ class Limites(Base):
     max_costo_usd_mes: float | None = None
     alerta_al_porcentaje: int = Field(default=80, ge=1, le=100)
     retencion_conversaciones_dias: int = Field(default=365, ge=1)
+    # Separada de la de arriba y mucho mas corta, a proposito: una conversacion
+    # escrita es barata de guardar y util para depurar; una foto pesa y puede
+    # mostrar la casa, la cedula o una cara. La foto sirve para resolver el
+    # caso, y un caso vive dias. Ver supabase/08_multimedia.sql.
+    retencion_multimedia_dias: int = Field(default=30, ge=1)
 
 
 class Conversaciones(Base):

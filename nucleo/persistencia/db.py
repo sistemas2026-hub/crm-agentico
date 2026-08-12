@@ -169,29 +169,54 @@ def registrar_mensaje(tenant: str, canal: str, usuario_externo: str,
 def ultima_actividad(tenant: str, canal: str | None = None) -> list[dict]:
     """
     Una fila por conversacion: usuario_externo + cuando fue la ultima vez
-    que se le escribio o respondio. Insumo del detector de seguimientos.
+    que se le escribio o respondio. Insumo del detector de seguimientos y de
+    la bandeja.
+
+    Trae dos datos que no estan en la tabla y que la bandeja necesita para ser
+    legible de un vistazo:
+
+      ultimo_mensaje / ultimo_rol
+          Sin el texto del ultimo turno todas las filas se ven iguales y hay
+          que abrir cada una para saber de que va.
+
+      atendida
+          Si algun humano ya escribio en el hilo. Es la diferencia entre
+          "nadie tomo esto" y "alguien esta en eso", que es lo que decide a
+          cual entrar primero. 'escalada_a_humano' sola no alcanza: una
+          escalada hace dos horas y ya contestada no necesita a nadie.
 
     'actualizado_en' viene como datetime con zona horaria, no como texto:
     es timestamptz en la base y quien consume ya no tiene que parsearlo.
     """
+    columnas = """c.id, c.canal, c.usuario_externo, c.rol_efectivo, c.estado,
+                  c.escalada_a_humano, c.motivo_escalamiento, c.caso_id, c.etiqueta,
+                  c.actualizado_en,
+                  ultimo.contenido as ultimo_mensaje,
+                  ultimo.rol       as ultimo_rol,
+                  exists (select 1 from asistente.messages h
+                           where h.conversation_id = c.id
+                             and h.rol = 'humano') as atendida"""
+    desde = """from asistente.conversations c
+               left join lateral (
+                   select contenido, rol
+                     from asistente.messages
+                    where conversation_id = c.id and contenido is not null
+                    order by creado_en desc
+                    limit 1
+               ) ultimo on true"""
+
     with sesion(tenant) as (cur, org):
         if canal:
             cur.execute(
-                """select id, canal, usuario_externo, rol_efectivo, estado,
-                          escalada_a_humano, motivo_escalamiento, caso_id, etiqueta,
-                          actualizado_en
-                   from asistente.conversations
-                   where organization_id = %s and canal = %s
-                   order by actualizado_en desc""",
+                f"""select {columnas} {desde}
+                    where c.organization_id = %s and c.canal = %s
+                    order by c.actualizado_en desc""",
                 (org, canal))
         else:
             cur.execute(
-                """select id, canal, usuario_externo, rol_efectivo, estado,
-                          escalada_a_humano, motivo_escalamiento, caso_id, etiqueta,
-                          actualizado_en
-                   from asistente.conversations
-                   where organization_id = %s
-                   order by actualizado_en desc""",
+                f"""select {columnas} {desde}
+                    where c.organization_id = %s
+                    order by c.actualizado_en desc""",
                 (org,))
         return [dict(f) for f in cur.fetchall()]
 
@@ -207,7 +232,7 @@ def mensajes_de(tenant: str, conversation_id: str) -> dict:
         cur.execute(
             """select id, canal, usuario_externo, rol_efectivo, estado,
                       escalada_a_humano, motivo_escalamiento, caso_id, etiqueta,
-                      actualizado_en
+                      actualizado_en, conservar, conservar_motivo, conservar_por
                from asistente.conversations
                where organization_id = %s and id = %s""",
             (org, conversation_id))
@@ -216,7 +241,19 @@ def mensajes_de(tenant: str, conversation_id: str) -> dict:
             return {"conversacion": None, "mensajes": []}
 
         cur.execute(
-            """select m.id, m.rol, m.contenido, m.creado_en, e.caso as caso_marcado
+            """select m.id, m.rol, m.contenido, m.creado_en, e.caso as caso_marcado,
+                      -- Los adjuntos de ESA burbuja, sin los bytes: la interfaz
+                      -- los pide despues por su id (/media/<id>). Devolverlos
+                      -- aca serian varios MB de base64 en cada carga del hilo.
+                      coalesce((
+                        select json_agg(json_build_object(
+                                 'id', a.id, 'tipo', a.tipo, 'mime', a.mime,
+                                 'bytes', a.bytes, 'descripcion', a.descripcion)
+                               order by a.creado_en)
+                        from asistente.media a
+                        where a.mensaje_id = m.id
+                          and a.organization_id = m.organization_id
+                      ), '[]'::json) as adjuntos
                from asistente.messages m
                left join asistente.ejemplos_validados e
                  on e.mensaje_id = m.id and e.organization_id = m.organization_id
@@ -277,7 +314,8 @@ def caso_de_conversacion(tenant: str, conversation_id: str) -> str | None:
         return str(fila["caso_id"]) if fila and fila["caso_id"] else None
 
 
-def agregar_mensaje_humano(tenant: str, conversation_id: str, contenido: str) -> bool:
+def agregar_mensaje_humano(tenant: str, conversation_id: str,
+                           contenido: str) -> dict | None:
     """
     Un agente humano responde directo en el hilo, sin pasar por el modelo --
     para una conversacion ya escalada (marcar_escalada le puso caso_id), que
@@ -285,16 +323,22 @@ def agregar_mensaje_humano(tenant: str, conversation_id: str, contenido: str) ->
     'assistant' a proposito: es el mismo lado del canal que el cliente ya
     viene viendo, humano o bot no cambia esa columna, solo quien redacto.
 
-    Devuelve False si la conversacion no existe o no es de este tenant -- el
+    Devuelve None si la conversacion no existe o no es de este tenant -- el
     llamador (nucleo/canales/api.py) decide si eso es un 404.
+
+    Si existe, devuelve {'canal', 'usuario_externo'}: es POR DONDE hay que
+    hacerle llegar el mensaje al cliente. Guardarlo en la base no se lo entrega
+    a nadie -- una respuesta que se ve en la bandeja pero nunca sale es peor
+    que un error visible, porque el agente cree que ya atendio.
     """
     with sesion(tenant) as (cur, org):
         cur.execute(
-            """select 1 from asistente.conversations
+            """select canal, usuario_externo from asistente.conversations
                where organization_id = %s and id = %s""",
             (org, conversation_id))
-        if not cur.fetchone():
-            return False
+        fila = cur.fetchone()
+        if not fila:
+            return None
 
         cur.execute(
             """insert into asistente.messages
@@ -305,7 +349,220 @@ def agregar_mensaje_humano(tenant: str, conversation_id: str, contenido: str) ->
             """update asistente.conversations set actualizado_en = now()
                where id = %s""",
             (conversation_id,))
-        return True
+        return {"canal": fila["canal"], "usuario_externo": fila["usuario_externo"]}
+
+
+def dar_de_baja(tenant: str, usuario_externo: str, canal: str = "whatsapp",
+                motivo: str | None = None) -> None:
+    """Registra que este numero no quiere mensajes proactivos. Idempotente:
+    pedir baja dos veces no es un error."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """insert into asistente.canal_bajas
+                 (organization_id, canal, usuario_externo, motivo)
+               values (%s,%s,%s,%s)
+               on conflict (organization_id, canal, usuario_externo)
+                 do update set creado_en = now(), motivo = excluded.motivo""",
+            (org, canal, usuario_externo, motivo))
+
+
+def dar_de_alta(tenant: str, usuario_externo: str, canal: str = "whatsapp") -> bool:
+    """Revierte la baja. Devuelve si habia una."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """delete from asistente.canal_bajas
+               where organization_id = %s and canal = %s and usuario_externo = %s""",
+            (org, canal, usuario_externo))
+        return cur.rowcount > 0
+
+
+def esta_de_baja(tenant: str, usuario_externo: str, canal: str = "whatsapp") -> bool:
+    """Si este numero pidio no recibir mensajes proactivos.
+
+    Se consulta ANTES de cualquier envio que inicie el sistema. Nunca antes de
+    responderle a alguien que escribio: la baja bloquea la interrupcion, no la
+    atencion -- ver supabase/09_bajas_canal.sql."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select 1 from asistente.canal_bajas
+               where organization_id = %s and canal = %s and usuario_externo = %s""",
+            (org, canal, usuario_externo))
+        return cur.fetchone() is not None
+
+
+def guardar_media(tenant: str, conversation_id: str, media_id: str, tipo: str,
+                  contenido: bytes, mime: str | None = None,
+                  descripcion: str | None = None,
+                  mensaje_id: str | None = None) -> str | None:
+    """
+    Una foto o audio del cliente, ya comprimido (ver nucleo/canales/media.py).
+
+    Devuelve el id de la fila, o None si ese 'media_id' ya estaba guardado --
+    un reintento del webhook no duplica el archivo. Ver
+    supabase/08_multimedia.sql para por que vive en Postgres y no en un almacen
+    de objetos.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """insert into asistente.media
+                 (organization_id, conversation_id, mensaje_id, media_id, tipo,
+                  mime, contenido, bytes, descripcion)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+               on conflict (organization_id, media_id) do nothing
+               returning id""",
+            (org, conversation_id, mensaje_id, media_id, tipo, mime,
+             contenido, len(contenido), descripcion))
+        fila = cur.fetchone()
+        return str(fila["id"]) if fila else None
+
+
+def media_de(tenant: str, conversation_id: str) -> list[dict]:
+    """
+    Los adjuntos de una conversacion, SIN los bytes.
+
+    El contenido se pide aparte (media_bytes) porque una lista de diez fotos
+    en la respuesta de la bandeja serian varios MB de JSON en base64 que nadie
+    pidio: la interfaz muestra las miniaturas por su id.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select id, media_id, tipo, mime, bytes, descripcion, mensaje_id,
+                      creado_en
+               from asistente.media
+               where organization_id = %s and conversation_id = %s
+               order by creado_en""",
+            (org, conversation_id))
+        return [dict(f) for f in cur.fetchall()]
+
+
+def media_bytes(tenant: str, media_uuid: str) -> tuple[bytes, str] | None:
+    """(contenido, mime) de un adjunto, para servirlo. None si no existe o no
+    es de este tenant -- el filtro por organizacion lo hace la politica de
+    aislamiento, no un if."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select contenido, mime from asistente.media
+               where organization_id = %s and id = %s""",
+            (org, media_uuid))
+        fila = cur.fetchone()
+        if not fila:
+            return None
+        return bytes(fila["contenido"]), fila["mime"] or "application/octet-stream"
+
+
+def purgar_media(tenant: str, dias: int) -> int:
+    """
+    Borra los adjuntos mas viejos que 'dias'. Devuelve cuantos.
+
+    Existe porque la retencion de multimedia es MAS CORTA que la de las
+    conversaciones a proposito (ver supabase/08_multimedia.sql): el texto es
+    barato y util para depurar, una foto pesa y puede mostrar la casa, la
+    cedula o una cara. Se llama desde una tarea programada, no desde el turno.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """delete from asistente.media
+               where organization_id = %s
+                 and creado_en < now() - make_interval(days => %s)""",
+            (org, dias))
+        return cur.rowcount
+
+
+def marcar_conservar(tenant: str, conversation_id: str, conservar: bool,
+                     motivo: str | None = None,
+                     por: str | None = None) -> bool:
+    """
+    Saca (o vuelve a meter) una conversacion en la purga por retencion.
+
+    Distinto de marcar un ejemplo: eso dice "esta respuesta fue buena" y
+    alimenta el manual; esto dice "no la borres todavia" y no aparece en
+    ningun lado mas. Ver supabase/10_conservar_conversacion.sql.
+
+    Devuelve False si la conversacion no existe o no es de este tenant.
+
+    Al desmarcar se limpian motivo y autor: dejarlos colgados haria creer que
+    la conversacion sigue protegida cuando ya no lo esta.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """update asistente.conversations
+               set conservar = %s,
+                   conservar_motivo = case when %s then %s else null end,
+                   conservar_por    = case when %s then %s else null end
+               where organization_id = %s and id = %s""",
+            (conservar, conservar, motivo, conservar, por, org, conversation_id))
+        return cur.rowcount > 0
+
+
+def purgar_conversaciones(tenant: str, dias: int) -> int:
+    """
+    Borra las conversaciones mas viejas que 'dias'. Devuelve cuantas.
+
+    Los mensajes, las llamadas a herramientas y los adjuntos se van en cascada
+    con ellas -- estan declarados 'on delete cascade'.
+
+    DOS EXCEPCIONES, por dos razones distintas:
+
+    1. 'conservar' -- alguien dijo explicitamente "no borres esto todavia": un
+       reclamo, un incidente, algo que puede terminar en disputa. Ver
+       supabase/10_conservar_conversacion.sql.
+
+    2. Tener alguna respuesta marcada como ejemplo valido. Esas alimentan el
+       manual de procedimientos (supabase/05_ejemplos_validados.sql) y cuelgan
+       en cascada, asi que sin la excepcion la purga nocturna destruiria en
+       silencio el material que alguien marco a mano.
+
+    No son lo mismo y por eso son dos condiciones: un ejemplo dice "esta
+    respuesta fue buena", conservar dice "no la borres". Una conversacion
+    puede necesitar lo segundo siendo justo lo que NO hay que imitar.
+
+    Se limpia el evento de webhook por separado (no cuelga de la conversacion)
+    y con un plazo mucho mas corto: los reintentos de la plataforma ocurren en
+    minutos, guardar identificadores un ano no sirve para nada.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """delete from asistente.conversations c
+               where c.organization_id = %s
+                 and c.actualizado_en < now() - make_interval(days => %s)
+                 and not c.conservar
+                 and not exists (
+                   select 1 from asistente.ejemplos_validados e
+                   where e.conversation_id = c.id)""",
+            (org, dias))
+        borradas = cur.rowcount
+
+        # Los identificadores de webhook no cuelgan de ninguna conversacion:
+        # se limpian aparte, a 7 dias, que es margen de sobra sobre los
+        # reintentos de la plataforma.
+        cur.execute(
+            """delete from asistente.webhook_eventos
+               where organization_id = %s
+                 and visto_en < now() - interval '7 days'""",
+            (org,))
+        return borradas
+
+
+def evento_ya_visto(tenant: str, wamid: str, canal: str = "whatsapp") -> bool:
+    """
+    True si este webhook ya se proceso. False la primera vez -- y en esa misma
+    llamada lo deja registrado.
+
+    La deteccion y el registro van en UNA sentencia ('on conflict do nothing')
+    a proposito: consultar primero y escribir despues deja una ventana en la
+    que dos reintentos simultaneos leen "no visto" los dos y contestan los dos.
+    Con el insert atomico, solo uno gana la clave primaria.
+
+    Ver supabase/07_webhook_eventos.sql para por que esto vive en la base y no
+    en memoria del proceso.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """insert into asistente.webhook_eventos (organization_id, wamid, canal)
+               values (%s, %s, %s)
+               on conflict (organization_id, wamid) do nothing""",
+            (org, wamid, canal))
+        return cur.rowcount == 0
 
 
 def registrar_llamada_herramienta(tenant: str, conversation_id: str, rol: str,

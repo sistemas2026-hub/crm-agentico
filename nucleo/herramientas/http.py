@@ -18,10 +18,11 @@ tenant puede o no llamarlo (eso lo resuelve el motor antes de invocar esto).
 
 from __future__ import annotations
 
-import os
 import time
 
 import requests
+
+from nucleo.seguridad import secretos
 
 TIMEOUT_SEGUNDOS = 15
 
@@ -30,19 +31,27 @@ class ErrorHerramientaHttp(Exception):
     """Fallo al resolver credenciales o al llamar al endpoint."""
 
 
-def headers_de(herramienta) -> dict:
+def headers_de(herramienta, tenant: str | None = None) -> dict:
     """Header de autenticacion de una Herramienta. Publico porque
     nucleo/herramientas/agregado.py tambien lo necesita, con su propio manejo
     de errores (no puede usar 'ejecutar()' porque esa levanta en cualquier
-    HTTP 400 en vez de devolver un error que el modelo pueda corregir)."""
+    HTTP 400 en vez de devolver un error que el modelo pueda corregir).
+
+    'tenant' decide si la credencial puede venir de la empresa: con el, se
+    busca primero en sus secretos cifrados y despues en el entorno; sin el,
+    solo en el entorno. Es opcional porque hay llamadores legitimos que no
+    pertenecen a ninguna empresa (utilidades de cli/), y porque las claves de
+    plataforma (la del modelo) siguen viviendo en el entorno a proposito --
+    ver nucleo/seguridad/secretos.py.
+    """
     if not herramienta.auth_ref:
         return {}
-    clave = os.environ.get(herramienta.auth_ref)
+    clave = secretos.obtener(tenant, herramienta.auth_ref)
     if not clave:
         raise ErrorHerramientaHttp(
-            f"Falta la variable '{herramienta.auth_ref}' en el entorno. La "
-            f"configuracion guarda el NOMBRE del secreto, no su valor: "
-            f"agregalo al .env.")
+            f"Falta la credencial '{herramienta.auth_ref}'. La configuracion "
+            f"guarda el NOMBRE del secreto, no su valor: cargalo desde los "
+            f"ajustes de la empresa o agregalo al .env.")
     return {"Authorization": f"{herramienta.auth_esquema} {clave}"}
 
 
@@ -69,11 +78,13 @@ def url_de(herramienta, argumentos: dict | None = None) -> str:
     return herramienta.base_url.rstrip("/") + endpoint
 
 
-def ejecutar(herramienta, argumentos: dict) -> dict | list:
+def ejecutar(herramienta, argumentos: dict, tenant: str | None = None) -> dict | list:
     """
     'herramienta' es una instancia de nucleo.config.schema.Herramienta con
     tipo='http'. 'argumentos' ya viene validado por el llamador -- este
     modulo no valida forma de negocio, solo ejecuta.
+
+    'tenant' solo se usa para resolver la credencial -- ver headers_de().
     """
     if herramienta.tipo != "http":
         raise ErrorHerramientaHttp(
@@ -83,7 +94,7 @@ def ejecutar(herramienta, argumentos: dict) -> dict | list:
     # (nucleo/modelo/motor.py) no espera que su dict se mute por debajo.
     argumentos = dict(argumentos or {})
     url = url_de(herramienta, argumentos)
-    headers = headers_de(herramienta)
+    headers = headers_de(herramienta, tenant)
 
     if herramienta.metodo == "GET":
         r = requests.get(url, headers=headers, params=argumentos, timeout=TIMEOUT_SEGUNDOS)
@@ -107,7 +118,8 @@ def ejecutar(herramienta, argumentos: dict) -> dict | list:
 
 
 def ejecutar_asincrono(herramienta, argumentos: dict,
-                       intentos: int = 10, espera_segundos: float = 1.5) -> dict | list:
+                       intentos: int = 10, espera_segundos: float = 1.5,
+                       tenant: str | None = None) -> dict | list:
     """
     Para APIs que no responden en el momento: WispHub, al menos en ping y en
     crear/borrar cliente, devuelve {'task_id': ...} (202) y hay que consultar
@@ -120,14 +132,14 @@ def ejecutar_asincrono(herramienta, argumentos: dict,
     practica -- 10 intentos a 1.5s de por medio (15s) es margen de sobra, no
     un numero elegido al azar.
     """
-    inicial = ejecutar(herramienta, argumentos)
+    inicial = ejecutar(herramienta, argumentos, tenant)
     task_id = inicial.get("task_id") if isinstance(inicial, dict) else None
     if not task_id:
         raise ErrorHerramientaHttp(
             f"'{herramienta.nombre}': se esperaba 'task_id' en la respuesta y no vino.")
 
     url_tarea = herramienta.base_url.rstrip("/") + f"/tasks/{task_id}/"
-    headers = headers_de(herramienta)
+    headers = headers_de(herramienta, tenant)
 
     for _ in range(intentos):
         time.sleep(espera_segundos)
