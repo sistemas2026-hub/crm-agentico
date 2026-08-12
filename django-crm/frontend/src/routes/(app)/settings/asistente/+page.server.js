@@ -2,6 +2,7 @@ import { fail } from '@sveltejs/kit';
 import {
   guardarDescripcionEmpresa,
   guardarPersonaAsistente,
+  guardarPlazoVisitaTecnica,
   leerConfiguracionAsistente
 } from '$lib/server/v2/asistente-config.js';
 
@@ -71,5 +72,29 @@ export const actions = {
     }
 
     return { updatedEmpresa: true };
+  },
+
+  async updatePlazo({ request, locals }) {
+    if (locals.profile?.role !== 'ADMIN') {
+      return fail(403, {
+        updatePlazo: { error: 'Solo un administrador puede cambiar este plazo.' }
+      });
+    }
+
+    const form = await request.formData();
+    const dias = Number(form.get('dias'));
+    if (!Number.isInteger(dias) || dias < 1) {
+      return fail(400, { updatePlazo: { error: 'El plazo tiene que ser un numero entero de dias, mayor a 0.' } });
+    }
+
+    try {
+      await guardarPlazoVisitaTecnica(dias);
+    } catch (/** @type {any} */ err) {
+      return fail(400, {
+        updatePlazo: { error: err?.message || 'No se pudo guardar el plazo.' }
+      });
+    }
+
+    return { updatedPlazo: true };
   }
 };

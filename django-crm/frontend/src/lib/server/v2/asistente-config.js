@@ -98,3 +98,29 @@ export async function guardarDescripcionEmpresa(descripcion) {
   }
   return datos.descripcion;
 }
+
+/**
+ * Guarda el plazo (en dias) para resolver un ticket de visita tecnica --
+ * fecha_final se calcula como 'ahora + este numero' en cada llamada
+ * (nucleo/modelo/motor.py), nunca una fecha fija. Solo existe si el tenant
+ * tiene la herramienta 'agendar_visita_tecnica' en su catalogo.
+ * @param {number} dias
+ */
+export async function guardarPlazoVisitaTecnica(dias) {
+  const cfg = destino();
+  if (!cfg) {
+    throw new Error('Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT).');
+  }
+
+  const resp = await fetch(`${cfg.baseUrl}/configuracion/plazo-visita-tecnica`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dias, tenant: cfg.tenant })
+  });
+
+  const datos = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    throw new Error(datos.error || 'El asistente rechazo el cambio.');
+  }
+  return datos.dias;
+}

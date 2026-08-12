@@ -13,25 +13,36 @@ export async function load({ fetch }) {
   const baseUrl = env.PRIVATE_ASISTENTE_URL;
   const tenant = env.PRIVATE_ASISTENTE_TENANT;
   if (!baseUrl || !tenant) {
-    return { casos: [], ejemplos: [], error: 'Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT)' };
+    return {
+      casos: [], ejemplos: [], documentos: [], revisiones: [],
+      error: 'Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT)'
+    };
   }
 
   try {
-    const [respCasos, respEjemplos, respDocs] = await Promise.all([
+    const [respCasos, respEjemplos, respDocs, respRevisiones] = await Promise.all([
       fetch(`${baseUrl}/manual/casos?tenant=${encodeURIComponent(tenant)}`),
       fetch(`${baseUrl}/manual/ejemplos?tenant=${encodeURIComponent(tenant)}`),
-      fetch(`${baseUrl}/corpus/documentos?tenant=${encodeURIComponent(tenant)}`)
+      fetch(`${baseUrl}/corpus/documentos?tenant=${encodeURIComponent(tenant)}`),
+      fetch(`${baseUrl}/manual/revisiones?tenant=${encodeURIComponent(tenant)}`)
     ]);
     const datosCasos = await respCasos.json();
     if (!respCasos.ok) {
-      return { casos: [], ejemplos: [], documentos: [], error: datosCasos.error || 'No se pudo cargar la lista de casos' };
+      return {
+        casos: [], ejemplos: [], documentos: [], revisiones: [],
+        error: datosCasos.error || 'No se pudo cargar la lista de casos'
+      };
     }
     return {
       casos: datosCasos.casos,
       ejemplos: respEjemplos.ok ? (await respEjemplos.json()).ejemplos : [],
-      documentos: respDocs.ok ? (await respDocs.json()).documentos : []
+      documentos: respDocs.ok ? (await respDocs.json()).documentos : [],
+      revisiones: respRevisiones.ok ? (await respRevisiones.json()).revisiones : []
     };
   } catch (/** @type {any} */ err) {
-    return { casos: [], ejemplos: [], documentos: [], error: err?.message || 'No se pudo contactar al asistente' };
+    return {
+      casos: [], ejemplos: [], documentos: [], revisiones: [],
+      error: err?.message || 'No se pudo contactar al asistente'
+    };
   }
 }

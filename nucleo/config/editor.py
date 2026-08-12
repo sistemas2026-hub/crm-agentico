@@ -314,6 +314,26 @@ def _mutar_persona(doc: dict, nombre_asistente: str, tono: str,
     })
 
 
+NOMBRE_HERRAMIENTA_VISITA_TECNICA = "agendar_visita_tecnica"
+
+
+def _mutar_plazo_visita_tecnica(doc: dict, dias: int) -> None:
+    """
+    Cuantos dias de plazo tiene un ticket de visita tecnica antes de su
+    fecha_final (ver 'fechas_automaticas' en schema.py y motor.py, que hace
+    la cuenta real en el momento de la llamada). Editable sin tocar codigo
+    ni pedirmelo: mismo criterio de riesgo bajo que _mutar_persona -- no
+    toca permisos, solo cuanto tiempo se promete para resolver el caso.
+    """
+    for h in doc.get("herramientas", []):
+        if h.get("nombre") == NOMBRE_HERRAMIENTA_VISITA_TECNICA:
+            h.setdefault("fechas_automaticas", {})["fecha_final"] = dias
+            return
+    raise ErrorEdicion(
+        f"la herramienta '{NOMBRE_HERRAMIENTA_VISITA_TECNICA}' no existe en "
+        f"el catalogo -- no hay donde guardar el plazo.")
+
+
 def _mutar_identidad_descripcion(doc: dict, descripcion: str) -> None:
     """
     Que servicios y planes ofrece la empresa, en prosa -- se inyecta SIEMPRE
@@ -382,3 +402,9 @@ def guardar_persona(tenant: str, nombre_asistente: str, tono: str,
 
 def guardar_identidad_descripcion(tenant: str, descripcion: str) -> TenantConfig:
     return _editar(tenant, lambda doc: _mutar_identidad_descripcion(doc, descripcion))
+
+
+def guardar_plazo_visita_tecnica(tenant: str, dias: int) -> TenantConfig:
+    if dias < 1 or dias > 30:
+        raise ErrorEdicion("el plazo tiene que ser entre 1 y 30 dias.")
+    return _editar(tenant, lambda doc: _mutar_plazo_visita_tecnica(doc, dias))

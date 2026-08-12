@@ -458,11 +458,23 @@ class Herramienta(Base):
     # aparte (ej. WispHub en ping_cliente, verificado en vivo agosto 2026) --
     # ver nucleo/herramientas/http.py:ejecutar_asincrono().
     asincrona: bool = False
+    # Algunas APIs exigen multipart/form-data en vez de JSON -- verificado en
+    # vivo con WispHub POST /tickets/ (agosto 2026): JSON da 500 (opaco,
+    # sin motivo), form-urlencoded da 415, y solo multipart funciona. No es
+    # negociable por el cliente HTTP: hay que armar el body distinto.
+    multipart: bool = False
     # Valores constantes que el motor manda SIEMPRE con la llamada, nunca
     # visibles para el modelo (a diferencia de filtros_verificados, que el
     # modelo si propone). Ej.: ping_cliente necesita 'pings'/'arp_ping' fijos
     # -- no son un dato de negocio que el modelo deba decidir cada vez.
     argumentos_fijos: dict[str, Any] = Field(default_factory=dict)
+    # Como argumentos_fijos, pero calculados en el momento de la llamada en
+    # vez de un valor congelado en el YAML -- ej. 'fecha_inicio' tiene que
+    # ser AHORA, no la fecha en que se escribio la config. Clave: nombre del
+    # argumento. Valor: dias desde hoy (0 = ahora mismo, N = ahora + N dias).
+    # El modelo nunca decide una fecha (son notoriamente malos calculando
+    # fechas): el codigo hace la cuenta, el modelo ni la ve.
+    fechas_automaticas: dict[str, int] = Field(default_factory=dict)
 
     # --- agregado ---
     entidad: str | None = None
@@ -690,14 +702,20 @@ class TenantConfig(Base):
             raise ValueError(
                 f"escalamiento.destino_rol '{destino}' no es un rol definido")
 
-        # Las sustituciones de modelo deben apuntar a canales o roles reales.
+        # Las sustituciones de modelo deben apuntar a canales o roles reales --
+        # con una excepcion: 'rol:supervisor' es una clave VIRTUAL que usa
+        # nucleo/seguimiento/supervisor.py para poder redirigir la revision
+        # automatica de conversaciones a un modelo distinto (uno mas
+        # deliberado, ya que no tiene la urgencia de latencia de responderle
+        # a un cliente en vivo) sin que "supervisor" tenga que existir como
+        # rol conversacional de verdad en 'roles'.
         for clave in self.llm.overrides:
             if ":" not in clave:
                 raise ValueError(
                     f"llm.overrides['{clave}'] debe tener la forma "
                     f"'canal:whatsapp' o 'rol:tecnico'")
             ambito, valor = clave.split(":", 1)
-            if ambito == "rol" and valor not in nombres_rol:
+            if ambito == "rol" and valor not in nombres_rol and valor != "supervisor":
                 raise ValueError(f"llm.overrides: rol '{valor}' no existe")
             if ambito not in ("rol", "canal"):
                 raise ValueError(

@@ -87,6 +87,14 @@ def ejecutar(herramienta, argumentos: dict) -> dict | list:
 
     if herramienta.metodo == "GET":
         r = requests.get(url, headers=headers, params=argumentos, timeout=TIMEOUT_SEGUNDOS)
+    elif herramienta.multipart:
+        # requests solo arma multipart/form-data cuando hay un 'files=' --
+        # con (None, valor) se manda cada campo como parte de formulario
+        # comun, sin ser un archivo real. Ver el campo 'multipart' en
+        # nucleo/config/schema.py:Herramienta para el motivo.
+        archivos = {clave: (None, str(valor)) for clave, valor in argumentos.items()}
+        r = requests.request(herramienta.metodo, url, headers=headers,
+                             files=archivos, timeout=TIMEOUT_SEGUNDOS)
     else:
         r = requests.request(herramienta.metodo, url, headers=headers,
                              json=argumentos, timeout=TIMEOUT_SEGUNDOS)

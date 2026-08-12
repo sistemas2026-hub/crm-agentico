@@ -20,6 +20,11 @@ psycopg[binary]
 # revienta cuando alguien hace la primera consulta.
 openai
 
+# Claude (Anthropic). Formato propio, no compatible con OpenAI -- por eso
+# ClienteAnthropic es una clase aparte en cliente.py, no otra entrada de
+# ClienteCompatibleOpenAI. Mismo import perezoso que 'openai'.
+anthropic
+
 # nucleo/ingesta/docx.py, que fragmenta el corpus.
 python-docx
 

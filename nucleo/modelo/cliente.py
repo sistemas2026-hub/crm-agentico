@@ -227,25 +227,144 @@ class ClienteCompatibleOpenAI:
             segundos=transcurrido, modelo=modelo, proveedor=self.nombre)
 
 
+class ClienteAnthropic:
+    """
+    API de Anthropic (Claude). No habla el formato de OpenAI -- el prompt de
+    sistema va aparte de 'messages', y las llamadas/resultados de herramienta
+    son bloques de contenido ('tool_use'/'tool_result') en vez de la lista
+    'tool_calls' suelta que usan Ollama y los proveedores compatibles con
+    OpenAI. Por eso es una clase propia y no una entrada mas de
+    ClienteCompatibleOpenAI: traduce el formato canonico aca adentro para que
+    el resto del sistema (motor.py, escalamiento.py, supervisor.py) siga
+    viendo la misma forma sin importar el proveedor.
+    """
+
+    def __init__(self, api_key_ref: str, nombre: str = "anthropic"):
+        import anthropic                                 # import perezoso
+        clave = os.environ.get(api_key_ref)
+        if not clave:
+            raise SystemExit(
+                f"Falta la variable {api_key_ref} en el entorno.\n"
+                f"La configuracion guarda el NOMBRE del secreto, no su valor: "
+                f"agregalo al .env como  {api_key_ref}=...")
+        self.nombre = nombre
+        self._cli = anthropic.Anthropic(api_key=clave)
+
+    @staticmethod
+    def _adaptar(mensajes: list[dict]) -> tuple[str, list[dict]]:
+        """
+        Separa los mensajes 'system' (Anthropic los quiere aparte, no en
+        'messages') y convierte los turnos 'tool' en bloques 'tool_result'
+        dentro de un turno 'user' -- varios bloques juntos si se llamaron
+        varias herramientas en el mismo turno, porque Anthropic rechaza
+        'tool_result' sueltos en turnos 'user' separados.
+        """
+        sistema = []
+        salida: list[dict] = []
+        for m in mensajes:
+            rol = m.get("role")
+            if rol == "system":
+                if (m.get("content") or "").strip():
+                    sistema.append(m["content"])
+                continue
+            if rol == "tool":
+                bloque = {"type": "tool_result", "tool_use_id": m["tool_call_id"],
+                          "content": m.get("content") or ""}
+                previo = salida[-1] if salida else None
+                if (previo and previo["role"] == "user"
+                        and isinstance(previo["content"], list) and previo["content"]
+                        and previo["content"][0].get("type") == "tool_result"):
+                    previo["content"].append(bloque)
+                else:
+                    salida.append({"role": "user", "content": [bloque]})
+                continue
+            if rol == "assistant" and m.get("tool_calls"):
+                contenido: list[dict] = []
+                if (m.get("content") or "").strip():
+                    contenido.append({"type": "text", "text": m["content"]})
+                for tc in m["tool_calls"]:
+                    contenido.append({
+                        "type": "tool_use", "id": tc["id"],
+                        "name": tc["function"]["name"],
+                        # Canonico: 'arguments' ya es un dict (ver Llamada.argumentos
+                        # en motor.py); a diferencia de OpenAI, Anthropic lo quiere
+                        # como objeto, no como texto JSON -- no hace falta convertir.
+                        "input": tc["function"].get("arguments") or {},
+                    })
+                salida.append({"role": "assistant", "content": contenido})
+                continue
+            salida.append({"role": rol, "content": m.get("content") or ""})
+        return "\n\n".join(sistema), salida
+
+    @staticmethod
+    def _herramientas(tools: list[dict]) -> list[dict]:
+        """El catalogo interno describe herramientas en formato OpenAI
+        ({'type': 'function', 'function': {...}}); Anthropic las quiere
+        planas ({'name', 'description', 'input_schema'})."""
+        return [{"name": t["function"]["name"],
+                 "description": t["function"].get("description", ""),
+                 "input_schema": t["function"].get(
+                     "parameters", {"type": "object", "properties": {}})}
+                for t in tools]
+
+    def chat(self, modelo: str, mensajes: list[dict],
+             tools: list | None = None, temperatura: float = 0.1) -> Respuesta:
+        sistema, adaptados = self._adaptar(mensajes)
+        argumentos: dict[str, Any] = {
+            "model": modelo, "max_tokens": 8000, "messages": adaptados}
+        if sistema:
+            argumentos["system"] = sistema
+        if tools:
+            argumentos["tools"] = self._herramientas(tools)
+        # 'temperatura' no se reenvia: los modelos Opus 5+ la rechazan (400)
+        # y esto es para el rol supervisor, que no necesita ajustarla -- solo
+        # se acepta el parametro para que 'chat()' tenga la misma firma que
+        # los demas proveedores.
+
+        t0 = time.monotonic()
+        r = self._cli.messages.create(**argumentos)
+        transcurrido = time.monotonic() - t0
+
+        texto = []
+        llamadas = []
+        for bloque in r.content:
+            if bloque.type == "text":
+                texto.append(bloque.text)
+            elif bloque.type == "tool_use":
+                llamadas.append(Llamada(bloque.name, bloque.input))
+
+        return Respuesta(
+            contenido="".join(texto),
+            llamadas=llamadas,
+            tokens_entrada=r.usage.input_tokens,
+            tokens_salida=r.usage.output_tokens,
+            # Claude no expone el pensamiento por API (se resume u omite);
+            # no hay caracteres que comparar con el 'thinking' de Ollama.
+            razonamiento_chars=0,
+            segundos=transcurrido, modelo=modelo, proveedor=self.nombre)
+
+
 # =============================================================================
 #  CATALOGO
 # =============================================================================
 #  Solo endpoints publicos y nombres de variable. Ningun secreto.
 
 PROVEEDORES: dict[str, dict[str, Any]] = {
-    "ollama":   {"clase": ClienteOllama},
-    "deepseek": {"clase": ClienteCompatibleOpenAI,
-                 "base_url": "https://api.deepseek.com",
-                 "api_key_ref": "DEEPSEEK_API_KEY"},
-    "qwen":     {"clase": ClienteCompatibleOpenAI,
-                 "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-                 "api_key_ref": "DASHSCOPE_API_KEY"},
-    "glm":      {"clase": ClienteCompatibleOpenAI,
-                 "base_url": "https://open.bigmodel.cn/api/paas/v4",
-                 "api_key_ref": "GLM_API_KEY"},
-    "kimi":     {"clase": ClienteCompatibleOpenAI,
-                 "base_url": "https://api.moonshot.cn/v1",
-                 "api_key_ref": "MOONSHOT_API_KEY"},
+    "ollama":    {"clase": ClienteOllama},
+    "deepseek":  {"clase": ClienteCompatibleOpenAI,
+                  "base_url": "https://api.deepseek.com",
+                  "api_key_ref": "DEEPSEEK_API_KEY"},
+    "qwen":      {"clase": ClienteCompatibleOpenAI,
+                  "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+                  "api_key_ref": "DASHSCOPE_API_KEY"},
+    "glm":       {"clase": ClienteCompatibleOpenAI,
+                  "base_url": "https://open.bigmodel.cn/api/paas/v4",
+                  "api_key_ref": "GLM_API_KEY"},
+    "kimi":      {"clase": ClienteCompatibleOpenAI,
+                  "base_url": "https://api.moonshot.cn/v1",
+                  "api_key_ref": "MOONSHOT_API_KEY"},
+    "anthropic": {"clase": ClienteAnthropic,
+                  "api_key_ref": "ANTHROPIC_API_KEY"},
 }
 
 _cache: dict[str, Any] = {}

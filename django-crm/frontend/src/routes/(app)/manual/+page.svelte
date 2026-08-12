@@ -72,6 +72,21 @@
     }
     return grupos;
   }
+
+  // Copia local mutable, mismo motivo que 'ejemplos': aprobar/descartar
+  // actualiza la pantalla al toque, sin recargar todo.
+  let revisiones = $state(data.revisiones ?? []);
+  const pendientes = $derived(revisiones.filter((r) => r.estado === 'pendiente'));
+  const yaRevisadas = $derived(revisiones.filter((r) => r.estado !== 'pendiente'));
+  let verRevisadas = $state(false);
+
+  async function resolverRevision(r, accion) {
+    const resp = await fetch(`/api/manual/revisiones/${r.id}/${accion}`, { method: 'POST' });
+    if (resp.ok) {
+      const estado = accion === 'aprobar' ? 'aprobado' : 'descartado';
+      revisiones = revisiones.map((x) => (x.id === r.id ? { ...x, estado } : x));
+    }
+  }
 </script>
 
 <PageHeader title="Manual">
@@ -121,6 +136,75 @@
             </details>
           {/each}
         </div>
+      {/if}
+
+      <div class="v2-label" style="margin:24px 0 10px">
+        Revisiones del supervisor
+        <span class="v2-muted">({pendientes.length} pendiente{pendientes.length === 1 ? '' : 's'})</span>
+      </div>
+      {#if revisiones.length === 0}
+        <p class="v2-sub" style="margin-bottom:16px">
+          Todavía no hay conversaciones revisadas por el supervisor. Se generan solas cuando una
+          conversación con un cliente termina resuelta.
+        </p>
+      {:else if pendientes.length === 0}
+        <p class="v2-sub" style="margin-bottom:16px">Sin revisiones pendientes por ahora.</p>
+      {:else}
+        <div class="ejemplos-lista" style="margin-bottom:8px">
+          {#each pendientes as r (r.id)}
+            <div class="v2-card ejemplo-card">
+              <div class="ejemplo-meta v2-sub" style="margin-top:0">
+                <Pill tone={r.es_buen_ejemplo ? 'moss' : 'clay'}>
+                  {r.es_buen_ejemplo ? 'Buen ejemplo' : 'Con problemas'}
+                </Pill>
+                {#if r.caso}<span style="margin-left:6px">{etiqueta(r.caso)}</span>{/if}
+              </div>
+              <div class="ejemplo-pregunta" style="margin-top:8px">
+                <b>Cliente escribió:</b> {r.primer_mensaje || '—'}
+              </div>
+              <div class="ejemplo-respuesta"><b>Justificación:</b> {r.justificacion}</div>
+              {#if r.aporte_sugerido}
+                <div class="ejemplo-respuesta"><b>Aporte sugerido:</b> {r.aporte_sugerido}</div>
+              {/if}
+              <div class="ejemplo-meta v2-sub">
+                {relativeTime(r.creado_en)} ·
+                <a href="/conversaciones/{r.conversation_id}">Ver conversación completa</a> ·
+                <button type="button" class="quitar-marca-link" style="color:var(--v2-moss,#15803d)"
+                  onclick={() => resolverRevision(r, 'aprobar')}>
+                  Aprobar
+                </button> ·
+                <button type="button" class="quitar-marca-link" onclick={() => resolverRevision(r, 'descartar')}>
+                  Descartar
+                </button>
+              </div>
+            </div>
+          {/each}
+        </div>
+      {/if}
+      {#if yaRevisadas.length > 0}
+        <button type="button" class="v2-btn v2-btn-sm" style="margin-bottom:24px"
+          onclick={() => (verRevisadas = !verRevisadas)}>
+          {verRevisadas ? 'Ocultar' : 'Ver'} {yaRevisadas.length} ya revisada{yaRevisadas.length === 1 ? '' : 's'}
+        </button>
+        {#if verRevisadas}
+          <div class="ejemplos-lista" style="margin-bottom:24px">
+            {#each yaRevisadas as r (r.id)}
+              <div class="v2-card ejemplo-card">
+                <div class="ejemplo-meta v2-sub" style="margin-top:0">
+                  <Pill tone={r.estado === 'aprobado' ? 'moss' : 'slate'}>{r.estado}</Pill>
+                  {#if r.caso}<span style="margin-left:6px">{etiqueta(r.caso)}</span>{/if}
+                </div>
+                <div class="ejemplo-pregunta" style="margin-top:8px">
+                  <b>Cliente escribió:</b> {r.primer_mensaje || '—'}
+                </div>
+                <div class="ejemplo-meta v2-sub">
+                  {r.revisado_por ? `Por ${r.revisado_por} · ` : ''}{relativeTime(r.revisado_en || r.creado_en)} ·
+                  <a href="/conversaciones/{r.conversation_id}">Ver conversación completa</a>
+                </div>
+              </div>
+            {/each}
+          </div>
+        {/if}
       {/if}
 
       <div class="v2-label" style="margin:24px 0 10px">Ejemplos marcados por caso</div>

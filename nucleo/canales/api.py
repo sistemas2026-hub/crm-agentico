@@ -41,6 +41,7 @@ from nucleo.modelo import motor
 from nucleo.persistencia import db as persistencia
 from nucleo.recuperacion.busqueda import recuperar
 from nucleo.seguimiento import escalamiento
+from nucleo.seguimiento import supervisor
 from nucleo.seguridad.verificacion import Sesion
 
 app = Flask(__name__)
@@ -78,6 +79,33 @@ def _error_al_guardar(e: Exception):
     corregir escribiendo distinto."""
     print(f"[editor] fallo al guardar la configuracion: {type(e).__name__}: {e}")
     return jsonify({"error": f"No se pudo guardar en la base: {type(e).__name__}: {e}"}), 500
+
+
+def _agente_supervisor_json(config) -> dict | None:
+    """
+    El supervisor (nucleo/seguimiento/supervisor.py) no es un Rol real: no
+    esta en config.roles, no tiene 'puede_consultar' ni conversa con nadie --
+    revisa en segundo plano cada conversacion que se cierra y propone aportes
+    al manual. Se arma a mano (no via _agente_json, que asume un Rol de
+    verdad) para que la pantalla de Agentes pueda mostrar que existe, sin
+    forzarlo al mismo molde de tarjeta editable que un agente conversacional.
+
+    Solo aparece si el manual esta configurado -- mismo guard que
+    supervisor.revisar(), que sin 'manual.casos' ni siquiera llama al modelo.
+    """
+    if not config.manual.casos:
+        return None
+    return {
+        "nombre": "supervisor",
+        "descripcion": (
+            "Revisa cada conversacion cerrada y propone aportes al manual de "
+            "procedimientos. No conversa con nadie ni tiene herramientas: "
+            "corre solo, y cada aporte queda pendiente hasta que una persona "
+            "lo aprueba o lo descarta desde /manual."),
+        "modelo": config.llm.overrides.get("rol:supervisor"),
+        "automatico": True,
+        "herramientas": [],
+    }
 
 
 def _agente_json(nombre: str, rol, config) -> dict:
@@ -183,7 +211,8 @@ def chat():
         if evaluacion and evaluacion.get("escalar"):
             escalamiento.escalar(
                 config, tenant, id_sesion, conversation_id, estado["historial"],
-                evaluacion.get("motivo", ""), evaluacion.get("etiqueta", ""))
+                evaluacion.get("motivo", ""), evaluacion.get("etiqueta", ""),
+                resumen=evaluacion.get("resumen", ""))
             estado["escalada"] = True
             # El caso queda guardado para poder consultarlo despues: es lo que
             # permite que la pausa de arriba sepa cuando el humano lo cerro y
@@ -204,6 +233,15 @@ def chat():
                 cerrada = True
             except Exception as e:
                 print(f"[conversaciones] no se pudo cerrar la conversacion: {e}")
+            # El supervisor audita la conversacion ya cerrada y deja un
+            # veredicto PENDIENTE para que una persona lo confirme desde
+            # /manual -- nunca publica solo (ver nucleo/seguimiento/
+            # supervisor.py). Aparte del cierre: un fallo aca no debe
+            # revertir que la conversacion ya quedo cerrada.
+            try:
+                supervisor.revisar(config, rol, tenant, conversation_id, estado["historial"])
+            except Exception as e:
+                print(f"[supervisor] fallo al revisar la conversacion: {e}")
 
     return jsonify({"respuesta": respuesta, "verificado": estado["sesion"].verificado,
                     "cerrada": cerrada, "conversacion_id": conversation_id,
@@ -226,6 +264,9 @@ def agentes():
         return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
 
     salida = [_agente_json(nombre, rol, config) for nombre, rol in config.roles.items()]
+    supervisor = _agente_supervisor_json(config)
+    if supervisor:
+        salida.append(supervisor)
     return jsonify({"tenant": tenant, "agentes": salida})
 
 
@@ -341,6 +382,13 @@ def configuracion():
         # el resto (nombre legal, slug) se define al dar de alta el tenant.
         "identidad": {"descripcion": config.identidad.descripcion,
                       "nombre_comercial": config.identidad.nombre_comercial},
+        # Solo existe si la herramienta 'agendar_visita_tecnica' esta en el
+        # catalogo -- None en cualquier tenant que no la tenga, para que la
+        # pantalla sepa si mostrar el campo o no.
+        "plazo_visita_tecnica": next(
+            (h.fechas_automaticas.get("fecha_final")
+             for h in config.herramientas if h.nombre == "agendar_visita_tecnica"),
+            None),
         # Contexto de solo lectura para la pantalla: el modelo y cuantos
         # agentes hay se deciden en otro lado, pero quien ajusta el tono
         # merece verlos sin abrir otra pestana.
@@ -390,6 +438,30 @@ def configuracion_identidad():
 
     olvidar_config(tenant)
     return jsonify({"descripcion": config.identidad.descripcion})
+
+
+@app.put("/configuracion/plazo-visita-tecnica")
+def configuracion_plazo_visita_tecnica():
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+
+    try:
+        dias = int(cuerpo.get("dias"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "'dias' tiene que ser un numero entero."}), 400
+
+    try:
+        config = editor.guardar_plazo_visita_tecnica(tenant, dias)
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
+
+    olvidar_config(tenant)
+    herramienta = next(h for h in config.herramientas if h.nombre == "agendar_visita_tecnica")
+    return jsonify({"dias": herramienta.fechas_automaticas.get("fecha_final")})
 
 
 # =============================================================================
@@ -619,6 +691,49 @@ def manual_ejemplos():
         return jsonify({"error": "No se pudieron leer los ejemplos."}), 500
 
     return jsonify({"ejemplos": ejemplos})
+
+
+@app.get("/manual/revisiones")
+def manual_revisiones():
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+
+    try:
+        revisiones = persistencia.revisiones_de(tenant, request.args.get("estado"))
+    except Exception as e:
+        print(f"[supervisor] fallo al leer revisiones: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudieron leer las revisiones."}), 500
+
+    return jsonify({"revisiones": revisiones})
+
+
+def _actualizar_revision(id_revision, estado_nuevo):
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+
+    try:
+        existe = persistencia.actualizar_estado_revision(
+            tenant, id_revision, estado_nuevo, cuerpo.get("revisado_por"))
+    except Exception as e:
+        print(f"[supervisor] fallo al actualizar revision: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo guardar."}), 500
+
+    if not existe:
+        return jsonify({"error": f"La revision '{id_revision}' no existe."}), 404
+    return jsonify({"ok": True, "estado": estado_nuevo})
+
+
+@app.post("/manual/revisiones/<id_revision>/aprobar")
+def manual_revisiones_aprobar(id_revision):
+    return _actualizar_revision(id_revision, "aprobado")
+
+
+@app.post("/manual/revisiones/<id_revision>/descartar")
+def manual_revisiones_descartar(id_revision):
+    return _actualizar_revision(id_revision, "descartado")
 
 
 # =============================================================================
