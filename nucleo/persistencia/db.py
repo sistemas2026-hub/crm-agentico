@@ -456,6 +456,46 @@ def purgar_media(tenant: str, dias: int) -> int:
         return cur.rowcount
 
 
+def purgar_conversaciones(tenant: str, dias: int) -> int:
+    """
+    Borra las conversaciones mas viejas que 'dias'. Devuelve cuantas.
+
+    Los mensajes, las llamadas a herramientas y los adjuntos se van en cascada
+    con ellas -- estan declarados 'on delete cascade'.
+
+    LO QUE NO SE BORRA: una conversacion que tenga alguna respuesta marcada
+    como ejemplo valido. Esas alimentan el manual de procedimientos
+    (supabase/05_ejemplos_validados.sql), y tambien cuelgan en cascada, asi que
+    sin esta excepcion la purga nocturna destruiria en silencio el material que
+    alguien marco a mano. Una conversacion que un colaborador senalo como buena
+    dejo de ser historial descartable.
+
+    Se limpia el evento de webhook por separado (no cuelga de la conversacion)
+    y con un plazo mucho mas corto: los reintentos de la plataforma ocurren en
+    minutos, guardar identificadores un ano no sirve para nada.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """delete from asistente.conversations c
+               where c.organization_id = %s
+                 and c.actualizado_en < now() - make_interval(days => %s)
+                 and not exists (
+                   select 1 from asistente.ejemplos_validados e
+                   where e.conversation_id = c.id)""",
+            (org, dias))
+        borradas = cur.rowcount
+
+        # Los identificadores de webhook no cuelgan de ninguna conversacion:
+        # se limpian aparte, a 7 dias, que es margen de sobra sobre los
+        # reintentos de la plataforma.
+        cur.execute(
+            """delete from asistente.webhook_eventos
+               where organization_id = %s
+                 and visto_en < now() - interval '7 days'""",
+            (org,))
+        return borradas
+
+
 def evento_ya_visto(tenant: str, wamid: str, canal: str = "whatsapp") -> bool:
     """
     True si este webhook ya se proceso. False la primera vez -- y en esa misma

@@ -74,4 +74,11 @@ app.conf.beat_schedule = {
         "task": "common.tasks.flush_expired_refresh_tokens",
         "schedule": crontab(hour=3, minute=30),
     },
+    # Aplica la retencion del asistente: adjuntos vencidos (30 dias) y
+    # conversaciones vencidas (365). Hasta ahora esos plazos estaban declarados
+    # en la configuracion del tenant y no los ejecutaba nadie. Diaria, 4 AM.
+    "purgar-retencion-asistente": {
+        "task": "common.tasks.purgar_retencion_asistente",
+        "schedule": crontab(hour=4, minute=0),
+    },
 }

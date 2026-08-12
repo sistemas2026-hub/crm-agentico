@@ -1204,6 +1204,51 @@ def media_archivo(id_media):
                             "Cache-Control": "private, max-age=86400"}
 
 
+@app.post("/mantenimiento/<tenant>/purgar")
+def mantenimiento_purgar(tenant):
+    """
+    Aplica la retencion declarada por la empresa: borra lo vencido.
+
+    Vive en el motor y no en el CRM por una razon concreta, y hay una leccion
+    ajena que la respalda: la purga de notificaciones del CRM estuvo borrando
+    CERO filas todas las noches durante meses, porque un worker de Celery no
+    pasa por el middleware que fija el contexto de aislamiento, y la politica
+    filtra contra un valor vacio que no coincide con nada. Nunca fallo; solo no
+    hizo nada, y no lo registraba.
+
+    Aca eso no puede pasar: db.sesion() fija la empresa en cada operacion --
+    es la misma funcion que usa el resto del motor, no una ruta especial.
+
+    NO va bajo /canales/whatsapp: ese prefijo es el que se expone a internet.
+    Esto lo llama una tarea programada por la red interna.
+    """
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+
+    dias_media = config.limites.retencion_multimedia_dias
+    dias_conv = config.limites.retencion_conversaciones_dias
+
+    salida = {"retencion_multimedia_dias": dias_media,
+              "retencion_conversaciones_dias": dias_conv}
+    try:
+        # Multimedia primero: tiene el plazo mas corto, y borrarla antes deja
+        # menos trabajo en cascada al borrar conversaciones.
+        salida["media_borrada"] = persistencia.purgar_media(tenant, dias_media)
+        salida["conversaciones_borradas"] = persistencia.purgar_conversaciones(
+            tenant, dias_conv)
+    except Exception as e:
+        print(f"[mantenimiento] fallo la purga de '{tenant}': "
+              f"{type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo completar la purga."}), 500
+
+    print(f"[mantenimiento] purga de '{tenant}': "
+          f"{salida['media_borrada']} archivos (>{dias_media}d), "
+          f"{salida['conversaciones_borradas']} conversaciones (>{dias_conv}d)")
+    return jsonify(salida)
+
+
 @app.get("/salud")
 def salud():
     return jsonify({"estado": "ok"})
