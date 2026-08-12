@@ -1293,7 +1293,7 @@ def whatsapp_webhook(tenant):
 
         # Antes de gastar un turno del modelo: si este wamid ya se atendio, es
         # un reintento de Meta y contestar de nuevo seria cobrar y responder
-        # dos veces. Ver supabase/07_webhook_eventos.sql.
+        # dos veces. Ver supabase/08_webhook_eventos.sql.
         try:
             if persistencia.evento_ya_visto(tenant, wamid):
                 continue
