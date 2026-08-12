@@ -2,13 +2,19 @@
   /**
    * WhatsApp: las credenciales que hacen falta para prender el canal.
    *
-   * NUNCA se ve un valor cargado. Esta pantalla solo sabe si algo esta
+   * NUNCA se ve un valor GUARDADO. Esta pantalla solo sabe si algo esta
    * cargado (una pista de 4 caracteres y cuando) -- los valores reales viven
-   * cifrados en la base y ni el motor los vuelve a mostrar (ver
-   * nucleo/seguridad/secretos.py). La unica excepcion es el verify_token
-   * recien generado: ese SI se muestra una vez, porque hay que copiarlo a
-   * Meta, y despues de esa carga se pierde de la pantalla igual que los
-   * demas.
+   * cifrados en la base y ni siquiera salen de ella (ver
+   * nucleo/seguridad/secretos.py::listar). La unica excepcion es el
+   * verify_token recien generado: ese SI se muestra una vez, porque hay que
+   * copiarlo a Meta, y despues de esa carga se pierde igual que los demas.
+   *
+   * El ojo de cada campo es OTRA cosa y no contradice lo anterior: muestra lo
+   * que la persona acaba de escribir o pegar, que ya esta en su navegador.
+   * Existe porque con cinco campos de puntitos identicos no hay forma de
+   * notar que el token se pego en la casilla del App Secret -- y ese error no
+   * se descubre hasta que Meta rechaza el webhook, con un mensaje que no
+   * menciona cual credencial esta cruzada.
    *
    * El toggle "Activar" queda deshabilitado hasta que las cuatro credenciales
    * indispensables tengan valor. Es una ayuda de la interfaz, no la
@@ -20,7 +26,7 @@
   import Pill from '$lib/v2/components/Pill.svelte';
   import { shortAge } from '$lib/v2/format.js';
   import { enhance } from '$app/forms';
-  import { Copy, Check, ExternalLink } from '@lucide/svelte';
+  import { Copy, Check, ExternalLink, Eye, EyeOff } from '@lucide/svelte';
 
   /** @type {{ data: any, form: any }} */
   let { data, form } = $props();
@@ -95,6 +101,18 @@
   let copiadoUrl = $state(false);
   let copiadoToken = $state(false);
 
+  // Por credencial: si se está viendo lo tecleado, y qué se tecleó. Los dos
+  // son por clave y no un booleano suelto porque hay cinco campos y mostrar
+  // uno no puede destapar los otros cuatro.
+  //
+  // Esto NO revela lo guardado -- el valor cifrado nunca sale de la base (ver
+  // secretos.listar()). Revela lo que la persona acaba de escribir o pegar,
+  // que ya está en su navegador. Existe porque con cinco campos de puntitos
+  // idénticos no hay forma de notar que el token se pegó en la casilla del
+  // App Secret, y ese error se descubre recién cuando Meta rechaza el webhook.
+  let aLaVista = $state(/** @type {Record<string, boolean>} */ ({}));
+  let pegado = $state(/** @type {Record<string, string>} */ ({}));
+
   /** @param {string} texto @param {() => void} marcar */
   async function copiar(texto, marcar) {
     try {
@@ -124,6 +142,23 @@
       await update({ reset: false });
     };
   };
+
+  /**
+   * Tras guardar una credencial: vaciar el campo y volver a ocultarlo. El
+   * reset del formulario limpia el DOM, pero el valor vive en 'pegado' y el
+   * bind lo volveria a poner -- y dejar el secreto a la vista despues de
+   * guardarlo es justo lo que no se quiere.
+   * @param {string} clave
+   */
+  function guardandoCredencial(clave) {
+    return () => async (/** @type {any} */ { update, result }) => {
+      await update();
+      if (result?.type === 'success') {
+        pegado[clave] = '';
+        aLaVista[clave] = false;
+      }
+    };
+  }
 </script>
 
 <PageHeader title="WhatsApp">
@@ -320,19 +355,37 @@
                 <form
                   method="POST"
                   action="?/guardarCredencial"
-                  use:enhance={enviando}
+                  use:enhance={guardandoCredencial(c.clave)}
                   class="cred-form"
                 >
                   <input type="hidden" name="nombre" value={refName} />
                   <input type="hidden" name="descripcion" value={c.etiqueta} />
-                  <input
-                    class="v2-input"
-                    type="password"
-                    name="valor"
-                    autocomplete="off"
-                    placeholder={secreto ? 'Reemplazar…' : 'Pegar valor…'}
-                    required
-                  />
+                  <div class="cred-campo">
+                    <input
+                      class="v2-input"
+                      type={aLaVista[c.clave] ? 'text' : 'password'}
+                      name="valor"
+                      autocomplete="off"
+                      placeholder={secreto ? 'Reemplazar…' : 'Pegar valor…'}
+                      required
+                      bind:value={pegado[c.clave]}
+                    />
+                    <!-- Muestra lo que ACABÁS de pegar, no lo que está
+                         guardado: ese valor ya está en tu navegador, así que
+                         verlo no expone nada nuevo. Sirve para lo único que
+                         hace falta acá — confirmar que el valor cayó en la
+                         casilla correcta, con cinco campos que si no se ven
+                         idénticos. -->
+                    <button
+                      type="button"
+                      class="cred-ojo"
+                      onclick={() => (aLaVista[c.clave] = !aLaVista[c.clave])}
+                      aria-label={aLaVista[c.clave] ? 'Ocultar' : 'Mostrar lo que pegaste'}
+                      title={aLaVista[c.clave] ? 'Ocultar' : 'Mostrar lo que pegaste'}
+                    >
+                      {#if aLaVista[c.clave]}<EyeOff size={14} />{:else}<Eye size={14} />{/if}
+                    </button>
+                  </div>
                   <button class="v2-btn v2-btn-sm" type="submit">
                     {secreto ? 'Actualizar' : 'Guardar'}
                   </button>
@@ -404,10 +457,37 @@
     display: flex;
     gap: 6px;
   }
-  .cred-form input {
+  /* El campo y su ojo son una sola pieza: el boton va DENTRO del recuadro,
+     no al lado, para que no se lea como una accion sobre la credencial
+     (guardar, borrar) sino como parte de escribir en el campo. */
+  .cred-campo {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    display: flex;
+  }
+  .cred-campo input {
     flex: 1;
     min-width: 0;
     font-size: 12.5px;
+    padding-right: 30px;
+  }
+  .cred-ojo {
+    position: absolute;
+    right: 1px;
+    top: 1px;
+    bottom: 1px;
+    width: 28px;
+    display: grid;
+    place-items: center;
+    border: 0;
+    background: none;
+    color: var(--v2-slate);
+    cursor: pointer;
+    border-radius: 0 7px 7px 0;
+  }
+  .cred-ojo:hover {
+    color: var(--v2-ink);
   }
 
   @media (max-width: 640px) {
