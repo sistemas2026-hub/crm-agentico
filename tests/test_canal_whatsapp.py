@@ -195,6 +195,20 @@ def main():
     check("una imagen no trae texto", mensajes[1]["texto"] == "")
     check("pero si conserva el tipo", mensajes[1]["tipo"] == "image")
 
+    # Meta entrega el remitente en 'from' O en 'from_user_id' -- las dos se
+    # vieron en vivo. Leer solo una descarta mensajes reales, y el descarte es
+    # invisible: sin remitente no hay a quien contestarle, asi que el mensaje
+    # se pierde sin que nadie se entere.
+    sobre_alterno = {'entry': [{'changes': [{'value': {'messages': [
+        {'id': 'wamid.ALT', 'from_user_id': '573001112233', 'type': 'text',
+         'text': {'body': 'llego con from_user_id'}}
+    ]}}]}]}
+    alt = whatsapp.mensajes_entrantes(sobre_alterno)
+    check("lee el remitente cuando viene como 'from_user_id'",
+          len(alt) == 1 and alt[0]["de"] == "573001112233")
+    check("y sigue leyendolo cuando viene como 'from'",
+          mensajes[0]["de"] == "573001112233")
+
     estados = whatsapp.estados_entrantes(sobre)
     check("los acuses salen por separado, no como mensajes", len(estados) == 1)
     check("un acuse NO aparece entre los mensajes",

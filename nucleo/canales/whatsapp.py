@@ -182,7 +182,14 @@ def mensajes_entrantes(cuerpo: dict) -> list[dict]:
                 adjunto = m.get(tipo) or {} if tipo in TIPOS_CON_ARCHIVO else {}
                 salida.append({
                     "wamid": m.get("id"),
-                    "de": m.get("from"),
+                    # 'from' es lo que documenta la Cloud API, pero Meta
+                    # tambien entrega 'from_user_id' -- verificado en vivo
+                    # (agosto 2026) sobre un mensaje real: las claves que
+                    # llegaron fueron ['from_user_id','id','text','timestamp',
+                    # 'type'], sin 'from'. Leer solo una de las dos descarta
+                    # mensajes legitimos, y el descarte es silencioso porque
+                    # sin remitente no hay a quien contestarle.
+                    "de": m.get("from") or m.get("from_user_id"),
                     "tipo": tipo,
                     "texto": (m.get("text") or {}).get("body", "") if tipo == "text" else "",
                     # El pie de foto es texto del cliente: "mira como quedo"
