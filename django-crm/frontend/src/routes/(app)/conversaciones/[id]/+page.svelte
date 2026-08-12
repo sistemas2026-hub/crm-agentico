@@ -26,6 +26,15 @@
   // untrack: la conversacion/hilo/caso se mutan localmente despues (enviar(),
   // la asignacion) -- capturar el valor inicial es lo que se quiere, no
   // seguir a `data` en cada re-render (mismo patron que goals/[id]/edit).
+  //
+  // Este componente se REMONTA por completo al pasar de una conversacion a
+  // otra -- ver el {#key abierta} en +layout.svelte -- asi que este
+  // untrack corre de nuevo, fresco, en cada chat. Se probaron dos versiones
+  // de un $effect que resincronizaba sin remontar (para evitar el parpadeo),
+  // pero en pruebas reales (grabaciones de Jam, agosto 2026) el panel se
+  // quedaba mostrando la conversacion anterior pese al effect -- se volvio a
+  // este enfoque, mas simple y con la garantia estructural de Svelte de que
+  // un componente remontado siempre arranca de cero.
   let conversacion = $state(untrack(() => data.conversacion));
   let mensajes = $state(untrack(() => data.mensajes ?? []));
   let caso = $state(untrack(() => data.caso));
