@@ -1149,8 +1149,28 @@ def whatsapp_webhook(tenant):
               f"cliente_final: no hay con que atender el mensaje")
         return jsonify({"recibido": True}), 200
 
+    entrantes = whatsapp.mensajes_entrantes(cuerpo)
+    estados = whatsapp.estados_entrantes(cuerpo)
+
+    # Que trajo esta entrega. Sin esto, un webhook que llega y no produce nada
+    # es indistinguible de uno que no llego: los dos se ven como un 200 en el
+    # registro de acceso. Costo una tarde de depuracion averiguar cual de los
+    # dos estaba pasando.
+    if not entrantes and not estados:
+        campos = []
+        for entrada in (cuerpo or {}).get("entry", []) or []:
+            for cambio in entrada.get("changes", []) or []:
+                campos.append(cambio.get("field"))
+                valor = cambio.get("value") or {}
+                campos.append("value:" + ",".join(sorted(valor)))
+        print(f"[whatsapp] entrega SIN mensajes ni estados. Contenido: "
+              f"{campos or list((cuerpo or {}).keys())}")
+    else:
+        print(f"[whatsapp] entrega con {len(entrantes)} mensaje(s) y "
+              f"{len(estados)} estado(s)")
+
     atendidos = 0
-    for entrante in whatsapp.mensajes_entrantes(cuerpo):
+    for entrante in entrantes:
         wamid = entrante.get("wamid")
         de = entrante.get("de")
         if not wamid or not de:
@@ -1178,12 +1198,14 @@ def whatsapp_webhook(tenant):
 
     # Los acuses de entrega llegan por este mismo webhook y NO son
     # conversacion: sin separarlos, el bot contestaria a su propio "entregado".
-    for estado in whatsapp.estados_entrantes(cuerpo):
+    for estado in estados:
         if estado.get("estado") == "failed":
             print(f"[whatsapp] no se pudo entregar {estado.get('wamid')} a "
                   f"{estado.get('de')}: {estado.get('error')}")
 
     return jsonify({"recibido": True, "atendidos": atendidos}), 200
+
+
 @app.get("/corpus/documentos")
 def corpus_documentos():
     tenant = request.args.get("tenant")
