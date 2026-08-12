@@ -629,6 +629,11 @@ class Limites(Base):
     max_costo_usd_mes: float | None = None
     alerta_al_porcentaje: int = Field(default=80, ge=1, le=100)
     retencion_conversaciones_dias: int = Field(default=365, ge=1)
+    # Separada de la de arriba y mucho mas corta, a proposito: una conversacion
+    # escrita es barata de guardar y util para depurar; una foto pesa y puede
+    # mostrar la casa, la cedula o una cara. La foto sirve para resolver el
+    # caso, y un caso vive dias. Ver supabase/08_multimedia.sql.
+    retencion_multimedia_dias: int = Field(default=30, ge=1)
 
 
 class Conversaciones(Base):

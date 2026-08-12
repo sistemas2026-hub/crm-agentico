@@ -824,6 +824,10 @@ limites:
   alerta_al_porcentaje: 80
   # Cubre depuracion, auditoria y analisis; mas alla es solo superficie de riesgo.
   retencion_conversaciones_dias: 365
+  # Mucho mas corta que la de arriba, a proposito: el texto es barato y util
+  # para depurar; una foto pesa y puede mostrar la casa, la cedula o una cara.
+  # La foto sirve para resolver el caso, y un caso vive dias.
+  retencion_multimedia_dias: 30
 
 evaluacion:
   minimo_acierto_pct: 90.0

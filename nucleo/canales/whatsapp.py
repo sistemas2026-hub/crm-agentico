@@ -58,6 +58,10 @@ TIMEOUT_SEGUNDOS = 20
 # (mandar una plantilla), no es un fallo a reintentar.
 CODIGO_FUERA_DE_VENTANA = 131047
 
+# Tipos de mensaje que traen un archivo aparte, todos con la misma forma
+# {id, mime_type, caption} dentro de la clave que se llama igual que el tipo.
+TIPOS_CON_ARCHIVO = ("image", "audio", "video", "document", "sticker", "voice")
+
 
 class ErrorWhatsApp(Exception):
     """Fallo al hablar con la Cloud API, o configuracion incompleta."""
@@ -173,11 +177,19 @@ def mensajes_entrantes(cuerpo: dict) -> list[dict]:
             valor = cambio.get("value") or {}
             for m in valor.get("messages", []) or []:
                 tipo = m.get("type", "")
+                # Los tipos con archivo comparten la forma {id, mime_type,
+                # caption}: se lee igual para todos en vez de una rama por tipo.
+                adjunto = m.get(tipo) or {} if tipo in TIPOS_CON_ARCHIVO else {}
                 salida.append({
                     "wamid": m.get("id"),
                     "de": m.get("from"),
                     "tipo": tipo,
                     "texto": (m.get("text") or {}).get("body", "") if tipo == "text" else "",
+                    # El pie de foto es texto del cliente: "mira como quedo"
+                    # dice tanto como la foto misma.
+                    "descripcion": adjunto.get("caption", ""),
+                    "media_id": adjunto.get("id"),
+                    "mime": adjunto.get("mime_type"),
                     "crudo": m,
                 })
     return salida
@@ -268,6 +280,62 @@ def enviar_texto(config, tenant: str, para: str, texto: str) -> str | None:
     })
     mensajes = respuesta.get("messages") or []
     return mensajes[0].get("id") if mensajes else None
+
+
+# =============================================================================
+#  MULTIMEDIA  -  bajar lo que mando el cliente
+# =============================================================================
+#  Para un ISP la foto de las luces del router es EL caso de soporte: dice en un
+#  segundo lo que al cliente le cuesta tres mensajes explicar.
+#
+#  Son DOS pasos, no uno: Meta no entrega el archivo en el webhook, solo un id.
+#  Con ese id se pide la ficha (que trae una URL firmada y temporal) y recien
+#  ahi se descarga -- y esa segunda descarga TAMBIEN necesita el token, aunque
+#  la URL ya venga firmada. Es el error mas facil de cometer aca.
+
+# Un telefono moderno manda fotos de varios MB. Se rechaza antes de bajar lo que
+# no vamos a poder guardar, en vez de descargarlo para descartarlo despues.
+MAX_BYTES_DESCARGA = 16 * 1024 * 1024
+
+
+def descargar_media(config, tenant: str, media_id: str) -> tuple[bytes, str]:
+    """
+    Devuelve (bytes, mime) del archivo que mando el cliente.
+
+    Levanta ErrorWhatsApp si no se puede: quien llama decide si eso corta el
+    turno (no, nunca) o solo deja al mensaje sin adjunto.
+    """
+    token = _secreto(tenant, _cfg(config).token_ref, "de envio (token_ref)")
+    cabeceras = {"Authorization": f"Bearer {token}"}
+
+    ficha = requests.get(_url(config, media_id), headers=cabeceras,
+                         timeout=TIMEOUT_SEGUNDOS)
+    if ficha.status_code >= 400:
+        raise ErrorWhatsApp(
+            f"No se pudo consultar el archivo {media_id}: {ficha.status_code}")
+    datos = ficha.json()
+    url = datos.get("url")
+    if not url:
+        raise ErrorWhatsApp(f"La ficha del archivo {media_id} no trae 'url'.")
+
+    tamano = int(datos.get("file_size") or 0)
+    if tamano > MAX_BYTES_DESCARGA:
+        raise ErrorWhatsApp(
+            f"El archivo pesa {tamano // 1024} KB, mas del maximo aceptado.")
+
+    # La URL viene firmada y aun asi exige el token. Sin esta cabecera Meta
+    # devuelve 401 y parece que la URL estuviera vencida.
+    archivo = requests.get(url, headers=cabeceras, timeout=TIMEOUT_SEGUNDOS,
+                           stream=True)
+    if archivo.status_code >= 400:
+        raise ErrorWhatsApp(
+            f"No se pudo descargar el archivo {media_id}: {archivo.status_code}")
+
+    contenido = archivo.content
+    if len(contenido) > MAX_BYTES_DESCARGA:
+        raise ErrorWhatsApp("El archivo descargado supera el maximo aceptado.")
+
+    return contenido, datos.get("mime_type") or archivo.headers.get("Content-Type", "")
 
 
 def marcar_leido(config, tenant: str, wamid: str) -> None:

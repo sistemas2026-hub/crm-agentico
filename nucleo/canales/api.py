@@ -35,7 +35,7 @@ import threading
 
 from flask import Flask, jsonify, request
 
-from nucleo.canales import whatsapp
+from nucleo.canales import media, whatsapp
 from nucleo.config import editor, fuente
 from nucleo.ingesta import corpus as ingesta
 from nucleo.ingesta.docx import procesar
@@ -825,6 +825,46 @@ def _rol_de_cliente(config) -> str | None:
     return None
 
 
+# Lo que se le dice al MODELO cuando el cliente manda un archivo sin escribir
+# nada. Es una descripcion del hecho, no del contenido: nadie miro la foto. Sin
+# esto el turno arrancaria con un mensaje vacio y el modelo saludaria como si
+# fuera el primer contacto.
+_AVISO_ADJUNTO = {
+    "image": "[El cliente envio una foto]",
+    "audio": "[El cliente envio un audio]",
+    "voice": "[El cliente envio una nota de voz]",
+    "video": "[El cliente envio un video]",
+    "document": "[El cliente envio un documento]",
+    "sticker": "[El cliente envio un sticker]",
+    "location": "[El cliente compartio su ubicacion]",
+}
+
+
+def _guardar_adjunto(config, tenant: str, entrante: dict,
+                     conversacion_id: str | None) -> None:
+    """
+    Baja el archivo, lo comprime y lo guarda colgado de la conversacion.
+
+    Nunca levanta: es informacion de apoyo. Si falla, el cliente igual recibe
+    su respuesta y el agente ve el mensaje sin la foto -- que es peor que
+    tenerla, pero muchisimo mejor que un turno caido.
+    """
+    media_id = entrante.get("media_id")
+    if not media_id or not conversacion_id:
+        return
+    try:
+        crudo, mime = whatsapp.descargar_media(config, tenant, media_id)
+        contenido, mime = media.preparar(crudo, entrante.get("tipo", ""), mime)
+        persistencia.guardar_media(
+            tenant, conversacion_id, media_id, entrante.get("tipo", ""),
+            contenido, mime, entrante.get("descripcion") or None)
+        print(f"[whatsapp] adjunto {media_id} guardado "
+              f"({len(crudo) // 1024} KB -> {len(contenido) // 1024} KB)")
+    except Exception as e:
+        print(f"[whatsapp] no se pudo guardar el adjunto {media_id}: "
+              f"{type(e).__name__}: {e}")
+
+
 def _procesar_mensaje_whatsapp(config, tenant: str, rol: str, entrante: dict) -> None:
     """
     Un mensaje entrante, de punta a punta. Corre FUERA del ciclo de respuesta
@@ -839,17 +879,31 @@ def _procesar_mensaje_whatsapp(config, tenant: str, rol: str, entrante: dict) ->
             whatsapp.marcar_leido(config, tenant, wamid)
 
         texto = entrante.get("texto", "")
+        descripcion = entrante.get("descripcion", "")
+        tipo = entrante.get("tipo", "")
+
+        # Lo que el modelo lee de un adjunto es lo que el cliente ESCRIBIO al
+        # mandarlo, mas el hecho de que mando algo. No se le pasa la foto: no
+        # hay modelo de vision configurado, e inventar una descripcion seria
+        # exactamente lo que el PRD RF-07 prohibe.
         if not texto.strip():
-            # Todavia no se procesan fotos ni audios (Fase 3): se responde algo
-            # util en vez de dejar al cliente esperando una respuesta que no
-            # va a llegar.
+            texto = descripcion.strip() or _AVISO_ADJUNTO.get(tipo, "")
+
+        if not texto:
             whatsapp.enviar_texto(
                 config, tenant, de,
-                "Por ahora solo puedo leer mensajes de texto. "
-                "Contame en palabras que necesitas y te ayudo.")
+                "Recibí tu mensaje, pero no puedo leer ese tipo de archivo. "
+                "Contame en palabras qué necesitás y te ayudo.")
             return
 
         salida = atender_turno(config, tenant, rol, de, texto, "whatsapp")
+
+        # El adjunto se guarda DESPUES del turno, con la conversacion ya
+        # creada: es lo que le da el conversation_id al que colgarlo. Va
+        # aparte del turno y en su propio try porque una foto que no se pudo
+        # bajar no puede dejar al cliente sin respuesta.
+        _guardar_adjunto(config, tenant, entrante, salida.get("conversacion_id"))
+
         whatsapp.enviar_texto(config, tenant, de, salida["respuesta"])
     except Exception as e:
         print(f"[whatsapp] fallo al atender a {de} ({wamid}): "
@@ -977,6 +1031,48 @@ def corpus_fragmentos(id_documento):
         return jsonify({"error": "No se pudieron leer los fragmentos."}), 500
 
     return jsonify({"fragmentos": fragmentos})
+
+
+@app.get("/conversaciones/<id_conversacion>/media")
+def conversaciones_media(id_conversacion):
+    """Que adjuntos tiene una conversacion, SIN los bytes -- la bandeja pide
+    cada archivo aparte por su id."""
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        return jsonify({"media": persistencia.media_de(tenant, id_conversacion)})
+    except Exception as e:
+        print(f"[media] fallo al listar: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudieron leer los adjuntos."}), 500
+
+
+@app.get("/media/<id_media>")
+def media_archivo(id_media):
+    """
+    El archivo en si. Sale con los bytes crudos y su mime, para que la interfaz
+    lo use directo en un <img> sin pasarlo por base64.
+
+    El aislamiento por empresa lo hace la politica de la base, no un if: pedir
+    el id de otra empresa devuelve 404 porque la fila sencillamente no se ve.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        encontrado = persistencia.media_bytes(tenant, id_media)
+    except Exception as e:
+        print(f"[media] fallo al leer {id_media}: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo leer el archivo."}), 500
+
+    if not encontrado:
+        return jsonify({"error": "No existe."}), 404
+
+    contenido, mime = encontrado
+    # Cache larga: el contenido de un id nunca cambia (se inserta una vez y se
+    # borra por antiguedad), asi que revalidar seria trafico puro.
+    return contenido, 200, {"Content-Type": mime,
+                            "Cache-Control": "private, max-age=86400"}
 
 
 @app.get("/salud")

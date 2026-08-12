@@ -340,6 +340,84 @@ def agregar_mensaje_humano(tenant: str, conversation_id: str,
         return {"canal": fila["canal"], "usuario_externo": fila["usuario_externo"]}
 
 
+def guardar_media(tenant: str, conversation_id: str, media_id: str, tipo: str,
+                  contenido: bytes, mime: str | None = None,
+                  descripcion: str | None = None,
+                  mensaje_id: str | None = None) -> str | None:
+    """
+    Una foto o audio del cliente, ya comprimido (ver nucleo/canales/media.py).
+
+    Devuelve el id de la fila, o None si ese 'media_id' ya estaba guardado --
+    un reintento del webhook no duplica el archivo. Ver
+    supabase/08_multimedia.sql para por que vive en Postgres y no en un almacen
+    de objetos.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """insert into asistente.media
+                 (organization_id, conversation_id, mensaje_id, media_id, tipo,
+                  mime, contenido, bytes, descripcion)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+               on conflict (organization_id, media_id) do nothing
+               returning id""",
+            (org, conversation_id, mensaje_id, media_id, tipo, mime,
+             contenido, len(contenido), descripcion))
+        fila = cur.fetchone()
+        return str(fila["id"]) if fila else None
+
+
+def media_de(tenant: str, conversation_id: str) -> list[dict]:
+    """
+    Los adjuntos de una conversacion, SIN los bytes.
+
+    El contenido se pide aparte (media_bytes) porque una lista de diez fotos
+    en la respuesta de la bandeja serian varios MB de JSON en base64 que nadie
+    pidio: la interfaz muestra las miniaturas por su id.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select id, media_id, tipo, mime, bytes, descripcion, mensaje_id,
+                      creado_en
+               from asistente.media
+               where organization_id = %s and conversation_id = %s
+               order by creado_en""",
+            (org, conversation_id))
+        return [dict(f) for f in cur.fetchall()]
+
+
+def media_bytes(tenant: str, media_uuid: str) -> tuple[bytes, str] | None:
+    """(contenido, mime) de un adjunto, para servirlo. None si no existe o no
+    es de este tenant -- el filtro por organizacion lo hace la politica de
+    aislamiento, no un if."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select contenido, mime from asistente.media
+               where organization_id = %s and id = %s""",
+            (org, media_uuid))
+        fila = cur.fetchone()
+        if not fila:
+            return None
+        return bytes(fila["contenido"]), fila["mime"] or "application/octet-stream"
+
+
+def purgar_media(tenant: str, dias: int) -> int:
+    """
+    Borra los adjuntos mas viejos que 'dias'. Devuelve cuantos.
+
+    Existe porque la retencion de multimedia es MAS CORTA que la de las
+    conversaciones a proposito (ver supabase/08_multimedia.sql): el texto es
+    barato y util para depurar, una foto pesa y puede mostrar la casa, la
+    cedula o una cara. Se llama desde una tarea programada, no desde el turno.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """delete from asistente.media
+               where organization_id = %s
+                 and creado_en < now() - make_interval(days => %s)""",
+            (org, dias))
+        return cur.rowcount
+
+
 def evento_ya_visto(tenant: str, wamid: str, canal: str = "whatsapp") -> bool:
     """
     True si este webhook ya se proceso. False la primera vez -- y en esa misma
