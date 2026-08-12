@@ -375,16 +375,22 @@
                          verlo no expone nada nuevo. Sirve para lo único que
                          hace falta acá — confirmar que el valor cayó en la
                          casilla correcta, con cinco campos que si no se ven
-                         idénticos. -->
-                    <button
-                      type="button"
-                      class="cred-ojo"
-                      onclick={() => (aLaVista[c.clave] = !aLaVista[c.clave])}
-                      aria-label={aLaVista[c.clave] ? 'Ocultar' : 'Mostrar lo que pegaste'}
-                      title={aLaVista[c.clave] ? 'Ocultar' : 'Mostrar lo que pegaste'}
-                    >
-                      {#if aLaVista[c.clave]}<EyeOff size={14} />{:else}<Eye size={14} />{/if}
-                    </button>
+                         idénticos.
+
+                         Solo existe cuando hay algo escrito. Con el campo
+                         vacío, alternar entre puntitos y texto no cambia nada
+                         a la vista: el botón parecía roto sin estarlo. -->
+                    {#if pegado[c.clave]}
+                      <button
+                        type="button"
+                        class="cred-ojo"
+                        onclick={() => (aLaVista[c.clave] = !aLaVista[c.clave])}
+                        aria-label={aLaVista[c.clave] ? 'Ocultar' : 'Mostrar lo que pegaste'}
+                        title={aLaVista[c.clave] ? 'Ocultar' : 'Mostrar lo que pegaste'}
+                      >
+                        {#if aLaVista[c.clave]}<EyeOff size={14} />{:else}<Eye size={14} />{/if}
+                      </button>
+                    {/if}
                   </div>
                   <button class="v2-btn v2-btn-sm" type="submit">
                     {secreto ? 'Actualizar' : 'Guardar'}
@@ -479,6 +485,10 @@
     flex: 1;
     min-width: 0;
     font-size: 12.5px;
+  }
+  /* El hueco para el ojo solo cuando el ojo existe: sin esto, un campo vacio
+     reserva 30px que nada ocupa. */
+  .cred-campo:has(.cred-ojo) input {
     padding-right: 30px;
   }
   .cred-ojo {
