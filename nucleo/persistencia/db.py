@@ -708,3 +708,68 @@ def fragmentos_de(tenant: str, document_id: str) -> list[dict]:
                order by orden""",
             (org, document_id))
         return [dict(f) for f in cur.fetchall()]
+
+
+def guardar_revision_supervisor(tenant: str, conversation_id: str,
+                                es_buen_ejemplo: bool, caso: str | None,
+                                justificacion: str,
+                                aporte_sugerido: str | None) -> None:
+    """
+    El veredicto del supervisor sobre una conversacion ya cerrada (ver
+    nucleo/seguimiento/supervisor.py, el unico llamador). 'on conflict do
+    nothing': el disparador (conversacion marcada 'resuelta') solo pasa una
+    vez por conversacion real, asi que una segunda fila para el mismo id
+    seria un reintento, no una revision nueva -- se descarta en silencio en
+    vez de pisar el veredicto original.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """insert into asistente.revisiones_supervisor
+                 (organization_id, conversation_id, es_buen_ejemplo, caso,
+                  justificacion, aporte_sugerido)
+               values (%s, %s, %s, %s, %s, %s)
+               on conflict (conversation_id) do nothing""",
+            (org, conversation_id, es_buen_ejemplo, caso, justificacion,
+             aporte_sugerido))
+
+
+def revisiones_de(tenant: str, estado: str | None = None) -> list[dict]:
+    """
+    Las revisiones del supervisor, con el mensaje del cliente que abrio la
+    conversacion como referencia rapida -- lo que necesita /manual para
+    mostrar de que se trataba sin abrir la conversacion completa.
+
+    'estado=None' trae todas (pendiente/aprobado/descartado); pasar un
+    estado puntual filtra en la consulta.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select r.id, r.conversation_id, r.es_buen_ejemplo, r.caso,
+                      r.justificacion, r.aporte_sugerido, r.estado,
+                      r.revisado_por, r.creado_en, r.revisado_en,
+                      c.usuario_externo,
+                      (select contenido from asistente.messages m
+                        where m.conversation_id = r.conversation_id
+                          and m.rol = 'user'
+                        order by m.creado_en asc limit 1) as primer_mensaje
+               from asistente.revisiones_supervisor r
+               join asistente.conversations c on c.id = r.conversation_id
+               where r.organization_id = %s
+                 and (%s::text is null or r.estado = %s)
+               order by r.creado_en desc""",
+            (org, estado, estado))
+        return [dict(f) for f in cur.fetchall()]
+
+
+def actualizar_estado_revision(tenant: str, revision_id: str, estado: str,
+                               revisado_por: str | None) -> bool:
+    """Aprobar o descartar una revision del supervisor -- la unica forma en
+    que una de estas pasa de 'pendiente' a algo que una persona confirmo.
+    Devuelve False si el id no existe o no es de este tenant."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """update asistente.revisiones_supervisor
+               set estado = %s, revisado_por = %s, revisado_en = now()
+               where organization_id = %s and id = %s""",
+            (estado, revisado_por, org, revision_id))
+        return cur.rowcount > 0

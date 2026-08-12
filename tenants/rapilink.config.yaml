@@ -20,6 +20,14 @@ identidad:
   sector: isp
   zona_horaria: America/Bogota
   idioma: es
+  # Editado tambien desde Configuracion > Personalidad del asistente en
+  # vivo -- este valor se sincronizo manualmente para que --exportar no lo
+  # borre. Si se edita desde la interfaz, actualizar aca tambien a mano.
+  descripcion: >
+    Rapilink es un proveedor de internet (ISP). Ofrece planes de internet
+    residencial solo, y tambien planes combo que incluyen internet +
+    television. No se conocen otros servicios (telefonia, etc.) mas alla de
+    estos dos.
 
 marca:
   firma_mensajes: "Rapilink - Soporte"
@@ -62,11 +70,38 @@ glosario:
 roles:
 
   soporte:
-    descripcion: Atiende al cliente, revisa su estado y sus tickets.
+    descripcion: |
+      Atiende a un colaborador interno (nunca al cliente directo), revisa
+      estado de clientes y tickets.
+
+      Ademas, funciona como el orquestador de visitas tecnicas: cuando un
+      colaborador te confirma que ya reviso en la central y una falla de
+      TV en canales especificos es PUNTUAL (solo de un cliente, no
+      explicada por cableado, splitter, ni exceso de TV sobre el maximo
+      recomendado), llama a 'agendar_visita_tecnica' para crear el ticket.
+
+      Reglas para usar 'agendar_visita_tecnica' -- son estrictas porque
+      agenda una visita real, con costo y logistica, sin ningun paso de
+      confirmacion despues tuyo:
+      - Nunca la llames solo porque un cliente pide una visita, ni porque
+        alguien pregunta "se puede agendar". Solo cuando el mensaje del
+        colaborador indica una CONFIRMACION ya hecha (revisada la central,
+        descartadas las causas del lado del cliente).
+      - Necesitas el cliente identificado (id_servicio o cedula -- si solo
+        te dan la cedula, usa consultar_cliente_por_cedula primero para
+        resolver el id_servicio) y una descripcion clara del caso: que
+        canales estan afectados (por NOMBRE, nunca numero) y que se validó
+        antes de escalar.
+      - Si falta alguno de esos datos, pedilo antes de llamar a la
+        herramienta -- no la llames con informacion incompleta ni
+        inventada.
+      - Despues de crear el ticket, confirmale al colaborador el numero
+        (id_ticket) para que quede como referencia.
     area: Atención al Cliente
     cargo: Agente de Soporte
-    puede_consultar: [consultar_cliente, consultar_cliente_por_cedula, consultar_ticket, 
-          consultar_tickets_de_cliente, contar_tickets, contar_clientes, consultar_casos_bottlecrm]
+    puede_consultar: [consultar_cliente, consultar_cliente_por_cedula, consultar_ticket,
+          consultar_tickets_de_cliente, contar_tickets, contar_clientes, consultar_casos_bottlecrm,
+          agendar_visita_tecnica]
     campos_permitidos:
       consultar_cliente: [id_servicio, nombre, cedula, estado, email, telefono, direccion, localidad,
         ciudad, plan_internet, zona, fecha_instalacion, estado_facturas, saldo, fecha_corte]
@@ -85,6 +120,11 @@ roles:
       consultar_tickets_de_cliente: [id_ticket, asunto, estado, prioridad, tecnico, fecha_creacion]
       contar_tickets: [total, desglose, interpretacion, advertencia]
       contar_clientes: [total, desglose, interpretacion, advertencia]
+      # Sin 'servicio' completo (mismo motivo que consultar_ticket): trae el
+      # registro del cliente entero. 'servicio.id_servicio' alcanza para
+      # confirmar a quien se le agendo.
+      agendar_visita_tecnica: [id_ticket, asunto, estado, prioridad, tecnico, departamento,
+            fecha_creacion, servicio.id_servicio]
     nunca_revelar: [password_servicio, password_cpe, password_router_wifi, password_ssid_router_wifi,
       usuario_router_wifi, coordenadas]
 
@@ -112,18 +152,23 @@ roles:
     descripcion: Consultas consolidadas, sin datos personales.
     area: Administración
     cargo: Analista
-    puede_consultar: [consultar_cliente, consultar_tickets_de_cliente, contar_clientes, 
-          contar_facturas, contar_tickets, informe_materiales]
+    # 'consultar_ticket' agregado desde la interfaz (Agentes) -- sincronizado
+    # aca para que este archivo no lo pise en el proximo cargar_config.py.
+    puede_consultar: [consultar_cliente, consultar_tickets_de_cliente, contar_clientes,
+          contar_facturas, contar_tickets, informe_materiales, consultar_ticket]
     campos_permitidos:
       # Sin PII: ni cedula, ni contacto. Ve estado y servicio.
-      consultar_cliente: [id_servicio, nombre, estado, plan_internet, zona, fecha_instalacion, 
+      consultar_cliente: [id_servicio, nombre, estado, plan_internet, zona, fecha_instalacion,
             estado_facturas]
       consultar_tickets_de_cliente: [id_ticket, asunto, estado, prioridad, tecnico, fecha_creacion]
       contar_clientes: [total, desglose, interpretacion, advertencia]
       contar_facturas: [total, desglose, interpretacion, advertencia]
       contar_tickets: [total, desglose, interpretacion, advertencia]
-      informe_materiales: [periodo, totales, tickets_cerrados, con_registro_de_material, 
+      informe_materiales: [periodo, totales, tickets_cerrados, con_registro_de_material,
             registros_en_cero, cobertura_por_categoria, sin_normalizar, interpretacion, advertencia]
+      consultar_ticket: [asunto, fecha_inicio, servicio.id_servicio, departamento,
+            servicio.plan_internet, descripcion, origen_reporte, estado, prioridad,
+            servicio.zona, fecha_creacion, razon_falla, tecnico, fecha_fin, id_ticket]
     nunca_revelar: [cedula, email, telefono, direccion, coordenadas, saldo]
 
   cliente_final:
@@ -374,6 +419,14 @@ llm:
     'rol:facturacion': deepseek:deepseek-v4-flash
     'rol:administracion': deepseek:deepseek-v4-flash
     'rol:cliente_final': deepseek:deepseek-v4-flash
+    # 'rol:supervisor' es una clave VIRTUAL (nucleo/seguimiento/supervisor.py):
+    # no es un rol real, no aparece arriba en 'roles'. Revisa cada conversacion
+    # cerrada en segundo plano -- sin la urgencia de latencia de responderle a
+    # un cliente en vivo -- asi que va a Claude en vez de DeepSeek, para que
+    # el juicio de "fue un buen ejemplo" sea lo mas confiable posible. En
+    # prueba con Sonnet 5 (mas barato que Opus 5) ahora que la revision se
+    # apoya en el manual real via RAG y no solo en el criterio del modelo.
+    'rol:supervisor': anthropic:claude-sonnet-5
   # Si algun rol necesita quedarse en local (ej. si se restringe la
   # autorizacion mas adelante), se quita su linea de aqui: el modelo_por_
   # defecto de arriba sigue siendo local y actua como resguardo.
@@ -401,6 +454,15 @@ herramientas:
     metodo: GET
     auth_ref: WISPHUB_API_KEY
     auth_esquema: Api-Key
+    # BUG encontrado en vivo (agosto 2026): esta herramienta nunca tuvo
+    # filtro -- el modelo no tenia como decirle CUAL cliente, asi que
+    # devolvia la coleccion entera sin filtrar. Verificado que
+    # ?id_servicio=N funciona (count=1 contra un cliente real).
+    filtros_verificados:
+      id_servicio:
+        param: id_servicio
+        tipo: id
+        verificado_el: 2026-08-12
 
   - nombre: consultar_cliente_por_cedula
     tipo: http
@@ -412,6 +474,13 @@ herramientas:
     metodo: GET
     auth_ref: WISPHUB_API_KEY
     auth_esquema: Api-Key
+    # Mismo bug que consultar_cliente -- sin filtro, nunca busco de verdad
+    # por cedula. Verificado en vivo: ?cedula=N funciona (count=1).
+    filtros_verificados:
+      cedula:
+        param: cedula
+        tipo: id
+        verificado_el: 2026-08-12
 
   - nombre: consultar_mi_servicio
     tipo: http
@@ -496,6 +565,85 @@ herramientas:
     inyectar_sesion:
       id_servicio: id_cliente
       interfaz: interfaz_lan
+
+  - nombre: agendar_visita_tecnica
+    tipo: http
+    multipart: true
+    descripcion: >
+      Agenda una visita tecnica real en WispHub (crea un ticket) -- se
+      ejecuta de inmediato, SIN ningun paso de confirmacion humana despues
+      de la llamada, asi que la decision de llamarla o no es toda tuya.
+
+      Solo la usas cuando el colaborador que te escribe ya CONFIRMO
+      (reviso la central) que una falla puntual de TV en canales
+      especificos no se explica por causas del lado del cliente (cableado,
+      exceso de TV sobre el splitter, etc. -- ver seccion 5.11 del
+      manual). Nunca la llames porque el cliente final lo pida directo, ni
+      porque alguien pregunte "se puede agendar" sin haber confirmado
+      nada -- eso es una pregunta, no una confirmacion.
+
+      Argumentos que proponés: 'servicio' (id_servicio del cliente -- si
+      solo tenés la cedula, resolvela primero con
+      consultar_cliente_por_cedula) y 'descripcion' (canales afectados por
+      NOMBRE, nunca numero, y que se valido antes de escalar). Si falta
+      alguno, pedilo antes de llamar -- nunca inventes ni completes a
+      medias. El resto (tecnico, prioridad, departamento, asunto) queda
+      fijo, siempre el mismo tecnico y asunto 'Problemas De Tv'.
+    solo_lectura: false
+    # Lo exige el validador (toda escritura lo necesita) pero hoy no hace
+    # nada en el codigo -- ningun paso del motor lo lee todavia (ver
+    # nucleo/modelo/motor.py). En la practica la herramienta ya es
+    # autonoma: se ejecuta apenas el modelo la llama, sin ningun paso
+    # extra. La "confirmacion" real pasa por la conversacion (el
+    # colaborador ya reviso la central antes de escribirle al agente), no
+    # por este flag. Decision explicita, agosto 2026 -- no reactivar el
+    # gate sin discutirlo, afecta a todo el catalogo de escritura.
+    requiere_confirmacion: true
+    roles_permitidos: [soporte]
+    base_url: https://api.wisphub.io
+    endpoint: /api/tickets/
+    metodo: POST
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    # Verificado en vivo (agosto 2026, tickets de prueba 89721/89724 sobre
+    # id_servicio=5832): esta API exige multipart/form-data -- JSON da 500
+    # (opaco, sin motivo), form-urlencoded da 415. 'asuntos_default' tiene
+    # que ser IGUAL a 'asunto' (lo exige la propia API, no es redundancia
+    # nuestra); 'estado'/'prioridad' van como CODIGO NUMERICO en texto
+    # (1=Nuevo, prioridad 2=Normal), no como la palabra que se ve al leer
+    # ("Nuevo"/"Normal" fallan la validacion).
+    argumentos_fijos:
+      tecnico: "1428053"                          # Mario Vasquez / sistemas@rapilink-sas
+      email_tecnico: mario.vasquez.moreno@gmail.com
+      asunto: Problemas De Tv
+      asuntos_default: Problemas De Tv
+      estado: "1"                                 # Nuevo
+      prioridad: "2"                               # Normal
+      departamento: Soporte Técnico
+      departamentos_default: Soporte Técnico
+      origen_reporte: oficina
+    # fecha_inicio = el momento real de creacion; fecha_final = el plazo de
+    # resolucion para este tipo de ticket. Se calculan en motor.py, nunca
+    # fijas en este archivo (quedarian congeladas en la fecha de hoy). El
+    # '3' de fecha_final se edita desde Configuracion > Personalidad del
+    # asistente > Plazos de tickets -- no hace falta tocar este archivo
+    # para cambiarlo.
+    fechas_automaticas:
+      fecha_inicio: 0
+      fecha_final: 3
+    # Reusa 'filtros_verificados' (igual que las herramientas de solo
+    # lectura) para los DOS valores que si varian por llamada -- el
+    # ejecutor no distingue "filtro de busqueda" de "campo de un POST", solo
+    # traduce clave del modelo -> param real.
+    filtros_verificados:
+      servicio:
+        param: servicio
+        tipo: id
+        verificado_el: 2026-08-12
+      descripcion:
+        param: descripcion
+        tipo: texto
+        verificado_el: 2026-08-12
 
   - nombre: consultar_ticket
     tipo: http

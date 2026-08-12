@@ -248,7 +248,22 @@
     </div>
   </aside>
 
-  {@render children()}
+  <!-- 'abierta' (el id de la URL) como key: [id]/+page.svelte inicializa su
+       estado local con $state(untrack(...)) a proposito (para que enviar()
+       no se pise con una relectura reactiva mientras se escribe), y ese
+       mismo untrack hace que SvelteKit, al reusar este componente entre una
+       conversacion y otra, se quede mostrando la anterior -- confirmado con
+       grabaciones reales (Jam, agosto 2026): sin esto el panel no actualiza
+       NUNCA, solo cambia la URL. Se probo resincronizar con un $effect en
+       vez de esto (evitaba el parpadeo de remontar), pero en las mismas
+       pruebas grabadas el effect no alcanzaba a aplicar el cambio a tiempo.
+       La key fuerza a Svelte a destruir y recrear el componente -- unico
+       mecanismo que garantiza la reinicializacion, al costo de un
+       parpadeo breve. Solo envuelve el hijo, no <aside> de arriba: la
+       lista de conversaciones NO se remonta al cambiar de chat. -->
+  {#key abierta}
+    {@render children()}
+  {/key}
 </div>
 
 <style>

@@ -11,12 +11,18 @@ conversacion se marcaba escalada_a_humano. Sus valores por defecto
 duda_de_identidad) son condiciones SEMANTICAS, no palabras clave -- por eso
 quien las evalua es el modelo, no una comparacion de texto por codigo.
 
-Una sola llamada al modelo por turno hace las tres cosas (evaluar() abajo):
+Una sola llamada al modelo por turno hace las cuatro cosas (evaluar() abajo):
 si corresponde escalar, que etiqueta de conversaciones.etiquetas describe el
-tema, y si la conversacion ya llego a su fin (el cliente se despidio o
+tema, si la conversacion ya llego a su fin (el cliente se despidio o
 confirmo que su problema se resolvio) -- api.py usa esto ultimo para cerrar
-la conversacion en la bandeja. Se combinan para no duplicar el costo de una
-llamada aparte por cada una.
+la conversacion en la bandeja -- y un resumen corto del caso para cuando
+escala. Se combinan para no duplicar el costo de una llamada aparte por
+cada una.
+
+El resumen va PRIMERO en la descripcion del ticket, antes de la
+transcripcion completa (ver escalar()): quien toma el caso en BottleCRM lo
+lee de entrada, sin tener que leer toda la conversacion para entender de
+que se trata -- eso es lo que hacia perder tiempo antes.
 
 Al escalar (escalar()), se crea el ticket real en BottleCRM via su API REST
 (nucleo/herramientas/http.py:ejecutar(), el mismo ejecutor generico que ya
@@ -79,6 +85,16 @@ def _esquema_evaluacion(config) -> dict:
                             "en cualquier otro caso, incluido mientras el "
                             "problema sigue sin resolver.",
                     },
+                    "resumen": {
+                        "type": "string",
+                        "description": "2-3 frases resumiendo el caso para "
+                            "quien lo va a atender: que reporto el cliente, "
+                            "que ya se probo/descarto, y en que quedo "
+                            "pendiente. Ignoralo si escalar=false. Va antes "
+                            "de la transcripcion completa en el ticket, asi "
+                            "que tiene que alcanzar por si solo, sin tener "
+                            "que leer el resto para entenderlo.",
+                    },
                 },
                 "required": ["escalar", "etiqueta", "resuelta"],
             },
@@ -89,9 +105,9 @@ def _esquema_evaluacion(config) -> dict:
 def evaluar(config, rol: str, historial: list[dict]) -> dict | None:
     """
     Le pregunta al modelo si esta conversacion necesita un humano ahora, que
-    etiqueta le corresponde, y si ya llego a su fin. Nunca elige algo fuera
-    de escalamiento.activar_si / conversaciones.etiquetas -- el esquema se
-    lo impide (enum).
+    etiqueta le corresponde, si ya llego a su fin, y (si escala) un resumen
+    corto del caso. Nunca elige algo fuera de escalamiento.activar_si /
+    conversaciones.etiquetas -- el esquema se lo impide (enum).
 
     Usa el mismo modelo que ya esta respondiendole a este rol
     (llm.overrides['rol:<rol>'], igual que motor.py) en vez de
@@ -176,7 +192,8 @@ def _transcripcion_legible(historial: list[dict]) -> str:
 
 
 def escalar(config, tenant: str, usuario_externo: str, conversation_id: str,
-           historial: list[dict], motivo: str, etiqueta: str) -> None:
+           historial: list[dict], motivo: str, etiqueta: str,
+           resumen: str = "") -> None:
     """
     Crea el ticket en BottleCRM y marca la conversacion como escalada.
 
@@ -194,11 +211,22 @@ def escalar(config, tenant: str, usuario_externo: str, conversation_id: str,
     try:
         tag_id = _resolver_tag(config, etiqueta)
         transcripcion = _transcripcion_legible(historial)
+
+        # El resumen va PRIMERO y nunca se recorta (es corto por diseno,
+        # 2-3 frases via el esquema de evaluar_conversacion). El limite de
+        # 4000 caracteres de BottleCRM se le aplica a la TRANSCRIPCION, no
+        # al conjunto -- si se cortara desde el final del texto combinado
+        # (como se hacia antes), un resumen largo o una transcripcion corta
+        # podian dejar el resumen mismo afuera.
+        encabezado = f"RESUMEN: {resumen.strip()}\n\n{'-' * 40}\n\n" if resumen.strip() else ""
+        espacio_transcripcion = max(4000 - len(encabezado), 0)
+        cuerpo = encabezado + transcripcion[-espacio_transcripcion:]
+
         payload = {
             # Unico por org (verificado en vivo: un nombre repetido da 400)
             # -- el id de conversacion de sobra lo garantiza.
             "name": f"WhatsApp {usuario_externo} - {conversation_id[:8]}",
-            "description": transcripcion[-4000:],
+            "description": cuerpo,
             "status": "New",
             "case_type": "Question",
             "priority": "Normal",

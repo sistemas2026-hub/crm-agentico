@@ -23,9 +23,11 @@
 
   let editing = $state(false);
   let editingEmpresa = $state(false);
+  let editingPlazo = $state(false);
 
   let p = $derived(data.config?.persona);
   let identidad = $derived(data.config?.identidad);
+  let plazoVisitaTecnica = $derived(data.config?.plazo_visita_tecnica);
 
   const TONOS = [
     ['cercano', 'Cercano', 'Trata de usted pero sin formalismos. El que viene por defecto.'],
@@ -177,6 +179,38 @@
         </SettingsFormPanel>
       {/if}
 
+      {#if editingPlazo}
+        <SettingsFormPanel
+          title="Plazos de tickets"
+          action="?/updatePlazo"
+          error={form?.updatePlazo?.error}
+          submitLabel="Guardar"
+          oncancel={() => (editingPlazo = false)}
+          ondone={() => (editingPlazo = false)}
+        >
+          {#snippet fields()}
+            <div class="v2-field">
+              <label for="f-plazo-tv">Días para resolver una visita técnica de TV</label>
+              <input
+                id="f-plazo-tv"
+                class="v2-input"
+                type="number"
+                name="dias"
+                min="1"
+                max="30"
+                required
+                value={plazoVisitaTecnica}
+              />
+              <p class="v2-hint">
+                Cuando el agente agenda una visita técnica, este es el plazo que se promete para
+                resolverla — se calcula desde el momento en que se crea el ticket, no una fecha fija.
+                Hoy se cuenta en días corridos, no hábiles.
+              </p>
+            </div>
+          {/snippet}
+        </SettingsFormPanel>
+      {/if}
+
       <div class="v2-split">
         <div>
           <div class="v2-label" style="margin-bottom:10px">Como se presenta</div>
@@ -282,6 +316,26 @@
           </p>
         {/if}
       </div>
+
+      {#if plazoVisitaTecnica != null}
+        <div style="display:flex;align-items:center;justify-content:space-between;margin:22px 0 10px">
+          <div class="v2-label" style="margin:0">Plazos de tickets</div>
+          {#if data.can_edit && !editingPlazo}
+            <button class="v2-btn v2-btn-sm" onclick={() => (editingPlazo = true)}>Editar</button>
+          {/if}
+        </div>
+        <div class="v2-card" style="padding:15px 16px">
+          <div class="v2-setting" style="padding:0">
+            <div class="v2-setting-body">
+              <b>Visita técnica de TV</b>
+              <span class="v2-sub" style="font-size:11.5px">
+                Plazo que se promete al agendar una visita, desde el momento en que se crea el ticket.
+              </span>
+            </div>
+            <Pill tone="slate">{plazoVisitaTecnica} día{plazoVisitaTecnica === 1 ? '' : 's'}</Pill>
+          </div>
+        </div>
+      {/if}
     {/if}
   </div>
 </div>

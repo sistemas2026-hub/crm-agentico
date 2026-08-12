@@ -117,78 +117,99 @@
   <div class="v2-pad grilla-envoltorio">
   <div class="grilla">
     {#each data.agentes as agente}
-      {@const nodos = nodosDe(agente.herramientas)}
-      <div class="tarjeta">
-        <div class="encabezado-tarjeta">
-          <h3>{agente.nombre}</h3>
-          {#if agente.area || agente.cargo}
-            <p class="organizacion">
-              {agente.cargo || '—'}{#if agente.area} · {agente.area}{/if}
-            </p>
-          {/if}
-          <span class="pill-orientacion" class:cliente={agente.orientado_a === 'cliente_final'}>
-            {agente.orientado_a === 'cliente_final' ? 'Habla con el cliente' : 'Uso interno'}
-          </span>
-        </div>
-
-        <p class="descripcion">{resumen(agente.descripcion)}</p>
-
-        <svg viewBox="0 0 {ANCHO} {ALTO}" class="diagrama" role="img" aria-label="Herramientas de {agente.nombre}">
-          {#each nodos as nodo}
-            <line x1={CX} y1={CY} x2={nodo.x} y2={nodo.y} stroke="#d1d5db" stroke-width="1.5" />
-          {/each}
-
-          <circle cx={CX} cy={CY} r="30" fill="#111827" />
-          <text x={CX} y={CY} text-anchor="middle" dominant-baseline="middle" fill="white" font-size="10" font-weight="600">
-            {agente.nombre}
-          </text>
-
-          {#each nodos as nodo}
-            <g>
-              <title>{nodo.descripcion || nodo.nombre}</title>
-              <circle cx={nodo.x} cy={nodo.y} r="26" fill={COLOR_TIPO[nodo.tipo] || '#6b7280'} fill-opacity="0.15"
-                     stroke={COLOR_TIPO[nodo.tipo] || '#6b7280'} stroke-width="1.5" />
-              <text x={nodo.x} y={nodo.y} text-anchor="middle" dominant-baseline="middle"
-                   font-size="7" fill="#374151">
-                {nodo.nombre.length > 16 ? nodo.nombre.slice(0, 14) + '…' : nodo.nombre}
-              </text>
-            </g>
-          {/each}
-        </svg>
-
-        <div class="leyenda">
-          <span><i class="punto" style="background:{COLOR_TIPO.http}"></i>http</span>
-          <span><i class="punto" style="background:{COLOR_TIPO.agregado}"></i>agregado</span>
-          <span><i class="punto" style="background:{COLOR_TIPO.batch}"></i>batch</span>
-        </div>
-
-        {#if esAdmin}
-          <div class="acciones-tarjeta">
-            <button class="v2-btn v2-btn-sm" type="button" onclick={() => abrirEditar(agente)}>
-              Editar
-            </button>
-            {#if borradoArmado[agente.nombre]}
-              <span class="confirmar-borrado">
-                <span class="v2-sub" style="font-size:11.5px">Esto no se puede deshacer.</span>
-                <button class="v2-btn v2-btn-sm" type="button" onclick={() => borrar(agente.nombre)}>
-                  Confirmar
-                </button>
-                <button
-                  class="v2-btn v2-btn-sm"
-                  type="button"
-                  onclick={() => (borradoArmado = { ...borradoArmado, [agente.nombre]: false })}
-                >
-                  Cancelar
-                </button>
-              </span>
-            {:else}
-              <button class="v2-btn v2-btn-sm" type="button" onclick={() => borrar(agente.nombre)}>
-                Eliminar
-              </button>
-            {/if}
+      {#if agente.automatico}
+        <!--
+          El supervisor no es un Rol real (no tiene herramientas ni
+          puede_consultar): sin diagrama de herramientas y sin acciones de
+          editar/borrar, que no aplican -- no hay '/api/agentes/supervisor'
+          contra el que llamarlas. Ver nucleo/canales/api.py:_agente_supervisor_json.
+        -->
+        <div class="tarjeta tarjeta-automatica">
+          <div class="encabezado-tarjeta">
+            <h3>{agente.nombre}</h3>
+            <span class="pill-orientacion pill-automatico">Automático · segundo plano</span>
           </div>
-        {/if}
-      </div>
+
+          <p class="descripcion">{agente.descripcion}</p>
+
+          <p class="modelo-automatico">
+            Modelo: <strong>{agente.modelo || 'hereda el del rol que cierra cada conversación'}</strong>
+          </p>
+        </div>
+      {:else}
+        {@const nodos = nodosDe(agente.herramientas)}
+        <div class="tarjeta">
+          <div class="encabezado-tarjeta">
+            <h3>{agente.nombre}</h3>
+            {#if agente.area || agente.cargo}
+              <p class="organizacion">
+                {agente.cargo || '—'}{#if agente.area} · {agente.area}{/if}
+              </p>
+            {/if}
+            <span class="pill-orientacion" class:cliente={agente.orientado_a === 'cliente_final'}>
+              {agente.orientado_a === 'cliente_final' ? 'Habla con el cliente' : 'Uso interno'}
+            </span>
+          </div>
+
+          <p class="descripcion">{resumen(agente.descripcion)}</p>
+
+          <svg viewBox="0 0 {ANCHO} {ALTO}" class="diagrama" role="img" aria-label="Herramientas de {agente.nombre}">
+            {#each nodos as nodo}
+              <line x1={CX} y1={CY} x2={nodo.x} y2={nodo.y} stroke="#d1d5db" stroke-width="1.5" />
+            {/each}
+
+            <circle cx={CX} cy={CY} r="30" fill="#111827" />
+            <text x={CX} y={CY} text-anchor="middle" dominant-baseline="middle" fill="white" font-size="10" font-weight="600">
+              {agente.nombre}
+            </text>
+
+            {#each nodos as nodo}
+              <g>
+                <title>{nodo.descripcion || nodo.nombre}</title>
+                <circle cx={nodo.x} cy={nodo.y} r="26" fill={COLOR_TIPO[nodo.tipo] || '#6b7280'} fill-opacity="0.15"
+                       stroke={COLOR_TIPO[nodo.tipo] || '#6b7280'} stroke-width="1.5" />
+                <text x={nodo.x} y={nodo.y} text-anchor="middle" dominant-baseline="middle"
+                     font-size="7" fill="#374151">
+                  {nodo.nombre.length > 16 ? nodo.nombre.slice(0, 14) + '…' : nodo.nombre}
+                </text>
+              </g>
+            {/each}
+          </svg>
+
+          <div class="leyenda">
+            <span><i class="punto" style="background:{COLOR_TIPO.http}"></i>http</span>
+            <span><i class="punto" style="background:{COLOR_TIPO.agregado}"></i>agregado</span>
+            <span><i class="punto" style="background:{COLOR_TIPO.batch}"></i>batch</span>
+          </div>
+
+          {#if esAdmin}
+            <div class="acciones-tarjeta">
+              <button class="v2-btn v2-btn-sm" type="button" onclick={() => abrirEditar(agente)}>
+                Editar
+              </button>
+              {#if borradoArmado[agente.nombre]}
+                <span class="confirmar-borrado">
+                  <span class="v2-sub" style="font-size:11.5px">Esto no se puede deshacer.</span>
+                  <button class="v2-btn v2-btn-sm" type="button" onclick={() => borrar(agente.nombre)}>
+                    Confirmar
+                  </button>
+                  <button
+                    class="v2-btn v2-btn-sm"
+                    type="button"
+                    onclick={() => (borradoArmado = { ...borradoArmado, [agente.nombre]: false })}
+                  >
+                    Cancelar
+                  </button>
+                </span>
+              {:else}
+                <button class="v2-btn v2-btn-sm" type="button" onclick={() => borrar(agente.nombre)}>
+                  Eliminar
+                </button>
+              {/if}
+            </div>
+          {/if}
+        </div>
+      {/if}
     {/each}
   </div>
   </div>
@@ -244,6 +265,19 @@
   .pill-orientacion.cliente {
     background: #dcfce7;
     color: #15803d;
+  }
+  .pill-orientacion.pill-automatico {
+    background: #ede9fe;
+    color: #6d28d9;
+  }
+  .tarjeta-automatica {
+    border-style: dashed;
+    background: var(--v2-bg-subtle, #fafafa);
+  }
+  .modelo-automatico {
+    font-size: 11px;
+    color: var(--v2-muted, #888);
+    margin: 0;
   }
   .descripcion {
     font-size: 12px;

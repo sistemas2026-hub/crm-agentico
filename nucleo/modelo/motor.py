@@ -40,6 +40,7 @@ from __future__ import annotations
 import json
 import re
 import time
+from datetime import datetime, timedelta
 
 from nucleo.herramientas import agregado as ejecutor_agregado
 from nucleo.herramientas import http as ejecutor_http
@@ -271,6 +272,14 @@ def _ejecutar_tool(herramienta, sesion, argumentos_modelo: dict,
     # de 'argumentos_fijos' en schema.py).
     argumentos.update(herramienta.argumentos_fijos)
 
+    # Fechas calculadas en el momento (ver 'fechas_automaticas' en
+    # schema.py). Formato DD/MM/AAAA HH:MM: es lo que exige WispHub hoy, el
+    # unico proveedor con esta necesidad -- si aparece otro con un formato
+    # distinto, esto pasa a ser un campo de config en vez de una constante.
+    for arg_llamada, dias in herramienta.fechas_automaticas.items():
+        fecha = datetime.now() + timedelta(days=dias)
+        argumentos[arg_llamada] = fecha.strftime("%d/%m/%Y %H:%M")
+
     # El modelo puede proponer estas claves; se sobrescriben siempre con la
     # sesion verificada -- ver el comentario de 'inyectar_sesion' en schema.py.
     for arg_llamada, atributo_sesion in herramienta.inyectar_sesion.items():
@@ -323,11 +332,26 @@ def _sanitizar(texto: str) -> str:
     return limpio
 
 
-def _redactar(referencia_modelo: str, historial: list[dict], temperatura: float) -> str:
-    resp = cliente.chat(referencia_modelo, historial, tools=None, temperatura=temperatura)
-    limpio = _sanitizar(resp.contenido)
-    historial.append({"role": "assistant", "content": limpio})
-    return limpio
+def _redactar(referencia_modelo: str, historial: list[dict], temperatura: float,
+              intentos: int = 3) -> str:
+    """
+    Redaccion final despues de que el modelo ya uso las herramientas que
+    necesitaba. Reintenta si viene vacia -- visto en vivo con DeepSeek dos
+    veces (agosto 2026): el primer intento post-tool-call a veces devuelve
+    contenido en blanco. El primer caso (blanco en el intento INICIAL, sin
+    tool calls todavia) ya se reintentaba en responder(); a este, que pasa
+    DESPUES de una herramienta real (ej. verificar_identidad_por_cedula), le
+    faltaba la misma proteccion -- el cliente se quedaba con una burbuja
+    vacia y tenia que escribir de nuevo para obtener respuesta.
+    """
+    for _ in range(intentos):
+        resp = cliente.chat(referencia_modelo, historial, tools=None, temperatura=temperatura)
+        limpio = _sanitizar(resp.contenido)
+        if limpio:
+            historial.append({"role": "assistant", "content": limpio})
+            return limpio
+    historial.append({"role": "assistant", "content": ""})
+    return "No pude terminar de redactar la respuesta. ¿Podés reformular tu mensaje?"
 
 
 def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
