@@ -43,6 +43,7 @@ from nucleo.modelo import motor
 from nucleo.persistencia import db as persistencia
 from nucleo.recuperacion.busqueda import recuperar
 from nucleo.seguimiento import escalamiento
+from nucleo.seguridad import secretos
 from nucleo.seguridad.verificacion import Sesion
 
 app = Flask(__name__)
@@ -423,6 +424,134 @@ def configuracion_identidad():
 
     olvidar_config(tenant)
     return jsonify({"descripcion": config.identidad.descripcion})
+
+
+@app.get("/configuracion/canales")
+def configuracion_canales():
+    """
+    Estado del canal de WhatsApp para la pantalla de ajustes: si esta activo,
+    los NOMBRES de los secretos que declara (nunca sus valores -- esos se
+    consultan aparte en /secretos) y que plantillas tiene mapeadas.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+
+    w = config.canales.whatsapp
+    return jsonify({"whatsapp": {
+        # El slug tal cual se lo paso quien llamo -- es el mismo valor con el
+        # que se arma la URL del webhook (/canales/whatsapp/<tenant_slug>), y
+        # la pantalla de ajustes lo necesita para armar esa URL sin adivinar.
+        "tenant_slug": tenant,
+        "activo": w.activo,
+        "version_api": w.version_api,
+        "numero_visible": w.numero_visible,
+        "plantillas": w.plantillas,
+        # Los NOMBRES declarados -- la pantalla cruza esto contra /secretos
+        # para saber cuales de los cuatro indispensables ya tienen un valor.
+        "refs": {
+            "phone_number_id": w.phone_number_id_ref,
+            "token": w.token_ref,
+            "waba_id": w.waba_id_ref,
+            "app_secret": w.app_secret_ref,
+            "verify_token": w.verify_token_ref,
+        },
+    }})
+
+
+@app.put("/configuracion/canales/whatsapp")
+def configuracion_canal_whatsapp():
+    """
+    Prender/apagar el canal y el numero visible. Los valores de las
+    credenciales NO pasan por aca -- ver POST /secretos.
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+
+    try:
+        config = editor.guardar_canal_whatsapp(
+            tenant, activo=bool(cuerpo.get("activo", False)),
+            numero_visible=cuerpo.get("numero_visible") or None)
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
+
+    olvidar_config(tenant)
+    w = config.canales.whatsapp
+    return jsonify({"activo": w.activo, "numero_visible": w.numero_visible})
+
+
+# =============================================================================
+#  SECRETOS  -  credenciales por empresa (WhatsApp, WispHub...), cifradas
+# =============================================================================
+#  Nunca se devuelve un valor. Ver nucleo/seguridad/secretos.py: la pantalla
+#  de ajustes solo necesita saber SI algo esta cargado (pista + fecha), no QUE
+#  es. Distinto del resto de este archivo, que sirve datos de negocio: aca lo
+#  que se sirve es metadata de una llave, nunca la llave.
+
+@app.get("/secretos")
+def secretos_listar():
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        return jsonify({"secretos": secretos.listar(tenant)})
+    except secretos.ErrorSecreto as e:
+        return jsonify({"error": str(e)}), 500
+    except Exception as e:
+        print(f"[secretos] fallo al listar: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudieron leer los secretos."}), 500
+
+
+@app.post("/secretos")
+def secretos_guardar():
+    """
+    Cifra y guarda (o actualiza) un secreto de la empresa.
+
+    'nombre' llega libre y no contra una lista cerrada a proposito: este
+    endpoint es generico (sirve para WHATSAPP_* y para cualquier otro
+    auth_ref que declare una Herramienta, ej. WISPHUB_API_KEY). Lo que decide
+    QUE secretos hacen falta es la configuracion del tenant, no este archivo.
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    nombre = (cuerpo.get("nombre") or "").strip()
+    valor = cuerpo.get("valor") or ""
+    if not tenant or not nombre:
+        return jsonify({"error": "Faltan campos: tenant, nombre"}), 400
+
+    try:
+        secretos.guardar(tenant, nombre, valor, cuerpo.get("descripcion"))
+    except secretos.ErrorSecreto as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        print(f"[secretos] fallo al guardar '{nombre}': {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo guardar el secreto."}), 500
+
+    return jsonify({"ok": True})
+
+
+@app.delete("/secretos/<nombre>")
+def secretos_borrar(nombre):
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant") or request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+
+    try:
+        borrado = secretos.borrar(tenant, nombre)
+    except Exception as e:
+        print(f"[secretos] fallo al borrar '{nombre}': {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo borrar el secreto."}), 500
+
+    return jsonify({"borrado": borrado})
 
 
 # =============================================================================

@@ -18,6 +18,7 @@
  * throw from one of those is a real failure and is left to propagate.
  */
 import { leerConfiguracionAsistente } from './asistente-config.js';
+import { leerCanalWhatsapp } from './canal-whatsapp.js';
 import { getBusinessHours } from './business-hours.js';
 import { getCustomFields } from './custom-fields.js';
 import { getEscalationPolicies } from './escalation.js';
@@ -108,7 +109,8 @@ export async function getSettingsHub(event) {
     macro,
     tag,
     field,
-    asistente
+    asistente,
+    canalWhatsapp
   ] = await Promise.all([
     getOrgSettings(event),
     getBusinessHours(event),
@@ -125,7 +127,8 @@ export async function getSettingsHub(event) {
     // No lanza nunca (ver asistente-config.js): el asistente es otro servicio
     // y puede no estar desplegado. Si tirara, se caeria el hub entero y el
     // sintoma seria "no puedo entrar a configuracion".
-    leerConfiguracionAsistente()
+    leerConfiguracionAsistente(),
+    leerCanalWhatsapp()
   ]);
 
   const now = Date.now();
@@ -150,6 +153,7 @@ export async function getSettingsHub(event) {
     fieldTotals: field.totals,
     // null = no hay asistente, o no contesta. El hub lista igual sus destinos,
     // sin valor, como ya hace con lo que un miembro no puede contar.
-    asistente
+    asistente,
+    canalWhatsapp
   };
 }
