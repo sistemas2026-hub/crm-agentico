@@ -177,13 +177,13 @@ Meta necesita una URL pública HTTPS para entregar los mensajes, así que el mot
 
 | Dominio | Servicio | Puerto | Regla de Traefik |
 |---|---|---|---|
-| `wa.rapilinksas.co` | `motor` | 5000 | `Host(...) && PathPrefix(/canales/whatsapp)` |
+| `motor.rapilinksas.co` | `motor` | 5000 | `Host(...) && PathPrefix(/canales/whatsapp)` |
 
 ⚠️ **No sirve reusar `agent.rapilinksas.co`.** Ese dominio apunta al **frontend** (puerto 3000), que no tiene esa ruta: la petición de Meta cae en el guardia de sesión de SvelteKit y sale un **307 a `/login`**. Meta espera el `hub.challenge` en texto plano, recibe una redirección, y muestra *«No se pudo validar la URL de devolución de llamada o el token de verificación»* — un mensaje que hace pensar en el verify token cuando el problema es que la URL nunca llegó al motor. Ya pasó una vez.
 
 **Pasos, en este orden** (saltarse el primero hace fallar el tercero):
 
-1. **DNS**: registro A de `wa.rapilinksas.co` → `86.48.18.185`. Comprobar con `dig +short wa.rapilinksas.co` antes de seguir; sin esto Traefik no puede emitir certificado.
+1. **DNS**: registro A de `motor.rapilinksas.co` → `86.48.18.185`. Comprobar con `dig +short motor.rapilinksas.co` antes de seguir; sin esto Traefik no puede emitir certificado.
 2. **Variables** en Dokploy, servicio `motor`: `SECRETOS_CLAVE_MAESTRA` (obligatoria — sin ella no se descifra ninguna credencial) y `BOTTLECRM_API_TOKEN`. En `backend`, `celery-worker` y `celery-beat`: `ASISTENTE_URL` y `ASISTENTE_TENANT`.
 3. **Dominio** en Dokploy sobre el servicio `motor`, puerto 5000, con la regla de arriba. **Redesplegar después de crearlo** — Dokploy escribe las etiquetas de Traefik al recrear el contenedor, no al guardar el formulario.
 
@@ -193,18 +193,33 @@ Meta necesita una URL pública HTTPS para entregar los mensajes, así que el mot
 
 La autenticación de esa ruta no es un token de sesión sino **la firma del cuerpo**: Meta firma cada entrega con el App Secret (`X-Hub-Signature-256`) y el motor rechaza con 401 lo que no valide. Falla cerrado — si no puede resolver el secreto (base caída incluida), tampoco procesa.
 
-En Meta, la URL de callback se registra como `https://wa.rapilinksas.co/canales/whatsapp/rapilink` (el último segmento es el slug del tenant, así que un segundo ISP entra por la misma infraestructura sin tocar nada).
+En Meta, la URL de callback se registra como `https://motor.rapilinksas.co/canales/whatsapp/rapilink` (el último segmento es el slug del tenant, así que un segundo ISP entra por la misma infraestructura sin tocar nada).
+
+**Cómo saber en qué paso se quedó**, sin adivinar. Medido el 12/08/2026 con el dominio creado a medias:
+
+```
+curl -sk -o /dev/null -w "%{http_code} %{remote_ip}\n" https://motor.rapilinksas.co/salud
+```
+
+| Lo que sale | Dónde está el problema |
+|---|---|
+| `curl: (6)` no resuelve | Falta el DNS (paso 1) |
+| IP correcta, pero **`404` y falla el certificado** | DNS ok, Traefik **sin ruta para ese host**: falta crear el dominio, o falta **redesplegar**. El certificado no existe porque Traefik solo lo pide cuando el router existe — el fallo de TLS es consecuencia, no causa |
+| `404` con certificado válido | Hay ruta y `PathPrefix` está bien: `/salud` **debe** dar 404. Probar el handshake de abajo |
+| `502` | Hay ruta pero el contenedor no responde: puerto equivocado (tiene que ser 5000) o el motor está caído |
+
+El `404` de Traefik se reconoce por el cuerpo `404 page not found` en texto plano, `Content-Length: 19` y **sin cabecera `Server`**. Si viniera del motor sería un JSON.
 
 Comprobar el alta antes de darla en Meta — tiene que devolver `12345` en texto plano:
 
 ```
-curl "https://wa.rapilinksas.co/canales/whatsapp/rapilink?hub.mode=subscribe&hub.verify_token=<el-verify-token>&hub.challenge=12345"
+curl "https://motor.rapilinksas.co/canales/whatsapp/rapilink?hub.mode=subscribe&hub.verify_token=<el-verify-token>&hub.challenge=12345"
 ```
 
 Y que lo demás **no** esté publicado (404 de Traefik, no una respuesta del motor):
 
 ```
-curl -s -o /dev/null -w "%{http_code}\n" https://wa.rapilinksas.co/salud   # 404 esperado
+curl -s -o /dev/null -w "%{http_code}\n" https://motor.rapilinksas.co/salud   # 404 esperado
 ```
 
 ### Credenciales de WhatsApp
@@ -349,7 +364,7 @@ ssh -L 5434:<ip-del-contenedor-db>:5432 root@86.48.18.185
 
 **Un rol `crm_user` para Django.** Hoy el CRM se conecta como `postgres`, que tiene `BYPASSRLS` — las políticas de aislamiento no se evalúan. Con una sola organización no hay consecuencia visible, y por eso es fácil de olvidar. El motor ya baja a `app_backend` (ver `nucleo/persistencia/db.py`); el CRM todavía no.
 
-**El webhook de WhatsApp — falta el dominio, no el código.** Las rutas ya existen (`GET`/`POST /canales/whatsapp/<tenant>`, ver §4.c) y sus guardas pasan (`py -3.13 tests/test_canal_whatsapp.py`). Lo que falta para el piloto: el DNS de `wa.rapilinksas.co`, crear el dominio en Dokploy con el `PathPrefix`, cargar las variables del §4.c, y cargar los secretos de Meta desde **Ajustes → WhatsApp**. Lo único de producto que sigue dependiendo de terceros son las plantillas para avisos proactivos, que las aprueba Meta.
+**El webhook de WhatsApp — falta el dominio, no el código.** Las rutas ya existen (`GET`/`POST /canales/whatsapp/<tenant>`, ver §4.c) y sus guardas pasan (`py -3.13 tests/test_canal_whatsapp.py`). Lo que falta para el piloto: el DNS de `motor.rapilinksas.co`, crear el dominio en Dokploy con el `PathPrefix`, cargar las variables del §4.c, y cargar los secretos de Meta desde **Ajustes → WhatsApp**. Lo único de producto que sigue dependiendo de terceros son las plantillas para avisos proactivos, que las aprueba Meta.
 
 **Autenticar `/chat` y `/agentes` en el motor.** Hoy no piden nada: lo que impide que se usen desde fuera es que el motor no sea alcanzable, y desde que exista el dominio del webhook (§4.c) lo único que los separa de internet es el `PathPrefix` de una regla de Traefik. Funciona, pero es **una sola capa**, y el resto del proyecto usa dos por principio (PRD §7.4: las reglas duras se aplican en código, no solo en la configuración de alrededor). Una regla mal escrita al agregar un dominio, y cualquiera puede conversar con el asistente a costa de la empresa y leer cómo está configurado cada agente.
 
@@ -368,7 +383,7 @@ Es una decisión de producto —¿se vende una instalación por ISP, o una plata
 
 Dos cosas que se deciden junto con eso:
 
-- **El nombre del dominio del webhook.** `wa.rapilinksas.co` es la marca del primer cliente; el segundo ISP estaría pegando el dominio de otra empresa en su configuración de Meta. Si el camino es "una plataforma", conviene un dominio neutro desde el principio: cambiarlo después obliga a que **cada** cliente reconfigure su webhook en Meta a mano.
+- **El nombre del dominio del webhook.** `motor.rapilinksas.co` está bajo la marca del primer cliente; el segundo ISP estaría pegando el dominio de otra empresa en su configuración de Meta. Si el camino es "una plataforma", conviene un dominio neutro desde el principio: cambiarlo después obliga a que **cada** cliente reconfigure su webhook en Meta a mano.
 - **El motor corre con `--workers 1`** (ver el comentario en `docker-compose.prod.yml`). No es por memoria: `_sesiones` guarda el historial caliente en RAM del proceso. Aguanta bien con hilos, pero es un techo real con varios ISPs, y se levanta el día que ese historial viva en `asistente.conversations` en vez de en memoria.
 
 **El 502 de `crm.rapilinksas.co`.** Ese dominio tiene ruta en Traefik apuntando a algo que no responde. No afecta a la base —el pooler escucha en TCP directo, sin pasar por Traefik— pero quien espere llegar al Studio de Supabase por ahí, hoy no puede.
