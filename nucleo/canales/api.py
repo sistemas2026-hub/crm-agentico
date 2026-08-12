@@ -1289,6 +1289,16 @@ def whatsapp_webhook(tenant):
         wamid = entrante.get("wamid")
         de = entrante.get("de")
         if not wamid or not de:
+            # Un mensaje sin id o sin remitente no se puede atender NI
+            # deduplicar. Antes se descartaba con un 'continue' mudo, y eso
+            # dejaba el peor rastro posible: el registro decia "entrega con 1
+            # mensaje" y despues no pasaba nada, sin ninguna linea que
+            # explicara por que. Se dice que se descarto y con que forma
+            # llego -- las CLAVES, nunca el contenido, que es de un cliente.
+            print(f"[whatsapp] mensaje descartado: sin "
+                  f"{'wamid' if not wamid else 'remitente'}. "
+                  f"tipo={entrante.get('tipo')!r} "
+                  f"claves={sorted((entrante.get('crudo') or {}).keys())}")
             continue
 
         # Antes de gastar un turno del modelo: si este wamid ya se atendio, es
