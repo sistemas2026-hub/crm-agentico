@@ -1,5 +1,6 @@
 import { fail } from '@sveltejs/kit';
 import {
+  guardarDescripcionEmpresa,
   guardarPersonaAsistente,
   leerConfiguracionAsistente
 } from '$lib/server/v2/asistente-config.js';
@@ -49,5 +50,26 @@ export const actions = {
     // Sin redirect: `load` se vuelve a correr despues de la accion y los
     // valores nuevos aparecen donde el usuario ya esta mirando.
     return { updated: true };
+  },
+
+  async updateEmpresa({ request, locals }) {
+    if (locals.profile?.role !== 'ADMIN') {
+      return fail(403, {
+        updateEmpresa: { error: 'Solo un administrador puede cambiar esta informacion.' }
+      });
+    }
+
+    const form = await request.formData();
+    const descripcion = form.get('descripcion')?.toString().trim() ?? '';
+
+    try {
+      await guardarDescripcionEmpresa(descripcion);
+    } catch (/** @type {any} */ err) {
+      return fail(400, {
+        updateEmpresa: { error: err?.message || 'No se pudo guardar.' }
+      });
+    }
+
+    return { updatedEmpresa: true };
   }
 };

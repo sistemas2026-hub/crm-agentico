@@ -23,7 +23,8 @@
     LogOut,
     Sparkles,
     Network,
-    MessageCircle
+    MessageCircle,
+    ListChecks
   } from '@lucide/svelte';
   import { t } from '$lib/terminology.js';
 
@@ -94,6 +95,7 @@
         { href: '/conversaciones', label: 'Conversaciones', icon: MessageCircle },
         { href: '/simulador-whatsapp', label: 'Simulador WhatsApp', icon: Smartphone },
         { href: '/agentes', label: 'Agentes', icon: Network },
+        { href: '/manual', label: 'Manual', icon: ListChecks },
         { href: '/solutions', label: 'Base de conocimiento', icon: BookOpen },
         { href: '/documents', label: 'Documentos', icon: FileText }
       ]

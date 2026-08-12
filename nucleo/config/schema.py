@@ -97,6 +97,14 @@ class Identidad(Base):
     sector: str = "isp"
     zona_horaria: str = "America/Bogota"
     idioma: str = "es"
+    # Que servicios ofrece la empresa y sus planes en general (ej. "internet
+    # solo, o combo internet+TV") -- se inyecta SIEMPRE en el prompt de
+    # cualquier rol (nucleo/recuperacion/prompt.py), a diferencia del corpus
+    # (RAG, se recupera solo si la pregunta matchea). Existe porque un
+    # cliente pregunto por TV y el agente, sin saber que la empresa SI la
+    # vende en combo, no supo si inventar o negar el servicio -- esto le da
+    # el contexto de base que necesita para no adivinar ninguna de las dos.
+    descripcion: str = Field(default="", max_length=2000)
 
 
 class Marca(Base):
@@ -391,7 +399,10 @@ class Periodo(Base):
 
 class Herramienta(Base):
     nombre: str
-    tipo: Literal["http", "agregado", "sql", "webhook", "batch"]
+    # 'interno': no llama a ninguna API -- el motor la resuelve el mismo
+    # (hoy, solo confirma_identidad). Sin endpoint/base_url a proposito, ver
+    # el validador mas abajo.
+    tipo: Literal["http", "agregado", "sql", "webhook", "batch", "interno"]
     descripcion: str = ""
     solo_lectura: bool = True
     roles_permitidos: list[str] = Field(min_length=1)
@@ -417,6 +428,14 @@ class Herramienta(Base):
     # Campo de la API por el que se busca (ej. 'cedula'). Requerido si
     # verifica_identidad=True.
     campo_busqueda: str | None = None
+    # Segunda etapa de verificacion: cierra (o descarta) lo que
+    # verifica_identidad dejo pendiente -- ver Sesion.id_cliente_pendiente.
+    # No llama a ninguna API (tipo 'interno'): el motor solo lee el
+    # 'confirma' (bool) que propone el modelo -- la unica otra excepcion,
+    # junto con campo_busqueda, a que el modelo nunca proponga datos de
+    # identidad, porque este SI es un booleano sobre lo que el CLIENTE
+    # respondio, no un identificador.
+    confirma_identidad: bool = False
 
     # --- http / agregado ---
     # No es secreto (no dispara el barrido de _barrer_secretos): es dato de
@@ -624,6 +643,18 @@ class Conversaciones(Base):
     etiquetas: list[str] = Field(default_factory=list)
 
 
+class Manual(Base):
+    """
+    Casos/procesos fijos para clasificar ejemplos marcados como buenos
+    (ver asistente.ejemplos_validados). Fuente de verdad de la taxonomia que
+    arma el manual de procedimientos a partir de conversaciones reales, en
+    vez de escribirlo a ciegas -- via tool-calling forzado en el frontend,
+    igual que 'conversaciones.etiquetas' para escalamiento: nunca se marca
+    con un caso fuera de esta lista.
+    """
+    casos: list[str] = Field(default_factory=list)
+
+
 class Evaluacion(Base):
     """
     Criterio de aceptacion para produccion.
@@ -661,6 +692,7 @@ class TenantConfig(Base):
     conversaciones: Conversaciones = Field(default_factory=Conversaciones)
     limites: Limites = Field(default_factory=Limites)
     evaluacion: Evaluacion = Field(default_factory=Evaluacion)
+    manual: Manual = Field(default_factory=Manual)
 
     @model_validator(mode="after")
     def _coherencia_global(self):

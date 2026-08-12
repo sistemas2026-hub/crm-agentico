@@ -120,15 +120,17 @@ def sesion(tenant: str):
 
 
 def registrar_mensaje(tenant: str, canal: str, usuario_externo: str,
-                      rol_efectivo: str, rol: str, contenido: str) -> str:
+                      rol_efectivo: str, rol: str, contenido: str) -> tuple[str, str]:
     """
     Une una fila de conversacion (crea si no existe) con una fila de
     mensaje, y actualiza 'actualizado_en' -- es la unica señal que necesita
     un scheduler para saber "hace cuanto no le escribimos a este usuario".
 
-    Devuelve el id de la conversacion: nucleo/seguimiento/escalamiento.py lo
-    necesita para poder marcarla despues, y evita una consulta aparte para
-    algo que esta funcion ya resolvio.
+    Devuelve (conversation_id, message_id): lo primero lo necesita
+    nucleo/seguimiento/escalamiento.py para poder marcar la conversacion
+    despues; lo segundo, marcar_ejemplo (este mismo archivo) para poder
+    marcar UNA respuesta puntual como buen ejemplo -- evita una consulta
+    aparte para algo que esta funcion ya resolvio.
     """
     with sesion(tenant) as (cur, org):
         cur.execute(
@@ -157,10 +159,11 @@ def registrar_mensaje(tenant: str, canal: str, usuario_externo: str,
         cur.execute(
             """insert into asistente.messages
                  (organization_id, conversation_id, rol, contenido)
-               values (%s, %s, %s, %s)""",
+               values (%s, %s, %s, %s) returning id""",
             (org, conv, rol, contenido))
+        mensaje = cur.fetchone()["id"]
 
-        return str(conv)
+        return str(conv), str(mensaje)
 
 
 def ultima_actividad(tenant: str, canal: str | None = None) -> list[dict]:
@@ -238,10 +241,12 @@ def mensajes_de(tenant: str, conversation_id: str) -> dict:
             return {"conversacion": None, "mensajes": []}
 
         cur.execute(
-            """select rol, contenido, creado_en
-               from asistente.messages
-               where organization_id = %s and conversation_id = %s
-               order by creado_en asc""",
+            """select m.id, m.rol, m.contenido, m.creado_en, e.caso as caso_marcado
+               from asistente.messages m
+               left join asistente.ejemplos_validados e
+                 on e.mensaje_id = m.id and e.organization_id = m.organization_id
+               where m.organization_id = %s and m.conversation_id = %s
+               order by m.creado_en asc""",
             (org, conversation_id))
         return {"conversacion": dict(conversacion), "mensajes": [dict(f) for f in cur.fetchall()]}
 
@@ -262,6 +267,24 @@ def marcar_escalada(tenant: str, conversation_id: str, motivo: str,
                    caso_id = %s, etiqueta = %s, actualizado_en = now()
                where organization_id = %s and id = %s""",
             (motivo, caso_id, etiqueta, org, conversation_id))
+
+
+def cerrar_conversacion(tenant: str, conversation_id: str) -> None:
+    """
+    Marca la conversacion como 'cerrada' -- señal de bandeja, no un reinicio
+    real: no toca la sesion en memoria del canal (historial, nivel de
+    verificacion, ver nucleo/canales/api.py). El proximo mensaje del mismo
+    usuario_externo abre una fila nueva (el 'where estado = 'abierta'' de
+    registrar_mensaje ya no la encuentra), pero el modelo sigue teniendo el
+    contexto completo -- misma logica que un ticket que se cierra y se
+    reabre sin perder el historial.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """update asistente.conversations
+               set estado = 'cerrada', actualizado_en = now()
+               where organization_id = %s and id = %s""",
+            (org, conversation_id))
 
 
 def caso_de_conversacion(tenant: str, conversation_id: str) -> str | None:
@@ -327,7 +350,7 @@ def evento_ya_visto(tenant: str, wamid: str, canal: str = "whatsapp") -> bool:
     que dos reintentos simultaneos leen "no visto" los dos y contestan los dos.
     Con el insert atomico, solo uno gana la clave primaria.
 
-    Ver supabase/06_webhook_eventos.sql para por que esto vive en la base y no
+    Ver supabase/07_webhook_eventos.sql para por que esto vive en la base y no
     en memoria del proceso.
     """
     with sesion(tenant) as (cur, org):
@@ -382,4 +405,103 @@ def herramientas_de(tenant: str, conversation_id: str) -> list[dict]:
                where organization_id = %s and conversation_id = %s
                order by creado_en asc""",
             (org, conversation_id))
+        return [dict(f) for f in cur.fetchall()]
+
+
+def marcar_ejemplo(tenant: str, conversation_id: str, mensaje_id: str,
+                   caso: str, marcado_por: str | None) -> None:
+    """
+    Marca una respuesta del agente como buen ejemplo del caso/proceso
+    indicado -- base del manual de procedimientos (ver /manual). 'caso' ya
+    llega validado contra tenant_config.manual.casos (nucleo/canales/api.py,
+    el unico llamador): esta funcion no vuelve a chequear la lista.
+
+    Upsert por 'mensaje_id' (unique en la tabla): volver a marcar la misma
+    burbuja actualiza el caso en vez de duplicar fila -- una burbuja
+    solo pertenece a un caso a la vez.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """insert into asistente.ejemplos_validados
+                 (organization_id, conversation_id, mensaje_id, caso, marcado_por)
+               values (%s, %s, %s, %s, %s)
+               on conflict (mensaje_id) do update
+                 set caso = excluded.caso, marcado_por = excluded.marcado_por,
+                     creado_en = now()""",
+            (org, conversation_id, mensaje_id, caso, marcado_por))
+
+
+def desmarcar_ejemplo(tenant: str, mensaje_id: str) -> None:
+    """Deshace un marcado -- ej. si se eligio el caso equivocado por error."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """delete from asistente.ejemplos_validados
+               where organization_id = %s and mensaje_id = %s""",
+            (org, mensaje_id))
+
+
+def ejemplos_por_caso(tenant: str, caso: str | None = None) -> list[dict]:
+    """
+    Los ejemplos marcados, con el mensaje del cliente que los disparo (el
+    'user' inmediato anterior en la misma conversacion) -- lo que necesita
+    /manual para mostrar pregunta y respuesta juntas, agrupadas por caso.
+
+    'caso=None' trae todos los casos juntos (el frontend los agrupa); pasar
+    un caso puntual filtra en la consulta en vez de traer de mas.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select e.id, e.caso, e.marcado_por, e.creado_en,
+                      e.conversation_id, e.mensaje_id,
+                      m.contenido as respuesta,
+                      (select contenido from asistente.messages mu
+                        where mu.conversation_id = m.conversation_id
+                          and mu.rol = 'user' and mu.creado_en <= m.creado_en
+                        order by mu.creado_en desc limit 1) as pregunta
+               from asistente.ejemplos_validados e
+               join asistente.messages m on m.id = e.mensaje_id
+               where e.organization_id = %s
+                 and (%s::text is null or e.caso = %s)
+               order by e.caso, e.creado_en desc""",
+            (org, caso, caso))
+        return [dict(f) for f in cur.fetchall()]
+
+
+def documentos_de(tenant: str) -> list[dict]:
+    """
+    Los documentos del corpus de este tenant -- para la pantalla de solo
+    lectura que muestra que hay publicado (distinto de /manual/ejemplos,
+    que muestra material CRUDO todavia sin redactar). 'n_fragmentos' cuenta
+    solo los vigentes: un documento 'obsoleto' no tiene ninguno (ver
+    cli/cargar_corpus.py, _cargar_obsoleto -- solo guarda la fila de
+    metadatos, nunca fragmenta ni vectoriza).
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select d.id, d.codigo, d.titulo, d.version, d.estado,
+                      d.fecha_vigencia, d.creado_en,
+                      (select count(*) from asistente.document_chunks c
+                        where c.document_id = d.id and c.vigente) as n_fragmentos
+               from asistente.documents d
+               where d.organization_id = %s
+               order by d.codigo, d.version desc""",
+            (org,))
+        return [dict(f) for f in cur.fetchall()]
+
+
+def fragmentos_de(tenant: str, document_id: str) -> list[dict]:
+    """
+    El texto vigente de un documento, en orden -- lo que de verdad puede
+    recuperar match_chunks() hoy. 'metadata' trae al menos 'seccion' (el
+    numero, ej. '5.8'; ver nucleo/ingesta/docx.py) para que la pantalla
+    agrupe fragmentos consecutivos del mismo numeral sin una consulta
+    aparte.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select orden, contenido, metadata
+               from asistente.document_chunks
+               where organization_id = %s and document_id = %s and vigente
+               order by orden""",
+            (org, document_id))
         return [dict(f) for f in cur.fetchall()]

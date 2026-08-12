@@ -49,6 +49,16 @@ class Sesion:
     interfaz_lan: str | None = None
     candidatos: list[str] = field(default_factory=list)  # si el numero es ambiguo
 
+    # Verificacion en DOS pasos: encontrar un cliente por cedula no alcanza
+    # para marcar 'verificado' -- primero hay que confirmar con la persona
+    # que el nombre que figura es el suyo (nucleo/modelo/motor.py:
+    # _ejecutar_confirmacion, la unica funcion que lee estos 'pendiente' y
+    # los promueve a los de arriba). Mientras esten seteados, la sesion
+    # sigue sin verificar y ninguna otra herramienta se desbloquea.
+    id_cliente_pendiente: str | None = None
+    nombre_pendiente: str | None = None
+    interfaz_lan_pendiente: str | None = None
+
 
 def extraer_identificador(texto: str, patron_extraccion: str) -> str | None:
     """

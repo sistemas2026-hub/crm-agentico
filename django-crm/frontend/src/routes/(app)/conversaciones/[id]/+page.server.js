@@ -60,7 +60,18 @@ export async function load({ fetch, cookies, params }) {
     // idem: el panel de proceso queda vacio, no se cae la conversacion.
   }
 
-  return { conversacion: datos.conversacion, mensajes: datos.mensajes, caso, owners, herramientas };
+  // Casos fijos para marcar una respuesta como buen ejemplo (ver
+  // MarcarEjemplo.svelte). Igual que arriba: si falla, el boton de marcar
+  // simplemente no tiene opciones -- no se cae la conversacion por esto.
+  let casos = [];
+  try {
+    const respCasos = await fetch(`${baseUrl}/manual/casos?tenant=${encodeURIComponent(tenant)}`);
+    if (respCasos.ok) casos = (await respCasos.json()).casos;
+  } catch {
+    // idem
+  }
+
+  return { conversacion: datos.conversacion, mensajes: datos.mensajes, caso, owners, herramientas, casos };
 }
 
 /** @type {import('./$types').Actions} */

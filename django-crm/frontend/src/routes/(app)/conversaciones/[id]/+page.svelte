@@ -3,6 +3,7 @@
   import { enhance } from '$app/forms';
   import Pill from '$lib/v2/components/Pill.svelte';
   import Avatar from '$lib/v2/components/Avatar.svelte';
+  import MarcarEjemplo from '$lib/components/manual/MarcarEjemplo.svelte';
   import { relativeTime } from '$lib/v2/format.js';
   import {
     TriangleAlert,
@@ -29,6 +30,7 @@
   let caso = $state(untrack(() => data.caso));
   let owners = $state(untrack(() => data.owners ?? []));
   let herramientas = $state(untrack(() => data.herramientas ?? []));
+  let casos = $state(untrack(() => data.casos ?? []));
 
   let entrada = $state('');
   let enviando = $state(false);
@@ -258,7 +260,9 @@
       mensajes.push({
         rol: 'assistant',
         contenido: datos.respuesta,
-        creado_en: new Date().toISOString()
+        creado_en: new Date().toISOString(),
+        id: datos.mensaje_id,
+        caso_marcado: null
       });
     } catch (/** @type {any} */ err) {
       error = err?.message || 'No se pudo contactar al asistente.';
@@ -335,6 +339,14 @@
               </div>
             {/if}
             <div class="chat-hora v2-num">{hora(item.m.creado_en)}</div>
+            {#if item.m.rol === 'assistant' && casos.length > 0}
+              <MarcarEjemplo
+                conversacionId={conversacion.id}
+                mensajeId={item.m.id}
+                casoInicial={item.m.caso_marcado}
+                {casos}
+              />
+            {/if}
           </div>
         {/if}
       {/each}

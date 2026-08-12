@@ -73,3 +73,28 @@ export async function guardarPersonaAsistente(valores) {
   }
   return datos.persona;
 }
+
+/**
+ * Guarda que servicios/planes ofrece la empresa -- contexto que se inyecta
+ * SIEMPRE en el prompt del agente (nucleo/recuperacion/prompt.py), a
+ * diferencia del corpus (RAG, solo si la pregunta matchea).
+ * @param {string} descripcion
+ */
+export async function guardarDescripcionEmpresa(descripcion) {
+  const cfg = destino();
+  if (!cfg) {
+    throw new Error('Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT).');
+  }
+
+  const resp = await fetch(`${cfg.baseUrl}/configuracion/identidad`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ descripcion, tenant: cfg.tenant })
+  });
+
+  const datos = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    throw new Error(datos.error || 'El asistente rechazo el cambio.');
+  }
+  return datos.descripcion;
+}

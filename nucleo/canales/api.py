@@ -150,9 +150,10 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
         config, rol, mensaje, estado["historial"], estado["sesion"])
 
     conversation_id = None
+    mensaje_id = None
     try:
         persistencia.registrar_mensaje(tenant, canal, id_sesion, rol, "user", mensaje)
-        conversation_id = persistencia.registrar_mensaje(
+        conversation_id, mensaje_id = persistencia.registrar_mensaje(
             tenant, canal, id_sesion, rol, "assistant", respuesta)
         for llamada in registro_herramientas:
             persistencia.registrar_llamada_herramienta(tenant, conversation_id, rol, llamada)
@@ -166,6 +167,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     # se re-evalua una vez mas, y escalar() es idempotente en la practica
     # (crea un ticket nuevo, pero no revienta nada).
     rol_cfg = config.roles.get(rol)
+    cerrada = False
     if (conversation_id and rol_cfg and rol_cfg.orientado_a == "cliente_final"
             and not estado["escalada"]):
         try:
@@ -186,9 +188,21 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             except Exception as e:
                 print(f"[escalamiento] no se pudo leer el caso de la conversacion: {e}")
             respuesta = f"{respuesta}\n\n{config.escalamiento.mensaje}".strip()
+        elif evaluacion and evaluacion.get("resuelta"):
+            # No escalada Y el cliente confirmo que ya quedo resuelto: cierra
+            # la conversacion en la bandeja (ver cerrar_conversacion en
+            # persistencia). El propio saludo de despedida del modelo ya
+            # cumple el rol de "mensaje de cierre" -- no hace falta agregar
+            # otro, sonaria repetido.
+            try:
+                persistencia.cerrar_conversacion(tenant, conversation_id)
+                cerrada = True
+            except Exception as e:
+                print(f"[conversaciones] no se pudo cerrar la conversacion: {e}")
 
     return {"respuesta": respuesta, "verificado": estado["sesion"].verificado,
-            "pausada": False}
+            "cerrada": cerrada, "conversacion_id": conversation_id,
+            "mensaje_id": mensaje_id, "pausada": False}
 
 
 @app.post("/chat")
@@ -216,8 +230,8 @@ def chat():
     except motor.ErrorMotor as e:
         return jsonify({"error": str(e)}), 400
 
-    # 'pausada' solo viaja cuando es cierto: el simulador y la bandeja ya
-    # dependen de esa forma de respuesta.
+    # 'pausada' solo viaja cuando es cierto: es la forma que ya devolvia /chat
+    # antes de que existiera el webhook, y el simulador depende de ella.
     if not salida.get("pausada"):
         salida.pop("pausada", None)
     return jsonify(salida)
@@ -349,6 +363,11 @@ def configuracion():
 
     return jsonify({
         "persona": config.persona.model_dump(mode="json"),
+        # 'descripcion' es lo unico de 'identidad' que se edita desde esta
+        # pantalla (que servicios/planes ofrece la empresa, para el prompt);
+        # el resto (nombre legal, slug) se define al dar de alta el tenant.
+        "identidad": {"descripcion": config.identidad.descripcion,
+                      "nombre_comercial": config.identidad.nombre_comercial},
         # Contexto de solo lectura para la pantalla: el modelo y cuantos
         # agentes hay se deciden en otro lado, pero quien ajusta el tono
         # merece verlos sin abrir otra pestana.
@@ -379,6 +398,25 @@ def configuracion_persona():
 
     olvidar_config(tenant)
     return jsonify({"persona": config.persona.model_dump(mode="json")})
+
+
+@app.put("/configuracion/identidad")
+def configuracion_identidad():
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+
+    try:
+        config = editor.guardar_identidad_descripcion(
+            tenant, descripcion=cuerpo.get("descripcion", ""))
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
+
+    olvidar_config(tenant)
+    return jsonify({"descripcion": config.identidad.descripcion})
 
 
 # =============================================================================
@@ -504,6 +542,56 @@ def conversaciones_herramientas(id_conversacion):
     return jsonify({"herramientas": llamadas})
 
 
+@app.post("/conversaciones/<id_conversacion>/mensajes/<mensaje_id>/marcar")
+def conversaciones_marcar_ejemplo(id_conversacion, mensaje_id):
+    """
+    Marca una respuesta puntual del agente como buen ejemplo de un caso --
+    base del manual de procedimientos (ver /manual mas abajo). Solo marca
+    lo BUENO: no hay contraparte de "invalida" ni correccion en el momento
+    (decision del cliente, ver el plan de esta funcionalidad).
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    caso = cuerpo.get("caso")
+    marcado_por = cuerpo.get("marcado_por")
+    if not tenant or not caso:
+        return jsonify({"error": "Faltan campos: tenant, caso"}), 400
+
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+
+    # Fail-closed, mismo criterio que cualquier enum del proyecto: un caso
+    # fuera de tenant_config.manual.casos se rechaza, nunca se guarda tal cual.
+    if caso not in config.manual.casos:
+        return jsonify({"error": f"'{caso}' no esta en la lista de casos "
+                                 f"configurada (manual.casos)."}), 400
+
+    try:
+        persistencia.marcar_ejemplo(tenant, id_conversacion, mensaje_id, caso, marcado_por)
+    except Exception as e:
+        print(f"[manual] fallo al marcar ejemplo: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo guardar el marcado."}), 500
+
+    return jsonify({"ok": True, "caso": caso}), 201
+
+
+@app.delete("/conversaciones/<id_conversacion>/mensajes/<mensaje_id>/marcar")
+def conversaciones_desmarcar_ejemplo(id_conversacion, mensaje_id):
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+
+    try:
+        persistencia.desmarcar_ejemplo(tenant, mensaje_id)
+    except Exception as e:
+        print(f"[manual] fallo al desmarcar ejemplo: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo deshacer el marcado."}), 500
+
+    return "", 204
+
+
 @app.post("/sugerencias")
 def sugerencias():
     """
@@ -560,7 +648,41 @@ def sugerencias():
 
 
 # =============================================================================
-#  CORPUS  -  cargar documentacion sin pasar por la consola
+#  MANUAL  -  ejemplos marcados, agrupados por caso/proceso
+# =============================================================================
+
+@app.get("/manual/casos")
+def manual_casos():
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+
+    return jsonify({"casos": config.manual.casos})
+
+
+@app.get("/manual/ejemplos")
+def manual_ejemplos():
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+
+    try:
+        ejemplos = persistencia.ejemplos_por_caso(tenant, request.args.get("caso"))
+    except Exception as e:
+        print(f"[manual] fallo al leer ejemplos: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudieron leer los ejemplos."}), 500
+
+    return jsonify({"ejemplos": ejemplos})
+
+
+# =============================================================================
+#  CORPUS  -  cargar documentacion sin pasar por la consola, y consultar que
+#  hay publicado hoy
 # =============================================================================
 #  Hasta ahora, meter un documento al corpus exigia un desarrollador con el
 #  repo, el .env y Ollama: dejar el .docx en corpus/<slug>/ y correr
@@ -569,7 +691,9 @@ def sugerencias():
 #  de los tres pasos, ese era el unico que la empresa no podia hacer sola.
 #
 #  La escritura es la MISMA que usa el CLI (nucleo/ingesta/corpus.py); lo unico
-#  que cambia es de donde viene el archivo y con que rol se escribe.
+#  que cambia es de donde viene el archivo y con que rol se escribe. La lectura
+#  (GET, mas abajo) es distinta de /manual/*: eso es material crudo todavia sin
+#  redactar, esto es lo que ya esta publicado y el motor puede recuperar.
 
 EXTENSIONES_SOPORTADAS = (".docx",)
 
@@ -799,7 +923,7 @@ def whatsapp_webhook(tenant):
 
         # Antes de gastar un turno del modelo: si este wamid ya se atendio, es
         # un reintento de Meta y contestar de nuevo seria cobrar y responder
-        # dos veces. Ver supabase/06_webhook_eventos.sql.
+        # dos veces. Ver supabase/07_webhook_eventos.sql.
         try:
             if persistencia.evento_ya_visto(tenant, wamid):
                 continue
@@ -825,6 +949,34 @@ def whatsapp_webhook(tenant):
                   f"{estado.get('de')}: {estado.get('error')}")
 
     return jsonify({"recibido": True, "atendidos": atendidos}), 200
+@app.get("/corpus/documentos")
+def corpus_documentos():
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+
+    try:
+        documentos = persistencia.documentos_de(tenant)
+    except Exception as e:
+        print(f"[corpus] fallo al listar documentos: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudieron leer los documentos."}), 500
+
+    return jsonify({"documentos": documentos})
+
+
+@app.get("/corpus/documentos/<id_documento>/fragmentos")
+def corpus_fragmentos(id_documento):
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+
+    try:
+        fragmentos = persistencia.fragmentos_de(tenant, id_documento)
+    except Exception as e:
+        print(f"[corpus] fallo al leer fragmentos: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudieron leer los fragmentos."}), 500
+
+    return jsonify({"fragmentos": fragmentos})
 
 
 @app.get("/salud")
