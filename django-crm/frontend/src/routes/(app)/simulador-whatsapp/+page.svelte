@@ -10,16 +10,23 @@
    * para cada 'identificador_sesion' que no haya visto antes).
    */
   import PageHeader from '$lib/v2/components/PageHeader.svelte';
+  import MarcarEjemplo from '$lib/components/manual/MarcarEjemplo.svelte';
+
+  /** @type {{ data: any }} */
+  let { data } = $props();
+  let casos = $state(data.casos ?? []);
 
   let telefono = $state('3001234567');
   let mensajes = $state([]);
   let entrada = $state('');
   let enviando = $state(false);
   let verificado = $state(false);
+  let cerrada = $state(false);
 
   function reiniciar() {
     mensajes = [];
     verificado = false;
+    cerrada = false;
   }
 
   async function enviar() {
@@ -29,6 +36,9 @@
     mensajes.push({ rol: 'usuario', texto });
     entrada = '';
     enviando = true;
+    // Si la conversacion anterior se habia cerrado, escribir de nuevo abre
+    // una nueva de forma transparente (mismo numero) -- ver cerrar_conversacion.
+    cerrada = false;
 
     try {
       const resp = await fetch('/api/simulador-whatsapp', {
@@ -38,8 +48,15 @@
       });
       const datos = await resp.json();
       if (resp.ok) {
-        mensajes.push({ rol: 'asistente', texto: datos.respuesta });
+        mensajes.push({
+          rol: 'asistente',
+          texto: datos.respuesta,
+          conversacionId: datos.conversacion_id,
+          mensajeId: datos.mensaje_id,
+          casoMarcado: null
+        });
         verificado = !!datos.verificado;
+        cerrada = !!datos.cerrada;
       } else {
         mensajes.push({ rol: 'error', texto: datos.error || 'El asistente no pudo responder.' });
       }
@@ -87,12 +104,25 @@
         <p class="chat-vacio">Escribí un mensaje como si fueras este cliente para empezar.</p>
       {/if}
       {#each mensajes as m}
-        <div class="chat-burbuja chat-{m.rol}">{m.texto}</div>
+        <div class="chat-burbuja chat-{m.rol}">
+          <div>{m.texto}</div>
+          {#if m.rol === 'asistente' && casos.length > 0}
+            <MarcarEjemplo
+              conversacionId={m.conversacionId}
+              mensajeId={m.mensajeId}
+              casoInicial={m.casoMarcado}
+              {casos}
+            />
+          {/if}
+        </div>
       {/each}
       {#if enviando}
         <div class="chat-burbuja chat-asistente chat-escribiendo" aria-label="Escribiendo…">
           <span class="punto"></span><span class="punto"></span><span class="punto"></span>
         </div>
+      {/if}
+      {#if cerrada && !enviando}
+        <div class="chat-cerrada">Conversación finalizada — si el cliente vuelve a escribir, se abre una nueva.</div>
       {/if}
     </div>
 
@@ -177,6 +207,15 @@
     align-self: flex-start;
     background: #fee2e2;
     color: #991b1b;
+  }
+  .chat-cerrada {
+    align-self: center;
+    font-size: 12px;
+    color: var(--v2-muted, #888);
+    padding: 4px 10px;
+    border-top: 1px dashed var(--v2-border, #e5e5e5);
+    border-bottom: 1px dashed var(--v2-border, #e5e5e5);
+    margin: 4px 0;
   }
   .chat-escribiendo {
     display: flex;

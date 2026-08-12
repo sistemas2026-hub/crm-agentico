@@ -38,6 +38,7 @@ Alcance de esta version (ver plan)
 from __future__ import annotations
 
 import json
+import re
 import time
 
 from nucleo.herramientas import agregado as ejecutor_agregado
@@ -60,6 +61,28 @@ def herramientas_del_rol(config, rol_cfg):
 
 
 def _esquema_openai(herramienta):
+    if herramienta.confirma_identidad:
+        # Segunda excepcion a "sin argumentos libres": no es un identificador,
+        # es lo que el CLIENTE respondio (si/no) a la pregunta de confirmar
+        # el nombre -- ver _ejecutar_confirmacion.
+        return {
+            "type": "function",
+            "function": {
+                "name": herramienta.nombre,
+                "description": herramienta.descripcion,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "confirma": {
+                            "type": "boolean",
+                            "description": "true si el cliente confirmo que el "
+                                          "nombre es el suyo, false si dijo que no.",
+                        }
+                    },
+                    "required": ["confirma"],
+                },
+            },
+        }
     if herramienta.verifica_identidad:
         # Unica excepcion a "sin argumentos libres": el dato para verificar
         # (ej. cedula) lo tiene que dar el cliente, no puede venir de sesion.
@@ -129,8 +152,15 @@ def _ejecutar_verificacion(herramienta, sesion, argumentos_modelo: dict) -> dict
     """
     Ejecuta una herramienta 'verifica_identidad=True'. Nunca deja pasar el
     registro crudo del cliente hacia el modelo: solo actualiza 'sesion' y
-    devuelve un resultado minimo (verificado/ambiguo/no encontrado) para que
-    el modelo redacte sobre ESO, nunca sobre el dato real.
+    devuelve un resultado minimo para que el modelo redacte sobre ESO, nunca
+    sobre el dato real.
+
+    Encontrar UN cliente por el dato buscado NO alcanza para verificar --
+    deja el candidato en 'pendiente' (Sesion.id_cliente_pendiente) y el
+    nombre para que el modelo se lo lea al cliente y le pida confirmar.
+    'verificado' sigue en False hasta que _ejecutar_confirmacion cierre el
+    segundo paso; el nombre es el UNICO campo que se deja pasar a proposito,
+    justamente para poder pedir esa confirmacion.
     """
     campo = herramienta.campo_busqueda
     valor = str((argumentos_modelo or {}).get(campo, "")).strip()
@@ -161,11 +191,50 @@ def _ejecutar_verificacion(herramienta, sesion, argumentos_modelo: dict) -> dict
                    "elijas vos cual es."}
 
     if sesion is not None:
-        sesion.verificado = True
-        sesion.nivel = max(sesion.nivel, 1)
-        sesion.id_cliente = str(filas[0]["id_servicio"])
-        sesion.interfaz_lan = filas[0].get("interfaz_lan") or None
+        sesion.id_cliente_pendiente = str(filas[0]["id_servicio"])
+        sesion.interfaz_lan_pendiente = filas[0].get("interfaz_lan") or None
+        sesion.nombre_pendiente = filas[0].get("nombre") or None
         sesion.candidatos = []
+    return {
+        "verificado": False,
+        "nombre_a_confirmar": sesion.nombre_pendiente if sesion else None,
+        "instruccion_interna": "Todavia NO esta verificado. Decile al cliente "
+            "que el servicio figura a nombre de 'nombre_a_confirmar' y "
+            "pedile que confirme si es el/ella. Nunca reveles ningun otro "
+            "dato todavia. Cuando responda, llama a confirmar_identidad con "
+            "confirma=true si dijo que si, confirma=false si dijo que no.",
+    }
+
+
+def _ejecutar_confirmacion(sesion, argumentos_modelo: dict) -> dict:
+    """
+    Cierra (o descarta) la verificacion en dos pasos que dejo pendiente
+    _ejecutar_verificacion. Es el UNICO lugar que marca 'sesion.verificado
+    = True' -- encontrar el candidato por cedula ya no alcanza por si solo.
+    """
+    if sesion is None or not sesion.id_cliente_pendiente:
+        return {"error": "No hay ninguna verificacion pendiente de confirmar."}
+
+    confirma = bool((argumentos_modelo or {}).get("confirma"))
+
+    if not confirma:
+        # Se descarta: puede ser una cedula mal tipeada que por coincidencia
+        # matcheo a otra persona. Se limpia para que el cliente pueda
+        # reintentar de cero, no queda a mitad de camino.
+        sesion.id_cliente_pendiente = None
+        sesion.nombre_pendiente = None
+        sesion.interfaz_lan_pendiente = None
+        return {"verificado": False, "motivo": "el cliente no confirmo el nombre",
+               "instruccion_interna": "Pedile de nuevo el numero de cedula, "
+                   "puede haber un error de tipeo."}
+
+    sesion.verificado = True
+    sesion.nivel = max(sesion.nivel, 1)
+    sesion.id_cliente = sesion.id_cliente_pendiente
+    sesion.interfaz_lan = sesion.interfaz_lan_pendiente
+    sesion.id_cliente_pendiente = None
+    sesion.nombre_pendiente = None
+    sesion.interfaz_lan_pendiente = None
     return {"verificado": True}
 
 
@@ -233,10 +302,29 @@ def _tool_call_a_dict(nombre: str, argumentos: dict, id_llamada: str) -> dict:
             "function": {"name": nombre, "arguments": argumentos}}
 
 
+# Visto en vivo (agosto 2026): el modelo, sin ninguna herramienta real para
+# lo que queria hacer (un cliente pregunto por un servicio que la empresa no
+# ofrece -- TV, este ISP no la tiene), fabrico una llamada a herramienta
+# INEXISTENTE como texto plano en vez de usar el tool-calling real de la API
+# -- con tokens de control de su propio vocabulario (<｜｜DSML｜｜tool_calls>,
+# barra vertical ancha U+FF5C) que se filtraron directo al cliente. El
+# prompt ya le pide no inventar (ver construir_system), pero esto es
+# fail-closed en codigo: nunca se le muestra al cliente un intento de
+# llamada a herramienta que no paso por el tool-calling real.
+_RE_FUGA_TOOL_CALL = re.compile(r"<\s*/?\s*｜+[^>]*>")
+
+
+def _sanitizar(texto: str) -> str:
+    limpio = _RE_FUGA_TOOL_CALL.sub("", texto)
+    limpio = re.sub(r"\n{3,}", "\n\n", limpio).strip()
+    return limpio
+
+
 def _redactar(referencia_modelo: str, historial: list[dict], temperatura: float) -> str:
     resp = cliente.chat(referencia_modelo, historial, tools=None, temperatura=temperatura)
-    historial.append({"role": "assistant", "content": resp.contenido})
-    return resp.contenido
+    limpio = _sanitizar(resp.contenido)
+    historial.append({"role": "assistant", "content": limpio})
+    return limpio
 
 
 def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
@@ -314,10 +402,20 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                             tools=catalogo_openai or None, temperatura=config.llm.temperatura)
 
         if not resp.llamadas:
-            if not hubo_llamadas:
-                historial.append({"role": "assistant", "content": resp.contenido})
-                return resp.contenido, registro
-            break  # ya no pide mas herramientas: pasa a redaccion final
+            if resp.contenido.strip():
+                if not hubo_llamadas:
+                    limpio = _sanitizar(resp.contenido)
+                    historial.append({"role": "assistant", "content": limpio})
+                    return limpio, registro
+                break  # ya no pide mas herramientas: pasa a redaccion final
+            if hubo_llamadas:
+                break  # sin texto pero ya hubo tools: igual pasa a redaccion final
+            # Sin texto y sin tool call en el primer intento: visto en vivo con
+            # DeepSeek en el primer turno de una conversacion nueva (respuesta
+            # en blanco, el cliente tenia que reescribir el mismo mensaje para
+            # obtener contestacion). Se reintenta en vez de devolverle al
+            # cliente una burbuja vacia -- acotado por 'limite_iteraciones_agente'.
+            continue
 
         hubo_llamadas = True
         tool_calls = [_tool_call_a_dict(l.nombre, l.argumentos, f"call_{i}")
@@ -340,6 +438,10 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 # Se ofrece SIEMPRE, este o no verificada la sesion todavia --
                 # es justamente como se verifica. Nunca pasa por el gate.
                 salida = _ejecutar_verificacion(herramienta, sesion, llamada.argumentos)
+            elif herramienta.confirma_identidad:
+                # Idem: tiene que poder llamarse ANTES de que la sesion este
+                # verificada -- es lo que la termina de verificar.
+                salida = _ejecutar_confirmacion(sesion, llamada.argumentos)
             elif rol_cfg.orientado_a == "cliente_final" and (sesion is None or sesion.nivel < nivel_exigido):
                 salida = {"error": "IDENTIDAD_NO_VERIFICADA",
                          "instruccion_interna": "No muestres ningun dato. "
@@ -362,15 +464,23 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
             # vez resuelto el conversation_id). n_registros solo tiene
             # sentido para una lista (results de una consulta); para
             # cualquier otra forma queda None a proposito, no un 0 enganoso.
-            registro.append({
-                "herramienta": llamada.nombre,
-                "parametros": _enmascarar(llamada.argumentos),
-                "exito": codigo_error is None,
-                "n_registros": len(salida) if isinstance(salida, list) else None,
-                "codigo_error": codigo_error,
-                "duracion_ms": int((time.monotonic() - t0) * 1000),
-                "es_escritura": bool(herramienta and not herramienta.solo_lectura),
-            })
+            #
+            # IDENTIDAD_NO_VERIFICADA se excluye a proposito: no es un fallo,
+            # es el gate de seguridad frenando ANTES de llamar a nada (0ms,
+            # ninguna API externa de por medio) -- es normal que el modelo
+            # pruebe una herramienta antes de tener con que verificar, y
+            # registrarlo como una X en "Ver proceso" parece un error cuando
+            # en realidad la proteccion funciono como debia.
+            if codigo_error != "IDENTIDAD_NO_VERIFICADA":
+                registro.append({
+                    "herramienta": llamada.nombre,
+                    "parametros": _enmascarar(llamada.argumentos),
+                    "exito": codigo_error is None,
+                    "n_registros": len(salida) if isinstance(salida, list) else None,
+                    "codigo_error": codigo_error,
+                    "duracion_ms": int((time.monotonic() - t0) * 1000),
+                    "es_escritura": bool(herramienta and not herramienta.solo_lectura),
+                })
 
             historial.append({"role": "tool", "name": llamada.nombre,
                               "tool_call_id": f"call_{i}",

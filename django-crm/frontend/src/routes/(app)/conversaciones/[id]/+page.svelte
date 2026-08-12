@@ -4,6 +4,7 @@
   import PageHeader from '$lib/v2/components/PageHeader.svelte';
   import Pill from '$lib/v2/components/Pill.svelte';
   import Avatar from '$lib/v2/components/Avatar.svelte';
+  import MarcarEjemplo from '$lib/components/manual/MarcarEjemplo.svelte';
   import { relativeTime } from '$lib/v2/format.js';
   import { TriangleAlert, ChevronDown, ArrowRight, CircleCheck, CircleX } from '@lucide/svelte';
 
@@ -18,6 +19,7 @@
   let caso = $state(untrack(() => data.caso));
   let owners = $state(untrack(() => data.owners ?? []));
   let herramientas = $state(untrack(() => data.herramientas ?? []));
+  let casos = $state(untrack(() => data.casos ?? []));
 
   let entrada = $state('');
   let enviando = $state(false);
@@ -104,7 +106,9 @@
       mensajes.push({
         rol: 'assistant',
         contenido: datos.respuesta,
-        creado_en: new Date().toISOString()
+        creado_en: new Date().toISOString(),
+        id: datos.mensaje_id,
+        caso_marcado: null
       });
     } catch (/** @type {any} */ err) {
       error = err?.message || 'No se pudo contactar al asistente.';
@@ -256,6 +260,14 @@
       <div class="chat-burbuja {burbujaClase(m.rol)}">
         <div>{m.contenido}</div>
         <div class="chat-hora">{relativeTime(m.creado_en)}</div>
+        {#if m.rol === 'assistant' && casos.length > 0}
+          <MarcarEjemplo
+            conversacionId={conversacion.id}
+            mensajeId={m.id}
+            casoInicial={m.caso_marcado}
+            {casos}
+          />
+        {/if}
       </div>
     {/each}
     {#if enviando && !escalada}

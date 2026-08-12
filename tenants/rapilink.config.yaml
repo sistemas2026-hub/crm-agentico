@@ -159,8 +159,19 @@ roles:
       servicio, eso no lo sabe la mayoria de los clientes) y llama a
       verificar_identidad_por_cedula con ese dato. Si te dice que es
       ambiguo, pedile ademas su nombre completo o direccion para descartar.
+
+      La cedula sola NO verifica todavia -- es un chequeo en dos pasos.
+      Cuando verificar_identidad_por_cedula encuentra un unico cliente, te
+      devuelve 'nombre_a_confirmar': decile al cliente que el servicio
+      figura a nombre de esa persona y pregunta si es el/ella. NUNCA
+      reveles ningun otro dato en ese momento (ni estado, ni saldo, ni
+      nada). Cuando responda, llama a confirmar_identidad con
+      confirma=true (dijo que si) o confirma=false (dijo que no, puede ser
+      una cedula mal tipeada -- pedisela de nuevo). Recien despues de un
+      confirma=true el cliente queda verificado de verdad.
     orientado_a: cliente_final
-    puede_consultar: [consultar_mi_servicio, verificar_identidad_por_cedula, ping_cliente]
+    puede_consultar: [consultar_mi_servicio, verificar_identidad_por_cedula,
+          confirmar_identidad, ping_cliente]
     campos_permitidos:
       # Lo minimo para autoservicio. El id_cliente NO lo propone el modelo:
       # lo inyecta el codigo desde la sesion autenticada.
@@ -390,11 +401,12 @@ herramientas:
   - nombre: verificar_identidad_por_cedula
     tipo: http
     descripcion: >
-      Verifica la identidad del cliente por su numero de cedula, cuando el
-      numero de WhatsApp no alcanzo para verificarlo solo. Filtro verificado
-      contra la API real (metodo del valor imposible, agosto 2026 -- ver
-      .claude/skills/wisphub-api/SKILL.md). NUNCA devuelve datos del cliente:
-      solo confirma si quedo verificado, ambiguo o no encontrado.
+      Primer paso de la verificacion (no el unico -- ver confirmar_identidad)
+      por numero de cedula, cuando el numero de WhatsApp no alcanzo para
+      verificarlo solo. Filtro verificado contra la API real (metodo del
+      valor imposible, agosto 2026 -- ver .claude/skills/wisphub-api/SKILL.md).
+      NUNCA devuelve datos del cliente: solo el nombre a confirmar, o si
+      quedo ambiguo o no encontrado.
     solo_lectura: true
     roles_permitidos: [cliente_final]
     verifica_identidad: true
@@ -404,6 +416,17 @@ herramientas:
     metodo: GET
     auth_ref: WISPHUB_API_KEY
     auth_esquema: Api-Key
+
+  - nombre: confirmar_identidad
+    tipo: interno
+    descripcion: >
+      Segundo y ultimo paso de la verificacion. Llamala DESPUES de que el
+      cliente responda si el nombre que le leiste (nombre_a_confirmar, de
+      verificar_identidad_por_cedula) es el suyo. No llama a ninguna API --
+      solo cierra (o descarta) la verificacion pendiente.
+    solo_lectura: true
+    roles_permitidos: [cliente_final]
+    confirma_identidad: true
 
   - nombre: ping_cliente
     tipo: http
@@ -717,6 +740,24 @@ escalamiento:
 #  partida, se ajusta con uso real.
 conversaciones:
   etiquetas: [soporte_tecnico, facturacion, comercial, queja]
+
+# -----------------------------------------------------------------------------
+#  MANUAL  -  taxonomia fija de casos para marcar respuestas buenas (ver
+#  /manual y /conversaciones). Punto de partida: lo que cliente_final ya
+#  resuelve o deriva hoy segun su descripcion, mas los casos probados en
+#  vivo. Se ajusta con uso real, igual que 'conversaciones.etiquetas'.
+# -----------------------------------------------------------------------------
+manual:
+  casos:
+    - no_internet
+    - internet_lento
+    - consulta_saldo
+    - consulta_factura
+    - estado_servicio
+    - reconexion
+    - cambio_contrasena
+    - reclamo_formal
+    - otro
 
 limites:
   max_conversaciones_dia: 500

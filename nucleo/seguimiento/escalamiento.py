@@ -11,10 +11,12 @@ conversacion se marcaba escalada_a_humano. Sus valores por defecto
 duda_de_identidad) son condiciones SEMANTICAS, no palabras clave -- por eso
 quien las evalua es el modelo, no una comparacion de texto por codigo.
 
-Una sola llamada al modelo por turno hace las dos cosas (evaluar() abajo):
-si corresponde escalar, y que etiqueta de conversaciones.etiquetas describe
-el tema. Se combinan para no duplicar el costo de una llamada aparte por
-cada una.
+Una sola llamada al modelo por turno hace las tres cosas (evaluar() abajo):
+si corresponde escalar, que etiqueta de conversaciones.etiquetas describe el
+tema, y si la conversacion ya llego a su fin (el cliente se despidio o
+confirmo que su problema se resolvio) -- api.py usa esto ultimo para cerrar
+la conversacion en la bandeja. Se combinan para no duplicar el costo de una
+llamada aparte por cada una.
 
 Al escalar (escalar()), se crea el ticket real en BottleCRM via su API REST
 (nucleo/herramientas/http.py:ejecutar(), el mismo ejecutor generico que ya
@@ -68,8 +70,17 @@ def _esquema_evaluacion(config) -> dict:
                         "enum": list(config.conversaciones.etiquetas),
                         "description": "De que trata la conversacion, de esta lista.",
                     },
+                    "resuelta": {
+                        "type": "boolean",
+                        "description": "true si el cliente confirmo que su "
+                            "problema ya se resolvio o se esta despidiendo "
+                            "(gracias, listo, ya quedo, chau) y la "
+                            "conversacion no necesita seguir abierta. false "
+                            "en cualquier otro caso, incluido mientras el "
+                            "problema sigue sin resolver.",
+                    },
                 },
-                "required": ["escalar", "etiqueta"],
+                "required": ["escalar", "etiqueta", "resuelta"],
             },
         },
     }
@@ -77,10 +88,10 @@ def _esquema_evaluacion(config) -> dict:
 
 def evaluar(config, rol: str, historial: list[dict]) -> dict | None:
     """
-    Le pregunta al modelo si esta conversacion necesita un humano ahora y
-    que etiqueta le corresponde. Nunca elige algo fuera de
-    escalamiento.activar_si / conversaciones.etiquetas -- el esquema se lo
-    impide (enum).
+    Le pregunta al modelo si esta conversacion necesita un humano ahora, que
+    etiqueta le corresponde, y si ya llego a su fin. Nunca elige algo fuera
+    de escalamiento.activar_si / conversaciones.etiquetas -- el esquema se
+    lo impide (enum).
 
     Usa el mismo modelo que ya esta respondiendole a este rol
     (llm.overrides['rol:<rol>'], igual que motor.py) en vez de
@@ -144,6 +155,26 @@ def _resolver_tag(config, nombre_tag: str) -> str | None:
     return creado.get("id") if isinstance(creado, dict) else None
 
 
+_ROL_LEGIBLE = {"user": "Cliente", "assistant": "Asistente"}
+
+
+def _transcripcion_legible(historial: list[dict]) -> str:
+    """
+    Solo lo que de verdad se dijeron cliente y asistente -- para la
+    descripcion del ticket que lee un humano. 'historial' trae mucho mas
+    que eso (el prompt del sistema, el bloque de contexto del RAG con el
+    manual completo, las respuestas crudas de las herramientas): pasarlo
+    entero convertia la descripcion del caso en un volcado de la ingenieria
+    de prompt en vez de un resumen legible del caso.
+    """
+    lineas = [
+        f"{_ROL_LEGIBLE[m['role']]}: {m['content']}"
+        for m in historial
+        if m.get("role") in _ROL_LEGIBLE and m.get("content")
+    ]
+    return "\n".join(lineas)
+
+
 def escalar(config, tenant: str, usuario_externo: str, conversation_id: str,
            historial: list[dict], motivo: str, etiqueta: str) -> None:
     """
@@ -162,10 +193,7 @@ def escalar(config, tenant: str, usuario_externo: str, conversation_id: str,
 
     try:
         tag_id = _resolver_tag(config, etiqueta)
-
-        transcripcion = "\n".join(
-            f"{m.get('role')}: {m.get('content')}"
-            for m in historial if m.get("content"))
+        transcripcion = _transcripcion_legible(historial)
         payload = {
             # Unico por org (verificado en vivo: un nombre repetido da 400)
             # -- el id de conversacion de sobra lo garantiza.

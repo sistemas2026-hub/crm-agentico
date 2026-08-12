@@ -22,8 +22,10 @@
   let { data, form } = $props();
 
   let editing = $state(false);
+  let editingEmpresa = $state(false);
 
   let p = $derived(data.config?.persona);
+  let identidad = $derived(data.config?.identidad);
 
   const TONOS = [
     ['cercano', 'Cercano', 'Trata de usted pero sin formalismos. El que viene por defecto.'],
@@ -144,6 +146,37 @@
         </SettingsFormPanel>
       {/if}
 
+      {#if editingEmpresa}
+        <SettingsFormPanel
+          title="Qué ofrece la empresa"
+          action="?/updateEmpresa"
+          error={form?.updateEmpresa?.error}
+          submitLabel="Guardar"
+          oncancel={() => (editingEmpresa = false)}
+          ondone={() => (editingEmpresa = false)}
+        >
+          {#snippet fields()}
+            <div class="v2-field v2-sfp-wide">
+              <label for="f-descripcion-empresa">Servicios y planes que ofrece la empresa</label>
+              <textarea
+                id="f-descripcion-empresa"
+                class="v2-input"
+                name="descripcion"
+                rows="5"
+                maxlength="2000"
+                placeholder="Ej: Rapilink ofrece planes de internet residencial, y combos de internet + TV. No ofrece telefonía."
+              >{identidad?.descripcion}</textarea>
+              <p class="v2-hint">
+                Esto se le pasa SIEMPRE al agente, en cualquier conversación — a diferencia de los
+                documentos del corpus, que solo se traen si la pregunta coincide. Sirve para que el
+                agente sepa qué existe y qué no, en vez de adivinar cuando le preguntan algo (ej. si
+                vendemos TV o no).
+              </p>
+            </div>
+          {/snippet}
+        </SettingsFormPanel>
+      {/if}
+
       <div class="v2-split">
         <div>
           <div class="v2-label" style="margin-bottom:10px">Como se presenta</div>
@@ -229,6 +262,25 @@
             </p>
           {/if}
         </div>
+      </div>
+
+      <div style="display:flex;align-items:center;justify-content:space-between;margin:22px 0 10px">
+        <div class="v2-label" style="margin:0">Qué ofrece la empresa</div>
+        {#if data.can_edit && !editingEmpresa}
+          <button class="v2-btn v2-btn-sm" onclick={() => (editingEmpresa = true)}>Editar</button>
+        {/if}
+      </div>
+      <div class="v2-card" style="padding:15px 16px">
+        {#if identidad?.descripcion}
+          <p style="font-size:12.5px;margin:0;line-height:1.6;white-space:pre-wrap">
+            {identidad.descripcion}
+          </p>
+        {:else}
+          <p class="v2-sub" style="font-size:12.5px;margin:0">
+            Todavía no se describió qué servicios y planes ofrece la empresa. Sin esto, el agente no
+            tiene forma de saber si un servicio que le preguntan existe o no.
+          </p>
+        {/if}
       </div>
     {/if}
   </div>

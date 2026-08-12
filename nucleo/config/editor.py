@@ -58,6 +58,7 @@ comparar ambas versiones siga siendo posible.
 
 from __future__ import annotations
 
+import copy
 import json
 import re
 from typing import Callable
@@ -117,7 +118,17 @@ def _editar(tenant: str, mutar: Callable[[dict], None]) -> TenantConfig:
                 f"no hay nada que editar. Cargarla primero con: "
                 f"py -3.13 cli/cargar_config.py tenants/{tenant}.config.yaml")
 
-        doc = fila["config"]
+        # Copia independiente a proposito: 'mutar' cambia dicts anidados en el
+        # lugar (ej. _mutar_editar hace rol["descripcion"] = ...). Sin copiar,
+        # 'doc' y 'fila["config"]' son el MISMO objeto, así que mutar 'doc'
+        # tambien corrompe el "antes" que se usa mas abajo para detectar
+        # cambios -- el resultado quedaba comparado contra si mismo y
+        # 'datos == fila["config"]' daba True siempre, así que ninguna edicion
+        # a un rol EXISTENTE llegaba a guardarse (crear_rol no lo sufria por
+        # casualidad: el rol nuevo no traia los campos con default que Pydantic
+        # agrega al validar, y esa diferencia de claves bastaba para que el
+        # 'if' de abajo diera False).
+        doc = copy.deepcopy(fila["config"])
         mutar(doc)
         config = _validar(tenant, doc)
         datos = config.model_dump(mode="json")
@@ -206,14 +217,28 @@ def _comprobar_nadie_se_queda_sin_roles(doc: dict) -> None:
 
 
 def _aplicar_herramientas(doc: dict, nombre_rol: str, herramientas: list[dict],
-                          campos_permitidos_out: dict) -> None:
+                          campos_permitidos_out: dict, anterior: set[str] | None = None) -> None:
     """
     Muta 'herramientas' del documento: agrega nombre_rol a roles_permitidos de
     cada herramienta seleccionada (si no estaba), y lo quita de las que ya no
     estan seleccionadas. Documental/defensa en profundidad -- el motor autoriza
     por Rol.puede_consultar, no por esto -- pero dejarlo desactualizado seria
     mentir en la config.
+
+    'anterior' es el 'puede_consultar' del rol ANTES de esta edicion. Solo se
+    le quita 'nombre_rol' a una herramienta si de verdad estaba ahi -- nunca
+    por una herramienta que el rol nunca ofrecio en su catalogo, aunque
+    'roles_permitidos' la apunte a este rol por otro motivo. Caso real: las
+    herramientas de uso interno de escalamiento (nucleo/seguimiento/
+    escalamiento.py, ej. 'crear_caso_soporte') no las llama ningun modelo, asi
+    que ningun rol las tiene en 'puede_consultar' -- pero el esquema exige
+    'roles_permitidos' con al menos un elemento, asi que quedan apuntando a un
+    rol cualquiera (ej. 'administracion') solo para cumplir esa cota minima.
+    Sin este chequeo, CUALQUIER guardado de ese rol las desvinculaba (no
+    estaban entre las seleccionadas del formulario, que ni las ofrece) y el
+    validador rechazaba el guardado entero por dejarlas huerfanas.
     """
+    anterior = anterior or set()
     seleccionadas = {h["nombre"] for h in herramientas}
     for herr in doc.get("herramientas", []):
         nombre_herr = herr.get("nombre")
@@ -221,7 +246,7 @@ def _aplicar_herramientas(doc: dict, nombre_rol: str, herramientas: list[dict],
         ya_esta = nombre_rol in permitidos
         if nombre_herr in seleccionadas and not ya_esta:
             permitidos.append(nombre_rol)
-        elif nombre_herr not in seleccionadas and ya_esta:
+        elif nombre_herr not in seleccionadas and ya_esta and nombre_herr in anterior:
             permitidos.remove(nombre_rol)
 
     for h in herramientas:
@@ -257,8 +282,9 @@ def _mutar_editar(doc: dict, nombre: str, area: str | None, cargo: str | None,
     if nombre not in doc.get("roles", {}):
         raise ErrorEdicion(f"el rol '{nombre}' no existe")
 
+    anterior = set(doc["roles"][nombre].get("puede_consultar") or [])
     campos_permitidos: dict = {}
-    _aplicar_herramientas(doc, nombre, herramientas, campos_permitidos)
+    _aplicar_herramientas(doc, nombre, herramientas, campos_permitidos, anterior)
 
     rol = doc["roles"][nombre]
     rol["descripcion"] = descripcion
@@ -286,6 +312,16 @@ def _mutar_persona(doc: dict, nombre_asistente: str, tono: str,
         "longitud_respuesta": longitud_respuesta,
         "instrucciones_adicionales": instrucciones_adicionales,
     })
+
+
+def _mutar_identidad_descripcion(doc: dict, descripcion: str) -> None:
+    """
+    Que servicios y planes ofrece la empresa, en prosa -- se inyecta SIEMPRE
+    en el prompt de cualquier rol (ver nucleo/recuperacion/prompt.py), a
+    diferencia del corpus (RAG, solo si la pregunta matchea). No toca
+    permisos ni roles, mismo criterio de riesgo bajo que _mutar_persona.
+    """
+    doc.setdefault("identidad", {})["descripcion"] = descripcion
 
 
 def _mutar_borrar(doc: dict, nombre: str) -> None:
@@ -342,3 +378,7 @@ def guardar_persona(tenant: str, nombre_asistente: str, tono: str,
     return _editar(tenant, lambda doc: _mutar_persona(
         doc, nombre_asistente, tono, longitud_respuesta,
         instrucciones_adicionales))
+
+
+def guardar_identidad_descripcion(tenant: str, descripcion: str) -> TenantConfig:
+    return _editar(tenant, lambda doc: _mutar_identidad_descripcion(doc, descripcion))
