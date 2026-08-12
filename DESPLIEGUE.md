@@ -185,7 +185,20 @@ Meta necesita una URL pública HTTPS para entregar los mensajes, así que el mot
 
 1. **DNS**: registro A de `motor.rapilinksas.co` → `86.48.18.185`. Comprobar con `dig +short motor.rapilinksas.co` antes de seguir; sin esto Traefik no puede emitir certificado.
 2. **Variables** en Dokploy, servicio `motor`: `SECRETOS_CLAVE_MAESTRA` (obligatoria — sin ella no se descifra ninguna credencial) y `BOTTLECRM_API_TOKEN`. En `backend`, `celery-worker` y `celery-beat`: `ASISTENTE_URL` y `ASISTENTE_TENANT`.
-3. **Dominio** en Dokploy sobre el servicio `motor`, puerto 5000, con la regla de arriba. **Redesplegar después de crearlo** — Dokploy escribe las etiquetas de Traefik al recrear el contenedor, no al guardar el formulario.
+3. **Dominio** en Dokploy sobre el servicio `motor`. La regla de arriba no se escribe a mano: Dokploy la arma con los campos del formulario.
+
+| Campo del formulario | Valor |
+|---|---|
+| Service Name | `motor` |
+| Host | `motor.rapilinksas.co` |
+| **Path** | **`/canales/whatsapp`** ← acá va el `PathPrefix`, no en un campo de regla |
+| Internal Path | `/` (el valor por defecto) |
+| **Strip Path** | **apagado** |
+| Container Port | `5000` |
+
+⚠️ **Strip Path tiene que quedar apagado.** Encendido, Traefik le quita `/canales/whatsapp` a la petición antes de pasarla y al motor le llega `/rapilink`, que no existe: da **404 con todo lo demás bien configurado**, y el síntoma no señala la causa. El motor espera la ruta completa, que es justo lo que `Internal Path: /` significa.
+
+**Redesplegar después de guardar** — Dokploy escribe las etiquetas de Traefik al recrear el contenedor, no al guardar el formulario. Lo avisa él mismo en el formulario, y es el paso que más veces se olvida.
 
 ⚠️ **El `PathPrefix` no es opcional.** Sin él, el mismo dominio publica `/chat`, `/agentes` y `/agentes/catalogo`, que no piden autenticación de ninguna clase: cualquiera podría conversar con el asistente a costa de la empresa y leer cómo está configurado cada agente. La regla tiene que restringirse a `/canales/whatsapp` y nada más.
 
