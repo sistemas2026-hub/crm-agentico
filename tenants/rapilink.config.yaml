@@ -725,10 +725,38 @@ herramientas:
 #  CANALES
 # -----------------------------------------------------------------------------
 canales:
+  # WhatsApp Business, Cloud API de Meta directo (sin intermediario).
+  #
+  # Todos los '*_ref' son NOMBRES de secretos, nunca valores -- el validador
+  # rechaza el archivo si detecta algo con pinta de credencial. Los valores se
+  # cargan aparte, cifrados, en asistente.tenant_secrets (ver
+  # nucleo/seguridad/secretos.py); si un nombre no esta ahi, se busca en el
+  # entorno del motor.
+  #
+  # Cual es cual, porque los nombres de Meta se confunden:
+  #   phone_number_id   ID del numero EMISOR. No es el telefono.
+  #   waba_id           la cuenta de WhatsApp Business. Solo para plantillas.
+  #   token             de un System User, PERMANENTE. El de la consola dura
+  #                     24 h y deja de servir sin aviso.
+  #   app_secret        firma cada webhook entrante. Sin el no hay forma de
+  #                     saber si quien golpea la URL publica es Meta.
+  #   verify_token      cadena que elige la empresa; Meta la devuelve una sola
+  #                     vez, en el handshake de alta del webhook.
   whatsapp:
+    # Poner en true EXIGE los cuatro refs indispensables (el validador falla
+    # si falta alguno): mejor que arrancar bien y romperse con el primer
+    # mensaje de un cliente real.
     activo: false           # se activa cuando el piloto interno pase la evaluacion
     phone_number_id_ref: WHATSAPP_PHONE_NUMBER_ID
     token_ref: WHATSAPP_TOKEN
+    waba_id_ref: WHATSAPP_WABA_ID
+    app_secret_ref: WHATSAPP_APP_SECRET
+    verify_token_ref: WHATSAPP_VERIFY_TOKEN
+    # Fija a proposito: que Meta publique una version nueva no puede cambiar el
+    # comportamiento del canal sin que alguien lo decida.
+    version_api: v23.0
+    # Solo para mostrarlo en los ajustes. No participa de ninguna llamada.
+    numero_visible: null
     plantillas: {}
   web:
     activo: true

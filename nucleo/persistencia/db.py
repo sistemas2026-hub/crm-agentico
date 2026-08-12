@@ -279,7 +279,8 @@ def caso_de_conversacion(tenant: str, conversation_id: str) -> str | None:
         return str(fila["caso_id"]) if fila and fila["caso_id"] else None
 
 
-def agregar_mensaje_humano(tenant: str, conversation_id: str, contenido: str) -> bool:
+def agregar_mensaje_humano(tenant: str, conversation_id: str,
+                           contenido: str) -> dict | None:
     """
     Un agente humano responde directo en el hilo, sin pasar por el modelo --
     para una conversacion ya escalada (marcar_escalada le puso caso_id), que
@@ -287,16 +288,22 @@ def agregar_mensaje_humano(tenant: str, conversation_id: str, contenido: str) ->
     'assistant' a proposito: es el mismo lado del canal que el cliente ya
     viene viendo, humano o bot no cambia esa columna, solo quien redacto.
 
-    Devuelve False si la conversacion no existe o no es de este tenant -- el
+    Devuelve None si la conversacion no existe o no es de este tenant -- el
     llamador (nucleo/canales/api.py) decide si eso es un 404.
+
+    Si existe, devuelve {'canal', 'usuario_externo'}: es POR DONDE hay que
+    hacerle llegar el mensaje al cliente. Guardarlo en la base no se lo entrega
+    a nadie -- una respuesta que se ve en la bandeja pero nunca sale es peor
+    que un error visible, porque el agente cree que ya atendio.
     """
     with sesion(tenant) as (cur, org):
         cur.execute(
-            """select 1 from asistente.conversations
+            """select canal, usuario_externo from asistente.conversations
                where organization_id = %s and id = %s""",
             (org, conversation_id))
-        if not cur.fetchone():
-            return False
+        fila = cur.fetchone()
+        if not fila:
+            return None
 
         cur.execute(
             """insert into asistente.messages
@@ -307,7 +314,29 @@ def agregar_mensaje_humano(tenant: str, conversation_id: str, contenido: str) ->
             """update asistente.conversations set actualizado_en = now()
                where id = %s""",
             (conversation_id,))
-        return True
+        return {"canal": fila["canal"], "usuario_externo": fila["usuario_externo"]}
+
+
+def evento_ya_visto(tenant: str, wamid: str, canal: str = "whatsapp") -> bool:
+    """
+    True si este webhook ya se proceso. False la primera vez -- y en esa misma
+    llamada lo deja registrado.
+
+    La deteccion y el registro van en UNA sentencia ('on conflict do nothing')
+    a proposito: consultar primero y escribir despues deja una ventana en la
+    que dos reintentos simultaneos leen "no visto" los dos y contestan los dos.
+    Con el insert atomico, solo uno gana la clave primaria.
+
+    Ver supabase/06_webhook_eventos.sql para por que esto vive en la base y no
+    en memoria del proceso.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """insert into asistente.webhook_eventos (organization_id, wamid, canal)
+               values (%s, %s, %s)
+               on conflict (organization_id, wamid) do nothing""",
+            (org, wamid, canal))
+        return cur.rowcount == 0
 
 
 def registrar_llamada_herramienta(tenant: str, conversation_id: str, rol: str,
