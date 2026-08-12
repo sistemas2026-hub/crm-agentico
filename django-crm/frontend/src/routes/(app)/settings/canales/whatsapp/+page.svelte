@@ -111,6 +111,19 @@
       await update();
     };
   };
+
+  // 'update()' por defecto RESETEA el formulario a sus valores por defecto
+  // (comportamiento nativo de use:enhance) -- bien para el campo de
+  // credencial, que conviene vaciar despues de guardar un secreto. Mal para
+  // este: el checkbox y el numero visible volverian a lo que HABIA antes de
+  // tocar nada, y como aca no habia numero cargado, "antes" es vacio -- se
+  // ve como si el campo se hubiera borrado solo, aunque el guardado si
+  // funciono.
+  const guardandoCanal = () => {
+    return async (/** @type {any} */ { update }) => {
+      await update({ reset: false });
+    };
+  };
 </script>
 
 <PageHeader title="WhatsApp">
@@ -175,7 +188,7 @@
         <form
           method="POST"
           action="?/guardarCanal"
-          use:enhance={enviando}
+          use:enhance={guardandoCanal}
           style="display:flex;flex-direction:column;gap:14px"
         >
           <input type="hidden" name="activo" value={activoChecked} />
