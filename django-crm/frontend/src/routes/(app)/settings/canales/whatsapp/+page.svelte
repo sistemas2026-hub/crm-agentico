@@ -391,6 +391,15 @@
                   </button>
                 </form>
 
+                <!-- El campo se vacía al guardar (no se deja un secreto en el
+                     formulario), y ese vaciado es la señal más fuerte de la
+                     pantalla: sin esto se lee como "se perdió" en vez de
+                     "listo". La confirmación tiene que estar donde estaba el
+                     valor, no solo en la pista de la izquierda. -->
+                {#if form?.guardado === refName}
+                  <p class="cred-ok"><Check size={12} /> Guardado</p>
+                {/if}
+
                 <div style="display:flex;gap:6px">
                   {#if c.generable}
                     <form method="POST" action="?/generarVerifyToken" use:enhance={enviando}>
@@ -488,6 +497,15 @@
   }
   .cred-ojo:hover {
     color: var(--v2-ink);
+  }
+  .cred-ok {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin: 2px 0 0;
+    font-size: 11.5px;
+    color: var(--v2-moss);
+    font-weight: 550;
   }
 
   @media (max-width: 640px) {
