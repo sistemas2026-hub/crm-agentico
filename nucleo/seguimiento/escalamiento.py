@@ -221,7 +221,9 @@ def caso_sigue_abierto(config, caso_id: str) -> bool:
         import requests
 
         url = f"{herramienta.base_url.rstrip('/')}{herramienta.endpoint}{caso_id}/"
-        r = requests.get(url, headers=herramientas_http.headers_de(herramienta), timeout=10)
+        r = requests.get(url, timeout=10,
+                         headers=herramientas_http.headers_de(
+                             herramienta, config.identidad.slug))
         r.raise_for_status()
         cuerpo = r.json()
         caso = cuerpo.get("cases_obj", cuerpo) if isinstance(cuerpo, dict) else {}

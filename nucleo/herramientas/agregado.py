@@ -41,7 +41,7 @@ class ErrorAgregado(Exception):
     """Consulta agregada invalida o rechazada por la API."""
 
 
-def _contar(herramienta, params: dict) -> int:
+def _contar(herramienta, params: dict, tenant: str | None = None) -> int:
     """
     Una llamada, cero filas: se pide limit=1 y se lee 'count' del paginado.
     Contar 8.700 registros cuesta lo mismo que contar 3 -- el modelo nunca
@@ -49,7 +49,7 @@ def _contar(herramienta, params: dict) -> int:
     """
     p = dict(params)
     p["limit"] = 1
-    r = requests.get(url_de(herramienta), headers=headers_de(herramienta),
+    r = requests.get(url_de(herramienta), headers=headers_de(herramienta, tenant),
                      params=p, timeout=TIMEOUT_SEGUNDOS)
     if r.status_code == 400:
         # La API suele explicar bien sus rechazos (rango de fechas muy
@@ -136,7 +136,7 @@ def _describir(herramienta, usados: dict, periodo_texto: str | None) -> str:
     return texto + "."
 
 
-def ejecutar(herramienta, argumentos_modelo: dict) -> dict:
+def ejecutar(herramienta, argumentos_modelo: dict, tenant: str | None = None) -> dict:
     argumentos_modelo = argumentos_modelo or {}
 
     try:
@@ -165,7 +165,7 @@ def ejecutar(herramienta, argumentos_modelo: dict) -> dict:
         agrupar_por = argumentos_modelo.get("agrupar_por")
 
         if not agrupar_por:
-            total = _contar(herramienta, base_params)
+            total = _contar(herramienta, base_params, tenant)
             salida = {"total": total, "interpretacion": interpretacion}
             if avisos:
                 salida["advertencia"] = " ".join(avisos)
@@ -189,7 +189,7 @@ def ejecutar(herramienta, argumentos_modelo: dict) -> dict:
         for etiqueta, valor_api in valores:
             params = dict(base_params)
             params[filtro_grupo.param] = valor_api
-            desglose[etiqueta] = _contar(herramienta, params)
+            desglose[etiqueta] = _contar(herramienta, params, tenant)
 
         salida = {
             "total": sum(desglose.values()),

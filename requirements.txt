@@ -26,3 +26,9 @@ python-docx
 # Servidor WSGI. El de Flask ('app.run') avisa el mismo que no es para
 # produccion; ver el comando del servicio 'motor' en docker-compose.prod.yml.
 gunicorn
+
+# nucleo/seguridad/secretos.py, para cifrar las credenciales por empresa
+# (Fernet). El import es PEREZOSO: sin el paquete el motor arranca igual y solo
+# falla cuando alguien pide un secreto guardado en la base -- lo que sigue
+# resolviendose contra el entorno no lo necesita.
+cryptography

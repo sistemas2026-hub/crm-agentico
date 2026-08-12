@@ -125,7 +125,8 @@ def _esquema_openai(herramienta):
     }
 
 
-def _ejecutar_verificacion(herramienta, sesion, argumentos_modelo: dict) -> dict:
+def _ejecutar_verificacion(herramienta, sesion, argumentos_modelo: dict,
+                           tenant: str | None = None) -> dict:
     """
     Ejecuta una herramienta 'verifica_identidad=True'. Nunca deja pasar el
     registro crudo del cliente hacia el modelo: solo actualiza 'sesion' y
@@ -137,7 +138,7 @@ def _ejecutar_verificacion(herramienta, sesion, argumentos_modelo: dict) -> dict
     if not valor:
         return {"verificado": False, "motivo": "no se recibio el dato a verificar"}
 
-    crudo = ejecutor_http.ejecutar(herramienta, {campo: valor})
+    crudo = ejecutor_http.ejecutar(herramienta, {campo: valor}, tenant)
     filas = crudo.get("results", []) if isinstance(crudo, dict) else crudo
     if not isinstance(filas, list):
         filas = []
@@ -169,7 +170,8 @@ def _ejecutar_verificacion(herramienta, sesion, argumentos_modelo: dict) -> dict
     return {"verificado": True}
 
 
-def _ejecutar_tool(herramienta, sesion, argumentos_modelo: dict) -> dict | list:
+def _ejecutar_tool(herramienta, sesion, argumentos_modelo: dict,
+                   tenant: str | None = None) -> dict | list:
     argumentos_modelo = argumentos_modelo or {}
 
     if herramienta.tipo == "agregado":
@@ -177,7 +179,7 @@ def _ejecutar_tool(herramienta, sesion, argumentos_modelo: dict) -> dict | list:
         # valores CRUDOS del modelo (incluido 'agrupar_por'/'periodo', que no
         # son filtros) para decidir agrupamiento y rango -- hace su propia
         # traduccion de filtros adentro.
-        return ejecutor_agregado.ejecutar(herramienta, argumentos_modelo)
+        return ejecutor_agregado.ejecutar(herramienta, argumentos_modelo, tenant)
 
     argumentos = {}
 
@@ -207,8 +209,9 @@ def _ejecutar_tool(herramienta, sesion, argumentos_modelo: dict) -> dict | list:
 
     if herramienta.tipo == "http":
         if herramienta.asincrona:
-            return ejecutor_http.ejecutar_asincrono(herramienta, argumentos)
-        return ejecutor_http.ejecutar(herramienta, argumentos)
+            return ejecutor_http.ejecutar_asincrono(herramienta, argumentos,
+                                                    tenant=tenant)
+        return ejecutor_http.ejecutar(herramienta, argumentos, tenant)
     raise NotImplementedError(
         f"Tipo de herramienta '{herramienta.tipo}' aun no tiene ejecutor en nucleo/.")
 
@@ -339,7 +342,8 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
             elif herramienta.verifica_identidad:
                 # Se ofrece SIEMPRE, este o no verificada la sesion todavia --
                 # es justamente como se verifica. Nunca pasa por el gate.
-                salida = _ejecutar_verificacion(herramienta, sesion, llamada.argumentos)
+                salida = _ejecutar_verificacion(herramienta, sesion, llamada.argumentos,
+                                                config.identidad.slug)
             elif rol_cfg.orientado_a == "cliente_final" and (sesion is None or sesion.nivel < nivel_exigido):
                 salida = {"error": "IDENTIDAD_NO_VERIFICADA",
                          "instruccion_interna": "No muestres ningun dato. "
@@ -348,7 +352,8 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 codigo_error = "IDENTIDAD_NO_VERIFICADA"
             else:
                 try:
-                    crudo = _ejecutar_tool(herramienta, sesion, llamada.argumentos)
+                    crudo = _ejecutar_tool(herramienta, sesion, llamada.argumentos,
+                                          config.identidad.slug)
                     salida = listas_blancas.filtrar_campos(rol_cfg, herramienta.nombre, crudo)
                 except Exception as e:
                     # No tumba el turno: el modelo recibe un error legible y
