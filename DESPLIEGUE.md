@@ -179,6 +179,14 @@ Meta necesita una URL pública HTTPS para entregar los mensajes, así que el mot
 |---|---|---|---|
 | `wa.rapilinksas.co` | `motor` | 5000 | `Host(...) && PathPrefix(/canales/whatsapp)` |
 
+⚠️ **No sirve reusar `agent.rapilinksas.co`.** Ese dominio apunta al **frontend** (puerto 3000), que no tiene esa ruta: la petición de Meta cae en el guardia de sesión de SvelteKit y sale un **307 a `/login`**. Meta espera el `hub.challenge` en texto plano, recibe una redirección, y muestra *«No se pudo validar la URL de devolución de llamada o el token de verificación»* — un mensaje que hace pensar en el verify token cuando el problema es que la URL nunca llegó al motor. Ya pasó una vez.
+
+**Pasos, en este orden** (saltarse el primero hace fallar el tercero):
+
+1. **DNS**: registro A de `wa.rapilinksas.co` → `86.48.18.185`. Comprobar con `dig +short wa.rapilinksas.co` antes de seguir; sin esto Traefik no puede emitir certificado.
+2. **Variables** en Dokploy, servicio `motor`: `SECRETOS_CLAVE_MAESTRA` (obligatoria — sin ella no se descifra ninguna credencial) y `BOTTLECRM_API_TOKEN`. En `backend`, `celery-worker` y `celery-beat`: `ASISTENTE_URL` y `ASISTENTE_TENANT`.
+3. **Dominio** en Dokploy sobre el servicio `motor`, puerto 5000, con la regla de arriba. **Redesplegar después de crearlo** — Dokploy escribe las etiquetas de Traefik al recrear el contenedor, no al guardar el formulario.
+
 ⚠️ **El `PathPrefix` no es opcional.** Sin él, el mismo dominio publica `/chat`, `/agentes` y `/agentes/catalogo`, que no piden autenticación de ninguna clase: cualquiera podría conversar con el asistente a costa de la empresa y leer cómo está configurado cada agente. La regla tiene que restringirse a `/canales/whatsapp` y nada más.
 
 ⚠️ **Y por eso el envío proactivo vive FUERA de ese prefijo.** `POST /avisos/whatsapp/<tenant>` (mandar una plantilla) y `GET /plantillas/whatsapp/<tenant>` están deliberadamente en otra ruta: la firma de Meta no los protege —quien llama no es Meta, es una tarea interna del CRM por la red del compose— así que si cayeran bajo `/canales/whatsapp` quedarían expuestos a internet **sin autenticación de ninguna clase**, y cualquiera podría mandarle mensajes a los clientes de la empresa desde su número. Si algún día hay que exponerlos, necesitan autenticación propia primero.

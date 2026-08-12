@@ -94,6 +94,13 @@ services:
       # --- Celery ---
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
+      # El CRM le habla al motor por la red interna del compose: la ingesta de
+      # documentos al corpus (common/tasks.py) y la purga diaria de retencion
+      # (purgar_retencion_asistente). Sin estas dos, esas tareas no fallan --
+      # registran "el asistente no esta configurado" y no hacen nada, que es
+      # peor porque no se nota.
+      ASISTENTE_URL: ${ASISTENTE_URL:-http://motor:5000}
+      ASISTENTE_TENANT: ${ASISTENTE_TENANT:-rapilink}
       # --- Correo ---
       DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-noreply@rapilinksas.co}
       ADMIN_EMAIL: ${ADMIN_EMAIL:?}
@@ -140,6 +147,13 @@ services:
       DBPASSWORD: ${DBPASSWORD:?}
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
+      # El CRM le habla al motor por la red interna del compose: la ingesta de
+      # documentos al corpus (common/tasks.py) y la purga diaria de retencion
+      # (purgar_retencion_asistente). Sin estas dos, esas tareas no fallan --
+      # registran "el asistente no esta configurado" y no hacen nada, que es
+      # peor porque no se nota.
+      ASISTENTE_URL: ${ASISTENTE_URL:-http://motor:5000}
+      ASISTENTE_TENANT: ${ASISTENTE_TENANT:-rapilink}
     depends_on:
       redis:
         condition: service_healthy
@@ -178,6 +192,13 @@ services:
       DBPASSWORD: ${DBPASSWORD:?}
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
+      # El CRM le habla al motor por la red interna del compose: la ingesta de
+      # documentos al corpus (common/tasks.py) y la purga diaria de retencion
+      # (purgar_retencion_asistente). Sin estas dos, esas tareas no fallan --
+      # registran "el asistente no esta configurado" y no hacen nada, que es
+      # peor porque no se nota.
+      ASISTENTE_URL: ${ASISTENTE_URL:-http://motor:5000}
+      ASISTENTE_TENANT: ${ASISTENTE_TENANT:-rapilink}
     depends_on:
       redis:
         condition: service_healthy
@@ -249,6 +270,23 @@ services:
       WISPHUB_BASE_URL: ${WISPHUB_BASE_URL:-https://api.wisphub.io}
       WISPHUB_MODO_REAL: ${WISPHUB_MODO_REAL:-true}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?}
+      # Ticket del CRM al escalar una conversacion, y la verificacion de si ese
+      # caso sigue abierto (nucleo/seguimiento/escalamiento.py). Sin esto, el
+      # bot escala y NO deja de responder: caso_sigue_abierto() no puede
+      # consultar y su fail-safe mantiene la pausa, pero el caso nunca se creo.
+      BOTTLECRM_API_TOKEN: ${BOTTLECRM_API_TOKEN:?}
+      # Descifra las credenciales por empresa de asistente.tenant_secrets
+      # (WhatsApp y cualquier otro auth_ref). Es la UNICA que se queda en el
+      # entorno, a proposito -- ver nucleo/seguridad/secretos.py.
+      #
+      # Con ':?' y no con un default: sin ella el motor arranca igual pero la
+      # pantalla de credenciales falla al guardar y el canal de WhatsApp no
+      # puede resolver un solo secreto. Es preferible que el despliegue se
+      # niegue a levantar y lo diga, a que levante y no funcione la mitad.
+      #
+      # SI SE PIERDE hay que volver a cargar todos los secretos a mano: no hay
+      # forma de recuperar los valores sin ella, y esa es la propiedad buscada.
+      SECRETOS_CLAVE_MAESTRA: ${SECRETOS_CLAVE_MAESTRA:?}
     depends_on:
       ollama:
         condition: service_healthy
