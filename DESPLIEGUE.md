@@ -171,6 +171,52 @@ Al entrar pide usuario y contraseña: son `DASHBOARD_USERNAME` y `DASHBOARD_PASS
 
 `motor`, `ollama` y `redis` **no llevan dominio**. El frontend alcanza al motor por la red interna (`http://motor:5000`); exponerlo sería abrir el asistente a internet sin autenticación.
 
+### 4.c El webhook de WhatsApp — la única excepción
+
+Meta necesita una URL pública HTTPS para entregar los mensajes, así que el motor **sí** necesita un dominio. Pero solo para esa ruta:
+
+| Dominio | Servicio | Puerto | Regla de Traefik |
+|---|---|---|---|
+| `wa.rapilinksas.co` | `motor` | 5000 | `Host(...) && PathPrefix(/canales/whatsapp)` |
+
+⚠️ **El `PathPrefix` no es opcional.** Sin él, el mismo dominio publica `/chat`, `/agentes` y `/agentes/catalogo`, que no piden autenticación de ninguna clase: cualquiera podría conversar con el asistente a costa de la empresa y leer cómo está configurado cada agente. La regla tiene que restringirse a `/canales/whatsapp` y nada más.
+
+La autenticación de esa ruta no es un token de sesión sino **la firma del cuerpo**: Meta firma cada entrega con el App Secret (`X-Hub-Signature-256`) y el motor rechaza con 401 lo que no valide. Falla cerrado — si no puede resolver el secreto (base caída incluida), tampoco procesa.
+
+En Meta, la URL de callback se registra como `https://wa.rapilinksas.co/canales/whatsapp/rapilink` (el último segmento es el slug del tenant, así que un segundo ISP entra por la misma infraestructura sin tocar nada).
+
+Comprobar el alta antes de darla en Meta — tiene que devolver `12345` en texto plano:
+
+```
+curl "https://wa.rapilinksas.co/canales/whatsapp/rapilink?hub.mode=subscribe&hub.verify_token=<el-verify-token>&hub.challenge=12345"
+```
+
+Y que lo demás **no** esté publicado (404 de Traefik, no una respuesta del motor):
+
+```
+curl -s -o /dev/null -w "%{http_code}\n" https://wa.rapilinksas.co/salud   # 404 esperado
+```
+
+### Credenciales de WhatsApp
+
+Se cargan **por empresa y cifradas** en `asistente.tenant_secrets` (ver `nucleo/seguridad/secretos.py`), no en el `.env`. El YAML solo guarda los nombres:
+
+| Nombre | De dónde sale en Meta |
+|---|---|
+| `WHATSAPP_PHONE_NUMBER_ID` | WhatsApp → API Setup. Es el ID del emisor, **no el teléfono** |
+| `WHATSAPP_TOKEN` | System User → token **permanente**. El de la consola dura 24 h |
+| `WHATSAPP_WABA_ID` | WhatsApp Business Account ID. Solo hace falta para plantillas |
+| `WHATSAPP_APP_SECRET` | App → Settings → Basic. Firma los webhooks |
+| `WHATSAPP_VERIFY_TOKEN` | **Lo inventa la empresa.** Solo se usa en el handshake de alta |
+
+La única que sigue en el `.env` (y en las variables de Dokploy) es `SECRETOS_CLAVE_MAESTRA`, que es la que descifra las demás. **Si se pierde hay que volver a cargar todos los secretos a mano** — no hay forma de recuperarlos, y esa es la propiedad buscada. Generarla con:
+
+```
+py -3.13 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Permisos que el System User necesita: `whatsapp_business_messaging` y `whatsapp_business_management`. Sin la **verificación del negocio** en Business Manager el número queda limitado a 250 conversaciones/día y no se aprueban plantillas. Y el número **no puede estar en uso en la app normal de WhatsApp**: hay que borrarlo de ahí o migrarlo, no se puede tener en los dos lados.
+
 El puerto del frontend es 3000, no 5173: con el build de producción manda adapter-node. El 5173 es del servidor de Vite, que quedó solo en desarrollo.
 
 Ambos dominios necesitan DNS apuntando al servidor **antes** de desplegar, o Traefik no puede emitir certificado:
@@ -279,7 +325,7 @@ ssh -L 5434:<ip-del-contenedor-db>:5432 root@86.48.18.185
 
 **Un rol `crm_user` para Django.** Hoy el CRM se conecta como `postgres`, que tiene `BYPASSRLS` — las políticas de aislamiento no se evalúan. Con una sola organización no hay consecuencia visible, y por eso es fácil de olvidar. El motor ya baja a `app_backend` (ver `nucleo/persistencia/db.py`); el CRM todavía no.
 
-**El webhook de WhatsApp.** `nucleo/canales/api.py` expone `/chat`, `/agentes` y `/salud`. No hay ruta de entrada para WhatsApp, y cuando la haya necesita dominio público por Traefik.
+**El webhook de WhatsApp — falta el dominio, no el código.** Las rutas ya existen (`GET`/`POST /canales/whatsapp/<tenant>`, ver §4.c) y sus guardas pasan (`py -3.13 tests/test_canal_whatsapp.py`). Lo que falta para el piloto: crear el dominio en Dokploy con el `PathPrefix`, cargar los cinco secretos de Meta, y poner `canales.whatsapp.activo: true` en la configuración del tenant. Pendientes de producto, aparte: fotos y audios (hoy se responde pidiendo texto) y las plantillas para avisos proactivos, que dependen de la aprobación de Meta.
 
 **El 502 de `crm.rapilinksas.co`.** Ese dominio tiene ruta en Traefik apuntando a algo que no responde. No afecta a la base —el pooler escucha en TCP directo, sin pasar por Traefik— pero quien espere llegar al Studio de Supabase por ahí, hoy no puede.
 

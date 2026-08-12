@@ -206,16 +206,29 @@
     if (escalada) {
       // Una sola burbuja: lo que el agente escribio ES la respuesta, no hay
       // nada que "contestar" del otro lado.
-      mensajes.push({ rol: 'assistant', contenido: texto, creado_en: new Date().toISOString() });
+      const burbuja = {
+        rol: 'assistant',
+        contenido: texto,
+        creado_en: new Date().toISOString(),
+        /** @type {string|null} */ sinEntregar: null
+      };
+      mensajes.push(burbuja);
       try {
         const resp = await fetch(`/api/conversaciones/${conversacion.id}/humano`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ mensaje: texto })
         });
+        const datos = await resp.json();
         if (!resp.ok) {
-          const datos = await resp.json();
           error = datos.error || 'No se pudo guardar la respuesta.';
+        } else if (datos.aviso) {
+          // Se guardo pero NO salio por el canal. El caso mas comun es la
+          // ventana de 24 h de WhatsApp. Va marcado en la burbuja y no solo
+          // como error suelto: dentro de un rato el aviso de arriba ya no
+          // esta, y la burbuja sigue ahi pareciendo entregada.
+          burbuja.sinEntregar = datos.aviso;
+          error = datos.aviso;
         }
       } catch (/** @type {any} */ err) {
         error = err?.message || 'No se pudo guardar la respuesta.';
@@ -310,8 +323,17 @@
         {#if item.tipo === 'dia'}
           <div class="dia"><span>{item.texto}</span></div>
         {:else}
-          <div class="chat-burbuja {burbujaClase(item.m.rol)}">
+          <div
+            class="chat-burbuja {burbujaClase(item.m.rol)}"
+            class:sin-entregar={item.m.sinEntregar}
+          >
             <div>{item.m.contenido}</div>
+            {#if item.m.sinEntregar}
+              <div class="no-llego">
+                <TriangleAlert size={12} />
+                No le llegó al cliente — {item.m.sinEntregar}
+              </div>
+            {/if}
             <div class="chat-hora v2-num">{hora(item.m.creado_en)}</div>
           </div>
         {/if}
@@ -914,6 +936,23 @@
     margin-top: 4px;
     font-size: 11px;
     opacity: 0.65;
+  }
+  /* Una respuesta guardada que nunca salio tiene que verse distinta de una
+     entregada. El aviso de arriba desaparece al rato; la burbuja se queda. */
+  .chat-burbuja.sin-entregar {
+    outline: 1px solid var(--v2-rust);
+    outline-offset: -1px;
+  }
+  .no-llego {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 6px;
+    padding-top: 5px;
+    border-top: 1px solid color-mix(in srgb, var(--v2-rust) 35%, transparent);
+    font-size: 11px;
+    color: var(--v2-rust);
+    line-height: 1.35;
   }
   .chat-escribiendo {
     display: flex;
