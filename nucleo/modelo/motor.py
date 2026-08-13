@@ -326,6 +326,16 @@ def _tool_call_a_dict(nombre: str, argumentos: dict, id_llamada: str) -> dict:
 # llamada a herramienta que no paso por el tool-calling real.
 _RE_FUGA_TOOL_CALL = re.compile(r"<\s*/?\s*｜+[^>]*>")
 
+# Visto en vivo con DeepSeek (agosto 2026): despues de que una herramienta de
+# verificacion devuelve {"verificado": true}, la redaccion final a veces
+# repite el valor crudo del campo -- la burbuja del cliente decia
+# literalmente "true", sin ninguna frase. RF-07 prohibe mostrar el dato
+# crudo; esto es el mismo fail-closed en codigo que _RE_FUGA_TOOL_CALL, para
+# un tipo de fuga distinto (no un token de control, sino el propio valor de
+# un resultado de herramienta sin redactar).
+_RE_RESPUESTA_CRUDA = re.compile(r"^(true|false|null|\d+(\.\d+)?|[\{\[].*[\}\]])$",
+                                 re.IGNORECASE)
+
 
 def _sanitizar(texto: str) -> str:
     limpio = _RE_FUGA_TOOL_CALL.sub("", texto)
@@ -344,11 +354,16 @@ def _redactar(referencia_modelo: str, historial: list[dict], temperatura: float,
     DESPUES de una herramienta real (ej. verificar_identidad_por_cedula), le
     faltaba la misma proteccion -- el cliente se quedaba con una burbuja
     vacia y tenia que escribir de nuevo para obtener respuesta.
+
+    Tambien reintenta si la redaccion es un valor crudo sin frase (ver
+    _RE_RESPUESTA_CRUDA) -- mismo motivo que la burbuja vacia: es una
+    respuesta que no le sirve al cliente, asi que se trata igual, no como un
+    resultado valido que solo hay que sanitizar.
     """
     for _ in range(intentos):
         resp = cliente.chat(referencia_modelo, historial, tools=None, temperatura=temperatura)
         limpio = _sanitizar(resp.contenido)
-        if limpio:
+        if limpio and not _RE_RESPUESTA_CRUDA.match(limpio):
             historial.append({"role": "assistant", "content": limpio})
             return limpio
     historial.append({"role": "assistant", "content": ""})
