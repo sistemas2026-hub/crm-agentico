@@ -50,6 +50,26 @@ docker compose up -d --build --no-deps motor
 
 Verificar que tiene `bge-m3` antes: `curl localhost:11434/api/tags`. Sin override, el default sigue siendo el contenedor — a nadie más le cambia nada.
 
+**Recargar el corpus de producción hay que hacerlo por túnel, no dentro del contenedor del motor.** `corpus/` está en `.gitignore` a propósito (`git ls-files corpus/` no trae ni un `.docx`) — los documentos viven solo en las máquinas de quien los cargó, nunca llegaron a la imagen del motor. `docker exec <motor> python cli/cargar_corpus.py rapilink` en el VPS falla con `No existe /app/corpus/rapilink`, y no es un bug: ese directorio nunca existió ahí.
+
+El script sí corre desde una máquina de desarrollo (donde SÍ está `corpus/rapilink/*.docx`) apuntando al Ollama del servidor, con un túnel SSH sobre la red interna de Docker — Ollama no publica puerto al host, `11434/tcp` sin `0.0.0.0:`:
+
+```
+# la IP del contenedor ollama, no 'localhost': el tunel entra al host, no al contenedor
+docker inspect $(docker ps -q --filter name=ollama) --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} -> {{$v.IPAddress}}{{println}}{{end}}'
+
+ssh -L 11434:<ip-del-contenedor-ollama>:11434 root@86.48.18.185
+```
+
+Y en otra terminal, con el túnel abierto y el `.env` local apuntando a la base real (ver arriba):
+
+```
+$env:OLLAMA_HOST="http://localhost:11434"      # PowerShell
+py -3.13 cli/cargar_corpus.py rapilink --forzar
+```
+
+Hecho en vivo el 13/08/2026: 106 fragmentos recargados con el `bge-m3` del servidor en 49 segundos.
+
 **No hay recarga en caliente del frontend dentro de Docker.** El código entra por un bind mount desde Windows y los eventos de archivo del host no cruzan al contenedor Linux, así que Vite nunca se entera de un cambio: sigue sirviendo el módulo compilado viejo. No falla ni avisa — se edita, se recarga el navegador y no pasa nada; o peor, SSR y cliente quedan en versiones distintas y sale `hydration_mismatch` en consola. Después de editar cualquier archivo del frontend:
 
 ```
@@ -393,13 +413,7 @@ La exportación conserva los comentarios del YAML — son notas de verificación
 
 Cosas sabidas que faltan. Cada una dice por qué importa, que es lo que no se deduce del código.
 
-**Levantar Ollama en el VPS.** El RAG **sí está conectado** en el código —`motor.responder()` llama a `recuperar()` en `nucleo/modelo/motor.py:394`— pero en producción no funciona: cada mensaje deja `[rag] no se pudo recuperar contexto` y el asistente contesta solo con el prompt, sin la documentación interna. No rompe el turno a propósito (peor es no atender), y por eso pasa desapercibido: la respuesta se ve razonable, solo que no cita el procedimiento que está cargado.
-
-**Causa encontrada (13/08/2026): redes de Docker, no Ollama.** Ollama estaba sano, con `bge-m3` bajado, y `OLLAMA_HOST` bien puesto. Lo que fallaba era que el motor y Ollama no compartían ninguna red, porque el dominio que se le creó al motor para el webhook lo movió a `dokploy-network` y lo sacó de `default`. Ver la primera entrada de Diagnóstico. Arreglado en `docker-compose.prod.yml`; **requiere redesplegar** para que se apliquen las redes.
-
 **Calibrar `umbral_similitud`.** Está en 0.35 y una pregunta deliberadamente ajena ("la receta del ajiaco santafereño") todavía arrastra un fragmento con 0.350. `bge-m3` da similitudes altas de base; 0.45 parece más sano, pero subirlo puede dejar fuera preguntas legítimas mal formuladas. Decidirlo midiendo con preguntas reales de los técnicos.
-
-**Recargar el corpus con el Ollama del servidor.** Los 106 fragmentos actuales se vectorizaron con el `bge-m3` de una máquina de desarrollo. Si la versión del modelo que baja el contenedor no es idéntica, los vectores dejan de ser comparables con los de las consultas — y esto **no da error**: simplemente empieza a devolver fragmentos peores. Es la clase de degradación que nadie nota hasta que alguien dice que "el asistente ya no responde bien". `py -3.13 cli/cargar_corpus.py rapilink --forzar` con `OLLAMA_HOST` apuntando al servidor.
 
 **Limpiar el esquema `asistente` de la base de isp-reports.** Una corrida temprana lo creó ahí con 106 fragmentos, cuando todavía se creía que el asistente viviría dentro de esa base. Está aislado en su propio esquema y no estorba, pero es contaminación de un proyecto en otro. `drop schema asistente cascade` contra `supabase-515b-db` no deja rastro — el esquema se diseñó para eso.
 
