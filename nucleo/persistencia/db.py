@@ -672,17 +672,21 @@ def ejemplos_por_caso(tenant: str, caso: str | None = None) -> list[dict]:
 
 def documentos_de(tenant: str) -> list[dict]:
     """
-    Los documentos del corpus de este tenant -- para la pantalla de solo
-    lectura que muestra que hay publicado (distinto de /manual/ejemplos,
-    que muestra material CRUDO todavia sin redactar). 'n_fragmentos' cuenta
-    solo los vigentes: un documento 'obsoleto' no tiene ninguno (ver
-    cli/cargar_corpus.py, _cargar_obsoleto -- solo guarda la fila de
-    metadatos, nunca fragmenta ni vectoriza).
+    Los documentos del corpus de este tenant -- para la pantalla que muestra
+    que hay publicado (distinto de /manual/ejemplos, que muestra material
+    CRUDO todavia sin redactar). 'n_fragmentos' cuenta solo los vigentes: un
+    documento 'obsoleto' no tiene ninguno (ver cli/cargar_corpus.py,
+    _cargar_obsoleto -- solo guarda la fila de metadatos, nunca fragmenta ni
+    vectoriza).
+
+    'roles_permitidos' viaja para que esa misma pantalla pueda mostrar y
+    editar a quien se le recupera cada documento (PUT
+    /corpus/documentos/<id>/roles) sin una consulta aparte.
     """
     with sesion(tenant) as (cur, org):
         cur.execute(
             """select d.id, d.codigo, d.titulo, d.version, d.estado,
-                      d.fecha_vigencia, d.creado_en,
+                      d.fecha_vigencia, d.creado_en, d.roles_permitidos,
                       (select count(*) from asistente.document_chunks c
                         where c.document_id = d.id and c.vigente) as n_fragmentos
                from asistente.documents d

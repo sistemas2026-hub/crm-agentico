@@ -1053,6 +1053,42 @@ def corpus_retirar(id_documento):
     return jsonify({"retirado": True})
 
 
+@app.put("/corpus/documentos/<id_documento>/roles")
+def corpus_actualizar_roles(id_documento):
+    """
+    Corrige a quien se le recupera un documento YA cargado, sin re-vectorizar.
+    Antes de esto, la unica forma de arreglar un typo en los roles era editar
+    el .docx o el YAML del tenant y volver a correr la ingesta completa.
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+
+    # roles_validos espera texto separado por comas -- reusa la MISMA
+    # validacion que la carga (rol desconocido = 400, nunca en silencio).
+    try:
+        roles = ingesta.roles_validos(config, ",".join(cuerpo.get("roles") or []))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    try:
+        with persistencia.sesion(tenant) as (cur, org):
+            ok = ingesta.actualizar_roles(cur, org, id_documento, roles)
+    except Exception as e:
+        print(f"[corpus] fallo al actualizar roles de '{id_documento}': {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudieron actualizar los roles."}), 500
+
+    if not ok:
+        return jsonify({"error": f"El documento '{id_documento}' no existe."}), 404
+    return jsonify({"roles_permitidos": roles})
+
+
 # =============================================================================
 #  WEBHOOK DE WHATSAPP  -  la unica ruta de este servicio expuesta a internet
 # =============================================================================

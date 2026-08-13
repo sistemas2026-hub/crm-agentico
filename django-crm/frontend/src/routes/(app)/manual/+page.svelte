@@ -3,18 +3,93 @@
    * Revision de lo marcado como "buen ejemplo" en Conversaciones y el
    * Simulador de WhatsApp (ver MarcarEjemplo.svelte), agrupado por
    * caso/proceso (tenant_config.manual.casos). Es la materia prima para
-   * redactar el procedimiento de cada caso -- redactarlo y publicarlo al
-   * corpus que usa el bot es una entrega aparte, esta pantalla es solo
-   * lectura.
+   * redactar el procedimiento de cada caso.
+   *
+   * "Documentos publicados" ya no es solo lectura: un ADMIN puede subir un
+   * .docx nuevo (DocumentoSubirDialog, que fragmenta y vectoriza al momento)
+   * y corregir a que roles se le muestra un documento ya cargado, sin
+   * re-vectorizar (PUT /api/corpus/documentos/<id>/roles).
    */
   import PageHeader from '$lib/v2/components/PageHeader.svelte';
   import Pill from '$lib/v2/components/Pill.svelte';
   import { relativeTime } from '$lib/v2/format.js';
+  import { Button } from '$lib/components/ui/button/index.js';
+  import DocumentoSubirDialog from '$lib/components/manual/DocumentoSubirDialog.svelte';
+  import { toast } from 'svelte-sonner';
 
   /** @type {{ data: any }} */
   let { data } = $props();
 
   const etiqueta = (c) => c.replaceAll('_', ' ');
+  const esAdmin = $derived(data.role === 'ADMIN');
+
+  let dialogoSubirAbierto = $state(false);
+
+  // Copia local mutable, mismo motivo que 'ejemplos' mas abajo: subir un
+  // documento o cambiarle los roles actualiza la pantalla al toque.
+  let documentos = $state(data.documentos ?? []);
+
+  /** El POST de subida no devuelve la misma forma que el GET de listado
+   * (ver nucleo/ingesta/corpus.py::ingerir) -- se traduce aca. 'yaExistia'
+   * cubre el caso raro de resubir el mismo codigo+version: reemplaza la fila
+   * en vez de duplicarla. */
+  function alSubirDocumento(/** @type {any} */ doc) {
+    const entrada = {
+      id: doc.document_id, codigo: doc.codigo, titulo: doc.titulo,
+      version: doc.version, estado: 'vigente', n_fragmentos: doc.fragmentos,
+      roles_permitidos: doc.roles_permitidos, fecha_vigencia: null,
+      creado_en: new Date().toISOString()
+    };
+    const yaExistia = documentos.some((/** @type {any} */ d) => d.id === entrada.id);
+    documentos = yaExistia
+      ? documentos.map((/** @type {any} */ d) => (d.id === entrada.id ? entrada : d))
+      : [entrada, ...documentos];
+  }
+
+  /** @type {Record<string, boolean>} */
+  let editandoRoles = $state({});
+  /** @type {Record<string, Record<string, boolean>>} */
+  let rolesEnEdicion = $state({});
+  /** @type {Record<string, boolean>} */
+  let guardandoRoles = $state({});
+
+  function abrirEdicionRoles(/** @type {any} */ doc) {
+    const actuales = new Set(doc.roles_permitidos || []);
+    /** @type {Record<string, boolean>} */
+    const marcados = {};
+    for (const r of data.roles || []) marcados[r] = actuales.has(r);
+    rolesEnEdicion = { ...rolesEnEdicion, [doc.id]: marcados };
+    editandoRoles = { ...editandoRoles, [doc.id]: true };
+  }
+
+  function toggleRolEdicion(/** @type {string} */ id, /** @type {string} */ rol) {
+    const actual = rolesEnEdicion[id] || {};
+    rolesEnEdicion = { ...rolesEnEdicion, [id]: { ...actual, [rol]: !actual[rol] } };
+  }
+
+  async function guardarRoles(/** @type {any} */ doc) {
+    guardandoRoles = { ...guardandoRoles, [doc.id]: true };
+    try {
+      const elegidos = Object.keys(rolesEnEdicion[doc.id] || {})
+        .filter((r) => rolesEnEdicion[doc.id][r]);
+      const resp = await fetch(`/api/corpus/documentos/${doc.id}/roles`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ roles: elegidos })
+      });
+      const datos = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        toast.error(datos?.error || 'No se pudieron actualizar los roles');
+        return;
+      }
+      documentos = documentos.map((/** @type {any} */ d) =>
+        d.id === doc.id ? { ...d, roles_permitidos: datos.roles_permitidos } : d);
+      editandoRoles = { ...editandoRoles, [doc.id]: false };
+      toast.success('Roles actualizados.');
+    } finally {
+      guardandoRoles = { ...guardandoRoles, [doc.id]: false };
+    }
+  }
 
   // Copia local mutable: quitar una marca la saca de la pantalla al toque,
   // sin esperar a recargar la pagina entera (ver quitarMarca abajo).
@@ -94,7 +169,16 @@
     Respuestas del agente marcadas como buen ejemplo, agrupadas por caso — base para redactar el
     procedimiento de cada una. Se marca desde Conversaciones o el Simulador de WhatsApp.
   {/snippet}
+  {#snippet actions()}
+    {#if esAdmin}
+      <Button type="button" onclick={() => (dialogoSubirAbierto = true)}>Nuevo documento</Button>
+    {/if}
+  {/snippet}
 </PageHeader>
+
+{#if esAdmin}
+  <DocumentoSubirDialog bind:open={dialogoSubirAbierto} roles={data.roles || []} onSubido={alSubirDocumento} />
+{/if}
 
 {#if data.error}
   <p class="aviso-error v2-pad">⚠️ {data.error}</p>
@@ -106,10 +190,10 @@
 {:else}
   <div class="v2-scroll">
     <div class="v2-pad manual-envoltorio">
-      {#if data.documentos && data.documentos.length > 0}
+      {#if documentos.length > 0}
         <div class="v2-label" style="margin-bottom:10px">Documentos publicados</div>
         <div class="docs-lista">
-          {#each data.documentos as doc (doc.id)}
+          {#each documentos as doc (doc.id)}
             <details
               class="v2-card doc-detalle"
               ontoggle={(e) => e.currentTarget.open && cargarFragmentos(doc.id)}
@@ -118,8 +202,50 @@
                 <span class="doc-titulo">{doc.titulo}</span>
                 <span class="v2-muted">{doc.codigo} · v{doc.version} · {doc.n_fragmentos} fragmento{doc.n_fragmentos === 1 ? '' : 's'}</span>
                 <Pill tone={doc.estado === 'vigente' ? 'moss' : 'slate'}>{doc.estado}</Pill>
+                {#if !doc.roles_permitidos || doc.roles_permitidos.length === 0}
+                  <Pill tone="clay">sin roles</Pill>
+                {/if}
               </summary>
               <div class="doc-cuerpo">
+                <div class="doc-roles">
+                  {#if !editandoRoles[doc.id]}
+                    <span class="v2-sub">
+                      {#if doc.roles_permitidos && doc.roles_permitidos.length > 0}
+                        Visible para: {doc.roles_permitidos.join(', ')}
+                      {:else}
+                        Nadie lo puede consultar todavía — sin roles asignados.
+                      {/if}
+                    </span>
+                    {#if esAdmin}
+                      <button type="button" class="quitar-marca-link" onclick={() => abrirEdicionRoles(doc)}>
+                        Editar roles
+                      </button>
+                    {/if}
+                  {:else}
+                    <div class="doc-roles-editor">
+                      {#each data.roles || [] as rol (rol)}
+                        <label class="doc-rol-check">
+                          <input
+                            type="checkbox"
+                            checked={!!rolesEnEdicion[doc.id]?.[rol]}
+                            onchange={() => toggleRolEdicion(doc.id, rol)}
+                          />
+                          {rol}
+                        </label>
+                      {/each}
+                      <div class="doc-roles-acciones">
+                        <button type="button" class="v2-btn v2-btn-sm" disabled={guardandoRoles[doc.id]}
+                          onclick={() => guardarRoles(doc)}>
+                          Guardar
+                        </button>
+                        <button type="button" class="v2-btn v2-btn-sm" disabled={guardandoRoles[doc.id]}
+                          onclick={() => (editandoRoles = { ...editandoRoles, [doc.id]: false })}>
+                          Cancelar
+                        </button>
+                      </div>
+                    </div>
+                  {/if}
+                </div>
                 {#if fragmentosPorDoc[doc.id] === 'cargando'}
                   <p class="v2-sub">Cargando…</p>
                 {:else if fragmentosPorDoc[doc.id]?.length === 0}
@@ -348,5 +474,31 @@
     line-height: 1.6;
     white-space: pre-wrap;
     margin: 0 0 8px;
+  }
+
+  .doc-roles {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .doc-roles-editor {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+  }
+  .doc-rol-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12.5px;
+  }
+  .doc-roles-acciones {
+    display: flex;
+    gap: 6px;
+    margin-left: auto;
   }
 </style>
