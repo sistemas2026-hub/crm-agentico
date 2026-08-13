@@ -46,6 +46,10 @@ services:
       context: ./django-crm
       dockerfile: Dockerfile
     restart: unless-stopped
+    # Con dominio en Dokploy, este servicio necesita las DOS redes. Ver la
+    # nota al pie de este archivo: declarar una sola lo saca de 'default' y
+    # deja de ver a sus companeros del compose.
+    networks: [default, dokploy-network]
     environment:
       # --- Django ---
       SECRET_KEY: ${SECRET_KEY:?definir en Dokploy, no reusar la de dev}
@@ -214,6 +218,10 @@ services:
       # del servidor de desarrollo. Escucha en el puerto 3000.
       target: prod
     restart: unless-stopped
+    # Con dominio en Dokploy, este servicio necesita las DOS redes. Ver la
+    # nota al pie de este archivo: declarar una sola lo saca de 'default' y
+    # deja de ver a sus companeros del compose.
+    networks: [default, dokploy-network]
     environment:
       # PUBLIC_ lo usa el NAVEGADOR: tiene que ser el dominio publico del
       # backend, no un nombre de la red interna que el navegador no resuelve.
@@ -257,6 +265,10 @@ services:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
+    # Con dominio en Dokploy, este servicio necesita las DOS redes. Ver la
+    # nota al pie de este archivo: declarar una sola lo saca de 'default' y
+    # deja de ver a sus companeros del compose.
+    networks: [default, dokploy-network]
     environment:
       # Conexion: las mismas cinco que el CRM. nucleo/persistencia/conexion.py
       # compone la cadena con ellas.
@@ -314,3 +326,31 @@ volumes:
   # Los modelos descargados. Sin esto, cada redespliegue vuelve a bajar 1.2 GB
   # y la primera consulta espera a que termine.
   ollama_models:
+
+networks:
+  # 'default' es la red que Compose crea para este proyecto y por la que los
+  # servicios se encuentran por nombre: el motor busca 'ollama', el backend
+  # busca 'redis'. No hace falta declararla, pero se nombra arriba para poder
+  # nombrar tambien la otra.
+  #
+  # 'dokploy-network' es de Dokploy, compartida con los demas proyectos del
+  # VPS, y es por donde Traefik alcanza a un servicio con dominio. La crea
+  # Dokploy, por eso 'external'.
+  #
+  # POR QUE ESTA ESCRITO ESTO. Al ponerle dominio a un servicio, Dokploy le
+  # agrega 'networks: [dokploy-network]'. En Compose, declarar una red explicita
+  # SACA al servicio de 'default' -- no se suma, lo reemplaza. El servicio gana
+  # internet y en el mismo movimiento pierde de vista a sus companeros, sin que
+  # nada avise.
+  #
+  # Paso de verdad: el dia que el motor recibio su dominio para el webhook de
+  # WhatsApp, dejo de resolver 'ollama' y el RAG se apago. No fallaba el turno
+  # -- 'recuperar()' atrapa el error a proposito, porque peor es no atender--
+  # asi que el asistente siguio contestando, solo que sin la documentacion
+  # interna. Se noto varios dias despues.
+  #
+  # Los servicios SIN dominio no van en dokploy-network: es compartida con
+  # otros proyectos del VPS, y redis y la base no tienen nada que hacer ahi.
+  default:
+  dokploy-network:
+    external: true

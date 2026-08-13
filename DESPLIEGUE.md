@@ -395,15 +395,7 @@ Cosas sabidas que faltan. Cada una dice por qué importa, que es lo que no se de
 
 **Levantar Ollama en el VPS.** El RAG **sí está conectado** en el código —`motor.responder()` llama a `recuperar()` en `nucleo/modelo/motor.py:394`— pero en producción no funciona: cada mensaje deja `[rag] no se pudo recuperar contexto` y el asistente contesta solo con el prompt, sin la documentación interna. No rompe el turno a propósito (peor es no atender), y por eso pasa desapercibido: la respuesta se ve razonable, solo que no cita el procedimiento que está cargado.
 
-La causa es el servicio `ollama` de `docker-compose.prod.yml`, que es quien vectoriza la pregunta con `bge-m3`. `OLLAMA_HOST` no puede estar mal —el compose lo fija literal, sin variable de por medio— así que si el motor no lo alcanza es que ese contenedor no está corriendo. Diagnóstico:
-
-```
-docker ps -a --filter name=ollama
-docker logs --tail 50 $(docker ps -aq --filter name=ollama)
-docker exec <contenedor-motor> python -c "import ollama; print(ollama.list())"
-```
-
-Una vez arriba, falta bajarle el modelo: `docker exec <contenedor-ollama> ollama pull bge-m3`.
+**Causa encontrada (13/08/2026): redes de Docker, no Ollama.** Ollama estaba sano, con `bge-m3` bajado, y `OLLAMA_HOST` bien puesto. Lo que fallaba era que el motor y Ollama no compartían ninguna red, porque el dominio que se le creó al motor para el webhook lo movió a `dokploy-network` y lo sacó de `default`. Ver la primera entrada de Diagnóstico. Arreglado en `docker-compose.prod.yml`; **requiere redesplegar** para que se apliquen las redes.
 
 **Calibrar `umbral_similitud`.** Está en 0.35 y una pregunta deliberadamente ajena ("la receta del ajiaco santafereño") todavía arrastra un fragmento con 0.350. `bge-m3` da similitudes altas de base; 0.45 parece más sano, pero subirlo puede dejar fuera preguntas legítimas mal formuladas. Decidirlo midiendo con preguntas reales de los técnicos.
 
@@ -462,6 +454,19 @@ Dos cosas que se deciden junto con eso:
 ## Diagnóstico
 
 Errores que ya costaron tiempo una vez.
+
+**Un servicio deja de ver a otro del mismo compose justo después de darle un dominio.** Al crear un dominio, Dokploy le escribe al servicio `networks: [dokploy-network]`, y en Compose declarar una red explícita **saca** al servicio de `default` en vez de sumarse. Gana internet y pierde de vista a sus compañeros, sin que nada avise.
+
+Pasó de verdad: el día que el motor recibió su dominio para el webhook de WhatsApp, dejó de resolver `ollama` y el RAG se apagó. No rompía el turno —`recuperar()` atrapa el error a propósito, porque peor es no atender— así que el asistente siguió contestando, solo que sin la documentación interna. Se notó días después, y el mensaje de la librería (`Failed to connect to Ollama... check that Ollama is downloaded`) manda a instalar algo que ya estaba corriendo y sano.
+
+Se ve en una línea — si no comparten ninguna red, ahí está:
+
+```
+docker inspect -f '{{.Name}} -> {{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' \
+  $(docker ps -q --filter name=motor) $(docker ps -q --filter name=ollama)
+```
+
+Ya está resuelto en `docker-compose.prod.yml`: los tres servicios con dominio (`backend`, `frontend`, `motor`) declaran **las dos** redes. Los que no tienen dominio se quedan fuera de `dokploy-network` a propósito: es compartida con los demás proyectos del VPS y ni `redis` ni la base tienen nada que hacer ahí.
 
 **`FATAL: Tenant or user not found`** — No es la contraseña ni el tenant. Casi seguro estás hablando con el pooler **equivocado**: hay dos Supabase en el servidor y durante mucho tiempo solo el viejo publicaba puertos al host. Verifica a cuál llegas antes de tocar credenciales:
 
