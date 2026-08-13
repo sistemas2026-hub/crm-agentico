@@ -1054,6 +1054,42 @@ def corpus_retirar(id_documento):
     return jsonify({"retirado": True})
 
 
+@app.put("/corpus/documentos/<id_documento>/roles")
+def corpus_actualizar_roles(id_documento):
+    """
+    Corrige a quien se le recupera un documento YA cargado, sin re-vectorizar.
+    Antes de esto, la unica forma de arreglar un typo en los roles era editar
+    el .docx o el YAML del tenant y volver a correr la ingesta completa.
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+
+    # roles_validos espera texto separado por comas -- reusa la MISMA
+    # validacion que la carga (rol desconocido = 400, nunca en silencio).
+    try:
+        roles = ingesta.roles_validos(config, ",".join(cuerpo.get("roles") or []))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    try:
+        with persistencia.sesion(tenant) as (cur, org):
+            ok = ingesta.actualizar_roles(cur, org, id_documento, roles)
+    except Exception as e:
+        print(f"[corpus] fallo al actualizar roles de '{id_documento}': {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudieron actualizar los roles."}), 500
+
+    if not ok:
+        return jsonify({"error": f"El documento '{id_documento}' no existe."}), 404
+    return jsonify({"roles_permitidos": roles})
+
+
 # =============================================================================
 #  WEBHOOK DE WHATSAPP  -  la unica ruta de este servicio expuesta a internet
 # =============================================================================
@@ -1162,6 +1198,15 @@ def _procesar_mensaje_whatsapp(config, tenant: str, rol: str, entrante: dict) ->
     de = entrante.get("de")
     wamid = entrante.get("wamid")
 
+    # Que llegue un BSUID en vez de un telefono NO impide contestar: el envio
+    # lo nombra por el campo 'recipient' en vez de 'to' (ver _destinatario() en
+    # nucleo/canales/whatsapp.py). Lo que si queda sin poder hacerse es cruzarlo
+    # con la base del ISP, porque un BSUID no es un numero: esa persona va a
+    # tener que identificarse con su cedula como cualquier numero desconocido.
+    if not entrante.get("telefono"):
+        print(f"[whatsapp] {de} llega sin telefono (BSUID): se contesta igual, "
+              f"pero no se puede reconocer al cliente sin que se identifique.")
+
     try:
         if wamid:
             whatsapp.marcar_leido(config, tenant, wamid)
@@ -1265,16 +1310,68 @@ def whatsapp_webhook(tenant):
               f"cliente_final: no hay con que atender el mensaje")
         return jsonify({"recibido": True}), 200
 
+    entrantes = whatsapp.mensajes_entrantes(cuerpo)
+    estados = whatsapp.estados_entrantes(cuerpo)
+
+    # Que trajo esta entrega. Sin esto, un webhook que llega y no produce nada
+    # es indistinguible de uno que no llego: los dos se ven como un 200 en el
+    # registro de acceso. Costo una tarde de depuracion averiguar cual de los
+    # dos estaba pasando.
+    if not entrantes and not estados:
+        campos = []
+        for entrada in (cuerpo or {}).get("entry", []) or []:
+            for cambio in entrada.get("changes", []) or []:
+                campos.append(cambio.get("field"))
+                valor = cambio.get("value") or {}
+                campos.append("value:" + ",".join(sorted(valor)))
+        print(f"[whatsapp] entrega SIN mensajes ni estados. Contenido: "
+              f"{campos or list((cuerpo or {}).keys())}")
+    else:
+        # Se dice de que forma llego el remitente, no solo cuantos mensajes.
+        # Un identificador opaco ('CO.1360...') en vez de un telefono rompe la
+        # verificacion por posesion del canal SIN dar ningun error: el cliente
+        # queda como desconocido y se le pide la cedula aunque escriba desde su
+        # propio numero. Es la clase de fallo que hay que poder ver de un
+        # vistazo en vez de deducir.
+        formas = [("telefono" if (e.get("de") or "").isdigit() else "OPACO")
+                  for e in entrantes]
+        print(f"[whatsapp] entrega con {len(entrantes)} mensaje(s) y "
+              f"{len(estados)} estado(s). Remitente(s): {formas}")
+
+        # Si el remitente vino opaco, hace falta saber que SI trajo la entrega
+        # para encontrar donde esta el telefono. Se registran las CLAVES de
+        # cada nivel, nunca los valores: el contenido es de un cliente.
+        if "OPACO" in formas:
+            for entrada in (cuerpo or {}).get("entry", []) or []:
+                for cambio in entrada.get("changes", []) or []:
+                    valor = cambio.get("value") or {}
+                    contactos = valor.get("contacts") or []
+                    print(f"[whatsapp] remitente opaco. field={cambio.get('field')!r} "
+                          f"value={sorted(valor)} "
+                          f"contacts={len(contactos)} "
+                          f"claves_contacto={sorted(contactos[0]) if contactos else '-'} "
+                          f"metadata={sorted(valor.get('metadata') or {})}")
+
     atendidos = 0
-    for entrante in whatsapp.mensajes_entrantes(cuerpo):
+    for entrante in entrantes:
         wamid = entrante.get("wamid")
         de = entrante.get("de")
         if not wamid or not de:
+            # Un mensaje sin id o sin remitente no se puede atender NI
+            # deduplicar. Antes se descartaba con un 'continue' mudo, y eso
+            # dejaba el peor rastro posible: el registro decia "entrega con 1
+            # mensaje" y despues no pasaba nada, sin ninguna linea que
+            # explicara por que. Se dice que se descarto y con que forma
+            # llego -- las CLAVES, nunca el contenido, que es de un cliente.
+            print(f"[whatsapp] mensaje descartado: sin "
+                  f"{'wamid' if not wamid else 'remitente'}. "
+                  f"tipo={entrante.get('tipo')!r} "
+                  f"claves={sorted((entrante.get('crudo') or {}).keys())}")
             continue
 
         # Antes de gastar un turno del modelo: si este wamid ya se atendio, es
         # un reintento de Meta y contestar de nuevo seria cobrar y responder
-        # dos veces. Ver supabase/07_webhook_eventos.sql.
+        # dos veces. Ver supabase/08_webhook_eventos.sql.
         try:
             if persistencia.evento_ya_visto(tenant, wamid):
                 continue
@@ -1294,12 +1391,24 @@ def whatsapp_webhook(tenant):
 
     # Los acuses de entrega llegan por este mismo webhook y NO son
     # conversacion: sin separarlos, el bot contestaria a su propio "entregado".
-    for estado in whatsapp.estados_entrantes(cuerpo):
+    for estado in estados:
         if estado.get("estado") == "failed":
-            print(f"[whatsapp] no se pudo entregar {estado.get('wamid')} a "
-                  f"{estado.get('de')}: {estado.get('error')}")
+            print(f"[whatsapp] no se pudo entregar a {estado.get('de')}: "
+                  f"codigo={estado.get('codigo')} {estado.get('error')} "
+                  f"| detalle={estado.get('detalle')}")
+            continue
+        # Los acuses buenos tambien se registran. Antes solo se imprimian los
+        # fallidos, y eso obligaba a deducir del SILENCIO que un mensaje habia
+        # salido bien -- que es justo lo que no se puede distinguir de que el
+        # acuse nunca llego. La categoria es lo que factura Meta.
+        categoria = estado.get("categoria")
+        print(f"[whatsapp] {estado.get('estado')} -> {estado.get('de')}"
+              + (f" | conversacion={estado.get('conversacion')} ({categoria})"
+                 if categoria else ""))
 
     return jsonify({"recibido": True, "atendidos": atendidos}), 200
+
+
 @app.get("/corpus/documentos")
 def corpus_documentos():
     tenant = request.args.get("tenant")

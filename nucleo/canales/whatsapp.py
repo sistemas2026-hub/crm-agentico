@@ -167,14 +167,56 @@ def mensajes_entrantes(cuerpo: dict) -> list[dict]:
     Devuelve, por mensaje:
         wamid    id unico de Meta -- la clave para no contestar dos veces
         de       telefono del cliente, en formato internacional sin '+'
+        nombre   como se llama en su perfil de WhatsApp, si vino
         tipo     text | image | audio | ...
         texto    el contenido si es texto; '' en los demas tipos
         crudo    el mensaje entero, para lo que todavia no se traduce
+
+    DE DONDE SALE EL TELEFONO  (no es una sola clave)
+    -------------------------------------------------
+    La referencia de Meta dice que el remitente viene en 'messages[].from', y
+    que 'contacts[].wa_id' trae el mismo numero. En la practica llego una
+    tercera forma: 'from_user_id' con un valor OPACO ('CO.13603999...'), que
+    no es un telefono y no sirve para cruzar contra la base del ISP.
+
+    Por eso se prefiere 'wa_id' de 'contacts': es el unico que la
+    documentacion define como el numero, y es el que necesita la verificacion
+    por posesion del canal (nucleo/seguridad/verificacion.py). Las otras dos
+    quedan como respaldo, en orden de confiabilidad -- sin ninguna de las
+    tres no hay a quien contestarle.
     """
     salida = []
     for entrada in (cuerpo or {}).get("entry", []) or []:
         for cambio in entrada.get("changes", []) or []:
             valor = cambio.get("value") or {}
+
+            # Los contactos vienen al lado de los mensajes, en la misma
+            # entrega. Casi siempre es uno; se indexa por si Meta agrupa
+            # varios remitentes en un mismo envio.
+            contactos = valor.get("contacts") or []
+            wa_id = None
+            bsuid = None
+            nombre = None
+            if contactos:
+                # 'wa_id' es el telefono, y es lo que hace falta para
+                # reconocer al cliente contra la base del ISP.
+                #
+                # 'user_id' es un BSUID (Business-Scoped User ID): identifica
+                # al usuario FRENTE A ESTE NEGOCIO y no es un telefono. El
+                # 'CO.' que lo precede NO es un prefijo de pais que haya que
+                # quitar -- es parte del identificador. Verificado en vivo
+                # (agosto 2026): el endpoint de envio no acepta un BSUID como
+                # destinatario en ninguna de las formas probadas; extrae los
+                # digitos, los trata como telefono y el acuse vuelve con
+                # 131026 ("no es un numero de WhatsApp").
+                #
+                # Se guarda igual porque es el unico identificador estable que
+                # llega, pero mientras venga solo el BSUID no hay forma de
+                # responderle a esa persona ni de cruzarla con WispHub.
+                wa_id = contactos[0].get("wa_id")
+                bsuid = contactos[0].get("user_id")
+                nombre = ((contactos[0].get("profile") or {}).get("name"))
+
             for m in valor.get("messages", []) or []:
                 tipo = m.get("type", "")
                 # Los tipos con archivo comparten la forma {id, mime_type,
@@ -182,7 +224,24 @@ def mensajes_entrantes(cuerpo: dict) -> list[dict]:
                 adjunto = m.get(tipo) or {} if tipo in TIPOS_CON_ARCHIVO else {}
                 salida.append({
                     "wamid": m.get("id"),
-                    "de": m.get("from"),
+                    # DOS IDENTIDADES, NO UNA  -- se guardan por separado a
+                    # proposito, porque no son intercambiables:
+                    #
+                    #   telefono  sirve para responder Y para reconocer al
+                    #             cliente contra la base del ISP. Puede faltar.
+                    #   bsuid     identifica a la persona frente a este negocio.
+                    #             Es estable, pero NO se puede usar para
+                    #             responder (ver arriba) ni para cruzar datos.
+                    #
+                    # Colapsarlas en un solo campo fue el error que hizo que
+                    # se le respondiera a un BSUID como si fuera un telefono.
+                    "telefono": wa_id or m.get("from"),
+                    "bsuid": bsuid or m.get("from_user_id"),
+                    # Con que identificar la conversacion: el telefono si esta,
+                    # y si no el BSUID -- sin ninguno de los dos no hay a quien
+                    # atribuirle el mensaje.
+                    "de": wa_id or m.get("from") or bsuid or m.get("from_user_id"),
+                    "nombre": nombre,
                     "tipo": tipo,
                     "texto": (m.get("text") or {}).get("body", "") if tipo == "text" else "",
                     # El pie de foto es texto del cliente: "mira como quedo"
@@ -208,11 +267,34 @@ def estados_entrantes(cuerpo: dict) -> list[dict]:
     for entrada in (cuerpo or {}).get("entry", []) or []:
         for cambio in entrada.get("changes", []) or []:
             for s in (cambio.get("value") or {}).get("statuses", []) or []:
+                # El CODIGO es lo que identifica el motivo; el texto de Meta
+                # es el mismo ('Message undeliverable') para causas muy
+                # distintas -- destinatario que no existe, fuera de la ventana
+                # de 24 h, numero bloqueado. Sin el codigo hay que adivinar
+                # cual de las tres es.
+                err = (s.get("errors") or [{}])[0]
+                # Meta NO cobra por mensaje sino por CONVERSACION: una ventana
+                # de 24 h con esta persona, con su propio id y su categoria
+                # (service / utility / marketing / authentication), cada una
+                # con tarifa distinta. Sin esto, la unica forma de saber cuanto
+                # cuesta el canal es entrar al panel de Meta -- y
+                # limites.max_costo_usd_mes no tiene con que contar.
+                conv = s.get("conversation") or {}
                 salida.append({
                     "wamid": s.get("id"),
                     "estado": s.get("status"),
-                    "de": s.get("recipient_id"),
-                    "error": (s.get("errors") or [{}])[0].get("message"),
+                    # 'recipient_id' es el telefono. Un envio por BSUID (ver
+                    # _destinatario) trae el identificador en
+                    # 'recipient_user_id' -- mismo patron de identidad dual
+                    # que mensajes_entrantes(), y sin este respaldo el acuse
+                    # de un BSUID queda con 'de: None' en el log.
+                    "de": s.get("recipient_id") or s.get("recipient_user_id"),
+                    "error": err.get("message"),
+                    "codigo": err.get("code"),
+                    "detalle": (err.get("error_data") or {}).get("details"),
+                    "conversacion": conv.get("id"),
+                    "categoria": ((conv.get("origin") or {}).get("type")
+                                  or conv.get("category")),
                 })
     return salida
 
@@ -252,6 +334,33 @@ def _post(config, tenant: str, recurso: str, payload: dict) -> dict:
     return r.json()
 
 
+def _destinatario(para: str) -> dict:
+    """
+    El campo con el que se nombra a quien recibe. NO es siempre el mismo, y
+    confundirlos es un error mudo.
+
+    'to' es para un TELEFONO. 'recipient' es para un BSUID (Business-Scoped
+    User ID, ej. 'CO.1360399936298471'), que es lo que Meta entrega desde abril
+    de 2026 cuando la persona escondio su numero detras de un nombre de
+    usuario. Los envios a BSUID se habilitaron en julio de 2026.
+
+    Mandar un BSUID por 'to' NO da un error claro: Meta acepta la peticion, le
+    extrae los digitos, los trata como telefono, y el fallo llega despues y por
+    otro lado -- un 131026 ("no es un numero de WhatsApp") en el webhook de
+    estados. Costo dias de buscar la causa donde no estaba.
+
+    El 'CO.' es parte del identificador, no un prefijo de pais: la
+    documentacion avisa que quitarle el punto o los caracteres alfanumericos
+    hace fallar la peticion.
+    """
+    para = (para or "").strip()
+    if not para:
+        raise ErrorWhatsApp("No hay a quien enviarle el mensaje.")
+    # Solo digitos = telefono. Cualquier otra cosa se trata como BSUID: es mas
+    # seguro que buscar el 'CO.', que es el prefijo de UN pais y no una regla.
+    return {"to": para} if para.isdigit() else {"recipient": para}
+
+
 def enviar_texto(config, tenant: str, para: str, texto: str) -> str | None:
     """
     Un mensaje de texto al cliente. Devuelve el wamid del mensaje enviado, que
@@ -271,7 +380,7 @@ def enviar_texto(config, tenant: str, para: str, texto: str) -> str | None:
     respuesta = _post(config, tenant, f"{emisor}/messages", {
         "messaging_product": "whatsapp",
         "recipient_type": "individual",
-        "to": para,
+        **_destinatario(para),
         "type": "text",
         # preview_url en False a proposito: una vista previa de enlace la
         # genera Meta trayendo la pagina, y no hace falta para lo que responde
@@ -321,7 +430,7 @@ def enviar_plantilla(config, tenant: str, para: str, plantilla: str,
     respuesta = _post(config, tenant, f"{emisor}/messages", {
         "messaging_product": "whatsapp",
         "recipient_type": "individual",
-        "to": para,
+        **_destinatario(para),
         "type": "template",
         "template": {
             "name": nombre_real,

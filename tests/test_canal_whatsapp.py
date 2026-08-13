@@ -195,11 +195,99 @@ def main():
     check("una imagen no trae texto", mensajes[1]["texto"] == "")
     check("pero si conserva el tipo", mensajes[1]["tipo"] == "image")
 
+    # Meta entrega el remitente en 'from' O en 'from_user_id' -- las dos se
+    # vieron en vivo. Leer solo una descarta mensajes reales, y el descarte es
+    # invisible: sin remitente no hay a quien contestarle, asi que el mensaje
+    # se pierde sin que nadie se entere.
+    sobre_alterno = {'entry': [{'changes': [{'value': {'messages': [
+        {'id': 'wamid.ALT', 'from_user_id': '573001112233', 'type': 'text',
+         'text': {'body': 'llego con from_user_id'}}
+    ]}}]}]}
+    alt = whatsapp.mensajes_entrantes(sobre_alterno)
+    check("lee el remitente cuando viene como 'from_user_id'",
+          len(alt) == 1 and alt[0]["de"] == "573001112233")
+    check("y sigue leyendolo cuando viene como 'from'",
+          mensajes[0]["de"] == "573001112233")
+
+    # De donde sale el telefono. 'wa_id' de contacts es el unico que la
+    # documentacion define como el numero; 'from_user_id' llego en vivo con un
+    # valor OPACO ('CO.136039...') que no sirve para cruzar contra la base del
+    # ISP. Si se prefiriera el equivocado, la verificacion por posesion del
+    # canal deja de funcionar sin dar ningun error: el cliente queda como
+    # desconocido y se le pide la cedula aunque escriba desde su numero.
+    con_contacto = {'entry': [{'changes': [{'value': {
+        'contacts': [{'wa_id': '573208633423',
+                      'profile': {'name': 'Mario'}}],
+        'messages': [{'id': 'wamid.C1', 'from_user_id': 'CO.999999999',
+                      'type': 'text', 'text': {'body': 'hola'}}]}}]}]}
+    c = whatsapp.mensajes_entrantes(con_contacto)
+    check("prefiere el wa_id de contacts sobre el id opaco",
+          len(c) == 1 and c[0]["de"] == "573208633423")
+    check("y trae el nombre del perfil", c[0]["nombre"] == "Mario")
+
+    # Telefono y BSUID son cosas distintas y se guardan separadas: colapsarlas
+    # en un campo es lo que hizo que se le respondiera a un BSUID como si
+    # fuera un numero, con 131026 de vuelta y el cliente sin recibir nada.
+    solo_bsuid = {'entry': [{'changes': [{'value': {
+        'contacts': [{'user_id': 'CO.1360399936298471', 'profile': {'name': 'M'}}],
+        'messages': [{'id': 'wamid.B', 'from_user_id': 'CO.1360399936298471',
+                      'type': 'text', 'text': {'body': 'hola'}}]}}]}]}
+    b = whatsapp.mensajes_entrantes(solo_bsuid)[0]
+    check("sin wa_id, 'telefono' queda vacio en vez de inventarse uno",
+          b["telefono"] is None)
+    check("y el BSUID se conserva aparte", b["bsuid"] == "CO.1360399936298471")
+
+    # A un BSUID se le contesta por 'recipient'; a un telefono por 'to'.
+    # Mandar un BSUID por 'to' no da error: Meta le extrae los digitos, los
+    # trata como telefono, y el fallo aparece despues y por otro lado (131026
+    # en el webhook de estados). Por eso se verifica el campo, no el envio.
+    check("a un BSUID se le escribe por 'recipient'",
+          whatsapp._destinatario("CO.1360399936298471")
+          == {"recipient": "CO.1360399936298471"})
+    check("y a un telefono por 'to'",
+          whatsapp._destinatario("573208633423") == {"to": "573208633423"})
+    check("el 'CO.' no se toca: quitarlo hace fallar la peticion",
+          "CO." in whatsapp._destinatario("CO.123")["recipient"])
+
+    solo_opaco = {'entry': [{'changes': [{'value': {'messages': [
+        {'id': 'wamid.C2', 'from_user_id': 'CO.888', 'type': 'text',
+         'text': {'body': 'hola'}}]}}]}]}
+    c2 = whatsapp.mensajes_entrantes(solo_opaco)
+    check("sin contacts, cae al id opaco antes que descartar el mensaje",
+          len(c2) == 1 and c2[0]["de"] == "CO.888")
+
     estados = whatsapp.estados_entrantes(sobre)
     check("los acuses salen por separado, no como mensajes", len(estados) == 1)
     check("un acuse NO aparece entre los mensajes",
           all(m["wamid"] != "wamid.CCC" for m in mensajes))
     check("lee el estado del acuse", estados[0]["estado"] == "delivered")
+
+    # Meta cobra por conversacion de 24 h, no por mensaje, y cada categoria
+    # tiene tarifa distinta. Si esto se deja de leer, el costo del canal solo
+    # se puede mirar en el panel de Meta.
+    con_conversacion = {'entry': [{'changes': [{'value': {'statuses': [
+        {'id': 'wamid.S1', 'status': 'sent', 'recipient_id': 'CO.999',
+         'conversation': {'id': 'conv-abc',
+                          'origin': {'type': 'service'}}}]}}]}]}
+    e = whatsapp.estados_entrantes(con_conversacion)[0]
+    check("guarda el id de la conversacion que factura Meta",
+          e["conversacion"] == "conv-abc")
+    check("y su categoria", e["categoria"] == "service")
+
+    sin_origin = {'entry': [{'changes': [{'value': {'statuses': [
+        {'id': 'wamid.S2', 'status': 'sent',
+         'conversation': {'id': 'c2', 'category': 'utility'}}]}}]}]}
+    check("si la categoria viene suelta en vez de en 'origin', tambien",
+          whatsapp.estados_entrantes(sin_origin)[0]["categoria"] == "utility")
+
+    # Un acuse de un envio por BSUID (ver _destinatario) no trae
+    # 'recipient_id' -- ese campo es del telefono. Sin el respaldo, el acuse
+    # queda con 'de: None' y el log de un delivered/failed pierde a quien.
+    solo_bsuid = {'entry': [{'changes': [{'value': {'statuses': [
+        {'id': 'wamid.S3', 'status': 'delivered',
+         'recipient_user_id': 'CO.1360399936298471'}]}}]}]}
+    check("un acuse de BSUID lee 'recipient_user_id' cuando falta 'recipient_id'",
+          whatsapp.estados_entrantes(solo_bsuid)[0]["de"] == "CO.1360399936298471")
 
     print("\nsobres degenerados (no pueden tumbar el webhook)")
     for nombre, valor in [("vacio", {}), ("None", None),

@@ -158,32 +158,6 @@ services:
     ports:
       - "5173:5173"
 
-  # Embeddings. NO sirve el LLM: los cinco roles estan redirigidos a
-  # deepseek-v4-flash en tenants/rapilink.config.yaml, asi que aca solo corre
-  # bge-m3 (~1.2 GB en disco, ~2-3 GB residente) y no el qwen3:30b, que pedia
-  # 18 GB. Tampoco se puede resolver con DeepSeek: su API expone /models y
-  # /chat/completions, pero /embeddings responde 404 -- verificado. Un modelo
-  # de chat no devuelve vectores; es otro tipo de modelo, no una opcion del
-  # mismo.
-  ollama:
-    image: ollama/ollama:latest
-    restart: unless-stopped
-    environment:
-      # Por defecto Ollama descarga el modelo de memoria tras 5 minutos
-      # ocioso. Los embeddings estan en el camino critico de CADA pregunta,
-      # no solo de la carga del corpus: sin esto, la primera consulta despues
-      # de una pausa paga la recarga entera (RNF-04, el tecnico esperando en
-      # campo).
-      OLLAMA_KEEP_ALIVE: "-1"
-    volumes:
-      - ollama_models:/root/.ollama
-    healthcheck:
-      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-
   motor:
     build:
       context: .
@@ -191,17 +165,14 @@ services:
     env_file:
       - .env
     environment:
-      # Redirige ollama.embed() al contenedor de arriba. La libreria resuelve
-      # el host con os.getenv('OLLAMA_HOST'), asi que no hay codigo que tocar.
-      #
-      # Configurable, no fijo: quien ya tiene Ollama nativo en su maquina
-      # (Windows/Mac, el uso habitual de este equipo de desarrollo -- ver
-      # PRD.md 7.1.1) puede apuntar aca a 'http://host.docker.internal:11434'
-      # desde su .env y saltarse el contenedor -- y con el, la descarga de
-      # ~4-5 GB (imagen + bge-m3) que ese Ollama ya tiene resuelta. Sin
-      # override en el .env, el default sigue siendo el contenedor de abajo:
-      # a nadie mas le cambia nada.
-      OLLAMA_HOST: ${OLLAMA_HOST:-http://ollama:11434}
+      # Embeddings del corpus (nucleo/recuperacion/embeddings.py): API de
+      # OpenAI, no Ollama local (agosto 2026). Antes este servicio corria un
+      # contenedor 'ollama' aparte solo para bge-m3 (~1.2 GB en disco, ~2-3 GB
+      # residente) -- se saco por completo, no solo se apunto a otro lado: sin
+      # otro consumidor (los cinco roles de chat ya estaban redirigidos a
+      # DeepSeek/Anthropic), era el unico motivo para tenerlo corriendo.
+      # Requiere OPENAI_API_KEY en el .env de la raiz.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?agregalo al .env -- ver nucleo/recuperacion/embeddings.py}
     ports:
       - "5000:5000"
     volumes:
@@ -209,9 +180,6 @@ services:
       - ./tenants:/app/tenants
       - ./corpus:/app/corpus
       - ./cli:/app/cli
-    depends_on:
-      ollama:
-        condition: service_healthy
 
 volumes:
   # external: reusa el volumen que ya existia cuando django-crm corria como
@@ -222,6 +190,3 @@ volumes:
     name: django-crm_postgres_data
     external: true
   frontend_node_modules:
-  # Los modelos descargados. Sin volumen, cada redespliegue vuelve a bajar
-  # 1.2 GB y la primera consulta espera a que termine.
-  ollama_models:

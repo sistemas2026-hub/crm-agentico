@@ -46,6 +46,10 @@ services:
       context: ./django-crm
       dockerfile: Dockerfile
     restart: unless-stopped
+    # Con dominio en Dokploy, este servicio necesita las DOS redes. Ver la
+    # nota al pie de este archivo: declarar una sola lo saca de 'default' y
+    # deja de ver a sus companeros del compose.
+    networks: [default, dokploy-network]
     environment:
       # --- Django ---
       SECRET_KEY: ${SECRET_KEY:?definir en Dokploy, no reusar la de dev}
@@ -214,6 +218,10 @@ services:
       # del servidor de desarrollo. Escucha en el puerto 3000.
       target: prod
     restart: unless-stopped
+    # Con dominio en Dokploy, este servicio necesita las DOS redes. Ver la
+    # nota al pie de este archivo: declarar una sola lo saca de 'default' y
+    # deja de ver a sus companeros del compose.
+    networks: [default, dokploy-network]
     environment:
       # PUBLIC_ lo usa el NAVEGADOR: tiene que ser el dominio publico del
       # backend, no un nombre de la red interna que el navegador no resuelve.
@@ -234,29 +242,15 @@ services:
     depends_on:
       - backend
 
-  # Solo embeddings (bge-m3). El LLM va a la API de DeepSeek: los cinco roles
-  # estan redirigidos en tenants/rapilink.config.yaml.
-  ollama:
-    image: ollama/ollama:latest
-    restart: unless-stopped
-    environment:
-      # Sin esto el modelo se descarga de memoria tras 5 minutos ocioso y la
-      # primera consulta despues de una pausa paga la recarga (RNF-04).
-      OLLAMA_KEEP_ALIVE: "-1"
-    volumes:
-      - ollama_models:/root/.ollama
-    healthcheck:
-      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-
   motor:
     build:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
+    # Con dominio en Dokploy, este servicio necesita las DOS redes. Ver la
+    # nota al pie de este archivo: declarar una sola lo saca de 'default' y
+    # deja de ver a sus companeros del compose.
+    networks: [default, dokploy-network]
     environment:
       # Conexion: las mismas cinco que el CRM. nucleo/persistencia/conexion.py
       # compone la cadena con ellas.
@@ -265,11 +259,15 @@ services:
       DBNAME: ${DBNAME:?}
       DBUSER: ${DBUSER:?}
       DBPASSWORD: ${DBPASSWORD:?}
-      OLLAMA_HOST: http://ollama:11434
       WISPHUB_API_KEY: ${WISPHUB_API_KEY:?}
       WISPHUB_BASE_URL: ${WISPHUB_BASE_URL:-https://api.wisphub.io}
       WISPHUB_MODO_REAL: ${WISPHUB_MODO_REAL:-true}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?}
+      # Embeddings del corpus (nucleo/recuperacion/embeddings.py). Reemplaza a
+      # Ollama local (agosto 2026): el VPS no tiene recursos de sobra para
+      # correr un modelo ademas de todo lo demas, y esto ya no depende de
+      # que el motor comparta red con ningun otro contenedor para vectorizar.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?}
       # Ticket del CRM al escalar una conversacion, y la verificacion de si ese
       # caso sigue abierto (nucleo/seguimiento/escalamiento.py). Sin esto, el
       # bot escala y NO deja de responder: caso_sigue_abierto() no puede
@@ -287,9 +285,6 @@ services:
       # SI SE PIERDE hay que volver a cargar todos los secretos a mano: no hay
       # forma de recuperar los valores sin ella, y esa es la propiedad buscada.
       SECRETOS_CLAVE_MAESTRA: ${SECRETOS_CLAVE_MAESTRA:?}
-    depends_on:
-      ollama:
-        condition: service_healthy
     # UN SOLO worker, y no es por memoria: nucleo/canales/api.py guarda el
     # historial de cada conversacion en '_sesiones', un diccionario en memoria
     # del proceso. Con varios workers -que son procesos, no hilos- cada uno
@@ -311,6 +306,35 @@ services:
 volumes:
   # Archivos subidos por los usuarios. Sin S3, viven en disco.
   media:
-  # Los modelos descargados. Sin esto, cada redespliegue vuelve a bajar 1.2 GB
-  # y la primera consulta espera a que termine.
-  ollama_models:
+
+networks:
+  # 'default' es la red que Compose crea para este proyecto y por la que los
+  # servicios se encuentran por nombre: el backend busca 'redis', el frontend
+  # y el backend (la purga de retencion) buscan 'motor'. No hace falta
+  # declararla, pero se nombra arriba para poder nombrar tambien la otra.
+  #
+  # 'dokploy-network' es de Dokploy, compartida con los demas proyectos del
+  # VPS, y es por donde Traefik alcanza a un servicio con dominio. La crea
+  # Dokploy, por eso 'external'.
+  #
+  # POR QUE ESTA ESCRITO ESTO. El motor aparecio un dia SOLO en
+  # dokploy-network, sin 'default', y dejo de resolver 'ollama' (el servicio
+  # que vectorizaba el corpus antes de pasar a la API de OpenAI, agosto 2026):
+  # el RAG se apago y nadie lo vio, porque recuperar() atrapa el error a
+  # proposito --peor es no atender-- asi que siguio contestando sin la
+  # documentacion interna.
+  #
+  # Por que se quedo sin 'default' no se sabe. La explicacion obvia (que
+  # Dokploy le escribe 'networks: [dokploy-network]' al darle dominio, y en
+  # Compose una red explicita reemplaza a 'default' en vez de sumarse) NO se
+  # sostiene: backend tambien tiene dominio y quedo con las dos.
+  #
+  # Nombrarlas aca deja de depender de averiguarlo. Se mantiene aunque
+  # 'ollama' ya no exista: motor sigue necesitando 'default' para que
+  # frontend y backend lo encuentren.
+  #
+  # Los servicios SIN dominio no van en dokploy-network: es compartida con
+  # otros proyectos del VPS, y redis y la base no tienen nada que hacer ahi.
+  default:
+  dokploy-network:
+    external: true

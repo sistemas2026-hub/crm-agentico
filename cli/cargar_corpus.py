@@ -57,19 +57,17 @@ RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ))
 sys.path.insert(0, str(RAIZ / "cli"))
 
-import ollama                                                  # noqa: E402
 import psycopg                                                 # noqa: E402
 from dotenv import load_dotenv                                 # noqa: E402
 
 from nucleo.config import cargar_config                        # noqa: E402
 from nucleo.ingesta.docx import procesar                       # noqa: E402
 from nucleo.persistencia.conexion import dsn                   # noqa: E402
+from nucleo.recuperacion.embeddings import (                   # noqa: E402
+    MODELO as MODELO_EMBEDDINGS, vectorizar as _vectorizar_openai)
 from ingerir import clasificar, perfil_de                      # noqa: E402  (reutiliza lo ya construido)
 
 load_dotenv(RAIZ / ".env", override=True)
-
-MODELO_EMBEDDINGS = "bge-m3"
-DIMENSIONES = 1024
 
 
 def _hash(ruta: Path) -> str:
@@ -111,18 +109,6 @@ def _roles_validos(cfg, roles_texto: str, ruta: Path) -> list[str] | None:
             f"{ruta.name}: declara rol(es) inexistente(s) en 'roles': "
             f"{', '.join(desconocidos)}. Roles del tenant: {', '.join(sorted(cfg.roles))}")
     return nombres or None
-
-
-def _vectorizar(texto: str) -> list[float]:
-    """
-    Un fragmento -> un vector de 1024 numeros.
-
-    NUNCA se trunca el texto de entrada: bge-m3 admite hasta 8192 tokens, muy
-    por encima de los fragmentos mas largos del corpus (~1441 tokens, medido).
-    Es justo la razon por la que se eligio este modelo y no uno de 512.
-    """
-    r = ollama.embed(model=MODELO_EMBEDDINGS, input=texto)
-    return r["embeddings"][0]
 
 
 def _conectar():
@@ -244,7 +230,7 @@ def cargar_tenant(slug: str, forzar: bool = False) -> None:
             n = 0
             for frag in doc.fragmentos:
                 contextualizado = frag.contextualizar(doc)
-                vector = _vectorizar(contextualizado)
+                vector = _vectorizar_openai(contextualizado)
                 cur.execute("""insert into asistente.document_chunks
                                (organization_id, document_id, orden, contenido,
                                 contenido_contextualizado, embedding, metadata,

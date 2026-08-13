@@ -364,9 +364,15 @@ corpus:
       metadatos_dominio: [area]
 
 rag:
-  modelo_embeddings: bge-m3
-  # Coincide con vector(1024) del esquema SQL. Cambiarlo obliga a re-vectorizar
-  # todo el corpus Y a migrar la columna.
+  # text-embedding-3-large de OpenAI, no Ollama: el VPS no tiene recursos de
+  # sobra para correr un modelo local ademas de todo lo demas (agosto 2026).
+  # Pedido con dimensions=1024 (nucleo/recuperacion/embeddings.py) -- MISMA
+  # dimension que bge-m3, a proposito, para no migrar la columna ademas de
+  # re-vectorizar. Cambiar 'modelo_embeddings' sin re-vectorizar el corpus deja
+  # vectores no comparables: la busqueda no falla, devuelve peor en silencio.
+  modelo_embeddings: text-embedding-3-large
+  # Coincide con vector(1024) del esquema SQL. Cambiarlo (a otro que no sea
+  # 1024) obliga a migrar la columna, ademas de re-vectorizar todo el corpus.
   dimensiones: 1024
   top_k: 8
   umbral_similitud: 0.35

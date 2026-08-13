@@ -399,7 +399,7 @@ def esta_de_baja(tenant: str, usuario_externo: str, canal: str = "whatsapp") -> 
 
     Se consulta ANTES de cualquier envio que inicie el sistema. Nunca antes de
     responderle a alguien que escribio: la baja bloquea la interrupcion, no la
-    atencion -- ver supabase/09_bajas_canal.sql."""
+    atencion -- ver supabase/10_bajas_canal.sql."""
     with sesion(tenant) as (cur, org):
         cur.execute(
             """select 1 from asistente.canal_bajas
@@ -417,7 +417,7 @@ def guardar_media(tenant: str, conversation_id: str, media_id: str, tipo: str,
 
     Devuelve el id de la fila, o None si ese 'media_id' ya estaba guardado --
     un reintento del webhook no duplica el archivo. Ver
-    supabase/08_multimedia.sql para por que vive en Postgres y no en un almacen
+    supabase/09_multimedia.sql para por que vive en Postgres y no en un almacen
     de objetos.
     """
     with sesion(tenant) as (cur, org):
@@ -473,7 +473,7 @@ def purgar_media(tenant: str, dias: int) -> int:
     Borra los adjuntos mas viejos que 'dias'. Devuelve cuantos.
 
     Existe porque la retencion de multimedia es MAS CORTA que la de las
-    conversaciones a proposito (ver supabase/08_multimedia.sql): el texto es
+    conversaciones a proposito (ver supabase/09_multimedia.sql): el texto es
     barato y util para depurar, una foto pesa y puede mostrar la casa, la
     cedula o una cara. Se llama desde una tarea programada, no desde el turno.
     """
@@ -494,7 +494,7 @@ def marcar_conservar(tenant: str, conversation_id: str, conservar: bool,
 
     Distinto de marcar un ejemplo: eso dice "esta respuesta fue buena" y
     alimenta el manual; esto dice "no la borres todavia" y no aparece en
-    ningun lado mas. Ver supabase/10_conservar_conversacion.sql.
+    ningun lado mas. Ver supabase/11_conservar_conversacion.sql.
 
     Devuelve False si la conversacion no existe o no es de este tenant.
 
@@ -548,7 +548,7 @@ def purgar_conversaciones(tenant: str, dias: int) -> int:
 
     1. 'conservar' -- alguien dijo explicitamente "no borres esto todavia": un
        reclamo, un incidente, algo que puede terminar en disputa. Ver
-       supabase/10_conservar_conversacion.sql.
+       supabase/11_conservar_conversacion.sql.
 
     2. Tener alguna respuesta marcada como ejemplo valido. Esas alimentan el
        manual de procedimientos (supabase/05_ejemplos_validados.sql) y cuelgan
@@ -596,7 +596,7 @@ def evento_ya_visto(tenant: str, wamid: str, canal: str = "whatsapp") -> bool:
     que dos reintentos simultaneos leen "no visto" los dos y contestan los dos.
     Con el insert atomico, solo uno gana la clave primaria.
 
-    Ver supabase/07_webhook_eventos.sql para por que esto vive en la base y no
+    Ver supabase/08_webhook_eventos.sql para por que esto vive en la base y no
     en memoria del proceso.
     """
     with sesion(tenant) as (cur, org):
@@ -715,17 +715,21 @@ def ejemplos_por_caso(tenant: str, caso: str | None = None) -> list[dict]:
 
 def documentos_de(tenant: str) -> list[dict]:
     """
-    Los documentos del corpus de este tenant -- para la pantalla de solo
-    lectura que muestra que hay publicado (distinto de /manual/ejemplos,
-    que muestra material CRUDO todavia sin redactar). 'n_fragmentos' cuenta
-    solo los vigentes: un documento 'obsoleto' no tiene ninguno (ver
-    cli/cargar_corpus.py, _cargar_obsoleto -- solo guarda la fila de
-    metadatos, nunca fragmenta ni vectoriza).
+    Los documentos del corpus de este tenant -- para la pantalla que muestra
+    que hay publicado (distinto de /manual/ejemplos, que muestra material
+    CRUDO todavia sin redactar). 'n_fragmentos' cuenta solo los vigentes: un
+    documento 'obsoleto' no tiene ninguno (ver cli/cargar_corpus.py,
+    _cargar_obsoleto -- solo guarda la fila de metadatos, nunca fragmenta ni
+    vectoriza).
+
+    'roles_permitidos' viaja para que esa misma pantalla pueda mostrar y
+    editar a quien se le recupera cada documento (PUT
+    /corpus/documentos/<id>/roles) sin una consulta aparte.
     """
     with sesion(tenant) as (cur, org):
         cur.execute(
             """select d.id, d.codigo, d.titulo, d.version, d.estado,
-                      d.fecha_vigencia, d.creado_en,
+                      d.fecha_vigencia, d.creado_en, d.roles_permitidos,
                       (select count(*) from asistente.document_chunks c
                         where c.document_id = d.id and c.vigente) as n_fragmentos
                from asistente.documents d

@@ -35,20 +35,36 @@ Con esas cinco variables presentes en `.env`, `backend`, `celery-worker`, `celer
 - **Dos personas trabajando así a la vez chocan.** Dos entornos locales corriendo migraciones o escribiendo conversaciones contra la misma base al mismo tiempo compiten por las mismas filas — ver la nota sobre colaboración en la rama compartida. Avisar antes de usarlo, no asumir que nadie más está.
 - El backend se conecta como `postgres`, que tiene `BYPASSRLS` (ver ARQUITECTURA.md). Local o en el VPS, la separación por tenant no lo protege: ve todo.
 
-**Si ya tenés Ollama nativo en la máquina** (el uso habitual del equipo de desarrollo, ver PRD.md 7.1.1 — `banco_pruebas.py` habla contra ese, no contra Docker), el servicio `ollama` del compose es un contenedor aparte con un volumen vacío: no ve los modelos que ya tenés instalados, y `docker compose up` los vuelve a bajar (~4-5 GB, imagen + `bge-m3`). Se evita apuntando `OLLAMA_HOST` al Ollama del host desde tu `.env`:
+**Embeddings del corpus: API de OpenAI, no Ollama** (agosto 2026 -- ver `nucleo/recuperacion/embeddings.py`). El VPS no tenia recursos de sobra para correr un modelo local ademas de todo lo demas (el CRM, el motor, dos Supabase, Traefik), y el unico consumidor de ese contenedor era la vectorizacion del corpus: los cinco roles de chat ya estaban redirigidos a DeepSeek/Anthropic, asi que no hacia falta para nada mas. Se saco el servicio `ollama` de los dos compose (dev y prod) en vez de dejarlo corriendo sin uso.
+
+Requiere `OPENAI_API_KEY` en el `.env` (dev) o en las variables de Dokploy del servicio `motor` (prod) -- ver la tabla de variables mas abajo. `cli/banco_pruebas.py` y `cli/prueba_velocidad.py` (PRD.md 7.1.1, comparar modelos de chat) siguen hablando contra el Ollama nativo de tu maquina si lo tenes instalado; eso no cambio, es un uso aparte del RAG.
+
+**Recargar el corpus de produccion ya no necesita tunel SSH.** Antes habia que vectorizar desde una maquina de desarrollo apuntando al Ollama del servidor por un tunel, porque Ollama no publica puerto al host. Con OpenAI de por medio no hay ningun servicio de red al que hacerle tunel -- el script corre igual desde donde esten los `.docx` (`corpus/<slug>/*.docx`, que estan en `.gitignore` y nunca llegan a la imagen del motor), apuntando el `.env` local a la base real:
 
 ```
-OLLAMA_HOST=http://host.docker.internal:11434
+py -3.13 cli/cargar_corpus.py rapilink --forzar
 ```
 
-Y arrancando `motor` con `--no-deps`, para que no arrastre al contenedor `ollama` por el `depends_on`:
+Hecho en vivo el 13/08/2026: 106 fragmentos recargados con el `bge-m3` del servidor en 49 segundos -- pero ese fue el ultimo tunel: mas tarde ese mismo dia se paso a embeddings de OpenAI, asi que esos 106 quedaron obsoletos otra vez y hay que recargarlos una vez mas (ya sin tunel) antes de que el RAG vuelva a servir contexto real.
+
+**No hay recarga en caliente del frontend dentro de Docker.** El código entra por un bind mount desde Windows y los eventos de archivo del host no cruzan al contenedor Linux, así que Vite nunca se entera de un cambio: sigue sirviendo el módulo compilado viejo. No falla ni avisa — se edita, se recarga el navegador y no pasa nada; o peor, SSR y cliente quedan en versiones distintas y sale `hydration_mismatch` en consola. Después de editar cualquier archivo del frontend:
 
 ```
-docker compose up -d --build backend celery-worker celery-beat frontend
-docker compose up -d --build --no-deps motor
+docker compose restart frontend
 ```
 
-Verificar que tiene `bge-m3` antes: `curl localhost:11434/api/tags`. Sin override, el default sigue siendo el contenedor — a nadie más le cambia nada.
+El sondeo de archivos (`usePolling`), que es el arreglo habitual, **se probó acá y empeora las cosas**: deja el proceso a ~25% de CPU constante y le come el turno al servidor hasta que deja de responder (medido: `/login` cuatro minutos sin devolver un byte; apagándolo, 200 y CPU a 0%). Está detrás de `VITE_USE_POLLING`, apagada.
+
+Y paciencia con el arranque en frío: la primera petición a cada ruta compila a través del bind mount y puede tardar un minuto. Después queda cacheada y responde en milisegundos.
+
+⚠️ **No correr `pnpm build` ni `pnpm check` en Windows con el contenedor levantado.** Los dos ejecutan `svelte-kit sync`, que reescribe `.svelte-kit/generated/` — una carpeta que vive en el bind mount, o sea compartida con el contenedor. pnpm trunca los nombres de directorio largos en Windows, así que las rutas quedan escritas cortas y el contenedor (Linux, rutas completas) deja de resolverlas: la aplicación entera pasa a devolver **500** con `Failed to resolve import ... Does the file exist?`. El síntoma no apunta para nada a la causa. Si ya pasó:
+
+```
+docker exec <contenedor-frontend> sh -c "cd /app && pnpm exec svelte-kit sync"
+docker compose restart frontend
+```
+
+Para verificar tipos o compilar sin romper el entorno, hacerlo **dentro** del contenedor: `docker exec <contenedor-frontend> pnpm check`.
 
 ## Procedimiento
 
@@ -82,7 +98,7 @@ sysctl -w vm.swappiness=10 && echo 'vm.swappiness=10' >> /etc/sysctl.conf
 
 ### 3. Variables
 
-Van en la sección **Environment** del servicio. **Diecinueve** son obligatorias; el despliegue se detiene nombrando la que falte, antes de construir nada. Péguelas todas de una vez — **Compose se para en la primera**, así que ir agregándolas de a una es un redespliegue por variable.
+Van en la sección **Environment** del servicio. **Veinte** son obligatorias; el despliegue se detiene nombrando la que falte, antes de construir nada. Péguelas todas de una vez — **Compose se para en la primera**, así que ir agregándolas de a una es un redespliegue por variable.
 
 ```
 DBHOST=crm.rapilinksas.co
@@ -107,6 +123,7 @@ WISPHUB_API_KEY=
 WISPHUB_BASE_URL=https://api.wisphub.io
 WISPHUB_MODO_REAL=true
 DEEPSEEK_API_KEY=
+OPENAI_API_KEY=
 BOTTLECRM_API_TOKEN=
 
 SECRETOS_CLAVE_MAESTRA=
@@ -125,6 +142,8 @@ py -3.13 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key()
 ```
 
 **Si se pierde, no hay forma de recuperar los valores**: hay que volver a cargar todas las credenciales a mano. Es la propiedad buscada, no un descuido — guardala donde guardes las demás.
+
+`OPENAI_API_KEY` vectoriza el corpus (`nucleo/recuperacion/embeddings.py`, `text-embedding-3-large`). Reemplaza a Ollama local desde agosto 2026 — sin ella el motor arranca igual, pero cada pregunta se responde sin contexto documental y queda `[rag] no se pudo recuperar contexto` en el log.
 
 `BOTTLECRM_API_TOKEN` lo usa el motor para abrir el ticket al escalar una conversación y para comprobar si ese caso sigue abierto. Sin él, el bot escala y el ticket nunca se crea.
 
@@ -182,7 +201,7 @@ El servicio es `kong`, la pasarela de API — **no `db`**. Apuntarlo a `db` da 5
 
 Al entrar pide usuario y contraseña: son `DASHBOARD_USERNAME` y `DASHBOARD_PASSWORD` de las variables de ese proyecto.
 
-`motor`, `ollama` y `redis` **no llevan dominio**. El frontend alcanza al motor por la red interna (`http://motor:5000`); exponerlo sería abrir el asistente a internet sin autenticación.
+`motor` y `redis` **no llevan dominio**. El frontend alcanza al motor por la red interna (`http://motor:5000`); exponerlo sería abrir el asistente a internet sin autenticación.
 
 ### 4.c El webhook de WhatsApp — la única excepción
 
@@ -292,14 +311,11 @@ dig +short agent.rapilinksas.co agent-api.rapilinksas.co
 
 ### 5. Después del primer despliegue
 
-```
-docker ps | grep ollama
-docker exec -it <contenedor-ollama> ollama pull bge-m3
-```
+**Cargar el corpus.** A diferencia de Ollama, la API de OpenAI no necesita bajar ningún modelo — con `OPENAI_API_KEY` puesta (ver Variables) alcanza con correr, desde cualquier máquina con el `.env` apuntando a la base real:
 
-Una sola vez: queda en el volumen `ollama_models` y sobrevive a los redespliegues.
-
-Y **recargar el corpus contra ese Ollama** — ver la primera entrada de pendientes, porque no es opcional.
+```
+py -3.13 cli/cargar_corpus.py rapilink --forzar
+```
 
 ### 6. Comprobar que quedó bien
 
@@ -374,11 +390,7 @@ La exportación conserva los comentarios del YAML — son notas de verificación
 
 Cosas sabidas que faltan. Cada una dice por qué importa, que es lo que no se deduce del código.
 
-**Conectar el RAG.** El asistente no lee el corpus. `motor.responder()` solo usa `construir_system()` de `nucleo/recuperacion/`: no vectoriza la pregunta ni llama a `match_chunks`. Todo lo demás ya está en pie —106 fragmentos vectorizados, la función en la base, `bge-m3` corriendo, el aislamiento verificado— así que falta únicamente el paso que los une. Hoy, preguntarle a un técnico cómo diagnosticar una falla devuelve una respuesta razonable del prompt, no el procedimiento de `G-GO-04` que está cargado.
-
 **Calibrar `umbral_similitud`.** Está en 0.35 y una pregunta deliberadamente ajena ("la receta del ajiaco santafereño") todavía arrastra un fragmento con 0.350. `bge-m3` da similitudes altas de base; 0.45 parece más sano, pero subirlo puede dejar fuera preguntas legítimas mal formuladas. Decidirlo midiendo con preguntas reales de los técnicos.
-
-**Recargar el corpus con el Ollama del servidor.** Los 106 fragmentos actuales se vectorizaron con el `bge-m3` de una máquina de desarrollo. Si la versión del modelo que baja el contenedor no es idéntica, los vectores dejan de ser comparables con los de las consultas — y esto **no da error**: simplemente empieza a devolver fragmentos peores. Es la clase de degradación que nadie nota hasta que alguien dice que "el asistente ya no responde bien". `py -3.13 cli/cargar_corpus.py rapilink --forzar` con `OLLAMA_HOST` apuntando al servidor.
 
 **Limpiar el esquema `asistente` de la base de isp-reports.** Una corrida temprana lo creó ahí con 106 fragmentos, cuando todavía se creía que el asistente viviría dentro de esa base. Está aislado en su propio esquema y no estorba, pero es contaminación de un proyecto en otro. `drop schema asistente cascade` contra `supabase-515b-db` no deja rastro — el esquema se diseñó para eso.
 
@@ -391,6 +403,20 @@ ssh -L 5434:<ip-del-contenedor-db>:5432 root@86.48.18.185
 **Un rol `crm_user` para Django.** Hoy el CRM se conecta como `postgres`, que tiene `BYPASSRLS` — las políticas de aislamiento no se evalúan. Con una sola organización no hay consecuencia visible, y por eso es fácil de olvidar. El motor ya baja a `app_backend` (ver `nucleo/persistencia/db.py`); el CRM todavía no.
 
 **El webhook de WhatsApp — falta el dominio, no el código.** Las rutas ya existen (`GET`/`POST /canales/whatsapp/<tenant>`, ver §4.c) y sus guardas pasan (`py -3.13 tests/test_canal_whatsapp.py`). Lo que falta para el piloto: el DNS de `motor.rapilinksas.co`, crear el dominio en Dokploy con el `PathPrefix`, cargar las variables del §4.c, y cargar los secretos de Meta desde **Ajustes → WhatsApp**. Lo único de producto que sigue dependiendo de terceros son las plantillas para avisos proactivos, que las aprueba Meta.
+
+**Contestarle a un BSUID va por `recipient`, no por `to`.** Está resuelto, pero queda escrito porque el error costó días y no da ninguna señal de que se está cometiendo.
+
+Desde abril de 2026 Meta entrega `contacts[0].user_id` y `messages[0].from_user_id` con la forma `CO.1360399936298471` —un **BSUID** (Business-Scoped User ID)— en vez de `wa_id`/`from`, cuando la persona escondió su número detrás de un nombre de usuario. Los envíos a BSUID se habilitaron en julio de 2026.
+
+El campo del destinatario **no es el mismo para los dos**: `to` es para un teléfono, `recipient` para un BSUID (con `recipient_type: individual` en ambos). Lo resuelve `_destinatario()` en `nucleo/canales/whatsapp.py`.
+
+**Por qué no se ve el error.** Un BSUID mandado por `to` no da 400. Meta acepta con **200**, le extrae los dígitos, los trata como teléfono, y el fallo llega minutos después y por otro lado: un **131026** (*"el número no es un número de WhatsApp"*) en el webhook de `statuses`. El log dice que el mensaje salió. Nada apunta al campo.
+
+Eso mandó la búsqueda a todos lados menos al lugar correcto: se revisó y descartó la URL del callback, `active: true`, la suscripción al campo `messages`, el App Secret, el verify token, el número (`CONNECTED`, `CLOUD_API`, `VERIFIED`), la suscripción de la WABA y la app publicada. Se probaron cinco formas del destinatario en `v23.0` y `v26.0` —**todas usando `to`**, que era el error—. Y se llegó a escribir acá que no había forma de responder, que era falso.
+
+**Dos detalles que hacen fallar la petición:** el `CO.` es parte del identificador, no un prefijo de país — quitarle el punto o los caracteres alfanuméricos la rompe. Y los BSUID están acotados al *business portfolio*: solo un número del mismo portfolio puede escribirle a un BSUID dado.
+
+**Lo que sigue sin poder hacerse** es reconocer al cliente: un BSUID no es un teléfono, así que no cruza contra WispHub. Esa persona tiene que identificarse con la cédula, como cualquier número desconocido. Por eso `mensajes_entrantes()` guarda `telefono` y `bsuid` en campos separados en vez de colapsarlos.
 
 **Autenticar `/chat` y `/agentes` en el motor.** Hoy no piden nada: lo que impide que se usen desde fuera es que el motor no sea alcanzable, y desde que exista el dominio del webhook (§4.c) lo único que los separa de internet es el `PathPrefix` de una regla de Traefik. Funciona, pero es **una sola capa**, y el resto del proyecto usa dos por principio (PRD §7.4: las reglas duras se aplican en código, no solo en la configuración de alrededor). Una regla mal escrita al agregar un dominio, y cualquiera puede conversar con el asistente a costa de la empresa y leer cómo está configurado cada agente.
 
@@ -419,6 +445,20 @@ Dos cosas que se deciden junto con eso:
 ## Diagnóstico
 
 Errores que ya costaron tiempo una vez.
+
+**Un servicio del compose no resuelve el nombre de otro** (`Temporary failure in name resolution`). Se quedó sin la red `default`, que es por la que los servicios se encuentran por nombre. Pasó con el motor: quedó solo en `dokploy-network` y dejó de ver a `ollama` (el servicio que vectorizaba el corpus antes de pasar a la API de OpenAI, agosto 2026 — ya no existe, pero la lección de red vale igual para cualquier servicio futuro), así que el RAG se apagó. No rompía el turno —`recuperar()` atrapa el error a propósito, porque peor es no atender— así que el asistente siguió contestando, solo que sin la documentación interna, y se notó días después.
+
+Lo que más costó fue el mensaje: la librería de Ollama decía `Failed to connect to Ollama. Please check that Ollama is downloaded, running and accessible`, o sea mandaba a instalar algo que llevaba dos días corriendo, sano y con `bge-m3` bajado. La causa no estaba en Ollama sino en la red.
+
+Se ve en una línea — si dos servicios no comparten ninguna red, ahí está:
+
+```
+docker inspect -f '{{.Name}} -> {{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}'   $(docker ps -q --filter name=<servicio-a>) $(docker ps -q --filter name=<servicio-b>)
+```
+
+**Por qué se quedó sin `default`, no se sabe.** La explicación obvia —que Dokploy le escribe `networks: [dokploy-network]` al darle dominio, y en Compose declarar una red explícita reemplaza a `default` en vez de sumarse— **no se sostiene**: `backend` también tiene dominio y quedó con las dos. Así que no es una consecuencia automática de tener dominio. Se comprobó el 13/08/2026, después de haberlo escrito acá al revés.
+
+Lo que sí queda resuelto es que no vuelva a depender de eso: los tres servicios con dominio (`backend`, `frontend`, `motor`) declaran **las dos** redes explícitamente en `docker-compose.prod.yml`. Los que no tienen dominio se quedan fuera de `dokploy-network` a propósito: es compartida con los demás proyectos del VPS y ni `redis` ni la base tienen nada que hacer ahí.
 
 **`FATAL: Tenant or user not found`** — No es la contraseña ni el tenant. Casi seguro estás hablando con el pooler **equivocado**: hay dos Supabase en el servidor y durante mucho tiempo solo el viejo publicaba puertos al host. Verifica a cuál llegas antes de tocar credenciales:
 
