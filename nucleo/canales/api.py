@@ -1281,8 +1281,16 @@ def whatsapp_webhook(tenant):
         print(f"[whatsapp] entrega SIN mensajes ni estados. Contenido: "
               f"{campos or list((cuerpo or {}).keys())}")
     else:
+        # Se dice de que forma llego el remitente, no solo cuantos mensajes.
+        # Un identificador opaco ('CO.1360...') en vez de un telefono rompe la
+        # verificacion por posesion del canal SIN dar ningun error: el cliente
+        # queda como desconocido y se le pide la cedula aunque escriba desde su
+        # propio numero. Es la clase de fallo que hay que poder ver de un
+        # vistazo en vez de deducir.
+        formas = [("telefono" if (e.get("de") or "").isdigit() else "OPACO")
+                  for e in entrantes]
         print(f"[whatsapp] entrega con {len(entrantes)} mensaje(s) y "
-              f"{len(estados)} estado(s)")
+              f"{len(estados)} estado(s). Remitente(s): {formas}")
 
     atendidos = 0
     for entrante in entrantes:

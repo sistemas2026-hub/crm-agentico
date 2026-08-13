@@ -167,14 +167,39 @@ def mensajes_entrantes(cuerpo: dict) -> list[dict]:
     Devuelve, por mensaje:
         wamid    id unico de Meta -- la clave para no contestar dos veces
         de       telefono del cliente, en formato internacional sin '+'
+        nombre   como se llama en su perfil de WhatsApp, si vino
         tipo     text | image | audio | ...
         texto    el contenido si es texto; '' en los demas tipos
         crudo    el mensaje entero, para lo que todavia no se traduce
+
+    DE DONDE SALE EL TELEFONO  (no es una sola clave)
+    -------------------------------------------------
+    La referencia de Meta dice que el remitente viene en 'messages[].from', y
+    que 'contacts[].wa_id' trae el mismo numero. En la practica llego una
+    tercera forma: 'from_user_id' con un valor OPACO ('CO.13603999...'), que
+    no es un telefono y no sirve para cruzar contra la base del ISP.
+
+    Por eso se prefiere 'wa_id' de 'contacts': es el unico que la
+    documentacion define como el numero, y es el que necesita la verificacion
+    por posesion del canal (nucleo/seguridad/verificacion.py). Las otras dos
+    quedan como respaldo, en orden de confiabilidad -- sin ninguna de las
+    tres no hay a quien contestarle.
     """
     salida = []
     for entrada in (cuerpo or {}).get("entry", []) or []:
         for cambio in entrada.get("changes", []) or []:
             valor = cambio.get("value") or {}
+
+            # Los contactos vienen al lado de los mensajes, en la misma
+            # entrega. Casi siempre es uno; se indexa por si Meta agrupa
+            # varios remitentes en un mismo envio.
+            contactos = valor.get("contacts") or []
+            wa_id = None
+            nombre = None
+            if contactos:
+                wa_id = contactos[0].get("wa_id")
+                nombre = ((contactos[0].get("profile") or {}).get("name"))
+
             for m in valor.get("messages", []) or []:
                 tipo = m.get("type", "")
                 # Los tipos con archivo comparten la forma {id, mime_type,
@@ -189,7 +214,8 @@ def mensajes_entrantes(cuerpo: dict) -> list[dict]:
                     # 'type'], sin 'from'. Leer solo una de las dos descarta
                     # mensajes legitimos, y el descarte es silencioso porque
                     # sin remitente no hay a quien contestarle.
-                    "de": m.get("from") or m.get("from_user_id"),
+                    "de": wa_id or m.get("from") or m.get("from_user_id"),
+                    "nombre": nombre,
                     "tipo": tipo,
                     "texto": (m.get("text") or {}).get("body", "") if tipo == "text" else "",
                     # El pie de foto es texto del cliente: "mira como quedo"

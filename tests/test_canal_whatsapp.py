@@ -209,6 +209,29 @@ def main():
     check("y sigue leyendolo cuando viene como 'from'",
           mensajes[0]["de"] == "573001112233")
 
+    # De donde sale el telefono. 'wa_id' de contacts es el unico que la
+    # documentacion define como el numero; 'from_user_id' llego en vivo con un
+    # valor OPACO ('CO.136039...') que no sirve para cruzar contra la base del
+    # ISP. Si se prefiriera el equivocado, la verificacion por posesion del
+    # canal deja de funcionar sin dar ningun error: el cliente queda como
+    # desconocido y se le pide la cedula aunque escriba desde su numero.
+    con_contacto = {'entry': [{'changes': [{'value': {
+        'contacts': [{'wa_id': '573208633423',
+                      'profile': {'name': 'Mario'}}],
+        'messages': [{'id': 'wamid.C1', 'from_user_id': 'CO.999999999',
+                      'type': 'text', 'text': {'body': 'hola'}}]}}]}]}
+    c = whatsapp.mensajes_entrantes(con_contacto)
+    check("prefiere el wa_id de contacts sobre el id opaco",
+          len(c) == 1 and c[0]["de"] == "573208633423")
+    check("y trae el nombre del perfil", c[0]["nombre"] == "Mario")
+
+    solo_opaco = {'entry': [{'changes': [{'value': {'messages': [
+        {'id': 'wamid.C2', 'from_user_id': 'CO.888', 'type': 'text',
+         'text': {'body': 'hola'}}]}}]}]}
+    c2 = whatsapp.mensajes_entrantes(solo_opaco)
+    check("sin contacts, cae al id opaco antes que descartar el mensaje",
+          len(c2) == 1 and c2[0]["de"] == "CO.888")
+
     estados = whatsapp.estados_entrantes(sobre)
     check("los acuses salen por separado, no como mensajes", len(estados) == 1)
     check("un acuse NO aparece entre los mensajes",
