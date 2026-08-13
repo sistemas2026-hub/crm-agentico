@@ -197,7 +197,14 @@ def mensajes_entrantes(cuerpo: dict) -> list[dict]:
             wa_id = None
             nombre = None
             if contactos:
-                wa_id = contactos[0].get("wa_id")
+                # 'wa_id' es lo que documenta Meta. 'user_id' es lo que llego
+                # en vivo (agosto 2026) en su lugar: un identificador opaco,
+                # no un telefono. Se toma igual porque es la unica forma de
+                # direccionar a esa persona -- y se prefiere al
+                # 'from_user_id' del mensaje porque ESE viene con prefijo de
+                # pais ('CO.136...') y los acuses de entrega de Meta nombran
+                # al destinatario SIN el ('136...').
+                wa_id = contactos[0].get("wa_id") or contactos[0].get("user_id")
                 nombre = ((contactos[0].get("profile") or {}).get("name"))
 
             for m in valor.get("messages", []) or []:
