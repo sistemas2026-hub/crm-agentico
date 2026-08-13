@@ -54,8 +54,20 @@ class Fragmento:
 
 
 def vectorizar(pregunta: str, modelo: str) -> list[float]:
+    import os
     import ollama                                    # import perezoso
-    return ollama.embed(model=modelo, input=pregunta)["embeddings"][0]
+    try:
+        return ollama.embed(model=modelo, input=pregunta)["embeddings"][0]
+    except Exception as e:
+        # El mensaje de la libreria ("Failed to connect to Ollama... check that
+        # Ollama is downloaded") manda a instalarlo, que casi nunca es el
+        # problema: la causa habitual es que OLLAMA_HOST apunta a otro lado
+        # (el contenedor en produccion, el host en desarrollo) o que ese
+        # servicio se cayo. Sin saber A QUE host se intento, no se distingue
+        # una cosa de la otra y se depura a ciegas.
+        host = os.getenv("OLLAMA_HOST") or "http://localhost:11434 (por defecto)"
+        raise RuntimeError(
+            f"no respondio Ollama en {host} (modelo '{modelo}'): {e}") from e
 
 
 def recuperar(config, tenant: str, rol: str,

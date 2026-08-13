@@ -1359,6 +1359,15 @@ def whatsapp_webhook(tenant):
             print(f"[whatsapp] no se pudo entregar a {estado.get('de')}: "
                   f"codigo={estado.get('codigo')} {estado.get('error')} "
                   f"| detalle={estado.get('detalle')}")
+            continue
+        # Los acuses buenos tambien se registran. Antes solo se imprimian los
+        # fallidos, y eso obligaba a deducir del SILENCIO que un mensaje habia
+        # salido bien -- que es justo lo que no se puede distinguir de que el
+        # acuse nunca llego. La categoria es lo que factura Meta.
+        categoria = estado.get("categoria")
+        print(f"[whatsapp] {estado.get('estado')} -> {estado.get('de')}"
+              + (f" | conversacion={estado.get('conversacion')} ({categoria})"
+                 if categoria else ""))
 
     return jsonify({"recibido": True, "atendidos": atendidos}), 200
 

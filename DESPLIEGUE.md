@@ -393,7 +393,17 @@ La exportación conserva los comentarios del YAML — son notas de verificación
 
 Cosas sabidas que faltan. Cada una dice por qué importa, que es lo que no se deduce del código.
 
-**Conectar el RAG.** El asistente no lee el corpus. `motor.responder()` solo usa `construir_system()` de `nucleo/recuperacion/`: no vectoriza la pregunta ni llama a `match_chunks`. Todo lo demás ya está en pie —106 fragmentos vectorizados, la función en la base, `bge-m3` corriendo, el aislamiento verificado— así que falta únicamente el paso que los une. Hoy, preguntarle a un técnico cómo diagnosticar una falla devuelve una respuesta razonable del prompt, no el procedimiento de `G-GO-04` que está cargado.
+**Levantar Ollama en el VPS.** El RAG **sí está conectado** en el código —`motor.responder()` llama a `recuperar()` en `nucleo/modelo/motor.py:394`— pero en producción no funciona: cada mensaje deja `[rag] no se pudo recuperar contexto` y el asistente contesta solo con el prompt, sin la documentación interna. No rompe el turno a propósito (peor es no atender), y por eso pasa desapercibido: la respuesta se ve razonable, solo que no cita el procedimiento que está cargado.
+
+La causa es el servicio `ollama` de `docker-compose.prod.yml`, que es quien vectoriza la pregunta con `bge-m3`. `OLLAMA_HOST` no puede estar mal —el compose lo fija literal, sin variable de por medio— así que si el motor no lo alcanza es que ese contenedor no está corriendo. Diagnóstico:
+
+```
+docker ps -a --filter name=ollama
+docker logs --tail 50 $(docker ps -aq --filter name=ollama)
+docker exec <contenedor-motor> python -c "import ollama; print(ollama.list())"
+```
+
+Una vez arriba, falta bajarle el modelo: `docker exec <contenedor-ollama> ollama pull bge-m3`.
 
 **Calibrar `umbral_similitud`.** Está en 0.35 y una pregunta deliberadamente ajena ("la receta del ajiaco santafereño") todavía arrastra un fragmento con 0.350. `bge-m3` da similitudes altas de base; 0.45 parece más sano, pero subirlo puede dejar fuera preguntas legítimas mal formuladas. Decidirlo midiendo con preguntas reales de los técnicos.
 

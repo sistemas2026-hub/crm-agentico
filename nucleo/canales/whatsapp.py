@@ -273,6 +273,13 @@ def estados_entrantes(cuerpo: dict) -> list[dict]:
                 # de 24 h, numero bloqueado. Sin el codigo hay que adivinar
                 # cual de las tres es.
                 err = (s.get("errors") or [{}])[0]
+                # Meta NO cobra por mensaje sino por CONVERSACION: una ventana
+                # de 24 h con esta persona, con su propio id y su categoria
+                # (service / utility / marketing / authentication), cada una
+                # con tarifa distinta. Sin esto, la unica forma de saber cuanto
+                # cuesta el canal es entrar al panel de Meta -- y
+                # limites.max_costo_usd_mes no tiene con que contar.
+                conv = s.get("conversation") or {}
                 salida.append({
                     "wamid": s.get("id"),
                     "estado": s.get("status"),
@@ -280,6 +287,9 @@ def estados_entrantes(cuerpo: dict) -> list[dict]:
                     "error": err.get("message"),
                     "codigo": err.get("code"),
                     "detalle": (err.get("error_data") or {}).get("details"),
+                    "conversacion": conv.get("id"),
+                    "categoria": ((conv.get("origin") or {}).get("type")
+                                  or conv.get("category")),
                 })
     return salida
 

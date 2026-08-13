@@ -262,6 +262,24 @@ def main():
           all(m["wamid"] != "wamid.CCC" for m in mensajes))
     check("lee el estado del acuse", estados[0]["estado"] == "delivered")
 
+    # Meta cobra por conversacion de 24 h, no por mensaje, y cada categoria
+    # tiene tarifa distinta. Si esto se deja de leer, el costo del canal solo
+    # se puede mirar en el panel de Meta.
+    con_conversacion = {'entry': [{'changes': [{'value': {'statuses': [
+        {'id': 'wamid.S1', 'status': 'sent', 'recipient_id': 'CO.999',
+         'conversation': {'id': 'conv-abc',
+                          'origin': {'type': 'service'}}}]}}]}]}
+    e = whatsapp.estados_entrantes(con_conversacion)[0]
+    check("guarda el id de la conversacion que factura Meta",
+          e["conversacion"] == "conv-abc")
+    check("y su categoria", e["categoria"] == "service")
+
+    sin_origin = {'entry': [{'changes': [{'value': {'statuses': [
+        {'id': 'wamid.S2', 'status': 'sent',
+         'conversation': {'id': 'c2', 'category': 'utility'}}]}}]}]}
+    check("si la categoria viene suelta en vez de en 'origin', tambien",
+          whatsapp.estados_entrantes(sin_origin)[0]["categoria"] == "utility")
+
     print("\nsobres degenerados (no pueden tumbar el webhook)")
     for nombre, valor in [("vacio", {}), ("None", None),
                           ("sin entry", {"object": "x"}),
