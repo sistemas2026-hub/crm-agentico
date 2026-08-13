@@ -182,7 +182,7 @@ def ultima_actividad(tenant: str, canal: str | None = None) -> list[dict]:
       atendida
           Si algun humano ya escribio en el hilo, O si alguien la marco a
           mano como atendida sin responder por el chat (ver
-          marcar_atendida() y supabase/11_atendida_manual.sql -- resuelto
+          marcar_atendida() y supabase/12_atendida_manual.sql -- resuelto
           por telefono, en persona, etc.). Es la diferencia entre "nadie
           tomo esto" y "alguien esta en eso", que es lo que decide a cual
           entrar primero. 'escalada_a_humano' sola no alcanza: una escalada
@@ -286,7 +286,7 @@ def marcar_escalada(tenant: str, conversation_id: str, motivo: str,
 
     'necesita_atencion_humana' es independiente de 'escalada_a_humano': toda
     escalada crea ticket y pausa el bot igual, pero no toda escalada exige
-    que alguien del equipo entre ya mismo (ver supabase/12_necesita_atencion_humana.sql).
+    que alguien del equipo entre ya mismo (ver supabase/13_necesita_atencion_humana.sql).
     Decide el filtro "Sin atender" del frontend, nada mas.
     """
     with sesion(tenant) as (cur, org):
@@ -519,7 +519,7 @@ def marcar_atendida(tenant: str, conversation_id: str, por: str | None) -> bool:
     No es lo mismo que responder de verdad (eso ya marca 'atendida' solo,
     via el exists de ultima_actividad()): esto es el camino manual para
     cuando responder por el chat no corresponde. Ver
-    supabase/11_atendida_manual.sql.
+    supabase/12_atendida_manual.sql.
 
     Solo prende la marca -- no hay 'desmarcar' a proposito: si alguien la
     marco por error, la forma de corregirlo es responder de verdad (que ya
