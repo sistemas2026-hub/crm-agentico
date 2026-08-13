@@ -1161,6 +1161,16 @@ def _procesar_mensaje_whatsapp(config, tenant: str, rol: str, entrante: dict) ->
     de = entrante.get("de")
     wamid = entrante.get("wamid")
 
+    # Si la entrega no trajo telefono sino solo un BSUID, no hay a donde
+    # responder: Meta acepta el envio con 200 y recien despues avisa por el
+    # webhook de estados con 131026. Se corta ACA, antes de gastar un turno del
+    # modelo (que cuesta y tarda 4.7-12 s) en una respuesta que no va a salir.
+    # El mensaje igual queda registrado arriba; lo que no ocurre es la respuesta.
+    if not entrante.get("telefono"):
+        print(f"[whatsapp] mensaje de {de} SIN telefono (solo BSUID): se recibe "
+              f"pero no se puede responder. wamid={wamid}")
+        return
+
     try:
         if wamid:
             whatsapp.marcar_leido(config, tenant, wamid)

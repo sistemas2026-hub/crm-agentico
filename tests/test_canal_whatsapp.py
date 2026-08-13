@@ -225,6 +225,25 @@ def main():
           len(c) == 1 and c[0]["de"] == "573208633423")
     check("y trae el nombre del perfil", c[0]["nombre"] == "Mario")
 
+    # Telefono y BSUID son cosas distintas y se guardan separadas: colapsarlas
+    # en un campo es lo que hizo que se le respondiera a un BSUID como si
+    # fuera un numero, con 131026 de vuelta y el cliente sin recibir nada.
+    solo_bsuid = {'entry': [{'changes': [{'value': {
+        'contacts': [{'user_id': 'CO.1360399936298471', 'profile': {'name': 'M'}}],
+        'messages': [{'id': 'wamid.B', 'from_user_id': 'CO.1360399936298471',
+                      'type': 'text', 'text': {'body': 'hola'}}]}}]}]}
+    b = whatsapp.mensajes_entrantes(solo_bsuid)[0]
+    check("sin wa_id, 'telefono' queda vacio en vez de inventarse uno",
+          b["telefono"] is None)
+    check("y el BSUID se conserva aparte", b["bsuid"] == "CO.1360399936298471")
+
+    try:
+        whatsapp.enviar_texto(_ConfigFalsa(), TENANT, "CO.1360399936298471", "hola")
+        check("responderle a un BSUID se rechaza ANTES de llamar a Meta", False)
+    except whatsapp.ErrorWhatsApp as e:
+        check("responderle a un BSUID se rechaza ANTES de llamar a Meta",
+              "BSUID" in str(e))
+
     solo_opaco = {'entry': [{'changes': [{'value': {'messages': [
         {'id': 'wamid.C2', 'from_user_id': 'CO.888', 'type': 'text',
          'text': {'body': 'hola'}}]}}]}]}

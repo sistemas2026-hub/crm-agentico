@@ -195,16 +195,26 @@ def mensajes_entrantes(cuerpo: dict) -> list[dict]:
             # varios remitentes en un mismo envio.
             contactos = valor.get("contacts") or []
             wa_id = None
+            bsuid = None
             nombre = None
             if contactos:
-                # 'wa_id' es lo que documenta Meta. 'user_id' es lo que llego
-                # en vivo (agosto 2026) en su lugar: un identificador opaco,
-                # no un telefono. Se toma igual porque es la unica forma de
-                # direccionar a esa persona -- y se prefiere al
-                # 'from_user_id' del mensaje porque ESE viene con prefijo de
-                # pais ('CO.136...') y los acuses de entrega de Meta nombran
-                # al destinatario SIN el ('136...').
-                wa_id = contactos[0].get("wa_id") or contactos[0].get("user_id")
+                # 'wa_id' es el telefono, y es lo que hace falta para
+                # reconocer al cliente contra la base del ISP.
+                #
+                # 'user_id' es un BSUID (Business-Scoped User ID): identifica
+                # al usuario FRENTE A ESTE NEGOCIO y no es un telefono. El
+                # 'CO.' que lo precede NO es un prefijo de pais que haya que
+                # quitar -- es parte del identificador. Verificado en vivo
+                # (agosto 2026): el endpoint de envio no acepta un BSUID como
+                # destinatario en ninguna de las formas probadas; extrae los
+                # digitos, los trata como telefono y el acuse vuelve con
+                # 131026 ("no es un numero de WhatsApp").
+                #
+                # Se guarda igual porque es el unico identificador estable que
+                # llega, pero mientras venga solo el BSUID no hay forma de
+                # responderle a esa persona ni de cruzarla con WispHub.
+                wa_id = contactos[0].get("wa_id")
+                bsuid = contactos[0].get("user_id")
                 nombre = ((contactos[0].get("profile") or {}).get("name"))
 
             for m in valor.get("messages", []) or []:
@@ -214,14 +224,23 @@ def mensajes_entrantes(cuerpo: dict) -> list[dict]:
                 adjunto = m.get(tipo) or {} if tipo in TIPOS_CON_ARCHIVO else {}
                 salida.append({
                     "wamid": m.get("id"),
-                    # 'from' es lo que documenta la Cloud API, pero Meta
-                    # tambien entrega 'from_user_id' -- verificado en vivo
-                    # (agosto 2026) sobre un mensaje real: las claves que
-                    # llegaron fueron ['from_user_id','id','text','timestamp',
-                    # 'type'], sin 'from'. Leer solo una de las dos descarta
-                    # mensajes legitimos, y el descarte es silencioso porque
-                    # sin remitente no hay a quien contestarle.
-                    "de": wa_id or m.get("from") or m.get("from_user_id"),
+                    # DOS IDENTIDADES, NO UNA  -- se guardan por separado a
+                    # proposito, porque no son intercambiables:
+                    #
+                    #   telefono  sirve para responder Y para reconocer al
+                    #             cliente contra la base del ISP. Puede faltar.
+                    #   bsuid     identifica a la persona frente a este negocio.
+                    #             Es estable, pero NO se puede usar para
+                    #             responder (ver arriba) ni para cruzar datos.
+                    #
+                    # Colapsarlas en un solo campo fue el error que hizo que
+                    # se le respondiera a un BSUID como si fuera un telefono.
+                    "telefono": wa_id or m.get("from"),
+                    "bsuid": bsuid or m.get("from_user_id"),
+                    # Con que identificar la conversacion: el telefono si esta,
+                    # y si no el BSUID -- sin ninguno de los dos no hay a quien
+                    # atribuirle el mensaje.
+                    "de": wa_id or m.get("from") or bsuid or m.get("from_user_id"),
                     "nombre": nombre,
                     "tipo": tipo,
                     "texto": (m.get("text") or {}).get("body", "") if tipo == "text" else "",
@@ -310,6 +329,18 @@ def enviar_texto(config, tenant: str, para: str, texto: str) -> str | None:
     agente (si, en la bandeja) o solo se registra (en el turno del bot, donde
     no hay nadie mirando).
     """
+    # Un BSUID no es un destinatario valido: Meta acepta la peticion con 200,
+    # le extrae los digitos, los trata como telefono y recien despues avisa por
+    # el webhook de estados con 131026 ("no es un numero de WhatsApp"). Ese
+    # camino deja creer que el mensaje salio. Verificado en vivo contra v23.0 y
+    # v26.0, y con cinco formas distintas de armar el destinatario: ninguna
+    # entrega. Se corta antes y se dice por que.
+    if (para or "").startswith("CO.") or not (para or "").isdigit():
+        raise ErrorWhatsApp(
+            f"'{para}' no es un numero de telefono sino un identificador de "
+            f"usuario (BSUID). WhatsApp no permite responderle a ese "
+            f"identificador: hace falta que la entrega traiga 'wa_id'.")
+
     if not texto or not texto.strip():
         raise ErrorWhatsApp("No se envia un mensaje vacio.")
 

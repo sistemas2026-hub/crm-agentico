@@ -50,6 +50,25 @@ docker compose up -d --build --no-deps motor
 
 Verificar que tiene `bge-m3` antes: `curl localhost:11434/api/tags`. Sin override, el default sigue siendo el contenedor — a nadie más le cambia nada.
 
+**No hay recarga en caliente del frontend dentro de Docker.** El código entra por un bind mount desde Windows y los eventos de archivo del host no cruzan al contenedor Linux, así que Vite nunca se entera de un cambio: sigue sirviendo el módulo compilado viejo. No falla ni avisa — se edita, se recarga el navegador y no pasa nada; o peor, SSR y cliente quedan en versiones distintas y sale `hydration_mismatch` en consola. Después de editar cualquier archivo del frontend:
+
+```
+docker compose restart frontend
+```
+
+El sondeo de archivos (`usePolling`), que es el arreglo habitual, **se probó acá y empeora las cosas**: deja el proceso a ~25% de CPU constante y le come el turno al servidor hasta que deja de responder (medido: `/login` cuatro minutos sin devolver un byte; apagándolo, 200 y CPU a 0%). Está detrás de `VITE_USE_POLLING`, apagada.
+
+Y paciencia con el arranque en frío: la primera petición a cada ruta compila a través del bind mount y puede tardar un minuto. Después queda cacheada y responde en milisegundos.
+
+⚠️ **No correr `pnpm build` ni `pnpm check` en Windows con el contenedor levantado.** Los dos ejecutan `svelte-kit sync`, que reescribe `.svelte-kit/generated/` — una carpeta que vive en el bind mount, o sea compartida con el contenedor. pnpm trunca los nombres de directorio largos en Windows, así que las rutas quedan escritas cortas y el contenedor (Linux, rutas completas) deja de resolverlas: la aplicación entera pasa a devolver **500** con `Failed to resolve import ... Does the file exist?`. El síntoma no apunta para nada a la causa. Si ya pasó:
+
+```
+docker exec <contenedor-frontend> sh -c "cd /app && pnpm exec svelte-kit sync"
+docker compose restart frontend
+```
+
+Para verificar tipos o compilar sin romper el entorno, hacerlo **dentro** del contenedor: `docker exec <contenedor-frontend> pnpm check`.
+
 ## Procedimiento
 
 ### 1. Antes de nada: swap
@@ -391,6 +410,16 @@ ssh -L 5434:<ip-del-contenedor-db>:5432 root@86.48.18.185
 **Un rol `crm_user` para Django.** Hoy el CRM se conecta como `postgres`, que tiene `BYPASSRLS` — las políticas de aislamiento no se evalúan. Con una sola organización no hay consecuencia visible, y por eso es fácil de olvidar. El motor ya baja a `app_backend` (ver `nucleo/persistencia/db.py`); el CRM todavía no.
 
 **El webhook de WhatsApp — falta el dominio, no el código.** Las rutas ya existen (`GET`/`POST /canales/whatsapp/<tenant>`, ver §4.c) y sus guardas pasan (`py -3.13 tests/test_canal_whatsapp.py`). Lo que falta para el piloto: el DNS de `motor.rapilinksas.co`, crear el dominio en Dokploy con el `PathPrefix`, cargar las variables del §4.c, y cargar los secretos de Meta desde **Ajustes → WhatsApp**. Lo único de producto que sigue dependiendo de terceros son las plantillas para avisos proactivos, que las aprueba Meta.
+
+**Responder cuando Meta manda un BSUID y no un teléfono.** Es lo que hoy tiene el piloto detenido, y no se arregla en nuestro código. Meta está entregando `contacts[0].user_id` y `messages[0].from_user_id` con la forma `CO.1360399936298471` —un **BSUID** (Business-Scoped User ID), que identifica a la persona *frente a este negocio*— en vez de `wa_id`/`from` con el teléfono. Se recibe bien; lo que no hay es a dónde responder.
+
+Lo que se probó y **no** funciona: mandar el BSUID tal cual, quitarle el `CO.`, y otras tres formas de armar el destinatario, en `v23.0` y en `v26.0`. En todas Meta acepta con **200**, le extrae los dígitos, los trata como teléfono, y recién después avisa por el webhook de estados con **131026** (*"el número no es un número de WhatsApp"*). Ese camino es el que hace perder tiempo: el envío parece exitoso y el fallo llega asincrónico, por otro lado.
+
+El `CO.` **no es un prefijo de país que haya que quitar** — es parte del identificador. Costó una teoría equivocada y un commit que la afirmaba.
+
+Ya está descartado todo lo nuestro: URL del callback, `active: true`, suscripción al campo `messages`, App Secret (validado con `{app_id}|{app_secret}`), verify token, el número (`CONNECTED`, `CLOUD_API`, `VERIFIED`), la suscripción de la WABA y la app publicada. Y el código: `mensajes_entrantes()` guarda las dos identidades por separado (`telefono` y `bsuid`), `enviar_texto()` rechaza un BSUID **antes** de llamar a Meta, y el webhook ni siquiera gasta un turno del modelo en un mensaje que no va a poder contestar. O sea: cuando Meta empiece a mandar `wa_id`, esto funciona sin tocar nada.
+
+Lo que falta es averiguar con soporte de Meta **por qué** esa app entrega BSUID en lugar de teléfono —suele ser configuración de la app o del número, no de la integración— y que lo cambien.
 
 **Autenticar `/chat` y `/agentes` en el motor.** Hoy no piden nada: lo que impide que se usen desde fuera es que el motor no sea alcanzable, y desde que exista el dominio del webhook (§4.c) lo único que los separa de internet es el `PathPrefix` de una regla de Traefik. Funciona, pero es **una sola capa**, y el resto del proyecto usa dos por principio (PRD §7.4: las reglas duras se aplican en código, no solo en la configuración de alrededor). Una regla mal escrita al agregar un dominio, y cualquiera puede conversar con el asistente a costa de la empresa y leer cómo está configurado cada agente.
 
