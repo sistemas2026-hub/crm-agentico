@@ -337,17 +337,18 @@ networks:
   # VPS, y es por donde Traefik alcanza a un servicio con dominio. La crea
   # Dokploy, por eso 'external'.
   #
-  # POR QUE ESTA ESCRITO ESTO. Al ponerle dominio a un servicio, Dokploy le
-  # agrega 'networks: [dokploy-network]'. En Compose, declarar una red explicita
-  # SACA al servicio de 'default' -- no se suma, lo reemplaza. El servicio gana
-  # internet y en el mismo movimiento pierde de vista a sus companeros, sin que
-  # nada avise.
+  # POR QUE ESTA ESCRITO ESTO. El motor aparecio un dia SOLO en
+  # dokploy-network, sin 'default', y dejo de resolver 'ollama': el RAG se
+  # apago y nadie lo vio, porque recuperar() atrapa el error a proposito
+  # --peor es no atender-- asi que siguio contestando sin la documentacion
+  # interna.
   #
-  # Paso de verdad: el dia que el motor recibio su dominio para el webhook de
-  # WhatsApp, dejo de resolver 'ollama' y el RAG se apago. No fallaba el turno
-  # -- 'recuperar()' atrapa el error a proposito, porque peor es no atender--
-  # asi que el asistente siguio contestando, solo que sin la documentacion
-  # interna. Se noto varios dias despues.
+  # Por que se quedo sin 'default' no se sabe. La explicacion obvia (que
+  # Dokploy le escribe 'networks: [dokploy-network]' al darle dominio, y en
+  # Compose una red explicita reemplaza a 'default' en vez de sumarse) NO se
+  # sostiene: backend tambien tiene dominio y quedo con las dos.
+  #
+  # Nombrarlas aca deja de depender de averiguarlo.
   #
   # Los servicios SIN dominio no van en dokploy-network: es compartida con
   # otros proyectos del VPS, y redis y la base no tienen nada que hacer ahi.

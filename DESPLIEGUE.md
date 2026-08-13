@@ -455,18 +455,19 @@ Dos cosas que se deciden junto con eso:
 
 Errores que ya costaron tiempo una vez.
 
-**Un servicio deja de ver a otro del mismo compose justo después de darle un dominio.** Al crear un dominio, Dokploy le escribe al servicio `networks: [dokploy-network]`, y en Compose declarar una red explícita **saca** al servicio de `default` en vez de sumarse. Gana internet y pierde de vista a sus compañeros, sin que nada avise.
+**Un servicio del compose no resuelve el nombre de otro** (`Temporary failure in name resolution`). Se quedó sin la red `default`, que es por la que los servicios se encuentran por nombre. Pasó con el motor: quedó solo en `dokploy-network` y dejó de ver a `ollama`, así que el RAG se apagó. No rompía el turno —`recuperar()` atrapa el error a propósito, porque peor es no atender— así que el asistente siguió contestando, solo que sin la documentación interna, y se notó días después.
 
-Pasó de verdad: el día que el motor recibió su dominio para el webhook de WhatsApp, dejó de resolver `ollama` y el RAG se apagó. No rompía el turno —`recuperar()` atrapa el error a propósito, porque peor es no atender— así que el asistente siguió contestando, solo que sin la documentación interna. Se notó días después, y el mensaje de la librería (`Failed to connect to Ollama... check that Ollama is downloaded`) manda a instalar algo que ya estaba corriendo y sano.
+Lo que más costó fue el mensaje: la librería dice `Failed to connect to Ollama. Please check that Ollama is downloaded, running and accessible`, o sea manda a instalar algo que llevaba dos días corriendo, sano y con `bge-m3` bajado. La causa no estaba en Ollama sino en la red. (Ese error ahora dice a qué host se intentó conectar, ver `nucleo/recuperacion/busqueda.py`.)
 
 Se ve en una línea — si no comparten ninguna red, ahí está:
 
 ```
-docker inspect -f '{{.Name}} -> {{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' \
-  $(docker ps -q --filter name=motor) $(docker ps -q --filter name=ollama)
+docker inspect -f '{{.Name}} -> {{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}'   $(docker ps -q --filter name=motor) $(docker ps -q --filter name=ollama)
 ```
 
-Ya está resuelto en `docker-compose.prod.yml`: los tres servicios con dominio (`backend`, `frontend`, `motor`) declaran **las dos** redes. Los que no tienen dominio se quedan fuera de `dokploy-network` a propósito: es compartida con los demás proyectos del VPS y ni `redis` ni la base tienen nada que hacer ahí.
+**Por qué se quedó sin `default`, no se sabe.** La explicación obvia —que Dokploy le escribe `networks: [dokploy-network]` al darle dominio, y en Compose declarar una red explícita reemplaza a `default` en vez de sumarse— **no se sostiene**: `backend` también tiene dominio y quedó con las dos. Así que no es una consecuencia automática de tener dominio. Se comprobó el 13/08/2026, después de haberlo escrito acá al revés.
+
+Lo que sí queda resuelto es que no vuelva a depender de eso: los tres servicios con dominio (`backend`, `frontend`, `motor`) declaran **las dos** redes explícitamente en `docker-compose.prod.yml`. Los que no tienen dominio se quedan fuera de `dokploy-network` a propósito: es compartida con los demás proyectos del VPS y ni `redis` ni la base tienen nada que hacer ahí.
 
 **`FATAL: Tenant or user not found`** — No es la contraseña ni el tenant. Casi seguro estás hablando con el pooler **equivocado**: hay dos Supabase en el servidor y durante mucho tiempo solo el viejo publicaba puertos al host. Verifica a cuál llegas antes de tocar credenciales:
 
