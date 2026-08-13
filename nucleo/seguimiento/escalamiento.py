@@ -95,6 +95,17 @@ def _esquema_evaluacion(config) -> dict:
                             "que tiene que alcanzar por si solo, sin tener "
                             "que leer el resto para entenderlo.",
                     },
+                    "necesita_humano": {
+                        "type": "boolean",
+                        "description": "Solo si escalar=true. true si hace "
+                            "falta que una persona del equipo atienda esto "
+                            "AHORA (el cliente sigue esperando una "
+                            "respuesta puntual). false si el caso ya quedo "
+                            "resuelto por otra via o registrado para "
+                            "seguimiento y no necesita que nadie entre de "
+                            "inmediato. Depende del caso, no hay una regla "
+                            "fija.",
+                    },
                 },
                 "required": ["escalar", "etiqueta", "resuelta"],
             },
@@ -193,7 +204,7 @@ def _transcripcion_legible(historial: list[dict]) -> str:
 
 def escalar(config, tenant: str, usuario_externo: str, conversation_id: str,
            historial: list[dict], motivo: str, etiqueta: str,
-           resumen: str = "") -> None:
+           resumen: str = "", necesita_humano: bool = True) -> None:
     """
     Crea el ticket en BottleCRM y marca la conversacion como escalada.
 
@@ -237,7 +248,8 @@ def escalar(config, tenant: str, usuario_externo: str, conversation_id: str,
         respuesta = herramientas_http.ejecutar(herramienta_caso, payload)
         caso_id = respuesta.get("id") if isinstance(respuesta, dict) else None
 
-        persistencia.marcar_escalada(tenant, conversation_id, motivo, caso_id, etiqueta)
+        persistencia.marcar_escalada(tenant, conversation_id, motivo, caso_id,
+                                     etiqueta, necesita_humano)
     except Exception as e:
         print(f"[escalamiento] fallo al escalar la conversacion "
               f"{conversation_id}: {type(e).__name__}: {e}")

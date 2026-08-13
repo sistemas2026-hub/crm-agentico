@@ -30,6 +30,7 @@
    * sin un viaje de red por cada clic.
    */
   import { page } from '$app/state';
+  import { invalidate } from '$app/navigation';
   import PageHeader from '$lib/v2/components/PageHeader.svelte';
   import EmptyState from '$lib/v2/components/EmptyState.svelte';
   import Pill from '$lib/v2/components/Pill.svelte';
@@ -42,6 +43,41 @@
 
   let conversaciones = $derived(data.conversaciones ?? []);
   let abierta = $derived(page.params.id ?? null);
+
+  // Sondeo: mientras esta pestaña esta abierta, revisa cada pocos segundos
+  // si hay algo nuevo (un chat que nadie tenia, un mensaje que cambio el
+  // "ultimo_mensaje" de una fila) -- para cuando WhatsApp real este
+  // integrado y un cliente escriba sin que nadie tenga que recargar. Solo
+  // si la pestaña esta visible: una de fondo no gasta pedidos al motor.
+  // Todavia no hay WebSocket, esto es sondeo simple.
+  //
+  // El intervalo NO alcanza solo: si la pestaña estuvo de fondo (otra
+  // pestaña, otra app), el intervalo de 8s puede haber estado corriendo
+  // igual pero cada disparo se descartaba por el chequeo de arriba -- al
+  // volver, el proximo disparo real puede tardar hasta 8s mas (y los
+  // navegadores frenan los timers de pestañas de fondo, asi que puede ser
+  // bastante mas). El listener de 'visibilitychange' sondea AL INSTANTE
+  // apenas la pestaña vuelve a estar visible, en vez de esperar al proximo
+  // tick -- confirmado en vivo (agosto 2026): sin esto, dos pestañas
+  // (conversaciones + simulador) no mostraban el mensaje nuevo en minutos.
+  $effect(() => {
+    const intervalo = setInterval(() => {
+      if (document.visibilityState === 'visible') invalidate('app:conversaciones');
+    }, 8000);
+    // Dos señales, no una: 'visibilitychange' no siempre alcanza (algunos
+    // navegadores/arreglos de ventana no la disparan de forma confiable
+    // segun como se cambia de pestaña o ventana). 'focus' de la ventana es
+    // una segunda red -- entre las dos, es dificil que ninguna dispare al
+    // volver.
+    const alVolver = () => invalidate('app:conversaciones');
+    document.addEventListener('visibilitychange', alVolver);
+    window.addEventListener('focus', alVolver);
+    return () => {
+      clearInterval(intervalo);
+      document.removeEventListener('visibilitychange', alVolver);
+      window.removeEventListener('focus', alVolver);
+    };
+  });
 
   const CANAL_LABEL = { whatsapp: 'WhatsApp', 'whatsapp-simulado': 'Simulador' };
   const canalLabel = (/** @type {string} */ c) => CANAL_LABEL[c] ?? c;
@@ -58,8 +94,13 @@
   const etiquetaTone = (/** @type {string} */ e) => ETIQUETA_TONE[e] ?? 'ink';
   const etiquetaLabel = (/** @type {string} */ e) => (e ? e.replaceAll('_', ' ') : '');
 
-  /** Escalada y sin que nadie del equipo haya escrito: pide algo. */
-  const pendiente = (/** @type {any} */ c) => c.escalada_a_humano && !c.atendida;
+  /** Escalada, necesita atencion humana ahora, y sin que nadie del equipo
+      haya escrito: pide algo. 'necesita_atencion_humana' es independiente
+      de 'escalada_a_humano' -- toda escalada crea ticket y pausa el bot
+      igual, pero no toda escalada exige entrar ya mismo (ver
+      nucleo/seguimiento/escalamiento.py). */
+  const pendiente = (/** @type {any} */ c) =>
+    c.escalada_a_humano && c.necesita_atencion_humana && !c.atendida;
 
   const AUTOR = { user: 'Cliente', assistant: 'Asistente', humano: 'Vos', tool: 'Herramienta' };
 

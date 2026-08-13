@@ -1,5 +1,6 @@
 <script>
   import { untrack } from 'svelte';
+  import { invalidate } from '$app/navigation';
   import { enhance } from '$app/forms';
   import Pill from '$lib/v2/components/Pill.svelte';
   import Avatar from '$lib/v2/components/Avatar.svelte';
@@ -48,6 +49,108 @@
   /** Solo se usa por debajo de 1240px, donde la columna de contexto no cabe
       al lado y pasa a abrirse como panel. */
   let contextoAbierto = $state(false);
+
+  // --- atender: sacar el caso de "Sin atender" sin pasar por el chat -------
+  // 'atendida' hoy se calcula sola en cuanto alguien responde de verdad
+  // (ver nucleo/persistencia/db.py::ultima_actividad) -- esto es el camino
+  // manual para cuando el caso se resolvio por telefono, en persona, o por
+  // otro canal, y no corresponde mandarle un mensaje al cliente solo para
+  // que el calculo lo cuente. Sin desmarcar a proposito: ver
+  // marcar_atendida() en el motor.
+  let atendida = $state(untrack(() => !!data.conversacion?.atendida));
+  let marcandoAtendida = $state(false);
+  let errorAtender = $state('');
+
+  async function marcarAtendida() {
+    if (marcandoAtendida || atendida) return;
+    marcandoAtendida = true;
+    errorAtender = '';
+    try {
+      const resp = await fetch(`/api/conversaciones/${conversacion.id}/atender`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ caso_id: conversacion.caso_id ?? null })
+      });
+      const datos = await resp.json();
+      if (!resp.ok) {
+        errorAtender = datos.error || 'No se pudo guardar.';
+        return;
+      }
+      atendida = true;
+      // El servidor toma el ticket a nombre de quien dio "Atender" (ver el
+      // proxy) -- reflejarlo ya mismo en "Asignado a", sin esperar a que
+      // alguien reabra el ticket para verlo.
+      if (datos.asignado) asignadoA = datos.asignado.id;
+      // Sin esto, la lista de la izquierda (+layout.svelte, otro load())
+      // no se entera hasta el proximo sondeo -- hasta 8s despues. Con
+      // invalidate() se refresca al instante, apenas se guarda.
+      invalidate('app:conversaciones');
+    } catch (/** @type {any} */ err) {
+      errorAtender = err?.message || 'No se pudo guardar.';
+    } finally {
+      marcandoAtendida = false;
+    }
+  }
+
+  // --- sondeo: mensajes nuevos sin recargar (para cuando WhatsApp real este
+  // integrado y el cliente escriba mientras esta pantalla esta abierta) ----
+  // Todavia no hay WebSocket -- sondea cada pocos segundos mientras la
+  // pestaña esta visible (una de fondo no gasta pedidos). Nunca REEMPLAZA
+  // 'mensajes': solo agrega lo que no estaba, para no perder ni duplicar los
+  // push() optimistas de enviar().
+  async function sondearMensajesNuevos() {
+    try {
+      const resp = await fetch(`/api/conversaciones/${conversacion.id}/mensajes`);
+      if (!resp.ok) return;
+      const datos = await resp.json();
+      const ahora = Date.now();
+      for (const m of datos.mensajes ?? []) {
+        if (!m.id || mensajes.some((loc) => loc.id === m.id)) continue;
+        // Evita duplicar un mensaje que ESTA pestaña ya empujo de forma
+        // optimista (sin id todavia) y que el sondeo recien ahora trae con
+        // su id real -- match por rol + contenido + reciente.
+        const esEcoDeOptimista = mensajes.some(
+          (loc) =>
+            !loc.id &&
+            loc.rol === m.rol &&
+            loc.contenido === m.contenido &&
+            ahora - new Date(loc.creado_en).getTime() < 15000
+        );
+        if (!esEcoDeOptimista) mensajes.push(m);
+      }
+
+      // La conversacion tambien cambia sin que esta pestaña lo sepa -- se
+      // puede escalar (o alguien mas la atiende/asigna el ticket) DESPUES
+      // de que esta pantalla ya cargo. 'conversacion' se reemplaza entera
+      // (no hay push() locales sobre ella como si hay en 'mensajes', asi que
+      // no hay nada que perder). 'atendida' sigue la misma logica -- salvo
+      // que este a mitad de guardarse desde ESTA pestaña ahora mismo, para
+      // no pisar el propio click con una respuesta vieja del sondeo.
+      if (datos.conversacion) conversacion = datos.conversacion;
+      if (!marcandoAtendida) atendida = !!datos.conversacion?.atendida;
+    } catch {
+      // un sondeo que falla no tiene que avisar nada -- se reintenta solo.
+    }
+  }
+
+  $effect(() => {
+    const intervalo = setInterval(() => {
+      if (document.visibilityState === 'visible') sondearMensajesNuevos();
+    }, 5000);
+    // Igual que en +layout.svelte: sin esto, volver a esta pestaña despues
+    // de estar en otra espera hasta el proximo tick (y los navegadores
+    // frenan los timers de pestañas de fondo) para notar algo nuevo. Dos
+    // señales (visibilitychange + focus de ventana), no una -- entre las
+    // dos es dificil que ninguna dispare al volver.
+    const alVolver = () => sondearMensajesNuevos();
+    document.addEventListener('visibilitychange', alVolver);
+    window.addEventListener('focus', alVolver);
+    return () => {
+      clearInterval(intervalo);
+      document.removeEventListener('visibilitychange', alVolver);
+      window.removeEventListener('focus', alVolver);
+    };
+  });
 
   // --- conservar: sacar la conversacion de la purga por retencion ----------
   // Distinto de marcar un ejemplo: eso dice "esta respuesta fue buena" y
@@ -369,6 +472,24 @@
     <p class="aviso">
       <TriangleAlert size={14} />
       {conversacion.motivo_escalamiento || 'Escalada a un humano'}
+      {#if conversacion.necesita_atencion_humana}
+        {#if !atendida}
+          <button
+            type="button"
+            class="v2-btn v2-btn-sm aviso-atender"
+            onclick={marcarAtendida}
+            disabled={marcandoAtendida}
+          >
+            <CircleCheck size={13} />
+            {marcandoAtendida ? 'Marcando…' : 'Atender'}
+          </button>
+        {:else}
+          <span class="aviso-atendida">
+            <CircleCheck size={13} /> Atendida
+          </span>
+        {/if}
+      {/if}
+      {#if errorAtender}<span class="aviso-mal">{errorAtender}</span>{/if}
     </p>
   {/if}
 
@@ -773,6 +894,23 @@
     color: var(--v2-rust);
     background: color-mix(in srgb, var(--v2-rust) 6%, transparent);
     border-bottom: 1px solid var(--v2-line);
+  }
+  .aviso-atender {
+    margin-left: auto;
+    flex: none;
+  }
+  .aviso-atendida {
+    margin-left: auto;
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--v2-moss, #15803d);
+    font-weight: 600;
+  }
+  .aviso-mal {
+    flex: none;
+    color: var(--v2-rust);
   }
   /* El hilo es lo único que scrollea acá: el encabezado y el compositor
      quedan fijos, para no tener que bajar hasta el fondo para escribir. */

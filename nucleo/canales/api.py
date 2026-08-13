@@ -213,7 +213,8 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             escalamiento.escalar(
                 config, tenant, id_sesion, conversation_id, estado["historial"],
                 evaluacion.get("motivo", ""), evaluacion.get("etiqueta", ""),
-                resumen=evaluacion.get("resumen", ""))
+                resumen=evaluacion.get("resumen", ""),
+                necesita_humano=evaluacion.get("necesita_humano", True))
             estado["escalada"] = True
             # El caso queda guardado para poder consultarlo despues: es lo que
             # permite que la pausa de arriba sepa cuando el humano lo cerro y
@@ -1452,6 +1453,36 @@ def conversaciones_conservar(id_conversacion):
     if not existe:
         return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
     return jsonify({"conservar": conservar, "motivo": motivo})
+
+
+@app.post("/conversaciones/<id_conversacion>/atender")
+def conversaciones_atender(id_conversacion):
+    """
+    Marca una conversacion escalada como atendida sin pasar por el chat --
+    el colaborador la resolvio por telefono, en persona, o por otro canal, y
+    no corresponde (o no hace falta) responderle al cliente por ahi. Ver
+    persistencia.marcar_atendida().
+
+    Distinto de responder de verdad (POST /conversaciones/<id>/humano): esa
+    via ya deja la conversacion atendida sola, calculada. Esta es la manual,
+    para cuando esa via no aplica.
+
+    Cuerpo: {tenant, por?}
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+
+    try:
+        existe = persistencia.marcar_atendida(tenant, id_conversacion, cuerpo.get("por"))
+    except Exception as e:
+        print(f"[conversaciones] fallo al marcar atendida: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo guardar."}), 500
+
+    if not existe:
+        return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+    return jsonify({"atendida": True})
 
 
 @app.get("/conversaciones/<id_conversacion>/media")

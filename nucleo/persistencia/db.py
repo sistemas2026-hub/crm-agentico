@@ -180,22 +180,27 @@ def ultima_actividad(tenant: str, canal: str | None = None) -> list[dict]:
           que abrir cada una para saber de que va.
 
       atendida
-          Si algun humano ya escribio en el hilo. Es la diferencia entre
-          "nadie tomo esto" y "alguien esta en eso", que es lo que decide a
-          cual entrar primero. 'escalada_a_humano' sola no alcanza: una
-          escalada hace dos horas y ya contestada no necesita a nadie.
+          Si algun humano ya escribio en el hilo, O si alguien la marco a
+          mano como atendida sin responder por el chat (ver
+          marcar_atendida() y supabase/11_atendida_manual.sql -- resuelto
+          por telefono, en persona, etc.). Es la diferencia entre "nadie
+          tomo esto" y "alguien esta en eso", que es lo que decide a cual
+          entrar primero. 'escalada_a_humano' sola no alcanza: una escalada
+          hace dos horas y ya contestada no necesita a nadie.
 
     'actualizado_en' viene como datetime con zona horaria, no como texto:
     es timestamptz en la base y quien consume ya no tiene que parsearlo.
     """
     columnas = """c.id, c.canal, c.usuario_externo, c.rol_efectivo, c.estado,
-                  c.escalada_a_humano, c.motivo_escalamiento, c.caso_id, c.etiqueta,
+                  c.escalada_a_humano, c.necesita_atencion_humana,
+                  c.motivo_escalamiento, c.caso_id, c.etiqueta,
                   c.actualizado_en,
                   ultimo.contenido as ultimo_mensaje,
                   ultimo.rol       as ultimo_rol,
-                  exists (select 1 from asistente.messages h
-                           where h.conversation_id = c.id
-                             and h.rol = 'humano') as atendida"""
+                  (c.atendida_manual or exists (
+                       select 1 from asistente.messages h
+                        where h.conversation_id = c.id
+                          and h.rol = 'humano')) as atendida"""
     desde = """from asistente.conversations c
                left join lateral (
                    select contenido, rol
@@ -231,8 +236,14 @@ def mensajes_de(tenant: str, conversation_id: str) -> dict:
     with sesion(tenant) as (cur, org):
         cur.execute(
             """select id, canal, usuario_externo, rol_efectivo, estado,
-                      escalada_a_humano, motivo_escalamiento, caso_id, etiqueta,
-                      actualizado_en, conservar, conservar_motivo, conservar_por
+                      escalada_a_humano, necesita_atencion_humana,
+                      motivo_escalamiento, caso_id, etiqueta,
+                      actualizado_en, conservar, conservar_motivo, conservar_por,
+                      atendida_manual, atendida_por,
+                      (atendida_manual or exists (
+                           select 1 from asistente.messages h
+                            where h.conversation_id = conversations.id
+                              and h.rol = 'humano')) as atendida
                from asistente.conversations
                where organization_id = %s and id = %s""",
             (org, conversation_id))
@@ -264,21 +275,28 @@ def mensajes_de(tenant: str, conversation_id: str) -> dict:
 
 
 def marcar_escalada(tenant: str, conversation_id: str, motivo: str,
-                    caso_id: str | None, etiqueta: str | None) -> None:
+                    caso_id: str | None, etiqueta: str | None,
+                    necesita_atencion_humana: bool = True) -> None:
     """
     Registra que la conversacion paso a un humano: la marca escalada, guarda
     por que (una de escalamiento.activar_si) y el caso/etiqueta que resulto
     -- ver nucleo/seguimiento/escalamiento.py, el unico llamador. Filtra
     tambien por organization_id aunque 'id' ya es unico: mismo estilo
     defensivo que el resto de este archivo.
+
+    'necesita_atencion_humana' es independiente de 'escalada_a_humano': toda
+    escalada crea ticket y pausa el bot igual, pero no toda escalada exige
+    que alguien del equipo entre ya mismo (ver supabase/12_necesita_atencion_humana.sql).
+    Decide el filtro "Sin atender" del frontend, nada mas.
     """
     with sesion(tenant) as (cur, org):
         cur.execute(
             """update asistente.conversations
                set escalada_a_humano = true, motivo_escalamiento = %s,
-                   caso_id = %s, etiqueta = %s, actualizado_en = now()
+                   caso_id = %s, etiqueta = %s,
+                   necesita_atencion_humana = %s, actualizado_en = now()
                where organization_id = %s and id = %s""",
-            (motivo, caso_id, etiqueta, org, conversation_id))
+            (motivo, caso_id, etiqueta, necesita_atencion_humana, org, conversation_id))
 
 
 def cerrar_conversacion(tenant: str, conversation_id: str) -> None:
@@ -491,6 +509,31 @@ def marcar_conservar(tenant: str, conversation_id: str, conservar: bool,
                    conservar_por    = case when %s then %s else null end
                where organization_id = %s and id = %s""",
             (conservar, conservar, motivo, conservar, por, org, conversation_id))
+        return cur.rowcount > 0
+
+
+def marcar_atendida(tenant: str, conversation_id: str, por: str | None) -> bool:
+    """
+    Marca una conversacion escalada como atendida SIN pasar por el chat --
+    el colaborador la resolvio por telefono, en persona, o por otro canal.
+    No es lo mismo que responder de verdad (eso ya marca 'atendida' solo,
+    via el exists de ultima_actividad()): esto es el camino manual para
+    cuando responder por el chat no corresponde. Ver
+    supabase/11_atendida_manual.sql.
+
+    Solo prende la marca -- no hay 'desmarcar' a proposito: si alguien la
+    marco por error, la forma de corregirlo es responder de verdad (que ya
+    la deja atendida por el otro camino) o escalar de nuevo, no un boton que
+    vuelva a poner "sin atender" un caso que ya se resolvio.
+
+    Devuelve False si la conversacion no existe o no es de este tenant.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """update asistente.conversations
+               set atendida_manual = true, atendida_por = %s
+               where organization_id = %s and id = %s""",
+            (por, org, conversation_id))
         return cur.rowcount > 0
 
 

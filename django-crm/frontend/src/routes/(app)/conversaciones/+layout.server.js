@@ -13,9 +13,17 @@ import { env } from '$env/dynamic/private';
  * volver atras para elegir la siguiente. Como layout, SvelteKit la carga una
  * sola vez y la comparte con la pantalla hija.
  *
+ * depends('app:conversaciones'): +layout.svelte sondea cada pocos segundos
+ * mientras la pestaña esta visible y llama a invalidate('app:conversaciones')
+ * -- asi un chat nuevo (o un mensaje que actualiza el ultimo_mensaje de la
+ * lista) aparece solo, sin recargar la pagina. Sin este depends(),
+ * invalidate() no tendria que re-ejecutar.
+ *
  * @type {import('./$types').LayoutServerLoad}
  */
-export async function load({ fetch }) {
+export async function load({ fetch, depends }) {
+  depends('app:conversaciones');
+
   const baseUrl = env.PRIVATE_ASISTENTE_URL;
   const tenant = env.PRIVATE_ASISTENTE_TENANT;
   if (!baseUrl || !tenant) {
