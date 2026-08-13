@@ -319,6 +319,33 @@ def _post(config, tenant: str, recurso: str, payload: dict) -> dict:
     return r.json()
 
 
+def _destinatario(para: str) -> dict:
+    """
+    El campo con el que se nombra a quien recibe. NO es siempre el mismo, y
+    confundirlos es un error mudo.
+
+    'to' es para un TELEFONO. 'recipient' es para un BSUID (Business-Scoped
+    User ID, ej. 'CO.1360399936298471'), que es lo que Meta entrega desde abril
+    de 2026 cuando la persona escondio su numero detras de un nombre de
+    usuario. Los envios a BSUID se habilitaron en julio de 2026.
+
+    Mandar un BSUID por 'to' NO da un error claro: Meta acepta la peticion, le
+    extrae los digitos, los trata como telefono, y el fallo llega despues y por
+    otro lado -- un 131026 ("no es un numero de WhatsApp") en el webhook de
+    estados. Costo dias de buscar la causa donde no estaba.
+
+    El 'CO.' es parte del identificador, no un prefijo de pais: la
+    documentacion avisa que quitarle el punto o los caracteres alfanumericos
+    hace fallar la peticion.
+    """
+    para = (para or "").strip()
+    if not para:
+        raise ErrorWhatsApp("No hay a quien enviarle el mensaje.")
+    # Solo digitos = telefono. Cualquier otra cosa se trata como BSUID: es mas
+    # seguro que buscar el 'CO.', que es el prefijo de UN pais y no una regla.
+    return {"to": para} if para.isdigit() else {"recipient": para}
+
+
 def enviar_texto(config, tenant: str, para: str, texto: str) -> str | None:
     """
     Un mensaje de texto al cliente. Devuelve el wamid del mensaje enviado, que
@@ -329,18 +356,6 @@ def enviar_texto(config, tenant: str, para: str, texto: str) -> str | None:
     agente (si, en la bandeja) o solo se registra (en el turno del bot, donde
     no hay nadie mirando).
     """
-    # Un BSUID no es un destinatario valido: Meta acepta la peticion con 200,
-    # le extrae los digitos, los trata como telefono y recien despues avisa por
-    # el webhook de estados con 131026 ("no es un numero de WhatsApp"). Ese
-    # camino deja creer que el mensaje salio. Verificado en vivo contra v23.0 y
-    # v26.0, y con cinco formas distintas de armar el destinatario: ninguna
-    # entrega. Se corta antes y se dice por que.
-    if (para or "").startswith("CO.") or not (para or "").isdigit():
-        raise ErrorWhatsApp(
-            f"'{para}' no es un numero de telefono sino un identificador de "
-            f"usuario (BSUID). WhatsApp no permite responderle a ese "
-            f"identificador: hace falta que la entrega traiga 'wa_id'.")
-
     if not texto or not texto.strip():
         raise ErrorWhatsApp("No se envia un mensaje vacio.")
 
@@ -350,7 +365,7 @@ def enviar_texto(config, tenant: str, para: str, texto: str) -> str | None:
     respuesta = _post(config, tenant, f"{emisor}/messages", {
         "messaging_product": "whatsapp",
         "recipient_type": "individual",
-        "to": para,
+        **_destinatario(para),
         "type": "text",
         # preview_url en False a proposito: una vista previa de enlace la
         # genera Meta trayendo la pagina, y no hace falta para lo que responde
@@ -400,7 +415,7 @@ def enviar_plantilla(config, tenant: str, para: str, plantilla: str,
     respuesta = _post(config, tenant, f"{emisor}/messages", {
         "messaging_product": "whatsapp",
         "recipient_type": "individual",
-        "to": para,
+        **_destinatario(para),
         "type": "template",
         "template": {
             "name": nombre_real,

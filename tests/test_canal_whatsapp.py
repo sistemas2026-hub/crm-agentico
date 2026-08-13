@@ -237,12 +237,17 @@ def main():
           b["telefono"] is None)
     check("y el BSUID se conserva aparte", b["bsuid"] == "CO.1360399936298471")
 
-    try:
-        whatsapp.enviar_texto(_ConfigFalsa(), TENANT, "CO.1360399936298471", "hola")
-        check("responderle a un BSUID se rechaza ANTES de llamar a Meta", False)
-    except whatsapp.ErrorWhatsApp as e:
-        check("responderle a un BSUID se rechaza ANTES de llamar a Meta",
-              "BSUID" in str(e))
+    # A un BSUID se le contesta por 'recipient'; a un telefono por 'to'.
+    # Mandar un BSUID por 'to' no da error: Meta le extrae los digitos, los
+    # trata como telefono, y el fallo aparece despues y por otro lado (131026
+    # en el webhook de estados). Por eso se verifica el campo, no el envio.
+    check("a un BSUID se le escribe por 'recipient'",
+          whatsapp._destinatario("CO.1360399936298471")
+          == {"recipient": "CO.1360399936298471"})
+    check("y a un telefono por 'to'",
+          whatsapp._destinatario("573208633423") == {"to": "573208633423"})
+    check("el 'CO.' no se toca: quitarlo hace fallar la peticion",
+          "CO." in whatsapp._destinatario("CO.123")["recipient"])
 
     solo_opaco = {'entry': [{'changes': [{'value': {'messages': [
         {'id': 'wamid.C2', 'from_user_id': 'CO.888', 'type': 'text',

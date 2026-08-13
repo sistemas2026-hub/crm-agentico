@@ -1161,19 +1161,14 @@ def _procesar_mensaje_whatsapp(config, tenant: str, rol: str, entrante: dict) ->
     de = entrante.get("de")
     wamid = entrante.get("wamid")
 
-    # Sin telefono NO se corta el turno. Cortarlo ahorra el costo del modelo,
-    # pero deja la conversacion sin crear: no aparece en /conversaciones y no
-    # hay nada que mirar. Mientras el canal se esta probando importa mas ver el
-    # circuito completo -- que el mensaje llegue, que el modelo conteste y que
-    # todo eso quede en la bandeja -- que ahorrarse el turno.
-    #
-    # Lo unico que no va a ocurrir es la entrega, y de eso se encarga
-    # enviar_texto(), que rechaza un BSUID antes de llamar a Meta.
-    hay_a_donde_responder = bool(entrante.get("telefono"))
-    if not hay_a_donde_responder:
-        print(f"[whatsapp] {de} llega SIN telefono (solo BSUID): se atiende el "
-              f"turno y queda en la bandeja, pero la respuesta no se puede "
-              f"entregar. wamid={wamid}")
+    # Que llegue un BSUID en vez de un telefono NO impide contestar: el envio
+    # lo nombra por el campo 'recipient' en vez de 'to' (ver _destinatario() en
+    # nucleo/canales/whatsapp.py). Lo que si queda sin poder hacerse es cruzarlo
+    # con la base del ISP, porque un BSUID no es un numero: esa persona va a
+    # tener que identificarse con su cedula como cualquier numero desconocido.
+    if not entrante.get("telefono"):
+        print(f"[whatsapp] {de} llega sin telefono (BSUID): se contesta igual, "
+              f"pero no se puede reconocer al cliente sin que se identifique.")
 
     try:
         if wamid:
@@ -1214,14 +1209,7 @@ def _procesar_mensaje_whatsapp(config, tenant: str, rol: str, entrante: dict) ->
         _guardar_adjunto(config, tenant, entrante, salida.get("conversacion_id"),
                          salida.get("mensaje_usuario_id"))
 
-        if hay_a_donde_responder:
-            whatsapp.enviar_texto(config, tenant, de, salida["respuesta"])
-        else:
-            # El turno salio bien y la respuesta esta guardada; lo que falta es
-            # el ultimo tramo. Se registra que el modelo SI contesto, para que
-            # el rastro no se parezca al de un turno que fallo.
-            print(f"[whatsapp] respuesta lista para {de} pero sin entregar "
-                  f"(sin telefono): {salida['respuesta'][:120]!r}")
+        whatsapp.enviar_texto(config, tenant, de, salida["respuesta"])
     except Exception as e:
         print(f"[whatsapp] fallo al atender a {de} ({wamid}): "
               f"{type(e).__name__}: {e}")
