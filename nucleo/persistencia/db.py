@@ -190,11 +190,16 @@ def ultima_actividad(tenant: str, canal: str | None = None) -> list[dict]:
 
     'actualizado_en' viene como datetime con zona horaria, no como texto:
     es timestamptz en la base y quien consume ya no tiene que parsearlo.
+
+    'id_cliente'/'nombre_cliente' (ver supabase/14_identidad_conversacion.sql)
+    son NULL hasta que _ejecutar_confirmacion verifica al cliente -- antes de
+    eso, la unica identidad que hay es 'usuario_externo' (el numero o BSUID
+    crudo del canal).
     """
     columnas = """c.id, c.canal, c.usuario_externo, c.rol_efectivo, c.estado,
                   c.escalada_a_humano, c.necesita_atencion_humana,
                   c.motivo_escalamiento, c.caso_id, c.etiqueta,
-                  c.actualizado_en,
+                  c.actualizado_en, c.id_cliente, c.nombre_cliente,
                   ultimo.contenido as ultimo_mensaje,
                   ultimo.rol       as ultimo_rol,
                   (c.atendida_manual or exists (
@@ -239,7 +244,7 @@ def mensajes_de(tenant: str, conversation_id: str) -> dict:
                       escalada_a_humano, necesita_atencion_humana,
                       motivo_escalamiento, caso_id, etiqueta,
                       actualizado_en, conservar, conservar_motivo, conservar_por,
-                      atendida_manual, atendida_por,
+                      atendida_manual, atendida_por, id_cliente, nombre_cliente,
                       (atendida_manual or exists (
                            select 1 from asistente.messages h
                             where h.conversation_id = conversations.id
@@ -315,6 +320,27 @@ def cerrar_conversacion(tenant: str, conversation_id: str) -> None:
                set estado = 'cerrada', actualizado_en = now()
                where organization_id = %s and id = %s""",
             (org, conversation_id))
+
+
+def identificar_cliente(tenant: str, conversation_id: str,
+                        id_cliente: str, nombre: str | None) -> None:
+    """
+    Guarda a QUIEN corresponde esta conversacion, resuelto por
+    nucleo.modelo.motor._ejecutar_confirmacion -- no el identificador crudo
+    del canal (eso ya vive en usuario_externo), sino el cliente real.
+
+    Se llama en CADA turno una vez verificada la sesion (nucleo/canales/
+    api.py::atender_turno): es un UPDATE idempotente, no hay costo en
+    repetirlo. Antes de esto, Sesion.id_cliente vivia solo en memoria del
+    proceso del motor y se perdia en cada reinicio -- /conversaciones nunca
+    tenia con que mostrar un nombre, solo el BSUID o telefono crudo.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """update asistente.conversations
+               set id_cliente = %s, nombre_cliente = %s
+               where organization_id = %s and id = %s""",
+            (id_cliente, nombre, org, conversation_id))
 
 
 def caso_de_conversacion(tenant: str, conversation_id: str) -> str | None:

@@ -49,7 +49,7 @@ from nucleo.recuperacion.prompt import construir_system
 from nucleo.recuperacion.busqueda import (recuperar, bloque_de_contexto,
                                           registrar_sin_resultados)
 from nucleo.seguridad import listas_blancas
-from nucleo.seguridad.verificacion import nivel_requerido
+from nucleo.seguridad.verificacion import nivel_requerido, es_factor_de_posesion
 
 
 class ErrorMotor(Exception):
@@ -233,6 +233,7 @@ def _ejecutar_confirmacion(sesion, argumentos_modelo: dict) -> dict:
     sesion.verificado = True
     sesion.nivel = max(sesion.nivel, 1)
     sesion.id_cliente = sesion.id_cliente_pendiente
+    sesion.nombre = sesion.nombre_pendiente
     sesion.interfaz_lan = sesion.interfaz_lan_pendiente
     sesion.id_cliente_pendiente = None
     sesion.nombre_pendiente = None
@@ -420,6 +421,16 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
     referencia_redaccion = config.llm.modelo_redaccion or referencia_decision
 
     nivel_exigido = nivel_requerido(rol_cfg, config.seguridad) if rol_cfg.orientado_a == "cliente_final" else 0
+    # Sin un telefono real de por medio, el identificador del canal (ej. un
+    # BSUID de WhatsApp) no es un factor de posesion -- cualquiera que
+    # escriba desde esa cuenta pasaria la barra igual. Se exige nivel 1 ANTES
+    # de cualquier herramienta, no solo de las marcadas sensibles: es la
+    # unica forma de saber quien es, y sin esto la conversacion queda para
+    # siempre como "sin identificar" en /conversaciones si nunca toca un
+    # recurso protegido.
+    if (rol_cfg.orientado_a == "cliente_final" and sesion is not None
+            and not es_factor_de_posesion(sesion.identificador_canal)):
+        nivel_exigido = max(nivel_exigido, 1)
 
     hubo_llamadas = False
     iteraciones = 0

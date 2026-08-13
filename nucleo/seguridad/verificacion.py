@@ -31,7 +31,6 @@ herramienta->recurso en la config.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 
 
@@ -43,6 +42,12 @@ class Sesion:
     verificado: bool = False
     nivel: int = 0
     id_cliente: str | None = None
+    # El nombre que confirmo el cliente en _ejecutar_confirmacion. A
+    # diferencia de 'nombre_pendiente' (que se limpia al cerrar el segundo
+    # paso), este sobrevive: es lo que nucleo/canales/api.py persiste en
+    # asistente.conversations para que /conversaciones muestre un nombre en
+    # vez del identificador crudo del canal.
+    nombre: str | None = None
     # Capturada al verificar (nunca la propone el modelo): la necesita
     # ping_cliente para el parametro 'interfaz' de WispHub. Puede quedar
     # vacia -- normal en clientes nuevos, ver nucleo/herramientas/http.py.
@@ -58,18 +63,6 @@ class Sesion:
     id_cliente_pendiente: str | None = None
     nombre_pendiente: str | None = None
     interfaz_lan_pendiente: str | None = None
-
-
-def extraer_identificador(texto: str, patron_extraccion: str) -> str | None:
-    """
-    Saca el numero de telefono del campo crudo del canal usando el patron del
-    tenant (Autenticacion.patron_extraccion). Existe porque el campo
-    'telefono' de WispHub guarda mas de un numero junto en la mayoria de los
-    casos -- leerlo como valor unico bajaria mucho la cobertura (ver
-    docstring de 'Autenticacion' en schema.py).
-    """
-    m = re.search(patron_extraccion, texto or "")
-    return m.group(0) if m else None
 
 
 def nivel_requerido(rol_cfg, seguridad_cfg) -> int:
@@ -93,38 +86,23 @@ def nivel_requerido(rol_cfg, seguridad_cfg) -> int:
     return max(niveles, default=0)
 
 
-def verificar_por_telefono(sesion: Sesion, autenticacion_cfg,
-                           buscar_clientes_por_telefono, telefono: str) -> Sesion:
+def es_factor_de_posesion(identificador: str) -> bool:
     """
-    Intenta subir la sesion a nivel 1 cruzando 'telefono' contra los clientes
-    que devuelva 'buscar_clientes_por_telefono(telefono)'.
+    El numero de telefono sirve como factor de POSESION (98.7% de cobertura
+    medida sobre la base de Rapilink, ver el docstring de arriba) porque casi
+    nadie mas tiene ese aparato. Un identificador que NO es un telefono --
+    como el BSUID que manda WhatsApp cuando el cliente oculto su numero
+    detras de un username de la plataforma -- no tiene esa propiedad:
+    cualquiera que escriba desde esa cuenta pasaria la barra igual.
 
-    'buscar_clientes_por_telefono' se inyecta a proposito (no llama a
-    WispHub directo desde aca): en modo simulado es un lookup fijo; en modo
-    real depende de que exista un filtro por telefono VERIFICADO contra la
-    API -- no confirmado todavia (ver skill wisphub-api, metodo del valor
-    imposible). Hasta sondearlo, no se asume que funciona.
+    Por eso NO cuenta como verificacion por si sola: nucleo/modelo/motor.py
+    exige nivel 1 ANTES de cualquier herramienta cuando esto da False, aunque
+    ninguno de los recursos que toque ese turno este marcado como sensible en
+    'seguridad.requiere_verificacion'. Mismo heuristico que
+    nucleo/canales/whatsapp.py::_destinatario() para distinguir un telefono
+    real de un BSUID.
     """
-    candidatos = buscar_clientes_por_telefono(telefono)
-
-    if not candidatos:
-        sesion.verificado = False
-        sesion.nivel = 0
-        return sesion
-
-    if len(candidatos) > 1 and autenticacion_cfg.desambiguar_si_multiple:
-        # No es fallo de autenticacion: hay que preguntar cual servicio, y el
-        # codigo -no el modelo- decide entre los candidatos reales.
-        sesion.verificado = False
-        sesion.nivel = 0
-        sesion.candidatos = [c["id_cliente"] for c in candidatos]
-        return sesion
-
-    sesion.verificado = True
-    sesion.nivel = 1
-    sesion.id_cliente = candidatos[0]["id_cliente"]
-    sesion.candidatos = []
-    return sesion
+    return bool(identificador) and identificador.isdigit()
 
 
 def resolver_candidato(sesion: Sesion, id_cliente_elegido: str) -> Sesion:

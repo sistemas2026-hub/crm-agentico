@@ -240,7 +240,9 @@
             href="/conversaciones/{c.id}"
             aria-current={c.id === abierta ? 'page' : undefined}
           >
-            {#if esTelefono(c.usuario_externo)}
+            {#if c.nombre_cliente}
+              <Avatar name={c.nombre_cliente} size={30} />
+            {:else if esTelefono(c.usuario_externo)}
               <span class="ident" aria-hidden="true"><Phone size={14} /></span>
             {:else if !c.usuario_externo || esUuid(c.usuario_externo)}
               <span class="ident" aria-hidden="true"><User size={14} /></span>
@@ -250,7 +252,7 @@
 
             <div class="cuerpo">
               <div class="alta">
-                <span class="quien">{quien(c.usuario_externo)}</span>
+                <span class="quien">{c.nombre_cliente || quien(c.usuario_externo)}</span>
                 <span class="cuando v2-num">{shortAge(c.actualizado_en)}</span>
               </div>
 

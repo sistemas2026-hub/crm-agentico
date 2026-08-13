@@ -191,6 +191,18 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             tenant, canal, id_sesion, rol, "assistant", respuesta)
         for llamada in registro_herramientas:
             persistencia.registrar_llamada_herramienta(tenant, conversation_id, rol, llamada)
+        # Recien aca existe conversation_id (ver el docstring de
+        # motor.responder): antes de esto no habia donde persistir a quien
+        # verifico _ejecutar_confirmacion. Se repite cada turno una vez
+        # verificado -- es un UPDATE idempotente, mas simple que rastrear si
+        # ya se guardo antes.
+        if estado["sesion"] is not None and estado["sesion"].verificado and estado["sesion"].id_cliente:
+            try:
+                persistencia.identificar_cliente(
+                    tenant, conversation_id,
+                    estado["sesion"].id_cliente, estado["sesion"].nombre)
+            except Exception as e:
+                print(f"[persistencia] no se pudo guardar la identidad: {e}")
     except Exception as e:  # nunca se rompe el turno por un fallo de persistencia
         print(f"[persistencia] no se pudo guardar el turno: {e}")
 
