@@ -1292,6 +1292,20 @@ def whatsapp_webhook(tenant):
         print(f"[whatsapp] entrega con {len(entrantes)} mensaje(s) y "
               f"{len(estados)} estado(s). Remitente(s): {formas}")
 
+        # Si el remitente vino opaco, hace falta saber que SI trajo la entrega
+        # para encontrar donde esta el telefono. Se registran las CLAVES de
+        # cada nivel, nunca los valores: el contenido es de un cliente.
+        if "OPACO" in formas:
+            for entrada in (cuerpo or {}).get("entry", []) or []:
+                for cambio in entrada.get("changes", []) or []:
+                    valor = cambio.get("value") or {}
+                    contactos = valor.get("contacts") or []
+                    print(f"[whatsapp] remitente opaco. field={cambio.get('field')!r} "
+                          f"value={sorted(valor)} "
+                          f"contacts={len(contactos)} "
+                          f"claves_contacto={sorted(contactos[0]) if contactos else '-'} "
+                          f"metadata={sorted(valor.get('metadata') or {})}")
+
     atendidos = 0
     for entrante in entrantes:
         wamid = entrante.get("wamid")
