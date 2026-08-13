@@ -248,11 +248,19 @@ def estados_entrantes(cuerpo: dict) -> list[dict]:
     for entrada in (cuerpo or {}).get("entry", []) or []:
         for cambio in entrada.get("changes", []) or []:
             for s in (cambio.get("value") or {}).get("statuses", []) or []:
+                # El CODIGO es lo que identifica el motivo; el texto de Meta
+                # es el mismo ('Message undeliverable') para causas muy
+                # distintas -- destinatario que no existe, fuera de la ventana
+                # de 24 h, numero bloqueado. Sin el codigo hay que adivinar
+                # cual de las tres es.
+                err = (s.get("errors") or [{}])[0]
                 salida.append({
                     "wamid": s.get("id"),
                     "estado": s.get("status"),
                     "de": s.get("recipient_id"),
-                    "error": (s.get("errors") or [{}])[0].get("message"),
+                    "error": err.get("message"),
+                    "codigo": err.get("code"),
+                    "detalle": (err.get("error_data") or {}).get("details"),
                 })
     return salida
 

@@ -1347,8 +1347,9 @@ def whatsapp_webhook(tenant):
     # conversacion: sin separarlos, el bot contestaria a su propio "entregado".
     for estado in estados:
         if estado.get("estado") == "failed":
-            print(f"[whatsapp] no se pudo entregar {estado.get('wamid')} a "
-                  f"{estado.get('de')}: {estado.get('error')}")
+            print(f"[whatsapp] no se pudo entregar a {estado.get('de')}: "
+                  f"codigo={estado.get('codigo')} {estado.get('error')} "
+                  f"| detalle={estado.get('detalle')}")
 
     return jsonify({"recibido": True, "atendidos": atendidos}), 200
 
