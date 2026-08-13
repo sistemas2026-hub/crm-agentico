@@ -155,7 +155,12 @@ corpus:
       metadatos_dominio: [marca_equipo, tipo_procedimiento]
 
 rag:
-  modelo_embeddings: bge-m3
+  # El proveedor de embeddings es de PLATAFORMA, no de tenant: lo fija
+  # nucleo/recuperacion/embeddings.py (hoy, text-embedding-3-large de OpenAI,
+  # pedido con dimensions=1024). Este campo es la ETIQUETA que queda guardada
+  # en document_chunks.modelo_embeddings para poder distinguir despues con que
+  # proveedor se vectorizo cada fila -- no selecciona el proveedor.
+  modelo_embeddings: text-embedding-3-large
   # DEBE coincidir con vector(N) del esquema SQL. Cambiarlo obliga a
   # re-vectorizar todo el corpus Y a migrar la columna. Decidelo una vez.
   dimensiones: 1024

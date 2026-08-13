@@ -35,40 +35,17 @@ Con esas cinco variables presentes en `.env`, `backend`, `celery-worker`, `celer
 - **Dos personas trabajando así a la vez chocan.** Dos entornos locales corriendo migraciones o escribiendo conversaciones contra la misma base al mismo tiempo compiten por las mismas filas — ver la nota sobre colaboración en la rama compartida. Avisar antes de usarlo, no asumir que nadie más está.
 - El backend se conecta como `postgres`, que tiene `BYPASSRLS` (ver ARQUITECTURA.md). Local o en el VPS, la separación por tenant no lo protege: ve todo.
 
-**Si ya tenés Ollama nativo en la máquina** (el uso habitual del equipo de desarrollo, ver PRD.md 7.1.1 — `banco_pruebas.py` habla contra ese, no contra Docker), el servicio `ollama` del compose es un contenedor aparte con un volumen vacío: no ve los modelos que ya tenés instalados, y `docker compose up` los vuelve a bajar (~4-5 GB, imagen + `bge-m3`). Se evita apuntando `OLLAMA_HOST` al Ollama del host desde tu `.env`:
+**Embeddings del corpus: API de OpenAI, no Ollama** (agosto 2026 -- ver `nucleo/recuperacion/embeddings.py`). El VPS no tenia recursos de sobra para correr un modelo local ademas de todo lo demas (el CRM, el motor, dos Supabase, Traefik), y el unico consumidor de ese contenedor era la vectorizacion del corpus: los cinco roles de chat ya estaban redirigidos a DeepSeek/Anthropic, asi que no hacia falta para nada mas. Se saco el servicio `ollama` de los dos compose (dev y prod) en vez de dejarlo corriendo sin uso.
+
+Requiere `OPENAI_API_KEY` en el `.env` (dev) o en las variables de Dokploy del servicio `motor` (prod) -- ver la tabla de variables mas abajo. `cli/banco_pruebas.py` y `cli/prueba_velocidad.py` (PRD.md 7.1.1, comparar modelos de chat) siguen hablando contra el Ollama nativo de tu maquina si lo tenes instalado; eso no cambio, es un uso aparte del RAG.
+
+**Recargar el corpus de produccion ya no necesita tunel SSH.** Antes habia que vectorizar desde una maquina de desarrollo apuntando al Ollama del servidor por un tunel, porque Ollama no publica puerto al host. Con OpenAI de por medio no hay ningun servicio de red al que hacerle tunel -- el script corre igual desde donde esten los `.docx` (`corpus/<slug>/*.docx`, que estan en `.gitignore` y nunca llegan a la imagen del motor), apuntando el `.env` local a la base real:
 
 ```
-OLLAMA_HOST=http://host.docker.internal:11434
-```
-
-Y arrancando `motor` con `--no-deps`, para que no arrastre al contenedor `ollama` por el `depends_on`:
-
-```
-docker compose up -d --build backend celery-worker celery-beat frontend
-docker compose up -d --build --no-deps motor
-```
-
-Verificar que tiene `bge-m3` antes: `curl localhost:11434/api/tags`. Sin override, el default sigue siendo el contenedor — a nadie más le cambia nada.
-
-**Recargar el corpus de producción hay que hacerlo por túnel, no dentro del contenedor del motor.** `corpus/` está en `.gitignore` a propósito (`git ls-files corpus/` no trae ni un `.docx`) — los documentos viven solo en las máquinas de quien los cargó, nunca llegaron a la imagen del motor. `docker exec <motor> python cli/cargar_corpus.py rapilink` en el VPS falla con `No existe /app/corpus/rapilink`, y no es un bug: ese directorio nunca existió ahí.
-
-El script sí corre desde una máquina de desarrollo (donde SÍ está `corpus/rapilink/*.docx`) apuntando al Ollama del servidor, con un túnel SSH sobre la red interna de Docker — Ollama no publica puerto al host, `11434/tcp` sin `0.0.0.0:`:
-
-```
-# la IP del contenedor ollama, no 'localhost': el tunel entra al host, no al contenedor
-docker inspect $(docker ps -q --filter name=ollama) --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} -> {{$v.IPAddress}}{{println}}{{end}}'
-
-ssh -L 11434:<ip-del-contenedor-ollama>:11434 root@86.48.18.185
-```
-
-Y en otra terminal, con el túnel abierto y el `.env` local apuntando a la base real (ver arriba):
-
-```
-$env:OLLAMA_HOST="http://localhost:11434"      # PowerShell
 py -3.13 cli/cargar_corpus.py rapilink --forzar
 ```
 
-Hecho en vivo el 13/08/2026: 106 fragmentos recargados con el `bge-m3` del servidor en 49 segundos.
+Hecho en vivo el 13/08/2026: 106 fragmentos recargados con el `bge-m3` del servidor en 49 segundos -- pero ese fue el ultimo tunel: mas tarde ese mismo dia se paso a embeddings de OpenAI, asi que esos 106 quedaron obsoletos otra vez y hay que recargarlos una vez mas (ya sin tunel) antes de que el RAG vuelva a servir contexto real.
 
 **No hay recarga en caliente del frontend dentro de Docker.** El código entra por un bind mount desde Windows y los eventos de archivo del host no cruzan al contenedor Linux, así que Vite nunca se entera de un cambio: sigue sirviendo el módulo compilado viejo. No falla ni avisa — se edita, se recarga el navegador y no pasa nada; o peor, SSR y cliente quedan en versiones distintas y sale `hydration_mismatch` en consola. Después de editar cualquier archivo del frontend:
 
@@ -121,7 +98,7 @@ sysctl -w vm.swappiness=10 && echo 'vm.swappiness=10' >> /etc/sysctl.conf
 
 ### 3. Variables
 
-Van en la sección **Environment** del servicio. **Diecinueve** son obligatorias; el despliegue se detiene nombrando la que falte, antes de construir nada. Péguelas todas de una vez — **Compose se para en la primera**, así que ir agregándolas de a una es un redespliegue por variable.
+Van en la sección **Environment** del servicio. **Veinte** son obligatorias; el despliegue se detiene nombrando la que falte, antes de construir nada. Péguelas todas de una vez — **Compose se para en la primera**, así que ir agregándolas de a una es un redespliegue por variable.
 
 ```
 DBHOST=crm.rapilinksas.co
@@ -146,6 +123,7 @@ WISPHUB_API_KEY=
 WISPHUB_BASE_URL=https://api.wisphub.io
 WISPHUB_MODO_REAL=true
 DEEPSEEK_API_KEY=
+OPENAI_API_KEY=
 BOTTLECRM_API_TOKEN=
 
 SECRETOS_CLAVE_MAESTRA=
@@ -164,6 +142,8 @@ py -3.13 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key()
 ```
 
 **Si se pierde, no hay forma de recuperar los valores**: hay que volver a cargar todas las credenciales a mano. Es la propiedad buscada, no un descuido — guardala donde guardes las demás.
+
+`OPENAI_API_KEY` vectoriza el corpus (`nucleo/recuperacion/embeddings.py`, `text-embedding-3-large`). Reemplaza a Ollama local desde agosto 2026 — sin ella el motor arranca igual, pero cada pregunta se responde sin contexto documental y queda `[rag] no se pudo recuperar contexto` en el log.
 
 `BOTTLECRM_API_TOKEN` lo usa el motor para abrir el ticket al escalar una conversación y para comprobar si ese caso sigue abierto. Sin él, el bot escala y el ticket nunca se crea.
 
@@ -221,7 +201,7 @@ El servicio es `kong`, la pasarela de API — **no `db`**. Apuntarlo a `db` da 5
 
 Al entrar pide usuario y contraseña: son `DASHBOARD_USERNAME` y `DASHBOARD_PASSWORD` de las variables de ese proyecto.
 
-`motor`, `ollama` y `redis` **no llevan dominio**. El frontend alcanza al motor por la red interna (`http://motor:5000`); exponerlo sería abrir el asistente a internet sin autenticación.
+`motor` y `redis` **no llevan dominio**. El frontend alcanza al motor por la red interna (`http://motor:5000`); exponerlo sería abrir el asistente a internet sin autenticación.
 
 ### 4.c El webhook de WhatsApp — la única excepción
 
@@ -331,14 +311,11 @@ dig +short agent.rapilinksas.co agent-api.rapilinksas.co
 
 ### 5. Después del primer despliegue
 
-```
-docker ps | grep ollama
-docker exec -it <contenedor-ollama> ollama pull bge-m3
-```
+**Cargar el corpus.** A diferencia de Ollama, la API de OpenAI no necesita bajar ningún modelo — con `OPENAI_API_KEY` puesta (ver Variables) alcanza con correr, desde cualquier máquina con el `.env` apuntando a la base real:
 
-Una sola vez: queda en el volumen `ollama_models` y sobrevive a los redespliegues.
-
-Y **recargar el corpus contra ese Ollama** — ver la primera entrada de pendientes, porque no es opcional.
+```
+py -3.13 cli/cargar_corpus.py rapilink --forzar
+```
 
 ### 6. Comprobar que quedó bien
 
@@ -469,14 +446,14 @@ Dos cosas que se deciden junto con eso:
 
 Errores que ya costaron tiempo una vez.
 
-**Un servicio del compose no resuelve el nombre de otro** (`Temporary failure in name resolution`). Se quedó sin la red `default`, que es por la que los servicios se encuentran por nombre. Pasó con el motor: quedó solo en `dokploy-network` y dejó de ver a `ollama`, así que el RAG se apagó. No rompía el turno —`recuperar()` atrapa el error a propósito, porque peor es no atender— así que el asistente siguió contestando, solo que sin la documentación interna, y se notó días después.
+**Un servicio del compose no resuelve el nombre de otro** (`Temporary failure in name resolution`). Se quedó sin la red `default`, que es por la que los servicios se encuentran por nombre. Pasó con el motor: quedó solo en `dokploy-network` y dejó de ver a `ollama` (el servicio que vectorizaba el corpus antes de pasar a la API de OpenAI, agosto 2026 — ya no existe, pero la lección de red vale igual para cualquier servicio futuro), así que el RAG se apagó. No rompía el turno —`recuperar()` atrapa el error a propósito, porque peor es no atender— así que el asistente siguió contestando, solo que sin la documentación interna, y se notó días después.
 
-Lo que más costó fue el mensaje: la librería dice `Failed to connect to Ollama. Please check that Ollama is downloaded, running and accessible`, o sea manda a instalar algo que llevaba dos días corriendo, sano y con `bge-m3` bajado. La causa no estaba en Ollama sino en la red. (Ese error ahora dice a qué host se intentó conectar, ver `nucleo/recuperacion/busqueda.py`.)
+Lo que más costó fue el mensaje: la librería de Ollama decía `Failed to connect to Ollama. Please check that Ollama is downloaded, running and accessible`, o sea mandaba a instalar algo que llevaba dos días corriendo, sano y con `bge-m3` bajado. La causa no estaba en Ollama sino en la red.
 
-Se ve en una línea — si no comparten ninguna red, ahí está:
+Se ve en una línea — si dos servicios no comparten ninguna red, ahí está:
 
 ```
-docker inspect -f '{{.Name}} -> {{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}'   $(docker ps -q --filter name=motor) $(docker ps -q --filter name=ollama)
+docker inspect -f '{{.Name}} -> {{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}'   $(docker ps -q --filter name=<servicio-a>) $(docker ps -q --filter name=<servicio-b>)
 ```
 
 **Por qué se quedó sin `default`, no se sabe.** La explicación obvia —que Dokploy le escribe `networks: [dokploy-network]` al darle dominio, y en Compose declarar una red explícita reemplaza a `default` en vez de sumarse— **no se sostiene**: `backend` también tiene dominio y quedó con las dos. Así que no es una consecuencia automática de tener dominio. Se comprobó el 13/08/2026, después de haberlo escrito acá al revés.

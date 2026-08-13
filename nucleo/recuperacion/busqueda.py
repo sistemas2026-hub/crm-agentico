@@ -12,9 +12,9 @@ modelo improvisara del prompt, no lo que dice la guia.
 Como funciona
 -------------
 La pregunta se vectoriza con el MISMO modelo con que se vectorizo el corpus
-(config.rag.modelo_embeddings). No es un detalle: vectores de modelos distintos
-no son comparables, y la busqueda no falla -- devuelve fragmentos peores, en
-silencio.
+(nucleo/recuperacion/embeddings.py -- un solo proveedor de plataforma, no por
+tenant). No es un detalle: vectores de modelos distintos no son comparables, y
+la busqueda no falla -- devuelve fragmentos peores, en silencio.
 
 Se usa asistente.match_chunks, la vectorial pura, y no match_chunks_hibrido
 aunque el YAML traiga busqueda_hibrida. Motivo: la hibrida devuelve un puntaje
@@ -36,6 +36,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from nucleo.persistencia.db import sesion
+from nucleo.recuperacion.embeddings import vectorizar
 
 
 @dataclass(frozen=True)
@@ -51,23 +52,6 @@ class Fragmento:
         decir de donde salio en vez de afirmarlo como conocimiento propio."""
         version = f" v{self.version}" if self.version else ""
         return f"[{self.codigo}{version} — {self.titulo}]\n{self.contenido}"
-
-
-def vectorizar(pregunta: str, modelo: str) -> list[float]:
-    import os
-    import ollama                                    # import perezoso
-    try:
-        return ollama.embed(model=modelo, input=pregunta)["embeddings"][0]
-    except Exception as e:
-        # El mensaje de la libreria ("Failed to connect to Ollama... check that
-        # Ollama is downloaded") manda a instalarlo, que casi nunca es el
-        # problema: la causa habitual es que OLLAMA_HOST apunta a otro lado
-        # (el contenedor en produccion, el host en desarrollo) o que ese
-        # servicio se cayo. Sin saber A QUE host se intento, no se distingue
-        # una cosa de la otra y se depura a ciegas.
-        host = os.getenv("OLLAMA_HOST") or "http://localhost:11434 (por defecto)"
-        raise RuntimeError(
-            f"no respondio Ollama en {host} (modelo '{modelo}'): {e}") from e
 
 
 def recuperar(config, tenant: str, rol: str,
@@ -90,7 +74,7 @@ def recuperar(config, tenant: str, rol: str,
     todavia). Es informacion, no un fallo: quien llama decide que hacer con
     ese silencio.
     """
-    vector = vectorizar(pregunta, config.rag.modelo_embeddings)
+    vector = vectorizar(pregunta)
 
     with sesion(tenant) as (cur, org):
         cur.execute(

@@ -102,12 +102,16 @@ def roles_validos(config, roles_texto: str | None) -> list[str] | None:
 def vectorizar(texto: str, modelo: str) -> list[float]:
     """Un fragmento -> un vector.
 
-    NUNCA se trunca la entrada: bge-m3 admite hasta 8192 tokens, muy por
-    encima del fragmento mas largo del corpus (~1441 tokens, medido). Es la
-    razon por la que se eligio ese modelo y no uno de 512.
+    'modelo' ya NO decide con que se vectoriza -- eso lo fija
+    nucleo/recuperacion/embeddings.py, un solo proveedor de plataforma en vez
+    de una eleccion por llamada. Se conserva el parametro porque quien llama
+    (ingerir(), mas abajo) lo necesita igual para la columna
+    document_chunks.modelo_embeddings: sin ese registro, no se puede saber a
+    posteriori con que proveedor se vectorizo cada fila, y eso es lo que
+    distingue un corpus mezclado de uno consistente.
     """
-    import ollama                                    # import perezoso
-    return ollama.embed(model=modelo, input=texto)["embeddings"][0]
+    from nucleo.recuperacion.embeddings import vectorizar as _vectorizar_openai
+    return _vectorizar_openai(texto)
 
 
 def _fila(cur, org_id: str, codigo: str, version: str):
