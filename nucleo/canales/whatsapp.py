@@ -283,7 +283,12 @@ def estados_entrantes(cuerpo: dict) -> list[dict]:
                 salida.append({
                     "wamid": s.get("id"),
                     "estado": s.get("status"),
-                    "de": s.get("recipient_id"),
+                    # 'recipient_id' es el telefono. Un envio por BSUID (ver
+                    # _destinatario) trae el identificador en
+                    # 'recipient_user_id' -- mismo patron de identidad dual
+                    # que mensajes_entrantes(), y sin este respaldo el acuse
+                    # de un BSUID queda con 'de: None' en el log.
+                    "de": s.get("recipient_id") or s.get("recipient_user_id"),
                     "error": err.get("message"),
                     "codigo": err.get("code"),
                     "detalle": (err.get("error_data") or {}).get("details"),

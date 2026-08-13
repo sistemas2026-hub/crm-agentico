@@ -194,6 +194,27 @@ def ingerir(cur, org_id: str, doc, hash_: str, *,
             "roles_permitidos": roles_permitidos}
 
 
+def actualizar_roles(cur, org_id: str, document_id: str,
+                     roles_permitidos: list[str] | None) -> bool:
+    """
+    Cambia a quien se le puede recuperar un documento YA cargado, sin
+    re-vectorizar. Antes de esto, corregir un typo en la tabla de roles del
+    .docx o en 'roles_por_defecto' del YAML exigia volver a correr la
+    ingesta completa -- esto solo toca la fila de asistente.documents.
+
+    None (sin roles marcados) es el mismo fail-closed que un documento recien
+    creado sin tabla de roles: no lo recupera NADIE hasta que alguien lo
+    asigne a proposito -- nunca "todos lo ven" por omision.
+
+    Filtra por organization_id ademas del id, como retirar().
+    """
+    cur.execute(
+        """update asistente.documents set roles_permitidos=%s
+           where id=%s and organization_id=%s""",
+        (roles_permitidos, document_id, org_id))
+    return cur.rowcount > 0
+
+
 def retirar(cur, org_id: str, document_id: str) -> bool:
     """
     Saca un documento del corpus sin borrarlo: pasa a 'obsoleto', que es lo

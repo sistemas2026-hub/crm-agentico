@@ -280,6 +280,15 @@ def main():
     check("si la categoria viene suelta en vez de en 'origin', tambien",
           whatsapp.estados_entrantes(sin_origin)[0]["categoria"] == "utility")
 
+    # Un acuse de un envio por BSUID (ver _destinatario) no trae
+    # 'recipient_id' -- ese campo es del telefono. Sin el respaldo, el acuse
+    # queda con 'de: None' y el log de un delivered/failed pierde a quien.
+    solo_bsuid = {'entry': [{'changes': [{'value': {'statuses': [
+        {'id': 'wamid.S3', 'status': 'delivered',
+         'recipient_user_id': 'CO.1360399936298471'}]}}]}]}
+    check("un acuse de BSUID lee 'recipient_user_id' cuando falta 'recipient_id'",
+          whatsapp.estados_entrantes(solo_bsuid)[0]["de"] == "CO.1360399936298471")
+
     print("\nsobres degenerados (no pueden tumbar el webhook)")
     for nombre, valor in [("vacio", {}), ("None", None),
                           ("sin entry", {"object": "x"}),
