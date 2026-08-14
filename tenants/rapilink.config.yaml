@@ -210,75 +210,49 @@ roles:
       - Nunca "calmate" en seco ante un reclamo -> "entiendo, lo resolvemos".
       - Nunca "espera" sin explicar por que -> "dejame revisar tu cuenta un momento".
 
-      Lo que resolves VOS, al instante (protocolo de atencion al cliente, S6):
-      consultas de saldo, estado de factura y estado del servicio. Tambien un
-      primer diagnostico cuando el cliente dice que no tiene internet o
-      perdio la señal:
+      TU TRABAJO ES ENRUTAR, NO RESOLVER. Sos la puerta de entrada: le
+      das la bienvenida, verificas quien es, entendes que necesita, y lo
+      pasas al area que corresponde con derivar_a_area. Las areas
+      especializadas tienen las herramientas y los procedimientos; vos no
+      -- si intentas resolverlo vos, le vas a dar una respuesta peor.
 
-      Llama ping_cliente, consultar_estado_ont y consultar_senal_ont --
-      las tres, CADA UNA UNA SOLA VEZ por turno (nunca repitas una que ya
-      te respondio, aunque el resultado no te convenza -- si necesitas mas
-      informacion, la unica que se puede llamar de nuevo mas a fondo es
-      diagnosticar_falla_ont). Con lo que devuelvan, segui este criterio:
+      A donde va cada cosa:
 
-      - Si ping_cliente NO respondio o respondio poco: la causa es de red
-        del lado del cliente. Guialo con las luces del router y un
-        reinicio de 30 segundos (que lo haga el/ella), siguiendo el
-        protocolo de esa herramienta. NO ofrezcas reiniciar_ont en este
-        caso -- si el equipo ni responde al ping, un reinicio remoto
-        tampoco va a llegar.
+      - Algo del servicio que no anda: internet lento o caido, sin señal,
+        problemas de TV, el equipo con luces raras, WiFi
+        -> derivar_a_area(soporte_tecnico_cliente)
 
-      - Si ping_cliente SI respondio, y consultar_estado_ont y
-        consultar_senal_ont tambien funcionaron: contale en una frase lo
-        que encontraste ("tu equipo esta en linea y la señal te llega
-        bien", o lo que corresponda) -- nunca el numero en dBm ni el
-        nombre tecnico de la causa, eso es para un colaborador interno,
-        no para el cliente. Si el equipo esta en linea Y la señal dio
-        'aceptable': proponele un reinicio remoto (reiniciar_ont) ANTES
-        de escalar a un humano -- avisale que el equipo va a quedar sin
-        conexion uno o dos minutos. Es un equipo electronico que a veces
-        necesita reinicio, y ya descartaste que sea un problema de red
-        real. Si ya lo intentaste en esta conversacion y el cliente sigue
-        igual, no lo ofrezcas de nuevo: deriva.
+      - Plata: saldo, facturas, fecha de corte, un cobro que no entiende,
+        cuando se le vence, promesas de pago
+        -> derivar_a_area(facturacion_cliente)
 
-      - Si consultar_estado_ont o consultar_senal_ont fallan (ej. este
-        cliente no tiene el equipo registrado en este sistema todavia) o
-        la señal NO dio 'aceptable': NO ofrezcas el reinicio remoto.
-        Segui el mismo camino que si nunca hubieras tenido este dato --
-        luces del router, reinicio manual de 30 segundos -- sin
-        mencionarle al cliente ningun error tecnico.
+      LLAMA derivar_a_area, no la anuncies. Escribir "te paso con soporte
+      tecnico" SIN llamar la herramienta deja al cliente esperando una
+      respuesta que nunca llega: el pase no ocurre por decirlo. Primero
+      ejecutas la herramienta, y el area nueva contesta sola en el mismo
+      mensaje.
 
-      Si el cliente reporta un problema de TV: ANTES de diagnosticar nada
-      o de derivar a soporte_tecnico_cliente, confirma que su plan
-      realmente incluye TV -- pero NUNCA por el nombre del plan (nombres
-      como 'PLAN HOGAR' o 'PLAN ELITE' pueden incluir TV igual, el nombre
-      no lo dice de forma confiable). Llama a consultar_mi_servicio,
-      toma el 'id' de plan_internet, y llama a consultar_plan_tv con ese
-      id_plan: te devuelve la descripcion REAL del plan, que si menciona
-      TV. Si esa descripcion no menciona TV, el cliente NO tiene el
-      servicio contratado. En ese caso no sigas ninguna pregunta de
-      diagnostico (luces, cableado, sintonizacion): decile con calma que
-      su plan actual no incluye TV, y ofrecele derivar a un colaborador
-      humano para agregarlo si le interesa -- nunca inventes que si tiene
-      el servicio ni asumas que todo cliente lo tiene.
+      Deriva APENAS entendes de que se trata -- no hagas preguntas de
+      diagnostico primero (cuantos televisores tiene, como estan las
+      luces): esas las hace el especialista, que sabe cual corresponde.
+      Tampoco le anuncies que lo derivas ni le pidas que espere: la
+      derivacion es instantanea, el area nueva contesta en el mismo
+      mensaje y para el cliente es una sola conversacion.
 
-      Si la falla del servicio necesita un diagnostico mas profundo (ya
-      hiciste TODO el diagnostico de arriba -- ping, estado y señal de la
-      ONT, y el reinicio que correspondia, remoto o manual -- y sigue sin
-      resolverse), o la consulta de facturacion va mas alla de saldo/estado
-      (ej. disputar un cobro, entender una factura puntual): llama a
-      derivar_a_area (soporte_tecnico_cliente para lo tecnico,
-      facturacion_cliente para lo demas de facturacion). No es escalar a un
-      humano -- es otro agente de IA especializado que sigue atendiendo
-      directo. Decile al cliente algo breve y natural (nunca mecanico) de
-      que seguis por ahi, sin resolverle nada todavia en ese mismo mensaje.
+      Si de verdad no entendes que necesita, preguntale a que se refiere
+      -- una sola vez, breve. Ante la duda entre dos areas, elegi la mas
+      probable: el especialista puede pasarlo de vuelta si se equivoco.
 
-      Lo que SI derivas a un colaborador HUMANO: traslados, reconexion,
-      instalaciones nuevas, reclamos formales, y cambio de contrasena (el
-      protocolo dice que esto se resuelve al instante, pero todavia no
-      existe esa herramienta aqui -- hasta que exista, se deriva). Al
-      derivar a un humano, decile al cliente que un colaborador humano
-      sigue el caso.
+      Lo unico que SI resolves vos: una pregunta general que no es de
+      ningun area (horarios, como contactar a la empresa, que planes
+      existen a grandes rasgos).
+
+      Lo que va a un colaborador HUMANO, no a un area: traslados,
+      reconexion, instalaciones nuevas, reclamos formales, y cambio de
+      contrasena (el protocolo dice que esto se resuelve al instante, pero
+      todavia no existe esa herramienta aqui -- hasta que exista, se
+      deriva). Al derivar a un humano, decile al cliente que un
+      colaborador humano sigue el caso.
 
       Verificacion de identidad: normalmente ya queda resuelta por el numero
       de WhatsApp desde el que escribe (no tenes que pedir nada). Si el
@@ -297,37 +271,16 @@ roles:
       una cedula mal tipeada -- pedisela de nuevo). Recien despues de un
       confirma=true el cliente queda verificado de verdad.
     orientado_a: cliente_final
-    puede_consultar: [consultar_mi_servicio, verificar_identidad_por_cedula, confirmar_identidad,
-          ping_cliente, derivar_a_area, consultar_plan_tv, consultar_estado_ont,
-          consultar_senal_ont, reiniciar_ont, diagnosticar_falla_ont]
-    campos_permitidos:
-      # Lo minimo para autoservicio. El id_cliente NO lo propone el modelo:
-      # lo inyecta el codigo desde la sesion autenticada.
-      consultar_mi_servicio: [estado, plan_internet, estado_facturas, saldo, fecha_corte,
-            ssid_router_wifi]
-      # 'ping-N' (N=1..pings, ver argumentos_fijos de la herramienta) y
-      # 'ping-exitoso' son las claves reales que devuelve WispHub -- no hay
-      # forma de agruparlas bajo un nombre generico sin perder la lista
-      # blanca por campo (ver nucleo/seguridad/listas_blancas.py). 'host' es
-      # la MAC del equipo, no un dato de contacto -- se deja pasar porque
-      # ayuda a confirmar que respondio el equipo correcto.
-      ping_cliente: ["ping-1", "ping-2", "ping-3", "ping-exitoso"]
-      # Solo la descripcion -- el resto de lo que trae ese endpoint
-      # (precio, velocidades, configuracion de cola de Mikrotik) es
-      # config interna de red, no algo que el bot deba ver ni repetir.
-      consultar_plan_tv: [descripcion]
-      # Interpretado, no crudo (PRD 12.5): 'onu_status' es Online/Offline en
-      # texto plano; 'onu_signal' es la clasificacion de SmartOLT en texto
-      # ("Very good"); 'onu_signal_1490_veredicto' es 'aceptable' o el texto
-      # de problema, calculado en codigo. Nunca el dBm crudo, ni el serial,
-      # ni topologia de red (puerto, board, OLT) -- eso es RF-07.
-      consultar_estado_ont: [onu_status]
-      consultar_senal_ont: [onu_signal, onu_signal_1490_veredicto]
-      reiniciar_ont: [response]
-      # SOLO la version interpretada -- nunca el texto crudo en ingles
-      # ("dying-gasp"), nunca la hora exacta de la caida (permite inferir
-      # patrones de ausencia del domicilio), nunca la senal optica en dBm.
-      diagnosticar_falla_ont: ["ONU details.Last down cause_interpretado"]
+    # Catalogo de ROUTER: identidad + derivacion, nada mas. Las herramientas
+    # de diagnostico y de facturacion viven en los especialistas (agosto
+    # 2026). Antes estaban todas aca y el agente hacia de todo: el prompt
+    # crecio hasta mezclar facturacion, TV y diagnostico tecnico en un solo
+    # bloque, y agregar un area nueva (ventas) significaba engordarlo mas.
+    # Con catalogos chicos y enfocados, cada agente elige mejor su
+    # herramienta -- y sumar un area es un rol nuevo, no tocar el que ya
+    # funciona.
+    puede_consultar: [verificar_identidad_por_cedula, confirmar_identidad, derivar_a_area]
+    campos_permitidos: {}
     nunca_revelar: [password_servicio, password_cpe, password_router_wifi, usuario_router_wifi,
           cedula, direccion, coordenadas, ip, mac_cpe, sn_onu, sectorial, router.nombre]
 
@@ -381,9 +334,40 @@ roles:
 
       Guiate por el manual de procedimientos (se te da como contexto segun
       el tema de la conversacion): segui el checklist de validacion de la
-      seccion que aplique punto por punto, sin saltarte ninguno. Usa
-      ping_cliente y consultar_mi_servicio para apoyar el diagnostico con
-      datos reales, no solo lo que el cliente describe.
+      seccion que aplique punto por punto, sin saltarte ninguno. Apoya el
+      diagnostico con datos reales, no solo con lo que el cliente describe.
+
+      DIAGNOSTICO DE CONEXION (cuando dice que no tiene internet o perdio
+      la señal). Llama ping_cliente, consultar_estado_ont y
+      consultar_senal_ont -- las tres, CADA UNA UNA SOLA VEZ (nunca
+      repitas una que ya te respondio, aunque el resultado no te
+      convenza). Con lo que devuelvan:
+
+      - Si ping_cliente NO respondio o respondio poco: la causa esta del
+        lado del cliente. Guialo con las luces del router y un reinicio
+        de 30 segundos que haga el/ella. NO uses reiniciar_ont: si el
+        equipo ni responde al ping, un reinicio remoto tampoco llega.
+
+      - Si ping_cliente SI respondio y el equipo esta en linea con señal
+        'aceptable': contale en una frase lo que encontraste ("tu equipo
+        esta en linea y la señal te llega bien") -- nunca el numero en
+        dBm ni el nombre tecnico de la causa. Y reinicia la ONT con
+        reiniciar_ont: es un equipo electronico que a veces lo necesita, y
+        ya descartaste que el problema sea de red. Avisale que queda sin
+        conexion uno o dos minutos. Una sola vez por conversacion: si ya
+        lo hiciste y sigue igual, deriva a un humano.
+
+      - Si el equipo figura Offline: usa diagnosticar_falla_ont para saber
+        POR QUE se cayo. Te devuelve la causa ya interpretada (sin energia
+        electrica en el domicilio, o falla optica en la fibra). Si es
+        falta de energia, decile que revise que el equipo este enchufado y
+        que haya luz en la casa. Si es falla optica, no hay nada que el
+        cliente pueda hacer: deriva a un humano para visita tecnica.
+
+      - Si consultar_estado_ont o consultar_senal_ont fallan (el equipo de
+        este cliente puede no estar registrado en ese sistema todavia):
+        segui como si nunca hubieras tenido ese dato -- luces del router y
+        reinicio manual -- sin mencionarle ningun error tecnico.
 
       Cuando el procedimiento dice que corresponde escalar (todo dentro de
       lo recomendado y el problema persiste), deriva a un colaborador
@@ -393,13 +377,38 @@ roles:
       orientalo para resolverlo el mismo -- NO escales ni derives por eso,
       seguis siendo vos quien lo resuelve.
 
+      PROBLEMA DE TV: ANTES de diagnosticar nada, confirma que su plan
+      realmente incluya TV -- pero NUNCA por el nombre del plan (nombres
+      como 'PLAN HOGAR' o 'PLAN ELITE' pueden incluir TV igual, el nombre
+      no lo dice de forma confiable). Llama a consultar_mi_servicio, toma
+      el 'id' de plan_internet, y llama a consultar_plan_tv con ese
+      id_plan: te devuelve la descripcion REAL del plan, que si menciona
+      TV. Si esa descripcion no menciona TV, el cliente NO tiene el
+      servicio contratado: no sigas ninguna pregunta de diagnostico
+      (luces, cableado, sintonizacion), decile con calma que su plan
+      actual no incluye TV y ofrecele pasarlo con un colaborador humano
+      para agregarlo si le interesa. Nunca inventes que si lo tiene ni
+      asumas que todo cliente lo tiene.
+
       Si la consulta en realidad es de facturacion, llama a derivar_a_area
       hacia facturacion_cliente -- no intentes resolverla vos.
     orientado_a: cliente_final
-    puede_consultar: [consultar_mi_servicio, ping_cliente, derivar_a_area]
+    puede_consultar: [consultar_mi_servicio, ping_cliente, derivar_a_area,
+          consultar_plan_tv, consultar_estado_ont, consultar_senal_ont,
+          reiniciar_ont, diagnosticar_falla_ont]
     campos_permitidos:
       consultar_mi_servicio: [estado, plan_internet, ssid_router_wifi]
       ping_cliente: ["ping-1", "ping-2", "ping-3", "ping-exitoso"]
+      # Sin TV no hay falla de TV que diagnosticar -- este agente confirma
+      # que el plan la incluya antes de preguntar nada (ver su descripcion).
+      consultar_plan_tv: [descripcion]
+      # Mismo criterio de PII que tenia cliente_final: lo interpretado, no
+      # el dBm crudo ni la topologia de red (RF-07). Que sea el agente
+      # tecnico no cambia que del otro lado sigue habiendo un CLIENTE.
+      consultar_estado_ont: [onu_status]
+      consultar_senal_ont: [onu_signal, onu_signal_1490_veredicto]
+      reiniciar_ont: [response]
+      diagnosticar_falla_ont: ["ONU details.Last down cause_interpretado"]
     nunca_revelar: [password_servicio, password_cpe, password_router_wifi, usuario_router_wifi,
           cedula, direccion, coordenadas, ip, mac_cpe, sn_onu, sectorial, router.nombre]
 
@@ -754,18 +763,24 @@ herramientas:
   - nombre: derivar_a_area
     tipo: interno
     descripcion: >
-      Pasa el resto de ESTA conversacion a otro agente especializado, que
-      la sigue atendiendo directo (no es escalar a un humano). Llamala
-      apenas quede claro que el tema es de otra area -- no antes de
-      verificar identidad (no vas a poder llamarla todavia si no esta
+      Pasa esta conversacion al agente especializado del area, que la
+      atiende EN EL MISMO MENSAJE con sus propias herramientas (no es
+      escalar a un humano, y el cliente no tiene que volver a escribir ni
+      esperar). Llamala apenas quede claro de que area es el tema -- no
+      antes de verificar identidad (no vas a poder todavia si no esta
       verificada), y no para preguntas generales que vos mismo resolves.
-      No sirve para lo que ninguna area puede resolver sola (fallas
-      confirmadas del servicio, reclamos formales, instalaciones nuevas):
-      eso se sigue escalando a un humano, como siempre.
+      No sirve para lo que ninguna area puede resolver sola (reclamos
+      formales, instalaciones nuevas, traslados): eso se sigue escalando a
+      un humano, como siempre.
     solo_lectura: true
     roles_permitidos: [cliente_final, facturacion_cliente, soporte_tecnico_cliente]
     deriva_rol: true
-    areas_destino: [cliente_final, facturacion_cliente, soporte_tecnico_cliente]
+    # Sin 'cliente_final' entre los destinos: desde agosto 2026 es un ROUTER
+    # sin herramientas propias, asi que derivar de vuelta ahi seria un
+    # callejon sin salida (el cliente quedaria con un agente que no puede
+    # resolverle nada). Un especialista que se equivoco de area pasa
+    # DIRECTO al otro especialista, no vuelve a pasar por la puerta.
+    areas_destino: [facturacion_cliente, soporte_tecnico_cliente]
 
   - nombre: ping_cliente
     tipo: http
@@ -829,9 +844,19 @@ herramientas:
     # bien (arp_ping=false + sin interfaz = ping real, verificado arriba),
     # sin depender de un campo que puede estar vacio (normal) O con un valor
     # que ya no corresponde (silencioso, dificil de detectar caso por caso).
+    # arp_ping FALSE, no true. Quedo en 'true' por un merge automatico
+    # (14/08/2026) que junto dos ramas: una lo tenia en false con todo el
+    # comentario de arriba explicando por que, la otra en true. Git se quedo
+    # con el valor de una y el comentario de la otra, sin conflicto -- el
+    # archivo quedo contradiciendose a si mismo y nadie lo hubiera notado
+    # leyendo el diff.
+    #
+    # Con 'interfaz' ya sin inyectar (ver arriba), arp_ping=true hace que
+    # TODO ping falle, para cualquier cliente: 'failure: interface needs to
+    # be specified for arp ping'. Reproducido en vivo apenas se detecto.
     argumentos_fijos:
       pings: 3
-      arp_ping: true
+      arp_ping: false
     inyectar_sesion:
       id_servicio: id_cliente
 

@@ -351,21 +351,19 @@ def _ejecutar_derivacion(herramienta, sesion, argumentos_modelo: dict, nombre_ro
     if sesion is not None:
         sesion.rol_siguiente = area
 
-    # El catalogo de herramientas de ESTE turno ya se armo con el rol viejo
-    # (herramientas_del_rol() corre una sola vez, antes del loop) -- el rol
-    # nuevo recien atiende de verdad en el PROXIMO mensaje del cliente, con
-    # su propio catalogo. Por eso la instruccion es explicita en pedir un
-    # cierre breve, no una respuesta ya usando herramientas que este turno
-    # no tiene: prometer resolverlo ahora mismo y no poder es peor que un
-    # segundo de espera.
+    # El especialista atiende EN ESTE MISMO TURNO: responder() detecta
+    # 'rol_siguiente' apenas termina esta tanda de llamadas, rearma el
+    # catalogo con las herramientas del area nueva y sigue el bucle (ver el
+    # bloque 'DERIVACION EN EL MISMO TURNO'). Por eso ya no se le pide un
+    # cierre breve al modelo: el cliente no tiene que volver a escribir, y
+    # avisarle del cambio de area seria contarle una plomeria interna que no
+    # le sirve de nada.
     return {"ok": True, "area": area,
-           "instruccion_interna": f"A partir de ahora atiende esta "
-               f"conversacion el area '{area}'. Decile al cliente, en una "
-               f"frase breve y natural (nunca mecanica, ej. 'dale, te ayudo "
-               f"con eso'), que segui por ahi -- SIN resolverle nada todavia "
-               f"en este mismo mensaje (no tenes las herramientas de esa "
-               f"area en este turno): la atencion especializada sigue "
-               f"apenas te vuelva a escribir."}
+           "instruccion_interna": f"Listo, la atiende '{area}' -- que sigue "
+               f"AHORA MISMO, en este mismo mensaje, con sus propias "
+               f"herramientas. No le anuncies al cliente que lo derivaste ni "
+               f"le pidas que espere: para el es la misma conversacion y la "
+               f"respuesta le llega ya."}
 
 
 def _previas_no_cumplidas(herramienta, historial: list[dict]) -> list[str]:
@@ -600,6 +598,17 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
         historial.append({"role": "system", "content": construir_system(config, nombre_rol)})
         if nota_continuidad:
             historial.append({"role": "system", "content": nota_continuidad})
+        # Si la sesion YA venia verificada (lo normal en WhatsApp a partir
+        # del segundo mensaje) hay que DECIRLO. El modelo lo deducia solo
+        # cuando una herramienta le devolvia datos reales -- señal que
+        # desaparece en un rol sin herramientas de datos, como el router:
+        # ahi volvia a pedir la cedula de alguien ya verificado, en cada
+        # conversacion. Verificado en vivo (agosto 2026).
+        if sesion is not None and sesion.verificado:
+            historial.append({"role": "system", "content":
+                "Este cliente YA esta verificado por el sistema (nivel "
+                f"{sesion.nivel}). No le pidas la cedula ni ningun dato de "
+                "identidad: segui directo con lo que necesita."})
     historial.append({"role": "user", "content": mensaje})
 
     herramientas = herramientas_del_rol(config, rol_cfg)
@@ -813,6 +822,60 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                     and not _previas_no_cumplidas(h, historial)):
                 historial.append({"role": "system", "content": h.sugerir_cuando_disponible})
                 ya_sugeridas_este_turno.add(h.nombre)
+
+        # DERIVACION EN EL MISMO TURNO. Si el modelo acaba de derivar a otra
+        # area, el especialista atiende ACA, no en el proximo mensaje del
+        # cliente: se rearma el catalogo con SUS herramientas y se le da su
+        # prompt, y el bucle sigue.
+        #
+        # Sin esto, derivar le cuesta al cliente un intercambio entero: el
+        # router contesta "dale, te ayudo con eso", el cliente tiene que
+        # volver a escribir, y recien ahi lo atienden -- sobre turnos que ya
+        # tardan 20-40s. Con el rearme, el cliente ve UNA respuesta, ya
+        # resuelta por quien corresponde.
+        #
+        # El prompt del area nueva entra como 'system' al final del
+        # historial, no reemplazando al de arriba: el modelo necesita el
+        # contexto de lo que ya paso en la conversacion (que se pidio, que
+        # devolvieron las herramientas), no empezar de cero.
+        if sesion is not None and getattr(sesion, "rol_siguiente", None):
+            rol_nuevo = sesion.rol_siguiente
+            rol_cfg_nuevo = config.roles.get(rol_nuevo)
+            if rol_cfg_nuevo is not None and rol_nuevo != nombre_rol:
+                nombre_rol = rol_nuevo
+                rol_cfg = rol_cfg_nuevo
+                herramientas = herramientas_del_rol(config, rol_cfg)
+                catalogo_openai = [_esquema_openai(h) for h in herramientas]
+                nivel_exigido = (nivel_requerido(rol_cfg, config.seguridad)
+                                if rol_cfg.orientado_a == "cliente_final" else 0)
+                if (rol_cfg.orientado_a == "cliente_final" and sesion is not None
+                        and not es_factor_de_posesion(sesion.identificador_canal)):
+                    nivel_exigido = max(nivel_exigido, 1)
+                # El empujon de 'sugerir_cuando_disponible' se evalua contra
+                # el catalogo nuevo: lo ya sugerido para el rol viejo no
+                # aplica a herramientas que recien ahora existen.
+                ya_sugeridas_este_turno.clear()
+                historial.append({"role": "system",
+                                  "content": construir_system(config, nombre_rol)})
+                historial.append({"role": "system", "content":
+                    f"Vos atendes ahora esta conversacion, en el mismo mensaje "
+                    f"-- el cliente NO tiene que volver a escribir. Segui "
+                    f"desde donde quedo (ya esta verificado, no le pidas la "
+                    f"identidad de nuevo) y resolvele lo que pidio con TUS "
+                    f"herramientas. No le digas que lo estas derivando ni que "
+                    f"lo pasas con otra area: para el es la misma "
+                    f"conversacion."})
+                # 'sesion.rol_siguiente' NO se limpia aca a proposito:
+                # nucleo/canales/api.py lo lee DESPUES de que responder()
+                # vuelve, para persistir 'rol_efectivo' y que el proximo
+                # mensaje del cliente entre directo al area correcta. Si se
+                # limpiara, el handoff funcionaria en este turno y se
+                # perderia en el siguiente. Tampoco hace falta para detectar
+                # una segunda derivacion: 'nombre_rol' ya quedo igual a
+                # 'rol_siguiente', asi que este bloque no vuelve a disparar
+                # salvo que el especialista derive de nuevo (y ahi cambia el
+                # valor). El ping-pong queda acotado por
+                # 'limite_iteraciones_agente'.
 
     if hubo_llamadas:
         return _redactar(referencia_redaccion, historial, config.llm.temperatura), registro
