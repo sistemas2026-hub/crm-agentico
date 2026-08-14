@@ -334,6 +334,24 @@ Documentación oficial: <https://wisphub.net/api-docs/> (el spec OpenAPI está e
 - Endpoints aún no usados que sirven al norte: `/api/clientes/{id}/saldo/`, `/api/zonas/`, `/api/plan-internet/`, `/api/staff/`, `/api/gastos/`.
 - Sandbox: `https://sandbox-api.wisphub.net` (según doc; no probado).
 
+**Trampa nueva, encontrada al integrar SmartOLT (agosto 2026):** el endpoint de ping (`POST /clientes/{id}/ping/`) usaba una `interfaz` tomada de `interfaz_lan` del cliente. Si ese campo está **vacío**, no hay problema (caso normal, documentado arriba). Pero si está **poblado con un valor que ya no corresponde** a ese equipo, el ping falla con `"input does not match any value of interface"` — mismo síntoma que "el equipo no responde", pero es un dato de WispHub desactualizado, no una falla real de red. Se decidió dejar de mandar `interfaz` del todo: `arp_ping=false` sin interfaz ya pinguea bien (verificado), y no depender de que ese campo esté siempre bien cargado evita esta clase de falso negativo silencioso.
+
+### 7.7 Notas de integración con SmartOLT
+
+SmartOLT es donde el ISP administra las ONUs autorizadas en la OLT de fibra — se integró (agosto 2026) para convertir el diagnóstico ciego de conectividad (antes solo `ping_cliente`) en uno concluyente: distinguir equipo sin energía, sin señal óptica, señal débil o equipo sano. Documentación completa y verificada en vivo: `.claude/skills/smartolt-api/SKILL.md`.
+
+**Auth:** header `X-Token: <api_key>` (no `Authorization`, no `Bearer`) — distinto de WispHub, por eso `Herramienta` tiene un campo `auth_header` configurable, no fijo en `nucleo/`.
+
+**El identificador es la misma llave que WispHub.** `sn_onu` (WispHub) funciona directo como `unique_external_id` de SmartOLT, sin traducción — confirmado con el método del valor imposible. Cubre el **68%** de los clientes activos: el resto no tiene `sn_onu` cargado en WispHub, y para esos el diagnóstico cae al camino alternativo (preguntar por las luces del equipo). Un script de backfill (`cli/proponer_sn_onu.py` + `cli/aplicar_sn_onu.py`) cruza el nombre del cliente contra el nombre de la ONU para proponer candidatos — aplicado en producción, subió la cobertura al ~93%, con 286 casos que quedaron para revisión manual por ambigüedad o falta de candidato.
+
+**Límite de tasa:** 1.000 llamadas/hora (confirmado por cabecera `X-RateLimit-*`, no por documentación de terceros — una búsqueda inicial daba 15/hora, que resultó ser la cifra de un caso de uso masivo distinto).
+
+**El reinicio de ONT no pide aprobación humana — decisión explícita del cliente.** En su lugar, precondiciones en código (`Herramienta.exige_previas`): solo se ejecuta si la señal y el ping ya dieron resultado favorable **en esa misma conversación**, mirando siempre la llamada más reciente (una señal buena hace tres mensajes que después empeoró no cuenta). Mismo principio de RNF-02 (seguridad en código, no en el prompt) aplicado a una acción de escritura, no solo a la lectura de PII.
+
+**Tiempos de recuperación, medidos en vivo — dos números que no hay que confundir:** el estado de SmartOLT (`onu_status`) tarda ~6 minutos en reflejar que la ONU volvió a estar en línea (el reregistro GPON completo). El equipo responde a un **ping real** mucho antes, ~73 segundos — y ese es el número que le importa al cliente. El texto que promete algo al cliente usa el segundo, no el primero.
+
+**El código calcula, el modelo compone (ver §12.5), aplicado también acá:** los umbrales de señal óptica (G-GO-04: -8 a -25 dBm aceptable) y la traducción de la causa de caída (`dying-gasp` → sin energía eléctrica; `LOSi/LOBi`/`LOFi` → falla óptica) se calculan en código (`Herramienta.veredictos`/`Herramienta.mapeos`, genéricos en `nucleo/`), nunca los interpreta el modelo sobre el dato crudo en inglés.
+
 ---
 
 ## 8. Roadmap por fases
@@ -343,7 +361,7 @@ Documentación oficial: <https://wisphub.net/api-docs/> (el spec OpenAPI está e
 | **0** | Prototipo de soporte en consola contra WispHub | ✅ Hecho |
 | **1** | Consolidar soporte: prompt de asesor, filtro PII, consulta por cédula | ✅ Hecho |
 | **2** | Identidad de área; parametrizar herramientas y filtros por rol | ✅ Hecho (login real pendiente, ver §8.1) |
-| **3** | Replicar patrón a Facturación y Técnica | ✅ Catálogo definido y verificado |
+| **3** | Replicar patrón a Facturación y Técnica | ✅ Catálogo definido y verificado — Técnica ahora incluye SmartOLT (lectura de red + reinicio de ONT, ver §7.7), no solo WispHub |
 | **4** | Generación de informes + exportación (Excel/PDF) | Pendiente |
 | **5** | Interfaz web interna (reemplaza la consola) | Pendiente |
 | **6** | Auditoría/logs y despliegue en servidor on-premise | Auditoría ✅ (§8.2) · despliegue pendiente |

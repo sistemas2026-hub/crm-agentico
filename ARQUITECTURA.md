@@ -15,6 +15,12 @@ Dar de alta un ISP nuevo es: fila en `tenants` (tabla), archivo en `tenants/` (c
 
 Si al escribir código en el núcleo aparece la necesidad de distinguir un cliente, no se resuelve con un `if`: significa que **falta un campo en la configuración**.
 
+### Un matiz sobre esa regla: dato de tenant no siempre es secreto
+
+`auth_ref` (nombre de un secreto, valor cifrado en `asistente.tenant_secrets`) resuelve el caso de las credenciales. Pero hay datos que **varían por empresa sin ser secretos** — un subdominio, un ID de cuenta externa. Ahí no corresponde ni un literal fijo en el YAML (viola la regla: sería un dato de una empresa mezclado con el motor si `nucleo/` lo asumiera fijo) ni cifrarlo sin necesidad.
+
+Solución (agosto 2026, ver CLAUDE.md "Esto es SaaS multi-tenant"): `TenantConfig.variables_tenant` (texto plano, editable desde la interfaz, persistido por tenant en `asistente.tenant_config`) + `Herramienta.base_url_ref` (el NOMBRE de la variable, mismo patrón que `auth_ref`). Primer y único uso hoy: el subdominio de SmartOLT (`SMARTOLT_SUBDOMINIO`, ver PRD §7.7) — el próximo ISP que se conecte carga el suyo desde `/settings/canales/smartolt`, sin tocar ningún YAML.
+
 ### Y no depende de que alguien se acuerde
 
 ```
@@ -96,6 +102,11 @@ Ninguna vive en los YAML. La configuración solo guarda **nombres** (`auth_ref: 
 WISPHUB_API_KEY            clave del ISP
 WISPHUB_BASE_URL
 WISPHUB_MODO_REAL
+
+SMARTOLT_API_KEY           clave del ISP (header X-Token, ver PRD §7.7)
+SMARTOLT_BASE_URL          seed local -- una vez cargado el tenant, el
+                            subdominio real vive en variables_tenant (DB),
+                            no en el .env (ver el porqué mas abajo)
 
 VITE_SUPABASE_URL          proyecto
 VITE_SUPABASE_ANON_KEY     pública por diseño — protegida por RLS
