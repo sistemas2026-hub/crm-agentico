@@ -190,6 +190,13 @@
           // la senal de que alguien empezo la carga y no llego a activarlo,
           // no el estado de "todavia nadie lo toco".
           warn: !!data.canalWhatsapp && !data.canalWhatsapp.activo && !!data.canalWhatsapp.numero_visible
+        },
+        {
+          href: '/settings/integraciones/smartolt',
+          title: 'SmartOLT',
+          body: 'Credenciales para el sondeo de la API -- todavia sin herramientas activas.',
+          value: data.smartoltCargado ? 'Credenciales cargadas' : null,
+          warn: false
         }
       ]
     },
