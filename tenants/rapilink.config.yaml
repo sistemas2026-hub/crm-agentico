@@ -107,9 +107,10 @@ roles:
         (id_ticket) para que quede como referencia.
     area: Atención al Cliente
     cargo: Agente de Soporte
-    puede_consultar: [consultar_cliente, consultar_cliente_por_cedula, consultar_ticket, 
-          consultar_tickets_de_cliente, contar_tickets, contar_clientes, consultar_casos_bottlecrm, 
-          agendar_visita_tecnica]
+    puede_consultar: [consultar_cliente, consultar_cliente_por_cedula, consultar_ticket,
+          consultar_tickets_de_cliente, contar_tickets, contar_clientes, consultar_casos_bottlecrm,
+          agendar_visita_tecnica, consultar_estado_ont, consultar_senal_ont, reiniciar_ont,
+          diagnosticar_falla_ont]
     campos_permitidos:
       consultar_cliente: [id_servicio, nombre, cedula, estado, email, telefono, direccion, localidad,
         ciudad, plan_internet, zona, fecha_instalacion, estado_facturas, saldo, fecha_corte]
@@ -133,6 +134,19 @@ roles:
       # confirmar a quien se le agendo.
       agendar_visita_tecnica: [id_ticket, asunto, estado, prioridad, tecnico, departamento, 
             fecha_creacion, servicio.id_servicio]
+      # SmartOLT: 'onu_status'/'last_status_change' no traen PII (ver skill
+      # smartolt-api). Soporte ve el dBm crudo ademas del veredicto -- lo
+      # necesita para escalar con datos exactos, a diferencia de
+      # cliente_final.
+      consultar_estado_ont: [onu_status, last_status_change]
+      consultar_senal_ont: [onu_signal, onu_signal_1310, onu_signal_1490, onu_signal_1490_veredicto]
+      reiniciar_ont: [status, response]
+      # Soporte ve la causa cruda Y la interpretada (le sirve para escalar
+      # con precision tecnica), mas el estado del equipo y la senal optica
+      # -- sin 'ONU details.Description' (es el nombre del cliente, PII) ni
+      # topologia de VLAN/perfil.
+      diagnosticar_falla_ont: ["ONU details.Last down cause", "ONU details.Last down cause_interpretado",
+            "ONU details.Run state", "ONU details.Last down time", "Optical status.Rx optical power(dBm)"]
     nunca_revelar: [password_servicio, password_cpe, password_router_wifi, password_ssid_router_wifi,
       usuario_router_wifi, coordenadas]
 
@@ -248,7 +262,8 @@ roles:
       confirma=true el cliente queda verificado de verdad.
     orientado_a: cliente_final
     puede_consultar: [consultar_mi_servicio, verificar_identidad_por_cedula, confirmar_identidad,
-          ping_cliente, derivar_a_area, consultar_plan_tv]
+          ping_cliente, derivar_a_area, consultar_plan_tv, consultar_estado_ont,
+          consultar_senal_ont, reiniciar_ont, diagnosticar_falla_ont]
     campos_permitidos:
       # Lo minimo para autoservicio. El id_cliente NO lo propone el modelo:
       # lo inyecta el codigo desde la sesion autenticada.
@@ -265,7 +280,19 @@ roles:
       # (precio, velocidades, configuracion de cola de Mikrotik) es
       # config interna de red, no algo que el bot deba ver ni repetir.
       consultar_plan_tv: [descripcion]
-    nunca_revelar: [password_servicio, password_cpe, password_router_wifi, usuario_router_wifi, 
+      # Interpretado, no crudo (PRD 12.5): 'onu_status' es Online/Offline en
+      # texto plano; 'onu_signal' es la clasificacion de SmartOLT en texto
+      # ("Very good"); 'onu_signal_1490_veredicto' es 'aceptable' o el texto
+      # de problema, calculado en codigo. Nunca el dBm crudo, ni el serial,
+      # ni topologia de red (puerto, board, OLT) -- eso es RF-07.
+      consultar_estado_ont: [onu_status]
+      consultar_senal_ont: [onu_signal, onu_signal_1490_veredicto]
+      reiniciar_ont: [response]
+      # SOLO la version interpretada -- nunca el texto crudo en ingles
+      # ("dying-gasp"), nunca la hora exacta de la caida (permite inferir
+      # patrones de ausencia del domicilio), nunca la senal optica en dBm.
+      diagnosticar_falla_ont: ["ONU details.Last down cause_interpretado"]
+    nunca_revelar: [password_servicio, password_cpe, password_router_wifi, usuario_router_wifi,
           cedula, direccion, coordenadas, ip, mac_cpe, sn_onu, sectorial, router.nombre]
 
   facturacion_cliente:
@@ -337,7 +364,7 @@ roles:
     campos_permitidos:
       consultar_mi_servicio: [estado, plan_internet, ssid_router_wifi]
       ping_cliente: ["ping-1", "ping-2", "ping-3", "ping-exitoso"]
-    nunca_revelar: [password_servicio, password_cpe, password_router_wifi, usuario_router_wifi, 
+    nunca_revelar: [password_servicio, password_cpe, password_router_wifi, usuario_router_wifi,
           cedula, direccion, coordenadas, ip, mac_cpe, sn_onu, sectorial, router.nombre]
 
 # -----------------------------------------------------------------------------
@@ -523,8 +550,8 @@ llm:
   # tratamiento que firma el cliente cubre transferencia internacional (Ley
   # 1581 art. 26, ver PRD RNF-01). Lo que cambia es que el local ya no es el
   # resguardo -- no hay resguardo, y por eso conviene que este escrito.
-  modelo_por_defecto: qwen3:30b-a3b-q4_K_M
-  modelo_informes: qwen3:30b-a3b-q4_K_M
+  modelo_por_defecto: deepseek:deepseek-v4-flash
+  modelo_informes: deepseek:deepseek-v4-flash
   temperatura: 0.1
   max_tokens: 1024
   # Cada iteracion cuesta un TURNO COMPLETO (~43 s local, ~5 s API), no
@@ -555,6 +582,16 @@ llm:
   # volver a levantar ese servicio.
 
 # -----------------------------------------------------------------------------
+#  VARIABLES DE TENANT  -  no son secretos, pero SI varian por empresa
+# -----------------------------------------------------------------------------
+# Editables desde /configuracion/variables (pantalla de ajustes) una vez que
+# el tenant esta cargado en la base -- este archivo es solo la SEMILLA con la
+# que arranca. Referenciadas por 'Herramienta.base_url_ref' en 'herramientas'
+# mas abajo (ver el campo en nucleo/config/schema.py).
+variables_tenant:
+  SMARTOLT_SUBDOMINIO: https://rapilinksas.smartolt.com
+
+# -----------------------------------------------------------------------------
 #  HERRAMIENTAS
 # -----------------------------------------------------------------------------
 #  Los filtros de la seccion 'agregado' estan VERIFICADOS contra la API en
@@ -565,17 +602,6 @@ llm:
 #  Un filtro ignorado no da error: devuelve el universo entero disfrazado de
 #  respuesta exacta. Por eso los ignorados se listan aparte y se RECHAZAN con
 #  su motivo, en vez de intentarse.
-    rol:soporte: deepseek:deepseek-v4-flash
-    rol:facturacion: deepseek:deepseek-v4-flash
-    rol:cliente_final: deepseek:deepseek-v4-flash
-    rol:administracion: deepseek:deepseek-v4-flash
-    # Sin estas dos, evaluar_conversacion (nucleo/seguimiento/escalamiento.py)
-    # caia en modelo_por_defecto (el qwen3 local, sin Ollama corriendo desde
-    # que los embeddings pasaron a OpenAI) apenas la conversacion se atendia
-    # con uno de estos dos roles -- el mismo problema que ya describe el
-    # comentario de arriba sobre el rol fusionado. Confirmado en vivo.
-    rol:facturacion_cliente: deepseek:deepseek-v4-flash
-    rol:soporte_tecnico_cliente: deepseek:deepseek-v4-flash
 herramientas:
 
   - nombre: consultar_cliente
@@ -754,12 +780,24 @@ herramientas:
     # Lo que se pierde: arp_ping alcanza equipos detras de un firewall, y sin
     # el esos figuran como que no responden. Es un falso negativo acotado y
     # visible; lo otro era basura silenciosa.
+    #
+    # 'interfaz' YA NO se inyecta -- decision explicita del cliente (14/08/2026),
+    # confirmada en vivo el mismo dia: una 'interfaz_lan' PRESENTE pero
+    # incorrecta para ese equipo (visto en una ficha de prueba, id_servicio
+    # 6555) rompe el ping igual, con o sin arp_ping ("input does not match
+    # any value of interface") -- el mismo sintoma que "el equipo no
+    # responde", pero es un dato de WispHub desactualizado, no una falla
+    # real. Vaciar esa interfaz arreglo el ping al toque. En vez de confiar
+    # en que 'interfaz_lan' este siempre bien cargada para cada cliente real,
+    # se deja de mandar del todo: mismo camino que ya se sabe que funciona
+    # bien (arp_ping=false + sin interfaz = ping real, verificado arriba),
+    # sin depender de un campo que puede estar vacio (normal) O con un valor
+    # que ya no corresponde (silencioso, dificil de detectar caso por caso).
     argumentos_fijos:
       pings: 3
       arp_ping: true
     inyectar_sesion:
       id_servicio: id_cliente
-      interfaz: interfaz_lan
 
   - nombre: agendar_visita_tecnica
     tipo: http
@@ -1077,6 +1115,153 @@ herramientas:
     metodo: POST
     auth_ref: BOTTLECRM_API_TOKEN
     auth_esquema: Bearer
+
+  # SmartOLT: control de la ONU autorizada en la OLT de fibra. Sondeado en
+  # vivo contra la instancia real de Rapilink (agosto 2026, ver
+  # .claude/skills/smartolt-api/SKILL.md) -- nunca se tomo la doc del
+  # proveedor por buena sin probarla.
+  #
+  # 'sn_onu' de WispHub sirve DIRECTO como identificador de SmartOLT, sin
+  # traduccion (verificado con el metodo del valor imposible: serial
+  # inventado -> 400, no el universo entero). Lo inyecta el codigo desde la
+  # sesion verificada, igual que 'interfaz_lan' -- el modelo nunca elige de
+  # que ONU habla. Falta en el 32% de los clientes activos (ver skill
+  # wisphub-api): para esos, la llamada falla de forma controlada (ver la
+  # guarda de 'endpoint sin resolver' en nucleo/herramientas/http.py) y el
+  # modelo cae al camino alternativo (ping + preguntas de luces).
+  - nombre: consultar_estado_ont
+    tipo: http
+    descripcion: >
+      Estado de la ONU del cliente en la OLT (Online/Offline) y hace cuanto
+      cambio. PRIMER paso del diagnostico de SmartOLT -- liviano (sin PII,
+      sin latencia relevante). Si da Offline sin que consultar_senal_ont
+      alcance para explicar por que, y hace falta distinguir sin energia de
+      falla optica, ese es un diagnostico mas profundo que todavia no esta
+      disponible como herramienta -- en ese caso segui el protocolo de
+      preguntar por las luces del equipo.
+    solo_lectura: true
+    roles_permitidos: [cliente_final, soporte]
+    base_url_ref: SMARTOLT_SUBDOMINIO
+    endpoint: /api/onu/get_onu_status/{sn_onu}
+    metodo: GET
+    auth_ref: SMARTOLT_API_KEY
+    auth_esquema: ""
+    auth_header: X-Token
+    extraer_de: onu_status
+    inyectar_sesion:
+      sn_onu: sn_onu
+
+  - nombre: consultar_senal_ont
+    tipo: http
+    descripcion: >
+      Nivel de senal optica de la ONU del cliente. SEGUNDO paso del
+      diagnostico de SmartOLT, junto con consultar_estado_ont -- llama a
+      las dos juntas para un diagnostico completo. El veredicto
+      (onu_signal_1490_veredicto) ya viene calculado contra los umbrales de
+      G-GO-04, no lo calcules vos: 'aceptable' es -8 a -25 dBm, fuera de
+      ese rango es un problema real de senal.
+    solo_lectura: true
+    roles_permitidos: [cliente_final, soporte]
+    base_url_ref: SMARTOLT_SUBDOMINIO
+    endpoint: /api/onu/get_onu_signal/{sn_onu}
+    metodo: GET
+    auth_ref: SMARTOLT_API_KEY
+    auth_esquema: ""
+    auth_header: X-Token
+    extraer_de: onu_signal
+    inyectar_sesion:
+      sn_onu: sn_onu
+    # G-GO-04 (guia de diagnostico de fallas de conectividad, campo -- ONT
+    # del cliente): -8 a -25 dBm aceptable, peor que -25 es problema del
+    # drop. El tercer tramo (mejor que -8, senal "demasiado fuerte") no esta
+    # normado en G-GO-04 -- se etiqueta como fuera de rango en vez de
+    # inventar un limite, y se deriva a revision tecnica en cualquier caso.
+    veredictos:
+      onu_signal_1490:
+        - {desde: -25, hasta: -8, etiqueta: "aceptable"}
+        - {hasta: -25.0001, etiqueta: "problema en el drop (conector, cable o tensores) -- senal debil"}
+        - {desde: -7.9999, etiqueta: "fuera del rango documentado (senal muy fuerte) -- revisar con un tecnico"}
+
+  - nombre: reiniciar_ont
+    tipo: http
+    descripcion: >
+      Reinicia la ONT del cliente. Contrato del proveedor (documentado,
+      agosto 2026): comando fire-and-forget -- confirma que SE MANDO, no que
+      la ONT ya reinicio ni que el problema se resolvio. Avisale al cliente
+      que el equipo va a estar sin conexion **uno o dos minutos** (medido en
+      vivo, 14/08/2026: volvio a responder en ~73 segundos) y que revise si
+      volvio la señal despues de ese tiempo.
+
+      SIN paso de aprobacion humana -- el codigo exige en su lugar que ya
+      hayas corrido consultar_senal_ont y ping_cliente EN ESTA conversacion
+      y que los dos hayan dado resultado favorable (senal aceptable, ping
+      exitoso). Si no se cumple, la herramienta se rechaza sola con el
+      motivo -- no lo intentes "igual", segui el protocolo alternativo. Es
+      exactamente la logica del equipo electronico que a veces necesita
+      reinicio PERO solo tiene sentido si ya se descarto que el problema es
+      de red: si la senal esta mal, reiniciar no arregla nada y solo
+      retrasa mandar un tecnico.
+
+      Maximo UNA vez por conversacion -- si el cliente insiste en que lo
+      reinicies de nuevo, no lo repitas: decile que un colaborador humano
+      sigue el caso.
+    solo_lectura: false
+    requiere_confirmacion: true
+    roles_permitidos: [cliente_final, soporte]
+    base_url_ref: SMARTOLT_SUBDOMINIO
+    endpoint: /api/onu/reboot/{sn_onu}
+    metodo: POST
+    auth_ref: SMARTOLT_API_KEY
+    auth_esquema: ""
+    auth_header: X-Token
+    inyectar_sesion:
+      sn_onu: sn_onu
+    exige_previas:
+      - {herramienta: consultar_senal_ont, campo: onu_signal_1490_veredicto, valor: aceptable}
+      - {herramienta: ping_cliente, campo: "ping-exitoso", valor: true}
+    limite_por_conversacion: 1
+
+  - nombre: diagnosticar_falla_ont
+    tipo: http
+    descripcion: >
+      Diagnostico PROFUNDO de por que la ONU esta offline -- distingue sin
+      energia electrica en el domicilio de una falla optica (fibra o caja
+      NAP). SOLO llamala como SEGUNDO paso, y solo cuando
+      consultar_estado_ont ya dio Offline y consultar_senal_ont no alcanzo
+      para explicar por que (offline no tiene lectura de senal util) --
+      nunca la llames primero ni la llames si el equipo esta Online, ahi no
+      aporta nada mas que las dos herramientas livianas. Tarda ~10 segundos
+      (mucho mas que las otras herramientas de SmartOLT) -- es el costo de
+      tener la causa real en vez de adivinar, avisale al cliente que estas
+      revisando algo mas a fondo si la conversacion se alarga.
+
+      'ONU details.Last down cause_interpretado' ya viene calculado: no
+      interpretes vos vos el texto crudo en ingles ('dying-gasp', 'ONT
+      LOSi/LOBi alarm'), usa la version interpretada. Si no viene el campo
+      '_interpretado' es porque la causa no esta en el mapeo conocido --
+      en ese caso no inventes que significa, decí que no se pudo determinar
+      la causa exacta y seguí con el protocolo (luces del equipo, o
+      escalar).
+    solo_lectura: true
+    roles_permitidos: [cliente_final, soporte]
+    base_url_ref: SMARTOLT_SUBDOMINIO
+    endpoint: /api/onu/get_onu_full_status_info/{sn_onu}
+    metodo: GET
+    auth_ref: SMARTOLT_API_KEY
+    auth_esquema: ""
+    auth_header: X-Token
+    extraer_de: full_status_json
+    inyectar_sesion:
+      sn_onu: sn_onu
+    # Valores reales observados contra la instancia de Rapilink (agosto
+    # 2026, ver skill smartolt-api). Un valor sin entrada aca se deja SIN
+    # interpretar -- nunca se inventa una etiqueta para una causa nueva.
+    mapeos:
+      "ONU details.Last down cause":
+        dying-gasp: "sin energia electrica en el domicilio (corte de luz o el equipo se desenchufo)"
+        "ONT LOSi/LOBi alarm": "falla optica -- fibra cortada o problema en la caja del splitter (NAP)"
+        "ONT LOFi alarm": "falla optica -- fibra cortada o problema en la caja del splitter (NAP)"
+        "ONU is currently online": "el equipo esta en linea, no hay una caida que explicar"
 
 # -----------------------------------------------------------------------------
 #  CANALES

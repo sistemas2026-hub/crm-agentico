@@ -30,8 +30,13 @@ Alcance de esta version (ver plan)
   modelo deba proponer necesita un campo de esquema que todavia no existe.
 - La verificacion de identidad es por ROL (nivel maximo declarado), no por
   herramienta individual -- ver nucleo/seguridad/verificacion.py.
-- No hay mecanismo de confirmacion humana asincrona (solo aplica a
-  herramientas de escritura; cliente_final hoy solo tiene una de lectura).
+- No hay mecanismo de confirmacion humana asincrona para escrituras.
+  'requiere_confirmacion' se valida en schema.py pero no se aplica aca --
+  la unica escritura de 'cliente_final' hoy ('reiniciar_ont') usa en su
+  lugar 'Herramienta.exige_previas' (precondiciones en codigo, fail-closed,
+  ver _previas_no_cumplidas mas abajo), por decision explicita: reiniciar
+  un equipo no necesita aprobacion humana si el diagnostico previo ya
+  favorece hacerlo.
 ================================================================================
 """
 
@@ -216,6 +221,7 @@ def _ejecutar_verificacion(herramienta, sesion, argumentos_modelo: dict,
     if sesion is not None:
         sesion.id_cliente_pendiente = str(filas[0]["id_servicio"])
         sesion.interfaz_lan_pendiente = filas[0].get("interfaz_lan") or None
+        sesion.sn_onu_pendiente = filas[0].get("sn_onu") or None
         sesion.nombre_pendiente = filas[0].get("nombre") or None
         sesion.candidatos = []
     return {
@@ -247,6 +253,7 @@ def _ejecutar_confirmacion(sesion, argumentos_modelo: dict) -> dict:
         sesion.id_cliente_pendiente = None
         sesion.nombre_pendiente = None
         sesion.interfaz_lan_pendiente = None
+        sesion.sn_onu_pendiente = None
         return {"verificado": False, "motivo": "el cliente no confirmo el nombre",
                "instruccion_interna": "Pedile de nuevo el numero de cedula, "
                    "puede haber un error de tipeo."}
@@ -256,9 +263,11 @@ def _ejecutar_confirmacion(sesion, argumentos_modelo: dict) -> dict:
     sesion.id_cliente = sesion.id_cliente_pendiente
     sesion.nombre = sesion.nombre_pendiente
     sesion.interfaz_lan = sesion.interfaz_lan_pendiente
+    sesion.sn_onu = sesion.sn_onu_pendiente
     sesion.id_cliente_pendiente = None
     sesion.nombre_pendiente = None
     sesion.interfaz_lan_pendiente = None
+    sesion.sn_onu_pendiente = None
     # Reproducido en vivo (agosto 2026): sin esta instruccion, el modelo a
     # veces inventaba que "no tenia la herramienta para cerrar la
     # verificacion por este canal" y escalaba sin necesidad -- pese a que
@@ -327,8 +336,42 @@ def _ejecutar_derivacion(herramienta, sesion, argumentos_modelo: dict, nombre_ro
                f"apenas te vuelva a escribir."}
 
 
+def _previas_no_cumplidas(herramienta, historial: list[dict]) -> list[str]:
+    """Nombres de las herramientas de 'exige_previas' (schema.py) que
+    TODAVIA no dieron el resultado favorable declarado, en esta conversacion.
+    Vacio = todo cumplido. Mira la llamada MAS RECIENTE de cada herramienta
+    requerida en 'historial' -- una que cumplio hace varios mensajes pero ya
+    no representa el estado actual no cuenta (ej. la senal pudo haber
+    empeorado despues)."""
+    faltantes = []
+    for previa in herramienta.exige_previas:
+        cumplida = False
+        for msg in historial:
+            if msg.get("role") != "tool" or msg.get("name") != previa.herramienta:
+                continue
+            try:
+                dato = json.loads(msg.get("content") or "null")
+            except (TypeError, ValueError):
+                continue
+            if isinstance(dato, dict):
+                # No se corta al primer match: la ULTIMA ocurrencia en el
+                # historial (mas reciente) es la que decide.
+                cumplida = dato.get(previa.campo) == previa.valor
+        if not cumplida:
+            faltantes.append(previa.herramienta)
+    return faltantes
+
+
+def _veces_ejecutada(herramienta, historial: list[dict]) -> int:
+    """Cuantas veces ya corrio 'herramienta' en esta conversacion -- para
+    Herramienta.limite_por_conversacion."""
+    return sum(1 for msg in historial
+              if msg.get("role") == "tool" and msg.get("name") == herramienta.nombre)
+
+
 def _ejecutar_tool(herramienta, sesion, argumentos_modelo: dict,
-                   tenant: str | None = None) -> dict | list:
+                   tenant: str | None = None,
+                   variables_tenant: dict | None = None) -> dict | list:
     argumentos_modelo = argumentos_modelo or {}
 
     if herramienta.tipo == "agregado":
@@ -402,15 +445,17 @@ def _ejecutar_tool(herramienta, sesion, argumentos_modelo: dict,
                 tenant, herramienta.nombre, clave, herramienta.cache_vigencia_dias)
             if cacheado is not None:
                 return cacheado
-            resultado = (ejecutor_http.ejecutar_asincrono(herramienta, argumentos, tenant=tenant)
+            resultado = (ejecutor_http.ejecutar_asincrono(herramienta, argumentos, tenant=tenant,
+                                                          variables_tenant=variables_tenant)
                         if herramienta.asincrona else
-                        ejecutor_http.ejecutar(herramienta, argumentos, tenant))
+                        ejecutor_http.ejecutar(herramienta, argumentos, tenant, variables_tenant))
             persistencia.guardar_cache(tenant, herramienta.nombre, clave, resultado)
             return resultado
         if herramienta.asincrona:
             return ejecutor_http.ejecutar_asincrono(herramienta, argumentos,
-                                                    tenant=tenant)
-        return ejecutor_http.ejecutar(herramienta, argumentos, tenant)
+                                                    tenant=tenant,
+                                                    variables_tenant=variables_tenant)
+        return ejecutor_http.ejecutar(herramienta, argumentos, tenant, variables_tenant)
     raise NotImplementedError(
         f"Tipo de herramienta '{herramienta.tipo}' aun no tiene ejecutor en nucleo/.")
 
@@ -639,10 +684,33 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 # cliente_final) -- si no, seria posible pasar de area sin
                 # haber confirmado quien es el cliente.
                 salida = _ejecutar_derivacion(herramienta, sesion, llamada.argumentos, nombre_rol)
+            elif (faltantes := _previas_no_cumplidas(herramienta, historial)):
+                # Fail-closed en codigo, no aprobacion humana -- ver
+                # Precondicion en schema.py. Ninguna herramienta actual la
+                # necesita salvo 'reiniciar_ont'; generico por si aparece
+                # otra accion con el mismo requisito.
+                salida = {"error": "PRECONDICION_NO_CUMPLIDA",
+                         "instruccion_interna": "Todavia no ejecutaste (o no "
+                             "dio un resultado favorable) esto antes de "
+                             f"intentar '{herramienta.nombre}': "
+                             f"{', '.join(faltantes)}. Llamalas primero -- "
+                             "si el resultado no es favorable, esta "
+                             "herramienta no es el siguiente paso, segui el "
+                             "protocolo alternativo en vez de insistir."}
+                codigo_error = "PRECONDICION_NO_CUMPLIDA"
+            elif herramienta.limite_por_conversacion is not None and _veces_ejecutada(
+                    herramienta, historial) >= herramienta.limite_por_conversacion:
+                salida = {"error": "LIMITE_DE_CONVERSACION",
+                         "instruccion_interna": f"'{herramienta.nombre}' ya se "
+                             "uso el maximo de veces permitidas en esta "
+                             "conversacion. No la repitas -- si el cliente "
+                             "insiste, decile que un colaborador humano va a "
+                             "seguir el caso."}
+                codigo_error = "LIMITE_DE_CONVERSACION"
             else:
                 try:
                     crudo = _ejecutar_tool(herramienta, sesion, llamada.argumentos,
-                                          config.identidad.slug)
+                                          config.identidad.slug, config.variables_tenant)
                     salida = listas_blancas.filtrar_campos(rol_cfg, herramienta.nombre, crudo)
                 except Exception as e:
                     # No tumba el turno: el modelo recibe un error legible y

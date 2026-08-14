@@ -65,7 +65,7 @@ from typing import Callable
 
 from pydantic import ValidationError
 
-from .schema import TenantConfig, _barrer_secretos
+from .schema import RE_NOMBRE_REF, TenantConfig, _barrer_secretos
 
 _RE_NOMBRE_ROL = re.compile(r"^[a-z][a-z0-9_]{1,29}$")
 
@@ -344,6 +344,22 @@ def _mutar_identidad_descripcion(doc: dict, descripcion: str) -> None:
     doc.setdefault("identidad", {})["descripcion"] = descripcion
 
 
+def _mutar_variable_tenant(doc: dict, nombre: str, valor: str) -> None:
+    """
+    Guarda un valor NO secreto que varia por empresa (ej. el subdominio de
+    SmartOLT) -- ver TenantConfig.variables_tenant en schema.py. Genero a
+    proposito: este archivo no sabe que integraciones existen, solo que
+    'nombre' tiene que matchear el patron de referencia (RE_NOMBRE_REF,
+    revalidado por Pydantic al final de _editar) para poder ser referenciado
+    desde 'Herramienta.base_url_ref'.
+    """
+    doc.setdefault("variables_tenant", {})[nombre] = valor
+
+
+def _mutar_borrar_variable_tenant(doc: dict, nombre: str) -> None:
+    (doc.get("variables_tenant") or {}).pop(nombre, None)
+
+
 def _mutar_canal_whatsapp(doc: dict, activo: bool, numero_visible: str | None) -> None:
     """
     Prender/apagar el canal y el numero que se muestra en la pantalla de
@@ -436,3 +452,19 @@ def guardar_plazo_visita_tecnica(tenant: str, dias: int) -> TenantConfig:
 def guardar_canal_whatsapp(tenant: str, activo: bool,
                            numero_visible: str | None) -> TenantConfig:
     return _editar(tenant, lambda doc: _mutar_canal_whatsapp(doc, activo, numero_visible))
+
+
+def guardar_variable_tenant(tenant: str, nombre: str, valor: str) -> TenantConfig:
+    if not RE_NOMBRE_REF.match(nombre):
+        raise ErrorEdicion(
+            f"'{nombre}': el nombre de la variable debe ser MAYUSCULAS, "
+            f"empezar con letra y usar solo letras/numeros/guion bajo "
+            f"(ej. SMARTOLT_SUBDOMINIO) -- es como se referencia despues "
+            f"desde 'base_url_ref' en el catalogo de herramientas.")
+    if not valor or not valor.strip():
+        raise ErrorEdicion("falta el valor.")
+    return _editar(tenant, lambda doc: _mutar_variable_tenant(doc, nombre, valor.strip()))
+
+
+def borrar_variable_tenant(tenant: str, nombre: str) -> TenantConfig:
+    return _editar(tenant, lambda doc: _mutar_borrar_variable_tenant(doc, nombre))

@@ -844,6 +844,18 @@ def configuracion_canales():
         return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
 
     w = config.canales.whatsapp
+    # SmartOLT no es un 'canal' propiamente (no es un medio de contacto con el
+    # cliente), pero vive en el mismo endpoint por lo mismo que ping_cliente
+    # vive en el catalogo de WispHub: es la unica integracion externa nueva y
+    # no amerita todavia una seccion propia en el schema.
+    #
+    # 'subdominio' se resuelve desde 'variables_tenant' via 'base_url_ref'
+    # (no desde 'base_url' -- este software es SaaS multi-tenant, el dominio
+    # varia por empresa y tiene que poder cargarse desde esta pantalla, no
+    # quedar fijo en un YAML que solo un desarrollador edita. Ver
+    # 'base_url_ref' en nucleo/config/schema.py y PUT /configuracion/variables).
+    smartolt_tool = next((h for h in config.herramientas
+                         if h.nombre == "consultar_estado_ont"), None)
     return jsonify({"whatsapp": {
         # El slug tal cual se lo paso quien llamo -- es el mismo valor con el
         # que se arma la URL del webhook (/canales/whatsapp/<tenant_slug>), y
@@ -862,6 +874,12 @@ def configuracion_canales():
             "app_secret": w.app_secret_ref,
             "verify_token": w.verify_token_ref,
         },
+    }, "smartolt": {
+        "instalado": smartolt_tool is not None,
+        "subdominio_ref": smartolt_tool.base_url_ref if smartolt_tool else None,
+        "subdominio": (config.variables_tenant.get(smartolt_tool.base_url_ref)
+                       if smartolt_tool and smartolt_tool.base_url_ref else None),
+        "ref_clave": smartolt_tool.auth_ref if smartolt_tool else None,
     }})
 
 
@@ -888,6 +906,53 @@ def configuracion_canal_whatsapp():
     olvidar_config(tenant)
     w = config.canales.whatsapp
     return jsonify({"activo": w.activo, "numero_visible": w.numero_visible})
+
+
+@app.put("/configuracion/variables/<nombre>")
+def configuracion_variable_guardar(nombre):
+    """
+    Guarda un valor NO secreto que varia por empresa (ej. el subdominio de
+    SmartOLT) -- ver TenantConfig.variables_tenant en schema.py. Generico a
+    proposito: cualquier 'Herramienta.base_url_ref' futuro usa este mismo
+    endpoint, este archivo no necesita saber que integracion es cada una.
+    Distinto de /secretos: esto se guarda en texto plano en la config del
+    tenant (no cifrado) porque no es sensible -- un subdominio no es una
+    credencial.
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    valor = cuerpo.get("valor")
+    if not valor:
+        return jsonify({"error": "Falta el campo 'valor'"}), 400
+
+    try:
+        config = editor.guardar_variable_tenant(tenant, nombre, valor)
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
+
+    olvidar_config(tenant)
+    return jsonify({"nombre": nombre, "valor": config.variables_tenant.get(nombre)})
+
+
+@app.delete("/configuracion/variables/<nombre>")
+def configuracion_variable_borrar(nombre):
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+
+    try:
+        editor.borrar_variable_tenant(tenant, nombre)
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
+
+    olvidar_config(tenant)
+    return jsonify({"borrado": nombre})
 
 
 # =============================================================================
@@ -965,16 +1030,15 @@ def diagnostico_smartolt():
     """
     Prueba de conectividad de solo lectura contra SmartOLT, con lo que la
     persona acaba de pegar en la pantalla de ajustes -- ANTES de guardarlo
-    como secreto, para poder corregir un dato mal pegado sin round-trip.
+    como secreto/variable, para poder corregir un dato mal pegado sin
+    round-trip.
 
     El endpoint (GET /api/onu/get_all_onus_details) y el header (X-Token,
-    no Authorization) salen de la documentacion publica de SmartOLT
-    (api.smartolt.com, via su coleccion de Postman) -- primer intento
-    (/api/network/olts + Authorization) dio 404 contra una cuenta real,
-    confirmando que estaba mal. Esta version es la SEGUNDA hipotesis,
-    todavia sin confirmar en vivo -- misma cautela que con cualquier API
-    nueva de este proyecto (ver skill wisphub-api). Una vez confirmado,
-    actualizar este comentario y escribir la skill 'smartolt-api'.
+    no Authorization) quedaron CONFIRMADOS en vivo contra la instancia real
+    de Rapilink -- ver .claude/skills/smartolt-api/SKILL.md. No se usa
+    'get_olts' para esto pese a ser mas liviano: el proveedor pide
+    explicitamente no usarlo como heartbeat/chequeo de conexion (misma
+    skill).
     """
     cuerpo = request.get_json(force=True, silent=True) or {}
     base_url = (cuerpo.get("base_url") or "").strip().rstrip("/")
@@ -1002,8 +1066,14 @@ def diagnostico_smartolt():
         except ValueError:
             return jsonify({"ok": False, "detalle": "Respondio 200 pero sin JSON -- "
                              "revisar si la ruta es la correcta."})
-        return jsonify({"ok": True, "detalle": "Conexion correcta.",
-                        "muestra": cuerpo_resp if isinstance(cuerpo_resp, list) else [cuerpo_resp]})
+        # SIN 'muestra' con los registros crudos: get_all_onus_details trae
+        # nombre y direccion del cliente por ONU (ver tabla de riesgo en la
+        # skill smartolt-api) -- un chequeo de conexion no tiene que devolver
+        # datos de clientes al navegador. La cantidad alcanza para confirmar
+        # que la clave sirve.
+        cantidad = len(cuerpo_resp) if isinstance(cuerpo_resp, list) else 1
+        return jsonify({"ok": True,
+                        "detalle": f"Conexion correcta -- {cantidad} ONU(s) visibles con esta clave."})
     if r.status_code in (401, 403):
         return jsonify({"ok": False, "detalle": f"La API key fue rechazada (HTTP {r.status_code})."})
     if r.status_code == 404:

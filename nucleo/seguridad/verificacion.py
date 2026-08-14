@@ -52,6 +52,12 @@ class Sesion:
     # ping_cliente para el parametro 'interfaz' de WispHub. Puede quedar
     # vacia -- normal en clientes nuevos, ver nucleo/herramientas/http.py.
     interfaz_lan: str | None = None
+    # Capturado al verificar (nunca lo propone el modelo): la necesitan las
+    # herramientas de SmartOLT para identificar la ONU del cliente sin que el
+    # modelo pueda elegir de cual habla -- mismo motivo que interfaz_lan.
+    # Falta en el 32% de los clientes activos (ver .claude/skills/wisphub-api):
+    # queda en None, y las herramientas de SmartOLT no tienen con que llamar.
+    sn_onu: str | None = None
     candidatos: list[str] = field(default_factory=list)  # si el numero es ambiguo
 
     # Verificacion en DOS pasos: encontrar un cliente por cedula no alcanza
@@ -63,6 +69,7 @@ class Sesion:
     id_cliente_pendiente: str | None = None
     nombre_pendiente: str | None = None
     interfaz_lan_pendiente: str | None = None
+    sn_onu_pendiente: str | None = None
 
     # Rol al que se derivo la conversacion en ESTE turno (ver
     # nucleo/modelo/motor.py::_ejecutar_derivacion). None la mayoria de las

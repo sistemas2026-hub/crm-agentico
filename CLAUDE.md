@@ -23,6 +23,14 @@ Estos dos archivos cambian seguido y son la fuente de verdad — no un resumen d
 py -3.13 tests/test_nucleo_sin_tenants.py
 ```
 
+## Esto es SaaS multi-tenant: diseñar para muchas empresas, no para Rapilink
+
+Rapilink es el primer despliegue, no el único que va a existir. Toda decisión de diseño asume que **se van a conectar muchas empresas**, cada una con sus propios valores — no solo Rapilink con los suyos hardcodeados.
+
+La consecuencia concreta: un dato que varía por empresa (el subdominio de una API externa, un ID de cuenta, cualquier config que no es igual para todo el mundo) se modela como **configuración editable desde la interfaz y persistida en la config del tenant** — nunca como un valor fijo en código, ni en un YAML que solo un desarrollador sabe editar. "Hoy solo hay un tenant" no es excusa para hardcodear: la próxima empresa que se conecte no debería necesitar una sesión de código para algo que ya se resolvió una vez. Ver el patrón ya construido para esto: `TenantConfig.variables_tenant` + `Herramienta.base_url_ref` (`nucleo/config/schema.py`) — mismo espíritu que `auth_ref` para secretos, pero para datos que no son secretos y aun así varían por empresa. `nucleo/config/editor.py` ya persiste config por tenant en base de datos (`asistente.tenant_config`), versionada — el YAML en `tenants/*.yaml` es solo la semilla inicial, no la fuente de verdad una vez cargado.
+
+Esto no es una sugerencia de "buena práctica" en abstracto: nace de una corrección directa de un colaborador después de que se declarara un dato de empresa (el subdominio de SmartOLT) como fijo en el YAML "porque hoy solo hay un tenant y cambiarlo es más trabajo". No repetir ese razonamiento.
+
 ## Decisiones que no hay que redescubrir
 
 - **El modelo compone, el código calcula** (PRD §12.5): ninguna consulta agregada le pide al modelo sumar, contar o promediar filas. Python calcula; el modelo traduce lenguaje a parámetros y redacta el resultado.

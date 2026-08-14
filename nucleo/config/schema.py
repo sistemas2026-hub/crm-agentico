@@ -404,6 +404,45 @@ class Periodo(Base):
         return self
 
 
+class RangoVeredicto(Base):
+    """
+    Un tramo de un umbral: [desde, hasta] (ambos inclusive; None = sin tope
+    de ese lado) -> la etiqueta que le corresponde. El PRIMER rango que
+    matchea gana, en el orden declarado -- no se valida que los rangos no se
+    superpongan, el orden es la desambiguacion.
+    """
+    desde: float | None = None
+    hasta: float | None = None
+    etiqueta: str
+
+    @model_validator(mode="after")
+    def _algun_limite(self):
+        if self.desde is None and self.hasta is None:
+            raise ValueError(
+                "un RangoVeredicto necesita al menos 'desde' o 'hasta' -- "
+                "sin ninguno de los dos matchea cualquier valor y no sirve "
+                "como umbral")
+        return self
+
+
+class Precondicion(Base):
+    """
+    Una condicion que otra herramienta ya tiene que haber cumplido, EN ESTA
+    CONVERSACION, antes de que el motor deje ejecutar la que la declara.
+
+    Nace de un pedido puntual del cliente sobre el reinicio de la ONT: no un
+    paso de aprobacion humana, sino una precondicion en codigo -- "reiniciar
+    solo si ya se diagnostico que la senal esta bien y el ping responde".
+    Fail-closed: sin una llamada previa que matchee, no se ejecuta. Generico
+    a proposito -- 'campo'/'valor' son el nombre y valor que ESA herramienta
+    devuelve (ej. 'onu_signal_1490_veredicto'/'aceptable'), nucleo/ no sabe
+    que significan.
+    """
+    herramienta: str
+    campo: str
+    valor: Any
+
+
 class Herramienta(Base):
     nombre: str
     # 'interno': no llama a ninguna API -- el motor la resuelve el mismo
@@ -458,14 +497,32 @@ class Herramienta(Base):
     # --- http / agregado ---
     # No es secreto (no dispara el barrido de _barrer_secretos): es dato de
     # tenant igual que 'endpoint', solo que compartido por varias
-    # herramientas del mismo proveedor.
+    # herramientas del mismo proveedor. Literal en el YAML -- sirve para una
+    # API cuyo dominio es el MISMO para cualquier empresa (WispHub, BottleCRM
+    # self-hosted). Para una API donde el dominio VARIA por empresa (ej.
+    # SmartOLT: '{subdominio}.smartolt.com', uno distinto por ISP), usar
+    # 'base_url_ref' en su lugar -- este software es SaaS multi-tenant, y un
+    # dato asi no puede quedar fijo en un archivo que solo un desarrollador
+    # edita: la proxima empresa que se conecte tiene que poder cargarlo desde
+    # la pantalla de ajustes, no pedir una sesion de codigo.
     base_url: str | None = None
+    # El NOMBRE de una variable en TenantConfig.variables_tenant -- mismo
+    # patron que 'auth_ref' apunta a un secreto, pero esto NO es secreto
+    # (dominio, subdominio, ID de cuenta): se guarda en texto plano en la
+    # config del tenant, editable desde /configuracion/variables. Si se
+    # declara, el ejecutor resuelve el 'base_url' real desde ahi en el
+    # momento de la llamada -- 'base_url' arriba queda sin usar.
+    base_url_ref: str | None = None
     endpoint: str | None = None
     metodo: Literal["GET", "POST", "PUT", "PATCH"] = "GET"
     auth_ref: str | None = None
     # El esquema del header Authorization varia por proveedor (WispHub usa
     # 'Api-Key', no el 'Bearer' habitual) -- es dato del tenant, no del motor.
     auth_esquema: str = "Bearer"
+    # El NOMBRE del header tambien varia -- SmartOLT no usa 'Authorization' en
+    # absoluto, exige 'X-Token' sin esquema (auth_esquema: "" en ese caso).
+    # Verificado en vivo agosto 2026, ver .claude/skills/smartolt-api.
+    auth_header: str = "Authorization"
     # Algunas APIs envuelven la respuesta en una clave en vez de devolver el
     # dato directo (ej. {"cases_obj": {...}} o {"cases": [...], "cases_count": N}
     # en vez de {"results": [...], "count": N}). Si se declara, el ejecutor
@@ -476,6 +533,36 @@ class Herramienta(Base):
     # aparte (ej. WispHub en ping_cliente, verificado en vivo agosto 2026) --
     # ver nucleo/herramientas/http.py:ejecutar_asincrono().
     asincrona: bool = False
+    # PRD 12.5 "el modelo compone, el codigo calcula": para una herramienta
+    # que devuelve un numero contra el que hay un umbral normado (ej. dBm de
+    # senal optica contra G-GO-04), el ejecutor computa la etiqueta en
+    # Python y la agrega como '{campo}_veredicto' -- el modelo nunca
+    # interpreta el numero crudo. Los rangos (y sus valores) son dato de
+    # tenant, no del motor: nucleo/ no sabe que es un dBm ni cuales son los
+    # limites de Rapilink.
+    veredictos: dict[str, list[RangoVeredicto]] = Field(default_factory=dict)
+    # Como 'veredictos', pero para un valor de TEXTO exacto en vez de un
+    # rango numerico (ej. SmartOLT 'Last down cause': "dying-gasp" -> "sin
+    # energia en el domicilio"). El campo puede usar notacion con punto de
+    # UN nivel ("ONU details.Last down cause") para leer y escribir dentro
+    # de un objeto anidado -- mismo formato que Rol.campos_permitidos
+    # (nucleo/seguridad/listas_blancas.py), asi la etiqueta calculada queda
+    # en el mismo lugar que la lista blanca ya sabe filtrar. Un valor sin
+    # entrada en el mapeo se deja sin interpretar -- no inventa una
+    # etiqueta para una causa que no se documento todavia.
+    mapeos: dict[str, dict[str, str]] = Field(default_factory=dict)
+    # Ver Precondicion. TODAS tienen que cumplirse (AND), con la llamada MAS
+    # RECIENTE de cada herramienta requerida -- una que cumplio hace varios
+    # mensajes pero ya no representa el estado actual no cuenta.
+    exige_previas: list[Precondicion] = Field(default_factory=list)
+    # Tope de veces que esta herramienta puede ejecutarse en UNA conversacion
+    # (None = sin tope). Pensado para 'reiniciar_ont': un cliente que insiste
+    # ("reiniciá otra vez") no puede hacer que el modelo corte el servicio
+    # repetidamente en el mismo intercambio. No es un cooldown por tiempo
+    # (el historial de la conversacion no guarda timestamps por mensaje) --
+    # es un tope duro por conversacion, mas simple y igual de efectivo para
+    # el caso que motiva esto.
+    limite_por_conversacion: int | None = Field(default=None, ge=1)
     # Algunas APIs exigen multipart/form-data en vez de JSON -- verificado en
     # vivo con WispHub POST /tickets/ (agosto 2026): JSON da 500 (opaco,
     # sin motivo), form-urlencoded da 415, y solo multipart funciona. No es
@@ -515,16 +602,17 @@ class Herramienta(Base):
     periodo: Periodo | None = None
     tope_grupos: int = Field(default=12, ge=1, le=50)
 
-    @field_validator("auth_ref")
+    @field_validator("auth_ref", "base_url_ref")
     @classmethod
     def _ref_es_nombre_no_valor(cls, v: str | None) -> str | None:
         if v is None:
             return v
         if not RE_NOMBRE_REF.match(v):
             raise ValueError(
-                f"auth_ref='{v}' parece un VALOR. Debe ser el NOMBRE de la "
-                f"variable de entorno o del secreto en Vault, en MAYUSCULAS "
-                f"(ej. WISPHUB_API_KEY). Ningun secreto vive en este archivo.")
+                f"'{v}' parece un VALOR. Debe ser el NOMBRE de la variable de "
+                f"entorno, del secreto, o de la variable de tenant, en "
+                f"MAYUSCULAS (ej. WISPHUB_API_KEY, SMARTOLT_SUBDOMINIO). "
+                f"Ningun valor real vive en este archivo.")
         return v
 
     @model_validator(mode="after")
@@ -532,8 +620,18 @@ class Herramienta(Base):
         if self.tipo in ("http", "agregado") and not self.endpoint:
             raise ValueError(f"'{self.nombre}': tipo {self.tipo} exige 'endpoint'")
 
-        if self.tipo in ("http", "agregado") and not self.base_url:
-            raise ValueError(f"'{self.nombre}': tipo {self.tipo} exige 'base_url'")
+        if self.tipo in ("http", "agregado") and not (self.base_url or self.base_url_ref):
+            raise ValueError(
+                f"'{self.nombre}': tipo {self.tipo} exige 'base_url' (fijo, "
+                f"igual para cualquier empresa) o 'base_url_ref' (varia por "
+                f"empresa, ej. un subdominio -- ver el comentario del campo "
+                f"en schema.py)")
+
+        if self.base_url and self.base_url_ref:
+            raise ValueError(
+                f"'{self.nombre}': declara 'base_url' Y 'base_url_ref' -- "
+                f"decidi cual, el segundo pisaria al primero en tiempo de "
+                f"ejecucion y dejaria el otro como codigo muerto que confunde.")
 
         if self.verifica_identidad and not self.campo_busqueda:
             raise ValueError(
@@ -774,6 +872,16 @@ class TenantConfig(Base):
     rag: RAG
     llm: LLM
     herramientas: list[Herramienta] = Field(default_factory=list)
+    # Valores por empresa que NO son secretos pero SI varian por tenant (un
+    # subdominio, un ID de cuenta) -- referenciados por 'Herramienta.
+    # base_url_ref'. Se guardan en texto plano ACA (a diferencia de los
+    # secretos, que van cifrados en asistente.tenant_secrets) porque no hace
+    # falta cifrarlos, y separarlos de 'base_url' (fijo) es lo que permite que
+    # una empresa nueva cargue el suyo desde /configuracion/variables sin que
+    # nadie edite el YAML a mano -- este software conecta muchas empresas, no
+    # una sola, y esa es la diferencia entre un dato de PLATAFORMA (nucleo/,
+    # igual para todas) y uno de EMPRESA (aca, distinto por tenant).
+    variables_tenant: dict[str, str] = Field(default_factory=dict)
     canales: Canales = Field(default_factory=Canales)
     escalamiento: Escalamiento = Field(default_factory=Escalamiento)
     conversaciones: Conversaciones = Field(default_factory=Conversaciones)
