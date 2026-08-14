@@ -110,7 +110,7 @@ roles:
     puede_consultar: [consultar_cliente, consultar_cliente_por_cedula, consultar_ticket,
           consultar_tickets_de_cliente, contar_tickets, contar_clientes, consultar_casos_bottlecrm,
           agendar_visita_tecnica, consultar_estado_ont, consultar_senal_ont, reiniciar_ont,
-          diagnosticar_falla_ont]
+          diagnosticar_falla_ont, consultar_estado_catv]
     campos_permitidos:
       consultar_cliente: [id_servicio, nombre, cedula, estado, email, telefono, direccion, localidad,
         ciudad, plan_internet, zona, fecha_instalacion, estado_facturas, saldo, fecha_corte]
@@ -147,6 +147,9 @@ roles:
       # topologia de VLAN/perfil.
       diagnosticar_falla_ont: ["ONU details.Last down cause", "ONU details.Last down cause_interpretado",
             "ONU details.Run state", "ONU details.Last down time", "Optical status.Rx optical power(dBm)"]
+      # El colaborador SI ve el nivel optico de CATV en crudo: sabe leer un
+      # dBm, y sin rango confirmado todavia es el unico que puede juzgarlo.
+      consultar_estado_catv: ["ONU CATV port.Port State", "Optical status.CATV Rx optical power(dBm)"]
     nunca_revelar: [password_servicio, password_cpe, password_router_wifi, password_ssid_router_wifi,
       usuario_router_wifi, coordenadas]
 
@@ -299,7 +302,7 @@ roles:
     orientado_a: cliente_final
     puede_consultar: [consultar_mi_servicio, verificar_identidad_por_cedula, confirmar_identidad,
           ping_cliente, derivar_a_area, consultar_plan_tv, consultar_estado_ont,
-          consultar_senal_ont, reiniciar_ont, diagnosticar_falla_ont]
+          consultar_senal_ont, reiniciar_ont, diagnosticar_falla_ont, consultar_estado_catv]
     campos_permitidos:
       # Lo minimo para autoservicio. El id_cliente NO lo propone el modelo:
       # lo inyecta el codigo desde la sesion autenticada.
@@ -328,6 +331,11 @@ roles:
       # ("dying-gasp"), nunca la hora exacta de la caida (permite inferir
       # patrones de ausencia del domicilio), nunca la senal optica en dBm.
       diagnosticar_falla_ont: ["ONU details.Last down cause_interpretado"]
+      # Solo el estado del puerto (up/down), que es accionable para el
+      # cliente. El nivel optico en dBm NO -- mismo criterio que la senal de
+      # la ONU: un numero que no puede interpretar y que no cambia lo que
+      # tiene que hacer.
+      consultar_estado_catv: ["ONU CATV port.Port State"]
     nunca_revelar: [password_servicio, password_cpe, password_router_wifi, usuario_router_wifi,
           cedula, direccion, coordenadas, ip, mac_cpe, sn_onu, sectorial, router.nombre]
 
@@ -396,10 +404,14 @@ roles:
       Si la consulta en realidad es de facturacion, llama a derivar_a_area
       hacia facturacion_cliente -- no intentes resolverla vos.
     orientado_a: cliente_final
-    puede_consultar: [consultar_mi_servicio, ping_cliente, derivar_a_area]
+    puede_consultar: [consultar_mi_servicio, ping_cliente, derivar_a_area, consultar_estado_catv]
     campos_permitidos:
       consultar_mi_servicio: [estado, plan_internet, ssid_router_wifi]
       ping_cliente: ["ping-1", "ping-2", "ping-3", "ping-exitoso"]
+      # Las fallas de TV se derivan a este rol (ver su descripcion), asi que
+      # necesita el mismo dato duro que cliente_final para no quedar
+      # diagnosticando solo con lo que el cliente cuenta.
+      consultar_estado_catv: ["ONU CATV port.Port State"]
     nunca_revelar: [password_servicio, password_cpe, password_router_wifi, usuario_router_wifi,
           cedula, direccion, coordenadas, ip, mac_cpe, sn_onu, sectorial, router.nombre]
 
@@ -1341,6 +1353,52 @@ herramientas:
         "ONT LOSi/LOBi alarm": "falla optica -- fibra cortada o problema en la caja del splitter (NAP)"
         "ONT LOFi alarm": "falla optica -- fibra cortada o problema en la caja del splitter (NAP)"
         "ONU is currently online": "el equipo esta en linea, no hay una caida que explicar"
+
+  - nombre: consultar_estado_catv
+    tipo: http
+    descripcion: >
+      Estado del puerto de TV (CATV) en el equipo del cliente, leido de la
+      OLT. Para fallas de TV, es el UNICO dato duro que se puede mirar del
+      lado nuestro -- todo lo demas del protocolo (luces, cableado,
+      sintonizacion) depende de lo que el cliente reporte.
+
+      LLAMALA APENAS el cliente reporta una falla de TV y ya confirmaste
+      que su plan la incluye, ANTES de arrancar con la lista de preguntas.
+      El manual (5.9) pide verificar en SmartOLT como parte del
+      procedimiento, no despues de agotar al cliente: si el puerto esta
+      caido, todas esas preguntas sobran.
+
+      Como leer 'Port State':
+      - 'up'   = el puerto esta activo, la señal de TV sale del equipo. El
+                 problema esta del lado del cliente (sintonizacion,
+                 cableado, entrada del TV) -- segui el protocolo normal.
+      - 'down' = el puerto de TV NO esta activo. ESO es la falla, no la
+                 configuracion del televisor: no le pidas al cliente que
+                 sintonice ni que revise cables, pasa el caso para que se
+                 reactive el servicio de CATV en el equipo.
+
+      Tarda ~10 segundos (usa el mismo endpoint pesado que
+      diagnosticar_falla_ont). No las llames a las dos en el mismo turno:
+      son dos consultas lentas separadas, y responden preguntas distintas
+      (esta es para TV; la otra, para un equipo caido).
+    solo_lectura: true
+    roles_permitidos: [cliente_final, soporte_tecnico_cliente, soporte]
+    base_url_ref: SMARTOLT_SUBDOMINIO
+    endpoint: /api/onu/get_onu_full_status_info/{sn_onu}
+    metodo: GET
+    auth_ref: SMARTOLT_API_KEY
+    auth_esquema: ""
+    auth_header: X-Token
+    extraer_de: full_status_json
+    inyectar_sesion:
+      sn_onu: sn_onu
+    # PENDIENTE: 'Optical status.CATV Rx optical power(dBm)' existe y trae
+    # el nivel optico de CATV (medido en vivo, agosto 2026: -5.90 en un
+    # equipo sano). NO se expone todavia porque no hay un rango aceptable
+    # confirmado con el area tecnica -- y el dBm crudo no va al modelo sin
+    # interpretar (PRD 12.5). Cuando ese rango exista, se agrega aca un
+    # bloque 'veredictos' igual al de consultar_senal_ont y el campo
+    # '..._veredicto' a la lista blanca de los roles.
 
 # -----------------------------------------------------------------------------
 #  CANALES
