@@ -182,8 +182,15 @@ rag:
 #  falla con error: responde con datos inventados y tono seguro. Elegir y
 #  redactar son habilidades DISTINTAS y hay que medirlas por separado.
 llm:
-  proveedor: ollama
-  modelo_por_defecto: qwen3:30b-a3b-q4_K_M
+  # El proveedor sale del PREFIJO de esta referencia, no de un campo aparte:
+  # 'deepseek:x' -> deepseek, 'anthropic:x' -> anthropic, y un nombre sin
+  # prefijo conocido -> ollama (local). Ver nucleo/modelo/cliente.py::resolver.
+  #
+  # Ojo con esa ultima regla: un nombre mal escrito NO falla, se interpreta
+  # como modelo local. Eso se diseno como resguardo (que un typo se quede en
+  # casa en vez de irse a internet con datos de un cliente), pero desde que no
+  # hay Ollama corriendo se traduce en un turno que muere pidiendo memoria.
+  modelo_por_defecto: deepseek:deepseek-v4-flash
   temperatura: 0.1
   max_tokens: 1024
   limite_iteraciones_agente: 4       # cada iteracion es un TURNO completo

@@ -132,7 +132,7 @@ Ya implementado y funcionando:
 ## 6. Requisitos no funcionales
 
 - **RNF-01 · Privacidad:** cumplimiento con la Ley 1581 de 2012 (protección de datos personales, Colombia).
-  - **El modelo por defecto es local** (Ollama, on-premise). Sigue siendo el resguardo: cualquier rol no enrutado explícitamente, o un `override` mal escrito, se queda en casa.
+  - **Ya no hay modelo local** (agosto 2026). El diseño original dejaba Ollama on-premise como resguardo: un rol sin enrutar, o un `override` mal escrito, se quedaba en casa. Ese resguardo **dejó de existir** cuando se sacó Ollama del VPS al pasar los embeddings a la API de OpenAI — era su único consumidor y el servidor no tenía memoria de sobra. Hoy `modelo_por_defecto` es DeepSeek, así que **todo** sale a una API externa, amparado en la misma autorización de tratamiento de abajo. Un nombre de modelo mal escrito ya no se queda en casa: falla el turno (`cliente.py::resolver` lo interpreta como local y no hay local que responda).
   - **Excepción aprobada (agosto 2026): DeepSeek (`deepseek-v4-flash`) para todos los roles**, incluidos los que llevan PII (`soporte`, `facturacion`, `cliente_final`). Base legal: la autorización de tratamiento que firma el cliente al contratar **cubre transferencia internacional de datos** (Ley 1581, art. 26 — la transferencia a países sin nivel adecuado de protección es lícita con autorización expresa e inequívoca del titular). Confirmado sobre el texto vigente de Rapilink; los ~7.272 clientes activos ya lo firmaron.
   - Motivación medida, no solo de costo: el modelo local tarda 42.6 s por turno (~180 s si estaba descargado de memoria); DeepSeek, 4.7-12 s — hasta 17× más rápido en la misma tarea real (`cli/prueba_velocidad.py`). A ~$0.24 por cada 1.000 consultas, resuelve directamente la tensión de RNF-04 con el técnico en campo.
   - **La persistencia se reparte** (decisión de agosto 2026, al adoptar Supabase hospedado para la arquitectura multi-tenant). El criterio es uno solo: *sale a la nube lo que no identifica a una persona*.
@@ -154,7 +154,7 @@ Ya implementado y funcionando:
   - ⚠️ **Validación legal ahora obligatoria antes de producción**, no opcional: la adopción de infraestructura hospedada cambia el análisis que motivó este requisito.
 - **RNF-02 · Seguridad en capas:** las reglas duras (filtrado de PII, confirmación de acciones sensibles) se aplican en **código**, no solo en el prompt. El prompt guía el comportamiento; el código garantiza los límites no negociables.
 - **RNF-03 · Costo:** volumen bajo (~300 consultas/día). El modelo local no tiene costo por token; el `override` a DeepSeek (agosto 2026) agrega ~$0.24 por cada 1.000 consultas — a este volumen, unos pocos dólares al mes.
-- **RNF-04 · Rendimiento:** originalmente se priorizó calidad sobre latencia, aceptando los 42.6 s/turno de `qwen3:30b-a3b`. La tensión con el técnico en campo (§14 del diseño multi-tenant) queda **resuelta por el `override` a DeepSeek** (RNF-01): 4.7-12 s por turno con calidad de texto equivalente, medido sobre la misma tarea de producción. El modelo local sigue siendo el resguardo para roles no enrutados o si `overrides` falla.
+- **RNF-04 · Rendimiento:** originalmente se priorizó calidad sobre latencia, aceptando los 42.6 s/turno de `qwen3:30b-a3b`. La tensión con el técnico en campo (§14 del diseño multi-tenant) queda **resuelta por DeepSeek** (RNF-01): 4.7-12 s por turno con calidad de texto equivalente, medido sobre la misma tarea de producción. Desde agosto 2026 DeepSeek es el **default**, no un `override`: ya no hay modelo local al que caer.
 - **RNF-05 · Mantenibilidad:** herramientas, filtros y prompts parametrizados por área, para replicar el patrón sin reescribir el motor.
 
 ---
@@ -165,9 +165,9 @@ Ya implementado y funcionando:
 
 | Componente | Tecnología |
 |-----------|-----------|
-| Modelo (motor) | **Qwen3 30B-A3B** (MoE, Q4_K_M) vía **Ollama** (local) |
+| Modelo (motor) | **DeepSeek** (`deepseek-v4-flash`) vía API. Hasta agosto 2026 fue **Qwen3 30B-A3B** (MoE, Q4_K_M) vía **Ollama** local — ver RNF-01 |
 | Lenguaje | Python 3.13 |
-| Cliente del modelo | librería `ollama` |
+| Cliente del modelo | librería `openai` (contrato compatible; también `anthropic`). `ollama` queda solo para `cli/banco_pruebas.py` y `cli/prueba_velocidad.py`, que comparan modelos contra el Ollama de la máquina de quien los corre |
 | Llamadas HTTP | `requests` |
 | Configuración y credenciales | `python-dotenv` (archivo `.env`) |
 | API de datos | WispHub REST API (JSON, auth por API Key) |

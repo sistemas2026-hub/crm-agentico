@@ -407,9 +407,23 @@ rag:
 #    de produccion: modelo local en caliente, ~22s hasta la primera palabra
 #    (7.6 tok/s); DeepSeek, ~8s (115 tok/s). Calidad de texto equivalente.
 llm:
-  proveedor: ollama
-  modelo_por_defecto: qwen3:30b-a3b-q4_K_M
-  modelo_informes: qwen3:30b-a3b-q4_K_M
+  # DeepSeek tambien POR DEFECTO, no solo por override (agosto 2026). Antes el
+  # default era el modelo local y los overrides por rol eran la excepcion que
+  # salia a la nube; ya no hay modelo local en ningun lado -- se saco el
+  # contenedor de Ollama del VPS al pasar los embeddings a OpenAI, y era su
+  # unico consumidor.
+  #
+  # Dejarlo apuntando al local era una mina: cualquier rol SIN override
+  # explicito caia ahi y el turno moria con 'model requires more system
+  # memory'. Paso de verdad con el rol fusionado de un colaborador
+  # (nucleo/config/fusion.py), que por nombre no matcheaba ningun override.
+  #
+  # La base legal es la misma que ya cubria los overrides: la autorizacion de
+  # tratamiento que firma el cliente cubre transferencia internacional (Ley
+  # 1581 art. 26, ver PRD RNF-01). Lo que cambia es que el local ya no es el
+  # resguardo -- no hay resguardo, y por eso conviene que este escrito.
+  modelo_por_defecto: deepseek:deepseek-v4-flash
+  modelo_informes: deepseek:deepseek-v4-flash
   temperatura: 0.1
   max_tokens: 1024
   # Cada iteracion cuesta un TURNO COMPLETO (~43 s local, ~5 s API), no
@@ -418,20 +432,14 @@ llm:
   # El razonamiento se descarta del historial: reenviarlo acumula 2.500-5.400
   # caracteres inutiles por turno.
   descartar_thinking: true
-  # DeepSeek para TODOS los roles, incluidos los que llevan PII (soporte,
-  # facturacion, cliente_final). Aprobado: la autorizacion de tratamiento que
-  # firma el cliente cubre transferencia internacional de datos (Ley 1581,
-  # art. 26). Sin esa cobertura, el override tendria que limitarse a
-  # 'rol:administracion' y al RAG documental, que no llevan PII.
+  # Solo lo que se APARTA del default de arriba. Los cuatro roles reales ya no
+  # figuran aca: todos usaban deepseek-v4-flash, que ahora es el default, asi
+  # que repetirlos era ruido que se desincroniza en el primer cambio.
   #
-  # Se enruta TODO por rol y no por canal: mas rapido y mas barato en todos
-  # lados, y la base legal ya cubre la transferencia, asi que no hace falta
-  # mantener el local como opcion mas segura para ningun rol.
+  # (La base legal para que roles con PII -soporte, facturacion,
+  # cliente_final- salgan a una API externa esta explicada arriba, junto al
+  # modelo por defecto, que es donde manda ahora.)
   overrides:
-    'rol:soporte': deepseek:deepseek-v4-flash
-    'rol:facturacion': deepseek:deepseek-v4-flash
-    'rol:administracion': deepseek:deepseek-v4-flash
-    'rol:cliente_final': deepseek:deepseek-v4-flash
     # 'rol:supervisor' es una clave VIRTUAL (nucleo/seguimiento/supervisor.py):
     # no es un rol real, no aparece arriba en 'roles'. Revisa cada conversacion
     # cerrada en segundo plano -- sin la urgencia de latencia de responderle a
@@ -440,9 +448,10 @@ llm:
     # prueba con Sonnet 5 (mas barato que Opus 5) ahora que la revision se
     # apoya en el manual real via RAG y no solo en el criterio del modelo.
     'rol:supervisor': anthropic:claude-sonnet-5
-  # Si algun rol necesita quedarse en local (ej. si se restringe la
-  # autorizacion mas adelante), se quita su linea de aqui: el modelo_por_
-  # defecto de arriba sigue siendo local y actua como resguardo.
+  # Si algun rol necesitara quedarse en un modelo local (ej. si se restringe
+  # la autorizacion mas adelante), se le agrega su linea aqui -- pero hoy NO
+  # hay modelo local corriendo en ningun lado, asi que primero habria que
+  # volver a levantar ese servicio.
 
 # -----------------------------------------------------------------------------
 #  HERRAMIENTAS
