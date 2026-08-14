@@ -43,6 +43,7 @@ from nucleo.ingesta.docx import procesar
 from nucleo.modelo import motor
 from nucleo.persistencia import db as persistencia
 from nucleo.recuperacion.busqueda import recuperar
+from nucleo.recuperacion.prompt import piezas_del_system
 from nucleo.seguimiento import escalamiento
 from nucleo.seguimiento import supervisor
 from nucleo.seguridad import secretos
@@ -120,6 +121,12 @@ def _agente_json(nombre: str, rol, config) -> dict:
         "area": rol.area,
         "cargo": rol.cargo,
         "orientado_a": rol.orientado_a,
+        # El system prompt REAL, partido en piezas con su origen. Sin esto,
+        # para saber por que un agente contesto algo hay que reconstruirlo de
+        # memoria cruzando cuatro secciones de la configuracion -- y el
+        # trabajo termina en el prompt aunque la causa este en otro lado (ver
+        # 'confirmar_identidad' faltante en la base, agosto 2026).
+        "prompt_piezas": piezas_del_system(config, nombre),
         "herramientas": [
             {
                 "nombre": h.nombre, "descripcion": h.descripcion.strip(), "tipo": h.tipo,

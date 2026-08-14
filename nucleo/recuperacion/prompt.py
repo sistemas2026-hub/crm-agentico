@@ -21,17 +21,56 @@ prompt no es lo unico que la exige.
 
 from __future__ import annotations
 
+# De donde sale cada pieza. Texto para una PERSONA (a que pantalla ir), no
+# una ruta que el codigo resuelva.
+AJUSTES = "Ajustes -> Personalidad del asistente"
+ORIGEN_CODIGO = "fijo en el codigo, no se edita"
+GEN = "se genera segun 'orientado_a' del agente"
+
 
 def construir_system(config, nombre_rol: str) -> str:
+    """El system prompt completo, tal cual lo recibe el modelo."""
+    return "\n\n".join(p["texto"] for p in piezas_del_system(config, nombre_rol))
+
+
+def piezas_del_system(config, nombre_rol: str) -> list[dict]:
+    """
+    Las mismas partes que construir_system(), pero cada una con su titulo y
+    DONDE se edita. Es lo que le permite a la pantalla de agentes contestar
+    "por que dijo eso" sin que nadie tenga que reconstruir el prompt de
+    memoria cruzando cuatro secciones de la configuracion.
+
+    Una sola fuente a proposito: construir_system() se arma desde esto, no al
+    reves ni en paralelo. Dos funciones que generan "el mismo" prompt divergen
+    en el primer cambio, y el dia que diverjan la pantalla estaria mintiendo
+    justo cuando alguien la consulta para depurar.
+
+    'origen' es texto para una persona, no una ruta que el codigo resuelva:
+    dice a que pantalla ir. 'editable' distingue lo que se cambia desde la
+    plataforma de lo que esta fijo en codigo o se genera solo -- un bloque
+    generado (a quien le habla el agente) no tiene donde editarse porque no
+    lo escribio nadie, y ese es justamente el punto.
+    """
     rol = config.roles[nombre_rol]
     persona = config.persona
     identidad = config.identidad
 
-    partes = [
+    piezas: list[dict] = []
+
+    def agregar(titulo: str, origen: str, texto: str, editable: bool = True):
+        if texto and texto.strip():
+            piezas.append({"titulo": titulo, "origen": origen,
+                           "texto": texto, "editable": editable})
+
+    agregar(
+        "Identidad y tono", AJUSTES,
         f"Eres {persona.nombre_asistente}, el asistente de "
         f"{identidad.nombre_comercial or identidad.nombre_legal}, un "
         f"proveedor de internet (ISP). Respondes en {identidad.idioma}, con "
-        f"tono {persona.tono} y respuestas {persona.longitud_respuesta}s.",
+        f"tono {persona.tono} y respuestas {persona.longitud_respuesta}s.")
+
+    agregar(
+        "No inventar", ORIGEN_CODIGO,
         "No inventes datos: si una herramienta no te da un dato, decilo "
         "explicitamente en vez de completarlo. Tampoco inventes un "
         "procedimiento, un paso a seguir, ni el nombre de una herramienta "
@@ -45,19 +84,22 @@ def construir_system(config, nombre_rol: str) -> str:
         "preguntan por algo que la empresa directamente no ofrece, decilo "
         "con la misma honestidad ('ese servicio no lo ofrecemos') en vez "
         "de fabricar una respuesta o simular que consultaste algo que no "
-        "existe.",
-    ]
+        "existe.", editable=False)
 
-    if identidad.descripcion:
-        # Contexto de negocio SIEMPRE presente (a diferencia del corpus, que
-        # solo se trae si la pregunta matchea por RAG): que servicios y
-        # planes existen de verdad. Sin esto el modelo no tiene forma de
-        # saber si un servicio que preguntan (ej. TV) existe o no, y
-        # improvisa en cualquiera de las dos direcciones.
-        partes.append(f"Que ofrece la empresa: {identidad.descripcion}")
+    # Contexto de negocio SIEMPRE presente (a diferencia del corpus, que solo
+    # se trae si la pregunta matchea por RAG): que servicios y planes existen
+    # de verdad. Sin esto el modelo no tiene forma de saber si un servicio que
+    # preguntan (ej. TV) existe o no, y improvisa en cualquier direccion.
+    agregar("Que ofrece la empresa", AJUSTES,
+            f"Que ofrece la empresa: {identidad.descripcion}"
+            if identidad.descripcion else "")
 
+    # Esta pieza NO la escribe nadie: la decide 'orientado_a'. Es lo que
+    # impide que alguien cree un agente de cara al cliente y se olvide de
+    # decirle que quien escribe es un desconocido hasta verificarse.
     if rol.orientado_a == "cliente_final":
-        partes.append(
+        agregar(
+            "A quien le hablas", GEN,
             "Quien te escribe es el CLIENTE FINAL, en segunda persona, por "
             "un canal como WhatsApp -- no un colaborador interno. Es un "
             "desconocido hasta que su identidad quede verificada por el "
@@ -95,21 +137,25 @@ def construir_system(config, nombre_rol: str) -> str:
             "ni # titulos): este canal no lo renderiza, y quedan simbolos "
             "sueltos a la vista en vez de texto resaltado. Escribi en texto "
             "plano; si hace falta estructurar pasos, usa una lista numerada "
-            "simple (1. 2. 3.) en lineas separadas, nunca asteriscos.")
+            "simple (1. 2. 3.) en lineas separadas, nunca asteriscos.",
+            editable=False)
     else:
-        partes.append(
+        agregar(
+            "A quien le hablas", GEN,
             "Quien te escribe es SIEMPRE un colaborador de la empresa, "
             "nunca el cliente final. Habla del cliente en tercera persona; "
-            "no lo saludes a el, saluda a quien te escribe.")
+            "no lo saludes a el, saluda a quien te escribe.", editable=False)
 
-    if rol.descripcion:
-        partes.append(f"Tu rol especifico: {rol.descripcion}")
+    agregar("Tu rol especifico", "este mismo agente",
+            f"Tu rol especifico: {rol.descripcion}" if rol.descripcion else "")
 
-    if persona.instrucciones_adicionales:
-        partes.append(persona.instrucciones_adicionales)
+    agregar("Instrucciones adicionales", AJUSTES,
+            persona.instrucciones_adicionales)
 
-    if config.seguridad.reglas_absolutas:
-        partes.append("Reglas que no podes romper bajo ninguna circunstancia:\n- "
-                      + "\n- ".join(config.seguridad.reglas_absolutas))
+    agregar("Reglas absolutas",
+            "configuracion del tenant (seguridad.reglas_absolutas)",
+            "Reglas que no podes romper bajo ninguna circunstancia:\n- "
+            + "\n- ".join(config.seguridad.reglas_absolutas)
+            if config.seguridad.reglas_absolutas else "")
 
-    return "\n\n".join(partes)
+    return piezas

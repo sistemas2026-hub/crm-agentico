@@ -183,6 +183,41 @@
             <span><i class="punto" style="background:{COLOR_TIPO.batch}"></i>batch</span>
           </div>
 
+          {#if agente.prompt_piezas?.length}
+            <details class="recibe">
+              <summary>Qué recibe este agente</summary>
+
+              <p class="recibe-nota v2-sub">
+                Las instrucciones que le llegan en cada turno, en orden. No se editan acá: cada
+                bloque dice de dónde sale.
+              </p>
+
+              {#each agente.prompt_piezas as pieza (pieza.titulo)}
+                <div class="pieza">
+                  <div class="pieza-cabeza">
+                    <span class="pieza-titulo">{pieza.titulo}</span>
+                    <span class="pieza-origen" class:fijo={!pieza.editable}>{pieza.origen}</span>
+                  </div>
+                  <pre class="pieza-texto">{pieza.texto}</pre>
+                </div>
+              {/each}
+
+              <!--
+                El prompt no es todo lo que recibe: tambien van las descripciones de
+                las herramientas de arriba (que cargan bastante comportamiento) y el
+                contexto del corpus, que cambia con cada pregunta. Sin este aviso,
+                alguien podria depurar mirando solo esta lista y concluir que el
+                agente "no tiene" una instruccion que en realidad le llega por otro
+                lado.
+              -->
+              <p class="recibe-nota v2-sub">
+                Además de esto recibe la descripción de cada herramienta de arriba, y —cuando la
+                pregunta coincide con el corpus— los fragmentos del manual, que cambian en cada
+                turno.
+              </p>
+            </details>
+          {/if}
+
           {#if esAdmin}
             <div class="acciones-tarjeta">
               <button class="v2-btn v2-btn-sm" type="button" onclick={() => abrirEditar(agente)}>
@@ -315,5 +350,57 @@
     align-items: center;
     gap: 6px;
     flex-wrap: wrap;
+  }
+
+  .recibe {
+    border-top: 1px solid var(--v2-border, #e5e5e5);
+    padding-top: 8px;
+  }
+  .recibe summary {
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    user-select: none;
+  }
+  .recibe-nota {
+    font-size: 11.5px;
+    margin: 8px 0;
+  }
+  .pieza {
+    margin-bottom: 10px;
+  }
+  .pieza-cabeza {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .pieza-titulo {
+    font-size: 11.5px;
+    font-weight: 600;
+  }
+  .pieza-origen {
+    font-size: 10.5px;
+    color: var(--v2-muted, #888);
+  }
+  /* Lo generado o fijo se distingue de lo editable: si no, alguien busca
+     donde cambiar un bloque que nadie escribio. */
+  .pieza-origen.fijo {
+    font-style: italic;
+  }
+  .pieza-texto {
+    margin: 3px 0 0;
+    font-size: 11.5px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: inherit;
+    color: #4b5563;
+    background: var(--v2-bg-subtle, #fafafa);
+    border-radius: 6px;
+    padding: 7px 9px;
+    max-height: 190px;
+    overflow-y: auto;
   }
 </style>
