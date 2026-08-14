@@ -13,3 +13,27 @@ if [ -n "$CAMBIADOS" ]; then
     echo "================================================================"
     echo ""
 fi
+
+# La configuracion del tenant es distinta al resto del repo: NO alcanza con
+# tener el archivo actualizado. Vive en la base (asistente.tenant_config) y el
+# motor lee de ahi, no del YAML -- asi que un pull que la trae cambiada deja tu
+# entorno corriendo la version VIEJA hasta que la cargues a mano. Es
+# exactamente el desfase que hizo que produccion quedara sin dos agentes
+# (agosto 2026): el YAML los tenia, la base no.
+CONFIG=$(git diff --name-only ORIG_HEAD HEAD -- 'tenants/*.config.yaml' 2>/dev/null)
+
+if [ -n "$CONFIG" ]; then
+    echo ""
+    echo "================================================================"
+    echo "  Cambio la configuracion de un tenant:"
+    echo "$CONFIG" | sed 's/^/    - /'
+    echo ""
+    echo "  Esto NO se aplica solo. Para que tu entorno use lo que llego:"
+    echo "$CONFIG" | sed 's|^|    py -3.13 cli/cargar_config.py |'
+    echo ""
+    echo "  Si el comando se NIEGA a cargar, no uses --forzar a ciegas: hay"
+    echo "  algo en tu base que el archivo no trae (tipico: un agente creado"
+    echo "  desde la interfaz). Exporta primero, revisa el diff, y recien ahi."
+    echo "================================================================"
+    echo ""
+fi
