@@ -37,6 +37,7 @@ from flask import Flask, jsonify, request
 
 from nucleo.canales import media, whatsapp
 from nucleo.config import editor, fuente
+from nucleo.config.fusion import fusionar_roles, modelo_fusionado
 from nucleo.ingesta import corpus as ingesta
 from nucleo.ingesta.docx import procesar
 from nucleo.modelo import motor
@@ -265,23 +266,71 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
 
 @app.post("/chat")
 def chat():
+    """
+    Un turno. El agente se puede indicar de DOS formas, y son excluyentes:
+
+      rol         el nombre, tal cual. Lo usa el simulador de WhatsApp, que
+                  necesita fijar 'cliente_final' a proposito para probar ese
+                  canal, y cualquier llamador interno que ya sepa cual quiere.
+      profile_id  el perfil del CRM de quien pregunta. El motor resuelve que
+                  agentes tiene asignados (supabase/15_agentes_por_colaborador)
+                  y le arma la union: un colaborador con Soporte y Facturacion
+                  puede preguntar por el ticket Y la factura en un solo turno,
+                  sin elegir a cual agente le habla.
+    """
     cuerpo = request.get_json(force=True, silent=True) or {}
     tenant = cuerpo.get("tenant")
     rol = cuerpo.get("rol")
+    profile_id = cuerpo.get("profile_id")
     id_sesion = cuerpo.get("identificador_sesion")
     mensaje = cuerpo.get("mensaje")
     canal = cuerpo.get("canal", "api")
 
     faltantes = [nombre for nombre, valor in
-                {"tenant": tenant, "rol": rol, "identificador_sesion": id_sesion,
+                {"tenant": tenant, "identificador_sesion": id_sesion,
                  "mensaje": mensaje}.items() if not valor]
     if faltantes:
         return jsonify({"error": f"Faltan campos: {', '.join(faltantes)}"}), 400
+    if not rol and not profile_id:
+        return jsonify({"error": "Falta 'rol' o 'profile_id'."}), 400
 
     try:
         config = _config_de(tenant)
     except FileNotFoundError:
         return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+
+    if profile_id:
+        try:
+            asignados = persistencia.agentes_de_colaborador(tenant, profile_id)
+        except Exception as e:
+            print(f"[agentes] fallo al resolver los de '{profile_id}': "
+                  f"{type(e).__name__}: {e}")
+            return jsonify({"error": "No se pudieron resolver los agentes."}), 500
+        # Fail-closed: sin asignacion no se atiende. Caer a un agente por
+        # defecto seria darle a alguien un acceso que nadie le concedio.
+        if not asignados:
+            return jsonify({"error": "Todavia no tenes ningun agente asignado. "
+                                     "Pedile a un administrador que te asigne "
+                                     "al menos uno."}), 403
+        try:
+            rol, rol_fusionado = fusionar_roles(config, asignados)
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+        # Copia por peticion, no se muta el config cacheado: el rol fusionado
+        # existe solo para este turno. Si se registrara en el compartido,
+        # apareceria como un agente mas en GET /agentes y en el editor.
+        #
+        # El override de modelo viaja con el: 'llm.overrides' se indexa por
+        # nombre de rol, y el fusionado tiene un nombre que no figura ahi.
+        # Sin esto cae en 'modelo_por_defecto', que sigue siendo el modelo
+        # local -- y ese ya no corre en ningun lado.
+        llm = config.llm
+        modelo = modelo_fusionado(config, asignados)
+        if modelo:
+            llm = llm.model_copy(
+                update={"overrides": {**llm.overrides, f"rol:{rol}": modelo}})
+        config = config.model_copy(
+            update={"roles": {**config.roles, rol: rol_fusionado}, "llm": llm})
 
     try:
         salida = atender_turno(config, tenant, rol, id_sesion, mensaje, canal)
@@ -336,6 +385,87 @@ def agentes_catalogo():
         "herramientas": editor.catalogo_herramientas(config),
         "roles_existentes": sorted(config.roles),
     })
+
+
+# -----------------------------------------------------------------------------
+#  QUE AGENTES PUEDE USAR CADA COLABORADOR
+# -----------------------------------------------------------------------------
+#  Solo agentes INTERNOS: el de cliente final no se le asigna a un empleado.
+#  Ese atiende a un desconocido y verifica identidad; los internos dan por
+#  hecho que quien escribe ya esta autorizado y pueden consultar a CUALQUIER
+#  cliente. Mezclarlos seria abrirle a una persona datos de terceros por la
+#  puerta de al lado -- por eso se filtra aca y se vuelve a validar al guardar.
+
+def _agentes_internos(config) -> list[str]:
+    return sorted(n for n, r in config.roles.items()
+                  if r.orientado_a == "colaborador")
+
+
+@app.get("/agentes/asignaciones")
+def agentes_asignaciones():
+    """
+    {profile_id: [agente, ...]} de todo el tenant, mas la lista de agentes
+    asignables. La pantalla cruza esto contra los usuarios del CRM, que los
+    trae de la API de Django -- el motor no lee las tablas del CRM.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+
+    try:
+        asignaciones = persistencia.asignaciones_de_agentes(tenant)
+    except Exception as e:
+        print(f"[agentes] fallo al listar asignaciones: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudieron leer las asignaciones."}), 500
+
+    return jsonify({"asignaciones": asignaciones,
+                    "agentes": _agentes_internos(config)})
+
+
+@app.put("/agentes/asignaciones/<profile_id>")
+def agentes_asignar(profile_id):
+    """
+    Deja a este colaborador con EXACTAMENTE los agentes de 'roles'. Una lista
+    vacia es valida y significa quitarle el acceso: sin agentes, /chat le
+    responde 403 en vez de caer a uno por defecto.
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+
+    roles = cuerpo.get("roles")
+    if not isinstance(roles, list):
+        return jsonify({"error": "'roles' tiene que ser una lista."}), 400
+
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+
+    permitidos = set(_agentes_internos(config))
+    invalidos = [r for r in roles if r not in permitidos]
+    if invalidos:
+        # Se nombra el motivo probable en vez de solo "invalido": si alguien
+        # intenta asignar el agente de cliente final, el error tiene que
+        # explicar por que no se puede, no parecer un typo.
+        return jsonify({"error": (
+            f"No se puede asignar: {', '.join(sorted(invalidos))}. "
+            f"Solo agentes internos ({', '.join(sorted(permitidos))}) -- el "
+            f"agente que atiende al cliente final no se le asigna a un "
+            f"colaborador.")}), 400
+
+    try:
+        guardados = persistencia.asignar_agentes(tenant, profile_id, roles)
+    except Exception as e:
+        print(f"[agentes] fallo al asignar a '{profile_id}': {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudieron guardar las asignaciones."}), 500
+
+    return jsonify({"profile_id": profile_id, "roles": guardados})
 
 
 @app.post("/agentes")

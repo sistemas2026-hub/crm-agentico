@@ -88,6 +88,7 @@
   {/snippet}
   {#snippet actions()}
     {#if esAdmin}
+      <a class="v2-btn v2-btn-sm" href="/agentes/asignaciones">Quién usa cada agente</a>
       <Button type="button" onclick={abrirCrear}>Nuevo agente</Button>
     {/if}
   {/snippet}

@@ -396,6 +396,69 @@ def agregar_mensaje_humano(tenant: str, conversation_id: str,
         return {"canal": fila["canal"], "usuario_externo": fila["usuario_externo"]}
 
 
+def agentes_de_colaborador(tenant: str, profile_id: str) -> list[str]:
+    """
+    Que agentes tiene asignados este empleado del CRM (ver
+    supabase/15_agentes_por_colaborador.sql). Lista vacia = ninguno, y quien
+    llama debe tratarlo como "no accede", nunca como "accede a todos":
+    fail-closed, igual que roles_permitidos en el corpus.
+
+    'profile_id' es el perfil del CRM (public.profile), no un cliente final
+    -- las filas de clientes lo tienen en NULL y no aparecen aca.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select rol from asistente.tenant_users
+               where organization_id = %s and profile_id = %s and activo
+               order by rol""",
+            (org, profile_id))
+        return [f["rol"] for f in cur.fetchall()]
+
+
+def asignaciones_de_agentes(tenant: str) -> dict[str, list[str]]:
+    """
+    Todas las asignaciones del tenant: {profile_id: [agente, ...]}.
+
+    Para la pantalla de asignacion, que cruza esto contra la lista de usuarios
+    del CRM (esa la trae el frontend de la API de Django, no de aca: el motor
+    no lee las tablas del CRM).
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select profile_id, rol from asistente.tenant_users
+               where organization_id = %s and profile_id is not null and activo
+               order by profile_id, rol""",
+            (org,))
+        salida: dict[str, list[str]] = {}
+        for f in cur.fetchall():
+            salida.setdefault(str(f["profile_id"]), []).append(f["rol"])
+        return salida
+
+
+def asignar_agentes(tenant: str, profile_id: str, roles: list[str]) -> list[str]:
+    """
+    Deja a este colaborador con EXACTAMENTE los agentes de 'roles'.
+
+    Borra y reinserta en una sola transaccion en vez de calcular el delta: la
+    pantalla manda el estado completo de los checkboxes, asi que el delta seria
+    reconstruir lo que el llamador ya sabe. Y borrar de verdad (no 'activo =
+    false') mantiene la tabla legible -- una asignacion quitada no es historia
+    que haga falta conservar, a diferencia de una conversacion.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """delete from asistente.tenant_users
+               where organization_id = %s and profile_id = %s""",
+            (org, profile_id))
+        for rol in roles:
+            cur.execute(
+                """insert into asistente.tenant_users
+                     (organization_id, profile_id, rol)
+                   values (%s, %s, %s)""",
+                (org, profile_id, rol))
+        return list(roles)
+
+
 def dar_de_baja(tenant: str, usuario_externo: str, canal: str = "whatsapp",
                 motivo: str | None = None) -> None:
     """Registra que este numero no quiere mensajes proactivos. Idempotente:
