@@ -189,14 +189,29 @@ roles:
       - Nunca "espera" sin explicar por que -> "dejame revisar tu cuenta un momento".
 
       Lo que resolves VOS, al instante (protocolo de atencion al cliente, S6):
-      consultas de saldo, estado de factura y estado del servicio.
+      consultas de saldo, estado de factura y estado del servicio. Tambien un
+      primer diagnostico cuando el cliente dice que no tiene internet o
+      perdio la señal: usa ping_cliente y segui su protocolo (si responde,
+      la causa no es de red -- revisa plan/facturacion o escala para
+      revision mas profunda; si no responde o responde poco, guialo con las
+      luces del router y un reinicio de 30 segundos, siguiendo el
+      protocolo de esa herramienta).
 
-      Lo que NO resolves y derivas a un colaborador humano: fallas del
-      servicio, traslados, reconexion, instalaciones nuevas, reclamos
-      formales, y cambio de contrasena (el protocolo dice que esto se
-      resuelve al instante, pero todavia no existe esa herramienta aqui --
-      hasta que exista, se deriva). Al derivar, decile al cliente que un
-      colaborador humano sigue el caso.
+      Una factura PENDIENTE no corta el servicio por si sola: solo lo afecta
+      a partir de la FECHA DE CORTE. Compara esa fecha con la de hoy antes de
+      mencionarla. Si el corte todavia no llego, decilo asi ("tenes una
+      factura pendiente, con corte el X, o sea que todavia no te afecta el
+      servicio") y segui buscando la causa por otro lado. Nunca insinues que
+      una deuda esta limitando el servicio cuando la fecha de corte es
+      futura: es falso y el cliente lo sabe.
+
+      Lo que NO resolves y derivas a un colaborador humano: si despues de
+      usar ping_cliente y el reinicio de 30 segundos el cliente sigue sin
+      servicio, deriva. Tambien derivas siempre traslados, reconexion,
+      instalaciones nuevas, reclamos formales, y cambio de contrasena (el
+      protocolo dice que esto se resuelve al instante, pero todavia no
+      existe esa herramienta aqui -- hasta que exista, se deriva). Al
+      derivar, decile al cliente que un colaborador humano sigue el caso.
 
       Verificacion de identidad: normalmente ya queda resuelta por el numero
       de WhatsApp desde el que escribe (no tenes que pedir nada). Si el
@@ -400,9 +415,23 @@ rag:
 #    de produccion: modelo local en caliente, ~22s hasta la primera palabra
 #    (7.6 tok/s); DeepSeek, ~8s (115 tok/s). Calidad de texto equivalente.
 llm:
-  proveedor: ollama
-  modelo_por_defecto: qwen3:30b-a3b-q4_K_M
-  modelo_informes: qwen3:30b-a3b-q4_K_M
+  # DeepSeek tambien POR DEFECTO, no solo por override (agosto 2026). Antes el
+  # default era el modelo local y los overrides por rol eran la excepcion que
+  # salia a la nube; ya no hay modelo local en ningun lado -- se saco el
+  # contenedor de Ollama del VPS al pasar los embeddings a OpenAI, y era su
+  # unico consumidor.
+  #
+  # Dejarlo apuntando al local era una mina: cualquier rol SIN override
+  # explicito caia ahi y el turno moria con 'model requires more system
+  # memory'. Paso de verdad con el rol fusionado de un colaborador
+  # (nucleo/config/fusion.py), que por nombre no matcheaba ningun override.
+  #
+  # La base legal es la misma que ya cubria los overrides: la autorizacion de
+  # tratamiento que firma el cliente cubre transferencia internacional (Ley
+  # 1581 art. 26, ver PRD RNF-01). Lo que cambia es que el local ya no es el
+  # resguardo -- no hay resguardo, y por eso conviene que este escrito.
+  modelo_por_defecto: deepseek:deepseek-v4-flash
+  modelo_informes: deepseek:deepseek-v4-flash
   temperatura: 0.1
   max_tokens: 1024
   # Cada iteracion cuesta un TURNO COMPLETO (~43 s local, ~5 s API), no
@@ -411,20 +440,14 @@ llm:
   # El razonamiento se descarta del historial: reenviarlo acumula 2.500-5.400
   # caracteres inutiles por turno.
   descartar_thinking: true
-  # DeepSeek para TODOS los roles, incluidos los que llevan PII (soporte,
-  # facturacion, cliente_final). Aprobado: la autorizacion de tratamiento que
-  # firma el cliente cubre transferencia internacional de datos (Ley 1581,
-  # art. 26). Sin esa cobertura, el override tendria que limitarse a
-  # 'rol:administracion' y al RAG documental, que no llevan PII.
+  # Solo lo que se APARTA del default de arriba. Los cuatro roles reales ya no
+  # figuran aca: todos usaban deepseek-v4-flash, que ahora es el default, asi
+  # que repetirlos era ruido que se desincroniza en el primer cambio.
   #
-  # Se enruta TODO por rol y no por canal: mas rapido y mas barato en todos
-  # lados, y la base legal ya cubre la transferencia, asi que no hace falta
-  # mantener el local como opcion mas segura para ningun rol.
+  # (La base legal para que roles con PII -soporte, facturacion,
+  # cliente_final- salgan a una API externa esta explicada arriba, junto al
+  # modelo por defecto, que es donde manda ahora.)
   overrides:
-    'rol:soporte': deepseek:deepseek-v4-flash
-    'rol:facturacion': deepseek:deepseek-v4-flash
-    'rol:administracion': deepseek:deepseek-v4-flash
-    'rol:cliente_final': deepseek:deepseek-v4-flash
     # 'rol:supervisor' es una clave VIRTUAL (nucleo/seguimiento/supervisor.py):
     # no es un rol real, no aparece arriba en 'roles'. Revisa cada conversacion
     # cerrada en segundo plano -- sin la urgencia de latencia de responderle a
@@ -433,9 +456,10 @@ llm:
     # prueba con Sonnet 5 (mas barato que Opus 5) ahora que la revision se
     # apoya en el manual real via RAG y no solo en el criterio del modelo.
     'rol:supervisor': anthropic:claude-sonnet-5
-  # Si algun rol necesita quedarse en local (ej. si se restringe la
-  # autorizacion mas adelante), se quita su linea de aqui: el modelo_por_
-  # defecto de arriba sigue siendo local y actua como resguardo.
+  # Si algun rol necesitara quedarse en un modelo local (ej. si se restringe
+  # la autorizacion mas adelante), se le agrega su linea aqui -- pero hoy NO
+  # hay modelo local corriendo en ningun lado, asi que primero habria que
+  # volver a levantar ese servicio.
 
 # -----------------------------------------------------------------------------
 #  HERRAMIENTAS
@@ -563,11 +587,29 @@ herramientas:
     auth_ref: WISPHUB_API_KEY
     auth_esquema: Api-Key
     # Fijos, nunca decididos por el modelo (ver argumentos_fijos en
-    # schema.py). arp_ping=true: funciona aunque el cliente este detras de
-    # firewall, pero exige 'interfaz' -- por eso se inyecta interfaz_lan.
+    # schema.py).
+    #
+    # arp_ping en FALSE. Estuvo en true, y rompia el diagnostico de cualquier
+    # cliente sin 'interfaz_lan' -- que son muchos: ese campo vacio es NORMAL,
+    # se llena en un paso posterior de sincronizacion del router (ver la skill
+    # wisphub-api, verificado contra 15 clientes reales).
+    #
+    # Y no fallaba de frente, que hubiera sido preferible. Medido contra la
+    # API el 14/08/2026 sobre id_servicio=6580:
+    #
+    #   arp_ping=true  sin interfaz -> HTTP 202, tarea SUCCESS, y de resultado
+    #                                  el texto 'Error "failure: interface
+    #                                  needs to be specified for arp ping"'.
+    #   arp_ping=false sin interfaz -> el ping real: received 1,
+    #                                  packet-loss 0, avg-rtt 1ms401us.
+    #
+    # Un error con forma de exito, que el modelo tenia que interpretar solo.
+    # Lo que se pierde: arp_ping alcanza equipos detras de un firewall, y sin
+    # el esos figuran como que no responden. Es un falso negativo acotado y
+    # visible; lo otro era basura silenciosa.
     argumentos_fijos:
       pings: 3
-      arp_ping: true
+      arp_ping: false
     inyectar_sesion:
       id_servicio: id_cliente
       interfaz: interfaz_lan
@@ -923,7 +965,15 @@ canales:
     # Poner en true EXIGE los cuatro refs indispensables (el validador falla
     # si falta alguno): mejor que arrancar bien y romperse con el primer
     # mensaje de un cliente real.
-    activo: false           # se activa cuando el piloto interno pase la evaluacion
+    # ACTIVO desde agosto 2026: el canal atiende clientes reales. Estaba en
+    # false porque el piloto todavia no habia arrancado, y se activo desde
+    # Ajustes -> Canales -> WhatsApp, que escribe en la base.
+    #
+    # Quedo en false aca mientras tanto, y eso tumbo el canal: un
+    # 'cargar_config --forzar' lo devolvio a false y el webhook empezo a
+    # responder 401 a Meta ("El canal de WhatsApp no esta activo"). El valor
+    # de este archivo tiene que seguir al de produccion, no al reves.
+    activo: true
     phone_number_id_ref: WHATSAPP_PHONE_NUMBER_ID
     token_ref: WHATSAPP_TOKEN
     waba_id_ref: WHATSAPP_WABA_ID
@@ -933,7 +983,8 @@ canales:
     # comportamiento del canal sin que alguien lo decida.
     version_api: v23.0
     # Solo para mostrarlo en los ajustes. No participa de ninguna llamada.
-    numero_visible: null
+    # No es un secreto: es el numero publico al que le escriben los clientes.
+    numero_visible: '+573208633423'
     # clave interna -> nombre aprobado en Meta. La indireccion existe para que
     # el codigo diga 'aviso_mora' y cada empresa lo mapee al nombre que
     # registro. Se llenan cuando Meta apruebe las plantillas; comprobar el

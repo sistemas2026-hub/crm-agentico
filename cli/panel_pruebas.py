@@ -38,7 +38,7 @@ load_dotenv(override=True)
 
 from nucleo.config import cargar_config
 from nucleo.modelo import motor
-from nucleo.seguridad.verificacion import Sesion, verificar_por_telefono
+from nucleo.seguridad.verificacion import Sesion
 
 RUTA_CONFIG = "tenants/rapilink.config.yaml"
 USAR_WISPHUB_REAL = os.environ.get("WISPHUB_MODO_REAL", "false").strip().lower() == "true"
@@ -146,17 +146,19 @@ st.caption(f"{config.identidad.nombre_comercial or config.identidad.nombre_legal
 with st.sidebar:
     st.header("Sesion")
     telefono = st.text_input("Numero que simula escribir", value="3001234567")
-    st.caption("Registrado en el directorio de prueba: 3001234567 -> "
-              "id_cliente 4521. Cualquier otro numero queda sin verificar.")
+    st.caption("La sesion arranca sin verificar: el asistente te va a pedir "
+              "la cedula y confirmar el nombre antes de mostrar datos.")
     if st.button("Reiniciar conversacion", use_container_width=True):
         st.session_state.clear()
         st.rerun()
 
 if "sesion" not in st.session_state or st.session_state.get("telefono_actual") != telefono:
-    _sesion = Sesion(identificador_canal=telefono)
-    _sesion = verificar_por_telefono(_sesion, config.autenticacion,
-                                     buscar_clientes_por_telefono, telefono)
-    st.session_state["sesion"] = _sesion
+    # Arranca SIN verificar, igual que en produccion: la identidad la resuelve
+    # el modelo pidiendo la cedula y confirmando el nombre. Antes esto llamaba
+    # a verificar_por_telefono(), eliminada en agosto de 2026 -- nunca tuvo un
+    # llamador en el motor y Meta dejo de mandar el telefono en muchas
+    # entregas (manda un BSUID, que no identifica contra la base del ISP).
+    st.session_state["sesion"] = Sesion(identificador_canal=telefono)
     st.session_state["telefono_actual"] = telefono
     st.session_state["historial"] = []
 

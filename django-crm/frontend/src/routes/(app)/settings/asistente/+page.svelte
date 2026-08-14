@@ -29,6 +29,15 @@
   let identidad = $derived(data.config?.identidad);
   let plazoVisitaTecnica = $derived(data.config?.plazo_visita_tecnica);
 
+  // Sin p (el motor no responde): ni un formulario vacio ni una pantalla en
+  // blanco. Si no hay valores que mostrar, ofrecer campos para llenar
+  // terminaria en un guardado que falla despues de escribir todo.
+  //
+  // Documentado aca y no como comentario HTML dentro del {#if !p} de abajo:
+  // un comentario ahi, como primer nodo de esa rama, choca con los
+  // marcadores de hidratacion de Svelte 5 (mismo bug que en agentes/
+  // +page.svelte) y produce 'hydration_mismatch' en cada carga.
+
   const TONOS = [
     ['cercano', 'Cercano', 'Trata de usted pero sin formalismos. El que viene por defecto.'],
     ['formal', 'Formal', 'Mas distante y cuidado. Para un cliente que espera trato institucional.'],
@@ -69,11 +78,6 @@
 <div class="v2-scroll">
   <div class="v2-pad" style="padding-top:16px;padding-bottom:32px">
     {#if !p}
-      <!--
-        Ni un formulario vacio ni una pantalla en blanco. Si el motor no
-        contesta no hay valores que mostrar, y ofrecer campos para llenar
-        terminaria en un guardado que falla despues de escribir todo.
-      -->
       <div class="v2-card" style="padding:20px 22px;max-width:60ch">
         <b style="font-size:13px">No se pudo leer la configuracion del asistente</b>
         <p class="v2-sub" style="font-size:12.5px;margin:8px 0 0;line-height:1.5">

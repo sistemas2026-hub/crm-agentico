@@ -229,6 +229,33 @@ por API. Una herramienta de creacion NO necesita enviarlo.
 
 ## Trampas que ya costaron tiempo
 
+**Un campo opcional puede aceptar AUSENTE y rechazar `null`.** Verificado en
+`/api/clientes/{id}/ping/` (agosto 2026): `interfaz` omitido responde 202, e
+`interfaz: ""` tambien, pero `{"interfaz": null}` devuelve
+`400 {"interfaz":["Este campo no puede ser nulo."]}`. La diferencia importa
+porque un valor vacio en la sesion se convierte en `None` con facilidad
+(`x.get(...) or None`) y termina viajando como `null` en el JSON. Al inyectar
+valores de sesion, **omitir la clave** en vez de mandarla nula.
+
+**Una tarea asincrona puede decir SUCCESS y traer un error de texto como
+resultado.** El caso peor de esta API hasta ahora, porque no hay como
+detectarlo mirando codigos de estado. En `/api/clientes/{id}/ping/` con
+`arp_ping=true` y sin `interfaz`:
+
+```
+POST  -> HTTP 202  {"task_id": "..."}
+GET /api/tasks/{id}/  ->  status: SUCCESS
+    result: [{'ping-1': '('Error "failure: interface needs to be specified
+              for arp ping" executing command /ping =arp-ping=yes ...'}]
+```
+
+HTTP correcto, tarea exitosa, y adentro un error en prosa donde deberia haber
+metricas (`received`, `packet-loss`, `avg-rtt`). Con `arp_ping=false` la misma
+llamada devuelve el ping de verdad. **`arp_ping` exige `interfaz`**, y como
+`interfaz_lan` vacio es normal (ver mas arriba), dejarlo en true rompe el
+diagnostico de muchos clientes sin que nada lo denuncie.
+
+
 **Los filtros de estado son NUMERICOS.** `?estado=Nuevo` devuelve 0 resultados
 sin error alguno. Parece "no hay tickets nuevos"; en realidad la consulta no
 existe.
@@ -245,6 +272,18 @@ para comparar nada. En facturas el recorte son ~2 ultimos meses de emision.
 **Los rangos de fecha tienen tope.** Facturas corta en 3 meses, tickets en 2.
 Mas alla devuelve HTTP 400. Se valida ANTES de llamar, o el asesor ve un
 "fallo al llamar a WispHub" sin saber por que.
+
+**`sn_onu` solo lo tiene el 68% de los clientes activos.** Medido el 14/08/2026
+sobre los 4.163 activos (paginacion verificada: 4.163 filas, 4.163 ids
+distintos): 2.864 traen serial, **1.299 lo tienen vacio**. Una primera muestra
+de las 12 primeras paginas daba 75% — el sesgo de las primeras paginas es real,
+hay que recorrer todo.
+
+Importa porque `sn_onu` es la llave contra SmartOLT (y contra cualquier sistema
+que indexe por ONU): **1 de cada 3 clientes no se puede diagnosticar por ahi**,
+y una herramienta que lo asuma le falla a un tercio de la base. El formato es
+uniforme: 12 caracteres con prefijo de fabricante (`HWTC*` Huawei, `CDTC*`,
+`DF*`, `DC*`).
 
 **El campo `telefono` guarda varios numeros en uno.** El 55% de los clientes.
 Leerlo como valor unico da 43% de cobertura; extrayendo todos los moviles

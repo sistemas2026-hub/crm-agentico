@@ -439,7 +439,9 @@
       <ArrowLeft size={16} />
     </a>
 
-    {#if esTelefono(conversacion.usuario_externo)}
+    {#if conversacion.nombre_cliente}
+      <Avatar name={conversacion.nombre_cliente} size={32} />
+    {:else if esTelefono(conversacion.usuario_externo)}
       <span class="ident" aria-hidden="true"><Phone size={15} /></span>
     {:else if !conversacion.usuario_externo || esUuid(conversacion.usuario_externo)}
       <span class="ident" aria-hidden="true"><User size={15} /></span>
@@ -448,7 +450,7 @@
     {/if}
 
     <div class="centro-quien">
-      <h2>{quien(conversacion.usuario_externo)}</h2>
+      <h2>{conversacion.nombre_cliente || quien(conversacion.usuario_externo)}</h2>
       <div class="centro-meta">
         <Pill tone={canalTone(conversacion.canal)}>{canalLabel(conversacion.canal)}</Pill>
         <Pill tone={estadoTone(conversacion.estado)}>{conversacion.estado}</Pill>

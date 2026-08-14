@@ -49,7 +49,7 @@ from nucleo.recuperacion.prompt import construir_system
 from nucleo.recuperacion.busqueda import (recuperar, bloque_de_contexto,
                                           registrar_sin_resultados)
 from nucleo.seguridad import listas_blancas
-from nucleo.seguridad.verificacion import nivel_requerido
+from nucleo.seguridad.verificacion import nivel_requerido, es_factor_de_posesion
 
 
 class ErrorMotor(Exception):
@@ -233,11 +233,29 @@ def _ejecutar_confirmacion(sesion, argumentos_modelo: dict) -> dict:
     sesion.verificado = True
     sesion.nivel = max(sesion.nivel, 1)
     sesion.id_cliente = sesion.id_cliente_pendiente
+    sesion.nombre = sesion.nombre_pendiente
     sesion.interfaz_lan = sesion.interfaz_lan_pendiente
     sesion.id_cliente_pendiente = None
     sesion.nombre_pendiente = None
     sesion.interfaz_lan_pendiente = None
-    return {"verificado": True}
+    # Reproducido en vivo (agosto 2026): sin esta instruccion, el modelo a
+    # veces inventaba que "no tenia la herramienta para cerrar la
+    # verificacion por este canal" y escalaba sin necesidad -- pese a que
+    # 'verificado' ya es True en este mismo punto. Es la UNICA rama de este
+    # archivo que dejaba al modelo sin instruccion_interna; el resto (arriba
+    # y en _ejecutar_verificacion) ya la tiene. Se nombran las dos excusas
+    # puntuales que aparecieron en produccion, no solo "ya estas verificado":
+    # negarlas explicitamente es lo que evita que el modelo las repita.
+    return {"verificado": True,
+           "instruccion_interna": "Verificacion CERRADA en este mismo paso, "
+               "sin nada pendiente: no existe ningun paso adicional, ni "
+               "ninguna limitacion de este canal (WhatsApp u otro) que te "
+               "impida seguir. Decile al cliente en una frase breve que ya "
+               "quedo verificado, y en el MISMO mensaje segui de inmediato "
+               "con el problema que te habia contado antes de pedirle la "
+               "cedula, usando las herramientas que tengas para su rol. "
+               "Nunca digas que falta un paso, que el canal no lo permite, "
+               "ni escales a un humano solo por este motivo."}
 
 
 def _ejecutar_tool(herramienta, sesion, argumentos_modelo: dict,
@@ -282,8 +300,25 @@ def _ejecutar_tool(herramienta, sesion, argumentos_modelo: dict,
 
     # El modelo puede proponer estas claves; se sobrescriben siempre con la
     # sesion verificada -- ver el comentario de 'inyectar_sesion' en schema.py.
+    #
+    # Un valor VACIO en la sesion se OMITE, no se manda como null. Un campo
+    # opcional que la API acepta ausente no siempre acepta un nulo explicito,
+    # y ahi la diferencia deja de ser cosmetica: verificado contra WispHub
+    # (agosto 2026), 'interfaz' ausente o '' responde 202, pero
+    # {"interfaz": null} devuelve 400 "Este campo no puede ser nulo". El
+    # sintoma era un cliente al que no se le podia diagnosticar la conexion --
+    # y 'interfaz_lan' vacio es NORMAL, no un dato faltante (ver skill
+    # wisphub-api), asi que le pasaba a muchos.
+    #
+    # Se descarta el vacio y no solo el None: el propio motor ya convierte ''
+    # en None al verificar la identidad, y quien escriba el YAML no deberia
+    # tener que saber cual de las dos formas llega.
     for arg_llamada, atributo_sesion in herramienta.inyectar_sesion.items():
-        argumentos[arg_llamada] = getattr(sesion, atributo_sesion, None)
+        valor = getattr(sesion, atributo_sesion, None)
+        if valor is None or valor == "":
+            argumentos.pop(arg_llamada, None)
+        else:
+            argumentos[arg_llamada] = valor
 
     if herramienta.tipo == "http":
         if herramienta.asincrona:
@@ -325,6 +360,16 @@ def _tool_call_a_dict(nombre: str, argumentos: dict, id_llamada: str) -> dict:
 # llamada a herramienta que no paso por el tool-calling real.
 _RE_FUGA_TOOL_CALL = re.compile(r"<\s*/?\s*｜+[^>]*>")
 
+# Visto en vivo con DeepSeek (agosto 2026): despues de que una herramienta de
+# verificacion devuelve {"verificado": true}, la redaccion final a veces
+# repite el valor crudo del campo -- la burbuja del cliente decia
+# literalmente "true", sin ninguna frase. RF-07 prohibe mostrar el dato
+# crudo; esto es el mismo fail-closed en codigo que _RE_FUGA_TOOL_CALL, para
+# un tipo de fuga distinto (no un token de control, sino el propio valor de
+# un resultado de herramienta sin redactar).
+_RE_RESPUESTA_CRUDA = re.compile(r"^(true|false|null|\d+(\.\d+)?|[\{\[].*[\}\]])$",
+                                 re.IGNORECASE)
+
 
 def _sanitizar(texto: str) -> str:
     limpio = _RE_FUGA_TOOL_CALL.sub("", texto)
@@ -343,11 +388,16 @@ def _redactar(referencia_modelo: str, historial: list[dict], temperatura: float,
     DESPUES de una herramienta real (ej. verificar_identidad_por_cedula), le
     faltaba la misma proteccion -- el cliente se quedaba con una burbuja
     vacia y tenia que escribir de nuevo para obtener respuesta.
+
+    Tambien reintenta si la redaccion es un valor crudo sin frase (ver
+    _RE_RESPUESTA_CRUDA) -- mismo motivo que la burbuja vacia: es una
+    respuesta que no le sirve al cliente, asi que se trata igual, no como un
+    resultado valido que solo hay que sanitizar.
     """
     for _ in range(intentos):
         resp = cliente.chat(referencia_modelo, historial, tools=None, temperatura=temperatura)
         limpio = _sanitizar(resp.contenido)
-        if limpio:
+        if limpio and not _RE_RESPUESTA_CRUDA.match(limpio):
             historial.append({"role": "assistant", "content": limpio})
             return limpio
     historial.append({"role": "assistant", "content": ""})
@@ -420,6 +470,16 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
     referencia_redaccion = config.llm.modelo_redaccion or referencia_decision
 
     nivel_exigido = nivel_requerido(rol_cfg, config.seguridad) if rol_cfg.orientado_a == "cliente_final" else 0
+    # Sin un telefono real de por medio, el identificador del canal (ej. un
+    # BSUID de WhatsApp) no es un factor de posesion -- cualquiera que
+    # escriba desde esa cuenta pasaria la barra igual. Se exige nivel 1 ANTES
+    # de cualquier herramienta, no solo de las marcadas sensibles: es la
+    # unica forma de saber quien es, y sin esto la conversacion queda para
+    # siempre como "sin identificar" en /conversaciones si nunca toca un
+    # recurso protegido.
+    if (rol_cfg.orientado_a == "cliente_final" and sesion is not None
+            and not es_factor_de_posesion(sesion.identificador_canal)):
+        nivel_exigido = max(nivel_exigido, 1)
 
     hubo_llamadas = False
     iteraciones = 0

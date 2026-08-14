@@ -119,6 +119,49 @@ def sesion(tenant: str):
         con.close()
 
 
+def estado_de_conversacion_abierta(tenant: str, canal: str,
+                                   usuario_externo: str) -> dict | None:
+    """
+    Lo que hay que saber de la conversacion ABIERTA de este usuario antes de
+    atenderlo: si ya se escalo a una persona, y a quien se verifico que era.
+
+    Devuelve None si no hay ninguna abierta -- entonces es un contacto nuevo y
+    no hay nada que recordar.
+
+    Existe porque ese estado vivia SOLO en memoria del motor
+    (nucleo/canales/api.py::_sesiones) y se perdia en cada reinicio, con dos
+    consecuencias que el cliente si notaba:
+
+      - Una conversacion escalada volvia a ser atendida por el bot. Se le
+        habia dicho "te paso con un companero" y el bot seguia conversando
+        como si nada. Visto en produccion el 14/08/2026: escalada a las 00:08,
+        contestando de nuevo a las 00:16, 00:25, 00:41...
+      - Habia que pedirle la cedula otra vez. El mismo cliente se verifico
+        tres veces en una tarde.
+
+    Es la MISMA fila que reusa registrar_mensaje ('abierta' mas reciente), asi
+    que lo que se lee aca es lo que despues se va a escribir.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select id, escalada_a_humano, caso_id, id_cliente, nombre_cliente
+               from asistente.conversations
+               where organization_id = %s and canal = %s and usuario_externo = %s
+                 and estado = 'abierta'
+               order by actualizado_en desc limit 1""",
+            (org, canal, usuario_externo))
+        fila = cur.fetchone()
+        if not fila:
+            return None
+        return {
+            "conversation_id": str(fila["id"]),
+            "escalada": bool(fila["escalada_a_humano"]),
+            "caso_id": str(fila["caso_id"]) if fila["caso_id"] else None,
+            "id_cliente": fila["id_cliente"],
+            "nombre_cliente": fila["nombre_cliente"],
+        }
+
+
 def registrar_mensaje(tenant: str, canal: str, usuario_externo: str,
                       rol_efectivo: str, rol: str, contenido: str) -> tuple[str, str]:
     """
@@ -190,11 +233,16 @@ def ultima_actividad(tenant: str, canal: str | None = None) -> list[dict]:
 
     'actualizado_en' viene como datetime con zona horaria, no como texto:
     es timestamptz en la base y quien consume ya no tiene que parsearlo.
+
+    'id_cliente'/'nombre_cliente' (ver supabase/14_identidad_conversacion.sql)
+    son NULL hasta que _ejecutar_confirmacion verifica al cliente -- antes de
+    eso, la unica identidad que hay es 'usuario_externo' (el numero o BSUID
+    crudo del canal).
     """
     columnas = """c.id, c.canal, c.usuario_externo, c.rol_efectivo, c.estado,
                   c.escalada_a_humano, c.necesita_atencion_humana,
                   c.motivo_escalamiento, c.caso_id, c.etiqueta,
-                  c.actualizado_en,
+                  c.actualizado_en, c.id_cliente, c.nombre_cliente,
                   ultimo.contenido as ultimo_mensaje,
                   ultimo.rol       as ultimo_rol,
                   (c.atendida_manual or exists (
@@ -239,7 +287,7 @@ def mensajes_de(tenant: str, conversation_id: str) -> dict:
                       escalada_a_humano, necesita_atencion_humana,
                       motivo_escalamiento, caso_id, etiqueta,
                       actualizado_en, conservar, conservar_motivo, conservar_por,
-                      atendida_manual, atendida_por,
+                      atendida_manual, atendida_por, id_cliente, nombre_cliente,
                       (atendida_manual or exists (
                            select 1 from asistente.messages h
                             where h.conversation_id = conversations.id
@@ -317,6 +365,27 @@ def cerrar_conversacion(tenant: str, conversation_id: str) -> None:
             (org, conversation_id))
 
 
+def identificar_cliente(tenant: str, conversation_id: str,
+                        id_cliente: str, nombre: str | None) -> None:
+    """
+    Guarda a QUIEN corresponde esta conversacion, resuelto por
+    nucleo.modelo.motor._ejecutar_confirmacion -- no el identificador crudo
+    del canal (eso ya vive en usuario_externo), sino el cliente real.
+
+    Se llama en CADA turno una vez verificada la sesion (nucleo/canales/
+    api.py::atender_turno): es un UPDATE idempotente, no hay costo en
+    repetirlo. Antes de esto, Sesion.id_cliente vivia solo en memoria del
+    proceso del motor y se perdia en cada reinicio -- /conversaciones nunca
+    tenia con que mostrar un nombre, solo el BSUID o telefono crudo.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """update asistente.conversations
+               set id_cliente = %s, nombre_cliente = %s
+               where organization_id = %s and id = %s""",
+            (id_cliente, nombre, org, conversation_id))
+
+
 def caso_de_conversacion(tenant: str, conversation_id: str) -> str | None:
     """
     El caso del CRM al que se derivo esta conversacion, o None si no se
@@ -368,6 +437,69 @@ def agregar_mensaje_humano(tenant: str, conversation_id: str,
                where id = %s""",
             (conversation_id,))
         return {"canal": fila["canal"], "usuario_externo": fila["usuario_externo"]}
+
+
+def agentes_de_colaborador(tenant: str, profile_id: str) -> list[str]:
+    """
+    Que agentes tiene asignados este empleado del CRM (ver
+    supabase/15_agentes_por_colaborador.sql). Lista vacia = ninguno, y quien
+    llama debe tratarlo como "no accede", nunca como "accede a todos":
+    fail-closed, igual que roles_permitidos en el corpus.
+
+    'profile_id' es el perfil del CRM (public.profile), no un cliente final
+    -- las filas de clientes lo tienen en NULL y no aparecen aca.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select rol from asistente.tenant_users
+               where organization_id = %s and profile_id = %s and activo
+               order by rol""",
+            (org, profile_id))
+        return [f["rol"] for f in cur.fetchall()]
+
+
+def asignaciones_de_agentes(tenant: str) -> dict[str, list[str]]:
+    """
+    Todas las asignaciones del tenant: {profile_id: [agente, ...]}.
+
+    Para la pantalla de asignacion, que cruza esto contra la lista de usuarios
+    del CRM (esa la trae el frontend de la API de Django, no de aca: el motor
+    no lee las tablas del CRM).
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select profile_id, rol from asistente.tenant_users
+               where organization_id = %s and profile_id is not null and activo
+               order by profile_id, rol""",
+            (org,))
+        salida: dict[str, list[str]] = {}
+        for f in cur.fetchall():
+            salida.setdefault(str(f["profile_id"]), []).append(f["rol"])
+        return salida
+
+
+def asignar_agentes(tenant: str, profile_id: str, roles: list[str]) -> list[str]:
+    """
+    Deja a este colaborador con EXACTAMENTE los agentes de 'roles'.
+
+    Borra y reinserta en una sola transaccion en vez de calcular el delta: la
+    pantalla manda el estado completo de los checkboxes, asi que el delta seria
+    reconstruir lo que el llamador ya sabe. Y borrar de verdad (no 'activo =
+    false') mantiene la tabla legible -- una asignacion quitada no es historia
+    que haga falta conservar, a diferencia de una conversacion.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """delete from asistente.tenant_users
+               where organization_id = %s and profile_id = %s""",
+            (org, profile_id))
+        for rol in roles:
+            cur.execute(
+                """insert into asistente.tenant_users
+                     (organization_id, profile_id, rol)
+                   values (%s, %s, %s)""",
+                (org, profile_id, rol))
+        return list(roles)
 
 
 def dar_de_baja(tenant: str, usuario_externo: str, canal: str = "whatsapp",

@@ -125,25 +125,84 @@ def _organizacion(cur, slug: str, org_id: str | None = None) -> str:
         f"{listado}")
 
 
+# Cada seccion que el editor de la interfaz puede escribir, sacada de las
+# funciones _mutar_* de nucleo/config/editor.py. Si se agrega una alla, va
+# aca: lo que el editor toca y esta lista no cubre, se pisa en silencio.
+#
+# 'herramientas' entra por _mutar_plazo_visita_tecnica, que edita
+# fechas_automaticas de una herramienta puntual -- no es solo catalogo.
+SECCIONES_QUE_EDITA_LA_INTERFAZ = ("roles", "canales", "identidad", "persona",
+                                   "herramientas")
+
+
+def _hojas(valor, prefijo=""):
+    """
+    Aplana a {'a.b.c': valor} para comparar VALOR por VALOR.
+
+    Las LISTAS tambien se recorren, no se tratan como un valor unico: sin eso
+    'herramientas' -que es una lista de 19 diccionarios- se reportaba entera
+    como una sola diferencia de 41 KB. Un aviso que nadie puede leer empuja a
+    usar --forzar sin mirar, que es justo el habito que esta guarda existe
+    para evitar.
+
+    Se indexa por 'nombre' cuando el elemento lo trae: reordenar herramientas
+    en el YAML no deberia aparecer como que cambiaron todas.
+    """
+    if isinstance(valor, dict):
+        salida = {}
+        for clave, sub in valor.items():
+            salida.update(_hojas(sub, f"{prefijo}.{clave}" if prefijo else str(clave)))
+        return salida
+    if isinstance(valor, list):
+        salida = {}
+        for i, sub in enumerate(valor):
+            etiqueta = sub["nombre"] if isinstance(sub, dict) and sub.get("nombre") else i
+            salida.update(_hojas(sub, f"{prefijo}[{etiqueta}]"))
+        return salida
+    return {prefijo: valor}
+
+
+def _corto(valor, tope: int = 70) -> str:
+    """El valor para mostrar en un aviso, acotado. Un prompt de 1.400
+    caracteres impreso entero tapa las otras diferencias de la lista."""
+    texto = repr(valor)
+    return texto if len(texto) <= tope else texto[:tope - 1] + "…"
+
+
 def _lo_que_pisaria(guardado: dict, nuevo: dict) -> list[str]:
     """
     Que se PERDERIA de la base al cargar 'nuevo' encima.
 
-    Solo mira lo que el editor de la interfaz puede escribir -- roles y sus
-    overrides de modelo. Un rol que esta en el archivo y no en la base es una
-    incorporacion, no una perdida, y no se reporta: lo que hay que frenar es
-    borrar el trabajo de otro, no agregar el propio.
+    Compara VALOR por valor, no presencia de claves. Esa distincion costo una
+    caida: al empujar el YAML se comprobo que ninguna clave de la base faltara
+    en el archivo -- y ninguna faltaba-- pero 'canales.whatsapp.activo' estaba
+    en las dos con valores distintos (true en la base, false en el archivo).
+    El canal quedo apagado y el webhook devolvio 401 a Meta hasta que alguien
+    lo noto.
+
+    Un valor que esta en el archivo y no en la base es una incorporacion, no
+    una perdida, y no se reporta: lo que hay que frenar es borrar el trabajo
+    de otro, no agregar el propio.
     """
     lineas: list[str] = []
 
     roles_g = guardado.get("roles") or {}
     roles_n = nuevo.get("roles") or {}
-    for nombre, definicion in roles_g.items():
+    for nombre in roles_g:
         if nombre not in roles_n:
             lineas.append(f"el rol '{nombre}' esta en la base y no en el archivo: "
                           f"se BORRARIA")
-        elif definicion != roles_n[nombre]:
-            lineas.append(f"el rol '{nombre}' es distinto en la base: se PISARIA")
+
+    for seccion in SECCIONES_QUE_EDITA_LA_INTERFAZ:
+        viejo = _hojas(guardado.get(seccion), seccion)
+        nuevo_plano = _hojas(nuevo.get(seccion), seccion)
+        for ruta, valor in viejo.items():
+            # Solo lo que ya existe en el archivo con OTRO valor. Una clave que
+            # el archivo no trae la completa el esquema con su default, y
+            # reportarla seria ruido en cada corrida.
+            if ruta in nuevo_plano and nuevo_plano[ruta] != valor:
+                lineas.append(f"{ruta}: la base dice {_corto(valor)} y el "
+                              f"archivo {_corto(nuevo_plano[ruta])} -- se PISARIA")
 
     ov_g = ((guardado.get("llm") or {}).get("overrides") or {})
     ov_n = ((nuevo.get("llm") or {}).get("overrides") or {})

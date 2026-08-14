@@ -337,6 +337,13 @@ class LLM(Base):
     probablemente abandone. Que la estructura lo contemple desde el diseno
     cuesta cero; agregarlo despues obliga a tocar el motor.
     """
+    # NO SE USA. Se conserva para que las configuraciones ya guardadas en la
+    # base sigan cargando (Base tiene extra='forbid': quitarlo haria fallar la
+    # validacion de cualquier config que todavia lo traiga). Quien decide el
+    # proveedor es el PREFIJO de cada referencia de modelo --
+    # 'deepseek:deepseek-v4-flash' -> deepseek, ver cliente.py::resolver-- y
+    # esta lista ni siquiera incluye a deepseek, asi que nunca pudo expresar
+    # lo que de verdad se estaba usando. No lo pongas en un tenant nuevo.
     proveedor: Literal["ollama", "openai", "anthropic"] = "ollama"
     modelo_por_defecto: str
     # El modelo que ELIGE herramienta y el que REDACTA pueden ser distintos.

@@ -311,6 +311,28 @@ dig +short agent.rapilinksas.co agent-api.rapilinksas.co
 
 ### 5. Después del primer despliegue
 
+**Sincronizar la configuración del tenant. Redesplegar NO la actualiza.** El motor lee la configuración de `asistente.tenant_config`, no del YAML del repo: el contenedor puede tener código nuevo y seguir corriendo con roles, herramientas y modelos viejos. Nada avisa — el asistente contesta igual, solo que con menos herramientas de las que el repo cree que tiene.
+
+```
+py -3.13 cli/cargar_config.py --ver rapilink        # que hay hoy en la base
+py -3.13 cli/cargar_config.py tenants/rapilink.config.yaml
+```
+
+⚠️ **Esto ya causó un bug que costó medio día.** En agosto 2026 la base estaba en v14 y le faltaba `confirmar_identidad` en el rol `cliente_final`. El síntoma: un cliente confirmaba su identidad por WhatsApp y el bot respondía *"no tengo la herramienta para cerrar ese paso"* y escalaba a un humano. Se persiguió como un problema de prompt —el modelo **decía la verdad**, no alucinaba: esa herramienta no existía en la configuración que él veía—. Comparar el YAML contra la base habría dado la respuesta en un minuto.
+
+La carga **se niega** a pisar roles que solo existan en la base y nombra cuál (los roles también se editan desde `/agentes`, y esas ediciones viven ahí). Si aparece esa negativa, hay dos caminos, y hay que elegir a conciencia:
+
+```
+py -3.13 cli/cargar_config.py --exportar rapilink            # la base gana: baja al YAML
+py -3.13 cli/cargar_config.py tenants/rapilink.config.yaml --forzar   # el YAML gana
+```
+
+Antes de `--forzar`, guardá la configuración vigente — es el único respaldo que vas a tener:
+
+```
+py -3.13 cli/cargar_config.py --ver rapilink > respaldo_config.txt
+```
+
 **Cargar el corpus.** A diferencia de Ollama, la API de OpenAI no necesita bajar ningún modelo — con `OPENAI_API_KEY` puesta (ver Variables) alcanza con correr, desde cualquier máquina con el `.env` apuntando a la base real:
 
 ```
@@ -445,6 +467,14 @@ Dos cosas que se deciden junto con eso:
 ## Diagnóstico
 
 Errores que ya costaron tiempo una vez.
+
+**El asistente dice que no tiene una herramienta que SÍ está en el YAML.** No es el modelo alucinando: casi seguro está diciendo la verdad sobre la configuración que él ve. El motor lee de `asistente.tenant_config`, no del repo, y redesplegar no la sincroniza. Antes de tocar prompts, comparar:
+
+```
+py -3.13 cli/cargar_config.py --ver rapilink
+```
+
+Si al rol le faltan herramientas que el YAML sí declara, la cura es `cli/cargar_config.py` (ver §5), no reescribir el prompt. Pasó exactamente así con `confirmar_identidad` en agosto 2026 — ver la advertencia de esa sección.
 
 **Un servicio del compose no resuelve el nombre de otro** (`Temporary failure in name resolution`). Se quedó sin la red `default`, que es por la que los servicios se encuentran por nombre. Pasó con el motor: quedó solo en `dokploy-network` y dejó de ver a `ollama` (el servicio que vectorizaba el corpus antes de pasar a la API de OpenAI, agosto 2026 — ya no existe, pero la lección de red vale igual para cualquier servicio futuro), así que el RAG se apagó. No rompía el turno —`recuperar()` atrapa el error a propósito, porque peor es no atender— así que el asistente siguió contestando, solo que sin la documentación interna, y se notó días después.
 

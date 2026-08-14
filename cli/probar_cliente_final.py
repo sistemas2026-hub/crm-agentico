@@ -34,7 +34,7 @@ load_dotenv(override=True)
 
 from nucleo.config import cargar_config
 from nucleo.modelo import motor
-from nucleo.seguridad.verificacion import Sesion, verificar_por_telefono
+from nucleo.seguridad.verificacion import Sesion
 
 RUTA_CONFIG = "tenants/rapilink.config.yaml"
 
@@ -82,18 +82,19 @@ if __name__ == "__main__":
         "no registrado: probar con otro cualquiera]: "
     ).strip() or "3001234567"
 
+    # La sesion arranca SIN verificar, igual que en produccion. Antes esto
+    # llamaba a verificar_por_telefono() para resolver la identidad contra el
+    # numero: esa funcion se elimino en agosto de 2026 porque nunca tuvo un
+    # llamador real en el motor -- describia un diseño que no era el que
+    # corria-- y porque Meta dejo de mandar el telefono en muchas entregas
+    # (manda un BSUID, que no identifica a nadie contra la base del ISP).
+    #
+    # La identidad hoy la resuelve el MODELO pidiendo la cedula y confirmando
+    # el nombre (motor.py::_ejecutar_verificacion / _ejecutar_confirmacion).
+    # Esta prueba ahora ejercita ese camino de verdad, que es el que importa.
     sesion = Sesion(identificador_canal=telefono)
-    sesion = verificar_por_telefono(sesion, config.autenticacion,
-                                    _buscar_clientes_por_telefono, telefono)
-
-    if sesion.verificado:
-        print(f"  [verificado -> id_cliente={sesion.id_cliente}]")
-    elif sesion.candidatos:
-        print(f"  [numero ambiguo, candidatos: {sesion.candidatos} "
-              f"-- desambiguacion no cubierta en esta prueba]")
-    else:
-        print("  [NO verificado: numero no encontrado en el directorio. "
-              "El motor debe pedir identidad antes de mostrar datos.]")
+    print("  [sin verificar: el asistente deberia pedirte la cedula antes de "
+          "mostrar cualquier dato de la cuenta]")
 
     historial: list[dict] = []
     print("\nEscribi como si fueras el cliente. 'salir' para terminar.\n")

@@ -37,11 +37,13 @@ from flask import Flask, jsonify, request
 
 from nucleo.canales import media, whatsapp
 from nucleo.config import editor, fuente
+from nucleo.config.fusion import fusionar_roles, modelo_fusionado
 from nucleo.ingesta import corpus as ingesta
 from nucleo.ingesta.docx import procesar
 from nucleo.modelo import motor
 from nucleo.persistencia import db as persistencia
 from nucleo.recuperacion.busqueda import recuperar
+from nucleo.recuperacion.prompt import piezas_del_system
 from nucleo.seguimiento import escalamiento
 from nucleo.seguimiento import supervisor
 from nucleo.seguridad import secretos
@@ -119,14 +121,78 @@ def _agente_json(nombre: str, rol, config) -> dict:
         "area": rol.area,
         "cargo": rol.cargo,
         "orientado_a": rol.orientado_a,
+        # El system prompt REAL, partido en piezas con su origen. Sin esto,
+        # para saber por que un agente contesto algo hay que reconstruirlo de
+        # memoria cruzando cuatro secciones de la configuracion -- y el
+        # trabajo termina en el prompt aunque la causa este en otro lado (ver
+        # 'confirmar_identidad' faltante en la base, agosto 2026).
+        "prompt_piezas": piezas_del_system(config, nombre),
         "herramientas": [
             {
                 "nombre": h.nombre, "descripcion": h.descripcion.strip(), "tipo": h.tipo,
                 "campos_permitidos": rol.campos_permitidos.get(h.nombre, []),
+                # Lo que separa mirar de HACER. 'agendar_visita_tecnica' crea
+                # una visita real, con costo y logistica; en la tarjeta se veia
+                # igual que una consulta porque este dato no viajaba. Es lo
+                # primero que hay que ver para revisar que puede hacer un
+                # agente, no un detalle.
+                "solo_lectura": h.solo_lectura,
+                "requiere_confirmacion": h.requiere_confirmacion,
             }
             for h in herramientas
         ],
     }
+
+
+def _sesion_nueva(tenant: str, id_sesion: str, canal: str) -> dict:
+    """
+    El estado en memoria de una conversacion que el proceso no tenia, LEIDO
+    de la base cuando hay una conversacion abierta con esta persona.
+
+    Sin esto, un reinicio del motor equivalia a borrarle la memoria al
+    asistente en mitad de una conversacion: la marca de escalamiento se perdia
+    y el bot volvia a atender a alguien a quien ya se le habia dicho que lo
+    pasaba con una persona, y la verificacion se perdia y habia que pedirle la
+    cedula de nuevo.
+
+    Lo que NO se rehidrata es el historial de mensajes: son dos decisiones
+    distintas. El escalamiento y la identidad son estado, chico y acotado; el
+    historial es contexto que viaja al modelo en cada turno y crece sin techo.
+    Restaurarlo se puede hacer, pero cambia el costo de cada llamada y merece
+    decidirse aparte.
+
+    Un fallo al leer NO impide atender: se arranca en blanco, que es
+    exactamente lo que pasaba antes. Peor que empezar sin memoria es no
+    contestarle a un cliente.
+    """
+    estado = {"sesion": Sesion(identificador_canal=id_sesion),
+              "historial": [], "escalada": False, "caso_id": None}
+    try:
+        previo = persistencia.estado_de_conversacion_abierta(tenant, canal, id_sesion)
+    except Exception as e:
+        print(f"[sesion] no se pudo leer el estado previo de {id_sesion}: "
+              f"{type(e).__name__}: {e}")
+        return estado
+    if not previo:
+        return estado
+
+    estado["escalada"] = previo["escalada"]
+    estado["caso_id"] = previo["caso_id"]
+
+    # La identidad se restaura solo mientras la conversacion siga ABIERTA (es
+    # la unica que devuelve la consulta): al cerrarse, la siguiente empieza de
+    # cero y hay que verificar otra vez. Esa es la frontera -- se continua una
+    # conversacion, no se recuerda a una persona para siempre.
+    if previo["id_cliente"]:
+        estado["sesion"].verificado = True
+        estado["sesion"].nivel = max(estado["sesion"].nivel, 1)
+        estado["sesion"].id_cliente = previo["id_cliente"]
+        estado["sesion"].nombre = previo["nombre_cliente"]
+
+    print(f"[sesion] {id_sesion}: se retoma la conversacion abierta "
+          f"(escalada={previo['escalada']}, "
+          f"verificado={'si' if previo['id_cliente'] else 'no'})")
+    return estado
 
 
 def atender_turno(config, tenant: str, rol: str, id_sesion: str,
@@ -147,8 +213,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     """
     clave = (tenant, id_sesion)
     if clave not in _sesiones:
-        _sesiones[clave] = {"sesion": Sesion(identificador_canal=id_sesion),
-                            "historial": [], "escalada": False, "caso_id": None}
+        _sesiones[clave] = _sesion_nueva(tenant, id_sesion, canal)
     estado = _sesiones[clave]
 
     # --- si ya se escalo, el bot NO contesta ---------------------------------
@@ -191,6 +256,18 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             tenant, canal, id_sesion, rol, "assistant", respuesta)
         for llamada in registro_herramientas:
             persistencia.registrar_llamada_herramienta(tenant, conversation_id, rol, llamada)
+        # Recien aca existe conversation_id (ver el docstring de
+        # motor.responder): antes de esto no habia donde persistir a quien
+        # verifico _ejecutar_confirmacion. Se repite cada turno una vez
+        # verificado -- es un UPDATE idempotente, mas simple que rastrear si
+        # ya se guardo antes.
+        if estado["sesion"] is not None and estado["sesion"].verificado and estado["sesion"].id_cliente:
+            try:
+                persistencia.identificar_cliente(
+                    tenant, conversation_id,
+                    estado["sesion"].id_cliente, estado["sesion"].nombre)
+            except Exception as e:
+                print(f"[persistencia] no se pudo guardar la identidad: {e}")
     except Exception as e:  # nunca se rompe el turno por un fallo de persistencia
         print(f"[persistencia] no se pudo guardar el turno: {e}")
 
@@ -253,23 +330,71 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
 
 @app.post("/chat")
 def chat():
+    """
+    Un turno. El agente se puede indicar de DOS formas, y son excluyentes:
+
+      rol         el nombre, tal cual. Lo usa el simulador de WhatsApp, que
+                  necesita fijar 'cliente_final' a proposito para probar ese
+                  canal, y cualquier llamador interno que ya sepa cual quiere.
+      profile_id  el perfil del CRM de quien pregunta. El motor resuelve que
+                  agentes tiene asignados (supabase/15_agentes_por_colaborador)
+                  y le arma la union: un colaborador con Soporte y Facturacion
+                  puede preguntar por el ticket Y la factura en un solo turno,
+                  sin elegir a cual agente le habla.
+    """
     cuerpo = request.get_json(force=True, silent=True) or {}
     tenant = cuerpo.get("tenant")
     rol = cuerpo.get("rol")
+    profile_id = cuerpo.get("profile_id")
     id_sesion = cuerpo.get("identificador_sesion")
     mensaje = cuerpo.get("mensaje")
     canal = cuerpo.get("canal", "api")
 
     faltantes = [nombre for nombre, valor in
-                {"tenant": tenant, "rol": rol, "identificador_sesion": id_sesion,
+                {"tenant": tenant, "identificador_sesion": id_sesion,
                  "mensaje": mensaje}.items() if not valor]
     if faltantes:
         return jsonify({"error": f"Faltan campos: {', '.join(faltantes)}"}), 400
+    if not rol and not profile_id:
+        return jsonify({"error": "Falta 'rol' o 'profile_id'."}), 400
 
     try:
         config = _config_de(tenant)
     except FileNotFoundError:
         return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+
+    if profile_id:
+        try:
+            asignados = persistencia.agentes_de_colaborador(tenant, profile_id)
+        except Exception as e:
+            print(f"[agentes] fallo al resolver los de '{profile_id}': "
+                  f"{type(e).__name__}: {e}")
+            return jsonify({"error": "No se pudieron resolver los agentes."}), 500
+        # Fail-closed: sin asignacion no se atiende. Caer a un agente por
+        # defecto seria darle a alguien un acceso que nadie le concedio.
+        if not asignados:
+            return jsonify({"error": "Todavia no tenes ningun agente asignado. "
+                                     "Pedile a un administrador que te asigne "
+                                     "al menos uno."}), 403
+        try:
+            rol, rol_fusionado = fusionar_roles(config, asignados)
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+        # Copia por peticion, no se muta el config cacheado: el rol fusionado
+        # existe solo para este turno. Si se registrara en el compartido,
+        # apareceria como un agente mas en GET /agentes y en el editor.
+        #
+        # El override de modelo viaja con el: 'llm.overrides' se indexa por
+        # nombre de rol, y el fusionado tiene un nombre que no figura ahi.
+        # Sin esto cae en 'modelo_por_defecto', que sigue siendo el modelo
+        # local -- y ese ya no corre en ningun lado.
+        llm = config.llm
+        modelo = modelo_fusionado(config, asignados)
+        if modelo:
+            llm = llm.model_copy(
+                update={"overrides": {**llm.overrides, f"rol:{rol}": modelo}})
+        config = config.model_copy(
+            update={"roles": {**config.roles, rol: rol_fusionado}, "llm": llm})
 
     try:
         salida = atender_turno(config, tenant, rol, id_sesion, mensaje, canal)
@@ -324,6 +449,87 @@ def agentes_catalogo():
         "herramientas": editor.catalogo_herramientas(config),
         "roles_existentes": sorted(config.roles),
     })
+
+
+# -----------------------------------------------------------------------------
+#  QUE AGENTES PUEDE USAR CADA COLABORADOR
+# -----------------------------------------------------------------------------
+#  Solo agentes INTERNOS: el de cliente final no se le asigna a un empleado.
+#  Ese atiende a un desconocido y verifica identidad; los internos dan por
+#  hecho que quien escribe ya esta autorizado y pueden consultar a CUALQUIER
+#  cliente. Mezclarlos seria abrirle a una persona datos de terceros por la
+#  puerta de al lado -- por eso se filtra aca y se vuelve a validar al guardar.
+
+def _agentes_internos(config) -> list[str]:
+    return sorted(n for n, r in config.roles.items()
+                  if r.orientado_a == "colaborador")
+
+
+@app.get("/agentes/asignaciones")
+def agentes_asignaciones():
+    """
+    {profile_id: [agente, ...]} de todo el tenant, mas la lista de agentes
+    asignables. La pantalla cruza esto contra los usuarios del CRM, que los
+    trae de la API de Django -- el motor no lee las tablas del CRM.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+
+    try:
+        asignaciones = persistencia.asignaciones_de_agentes(tenant)
+    except Exception as e:
+        print(f"[agentes] fallo al listar asignaciones: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudieron leer las asignaciones."}), 500
+
+    return jsonify({"asignaciones": asignaciones,
+                    "agentes": _agentes_internos(config)})
+
+
+@app.put("/agentes/asignaciones/<profile_id>")
+def agentes_asignar(profile_id):
+    """
+    Deja a este colaborador con EXACTAMENTE los agentes de 'roles'. Una lista
+    vacia es valida y significa quitarle el acceso: sin agentes, /chat le
+    responde 403 en vez de caer a uno por defecto.
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+
+    roles = cuerpo.get("roles")
+    if not isinstance(roles, list):
+        return jsonify({"error": "'roles' tiene que ser una lista."}), 400
+
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+
+    permitidos = set(_agentes_internos(config))
+    invalidos = [r for r in roles if r not in permitidos]
+    if invalidos:
+        # Se nombra el motivo probable en vez de solo "invalido": si alguien
+        # intenta asignar el agente de cliente final, el error tiene que
+        # explicar por que no se puede, no parecer un typo.
+        return jsonify({"error": (
+            f"No se puede asignar: {', '.join(sorted(invalidos))}. "
+            f"Solo agentes internos ({', '.join(sorted(permitidos))}) -- el "
+            f"agente que atiende al cliente final no se le asigna a un "
+            f"colaborador.")}), 400
+
+    try:
+        guardados = persistencia.asignar_agentes(tenant, profile_id, roles)
+    except Exception as e:
+        print(f"[agentes] fallo al asignar a '{profile_id}': {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudieron guardar las asignaciones."}), 500
+
+    return jsonify({"profile_id": profile_id, "roles": guardados})
 
 
 @app.post("/agentes")
