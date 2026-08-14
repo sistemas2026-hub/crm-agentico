@@ -107,9 +107,9 @@ roles:
         (id_ticket) para que quede como referencia.
     area: Atención al Cliente
     cargo: Agente de Soporte
-    puede_consultar: [consultar_cliente, consultar_cliente_por_cedula, consultar_ticket,
-          consultar_tickets_de_cliente, contar_tickets, contar_clientes, consultar_casos_bottlecrm,
-          agendar_visita_tecnica, consultar_estado_ont, consultar_senal_ont, reiniciar_ont,
+    puede_consultar: [consultar_cliente, consultar_cliente_por_cedula, consultar_ticket, 
+          consultar_tickets_de_cliente, contar_tickets, contar_clientes, consultar_casos_bottlecrm, 
+          agendar_visita_tecnica, consultar_estado_ont, consultar_senal_ont, reiniciar_ont, 
           diagnosticar_falla_ont]
     campos_permitidos:
       consultar_cliente: [id_servicio, nombre, cedula, estado, email, telefono, direccion, localidad,
@@ -146,7 +146,7 @@ roles:
       # -- sin 'ONU details.Description' (es el nombre del cliente, PII) ni
       # topologia de VLAN/perfil.
       diagnosticar_falla_ont: ["ONU details.Last down cause", "ONU details.Last down cause_interpretado",
-            "ONU details.Run state", "ONU details.Last down time", "Optical status.Rx optical power(dBm)"]
+        "ONU details.Run state", "ONU details.Last down time", "Optical status.Rx optical power(dBm)"]
     nunca_revelar: [password_servicio, password_cpe, password_router_wifi, password_ssid_router_wifi,
       usuario_router_wifi, coordenadas]
 
@@ -216,15 +216,8 @@ roles:
       especializadas tienen las herramientas y los procedimientos; vos no
       -- si intentas resolverlo vos, le vas a dar una respuesta peor.
 
-      A donde va cada cosa:
-
-      - Algo del servicio que no anda: internet lento o caido, sin señal,
-        problemas de TV, el equipo con luces raras, WiFi
-        -> derivar_a_area(soporte_tecnico_cliente)
-
-      - Plata: saldo, facturas, fecha de corte, un cobro que no entiende,
-        cuando se le vence, promesas de pago
-        -> derivar_a_area(facturacion_cliente)
+      La lista de a que area va cada cosa te llega aparte, generada desde
+      la configuracion de cada agente -- guiate por esa.
 
       LLAMA derivar_a_area, no la anuncies. Escribir "te paso con soporte
       tecnico" SIN llamar la herramienta deja al cliente esperando una
@@ -281,12 +274,17 @@ roles:
     # funciona.
     puede_consultar: [verificar_identidad_por_cedula, confirmar_identidad, derivar_a_area]
     campos_permitidos: {}
-    nunca_revelar: [password_servicio, password_cpe, password_router_wifi, usuario_router_wifi,
+    nunca_revelar: [password_servicio, password_cpe, password_router_wifi, usuario_router_wifi, 
           cedula, direccion, coordenadas, ip, mac_cpe, sn_onu, sectorial, router.nombre]
 
   facturacion_cliente:
     area: Facturación
     cargo: Agente de Facturación (autoservicio)
+    # Lo lee el ROUTER para saber cuando mandarle una conversacion -- se
+    # edita desde /agentes/flujo, no en el prompt del router.
+    atiende: >-
+      Plata: saldo, facturas pendientes, fecha de corte, un cobro que no
+      entiende, cuando se le vence, promesas de pago
     descripcion: |
       El suscriptor, ya derivado desde el agente general porque su consulta
       es de facturacion. Mismo tono cercano que el agente general (tuteo,
@@ -323,6 +321,9 @@ roles:
   soporte_tecnico_cliente:
     area: Soporte Técnico
     cargo: Agente de Soporte Técnico (autoservicio)
+    atiende: >-
+      Algo del servicio que no anda: internet lento o caido, sin señal,
+      problemas de TV, el equipo con luces raras, WiFi
     descripcion: |
       El suscriptor, ya derivado desde el agente general porque su consulta
       tecnica necesita un diagnostico mas profundo que un ping rapido.
@@ -393,9 +394,8 @@ roles:
       Si la consulta en realidad es de facturacion, llama a derivar_a_area
       hacia facturacion_cliente -- no intentes resolverla vos.
     orientado_a: cliente_final
-    puede_consultar: [consultar_mi_servicio, ping_cliente, derivar_a_area,
-          consultar_plan_tv, consultar_estado_ont, consultar_senal_ont,
-          reiniciar_ont, diagnosticar_falla_ont]
+    puede_consultar: [consultar_mi_servicio, ping_cliente, derivar_a_area, consultar_plan_tv, 
+          consultar_estado_ont, consultar_senal_ont, reiniciar_ont, diagnosticar_falla_ont]
     campos_permitidos:
       consultar_mi_servicio: [estado, plan_internet, ssid_router_wifi]
       ping_cliente: ["ping-1", "ping-2", "ping-3", "ping-exitoso"]
@@ -409,7 +409,7 @@ roles:
       consultar_senal_ont: [onu_signal, onu_signal_1490_veredicto]
       reiniciar_ont: [response]
       diagnosticar_falla_ont: ["ONU details.Last down cause_interpretado"]
-    nunca_revelar: [password_servicio, password_cpe, password_router_wifi, usuario_router_wifi,
+    nunca_revelar: [password_servicio, password_cpe, password_router_wifi, usuario_router_wifi, 
           cedula, direccion, coordenadas, ip, mac_cpe, sn_onu, sectorial, router.nombre]
 
 # -----------------------------------------------------------------------------
@@ -1247,9 +1247,15 @@ herramientas:
     # inventar un limite, y se deriva a revision tecnica en cualquier caso.
     veredictos:
       onu_signal_1490:
-        - {desde: -25, hasta: -8, etiqueta: "aceptable"}
-        - {hasta: -25.0001, etiqueta: "problema en el drop (conector, cable o tensores) -- senal debil"}
-        - {desde: -7.9999, etiqueta: "fuera del rango documentado (senal muy fuerte) -- revisar con un tecnico"}
+        - desde: -25.0
+          hasta: -8.0
+          etiqueta: aceptable
+        - desde:
+          hasta: -25.0001
+          etiqueta: problema en el drop (conector, cable o tensores) -- senal debil
+        - desde: -7.9999
+          hasta:
+          etiqueta: fuera del rango documentado (senal muy fuerte) -- revisar con un tecnico
 
   - nombre: reiniciar_ont
     tipo: http

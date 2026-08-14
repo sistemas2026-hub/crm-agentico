@@ -124,3 +124,43 @@ export async function guardarPlazoVisitaTecnica(dias) {
   }
   return datos.dias;
 }
+
+/**
+ * El flujo de derivacion: quien enruta, que agentes son destino y que
+ * atiende cada uno. Alimenta /agentes/flujo, que ahora se edita.
+ * @returns {Promise<any | null>}
+ */
+export async function leerFlujoDerivacion() {
+  const cfg = destino();
+  if (!cfg) return null;
+  try {
+    const resp = await fetch(
+      `${cfg.baseUrl}/agentes/flujo?tenant=${encodeURIComponent(cfg.tenant)}`
+    );
+    if (!resp.ok) return null;
+    return await resp.json();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Conecta/desconecta agentes del router y actualiza que atiende cada uno.
+ * Lanza con el motivo del motor si lo rechaza (un destino que no existe, un
+ * agente interno): ese texto es mas util que "no se pudo guardar".
+ * @param {string[]} destinos
+ * @param {Record<string, string>} atiende
+ */
+export async function guardarFlujoDerivacion(destinos, atiende) {
+  const cfg = destino();
+  if (!cfg) throw new Error('Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT).');
+
+  const resp = await fetch(`${cfg.baseUrl}/agentes/flujo`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tenant: cfg.tenant, destinos, atiende })
+  });
+  const datos = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(datos.error || 'El asistente rechazo el cambio.');
+  return datos;
+}

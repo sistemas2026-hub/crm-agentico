@@ -77,6 +77,57 @@ def construir_system(config, nombre_rol: str) -> str:
     return "\n\n".join(p["texto"] for p in piezas_del_system(config, nombre_rol))
 
 
+def _tabla_de_derivacion(config, rol) -> str:
+    """
+    Las areas a las que este rol puede derivar y QUE atiende cada una, en el
+    formato que el modelo necesita para decidir.
+
+    Se arma leyendo la configuracion, no de un texto escrito a mano: los
+    destinos salen de la herramienta que declara 'deriva_rol' (su
+    'areas_destino') y el criterio de cada uno sale del 'atiende' de ese rol.
+    Conectar un agente nuevo pasa a ser marcarlo como destino y describir que
+    atiende -- sin tocar el prompt de nadie.
+
+    Devuelve '' si este rol no deriva a ningun lado (la mayoria): 'agregar()'
+    descarta las piezas vacias, asi que el prompt de un especialista no
+    carga con una seccion que no le corresponde.
+
+    Un destino SIN 'atiende' se nombra igual, pero avisando que no se sabe
+    cuando usarlo -- preferible a omitirlo en silencio: el sintoma seria "cree
+    un agente y nunca le llega nada", que es dificil de diagnosticar desde
+    afuera.
+    """
+    destinos: list[str] = []
+    for nombre_herr in rol.puede_consultar:
+        herr = next((h for h in config.herramientas if h.nombre == nombre_herr), None)
+        if herr is not None and getattr(herr, "deriva_rol", False):
+            destinos.extend(herr.areas_destino)
+
+    if not destinos:
+        return ""
+
+    lineas = []
+    for destino in dict.fromkeys(destinos):        # sin repetir, orden estable
+        rol_destino = config.roles.get(destino)
+        if rol_destino is None:
+            continue
+        atiende = (rol_destino.atiende or "").strip()
+        if atiende:
+            lineas.append(f"- {atiende}\n  -> derivar_a_area('{destino}')")
+        else:
+            lineas.append(
+                f"- (a '{destino}' no se le describio todavia que atiende, asi "
+                f"que no derives ahi salvo que el cliente lo pida por su "
+                f"nombre)")
+
+    if not lineas:
+        return ""
+
+    return ("A que area deriva cada cosa:\n" + "\n".join(lineas) +
+            "\n\nSi ninguna encaja, no fuerces una derivacion: resolvelo vos "
+            "si podes, o pasalo a un colaborador humano.")
+
+
 def piezas_del_system(config, nombre_rol: str) -> list[dict]:
     """
     Las mismas partes que construir_system(), pero cada una con su titulo y
@@ -192,6 +243,17 @@ def piezas_del_system(config, nombre_rol: str) -> list[dict]:
 
     agregar("Tu rol especifico", "este mismo agente",
             f"Tu rol especifico: {rol.descripcion}" if rol.descripcion else "")
+
+    # Tabla de enrutamiento GENERADA, no escrita a mano. Si este rol tiene una
+    # herramienta que deriva a otras areas, se arma la lista de destinos
+    # leyendo el 'atiende' de cada uno.
+    #
+    # Es lo que permite conectar un agente nuevo desde la pantalla: se lo marca
+    # como destino y se completa su 'atiende', y el router se entera solo. La
+    # alternativa -- que alguien edite el prompt del router cada vez -- es
+    # justo lo que hace que agregar un area sea trabajo de codigo.
+    agregar("A que area deriva cada cosa", GEN, _tabla_de_derivacion(config, rol),
+            editable=False)
 
     agregar("Instrucciones adicionales", AJUSTES,
             persona.instrucciones_adicionales)

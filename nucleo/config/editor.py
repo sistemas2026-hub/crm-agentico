@@ -344,6 +344,55 @@ def _mutar_identidad_descripcion(doc: dict, descripcion: str) -> None:
     doc.setdefault("identidad", {})["descripcion"] = descripcion
 
 
+def _mutar_flujo_derivacion(doc: dict, destinos: list[str], atiende: dict) -> None:
+    """
+    Que agentes son destino del router, y que atiende cada uno.
+
+    Es lo que hace editable el diagrama de /agentes/flujo: 'destinos' va a
+    'areas_destino' de la herramienta que declara 'deriva_rol', y 'atiende'
+    a cada rol. El prompt del router NO se toca -- su tabla de enrutamiento
+    se genera desde esto (nucleo/recuperacion/prompt.py::_tabla_de_derivacion).
+
+    Se valida contra el documento, no contra el modelo ya cargado: un destino
+    que no existe como rol, o que apunta al propio router, dejaria el
+    diagrama mostrando una flecha que el motor nunca podria seguir.
+    """
+    roles = doc.get("roles") or {}
+    herramientas = doc.get("herramientas") or []
+
+    deriva = next((h for h in herramientas if h.get("deriva_rol")), None)
+    if deriva is None:
+        raise ErrorEdicion(
+            "este tenant no tiene ninguna herramienta de derivacion "
+            "(deriva_rol), asi que no hay flujo que editar todavia.")
+
+    # Un destino tiene que existir y atender al CLIENTE: derivar una
+    # conversacion de WhatsApp a un rol interno (soporte, administracion)
+    # pondria a un agente que habla en tercera persona del cliente a
+    # hablarle DE FRENTE a ese cliente.
+    #
+    # No se rechaza que un destino tenga a su vez la herramienta de derivar:
+    # los especialistas la tienen a proposito, para pasarse una conversacion
+    # entre ellos cuando el router se equivoco de area. La auto-derivacion
+    # (derivar a donde ya se esta) la resuelve el motor en ejecucion --
+    # nucleo/modelo/motor.py::_ejecutar_derivacion la detecta y no hace nada.
+    for destino in destinos:
+        if destino not in roles:
+            raise ErrorEdicion(f"'{destino}' no es un agente de este tenant.")
+        if (roles[destino].get("orientado_a") or "colaborador") != "cliente_final":
+            raise ErrorEdicion(
+                f"'{destino}' es un agente interno (habla con un colaborador, "
+                f"no con el cliente): no puede recibir una conversacion "
+                f"derivada desde WhatsApp.")
+
+    deriva["areas_destino"] = list(dict.fromkeys(destinos))
+
+    for nombre_rol, texto in (atiende or {}).items():
+        if nombre_rol not in roles:
+            raise ErrorEdicion(f"'{nombre_rol}' no es un agente de este tenant.")
+        roles[nombre_rol]["atiende"] = (texto or "").strip()
+
+
 def _mutar_variable_tenant(doc: dict, nombre: str, valor: str) -> None:
     """
     Guarda un valor NO secreto que varia por empresa (ej. el subdominio de
@@ -452,6 +501,11 @@ def guardar_plazo_visita_tecnica(tenant: str, dias: int) -> TenantConfig:
 def guardar_canal_whatsapp(tenant: str, activo: bool,
                            numero_visible: str | None) -> TenantConfig:
     return _editar(tenant, lambda doc: _mutar_canal_whatsapp(doc, activo, numero_visible))
+
+
+def guardar_flujo_derivacion(tenant: str, destinos: list[str],
+                             atiende: dict) -> TenantConfig:
+    return _editar(tenant, lambda doc: _mutar_flujo_derivacion(doc, destinos, atiende))
 
 
 def guardar_variable_tenant(tenant: str, nombre: str, valor: str) -> TenantConfig:

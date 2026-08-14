@@ -14,6 +14,49 @@
    * el color se reconozca entre pantallas.
    */
   import PageHeader from '$lib/v2/components/PageHeader.svelte';
+  import { enhance } from '$app/forms';
+  import { Check, AlertTriangle } from '@lucide/svelte';
+
+  /** @type {{ data: any, form: any }} */
+  let { data, form } = $props();
+
+  let flujo = $derived(data.flujo);
+  let entradas = $derived(data.flujo?.entradas ?? []);
+  let agentes = $derived(data.flujo?.agentes ?? []);
+  // Candidatos a destino: todos los de cara al cliente menos la PUERTA DE
+  // ENTRADA (a donde cae un mensaje nuevo). Ojo, no es "los que no derivan":
+  // los especialistas tambien derivan, entre ellos, y aun asi son destinos
+  // validos -- filtrar por eso dejaria la lista vacia.
+  let candidatos = $derived(agentes.filter((/** @type {any} */ a) => !a.es_entrada));
+
+  // Copia local editable. Se siembra una sola vez con lo que vino del motor;
+  // despues manda lo que el usuario toco, hasta que recargue.
+  let conectado = $state(
+    Object.fromEntries(
+      (data.flujo?.agentes ?? []).map((/** @type {any} */ a) => [a.nombre, a.es_destino])
+    )
+  );
+  let atiende = $state(
+    Object.fromEntries(
+      (data.flujo?.agentes ?? []).map((/** @type {any} */ a) => [a.nombre, a.atiende ?? ''])
+    )
+  );
+
+  // Conectado pero sin decir que atiende = enganchado e invisible: el router
+  // no tiene con que decidir mandarle nada. Se avisa antes de guardar, no
+  // despues de que alguien note que un agente nunca recibe conversaciones.
+  let mudos = $derived(
+    candidatos.filter((/** @type {any} */ a) => conectado[a.nombre] && !(atiende[a.nombre] || '').trim())
+  );
+
+  // 'update()' por defecto resetea el formulario a los valores del DOM al
+  // cargar -- perderia lo recien escrito. Ver el mismo caso en la pantalla
+  // del canal de WhatsApp.
+  const guardando = () => {
+    return async (/** @type {any} */ { update }) => {
+      await update({ reset: false });
+    };
+  };
 </script>
 
 <PageHeader title="Flujo de derivación">
@@ -28,6 +71,77 @@
 
 <div class="v2-scroll">
   <div class="v2-pad" style="padding-top:16px;padding-bottom:40px;max-width:900px">
+
+    <!-- ── conexiones, editable ──────────────────────────────────────────── -->
+    <div class="v2-label" style="margin-bottom:10px">Quién atiende qué</div>
+    {#if !flujo}
+      <div class="v2-card" style="padding:20px 22px;margin-bottom:26px">
+        <b style="font-size:13px">No se pudo leer el flujo</b>
+        <p class="v2-sub" style="font-size:12.5px;margin:8px 0 0;line-height:1.5">
+          El motor no está respondiendo. El diagrama de abajo explica igual el mecanismo.
+        </p>
+      </div>
+    {:else if !flujo.herramienta_derivacion}
+      <div class="v2-card" style="padding:20px 22px;margin-bottom:26px">
+        <b style="font-size:13px">Este agente todavía no deriva a nadie</b>
+        <p class="v2-sub" style="font-size:12.5px;margin:8px 0 0;line-height:1.5">
+          Para conectar especialistas hace falta una herramienta de derivación en el catálogo del
+          tenant. El diagrama de abajo explica cómo funcionaría.
+        </p>
+      </div>
+    {:else}
+      <form method="POST" action="?/guardar" use:enhance={guardando} style="margin-bottom:26px">
+        <div class="v2-card" style="padding:16px">
+          <p class="v2-sub" style="font-size:12px;margin:0 0 14px;line-height:1.5">
+            {#if entradas.length}<b>{entradas.join(', ')}</b>{:else}El agente de entrada{/if}
+            recibe todos los mensajes y decide a quién pasárselos, leyendo lo que cada agente dice
+            que atiende. Escribilo como lo diría el cliente, no en jerga técnica.
+          </p>
+
+          {#each candidatos as a (a.nombre)}
+            <div class="agente-fila">
+              <label class="agente-check">
+                <input type="checkbox" name="destinos" value={a.nombre}
+                       bind:checked={conectado[a.nombre]} disabled={!data.can_edit} />
+                <span>
+                  <b style="font-size:13px">{a.area || a.nombre}</b>
+                  <span class="v2-sub" style="font-size:11px"> · {a.n_herramientas} herramientas</span>
+                </span>
+              </label>
+
+              {#if conectado[a.nombre]}
+                <input class="v2-input agente-atiende" type="text" name={`atiende:${a.nombre}`}
+                       placeholder="Ej: saldo, facturas, fecha de corte, un cobro que no entiende"
+                       bind:value={atiende[a.nombre]} disabled={!data.can_edit} />
+              {:else}
+                <p class="v2-sub" style="font-size:11.5px;margin:0">
+                  Desconectado: el agente existe, pero no le va a llegar ninguna conversación.
+                </p>
+              {/if}
+            </div>
+          {/each}
+
+          {#if mudos.length}
+            <p class="aviso-mudo">
+              <AlertTriangle size={13} />
+              {mudos.map((/** @type {any} */ a) => a.area || a.nombre).join(', ')}:
+              está conectado pero sin describir qué atiende, así que el enrutador no va a tener con
+              qué decidir mandarle nada.
+            </p>
+          {/if}
+
+          {#if form?.error}<p class="v2-error" style="font-size:12px;margin:12px 0 0">{form.error}</p>{/if}
+          {#if form?.guardado}<p class="ok-guardado"><Check size={13} /> Guardado</p>{/if}
+
+          {#if data.can_edit}
+            <button class="v2-btn v2-btn-primary v2-btn-sm" type="submit" style="margin-top:14px">
+              Guardar flujo
+            </button>
+          {/if}
+        </div>
+      </form>
+    {/if}
+
     <div class="v2-label" style="margin-bottom:10px">El mecanismo</div>
     <div class="v2-card diagrama-card">
       <svg class="diagrama" viewBox="0 0 900 700" role="img"
@@ -351,5 +465,50 @@
   .marca.fix {
     background: color-mix(in srgb, var(--v2-rust) 15%, transparent);
     color: var(--v2-rust);
+  }
+
+/* El check y el texto de "que atiende" son una unidad: si estan sueltos,
+     no se lee que el segundo solo tiene sentido cuando el primero esta
+     marcado. */
+  .agente-fila {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    padding: 12px 0;
+  }
+  .agente-fila + .agente-fila {
+    border-top: 1px solid var(--v2-line-soft);
+  }
+  .agente-check {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    cursor: pointer;
+  }
+  .agente-check input {
+    accent-color: var(--v2-ink);
+  }
+  /* Indentado bajo su check, para que se lea como dependiente de el. */
+  .agente-atiende {
+    margin-left: 25px;
+    font-size: 12.5px;
+  }
+  .aviso-mudo {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    margin: 12px 0 0;
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: var(--v2-clay);
+  }
+  .ok-guardado {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin: 12px 0 0;
+    font-size: 12px;
+    color: var(--v2-moss);
+    font-weight: 550;
   }
 </style>

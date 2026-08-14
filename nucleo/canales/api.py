@@ -655,6 +655,93 @@ def agentes_asignar(profile_id):
     return jsonify({"profile_id": profile_id, "roles": guardados})
 
 
+def _flujo_de(config) -> dict:
+    """
+    El flujo de derivacion de una config ya cargada. Funcion aparte, y no el
+    cuerpo del GET, porque el PUT tambien necesita devolverlo despues de
+    guardar -- y ahi el tenant viene en el cuerpo, no en la query, asi que
+    llamar al handler del GET fallaba con "falta el parametro 'tenant'".
+    """
+    deriva = next((h for h in config.herramientas if h.deriva_rol), None)
+    destinos = list(deriva.areas_destino) if deriva else []
+
+    # Tres conceptos distintos que es facil confundir en uno solo:
+    #
+    #   puede_derivar  tiene la herramienta en su catalogo. La tienen TODOS
+    #                  los agentes de cara al cliente, tambien los
+    #                  especialistas -- para pasarse una conversacion entre
+    #                  ellos cuando la primera derivacion no fue la correcta.
+    #   es_destino     esta en 'areas_destino': puede RECIBIR conversaciones.
+    #   es_entrada     de cara al cliente y NO es destino de nadie: es a donde
+    #                  cae un mensaje nuevo. Es el unico que la pantalla no
+    #                  ofrece como destino (seria un ciclo hacia la puerta).
+    #
+    # Confundir 'puede_derivar' con 'es_entrada' deja la pantalla sin ningun
+    # candidato que ofrecer, porque los tres derivan.
+    agentes = []
+    for nombre, rol in config.roles.items():
+        if rol.orientado_a != "cliente_final":
+            continue          # el flujo de derivacion es del lado del cliente
+        agentes.append({
+            "nombre": nombre,
+            "area": rol.area,
+            "cargo": rol.cargo,
+            "atiende": rol.atiende,
+            "puede_derivar": deriva is not None and deriva.nombre in rol.puede_consultar,
+            "es_destino": nombre in destinos,
+            "es_entrada": nombre not in destinos,
+            "n_herramientas": len(rol.puede_consultar),
+        })
+
+    return {
+        "herramienta_derivacion": deriva.nombre if deriva else None,
+        "entradas": [a["nombre"] for a in agentes if a["es_entrada"]],
+        "agentes": agentes,
+    }
+
+
+@app.get("/agentes/flujo")
+def agentes_flujo():
+    """
+    El flujo de derivacion tal como esta hoy: quien es la puerta de entrada,
+    que agentes son destino y que atiende cada uno. Es lo que dibuja (y ahora
+    edita) la pantalla /agentes/flujo.
+
+    Devuelve TODOS los agentes de cara al cliente, no solo los conectados: la
+    pantalla necesita poder ofrecer los sueltos para engancharlos.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+    return jsonify(_flujo_de(config))
+
+
+@app.put("/agentes/flujo")
+def agentes_flujo_guardar():
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    destinos = cuerpo.get("destinos")
+    if not isinstance(destinos, list):
+        return jsonify({"error": "'destinos' tiene que ser una lista de nombres de agente."}), 400
+
+    try:
+        config = editor.guardar_flujo_derivacion(
+            tenant, destinos, cuerpo.get("atiende") or {})
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
+
+    olvidar_config(tenant)
+    return jsonify(_flujo_de(config))
+
+
 @app.post("/agentes")
 def agentes_crear():
     cuerpo = request.get_json(force=True, silent=True) or {}

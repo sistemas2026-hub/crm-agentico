@@ -177,6 +177,17 @@ class Rol(Base):
     # sigue decidiendo unicamente 'puede_consultar'/'campos_permitidos'.
     area: str | None = None
     cargo: str | None = None
+    # QUE TEMAS ATIENDE, en palabras del cliente ("saldo, facturas, fechas de
+    # corte"). Lo lee el ROUTER para decidir a quien derivar: se arma su tabla
+    # de enrutamiento juntando el 'atiende' de cada destino
+    # (nucleo/recuperacion/prompt.py), en vez de tenerlo escrito a mano en su
+    # prompt. Asi, conectar un agente nuevo al router es completar este campo
+    # desde la pantalla -- no editar el texto de otro agente.
+    #
+    # Vacio = el router no sabe cuando mandarle nada, aunque este declarado
+    # como destino. Es lo que hace que la pantalla pueda avisar "este agente
+    # esta conectado pero nunca le va a llegar una conversacion".
+    atiende: str = Field(default="", max_length=400)
 
 
 # =============================================================================
