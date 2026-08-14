@@ -939,7 +939,15 @@ canales:
     # Poner en true EXIGE los cuatro refs indispensables (el validador falla
     # si falta alguno): mejor que arrancar bien y romperse con el primer
     # mensaje de un cliente real.
-    activo: false           # se activa cuando el piloto interno pase la evaluacion
+    # ACTIVO desde agosto 2026: el canal atiende clientes reales. Estaba en
+    # false porque el piloto todavia no habia arrancado, y se activo desde
+    # Ajustes -> Canales -> WhatsApp, que escribe en la base.
+    #
+    # Quedo en false aca mientras tanto, y eso tumbo el canal: un
+    # 'cargar_config --forzar' lo devolvio a false y el webhook empezo a
+    # responder 401 a Meta ("El canal de WhatsApp no esta activo"). El valor
+    # de este archivo tiene que seguir al de produccion, no al reves.
+    activo: true
     phone_number_id_ref: WHATSAPP_PHONE_NUMBER_ID
     token_ref: WHATSAPP_TOKEN
     waba_id_ref: WHATSAPP_WABA_ID
@@ -949,7 +957,8 @@ canales:
     # comportamiento del canal sin que alguien lo decida.
     version_api: v23.0
     # Solo para mostrarlo en los ajustes. No participa de ninguna llamada.
-    numero_visible: null
+    # No es un secreto: es el numero publico al que le escriben los clientes.
+    numero_visible: '+573208633423'
     # clave interna -> nombre aprobado en Meta. La indireccion existe para que
     # el codigo diga 'aviso_mora' y cada empresa lo mapee al nombre que
     # registro. Se llenan cuando Meta apruebe las plantillas; comprobar el
