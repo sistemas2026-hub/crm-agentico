@@ -99,4 +99,18 @@ def filtrar_campos(rol, nombre_herramienta: str, datos):
                                      datos.get("count", len(datos["results"])))
         return _solo_permitidos(permitidos, datos)
 
+    # Valor suelto (str/int/float/bool/None): pasa cuando la herramienta usa
+    # 'extraer_de' apuntando a un campo que en la API real es un valor
+    # simple, no un objeto (ej. consultar_estado_ont, extraer_de: onu_status
+    # -- la API responde {"onu_status": "Online", ...} y para aca ya llega
+    # solo el string "Online"). La lista blanca en ese caso declara UN solo
+    # nombre -- el campo que ese valor representa -- y se empaqueta de
+    # vuelta en un dict con esa clave, para que el modelo sepa que dato es.
+    # Con mas de un nombre no hay forma de saber cual le corresponde: se
+    # rechaza en vez de adivinar.
+    if datos is None or isinstance(datos, (str, int, float, bool)):
+        if len(permitidos) == 1:
+            return {next(iter(permitidos)): datos}
+        return {"error": "Formato de respuesta no reconocido. Resultado descartado."}
+
     return {"error": "Formato de respuesta no reconocido. Resultado descartado."}
