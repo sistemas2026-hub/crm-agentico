@@ -43,6 +43,15 @@
   /** @type {Record<string, boolean>} */
   let borradoArmado = $state({});
 
+  // El shell de la app recorta con overflow:hidden (ver (app)/+layout.svelte),
+  // asi que la grilla de tarjetas pide su propio scroll con .v2-scroll/.v2-pad
+  // -- mismo patron que /settings y sus subpaginas. Documentado aca y no como
+  // comentario HTML dentro del {:else}: un comentario ahi, como primer nodo de
+  // la rama, choco con los marcadores de hidratacion de Svelte 5 y producia
+  // 'hydration_mismatch' en cada carga -- Svelte tiraba el DOM del servidor y
+  // volvia a armar todo desde cero en el cliente, lo que se sentia como que el
+  // scroll "se resetea solo" a mitad de uso.
+
   async function borrar(/** @type {string} */ nombre) {
     if (!borradoArmado[nombre]) {
       borradoArmado = { ...borradoArmado, [nombre]: true };
@@ -108,12 +117,6 @@
 {:else if !data.agentes || data.agentes.length === 0}
   <p class="chat-vacio">No hay agentes configurados.</p>
 {:else}
-  <!--
-    El shell de la app recorta con overflow:hidden (ver (app)/+layout.svelte),
-    asi que cada pantalla tiene que pedir su propio scroll. Sin este envoltorio
-    la grilla se corta en el borde de la ventana en vez de dejar bajar --
-    mismo patron que /settings y sus subpaginas.
-  -->
   <div class="v2-scroll">
   <div class="v2-pad grilla-envoltorio">
   <div class="grilla">
