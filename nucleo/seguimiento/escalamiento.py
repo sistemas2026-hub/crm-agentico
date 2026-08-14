@@ -51,6 +51,81 @@ def _herramienta(config, nombre: str):
 
 
 def _esquema_evaluacion(config) -> dict:
+    propiedades = {
+        "escalar": {
+            "type": "boolean",
+            "description": "true si corresponde escalar a un humano ahora mismo.",
+        },
+        "motivo": {
+            "type": "string",
+            "enum": list(config.escalamiento.activar_si),
+            "description": "Por que escala. Ignoralo si escalar=false.",
+        },
+        "etiqueta": {
+            "type": "string",
+            "enum": list(config.conversaciones.etiquetas),
+            "description": "De que trata la conversacion, de esta lista.",
+        },
+        "resuelta": {
+            "type": "boolean",
+            "description": "true si el cliente confirmo que su "
+                "problema ya se resolvio o se esta despidiendo "
+                "(gracias, listo, ya quedo, chau) y la "
+                "conversacion no necesita seguir abierta. false "
+                "en cualquier otro caso, incluido mientras el "
+                "problema sigue sin resolver.",
+        },
+        "resumen": {
+            "type": "string",
+            "description": "2-3 frases resumiendo el caso para "
+                "quien lo va a atender: que reporto el cliente, "
+                "que ya se probo/descarto, y en que quedo "
+                "pendiente. Ignoralo si escalar=false. Va antes "
+                "de la transcripcion completa en el ticket, asi "
+                "que tiene que alcanzar por si solo, sin tener "
+                "que leer el resto para entenderlo.",
+        },
+        "necesita_humano": {
+            "type": "boolean",
+            "description": "Solo si escalar=true. true si hace "
+                "falta que una persona del equipo atienda esto "
+                "AHORA (el cliente sigue esperando una "
+                "respuesta puntual). false si el caso ya quedo "
+                "resuelto por otra via o registrado para "
+                "seguimiento y no necesita que nadie entre de "
+                "inmediato. Depende del caso, no hay una regla "
+                "fija.",
+        },
+    }
+
+    # Solo se ofrece si hay algun caso declarado -- un enum vacio no es un
+    # valor valido de JSON Schema para ningun proveedor, y sin casos no hay
+    # nada para el modelo que elegir.
+    #
+    # Obligatorio, con 'otro' como salida segura -- mismo criterio que
+    # 'etiqueta'. La primera version lo dejaba opcional con una redaccion
+    # cautelosa ("solo si encaja con claridad, no adivines"): en pruebas en
+    # vivo (agosto 2026), con el contexto real de la conversacion (prompt +
+    # RAG + varios turnos), el modelo casi nunca lo completaba -- pero en
+    # una prueba aislada, con el mismo texto, si lo hacia bien. La cautela
+    # de la redaccion lo volvia demasiado facil de saltear. 'etiqueta', con
+    # la misma forma (enum + obligatorio) pero redactada como categorizacion
+    # de rutina, si se completaba siempre.
+    if config.manual.casos:
+        propiedades["caso_manual"] = {
+            "type": "string",
+            "enum": list(config.manual.casos),
+            "description": "A cual de estos casos del manual corresponde "
+                "esta conversacion. Usa 'otro' si ninguno encaja bien -- "
+                "pero elegi siempre uno, no lo dejes vacio. Un "
+                "verificador aparte lo usa para saber si este caso "
+                "puntual tiene agendamiento automatico de visita "
+                "tecnica habilitado, sin pasar por un humano.",
+        }
+        requeridos = ["escalar", "etiqueta", "resuelta", "caso_manual"]
+    else:
+        requeridos = ["escalar", "etiqueta", "resuelta"]
+
     return {
         "type": "function",
         "function": {
@@ -61,53 +136,8 @@ def _esquema_evaluacion(config) -> dict:
             ),
             "parameters": {
                 "type": "object",
-                "properties": {
-                    "escalar": {
-                        "type": "boolean",
-                        "description": "true si corresponde escalar a un humano ahora mismo.",
-                    },
-                    "motivo": {
-                        "type": "string",
-                        "enum": list(config.escalamiento.activar_si),
-                        "description": "Por que escala. Ignoralo si escalar=false.",
-                    },
-                    "etiqueta": {
-                        "type": "string",
-                        "enum": list(config.conversaciones.etiquetas),
-                        "description": "De que trata la conversacion, de esta lista.",
-                    },
-                    "resuelta": {
-                        "type": "boolean",
-                        "description": "true si el cliente confirmo que su "
-                            "problema ya se resolvio o se esta despidiendo "
-                            "(gracias, listo, ya quedo, chau) y la "
-                            "conversacion no necesita seguir abierta. false "
-                            "en cualquier otro caso, incluido mientras el "
-                            "problema sigue sin resolver.",
-                    },
-                    "resumen": {
-                        "type": "string",
-                        "description": "2-3 frases resumiendo el caso para "
-                            "quien lo va a atender: que reporto el cliente, "
-                            "que ya se probo/descarto, y en que quedo "
-                            "pendiente. Ignoralo si escalar=false. Va antes "
-                            "de la transcripcion completa en el ticket, asi "
-                            "que tiene que alcanzar por si solo, sin tener "
-                            "que leer el resto para entenderlo.",
-                    },
-                    "necesita_humano": {
-                        "type": "boolean",
-                        "description": "Solo si escalar=true. true si hace "
-                            "falta que una persona del equipo atienda esto "
-                            "AHORA (el cliente sigue esperando una "
-                            "respuesta puntual). false si el caso ya quedo "
-                            "resuelto por otra via o registrado para "
-                            "seguimiento y no necesita que nadie entre de "
-                            "inmediato. Depende del caso, no hay una regla "
-                            "fija.",
-                    },
-                },
-                "required": ["escalar", "etiqueta", "resuelta"],
+                "properties": propiedades,
+                "required": requeridos,
             },
         },
     }

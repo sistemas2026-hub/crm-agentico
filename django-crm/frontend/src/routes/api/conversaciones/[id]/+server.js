@@ -51,3 +51,38 @@ export async function POST({ request, locals, fetch }) {
     return json({ error: err?.message || 'No se pudo contactar al asistente' }, { status: 502 });
   }
 }
+
+/**
+ * SOLO PARA PRUEBAS -- borra la conversacion entera para poder reescribirle
+ * al bot desde el WhatsApp real sin arrastrar el contexto de la prueba
+ * anterior (rol derivado, si ya escalo, el historial). Ver el boton
+ * "Reiniciar (prueba)" en +page.svelte y nucleo/canales/api.py:
+ * conversaciones_borrar -- sacar los dos cuando termine esa etapa.
+ *
+ * @type {import('./$types').RequestHandler}
+ */
+export async function DELETE({ params, locals, fetch }) {
+  if (!locals.user) {
+    return json({ error: 'No autenticado' }, { status: 401 });
+  }
+
+  const baseUrl = env.PRIVATE_ASISTENTE_URL;
+  const tenant = env.PRIVATE_ASISTENTE_TENANT;
+  if (!baseUrl || !tenant) {
+    return json({ error: 'Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT)' },
+      { status: 500 });
+  }
+
+  try {
+    const resp = await fetch(`${baseUrl}/conversaciones/${params.id}?tenant=${tenant}`, {
+      method: 'DELETE'
+    });
+    if (!resp.ok) {
+      const datos = await resp.json().catch(() => ({}));
+      return json({ error: datos.error || 'No se pudo borrar' }, { status: resp.status });
+    }
+    return new Response(null, { status: 204 });
+  } catch (/** @type {any} */ err) {
+    return json({ error: err?.message || 'No se pudo contactar al asistente' }, { status: 502 });
+  }
+}

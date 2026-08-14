@@ -1,6 +1,6 @@
 <script>
   import { untrack } from 'svelte';
-  import { invalidate } from '$app/navigation';
+  import { invalidate, goto } from '$app/navigation';
   import { enhance } from '$app/forms';
   import Pill from '$lib/v2/components/Pill.svelte';
   import Avatar from '$lib/v2/components/Avatar.svelte';
@@ -18,7 +18,8 @@
     User,
     PanelRight,
     X,
-    Paperclip
+    Paperclip,
+    RotateCcw
   } from '@lucide/svelte';
 
   /** @type {{ data: any }} */
@@ -89,6 +90,36 @@
       errorAtender = err?.message || 'No se pudo guardar.';
     } finally {
       marcandoAtendida = false;
+    }
+  }
+
+  // --- SOLO PARA PRUEBAS: reiniciar la conversacion para el entrenamiento
+  // por WhatsApp real -- borra todo (mensajes, rol derivado, si ya escalo)
+  // para poder reescribirle al bot de cero sin abrir otro numero. Sacar
+  // este bloque, el boton en el header y el endpoint DELETE
+  // (api/conversaciones/[id]/+server.js, nucleo/canales/api.py) cuando
+  // termine esa etapa.
+  let reiniciando = $state(false);
+  let errorReiniciar = $state('');
+
+  async function reiniciarConversacion() {
+    if (reiniciando) return;
+    if (!confirm('¿Borrar esta conversación de prueba? No se puede deshacer.')) return;
+    reiniciando = true;
+    errorReiniciar = '';
+    try {
+      const resp = await fetch(`/api/conversaciones/${conversacion.id}`, { method: 'DELETE' });
+      if (!resp.ok) {
+        const datos = await resp.json().catch(() => ({}));
+        errorReiniciar = datos.error || 'No se pudo borrar.';
+        return;
+      }
+      invalidate('app:conversaciones');
+      goto('/conversaciones');
+    } catch (/** @type {any} */ err) {
+      errorReiniciar = err?.message || 'No se pudo borrar.';
+    } finally {
+      reiniciando = false;
     }
   }
 
@@ -468,7 +499,23 @@
     >
       <PanelRight size={14} /> Contexto
     </button>
+
+    <!-- SOLO PARA PRUEBAS -- ver reiniciarConversacion() mas arriba. -->
+    <button
+      type="button"
+      class="v2-btn v2-btn-sm reiniciar-prueba"
+      onclick={reiniciarConversacion}
+      disabled={reiniciando}
+      title="Borra esta conversación para volver a probar desde cero (solo entrenamiento)"
+    >
+      <RotateCcw size={14} />
+      {reiniciando ? 'Borrando…' : 'Reiniciar (prueba)'}
+    </button>
   </header>
+
+  {#if errorReiniciar}
+    <p class="aviso">{errorReiniciar}</p>
+  {/if}
 
   {#if conversacion.escalada_a_humano}
     <p class="aviso">
@@ -913,6 +960,16 @@
   .aviso-mal {
     flex: none;
     color: var(--v2-rust);
+  }
+  /* SOLO PARA PRUEBAS -- ver reiniciarConversacion() en el script. Mismo
+     tono de aviso que .aviso-mal, para que se lea como una accion
+     destructiva sin inventar una variante nueva de .v2-btn. */
+  .reiniciar-prueba {
+    color: var(--v2-rust);
+    border-color: color-mix(in srgb, var(--v2-rust) 35%, transparent);
+  }
+  .reiniciar-prueba:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--v2-rust) 8%, transparent);
   }
   /* El hilo es lo único que scrollea acá: el encabezado y el compositor
      quedan fijos, para no tener que bajar hasta el fondo para escribir. */

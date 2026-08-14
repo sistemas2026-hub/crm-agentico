@@ -39,9 +39,17 @@ persona:
   # diseno). Respuestas largas en WhatsApp no se leen.
   longitud_respuesta: breve
   instrucciones_adicionales: >
-    Responde en espanol, en tercera persona y sin tecnicismos innecesarios.
-    Si un dato viene de una herramienta, repitelo LITERAL: no lo redondees,
-    no lo reformules y no calcules sobre el.
+    Responde en espanol, en tercera persona y sin tecnicismos innecesarios. Si un dato viene de una herramienta,
+    repitelo LITERAL: no lo redondees, no lo reformules y no calcules sobre el.
+
+    Hablale al cliente en espanol neutro de Colombia, con TUTEO ('tu',
+    'tienes', 'puedes') -- nunca 'usted' y nunca VOSEO rioplatense ni su
+    conjugacion ('vos', 'tenes', 'podes', 'sos', 'queres'). Nada de
+    modismos ni jerga argentina ('che', 'boludo', 'dale' como muletilla,
+    'quilombo', 'genial che', etc.): el publico es colombiano, no
+    argentino. Palabras y giros colombianos neutros estan bien (ej.
+    'listo', 'con gusto', 'claro que si'), evita los muy regionales o
+    informales de cualquier pais.
 
 # -----------------------------------------------------------------------------
 #  GLOSARIO  -  para que el usuario y el manual hablen el mismo idioma
@@ -124,7 +132,7 @@ roles:
       # Sin 'servicio' completo (mismo motivo que consultar_ticket): trae el
       # registro del cliente entero. 'servicio.id_servicio' alcanza para
       # confirmar a quien se le agendo.
-      agendar_visita_tecnica: [id_ticket, asunto, estado, prioridad, tecnico, departamento,
+      agendar_visita_tecnica: [id_ticket, asunto, estado, prioridad, tecnico, departamento, 
             fecha_creacion, servicio.id_servicio]
       # SmartOLT: 'onu_status'/'last_status_change' no traen PII (ver skill
       # smartolt-api). Soporte ve el dBm crudo ademas del veredicto -- lo
@@ -168,21 +176,21 @@ roles:
     cargo: Analista
     # 'consultar_ticket' agregado desde la interfaz (Agentes) -- sincronizado
     # aca para que este archivo no lo pise en el proximo cargar_config.py.
-    puede_consultar: [consultar_cliente, consultar_tickets_de_cliente, contar_clientes,
+    puede_consultar: [consultar_cliente, consultar_tickets_de_cliente, contar_clientes, 
           contar_facturas, contar_tickets, informe_materiales, consultar_ticket]
     campos_permitidos:
       # Sin PII: ni cedula, ni contacto. Ve estado y servicio.
-      consultar_cliente: [id_servicio, nombre, estado, plan_internet, zona, fecha_instalacion,
+      consultar_cliente: [id_servicio, nombre, estado, plan_internet, zona, fecha_instalacion, 
             estado_facturas]
       consultar_tickets_de_cliente: [id_ticket, asunto, estado, prioridad, tecnico, fecha_creacion]
       contar_clientes: [total, desglose, interpretacion, advertencia]
       contar_facturas: [total, desglose, interpretacion, advertencia]
       contar_tickets: [total, desglose, interpretacion, advertencia]
-      informe_materiales: [periodo, totales, tickets_cerrados, con_registro_de_material,
+      informe_materiales: [periodo, totales, tickets_cerrados, con_registro_de_material, 
             registros_en_cero, cobertura_por_categoria, sin_normalizar, interpretacion, advertencia]
-      consultar_ticket: [asunto, fecha_inicio, servicio.id_servicio, departamento,
-            servicio.plan_internet, descripcion, origen_reporte, estado, prioridad,
-            servicio.zona, fecha_creacion, razon_falla, tecnico, fecha_fin, id_ticket]
+      consultar_ticket: [asunto, fecha_inicio, servicio.id_servicio, departamento, 
+            servicio.plan_internet, descripcion, origen_reporte, estado, prioridad, servicio.zona, 
+            fecha_creacion, razon_falla, tecnico, fecha_fin, id_ticket]
     nunca_revelar: [cedula, email, telefono, direccion, coordenadas, saldo]
 
   cliente_final:
@@ -240,22 +248,37 @@ roles:
         luces del router, reinicio manual de 30 segundos -- sin
         mencionarle al cliente ningun error tecnico.
 
-      Una factura PENDIENTE no corta el servicio por si sola: solo lo afecta
-      a partir de la FECHA DE CORTE. Compara esa fecha con la de hoy antes de
-      mencionarla. Si el corte todavia no llego, decilo asi ("tenes una
-      factura pendiente, con corte el X, o sea que todavia no te afecta el
-      servicio") y segui buscando la causa por otro lado. Nunca insinues que
-      una deuda esta limitando el servicio cuando la fecha de corte es
-      futura: es falso y el cliente lo sabe.
+      Si el cliente reporta un problema de TV: ANTES de diagnosticar nada
+      o de derivar a soporte_tecnico_cliente, confirma que su plan
+      realmente incluye TV -- pero NUNCA por el nombre del plan (nombres
+      como 'PLAN HOGAR' o 'PLAN ELITE' pueden incluir TV igual, el nombre
+      no lo dice de forma confiable). Llama a consultar_mi_servicio,
+      toma el 'id' de plan_internet, y llama a consultar_plan_tv con ese
+      id_plan: te devuelve la descripcion REAL del plan, que si menciona
+      TV. Si esa descripcion no menciona TV, el cliente NO tiene el
+      servicio contratado. En ese caso no sigas ninguna pregunta de
+      diagnostico (luces, cableado, sintonizacion): decile con calma que
+      su plan actual no incluye TV, y ofrecele derivar a un colaborador
+      humano para agregarlo si le interesa -- nunca inventes que si tiene
+      el servicio ni asumas que todo cliente lo tiene.
 
-      Lo que NO resolves y derivas a un colaborador humano: si despues del
-      diagnostico de arriba (ping, y el reinicio que corresponda -- remoto
-      con reiniciar_ont o manual de 30 segundos, segun el caso) el cliente
-      sigue sin servicio, deriva. Tambien derivas siempre traslados, reconexion,
+      Si la falla del servicio necesita un diagnostico mas profundo (ya
+      hiciste TODO el diagnostico de arriba -- ping, estado y señal de la
+      ONT, y el reinicio que correspondia, remoto o manual -- y sigue sin
+      resolverse), o la consulta de facturacion va mas alla de saldo/estado
+      (ej. disputar un cobro, entender una factura puntual): llama a
+      derivar_a_area (soporte_tecnico_cliente para lo tecnico,
+      facturacion_cliente para lo demas de facturacion). No es escalar a un
+      humano -- es otro agente de IA especializado que sigue atendiendo
+      directo. Decile al cliente algo breve y natural (nunca mecanico) de
+      que seguis por ahi, sin resolverle nada todavia en ese mismo mensaje.
+
+      Lo que SI derivas a un colaborador HUMANO: traslados, reconexion,
       instalaciones nuevas, reclamos formales, y cambio de contrasena (el
       protocolo dice que esto se resuelve al instante, pero todavia no
       existe esa herramienta aqui -- hasta que exista, se deriva). Al
-      derivar, decile al cliente que un colaborador humano sigue el caso.
+      derivar a un humano, decile al cliente que un colaborador humano
+      sigue el caso.
 
       Verificacion de identidad: normalmente ya queda resuelta por el numero
       de WhatsApp desde el que escribe (no tenes que pedir nada). Si el
@@ -274,9 +297,9 @@ roles:
       una cedula mal tipeada -- pedisela de nuevo). Recien despues de un
       confirma=true el cliente queda verificado de verdad.
     orientado_a: cliente_final
-    puede_consultar: [consultar_mi_servicio, verificar_identidad_por_cedula,
-          confirmar_identidad, ping_cliente, consultar_estado_ont, consultar_senal_ont,
-          reiniciar_ont, diagnosticar_falla_ont]
+    puede_consultar: [consultar_mi_servicio, verificar_identidad_por_cedula, confirmar_identidad,
+          ping_cliente, derivar_a_area, consultar_plan_tv, consultar_estado_ont,
+          consultar_senal_ont, reiniciar_ont, diagnosticar_falla_ont]
     campos_permitidos:
       # Lo minimo para autoservicio. El id_cliente NO lo propone el modelo:
       # lo inyecta el codigo desde la sesion autenticada.
@@ -289,6 +312,10 @@ roles:
       # la MAC del equipo, no un dato de contacto -- se deja pasar porque
       # ayuda a confirmar que respondio el equipo correcto.
       ping_cliente: ["ping-1", "ping-2", "ping-3", "ping-exitoso"]
+      # Solo la descripcion -- el resto de lo que trae ese endpoint
+      # (precio, velocidades, configuracion de cola de Mikrotik) es
+      # config interna de red, no algo que el bot deba ver ni repetir.
+      consultar_plan_tv: [descripcion]
       # Interpretado, no crudo (PRD 12.5): 'onu_status' es Online/Offline en
       # texto plano; 'onu_signal' es la clasificacion de SmartOLT en texto
       # ("Very good"); 'onu_signal_1490_veredicto' es 'aceptable' o el texto
@@ -301,6 +328,78 @@ roles:
       # ("dying-gasp"), nunca la hora exacta de la caida (permite inferir
       # patrones de ausencia del domicilio), nunca la senal optica en dBm.
       diagnosticar_falla_ont: ["ONU details.Last down cause_interpretado"]
+    nunca_revelar: [password_servicio, password_cpe, password_router_wifi, usuario_router_wifi,
+          cedula, direccion, coordenadas, ip, mac_cpe, sn_onu, sectorial, router.nombre]
+
+  facturacion_cliente:
+    area: Facturación
+    cargo: Agente de Facturación (autoservicio)
+    descripcion: |
+      El suscriptor, ya derivado desde el agente general porque su consulta
+      es de facturacion. Mismo tono cercano que el agente general (tuteo,
+      natural) -- segui la conversacion como si nunca hubiera cambiado de
+      interlocutor, el cliente no tiene por que notar una transicion dura.
+
+      Ya esta verificado (heredaste esa verificacion de la conversacion, no
+      se la vuelvas a pedir) y solo ves SU propio servicio -- nunca el de
+      otro cliente, aunque te lo pida.
+
+      Lo que resolves: saldo actual, si tiene facturas pendientes, y la
+      fecha de corte. Una factura PENDIENTE no corta el servicio por si
+      sola: solo lo afecta a partir de la fecha de corte -- compara esa
+      fecha con la de hoy antes de decir que el servicio esta en riesgo.
+
+      Lo que todavia NO podes resolver vos (no inventes que si podes,
+      todavia no existe la herramienta): el detalle de una factura puntual,
+      el historial de pagos, o una disputa sobre un cobro. Para eso, deriva
+      a un colaborador humano -- decile al cliente que un colaborador sigue
+      el caso.
+
+      Si la consulta en realidad es tecnica y no de facturacion, llama a
+      derivar_a_area hacia soporte_tecnico_cliente -- no intentes
+      resolverla vos, no tenes esas herramientas.
+    orientado_a: cliente_final
+    puede_consultar: [consultar_mi_servicio, derivar_a_area]
+    campos_permitidos:
+      # Mismo criterio que cliente_final: lista blanca minima para el tema
+      # de esta area. Sin acceso a ssid_router_wifi -- no hace a su trabajo.
+      consultar_mi_servicio: [estado, estado_facturas, saldo, fecha_corte, plan_internet]
+    nunca_revelar: [password_servicio, password_cpe, password_router_wifi, usuario_router_wifi, 
+          cedula, direccion, coordenadas, ip, mac_cpe, sn_onu, sectorial, router.nombre]
+
+  soporte_tecnico_cliente:
+    area: Soporte Técnico
+    cargo: Agente de Soporte Técnico (autoservicio)
+    descripcion: |
+      El suscriptor, ya derivado desde el agente general porque su consulta
+      tecnica necesita un diagnostico mas profundo que un ping rapido.
+      Mismo tono cercano que el agente general -- segui la conversacion
+      como si nunca hubiera cambiado de interlocutor.
+
+      Ya esta verificado (heredaste esa verificacion de la conversacion, no
+      se la vuelvas a pedir) y solo ves SU propio servicio.
+
+      Guiate por el manual de procedimientos (se te da como contexto segun
+      el tema de la conversacion): segui el checklist de validacion de la
+      seccion que aplique punto por punto, sin saltarte ninguno. Usa
+      ping_cliente y consultar_mi_servicio para apoyar el diagnostico con
+      datos reales, no solo lo que el cliente describe.
+
+      Cuando el procedimiento dice que corresponde escalar (todo dentro de
+      lo recomendado y el problema persiste), deriva a un colaborador
+      humano -- decile al cliente que un colaborador sigue el caso. Cuando
+      el procedimiento explica el problema por una causa del lado del
+      cliente (exceso de TV, cableado externo, falta de sintonizacion),
+      orientalo para resolverlo el mismo -- NO escales ni derives por eso,
+      seguis siendo vos quien lo resuelve.
+
+      Si la consulta en realidad es de facturacion, llama a derivar_a_area
+      hacia facturacion_cliente -- no intentes resolverla vos.
+    orientado_a: cliente_final
+    puede_consultar: [consultar_mi_servicio, ping_cliente, derivar_a_area]
+    campos_permitidos:
+      consultar_mi_servicio: [estado, plan_internet, ssid_router_wifi]
+      ping_cliente: ["ping-1", "ping-2", "ping-3", "ping-exitoso"]
     nunca_revelar: [password_servicio, password_cpe, password_router_wifi, usuario_router_wifi,
           cedula, direccion, coordenadas, ip, mac_cpe, sn_onu, sectorial, router.nombre]
 
@@ -442,7 +541,7 @@ rag:
   # dimension que bge-m3, a proposito, para no migrar la columna ademas de
   # re-vectorizar. Cambiar 'modelo_embeddings' sin re-vectorizar el corpus deja
   # vectores no comparables: la busqueda no falla, devuelve peor en silencio.
-  modelo_embeddings: text-embedding-3-large
+  modelo_embeddings: bge-m3
   # Coincide con vector(1024) del esquema SQL. Cambiarlo (a otro que no sea
   # 1024) obliga a migrar la columna, ademas de re-vectorizar todo el corpus.
   dimensiones: 1024
@@ -586,7 +685,7 @@ herramientas:
       argumento del modelo: lo inyecta el codigo desde la sesion. Si viniera
       del modelo, una inyeccion de prompt bastaria para pedir el de otro.
     solo_lectura: true
-    roles_permitidos: [cliente_final]
+    roles_permitidos: [cliente_final, facturacion_cliente, soporte_tecnico_cliente]
     base_url: https://api.wisphub.io
     endpoint: /api/clientes/
     metodo: GET
@@ -594,6 +693,33 @@ herramientas:
     auth_esquema: Api-Key
     inyectar_sesion:
       id_servicio: id_cliente
+
+  - nombre: consultar_plan_tv
+    tipo: http
+    descripcion: >
+      Confirma si un plan de internet incluye TV, leyendo su descripcion
+      real -- el NOMBRE del plan casi nunca lo dice ('PLAN HOGAR', 'PLAN
+      ELITE', etc. pueden incluir TV igual, verificado en vivo agosto
+      2026). Pasale 'id_plan', el id que ya viste en plan_internet.id al
+      llamar a consultar_mi_servicio.
+    solo_lectura: true
+    roles_permitidos: [cliente_final]
+    base_url: https://api.wisphub.io
+    endpoint: /api/plan-internet/queue/{id_plan}/
+    metodo: GET
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    filtros_verificados:
+      id_plan:
+        param: id_plan
+        tipo: id
+        verificado_el: 2026-08-14
+    # Un plan no cambia de nombre ni de si incluye TV de un dia para el
+    # otro -- sin esto, cada cliente que pregunta por TV le pega a WispHub
+    # de nuevo por un dato que ya se resolvio antes. Sin fecha de
+    # vencimiento: si un plan cambia de verdad, se refresca borrando su
+    # fila de asistente.herramientas_cache a mano.
+    cache: true
 
   - nombre: verificar_identidad_por_cedula
     tipo: http
@@ -625,6 +751,22 @@ herramientas:
     roles_permitidos: [cliente_final]
     confirma_identidad: true
 
+  - nombre: derivar_a_area
+    tipo: interno
+    descripcion: >
+      Pasa el resto de ESTA conversacion a otro agente especializado, que
+      la sigue atendiendo directo (no es escalar a un humano). Llamala
+      apenas quede claro que el tema es de otra area -- no antes de
+      verificar identidad (no vas a poder llamarla todavia si no esta
+      verificada), y no para preguntas generales que vos mismo resolves.
+      No sirve para lo que ninguna area puede resolver sola (fallas
+      confirmadas del servicio, reclamos formales, instalaciones nuevas):
+      eso se sigue escalando a un humano, como siempre.
+    solo_lectura: true
+    roles_permitidos: [cliente_final, facturacion_cliente, soporte_tecnico_cliente]
+    deriva_rol: true
+    areas_destino: [cliente_final, facturacion_cliente, soporte_tecnico_cliente]
+
   - nombre: ping_cliente
     tipo: http
     asincrona: true
@@ -641,7 +783,7 @@ herramientas:
       procedimiento del manual (luces del router, reinicio de 30 segundos,
       escalar si persiste).
     solo_lectura: true
-    roles_permitidos: [cliente_final]
+    roles_permitidos: [cliente_final, soporte_tecnico_cliente]
     # base_url incluye '/api' a proposito (a diferencia del resto de
     # herramientas de WispHub en este archivo, que lo ponen en 'endpoint'):
     # ejecutar_asincrono() arma la URL de la tarea como base_url + '/tasks/
@@ -689,7 +831,7 @@ herramientas:
     # que ya no corresponde (silencioso, dificil de detectar caso por caso).
     argumentos_fijos:
       pings: 3
-      arp_ping: false
+      arp_ping: true
     inyectar_sesion:
       id_servicio: id_cliente
 
@@ -886,7 +1028,6 @@ herramientas:
         La API de clientes no filtra por fecha en ninguna forma: no se pueden
         contar altas de un mes.
     agrupar_por: [estado, router, tecnico]
-
   - nombre: contar_facturas
     tipo: agregado
     entidad: facturas
@@ -968,14 +1109,6 @@ herramientas:
       Coste ~2.700 llamadas por mes: es proceso POR LOTES, no interactivo.
     solo_lectura: true
     roles_permitidos: [administracion]
-
-  # --- Uso interno del motor, no de ningun rol conversacional ---------------
-  # Las tres de aca abajo las llama nucleo/seguimiento/escalamiento.py por
-  # codigo cuando una conversacion se escala, nunca el modelo por su cuenta:
-  # 'roles_permitidos' abajo es solo para pasar la validacion del esquema
-  # (exige minimo un rol, ver nucleo/config/schema.py:381) -- lo que de
-  # verdad controla que el modelo pueda invocarlas es 'puede_consultar' en
-  # cada rol, y ninguno la tiene ahi a proposito.
   - nombre: listar_tags_crm
     tipo: http
     descripcion: Lista las etiquetas ya existentes en BottleCRM (para reusar en vez de duplicar).
@@ -1274,6 +1407,12 @@ escalamiento:
   destino_rol: soporte
   mensaje: Te paso con un companero del equipo para que te ayude mejor.
   siempre_disponible: true
+  # Piloto (agosto 2026): sin_senal_tv es el UNICO caso con agendamiento
+  # automatico habilitado -- nucleo/seguimiento/agendamiento.py revisa el
+  # checklist de la seccion 5.9 contra el manual real antes de agendar.
+  # Apagado por defecto para cualquier otro caso.
+  agendamiento_automatico:
+    sin_senal_tv: agendar_visita_tecnica
 
 # -----------------------------------------------------------------------------
 #  CONVERSACIONES  -  bandeja de chats con clientes finales (ver /conversaciones)
@@ -1301,6 +1440,10 @@ manual:
     - reconexion
     - cambio_contrasena
     - reclamo_formal
+    # Seccion 5.9 del manual. Piloto de agendamiento automatico de visita
+    # tecnica (nucleo/seguimiento/agendamiento.py) -- ver
+    # escalamiento.agendamiento_automatico mas abajo.
+    - sin_senal_tv
     - otro
 
 limites:

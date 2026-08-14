@@ -160,13 +160,24 @@ def _rol_sin_exclusivas(doc: dict, excepto: str | None = None) -> str:
     def sin_exclusivas() -> list[str]:
         exclusivas = {h["roles_permitidos"][0] for h in doc["herramientas"]
                       if len(h["roles_permitidos"]) == 1}
-        return [n for n in doc["roles"] if n not in exclusivas and n != excepto]
+        # Tampoco un rol al que alguna herramienta 'deriva_rol' apunte
+        # (areas_destino): esta prueba edita 'orientado_a' a colaborador de
+        # forma generica, y un rol que sigue siendo blanco de una derivacion
+        # tiene que seguir orientado a cliente_final (ver la coherencia
+        # global en schema.py) -- no es el caso que esta prueba mide.
+        derivables = {n for h in doc["herramientas"] if h.get("deriva_rol")
+                     for n in h.get("areas_destino", [])}
+        return [n for n in doc["roles"]
+               if n not in exclusivas and n not in derivables and n != excepto]
 
     libres = sin_exclusivas()
     if libres:
         return libres[0]
 
-    candidato = next(n for n in doc["roles"] if n != excepto)
+    derivables = {n for h in doc["herramientas"] if h.get("deriva_rol")
+                 for n in h.get("areas_destino", [])}
+    candidato = next((n for n in doc["roles"] if n != excepto and n not in derivables),
+                     next(n for n in doc["roles"] if n != excepto))
     for h in doc["herramientas"]:
         if h["roles_permitidos"] == [candidato]:
             otro = next(n for n in doc["roles"] if n != candidato)
