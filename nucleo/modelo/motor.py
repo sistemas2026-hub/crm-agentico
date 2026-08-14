@@ -238,7 +238,24 @@ def _ejecutar_confirmacion(sesion, argumentos_modelo: dict) -> dict:
     sesion.id_cliente_pendiente = None
     sesion.nombre_pendiente = None
     sesion.interfaz_lan_pendiente = None
-    return {"verificado": True}
+    # Reproducido en vivo (agosto 2026): sin esta instruccion, el modelo a
+    # veces inventaba que "no tenia la herramienta para cerrar la
+    # verificacion por este canal" y escalaba sin necesidad -- pese a que
+    # 'verificado' ya es True en este mismo punto. Es la UNICA rama de este
+    # archivo que dejaba al modelo sin instruccion_interna; el resto (arriba
+    # y en _ejecutar_verificacion) ya la tiene. Se nombran las dos excusas
+    # puntuales que aparecieron en produccion, no solo "ya estas verificado":
+    # negarlas explicitamente es lo que evita que el modelo las repita.
+    return {"verificado": True,
+           "instruccion_interna": "Verificacion CERRADA en este mismo paso, "
+               "sin nada pendiente: no existe ningun paso adicional, ni "
+               "ninguna limitacion de este canal (WhatsApp u otro) que te "
+               "impida seguir. Decile al cliente en una frase breve que ya "
+               "quedo verificado, y en el MISMO mensaje segui de inmediato "
+               "con el problema que te habia contado antes de pedirle la "
+               "cedula, usando las herramientas que tengas para su rol. "
+               "Nunca digas que falta un paso, que el canal no lo permite, "
+               "ni escales a un humano solo por este motivo."}
 
 
 def _ejecutar_tool(herramienta, sesion, argumentos_modelo: dict,
