@@ -197,6 +197,14 @@ roles:
       luces del router y un reinicio de 30 segundos, siguiendo el
       protocolo de esa herramienta).
 
+      Una factura PENDIENTE no corta el servicio por si sola: solo lo afecta
+      a partir de la FECHA DE CORTE. Compara esa fecha con la de hoy antes de
+      mencionarla. Si el corte todavia no llego, decilo asi ("tenes una
+      factura pendiente, con corte el X, o sea que todavia no te afecta el
+      servicio") y segui buscando la causa por otro lado. Nunca insinues que
+      una deuda esta limitando el servicio cuando la fecha de corte es
+      futura: es falso y el cliente lo sabe.
+
       Lo que NO resolves y derivas a un colaborador humano: si despues de
       usar ping_cliente y el reinicio de 30 segundos el cliente sigue sin
       servicio, deriva. Tambien derivas siempre traslados, reconexion,

@@ -28,6 +28,50 @@ ORIGEN_CODIGO = "fijo en el codigo, no se edita"
 GEN = "se genera segun 'orientado_a' del agente"
 
 
+_DIAS = ("lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo")
+_MESES = ("enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
+          "agosto", "septiembre", "octubre", "noviembre", "diciembre")
+
+
+def _hoy_en(zona: str) -> str:
+    """
+    Que dia es hoy, en la zona horaria del tenant.
+
+    NO ES UN ADORNO. Sin esto el modelo no puede comparar una fecha contra el
+    presente, y eso lo lleva a inventar. Visto en produccion (14/08/2026): a
+    una clienta con una factura pendiente y fecha de corte el 20/08 le dijo
+    que esa deuda "puede estar limitando tu servicio". Ella tuvo que
+    corregirlo dos veces -- "hoy apenas es 13"-- y recien ahi acepto que
+    tenia razon. Sabia razonarlo; le faltaba el dato.
+
+    SOLO EL DIA, sin hora: el prompt se arma en cada turno, y si trajera la
+    hora cambiaria cada minuto, rompiendo el cacheo de prefijo del proveedor
+    en todas las llamadas (RNF-03). Con granularidad de dia, el prompt es
+    identico durante toda la jornada. Lo que se pierde es responder "¿estan
+    abiertos AHORA?"; para eso puede decir el horario y que la persona
+    juzgue.
+
+    Los nombres van escritos a mano y no por locale: un contenedor no suele
+    traer el locale español instalado, y strftime devolveria 'Friday'.
+    """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+    try:
+        ahora = datetime.now(ZoneInfo(zona))
+    except (ZoneInfoNotFoundError, ValueError):
+        # Zona mal escrita en la config: mejor la fecha del servidor que
+        # ninguna. Sin esto el modelo vuelve a quedarse sin referencia.
+        print(f"[prompt] zona horaria desconocida '{zona}', se usa la del servidor")
+        ahora = datetime.now()
+
+    return (f"Hoy es {_DIAS[ahora.weekday()]} {ahora.day} de "
+            f"{_MESES[ahora.month - 1]} de {ahora.year}. Usalo para cualquier "
+            f"cuenta con fechas -- si una fecha de corte, de vencimiento o de "
+            f"cita todavia no llego, NO hables de ella como si ya hubiera "
+            f"pasado.")
+
+
 def construir_system(config, nombre_rol: str) -> str:
     """El system prompt completo, tal cual lo recibe el modelo."""
     return "\n\n".join(p["texto"] for p in piezas_del_system(config, nombre_rol))
@@ -157,5 +201,10 @@ def piezas_del_system(config, nombre_rol: str) -> list[dict]:
             "Reglas que no podes romper bajo ninguna circunstancia:\n- "
             + "\n- ".join(config.seguridad.reglas_absolutas)
             if config.seguridad.reglas_absolutas else "")
+
+    # ULTIMA a proposito, ver _hoy_en(). Es la unica pieza que cambia con el
+    # tiempo: dejandola al final, todo lo de arriba es un prefijo identico
+    # entre turnos y el proveedor lo puede cachear.
+    agregar("Fecha de hoy", GEN, _hoy_en(identidad.zona_horaria), editable=False)
 
     return piezas
