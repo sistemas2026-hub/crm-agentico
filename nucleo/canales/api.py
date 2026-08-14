@@ -131,6 +131,13 @@ def _agente_json(nombre: str, rol, config) -> dict:
             {
                 "nombre": h.nombre, "descripcion": h.descripcion.strip(), "tipo": h.tipo,
                 "campos_permitidos": rol.campos_permitidos.get(h.nombre, []),
+                # Lo que separa mirar de HACER. 'agendar_visita_tecnica' crea
+                # una visita real, con costo y logistica; en la tarjeta se veia
+                # igual que una consulta porque este dato no viajaba. Es lo
+                # primero que hay que ver para revisar que puede hacer un
+                # agente, no un detalle.
+                "solo_lectura": h.solo_lectura,
+                "requiere_confirmacion": h.requiere_confirmacion,
             }
             for h in herramientas
         ],

@@ -1,21 +1,23 @@
 <script>
   /**
-   * Muestra los agentes ya configurados en tenants/*.yaml (del lado de
-   * crm-agentico) y, para cada uno, un diagrama con lineas hacia cada
-   * herramienta que puede usar. Un ADMIN puede crear/editar/borrar agentes
-   * desde aca (via AgenteFormDialog, que habla con /api/agentes); crear una
-   * herramienta nueva sigue siendo trabajo de codigo.
+   * Los agentes configurados y, para cada uno, que puede hacer y que puede
+   * ver. Un ADMIN puede crear/editar/borrar desde aca (via AgenteFormDialog,
+   * que habla con /api/agentes); crear una herramienta nueva sigue siendo
+   * trabajo de codigo.
    *
-   * El diagrama es SVG a mano (mismo estilo que Sparkline.svelte: viewBox +
-   * coordenadas calculadas), sin libreria de graficos -- no hay ninguna en
-   * este frontend y el tamano del grafo (un agente + hasta ~7 herramientas)
-   * no lo amerita.
+   * La tarjeta esta armada para responder una pregunta concreta: "¿que le
+   * estoy dejando hacer a este agente?". Por eso las herramientas van
+   * agrupadas por lo que HACEN (ver porLoQueHace) con los campos que ve de
+   * cada una, y no como el diagrama radial que hubo antes -- ese ocupaba mas
+   * y decia menos: truncaba los nombres hasta volverlos ambiguos y no
+   * distinguia una consulta de algo que cambia el mundo real.
    */
   import PageHeader from '$lib/v2/components/PageHeader.svelte';
   import AgenteFormDialog from '$lib/components/agentes/AgenteFormDialog.svelte';
   import { Button } from '$lib/components/ui/button/index.js';
   import { toast } from 'svelte-sonner';
   import { invalidateAll } from '$app/navigation';
+  import { AlertTriangle } from '@lucide/svelte';
 
   /** @type {{ data: any }} */
   let { data } = $props();
@@ -68,27 +70,41 @@
     await invalidateAll();
   }
 
-  const ANCHO = 300;
-  const ALTO = 220;
-  const CX = ANCHO / 2;
-  const CY = ALTO / 2;
-  const RADIO = 82;
-
-  /** Primer parrafo de la descripcion -- algunas (cliente_final) son largas
-   * porque duplican el prompt completo; acá solo hace falta el resumen. */
+  /** Primer PARRAFO de la descripcion. Antes cortaba en el primer salto de
+   * linea, y como el YAML usa bloques literales eso partia la frase al medio
+   * ("...revisa" y nada mas). El parrafo entero se lee completo; si es largo
+   * lo recorta el CSS, que al menos corta donde termina un renglon. */
   function resumen(texto) {
-    return (texto || '').trim().split('\n')[0];
+    return (texto || '').trim().split(/\n\s*\n/)[0].replace(/\s*\n\s*/g, ' ');
   }
 
-  function nodosDe(herramientas) {
-    const n = herramientas.length;
-    return herramientas.map((h, i) => {
-      const angulo = (i / Math.max(n, 1)) * 2 * Math.PI - Math.PI / 2;
-      return { ...h, x: CX + RADIO * Math.cos(angulo), y: CY + RADIO * Math.sin(angulo) };
-    });
+  /**
+   * Las herramientas por lo que HACEN, no por su tipo tecnico.
+   *
+   * 'http'/'agregado'/'batch' es detalle de implementacion: a quien revisa
+   * que puede hacer un agente no le dice nada. Lo que le importa es si el
+   * agente mira, cuenta, o CAMBIA algo del mundo real.
+   *
+   * El orden no es alfabetico ni el del YAML: 'Actua' va ultimo y aparte
+   * porque es el unico grupo con consecuencias. En soporte es una sola
+   * herramienta de ocho -- agendar_visita_tecnica crea una visita con costo
+   * y logistica-- y hasta ahora se veia igual que una consulta.
+   */
+  function porLoQueHace(herramientas) {
+    const grupos = [
+      { clave: 'consulta', titulo: 'Consulta', items: [] },
+      { clave: 'cuenta', titulo: 'Cuenta', items: [] },
+      { clave: 'actua', titulo: 'Actúa', items: [] }
+    ];
+    for (const h of herramientas ?? []) {
+      // Escribir manda sobre el tipo: una herramienta que cambia algo va a
+      // 'Actua' aunque ademas sea un agregado.
+      if (h.solo_lectura === false) grupos[2].items.push(h);
+      else if (h.tipo === 'agregado') grupos[1].items.push(h);
+      else grupos[0].items.push(h);
+    }
+    return grupos.filter((g) => g.items.length > 0);
   }
-
-  const COLOR_TIPO = { http: '#2563eb', agregado: '#7c3aed', batch: '#b45309' };
 </script>
 
 <PageHeader title="Agentes">
@@ -141,13 +157,16 @@
           </p>
         </div>
       {:else}
-        {@const nodos = nodosDe(agente.herramientas)}
+        {@const grupos = porLoQueHace(agente.herramientas)}
         <div class="tarjeta">
           <div class="encabezado-tarjeta">
             <h3>{agente.nombre}</h3>
             {#if agente.area || agente.cargo}
+              <!-- El separador se arma en JS: puesto como texto dentro de un
+                   {#if}, Svelte le come el espacio de adelante y quedaba
+                   "Agente de Soporte· Atencion al Cliente". -->
               <p class="organizacion">
-                {agente.cargo || '—'}{#if agente.area} · {agente.area}{/if}
+                {[agente.cargo, agente.area].filter(Boolean).join(' · ')}
               </p>
             {/if}
             <span class="pill-orientacion" class:cliente={agente.orientado_a === 'cliente_final'}>
@@ -157,33 +176,44 @@
 
           <p class="descripcion">{resumen(agente.descripcion)}</p>
 
-          <svg viewBox="0 0 {ANCHO} {ALTO}" class="diagrama" role="img" aria-label="Herramientas de {agente.nombre}">
-            {#each nodos as nodo}
-              <line x1={CX} y1={CY} x2={nodo.x} y2={nodo.y} stroke="#d1d5db" stroke-width="1.5" />
+          <!--
+            Reemplaza al diagrama radial que estaba aca. Ese gastaba ~250px de
+            alto para decir "tiene 8 herramientas" peor que una lista: la
+            posicion de cada nodo no significaba nada (todas cuelgan del
+            agente, es un hecho), los nombres se truncaban a 16 caracteres --
+            'consultar_cliente' y 'consultar_cliente_por_cedula' quedaban
+            IDENTICOS en pantalla-- y las dos cosas que de verdad importan
+            para revisar un agente, que escribe y que campos ve, no aparecian.
+          -->
+          <div class="herramientas">
+            {#each grupos as grupo (grupo.clave)}
+              <div class="grupo" class:grupo-actua={grupo.clave === 'actua'}>
+                <div class="grupo-titulo">
+                  {#if grupo.clave === 'actua'}<AlertTriangle size={12} />{/if}
+                  {grupo.titulo}
+                  <span class="grupo-cuenta">{grupo.items.length}</span>
+                </div>
+                {#each grupo.items as h (h.nombre)}
+                  <div class="herramienta" title={h.descripcion || h.nombre}>
+                    <span class="herr-nombre">{h.nombre}</span>
+                    <span class="herr-campos">
+                      {h.campos_permitidos.length
+                        ? `${h.campos_permitidos.length} campo${h.campos_permitidos.length === 1 ? '' : 's'}`
+                        : '—'}
+                    </span>
+                  </div>
+                  {#if grupo.clave === 'actua'}
+                    <p class="herr-aviso">
+                      Cambia algo real{h.requiere_confirmacion
+                        ? ' · pide confirmación antes'
+                        : ''}
+                    </p>
+                  {/if}
+                {/each}
+              </div>
+            {:else}
+              <p class="v2-sub" style="font-size:12px">Sin herramientas asignadas.</p>
             {/each}
-
-            <circle cx={CX} cy={CY} r="30" fill="#111827" />
-            <text x={CX} y={CY} text-anchor="middle" dominant-baseline="middle" fill="white" font-size="10" font-weight="600">
-              {agente.nombre}
-            </text>
-
-            {#each nodos as nodo}
-              <g>
-                <title>{nodo.descripcion || nodo.nombre}</title>
-                <circle cx={nodo.x} cy={nodo.y} r="26" fill={COLOR_TIPO[nodo.tipo] || '#6b7280'} fill-opacity="0.15"
-                       stroke={COLOR_TIPO[nodo.tipo] || '#6b7280'} stroke-width="1.5" />
-                <text x={nodo.x} y={nodo.y} text-anchor="middle" dominant-baseline="middle"
-                     font-size="7" fill="#374151">
-                  {nodo.nombre.length > 16 ? nodo.nombre.slice(0, 14) + '…' : nodo.nombre}
-                </text>
-              </g>
-            {/each}
-          </svg>
-
-          <div class="leyenda">
-            <span><i class="punto" style="background:{COLOR_TIPO.http}"></i>http</span>
-            <span><i class="punto" style="background:{COLOR_TIPO.agregado}"></i>agregado</span>
-            <span><i class="punto" style="background:{COLOR_TIPO.batch}"></i>batch</span>
           </div>
 
           {#if agente.prompt_piezas?.length}
@@ -323,22 +353,57 @@
     color: #4b5563;
     margin: 0;
   }
-  .diagrama {
-    width: 100%;
-    height: auto;
-  }
-  .leyenda {
+  .herramientas {
     display: flex;
+    flex-direction: column;
     gap: 12px;
-    font-size: 10px;
-    color: var(--v2-muted, #888);
   }
-  .punto {
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    margin-right: 4px;
+  .grupo-titulo {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 10.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--v2-muted, #888);
+    margin-bottom: 5px;
+  }
+  .grupo-cuenta {
+    font-weight: 400;
+    opacity: 0.8;
+  }
+  /* 'Actua' es el unico grupo con consecuencias: se separa del resto en vez
+     de distinguirse solo por color, que a un daltonico no le dice nada. */
+  .grupo-actua {
+    border-top: 1px solid var(--v2-border, #e5e5e5);
+    padding-top: 10px;
+  }
+  .grupo-actua .grupo-titulo {
+    color: var(--v2-ember, #ea580c);
+  }
+  .herramienta {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 12px;
+    padding: 2.5px 0;
+  }
+  .herr-nombre {
+    color: #374151;
+    word-break: break-word;
+  }
+  .herr-campos {
+    flex-shrink: 0;
+    font-size: 11px;
+    color: var(--v2-muted, #888);
+    font-variant-numeric: tabular-nums;
+  }
+  .herr-aviso {
+    margin: 0 0 2px;
+    font-size: 10.5px;
+    color: var(--v2-ember, #ea580c);
   }
   .acciones-tarjeta {
     display: flex;
