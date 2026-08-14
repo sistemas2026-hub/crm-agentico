@@ -26,6 +26,7 @@ Uso
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -181,6 +182,48 @@ historial_desmejora = [
 comprobar(_previas_no_cumplidas(h_reinicio, historial_desmejora) == ["consultar_senal"],
          "si la señal empeoro DESPUES de una lectura buena, la ultima manda -- no cumple")
 
+print("\nexige_previas: la forma REAL del dato filtrado, no solo un dict plano")
+# Esto es lo que 'listas_blancas.filtrar_campos' deja en el historial cuando la
+# herramienta devuelve una LISTA (ping_cliente): {'total', 'resultados'}, con
+# el campo buscado adentro de una de las filas. La version anterior de esta
+# prueba usaba un dict plano inventado ({'ping-exitoso': true}) y por eso NO
+# detecto el bug real -- la precondicion de reiniciar_ont estuvo rota en
+# produccion sin que esta guarda dijera nada. Ver _buscar_campo en motor.py.
+h_real = _herramienta(exige_previas=[
+    Precondicion(herramienta="ping", campo="ping-exitoso", valor="3 de 3"),
+])
+historial_forma_real = [
+    {"role": "tool", "name": "ping", "content": json.dumps({
+        "total": 4,
+        "resultados": [
+            {"ping-1": {"received": "1", "packet-loss": "0"}},
+            {"ping-2": {"received": "1", "packet-loss": "0"}},
+            {"ping-3": {"received": "1", "packet-loss": "0"}},
+            {"ping-exitoso": "3 de 3"},
+        ],
+    })},
+]
+comprobar(_previas_no_cumplidas(h_real, historial_forma_real) == [],
+         "encuentra el campo dentro de {total, resultados} (forma real de una lista filtrada)")
+
+historial_forma_real_fallo = [
+    {"role": "tool", "name": "ping", "content": json.dumps({
+        "total": 4,
+        "resultados": [
+            {"ping-1": {"status": "timeout"}},
+            {"ping-exitoso": "0 de 3"},
+        ],
+    })},
+]
+comprobar(_previas_no_cumplidas(h_real, historial_forma_real_fallo) == ["ping"],
+         "y NO se cumple cuando el valor anidado es distinto ('0 de 3')")
+
+print("\nexige_previas: casos de borde de la busqueda anidada")
+h_json_roto = _herramienta(exige_previas=[
+    Precondicion(herramienta="consultar_senal", campo="veredicto", valor="aceptable"),
+    Precondicion(herramienta="ping", campo="ping-exitoso", valor=True),
+])
+h_reinicio = h_json_roto
 historial_json_roto = [
     {"role": "tool", "name": "consultar_senal", "content": "no es json valido"},
     {"role": "tool", "name": "ping", "content": '{"ping-exitoso": true}'},
