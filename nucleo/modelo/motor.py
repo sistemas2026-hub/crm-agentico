@@ -300,8 +300,25 @@ def _ejecutar_tool(herramienta, sesion, argumentos_modelo: dict,
 
     # El modelo puede proponer estas claves; se sobrescriben siempre con la
     # sesion verificada -- ver el comentario de 'inyectar_sesion' en schema.py.
+    #
+    # Un valor VACIO en la sesion se OMITE, no se manda como null. Un campo
+    # opcional que la API acepta ausente no siempre acepta un nulo explicito,
+    # y ahi la diferencia deja de ser cosmetica: verificado contra WispHub
+    # (agosto 2026), 'interfaz' ausente o '' responde 202, pero
+    # {"interfaz": null} devuelve 400 "Este campo no puede ser nulo". El
+    # sintoma era un cliente al que no se le podia diagnosticar la conexion --
+    # y 'interfaz_lan' vacio es NORMAL, no un dato faltante (ver skill
+    # wisphub-api), asi que le pasaba a muchos.
+    #
+    # Se descarta el vacio y no solo el None: el propio motor ya convierte ''
+    # en None al verificar la identidad, y quien escriba el YAML no deberia
+    # tener que saber cual de las dos formas llega.
     for arg_llamada, atributo_sesion in herramienta.inyectar_sesion.items():
-        argumentos[arg_llamada] = getattr(sesion, atributo_sesion, None)
+        valor = getattr(sesion, atributo_sesion, None)
+        if valor is None or valor == "":
+            argumentos.pop(arg_llamada, None)
+        else:
+            argumentos[arg_llamada] = valor
 
     if herramienta.tipo == "http":
         if herramienta.asincrona:

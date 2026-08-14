@@ -136,13 +136,37 @@ SECCIONES_QUE_EDITA_LA_INTERFAZ = ("roles", "canales", "identidad", "persona",
 
 
 def _hojas(valor, prefijo=""):
-    """Aplana un dict anidado a {'a.b.c': valor} para comparar VALOR por VALOR."""
+    """
+    Aplana a {'a.b.c': valor} para comparar VALOR por VALOR.
+
+    Las LISTAS tambien se recorren, no se tratan como un valor unico: sin eso
+    'herramientas' -que es una lista de 19 diccionarios- se reportaba entera
+    como una sola diferencia de 41 KB. Un aviso que nadie puede leer empuja a
+    usar --forzar sin mirar, que es justo el habito que esta guarda existe
+    para evitar.
+
+    Se indexa por 'nombre' cuando el elemento lo trae: reordenar herramientas
+    en el YAML no deberia aparecer como que cambiaron todas.
+    """
     if isinstance(valor, dict):
         salida = {}
         for clave, sub in valor.items():
             salida.update(_hojas(sub, f"{prefijo}.{clave}" if prefijo else str(clave)))
         return salida
+    if isinstance(valor, list):
+        salida = {}
+        for i, sub in enumerate(valor):
+            etiqueta = sub["nombre"] if isinstance(sub, dict) and sub.get("nombre") else i
+            salida.update(_hojas(sub, f"{prefijo}[{etiqueta}]"))
+        return salida
     return {prefijo: valor}
+
+
+def _corto(valor, tope: int = 70) -> str:
+    """El valor para mostrar en un aviso, acotado. Un prompt de 1.400
+    caracteres impreso entero tapa las otras diferencias de la lista."""
+    texto = repr(valor)
+    return texto if len(texto) <= tope else texto[:tope - 1] + "…"
 
 
 def _lo_que_pisaria(guardado: dict, nuevo: dict) -> list[str]:
@@ -177,8 +201,8 @@ def _lo_que_pisaria(guardado: dict, nuevo: dict) -> list[str]:
             # el archivo no trae la completa el esquema con su default, y
             # reportarla seria ruido en cada corrida.
             if ruta in nuevo_plano and nuevo_plano[ruta] != valor:
-                lineas.append(f"{ruta}: la base dice {valor!r} y el archivo "
-                              f"{nuevo_plano[ruta]!r} -- se PISARIA")
+                lineas.append(f"{ruta}: la base dice {_corto(valor)} y el "
+                              f"archivo {_corto(nuevo_plano[ruta])} -- se PISARIA")
 
     ov_g = ((guardado.get("llm") or {}).get("overrides") or {})
     ov_n = ((nuevo.get("llm") or {}).get("overrides") or {})

@@ -579,11 +579,29 @@ herramientas:
     auth_ref: WISPHUB_API_KEY
     auth_esquema: Api-Key
     # Fijos, nunca decididos por el modelo (ver argumentos_fijos en
-    # schema.py). arp_ping=true: funciona aunque el cliente este detras de
-    # firewall, pero exige 'interfaz' -- por eso se inyecta interfaz_lan.
+    # schema.py).
+    #
+    # arp_ping en FALSE. Estuvo en true, y rompia el diagnostico de cualquier
+    # cliente sin 'interfaz_lan' -- que son muchos: ese campo vacio es NORMAL,
+    # se llena en un paso posterior de sincronizacion del router (ver la skill
+    # wisphub-api, verificado contra 15 clientes reales).
+    #
+    # Y no fallaba de frente, que hubiera sido preferible. Medido contra la
+    # API el 14/08/2026 sobre id_servicio=6580:
+    #
+    #   arp_ping=true  sin interfaz -> HTTP 202, tarea SUCCESS, y de resultado
+    #                                  el texto 'Error "failure: interface
+    #                                  needs to be specified for arp ping"'.
+    #   arp_ping=false sin interfaz -> el ping real: received 1,
+    #                                  packet-loss 0, avg-rtt 1ms401us.
+    #
+    # Un error con forma de exito, que el modelo tenia que interpretar solo.
+    # Lo que se pierde: arp_ping alcanza equipos detras de un firewall, y sin
+    # el esos figuran como que no responden. Es un falso negativo acotado y
+    # visible; lo otro era basura silenciosa.
     argumentos_fijos:
       pings: 3
-      arp_ping: true
+      arp_ping: false
     inyectar_sesion:
       id_servicio: id_cliente
       interfaz: interfaz_lan

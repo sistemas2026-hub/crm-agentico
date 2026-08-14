@@ -229,6 +229,33 @@ por API. Una herramienta de creacion NO necesita enviarlo.
 
 ## Trampas que ya costaron tiempo
 
+**Un campo opcional puede aceptar AUSENTE y rechazar `null`.** Verificado en
+`/api/clientes/{id}/ping/` (agosto 2026): `interfaz` omitido responde 202, e
+`interfaz: ""` tambien, pero `{"interfaz": null}` devuelve
+`400 {"interfaz":["Este campo no puede ser nulo."]}`. La diferencia importa
+porque un valor vacio en la sesion se convierte en `None` con facilidad
+(`x.get(...) or None`) y termina viajando como `null` en el JSON. Al inyectar
+valores de sesion, **omitir la clave** en vez de mandarla nula.
+
+**Una tarea asincrona puede decir SUCCESS y traer un error de texto como
+resultado.** El caso peor de esta API hasta ahora, porque no hay como
+detectarlo mirando codigos de estado. En `/api/clientes/{id}/ping/` con
+`arp_ping=true` y sin `interfaz`:
+
+```
+POST  -> HTTP 202  {"task_id": "..."}
+GET /api/tasks/{id}/  ->  status: SUCCESS
+    result: [{'ping-1': '('Error "failure: interface needs to be specified
+              for arp ping" executing command /ping =arp-ping=yes ...'}]
+```
+
+HTTP correcto, tarea exitosa, y adentro un error en prosa donde deberia haber
+metricas (`received`, `packet-loss`, `avg-rtt`). Con `arp_ping=false` la misma
+llamada devuelve el ping de verdad. **`arp_ping` exige `interfaz`**, y como
+`interfaz_lan` vacio es normal (ver mas arriba), dejarlo en true rompe el
+diagnostico de muchos clientes sin que nada lo denuncie.
+
+
 **Los filtros de estado son NUMERICOS.** `?estado=Nuevo` devuelve 0 resultados
 sin error alguno. Parece "no hay tickets nuevos"; en realidad la consulta no
 existe.
