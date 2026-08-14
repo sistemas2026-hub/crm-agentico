@@ -135,7 +135,7 @@
 
 <style>
   .aviso-error {
-    color: #991b1b;
+    color: var(--v2-rust);
     font-size: 14px;
   }
   .tabla-envoltorio {
@@ -153,13 +153,13 @@
     font-size: 11.5px;
     text-transform: uppercase;
     letter-spacing: 0.02em;
-    color: var(--v2-muted, #888);
+    color: var(--v2-slate);
     padding: 0 14px 8px 0;
-    border-bottom: 1px solid var(--v2-border, #e5e5e5);
+    border-bottom: 1px solid var(--v2-line);
   }
   .tabla td {
     padding: 10px 14px 10px 0;
-    border-bottom: 1px solid var(--v2-border, #e5e5e5);
+    border-bottom: 1px solid var(--v2-line);
     vertical-align: middle;
   }
   .col-agente {

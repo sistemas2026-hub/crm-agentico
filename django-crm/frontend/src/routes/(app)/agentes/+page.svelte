@@ -17,7 +17,7 @@
   import { Button } from '$lib/components/ui/button/index.js';
   import { toast } from 'svelte-sonner';
   import { invalidateAll } from '$app/navigation';
-  import { AlertTriangle } from '@lucide/svelte';
+  import { AlertTriangle, Bot, BotMessageSquare, ScanEye } from '@lucide/svelte';
 
   /** @type {{ data: any }} */
   let { data } = $props();
@@ -146,8 +146,12 @@
         -->
         <div class="tarjeta tarjeta-automatica">
           <div class="encabezado-tarjeta">
-            <h3>{agente.nombre}</h3>
-            <span class="pill-orientacion pill-automatico">Automático · segundo plano</span>
+            <span class="marca-agente" aria-hidden="true"><ScanEye size={19} /></span>
+            <div class="identidad">
+              <h3>{agente.nombre}</h3>
+              <p class="organizacion">Revisa conversaciones ya cerradas</p>
+            </div>
+            <span class="pill-orientacion pill-automatico">Automático</span>
           </div>
 
           <p class="descripcion">{agente.descripcion}</p>
@@ -160,17 +164,37 @@
         {@const grupos = porLoQueHace(agente.herramientas)}
         <div class="tarjeta">
           <div class="encabezado-tarjeta">
-            <h3>{agente.nombre}</h3>
-            {#if agente.area || agente.cargo}
-              <!-- El separador se arma en JS: puesto como texto dentro de un
-                   {#if}, Svelte le come el espacio de adelante y quedaba
-                   "Agente de Soporte· Atencion al Cliente". -->
-              <p class="organizacion">
-                {[agente.cargo, agente.area].filter(Boolean).join(' · ')}
-              </p>
-            {/if}
+            <!--
+              Un icono de robot, no las iniciales del nombre: lo primero que
+              tiene que decir la tarjeta es QUE ES, y lo que hay detras no es
+              una persona. La variante distingue a quien le habla -- con globo
+              de dialogo si atiende al cliente final, sin el si es interno --
+              asi la diferencia se ve antes de leer la etiqueta.
+
+              En tono piedra, nunca en ambar: el ambar esta reservado para
+              accion y para lo que exige atencion (el grupo 'Actua' de abajo).
+              Gastarlo aca de adorno se la quita justo donde importa.
+            -->
+            <span class="marca-agente" aria-hidden="true">
+              {#if agente.orientado_a === 'cliente_final'}
+                <BotMessageSquare size={19} />
+              {:else}
+                <Bot size={19} />
+              {/if}
+            </span>
+            <div class="identidad">
+              <h3>{agente.nombre}</h3>
+              {#if agente.area || agente.cargo}
+                <!-- El separador se arma en JS: puesto como texto dentro de un
+                     {#if}, Svelte le come el espacio de adelante y quedaba
+                     "Agente de Soporte· Atencion al Cliente". -->
+                <p class="organizacion">
+                  {[agente.cargo, agente.area].filter(Boolean).join(' · ')}
+                </p>
+              {/if}
+            </div>
             <span class="pill-orientacion" class:cliente={agente.orientado_a === 'cliente_final'}>
-              {agente.orientado_a === 'cliente_final' ? 'Habla con el cliente' : 'Uso interno'}
+              {agente.orientado_a === 'cliente_final' ? 'Cliente final' : 'Uso interno'}
             </span>
           </div>
 
@@ -291,11 +315,11 @@
     padding-bottom: 32px;
   }
   .aviso-error {
-    color: #991b1b;
+    color: var(--v2-rust);
     font-size: 14px;
   }
   .chat-vacio {
-    color: var(--v2-muted, #888);
+    color: var(--v2-slate);
     font-size: 14px;
   }
   .grilla {
@@ -304,53 +328,82 @@
     gap: 16px;
   }
   .tarjeta {
-    border: 1px solid var(--v2-border, #e5e5e5);
-    border-radius: 12px;
+    border: 1px solid var(--v2-line);
+    border-radius: var(--v2-radius);
+    background: var(--v2-card);
     padding: 16px;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 10px;
   }
+  /* Icono, identidad y etiqueta en una fila: el bloque que se lee primero. */
+  .encabezado-tarjeta {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .marca-agente {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 9px;
+    background: var(--v2-line-soft);
+    border: 1px solid var(--v2-line);
+    color: var(--v2-ink);
+  }
+  .identidad {
+    min-width: 0;
+    flex: 1;
+  }
+  /* 17px contra los 12px de la descripcion: sin ese salto la tarjeta se lee
+     como una lista uniforme y el nombre no ancla nada. */
   .encabezado-tarjeta h3 {
     margin: 0;
-    font-size: 15px;
+    font-size: 17px;
     font-weight: 600;
+    line-height: 1.2;
     text-transform: capitalize;
+    color: var(--v2-ink);
   }
   .organizacion {
-    margin: 2px 0 4px;
-    font-size: 12px;
-    color: var(--v2-muted, #888);
+    margin: 2px 0 0;
+    font-size: 11.5px;
+    color: var(--v2-slate);
   }
   .pill-orientacion {
-    display: inline-block;
+    flex: none;
+    align-self: center;
     font-size: 10px;
     padding: 2px 8px;
     border-radius: 999px;
-    background: #f1f1f1;
-    color: #4b5563;
-    width: fit-content;
+    background: var(--v2-line-soft);
+    border: 1px solid var(--v2-line);
+    color: var(--v2-slate);
+    white-space: nowrap;
   }
+  /* El unico agente que le habla a alguien de afuera: se marca, pero con
+     'moss' (positivo, uso moderado), no con ambar. */
   .pill-orientacion.cliente {
-    background: #dcfce7;
-    color: #15803d;
-  }
-  .pill-orientacion.pill-automatico {
-    background: #ede9fe;
-    color: #6d28d9;
+    color: var(--v2-moss);
+    border-color: color-mix(in oklab, var(--v2-moss) 30%, transparent);
+    background: color-mix(in oklab, var(--v2-moss) 8%, transparent);
   }
   .tarjeta-automatica {
     border-style: dashed;
-    background: var(--v2-bg-subtle, #fafafa);
+    background: var(--v2-line-soft);
   }
   .modelo-automatico {
     font-size: 11px;
-    color: var(--v2-muted, #888);
+    color: var(--v2-slate);
     margin: 0;
   }
   .descripcion {
     font-size: 12px;
-    color: #4b5563;
+    line-height: 1.55;
+    color: var(--v2-ink);
+    opacity: 0.78;
     margin: 0;
   }
   .herramientas {
@@ -366,7 +419,7 @@
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    color: var(--v2-muted, #888);
+    color: var(--v2-slate);
     margin-bottom: 5px;
   }
   .grupo-cuenta {
@@ -376,11 +429,11 @@
   /* 'Actua' es el unico grupo con consecuencias: se separa del resto en vez
      de distinguirse solo por color, que a un daltonico no le dice nada. */
   .grupo-actua {
-    border-top: 1px solid var(--v2-border, #e5e5e5);
+    border-top: 1px solid var(--v2-line);
     padding-top: 10px;
   }
   .grupo-actua .grupo-titulo {
-    color: var(--v2-ember, #ea580c);
+    color: var(--v2-ember);
   }
   .herramienta {
     display: flex;
@@ -391,26 +444,26 @@
     padding: 2.5px 0;
   }
   .herr-nombre {
-    color: #374151;
+    color: var(--v2-ink);
     word-break: break-word;
   }
   .herr-campos {
     flex-shrink: 0;
     font-size: 11px;
-    color: var(--v2-muted, #888);
+    color: var(--v2-slate);
     font-variant-numeric: tabular-nums;
   }
   .herr-aviso {
     margin: 0 0 2px;
     font-size: 10.5px;
-    color: var(--v2-ember, #ea580c);
+    color: var(--v2-ember);
   }
   .acciones-tarjeta {
     display: flex;
     align-items: center;
     gap: 6px;
     padding-top: 4px;
-    border-top: 1px solid var(--v2-border, #e5e5e5);
+    border-top: 1px solid var(--v2-line);
     margin-top: 4px;
   }
   .confirmar-borrado {
@@ -421,7 +474,7 @@
   }
 
   .recibe {
-    border-top: 1px solid var(--v2-border, #e5e5e5);
+    border-top: 1px solid var(--v2-line);
     padding-top: 8px;
   }
   .recibe summary {
@@ -450,7 +503,7 @@
   }
   .pieza-origen {
     font-size: 10.5px;
-    color: var(--v2-muted, #888);
+    color: var(--v2-slate);
   }
   /* Lo generado o fijo se distingue de lo editable: si no, alguien busca
      donde cambiar un bloque que nadie escribio. */
@@ -464,8 +517,9 @@
     white-space: pre-wrap;
     word-break: break-word;
     font-family: inherit;
-    color: #4b5563;
-    background: var(--v2-bg-subtle, #fafafa);
+    color: var(--v2-ink);
+    opacity: 0.82;
+    background: var(--v2-line-soft);
     border-radius: 6px;
     padding: 7px 9px;
     max-height: 190px;
