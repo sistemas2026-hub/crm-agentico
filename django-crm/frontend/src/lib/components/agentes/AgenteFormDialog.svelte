@@ -131,7 +131,7 @@
 </script>
 
 <Dialog.Root bind:open onOpenChange={(v) => onOpenChange?.(v)}>
-  <Dialog.Content class="sm:max-w-2xl">
+  <Dialog.Content class="sm:max-w-5xl">
     <Dialog.Header>
       <Dialog.Title>{modo === 'crear' ? 'Nuevo agente' : `Editar ${agente?.nombre ?? ''}`}</Dialog.Title>
       <Dialog.Description>
@@ -140,7 +140,19 @@
       </Dialog.Description>
     </Dialog.Header>
 
-    <div class="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
+    <!--
+      Dos columnas en pantalla ancha, y cada una con su propio scroll. Antes
+      todo iba en una sola tira: la descripcion -que es el texto mas largo y el
+      unico que hay que LEER de corrido- quedaba espachurrada en 3 filas entre
+      los campos de arriba y una lista de 12 herramientas. Separadas, la
+      descripcion se queda con el alto entero del dialogo y la lista de
+      herramientas scrollea sin empujarla.
+
+      En pantalla angosta vuelve a una columna y scrollea el conjunto, que es
+      lo unico que entra.
+    -->
+    <div class="grid max-h-[62vh] gap-x-5 gap-y-3 overflow-y-auto pr-1 md:grid-cols-2 md:overflow-hidden">
+      <div class="flex min-h-0 flex-col gap-3">
       <div class="grid grid-cols-2 gap-2">
         <label class="space-y-1 text-sm">
           <span class="font-medium">Nombre (identificador) <span class="text-red-600">*</span></span>
@@ -188,18 +200,32 @@
         </label>
       </div>
 
-      <label class="space-y-1 text-sm">
+      <label class="flex min-h-0 flex-1 flex-col gap-1 text-sm">
         <span class="font-medium">Descripción / instrucciones <span class="text-red-600">*</span></span>
+        <!--
+          Esto no es una nota interna: entra TAL CUAL en el prompt de cada
+          turno (la pieza 'Tu rol especifico', ver "Que recibe este agente" en
+          la tarjeta). Vale decirlo, porque cambia como se escribe: no se
+          redacta para un compañero, se redacta para el modelo.
+        -->
+        <span class="text-xs text-[var(--text-secondary)]">
+          Se le entrega al modelo en cada turno, tal cual. Escribí qué hace, con quién habla y
+          sobre todo qué <em>no</em> debe hacer.
+        </span>
         <textarea
           bind:value={descripcion}
-          rows="3"
           placeholder="Qué hace este agente, con quién habla, qué NO debe hacer."
-          class="w-full rounded-md border border-[var(--border-default)] bg-[var(--surface-default)] p-2 text-sm"
+          class="min-h-[15rem] w-full flex-1 resize-y rounded-md border border-[var(--border-default)] bg-[var(--surface-default)] p-3 text-[13px] leading-[1.65]"
         ></textarea>
+        <span class="text-xs text-[var(--text-secondary)]">
+          {descripcion.length} caracteres
+        </span>
       </label>
+      </div>
 
-      <div class="space-y-2">
+      <div class="flex min-h-0 flex-col gap-2">
         <span class="text-sm font-medium">Herramientas que puede usar</span>
+        <div class="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
         {#each catalogo as herr (herr.nombre)}
           <div class="rounded-md border border-[var(--border-default)] p-2">
             <label class="flex items-start gap-2 text-sm">
@@ -271,6 +297,7 @@
             {/if}
           </div>
         {/each}
+        </div>
       </div>
     </div>
 
