@@ -205,11 +205,40 @@ roles:
       Lo que resolves VOS, al instante (protocolo de atencion al cliente, S6):
       consultas de saldo, estado de factura y estado del servicio. Tambien un
       primer diagnostico cuando el cliente dice que no tiene internet o
-      perdio la señal: usa ping_cliente y segui su protocolo (si responde,
-      la causa no es de red -- revisa plan/facturacion o escala para
-      revision mas profunda; si no responde o responde poco, guialo con las
-      luces del router y un reinicio de 30 segundos, siguiendo el
-      protocolo de esa herramienta).
+      perdio la señal:
+
+      Llama ping_cliente, consultar_estado_ont y consultar_senal_ont --
+      las tres, CADA UNA UNA SOLA VEZ por turno (nunca repitas una que ya
+      te respondio, aunque el resultado no te convenza -- si necesitas mas
+      informacion, la unica que se puede llamar de nuevo mas a fondo es
+      diagnosticar_falla_ont). Con lo que devuelvan, segui este criterio:
+
+      - Si ping_cliente NO respondio o respondio poco: la causa es de red
+        del lado del cliente. Guialo con las luces del router y un
+        reinicio de 30 segundos (que lo haga el/ella), siguiendo el
+        protocolo de esa herramienta. NO ofrezcas reiniciar_ont en este
+        caso -- si el equipo ni responde al ping, un reinicio remoto
+        tampoco va a llegar.
+
+      - Si ping_cliente SI respondio, y consultar_estado_ont y
+        consultar_senal_ont tambien funcionaron: contale en una frase lo
+        que encontraste ("tu equipo esta en linea y la señal te llega
+        bien", o lo que corresponda) -- nunca el numero en dBm ni el
+        nombre tecnico de la causa, eso es para un colaborador interno,
+        no para el cliente. Si el equipo esta en linea Y la señal dio
+        'aceptable': proponele un reinicio remoto (reiniciar_ont) ANTES
+        de escalar a un humano -- avisale que el equipo va a quedar sin
+        conexion uno o dos minutos. Es un equipo electronico que a veces
+        necesita reinicio, y ya descartaste que sea un problema de red
+        real. Si ya lo intentaste en esta conversacion y el cliente sigue
+        igual, no lo ofrezcas de nuevo: deriva.
+
+      - Si consultar_estado_ont o consultar_senal_ont fallan (ej. este
+        cliente no tiene el equipo registrado en este sistema todavia) o
+        la señal NO dio 'aceptable': NO ofrezcas el reinicio remoto.
+        Segui el mismo camino que si nunca hubieras tenido este dato --
+        luces del router, reinicio manual de 30 segundos -- sin
+        mencionarle al cliente ningun error tecnico.
 
       Una factura PENDIENTE no corta el servicio por si sola: solo lo afecta
       a partir de la FECHA DE CORTE. Compara esa fecha con la de hoy antes de
@@ -219,9 +248,10 @@ roles:
       una deuda esta limitando el servicio cuando la fecha de corte es
       futura: es falso y el cliente lo sabe.
 
-      Lo que NO resolves y derivas a un colaborador humano: si despues de
-      usar ping_cliente y el reinicio de 30 segundos el cliente sigue sin
-      servicio, deriva. Tambien derivas siempre traslados, reconexion,
+      Lo que NO resolves y derivas a un colaborador humano: si despues del
+      diagnostico de arriba (ping, y el reinicio que corresponda -- remoto
+      con reiniciar_ont o manual de 30 segundos, segun el caso) el cliente
+      sigue sin servicio, deriva. Tambien derivas siempre traslados, reconexion,
       instalaciones nuevas, reclamos formales, y cambio de contrasena (el
       protocolo dice que esto se resuelve al instante, pero todavia no
       existe esa herramienta aqui -- hasta que exista, se deriva). Al
@@ -1020,7 +1050,13 @@ herramientas:
     auth_ref: SMARTOLT_API_KEY
     auth_esquema: ""
     auth_header: X-Token
-    extraer_de: onu_status
+    # SIN 'extraer_de': la respuesta de este endpoint es PLANA
+    # ({onu_status, last_status_change, status, response_code}), no trae un
+    # objeto envolvente. Declararlo extraia el STRING 'Online' en vez de un
+    # dict, y el filtro de campos lo descartaba entero con "Formato de
+    # respuesta no reconocido" -- el modelo recibia un error donde deberia
+    # haber un dato, y el registro de auditoria lo marcaba como exitoso
+    # igual (la llamada HTTP si funcionaba). Encontrado 14/08/2026.
     inyectar_sesion:
       sn_onu: sn_onu
 
@@ -1041,7 +1077,9 @@ herramientas:
     auth_ref: SMARTOLT_API_KEY
     auth_esquema: ""
     auth_header: X-Token
-    extraer_de: onu_signal
+    # SIN 'extraer_de', mismo motivo que consultar_estado_ont (ver arriba):
+    # la respuesta es plana, 'onu_signal' es un campo ('Very good'), no un
+    # objeto envolvente.
     inyectar_sesion:
       sn_onu: sn_onu
     # G-GO-04 (guia de diagnostico de fallas de conectividad, campo -- ONT
@@ -1058,7 +1096,13 @@ herramientas:
   - nombre: reiniciar_ont
     tipo: http
     descripcion: >
-      Reinicia la ONT del cliente. Contrato del proveedor (documentado,
+      LLAMALA (no sugieras el reinicio manual del router, no escales) apenas
+      consultar_senal_ont haya dado 'aceptable' Y ping_cliente haya
+      respondido bien, en un cliente que dice no tener internet -- ese es
+      exactamente el caso para el que existe esta herramienta, y usar el
+      reinicio manual en su lugar le hace perder tiempo al cliente para
+      lograr lo mismo que esto hace en un paso. Reinicia la ONT del cliente.
+      Contrato del proveedor (documentado,
       agosto 2026): comando fire-and-forget -- confirma que SE MANDO, no que
       la ONT ya reinicio ni que el problema se resolvio. Avisale al cliente
       que el equipo va a estar sin conexion **uno o dos minutos** (medido en
@@ -1091,8 +1135,37 @@ herramientas:
       sn_onu: sn_onu
     exige_previas:
       - {herramienta: consultar_senal_ont, campo: onu_signal_1490_veredicto, valor: aceptable}
-      - {herramienta: ping_cliente, campo: "ping-exitoso", valor: true}
+      # 'ping-exitoso' de WispHub es TEXTO ("3 de 3", "0 de 3"), nunca un
+      # booleano -- 'valor: true' aca NUNCA podia coincidir, la precondicion
+      # estuvo imposible de cumplir desde que se escribio (encontrado
+      # 14/08/2026 recien al ver que el modelo nunca lograba ofrecer el
+      # reinicio, ni una vez, en varias pruebas reales). "3 de 3" queda fijo
+      # porque 'argumentos_fijos.pings' de ping_cliente tambien esta fijo en
+      # 3 -- si ese numero cambia alguna vez, cambiar este tambien.
+      - {herramienta: ping_cliente, campo: "ping-exitoso", valor: "3 de 3"}
     limite_por_conversacion: 1
+    # Empujon de segunda oportunidad -- ver el campo en schema.py. El motor
+    # inyecta esto apenas la señal y el ping YA dieron favorable en esta
+    # conversacion, para que el modelo lo considere antes de redactar (no
+    # pudo haberlo pedido en el mismo lote que recien trajo esos datos).
+    # El texto insiste en EJECUTAR y no en anunciar por un motivo medido
+    # (14/08/2026): con una redaccion mas suave ("decidi si corresponde
+    # llamar a reiniciar_ont"), el modelo le contestaba al cliente "voy a
+    # reiniciarlo de forma remota" SIN llamar la herramienta -- prometia una
+    # accion que nunca ocurria, que es peor que no ofrecerla.
+    sugerir_cuando_disponible: >
+      El diagnostico (señal + ping) dio favorable, asi que reiniciar la ONT
+      es el siguiente paso -- no el reinicio manual del router, no escalar a
+      un humano.
+
+      LLAMA LA HERRAMIENTA reiniciar_ont AHORA, en este mismo paso. No
+      anuncies que la vas a usar ni le prometas al cliente que vas a
+      reiniciar: si no la llamas, el reinicio NO ocurre y le habrias
+      mentido. Primero ejecutala, y recien despues contale al cliente que
+      ya la reiniciaste y que espere uno o dos minutos.
+
+      Unica excepcion: si el cliente ya te dijo en este intercambio que no
+      quiere que la reinicies.
 
   - nombre: diagnosticar_falla_ont
     tipo: http

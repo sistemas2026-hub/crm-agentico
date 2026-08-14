@@ -18,6 +18,7 @@ tenant puede o no llamarlo (eso lo resuelve el motor antes de invocar esto).
 
 from __future__ import annotations
 
+import re
 import time
 
 import requests
@@ -184,17 +185,37 @@ def _escribir_anidado(dato: dict, campo: str, sufijo: str, valor) -> None:
         dato[f"{campo}{sufijo}"] = valor
 
 
+def _a_numero(valor):
+    """El valor como float, o None si no hay ningun numero que sacarle.
+
+    Acepta texto con unidad pegada -- SmartOLT devuelve la señal optica como
+    '-20.04 dBm', no como -20.04, y una ONU offline devuelve '-' a secas.
+    Exigir que ya sea numerico (lo que hacia esta funcion antes) dejaba el
+    veredicto sin calcular EN TODOS LOS CASOS para esa API, en silencio:
+    'aceptable' nunca aparecia, y con el la precondicion de reiniciar_ont
+    nunca podia cumplirse. Encontrado 14/08/2026."""
+    if isinstance(valor, bool):
+        return None                      # True/False no son medidas
+    if isinstance(valor, (int, float)):
+        return float(valor)
+    if isinstance(valor, str):
+        m = re.search(r"-?\d+(?:\.\d+)?", valor)
+        if m:
+            return float(m.group(0))
+    return None
+
+
 def _aplicar_veredictos(herramienta, dato) -> None:
     """Muta 'dato' in-place agregando '{campo}_veredicto' segun los rangos
     declarados en Herramienta.veredictos -- ver el campo en schema.py.
-    Silencioso si el campo no esta o no es numerico: no toda respuesta trae
-    todos los campos (ej. una ONU offline sin lectura de senal), y eso no es
-    un error del ejecutor."""
+    Silencioso si el campo no esta o no tiene un numero que leer: no toda
+    respuesta trae todos los campos (ej. una ONU offline devuelve '-' en vez
+    de la señal), y eso no es un error del ejecutor."""
     if not herramienta.veredictos or not isinstance(dato, dict):
         return
     for campo, rangos in herramienta.veredictos.items():
-        valor = _leer_anidado(dato, campo)
-        if not isinstance(valor, (int, float)):
+        valor = _a_numero(_leer_anidado(dato, campo))
+        if valor is None:
             continue
         for rango in rangos:
             si_desde = rango.desde is None or valor >= rango.desde

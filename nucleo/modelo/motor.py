@@ -267,6 +267,38 @@ def _ejecutar_confirmacion(sesion, argumentos_modelo: dict) -> dict:
                "ni escales a un humano solo por este motivo."}
 
 
+def _buscar_campo(dato, campo: str):
+    """El valor de 'campo' dentro de la respuesta YA FILTRADA de una
+    herramienta, sea cual sea la forma en que quedo.
+
+    Existe porque esa forma NO es una sola. 'nucleo/seguridad/listas_blancas.py'
+    normaliza una respuesta de lista a {'total': N, 'resultados': [...]}, y
+    cada fila puede traer un campo distinto -- ping_cliente devuelve
+    exactamente eso: [{'ping-1': {...}}, ..., {'ping-exitoso': '3 de 3'}].
+    Buscar solo en el primer nivel encuentra 'total' y 'resultados', nunca
+    'ping-exitoso'.
+
+    Costo un bug real (agosto 2026): la precondicion de 'reiniciar_ont'
+    nunca podia cumplirse, el modelo jamas lograba ofrecer el reinicio, y
+    desde afuera se veia identico a "el modelo no quiere hacerlo" -- se
+    perdio tiempo ajustando prompts antes de mirar la forma del dato.
+    """
+    if isinstance(dato, dict):
+        if campo in dato:
+            return dato[campo]
+        for anidado in dato.values():
+            if isinstance(anidado, (dict, list)):
+                encontrado = _buscar_campo(anidado, campo)
+                if encontrado is not None:
+                    return encontrado
+    elif isinstance(dato, list):
+        for item in dato:
+            encontrado = _buscar_campo(item, campo)
+            if encontrado is not None:
+                return encontrado
+    return None
+
+
 def _previas_no_cumplidas(herramienta, historial: list[dict]) -> list[str]:
     """Nombres de las herramientas de 'exige_previas' (schema.py) que
     TODAVIA no dieron el resultado favorable declarado, en esta conversacion.
@@ -284,10 +316,9 @@ def _previas_no_cumplidas(herramienta, historial: list[dict]) -> list[str]:
                 dato = json.loads(msg.get("content") or "null")
             except (TypeError, ValueError):
                 continue
-            if isinstance(dato, dict):
-                # No se corta al primer match: la ULTIMA ocurrencia en el
-                # historial (mas reciente) es la que decide.
-                cumplida = dato.get(previa.campo) == previa.valor
+            # No se corta al primer match: la ULTIMA ocurrencia en el
+            # historial (mas reciente) es la que decide.
+            cumplida = _buscar_campo(dato, previa.campo) == previa.valor
         if not cumplida:
             faltantes.append(previa.herramienta)
     return faltantes
@@ -525,6 +556,18 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
             and not es_factor_de_posesion(sesion.identificador_canal)):
         nivel_exigido = max(nivel_exigido, 1)
 
+    # Cache DENTRO DE ESTE TURNO: {(nombre, argumentos_del_modelo) -> (salida,
+    # codigo_error)}. Visto en vivo (agosto 2026, diagnostico de SmartOLT): el
+    # modelo a veces pide la MISMA consulta de solo lectura dos veces en el
+    # mismo turno (dos iteraciones del bucle de abajo), sin que haya pasado
+    # nada nuevo que justifique repetirla -- duplica la latencia y el consumo
+    # de la API externa sin agregar dato alguno. Solo aplica a solo_lectura:
+    # una escritura nunca se sirve de una copia vieja.
+    cache_turno: dict[tuple[str, str], tuple[object, str | None]] = {}
+    # Que herramientas ya recibieron el empujon de 'sugerir_cuando_disponible'
+    # en este turno -- ver el bloque despues del for de abajo.
+    ya_sugeridas_este_turno: set[str] = set()
+
     hubo_llamadas = False
     iteraciones = 0
     while iteraciones < config.llm.limite_iteraciones_agente:
@@ -604,16 +647,23 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                              "seguir el caso."}
                 codigo_error = "LIMITE_DE_CONVERSACION"
             else:
-                try:
-                    crudo = _ejecutar_tool(herramienta, sesion, llamada.argumentos,
-                                          config.identidad.slug, config.variables_tenant)
-                    salida = listas_blancas.filtrar_campos(rol_cfg, herramienta.nombre, crudo)
-                except Exception as e:
-                    # No tumba el turno: el modelo recibe un error legible y
-                    # puede decirle al cliente que hubo un problema, en vez de
-                    # que /chat completo se caiga con un 500.
-                    salida = {"error": "No se pudo completar la consulta en este momento."}
-                    codigo_error = f"{type(e).__name__}: {e}"[:200]
+                clave_cache = (herramienta.nombre,
+                              json.dumps(llamada.argumentos or {}, sort_keys=True))
+                if herramienta.solo_lectura and clave_cache in cache_turno:
+                    salida, codigo_error = cache_turno[clave_cache]
+                else:
+                    try:
+                        crudo = _ejecutar_tool(herramienta, sesion, llamada.argumentos,
+                                              config.identidad.slug, config.variables_tenant)
+                        salida = listas_blancas.filtrar_campos(rol_cfg, herramienta.nombre, crudo)
+                    except Exception as e:
+                        # No tumba el turno: el modelo recibe un error legible y
+                        # puede decirle al cliente que hubo un problema, en vez de
+                        # que /chat completo se caiga con un 500.
+                        salida = {"error": "No se pudo completar la consulta en este momento."}
+                        codigo_error = f"{type(e).__name__}: {e}"[:200]
+                    if herramienta.solo_lectura:
+                        cache_turno[clave_cache] = (salida, codigo_error)
 
             # asistente.tool_calls: fila por invocacion, para la auditoria en
             # /conversaciones (nucleo/canales/api.py la persiste despues, una
@@ -641,6 +691,24 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
             historial.append({"role": "tool", "name": llamada.nombre,
                               "tool_call_id": f"call_{i}",
                               "content": json.dumps(salida, ensure_ascii=False)})
+
+        # Segunda oportunidad de decision: el modelo que arma esta tanda de
+        # llamadas lo hace ANTES de tener los resultados, asi que no puede
+        # haber decidido llamar 'reiniciar_ont' (ni cualquier otra con
+        # 'exige_previas') en el mismo lote que recien la habilita. Sin este
+        # empujon, el modelo tipicamente pasa derecho a redactar con lo que
+        # ya tiene -- la respuesta final ('_redactar') ni siquiera puede
+        # llamar herramientas (tools=None), asi que esta es la UNICA
+        # ventana. Una vez por herramienta por turno (no reinsistir si el
+        # modelo ya lo vio y opto por otra cosa) y solo si todavia no se
+        # intento ejecutar en esta conversacion.
+        for h in herramientas:
+            if (h.exige_previas and h.sugerir_cuando_disponible
+                    and h.nombre not in ya_sugeridas_este_turno
+                    and _veces_ejecutada(h, historial) == 0
+                    and not _previas_no_cumplidas(h, historial)):
+                historial.append({"role": "system", "content": h.sugerir_cuando_disponible})
+                ya_sugeridas_este_turno.add(h.nombre)
 
     if hubo_llamadas:
         return _redactar(referencia_redaccion, historial, config.llm.temperatura), registro

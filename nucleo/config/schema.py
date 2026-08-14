@@ -544,6 +544,20 @@ class Herramienta(Base):
     # RECIENTE de cada herramienta requerida -- una que cumplio hace varios
     # mensajes pero ya no representa el estado actual no cuenta.
     exige_previas: list[Precondicion] = Field(default_factory=list)
+    # Texto que el motor inyecta como mensaje 'system' apenas 'exige_previas'
+    # queda satisfecha (y esta herramienta todavia no se llamo en la
+    # conversacion) -- SOLO si 'exige_previas' esta declarado, no tiene
+    # sentido sin precondicion que "recien se cumpla".
+    #
+    # Existe porque un texto en el prompt del rol o en la propia descripcion
+    # de la herramienta NO alcanza (probado en vivo, agosto 2026, con
+    # reiniciar_ont): el modelo que decide que herramienta llamar solo ve esas
+    # instrucciones ANTES de pedir los datos que activan la precondicion, y
+    # el modelo que redacta la respuesta final no puede llamar herramientas
+    # (tools=None). Sin este mensaje, nadie le da al modelo una SEGUNDA
+    # oportunidad de decision justo cuando el dato que la habilita ya esta
+    # disponible -- se queda con el plan que armo antes de tener el dato.
+    sugerir_cuando_disponible: str | None = None
     # Tope de veces que esta herramienta puede ejecutarse en UNA conversacion
     # (None = sin tope). Pensado para 'reiniciar_ont': un cliente que insiste
     # ("reiniciá otra vez") no puede hacer que el modelo corte el servicio

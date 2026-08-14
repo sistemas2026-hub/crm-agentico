@@ -255,6 +255,29 @@ llamada devuelve el ping de verdad. **`arp_ping` exige `interfaz`**, y como
 `interfaz_lan` vacio es normal (ver mas arriba), dejarlo en true rompe el
 diagnostico de muchos clientes sin que nada lo denuncie.
 
+**`interfaz_lan` PRESENTE pero incorrecta rompe el ping igual que `arp_ping`
+mal puesto -- mismo sintoma, causa distinta.** El caso de arriba es con el
+campo vacio (normal). Si el campo tiene un valor que no corresponde a esta
+ONU en particular (visto en vivo, agosto 2026, en una ficha de prueba), el
+mismo error de texto aparece igual (`"input does not match any value of
+interface"`), no importa `arp_ping`. La leccion completa: no confiar en
+`interfaz_lan` en absoluto para pinguear -- ver mas abajo por que
+`ping_cliente` dejo de inyectarlo del todo.
+
+**`ping-exitoso` es TEXTO ("3 de 3", "0 de 3"), nunca un booleano.**
+Verificado en vivo (agosto 2026). Costo un bug real: una precondicion de
+`Herramienta.exige_previas` (`nucleo/config/schema.py`) se declaro con
+`valor: true`, comparacion EXACTA contra un campo que en realidad nunca es
+`true`/`false` sino la cadena `"N de M"` -- la precondicion quedo imposible
+de cumplir desde el dia que se escribio, sin que ningun error lo avisara (el
+modelo simplemente nunca podia pasar el gate, y eso se veia identico a "el
+modelo no quiere ofrecer esto"). Se detecto recien despues de varias pruebas
+en vivo fallidas, sospechando primero del modelo y no del dato. Leccion: al
+declarar una `Precondicion` contra un campo de una API externa, verificar el
+VALOR Y EL TIPO reales (con una llamada real o revisando esta skill), nunca
+asumir que "exitoso" se traduce a un booleano solo porque el nombre del
+campo lo sugiere.
+
 
 **Los filtros de estado son NUMERICOS.** `?estado=Nuevo` devuelve 0 resultados
 sin error alguno. Parece "no hay tickets nuevos"; en realidad la consulta no
