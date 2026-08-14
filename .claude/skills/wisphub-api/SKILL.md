@@ -273,6 +273,18 @@ para comparar nada. En facturas el recorte son ~2 ultimos meses de emision.
 Mas alla devuelve HTTP 400. Se valida ANTES de llamar, o el asesor ve un
 "fallo al llamar a WispHub" sin saber por que.
 
+**`sn_onu` solo lo tiene el 68% de los clientes activos.** Medido el 14/08/2026
+sobre los 4.163 activos (paginacion verificada: 4.163 filas, 4.163 ids
+distintos): 2.864 traen serial, **1.299 lo tienen vacio**. Una primera muestra
+de las 12 primeras paginas daba 75% — el sesgo de las primeras paginas es real,
+hay que recorrer todo.
+
+Importa porque `sn_onu` es la llave contra SmartOLT (y contra cualquier sistema
+que indexe por ONU): **1 de cada 3 clientes no se puede diagnosticar por ahi**,
+y una herramienta que lo asuma le falla a un tercio de la base. El formato es
+uniforme: 12 caracteres con prefijo de fabricante (`HWTC*` Huawei, `CDTC*`,
+`DF*`, `DC*`).
+
 **El campo `telefono` guarda varios numeros en uno.** El 55% de los clientes.
 Leerlo como valor unico da 43% de cobertura; extrayendo todos los moviles
 (`(?<!\d)3\d{9}(?!\d)`), 98.7%.
