@@ -1,6 +1,11 @@
 import { fail } from '@sveltejs/kit';
 import { borrarSecreto, guardarSecreto, listarSecretos } from '$lib/server/v2/canal-whatsapp.js';
-import { guardarVariable, leerSmartOlt, REF_API_KEY } from '$lib/server/v2/smartolt.js';
+import {
+  guardarVariable,
+  leerSmartOlt,
+  probarConexion as probarConexionSmartolt,
+  REF_API_KEY
+} from '$lib/server/v2/smartolt.js';
 
 const SOLO_ADMIN = 'Solo un administrador puede cambiar esto.';
 
@@ -63,5 +68,28 @@ export const actions = {
       return fail(400, { subdominioError: err?.message || 'No se pudo guardar el subdominio.' });
     }
     return { subdominioGuardado: true };
+  },
+
+  /**
+   * Prueba con lo que la persona tiene escrito en ESE momento (subdominio +
+   * clave), no con lo ya guardado -- asi se corrige un dato mal pegado sin
+   * guardar primero. Ver smartolt.js::probarConexion().
+   */
+  async probarConexion({ request, locals }) {
+    if (locals.profile?.role !== 'ADMIN') return fail(403, { pruebaError: SOLO_ADMIN });
+
+    const form = await request.formData();
+    const subdominio = form.get('subdominio')?.toString().trim() ?? '';
+    const apiKey = form.get('api_key')?.toString().trim() ?? '';
+    if (!subdominio || !apiKey) {
+      return fail(400, { pruebaError: 'Pegá el subdominio y la clave antes de probar.' });
+    }
+
+    try {
+      const resultado = await probarConexionSmartolt(subdominio, apiKey);
+      return { prueba: resultado };
+    } catch (/** @type {any} */ err) {
+      return fail(400, { pruebaError: err?.message || 'No se pudo probar la conexión.' });
+    }
   }
 };

@@ -899,6 +899,67 @@ def secretos_borrar(nombre):
 
 
 # =============================================================================
+#  DIAGNOSTICO DE INTEGRACIONES  -  probar credenciales antes de guardarlas
+# =============================================================================
+
+@app.post("/diagnostico/smartolt")
+def diagnostico_smartolt():
+    """
+    Prueba de conectividad de solo lectura contra SmartOLT, con lo que la
+    persona acaba de pegar en la pantalla de ajustes -- ANTES de guardarlo
+    como secreto/variable, para poder corregir un dato mal pegado sin
+    round-trip.
+
+    El endpoint (GET /api/onu/get_all_onus_details) y el header (X-Token,
+    no Authorization) quedaron CONFIRMADOS en vivo contra la instancia real
+    de Rapilink -- ver .claude/skills/smartolt-api/SKILL.md. No se usa
+    'get_olts' para esto pese a ser mas liviano: el proveedor pide
+    explicitamente no usarlo como heartbeat/chequeo de conexion (misma
+    skill).
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    base_url = (cuerpo.get("base_url") or "").strip().rstrip("/")
+    api_key = (cuerpo.get("api_key") or "").strip()
+    if not base_url or not api_key:
+        return jsonify({"error": "Faltan campos: base_url, api_key"}), 400
+
+    import requests
+
+    try:
+        r = requests.get(f"{base_url}/api/onu/get_all_onus_details",
+                         headers={"X-Token": api_key}, timeout=10)
+    except requests.exceptions.SSLError:
+        return jsonify({"ok": False, "detalle": "El dominio no tiene HTTPS valido -- revisa la URL."})
+    except requests.exceptions.ConnectionError:
+        return jsonify({"ok": False, "detalle": "No se pudo conectar -- revisa el subdominio."})
+    except requests.exceptions.Timeout:
+        return jsonify({"ok": False, "detalle": "El servidor no respondio a tiempo."})
+    except Exception as e:
+        return jsonify({"ok": False, "detalle": f"{type(e).__name__}: {e}"})
+
+    if r.status_code == 200:
+        try:
+            cuerpo_resp = r.json()
+        except ValueError:
+            return jsonify({"ok": False, "detalle": "Respondio 200 pero sin JSON -- "
+                             "revisar si la ruta es la correcta."})
+        # SIN 'muestra' con los registros crudos: get_all_onus_details trae
+        # nombre y direccion del cliente por ONU (ver tabla de riesgo en la
+        # skill smartolt-api) -- un chequeo de conexion no tiene que devolver
+        # datos de clientes al navegador. La cantidad alcanza para confirmar
+        # que la clave sirve.
+        cantidad = len(cuerpo_resp) if isinstance(cuerpo_resp, list) else 1
+        return jsonify({"ok": True,
+                        "detalle": f"Conexion correcta -- {cantidad} ONU(s) visibles con esta clave."})
+    if r.status_code in (401, 403):
+        return jsonify({"ok": False, "detalle": f"La API key fue rechazada (HTTP {r.status_code})."})
+    if r.status_code == 404:
+        return jsonify({"ok": False, "detalle": "HTTP 404 -- el subdominio responde, pero esta ruta "
+                         "no existe en esta cuenta (la API real puede diferir de la hipotesis)."})
+    return jsonify({"ok": False, "detalle": f"HTTP {r.status_code}: {r.text[:200]}"})
+
+
+# =============================================================================
 #  CONVERSACIONES  -  solo lectura, la bandeja de chats con clientes finales
 # =============================================================================
 

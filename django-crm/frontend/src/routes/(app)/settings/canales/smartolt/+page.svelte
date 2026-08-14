@@ -15,7 +15,7 @@
   import Pill from '$lib/v2/components/Pill.svelte';
   import { shortAge } from '$lib/v2/format.js';
   import { enhance } from '$app/forms';
-  import { Check, Eye, EyeOff } from '@lucide/svelte';
+  import { Check, Eye, EyeOff, Plug } from '@lucide/svelte';
 
   /** @type {{ data: any, form: any }} */
   let { data, form } = $props();
@@ -51,6 +51,15 @@
   const enviando = () => {
     return async (/** @type {any} */ { update }) => {
       await update();
+    };
+  };
+
+  let probando = $state(false);
+  const probandoConexion = () => {
+    probando = true;
+    return async (/** @type {any} */ { update }) => {
+      await update();
+      probando = false;
     };
   };
 </script>
@@ -201,6 +210,40 @@
               </form>
             {/if}
           </div>
+        {/if}
+      </div>
+
+      <div class="v2-label" style="margin:22px 0 10px">Probar conexión</div>
+      <div class="v2-card" style="padding:16px">
+        <p class="v2-sub" style="font-size:11.5px;margin:0 0 10px;line-height:1.5">
+          Llama a SmartOLT en el momento con el subdominio y la clave que tenés escritos arriba —
+          sirve para confirmar que valen ANTES de guardarlos, sin ida y vuelta.
+        </p>
+        {#if !pegado}
+          <p class="v2-sub" style="font-size:11.5px;margin:0">
+            Pegá la clave de API arriba para poder probar.
+          </p>
+        {:else if data.can_edit}
+          <form method="POST" action="?/probarConexion" use:enhance={probandoConexion}>
+            <input type="hidden" name="subdominio" value={subdominio} />
+            <input type="hidden" name="api_key" value={pegado} />
+            <button class="v2-btn v2-btn-sm" type="submit" disabled={probando}>
+              <Plug size={13} />
+              {probando ? 'Probando…' : 'Probar conexión'}
+            </button>
+          </form>
+        {/if}
+        {#if form?.pruebaError}<p class="v2-error" style="font-size:11.5px;margin:10px 0 0">
+            {form.pruebaError}
+          </p>{/if}
+        {#if form?.prueba}
+          <p
+            class="v2-sub"
+            style="font-size:11.5px;margin:10px 0 0;font-weight:600"
+            style:color={form.prueba.ok ? 'var(--v2-moss)' : 'var(--v2-clay)'}
+          >
+            {form.prueba.detalle}
+          </p>
         {/if}
       </div>
     {/if}

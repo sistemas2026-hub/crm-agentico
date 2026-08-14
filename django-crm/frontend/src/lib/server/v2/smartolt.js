@@ -76,4 +76,27 @@ export async function guardarVariable(nombre, valor) {
   return datos;
 }
 
+/**
+ * Prueba de conectividad de solo lectura contra SmartOLT, con lo que la
+ * persona tiene ESCRITO en pantalla en ese momento -- no lo ya guardado --
+ * para poder corregir un dato mal pegado sin round-trip de guardar primero.
+ * Ver POST /diagnostico/smartolt en nucleo/canales/api.py.
+ * @param {string} subdominio
+ * @param {string} apiKey
+ * @returns {Promise<{ ok: boolean, detalle: string }>}
+ */
+export async function probarConexion(subdominio, apiKey) {
+  const cfg = destino();
+  if (!cfg) throw new Error('Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT).');
+
+  const resp = await fetch(`${cfg.baseUrl}/diagnostico/smartolt`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ base_url: subdominio, api_key: apiKey })
+  });
+  const datos = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(datos.error || 'No se pudo probar la conexión.');
+  return datos;
+}
+
 export { REF_API_KEY };
