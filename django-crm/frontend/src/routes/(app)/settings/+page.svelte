@@ -190,7 +190,21 @@
           // la senal de que alguien empezo la carga y no llego a activarlo,
           // no el estado de "todavia nadie lo toco".
           warn: !!data.canalWhatsapp && !data.canalWhatsapp.activo && !!data.canalWhatsapp.numero_visible
-        }
+        },
+        // Solo aparece si el catalogo del tenant declara las herramientas de
+        // SmartOLT -- un tenant sin esa integracion no tiene por que ver un
+        // destino que no lleva a nada util.
+        ...(data.smartolt?.instalado
+          ? [
+              {
+                href: '/settings/canales/smartolt',
+                title: 'SmartOLT',
+                body: 'La clave que le da al asistente lectura y reinicio de la ONU del cliente.',
+                value: data.smartolt.tiene_clave ? 'Clave cargada' : null,
+                warn: !data.smartolt.tiene_clave
+              }
+            ]
+          : [])
       ]
     },
     {

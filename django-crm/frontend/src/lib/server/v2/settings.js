@@ -19,6 +19,7 @@
  */
 import { leerConfiguracionAsistente } from './asistente-config.js';
 import { leerCanalWhatsapp } from './canal-whatsapp.js';
+import { leerSmartOlt } from './smartolt.js';
 import { getBusinessHours } from './business-hours.js';
 import { getCustomFields } from './custom-fields.js';
 import { getEscalationPolicies } from './escalation.js';
@@ -110,7 +111,8 @@ export async function getSettingsHub(event) {
     tag,
     field,
     asistente,
-    canalWhatsapp
+    canalWhatsapp,
+    smartolt
   ] = await Promise.all([
     getOrgSettings(event),
     getBusinessHours(event),
@@ -128,7 +130,8 @@ export async function getSettingsHub(event) {
     // y puede no estar desplegado. Si tirara, se caeria el hub entero y el
     // sintoma seria "no puedo entrar a configuracion".
     leerConfiguracionAsistente(),
-    leerCanalWhatsapp()
+    leerCanalWhatsapp(),
+    leerSmartOlt()
   ]);
 
   const now = Date.now();
@@ -154,6 +157,7 @@ export async function getSettingsHub(event) {
     // null = no hay asistente, o no contesta. El hub lista igual sus destinos,
     // sin valor, como ya hace con lo que un miembro no puede contar.
     asistente,
-    canalWhatsapp
+    canalWhatsapp,
+    smartolt
   };
 }

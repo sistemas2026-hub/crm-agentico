@@ -721,6 +721,18 @@ def configuracion_canales():
         return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
 
     w = config.canales.whatsapp
+    # SmartOLT no es un 'canal' propiamente (no es un medio de contacto con el
+    # cliente), pero vive en el mismo endpoint por lo mismo que ping_cliente
+    # vive en el catalogo de WispHub: es la unica integracion externa nueva y
+    # no amerita todavia una seccion propia en el schema.
+    #
+    # 'subdominio' se resuelve desde 'variables_tenant' via 'base_url_ref'
+    # (no desde 'base_url' -- este software es SaaS multi-tenant, el dominio
+    # varia por empresa y tiene que poder cargarse desde esta pantalla, no
+    # quedar fijo en un YAML que solo un desarrollador edita. Ver
+    # 'base_url_ref' en nucleo/config/schema.py y PUT /configuracion/variables).
+    smartolt_tool = next((h for h in config.herramientas
+                         if h.nombre == "consultar_estado_ont"), None)
     return jsonify({"whatsapp": {
         # El slug tal cual se lo paso quien llamo -- es el mismo valor con el
         # que se arma la URL del webhook (/canales/whatsapp/<tenant_slug>), y
@@ -739,6 +751,12 @@ def configuracion_canales():
             "app_secret": w.app_secret_ref,
             "verify_token": w.verify_token_ref,
         },
+    }, "smartolt": {
+        "instalado": smartolt_tool is not None,
+        "subdominio_ref": smartolt_tool.base_url_ref if smartolt_tool else None,
+        "subdominio": (config.variables_tenant.get(smartolt_tool.base_url_ref)
+                       if smartolt_tool and smartolt_tool.base_url_ref else None),
+        "ref_clave": smartolt_tool.auth_ref if smartolt_tool else None,
     }})
 
 
@@ -765,6 +783,53 @@ def configuracion_canal_whatsapp():
     olvidar_config(tenant)
     w = config.canales.whatsapp
     return jsonify({"activo": w.activo, "numero_visible": w.numero_visible})
+
+
+@app.put("/configuracion/variables/<nombre>")
+def configuracion_variable_guardar(nombre):
+    """
+    Guarda un valor NO secreto que varia por empresa (ej. el subdominio de
+    SmartOLT) -- ver TenantConfig.variables_tenant en schema.py. Generico a
+    proposito: cualquier 'Herramienta.base_url_ref' futuro usa este mismo
+    endpoint, este archivo no necesita saber que integracion es cada una.
+    Distinto de /secretos: esto se guarda en texto plano en la config del
+    tenant (no cifrado) porque no es sensible -- un subdominio no es una
+    credencial.
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    valor = cuerpo.get("valor")
+    if not valor:
+        return jsonify({"error": "Falta el campo 'valor'"}), 400
+
+    try:
+        config = editor.guardar_variable_tenant(tenant, nombre, valor)
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
+
+    olvidar_config(tenant)
+    return jsonify({"nombre": nombre, "valor": config.variables_tenant.get(nombre)})
+
+
+@app.delete("/configuracion/variables/<nombre>")
+def configuracion_variable_borrar(nombre):
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+
+    try:
+        editor.borrar_variable_tenant(tenant, nombre)
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
+
+    olvidar_config(tenant)
+    return jsonify({"borrado": nombre})
 
 
 # =============================================================================

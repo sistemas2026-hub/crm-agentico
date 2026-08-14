@@ -101,7 +101,7 @@ roles:
     cargo: Agente de Soporte
     puede_consultar: [consultar_cliente, consultar_cliente_por_cedula, consultar_ticket,
           consultar_tickets_de_cliente, contar_tickets, contar_clientes, consultar_casos_bottlecrm,
-          agendar_visita_tecnica]
+          agendar_visita_tecnica, consultar_estado_ont, consultar_senal_ont, reiniciar_ont]
     campos_permitidos:
       consultar_cliente: [id_servicio, nombre, cedula, estado, email, telefono, direccion, localidad,
         ciudad, plan_internet, zona, fecha_instalacion, estado_facturas, saldo, fecha_corte]
@@ -125,6 +125,13 @@ roles:
       # confirmar a quien se le agendo.
       agendar_visita_tecnica: [id_ticket, asunto, estado, prioridad, tecnico, departamento,
             fecha_creacion, servicio.id_servicio]
+      # SmartOLT: 'onu_status'/'last_status_change' no traen PII (ver skill
+      # smartolt-api). Soporte ve el dBm crudo ademas del veredicto -- lo
+      # necesita para escalar con datos exactos, a diferencia de
+      # cliente_final.
+      consultar_estado_ont: [onu_status, last_status_change]
+      consultar_senal_ont: [onu_signal, onu_signal_1310, onu_signal_1490, onu_signal_1490_veredicto]
+      reiniciar_ont: [status, response]
     nunca_revelar: [password_servicio, password_cpe, password_router_wifi, password_ssid_router_wifi,
       usuario_router_wifi, coordenadas]
 
@@ -231,7 +238,8 @@ roles:
       confirma=true el cliente queda verificado de verdad.
     orientado_a: cliente_final
     puede_consultar: [consultar_mi_servicio, verificar_identidad_por_cedula,
-          confirmar_identidad, ping_cliente]
+          confirmar_identidad, ping_cliente, consultar_estado_ont, consultar_senal_ont,
+          reiniciar_ont]
     campos_permitidos:
       # Lo minimo para autoservicio. El id_cliente NO lo propone el modelo:
       # lo inyecta el codigo desde la sesion autenticada.
@@ -244,6 +252,14 @@ roles:
       # la MAC del equipo, no un dato de contacto -- se deja pasar porque
       # ayuda a confirmar que respondio el equipo correcto.
       ping_cliente: ["ping-1", "ping-2", "ping-3", "ping-exitoso"]
+      # Interpretado, no crudo (PRD 12.5): 'onu_status' es Online/Offline en
+      # texto plano; 'onu_signal' es la clasificacion de SmartOLT en texto
+      # ("Very good"); 'onu_signal_1490_veredicto' es 'aceptable' o el texto
+      # de problema, calculado en codigo. Nunca el dBm crudo, ni el serial,
+      # ni topologia de red (puerto, board, OLT) -- eso es RF-07.
+      consultar_estado_ont: [onu_status]
+      consultar_senal_ont: [onu_signal, onu_signal_1490_veredicto]
+      reiniciar_ont: [response]
     nunca_revelar: [password_servicio, password_cpe, password_router_wifi, usuario_router_wifi,
           cedula, direccion, coordenadas, ip, mac_cpe, sn_onu, sectorial, router.nombre]
 
@@ -460,6 +476,16 @@ llm:
   # la autorizacion mas adelante), se le agrega su linea aqui -- pero hoy NO
   # hay modelo local corriendo en ningun lado, asi que primero habria que
   # volver a levantar ese servicio.
+
+# -----------------------------------------------------------------------------
+#  VARIABLES DE TENANT  -  no son secretos, pero SI varian por empresa
+# -----------------------------------------------------------------------------
+# Editables desde /configuracion/variables (pantalla de ajustes) una vez que
+# el tenant esta cargado en la base -- este archivo es solo la SEMILLA con la
+# que arranca. Referenciadas por 'Herramienta.base_url_ref' en 'herramientas'
+# mas abajo (ver el campo en nucleo/config/schema.py).
+variables_tenant:
+  SMARTOLT_SUBDOMINIO: https://rapilinksas.smartolt.com
 
 # -----------------------------------------------------------------------------
 #  HERRAMIENTAS
@@ -939,6 +965,110 @@ herramientas:
     metodo: POST
     auth_ref: BOTTLECRM_API_TOKEN
     auth_esquema: Bearer
+
+  # SmartOLT: control de la ONU autorizada en la OLT de fibra. Sondeado en
+  # vivo contra la instancia real de Rapilink (agosto 2026, ver
+  # .claude/skills/smartolt-api/SKILL.md) -- nunca se tomo la doc del
+  # proveedor por buena sin probarla.
+  #
+  # 'sn_onu' de WispHub sirve DIRECTO como identificador de SmartOLT, sin
+  # traduccion (verificado con el metodo del valor imposible: serial
+  # inventado -> 400, no el universo entero). Lo inyecta el codigo desde la
+  # sesion verificada, igual que 'interfaz_lan' -- el modelo nunca elige de
+  # que ONU habla. Falta en el 32% de los clientes activos (ver skill
+  # wisphub-api): para esos, la llamada falla de forma controlada (ver la
+  # guarda de 'endpoint sin resolver' en nucleo/herramientas/http.py) y el
+  # modelo cae al camino alternativo (ping + preguntas de luces).
+  - nombre: consultar_estado_ont
+    tipo: http
+    descripcion: >
+      Estado de la ONU del cliente en la OLT (Online/Offline) y hace cuanto
+      cambio. PRIMER paso del diagnostico de SmartOLT -- liviano (sin PII,
+      sin latencia relevante). Si da Offline sin que consultar_senal_ont
+      alcance para explicar por que, y hace falta distinguir sin energia de
+      falla optica, ese es un diagnostico mas profundo que todavia no esta
+      disponible como herramienta -- en ese caso segui el protocolo de
+      preguntar por las luces del equipo.
+    solo_lectura: true
+    roles_permitidos: [cliente_final, soporte]
+    base_url_ref: SMARTOLT_SUBDOMINIO
+    endpoint: /api/onu/get_onu_status/{sn_onu}
+    metodo: GET
+    auth_ref: SMARTOLT_API_KEY
+    auth_esquema: ""
+    auth_header: X-Token
+    extraer_de: onu_status
+    inyectar_sesion:
+      sn_onu: sn_onu
+
+  - nombre: consultar_senal_ont
+    tipo: http
+    descripcion: >
+      Nivel de senal optica de la ONU del cliente. SEGUNDO paso del
+      diagnostico de SmartOLT, junto con consultar_estado_ont -- llama a
+      las dos juntas para un diagnostico completo. El veredicto
+      (onu_signal_1490_veredicto) ya viene calculado contra los umbrales de
+      G-GO-04, no lo calcules vos: 'aceptable' es -8 a -25 dBm, fuera de
+      ese rango es un problema real de senal.
+    solo_lectura: true
+    roles_permitidos: [cliente_final, soporte]
+    base_url_ref: SMARTOLT_SUBDOMINIO
+    endpoint: /api/onu/get_onu_signal/{sn_onu}
+    metodo: GET
+    auth_ref: SMARTOLT_API_KEY
+    auth_esquema: ""
+    auth_header: X-Token
+    extraer_de: onu_signal
+    inyectar_sesion:
+      sn_onu: sn_onu
+    # G-GO-04 (guia de diagnostico de fallas de conectividad, campo -- ONT
+    # del cliente): -8 a -25 dBm aceptable, peor que -25 es problema del
+    # drop. El tercer tramo (mejor que -8, senal "demasiado fuerte") no esta
+    # normado en G-GO-04 -- se etiqueta como fuera de rango en vez de
+    # inventar un limite, y se deriva a revision tecnica en cualquier caso.
+    veredictos:
+      onu_signal_1490:
+        - {desde: -25, hasta: -8, etiqueta: "aceptable"}
+        - {hasta: -25.0001, etiqueta: "problema en el drop (conector, cable o tensores) -- senal debil"}
+        - {desde: -7.9999, etiqueta: "fuera del rango documentado (senal muy fuerte) -- revisar con un tecnico"}
+
+  - nombre: reiniciar_ont
+    tipo: http
+    descripcion: >
+      Reinicia la ONT del cliente. Contrato del proveedor (documentado,
+      agosto 2026): comando fire-and-forget -- confirma que SE MANDO, no que
+      la ONT ya reinicio ni que el problema se resolvio. Avisale al cliente
+      que el equipo va a estar sin conexion unos segundos y que revise si
+      volvio la señal despues.
+
+      SIN paso de aprobacion humana -- el codigo exige en su lugar que ya
+      hayas corrido consultar_senal_ont y ping_cliente EN ESTA conversacion
+      y que los dos hayan dado resultado favorable (senal aceptable, ping
+      exitoso). Si no se cumple, la herramienta se rechaza sola con el
+      motivo -- no lo intentes "igual", segui el protocolo alternativo. Es
+      exactamente la logica del equipo electronico que a veces necesita
+      reinicio PERO solo tiene sentido si ya se descarto que el problema es
+      de red: si la senal esta mal, reiniciar no arregla nada y solo
+      retrasa mandar un tecnico.
+
+      Maximo UNA vez por conversacion -- si el cliente insiste en que lo
+      reinicies de nuevo, no lo repitas: decile que un colaborador humano
+      sigue el caso.
+    solo_lectura: false
+    requiere_confirmacion: true
+    roles_permitidos: [cliente_final, soporte]
+    base_url_ref: SMARTOLT_SUBDOMINIO
+    endpoint: /api/onu/reboot/{sn_onu}
+    metodo: POST
+    auth_ref: SMARTOLT_API_KEY
+    auth_esquema: ""
+    auth_header: X-Token
+    inyectar_sesion:
+      sn_onu: sn_onu
+    exige_previas:
+      - {herramienta: consultar_senal_ont, campo: onu_signal_1490_veredicto, valor: aceptable}
+      - {herramienta: ping_cliente, campo: "ping-exitoso", valor: true}
+    limite_por_conversacion: 1
 
 # -----------------------------------------------------------------------------
 #  CANALES
