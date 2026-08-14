@@ -119,6 +119,49 @@ def sesion(tenant: str):
         con.close()
 
 
+def estado_de_conversacion_abierta(tenant: str, canal: str,
+                                   usuario_externo: str) -> dict | None:
+    """
+    Lo que hay que saber de la conversacion ABIERTA de este usuario antes de
+    atenderlo: si ya se escalo a una persona, y a quien se verifico que era.
+
+    Devuelve None si no hay ninguna abierta -- entonces es un contacto nuevo y
+    no hay nada que recordar.
+
+    Existe porque ese estado vivia SOLO en memoria del motor
+    (nucleo/canales/api.py::_sesiones) y se perdia en cada reinicio, con dos
+    consecuencias que el cliente si notaba:
+
+      - Una conversacion escalada volvia a ser atendida por el bot. Se le
+        habia dicho "te paso con un companero" y el bot seguia conversando
+        como si nada. Visto en produccion el 14/08/2026: escalada a las 00:08,
+        contestando de nuevo a las 00:16, 00:25, 00:41...
+      - Habia que pedirle la cedula otra vez. El mismo cliente se verifico
+        tres veces en una tarde.
+
+    Es la MISMA fila que reusa registrar_mensaje ('abierta' mas reciente), asi
+    que lo que se lee aca es lo que despues se va a escribir.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select id, escalada_a_humano, caso_id, id_cliente, nombre_cliente
+               from asistente.conversations
+               where organization_id = %s and canal = %s and usuario_externo = %s
+                 and estado = 'abierta'
+               order by actualizado_en desc limit 1""",
+            (org, canal, usuario_externo))
+        fila = cur.fetchone()
+        if not fila:
+            return None
+        return {
+            "conversation_id": str(fila["id"]),
+            "escalada": bool(fila["escalada_a_humano"]),
+            "caso_id": str(fila["caso_id"]) if fila["caso_id"] else None,
+            "id_cliente": fila["id_cliente"],
+            "nombre_cliente": fila["nombre_cliente"],
+        }
+
+
 def registrar_mensaje(tenant: str, canal: str, usuario_externo: str,
                       rol_efectivo: str, rol: str, contenido: str) -> tuple[str, str]:
     """

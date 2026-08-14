@@ -144,6 +144,57 @@ def _agente_json(nombre: str, rol, config) -> dict:
     }
 
 
+def _sesion_nueva(tenant: str, id_sesion: str, canal: str) -> dict:
+    """
+    El estado en memoria de una conversacion que el proceso no tenia, LEIDO
+    de la base cuando hay una conversacion abierta con esta persona.
+
+    Sin esto, un reinicio del motor equivalia a borrarle la memoria al
+    asistente en mitad de una conversacion: la marca de escalamiento se perdia
+    y el bot volvia a atender a alguien a quien ya se le habia dicho que lo
+    pasaba con una persona, y la verificacion se perdia y habia que pedirle la
+    cedula de nuevo.
+
+    Lo que NO se rehidrata es el historial de mensajes: son dos decisiones
+    distintas. El escalamiento y la identidad son estado, chico y acotado; el
+    historial es contexto que viaja al modelo en cada turno y crece sin techo.
+    Restaurarlo se puede hacer, pero cambia el costo de cada llamada y merece
+    decidirse aparte.
+
+    Un fallo al leer NO impide atender: se arranca en blanco, que es
+    exactamente lo que pasaba antes. Peor que empezar sin memoria es no
+    contestarle a un cliente.
+    """
+    estado = {"sesion": Sesion(identificador_canal=id_sesion),
+              "historial": [], "escalada": False, "caso_id": None}
+    try:
+        previo = persistencia.estado_de_conversacion_abierta(tenant, canal, id_sesion)
+    except Exception as e:
+        print(f"[sesion] no se pudo leer el estado previo de {id_sesion}: "
+              f"{type(e).__name__}: {e}")
+        return estado
+    if not previo:
+        return estado
+
+    estado["escalada"] = previo["escalada"]
+    estado["caso_id"] = previo["caso_id"]
+
+    # La identidad se restaura solo mientras la conversacion siga ABIERTA (es
+    # la unica que devuelve la consulta): al cerrarse, la siguiente empieza de
+    # cero y hay que verificar otra vez. Esa es la frontera -- se continua una
+    # conversacion, no se recuerda a una persona para siempre.
+    if previo["id_cliente"]:
+        estado["sesion"].verificado = True
+        estado["sesion"].nivel = max(estado["sesion"].nivel, 1)
+        estado["sesion"].id_cliente = previo["id_cliente"]
+        estado["sesion"].nombre = previo["nombre_cliente"]
+
+    print(f"[sesion] {id_sesion}: se retoma la conversacion abierta "
+          f"(escalada={previo['escalada']}, "
+          f"verificado={'si' if previo['id_cliente'] else 'no'})")
+    return estado
+
+
 def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                   mensaje: str, canal: str) -> dict:
     """
@@ -162,8 +213,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     """
     clave = (tenant, id_sesion)
     if clave not in _sesiones:
-        _sesiones[clave] = {"sesion": Sesion(identificador_canal=id_sesion),
-                            "historial": [], "escalada": False, "caso_id": None}
+        _sesiones[clave] = _sesion_nueva(tenant, id_sesion, canal)
     estado = _sesiones[clave]
 
     # --- si ya se escalo, el bot NO contesta ---------------------------------
