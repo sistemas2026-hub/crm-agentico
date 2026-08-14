@@ -85,6 +85,25 @@ dejaba como contingencia principal.
 tienen `sn_onu` en WispHub. Para ese tercio, cualquier herramienta de SmartOLT
 no tiene con qué consultar.
 
+## Link directo a la ONU en el panel de SmartOLT — util para `soporte`, no para el asistente
+
+Documentado por el proveedor junto a `get_onu_details` (agosto 2026, no
+verificado en un navegador todavia -- es UI, no API, "el metodo del valor
+imposible" no aplica igual):
+
+```
+https://{subdominio}.smartolt.com/onu/details/{onu_external_id}
+```
+
+Con `sn_onu` (=`onu_external_id`) se arma sin llamar a la API. Sirve para un
+"ver en SmartOLT" en la pantalla de un colaborador (ficha del cliente, o el
+detalle de un ticket) -- un atajo a la vista completa del proveedor cuando
+el catalogo del asistente no cubre lo que hace falta (ej. cambiar
+`configuration_method`, ver el historial completo). NO es para `cliente_final`
+(requiere login de SmartOLT, y es panorama interno de red) ni para que el
+asistente lo devuelva en una conversacion -- es un link de interfaz, no un
+dato de una herramienta.
+
 ## Campos de `get_onu_details` — con qué cuidado
 
 Registro real completo, filtrado a lo relevante (60+ campos totales, no
@@ -112,6 +131,47 @@ todos abajo):
 `onu_signal` (clasificación en texto), `onu_signal_1310`, `onu_signal_1490` —
 nada de nombre, dirección, ni topología. Más limpio que filtrar
 `get_onu_details` después.
+
+## SmartOLT NO trae la IP del cliente — en esta instalación de Rapilink
+
+`get_onu_details` sí tiene el campo (`ip_address`, más `default_gateway`,
+`subnet_mask`, `dns1`, `dns2`), pero **verificado vacío en las 4.965 ONUs de
+la OLT `olt_id=3`, sin una sola excepción** (14/08/2026, método del valor
+imposible aplicado a nivel de columna: no un caso vacío, el 100%). La causa
+está en `wan_mode: "Setup via ONU webpage"` — Rapilink deja que cada ONU se
+autoconfigure (DHCP/PPPoE local), SmartOLT nunca la provisiona con un
+perfil que fije la IP, así que nunca la ve.
+
+**La IP SÍ está, pero en WispHub** (`GET /api/clientes/?id_servicio=N`,
+campo `ip` — el mismo que exige `agregar-cliente` al crear el cliente, ver
+skill `wisphub-api`). Confirmado con un cliente real (id_servicio 6580):
+WispHub trae `172.16.26.143`, SmartOLT trae `None` para ese mismo cliente.
+Para "qué IP tiene este cliente", la fuente es WispHub, no SmartOLT.
+
+### La IP SÍ aparece en `get_onu_full_status_info` — pero solo en modo OMCI, y hoy eso es 1 ONU en toda la red
+
+El usuario mostró capturas del panel de SmartOLT (boton "Get status" de una
+ONU de prueba, descripción "PRUEBA", `Management mode: OMCI`) con una sección
+`ONU WAN Interfaces` que sí trae `IPv4 address`. Verificado en vivo contra la
+API (14/08/2026): es exactamente `get_onu_full_status_info/{sn}` — el
+`full_status_json` trae, además de `Optical status`/`ONU details`/`History`
+(ya documentados arriba), dos secciones nuevas: `ONU WAN Interfaces`
+(`IPv4 address`, `Subnet mask`, `Default gateway`, `Manage VLAN`, `MAC
+address`...) y `ONU LAN Interfaces status`. El identificador se pasa SIN
+guion (`CDTC505AE4AB`, no `CDTC-505AE4AB`) — mismo formato de 12 caracteres
+que documenta la skill `wisphub-api`.
+
+**Pero esto no sirve todavía para ningún cliente real.** Se sumó `wan_mode`
+a la distribución ya medida sobre `get_all_onus_details?olt_id=3` (4.966
+ONUs): **4.953 en `"Setup via ONU webpage"`, 12 en blanco, 1 en `"Static"` —
+CERO en OMCI**, aparte de esta ONU de prueba. La seccion `ONU WAN Interfaces`
+solo se puebla cuando SmartOLT gestiona la ONU (OMCI); en modo webpage la
+ONU se autoconfigura fuera de su vista, igual que pasa con `ip_address` en
+`get_onu_details` (ver arriba). Para que esto aportara algo con clientes
+reales, haria falta migrar ONUs de "Setup via ONU webpage" a OMCI -- que es
+la accion de escritura (`set_onu_wan_configuration_method`) marcada como
+riesgosa mas abajo: cambia como la ONU negocia su acceso a la red, no es un
+cambio inocuo.
 
 ## ⚠️ 1310 vs 1490 — inferido por convención GPON, NO verificado empíricamente
 
