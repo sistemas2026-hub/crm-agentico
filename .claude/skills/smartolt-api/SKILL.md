@@ -132,46 +132,65 @@ todos abajo):
 nada de nombre, dirección, ni topología. Más limpio que filtrar
 `get_onu_details` después.
 
-## SmartOLT NO trae la IP del cliente — en esta instalación de Rapilink
+## La IP del cliente: dos campos que MIDEN COSAS DISTINTAS, no confundirlos
 
-`get_onu_details` sí tiene el campo (`ip_address`, más `default_gateway`,
-`subnet_mask`, `dns1`, `dns2`), pero **verificado vacío en las 4.965 ONUs de
-la OLT `olt_id=3`, sin una sola excepción** (14/08/2026, método del valor
-imposible aplicado a nivel de columna: no un caso vacío, el 100%). La causa
-está en `wan_mode: "Setup via ONU webpage"` — Rapilink deja que cada ONU se
-autoconfigure (DHCP/PPPoE local), SmartOLT nunca la provisiona con un
-perfil que fije la IP, así que nunca la ve.
+Hallazgo corregido el 14/08/2026 -- la primera version de esta seccion
+concluia "SmartOLT no trae la IP, salvo 1 ONU de prueba en modo OMCI" y
+estaba **mal**, por confundir dos campos con nombre parecido:
 
-**La IP SÍ está, pero en WispHub** (`GET /api/clientes/?id_servicio=N`,
-campo `ip` — el mismo que exige `agregar-cliente` al crear el cliente, ver
-skill `wisphub-api`). Confirmado con un cliente real (id_servicio 6580):
-WispHub trae `172.16.26.143`, SmartOLT trae `None` para ese mismo cliente.
-Para "qué IP tiene este cliente", la fuente es WispHub, no SmartOLT.
+| Campo | Endpoint | Lo que se midio | Conclusion |
+|---|---|---|---|
+| `wan_mode` / `ip_address` | `get_onu_details`, `get_all_onus_details` | **4.966 ONUs, TODA la OLT `olt_id=3`**: 4.953 en `"Setup via ONU webpage"`, 12 en blanco, 1 en `"Static"` -- CERO en OMCI, `ip_address` siempre `None` | Este campo especifico esta vacio para practicamente cualquier ONU real. Sigue siendo cierto, pero **no es la pregunta que importa** |
+| `ONU details.Management mode` | `get_onu_full_status_info` | **Muestra de 10 ONUs reales (no de prueba)**: las 10 en `"OMCI"`. `ONU WAN Interfaces.IPv4 address` poblado en 8 de esas 10 | Este es el campo que de verdad decide si la IP esta visible -- y para la gran mayoria de clientes reales, SI lo esta |
 
-### La IP SÍ aparece en `get_onu_full_status_info` — pero solo en modo OMCI, y hoy eso es 1 ONU en toda la red
+**La leccion, no solo el dato**: dos campos con nombres parecidos
+(`wan_mode` vs `Management mode`) en dos endpoints distintos del MISMO
+proveedor pueden medir cosas completamente distintas. Medir uno y sacar una
+conclusion sobre el otro sin verificar es exactamente el error que esta
+skill entera existe para evitar -- y aca se cometio una vez, hay que
+tenerlo presente.
 
-El usuario mostró capturas del panel de SmartOLT (boton "Get status" de una
-ONU de prueba, descripción "PRUEBA", `Management mode: OMCI`) con una sección
-`ONU WAN Interfaces` que sí trae `IPv4 address`. Verificado en vivo contra la
-API (14/08/2026): es exactamente `get_onu_full_status_info/{sn}` — el
-`full_status_json` trae, además de `Optical status`/`ONU details`/`History`
-(ya documentados arriba), dos secciones nuevas: `ONU WAN Interfaces`
-(`IPv4 address`, `Subnet mask`, `Default gateway`, `Manage VLAN`, `MAC
-address`...) y `ONU LAN Interfaces status`. El identificador se pasa SIN
-guion (`CDTC505AE4AB`, no `CDTC-505AE4AB`) — mismo formato de 12 caracteres
-que documenta la skill `wisphub-api`.
+**Para consultar la IP de un cliente real, dos fuentes validas**:
+- **WispHub** (`GET /api/clientes/?id_servicio=N`, campo `ip`) -- rapido,
+  siempre disponible, confirmado que coincide exacto con SmartOLT cuando
+  se cruzaron (`172.16.26.143` en ambos para id_servicio 6580 / `HWTCAF721761`).
+- **SmartOLT** (`get_onu_full_status_info/{sn}` -> `full_status_json["ONU
+  WAN Interfaces"]["IPv4 address"]`) -- mismo dato, pero paga el costo de
+  ~10s de latencia de ese endpoint. Sin motivo para preferirlo sobre
+  WispHub solo para la IP; tiene sentido si de todas formas se esta
+  llamando a ese endpoint por el diagnostico de causa de caida (ver abajo).
 
-**Pero esto no sirve todavía para ningún cliente real.** Se sumó `wan_mode`
-a la distribución ya medida sobre `get_all_onus_details?olt_id=3` (4.966
-ONUs): **4.953 en `"Setup via ONU webpage"`, 12 en blanco, 1 en `"Static"` —
-CERO en OMCI**, aparte de esta ONU de prueba. La seccion `ONU WAN Interfaces`
-solo se puebla cuando SmartOLT gestiona la ONU (OMCI); en modo webpage la
-ONU se autoconfigura fuera de su vista, igual que pasa con `ip_address` en
-`get_onu_details` (ver arriba). Para que esto aportara algo con clientes
-reales, haria falta migrar ONUs de "Setup via ONU webpage" a OMCI -- que es
-la accion de escritura (`set_onu_wan_configuration_method`) marcada como
-riesgosa mas abajo: cambia como la ONU negocia su acceso a la red, no es un
-cambio inocuo.
+## `get_onu_full_status_info` -- estructura completa verificada (14/08/2026)
+
+`full_status_json` tiene 7 secciones, cada una un dict de un nivel (con
+espacios en las claves, no rompe la notacion con punto de
+`nucleo/seguridad/listas_blancas.py` -- `"ONU details.Last down cause"`
+funciona tal cual):
+
+- `Optical status`: `Rx optical power(dBm)`, `Tx optical power(dBm)`,
+  `Temperature(C)`, `OLT Rx ONT optical power(dBm)`, `CATV Rx optical power(dBm)`.
+- `ONU CATV port`: `Port State`.
+- `ONU details`: `Control flag`, `Run state`, `Match state`,
+  `ONT distance(m)`, `SN`, `Management mode`, `Description` (nombre del
+  cliente -- PII, mismo criterio que `name` en `get_onu_details`),
+  **`Last down cause`** (ver el mapeo dying-gasp/LOSi-LOBi mas arriba en
+  esta skill), `Last up time`, `Last down time`, `ONT online duration`,
+  mas config de linea (perfil, FEC, QoS) que es topologia de red, no dato
+  de diagnostico.
+- `History`: LISTA (no dict) de hasta 10 eventos `{Auth at, Offline at,
+  Cause}` -- no accesible con la notacion con punto de un nivel, solo
+  `Last down cause` (el mas reciente) es directamente utilizable hoy.
+- `ONU WAN Interfaces`: `IPv4 address`, `Subnet mask`, `Default gateway`,
+  `Manage VLAN`, `MAC address`, mas un artefacto de serializacion (`"2":
+  {"[]": "0"}`) que hay que ignorar, no es un campo real.
+- `ONU LAN Interfaces status`: por puerto, `Link state` (up/down) -- sirve
+  para saber si hay un cable conectado al puerto LAN, mas alla del estado
+  optico.
+- `MACs on OLT from this ONU`: direcciones MAC vistas en el puerto -- topologia,
+  no diagnostico de cliente.
+
+El identificador se pasa SIN guion (`CDTC505AEAFF`, no `CDTC-505AEA-FF`) --
+mismo formato de 12 caracteres que documenta la skill `wisphub-api`.
 
 ## ⚠️ 1310 vs 1490 — inferido por convención GPON, NO verificado empíricamente
 
@@ -233,11 +252,66 @@ mensaje de "no tengo internet" violaría la guía del proveedor de cachear y no
 repetir. Si se quiere esta regla, es un trabajo periódico con caché
 (`Herramienta.cache_segundos` del plan), no una herramienta conversacional.
 
+## `reboot` ejecutado en vivo (14/08/2026) — contrato confirmado, y el tiempo de recuperación medido
+
+Probado contra la ONU de prueba (`CDTC505AE4AB`, descripción "PRUEBA", la
+misma del modo OMCI), con autorización explícita del usuario y en un
+equipo que no es de un cliente real:
+
+```
+POST /api/onu/reboot/CDTC505AE4AB
+-> HTTP 200, 0.56s: {"status": true, "response": "Device reboot command sent"}
+```
+
+Contrato confirmado tal cual lo documentaba el proveedor: responde rápido
+porque solo confirma que el comando se mandó, no que la ONU ya reinició.
+
+### Dos "tiempos de recuperación" distintos — no confundirlos
+
+Se midieron los DOS, en reinicios separados, y dan numeros muy distintos
+porque miden cosas distintas:
+
+| Que se midio | Como | Resultado |
+|---|---|---|
+| `onu_status` de SmartOLT vuelve a `"Online"` | `last_status_change` tras el reinicio | **~5 min 53 s** |
+| El equipo responde ping real (via WispHub, `arp_ping=false`) | Ping cada 5s hasta 3 de 3 exitosos, con timestamps propios | **~73 s** |
+
+La diferencia es real, no ruido de medicion: `onu_status`/`last_status_change`
+refleja cuando la OLT termina el re-registro GPON completo (sincronizacion
+optica, reaplicar el perfil de servicio) -- un proceso mas lento y mas
+completo. El **ping responde mucho antes**, en cuanto el equipo tiene
+conectividad IP basica, que es lo que de verdad le importa al cliente
+("¿ya tengo internet?").
+
+**Para el texto que le promete algo al cliente, usar el numero del ping
+(~1-2 minutos), no el de `onu_status` (~6 minutos)** -- prometer 6 minutos
+cuando en la practica vuelve a andar en 1 hace que el asistente parezca
+mas lento e inseguro de lo que es en realidad. Sigue siendo un solo dato
+por metodo, no una distribucion -- sirve de referencia de orden de
+magnitud, no de garantia exacta.
+
+Señal despues del reinicio: `-19.95 / -21.37 dBm`, `"Very good"` --
+practicamente identica a antes (`-19.95 / -21.49 dBm`), el equipo volvio
+sano en ambos reinicios probados.
+
+**Hallazgo de infraestructura, no de la integracion**: la ficha de
+WispHub de esta ONU de prueba (id_servicio 6555, "PRUEBA TEMPORAL", estado
+GRATIS -- no aparece en busquedas por `estado=activo`) tenia
+`interfaz_lan='ether2'` cargado, un valor que **no correspondia a esta
+ONU** y hacia fallar CUALQUIER ping (con o sin `arp_ping`) con
+`"input does not match any value of interface"`. El panel web de SmartOLT/
+WispHub, dejando el campo "Interface" en blanco, si pingeaba bien -- la
+diferencia es que la interfaz vacia SI se omite, una interfaz con un
+valor incorrecto NO se ignora aunque el valor este mal. Se corrigio
+vaciando `interfaz_lan` en esa ficha puntual. **Implicacion para produccion**:
+un cliente real con un `interfaz_lan` incorrecto (no vacio, sino con un
+valor que no le corresponde) rompe `ping_cliente` de la misma forma, y el
+sintoma seria identico a "el equipo no responde" -- vale la pena tenerlo
+presente si alguna vez un ping falla de forma sospechosamente consistente
+para UN cliente puntual.
+
 ## No verificado todavía (fuera del alcance del sondeo de hoy)
 
-- El endpoint de reinicio en vivo (`POST /api/onu/reboot/{sn}`) — no se
-  ejecutó. Falta acordar con el usuario una ONU de prueba y un horario.
-- Cuánto tarda una ONU en volver tras el reinicio.
 - Si hay dirección/contacto poblados en algún registro real (el que se leyó
   los traía vacíos) — para terminar de calibrar qué tan sensible es el campo.
 - `get_running_config` y los endpoints de escritura del script de terceros

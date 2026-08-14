@@ -155,7 +155,33 @@ def ejecutar(herramienta, argumentos: dict, tenant: str | None = None,
         crudo = crudo[herramienta.extraer_de]
 
     _aplicar_veredictos(herramienta, crudo)
+    _aplicar_mapeos(herramienta, crudo)
     return crudo
+
+
+def _leer_anidado(dato: dict, campo: str):
+    """Lee 'campo' de 'dato', con notacion de UN nivel ("Padre.Hijo") para
+    objetos anidados -- mismo formato que Rol.campos_permitidos
+    (nucleo/seguridad/listas_blancas.py)."""
+    if "." in campo:
+        padre, hijo = campo.split(".", 1)
+        sub = dato.get(padre)
+        return sub.get(hijo) if isinstance(sub, dict) else None
+    return dato.get(campo)
+
+
+def _escribir_anidado(dato: dict, campo: str, sufijo: str, valor) -> None:
+    """Escribe '{ultimo_tramo}{sufijo}' = valor en el mismo lugar de donde
+    se leyo 'campo' -- si es anidado, DENTRO del objeto padre, para que la
+    lista blanca lo pueda referenciar con la misma notacion con punto que
+    uso para leer el original."""
+    if "." in campo:
+        padre, hijo = campo.split(".", 1)
+        sub = dato.get(padre)
+        if isinstance(sub, dict):
+            sub[f"{hijo}{sufijo}"] = valor
+    else:
+        dato[f"{campo}{sufijo}"] = valor
 
 
 def _aplicar_veredictos(herramienta, dato) -> None:
@@ -167,15 +193,32 @@ def _aplicar_veredictos(herramienta, dato) -> None:
     if not herramienta.veredictos or not isinstance(dato, dict):
         return
     for campo, rangos in herramienta.veredictos.items():
-        valor = dato.get(campo)
+        valor = _leer_anidado(dato, campo)
         if not isinstance(valor, (int, float)):
             continue
         for rango in rangos:
             si_desde = rango.desde is None or valor >= rango.desde
             si_hasta = rango.hasta is None or valor <= rango.hasta
             if si_desde and si_hasta:
-                dato[f"{campo}_veredicto"] = rango.etiqueta
+                _escribir_anidado(dato, campo, "_veredicto", rango.etiqueta)
                 break
+
+
+def _aplicar_mapeos(herramienta, dato) -> None:
+    """Muta 'dato' in-place agregando '{campo}_interpretado' segun los
+    mapeos de texto declarados en Herramienta.mapeos -- ver el campo en
+    schema.py. Silencioso si el valor no esta mapeado: una causa nueva que
+    el proveedor todavia no documento no inventa una etiqueta, se queda sin
+    interpretar (el dato crudo sigue disponible para quien tenga permiso)."""
+    if not herramienta.mapeos or not isinstance(dato, dict):
+        return
+    for campo, tabla in herramienta.mapeos.items():
+        valor = _leer_anidado(dato, campo)
+        if not isinstance(valor, str):
+            continue
+        etiqueta = tabla.get(valor)
+        if etiqueta is not None:
+            _escribir_anidado(dato, campo, "_interpretado", etiqueta)
 
 
 def ejecutar_asincrono(herramienta, argumentos: dict,

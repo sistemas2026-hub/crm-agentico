@@ -530,6 +530,16 @@ class Herramienta(Base):
     # tenant, no del motor: nucleo/ no sabe que es un dBm ni cuales son los
     # limites de Rapilink.
     veredictos: dict[str, list[RangoVeredicto]] = Field(default_factory=dict)
+    # Como 'veredictos', pero para un valor de TEXTO exacto en vez de un
+    # rango numerico (ej. SmartOLT 'Last down cause': "dying-gasp" -> "sin
+    # energia en el domicilio"). El campo puede usar notacion con punto de
+    # UN nivel ("ONU details.Last down cause") para leer y escribir dentro
+    # de un objeto anidado -- mismo formato que Rol.campos_permitidos
+    # (nucleo/seguridad/listas_blancas.py), asi la etiqueta calculada queda
+    # en el mismo lugar que la lista blanca ya sabe filtrar. Un valor sin
+    # entrada en el mapeo se deja sin interpretar -- no inventa una
+    # etiqueta para una causa que no se documento todavia.
+    mapeos: dict[str, dict[str, str]] = Field(default_factory=dict)
     # Ver Precondicion. TODAS tienen que cumplirse (AND), con la llamada MAS
     # RECIENTE de cada herramienta requerida -- una que cumplio hace varios
     # mensajes pero ya no representa el estado actual no cuenta.
