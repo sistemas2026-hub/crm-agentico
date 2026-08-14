@@ -44,6 +44,7 @@ from nucleo.modelo import motor
 from nucleo.persistencia import db as persistencia
 from nucleo.recuperacion.busqueda import recuperar
 from nucleo.recuperacion.prompt import piezas_del_system
+from nucleo.seguimiento import agendamiento
 from nucleo.seguimiento import escalamiento
 from nucleo.seguimiento import supervisor
 from nucleo.seguridad import secretos
@@ -166,7 +167,8 @@ def _sesion_nueva(tenant: str, id_sesion: str, canal: str) -> dict:
     contestarle a un cliente.
     """
     estado = {"sesion": Sesion(identificador_canal=id_sesion),
-              "historial": [], "escalada": False, "caso_id": None}
+              "historial": [], "escalada": False, "caso_id": None, "rol_activo": None,
+              "repreguntado_agendamiento": False, "nota_pendiente": None}
     try:
         previo = persistencia.estado_de_conversacion_abierta(tenant, canal, id_sesion)
     except Exception as e:
@@ -176,8 +178,16 @@ def _sesion_nueva(tenant: str, id_sesion: str, canal: str) -> dict:
     if not previo:
         return estado
 
-    estado["escalada"] = previo["escalada"]
+    # La pausa solo tiene sentido si hay un HUMANO al que esperar. Una
+    # conversacion escalada pero agendada sola (nucleo/seguimiento/
+    # agendamiento.py) no tiene caso de BottleCRM abierto que la retome --
+    # pausarla la dejaria muda con ese cliente para siempre.
+    estado["escalada"] = previo["escalada"] and previo["necesita_atencion_humana"]
     estado["caso_id"] = previo["caso_id"]
+    # Se guarda tal cual vino de la base, sin validar todavia contra la
+    # config (esta funcion no la recibe) -- atender_turno() la revalida
+    # antes de usarla, por si el rol cambio o se borro desde entonces.
+    estado["rol_activo"] = previo["rol_efectivo"]
 
     # La identidad se restaura solo mientras la conversacion siga ABIERTA (es
     # la unica que devuelve la consulta): al cerrarse, la siguiente empieza de
@@ -216,6 +226,46 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
         _sesiones[clave] = _sesion_nueva(tenant, id_sesion, canal)
     estado = _sesiones[clave]
 
+    # --- si la conversacion ya se derivo a otra area, seguir ahi -------------
+    # Solo aplica cuando el rol que pide el LLAMADOR ya es cliente_final (para
+    # WhatsApp, siempre lo mismo hoy): nunca se pisa un rol interno/colaborador
+    # con uno derivado. 'rol_activo' se revalida contra la config actual, no
+    # se confia ciegamente en lo que quedo grabado -- un rol pudo borrarse o
+    # cambiar de 'orientado_a' desde la ultima vez.
+    nota_continuidad = None
+    rol_pedido = config.roles.get(rol)
+    if (rol_pedido is not None and rol_pedido.orientado_a == "cliente_final"
+            and estado.get("rol_activo")):
+        rol_activo_cfg = config.roles.get(estado["rol_activo"])
+        if rol_activo_cfg is not None and rol_activo_cfg.orientado_a == "cliente_final":
+            # Si ademas el historial en memoria esta vacio (se perdio en un
+            # reinicio -- ver _sesion_nueva(), no rehidrata mensajes), el
+            # especialista arranca sin ningun rastro de por que esta
+            # atendiendo. Confirmado en vivo (agosto 2026): sin avisarlo,
+            # el modelo podia derivar de nuevo a otra area sin motivo real,
+            # solo por no saber que ya estaba en la correcta.
+            if rol != estado["rol_activo"] and not estado["historial"]:
+                nota_continuidad = (
+                    "(Nota del sistema, no del cliente) Esta conversacion ya "
+                    "fue derivada a tu area en un mensaje anterior que no "
+                    "esta disponible en este historial (se perdio por un "
+                    "reinicio del sistema, no por el cliente). Atende el "
+                    "mensaje que sigue con naturalidad, sin pedirle que "
+                    "repita lo que ya conto si no hace falta. NO vuelvas a "
+                    "derivar a otra area salvo que el mensaje ACTUAL sea "
+                    "claramente de un tema distinto al tuyo.")
+            rol = estado["rol_activo"]
+
+    # --- repregunta pendiente del verificador de agendamiento -----------------
+    # nucleo/seguimiento/agendamiento.py dejo esto en un turno anterior porque
+    # el checklist del manual quedo con UN dato puntual sin confirmar. Se
+    # inyecta como nota de sistema para este turno (no via 'nota_continuidad':
+    # esta conversacion sigue con su historial intacto, no es el caso de
+    # amnesia por reinicio) y se consume una sola vez.
+    if estado.get("nota_pendiente"):
+        estado["historial"].append({"role": "system", "content": estado["nota_pendiente"]})
+        estado["nota_pendiente"] = None
+
     # --- si ya se escalo, el bot NO contesta ---------------------------------
     # Va antes de motor.responder() a proposito. Marcar la conversacion como
     # escalada y despues dejar que el modelo siga respondiendo deja al cliente
@@ -241,7 +291,20 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
         estado["caso_id"] = None
 
     respuesta, registro_herramientas = motor.responder(
-        config, rol, mensaje, estado["historial"], estado["sesion"])
+        config, rol, mensaje, estado["historial"], estado["sesion"],
+        nota_continuidad=nota_continuidad)
+
+    # --- si este turno derivo a otra area, persistir YA con el rol nuevo -----
+    # 'rol_siguiente' lo pone motor._ejecutar_derivacion() cuando el modelo
+    # llamo una herramienta 'deriva_rol' este mismo turno. Se consume ahora:
+    # el mensaje del asistente en ESTE turno (el aviso breve de "te paso con
+    # el area X") ya queda grabado con 'rol_efectivo' = el area nueva, que es
+    # lo que _rol_de_cliente()/el bloque de arriba leen para el PROXIMO
+    # mensaje de este mismo cliente.
+    if estado["sesion"] is not None and estado["sesion"].rol_siguiente:
+        rol = estado["sesion"].rol_siguiente
+        estado["rol_activo"] = rol
+        estado["sesion"].rol_siguiente = None
 
     conversation_id = None
     mensaje_id = None
@@ -287,20 +350,80 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             print(f"[escalamiento] fallo al evaluar: {type(e).__name__}: {e}")
             evaluacion = None
         if evaluacion and evaluacion.get("escalar"):
-            escalamiento.escalar(
-                config, tenant, id_sesion, conversation_id, estado["historial"],
-                evaluacion.get("motivo", ""), evaluacion.get("etiqueta", ""),
-                resumen=evaluacion.get("resumen", ""),
-                necesita_humano=evaluacion.get("necesita_humano", True))
-            estado["escalada"] = True
-            # El caso queda guardado para poder consultarlo despues: es lo que
-            # permite que la pausa de arriba sepa cuando el humano lo cerro y
-            # el asistente pueda retomar solo.
-            try:
-                estado["caso_id"] = persistencia.caso_de_conversacion(tenant, conversation_id)
-            except Exception as e:
-                print(f"[escalamiento] no se pudo leer el caso de la conversacion: {e}")
-            respuesta = f"{respuesta}\n\n{config.escalamiento.mensaje}".strip()
+            necesita_humano = evaluacion.get("necesita_humano", True)
+            nota_ticket = ""
+            posponer = False
+
+            # --- verificacion automatica de agendamiento --------------------
+            # Solo corre si el tenant declaro ESTE caso puntual en
+            # 'escalamiento.agendamiento_automatico' (apagado por defecto,
+            # ver nucleo/config/schema.py:Escalamiento). Ver
+            # nucleo/seguimiento/agendamiento.py para el detalle.
+            caso_manual = evaluacion.get("caso_manual")
+            herramienta_auto = (config.escalamiento.agendamiento_automatico.get(caso_manual)
+                                if caso_manual else None)
+            if herramienta_auto:
+                try:
+                    veredicto = agendamiento.verificar(config, tenant, rol, estado["historial"])
+                except Exception as e:
+                    print(f"[agendamiento] fallo al verificar: {type(e).__name__}: {e}")
+                    veredicto = None
+
+                if veredicto and veredicto.get("checklist_completo") and veredicto.get("corresponde_agendar"):
+                    id_ticket_auto = agendamiento.agendar(
+                        config, tenant, estado["sesion"], herramienta_auto,
+                        veredicto.get("descripcion_visita", ""))
+                    if id_ticket_auto:
+                        necesita_humano = False
+                        nota_ticket = (f"\n\nVisita tecnica agendada "
+                                       f"automaticamente (ticket #{id_ticket_auto}).")
+                elif (veredicto and not veredicto.get("checklist_completo")
+                      and veredicto.get("pregunta_faltante")
+                      and not estado["repreguntado_agendamiento"]):
+                    # Una sola oportunidad de cerrar el hueco antes de
+                    # escalar de verdad -- si el cliente no puede
+                    # resolverlo, el proximo intento ya no repregunta.
+                    estado["repreguntado_agendamiento"] = True
+                    estado["nota_pendiente"] = (
+                        "(Nota del sistema, no del cliente) Antes de "
+                        "escalar, falta confirmar un dato puntual del "
+                        f"procedimiento: {veredicto['pregunta_faltante']} "
+                        "Pediselo al cliente en tu proxima respuesta, de "
+                        "forma natural.")
+                    posponer = True
+
+            if not posponer:
+                escalamiento.escalar(
+                    config, tenant, id_sesion, conversation_id, estado["historial"],
+                    evaluacion.get("motivo", ""), evaluacion.get("etiqueta", ""),
+                    resumen=(evaluacion.get("resumen", "") + nota_ticket).strip(),
+                    necesita_humano=necesita_humano)
+                # La pausa (arriba, "si ya se escalo, el bot NO contesta")
+                # solo tiene sentido cuando de verdad hay un humano al que
+                # esperar -- si se agendo solo, el bot sigue atendiendo
+                # normal desde el proximo mensaje.
+                estado["escalada"] = necesita_humano
+                # El caso queda guardado para poder consultarlo despues: es lo
+                # que permite que la pausa de arriba sepa cuando el humano lo
+                # cerro y el asistente pueda retomar solo.
+                try:
+                    estado["caso_id"] = persistencia.caso_de_conversacion(tenant, conversation_id)
+                except Exception as e:
+                    print(f"[escalamiento] no se pudo leer el caso de la conversacion: {e}")
+                if necesita_humano:
+                    respuesta = f"{respuesta}\n\n{config.escalamiento.mensaje}".strip()
+                else:
+                    respuesta = (f"{respuesta}\n\nTu visita tecnica ya quedo agendada, "
+                                f"un tecnico te va a contactar para coordinar.").strip()
+                # El mensaje del asistente ya se guardo (mas arriba, antes de
+                # poder evaluar la escalada -- necesitaba conversation_id).
+                # Sin esto el HTTP response trae el aviso pero /conversaciones
+                # sigue mostrando el texto de antes.
+                if mensaje_id:
+                    try:
+                        persistencia.actualizar_contenido_mensaje(tenant, mensaje_id, respuesta)
+                    except Exception as e:
+                        print(f"[persistencia] no se pudo actualizar el aviso de escalada: {e}")
         elif evaluacion and evaluacion.get("resuelta"):
             # No escalada Y el cliente confirmo que ya quedo resuelto: cierra
             # la conversacion en la bandeja (ver cerrar_conversacion en
@@ -1854,6 +1977,37 @@ def conversaciones_atender(id_conversacion):
     if not existe:
         return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
     return jsonify({"atendida": True})
+
+
+@app.delete("/conversaciones/<id_conversacion>")
+def conversaciones_borrar(id_conversacion):
+    """
+    SOLO PARA PRUEBAS -- borra la conversacion entera (mensajes, tool_calls
+    y adjuntos en cascada, ver persistencia.borrar_conversacion) y limpia
+    el estado en memoria de esa sesion, para que la proxima vez que ese
+    numero le escriba al bot arranque de cero: sin eso, aunque la base
+    quede vacia, el proceso seguiria recordando el rol activo, si ya
+    escalo, y el historial de la conversacion borrada.
+
+    Pensado para el boton "Reiniciar (prueba)" del entrenamiento por
+    WhatsApp real -- sacar este endpoint y el boton cuando termine esa
+    etapa.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+
+    try:
+        borrada = persistencia.borrar_conversacion(tenant, id_conversacion)
+    except Exception as e:
+        print(f"[conversaciones] fallo al borrar: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo borrar."}), 500
+
+    if not borrada:
+        return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+
+    _sesiones.pop((tenant, borrada["usuario_externo"]), None)
+    return "", 204
 
 
 @app.get("/conversaciones/<id_conversacion>/media")

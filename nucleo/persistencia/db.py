@@ -63,6 +63,7 @@ from __future__ import annotations
 
 import json
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 
 import psycopg
 from psycopg.rows import dict_row
@@ -138,13 +139,23 @@ def estado_de_conversacion_abierta(tenant: str, canal: str,
         contestando de nuevo a las 00:16, 00:25, 00:41...
       - Habia que pedirle la cedula otra vez. El mismo cliente se verifico
         tres veces en una tarde.
+      - Una derivacion a un area (facturacion, soporte tecnico...) se
+        perdia igual que la escalada: el reinicio devolvia al cliente al
+        agente general, en la mitad de una conversacion ya derivada.
+
+    'necesita_atencion_humana' decide si la pausa (mas abajo, en
+    atender_turno()) tiene sentido: una conversacion escalada pero agendada
+    sola (nucleo/seguimiento/agendamiento.py) no tiene a ningun humano al
+    que esperar, y pausar el bot ahi lo dejaria mudo para siempre con ese
+    cliente.
 
     Es la MISMA fila que reusa registrar_mensaje ('abierta' mas reciente), asi
     que lo que se lee aca es lo que despues se va a escribir.
     """
     with sesion(tenant) as (cur, org):
         cur.execute(
-            """select id, escalada_a_humano, caso_id, id_cliente, nombre_cliente
+            """select id, escalada_a_humano, caso_id, id_cliente, nombre_cliente,
+                      rol_efectivo, necesita_atencion_humana
                from asistente.conversations
                where organization_id = %s and canal = %s and usuario_externo = %s
                  and estado = 'abierta'
@@ -156,9 +167,11 @@ def estado_de_conversacion_abierta(tenant: str, canal: str,
         return {
             "conversation_id": str(fila["id"]),
             "escalada": bool(fila["escalada_a_humano"]),
+            "necesita_atencion_humana": bool(fila["necesita_atencion_humana"]),
             "caso_id": str(fila["caso_id"]) if fila["caso_id"] else None,
             "id_cliente": fila["id_cliente"],
             "nombre_cliente": fila["nombre_cliente"],
+            "rol_efectivo": fila["rol_efectivo"],
         }
 
 
@@ -207,6 +220,23 @@ def registrar_mensaje(tenant: str, canal: str, usuario_externo: str,
         mensaje = cur.fetchone()["id"]
 
         return str(conv), str(mensaje)
+
+
+def actualizar_contenido_mensaje(tenant: str, mensaje_id: str, contenido: str) -> None:
+    """
+    Corrige el contenido de un mensaje ya guardado. nucleo/canales/api.py
+    necesita esto porque el aviso de escalada/agendamiento se agrega a
+    'respuesta' DESPUES de llamar a registrar_mensaje() -- el bloque de
+    escalamiento necesita el conversation_id que esa llamada devuelve, asi
+    que persistir y decidir el aviso no pueden pasar en el mismo paso. Sin
+    este ajuste posterior, el HTTP response que recibe el cliente trae el
+    aviso pero lo que se lee despues en /conversaciones no.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """update asistente.messages set contenido = %s
+               where id = %s and organization_id = %s""",
+            (contenido, mensaje_id, org))
 
 
 def ultima_actividad(tenant: str, canal: str | None = None) -> list[dict]:
@@ -540,6 +570,43 @@ def esta_de_baja(tenant: str, usuario_externo: str, canal: str = "whatsapp") -> 
         return cur.fetchone() is not None
 
 
+def leer_cache(tenant: str, herramienta: str, clave: str,
+               vigencia_dias: int | None) -> dict | list | None:
+    """Respuesta cacheada de una herramienta 'http' con cache=true (ver
+    nucleo/config/schema.py:Herramienta y nucleo/modelo/motor.py), o None si
+    no hay entrada o vencio. 'vigencia_dias' None = no vence nunca."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select respuesta, actualizado_en from asistente.herramientas_cache
+               where organization_id = %s and herramienta = %s and clave = %s""",
+            (org, herramienta, clave))
+        fila = cur.fetchone()
+        if not fila:
+            return None
+        if vigencia_dias is not None:
+            vencio = fila["actualizado_en"] < datetime.now(timezone.utc) - timedelta(days=vigencia_dias)
+            if vencio:
+                return None
+        return fila["respuesta"]
+
+
+def guardar_cache(tenant: str, herramienta: str, clave: str, respuesta) -> None:
+    """Guarda (o refresca) una entrada de cache. Nunca rompe el turno: un
+    fallo aca no puede tumbar la respuesta que ya se le va a dar al
+    cliente -- mismo criterio que registrar_llamada_herramienta."""
+    try:
+        with sesion(tenant) as (cur, org):
+            cur.execute(
+                """insert into asistente.herramientas_cache
+                     (organization_id, herramienta, clave, respuesta, actualizado_en)
+                   values (%s, %s, %s, %s, now())
+                   on conflict (organization_id, herramienta, clave)
+                   do update set respuesta = excluded.respuesta, actualizado_en = now()""",
+                (org, herramienta, clave, json.dumps(respuesta, ensure_ascii=False)))
+    except Exception as e:
+        print(f"[persistencia] no se pudo guardar la cache de '{herramienta}': {e}")
+
+
 def guardar_media(tenant: str, conversation_id: str, media_id: str, tipo: str,
                   contenido: bytes, mime: str | None = None,
                   descripcion: str | None = None,
@@ -667,6 +734,30 @@ def marcar_atendida(tenant: str, conversation_id: str, por: str | None) -> bool:
                where organization_id = %s and id = %s""",
             (por, org, conversation_id))
         return cur.rowcount > 0
+
+
+def borrar_conversacion(tenant: str, conversation_id: str) -> dict | None:
+    """
+    SOLO PARA PRUEBAS: borra una conversacion de un tiro -- mensajes,
+    llamadas a herramientas y adjuntos se van en cascada (on delete
+    cascade, igual que purgar_conversaciones). A diferencia de la purga
+    automatica, esto NO respeta 'conservar' ni ejemplos marcados: es una
+    accion manual y deliberada (el boton de "reiniciar" del entrenamiento
+    por WhatsApp real, para reescribirle al bot sin arrastrar el contexto
+    de la prueba anterior -- sacar cuando termine esa etapa).
+
+    Devuelve {'usuario_externo', 'canal'} de lo borrado (para que el
+    llamador limpie tambien el estado en memoria del proceso, ver
+    nucleo/canales/api.py:_sesiones), o None si no existia.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """delete from asistente.conversations
+               where organization_id = %s and id = %s
+               returning usuario_externo, canal""",
+            (org, conversation_id))
+        fila = cur.fetchone()
+        return dict(fila) if fila else None
 
 
 def purgar_conversaciones(tenant: str, dias: int) -> int:

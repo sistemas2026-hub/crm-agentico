@@ -45,6 +45,7 @@ from datetime import datetime, timedelta
 from nucleo.herramientas import agregado as ejecutor_agregado
 from nucleo.herramientas import http as ejecutor_http
 from nucleo.modelo import cliente
+from nucleo.persistencia import db as persistencia
 from nucleo.recuperacion.prompt import construir_system
 from nucleo.recuperacion.busqueda import (recuperar, bloque_de_contexto,
                                           registrar_sin_resultados)
@@ -81,6 +82,26 @@ def _esquema_openai(herramienta):
                         }
                     },
                     "required": ["confirma"],
+                },
+            },
+        }
+    if herramienta.deriva_rol:
+        # El modelo SI propone 'area', pero acotada al enum declarado en el
+        # YAML (areas_destino) -- nunca un nombre de rol libre. La
+        # coherencia global (schema.py) ya garantizo que cada uno de esos
+        # nombres es un rol real, orientado_a=cliente_final.
+        return {
+            "type": "function",
+            "function": {
+                "name": herramienta.nombre,
+                "description": herramienta.descripcion,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "area": {"type": "string", "enum": herramienta.areas_destino,
+                                 "description": "A que area pasar el resto de la conversacion."}
+                    },
+                    "required": ["area"],
                 },
             },
         }
@@ -258,6 +279,54 @@ def _ejecutar_confirmacion(sesion, argumentos_modelo: dict) -> dict:
                "ni escales a un humano solo por este motivo."}
 
 
+def _ejecutar_derivacion(herramienta, sesion, argumentos_modelo: dict, nombre_rol_actual: str) -> dict:
+    """
+    Pasa el resto de la conversacion a otro rol cliente_final (facturacion,
+    soporte tecnico...). No llama a ninguna API: solo deja la decision en
+    'sesion.rol_siguiente', que atender_turno() (nucleo/canales/api.py) lee
+    despues de esta llamada para persistir 'rol_efectivo' con el rol nuevo.
+
+    Verificacion de identidad: NO se repite. 'sesion' es la misma instancia
+    para toda la conversacion, y el estado de verificado/id_cliente vive ahi
+    independiente del rol -- el especialista la hereda automatica.
+
+    'area' llega acotada por el enum del esquema (ver _esquema_openai), pero
+    se revalida aca contra 'areas_destino' igual: el esquema es lo que el
+    modelo VE, no una garantia de lo que puede llegar a mandar.
+    """
+    area = (argumentos_modelo or {}).get("area")
+    if area not in herramienta.areas_destino:
+        return {"error": f"'{area}' no es un area valida para derivar.",
+               "instruccion_interna": f"Elegi una de estas: "
+                   f"{', '.join(herramienta.areas_destino)}."}
+
+    if area == nombre_rol_actual:
+        # Auto-derivacion: el modelo se confundio, no hace nada -- no tiene
+        # sentido "derivar" a donde ya esta. Se le avisa para que no repita.
+        return {"ok": True, "area": area,
+               "instruccion_interna": "Ya estas atendiendo esta area, no "
+                   "hace falta derivar. Segui con la conversacion."}
+
+    if sesion is not None:
+        sesion.rol_siguiente = area
+
+    # El catalogo de herramientas de ESTE turno ya se armo con el rol viejo
+    # (herramientas_del_rol() corre una sola vez, antes del loop) -- el rol
+    # nuevo recien atiende de verdad en el PROXIMO mensaje del cliente, con
+    # su propio catalogo. Por eso la instruccion es explicita en pedir un
+    # cierre breve, no una respuesta ya usando herramientas que este turno
+    # no tiene: prometer resolverlo ahora mismo y no poder es peor que un
+    # segundo de espera.
+    return {"ok": True, "area": area,
+           "instruccion_interna": f"A partir de ahora atiende esta "
+               f"conversacion el area '{area}'. Decile al cliente, en una "
+               f"frase breve y natural (nunca mecanica, ej. 'dale, te ayudo "
+               f"con eso'), que segui por ahi -- SIN resolverle nada todavia "
+               f"en este mismo mensaje (no tenes las herramientas de esa "
+               f"area en este turno): la atencion especializada sigue "
+               f"apenas te vuelva a escribir."}
+
+
 def _ejecutar_tool(herramienta, sesion, argumentos_modelo: dict,
                    tenant: str | None = None) -> dict | list:
     argumentos_modelo = argumentos_modelo or {}
@@ -321,6 +390,23 @@ def _ejecutar_tool(herramienta, sesion, argumentos_modelo: dict,
             argumentos[arg_llamada] = valor
 
     if herramienta.tipo == "http":
+        if herramienta.cache and tenant:
+            # 'argumentos' ya tiene TODO resuelto en este punto (filtros del
+            # modelo + inyectar_sesion) -- la clave sale de ahi, ordenada
+            # para que el mismo pedido siempre arme la misma clave. El
+            # validador de Herramienta ya garantiza que una herramienta con
+            # cache=true nunca tiene inyectar_sesion (ver schema.py), asi
+            # que aca nunca hay un dato de cliente puntual.
+            clave = "&".join(f"{k}={argumentos[k]}" for k in sorted(argumentos))
+            cacheado = persistencia.leer_cache(
+                tenant, herramienta.nombre, clave, herramienta.cache_vigencia_dias)
+            if cacheado is not None:
+                return cacheado
+            resultado = (ejecutor_http.ejecutar_asincrono(herramienta, argumentos, tenant=tenant)
+                        if herramienta.asincrona else
+                        ejecutor_http.ejecutar(herramienta, argumentos, tenant))
+            persistencia.guardar_cache(tenant, herramienta.nombre, clave, resultado)
+            return resultado
         if herramienta.asincrona:
             return ejecutor_http.ejecutar_asincrono(herramienta, argumentos,
                                                     tenant=tenant)
@@ -405,11 +491,19 @@ def _redactar(referencia_modelo: str, historial: list[dict], temperatura: float,
 
 
 def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
-              sesion) -> tuple[str, list[dict]]:
+              sesion, nota_continuidad: str | None = None) -> tuple[str, list[dict]]:
     """
     'sesion' es una nucleo.seguridad.verificacion.Sesion (o None si el rol no
     exige verificacion). 'historial' se muta in-place -- el llamador lo
     conserva entre turnos.
+
+    'nota_continuidad': solo la usa nucleo/canales/api.py::atender_turno()
+    cuando esta conversacion ya estaba derivada a este rol (via
+    derivar_a_area) pero el historial en memoria se perdio -- un reinicio
+    del motor, ver _sesion_nueva(). Sin esto, el especialista arranca con
+    CERO contexto de por que esta atendiendo, y se vio en vivo (agosto
+    2026) que sin esa aclaracion podia derivar de nuevo a otra area sin
+    ningun motivo real, solo por no saber que ya estaba en la correcta.
 
     Devuelve (respuesta, registro_herramientas). El registro es una fila por
     herramienta invocada este turno -- nombre, parametros enmascarados,
@@ -428,6 +522,8 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
 
     if not historial:
         historial.append({"role": "system", "content": construir_system(config, nombre_rol)})
+        if nota_continuidad:
+            historial.append({"role": "system", "content": nota_continuidad})
     historial.append({"role": "user", "content": mensaje})
 
     herramientas = herramientas_del_rol(config, rol_cfg)
@@ -536,6 +632,13 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                              "Pedile al cliente el dato que falta para "
                              "verificar su identidad antes de continuar."}
                 codigo_error = "IDENTIDAD_NO_VERIFICADA"
+            elif herramienta.deriva_rol:
+                # Despues del gate a proposito: solo tiene sentido derivar
+                # una vez que la identidad ya esta verificada (misma politica
+                # de "verificar primero, siempre" que ya rige el resto de
+                # cliente_final) -- si no, seria posible pasar de area sin
+                # haber confirmado quien es el cliente.
+                salida = _ejecutar_derivacion(herramienta, sesion, llamada.argumentos, nombre_rol)
             else:
                 try:
                     crudo = _ejecutar_tool(herramienta, sesion, llamada.argumentos,

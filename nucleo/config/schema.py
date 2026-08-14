@@ -443,6 +443,17 @@ class Herramienta(Base):
     # identidad, porque este SI es un booleano sobre lo que el CLIENTE
     # respondio, no un identificador.
     confirma_identidad: bool = False
+    # Tipo 'interno', igual que confirma_identidad: no llama a ninguna API,
+    # el motor solo cambia que ROL atiende el resto de la conversacion. El
+    # modelo SI propone 'area' -- es la unica info que aporta, y esta
+    # acotada por el enum de 'areas_destino', nunca libre. Ver
+    # nucleo/modelo/motor.py::_ejecutar_derivacion.
+    deriva_rol: bool = False
+    # Nombres de rol (del mismo tenant, orientado_a=cliente_final) a los que
+    # esta herramienta puede derivar. Requerido si deriva_rol=True -- sin
+    # esto no hay que ofrecerle al modelo, no hay forma de armar el enum del
+    # esquema ni de validar la derivacion en codigo.
+    areas_destino: list[str] = Field(default_factory=list)
 
     # --- http / agregado ---
     # No es secreto (no dispara el barrido de _barrer_secretos): es dato de
@@ -482,6 +493,15 @@ class Herramienta(Base):
     # El modelo nunca decide una fecha (son notoriamente malos calculando
     # fechas): el codigo hace la cuenta, el modelo ni la ve.
     fechas_automaticas: dict[str, int] = Field(default_factory=dict)
+    # Cachea la respuesta en asistente.herramientas_cache -- evita pegarle a
+    # la API en cada consulta. Pensado para catalogos estables (un plan, una
+    # zona), NUNCA para datos que cambian por cliente (saldo, estado): la
+    # clave de cache no distingue "hace 2 segundos" de "hace 2 meses" salvo
+    # que se declare cache_vigencia_dias. Ver nucleo/modelo/motor.py.
+    cache: bool = False
+    # Dias antes de refrescar una entrada. None = no vence (se asume estable
+    # hasta que alguien fuerce un refresco borrando la fila en la base).
+    cache_vigencia_dias: int | None = None
 
     # --- agregado ---
     entidad: str | None = None
@@ -518,6 +538,27 @@ class Herramienta(Base):
         if self.verifica_identidad and not self.campo_busqueda:
             raise ValueError(
                 f"'{self.nombre}': verifica_identidad exige 'campo_busqueda'")
+
+        if self.deriva_rol and not self.areas_destino:
+            raise ValueError(
+                f"'{self.nombre}': deriva_rol exige 'areas_destino' (al menos un rol)")
+
+        if self.cache and self.tipo != "http":
+            raise ValueError(
+                f"'{self.nombre}': cache=true solo tiene sentido para tipo "
+                f"'http' -- 'agregado' agrega sobre todo el universo cada "
+                f"vez, cachear un conteo mentiria apenas cambia un registro")
+
+        if self.cache and self.inyectar_sesion:
+            raise ValueError(
+                f"'{self.nombre}': cache=true no puede combinarse con "
+                f"inyectar_sesion. 'inyectar_sesion' es la marca de que la "
+                f"respuesta depende de QUE cliente pregunta (su propio "
+                f"servicio, su propio saldo) -- guardar eso en la cache "
+                f"persistiria datos de cliente crudos, algo que este "
+                f"proyecto nunca hace (ver el docstring de nucleo/"
+                f"persistencia/db.py). 'cache' es solo para catalogos "
+                f"iguales para cualquiera que pregunte (un plan, una zona).")
 
         if not self.solo_lectura and not self.requiere_confirmacion:
             raise ValueError(
@@ -657,6 +698,12 @@ class Escalamiento(Base):
     mensaje: str = ""
     # Un escape a humano SIEMPRE disponible, no solo por deteccion automatica.
     siempre_disponible: bool = True
+    # Caso de 'manual.casos' -> nombre de Herramienta a ejecutar en CODIGO
+    # (nunca via tool-calling del modelo) cuando el verificador de
+    # nucleo/seguimiento/agendamiento.py confirma que el checklist de ese
+    # caso quedo completo. Vacio por defecto: ningun tenant ni ningun caso
+    # agenda solo sin declararlo a proposito aca.
+    agendamiento_automatico: dict[str, str] = Field(default_factory=dict)
 
 
 class Limites(Base):
@@ -757,6 +804,28 @@ class TenantConfig(Base):
                     f"herramienta '{h.nombre}' permite rol(es) inexistente(s): "
                     f"{sorted(desconocidos)}. Roles definidos: {sorted(nombres_rol)}")
 
+            # Derivar a un rol inexistente, o a uno orientado a colaborador,
+            # es el agujero de seguridad que este mecanismo existe para
+            # evitar: un rol interno no verifica identidad y puede consultar
+            # a cualquier cliente (ver nucleo/modelo/motor.py, nivel_exigido
+            # se salta por completo si orientado_a != 'cliente_final'). Se
+            # verifica aca, no solo en tiempo de ejecucion, para que un YAML
+            # mal escrito no se cargue nunca.
+            if h.deriva_rol:
+                desconocidos = set(h.areas_destino) - nombres_rol
+                if desconocidos:
+                    raise ValueError(
+                        f"herramienta '{h.nombre}' deriva a rol(es) "
+                        f"inexistente(s): {sorted(desconocidos)}")
+                internos = [n for n in h.areas_destino
+                           if self.roles[n].orientado_a != "cliente_final"]
+                if internos:
+                    raise ValueError(
+                        f"herramienta '{h.nombre}' deriva a rol(es) orientados "
+                        f"a colaborador: {sorted(internos)}. Un rol interno no "
+                        f"verifica identidad -- derivar ahi expondria datos de "
+                        f"cualquier cliente a un desconocido.")
+
         for nombre_rol, rol in self.roles.items():
             # Un rol no puede usar una herramienta que no existe.
             faltantes = set(rol.puede_consultar) - nombres_herr
@@ -793,6 +862,20 @@ class TenantConfig(Base):
         if destino and destino not in nombres_rol:
             raise ValueError(
                 f"escalamiento.destino_rol '{destino}' no es un rol definido")
+
+        # Cada caso de agendamiento automatico tiene que ser un caso real del
+        # manual, y la herramienta que ejecuta tiene que existir -- fail
+        # closed al cargar, no en el primer turno que lo dispare de verdad.
+        casos_manual = set(self.manual.casos)
+        for caso, nombre_herr in self.escalamiento.agendamiento_automatico.items():
+            if caso not in casos_manual:
+                raise ValueError(
+                    f"escalamiento.agendamiento_automatico['{caso}'] no es un "
+                    f"caso de 'manual.casos' ({sorted(casos_manual)})")
+            if nombre_herr not in nombres_herr:
+                raise ValueError(
+                    f"escalamiento.agendamiento_automatico['{caso}'] apunta a "
+                    f"la herramienta inexistente '{nombre_herr}'")
 
         # Las sustituciones de modelo deben apuntar a canales o roles reales --
         # con una excepcion: 'rol:supervisor' es una clave VIRTUAL que usa

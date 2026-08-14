@@ -64,6 +64,15 @@ class Sesion:
     nombre_pendiente: str | None = None
     interfaz_lan_pendiente: str | None = None
 
+    # Rol al que se derivo la conversacion en ESTE turno (ver
+    # nucleo/modelo/motor.py::_ejecutar_derivacion). None la mayoria de las
+    # veces -- solo se pone cuando el modelo llamo una herramienta
+    # 'deriva_rol' este turno. Quien llama a motor.responder() (hoy,
+    # nucleo/canales/api.py::atender_turno) lo lee DESPUES de la llamada
+    # para persistir 'rol_efectivo' con el nuevo rol, y lo mantiene vivo
+    # para los turnos siguientes de esta misma sesion en memoria.
+    rol_siguiente: str | None = None
+
 
 def nivel_requerido(rol_cfg, seguridad_cfg) -> int:
     """
