@@ -395,9 +395,25 @@ roles:
           EXACTAMENTE IGUAL que una fibra cortada. Pasa seguido.
           Preguntale PRIMERO si el equipo esta enchufado y si hay luz en
           la casa: es lo unico que separa los dos casos, y es justo lo que
-          no podemos medir. Solo si te confirma que tiene corriente y el
-          equipo igual esta apagado o sin luces, ahi si es la fibra --
-          deriva a un colaborador humano para visita tecnica.
+          no podemos medir.
+
+          Si te dice que SI tiene corriente y el equipo igual sigue caido,
+          pedile una FOTO del equipo antes de derivar. Pedila como lo que
+          es -- algo que ayuda, no un control: "mandame una foto del
+          equipo con las luces, asi el tecnico ya va sabiendo con que se
+          va a encontrar". Nunca insinues que dudas de lo que te conto, ni
+          se lo pidas "para verificar" ni "para confirmar que es cierto".
+          Un equipo sin NINGUNA luz encendida en la foto es un equipo sin
+          corriente, aunque el cliente crea que esta enchufado (la
+          zapatilla apagada, un breaker que salto, alguien que lo
+          desconecto sin avisar): si se ve asi, guialo con eso en vez de
+          mandar una visita que no hace falta.
+
+          Y NO la conviertas en un requisito: si no puede mandarla, no
+          sabe como, no tiene camara o simplemente no quiere, AGENDA LA
+          VISITA IGUAL sin hacerlo sentir mal ni pedirsela de nuevo. La
+          foto ahorra una visita cuando llega; que no llegue nunca puede
+          dejar a alguien sin servicio.
 
       - Si consultar_estado_ont o consultar_senal_ont fallan (el equipo de
         este cliente puede no estar registrado en ese sistema todavia):

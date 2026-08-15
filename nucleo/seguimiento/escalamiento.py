@@ -259,7 +259,32 @@ def escalar(config, tenant: str, usuario_externo: str, conversation_id: str,
         # al conjunto -- si se cortara desde el final del texto combinado
         # (como se hacia antes), un resumen largo o una transcripcion corta
         # podian dejar el resumen mismo afuera.
-        encabezado = f"RESUMEN: {resumen.strip()}\n\n{'-' * 40}\n\n" if resumen.strip() else ""
+        # Los adjuntos se nombran EN EL CASO, no solo en la transcripcion.
+        # La transcripcion ya trae un "[El cliente envio una foto]" (lo unico
+        # que ve el modelo), asi que quien lee el caso sabe que existe pero no
+        # donde mirarla: los bytes viven en asistente.media, ligados a la
+        # conversacion, y la unica pista era deducir que el id del nombre del
+        # caso es esa conversacion. Cuando la foto es la prueba de que una
+        # visita tecnica NO hace falta (el equipo estaba desenchufado), que se
+        # pierda por no encontrarla cuesta un camion.
+        nota_adjuntos = ""
+        try:
+            adjuntos = persistencia.media_de(tenant, conversation_id)
+        except Exception as e:
+            print(f"[escalamiento] no se pudieron leer los adjuntos: {e}")
+            adjuntos = []
+        if adjuntos:
+            detalle = ", ".join(sorted({a["tipo"] for a in adjuntos}))
+            nota_adjuntos = (
+                f"ADJUNTOS: el cliente envio {len(adjuntos)} archivo(s) "
+                f"({detalle}). Se ven en la bandeja de conversaciones, "
+                f"abriendo esta misma conversacion ({conversation_id}). "
+                f"Se conservan 30 dias.\n\n")
+
+        encabezado = f"RESUMEN: {resumen.strip()}\n\n" if resumen.strip() else ""
+        encabezado += nota_adjuntos
+        if encabezado:
+            encabezado += f"{'-' * 40}\n\n"
         espacio_transcripcion = max(4000 - len(encabezado), 0)
         cuerpo = encabezado + transcripcion[-espacio_transcripcion:]
 
