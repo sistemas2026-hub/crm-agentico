@@ -90,11 +90,17 @@ sysctl -w vm.swappiness=10 && echo 'vm.swappiness=10' >> /etc/sysctl.conf
 | Repository | `sistemas2026-hub/crm-agentico` |
 | Branch | `fix/integracion-wisphub` |
 | Compose Path | `./docker-compose.prod.yml` |
-| Trigger Type | Manual mientras esto se estabiliza — ver abajo |
+| Trigger Type | **On Push** (`Autodeploy` encendido) — ver abajo |
 
 ⚠️ **El Compose Path importa.** `docker-compose.yml` es el de desarrollo: trae un Postgres local y publica el 5432, que en el VPS ya ocupa el pooler del Supabase viejo. Desplegar ese da `address already in use`.
 
-⚠️ **Sobre "On Push".** Esa rama la comparten dos personas. Con el disparador automático, un commit de cualquiera redespliega producción sin que nadie lo decida, compilando en un servidor con poca memoria. Con despliegue manual eso lo decide quien mira.
+⚠️ **Un `git push` a esa rama SALE A PRODUCCIÓN.** `Autodeploy` está encendido a propósito (confirmado el 15/08/2026). No hay paso intermedio ni nadie que apruebe: se empuja y se despliega.
+
+Y esa rama la comparten dos personas, así que el commit de cualquiera redespliega el servicio del otro. La consecuencia práctica: **las guardas se corren ANTES de empujar, no después** — `tests/`, y `cli/evaluar.py` si se tocó un prompt, un catálogo o un modelo. Un push con algo roto no espera a que alguien lo revise.
+
+Esta advertencia decía lo contrario hasta hoy (afirmaba que el disparador era manual). Estuvo desactualizada un tiempo indeterminado, y sirvió para razonar mal sobre por qué producción se comportaba distinto al motor local: se dio por hecho que allá había código viejo cuando ya estaba desplegado. **Si el disparador se cambia, hay que cambiar esta línea en el mismo momento.**
+
+⚠️ **Un cambio de CONFIGURACIÓN no es un despliegue, y a veces necesita un reinicio.** `nucleo/canales/api.py` cachea la config por proceso (`_configs`) y la lee una sola vez. Los endpoints del editor llaman a `olvidar_config()` al guardar, así que **lo que se edita desde la interfaz se ve al instante**. Lo que se escribe desde un script o desde otra máquina (`cli/cargar_config.py`, `editor._editar`) NO invalida el caché del motor que está corriendo: sigue sirviendo la versión vieja hasta que se reinicie. El síntoma es desconcertante — la base dice v36, el agente contesta como en v35 — y cuesta un rato si no se sabe.
 
 ### 3. Variables
 
