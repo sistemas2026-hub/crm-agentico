@@ -37,3 +37,24 @@ if [ -n "$CONFIG" ]; then
     echo "================================================================"
     echo ""
 fi
+
+# Las migraciones tampoco se aplican solas, y su sintoma es peor que el de la
+# config: el motor arranca bien y falla despues, en medio de una conversacion,
+# con un error de columna inexistente que no se parece en nada a la causa.
+# Paso de verdad el 15/08/2026 -- una columna nueva que llego por pull dejo de
+# persistir el estado de la sesion, y la conversacion se caia al redactar.
+MIGRACIONES=$(git diff --name-only --diff-filter=A ORIG_HEAD HEAD -- 'supabase/*.sql' 2>/dev/null)
+
+if [ -n "$MIGRACIONES" ]; then
+    echo ""
+    echo "================================================================"
+    echo "  Llegaron migraciones nuevas de la base:"
+    echo "$MIGRACIONES" | sed 's/^/    - /'
+    echo ""
+    echo "  Aplicalas ANTES de seguir probando, o el motor va a fallar en"
+    echo "  medio de una conversacion con un error que no señala la causa:"
+    echo ""
+    echo "$MIGRACIONES" | sed 's|^|    docker exec -i crm-agentico-db-1 psql -U postgres -d crm_db < |'
+    echo "================================================================"
+    echo ""
+fi

@@ -125,7 +125,7 @@ def _tabla_de_derivacion(config, rol) -> str:
 
     return ("A que area deriva cada cosa:\n" + "\n".join(lineas) +
             "\n\nSi ninguna encaja, no fuerces una derivacion: resolvelo vos "
-            "si podes, o pasalo a un colaborador humano.")
+            "si puedes, o pasalo a un colaborador humano.")
 
 
 def piezas_del_system(config, nombre_rol: str) -> list[dict]:
@@ -169,11 +169,11 @@ def piezas_del_system(config, nombre_rol: str) -> list[dict]:
         "No inventes datos: si una herramienta no te da un dato, decilo "
         "explicitamente en vez de completarlo. Tampoco inventes un "
         "procedimiento, un paso a seguir, ni el nombre de una herramienta "
-        "que no tenes en tu lista -- tu unica fuente de procedimientos es "
+        "que no tienes en tu lista -- tu unica fuente de procedimientos es "
         "lo que te llega en este prompt (guias del corpus, tus "
         "herramientas reales), nunca tu propio criterio de que 'suena "
         "razonable'. Esto vale incluso para un servicio real de la "
-        "empresa: si no tenes una guia cargada para ese caso puntual, no "
+        "empresa: si no tienes una guia cargada para ese caso puntual, no "
         "improvises pasos -- decilo ('no tengo el procedimiento para esto "
         "todavia') y ofrece pasar el caso a un colaborador humano. Y si "
         "preguntan por algo que la empresa directamente no ofrece, decilo "
@@ -202,7 +202,7 @@ def piezas_del_system(config, nombre_rol: str) -> list[dict]:
             f"de que el codigo confirme la verificacion. Al inicio de la "
             f"conversacion, saluda presentandote por tu nombre ({persona.nombre_asistente}) "
             f"de forma natural y cercana, como lo haria una persona real del "
-            f"equipo de atencion -- nunca digas que sos un bot, un asistente "
+            f"equipo de atencion -- nunca digas que eres un bot, un asistente "
             f"automatizado, ni uses frases con sonido de guion o de robot.\n"
             "VERIFICACION PRIMERO, SIEMPRE: apenas el cliente cuenta cual es "
             "su problema, tu SIGUIENTE mensaje tiene que pedir la "
@@ -220,7 +220,7 @@ def piezas_del_system(config, nombre_rol: str) -> list[dict]:
             "esperar a la otra. (1) Si confirmar_identidad te devuelve "
             "verificado:true, la sesion QUEDO VERIFICADA en ese mismo "
             "momento -- no existe ninguna otra herramienta ni ningun otro "
-            "paso que 'cierre' la verificacion, y podes seguir de "
+            "paso que 'cierre' la verificacion, y puedes seguir de "
             "inmediato con el problema del cliente en ese mismo mensaje. "
             "(2) Si el resultado de CUALQUIER OTRA herramienta trae datos "
             "reales (no un mensaje de error pidiendo identidad), es porque "
@@ -260,7 +260,7 @@ def piezas_del_system(config, nombre_rol: str) -> list[dict]:
 
     agregar("Reglas absolutas",
             "configuracion del tenant (seguridad.reglas_absolutas)",
-            "Reglas que no podes romper bajo ninguna circunstancia:\n- "
+            "Reglas que no puedes romper bajo ninguna circunstancia:\n- "
             + "\n- ".join(config.seguridad.reglas_absolutas)
             if config.seguridad.reglas_absolutas else "")
 

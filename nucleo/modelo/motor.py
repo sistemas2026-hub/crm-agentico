@@ -569,14 +569,70 @@ _RE_RESPUESTA_CRUDA = re.compile(r"^(true|false|null|\d+(\.\d+)?|[\{\[].*[\}\]])
                                  re.IGNORECASE)
 
 
-def _sanitizar(texto: str) -> str:
+class _LlamadaRecuperada:
+    """Una llamada que el modelo pidio en texto en vez de por la API, con la
+    misma forma que las de verdad para que el bucle no tenga que distinguirlas."""
+
+    def __init__(self, nombre: str):
+        self.nombre = nombre
+        self.argumentos = {}
+
+
+def _llamadas_fugadas(contenido: str, herramientas) -> list:
+    """
+    Rescata las herramientas que el modelo pidio ESCRIBIENDOLAS en vez de
+    usar el tool-calling de la API. DeepSeek lo hace de forma reproducible
+    (medido el 15/08/2026: tres veces seguidas sobre el mismo turno), y
+    reintentar no lo corrige -- pero el texto dice exactamente que queria:
+
+        <｜｜DSML｜｜invoke name="consultar_estado_ont">
+
+    Descartarlo dejaba al cliente con "No pude terminar de redactar la
+    respuesta"; ejecutarlo es hacer lo que el modelo pidio, solo que leyendolo
+    de donde lo escribio.
+
+    SOLO se recuperan herramientas SIN argumentos del modelo. Una que los
+    necesite (un filtro, la cedula, el area a la que derivar) se ignora a
+    proposito: el texto fugado no los trae de forma confiable, y ejecutarla
+    con los argumentos vacios seria inventar la consulta. Y solo las que ESE
+    rol tiene en su catalogo -- el permiso no lo afloja este rescate.
+    """
+    nombres = re.findall(r'name="([a-z0-9_]+)"', contenido or "", re.I)
+    if not nombres:
+        return []
+    por_nombre = {h.nombre: h for h in herramientas}
+    recuperadas, vistas = [], set()
+    for nombre in nombres:
+        herr = por_nombre.get(nombre)
+        if herr is None or nombre in vistas:
+            continue
+        if (herr.filtros_verificados or herr.verifica_identidad
+                or herr.confirma_identidad or herr.deriva_rol):
+            continue
+        vistas.add(nombre)
+        recuperadas.append(_LlamadaRecuperada(nombre))
+    return recuperadas
+
+
+def _sanitizar(texto: str, nombres_rol=()) -> str:
     limpio = _RE_FUGA_TOOL_CALL.sub("", texto)
+    # Nombres de rol sueltos. Visto en vivo (15/08/2026): al derivar, el
+    # modelo escupio 'soporte_tecnico_cliente' como una linea propia en medio
+    # del mensaje, y el cliente lo vio. Es el identificador INTERNO del
+    # agente, no algo que signifique nada para quien escribe por WhatsApp.
+    #
+    # Se borra solo cuando ocupa la linea entera: si aparece dentro de una
+    # frase, sacarlo dejaria una oracion rota, y eso se lee peor que el
+    # nombre. Los nombres salen de la config del tenant, asi que nucleo/
+    # sigue sin conocer ninguno.
+    for nombre in nombres_rol:
+        limpio = re.sub(rf"^\s*{re.escape(nombre)}\s*$", "", limpio, flags=re.M)
     limpio = re.sub(r"\n{3,}", "\n\n", limpio).strip()
     return limpio
 
 
 def _redactar(referencia_modelo: str, historial: list[dict], temperatura: float,
-              intentos: int = 3) -> str:
+              intentos: int = 3, nombres_rol=()) -> str:
     """
     Redaccion final despues de que el modelo ya uso las herramientas que
     necesitaba. Reintenta si viene vacia -- visto en vivo con DeepSeek dos
@@ -594,7 +650,7 @@ def _redactar(referencia_modelo: str, historial: list[dict], temperatura: float,
     """
     for _ in range(intentos):
         resp = cliente.chat(referencia_modelo, historial, tools=None, temperatura=temperatura)
-        limpio = _sanitizar(resp.contenido)
+        limpio = _sanitizar(resp.contenido, nombres_rol)
         if limpio and not _RE_RESPUESTA_CRUDA.match(limpio):
             historial.append({"role": "assistant", "content": limpio})
             return limpio
@@ -746,18 +802,54 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
 
     hubo_llamadas = False
     iteraciones = 0
+    # Los reintentos por una llamada mal escrita se cuentan APARTE (ver mas
+    # abajo): son un error de formato del modelo, no trabajo hecho, y
+    # cobrarselos al presupuesto de iteraciones deja al turno sin margen para
+    # terminar lo que estaba haciendo. Con tope propio para que no giren solos.
+    reintentos_fuga = 0
     while iteraciones < config.llm.limite_iteraciones_agente:
         iteraciones += 1
         resp = cliente.chat(referencia_decision, historial,
                             tools=catalogo_openai or None, temperatura=config.llm.temperatura)
 
         if not resp.llamadas:
-            if resp.contenido.strip():
+            # Antes de decidir nada: si el modelo pidio herramientas
+            # escribiendolas en vez de usar la API, se ejecutan igual. Ver
+            # _llamadas_fugadas -- es reproducible con DeepSeek y reintentar
+            # no lo corrige, pero el texto dice exactamente que queria.
+            rescatadas = _llamadas_fugadas(resp.contenido, herramientas)
+            if rescatadas:
+                print(f"[motor] el modelo escribio {len(rescatadas)} llamada(s) "
+                      f"en vez de invocarlas; se ejecutan igual: "
+                      f"{[l.nombre for l in rescatadas]}")
+                resp.llamadas = rescatadas
+                resp.contenido = ""
+
+        if not resp.llamadas:
+            # La decision se toma sobre el texto YA LIMPIO, no sobre el crudo.
+            # DeepSeek a veces no usa el tool-calling de la API y escribe la
+            # llamada como texto con sus tokens de control
+            # ('<｜｜DSML｜｜invoke name="consultar_estado_ont">'). Eso llega
+            # aca con 'llamadas' vacio y 'contenido' lleno, y medido sobre el
+            # crudo parecia "ya no pide mas herramientas" -- el motor pasaba a
+            # redactar cuando el modelo todavia queria medir. En la redaccion
+            # las herramientas ya estan apagadas, asi que lo repetia, se
+            # limpiaba a vacio, y el cliente terminaba viendo "No pude
+            # terminar de redactar la respuesta". Reproducido en vivo el
+            # 15/08/2026 con una falla de TV, tres veces seguidas.
+            limpio = _sanitizar(resp.contenido, config.roles)
+            if limpio:
                 if not hubo_llamadas:
-                    limpio = _sanitizar(resp.contenido)
                     historial.append({"role": "assistant", "content": limpio})
                     return limpio, registro
                 break  # ya no pide mas herramientas: pasa a redaccion final
+            if _RE_FUGA_TOOL_CALL.search(resp.contenido or "") and reintentos_fuga < 2:
+                # Queria seguir usando herramientas y lo escribio mal: se le
+                # da otra vuelta del bucle, con el catalogo todavia
+                # disponible, en vez de mandarlo a redactar sin los datos.
+                reintentos_fuga += 1
+                iteraciones -= 1
+                continue
             if hubo_llamadas:
                 break  # sin texto pero ya hubo tools: igual pasa a redaccion final
             # Sin texto y sin tool call en el primer intento: visto en vivo con
@@ -949,5 +1041,6 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 # 'limite_iteraciones_agente'.
 
     if hubo_llamadas:
-        return _redactar(referencia_redaccion, historial, config.llm.temperatura), registro
+        return _redactar(referencia_redaccion, historial, config.llm.temperatura,
+                        nombres_rol=config.roles), registro
     return "No pude completar la consulta en el numero de pasos permitido.", registro
