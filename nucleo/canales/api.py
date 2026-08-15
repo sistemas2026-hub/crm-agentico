@@ -510,7 +510,7 @@ def chat():
         # Fail-closed: sin asignacion no se atiende. Caer a un agente por
         # defecto seria darle a alguien un acceso que nadie le concedio.
         if not asignados:
-            return jsonify({"error": "Todavia no tenes ningun agente asignado. "
+            return jsonify({"error": "Todavia no tienes ningun agente asignado. "
                                      "Pedile a un administrador que te asigne "
                                      "al menos uno."}), 403
         try:
