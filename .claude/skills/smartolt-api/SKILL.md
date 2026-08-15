@@ -215,14 +215,30 @@ uno con su `Cause`). Valores reales vistos en la instancia de Rapilink:
 
 | `Last down cause` | Qué significa | Mapeo a G-GO-04 |
 |---|---|---|
-| `dying-gasp` | La ONU avisó que se quedó sin energía justo antes de apagarse (mecanismo estándar GPON) | Corte de luz en la casa del cliente -- LED POWER apagado |
-| `ONT LOSi/LOBi alarm` | Loss Of Signal / Loss Of Burst -- perdió la señal óptica | Fibra cortada o falla en la NAP -- LED LOS rojo |
-| `ONT LOFi alarm` | Loss Of Frame -- perdió sincronía, también óptico | Mismo grupo que LOS: falla óptica |
+| `dying-gasp` | La ONU avisó que se quedó sin energía justo antes de apagarse (mecanismo estándar GPON) | Corte de luz en la casa del cliente -- LED POWER apagado. **Concluyente** |
+| `ONT LOSi/LOBi alarm` | Loss Of Signal / Loss Of Burst -- dejó de llegar señal óptica | **AMBIGUO**: fibra cortada / falla NAP (LED LOS rojo) **o** equipo apagado o desenchufado. Ver abajo |
+| `ONT LOFi alarm` | Loss Of Frame -- perdió sincronía, también óptico | Mismo grupo que LOS, y con la misma ambigüedad |
 | `"ONU is currently online"` | No es una causa de caída, es el estado del evento más reciente cuando está en línea | — |
 
-Con esto, **el asistente sí puede distinguir corte de luz de falla de fibra
-sin preguntarle nada al cliente** -- corrige lo que se había anotado antes en
-esta misma skill. El costo es la latencia: `get_onu_full_status_info` tarda
+⚠️ **La asimetría que importa: `dying-gasp` concluye, `LOS` no.** El
+dying-gasp es un aviso de **mejor esfuerzo** -- la ONU lo manda *si llega a
+hacerlo*, con la energía que le queda en el capacitor. Si el equipo se apaga
+de golpe, o alguien lo desenchufa, ese aviso nunca sale, y la OLT solo
+registra que dejó de recibir luz: **exactamente lo mismo que ve con la fibra
+cortada.**
+
+Consecuencia práctica, reportada desde la operación de Rapilink (agosto
+2026): `LOS` aparece seguido en equipos que en realidad estaban
+**desconectados de la corriente**. Concluir "fibra cortada" a partir de un
+`LOS` manda visitas técnicas a casas donde solo había que enchufar el equipo.
+
+Entonces: con `dying-gasp` se puede afirmar el corte de energía sin preguntar
+nada. Con `LOS`/`LOF` **hay que preguntarle al cliente si el equipo está
+enchufado y si hay luz** -- es lo único que separa las dos causas, y es
+justamente lo que no se puede medir desde la OLT. Solo si confirma que tiene
+corriente y el equipo sigue caído, ahí sí es la fibra.
+
+El costo es la latencia: `get_onu_full_status_info` tarda
 ~10s (medido: 9.9s), swich el proveedor lo autoriza explícitamente para
 "investigating a real-time issue reported by a user" -- que es exactamente
 este caso -- pero prohíbe usarlo en polling o en bulk.

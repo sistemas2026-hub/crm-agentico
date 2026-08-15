@@ -381,11 +381,23 @@ roles:
         lo hiciste y sigue igual, deriva a un humano.
 
       - Si el equipo figura Offline: usa diagnosticar_falla_ont para saber
-        POR QUE se cayo. Te devuelve la causa ya interpretada (sin energia
-        electrica en el domicilio, o falla optica en la fibra). Si es
-        falta de energia, decile que revise que el equipo este enchufado y
-        que haya luz en la casa. Si es falla optica, no hay nada que el
-        cliente pueda hacer: deriva a un humano para visita tecnica.
+        POR QUE se cayo. Te devuelve la causa ya interpretada, y segun
+        cual sea:
+
+        - 'sin energia electrica': el equipo ALCANZO a avisar que se
+          quedaba sin luz, asi que es seguro. Decile que revise que este
+          enchufado y que haya corriente en la casa.
+
+        - 'sin señal optica' (la fibra): NO des por hecho que es la fibra
+          todavia. Ese aviso de "me estoy quedando sin energia" es de
+          mejor esfuerzo: si el equipo se apaga de golpe o alguien lo
+          desenchufa, no llega a mandarlo, y desde nuestro lado se ve
+          EXACTAMENTE IGUAL que una fibra cortada. Pasa seguido.
+          Preguntale PRIMERO si el equipo esta enchufado y si hay luz en
+          la casa: es lo unico que separa los dos casos, y es justo lo que
+          no podemos medir. Solo si te confirma que tiene corriente y el
+          equipo igual esta apagado o sin luces, ahi si es la fibra --
+          deriva a un colaborador humano para visita tecnica.
 
       - Si consultar_estado_ont o consultar_senal_ont fallan (el equipo de
         este cliente puede no estar registrado en ese sistema todavia):
@@ -1387,9 +1399,11 @@ herramientas:
   - nombre: diagnosticar_falla_ont
     tipo: http
     descripcion: >
-      Diagnostico PROFUNDO de por que la ONU esta offline -- distingue sin
-      energia electrica en el domicilio de una falla optica (fibra o caja
-      NAP). SOLO llamala como SEGUNDO paso, y solo cuando
+      Diagnostico PROFUNDO de por que la ONU esta offline. Distingue el
+      corte de energia CONFIRMADO (el equipo alcanzo a avisar) de una caida
+      sin aviso -- que puede ser la fibra, pero tambien un equipo apagado o
+      desenchufado de golpe: esos dos se ven identicos desde la OLT y solo
+      los separa preguntarle al cliente. SOLO llamala como SEGUNDO paso, y solo cuando
       consultar_estado_ont ya dio Offline y consultar_senal_ont no alcanzo
       para explicar por que (offline no tiene lectura de senal util) --
       nunca la llames primero ni la llames si el equipo esta Online, ahi no
@@ -1422,8 +1436,15 @@ herramientas:
     mapeos:
       "ONU details.Last down cause":
         dying-gasp: "sin energia electrica en el domicilio (corte de luz o el equipo se desenchufo)"
-        "ONT LOSi/LOBi alarm": "falla optica -- fibra cortada o problema en la caja del splitter (NAP)"
-        "ONT LOFi alarm": "falla optica -- fibra cortada o problema en la caja del splitter (NAP)"
+        # NO afirma "fibra cortada": el dying-gasp es de mejor esfuerzo, y un
+        # equipo que se apaga de golpe (o que desenchufan) no llega a
+        # mandarlo -- la OLT ve lo mismo que con la fibra cortada. Verificado
+        # en campo por Rapilink (agosto 2026): aparece asi seguido con
+        # equipos que en realidad estaban desconectados de la corriente.
+        # Afirmar la fibra aca mandaba visitas tecnicas a casas donde solo
+        # habia que enchufar el equipo.
+        "ONT LOSi/LOBi alarm": "sin señal optica: puede ser la fibra (cortada o falla en la caja NAP) O el equipo apagado/desenchufado -- desde la OLT los dos se ven identicos, hay que preguntarle al cliente por la corriente para distinguirlos"
+        "ONT LOFi alarm": "sin señal optica: puede ser la fibra (cortada o falla en la caja NAP) O el equipo apagado/desenchufado -- desde la OLT los dos se ven identicos, hay que preguntarle al cliente por la corriente para distinguirlos"
         "ONU is currently online": "el equipo esta en linea, no hay una caida que explicar"
 
   - nombre: consultar_estado_catv
