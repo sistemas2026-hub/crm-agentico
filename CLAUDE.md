@@ -31,6 +31,18 @@ La consecuencia concreta: un dato que varía por empresa (el subdominio de una A
 
 Esto no es una sugerencia de "buena práctica" en abstracto: nace de una corrección directa de un colaborador después de que se declarara un dato de empresa (el subdominio de SmartOLT) como fijo en el YAML "porque hoy solo hay un tenant y cambiarlo es más trabajo". No repetir ese razonamiento.
 
+## Antes de dar por bueno un cambio de prompt, catálogo o modelo
+
+```
+py -3.13 cli/evaluar.py rapilink
+```
+
+Casos dorados (`evaluacion/<slug>.casos.yaml`) contra el motor **real**. Afirman sobre la **traza** —qué herramientas se llamaron, a qué área se derivó, si hubo errores, qué no puede aparecer en la respuesta— y nunca sobre la redacción: el modelo dice lo mismo de diez formas y un test que exige una frase exacta falla por lo que no importa.
+
+Nace de una lección cara (14/08/2026): tres bugs estuvieron rotos horas —una herramienta devolviendo un *error* donde debía haber un dato, un veredicto que no se calculaba, una precondición imposible de cumplir— y **ninguno se veía leyendo la respuesta**. Los tres se ven en la traza. Validar a mano abriendo el simulador no los detecta.
+
+Cuando algo falle en producción, agregarlo al set con lo que *debería* haber pasado: así crece con fallas reales, no con casos imaginados, y cada bug arreglado queda con su guarda.
+
 ## Decisiones que no hay que redescubrir
 
 - **El modelo compone, el código calcula** (PRD §12.5): ninguna consulta agregada le pide al modelo sumar, contar o promediar filas. Python calcula; el modelo traduce lenguaje a parámetros y redacta el resultado.
@@ -44,6 +56,7 @@ Esto no es una sugerencia de "buena práctica" en abstracto: nace de una correcc
 ```
 py -3.13 tests/test_nucleo_sin_tenants.py   # guarda de arquitectura
 py -3.13 tests/test_editor_config.py        # guarda del editor de agentes (sin base)
+py -3.13 cli/evaluar.py rapilink            # casos dorados contra el motor real
 py -3.13 cli/banco_pruebas.py               # compara modelos contra el prompt real
 py -3.13 cli/sondear_api.py                 # descubre endpoints de WispHub (solo lectura)
 ```
