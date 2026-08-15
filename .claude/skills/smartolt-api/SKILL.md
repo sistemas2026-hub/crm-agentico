@@ -271,6 +271,46 @@ este caso -- pero prohíbe usarlo en polling o en bulk.
 (`"Optical status"`, `"ONU details"`, `"History"`, ...) -- se parsea con
 claves de diccionario, sin regex.
 
+## Operaciones de CATV — existen, y como encontrarlas cuando el sondeo falla
+
+Documentadas por el proveedor (coleccion oficial, 15/08/2026). **Ninguna
+ejecutada todavia** — las de POST escriben sobre el equipo de un cliente:
+
+| Metodo | Endpoint | |
+|---|---|---|
+| `GET` | `/api/onu/get_onus_catv_statuses` | Estados de CATV, admite `olt_id`, `board`, `port`, `zone` |
+| `POST` | `/api/onu/enable_catv/{onu_external_id}` | Habilitar en una ONU |
+| `POST` | `/api/onu/disable_catv/{onu_external_id}` | Deshabilitar en una ONU |
+| `POST` | `/api/onu/bulk_enable_catv` | Hasta 50 ONUs por llamada |
+| `POST` | `/api/onu/bulk_disable_catv` | Hasta 50 ONUs por llamada |
+
+Con esto se puede automatizar el paso del manual 5.9 ("desactivar CATV,
+activar de nuevo, reiniciar"), que hoy obliga a pasar el caso a una persona.
+
+⚠️ **Como se llego, porque el metodo obvio MIENTE.** Primero se probaron rutas
+candidatas con `GET` + serial imposible, esperando distinguir "no existe"
+(405) de "existe" (400, llega a validar el id). Los seis candidatos dieron
+405. **Conclusion equivocada**: el control lo desarmo -- `/api/onu/reboot/`,
+que SI existe, tambien da 405 con `GET`, porque es POST-only. Un 405 solo
+dice "esta ruta no responde a GET", que es cierto para cualquier endpoint de
+escritura, exista o no.
+
+Y la ruta adivinada (`enable_catv/{id}`) era la correcta desde el principio:
+fallaba el sondeo, no el nombre.
+
+**Lo que si funciona**: bajar la coleccion que respalda la documentacion, sin
+tocar la instancia del cliente. La pagina es un Postman Documenter y trae el
+id en un `<meta name="collectionId">`:
+
+```python
+# https://api.smartolt.com/ -> meta collectionId -> 2941216-14d7ad01-...
+requests.get("https://api.smartolt.com/api/collections/2941216/71CXC8s").json()
+```
+
+Devuelve metodos, rutas y cuerpos de TODAS las operaciones. Mismo espiritu que
+el truco del YAML de ReDoc en la skill de WispHub: la pagina se renderiza con
+JS, pero los datos salen de un archivo que se puede pedir directo.
+
 ## CATV: el estado esta en 'catv', NO en 'ONU CATV port.Port State'
 
 Verificado el 15/08/2026, y corrige una herramienta que ya se habia construido
