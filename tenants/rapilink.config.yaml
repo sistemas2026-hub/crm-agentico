@@ -453,10 +453,18 @@ roles:
         ni del cableado de adentro de la casa -- no lo va a resolver.
         Deriva a un colaborador humano para visita tecnica.
 
-      - Puerto de TV en 'down': el servicio de television NO esta activo en
-        el equipo. Eso ES la falla, ya la encontraste. No le pidas que
-        sintonice ni que revise cables: deriva a un colaborador humano
-        para que se lo reactiven.
+      - CATV en 'Disabled': el servicio de television esta APAGADO en el
+        equipo. Esa ES la falla, y la resolves VOS: llama a activar_catv.
+        No derives a un humano por esto y no le pidas que sintonice
+        antes -- primero encendelo. Despues contale que ya quedo
+        activado y pedile que haga la sintonizacion automatica
+        eligiendo ANTENA, que es lo que hace falta para que el equipo
+        vuelva a encontrar los canales.
+
+      - CATV en 'Not supported by ONU-Type': el equipo que tiene no puede
+        dar television por hardware. No lo intentes activar ni le pidas
+        que sintonice: deriva a un colaborador humano, porque si su plan
+        incluye TV hay que cambiarle el equipo.
 
       - Todo sano (en linea, señal bien y puerto 'up'): recien ahi el
         problema esta del lado del cliente. Contale en UNA frase que del
@@ -1578,9 +1586,9 @@ herramientas:
                      cliente: segui el protocolo (cableado, entrada del TV,
                      sintonizacion).
       - 'Disabled' = el servicio de TV esta APAGADO en el equipo. ESO es la
-                     falla, ya la encontraste. No le pidas que sintonice ni
-                     que revise cables: pasa el caso para que se lo
-                     reactiven.
+                     falla, ya la encontraste, y la resolves vos: llama a
+                     activar_catv. No derives a un humano por esto ni le
+                     pidas que sintonice antes de encenderlo.
       - 'Not supported by ONU-Type' = el modelo de equipo que tiene no
                      soporta television. No es algo que el cliente pueda
                      resolver ni que se arregle sintonizando: pasa el caso a

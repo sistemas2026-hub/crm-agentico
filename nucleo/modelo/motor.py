@@ -569,14 +569,25 @@ _RE_RESPUESTA_CRUDA = re.compile(r"^(true|false|null|\d+(\.\d+)?|[\{\[].*[\}\]])
                                  re.IGNORECASE)
 
 
-def _sanitizar(texto: str) -> str:
+def _sanitizar(texto: str, nombres_rol=()) -> str:
     limpio = _RE_FUGA_TOOL_CALL.sub("", texto)
+    # Nombres de rol sueltos. Visto en vivo (15/08/2026): al derivar, el
+    # modelo escupio 'soporte_tecnico_cliente' como una linea propia en medio
+    # del mensaje, y el cliente lo vio. Es el identificador INTERNO del
+    # agente, no algo que signifique nada para quien escribe por WhatsApp.
+    #
+    # Se borra solo cuando ocupa la linea entera: si aparece dentro de una
+    # frase, sacarlo dejaria una oracion rota, y eso se lee peor que el
+    # nombre. Los nombres salen de la config del tenant, asi que nucleo/
+    # sigue sin conocer ninguno.
+    for nombre in nombres_rol:
+        limpio = re.sub(rf"^\s*{re.escape(nombre)}\s*$", "", limpio, flags=re.M)
     limpio = re.sub(r"\n{3,}", "\n\n", limpio).strip()
     return limpio
 
 
 def _redactar(referencia_modelo: str, historial: list[dict], temperatura: float,
-              intentos: int = 3) -> str:
+              intentos: int = 3, nombres_rol=()) -> str:
     """
     Redaccion final despues de que el modelo ya uso las herramientas que
     necesitaba. Reintenta si viene vacia -- visto en vivo con DeepSeek dos
@@ -594,7 +605,7 @@ def _redactar(referencia_modelo: str, historial: list[dict], temperatura: float,
     """
     for _ in range(intentos):
         resp = cliente.chat(referencia_modelo, historial, tools=None, temperatura=temperatura)
-        limpio = _sanitizar(resp.contenido)
+        limpio = _sanitizar(resp.contenido, nombres_rol)
         if limpio and not _RE_RESPUESTA_CRUDA.match(limpio):
             historial.append({"role": "assistant", "content": limpio})
             return limpio
@@ -754,7 +765,7 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
         if not resp.llamadas:
             if resp.contenido.strip():
                 if not hubo_llamadas:
-                    limpio = _sanitizar(resp.contenido)
+                    limpio = _sanitizar(resp.contenido, config.roles)
                     historial.append({"role": "assistant", "content": limpio})
                     return limpio, registro
                 break  # ya no pide mas herramientas: pasa a redaccion final
@@ -949,5 +960,6 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 # 'limite_iteraciones_agente'.
 
     if hubo_llamadas:
-        return _redactar(referencia_redaccion, historial, config.llm.temperatura), registro
+        return _redactar(referencia_redaccion, historial, config.llm.temperatura,
+                        nombres_rol=config.roles), registro
     return "No pude completar la consulta en el numero de pasos permitido.", registro
