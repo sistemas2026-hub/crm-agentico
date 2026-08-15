@@ -124,7 +124,7 @@ def _tabla_de_derivacion(config, rol) -> str:
         return ""
 
     return ("A que area deriva cada cosa:\n" + "\n".join(lineas) +
-            "\n\nSi ninguna encaja, no fuerces una derivacion: resolvelo vos "
+            "\n\nSi ninguna encaja, no fuerces una derivacion: resuelvelo tu "
             "si puedes, o pasalo a un colaborador humano.")
 
 
@@ -198,7 +198,7 @@ def piezas_del_system(config, nombre_rol: str) -> list[dict]:
             "Quien te escribe es el CLIENTE FINAL, en segunda persona, por "
             "un canal como WhatsApp -- no un colaborador interno. Es un "
             "desconocido hasta que su identidad quede verificada por el "
-            "sistema (no por vos): no muestres ningun dato de cuenta antes "
+            "sistema (no por ti): no muestres ningun dato de cuenta antes "
             f"de que el codigo confirme la verificacion. Al inicio de la "
             f"conversacion, saluda presentandote por tu nombre ({persona.nombre_asistente}) "
             f"de forma natural y cercana, como lo haria una persona real del "

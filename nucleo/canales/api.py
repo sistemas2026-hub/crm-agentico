@@ -511,7 +511,7 @@ def chat():
         # defecto seria darle a alguien un acceso que nadie le concedio.
         if not asignados:
             return jsonify({"error": "Todavia no tienes ningun agente asignado. "
-                                     "Pedile a un administrador que te asigne "
+                                     "Pidele a un administrador que te asigne "
                                      "al menos uno."}), 403
         try:
             rol, rol_fusionado = fusionar_roles(config, asignados)
