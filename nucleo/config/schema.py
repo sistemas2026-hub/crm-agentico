@@ -894,6 +894,23 @@ class Escalamiento(Base):
     # caso quedo completo. Vacio por defecto: ningun tenant ni ningun caso
     # agenda solo sin declararlo a proposito aca.
     agendamiento_automatico: dict[str, str] = Field(default_factory=dict)
+    # Motivos de 'activar_si' que NO escalan la primera vez que aparecen: el
+    # asistente se queda una vuelta mas e intenta resolver. Si el motivo
+    # vuelve a aparecer, escala sin discutir.
+    #
+    # Nace de un caso real (15/08/2026): un cliente escribio "el internet no
+    # sirve para una verga" en su primer reclamo, el modelo lo leyo como
+    # 'frustracion_detectada' y la conversacion se fue a un humano antes de
+    # que se intentara ningun diagnostico. En un ISP eso es casi todo el que
+    # se queda sin servicio -- el asistente pasaba de atender a filtrar
+    # llamadas.
+    #
+    # Que quede por tenant y por motivo, y no fijo en el codigo, es
+    # deliberado: otro ISP puede querer que un insulto pase a una persona de
+    # inmediato, y esa es una decision suya. Un motivo que no este aca escala
+    # como siempre, a la primera -- entre ellos 'solicitud_explicita', que es
+    # el cliente PIDIENDO un humano y nunca debe hacerse esperar.
+    intentar_resolver_antes: list[str] = Field(default_factory=list)
 
 
 class Limites(Base):

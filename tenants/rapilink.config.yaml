@@ -644,7 +644,7 @@ rag:
   # registra en unanswered_queries.
   mensaje_sin_resultados: >
     No encontre eso en la documentacion disponible. Lo estoy registrando para
-    que lo revisen. Si es urgente, te paso con un companero.
+    que lo revisen. Si es urgente, te paso con un compañero.
 
 # -----------------------------------------------------------------------------
 #  MODELOS  -  medido con banco_pruebas.py, agosto 2026
@@ -1677,8 +1677,27 @@ canales:
 escalamiento:
   activar_si: [frustracion_detectada, tres_fallos_seguidos, solicitud_explicita, duda_de_identidad]
   destino_rol: soporte
-  mensaje: Te paso con un companero del equipo para que te ayude mejor.
+  # Este texto REEMPLAZA la respuesta del asistente cuando escala (ver
+  # nucleo/canales/api.py), no se le suma -- asi que tiene que sostenerse
+  # solo: es lo unico que el cliente va a leer en ese turno.
+  mensaje: >-
+    Entiendo tu molestia. Te paso con un compañero del equipo que va a
+    revisar tu caso ahora mismo.
   siempre_disponible: true
+  # Un cliente que putea por el servicio no esta pidiendo un humano: esta
+  # pidiendo que le arreglen el internet, y eso el asistente lo puede hacer
+  # solo en veinte segundos. Escalarlo a la primera lo sacaba del asistente
+  # antes de intentar siquiera el diagnostico -- y en un ISP eso es casi todo
+  # el que se queda sin servicio (visto el 15/08/2026: "el internet no sirve
+  # para una verga" -> caso humano abierto, cero herramientas ejecutadas).
+  #
+  # Se le da UNA vuelta, no mas. Si el proximo mensaje sigue igual, pasa a
+  # una persona sin discutir: insistir con alguien que ya exploto dos veces
+  # empeora las cosas.
+  #
+  # 'solicitud_explicita' NO va aca a proposito: ese es el cliente PIDIENDO
+  # hablar con alguien, y a eso no se lo hace esperar una vuelta.
+  intentar_resolver_antes: [frustracion_detectada]
   # Piloto (agosto 2026): sin_senal_tv es el UNICO caso con agendamiento
   # automatico habilitado -- nucleo/seguimiento/agendamiento.py revisa el
   # checklist de la seccion 5.9 contra el manual real antes de agendar.

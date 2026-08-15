@@ -168,7 +168,13 @@ def _sesion_nueva(tenant: str, id_sesion: str, canal: str) -> dict:
     """
     estado = {"sesion": Sesion(identificador_canal=id_sesion),
               "historial": [], "escalada": False, "caso_id": None, "rol_activo": None,
-              "repreguntado_agendamiento": False, "nota_pendiente": None}
+              "repreguntado_agendamiento": False, "nota_pendiente": None,
+              # Esta conversacion ya tuvo su vuelta extra antes de escalar
+              # (ver escalamiento.merece_un_intento). Vive en memoria, como
+              # 'repreguntado_agendamiento': si el motor se reinicia se
+              # concede un intento mas, que es un costo aceptable frente a
+              # una lectura extra a la base en cada turno.
+              "intento_antes_de_escalar": False}
     try:
         previo = persistencia.estado_de_conversacion_abierta(tenant, canal, id_sesion)
     except Exception as e:
@@ -284,7 +290,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     if estado["escalada"]:
         if escalamiento.caso_sigue_abierto(config, estado["caso_id"]):
             respuesta = (config.escalamiento.mensaje or "").strip() or \
-                "Tu caso ya esta con un companero del equipo."
+                "Tu caso ya esta con un compañero del equipo."
             estado["historial"].append({"role": "user", "content": mensaje})
             estado["historial"].append({"role": "assistant", "content": respuesta})
             try:
@@ -368,6 +374,32 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             nota_ticket = ""
             posponer = False
 
+            # --- una vuelta mas antes de pasarlo a un humano ----------------
+            # Solo para los motivos que el tenant declaro (por defecto,
+            # ninguno). Ver escalamiento.merece_un_intento y el campo en
+            # nucleo/config/schema.py.
+            #
+            # La nota le pide al modelo que ACTUE, no que contenga. Es la
+            # diferencia que importa con un cliente furioso: "entiendo tu
+            # frustracion, lamento las molestias" repetido suena a libreto y
+            # lo enfurece mas; "ya vi tu equipo, la señal esta bien, te lo
+            # estoy reiniciando" lo calma, porque es lo que vino a buscar.
+            if escalamiento.merece_un_intento(
+                    config, evaluacion.get("motivo", ""),
+                    estado["intento_antes_de_escalar"]):
+                estado["intento_antes_de_escalar"] = True
+                estado["nota_pendiente"] = (
+                    "(Nota del sistema, no del cliente) El cliente esta "
+                    "molesto. NO lo escales todavia y NO le contestes con "
+                    "frases de consuelo ni le pidas que se calme: usa tus "
+                    "herramientas ahora, deciles que encontraste y que estas "
+                    "haciendo al respecto. Si todavia no lo verificaste, "
+                    "pedile la cedula UNA vez y segui de una. Si con eso no "
+                    "alcanza, en el proximo mensaje se pasa a un companero.")
+                posponer = True
+                print(f"[escalamiento] {id_sesion}: '{evaluacion.get('motivo')}' "
+                      "se pospone una vuelta -- el asistente lo intenta primero")
+
             # --- verificacion automatica de agendamiento --------------------
             # Solo corre si el tenant declaro ESTE caso puntual en
             # 'escalamiento.agendamiento_automatico' (apagado por defecto,
@@ -376,7 +408,10 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             caso_manual = evaluacion.get("caso_manual")
             herramienta_auto = (config.escalamiento.agendamiento_automatico.get(caso_manual)
                                 if caso_manual else None)
-            if herramienta_auto:
+            # Si ya se pospuso arriba no hace falta verificar nada: esta
+            # escalada no va a ocurrir en este turno, y 'verificar' es otra
+            # llamada al modelo.
+            if herramienta_auto and not posponer:
                 try:
                     veredicto = agendamiento.verificar(config, tenant, rol, estado["historial"])
                 except Exception as e:
@@ -425,7 +460,20 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 except Exception as e:
                     print(f"[escalamiento] no se pudo leer el caso de la conversacion: {e}")
                 if necesita_humano:
-                    respuesta = f"{respuesta}\n\n{config.escalamiento.mensaje}".strip()
+                    # REEMPLAZA, no se suma. Pegarlo al final producia mensajes
+                    # que se contradicen solos: la escalada se evalua DESPUES
+                    # de que el modelo contesto, asi que cuando escribio su
+                    # respuesta todavia no sabia que el turno terminaba en
+                    # traspaso. Visto en produccion el 15/08/2026 -- al cliente
+                    # le llego "necesito verificar tu identidad: ¿me pasas tu
+                    # cedula?" y debajo "Te paso con un companero", y no habia
+                    # forma de saber si mandar la cedula o esperar.
+                    #
+                    # Lo que se descarta no se pierde: si el caso pasa a una
+                    # persona, la pregunta que el modelo iba a hacer ya no
+                    # corre. Y el texto es del tenant, asi que el tono se
+                    # ajusta ahi (config.escalamiento.mensaje), no aca.
+                    respuesta = (config.escalamiento.mensaje or "").strip() or respuesta
                 else:
                     respuesta = (f"{respuesta}\n\nTu visita tecnica ya quedo agendada, "
                                 f"un tecnico te va a contactar para coordinar.").strip()

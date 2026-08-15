@@ -186,6 +186,30 @@ def evaluar(config, rol: str, historial: list[dict]) -> dict | None:
     return None
 
 
+def merece_un_intento(config, motivo: str, ya_se_intento: bool) -> bool:
+    """
+    True si esta escalada se pospone una vuelta para que el asistente intente
+    resolverlo el mismo.
+
+    El criterio es del TENANT ('escalamiento.intentar_resolver_antes', ver
+    nucleo/config/schema.py), no del codigo: aca solo se aplica. Y se aplica
+    UNA sola vez -- 'ya_se_intento' es la memoria de que esta conversacion ya
+    tuvo su oportunidad, y con eso puesto siempre devuelve False.
+
+    Ese techo no es un detalle: sin el, un cliente que sigue enojado y al que
+    nunca se le pudo resolver nada quedaria dando vueltas con el bot para
+    siempre, que es exactamente lo que la escalada existe para evitar. Un
+    agente que insiste con alguien que ya explotó dos veces empeora las cosas.
+
+    Que se pospone y que no lo decide el motivo, no la intensidad: un cliente
+    que PIDE hablar con una persona ('solicitud_explicita') nunca deberia
+    estar en esta lista, por mas calmado que suene.
+    """
+    if ya_se_intento or not motivo:
+        return False
+    return motivo in (config.escalamiento.intentar_resolver_antes or [])
+
+
 def _resolver_tag(config, nombre_tag: str) -> str | None:
     """
     id de la etiqueta en BottleCRM, creandola si hace falta.
