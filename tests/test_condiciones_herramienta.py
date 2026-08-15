@@ -288,6 +288,32 @@ comprobar(_alternativas(h_reintento, {"sn_onu": "DC90E681213E"}).get("sn_onu")
          != "DC90E681213E",
          "el original no se pisa: el reintento usa una copia")
 
+print("\nPrecondicion 'contiene': el guard sobre un texto libre")
+# El caso real: encender la TV solo si el plan la incluye, y las
+# descripciones de plan son texto libre que escribe una persona.
+p_tv = Precondicion(herramienta="consultar_plan_tv", campo="descripcion", contiene="TV")
+comprobar(p_tv.acepta("PLAN HOGAR FO (100MB + TV)"), "reconoce el rasgo dentro del texto")
+comprobar(p_tv.acepta("SERVICIO DE INTERNET + TV"), "y en otra redaccion distinta")
+comprobar(p_tv.acepta("plan hogar fo (100mb + tv)"), "sin distinguir mayusculas")
+# 'television' NO contiene la subcadena 'tv' -- si algun plan se escribiera
+# asi, el guard lo rechazaria. Medido el 15/08/2026: los 10 planes de Rapilink
+# que incluyen television usan el token 'TV', ninguno la palabra completa. Si
+# aparece uno que la use, hay que ajustar el 'contiene' del YAML.
+comprobar(not p_tv.acepta("plan hogar con television"),
+         "'television' no matchea 'TV': es una limitacion conocida, no un bug")
+comprobar(Precondicion(herramienta="x", campo="d", contiene="TELEVISIÓN")
+         .acepta("plan con television"), "ni tildes -- lo escribe una persona")
+comprobar(not p_tv.acepta("SERVICIO FIBRA OPTICA 100MB"),
+         "un plan SIN television no cumple: es el caso que evita regalar el servicio")
+# Fail-closed: si el dato no es texto, no se puede afirmar que contenga nada.
+comprobar(not p_tv.acepta(None), "un dato ausente no cumple")
+comprobar(not p_tv.acepta(123), "un dato que no es texto tampoco")
+
+lanza("declarar 'valor' y 'contiene' a la vez se rechaza", ValidationError,
+     lambda: Precondicion(herramienta="x", campo="c", valor="a", contiene="b"))
+lanza("no declarar ninguno de los tres se rechaza", ValidationError,
+     lambda: Precondicion(herramienta="x", campo="c"))
+
 if fallos:
     print(f"\n[FALLA] {len(fallos)} caso(s):")
     for f in fallos:

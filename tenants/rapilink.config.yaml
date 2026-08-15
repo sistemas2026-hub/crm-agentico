@@ -110,7 +110,7 @@ roles:
     puede_consultar: [consultar_cliente, consultar_cliente_por_cedula, consultar_ticket,
           consultar_tickets_de_cliente, contar_tickets, contar_clientes, consultar_casos_bottlecrm,
           agendar_visita_tecnica, consultar_estado_ont, consultar_senal_ont, reiniciar_ont,
-          diagnosticar_falla_ont, consultar_estado_catv]
+          diagnosticar_falla_ont, consultar_estado_catv, activar_catv]
     campos_permitidos:
       consultar_cliente: [id_servicio, nombre, cedula, estado, email, telefono, direccion, localidad,
         ciudad, plan_internet, zona, fecha_instalacion, estado_facturas, saldo, fecha_corte]
@@ -148,6 +148,7 @@ roles:
       diagnosticar_falla_ont: ["ONU details.Last down cause", "ONU details.Last down cause_interpretado",
             "ONU details.Run state", "ONU details.Last down time", "Optical status.Rx optical power(dBm)"]
       consultar_estado_catv: [catv]
+      activar_catv: [response]
     nunca_revelar: [password_servicio, password_cpe, password_router_wifi, password_ssid_router_wifi,
       usuario_router_wifi, coordenadas]
 
@@ -469,7 +470,7 @@ roles:
     orientado_a: cliente_final
     puede_consultar: [consultar_mi_servicio, ping_cliente, derivar_a_area,
           consultar_plan_tv, consultar_estado_ont, consultar_senal_ont,
-          reiniciar_ont, diagnosticar_falla_ont, consultar_estado_catv]
+          reiniciar_ont, diagnosticar_falla_ont, consultar_estado_catv, activar_catv]
     campos_permitidos:
       consultar_mi_servicio: [estado, plan_internet, ssid_router_wifi]
       ping_cliente: ["ping-1", "ping-2", "ping-3", "ping-exitoso"]
@@ -487,6 +488,8 @@ roles:
       # atiende. Solo el estado del servicio (Enabled/Disabled/no soportado),
       # que es accionable; nada de niveles opticos ni topologia.
       consultar_estado_catv: [catv]
+      # Solo la confirmacion del proveedor ("CATV enabled"), nada mas.
+      activar_catv: [response]
     nunca_revelar: [password_servicio, password_cpe, password_router_wifi, usuario_router_wifi,
           cedula, direccion, coordenadas, ip, mac_cpe, sn_onu, sectorial, router.nombre]
 
@@ -1498,6 +1501,63 @@ herramientas:
         "ONT LOSi/LOBi alarm": "sin señal optica: puede ser la fibra (cortada o falla en la caja NAP) O el equipo apagado/desenchufado -- desde la OLT los dos se ven identicos, hay que preguntarle al cliente por la corriente para distinguirlos"
         "ONT LOFi alarm": "sin señal optica: puede ser la fibra (cortada o falla en la caja NAP) O el equipo apagado/desenchufado -- desde la OLT los dos se ven identicos, hay que preguntarle al cliente por la corriente para distinguirlos"
         "ONU is currently online": "el equipo esta en linea, no hay una caida que explicar"
+
+  - nombre: activar_catv
+    tipo: http
+    descripcion: >
+      Enciende el servicio de television en el equipo del cliente. Se usa en
+      UN solo caso: consultar_estado_catv dio 'Disabled' y su plan SI
+      incluye TV. Ahi la television esta apagada en el equipo por error, y
+      encenderla resuelve el caso entero sin visita ni tecnico.
+
+      NO la llames en ningun otro caso. Si el plan no incluye TV, el
+      servicio esta apagado A PROPOSITO y encenderlo seria darle algo que no
+      contrato -- medido: de cada dos clientes con la TV apagada, uno la
+      tiene apagada con razon. El motor ademas lo rechaza solo si falta
+      alguna de las dos condiciones, asi que no lo intentes "por si acaso":
+      segui el protocolo normal.
+
+      Despues de encenderla, decile al cliente que ya quedo activada y
+      preguntale si le volvio la señal. Si todavia no la ve, guialo con la
+      sintonizacion automatica de canales eligiendo ANTENA -- el equipo
+      necesita volver a buscar los canales despues de recuperar la señal.
+
+      Maximo UNA vez por conversacion.
+    solo_lectura: false
+    requiere_confirmacion: true
+    roles_permitidos: [soporte_tecnico_cliente, soporte]
+    base_url_ref: SMARTOLT_SUBDOMINIO
+    endpoint: /api/onu/enable_catv/{sn_onu}
+    metodo: POST
+    auth_ref: SMARTOLT_API_KEY
+    auth_esquema: ""
+    auth_header: X-Token
+    inyectar_sesion:
+      sn_onu: sn_onu
+    reintentar_identificador_como:
+      sn_onu: gpon_hex
+    limite_por_conversacion: 1
+    # Los dos guards en CODIGO, no en el prompt (PRD 7.4): esto le enciende
+    # un servicio pago a un cliente, y el prompt es guia, no garantia. Sin
+    # las dos medidas hechas en esta conversacion, el motor no ejecuta.
+    #
+    # 'contiene' y no 'valor': las descripciones de plan son texto libre
+    # ("PLAN HOGAR FO (100MB + TV)", "SERVICIO DE INTERNET + TV"), no un
+    # valor cerrado que se pueda enumerar sin desactualizarse.
+    #
+    # Se busca "TV" y no "television" porque asi lo escriben: medido el
+    # 15/08/2026, los 10 planes de Rapilink que incluyen television usan el
+    # token 'TV', ninguno la palabra completa. OJO: 'television' NO contiene
+    # la subcadena 'tv', asi que un plan nuevo escrito de esa forma quedaria
+    # afuera -- el guard falla del lado seguro (no enciende), pero habria que
+    # ajustar este 'contiene'.
+    exige_previas:
+      - herramienta: consultar_plan_tv
+        campo: descripcion
+        contiene: "TV"
+      - herramienta: consultar_estado_catv
+        campo: catv
+        valor: Disabled
 
   - nombre: consultar_estado_catv
     tipo: http

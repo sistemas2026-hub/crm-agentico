@@ -47,6 +47,7 @@ Uso
 from __future__ import annotations
 
 import re
+import unicodedata
 from datetime import date
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -70,6 +71,14 @@ PATRONES_SECRETO = [
     (re.compile(r"^[A-Za-z0-9+/]{40,}={0,2}$"), "cadena base64 larga"),
     (re.compile(r"^[a-f0-9]{32,}$", re.I), "hash o clave hexadecimal"),
 ]
+
+
+def _sin_tildes(texto: str) -> str:
+    """Minusculas y sin tildes, para comparar texto que escribio una persona.
+    'Television' y 'TELEVISIÓN' tienen que dar lo mismo -- ver
+    Precondicion.contiene."""
+    normal = unicodedata.normalize("NFD", texto.lower())
+    return "".join(c for c in normal if unicodedata.category(c) != "Mn")
 
 
 def _parece_secreto(valor: str) -> str | None:
@@ -461,19 +470,42 @@ class Precondicion(Base):
     # reinicio remoto. Lo que hay que exigir es que el equipo CONTESTE, no
     # que conteste perfecto.
     valores: list[Any] | None = None
+    # Un texto que tiene que ESTAR CONTENIDO en el valor leido, cuando lo que
+    # hay que exigir no es un valor cerrado sino un rasgo de un texto libre.
+    # Medido el 15/08/2026: la unica forma de saber si un plan incluye
+    # television es que su descripcion lo diga, y esas descripciones son
+    # libres ("PLAN HOGAR FO (100MB + TV)", "SERVICIO DE INTERNET + TV"...).
+    # Enumerarlas con 'valores' seria una lista que se desactualiza con el
+    # primer plan nuevo, y quedarse sin el guard significa encenderle un
+    # servicio pago a quien no lo paga: de 8 clientes con CATV apagada, 4 la
+    # tenian apagada CON RAZON.
+    #
+    # Sin distinguir mayusculas ni tildes -- lo escribe una persona en el
+    # panel del proveedor, no un sistema.
+    contiene: str | None = None
 
     @model_validator(mode="after")
-    def _uno_u_otro(self):
-        if (self.valor is None) == (self.valores is None):
+    def _uno_solo(self):
+        declarados = sum(x is not None for x in (self.valor, self.valores, self.contiene))
+        if declarados != 1:
             raise ValueError(
                 f"la precondicion sobre '{self.herramienta}.{self.campo}' tiene "
-                f"que declarar 'valor' (uno solo) o 'valores' (varios "
-                f"aceptables), no ambos ni ninguno")
+                f"que declarar EXACTAMENTE uno de 'valor' (uno solo), "
+                f"'valores' (varios aceptables) o 'contiene' (un texto dentro "
+                f"del valor leido) -- declaro {declarados}")
         return self
 
     def acepta(self, leido) -> bool:
         """Si el valor leido de la respuesta cumple esta condicion."""
-        return leido in self.valores if self.valores is not None else leido == self.valor
+        if self.contiene is not None:
+            # Fail-closed ante un dato que no es texto: un numero o un None no
+            # 'contiene' nada, y darlo por bueno seria saltearse el guard.
+            if not isinstance(leido, str):
+                return False
+            return _sin_tildes(self.contiene) in _sin_tildes(leido)
+        if self.valores is not None:
+            return leido in self.valores
+        return leido == self.valor
 
 
 class Herramienta(Base):
