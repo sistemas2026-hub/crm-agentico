@@ -61,11 +61,34 @@ cada endpoint tiene su propio sobre, no asumir un patrón común entre ellos.
 
 ## El identificador — el hallazgo más importante del sondeo
 
-**`sn_onu` de WispHub funciona DIRECTO como identificador de SmartOLT.** No
-hace falta traducir a un `onu_id` interno — es el mismo valor
-(`unique_external_id` / `sn` en la respuesta de SmartOLT). Verificado con
-`HWTCAF721761` (Carlos Eliecer Diaz Lazo, id_servicio 6580 en WispHub):
-`get_onu_details` lo aceptó y devolvió exactamente ese cliente.
+**`sn_onu` de WispHub funciona DIRECTO como identificador de SmartOLT** —
+para la enorme mayoría. No hace falta traducir a un `onu_id` interno.
+Verificado con `HWTCAF721761` (Carlos Eliecer Diaz Lazo, id_servicio 6580 en
+WispHub): `get_onu_details` lo aceptó y devolvió exactamente ese cliente.
+
+⚠️ **Corrección (15/08/2026): `sn` y `unique_external_id` NO siempre son el
+mismo valor.** Esta sección afirmaba que sí, y es falso para una minoría que
+igual importa. Medido sobre las 4.966 ONUs de la OLT 3:
+
+| | ONUs | Forma que acepta el endpoint |
+|---|---|---|
+| `sn == unique_external_id` | 4.898 | la corta (`HWTCA6FB5263`) |
+| `sn != unique_external_id` | **68** | **solo la hexadecimal** (`44433930E681213E`) |
+
+La forma hexadecimal es la representación GPON estándar: los 4 primeros
+caracteres del serial son el fabricante en ASCII, y ahí van como hex
+(`"DC90"` → `44 43 39 30`). El resto queda igual.
+
+**Por qué importa**: WispHub guarda la forma CORTA, y las herramientas
+inyectan esa. Para esas 68 ONUs el endpoint responde **HTTP 400** y el cliente
+se queda sin diagnóstico con un error que no explica nada. No son ONUs
+huérfanas: se confirmaron tres con cliente real en WispHub (id_servicio 1805,
+1872, 2186), dos de ellos **activos**.
+
+Resuelto con `Herramienta.reintentar_identificador_como: {sn_onu: gpon_hex}`
+(ver `nucleo/config/schema.py`): si la llamada falla, se reintenta UNA vez con
+la forma convertida. No se puede usar siempre la hexadecimal — para las otras
+4.898 la válida es la corta.
 
 **Método del valor imposible aplicado al identificador** (no a un filtro,
 al identificador mismo — es la variante que corresponde cuando lo que hay que
@@ -247,6 +270,40 @@ este caso -- pero prohíbe usarlo en polling o en bulk.
 `full_status_info`) es limpia y anidada por sección
 (`"Optical status"`, `"ONU details"`, `"History"`, ...) -- se parsea con
 claves de diccionario, sin regex.
+
+## CATV: el estado esta en 'catv', NO en 'ONU CATV port.Port State'
+
+Verificado el 15/08/2026, y corrige una herramienta que ya se habia construido
+mal sobre el campo equivocado:
+
+| Estado real (`catv`) | `ONU CATV port.Port State` | `CATV Rx optical power` |
+|---|---|---|
+| `Enabled` | `up` | `-` (no reporta) |
+| `Disabled` | **`up`** | `-70.00` o `-` |
+| `Not supported by ONU-Type` | ausente (`None`) | `-` |
+
+**`Port State` dice `up` tanto con CATV habilitada como DESHABILITADA** -- no
+distingue, y ademas llega como `'up         -'`, con pinta de dos columnas de
+una tabla de texto mal partida. Construir sobre el da un falso negativo del
+peor tipo: al cliente que tiene la TV apagada en el equipo se le contesta que
+"de nuestro lado sale bien" y se lo manda a revisar cables.
+
+El campo bueno es **`catv`**, y esta en `get_onu_details/{sn}` -- que ademas
+tarda **0,6 s** contra los ~10 s de `get_onu_full_status_info`. Tres valores:
+`Enabled`, `Disabled`, `Not supported by ONU-Type`.
+
+**Descartado el nivel optico de CATV para un veredicto**: `CATV Rx optical
+power(dBm)` existe, pero de 7 ONUs sanas con CATV habilitada, las 7 devolvieron
+`-`. Solo lo reportan algunos modelos, asi que un umbral sobre ese campo
+aplicaria a una minoria. Ademas es OTRA longitud de onda (1550 nm, la
+portadora de video) que la senal de datos (1490 nm), asi que el rango de
+G-GO-04 no le corresponde.
+
+**Reparto de modelos** (5.328 ONUs, ambas OLTs): los que traen `CATV` en el
+nombre del modelo la soportan (`CDATA-CATV`, `EASY4-LINK-CATV`); `CDATA` pelado
+no (0 de 359 habilitadas). En total: 4.019 `Enabled`, 582 `Disabled`, 365
+`Not supported`. Esos 365 no pueden dar television por hardware -- si el plan
+del cliente la incluye, es un equipo a cambiar, no un caso de soporte.
 
 ## El endpoint masivo — confirma el mismo patrón de filtro ignorado que WispHub
 

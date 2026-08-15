@@ -147,9 +147,7 @@ roles:
       # topologia de VLAN/perfil.
       diagnosticar_falla_ont: ["ONU details.Last down cause", "ONU details.Last down cause_interpretado",
             "ONU details.Run state", "ONU details.Last down time", "Optical status.Rx optical power(dBm)"]
-      # El colaborador SI ve el nivel optico de CATV en crudo: sabe leer un
-      # dBm, y sin rango confirmado todavia es el unico que puede juzgarlo.
-      consultar_estado_catv: ["ONU CATV port.Port State", "Optical status.CATV Rx optical power(dBm)"]
+      consultar_estado_catv: [catv]
     nunca_revelar: [password_servicio, password_cpe, password_router_wifi, password_ssid_router_wifi,
       usuario_router_wifi, coordenadas]
 
@@ -395,9 +393,25 @@ roles:
           EXACTAMENTE IGUAL que una fibra cortada. Pasa seguido.
           Preguntale PRIMERO si el equipo esta enchufado y si hay luz en
           la casa: es lo unico que separa los dos casos, y es justo lo que
-          no podemos medir. Solo si te confirma que tiene corriente y el
-          equipo igual esta apagado o sin luces, ahi si es la fibra --
-          deriva a un colaborador humano para visita tecnica.
+          no podemos medir.
+
+          Si te dice que SI tiene corriente y el equipo igual sigue caido,
+          pedile una FOTO del equipo antes de derivar. Pedila como lo que
+          es -- algo que ayuda, no un control: "mandame una foto del
+          equipo con las luces, asi el tecnico ya va sabiendo con que se
+          va a encontrar". Nunca insinues que dudas de lo que te conto, ni
+          se lo pidas "para verificar" ni "para confirmar que es cierto".
+          Un equipo sin NINGUNA luz encendida en la foto es un equipo sin
+          corriente, aunque el cliente crea que esta enchufado (la
+          zapatilla apagada, un breaker que salto, alguien que lo
+          desconecto sin avisar): si se ve asi, guialo con eso en vez de
+          mandar una visita que no hace falta.
+
+          Y NO la conviertas en un requisito: si no puede mandarla, no
+          sabe como, no tiene camara o simplemente no quiere, AGENDA LA
+          VISITA IGUAL sin hacerlo sentir mal ni pedirsela de nuevo. La
+          foto ahorra una visita cuando llega; que no llegue nunca puede
+          dejar a alguien sin servicio.
 
       - Si consultar_estado_ont o consultar_senal_ont fallan (el equipo de
         este cliente puede no estar registrado en ese sistema todavia):
@@ -470,10 +484,9 @@ roles:
       reiniciar_ont: [response]
       diagnosticar_falla_ont: ["ONU details.Last down cause_interpretado"]
       # El unico dato duro para una falla de TV, y este es el agente que las
-      # atiende. Solo el estado del puerto (up/down): el nivel optico en dBm
-      # no entra por el mismo criterio que la senal de la ONU, un numero que
-      # el cliente no puede interpretar y que no cambia lo que tiene que hacer.
-      consultar_estado_catv: ["ONU CATV port.Port State"]
+      # atiende. Solo el estado del servicio (Enabled/Disabled/no soportado),
+      # que es accionable; nada de niveles opticos ni topologia.
+      consultar_estado_catv: [catv]
     nunca_revelar: [password_servicio, password_cpe, password_router_wifi, usuario_router_wifi,
           cedula, direccion, coordenadas, ip, mac_cpe, sn_onu, sectorial, router.nombre]
 
@@ -1282,6 +1295,13 @@ herramientas:
     # igual (la llamada HTTP si funcionaba). Encontrado 14/08/2026.
     inyectar_sesion:
       sn_onu: sn_onu
+    # De 4.966 ONUs de Rapilink, 68 solo responden con el serial en su
+    # forma hexadecimal (verificado en vivo, agosto 2026) -- y entre ellas
+    # hay clientes ACTIVOS. WispHub guarda la forma corta, asi que sin este
+    # reintento esos clientes se quedan sin diagnostico, con un 400 que no
+    # explica nada. Ver el campo en nucleo/config/schema.py.
+    reintentar_identificador_como:
+      sn_onu: gpon_hex
 
   - nombre: consultar_senal_ont
     tipo: http
@@ -1305,6 +1325,13 @@ herramientas:
     # objeto envolvente.
     inyectar_sesion:
       sn_onu: sn_onu
+    # De 4.966 ONUs de Rapilink, 68 solo responden con el serial en su
+    # forma hexadecimal (verificado en vivo, agosto 2026) -- y entre ellas
+    # hay clientes ACTIVOS. WispHub guarda la forma corta, asi que sin este
+    # reintento esos clientes se quedan sin diagnostico, con un 400 que no
+    # explica nada. Ver el campo en nucleo/config/schema.py.
+    reintentar_identificador_como:
+      sn_onu: gpon_hex
     # G-GO-04 (guia de diagnostico de fallas de conectividad, campo -- ONT
     # del cliente): -8 a -25 dBm aceptable, peor que -25 es problema del
     # drop. El tercer tramo (mejor que -8, senal "demasiado fuerte") no esta
@@ -1362,6 +1389,13 @@ herramientas:
     auth_header: X-Token
     inyectar_sesion:
       sn_onu: sn_onu
+    # De 4.966 ONUs de Rapilink, 68 solo responden con el serial en su
+    # forma hexadecimal (verificado en vivo, agosto 2026) -- y entre ellas
+    # hay clientes ACTIVOS. WispHub guarda la forma corta, asi que sin este
+    # reintento esos clientes se quedan sin diagnostico, con un 400 que no
+    # explica nada. Ver el campo en nucleo/config/schema.py.
+    reintentar_identificador_como:
+      sn_onu: gpon_hex
     # Los comentarios van ARRIBA de la clave, no entre los elementos de la
     # lista: ruamel indexa los de adentro por posicion y --exportar los
     # pierde al cambiar un elemento (ver el limite conocido de _fusionar en
@@ -1441,6 +1475,13 @@ herramientas:
     extraer_de: full_status_json
     inyectar_sesion:
       sn_onu: sn_onu
+    # De 4.966 ONUs de Rapilink, 68 solo responden con el serial en su
+    # forma hexadecimal (verificado en vivo, agosto 2026) -- y entre ellas
+    # hay clientes ACTIVOS. WispHub guarda la forma corta, asi que sin este
+    # reintento esos clientes se quedan sin diagnostico, con un 400 que no
+    # explica nada. Ver el campo en nucleo/config/schema.py.
+    reintentar_identificador_como:
+      sn_onu: gpon_hex
     # Valores reales observados contra la instancia de Rapilink (agosto
     # 2026, ver skill smartolt-api). Un valor sin entrada aca se deja SIN
     # interpretar -- nunca se inventa una etiqueta para una causa nueva.
@@ -1461,44 +1502,51 @@ herramientas:
   - nombre: consultar_estado_catv
     tipo: http
     descripcion: >
-      Estado del puerto de TV (CATV) en el equipo del cliente, leido de la
-      OLT. Para fallas de TV, es el UNICO dato duro que se puede mirar del
-      lado nuestro -- todo lo demas del protocolo (luces, cableado,
+      Si el servicio de TV esta habilitado en el equipo del cliente, segun
+      la OLT. Para una falla de TV es el UNICO dato duro que tenemos de
+      nuestro lado -- todo lo demas del protocolo (cableado, entrada,
       sintonizacion) depende de lo que el cliente reporte.
 
       LLAMALA APENAS el cliente reporta una falla de TV y ya confirmaste
       que su plan la incluye, ANTES de arrancar con la lista de preguntas.
-      El manual (5.9) pide verificar en SmartOLT como parte del
-      procedimiento, no despues de agotar al cliente: si el puerto esta
-      caido, todas esas preguntas sobran.
+      El manual (5.9) pide verificar en SmartOLT como PARTE del
+      procedimiento, no despues de agotar al cliente.
 
-      Como leer 'Port State':
-      - 'up'   = el puerto esta activo, la señal de TV sale del equipo. El
-                 problema esta del lado del cliente (sintonizacion,
-                 cableado, entrada del TV) -- segui el protocolo normal.
-      - 'down' = el puerto de TV NO esta activo. ESO es la falla, no la
-                 configuracion del televisor: no le pidas al cliente que
-                 sintonice ni que revise cables, pasa el caso para que se
-                 reactive el servicio de CATV en el equipo.
-
-      Tarda ~10 segundos (usa el mismo endpoint pesado que
-      diagnosticar_falla_ont). No las llames a las dos en el mismo turno:
-      son dos consultas lentas separadas, y responden preguntas distintas
-      (esta es para TV; la otra, para un equipo caido).
+      Como leer 'catv':
+      - 'Enabled'  = el servicio esta habilitado en el equipo. De nuestro
+                     lado sale bien, asi que el problema esta del lado del
+                     cliente: segui el protocolo (cableado, entrada del TV,
+                     sintonizacion).
+      - 'Disabled' = el servicio de TV esta APAGADO en el equipo. ESO es la
+                     falla, ya la encontraste. No le pidas que sintonice ni
+                     que revise cables: pasa el caso para que se lo
+                     reactiven.
+      - 'Not supported by ONU-Type' = el modelo de equipo que tiene no
+                     soporta television. No es algo que el cliente pueda
+                     resolver ni que se arregle sintonizando: pasa el caso a
+                     un colaborador humano, porque si su plan incluye TV hay
+                     que cambiarle el equipo.
     solo_lectura: true
     # Sin 'cliente_final': ese rol es un ROUTER, no diagnostica (ver su
     # catalogo). Las fallas de TV las atiende soporte_tecnico_cliente.
     roles_permitidos: [soporte_tecnico_cliente, soporte]
     base_url_ref: SMARTOLT_SUBDOMINIO
-    endpoint: /api/onu/get_onu_full_status_info/{sn_onu}
+    endpoint: /api/onu/get_onu_details/{sn_onu}
     metodo: GET
     auth_ref: SMARTOLT_API_KEY
     auth_esquema: ""
     auth_header: X-Token
-    extraer_de: full_status_json
+    extraer_de: onu_details
     inyectar_sesion:
       sn_onu: sn_onu
-    # PENDIENTE: 'Optical status.CATV Rx optical power(dBm)' existe y trae
+    # De 4.966 ONUs de Rapilink, 68 solo responden con el serial en su
+    # forma hexadecimal (verificado en vivo, agosto 2026) -- y entre ellas
+    # hay clientes ACTIVOS. WispHub guarda la forma corta, asi que sin este
+    # reintento esos clientes se quedan sin diagnostico, con un 400 que no
+    # explica nada. Ver el campo en nucleo/config/schema.py.
+    reintentar_identificador_como:
+      sn_onu: gpon_hex
+    # DESCARTADO: 'Optical status.CATV Rx optical power(dBm)' existe y trae
     # el nivel optico de CATV (medido en vivo, agosto 2026: -5.90 en un
     # equipo sano). NO se expone todavia porque no hay un rango aceptable
     # confirmado con el area tecnica -- y el dBm crudo no va al modelo sin

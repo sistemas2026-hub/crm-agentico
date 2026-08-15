@@ -632,6 +632,19 @@ class Herramienta(Base):
     # zona), NUNCA para datos que cambian por cliente (saldo, estado): la
     # clave de cache no distingue "hace 2 segundos" de "hace 2 meses" salvo
     # que se declare cache_vigencia_dias. Ver nucleo/modelo/motor.py.
+    # Argumento -> nombre de una transformacion conocida por el ejecutor
+    # (nucleo/herramientas/http.py:_TRANSFORMACIONES). Si la llamada FALLA, se
+    # reintenta UNA vez con ese argumento convertido. Existe porque una misma
+    # cosa puede tener dos escrituras equivalentes y la API aceptar solo una,
+    # distinta segun el registro -- verificado en vivo (agosto 2026): de 4.966
+    # ONUs de Rapilink, 68 solo responden con el serial en su forma
+    # hexadecimal, y para las otras 4.898 la valida es la corta. No se puede
+    # elegir una sola de antemano, y adivinar mal deja al cliente sin
+    # diagnostico con un error que no dice nada.
+    #
+    # El nucleo aporta el mecanismo y las transformaciones con nombre; QUE
+    # herramienta lo necesita lo declara el tenant.
+    reintentar_identificador_como: dict[str, str] = Field(default_factory=dict)
     cache: bool = False
     # Dias antes de refrescar una entrada. None = no vence (se asume estable
     # hasta que alguien fuerce un refresco borrando la fila en la base).
