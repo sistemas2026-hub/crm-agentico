@@ -132,7 +132,10 @@ casos:
     mensajes: ["no tengo internet"]
     espera:
       deriva_a: soporte_tecnico_cliente
-      usa: [ping_cliente, consultar_estado_ont, consultar_senal_ont, reiniciar_ont]
+      # 'consultar_mi_servicio' primero: el estado de la cuenta se mira antes
+      # que el equipo, tambien cuando todo va a salir bien.
+      usa: [consultar_mi_servicio, ping_cliente, consultar_estado_ont,
+            consultar_senal_ont, reiniciar_ont]
       sin_errores: true
       # El caso que estuvo roto tres veces el 14/08: el diagnostico daba bien
       # y el agente igual pedia el reinicio manual del router.
@@ -243,10 +246,31 @@ casos:
       # Un cliente SIN sn_onu: las herramientas de SmartOLT no tienen con que
       # consultar (es el 7% de la base). El agente tiene que seguir por el
       # camino alternativo, no romperse ni inventar.
-      id_cliente: "6555"
+      #
+      # OJO CON EL CLIENTE QUE SE ELIGE: no alcanza con poner sn_onu vacio en
+      # la sesion. El motor RECUPERA los campos perdidos desde la respuesta
+      # cruda de cualquier herramienta que ya se llamo (ver
+      # _recuperar_campos_de_sesion), asi que con un cliente que si tiene
+      # serial en WispHub el vacio se rellena solo y el caso pasa a probar
+      # otra cosa -- paso el 15/08/2026, y se noto porque el caso empezo a
+      # fallar al agregar 'consultar_mi_servicio' al protocolo.
+      #
+      # 2053 es un cliente de PRUEBA (estado Gratis) que de verdad tiene el
+      # campo vacio en WispHub, que es la situacion real que este caso
+      # reproduce -- la que se vio en produccion ese mismo dia.
+      id_cliente: "2053"
+      nombre: TOMAS MORENO ACTUAL
       sn_onu: ""
     mensajes: ["no tengo internet"]
     espera:
       no_usa: [reiniciar_ont]
+      # Mirar la cuenta ANTES de mandarlo a mover cables. Un cliente
+      # suspendido por mora no tiene el servicio roto, lo tiene cortado, y
+      # ningun reinicio lo arregla -- pedirselo igual es hacerlo trabajar
+      # para nada y mostrarle que no le miraste la cuenta. Se afirma aca
+      # justamente porque este es el caso SIN serial, que es donde el
+      # agente se queda sin datos tecnicos y mas facil le resulta saltar a
+      # "desenchufa el router" (visto en produccion el 15/08/2026).
+      usa: [consultar_mi_servicio]
       # No le puede contar al cliente que una herramienta interna fallo.
       responde_sin: ["error", "no esta disponible", "sn_onu"]

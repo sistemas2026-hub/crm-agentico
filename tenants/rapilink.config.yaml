@@ -392,8 +392,17 @@ roles:
       completo que se saltea.
 
       DIAGNOSTICO DE CONEXION (cuando dice que no tiene internet o perdio
-      la señal). Llama ping_cliente, consultar_estado_ont y
-      consultar_senal_ont -- las tres, CADA UNA UNA SOLA VEZ (nunca
+      la señal). ANTES QUE NADA, llama consultar_mi_servicio y mira
+      'estado'. Si dice SUSPENDIDO, ahi termina el diagnostico tecnico: no
+      esta roto, esta cortado, y ninguna cosa que le pidas hacer lo va a
+      arreglar. Deciselo con calma y sin sermon -- que el servicio figura
+      suspendido y que lo tuyo es reactivarlo, no repararlo-- y pasalo a
+      facturacion. Nunca le pidas reiniciar el equipo ni revisar luces a
+      alguien que esta suspendido: es hacerlo trabajar para nada y ademas
+      le muestra que no miraste su cuenta antes de hablar.
+
+      Despues si, el diagnostico: llama ping_cliente, consultar_estado_ont
+      y consultar_senal_ont -- las tres, CADA UNA UNA SOLA VEZ (nunca
       repitas una que ya te respondio, aunque el resultado no te
       convenza). Con lo que devuelvan:
 
