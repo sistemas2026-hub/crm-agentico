@@ -55,7 +55,7 @@ from nucleo.recuperacion.prompt import construir_system
 from nucleo.recuperacion.busqueda import (recuperar, bloque_de_contexto,
                                           registrar_sin_resultados)
 from nucleo.seguridad import listas_blancas
-from nucleo.seguridad.verificacion import nivel_requerido, es_factor_de_posesion
+from nucleo.seguridad.verificacion import Sesion, nivel_requerido, es_factor_de_posesion
 
 
 class ErrorMotor(Exception):
@@ -173,6 +173,44 @@ def _esquema_openai(herramienta):
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     }
+
+
+def _recuperar_campos_de_sesion(sesion, herramienta, crudo) -> None:
+    """
+    Rellena un campo persistible que la sesion perdio, leyendolo de la
+    respuesta cruda de una herramienta que ya se llamo igual.
+
+    Esos campos (Sesion.CAMPOS_PERSISTIBLES: el serial de la ONU, la interfaz)
+    se capturan al verificar la identidad, y esa era la UNICA oportunidad. Una
+    conversacion que sigue abierta pero cuya captura se perdio quedaba ciega
+    para siempre: verificada, atendida con normalidad, y con todas las
+    herramientas que dependen del serial fallando en silencio detras. El
+    cliente recibia el protocolo alternativo -- "desconecta el router 30
+    segundos" -- en vez del diagnostico y el reinicio remoto que si estaban a
+    mano. Visto en produccion el 15/08/2026, en las conversaciones que ya
+    estaban abiertas cuando se agrego la persistencia (migracion 17) y que por
+    eso nunca llegaron a guardar nada.
+
+    Solo se lee de herramientas cuyo DESTINATARIO lo eligio el motor
+    ('inyectar_sesion' no vacio: el id sale de la sesion verificada, nunca de
+    un argumento del modelo). Si no, bastaria que el modelo consultara a otro
+    cliente -- por inyeccion de prompt o por un rol interno que si puede
+    hacerlo -- para que la sesion se quedara con el serial ajeno y el siguiente
+    reinicio remoto cayera sobre la casa equivocada.
+
+    Solo rellena lo que falta: nunca pisa un valor que la sesion ya tiene.
+    """
+    if sesion is None or not sesion.verificado or not herramienta.inyectar_sesion:
+        return
+    faltan = [c for c in Sesion.CAMPOS_PERSISTIBLES if not getattr(sesion, c, None)]
+    if not faltan:
+        return
+    for campo in faltan:
+        valor = _buscar_campo(crudo, campo)
+        if valor:
+            setattr(sesion, campo, valor)
+            print(f"[sesion] '{campo}' se recupero de '{herramienta.nombre}' "
+                  "(se habia perdido; la conversacion vuelve a tener diagnostico)")
 
 
 def _ejecutar_verificacion(herramienta, sesion, argumentos_modelo: dict,
@@ -790,6 +828,7 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                     try:
                         crudo = _ejecutar_tool(herramienta, sesion, llamada.argumentos,
                                               config.identidad.slug, config.variables_tenant)
+                        _recuperar_campos_de_sesion(sesion, herramienta, crudo)
                         salida = listas_blancas.filtrar_campos(rol_cfg, herramienta.nombre, crudo)
                     except Exception as e:
                         # No tumba el turno: el modelo recibe un error legible y

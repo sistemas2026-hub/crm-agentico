@@ -37,7 +37,9 @@ from nucleo.config.schema import Herramienta, Precondicion, RangoVeredicto  # no
 from nucleo.herramientas.http import (ErrorHerramientaHttp, _alternativas,  # noqa: E402
                                       _aplicar_mapeos, _aplicar_veredictos,
                                       _gpon_hex, base_url_de, url_de)
-from nucleo.modelo.motor import _previas_no_cumplidas, _veces_ejecutada     # noqa: E402
+from nucleo.modelo.motor import (_previas_no_cumplidas,                     # noqa: E402
+                                 _recuperar_campos_de_sesion, _veces_ejecutada)
+from nucleo.seguridad.verificacion import Sesion                            # noqa: E402
 from pydantic import ValidationError                                        # noqa: E402
 
 fallos: list[str] = []
@@ -287,6 +289,37 @@ comprobar(_alternativas(_herramienta(), {"sn_onu": "DC90E681213E"}) == {},
 comprobar(_alternativas(h_reintento, {"sn_onu": "DC90E681213E"}).get("sn_onu")
          != "DC90E681213E",
          "el original no se pisa: el reintento usa una copia")
+
+print("\nrecuperar campos de sesion: una conversacion ciega vuelve a ver")
+# La respuesta cruda de WispHub, con la forma que de verdad tiene.
+CRUDO = {"count": 1, "results": [{"id_servicio": "6555", "sn_onu": "CDTC505AE4AB",
+                                 "interfaz_lan": "ether2"}]}
+h_propia = _herramienta(nombre="consultar_mi_servicio",
+                       inyectar_sesion={"id_servicio": "id_cliente"})
+
+s = Sesion(identificador_canal="3001234567"); s.verificado = True
+_recuperar_campos_de_sesion(s, h_propia, CRUDO)
+comprobar(s.sn_onu == "CDTC505AE4AB",
+         "el serial perdido se recupera de una consulta posterior")
+comprobar(s.interfaz_lan == "ether2", "y con el, el resto de los persistibles")
+
+# Lo que ya se sabe no se toca: el valor de la sesion verificada manda sobre
+# cualquier cosa que devuelva una herramienta despues.
+s_con_dato = Sesion(identificador_canal="3001234567"); s_con_dato.verificado = True; s_con_dato.sn_onu = "YAxTENGO0001"
+_recuperar_campos_de_sesion(s_con_dato, h_propia, CRUDO)
+comprobar(s_con_dato.sn_onu == "YAxTENGO0001", "un valor que ya existia no se pisa")
+
+# El limite que hace segura toda la recuperacion: si el destinatario no lo
+# eligio el motor, el serial podria ser de otro cliente -- y el proximo
+# reinicio remoto caeria sobre la casa equivocada.
+s_ajena = Sesion(identificador_canal="3001234567"); s_ajena.verificado = True
+_recuperar_campos_de_sesion(s_ajena, _herramienta(nombre="buscar_cualquier_cliente"), CRUDO)
+comprobar(not s_ajena.sn_onu,
+         "de una herramienta SIN inyectar_sesion no se recupera nada")
+
+s_sin_verificar = Sesion(identificador_canal="3001234567")
+_recuperar_campos_de_sesion(s_sin_verificar, h_propia, CRUDO)
+comprobar(not s_sin_verificar.sn_onu, "sin verificar tampoco: no hay a quien atribuirselo")
 
 if fallos:
     print(f"\n[FALLA] {len(fallos)} caso(s):")
