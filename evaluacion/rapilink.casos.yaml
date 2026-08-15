@@ -99,6 +99,25 @@ casos:
   # buena una falla aca: consultar el estado real de la ONU
   # (get_onu_status/CDTC505AE4AB) y esperar a que vuelva a 'Online'. Dejar
   # ~6 minutos entre corridas de este caso puntual.
+  #
+  # AMPLIACION (15/08/2026): no alcanza con espaciar las CORRIDAS. Medido
+  # dos veces el mismo dia -- este caso pasa AISLADO (--caso "reinicio
+  # remoto") y falla dentro de la bateria completa, con la ONU sana y el
+  # ping respondiendo. Lo que lo rompe es un caso ANTERIOR de la misma
+  # corrida que ya reinicio la ONU: 'Last down cause' queda en 'LOSi/LOBi'
+  # -- residuo de ese reinicio, no una falla actual -- y el agente lo lee
+  # como equipo caido, pregunta por la corriente y nunca llega a reiniciar.
+  #
+  # O sea: la bateria completa no puede dar 12/12 en una sola pasada
+  # mientras dos casos compartan la misma ONU. Si este es el UNICO caso en
+  # rojo y pasa al correrlo solo, no es una regresion. Arreglarlo de verdad
+  # pide una segunda ONU de laboratorio, o que el caso no dependa de una
+  # ONU que otro caso reinicia.
+  #
+  # Y ojo con los timestamps al diagnosticar esto: SmartOLT los devuelve en
+  # hora local (-05:00) y la base en UTC. Comparar '18:04' contra '23:0x'
+  # sin sumar las 5 horas hace parecer que el reinicio fue hace rato cuando
+  # fue recien -- ya llevo a descartar esta misma causa por error.
   - nombre: equipo sano termina en reinicio remoto, no en reinicio manual
     rol: cliente_final
     mensajes: ["no tengo internet"]
