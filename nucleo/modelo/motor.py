@@ -253,7 +253,7 @@ def _ejecutar_verificacion(herramienta, sesion, argumentos_modelo: dict,
             sesion.candidatos = [str(f["id_servicio"]) for f in filas]
         return {"verificado": False, "motivo": "ambiguo",
                "instruccion_interna": "Hay mas de un cliente con ese dato. "
-                   "Pedile otro dato adicional para desambiguar -- nunca "
+                   "Pidele otro dato adicional para desambiguar -- nunca "
                    "elijas vos cual es."}
 
     if sesion is not None:
@@ -265,9 +265,9 @@ def _ejecutar_verificacion(herramienta, sesion, argumentos_modelo: dict,
     return {
         "verificado": False,
         "nombre_a_confirmar": sesion.nombre_pendiente if sesion else None,
-        "instruccion_interna": "Todavia NO esta verificado. Decile al cliente "
+        "instruccion_interna": "Todavia NO esta verificado. Dile al cliente "
             "que el servicio figura a nombre de 'nombre_a_confirmar' y "
-            "pedile que confirme si es el/ella. Nunca reveles ningun otro "
+            "pidele que confirme si es el/ella. Nunca reveles ningun otro "
             "dato todavia. Cuando responda, llama a confirmar_identidad con "
             "confirma=true si dijo que si, confirma=false si dijo que no.",
     }
@@ -293,7 +293,7 @@ def _ejecutar_confirmacion(sesion, argumentos_modelo: dict) -> dict:
         sesion.interfaz_lan_pendiente = None
         sesion.sn_onu_pendiente = None
         return {"verificado": False, "motivo": "el cliente no confirmo el nombre",
-               "instruccion_interna": "Pedile de nuevo el numero de cedula, "
+               "instruccion_interna": "Pidele de nuevo el numero de cedula, "
                    "puede haber un error de tipeo."}
 
     sesion.verificado = True
@@ -318,8 +318,8 @@ def _ejecutar_confirmacion(sesion, argumentos_modelo: dict) -> dict:
            "instruccion_interna": "Verificacion CERRADA en este mismo paso, "
                "sin nada pendiente: no existe ningun paso adicional, ni "
                "ninguna limitacion de este canal (WhatsApp u otro) que te "
-               "impida seguir. Decile al cliente en una frase breve que ya "
-               "quedo verificado, y en el MISMO mensaje segui de inmediato "
+               "impida seguir. Dile al cliente en una frase breve que ya "
+               "quedo verificado, y en el MISMO mensaje sigue de inmediato "
                "con el problema que te habia contado antes de pedirle la "
                "cedula, usando las herramientas que tengas para su rol. "
                "Nunca digas que falta un paso, que el canal no lo permite, "
@@ -376,7 +376,7 @@ def _ejecutar_derivacion(herramienta, sesion, argumentos_modelo: dict, nombre_ro
     area = (argumentos_modelo or {}).get("area")
     if area not in herramienta.areas_destino:
         return {"error": f"'{area}' no es un area valida para derivar.",
-               "instruccion_interna": f"Elegi una de estas: "
+               "instruccion_interna": f"Elige una de estas: "
                    f"{', '.join(herramienta.areas_destino)}."}
 
     if area == nombre_rol_actual:
@@ -384,7 +384,7 @@ def _ejecutar_derivacion(herramienta, sesion, argumentos_modelo: dict, nombre_ro
         # sentido "derivar" a donde ya esta. Se le avisa para que no repita.
         return {"ok": True, "area": area,
                "instruccion_interna": "Ya estas atendiendo esta area, no "
-                   "hace falta derivar. Segui con la conversacion."}
+                   "hace falta derivar. Sigue con la conversacion."}
 
     if sesion is not None:
         sesion.rol_siguiente = area
@@ -723,11 +723,11 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
             # a un numero de expediente.
             quien = (f" QUIEN es: el servicio figura a nombre de {sesion.nombre}"
                      " -- si te pregunta si sabes quien te habla, o como se"
-                     " llama, decile el nombre, es el dato que esta pidiendo y"
+                     " llama, dile el nombre, es el dato que esta pidiendo y"
                      " es suyo." if sesion.nombre else "")
             historial.append({"role": "system", "content":
                 "Este cliente YA esta verificado: no le pidas la cedula ni "
-                f"ningun dato de identidad, segui directo con lo que necesita.{quien}"
+                f"ningun dato de identidad, sigue directo con lo que necesita.{quien}"
                 " COMO se supo es otra cosa: si te pregunta como lo sabes, o "
                 "por que no le pediste datos, contestale solo que su identidad "
                 "quedo verificada antes en esta misma conversacion. NUNCA "
@@ -888,7 +888,7 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
             elif rol_cfg.orientado_a == "cliente_final" and (sesion is None or sesion.nivel < nivel_exigido):
                 salida = {"error": "IDENTIDAD_NO_VERIFICADA",
                          "instruccion_interna": "No muestres ningun dato. "
-                             "Pedile al cliente el dato que falta para "
+                             "Pidele al cliente el dato que falta para "
                              "verificar su identidad antes de continuar."}
                 codigo_error = "IDENTIDAD_NO_VERIFICADA"
             elif herramienta.deriva_rol:
@@ -909,7 +909,7 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                              f"intentar '{herramienta.nombre}': "
                              f"{', '.join(faltantes)}. Llamalas primero -- "
                              "si el resultado no es favorable, esta "
-                             "herramienta no es el siguiente paso, segui el "
+                             "herramienta no es el siguiente paso, sigue el "
                              "protocolo alternativo en vez de insistir."}
                 codigo_error = "PRECONDICION_NO_CUMPLIDA"
             elif herramienta.limite_por_conversacion is not None and _veces_ejecutada(
@@ -918,7 +918,7 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                          "instruccion_interna": f"'{herramienta.nombre}' ya se "
                              "uso el maximo de veces permitidas en esta "
                              "conversacion. No la repitas -- si el cliente "
-                             "insiste, decile que un colaborador humano va a "
+                             "insiste, dile que un colaborador humano va a "
                              "seguir el caso."}
                 codigo_error = "LIMITE_DE_CONVERSACION"
             else:
@@ -1022,7 +1022,7 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                                   "content": construir_system(config, nombre_rol)})
                 historial.append({"role": "system", "content":
                     f"Vos atendes ahora esta conversacion, en el mismo mensaje "
-                    f"-- el cliente NO tiene que volver a escribir. Segui "
+                    f"-- el cliente NO tiene que volver a escribir. Sigue "
                     f"desde donde quedo (ya esta verificado, no le pidas la "
                     f"identidad de nuevo) y resolvele lo que pidio con TUS "
                     f"herramientas. No le digas que lo estas derivando ni que "

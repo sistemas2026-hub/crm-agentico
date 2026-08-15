@@ -117,7 +117,7 @@ def _esquema_evaluacion(config) -> dict:
             "enum": list(config.manual.casos),
             "description": "A cual de estos casos del manual corresponde "
                 "esta conversacion. Usa 'otro' si ninguno encaja bien -- "
-                "pero elegi siempre uno, no lo dejes vacio. Un "
+                "pero elige siempre uno, no lo dejes vacio. Un "
                 "verificador aparte lo usa para saber si este caso "
                 "puntual tiene agendamiento automatico de visita "
                 "tecnica habilitado, sin pasar por un humano.",
