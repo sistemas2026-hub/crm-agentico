@@ -230,7 +230,7 @@ def piezas_del_system(config, nombre_rol: str) -> list[dict]:
             "paso o que el canal no lo permite.\n"
             "Nunca uses formato markdown (nada de **negrita**, _cursiva_, "
             "ni # titulos): este canal no lo renderiza, y quedan simbolos "
-            "sueltos a la vista en vez de texto resaltado. Escribi en texto "
+            "sueltos a la vista en vez de texto resaltado. Escribe en texto "
             "plano; si hace falta estructurar pasos, usa una lista numerada "
             "simple (1. 2. 3.) en lineas separadas, nunca asteriscos.",
             editable=False)
