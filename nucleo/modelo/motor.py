@@ -658,17 +658,27 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
             # contestar con la verdad, que ademas es el dato que el cliente
             # esta pidiendo. No es una fuga: es SU propio nombre, y ya se lo
             # dijimos al verificarlo ("el servicio figura a nombre de X").
-            quien = f" El servicio figura a nombre de {sesion.nombre}." if sesion.nombre else ""
+            # Son DOS preguntas distintas y se contestan distinto. Mezclarlas
+            # en una sola regla salio mal (15/08/2026): ante "¿sabes quien te
+            # habla?" contestaba "tu identidad quedo verificada antes en esta
+            # conversacion" -- cierto, pero le respondia sobre el TRAMITE a
+            # alguien que preguntaba por su NOMBRE, teniendolo a mano. Suena a
+            # evasiva justo donde el cliente esta midiendo si le hablan a el o
+            # a un numero de expediente.
+            quien = (f" QUIEN es: el servicio figura a nombre de {sesion.nombre}"
+                     " -- si te pregunta si sabes quien te habla, o como se"
+                     " llama, decile el nombre, es el dato que esta pidiendo y"
+                     " es suyo." if sesion.nombre else "")
             historial.append({"role": "system", "content":
                 "Este cliente YA esta verificado: no le pidas la cedula ni "
                 f"ningun dato de identidad, segui directo con lo que necesita.{quien}"
-                " Si te pregunta como sabes quien es, o por que no le pediste "
-                "datos, contestale solo lo que sabes: que su identidad quedo "
-                "verificada antes en esta misma conversacion. NUNCA expliques "
-                "el mecanismo ni inventes uno (no digas que lo reconociste "
-                "por su numero, por su chat, ni que 'el sistema lo confirma') "
-                "-- si no sabes como se verifico, decilo asi de simple y "
-                "ofrecele confirmarlo de nuevo con su cedula."})
+                " COMO se supo es otra cosa: si te pregunta como lo sabes, o "
+                "por que no le pediste datos, contestale solo que su identidad "
+                "quedo verificada antes en esta misma conversacion. NUNCA "
+                "expliques el mecanismo ni inventes uno (no digas que lo "
+                "reconociste por su numero, por su chat, ni que 'el sistema lo "
+                "confirma') -- si no sabes como se verifico, decilo asi de "
+                "simple y ofrecele confirmarlo de nuevo con su cedula."})
     historial.append({"role": "user", "content": mensaje})
 
     herramientas = herramientas_del_rol(config, rol_cfg)
