@@ -155,7 +155,7 @@ def estado_de_conversacion_abierta(tenant: str, canal: str,
     with sesion(tenant) as (cur, org):
         cur.execute(
             """select id, escalada_a_humano, caso_id, id_cliente, nombre_cliente,
-                      rol_efectivo, necesita_atencion_humana
+                      rol_efectivo, necesita_atencion_humana, datos_sesion
                from asistente.conversations
                where organization_id = %s and canal = %s and usuario_externo = %s
                  and estado = 'abierta'
@@ -172,6 +172,10 @@ def estado_de_conversacion_abierta(tenant: str, canal: str,
             "id_cliente": fila["id_cliente"],
             "nombre_cliente": fila["nombre_cliente"],
             "rol_efectivo": fila["rol_efectivo"],
+            # Los identificadores tecnicos capturados al verificar (ej. el
+            # serial de la ONU). Sin esto, tras un reinicio del motor la
+            # conversacion vuelve verificada pero sin con que consultar.
+            "datos_sesion": fila["datos_sesion"] or {},
         }
 
 
@@ -396,7 +400,8 @@ def cerrar_conversacion(tenant: str, conversation_id: str) -> None:
 
 
 def identificar_cliente(tenant: str, conversation_id: str,
-                        id_cliente: str, nombre: str | None) -> None:
+                        id_cliente: str, nombre: str | None,
+                        datos: dict | None = None) -> None:
     """
     Guarda a QUIEN corresponde esta conversacion, resuelto por
     nucleo.modelo.motor._ejecutar_confirmacion -- no el identificador crudo
@@ -411,9 +416,10 @@ def identificar_cliente(tenant: str, conversation_id: str,
     with sesion(tenant) as (cur, org):
         cur.execute(
             """update asistente.conversations
-               set id_cliente = %s, nombre_cliente = %s
+               set id_cliente = %s, nombre_cliente = %s,
+                   datos_sesion = %s
                where organization_id = %s and id = %s""",
-            (id_cliente, nombre, org, conversation_id))
+            (id_cliente, nombre, json.dumps(datos or {}), org, conversation_id))
 
 
 def caso_de_conversacion(tenant: str, conversation_id: str) -> str | None:

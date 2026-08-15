@@ -385,7 +385,7 @@ def _previas_no_cumplidas(herramienta, historial: list[dict]) -> list[str]:
                 continue
             # No se corta al primer match: la ULTIMA ocurrencia en el
             # historial (mas reciente) es la que decide.
-            cumplida = _buscar_campo(dato, previa.campo) == previa.valor
+            cumplida = previa.acepta(_buscar_campo(dato, previa.campo))
         if not cumplida:
             faltantes.append(previa.herramienta)
     return faltantes
@@ -611,10 +611,26 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
         # ahi volvia a pedir la cedula de alguien ya verificado, en cada
         # conversacion. Verificado en vivo (agosto 2026).
         if sesion is not None and sesion.verificado:
+            # El NOMBRE va en el mensaje a proposito. Sin el, ante "¿vos sabes
+            # quien soy?" el modelo no tiene con que contestar y se inventa
+            # una explicacion -- visto en vivo (15/08/2026): dijo "tu chat
+            # esta asociado a tu cuenta porque escribis desde el WhatsApp que
+            # tenes registrado" y "el sistema me confirma que sos el
+            # titular", las dos frases fabricadas. Con el nombre a mano puede
+            # contestar con la verdad, que ademas es el dato que el cliente
+            # esta pidiendo. No es una fuga: es SU propio nombre, y ya se lo
+            # dijimos al verificarlo ("el servicio figura a nombre de X").
+            quien = f" El servicio figura a nombre de {sesion.nombre}." if sesion.nombre else ""
             historial.append({"role": "system", "content":
-                "Este cliente YA esta verificado por el sistema (nivel "
-                f"{sesion.nivel}). No le pidas la cedula ni ningun dato de "
-                "identidad: segui directo con lo que necesita."})
+                "Este cliente YA esta verificado: no le pidas la cedula ni "
+                f"ningun dato de identidad, segui directo con lo que necesita.{quien}"
+                " Si te pregunta como sabes quien es, o por que no le pediste "
+                "datos, contestale solo lo que sabes: que su identidad quedo "
+                "verificada antes en esta misma conversacion. NUNCA expliques "
+                "el mecanismo ni inventes uno (no digas que lo reconociste "
+                "por su numero, por su chat, ni que 'el sistema lo confirma') "
+                "-- si no sabes como se verifico, decilo asi de simple y "
+                "ofrecele confirmarlo de nuevo con su cedula."})
     historial.append({"role": "user", "content": mensaje})
 
     herramientas = herramientas_del_rol(config, rol_cfg)

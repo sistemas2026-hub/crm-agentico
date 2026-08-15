@@ -451,7 +451,29 @@ class Precondicion(Base):
     """
     herramienta: str
     campo: str
-    valor: Any
+    valor: Any = None
+    # Varios valores aceptables, cuando el dato REAL no es un unico valor
+    # estable. Medido el 15/08/2026: 'ping-exitoso' de WispHub devolvio
+    # '1 de 3', '2 de 3' y '3 de 3' en tres corridas seguidas contra el MISMO
+    # equipo sano. Con 'valor: "3 de 3"' la precondicion solo se cumplia
+    # cuando el ping salia perfecto -- una de cada tres veces-- y el cliente
+    # con la conexion inestable (justo el que se queja) casi nunca llegaba al
+    # reinicio remoto. Lo que hay que exigir es que el equipo CONTESTE, no
+    # que conteste perfecto.
+    valores: list[Any] | None = None
+
+    @model_validator(mode="after")
+    def _uno_u_otro(self):
+        if (self.valor is None) == (self.valores is None):
+            raise ValueError(
+                f"la precondicion sobre '{self.herramienta}.{self.campo}' tiene "
+                f"que declarar 'valor' (uno solo) o 'valores' (varios "
+                f"aceptables), no ambos ni ninguno")
+        return self
+
+    def acepta(self, leido) -> bool:
+        """Si el valor leido de la respuesta cumple esta condicion."""
+        return leido in self.valores if self.valores is not None else leido == self.valor
 
 
 class Herramienta(Base):
