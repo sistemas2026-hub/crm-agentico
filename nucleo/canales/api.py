@@ -168,7 +168,12 @@ def _sesion_nueva(tenant: str, id_sesion: str, canal: str) -> dict:
     """
     estado = {"sesion": Sesion(identificador_canal=id_sesion),
               "historial": [], "escalada": False, "caso_id": None, "rol_activo": None,
-              "repreguntado_agendamiento": False, "nota_pendiente": None}
+              "repreguntado_agendamiento": False, "nota_pendiente": None,
+              # Distinto de 'escalada': esa se apaga a proposito cuando no hay
+              # humano a quien esperar (ver mas abajo), y sin esta bandera esa
+              # misma pausa apagada volvia a habilitar la evaluacion en el
+              # turno siguiente y se creaba un caso duplicado.
+              "ya_escalada": False}
     try:
         previo = persistencia.estado_de_conversacion_abierta(tenant, canal, id_sesion)
     except Exception as e:
@@ -183,6 +188,9 @@ def _sesion_nueva(tenant: str, id_sesion: str, canal: str) -> dict:
     # agendamiento.py) no tiene caso de BottleCRM abierto que la retome --
     # pausarla la dejaria muda con ese cliente para siempre.
     estado["escalada"] = previo["escalada"] and previo["necesita_atencion_humana"]
+    # Sin el 'and': lo que interesa aca no es si el bot esta en pausa, sino si
+    # esta conversacion YA tiene un caso creado. Son cosas distintas.
+    estado["ya_escalada"] = previo["escalada"]
     estado["caso_id"] = previo["caso_id"]
     # Se guarda tal cual vino de la base, sin validar todavia contra la
     # config (esta funcion no la recibe) -- atender_turno() la revalida
@@ -298,6 +306,9 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
         # El caso se cerro: el asistente vuelve a atender desde este turno.
         estado["escalada"] = False
         estado["caso_id"] = None
+        # Y vuelve a poder escalar: el caso anterior ya no esta abierto, asi
+        # que un caso nuevo no seria un duplicado sino uno legitimo.
+        estado["ya_escalada"] = False
 
     respuesta, registro_herramientas = motor.responder(
         config, rol, mensaje, estado["historial"], estado["sesion"],
@@ -357,7 +368,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     rol_cfg = config.roles.get(rol)
     cerrada = False
     if (conversation_id and rol_cfg and rol_cfg.orientado_a == "cliente_final"
-            and not estado["escalada"]):
+            and not estado["escalada"] and not estado["ya_escalada"]):
         try:
             evaluacion = escalamiento.evaluar(config, rol, estado["historial"])
         except Exception as e:
@@ -367,6 +378,11 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             necesita_humano = evaluacion.get("necesita_humano", True)
             nota_ticket = ""
             posponer = False
+            # Tiene que existir SIEMPRE, no solo dentro de la rama de
+            # agendamiento: mas abajo decide que se le promete al cliente, y
+            # esa promesa no puede depender de una variable que a veces no se
+            # asigno. Ver el comentario del aviso final.
+            id_ticket_auto = None
 
             # --- verificacion automatica de agendamiento --------------------
             # Solo corre si el tenant declaro ESTE caso puntual en
@@ -382,6 +398,15 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 except Exception as e:
                     print(f"[agendamiento] fallo al verificar: {type(e).__name__}: {e}")
                     veredicto = None
+
+                # Sin esta linea, un veredicto que dice "no" es invisible: no
+                # hay ticket, no hay error, y desde afuera se ve igual que si
+                # el agendamiento no estuviera configurado.
+                if veredicto:
+                    print(f"[agendamiento] caso='{caso_manual}' "
+                          f"checklist_completo={veredicto.get('checklist_completo')} "
+                          f"corresponde_agendar={veredicto.get('corresponde_agendar')} "
+                          f"falta={veredicto.get('pregunta_faltante') or '-'}")
 
                 if veredicto and veredicto.get("checklist_completo") and veredicto.get("corresponde_agendar"):
                     id_ticket_auto = agendamiento.agendar(
@@ -424,11 +449,20 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                     estado["caso_id"] = persistencia.caso_de_conversacion(tenant, conversation_id)
                 except Exception as e:
                     print(f"[escalamiento] no se pudo leer el caso de la conversacion: {e}")
-                if necesita_humano:
-                    respuesta = f"{respuesta}\n\n{config.escalamiento.mensaje}".strip()
-                else:
+                # El aviso se decide por el TICKET REAL, no por
+                # 'necesita_humano'. El evaluador puede devolver
+                # necesita_humano=false por su cuenta (caso registrado para
+                # seguimiento, sin urgencia) sin que se haya agendado nada:
+                # atado a esa bandera, el cliente escuchaba "tu visita ya
+                # quedo agendada" cuando no existia ninguna visita. Visto en
+                # una prueba real el 15/08/2026 -- el peor error posible aca
+                # es prometerle a alguien un tecnico que no va a ir.
+                if id_ticket_auto:
                     respuesta = (f"{respuesta}\n\nTu visita tecnica ya quedo agendada, "
                                 f"un tecnico te va a contactar para coordinar.").strip()
+                elif necesita_humano:
+                    respuesta = f"{respuesta}\n\n{config.escalamiento.mensaje}".strip()
+                estado["ya_escalada"] = True
                 # El mensaje del asistente ya se guardo (mas arriba, antes de
                 # poder evaluar la escalada -- necesitaba conversation_id).
                 # Sin esto el HTTP response trae el aviso pero /conversaciones
@@ -1790,7 +1824,7 @@ def _procesar_mensaje_whatsapp(config, tenant: str, rol: str, entrante: dict) ->
             whatsapp.enviar_texto(
                 config, tenant, de,
                 "Recibí tu mensaje, pero no puedo leer ese tipo de archivo. "
-                "Contame en palabras qué necesitás y te ayudo.")
+                "Cuéntame en palabras qué necesitas y te ayudo.")
             return
 
         salida = atender_turno(config, tenant, rol, de, texto, "whatsapp")

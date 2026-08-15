@@ -148,6 +148,19 @@ todos abajo):
 | `signal_1490` | `-21.74` (dBm) | 🟡 Ver nota de wavelength abajo |
 | `distance` | `"4289"` (metros, inferido) | 🟢 Sin riesgo |
 | `last_status_change` | timestamp | 🟢 Sirve para distinguir corte reciente de intermitencia vieja |
+
+⚠️ **Los timestamps de SmartOLT vienen en hora LOCAL de la instancia
+(`-05:00`), no en UTC.** `get_onu_status` devuelve `last_status_change`
+*sin* offset (`"2026-08-15 18:00:25"`) y `get_onu_full_status_info` sí lo
+trae (`"2026-08-15 18:04:39-05:00"`) — el mismo instante, escrito de dos
+formas, por dos endpoints del mismo proveedor.
+
+Costó una conclusión equivocada el 15/08/2026: se comparó un
+`last_status_change` de las `18:00` contra timestamps de la base (que van
+en UTC, `23:0x`) y se dio por sentado que el reinicio había sido "horas
+antes". Eran **cinco minutos** antes. Con eso se descartó por error la
+causa real de un caso dorado en rojo, que era justamente la ONU recién
+reiniciada. Sumar 5 horas antes de comparar contra cualquier otra fuente.
 | `authorization_date` | timestamp | 🟢 Sin riesgo |
 
 **`get_onu_signal/{sn}` es el candidato natural para `cliente_final`**: devuelve

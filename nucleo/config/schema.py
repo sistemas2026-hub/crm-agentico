@@ -139,6 +139,31 @@ class Persona(Base):
     # error: se nota como "el asistente empeoro", que es lo que nadie sabe
     # diagnosticar. 2.000 caracteres son ~10x lo que usa un tenant real.
     instrucciones_adicionales: str = Field(default="", max_length=2000)
+    # Tratamiento al que se NORMALIZA el texto que sale hacia el cliente, ya
+    # redactado (nucleo/modelo/tuteo.py). Vacio = no se toca nada.
+    #
+    # No es lo mismo que pedirselo al modelo por 'instrucciones_adicionales':
+    # eso es guia y se desobedece. Esto corre despues, sobre el texto final.
+    # Se agrego el 15/08/2026 despues de cuatro intentos de resolverlo por
+    # prompt, con todas las fuentes de contexto ya medidas en cero formas de
+    # voseo y el modelo produciendolo igual, de forma intermitente.
+    #
+    # Es configuracion y no una constante del motor porque el tratamiento
+    # varia por empresa: un ISP rioplatense va a querer justo lo contrario.
+    normalizar_tratamiento: str | None = None
+
+    @field_validator("normalizar_tratamiento")
+    @classmethod
+    def _tratamiento_implementado(cls, v):
+        # Rechaza cualquier valor sin normalizador real detras: un tenant que
+        # declara 'usted' y no obtiene nada es peor que un error al cargar,
+        # porque se descubre en produccion leyendo una conversacion.
+        from nucleo.modelo.tuteo import NORMALIZADORES
+        if v not in (None, "") and v not in NORMALIZADORES:
+            raise ValueError(
+                f"'{v}' no tiene normalizador implementado. Disponibles: "
+                f"{', '.join(sorted(NORMALIZADORES))} (ver nucleo/modelo/tuteo.py)")
+        return v or None
 
 
 class TerminoGlosario(Base):
@@ -1145,6 +1170,12 @@ def cargar_config(ruta: str | Path) -> TenantConfig:
 
 if __name__ == "__main__":
     import sys
+    # Corriendo como script, la raiz del repo no esta en sys.path y los
+    # validadores que importan otros modulos del nucleo (ej. el de
+    # 'normalizar_tratamiento', que consulta nucleo/modelo/tuteo.py) fallan
+    # con ModuleNotFoundError -- un error que no se parece en nada a "falta
+    # una ruta". Se agrega antes de validar nada.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     # Sin argumentos, valida TODOS los tenants. No se nombra ninguno: el nucleo
     # no conoce clientes (ver nucleo/__init__.py y la guarda en tests/).
     objetivos = sys.argv[1:] or sorted(

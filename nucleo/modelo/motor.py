@@ -50,6 +50,7 @@ from datetime import datetime, timedelta
 from nucleo.herramientas import agregado as ejecutor_agregado
 from nucleo.herramientas import http as ejecutor_http
 from nucleo.modelo import cliente
+from nucleo.modelo import tuteo
 from nucleo.persistencia import db as persistencia
 from nucleo.recuperacion.prompt import construir_system
 from nucleo.recuperacion.busqueda import (recuperar, bloque_de_contexto,
@@ -614,8 +615,15 @@ def _llamadas_fugadas(contenido: str, herramientas) -> list:
     return recuperadas
 
 
-def _sanitizar(texto: str, nombres_rol=()) -> str:
+def _sanitizar(texto: str, nombres_rol=(), tratamiento: str | None = None) -> str:
     limpio = _RE_FUGA_TOOL_CALL.sub("", texto)
+    # Tratamiento (tuteo/voseo/usted). Va aca y no en el prompt porque el
+    # prompt es guia y esto es garantia -- ver la explicacion larga en
+    # nucleo/modelo/tuteo.py. Cual se aplica lo decide el tenant; nucleo/
+    # no sabe cual usa ninguna empresa.
+    normalizador = tuteo.NORMALIZADORES.get(tratamiento or "")
+    if normalizador:
+        limpio = normalizador(limpio)
     # Nombres de rol sueltos. Visto en vivo (15/08/2026): al derivar, el
     # modelo escupio 'soporte_tecnico_cliente' como una linea propia en medio
     # del mensaje, y el cliente lo vio. Es el identificador INTERNO del
@@ -632,7 +640,7 @@ def _sanitizar(texto: str, nombres_rol=()) -> str:
 
 
 def _redactar(referencia_modelo: str, historial: list[dict], temperatura: float,
-              intentos: int = 3, nombres_rol=()) -> str:
+              intentos: int = 3, nombres_rol=(), tratamiento: str | None = None) -> str:
     """
     Redaccion final despues de que el modelo ya uso las herramientas que
     necesitaba. Reintenta si viene vacia -- visto en vivo con DeepSeek dos
@@ -650,7 +658,7 @@ def _redactar(referencia_modelo: str, historial: list[dict], temperatura: float,
     """
     for _ in range(intentos):
         resp = cliente.chat(referencia_modelo, historial, tools=None, temperatura=temperatura)
-        limpio = _sanitizar(resp.contenido, nombres_rol)
+        limpio = _sanitizar(resp.contenido, nombres_rol, tratamiento)
         if limpio and not _RE_RESPUESTA_CRUDA.match(limpio):
             historial.append({"role": "assistant", "content": limpio})
             return limpio
@@ -837,7 +845,8 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
             # limpiaba a vacio, y el cliente terminaba viendo "No pude
             # terminar de redactar la respuesta". Reproducido en vivo el
             # 15/08/2026 con una falla de TV, tres veces seguidas.
-            limpio = _sanitizar(resp.contenido, config.roles)
+            limpio = _sanitizar(resp.contenido, config.roles,
+                                config.persona.normalizar_tratamiento)
             if limpio:
                 if not hubo_llamadas:
                     historial.append({"role": "assistant", "content": limpio})
@@ -1042,5 +1051,6 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
 
     if hubo_llamadas:
         return _redactar(referencia_redaccion, historial, config.llm.temperatura,
-                        nombres_rol=config.roles), registro
+                        nombres_rol=config.roles,
+                        tratamiento=config.persona.normalizar_tratamiento), registro
     return "No pude completar la consulta en el numero de pasos permitido.", registro
