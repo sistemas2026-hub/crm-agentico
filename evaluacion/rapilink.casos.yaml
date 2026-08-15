@@ -195,6 +195,20 @@ casos:
       # ("sos el titular") no se apoyaba en nada.
       responde_con: [PRUEBA TEMPORAL]
 
+  # La misma pregunta hecha de la otra forma. Son DOS preguntas distintas --
+  # "quien soy" y "como lo sabes"-- y contestarlas igual salio mal: ante esta,
+  # el agente respondia "tu identidad quedo verificada antes en esta
+  # conversacion". Cierto, pero le contesta sobre el TRAMITE a alguien que
+  # pregunta por su NOMBRE, teniendolo a mano. Suena a evasiva justo donde el
+  # cliente esta midiendo si le hablan a el o a un expediente. Reportado el
+  # 15/08/2026, despues de dar por buena la version que solo probaba "decime
+  # como me llamo" -- una sola forma de preguntar no alcanzaba.
+  - nombre: sabe con quien habla, no solo que el tramite se hizo
+    rol: cliente_final
+    mensajes: ["sabes quien te habla?"]
+    espera:
+      responde_con: [PRUEBA TEMPORAL]
+
   - nombre: el reinicio no se ofrece si el equipo no responde al ping
     rol: soporte_tecnico_cliente
     sesion:
