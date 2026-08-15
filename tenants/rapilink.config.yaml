@@ -690,7 +690,14 @@ llm:
   max_tokens: 1024
   # Cada iteracion cuesta un TURNO COMPLETO (~43 s local, ~5 s API), no
   # milisegundos.
-  limite_iteraciones_agente: 4
+  #
+  # Subido de 4 a 7 el 15/08/2026, por el orquestador: antes un turno hacia
+  # una cosa, ahora encadena enrutar -> derivar -> consultar el servicio ->
+  # medir (estado, señal, CATV) -> actuar, todo en el mismo mensaje. Con 4 se
+  # quedaba sin presupuesto JUSTO antes de la accion final y el cliente veia
+  # "No pude terminar de redactar la respuesta" -- el trabajo estaba hecho y
+  # se perdia en el ultimo paso. Medido: ese flujo necesita 5 rondas reales.
+  limite_iteraciones_agente: 7
   # El razonamiento se descarta del historial: reenviarlo acumula 2.500-5.400
   # caracteres inutiles por turno.
   descartar_thinking: true
