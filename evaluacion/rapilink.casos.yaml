@@ -86,6 +86,19 @@ casos:
       catalogo_con: [derivar_a_area]
 
   # --- diagnostico tecnico completo ---------------------------------------
+  # ⚠️ ESTE CASO REINICIA LA ONU DE LABORATORIO DE VERDAD, y por eso NO se
+  # puede repetir seguido. Medido el 15/08/2026: corriendolo 5 veces en 15
+  # minutos, fallo 3 -- y no por un bug, sino porque cada corrida dejaba al
+  # equipo reiniciandose para la siguiente. Segun la medicion de la skill de
+  # SmartOLT, el ping vuelve a responder a los ~73s y 'onu_status' recien a
+  # los ~6 min; en el medio, ping_cliente se cae por timeout, la precondicion
+  # de reiniciar_ont no se cumple, y el caso falla por un motivo que no
+  # existe.
+  #
+  # Se persiguio como una regresion de prompt y no lo era. Antes de dar por
+  # buena una falla aca: consultar el estado real de la ONU
+  # (get_onu_status/CDTC505AE4AB) y esperar a que vuelva a 'Online'. Dejar
+  # ~6 minutos entre corridas de este caso puntual.
   - nombre: equipo sano termina en reinicio remoto, no en reinicio manual
     rol: cliente_final
     mensajes: ["no tengo internet"]
@@ -104,6 +117,37 @@ casos:
       # Cada consulta de solo lectura, UNA sola vez -- el cache por turno del
       # motor. Duplicarlas es latencia y consumo de API sin dato nuevo.
       usa_una_sola_vez: [ping_cliente, consultar_estado_ont, consultar_senal_ont]
+
+  # --- television ---------------------------------------------------------
+  - nombre: falla de TV confirma el plan y mide el puerto antes de preguntar
+    rol: cliente_final
+    mensajes: ["no me sale señal en el tv", "en todos los tv, tengo 3"]
+    espera:
+      deriva_a: soporte_tecnico_cliente
+      # El nombre del plan NO dice si incluye TV (de 55 planes reales, uno
+      # solo lo menciona; 'PLAN HOGAR' y 'PLAN ELITE' la incluyen sin
+      # decirlo). Y el puerto CATV es el unico dato duro que hay para una
+      # falla de TV: si esta caido, pedirle al cliente que sintonice el
+      # televisor es perder el tiempo de los dos.
+      usa: [consultar_plan_tv, consultar_estado_catv]
+      sin_errores: true
+      # La regla que motivo el arbol de diagnostico: el manual dice
+      # VERIFICAR que las luces esten normales, no PREGUNTARLAS -- esa
+      # instruccion se escribio para un agente humano por telefono, que no
+      # tenia otra forma de saberlo. Con la señal ya medida, esa pregunta
+      # esta contestada. 'en rojo' es la forma en que aparece cuando el
+      # agente recae en preguntarla ("¿alguna en rojo o apagada?").
+      responde_sin: ["en rojo"]
+
+  - nombre: el diagnostico de TV vive en el especialista, no en el router
+    rol: cliente_final
+    mensajes: ["se me fue la señal del tv"]
+    espera:
+      deriva_a: soporte_tecnico_cliente
+      # Mismo criterio que 'el router enruta, no diagnostica', aplicado a las
+      # herramientas de TV: el router no las tiene, las tiene quien atiende.
+      catalogo_sin: [consultar_estado_catv, consultar_plan_tv]
+      catalogo_con: [derivar_a_area]
 
   # --- seguridad ----------------------------------------------------------
   - nombre: sin verificar no se muestra ningun dato
