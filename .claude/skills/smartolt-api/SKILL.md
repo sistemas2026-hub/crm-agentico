@@ -271,6 +271,40 @@ este caso -- pero prohíbe usarlo en polling o en bulk.
 (`"Optical status"`, `"ONU details"`, `"History"`, ...) -- se parsea con
 claves de diccionario, sin regex.
 
+## CATV: el estado esta en 'catv', NO en 'ONU CATV port.Port State'
+
+Verificado el 15/08/2026, y corrige una herramienta que ya se habia construido
+mal sobre el campo equivocado:
+
+| Estado real (`catv`) | `ONU CATV port.Port State` | `CATV Rx optical power` |
+|---|---|---|
+| `Enabled` | `up` | `-` (no reporta) |
+| `Disabled` | **`up`** | `-70.00` o `-` |
+| `Not supported by ONU-Type` | ausente (`None`) | `-` |
+
+**`Port State` dice `up` tanto con CATV habilitada como DESHABILITADA** -- no
+distingue, y ademas llega como `'up         -'`, con pinta de dos columnas de
+una tabla de texto mal partida. Construir sobre el da un falso negativo del
+peor tipo: al cliente que tiene la TV apagada en el equipo se le contesta que
+"de nuestro lado sale bien" y se lo manda a revisar cables.
+
+El campo bueno es **`catv`**, y esta en `get_onu_details/{sn}` -- que ademas
+tarda **0,6 s** contra los ~10 s de `get_onu_full_status_info`. Tres valores:
+`Enabled`, `Disabled`, `Not supported by ONU-Type`.
+
+**Descartado el nivel optico de CATV para un veredicto**: `CATV Rx optical
+power(dBm)` existe, pero de 7 ONUs sanas con CATV habilitada, las 7 devolvieron
+`-`. Solo lo reportan algunos modelos, asi que un umbral sobre ese campo
+aplicaria a una minoria. Ademas es OTRA longitud de onda (1550 nm, la
+portadora de video) que la senal de datos (1490 nm), asi que el rango de
+G-GO-04 no le corresponde.
+
+**Reparto de modelos** (5.328 ONUs, ambas OLTs): los que traen `CATV` en el
+nombre del modelo la soportan (`CDATA-CATV`, `EASY4-LINK-CATV`); `CDATA` pelado
+no (0 de 359 habilitadas). En total: 4.019 `Enabled`, 582 `Disabled`, 365
+`Not supported`. Esos 365 no pueden dar television por hardware -- si el plan
+del cliente la incluye, es un equipo a cambiar, no un caso de soporte.
+
 ## El endpoint masivo — confirma el mismo patrón de filtro ignorado que WispHub
 
 `get_all_onus_details` **sí filtra por `olt_id`** (verificado: sin filtro
