@@ -57,13 +57,30 @@ prohibido_a_cliente_final:
 casos:
 
   # --- enrutamiento -------------------------------------------------------
+  #
+  # LOS CASOS DE ENRUTAMIENTO NO TOCAN EL EQUIPO, y por eso van sin 'sn_onu'.
+  # No es un detalle de estilo: cualquier caso de cara al cliente que diga
+  # "no tengo internet" con un serial valido termina, tras el handoff, en el
+  # diagnostico completo del especialista -- reinicio real de la ONU
+  # incluido. El unico caso que debe llegar hasta ahi es el que lo afirma
+  # ("equipo sano termina en reinicio remoto"); si otro lo hace antes, deja
+  # el equipo levantandose y ESE caso falla por un motivo que no existe.
+  #
+  # Costo medido (15/08/2026): el ping vuelve a los ~73s y 'onu_status' a los
+  # ~6 min, y entre dos casos pasan 30. Se vio dos veces seguidas y las dos
+  # se persiguio como una regresion del prompt antes de mirar el equipo real.
   - nombre: falla de internet va a soporte tecnico
     rol: cliente_final
+    sesion:
+      sn_onu: ""
     mensajes: ["no tengo internet"]
     espera:
       deriva_a: soporte_tecnico_cliente
       usa: [derivar_a_area]
-      sin_errores: true
+      # Sin 'sin_errores' a proposito: sin serial, las herramientas de
+      # SmartOLT fallan y eso ES lo esperado aca. El camino completo y sin
+      # un solo error lo afirma el caso del reinicio remoto, que si lleva
+      # serial y para eso existe.
 
   - nombre: consulta de saldo va a facturacion
     rol: cliente_final
@@ -75,6 +92,17 @@ casos:
 
   - nombre: el router enruta, no diagnostica
     rol: cliente_final
+    # Sin 'sn_onu' A PROPOSITO, y no porque el caso lo necesite: este caso
+    # afirma sobre ENRUTAMIENTO, que no toca el equipo. Pero el mensaje
+    # dispara el handoff, y el especialista hacia el diagnostico completo
+    # -- incluido el reinicio real de la ONU de laboratorio. El caso
+    # siguiente arrancaba 36 segundos despues, con el equipo todavia
+    # levantandose, y fallaba por un motivo que no existe: se veia igual
+    # que una regresion del prompt (15/08/2026, se persiguio como tal).
+    # Sin serial, las herramientas de SmartOLT no tienen a que apuntar y
+    # el turno termina donde a este caso le importa.
+    sesion:
+      sn_onu: ""
     mensajes: ["se me cayo el internet"]
     espera:
       deriva_a: soporte_tecnico_cliente
