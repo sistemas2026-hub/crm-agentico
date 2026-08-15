@@ -34,9 +34,9 @@ RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ))
 
 from nucleo.config.schema import Herramienta, Precondicion, RangoVeredicto  # noqa: E402
-from nucleo.herramientas.http import (ErrorHerramientaHttp, _aplicar_mapeos,  # noqa: E402
-                                      _aplicar_veredictos, base_url_de,
-                                      url_de)
+from nucleo.herramientas.http import (ErrorHerramientaHttp, _alternativas,  # noqa: E402
+                                      _aplicar_mapeos, _aplicar_veredictos,
+                                      _gpon_hex, base_url_de, url_de)
 from nucleo.modelo.motor import _previas_no_cumplidas, _veces_ejecutada     # noqa: E402
 from pydantic import ValidationError                                        # noqa: E402
 
@@ -242,6 +242,31 @@ historial_otra_herramienta = [{"role": "tool", "name": "otra_herramienta", "cont
 comprobar(_veces_ejecutada(h_limitada, historial_otra_herramienta) == 0,
          "una llamada a OTRA herramienta no cuenta")
 
+
+print("\nreintentar_identificador_como: las dos escrituras de un mismo serial")
+# 'DC90' en ASCII es 44 43 39 30 -- la forma hexadecimal estandar GPON.
+comprobar(_gpon_hex("DC90E681213E") == "44433930E681213E",
+         "el prefijo del fabricante pasa a su representacion hexadecimal")
+comprobar(_gpon_hex("HWTCA6FB5263") == "48575443A6FB5263",
+         "sirve para cualquier fabricante, no solo uno")
+# Convertir a ciegas daria un identificador inventado, y pedir datos de "algun"
+# equipo es peor que fallar.
+comprobar(_gpon_hex("CORTO") is None, "un valor que no tiene 12 caracteres no se convierte")
+comprobar(_gpon_hex("DC90-E681213E") is None, "un valor con separadores tampoco")
+
+h_reintento = _herramienta(endpoint="/api/onu/x/{sn_onu}",
+                          inyectar_sesion={"sn_onu": "sn_onu"},
+                          reintentar_identificador_como={"sn_onu": "gpon_hex"})
+comprobar(_alternativas(h_reintento, {"sn_onu": "DC90E681213E"})
+         == {"sn_onu": "44433930E681213E"},
+         "con la transformacion declarada, se ofrece la forma alternativa")
+comprobar(_alternativas(h_reintento, {"sn_onu": "SERIAL-RARO"}) == {},
+         "si el valor no tiene la forma esperada, no se reintenta con basura")
+comprobar(_alternativas(_herramienta(), {"sn_onu": "DC90E681213E"}) == {},
+         "una herramienta que no lo declara nunca reintenta")
+comprobar(_alternativas(h_reintento, {"sn_onu": "DC90E681213E"}).get("sn_onu")
+         != "DC90E681213E",
+         "el original no se pisa: el reintento usa una copia")
 
 if fallos:
     print(f"\n[FALLA] {len(fallos)} caso(s):")

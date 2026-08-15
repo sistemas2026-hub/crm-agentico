@@ -115,6 +115,45 @@ def url_de(herramienta, argumentos: dict | None = None,
     return base_url.rstrip("/") + endpoint
 
 
+def _gpon_hex(valor: str) -> str | None:
+    """
+    El serial de una ONU se escribe de dos formas equivalentes: 'DC90E681213E'
+    (los 4 primeros caracteres son el fabricante, en ASCII) y
+    '44433930E681213E' (ese mismo prefijo en hexadecimal). Es la
+    representacion estandar GPON, no una rareza de un proveedor.
+
+    Devuelve None si el valor no tiene la forma esperada -- convertir a ciegas
+    daria un identificador inventado, y pedir datos de "algun" equipo es peor
+    que fallar.
+    """
+    if len(valor) != 12 or not valor.isalnum():
+        return None
+    return "".join(f"{ord(ch):02X}" for ch in valor[:4]) + valor[4:]
+
+
+# Transformaciones que un tenant puede pedir por nombre desde
+# 'Herramienta.reintentar_identificador_como' (ver schema.py). El nucleo
+# provee el mecanismo; que herramienta lo necesita es decision del tenant.
+_TRANSFORMACIONES = {"gpon_hex": _gpon_hex}
+
+
+def _alternativas(herramienta, argumentos: dict) -> dict:
+    """Los argumentos con su identificador ya convertido, o {} si no hay
+    ninguna transformacion aplicable. No muta el original."""
+    cambiados = dict(argumentos)
+    hubo_cambio = False
+    for clave, nombre in (herramienta.reintentar_identificador_como or {}).items():
+        valor = argumentos.get(clave)
+        transformar = _TRANSFORMACIONES.get(nombre)
+        if not isinstance(valor, str) or transformar is None:
+            continue
+        nuevo = transformar(valor)
+        if nuevo and nuevo != valor:
+            cambiados[clave] = nuevo
+            hubo_cambio = True
+    return cambiados if hubo_cambio else {}
+
+
 def ejecutar(herramienta, argumentos: dict, tenant: str | None = None,
              variables_tenant: dict | None = None) -> dict | list:
     """
@@ -130,25 +169,43 @@ def ejecutar(herramienta, argumentos: dict, tenant: str | None = None,
         raise ErrorHerramientaHttp(
             f"'{herramienta.nombre}' no es tipo 'http' (es '{herramienta.tipo}').")
 
-    # Copia: url_de() puede popear claves que van en la ruta, y el llamador
-    # (nucleo/modelo/motor.py) no espera que su dict se mute por debajo.
     argumentos = dict(argumentos or {})
-    url = url_de(herramienta, argumentos, variables_tenant)
     headers = headers_de(herramienta, tenant)
 
-    if herramienta.metodo == "GET":
-        r = requests.get(url, headers=headers, params=argumentos, timeout=TIMEOUT_SEGUNDOS)
-    elif herramienta.multipart:
-        # requests solo arma multipart/form-data cuando hay un 'files=' --
-        # con (None, valor) se manda cada campo como parte de formulario
-        # comun, sin ser un archivo real. Ver el campo 'multipart' en
-        # nucleo/config/schema.py:Herramienta para el motivo.
-        archivos = {clave: (None, str(valor)) for clave, valor in argumentos.items()}
-        r = requests.request(herramienta.metodo, url, headers=headers,
-                             files=archivos, timeout=TIMEOUT_SEGUNDOS)
-    else:
-        r = requests.request(herramienta.metodo, url, headers=headers,
-                             json=argumentos, timeout=TIMEOUT_SEGUNDOS)
+    def _pedir(args: dict):
+        # Copia por intento: url_de() popea las claves que van en la RUTA, asi
+        # que un segundo intento con el mismo dict ya no las encontraria.
+        args = dict(args)
+        url = url_de(herramienta, args, variables_tenant)
+        if herramienta.metodo == "GET":
+            return requests.get(url, headers=headers, params=args,
+                                timeout=TIMEOUT_SEGUNDOS)
+        if herramienta.multipart:
+            # requests solo arma multipart/form-data cuando hay un 'files=' --
+            # con (None, valor) se manda cada campo como parte de formulario
+            # comun, sin ser un archivo real. Ver el campo 'multipart' en
+            # nucleo/config/schema.py:Herramienta para el motivo.
+            archivos = {c: (None, str(v)) for c, v in args.items()}
+            return requests.request(herramienta.metodo, url, headers=headers,
+                                    files=archivos, timeout=TIMEOUT_SEGUNDOS)
+        return requests.request(herramienta.metodo, url, headers=headers,
+                                json=args, timeout=TIMEOUT_SEGUNDOS)
+
+    r = _pedir(argumentos)
+
+    # Un identificador con dos escrituras validas: si la primera no le sirve a
+    # la API, se prueba la otra ANTES de dar el dato por inexistente. Ver
+    # 'reintentar_identificador_como' en schema.py -- sin esto, los clientes
+    # cuyo equipo esta registrado con la otra forma se quedan sin diagnostico
+    # y el error no dice por que. Un solo reintento, y solo si la
+    # transformacion produjo algo distinto.
+    if not r.ok:
+        alternativos = _alternativas(herramienta, argumentos)
+        if alternativos:
+            print(f"[http] '{herramienta.nombre}': {r.status_code} con el "
+                  f"identificador original, reintentando con la forma alternativa")
+            r = _pedir(alternativos)
+
     r.raise_for_status()
     crudo = r.json()
 

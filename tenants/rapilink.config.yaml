@@ -1298,6 +1298,13 @@ herramientas:
     # igual (la llamada HTTP si funcionaba). Encontrado 14/08/2026.
     inyectar_sesion:
       sn_onu: sn_onu
+    # De 4.966 ONUs de Rapilink, 68 solo responden con el serial en su
+    # forma hexadecimal (verificado en vivo, agosto 2026) -- y entre ellas
+    # hay clientes ACTIVOS. WispHub guarda la forma corta, asi que sin este
+    # reintento esos clientes se quedan sin diagnostico, con un 400 que no
+    # explica nada. Ver el campo en nucleo/config/schema.py.
+    reintentar_identificador_como:
+      sn_onu: gpon_hex
 
   - nombre: consultar_senal_ont
     tipo: http
@@ -1321,6 +1328,13 @@ herramientas:
     # objeto envolvente.
     inyectar_sesion:
       sn_onu: sn_onu
+    # De 4.966 ONUs de Rapilink, 68 solo responden con el serial en su
+    # forma hexadecimal (verificado en vivo, agosto 2026) -- y entre ellas
+    # hay clientes ACTIVOS. WispHub guarda la forma corta, asi que sin este
+    # reintento esos clientes se quedan sin diagnostico, con un 400 que no
+    # explica nada. Ver el campo en nucleo/config/schema.py.
+    reintentar_identificador_como:
+      sn_onu: gpon_hex
     # G-GO-04 (guia de diagnostico de fallas de conectividad, campo -- ONT
     # del cliente): -8 a -25 dBm aceptable, peor que -25 es problema del
     # drop. El tercer tramo (mejor que -8, senal "demasiado fuerte") no esta
@@ -1378,6 +1392,13 @@ herramientas:
     auth_header: X-Token
     inyectar_sesion:
       sn_onu: sn_onu
+    # De 4.966 ONUs de Rapilink, 68 solo responden con el serial en su
+    # forma hexadecimal (verificado en vivo, agosto 2026) -- y entre ellas
+    # hay clientes ACTIVOS. WispHub guarda la forma corta, asi que sin este
+    # reintento esos clientes se quedan sin diagnostico, con un 400 que no
+    # explica nada. Ver el campo en nucleo/config/schema.py.
+    reintentar_identificador_como:
+      sn_onu: gpon_hex
     exige_previas:
       - {herramienta: consultar_senal_ont, campo: onu_signal_1490_veredicto, valor: aceptable}
       # 'ping-exitoso' de WispHub es TEXTO ("3 de 3", "0 de 3"), nunca un
@@ -1446,6 +1467,13 @@ herramientas:
     extraer_de: full_status_json
     inyectar_sesion:
       sn_onu: sn_onu
+    # De 4.966 ONUs de Rapilink, 68 solo responden con el serial en su
+    # forma hexadecimal (verificado en vivo, agosto 2026) -- y entre ellas
+    # hay clientes ACTIVOS. WispHub guarda la forma corta, asi que sin este
+    # reintento esos clientes se quedan sin diagnostico, con un 400 que no
+    # explica nada. Ver el campo en nucleo/config/schema.py.
+    reintentar_identificador_como:
+      sn_onu: gpon_hex
     # Valores reales observados contra la instancia de Rapilink (agosto
     # 2026, ver skill smartolt-api). Un valor sin entrada aca se deja SIN
     # interpretar -- nunca se inventa una etiqueta para una causa nueva.
@@ -1503,6 +1531,13 @@ herramientas:
     extraer_de: full_status_json
     inyectar_sesion:
       sn_onu: sn_onu
+    # De 4.966 ONUs de Rapilink, 68 solo responden con el serial en su
+    # forma hexadecimal (verificado en vivo, agosto 2026) -- y entre ellas
+    # hay clientes ACTIVOS. WispHub guarda la forma corta, asi que sin este
+    # reintento esos clientes se quedan sin diagnostico, con un 400 que no
+    # explica nada. Ver el campo en nucleo/config/schema.py.
+    reintentar_identificador_como:
+      sn_onu: gpon_hex
     # PENDIENTE: 'Optical status.CATV Rx optical power(dBm)' existe y trae
     # el nivel optico de CATV (medido en vivo, agosto 2026: -5.90 en un
     # equipo sano). NO se expone todavia porque no hay un rango aceptable
