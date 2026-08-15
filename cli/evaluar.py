@@ -142,6 +142,14 @@ def correr_caso(config, caso: dict, defaults: dict, prohibido: list[str]) -> dic
         if _sin_tildes_minusc(prohibida) in respuesta_norm:
             fallas.append(f"responde_sin: la respuesta dice '{prohibida}'")
 
+    # 'responde_con' se usa con cuidado y solo para DATOS, nunca para
+    # redaccion: exigir que aparezca el nombre del cliente es legitimo (o lo
+    # sabe o no lo sabe); exigir una frase de cortesia seria un test que
+    # falla porque el modelo dijo lo mismo con otras palabras.
+    for requerida in espera.get("responde_con") or []:
+        if _sin_tildes_minusc(requerida) not in respuesta_norm:
+            fallas.append(f"responde_con: la respuesta NO dice '{requerida}'")
+
     # Las prohibiciones globales solo aplican a lo que ve un CLIENTE: un rol
     # interno SI puede ver un dBm o un serial, es su trabajo.
     if rol_cfg is not None and rol_cfg.orientado_a == "cliente_final":

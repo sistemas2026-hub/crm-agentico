@@ -1396,16 +1396,27 @@ herramientas:
     # explica nada. Ver el campo en nucleo/config/schema.py.
     reintentar_identificador_como:
       sn_onu: gpon_hex
+    # Los comentarios van ARRIBA de la clave, no entre los elementos de la
+    # lista: ruamel indexa los de adentro por posicion y --exportar los
+    # pierde al cambiar un elemento (ver el limite conocido de _fusionar en
+    # cli/cargar_config.py). Se perdieron una vez, aca mismo.
+    #
+    # 'ping-exitoso' de WispHub es TEXTO ("3 de 3", "0 de 3"), NUNCA un
+    # booleano. Estuvo declarado como 'valor: true' y por eso la precondicion
+    # era imposible de cumplir desde el dia que se escribio -- el modelo
+    # nunca lograba ofrecer el reinicio y desde afuera parecia que no queria.
+    #
+    # Y despues 'valores' en vez de un unico "3 de 3": medido el 15/08/2026,
+    # el MISMO equipo sano devolvio '1 de 3', '2 de 3' y '3 de 3' en tres
+    # corridas seguidas. Exigir el ping perfecto dejaba el reinicio remoto
+    # fuera de alcance justo para el cliente con la conexion inestable, que
+    # es el que se queja. Lo que importa es que el equipo CONTESTE: si
+    # contesta, el comando llega. '0 de 3' queda afuera a proposito -- ahi no
+    # hay a quien mandarle nada.
     exige_previas:
       - {herramienta: consultar_senal_ont, campo: onu_signal_1490_veredicto, valor: aceptable}
-      # 'ping-exitoso' de WispHub es TEXTO ("3 de 3", "0 de 3"), nunca un
-      # booleano -- 'valor: true' aca NUNCA podia coincidir, la precondicion
-      # estuvo imposible de cumplir desde que se escribio (encontrado
-      # 14/08/2026 recien al ver que el modelo nunca lograba ofrecer el
-      # reinicio, ni una vez, en varias pruebas reales). "3 de 3" queda fijo
-      # porque 'argumentos_fijos.pings' de ping_cliente tambien esta fijo en
-      # 3 -- si ese numero cambia alguna vez, cambiar este tambien.
-      - {herramienta: ping_cliente, campo: "ping-exitoso", valor: "3 de 3"}
+      - {herramienta: ping_cliente, campo: "ping-exitoso",
+         valores: ["1 de 3", "2 de 3", "3 de 3"]}
     limite_por_conversacion: 1
     # Empujon de segunda oportunidad -- ver el campo en schema.py. El motor
     # inyecta esto apenas la señal y el ping YA dieron favorable en esta

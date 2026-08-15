@@ -218,6 +218,26 @@ historial_forma_real_fallo = [
 comprobar(_previas_no_cumplidas(h_real, historial_forma_real_fallo) == ["ping"],
          "y NO se cumple cuando el valor anidado es distinto ('0 de 3')")
 
+print("\nexige_previas: 'valores' cuando el dato real no es estable")
+# 'ping-exitoso' de WispHub devolvio '1 de 3', '2 de 3' y '3 de 3' en tres
+# corridas seguidas contra el mismo equipo sano (15/08/2026). Exigir un unico
+# valor dejaba la precondicion cumpliendose una de cada tres veces.
+h_varios = _herramienta(exige_previas=[
+    Precondicion(herramienta="ping", campo="ping-exitoso",
+                 valores=["1 de 3", "2 de 3", "3 de 3"]),
+])
+for valor, deberia_cumplir in [("3 de 3", True), ("1 de 3", True), ("0 de 3", False)]:
+    hist = [{"role": "tool", "name": "ping",
+             "content": json.dumps({"ping-exitoso": valor})}]
+    cumple = _previas_no_cumplidas(h_varios, hist) == []
+    comprobar(cumple is deberia_cumplir,
+             f"'{valor}' {'cumple' if deberia_cumplir else 'NO cumple'} la precondicion")
+
+lanza("declarar 'valor' Y 'valores' a la vez se rechaza", ValidationError,
+     lambda: Precondicion(herramienta="x", campo="y", valor=1, valores=[1]))
+lanza("no declarar ninguno de los dos se rechaza", ValidationError,
+     lambda: Precondicion(herramienta="x", campo="y"))
+
 print("\nexige_previas: casos de borde de la busqueda anidada")
 h_json_roto = _herramienta(exige_previas=[
     Precondicion(herramienta="consultar_senal", campo="veredicto", valor="aceptable"),

@@ -198,6 +198,15 @@ def _sesion_nueva(tenant: str, id_sesion: str, canal: str) -> dict:
         estado["sesion"].nivel = max(estado["sesion"].nivel, 1)
         estado["sesion"].id_cliente = previo["id_cliente"]
         estado["sesion"].nombre = previo["nombre_cliente"]
+        # Y los identificadores tecnicos que capturo la verificacion (el
+        # serial de la ONU, la interfaz). Sin esto la conversacion volvia
+        # verificada pero MUDA para cualquier herramienta que los necesite:
+        # el cliente recibia un diagnostico a ciegas y nada lo denunciaba
+        # -- la guarda fallaba cerrado y el modelo seguia por el camino
+        # alternativo. Visto en produccion el 15/08/2026.
+        for campo, valor in (previo.get("datos_sesion") or {}).items():
+            if campo in Sesion.CAMPOS_PERSISTIBLES and valor:
+                setattr(estado["sesion"], campo, valor)
 
     print(f"[sesion] {id_sesion}: se retoma la conversacion abierta "
           f"(escalada={previo['escalada']}, "
@@ -328,7 +337,12 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             try:
                 persistencia.identificar_cliente(
                     tenant, conversation_id,
-                    estado["sesion"].id_cliente, estado["sesion"].nombre)
+                    estado["sesion"].id_cliente, estado["sesion"].nombre,
+                    # Lo capturado al verificar, para que sobreviva a un
+                    # reinicio -- ver Sesion.CAMPOS_PERSISTIBLES.
+                    {c: getattr(estado["sesion"], c, None)
+                     for c in Sesion.CAMPOS_PERSISTIBLES
+                     if getattr(estado["sesion"], c, None)})
             except Exception as e:
                 print(f"[persistencia] no se pudo guardar la identidad: {e}")
     except Exception as e:  # nunca se rompe el turno por un fallo de persistencia

@@ -38,6 +38,22 @@ from dataclasses import dataclass, field
 class Sesion:
     """Estado de verificacion de UNA conversacion (vive en memoria del canal;
     no se persiste -- ver PRD RNF-01 sobre que datos de WispHub no se guardan)."""
+
+    # Lo unico de la ficha del cliente que SI se persiste, y solo mientras la
+    # conversacion siga abierta (asistente.conversations.datos_sesion, ver
+    # supabase/17_datos_sesion.sql). No es una excepcion a RNF-01: no son
+    # datos personales sino IDENTIFICADORES TECNICOS de su equipo, y sin
+    # ellos un reinicio del motor deja la conversacion verificada pero con
+    # todas las herramientas que los necesitan fallando -- el cliente recibe
+    # un diagnostico a ciegas y nadie se entera (visto en produccion el
+    # 15/08/2026).
+    #
+    # Es una lista y no columnas para que el motor no tenga que conocer el
+    # vocabulario del tenant: 'sn_onu' es de un ISP de fibra, el proximo
+    # puede capturar otra cosa. Agregar un campo capturado en
+    # _ejecutar_verificacion es agregarlo aca, sin tocar el esquema.
+    CAMPOS_PERSISTIBLES = ("sn_onu", "interfaz_lan")
+
     identificador_canal: str          # ej. numero de whatsapp, tal cual llega
     verificado: bool = False
     nivel: int = 0
