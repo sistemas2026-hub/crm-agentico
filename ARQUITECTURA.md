@@ -53,7 +53,7 @@ tenants/                   DATOS por empresa — sin código
 
 supabase/                  migraciones SQL
 cli/                       utilidades operativas
-evaluacion/                sets dorados por tenant
+evaluacion/                sets dorados por tenant (<slug>.casos.yaml)
 tests/                     incluye la guarda del núcleo
 
 django-crm/                LA PLATAFORMA — CRM (BottleCRM/Django-CRM)

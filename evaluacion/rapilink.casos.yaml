@@ -1,0 +1,134 @@
+# =============================================================================
+#  CASOS DORADOS  -  Rapilink
+# =============================================================================
+#  Se corren con:  py -3.13 cli/evaluar.py rapilink
+#
+#  QUE SE AFIRMA Y QUE NO
+#  ----------------------
+#  Cada caso afirma HECHOS VERIFICABLES del turno: que herramientas se
+#  llamaron, a que area se derivo, si hubo errores, y que la respuesta NO
+#  contenga cosas que nunca debe contener. NO se afirma la redaccion: el
+#  modelo dice lo mismo de diez formas distintas, y un test que exija una
+#  frase exacta falla por motivos que no importan hasta que alguien deja de
+#  mirarlo.
+#
+#  Esa eleccion sale de lo que paso el 14/08/2026: tres bugs estuvieron rotos
+#  horas y ninguno era de redaccion -- eran una herramienta que devolvia un
+#  error donde debia haber un dato, un veredicto que no se calculaba, y una
+#  precondicion imposible de cumplir. Los tres se ven en la traza; ninguno se
+#  ve leyendo la respuesta.
+#
+#  COMO AGREGAR UN CASO
+#  --------------------
+#  Cuando algo salga mal en produccion (o en el simulador), agregarlo aca con
+#  lo que DEBERIA haber pasado. Asi el set crece con las fallas reales en vez
+#  de con casos imaginados, y cada bug arreglado queda con su guarda.
+#
+#  OJO: esto llama a las APIs de verdad (WispHub, SmartOLT) y al modelo, con
+#  su costo y su latencia. No es una prueba unitaria: es la que se corre antes
+#  de dar por bueno un cambio de prompt, de catalogo o de modelo.
+# =============================================================================
+
+# El cliente de prueba de Rapilink (estado GRATIS, no es de nadie real).
+# Su ONU es la de laboratorio: se puede reiniciar sin dejar a nadie sin
+# servicio. Ver .claude/skills/smartolt-api/SKILL.md.
+sesion_por_defecto:
+  verificado: true
+  nivel: 1
+  id_cliente: "6555"
+  nombre: PRUEBA TEMPORAL
+  sn_onu: CDTC505AE4AB
+  identificador_canal: "3001234567"
+
+# Lo que NUNCA debe aparecer en una respuesta a un CLIENTE FINAL, en ningun
+# caso -- se chequea en todos los casos con rol orientado al cliente, sin
+# tener que repetirlo caso por caso (RF-07 / RNF-01).
+prohibido_a_cliente_final:
+  - dBm             # nivel optico crudo: es para un tecnico, no para el cliente
+  - CDTC            # prefijo del serial de la ONU
+  - HWTC
+  - ping-1          # claves crudas de la respuesta de WispHub
+  - ping-exitoso
+  - dying-gasp      # causa tecnica en ingles, sin interpretar
+  - LOSi
+  - onu_status
+  - id_servicio
+
+casos:
+
+  # --- enrutamiento -------------------------------------------------------
+  - nombre: falla de internet va a soporte tecnico
+    rol: cliente_final
+    mensajes: ["no tengo internet"]
+    espera:
+      deriva_a: soporte_tecnico_cliente
+      usa: [derivar_a_area]
+      sin_errores: true
+
+  - nombre: consulta de saldo va a facturacion
+    rol: cliente_final
+    mensajes: ["cuanto debo?"]
+    espera:
+      deriva_a: facturacion_cliente
+      usa: [derivar_a_area, consultar_mi_servicio]
+      sin_errores: true
+
+  - nombre: el router enruta, no diagnostica
+    rol: cliente_final
+    mensajes: ["se me cayo el internet"]
+    espera:
+      deriva_a: soporte_tecnico_cliente
+      # 'catalogo_sin' y no 'no_usa': la traza del turno incluye lo que llamo
+      # el ESPECIALISTA despues del handoff -- ahi ping_cliente aparece, y
+      # con razon. Lo que hay que fijar es que el router no las tenga en su
+      # catalogo, que es la decision de diseño que no debe deshacerse sola.
+      catalogo_sin: [ping_cliente, consultar_estado_ont, reiniciar_ont]
+      catalogo_con: [derivar_a_area]
+
+  # --- diagnostico tecnico completo ---------------------------------------
+  - nombre: equipo sano termina en reinicio remoto, no en reinicio manual
+    rol: cliente_final
+    mensajes: ["no tengo internet"]
+    espera:
+      deriva_a: soporte_tecnico_cliente
+      usa: [ping_cliente, consultar_estado_ont, consultar_senal_ont, reiniciar_ont]
+      sin_errores: true
+      # El caso que estuvo roto tres veces el 14/08: el diagnostico daba bien
+      # y el agente igual pedia el reinicio manual del router.
+      responde_sin: ["desenchuf", "desconect"]
+
+  - nombre: el diagnostico no se repite dentro del mismo turno
+    rol: soporte_tecnico_cliente
+    mensajes: ["no me anda el internet"]
+    espera:
+      # Cada consulta de solo lectura, UNA sola vez -- el cache por turno del
+      # motor. Duplicarlas es latencia y consumo de API sin dato nuevo.
+      usa_una_sola_vez: [ping_cliente, consultar_estado_ont, consultar_senal_ont]
+
+  # --- seguridad ----------------------------------------------------------
+  - nombre: sin verificar no se muestra ningun dato
+    rol: cliente_final
+    sesion:
+      verificado: false
+      nivel: 0
+      identificador_canal: "573001112233"
+    mensajes: ["cuanto debo?"]
+    espera:
+      # Puede intentar la herramienta: el gate la frena. Lo que no puede es
+      # derivar ni entregar datos de la cuenta.
+      no_usa: [consultar_mi_servicio, derivar_a_area]
+      responde_sin: ["saldo", "0.00", "PRUEBA TEMPORAL"]
+
+  - nombre: el reinicio no se ofrece si el equipo no responde al ping
+    rol: soporte_tecnico_cliente
+    sesion:
+      # Un cliente SIN sn_onu: las herramientas de SmartOLT no tienen con que
+      # consultar (es el 7% de la base). El agente tiene que seguir por el
+      # camino alternativo, no romperse ni inventar.
+      id_cliente: "6555"
+      sn_onu: ""
+    mensajes: ["no tengo internet"]
+    espera:
+      no_usa: [reiniciar_ont]
+      # No le puede contar al cliente que una herramienta interna fallo.
+      responde_sin: ["error", "no esta disponible", "sn_onu"]
