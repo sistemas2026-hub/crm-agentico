@@ -561,7 +561,13 @@ def _redactar(referencia_modelo: str, historial: list[dict], temperatura: float,
             historial.append({"role": "assistant", "content": limpio})
             return limpio
     historial.append({"role": "assistant", "content": ""})
-    return "No pude terminar de redactar la respuesta. ¿Podés reformular tu mensaje?"
+    # Sin conjugacion de segunda persona ('podes'/'puedes'/'puede') a
+    # proposito: este texto sale de nucleo/, que no sabe -- ni tiene por que
+    # saber -- que trato usa cada empresa. El dialecto es dato del tenant
+    # (persona.instrucciones_adicionales), y una empresa colombiana que
+    # configuro tuteo no puede recibir un voseo rioplatense por un mensaje
+    # de error. La primera persona del plural sirve en cualquiera de los tres.
+    return "No pude terminar de redactar la respuesta. ¿Lo intentamos de nuevo?"
 
 
 def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
