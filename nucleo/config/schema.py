@@ -702,6 +702,38 @@ class Herramienta(Base):
     # El nucleo aporta el mecanismo y las transformaciones con nombre; QUE
     # herramienta lo necesita lo declara el tenant.
     reintentar_identificador_como: dict[str, str] = Field(default_factory=dict)
+    # Prohibe ejecutar esta herramienta en el MISMO turno en que el rol la
+    # recibio por derivacion, SI la puerta declaro que el cliente no dijo
+    # que servicio se le cayo ('servicio: no_lo_dijo').
+    #
+    # Para que sirve: la derivacion pasa el caso con el mensaje de entrada
+    # tal como llego a la puerta, que suele ser ambiguo ("me quede sin
+    # servicio" no dice si es internet o television). El especialista mide,
+    # se convence, y ACTUA sobre el equipo en ese mismo turno. Si el
+    # servicio que fallaba era el otro, ya le interrumpio el que si le
+    # andaba. Visto en vivo el 15/08/2026: "ME QUEDE SIN SERVICIO" ->
+    # reinicio remoto de la ONT -> "PERO ES CON LA TELEVISION".
+    #
+    # La primera version bloqueaba SIEMPRE en el turno de la derivacion, sin
+    # mirar el reporte. Funcionaba, pero le hacia preguntar "¿me confirmas
+    # que es el internet?" a alguien que acababa de escribir "no tengo
+    # internet" -- se lee como que no leyo. Por eso la condicion mira lo que
+    # la puerta declaro y no cuantos turnos pasaron.
+    #
+    # Solo para acciones que INTERRUMPEN el servicio. No se pone en
+    # 'activar_catv', que habilita algo apagado y no le quita nada a nadie.
+    # Tampoco hace falta en las de solo lectura: medir es gratis y sirve
+    # para cualquiera de los dos caminos.
+    # SOLO para herramientas 'deriva_rol'. Servicios que la puerta puede
+    # declarar como "esto es lo que reporto el cliente" al derivar. El motor
+    # le suma siempre 'no_lo_dijo' como opcion, que es la que importa: es la
+    # que frena las acciones marcadas con 'exige_turno_propio'.
+    #
+    # Es config del tenant y no una lista fija porque los servicios varian
+    # por empresa -- un ISP que solo vende internet no tiene nada que
+    # desambiguar, y otro puede vender telefonia ademas.
+    servicios_reportables: list[str] = Field(default_factory=list)
+    exige_turno_propio: bool = False
     cache: bool = False
     # Dias antes de refrescar una entrada. None = no vence (se asume estable
     # hasta que alguien fuerce un refresco borrando la fila en la base).

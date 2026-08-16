@@ -78,6 +78,11 @@ def correr_caso(config, caso: dict, defaults: dict, prohibido: list[str]) -> dic
 
     historial: list[dict] = []
     usadas: list[str] = []
+    # Las que de verdad CORRIERON: una que el motor freno (precondicion,
+    # limite, reporte ambiguo) figura en 'usadas' porque el modelo la
+    # intento, pero no le hizo nada a nadie. La distincion importa para
+    # 'no_usa', que afirma que algo no le paso al cliente -- ver mas abajo.
+    ejecutadas: list[str] = []
     errores: list[str] = []
     respuesta = ""
 
@@ -88,6 +93,8 @@ def correr_caso(config, caso: dict, defaults: dict, prohibido: list[str]) -> dic
             usadas.append(r["herramienta"])
             if r.get("codigo_error"):
                 errores.append(f"{r['herramienta']}: {r['codigo_error']}")
+            else:
+                ejecutadas.append(r["herramienta"])
 
     fallas: list[str] = []
     espera = caso.get("espera") or {}
@@ -110,9 +117,15 @@ def correr_caso(config, caso: dict, defaults: dict, prohibido: list[str]) -> dic
     # que mira la configuracion y no la corrida. Confundirlos hace que el
     # caso falle por lo que hizo OTRO agente, que es como se escribio mal la
     # primera version de estos casos.
+    # Mira 'ejecutadas', no 'usadas': lo que afirma es que la herramienta no
+    # LLEGO A CORRER -- que no se reinicio ningun equipo, que no se creo
+    # ningun ticket. Si el modelo la intento y una guarda del motor la freno,
+    # el caso pasa, porque para el cliente no paso nada. Contarlo como uso
+    # hacia fallar justo a los casos que existen para probar una guarda
+    # fail-closed: la guarda funcionaba y el caso decia que no.
     for herr in espera.get("no_usa") or []:
-        if herr in usadas:
-            fallas.append(f"no_usa: llamo '{herr}' y no debia")
+        if herr in ejecutadas:
+            fallas.append(f"no_usa: ejecuto '{herr}' y no debia")
 
     # Afirmacion sobre la CONFIGURACION, no sobre la corrida: que este rol no
     # tenga tal herramienta en su catalogo. No cuesta ninguna llamada y es la

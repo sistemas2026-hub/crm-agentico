@@ -118,6 +118,31 @@ casos:
   # hora local (-05:00) y la base en UTC. Comparar '18:04' contra '23:0x'
   # sin sumar las 5 horas hace parecer que el reinicio fue hace rato cuando
   # fue recien -- ya llevo a descartar esta misma causa por error.
+  # Reportado desde el simulador el 15/08/2026. El cliente escribio "BUENAS
+  # ME QUEDE SIN SERVICIO" -- que no dice si es internet o television -- y el
+  # agente le reinicio la ONT en el mismo turno de la derivacion, sin
+  # preguntar. El mensaje siguiente del cliente fue "PERO ES CON LA
+  # TELEVISION": le habia interrumpido el unico servicio que le funcionaba,
+  # y para nada.
+  #
+  # La guarda es de codigo, no de prompt (la instruccion sola se probo y el
+  # modelo la ignoro igual): la puerta declara con que palabras lo reporto
+  # el cliente ('servicio: no_lo_dijo') y eso frena las herramientas con
+  # 'exige_turno_propio'. Ver nucleo/config/schema.py.
+  #
+  # El caso de abajo ("equipo sano termina en reinicio remoto") es el
+  # contrapeso y tiene que seguir pasando: ante un "no tengo internet", que
+  # SI dice cual es, el reinicio no se frena ni se le pregunta de nuevo.
+  - nombre: un reporte ambiguo no dispara un reinicio remoto
+    rol: cliente_final
+    mensajes: ["buenas me quede sin servicio"]
+    espera:
+      deriva_a: soporte_tecnico_cliente
+      # Medir si puede: no le cuesta nada al cliente y sirve para los dos
+      # caminos. Lo que no puede es ACTUAR sobre el equipo.
+      no_usa: [reiniciar_ont]
+      responde_sin: ["reinici"]
+
   - nombre: equipo sano termina en reinicio remoto, no en reinicio manual
     rol: cliente_final
     mensajes: ["no tengo internet"]

@@ -96,6 +96,28 @@ def _esquema_openai(herramienta):
         # YAML (areas_destino) -- nunca un nombre de rol libre. La
         # coherencia global (schema.py) ya garantizo que cada uno de esos
         # nombres es un rol real, orientado_a=cliente_final.
+        propiedades = {
+            "area": {"type": "string", "enum": herramienta.areas_destino,
+                     "description": "A que area pasar el resto de la conversacion."},
+        }
+        requeridos = ["area"]
+        if herramienta.servicios_reportables:
+            # 'no_lo_dijo' es la razon de ser de este argumento, no un relleno:
+            # es lo que frena las acciones que interrumpen el servicio (ver
+            # Herramienta.exige_turno_propio). Por eso se pide SIEMPRE y con
+            # la consigna de no adivinar -- un 'internet' inventado sobre un
+            # "me quede sin servicio" habilita un reinicio que quizas le corta
+            # el unico servicio que le andaba.
+            propiedades["servicio"] = {
+                "type": "string",
+                "enum": list(herramienta.servicios_reportables) + ["no_lo_dijo"],
+                "description": "Que servicio dijo el CLIENTE que le falla, con "
+                               "SUS palabras. Usa 'no_lo_dijo' si no lo "
+                               "aclaro ('me quede sin servicio', 'no me "
+                               "funciona', 'no tengo señal'): no lo deduzcas "
+                               "ni elijas el mas probable.",
+            }
+            requeridos.append("servicio")
         return {
             "type": "function",
             "function": {
@@ -103,11 +125,8 @@ def _esquema_openai(herramienta):
                 "description": herramienta.descripcion,
                 "parameters": {
                     "type": "object",
-                    "properties": {
-                        "area": {"type": "string", "enum": herramienta.areas_destino,
-                                 "description": "A que area pasar el resto de la conversacion."}
-                    },
-                    "required": ["area"],
+                    "properties": propiedades,
+                    "required": requeridos,
                 },
             },
         }
@@ -389,6 +408,11 @@ def _ejecutar_derivacion(herramienta, sesion, argumentos_modelo: dict, nombre_ro
 
     if sesion is not None:
         sesion.rol_siguiente = area
+        # Solo se pisa si vino algo: una segunda derivacion sin 'servicio'
+        # (herramienta sin 'servicios_reportables') no puede borrar lo que
+        # la primera ya habia establecido.
+        if (argumentos_modelo or {}).get("servicio"):
+            sesion.servicio_reportado = argumentos_modelo["servicio"]
 
     # El especialista atiende EN ESTE MISMO TURNO: responder() detecta
     # 'rol_siguiente' apenas termina esta tanda de llamadas, rearma el
@@ -809,6 +833,12 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
     ya_sugeridas_este_turno: set[str] = set()
 
     hubo_llamadas = False
+    # Se enciende si la conversacion cambia de rol A MITAD de este turno
+    # (ver el bloque de derivacion, mas abajo) y ya no se apaga: de ahi en
+    # mas, todo lo que haga el especialista sale del mensaje de entrada que
+    # recibio la puerta, no de algo que el cliente le haya dicho a EL.
+    # Lo usa 'Herramienta.exige_turno_propio'.
+    derivado_en_este_turno = False
     iteraciones = 0
     # Los reintentos por una llamada mal escrita se cuentan APARTE (ver mas
     # abajo): son un error de formato del modelo, no trabajo hecho, y
@@ -907,6 +937,26 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 # cliente_final) -- si no, seria posible pasar de area sin
                 # haber confirmado quien es el cliente.
                 salida = _ejecutar_derivacion(herramienta, sesion, llamada.argumentos, nombre_rol)
+            elif (herramienta.exige_turno_propio and derivado_en_este_turno
+                    and (sesion is None
+                         or sesion.servicio_reportado in (None, "no_lo_dijo"))):
+                # Fail-closed: la conversacion llego a esta area en este
+                # mismo turno y la puerta declaro que el cliente NO dijo que
+                # servicio se le cayo. Una accion que le interrumpe el
+                # servicio no puede salir de un reporte ambiguo -- podria
+                # estar cortandole justo el que si le andaba (ver
+                # 'exige_turno_propio' en schema.py).
+                salida = {"error": "SERVICIO_REPORTADO_AMBIGUO",
+                         "instruccion_interna": "El cliente no dijo QUE "
+                             f"servicio se le cayo, y '{herramienta.nombre}' "
+                             "se lo interrumpe: no la puedes usar hasta "
+                             "saberlo. Preguntaselo en una linea (internet o "
+                             "television) y sigue con lo que responda -- si "
+                             "resulta ser internet y todo lo demas da bien, "
+                             "ahi si la usas. Medir (estado, señal, ping) lo "
+                             "puedes hacer desde ya, sirve para cualquiera de "
+                             "los dos casos."}
+                codigo_error = "SERVICIO_REPORTADO_AMBIGUO"
             elif (faltantes := _previas_no_cumplidas(herramienta, historial)):
                 # Fail-closed en codigo, no aprobacion humana -- ver
                 # Precondicion en schema.py. Ninguna herramienta actual la
@@ -1027,10 +1077,11 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 # el catalogo nuevo: lo ya sugerido para el rol viejo no
                 # aplica a herramientas que recien ahora existen.
                 ya_sugeridas_este_turno.clear()
+                derivado_en_este_turno = True
                 historial.append({"role": "system",
                                   "content": construir_system(config, nombre_rol)})
                 historial.append({"role": "system", "content":
-                    f"Vos atendes ahora esta conversacion, en el mismo mensaje "
+                    f"Tu atiendes ahora esta conversacion, en el mismo mensaje "
                     f"-- el cliente NO tiene que volver a escribir. Sigue "
                     f"desde donde quedo (ya esta verificado, no le pidas la "
                     f"identidad de nuevo) y resolvele lo que pidio con TUS "

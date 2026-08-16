@@ -398,8 +398,35 @@ roles:
       televisor. Un mensaje corto que se lee y se hace sirve mas que uno
       completo que se saltea.
 
+      ANTES DE CUALQUIER DIAGNOSTICO: SABER QUE SERVICIO SE LE CAYO.
+
+      "Me quede sin servicio", "no me funciona", "no tengo señal", "se me
+      fue todo" NO dicen cual es. Internet y television tienen
+      procedimientos distintos y herramientas distintas, y arrancar por
+      el equivocado no solo pierde tiempo: hace daño. Un reinicio remoto
+      por una falla de television no arregla nada y encima lo deja sin
+      internet uno o dos minutos, para terminar preguntandole lo que
+      tendrias que haber preguntado al principio.
+
+      Si el cliente no dijo CLARAMENTE si es internet o television,
+      preguntaselo en una linea antes de seguir. MEDIR mientras tanto
+      esta bien (ping, estado del equipo, señal: no le cuestan nada y te
+      sirven para cualquiera de los dos caminos). ACTUAR sobre el equipo,
+      NO: nada de reiniciar_ont ni de activar_catv hasta saber que
+      servicio es.
+
+      Esto NO contradice "no le preguntes lo que ya puedes medir": QUE
+      servicio se le cayo es justo lo unico que no se mide desde ningun
+      sistema. Solo lo sabe el.
+
+      Cuando responda: si es internet, sigue DIAGNOSTICO DE CONEXION. Si
+      es television, sigue PROBLEMA DE TV. Si dice que los dos, no
+      adivines cual atacar primero -- mira lo que ya mediste (si el
+      equipo esta caido o la señal optica esta fuera de rango, eso
+      explica los dos a la vez) y sigue por ahi.
+
       DIAGNOSTICO DE CONEXION (cuando dice que no tiene internet o perdio
-      la señal). Llama ping_cliente, consultar_estado_ont y
+      la conexion -- no cuando dice que perdio la señal de TV). Llama ping_cliente, consultar_estado_ont y
       consultar_senal_ont -- las tres, CADA UNA UNA SOLA VEZ (nunca
       repitas una que ya te respondio, aunque el resultado no te
       convenza). Con lo que devuelvan:
@@ -941,6 +968,10 @@ herramientas:
     # resolverle nada). Un especialista que se equivoco de area pasa
     # DIRECTO al otro especialista, no vuelve a pasar por la puerta.
     areas_destino: [facturacion_cliente, soporte_tecnico_cliente]
+    # Lo que el cliente dijo que le falla, con SUS palabras. Sirve para que
+    # el especialista no reinicie el equipo por una falla de television:
+    # ver 'exige_turno_propio' en reiniciar_ont.
+    servicios_reportables: [internet, television]
 
   - nombre: ping_cliente
     tipo: http
@@ -1462,6 +1493,14 @@ herramientas:
       sigue el caso.
     solo_lectura: false
     requiere_confirmacion: true
+    # Reiniciar deja al cliente sin internet uno o dos minutos, asi que no
+    # puede salir del mensaje con que la puerta derivo el caso: ese mensaje
+    # suele ser ambiguo ("me quede sin servicio") y bien puede estar
+    # hablando de la television. Paso el 15/08/2026 en el simulador --
+    # reinicio remoto, y recien despues el cliente aclaro que era la TV.
+    # Medir sigue permitido en ese turno; actuar no. Ver
+    # 'exige_turno_propio' en nucleo/config/schema.py.
+    exige_turno_propio: true
     roles_permitidos: [cliente_final, soporte]
     base_url_ref: SMARTOLT_SUBDOMINIO
     endpoint: /api/onu/reboot/{sn_onu}

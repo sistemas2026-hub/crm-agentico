@@ -95,6 +95,14 @@ class Sesion:
     # para persistir 'rol_efectivo' con el nuevo rol, y lo mantiene vivo
     # para los turnos siguientes de esta misma sesion en memoria.
     rol_siguiente: str | None = None
+    # Que servicio dijo el CLIENTE que le falla, declarado por la puerta al
+    # derivar (ver Herramienta.servicios_reportables). None = todavia no se
+    # derivo; el valor centinela 'no_lo_dijo' = se derivo pero el mensaje era
+    # ambiguo ("me quede sin servicio"). Lo lee la guarda de
+    # 'exige_turno_propio' en nucleo/modelo/motor.py: una accion que
+    # interrumpe el servicio no puede salir de un reporte que no dice cual
+    # servicio es.
+    servicio_reportado: str | None = None
 
 
 def nivel_requerido(rol_cfg, seguridad_cfg) -> int:
