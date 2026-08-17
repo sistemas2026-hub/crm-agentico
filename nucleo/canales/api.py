@@ -938,6 +938,32 @@ def agentes_borrar(nombre):
 #  las dos en una pantalla haria que cambiar el tono se sintiera tan riesgoso
 #  como abrirle una herramienta nueva a un area.
 
+@app.get("/reportes/escalamiento")
+def reporte_escalamiento():
+    """
+    Version HTTP de cli/reporte_escalamiento.py -- mismo calculo
+    (persistencia.tasa_escalamiento), para que /agentes lo muestre sin pasar
+    por la terminal. 'dias' default 7, tope 90 (mas alla el query barre
+    demasiada tabla para una carga de pantalla interactiva).
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        dias = int(request.args.get("dias", 7))
+    except ValueError:
+        return jsonify({"error": "'dias' debe ser un numero."}), 400
+    dias = max(1, min(dias, 90))
+
+    try:
+        r = persistencia.tasa_escalamiento(tenant, dias)
+    except Exception as e:
+        print(f"[reportes] fallo al calcular escalamiento: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo calcular el reporte."}), 500
+
+    return jsonify({"dias": dias, **r})
+
+
 @app.get("/configuracion")
 def configuracion():
     tenant = request.args.get("tenant")

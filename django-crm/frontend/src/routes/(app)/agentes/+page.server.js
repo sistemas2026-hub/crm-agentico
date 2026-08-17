@@ -18,20 +18,27 @@ export async function load({ fetch }) {
   }
 
   try {
-    const [respAgentes, respCatalogo] = await Promise.all([
+    const [respAgentes, respCatalogo, respEscalamiento] = await Promise.all([
       fetch(`${baseUrl}/agentes?tenant=${encodeURIComponent(tenant)}`),
-      fetch(`${baseUrl}/agentes/catalogo?tenant=${encodeURIComponent(tenant)}`)
+      fetch(`${baseUrl}/agentes/catalogo?tenant=${encodeURIComponent(tenant)}`),
+      // No bloquea la pantalla si falla -- ver por que abajo.
+      fetch(`${baseUrl}/reportes/escalamiento?tenant=${encodeURIComponent(tenant)}&dias=14`)
     ]);
     const datosAgentes = await respAgentes.json();
     const datosCatalogo = await respCatalogo.json();
     if (!respAgentes.ok) {
-      return { agentes: [], catalogo: [], error: datosAgentes.error || 'No se pudo cargar la lista de agentes' };
+      return { agentes: [], catalogo: [], escalamiento: null, error: datosAgentes.error || 'No se pudo cargar la lista de agentes' };
     }
+    // Mismo criterio que leerConfiguracionAsistente() en asistente-config.js:
+    // esta metrica es un agregado, no el catalogo de agentes -- si el calculo
+    // falla no tiene que tumbar la pantalla entera, se muestra sin el dato.
+    const datosEscalamiento = respEscalamiento.ok ? await respEscalamiento.json() : null;
     return {
       agentes: datosAgentes.agentes,
-      catalogo: respCatalogo.ok ? datosCatalogo.herramientas : []
+      catalogo: respCatalogo.ok ? datosCatalogo.herramientas : [],
+      escalamiento: datosEscalamiento
     };
   } catch (/** @type {any} */ err) {
-    return { agentes: [], catalogo: [], error: err?.message || 'No se pudo contactar al asistente' };
+    return { agentes: [], catalogo: [], escalamiento: null, error: err?.message || 'No se pudo contactar al asistente' };
   }
 }
