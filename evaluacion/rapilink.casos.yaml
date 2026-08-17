@@ -292,6 +292,22 @@ casos:
     espera:
       usa: [consultar_mi_servicio]
       sin_errores: true
+
+  # --- informes exportables (RF-12, agosto 2026) --------------------------
+  # Primer caso con un rol COLABORADOR (administracion): no exige verificar
+  # identidad (orientado_a=colaborador, nivel_exigido=0 en motor.py), asi que
+  # la sesion no necesita nada especial.
+  - nombre: pedido explicito de reporte descargable llama al agregado
+    rol: administracion
+    mensajes: ["mandame un excel con los clientes activos"]
+    espera:
+      # No se puede afirmar sobre 'formato: excel' puntual (el corredor no
+      # expone los argumentos de la llamada, solo que se hizo) -- lo que si
+      # se puede verificar es que llamo al agregado correcto y no fallo, que
+      # es lo que hace falta para que nucleo/herramientas/informes.py llegue
+      # a ejecutarse en absoluto.
+      usa: [contar_clientes]
+      sin_errores: true
       responde_sin: ["mora", "atrasad", "vencid", "en riesgo"]
 
   - nombre: el reinicio no se ofrece si el equipo no responde al ping

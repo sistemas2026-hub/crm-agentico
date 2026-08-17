@@ -717,6 +717,35 @@ def media_bytes(tenant: str, media_uuid: str) -> tuple[bytes, str] | None:
         return bytes(fila["contenido"]), fila["mime"] or "application/octet-stream"
 
 
+def media_bytes_por_media_id(tenant: str, media_id: str) -> tuple[bytes, str] | None:
+    """
+    Igual que media_bytes(), pero busca por la columna 'media_id' (texto, la
+    unica que unique(organization_id, media_id) garantiza), no por 'id' (la
+    clave primaria, generada por Postgres con gen_random_uuid()).
+
+    Existe porque son dos identificadores DISTINTOS con la misma forma de
+    UUID -- 'id' no se conoce hasta despues del INSERT, y un archivo que el
+    motor genera (nucleo/herramientas/informes.py) necesita poder referenciar
+    su propio identificador ANTES de que la fila exista (se genera durante
+    motor.responder(), se inserta recien en nucleo/canales/api.py, una vez
+    resuelto conversation_id -- ver el docstring de responder()). Para eso el
+    UUID lo elige el codigo, no Postgres, y viaja en 'media_id'.
+
+    Para una foto recibida de WhatsApp, en cambio, 'media_id' es el id de
+    Meta y el que arma la URL de descarga sigue siendo 'id' (ver
+    media_bytes() y GET /media/<id_media>) -- no se toca ese camino.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select contenido, mime from asistente.media
+               where organization_id = %s and media_id = %s""",
+            (org, media_id))
+        fila = cur.fetchone()
+        if not fila:
+            return None
+        return bytes(fila["contenido"]), fila["mime"] or "application/octet-stream"
+
+
 def purgar_media(tenant: str, dias: int) -> int:
     """
     Borra los adjuntos mas viejos que 'dias'. Devuelve cuantos.

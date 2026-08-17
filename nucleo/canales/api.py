@@ -351,7 +351,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
         estado["escalada"] = False
         estado["caso_id"] = None
 
-    respuesta, registro_herramientas = motor.responder(
+    respuesta, registro_herramientas, medios_pendientes = motor.responder(
         config, rol, mensaje, estado["historial"], estado["sesion"],
         nota_continuidad=nota_continuidad)
 
@@ -380,6 +380,20 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             tenant, canal, id_sesion, rol, "assistant", respuesta)
         for llamada in registro_herramientas:
             persistencia.registrar_llamada_herramienta(tenant, conversation_id, rol, llamada)
+        # Mismo motivo que el bucle de arriba: un archivo generado por una
+        # herramienta 'agregado' exportable (ver nucleo/herramientas/
+        # informes.py) no se pudo guardar dentro de motor.responder() porque
+        # todavia no existia conversation_id. El 'media_id' que el modelo ya
+        # vio en su turno (crudo['archivo_id']) es el MISMO que se inserta
+        # aca -- no hace falta avisarle nada nuevo, solo completar el guardado.
+        for medio in medios_pendientes:
+            try:
+                persistencia.guardar_media(
+                    tenant, conversation_id, medio["media_id"], medio["tipo"],
+                    medio["contenido"], mime=medio.get("mime"),
+                    descripcion=medio.get("descripcion"), mensaje_id=mensaje_id)
+            except Exception as e:
+                print(f"[informes] no se pudo guardar el archivo generado: {e}")
         # Recien aca existe conversation_id (ver el docstring de
         # motor.responder): antes de esto no habia donde persistir a quien
         # verifico _ejecutar_confirmacion. Se repite cada turno una vez
@@ -2313,6 +2327,35 @@ def media_archivo(id_media):
     contenido, mime = encontrado
     # Cache larga: el contenido de un id nunca cambia (se inserta una vez y se
     # borra por antiguedad), asi que revalidar seria trafico puro.
+    return contenido, 200, {"Content-Type": mime,
+                            "Cache-Control": "private, max-age=86400"}
+
+
+@app.get("/informes/<media_id>")
+def informe_archivo(media_id):
+    """
+    Un archivo GENERADO por el motor (nucleo/herramientas/informes.py), no
+    recibido de WhatsApp -- por eso no comparte ruta con /media/<id_media>.
+
+    Esa otra ruta busca por 'id' (la clave primaria de asistente.media,
+    generada por Postgres). Esta busca por 'media_id' (el UUID que el codigo
+    elige ANTES de insertar la fila, para poder mencionarlo en la respuesta
+    del modelo desde motor.responder() -- que corre antes de que 'id' exista.
+    Ver persistencia.media_bytes_por_media_id().
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        encontrado = persistencia.media_bytes_por_media_id(tenant, media_id)
+    except Exception as e:
+        print(f"[informes] fallo al leer {media_id}: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo leer el archivo."}), 500
+
+    if not encontrado:
+        return jsonify({"error": "No existe."}), 404
+
+    contenido, mime = encontrado
     return contenido, 200, {"Content-Type": mime,
                             "Cache-Control": "private, max-age=86400"}
 

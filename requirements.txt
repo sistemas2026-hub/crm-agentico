@@ -42,3 +42,9 @@ cryptography
 # guardarlas (3-8 MB de un telefono moderno -> ~200 KB). El import es PEREZOSO:
 # sin el paquete la foto se guarda tal cual, pesa mas y nada se rompe.
 Pillow
+
+# nucleo/herramientas/informes.py, para exportar un agregado a Excel (RF-12).
+# Import perezoso: sin el paquete, generar_excel() falla con un error legible
+# en vez de romper el turno -- pero a diferencia de Pillow, el fallo SI debe
+# ser visible (el modelo pidio un archivo explicitamente).
+openpyxl

@@ -363,7 +363,7 @@ SmartOLT es donde el ISP administra las ONUs autorizadas en la OLT de fibra — 
 | **1** | Consolidar soporte: prompt de asesor, filtro PII, consulta por cédula | ✅ Hecho |
 | **2** | Identidad de área; parametrizar herramientas y filtros por rol | ✅ Hecho (login real pendiente, ver §8.1) |
 | **3** | Replicar patrón a Facturación y Técnica | ✅ Catálogo definido y verificado — Técnica ahora incluye SmartOLT (lectura de red + reinicio de ONT, ver §7.7), no solo WispHub |
-| **4** | Generación de informes + exportación (Excel/PDF) | Pendiente |
+| **4** | Generación de informes + exportación (Excel/PDF) | ✅ Excel (ver §8.4) · PDF pendiente |
 | **5** | Interfaz web interna (reemplaza la consola) | Pendiente |
 | **6** | Auditoría/logs y despliegue en servidor on-premise | Auditoría ✅ (§8.2) · despliegue pendiente |
 
@@ -417,6 +417,22 @@ Nace de un hueco concreto: el 15/08/2026 se agregó `escalamiento.intentar_resol
 ```
 py -3.13 cli/reporte_escalamiento.py --tenant rapilink --dias 7
 ```
+
+### 8.4 Informes exportables (RF-12, agosto 2026) — Excel, PDF pendiente
+
+Antes de esto no existía ningún camino para generar un archivo real desde una conversación: `informe_materiales` (el único intento de "informe") es tipo `batch` y ni siquiera tiene ejecutor en `motor.py` — solo corre como script manual. RF-12 seguía sin cumplirse.
+
+**Cómo funciona.** Una herramienta `tipo: agregado` marcada `exportable: true` (`nucleo/config/schema.py::Herramienta`) ofrece al modelo un argumento extra, `formato: texto|excel`. Si el colaborador pide explícitamente un archivo, `nucleo/herramientas/informes.py::generar_excel()` toma el **mismo** dict que `agregado.ejecutar()` ya calculó (`total`, `desglose`, `interpretacion`) y lo vuelca a una hoja de cálculo — el código sigue calculando (PRD §12.5), esto solo cambia el empaque. El modelo nunca ve los bytes del archivo, solo un identificador para poder mencionarlo — y su propia descripción le prohíbe explícitamente mostrar ese identificador al colaborador, porque no significa nada para una persona y el archivo ya aparece como adjunto en la conversación sin que haga falta.
+
+**Restricción de arquitectura real, no cosmética.** `motor.py::responder()` corre **antes** de que exista `conversation_id` (se resuelve recién en `api.py`, al persistir el turno) — y `asistente.media` exige `conversation_id not null`. Por eso `responder()` devuelve un tercer valor, `medios_pendientes`, con el mismo patrón que ya usa `registro_herramientas` para la auditoría: el archivo se genera durante el turno, pero se guarda en `api.py` una vez que el conversation_id existe.
+
+**Dos identificadores de `asistente.media`, no confundir.** `id` (la clave primaria, generada por Postgres) es la que usa el flujo existente de fotos de WhatsApp — no se conoce hasta después del INSERT. Un archivo generado por el motor necesita poder referenciar su propio identificador *antes* de que la fila exista, así que usa la columna `media_id` (texto, `unique(organization_id, media_id)`), elegida por código. Confirmado en vivo (17/08/2026) que confundir las dos —la misma trampa de "dos catálogos con la misma forma" que ya costó tiempo con zona/router de WispHub— hacía que el archivo se generara pero fuera irrecuperable con el identificador que el modelo mencionaba.
+
+**La entrega no necesitó tocar el frontend.** El visor de conversaciones (`/conversaciones/[id]`) ya tenía una rama genérica para adjuntos que no son foto ni audio (enlace con ícono y tamaño en KB), unida por `mensaje_id` — el mismo mecanismo que ya muestra las fotos que manda un cliente. Un archivo generado por el motor pasa por el mismo camino sin ningún cambio de UI.
+
+Guardas: `tests/test_informes.py` (el archivo refleja exactamente lo que el agregado calculó, sin inventar ni redondear) y el caso dorado "pedido explícito de reporte descargable llama al agregado" (`evaluacion/rapilink.casos.yaml`). Primer caso dorado con un rol **colaborador** (`administracion`), no `cliente_final`.
+
+**Pendiente:** PDF (Excel cubre el caso de uso inicial — datos tabulares). Y el catálogo hoy solo tiene `contar_clientes` marcada `exportable` — extender a `contar_facturas`/`contar_tickets` es repetir el mismo patrón, sin cambios de código.
 
 ---
 

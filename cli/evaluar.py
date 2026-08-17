@@ -82,7 +82,7 @@ def correr_caso(config, caso: dict, defaults: dict, prohibido: list[str]) -> dic
     respuesta = ""
 
     for mensaje in caso["mensajes"]:
-        respuesta, registro = motor.responder(
+        respuesta, registro, _medios = motor.responder(
             config, caso["rol"], mensaje, historial, sesion)
         for r in registro:
             usadas.append(r["herramienta"])

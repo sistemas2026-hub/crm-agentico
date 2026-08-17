@@ -45,10 +45,12 @@ from __future__ import annotations
 import json
 import re
 import time
+import uuid
 from datetime import datetime, timedelta
 
 from nucleo.herramientas import agregado as ejecutor_agregado
 from nucleo.herramientas import http as ejecutor_http
+from nucleo.herramientas import informes
 from nucleo.modelo import cliente
 from nucleo.persistencia import db as persistencia
 from nucleo.recuperacion.prompt import construir_system
@@ -132,7 +134,8 @@ def _esquema_openai(herramienta):
             },
         }
     es_agregado = herramienta.tipo == "agregado"
-    if herramienta.filtros_verificados or (es_agregado and (herramienta.agrupar_por or herramienta.periodo)):
+    if herramienta.filtros_verificados or (es_agregado and (
+            herramienta.agrupar_por or herramienta.periodo or herramienta.exportable)):
         # Reusa 'filtros_verificados' (ya existia para herramientas tipo
         # 'agregado') tambien para 'http': cada entrada YA fue confirmada
         # contra la API real con el metodo del valor imposible -- ofrecerla
@@ -157,6 +160,13 @@ def _esquema_openai(herramienta):
                 "description": "Rango de fechas: 'AAAA-MM' o "
                                "'AAAA-MM-DD a AAAA-MM-DD'. Si se omite, se "
                                "usa el periodo por defecto de la API."}
+        if es_agregado and herramienta.exportable:
+            propiedades["formato"] = {
+                "type": "string", "enum": ["texto", "excel"],
+                "description": "'excel' SOLO si el usuario pidio explicitamente "
+                               "un archivo/reporte descargable (ej. 'mandame un "
+                               "excel', 'quiero el reporte'). Si solo pregunto "
+                               "un numero, usa 'texto' (o no lo indiques)."}
         return {
             "type": "function",
             "function": {
@@ -669,7 +679,8 @@ def _redactar(referencia_modelo: str, historial: list[dict], temperatura: float,
 
 
 def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
-              sesion, nota_continuidad: str | None = None) -> tuple[str, list[dict]]:
+              sesion, nota_continuidad: str | None = None
+              ) -> tuple[str, list[dict], list[dict]]:
     """
     'sesion' es una nucleo.seguridad.verificacion.Sesion (o None si el rol no
     exige verificacion). 'historial' se muta in-place -- el llamador lo
@@ -683,20 +694,29 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
     2026) que sin esa aclaracion podia derivar de nuevo a otra area sin
     ningun motivo real, solo por no saber que ya estaba en la correcta.
 
-    Devuelve (respuesta, registro_herramientas). El registro es una fila por
-    herramienta invocada este turno -- nombre, parametros enmascarados,
-    exito, duracion -- para que nucleo/canales/api.py lo guarde en
-    asistente.tool_calls despues de resolver el conversation_id (que todavia
-    no existe en este punto: la conversacion se crea/reusa recien al
-    persistir el turno). Es la base de "ver proceso" en /conversaciones: que
-    hizo el agente, en que orden, sin que el motor sepa que existe esa
-    pantalla.
+    Devuelve (respuesta, registro_herramientas, medios_pendientes).
+
+    'registro_herramientas': una fila por herramienta invocada este turno --
+    nombre, parametros enmascarados, exito, duracion -- para que
+    nucleo/canales/api.py lo guarde en asistente.tool_calls despues de
+    resolver el conversation_id (que todavia no existe en este punto: la
+    conversacion se crea/reusa recien al persistir el turno). Es la base de
+    "ver proceso" en /conversaciones: que hizo el agente, en que orden, sin
+    que el motor sepa que existe esa pantalla.
+
+    'medios_pendientes': igual problema, mismo motivo -- un archivo generado
+    por una herramienta 'agregado' con 'exportable' (ver
+    nucleo/herramientas/informes.py) no se puede guardar en asistente.media
+    aca porque esa tabla exige conversation_id, que todavia no existe. Casi
+    siempre vacia: solo trae algo cuando el turno de verdad genero un
+    archivo.
     """
     rol_cfg = config.roles.get(nombre_rol)
     if rol_cfg is None:
         raise ErrorMotor(f"Rol '{nombre_rol}' no existe en la configuracion del tenant.")
 
     registro: list[dict] = []
+    medios_pendientes: list[dict] = []
 
     if not historial:
         historial.append({"role": "system", "content": construir_system(config, nombre_rol)})
@@ -774,7 +794,7 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
         if not herramientas:
             respuesta = config.rag.mensaje_sin_resultados.strip()
             historial.append({"role": "assistant", "content": respuesta})
-            return respuesta, registro
+            return respuesta, registro, medios_pendientes
 
     referencia_decision = config.llm.overrides.get(f"rol:{nombre_rol}",
                                                     config.llm.modelo_por_defecto)
@@ -848,7 +868,7 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                     if fuga:
                         print(f"[salida] fuga bloqueada en rol '{nombre_rol}': '{fuga}'")
                     historial.append({"role": "assistant", "content": limpio})
-                    return limpio, registro
+                    return limpio, registro, medios_pendientes
                 break  # ya no pide mas herramientas: pasa a redaccion final
             if _RE_FUGA_TOOL_CALL.search(resp.contenido or "") and reintentos_fuga < 2:
                 # Queria seguir usando herramientas y lo escribio mal: se le
@@ -938,6 +958,31 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                         crudo = _ejecutar_tool(herramienta, sesion, llamada.argumentos,
                                               config.identidad.slug, config.variables_tenant)
                         _recuperar_campos_de_sesion(sesion, herramienta, crudo)
+                        if (herramienta.tipo == "agregado" and herramienta.exportable
+                                and isinstance(crudo, dict) and "error" not in crudo
+                                and (llamada.argumentos or {}).get("formato") == "excel"):
+                            # El archivo lo arma el codigo a partir del MISMO
+                            # 'crudo' que ya se iba a redactar en texto -- el
+                            # modelo no aporta ni ve un solo dato nuevo, solo
+                            # el identificador para poder mencionarlo. Un
+                            # fallo aca (ej. falta openpyxl) no tumba el turno:
+                            # 'error_archivo' queda en 'crudo' y el modelo
+                            # puede avisar que el archivo no se pudo generar,
+                            # en vez de fingir que si (RF-07).
+                            try:
+                                archivo = informes.generar_excel(
+                                    crudo.get("interpretacion", ""), crudo)
+                                media_id = str(uuid.uuid4())
+                                medios_pendientes.append({
+                                    "media_id": media_id,
+                                    "tipo": "document",
+                                    "mime": informes.MIME_XLSX,
+                                    "contenido": archivo,
+                                    "descripcion": crudo.get("interpretacion", ""),
+                                })
+                                crudo["archivo_id"] = media_id
+                            except informes.ErrorInforme as e:
+                                crudo["error_archivo"] = str(e)
                         salida = listas_blancas.filtrar_campos(rol_cfg, herramienta.nombre, crudo)
                     except Exception as e:
                         # No tumba el turno: el modelo recibe un error legible y
@@ -1048,6 +1093,7 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 # 'limite_iteraciones_agente'.
 
     if hubo_llamadas:
-        return _redactar(referencia_redaccion, historial, config.llm.temperatura,
-                        nombres_rol=config.roles), registro
-    return "No pude completar la consulta en el numero de pasos permitido.", registro
+        return (_redactar(referencia_redaccion, historial, config.llm.temperatura,
+                         nombres_rol=config.roles), registro, medios_pendientes)
+    return ("No pude completar la consulta en el numero de pasos permitido.",
+            registro, medios_pendientes)

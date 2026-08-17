@@ -693,6 +693,13 @@ class Herramienta(Base):
     agrupar_por: list[str] = Field(default_factory=list)
     periodo: Periodo | None = None
     tope_grupos: int = Field(default=12, ge=1, le=50)
+    # Solo para tipo 'agregado'. Si es True, el modelo recibe un argumento
+    # extra ('formato': texto|excel) y puede pedir el resultado como archivo
+    # descargable en vez de solo redactarlo. El archivo lo arma
+    # nucleo/herramientas/informes.py -- una hoja con 'interpretacion' y el
+    # desglose, nunca datos que el agregado no calculo ya. El modelo nunca ve
+    # el archivo en si, solo su identificador (ver motor.py, medios_pendientes).
+    exportable: bool = False
 
     @field_validator("auth_ref", "base_url_ref")
     @classmethod

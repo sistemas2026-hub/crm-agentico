@@ -146,7 +146,7 @@ roles:
             servicio.id_servicio, servicio.plan_internet, servicio.zona]
       consultar_tickets_de_cliente: [id_ticket, asunto, estado, prioridad, tecnico, fecha_creacion]
       contar_tickets: [total, desglose, interpretacion, advertencia]
-      contar_clientes: [total, desglose, interpretacion, advertencia]
+      contar_clientes: [total, desglose, interpretacion, advertencia, archivo_id, error_archivo]
       # Sin 'servicio' completo (mismo motivo que consultar_ticket): trae el
       # registro del cliente entero. 'servicio.id_servicio' alcanza para
       # confirmar a quien se le agendo.
@@ -186,7 +186,7 @@ roles:
             fecha_pago]
       registrar_pago: [resultado, id_factura, total_cobrado, mensajes, messages, task_id, errors]
       contar_facturas: [total, desglose, interpretacion, advertencia]
-      contar_clientes: [total, desglose, interpretacion, advertencia]
+      contar_clientes: [total, desglose, interpretacion, advertencia, archivo_id, error_archivo]
     nunca_revelar: [password_servicio, password_cpe, password_router_wifi, password_ssid_router_wifi,
       ip, mac_cpe]
 
@@ -203,7 +203,7 @@ roles:
       consultar_cliente: [id_servicio, nombre, estado, plan_internet, zona, fecha_instalacion, 
             estado_facturas]
       consultar_tickets_de_cliente: [id_ticket, asunto, estado, prioridad, tecnico, fecha_creacion]
-      contar_clientes: [total, desglose, interpretacion, advertencia]
+      contar_clientes: [total, desglose, interpretacion, advertencia, archivo_id, error_archivo]
       contar_facturas: [total, desglose, interpretacion, advertencia]
       contar_tickets: [total, desglose, interpretacion, advertencia]
       informe_materiales: [periodo, totales, tickets_cerrados, con_registro_de_material, 
@@ -1161,7 +1161,28 @@ herramientas:
     tipo: agregado
     entidad: clientes
     etiqueta: clientes
+    descripcion: >
+      Cuenta clientes por estado, plan, ciudad, localidad, router o tecnico
+      (o el total sin filtro). El resultado ya viene calculado -- nunca sumes
+      ni corrijas el numero que te llega.
+
+      Si el colaborador pide explicitamente un archivo o reporte descargable
+      ("mandame un excel", "quiero el reporte de morosos"), pasa
+      formato='excel': se genera un archivo real y queda adjunto a tu
+      respuesta automaticamente, el colaborador lo ve en la misma
+      conversacion. El resultado te trae 'archivo_id' -- es un identificador
+      TECNICO, NUNCA lo escribas ni lo menciones en tu respuesta (no significa
+      nada para una persona). Solo confirma que ya generaste el archivo, por
+      ejemplo "Listo, te dejo el Excel con el detalle". Si solo pregunta un
+      numero ("cuantos clientes activos hay"), no uses formato o dejalo en
+      'texto' -- redacta la respuesta como siempre, sin mencionar ningun
+      archivo.
+
+      Si el resultado trae 'error_archivo', el archivo NO se genero -- decile
+      al colaborador que el reporte no se pudo generar en este momento, nunca
+      afirmes que si se genero.
     solo_lectura: true
+    exportable: true
     roles_permitidos: [soporte, facturacion, administracion]
     base_url: https://api.wisphub.io
     endpoint: /api/clientes/
