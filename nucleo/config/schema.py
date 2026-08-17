@@ -558,6 +558,25 @@ class Herramienta(Base):
     # esto no hay que ofrecerle al modelo, no hay forma de armar el enum del
     # esquema ni de validar la derivacion en codigo.
     areas_destino: list[str] = Field(default_factory=list)
+    # Excepcion CUARTA a "el modelo nunca propone argumentos libres" (las
+    # otras tres: campo_busqueda de verifica_identidad, 'confirma' de
+    # confirma_identidad, 'area' acotada de deriva_rol). Esta SI necesita ser
+    # libre: el asistente de configuracion guiada (CLAUDE.md, "la proxima
+    # empresa que se conecte no deberia necesitar una sesion de codigo")
+    # existe justamente para que un ADMIN describa una API que nucleo/ no
+    # conoce todavia. La seguridad no viene de restringir el argumento sino
+    # de tres capas alrededor: nucleo/herramientas/sondeo.py bloquea SSRF
+    # (nunca una IP privada/interna), la clave de auth se referencia por
+    # NOMBRE (auth_ref) y se resuelve server-side -- nunca pasa por el
+    # modelo -- y nada de lo sondeado se activa sin aprobacion humana (ver
+    # propone_herramienta).
+    sondea_api: bool = False
+    # Quinta excepcion: guarda el borrador de Herramienta que arma el ADMIN
+    # despues de sondear, en asistente.herramientas_propuestas -- 'pendiente'
+    # hasta que alguien lo apruebe desde /configuracion-guiada. El modelo
+    # nunca escribe directo al catalogo real, aunque sea el mismo ADMIN
+    # quien esta charlando -- ver nucleo/canales/api.py, aprobar_propuesta().
+    propone_herramienta: bool = False
 
     # --- http / agregado ---
     # No es secreto (no dispara el barrido de _barrer_secretos): es dato de

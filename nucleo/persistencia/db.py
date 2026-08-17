@@ -1059,6 +1059,74 @@ def fragmentos_de(tenant: str, document_id: str) -> list[dict]:
         return [dict(f) for f in cur.fetchall()]
 
 
+def guardar_herramienta_propuesta(tenant: str, descripcion_pedido: str,
+                                  sondeo: dict, herramienta_propuesta: dict,
+                                  propuesto_por: str) -> str:
+    """
+    Un borrador de Herramienta que el rol 'configuracion_guiada' arma
+    despues de sondear una API real (nucleo/herramientas/sondeo.py). Nunca
+    se activa sola -- ver aprobar_herramienta_propuesta(). Devuelve el id
+    para que el turno pueda mencionarselo al ADMIN.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """insert into asistente.herramientas_propuestas
+                 (organization_id, descripcion_pedido, sondeo,
+                  herramienta_propuesta, propuesto_por)
+               values (%s, %s, %s, %s, %s)
+               returning id""",
+            (org, descripcion_pedido, json.dumps(sondeo, ensure_ascii=False),
+             json.dumps(herramienta_propuesta, ensure_ascii=False), propuesto_por))
+        return str(cur.fetchone()["id"])
+
+
+def herramientas_propuestas_de(tenant: str, estado: str | None = None) -> list[dict]:
+    """'estado=None' trae todas (pendiente/aprobada/rechazada); pasar un
+    estado puntual filtra en la consulta -- mismo patron que revisiones_de()."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select id, descripcion_pedido, sondeo, herramienta_propuesta,
+                      propuesto_por, estado, motivo_rechazo, revisado_por,
+                      creado_en, revisado_en
+               from asistente.herramientas_propuestas
+               where organization_id = %s
+                 and (%s::text is null or estado = %s)
+               order by creado_en desc""",
+            (org, estado, estado))
+        return [dict(f) for f in cur.fetchall()]
+
+
+def herramienta_propuesta_de(tenant: str, propuesta_id: str) -> dict | None:
+    """Una propuesta puntual -- para aprobar_herramienta_propuesta(), que
+    necesita el 'herramienta_propuesta' completo antes de escribirlo al
+    catalogo real."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select id, descripcion_pedido, sondeo, herramienta_propuesta,
+                      propuesto_por, estado, motivo_rechazo, revisado_por,
+                      creado_en, revisado_en
+               from asistente.herramientas_propuestas
+               where organization_id = %s and id = %s""",
+            (org, propuesta_id))
+        fila = cur.fetchone()
+        return dict(fila) if fila else None
+
+
+def resolver_herramienta_propuesta(tenant: str, propuesta_id: str, estado: str,
+                                   revisado_por: str, motivo_rechazo: str | None = None) -> bool:
+    """Aprobar o rechazar una propuesta -- la unica forma en que una de
+    estas pasa de 'pendiente' a algo que una persona confirmo. Devuelve
+    False si el id no existe o no es de este tenant."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """update asistente.herramientas_propuestas
+               set estado = %s, revisado_por = %s, revisado_en = now(),
+                   motivo_rechazo = %s
+               where organization_id = %s and id = %s""",
+            (estado, revisado_por, motivo_rechazo, org, propuesta_id))
+        return cur.rowcount > 0
+
+
 def guardar_revision_supervisor(tenant: str, conversation_id: str,
                                 es_buen_ejemplo: bool, caso: str | None,
                                 justificacion: str,

@@ -124,6 +124,69 @@ def _esquema_openai(herramienta):
                 },
             },
         }
+    if herramienta.sondea_api:
+        # Cuarta excepcion a "sin argumentos libres" -- ver
+        # Herramienta.sondea_api (schema.py) para el porque. 'auth_ref' es
+        # el NOMBRE de un secreto ya guardado, nunca la clave: el modelo no
+        # tiene forma de proponer un valor de credencial aca.
+        return {
+            "type": "function",
+            "function": {
+                "name": herramienta.nombre,
+                "description": herramienta.descripcion,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "url": {"type": "string",
+                               "description": "URL completa (https) del endpoint a sondear."},
+                        "auth_ref": {"type": "string",
+                                    "description": "Nombre del secreto YA GUARDADO con la "
+                                        "clave de esta API (no el valor). Si la API no "
+                                        "necesita auth, omitir."},
+                        "auth_header": {"type": "string",
+                                       "description": "Nombre del header de auth. Por "
+                                           "defecto 'Authorization'."},
+                        "auth_esquema": {"type": "string",
+                                        "description": "Prefijo antes de la clave en el "
+                                            "header, ej. 'Bearer' o 'Api-Key'. Vacio si "
+                                            "la API no usa prefijo."},
+                        "params": {"type": "string",
+                                  "description": "Query params a probar, como texto JSON. "
+                                      "Ej: '{\"estado\": \"1\"}'. Omitir para la llamada base."},
+                    },
+                    "required": ["url"],
+                },
+            },
+        }
+    if herramienta.propone_herramienta:
+        # Quinta excepcion. El modelo arma el borrador completo -- pero
+        # NUNCA se activa solo con esto: queda 'pendiente' hasta que un
+        # humano lo apruebe (ver Herramienta.propone_herramienta).
+        return {
+            "type": "function",
+            "function": {
+                "name": herramienta.nombre,
+                "description": herramienta.descripcion,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "descripcion_pedido": {"type": "string",
+                            "description": "Lo que el ADMIN pidio conectar, en sus palabras."},
+                        "sondeo": {"type": "string",
+                            "description": "Texto JSON con la evidencia real del sondeo: "
+                                "URL(s) probadas y lo que devolvieron. Para que quien "
+                                "aprueba pueda auditar que se probo de verdad."},
+                        "herramienta_propuesta": {"type": "string",
+                            "description": "Texto JSON con el borrador de Herramienta "
+                                "(mismos campos que nucleo/config/schema.py: nombre, "
+                                "tipo, endpoint, filtros_verificados, etc.) armado a "
+                                "partir de lo que el sondeo confirmo -- nunca de lo que "
+                                "el ADMIN supone sin probarlo."},
+                    },
+                    "required": ["descripcion_pedido", "sondeo", "herramienta_propuesta"],
+                },
+            },
+        }
     if herramienta.verifica_identidad:
         # Unica excepcion a "sin argumentos libres": el dato para verificar
         # (ej. cedula) lo tiene que dar el cliente, no puede venir de sesion.
@@ -426,6 +489,80 @@ def _ejecutar_derivacion(herramienta, sesion, argumentos_modelo: dict, nombre_ro
                f"herramientas. No le anuncies al cliente que lo derivaste ni "
                f"le pidas que espere: para el es la misma conversacion y la "
                f"respuesta le llega ya."}
+
+
+def _ejecutar_sondeo(argumentos_modelo: dict, tenant: str) -> dict:
+    """
+    Sondea una API EXTERNA que un ADMIN describio en el chat -- unico lugar
+    del proyecto que llama a una URL no verificada de antemano. Ver
+    Herramienta.sondea_api (schema.py) para el porque, y
+    nucleo/herramientas/sondeo.py para el bloqueo de SSRF.
+
+    'auth_ref' es el NOMBRE de un secreto ya guardado (nunca la clave): se
+    resuelve aca, server-side, y no pasa por el modelo en ningun momento.
+    """
+    from nucleo.herramientas import sondeo as sondeo_seguro
+    from nucleo.seguridad import secretos
+
+    argumentos_modelo = argumentos_modelo or {}
+    url = argumentos_modelo.get("url", "")
+    if not url:
+        return {"error": "Falta 'url'."}
+
+    headers = {}
+    auth_ref = argumentos_modelo.get("auth_ref")
+    if auth_ref:
+        clave = secretos.obtener(tenant, auth_ref)
+        if clave is None:
+            return {"error": f"No existe un secreto guardado llamado "
+                             f"'{auth_ref}'. Pedile al ADMIN que lo guarde "
+                             f"primero desde la pantalla de credenciales."}
+        esquema = argumentos_modelo.get("auth_esquema", "")
+        header_nombre = argumentos_modelo.get("auth_header") or "Authorization"
+        headers[header_nombre] = f"{esquema} {clave}".strip()
+
+    params = None
+    params_texto = argumentos_modelo.get("params")
+    if params_texto:
+        try:
+            params = json.loads(params_texto)
+        except (TypeError, ValueError):
+            return {"error": "'params' no es JSON valido."}
+
+    try:
+        return sondeo_seguro.sondear(url, headers, params)
+    except sondeo_seguro.ErrorSondeo as e:
+        return {"error": str(e)}
+
+
+def _ejecutar_propuesta(argumentos_modelo: dict, tenant: str, propuesto_por: str) -> dict:
+    """
+    Guarda el borrador de Herramienta que el ADMIN armo junto con el
+    asistente, DESPUES de sondear -- ver Herramienta.propone_herramienta.
+    Nunca se activa sola: queda 'pendiente' en
+    asistente.herramientas_propuestas hasta que una persona la apruebe
+    (nucleo/canales/api.py::aprobar_propuesta), que recien ahi la valida
+    contra el esquema completo (schema.py) y la escribe al catalogo real.
+    """
+    from nucleo.persistencia import db as persistencia
+
+    argumentos_modelo = argumentos_modelo or {}
+    descripcion_pedido = argumentos_modelo.get("descripcion_pedido", "")
+    try:
+        sondeo_dict = json.loads(argumentos_modelo.get("sondeo") or "{}")
+        herramienta_dict = json.loads(argumentos_modelo.get("herramienta_propuesta") or "{}")
+    except (TypeError, ValueError):
+        return {"error": "'sondeo' o 'herramienta_propuesta' no son JSON valido."}
+
+    if not herramienta_dict.get("nombre") or not herramienta_dict.get("tipo"):
+        return {"error": "El borrador necesita al menos 'nombre' y 'tipo'."}
+
+    id_propuesta = persistencia.guardar_herramienta_propuesta(
+        tenant, descripcion_pedido, sondeo_dict, herramienta_dict, propuesto_por)
+    return {"propuesta_id": id_propuesta, "estado": "pendiente",
+           "instruccion_interna": "Decile al ADMIN que quedo guardada, "
+               "pendiente de que alguien la apruebe desde la pantalla de "
+               "configuracion -- no esta activa todavia, no lo prometas."}
 
 
 def _previas_no_cumplidas(herramienta, historial: list[dict]) -> list[str]:
@@ -938,6 +1075,14 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 # cliente_final) -- si no, seria posible pasar de area sin
                 # haber confirmado quien es el cliente.
                 salida = _ejecutar_derivacion(herramienta, sesion, llamada.argumentos, nombre_rol)
+            elif herramienta.sondea_api:
+                # Colaborador (ADMIN, gateado en la capa web -- ver
+                # nucleo/canales/api.py), nunca cliente_final: el gate de
+                # identidad de arriba no aplica a este rol para empezar.
+                salida = _ejecutar_sondeo(llamada.argumentos, config.identidad.slug)
+            elif herramienta.propone_herramienta:
+                quien = sesion.identificador_canal if sesion else "desconocido"
+                salida = _ejecutar_propuesta(llamada.argumentos, config.identidad.slug, quien)
             elif (faltantes := _previas_no_cumplidas(herramienta, historial)):
                 # Fail-closed en codigo, no aprobacion humana -- ver
                 # Precondicion en schema.py. Ninguna herramienta actual la

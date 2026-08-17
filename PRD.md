@@ -438,6 +438,27 @@ Guardas: `tests/test_informes.py` (el archivo refleja exactamente lo que el agre
 
 `contar_clientes`, `contar_facturas` y `contar_tickets` están marcadas `exportable`, en Excel y PDF, verificado en vivo contra producción. Al mismo tiempo se corrigió `contar_facturas.agrupar_por: zona`, que estaba declarado pero nunca podía funcionar (`zona` era `tipo: id`, y el motor de agregados solo agrupa catálogos cerrados `tipo: enum`) — se pasó a `enum` con las 5 zonas reales de WispHub, verificadas con el método del valor imposible.
 
+### 8.5 Asistente de configuración guiada (agosto 2026)
+
+CLAUDE.md ya lo pedía: *"la próxima empresa que se conecte no debería necesitar una sesión de código para algo que ya se resolvió una vez"*. Hasta ahora, conectar un sistema nuevo era 100% trabajo de un desarrollador: sondear la API a mano (`cli/sondear_api.py`), verificar cada filtro con el método del valor imposible, escribir el YAML, aplicarlo. Este rol (`configuracion_guiada`, gateado a ADMIN en la capa web) hace lo mismo pero conversando con un colaborador — sin que deje de sondear de verdad ni de exigir aprobación humana.
+
+**Dos herramientas nuevas, quinta y sexta excepción a "el modelo nunca propone argumentos libres"** (las anteriores: `campo_busqueda` de verificar identidad, `confirma` de confirmar identidad, `area` acotada de derivar rol):
+
+- `sondear_api` (`Herramienta.sondea_api`): hace un GET real contra una URL que el ADMIN describe, y devuelve un resumen (`count`, `campos_disponibles`, hasta 3 filas de muestra) — nunca el volcado completo.
+- `proponer_herramienta` (`Herramienta.propone_herramienta`): guarda un borrador de `Herramienta` en `asistente.herramientas_propuestas`, `estado='pendiente'`. Nunca se activa sola.
+
+**La superficie de ataque nueva, y cómo se cerró.** Es la única parte del proyecto que llama a una URL no verificada de antemano — eso es SSRF (Server-Side Request Forgery): sin control, un ADMIN (o una cuenta comprometida) podría hacer que el servidor "sondee" su propia red interna — el motor, el pooler de Postgres, o el endpoint de metadata de la nube (`169.254.169.254`, que en AWS/GCP/Azure expone credenciales sin autenticación). `nucleo/herramientas/sondeo.py` bloquea: solo `https`, y resuelve el host rechazando cualquier IP que caiga en un rango privado/interno/de enlace local (RFC 1918, loopback, link-local). Límite conocido y dejado escrito en el propio módulo: hay una ventana de DNS rebinding entre la verificación y la conexión real; el riesgo residual es bajo (solo lo dispara un ADMIN ya autenticado) pero no es cero.
+
+**La clave de la API nueva nunca toca al modelo.** `sondear_api` recibe `auth_ref` — el NOMBRE de un secreto que el ADMIN ya guardó desde la pantalla de Secretos (cifrado, patrón ya existente) — y lo resuelve server-side. Enviar la clave completa a través del chat la mandaría a DeepSeek como parte de la conversación, exactamente el tipo de exposición de credenciales que el resto del proyecto evita.
+
+**`nucleo/config/editor.py` decía explícitamente que crear una herramienta "sigue siendo trabajo de código... esa superficie es sensible en seguridad".** Esto no relaja esa regla, la resuelve distinto: la preocupación nunca fue "una pantalla", fue "sin verificar y sin que un humano lo revise". Las dos garantías siguen intactas — nada llega al catálogo real sin pasar por el sondeo (evidencia auditable, guardada junto con la propuesta) y sin que un ADMIN apruebe el borrador exacto desde `/configuracion/propuestas/<id>/aprobar`. `editor.aprobar_herramienta_propuesta()` valida contra el mismo esquema que todo lo demás — un borrador mal armado se rechaza con el error específico, no se cuela.
+
+**Verificado en vivo, no solo en el test unitario.** Primer intento real: el modelo propuso `tipo: catalogo` (no existe) sin `roles_permitidos` (obligatorio) — la aprobación lo rechazó correctamente, con el error exacto de Pydantic. Se afinó el prompt del rol con un ejemplo concreto de la forma exacta del esquema, y el segundo intento (sondear el catálogo de zonas de WispHub, sin filtros) produjo un borrador válido de punta a punta: sondeo real → propuesta con evidencia → aprobación → herramienta viva en el catálogo. Retirada después de verificar — era una prueba, no un pedido real de Rapilink.
+
+Guardas: `tests/test_sondeo.py` (bloqueo SSRF contra IPs y hostnames reales, no solo la lógica en abstracto) y `tests/test_configuracion_guiada.py` (un borrador mal armado —incluidos los dos errores reales vistos en vivo— se rechaza antes de tocar el catálogo).
+
+**Pendiente:** pantalla web para listar/aprobar/rechazar propuestas (los endpoints existen: `GET /configuracion/propuestas`, `POST .../aprobar`, `POST .../rechazar` — la UI todavía no).
+
 ---
 
 ## 9. Despliegue

@@ -1622,6 +1622,91 @@ def manual_revisiones_descartar(id_revision):
 
 
 # =============================================================================
+#  CONFIGURACION GUIADA  -  propuestas de herramienta nuevas, pendientes de
+#  aprobacion humana. Ver tenants/rapilink.config.yaml, rol
+#  'configuracion_guiada', y nucleo/config/editor.py::
+#  aprobar_herramienta_propuesta para el porque esto no salta la regla de
+#  "crear una herramienta es trabajo de codigo".
+# =============================================================================
+
+@app.get("/configuracion/propuestas")
+def configuracion_propuestas():
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        propuestas = persistencia.herramientas_propuestas_de(tenant, request.args.get("estado"))
+    except Exception as e:
+        print(f"[configuracion-guiada] fallo al leer propuestas: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudieron leer las propuestas."}), 500
+    return jsonify({"propuestas": propuestas})
+
+
+@app.post("/configuracion/propuestas/<id_propuesta>/aprobar")
+def configuracion_propuesta_aprobar(id_propuesta):
+    """
+    Escribe la herramienta propuesta al catalogo REAL (editor.py) y recien
+    despues marca la propuesta como 'aprobada' -- en ese orden, para que un
+    borrador mal armado (le falta un campo, un rol que no existe) quede
+    visiblemente sin aprobar en vez de aprobado pero sin efecto.
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'."}), 400
+
+    try:
+        propuesta = persistencia.herramienta_propuesta_de(tenant, id_propuesta)
+    except Exception as e:
+        print(f"[configuracion-guiada] fallo al leer la propuesta: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo leer la propuesta."}), 500
+    if not propuesta:
+        return jsonify({"error": f"La propuesta '{id_propuesta}' no existe."}), 404
+    if propuesta["estado"] != "pendiente":
+        return jsonify({"error": f"Esta propuesta ya esta '{propuesta['estado']}', "
+                                 f"no se puede volver a aprobar."}), 400
+
+    try:
+        editor.aprobar_herramienta_propuesta(tenant, propuesta["herramienta_propuesta"])
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
+
+    olvidar_config(tenant)
+    try:
+        persistencia.resolver_herramienta_propuesta(
+            tenant, id_propuesta, "aprobada", cuerpo.get("revisado_por"))
+    except Exception as e:
+        # La herramienta YA quedo escrita en el catalogo -- esto solo afecta
+        # el rotulo de la propuesta. No se revierte lo ya guardado por esto.
+        print(f"[configuracion-guiada] la herramienta se agrego pero no se "
+             f"pudo marcar la propuesta como aprobada: {type(e).__name__}: {e}")
+
+    return jsonify({"ok": True, "estado": "aprobada"})
+
+
+@app.post("/configuracion/propuestas/<id_propuesta>/rechazar")
+def configuracion_propuesta_rechazar(id_propuesta):
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'."}), 400
+
+    try:
+        existe = persistencia.resolver_herramienta_propuesta(
+            tenant, id_propuesta, "rechazada", cuerpo.get("revisado_por"),
+            motivo_rechazo=cuerpo.get("motivo"))
+    except Exception as e:
+        print(f"[configuracion-guiada] fallo al rechazar: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo guardar."}), 500
+
+    if not existe:
+        return jsonify({"error": f"La propuesta '{id_propuesta}' no existe."}), 404
+    return jsonify({"ok": True, "estado": "rechazada"})
+
+
+# =============================================================================
 #  CORPUS  -  cargar documentacion sin pasar por la consola, y consultar que
 #  hay publicado hoy
 # =============================================================================

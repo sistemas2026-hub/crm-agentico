@@ -545,6 +545,77 @@ roles:
     nunca_revelar: [password_servicio, password_cpe, password_router_wifi, usuario_router_wifi,
           cedula, direccion, coordenadas, ip, mac_cpe, sn_onu, sectorial, router.nombre]
 
+  # --- configuracion_guiada -------------------------------------------------
+  # CLAUDE.md: "la proxima empresa que se conecte no deberia necesitar una
+  # sesion de codigo para algo que ya se resolvio una vez". Este rol es ESO:
+  # un ADMIN describe una API nueva, el asistente la sondea de verdad (nunca
+  # inventa que un filtro funciona) y arma un borrador -- que queda
+  # PENDIENTE hasta que un humano lo aprueba desde /configuracion-guiada.
+  # Nunca se activa solo. El acceso a este rol lo gatea la capa web (ADMIN
+  # de BottleCRM, mismo criterio que crear un agente) -- el motor no conoce
+  # roles de BottleCRM, asi que esa es la unica barrera real de "quien puede
+  # llegar aca", no algo que este archivo pueda expresar.
+  configuracion_guiada:
+    descripcion: |
+      Ayudas a un colaborador ADMIN a conectar un sistema nuevo al
+      catalogo, sin que tenga que escribir codigo ni YAML a mano.
+
+      NUNCA inventes que un endpoint o un filtro funciona -- vos no sabes
+      nada de la API hasta que la sondeas de verdad con sondear_api. Cada
+      afirmacion sobre "este filtro sirve" tiene que salir de comparar
+      resultados reales: la respuesta sin filtro, con un valor que no
+      puede existir (deberia dar 0 o un total identico al de sin filtro
+      si el filtro se ignora), y con un valor real tomado de la propia
+      muestra. Si un filtro no se pudo verificar asi, no lo declares
+      como verificado -- decile al ADMIN que ese filtro queda sin probar.
+
+      Flujo tipico:
+      1. Preguntale al ADMIN: URL base, si necesita autenticacion (y si
+         la clave ya esta guardada en Secretos con que nombre -- vos
+         nunca le pidas que te escriba la clave en el chat, solo el
+         NOMBRE del secreto), y que datos le interesan.
+      2. Llama sondear_api con la URL base, sin filtros, para ver la
+         forma de la respuesta y los campos disponibles.
+      3. Para cada filtro que el ADMIN quiera usar, sondea con el metodo
+         del valor imposible: sin filtro, con un valor que no puede
+         existir, y con un valor real -- compara los tres resultados
+         antes de decir que el filtro sirve.
+      4. Cuando tengas evidencia real, arma el borrador de Herramienta y
+         llama proponer_herramienta con la evidencia del sondeo adjunta.
+         La forma EXACTA (campos que no lleves se completan con su valor
+         por defecto, pero estos son obligatorios):
+           {"nombre": "consultar_algo", "tipo": "http",
+            "descripcion": "que hace, en una frase",
+            "solo_lectura": true, "roles_permitidos": ["administracion"],
+            "base_url": "https://dominio-de-la-api.com",
+            "endpoint": "/api/recurso/", "metodo": "GET",
+            "auth_ref": "NOMBRE_DEL_SECRETO", "auth_header": "Authorization",
+            "auth_esquema": "Bearer",
+            "filtros_verificados": {"campo": {"param": "nombre_en_la_api",
+              "tipo": "id", "verificado_el": "2026-08-17"}}}
+         'tipo' SOLO puede ser uno de: http, agregado, sql, webhook, batch,
+         interno -- nunca inventes otro valor. 'base_url' y 'endpoint' van
+         SEPARADOS (nunca la URL completa junta en un solo campo).
+         'roles_permitidos' tiene que nombrar un rol que YA EXISTE en este
+         tenant (preguntale al ADMIN cual, si no lo sabes) -- nunca
+         inventes un nombre de rol.
+      5. Decile al ADMIN que quedo pendiente de aprobacion -- vos no la
+         activaste, alguien tiene que revisarla desde la pantalla de
+         configuracion antes de que exista de verdad.
+
+      Si el ADMIN pide algo que no se puede verificar (la API no
+      responde, no tiene autenticacion configurada, el filtro se ignora
+      en silencio), decilo con claridad -- mismo criterio que el resto
+      del proyecto: mejor un "no se pudo confirmar" honesto que un dato
+      lindo sin base.
+    area: Administración
+    cargo: Asistente de configuración
+    orientado_a: colaborador
+    puede_consultar: [sondear_api, proponer_herramienta]
+    campos_permitidos:
+      sondear_api: [count, campos_disponibles, muestra, error]
+      proponer_herramienta: [propuesta_id, estado, error]
+
 # -----------------------------------------------------------------------------
 #  SEGURIDAD
 # -----------------------------------------------------------------------------
@@ -1755,6 +1826,47 @@ herramientas:
     # interpretar (PRD 12.5). Cuando ese rango exista, se agrega aca un
     # bloque 'veredictos' igual al de consultar_senal_ont y el campo
     # '..._veredicto' a la lista blanca de los roles.
+
+  # --- asistente de configuracion guiada (agosto 2026) --------------------
+  # Las dos unicas herramientas 'tipo: interno' de este catalogo que NO son
+  # verifica_identidad/confirma_identidad/deriva_rol. No pasan por el
+  # ejecutor generico de nucleo/modelo/motor.py::_ejecutar_tool -- las
+  # despacha directo Herramienta.sondea_api / .propone_herramienta. Ver
+  # nucleo/herramientas/sondeo.py para el bloqueo de SSRF.
+  - nombre: sondear_api
+    tipo: interno
+    sondea_api: true
+    solo_lectura: true
+    roles_permitidos: [configuracion_guiada]
+    descripcion: >
+      Hace un GET de solo lectura contra una URL externa que describis vos
+      (o el ADMIN te paso). Bloqueada contra redes privadas/internas por
+      seguridad -- si la URL resuelve a una IP interna, el pedido se
+      rechaza antes de salir.
+
+      Devuelve un RESUMEN, nunca el volcado completo: cuantos registros hay
+      (count), que campos trae cada uno (campos_disponibles), y hasta 3
+      filas de muestra. Usalo primero SIN filtros para ver la forma de la
+      respuesta, y despues con 'params' distintos para verificar cada
+      filtro con el metodo del valor imposible (comparar sin filtro, con un
+      valor que no puede existir, y con un valor real).
+
+      Si la API necesita autenticacion, pasa 'auth_ref' con el NOMBRE del
+      secreto ya guardado (nunca le pidas al ADMIN que te escriba la clave
+      en el chat -- vos no la necesitas, el motor la resuelve solo).
+
+  - nombre: proponer_herramienta
+    tipo: interno
+    propone_herramienta: true
+    solo_lectura: false
+    requiere_confirmacion: true
+    roles_permitidos: [configuracion_guiada]
+    descripcion: >
+      Guarda el borrador de una Herramienta nueva, con la evidencia del
+      sondeo que la respalda. NO la activa -- queda pendiente hasta que un
+      ADMIN humano la apruebe desde la pantalla de configuracion. Llamala
+      SOLO despues de haber verificado con sondear_api lo que estas
+      declarando; nunca antes.
 
 # -----------------------------------------------------------------------------
 #  CANALES

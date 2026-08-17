@@ -8,11 +8,20 @@
 no necesita saber nada de edicion, y este archivo no necesita saber nada de
 como se sirve por HTTP (eso vive en canales/api.py).
 
-Alcance deliberado (ver plan aprobado): solo se crean/editan/borran ROLES.
+Alcance original (ver plan aprobado): solo se crean/editan/borran ROLES.
 Crear una herramienta nueva -- conectar una API nueva, decidir sus filtros
-verificados, su whitelist de campos -- sigue siendo trabajo de codigo. No es
-un limite tecnico de este modulo, es que esa superficie es sensible en
-seguridad y no encaja en "editar desde una pantalla".
+verificados, su whitelist de campos -- era trabajo de codigo, a proposito:
+esa superficie es sensible en seguridad y no encajaba en "editar desde una
+pantalla SIN verificacion".
+
+Extension (agosto 2026, ver aprobar_herramienta_propuesta mas abajo): el
+asistente de configuracion guiada SI puede agregar una herramienta nueva
+desde una pantalla -- pero no relaja la razon original, la resuelve de otra
+forma. La preocupacion nunca fue "una pantalla", fue "sin verificar contra
+la API real y sin que un humano lo revise". Esa doble garantia sigue
+intacta: nada llega aca sin haber pasado por nucleo/herramientas/sondeo.py
+(metodo del valor imposible, no promesas) Y sin que un ADMIN humano apruebe
+el borrador exacto -- nunca el modelo escribe directo al catalogo real.
 
 Escribe en la base, no en el YAML
 ---------------------------------
@@ -522,3 +531,35 @@ def guardar_variable_tenant(tenant: str, nombre: str, valor: str) -> TenantConfi
 
 def borrar_variable_tenant(tenant: str, nombre: str) -> TenantConfig:
     return _editar(tenant, lambda doc: _mutar_borrar_variable_tenant(doc, nombre))
+
+
+def aprobar_herramienta_propuesta(tenant: str, herramienta_propuesta: dict) -> TenantConfig:
+    """
+    Agrega al catalogo real una herramienta que vino de una propuesta ya
+    aprobada por un ADMIN humano (ver nucleo/canales/api.py::
+    aprobar_propuesta, el unico llamador -- nunca se invoca directo desde
+    una conversacion). Ver el docstring de este archivo para por que esto
+    no relaja la regla original de "crear una herramienta es trabajo de
+    codigo": llega aca ya sondeada de verdad y ya aprobada por una persona.
+
+    Rechaza si ya existe una herramienta con ese nombre -- una coincidencia
+    de nombre en el borrador no debe pisar algo real. La validacion de
+    FORMA (que 'herramienta_propuesta' tenga los campos correctos para su
+    'tipo', que 'roles_permitidos' apunte a roles que existen) la hace
+    _editar() al final, contra el mismo esquema que valida todo lo demas --
+    si el borrador esta mal armado, el error sale aca y la propuesta queda
+    aprobada pero sin poder escribirse (ver el llamador: no marca 'aprobada'
+    hasta que esto no lance).
+    """
+    nombre = herramienta_propuesta.get("nombre")
+    if not nombre:
+        raise ErrorEdicion("El borrador no tiene 'nombre'.")
+    return _editar(tenant, lambda doc: _mutar_agregar_herramienta(doc, herramienta_propuesta))
+
+
+def _mutar_agregar_herramienta(doc: dict, herramienta_propuesta: dict) -> None:
+    nombre = herramienta_propuesta["nombre"]
+    existentes = {h.get("nombre") for h in doc.get("herramientas", [])}
+    if nombre in existentes:
+        raise ErrorEdicion(f"ya existe una herramienta llamada '{nombre}' en el catalogo.")
+    doc.setdefault("herramientas", []).append(herramienta_propuesta)
