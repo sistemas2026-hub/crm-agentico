@@ -145,7 +145,7 @@ roles:
             departamento, origen_reporte, fecha_creacion, fecha_inicio, fecha_fin, 
             servicio.id_servicio, servicio.plan_internet, servicio.zona]
       consultar_tickets_de_cliente: [id_ticket, asunto, estado, prioridad, tecnico, fecha_creacion]
-      contar_tickets: [total, desglose, interpretacion, advertencia]
+      contar_tickets: [total, desglose, interpretacion, advertencia, archivo_id, error_archivo]
       contar_clientes: [total, desglose, interpretacion, advertencia, archivo_id, error_archivo]
       # Sin 'servicio' completo (mismo motivo que consultar_ticket): trae el
       # registro del cliente entero. 'servicio.id_servicio' alcanza para
@@ -185,7 +185,7 @@ roles:
       consultar_facturas: [id_factura, estado, total, saldo, fecha_emision, fecha_vencimiento, 
             fecha_pago]
       registrar_pago: [resultado, id_factura, total_cobrado, mensajes, messages, task_id, errors]
-      contar_facturas: [total, desglose, interpretacion, advertencia]
+      contar_facturas: [total, desglose, interpretacion, advertencia, archivo_id, error_archivo]
       contar_clientes: [total, desglose, interpretacion, advertencia, archivo_id, error_archivo]
     nunca_revelar: [password_servicio, password_cpe, password_router_wifi, password_ssid_router_wifi,
       ip, mac_cpe]
@@ -207,8 +207,8 @@ roles:
             estado_facturas]
       consultar_tickets_de_cliente: [id_ticket, asunto, estado, prioridad, tecnico, fecha_creacion]
       contar_clientes: [total, desglose, interpretacion, advertencia, archivo_id, error_archivo]
-      contar_facturas: [total, desglose, interpretacion, advertencia]
-      contar_tickets: [total, desglose, interpretacion, advertencia]
+      contar_facturas: [total, desglose, interpretacion, advertencia, archivo_id, error_archivo]
+      contar_tickets: [total, desglose, interpretacion, advertencia, archivo_id, error_archivo]
       informe_materiales: [periodo, totales, tickets_cerrados, con_registro_de_material, 
             registros_en_cero, cobertura_por_categoria, sin_normalizar, interpretacion, advertencia]
       consultar_ticket: [asunto, fecha_inicio, servicio.id_servicio, departamento, 
@@ -1232,20 +1232,50 @@ herramientas:
     tipo: agregado
     entidad: facturas
     etiqueta: facturas
+    descripcion: >
+      Cuenta facturas por estado o zona (o el total sin filtro). El
+      resultado ya viene calculado -- nunca sumes ni corrijas el numero.
+
+      Si el colaborador pide explicitamente un archivo o reporte
+      descargable ("mandame un excel", "quiero el reporte de morosos"),
+      pasa formato='excel': se genera un archivo real y queda adjunto a tu
+      respuesta automaticamente. El resultado te trae 'archivo_id' -- es un
+      identificador TECNICO, NUNCA lo escribas ni lo menciones en tu
+      respuesta. Solo confirma que ya generaste el archivo. Si solo
+      pregunta un numero, no uses formato o dejalo en 'texto'.
+
+      Si el resultado trae 'error_archivo', el archivo NO se genero --
+      decile al colaborador que el reporte no se pudo generar en este
+      momento, nunca afirmes que si se genero.
     solo_lectura: true
+    exportable: true
     roles_permitidos: [facturacion, administracion]
     base_url: https://api.wisphub.io
     endpoint: /api/facturas/
     auth_ref: WISPHUB_API_KEY
     auth_esquema: Api-Key
-    # Verificado: 3606+5087+7 = 8700 = total. Las 5 zonas suman 8700 exacto.
     filtros_verificados:
       estado:
         param: estado
         tipo: enum
         valores: {pendiente: 1, pagada: 2, cancelada: 3, en_revision: 4, transferida: 5}
         verificado_el: 2026-07-29
-      zona: {param: zona, tipo: id, verificado_el: 2026-07-29}
+      # 'tipo: id' antes -- rechazaba silenciosamente cualquier intento de
+      # agrupar_por: zona (agregado.py solo agrupa filtros tipo enum con
+      # 'valores' cerrado). Encontrado en vivo (17/08/2026): un colaborador
+      # de facturacion pidio "facturas pendientes por zona" y el agregado
+      # devolvio el error correcto, pero la promesa de 'agrupar_por: [estado,
+      # zona]' de mas abajo nunca podia cumplirse. Solo 5 zonas en WispHub
+      # (catalogo cerrado, /api/zonas/) -- se pasa a enum. Re-verificado el
+      # mismo dia: las 5 zonas suman 5306 = total sin filtro exacto, y
+      # zona=999999999 da 0.
+      zona:
+        param: zona
+        tipo: enum
+        valores: {SERVIDOR SABANAGRANDE: 32278, CORTE 15 - SERVIDOR 1: 20053,
+                   CORTE 15 - SERVIDOR 2: 20054, CORTE 30 - SERVIDOR 1: 20049,
+                   CORTE 30 - SERVIDOR 2: 20050}
+        verificado_el: 2026-08-17
     filtros_ignorados_por_api:
       facturadas: La API ignora este filtro.
       cliente: Para las facturas de UN cliente usa consultar_facturas.
@@ -1266,7 +1296,22 @@ herramientas:
     tipo: agregado
     entidad: tickets
     etiqueta: tickets
+    descripcion: >
+      Cuenta tickets por estado (o el total sin filtro). El resultado ya
+      viene calculado -- nunca sumes ni corrijas el numero.
+
+      Si el colaborador pide explicitamente un archivo o reporte
+      descargable, pasa formato='excel': se genera un archivo real y queda
+      adjunto a tu respuesta automaticamente. El resultado te trae
+      'archivo_id' -- es un identificador TECNICO, NUNCA lo escribas ni lo
+      menciones en tu respuesta. Solo confirma que ya generaste el archivo.
+      Si solo pregunta un numero, no uses formato o dejalo en 'texto'.
+
+      Si el resultado trae 'error_archivo', el archivo NO se genero --
+      decile al colaborador que el reporte no se pudo generar en este
+      momento, nunca afirmes que si se genero.
     solo_lectura: true
+    exportable: true
     roles_permitidos: [soporte, administracion]
     base_url: https://api.wisphub.io
     endpoint: /api/tickets/
