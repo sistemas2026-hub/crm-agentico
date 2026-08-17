@@ -78,6 +78,52 @@ def olvidar_config(tenant: str) -> None:
     _configs.pop(tenant, None)
 
 
+_TOKEN_SERVICIO = os.environ.get("MOTOR_SERVICE_TOKEN")
+if _TOKEN_SERVICIO:
+    print("[auth] MOTOR_SERVICE_TOKEN activo: /chat, /agentes y el resto de "
+         "rutas internas exigen el token de servicio.")
+else:
+    print("[auth] MOTOR_SERVICE_TOKEN no esta configurado -- las rutas "
+         "internas quedan abiertas a quien alcance el motor por red. Ver "
+         "DESPLIEGUE.md, 'Autenticar /chat y /agentes en el motor'.")
+
+# Rutas que se autentican con OTRO mecanismo (no el token de servicio), asi
+# que quedan afuera de la comprobacion de abajo:
+#   - el webhook de WhatsApp: Meta lo firma (verify_token en el handshake,
+#     X-Hub-Signature-256 en los mensajes), y Meta no puede mandar un header
+#     nuestro -- exigirselo lo dejaria afuera a el, no a un atacante.
+#   - /salud: lo pega el healthcheck de Dokploy, sin credenciales, y no
+#     devuelve nada mas que {"estado": "ok"}.
+_RUTAS_SIN_TOKEN = {"/salud"}
+_PREFIJOS_SIN_TOKEN = ("/canales/whatsapp/",)
+
+
+@app.before_request
+def _exigir_token_de_servicio():
+    """
+    Hoy lo unico que separa /chat, /agentes y el resto de internet es el
+    'PathPrefix' de una regla de Traefik -- una sola capa, cuando el resto
+    del proyecto usa dos por principio (PRD.md 7.4: las reglas duras se
+    aplican en codigo, no solo en la configuracion de alrededor). Una regla
+    mal escrita al agregar un dominio y cualquiera puede conversar con el
+    asistente a costa de la empresa, o leer como esta configurado cada
+    agente. Ver DESPLIEGUE.md.
+
+    Si 'MOTOR_SERVICE_TOKEN' no esta configurado, no se bloquea nada -- el
+    valor por defecto no puede romper un despliegue que todavia no cargo la
+    variable (arranque local, el compose de desarrollo). Una vez cargada,
+    es fail-closed: falta o no coincide, 401.
+    """
+    if not _TOKEN_SERVICIO:
+        return None
+    if request.path in _RUTAS_SIN_TOKEN or request.path.startswith(_PREFIJOS_SIN_TOKEN):
+        return None
+    recibido = request.headers.get("X-Servicio-Token", "")
+    if recibido != _TOKEN_SERVICIO:
+        return jsonify({"error": "Token de servicio invalido o ausente."}), 401
+    return None
+
+
 def _error_al_guardar(e: Exception):
     """Todo lo que no sea un problema de la configuracion en si (la base
     inalcanzable, el tenant sin cargar) es un fallo del servidor, no del
