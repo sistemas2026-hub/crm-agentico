@@ -356,6 +356,50 @@ def mensajes_de(tenant: str, conversation_id: str) -> dict:
         return {"conversacion": dict(conversacion), "mensajes": [dict(f) for f in cur.fetchall()]}
 
 
+def tasa_escalamiento(tenant: str, dias: int) -> dict:
+    """
+    Cuantas conversaciones de los ultimos N dias terminaron escaladas, y por
+    que motivo -- agregado en SQL (count()), no traido fila por fila para
+    contarlo en Python (mismo principio que PRD.md 12.5: el codigo calcula).
+
+    Nace de medir si 'escalamiento.intentar_resolver_antes' (la vuelta extra
+    antes de pasar a un humano, agregada el 15/08/2026) esta funcionando en
+    la poblacion real y no solo en las dos conversaciones que se revisaron a
+    mano ese dia. Mismo concepto que la 'tasa de escalada' que reporta
+    Intercom Fin como metrica de primera clase -- ver investigacion de
+    agosto 2026 sobre el rubro.
+
+    Cuenta TODA conversacion en el periodo (escalada o no), asi que el
+    'total' de abajo incluye las que el asistente resolvio solo -- es lo que
+    hace que la proporcion tenga sentido. No filtra por rol: en Rapilink hoy
+    solo hay roles 'cliente_final' con posibilidad de escalar (ver
+    nucleo/canales/api.py::atender_turno, que ya restringe la evaluacion a
+    'orientado_a == cliente_final'), asi que toda fila que llega con
+    'escalada_a_humano' es de un cliente.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select escalada_a_humano, motivo_escalamiento, count(*) as n
+                 from asistente.conversations
+                where organization_id = %s
+                  and creado_en >= now() - (%s || ' days')::interval
+                group by escalada_a_humano, motivo_escalamiento""",
+            (org, dias))
+        filas = [dict(f) for f in cur.fetchall()]
+
+    total = sum(f["n"] for f in filas)
+    escaladas = sum(f["n"] for f in filas if f["escalada_a_humano"])
+    por_motivo: dict[str, int] = {}
+    for f in filas:
+        if f["escalada_a_humano"]:
+            motivo = f["motivo_escalamiento"] or "(sin motivo registrado)"
+            por_motivo[motivo] = por_motivo.get(motivo, 0) + f["n"]
+
+    return {"total": total, "escaladas": escaladas,
+            "tasa": (escaladas / total) if total else 0.0,
+            "por_motivo": por_motivo}
+
+
 def marcar_escalada(tenant: str, conversation_id: str, motivo: str,
                     caso_id: str | None, etiqueta: str | None,
                     necesita_atencion_humana: bool = True) -> None:

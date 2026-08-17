@@ -55,6 +55,7 @@ from nucleo.recuperacion.prompt import construir_system
 from nucleo.recuperacion.busqueda import (recuperar, bloque_de_contexto,
                                           registrar_sin_resultados)
 from nucleo.seguridad import listas_blancas
+from nucleo.seguridad import salida as guardia_salida
 from nucleo.seguridad.verificacion import Sesion, nivel_requerido, es_factor_de_posesion
 
 
@@ -652,6 +653,9 @@ def _redactar(referencia_modelo: str, historial: list[dict], temperatura: float,
         resp = cliente.chat(referencia_modelo, historial, tools=None, temperatura=temperatura)
         limpio = _sanitizar(resp.contenido, nombres_rol)
         if limpio and not _RE_RESPUESTA_CRUDA.match(limpio):
+            limpio, fuga = guardia_salida.verificar(limpio)
+            if fuga:
+                print(f"[salida] fuga bloqueada en redaccion final: '{fuga}'")
             historial.append({"role": "assistant", "content": limpio})
             return limpio
     historial.append({"role": "assistant", "content": ""})
@@ -840,6 +844,9 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
             limpio = _sanitizar(resp.contenido, config.roles)
             if limpio:
                 if not hubo_llamadas:
+                    limpio, fuga = guardia_salida.verificar(limpio)
+                    if fuga:
+                        print(f"[salida] fuga bloqueada en rol '{nombre_rol}': '{fuga}'")
                     historial.append({"role": "assistant", "content": limpio})
                     return limpio, registro
                 break  # ya no pide mas herramientas: pasa a redaccion final
