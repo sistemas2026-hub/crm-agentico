@@ -66,6 +66,16 @@ class ErrorMotor(Exception):
     pass
 
 
+# 'formato' que el modelo puede pedir en una herramienta 'agregado'
+# exportable -> (funcion generadora, mime). Un solo lugar para agregar un
+# formato nuevo (ver _esquema_openai, que arma el enum desde estas mismas
+# claves) sin tocar la logica de ejecucion.
+_GENERADORES_INFORME = {
+    "excel": (informes.generar_excel, informes.MIME_XLSX),
+    "pdf": (informes.generar_pdf, informes.MIME_PDF),
+}
+
+
 def herramientas_del_rol(config, rol_cfg):
     catalogo = {h.nombre: h for h in config.herramientas}
     return [catalogo[n] for n in rol_cfg.puede_consultar if n in catalogo]
@@ -163,11 +173,13 @@ def _esquema_openai(herramienta):
                                "usa el periodo por defecto de la API."}
         if es_agregado and herramienta.exportable:
             propiedades["formato"] = {
-                "type": "string", "enum": ["texto", "excel"],
-                "description": "'excel' SOLO si el usuario pidio explicitamente "
-                               "un archivo/reporte descargable (ej. 'mandame un "
-                               "excel', 'quiero el reporte'). Si solo pregunto "
-                               "un numero, usa 'texto' (o no lo indiques)."}
+                "type": "string", "enum": ["texto", *_GENERADORES_INFORME],
+                "description": "'excel' o 'pdf' SOLO si el usuario pidio "
+                               "explicitamente un archivo/reporte descargable "
+                               "(ej. 'mandame un excel', 'quiero el reporte en "
+                               "pdf'). Si no especifico el tipo de archivo, "
+                               "usa 'excel' por defecto. Si solo pregunto un "
+                               "numero, usa 'texto' (o no lo indiques)."}
         return {
             "type": "function",
             "function": {
@@ -959,25 +971,26 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                         crudo = _ejecutar_tool(herramienta, sesion, llamada.argumentos,
                                               config.identidad.slug, config.variables_tenant)
                         _recuperar_campos_de_sesion(sesion, herramienta, crudo)
+                        formato_pedido = (llamada.argumentos or {}).get("formato")
                         if (herramienta.tipo == "agregado" and herramienta.exportable
                                 and isinstance(crudo, dict) and "error" not in crudo
-                                and (llamada.argumentos or {}).get("formato") == "excel"):
+                                and formato_pedido in _GENERADORES_INFORME):
                             # El archivo lo arma el codigo a partir del MISMO
                             # 'crudo' que ya se iba a redactar en texto -- el
                             # modelo no aporta ni ve un solo dato nuevo, solo
                             # el identificador para poder mencionarlo. Un
-                            # fallo aca (ej. falta openpyxl) no tumba el turno:
-                            # 'error_archivo' queda en 'crudo' y el modelo
-                            # puede avisar que el archivo no se pudo generar,
-                            # en vez de fingir que si (RF-07).
+                            # fallo aca (ej. falta la libreria) no tumba el
+                            # turno: 'error_archivo' queda en 'crudo' y el
+                            # modelo puede avisar que el archivo no se pudo
+                            # generar, en vez de fingir que si (RF-07).
+                            generar, mime = _GENERADORES_INFORME[formato_pedido]
                             try:
-                                archivo = informes.generar_excel(
-                                    crudo.get("interpretacion", ""), crudo)
+                                archivo = generar(crudo.get("interpretacion", ""), crudo)
                                 media_id = str(uuid.uuid4())
                                 medios_pendientes.append({
                                     "media_id": media_id,
                                     "tipo": "document",
-                                    "mime": informes.MIME_XLSX,
+                                    "mime": mime,
                                     "contenido": archivo,
                                     "descripcion": crudo.get("interpretacion", ""),
                                 })

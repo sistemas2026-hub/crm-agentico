@@ -43,8 +43,16 @@ cryptography
 # sin el paquete la foto se guarda tal cual, pesa mas y nada se rompe.
 Pillow
 
-# nucleo/herramientas/informes.py, para exportar un agregado a Excel (RF-12).
-# Import perezoso: sin el paquete, generar_excel() falla con un error legible
-# en vez de romper el turno -- pero a diferencia de Pillow, el fallo SI debe
-# ser visible (el modelo pidio un archivo explicitamente).
+# nucleo/herramientas/informes.py, para exportar un agregado a Excel/PDF
+# (RF-12). Import perezoso en los dos: sin el paquete, generar_excel()/
+# generar_pdf() fallan con un error legible en vez de romper el turno --
+# pero a diferencia de Pillow, el fallo SI debe ser visible (el modelo pidio
+# un archivo explicitamente). reportlab es pure-Python, sin dependencias de
+# sistema (a diferencia de weasyprint, que necesita Cairo/Pango).
 openpyxl
+reportlab
+
+# Solo tests/test_informes.py, para leer el texto de un PDF generado y
+# verificar que trae los numeros correctos. El motor nunca lee un PDF, solo
+# lo escribe (reportlab, arriba) -- esto no es una dependencia de la app.
+pypdf

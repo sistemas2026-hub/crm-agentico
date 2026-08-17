@@ -7,11 +7,15 @@
 Por que existe
 --------------
 nucleo/herramientas/informes.py convierte el resultado YA CALCULADO de una
-herramienta 'agregado' (nucleo/herramientas/agregado.py) en un archivo Excel.
-No debe agregar NINGUN numero que el agregado no haya calculado -- si lo
-hiciera, estaria violando PRD 12.5 ('el modelo compone, el codigo calcula')
-por la puerta de atras: el archivo tendria un dato que nadie calculo con el
-metodo verificado.
+herramienta 'agregado' (nucleo/herramientas/agregado.py) en un archivo
+(Excel o PDF). No debe agregar NINGUN numero que el agregado no haya
+calculado -- si lo hiciera, estaria violando PRD 12.5 ('el modelo compone,
+el codigo calcula') por la puerta de atras: el archivo tendria un dato que
+nadie calculo con el metodo verificado.
+
+La parte de PDF usa pypdf SOLO para leer el archivo de vuelta y verificar su
+texto -- no es una dependencia del motor (que solo ESCRIBE PDFs, con
+reportlab), instalarla aparte si falta (ver requirements.txt).
 
 Uso
 ---
@@ -67,6 +71,30 @@ print("\nsuma exacta: el archivo no inventa ni redondea nada")
 suma_en_archivo = sum(v for _, v in filas if isinstance(v, int))
 comprobar(suma_en_archivo == sum(resultado["desglose"].values()),
          "la suma de las filas del archivo coincide con el desglose original")
+
+
+def _texto_pdf(bytes_pdf: bytes) -> str:
+    from pypdf import PdfReader
+    lector = PdfReader(io.BytesIO(bytes_pdf))
+    return "\n".join(pagina.extract_text() for pagina in lector.pages)
+
+
+print("\nPDF -- misma verificacion, mismo criterio: nada que el agregado no haya calculado")
+pdf_total = informes.generar_pdf(
+    "Clientes activos.", {"total": 4260, "interpretacion": "Clientes activos."})
+comprobar(pdf_total[:5] == b"%PDF-", "el archivo es un PDF valido")
+texto = _texto_pdf(pdf_total)
+comprobar("Clientes activos." in texto, "la interpretacion esta en el PDF")
+comprobar("4260" in texto, "el total aparece tal cual")
+
+pdf_desglose = informes.generar_pdf(resultado["interpretacion"], resultado)
+texto_desglose = _texto_pdf(pdf_desglose)
+comprobar("activo" in texto_desglose and "4260" in texto_desglose,
+         "el valor mas grande del desglose esta en el PDF")
+comprobar("gratis" in texto_desglose and "88" in texto_desglose,
+         "el valor mas chico tambien")
+comprobar(texto_desglose.index("activo") < texto_desglose.index("gratis"),
+         "el PDF tambien viene ordenado de mayor a menor")
 
 if fallos:
     print(f"\n[FALLA] {len(fallos)} caso(s):")

@@ -1180,16 +1180,17 @@ herramientas:
       ni corrijas el numero que te llega.
 
       Si el colaborador pide explicitamente un archivo o reporte descargable
-      ("mandame un excel", "quiero el reporte de morosos"), pasa
-      formato='excel': se genera un archivo real y queda adjunto a tu
-      respuesta automaticamente, el colaborador lo ve en la misma
-      conversacion. El resultado te trae 'archivo_id' -- es un identificador
-      TECNICO, NUNCA lo escribas ni lo menciones en tu respuesta (no significa
-      nada para una persona). Solo confirma que ya generaste el archivo, por
-      ejemplo "Listo, te dejo el Excel con el detalle". Si solo pregunta un
-      numero ("cuantos clientes activos hay"), no uses formato o dejalo en
-      'texto' -- redacta la respuesta como siempre, sin mencionar ningun
-      archivo.
+      ("mandame un excel", "quiero el reporte de morosos", "pasamelo en
+      pdf"), pasa formato='excel' o formato='pdf' segun lo que haya pedido
+      (si no aclaro el tipo de archivo, usa 'excel'): se genera un archivo
+      real y queda adjunto a tu respuesta automaticamente, el colaborador lo
+      ve en la misma conversacion. El resultado te trae 'archivo_id' -- es un
+      identificador TECNICO, NUNCA lo escribas ni lo menciones en tu
+      respuesta (no significa nada para una persona). Solo confirma que ya
+      generaste el archivo, por ejemplo "Listo, te dejo el Excel con el
+      detalle". Si solo pregunta un numero ("cuantos clientes activos hay"),
+      no uses formato o dejalo en 'texto' -- redacta la respuesta como
+      siempre, sin mencionar ningun archivo.
 
       Si el resultado trae 'error_archivo', el archivo NO se genero -- decile
       al colaborador que el reporte no se pudo generar en este momento, nunca
@@ -1237,12 +1238,13 @@ herramientas:
       resultado ya viene calculado -- nunca sumes ni corrijas el numero.
 
       Si el colaborador pide explicitamente un archivo o reporte
-      descargable ("mandame un excel", "quiero el reporte de morosos"),
-      pasa formato='excel': se genera un archivo real y queda adjunto a tu
-      respuesta automaticamente. El resultado te trae 'archivo_id' -- es un
-      identificador TECNICO, NUNCA lo escribas ni lo menciones en tu
-      respuesta. Solo confirma que ya generaste el archivo. Si solo
-      pregunta un numero, no uses formato o dejalo en 'texto'.
+      descargable ("mandame un excel", "quiero el reporte de morosos",
+      "pasamelo en pdf"), pasa formato='excel' o formato='pdf' segun lo que
+      haya pedido (si no aclaro, usa 'excel'): se genera un archivo real y
+      queda adjunto a tu respuesta automaticamente. El resultado te trae
+      'archivo_id' -- es un identificador TECNICO, NUNCA lo escribas ni lo
+      menciones en tu respuesta. Solo confirma que ya generaste el archivo.
+      Si solo pregunta un numero, no uses formato o dejalo en 'texto'.
 
       Si el resultado trae 'error_archivo', el archivo NO se genero --
       decile al colaborador que el reporte no se pudo generar en este
@@ -1301,7 +1303,8 @@ herramientas:
       viene calculado -- nunca sumes ni corrijas el numero.
 
       Si el colaborador pide explicitamente un archivo o reporte
-      descargable, pasa formato='excel': se genera un archivo real y queda
+      descargable, pasa formato='excel' o formato='pdf' segun lo que haya
+      pedido (si no aclaro, usa 'excel'): se genera un archivo real y queda
       adjunto a tu respuesta automaticamente. El resultado te trae
       'archivo_id' -- es un identificador TECNICO, NUNCA lo escribas ni lo
       menciones en tu respuesta. Solo confirma que ya generaste el archivo.
