@@ -1,4 +1,5 @@
 import { env } from '$env/dynamic/private';
+import { headersMotor } from '$lib/server/v2/motor-headers.js';
 
 /**
  * Server load: lista las conversaciones del asistente con clientes finales
@@ -34,7 +35,8 @@ export async function load({ fetch, depends }) {
   }
 
   try {
-    const resp = await fetch(`${baseUrl}/conversaciones?tenant=${encodeURIComponent(tenant)}`);
+    const resp = await fetch(`${baseUrl}/conversaciones?tenant=${encodeURIComponent(tenant)}`,
+      { headers: headersMotor() });
     const datos = await resp.json();
     if (!resp.ok) {
       return { conversaciones: [], error: datos.error || 'No se pudo cargar las conversaciones' };

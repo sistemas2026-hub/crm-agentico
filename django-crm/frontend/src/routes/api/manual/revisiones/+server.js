@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
+import { headersMotor } from '$lib/server/v2/motor-headers.js';
 
 /**
  * Las revisiones del supervisor, para la pantalla /manual. Proxy de solo
@@ -25,7 +26,7 @@ export async function GET({ url, locals, fetch }) {
   if (estado) query.set('estado', estado);
 
   try {
-    const resp = await fetch(`${baseUrl}/manual/revisiones?${query}`);
+    const resp = await fetch(`${baseUrl}/manual/revisiones?${query}`, { headers: headersMotor() });
     const datos = await resp.json();
     if (!resp.ok) {
       return json({ error: datos.error || 'No se pudieron leer las revisiones' }, { status: resp.status });

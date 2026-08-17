@@ -1,5 +1,6 @@
 import { env } from '$env/dynamic/private';
 import { getOrgPeopleAndTeams } from '$lib/server/v2/org-people.js';
+import { headersMotor } from '$lib/server/v2/motor-headers.js';
 
 /**
  * Quien puede usar cada agente. Cruza dos fuentes que viven en lados
@@ -29,7 +30,7 @@ export async function load({ cookies, fetch }) {
   try {
     const [gente, resp] = await Promise.all([
       getOrgPeopleAndTeams(cookies),
-      fetch(`${baseUrl}/agentes/asignaciones?tenant=${encodeURIComponent(tenant)}`)
+      fetch(`${baseUrl}/agentes/asignaciones?tenant=${encodeURIComponent(tenant)}`, { headers: headersMotor() })
     ]);
     const datos = await resp.json();
     if (!resp.ok) {

@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
+import { headersMotor } from '$lib/server/v2/motor-headers.js';
 
 /**
  * Cambiar a quien se le recupera un documento YA cargado, sin re-vectorizar.
@@ -29,7 +30,7 @@ export async function PUT({ params, request, locals, fetch }) {
   try {
     const resp = await fetch(`${baseUrl}/corpus/documentos/${encodeURIComponent(params.id)}/roles`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: headersMotor({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ ...cuerpo, tenant })
     });
     const datos = await resp.json();

@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
+import { headersMotor } from '$lib/server/v2/motor-headers.js';
 
 /**
  * Proxy hacia el motor del asistente para listar el catalogo de herramientas
@@ -30,7 +31,8 @@ export async function GET({ locals, fetch }) {
   }
 
   try {
-    const resp = await fetch(`${cfg.baseUrl}/agentes/catalogo?tenant=${encodeURIComponent(cfg.tenant)}`);
+    const resp = await fetch(`${cfg.baseUrl}/agentes/catalogo?tenant=${encodeURIComponent(cfg.tenant)}`,
+      { headers: headersMotor() });
     const datos = await resp.json();
     if (!resp.ok) {
       return json({ error: datos.error || 'No se pudo cargar el catalogo' }, { status: resp.status });
@@ -61,7 +63,7 @@ export async function POST({ request, locals, fetch }) {
   try {
     const resp = await fetch(`${cfg.baseUrl}/agentes`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: headersMotor({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ ...cuerpo, tenant: cfg.tenant })
     });
     const datos = await resp.json();

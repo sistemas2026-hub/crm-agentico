@@ -1,5 +1,6 @@
 import { error } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
+import { headersMotor } from '$lib/server/v2/motor-headers.js';
 
 /**
  * Sirve un adjunto que mando el cliente por el canal (una foto del router, un
@@ -28,7 +29,8 @@ export async function GET({ params, locals, fetch, setHeaders }) {
   }
 
   const resp = await fetch(
-    `${baseUrl}/media/${params.id}?tenant=${encodeURIComponent(tenant)}`
+    `${baseUrl}/media/${params.id}?tenant=${encodeURIComponent(tenant)}`,
+    { headers: headersMotor() }
   );
   if (!resp.ok) {
     error(resp.status === 404 ? 404 : 502, 'No se pudo leer el archivo');

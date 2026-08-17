@@ -1,4 +1,5 @@
 import { env } from '$env/dynamic/private';
+import { headersMotor } from '$lib/server/v2/motor-headers.js';
 
 /**
  * Server load: lista los agentes configurados en el motor (crm-agentico), sus
@@ -19,10 +20,10 @@ export async function load({ fetch }) {
 
   try {
     const [respAgentes, respCatalogo, respEscalamiento] = await Promise.all([
-      fetch(`${baseUrl}/agentes?tenant=${encodeURIComponent(tenant)}`),
-      fetch(`${baseUrl}/agentes/catalogo?tenant=${encodeURIComponent(tenant)}`),
+      fetch(`${baseUrl}/agentes?tenant=${encodeURIComponent(tenant)}`, { headers: headersMotor() }),
+      fetch(`${baseUrl}/agentes/catalogo?tenant=${encodeURIComponent(tenant)}`, { headers: headersMotor() }),
       // No bloquea la pantalla si falla -- ver por que abajo.
-      fetch(`${baseUrl}/reportes/escalamiento?tenant=${encodeURIComponent(tenant)}&dias=14`)
+      fetch(`${baseUrl}/reportes/escalamiento?tenant=${encodeURIComponent(tenant)}&dias=14`, { headers: headersMotor() })
     ]);
     const datosAgentes = await respAgentes.json();
     const datosCatalogo = await respCatalogo.json();

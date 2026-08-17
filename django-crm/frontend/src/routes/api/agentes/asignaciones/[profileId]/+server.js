@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
+import { headersMotor } from '$lib/server/v2/motor-headers.js';
 
 /**
  * Que agentes puede usar un colaborador. Mismo gate de ADMIN que crear o
@@ -30,7 +31,7 @@ export async function PUT({ params, request, locals, fetch }) {
       `${baseUrl}/agentes/asignaciones/${encodeURIComponent(params.profileId)}`,
       {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: headersMotor({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ roles: cuerpo?.roles ?? [], tenant })
       }
     );

@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
+import { headersMotor } from '$lib/server/v2/motor-headers.js';
 
 /**
  * La lista fija de casos/procesos para clasificar ejemplos marcados (ver
@@ -21,7 +22,8 @@ export async function GET({ locals, fetch }) {
   }
 
   try {
-    const resp = await fetch(`${baseUrl}/manual/casos?tenant=${encodeURIComponent(tenant)}`);
+    const resp = await fetch(`${baseUrl}/manual/casos?tenant=${encodeURIComponent(tenant)}`,
+      { headers: headersMotor() });
     const datos = await resp.json();
     if (!resp.ok) {
       return json({ error: datos.error || 'No se pudieron leer los casos' }, { status: resp.status });

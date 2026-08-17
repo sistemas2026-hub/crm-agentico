@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
+import { headersMotor } from '$lib/server/v2/motor-headers.js';
 
 /**
  * Proxy para que un agente humano responda directo en una conversacion ya
@@ -30,7 +31,7 @@ export async function POST({ request, params, locals, fetch }) {
   try {
     const resp = await fetch(`${baseUrl}/conversaciones/${params.id}/mensajes`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: headersMotor({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ tenant, mensaje })
     });
     const datos = await resp.json();

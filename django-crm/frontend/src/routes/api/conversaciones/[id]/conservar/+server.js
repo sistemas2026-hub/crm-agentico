@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
+import { headersMotor } from '$lib/server/v2/motor-headers.js';
 
 /**
  * Proxy para sacar (o volver a meter) una conversacion en la purga por
@@ -29,7 +30,7 @@ export async function POST({ request, params, locals, fetch }) {
   try {
     const resp = await fetch(`${baseUrl}/conversaciones/${params.id}/conservar`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: headersMotor({ 'Content-Type': 'application/json' }),
       // 'por' sale de la sesion, nunca del cuerpo que manda el navegador: es
       // quien tomo la decision, y no puede ser un valor que el cliente elija.
       body: JSON.stringify({ tenant, conservar, motivo, por: locals.user.email })

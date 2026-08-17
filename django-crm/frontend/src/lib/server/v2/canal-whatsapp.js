@@ -12,6 +12,7 @@
  * apreto un boton y tiene que enterarse de que no se guardo.
  */
 import { env } from '$env/dynamic/private';
+import { headersMotor } from './motor-headers.js';
 
 function destino() {
   const baseUrl = env.PRIVATE_ASISTENTE_URL;
@@ -30,7 +31,8 @@ export async function leerCanalWhatsapp() {
   if (!cfg) return null;
   try {
     const resp = await fetch(
-      `${cfg.baseUrl}/configuracion/canales?tenant=${encodeURIComponent(cfg.tenant)}`
+      `${cfg.baseUrl}/configuracion/canales?tenant=${encodeURIComponent(cfg.tenant)}`,
+      { headers: headersMotor() }
     );
     if (!resp.ok) return null;
     const datos = await resp.json();
@@ -50,7 +52,8 @@ export async function listarSecretos() {
   const cfg = destino();
   if (!cfg) return [];
   try {
-    const resp = await fetch(`${cfg.baseUrl}/secretos?tenant=${encodeURIComponent(cfg.tenant)}`);
+    const resp = await fetch(`${cfg.baseUrl}/secretos?tenant=${encodeURIComponent(cfg.tenant)}`,
+      { headers: headersMotor() });
     if (!resp.ok) return [];
     const datos = await resp.json();
     return datos.secretos ?? [];
@@ -69,7 +72,7 @@ export async function guardarCanalWhatsapp(valores) {
 
   const resp = await fetch(`${cfg.baseUrl}/configuracion/canales/whatsapp`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: headersMotor({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ ...valores, tenant: cfg.tenant })
   });
   const datos = await resp.json().catch(() => ({}));
@@ -90,7 +93,7 @@ export async function guardarSecreto(nombre, valor, descripcion) {
 
   const resp = await fetch(`${cfg.baseUrl}/secretos`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: headersMotor({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ tenant: cfg.tenant, nombre, valor, descripcion })
   });
   const datos = await resp.json().catch(() => ({}));
@@ -104,7 +107,7 @@ export async function borrarSecreto(nombre) {
 
   const resp = await fetch(
     `${cfg.baseUrl}/secretos/${encodeURIComponent(nombre)}?tenant=${encodeURIComponent(cfg.tenant)}`,
-    { method: 'DELETE' }
+    { method: 'DELETE', headers: headersMotor() }
   );
   const datos = await resp.json().catch(() => ({}));
   if (!resp.ok) throw new Error(datos.error || 'No se pudo borrar la credencial.');

@@ -152,6 +152,13 @@ services:
       # bloque en docker-compose.prod.yml para por que van aca y no en un .env.
       PRIVATE_ASISTENTE_URL: http://motor:5000
       PRIVATE_ASISTENTE_TENANT: ${ASISTENTE_TENANT:-rapilink}
+      # El header que nucleo/canales/api.py exige cuando el motor tiene
+      # MOTOR_SERVICE_TOKEN puesto (ver ese mismo nombre en el .env de la
+      # raiz -- 'motor:' abajo lo hereda solo via env_file, este servicio
+      # necesita el nombre PRIVATE_ porque no lee el .env de la raiz). Vacio
+      # por defecto: sin la variable puesta, headersMotor() no manda nada y
+      # nada se rompe -- ver lib/server/v2/motor-headers.js.
+      PRIVATE_MOTOR_SERVICE_TOKEN: ${MOTOR_SERVICE_TOKEN:-}
     volumes:
       - ./django-crm/frontend:/app
       - frontend_node_modules:/app/node_modules
