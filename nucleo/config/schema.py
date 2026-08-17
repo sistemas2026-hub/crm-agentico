@@ -594,6 +594,13 @@ class Herramienta(Base):
     # extrae esa clave antes de pasar el dato al filtro de campos -- generico,
     # no sabe que proveedor la necesita.
     extraer_de: str | None = None
+    # Campos de la respuesta que son TEXTO LIBRE, no un valor estructurado --
+    # un operador humano pudo haber escrito cualquier cosa ahi, incluida PII
+    # (PRD.md 7.4, "Limite conocido: los campos de texto libre"). La lista
+    # blanca decide que campos pasan, no que contienen; estos nombres pasan
+    # ademas por nucleo/seguridad/redaccion.py antes de llegar al modelo,
+    # sin importar que rol pregunte -- es una propiedad del CAMPO, no del rol.
+    campos_texto_libre: list[str] = Field(default_factory=list)
     # La API responde 202 + {"task_id": ...} y hay que consultar el resultado
     # aparte (ej. WispHub en ping_cliente, verificado en vivo agosto 2026) --
     # ver nucleo/herramientas/http.py:ejecutar_asincrono().

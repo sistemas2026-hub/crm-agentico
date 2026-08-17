@@ -196,6 +196,9 @@ roles:
     cargo: Analista
     # 'consultar_ticket' agregado desde la interfaz (Agentes) -- sincronizado
     # aca para que este archivo no lo pise en el proximo cargar_config.py.
+    # (17/08/2026: tambien se completo roles_permitidos de la herramienta,
+    # que habia quedado sin 'administracion' -- documental, no afectaba el
+    # acceso real, pero mentia en la config.)
     puede_consultar: [consultar_cliente, consultar_tickets_de_cliente, contar_clientes, 
           contar_facturas, contar_tickets, informe_materiales, consultar_ticket]
     campos_permitidos:
@@ -1083,12 +1086,22 @@ herramientas:
   - nombre: consultar_ticket
     tipo: http
     solo_lectura: true
-    roles_permitidos: [soporte]
+    # 'administracion' agregado aca (estaba en su puede_consultar pero no
+    # aca -- ver el comentario en ese rol. Documental/defensa en profundidad,
+    # el motor autoriza por puede_consultar (editor.py), pero dejarlo asi
+    # mentia en la config).
+    roles_permitidos: [soporte, administracion]
     base_url: https://api.wisphub.io
     endpoint: /api/tickets/
     metodo: GET
     auth_ref: WISPHUB_API_KEY
     auth_esquema: Api-Key
+    # 'descripcion' es texto libre escrito por un operador -- puede traer
+    # PII embebida (PRD.md 7.4: caso real con nombre, telefono, email,
+    # direccion, GPS, cedula y un enlace, todo en un solo campo). La lista
+    # blanca de abajo decide que campos pasan; esto decide que se les saca
+    # ANTES de que lleguen al modelo. Ver nucleo/seguridad/redaccion.py.
+    campos_texto_libre: [descripcion]
 
   - nombre: consultar_tickets_de_cliente
     tipo: http

@@ -57,6 +57,7 @@ from nucleo.recuperacion.prompt import construir_system
 from nucleo.recuperacion.busqueda import (recuperar, bloque_de_contexto,
                                           registrar_sin_resultados)
 from nucleo.seguridad import listas_blancas
+from nucleo.seguridad import redaccion
 from nucleo.seguridad import salida as guardia_salida
 from nucleo.seguridad.verificacion import Sesion, nivel_requerido, es_factor_de_posesion
 
@@ -984,6 +985,9 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                             except informes.ErrorInforme as e:
                                 crudo["error_archivo"] = str(e)
                         salida = listas_blancas.filtrar_campos(rol_cfg, herramienta.nombre, crudo)
+                        if herramienta.campos_texto_libre:
+                            salida = redaccion.redactar_campos(
+                                salida, herramienta.campos_texto_libre)
                     except Exception as e:
                         # No tumba el turno: el modelo recibe un error legible y
                         # puede decirle al cliente que hubo un problema, en vez de

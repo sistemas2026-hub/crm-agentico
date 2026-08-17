@@ -263,17 +263,21 @@ Colaborador (respuesta / informe)
   - La **confirmación manual** impide ejecutar un pago sin aprobación humana.
   - **La guardia de salida** (`nucleo/seguridad/salida.py`, agosto 2026) es una tercera capa, agregada después de que las dos de arriba demostraran ser insuficientes: ambas protegen la *entrada* de datos al modelo, ninguna mira el *texto* que el modelo redacta antes de que llegue al cliente. Los casos dorados ya declaraban `responde_sin` para atrapar fugas de plomería interna (un código de error repetido tal cual, una fabricación sobre "cómo se sabe" la identidad), pero solo en evaluación — nada lo detenía en producción. La guardia corre el mismo chequeo en tiempo real, sobre los dos puntos donde `motor.py::responder()` devuelve texto redactado. Patrón con precedente en el rubro: Decagon lo llama *"capa de supervisor que atrapa errores antes de que el cliente los vea"* (investigado agosto 2026 comparando este proyecto contra Sierra, Decagon e Intercom Fin). **Deliberadamente no reusa `Rol.nunca_revelar`**: esa lista son nombres de *campo* para filtrar datos crudos de API, no frases prohibidas en lenguaje natural — `cliente_final` tiene `cedula` y `direccion` ahí, y el agente dice "pasame tu cédula" en cada verificación; buscar esa palabra en el texto libre habría bloqueado el flujo normal. Los patrones de la guardia son solo códigos internos del motor (`IDENTIDAD_NO_VERIFICADA`, `PRECONDICION_NO_CUMPLIDA`, etc.), tokens que nunca aparecen en español legítimo. Guarda: `tests/test_guardia_salida.py`.
 
-#### Límite conocido: los campos de texto libre
+#### Campos de texto libre — redacción por patrón (RESUELTO, agosto 2026)
 
 El filtro controla **qué campos** pasan, no **qué contiene** cada campo. Un campo de texto libre puede traer embebido cualquier dato, y la lista blanca no lo ve.
 
 Caso real detectado en producción: la `descripcion` de un ticket de instalación contenía nombre completo, teléfono, email, dirección, coordenadas GPS, número de documento, plan contratado con precio y un enlace público al PDF de la solicitud — todo en un solo string de 419 caracteres.
 
-Se decidió **mantener `descripcion`**: es el contenido del ticket y Soporte no puede trabajar sin él. Pero conviene tenerlo presente:
+Se decidió **mantener `descripcion`**: es el contenido del ticket y Soporte no puede trabajar sin él. La minimización de datos que da la lista blanca **no aplica** a los campos de texto libre — ahí llega lo que el operador haya escrito — así que hacía falta una capa más.
 
-- La minimización de datos que da la lista blanca **no aplica** a los campos de texto libre. Ahí llega lo que el operador haya escrito.
-- Si en algún momento se exige minimización estricta (auditoría legal, área con acceso restringido), un campo así necesita **redacción por patrón** (regex de cédulas, teléfonos, emails, URLs) además de la lista blanca. No está implementado.
-- Al agregar un campo nuevo a una lista blanca, preguntarse si es texto libre. Si lo es, la decisión no es solo "¿este campo sirve?" sino "¿qué puede venir escrito adentro?".
+**Implementado**: `nucleo/seguridad/redaccion.py` — patrones de cédula/teléfono (8-11 dígitos), email, URL y coordenadas GPS, aplicados sobre los campos que `Herramienta.campos_texto_libre` declara (propiedad del campo, no del rol — corre para cualquiera que consulte, sin repetir la declaración por área). Reemplaza cada coincidencia por una etiqueta (`[email oculto]`, etc.), conserva el resto del texto intacto — sacar la PII sin volver el campo inútil para quien tiene que atender el ticket.
+
+**Verificado contra datos reales, no un ejemplo de laboratorio** (17/08/2026): de 300 tickets reales, **136 (45%) traían un número de 8-11 dígitos embebido en la descripción** — más frecuente de lo que el caso original hacía pensar. La redacción lo saca (`"Telefono: 3113683499"` → `"Telefono: [numero de identificacion oculto]"`) sin tocar el resto del texto.
+
+**Límite honesto, no resuelto**: solo cubre patrones estructurados (números, emails, URLs, coordenadas). Un nombre propio o una dirección en prosa libre (`"Calle 45 #12-30"`) no se detecta — eso exigiría NLP, no regex, y queda fuera de este alcance.
+
+Configurado hoy en `consultar_ticket` (roles `soporte` y `administracion`). Al agregar un campo nuevo a una lista blanca, preguntarse si es texto libre — si lo es, agregarlo también a `campos_texto_libre` de esa herramienta. Guarda: `tests/test_redaccion.py`.
 
 ### 7.5 Parametrización por área (guía para extender)
 
