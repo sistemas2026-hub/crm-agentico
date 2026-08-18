@@ -494,7 +494,7 @@ Dos cosas que se deciden junto con eso:
 
 **El 502 de `crm.rapilinksas.co`.** Ese dominio tiene ruta en Traefik apuntando a algo que no responde. No afecta a la base —el pooler escucha en TCP directo, sin pasar por Traefik— pero quien espere llegar al Studio de Supabase por ahí, hoy no puede.
 
-**Variables muertas en `.env`.** `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` no las usa nadie en este repositorio. Probablemente son residuo del proyecto de reportes. Confunden más de lo que ayudan.
+**Variables muertas en `.env` — retiradas (18/08/2026).** `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` no las usaba nadie en este repositorio (confirmado por grep completo, no solo por sospecha) — residuo de un diseño anterior donde el frontend hablaba directo con Supabase; ARQUITECTURA.md también las listaba y quedó corregido. Solo en el `.env` local, no versionado — cada colaborador con su propia copia debe quitarlas a mano si las tiene.
 
 ## Diagnóstico
 
