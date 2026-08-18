@@ -400,6 +400,47 @@ def tasa_escalamiento(tenant: str, dias: int) -> dict:
             "por_motivo": por_motivo}
 
 
+def preguntas_sin_respuesta(tenant: str, dias: int,
+                            incluir_revisadas: bool = False) -> list[dict]:
+    """
+    Preguntas que el asistente no pudo responder con el corpus (el RAG no
+    encontro ningun fragmento por encima del umbral de similitud) en los
+    ultimos N dias -- agregado en SQL, no traido fila por fila (mismo
+    principio que PRD.md SS12.5).
+
+    asistente.unanswered_queries se llena sola desde hace meses (ver
+    nucleo/recuperacion/busqueda.py) pero nadie la habia leido -- es la
+    primera funcion que lo hace. Cada fila es, segun su propio comentario en
+    el esquema, "un hueco en la documentacion del cliente".
+
+    Se agrupa por texto EXACTO normalizado (minusculas, sin espacios de
+    mas): agarra duplicados literales, no reformulaciones del mismo tema
+    ("no tengo señal en el tv" vs "se me fue la señal" quedan separadas).
+    Agrupar por significado exigiria clustering semantico -- una version
+    futura, no esta. Ordenado por cuantas veces se repitio la MISMA
+    pregunta: la que mas se repite es la que mas vale la pena escribir en
+    el manual primero.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select lower(trim(pregunta)) as pregunta_normalizada,
+                      count(*) as n,
+                      min(mejor_similitud) as peor_similitud,
+                      max(creado_en) as ultima_vez,
+                      (array_agg(pregunta order by creado_en desc))[1]
+                        as pregunta_ejemplo,
+                      (array_agg(rol_solicitante order by creado_en desc))[1]
+                        as rol_ejemplo
+                 from asistente.unanswered_queries
+                where organization_id = %s
+                  and creado_en >= now() - (%s || ' days')::interval
+                  and (%s or not revisada)
+                group by pregunta_normalizada
+                order by n desc, ultima_vez desc""",
+            (org, dias, incluir_revisadas))
+        return [dict(f) for f in cur.fetchall()]
+
+
 def marcar_escalada(tenant: str, conversation_id: str, motivo: str,
                     caso_id: str | None, etiqueta: str | None,
                     necesita_atencion_humana: bool = True) -> None:
