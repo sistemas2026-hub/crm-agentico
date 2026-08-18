@@ -95,14 +95,87 @@
   // sin esperar a recargar la pagina entera (ver quitarMarca abajo).
   let ejemplos = $state(data.ejemplos ?? []);
 
+  // La lista viva de tipos de caso (editable mas abajo). Se declara antes de
+  // 'porCaso' porque ese derived la lee.
+  let casos = $state([...(data.casos ?? [])]);
+
   const porCaso = $derived(
-    (data.casos || []).map((caso) => ({
+    (casos || []).map((caso) => ({
       caso,
       ejemplos: ejemplos.filter((e) => e.caso === caso)
     }))
   );
 
   const totalMarcado = $derived(ejemplos.length);
+
+  // --- Tipos de caso -------------------------------------------------------
+  // Es la lista con la que el asistente clasifica CADA conversacion (queda en
+  // la pildora de la bandeja). Se edita aca y no en un YAML porque cambia con
+  // el uso del negocio: agregar "instalacion_nueva" no deberia necesitar a un
+  // desarrollador.
+  let editandoCasos = $state(false);
+  let casoNuevo = $state('');
+  let guardandoCasos = $state(false);
+  // Copia de respaldo para poder cancelar sin recargar la pagina.
+  let casosAntes = $state([]);
+
+  function abrirEdicionCasos() {
+    casosAntes = [...casos];
+    casoNuevo = '';
+    editandoCasos = true;
+  }
+
+  function cancelarEdicionCasos() {
+    casos = [...casosAntes];
+    editandoCasos = false;
+  }
+
+  function agregarCaso() {
+    // Se normaliza aca lo mismo que el motor exige, para que el error mas
+    // comun (escribir "Problema de TV") se resuelva solo en vez de volver
+    // como un rechazo del servidor.
+    const limpio = casoNuevo.trim().toLowerCase()
+      .normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    if (!limpio) return;
+    if (casos.includes(limpio)) {
+      toast.error(`'${limpio}' ya esta en la lista.`);
+      return;
+    }
+    casos = [...casos, limpio];
+    casoNuevo = '';
+  }
+
+  function quitarCaso(caso) {
+    casos = casos.filter((c) => c !== caso);
+  }
+
+  /** Manda la lista completa: el motor valida el conjunto (que quede 'otro',
+   * que no se borre un caso del que dependa el agendamiento automatico) y
+   * devuelve el motivo exacto si algo no cierra. */
+  async function guardarCasos() {
+    guardandoCasos = true;
+    try {
+      const resp = await fetch('/api/manual/casos', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ casos })
+      });
+      const datos = await resp.json();
+      if (!resp.ok) {
+        toast.error(datos.error || 'No se pudieron guardar los tipos de caso');
+        return;
+      }
+      casos = datos.casos;
+      editandoCasos = false;
+      toast.success('Tipos de caso actualizados');
+    } catch (err) {
+      toast.error('No se pudo contactar al asistente');
+    } finally {
+      guardandoCasos = false;
+    }
+  }
+
 
   /** Deshace el marcado de un ejemplo ya incorporado al manual -- mismo
    * endpoint que "Quitar marca" en MarcarEjemplo.svelte, pero se puede
@@ -333,6 +406,61 @@
         {/if}
       {/if}
 
+      <!-- Tipos de caso. Es la lista con la que el asistente etiqueta cada
+           conversación sola; se edita acá para no tener que tocar la
+           configuración del tenant a mano. -->
+      <div class="v2-label casos-titulo" style="margin:24px 0 10px">
+        <span>Tipos de caso</span>
+        {#if esAdmin && !editandoCasos}
+          <button class="casos-editar" onclick={abrirEdicionCasos}>Editar</button>
+        {/if}
+      </div>
+      <p class="v2-sub" style="margin:-4px 0 12px">
+        Con esta lista el asistente clasifica cada conversación por su cuenta y le pone
+        la etiqueta en la bandeja. No hace falta que nadie la asigne a mano.
+      </p>
+
+      <div class="v2-card casos-caja">
+        <div class="casos-lista">
+          {#each casos as caso (caso)}
+            <span class="caso-chip" class:editable={editandoCasos}>
+              {etiqueta(caso)}
+              {#if editandoCasos}
+                <button
+                  class="caso-quitar"
+                  title={'Quitar ' + etiqueta(caso)}
+                  aria-label={'Quitar ' + etiqueta(caso)}
+                  onclick={() => quitarCaso(caso)}>×</button>
+              {/if}
+            </span>
+          {/each}
+        </div>
+
+        {#if editandoCasos}
+          <div class="casos-alta">
+            <input
+              class="caso-input"
+              type="text"
+              placeholder="Ej: instalación nueva"
+              bind:value={casoNuevo}
+              onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); agregarCaso(); } }}
+            />
+            <Button variant="outline" size="sm" onclick={agregarCaso}>Agregar</Button>
+          </div>
+          <p class="v2-sub casos-nota">
+            Se guarda en minúscula y con guiones bajos. «otro» no se puede quitar: es lo que
+            usa el asistente cuando ninguno encaja. Tampoco se puede quitar un caso del que
+            dependa el agendamiento automático de visitas.
+          </p>
+          <div class="casos-acciones">
+            <Button size="sm" onclick={guardarCasos} disabled={guardandoCasos}>
+              {guardandoCasos ? 'Guardando…' : 'Guardar'}
+            </Button>
+            <Button variant="ghost" size="sm" onclick={cancelarEdicionCasos}>Cancelar</Button>
+          </div>
+        {/if}
+      </div>
+
       <div class="v2-label" style="margin:24px 0 10px">Ejemplos marcados por caso</div>
       {#if totalMarcado === 0}
         <p class="v2-sub" style="margin-bottom:16px">
@@ -376,6 +504,58 @@
     color: #991b1b;
     font-size: 14px;
   }
+  .casos-titulo {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .casos-editar {
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    color: var(--v2-accent, #b45309);
+    cursor: pointer;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+  .casos-editar:hover { text-decoration: underline; }
+  .casos-caja { padding: 14px; margin-bottom: 8px; }
+  .casos-lista { display: flex; flex-wrap: wrap; gap: 8px; }
+  .caso-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--v2-linea, #e2e0db);
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  .caso-chip.editable { padding-right: 5px; }
+  .caso-quitar {
+    background: none;
+    border: none;
+    padding: 0 2px;
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+    color: var(--v2-sub, #7a736a);
+  }
+  .caso-quitar:hover { color: #b3261e; }
+  .casos-alta { display: flex; gap: 8px; margin-top: 12px; }
+  .caso-input {
+    flex: 1;
+    min-width: 0;
+    padding: 5px 9px;
+    border: 1px solid var(--v2-linea, #e2e0db);
+    border-radius: 6px;
+    font: inherit;
+  }
+  .casos-nota { margin: 8px 0 0; }
+  .casos-acciones { display: flex; gap: 8px; margin-top: 12px; }
+
   .manual-envoltorio {
     padding-top: 12px;
     padding-bottom: 32px;

@@ -142,7 +142,7 @@
     const q = busqueda.trim().toLowerCase();
     if (!q) return lista;
     return lista.filter((/** @type {any} */ c) =>
-      [c.usuario_externo, c.ultimo_mensaje, c.etiqueta, c.motivo_escalamiento]
+      [c.usuario_externo, c.ultimo_mensaje, c.etiqueta, c.caso_manual, c.motivo_escalamiento]
         .filter(Boolean)
         .some((campo) => String(campo).toLowerCase().includes(q))
     );
@@ -267,7 +267,7 @@
                    llevando" es el caso normal: ponerle una píldora a cada fila
                    agrega una línea y un rectángulo por conversación para no
                    informar nada. -->
-              {#if c.escalada_a_humano || c.etiqueta}
+              {#if c.escalada_a_humano || c.etiqueta || c.caso_manual}
                 <div class="baja">
                   {#if pendiente(c)}
                     <span class="marca" title={c.motivo_escalamiento || 'Escalada a un humano'}>
@@ -279,6 +279,15 @@
 
                   {#if c.etiqueta}
                     <Pill tone={etiquetaTone(c.etiqueta)}>{etiquetaLabel(c.etiqueta)}</Pill>
+                  {/if}
+
+                  <!-- De qué es la conversación, no si escaló: lo asigna el
+                       asistente en cada turno y existe también en las que
+                       resolvió solo (ver supabase/18_caso_conversacion.sql).
+                       Va en tono neutro para que no compita con la píldora
+                       de estado, que es la que pide una acción. -->
+                  {#if c.caso_manual}
+                    <Pill tone="ink">{etiquetaLabel(c.caso_manual)}</Pill>
                   {/if}
                 </div>
               {/if}

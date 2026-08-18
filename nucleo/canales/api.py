@@ -374,6 +374,16 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
         except Exception as e:
             print(f"[escalamiento] fallo al evaluar: {type(e).__name__}: {e}")
             evaluacion = None
+        # De que es esta conversacion. Se guarda SIEMPRE que el evaluador
+        # haya clasificado, escale o no: el 'caso_manual' ya se calculaba en
+        # cada turno pero solo se leia para decidir el agendamiento
+        # automatico, y despues se tiraba -- una conversacion que el
+        # asistente resolvio solo terminaba en la bandeja sin ninguna
+        # etiqueta de que trataba. Ver supabase/18_caso_conversacion.sql.
+        if evaluacion and evaluacion.get("caso_manual"):
+            persistencia.marcar_caso(tenant, conversation_id,
+                                     evaluacion["caso_manual"])
+
         if evaluacion and evaluacion.get("escalar"):
             necesita_humano = evaluacion.get("necesita_humano", True)
             nota_ticket = ""
@@ -1459,6 +1469,33 @@ def manual_casos():
         config = _config_de(tenant)
     except FileNotFoundError:
         return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+
+    return jsonify({"casos": config.manual.casos})
+
+
+@app.put("/manual/casos")
+def manual_casos_guardar():
+    """
+    Reemplaza la lista completa de tipos de caso, no un caso suelto: asi la
+    interfaz manda lo que quedo en pantalla y no hay que resolver ordenes ni
+    renombrados con operaciones parciales. El editor valida el conjunto
+    entero (ver _mutar_casos_manual) y lo guarda versionado.
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+
+    casos = cuerpo.get("casos")
+    if not isinstance(casos, list):
+        return jsonify({"error": "'casos' tiene que ser una lista."}), 400
+
+    try:
+        config = editor.guardar_casos_manual(tenant, casos)
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
 
     return jsonify({"casos": config.manual.casos})
 

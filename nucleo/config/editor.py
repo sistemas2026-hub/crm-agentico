@@ -393,6 +393,70 @@ def _mutar_flujo_derivacion(doc: dict, destinos: list[str], atiende: dict) -> No
         roles[nombre_rol]["atiende"] = (texto or "").strip()
 
 
+def _mutar_casos_manual(doc: dict, casos: list[str]) -> None:
+    """
+    La lista de tipos de caso con que se clasifica cada conversacion
+    ('manual.casos': internet_lento, sin_senal_tv, consulta_saldo, ...). El
+    modelo elige uno por turno, acotado por enum -- ver
+    nucleo/seguimiento/escalamiento.py -- y queda guardado en la
+    conversacion (supabase/18_caso_conversacion.sql).
+
+    Editable desde la interfaz a proposito: que casos atiende una empresa es
+    dato del negocio, cambia con el uso, y pedir una sesion de desarrollo
+    para agregar "instalacion_nueva" a una lista es exactamente lo que este
+    editor existe para evitar.
+
+    Riesgo bajo pero NO nulo, y por eso las dos guardas de abajo: la lista es
+    el enum que ve el modelo, y hay otras partes de la config que apuntan a
+    un caso por nombre. Borrar el caso equivocado no rompe nada de forma
+    visible -- deja de dispararse un automatismo y nadie se entera.
+    """
+    casos_limpios: list[str] = []
+    for caso in casos:
+        caso = (caso or "").strip()
+        if not caso:
+            continue
+        if not _RE_NOMBRE_ROL.match(caso):
+            raise ErrorEdicion(
+                f"'{caso}': el nombre del caso debe ser minuscula, empezar "
+                f"con letra y usar solo letras/numeros/guion bajo (2-30 "
+                f"caracteres). Ej: 'instalacion_nueva'.")
+        if caso in casos_limpios:
+            raise ErrorEdicion(f"'{caso}' esta repetido en la lista.")
+        casos_limpios.append(caso)
+
+    if not casos_limpios:
+        raise ErrorEdicion(
+            "la lista de casos no puede quedar vacia: es el enum con el que "
+            "el asistente clasifica cada conversacion.")
+
+    # 'otro' es la salida segura del enum: sin ella, una conversacion que no
+    # encaja en ningun caso obliga al modelo a elegir uno que no corresponde,
+    # y la clasificacion pasa de "no se sabe" a "dice algo falso".
+    if "otro" not in casos_limpios:
+        raise ErrorEdicion(
+            "la lista tiene que incluir 'otro': es la opcion que usa el "
+            "asistente cuando ninguna de las demas encaja. Sin ella se ve "
+            "obligado a elegir mal.")
+
+    # Un caso que otra parte de la config referencia por nombre no se puede
+    # borrar desde aca. Hoy solo el agendamiento automatico
+    # ('escalamiento.agendamiento_automatico': sin_senal_tv -> agendar la
+    # visita), y su sintoma al borrarlo seria silencioso: el piloto deja de
+    # dispararse, sin error, sin log, y las visitas vuelven a depender de que
+    # alguien las cree a mano.
+    referenciados = set((doc.get("escalamiento") or {})
+                        .get("agendamiento_automatico") or {})
+    huerfanos = sorted(referenciados - set(casos_limpios))
+    if huerfanos:
+        raise ErrorEdicion(
+            f"no se puede quitar {', '.join(huerfanos)}: el agendamiento "
+            f"automatico depende de ese caso. Primero hay que desactivarlo "
+            f"en la configuracion del escalamiento.")
+
+    doc.setdefault("manual", {})["casos"] = casos_limpios
+
+
 def _mutar_variable_tenant(doc: dict, nombre: str, valor: str) -> None:
     """
     Guarda un valor NO secreto que varia por empresa (ej. el subdominio de
@@ -506,6 +570,10 @@ def guardar_canal_whatsapp(tenant: str, activo: bool,
 def guardar_flujo_derivacion(tenant: str, destinos: list[str],
                              atiende: dict) -> TenantConfig:
     return _editar(tenant, lambda doc: _mutar_flujo_derivacion(doc, destinos, atiende))
+
+
+def guardar_casos_manual(tenant: str, casos: list[str]) -> TenantConfig:
+    return _editar(tenant, lambda doc: _mutar_casos_manual(doc, casos))
 
 
 def guardar_variable_tenant(tenant: str, nombre: str, valor: str) -> TenantConfig:

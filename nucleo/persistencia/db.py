@@ -275,7 +275,7 @@ def ultima_actividad(tenant: str, canal: str | None = None) -> list[dict]:
     """
     columnas = """c.id, c.canal, c.usuario_externo, c.rol_efectivo, c.estado,
                   c.escalada_a_humano, c.necesita_atencion_humana,
-                  c.motivo_escalamiento, c.caso_id, c.etiqueta,
+                  c.motivo_escalamiento, c.caso_id, c.etiqueta, c.caso_manual,
                   c.actualizado_en, c.id_cliente, c.nombre_cliente,
                   ultimo.contenido as ultimo_mensaje,
                   ultimo.rol       as ultimo_rol,
@@ -379,6 +379,37 @@ def marcar_escalada(tenant: str, conversation_id: str, motivo: str,
                    necesita_atencion_humana = %s, actualizado_en = now()
                where organization_id = %s and id = %s""",
             (motivo, caso_id, etiqueta, necesita_atencion_humana, org, conversation_id))
+
+
+def marcar_caso(tenant: str, conversation_id: str, caso: str | None) -> None:
+    """
+    Guarda de QUE es esta conversacion (uno de 'manual.casos' del tenant, ver
+    supabase/18_caso_conversacion.sql). Se llama en CADA turno, no solo al
+    escalar: la clasificacion cambia mientras la conversacion se aclara -- un
+    "me quede sin servicio" empieza sin caso, pasa por 'no_internet' y
+    termina en 'sin_senal_tv' cuando el cliente dice que es la television. La
+    ultima gana, que es la que describe de verdad el caso.
+
+    No pisa con NULL: si un turno no trajo clasificacion (el evaluador fallo,
+    o el tenant no declaro casos), se conserva la que ya habia en vez de
+    borrarla. Perder una clasificacion buena por un turno mudo seria peor que
+    no tenerla.
+
+    Nunca lanza: esto es una etiqueta para la bandeja, no parte de la
+    respuesta al cliente -- mismo criterio que registrar_llamada_herramienta.
+    """
+    if not caso:
+        return
+    try:
+        with sesion(tenant) as (cur, org):
+            cur.execute(
+                """update asistente.conversations
+                      set caso_manual = %s, actualizado_en = now()
+                    where organization_id = %s and id = %s""",
+                (caso, org, conversation_id))
+    except Exception as e:
+        print(f"[persistencia] no se pudo guardar el caso de la conversacion "
+              f"{conversation_id}: {type(e).__name__}: {e}")
 
 
 def cerrar_conversacion(tenant: str, conversation_id: str) -> None:
