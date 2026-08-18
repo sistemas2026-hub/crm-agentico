@@ -59,6 +59,62 @@ cada endpoint tiene su propio sobre, no asumir un patrón común entre ellos.
 | `/api/onu/get_onus_by_pon_port/...` | GET | Probado, **no existe** | 405 "Unknown method" |
 | `/api/onu/get_onus_by_olt_board_port/...` | GET | Probado, **no existe** | 405 "Unknown method" |
 
+## `get_outage_pons` — verificado contra una caída real (18/08/2026), y la latencia de agrupación
+
+Consultado en vivo mientras 8 ONUs de la OLT 3 (Rapilink) estaban caídas de
+verdad — no una prueba armada. La forma de la respuesta:
+
+```json
+{
+  "response": {
+    "total_pons": 1,
+    "sections": [
+      {"key": "partial_los", "group_by": "pon", "groups": [
+        {"label": "1/3", "sublabel": "VINA DEL REY", "pon_count": 1,
+         "subscribers": 8, "since": "2026-08-17 16:22:51",
+         "pons": [{"alert_kind": "partial_los",
+                    "partial_started_at": "2026-08-17 16:22:51",
+                    "partial_last_seen_at": "2026-08-18 15:34:10",
+                    "olt_id": "3", "board": "1", "port": "3",
+                    "total_onus": "103", "los_count": "8",
+                    "power_count": "4", "offline_count": "7",
+                    "affected_onus": 8, "affected_percent": 7.8,
+                    "odb_name": "CTO 56", "odb_count": 23, ...}]}
+      ]},
+      {"key": "los", "groups": []},
+      {"key": "power", "groups": []},
+      {"key": "offline", "groups": []}
+    ],
+    "stale": {"pon_count": 0, "subscribers": 0, "groups": []},
+    "unreachable_olts": []
+  }
+}
+```
+
+Coincide exacto con el panel de SmartOLT (mismos 8 afectados, mismo 7.8%,
+mismo board/puerto) — la API no es una versión resumida o con retraso de lo
+que se ve en pantalla, es la misma fuente.
+
+**`partial_started_at` es preciso al minuto, no una estimación.** Resuelve
+la duda que quedaba abierta: si el timestamp de una caída agrupada era
+confiable. Lo es.
+
+**Latencia de agrupación: 2 a 5 minutos, según los desarrolladores de
+SmartOLT** (dato del proveedor, comunicado directo — no medido por este
+proyecto cronometrando una caída desde que arranca, que sigue siendo la
+verificación pendiente si alguna vez hay oportunidad de observar una en
+vivo desde el minuto cero). Implicación de diseño: cualquier lógica que
+consulte este endpoint para decidir "¿esto es una falla de red o del
+cliente?" no puede tratar una respuesta vacía en los primeros ~5 minutos
+de un reporte como "confirmado que no es de red" — es inconclusa, no
+negativa, en esa ventana.
+
+Secciones separadas por tipo de alerta: `partial_los` (parcial, como este
+caso), `los` (loss of signal total), `power` (corte de energía),
+`offline`. Todas vacías = sin incidentes activos en esa OLT, forma de
+respuesta limpia también en ese caso (verificado en agosto con las 2 OLTs
+en cero).
+
 ## El identificador — el hallazgo más importante del sondeo
 
 **`sn_onu` de WispHub funciona DIRECTO como identificador de SmartOLT** —
