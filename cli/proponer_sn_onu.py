@@ -32,9 +32,27 @@ equivocada por el nombre, heredaria ese riesgo sin verificar. El dia que
 exista una decision explicita de escribir, es un script APARTE, con
 confirmacion y modo dry-run primero -- no este.
 
+Verificacion por IP (18/08/2026) -- segunda señal, independiente del nombre
+-----------------------------------------------------------------------------
+El nombre falla justo donde mas se necesita (typos, tildes, duplicados). La
+IP que WispHub guarda por cliente (campo 'ip') es, en Rapilink, una
+asignacion ESTATICA dentro de su red interna (confirmado en vivo: 'IPv4
+access type: Static' en get_onu_full_status_info) -- no cambia con cada
+reconexion como pasaria con un ISP residencial tipico. Verificado contra 8
+clientes reales con sn_onu ya confirmado: quien tenia IP de los dos lados,
+coincidio 8 de 8. Por eso sirve como confirmacion independiente del nombre,
+no solo como otro dato mas.
+
+Requiere get_onu_full_status_info (el endpoint PESADO, ~10s por ONU, el
+proveedor pide no usarlo en bulk/polling) -- por eso es opt-in
+(--verificar-ip) y solo se llama sobre candidatos ya acotados por nombre
+(alta_confianza, revisar_typo, ambiguo con mas de un candidato), nunca
+sobre todo el universo de ONUs.
+
 Uso
 ---
     py -3.13 cli/proponer_sn_onu.py
+    py -3.13 cli/proponer_sn_onu.py --verificar-ip
     py -3.13 cli/proponer_sn_onu.py --csv candidatos_sn_onu.csv
 ================================================================================
 """
@@ -135,6 +153,55 @@ def clientes_activos_wisphub() -> list[dict]:
     return clientes
 
 
+def ip_de_onu(sn: str) -> str | None:
+    """IP que SmartOLT ve realmente conectada en esa ONU, o None si no se
+    pudo obtener (endpoint pesado -- ver el docstring del modulo, no se
+    reintenta con la forma hexadecimal para no duplicar el costo de 10s).
+    'full_status_json' es la forma real de la respuesta -- 'response' NO
+    existe en este endpoint, a diferencia de get_outage_pons (confirmado
+    en vivo, 18/08/2026: asumir la misma envoltura para dos endpoints
+    distintos del mismo proveedor caus el primer intento de esto)."""
+    try:
+        r = requests.get(f"{SMARTOLT_BASE_URL}/api/onu/get_onu_full_status_info/{sn}",
+                         headers=SMARTOLT_HEADERS, timeout=15)
+        if not r.ok:
+            return None
+        wan = r.json().get("full_status_json", {}).get("ONU WAN Interfaces", {})
+        return wan.get("IPv4 address") if isinstance(wan, dict) else None
+    except requests.exceptions.RequestException:
+        return None
+
+
+def confirmar_por_ip(candidatos: list[dict], ip_wisphub: str | None) -> tuple[dict | None, str, str]:
+    """Entre varios candidatos de ONU (mismo nombre o nombre parecido),
+    cual tiene la IP que WispHub tiene guardada para este cliente -- si
+    hay exactamente uno, ESE es el correcto, sin importar cuantos otros
+    compartian el nombre.
+
+    Devuelve (onu_confirmada, razon, nota):
+      razon es un codigo fijo para decidir el nivel de confianza sin
+      comparar texto libre -- 'sin_ip', 'confirmado', 'no_coincide',
+      'multiple'. 'nota' es la version legible para el reporte.
+      onu_confirmada es None salvo en 'confirmado' -- que no confirme no
+      es un fallo, solo falta de dato (no toda ONU trae IP en
+      get_onu_full_status_info)."""
+    if not ip_wisphub:
+        return None, "sin_ip", "sin IP en WispHub para comparar"
+
+    coincidencias = []
+    for onu in candidatos:
+        sn = onu.get("sn") or onu.get("unique_external_id") or ""
+        ip_so = ip_de_onu(sn)
+        if ip_so and ip_so == ip_wisphub:
+            coincidencias.append(onu)
+
+    if len(coincidencias) == 1:
+        return coincidencias[0], "confirmado", "IP coincide -- confirmado"
+    if len(coincidencias) > 1:
+        return None, "multiple", f"{len(coincidencias)} candidatos con la MISMA ip que WispHub -- revisar a mano"
+    return None, "no_coincide", "ninguna IP de los candidatos coincide con la de WispHub"
+
+
 def onus_smartolt() -> list[dict]:
     """TODAS las ONUs de las dos OLTs de Rapilink, via el endpoint masivo.
     'pon_port' se sabe roto (ver skill) pero aca no se filtra por eso -- se
@@ -153,6 +220,10 @@ def onus_smartolt() -> list[dict]:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--csv", help="Si se pasa, ademas guarda el reporte en este archivo CSV")
+    ap.add_argument("--verificar-ip", action="store_true",
+                    help="Cruza la IP de WispHub contra get_onu_full_status_info "
+                         "para cada candidato -- mas lento (~10s por candidato), "
+                         "pero confirma o desmiente lo que dice el nombre solo.")
     args = ap.parse_args()
 
     if not SMARTOLT_BASE_URL or not SMARTOLT_HEADERS["X-Token"]:
@@ -209,6 +280,15 @@ def main() -> None:
             if sn in seriales_ya_usados:
                 filas.append((id_servicio, nombre_wh, sn, onu.get("name", ""),
                              "ambiguo", "ese sn_onu ya esta asignado a OTRO cliente en WispHub"))
+            elif args.verificar_ip:
+                confirmada, razon, nota = confirmar_por_ip([onu], c.get("ip"))
+                # Un nombre exacto CON ip que NO coincide es mas sospechoso que
+                # uno sin verificar -- se marca distinto, no se descarta (el
+                # nombre exacto sigue siendo una senal real).
+                nivel = {"confirmado": "confirmado_ip",
+                        "no_coincide": "revisar_ip_no_coincide"}.get(razon, "alta_confianza")
+                filas.append((id_servicio, nombre_wh, sn, onu.get("name", ""),
+                             nivel, f"nombre exacto, sin ambiguedad -- {nota}"))
             else:
                 filas.append((id_servicio, nombre_wh, sn, onu.get("name", ""),
                              "alta_confianza", "nombre exacto, sin ambiguedad"))
@@ -217,8 +297,19 @@ def main() -> None:
         if len(candidatos_exactos) > 1:
             sns = ", ".join(o.get("sn") or o.get("unique_external_id") or "?"
                             for o in candidatos_exactos)
-            filas.append((id_servicio, nombre_wh, sns, "", "ambiguo",
-                         f"{len(candidatos_exactos)} ONUs distintas con ese mismo nombre"))
+            if args.verificar_ip:
+                confirmada, razon, nota = confirmar_por_ip(candidatos_exactos, c.get("ip"))
+                if confirmada:
+                    sn_confirmado = confirmada.get("sn") or confirmada.get("unique_external_id") or ""
+                    filas.append((id_servicio, nombre_wh, sn_confirmado, confirmada.get("name", ""),
+                                 "confirmado_ip",
+                                 f"{len(candidatos_exactos)} ONUs con ese nombre, la IP desempato -- {nota}"))
+                else:
+                    filas.append((id_servicio, nombre_wh, sns, "", "ambiguo",
+                                 f"{len(candidatos_exactos)} ONUs distintas con ese mismo nombre -- {nota}"))
+            else:
+                filas.append((id_servicio, nombre_wh, sns, "", "ambiguo",
+                             f"{len(candidatos_exactos)} ONUs distintas con ese mismo nombre"))
             continue
 
         if norm_wh in nombres_duplicados:
@@ -236,8 +327,20 @@ def main() -> None:
             candidatos = indice[mejor_nombre]
             sns = ", ".join(o.get("sn") or o.get("unique_external_id") or "?"
                             for o in candidatos)
-            filas.append((id_servicio, nombre_wh, sns, mejor_nombre,
-                         "revisar_typo", f"similitud {mejor_ratio:.0%} -- posible typo, confirmar a mano"))
+            if args.verificar_ip:
+                confirmada, razon, nota = confirmar_por_ip(candidatos, c.get("ip"))
+                if confirmada:
+                    sn_confirmado = confirmada.get("sn") or confirmada.get("unique_external_id") or ""
+                    filas.append((id_servicio, nombre_wh, sn_confirmado, confirmada.get("name", ""),
+                                 "confirmado_ip",
+                                 f"similitud {mejor_ratio:.0%}, la IP lo confirma -- {nota}"))
+                else:
+                    filas.append((id_servicio, nombre_wh, sns, mejor_nombre, "revisar_typo",
+                                 f"similitud {mejor_ratio:.0%} -- posible typo, confirmar a mano "
+                                 f"({nota})"))
+            else:
+                filas.append((id_servicio, nombre_wh, sns, mejor_nombre,
+                             "revisar_typo", f"similitud {mejor_ratio:.0%} -- posible typo, confirmar a mano"))
         else:
             filas.append((id_servicio, nombre_wh, "", "", "sin_candidato",
                          "no se encontro ninguna ONU con nombre parecido"))
@@ -246,15 +349,19 @@ def main() -> None:
     for fila in filas:
         conteo[fila[4]] = conteo.get(fila[4], 0) + 1
 
+    _NIVELES = ("confirmado_ip", "alta_confianza", "revisar_typo",
+               "revisar_ip_no_coincide", "ambiguo", "sin_candidato")
+
     print("Resumen:")
-    for nivel in ("alta_confianza", "revisar_typo", "ambiguo", "sin_candidato"):
+    for nivel in _NIVELES:
         print(f"  {nivel}: {conteo.get(nivel, 0)}")
     print()
 
     print(f"{'id_servicio':<12}{'nombre':<35}{'confianza':<16}{'candidato(s)':<30}motivo")
     print("-" * 130)
+    orden = {nivel: i for i, nivel in enumerate(_NIVELES)}
     for id_servicio, nombre, sn, nombre_so, confianza, motivo in sorted(
-            filas, key=lambda f: (f[4] != "alta_confianza", f[4] != "revisar_typo", f[0])):
+            filas, key=lambda f: (orden.get(f[4], len(_NIVELES)), f[0])):
         print(f"{id_servicio:<12}{nombre[:33]:<35}{confianza:<16}{sn[:28]:<30}{motivo}")
 
     if args.csv:
