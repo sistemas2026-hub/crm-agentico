@@ -317,6 +317,32 @@ def main() -> None:
                          "hay otro cliente ACTIVO con el mismo nombre en WispHub"))
             continue
 
+        # Sin match exacto contra 'nombre': antes de pasar a typo, probar contra
+        # 'servicio' -- el campo separado que WispHub muestra en su propia
+        # pantalla como "Servicio", a veces mas corto (sin segundo nombre) que
+        # 'nombre'. Confirmado en vivo (18/08/2026): id_servicio 6727,
+        # SmartOLT tenia la ONU con el nombre de 'servicio', no el de
+        # 'nombre' -- por eso ese caso salia 'sin_candidato' antes de esto.
+        # Cuesta cero cuando 'servicio' == 'nombre' (el caso mas comun): el
+        # 'if norm_servicio != norm_wh' de abajo lo salta directo.
+        norm_servicio = normalizar(c.get("servicio") or "")
+        if norm_servicio and norm_servicio != norm_wh:
+            candidatos_servicio = indice.get(norm_servicio, [])
+            if len(candidatos_servicio) == 1:
+                onu = candidatos_servicio[0]
+                sn = onu.get("sn") or onu.get("unique_external_id") or ""
+                if sn not in seriales_ya_usados:
+                    nivel, nota_ip = "alta_confianza", ""
+                    if args.verificar_ip:
+                        confirmada, razon, nota = confirmar_por_ip([onu], c.get("ip"))
+                        nivel = {"confirmado": "confirmado_ip",
+                                "no_coincide": "revisar_ip_no_coincide"}.get(razon, "alta_confianza")
+                        nota_ip = f" -- {nota}"
+                    filas.append((id_servicio, nombre_wh, sn, onu.get("name", ""), nivel,
+                                 f"coincide por 'servicio' ({c.get('servicio')}), "
+                                 f"no por 'nombre'{nota_ip}"))
+                    continue
+
         # Sin match exacto: buscar el mas parecido (typo), solo si supera el umbral.
         mejor_nombre, mejor_ratio = None, 0.0
         for n in indice:
