@@ -298,10 +298,13 @@ def main() -> None:
                         "propuesta contra el valor real. Es la unica forma de saber si "
                         "un cambio en las reglas mejoro o empeoro, sin escribir nada.")
     ap.add_argument("--verificar-mac", action="store_true",
-                   help="Para las filas que quedaron sin resolver, le pregunta a la OLT "
-                        "la MAC real del equipo y la compara con la de WispHub. Es lo "
-                        "unico que confirma sin dudas, pero cuesta ~10s por equipo y el "
-                        "proveedor pide no usarlo en bulk -- apagado por defecto.")
+                   help="Le pregunta a la OLT la MAC real de cada equipo y la compara "
+                        "con la de WispHub. Es lo unico que confirma sin dudas, pero "
+                        "OJO: en la corrida del 18/08/2026 la MITAD volvio SIN "
+                        "veredicto -- hay ONUs que contestan bien y no exponen ninguna "
+                        "MAC. No sirve para blindar la carga entera, solo para "
+                        "confirmar una parte. Apagado por defecto: tarda horas y el "
+                        "proveedor pide no usar ese endpoint en bulk.")
     args = ap.parse_args()
 
     if not SMARTOLT_BASE_URL or not SMARTOLT_HEADERS["X-Token"]:
@@ -559,15 +562,34 @@ def main() -> None:
     # desmienta. Lo que el equipo no pueda contestar (caido) queda igual que
     # estaba: sin veredicto no se mueve nada.
     if args.verificar_mac:
+        # TODA fila con un candidato unico, incluida 'alta_confianza'. Esa es
+        # justamente la que se va a escribir, y mide 97.94% (--validar): sobre
+        # 246 propuestas son ~5 clientes que quedarian apuntando al equipo de
+        # otra casa, y ahi un reinicio remoto se lo hace a un tercero. Los
+        # otros niveles se verifican tambien porque un CONFIRMADO los asciende
+        # y deja de hacer falta que alguien los mire.
         pendientes = [i for i, f in enumerate(filas)
-                     if f[4] in ("solo_mac", "revisar_mac", "revisar_typo") and f[2]
-                     and "," not in f[2]]
-        print(f"[verificar-mac] {len(pendientes)} equipos a consultar "
-             f"(~{len(pendientes) * 10 // 60} min, ~10s cada uno)")
+                     if f[4] in ("alta_confianza", "solo_mac", "revisar_mac",
+                                 "revisar_typo")
+                     and f[2] and "," not in f[2]]
+        # Estado de cada ONU segun la lista masiva, que ya esta traida: a una
+        # que figura Offline o Power fail no hace falta preguntarle nada, y
+        # preguntarle cuesta el tiempo de espera completo para recibir lo
+        # mismo. En la corrida del 18/08/2026, 33 de 277 se ahorraron asi.
+        estado_onu = {(o.get("sn") or "").upper(): o.get("status") or "?"
+                     for o in onus}
+        print(f"[verificar-mac] {len(pendientes)} equipos. Tarda: el endpoint "
+             f"contesta en 10-30s cuando contesta, y bastante mas cuando el "
+             f"equipo no esta. Contar en horas, no en minutos.")
         confirmados = desmentidos = mudos = 0
         for n, i in enumerate(pendientes, 1):
             id_servicio, nombre_wh, sn, nombre_so, nivel, motivo = filas[i]
             mac_wh = cola_hex(por_id.get(id_servicio, {}).get("mac_cpe") or "")
+            if estado_onu.get(sn.upper()) != "Online":
+                mudos += 1
+                if n % 10 == 0:
+                    print(f"    {n}/{len(pendientes)}...")
+                continue
             real = mac_del_equipo(sn)
             if not real or len(mac_wh) < 10:
                 mudos += 1
