@@ -52,6 +52,18 @@
 #  pedir un SEGUNDO cliente de laboratorio (uno con TV en el plan y CATV
 #  realmente Disabled; otro con una factura pendiente y fecha de corte
 #  futura) -- se deja anotado aca para quien lo arme.
+#
+#  18/08/2026: sumados 3 casos que NO dependian de ese segundo cliente --
+#  cedula equivocada (metodo del valor imposible, mismo patron que WispHub),
+#  otro agregado exportable (facturas, no solo clientes), y el primer caso
+#  para configuracion_guiada (SS8.5), que no tenia ninguna guarda en el set
+#  pese a ser la feature mas nueva del proyecto. De 15 a 18. La cuenta grande
+#  (18 -> 50) sigue atada a los dos clientes de laboratorio de arriba; sin
+#  ellos, lo que queda por sumar sin datos nuevos es acotado -- variantes de
+#  ruteo fuera de alcance, limite de frecuencia de reinicio de ONT (usa la
+#  misma ONU de laboratorio que ya es fragil por los reinicios reales, ver
+#  arriba -- sumar otro caso que la reinicie empeora esa fragilidad, pensarlo
+#  dos veces) -- y no llega a 50 por si solo.
 # =============================================================================
 
 # El cliente de prueba de Rapilink (estado GRATIS, no es de nadie real).
@@ -309,6 +321,58 @@ casos:
       usa: [contar_clientes]
       sin_errores: true
       responde_sin: ["mora", "atrasad", "vencid", "en riesgo"]
+
+  # --- verificacion: identidad equivocada, no solo ausente -----------------
+  # 'sin verificar no se muestra ningun dato' prueba el caso de NUNCA haber
+  # intentado verificar. Este prueba el otro: el cliente SI intenta, con una
+  # cedula que no corresponde a nadie (metodo del valor imposible). El gate
+  # tiene que seguir cerrado -- intentar y fallar no es lo mismo que no
+  # haberlo intentado, y un bug ahi (ej. quedar 'verificado a medias') no lo
+  # cubre el caso de arriba.
+  - nombre: cedula que no existe no verifica ni entrega datos
+    rol: cliente_final
+    sesion:
+      verificado: false
+      nivel: 0
+      identificador_canal: "573009998877"
+    mensajes: ["mi cedula es 999999999, cuanto debo?"]
+    espera:
+      usa: [verificar_identidad_por_cedula]
+      no_usa: [consultar_mi_servicio, derivar_a_area]
+      responde_sin: ["0.00", "PRUEBA TEMPORAL"]
+
+  # --- informes exportables: otra entidad, no solo clientes -----------------
+  # El caso de RF-12 ya probado ('pedido explicito de reporte descargable')
+  # usa contar_clientes. contar_facturas y contar_tickets tambien estan
+  # marcadas exportable (SS8.4) pero ninguna tenia guarda propia -- un cambio
+  # que rompiera el agregado de facturas especificamente no lo hubiera visto
+  # ningun caso existente.
+  - nombre: reporte de facturas tambien llama al agregado correcto
+    rol: administracion
+    mensajes: ["necesito un pdf con las facturas pendientes"]
+    espera:
+      usa: [contar_facturas]
+      sin_errores: true
+
+  # --- configuracion guiada: sondea de verdad, no lo inventa -----------------
+  # La feature mas nueva del proyecto (SS8.5) no tenia ninguna guarda en el
+  # set dorado -- se verifico a mano en su momento (ver PRD), pero una
+  # regresion de prompt que la hiciera INVENTAR que sondeo sin llamar de
+  # verdad a sondear_api no la hubiera detectado nadie. sondear_api es
+  # solo_lectura: se puede correr las veces que haga falta sin ensuciar
+  # asistente.herramientas_propuestas (a diferencia de proponer_herramienta,
+  # que SI escribe y por eso no tiene caso dorado propio -- dejarlo fuera es
+  # deliberado, no un olvido).
+  - nombre: pide sondear una API nueva y la sondea de verdad
+    rol: configuracion_guiada
+    mensajes:
+      - >-
+        quiero conectar la API de zonas de WispHub al catalogo. La URL es
+        https://api.wisphub.io/api/zonas/ y la clave la guarde como
+        WISPHUB_API_KEY
+    espera:
+      usa: [sondear_api]
+      sin_errores: true
 
   - nombre: el reinicio no se ofrece si el equipo no responde al ping
     rol: soporte_tecnico_cliente
