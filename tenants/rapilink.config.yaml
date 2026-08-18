@@ -106,6 +106,16 @@ roles:
       explicada por cableado, splitter, ni exceso de TV sobre el maximo
       recomendado), llama a 'agendar_visita_tecnica' para crear el ticket.
 
+      Cuando el diagnostico de un cliente de fibra de un equipo offline o
+      con mala señal, llama 'consultar_incidente_red' antes de asumir que
+      es un problema puntual de ese cliente -- puede ser una caida que
+      afecta a varios a la vez. IMPORTANTE: SmartOLT tarda de 2 a 5
+      minutos en agrupar una caida recien empezada (dato del proveedor).
+      Si 'es_incidente_de_red' da false y el reporte es muy reciente, no
+      lo tomes como "confirmado que es solo de este cliente" -- decile al
+      colaborador que todavia no hay nada agrupado, no que no hay ningun
+      problema de red.
+
       Reglas para usar 'agendar_visita_tecnica' -- son estrictas porque
       agenda una visita real, con costo y logistica, sin ningun paso de
       confirmacion despues tuyo:
@@ -128,7 +138,7 @@ roles:
     puede_consultar: [consultar_cliente, consultar_cliente_por_cedula, consultar_ticket,
           consultar_tickets_de_cliente, contar_tickets, contar_clientes, consultar_casos_bottlecrm,
           agendar_visita_tecnica, consultar_estado_ont, consultar_senal_ont, reiniciar_ont,
-          diagnosticar_falla_ont, consultar_estado_catv, activar_catv]
+          diagnosticar_falla_ont, consultar_estado_catv, activar_catv, consultar_incidente_red]
     campos_permitidos:
       consultar_cliente: [id_servicio, nombre, cedula, estado, email, telefono, direccion, localidad,
         ciudad, plan_internet, zona, fecha_instalacion, estado_facturas, saldo, fecha_corte]
@@ -167,6 +177,13 @@ roles:
             "ONU details.Run state", "ONU details.Last down time", "Optical status.Rx optical power(dBm)"]
       consultar_estado_catv: [catv]
       activar_catv: [response]
+      # zona/caja son topologia de red -- necesaria para soporte, no para
+      # cliente_final (mismo criterio que olt_id/board/port en la skill
+      # smartolt-api). Esta herramienta no esta en el catalogo de
+      # cliente_final: ver el comentario de 'roles_permitidos' donde se
+      # declara, mas abajo.
+      consultar_incidente_red: [es_incidente_de_red, tipo_alerta, clientes_afectados,
+            porcentaje_afectado, desde, zona, caja, motivo]
     nunca_revelar: [password_servicio, password_cpe, password_router_wifi, password_ssid_router_wifi,
       usuario_router_wifi, coordenadas]
 
@@ -1564,6 +1581,31 @@ herramientas:
         - desde: -7.9999
           hasta:
           etiqueta: fuera del rango documentado (senal muy fuerte) -- revisar con un tecnico
+
+  - nombre: consultar_incidente_red
+    tipo: interno
+    detecta_incidente: true
+    descripcion: >
+      Correlaciona la ONU de ESTE cliente contra los incidentes activos de
+      su OLT en SmartOLT -- resuelve si su falla es un caso aislado o parte
+      de una caida que afecta a mas gente (mismo splitter/PON). El
+      veredicto ('es_incidente_de_red', cuantos clientes, desde cuando) ya
+      viene calculado, no lo recalcules ni lo cuestiones. IMPORTANTE:
+      SmartOLT tarda 2 a 5 minutos en agrupar una caida recien empezada
+      (dato del proveedor) -- 'es_incidente_de_red: false' en un reporte
+      muy reciente significa "todavia no hay nada agrupado", no "confirmado
+      que es solo suyo". Comunicaselo asi al colaborador, no lo simplifiques
+      a un si/no tajante cuando el reporte tiene pocos minutos.
+    solo_lectura: true
+    roles_permitidos: [soporte]
+    base_url_ref: SMARTOLT_SUBDOMINIO
+    auth_ref: SMARTOLT_API_KEY
+    auth_esquema: ""
+    auth_header: X-Token
+    inyectar_sesion:
+      sn_onu: sn_onu
+    reintentar_identificador_como:
+      sn_onu: gpon_hex
 
   - nombre: reiniciar_ont
     tipo: http

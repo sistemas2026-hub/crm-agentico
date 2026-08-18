@@ -577,6 +577,15 @@ class Herramienta(Base):
     # nunca escribe directo al catalogo real, aunque sea el mismo ADMIN
     # quien esta charlando -- ver nucleo/canales/api.py, aprobar_propuesta().
     propone_herramienta: bool = False
+    # NO es una excepcion a "el modelo nunca propone argumentos libres" --
+    # toma CERO argumentos del modelo, solo 'sn_onu' via inyectar_sesion,
+    # igual que consultar_senal_ont. Encadena dos llamadas a SmartOLT
+    # (resolver OLT/board/port de la ONU, despues consultar incidentes
+    # activos de esa OLT) y calcula el veredicto en codigo -- PRD SS12.5, el
+    # modelo nunca compara board/port a mano. Ver
+    # nucleo/herramientas/incidentes.py y la skill smartolt-api (seccion
+    # get_outage_pons) para el porque y la verificacion en vivo.
+    detecta_incidente: bool = False
 
     # --- http / agregado ---
     # No es secreto (no dispara el barrido de _barrer_secretos): es dato de

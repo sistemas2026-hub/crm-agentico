@@ -50,6 +50,7 @@ from datetime import datetime, timedelta
 
 from nucleo.herramientas import agregado as ejecutor_agregado
 from nucleo.herramientas import http as ejecutor_http
+from nucleo.herramientas import incidentes as ejecutor_incidentes
 from nucleo.herramientas import informes
 from nucleo.modelo import cliente
 from nucleo.persistencia import db as persistencia
@@ -659,6 +660,9 @@ def _ejecutar_tool(herramienta, sesion, argumentos_modelo: dict,
             argumentos.pop(arg_llamada, None)
         else:
             argumentos[arg_llamada] = valor
+
+    if herramienta.tipo == "interno" and herramienta.detecta_incidente:
+        return ejecutor_incidentes.detectar(herramienta, argumentos, tenant, variables_tenant)
 
     if herramienta.tipo == "http":
         if herramienta.cache and tenant:

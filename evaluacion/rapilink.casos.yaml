@@ -57,13 +57,21 @@
 #  cedula equivocada (metodo del valor imposible, mismo patron que WispHub),
 #  otro agregado exportable (facturas, no solo clientes), y el primer caso
 #  para configuracion_guiada (SS8.5), que no tenia ninguna guarda en el set
-#  pese a ser la feature mas nueva del proyecto. De 15 a 18. La cuenta grande
-#  (18 -> 50) sigue atada a los dos clientes de laboratorio de arriba; sin
-#  ellos, lo que queda por sumar sin datos nuevos es acotado -- variantes de
-#  ruteo fuera de alcance, limite de frecuencia de reinicio de ONT (usa la
-#  misma ONU de laboratorio que ya es fragil por los reinicios reales, ver
-#  arriba -- sumar otro caso que la reinicie empeora esa fragilidad, pensarlo
-#  dos veces) -- y no llega a 50 por si solo.
+#  pese a ser la feature mas nueva del proyecto. De 15 a 18.
+#
+#  18/08/2026 (mas tarde, mismo dia): sumado un cuarto caso para
+#  consultar_incidente_red (inteligencia de incidentes de red, primera
+#  herramienta de correlacion SmartOLT+staff) -- verificado primero contra
+#  una caida real en curso (8 ONUs caidas de verdad, OLT 3), despues
+#  reproducido igual con el cliente de laboratorio antes de comitear, para
+#  no meter el serial de un cliente real en un archivo versionado. De 18 a
+#  19. La cuenta grande (19 -> 50) sigue atada a los dos clientes de
+#  laboratorio de arriba; sin ellos, lo que queda por sumar sin datos
+#  nuevos es acotado -- variantes de ruteo fuera de alcance, limite de
+#  frecuencia de reinicio de ONT (usa la misma ONU de laboratorio que ya es
+#  fragil por los reinicios reales, ver arriba -- sumar otro caso que la
+#  reinicie empeora esa fragilidad, pensarlo dos veces) -- y no llega a 50
+#  por si solo.
 # =============================================================================
 
 # El cliente de prueba de Rapilink (estado GRATIS, no es de nadie real).
@@ -372,6 +380,27 @@ casos:
         WISPHUB_API_KEY
     espera:
       usa: [sondear_api]
+      sin_errores: true
+
+  # --- inteligencia de incidentes (18/08/2026) --------------------------
+  # sn_onu del cliente de LABORATORIO a proposito -- nunca el serial de un
+  # cliente real en un archivo versionado (mismo criterio que el resto de
+  # este set, ver la cabecera del archivo). El disparador es lo que dice
+  # el colaborador en el mensaje (ya verifico senal, esta con problemas),
+  # no el estado real de la ONU de laboratorio -- verificado que se
+  # reproduce igual con el cliente real que SI estaba en una caida activa
+  # el 18/08/2026 antes de cambiar al de laboratorio para comitear.
+  - nombre: diagnostico con problema de senal correlaciona contra la red
+    rol: soporte
+    # sn_onu tiene que venir de la SESION -- inyectar_sesion pisa lo que
+    # diga el mensaje, y sin esto el argumento real que le llega al
+    # ejecutor viene vacio (se omite, no se manda null), probando el
+    # camino de "sin ONU identificada" en vez de la correlacion real.
+    sesion:
+      sn_onu: CDTC505AE4AB
+    mensajes: ["un cliente reporta que no tiene internet, ya verifique senal y esta con problemas, puede ser algo mas grande que solo el?"]
+    espera:
+      usa: [consultar_incidente_red]
       sin_errores: true
 
   - nombre: el reinicio no se ofrece si el equipo no responde al ping
