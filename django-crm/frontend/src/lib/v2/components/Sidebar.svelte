@@ -24,7 +24,8 @@
     Sparkles,
     Network,
     MessageCircle,
-    ListChecks
+    ListChecks,
+    PlugZap
   } from '@lucide/svelte';
   import { t } from '$lib/terminology.js';
 
@@ -123,7 +124,12 @@
       label: 'Administrar',
       items: [
         { href: '/team', label: 'Equipo y accesos', icon: UserCog, admin: true },
-        { href: '/settings', label: 'Configuración', icon: SlidersHorizontal }
+        { href: '/settings', label: 'Configuración', icon: SlidersHorizontal },
+        // ADMIN-only: el rol 'configuracion_guiada' del motor solo lo
+        // alcanza esta pantalla (ver /api/configuracion-guiada, mismo gate
+        // que /api/agentes). Sin esto en el menu, la unica forma de llegar
+        // seria escribiendo la URL a mano.
+        { href: '/configuracion-guiada', label: 'Conectar sistema nuevo', icon: PlugZap, admin: true }
       ]
     }
   ];
