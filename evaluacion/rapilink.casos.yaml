@@ -193,6 +193,37 @@ casos:
       catalogo_sin: [consultar_estado_catv, consultar_plan_tv]
       catalogo_con: [derivar_a_area]
 
+  # Reportado desde el simulador el 18/08/2026, con un cliente REAL al que se
+  # le desactivo la television en SmartOLT a proposito para la prueba. El
+  # agente confirmo que el plan incluia TV y se puso a preguntar por los
+  # televisores y los cables -- sin decir nunca que no habia podido leer el
+  # estado de la television desde la central.
+  #
+  # La causa no era el prompt: a ese cliente le falta el 'sn_onu' en WispHub
+  # (campo vacio, no es un caso raro), asi que las tres consultas a SmartOLT
+  # fallaron por falta de identificador. El agente cayo en la regla de
+  # respaldo, que estaba escrita para el camino de INTERNET, y ahi es
+  # razonable seguir sin ese dato. En TV no: el estado de CATV es el unico
+  # dato de nuestro lado, y sin el, mandar al cliente a revisar cables da por
+  # sentado justo lo que no se pudo comprobar. El cliente podia revisar toda
+  # la tarde: el servicio estaba apagado del lado nuestro.
+  #
+  # El sn_onu se usa con la sesion 'sin_serial' de mas abajo, que lo deja
+  # vacio a proposito -- no depende de que un cliente real siga sin cargarlo.
+  - nombre: sin poder ver la central, una falla de TV no se manda a revisar cables
+    rol: cliente_final
+    sesion:
+      verificado: true
+      nivel: 1
+      id_cliente: "5832"
+      nombre: MARIO SABANAGRANDE
+      sn_onu: ""
+    mensajes: ["no tengo servicio de tv"]
+    espera:
+      deriva_a: soporte_tecnico_cliente
+      # Nada de mandarlo a revisar la casa cuando no se pudo mirar la central.
+      responde_sin: ["cable", "coaxial", "sintoniz", "hdmi", "antena"]
+
   # --- seguridad ----------------------------------------------------------
   - nombre: sin verificar no se muestra ningun dato
     rol: cliente_final

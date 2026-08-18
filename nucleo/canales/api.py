@@ -374,6 +374,44 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
         except Exception as e:
             print(f"[escalamiento] fallo al evaluar: {type(e).__name__}: {e}")
             evaluacion = None
+
+        # Escalamiento POR HECHO, no por juicio. Si una herramienta declarada
+        # con 'escalar_si_falla' (schema.py) fallo en este turno, la
+        # conversacion escala aunque el evaluador haya dicho que no.
+        #
+        # No es desconfianza del evaluador en general: es que en los casos
+        # limite responde distinto a la misma pregunta. Medido el 18/08/2026
+        # sobre el mismo historial y la misma config, en llamadas seguidas:
+        # escalar=true una vez, false la siguiente. Y para entonces el agente
+        # ya le habia dicho al cliente que un colaborador iba a seguir su
+        # caso -- o sea que la mitad de las veces le prometia una persona que
+        # no llegaba nunca.
+        por_nombre = {h.nombre: h for h in config.herramientas}
+        forzado = None
+        for llamada in registro_herramientas:
+            if not llamada.get("codigo_error"):
+                continue
+            herr = por_nombre.get(llamada["herramienta"])
+            if herr is not None and herr.escalar_si_falla:
+                forzado = herr.escalar_si_falla
+                break
+        if forzado:
+            evaluacion = dict(evaluacion or {})
+            if not evaluacion.get("escalar"):
+                print(f"[escalamiento] forzado por '{forzado}': una herramienta "
+                      f"con escalar_si_falla no pudo ejecutarse")
+            evaluacion["escalar"] = True
+            evaluacion["motivo"] = forzado
+            evaluacion["necesita_humano"] = True
+            # El resumen y la etiqueta los deja el evaluador si los trajo; si
+            # no vino nada (fallo entero), se completa lo minimo para que el
+            # caso no llegue mudo a la bandeja.
+            evaluacion.setdefault("etiqueta", "")
+            evaluacion.setdefault(
+                "resumen",
+                "El asistente no pudo completar el diagnostico porque una "
+                "consulta a los sistemas no devolvio datos para este cliente. "
+                "Hay que revisarlo a mano.")
         # De que es esta conversacion. Se guarda SIEMPRE que el evaluador
         # haya clasificado, escale o no: el 'caso_manual' ya se calculaba en
         # cada turno pero solo se leia para decidir el agendamiento
@@ -402,7 +440,15 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             caso_manual = evaluacion.get("caso_manual")
             herramienta_auto = (config.escalamiento.agendamiento_automatico.get(caso_manual)
                                 if caso_manual else None)
-            if herramienta_auto:
+            # 'not forzado': cuando la escalada la fuerza una herramienta que
+            # no pudo ejecutarse, no hay nada que verificar ni que
+            # repreguntar. El verificador de agendamiento veria el checklist
+            # incompleto y pospondria la escalada para pedirle un dato mas al
+            # cliente -- un dato que no cambia nada, porque lo que falta no lo
+            # tiene el cliente sino nuestro sistema. Visto el 18/08/2026: la
+            # escalada forzada se activaba y quedaba atrapada justo aca, asi
+            # que al cliente se le prometia un colaborador que no llegaba.
+            if herramienta_auto and not forzado:
                 try:
                     veredicto = agendamiento.verificar(config, tenant, rol, estado["historial"])
                 except Exception as e:

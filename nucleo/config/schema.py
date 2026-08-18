@@ -732,6 +732,23 @@ class Herramienta(Base):
     # Es config del tenant y no una lista fija porque los servicios varian
     # por empresa -- un ISP que solo vende internet no tiene nada que
     # desambiguar, y otro puede vender telefonia ademas.
+    # Si esta herramienta FALLA, la conversacion escala con este motivo, en
+    # codigo y sin preguntarle a nadie. El motivo tiene que estar declarado
+    # en 'escalamiento.activar_si'.
+    #
+    # Existe porque el escalamiento normal lo decide un segundo modelo
+    # ('escalamiento.evaluar') y en los casos limite es INTERMITENTE: medido
+    # el 18/08/2026, el mismo historial con la misma config devolvio
+    # escalar=true y escalar=false en llamadas seguidas. Mientras tanto el
+    # agente ya le habia dicho al cliente que un colaborador iba a seguir su
+    # caso -- asi que la mitad de las veces se le prometia una persona que
+    # nunca llegaba.
+    #
+    # Que una herramienta fallo no es un juicio, es un hecho que el motor ya
+    # tiene. Cuando de ese hecho se sigue "aca el asistente no puede seguir
+    # solo", conviene que lo decida el codigo y no un modelo. Mismo criterio
+    # que 'exige_turno_propio' y que el normalizador de tratamiento.
+    escalar_si_falla: str | None = None
     servicios_reportables: list[str] = Field(default_factory=list)
     exige_turno_propio: bool = False
     cache: bool = False
@@ -1052,6 +1069,17 @@ class TenantConfig(Base):
                     f"rol '{nombre_rol}': el nombre debe ser minuscula, "
                     f"empezar con letra y usar solo letras/numeros/guion bajo "
                     f"(2-30 caracteres)")
+
+        # Un 'escalar_si_falla' que apunte a un motivo no declarado no daria
+        # ningun error al ejecutarse: escalaria con una razon que el resto
+        # del sistema no reconoce y que nadie puede filtrar en la bandeja.
+        for h in self.herramientas:
+            if h.escalar_si_falla and h.escalar_si_falla not in self.escalamiento.activar_si:
+                raise ValueError(
+                    f"herramienta '{h.nombre}': 'escalar_si_falla' declara el "
+                    f"motivo '{h.escalar_si_falla}', que no esta en "
+                    f"escalamiento.activar_si "
+                    f"({', '.join(self.escalamiento.activar_si) or 'vacio'})")
 
         # Una herramienta no puede permitir un rol inexistente.
         for h in self.herramientas:

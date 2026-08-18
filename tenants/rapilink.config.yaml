@@ -485,6 +485,30 @@ roles:
         sigue como si nunca hubieras tenido ese dato -- luces del router y
         reinicio manual -- sin mencionarle ningun error tecnico.
 
+      - PERO si el que falla es consultar_estado_catv Y el reporte es de
+        TELEVISION, no aplica lo de arriba. Ahi NO puedes seguir con el
+        checklist del cliente: el estado de CATV es el unico dato de
+        nuestro lado en una falla de TV, y sin el no sabes si el servicio
+        esta apagado desde la central. Pasar a preguntarle por cables y
+        entradas da por sentado que nuestro lado esta bien, que es
+        justamente lo que no pudiste comprobar.
+
+        Lo que corresponde: decirle en una linea que necesitas que alguien
+        del equipo revise su caso, sin explicarle el detalle tecnico, y
+        pasarlo a un colaborador humano. Ese caso escala con el motivo
+        'sin_datos_para_diagnosticar': no es que el cliente se haya
+        enojado ni que lo haya pedido, es que al sistema le falta un dato
+        para poder mirar, y quien lo atienda tiene que saber que hay algo
+        que revisar en la central. Nunca le digas que del lado
+        nuestro se ve bien, ni le pidas que revise cables, ni cierres el
+        caso como si fuera de su casa.
+
+        Paso el 18/08/2026 con un cliente real: la television estaba
+        desactivada desde la central, el sistema no pudo leerlo porque a
+        ese cliente le falta el identificador de su equipo, y el agente
+        se puso a preguntar por los televisores. El cliente podia revisar
+        cables toda la tarde sin encontrar nada.
+
       Cuando el procedimiento dice que corresponde escalar (todo dentro de
       lo recomendado y el problema persiste), lo que corresponde es una
       VISITA TECNICA -- y esa visita NO la agenda una persona: la agenda
@@ -1705,6 +1729,13 @@ herramientas:
                      un colaborador humano, porque si su plan incluye TV hay
                      que cambiarle el equipo.
     solo_lectura: true
+    # Si no se puede leer, la conversacion escala SOLA, en codigo. En una
+    # falla de TV este es el unico dato de nuestro lado: sin el, seguir
+    # preguntando por cables da por sentado que la central esta bien, que es
+    # justo lo que no se pudo comprobar. Paso el 18/08/2026 con un cliente
+    # real sin identificador de equipo cargado, y la television estaba
+    # desactivada desde la central.
+    escalar_si_falla: sin_datos_para_diagnosticar
     # Sin 'cliente_final': ese rol es un ROUTER, no diagnostica (ver su
     # catalogo). Las fallas de TV las atiende soporte_tecnico_cliente.
     roles_permitidos: [soporte_tecnico_cliente, soporte]
@@ -1794,7 +1825,7 @@ canales:
 
 escalamiento:
   activar_si: [frustracion_detectada, tres_fallos_seguidos, solicitud_explicita, duda_de_identidad,
-               visita_tecnica_requerida]
+               visita_tecnica_requerida, sin_datos_para_diagnosticar]
   destino_rol: soporte
   mensaje: Te paso con un companero del equipo para que te ayude mejor.
   siempre_disponible: true

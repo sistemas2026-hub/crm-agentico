@@ -659,6 +659,16 @@ def _sanitizar(texto: str, nombres_rol=(), tratamiento: str | None = None) -> st
     # sigue sin conocer ninguno.
     for nombre in nombres_rol:
         limpio = re.sub(rf"^\s*{re.escape(nombre)}\s*$", "", limpio, flags=re.M)
+    # Y cualquier OTRO identificador interno suelto, aunque no sea un rol de
+    # este tenant. Visto el 18/08/2026: el modelo cerro un mensaje con
+    # 'colaborador_humano' en su propia linea -- no es un rol declarado, asi
+    # que el barrido de arriba no lo tocaba, y el cliente lo leyo.
+    #
+    # La regla pide guion bajo a proposito: una linea con UNA sola palabra en
+    # minusculas y sin espacios puede ser una respuesta legitima ("listo"),
+    # pero una con guion bajo es siempre un identificador de codigo. Nadie le
+    # escribe 'colaborador_humano' a un cliente por WhatsApp.
+    limpio = re.sub(r"^\s*[a-z][a-z0-9]*(?:_[a-z0-9]+)+\s*$", "", limpio, flags=re.M)
     limpio = re.sub(r"\n{3,}", "\n\n", limpio).strip()
     return limpio
 
