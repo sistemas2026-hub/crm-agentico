@@ -267,7 +267,7 @@ def _sesion_nueva(tenant: str, id_sesion: str, canal: str) -> dict:
 
 
 def atender_turno(config, tenant: str, rol: str, id_sesion: str,
-                  mensaje: str, canal: str) -> dict:
+                  mensaje: str, canal: str, profile_id: str | None = None) -> dict:
     """
     Un turno completo de conversacion: pausa por escalamiento, modelo,
     persistencia y evaluacion de escalamiento.
@@ -276,6 +276,11 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     WhatsApp (mas abajo) haga lo MISMO en vez de una copia parecida. Un canal
     con su propia version de esta logica se desincroniza: es exactamente como
     aparecio el bot que seguia contestando despues de escalar.
+
+    'profile_id': quien pregunta, cuando /chat lo resolvio (app web). None en
+    el webhook de WhatsApp -- ahi no hay un colaborador del CRM de por medio,
+    solo se propaga a asistente.tool_calls.profile_id para la auditoria por
+    persona (ver supabase/19_tool_calls_profile_id.sql).
 
     Devuelve {'respuesta', 'verificado', 'pausada'}. Levanta motor.ErrorMotor
     si el rol o el mensaje no son atendibles -- quien llama decide si eso es un
@@ -379,7 +384,8 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
         conversation_id, mensaje_id = persistencia.registrar_mensaje(
             tenant, canal, id_sesion, rol, "assistant", respuesta)
         for llamada in registro_herramientas:
-            persistencia.registrar_llamada_herramienta(tenant, conversation_id, rol, llamada)
+            persistencia.registrar_llamada_herramienta(
+                tenant, conversation_id, rol, llamada, profile_id=profile_id)
         # Mismo motivo que el bucle de arriba: un archivo generado por una
         # herramienta 'agregado' exportable (ver nucleo/herramientas/
         # informes.py) no se pudo guardar dentro de motor.responder() porque
@@ -642,7 +648,8 @@ def chat():
             update={"roles": {**config.roles, rol: rol_fusionado}, "llm": llm})
 
     try:
-        salida = atender_turno(config, tenant, rol, id_sesion, mensaje, canal)
+        salida = atender_turno(config, tenant, rol, id_sesion, mensaje, canal,
+                               profile_id=profile_id)
     except motor.ErrorMotor as e:
         return jsonify({"error": str(e)}), 400
 

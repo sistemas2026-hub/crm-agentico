@@ -911,13 +911,17 @@ def evento_ya_visto(tenant: str, wamid: str, canal: str = "whatsapp") -> bool:
 
 
 def registrar_llamada_herramienta(tenant: str, conversation_id: str, rol: str,
-                                  llamada: dict) -> None:
+                                  llamada: dict, profile_id: str | None = None) -> None:
     """
     Una fila de asistente.tool_calls por herramienta que el agente invoco
     este turno -- ver nucleo/modelo/motor.py:responder(), que arma 'llamada'
     (ya con los parametros enmascarados, nunca el dato crudo del cliente).
     Es la base de "ver proceso" en /conversaciones: que hizo el agente, en
     que orden, si fallo.
+
+    'profile_id' es quien ejecuto -- el perfil del CRM, cuando el turno vino
+    de la app web con profile_id (ver POST /chat). None en canales de
+    cliente final (WhatsApp): ahi no hay un colaborador que identificar.
 
     Nunca rompe el turno: mismo criterio que registrar_mensaje. Perder una
     fila de auditoria no puede tumbar la atencion al cliente.
@@ -928,13 +932,13 @@ def registrar_llamada_herramienta(tenant: str, conversation_id: str, rol: str,
                 """insert into asistente.tool_calls
                      (organization_id, conversation_id, herramienta, parametros,
                       rol_solicitante, exito, n_registros, codigo_error,
-                      duracion_ms, es_escritura)
-                   values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                      duracion_ms, es_escritura, profile_id)
+                   values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                 (org, conversation_id, llamada["herramienta"],
                  json.dumps(llamada["parametros"], ensure_ascii=False),
                  rol, llamada["exito"], llamada["n_registros"],
                  llamada["codigo_error"], llamada["duracion_ms"],
-                 llamada["es_escritura"]))
+                 llamada["es_escritura"], profile_id))
     except Exception as e:
         print(f"[persistencia] no se pudo guardar la llamada a herramienta: {e}")
 
