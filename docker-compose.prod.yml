@@ -258,13 +258,27 @@ services:
     # deja de ver a sus companeros del compose.
     networks: [default, dokploy-network]
     environment:
-      # Conexion: las mismas cinco que el CRM. nucleo/persistencia/conexion.py
-      # compone la cadena con ellas.
+      # Conexion: mismo host/base que el CRM, pero DBUSER/DBPASSWORD PROPIOS
+      # -- no ${DBUSER}/${DBPASSWORD}, que ahora son de crm_user (Django).
+      # nucleo/persistencia/conexion.py compone la cadena con estas cinco.
+      #
+      # INCIDENTE (18/08/2026): esto compartia ${DBUSER}/${DBPASSWORD} con
+      # 'backend'/'celery-*'. Al cortar el CRM a crm_user (sin acceso al
+      # esquema 'asistente'), el motor quedo sin poder leer ni escribir su
+      # propia base -- en silencio, porque varias escrituras atrapan el
+      # error y solo lo logean, sin tumbar el turno. El cliente seguia
+      # recibiendo respuesta (el historial de la conversacion vive en RAM,
+      # ver mas abajo); lo que se perdio fue todo lo que se intento
+      # persistir en esa ventana: mensajes, tool_calls, conversaciones.
+      #
+      # El motor necesita 'app_backend' (esquema asistente), crm_user
+      # necesita 'public' (esquema del CRM) -- son dos necesidades
+      # distintas y no pueden compartir una sola variable nunca mas.
       DBHOST: ${DBHOST:?}
       DBPORT: ${DBPORT:?}
       DBNAME: ${DBNAME:?}
-      DBUSER: ${DBUSER:?}
-      DBPASSWORD: ${DBPASSWORD:?}
+      DBUSER: ${MOTOR_DBUSER:?}
+      DBPASSWORD: ${MOTOR_DBPASSWORD:?}
       WISPHUB_API_KEY: ${WISPHUB_API_KEY:?}
       WISPHUB_BASE_URL: ${WISPHUB_BASE_URL:-https://api.wisphub.io}
       WISPHUB_MODO_REAL: ${WISPHUB_MODO_REAL:-true}
