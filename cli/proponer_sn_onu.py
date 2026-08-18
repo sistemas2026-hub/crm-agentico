@@ -150,6 +150,47 @@ def onus_smartolt() -> list[dict]:
     return onus
 
 
+# Tolerancia del desfase entre la MAC del CPE y el serial de la ONU. Medido
+# sobre 801 clientes que tienen los DOS campos cargados: en 619 el serial es
+# la MAC menos un numero chico (618 veces exactamente 1), y en los 182
+# restantes el desfase es cualquier cosa o no hay relacion. O sea: la MAC NO
+# sirve para deducir el serial -- 77% no alcanza cuando equivocarse significa
+# reiniciar el equipo de otra casa.
+#
+# Pero si sirve para lo contrario, que es para lo que se usa aca: cuando el
+# NOMBRE ya propuso un candidato, la MAC dice si ese candidato es coherente.
+# Es una segunda señal independiente, y las dos tienen que estar de acuerdo.
+MAX_DESFASE_MAC = 64
+
+# Orden del reporte: primero lo que se puede escribir sin pensar, despues lo
+# que necesita una persona, de mas prometedor a menos.
+ORDEN_NIVEL = {"alta_confianza": 0, "revisar_mac": 1, "revisar_typo": 2,
+               "ambiguo": 3, "sin_candidato": 4}
+
+
+def mac_corrobora(mac_cpe: str, sn_onu: str) -> bool | None:
+    """
+    True si la MAC del CPE es coherente con ese serial, False si lo
+    contradice, None si no se puede saber (falta uno de los dos, o no son
+    hexadecimales).
+
+    None NO es "no coincide": es "no hay con que comparar", y por eso no
+    descalifica a un candidato -- solo lo deja sostenido por el nombre, que es
+    exactamente lo que pasaba antes de agregar esta comprobacion.
+    """
+    hexmac = (mac_cpe or "").replace(":", "").replace("-", "").strip().upper()
+    sn = (sn_onu or "").strip().upper()
+    if len(hexmac) < 8 or len(sn) < 5:
+        return None
+    try:
+        # El serial es <prefijo de 4 del fabricante> + 8 hexadecimales; la MAC
+        # comparte esos ultimos 8, o cae cerca.
+        desfase = int(hexmac[-8:], 16) - int(sn[4:], 16)
+    except ValueError:
+        return None
+    return 0 <= desfase <= MAX_DESFASE_MAC
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--csv", help="Si se pasa, ademas guarda el reporte en este archivo CSV")
@@ -187,6 +228,12 @@ def main() -> None:
         n = normalizar(o.get("name") or "")
         if n:
             indice.setdefault(n, []).append(o)
+    # Segundo indice, por CONJUNTO de palabras. Existe porque el nombre exacto
+    # falla por dos motivos que estan en los datos de WispHub y no se van a
+    # arreglar solos: apellidos duplicados al cargar ("JUAN DAVID BARRIOS
+    # BARRIOS") y la enie mal codificada ("NIÃO" donde SmartOLT tiene "NIÑO").
+    # Comparar palabra por palabra sobrevive a las dos.
+    onus_tokens = [(o, set(normalizar(o.get("name") or "").split())) for o in onus]
     print(f"[smartolt] {len(onus)} ONUs, {len(indice)} nombres distintos (normalizados)")
     print()
 
@@ -210,8 +257,29 @@ def main() -> None:
                 filas.append((id_servicio, nombre_wh, sn, onu.get("name", ""),
                              "ambiguo", "ese sn_onu ya esta asignado a OTRO cliente en WispHub"))
             else:
-                filas.append((id_servicio, nombre_wh, sn, onu.get("name", ""),
-                             "alta_confianza", "nombre exacto, sin ambiguedad"))
+                # Segunda señal: la MAC del CPE. Un nombre exacto NO alcanza
+                # para escribir sin revisar -- medido el 18/08/2026 sobre los
+                # clientes activos sin serial, de los que resolvian a una sola
+                # ONU por nombre habia 10 en los que la MAC apuntaba a otro
+                # equipo. Esos 10 salian como 'alta_confianza' y se habrian
+                # escrito: el cliente quedaria apuntando al equipo de otra
+                # casa, y ahi un reinicio remoto se lo hace a un tercero.
+                acuerdo = mac_corrobora(c.get("mac_cpe") or "", sn)
+                if acuerdo is False:
+                    filas.append((id_servicio, nombre_wh, sn, onu.get("name", ""),
+                                 "revisar_mac",
+                                 "el nombre coincide exacto pero la MAC del CPE "
+                                 "apunta a otro equipo -- confirmar a mano cual "
+                                 "de los dos datos esta mal"))
+                elif acuerdo is None:
+                    filas.append((id_servicio, nombre_wh, sn, onu.get("name", ""),
+                                 "alta_confianza",
+                                 "nombre exacto, sin ambiguedad (sin MAC cargada "
+                                 "para corroborar)"))
+                else:
+                    filas.append((id_servicio, nombre_wh, sn, onu.get("name", ""),
+                                 "alta_confianza",
+                                 "nombre exacto y MAC del CPE coherente"))
             continue
 
         if len(candidatos_exactos) > 1:
@@ -226,7 +294,51 @@ def main() -> None:
                          "hay otro cliente ACTIVO con el mismo nombre en WispHub"))
             continue
 
-        # Sin match exacto: buscar el mas parecido (typo), solo si supera el umbral.
+        # Sin match exacto: probar por conjunto de palabras, pero SOLO se acepta
+        # si la MAC del CPE tambien esta de acuerdo. Un nombre parecido por si
+        # solo no alcanza para escribir; dos señales independientes que
+        # coinciden, si. Si la MAC no esta cargada o contradice, la propuesta
+        # baja a revision manual en vez de escribirse.
+        tok_wh = set(norm_wh.split())
+        if len(tok_wh) >= 3:
+            cerca = []
+            for onu, tok_onu in onus_tokens:
+                if len(tok_onu) < 3:
+                    continue
+                comunes = tok_wh & tok_onu
+                menor = min(len(tok_wh), len(tok_onu))
+                # Al menos 3 palabras iguales y como maximo UNA que no cuadre
+                # del nombre mas corto: eso tolera el apellido repetido y una
+                # palabra mal codificada, sin abrir la puerta a dos personas
+                # que solo comparten el nombre de pila.
+                if len(comunes) >= 3 and len(comunes) >= menor - 1:
+                    cerca.append(onu)
+            if len(cerca) == 1:
+                onu = cerca[0]
+                sn = onu.get("sn") or onu.get("unique_external_id") or ""
+                acuerdo = mac_corrobora(c.get("mac_cpe") or "", sn)
+                if sn in seriales_ya_usados:
+                    filas.append((id_servicio, nombre_wh, sn, onu.get("name", ""),
+                                 "ambiguo", "ese sn_onu ya esta asignado a OTRO cliente en WispHub"))
+                elif acuerdo is True:
+                    filas.append((id_servicio, nombre_wh, sn, onu.get("name", ""),
+                                 "alta_confianza",
+                                 "nombre casi igual (palabra por palabra) Y MAC del "
+                                 "CPE coherente -- dos señales de acuerdo"))
+                else:
+                    filas.append((id_servicio, nombre_wh, sn, onu.get("name", ""),
+                                 "revisar_typo",
+                                 "nombre casi igual palabra por palabra, pero la MAC "
+                                 + ("contradice" if acuerdo is False else "no esta cargada")
+                                 + " -- confirmar a mano"))
+                continue
+            if len(cerca) > 1:
+                sns = ", ".join(o.get("sn") or "?" for o in cerca)
+                filas.append((id_servicio, nombre_wh, sns, "", "ambiguo",
+                             f"{len(cerca)} ONUs con nombre casi igual"))
+                continue
+
+        # Ultimo recurso: el mas parecido por similitud de texto (typo).
         mejor_nombre, mejor_ratio = None, 0.0
         for n in indice:
             ratio = difflib.SequenceMatcher(None, norm_wh, n).ratio()
@@ -247,14 +359,14 @@ def main() -> None:
         conteo[fila[4]] = conteo.get(fila[4], 0) + 1
 
     print("Resumen:")
-    for nivel in ("alta_confianza", "revisar_typo", "ambiguo", "sin_candidato"):
+    for nivel in ("alta_confianza", "revisar_mac", "revisar_typo", "ambiguo", "sin_candidato"):
         print(f"  {nivel}: {conteo.get(nivel, 0)}")
     print()
 
     print(f"{'id_servicio':<12}{'nombre':<35}{'confianza':<16}{'candidato(s)':<30}motivo")
     print("-" * 130)
     for id_servicio, nombre, sn, nombre_so, confianza, motivo in sorted(
-            filas, key=lambda f: (f[4] != "alta_confianza", f[4] != "revisar_typo", f[0])):
+            filas, key=lambda f: (ORDEN_NIVEL.get(f[4], 99), f[0])):
         print(f"{id_servicio:<12}{nombre[:33]:<35}{confianza:<16}{sn[:28]:<30}{motivo}")
 
     if args.csv:
