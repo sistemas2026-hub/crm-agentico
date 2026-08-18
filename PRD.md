@@ -365,11 +365,11 @@ SmartOLT es donde el ISP administra las ONUs autorizadas en la OLT de fibra — 
 |------|-----------|--------|
 | **0** | Prototipo de soporte en consola contra WispHub | ✅ Hecho |
 | **1** | Consolidar soporte: prompt de asesor, filtro PII, consulta por cédula | ✅ Hecho |
-| **2** | Identidad de área; parametrizar herramientas y filtros por rol | ✅ Hecho (login real pendiente, ver §8.1) |
+| **2** | Identidad de área; parametrizar herramientas y filtros por rol | ✅ Hecho — login real ya existe (JWT vía BottleCRM), ver §8.1 |
 | **3** | Replicar patrón a Facturación y Técnica | ✅ Catálogo definido y verificado — Técnica ahora incluye SmartOLT (lectura de red + reinicio de ONT, ver §7.7), no solo WispHub |
 | **4** | Generación de informes + exportación (Excel/PDF) | ✅ Excel y PDF (ver §8.4) |
-| **5** | Interfaz web interna (reemplaza la consola) | Pendiente |
-| **6** | Auditoría/logs y despliegue en servidor on-premise | Auditoría ✅ (§8.2) · despliegue pendiente |
+| **5** | Interfaz web interna (reemplaza la consola) | ✅ En gran parte hecho — ver §8.1 |
+| **6** | Auditoría/logs y despliegue en servidor on-premise | Auditoría ✅ (§8.2) · despliegue: pasos manuales pendientes en DESPLIEGUE.md → `## Pendientes` |
 
 ---
 
@@ -388,29 +388,26 @@ El control es doble y se aplica en código: una herramienta que no está en `her
 
 **Credenciales: ningún área.** `password_servicio`, `password_cpe`, `password_router_wifi`, `password_ssid_router_wifi` y `usuario_router_wifi` están fuera de todas las listas, incluida Técnica. Un técnico que necesite una credencial la saca de WispHub; pasarla por el modelo no le ahorra un paso y la deja escrita en el historial de la conversación.
 
-**NO hecho — pendiente para la interfaz web (Fase 5):**
+**Hecho también (agosto 2026, corrige lo que decía este párrafo antes):** identificación real, no elegir un área de una lista. `django-crm/frontend/src/hooks.server.js` implementa login con JWT emitido por BottleCRM (access + refresh token rotado, membresía de organización, `locals.user`/`locals.profile.role`) — es la app web la que gatea cada ruta (`redirect` a `/login` sin sesión). Sobre esa identidad real hay una capa de autorización propia del asistente: `asistente.tenant_users` mapea `profile_id` (el perfil real del CRM) → los agentes/roles que un ADMIN le asignó (`/agentes/asignaciones`, `persistencia.agentes_de_colaborador()`). `POST /chat` resuelve el rol a partir de ese `profile_id` — nunca lo manda el cliente — y es **fail-closed**: sin asignación, `403` ("Todavía no tienes ningún agente asignado"), no cae a un rol por defecto. Un colaborador con Soporte y Facturación asignados los ve fusionados en un solo turno, sin elegir a cuál le habla.
 
-- **Es identificación, no autenticación.** No hay contraseña: quien abre la consola elige su área de una lista. Sirve para acotar lo que cada uno ve y para probar el catálogo, pero no impide que alguien elija otra área. La autenticación real requiere la capa web.
+**Sigue sin resolver:**
+
 - **Una sola clave de API para todos.** La clave de WispHub pertenece a un usuario del staff y hereda sus permisos, así que WispHub ve todas las consultas como si fueran de esa misma persona. **La separación por área es nuestra, no de WispHub.** Para que el control fuera real de punta a punta harían falta claves por colaborador.
-- **Sin auditoría** (RF-13): no queda registro de quién consultó qué. Con la identidad ya disponible, es el paso natural siguiente.
+- **La identidad del colaborador no queda en la fila de auditoría misma** — ver el matiz en §8.2: es recuperable, pero indirecto.
 
-### 8.2 Auditoría (RF-13) — implementada
+### 8.2 Auditoría (RF-13) — implementada, en base de datos (corrige la versión anterior de esta sección)
 
-Una línea JSON por **acceso a datos** (ejecución de herramienta), no por mensaje de la conversación. Archivo `auditoria.log`, fuera del repositorio.
+**Esta sección describía un archivo `auditoria.log` en JSON que ya no es como funciona el motor multi-tenant.** Ese archivo solo lo sigue escribiendo `soporte_wisphub.py`, el prototipo de referencia de un solo tenant (ver §11) — nunca `nucleo/`. La auditoría real es una fila en Postgres por **acceso a datos** (ejecución de herramienta), no por mensaje: `asistente.tool_calls`, insertada por `persistencia.registrar_llamada_herramienta()` y mostrada en el panel "Ver proceso" de `/conversaciones`.
 
-```json
-{"ts":"2026-07-28T21:56:29-05:00","area":"soporte",
- "herramienta":"consultar_cliente_por_cedula","args":{"cedula":"******1347"},
- "estado":"ok","sensible":false,"registros":1,"ms":762}
-```
-
-**Qué se registra:** cuándo, qué área, qué herramienta, sobre qué registro, con qué resultado, cuántos registros devolvió y cuánto tardó. Los `estado` posibles distinguen los cuatro caminos: `ok`, `error_api`, `argumentos_invalidos`, `rechazado_por_area`, `cancelado_por_operador`. Este último es el que deja constancia de que un humano **negó** una acción sensible.
+Columnas: `organization_id`, `conversation_id`, `herramienta`, `parametros` (enmascarados), `rol_solicitante`, `exito`, `n_registros`, `codigo_error`, `duracion_ms`, `es_escritura`, `creado_en`.
 
 **Qué NO se registra:** ningún dato devuelto. Ni nombre, ni email, ni dirección, ni IP, ni plan. *Un log de auditoría que copia los datos que vigila deja de ser un control y pasa a ser una segunda base de datos sin proteger.*
 
-**Enmascaramiento:** los identificadores de 8 dígitos o más se ocultan salvo los últimos 4 (`1044601347` → `******1347`). Cubre cédulas y teléfonos. Los IDs cortos —servicio (4), ticket (5), factura (6)— se conservan: son los que hacen útil la auditoría y no identifican a una persona por sí solos.
+**Enmascaramiento — más simple y más parejo de lo que decía esta sección antes.** `motor.py::_enmascarar()` no distingue por tipo de campo ni por largo del identificador: **todo** argumento de más de 4 caracteres se trunca a sus últimos 4 con el prefijo `...` (`"1044601347"` → `"...1347"`), sin importar si es cédula, teléfono o un ID de ticket de 5 dígitos. La afirmación anterior de que "los IDs cortos —ticket (5), factura (6)— se conservan" era falsa: con esta regla, cualquiera de más de 4 caracteres se enmascara igual.
 
-**Pendiente:** el log registra el **área**, no la persona — porque hoy no hay autenticación (§8.1). Cuando exista login real, el campo `area` debe acompañarse del identificador del colaborador; el resto de la estructura no cambia. Tampoco hay rotación del archivo.
+**La identidad SÍ queda registrada — indirecta, no ausente.** Para los flujos disparados desde la web (`/asistente`, `/configuracion-guiada`), el frontend resuelve `profile_id` server-side (nunca del cliente, ver `routes/api/asistente/+server.js`) y manda `identificador_sesion: locals.user.id` — el motor lo guarda como `usuario_externo` de la conversación. Es decir: la conversación entera queda atada al colaborador real, no solo al área. Lo que falta es más chico que "no hay registro de quién": `asistente.tool_calls` guarda `rol_solicitante` (el rol, ya fusionado si el colaborador tiene varios asignados), no el `profile_id` como columna propia — para saber qué colaborador ejecutó una herramienta puntual hay que cruzar por `conversation_id` contra `conversations.usuario_externo`, no viene en la misma fila. Sumar esa columna (`profile_id` en `asistente.tool_calls`) es directo y queda como pendiente concreto.
+
+**Pendiente real, distinto del que decía esta sección:** no hay política de retención/purga sobre `asistente.tool_calls` (antes decía "rotación del archivo", que ya no aplica — es una tabla, no un archivo).
 
 ### 8.3 Métrica de tasa de escalamiento (agosto 2026)
 
