@@ -138,7 +138,8 @@ roles:
     puede_consultar: [consultar_cliente, consultar_cliente_por_cedula, consultar_ticket,
           consultar_tickets_de_cliente, contar_tickets, contar_clientes, consultar_casos_bottlecrm,
           agendar_visita_tecnica, consultar_estado_ont, consultar_senal_ont, reiniciar_ont,
-          diagnosticar_falla_ont, consultar_estado_catv, activar_catv, consultar_incidente_red]
+          diagnosticar_falla_ont, consultar_estado_catv, activar_catv, consultar_incidente_red,
+          consultar_tecnicos, crear_ticket, responder_ticket, actualizar_estado_ticket]
     campos_permitidos:
       consultar_cliente: [id_servicio, nombre, cedula, estado, email, telefono, direccion, localidad,
         ciudad, plan_internet, zona, fecha_instalacion, estado_facturas, saldo, fecha_corte]
@@ -184,6 +185,16 @@ roles:
       # declara, mas abajo.
       consultar_incidente_red: [es_incidente_de_red, tipo_alerta, clientes_afectados,
             porcentaje_afectado, desde, zona, caja, motivo]
+      consultar_tecnicos: [id, username, nombre, email]
+      # Las tres de escritura con aprobacion_humana NUNCA devuelven el
+      # registro real de WispHub en este paso -- 'aprobacion_humana' salta
+      # la lista blanca (motor.py no llama filtrar_campos en esa rama,
+      # ver el comentario de schema.py sobre por que no es lo mismo que
+      # 'requiere_confirmacion'); esto solo documenta la forma real de
+      # _ejecutar_propuesta_de_accion, que el validador exige igual.
+      crear_ticket: [accion_id, estado, resumen, instruccion_interna]
+      responder_ticket: [accion_id, estado, resumen, instruccion_interna]
+      actualizar_estado_ticket: [accion_id, estado, resumen, instruccion_interna]
     nunca_revelar: [password_servicio, password_cpe, password_router_wifi, password_ssid_router_wifi,
       usuario_router_wifi, coordenadas]
 
@@ -1204,6 +1215,182 @@ herramientas:
     metodo: GET
     auth_ref: WISPHUB_API_KEY
     auth_esquema: Api-Key
+
+  - nombre: consultar_tecnicos
+    tipo: http
+    descripcion: >
+      Lista el personal (staff) de WispHub. Usala para resolver el ID de
+      un tecnico cuando el colaborador lo menciona por nombre, antes de
+      crear o reasignar un ticket -- nunca inventes un ID.
+    solo_lectura: true
+    cache: true
+    cache_vigencia_dias: 7
+    roles_permitidos: [soporte]
+    base_url: https://api.wisphub.io
+    endpoint: /api/staff/
+    metodo: GET
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+
+  # --- escritura de tickets (18/08/2026) -- aprobacion_humana real -------
+  # Endpoints verificados contra la documentacion oficial de WispHub
+  # (pegada por el usuario), filtros de LECTURA ya verificados en vivo con
+  # el metodo del valor imposible (mis_tickets, fecha_creacion_0/_1). Las
+  # tres de ESCRITURA de abajo todavia no se probaron contra produccion --
+  # quedan con aprobacion_humana=true a proposito: la primera vez que se
+  # ejecuten de verdad va a ser desde /acciones/propuestas, con un ticket
+  # de prueba, no en el primer intento a ciegas.
+  - nombre: crear_ticket
+    tipo: http
+    descripcion: >
+      Crea un ticket de soporte tecnico real en WispHub. Necesitas el
+      id_servicio del cliente (si solo tenes la cedula, resolvela primero
+      con consultar_cliente_por_cedula) y el 'asunto' TIENE que ser
+      exactamente una de las opciones del enum -- nunca inventes un
+      asunto que no este en la lista. Si no sabes el ID del tecnico,
+      usa consultar_tecnicos primero. Queda PENDIENTE de aprobacion --
+      decile al colaborador que todavia no se creo de verdad, alguien
+      tiene que aprobarla desde la pantalla correspondiente.
+    solo_lectura: false
+    requiere_confirmacion: true
+    aprobacion_humana: true
+    roles_permitidos: [soporte]
+    base_url: https://api.wisphub.io
+    endpoint: /api/tickets/
+    metodo: POST
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    plantilla_resumen: "Crear ticket '{asunto}' para el servicio {servicio} (prioridad {prioridad})"
+    argumentos_fijos:
+      departamento: "Soporte Técnico"
+    espejar_campos:
+      asunto: asuntos_default
+      departamento: departamentos_default
+    filtros_verificados:
+      servicio:
+        param: servicio
+        tipo: id
+      tecnico:
+        param: tecnico
+        tipo: id
+      descripcion:
+        param: descripcion
+        tipo: texto
+      estado:
+        param: estado
+        tipo: enum
+        valores: {nuevo: 1, en_progreso: 2, resuelto: 3, cerrado: 4}
+      prioridad:
+        param: prioridad
+        tipo: enum
+        valores: {baja: 1, normal: 2, alta: 3, muy_alta: 4}
+      origen_reporte:
+        param: origen_reporte
+        tipo: enum
+        valores:
+          oficina: oficina
+          portal_cliente: portal_cliente
+          telefono: telefono
+          presencial: presencial
+          redes_sociales: redes_sociales
+      asunto:
+        param: asunto
+        tipo: enum
+        valores:
+          "Internet Lento": "Internet Lento"
+          "No Tiene Internet": "No Tiene Internet"
+          "Antena Desalineada": "Antena Desalineada"
+          "Antena Dañada": "Antena Dañada"
+          "No Responde la Antena": "No Responde la Antena"
+          "No Responde el Router Wifi": "No Responde el Router Wifi"
+          "Router Wifi Reseteado(Valores de Fabrica)": "Router Wifi Reseteado(Valores de Fabrica)"
+          "Cambio de Router Wifi": "Cambio de Router Wifi"
+          "Cambio de Antena": "Cambio de Antena"
+          "Cambio de Antena + Router Wifi": "Cambio de Antena + Router Wifi"
+          "Cambio de Contraseña en Router Wifi": "Cambio de Contraseña en Router Wifi"
+          "Cable UTP Dañado": "Cable UTP Dañado"
+          "Internet Intermitente": "Internet Intermitente"
+          "Cambio de Domicilio": "Cambio de Domicilio"
+          "PoE Dañado": "PoE Dañado"
+          "Reconexión": "Reconexión"
+          "Recolección De Equipos": "Recolección De Equipos"
+          "Conector Dañado": "Conector Dañado"
+          "Cambio A Fibra Óptica": "Cambio A Fibra Óptica"
+          "Cable Fibra Dañado": "Cable Fibra Dañado"
+          "Jumper Dañado": "Jumper Dañado"
+          "Antena valores De Fabrica": "Antena valores De Fabrica"
+          "Cableado Para Modem Extra": "Cableado Para Modem Extra"
+          "Eliminador Dañado": "Eliminador Dañado"
+          "Cables Mal Colocados": "Cables Mal Colocados"
+          "RJ45 Dañado": "RJ45 Dañado"
+          "Alambres Rotos": "Alambres Rotos"
+          "Cancelación": "Cancelación"
+          "Desconexión": "Desconexión"
+          "Troncal Dañado": "Troncal Dañado"
+          "Caja Nap Dañada": "Caja Nap Dañada"
+
+  - nombre: responder_ticket
+    tipo: http
+    descripcion: >
+      Agrega una respuesta/nota a un ticket YA EXISTENTE en WispHub, con
+      la opcion de reabrirlo. Necesitas el id_ticket (de consultar_ticket
+      o de una creacion previa). Queda PENDIENTE de aprobacion, igual que
+      crear_ticket.
+    solo_lectura: false
+    requiere_confirmacion: true
+    aprobacion_humana: true
+    roles_permitidos: [soporte]
+    base_url: https://api.wisphub.io
+    endpoint: /api/tickets/{id_ticket}/respuesta/
+    metodo: POST
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    plantilla_resumen: "Responder al ticket {id_ticket}: \"{respuesta}\""
+    campos_texto_libre: [respuesta]
+    filtros_verificados:
+      id_ticket:
+        param: id_ticket
+        tipo: id
+      respuesta:
+        param: respuesta
+        tipo: texto
+      reabrir_ticket:
+        param: reabrir-ticket
+        tipo: texto
+      estado:
+        param: ticket-estado
+        tipo: enum
+        valores: {nuevo: 1, en_progreso: 2, resuelto: 3, cerrado: 4}
+      prioridad:
+        param: ticket-prioridad
+        tipo: enum
+        valores: {baja: 1, normal: 2, alta: 3, muy_alta: 4}
+
+  - nombre: actualizar_estado_ticket
+    tipo: http
+    descripcion: >
+      Cambia el estado de un ticket YA EXISTENTE (ej. marcarlo Resuelto o
+      Cerrado). Solo el estado -- para agregar una nota usa
+      responder_ticket. Necesitas el id_ticket. Queda PENDIENTE de
+      aprobacion, igual que las otras dos.
+    solo_lectura: false
+    requiere_confirmacion: true
+    aprobacion_humana: true
+    roles_permitidos: [soporte]
+    base_url: https://api.wisphub.io
+    endpoint: /api/tickets/{id_ticket}/
+    metodo: PUT
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    plantilla_resumen: "Cambiar el ticket {id_ticket} a estado '{estado}'"
+    filtros_verificados:
+      id_ticket:
+        param: id_ticket
+        tipo: id
+      estado:
+        param: estado
+        tipo: enum
+        valores: {nuevo: 1, en_progreso: 2, resuelto: 3, cerrado: 4}
 
   - nombre: consultar_facturas
     tipo: http

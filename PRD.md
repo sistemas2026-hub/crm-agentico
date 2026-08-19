@@ -456,6 +456,20 @@ Guardas: `tests/test_sondeo.py` (bloqueo SSRF contra IPs y hostnames reales, no 
 
 **Pantalla web** (agosto 2026): `/configuracion-guiada`, entrada "Conectar sistema nuevo" en Administrar (solo ADMIN, oculta del menú y con `redirect` en el `load()` para cualquiera más). Chat a un lado — mismo patrón que el simulador de WhatsApp — y panel de propuestas pendientes al otro, con Aprobar/Rechazar por propuesta — mismo patrón que la cola de revisiones de `/manual`. Las cuatro rutas server-side (`/api/configuracion-guiada` y sus tres sub-rutas de propuestas) repiten el gate `locals.profile?.role !== 'ADMIN'` que ya usa `/api/agentes`, en vez de confiar solo en que el menú esté oculto.
 
+### 8.6 Escritura de tickets con aprobación humana real (`aprobacion_humana`, agosto 2026)
+
+Primer caso concreto de escritura donde el propio colaborador de soporte propone la acción, no un ADMIN: crear un ticket, responder uno existente, o cambiarle el estado — directo desde WispHub, a partir de la documentación oficial de sus endpoints (`POST /api/tickets/`, `POST /api/tickets/{id}/respuesta/`, `PUT /api/tickets/{id}/`).
+
+**Por qué no se reusó `requiere_confirmacion`.** Ese campo existe desde antes y el validador lo *fuerza* a `true` en toda herramienta de escritura (`if not solo_lectura and not requiere_confirmacion: raise ValueError`) — pero nunca se aplicó en tiempo de ejecución (`motor.py` no lo mira). Herramientas ya en producción y deliberadamente autónomas (`registrar_pago`, `activar_catv`, `crear_tag_crm`) lo llevan puesto solo para pasar la validación. Convertirlo en un gate real las hubiera frenado a todas de un día para el otro, sin que nadie lo pidiera. Por eso el gate nuevo es un campo separado y opt-in: `Herramienta.aprobacion_humana`, con su propia regla de coherencia (no tiene sentido en una herramienta `solo_lectura`).
+
+**El mecanismo, genérico — no específico de tickets.** Cuando el modelo llama una herramienta con `aprobacion_humana: true`, `motor.py` no ejecuta nada contra la API externa: resuelve los argumentos (misma `_resolver_argumentos()` que usa la ejecución normal — filtros verificados, argumentos fijos, fechas automáticas, inyección de sesión) y guarda la propuesta en `asistente.acciones_propuestas` (`estado='pendiente'`), con un resumen legible (`Herramienta.plantilla_resumen`, ej. `"Crear ticket '{asunto}' para el servicio {servicio}"`). Al modelo le vuelve una instrucción explícita de no confirmar que ya se hizo. Un humano aprueba o rechaza desde `/acciones/propuestas` (tres endpoints nuevos en `nucleo/canales/api.py`); solo al aprobar se ejecuta de verdad, vía `motor.ejecutar_accion_aprobada()`, contra la herramienta HTTP real del catálogo. Aprobar registra el resultado (éxito o error de la API) pero el estado queda `'aprobada'` en ambos casos — aprobar es "un humano autorizó la intención", no "necesariamente salió bien".
+
+**`espejar_campos` (nuevo, genérico).** WispHub pide el mismo valor duplicado en dos campos (`asunto`/`asuntos_default`, `departamento`/`departamentos_default`) — capricho de su API, no algo que el modelo deba resolver ni que amerite lógica especial. `Herramienta.espejar_campos: {origen: destino}` copia el valor ya resuelto de un campo a otro, como paso final de `_resolver_argumentos()`.
+
+**El catálogo de `asunto` es un enum cerrado, no texto libre.** `crear_ticket` obliga a que el modelo elija una de las ~31 opciones reales de WispHub (`filtros_verificados.asunto`, tipo enum) — mismo mecanismo que ya filtraba parámetros de consulta, reusado para el cuerpo de un POST, porque `_resolver_argumentos()` termina siempre en el mismo diccionario `argumentos` sin importar el método HTTP.
+
+**Sin probar todavía contra WispHub real.** Las tres herramientas (`crear_ticket`, `responder_ticket`, `actualizar_estado_ticket`) están armadas y pasan las guardas de esquema, pero la primera ejecución real (aprobar una propuesta de verdad) está pendiente de un ticket de prueba — no se ejecuta a ciegas.
+
 ---
 
 ## 9. Despliegue

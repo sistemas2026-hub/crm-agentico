@@ -518,6 +518,38 @@ class Herramienta(Base):
     solo_lectura: bool = True
     roles_permitidos: list[str] = Field(min_length=1)
     requiere_confirmacion: bool = False
+    # NO es lo mismo que 'requiere_confirmacion' -- ese campo lo exige el
+    # validador de TODA escritura (mas abajo), asi que hoy lo declaran
+    # herramientas deliberadamente autonomas (registrar_pago, activar_catv...)
+    # solo para pasar la validacion, sin que nada las frene en tiempo de
+    # ejecucion -- ver el comentario "no reactivar el gate sin discutirlo"
+    # en tenants/rapilink.config.yaml. Reusar ese campo para un gate real
+    # las hubiera roto a todas de un dia para el otro.
+    #
+    # 'aprobacion_humana' es el gate real, opt-in, agregado el 18/08/2026
+    # con un caso concreto (crear/responder/actualizar tickets de WispHub):
+    # el motor NO ejecuta la escritura, la guarda en
+    # asistente.acciones_propuestas y le dice al modelo que quedo
+    # pendiente. Solo se ejecuta de verdad cuando alguien la aprueba desde
+    # /configuracion (ver nucleo/canales/api.py). Empieza en False para
+    # todo lo existente -- no cambia el comportamiento de ninguna
+    # herramienta que no la declare explicitamente.
+    aprobacion_humana: bool = False
+    # Solo tiene efecto con aprobacion_humana=True. Texto con marcadores
+    # '{clave}' que se rellenan con los argumentos YA resueltos (los mismos
+    # que se le mandarian a la API) -- para que quien aprueba lea "Crear
+    # ticket 'No Tiene Internet' para el servicio 1234" en vez del JSON
+    # crudo. Si no se declara, o si falta algun marcador en los argumentos
+    # resueltos, se usa un resumen generico -- nunca falla el turno por
+    # esto.
+    plantilla_resumen: str | None = None
+    # {origen: destino} -- despues de resolver los argumentos, copia el
+    # valor de 'origen' a 'destino'. Existe por un patron real de WispHub:
+    # crear/editar un ticket exige mandar 'asunto' Y 'asuntos_default' (o
+    # 'asunto_default' al editar) con el MISMO valor -- pedirle al modelo
+    # que mande el mismo dato dos veces es pedirle que se equivoque dos
+    # veces. El codigo lo duplica, el modelo elige una sola vez.
+    espejar_campos: dict[str, str] = Field(default_factory=dict)
     # Argumento_de_la_llamada -> atributo de la sesion verificada. El modelo
     # NUNCA propone estos valores (aunque los pida en el mensaje): el motor
     # los sobrescribe siempre con lo que haya en la sesion. Existe para que
@@ -796,6 +828,12 @@ class Herramienta(Base):
             raise ValueError(
                 f"'{self.nombre}' escribe y no exige confirmacion. Toda accion "
                 f"de escritura requiere confirmacion humana explicita.")
+
+        if self.aprobacion_humana and self.solo_lectura:
+            raise ValueError(
+                f"'{self.nombre}': aprobacion_humana solo tiene sentido en una "
+                f"escritura -- una consulta de solo lectura no necesita cola de "
+                f"aprobacion.")
 
         if self.tipo == "agregado":
             if not self.entidad:

@@ -566,6 +566,80 @@ def _ejecutar_propuesta(argumentos_modelo: dict, tenant: str, propuesto_por: str
                "configuracion -- no esta activa todavia, no lo prometas."}
 
 
+def _resumen_de_accion(herramienta, argumentos: dict) -> str:
+    """Texto legible para quien va a aprobar/rechazar una accion propuesta
+    -- ver Herramienta.plantilla_resumen. Fallback generico si no hay
+    plantilla o si le falta algun dato: nunca revienta el turno por esto,
+    en el peor caso el resumen es menos lindo, no inexistente."""
+    if herramienta.plantilla_resumen:
+        try:
+            return herramienta.plantilla_resumen.format(**argumentos)
+        except (KeyError, IndexError):
+            pass
+    pares = ", ".join(f"{k}={v}" for k, v in argumentos.items())
+    return f"{herramienta.nombre}({pares})"
+
+
+def _ejecutar_propuesta_de_accion(herramienta, sesion, argumentos_modelo: dict,
+                                  tenant: str, rol: str, propuesto_por: str) -> dict:
+    """
+    Para una Herramienta con aprobacion_humana=True (nucleo/config/
+    schema.py): resuelve los argumentos reales -- igual que _ejecutar_tool,
+    mismo _resolver_argumentos() -- pero NUNCA llama a la API. Los deja
+    'pendiente' en asistente.acciones_propuestas. La unica funcion que de
+    verdad escribe es ejecutar_accion_aprobada(), llamada desde
+    nucleo/canales/api.py solo despues de que una persona aprueba.
+
+    Retomado el 18/08/2026 con un caso concreto (tickets de WispHub) --
+    'requiere_confirmacion' sigue significando lo mismo que siempre
+    (declarado, no aplicado): este es un mecanismo NUEVO y separado, no una
+    reactivacion de ese campo. Ver el comentario de aprobacion_humana en
+    schema.py.
+    """
+    from nucleo.persistencia import db as persistencia
+
+    argumentos = _resolver_argumentos(herramienta, sesion, argumentos_modelo)
+    resumen = _resumen_de_accion(herramienta, argumentos)
+    accion_id = persistencia.guardar_accion_propuesta(
+        tenant, herramienta.nombre, argumentos, resumen, rol, propuesto_por)
+    return {"accion_id": accion_id, "estado": "pendiente", "resumen": resumen,
+           "instruccion_interna": f"Decile a quien te pidio esto que la accion "
+               f"quedo pendiente de aprobacion ({resumen}) -- todavia NO se "
+               f"ejecuto, no confirmes que ya se hizo. Alguien tiene que "
+               f"aprobarla desde la pantalla correspondiente."}
+
+
+def ejecutar_accion_aprobada(config, accion: dict) -> tuple[dict, str | None]:
+    """
+    La UNICA funcion que ejecuta de verdad una escritura que paso por
+    aprobacion_humana -- llamada desde nucleo/canales/api.py despues de que
+    alguien aprueba. 'accion' es la fila de asistente.acciones_propuestas
+    (ya con 'herramienta' y 'argumentos' resueltos de antes, guardados tal
+    cual se iban a mandar).
+
+    Devuelve (resultado, codigo_error) -- mismo patron que el resto del
+    motor: codigo_error es None si salio bien. No reintenta ni interpreta
+    el error, solo lo deja explicito para que quien aprobo sepa que paso.
+    """
+    herramienta = next((h for h in config.herramientas
+                        if h.nombre == accion["herramienta"]), None)
+    if herramienta is None:
+        return {"error": f"La herramienta '{accion['herramienta']}' ya no "
+                         f"existe en el catalogo."}, "HERRAMIENTA_DESCONOCIDA"
+    try:
+        if herramienta.tipo == "http":
+            resultado = (ejecutor_http.ejecutar_asincrono(herramienta, accion["argumentos"],
+                                                          tenant=config.identidad.slug)
+                        if herramienta.asincrona else
+                        ejecutor_http.ejecutar(herramienta, accion["argumentos"],
+                                               config.identidad.slug, config.variables_tenant))
+            return resultado, None
+        return {"error": f"Tipo '{herramienta.tipo}' no soportado para "
+                         f"ejecucion aprobada."}, "TIPO_NO_SOPORTADO"
+    except Exception as e:
+        return {"error": "La API no acepto la accion."}, f"{type(e).__name__}: {e}"[:200]
+
+
 def _previas_no_cumplidas(herramienta, historial: list[dict]) -> list[str]:
     """Nombres de las herramientas de 'exige_previas' (schema.py) que
     TODAVIA no dieron el resultado favorable declarado, en esta conversacion.
@@ -598,18 +672,18 @@ def _veces_ejecutada(herramienta, historial: list[dict]) -> int:
               if msg.get("role") == "tool" and msg.get("name") == herramienta.nombre)
 
 
-def _ejecutar_tool(herramienta, sesion, argumentos_modelo: dict,
-                   tenant: str | None = None,
-                   variables_tenant: dict | None = None) -> dict | list:
+def _resolver_argumentos(herramienta, sesion, argumentos_modelo: dict) -> dict:
+    """
+    Los argumentos REALES que se le mandan a una API, a partir de lo que el
+    modelo propuso -- filtros traducidos (fail-closed: solo lo declarado en
+    filtros_verificados), constantes del tenant, fechas calculadas, y la
+    sesion verificada pisando lo que el modelo haya dicho. Separado de
+    _ejecutar_tool() para que _ejecutar_propuesta_de_accion() pueda armar
+    los mismos argumentos SIN llamar a la API todavia -- son los que se
+    guardan en asistente.acciones_propuestas, listos para ejecutar cuando
+    alguien apruebe.
+    """
     argumentos_modelo = argumentos_modelo or {}
-
-    if herramienta.tipo == "agregado":
-        # No pasa por la traduccion de mas abajo: agregado necesita los
-        # valores CRUDOS del modelo (incluido 'agrupar_por'/'periodo', que no
-        # son filtros) para decidir agrupamiento y rango -- hace su propia
-        # traduccion de filtros adentro.
-        return ejecutor_agregado.ejecutar(herramienta, argumentos_modelo, tenant)
-
     argumentos = {}
 
     # Solo se traducen los filtros DECLARADOS (fail-closed): si el modelo
@@ -660,6 +734,30 @@ def _ejecutar_tool(herramienta, sesion, argumentos_modelo: dict,
             argumentos.pop(arg_llamada, None)
         else:
             argumentos[arg_llamada] = valor
+
+    # Ver Herramienta.espejar_campos en schema.py -- despues de todo lo
+    # demas, para copiar el valor YA resuelto (traducido, no lo que dijo
+    # el modelo en crudo).
+    for origen, destino in herramienta.espejar_campos.items():
+        if origen in argumentos:
+            argumentos[destino] = argumentos[origen]
+
+    return argumentos
+
+
+def _ejecutar_tool(herramienta, sesion, argumentos_modelo: dict,
+                   tenant: str | None = None,
+                   variables_tenant: dict | None = None) -> dict | list:
+    argumentos_modelo = argumentos_modelo or {}
+
+    if herramienta.tipo == "agregado":
+        # No pasa por la traduccion de mas abajo: agregado necesita los
+        # valores CRUDOS del modelo (incluido 'agrupar_por'/'periodo', que no
+        # son filtros) para decidir agrupamiento y rango -- hace su propia
+        # traduccion de filtros adentro.
+        return ejecutor_agregado.ejecutar(herramienta, argumentos_modelo, tenant)
+
+    argumentos = _resolver_argumentos(herramienta, sesion, argumentos_modelo)
 
     if herramienta.tipo == "interno" and herramienta.detecta_incidente:
         return ejecutor_incidentes.detectar(herramienta, argumentos, tenant, variables_tenant)
@@ -1110,6 +1208,17 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                              "insiste, dile que un colaborador humano va a "
                              "seguir el caso."}
                 codigo_error = "LIMITE_DE_CONVERSACION"
+            elif herramienta.aprobacion_humana:
+                # Mecanismo NUEVO (18/08/2026), separado de
+                # 'requiere_confirmacion' -- ver el comentario de
+                # aprobacion_humana en schema.py sobre por que no se reuso
+                # ese campo. Despues del gate de identidad y de
+                # precondiciones/limite: no tiene sentido proponer una
+                # accion que de entrada no se podria ejecutar.
+                quien = sesion.identificador_canal if sesion else "desconocido"
+                salida = _ejecutar_propuesta_de_accion(
+                    herramienta, sesion, llamada.argumentos,
+                    config.identidad.slug, nombre_rol, quien)
             else:
                 clave_cache = (herramienta.nombre,
                               json.dumps(llamada.argumentos or {}, sort_keys=True))
