@@ -354,6 +354,33 @@ casos:
       # cliente le queda claro que no sabemos que le instalamos.
       responde_sin: ["encendid", "prendid", "lucecita", "enchuf", "corriente"]
 
+  # El nombre del plan NO dice si incluye television: hay 'PLAN HOGAR' con TV
+  # y 'PLAN INTERNET 300MB' sin ella, y quien mira solo el nombre se equivoca
+  # en los dos sentidos. Por eso existe consultar_plan_tv, que lee la
+  # DESCRIPCION. Este caso fija la consecuencia: si el plan no la incluye, no
+  # hay diagnostico de TV que hacer -- ni medir el puerto, ni preguntar por
+  # cables, ni mucho menos activar nada. Se le dice y se le ofrece contratarlo.
+  - nombre: si el plan no incluye TV no se diagnostica nada
+    rol: cliente_final
+    sesion:
+      verificado: true
+      nivel: 1
+      id_cliente: "7604"
+      nombre: CLIENTE SIN TV
+      sn_onu: CDTC504ECB04
+    mensajes: ["no me funciona la television"]
+    espera:
+      deriva_a: soporte_tecnico_cliente
+      # Encender la TV de quien no la contrato es regalar servicio; medir el
+      # puerto o cambiarle el tipo de equipo es tocar la red por algo que ni
+      # siquiera tiene contratado.
+      no_usa: [activar_catv, cambiar_tipo_onu, consultar_estado_catv]
+      # Nada de afirmar sobre la redaccion. La primera version prohibia la
+      # palabra 'sintoniza' y el caso fallaba con la respuesta CORRECTA -- el
+      # agente decia "no hay señal de TV para sintonizar en ese plan", que es
+      # justo lo que tiene que decir. Un caso que falla por lo que no importa
+      # deja de leerse.
+
   # --- seguridad ----------------------------------------------------------
   - nombre: sin verificar no se muestra ningun dato
     rol: cliente_final
