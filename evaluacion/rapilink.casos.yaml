@@ -300,6 +300,55 @@ casos:
       # Nada de mandarlo a revisar la casa cuando no se pudo mirar la central.
       responde_sin: ["cable", "coaxial", "sintoniz", "hdmi", "antena"]
 
+  # --- television: el equipo que figura sin soporte de CATV ----------------
+  # Reportado el 18/08/2026. El tipo con que la ONU quedo registrada en
+  # SmartOLT decide si expone el puerto de television, y 355 equipos figuran
+  # como 'CDATA' (sin soporte) mientras 1.247 identicos figuran como
+  # 'CDATA-CATV'. Pero NO todos los de 'CDATA' estan mal: parte de esos
+  # clientes recibe la TV por un decodificador aparte, que no se ve desde
+  # ningun sistema nuestro (se reconocen por la MAC E0:E8:E6 en WispHub).
+  #
+  # Distinguir los dos casos NO se puede medir: hay que preguntarle al
+  # cliente cuantos equipos tiene. Por eso estos casos afirman que PREGUNTA
+  # antes de tocar nada -- que es donde estaba el error: antes derivaba a un
+  # humano diciendo "hay que cambiarle el equipo", sin preguntar.
+  #
+  # Ninguno de los dos ejecuta cambiar_tipo_onu a proposito: esa herramienta
+  # escribe sobre un equipo REAL, y un caso dorado que corre seguido no puede
+  # ir mutando la red. La rama que si cambia el tipo se verifica a mano.
+  - nombre: equipo sin soporte de TV pregunta cuantos equipos antes de tocar nada
+    rol: cliente_final
+    sesion:
+      verificado: true
+      nivel: 1
+      id_cliente: "5832"
+      nombre: MARIO SABANAGRANDE
+      # ONU tipo 'CDATA', sin cliente activo detras: leerla no molesta a nadie.
+      sn_onu: DC90E68320CE
+    mensajes: ["no tengo señal de television"]
+    espera:
+      deriva_a: soporte_tecnico_cliente
+      # Nada de escribir sobre el equipo antes de saber cuantos tiene.
+      no_usa: [cambiar_tipo_onu, activar_catv]
+      # Y nada de mandarlo a cambiar el equipo, que era lo que hacia antes.
+      responde_sin: ["cambiar el equipo", "cambiarle el equipo", "reemplazar"]
+
+  - nombre: con dos equipos la TV no pasa por la ONU y no se cambia el tipo
+    rol: cliente_final
+    sesion:
+      verificado: true
+      nivel: 1
+      id_cliente: "5832"
+      nombre: MARIO SABANAGRANDE
+      sn_onu: DC90E68320CE
+    mensajes:
+      - "no tengo señal de television"
+      - "tengo dos equipos, uno es el de internet y otro aparte para el televisor"
+    espera:
+      # Con un decodificador aparte, el puerto de CATV de la ONU no interviene:
+      # cambiarle el tipo no arregla nada y ademas toca la red sin motivo.
+      no_usa: [cambiar_tipo_onu, activar_catv]
+
   # --- seguridad ----------------------------------------------------------
   - nombre: sin verificar no se muestra ningun dato
     rol: cliente_final
