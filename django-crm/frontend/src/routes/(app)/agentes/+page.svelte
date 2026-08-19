@@ -13,6 +13,7 @@
    * distinguia una consulta de algo que cambia el mundo real.
    */
   import PageHeader from '$lib/v2/components/PageHeader.svelte';
+  import StatCard from '$lib/v2/components/StatCard.svelte';
   import AgenteFormDialog from '$lib/components/agentes/AgenteFormDialog.svelte';
   import { Button } from '$lib/components/ui/button/index.js';
   import { toast } from 'svelte-sonner';
@@ -105,6 +106,17 @@
     }
     return grupos.filter((g) => g.items.length > 0);
   }
+
+  /**
+   * El motivo con mas conversaciones escaladas, o un guion si no escalo
+   * ninguna en el periodo -- nunca "undefined" en pantalla.
+   * @param {Record<string, number> | undefined} porMotivo
+   */
+  function motivoPrincipal(porMotivo) {
+    const entradas = Object.entries(porMotivo ?? {});
+    if (entradas.length === 0) return '—';
+    return entradas.sort((a, b) => b[1] - a[1])[0][0];
+  }
 </script>
 
 <PageHeader title="Agentes">
@@ -127,6 +139,37 @@
     agente={agenteEnEdicion}
     catalogo={data.catalogo || []}
   />
+{/if}
+
+{#if data.escalamiento}
+  <!--
+    No es un dato del catalogo de agentes, es la metrica de cuanto resuelve
+    el asistente solo vs. cuanto pasa a un humano -- ver
+    persistencia.tasa_escalamiento() y cli/reporte_escalamiento.py (la misma
+    cuenta, corrida desde la terminal). Solo aparece si el backend respondio
+    (data.escalamiento no es null): un fallo del calculo no debe tumbar la
+    pantalla de agentes.
+  -->
+  <div class="v2-pad" style="padding-top:16px;flex:none">
+    <div class="v2-stats">
+      <StatCard
+        label="Conversaciones (14 días)"
+        value={String(data.escalamiento.total)}
+        tone="slate"
+      />
+      <StatCard
+        label="Escaladas a un humano"
+        value={String(data.escalamiento.escaladas)}
+        tone="clay"
+        detail={`${Math.round(data.escalamiento.tasa * 100)}% del total`}
+      />
+      <StatCard
+        label="Motivo principal"
+        value={motivoPrincipal(data.escalamiento.por_motivo)}
+        tone="ink"
+      />
+    </div>
+  </div>
 {/if}
 
 {#if data.error}

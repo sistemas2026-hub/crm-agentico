@@ -78,6 +78,52 @@ def olvidar_config(tenant: str) -> None:
     _configs.pop(tenant, None)
 
 
+_TOKEN_SERVICIO = os.environ.get("MOTOR_SERVICE_TOKEN")
+if _TOKEN_SERVICIO:
+    print("[auth] MOTOR_SERVICE_TOKEN activo: /chat, /agentes y el resto de "
+         "rutas internas exigen el token de servicio.")
+else:
+    print("[auth] MOTOR_SERVICE_TOKEN no esta configurado -- las rutas "
+         "internas quedan abiertas a quien alcance el motor por red. Ver "
+         "DESPLIEGUE.md, 'Autenticar /chat y /agentes en el motor'.")
+
+# Rutas que se autentican con OTRO mecanismo (no el token de servicio), asi
+# que quedan afuera de la comprobacion de abajo:
+#   - el webhook de WhatsApp: Meta lo firma (verify_token en el handshake,
+#     X-Hub-Signature-256 en los mensajes), y Meta no puede mandar un header
+#     nuestro -- exigirselo lo dejaria afuera a el, no a un atacante.
+#   - /salud: lo pega el healthcheck de Dokploy, sin credenciales, y no
+#     devuelve nada mas que {"estado": "ok"}.
+_RUTAS_SIN_TOKEN = {"/salud"}
+_PREFIJOS_SIN_TOKEN = ("/canales/whatsapp/",)
+
+
+@app.before_request
+def _exigir_token_de_servicio():
+    """
+    Hoy lo unico que separa /chat, /agentes y el resto de internet es el
+    'PathPrefix' de una regla de Traefik -- una sola capa, cuando el resto
+    del proyecto usa dos por principio (PRD.md 7.4: las reglas duras se
+    aplican en codigo, no solo en la configuracion de alrededor). Una regla
+    mal escrita al agregar un dominio y cualquiera puede conversar con el
+    asistente a costa de la empresa, o leer como esta configurado cada
+    agente. Ver DESPLIEGUE.md.
+
+    Si 'MOTOR_SERVICE_TOKEN' no esta configurado, no se bloquea nada -- el
+    valor por defecto no puede romper un despliegue que todavia no cargo la
+    variable (arranque local, el compose de desarrollo). Una vez cargada,
+    es fail-closed: falta o no coincide, 401.
+    """
+    if not _TOKEN_SERVICIO:
+        return None
+    if request.path in _RUTAS_SIN_TOKEN or request.path.startswith(_PREFIJOS_SIN_TOKEN):
+        return None
+    recibido = request.headers.get("X-Servicio-Token", "")
+    if recibido != _TOKEN_SERVICIO:
+        return jsonify({"error": "Token de servicio invalido o ausente."}), 401
+    return None
+
+
 def _error_al_guardar(e: Exception):
     """Todo lo que no sea un problema de la configuracion en si (la base
     inalcanzable, el tenant sin cargar) es un fallo del servidor, no del
@@ -173,7 +219,13 @@ def _sesion_nueva(tenant: str, id_sesion: str, canal: str) -> dict:
               # humano a quien esperar (ver mas abajo), y sin esta bandera esa
               # misma pausa apagada volvia a habilitar la evaluacion en el
               # turno siguiente y se creaba un caso duplicado.
-              "ya_escalada": False}
+              "ya_escalada": False,
+              # Esta conversacion ya tuvo su vuelta extra antes de escalar
+              # (ver escalamiento.merece_un_intento). Vive en memoria, como
+              # 'repreguntado_agendamiento': si el motor se reinicia se
+              # concede un intento mas, que es un costo aceptable frente a
+              # una lectura extra a la base en cada turno.
+              "intento_antes_de_escalar": False}
     try:
         previo = persistencia.estado_de_conversacion_abierta(tenant, canal, id_sesion)
     except Exception as e:
@@ -223,7 +275,7 @@ def _sesion_nueva(tenant: str, id_sesion: str, canal: str) -> dict:
 
 
 def atender_turno(config, tenant: str, rol: str, id_sesion: str,
-                  mensaje: str, canal: str) -> dict:
+                  mensaje: str, canal: str, profile_id: str | None = None) -> dict:
     """
     Un turno completo de conversacion: pausa por escalamiento, modelo,
     persistencia y evaluacion de escalamiento.
@@ -232,6 +284,11 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     WhatsApp (mas abajo) haga lo MISMO en vez de una copia parecida. Un canal
     con su propia version de esta logica se desincroniza: es exactamente como
     aparecio el bot que seguia contestando despues de escalar.
+
+    'profile_id': quien pregunta, cuando /chat lo resolvio (app web). None en
+    el webhook de WhatsApp -- ahi no hay un colaborador del CRM de por medio,
+    solo se propaga a asistente.tool_calls.profile_id para la auditoria por
+    persona (ver supabase/19_tool_calls_profile_id.sql).
 
     Devuelve {'respuesta', 'verificado', 'pausada'}. Levanta motor.ErrorMotor
     si el rol o el mensaje no son atendibles -- quien llama decide si eso es un
@@ -292,7 +349,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     if estado["escalada"]:
         if escalamiento.caso_sigue_abierto(config, estado["caso_id"]):
             respuesta = (config.escalamiento.mensaje or "").strip() or \
-                "Tu caso ya esta con un companero del equipo."
+                "Tu caso ya esta con un compañero del equipo."
             estado["historial"].append({"role": "user", "content": mensaje})
             estado["historial"].append({"role": "assistant", "content": respuesta})
             try:
@@ -310,7 +367,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
         # que un caso nuevo no seria un duplicado sino uno legitimo.
         estado["ya_escalada"] = False
 
-    respuesta, registro_herramientas = motor.responder(
+    respuesta, registro_herramientas, medios_pendientes = motor.responder(
         config, rol, mensaje, estado["historial"], estado["sesion"],
         nota_continuidad=nota_continuidad)
 
@@ -338,7 +395,22 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
         conversation_id, mensaje_id = persistencia.registrar_mensaje(
             tenant, canal, id_sesion, rol, "assistant", respuesta)
         for llamada in registro_herramientas:
-            persistencia.registrar_llamada_herramienta(tenant, conversation_id, rol, llamada)
+            persistencia.registrar_llamada_herramienta(
+                tenant, conversation_id, rol, llamada, profile_id=profile_id)
+        # Mismo motivo que el bucle de arriba: un archivo generado por una
+        # herramienta 'agregado' exportable (ver nucleo/herramientas/
+        # informes.py) no se pudo guardar dentro de motor.responder() porque
+        # todavia no existia conversation_id. El 'media_id' que el modelo ya
+        # vio en su turno (crudo['archivo_id']) es el MISMO que se inserta
+        # aca -- no hace falta avisarle nada nuevo, solo completar el guardado.
+        for medio in medios_pendientes:
+            try:
+                persistencia.guardar_media(
+                    tenant, conversation_id, medio["media_id"], medio["tipo"],
+                    medio["contenido"], mime=medio.get("mime"),
+                    descripcion=medio.get("descripcion"), mensaje_id=mensaje_id)
+            except Exception as e:
+                print(f"[informes] no se pudo guardar el archivo generado: {e}")
         # Recien aca existe conversation_id (ver el docstring de
         # motor.responder): antes de esto no habia donde persistir a quien
         # verifico _ejecutar_confirmacion. Se repite cada turno una vez
@@ -432,6 +504,32 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             # asigno. Ver el comentario del aviso final.
             id_ticket_auto = None
 
+            # --- una vuelta mas antes de pasarlo a un humano ----------------
+            # Solo para los motivos que el tenant declaro (por defecto,
+            # ninguno). Ver escalamiento.merece_un_intento y el campo en
+            # nucleo/config/schema.py.
+            #
+            # La nota le pide al modelo que ACTUE, no que contenga. Es la
+            # diferencia que importa con un cliente furioso: "entiendo tu
+            # frustracion, lamento las molestias" repetido suena a libreto y
+            # lo enfurece mas; "ya vi tu equipo, la señal esta bien, te lo
+            # estoy reiniciando" lo calma, porque es lo que vino a buscar.
+            if escalamiento.merece_un_intento(
+                    config, evaluacion.get("motivo", ""),
+                    estado["intento_antes_de_escalar"]):
+                estado["intento_antes_de_escalar"] = True
+                estado["nota_pendiente"] = (
+                    "(Nota del sistema, no del cliente) El cliente esta "
+                    "molesto. NO lo escales todavia y NO le contestes con "
+                    "frases de consuelo ni le pidas que se calme: usa tus "
+                    "herramientas ahora, deciles que encontraste y que estas "
+                    "haciendo al respecto. Si todavia no lo verificaste, "
+                    "pedile la cedula UNA vez y segui de una. Si con eso no "
+                    "alcanza, en el proximo mensaje se pasa a un companero.")
+                posponer = True
+                print(f"[escalamiento] {id_sesion}: '{evaluacion.get('motivo')}' "
+                      "se pospone una vuelta -- el asistente lo intenta primero")
+
             # --- verificacion automatica de agendamiento --------------------
             # Solo corre si el tenant declaro ESTE caso puntual en
             # 'escalamiento.agendamiento_automatico' (apagado por defecto,
@@ -440,15 +538,21 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             caso_manual = evaluacion.get("caso_manual")
             herramienta_auto = (config.escalamiento.agendamiento_automatico.get(caso_manual)
                                 if caso_manual else None)
-            # 'not forzado': cuando la escalada la fuerza una herramienta que
-            # no pudo ejecutarse, no hay nada que verificar ni que
-            # repreguntar. El verificador de agendamiento veria el checklist
-            # incompleto y pospondria la escalada para pedirle un dato mas al
-            # cliente -- un dato que no cambia nada, porque lo que falta no lo
-            # tiene el cliente sino nuestro sistema. Visto el 18/08/2026: la
-            # escalada forzada se activaba y quedaba atrapada justo aca, asi
-            # que al cliente se le prometia un colaborador que no llegaba.
-            if herramienta_auto and not forzado:
+            # Dos motivos distintos para saltear la verificacion, y los dos
+            # valen:
+            #
+            # 'not posponer' -- si ya se pospuso arriba, esta escalada no va a
+            # ocurrir en este turno y 'verificar' es otra llamada al modelo.
+            #
+            # 'not forzado' -- cuando la escalada la fuerza una herramienta que
+            # no pudo ejecutarse, no hay nada que verificar ni que repreguntar.
+            # El verificador veria el checklist incompleto y pospondria la
+            # escalada para pedirle un dato mas al cliente: un dato que no
+            # cambia nada, porque lo que falta no lo tiene el cliente sino
+            # nuestro sistema. Visto el 18/08/2026 -- la escalada forzada se
+            # activaba y quedaba atrapada justo aca, asi que al cliente se le
+            # prometia un colaborador que no llegaba nunca.
+            if herramienta_auto and not posponer and not forzado:
                 try:
                     veredicto = agendamiento.verificar(config, tenant, rol, estado["historial"])
                 except Exception as e:
@@ -505,19 +609,37 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                     estado["caso_id"] = persistencia.caso_de_conversacion(tenant, conversation_id)
                 except Exception as e:
                     print(f"[escalamiento] no se pudo leer el caso de la conversacion: {e}")
-                # El aviso se decide por el TICKET REAL, no por
+                # Dos decisiones distintas, las dos aprendidas de fallas
+                # reales, y cada una manda en su caso.
+                #
+                # (1) El aviso de visita se decide por el TICKET REAL, no por
                 # 'necesita_humano'. El evaluador puede devolver
                 # necesita_humano=false por su cuenta (caso registrado para
                 # seguimiento, sin urgencia) sin que se haya agendado nada:
                 # atado a esa bandera, el cliente escuchaba "tu visita ya
-                # quedo agendada" cuando no existia ninguna visita. Visto en
-                # una prueba real el 15/08/2026 -- el peor error posible aca
-                # es prometerle a alguien un tecnico que no va a ir.
+                # quedo agendada" cuando no existia ninguna visita. Visto el
+                # 15/08/2026 -- el peor error posible aca es prometerle a
+                # alguien un tecnico que no va a ir. Este aviso SI se suma al
+                # texto del modelo: el turno cierra con el diagnostico ("esto
+                # necesita ir a la casa") y el aviso lo completa.
+                #
+                # (2) El traspaso a una persona REEMPLAZA la respuesta, no se
+                # le suma. Pegarlo al final producia mensajes que se
+                # contradicen solos: la escalada se evalua DESPUES de que el
+                # modelo contesto, asi que cuando escribio su respuesta
+                # todavia no sabia que el turno terminaba en traspaso. Visto
+                # en produccion el 15/08/2026 -- al cliente le llego "necesito
+                # verificar tu identidad: ¿me pasas tu cedula?" y debajo "Te
+                # paso con un companero", y no habia forma de saber si mandar
+                # la cedula o esperar. Lo que se descarta no se pierde: si el
+                # caso pasa a una persona, la pregunta que el modelo iba a
+                # hacer ya no corre. El texto es del tenant, asi que el tono
+                # se ajusta en config.escalamiento.mensaje.
                 if id_ticket_auto:
                     respuesta = (f"{respuesta}\n\nTu visita tecnica ya quedo agendada, "
                                 f"un tecnico te va a contactar para coordinar.").strip()
                 elif necesita_humano:
-                    respuesta = f"{respuesta}\n\n{config.escalamiento.mensaje}".strip()
+                    respuesta = (config.escalamiento.mensaje or "").strip() or respuesta
                 estado["ya_escalada"] = True
                 # El mensaje del asistente ya se guardo (mas arriba, antes de
                 # poder evaluar la escalada -- necesitaba conversation_id).
@@ -624,7 +746,8 @@ def chat():
             update={"roles": {**config.roles, rol: rol_fusionado}, "llm": llm})
 
     try:
-        salida = atender_turno(config, tenant, rol, id_sesion, mensaje, canal)
+        salida = atender_turno(config, tenant, rol, id_sesion, mensaje, canal,
+                               profile_id=profile_id)
     except motor.ErrorMotor as e:
         return jsonify({"error": str(e)}), 400
 
@@ -919,6 +1042,32 @@ def agentes_borrar(nombre):
 #  es superficie de seguridad; aca se decide como habla el asistente. Mezclar
 #  las dos en una pantalla haria que cambiar el tono se sintiera tan riesgoso
 #  como abrirle una herramienta nueva a un area.
+
+@app.get("/reportes/escalamiento")
+def reporte_escalamiento():
+    """
+    Version HTTP de cli/reporte_escalamiento.py -- mismo calculo
+    (persistencia.tasa_escalamiento), para que /agentes lo muestre sin pasar
+    por la terminal. 'dias' default 7, tope 90 (mas alla el query barre
+    demasiada tabla para una carga de pantalla interactiva).
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        dias = int(request.args.get("dias", 7))
+    except ValueError:
+        return jsonify({"error": "'dias' debe ser un numero."}), 400
+    dias = max(1, min(dias, 90))
+
+    try:
+        r = persistencia.tasa_escalamiento(tenant, dias)
+    except Exception as e:
+        print(f"[reportes] fallo al calcular escalamiento: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo calcular el reporte."}), 500
+
+    return jsonify({"dias": dias, **r})
+
 
 @app.get("/configuracion")
 def configuracion():
@@ -1602,6 +1751,91 @@ def manual_revisiones_aprobar(id_revision):
 @app.post("/manual/revisiones/<id_revision>/descartar")
 def manual_revisiones_descartar(id_revision):
     return _actualizar_revision(id_revision, "descartado")
+
+
+# =============================================================================
+#  CONFIGURACION GUIADA  -  propuestas de herramienta nuevas, pendientes de
+#  aprobacion humana. Ver tenants/rapilink.config.yaml, rol
+#  'configuracion_guiada', y nucleo/config/editor.py::
+#  aprobar_herramienta_propuesta para el porque esto no salta la regla de
+#  "crear una herramienta es trabajo de codigo".
+# =============================================================================
+
+@app.get("/configuracion/propuestas")
+def configuracion_propuestas():
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        propuestas = persistencia.herramientas_propuestas_de(tenant, request.args.get("estado"))
+    except Exception as e:
+        print(f"[configuracion-guiada] fallo al leer propuestas: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudieron leer las propuestas."}), 500
+    return jsonify({"propuestas": propuestas})
+
+
+@app.post("/configuracion/propuestas/<id_propuesta>/aprobar")
+def configuracion_propuesta_aprobar(id_propuesta):
+    """
+    Escribe la herramienta propuesta al catalogo REAL (editor.py) y recien
+    despues marca la propuesta como 'aprobada' -- en ese orden, para que un
+    borrador mal armado (le falta un campo, un rol que no existe) quede
+    visiblemente sin aprobar en vez de aprobado pero sin efecto.
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'."}), 400
+
+    try:
+        propuesta = persistencia.herramienta_propuesta_de(tenant, id_propuesta)
+    except Exception as e:
+        print(f"[configuracion-guiada] fallo al leer la propuesta: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo leer la propuesta."}), 500
+    if not propuesta:
+        return jsonify({"error": f"La propuesta '{id_propuesta}' no existe."}), 404
+    if propuesta["estado"] != "pendiente":
+        return jsonify({"error": f"Esta propuesta ya esta '{propuesta['estado']}', "
+                                 f"no se puede volver a aprobar."}), 400
+
+    try:
+        editor.aprobar_herramienta_propuesta(tenant, propuesta["herramienta_propuesta"])
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
+
+    olvidar_config(tenant)
+    try:
+        persistencia.resolver_herramienta_propuesta(
+            tenant, id_propuesta, "aprobada", cuerpo.get("revisado_por"))
+    except Exception as e:
+        # La herramienta YA quedo escrita en el catalogo -- esto solo afecta
+        # el rotulo de la propuesta. No se revierte lo ya guardado por esto.
+        print(f"[configuracion-guiada] la herramienta se agrego pero no se "
+             f"pudo marcar la propuesta como aprobada: {type(e).__name__}: {e}")
+
+    return jsonify({"ok": True, "estado": "aprobada"})
+
+
+@app.post("/configuracion/propuestas/<id_propuesta>/rechazar")
+def configuracion_propuesta_rechazar(id_propuesta):
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'."}), 400
+
+    try:
+        existe = persistencia.resolver_herramienta_propuesta(
+            tenant, id_propuesta, "rechazada", cuerpo.get("revisado_por"),
+            motivo_rechazo=cuerpo.get("motivo"))
+    except Exception as e:
+        print(f"[configuracion-guiada] fallo al rechazar: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo guardar."}), 500
+
+    if not existe:
+        return jsonify({"error": f"La propuesta '{id_propuesta}' no existe."}), 404
+    return jsonify({"ok": True, "estado": "rechazada"})
 
 
 # =============================================================================
@@ -2336,6 +2570,35 @@ def media_archivo(id_media):
     contenido, mime = encontrado
     # Cache larga: el contenido de un id nunca cambia (se inserta una vez y se
     # borra por antiguedad), asi que revalidar seria trafico puro.
+    return contenido, 200, {"Content-Type": mime,
+                            "Cache-Control": "private, max-age=86400"}
+
+
+@app.get("/informes/<media_id>")
+def informe_archivo(media_id):
+    """
+    Un archivo GENERADO por el motor (nucleo/herramientas/informes.py), no
+    recibido de WhatsApp -- por eso no comparte ruta con /media/<id_media>.
+
+    Esa otra ruta busca por 'id' (la clave primaria de asistente.media,
+    generada por Postgres). Esta busca por 'media_id' (el UUID que el codigo
+    elige ANTES de insertar la fila, para poder mencionarlo en la respuesta
+    del modelo desde motor.responder() -- que corre antes de que 'id' exista.
+    Ver persistencia.media_bytes_por_media_id().
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        encontrado = persistencia.media_bytes_por_media_id(tenant, media_id)
+    except Exception as e:
+        print(f"[informes] fallo al leer {media_id}: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo leer el archivo."}), 500
+
+    if not encontrado:
+        return jsonify({"error": "No existe."}), 404
+
+    contenido, mime = encontrado
     return contenido, 200, {"Content-Type": mime,
                             "Cache-Control": "private, max-age=86400"}
 

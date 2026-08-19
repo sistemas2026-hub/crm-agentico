@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { apiRequest } from '$lib/api-helpers.js';
+import { headersMotor } from '$lib/server/v2/motor-headers.js';
 
 /**
  * Proxy hacia el motor del asistente (crm-agentico, repo aparte, ver
@@ -55,7 +56,7 @@ export async function POST({ request, locals, fetch }) {
   try {
     const resp = await fetch(`${baseUrl}/chat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: headersMotor({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         tenant,
         profile_id: profileId,

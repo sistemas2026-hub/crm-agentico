@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
+import { headersMotor } from '$lib/server/v2/motor-headers.js';
 
 /**
  * Editar/borrar un agente puntual. Mismo gate de ADMIN que POST /api/agentes
@@ -33,7 +34,7 @@ export async function PUT({ params, request, locals, fetch }) {
   try {
     const resp = await fetch(`${cfg.baseUrl}/agentes/${encodeURIComponent(params.nombre)}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: headersMotor({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ ...cuerpo, tenant: cfg.tenant })
     });
     const datos = await resp.json();
@@ -64,7 +65,7 @@ export async function DELETE({ params, locals, fetch }) {
   try {
     const resp = await fetch(
       `${cfg.baseUrl}/agentes/${encodeURIComponent(params.nombre)}?tenant=${encodeURIComponent(cfg.tenant)}`,
-      { method: 'DELETE' }
+      { method: 'DELETE', headers: headersMotor() }
     );
     if (!resp.ok) {
       const datos = await resp.json().catch(() => ({}));

@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
+import { headersMotor } from '$lib/server/v2/motor-headers.js';
 
 /**
  * Aprobar una revision del supervisor -- la persona confirma que el
@@ -26,7 +27,7 @@ export async function POST({ params, locals, fetch }) {
   try {
     const resp = await fetch(`${baseUrl}/manual/revisiones/${params.id}/aprobar`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: headersMotor({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ tenant, revisado_por: locals.user.email })
     });
     const datos = await resp.json();

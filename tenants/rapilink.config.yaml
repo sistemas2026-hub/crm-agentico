@@ -113,6 +113,16 @@ roles:
       explicada por cableado, splitter, ni exceso de TV sobre el maximo
       recomendado), llama a 'agendar_visita_tecnica' para crear el ticket.
 
+      Cuando el diagnostico de un cliente de fibra de un equipo offline o
+      con mala señal, llama 'consultar_incidente_red' antes de asumir que
+      es un problema puntual de ese cliente -- puede ser una caida que
+      afecta a varios a la vez. IMPORTANTE: SmartOLT tarda de 2 a 5
+      minutos en agrupar una caida recien empezada (dato del proveedor).
+      Si 'es_incidente_de_red' da false y el reporte es muy reciente, no
+      lo tomes como "confirmado que es solo de este cliente" -- decile al
+      colaborador que todavia no hay nada agrupado, no que no hay ningun
+      problema de red.
+
       Reglas para usar 'agendar_visita_tecnica' -- son estrictas porque
       agenda una visita real, con costo y logistica, sin ningun paso de
       confirmacion despues tuyo:
@@ -135,7 +145,8 @@ roles:
     puede_consultar: [consultar_cliente, consultar_cliente_por_cedula, consultar_ticket,
           consultar_tickets_de_cliente, contar_tickets, contar_clientes, consultar_casos_bottlecrm,
           agendar_visita_tecnica, consultar_estado_ont, consultar_senal_ont, reiniciar_ont,
-          diagnosticar_falla_ont, consultar_estado_catv, activar_catv]
+          diagnosticar_falla_ont, consultar_estado_catv, activar_catv, cambiar_tipo_onu,
+          consultar_incidente_red]
     campos_permitidos:
       consultar_cliente: [id_servicio, nombre, cedula, estado, email, telefono, direccion, localidad,
         ciudad, plan_internet, zona, fecha_instalacion, estado_facturas, saldo, fecha_corte]
@@ -152,8 +163,8 @@ roles:
             departamento, origen_reporte, fecha_creacion, fecha_inicio, fecha_fin, 
             servicio.id_servicio, servicio.plan_internet, servicio.zona]
       consultar_tickets_de_cliente: [id_ticket, asunto, estado, prioridad, tecnico, fecha_creacion]
-      contar_tickets: [total, desglose, interpretacion, advertencia]
-      contar_clientes: [total, desglose, interpretacion, advertencia]
+      contar_tickets: [total, desglose, interpretacion, advertencia, archivo_id, error_archivo]
+      contar_clientes: [total, desglose, interpretacion, advertencia, archivo_id, error_archivo]
       # Sin 'servicio' completo (mismo motivo que consultar_ticket): trae el
       # registro del cliente entero. 'servicio.id_servicio' alcanza para
       # confirmar a quien se le agendo.
@@ -174,6 +185,14 @@ roles:
             "ONU details.Run state", "ONU details.Last down time", "Optical status.Rx optical power(dBm)"]
       consultar_estado_catv: [catv]
       activar_catv: [response]
+      cambiar_tipo_onu: [response, status]
+      # zona/caja son topologia de red -- necesaria para soporte, no para
+      # cliente_final (mismo criterio que olt_id/board/port en la skill
+      # smartolt-api). Esta herramienta no esta en el catalogo de
+      # cliente_final: ver el comentario de 'roles_permitidos' donde se
+      # declara, mas abajo.
+      consultar_incidente_red: [es_incidente_de_red, tipo_alerta, clientes_afectados,
+            porcentaje_afectado, desde, zona, caja, motivo]
     nunca_revelar: [password_servicio, password_cpe, password_router_wifi, password_ssid_router_wifi,
       usuario_router_wifi, coordenadas]
 
@@ -192,8 +211,8 @@ roles:
       consultar_facturas: [id_factura, estado, total, saldo, fecha_emision, fecha_vencimiento, 
             fecha_pago]
       registrar_pago: [resultado, id_factura, total_cobrado, mensajes, messages, task_id, errors]
-      contar_facturas: [total, desglose, interpretacion, advertencia]
-      contar_clientes: [total, desglose, interpretacion, advertencia]
+      contar_facturas: [total, desglose, interpretacion, advertencia, archivo_id, error_archivo]
+      contar_clientes: [total, desglose, interpretacion, advertencia, archivo_id, error_archivo]
     nunca_revelar: [password_servicio, password_cpe, password_router_wifi, password_ssid_router_wifi,
       ip, mac_cpe]
 
@@ -203,6 +222,9 @@ roles:
     cargo: Analista
     # 'consultar_ticket' agregado desde la interfaz (Agentes) -- sincronizado
     # aca para que este archivo no lo pise en el proximo cargar_config.py.
+    # (17/08/2026: tambien se completo roles_permitidos de la herramienta,
+    # que habia quedado sin 'administracion' -- documental, no afectaba el
+    # acceso real, pero mentia en la config.)
     puede_consultar: [consultar_cliente, consultar_tickets_de_cliente, contar_clientes, 
           contar_facturas, contar_tickets, informe_materiales, consultar_ticket]
     campos_permitidos:
@@ -210,9 +232,9 @@ roles:
       consultar_cliente: [id_servicio, nombre, estado, plan_internet, zona, fecha_instalacion, 
             estado_facturas]
       consultar_tickets_de_cliente: [id_ticket, asunto, estado, prioridad, tecnico, fecha_creacion]
-      contar_clientes: [total, desglose, interpretacion, advertencia]
-      contar_facturas: [total, desglose, interpretacion, advertencia]
-      contar_tickets: [total, desglose, interpretacion, advertencia]
+      contar_clientes: [total, desglose, interpretacion, advertencia, archivo_id, error_archivo]
+      contar_facturas: [total, desglose, interpretacion, advertencia, archivo_id, error_archivo]
+      contar_tickets: [total, desglose, interpretacion, advertencia, archivo_id, error_archivo]
       informe_materiales: [periodo, totales, tickets_cerrados, con_registro_de_material, 
             registros_en_cero, cobertura_por_categoria, sin_normalizar, interpretacion, advertencia]
       consultar_ticket: [asunto, fecha_inicio, servicio.id_servicio, departamento, 
@@ -426,8 +448,18 @@ roles:
       explica los dos a la vez) y sigue por ahi.
 
       DIAGNOSTICO DE CONEXION (cuando dice que no tiene internet o perdio
-      la conexion -- no cuando dice que perdio la señal de TV). Llama ping_cliente, consultar_estado_ont y
-      consultar_senal_ont -- las tres, CADA UNA UNA SOLA VEZ (nunca
+      la conexion -- no cuando dice que perdio la señal de TV).
+      ANTES QUE NADA, llama consultar_mi_servicio y mira
+      'estado'. Si dice SUSPENDIDO, ahi termina el diagnostico tecnico: no
+      esta roto, esta cortado, y ninguna cosa que le pidas hacer lo va a
+      arreglar. Deciselo con calma y sin sermon -- que el servicio figura
+      suspendido y que lo tuyo es reactivarlo, no repararlo-- y pasalo a
+      facturacion. Nunca le pidas reiniciar el equipo ni revisar luces a
+      alguien que esta suspendido: es hacerlo trabajar para nada y ademas
+      le muestra que no miraste su cuenta antes de hablar.
+
+      Despues si, el diagnostico: llama ping_cliente, consultar_estado_ont
+      y consultar_senal_ont -- las tres, CADA UNA UNA SOLA VEZ (nunca
       repitas una que ya te respondio, aunque el resultado no te
       convenza). Con lo que devuelvan:
 
@@ -572,10 +604,30 @@ roles:
         eligiendo ANTENA, que es lo que hace falta para que el equipo
         vuelva a encontrar los canales.
 
-      - CATV en 'Not supported by ONU-Type': el equipo que tiene no puede
-        dar television por hardware. No lo intentes activar ni le pidas
-        que sintonice: deriva a un colaborador humano, porque si su plan
-        incluye TV hay que cambiarle el equipo.
+      - CATV en 'Not supported by ONU-Type': el TIPO con que quedo
+        registrado el equipo no expone el puerto de television. Ojo, eso
+        NO quiere decir que el aparato no pueda darla -- y hay dos
+        situaciones detras, que se distinguen con UNA pregunta:
+
+        Preguntale: "¿tienes un solo equipo, o dos -- uno aparte para la
+        television?"
+
+        - UN SOLO equipo: el aparato si puede dar TV; lo que esta mal es
+          el tipo con que figura. Llama a cambiar_tipo_onu, despues
+          vuelve a leer consultar_estado_catv (tiene que dejar de decir
+          'Not supported') y activa con activar_catv. No hace falta
+          visita ni cambiarle nada fisico: se arregla desde la central.
+
+        - DOS equipos: la television NO pasa por la ONU, va por un
+          decodificador aparte que NO se ve desde ninguno de nuestros
+          sistemas. No cambies el tipo ni actives nada -- el puerto de
+          CATV de la ONU no interviene en su servicio. Sigue el checklist
+          de cableado y conexion como en cualquier otra falla de TV, y de
+          ahi sale si corresponde visita o no.
+
+        Si no contesta o no esta seguro de cuantos equipos tiene, NO
+        cambies el tipo: quedate en el checklist, que no le hace daño a
+        nadie.
 
       - Todo sano (en linea, señal bien y puerto 'up'): recien ahi el
         problema esta del lado del cliente. Cuentale en UNA frase que del
@@ -589,7 +641,8 @@ roles:
     orientado_a: cliente_final
     puede_consultar: [consultar_mi_servicio, ping_cliente, derivar_a_area,
           consultar_plan_tv, consultar_estado_ont, consultar_senal_ont,
-          reiniciar_ont, diagnosticar_falla_ont, consultar_estado_catv, activar_catv]
+          reiniciar_ont, diagnosticar_falla_ont, consultar_estado_catv, activar_catv,
+          cambiar_tipo_onu]
     campos_permitidos:
       consultar_mi_servicio: [estado, plan_internet, ssid_router_wifi]
       ping_cliente: ["ping-1", "ping-2", "ping-3", "ping-exitoso"]
@@ -609,8 +662,80 @@ roles:
       consultar_estado_catv: [catv]
       # Solo la confirmacion del proveedor ("CATV enabled"), nada mas.
       activar_catv: [response]
+      cambiar_tipo_onu: [response, status]
     nunca_revelar: [password_servicio, password_cpe, password_router_wifi, usuario_router_wifi,
           cedula, direccion, coordenadas, ip, mac_cpe, sn_onu, sectorial, router.nombre]
+
+  # --- configuracion_guiada -------------------------------------------------
+  # CLAUDE.md: "la proxima empresa que se conecte no deberia necesitar una
+  # sesion de codigo para algo que ya se resolvio una vez". Este rol es ESO:
+  # un ADMIN describe una API nueva, el asistente la sondea de verdad (nunca
+  # inventa que un filtro funciona) y arma un borrador -- que queda
+  # PENDIENTE hasta que un humano lo aprueba desde /configuracion-guiada.
+  # Nunca se activa solo. El acceso a este rol lo gatea la capa web (ADMIN
+  # de BottleCRM, mismo criterio que crear un agente) -- el motor no conoce
+  # roles de BottleCRM, asi que esa es la unica barrera real de "quien puede
+  # llegar aca", no algo que este archivo pueda expresar.
+  configuracion_guiada:
+    descripcion: |
+      Ayudas a un colaborador ADMIN a conectar un sistema nuevo al
+      catalogo, sin que tenga que escribir codigo ni YAML a mano.
+
+      NUNCA inventes que un endpoint o un filtro funciona -- vos no sabes
+      nada de la API hasta que la sondeas de verdad con sondear_api. Cada
+      afirmacion sobre "este filtro sirve" tiene que salir de comparar
+      resultados reales: la respuesta sin filtro, con un valor que no
+      puede existir (deberia dar 0 o un total identico al de sin filtro
+      si el filtro se ignora), y con un valor real tomado de la propia
+      muestra. Si un filtro no se pudo verificar asi, no lo declares
+      como verificado -- decile al ADMIN que ese filtro queda sin probar.
+
+      Flujo tipico:
+      1. Preguntale al ADMIN: URL base, si necesita autenticacion (y si
+         la clave ya esta guardada en Secretos con que nombre -- vos
+         nunca le pidas que te escriba la clave en el chat, solo el
+         NOMBRE del secreto), y que datos le interesan.
+      2. Llama sondear_api con la URL base, sin filtros, para ver la
+         forma de la respuesta y los campos disponibles.
+      3. Para cada filtro que el ADMIN quiera usar, sondea con el metodo
+         del valor imposible: sin filtro, con un valor que no puede
+         existir, y con un valor real -- compara los tres resultados
+         antes de decir que el filtro sirve.
+      4. Cuando tengas evidencia real, arma el borrador de Herramienta y
+         llama proponer_herramienta con la evidencia del sondeo adjunta.
+         La forma EXACTA (campos que no lleves se completan con su valor
+         por defecto, pero estos son obligatorios):
+           {"nombre": "consultar_algo", "tipo": "http",
+            "descripcion": "que hace, en una frase",
+            "solo_lectura": true, "roles_permitidos": ["administracion"],
+            "base_url": "https://dominio-de-la-api.com",
+            "endpoint": "/api/recurso/", "metodo": "GET",
+            "auth_ref": "NOMBRE_DEL_SECRETO", "auth_header": "Authorization",
+            "auth_esquema": "Bearer",
+            "filtros_verificados": {"campo": {"param": "nombre_en_la_api",
+              "tipo": "id", "verificado_el": "2026-08-17"}}}
+         'tipo' SOLO puede ser uno de: http, agregado, sql, webhook, batch,
+         interno -- nunca inventes otro valor. 'base_url' y 'endpoint' van
+         SEPARADOS (nunca la URL completa junta en un solo campo).
+         'roles_permitidos' tiene que nombrar un rol que YA EXISTE en este
+         tenant (preguntale al ADMIN cual, si no lo sabes) -- nunca
+         inventes un nombre de rol.
+      5. Decile al ADMIN que quedo pendiente de aprobacion -- vos no la
+         activaste, alguien tiene que revisarla desde la pantalla de
+         configuracion antes de que exista de verdad.
+
+      Si el ADMIN pide algo que no se puede verificar (la API no
+      responde, no tiene autenticacion configurada, el filtro se ignora
+      en silencio), decilo con claridad -- mismo criterio que el resto
+      del proyecto: mejor un "no se pudo confirmar" honesto que un dato
+      lindo sin base.
+    area: Administración
+    cargo: Asistente de configuración
+    orientado_a: colaborador
+    puede_consultar: [sondear_api, proponer_herramienta]
+    campos_permitidos:
+      sondear_api: [count, campos_disponibles, muestra, error]
+      proponer_herramienta: [propuesta_id, estado, error]
 
 # -----------------------------------------------------------------------------
 #  SEGURIDAD
@@ -767,7 +892,7 @@ rag:
   # registra en unanswered_queries.
   mensaje_sin_resultados: >
     No encontre eso en la documentacion disponible. Lo estoy registrando para
-    que lo revisen. Si es urgente, te paso con un companero.
+    que lo revisen. Si es urgente, te paso con un compañero.
 
 # -----------------------------------------------------------------------------
 #  MODELOS  -  medido con banco_pruebas.py, agosto 2026
@@ -1157,12 +1282,22 @@ herramientas:
   - nombre: consultar_ticket
     tipo: http
     solo_lectura: true
-    roles_permitidos: [soporte]
+    # 'administracion' agregado aca (estaba en su puede_consultar pero no
+    # aca -- ver el comentario en ese rol. Documental/defensa en profundidad,
+    # el motor autoriza por puede_consultar (editor.py), pero dejarlo asi
+    # mentia en la config).
+    roles_permitidos: [soporte, administracion]
     base_url: https://api.wisphub.io
     endpoint: /api/tickets/
     metodo: GET
     auth_ref: WISPHUB_API_KEY
     auth_esquema: Api-Key
+    # 'descripcion' es texto libre escrito por un operador -- puede traer
+    # PII embebida (PRD.md 7.4: caso real con nombre, telefono, email,
+    # direccion, GPS, cedula y un enlace, todo en un solo campo). La lista
+    # blanca de abajo decide que campos pasan; esto decide que se les saca
+    # ANTES de que lleguen al modelo. Ver nucleo/seguridad/redaccion.py.
+    campos_texto_libre: [descripcion]
 
   - nombre: consultar_tickets_de_cliente
     tipo: http
@@ -1235,7 +1370,29 @@ herramientas:
     tipo: agregado
     entidad: clientes
     etiqueta: clientes
+    descripcion: >
+      Cuenta clientes por estado, plan, ciudad, localidad, router o tecnico
+      (o el total sin filtro). El resultado ya viene calculado -- nunca sumes
+      ni corrijas el numero que te llega.
+
+      Si el colaborador pide explicitamente un archivo o reporte descargable
+      ("mandame un excel", "quiero el reporte de morosos", "pasamelo en
+      pdf"), pasa formato='excel' o formato='pdf' segun lo que haya pedido
+      (si no aclaro el tipo de archivo, usa 'excel'): se genera un archivo
+      real y queda adjunto a tu respuesta automaticamente, el colaborador lo
+      ve en la misma conversacion. El resultado te trae 'archivo_id' -- es un
+      identificador TECNICO, NUNCA lo escribas ni lo menciones en tu
+      respuesta (no significa nada para una persona). Solo confirma que ya
+      generaste el archivo, por ejemplo "Listo, te dejo el Excel con el
+      detalle". Si solo pregunta un numero ("cuantos clientes activos hay"),
+      no uses formato o dejalo en 'texto' -- redacta la respuesta como
+      siempre, sin mencionar ningun archivo.
+
+      Si el resultado trae 'error_archivo', el archivo NO se genero -- decile
+      al colaborador que el reporte no se pudo generar en este momento, nunca
+      afirmes que si se genero.
     solo_lectura: true
+    exportable: true
     roles_permitidos: [soporte, facturacion, administracion]
     base_url: https://api.wisphub.io
     endpoint: /api/clientes/
@@ -1272,20 +1429,51 @@ herramientas:
     tipo: agregado
     entidad: facturas
     etiqueta: facturas
+    descripcion: >
+      Cuenta facturas por estado o zona (o el total sin filtro). El
+      resultado ya viene calculado -- nunca sumes ni corrijas el numero.
+
+      Si el colaborador pide explicitamente un archivo o reporte
+      descargable ("mandame un excel", "quiero el reporte de morosos",
+      "pasamelo en pdf"), pasa formato='excel' o formato='pdf' segun lo que
+      haya pedido (si no aclaro, usa 'excel'): se genera un archivo real y
+      queda adjunto a tu respuesta automaticamente. El resultado te trae
+      'archivo_id' -- es un identificador TECNICO, NUNCA lo escribas ni lo
+      menciones en tu respuesta. Solo confirma que ya generaste el archivo.
+      Si solo pregunta un numero, no uses formato o dejalo en 'texto'.
+
+      Si el resultado trae 'error_archivo', el archivo NO se genero --
+      decile al colaborador que el reporte no se pudo generar en este
+      momento, nunca afirmes que si se genero.
     solo_lectura: true
+    exportable: true
     roles_permitidos: [facturacion, administracion]
     base_url: https://api.wisphub.io
     endpoint: /api/facturas/
     auth_ref: WISPHUB_API_KEY
     auth_esquema: Api-Key
-    # Verificado: 3606+5087+7 = 8700 = total. Las 5 zonas suman 8700 exacto.
     filtros_verificados:
       estado:
         param: estado
         tipo: enum
         valores: {pendiente: 1, pagada: 2, cancelada: 3, en_revision: 4, transferida: 5}
         verificado_el: 2026-07-29
-      zona: {param: zona, tipo: id, verificado_el: 2026-07-29}
+      # 'tipo: id' antes -- rechazaba silenciosamente cualquier intento de
+      # agrupar_por: zona (agregado.py solo agrupa filtros tipo enum con
+      # 'valores' cerrado). Encontrado en vivo (17/08/2026): un colaborador
+      # de facturacion pidio "facturas pendientes por zona" y el agregado
+      # devolvio el error correcto, pero la promesa de 'agrupar_por: [estado,
+      # zona]' de mas abajo nunca podia cumplirse. Solo 5 zonas en WispHub
+      # (catalogo cerrado, /api/zonas/) -- se pasa a enum. Re-verificado el
+      # mismo dia: las 5 zonas suman 5306 = total sin filtro exacto, y
+      # zona=999999999 da 0.
+      zona:
+        param: zona
+        tipo: enum
+        valores: {SERVIDOR SABANAGRANDE: 32278, CORTE 15 - SERVIDOR 1: 20053,
+                   CORTE 15 - SERVIDOR 2: 20054, CORTE 30 - SERVIDOR 1: 20049,
+                   CORTE 30 - SERVIDOR 2: 20050}
+        verificado_el: 2026-08-17
     filtros_ignorados_por_api:
       facturadas: La API ignora este filtro.
       cliente: Para las facturas de UN cliente usa consultar_facturas.
@@ -1306,7 +1494,23 @@ herramientas:
     tipo: agregado
     entidad: tickets
     etiqueta: tickets
+    descripcion: >
+      Cuenta tickets por estado (o el total sin filtro). El resultado ya
+      viene calculado -- nunca sumes ni corrijas el numero.
+
+      Si el colaborador pide explicitamente un archivo o reporte
+      descargable, pasa formato='excel' o formato='pdf' segun lo que haya
+      pedido (si no aclaro, usa 'excel'): se genera un archivo real y queda
+      adjunto a tu respuesta automaticamente. El resultado te trae
+      'archivo_id' -- es un identificador TECNICO, NUNCA lo escribas ni lo
+      menciones en tu respuesta. Solo confirma que ya generaste el archivo.
+      Si solo pregunta un numero, no uses formato o dejalo en 'texto'.
+
+      Si el resultado trae 'error_archivo', el archivo NO se genero --
+      decile al colaborador que el reporte no se pudo generar en este
+      momento, nunca afirmes que si se genero.
     solo_lectura: true
+    exportable: true
     roles_permitidos: [soporte, administracion]
     base_url: https://api.wisphub.io
     endpoint: /api/tickets/
@@ -1486,6 +1690,31 @@ herramientas:
           hasta:
           etiqueta: fuera del rango documentado (senal muy fuerte) -- revisar con un tecnico
 
+  - nombre: consultar_incidente_red
+    tipo: interno
+    detecta_incidente: true
+    descripcion: >
+      Correlaciona la ONU de ESTE cliente contra los incidentes activos de
+      su OLT en SmartOLT -- resuelve si su falla es un caso aislado o parte
+      de una caida que afecta a mas gente (mismo splitter/PON). El
+      veredicto ('es_incidente_de_red', cuantos clientes, desde cuando) ya
+      viene calculado, no lo recalcules ni lo cuestiones. IMPORTANTE:
+      SmartOLT tarda 2 a 5 minutos en agrupar una caida recien empezada
+      (dato del proveedor) -- 'es_incidente_de_red: false' en un reporte
+      muy reciente significa "todavia no hay nada agrupado", no "confirmado
+      que es solo suyo". Comunicaselo asi al colaborador, no lo simplifiques
+      a un si/no tajante cuando el reporte tiene pocos minutos.
+    solo_lectura: true
+    roles_permitidos: [soporte]
+    base_url_ref: SMARTOLT_SUBDOMINIO
+    auth_ref: SMARTOLT_API_KEY
+    auth_esquema: ""
+    auth_header: X-Token
+    inyectar_sesion:
+      sn_onu: sn_onu
+    reintentar_identificador_como:
+      sn_onu: gpon_hex
+
   - nombre: reiniciar_ont
     tipo: http
     descripcion: >
@@ -1644,6 +1873,52 @@ herramientas:
         "ONT LOFi alarm": "sin señal optica: puede ser la fibra (cortada o falla en la caja NAP) O el equipo apagado/desenchufado -- desde la OLT los dos se ven identicos, hay que preguntarle al cliente por la corriente para distinguirlos"
         "ONU is currently online": "el equipo esta en linea, no hay una caida que explicar"
 
+  - nombre: cambiar_tipo_onu
+    tipo: http
+    multipart: true
+    descripcion: >
+      Corrige el TIPO con que la ONU quedo registrada en SmartOLT, para que
+      exponga el puerto de television. No cambia nada fisico en la casa del
+      cliente: cambia como esta clasificado su equipo.
+
+      SOLO se usa cuando consultar_estado_catv devolvio 'Not supported by
+      ONU-Type' Y el cliente confirmo que tiene UN SOLO equipo. Si tiene dos,
+      su television va por un decodificador aparte y el puerto de la ONU no
+      interviene -- cambiar el tipo ahi no arregla nada.
+
+      Despues de llamarla, vuelve a leer consultar_estado_catv: tiene que
+      dejar de decir 'Not supported'. Recien entonces activar_catv.
+    solo_lectura: false
+    requiere_confirmacion: true
+    # No en el turno en que la conversacion llega al area: hace falta que el
+    # cliente haya contestado cuantos equipos tiene, y eso es un turno suyo.
+    exige_turno_propio: true
+    limite_por_conversacion: 1
+    exige_previas:
+      - herramienta: consultar_estado_catv
+        campo: catv
+        contiene: "Not supported"
+    roles_permitidos: [soporte_tecnico_cliente, soporte]
+    base_url_ref: SMARTOLT_SUBDOMINIO
+    endpoint: /api/onu/change_onu_type/{sn_onu}
+    metodo: POST
+    auth_ref: SMARTOLT_API_KEY
+    auth_esquema: ""
+    auth_header: X-Token
+    inyectar_sesion:
+      sn_onu: sn_onu
+    # El nombre del campo salio de la coleccion oficial del proveedor (ver
+    # .claude/skills/smartolt-api/SKILL.md, el truco del collectionId), no de
+    # adivinar: 'onu_type', form-data, con el NOMBRE del tipo como valor.
+    #
+    # 'CDATA-CATV' es el destino porque en esta instancia el unico tipo sin
+    # soporte de TV es 'CDATA' (355 equipos, medido el 18/08/2026) y su
+    # equivalente con CATV es ese, con 1.247 equipos funcionando. Si algun dia
+    # aparece otro tipo sin soporte, esto deja de alcanzar y hay que mapear
+    # origen -> destino en vez de un destino fijo.
+    argumentos_fijos:
+      onu_type: CDATA-CATV
+
   - nombre: activar_catv
     tipo: http
     descripcion: >
@@ -1763,6 +2038,47 @@ herramientas:
     # bloque 'veredictos' igual al de consultar_senal_ont y el campo
     # '..._veredicto' a la lista blanca de los roles.
 
+  # --- asistente de configuracion guiada (agosto 2026) --------------------
+  # Las dos unicas herramientas 'tipo: interno' de este catalogo que NO son
+  # verifica_identidad/confirma_identidad/deriva_rol. No pasan por el
+  # ejecutor generico de nucleo/modelo/motor.py::_ejecutar_tool -- las
+  # despacha directo Herramienta.sondea_api / .propone_herramienta. Ver
+  # nucleo/herramientas/sondeo.py para el bloqueo de SSRF.
+  - nombre: sondear_api
+    tipo: interno
+    sondea_api: true
+    solo_lectura: true
+    roles_permitidos: [configuracion_guiada]
+    descripcion: >
+      Hace un GET de solo lectura contra una URL externa que describis vos
+      (o el ADMIN te paso). Bloqueada contra redes privadas/internas por
+      seguridad -- si la URL resuelve a una IP interna, el pedido se
+      rechaza antes de salir.
+
+      Devuelve un RESUMEN, nunca el volcado completo: cuantos registros hay
+      (count), que campos trae cada uno (campos_disponibles), y hasta 3
+      filas de muestra. Usalo primero SIN filtros para ver la forma de la
+      respuesta, y despues con 'params' distintos para verificar cada
+      filtro con el metodo del valor imposible (comparar sin filtro, con un
+      valor que no puede existir, y con un valor real).
+
+      Si la API necesita autenticacion, pasa 'auth_ref' con el NOMBRE del
+      secreto ya guardado (nunca le pidas al ADMIN que te escriba la clave
+      en el chat -- vos no la necesitas, el motor la resuelve solo).
+
+  - nombre: proponer_herramienta
+    tipo: interno
+    propone_herramienta: true
+    solo_lectura: false
+    requiere_confirmacion: true
+    roles_permitidos: [configuracion_guiada]
+    descripcion: >
+      Guarda el borrador de una Herramienta nueva, con la evidencia del
+      sondeo que la respalda. NO la activa -- queda pendiente hasta que un
+      ADMIN humano la apruebe desde la pantalla de configuracion. Llamala
+      SOLO despues de haber verificado con sondear_api lo que estas
+      declarando; nunca antes.
+
 # -----------------------------------------------------------------------------
 #  CANALES
 # -----------------------------------------------------------------------------
@@ -1827,8 +2143,27 @@ escalamiento:
   activar_si: [frustracion_detectada, tres_fallos_seguidos, solicitud_explicita, duda_de_identidad,
                visita_tecnica_requerida, sin_datos_para_diagnosticar]
   destino_rol: soporte
-  mensaje: Te paso con un companero del equipo para que te ayude mejor.
+  # Este texto REEMPLAZA la respuesta del asistente cuando escala (ver
+  # nucleo/canales/api.py), no se le suma -- asi que tiene que sostenerse
+  # solo: es lo unico que el cliente va a leer en ese turno.
+  mensaje: >-
+    Entiendo tu molestia. Te paso con un compañero del equipo que va a
+    revisar tu caso ahora mismo.
   siempre_disponible: true
+  # Un cliente que putea por el servicio no esta pidiendo un humano: esta
+  # pidiendo que le arreglen el internet, y eso el asistente lo puede hacer
+  # solo en veinte segundos. Escalarlo a la primera lo sacaba del asistente
+  # antes de intentar siquiera el diagnostico -- y en un ISP eso es casi todo
+  # el que se queda sin servicio (visto el 15/08/2026: "el internet no sirve
+  # para una verga" -> caso humano abierto, cero herramientas ejecutadas).
+  #
+  # Se le da UNA vuelta, no mas. Si el proximo mensaje sigue igual, pasa a
+  # una persona sin discutir: insistir con alguien que ya exploto dos veces
+  # empeora las cosas.
+  #
+  # 'solicitud_explicita' NO va aca a proposito: ese es el cliente PIDIENDO
+  # hablar con alguien, y a eso no se lo hace esperar una vuelta.
+  intentar_resolver_antes: [frustracion_detectada]
   # Piloto (agosto 2026): sin_senal_tv es el UNICO caso con agendamiento
   # automatico habilitado -- nucleo/seguimiento/agendamiento.py revisa el
   # checklist de la seccion 5.9 contra el manual real antes de agendar.

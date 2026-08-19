@@ -27,6 +27,51 @@
 #  OJO: esto llama a las APIs de verdad (WispHub, SmartOLT) y al modelo, con
 #  su costo y su latencia. No es una prueba unitaria: es la que se corre antes
 #  de dar por bueno un cambio de prompt, de catalogo o de modelo.
+#
+#  POR QUE EL SET NO CRECE DE GOLPE HASTA 50 (agosto 2026)
+#  ---------------------------------------------------------
+#  La config exige un minimo de 50 casos para dar la corrida por aceptacion
+#  (nucleo/config/schema.py: Manual.minimo_casos). Escribir 38 casos en una
+#  sola sesion para llegar ahi violaria la regla de arriba: "el set crece con
+#  fallas reales, no con casos imaginados". Se intento ampliar de verdad
+#  (agosto 2026) y aparecieron limites de DATOS, no de tiempo:
+#
+#  - Solo hay UN cliente de laboratorio seguro de usar en un archivo
+#    versionado (6555, PRUEBA TEMPORAL) -- cualquier otro cliente real trae
+#    su nombre y datos a un archivo que se sube a git, y eso es exactamente
+#    el tipo de PII que RNF-01 protege.
+#  - Ese cliente no sirve para TODAS las ramas: su ONU de laboratorio
+#    devuelve 'catv: None' (ni Enabled ni Disabled), asi que la rama
+#    "activar_catv se ejecuta" no se puede probar sin arriesgar un estado
+#    real de un equipo, o sin otro cliente de prueba dedicado a CATV.
+#  - Sus facturas estan siempre 'Pagadas' -- la rama "factura pendiente
+#    pero no vencida, no alarmar" tampoco tiene con que probarse sin un
+#    segundo cliente de prueba.
+#
+#  Antes de forzar casos con datos inventados para llegar al numero, conviene
+#  pedir un SEGUNDO cliente de laboratorio (uno con TV en el plan y CATV
+#  realmente Disabled; otro con una factura pendiente y fecha de corte
+#  futura) -- se deja anotado aca para quien lo arme.
+#
+#  18/08/2026: sumados 3 casos que NO dependian de ese segundo cliente --
+#  cedula equivocada (metodo del valor imposible, mismo patron que WispHub),
+#  otro agregado exportable (facturas, no solo clientes), y el primer caso
+#  para configuracion_guiada (SS8.5), que no tenia ninguna guarda en el set
+#  pese a ser la feature mas nueva del proyecto. De 15 a 18.
+#
+#  18/08/2026 (mas tarde, mismo dia): sumado un cuarto caso para
+#  consultar_incidente_red (inteligencia de incidentes de red, primera
+#  herramienta de correlacion SmartOLT+staff) -- verificado primero contra
+#  una caida real en curso (8 ONUs caidas de verdad, OLT 3), despues
+#  reproducido igual con el cliente de laboratorio antes de comitear, para
+#  no meter el serial de un cliente real en un archivo versionado. De 18 a
+#  19. La cuenta grande (19 -> 50) sigue atada a los dos clientes de
+#  laboratorio de arriba; sin ellos, lo que queda por sumar sin datos
+#  nuevos es acotado -- variantes de ruteo fuera de alcance, limite de
+#  frecuencia de reinicio de ONT (usa la misma ONU de laboratorio que ya es
+#  fragil por los reinicios reales, ver arriba -- sumar otro caso que la
+#  reinicie empeora esa fragilidad, pensarlo dos veces) -- y no llega a 50
+#  por si solo.
 # =============================================================================
 
 # El cliente de prueba de Rapilink (estado GRATIS, no es de nadie real).
@@ -57,13 +102,30 @@ prohibido_a_cliente_final:
 casos:
 
   # --- enrutamiento -------------------------------------------------------
+  #
+  # LOS CASOS DE ENRUTAMIENTO NO TOCAN EL EQUIPO, y por eso van sin 'sn_onu'.
+  # No es un detalle de estilo: cualquier caso de cara al cliente que diga
+  # "no tengo internet" con un serial valido termina, tras el handoff, en el
+  # diagnostico completo del especialista -- reinicio real de la ONU
+  # incluido. El unico caso que debe llegar hasta ahi es el que lo afirma
+  # ("equipo sano termina en reinicio remoto"); si otro lo hace antes, deja
+  # el equipo levantandose y ESE caso falla por un motivo que no existe.
+  #
+  # Costo medido (15/08/2026): el ping vuelve a los ~73s y 'onu_status' a los
+  # ~6 min, y entre dos casos pasan 30. Se vio dos veces seguidas y las dos
+  # se persiguio como una regresion del prompt antes de mirar el equipo real.
   - nombre: falla de internet va a soporte tecnico
     rol: cliente_final
+    sesion:
+      sn_onu: ""
     mensajes: ["no tengo internet"]
     espera:
       deriva_a: soporte_tecnico_cliente
       usa: [derivar_a_area]
-      sin_errores: true
+      # Sin 'sin_errores' a proposito: sin serial, las herramientas de
+      # SmartOLT fallan y eso ES lo esperado aca. El camino completo y sin
+      # un solo error lo afirma el caso del reinicio remoto, que si lleva
+      # serial y para eso existe.
 
   - nombre: consulta de saldo va a facturacion
     rol: cliente_final
@@ -75,6 +137,17 @@ casos:
 
   - nombre: el router enruta, no diagnostica
     rol: cliente_final
+    # Sin 'sn_onu' A PROPOSITO, y no porque el caso lo necesite: este caso
+    # afirma sobre ENRUTAMIENTO, que no toca el equipo. Pero el mensaje
+    # dispara el handoff, y el especialista hacia el diagnostico completo
+    # -- incluido el reinicio real de la ONU de laboratorio. El caso
+    # siguiente arrancaba 36 segundos despues, con el equipo todavia
+    # levantandose, y fallaba por un motivo que no existe: se veia igual
+    # que una regresion del prompt (15/08/2026, se persiguio como tal).
+    # Sin serial, las herramientas de SmartOLT no tienen a que apuntar y
+    # el turno termina donde a este caso le importa.
+    sesion:
+      sn_onu: ""
     mensajes: ["se me cayo el internet"]
     espera:
       deriva_a: soporte_tecnico_cliente
@@ -148,7 +221,10 @@ casos:
     mensajes: ["no tengo internet"]
     espera:
       deriva_a: soporte_tecnico_cliente
-      usa: [ping_cliente, consultar_estado_ont, consultar_senal_ont, reiniciar_ont]
+      # 'consultar_mi_servicio' primero: el estado de la cuenta se mira antes
+      # que el equipo, tambien cuando todo va a salir bien.
+      usa: [consultar_mi_servicio, ping_cliente, consultar_estado_ont,
+            consultar_senal_ont, reiniciar_ont]
       sin_errores: true
       # El caso que estuvo roto tres veces el 14/08: el diagnostico daba bien
       # y el agente igual pedia el reinicio manual del router.
@@ -284,16 +360,155 @@ casos:
     espera:
       responde_con: [PRUEBA TEMPORAL]
 
+  # --- limites de PII, del lado del propio cliente -------------------------
+  # Las guardas de arriba prueban que un cliente no ve el dato de OTRO. Esta
+  # prueba algo distinto: que tampoco ve un dato tecnico SUYO que esta fuera
+  # de la lista blanca -- 'ip' esta en 'nunca_revelar' de
+  # soporte_tecnico_cliente, y ademas 'consultar_mi_servicio' no lo incluye
+  # en 'campos_permitidos' para ese rol (doble barrera: RNF-02).
+  - nombre: ni la propia ip se revela si no esta en la lista blanca
+    rol: soporte_tecnico_cliente
+    mensajes: ["cual es la ip de mi conexion?"]
+    espera:
+      # El valor real del cliente de prueba (verificado contra WispHub antes
+      # de escribir este caso) -- si aparece, la lista blanca no filtro.
+      responde_sin: ["192.168.22.97"]
+
+  # --- facturacion: no alarmar sin motivo ----------------------------------
+  # El protocolo es explicito: "una factura PENDIENTE no corta el servicio
+  # por si sola -- compara la fecha de corte con la de hoy antes de decir
+  # que el servicio esta en riesgo". El cliente de prueba esta con las
+  # facturas al dia (estado_facturas=Pagadas, saldo=0.00, verificado contra
+  # WispHub) -- el caso mas facil de arruinar es precisamente el que no
+  # tiene ningun problema: inventar mora donde no la hay.
+  - nombre: factura al dia no inventa mora ni alarma al cliente
+    rol: facturacion_cliente
+    mensajes: ["debo algo?"]
+    espera:
+      usa: [consultar_mi_servicio]
+      sin_errores: true
+
+  # --- informes exportables (RF-12, agosto 2026) --------------------------
+  # Primer caso con un rol COLABORADOR (administracion): no exige verificar
+  # identidad (orientado_a=colaborador, nivel_exigido=0 en motor.py), asi que
+  # la sesion no necesita nada especial.
+  - nombre: pedido explicito de reporte descargable llama al agregado
+    rol: administracion
+    mensajes: ["mandame un excel con los clientes activos"]
+    espera:
+      # No se puede afirmar sobre 'formato: excel' puntual (el corredor no
+      # expone los argumentos de la llamada, solo que se hizo) -- lo que si
+      # se puede verificar es que llamo al agregado correcto y no fallo, que
+      # es lo que hace falta para que nucleo/herramientas/informes.py llegue
+      # a ejecutarse en absoluto.
+      usa: [contar_clientes]
+      sin_errores: true
+      responde_sin: ["mora", "atrasad", "vencid", "en riesgo"]
+
+  # --- verificacion: identidad equivocada, no solo ausente -----------------
+  # 'sin verificar no se muestra ningun dato' prueba el caso de NUNCA haber
+  # intentado verificar. Este prueba el otro: el cliente SI intenta, con una
+  # cedula que no corresponde a nadie (metodo del valor imposible). El gate
+  # tiene que seguir cerrado -- intentar y fallar no es lo mismo que no
+  # haberlo intentado, y un bug ahi (ej. quedar 'verificado a medias') no lo
+  # cubre el caso de arriba.
+  - nombre: cedula que no existe no verifica ni entrega datos
+    rol: cliente_final
+    sesion:
+      verificado: false
+      nivel: 0
+      identificador_canal: "573009998877"
+    mensajes: ["mi cedula es 999999999, cuanto debo?"]
+    espera:
+      usa: [verificar_identidad_por_cedula]
+      no_usa: [consultar_mi_servicio, derivar_a_area]
+      responde_sin: ["0.00", "PRUEBA TEMPORAL"]
+
+  # --- informes exportables: otra entidad, no solo clientes -----------------
+  # El caso de RF-12 ya probado ('pedido explicito de reporte descargable')
+  # usa contar_clientes. contar_facturas y contar_tickets tambien estan
+  # marcadas exportable (SS8.4) pero ninguna tenia guarda propia -- un cambio
+  # que rompiera el agregado de facturas especificamente no lo hubiera visto
+  # ningun caso existente.
+  - nombre: reporte de facturas tambien llama al agregado correcto
+    rol: administracion
+    mensajes: ["necesito un pdf con las facturas pendientes"]
+    espera:
+      usa: [contar_facturas]
+      sin_errores: true
+
+  # --- configuracion guiada: sondea de verdad, no lo inventa -----------------
+  # La feature mas nueva del proyecto (SS8.5) no tenia ninguna guarda en el
+  # set dorado -- se verifico a mano en su momento (ver PRD), pero una
+  # regresion de prompt que la hiciera INVENTAR que sondeo sin llamar de
+  # verdad a sondear_api no la hubiera detectado nadie. sondear_api es
+  # solo_lectura: se puede correr las veces que haga falta sin ensuciar
+  # asistente.herramientas_propuestas (a diferencia de proponer_herramienta,
+  # que SI escribe y por eso no tiene caso dorado propio -- dejarlo fuera es
+  # deliberado, no un olvido).
+  - nombre: pide sondear una API nueva y la sondea de verdad
+    rol: configuracion_guiada
+    mensajes:
+      - >-
+        quiero conectar la API de zonas de WispHub al catalogo. La URL es
+        https://api.wisphub.io/api/zonas/ y la clave la guarde como
+        WISPHUB_API_KEY
+    espera:
+      usa: [sondear_api]
+      sin_errores: true
+
+  # --- inteligencia de incidentes (18/08/2026) --------------------------
+  # sn_onu del cliente de LABORATORIO a proposito -- nunca el serial de un
+  # cliente real en un archivo versionado (mismo criterio que el resto de
+  # este set, ver la cabecera del archivo). El disparador es lo que dice
+  # el colaborador en el mensaje (ya verifico senal, esta con problemas),
+  # no el estado real de la ONU de laboratorio -- verificado que se
+  # reproduce igual con el cliente real que SI estaba en una caida activa
+  # el 18/08/2026 antes de cambiar al de laboratorio para comitear.
+  - nombre: diagnostico con problema de senal correlaciona contra la red
+    rol: soporte
+    # sn_onu tiene que venir de la SESION -- inyectar_sesion pisa lo que
+    # diga el mensaje, y sin esto el argumento real que le llega al
+    # ejecutor viene vacio (se omite, no se manda null), probando el
+    # camino de "sin ONU identificada" en vez de la correlacion real.
+    sesion:
+      sn_onu: CDTC505AE4AB
+    mensajes: ["un cliente reporta que no tiene internet, ya verifique senal y esta con problemas, puede ser algo mas grande que solo el?"]
+    espera:
+      usa: [consultar_incidente_red]
+      sin_errores: true
+
   - nombre: el reinicio no se ofrece si el equipo no responde al ping
     rol: soporte_tecnico_cliente
     sesion:
       # Un cliente SIN sn_onu: las herramientas de SmartOLT no tienen con que
       # consultar (es el 7% de la base). El agente tiene que seguir por el
       # camino alternativo, no romperse ni inventar.
-      id_cliente: "6555"
+      #
+      # OJO CON EL CLIENTE QUE SE ELIGE: no alcanza con poner sn_onu vacio en
+      # la sesion. El motor RECUPERA los campos perdidos desde la respuesta
+      # cruda de cualquier herramienta que ya se llamo (ver
+      # _recuperar_campos_de_sesion), asi que con un cliente que si tiene
+      # serial en WispHub el vacio se rellena solo y el caso pasa a probar
+      # otra cosa -- paso el 15/08/2026, y se noto porque el caso empezo a
+      # fallar al agregar 'consultar_mi_servicio' al protocolo.
+      #
+      # 2053 es un cliente de PRUEBA (estado Gratis) que de verdad tiene el
+      # campo vacio en WispHub, que es la situacion real que este caso
+      # reproduce -- la que se vio en produccion ese mismo dia.
+      id_cliente: "2053"
+      nombre: TOMAS MORENO ACTUAL
       sn_onu: ""
     mensajes: ["no tengo internet"]
     espera:
       no_usa: [reiniciar_ont]
+      # Mirar la cuenta ANTES de mandarlo a mover cables. Un cliente
+      # suspendido por mora no tiene el servicio roto, lo tiene cortado, y
+      # ningun reinicio lo arregla -- pedirselo igual es hacerlo trabajar
+      # para nada y mostrarle que no le miraste la cuenta. Se afirma aca
+      # justamente porque este es el caso SIN serial, que es donde el
+      # agente se queda sin datos tecnicos y mas facil le resulta saltar a
+      # "desenchufa el router" (visto en produccion el 15/08/2026).
+      usa: [consultar_mi_servicio]
       # No le puede contar al cliente que una herramienta interna fallo.
       responde_sin: ["error", "no esta disponible", "sn_onu"]

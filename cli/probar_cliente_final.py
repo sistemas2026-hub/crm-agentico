@@ -108,5 +108,5 @@ if __name__ == "__main__":
         if not mensaje:
             continue
 
-        respuesta = motor.responder(config, "cliente_final", mensaje, historial, sesion)
+        respuesta, _registro, _medios = motor.responder(config, "cliente_final", mensaje, historial, sesion)
         print(f"\nasistente > {respuesta}\n")

@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
+import { headersMotor } from '$lib/server/v2/motor-headers.js';
 
 /**
  * El texto vigente de un documento puntual, en orden -- proxy hacia
@@ -23,7 +24,8 @@ export async function GET({ params, locals, fetch }) {
 
   try {
     const resp = await fetch(
-      `${baseUrl}/corpus/documentos/${params.id}/fragmentos?tenant=${encodeURIComponent(tenant)}`
+      `${baseUrl}/corpus/documentos/${params.id}/fragmentos?tenant=${encodeURIComponent(tenant)}`,
+      { headers: headersMotor() }
     );
     const datos = await resp.json();
     if (!resp.ok) {

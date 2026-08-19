@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
+import { headersMotor } from '$lib/server/v2/motor-headers.js';
 
 /**
  * Proxy de solo lectura para sondear mensajes nuevos sin recargar la
@@ -27,7 +28,8 @@ export async function GET({ params, locals, fetch }) {
 
   try {
     const resp = await fetch(
-      `${baseUrl}/conversaciones/${params.id}/mensajes?tenant=${encodeURIComponent(tenant)}`
+      `${baseUrl}/conversaciones/${params.id}/mensajes?tenant=${encodeURIComponent(tenant)}`,
+      { headers: headersMotor() }
     );
     const datos = await resp.json();
     if (!resp.ok) {

@@ -98,6 +98,8 @@ El sistema actual se **absorbe**, no se rescribe. Casi todo era ya configuració
 
 Ninguna vive en los YAML. La configuración solo guarda **nombres** (`auth_ref: WISPHUB_API_KEY`); el validador rechaza el archivo si detecta un valor con pinta de credencial.
 
+**Retiradas del `.env` (18/08/2026): `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY`.** Esta tabla las listaba como si el frontend hablara directo con Supabase (cliente en el browser, protegido por RLS con la clave anónima) — un diseño que quedó atrás: la app web habla con Django (JWT vía BottleCRM, ver `hooks.server.js`), nunca con un cliente Supabase del lado del navegador. Grep sobre todo el repo (`nucleo/`, `django-crm/backend/`, `django-crm/frontend/`) no encontró ni una referencia a ninguna de las dos — probable residuo de `isp-reports-app`, que sí usa ese patrón.
+
 ```
 WISPHUB_API_KEY            clave del ISP
 WISPHUB_BASE_URL
@@ -108,8 +110,6 @@ SMARTOLT_BASE_URL          seed local -- una vez cargado el tenant, el
                             subdominio real vive en variables_tenant (DB),
                             no en el .env (ver el porqué mas abajo)
 
-VITE_SUPABASE_URL          proyecto
-VITE_SUPABASE_ANON_KEY     pública por diseño — protegida por RLS
 SUPABASE_SERVICE_ROLE_KEY  ⚠️  solo migraciones (ver abajo)
 
 DATABASE_URL               conexión al Postgres del Supabase propio

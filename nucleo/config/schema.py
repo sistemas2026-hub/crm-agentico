@@ -583,6 +583,34 @@ class Herramienta(Base):
     # esto no hay que ofrecerle al modelo, no hay forma de armar el enum del
     # esquema ni de validar la derivacion en codigo.
     areas_destino: list[str] = Field(default_factory=list)
+    # Excepcion CUARTA a "el modelo nunca propone argumentos libres" (las
+    # otras tres: campo_busqueda de verifica_identidad, 'confirma' de
+    # confirma_identidad, 'area' acotada de deriva_rol). Esta SI necesita ser
+    # libre: el asistente de configuracion guiada (CLAUDE.md, "la proxima
+    # empresa que se conecte no deberia necesitar una sesion de codigo")
+    # existe justamente para que un ADMIN describa una API que nucleo/ no
+    # conoce todavia. La seguridad no viene de restringir el argumento sino
+    # de tres capas alrededor: nucleo/herramientas/sondeo.py bloquea SSRF
+    # (nunca una IP privada/interna), la clave de auth se referencia por
+    # NOMBRE (auth_ref) y se resuelve server-side -- nunca pasa por el
+    # modelo -- y nada de lo sondeado se activa sin aprobacion humana (ver
+    # propone_herramienta).
+    sondea_api: bool = False
+    # Quinta excepcion: guarda el borrador de Herramienta que arma el ADMIN
+    # despues de sondear, en asistente.herramientas_propuestas -- 'pendiente'
+    # hasta que alguien lo apruebe desde /configuracion-guiada. El modelo
+    # nunca escribe directo al catalogo real, aunque sea el mismo ADMIN
+    # quien esta charlando -- ver nucleo/canales/api.py, aprobar_propuesta().
+    propone_herramienta: bool = False
+    # NO es una excepcion a "el modelo nunca propone argumentos libres" --
+    # toma CERO argumentos del modelo, solo 'sn_onu' via inyectar_sesion,
+    # igual que consultar_senal_ont. Encadena dos llamadas a SmartOLT
+    # (resolver OLT/board/port de la ONU, despues consultar incidentes
+    # activos de esa OLT) y calcula el veredicto en codigo -- PRD SS12.5, el
+    # modelo nunca compara board/port a mano. Ver
+    # nucleo/herramientas/incidentes.py y la skill smartolt-api (seccion
+    # get_outage_pons) para el porque y la verificacion en vivo.
+    detecta_incidente: bool = False
 
     # --- http / agregado ---
     # No es secreto (no dispara el barrido de _barrer_secretos): es dato de
@@ -619,6 +647,13 @@ class Herramienta(Base):
     # extrae esa clave antes de pasar el dato al filtro de campos -- generico,
     # no sabe que proveedor la necesita.
     extraer_de: str | None = None
+    # Campos de la respuesta que son TEXTO LIBRE, no un valor estructurado --
+    # un operador humano pudo haber escrito cualquier cosa ahi, incluida PII
+    # (PRD.md 7.4, "Limite conocido: los campos de texto libre"). La lista
+    # blanca decide que campos pasan, no que contienen; estos nombres pasan
+    # ademas por nucleo/seguridad/redaccion.py antes de llegar al modelo,
+    # sin importar que rol pregunte -- es una propiedad del CAMPO, no del rol.
+    campos_texto_libre: list[str] = Field(default_factory=list)
     # La API responde 202 + {"task_id": ...} y hay que consultar el resultado
     # aparte (ej. WispHub en ping_cliente, verificado en vivo agosto 2026) --
     # ver nucleo/herramientas/http.py:ejecutar_asincrono().
@@ -767,6 +802,13 @@ class Herramienta(Base):
     agrupar_por: list[str] = Field(default_factory=list)
     periodo: Periodo | None = None
     tope_grupos: int = Field(default=12, ge=1, le=50)
+    # Solo para tipo 'agregado'. Si es True, el modelo recibe un argumento
+    # extra ('formato': texto|excel) y puede pedir el resultado como archivo
+    # descargable en vez de solo redactarlo. El archivo lo arma
+    # nucleo/herramientas/informes.py -- una hoja con 'interpretacion' y el
+    # desglose, nunca datos que el agregado no calculo ya. El modelo nunca ve
+    # el archivo en si, solo su identificador (ver motor.py, medios_pendientes).
+    exportable: bool = False
 
     @field_validator("auth_ref", "base_url_ref")
     @classmethod
@@ -968,6 +1010,23 @@ class Escalamiento(Base):
     # caso quedo completo. Vacio por defecto: ningun tenant ni ningun caso
     # agenda solo sin declararlo a proposito aca.
     agendamiento_automatico: dict[str, str] = Field(default_factory=dict)
+    # Motivos de 'activar_si' que NO escalan la primera vez que aparecen: el
+    # asistente se queda una vuelta mas e intenta resolver. Si el motivo
+    # vuelve a aparecer, escala sin discutir.
+    #
+    # Nace de un caso real (15/08/2026): un cliente escribio "el internet no
+    # sirve para una verga" en su primer reclamo, el modelo lo leyo como
+    # 'frustracion_detectada' y la conversacion se fue a un humano antes de
+    # que se intentara ningun diagnostico. En un ISP eso es casi todo el que
+    # se queda sin servicio -- el asistente pasaba de atender a filtrar
+    # llamadas.
+    #
+    # Que quede por tenant y por motivo, y no fijo en el codigo, es
+    # deliberado: otro ISP puede querer que un insulto pase a una persona de
+    # inmediato, y esa es una decision suya. Un motivo que no este aca escala
+    # como siempre, a la primera -- entre ellos 'solicitud_explicita', que es
+    # el cliente PIDIENDO un humano y nunca debe hacerse esperar.
+    intentar_resolver_antes: list[str] = Field(default_factory=list)
 
 
 class Limites(Base):

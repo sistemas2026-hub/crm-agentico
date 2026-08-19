@@ -21,6 +21,7 @@
  * enterarse de que no se guardo.
  */
 import { env } from '$env/dynamic/private';
+import { headersMotor } from './motor-headers.js';
 
 function destino() {
   const baseUrl = env.PRIVATE_ASISTENTE_URL;
@@ -39,7 +40,8 @@ export async function leerConfiguracionAsistente() {
   if (!cfg) return null;
   try {
     const resp = await fetch(
-      `${cfg.baseUrl}/configuracion?tenant=${encodeURIComponent(cfg.tenant)}`
+      `${cfg.baseUrl}/configuracion?tenant=${encodeURIComponent(cfg.tenant)}`,
+      { headers: headersMotor() }
     );
     if (!resp.ok) return null;
     return await resp.json();
@@ -63,7 +65,7 @@ export async function guardarPersonaAsistente(valores) {
 
   const resp = await fetch(`${cfg.baseUrl}/configuracion/persona`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: headersMotor({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ ...valores, tenant: cfg.tenant })
   });
 
@@ -88,7 +90,7 @@ export async function guardarDescripcionEmpresa(descripcion) {
 
   const resp = await fetch(`${cfg.baseUrl}/configuracion/identidad`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: headersMotor({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ descripcion, tenant: cfg.tenant })
   });
 
@@ -114,7 +116,7 @@ export async function guardarPlazoVisitaTecnica(dias) {
 
   const resp = await fetch(`${cfg.baseUrl}/configuracion/plazo-visita-tecnica`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: headersMotor({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ dias, tenant: cfg.tenant })
   });
 
@@ -135,7 +137,8 @@ export async function leerFlujoDerivacion() {
   if (!cfg) return null;
   try {
     const resp = await fetch(
-      `${cfg.baseUrl}/agentes/flujo?tenant=${encodeURIComponent(cfg.tenant)}`
+      `${cfg.baseUrl}/agentes/flujo?tenant=${encodeURIComponent(cfg.tenant)}`,
+      { headers: headersMotor() }
     );
     if (!resp.ok) return null;
     return await resp.json();
@@ -157,7 +160,7 @@ export async function guardarFlujoDerivacion(destinos, atiende) {
 
   const resp = await fetch(`${cfg.baseUrl}/agentes/flujo`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: headersMotor({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ tenant: cfg.tenant, destinos, atiende })
   });
   const datos = await resp.json().catch(() => ({}));

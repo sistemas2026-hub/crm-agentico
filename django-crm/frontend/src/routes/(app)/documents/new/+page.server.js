@@ -2,6 +2,7 @@ import { fail, redirect } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { getUploadOptions, uploadDocument, STATUS_CHOICES } from '$lib/server/v2/documents.js';
 import { readableError } from '$lib/server/v2/form-errors.js';
+import { headersMotor } from '$lib/server/v2/motor-headers.js';
 
 /**
  * Uploading a document.
@@ -28,7 +29,8 @@ export async function load(event) {
   const tenant = env.PRIVATE_ASISTENTE_TENANT;
   if (baseUrl && tenant) {
     try {
-      const r = await event.fetch(`${baseUrl}/agentes?tenant=${encodeURIComponent(tenant)}`);
+      const r = await event.fetch(`${baseUrl}/agentes?tenant=${encodeURIComponent(tenant)}`,
+        { headers: headersMotor() });
       if (r.ok) {
         const datos = await r.json();
         rolesAsistente = (datos.agentes ?? []).map((a) => ({

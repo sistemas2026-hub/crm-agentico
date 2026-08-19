@@ -261,18 +261,23 @@ Colaborador (respuesta / informe)
   - El filtro se aplica a **cualquier forma** de respuesta (objeto, lista, paginado). Un filtro que solo entienda objetos sueltos deja pasar listas completas con PII.
   - El filtro alcanza los **objetos anidados** (notación `servicio.id_servicio`). Dejar pasar un objeto entero porque su nombre está en la lista blanca es una fuga: el `servicio` que viene dentro de un ticket incluye la IP del cliente y el router con sus credenciales.
   - La **confirmación manual** impide ejecutar un pago sin aprobación humana.
+  - **La guardia de salida** (`nucleo/seguridad/salida.py`, agosto 2026) es una tercera capa, agregada después de que las dos de arriba demostraran ser insuficientes: ambas protegen la *entrada* de datos al modelo, ninguna mira el *texto* que el modelo redacta antes de que llegue al cliente. Los casos dorados ya declaraban `responde_sin` para atrapar fugas de plomería interna (un código de error repetido tal cual, una fabricación sobre "cómo se sabe" la identidad), pero solo en evaluación — nada lo detenía en producción. La guardia corre el mismo chequeo en tiempo real, sobre los dos puntos donde `motor.py::responder()` devuelve texto redactado. Patrón con precedente en el rubro: Decagon lo llama *"capa de supervisor que atrapa errores antes de que el cliente los vea"* (investigado agosto 2026 comparando este proyecto contra Sierra, Decagon e Intercom Fin). **Deliberadamente no reusa `Rol.nunca_revelar`**: esa lista son nombres de *campo* para filtrar datos crudos de API, no frases prohibidas en lenguaje natural — `cliente_final` tiene `cedula` y `direccion` ahí, y el agente dice "pasame tu cédula" en cada verificación; buscar esa palabra en el texto libre habría bloqueado el flujo normal. Los patrones de la guardia son solo códigos internos del motor (`IDENTIDAD_NO_VERIFICADA`, `PRECONDICION_NO_CUMPLIDA`, etc.), tokens que nunca aparecen en español legítimo. Guarda: `tests/test_guardia_salida.py`.
 
-#### Límite conocido: los campos de texto libre
+#### Campos de texto libre — redacción por patrón (RESUELTO, agosto 2026)
 
 El filtro controla **qué campos** pasan, no **qué contiene** cada campo. Un campo de texto libre puede traer embebido cualquier dato, y la lista blanca no lo ve.
 
 Caso real detectado en producción: la `descripcion` de un ticket de instalación contenía nombre completo, teléfono, email, dirección, coordenadas GPS, número de documento, plan contratado con precio y un enlace público al PDF de la solicitud — todo en un solo string de 419 caracteres.
 
-Se decidió **mantener `descripcion`**: es el contenido del ticket y Soporte no puede trabajar sin él. Pero conviene tenerlo presente:
+Se decidió **mantener `descripcion`**: es el contenido del ticket y Soporte no puede trabajar sin él. La minimización de datos que da la lista blanca **no aplica** a los campos de texto libre — ahí llega lo que el operador haya escrito — así que hacía falta una capa más.
 
-- La minimización de datos que da la lista blanca **no aplica** a los campos de texto libre. Ahí llega lo que el operador haya escrito.
-- Si en algún momento se exige minimización estricta (auditoría legal, área con acceso restringido), un campo así necesita **redacción por patrón** (regex de cédulas, teléfonos, emails, URLs) además de la lista blanca. No está implementado.
-- Al agregar un campo nuevo a una lista blanca, preguntarse si es texto libre. Si lo es, la decisión no es solo "¿este campo sirve?" sino "¿qué puede venir escrito adentro?".
+**Implementado**: `nucleo/seguridad/redaccion.py` — patrones de cédula/teléfono (8-11 dígitos), email, URL y coordenadas GPS, aplicados sobre los campos que `Herramienta.campos_texto_libre` declara (propiedad del campo, no del rol — corre para cualquiera que consulte, sin repetir la declaración por área). Reemplaza cada coincidencia por una etiqueta (`[email oculto]`, etc.), conserva el resto del texto intacto — sacar la PII sin volver el campo inútil para quien tiene que atender el ticket.
+
+**Verificado contra datos reales, no un ejemplo de laboratorio** (17/08/2026): de 300 tickets reales, **136 (45%) traían un número de 8-11 dígitos embebido en la descripción** — más frecuente de lo que el caso original hacía pensar. La redacción lo saca (`"Telefono: 3113683499"` → `"Telefono: [numero de identificacion oculto]"`) sin tocar el resto del texto.
+
+**Límite honesto, no resuelto**: solo cubre patrones estructurados (números, emails, URLs, coordenadas). Un nombre propio o una dirección en prosa libre (`"Calle 45 #12-30"`) no se detecta — eso exigiría NLP, no regex, y queda fuera de este alcance.
+
+Configurado hoy en `consultar_ticket` (roles `soporte` y `administracion`). Al agregar un campo nuevo a una lista blanca, preguntarse si es texto libre — si lo es, agregarlo también a `campos_texto_libre` de esa herramienta. Guarda: `tests/test_redaccion.py`.
 
 ### 7.5 Parametrización por área (guía para extender)
 
@@ -360,11 +365,11 @@ SmartOLT es donde el ISP administra las ONUs autorizadas en la OLT de fibra — 
 |------|-----------|--------|
 | **0** | Prototipo de soporte en consola contra WispHub | ✅ Hecho |
 | **1** | Consolidar soporte: prompt de asesor, filtro PII, consulta por cédula | ✅ Hecho |
-| **2** | Identidad de área; parametrizar herramientas y filtros por rol | ✅ Hecho (login real pendiente, ver §8.1) |
+| **2** | Identidad de área; parametrizar herramientas y filtros por rol | ✅ Hecho — login real ya existe (JWT vía BottleCRM), ver §8.1 |
 | **3** | Replicar patrón a Facturación y Técnica | ✅ Catálogo definido y verificado — Técnica ahora incluye SmartOLT (lectura de red + reinicio de ONT, ver §7.7), no solo WispHub |
-| **4** | Generación de informes + exportación (Excel/PDF) | Pendiente |
-| **5** | Interfaz web interna (reemplaza la consola) | Pendiente |
-| **6** | Auditoría/logs y despliegue en servidor on-premise | Auditoría ✅ (§8.2) · despliegue pendiente |
+| **4** | Generación de informes + exportación (Excel/PDF) | ✅ Excel y PDF (ver §8.4) |
+| **5** | Interfaz web interna (reemplaza la consola) | ✅ En gran parte hecho — ver §8.1 |
+| **6** | Auditoría/logs y despliegue en servidor on-premise | Auditoría ✅ (§8.2) · despliegue: pasos manuales pendientes en DESPLIEGUE.md → `## Pendientes` |
 
 ---
 
@@ -383,29 +388,73 @@ El control es doble y se aplica en código: una herramienta que no está en `her
 
 **Credenciales: ningún área.** `password_servicio`, `password_cpe`, `password_router_wifi`, `password_ssid_router_wifi` y `usuario_router_wifi` están fuera de todas las listas, incluida Técnica. Un técnico que necesite una credencial la saca de WispHub; pasarla por el modelo no le ahorra un paso y la deja escrita en el historial de la conversación.
 
-**NO hecho — pendiente para la interfaz web (Fase 5):**
+**Hecho también (agosto 2026, corrige lo que decía este párrafo antes):** identificación real, no elegir un área de una lista. `django-crm/frontend/src/hooks.server.js` implementa login con JWT emitido por BottleCRM (access + refresh token rotado, membresía de organización, `locals.user`/`locals.profile.role`) — es la app web la que gatea cada ruta (`redirect` a `/login` sin sesión). Sobre esa identidad real hay una capa de autorización propia del asistente: `asistente.tenant_users` mapea `profile_id` (el perfil real del CRM) → los agentes/roles que un ADMIN le asignó (`/agentes/asignaciones`, `persistencia.agentes_de_colaborador()`). `POST /chat` resuelve el rol a partir de ese `profile_id` — nunca lo manda el cliente — y es **fail-closed**: sin asignación, `403` ("Todavía no tienes ningún agente asignado"), no cae a un rol por defecto. Un colaborador con Soporte y Facturación asignados los ve fusionados en un solo turno, sin elegir a cuál le habla.
 
-- **Es identificación, no autenticación.** No hay contraseña: quien abre la consola elige su área de una lista. Sirve para acotar lo que cada uno ve y para probar el catálogo, pero no impide que alguien elija otra área. La autenticación real requiere la capa web.
+**Sigue sin resolver:**
+
 - **Una sola clave de API para todos.** La clave de WispHub pertenece a un usuario del staff y hereda sus permisos, así que WispHub ve todas las consultas como si fueran de esa misma persona. **La separación por área es nuestra, no de WispHub.** Para que el control fuera real de punta a punta harían falta claves por colaborador.
-- **Sin auditoría** (RF-13): no queda registro de quién consultó qué. Con la identidad ya disponible, es el paso natural siguiente.
+- **La identidad del colaborador no queda en la fila de auditoría misma** — ver el matiz en §8.2: es recuperable, pero indirecto.
 
-### 8.2 Auditoría (RF-13) — implementada
+### 8.2 Auditoría (RF-13) — implementada, en base de datos (corrige la versión anterior de esta sección)
 
-Una línea JSON por **acceso a datos** (ejecución de herramienta), no por mensaje de la conversación. Archivo `auditoria.log`, fuera del repositorio.
+**Esta sección describía un archivo `auditoria.log` en JSON que ya no es como funciona el motor multi-tenant.** Ese archivo solo lo sigue escribiendo `soporte_wisphub.py`, el prototipo de referencia de un solo tenant (ver §11) — nunca `nucleo/`. La auditoría real es una fila en Postgres por **acceso a datos** (ejecución de herramienta), no por mensaje: `asistente.tool_calls`, insertada por `persistencia.registrar_llamada_herramienta()` y mostrada en el panel "Ver proceso" de `/conversaciones`.
 
-```json
-{"ts":"2026-07-28T21:56:29-05:00","area":"soporte",
- "herramienta":"consultar_cliente_por_cedula","args":{"cedula":"******1347"},
- "estado":"ok","sensible":false,"registros":1,"ms":762}
-```
-
-**Qué se registra:** cuándo, qué área, qué herramienta, sobre qué registro, con qué resultado, cuántos registros devolvió y cuánto tardó. Los `estado` posibles distinguen los cuatro caminos: `ok`, `error_api`, `argumentos_invalidos`, `rechazado_por_area`, `cancelado_por_operador`. Este último es el que deja constancia de que un humano **negó** una acción sensible.
+Columnas: `organization_id`, `conversation_id`, `herramienta`, `parametros` (enmascarados), `rol_solicitante`, `exito`, `n_registros`, `codigo_error`, `duracion_ms`, `es_escritura`, `creado_en`.
 
 **Qué NO se registra:** ningún dato devuelto. Ni nombre, ni email, ni dirección, ni IP, ni plan. *Un log de auditoría que copia los datos que vigila deja de ser un control y pasa a ser una segunda base de datos sin proteger.*
 
-**Enmascaramiento:** los identificadores de 8 dígitos o más se ocultan salvo los últimos 4 (`1044601347` → `******1347`). Cubre cédulas y teléfonos. Los IDs cortos —servicio (4), ticket (5), factura (6)— se conservan: son los que hacen útil la auditoría y no identifican a una persona por sí solos.
+**Enmascaramiento — más simple y más parejo de lo que decía esta sección antes.** `motor.py::_enmascarar()` no distingue por tipo de campo ni por largo del identificador: **todo** argumento de más de 4 caracteres se trunca a sus últimos 4 con el prefijo `...` (`"1044601347"` → `"...1347"`), sin importar si es cédula, teléfono o un ID de ticket de 5 dígitos. La afirmación anterior de que "los IDs cortos —ticket (5), factura (6)— se conservan" era falsa: con esta regla, cualquiera de más de 4 caracteres se enmascara igual.
 
-**Pendiente:** el log registra el **área**, no la persona — porque hoy no hay autenticación (§8.1). Cuando exista login real, el campo `area` debe acompañarse del identificador del colaborador; el resto de la estructura no cambia. Tampoco hay rotación del archivo.
+**La identidad SÍ queda registrada — indirecta, no ausente.** Para los flujos disparados desde la web (`/asistente`, `/configuracion-guiada`), el frontend resuelve `profile_id` server-side (nunca del cliente, ver `routes/api/asistente/+server.js`) y manda `identificador_sesion: locals.user.id` — el motor lo guarda como `usuario_externo` de la conversación. Es decir: la conversación entera queda atada al colaborador real, no solo al área. Lo que falta es más chico que "no hay registro de quién": `asistente.tool_calls` guarda `rol_solicitante` (el rol, ya fusionado si el colaborador tiene varios asignados), no el `profile_id` como columna propia — para saber qué colaborador ejecutó una herramienta puntual hay que cruzar por `conversation_id` contra `conversations.usuario_externo`, no viene en la misma fila. Sumar esa columna (`profile_id` en `asistente.tool_calls`) es directo y queda como pendiente concreto.
+
+**Pendiente real, distinto del que decía esta sección:** no hay política de retención/purga sobre `asistente.tool_calls` (antes decía "rotación del archivo", que ya no aplica — es una tabla, no un archivo).
+
+### 8.3 Métrica de tasa de escalamiento (agosto 2026)
+
+`cli/reporte_escalamiento.py` — cuántas conversaciones de los últimos N días terminaron en un humano, y por qué motivo (`asistente.conversations.motivo_escalamiento`), agregado en SQL.
+
+Nace de un hueco concreto: el 15/08/2026 se agregó `escalamiento.intentar_resolver_antes` (una vuelta extra antes de escalar, ver `tests/test_escalamiento_paciente.py`) después de que un cliente escalara en su primer mensaje sin ningún diagnóstico intentado. El cambio se validó mirando dos conversaciones a mano — sin este reporte no había forma de saber si funcionaba sobre la población real. Mismo concepto que la "tasa de escalada" que Intercom Fin reporta como métrica de primera clase (investigado agosto 2026 comparando este proyecto contra Sierra, Decagon e Intercom Fin — ver también la guardia de salida en §7.4, del mismo relevamiento).
+
+```
+py -3.13 cli/reporte_escalamiento.py --tenant rapilink --dias 7
+```
+
+### 8.4 Informes exportables (RF-12, agosto 2026) — Excel y PDF
+
+Antes de esto no existía ningún camino para generar un archivo real desde una conversación: `informe_materiales` (el único intento de "informe") es tipo `batch` y ni siquiera tiene ejecutor en `motor.py` — solo corre como script manual. RF-12 seguía sin cumplirse.
+
+**Cómo funciona.** Una herramienta `tipo: agregado` marcada `exportable: true` (`nucleo/config/schema.py::Herramienta`) ofrece al modelo un argumento extra, `formato: texto|excel|pdf`. Si el colaborador pide explícitamente un archivo, `nucleo/herramientas/informes.py` (`generar_excel()`/`generar_pdf()`) toma el **mismo** dict que `agregado.ejecutar()` ya calculó (`total`, `desglose`, `interpretacion`) y lo vuelca al formato pedido — el código sigue calculando (PRD §12.5), esto solo cambia el empaque. `motor._GENERADORES_INFORME` mapea cada `formato` a su función y su mime; agregar un tercer formato es una entrada más en ese diccionario, no una rama nueva de lógica. PDF usa `reportlab` (pure-Python, sin dependencias de sistema — a diferencia de `weasyprint`, que necesita Cairo/Pango y complicaría la imagen de Docker). El modelo nunca ve los bytes del archivo, solo un identificador para poder mencionarlo — y su propia descripción le prohíbe explícitamente mostrar ese identificador al colaborador, porque no significa nada para una persona y el archivo ya aparece como adjunto en la conversación sin que haga falta.
+
+**Restricción de arquitectura real, no cosmética.** `motor.py::responder()` corre **antes** de que exista `conversation_id` (se resuelve recién en `api.py`, al persistir el turno) — y `asistente.media` exige `conversation_id not null`. Por eso `responder()` devuelve un tercer valor, `medios_pendientes`, con el mismo patrón que ya usa `registro_herramientas` para la auditoría: el archivo se genera durante el turno, pero se guarda en `api.py` una vez que el conversation_id existe.
+
+**Dos identificadores de `asistente.media`, no confundir.** `id` (la clave primaria, generada por Postgres) es la que usa el flujo existente de fotos de WhatsApp — no se conoce hasta después del INSERT. Un archivo generado por el motor necesita poder referenciar su propio identificador *antes* de que la fila exista, así que usa la columna `media_id` (texto, `unique(organization_id, media_id)`), elegida por código. Confirmado en vivo (17/08/2026) que confundir las dos —la misma trampa de "dos catálogos con la misma forma" que ya costó tiempo con zona/router de WispHub— hacía que el archivo se generara pero fuera irrecuperable con el identificador que el modelo mencionaba.
+
+**La entrega no necesitó tocar el frontend.** El visor de conversaciones (`/conversaciones/[id]`) ya tenía una rama genérica para adjuntos que no son foto ni audio (enlace con ícono y tamaño en KB), unida por `mensaje_id` — el mismo mecanismo que ya muestra las fotos que manda un cliente. Un archivo generado por el motor pasa por el mismo camino sin ningún cambio de UI.
+
+Guardas: `tests/test_informes.py` (el archivo refleja exactamente lo que el agregado calculó, sin inventar ni redondear — Excel y PDF, este último leído de vuelta con `pypdf` solo para el test, no es dependencia del motor) y el caso dorado "pedido explícito de reporte descargable llama al agregado" (`evaluacion/rapilink.casos.yaml`). Primer caso dorado con un rol **colaborador** (`administracion`), no `cliente_final`.
+
+`contar_clientes`, `contar_facturas` y `contar_tickets` están marcadas `exportable`, en Excel y PDF, verificado en vivo contra producción. Al mismo tiempo se corrigió `contar_facturas.agrupar_por: zona`, que estaba declarado pero nunca podía funcionar (`zona` era `tipo: id`, y el motor de agregados solo agrupa catálogos cerrados `tipo: enum`) — se pasó a `enum` con las 5 zonas reales de WispHub, verificadas con el método del valor imposible.
+
+### 8.5 Asistente de configuración guiada (agosto 2026)
+
+CLAUDE.md ya lo pedía: *"la próxima empresa que se conecte no debería necesitar una sesión de código para algo que ya se resolvió una vez"*. Hasta ahora, conectar un sistema nuevo era 100% trabajo de un desarrollador: sondear la API a mano (`cli/sondear_api.py`), verificar cada filtro con el método del valor imposible, escribir el YAML, aplicarlo. Este rol (`configuracion_guiada`, gateado a ADMIN en la capa web) hace lo mismo pero conversando con un colaborador — sin que deje de sondear de verdad ni de exigir aprobación humana.
+
+**Dos herramientas nuevas, quinta y sexta excepción a "el modelo nunca propone argumentos libres"** (las anteriores: `campo_busqueda` de verificar identidad, `confirma` de confirmar identidad, `area` acotada de derivar rol):
+
+- `sondear_api` (`Herramienta.sondea_api`): hace un GET real contra una URL que el ADMIN describe, y devuelve un resumen (`count`, `campos_disponibles`, hasta 3 filas de muestra) — nunca el volcado completo.
+- `proponer_herramienta` (`Herramienta.propone_herramienta`): guarda un borrador de `Herramienta` en `asistente.herramientas_propuestas`, `estado='pendiente'`. Nunca se activa sola.
+
+**La superficie de ataque nueva, y cómo se cerró.** Es la única parte del proyecto que llama a una URL no verificada de antemano — eso es SSRF (Server-Side Request Forgery): sin control, un ADMIN (o una cuenta comprometida) podría hacer que el servidor "sondee" su propia red interna — el motor, el pooler de Postgres, o el endpoint de metadata de la nube (`169.254.169.254`, que en AWS/GCP/Azure expone credenciales sin autenticación). `nucleo/herramientas/sondeo.py` bloquea: solo `https`, y resuelve el host rechazando cualquier IP que caiga en un rango privado/interno/de enlace local (RFC 1918, loopback, link-local). Límite conocido y dejado escrito en el propio módulo: hay una ventana de DNS rebinding entre la verificación y la conexión real; el riesgo residual es bajo (solo lo dispara un ADMIN ya autenticado) pero no es cero.
+
+**La clave de la API nueva nunca toca al modelo.** `sondear_api` recibe `auth_ref` — el NOMBRE de un secreto que el ADMIN ya guardó desde la pantalla de Secretos (cifrado, patrón ya existente) — y lo resuelve server-side. Enviar la clave completa a través del chat la mandaría a DeepSeek como parte de la conversación, exactamente el tipo de exposición de credenciales que el resto del proyecto evita.
+
+**`nucleo/config/editor.py` decía explícitamente que crear una herramienta "sigue siendo trabajo de código... esa superficie es sensible en seguridad".** Esto no relaja esa regla, la resuelve distinto: la preocupación nunca fue "una pantalla", fue "sin verificar y sin que un humano lo revise". Las dos garantías siguen intactas — nada llega al catálogo real sin pasar por el sondeo (evidencia auditable, guardada junto con la propuesta) y sin que un ADMIN apruebe el borrador exacto desde `/configuracion/propuestas/<id>/aprobar`. `editor.aprobar_herramienta_propuesta()` valida contra el mismo esquema que todo lo demás — un borrador mal armado se rechaza con el error específico, no se cuela.
+
+**Verificado en vivo, no solo en el test unitario.** Primer intento real: el modelo propuso `tipo: catalogo` (no existe) sin `roles_permitidos` (obligatorio) — la aprobación lo rechazó correctamente, con el error exacto de Pydantic. Se afinó el prompt del rol con un ejemplo concreto de la forma exacta del esquema, y el segundo intento (sondear el catálogo de zonas de WispHub, sin filtros) produjo un borrador válido de punta a punta: sondeo real → propuesta con evidencia → aprobación → herramienta viva en el catálogo. Retirada después de verificar — era una prueba, no un pedido real de Rapilink.
+
+Guardas: `tests/test_sondeo.py` (bloqueo SSRF contra IPs y hostnames reales, no solo la lógica en abstracto) y `tests/test_configuracion_guiada.py` (un borrador mal armado —incluidos los dos errores reales vistos en vivo— se rechaza antes de tocar el catálogo).
+
+**Pantalla web** (agosto 2026): `/configuracion-guiada`, entrada "Conectar sistema nuevo" en Administrar (solo ADMIN, oculta del menú y con `redirect` en el `load()` para cualquiera más). Chat a un lado — mismo patrón que el simulador de WhatsApp — y panel de propuestas pendientes al otro, con Aprobar/Rechazar por propuesta — mismo patrón que la cola de revisiones de `/manual`. Las cuatro rutas server-side (`/api/configuracion-guiada` y sus tres sub-rutas de propuestas) repiten el gate `locals.profile?.role !== 'ADMIN'` que ya usa `/api/agentes`, en vez de confiar solo en que el menú esté oculto.
 
 ---
 

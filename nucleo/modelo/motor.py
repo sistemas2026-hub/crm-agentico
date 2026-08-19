@@ -45,10 +45,13 @@ from __future__ import annotations
 import json
 import re
 import time
+import uuid
 from datetime import datetime, timedelta
 
 from nucleo.herramientas import agregado as ejecutor_agregado
 from nucleo.herramientas import http as ejecutor_http
+from nucleo.herramientas import incidentes as ejecutor_incidentes
+from nucleo.herramientas import informes
 from nucleo.modelo import cliente
 from nucleo.modelo import tuteo
 from nucleo.persistencia import db as persistencia
@@ -56,11 +59,23 @@ from nucleo.recuperacion.prompt import construir_system
 from nucleo.recuperacion.busqueda import (recuperar, bloque_de_contexto,
                                           registrar_sin_resultados)
 from nucleo.seguridad import listas_blancas
+from nucleo.seguridad import redaccion
+from nucleo.seguridad import salida as guardia_salida
 from nucleo.seguridad.verificacion import Sesion, nivel_requerido, es_factor_de_posesion
 
 
 class ErrorMotor(Exception):
     pass
+
+
+# 'formato' que el modelo puede pedir en una herramienta 'agregado'
+# exportable -> (funcion generadora, mime). Un solo lugar para agregar un
+# formato nuevo (ver _esquema_openai, que arma el enum desde estas mismas
+# claves) sin tocar la logica de ejecucion.
+_GENERADORES_INFORME = {
+    "excel": (informes.generar_excel, informes.MIME_XLSX),
+    "pdf": (informes.generar_pdf, informes.MIME_PDF),
+}
 
 
 def herramientas_del_rol(config, rol_cfg):
@@ -130,6 +145,69 @@ def _esquema_openai(herramienta):
                 },
             },
         }
+    if herramienta.sondea_api:
+        # Cuarta excepcion a "sin argumentos libres" -- ver
+        # Herramienta.sondea_api (schema.py) para el porque. 'auth_ref' es
+        # el NOMBRE de un secreto ya guardado, nunca la clave: el modelo no
+        # tiene forma de proponer un valor de credencial aca.
+        return {
+            "type": "function",
+            "function": {
+                "name": herramienta.nombre,
+                "description": herramienta.descripcion,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "url": {"type": "string",
+                               "description": "URL completa (https) del endpoint a sondear."},
+                        "auth_ref": {"type": "string",
+                                    "description": "Nombre del secreto YA GUARDADO con la "
+                                        "clave de esta API (no el valor). Si la API no "
+                                        "necesita auth, omitir."},
+                        "auth_header": {"type": "string",
+                                       "description": "Nombre del header de auth. Por "
+                                           "defecto 'Authorization'."},
+                        "auth_esquema": {"type": "string",
+                                        "description": "Prefijo antes de la clave en el "
+                                            "header, ej. 'Bearer' o 'Api-Key'. Vacio si "
+                                            "la API no usa prefijo."},
+                        "params": {"type": "string",
+                                  "description": "Query params a probar, como texto JSON. "
+                                      "Ej: '{\"estado\": \"1\"}'. Omitir para la llamada base."},
+                    },
+                    "required": ["url"],
+                },
+            },
+        }
+    if herramienta.propone_herramienta:
+        # Quinta excepcion. El modelo arma el borrador completo -- pero
+        # NUNCA se activa solo con esto: queda 'pendiente' hasta que un
+        # humano lo apruebe (ver Herramienta.propone_herramienta).
+        return {
+            "type": "function",
+            "function": {
+                "name": herramienta.nombre,
+                "description": herramienta.descripcion,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "descripcion_pedido": {"type": "string",
+                            "description": "Lo que el ADMIN pidio conectar, en sus palabras."},
+                        "sondeo": {"type": "string",
+                            "description": "Texto JSON con la evidencia real del sondeo: "
+                                "URL(s) probadas y lo que devolvieron. Para que quien "
+                                "aprueba pueda auditar que se probo de verdad."},
+                        "herramienta_propuesta": {"type": "string",
+                            "description": "Texto JSON con el borrador de Herramienta "
+                                "(mismos campos que nucleo/config/schema.py: nombre, "
+                                "tipo, endpoint, filtros_verificados, etc.) armado a "
+                                "partir de lo que el sondeo confirmo -- nunca de lo que "
+                                "el ADMIN supone sin probarlo."},
+                    },
+                    "required": ["descripcion_pedido", "sondeo", "herramienta_propuesta"],
+                },
+            },
+        }
     if herramienta.verifica_identidad:
         # Unica excepcion a "sin argumentos libres": el dato para verificar
         # (ej. cedula) lo tiene que dar el cliente, no puede venir de sesion.
@@ -151,7 +229,8 @@ def _esquema_openai(herramienta):
             },
         }
     es_agregado = herramienta.tipo == "agregado"
-    if herramienta.filtros_verificados or (es_agregado and (herramienta.agrupar_por or herramienta.periodo)):
+    if herramienta.filtros_verificados or (es_agregado and (
+            herramienta.agrupar_por or herramienta.periodo or herramienta.exportable)):
         # Reusa 'filtros_verificados' (ya existia para herramientas tipo
         # 'agregado') tambien para 'http': cada entrada YA fue confirmada
         # contra la API real con el metodo del valor imposible -- ofrecerla
@@ -176,6 +255,15 @@ def _esquema_openai(herramienta):
                 "description": "Rango de fechas: 'AAAA-MM' o "
                                "'AAAA-MM-DD a AAAA-MM-DD'. Si se omite, se "
                                "usa el periodo por defecto de la API."}
+        if es_agregado and herramienta.exportable:
+            propiedades["formato"] = {
+                "type": "string", "enum": ["texto", *_GENERADORES_INFORME],
+                "description": "'excel' o 'pdf' SOLO si el usuario pidio "
+                               "explicitamente un archivo/reporte descargable "
+                               "(ej. 'mandame un excel', 'quiero el reporte en "
+                               "pdf'). Si no especifico el tipo de archivo, "
+                               "usa 'excel' por defecto. Si solo pregunto un "
+                               "numero, usa 'texto' (o no lo indiques)."}
         return {
             "type": "function",
             "function": {
@@ -429,6 +517,80 @@ def _ejecutar_derivacion(herramienta, sesion, argumentos_modelo: dict, nombre_ro
                f"respuesta le llega ya."}
 
 
+def _ejecutar_sondeo(argumentos_modelo: dict, tenant: str) -> dict:
+    """
+    Sondea una API EXTERNA que un ADMIN describio en el chat -- unico lugar
+    del proyecto que llama a una URL no verificada de antemano. Ver
+    Herramienta.sondea_api (schema.py) para el porque, y
+    nucleo/herramientas/sondeo.py para el bloqueo de SSRF.
+
+    'auth_ref' es el NOMBRE de un secreto ya guardado (nunca la clave): se
+    resuelve aca, server-side, y no pasa por el modelo en ningun momento.
+    """
+    from nucleo.herramientas import sondeo as sondeo_seguro
+    from nucleo.seguridad import secretos
+
+    argumentos_modelo = argumentos_modelo or {}
+    url = argumentos_modelo.get("url", "")
+    if not url:
+        return {"error": "Falta 'url'."}
+
+    headers = {}
+    auth_ref = argumentos_modelo.get("auth_ref")
+    if auth_ref:
+        clave = secretos.obtener(tenant, auth_ref)
+        if clave is None:
+            return {"error": f"No existe un secreto guardado llamado "
+                             f"'{auth_ref}'. Pedile al ADMIN que lo guarde "
+                             f"primero desde la pantalla de credenciales."}
+        esquema = argumentos_modelo.get("auth_esquema", "")
+        header_nombre = argumentos_modelo.get("auth_header") or "Authorization"
+        headers[header_nombre] = f"{esquema} {clave}".strip()
+
+    params = None
+    params_texto = argumentos_modelo.get("params")
+    if params_texto:
+        try:
+            params = json.loads(params_texto)
+        except (TypeError, ValueError):
+            return {"error": "'params' no es JSON valido."}
+
+    try:
+        return sondeo_seguro.sondear(url, headers, params)
+    except sondeo_seguro.ErrorSondeo as e:
+        return {"error": str(e)}
+
+
+def _ejecutar_propuesta(argumentos_modelo: dict, tenant: str, propuesto_por: str) -> dict:
+    """
+    Guarda el borrador de Herramienta que el ADMIN armo junto con el
+    asistente, DESPUES de sondear -- ver Herramienta.propone_herramienta.
+    Nunca se activa sola: queda 'pendiente' en
+    asistente.herramientas_propuestas hasta que una persona la apruebe
+    (nucleo/canales/api.py::aprobar_propuesta), que recien ahi la valida
+    contra el esquema completo (schema.py) y la escribe al catalogo real.
+    """
+    from nucleo.persistencia import db as persistencia
+
+    argumentos_modelo = argumentos_modelo or {}
+    descripcion_pedido = argumentos_modelo.get("descripcion_pedido", "")
+    try:
+        sondeo_dict = json.loads(argumentos_modelo.get("sondeo") or "{}")
+        herramienta_dict = json.loads(argumentos_modelo.get("herramienta_propuesta") or "{}")
+    except (TypeError, ValueError):
+        return {"error": "'sondeo' o 'herramienta_propuesta' no son JSON valido."}
+
+    if not herramienta_dict.get("nombre") or not herramienta_dict.get("tipo"):
+        return {"error": "El borrador necesita al menos 'nombre' y 'tipo'."}
+
+    id_propuesta = persistencia.guardar_herramienta_propuesta(
+        tenant, descripcion_pedido, sondeo_dict, herramienta_dict, propuesto_por)
+    return {"propuesta_id": id_propuesta, "estado": "pendiente",
+           "instruccion_interna": "Decile al ADMIN que quedo guardada, "
+               "pendiente de que alguien la apruebe desde la pantalla de "
+               "configuracion -- no esta activa todavia, no lo prometas."}
+
+
 def _previas_no_cumplidas(herramienta, historial: list[dict]) -> list[str]:
     """Nombres de las herramientas de 'exige_previas' (schema.py) que
     TODAVIA no dieron el resultado favorable declarado, en esta conversacion.
@@ -523,6 +685,9 @@ def _ejecutar_tool(herramienta, sesion, argumentos_modelo: dict,
             argumentos.pop(arg_llamada, None)
         else:
             argumentos[arg_llamada] = valor
+
+    if herramienta.tipo == "interno" and herramienta.detecta_incidente:
+        return ejecutor_incidentes.detectar(herramienta, argumentos, tenant, variables_tenant)
 
     if herramienta.tipo == "http":
         if herramienta.cache and tenant:
@@ -694,6 +859,9 @@ def _redactar(referencia_modelo: str, historial: list[dict], temperatura: float,
         resp = cliente.chat(referencia_modelo, historial, tools=None, temperatura=temperatura)
         limpio = _sanitizar(resp.contenido, nombres_rol, tratamiento)
         if limpio and not _RE_RESPUESTA_CRUDA.match(limpio):
+            limpio, fuga = guardia_salida.verificar(limpio)
+            if fuga:
+                print(f"[salida] fuga bloqueada en redaccion final: '{fuga}'")
             historial.append({"role": "assistant", "content": limpio})
             return limpio
     historial.append({"role": "assistant", "content": ""})
@@ -707,7 +875,8 @@ def _redactar(referencia_modelo: str, historial: list[dict], temperatura: float,
 
 
 def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
-              sesion, nota_continuidad: str | None = None) -> tuple[str, list[dict]]:
+              sesion, nota_continuidad: str | None = None
+              ) -> tuple[str, list[dict], list[dict]]:
     """
     'sesion' es una nucleo.seguridad.verificacion.Sesion (o None si el rol no
     exige verificacion). 'historial' se muta in-place -- el llamador lo
@@ -721,20 +890,29 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
     2026) que sin esa aclaracion podia derivar de nuevo a otra area sin
     ningun motivo real, solo por no saber que ya estaba en la correcta.
 
-    Devuelve (respuesta, registro_herramientas). El registro es una fila por
-    herramienta invocada este turno -- nombre, parametros enmascarados,
-    exito, duracion -- para que nucleo/canales/api.py lo guarde en
-    asistente.tool_calls despues de resolver el conversation_id (que todavia
-    no existe en este punto: la conversacion se crea/reusa recien al
-    persistir el turno). Es la base de "ver proceso" en /conversaciones: que
-    hizo el agente, en que orden, sin que el motor sepa que existe esa
-    pantalla.
+    Devuelve (respuesta, registro_herramientas, medios_pendientes).
+
+    'registro_herramientas': una fila por herramienta invocada este turno --
+    nombre, parametros enmascarados, exito, duracion -- para que
+    nucleo/canales/api.py lo guarde en asistente.tool_calls despues de
+    resolver el conversation_id (que todavia no existe en este punto: la
+    conversacion se crea/reusa recien al persistir el turno). Es la base de
+    "ver proceso" en /conversaciones: que hizo el agente, en que orden, sin
+    que el motor sepa que existe esa pantalla.
+
+    'medios_pendientes': igual problema, mismo motivo -- un archivo generado
+    por una herramienta 'agregado' con 'exportable' (ver
+    nucleo/herramientas/informes.py) no se puede guardar en asistente.media
+    aca porque esa tabla exige conversation_id, que todavia no existe. Casi
+    siempre vacia: solo trae algo cuando el turno de verdad genero un
+    archivo.
     """
     rol_cfg = config.roles.get(nombre_rol)
     if rol_cfg is None:
         raise ErrorMotor(f"Rol '{nombre_rol}' no existe en la configuracion del tenant.")
 
     registro: list[dict] = []
+    medios_pendientes: list[dict] = []
 
     if not historial:
         historial.append({"role": "system", "content": construir_system(config, nombre_rol)})
@@ -812,7 +990,7 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
         if not herramientas:
             respuesta = config.rag.mensaje_sin_resultados.strip()
             historial.append({"role": "assistant", "content": respuesta})
-            return respuesta, registro
+            return respuesta, registro, medios_pendientes
 
     referencia_decision = config.llm.overrides.get(f"rol:{nombre_rol}",
                                                     config.llm.modelo_por_defecto)
@@ -889,8 +1067,11 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                                 config.persona.normalizar_tratamiento)
             if limpio:
                 if not hubo_llamadas:
+                    limpio, fuga = guardia_salida.verificar(limpio)
+                    if fuga:
+                        print(f"[salida] fuga bloqueada en rol '{nombre_rol}': '{fuga}'")
                     historial.append({"role": "assistant", "content": limpio})
-                    return limpio, registro
+                    return limpio, registro, medios_pendientes
                 break  # ya no pide mas herramientas: pasa a redaccion final
             if _RE_FUGA_TOOL_CALL.search(resp.contenido or "") and reintentos_fuga < 2:
                 # Queria seguir usando herramientas y lo escribio mal: se le
@@ -967,6 +1148,14 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                              "puedes hacer desde ya, sirve para cualquiera de "
                              "los dos casos."}
                 codigo_error = "SERVICIO_REPORTADO_AMBIGUO"
+            elif herramienta.sondea_api:
+                # Colaborador (ADMIN, gateado en la capa web -- ver
+                # nucleo/canales/api.py), nunca cliente_final: el gate de
+                # identidad de arriba no aplica a este rol para empezar.
+                salida = _ejecutar_sondeo(llamada.argumentos, config.identidad.slug)
+            elif herramienta.propone_herramienta:
+                quien = sesion.identificador_canal if sesion else "desconocido"
+                salida = _ejecutar_propuesta(llamada.argumentos, config.identidad.slug, quien)
             elif (faltantes := _previas_no_cumplidas(herramienta, historial)):
                 # Fail-closed en codigo, no aprobacion humana -- ver
                 # Precondicion en schema.py. Ninguna herramienta actual la
@@ -1000,7 +1189,36 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                         crudo = _ejecutar_tool(herramienta, sesion, llamada.argumentos,
                                               config.identidad.slug, config.variables_tenant)
                         _recuperar_campos_de_sesion(sesion, herramienta, crudo)
+                        formato_pedido = (llamada.argumentos or {}).get("formato")
+                        if (herramienta.tipo == "agregado" and herramienta.exportable
+                                and isinstance(crudo, dict) and "error" not in crudo
+                                and formato_pedido in _GENERADORES_INFORME):
+                            # El archivo lo arma el codigo a partir del MISMO
+                            # 'crudo' que ya se iba a redactar en texto -- el
+                            # modelo no aporta ni ve un solo dato nuevo, solo
+                            # el identificador para poder mencionarlo. Un
+                            # fallo aca (ej. falta la libreria) no tumba el
+                            # turno: 'error_archivo' queda en 'crudo' y el
+                            # modelo puede avisar que el archivo no se pudo
+                            # generar, en vez de fingir que si (RF-07).
+                            generar, mime = _GENERADORES_INFORME[formato_pedido]
+                            try:
+                                archivo = generar(crudo.get("interpretacion", ""), crudo)
+                                media_id = str(uuid.uuid4())
+                                medios_pendientes.append({
+                                    "media_id": media_id,
+                                    "tipo": "document",
+                                    "mime": mime,
+                                    "contenido": archivo,
+                                    "descripcion": crudo.get("interpretacion", ""),
+                                })
+                                crudo["archivo_id"] = media_id
+                            except informes.ErrorInforme as e:
+                                crudo["error_archivo"] = str(e)
                         salida = listas_blancas.filtrar_campos(rol_cfg, herramienta.nombre, crudo)
+                        if herramienta.campos_texto_libre:
+                            salida = redaccion.redactar_campos(
+                                salida, herramienta.campos_texto_libre)
                     except Exception as e:
                         # No tumba el turno: el modelo recibe un error legible y
                         # puede decirle al cliente que hubo un problema, en vez de
@@ -1111,7 +1329,9 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 # 'limite_iteraciones_agente'.
 
     if hubo_llamadas:
-        return _redactar(referencia_redaccion, historial, config.llm.temperatura,
-                        nombres_rol=config.roles,
-                        tratamiento=config.persona.normalizar_tratamiento), registro
-    return "No pude completar la consulta en el numero de pasos permitido.", registro
+        return (_redactar(referencia_redaccion, historial, config.llm.temperatura,
+                         nombres_rol=config.roles,
+                         tratamiento=config.persona.normalizar_tratamiento),
+                registro, medios_pendientes)
+    return ("No pude completar la consulta en el numero de pasos permitido.",
+            registro, medios_pendientes)

@@ -13,6 +13,7 @@
  * nucleo/config/schema.py.
  */
 import { env } from '$env/dynamic/private';
+import { headersMotor } from './motor-headers.js';
 
 const REF_API_KEY = 'SMARTOLT_API_KEY';
 
@@ -37,8 +38,10 @@ export async function leerSmartOlt() {
   if (!cfg) return null;
   try {
     const [respCanal, respSecretos] = await Promise.all([
-      fetch(`${cfg.baseUrl}/configuracion/canales?tenant=${encodeURIComponent(cfg.tenant)}`),
-      fetch(`${cfg.baseUrl}/secretos?tenant=${encodeURIComponent(cfg.tenant)}`)
+      fetch(`${cfg.baseUrl}/configuracion/canales?tenant=${encodeURIComponent(cfg.tenant)}`,
+        { headers: headersMotor() }),
+      fetch(`${cfg.baseUrl}/secretos?tenant=${encodeURIComponent(cfg.tenant)}`,
+        { headers: headersMotor() })
     ]);
     if (!respCanal.ok) return null;
     const datos = await respCanal.json();
@@ -68,7 +71,7 @@ export async function guardarVariable(nombre, valor) {
 
   const resp = await fetch(`${cfg.baseUrl}/configuracion/variables/${encodeURIComponent(nombre)}`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: headersMotor({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ tenant: cfg.tenant, valor })
   });
   const datos = await resp.json().catch(() => ({}));
@@ -91,7 +94,7 @@ export async function probarConexion(subdominio, apiKey) {
 
   const resp = await fetch(`${cfg.baseUrl}/diagnostico/smartolt`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: headersMotor({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ base_url: subdominio, api_key: apiKey })
   });
   const datos = await resp.json().catch(() => ({}));

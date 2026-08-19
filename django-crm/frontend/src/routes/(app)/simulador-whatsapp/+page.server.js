@@ -1,4 +1,5 @@
 import { env } from '$env/dynamic/private';
+import { headersMotor } from '$lib/server/v2/motor-headers.js';
 
 /**
  * Server load: solo trae la lista fija de casos (tenant_config.manual.casos)
@@ -16,7 +17,8 @@ export async function load({ fetch }) {
   if (!baseUrl || !tenant) return { casos: [] };
 
   try {
-    const resp = await fetch(`${baseUrl}/manual/casos?tenant=${encodeURIComponent(tenant)}`);
+    const resp = await fetch(`${baseUrl}/manual/casos?tenant=${encodeURIComponent(tenant)}`,
+      { headers: headersMotor() });
     return { casos: resp.ok ? (await resp.json()).casos : [] };
   } catch {
     return { casos: [] };

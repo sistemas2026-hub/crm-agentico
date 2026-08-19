@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
+import { headersMotor } from '$lib/server/v2/motor-headers.js';
 
 /**
  * Marcar/desmarcar una respuesta del agente como buen ejemplo de un caso --
@@ -40,7 +41,7 @@ export async function POST({ request, params, locals, fetch }) {
       `${cfg.baseUrl}/conversaciones/${params.id}/mensajes/${params.mensajeId}/marcar`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: headersMotor({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ tenant: cfg.tenant, caso, marcado_por: locals.user.email })
       }
     );
@@ -70,7 +71,7 @@ export async function DELETE({ params, locals, fetch }) {
     const resp = await fetch(
       `${cfg.baseUrl}/conversaciones/${params.id}/mensajes/${params.mensajeId}/marcar` +
         `?tenant=${encodeURIComponent(cfg.tenant)}`,
-      { method: 'DELETE' }
+      { method: 'DELETE', headers: headersMotor() }
     );
     if (!resp.ok) {
       const datos = await resp.json().catch(() => ({}));

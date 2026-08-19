@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
+import { headersMotor } from '$lib/server/v2/motor-headers.js';
 
 /**
  * Documentos del corpus: listar (GET, cualquier miembro logueado) y subir
@@ -31,7 +32,8 @@ export async function GET({ locals, fetch }) {
   }
 
   try {
-    const resp = await fetch(`${cfg.baseUrl}/corpus/documentos?tenant=${encodeURIComponent(cfg.tenant)}`);
+    const resp = await fetch(`${cfg.baseUrl}/corpus/documentos?tenant=${encodeURIComponent(cfg.tenant)}`,
+      { headers: headersMotor() });
     const datos = await resp.json();
     if (!resp.ok) {
       return json({ error: datos.error || 'No se pudieron leer los documentos' }, { status: resp.status });
@@ -69,7 +71,8 @@ export async function POST({ request, locals, fetch }) {
   saliente.append('tenant', cfg.tenant);
 
   try {
-    const resp = await fetch(`${cfg.baseUrl}/corpus/documentos`, { method: 'POST', body: saliente });
+    const resp = await fetch(`${cfg.baseUrl}/corpus/documentos`,
+      { method: 'POST', headers: headersMotor(), body: saliente });
     const datos = await resp.json();
     if (!resp.ok) {
       return json({ error: datos.error || 'No se pudo cargar el documento' }, { status: resp.status });

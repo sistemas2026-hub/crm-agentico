@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { getTicketFormOptions, updateTicket } from '$lib/server/v2/tickets.js';
+import { headersMotor } from '$lib/server/v2/motor-headers.js';
 
 /**
  * Proxy para marcar una conversacion escalada como atendida sin pasar por
@@ -33,7 +34,7 @@ export async function POST({ params, locals, fetch, cookies, request }) {
   try {
     const resp = await fetch(`${baseUrl}/conversaciones/${params.id}/atender`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: headersMotor({ 'Content-Type': 'application/json' }),
       // 'por' sale de la sesion, nunca del cuerpo que manda el navegador.
       body: JSON.stringify({ tenant, por: locals.user.email })
     });

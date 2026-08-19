@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
+import { headersMotor } from '$lib/server/v2/motor-headers.js';
 
 /**
  * Los tipos de caso con que el asistente clasifica cada conversación
@@ -32,9 +33,12 @@ export async function PUT({ request, locals, fetch }) {
   const cuerpo = await request.json();
 
   try {
+    // El PUT manda la lista completa en el cuerpo; 'headersMotor' le suma el
+    // token de servicio que el motor empezo a exigir (ver test_token_servicio).
+    // Sin ese token la llamada se rechaza, con cuerpo y todo.
     const resp = await fetch(`${baseUrl}/manual/casos`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: headersMotor({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ casos: cuerpo.casos, tenant })
     });
     const datos = await resp.json();

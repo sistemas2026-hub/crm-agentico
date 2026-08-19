@@ -2,6 +2,7 @@ import { error, fail } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { getTicket, getTicketFormOptions, updateTicket } from '$lib/server/v2/tickets.js';
 import { readableError } from '$lib/server/v2/form-errors.js';
+import { headersMotor } from '$lib/server/v2/motor-headers.js';
 
 /**
  * Server load: el hilo de una conversacion puntual, mas -- si ya se escalo
@@ -27,12 +28,14 @@ export async function load({ fetch, cookies, params }) {
   // la que se sentia como si la pagina entera se recargara.
   const [respMensajes, respHerr, respCasos] = await Promise.all([
     fetch(
-      `${baseUrl}/conversaciones/${encodeURIComponent(params.id)}/mensajes?tenant=${encodeURIComponent(tenant)}`
+      `${baseUrl}/conversaciones/${encodeURIComponent(params.id)}/mensajes?tenant=${encodeURIComponent(tenant)}`,
+      { headers: headersMotor() }
     ),
     fetch(
-      `${baseUrl}/conversaciones/${encodeURIComponent(params.id)}/herramientas?tenant=${encodeURIComponent(tenant)}`
+      `${baseUrl}/conversaciones/${encodeURIComponent(params.id)}/herramientas?tenant=${encodeURIComponent(tenant)}`,
+      { headers: headersMotor() }
     ).catch(() => null),
-    fetch(`${baseUrl}/manual/casos?tenant=${encodeURIComponent(tenant)}`).catch(() => null)
+    fetch(`${baseUrl}/manual/casos?tenant=${encodeURIComponent(tenant)}`, { headers: headersMotor() }).catch(() => null)
   ]);
 
   const datos = await respMensajes.json();

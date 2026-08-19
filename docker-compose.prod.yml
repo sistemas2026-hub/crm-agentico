@@ -239,6 +239,12 @@ services:
       # despliegue se detiene nombrandolo, igual que el resto.
       PRIVATE_ASISTENTE_URL: http://motor:5000
       PRIVATE_ASISTENTE_TENANT: ${ASISTENTE_TENANT:?slug del tenant, el mismo de tenants/<slug>.config.yaml}
+      # El header que nucleo/canales/api.py exige cuando 'motor' (mas abajo)
+      # tiene MOTOR_SERVICE_TOKEN puesto. Opcional a proposito -- ':-' y no
+      # ':?': sin la variable, headersMotor() no manda nada y nada se rompe.
+      # NO cargar esto en Dokploy hasta confirmar que 'motor' tambien la
+      # tiene puesta con el MISMO valor -- ver DESPLIEGUE.md.
+      PRIVATE_MOTOR_SERVICE_TOKEN: ${MOTOR_SERVICE_TOKEN:-}
     depends_on:
       - backend
 
@@ -252,13 +258,27 @@ services:
     # deja de ver a sus companeros del compose.
     networks: [default, dokploy-network]
     environment:
-      # Conexion: las mismas cinco que el CRM. nucleo/persistencia/conexion.py
-      # compone la cadena con ellas.
+      # Conexion: mismo host/base que el CRM, pero DBUSER/DBPASSWORD PROPIOS
+      # -- no ${DBUSER}/${DBPASSWORD}, que ahora son de crm_user (Django).
+      # nucleo/persistencia/conexion.py compone la cadena con estas cinco.
+      #
+      # INCIDENTE (18/08/2026): esto compartia ${DBUSER}/${DBPASSWORD} con
+      # 'backend'/'celery-*'. Al cortar el CRM a crm_user (sin acceso al
+      # esquema 'asistente'), el motor quedo sin poder leer ni escribir su
+      # propia base -- en silencio, porque varias escrituras atrapan el
+      # error y solo lo logean, sin tumbar el turno. El cliente seguia
+      # recibiendo respuesta (el historial de la conversacion vive en RAM,
+      # ver mas abajo); lo que se perdio fue todo lo que se intento
+      # persistir en esa ventana: mensajes, tool_calls, conversaciones.
+      #
+      # El motor necesita 'app_backend' (esquema asistente), crm_user
+      # necesita 'public' (esquema del CRM) -- son dos necesidades
+      # distintas y no pueden compartir una sola variable nunca mas.
       DBHOST: ${DBHOST:?}
       DBPORT: ${DBPORT:?}
       DBNAME: ${DBNAME:?}
-      DBUSER: ${DBUSER:?}
-      DBPASSWORD: ${DBPASSWORD:?}
+      DBUSER: ${MOTOR_DBUSER:?}
+      DBPASSWORD: ${MOTOR_DBPASSWORD:?}
       WISPHUB_API_KEY: ${WISPHUB_API_KEY:?}
       WISPHUB_BASE_URL: ${WISPHUB_BASE_URL:-https://api.wisphub.io}
       WISPHUB_MODO_REAL: ${WISPHUB_MODO_REAL:-true}
@@ -285,6 +305,14 @@ services:
       # SI SE PIERDE hay que volver a cargar todos los secretos a mano: no hay
       # forma de recuperar los valores sin ella, y esa es la propiedad buscada.
       SECRETOS_CLAVE_MAESTRA: ${SECRETOS_CLAVE_MAESTRA:?}
+      # Segunda capa de auth para /chat, /agentes y el resto de rutas
+      # internas (nucleo/canales/api.py::_exigir_token_de_servicio).
+      # Opcional a proposito -- ':-' y no ':?': sin ella, el motor arranca
+      # igual y no exige nada (permisivo por defecto, para no romper un
+      # despliegue que todavia no la cargo). Si se activa, 'frontend' (mas
+      # arriba) necesita la MISMA variable como PRIVATE_MOTOR_SERVICE_TOKEN,
+      # o sus 30 y pico llamadas empiezan a fallar con 401. Ver DESPLIEGUE.md.
+      MOTOR_SERVICE_TOKEN: ${MOTOR_SERVICE_TOKEN:-}
     # UN SOLO worker, y no es por memoria: nucleo/canales/api.py guarda el
     # historial de cada conversacion en '_sesiones', un diccionario en memoria
     # del proceso. Con varios workers -que son procesos, no hilos- cada uno

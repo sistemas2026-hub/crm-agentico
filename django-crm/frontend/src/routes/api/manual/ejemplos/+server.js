@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
+import { headersMotor } from '$lib/server/v2/motor-headers.js';
 
 /**
  * Los ejemplos ya marcados, para la pantalla /manual. Proxy de solo lectura
@@ -25,7 +26,7 @@ export async function GET({ url, locals, fetch }) {
   if (caso) query.set('caso', caso);
 
   try {
-    const resp = await fetch(`${baseUrl}/manual/ejemplos?${query}`);
+    const resp = await fetch(`${baseUrl}/manual/ejemplos?${query}`, { headers: headersMotor() });
     const datos = await resp.json();
     if (!resp.ok) {
       return json({ error: datos.error || 'No se pudieron leer los ejemplos' }, { status: resp.status });

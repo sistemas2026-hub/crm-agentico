@@ -90,11 +90,17 @@ sysctl -w vm.swappiness=10 && echo 'vm.swappiness=10' >> /etc/sysctl.conf
 | Repository | `sistemas2026-hub/crm-agentico` |
 | Branch | `fix/integracion-wisphub` |
 | Compose Path | `./docker-compose.prod.yml` |
-| Trigger Type | Manual mientras esto se estabiliza — ver abajo |
+| Trigger Type | **On Push** (`Autodeploy` encendido) — ver abajo |
 
 ⚠️ **El Compose Path importa.** `docker-compose.yml` es el de desarrollo: trae un Postgres local y publica el 5432, que en el VPS ya ocupa el pooler del Supabase viejo. Desplegar ese da `address already in use`.
 
-⚠️ **Sobre "On Push".** Esa rama la comparten dos personas. Con el disparador automático, un commit de cualquiera redespliega producción sin que nadie lo decida, compilando en un servidor con poca memoria. Con despliegue manual eso lo decide quien mira.
+⚠️ **Un `git push` a esa rama SALE A PRODUCCIÓN.** `Autodeploy` está encendido a propósito (confirmado el 15/08/2026). No hay paso intermedio ni nadie que apruebe: se empuja y se despliega.
+
+Y esa rama la comparten dos personas, así que el commit de cualquiera redespliega el servicio del otro. La consecuencia práctica: **las guardas se corren ANTES de empujar, no después** — `tests/`, y `cli/evaluar.py` si se tocó un prompt, un catálogo o un modelo. Un push con algo roto no espera a que alguien lo revise.
+
+Esta advertencia decía lo contrario hasta hoy (afirmaba que el disparador era manual). Estuvo desactualizada un tiempo indeterminado, y sirvió para razonar mal sobre por qué producción se comportaba distinto al motor local: se dio por hecho que allá había código viejo cuando ya estaba desplegado. **Si el disparador se cambia, hay que cambiar esta línea en el mismo momento.**
+
+⚠️ **Un cambio de CONFIGURACIÓN no es un despliegue, y a veces necesita un reinicio.** `nucleo/canales/api.py` cachea la config por proceso (`_configs`) y la lee una sola vez. Los endpoints del editor llaman a `olvidar_config()` al guardar, así que **lo que se edita desde la interfaz se ve al instante**. Lo que se escribe desde un script o desde otra máquina (`cli/cargar_config.py`, `editor._editar`) NO invalida el caché del motor que está corriendo: sigue sirviendo la versión vieja hasta que se reinicie. El síntoma es desconcertante — la base dice v36, el agente contesta como en v35 — y cuesta un rato si no se sabe.
 
 ### 3. Variables
 
@@ -422,7 +428,42 @@ Cosas sabidas que faltan. Cada una dice por qué importa, que es lo que no se de
 ssh -L 5434:<ip-del-contenedor-db>:5432 root@86.48.18.185
 ```
 
-**Un rol `crm_user` para Django.** Hoy el CRM se conecta como `postgres`, que tiene `BYPASSRLS` — las políticas de aislamiento no se evalúan. Con una sola organización no hay consecuencia visible, y por eso es fácil de olvidar. El motor ya baja a `app_backend` (ver `nucleo/persistencia/db.py`); el CRM todavía no.
+**Un rol `crm_user` para Django — creado y verificado (18/08/2026), falta el corte en Dokploy.**
+
+Hoy el CRM se conecta como `postgres`, que tiene `BYPASSRLS` — las políticas de aislamiento no se evalúan. Con una sola organización no hay fuga posible entre clientes, y por eso es fácil de olvidar; el riesgo real es otro, y hay que decirlo primero: **el propio diagnóstico de BottleCRM (`manage_rls --status`) miente en este entorno.** Solo mira `usesuper` en `pg_user` (`common/management/commands/manage_rls.py:60`), y en Supabase `postgres` tiene `rolsuper=false` pero `rolbypassrls=true` — dos atributos distintos que el comando no distingue. Reporta *"Database user postgres is not a superuser — RLS will be enforced"*, y es falso: verificado por SQL directo (`select rolsuper, rolbypassrls from pg_roles`), las 60 tablas de `ORG_SCOPED_TABLES` tienen su política `ENABLED (forced)` — las migraciones de BottleCRM ya las activaron — pero no protegen nada mientras el CRM se conecte como `postgres`. Es exactamente el error que la propia documentación de BottleCRM (`postgresql-and-rls.md`) advierte que puede pasar desapercibido "sin error, sin log", solo que aquí pasa incluso con su propia herramienta de verificación.
+
+**Lo que ya se hizo, sin tocar producción:**
+
+1. `crm_user` creado en la base real (`CREATE ROLE ... LOGIN`, sin `BYPASSRLS`, sin `SUPERUSER`) con `GRANT ALL` sobre el esquema `public` (tablas, secuencias y funciones existentes, más `ALTER DEFAULT PRIVILEGES` para las que cree `postgres` a futuro). El esquema `asistente` del motor **no** se tocó — mismo criterio de aislamiento que ya separa `app_backend`.
+2. Verificado con el backend local apuntando a la base real (ver "Desarrollo local contra la base real"), sin pasar por Dokploy: `manage_rls --verify-user` confirma `Is superuser: False` bajo `crm_user` — a diferencia de `--status`, este SÍ pregunta lo correcto. `--test` no corre (pide 2 organizaciones y hoy hay 1), así que se probó a mano: con `app.current_org` puesto al id real, `crm_user` ve exactamente las mismas filas que ve `postgres` sin ninguna restricción (11 `cases`, verificado); sin contexto, 0 filas — el fail-safe funciona.
+3. Revisadas las 11 tareas de Celery en `common/tasks.py`: las que tocan tablas con RLS (`remove_users`, `update_team_users`, `purge_read_notifications`, `ingerir_documento_en_asistente`, `retirar_documento_del_asistente`) ya llaman `set_rls_context()`. Las que no lo llaman (`send_welcome_email` y las otras tres de email, `flush_expired_refresh_tokens`) operan sobre `profile`/`user`/tokens, que **no** están en `ORG_SCOPED_TABLES` — no necesitan contexto. No hay ninguna tarea activa en este despliegue que vaya a devolver "cero filas" en silencio tras el corte.
+
+**Lo que falta, y por qué no se hizo solo:**
+
+`docker/backend/entrypoint.sh` corre `migrate --noinput` con las mismas credenciales (`DBUSER`/`DBPASSWORD`) con las que gunicorn sirve las peticiones — no hay un usuario de migración separado. Si `crm_user` se pone en Dokploy, las migraciones **futuras** de BottleCRM correrían como `crm_user`, que no es dueño de las tablas: una migración nueva que llame `get_enable_policy_sql()` sobre una tabla recién creada (`ALTER TABLE ... ENABLE ROW LEVEL SECURITY`) fallaría, porque esa operación exige ser el dueño. No es un problema hoy — no hay ninguna migración pendiente que lo necesite — pero es una decisión de despliegue (¿migrar siempre con una credencial de owner aparte? ¿aceptar el riesgo y arreglarlo si aparece?) que no me correspondía tomar sola.
+
+**Activado en producción (18/08/2026), con un incidente real de por medio — ver abajo.** `DBUSER`/`DBPASSWORD` son una sola variable compartida por todo el stack (Docker Compose, no un panel por servicio como se pensaba al principio), así que el corte fue un solo cambio, no tres. Primer intento falló el build (`error while interpolating services.backend.environment.DBPASSWORD: required variable DBPASSWORD is missing a value`) por escribir `DBUSER:...` con dos puntos en vez de `DBUSER=...` — un `.env` no es YAML. Corregido, redesplegado.
+
+**La verificación que se hizo en ese momento fue incompleta — solo probó el CRM, no el motor.** `https://agent.rapilinksas.co/login` y `https://agent-api.rapilinksas.co/admin/` cargaban normal, sin 500/502, y eso se tomó como "andá". Pero esas dos URLs son Django, que sí funciona con `crm_user`. El **motor** (`nucleo/`, servicio aparte) también leía `${DBUSER}`/`${DBPASSWORD}` — la misma variable — y `crm_user` no tiene ningún privilegio sobre el esquema `asistente`. Nadie lo notó hasta que un script de este mismo día (`cli/reporte_huecos_documentacion.py`, corriendo local contra la base real) dio `psycopg.errors.InsufficientPrivilege: permission denied for schema asistente`.
+
+**Impacto real, mientras esa configuración estuvo activa:** las conversaciones de WhatsApp siguieron respondiendo normal (el historial de una charla vive en memoria del proceso, no en la base, turno a turno — ver el comentario sobre `--workers 1` más abajo), pero cualquier intento de guardar algo en `asistente.*` —mensajes, `tool_calls`, conversaciones nuevas— falló en silencio: varias de esas funciones atrapan la excepción y solo la logean, a propósito, para no tumbarle la respuesta a un cliente por un problema de auditoría. Consecuencia: un hueco de datos en esa ventana, no un corte de servicio. No se puede recuperar lo que no se guardó.
+
+**Mitigación inmediata:** revertir `DBUSER`/`DBPASSWORD` a los valores de `postgres` en Dokploy, redesplegar. Confirmado que la conexión volvió (`cli/reporte_huecos_documentacion.py` corrió limpio contra datos reales).
+
+**Arreglo de fondo: el motor necesita una credencial propia, nunca la misma que Django.** Se creó `motor_user` — mismo patrón que ya usaba `postgres` para el motor (`LOGIN`, `BYPASSRLS` porque `nucleo/persistencia/db.py::_organizacion()` resuelve el tenant *antes* de bajar a `app_backend`, a propósito, y esa consulta puntual necesita bypass — está comentado así en el propio código), con `GRANT app_backend TO motor_user`. `docker-compose.prod.yml` deja de compartir variable: `motor` ahora lee `${MOTOR_DBUSER}`/`${MOTOR_DBPASSWORD}`, distintas de `${DBUSER}`/`${DBPASSWORD}` que siguen siendo de `crm_user` para `backend`/`celery-*`.
+
+**Para terminar de activarlo en producción**, además de lo ya cargado:
+
+| Servicio | `DBUSER` | `DBPASSWORD` |
+|---|---|---|
+| `backend`, `celery-worker`, `celery-beat` | `crm_user.05b5a4b4-3b9a-4901-86f2-f3ed8f8ac0a1` | (la de `crm_user`, ya cargada) |
+| `motor` | `${MOTOR_DBUSER}` → agregar en Dokploy: `motor_user.05b5a4b4-3b9a-4901-86f2-f3ed8f8ac0a1` | `${MOTOR_DBPASSWORD}` → agregar (entregada aparte, nunca commiteada) |
+
+Redesplegar, y esta vez **verificar el motor específicamente** (no alcanza con que el CRM cargue) — `cli/reporte_huecos_documentacion.py` o cualquier script de `cli/` corriendo contra la base real sirve de prueba.
+
+Sigue en pie el pendiente de fondo del lado de Django: el día que una migración de BottleCRM necesite activar RLS en una tabla nueva, va a fallar bajo `crm_user` porque no es dueño de las tablas (`postgres` sí). No es una tarea de hoy — se resuelve separando la credencial de migración de la de tráfico normal cuando haga falta.
+
+**Lección de esto, para cualquier corte de credencial futuro: verificar CADA servicio que lea la variable que se está cambiando, no el primero que responda bien.** Un `grep` de la variable en el compose antes de cortar hubiera mostrado los cuatro servicios que la usaban, no solo los tres que se pensaban cambiar.
 
 **El webhook de WhatsApp — falta el dominio, no el código.** Las rutas ya existen (`GET`/`POST /canales/whatsapp/<tenant>`, ver §4.c) y sus guardas pasan (`py -3.13 tests/test_canal_whatsapp.py`). Lo que falta para el piloto: el DNS de `motor.rapilinksas.co`, crear el dominio en Dokploy con el `PathPrefix`, cargar las variables del §4.c, y cargar los secretos de Meta desde **Ajustes → WhatsApp**. Lo único de producto que sigue dependiendo de terceros son las plantillas para avisos proactivos, que las aprueba Meta.
 
@@ -440,9 +481,21 @@ Eso mandó la búsqueda a todos lados menos al lugar correcto: se revisó y desc
 
 **Lo que sigue sin poder hacerse** es reconocer al cliente: un BSUID no es un teléfono, así que no cruza contra WispHub. Esa persona tiene que identificarse con la cédula, como cualquier número desconocido. Por eso `mensajes_entrantes()` guarda `telefono` y `bsuid` en campos separados en vez de colapsarlos.
 
-**Autenticar `/chat` y `/agentes` en el motor.** Hoy no piden nada: lo que impide que se usen desde fuera es que el motor no sea alcanzable, y desde que exista el dominio del webhook (§4.c) lo único que los separa de internet es el `PathPrefix` de una regla de Traefik. Funciona, pero es **una sola capa**, y el resto del proyecto usa dos por principio (PRD §7.4: las reglas duras se aplican en código, no solo en la configuración de alrededor). Una regla mal escrita al agregar un dominio, y cualquiera puede conversar con el asistente a costa de la empresa y leer cómo está configurado cada agente.
+**Autenticar `/chat` y `/agentes` en el motor — COMPLETO (agosto 2026).** Hoy `/chat`, `/agentes` y el resto de rutas internas no pedían nada: lo único que las separaba de internet era el `PathPrefix` de una regla de Traefik, una sola capa, cuando el resto del proyecto usa dos por principio (PRD §7.4). El lado del **motor**: `nucleo/canales/api.py::_exigir_token_de_servicio()` rechaza con 401 cualquier ruta que no sea `/salud` o el webhook de WhatsApp (esas dos se autentican con otro mecanismo — healthcheck sin credenciales y firma de Meta, respectivamente) si no llega el header `X-Servicio-Token` con el valor de `MOTOR_SERVICE_TOKEN`. Guarda: `tests/test_token_servicio.py`.
 
-La forma es un token de servicio compartido entre el frontend y el motor: una variable más en los dos lados y una comprobación en `nucleo/canales/api.py` que rechace sin ella. No es urgente mientras la regla esté bien —por eso está acá y no bloqueando el piloto— pero conviene hacerlo antes de sumar un segundo ISP, cuando haya más manos tocando dominios. El webhook seguiría exento: su credencial es la firma de Meta, no un token nuestro.
+**Deliberadamente NO bloquea nada si `MOTOR_SERVICE_TOKEN` no está en el entorno** — así no rompe un arranque local ni el despliegue actual, que todavía no la tiene cargada.
+
+**El lado del frontend ya está wireado.** `django-crm/frontend` le habla al motor desde 30 archivos (~40 llamadas `fetch()`), sin un cliente HTTP compartido — cada ruta arma la suya, así que se agregó `lib/server/v2/motor-headers.js` (`headersMotor()`) y se aplicó a las 30. Sin `PRIVATE_MOTOR_SERVICE_TOKEN` puesto, no manda nada (mismo criterio permisivo del motor). **Verificado con el stack local corriendo (Docker), no solo con `pnpm check`**: se activó `MOTOR_SERVICE_TOKEN` en el `.env` local, se confirmó `401` sin header / `200` con el header correcto contra el motor real, y se repitió exactamente la lógica de `headersMotor()` desde dentro del contenedor del frontend contra el motor real — `200`, datos reales. La llamada frontend→motor es una red interna de Docker (`http://motor:5000`) idéntica en forma en desarrollo y en producción (confirmado comparando ambos `docker-compose*.yml`), así que este mecanismo verificado en local es el mismo que correría en Dokploy.
+
+**Lo que la verificación local NO prueba, y sigue siendo un paso manual:** que la variable quede cargada en Dokploy, con el **mismo valor**, en los dos servicios (`motor` y `frontend`). Es configuración de la interfaz de Dokploy, no código.
+
+### Para activarlo en producción
+
+1. Generar un valor random (ej. `openssl rand -hex 32` o cualquier cadena larga e impredecible — no tiene que ser recordable, es una contraseña entre dos servicios).
+2. En Dokploy, panel del servicio **`crm`** → **Environment**: agregar `MOTOR_SERVICE_TOKEN=<el mismo valor>` una sola vez (Compose ya lo reparte a `motor` como `MOTOR_SERVICE_TOKEN` y a `frontend` como `PRIVATE_MOTOR_SERVICE_TOKEN`, ver `docker-compose.prod.yml`).
+3. **Reload** (o redeploy) para que los contenedores relean el entorno.
+4. Confirmar en los logs de `motor` que dice `MOTOR_SERVICE_TOKEN activo` (no `no esta configurado`).
+5. Probar `/agentes` y un par de pantallas más — si algo devuelve "Asistente no configurado" o un error de red, revisar que el valor haya llegado igual a los dos servicios.
 
 **Dar de alta un segundo ISP: el motor está listo, el pegamento no.** El motor ya es multi-empresa de verdad —la URL del webhook lleva el tenant (`/canales/whatsapp/<slug>`), las credenciales van cifradas por empresa en `asistente.tenant_secrets`, y el aislamiento está medido: `app_backend` sin fijar empresa ve **0 filas**, no todas—. BottleCRM, por su lado, ya es multi-organización.
 
@@ -462,7 +515,7 @@ Dos cosas que se deciden junto con eso:
 
 **El 502 de `crm.rapilinksas.co`.** Ese dominio tiene ruta en Traefik apuntando a algo que no responde. No afecta a la base —el pooler escucha en TCP directo, sin pasar por Traefik— pero quien espere llegar al Studio de Supabase por ahí, hoy no puede.
 
-**Variables muertas en `.env`.** `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` no las usa nadie en este repositorio. Probablemente son residuo del proyecto de reportes. Confunden más de lo que ayudan.
+**Variables muertas en `.env` — retiradas (18/08/2026).** `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` no las usaba nadie en este repositorio (confirmado por grep completo, no solo por sospecha) — residuo de un diseño anterior donde el frontend hablaba directo con Supabase; ARQUITECTURA.md también las listaba y quedó corregido. Solo en el `.env` local, no versionado — cada colaborador con su propia copia debe quitarlas a mano si las tiene.
 
 ## Diagnóstico
 

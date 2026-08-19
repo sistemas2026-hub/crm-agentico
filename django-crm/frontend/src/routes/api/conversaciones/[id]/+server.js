@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
+import { headersMotor } from '$lib/server/v2/motor-headers.js';
 
 /**
  * Proxy hacia el motor para continuar una conversación abierta desde la
@@ -30,7 +31,7 @@ export async function POST({ request, locals, fetch }) {
   try {
     const resp = await fetch(`${baseUrl}/chat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: headersMotor({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         tenant,
         rol: rol_efectivo || 'cliente_final',
@@ -75,7 +76,7 @@ export async function DELETE({ params, locals, fetch }) {
 
   try {
     const resp = await fetch(`${baseUrl}/conversaciones/${params.id}?tenant=${tenant}`, {
-      method: 'DELETE'
+      method: 'DELETE', headers: headersMotor()
     });
     if (!resp.ok) {
       const datos = await resp.json().catch(() => ({}));

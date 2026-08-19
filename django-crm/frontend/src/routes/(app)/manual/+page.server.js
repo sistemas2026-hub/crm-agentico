@@ -1,4 +1,5 @@
 import { env } from '$env/dynamic/private';
+import { headersMotor } from '$lib/server/v2/motor-headers.js';
 
 /**
  * Server load: la lista fija de casos (tenant_config.manual.casos), todos
@@ -22,11 +23,11 @@ export async function load({ fetch }) {
 
   try {
     const [respCasos, respEjemplos, respDocs, respRevisiones, respCatalogo] = await Promise.all([
-      fetch(`${baseUrl}/manual/casos?tenant=${encodeURIComponent(tenant)}`),
-      fetch(`${baseUrl}/manual/ejemplos?tenant=${encodeURIComponent(tenant)}`),
-      fetch(`${baseUrl}/corpus/documentos?tenant=${encodeURIComponent(tenant)}`),
-      fetch(`${baseUrl}/manual/revisiones?tenant=${encodeURIComponent(tenant)}`),
-      fetch(`${baseUrl}/agentes/catalogo?tenant=${encodeURIComponent(tenant)}`)
+      fetch(`${baseUrl}/manual/casos?tenant=${encodeURIComponent(tenant)}`, { headers: headersMotor() }),
+      fetch(`${baseUrl}/manual/ejemplos?tenant=${encodeURIComponent(tenant)}`, { headers: headersMotor() }),
+      fetch(`${baseUrl}/corpus/documentos?tenant=${encodeURIComponent(tenant)}`, { headers: headersMotor() }),
+      fetch(`${baseUrl}/manual/revisiones?tenant=${encodeURIComponent(tenant)}`, { headers: headersMotor() }),
+      fetch(`${baseUrl}/agentes/catalogo?tenant=${encodeURIComponent(tenant)}`, { headers: headersMotor() })
     ]);
     const datosCasos = await respCasos.json();
     if (!respCasos.ok) {

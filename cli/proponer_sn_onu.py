@@ -46,9 +46,27 @@ equivocada por el nombre, heredaria ese riesgo sin verificar. El dia que
 exista una decision explicita de escribir, es un script APARTE, con
 confirmacion y modo dry-run primero -- no este.
 
+Verificacion por IP (18/08/2026) -- segunda señal, independiente del nombre
+-----------------------------------------------------------------------------
+El nombre falla justo donde mas se necesita (typos, tildes, duplicados). La
+IP que WispHub guarda por cliente (campo 'ip') es, en Rapilink, una
+asignacion ESTATICA dentro de su red interna (confirmado en vivo: 'IPv4
+access type: Static' en get_onu_full_status_info) -- no cambia con cada
+reconexion como pasaria con un ISP residencial tipico. Verificado contra 8
+clientes reales con sn_onu ya confirmado: quien tenia IP de los dos lados,
+coincidio 8 de 8. Por eso sirve como confirmacion independiente del nombre,
+no solo como otro dato mas.
+
+Requiere get_onu_full_status_info (el endpoint PESADO, ~10s por ONU, el
+proveedor pide no usarlo en bulk/polling) -- por eso es opt-in
+(--verificar-ip) y solo se llama sobre candidatos ya acotados por nombre
+(alta_confianza, revisar_typo, ambiguo con mas de un candidato), nunca
+sobre todo el universo de ONUs.
+
 Uso
 ---
     py -3.13 cli/proponer_sn_onu.py
+    py -3.13 cli/proponer_sn_onu.py --verificar-ip
     py -3.13 cli/proponer_sn_onu.py --csv candidatos_sn_onu.csv
     py -3.13 cli/proponer_sn_onu.py --validar        # mide las reglas contra la realidad
     py -3.13 cli/proponer_sn_onu.py --verificar-mac  # confirma contra el equipo (lento)
@@ -152,6 +170,81 @@ def clientes_activos_wisphub() -> list[dict]:
     return clientes
 
 
+def ip_de_onu(sn: str) -> str | None:
+    """IP que SmartOLT ve realmente conectada en esa ONU, o None si no se
+    pudo obtener (endpoint pesado -- ver el docstring del modulo, no se
+    reintenta con la forma hexadecimal para no duplicar el costo de 10s).
+    'full_status_json' es la forma real de la respuesta -- 'response' NO
+    existe en este endpoint, a diferencia de get_outage_pons (confirmado
+    en vivo, 18/08/2026: asumir la misma envoltura para dos endpoints
+    distintos del mismo proveedor caus el primer intento de esto)."""
+    try:
+        r = requests.get(f"{SMARTOLT_BASE_URL}/api/onu/get_onu_full_status_info/{sn}",
+                         headers=SMARTOLT_HEADERS, timeout=15)
+        if not r.ok:
+            return None
+        wan = r.json().get("full_status_json", {}).get("ONU WAN Interfaces", {})
+        return wan.get("IPv4 address") if isinstance(wan, dict) else None
+    except requests.exceptions.RequestException:
+        return None
+
+
+def confirmar_por_ip(candidatos: list[dict], ip_wisphub: str | None) -> tuple[dict | None, str, str]:
+    """Entre varios candidatos de ONU (mismo nombre o nombre parecido),
+    cual tiene la IP que WispHub tiene guardada para este cliente -- si
+    hay exactamente uno, ESE es el correcto, sin importar cuantos otros
+    compartian el nombre.
+
+    Devuelve (onu_confirmada, razon, nota):
+      razon es un codigo fijo para decidir el nivel de confianza sin
+      comparar texto libre -- 'sin_ip', 'confirmado', 'no_coincide',
+      'multiple'. 'nota' es la version legible para el reporte.
+      onu_confirmada es None salvo en 'confirmado' -- que no confirme no
+      es un fallo, solo falta de dato (no toda ONU trae IP en
+      get_onu_full_status_info)."""
+    if not ip_wisphub:
+        return None, "sin_ip", "sin IP en WispHub para comparar"
+
+    coincidencias = []
+    for onu in candidatos:
+        sn = onu.get("sn") or onu.get("unique_external_id") or ""
+        ip_so = ip_de_onu(sn)
+        if ip_so and ip_so == ip_wisphub:
+            coincidencias.append(onu)
+
+    if len(coincidencias) == 1:
+        return coincidencias[0], "confirmado", "IP coincide -- confirmado"
+    if len(coincidencias) > 1:
+        return None, "multiple", f"{len(coincidencias)} candidatos con la MISMA ip que WispHub -- revisar a mano"
+    return None, "no_coincide", "ninguna IP de los candidatos coincide con la de WispHub"
+
+
+def tokens_clave(norm: str) -> list[str] | None:
+    """Primer nombre + primer apellido como PALABRAS sueltas -- heuristica
+    para nombres latinos 'NOMBRE [NOMBRE2] APELLIDO1 [APELLIDO2]'. None si
+    el nombre no tiene ni dos palabras (no hay con que buscar)."""
+    partes = norm.split()
+    if len(partes) < 2:
+        return None
+    apellido = partes[2] if len(partes) >= 3 else partes[1]
+    return [partes[0], apellido]
+
+
+def candidatos_por_tokens(tokens: list[str], indice: dict) -> list[dict]:
+    """Toda ONU cuyo nombre normalizado tenga AMBOS tokens como PALABRAS
+    completas, en cualquier orden y con cualquier cosa alrededor --
+    'VILMA LUCIA CASADIEGO MANOSALVA-1' matchea tokens ['VILMA',
+    'CASADIEGO'] aunque el string completo no coincida ni por similitud.
+    Palabras completas, no substring pegado: 'ANA' no matchea dentro de
+    'SUSANA' (serian palabras distintas al hacer .split())."""
+    candidatos = []
+    for nombre_norm, onus in indice.items():
+        palabras = set(nombre_norm.split())
+        if all(t in palabras for t in tokens):
+            candidatos.extend(onus)
+    return candidatos
+
+
 def onus_smartolt() -> list[dict]:
     """TODAS las ONUs de las dos OLTs de Rapilink, via el endpoint masivo.
     'pon_port' se sabe roto (ver skill) pero aca no se filtra por eso -- se
@@ -233,8 +326,9 @@ def candidatos_por_mac(mac_cpe: str, indice_cola: dict) -> list:
 
 # Orden del reporte: primero lo que se puede escribir sin pensar, despues lo
 # que necesita una persona, de mas prometedor a menos.
-ORDEN_NIVEL = {"alta_confianza": 0, "solo_mac": 1, "revisar_mac": 2,
-               "revisar_typo": 3, "ambiguo": 4, "sin_candidato": 5}
+# El orden de los niveles vive en '_NIVELES', dentro de main(): una sola
+# lista de la que salen el resumen y el orden del reporte, en vez de dos
+# estructuras que hay que acordarse de actualizar juntas.
 
 
 def mac_corrobora(mac_cpe: str, sn_onu: str) -> bool | None:
@@ -305,6 +399,10 @@ def main() -> None:
                         "MAC. No sirve para blindar la carga entera, solo para "
                         "confirmar una parte. Apagado por defecto: tarda horas y el "
                         "proveedor pide no usar ese endpoint en bulk.")
+    ap.add_argument("--verificar-ip", action="store_true",
+                    help="Cruza la IP de WispHub contra get_onu_full_status_info "
+                         "para cada candidato -- mas lento (~10s por candidato), "
+                         "pero confirma o desmiente lo que dice el nombre solo.")
     args = ap.parse_args()
 
     if not SMARTOLT_BASE_URL or not SMARTOLT_HEADERS["X-Token"]:
@@ -404,6 +502,15 @@ def main() -> None:
             if sn in seriales_ya_usados:
                 filas.append((id_servicio, nombre_wh, sn, onu.get("name", ""),
                              "ambiguo", "ese sn_onu ya esta asignado a OTRO cliente en WispHub"))
+            elif args.verificar_ip:
+                confirmada, razon, nota = confirmar_por_ip([onu], c.get("ip"))
+                # Un nombre exacto CON ip que NO coincide es mas sospechoso que
+                # uno sin verificar -- se marca distinto, no se descarta (el
+                # nombre exacto sigue siendo una senal real).
+                nivel = {"confirmado": "confirmado_ip",
+                        "no_coincide": "revisar_ip_no_coincide"}.get(razon, "alta_confianza")
+                filas.append((id_servicio, nombre_wh, sn, onu.get("name", ""),
+                             nivel, f"nombre exacto, sin ambiguedad -- {nota}"))
             else:
                 # Segunda señal: la MAC del CPE. Un nombre exacto NO alcanza
                 # para escribir sin revisar -- medido el 18/08/2026 sobre los
@@ -442,19 +549,34 @@ def main() -> None:
         if len(candidatos_exactos) > 1:
             sns_exactos = [o.get("sn") or o.get("unique_external_id") or "?"
                           for o in candidatos_exactos]
-            # La MAC desempata. Aca es donde mas rinde: entre candidatos que
-            # ya propuso el nombre, el correcto esta a 1 o 2 de la MAC y el
-            # otro a millones, asi que no es una pista debil sino una
-            # separacion tajante. Medido: resuelve 18 de 28 ambiguos.
+            # Dos desempates, y se prueban en orden de costo.
+            #
+            # Primero la MAC, que es GRATIS: entre candidatos que ya propuso
+            # el nombre, el correcto esta a 1 o 2 de la MAC y el otro a
+            # millones, asi que no es una pista debil sino una separacion
+            # tajante. Medido: resuelve 18 de 28 ambiguos sin una sola llamada.
             if sn_mac in sns_exactos:
                 filas.append((id_servicio, nombre_wh, sn_mac, onu_mac.get("name", ""),
                              "alta_confianza",
                              f"{len(candidatos_exactos)} ONUs con ese mismo nombre, "
                              f"y la MAC del CPE senala a esta"))
                 continue
-            filas.append((id_servicio, nombre_wh, ", ".join(sns_exactos), "", "ambiguo",
-                         f"{len(candidatos_exactos)} ONUs distintas con ese mismo nombre "
-                         f"y la MAC no senala a ninguna"))
+            # Recien si la MAC no alcanzo se paga la IP (~10s por candidato),
+            # y solo si lo pidieron.
+            if args.verificar_ip:
+                confirmada, razon, nota = confirmar_por_ip(candidatos_exactos, c.get("ip"))
+                if confirmada:
+                    sn_confirmado = confirmada.get("sn") or confirmada.get("unique_external_id") or ""
+                    filas.append((id_servicio, nombre_wh, sn_confirmado, confirmada.get("name", ""),
+                                 "confirmado_ip",
+                                 f"{len(candidatos_exactos)} ONUs con ese nombre, la IP desempato -- {nota}"))
+                else:
+                    filas.append((id_servicio, nombre_wh, ", ".join(sns_exactos), "", "ambiguo",
+                                 f"{len(candidatos_exactos)} ONUs distintas con ese mismo nombre -- {nota}"))
+            else:
+                filas.append((id_servicio, nombre_wh, ", ".join(sns_exactos), "", "ambiguo",
+                             f"{len(candidatos_exactos)} ONUs distintas con ese mismo nombre "
+                             f"y la MAC no senala a ninguna"))
             continue
 
         if norm_wh in nombres_duplicados:
@@ -469,6 +591,33 @@ def main() -> None:
             filas.append((id_servicio, nombre_wh, "", "", "ambiguo",
                          "hay otro cliente ACTIVO con el mismo nombre en WispHub"))
             continue
+
+        # Sin match exacto contra 'nombre': antes de pasar a typo, probar contra
+        # 'servicio' -- el campo separado que WispHub muestra en su propia
+        # pantalla como "Servicio", a veces mas corto (sin segundo nombre) que
+        # 'nombre'. Confirmado en vivo (18/08/2026): id_servicio 6727,
+        # SmartOLT tenia la ONU con el nombre de 'servicio', no el de
+        # 'nombre' -- por eso ese caso salia 'sin_candidato' antes de esto.
+        # Cuesta cero cuando 'servicio' == 'nombre' (el caso mas comun): el
+        # 'if norm_servicio != norm_wh' de abajo lo salta directo.
+        norm_servicio = normalizar(c.get("servicio") or "")
+        if norm_servicio and norm_servicio != norm_wh:
+            candidatos_servicio = indice.get(norm_servicio, [])
+            if len(candidatos_servicio) == 1:
+                onu = candidatos_servicio[0]
+                sn = onu.get("sn") or onu.get("unique_external_id") or ""
+                if sn not in seriales_ya_usados:
+                    nivel, nota_ip = "alta_confianza", ""
+                    if args.verificar_ip:
+                        confirmada, razon, nota = confirmar_por_ip([onu], c.get("ip"))
+                        nivel = {"confirmado": "confirmado_ip",
+                                "no_coincide": "revisar_ip_no_coincide"}.get(razon, "alta_confianza")
+                        nota_ip = f" -- {nota}"
+                    filas.append((id_servicio, nombre_wh, sn, onu.get("name", ""), nivel,
+                                 f"coincide por 'servicio' ({c.get('servicio')}), "
+                                 f"no por 'nombre'{nota_ip}"))
+                    continue
+
 
         # Sin match exacto: probar por conjunto de palabras, pero SOLO se acepta
         # si la MAC del CPE tambien esta de acuerdo. Un nombre parecido por si
@@ -521,7 +670,8 @@ def main() -> None:
                              f"senala a ninguna"))
                 continue
 
-        # Ultimo recurso: el mas parecido por similitud de texto (typo).
+
+        # Sin match exacto: buscar el mas parecido (typo), solo si supera el umbral.
         mejor_nombre, mejor_ratio = None, 0.0
         for n in indice:
             ratio = difflib.SequenceMatcher(None, norm_wh, n).ratio()
@@ -531,31 +681,100 @@ def main() -> None:
             candidatos = indice[mejor_nombre]
             sns_typo = [o.get("sn") or o.get("unique_external_id") or "?"
                        for o in candidatos]
+            # Mismo orden de costo que en los otros desempates: la MAC no
+            # cuesta nada, la IP cuesta una llamada de ~10s.
             if sn_mac in sns_typo:
                 filas.append((id_servicio, nombre_wh, sn_mac, mejor_nombre,
                              "alta_confianza",
                              f"nombre parecido ({mejor_ratio:.0%}) Y la MAC del CPE "
                              f"senala al mismo serial -- el typo deja de importar"))
+            elif args.verificar_ip:
+                confirmada, razon, nota = confirmar_por_ip(candidatos, c.get("ip"))
+                if confirmada:
+                    sn_confirmado = confirmada.get("sn") or confirmada.get("unique_external_id") or ""
+                    filas.append((id_servicio, nombre_wh, sn_confirmado, confirmada.get("name", ""),
+                                 "confirmado_ip",
+                                 f"similitud {mejor_ratio:.0%}, la IP lo confirma -- {nota}"))
+                else:
+                    filas.append((id_servicio, nombre_wh, ", ".join(sns_typo), mejor_nombre,
+                                 "revisar_typo",
+                                 f"similitud {mejor_ratio:.0%} -- posible typo, confirmar a mano "
+                                 f"({nota})"))
             else:
                 filas.append((id_servicio, nombre_wh, ", ".join(sns_typo), mejor_nombre,
                              "revisar_typo",
                              f"similitud {mejor_ratio:.0%} -- posible typo, confirmar a mano"))
-        elif sn_mac and sn_mac not in seriales_ya_usados:
-            # El nombre no encontro nada, pero la MAC si. Es el caso mas
-            # comun de todos aca (130 de 192 clientes), y el que este script
-            # perdia entero antes de tener la busqueda por MAC.
-            #
-            # NO es alta_confianza: sostenido solo por la MAC, acierta 7 de
-            # cada 10. Va al reporte para que una persona lo confirme, o
-            # para que --verificar-mac lo resuelva contra el equipo real.
-            filas.append((id_servicio, nombre_wh, sn_mac, onu_mac.get("name", ""),
-                         "solo_mac",
-                         f"la MAC del CPE apunta a este serial, pero el nombre en "
-                         f"SmartOLT es distinto ('{(onu_mac.get('name') or '')[:28]}') "
-                         f"-- confirmar antes de escribir"))
+            continue
+        # Ultimo recurso: ni 'nombre' ni 'servicio' dieron un match exacto, y
+        # el string completo no llega al umbral de similitud (tipico cuando
+        # SmartOLT tiene texto extra pegado: '-1', 'PPT', '2'). Se busca mas
+        # suelto -- nombre y apellido como palabras, en cualquier lugar del
+        # candidato -- y como eso trae mas ruido, la IP es la que de verdad
+        # decide cuando hay mas de un candidato.
+        tokens = tokens_clave(norm_wh)
+        candidatos_tokens = candidatos_por_tokens(tokens, indice) if tokens else []
+
+        if len(candidatos_tokens) == 1:
+            onu = candidatos_tokens[0]
+            sn = onu.get("sn") or onu.get("unique_external_id") or ""
+            if sn in seriales_ya_usados:
+                filas.append((id_servicio, nombre_wh, sn, onu.get("name", ""), "ambiguo",
+                             "nombre+apellido encontrados en 1 candidato, pero ese sn_onu "
+                             "ya esta asignado a OTRO cliente en WispHub"))
+            else:
+                # A diferencia de 'nombre'/'servicio' (campos completos,
+                # confiables), dos palabras sueltas coincidiendo es una
+                # senal MAS debil -- "ANA"+"IBANEZ" puede ser cualquiera de
+                # varias personas. Sin IP que lo confirme, esto NUNCA es
+                # alta_confianza -- 'revisar_tokens' dice explicitamente
+                # "esto es menos seguro que un typo", no un nivel mas.
+                nivel, nota_ip = "revisar_tokens", ""
+                if args.verificar_ip:
+                    confirmada, razon, nota = confirmar_por_ip([onu], c.get("ip"))
+                    nivel = {"confirmado": "confirmado_ip",
+                            "no_coincide": "revisar_tokens"}.get(razon, "revisar_tokens")
+                    nota_ip = f" -- {nota}"
+                filas.append((id_servicio, nombre_wh, sn, onu.get("name", ""), nivel,
+                             f"nombre+apellido encontrados en 1 candidato, confirmar con "
+                             f"cuidado ({onu.get('name', '')}){nota_ip}"))
+        elif len(candidatos_tokens) > 1:
+            sns = ", ".join(o.get("sn") or o.get("unique_external_id") or "?"
+                            for o in candidatos_tokens[:5])
+            if args.verificar_ip:
+                confirmada, razon, nota = confirmar_por_ip(candidatos_tokens, c.get("ip"))
+                if confirmada:
+                    sn_confirmado = confirmada.get("sn") or confirmada.get("unique_external_id") or ""
+                    filas.append((id_servicio, nombre_wh, sn_confirmado, confirmada.get("name", ""),
+                                 "confirmado_ip",
+                                 f"{len(candidatos_tokens)} candidatos con nombre+apellido, "
+                                 f"la IP desempato -- {nota}"))
+                else:
+                    filas.append((id_servicio, nombre_wh, sns, "", "ambiguo",
+                                 f"{len(candidatos_tokens)} candidatos con nombre+apellido -- {nota}"))
+            else:
+                filas.append((id_servicio, nombre_wh, sns, "", "ambiguo",
+                             f"{len(candidatos_tokens)} candidatos con nombre+apellido, "
+                             f"sin --verificar-ip para desempatar"))
         else:
-            filas.append((id_servicio, nombre_wh, "", "", "sin_candidato",
-                         "ni el nombre ni la MAC del CPE apuntan a ninguna ONU"))
+            # Ni el nombre completo, ni 'servicio', ni palabras sueltas. Queda
+            # la MAC, que es la unica senal que no depende de como haya quedado
+            # escrito el nombre en ninguno de los dos sistemas. Es el caso mas
+            # comun de todos aca (130 de 192 clientes) y el que este script
+            # perdia entero antes de la busqueda por MAC.
+            #
+            # NO es alta_confianza: sostenida sola, la MAC acierta 7 de cada
+            # 10. Va al reporte para que una persona lo confirme, o para que
+            # --verificar-mac lo resuelva contra el equipo real.
+            if sn_mac and sn_mac not in seriales_ya_usados:
+                filas.append((id_servicio, nombre_wh, sn_mac, onu_mac.get("name", ""),
+                             "solo_mac",
+                             f"la MAC del CPE apunta a este serial, pero el nombre en "
+                             f"SmartOLT es distinto ('{(onu_mac.get('name') or '')[:28]}') "
+                             f"-- confirmar antes de escribir"))
+            else:
+                filas.append((id_servicio, nombre_wh, "", "", "sin_candidato",
+                             "ni el nombre (completo, 'servicio' o palabras sueltas) "
+                             "ni la MAC del CPE apuntan a ninguna ONU"))
 
     # --- filtro final: la MAC real del equipo, solo si se pidio ---------
     # Sube a 'alta_confianza' lo que confirme y baja a 'ambiguo' lo que
@@ -637,16 +856,24 @@ def main() -> None:
     for fila in filas:
         conteo[fila[4]] = conteo.get(fila[4], 0) + 1
 
+    # Una sola lista, de mas firme a mas dudoso: la usan el resumen y el
+    # orden del reporte. 'confirmado_ip' primero porque se comprobo contra el
+    # equipo; 'solo_mac' abajo de 'alta_confianza' porque la MAC sola acierta
+    # 7 de cada 10 (ver candidatos_por_mac).
+    _NIVELES = ("confirmado_ip", "alta_confianza", "solo_mac", "revisar_typo",
+               "revisar_mac", "revisar_ip_no_coincide", "revisar_tokens",
+               "ambiguo", "sin_candidato")
+
     print("Resumen:")
-    for nivel in ("alta_confianza", "solo_mac", "revisar_mac", "revisar_typo",
-                 "ambiguo", "sin_candidato"):
+    for nivel in _NIVELES:
         print(f"  {nivel}: {conteo.get(nivel, 0)}")
     print()
 
     print(f"{'id_servicio':<12}{'nombre':<35}{'confianza':<16}{'candidato(s)':<30}motivo")
     print("-" * 130)
+    orden = {nivel: i for i, nivel in enumerate(_NIVELES)}
     for id_servicio, nombre, sn, nombre_so, confianza, motivo in sorted(
-            filas, key=lambda f: (ORDEN_NIVEL.get(f[4], 99), f[0])):
+            filas, key=lambda f: (orden.get(f[4], len(_NIVELES)), f[0])):
         print(f"{id_servicio:<12}{nombre[:33]:<35}{confianza:<16}{sn[:28]:<30}{motivo}")
 
     if args.csv:
