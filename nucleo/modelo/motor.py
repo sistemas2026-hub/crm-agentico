@@ -334,7 +334,45 @@ def _ejecutar_verificacion(herramienta, sesion, argumentos_modelo: dict,
     if not filas:
         if sesion is not None:
             sesion.verificado = False
-        return {"verificado": False, "motivo": "no encontrado"}
+            sesion.intentos_verificacion_fallidos += 1
+        # Sin 'instruccion_interna' aca, el modelo improvisaba: a veces
+        # insistia con el dato, a veces asumia un prospecto nuevo, a veces
+        # inventaba una excusa de "problema del sistema" -- probado en vivo
+        # el 19/08/2026, tres corridas, tres comportamientos distintos.
+        # 'no encontrado' es genuinamente ambiguo -- puede ser un error de
+        # tipeo (cliente real) o alguien que todavia no es cliente -- asi
+        # que se le da UN reintento antes de asumir lo segundo.
+        intentos = sesion.intentos_verificacion_fallidos if sesion else 1
+        # La via de escape ("si en cualquier momento te dice que no es
+        # cliente, deriva YA") aplica siempre, no solo despues de dos
+        # intentos -- probado en vivo el 19/08/2026: alguien puede
+        # autodeclararse "no soy cliente todavia" respondiendo al PRIMER
+        # pedido de reintento, sin llegar nunca al segundo. Sin esto en el
+        # intento 1, el modelo no tenia ninguna instruccion para ese caso y
+        # volvia al reflejo viejo de "te paso con un colaborador humano" sin
+        # llamar a ninguna herramienta.
+        via_de_escape = (
+            "Si en CUALQUIER momento la persona dice explicitamente que "
+            "todavia no es cliente (aunque sea respondiendo a que le pediste "
+            "reescribir el dato), no insistas mas con el dato -- LLAMA a "
+            "derivar_a_area en ESE MISMO mensaje, hacia el area de la tabla "
+            "de derivacion marcada como que NO requiere verificar identidad "
+            "(si hay alguna). Nunca digas 'te paso con...' sin haber llamado "
+            "la herramienta: eso deja a la persona esperando una derivacion "
+            "que nunca ocurre.")
+        if intentos <= 1:
+            instruccion = (
+                "No se encontro ningun cliente con ese dato. Puede ser un "
+                "error al escribirlo -- pedile que lo confirme o lo vuelva "
+                "a escribir. Todavia NO asumas que no es cliente vos mismo, "
+                "esperá a que te lo diga. " + via_de_escape)
+        else:
+            instruccion = (
+                "Van dos intentos sin encontrar coincidencia. Pregunta "
+                "directo si ya es cliente de la empresa o si en realidad "
+                "quiere CONTRATAR un servicio nuevo. " + via_de_escape)
+        return {"verificado": False, "motivo": "no encontrado",
+               "instruccion_interna": instruccion}
 
     if len(filas) > 1:
         if sesion is not None:
@@ -1053,7 +1091,18 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                                                     config.llm.modelo_por_defecto)
     referencia_redaccion = config.llm.modelo_redaccion or referencia_decision
 
-    nivel_exigido = nivel_requerido(rol_cfg, config.seguridad) if rol_cfg.orientado_a == "cliente_final" else 0
+    # 'exige_verificacion=False' (ver schema.py) es la salida: un cliente_final
+    # que TODAVIA NO ES CLIENTE (ej. 'ventas') no tiene nada que verificar
+    # contra WispHub, asi que el gate completo queda en 0 para ese rol. Sin
+    # este chequeo el codigo bloqueaba la herramienta igual aunque el prompt
+    # ya le hubiera dicho al modelo que no hacia falta verificar -- el
+    # modelo terminaba recibiendo IDENTIDAD_NO_VERIFICADA sin entender por
+    # que, y esa entrada se excluye del registro (ver mas abajo), asi que
+    # parecia que no habia intentado nada. Bug real, visto en vivo el
+    # 19/08/2026 con el rol 'ventas' recien creado.
+    _cliente_final_verificable = (rol_cfg.orientado_a == "cliente_final"
+                                  and rol_cfg.exige_verificacion)
+    nivel_exigido = nivel_requerido(rol_cfg, config.seguridad) if _cliente_final_verificable else 0
     # Sin un telefono real de por medio, el identificador del canal (ej. un
     # BSUID de WhatsApp) no es un factor de posesion -- cualquiera que
     # escriba desde esa cuenta pasaria la barra igual. Se exige nivel 1 ANTES
@@ -1061,7 +1110,7 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
     # unica forma de saber quien es, y sin esto la conversacion queda para
     # siempre como "sin identificar" en /conversaciones si nunca toca un
     # recurso protegido.
-    if (rol_cfg.orientado_a == "cliente_final" and sesion is not None
+    if (_cliente_final_verificable and sesion is not None
             and not es_factor_de_posesion(sesion.identificador_canal)):
         nivel_exigido = max(nivel_exigido, 1)
 
@@ -1165,7 +1214,22 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 # Idem: tiene que poder llamarse ANTES de que la sesion este
                 # verificada -- es lo que la termina de verificar.
                 salida = _ejecutar_confirmacion(sesion, llamada.argumentos)
-            elif rol_cfg.orientado_a == "cliente_final" and (sesion is None or sesion.nivel < nivel_exigido):
+            elif (rol_cfg.orientado_a == "cliente_final" and (sesion is None or sesion.nivel < nivel_exigido)
+                  # Excepcion: 'derivar_a_area' hacia un area que declara
+                  # exige_verificacion=False (ej. 'ventas') tiene que poder
+                  # llamarse SIN estar verificado -- es justamente la salida
+                  # para alguien que nunca va a poder verificarse porque
+                  # todavia no es cliente. Sin esto, el gate bloqueaba la
+                  # derivacion misma antes de que pudiera llegar al area que
+                  # no la necesita: bug real, visto en vivo el 19/08/2026 --
+                  # el modelo intentaba derivar, recibia IDENTIDAD_NO_VERIFICADA
+                  # (que se excluye del registro, ver mas abajo, asi que
+                  # parecia que no habia intentado nada) y terminaba
+                  # inventando una excusa en vez de la derivacion real.
+                  and not (herramienta.deriva_rol
+                          and not config.roles.get(
+                              (llamada.argumentos or {}).get("area"), rol_cfg
+                          ).exige_verificacion)):
                 salida = {"error": "IDENTIDAD_NO_VERIFICADA",
                          "instruccion_interna": "No muestres ningun dato. "
                              "Pidele al cliente el dato que falta para "
@@ -1337,9 +1401,16 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 rol_cfg = rol_cfg_nuevo
                 herramientas = herramientas_del_rol(config, rol_cfg)
                 catalogo_openai = [_esquema_openai(h) for h in herramientas]
+                # Mismo criterio que al entrar al turno -- ver el comentario
+                # de '_cliente_final_verificable' mas arriba. Aca importa
+                # todavia mas: es el momento en que derivar_a_area cambia el
+                # rol activo a mitad de turno (ej. a 'ventas'), y sin esto el
+                # gate seguia calculado para el rol VIEJO.
+                _cliente_final_verificable_nuevo = (rol_cfg.orientado_a == "cliente_final"
+                                                    and rol_cfg.exige_verificacion)
                 nivel_exigido = (nivel_requerido(rol_cfg, config.seguridad)
-                                if rol_cfg.orientado_a == "cliente_final" else 0)
-                if (rol_cfg.orientado_a == "cliente_final" and sesion is not None
+                                if _cliente_final_verificable_nuevo else 0)
+                if (_cliente_final_verificable_nuevo and sesion is not None
                         and not es_factor_de_posesion(sesion.identificador_canal)):
                     nivel_exigido = max(nivel_exigido, 1)
                 # El empujon de 'sugerir_cuando_disponible' se evalua contra

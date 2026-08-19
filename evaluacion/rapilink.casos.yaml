@@ -507,3 +507,54 @@ casos:
   # esto sea determinístico, el camino es una precondicion en codigo
   # (mismo mecanismo que 'exige_previas' de reiniciar_ont), no un caso
   # dorado que dependa de que el modelo elija bien.
+
+  # --- ventas (19/08/2026) ---------------------------------------------
+  # Nace de un bug real visto en el simulador (screenshot del usuario):
+  # "para solicitar un servicio" hacia que el router pidiera cedula de
+  # inmediato -- un prospecto nunca iba a pasar esa verificacion, porque
+  # genuinamente no esta en WispHub. La causa real NO era el prompt: era
+  # el gate de ejecucion (motor.py), que bloqueaba 'derivar_a_area' en si
+  # mismo mientras el ROL ACTUAL (el router) no estuviera verificado, sin
+  # mirar si el area de DESTINO ('ventas') declaraba exige_verificacion en
+  # false. El modelo intentaba derivar, el codigo lo bloqueaba con
+  # IDENTIDAD_NO_VERIFICADA (que se excluye del registro a proposito, ver
+  # el comentario en motor.py), y desde afuera parecia que el modelo no
+  # habia intentado nada -- costo varias rondas de prompt engineering
+  # antes de encontrar que el problema era el gate, no el texto.
+  - nombre: pedido de servicio nuevo deriva a ventas sin pedir cedula
+    rol: cliente_final
+    # 'sesion: verificado false' A PROPOSITO -- sin esto el caso corre con
+    # 'sesion_por_defecto' (verificado true, cliente PRUEBA TEMPORAL) y no
+    # prueba nada: un cliente YA verificado no necesita que nadie salte la
+    # verificacion por el, la regla de "no volver a pedirla" ya lo cubre.
+    # El bug real era sobre alguien SIN verificar (un prospecto).
+    sesion:
+      verificado: false
+      nivel: 0
+      identificador_canal: "573009991111"
+    mensajes: ["para solicitar un servicio"]
+    espera:
+      deriva_a: ventas
+      sin_errores: true
+      responde_sin: ["cedula", "cédula"]
+
+  # Contraparte: un cliente actual pidiendo sumar otro servicio SI tiene
+  # que probar que ya es cliente -- la excepcion de 'ventas' es solo para
+  # quien todavia no esta en el sistema, no un atajo general para evitar
+  # la verificacion. Mismo motivo para 'sesion: verificado false' que el
+  # caso de arriba.
+  - nombre: cliente actual pidiendo otro servicio si se verifica
+    rol: cliente_final
+    sesion:
+      verificado: false
+      nivel: 0
+      identificador_canal: "573009992222"
+    # Dos mensajes a proposito: el primero solo dispara el PEDIDO de
+    # cedula (todavia no hay valor que buscar, no llama a ninguna
+    # herramienta -- confirmado en vivo). Recien en el segundo, con la
+    # cedula ya en el mensaje, tiene sentido esperar la llamada real.
+    mensajes: ["quiero agregar otro servicio a mi cuenta", "1142434445"]
+    espera:
+      usa: [verificar_identidad_por_cedula]
+      no_usa: [derivar_a_area]
+      sin_errores: true

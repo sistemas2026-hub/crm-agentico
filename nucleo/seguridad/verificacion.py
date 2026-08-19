@@ -75,6 +75,12 @@ class Sesion:
     # queda en None, y las herramientas de SmartOLT no tienen con que llamar.
     sn_onu: str | None = None
     candidatos: list[str] = field(default_factory=list)  # si el numero es ambiguo
+    # Cuenta 'no encontrado' seguidos (nunca se persiste entre reinicios del
+    # motor -- si se pierde, en el peor caso se permite un reintento de mas,
+    # sin riesgo). Con 0 no hay forma de distinguir "se equivoco tipeando"
+    # de "genuinamente no es cliente" -- ver el comentario en
+    # nucleo/modelo/motor.py::_ejecutar_verificacion sobre por que importa.
+    intentos_verificacion_fallidos: int = 0
 
     # Verificacion en DOS pasos: encontrar un cliente por cedula no alcanza
     # para marcar 'verificado' -- primero hay que confirmar con la persona

@@ -113,7 +113,15 @@ def _tabla_de_derivacion(config, rol) -> str:
             continue
         atiende = (rol_destino.atiende or "").strip()
         if atiende:
-            lineas.append(f"- {atiende}\n  -> derivar_a_area('{destino}')")
+            aviso = ""
+            if not rol_destino.exige_verificacion:
+                # Generico a proposito: nucleo/ no puede nombrar un rol de
+                # tenant especifico (ej. 'ventas') -- se marca por el campo,
+                # no por el nombre, para que el router sepa cuando saltar la
+                # verificacion sin que el motor conozca a ese cliente.
+                aviso = ("\n  (NO requiere verificar identidad -- deriva "
+                        "directo, sin pedir cedula)")
+            lineas.append(f"- {atiende}\n  -> derivar_a_area('{destino}'){aviso}")
         else:
             lineas.append(
                 f"- (a '{destino}' no se le describio todavia que atiende, asi "
@@ -193,41 +201,64 @@ def piezas_del_system(config, nombre_rol: str) -> list[dict]:
     # impide que alguien cree un agente de cara al cliente y se olvide de
     # decirle que quien escribe es un desconocido hasta verificarse.
     if rol.orientado_a == "cliente_final":
+        if rol.exige_verificacion:
+            bloque_identidad = (
+                "Es un desconocido hasta que su identidad quede verificada "
+                "por el sistema (no por ti): no muestres ningun dato de "
+                "cuenta antes de que el codigo confirme la verificacion.\n"
+                "VERIFICACION PRIMERO, SIEMPRE -- SIN EXCEPCION, incluso si "
+                "el pedido suena a contratar un servicio nuevo: apenas el "
+                "cliente cuenta cual es su problema, tu SIGUIENTE mensaje "
+                "tiene que pedir la verificacion de identidad (ej. numero "
+                "de cedula, con la herramienta correspondiente) -- ANTES de "
+                "hacer cualquier pregunta de diagnostico (cuantos "
+                "televisores tiene, si las luces del equipo estan "
+                "normales, etc.), aunque esas preguntas en si no muestren "
+                "ningun dato de la cuenta. No arranques el diagnostico y "
+                "despues pidas la cedula: el orden es verificar, y RECIEN "
+                "AHI seguir con el problema. Unica excepcion: si el canal "
+                "ya la trae verificada de antes (ver el punto de abajo), no "
+                "hace falta volver a pedirla.\n"
+                "Si la verificacion no encuentra a nadie con el dato, la "
+                "herramienta te va a decir que hacer segun cuantas veces ya "
+                "paso -- seguila al pie de la letra, no improvises tu propio "
+                "criterio ahi (puede ser un simple error de tipeo, o alguien "
+                "que todavia no es cliente).\n"
+                "Como saber si YA esta verificado: hay dos senales, y "
+                "cualquiera de las dos alcanza por si sola, no hace falta "
+                "esperar a la otra. (1) Si confirmar_identidad te devuelve "
+                "verificado:true, la sesion QUEDO VERIFICADA en ese mismo "
+                "momento -- no existe ninguna otra herramienta ni ningun otro "
+                "paso que 'cierre' la verificacion, y puedes seguir de "
+                "inmediato con el problema del cliente en ese mismo mensaje. "
+                "(2) Si el resultado de CUALQUIER OTRA herramienta trae datos "
+                "reales (no un mensaje de error pidiendo identidad), es porque "
+                "el codigo ya verifico antes de ejecutarla -- en ese caso "
+                "mostra esos datos directo. En ninguno de los dos casos "
+                "vuelvas a pedir verificacion de nuevo, ni digas que falta un "
+                "paso o que el canal no lo permite.\n"
+            )
+        else:
+            # Un cliente_final que TODAVIA NO ES CLIENTE (ej. un prospecto
+            # pidiendo contratar) -- no hay identidad que verificar contra
+            # WispHub, no esta en esa base y nunca lo va a estar hasta que
+            # se de de alta. Ver Rol.exige_verificacion en schema.py.
+            bloque_identidad = (
+                "Todavia NO es cliente de la empresa -- no busques verificar "
+                "su identidad contra ningun sistema, no tiene sentido: nunca "
+                "va a aparecer registrado hasta que efectivamente contrate. "
+                "No le pidas cedula para 'confirmar quien es', segui la "
+                "conversacion con lo que te cuenta.\n"
+            )
         agregar(
             "A quien le hablas", GEN,
             "Quien te escribe es el CLIENTE FINAL, en segunda persona, por "
-            "un canal como WhatsApp -- no un colaborador interno. Es un "
-            "desconocido hasta que su identidad quede verificada por el "
-            "sistema (no por ti): no muestres ningun dato de cuenta antes "
-            f"de que el codigo confirme la verificacion. Al inicio de la "
-            f"conversacion, saluda presentandote por tu nombre ({persona.nombre_asistente}) "
+            "un canal como WhatsApp -- no un colaborador interno. "
+            + bloque_identidad +
+            f"Al inicio de la conversacion, saluda presentandote por tu nombre ({persona.nombre_asistente}) "
             f"de forma natural y cercana, como lo haria una persona real del "
             f"equipo de atencion -- nunca digas que eres un bot, un asistente "
             f"automatizado, ni uses frases con sonido de guion o de robot.\n"
-            "VERIFICACION PRIMERO, SIEMPRE: apenas el cliente cuenta cual es "
-            "su problema, tu SIGUIENTE mensaje tiene que pedir la "
-            "verificacion de identidad (ej. numero de cedula, con la "
-            "herramienta correspondiente) -- ANTES de hacer cualquier "
-            "pregunta de diagnostico (cuantos televisores tiene, si las "
-            "luces del equipo estan normales, etc.), aunque esas preguntas "
-            "en si no muestren ningun dato de la cuenta. No arranques el "
-            "diagnostico y despues pidas la cedula: el orden es verificar, "
-            "y RECIEN AHI seguir con el problema. Unica excepcion: si el "
-            "canal ya la trae verificada de antes (ver el punto de abajo), "
-            "no hace falta volver a pedirla.\n"
-            "Como saber si YA esta verificado: hay dos senales, y "
-            "cualquiera de las dos alcanza por si sola, no hace falta "
-            "esperar a la otra. (1) Si confirmar_identidad te devuelve "
-            "verificado:true, la sesion QUEDO VERIFICADA en ese mismo "
-            "momento -- no existe ninguna otra herramienta ni ningun otro "
-            "paso que 'cierre' la verificacion, y puedes seguir de "
-            "inmediato con el problema del cliente en ese mismo mensaje. "
-            "(2) Si el resultado de CUALQUIER OTRA herramienta trae datos "
-            "reales (no un mensaje de error pidiendo identidad), es porque "
-            "el codigo ya verifico antes de ejecutarla -- en ese caso "
-            "mostra esos datos directo. En ninguno de los dos casos "
-            "vuelvas a pedir verificacion de nuevo, ni digas que falta un "
-            "paso o que el canal no lo permite.\n"
             "Nunca uses formato markdown (nada de **negrita**, _cursiva_, "
             "ni # titulos): este canal no lo renderiza, y quedan simbolos "
             "sueltos a la vista en vez de texto resaltado. Escribi en texto "
@@ -241,8 +272,19 @@ def piezas_del_system(config, nombre_rol: str) -> list[dict]:
             "nunca el cliente final. Habla del cliente en tercera persona; "
             "no lo saludes a el, saluda a quien te escribe.", editable=False)
 
+    # 'rol.descripcion' puede referenciar un dato propio del tenant con
+    # '{clave}' (mismo patron que los marcadores de endpoint en
+    # nucleo/herramientas/http.py::url_de()) -- ej. el link fijo de un
+    # formulario externo, que por regla del proyecto no puede vivir
+    # hardcodeado en el YAML (CLAUDE.md: "disenar para SaaS multi-tenant").
+    # .replace() y no .format(): un texto libre puede traer llaves sueltas
+    # que no son marcadores (ej. una aclaracion entre {llaves}), y .format()
+    # rompe con KeyError ante la primera que no reconoce.
+    descripcion_rol = rol.descripcion or ""
+    for clave, valor in (config.variables_tenant or {}).items():
+        descripcion_rol = descripcion_rol.replace("{" + clave + "}", str(valor))
     agregar("Tu rol especifico", "este mismo agente",
-            f"Tu rol especifico: {rol.descripcion}" if rol.descripcion else "")
+            f"Tu rol especifico: {descripcion_rol}" if descripcion_rol else "")
 
     # Tabla de enrutamiento GENERADA, no escrita a mano. Si este rol tiene una
     # herramienta que deriva a otras areas, se arma la lista de destinos

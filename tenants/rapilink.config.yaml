@@ -299,15 +299,21 @@ roles:
       probable: el especialista puede pasarlo de vuelta si se equivoco.
 
       Lo unico que SI resuelves tu: una pregunta general que no es de
-      ningun area (horarios, como contactar a la empresa, que planes
-      existen a grandes rasgos).
+      ningun area (horarios, como contactar a la empresa). Si pregunta por
+      planes, precios, o quiere CONTRATAR un servicio nuevo (sea alguien
+      que todavia no es cliente, o uno actual sumando OTRO servicio),
+      pedile la cedula primero -- regla general de verificacion, sin
+      excepcion, ver mas abajo. Si la busqueda no encuentra a nadie y la
+      persona confirma que todavia no es cliente, deriva a 'ventas' (tiene
+      el catalogo real de planes y precios, no improvises esos datos vos)
+      -- nunca digas que ya lo derivaste sin haber llamado a
+      derivar_a_area en ese mismo mensaje.
 
       Lo que va a un colaborador HUMANO, no a un area: traslados,
-      reconexion, instalaciones nuevas, reclamos formales, y cambio de
-      contrasena (el protocolo dice que esto se resuelve al instante, pero
-      todavia no existe esa herramienta aqui -- hasta que exista, se
-      deriva). Al derivar a un humano, dile al cliente que un
-      colaborador humano sigue el caso.
+      reconexion, reclamos formales, y cambio de contrasena (el protocolo
+      dice que esto se resuelve al instante, pero todavia no existe esa
+      herramienta aqui -- hasta que exista, se deriva). Al derivar a un
+      humano, dile al cliente que un colaborador humano sigue el caso.
 
       Verificacion de identidad: normalmente ya queda resuelta por el numero
       de WhatsApp desde el que escribe (no tienes que pedir nada). Si el
@@ -583,6 +589,73 @@ roles:
       activar_catv: [response]
     nunca_revelar: [password_servicio, password_cpe, password_router_wifi, usuario_router_wifi,
           cedula, direccion, coordenadas, ip, mac_cpe, sn_onu, sectorial, router.nombre]
+
+  # --- ventas (19/08/2026) ---------------------------------------------------
+  # Nace de un bug real visto en el simulador: alguien escribio "para
+  # solicitar un servicio" y el router pidio cedula de inmediato -- un
+  # prospecto (todavia NO cliente) nunca va a pasar esa verificacion,
+  # porque genuinamente no esta en WispHub. Antes de esto, "instalaciones
+  # nuevas" derivaba ciego a un colaborador humano (ver derivar_a_area);
+  # esto reemplaza esa derivacion ciega por una conversacion real de
+  # calificacion. La captura final (documentos, firma) sigue siendo el
+  # formulario externo de siempre -- este rol NO la reemplaza, solo evita
+  # mandar a alguien sin cobertura o sin interes real, y contesta
+  # planes/precios con datos reales en vez de que el router improvise.
+  ventas:
+    area: Ventas
+    cargo: Agente de Ventas Virtual
+    # Lo lee el ROUTER (cliente_final) para saber cuando derivar aca --
+    # ver _tabla_de_derivacion en nucleo/recuperacion/prompt.py.
+    atiende: >-
+      Quiere CONTRATAR un servicio nuevo (todavia no es cliente), pregunta
+      si hay cobertura en su barrio/zona, o pregunta por planes y precios
+    descripcion: |
+      Un prospecto por WhatsApp -- TODAVIA NO es cliente de Rapilink. Nunca
+      vio nuestros planes ni sabe si tenemos cobertura en su zona. Mismo
+      tono cercano que el resto (tuteo, natural).
+
+      Tu trabajo: entender que quiere, preguntarle en que barrio o
+      localidad vive (para chequear cobertura), contarle que planes
+      existen y sus precios reales si pregunta, y si hay cobertura,
+      pasarle el link del formulario para completar la contratacion.
+
+      COBERTURA: llama a contar_clientes con el filtro localidad=<lo que
+      te haya dicho, tal cual lo escribio>. Si el total es mayor a 0, ya
+      tenemos clientes ahi -- decile que si hay cobertura y compartile el
+      link del formulario. Si el total es 0, NO le digas que no hay
+      cobertura (puede ser una zona nueva sin clientes todavia, o que
+      escribio el nombre distinto a como esta cargado en el sistema) --
+      decile que vas a confirmar con un colaborador y ofrece pasar el
+      caso a uno humano.
+
+      PLANES: si pregunta que planes hay, usa consultar_planes para ver
+      los nombres reales -- nunca inventes un nombre de plan que no este
+      ahi. Si pregunta el precio de uno en particular, primero resolve su
+      id con consultar_planes y despues llama a consultar_plan_detalle
+      con ese id_plan para el precio real -- nunca inventes ni redondees
+      un precio, y nunca cites un precio sin haber llamado a esta
+      herramienta en el mismo turno.
+
+      FORMULARIO: {VENTAS_FORMULARIO_URL}
+      Compartilo SOLO despues de confirmar cobertura (total > 0 en
+      contar_clientes) y de que el prospecto muestre intencion clara de
+      seguir adelante -- no lo mandes de arranque ni sin haber chequeado
+      la zona primero.
+
+      Nunca hables como si ya fuera cliente (nunca "tu servicio", "tu
+      cuenta", "tu factura") -- todavia no lo es.
+    orientado_a: cliente_final
+    # Sin esto, heredaria el "VERIFICACION PRIMERO, SIEMPRE" que aplica a
+    # TODO cliente_final -- ver Rol.exige_verificacion en schema.py. Un
+    # prospecto no esta en WispHub y nunca lo va a estar hasta que
+    # contrate: no hay identidad que verificar contra nada.
+    exige_verificacion: false
+    puede_consultar: [consultar_planes, consultar_plan_detalle, contar_clientes]
+    campos_permitidos:
+      consultar_planes: [id, nombre]
+      consultar_plan_detalle: [nombre, precio, bajada, subida, descripcion]
+      contar_clientes: [total, desglose, interpretacion, advertencia, archivo_id, error_archivo]
+    nunca_revelar: []
 
   # --- configuracion_guiada -------------------------------------------------
   # CLAUDE.md: "la proxima empresa que se conecte no deberia necesitar una
@@ -889,6 +962,12 @@ llm:
 # mas abajo (ver el campo en nucleo/config/schema.py).
 variables_tenant:
   SMARTOLT_SUBDOMINIO: https://rapilinksas.smartolt.com
+  # PENDIENTE (19/08/2026): falta el link real del formulario de
+  # contratacion (datos + documentos + firma) que hoy comparte un humano.
+  # Editable desde /settings sin tocar este archivo una vez cargado -- ver
+  # nucleo/config/editor.py. Referenciado en el prompt del rol 'ventas'
+  # con '{VENTAS_FORMULARIO_URL}' (ver nucleo/recuperacion/prompt.py).
+  VENTAS_FORMULARIO_URL: "PENDIENTE: pedirle a Mario el link real del formulario"
 
 # -----------------------------------------------------------------------------
 #  HERRAMIENTAS
@@ -984,6 +1063,51 @@ herramientas:
     # fila de asistente.herramientas_cache a mano.
     cache: true
 
+  # --- ventas (19/08/2026) ----------------------------------------------
+  - nombre: consultar_planes
+    tipo: http
+    descripcion: >
+      Catalogo de todos los planes de internet (nombre e ID). Usala para
+      resolver el ID de un plan por su nombre real antes de pedir su
+      precio con consultar_plan_detalle -- nunca inventes un nombre de
+      plan que no aparezca aca.
+    solo_lectura: true
+    cache: true
+    cache_vigencia_dias: 7
+    roles_permitidos: [ventas]
+    base_url: https://api.wisphub.io
+    endpoint: /api/plan-internet/
+    metodo: GET
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+
+  - nombre: consultar_plan_detalle
+    tipo: http
+    descripcion: >
+      Precio y velocidad reales de UN plan, por su ID (resolvelo primero
+      con consultar_planes). Verificado en vivo (19/08/2026): el precio
+      NO viene en el listado de consultar_planes, solo aca.
+    solo_lectura: true
+    # Mismo endpoint que consultar_plan_tv, cacheado con el mismo criterio
+    # (un plan no cambia de precio de un dia para el otro -- si cambia de
+    # verdad, se refresca borrando la fila de asistente.herramientas_cache
+    # a mano). Son dos herramientas porque cada rol ve un subconjunto de
+    # campos distinto: soporte de cliente_final necesita saber si incluye
+    # TV, ventas necesita precio/velocidad -- ninguno necesita lo del otro.
+    cache: true
+    roles_permitidos: [ventas]
+    base_url: https://api.wisphub.io
+    endpoint: /api/plan-internet/queue/{id_plan}/
+    metodo: GET
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    requeridos: [id_plan]
+    filtros_verificados:
+      id_plan:
+        param: id_plan
+        tipo: id
+        verificado_el: 2026-08-19
+
   - nombre: verificar_identidad_por_cedula
     tipo: http
     descripcion: >
@@ -1021,11 +1145,12 @@ herramientas:
       atiende EN EL MISMO MENSAJE con sus propias herramientas (no es
       escalar a un humano, y el cliente no tiene que volver a escribir ni
       esperar). Llamala apenas quede claro de que area es el tema -- no
-      antes de verificar identidad (no vas a poder todavia si no esta
-      verificada), y no para preguntas generales que tu mismo resuelves.
+      antes de verificar identidad, SALVO que el area de destino este
+      marcada como que no la requiere (es alguien que todavia no es
+      cliente), y no para preguntas generales que tu mismo resuelves.
       No sirve para lo que ninguna area puede resolver sola (reclamos
-      formales, instalaciones nuevas, traslados): eso se sigue escalando a
-      un humano, como siempre.
+      formales, traslados): eso se sigue escalando a un humano, como
+      siempre.
     solo_lectura: true
     roles_permitidos: [cliente_final, facturacion_cliente, soporte_tecnico_cliente]
     deriva_rol: true
@@ -1034,7 +1159,12 @@ herramientas:
     # callejon sin salida (el cliente quedaria con un agente que no puede
     # resolverle nada). Un especialista que se equivoco de area pasa
     # DIRECTO al otro especialista, no vuelve a pasar por la puerta.
-    areas_destino: [facturacion_cliente, soporte_tecnico_cliente]
+    #
+    # 'ventas' agregado 19/08/2026: reemplaza la derivacion ciega a un
+    # humano que tenia 'instalaciones nuevas' -- ver Rol.exige_verificacion
+    # en schema.py sobre por que un prospecto no pasa por el gate de
+    # identidad.
+    areas_destino: [facturacion_cliente, soporte_tecnico_cliente, ventas]
 
   - nombre: ping_cliente
     tipo: http
@@ -1638,7 +1768,10 @@ herramientas:
       afirmes que si se genero.
     solo_lectura: true
     exportable: true
-    roles_permitidos: [soporte, facturacion, administracion]
+    # 'ventas' agregado 19/08/2026: usa el filtro 'localidad' para chequear
+    # cobertura (total > 0 en una localidad = ya hay clientes ahi). Mismo
+    # tool, un uso mas: no hacia falta duplicar la logica de conteo.
+    roles_permitidos: [soporte, facturacion, administracion, ventas]
     base_url: https://api.wisphub.io
     endpoint: /api/clientes/
     auth_ref: WISPHUB_API_KEY

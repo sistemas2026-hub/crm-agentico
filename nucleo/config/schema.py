@@ -181,6 +181,17 @@ class Rol(Base):
     # se verifique (nucleo/seguridad/verificacion.py). No es un 'if' por rol
     # en el motor: es este campo el que decide.
     orientado_a: Literal["colaborador", "cliente_final"] = "colaborador"
+    # Solo tiene efecto con orientado_a='cliente_final'. Por defecto True:
+    # preserva el comportamiento de siempre (todo cliente_final es un
+    # desconocido hasta que se verifica). False es para un cliente_final
+    # que TODAVIA NO ES CLIENTE -- ej. un prospecto pidiendo contratar un
+    # servicio nuevo -- donde no hay nada que verificar contra WispHub: no
+    # esta en esa base de datos y nunca lo va a estar hasta que se de de
+    # alta. Agregado 19/08/2026 porque el bloque "VERIFICACION PRIMERO,
+    # SIEMPRE" (nucleo/recuperacion/prompt.py) era incondicional para
+    # cualquier cliente_final -- un rol de ventas para prospectos quedaba
+    # atrapado pidiendo una cedula que no tiene sentido pedir.
+    exige_verificacion: bool = True
     # Solo organizativas -- para mostrar el agente ordenado en un diagrama
     # (que area, que cargo). NO cambian que puede hacer o ver el rol; eso lo
     # sigue decidiendo unicamente 'puede_consultar'/'campos_permitidos'.
