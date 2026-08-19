@@ -155,6 +155,25 @@ fijo para TODA herramienta, sin excepcion, hasta este caso. Sirve para
 cualquier herramienta futura con un campo que la API exige y el modelo
 tiene que decidir.
 
+### Facturas — filtros y escritura (verificado en vivo, 19/08/2026)
+
+| Filtro/campo | Notas |
+|---|---|
+| `GET /api/facturas/?cliente=` | Quiere el **usuario** del cliente (formato `nombre-slug@empresa`, campo `usuario` en la respuesta de LISTA de `/api/clientes/` -- NO en la respuesta de detalle `/api/clientes/{id}/`, que trae `usuario_rb` en su lugar y ni siquiera el mismo valor). `servicio`/`id_servicio` como filtro es IGNORADO en silencio (devuelve el universo sin filtrar) -- mismo patron de siempre, probarlo con el metodo del valor imposible antes de asumir |
+| `GET /api/facturas/?estado=` | Ya verificado antes (1 pendiente, 2 pagada, 3 cancelada, 4 en revision, 5 transferida) |
+| Rango de fechas (`fecha_emision__range_0/_1`, etc.) | Tope real confirmado: **3 meses exactos** (`400 {"error":"El rango de fecha seleccionado no puede exceder 3 meses."}`), no una aproximacion |
+| `POST /api/facturas/{id}/registrar-pago/` | **`fecha_pago` es requerida de verdad** pese a que la doc la marca opcional ("solo tiene efecto con un permiso especial") -- sin ella, `400 {"fecha_pago":["Este campo es requerido."]}`. Se resuelve en codigo con la fecha actual, formato `YYYY-MM-DD HH:mm` (**distinto** al de tickets, `DD/MM/AAAA`) |
+| `POST /api/promesa-pago/` | **`id_factura` NO se valida** pese a que la doc lo marca requerido -- un valor imposible (`999999999`) no genero error junto a los demas campos vacios. El formato de `fecha_limite` del ejemplo oficial (`2022/08/26`, con barras) tambien esta mal: la API real exige guiones (`YYYY-MM-DD`), confirmado con un `400` de formato antes de acertar |
+
+**Bug encontrado, no de la API sino del catalogo propio**: `registrar_pago` llevaba
+tiempo en produccion sin declarar `filtros_verificados` -- el modelo no tenia
+forma de decir a que factura se referia, y el endpoint (`/api/facturas/{id}/
+registrar-pago/`) nunca podia resolver el marcador `{id}` de la URL. Toda
+llamada fallaba en silencio con `ErrorHerramientaHttp`, sin que ningun caso
+dorado lo hubiera notado (no habia ninguno que ejercitara esta herramienta).
+Corregido y verificado con un pago real sobre una factura de prueba (quedo
+`Pagada`, con `forma_pago`, `referencia` y `total_cobrado` reflejados).
+
 ### Crear cliente / instalacion — esquema confirmado (documentacion oficial, agosto 2026)
 
 ```

@@ -465,3 +465,45 @@ casos:
       sin_errores: true
       responde_con: ["pendiente"]
       responde_sin: ["ya se creo", "ya quedo creado", "listo, creado"]
+
+  # Verificado de punta a punta el 19/08/2026 contra la factura real #143512
+  # (PRUEBA TEMPORAL): consultar_factura_detalle y consultar_formas_pago
+  # funcionaron directo; registrar_pago estaba ROTO -- no declaraba
+  # 'filtros_verificados', asi que el modelo no tenia forma de decir a que
+  # factura se referia y 'url_de()' fallaba siempre (marcador '{id}' sin
+  # resolver). Se arreglo agregando el cableado y quedo verificado en vivo:
+  # registro un pago real, la factura paso a 'Pagada'. Esa misma prueba
+  # encontro que 'fecha_pago' es requerida por la API pese a que la doc la
+  # marca opcional -- se resuelve en codigo (fechas_automaticas: ahora
+  # mismo) en vez de pedirsela al modelo, con un formato DISTINTO al de
+  # tickets ('YYYY-MM-DD HH:mm' vs 'DD/MM/AAAA') -- por eso
+  # 'formato_fechas_automaticas' dejo de ser una constante fija del motor.
+  #
+  # Este caso no repite el pago real (la factura ya quedo Pagada; una
+  # corrida repetida no representa el camino feliz) -- confirma que la
+  # herramienta se ejecuta sin error contra la factura real. Sin
+  # 'responde_con' sobre el monto: el modelo lo formatea distinto segun
+  # la corrida ('69.900' localizado vs '69900.00' crudo) y 'responde_con'
+  # exige que TODAS las cadenas listadas aparezcan a la vez, no una u
+  # otra -- afirmar sobre el formato exacto es afirmar sobre redaccion,
+  # que este corredor deliberadamente no hace (ver CLAUDE.md).
+  - nombre: consultar_factura_detalle trae el detalle real de una factura puntual
+    rol: facturacion
+    mensajes: ["Dame el detalle de la factura 143512, con sus articulos."]
+    espera:
+      usa: [consultar_factura_detalle]
+      sin_errores: true
+
+  # agregar_promesa_pago verificado en vivo contra esta misma factura ANTES
+  # de que quedara pagada (POST real, 201, promesa creada) -- ver skill
+  # wisphub-api. NO se agrega un caso dorado para "no proponer una promesa
+  # sobre una factura ya pagada": se probo en tres corridas seguidas y el
+  # modelo vario -- a veces consulto el detalle primero, a veces no, sin
+  # que nada en el prompt o el catalogo lo obligue. Es una preferencia de
+  # buen criterio, no una garantia de codigo, y un caso que falla por
+  # muestreo del modelo en vez de por una regresion real dej de leerse
+  # (CLAUDE.md: los casos afirman sobre la traza estable, no sobre algo
+  # que varia de corrida en corrida). Si en algun momento se quiere que
+  # esto sea determinístico, el camino es una precondicion en codigo
+  # (mismo mecanismo que 'exige_previas' de reiniciar_ont), no un caso
+  # dorado que dependa de que el modelo elija bien.

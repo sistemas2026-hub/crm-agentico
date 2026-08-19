@@ -202,17 +202,28 @@ roles:
     descripcion: Revisa facturas, saldos y registra pagos.
     area: Facturación
     cargo: Agente de Facturación
-    puede_consultar: [consultar_cliente, consultar_cliente_por_cedula, consultar_facturas, 
-          registrar_pago, contar_facturas, contar_clientes]
+    puede_consultar: [consultar_cliente, consultar_cliente_por_cedula, consultar_facturas,
+          consultar_factura_detalle, consultar_formas_pago, registrar_pago, agregar_promesa_pago,
+          contar_facturas, contar_clientes]
     campos_permitidos:
       # Sin datos de red ni tickets: no hacen a su trabajo.
       consultar_cliente: [id_servicio, nombre, cedula, estado, email, telefono, direccion, localidad,
         ciudad, estado_facturas, saldo, fecha_corte, plan_internet]
-      consultar_cliente_por_cedula: [id_servicio, nombre, cedula, estado, email, telefono, 
+      consultar_cliente_por_cedula: [id_servicio, nombre, cedula, estado, email, telefono,
             estado_facturas, saldo, fecha_corte, plan_internet]
-      consultar_facturas: [id_factura, estado, total, saldo, fecha_emision, fecha_vencimiento, 
+      consultar_facturas: [id_factura, estado, total, saldo, fecha_emision, fecha_vencimiento,
             fecha_pago]
+      # Sin 'cliente' completo (mismo criterio que 'servicio' en tickets):
+      # trae email/telefono/direccion/cedula que ya se consultan aparte si
+      # hacen falta. 'cliente.nombre' alcanza para confirmar de quien es.
+      consultar_factura_detalle: [id_factura, folio, fecha_emision, fecha_vencimiento, fecha_pago,
+            estado, tipo, sub_total, descuento, saldo, total, cliente.nombre, articulos]
+      consultar_formas_pago: [id, nombre]
       registrar_pago: [resultado, id_factura, total_cobrado, mensajes, messages, task_id, errors]
+      # aprobacion_humana salta la lista blanca (ver el comentario igual en
+      # las herramientas de tickets) -- esto documenta la forma real de
+      # _ejecutar_propuesta_de_accion, que el validador exige igual.
+      agregar_promesa_pago: [accion_id, estado, resumen, instruccion_interna]
       contar_facturas: [total, desglose, interpretacion, advertencia, archivo_id, error_archivo]
       contar_clientes: [total, desglose, interpretacion, advertencia, archivo_id, error_archivo]
     nunca_revelar: [password_servicio, password_cpe, password_router_wifi, password_ssid_router_wifi,
@@ -1411,10 +1422,73 @@ herramientas:
     metodo: GET
     auth_ref: WISPHUB_API_KEY
     auth_esquema: Api-Key
+    # Verificados en vivo el 19/08/2026 con el metodo del valor imposible
+    # (factura real #143512 de PRUEBA TEMPORAL como control positivo):
+    # 'cliente' quiere el USUARIO (usuario@empresa, no el id_servicio --
+    # 'servicio'/id_servicio se probaron primero y la API los IGNORA en
+    # silencio, devolviendo el universo sin filtrar). 'estado' ya estaba
+    # verificado (ver skill wisphub-api). Los filtros de rango de fecha
+    # (fecha_emision__range_0/_1, etc., par obligatorio, tope 3 meses)
+    # quedan afuera por ahora -- agregan complejidad real y no eran lo
+    # que se pidio en esta pasada.
+    filtros_verificados:
+      cliente:
+        param: cliente
+        tipo: texto
+        verificado_el: 2026-08-19
+      estado:
+        param: estado
+        tipo: enum
+        valores: {pendiente: 1, pagada: 2, cancelada: 3, en_revision: 4, transferida: 5}
+        verificado_el: 2026-07-29
+
+  - nombre: consultar_factura_detalle
+    tipo: http
+    descripcion: >
+      Detalle completo de UNA factura por su ID, con sus articulos
+      (linea por linea: descripcion, cantidad, precio) y el cliente
+      asociado. Usala cuando el colaborador pida el detalle de una
+      factura puntual (ya identificada por id_factura), no para buscar
+      facturas -- para eso esta consultar_facturas.
+    solo_lectura: true
+    roles_permitidos: [facturacion]
+    base_url: https://api.wisphub.io
+    endpoint: /api/facturas/{id_factura}/
+    metodo: GET
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    requeridos: [id_factura]
+    filtros_verificados:
+      id_factura:
+        param: id_factura
+        tipo: id
+        verificado_el: 2026-08-19
+
+  - nombre: consultar_formas_pago
+    tipo: http
+    descripcion: >
+      Catalogo de formas de pago (Efectivo, Transferencia Bancaria,
+      etc.). Usala para resolver el ID de 'forma_pago' que pide
+      registrar_pago cuando el colaborador menciona el medio por
+      nombre -- nunca inventes un ID.
+    solo_lectura: true
+    cache: true
+    cache_vigencia_dias: 7
+    roles_permitidos: [facturacion]
+    base_url: https://api.wisphub.io
+    endpoint: /api/formas-de-pago/
+    metodo: GET
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
 
   - nombre: registrar_pago
     tipo: http
-    descripcion: ACCION SENSIBLE. Registra un pago sobre una factura.
+    descripcion: >
+      ACCION SENSIBLE. Registra un pago sobre una factura EXISTENTE
+      (necesitas su id_factura). Si el colaborador menciona la forma de
+      pago por nombre, resolvela primero con consultar_formas_pago -- no
+      inventes el ID. 'accion' decide si ademas de registrar el pago se
+      reactiva el servicio del cliente.
     solo_lectura: false
     requiere_confirmacion: true
     roles_permitidos: [facturacion]
@@ -1423,6 +1497,88 @@ herramientas:
     metodo: POST
     auth_ref: WISPHUB_API_KEY
     auth_esquema: Api-Key
+    # Hallazgo 19/08/2026: esta herramienta NO declaraba 'filtros_verificados'
+    # -- el modelo no tenia forma de decir a que factura se refiere.
+    # 'url_de()' nunca podia resolver el marcador '{id}' del endpoint y la
+    # llamada fallaba SIEMPRE con ErrorHerramientaHttp, silenciosamente
+    # (nadie lo habia notado porque no hay caso dorado ni prueba en vivo
+    # de esta herramienta hasta ahora).
+    #
+    # 'fecha_pago' la doc la marca opcional ("solo tiene efecto con un
+    # permiso especial"), pero la API SI exige que el campo este presente
+    # -- un pago real sin 'fecha_pago' dio 400 "Este campo es requerido".
+    # Se calcula en codigo (fechas_automaticas: ahora mismo) en vez de
+    # pedirsela al modelo: es el mismo dato de siempre ("ahora"), no una
+    # decision real. Formato confirmado en vivo: 'YYYY-MM-DD HH:mm', DISTINTO
+    # del que usan los tickets (DD/MM/AAAA) -- por eso existe
+    # 'formato_fechas_automaticas' (antes una constante fija del motor).
+    # 'total_cobrado' si se deja libre: la API la ignora salvo permiso
+    # especial, y forzar un valor en codigo pisaria ese permiso si algun
+    # dia esta clave lo tiene.
+    requeridos: [id_factura, accion]
+    fechas_automaticas:
+      fecha_pago: 0
+    formato_fechas_automaticas: "%Y-%m-%d %H:%M"
+    filtros_verificados:
+      id_factura:
+        param: id
+        tipo: id
+      referencia:
+        param: referencia
+        tipo: texto
+      total_cobrado:
+        param: total_cobrado
+        tipo: texto
+      accion:
+        param: accion
+        tipo: enum
+        valores: {solo_registrar_pago: 0, registrar_pago_y_activar_servicio: 1}
+      forma_pago:
+        param: forma_pago
+        tipo: id
+
+  - nombre: agregar_promesa_pago
+    tipo: http
+    descripcion: >
+      Registra que un cliente prometio pagar una factura para cierta
+      fecha limite. Necesitas el id_factura (de consultar_facturas o
+      consultar_factura_detalle). Queda PENDIENTE de aprobacion humana
+      -- decile al colaborador que todavia no se registro, alguien tiene
+      que aprobarla.
+    solo_lectura: false
+    requiere_confirmacion: true
+    aprobacion_humana: true
+    roles_permitidos: [facturacion]
+    base_url: https://api.wisphub.io
+    endpoint: /api/promesa-pago/
+    metodo: POST
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    plantilla_resumen: "Promesa de pago de la factura {id_factura} para el {fecha_limite}"
+    campos_texto_libre: [comentarios]
+    # Hallazgo 19/08/2026: la doc marca 'id_factura' como requerido, pero
+    # el serializer NO lo valida -- un valor imposible (999999999) no
+    # genero error junto a los demas campos vacios. Se fuerza igual via
+    # 'requeridos': el motor no confia en que la API vaya a rechazar lo
+    # que falte. La doc tambien trae el formato de 'fecha_limite' mal
+    # (ejemplo '2022/08/26' con barras); la API real exige guiones
+    # (YYYY-MM-DD), confirmado con un 400 real antes de acertar el
+    # formato.
+    requeridos: [id_factura, fecha_limite, accion]
+    filtros_verificados:
+      id_factura:
+        param: id_factura
+        tipo: id
+      fecha_limite:
+        param: fecha_limite
+        tipo: texto
+      comentarios:
+        param: comentarios
+        tipo: texto
+      accion:
+        param: accion
+        tipo: enum
+        valores: {registrar_promesa: 0, registrar_promesa_y_activar_servicio: 1}
 
   # --- BottleCRM (verificado en vivo, ver skill bottlecrm-api) ---------------
 

@@ -738,6 +738,14 @@ class Herramienta(Base):
     # El modelo nunca decide una fecha (son notoriamente malos calculando
     # fechas): el codigo hace la cuenta, el modelo ni la ve.
     fechas_automaticas: dict[str, int] = Field(default_factory=dict)
+    # 'fechas_automaticas' calcula la fecha, esto decide como se escribe.
+    # Default = el formato que ya exigia WispHub en tickets (DD\MM\AAAA
+    # HH:MM). Un mismo proveedor puede pedir OTRO formato en otro endpoint
+    # -- confirmado 19/08/2026: 'registrar-pago' exige 'fecha_pago' en
+    # 'YYYY-MM-DD HH:mm', no el formato de tickets. Un campo por
+    # HERRAMIENTA alcanza (no por fecha individual): cada endpoint tiene
+    # una sola convención para todas las fechas que calcula.
+    formato_fechas_automaticas: str = "%d/%m/%Y %H:%M"
     # Cachea la respuesta en asistente.herramientas_cache -- evita pegarle a
     # la API en cada consulta. Pensado para catalogos estables (un plan, una
     # zona), NUNCA para datos que cambian por cliente (saldo, estado): la

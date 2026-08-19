@@ -712,7 +712,7 @@ def _resolver_argumentos(herramienta, sesion, argumentos_modelo: dict) -> dict:
     # distinto, esto pasa a ser un campo de config en vez de una constante.
     for arg_llamada, dias in herramienta.fechas_automaticas.items():
         fecha = datetime.now() + timedelta(days=dias)
-        argumentos[arg_llamada] = fecha.strftime("%d/%m/%Y %H:%M")
+        argumentos[arg_llamada] = fecha.strftime(herramienta.formato_fechas_automaticas)
 
     # El modelo puede proponer estas claves; se sobrescriben siempre con la
     # sesion verificada -- ver el comentario de 'inyectar_sesion' en schema.py.
