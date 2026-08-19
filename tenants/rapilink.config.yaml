@@ -962,12 +962,16 @@ llm:
 # mas abajo (ver el campo en nucleo/config/schema.py).
 variables_tenant:
   SMARTOLT_SUBDOMINIO: https://rapilinksas.smartolt.com
-  # PENDIENTE (19/08/2026): falta el link real del formulario de
-  # contratacion (datos + documentos + firma) que hoy comparte un humano.
+  # Formulario real de contratacion (datos + documentos + firma), 5 pasos:
+  # datos personales, plan interesado (ya muestra nombre+precio, coherente
+  # con lo que 'ventas' contesta en el chat), ubicacion (GPS + barrio --
+  # la verificacion real de viabilidad tecnica pasa aca, el chequeo de
+  # 'ventas' por localidad es solo orientativo), documentos fotograficos,
+  # firma digital, autorizaciones (centrales de riesgo + habeas data).
   # Editable desde /settings sin tocar este archivo una vez cargado -- ver
   # nucleo/config/editor.py. Referenciado en el prompt del rol 'ventas'
   # con '{VENTAS_FORMULARIO_URL}' (ver nucleo/recuperacion/prompt.py).
-  VENTAS_FORMULARIO_URL: "PENDIENTE: pedirle a Mario el link real del formulario"
+  VENTAS_FORMULARIO_URL: https://rapilinksas.co/solicitud
 
 # -----------------------------------------------------------------------------
 #  HERRAMIENTAS
