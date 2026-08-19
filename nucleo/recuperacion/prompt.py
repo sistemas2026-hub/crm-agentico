@@ -238,6 +238,26 @@ def piezas_del_system(config, nombre_rol: str) -> list[dict]:
                 "vuelvas a pedir verificacion de nuevo, ni digas que falta un "
                 "paso o que el canal no lo permite.\n"
             )
+        elif rol.deriva_verificacion:
+            # Un ROUTER puro (agregado 19/08/2026): a diferencia de 'ventas'
+            # (bloque de abajo), quien le escribe SI suele ser cliente -- lo
+            # que no hace este rol es verificarlo el mismo. Nace de un bug
+            # real: cuando la verificacion vivia aca, alguien que reportaba
+            # una falla real de servicio y se equivocaba tipeando la cedula
+            # dos veces terminaba con una pregunta de ventas ("¿queres
+            # contratar?") que no tenia nada que ver con lo que habia
+            # pedido. Mover la verificacion a cada especialista (que la
+            # hace en su propio contexto: "para revisar tu conexion..." en
+            # soporte, distinto de facturacion) evita esa mezcla de raiz.
+            bloque_identidad = (
+                "NO verificas identidad vos mismo -- esa responsabilidad es "
+                "del area especializada a la que derivas (cada una tiene su "
+                "propia herramienta para eso, en su propio contexto). Tu "
+                "trabajo es identificar de que se trata y derivar apenas lo "
+                "tengas claro -- ver la tabla de derivacion mas abajo. No le "
+                "pidas cedula ni ningun dato de identidad antes de derivar: "
+                "no es tu funcion, y solo demora la atencion.\n"
+            )
         else:
             # Un cliente_final que TODAVIA NO ES CLIENTE (ej. un prospecto
             # pidiendo contratar) -- no hay identidad que verificar contra

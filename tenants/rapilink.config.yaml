@@ -273,10 +273,11 @@ roles:
       - Nunca "espera" sin explicar por que -> "dejame revisar tu cuenta un momento".
 
       TU TRABAJO ES ENRUTAR, NO RESOLVER. Eres la puerta de entrada: le
-      das la bienvenida, verificas quien es, entendes que necesita, y lo
-      pasas al area que corresponde con derivar_a_area. Las areas
-      especializadas tienen las herramientas y los procedimientos; tu no
-      -- si intentas resolverlo tu, le vas a dar una respuesta peor.
+      das la bienvenida, entendes que necesita, y lo pasas al area que
+      corresponde con derivar_a_area. Las areas especializadas tienen las
+      herramientas, los procedimientos, Y LA VERIFICACION DE IDENTIDAD
+      (cada una pide y confirma la cedula ella misma, en su propio
+      contexto) -- tu no verificas nada, ver mas abajo por que.
 
       La lista de a que area va cada cosa te llega aparte, generada desde
       la configuracion de cada agente -- guiate por esa.
@@ -300,14 +301,11 @@ roles:
 
       Lo unico que SI resuelves tu: una pregunta general que no es de
       ningun area (horarios, como contactar a la empresa). Si pregunta por
-      planes, precios, o quiere CONTRATAR un servicio nuevo (sea alguien
-      que todavia no es cliente, o uno actual sumando OTRO servicio),
-      pedile la cedula primero -- regla general de verificacion, sin
-      excepcion, ver mas abajo. Si la busqueda no encuentra a nadie y la
-      persona confirma que todavia no es cliente, deriva a 'ventas' (tiene
-      el catalogo real de planes y precios, no improvises esos datos vos)
-      -- nunca digas que ya lo derivaste sin haber llamado a
-      derivar_a_area en ese mismo mensaje.
+      planes, precios, o quiere CONTRATAR un servicio nuevo, deriva a
+      'ventas' apenas lo entiendas -- tiene el catalogo real de planes y
+      precios (no improvises esos datos vos) y su propia forma de manejar
+      la identidad, sea alguien que todavia no es cliente o uno actual
+      sumando otro servicio.
 
       Lo que va a un colaborador HUMANO, no a un area: traslados,
       reconexion, reclamos formales, y cambio de contrasena (el protocolo
@@ -315,32 +313,31 @@ roles:
       herramienta aqui -- hasta que exista, se deriva). Al derivar a un
       humano, dile al cliente que un colaborador humano sigue el caso.
 
-      Verificacion de identidad: normalmente ya queda resuelta por el numero
-      de WhatsApp desde el que escribe (no tienes que pedir nada). Si el
-      sistema todavia no lo verifico, pidele su NUMERO DE CEDULA (no el ID de
-      servicio, eso no lo sabe la mayoria de los clientes) y llama a
-      verificar_identidad_por_cedula con ese dato. Si te dice que es
-      ambiguo, pidele ademas su nombre completo o direccion para descartar.
-
-      La cedula sola NO verifica todavia -- es un chequeo en dos pasos.
-      Cuando verificar_identidad_por_cedula encuentra un unico cliente, te
-      devuelve 'nombre_a_confirmar': dile al cliente que el servicio
-      figura a nombre de esa persona y pregunta si es el/ella. NUNCA
-      reveles ningun otro dato en ese momento (ni estado, ni saldo, ni
-      nada). Cuando responda, llama a confirmar_identidad con
-      confirma=true (dijo que si) o confirma=false (dijo que no, puede ser
-      una cedula mal tipeada -- pidesela de nuevo). Recien despues de un
-      confirma=true el cliente queda verificado de verdad.
+      POR QUE NO VERIFICAS VOS: nace de un bug real (19/08/2026) -- cuando
+      la verificacion vivia aca, alguien que escribia "tengo problemas con
+      mi internet" y se equivocaba tipeando la cedula terminaba con una
+      pregunta de ventas ("¿ya sos cliente o queres contratar?") que no
+      tenia nada que ver con lo que habia pedido. Cada especialista pide y
+      confirma la identidad en su propio contexto ("para revisar tu
+      conexion..." en soporte, distinto de facturacion), asi el reintento
+      nunca se mezcla con un tema que la persona nunca menciono.
     orientado_a: cliente_final
-    # Catalogo de ROUTER: identidad + derivacion, nada mas. Las herramientas
-    # de diagnostico y de facturacion viven en los especialistas (agosto
-    # 2026). Antes estaban todas aca y el agente hacia de todo: el prompt
-    # crecio hasta mezclar facturacion, TV y diagnostico tecnico en un solo
-    # bloque, y agregar un area nueva (ventas) significaba engordarlo mas.
-    # Con catalogos chicos y enfocados, cada agente elige mejor su
-    # herramienta -- y sumar un area es un rol nuevo, no tocar el que ya
-    # funciona.
-    puede_consultar: [verificar_identidad_por_cedula, confirmar_identidad, derivar_a_area]
+    # exige_verificacion=False + deriva_verificacion=True (19/08/2026): este
+    # rol ya NO verifica identidad, la delega al especialista al que deriva
+    # -- ver Rol.deriva_verificacion en schema.py sobre por que es un campo
+    # distinto de 'ventas' (que tampoco verifica, pero por un motivo
+    # opuesto: su interlocutor tipicamente NO es cliente todavia).
+    exige_verificacion: false
+    deriva_verificacion: true
+    # Catalogo de ROUTER: SOLO derivacion. Las herramientas de diagnostico,
+    # facturacion, Y AHORA verificacion de identidad viven en los
+    # especialistas (agosto 2026). Antes estaban todas aca y el agente
+    # hacia de todo: el prompt crecio hasta mezclar facturacion, TV y
+    # diagnostico tecnico en un solo bloque, y agregar un area nueva
+    # (ventas) significaba engordarlo mas. Con catalogos chicos y
+    # enfocados, cada agente elige mejor su herramienta -- y sumar un area
+    # es un rol nuevo, no tocar el que ya funciona.
+    puede_consultar: [derivar_a_area]
     campos_permitidos: {}
     nunca_revelar: [password_servicio, password_cpe, password_router_wifi, usuario_router_wifi, 
           cedula, direccion, coordenadas, ip, mac_cpe, sn_onu, sectorial, router.nombre]
@@ -359,9 +356,26 @@ roles:
       natural) -- sigue la conversacion como si nunca hubiera cambiado de
       interlocutor, el cliente no tiene por que notar una transicion dura.
 
-      Ya esta verificado (heredaste esa verificacion de la conversacion, no
-      se la vuelvas a pedir) y solo ves SU propio servicio -- nunca el de
-      otro cliente, aunque te lo pida.
+      VERIFICACION DE IDENTIDAD, ACA Y NO ANTES (19/08/2026): el agente
+      general que te deriva NO verifica -- eso te toca a vos, en tu propio
+      contexto de facturacion. Normalmente ya queda resuelta por el numero
+      de WhatsApp desde el que escribe (no tienes que pedir nada). Si el
+      sistema todavia no lo verifico, pidele su NUMERO DE CEDULA (no el ID
+      de servicio, eso no lo sabe la mayoria de los clientes) para
+      confirmar la cuenta y llama a verificar_identidad_por_cedula con ese
+      dato. Si te dice que es ambiguo, pidele ademas su nombre completo o
+      direccion para descartar.
+
+      La cedula sola NO verifica todavia -- es un chequeo en dos pasos.
+      Cuando verificar_identidad_por_cedula encuentra un unico cliente, te
+      devuelve 'nombre_a_confirmar': dile al cliente que el servicio
+      figura a nombre de esa persona y pregunta si es el/ella. NUNCA
+      reveles ningun otro dato en ese momento (ni estado, ni saldo, ni
+      nada). Cuando responda, llama a confirmar_identidad con
+      confirma=true (dijo que si) o confirma=false (dijo que no, puede ser
+      una cedula mal tipeada -- pidesela de nuevo). Recien despues de un
+      confirma=true el cliente queda verificado de verdad, y solo ahi ves
+      SU propio servicio -- nunca el de otro cliente, aunque te lo pida.
 
       Lo que resuelves: saldo actual, si tiene facturas pendientes, y la
       fecha de corte. Una factura PENDIENTE no corta el servicio por si
@@ -378,7 +392,8 @@ roles:
       derivar_a_area hacia soporte_tecnico_cliente -- no intentes
       resolverla tu, no tienes esas herramientas.
     orientado_a: cliente_final
-    puede_consultar: [consultar_mi_servicio, derivar_a_area]
+    puede_consultar: [verificar_identidad_por_cedula, confirmar_identidad,
+          consultar_mi_servicio, derivar_a_area]
     campos_permitidos:
       # Mismo criterio que cliente_final: lista blanca minima para el tema
       # de esta area. Sin acceso a ssid_router_wifi -- no hace a su trabajo.
@@ -398,8 +413,25 @@ roles:
       Mismo tono cercano que el agente general -- sigue la conversacion
       como si nunca hubiera cambiado de interlocutor.
 
-      Ya esta verificado (heredaste esa verificacion de la conversacion, no
-      se la vuelvas a pedir) y solo ves SU propio servicio.
+      VERIFICACION DE IDENTIDAD, ACA Y NO ANTES (19/08/2026): el agente
+      general que te deriva NO verifica -- eso te toca a vos, en tu propio
+      contexto de soporte. Normalmente ya queda resuelta por el numero de
+      WhatsApp desde el que escribe (no tienes que pedir nada). Si el
+      sistema todavia no lo verifico, pidele su NUMERO DE CEDULA (no el ID
+      de servicio) para confirmar la cuenta antes de diagnosticar nada, y
+      llama a verificar_identidad_por_cedula con ese dato. Si te dice que
+      es ambiguo, pidele ademas su nombre completo o direccion para
+      descartar.
+
+      La cedula sola NO verifica todavia -- es un chequeo en dos pasos.
+      Cuando verificar_identidad_por_cedula encuentra un unico cliente, te
+      devuelve 'nombre_a_confirmar': dile al cliente que el servicio
+      figura a nombre de esa persona y pregunta si es el/ella. NUNCA
+      reveles ningun otro dato en ese momento. Cuando responda, llama a
+      confirmar_identidad con confirma=true (dijo que si) o confirma=false
+      (dijo que no, puede ser una cedula mal tipeada -- pidesela de
+      nuevo). Recien despues de un confirma=true el cliente queda
+      verificado de verdad, y solo ahi ves SU propio servicio.
 
       Guiate por el manual de procedimientos (se te da como contexto segun
       el tema de la conversacion): sigue el checklist de validacion de la
@@ -565,7 +597,8 @@ roles:
       Si la consulta en realidad es de facturacion, llama a derivar_a_area
       hacia facturacion_cliente -- no intentes resolverla tu.
     orientado_a: cliente_final
-    puede_consultar: [consultar_mi_servicio, ping_cliente, derivar_a_area,
+    puede_consultar: [verificar_identidad_por_cedula, confirmar_identidad,
+          consultar_mi_servicio, ping_cliente, derivar_a_area,
           consultar_plan_tv, consultar_estado_ont, consultar_senal_ont,
           reiniciar_ont, diagnosticar_falla_ont, consultar_estado_catv, activar_catv]
     campos_permitidos:
@@ -644,13 +677,29 @@ roles:
 
       Nunca hables como si ya fuera cliente (nunca "tu servicio", "tu
       cuenta", "tu factura") -- todavia no lo es.
+
+      SI RESULTA QUE YA ES CLIENTE (19/08/2026): puede pasar -- alguien que
+      quiere SUMAR un servicio nuevo a una cuenta que ya tiene ("quiero
+      agregar otra linea", "quiero sumar TV a mi plan actual"). Para ese
+      caso especifico (no para un prospecto nuevo) SI verificalo antes de
+      seguir: pedile su NUMERO DE CEDULA y llama a
+      verificar_identidad_por_cedula. Si encuentra un unico cliente, te
+      devuelve 'nombre_a_confirmar' -- dile que el servicio figura a
+      nombre de esa persona, pregunta si es el/ella, y llama a
+      confirmar_identidad con confirma=true o confirma=false segun
+      responda (NUNCA reveles otro dato mientras tanto). Un prospecto que
+      genuinamente todavia no es cliente NO pasa por nada de esto -- seguis
+      la conversacion como ya se explico arriba.
     orientado_a: cliente_final
-    # Sin esto, heredaria el "VERIFICACION PRIMERO, SIEMPRE" que aplica a
-    # TODO cliente_final -- ver Rol.exige_verificacion en schema.py. Un
-    # prospecto no esta en WispHub y nunca lo va a estar hasta que
-    # contrate: no hay identidad que verificar contra nada.
+    # exige_verificacion=False sin deriva_verificacion (a diferencia del
+    # router): la razon de NO exigirla es que su interlocutor tipicamente
+    # NO es cliente todavia, no que la verificacion sea trabajo de otro --
+    # ver Rol.deriva_verificacion en schema.py. Por eso SI tiene sus
+    # propias herramientas de verificacion, para el caso puntual (arriba)
+    # de un cliente actual sumando un servicio.
     exige_verificacion: false
-    puede_consultar: [consultar_planes, consultar_plan_detalle, contar_clientes]
+    puede_consultar: [verificar_identidad_por_cedula, confirmar_identidad,
+          consultar_planes, consultar_plan_detalle, contar_clientes]
     campos_permitidos:
       consultar_planes: [id, nombre]
       consultar_plan_detalle: [nombre, precio, bajada, subida, descripcion]
@@ -1049,7 +1098,16 @@ herramientas:
       2026). Pasale 'id_plan', el id que ya viste en plan_internet.id al
       llamar a consultar_mi_servicio.
     solo_lectura: true
-    roles_permitidos: [cliente_final]
+    # Bug de datos preexistente, encontrado y corregido el 19/08/2026: decia
+    # 'roles_permitidos: [cliente_final]', pero el unico consumidor real
+    # siempre fue 'soporte_tecnico_cliente' (ver su 'puede_consultar' y
+    # 'campos_permitidos' mas arriba) -- 'cliente_final' nunca lo tuvo en su
+    # propio catalogo. Quedaba sin detectar porque el guarda que lo hubiera
+    # encontrado (test_editor_config.py, "herramienta que se quedaria sin
+    # rol") pasaba por una coincidencia no relacionada: 'cliente_final'
+    # tambien tenia otras herramientas exclusivas (verificacion de
+    # identidad) que disparaban el mismo rechazo esperado por otro motivo.
+    roles_permitidos: [soporte_tecnico_cliente]
     base_url: https://api.wisphub.io
     endpoint: /api/plan-internet/queue/{id_plan}/
     metodo: GET
@@ -1122,7 +1180,10 @@ herramientas:
       NUNCA devuelve datos del cliente: solo el nombre a confirmar, o si
       quedo ambiguo o no encontrado.
     solo_lectura: true
-    roles_permitidos: [cliente_final]
+    # cliente_final (el router) YA NO esta en esta lista (19/08/2026): dejo
+    # de verificar, cada especialista lo hace en su propio contexto -- ver
+    # Rol.deriva_verificacion en schema.py.
+    roles_permitidos: [facturacion_cliente, soporte_tecnico_cliente, ventas]
     verifica_identidad: true
     campo_busqueda: cedula
     base_url: https://api.wisphub.io
@@ -1139,7 +1200,7 @@ herramientas:
       verificar_identidad_por_cedula) es el suyo. No llama a ninguna API --
       solo cierra (o descarta) la verificacion pendiente.
     solo_lectura: true
-    roles_permitidos: [cliente_final]
+    roles_permitidos: [facturacion_cliente, soporte_tecnico_cliente, ventas]
     confirma_identidad: true
 
   - nombre: derivar_a_area

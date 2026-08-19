@@ -80,10 +80,21 @@ def correr_caso(config, caso: dict, defaults: dict, prohibido: list[str]) -> dic
     usadas: list[str] = []
     errores: list[str] = []
     respuesta = ""
+    # Sigue el mismo patron que nucleo/canales/api.py::atender_turno(): si un
+    # mensaje deriva a otro rol (sesion.rol_siguiente), los mensajes
+    # SIGUIENTES de este mismo caso tienen que atenderse con el rol nuevo, no
+    # con el declarado en el caso. Bug real encontrado el 19/08/2026: sin
+    # esto, un caso de varios mensajes que espera una derivacion a mitad de
+    # conversacion le seguia mandando los mensajes de despues al rol viejo,
+    # y fallaba con HERRAMIENTA_DESCONOCIDA en vez de probar lo que decia
+    # probar.
+    rol_actual = caso["rol"]
 
     for mensaje in caso["mensajes"]:
         respuesta, registro, _medios = motor.responder(
-            config, caso["rol"], mensaje, historial, sesion)
+            config, rol_actual, mensaje, historial, sesion)
+        if sesion.rol_siguiente:
+            rol_actual = sesion.rol_siguiente
         for r in registro:
             usadas.append(r["herramienta"])
             if r.get("codigo_error"):

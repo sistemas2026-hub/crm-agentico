@@ -367,10 +367,26 @@ def _ejecutar_verificacion(herramienta, sesion, argumentos_modelo: dict,
                 "a escribir. Todavia NO asumas que no es cliente vos mismo, "
                 "esperá a que te lo diga. " + via_de_escape)
         else:
+            # Version anterior (18-19/08/2026) preguntaba directo "¿ya sos
+            # cliente o queres contratar?" -- tenia sentido cuando esta
+            # herramienta solo la llamaba el router, sin saber de que se
+            # trataba el pedido. Desde que la verificacion se movio a cada
+            # especialista (19/08/2026, ver Rol.deriva_verificacion en
+            # schema.py), quien llama a esta funcion YA SABE el tema (llego
+            # aca porque el router entendio que era soporte, o facturacion):
+            # asumir "capaz queres contratar" en ese contexto es un cambio
+            # de tema que no viene a cuento -- a alguien reportando una
+            # falla real de internet no se le pregunta si quiere contratar
+            # solo porque escribio mal la cedula dos veces.
             instruccion = (
-                "Van dos intentos sin encontrar coincidencia. Pregunta "
-                "directo si ya es cliente de la empresa o si en realidad "
-                "quiere CONTRATAR un servicio nuevo. " + via_de_escape)
+                "Van dos intentos sin encontrar coincidencia con lo que ya "
+                "sabes que necesita. Decile que no lograste ubicar la "
+                "cuenta con ese dato, y pedile un dato alternativo (otro "
+                "numero de documento, o el nombre completo del titular) -- "
+                "sin cambiar de tema ni asumir que dejo de ser cliente. Si "
+                "con eso tampoco se resuelve, decile que vas a pasar el "
+                "caso a un colaborador humano para que lo revise "
+                "directamente. " + via_de_escape)
         return {"verificado": False, "motivo": "no encontrado",
                "instruccion_interna": instruccion}
 

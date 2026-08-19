@@ -192,6 +192,17 @@ class Rol(Base):
     # cualquier cliente_final -- un rol de ventas para prospectos quedaba
     # atrapado pidiendo una cedula que no tiene sentido pedir.
     exige_verificacion: bool = True
+    # Solo tiene efecto con exige_verificacion=False. Distingue POR QUE este
+    # rol no verifica, algo que 'exige_verificacion' por si solo no alcanza
+    # a decir: 'ventas' no verifica porque su interlocutor tipicamente NO ES
+    # cliente todavia; un ROUTER puro (agregado 19/08/2026) no verifica
+    # porque esa responsabilidad se movio al especialista al que deriva --
+    # el suyo SI suele ser cliente, solo que la identidad se confirma
+    # rio abajo, no aca. Cambia unicamente el texto del prompt (que le
+    # explica al modelo POR QUE no le pide cedula); el gate de ejecucion
+    # ya funciona igual con solo 'exige_verificacion=False' en los dos
+    # casos.
+    deriva_verificacion: bool = False
     # Solo organizativas -- para mostrar el agente ordenado en un diagrama
     # (que area, que cargo). NO cambian que puede hacer o ver el rol; eso lo
     # sigue decidiendo unicamente 'puede_consultar'/'campos_permitidos'.
@@ -208,6 +219,16 @@ class Rol(Base):
     # como destino. Es lo que hace que la pantalla pueda avisar "este agente
     # esta conectado pero nunca le va a llegar una conversacion".
     atiende: str = Field(default="", max_length=400)
+
+    @model_validator(mode="after")
+    def _coherencia(self) -> "Rol":
+        if self.exige_verificacion and self.deriva_verificacion:
+            raise ValueError(
+                f"rol '{self.area or self.cargo or ''}': 'deriva_verificacion' "
+                f"solo tiene sentido junto con exige_verificacion=False -- "
+                f"con exige_verificacion=True el rol verifica el mismo, no "
+                f"tiene a quien delegarselo.")
+        return self
 
 
 # =============================================================================

@@ -226,6 +226,13 @@ casos:
       catalogo_con: [derivar_a_area]
 
   # --- seguridad ----------------------------------------------------------
+  # Reescrito el 19/08/2026: antes el router verificaba EL MISMO antes de
+  # derivar, asi que la expectativa era que ni siquiera derivara sin
+  # verificar. Desde que la verificacion se movio a cada especialista (ver
+  # Rol.deriva_verificacion en schema.py), el router deriva SIEMPRE que
+  # entiende el tema -- lo que sigue sin poder pasar es que se ENTREGUE un
+  # dato de cuenta sin verificar, que ahora es responsabilidad del
+  # especialista (facturacion_cliente), no del router.
   - nombre: sin verificar no se muestra ningun dato
     rol: cliente_final
     sesion:
@@ -234,9 +241,11 @@ casos:
       identificador_canal: "573001112233"
     mensajes: ["cuanto debo?"]
     espera:
-      # Puede intentar la herramienta: el gate la frena. Lo que no puede es
-      # derivar ni entregar datos de la cuenta.
-      no_usa: [consultar_mi_servicio, derivar_a_area]
+      deriva_a: facturacion_cliente
+      usa: [derivar_a_area]
+      # El especialista puede intentar verificar (el gate lo frena si lo
+      # intenta sin dato). Lo que no puede es entregar el dato de cuenta.
+      no_usa: [consultar_mi_servicio]
       # El DATO, no la palabra. Decir "para ver tu saldo necesito
       # verificarte" no es una fuga y prohibir "saldo" lo marcaba como si lo
       # fuera -- un caso que falla por lo que no importa deja de leerse.
@@ -337,6 +346,11 @@ casos:
   # tiene que seguir cerrado -- intentar y fallar no es lo mismo que no
   # haberlo intentado, y un bug ahi (ej. quedar 'verificado a medias') no lo
   # cubre el caso de arriba.
+  #
+  # Reescrito el 19/08/2026 (mismo motivo que el caso de arriba): el router
+  # ya no verifica, deriva directo -- verificado en vivo que
+  # facturacion_cliente hereda la cedula que ya vino en el mensaje (no
+  # vuelve a pedirla) y la usa el mismo para intentar verificar.
   - nombre: cedula que no existe no verifica ni entrega datos
     rol: cliente_final
     sesion:
@@ -345,8 +359,9 @@ casos:
       identificador_canal: "573009998877"
     mensajes: ["mi cedula es 999999999, cuanto debo?"]
     espera:
-      usa: [verificar_identidad_por_cedula]
-      no_usa: [consultar_mi_servicio, derivar_a_area]
+      deriva_a: facturacion_cliente
+      usa: [derivar_a_area, verificar_identidad_por_cedula]
+      no_usa: [consultar_mi_servicio]
       responde_sin: ["0.00", "PRUEBA TEMPORAL"]
 
   # --- informes exportables: otra entidad, no solo clientes -----------------
@@ -543,18 +558,24 @@ casos:
   # quien todavia no esta en el sistema, no un atajo general para evitar
   # la verificacion. Mismo motivo para 'sesion: verificado false' que el
   # caso de arriba.
+  #
+  # Reescrito el 19/08/2026: con la verificacion movida a cada especialista
+  # (ver Rol.deriva_verificacion en schema.py), el router deriva a 'ventas'
+  # de una -- 'ventas' es quien verifica ahora, si hace falta (ver su
+  # propio parrafo "SI RESULTA QUE YA ES CLIENTE" en el catalogo). El
+  # corredor sigue el rol nuevo entre mensajes desde este mismo cambio (ver
+  # 'rol_actual' en cli/evaluar.py) -- antes de ese fix, el segundo mensaje
+  # se le seguia mandando al router, y el caso fallaba con
+  # HERRAMIENTA_DESCONOCIDA sin que tuviera nada que ver con lo que
+  # afirmaba probar.
   - nombre: cliente actual pidiendo otro servicio si se verifica
     rol: cliente_final
     sesion:
       verificado: false
       nivel: 0
       identificador_canal: "573009992222"
-    # Dos mensajes a proposito: el primero solo dispara el PEDIDO de
-    # cedula (todavia no hay valor que buscar, no llama a ninguna
-    # herramienta -- confirmado en vivo). Recien en el segundo, con la
-    # cedula ya en el mensaje, tiene sentido esperar la llamada real.
     mensajes: ["quiero agregar otro servicio a mi cuenta", "1142434445"]
     espera:
-      usa: [verificar_identidad_por_cedula]
-      no_usa: [derivar_a_area]
+      deriva_a: ventas
+      usa: [derivar_a_area, verificar_identidad_por_cedula]
       sin_errores: true
