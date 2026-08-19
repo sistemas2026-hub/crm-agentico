@@ -249,7 +249,8 @@ def _esquema_openai(herramienta):
             "function": {
                 "name": herramienta.nombre,
                 "description": herramienta.descripcion,
-                "parameters": {"type": "object", "properties": propiedades, "required": []},
+                "parameters": {"type": "object", "properties": propiedades,
+                               "required": herramienta.requeridos},
             },
         }
     # Ver "Alcance" arriba: el resto, sin argumentos libres por ahora.

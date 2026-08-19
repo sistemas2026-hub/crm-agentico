@@ -550,6 +550,18 @@ class Herramienta(Base):
     # que mande el mismo dato dos veces es pedirle que se equivoque dos
     # veces. El codigo lo duplica, el modelo elige una sola vez.
     espejar_campos: dict[str, str] = Field(default_factory=dict)
+    # Claves de 'filtros_verificados' que el modelo tiene que completar SI o
+    # SI -- van al 'required' del schema de function-calling que recibe el
+    # modelo (antes, hardcodeado a [] para toda herramienta, sin excepcion:
+    # ver motor.py). Nace de un hallazgo en vivo (19/08/2026): la
+    # documentacion oficial de 'POST /api/tickets/' no marcaba 'tecnico' como
+    # obligatorio, y WispHub lo rechazo con 400 ("Este campo es requerido")
+    # recien al intentar crear un ticket real -- el mismo patron de "la doc
+    # es una hipotesis" que ya costo tiempo con los filtros de lectura. Un
+    # campo con valor fijo conocido (ej. 'estado' de un ticket nuevo) va en
+    # 'argumentos_fijos' en vez de aca -- 'requeridos' es solo para lo que
+    # el modelo tiene que decidir.
+    requeridos: list[str] = Field(default_factory=list)
     # Argumento_de_la_llamada -> atributo de la sesion verificada. El modelo
     # NUNCA propone estos valores (aunque los pida en el mensaje): el motor
     # los sobrescribe siempre con lo que haya en la sesion. Existe para que
@@ -834,6 +846,13 @@ class Herramienta(Base):
                 f"'{self.nombre}': aprobacion_humana solo tiene sentido en una "
                 f"escritura -- una consulta de solo lectura no necesita cola de "
                 f"aprobacion.")
+
+        sobrantes_requeridos = set(self.requeridos) - set(self.filtros_verificados)
+        if sobrantes_requeridos:
+            raise ValueError(
+                f"'{self.nombre}': 'requeridos' nombra {sorted(sobrantes_requeridos)}, "
+                f"que no esta en 'filtros_verificados' -- el modelo no tiene "
+                f"forma de completar un campo que no existe como argumento.")
 
         if self.tipo == "agregado":
             if not self.entidad:

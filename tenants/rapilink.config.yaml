@@ -1261,11 +1261,18 @@ herramientas:
     auth_ref: WISPHUB_API_KEY
     auth_esquema: Api-Key
     plantilla_resumen: "Crear ticket '{asunto}' para el servicio {servicio} (prioridad {prioridad})"
+    # 'estado' se fija en codigo -- todo ticket nuevo nace 'Nuevo' (1), no es
+    # una decision del modelo. 'tecnico' SI es requerido por la API (probado
+    # en vivo el 19/08/2026: un POST sin 'tecnico' ni 'estado' devuelve 400
+    # "Este campo es requerido" para los dos -- la documentacion oficial no
+    # los marcaba como obligatorios). Ver 'requeridos' abajo.
     argumentos_fijos:
       departamento: "Soporte Técnico"
+      estado: 1
     espejar_campos:
       asunto: asuntos_default
       departamento: departamentos_default
+    requeridos: [servicio, asunto, tecnico]
     filtros_verificados:
       servicio:
         param: servicio
@@ -1276,10 +1283,6 @@ herramientas:
       descripcion:
         param: descripcion
         tipo: texto
-      estado:
-        param: estado
-        tipo: enum
-        valores: {nuevo: 1, en_progreso: 2, resuelto: 3, cerrado: 4}
       prioridad:
         param: prioridad
         tipo: enum
@@ -1347,6 +1350,10 @@ herramientas:
     auth_esquema: Api-Key
     plantilla_resumen: "Responder al ticket {id_ticket}: \"{respuesta}\""
     campos_texto_libre: [respuesta]
+    # 'estado' y 'prioridad' confirmados requeridos en vivo (19/08/2026,
+    # ticket real #90354): un POST solo con 'respuesta' devuelve 400
+    # "Este campo es requerido" para 'ticket-estado' y 'ticket-prioridad'.
+    requeridos: [id_ticket, respuesta, estado, prioridad]
     filtros_verificados:
       id_ticket:
         param: id_ticket
@@ -1383,6 +1390,9 @@ herramientas:
     auth_ref: WISPHUB_API_KEY
     auth_esquema: Api-Key
     plantilla_resumen: "Cambiar el ticket {id_ticket} a estado '{estado}'"
+    # Confirmado en vivo (19/08/2026, ticket #90354): el PUT acepta solo
+    # 'estado' sin exigir el resto del recurso -- no es REST estricto.
+    requeridos: [id_ticket, estado]
     filtros_verificados:
       id_ticket:
         param: id_ticket

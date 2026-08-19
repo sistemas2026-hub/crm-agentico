@@ -131,6 +131,30 @@ OPTIONS /api/tickets/   ->  Allow: GET, POST, HEAD, OPTIONS
 > algun momento se decide poblarlo, el informe dejaria de depender de parsear
 > formularios en HTML.
 
+### Crear/editar tickets — campos requeridos que la documentacion NO marcaba (verificado en vivo, 19/08/2026)
+
+Mismo patron de siempre: la documentacion oficial de estos tres endpoints no
+marcaba todos los campos obligatorios, y solo se descubrio al provocar el
+error real contra un ticket de prueba (`servicio` 6555 "PRUEBA TEMPORAL",
+ticket `#90354`, cerrado al terminar).
+
+| Endpoint | Campos que la API exige de verdad | Como se confirmo |
+|---|---|---|
+| `POST /api/tickets/` (crear) | `estado` Y `tecnico`, ademas de lo obvio (`servicio`, `asunto`) | Un POST sin esos dos dio `400 {"estado":["Este campo es requerido."],"tecnico":["Este campo es requerido."]}`. La doc oficial no los listaba como obligatorios |
+| `POST /api/tickets/{id}/respuesta/` (responder) | `ticket-estado` Y `ticket-prioridad`, ademas de `respuesta` | Mismo metodo: `400` con los dos campos marcados "requerido". Aca la doc SI acertaba -- confirma que no hay que asumir en ningun sentido, ni que miente ni que dice la verdad, se prueba siempre |
+| `PUT /api/tickets/{id}/` (cambiar estado) | Solo `estado` -- **no** exige el resto del recurso pese a ser `PUT` | `PUT` con `{"estado": 3}` solo dio `200` y aplico el cambio. No es REST estricto, mismo hallazgo que otros endpoints de esta API |
+
+**Como se resolvio en el catalogo**: `estado` de `crear_ticket` se fijo en
+codigo (`argumentos_fijos: {estado: 1}` -- todo ticket nuevo nace "Nuevo",
+no es una decision real del modelo). `tecnico` SI lo elige el modelo
+(resuelto por nombre via `consultar_tecnicos`), asi que necesitaba forzarse
+como obligatorio en el schema que ve el modelo -- que hasta este hallazgo
+**no existia**: `Herramienta.requeridos` (`nucleo/config/schema.py`) es
+nuevo, agregado especificamente porque `motor.py` mandaba `"required": []`
+fijo para TODA herramienta, sin excepcion, hasta este caso. Sirve para
+cualquier herramienta futura con un campo que la API exige y el modelo
+tiene que decidir.
+
 ### Crear cliente / instalacion — esquema confirmado (documentacion oficial, agosto 2026)
 
 ```

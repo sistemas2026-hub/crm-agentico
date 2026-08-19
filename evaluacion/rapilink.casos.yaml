@@ -437,3 +437,31 @@ casos:
       usa: [consultar_mi_servicio]
       # No le puede contar al cliente que una herramienta interna fallo.
       responde_sin: ["error", "no esta disponible", "sn_onu"]
+
+  # Verificado de punta a punta contra WispHub real el 19/08/2026 (no solo
+  # este caso, a mano): crear_ticket propuso, se aprobo desde afuera del
+  # corredor, y creo el ticket real #90354 sobre este mismo cliente
+  # (servicio 6555, PRUEBA TEMPORAL) -- tecnico resuelto por nombre via
+  # consultar_tecnicos, estado fijado en codigo (Nuevo). Ese intento
+  # encontro que 'tecnico' y 'estado' son requeridos por la API aunque la
+  # documentacion oficial no los marcaba asi (ver skill wisphub-api), lo
+  # que llevo a agregar Herramienta.requeridos -- antes de eso, NINGUNA
+  # herramienta del catalogo podia pedirle al modelo un campo obligatorio,
+  # 'required' iba siempre vacio.
+  #
+  # Este caso NO aprueba la propuesta (aprobacion_humana no llama a la API
+  # en este paso, asi que no toca WispHub en cada corrida) y el corredor no
+  # inspecciona los argumentos reales de la llamada (llegan enmascarados a
+  # la traza) -- solo confirma que el modelo sigue el protocolo esperado
+  # (consulta el tecnico antes de crear) y que la respuesta nunca afirma
+  # que el ticket ya existe. La garantia de que 'tecnico' viaja de verdad
+  # es la prueba manual de arriba mas la guarda de schema.py
+  # ('requeridos' fuera de 'filtros_verificados' no valida) -- no este caso.
+  - nombre: crear_ticket con aprobacion humana sigue el protocolo y no confirma como hecho
+    rol: soporte
+    mensajes: ["Necesito crear un ticket de soporte para el servicio 6555 (PRUEBA TEMPORAL), asunto Internet Intermitente, prioridad normal, asignado al tecnico Javier Olivera, con la descripcion 'caso de prueba del corredor de casos dorados.'"]
+    espera:
+      usa: [consultar_tecnicos, crear_ticket]
+      sin_errores: true
+      responde_con: ["pendiente"]
+      responde_sin: ["ya se creo", "ya quedo creado", "listo, creado"]
