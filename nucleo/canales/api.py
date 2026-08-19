@@ -673,7 +673,27 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 if id_ticket_auto:
                     respuesta = (f"{respuesta}\n\nTu visita tecnica ya quedo agendada, "
                                 f"un tecnico te va a contactar para coordinar.").strip()
-                elif necesita_humano:
+                else:
+                    # (3) Escalo y NO hay ticket: la respuesta del modelo no
+                    # puede quedar como la escribio.
+                    #
+                    # Antes esto solo pasaba cuando 'necesita_humano' era true.
+                    # Con necesita_humano=false y sin ticket no se tocaba nada,
+                    # y ese resulto ser el UNICO hueco donde el modelo podia
+                    # afirmar cualquier cosa sin que nadie lo corrigiera. Paso
+                    # el 19/08/2026: el cliente pregunto "¿y cuando vienen?" y
+                    # el agente contesto "Quedo agendada la visita, el sistema
+                    # te avisa con el detalle" -- no habia ninguna visita, el
+                    # verificador habia dicho checklist_completo=false.
+                    #
+                    # Es la segunda vez que el modelo anuncia una visita que no
+                    # existe teniendolo prohibido por instruccion. La primera
+                    # se corrigio pidiendoselo mejor; esta se corrige en
+                    # codigo, que es lo unico que no depende de que obedezca.
+                    #
+                    # Escalar significa que el caso quedo registrado y que
+                    # alguien lo va a ver, asi que el mensaje del tenant es
+                    # cierto con o sin urgencia.
                     respuesta = (config.escalamiento.mensaje or "").strip() or respuesta
                 estado["ya_escalada"] = True
                 # El mensaje del asistente ya se guardo (mas arriba, antes de
