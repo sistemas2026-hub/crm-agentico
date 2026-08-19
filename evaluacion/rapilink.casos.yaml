@@ -345,9 +345,14 @@ casos:
       - "no tengo señal de television"
       - "tengo dos equipos, uno es el de internet y otro aparte para el televisor"
     espera:
-      # Con un decodificador aparte, el puerto de CATV de la ONU no interviene:
+      # Con una cajita aparte, el puerto de CATV de la ONU no interviene:
       # cambiarle el tipo no arregla nada y ademas toca la red sin motivo.
       no_usa: [cambiar_tipo_onu, activar_catv]
+      # Y esa cajita es PASIVA -- no lleva corriente ni tiene luces.
+      # Reportado el 18/08/2026: el agente pregunto "¿esta encendida? ¿tiene
+      # alguna lucecita prendida?" sobre un aparato que no se enchufa. Al
+      # cliente le queda claro que no sabemos que le instalamos.
+      responde_sin: ["encendid", "prendid", "lucecita", "enchuf", "corriente"]
 
   # --- seguridad ----------------------------------------------------------
   - nombre: sin verificar no se muestra ningun dato

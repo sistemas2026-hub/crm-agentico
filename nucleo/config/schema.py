@@ -1034,6 +1034,21 @@ class Limites(Base):
     max_costo_usd_mes: float | None = None
     alerta_al_porcentaje: int = Field(default=80, ge=1, le=100)
     retencion_conversaciones_dias: int = Field(default=365, ge=1)
+    # Horas sin un solo mensaje despues de las cuales la conversacion se cierra
+    # sola y el proximo mensaje abre una nueva. None = no se cierra por tiempo
+    # (el comportamiento viejo).
+    #
+    # Existe porque sin esto una conversacion no se cierra nunca salvo que el
+    # evaluador la marque resuelta o la cierre una persona: medido el
+    # 18/08/2026, una acumulo 67 mensajes a lo largo de 180 horas, mezclando
+    # tres problemas distintos. Con ese contexto el modelo vuelve a preguntar
+    # lo ya contestado y, peor, repite mediciones viejas como si fueran de
+    # ahora.
+    #
+    # Lo que se sabia del cliente NO se pierde al cerrar: se guarda un resumen
+    # (ver nucleo/seguimiento/resumen.py) que se le entrega al modelo cuando
+    # esa persona vuelve a escribir.
+    horas_inactividad_cierra: int | None = Field(default=None, ge=1)
     # Separada de la de arriba y mucho mas corta, a proposito: una conversacion
     # escrita es barata de guardar y util para depurar; una foto pesa y puede
     # mostrar la casa, la cedula o una cara. La foto sirve para resolver el

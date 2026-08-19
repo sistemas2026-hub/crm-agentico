@@ -121,7 +121,8 @@ def sesion(tenant: str):
 
 
 def estado_de_conversacion_abierta(tenant: str, canal: str,
-                                   usuario_externo: str) -> dict | None:
+                                   usuario_externo: str,
+                                   horas_inactividad: int | None = None) -> dict | None:
     """
     Lo que hay que saber de la conversacion ABIERTA de este usuario antes de
     atenderlo: si ya se escalo a una persona, y a quien se verifico que era.
@@ -159,8 +160,10 @@ def estado_de_conversacion_abierta(tenant: str, canal: str,
                from asistente.conversations
                where organization_id = %s and canal = %s and usuario_externo = %s
                  and estado = 'abierta'
+                 and (%s is null
+                      or actualizado_en > now() - (%s * interval '1 hour'))
                order by actualizado_en desc limit 1""",
-            (org, canal, usuario_externo))
+            (org, canal, usuario_externo, horas_inactividad, horas_inactividad))
         fila = cur.fetchone()
         if not fila:
             return None
@@ -180,7 +183,8 @@ def estado_de_conversacion_abierta(tenant: str, canal: str,
 
 
 def registrar_mensaje(tenant: str, canal: str, usuario_externo: str,
-                      rol_efectivo: str, rol: str, contenido: str) -> tuple[str, str]:
+                      rol_efectivo: str, rol: str, contenido: str,
+                      horas_inactividad: int | None = None) -> tuple[str, str]:
     """
     Une una fila de conversacion (crea si no existe) con una fila de
     mensaje, y actualiza 'actualizado_en' -- es la unica señal que necesita
@@ -197,8 +201,10 @@ def registrar_mensaje(tenant: str, canal: str, usuario_externo: str,
             """select id from asistente.conversations
                where organization_id = %s and canal = %s and usuario_externo = %s
                  and estado = 'abierta'
+                 and (%s is null
+                      or actualizado_en > now() - (%s * interval '1 hour'))
                order by actualizado_en desc limit 1""",
-            (org, canal, usuario_externo))
+            (org, canal, usuario_externo, horas_inactividad, horas_inactividad))
         fila = cur.fetchone()
 
         if fila:
@@ -1266,3 +1272,71 @@ def actualizar_estado_revision(tenant: str, revision_id: str, estado: str,
                where organization_id = %s and id = %s""",
             (estado, revisado_por, org, revision_id))
         return cur.rowcount > 0
+
+
+def guardar_resumen(tenant: str, conversation_id: str, resumen: str) -> None:
+    """Deja el resumen en la conversacion y la marca cerrada, en un solo paso.
+
+    Nunca rompe el turno si falla: perder un resumen es feo, no poder
+    contestarle a un cliente es peor.
+    """
+    try:
+        with sesion(tenant) as (cur, org):
+            cur.execute(
+                """update asistente.conversations
+                   set resumen = %s, estado = 'cerrada', actualizado_en = now()
+                   where organization_id = %s and id = %s""",
+                (resumen, org, conversation_id))
+    except Exception as e:
+        print(f"[resumen] no se pudo guardar en {conversation_id}: "
+              f"{type(e).__name__}: {e}")
+
+
+def conversacion_vencida(tenant: str, canal: str, usuario_externo: str,
+                         horas_inactividad: int | None):
+    """
+    La conversacion de este usuario que quedo ABIERTA pero ya paso el plazo de
+    inactividad, con sus mensajes -- para resumirla y cerrarla.
+
+    Devuelve None si no hay ninguna, o si el tenant no configuro el plazo.
+    """
+    if not horas_inactividad:
+        return None
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select id, resumen from asistente.conversations
+               where organization_id = %s and canal = %s and usuario_externo = %s
+                 and estado = 'abierta'
+                 and actualizado_en <= now() - (%s * interval '1 hour')
+               order by actualizado_en desc limit 1""",
+            (org, canal, usuario_externo, horas_inactividad))
+        fila = cur.fetchone()
+        if not fila:
+            return None
+        cur.execute(
+            """select rol, contenido from asistente.messages
+               where organization_id = %s and conversation_id = %s
+               order by creado_en""",
+            (org, fila["id"]))
+        mensajes = [{"role": "user" if r["rol"] == "user" else "assistant",
+                     "content": r["contenido"] or ""} for r in cur.fetchall()]
+    return {"conversation_id": str(fila["id"]),
+            "resumen_previo": fila["resumen"],
+            "historial": mensajes}
+
+
+def resumen_anterior(tenant: str, canal: str, usuario_externo: str) -> str | None:
+    """El resumen de la ultima conversacion CERRADA de este usuario."""
+    try:
+        with sesion(tenant) as (cur, org):
+            cur.execute(
+                """select resumen from asistente.conversations
+                   where organization_id = %s and canal = %s and usuario_externo = %s
+                     and estado = 'cerrada' and resumen is not null
+                   order by actualizado_en desc limit 1""",
+                (org, canal, usuario_externo))
+            fila = cur.fetchone()
+            return fila["resumen"] if fila else None
+    except Exception as e:
+        print(f"[resumen] no se pudo leer el anterior: {type(e).__name__}: {e}")
+        return None

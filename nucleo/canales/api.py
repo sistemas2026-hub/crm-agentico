@@ -46,6 +46,7 @@ from nucleo.recuperacion.busqueda import recuperar
 from nucleo.recuperacion.prompt import piezas_del_system
 from nucleo.seguimiento import agendamiento
 from nucleo.seguimiento import escalamiento
+from nucleo.seguimiento import resumen
 from nucleo.seguimiento import supervisor
 from nucleo.seguridad import secretos
 from nucleo.seguridad.verificacion import Sesion
@@ -191,7 +192,8 @@ def _agente_json(nombre: str, rol, config) -> dict:
     }
 
 
-def _sesion_nueva(tenant: str, id_sesion: str, canal: str) -> dict:
+def _sesion_nueva(tenant: str, id_sesion: str, canal: str,
+                  horas_inactividad: int | None = None) -> dict:
     """
     El estado en memoria de una conversacion que el proceso no tenia, LEIDO
     de la base cuando hay una conversacion abierta con esta persona.
@@ -227,7 +229,8 @@ def _sesion_nueva(tenant: str, id_sesion: str, canal: str) -> dict:
               # una lectura extra a la base en cada turno.
               "intento_antes_de_escalar": False}
     try:
-        previo = persistencia.estado_de_conversacion_abierta(tenant, canal, id_sesion)
+        previo = persistencia.estado_de_conversacion_abierta(
+            tenant, canal, id_sesion, horas_inactividad)
     except Exception as e:
         print(f"[sesion] no se pudo leer el estado previo de {id_sesion}: "
               f"{type(e).__name__}: {e}")
@@ -295,10 +298,42 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     400 (HTTP) o una linea de registro (webhook, donde no hay a quien
     devolverle un error).
     """
+    # Antes de nada: si la conversacion anterior de esta persona quedo abierta
+    # pero ya paso el plazo de inactividad, se la resume y se la cierra. Asi el
+    # turno que sigue empieza limpio en vez de pegarse a un hilo de dias --
+    # medido el 18/08/2026, uno llego a 67 mensajes y 180 horas mezclando tres
+    # problemas, y el modelo terminaba repitiendo preguntas ya contestadas y
+    # citando mediciones de cuatro horas antes como si fueran de ahora.
+    horas = config.limites.horas_inactividad_cierra
+    if horas:
+        try:
+            vencida = persistencia.conversacion_vencida(tenant, canal, id_sesion, horas)
+            if vencida:
+                texto = (vencida["resumen_previo"]
+                        or resumen.redactar(config, vencida["historial"]) or "")
+                persistencia.guardar_resumen(tenant, vencida["conversation_id"], texto)
+                # La sesion en memoria tambien se descarta: si no, el turno
+                # nuevo arrancaria con el historial viejo igual y el cierre no
+                # habria servido de nada.
+                _sesiones.pop((tenant, id_sesion), None)
+                print(f"[conversacion] {id_sesion}: cerrada por {horas}h sin "
+                      f"actividad, resumida en {len(texto)} caracteres")
+        except Exception as e:
+            print(f"[conversacion] no se pudo cerrar por inactividad: "
+                  f"{type(e).__name__}: {e}")
+
     clave = (tenant, id_sesion)
-    if clave not in _sesiones:
-        _sesiones[clave] = _sesion_nueva(tenant, id_sesion, canal)
+    nueva = clave not in _sesiones
+    if nueva:
+        _sesiones[clave] = _sesion_nueva(tenant, id_sesion, canal, horas)
     estado = _sesiones[clave]
+
+    # Al abrir una conversacion nueva, lo que se sabia del cliente entra como
+    # contexto -- no el historial entero, solo el resumen de la anterior.
+    if nueva and not estado["historial"]:
+        anterior = persistencia.resumen_anterior(tenant, canal, id_sesion)
+        if anterior:
+            estado["historial"].append(resumen.como_contexto(anterior))
 
     # --- si la conversacion ya se derivo a otra area, seguir ahi -------------
     # Solo aplica cuando el rol que pide el LLAMADOR ya es cliente_final (para
@@ -391,9 +426,9 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
         # hay que colgarle la foto que mando, para que aparezca en el hilo
         # donde la mando y no en una lista aparte al final.
         _, mensaje_usuario_id = persistencia.registrar_mensaje(
-            tenant, canal, id_sesion, rol, "user", mensaje)
+            tenant, canal, id_sesion, rol, "user", mensaje, horas)
         conversation_id, mensaje_id = persistencia.registrar_mensaje(
-            tenant, canal, id_sesion, rol, "assistant", respuesta)
+            tenant, canal, id_sesion, rol, "assistant", respuesta, horas)
         for llamada in registro_herramientas:
             persistencia.registrar_llamada_herramienta(
                 tenant, conversation_id, rol, llamada, profile_id=profile_id)

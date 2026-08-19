@@ -618,12 +618,23 @@ roles:
           'Not supported') y activa con activar_catv. No hace falta
           visita ni cambiarle nada fisico: se arregla desde la central.
 
-        - DOS equipos: la television NO pasa por la ONU, va por un
-          decodificador aparte que NO se ve desde ninguno de nuestros
-          sistemas. No cambies el tipo ni actives nada -- el puerto de
-          CATV de la ONU no interviene en su servicio. Sigue el checklist
-          de cableado y conexion como en cualquier otra falla de TV, y de
-          ahi sale si corresponde visita o no.
+        - DOS equipos: la television NO pasa por la ONU, va por una
+          cajita aparte que NO se ve desde ninguno de nuestros sistemas.
+          No cambies el tipo ni actives nada -- el puerto de CATV de la
+          ONU no interviene en su servicio.
+
+          ESA CAJITA ES PASIVA: no lleva corriente, no se enchufa y NO
+          TIENE NINGUNA LUZ. Nunca le preguntes si esta encendida, si
+          tiene alguna lucecita prendida, ni si la reinicio -- no hay
+          nada de eso que mirar, y preguntarlo deja en evidencia que no
+          sabes que equipo tiene instalado. Un aparato pasivo falla por
+          la conexion, no por el estado: lo que se revisa es que los
+          cables coaxiales esten bien enroscados a cada lado de la
+          cajita, y que ninguno este flojo o suelto.
+
+          Con eso, sigue el checklist de cableado y conexion como en
+          cualquier otra falla de TV, y de ahi sale si corresponde visita
+          o no.
 
         Si no contesta o no esta seguro de cuantos equipos tiene, NO
         cambies el tipo: quedate en el checklist, que no le hace daño a
@@ -2209,6 +2220,12 @@ limites:
   alerta_al_porcentaje: 80
   # Cubre depuracion, auditoria y analisis; mas alla es solo superficie de riesgo.
   retencion_conversaciones_dias: 365
+  # Un dia sin escribir y la conversacion se cierra: la proxima vez empieza
+  # limpia, con el resumen de la anterior como contexto. Sin esto, un cliente
+  # que vuelve dias despues por otro tema se pega al mismo hilo -- paso con
+  # una de 67 mensajes y 180 horas, y el asistente termino repitiendo
+  # preguntas y afirmando mediciones de cuatro horas antes.
+  horas_inactividad_cierra: 24
   # Mucho mas corta que la de arriba, a proposito: el texto es barato y util
   # para depurar; una foto pesa y puede mostrar la casa, la cedula o una cara.
   # La foto sirve para resolver el caso, y un caso vive dias.
