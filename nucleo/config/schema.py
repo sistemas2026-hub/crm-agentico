@@ -634,6 +634,13 @@ class Herramienta(Base):
     # esto no hay que ofrecerle al modelo, no hay forma de armar el enum del
     # esquema ni de validar la derivacion en codigo.
     areas_destino: list[str] = Field(default_factory=list)
+    # Tipo 'interno', igual que confirma_identidad: no llama a ninguna API,
+    # el motor filtra TenantConfig.planes_venta por la localidad que
+    # propone el modelo (via 'filtros_verificados', igual que cualquier
+    # filtro comun -- no hace falta una excepcion nueva a "sin argumentos
+    # libres", solo lee un valor ya acotado por esa lista). Ver
+    # nucleo/modelo/motor.py::_ejecutar_consulta_planes_venta.
+    consulta_planes_venta: bool = False
     # Excepcion CUARTA a "el modelo nunca propone argumentos libres" (las
     # otras tres: campo_busqueda de verifica_identidad, 'confirma' de
     # confirma_identidad, 'area' acotada de deriva_rol). Esta SI necesita ser
@@ -1103,6 +1110,32 @@ class Evaluacion(Base):
     minimo_casos: int = Field(default=50, ge=1)
 
 
+class PlanVenta(Base):
+    """
+    Un plan que se OFRECE a un prospecto nuevo -- lista curada por el
+    tenant, separada a proposito del catalogo tecnico del proveedor (ej.
+    WispHub trae 55 entradas para Rapilink, con variantes duplicadas y
+    nombres legacy pensados para facturar clientes existentes, no para
+    vender). Agregado 19/08/2026: un prospecto pregunto por "300 megas" y
+    el catalogo crudo devolvio TRES resultados distintos con ese numero --
+    cual de esos es el que de verdad se vende hoy es una decision humana,
+    no algo que el modelo deba adivinar ni algo que deba vivir hardcodeado
+    en un YAML que un desarrollador edita.
+    """
+    nombre_wisphub: str
+    # Tiene que coincidir EXACTO con un nombre real del catalogo del
+    # proveedor (verificar contra consultar_planes antes de cargar uno
+    # nuevo aca -- mismo principio de todo el proyecto: la documentacion,
+    # y en este caso el nombre que alguien recuerda, es una hipotesis).
+    localidades: list[str] = Field(default_factory=list)
+    # Vacio = se ofrece en CUALQUIER localidad con cobertura. Con entradas,
+    # SOLO se ofrece ahi -- coincidencia exacta (sin distinguir mayusculas)
+    # contra la localidad que 'ventas' ya pregunta para chequear cobertura
+    # (contar_clientes). Deliberadamente NO se usa 'zona'/'router' de
+    # WispHub: son catalogos con IDs independientes de 'localidad' (ver
+    # skill wisphub-api) y 'ventas' nunca pregunta por ellos.
+
+
 # =============================================================================
 #  RAIZ
 # =============================================================================
@@ -1130,6 +1163,12 @@ class TenantConfig(Base):
     # una sola, y esa es la diferencia entre un dato de PLATAFORMA (nucleo/,
     # igual para todas) y uno de EMPRESA (aca, distinto por tenant).
     variables_tenant: dict[str, str] = Field(default_factory=dict)
+    # Lista curada de planes para OFRECER a un prospecto nuevo -- ver
+    # PlanVenta arriba sobre por que es distinta del catalogo tecnico del
+    # proveedor. Vacio = ningun plan configurado todavia: el rol de ventas
+    # tiene que decirlo asi, nunca caer de vuelta al catalogo crudo (eso
+    # es exactamente el problema que este campo resuelve).
+    planes_venta: list[PlanVenta] = Field(default_factory=list)
     canales: Canales = Field(default_factory=Canales)
     escalamiento: Escalamiento = Field(default_factory=Escalamiento)
     conversaciones: Conversaciones = Field(default_factory=Conversaciones)

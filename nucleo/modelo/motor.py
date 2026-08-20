@@ -547,6 +547,39 @@ def _ejecutar_derivacion(herramienta, sesion, argumentos_modelo: dict, nombre_ro
                f"respuesta le llega ya."}
 
 
+def _ejecutar_consulta_planes_venta(config, argumentos_modelo: dict) -> dict:
+    """
+    Filtra config.planes_venta (lista curada por el tenant, ver PlanVenta en
+    schema.py) por la localidad que propone el modelo. NO llama a ninguna
+    API -- es una consulta de configuracion, no de WispHub.
+
+    Nace de un caso real (19/08/2026): un prospecto pregunto por "300
+    megas" y el catalogo crudo de WispHub (consultar_planes) trajo TRES
+    resultados con ese numero -- variantes tecnicas/legacy que no
+    corresponden a una decision que el modelo deba tomar solo. Esta
+    herramienta devuelve SOLO lo que un humano decidio ofrecer, nunca el
+    catalogo entero.
+
+    Sin coincidencias (localidad sin ningun plan configurado, o
+    'planes_venta' vacio del todo -- tenant recien dado de alta) se
+    devuelve una lista vacia con un aviso: el modelo tiene que decirlo
+    asi, nunca caer de vuelta al catalogo crudo ni inventar que no hay
+    planes disponibles (puede ser que todavia no se cargo la lista).
+    """
+    localidad = str((argumentos_modelo or {}).get("localidad", "")).strip().lower()
+    coincidentes = [
+        p.nombre_wisphub for p in config.planes_venta
+        if not p.localidades or localidad in {loc.lower() for loc in p.localidades}
+    ]
+    if not coincidentes:
+        return {"planes": [], "advertencia":
+                "No hay planes de venta configurados para esta localidad "
+                "(o ninguno todavia). No inventes que no hay servicio "
+                "disponible -- decile al colaborador/prospecto que vas a "
+                "confirmar con un colaborador humano."}
+    return {"planes": coincidentes}
+
+
 def _ejecutar_sondeo(argumentos_modelo: dict, tenant: str) -> dict:
     """
     Sondea una API EXTERNA que un ADMIN describio en el chat -- unico lugar
@@ -1230,6 +1263,12 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 # Idem: tiene que poder llamarse ANTES de que la sesion este
                 # verificada -- es lo que la termina de verificar.
                 salida = _ejecutar_confirmacion(sesion, llamada.argumentos)
+            elif herramienta.consulta_planes_venta:
+                # tipo 'interno', igual que las de arriba: no llama a ninguna
+                # API, solo lee TenantConfig.planes_venta. Nunca pasa por el
+                # gate de identidad -- no revela ningun dato de cliente, solo
+                # el catalogo de planes que un humano ya decidio publicar.
+                salida = _ejecutar_consulta_planes_venta(config, llamada.argumentos)
             elif (rol_cfg.orientado_a == "cliente_final" and (sesion is None or sesion.nivel < nivel_exigido)
                   # Excepcion: 'derivar_a_area' hacia un area que declara
                   # exige_verificacion=False (ej. 'ventas') tiene que poder
@@ -1252,11 +1291,14 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                              "verificar su identidad antes de continuar."}
                 codigo_error = "IDENTIDAD_NO_VERIFICADA"
             elif herramienta.deriva_rol:
-                # Despues del gate a proposito: solo tiene sentido derivar
-                # una vez que la identidad ya esta verificada (misma politica
-                # de "verificar primero, siempre" que ya rige el resto de
-                # cliente_final) -- si no, seria posible pasar de area sin
-                # haber confirmado quien es el cliente.
+                # Despues del gate a proposito, pero el gate en si mismo ya
+                # sabe dejar pasar esta llamada sin identidad verificada
+                # cuando el area de destino no la exige (ver la excepcion
+                # en el gate mas arriba, y Rol.exige_verificacion/
+                # deriva_verificacion en schema.py) -- 19/08/2026: la
+                # verificacion se movio del router a cada especialista, asi
+                # que 'derivar_a_area' tiene que poder ejecutarse ANTES de
+                # que nadie este verificado.
                 salida = _ejecutar_derivacion(herramienta, sesion, llamada.argumentos, nombre_rol)
             elif herramienta.sondea_api:
                 # Colaborador (ADMIN, gateado en la capa web -- ver

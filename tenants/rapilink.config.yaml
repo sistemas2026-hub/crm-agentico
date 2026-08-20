@@ -661,13 +661,22 @@ roles:
       decile que vas a confirmar con un colaborador y ofrece pasar el
       caso a uno humano.
 
-      PLANES: si pregunta que planes hay, usa consultar_planes para ver
-      los nombres reales -- nunca inventes un nombre de plan que no este
-      ahi. Si pregunta el precio de uno en particular, primero resolve su
-      id con consultar_planes y despues llama a consultar_plan_detalle
-      con ese id_plan para el precio real -- nunca inventes ni redondees
-      un precio, y nunca cites un precio sin haber llamado a esta
-      herramienta en el mismo turno.
+      PLANES (19/08/2026, cambio importante): si pregunta que planes hay,
+      llama PRIMERO a consultar_planes_venta con la localidad que ya te
+      dio -- te devuelve SOLO los planes que de verdad se ofrecen ahi, no
+      el catalogo tecnico completo. Nunca uses consultar_planes como
+      primer paso: trae variantes duplicadas (ej. tres resultados
+      distintos para "300 megas") que no es tu decision elegir. Si
+      consultar_planes_venta te devuelve la lista vacia, no inventes que
+      no hay servicio -- decile que vas a confirmar los planes
+      disponibles con un colaborador.
+
+      Con la lista curada en mano, si pregunta el precio de uno en
+      particular: resolve su id cruzando el nombre contra consultar_planes
+      (el catalogo tecnico, recien ACA si corresponde usarlo) y despues
+      llama a consultar_plan_detalle con ese id_plan para el precio real
+      -- nunca inventes ni redondees un precio, y nunca cites un precio
+      sin haber llamado a esta herramienta en el mismo turno.
 
       FORMULARIO: {VENTAS_FORMULARIO_URL}
       Compartilo SOLO despues de confirmar cobertura (total > 0 en
@@ -699,7 +708,8 @@ roles:
     # de un cliente actual sumando un servicio.
     exige_verificacion: false
     puede_consultar: [verificar_identidad_por_cedula, confirmar_identidad,
-          consultar_planes, consultar_plan_detalle, contar_clientes]
+          consultar_planes_venta, consultar_planes, consultar_plan_detalle,
+          contar_clientes]
     campos_permitidos:
       consultar_planes: [id, nombre]
       consultar_plan_detalle: [nombre, precio, bajada, subida, descripcion]
@@ -1023,6 +1033,30 @@ variables_tenant:
   VENTAS_FORMULARIO_URL: https://rapilinksas.co/solicitud
 
 # -----------------------------------------------------------------------------
+#  PLANES DE VENTA  -  lista curada, PENDIENTE de cargar (19/08/2026)
+# -----------------------------------------------------------------------------
+# Que planes se ofrecen a un prospecto nuevo, por localidad -- ver PlanVenta
+# en nucleo/config/schema.py. Distinto del catalogo tecnico de WispHub
+# (consultar_planes, 55 entradas con variantes duplicadas y nombres legacy):
+# nace de un caso real donde un prospecto pregunto por "300 megas" y el
+# catalogo crudo trajo TRES resultados con ese numero -- cual es el que de
+# verdad se vende hoy es una decision humana, no algo que el modelo deba
+# adivinar.
+#
+# VACIO A PROPOSITO: mientras no se cargue, 'ventas' le va a decir a
+# cualquier prospecto que no hay planes configurados para su zona y va a
+# ofrecer confirmar con un colaborador -- nunca cae de vuelta al catalogo
+# tecnico ruidoso. Formato (confirmar 'nombre_wisphub' contra
+# consultar_planes antes de cargar uno):
+#
+# planes_venta:
+#   - nombre_wisphub: "INTERNET 100MB FO"
+#     localidades: []                    # vacio = cualquier localidad con cobertura
+#   - nombre_wisphub: "INTERNET 300MB FO SIMETRICO"
+#     localidades: ["VILLA ADELA", "SABANAGRANDE"]
+planes_venta: []
+
+# -----------------------------------------------------------------------------
 #  HERRAMIENTAS
 # -----------------------------------------------------------------------------
 #  Los filtros de la seccion 'agregado' estan VERIFICADOS contra la API en
@@ -1126,13 +1160,38 @@ herramientas:
     cache: true
 
   # --- ventas (19/08/2026) ----------------------------------------------
+  - nombre: consultar_planes_venta
+    tipo: interno
+    descripcion: >
+      Lista CURADA de planes que de verdad se ofrecen a un prospecto
+      nuevo, filtrada por localidad -- no confundir con consultar_planes
+      (ese es el catalogo tecnico completo de WispHub, con variantes
+      duplicadas y nombres legacy que no son para vender). SIEMPRE
+      llamala primero, antes de mencionar cualquier plan o precio.
+      Pasale la localidad que el prospecto ya te dio para chequear
+      cobertura. Si te devuelve la lista vacia (con una advertencia), NO
+      caigas de vuelta al catalogo tecnico ni inventes que no hay
+      servicio -- decile que vas a confirmar los planes disponibles con
+      un colaborador.
+    solo_lectura: true
+    roles_permitidos: [ventas]
+    consulta_planes_venta: true
+    filtros_verificados:
+      localidad:
+        param: localidad
+        tipo: texto
+
   - nombre: consultar_planes
     tipo: http
     descripcion: >
-      Catalogo de todos los planes de internet (nombre e ID). Usala para
-      resolver el ID de un plan por su nombre real antes de pedir su
-      precio con consultar_plan_detalle -- nunca inventes un nombre de
-      plan que no aparezca aca.
+      Catalogo TECNICO completo de WispHub (nombre e ID) -- trae
+      variantes duplicadas y nombres legacy pensados para facturar
+      clientes existentes, NO una lista de venta (para eso esta
+      consultar_planes_venta, que hay que llamar primero). Usala solo
+      para resolver el ID de un plan YA CONFIRMADO por
+      consultar_planes_venta, antes de pedir su precio con
+      consultar_plan_detalle -- nunca inventes un nombre de plan que no
+      aparezca aca.
     solo_lectura: true
     cache: true
     cache_vigencia_dias: 7

@@ -517,6 +517,16 @@ El diseño de §8.8 tenía un problema real, señalado por el usuario mirando el
 
 Tres casos dorados existentes asumían el diseño anterior (verificar antes de derivar) y se reescribieron para reflejar el nuevo: ahora afirman que el router deriva de inmediato y que es el especialista quien no entrega datos sin verificar. Verificado en vivo el escenario que motivó el cambio: *"tengo problemas con mi internet"* → deriva a soporte → pide cédula en contexto de soporte → falla dos veces → sigue pidiendo confirmación sin mencionar ventas ni escalar de entrada.
 
+### 8.10 Catálogo de venta curado, separado del catálogo técnico (agosto 2026)
+
+Probando `ventas` en vivo, un prospecto preguntó por "300 megas" y `consultar_planes` (el catálogo técnico de WispHub, 55 entradas) devolvió **tres** resultados distintos con ese número — variantes duplicadas y nombres legacy pensados para facturar clientes existentes, no una lista pensada para vender. Cuál de esos es el plan que de verdad se ofrece hoy es una decisión humana; dejársela al modelo (o hardcodearla en el YAML) repite exactamente el error que CLAUDE.md ya prohíbe para datos de empresa.
+
+**`PlanVenta`/`TenantConfig.planes_venta` (nuevo, `nucleo/config/schema.py`):** lista curada de `{nombre_wisphub, localidades}` — `localidades` vacío significa "disponible en cualquier zona con cobertura"; con entradas, solo se ofrece ahí. Se filtra por la misma `localidad` que `ventas` ya le pregunta al prospecto para chequear cobertura (`contar_clientes`) — deliberadamente no por `zona`/`router` de WispHub, que son catálogos con IDs independientes que la conversación de ventas nunca toca (ver skill `wisphub-api`).
+
+**`consultar_planes_venta` (nueva herramienta, `tipo: interno`):** no llama a ninguna API — lee `planes_venta`, filtra por localidad, listo. El modelo la llama SIEMPRE primero; `consultar_planes` (el catálogo técnico) queda reservado para resolver el ID de un plan ya confirmado por la lista curada, nunca como punto de partida. Con `planes_venta` vacío (estado inicial, real en producción hasta que el usuario cargue su lista real) la herramienta devuelve una lista vacía con una advertencia explícita, y el prompt le prohíbe al modelo caer de vuelta al catálogo ruidoso — verificado en vivo: ante "qué planes hay" sin nada cargado, dice que no tiene la lista para esa zona y ofrece confirmar con un colaborador, en vez de inventar o mostrar las 55 variantes técnicas.
+
+Verificado con datos de ejemplo en memoria (sin tocar el archivo versionado, mientras no llega la lista real del cliente): un plan sin `localidades` aparece en cualquier zona consultada; uno con `localidades` específicas solo aparece ahí. Caso dorado nuevo cubre la degradación seria con la lista vacía; el filtrado por zona con datos reales queda pendiente de un caso dorado hasta que el tenant cargue su catálogo curado real.
+
 ---
 
 ## 9. Despliegue

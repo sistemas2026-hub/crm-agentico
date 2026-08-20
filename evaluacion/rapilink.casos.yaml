@@ -579,3 +579,24 @@ casos:
       deriva_a: ventas
       usa: [derivar_a_area, verificar_identidad_por_cedula]
       sin_errores: true
+
+  # 'planes_venta' (nucleo/config/schema.py) nace de un caso real: un
+  # prospecto pregunto por "300 megas" y consultar_planes (el catalogo
+  # TECNICO de WispHub) trajo tres resultados distintos -- variantes
+  # duplicadas que no es una decision que el modelo deba tomar solo. Este
+  # caso NO prueba el filtrado por localidad (necesitaria una lista
+  # curada real, que el tenant todavia no cargo) -- prueba la
+  # degradacion segura mientras 'planes_venta' este vacio: nunca cae de
+  # vuelta al catalogo tecnico ruidoso, lo dice explicitamente y ofrece
+  # confirmar con un colaborador.
+  - nombre: sin planes de venta configurados no cae al catalogo tecnico
+    rol: ventas
+    sesion:
+      verificado: false
+      nivel: 0
+      identificador_canal: "573009993333"
+    mensajes: ["quiero contratar internet, vivo en VILLA ADELA", "que planes hay?"]
+    espera:
+      usa: [consultar_planes_venta]
+      no_usa: [consultar_planes, consultar_plan_detalle]
+      sin_errores: true
