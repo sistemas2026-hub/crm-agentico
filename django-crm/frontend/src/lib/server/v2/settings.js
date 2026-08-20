@@ -20,6 +20,7 @@
 import { leerConfiguracionAsistente } from './asistente-config.js';
 import { leerCanalWhatsapp } from './canal-whatsapp.js';
 import { leerSmartOlt } from './smartolt.js';
+import { contarPlanesVenta } from './planes-venta.js';
 import { getBusinessHours } from './business-hours.js';
 import { getCustomFields } from './custom-fields.js';
 import { getEscalationPolicies } from './escalation.js';
@@ -112,7 +113,8 @@ export async function getSettingsHub(event) {
     field,
     asistente,
     canalWhatsapp,
-    smartolt
+    smartolt,
+    planesVenta
   ] = await Promise.all([
     getOrgSettings(event),
     getBusinessHours(event),
@@ -131,7 +133,10 @@ export async function getSettingsHub(event) {
     // sintoma seria "no puedo entrar a configuracion".
     leerConfiguracionAsistente(),
     leerCanalWhatsapp(),
-    leerSmartOlt()
+    leerSmartOlt(),
+    // Solo el conteo -- no pega contra WispHub (ver contarPlanesVenta()),
+    // asi el hub no paga un viaje de red a una API externa en cada carga.
+    contarPlanesVenta()
   ]);
 
   const now = Date.now();
@@ -158,6 +163,7 @@ export async function getSettingsHub(event) {
     // sin valor, como ya hace con lo que un miembro no puede contar.
     asistente,
     canalWhatsapp,
-    smartolt
+    smartolt,
+    planesVenta
   };
 }

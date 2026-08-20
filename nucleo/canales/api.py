@@ -38,6 +38,7 @@ from flask import Flask, jsonify, request
 from nucleo.canales import media, whatsapp
 from nucleo.config import editor, fuente
 from nucleo.config.fusion import fusionar_roles, modelo_fusionado
+from nucleo.herramientas import http as ejecutor_http
 from nucleo.ingesta import corpus as ingesta
 from nucleo.ingesta.docx import procesar
 from nucleo.modelo import motor
@@ -1195,6 +1196,76 @@ def configuracion_variable_borrar(nombre):
 
     olvidar_config(tenant)
     return jsonify({"borrado": nombre})
+
+
+@app.get("/configuracion/planes-venta")
+def configuracion_planes_venta_listar():
+    """
+    Para la pantalla que arma la lista curada de planes que 'ventas' ofrece
+    a un prospecto -- ver PlanVenta/TenantConfig.planes_venta en schema.py.
+
+    Trae DOS cosas: la lista curada que ya esta guardada (siempre), y el
+    catalogo TECNICO completo de WispHub EN VIVO -- solo si se pide con
+    '?catalogo=1'. Nunca cacheado (a diferencia de como usa este mismo
+    endpoint el asistente en una conversacion): quien esta configurando
+    necesita ver el catalogo mas actual, no uno de hasta 7 dias de
+    antiguedad. El llamado a WispHub queda OPCIONAL para que el hub de
+    configuracion (que solo necesita el conteo de planes ya curados, para
+    mostrar "3 planes ofrecidos" sin abrir la pantalla) no pague ese
+    viaje de red en cada carga de /settings.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+
+    catalogo: list[dict] = []
+    error_catalogo = None
+    if request.args.get("catalogo") == "1":
+        herramienta = next((h for h in config.herramientas if h.nombre == "consultar_planes"), None)
+        if herramienta is None:
+            error_catalogo = "Este agente no tiene 'consultar_planes' en su catalogo."
+        else:
+            try:
+                crudo = ejecutor_http.ejecutar(herramienta, {}, tenant, config.variables_tenant)
+                resultados = crudo.get("results", crudo) if isinstance(crudo, dict) else crudo
+                catalogo = [{"id": r.get("id"), "nombre": r.get("nombre")}
+                           for r in (resultados or []) if isinstance(r, dict)]
+            except Exception as e:
+                error_catalogo = f"No se pudo consultar el catalogo real: {type(e).__name__}: {e}"
+
+    return jsonify({
+        "catalogo": catalogo,
+        "error_catalogo": error_catalogo,
+        "planes_venta": [p.model_dump(mode="json") for p in config.planes_venta],
+    })
+
+
+@app.put("/configuracion/planes-venta")
+def configuracion_planes_venta_guardar():
+    """Reemplaza entera la lista curada -- ver editor.guardar_planes_venta:
+    la pantalla manda el estado completo de los checkboxes en cada
+    guardado, asi que no hace falta (ni conviene) un merge incremental."""
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    planes = cuerpo.get("planes")
+    if planes is None or not isinstance(planes, list):
+        return jsonify({"error": "Falta el campo 'planes' (lista)."}), 400
+
+    try:
+        config = editor.guardar_planes_venta(tenant, planes)
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
+
+    olvidar_config(tenant)
+    return jsonify({"planes_venta": [p.model_dump(mode="json") for p in config.planes_venta]})
 
 
 # =============================================================================
