@@ -21,8 +21,10 @@ function destino() {
 }
 
 /**
- * @typedef {{ nombre_wisphub: string, localidades: string[] }} PlanVenta
+ * @typedef {{ nombre_wisphub: string, zonas: number[] }} PlanVenta
  * @typedef {{ id: number | string, nombre: string }} PlanCatalogo
+ * @typedef {{ zona_id: number, zona_nombre: string, n_clientes: number }} ZonaConteo
+ * @typedef {{ localidad: string, zonas: ZonaConteo[], n_clientes: number }} LocalidadZona
  */
 
 /**
@@ -31,7 +33,7 @@ function destino() {
  * guardada. Pega contra WispHub en cada llamada -- usar solo en la
  * pantalla dedicada, nunca en el hub de configuracion (ver
  * contarPlanesVenta() para eso).
- * @returns {Promise<{ catalogo: PlanCatalogo[], error_catalogo: string | null, planes_venta: PlanVenta[] } | null>}
+ * @returns {Promise<{ catalogo: PlanCatalogo[], error_catalogo: string | null, planes_venta: PlanVenta[], localidades: LocalidadZona[], localidades_actualizado_en: string | null } | null>}
  */
 export async function leerPlanesVenta() {
   const cfg = destino();
@@ -86,5 +88,28 @@ export async function guardarPlanesVenta(planes) {
   });
   const datos = await resp.json().catch(() => ({}));
   if (!resp.ok) throw new Error(datos.error || 'No se pudo guardar la lista de planes.');
+  return datos;
+}
+
+/**
+ * Recorre el catalogo de clientes del proveedor entero y reemplaza el
+ * catalogo localidad -> zona(s) real(es) -- ver
+ * nucleo/herramientas/localidades.py. Puede tardar 60-90s (paginas
+ * secuenciales contra WispHub): no se le pone un timeout corto a
+ * proposito, cortarlo a mitad de camino no cancela el trabajo del lado
+ * del motor, solo deja a quien mira la pantalla sin saber si termino.
+ * @returns {Promise<{ localidades: LocalidadZona[], localidades_actualizado_en: string | null }>}
+ */
+export async function sincronizarLocalidades() {
+  const cfg = destino();
+  if (!cfg) throw new Error('Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT).');
+
+  const resp = await fetch(`${cfg.baseUrl}/configuracion/localidades/sincronizar`, {
+    method: 'POST',
+    headers: headersMotor({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ tenant: cfg.tenant })
+  });
+  const datos = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(datos.error || 'No se pudo sincronizar las localidades.');
   return datos;
 }

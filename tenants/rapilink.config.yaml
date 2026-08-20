@@ -652,24 +652,25 @@ roles:
       existen y sus precios reales si pregunta, y si hay cobertura,
       pasarle el link del formulario para completar la contratacion.
 
-      COBERTURA: llama a contar_clientes con el filtro localidad=<lo que
-      te haya dicho, tal cual lo escribio>. Si el total es mayor a 0, ya
-      tenemos clientes ahi -- decile que si hay cobertura y compartile el
-      link del formulario. Si el total es 0, NO le digas que no hay
+      COBERTURA Y PLANES (20/08/2026, cambio importante): llama a
+      consultar_planes_venta con localidad=<lo que te haya dicho, tal
+      cual lo escribio> -- te dice en un solo paso si hay cobertura y que
+      planes se ofrecen ahi (ya NO uses contar_clientes para esto: no
+      esta disponible para vos). Si 'cobertura' viene true, decile que si
+      hay cobertura; si ademas trae 'planes', contaselos con sus precios
+      reales y compartile el link del formulario. Si 'cobertura' es true
+      pero 'planes' viene vacio, no inventes que no hay servicio --
+      decile que vas a confirmar los planes disponibles con un
+      colaborador. Si 'cobertura' es false, NO le digas que no hay
       cobertura (puede ser una zona nueva sin clientes todavia, o que
       escribio el nombre distinto a como esta cargado en el sistema) --
       decile que vas a confirmar con un colaborador y ofrece pasar el
       caso a uno humano.
 
-      PLANES (19/08/2026, cambio importante): si pregunta que planes hay,
-      llama PRIMERO a consultar_planes_venta con la localidad que ya te
-      dio -- te devuelve SOLO los planes que de verdad se ofrecen ahi, no
-      el catalogo tecnico completo. Nunca uses consultar_planes como
-      primer paso: trae variantes duplicadas (ej. tres resultados
-      distintos para "300 megas") que no es tu decision elegir. Si
-      consultar_planes_venta te devuelve la lista vacia, no inventes que
-      no hay servicio -- decile que vas a confirmar los planes
-      disponibles con un colaborador.
+      Nunca uses consultar_planes como primer paso: trae el catalogo
+      tecnico completo de WispHub, con variantes duplicadas (ej. tres
+      resultados distintos para "300 megas") que no es tu decision
+      elegir.
 
       Con la lista curada en mano, si pregunta el precio de uno en
       particular: resolve su id cruzando el nombre contra consultar_planes
@@ -707,13 +708,18 @@ roles:
     # propias herramientas de verificacion, para el caso puntual (arriba)
     # de un cliente actual sumando un servicio.
     exige_verificacion: false
+    # 'contar_clientes' salio de aca el 20/08/2026 (junto con
+    # Herramienta.contar_clientes.roles_permitidos): eran DOS listas
+    # denormalizadas -- el esquema solo valida que el nombre exista, no
+    # que 'roles_permitidos' de la herramienta incluya al rol -- y sacar
+    # una sola no alcanzaba: el catalogo que se le OFRECE al modelo lo
+    # arma 'puede_consultar', asi que 'ventas' seguia pudiendo llamarla
+    # aunque ya no estuviera en el prompt. Ver incidente "doña manuela".
     puede_consultar: [verificar_identidad_por_cedula, confirmar_identidad,
-          consultar_planes_venta, consultar_planes, consultar_plan_detalle,
-          contar_clientes]
+          consultar_planes_venta, consultar_planes, consultar_plan_detalle]
     campos_permitidos:
       consultar_planes: [id, nombre]
       consultar_plan_detalle: [nombre, precio, bajada, subida, descripcion]
-      contar_clientes: [total, desglose, interpretacion, advertencia, archivo_id, error_archivo]
     nunca_revelar: []
 
   # --- configuracion_guiada -------------------------------------------------
@@ -1163,16 +1169,15 @@ herramientas:
   - nombre: consultar_planes_venta
     tipo: interno
     descripcion: >
-      Lista CURADA de planes que de verdad se ofrecen a un prospecto
-      nuevo, filtrada por localidad -- no confundir con consultar_planes
-      (ese es el catalogo tecnico completo de WispHub, con variantes
-      duplicadas y nombres legacy que no son para vender). SIEMPRE
-      llamala primero, antes de mencionar cualquier plan o precio.
-      Pasale la localidad que el prospecto ya te dio para chequear
-      cobertura. Si te devuelve la lista vacia (con una advertencia), NO
-      caigas de vuelta al catalogo tecnico ni inventes que no hay
-      servicio -- decile que vas a confirmar los planes disponibles con
-      un colaborador.
+      Cobertura Y lista CURADA de planes en un solo paso, a partir de la
+      localidad que te dio el prospecto -- no confundir con
+      consultar_planes (ese es el catalogo tecnico completo de WispHub,
+      con variantes duplicadas y nombres legacy que no son para vender).
+      SIEMPRE llamala primero, antes de decir si hay cobertura o
+      mencionar cualquier plan o precio. Te devuelve 'cobertura'
+      (booleano), 'n_clientes' si hay cobertura, y 'planes' (puede venir
+      vacia con una advertencia -- no caigas de vuelta al catalogo
+      tecnico ni inventes que no hay servicio).
     solo_lectura: true
     roles_permitidos: [ventas]
     consulta_planes_venta: true
@@ -1892,10 +1897,19 @@ herramientas:
       afirmes que si se genero.
     solo_lectura: true
     exportable: true
-    # 'ventas' agregado 19/08/2026: usa el filtro 'localidad' para chequear
-    # cobertura (total > 0 en una localidad = ya hay clientes ahi). Mismo
-    # tool, un uso mas: no hacia falta duplicar la logica de conteo.
-    roles_permitidos: [soporte, facturacion, administracion, ventas]
+    # 'ventas' tuvo acceso entre el 19 y el 20/08/2026 (chequeaba cobertura
+    # con el filtro 'localidad' en vivo, una llamada por mensaje). Sacado:
+    # agregaba 1-2s de latencia por turno y consultar_planes_venta ahora
+    # resuelve cobertura Y planes sin red, leyendo el catalogo sincronizado
+    # (ver incidente 20/08/2026, "doña manuela"). Sacar el rol del catalogo
+    # -- no solo del prompt -- es lo que de verdad cierra la puerta: el
+    # prompt es guia, nunca garantia (PRD 7.4).
+    roles_permitidos: [soporte, facturacion, administracion]
+    # Fuente del sync de localidades -> zona real (ver
+    # nucleo/herramientas/localidades.py). Reusa esta misma declaracion de
+    # base_url/endpoint/auth -- no llama a la API distinto, solo la
+    # recorre entera en vez de contar con un filtro puntual.
+    sincroniza_localidades: true
     base_url: https://api.wisphub.io
     endpoint: /api/clientes/
     auth_ref: WISPHUB_API_KEY

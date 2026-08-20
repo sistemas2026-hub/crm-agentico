@@ -641,6 +641,21 @@ class Herramienta(Base):
     # libres", solo lee un valor ya acotado por esa lista). Ver
     # nucleo/modelo/motor.py::_ejecutar_consulta_planes_venta.
     consulta_planes_venta: bool = False
+    # Marca esta herramienta (tipicamente 'agregado' sobre 'clientes', ej.
+    # contar_clientes) como la FUENTE del sync de localidades -> zona real
+    # (ver LocalidadZona mas abajo). El motor nunca la corre durante una
+    # conversacion -- solo nucleo/herramientas/localidades.py::sincronizar(),
+    # bajo demanda desde /configuracion/localidades/sincronizar. Reusa
+    # base_url/endpoint/auth_ref que la herramienta ya declara, sin duplicar
+    # esa config para un job aparte.
+    sincroniza_localidades: bool = False
+    # Nombres de campo en la respuesta cruda del proveedor -- configurables
+    # por tenant para no hardcodear el vocabulario de un proveedor puntual
+    # (WispHub llama 'localidad' y 'zona') en nucleo/. 'campo_zona_sync'
+    # espera un objeto anidado {id, nombre}, igual forma que 'zona'/'router'
+    # de WispHub.
+    campo_localidad_sync: str = "localidad"
+    campo_zona_sync: str = "zona"
     # Excepcion CUARTA a "el modelo nunca propone argumentos libres" (las
     # otras tres: campo_busqueda de verifica_identidad, 'confirma' de
     # confirma_identidad, 'area' acotada de deriva_rol). Esta SI necesita ser
@@ -1110,6 +1125,36 @@ class Evaluacion(Base):
     minimo_casos: int = Field(default=50, ge=1)
 
 
+class ZonaConteo(Base):
+    """Una zona real del proveedor (nodo de red -- router/servidor) con
+    cuantos clientes tiene DENTRO de una localidad puntual. Ver
+    LocalidadZona: una misma localidad puede repartirse en mas de una
+    zona, asi que esto vive en una lista, no en un campo suelto."""
+    zona_id: int
+    zona_nombre: str
+    n_clientes: int
+
+
+class LocalidadZona(Base):
+    """
+    Una localidad observada en el proveedor, con la(s) zona(s) real(es)
+    donde tiene clientes -- nunca la escribe una persona, solo la llena
+    nucleo/herramientas/localidades.py::sincronizar() recorriendo el
+    catalogo completo de clientes. Reemplaza el chequeo de cobertura en
+    vivo que 'ventas' hacia con contar_clientes en cada turno (agregaba
+    1-2s de latencia por mensaje -- ver incidente 20/08/2026, "doña
+    manuela") y le da a PlanVenta.zonas algo real contra que comparar en
+    vez de texto libre por localidad.
+
+    Una misma localidad puede caer en mas de una zona real (verificado:
+    "DOÑA MANUELA" tiene clientes en dos routers distintos) -- por eso
+    'zonas' es una lista, nunca una zona dominante unica.
+    """
+    localidad: str                     # nombre a mostrar (variante mas comun)
+    zonas: list[ZonaConteo] = Field(default_factory=list)
+    n_clientes: int = 0                # total, suma de zonas[].n_clientes
+
+
 class PlanVenta(Base):
     """
     Un plan que se OFRECE a un prospecto nuevo -- lista curada por el
@@ -1127,13 +1172,13 @@ class PlanVenta(Base):
     # proveedor (verificar contra consultar_planes antes de cargar uno
     # nuevo aca -- mismo principio de todo el proyecto: la documentacion,
     # y en este caso el nombre que alguien recuerda, es una hipotesis).
-    localidades: list[str] = Field(default_factory=list)
-    # Vacio = se ofrece en CUALQUIER localidad con cobertura. Con entradas,
-    # SOLO se ofrece ahi -- coincidencia exacta (sin distinguir mayusculas)
-    # contra la localidad que 'ventas' ya pregunta para chequear cobertura
-    # (contar_clientes). Deliberadamente NO se usa 'zona'/'router' de
-    # WispHub: son catalogos con IDs independientes de 'localidad' (ver
-    # skill wisphub-api) y 'ventas' nunca pregunta por ellos.
+    # IDs de zona real (LocalidadZona.zonas[].zona_id -- el catalogo del
+    # proveedor, ej. /api/zonas/ de WispHub). Vacio = se ofrece en
+    # CUALQUIER zona con cobertura. Reemplaza 'localidades: list[str]'
+    # (texto libre) -- ver incidente 20/08/2026: un barrio real (Doña
+    # Manuela) puede caer en mas de una zona, y el texto libre no lo podia
+    # representar ni mantenerse sincronizado solo con la realidad.
+    zonas: list[int] = Field(default_factory=list)
 
 
 # =============================================================================
@@ -1169,6 +1214,11 @@ class TenantConfig(Base):
     # tiene que decirlo asi, nunca caer de vuelta al catalogo crudo (eso
     # es exactamente el problema que este campo resuelve).
     planes_venta: list[PlanVenta] = Field(default_factory=list)
+    # Catalogo localidad -> zona(s) real(es), sincronizado bajo demanda --
+    # ver LocalidadZona arriba y nucleo/herramientas/localidades.py. Nunca
+    # se edita a mano: se reemplaza entero cada vez que corre el sync.
+    localidades: list[LocalidadZona] = Field(default_factory=list)
+    localidades_actualizado_en: str | None = None  # ISO, ultima sincronizacion
     canales: Canales = Field(default_factory=Canales)
     escalamiento: Escalamiento = Field(default_factory=Escalamiento)
     conversaciones: Conversaciones = Field(default_factory=Conversaciones)

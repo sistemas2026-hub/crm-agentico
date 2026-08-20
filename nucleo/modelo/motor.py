@@ -48,6 +48,7 @@ import time
 import uuid
 from datetime import datetime, timedelta
 
+from nucleo.config.schema import _sin_tildes
 from nucleo.herramientas import agregado as ejecutor_agregado
 from nucleo.herramientas import http as ejecutor_http
 from nucleo.herramientas import incidentes as ejecutor_incidentes
@@ -549,35 +550,49 @@ def _ejecutar_derivacion(herramienta, sesion, argumentos_modelo: dict, nombre_ro
 
 def _ejecutar_consulta_planes_venta(config, argumentos_modelo: dict) -> dict:
     """
-    Filtra config.planes_venta (lista curada por el tenant, ver PlanVenta en
-    schema.py) por la localidad que propone el modelo. NO llama a ninguna
-    API -- es una consulta de configuracion, no de WispHub.
+    Resuelve cobertura Y planes en un solo paso, leyendo config.localidades
+    (catalogo localidad -> zona(s) real(es), sincronizado bajo demanda --
+    ver LocalidadZona en schema.py y nucleo/herramientas/localidades.py) y
+    config.planes_venta (PlanVenta.zonas). NO llama a ninguna API: es la
+    razon de ser de este cambio -- 'ventas' antes llamaba a contar_clientes
+    en vivo por cada mensaje que mencionaba una localidad (1-2s de latencia
+    de red por turno, ver incidente 20/08/2026, "doña manuela"). Ahora lee
+    config, que ya esta en memoria del turno.
 
-    Nace de un caso real (19/08/2026): un prospecto pregunto por "300
-    megas" y el catalogo crudo de WispHub (consultar_planes) trajo TRES
-    resultados con ese numero -- variantes tecnicas/legacy que no
-    corresponden a una decision que el modelo deba tomar solo. Esta
-    herramienta devuelve SOLO lo que un humano decidio ofrecer, nunca el
-    catalogo entero.
+    Localidad no encontrada en el catalogo sincronizado (puede ser una zona
+    nueva sin clientes todavia, o el nombre escrito distinto a como esta
+    cargado) -> cobertura=False, con aviso de no negarla sin mas.
 
-    Sin coincidencias (localidad sin ningun plan configurado, o
-    'planes_venta' vacio del todo -- tenant recien dado de alta) se
-    devuelve una lista vacia con un aviso: el modelo tiene que decirlo
-    asi, nunca caer de vuelta al catalogo crudo ni inventar que no hay
-    planes disponibles (puede ser que todavia no se cargo la lista).
+    Localidad encontrada pero ningun PlanVenta con una zona en comun (nadie
+    curo un plan para esa zona todavia) -> cobertura=True, planes=[], con
+    aviso de no inventar que no hay servicio.
     """
-    localidad = str((argumentos_modelo or {}).get("localidad", "")).strip().lower()
+    localidad = str((argumentos_modelo or {}).get("localidad", "")).strip()
+    clave = _sin_tildes(localidad)
+    entrada = next(
+        (l for l in config.localidades if _sin_tildes(l.localidad) == clave), None)
+
+    if entrada is None:
+        return {"cobertura": False, "planes": [], "advertencia":
+                "No hay ningun cliente registrado en esa localidad todavia "
+                "-- puede ser una zona nueva sin clientes, o que el nombre "
+                "esta escrito distinto a como figura en el sistema. No "
+                "digas que no hay cobertura: decile que vas a confirmar "
+                "con un colaborador."}
+
+    zonas_localidad = {z.zona_id for z in entrada.zonas}
     coincidentes = [
         p.nombre_wisphub for p in config.planes_venta
-        if not p.localidades or localidad in {loc.lower() for loc in p.localidades}
+        if not p.zonas or (zonas_localidad & set(p.zonas))
     ]
+    salida = {"cobertura": True, "n_clientes": entrada.n_clientes, "planes": coincidentes}
     if not coincidentes:
-        return {"planes": [], "advertencia":
-                "No hay planes de venta configurados para esta localidad "
-                "(o ninguno todavia). No inventes que no hay servicio "
-                "disponible -- decile al colaborador/prospecto que vas a "
-                "confirmar con un colaborador humano."}
-    return {"planes": coincidentes}
+        salida["advertencia"] = (
+            "Hay cobertura en esa localidad pero todavia no hay ningun "
+            "plan curado para su zona. No inventes que no hay servicio "
+            "disponible -- decile que vas a confirmar los planes con un "
+            "colaborador humano.")
+    return salida
 
 
 def _ejecutar_sondeo(argumentos_modelo: dict, tenant: str) -> dict:

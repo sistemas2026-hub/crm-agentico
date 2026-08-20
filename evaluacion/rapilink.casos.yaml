@@ -600,3 +600,26 @@ casos:
       usa: [consultar_planes_venta]
       no_usa: [consultar_planes, consultar_plan_detalle]
       sin_errores: true
+
+  # Bug real (20/08/2026): "doña manuela" es un barrio real de Soledad (84
+  # clientes) -- no una respuesta sin sentido. 'ventas' chequeaba cobertura
+  # con contar_clientes EN VIVO en cada mensaje (921ms-2031ms de latencia
+  # medidos en produccion) y ademas, aparte, el evaluador de escalamiento
+  # (nucleo/seguimiento/escalamiento.py -- corre fuera de motor.responder(),
+  # fuera del alcance de este arnes) escalaba la conversacion con un motivo
+  # falso ('solicitud_explicita': nadie pidio un humano). El fix reemplazo
+  # el chequeo en vivo por un catalogo localidad->zona sincronizado
+  # (TenantConfig.localidades) y saco contar_clientes del catalogo de
+  # 'ventas' -- este caso guarda esas dos cosas.
+  - nombre: doña manuela resuelve cobertura sin llamar a contar_clientes
+    rol: ventas
+    sesion:
+      verificado: false
+      nivel: 0
+      identificador_canal: "573009994444"
+    mensajes: ["quiero contratar internet, vivo en doña manuela"]
+    espera:
+      usa: [consultar_planes_venta]
+      no_usa: [contar_clientes]
+      catalogo_sin: [contar_clientes]
+      sin_errores: true

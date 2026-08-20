@@ -553,6 +553,22 @@ def guardar_planes_venta(tenant: str, planes: list[dict]) -> TenantConfig:
     return _editar(tenant, lambda doc: _mutar_planes_venta(doc, planes))
 
 
+def _mutar_localidades(doc: dict, localidades: list[dict]) -> None:
+    """
+    Reemplaza ENTERO el catalogo localidad -> zona(s) -- ver
+    TenantConfig.localidades/LocalidadZona en schema.py. Igual criterio
+    que _mutar_planes_venta: lo produce nucleo/herramientas/localidades.py
+    de punta a punta en cada sincronizacion, nunca un merge incremental.
+    """
+    from datetime import datetime, timezone
+    doc["localidades"] = localidades
+    doc["localidades_actualizado_en"] = datetime.now(timezone.utc).isoformat()
+
+
+def guardar_localidades(tenant: str, localidades: list[dict]) -> TenantConfig:
+    return _editar(tenant, lambda doc: _mutar_localidades(doc, localidades))
+
+
 def aprobar_herramienta_propuesta(tenant: str, herramienta_propuesta: dict) -> TenantConfig:
     """
     Agrega al catalogo real una herramienta que vino de una propuesta ya

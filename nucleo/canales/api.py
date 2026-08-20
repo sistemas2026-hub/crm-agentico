@@ -39,6 +39,7 @@ from nucleo.canales import media, whatsapp
 from nucleo.config import editor, fuente
 from nucleo.config.fusion import fusionar_roles, modelo_fusionado
 from nucleo.herramientas import http as ejecutor_http
+from nucleo.herramientas import localidades as sincronizador_localidades
 from nucleo.ingesta import corpus as ingesta
 from nucleo.ingesta.docx import procesar
 from nucleo.modelo import motor
@@ -1241,6 +1242,56 @@ def configuracion_planes_venta_listar():
         "catalogo": catalogo,
         "error_catalogo": error_catalogo,
         "planes_venta": [p.model_dump(mode="json") for p in config.planes_venta],
+        "localidades": [l.model_dump(mode="json") for l in config.localidades],
+        "localidades_actualizado_en": config.localidades_actualizado_en,
+    })
+
+
+@app.post("/configuracion/localidades/sincronizar")
+def configuracion_localidades_sincronizar():
+    """
+    Recorre el catalogo de clientes del proveedor entero (paginado, ver
+    nucleo/herramientas/localidades.py) y reemplaza TenantConfig.localidades
+    -- el catalogo localidad -> zona(s) real(es) que 'ventas' usa para
+    resolver cobertura y planes sin pegarle a la API en cada mensaje.
+
+    Puede tardar 60-90s en una base de miles de clientes (paginas
+    secuenciales) -- es una accion de administrador bajo demanda desde
+    /settings/planes-venta, nunca participa de una conversacion.
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+
+    herramienta = next((h for h in config.herramientas if h.sincroniza_localidades), None)
+    if herramienta is None:
+        return jsonify({"error": "Este agente no tiene ninguna herramienta "
+                                 "marcada 'sincroniza_localidades'."}), 400
+
+    try:
+        localidades = sincronizador_localidades.sincronizar(
+            herramienta, tenant, config.variables_tenant)
+    except Exception as e:
+        return jsonify({"error": f"No se pudo sincronizar contra el "
+                                 f"proveedor: {type(e).__name__}: {e}"}), 502
+
+    try:
+        nuevo = editor.guardar_localidades(
+            tenant, [l.model_dump(mode="json") for l in localidades])
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
+
+    olvidar_config(tenant)
+    return jsonify({
+        "localidades": [l.model_dump(mode="json") for l in nuevo.localidades],
+        "localidades_actualizado_en": nuevo.localidades_actualizado_en,
     })
 
 
