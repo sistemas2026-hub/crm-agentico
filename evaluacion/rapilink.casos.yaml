@@ -374,7 +374,12 @@ casos:
       # Encender la TV de quien no la contrato es regalar servicio; medir el
       # puerto o cambiarle el tipo de equipo es tocar la red por algo que ni
       # siquiera tiene contratado.
-      no_usa: [activar_catv, cambiar_tipo_onu, consultar_estado_catv]
+      # Solo lo que ESCRIBE. 'consultar_estado_catv' estuvo en esta lista y el
+      # caso fallaba con la respuesta correcta ("tu plan no incluye
+      # television"): medir el puerto es una lectura, no le cuesta nada al
+      # cliente y no le regala nada. Lo que no puede pasar es ACTUAR sobre el
+      # equipo de alguien que no contrato el servicio.
+      no_usa: [activar_catv, cambiar_tipo_onu]
       # Nada de afirmar sobre la redaccion. La primera version prohibia la
       # palabra 'sintoniza' y el caso fallaba con la respuesta CORRECTA -- el
       # agente decia "no hay señal de TV para sintonizar en ese plan", que es
@@ -593,3 +598,124 @@ casos:
       usa: [consultar_mi_servicio]
       # No le puede contar al cliente que una herramienta interna fallo.
       responde_sin: ["error", "no esta disponible", "sn_onu"]
+
+  # Verificado de punta a punta contra WispHub real el 19/08/2026 (no solo
+  # este caso, a mano): crear_ticket propuso, se aprobo desde afuera del
+  # corredor, y creo el ticket real #90354 sobre este mismo cliente
+  # (servicio 6555, PRUEBA TEMPORAL) -- tecnico resuelto por nombre via
+  # consultar_tecnicos, estado fijado en codigo (Nuevo). Ese intento
+  # encontro que 'tecnico' y 'estado' son requeridos por la API aunque la
+  # documentacion oficial no los marcaba asi (ver skill wisphub-api), lo
+  # que llevo a agregar Herramienta.requeridos -- antes de eso, NINGUNA
+  # herramienta del catalogo podia pedirle al modelo un campo obligatorio,
+  # 'required' iba siempre vacio.
+  #
+  # Este caso NO aprueba la propuesta (aprobacion_humana no llama a la API
+  # en este paso, asi que no toca WispHub en cada corrida) y el corredor no
+  # inspecciona los argumentos reales de la llamada (llegan enmascarados a
+  # la traza) -- solo confirma que el modelo sigue el protocolo esperado
+  # (consulta el tecnico antes de crear) y que la respuesta nunca afirma
+  # que el ticket ya existe. La garantia de que 'tecnico' viaja de verdad
+  # es la prueba manual de arriba mas la guarda de schema.py
+  # ('requeridos' fuera de 'filtros_verificados' no valida) -- no este caso.
+  - nombre: crear_ticket con aprobacion humana sigue el protocolo y no confirma como hecho
+    rol: soporte
+    mensajes: ["Necesito crear un ticket de soporte para el servicio 6555 (PRUEBA TEMPORAL), asunto Internet Intermitente, prioridad normal, asignado al tecnico Javier Olivera, con la descripcion 'caso de prueba del corredor de casos dorados.'"]
+    espera:
+      usa: [consultar_tecnicos, crear_ticket]
+      sin_errores: true
+      responde_con: ["pendiente"]
+      responde_sin: ["ya se creo", "ya quedo creado", "listo, creado"]
+
+  # Verificado de punta a punta el 19/08/2026 contra la factura real #143512
+  # (PRUEBA TEMPORAL): consultar_factura_detalle y consultar_formas_pago
+  # funcionaron directo; registrar_pago estaba ROTO -- no declaraba
+  # 'filtros_verificados', asi que el modelo no tenia forma de decir a que
+  # factura se referia y 'url_de()' fallaba siempre (marcador '{id}' sin
+  # resolver). Se arreglo agregando el cableado y quedo verificado en vivo:
+  # registro un pago real, la factura paso a 'Pagada'. Esa misma prueba
+  # encontro que 'fecha_pago' es requerida por la API pese a que la doc la
+  # marca opcional -- se resuelve en codigo (fechas_automaticas: ahora
+  # mismo) en vez de pedirsela al modelo, con un formato DISTINTO al de
+  # tickets ('YYYY-MM-DD HH:mm' vs 'DD/MM/AAAA') -- por eso
+  # 'formato_fechas_automaticas' dejo de ser una constante fija del motor.
+  #
+  # Este caso no repite el pago real (la factura ya quedo Pagada; una
+  # corrida repetida no representa el camino feliz) -- confirma que la
+  # herramienta se ejecuta sin error contra la factura real. Sin
+  # 'responde_con' sobre el monto: el modelo lo formatea distinto segun
+  # la corrida ('69.900' localizado vs '69900.00' crudo) y 'responde_con'
+  # exige que TODAS las cadenas listadas aparezcan a la vez, no una u
+  # otra -- afirmar sobre el formato exacto es afirmar sobre redaccion,
+  # que este corredor deliberadamente no hace (ver CLAUDE.md).
+  - nombre: consultar_factura_detalle trae el detalle real de una factura puntual
+    rol: facturacion
+    mensajes: ["Dame el detalle de la factura 143512, con sus articulos."]
+    espera:
+      usa: [consultar_factura_detalle]
+      sin_errores: true
+
+  # agregar_promesa_pago verificado en vivo contra esta misma factura ANTES
+  # de que quedara pagada (POST real, 201, promesa creada) -- ver skill
+  # wisphub-api. NO se agrega un caso dorado para "no proponer una promesa
+  # sobre una factura ya pagada": se probo en tres corridas seguidas y el
+  # modelo vario -- a veces consulto el detalle primero, a veces no, sin
+  # que nada en el prompt o el catalogo lo obligue. Es una preferencia de
+  # buen criterio, no una garantia de codigo, y un caso que falla por
+  # muestreo del modelo en vez de por una regresion real dej de leerse
+  # (CLAUDE.md: los casos afirman sobre la traza estable, no sobre algo
+  # que varia de corrida en corrida). Si en algun momento se quiere que
+  # esto sea determinístico, el camino es una precondicion en codigo
+  # (mismo mecanismo que 'exige_previas' de reiniciar_ont), no un caso
+  # dorado que dependa de que el modelo elija bien.
+
+  # --- ventas (19/08/2026) ---------------------------------------------
+  # Nace de un bug real visto en el simulador (screenshot del usuario):
+  # "para solicitar un servicio" hacia que el router pidiera cedula de
+  # inmediato -- un prospecto nunca iba a pasar esa verificacion, porque
+  # genuinamente no esta en WispHub. La causa real NO era el prompt: era
+  # el gate de ejecucion (motor.py), que bloqueaba 'derivar_a_area' en si
+  # mismo mientras el ROL ACTUAL (el router) no estuviera verificado, sin
+  # mirar si el area de DESTINO ('ventas') declaraba exige_verificacion en
+  # false. El modelo intentaba derivar, el codigo lo bloqueaba con
+  # IDENTIDAD_NO_VERIFICADA (que se excluye del registro a proposito, ver
+  # el comentario en motor.py), y desde afuera parecia que el modelo no
+  # habia intentado nada -- costo varias rondas de prompt engineering
+  # antes de encontrar que el problema era el gate, no el texto.
+  - nombre: pedido de servicio nuevo deriva a ventas sin pedir cedula
+    rol: cliente_final
+    # 'sesion: verificado false' A PROPOSITO -- sin esto el caso corre con
+    # 'sesion_por_defecto' (verificado true, cliente PRUEBA TEMPORAL) y no
+    # prueba nada: un cliente YA verificado no necesita que nadie salte la
+    # verificacion por el, la regla de "no volver a pedirla" ya lo cubre.
+    # El bug real era sobre alguien SIN verificar (un prospecto).
+    sesion:
+      verificado: false
+      nivel: 0
+      identificador_canal: "573009991111"
+    mensajes: ["para solicitar un servicio"]
+    espera:
+      deriva_a: ventas
+      sin_errores: true
+      responde_sin: ["cedula", "cédula"]
+
+  # Contraparte: un cliente actual pidiendo sumar otro servicio SI tiene
+  # que probar que ya es cliente -- la excepcion de 'ventas' es solo para
+  # quien todavia no esta en el sistema, no un atajo general para evitar
+  # la verificacion. Mismo motivo para 'sesion: verificado false' que el
+  # caso de arriba.
+  - nombre: cliente actual pidiendo otro servicio si se verifica
+    rol: cliente_final
+    sesion:
+      verificado: false
+      nivel: 0
+      identificador_canal: "573009992222"
+    # Dos mensajes a proposito: el primero solo dispara el PEDIDO de
+    # cedula (todavia no hay valor que buscar, no llama a ninguna
+    # herramienta -- confirmado en vivo). Recien en el segundo, con la
+    # cedula ya en el mensaje, tiene sentido esperar la llamada real.
+    mensajes: ["quiero agregar otro servicio a mi cuenta", "1142434445"]
+    espera:
+      usa: [verificar_identidad_por_cedula]
+      no_usa: [derivar_a_area]
+      sin_errores: true

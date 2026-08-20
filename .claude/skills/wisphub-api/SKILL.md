@@ -131,6 +131,49 @@ OPTIONS /api/tickets/   ->  Allow: GET, POST, HEAD, OPTIONS
 > algun momento se decide poblarlo, el informe dejaria de depender de parsear
 > formularios en HTML.
 
+### Crear/editar tickets — campos requeridos que la documentacion NO marcaba (verificado en vivo, 19/08/2026)
+
+Mismo patron de siempre: la documentacion oficial de estos tres endpoints no
+marcaba todos los campos obligatorios, y solo se descubrio al provocar el
+error real contra un ticket de prueba (`servicio` 6555 "PRUEBA TEMPORAL",
+ticket `#90354`, cerrado al terminar).
+
+| Endpoint | Campos que la API exige de verdad | Como se confirmo |
+|---|---|---|
+| `POST /api/tickets/` (crear) | `estado` Y `tecnico`, ademas de lo obvio (`servicio`, `asunto`) | Un POST sin esos dos dio `400 {"estado":["Este campo es requerido."],"tecnico":["Este campo es requerido."]}`. La doc oficial no los listaba como obligatorios |
+| `POST /api/tickets/{id}/respuesta/` (responder) | `ticket-estado` Y `ticket-prioridad`, ademas de `respuesta` | Mismo metodo: `400` con los dos campos marcados "requerido". Aca la doc SI acertaba -- confirma que no hay que asumir en ningun sentido, ni que miente ni que dice la verdad, se prueba siempre |
+| `PUT /api/tickets/{id}/` (cambiar estado) | Solo `estado` -- **no** exige el resto del recurso pese a ser `PUT` | `PUT` con `{"estado": 3}` solo dio `200` y aplico el cambio. No es REST estricto, mismo hallazgo que otros endpoints de esta API |
+
+**Como se resolvio en el catalogo**: `estado` de `crear_ticket` se fijo en
+codigo (`argumentos_fijos: {estado: 1}` -- todo ticket nuevo nace "Nuevo",
+no es una decision real del modelo). `tecnico` SI lo elige el modelo
+(resuelto por nombre via `consultar_tecnicos`), asi que necesitaba forzarse
+como obligatorio en el schema que ve el modelo -- que hasta este hallazgo
+**no existia**: `Herramienta.requeridos` (`nucleo/config/schema.py`) es
+nuevo, agregado especificamente porque `motor.py` mandaba `"required": []`
+fijo para TODA herramienta, sin excepcion, hasta este caso. Sirve para
+cualquier herramienta futura con un campo que la API exige y el modelo
+tiene que decidir.
+
+### Facturas — filtros y escritura (verificado en vivo, 19/08/2026)
+
+| Filtro/campo | Notas |
+|---|---|
+| `GET /api/facturas/?cliente=` | Quiere el **usuario** del cliente (formato `nombre-slug@empresa`, campo `usuario` en la respuesta de LISTA de `/api/clientes/` -- NO en la respuesta de detalle `/api/clientes/{id}/`, que trae `usuario_rb` en su lugar y ni siquiera el mismo valor). `servicio`/`id_servicio` como filtro es IGNORADO en silencio (devuelve el universo sin filtrar) -- mismo patron de siempre, probarlo con el metodo del valor imposible antes de asumir |
+| `GET /api/facturas/?estado=` | Ya verificado antes (1 pendiente, 2 pagada, 3 cancelada, 4 en revision, 5 transferida) |
+| Rango de fechas (`fecha_emision__range_0/_1`, etc.) | Tope real confirmado: **3 meses exactos** (`400 {"error":"El rango de fecha seleccionado no puede exceder 3 meses."}`), no una aproximacion |
+| `POST /api/facturas/{id}/registrar-pago/` | **`fecha_pago` es requerida de verdad** pese a que la doc la marca opcional ("solo tiene efecto con un permiso especial") -- sin ella, `400 {"fecha_pago":["Este campo es requerido."]}`. Se resuelve en codigo con la fecha actual, formato `YYYY-MM-DD HH:mm` (**distinto** al de tickets, `DD/MM/AAAA`) |
+| `POST /api/promesa-pago/` | **`id_factura` NO se valida** pese a que la doc lo marca requerido -- un valor imposible (`999999999`) no genero error junto a los demas campos vacios. El formato de `fecha_limite` del ejemplo oficial (`2022/08/26`, con barras) tambien esta mal: la API real exige guiones (`YYYY-MM-DD`), confirmado con un `400` de formato antes de acertar |
+
+**Bug encontrado, no de la API sino del catalogo propio**: `registrar_pago` llevaba
+tiempo en produccion sin declarar `filtros_verificados` -- el modelo no tenia
+forma de decir a que factura se referia, y el endpoint (`/api/facturas/{id}/
+registrar-pago/`) nunca podia resolver el marcador `{id}` de la URL. Toda
+llamada fallaba en silencio con `ErrorHerramientaHttp`, sin que ningun caso
+dorado lo hubiera notado (no habia ninguno que ejercitara esta herramienta).
+Corregido y verificado con un pago real sobre una factura de prueba (quedo
+`Pagada`, con `forma_pago`, `referencia` y `total_cobrado` reflejados).
+
 ### Crear cliente / instalacion — esquema confirmado (documentacion oficial, agosto 2026)
 
 ```

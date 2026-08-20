@@ -1894,6 +1894,93 @@ def configuracion_propuesta_rechazar(id_propuesta):
 
 
 # =============================================================================
+#  ACCIONES PROPUESTAS  -  escrituras con aprobacion_humana=True, pendientes
+#  hasta que alguien las apruebe o rechace. Ver Herramienta.aprobacion_humana
+#  (schema.py) y motor.py::_ejecutar_propuesta_de_accion/
+#  ejecutar_accion_aprobada. Genero, no especifico de tickets -- cualquier
+#  herramienta de escritura futura que declare aprobacion_humana entra por
+#  aca, no hace falta un endpoint nuevo por cada una.
+# =============================================================================
+
+@app.get("/acciones/propuestas")
+def acciones_propuestas():
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        acciones = persistencia.acciones_propuestas_de(tenant, request.args.get("estado"))
+    except Exception as e:
+        print(f"[acciones] fallo al leer propuestas: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudieron leer las acciones propuestas."}), 500
+    return jsonify({"acciones": acciones})
+
+
+@app.post("/acciones/propuestas/<id_accion>/aprobar")
+def acciones_propuesta_aprobar(id_accion):
+    """
+    Ejecuta la escritura real contra la API externa y RECIEN DESPUES marca
+    la accion como 'aprobada' -- mismo orden que aprobar una herramienta
+    propuesta: si la API la rechaza, el resultado (y el error) quedan
+    visibles en la misma fila, no se pierde ni se finge que salio bien.
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'."}), 400
+
+    try:
+        accion = persistencia.accion_propuesta_de(tenant, id_accion)
+    except Exception as e:
+        print(f"[acciones] fallo al leer la accion: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo leer la accion."}), 500
+    if not accion:
+        return jsonify({"error": f"La accion '{id_accion}' no existe."}), 404
+    if accion["estado"] != "pendiente":
+        return jsonify({"error": f"Esta accion ya esta '{accion['estado']}', "
+                                 f"no se puede volver a aprobar."}), 400
+
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+
+    resultado, codigo_error = motor.ejecutar_accion_aprobada(config, accion)
+
+    try:
+        persistencia.resolver_accion_propuesta(
+            tenant, id_accion, "aprobada", cuerpo.get("revisado_por"),
+            resultado_ejecucion=resultado, codigo_error=codigo_error)
+    except Exception as e:
+        print(f"[acciones] la accion se ejecuto pero no se pudo guardar el "
+             f"resultado: {type(e).__name__}: {e}")
+
+    if codigo_error:
+        return jsonify({"ok": False, "estado": "aprobada", "error_ejecucion": codigo_error,
+                        "resultado": resultado}), 502
+    return jsonify({"ok": True, "estado": "aprobada", "resultado": resultado})
+
+
+@app.post("/acciones/propuestas/<id_accion>/rechazar")
+def acciones_propuesta_rechazar(id_accion):
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'."}), 400
+
+    try:
+        existe = persistencia.resolver_accion_propuesta(
+            tenant, id_accion, "rechazada", cuerpo.get("revisado_por"),
+            motivo_rechazo=cuerpo.get("motivo"))
+    except Exception as e:
+        print(f"[acciones] fallo al rechazar: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo guardar."}), 500
+
+    if not existe:
+        return jsonify({"error": f"La accion '{id_accion}' no existe."}), 404
+    return jsonify({"ok": True, "estado": "rechazada"})
+
+
+# =============================================================================
 #  CORPUS  -  cargar documentacion sin pasar por la consola, y consultar que
 #  hay publicado hoy
 # =============================================================================

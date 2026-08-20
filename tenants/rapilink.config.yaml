@@ -146,7 +146,8 @@ roles:
           consultar_tickets_de_cliente, contar_tickets, contar_clientes, consultar_casos_bottlecrm,
           agendar_visita_tecnica, consultar_estado_ont, consultar_senal_ont, reiniciar_ont,
           diagnosticar_falla_ont, consultar_estado_catv, activar_catv, cambiar_tipo_onu,
-          consultar_incidente_red]
+          consultar_incidente_red, consultar_tecnicos, crear_ticket, responder_ticket,
+          actualizar_estado_ticket]
     campos_permitidos:
       consultar_cliente: [id_servicio, nombre, cedula, estado, email, telefono, direccion, localidad,
         ciudad, plan_internet, zona, fecha_instalacion, estado_facturas, saldo, fecha_corte]
@@ -193,6 +194,16 @@ roles:
       # declara, mas abajo.
       consultar_incidente_red: [es_incidente_de_red, tipo_alerta, clientes_afectados,
             porcentaje_afectado, desde, zona, caja, motivo]
+      consultar_tecnicos: [id, username, nombre, email]
+      # Las tres de escritura con aprobacion_humana NUNCA devuelven el
+      # registro real de WispHub en este paso -- 'aprobacion_humana' salta
+      # la lista blanca (motor.py no llama filtrar_campos en esa rama,
+      # ver el comentario de schema.py sobre por que no es lo mismo que
+      # 'requiere_confirmacion'); esto solo documenta la forma real de
+      # _ejecutar_propuesta_de_accion, que el validador exige igual.
+      crear_ticket: [accion_id, estado, resumen, instruccion_interna]
+      responder_ticket: [accion_id, estado, resumen, instruccion_interna]
+      actualizar_estado_ticket: [accion_id, estado, resumen, instruccion_interna]
     nunca_revelar: [password_servicio, password_cpe, password_router_wifi, password_ssid_router_wifi,
       usuario_router_wifi, coordenadas]
 
@@ -200,17 +211,28 @@ roles:
     descripcion: Revisa facturas, saldos y registra pagos.
     area: Facturación
     cargo: Agente de Facturación
-    puede_consultar: [consultar_cliente, consultar_cliente_por_cedula, consultar_facturas, 
-          registrar_pago, contar_facturas, contar_clientes]
+    puede_consultar: [consultar_cliente, consultar_cliente_por_cedula, consultar_facturas,
+          consultar_factura_detalle, consultar_formas_pago, registrar_pago, agregar_promesa_pago,
+          contar_facturas, contar_clientes]
     campos_permitidos:
       # Sin datos de red ni tickets: no hacen a su trabajo.
       consultar_cliente: [id_servicio, nombre, cedula, estado, email, telefono, direccion, localidad,
         ciudad, estado_facturas, saldo, fecha_corte, plan_internet]
-      consultar_cliente_por_cedula: [id_servicio, nombre, cedula, estado, email, telefono, 
+      consultar_cliente_por_cedula: [id_servicio, nombre, cedula, estado, email, telefono,
             estado_facturas, saldo, fecha_corte, plan_internet]
-      consultar_facturas: [id_factura, estado, total, saldo, fecha_emision, fecha_vencimiento, 
+      consultar_facturas: [id_factura, estado, total, saldo, fecha_emision, fecha_vencimiento,
             fecha_pago]
+      # Sin 'cliente' completo (mismo criterio que 'servicio' en tickets):
+      # trae email/telefono/direccion/cedula que ya se consultan aparte si
+      # hacen falta. 'cliente.nombre' alcanza para confirmar de quien es.
+      consultar_factura_detalle: [id_factura, folio, fecha_emision, fecha_vencimiento, fecha_pago,
+            estado, tipo, sub_total, descuento, saldo, total, cliente.nombre, articulos]
+      consultar_formas_pago: [id, nombre]
       registrar_pago: [resultado, id_factura, total_cobrado, mensajes, messages, task_id, errors]
+      # aprobacion_humana salta la lista blanca (ver el comentario igual en
+      # las herramientas de tickets) -- esto documenta la forma real de
+      # _ejecutar_propuesta_de_accion, que el validador exige igual.
+      agregar_promesa_pago: [accion_id, estado, resumen, instruccion_interna]
       contar_facturas: [total, desglose, interpretacion, advertencia, archivo_id, error_archivo]
       contar_clientes: [total, desglose, interpretacion, advertencia, archivo_id, error_archivo]
     nunca_revelar: [password_servicio, password_cpe, password_router_wifi, password_ssid_router_wifi,
@@ -286,15 +308,21 @@ roles:
       probable: el especialista puede pasarlo de vuelta si se equivoco.
 
       Lo unico que SI resuelves tu: una pregunta general que no es de
-      ningun area (horarios, como contactar a la empresa, que planes
-      existen a grandes rasgos).
+      ningun area (horarios, como contactar a la empresa). Si pregunta por
+      planes, precios, o quiere CONTRATAR un servicio nuevo (sea alguien
+      que todavia no es cliente, o uno actual sumando OTRO servicio),
+      pedile la cedula primero -- regla general de verificacion, sin
+      excepcion, ver mas abajo. Si la busqueda no encuentra a nadie y la
+      persona confirma que todavia no es cliente, deriva a 'ventas' (tiene
+      el catalogo real de planes y precios, no improvises esos datos vos)
+      -- nunca digas que ya lo derivaste sin haber llamado a
+      derivar_a_area en ese mismo mensaje.
 
       Lo que va a un colaborador HUMANO, no a un area: traslados,
-      reconexion, instalaciones nuevas, reclamos formales, y cambio de
-      contrasena (el protocolo dice que esto se resuelve al instante, pero
-      todavia no existe esa herramienta aqui -- hasta que exista, se
-      deriva). Al derivar a un humano, dile al cliente que un
-      colaborador humano sigue el caso.
+      reconexion, reclamos formales, y cambio de contrasena (el protocolo
+      dice que esto se resuelve al instante, pero todavia no existe esa
+      herramienta aqui -- hasta que exista, se deriva). Al derivar a un
+      humano, dile al cliente que un colaborador humano sigue el caso.
 
       Verificacion de identidad: normalmente ya queda resuelta por el numero
       de WhatsApp desde el que escribe (no tienes que pedir nada). Si el
@@ -656,7 +684,17 @@ roles:
           cambiar_tipo_onu]
     campos_permitidos:
       consultar_mi_servicio: [estado, plan_internet, ssid_router_wifi]
-      ping_cliente: ["ping-1", "ping-2", "ping-3", "ping-exitoso"]
+      # Con notacion de punto, NO el objeto entero: 'ping-1' trae adentro el
+      # campo 'host', que es la IP del cliente. Dejarlo pasar completo se la
+      # entrega al modelo, y de ahi al cliente -- verificado el 19/08/2026,
+      # el agente contesto "Tu equipo responde en la IP 192.168.22.97".
+      #
+      # El caso dorado que lo vigila pasaba de casualidad: la IP SIEMPRE
+      # estuvo al alcance, y solo fallaba cuando al modelo se le ocurria
+      # mencionarla. De lo unico que el diagnostico depende es de si hubo
+      # perdida de paquetes.
+      ping_cliente: ["ping-exitoso", "ping-1.packet-loss", "ping-2.packet-loss",
+                     "ping-3.packet-loss"]
       # Sin TV no hay falla de TV que diagnosticar -- este agente confirma
       # que el plan la incluya antes de preguntar nada (ver su descripcion).
       consultar_plan_tv: [descripcion]
@@ -676,6 +714,73 @@ roles:
       cambiar_tipo_onu: [response, status]
     nunca_revelar: [password_servicio, password_cpe, password_router_wifi, usuario_router_wifi,
           cedula, direccion, coordenadas, ip, mac_cpe, sn_onu, sectorial, router.nombre]
+
+  # --- ventas (19/08/2026) ---------------------------------------------------
+  # Nace de un bug real visto en el simulador: alguien escribio "para
+  # solicitar un servicio" y el router pidio cedula de inmediato -- un
+  # prospecto (todavia NO cliente) nunca va a pasar esa verificacion,
+  # porque genuinamente no esta en WispHub. Antes de esto, "instalaciones
+  # nuevas" derivaba ciego a un colaborador humano (ver derivar_a_area);
+  # esto reemplaza esa derivacion ciega por una conversacion real de
+  # calificacion. La captura final (documentos, firma) sigue siendo el
+  # formulario externo de siempre -- este rol NO la reemplaza, solo evita
+  # mandar a alguien sin cobertura o sin interes real, y contesta
+  # planes/precios con datos reales en vez de que el router improvise.
+  ventas:
+    area: Ventas
+    cargo: Agente de Ventas Virtual
+    # Lo lee el ROUTER (cliente_final) para saber cuando derivar aca --
+    # ver _tabla_de_derivacion en nucleo/recuperacion/prompt.py.
+    atiende: >-
+      Quiere CONTRATAR un servicio nuevo (todavia no es cliente), pregunta
+      si hay cobertura en su barrio/zona, o pregunta por planes y precios
+    descripcion: |
+      Un prospecto por WhatsApp -- TODAVIA NO es cliente de Rapilink. Nunca
+      vio nuestros planes ni sabe si tenemos cobertura en su zona. Mismo
+      tono cercano que el resto (tuteo, natural).
+
+      Tu trabajo: entender que quiere, preguntarle en que barrio o
+      localidad vive (para chequear cobertura), contarle que planes
+      existen y sus precios reales si pregunta, y si hay cobertura,
+      pasarle el link del formulario para completar la contratacion.
+
+      COBERTURA: llama a contar_clientes con el filtro localidad=<lo que
+      te haya dicho, tal cual lo escribio>. Si el total es mayor a 0, ya
+      tenemos clientes ahi -- decile que si hay cobertura y compartile el
+      link del formulario. Si el total es 0, NO le digas que no hay
+      cobertura (puede ser una zona nueva sin clientes todavia, o que
+      escribio el nombre distinto a como esta cargado en el sistema) --
+      decile que vas a confirmar con un colaborador y ofrece pasar el
+      caso a uno humano.
+
+      PLANES: si pregunta que planes hay, usa consultar_planes para ver
+      los nombres reales -- nunca inventes un nombre de plan que no este
+      ahi. Si pregunta el precio de uno en particular, primero resolve su
+      id con consultar_planes y despues llama a consultar_plan_detalle
+      con ese id_plan para el precio real -- nunca inventes ni redondees
+      un precio, y nunca cites un precio sin haber llamado a esta
+      herramienta en el mismo turno.
+
+      FORMULARIO: {VENTAS_FORMULARIO_URL}
+      Compartilo SOLO despues de confirmar cobertura (total > 0 en
+      contar_clientes) y de que el prospecto muestre intencion clara de
+      seguir adelante -- no lo mandes de arranque ni sin haber chequeado
+      la zona primero.
+
+      Nunca hables como si ya fuera cliente (nunca "tu servicio", "tu
+      cuenta", "tu factura") -- todavia no lo es.
+    orientado_a: cliente_final
+    # Sin esto, heredaria el "VERIFICACION PRIMERO, SIEMPRE" que aplica a
+    # TODO cliente_final -- ver Rol.exige_verificacion en schema.py. Un
+    # prospecto no esta en WispHub y nunca lo va a estar hasta que
+    # contrate: no hay identidad que verificar contra nada.
+    exige_verificacion: false
+    puede_consultar: [consultar_planes, consultar_plan_detalle, contar_clientes]
+    campos_permitidos:
+      consultar_planes: [id, nombre]
+      consultar_plan_detalle: [nombre, precio, bajada, subida, descripcion]
+      contar_clientes: [total, desglose, interpretacion, advertencia, archivo_id, error_archivo]
+    nunca_revelar: []
 
   # --- configuracion_guiada -------------------------------------------------
   # CLAUDE.md: "la proxima empresa que se conecte no deberia necesitar una
@@ -982,6 +1087,16 @@ llm:
 # mas abajo (ver el campo en nucleo/config/schema.py).
 variables_tenant:
   SMARTOLT_SUBDOMINIO: https://rapilinksas.smartolt.com
+  # Formulario real de contratacion (datos + documentos + firma), 5 pasos:
+  # datos personales, plan interesado (ya muestra nombre+precio, coherente
+  # con lo que 'ventas' contesta en el chat), ubicacion (GPS + barrio --
+  # la verificacion real de viabilidad tecnica pasa aca, el chequeo de
+  # 'ventas' por localidad es solo orientativo), documentos fotograficos,
+  # firma digital, autorizaciones (centrales de riesgo + habeas data).
+  # Editable desde /settings sin tocar este archivo una vez cargado -- ver
+  # nucleo/config/editor.py. Referenciado en el prompt del rol 'ventas'
+  # con '{VENTAS_FORMULARIO_URL}' (ver nucleo/recuperacion/prompt.py).
+  VENTAS_FORMULARIO_URL: https://rapilinksas.co/solicitud
 
 # -----------------------------------------------------------------------------
 #  HERRAMIENTAS
@@ -1077,6 +1192,51 @@ herramientas:
     # fila de asistente.herramientas_cache a mano.
     cache: true
 
+  # --- ventas (19/08/2026) ----------------------------------------------
+  - nombre: consultar_planes
+    tipo: http
+    descripcion: >
+      Catalogo de todos los planes de internet (nombre e ID). Usala para
+      resolver el ID de un plan por su nombre real antes de pedir su
+      precio con consultar_plan_detalle -- nunca inventes un nombre de
+      plan que no aparezca aca.
+    solo_lectura: true
+    cache: true
+    cache_vigencia_dias: 7
+    roles_permitidos: [ventas]
+    base_url: https://api.wisphub.io
+    endpoint: /api/plan-internet/
+    metodo: GET
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+
+  - nombre: consultar_plan_detalle
+    tipo: http
+    descripcion: >
+      Precio y velocidad reales de UN plan, por su ID (resolvelo primero
+      con consultar_planes). Verificado en vivo (19/08/2026): el precio
+      NO viene en el listado de consultar_planes, solo aca.
+    solo_lectura: true
+    # Mismo endpoint que consultar_plan_tv, cacheado con el mismo criterio
+    # (un plan no cambia de precio de un dia para el otro -- si cambia de
+    # verdad, se refresca borrando la fila de asistente.herramientas_cache
+    # a mano). Son dos herramientas porque cada rol ve un subconjunto de
+    # campos distinto: soporte de cliente_final necesita saber si incluye
+    # TV, ventas necesita precio/velocidad -- ninguno necesita lo del otro.
+    cache: true
+    roles_permitidos: [ventas]
+    base_url: https://api.wisphub.io
+    endpoint: /api/plan-internet/queue/{id_plan}/
+    metodo: GET
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    requeridos: [id_plan]
+    filtros_verificados:
+      id_plan:
+        param: id_plan
+        tipo: id
+        verificado_el: 2026-08-19
+
   - nombre: verificar_identidad_por_cedula
     tipo: http
     descripcion: >
@@ -1113,12 +1273,13 @@ herramientas:
       Pasa esta conversacion al agente especializado del area, que la
       atiende EN EL MISMO MENSAJE con sus propias herramientas (no es
       escalar a un humano, y el cliente no tiene que volver a escribir ni
-      esperar). Llama a esta herramienta apenas quede claro de que area es el tema -- no
-      antes de verificar identidad (no vas a poder todavia si no esta
-      verificada), y no para preguntas generales que tu mismo resuelves.
+      esperar). Llama a esta herramienta apenas quede claro de que area es el
+      tema -- no antes de verificar identidad, SALVO que el area de destino
+      este marcada como que no la requiere (es alguien que todavia no es
+      cliente), y no para preguntas generales que tu mismo resuelves.
       No sirve para lo que ninguna area puede resolver sola (reclamos
-      formales, instalaciones nuevas, traslados): eso se sigue escalando a
-      un humano, como siempre.
+      formales, traslados): eso se sigue escalando a un humano, como
+      siempre.
     solo_lectura: true
     roles_permitidos: [cliente_final, facturacion_cliente, soporte_tecnico_cliente]
     deriva_rol: true
@@ -1127,7 +1288,12 @@ herramientas:
     # callejon sin salida (el cliente quedaria con un agente que no puede
     # resolverle nada). Un especialista que se equivoco de area pasa
     # DIRECTO al otro especialista, no vuelve a pasar por la puerta.
-    areas_destino: [facturacion_cliente, soporte_tecnico_cliente]
+    #
+    # 'ventas' agregado 19/08/2026: reemplaza la derivacion ciega a un
+    # humano que tenia 'instalaciones nuevas' -- ver Rol.exige_verificacion
+    # en schema.py sobre por que un prospecto no pasa por el gate de
+    # identidad.
+    areas_destino: [facturacion_cliente, soporte_tecnico_cliente, ventas]
     # Lo que el cliente dijo que le falla, con SUS palabras. Sirve para que
     # el especialista no reinicie el equipo por una falla de television:
     # ver 'exige_turno_propio' en reiniciar_ont.
@@ -1324,6 +1490,192 @@ herramientas:
     auth_ref: WISPHUB_API_KEY
     auth_esquema: Api-Key
 
+  - nombre: consultar_tecnicos
+    tipo: http
+    descripcion: >
+      Lista el personal (staff) de WispHub. Usala para resolver el ID de
+      un tecnico cuando el colaborador lo menciona por nombre, antes de
+      crear o reasignar un ticket -- nunca inventes un ID.
+    solo_lectura: true
+    cache: true
+    cache_vigencia_dias: 7
+    roles_permitidos: [soporte]
+    base_url: https://api.wisphub.io
+    endpoint: /api/staff/
+    metodo: GET
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+
+  # --- escritura de tickets (18/08/2026) -- aprobacion_humana real -------
+  # Endpoints verificados contra la documentacion oficial de WispHub
+  # (pegada por el usuario), filtros de LECTURA ya verificados en vivo con
+  # el metodo del valor imposible (mis_tickets, fecha_creacion_0/_1). Las
+  # tres de ESCRITURA de abajo todavia no se probaron contra produccion --
+  # quedan con aprobacion_humana=true a proposito: la primera vez que se
+  # ejecuten de verdad va a ser desde /acciones/propuestas, con un ticket
+  # de prueba, no en el primer intento a ciegas.
+  - nombre: crear_ticket
+    tipo: http
+    descripcion: >
+      Crea un ticket de soporte tecnico real en WispHub. Necesitas el
+      id_servicio del cliente (si solo tenes la cedula, resolvela primero
+      con consultar_cliente_por_cedula) y el 'asunto' TIENE que ser
+      exactamente una de las opciones del enum -- nunca inventes un
+      asunto que no este en la lista. Si no sabes el ID del tecnico,
+      usa consultar_tecnicos primero. Queda PENDIENTE de aprobacion --
+      decile al colaborador que todavia no se creo de verdad, alguien
+      tiene que aprobarla desde la pantalla correspondiente.
+    solo_lectura: false
+    requiere_confirmacion: true
+    aprobacion_humana: true
+    roles_permitidos: [soporte]
+    base_url: https://api.wisphub.io
+    endpoint: /api/tickets/
+    metodo: POST
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    plantilla_resumen: "Crear ticket '{asunto}' para el servicio {servicio} (prioridad {prioridad})"
+    # 'estado' se fija en codigo -- todo ticket nuevo nace 'Nuevo' (1), no es
+    # una decision del modelo. 'tecnico' SI es requerido por la API (probado
+    # en vivo el 19/08/2026: un POST sin 'tecnico' ni 'estado' devuelve 400
+    # "Este campo es requerido" para los dos -- la documentacion oficial no
+    # los marcaba como obligatorios). Ver 'requeridos' abajo.
+    argumentos_fijos:
+      departamento: "Soporte Técnico"
+      estado: 1
+    espejar_campos:
+      asunto: asuntos_default
+      departamento: departamentos_default
+    requeridos: [servicio, asunto, tecnico]
+    filtros_verificados:
+      servicio:
+        param: servicio
+        tipo: id
+      tecnico:
+        param: tecnico
+        tipo: id
+      descripcion:
+        param: descripcion
+        tipo: texto
+      prioridad:
+        param: prioridad
+        tipo: enum
+        valores: {baja: 1, normal: 2, alta: 3, muy_alta: 4}
+      origen_reporte:
+        param: origen_reporte
+        tipo: enum
+        valores:
+          oficina: oficina
+          portal_cliente: portal_cliente
+          telefono: telefono
+          presencial: presencial
+          redes_sociales: redes_sociales
+      asunto:
+        param: asunto
+        tipo: enum
+        valores:
+          "Internet Lento": "Internet Lento"
+          "No Tiene Internet": "No Tiene Internet"
+          "Antena Desalineada": "Antena Desalineada"
+          "Antena Dañada": "Antena Dañada"
+          "No Responde la Antena": "No Responde la Antena"
+          "No Responde el Router Wifi": "No Responde el Router Wifi"
+          "Router Wifi Reseteado(Valores de Fabrica)": "Router Wifi Reseteado(Valores de Fabrica)"
+          "Cambio de Router Wifi": "Cambio de Router Wifi"
+          "Cambio de Antena": "Cambio de Antena"
+          "Cambio de Antena + Router Wifi": "Cambio de Antena + Router Wifi"
+          "Cambio de Contraseña en Router Wifi": "Cambio de Contraseña en Router Wifi"
+          "Cable UTP Dañado": "Cable UTP Dañado"
+          "Internet Intermitente": "Internet Intermitente"
+          "Cambio de Domicilio": "Cambio de Domicilio"
+          "PoE Dañado": "PoE Dañado"
+          "Reconexión": "Reconexión"
+          "Recolección De Equipos": "Recolección De Equipos"
+          "Conector Dañado": "Conector Dañado"
+          "Cambio A Fibra Óptica": "Cambio A Fibra Óptica"
+          "Cable Fibra Dañado": "Cable Fibra Dañado"
+          "Jumper Dañado": "Jumper Dañado"
+          "Antena valores De Fabrica": "Antena valores De Fabrica"
+          "Cableado Para Modem Extra": "Cableado Para Modem Extra"
+          "Eliminador Dañado": "Eliminador Dañado"
+          "Cables Mal Colocados": "Cables Mal Colocados"
+          "RJ45 Dañado": "RJ45 Dañado"
+          "Alambres Rotos": "Alambres Rotos"
+          "Cancelación": "Cancelación"
+          "Desconexión": "Desconexión"
+          "Troncal Dañado": "Troncal Dañado"
+          "Caja Nap Dañada": "Caja Nap Dañada"
+
+  - nombre: responder_ticket
+    tipo: http
+    descripcion: >
+      Agrega una respuesta/nota a un ticket YA EXISTENTE en WispHub, con
+      la opcion de reabrirlo. Necesitas el id_ticket (de consultar_ticket
+      o de una creacion previa). Queda PENDIENTE de aprobacion, igual que
+      crear_ticket.
+    solo_lectura: false
+    requiere_confirmacion: true
+    aprobacion_humana: true
+    roles_permitidos: [soporte]
+    base_url: https://api.wisphub.io
+    endpoint: /api/tickets/{id_ticket}/respuesta/
+    metodo: POST
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    plantilla_resumen: "Responder al ticket {id_ticket}: \"{respuesta}\""
+    campos_texto_libre: [respuesta]
+    # 'estado' y 'prioridad' confirmados requeridos en vivo (19/08/2026,
+    # ticket real #90354): un POST solo con 'respuesta' devuelve 400
+    # "Este campo es requerido" para 'ticket-estado' y 'ticket-prioridad'.
+    requeridos: [id_ticket, respuesta, estado, prioridad]
+    filtros_verificados:
+      id_ticket:
+        param: id_ticket
+        tipo: id
+      respuesta:
+        param: respuesta
+        tipo: texto
+      reabrir_ticket:
+        param: reabrir-ticket
+        tipo: texto
+      estado:
+        param: ticket-estado
+        tipo: enum
+        valores: {nuevo: 1, en_progreso: 2, resuelto: 3, cerrado: 4}
+      prioridad:
+        param: ticket-prioridad
+        tipo: enum
+        valores: {baja: 1, normal: 2, alta: 3, muy_alta: 4}
+
+  - nombre: actualizar_estado_ticket
+    tipo: http
+    descripcion: >
+      Cambia el estado de un ticket YA EXISTENTE (ej. marcarlo Resuelto o
+      Cerrado). Solo el estado -- para agregar una nota usa
+      responder_ticket. Necesitas el id_ticket. Queda PENDIENTE de
+      aprobacion, igual que las otras dos.
+    solo_lectura: false
+    requiere_confirmacion: true
+    aprobacion_humana: true
+    roles_permitidos: [soporte]
+    base_url: https://api.wisphub.io
+    endpoint: /api/tickets/{id_ticket}/
+    metodo: PUT
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    plantilla_resumen: "Cambiar el ticket {id_ticket} a estado '{estado}'"
+    # Confirmado en vivo (19/08/2026, ticket #90354): el PUT acepta solo
+    # 'estado' sin exigir el resto del recurso -- no es REST estricto.
+    requeridos: [id_ticket, estado]
+    filtros_verificados:
+      id_ticket:
+        param: id_ticket
+        tipo: id
+      estado:
+        param: estado
+        tipo: enum
+        valores: {nuevo: 1, en_progreso: 2, resuelto: 3, cerrado: 4}
+
   - nombre: consultar_facturas
     tipo: http
     solo_lectura: true
@@ -1333,10 +1685,73 @@ herramientas:
     metodo: GET
     auth_ref: WISPHUB_API_KEY
     auth_esquema: Api-Key
+    # Verificados en vivo el 19/08/2026 con el metodo del valor imposible
+    # (factura real #143512 de PRUEBA TEMPORAL como control positivo):
+    # 'cliente' quiere el USUARIO (usuario@empresa, no el id_servicio --
+    # 'servicio'/id_servicio se probaron primero y la API los IGNORA en
+    # silencio, devolviendo el universo sin filtrar). 'estado' ya estaba
+    # verificado (ver skill wisphub-api). Los filtros de rango de fecha
+    # (fecha_emision__range_0/_1, etc., par obligatorio, tope 3 meses)
+    # quedan afuera por ahora -- agregan complejidad real y no eran lo
+    # que se pidio en esta pasada.
+    filtros_verificados:
+      cliente:
+        param: cliente
+        tipo: texto
+        verificado_el: 2026-08-19
+      estado:
+        param: estado
+        tipo: enum
+        valores: {pendiente: 1, pagada: 2, cancelada: 3, en_revision: 4, transferida: 5}
+        verificado_el: 2026-07-29
+
+  - nombre: consultar_factura_detalle
+    tipo: http
+    descripcion: >
+      Detalle completo de UNA factura por su ID, con sus articulos
+      (linea por linea: descripcion, cantidad, precio) y el cliente
+      asociado. Usala cuando el colaborador pida el detalle de una
+      factura puntual (ya identificada por id_factura), no para buscar
+      facturas -- para eso esta consultar_facturas.
+    solo_lectura: true
+    roles_permitidos: [facturacion]
+    base_url: https://api.wisphub.io
+    endpoint: /api/facturas/{id_factura}/
+    metodo: GET
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    requeridos: [id_factura]
+    filtros_verificados:
+      id_factura:
+        param: id_factura
+        tipo: id
+        verificado_el: 2026-08-19
+
+  - nombre: consultar_formas_pago
+    tipo: http
+    descripcion: >
+      Catalogo de formas de pago (Efectivo, Transferencia Bancaria,
+      etc.). Usala para resolver el ID de 'forma_pago' que pide
+      registrar_pago cuando el colaborador menciona el medio por
+      nombre -- nunca inventes un ID.
+    solo_lectura: true
+    cache: true
+    cache_vigencia_dias: 7
+    roles_permitidos: [facturacion]
+    base_url: https://api.wisphub.io
+    endpoint: /api/formas-de-pago/
+    metodo: GET
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
 
   - nombre: registrar_pago
     tipo: http
-    descripcion: ACCION SENSIBLE. Registra un pago sobre una factura.
+    descripcion: >
+      ACCION SENSIBLE. Registra un pago sobre una factura EXISTENTE
+      (necesitas su id_factura). Si el colaborador menciona la forma de
+      pago por nombre, resolvela primero con consultar_formas_pago -- no
+      inventes el ID. 'accion' decide si ademas de registrar el pago se
+      reactiva el servicio del cliente.
     solo_lectura: false
     requiere_confirmacion: true
     roles_permitidos: [facturacion]
@@ -1345,6 +1760,88 @@ herramientas:
     metodo: POST
     auth_ref: WISPHUB_API_KEY
     auth_esquema: Api-Key
+    # Hallazgo 19/08/2026: esta herramienta NO declaraba 'filtros_verificados'
+    # -- el modelo no tenia forma de decir a que factura se refiere.
+    # 'url_de()' nunca podia resolver el marcador '{id}' del endpoint y la
+    # llamada fallaba SIEMPRE con ErrorHerramientaHttp, silenciosamente
+    # (nadie lo habia notado porque no hay caso dorado ni prueba en vivo
+    # de esta herramienta hasta ahora).
+    #
+    # 'fecha_pago' la doc la marca opcional ("solo tiene efecto con un
+    # permiso especial"), pero la API SI exige que el campo este presente
+    # -- un pago real sin 'fecha_pago' dio 400 "Este campo es requerido".
+    # Se calcula en codigo (fechas_automaticas: ahora mismo) en vez de
+    # pedirsela al modelo: es el mismo dato de siempre ("ahora"), no una
+    # decision real. Formato confirmado en vivo: 'YYYY-MM-DD HH:mm', DISTINTO
+    # del que usan los tickets (DD/MM/AAAA) -- por eso existe
+    # 'formato_fechas_automaticas' (antes una constante fija del motor).
+    # 'total_cobrado' si se deja libre: la API la ignora salvo permiso
+    # especial, y forzar un valor en codigo pisaria ese permiso si algun
+    # dia esta clave lo tiene.
+    requeridos: [id_factura, accion]
+    fechas_automaticas:
+      fecha_pago: 0
+    formato_fechas_automaticas: "%Y-%m-%d %H:%M"
+    filtros_verificados:
+      id_factura:
+        param: id
+        tipo: id
+      referencia:
+        param: referencia
+        tipo: texto
+      total_cobrado:
+        param: total_cobrado
+        tipo: texto
+      accion:
+        param: accion
+        tipo: enum
+        valores: {solo_registrar_pago: 0, registrar_pago_y_activar_servicio: 1}
+      forma_pago:
+        param: forma_pago
+        tipo: id
+
+  - nombre: agregar_promesa_pago
+    tipo: http
+    descripcion: >
+      Registra que un cliente prometio pagar una factura para cierta
+      fecha limite. Necesitas el id_factura (de consultar_facturas o
+      consultar_factura_detalle). Queda PENDIENTE de aprobacion humana
+      -- decile al colaborador que todavia no se registro, alguien tiene
+      que aprobarla.
+    solo_lectura: false
+    requiere_confirmacion: true
+    aprobacion_humana: true
+    roles_permitidos: [facturacion]
+    base_url: https://api.wisphub.io
+    endpoint: /api/promesa-pago/
+    metodo: POST
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    plantilla_resumen: "Promesa de pago de la factura {id_factura} para el {fecha_limite}"
+    campos_texto_libre: [comentarios]
+    # Hallazgo 19/08/2026: la doc marca 'id_factura' como requerido, pero
+    # el serializer NO lo valida -- un valor imposible (999999999) no
+    # genero error junto a los demas campos vacios. Se fuerza igual via
+    # 'requeridos': el motor no confia en que la API vaya a rechazar lo
+    # que falte. La doc tambien trae el formato de 'fecha_limite' mal
+    # (ejemplo '2022/08/26' con barras); la API real exige guiones
+    # (YYYY-MM-DD), confirmado con un 400 real antes de acertar el
+    # formato.
+    requeridos: [id_factura, fecha_limite, accion]
+    filtros_verificados:
+      id_factura:
+        param: id_factura
+        tipo: id
+      fecha_limite:
+        param: fecha_limite
+        tipo: texto
+      comentarios:
+        param: comentarios
+        tipo: texto
+      accion:
+        param: accion
+        tipo: enum
+        valores: {registrar_promesa: 0, registrar_promesa_y_activar_servicio: 1}
 
   # --- BottleCRM (verificado en vivo, ver skill bottlecrm-api) ---------------
 
@@ -1404,7 +1901,10 @@ herramientas:
       afirmes que si se genero.
     solo_lectura: true
     exportable: true
-    roles_permitidos: [soporte, facturacion, administracion]
+    # 'ventas' agregado 19/08/2026: usa el filtro 'localidad' para chequear
+    # cobertura (total > 0 en una localidad = ya hay clientes ahi). Mismo
+    # tool, un uso mas: no hacia falta duplicar la logica de conteo.
+    roles_permitidos: [soporte, facturacion, administracion, ventas]
     base_url: https://api.wisphub.io
     endpoint: /api/clientes/
     auth_ref: WISPHUB_API_KEY

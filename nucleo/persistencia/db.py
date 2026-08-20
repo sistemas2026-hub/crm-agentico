@@ -1209,6 +1209,82 @@ def resolver_herramienta_propuesta(tenant: str, propuesta_id: str, estado: str,
         return cur.rowcount > 0
 
 
+def guardar_accion_propuesta(tenant: str, herramienta: str, argumentos: dict,
+                             resumen: str, rol_solicitante: str,
+                             propuesto_por: str) -> str:
+    """
+    Una escritura real (crear/editar algo en un sistema externo) que quedo
+    pendiente porque su Herramienta declara requiere_confirmacion -- ver
+    nucleo/modelo/motor.py, el punto donde se intercepta antes de llegar a
+    _ejecutar_tool(). 'argumentos' guarda los valores REALES (no
+    enmascarados, a diferencia de tool_calls): sin ellos no se podria
+    ejecutar la accion al aprobar. Devuelve el id para que el turno se lo
+    diga a quien pregunto.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """insert into asistente.acciones_propuestas
+                 (organization_id, herramienta, argumentos, resumen,
+                  rol_solicitante, propuesto_por)
+               values (%s, %s, %s, %s, %s, %s)
+               returning id""",
+            (org, herramienta, json.dumps(argumentos, ensure_ascii=False),
+             resumen, rol_solicitante, propuesto_por))
+        return str(cur.fetchone()["id"])
+
+
+def acciones_propuestas_de(tenant: str, estado: str | None = None) -> list[dict]:
+    """'estado=None' trae todas -- mismo patron que herramientas_propuestas_de()."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select id, herramienta, argumentos, resumen, rol_solicitante,
+                      propuesto_por, estado, motivo_rechazo, revisado_por,
+                      resultado_ejecucion, codigo_error, creado_en, revisado_en
+               from asistente.acciones_propuestas
+               where organization_id = %s
+                 and (%s::text is null or estado = %s)
+               order by creado_en desc""",
+            (org, estado, estado))
+        return [dict(f) for f in cur.fetchall()]
+
+
+def accion_propuesta_de(tenant: str, accion_id: str) -> dict | None:
+    """Una propuesta puntual -- para ejecutarla al aprobar, que necesita
+    'herramienta'+'argumentos' completos."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select id, herramienta, argumentos, resumen, rol_solicitante,
+                      propuesto_por, estado, motivo_rechazo, revisado_por,
+                      resultado_ejecucion, codigo_error, creado_en, revisado_en
+               from asistente.acciones_propuestas
+               where organization_id = %s and id = %s""",
+            (org, accion_id))
+        fila = cur.fetchone()
+        return dict(fila) if fila else None
+
+
+def resolver_accion_propuesta(tenant: str, accion_id: str, estado: str,
+                              revisado_por: str, motivo_rechazo: str | None = None,
+                              resultado_ejecucion: dict | None = None,
+                              codigo_error: str | None = None) -> bool:
+    """Aprobar o rechazar una accion. Si se aprueba y se ejecuta, el
+    llamador pasa 'resultado_ejecucion' (lo que devolvio la API real) en la
+    MISMA actualizacion -- para que 'aprobada' y 'ya se sabe que paso'
+    queden juntos, nunca una fila 'aprobada' que en realidad todavia no se
+    intento ejecutar. Devuelve False si el id no existe o no es de este
+    tenant."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """update asistente.acciones_propuestas
+               set estado = %s, revisado_por = %s, revisado_en = now(),
+                   motivo_rechazo = %s, resultado_ejecucion = %s, codigo_error = %s
+               where organization_id = %s and id = %s""",
+            (estado, revisado_por, motivo_rechazo,
+             json.dumps(resultado_ejecucion, ensure_ascii=False) if resultado_ejecucion is not None else None,
+             codigo_error, org, accion_id))
+        return cur.rowcount > 0
+
+
 def guardar_revision_supervisor(tenant: str, conversation_id: str,
                                 es_buen_ejemplo: bool, caso: str | None,
                                 justificacion: str,

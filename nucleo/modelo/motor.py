@@ -269,7 +269,8 @@ def _esquema_openai(herramienta):
             "function": {
                 "name": herramienta.nombre,
                 "description": herramienta.descripcion,
-                "parameters": {"type": "object", "properties": propiedades, "required": []},
+                "parameters": {"type": "object", "properties": propiedades,
+                               "required": herramienta.requeridos},
             },
         }
     # Ver "Alcance" arriba: el resto, sin argumentos libres por ahora.
@@ -353,7 +354,45 @@ def _ejecutar_verificacion(herramienta, sesion, argumentos_modelo: dict,
     if not filas:
         if sesion is not None:
             sesion.verificado = False
-        return {"verificado": False, "motivo": "no encontrado"}
+            sesion.intentos_verificacion_fallidos += 1
+        # Sin 'instruccion_interna' aca, el modelo improvisaba: a veces
+        # insistia con el dato, a veces asumia un prospecto nuevo, a veces
+        # inventaba una excusa de "problema del sistema" -- probado en vivo
+        # el 19/08/2026, tres corridas, tres comportamientos distintos.
+        # 'no encontrado' es genuinamente ambiguo -- puede ser un error de
+        # tipeo (cliente real) o alguien que todavia no es cliente -- asi
+        # que se le da UN reintento antes de asumir lo segundo.
+        intentos = sesion.intentos_verificacion_fallidos if sesion else 1
+        # La via de escape ("si en cualquier momento te dice que no es
+        # cliente, deriva YA") aplica siempre, no solo despues de dos
+        # intentos -- probado en vivo el 19/08/2026: alguien puede
+        # autodeclararse "no soy cliente todavia" respondiendo al PRIMER
+        # pedido de reintento, sin llegar nunca al segundo. Sin esto en el
+        # intento 1, el modelo no tenia ninguna instruccion para ese caso y
+        # volvia al reflejo viejo de "te paso con un colaborador humano" sin
+        # llamar a ninguna herramienta.
+        via_de_escape = (
+            "Si en CUALQUIER momento la persona dice explicitamente que "
+            "todavia no es cliente (aunque sea respondiendo a que le pediste "
+            "reescribir el dato), no insistas mas con el dato -- LLAMA a "
+            "derivar_a_area en ESE MISMO mensaje, hacia el area de la tabla "
+            "de derivacion marcada como que NO requiere verificar identidad "
+            "(si hay alguna). Nunca digas 'te paso con...' sin haber llamado "
+            "la herramienta: eso deja a la persona esperando una derivacion "
+            "que nunca ocurre.")
+        if intentos <= 1:
+            instruccion = (
+                "No se encontro ningun cliente con ese dato. Puede ser un "
+                "error al escribirlo -- pedile que lo confirme o lo vuelva "
+                "a escribir. Todavia NO asumas que no es cliente vos mismo, "
+                "esperá a que te lo diga. " + via_de_escape)
+        else:
+            instruccion = (
+                "Van dos intentos sin encontrar coincidencia. Pregunta "
+                "directo si ya es cliente de la empresa o si en realidad "
+                "quiere CONTRATAR un servicio nuevo. " + via_de_escape)
+        return {"verificado": False, "motivo": "no encontrado",
+               "instruccion_interna": instruccion}
 
     if len(filas) > 1:
         if sesion is not None:
@@ -591,6 +630,80 @@ def _ejecutar_propuesta(argumentos_modelo: dict, tenant: str, propuesto_por: str
                "configuracion -- no esta activa todavia, no lo prometas."}
 
 
+def _resumen_de_accion(herramienta, argumentos: dict) -> str:
+    """Texto legible para quien va a aprobar/rechazar una accion propuesta
+    -- ver Herramienta.plantilla_resumen. Fallback generico si no hay
+    plantilla o si le falta algun dato: nunca revienta el turno por esto,
+    en el peor caso el resumen es menos lindo, no inexistente."""
+    if herramienta.plantilla_resumen:
+        try:
+            return herramienta.plantilla_resumen.format(**argumentos)
+        except (KeyError, IndexError):
+            pass
+    pares = ", ".join(f"{k}={v}" for k, v in argumentos.items())
+    return f"{herramienta.nombre}({pares})"
+
+
+def _ejecutar_propuesta_de_accion(herramienta, sesion, argumentos_modelo: dict,
+                                  tenant: str, rol: str, propuesto_por: str) -> dict:
+    """
+    Para una Herramienta con aprobacion_humana=True (nucleo/config/
+    schema.py): resuelve los argumentos reales -- igual que _ejecutar_tool,
+    mismo _resolver_argumentos() -- pero NUNCA llama a la API. Los deja
+    'pendiente' en asistente.acciones_propuestas. La unica funcion que de
+    verdad escribe es ejecutar_accion_aprobada(), llamada desde
+    nucleo/canales/api.py solo despues de que una persona aprueba.
+
+    Retomado el 18/08/2026 con un caso concreto (tickets de WispHub) --
+    'requiere_confirmacion' sigue significando lo mismo que siempre
+    (declarado, no aplicado): este es un mecanismo NUEVO y separado, no una
+    reactivacion de ese campo. Ver el comentario de aprobacion_humana en
+    schema.py.
+    """
+    from nucleo.persistencia import db as persistencia
+
+    argumentos = _resolver_argumentos(herramienta, sesion, argumentos_modelo)
+    resumen = _resumen_de_accion(herramienta, argumentos)
+    accion_id = persistencia.guardar_accion_propuesta(
+        tenant, herramienta.nombre, argumentos, resumen, rol, propuesto_por)
+    return {"accion_id": accion_id, "estado": "pendiente", "resumen": resumen,
+           "instruccion_interna": f"Decile a quien te pidio esto que la accion "
+               f"quedo pendiente de aprobacion ({resumen}) -- todavia NO se "
+               f"ejecuto, no confirmes que ya se hizo. Alguien tiene que "
+               f"aprobarla desde la pantalla correspondiente."}
+
+
+def ejecutar_accion_aprobada(config, accion: dict) -> tuple[dict, str | None]:
+    """
+    La UNICA funcion que ejecuta de verdad una escritura que paso por
+    aprobacion_humana -- llamada desde nucleo/canales/api.py despues de que
+    alguien aprueba. 'accion' es la fila de asistente.acciones_propuestas
+    (ya con 'herramienta' y 'argumentos' resueltos de antes, guardados tal
+    cual se iban a mandar).
+
+    Devuelve (resultado, codigo_error) -- mismo patron que el resto del
+    motor: codigo_error es None si salio bien. No reintenta ni interpreta
+    el error, solo lo deja explicito para que quien aprobo sepa que paso.
+    """
+    herramienta = next((h for h in config.herramientas
+                        if h.nombre == accion["herramienta"]), None)
+    if herramienta is None:
+        return {"error": f"La herramienta '{accion['herramienta']}' ya no "
+                         f"existe en el catalogo."}, "HERRAMIENTA_DESCONOCIDA"
+    try:
+        if herramienta.tipo == "http":
+            resultado = (ejecutor_http.ejecutar_asincrono(herramienta, accion["argumentos"],
+                                                          tenant=config.identidad.slug)
+                        if herramienta.asincrona else
+                        ejecutor_http.ejecutar(herramienta, accion["argumentos"],
+                                               config.identidad.slug, config.variables_tenant))
+            return resultado, None
+        return {"error": f"Tipo '{herramienta.tipo}' no soportado para "
+                         f"ejecucion aprobada."}, "TIPO_NO_SOPORTADO"
+    except Exception as e:
+        return {"error": "La API no acepto la accion."}, f"{type(e).__name__}: {e}"[:200]
+
+
 def _previas_no_cumplidas(herramienta, historial: list[dict]) -> list[str]:
     """Nombres de las herramientas de 'exige_previas' (schema.py) que
     TODAVIA no dieron el resultado favorable declarado, en esta conversacion.
@@ -623,18 +736,18 @@ def _veces_ejecutada(herramienta, historial: list[dict]) -> int:
               if msg.get("role") == "tool" and msg.get("name") == herramienta.nombre)
 
 
-def _ejecutar_tool(herramienta, sesion, argumentos_modelo: dict,
-                   tenant: str | None = None,
-                   variables_tenant: dict | None = None) -> dict | list:
+def _resolver_argumentos(herramienta, sesion, argumentos_modelo: dict) -> dict:
+    """
+    Los argumentos REALES que se le mandan a una API, a partir de lo que el
+    modelo propuso -- filtros traducidos (fail-closed: solo lo declarado en
+    filtros_verificados), constantes del tenant, fechas calculadas, y la
+    sesion verificada pisando lo que el modelo haya dicho. Separado de
+    _ejecutar_tool() para que _ejecutar_propuesta_de_accion() pueda armar
+    los mismos argumentos SIN llamar a la API todavia -- son los que se
+    guardan en asistente.acciones_propuestas, listos para ejecutar cuando
+    alguien apruebe.
+    """
     argumentos_modelo = argumentos_modelo or {}
-
-    if herramienta.tipo == "agregado":
-        # No pasa por la traduccion de mas abajo: agregado necesita los
-        # valores CRUDOS del modelo (incluido 'agrupar_por'/'periodo', que no
-        # son filtros) para decidir agrupamiento y rango -- hace su propia
-        # traduccion de filtros adentro.
-        return ejecutor_agregado.ejecutar(herramienta, argumentos_modelo, tenant)
-
     argumentos = {}
 
     # Solo se traducen los filtros DECLARADOS (fail-closed): si el modelo
@@ -662,7 +775,7 @@ def _ejecutar_tool(herramienta, sesion, argumentos_modelo: dict,
     # distinto, esto pasa a ser un campo de config en vez de una constante.
     for arg_llamada, dias in herramienta.fechas_automaticas.items():
         fecha = datetime.now() + timedelta(days=dias)
-        argumentos[arg_llamada] = fecha.strftime("%d/%m/%Y %H:%M")
+        argumentos[arg_llamada] = fecha.strftime(herramienta.formato_fechas_automaticas)
 
     # El modelo puede proponer estas claves; se sobrescriben siempre con la
     # sesion verificada -- ver el comentario de 'inyectar_sesion' en schema.py.
@@ -685,6 +798,30 @@ def _ejecutar_tool(herramienta, sesion, argumentos_modelo: dict,
             argumentos.pop(arg_llamada, None)
         else:
             argumentos[arg_llamada] = valor
+
+    # Ver Herramienta.espejar_campos en schema.py -- despues de todo lo
+    # demas, para copiar el valor YA resuelto (traducido, no lo que dijo
+    # el modelo en crudo).
+    for origen, destino in herramienta.espejar_campos.items():
+        if origen in argumentos:
+            argumentos[destino] = argumentos[origen]
+
+    return argumentos
+
+
+def _ejecutar_tool(herramienta, sesion, argumentos_modelo: dict,
+                   tenant: str | None = None,
+                   variables_tenant: dict | None = None) -> dict | list:
+    argumentos_modelo = argumentos_modelo or {}
+
+    if herramienta.tipo == "agregado":
+        # No pasa por la traduccion de mas abajo: agregado necesita los
+        # valores CRUDOS del modelo (incluido 'agrupar_por'/'periodo', que no
+        # son filtros) para decidir agrupamiento y rango -- hace su propia
+        # traduccion de filtros adentro.
+        return ejecutor_agregado.ejecutar(herramienta, argumentos_modelo, tenant)
+
+    argumentos = _resolver_argumentos(herramienta, sesion, argumentos_modelo)
 
     if herramienta.tipo == "interno" and herramienta.detecta_incidente:
         return ejecutor_incidentes.detectar(herramienta, argumentos, tenant, variables_tenant)
@@ -996,7 +1133,18 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                                                     config.llm.modelo_por_defecto)
     referencia_redaccion = config.llm.modelo_redaccion or referencia_decision
 
-    nivel_exigido = nivel_requerido(rol_cfg, config.seguridad) if rol_cfg.orientado_a == "cliente_final" else 0
+    # 'exige_verificacion=False' (ver schema.py) es la salida: un cliente_final
+    # que TODAVIA NO ES CLIENTE (ej. 'ventas') no tiene nada que verificar
+    # contra WispHub, asi que el gate completo queda en 0 para ese rol. Sin
+    # este chequeo el codigo bloqueaba la herramienta igual aunque el prompt
+    # ya le hubiera dicho al modelo que no hacia falta verificar -- el
+    # modelo terminaba recibiendo IDENTIDAD_NO_VERIFICADA sin entender por
+    # que, y esa entrada se excluye del registro (ver mas abajo), asi que
+    # parecia que no habia intentado nada. Bug real, visto en vivo el
+    # 19/08/2026 con el rol 'ventas' recien creado.
+    _cliente_final_verificable = (rol_cfg.orientado_a == "cliente_final"
+                                  and rol_cfg.exige_verificacion)
+    nivel_exigido = nivel_requerido(rol_cfg, config.seguridad) if _cliente_final_verificable else 0
     # Sin un telefono real de por medio, el identificador del canal (ej. un
     # BSUID de WhatsApp) no es un factor de posesion -- cualquiera que
     # escriba desde esa cuenta pasaria la barra igual. Se exige nivel 1 ANTES
@@ -1004,7 +1152,7 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
     # unica forma de saber quien es, y sin esto la conversacion queda para
     # siempre como "sin identificar" en /conversaciones si nunca toca un
     # recurso protegido.
-    if (rol_cfg.orientado_a == "cliente_final" and sesion is not None
+    if (_cliente_final_verificable and sesion is not None
             and not es_factor_de_posesion(sesion.identificador_canal)):
         nivel_exigido = max(nivel_exigido, 1)
 
@@ -1115,7 +1263,22 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 # Idem: tiene que poder llamarse ANTES de que la sesion este
                 # verificada -- es lo que la termina de verificar.
                 salida = _ejecutar_confirmacion(sesion, llamada.argumentos)
-            elif rol_cfg.orientado_a == "cliente_final" and (sesion is None or sesion.nivel < nivel_exigido):
+            elif (rol_cfg.orientado_a == "cliente_final" and (sesion is None or sesion.nivel < nivel_exigido)
+                  # Excepcion: 'derivar_a_area' hacia un area que declara
+                  # exige_verificacion=False (ej. 'ventas') tiene que poder
+                  # llamarse SIN estar verificado -- es justamente la salida
+                  # para alguien que nunca va a poder verificarse porque
+                  # todavia no es cliente. Sin esto, el gate bloqueaba la
+                  # derivacion misma antes de que pudiera llegar al area que
+                  # no la necesita: bug real, visto en vivo el 19/08/2026 --
+                  # el modelo intentaba derivar, recibia IDENTIDAD_NO_VERIFICADA
+                  # (que se excluye del registro, ver mas abajo, asi que
+                  # parecia que no habia intentado nada) y terminaba
+                  # inventando una excusa en vez de la derivacion real.
+                  and not (herramienta.deriva_rol
+                          and not config.roles.get(
+                              (llamada.argumentos or {}).get("area"), rol_cfg
+                          ).exige_verificacion)):
                 salida = {"error": "IDENTIDAD_NO_VERIFICADA",
                          "instruccion_interna": "No muestres ningun dato. "
                              "Pidele al cliente el dato que falta para "
@@ -1179,6 +1342,17 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                              "insiste, dile que un colaborador humano va a "
                              "seguir el caso."}
                 codigo_error = "LIMITE_DE_CONVERSACION"
+            elif herramienta.aprobacion_humana:
+                # Mecanismo NUEVO (18/08/2026), separado de
+                # 'requiere_confirmacion' -- ver el comentario de
+                # aprobacion_humana en schema.py sobre por que no se reuso
+                # ese campo. Despues del gate de identidad y de
+                # precondiciones/limite: no tiene sentido proponer una
+                # accion que de entrada no se podria ejecutar.
+                quien = sesion.identificador_canal if sesion else "desconocido"
+                salida = _ejecutar_propuesta_de_accion(
+                    herramienta, sesion, llamada.argumentos,
+                    config.identidad.slug, nombre_rol, quien)
             else:
                 clave_cache = (herramienta.nombre,
                               json.dumps(llamada.argumentos or {}, sort_keys=True))
@@ -1296,9 +1470,16 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 rol_cfg = rol_cfg_nuevo
                 herramientas = herramientas_del_rol(config, rol_cfg)
                 catalogo_openai = [_esquema_openai(h) for h in herramientas]
+                # Mismo criterio que al entrar al turno -- ver el comentario
+                # de '_cliente_final_verificable' mas arriba. Aca importa
+                # todavia mas: es el momento en que derivar_a_area cambia el
+                # rol activo a mitad de turno (ej. a 'ventas'), y sin esto el
+                # gate seguia calculado para el rol VIEJO.
+                _cliente_final_verificable_nuevo = (rol_cfg.orientado_a == "cliente_final"
+                                                    and rol_cfg.exige_verificacion)
                 nivel_exigido = (nivel_requerido(rol_cfg, config.seguridad)
-                                if rol_cfg.orientado_a == "cliente_final" else 0)
-                if (rol_cfg.orientado_a == "cliente_final" and sesion is not None
+                                if _cliente_final_verificable_nuevo else 0)
+                if (_cliente_final_verificable_nuevo and sesion is not None
                         and not es_factor_de_posesion(sesion.identificador_canal)):
                     nivel_exigido = max(nivel_exigido, 1)
                 # El empujon de 'sugerir_cuando_disponible' se evalua contra

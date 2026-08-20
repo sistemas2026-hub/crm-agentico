@@ -206,6 +206,17 @@ class Rol(Base):
     # se verifique (nucleo/seguridad/verificacion.py). No es un 'if' por rol
     # en el motor: es este campo el que decide.
     orientado_a: Literal["colaborador", "cliente_final"] = "colaborador"
+    # Solo tiene efecto con orientado_a='cliente_final'. Por defecto True:
+    # preserva el comportamiento de siempre (todo cliente_final es un
+    # desconocido hasta que se verifica). False es para un cliente_final
+    # que TODAVIA NO ES CLIENTE -- ej. un prospecto pidiendo contratar un
+    # servicio nuevo -- donde no hay nada que verificar contra WispHub: no
+    # esta en esa base de datos y nunca lo va a estar hasta que se de de
+    # alta. Agregado 19/08/2026 porque el bloque "VERIFICACION PRIMERO,
+    # SIEMPRE" (nucleo/recuperacion/prompt.py) era incondicional para
+    # cualquier cliente_final -- un rol de ventas para prospectos quedaba
+    # atrapado pidiendo una cedula que no tiene sentido pedir.
+    exige_verificacion: bool = True
     # Solo organizativas -- para mostrar el agente ordenado en un diagrama
     # (que area, que cargo). NO cambian que puede hacer o ver el rol; eso lo
     # sigue decidiendo unicamente 'puede_consultar'/'campos_permitidos'.
@@ -543,6 +554,50 @@ class Herramienta(Base):
     solo_lectura: bool = True
     roles_permitidos: list[str] = Field(min_length=1)
     requiere_confirmacion: bool = False
+    # NO es lo mismo que 'requiere_confirmacion' -- ese campo lo exige el
+    # validador de TODA escritura (mas abajo), asi que hoy lo declaran
+    # herramientas deliberadamente autonomas (registrar_pago, activar_catv...)
+    # solo para pasar la validacion, sin que nada las frene en tiempo de
+    # ejecucion -- ver el comentario "no reactivar el gate sin discutirlo"
+    # en tenants/rapilink.config.yaml. Reusar ese campo para un gate real
+    # las hubiera roto a todas de un dia para el otro.
+    #
+    # 'aprobacion_humana' es el gate real, opt-in, agregado el 18/08/2026
+    # con un caso concreto (crear/responder/actualizar tickets de WispHub):
+    # el motor NO ejecuta la escritura, la guarda en
+    # asistente.acciones_propuestas y le dice al modelo que quedo
+    # pendiente. Solo se ejecuta de verdad cuando alguien la aprueba desde
+    # /configuracion (ver nucleo/canales/api.py). Empieza en False para
+    # todo lo existente -- no cambia el comportamiento de ninguna
+    # herramienta que no la declare explicitamente.
+    aprobacion_humana: bool = False
+    # Solo tiene efecto con aprobacion_humana=True. Texto con marcadores
+    # '{clave}' que se rellenan con los argumentos YA resueltos (los mismos
+    # que se le mandarian a la API) -- para que quien aprueba lea "Crear
+    # ticket 'No Tiene Internet' para el servicio 1234" en vez del JSON
+    # crudo. Si no se declara, o si falta algun marcador en los argumentos
+    # resueltos, se usa un resumen generico -- nunca falla el turno por
+    # esto.
+    plantilla_resumen: str | None = None
+    # {origen: destino} -- despues de resolver los argumentos, copia el
+    # valor de 'origen' a 'destino'. Existe por un patron real de WispHub:
+    # crear/editar un ticket exige mandar 'asunto' Y 'asuntos_default' (o
+    # 'asunto_default' al editar) con el MISMO valor -- pedirle al modelo
+    # que mande el mismo dato dos veces es pedirle que se equivoque dos
+    # veces. El codigo lo duplica, el modelo elige una sola vez.
+    espejar_campos: dict[str, str] = Field(default_factory=dict)
+    # Claves de 'filtros_verificados' que el modelo tiene que completar SI o
+    # SI -- van al 'required' del schema de function-calling que recibe el
+    # modelo (antes, hardcodeado a [] para toda herramienta, sin excepcion:
+    # ver motor.py). Nace de un hallazgo en vivo (19/08/2026): la
+    # documentacion oficial de 'POST /api/tickets/' no marcaba 'tecnico' como
+    # obligatorio, y WispHub lo rechazo con 400 ("Este campo es requerido")
+    # recien al intentar crear un ticket real -- el mismo patron de "la doc
+    # es una hipotesis" que ya costo tiempo con los filtros de lectura. Un
+    # campo con valor fijo conocido (ej. 'estado' de un ticket nuevo) va en
+    # 'argumentos_fijos' en vez de aca -- 'requeridos' es solo para lo que
+    # el modelo tiene que decidir.
+    requeridos: list[str] = Field(default_factory=list)
     # Argumento_de_la_llamada -> atributo de la sesion verificada. El modelo
     # NUNCA propone estos valores (aunque los pida en el mensaje): el motor
     # los sobrescribe siempre con lo que haya en la sesion. Existe para que
@@ -719,6 +774,14 @@ class Herramienta(Base):
     # El modelo nunca decide una fecha (son notoriamente malos calculando
     # fechas): el codigo hace la cuenta, el modelo ni la ve.
     fechas_automaticas: dict[str, int] = Field(default_factory=dict)
+    # 'fechas_automaticas' calcula la fecha, esto decide como se escribe.
+    # Default = el formato que ya exigia WispHub en tickets (DD\MM\AAAA
+    # HH:MM). Un mismo proveedor puede pedir OTRO formato en otro endpoint
+    # -- confirmado 19/08/2026: 'registrar-pago' exige 'fecha_pago' en
+    # 'YYYY-MM-DD HH:mm', no el formato de tickets. Un campo por
+    # HERRAMIENTA alcanza (no por fecha individual): cada endpoint tiene
+    # una sola convención para todas las fechas que calcula.
+    formato_fechas_automaticas: str = "%d/%m/%Y %H:%M"
     # Cachea la respuesta en asistente.herramientas_cache -- evita pegarle a
     # la API en cada consulta. Pensado para catalogos estables (un plan, una
     # zona), NUNCA para datos que cambian por cliente (saldo, estado): la
@@ -870,6 +933,19 @@ class Herramienta(Base):
             raise ValueError(
                 f"'{self.nombre}' escribe y no exige confirmacion. Toda accion "
                 f"de escritura requiere confirmacion humana explicita.")
+
+        if self.aprobacion_humana and self.solo_lectura:
+            raise ValueError(
+                f"'{self.nombre}': aprobacion_humana solo tiene sentido en una "
+                f"escritura -- una consulta de solo lectura no necesita cola de "
+                f"aprobacion.")
+
+        sobrantes_requeridos = set(self.requeridos) - set(self.filtros_verificados)
+        if sobrantes_requeridos:
+            raise ValueError(
+                f"'{self.nombre}': 'requeridos' nombra {sorted(sobrantes_requeridos)}, "
+                f"que no esta en 'filtros_verificados' -- el modelo no tiene "
+                f"forma de completar un campo que no existe como argumento.")
 
         if self.tipo == "agregado":
             if not self.entidad:
