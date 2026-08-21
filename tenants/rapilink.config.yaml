@@ -2278,6 +2278,21 @@ herramientas:
       muy reciente significa "todavia no hay nada agrupado", no "confirmado
       que es solo suyo". Comunicaselo asi al colaborador, no lo simplifiques
       a un si/no tajante cuando el reporte tiene pocos minutos.
+
+      VIENEN DOS NUMEROS Y NO MIDEN LO MISMO. 'clientes_afectados' es lo
+      que agrupa SmartOLT con su propio criterio. 'clientes_caidos_a_la_vez'
+      es evidencia cruda: cuantos equipos del mismo puerto se cayeron en el
+      mismo momento que el de este cliente, contado sobre los tiempos
+      reales. Para hablarle al cliente usa el SEGUNDO, y lo mismo con
+      'desde_por_tiempos' en vez de 'desde' -- en la caida del 21/08/2026
+      SmartOLT declaraba 8 afectados desde las 12:16 cuando los tiempos
+      mostraban 7 caidos juntos desde las 07:16, cinco horas antes.
+
+      Por que importa: un puerto acumula equipos apagados hace meses
+      (clientes que se fueron y nadie dio de baja). Contarlos como
+      afectados hincha el numero y lo vuelve inutil -- en ese mismo puerto
+      habia 17 caidos, y 10 llevaban entre mes y medio y ocho meses. Los
+      que importan son los que se cayeron JUNTOS.
     solo_lectura: true
     roles_permitidos: [soporte]
     base_url_ref: SMARTOLT_SUBDOMINIO
