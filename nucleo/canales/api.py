@@ -217,6 +217,9 @@ def _sesion_nueva(tenant: str, id_sesion: str, canal: str,
     estado = {"sesion": Sesion(identificador_canal=id_sesion),
               "historial": [], "escalada": False, "caso_id": None, "rol_activo": None,
               "repreguntado_agendamiento": False, "nota_pendiente": None,
+              # Un agendamiento que quedo a medias, para poder retomarlo en el
+              # turno siguiente aunque el modelo no vuelva a pedir escalar.
+              "agendamiento_pendiente": None,
               # Distinto de 'escalada': esa se apaga a proposito cuando no hay
               # humano a quien esperar (ver mas abajo), y sin esta bandera esa
               # misma pausa apagada volvia a habilitar la evaluacion en el
@@ -529,7 +532,27 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             persistencia.marcar_caso(tenant, conversation_id,
                                      evaluacion["caso_manual"])
 
+        # Un agendamiento pospuesto tiene que VOLVER, aunque el modelo no
+        # pida escalar de nuevo. Cuando el verificador pide un dato que
+        # faltaba, la escalada se pospone un turno (mas abajo) -- y hasta el
+        # 21/08/2026 el caso solo regresaba si el modelo, por su cuenta,
+        # volvia a decidir escalar. Medido contra la ONU de prueba: en el
+        # turno siguiente el modelo pregunto por el tomacorriente en vez de
+        # escalar, la verificacion no volvio a correr nunca, y la
+        # conversacion quedo colgada -- el agente prometiendole un tecnico al
+        # cliente en cada turno, sin un solo ticket detras. Es exactamente la
+        # falla con la que se abrio este trabajo.
+        if estado.get("agendamiento_pendiente") and not (evaluacion or {}).get("escalar"):
+            print("[agendamiento] se retoma el caso pospuesto: el modelo no "
+                  "volvio a escalar por su cuenta")
+            evaluacion = {**(evaluacion or {}), **estado["agendamiento_pendiente"],
+                         "escalar": True}
+
         if evaluacion and evaluacion.get("escalar"):
+            # Se consume aca: si hace falta posponer otra vez, la rama de
+            # abajo lo vuelve a guardar. Sin esto, un caso ya resuelto
+            # (ticket o humano) seguiria retomandose cada turno.
+            estado["agendamiento_pendiente"] = None
             necesita_humano = evaluacion.get("necesita_humano", True)
             nota_ticket = ""
             posponer = False
@@ -650,6 +673,17 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                     # escalar de verdad -- si el cliente no puede
                     # resolverlo, el proximo intento ya no repregunta.
                     estado["repreguntado_agendamiento"] = True
+                    # Lo que hace falta para retomarlo solo el turno que
+                    # viene. 'repreguntado_agendamiento' ya en True garantiza
+                    # que la proxima vuelta NO repregunte de nuevo: o sale
+                    # ticket, o sale humano.
+                    estado["agendamiento_pendiente"] = {
+                        "motivo": evaluacion.get("motivo", ""),
+                        "etiqueta": evaluacion.get("etiqueta", ""),
+                        "resumen": evaluacion.get("resumen", ""),
+                        "caso_manual": caso_manual,
+                        "necesita_humano": necesita_humano,
+                    }
                     estado["nota_pendiente"] = (
                         "(Nota del sistema, no del cliente) Antes de "
                         "escalar, falta confirmar un dato puntual del "

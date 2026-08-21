@@ -529,7 +529,15 @@ El caso quedó con **once ramas** y cada una sabe dónde termina. Cuatro se resu
 
 **Lo que el cliente ve de un incidente de red**: solo `es_incidente_de_red` y `desde_por_tiempos` — que su caída es general y desde cuándo, que es lo que le explica que no es su equipo. Cuántos vecinos están caídos, qué porcentaje del puerto, en qué zona y en qué caja es panorama interno de la red (mismo criterio que `olt_id`/`board`/`port`, RF-07).
 
-**Pendiente, y no se puede cerrar desde el código:** las tres ramas de visita **nunca produjeron un ticket real**. No se pueden forzar contra la cuenta de prueba — no queda `Offline`, ni en LOS, ni con señal fuera de rango sin tocar equipo físico — y por el mismo motivo no tienen casos dorados. El mecanismo está cubierto por `tests/test_agendamiento_veto.py`, que lo ejercita sobre el historial ya filtrado por la lista blanca; lo que falta es verlo pasar de verdad la próxima vez que haya una caída, o con una ONU de laboratorio.
+**Verificado en vivo (21/08/2026)** con la ONU de prueba puesta fuera de servicio a propósito: la rama de visita produjo el **ticket 90662** en WispHub, asunto `No Tiene Internet`, con el diagnóstico real en la descripción (ONU Offline, ping 100% de pérdida, sin incidente de red, corriente confirmada, reinicio hecho). El serial llegó solo desde WispHub por la recuperación de sesión, sin sembrarlo.
+
+Tres defectos salieron de esa corrida, ninguno visible en lo que el asistente contesta:
+
+- **El caso quedaba colgado.** Al repreguntar por un dato del checklist se posponía la escalada, y el caso solo volvía si el modelo decidía escalar otra vez por su cuenta. Si en el turno siguiente preguntaba otra cosa, la verificación no corría nunca más: el agente le prometía un técnico al cliente en cada turno y no había un solo ticket detrás. Es la falla con la que se abrió este trabajo. Ahora el agendamiento pospuesto se retoma solo (`estado["agendamiento_pendiente"]`), y con `repreguntado_agendamiento` ya en `True` la segunda vuelta termina sí o sí: o ticket, o persona.
+- **Una causa sin mapear dejaba al agente ciego.** `_aplicar_mapeos` se callaba ante un valor desconocido, confiando en que el dato crudo seguía disponible — falso justo para el rol que diagnostica, cuya lista blanca solo deja pasar `_interpretado`. La herramienta devolvía `{"ONU details": {}}`.
+- **El asunto del ticket era de TV.** `argumentos_fijos` pisa cualquier valor que se le pase, así que una falla de fibra entraba como `Problemas De Tv`. Se separa en `agendar_visita_internet`, que es para lo que `agendamiento_automatico` es un mapa caso→herramienta.
+
+**Lo que sigue sin poder verificarse:** las ramas que dependen de un estado que la cuenta de prueba no puede producir a demanda — señal fuera de rango, y la caída compartida (`no_agendar_si`). Esas están cubiertas por `tests/test_agendamiento_veto.py` sobre el historial ya filtrado, y se confirman en campo cuando ocurran. Tampoco tienen caso dorado, y no solo por el equipo: el corredor de casos dorados llama a `motor.responder`, que **no** incluye el agendamiento — esa ruta vive en el canal.
 
 ---
 

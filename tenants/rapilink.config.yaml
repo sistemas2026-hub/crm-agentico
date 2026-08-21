@@ -144,7 +144,8 @@ roles:
     cargo: Agente de Soporte
     puede_consultar: [consultar_cliente, consultar_cliente_por_cedula, consultar_ticket,
           consultar_tickets_de_cliente, contar_tickets, contar_clientes, consultar_casos_bottlecrm,
-          agendar_visita_tecnica, consultar_estado_ont, consultar_senal_ont, reiniciar_ont,
+          agendar_visita_tecnica, agendar_visita_internet,
+          consultar_estado_ont, consultar_senal_ont, reiniciar_ont,
           diagnosticar_falla_ont, consultar_estado_catv, activar_catv, cambiar_tipo_onu,
           consultar_incidente_red, consultar_dispositivos_conectados,
           consultar_tecnicos, crear_ticket, responder_ticket,
@@ -171,6 +172,8 @@ roles:
       # registro del cliente entero. 'servicio.id_servicio' alcanza para
       # confirmar a quien se le agendo.
       agendar_visita_tecnica: [id_ticket, asunto, estado, prioridad, tecnico, departamento, 
+            fecha_creacion, servicio.id_servicio]
+      agendar_visita_internet: [id_ticket, asunto, estado, prioridad, tecnico, departamento,
             fecha_creacion, servicio.id_servicio]
       # SmartOLT: 'onu_status'/'last_status_change' no traen PII (ver skill
       # smartolt-api). Soporte ve el dBm crudo ademas del veredicto -- lo
@@ -1583,6 +1586,62 @@ herramientas:
         tipo: texto
         verificado_el: 2026-08-12
 
+  # Gemela de 'agendar_visita_tecnica' y existe por UNA diferencia: el
+  # asunto. 'argumentos_fijos' pisa cualquier valor que le pasen (ver
+  # motor.py), asi que el asunto no se puede decidir por caso desde afuera
+  # -- y 'escalamiento.agendamiento_automatico' es un mapa caso->herramienta
+  # justamente para esto: cada caso agenda con la suya.
+  #
+  # Sin esto, una falla de fibra entraba a WispHub con asunto
+  # 'Problemas De Tv'. Visto el 21/08/2026 en el primer ticket real que
+  # genero el caso 'no_internet': descripcion correcta ("ONU Offline, ping
+  # sin respuesta, corriente confirmada") bajo un asunto de television. El
+  # tecnico lo lee al reves, y cualquier conteo por asunto queda sucio.
+  #
+  # 'No Tiene Internet' NO es un texto inventado: sale del catalogo real de
+  # /api/tickets/asuntos-tickets/ (consultado el 21/08/2026). Un asunto
+  # fuera del catalogo es de las cosas que WispHub acepta sin quejarse y
+  # despues no se puede filtrar.
+  - nombre: agendar_visita_internet
+    tipo: http
+    multipart: true
+    descripcion: >
+      Agenda una visita tecnica real en WispHub por una falla de INTERNET
+      (crea un ticket). NO la llames tu: la ejecuta el codigo cuando el
+      caso 'no_internet' llega a una rama que requiere visita (ver
+      nucleo/seguimiento/agendamiento.py). Existe aparte de
+      'agendar_visita_tecnica' solo porque el asunto del ticket es otro.
+    solo_lectura: false
+    requiere_confirmacion: true
+    roles_permitidos: [soporte]
+    base_url: https://api.wisphub.io
+    endpoint: /api/tickets/
+    metodo: POST
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    argumentos_fijos:
+      tecnico: "1428053"                          # Mario Vasquez / sistemas@rapilink-sas
+      email_tecnico: mario.vasquez.moreno@gmail.com
+      asunto: No Tiene Internet
+      asuntos_default: No Tiene Internet
+      estado: "1"                                 # Nuevo
+      prioridad: "2"                               # Normal
+      departamento: Soporte Técnico
+      departamentos_default: Soporte Técnico
+      origen_reporte: oficina
+    fechas_automaticas:
+      fecha_inicio: 0
+      fecha_final: 3
+    filtros_verificados:
+      servicio:
+        param: servicio
+        tipo: id
+        verificado_el: 2026-08-12
+      descripcion:
+        param: descripcion
+        tipo: texto
+        verificado_el: 2026-08-12
+
   - nombre: consultar_ticket
     tipo: http
     solo_lectura: true
@@ -2881,7 +2940,7 @@ escalamiento:
     # fibra, WAN perdida) y en cuales corresponde un humano (falla en todos
     # los aparatos tras reiniciar, solo WiFi, o todo normal y el cliente
     # insiste). El verificador contrasta contra el manual antes de agendar.
-    no_internet: agendar_visita_tecnica
+    no_internet: agendar_visita_internet
 
   # Ramas donde la evidencia YA es dura y viene de la red, no del relato del
   # cliente: ahi se agenda sin pasar por el checklist del manual. Ver
