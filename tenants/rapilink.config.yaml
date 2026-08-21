@@ -144,7 +144,7 @@ roles:
     cargo: Agente de Soporte
     puede_consultar: [consultar_cliente, consultar_cliente_por_cedula, consultar_ticket,
           consultar_tickets_de_cliente, contar_tickets, contar_clientes, consultar_casos_bottlecrm,
-          agendar_visita_tecnica, agendar_visita_internet,
+          agendar_visita_tecnica, agendar_visita_internet, consultar_velocidad_aprovisionada,
           consultar_estado_ont, consultar_senal_ont, reiniciar_ont,
           diagnosticar_falla_ont, consultar_estado_catv, activar_catv, cambiar_tipo_onu,
           consultar_incidente_red, consultar_dispositivos_conectados,
@@ -181,6 +181,10 @@ roles:
       # cliente_final.
       consultar_estado_ont: [onu_status, last_status_change]
       consultar_senal_ont: [onu_signal, onu_signal_1310, onu_signal_1490, onu_signal_1490_veredicto]
+      # El colaborador ve lo mismo que el agente: los nombres de perfil son
+      # la velocidad configurada y no son dato personal.
+      consultar_velocidad_aprovisionada: [download_speed_profile_name,
+                                          upload_speed_profile_name]
       reiniciar_ont: [status, response]
       # Soporte ve la causa cruda Y la interpretada (le sirve para escalar
       # con precision tecnica), mas el estado del equipo y la senal optica
@@ -786,7 +790,7 @@ roles:
           consultar_plan_tv, consultar_estado_ont, consultar_senal_ont,
           reiniciar_ont, diagnosticar_falla_ont, consultar_estado_catv, activar_catv,
           cambiar_tipo_onu, consultar_dispositivos_conectados,
-          consultar_incidente_red]
+          consultar_incidente_red, consultar_velocidad_aprovisionada]
     campos_permitidos:
       consultar_mi_servicio: [estado, plan_internet, ssid_router_wifi]
       # Con notacion de punto, NO el objeto entero: 'ping-1' trae adentro el
@@ -798,8 +802,25 @@ roles:
       # estuvo al alcance, y solo fallaba cuando al modelo se le ocurria
       # mencionarla. De lo unico que el diagnostico depende es de si hubo
       # perdida de paquetes.
+      # 'avg-rtt' y 'max-rtt' se suman el 21/08/2026: la respuesta de WispHub
+      # SIEMPRE los traia y la lista blanca los tiraba, asi que el agente solo
+      # podia hablar de perdida de paquetes. Sirven para una cosa puntual y no
+      # para otra:
+      #
+      #   SI  -- detectar una ultima milla degradada. Medido en un equipo
+      #          sano: 1 a 3 ms. Un salto a decenas de ms, o un 'max' muy
+      #          por encima del 'avg', es inestabilidad real del enlace.
+      #   NO  -- explicarle al cliente su ping en un juego o en una pagina.
+      #          Este ping va del router del ISP AL EQUIPO DEL CLIENTE: mide
+      #          la ultima milla, no el camino a internet. Presentarlo como
+      #          "tu ping" seria mentir con un numero de verdad.
+      #
+      # Con notacion de punto, nunca el objeto entero: 'ping-1' trae 'host',
+      # que es la IP del cliente (ver mas abajo, ya paso una vez).
       ping_cliente: ["ping-exitoso", "ping-1.packet-loss", "ping-2.packet-loss",
-                     "ping-3.packet-loss"]
+                     "ping-3.packet-loss", "ping-1.avg-rtt", "ping-2.avg-rtt",
+                     "ping-3.avg-rtt", "ping-1.max-rtt", "ping-2.max-rtt",
+                     "ping-3.max-rtt"]
       # Sin TV no hay falla de TV que diagnosticar -- este agente confirma
       # que el plan la incluya antes de preguntar nada (ver su descripcion).
       consultar_plan_tv: [descripcion]
@@ -808,6 +829,11 @@ roles:
       # tecnico no cambia que del otro lado sigue habiendo un CLIENTE.
       consultar_estado_ont: [onu_status]
       consultar_senal_ont: [onu_signal, onu_signal_1490_veredicto]
+      # Los nombres de perfil SON la velocidad y no dicen nada de la persona.
+      # 'status'/'response_code' quedan afuera: son el sobre del proveedor,
+      # no el dato.
+      consultar_velocidad_aprovisionada: [download_speed_profile_name,
+                                          upload_speed_profile_name]
       reiniciar_ont: [response]
       # 'MAC address' se suma para el caso del ping que no responde con la
       # ONU en linea: si el equipo no reporta ninguna MAC perdio la conexion
@@ -2386,6 +2412,52 @@ herramientas:
         - desde: -7.9999
           hasta:
           etiqueta: fuera del rango documentado (senal muy fuerte) -- revisar con un tecnico
+
+  # Descubierta sondeando la instancia real el 21/08/2026. NO esta en la
+  # documentacion de SmartOLT -- el usuario la busco ahi y no aparece. Sale
+  # del mismo metodo de siempre: probar el endpoint y ver si contesta.
+  # Verificada con el metodo del valor imposible (serial inventado -> 400
+  # "specify a valid ONU external ID"), asi que el endpoint valida el
+  # identificador y no devuelve lo primero que encuentra.
+  #
+  # Lo que aporta y hoy NO se ve por ningun otro lado: un cliente puede estar
+  # aprovisionado por debajo de su plan y nadie se entera. Eso es lentitud
+  # real, es culpa nuestra, y no la detecta ni el speedtest (que solo dice
+  # "va lento", no por que) ni la señal optica (que estaria perfecta).
+  - nombre: consultar_velocidad_aprovisionada
+    tipo: http
+    descripcion: >
+      A que velocidad esta REALMENTE configurado el equipo del cliente en la
+      red, que no es lo mismo que el plan que contrato. Devuelve el perfil de
+      bajada y el de subida; el nombre del perfil ES la velocidad
+      (PLAN_100MB = 100 megas de bajada).
+
+      USALA en cualquier reporte de internet lento, ANTES de pedirle al
+      cliente que corra una prueba de velocidad: si el equipo quedo
+      configurado por debajo de su plan, esa es la causa y ya la tienes --
+      hacerlo medir no agrega nada y lo hace trabajar al pepe.
+
+      LA SUBIDA ES NORMALMENTE LA MITAD DE LA BAJADA en esta red (medido
+      sobre 22 clientes reales el 21/08/2026: PLAN_100MB/PLAN_50MB,
+      PLAN_200MB_SV/PLAN_100MB). Un par asimetrico asi NO es una falla, no lo
+      reportes como problema.
+
+      Lo que SI es un hallazgo: que el perfil de bajada no corresponda al
+      plan contratado, o que no haya ningun perfil asignado. En los dos
+      casos, el cliente no puede alcanzar su velocidad por mas pruebas que
+      haga, y eso se resuelve del lado nuestro, no en su casa.
+    solo_lectura: true
+    roles_permitidos: [cliente_final, soporte_tecnico_cliente, soporte]
+    base_url_ref: SMARTOLT_SUBDOMINIO
+    endpoint: /api/onu/get_onu_speed_profiles/{sn_onu}
+    metodo: GET
+    auth_ref: SMARTOLT_API_KEY
+    auth_esquema: ""
+    auth_header: X-Token
+    inyectar_sesion:
+      sn_onu: sn_onu
+    reintentar_identificador_como:
+      sn_onu: gpon_hex
 
   - nombre: consultar_incidente_red
     tipo: interno

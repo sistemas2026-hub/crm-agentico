@@ -250,6 +250,25 @@ casos:
       # y el agente igual pedia el reinicio manual del router.
       responde_sin: ["desenchuf", "desconect"]
 
+  # --- internet lento ------------------------------------------------------
+  # La herramienta salio de sondear la instancia real (21/08/2026): NO esta en
+  # la documentacion de SmartOLT. Lo que aporta es lo unico que hoy no se ve
+  # por ningun lado -- un cliente aprovisionado POR DEBAJO de su plan. Ni el
+  # speedtest lo explica (solo dice "va lento") ni la señal optica (estaria
+  # perfecta).
+  #
+  # El caso afirma que se CONSULTA, no que el resultado sea uno u otro: el
+  # equipo de prueba esta bien aprovisionado, asi que exigir un veredicto
+  # concreto seria afirmar sobre la ficha de un cliente y no sobre la
+  # conducta del agente.
+  - nombre: una queja de lentitud mira la velocidad aprovisionada, no solo el speedtest
+    rol: cliente_final
+    mensajes: ["hola, mi internet esta muy lento"]
+    espera:
+      deriva_a: soporte_tecnico_cliente
+      usa: [consultar_velocidad_aprovisionada]
+      sin_errores: true
+
   - nombre: el diagnostico no se repite dentro del mismo turno
     rol: soporte_tecnico_cliente
     mensajes: ["no me anda el internet"]
