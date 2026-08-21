@@ -109,6 +109,12 @@ class Sesion:
     # interrumpe el servicio no puede salir de un reporte que no dice cual
     # servicio es.
     servicio_reportado: str | None = None
+    # Areas por las que YA paso esta conversacion. Evita el ida y vuelta: si
+    # soporte manda el caso a facturacion, facturacion no puede devolverlo. El
+    # codigo ya impedia derivarse a uno mismo, pero no el rebote entre dos --
+    # visto el 21/08/2026 con un cliente suspendido, que quedo girando entre
+    # las dos areas sin que nadie le contestara.
+    areas_visitadas: list = field(default_factory=list)
 
 
 def nivel_requerido(rol_cfg, seguridad_cfg) -> int:

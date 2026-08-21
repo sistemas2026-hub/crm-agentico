@@ -37,6 +37,8 @@ de la config que le pasan.
 
 from __future__ import annotations
 
+import json
+
 from nucleo.herramientas import http as herramientas_http
 from nucleo.modelo import cliente
 from nucleo.persistencia import db as persistencia
@@ -256,6 +258,46 @@ def _transcripcion_legible(historial: list[dict]) -> str:
     return "\n".join(lineas)
 
 
+def _que_se_probo(historial: list[dict]) -> str:
+    """
+    Lo que el asistente MIDIO y EJECUTO, en orden, sacado de la traza.
+
+    Existe porque un resumen en prosa no le alcanza a quien tiene que
+    resolver el caso: necesita saber que ya se probo, para no repetirselo al
+    cliente, y con que resultado. Eso es dato duro -- vive en el historial de
+    herramientas, no hay que pedirselo al modelo ni que la persona lo deduzca
+    leyendo veinte mensajes.
+
+    Generico a proposito: nombra la herramienta y si respondio o fallo, sin
+    interpretar los campos. Cuales importan lo sabe el tenant, no el nucleo, y
+    la transcripcion queda abajo para el detalle.
+    """
+    lineas = []
+    for msg in historial:
+        if msg.get("role") != "tool" or not msg.get("name"):
+            continue
+        try:
+            dato = json.loads(msg.get("content") or "null")
+        except (TypeError, ValueError):
+            dato = None
+        if isinstance(dato, dict) and dato.get("error"):
+            # Un fallo importa tanto como un exito: dice que NO se pudo ver, y
+            # quien retome no tiene que volver a intentarlo a ciegas.
+            linea = "  - " + msg["name"] + ": no se pudo -- " + str(dato["error"])
+        else:
+            valor = json.dumps(dato, ensure_ascii=False) if dato is not None else ""
+            linea = "  - " + msg["name"] + ": " + valor
+        lineas.append(linea[:160])
+    if not lineas:
+        return ""
+    vistas, unicas = set(), []
+    for l in lineas:
+        if l not in vistas:
+            vistas.add(l)
+            unicas.append(l)
+    return "QUE YA SE PROBO (no hace falta repetirlo):" + chr(10) + chr(10).join(unicas) + chr(10) + chr(10)
+
+
 def escalar(config, tenant: str, usuario_externo: str, conversation_id: str,
            historial: list[dict], motivo: str, etiqueta: str,
            resumen: str = "", necesita_humano: bool = True) -> None:
@@ -306,6 +348,9 @@ def escalar(config, tenant: str, usuario_externo: str, conversation_id: str,
                 f"Se conservan 30 dias.\n\n")
 
         encabezado = f"RESUMEN: {resumen.strip()}\n\n" if resumen.strip() else ""
+        # Antes de la transcripcion: es lo primero que necesita quien toma
+        # el caso, y le ahorra leerla entera para saber que ya se intento.
+        encabezado += _que_se_probo(historial)
         encabezado += nota_adjuntos
         if encabezado:
             encabezado += f"{'-' * 40}\n\n"

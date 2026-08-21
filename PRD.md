@@ -501,6 +501,24 @@ Verificado en vivo, de punta a punta: cobertura por localidad (`contar_clientes`
 
 ---
 
+### 8.9 TR-069 — integrado y funcionando, pero PENDIENTE de habilitación masiva (agosto 2026)
+
+SmartOLT expone `GET /api/onu/get_onu_router_hosts/{sn}`, que devuelve los equipos conectados al router del cliente: nombre (`HostName`), si están conectados ahora (`Active`), y si entraron por WiFi (`802.11`) o por cable (`Ethernet`). Responde en 2-3 segundos, no es el endpoint pesado. Es lo único que deja ver **del lado de adentro de la casa** — hasta ahí el diagnóstico llega a la ONT y después hay que preguntar.
+
+Resuelve exactamente los tres casos de `no_internet` que hoy solo se distinguen preguntando: falla **un aparato** (varios activos, WiFi y cable), falla **el WiFi** (solo los de cable activos), o **no hay nada conectado** (lista vacía con la ONT en línea).
+
+**La herramienta (`consultar_dispositivos_conectados`) está construida y verificada**, con la lista blanca acotada a `HostName`, `Active` e `InterfaceType` — la MAC y la IP de cada aparato del cliente NO llegan al modelo. Se verificó contra un cliente con 11 equipos conectados: el filtro las descarta.
+
+**Por qué queda pendiente:** de 5.329 ONUs, **solo 5 tienen TR-069 habilitado** (medido 19/08/2026), y de esas 5 dos responden con datos, una con lista vacía y **dos fallan** con `tr069_unable_to_process_command`. Habilitar TR-069 de forma masiva es una operación de red que va junto con la integración del CRM, no una decisión del asistente. Hasta entonces, las ramas que dependen de esta herramienta se van a ejercitar en el 0,1% de los clientes.
+
+**Decisión (21/08/2026): el árbol de diagnóstico NO se apoya en TR-069.** Se diseña con lo que SÍ está disponible para todos — WispHub (estado de cuenta, ping) y SmartOLT (estado de ONU, señal, causa de caída, incidentes de red) — y el dato de dispositivos entra como confirmación *opcional* cuando existe. El respaldo cuando falla no es "no hay nadie conectado" (eso sería mentirle a alguien) sino **preguntarle al cliente**, que es como se hacía antes de tener la herramienta.
+
+**Un fallo de TR-069 no es una lista vacía.** Está escrito en la descripción de la herramienta y es la trampa más fácil de este endpoint: tratar "no pude ver" como "no hay nada conectado" le diría a un cliente que no tiene ningún equipo cuando en realidad no se pudo mirar.
+
+Cuando la habilitación masiva esté hecha, lo que falta es solo **volver a apoyarse en ella** en el árbol y agregar sus casos dorados — la herramienta, el filtro de campos y la normalización de la respuesta (`extraer_de` con notación de punto, y diccionarios indexados por número convertidos a lista) ya están construidos y probados.
+
+---
+
 ## 9. Despliegue
 
 - **Desarrollo:** laptop actual (RTX 3050, 4 GB VRAM, 32 GB RAM). Suficiente para desarrollar y probar con modelos de 3–4B.

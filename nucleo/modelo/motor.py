@@ -533,8 +533,29 @@ def _ejecutar_derivacion(herramienta, sesion, argumentos_modelo: dict, nombre_ro
                "instruccion_interna": "Ya estas atendiendo esta area, no "
                    "hace falta derivar. Sigue con la conversacion."}
 
+    # Ida y vuelta entre dos areas. Impedir la auto-derivacion no alcanzaba:
+    # soporte manda el caso a facturacion, facturacion se lo devuelve a
+    # soporte, y el cliente no recibe una sola respuesta. Visto el 21/08/2026
+    # con un suspendido -- derivar, mirar el servicio, derivar de vuelta, y
+    # el turno agotandose hasta escalar por no tener salida.
+    #
+    # Fail-closed: un area que ya vio esta conversacion no la recibe otra vez.
+    # Si de verdad no puede resolverla, el camino es escalar, no rebotar.
+    if sesion is not None and area in getattr(sesion, "areas_visitadas", []):
+        return {"error": "AREA_YA_INTERVINO",
+               "instruccion_interna": f"'{area}' ya atendio esta conversacion "
+                   "y te la paso a ti: devolversela la dejaria rebotando sin "
+                   "que nadie le conteste al cliente. Resuelve lo que puedas "
+                   "con tus herramientas y, si de verdad excede lo tuyo, "
+                   "dilo y deja que el caso pase a una persona -- pero "
+                   "contestale algo primero."}
+
     if sesion is not None:
         sesion.rol_siguiente = area
+        # El area que deriva tambien queda marcada: es por donde ya paso.
+        for quien in (nombre_rol_actual, area):
+            if quien and quien not in sesion.areas_visitadas:
+                sesion.areas_visitadas.append(quien)
         # Solo se pisa si vino algo: una segunda derivacion sin 'servicio'
         # (herramienta sin 'servicios_reportables') no puede borrar lo que
         # la primera ya habia establecido.
@@ -730,10 +751,32 @@ def _previas_no_cumplidas(herramienta, historial: list[dict]) -> list[str]:
 
 
 def _veces_ejecutada(herramienta, historial: list[dict]) -> int:
-    """Cuantas veces ya corrio 'herramienta' en esta conversacion -- para
-    Herramienta.limite_por_conversacion."""
-    return sum(1 for msg in historial
-              if msg.get("role") == "tool" and msg.get("name") == herramienta.nombre)
+    """Cuantas veces CORRIO DE VERDAD 'herramienta' en esta conversacion --
+    para Herramienta.limite_por_conversacion.
+
+    Un intento que el motor freno (precondicion, turno propio, el limite
+    mismo) no cuenta: no le paso nada al cliente, asi que no puede gastarle
+    la unica oportunidad que tiene. Visto el 21/08/2026 con reiniciar_ont --
+    el modelo lo intento en el turno de la derivacion, la guarda lo bloqueo
+    con razon, y cuando el reinicio SI correspondia un turno despues salio
+    'LIMITE_DE_CONVERSACION'. El cliente quedaba sin el reinicio y la
+    conversacion sin salida, asi que terminaba escalando.
+
+    Mismo error que tenia el arnes de casos dorados con 'no_usa': contar
+    intentos donde habia que contar ejecuciones."""
+    n = 0
+    for msg in historial:
+        if msg.get("role") != "tool" or msg.get("name") != herramienta.nombre:
+            continue
+        try:
+            dato = json.loads(msg.get("content") or "null")
+        except (TypeError, ValueError):
+            dato = None
+        # Las salidas de error del motor son siempre {"error": ..., ...}
+        if isinstance(dato, dict) and dato.get("error"):
+            continue
+        n += 1
+    return n
 
 
 def _resolver_argumentos(herramienta, sesion, argumentos_modelo: dict) -> dict:
@@ -1291,26 +1334,25 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 # cliente_final) -- si no, seria posible pasar de area sin
                 # haber confirmado quien es el cliente.
                 salida = _ejecutar_derivacion(herramienta, sesion, llamada.argumentos, nombre_rol)
-            elif (herramienta.exige_turno_propio and derivado_en_este_turno
-                    and (sesion is None
-                         or sesion.servicio_reportado in (None, "no_lo_dijo"))):
+            elif herramienta.exige_turno_propio and derivado_en_este_turno:
                 # Fail-closed: la conversacion llego a esta area en este
                 # mismo turno y la puerta declaro que el cliente NO dijo que
                 # servicio se le cayo. Una accion que le interrumpe el
                 # servicio no puede salir de un reporte ambiguo -- podria
                 # estar cortandole justo el que si le andaba (ver
                 # 'exige_turno_propio' en schema.py).
-                salida = {"error": "SERVICIO_REPORTADO_AMBIGUO",
-                         "instruccion_interna": "El cliente no dijo QUE "
-                             f"servicio se le cayo, y '{herramienta.nombre}' "
-                             "se lo interrumpe: no la puedes usar hasta "
-                             "saberlo. Preguntaselo en una linea (internet o "
-                             "television) y sigue con lo que responda -- si "
-                             "resulta ser internet y todo lo demas da bien, "
-                             "ahi si la usas. Medir (estado, señal, ping) lo "
-                             "puedes hacer desde ya, sirve para cualquiera de "
-                             "los dos casos."}
-                codigo_error = "SERVICIO_REPORTADO_AMBIGUO"
+                salida = {"error": "FALTA_HABLAR_CON_EL_CLIENTE",
+                         "instruccion_interna": "Esta conversacion acaba de "
+                             "llegar a tu area y el cliente todavia no te "
+                             f"escribio a vos: '{herramienta.nombre}' le "
+                             "interrumpe el servicio, asi que no la puedes "
+                             "usar en este turno. Primero MIDE lo que puedas "
+                             "(estado del equipo, señal, ping) y preguntale "
+                             "lo que ningun sistema te dice -- en cuantos "
+                             "aparatos le falla, si tiene alguno por cable. "
+                             "Con lo que responda decides si esto sigue "
+                             "haciendo falta."}
+                codigo_error = "FALTA_HABLAR_CON_EL_CLIENTE"
             elif herramienta.sondea_api:
                 # Colaborador (ADMIN, gateado en la capa web -- ver
                 # nucleo/canales/api.py), nunca cliente_final: el gate de
