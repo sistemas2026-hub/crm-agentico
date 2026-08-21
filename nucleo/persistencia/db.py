@@ -160,8 +160,8 @@ def estado_de_conversacion_abierta(tenant: str, canal: str,
                from asistente.conversations
                where organization_id = %s and canal = %s and usuario_externo = %s
                  and estado = 'abierta'
-                 and (%s is null
-                      or actualizado_en > now() - (%s * interval '1 hour'))
+                 and (%s::int is null
+                      or actualizado_en > now() - (%s::int * interval '1 hour'))
                order by actualizado_en desc limit 1""",
             (org, canal, usuario_externo, horas_inactividad, horas_inactividad))
         fila = cur.fetchone()
@@ -180,6 +180,20 @@ def estado_de_conversacion_abierta(tenant: str, canal: str,
             # conversacion vuelve verificada pero sin con que consultar.
             "datos_sesion": fila["datos_sesion"] or {},
         }
+
+
+# El '::int' de las dos consultas de abajo no es decoracion. Sin el, con
+# 'horas_inactividad' en None -- que es su valor por defecto-- Postgres no
+# puede inferir el tipo de un parametro que solo aparece dentro de un
+# 'is null', y la consulta ENTERA falla con "could not determine data type of
+# parameter $4".
+#
+# Se vio el 21/08/2026, y lo que fallaba era lo peor que podia fallar: el
+# unico llamador que no pasa el valor es el turno de una conversacion
+# PAUSADA. O sea que lo que el cliente escribia MIENTRAS ESPERABA a una
+# persona era justo lo que no quedaba guardado, y quien tomaba el caso no lo
+# veia nunca. El error se imprimia y el turno seguia, asi que desde afuera no
+# se notaba nada.
 
 
 def registrar_mensaje(tenant: str, canal: str, usuario_externo: str,
@@ -201,8 +215,8 @@ def registrar_mensaje(tenant: str, canal: str, usuario_externo: str,
             """select id from asistente.conversations
                where organization_id = %s and canal = %s and usuario_externo = %s
                  and estado = 'abierta'
-                 and (%s is null
-                      or actualizado_en > now() - (%s * interval '1 hour'))
+                 and (%s::int is null
+                      or actualizado_en > now() - (%s::int * interval '1 hour'))
                order by actualizado_en desc limit 1""",
             (org, canal, usuario_externo, horas_inactividad, horas_inactividad))
         fila = cur.fetchone()
