@@ -171,10 +171,44 @@ def evidencia_ya_alcanza(config, caso: str, historial: list[dict]) -> str | None
     'Herramienta.exige_previas'; sin declararlas, todo sigue pasando por el
     verificador.
     """
-    condiciones = (config.escalamiento.evidencia_suficiente or {}).get(caso) or []
-    if not condiciones:
-        return None
-    for cond in condiciones:
+    return _primera_que_cumple(
+        (config.escalamiento.evidencia_suficiente or {}).get(caso), historial)
+
+
+def veto_de_agendamiento(config, caso: str, historial: list[dict]) -> str | None:
+    """
+    Si la traza dice que agendar una visita seria un ERROR, aunque todo lo
+    demas de al derecho. Devuelve el motivo legible o None.
+
+    El caso que lo motiva: una caida que afecta a varios clientes del mismo
+    puerto. Vista desde la ONU de UNO, se ve identica a su fibra cortada
+    -- misma causa 'sin señal optica', que es justamente la evidencia que
+    hace saltar el checklist y agendar sola. Con treinta personas
+    reportando la misma caida, eso son treinta tecnicos despachados a
+    treinta casas por una falla que esta en la red y no en ninguna de
+    ellas.
+
+    Va en CODIGO y no en el prompt por lo de siempre (PRD 7.4): el prompt
+    ya le pide al modelo que no lo trate como falla puntual, pero lo que
+    escribe el ticket es esta ruta, no el modelo. Si el veto vive donde se
+    ejecuta la escritura, no hay redaccion que se lo saltee.
+
+    Fail-closed al reves que 'evidencia_suficiente': ante la duda NO veta
+    (una condicion que no matchea deja el camino normal), porque el camino
+    normal ya es el conservador -- pasa por el verificador del manual.
+    """
+    return _primera_que_cumple(
+        (config.escalamiento.no_agendar_si or {}).get(caso), historial)
+
+
+def _primera_que_cumple(condiciones, historial: list[dict]) -> str | None:
+    """La primera condicion que la traza de ESTA conversacion satisface.
+
+    'exige_previas' de una herramienta hace lo mismo sobre el mismo
+    historial; esto lo separa para poder usarlo tambien desde el
+    agendamiento, sin que ninguno de los dos sepa del otro.
+    """
+    for cond in (condiciones or []):
         for msg in historial:
             if msg.get("role") != "tool" or msg.get("name") != cond.herramienta:
                 continue
@@ -182,6 +216,8 @@ def evidencia_ya_alcanza(config, caso: str, historial: list[dict]) -> str | None
                 dato = json.loads(msg.get("content") or "null")
             except (TypeError, ValueError):
                 continue
+            # Una herramienta que fallo no prueba nada, ni a favor ni en
+            # contra: se ignora y se sigue buscando.
             if isinstance(dato, dict) and dato.get("error"):
                 continue
             if cond.acepta(_buscar_campo(dato, cond.campo)):

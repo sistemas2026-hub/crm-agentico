@@ -298,21 +298,36 @@ def _aplicar_veredictos(herramienta, dato) -> None:
                 break
 
 
+# Lo que se escribe cuando el proveedor manda un valor que el mapeo no
+# conoce. NO lleva el valor crudo adentro a proposito: quien solo tiene
+# '_interpretado' en su lista blanca no lo tiene por casualidad, y meterle el
+# dato original aca lo colaria por la puerta de atras.
+SIN_MAPEAR = "el sistema reporto una causa que no sabemos interpretar"
+
+
 def _aplicar_mapeos(herramienta, dato) -> None:
     """Muta 'dato' in-place agregando '{campo}_interpretado' segun los
     mapeos de texto declarados en Herramienta.mapeos -- ver el campo en
-    schema.py. Silencioso si el valor no esta mapeado: una causa nueva que
-    el proveedor todavia no documento no inventa una etiqueta, se queda sin
-    interpretar (el dato crudo sigue disponible para quien tenga permiso)."""
+    schema.py.
+
+    Un valor que el mapeo NO conoce no inventa una etiqueta, pero tampoco se
+    calla: escribe SIN_MAPEAR. Antes se quedaba en silencio, apoyandose en
+    que "el dato crudo sigue disponible para quien tenga permiso" -- y eso es
+    falso justo para el rol que hace el diagnostico, cuya lista blanca solo
+    deja pasar '_interpretado'. Medido el 21/08/2026 contra la ONU de prueba:
+    la causa real era 're-register', que no estaba en el mapeo, y la
+    herramienta devolvio {"ONU details": {}}. El agente quedo ciego, no tenia
+    forma de saberlo, y siguio pidiendo un reinicio manual como si nada.
+    Una etiqueta que dice "no se" deja al modelo escalar por falta de datos;
+    un dict vacio lo deja adivinando."""
     if not herramienta.mapeos or not isinstance(dato, dict):
         return
     for campo, tabla in herramienta.mapeos.items():
         valor = _leer_anidado(dato, campo)
-        if not isinstance(valor, str):
+        if not isinstance(valor, str) or not valor.strip():
             continue
-        etiqueta = tabla.get(valor)
-        if etiqueta is not None:
-            _escribir_anidado(dato, campo, "_interpretado", etiqueta)
+        _escribir_anidado(dato, campo, "_interpretado",
+                          tabla.get(valor, SIN_MAPEAR))
 
 
 def ejecutar_asincrono(herramienta, argumentos: dict,

@@ -519,6 +519,20 @@ Cuando la habilitación masiva esté hecha, lo que falta es solo **volver a apoy
 
 ---
 
+### 8.10 `no_internet` — cerrado en código, con una rama que solo se confirma en una caída real (agosto 2026)
+
+El caso quedó con **once ramas** y cada una sabe dónde termina. Cuatro se resuelven sin humano y sin visita (suspensión por mora → facturación; falla en un solo aparato; solo WiFi; equipo sano en todos los aparatos → reinicio remoto). Tres agendan visita solas (fibra cortada confirmada; sin energía con corriente confirmada y sin recuperarse; ping sin respuesta con la ONU en línea, reinicio hecho y sin MAC). Cuatro terminan en una persona a propósito, porque mandar un técnico no las resolvería.
+
+**El atajo por evidencia** (`escalamiento.evidencia_suficiente`): cuando la red ya dijo la causa —pérdida de señal óptica, o el 1490 fuera de rango— no se le hace contestar al cliente el checklist del manual. El checklist está escrito para una persona que atiende por teléfono y en esas ramas pide datos que no existen: el 21/08/2026 exigía *"¿qué mensaje aparece en el dispositivo?"* a alguien sin ninguna conexión de la cual leer un mensaje. Solo se salta el verificador donde la evidencia viene de la **red**, nunca del relato del cliente — por eso "equipo sin energía" NO está en la lista: esa confirmación la da el cliente.
+
+**El veto** (`escalamiento.no_agendar_si`): una caída que afecta a varios vecinos del mismo puerto se ve, desde la ONU de uno solo, **idéntica a su propia fibra cortada** — misma causa `sin señal optica`, que es justamente la evidencia que agenda sola. Sin el veto, treinta reportes de la misma caída despachan treinta técnicos a treinta casas por una falla que no está en ninguna de ellas. Vive en código, en la ruta que escribe el ticket, y no en el prompt (RNF §7.4): el modelo compone el mensaje, pero no es quien decide la escritura.
+
+**Lo que el cliente ve de un incidente de red**: solo `es_incidente_de_red` y `desde_por_tiempos` — que su caída es general y desde cuándo, que es lo que le explica que no es su equipo. Cuántos vecinos están caídos, qué porcentaje del puerto, en qué zona y en qué caja es panorama interno de la red (mismo criterio que `olt_id`/`board`/`port`, RF-07).
+
+**Pendiente, y no se puede cerrar desde el código:** las tres ramas de visita **nunca produjeron un ticket real**. No se pueden forzar contra la cuenta de prueba — no queda `Offline`, ni en LOS, ni con señal fuera de rango sin tocar equipo físico — y por el mismo motivo no tienen casos dorados. El mecanismo está cubierto por `tests/test_agendamiento_veto.py`, que lo ejercita sobre el historial ya filtrado por la lista blanca; lo que falta es verlo pasar de verdad la próxima vez que haya una caída, o con una ONU de laboratorio.
+
+---
+
 ## 9. Despliegue
 
 - **Desarrollo:** laptop actual (RTX 3050, 4 GB VRAM, 32 GB RAM). Suficiente para desarrollar y probar con modelos de 3–4B.

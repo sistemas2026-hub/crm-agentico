@@ -1103,6 +1103,13 @@ class Escalamiento(Base):
     # CUALQUIERA se cumple, se agenda. Vacio = todo pasa por el verificador,
     # que es el comportamiento de siempre.
     evidencia_suficiente: dict[str, list[Precondicion]] = Field(default_factory=dict)
+    # El reverso: condiciones de la traza con las que agendar seria un ERROR,
+    # aunque el checklist este completo. Existe por la caida compartida --
+    # desde la ONU de un cliente se ve IGUAL que su propia fibra cortada, que
+    # es justo la evidencia que agenda sola. Sin esto, treinta reportes de la
+    # misma caida despachan treinta tecnicos. Ver
+    # nucleo/seguimiento/agendamiento.py:veto_de_agendamiento.
+    no_agendar_si: dict[str, list[Precondicion]] = Field(default_factory=dict)
     # Motivos de 'activar_si' que NO escalan la primera vez que aparecen: el
     # asistente se queda una vuelta mas e intenta resolver. Si el motivo
     # vuelve a aparecer, escala sin discutir.
@@ -1349,6 +1356,24 @@ class TenantConfig(Base):
                 if c.herramienta not in nombres_herr:
                     raise ValueError(
                         f"escalamiento.evidencia_suficiente['{caso}'] espera la "
+                        f"herramienta inexistente '{c.herramienta}'")
+
+        # Mismo control para el veto: si la herramienta que tendria que
+        # frenar el agendamiento no existe, el veto no frena nada y no lo
+        # dice nadie.
+        for caso, condiciones in self.escalamiento.no_agendar_si.items():
+            if caso not in casos_manual:
+                raise ValueError(
+                    f"escalamiento.no_agendar_si['{caso}'] no es un caso de "
+                    f"'manual.casos' ({sorted(casos_manual)})")
+            if caso not in self.escalamiento.agendamiento_automatico:
+                raise ValueError(
+                    f"escalamiento.no_agendar_si['{caso}'] no sirve de nada: "
+                    "ese caso no agenda solo, asi que no hay nada que vetar")
+            for c in condiciones:
+                if c.herramienta not in nombres_herr:
+                    raise ValueError(
+                        f"escalamiento.no_agendar_si['{caso}'] espera la "
                         f"herramienta inexistente '{c.herramienta}'")
 
         # Las sustituciones de modelo deben apuntar a canales o roles reales --

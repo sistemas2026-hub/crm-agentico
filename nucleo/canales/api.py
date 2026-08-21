@@ -587,6 +587,20 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             # nuestro sistema. Visto el 18/08/2026 -- la escalada forzada se
             # activaba y quedaba atrapada justo aca, asi que al cliente se le
             # prometia un colaborador que no llegaba nunca.
+            # Antes que nada, el veto: hay trazas con las que agendar es un
+            # ERROR aunque todo lo demas de al derecho. La caida compartida
+            # es la que lo motiva -- desde la ONU de un cliente se ve igual
+            # que su fibra cortada, que es la evidencia que agenda sola.
+            # Treinta reportes de la misma caida = treinta tecnicos
+            # despachados por una falla que no esta en ninguna de las casas.
+            veto = (agendamiento.veto_de_agendamiento(config, caso_manual,
+                                                      estado["historial"])
+                    if herramienta_auto and caso_manual else None)
+            if veto:
+                print(f"[agendamiento] VETADO por {veto}: no se agenda visita "
+                      "individual, el caso sigue el camino normal")
+                herramienta_auto = None
+
             if herramienta_auto and not posponer and not forzado:
                 # Primero lo barato: si la traza ya prueba por si sola que
                 # corresponde visita (evidencia de la RED, no del relato del

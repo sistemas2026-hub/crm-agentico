@@ -197,8 +197,16 @@ roles:
       # smartolt-api). Esta herramienta no esta en el catalogo de
       # cliente_final: ver el comentario de 'roles_permitidos' donde se
       # declara, mas abajo.
+      # 'clientes_caidos_a_la_vez' y 'desde_por_tiempos' NO estaban, y la
+      # descripcion de la herramienta manda usar esos dos y no los de
+      # SmartOLT. Los borraba la lista blanca antes de que el modelo los
+      # viera, asi que la regla era letra muerta: el agente solo podia
+      # hablar con el conteo inflado que se decidio no usar. No se veia en
+      # la respuesta -- "8 afectados desde las 12:16" suena igual de bien
+      # que el dato correcto.
       consultar_incidente_red: [es_incidente_de_red, tipo_alerta, clientes_afectados,
-            porcentaje_afectado, desde, zona, caja, motivo]
+            porcentaje_afectado, desde, zona, caja, motivo,
+            clientes_caidos_a_la_vez, desde_por_tiempos]
       consultar_tecnicos: [id, username, nombre, email]
       # Las tres de escritura con aprobacion_humana NUNCA devuelven el
       # registro real de WispHub en este paso -- 'aprobacion_humana' salta
@@ -572,7 +580,27 @@ roles:
         reinicio hecho, lo que queda no se resuelve mandando un tecnico a
         mirar el mismo equipo -- necesita que alguien lo revise a fondo.
 
-      - Si el equipo figura Offline: usa diagnosticar_falla_ont para saber
+      - Si el equipo figura Offline, o la señal esta fuera de rango: llama
+        consultar_incidente_red ANTES de concluir nada. Una caida que
+        afecta a varios vecinos del mismo puerto se ve, desde el equipo de
+        este cliente, EXACTAMENTE IGUAL que su propia fibra cortada -- y
+        tratarla como falla suya manda un tecnico a su casa por algo que
+        esta en la red.
+
+        Si 'es_incidente_de_red' es true: deciselo en una linea -- que la
+        caida es general en su sector, desde cuando, y que ya se esta
+        trabajando en eso. NO le agendes visita ni le pidas revisar nada de
+        su casa: no hay nada de su lado que arreglar. Nunca le digas
+        cuantos vecinos estan caidos ni en que caja: eso es informacion
+        interna de la red.
+
+        Si es false y el reporte tiene POCOS MINUTOS, no lo leas como
+        "confirmado que es solo suyo": SmartOLT tarda 2 a 5 minutos en
+        agrupar una caida recien empezada. Sigue con el diagnostico
+        individual, pero sin prometerle que es un problema exclusivo de su
+        casa.
+
+        Despues si, usa diagnosticar_falla_ont para saber
         POR QUE se cayo. Te devuelve la causa ya interpretada, y segun
         cual sea:
 
@@ -754,7 +782,8 @@ roles:
     puede_consultar: [consultar_mi_servicio, ping_cliente, derivar_a_area,
           consultar_plan_tv, consultar_estado_ont, consultar_senal_ont,
           reiniciar_ont, diagnosticar_falla_ont, consultar_estado_catv, activar_catv,
-          cambiar_tipo_onu, consultar_dispositivos_conectados]
+          cambiar_tipo_onu, consultar_dispositivos_conectados,
+          consultar_incidente_red]
     campos_permitidos:
       consultar_mi_servicio: [estado, plan_internet, ssid_router_wifi]
       # Con notacion de punto, NO el objeto entero: 'ping-1' trae adentro el
@@ -793,6 +822,14 @@ roles:
       # entro por WiFi o por cable alcanza para separar los tres casos.
       consultar_dispositivos_conectados: [HostName, Active, InterfaceType]
       cambiar_tipo_onu: [response, status]
+      # MUCHO mas angosta que la de 'soporte' a proposito. Al cliente le
+      # sirve saber que su caida es general y desde cuando: con eso entiende
+      # que no es su equipo y que ya se sabe. Cuantos vecinos estan caidos,
+      # que porcentaje del puerto, en que zona y en que caja es panorama
+      # interno de la red -- mismo criterio que olt_id/board/port (RF-07).
+      # 'desde_por_tiempos' y no 'desde': ver la descripcion de la
+      # herramienta, son dos numeros que no miden lo mismo.
+      consultar_incidente_red: [es_incidente_de_red, desde_por_tiempos]
     nunca_revelar: [password_servicio, password_cpe, password_router_wifi, usuario_router_wifi,
           cedula, direccion, coordenadas, ip, mac_cpe, sn_onu, sectorial, router.nombre]
 
@@ -2321,7 +2358,7 @@ herramientas:
       habia 17 caidos, y 10 llevaban entre mes y medio y ocho meses. Los
       que importan son los que se cayeron JUNTOS.
     solo_lectura: true
-    roles_permitidos: [soporte]
+    roles_permitidos: [soporte_tecnico_cliente, soporte]
     base_url_ref: SMARTOLT_SUBDOMINIO
     auth_ref: SMARTOLT_API_KEY
     auth_esquema: ""
@@ -2487,6 +2524,14 @@ herramientas:
         # habia que enchufar el equipo.
         "ONT LOSi/LOBi alarm": "sin señal optica: puede ser la fibra (cortada o falla en la caja NAP) O el equipo apagado/desenchufado -- desde la OLT los dos se ven identicos, hay que preguntarle al cliente por la corriente para distinguirlos"
         "ONT LOFi alarm": "sin señal optica: puede ser la fibra (cortada o falla en la caja NAP) O el equipo apagado/desenchufado -- desde la OLT los dos se ven identicos, hay que preguntarle al cliente por la corriente para distinguirlos"
+        # Visto en vivo el 21/08/2026 en la ONU de prueba. NO es una falla:
+        # el equipo se volvio a registrar contra la OLT, cosa que pasa tras
+        # una reconexion de fibra, un cambio de configuracion o un flap. Lo
+        # importante es que TAPA la causa anterior -- ese mismo equipo venia
+        # de cuatro 'ONT LOSi/LOBi alarm' en el dia, y 'Last down cause' solo
+        # refleja el evento mas reciente. Por eso la etiqueta no concluye
+        # nada y manda a mirar si se repite.
+        "re-register": "el equipo se volvio a registrar en la red hace poco (reconexion reciente). Esto NO dice por que se cayo antes: si el cliente sigue sin servicio, hay que tratarlo como una caida sin causa confirmada"
         "ONU is currently online": "el equipo esta en linea, no hay una caida que explicar"
 
   - nombre: cambiar_tipo_onu
@@ -2870,6 +2915,15 @@ escalamiento:
   # (cli/cargar_config.py::_fusionar) pierde los comentarios que viven entre
   # los elementos de una lista al exportar -- verificado, se llevaba estos y
   # de paso el encabezado de la seccion siguiente.
+  # Vetos: la traza que hace que agendar sea un error. Ver
+  # nucleo/seguimiento/agendamiento.py:veto_de_agendamiento -- corre ANTES
+  # que 'evidencia_suficiente', porque justamente lo que vetamos aca es una
+  # caida que desde la ONU de un cliente se ve identica a su fibra cortada.
+  no_agendar_si:
+    no_internet:
+      - herramienta: consultar_incidente_red
+        campo: es_incidente_de_red
+        valor: true
   evidencia_suficiente:
     no_internet:
       - herramienta: diagnosticar_falla_ont

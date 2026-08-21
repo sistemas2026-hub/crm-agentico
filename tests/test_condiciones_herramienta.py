@@ -35,6 +35,7 @@ sys.path.insert(0, str(RAIZ))
 
 from nucleo.config.schema import Herramienta, Precondicion, RangoVeredicto  # noqa: E402
 from nucleo.herramientas.http import (ErrorHerramientaHttp, _alternativas,  # noqa: E402
+                                      SIN_MAPEAR,
                                       _aplicar_mapeos, _aplicar_veredictos,
                                       _gpon_hex, base_url_de, url_de)
 from nucleo.modelo.motor import (_previas_no_cumplidas,                     # noqa: E402
@@ -125,10 +126,29 @@ _aplicar_mapeos(h_mapeo, d6)
 comprobar(d6["ONU details"].get("Last down cause_interpretado") == "sin energia electrica",
          "una causa mapeada calcula la etiqueta interpretada")
 
+# Hasta el 21/08/2026 esto afirmaba que una causa sin mapear NO escribia
+# nada, apoyandose en que el dato crudo seguia disponible "para quien tenga
+# permiso". Es falso justo para el rol que hace el diagnostico: su lista
+# blanca solo deja pasar '_interpretado', asi que el agente recibia
+# {"ONU details": {}} y quedaba ciego sin saberlo (medido contra la ONU de
+# prueba, cuya causa real era 're-register'). El contrato nuevo NO afloja lo
+# que protegia el viejo -- sigue sin inventarse un significado -- pero dice
+# "no se" en voz alta, que es lo que deja al modelo escalar por falta de
+# datos en vez de seguir adivinando.
 d7 = {"ONU details": {"Last down cause": "una causa nueva no documentada"}}
 _aplicar_mapeos(h_mapeo, d7)
-comprobar("Last down cause_interpretado" not in d7["ONU details"],
-         "una causa SIN entrada en el mapeo se deja sin interpretar (no se inventa)")
+etiqueta = d7["ONU details"].get("Last down cause_interpretado")
+comprobar(etiqueta == SIN_MAPEAR,
+         "una causa SIN entrada en el mapeo se marca como no interpretable")
+comprobar("una causa nueva no documentada" not in (etiqueta or ""),
+         "y la etiqueta NO arrastra el valor crudo: colarlo ahi saltearia la lista blanca")
+
+# Un campo vacio no es una causa desconocida: no hay nada que interpretar y
+# marcarlo como 'no sabemos' seria ruido con forma de hallazgo.
+d8 = {"ONU details": {"Last down cause": "   "}}
+_aplicar_mapeos(h_mapeo, d8)
+comprobar("Last down cause_interpretado" not in d8["ONU details"],
+         "un valor vacio no genera etiqueta de ningun tipo")
 
 print("\nRangoVeredicto: validacion")
 lanza("un rango sin 'desde' NI 'hasta' se rechaza (no significa nada)", ValidationError,

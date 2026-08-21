@@ -82,7 +82,12 @@ sesion_por_defecto:
   nivel: 1
   id_cliente: "6555"
   nombre: PRUEBA TEMPORAL
-  sn_onu: CDTC505AE4AB
+  # 21/08/2026: el serial de la cuenta de prueba CAMBIO -- SmartOLT ya no
+  # conoce a CDTC505AE4AB (400 "specify a valid ONU external ID") y ahora
+  # lista a PRUEBA TEMPORAL como CDTC505AE000. WispHub todavia guarda el
+  # viejo, asi que en el canal real este cliente queda sin diagnostico hasta
+  # que se corrija alli. Aca se usa el que existe de verdad.
+  sn_onu: CDTC505AE000
   identificador_canal: "3001234567"
 
 # Lo que NUNCA debe aparecer en una respuesta a un CLIENTE FINAL, en ningun
