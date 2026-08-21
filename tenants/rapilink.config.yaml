@@ -145,6 +145,7 @@ roles:
     puede_consultar: [consultar_cliente, consultar_cliente_por_cedula, consultar_ticket,
           consultar_tickets_de_cliente, contar_tickets, contar_clientes, consultar_casos_bottlecrm,
           agendar_visita_tecnica, agendar_visita_internet, consultar_velocidad_aprovisionada,
+          crear_ticket_lentitud, crear_ticket_lentitud_niveles,
           consultar_estado_ont, consultar_senal_ont, reiniciar_ont,
           diagnosticar_falla_ont, consultar_estado_catv, activar_catv, cambiar_tipo_onu,
           consultar_incidente_red, consultar_dispositivos_conectados,
@@ -175,6 +176,10 @@ roles:
             fecha_creacion, servicio.id_servicio]
       agendar_visita_internet: [id_ticket, asunto, estado, prioridad, tecnico, departamento,
             fecha_creacion, servicio.id_servicio]
+      crear_ticket_lentitud: [id_ticket, asunto, estado, prioridad, tecnico, departamento,
+            fecha_creacion, servicio.id_servicio]
+      crear_ticket_lentitud_niveles: [id_ticket, asunto, estado, prioridad, tecnico,
+            departamento, fecha_creacion, servicio.id_servicio]
       # SmartOLT: 'onu_status'/'last_status_change' no traen PII (ver skill
       # smartolt-api). Soporte ve el dBm crudo ademas del veredicto -- lo
       # necesita para escalar con datos exactos, a diferencia de
@@ -586,6 +591,79 @@ roles:
         colaborador humano. Con el equipo en linea, la señal en rango y el
         reinicio hecho, lo que queda no se resuelve mandando un tecnico a
         mirar el mismo equipo -- necesita que alguien lo revise a fondo.
+
+      INTERNET LENTO (cuando dice que anda lento, no que no anda). Es un
+      arbol DISTINTO del de arriba y no se mezclan: reiniciar el equipo no
+      arregla la lentitud y deja la casa sin conexion uno o dos minutos, asi
+      que aca NO se reinicia nunca. Paso el 21/08/2026 en pruebas: el
+      asistente reinicio la ONT de un cliente que solo se quejaba de que
+      andaba lento.
+
+      PRIMERO, DE QUE LENTITUD HABLA. No es lo mismo y se atiende distinto:
+      lento en todo y siempre, lento a ratos, lento solo en una pagina o
+      plataforma, ping alto en un juego, o "me dan menos megas de los que
+      pago". Si no lo dijo, preguntaselo en una linea. Velocidad y latencia
+      son cosas distintas: un speedtest no responde una queja de ping, y un
+      ping no responde una queja de lentitud.
+
+      SEGUNDO, MIDE TODO LO QUE PUEDAS ANTES DE PEDIRLE NADA. Llama
+      consultar_mi_servicio, consultar_velocidad_aprovisionada, ping_cliente,
+      consultar_estado_ont y consultar_senal_ont. Si el equipo figura caido o
+      la señal sale mal, suma consultar_incidente_red y
+      diagnosticar_falla_ont. Recien con eso en la mano decides si hace falta
+      molestarlo.
+
+      Con lo que devuelvan:
+
+      - SUSPENDIDO: no esta lento, esta cortado. Pasalo a facturacion y no
+        abras ningun caso tecnico.
+
+      - LA VELOCIDAD APROVISIONADA NO CORRESPONDE AL PLAN: ahi esta la causa
+        y no hace falta nada mas. No le pidas prueba de velocidad, no le
+        pidas que reinicie, no le preguntes por el WiFi: el equipo no puede
+        entregar lo que no tiene configurado. Deciselo sin tecnicismos ("tu
+        equipo quedo configurado con menos velocidad de la que contrataste, lo
+        estamos corrigiendo") y pasa el caso. OJO: la subida siendo la mitad
+        de la bajada es NORMAL en esta red, eso no es el caso.
+
+      - SEÑAL OPTICA FUERA DE RANGO: es una causa fisica y alcanza sola. No
+        le hagas hacer pruebas de velocidad para confirmar algo que ya
+        mediste. Pasa el caso.
+
+      - CAIDA QUE AFECTA A VARIOS (consultar_incidente_red da true): deciselo
+        en una linea -- que es general en su sector, desde cuando, y que ya
+        se esta trabajando. No le pidas pruebas ni le revises la casa.
+
+      - TODO SANO DE NUESTRO LADO: recien aca lo haces participar, y en este
+        orden. Primero PREGUNTA, porque de esto depende que el numero sirva
+        de algo: ¿la prueba la vas a hacer por cable o por WiFi? ¿hay otros
+        aparatos usando internet en este momento? Una prueba por WiFi mide el
+        WiFi, no el servicio, y con la casa entera consumiendo mide lo que
+        sobra. Despues si, pidele que abra speedtest.net y te diga que
+        numeros le da.
+
+        - Le anda bien por cable y mal por WiFi: el internet llega bien a la
+          casa. Sigue el procedimiento de WiFi del manual (banda de 5 GHz,
+          clave, alcance). Si con eso no se resuelve, pasa el caso a una
+          persona -- NO es una visita.
+
+        - Le falla en UN solo aparato y los demas andan: es ese aparato. Que
+          lo reinicie el, que olvide la red y se vuelva a conectar. No abras
+          caso tecnico.
+
+        - La prueba da bien y aun asi insiste: no inventes una causa. Decile
+          con todas las letras que con lo que puedes ver desde aca el
+          servicio esta llegando como corresponde, y pasa el caso para que
+          alguien haga las pruebas que tu no puedes hacer.
+
+      LO QUE NUNCA HACES EN LENTITUD: reiniciar la ONT, prometer una visita,
+      o afirmar una causa que no mediste (saturacion, "esta la red
+      congestionada", "es tu router"). Si no lo mediste, no lo digas.
+
+      Y CUANDO PASES EL CASO: el resumen tiene que servirle a quien lo tome.
+      Que reporto, que mediste y con que resultado, que quedo sin comprobar
+      y por que. Si NO le pediste prueba de velocidad porque ya tenias la
+      causa, dilo -- si no, la persona se la va a pedir de nuevo al cliente.
 
       - Si el equipo figura Offline, o la señal esta fuera de rango: llama
         consultar_incidente_red ANTES de concluir nada. Una caida que
@@ -1668,6 +1746,96 @@ herramientas:
         tipo: texto
         verificado_el: 2026-08-12
 
+  # Los dos tickets de lentitud. Se crean en CODIGO al escalar (ver
+  # 'ticket_al_escalar' abajo y nucleo/seguimiento/agendamiento.py), no via
+  # tool-calling: el especialista que atiende al cliente ni siquiera los
+  # tiene en su catalogo.
+  #
+  # Son dos y no uno por el ASUNTO, que es lo primero que lee quien toma el
+  # trabajo. Los dos salen del catalogo REAL de /api/tickets/asuntos-tickets/
+  # (consultado el 21/08/2026) -- un asunto inventado WispHub lo acepta sin
+  # quejarse y despues no se puede filtrar.
+  #
+  # Que sean casi identicos a las herramientas de visita es sabido: hoy
+  # 'argumentos_fijos' pisa cualquier valor que se le pase, asi que el asunto
+  # no se puede decidir por caso desde afuera. Con cuatro se tolera; si
+  # aparece una quinta, conviene un mecanismo en vez de otra copia.
+  - nombre: crear_ticket_lentitud
+    tipo: http
+    multipart: true
+    descripcion: >
+      Deja anotado en WispHub un caso de internet lento SIN causa identificada, para que una persona siga el diagnostico con las pruebas que el asistente no puede hacer.
+      NO la llames tu: la ejecuta el codigo cuando un caso de internet lento
+      se pasa a una persona.
+    solo_lectura: false
+    requiere_confirmacion: true
+    roles_permitidos: [soporte]
+    base_url: https://api.wisphub.io
+    endpoint: /api/tickets/
+    metodo: POST
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    argumentos_fijos:
+      tecnico: "1428053"                          # Mario Vasquez / sistemas@rapilink-sas
+      email_tecnico: mario.vasquez.moreno@gmail.com
+      asunto: Internet Lento
+      asuntos_default: Internet Lento
+      estado: "1"                                 # Nuevo
+      prioridad: "2"                               # Normal
+      departamento: Soporte Técnico
+      departamentos_default: Soporte Técnico
+      origen_reporte: oficina
+    fechas_automaticas:
+      fecha_inicio: 0
+      fecha_final: 3
+    filtros_verificados:
+      servicio:
+        param: servicio
+        tipo: id
+        verificado_el: 2026-08-12
+      descripcion:
+        param: descripcion
+        tipo: texto
+        verificado_el: 2026-08-12
+
+  - nombre: crear_ticket_lentitud_niveles
+    tipo: http
+    multipart: true
+    descripcion: >
+      Mismo ticket que crear_ticket_lentitud pero para cuando la señal optica ya salio fuera de rango: el asunto se lo dice al tecnico antes de que abra la descripcion.
+      NO la llames tu: la ejecuta el codigo cuando un caso de internet lento
+      se pasa a una persona.
+    solo_lectura: false
+    requiere_confirmacion: true
+    roles_permitidos: [soporte]
+    base_url: https://api.wisphub.io
+    endpoint: /api/tickets/
+    metodo: POST
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    argumentos_fijos:
+      tecnico: "1428053"                          # Mario Vasquez / sistemas@rapilink-sas
+      email_tecnico: mario.vasquez.moreno@gmail.com
+      asunto: Internet Lento/Niveles Altos
+      asuntos_default: Internet Lento/Niveles Altos
+      estado: "1"                                 # Nuevo
+      prioridad: "2"                               # Normal
+      departamento: Soporte Técnico
+      departamentos_default: Soporte Técnico
+      origen_reporte: oficina
+    fechas_automaticas:
+      fecha_inicio: 0
+      fecha_final: 3
+    filtros_verificados:
+      servicio:
+        param: servicio
+        tipo: id
+        verificado_el: 2026-08-12
+      descripcion:
+        param: descripcion
+        tipo: texto
+        verificado_el: 2026-08-12
+
   - nombre: consultar_ticket
     tipo: http
     solo_lectura: true
@@ -2401,6 +2569,15 @@ herramientas:
     # drop. El tercer tramo (mejor que -8, senal "demasiado fuerte") no esta
     # normado en G-GO-04 -- se etiqueta como fuera de rango en vez de
     # inventar un limite, y se deriva a revision tecnica en cualquier caso.
+    # Las dos etiquetas de problema arrancan con 'fuera de rango' A
+    # PROPOSITO, no por estilo: es lo que hace que una condicion de
+    # 'evidencia_suficiente' / 'ticket_al_escalar' pueda preguntar por las
+    # dos con un solo 'contiene', sin acoplarse al texto descriptivo que
+    # sigue. Antes decian 'problema en el drop...' y 'fuera DEL rango...', y
+    # la condicion buscaba 'fuera de rango': no matcheaba NINGUNA de las
+    # tres. La condicion existia, se veia razonable y estaba muerta desde el
+    # dia que se escribio -- comprobado el 21/08/2026 pasando las tres
+    # etiquetas reales por el matcher.
     veredictos:
       onu_signal_1490:
         - desde: -25.0
@@ -2408,10 +2585,10 @@ herramientas:
           etiqueta: aceptable
         - desde:
           hasta: -25.0001
-          etiqueta: problema en el drop (conector, cable o tensores) -- senal debil
+          etiqueta: "fuera de rango -- senal debil: problema en el drop (conector, cable o tensores)"
         - desde: -7.9999
           hasta:
-          etiqueta: fuera del rango documentado (senal muy fuerte) -- revisar con un tecnico
+          etiqueta: "fuera de rango -- senal muy fuerte: revisar con un tecnico"
 
   # Descubierta sondeando la instancia real el 21/08/2026. NO esta en la
   # documentacion de SmartOLT -- el usuario la busco ahi y no aparece. Sale
@@ -3055,6 +3232,26 @@ escalamiento:
       - herramienta: consultar_incidente_red
         campo: es_incidente_de_red
         valor: true
+  # Que ticket operativo sale cuando el caso se pasa a una persona. Gana la
+  # PRIMERA entrada cuyas condiciones cumpla la traza; la ultima, sin
+  # condiciones, es el caso por defecto (el esquema obliga ese orden).
+  #
+  # 'internet_lento' escala SIEMPRE, por decision del piloto: el agente hace
+  # todo el diagnostico que no necesita a nadie y despues pasa el caso con la
+  # ficha armada. Lo que cambia segun lo medido es el ASUNTO, porque es lo
+  # que le dice al tecnico de que se trata antes de abrir nada.
+  #
+  # 'no_internet' NO esta aca a proposito: ese caso ya agenda la visita sola
+  # cuando corresponde, y ese ticket ES el trabajo anotado. Duplicarlo seria
+  # mandar dos veces el mismo trabajo.
+  ticket_al_escalar:
+    internet_lento:
+      - herramienta: crear_ticket_lentitud_niveles
+        condiciones:
+          - herramienta: consultar_senal_ont
+            campo: onu_signal_1490_veredicto
+            contiene: "fuera de rango"
+      - herramienta: crear_ticket_lentitud
   evidencia_suficiente:
     no_internet:
       - herramienta: diagnosticar_falla_ont

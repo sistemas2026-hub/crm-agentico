@@ -1074,6 +1074,27 @@ class Canales(Base):
     web: dict[str, Any] = Field(default_factory=lambda: {"activo": True})
 
 
+class TicketEscalado(Base):
+    """
+    Que ticket operativo se crea cuando un caso se pasa a una persona.
+
+    Distinto del agendamiento automatico, y la diferencia es el proposito:
+    'agendamiento_automatico' decide SI corresponde despachar un tecnico, y
+    por eso pasa por un verificador contra el manual. Esto no decide nada --
+    el caso YA se escalo-- solo deja el trabajo anotado donde la operacion
+    lo ve, con un tecnico asignado, en vez de que viva solo en la bandeja
+    interna del asistente.
+
+    'condiciones' elige el ticket segun lo que la traza ya probo, porque el
+    ASUNTO es lo que le dice al tecnico de que se trata antes de abrir nada:
+    una lentitud sin causa identificada y una con la optica fuera de rango
+    son dos trabajos distintos y en el catalogo del ISP suelen ser dos
+    asuntos distintos. Sin condiciones, es el caso por defecto -- va ultimo.
+    """
+    herramienta: str
+    condiciones: list[Precondicion] = Field(default_factory=list)
+
+
 class Escalamiento(Base):
     activar_si: list[str] = Field(default_factory=list)
     destino_rol: str | None = None
@@ -1086,6 +1107,10 @@ class Escalamiento(Base):
     # caso quedo completo. Vacio por defecto: ningun tenant ni ningun caso
     # agenda solo sin declararlo a proposito aca.
     agendamiento_automatico: dict[str, str] = Field(default_factory=dict)
+    # Caso de 'manual.casos' -> que ticket operativo se crea al escalar. Se
+    # evalua en orden y gana el PRIMERO cuyas condiciones cumpla la traza;
+    # una entrada sin condiciones es el caso por defecto. Ver TicketEscalado.
+    ticket_al_escalar: dict[str, list[TicketEscalado]] = Field(default_factory=dict)
     # Caso de 'manual.casos' -> condiciones sobre la TRAZA que, si se
     # cumplen, bastan para agendar SIN pasar por el verificador del manual.
     #
@@ -1357,6 +1382,39 @@ class TenantConfig(Base):
                     raise ValueError(
                         f"escalamiento.evidencia_suficiente['{caso}'] espera la "
                         f"herramienta inexistente '{c.herramienta}'")
+
+        # El ticket que se crea al escalar: mismo criterio fail-closed. Un
+        # caso mal escrito aca no rompe nada en vivo -- la escalada ocurre
+        # igual, solo que sin ticket-- y por eso hay que atajarlo al cargar:
+        # desde afuera se ve identico a "todavia no le toca ticket a este
+        # caso", y nadie se entera de que la operacion dejo de recibir el
+        # trabajo anotado.
+        for caso, entradas in self.escalamiento.ticket_al_escalar.items():
+            if caso not in casos_manual:
+                raise ValueError(
+                    f"escalamiento.ticket_al_escalar['{caso}'] no es un caso "
+                    f"de 'manual.casos' ({sorted(casos_manual)})")
+            for entrada in entradas:
+                if entrada.herramienta not in nombres_herr:
+                    raise ValueError(
+                        f"escalamiento.ticket_al_escalar['{caso}'] apunta a la "
+                        f"herramienta inexistente '{entrada.herramienta}'")
+                for c in entrada.condiciones:
+                    if c.herramienta not in nombres_herr:
+                        raise ValueError(
+                            f"escalamiento.ticket_al_escalar['{caso}'] espera "
+                            f"la herramienta inexistente '{c.herramienta}'")
+            # Una entrada CON condiciones despues de una sin ellas no se
+            # alcanza nunca: la de por defecto matchea todo. Es un error de
+            # orden y se ve solo leyendo el YAML con atencion, que es
+            # justamente cuando no se ve.
+            for i, entrada in enumerate(entradas[:-1]):
+                if not entrada.condiciones:
+                    raise ValueError(
+                        f"escalamiento.ticket_al_escalar['{caso}']: la entrada "
+                        f"{i} no tiene condiciones, asi que gana siempre y las "
+                        f"que siguen no se evaluan nunca. El caso por defecto "
+                        f"va ultimo.")
 
         # Mismo control para el veto: si la herramienta que tendria que
         # frenar el agendamiento no existe, el veto no frena nada y no lo

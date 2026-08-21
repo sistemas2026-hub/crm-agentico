@@ -201,6 +201,30 @@ def veto_de_agendamiento(config, caso: str, historial: list[dict]) -> str | None
         (config.escalamiento.no_agendar_si or {}).get(caso), historial)
 
 
+def ticket_para_escalar(config, caso: str, historial: list[dict]) -> str | None:
+    """
+    Que herramienta crea el ticket operativo al pasar este caso a una persona.
+
+    Gana la PRIMERA entrada cuyas condiciones cumpla la traza; una entrada sin
+    condiciones es el caso por defecto y por eso el esquema la obliga a ir
+    ultima. Devuelve el nombre de la herramienta, o None si el tenant no
+    declaro ticket para este caso (que es lo normal: se declara a proposito).
+
+    Por que el asunto depende de la traza y no del caso a secas: el asunto es
+    lo primero que lee quien toma el trabajo, antes de abrir la descripcion.
+    Una lentitud sin causa identificada y una con la optica fuera de rango se
+    atienden distinto, y en el catalogo del ISP ya son dos asuntos separados
+    -- usar el que corresponde es gratis y evita que el tecnico llegue con la
+    idea equivocada.
+    """
+    for entrada in (config.escalamiento.ticket_al_escalar or {}).get(caso) or []:
+        if not entrada.condiciones:
+            return entrada.herramienta
+        if _primera_que_cumple(entrada.condiciones, historial):
+            return entrada.herramienta
+    return None
+
+
 def _primera_que_cumple(condiciones, historial: list[dict]) -> str | None:
     """La primera condicion que la traza de ESTA conversacion satisface.
 

@@ -561,6 +561,9 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             # esa promesa no puede depender de una variable que a veces no se
             # asigno. Ver el comentario del aviso final.
             id_ticket_auto = None
+            # El ticket que deja el trabajo anotado en la operacion. Se
+            # cuenta aparte del de visita a proposito -- ver mas abajo.
+            id_ticket_operativo = None
 
             # --- una vuelta mas antes de pasarlo a un humano ----------------
             # Solo para los motivos que el tenant declaro (por defecto,
@@ -693,6 +696,46 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                     posponer = True
 
             if not posponer:
+                # El trabajo queda anotado donde la operacion lo ve, con un
+                # tecnico asignado -- no solo en la bandeja interna del
+                # asistente. Distinto del agendamiento automatico: eso decide
+                # SI corresponde un tecnico y pasa por el verificador del
+                # manual; esto no decide nada, el caso ya se escalo. Si ya se
+                # agendo una visita en este mismo turno no se duplica: ese
+                # ticket ya es el trabajo anotado.
+                #
+                # En variable PROPIA, no en 'id_ticket_auto': ese decide el
+                # aviso de "tu visita ya quedo agendada" que se le suma a la
+                # respuesta, y un ticket de diagnostico NO es una visita.
+                # Reusarlo hacia que el cliente escuchara que iba un tecnico a
+                # su casa cuando lo unico que paso fue que el caso quedo
+                # anotado -- visto el 21/08/2026 en la primera prueba de este
+                # mismo codigo. Con la variable separada, el turno cae en la
+                # rama de escalada sin visita, que le dice la verdad: que lo
+                # toma una persona.
+                nombre_ticket = (
+                    agendamiento.ticket_para_escalar(config, caso_manual,
+                                                     estado["historial"])
+                    if caso_manual and not id_ticket_auto else None)
+                if nombre_ticket:
+                    id_ticket_operativo = agendamiento.agendar(
+                        config, tenant, estado["sesion"], nombre_ticket,
+                        (evaluacion.get("resumen", "") or "")[:400])
+                    if id_ticket_operativo:
+                        print(f"[escalamiento] ticket operativo #{id_ticket_operativo} "
+                              f"creado con '{nombre_ticket}'")
+                        # Que el numero quede en el caso: quien lo tome en la
+                        # bandeja tiene que poder saltar al ticket sin buscarlo.
+                        nota_ticket += (chr(10) + chr(10) + "Ticket operativo #"
+                                       + str(id_ticket_operativo)
+                                       + " (" + nombre_ticket + ").")
+                    else:
+                        # Que NO haya salido importa: quien lea el caso en la
+                        # bandeja tiene que saber que la operacion no lo
+                        # recibio, en vez de suponer que si.
+                        print("[escalamiento] no se pudo crear el ticket "
+                              f"operativo con '{nombre_ticket}'")
+
                 escalamiento.escalar(
                     config, tenant, id_sesion, conversation_id, estado["historial"],
                     evaluacion.get("motivo", ""), evaluacion.get("etiqueta", ""),
