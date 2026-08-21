@@ -2838,6 +2838,47 @@ escalamiento:
     # insiste). El verificador contrasta contra el manual antes de agendar.
     no_internet: agendar_visita_tecnica
 
+  # Ramas donde la evidencia YA es dura y viene de la red, no del relato del
+  # cliente: ahi se agenda sin pasar por el checklist del manual. Ver
+  # 'evidencia_suficiente' en nucleo/config/schema.py.
+  #
+  # Por que estas tres y no el caso entero: el verificador contrasta contra
+  # el procedimiento que el RAG recupere, y el 21/08/2026 traia el de WiFi
+  # por parecido -- exigia "¿que mensaje aparece en el dispositivo?" a un
+  # cliente que no tiene ninguna conexion de la cual leer un mensaje. Con eso
+  # 'no_internet' no agendaba nunca.
+  #
+  # Las ramas que NO estan aca (falla en todos los aparatos tras reiniciar,
+  # solo WiFi, todo normal y el cliente insiste) siguen escalando a un
+  # humano, como se definio: ahi el servicio llega y mandar un tecnico a
+  # mirar el mismo equipo no resuelve nada.
+  #
+  # Las dos condiciones de abajo, en orden:
+  #   1. 'sin señal optica' -- fibra cortada o falla en la caja. La OLT lo
+  #      ve; no hay nada que preguntarle al cliente sobre su casa.
+  #   2. 'fuera de rango' -- el problema esta en la acometida (el drop, un
+  #      conector, un empalme). El veredicto lo calcula el codigo.
+  #
+  # OJO con el nombre del campo: va PLANO, sin el 'ONU details.' de
+  # adelante. La lista blanca entiende notacion con punto, pero
+  # '_buscar_campo' -- el que evalua estas condiciones -- no: busca la clave
+  # en cualquier nivel. Con el prefijo devolvia None y la condicion no
+  # disparaba nunca, y desde afuera se veia igual que si el mecanismo no
+  # existiera.
+  #
+  # Los comentarios van ACA y no dentro de la lista: el editor de config
+  # (cli/cargar_config.py::_fusionar) pierde los comentarios que viven entre
+  # los elementos de una lista al exportar -- verificado, se llevaba estos y
+  # de paso el encabezado de la seccion siguiente.
+  evidencia_suficiente:
+    no_internet:
+      - herramienta: diagnosticar_falla_ont
+        campo: Last down cause_interpretado
+        contiene: "sin señal optica"
+      - herramienta: consultar_senal_ont
+        campo: onu_signal_1490_veredicto
+        contiene: "fuera de rango"
+
 # -----------------------------------------------------------------------------
 #  CONVERSACIONES  -  bandeja de chats con clientes finales (ver /conversaciones)
 # -----------------------------------------------------------------------------

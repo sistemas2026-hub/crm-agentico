@@ -588,11 +588,29 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             # activaba y quedaba atrapada justo aca, asi que al cliente se le
             # prometia un colaborador que no llegaba nunca.
             if herramienta_auto and not posponer and not forzado:
-                try:
-                    veredicto = agendamiento.verificar(config, tenant, rol, estado["historial"])
-                except Exception as e:
-                    print(f"[agendamiento] fallo al verificar: {type(e).__name__}: {e}")
-                    veredicto = None
+                # Primero lo barato: si la traza ya prueba por si sola que
+                # corresponde visita (evidencia de la RED, no del relato del
+                # cliente), se agenda sin consultar el manual -- y sin gastar
+                # la llamada al modelo que cuesta el verificador. Ver
+                # 'evidencia_suficiente' en schema.py: el checklist que el RAG
+                # recupera esta escrito para una persona que atiende, y en
+                # estas ramas pide datos que no existen (el 21/08/2026 exigia
+                # "¿que mensaje aparece en el dispositivo?" a alguien sin
+                # ninguna conexion de la cual leer un mensaje).
+                directo = agendamiento.evidencia_ya_alcanza(
+                    config, caso_manual, estado["historial"])
+                if directo:
+                    print(f"[agendamiento] evidencia suficiente ({directo}): "
+                          f"se agenda sin pasar por el checklist del manual")
+                    veredicto = {"checklist_completo": True,
+                                 "corresponde_agendar": True,
+                                 "descripcion_visita": (evaluacion.get("resumen") or "")[:400]}
+                else:
+                    try:
+                        veredicto = agendamiento.verificar(config, tenant, rol, estado["historial"])
+                    except Exception as e:
+                        print(f"[agendamiento] fallo al verificar: {type(e).__name__}: {e}")
+                        veredicto = None
 
                 # Sin esta linea, un veredicto que dice "no" es invisible: no
                 # hay ticket, no hay error, y desde afuera se ve igual que si

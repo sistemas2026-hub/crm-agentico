@@ -1086,6 +1086,23 @@ class Escalamiento(Base):
     # caso quedo completo. Vacio por defecto: ningun tenant ni ningun caso
     # agenda solo sin declararlo a proposito aca.
     agendamiento_automatico: dict[str, str] = Field(default_factory=dict)
+    # Caso de 'manual.casos' -> condiciones sobre la TRAZA que, si se
+    # cumplen, bastan para agendar SIN pasar por el verificador del manual.
+    #
+    # Existe porque el verificador contrasta contra el procedimiento que el
+    # RAG recupere, y ese procedimiento esta escrito para una persona que
+    # atiende, no para un agente que ya midio la OLT. Visto el 21/08/2026:
+    # una falla sin señal optica quedaba sin agendar porque el checklist
+    # recuperado (el de WiFi, traido por parecido) exigia "¿que mensaje
+    # aparece en el dispositivo?" -- una pregunta imposible de contestar
+    # cuando no hay ninguna conexion de la cual leer un mensaje.
+    #
+    # Solo para ramas donde la evidencia YA es dura y viene de la red, no
+    # del relato del cliente. Cada condicion usa la misma forma que
+    # 'Herramienta.exige_previas' y se evalua contra el historial: si
+    # CUALQUIERA se cumple, se agenda. Vacio = todo pasa por el verificador,
+    # que es el comportamiento de siempre.
+    evidencia_suficiente: dict[str, list[Precondicion]] = Field(default_factory=dict)
     # Motivos de 'activar_si' que NO escalan la primera vez que aparecen: el
     # asistente se queda una vuelta mas e intenta resolver. Si el motivo
     # vuelve a aparecer, escala sin discutir.

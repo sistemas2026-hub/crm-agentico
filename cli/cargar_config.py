@@ -365,6 +365,27 @@ def _fusionar(destino, completo, minimo):
 
         if [_como_json(v) for v in destino] == list(completo):
             return destino
+        # Listas de objetos SIN 'nombre' -- las precondiciones de
+        # 'evidencia_suficiente', por ejemplo. Mientras la cantidad no cambie
+        # se entra en cada elemento en vez de reemplazar la lista: el
+        # reemplazo descarta los nodos originales, y con ellos CUALQUIER
+        # comentario anclado ahi. El que se pierde no es solo el de adentro:
+        # ruamel cuelga el encabezado de la seccion siguiente del ultimo nodo
+        # del bloque anterior, asi que una lista al final de una seccion se
+        # lleva puesto el titulo de la que sigue. Medido: agregar
+        # 'evidencia_suficiente' borraba las 7 lineas del encabezado de
+        # CONVERSACIONES en cada exportacion.
+        if (len(destino) == len(completo)
+                and all(isinstance(d, dict) for d in destino)
+                and all(isinstance(c, dict) for c in completo)):
+            minimos = minimo if isinstance(minimo, list) else []
+            for i, (nodo, item) in enumerate(zip(destino, completo)):
+                fusionado = _fusionar(nodo, item,
+                                      minimos[i] if i < len(minimos) else None)
+                if fusionado is not nodo:
+                    destino[i] = fusionado
+            return destino
+
         # Se reemplaza el CONTENIDO, no el nodo: asi una lista escrita en linea
         # ([a, b, c]) sigue en linea despues de agregarle un elemento, en vez de
         # estallar en una lista de guiones que reescribe el bloque entero.

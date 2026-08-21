@@ -31,8 +31,10 @@ escalamiento.escalar() al crear el ticket de BottleCRM en codigo.
 
 from __future__ import annotations
 
+import json
+
 from nucleo.modelo import cliente
-from nucleo.modelo.motor import _ejecutar_tool
+from nucleo.modelo.motor import _buscar_campo, _ejecutar_tool
 from nucleo.recuperacion import busqueda
 
 
@@ -145,6 +147,45 @@ def verificar(config, tenant: str, rol: str, historial: list[dict]) -> dict | No
     for llamada in respuesta.llamadas:
         if llamada.nombre == "verificar_agendamiento":
             return llamada.argumentos
+    return None
+
+
+def evidencia_ya_alcanza(config, caso: str, historial: list[dict]) -> str | None:
+    """
+    Si la traza ya prueba, por si sola, que corresponde una visita.
+
+    Devuelve el motivo legible (para el log) o None si hay que pasar por el
+    verificador del manual, que es el camino normal.
+
+    Por que existe: el verificador contrasta la conversacion contra el
+    procedimiento que el RAG recupere, y ese procedimiento esta escrito para
+    una persona que atiende -- no para un agente que ya midio la OLT. Visto
+    el 21/08/2026, una falla sin señal optica no llegaba a agendar nunca
+    porque el checklist recuperado exigia "¿que mensaje aparece en el
+    dispositivo?", una pregunta que no tiene respuesta cuando no hay ninguna
+    conexion de la cual leer un mensaje.
+
+    Solo se salta el verificador donde la evidencia viene de la RED y no del
+    relato del cliente. Cada condicion la declara el tenant
+    ('escalamiento.evidencia_suficiente') con la misma forma que
+    'Herramienta.exige_previas'; sin declararlas, todo sigue pasando por el
+    verificador.
+    """
+    condiciones = (config.escalamiento.evidencia_suficiente or {}).get(caso) or []
+    if not condiciones:
+        return None
+    for cond in condiciones:
+        for msg in historial:
+            if msg.get("role") != "tool" or msg.get("name") != cond.herramienta:
+                continue
+            try:
+                dato = json.loads(msg.get("content") or "null")
+            except (TypeError, ValueError):
+                continue
+            if isinstance(dato, dict) and dato.get("error"):
+                continue
+            if cond.acepta(_buscar_campo(dato, cond.campo)):
+                return f"{cond.herramienta}.{cond.campo}"
     return None
 
 
