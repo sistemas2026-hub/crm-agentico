@@ -99,16 +99,33 @@ def roles_validos(config, roles_texto: str | None) -> list[str] | None:
     return nombres or None
 
 
-def vectorizar(texto: str, modelo: str) -> list[float]:
+def modelo_real() -> str:
+    """
+    El modelo con el que de verdad se vectoriza, leido de la unica fuente que
+    lo decide (nucleo/recuperacion/embeddings.py).
+
+    Existe porque 'rag.modelo_embeddings' de la config NO manda: embeddings.py
+    fija un solo proveedor de plataforma. Estampar en
+    document_chunks.modelo_embeddings lo que dice la config -- que es lo que
+    se hacia hasta el 21/08/2026 -- registra una mentira cuando las dos cosas
+    no coinciden, y es peor que no registrar nada: un corpus consistente
+    queda etiquetado como mezclado, o al reves.
+
+    Verificado ese dia: la config de rapilink declaraba 'bge-m3' mientras
+    embeddings.py usaba 'text-embedding-3-large'. Los vectores eran todos de
+    OpenAI (comprobado midiendo similitudes reales), asi que la etiqueta era
+    lo unico incorrecto.
+    """
+    from nucleo.recuperacion.embeddings import MODELO
+    return MODELO
+
+
+def vectorizar(texto: str, modelo: str | None = None) -> list[float]:
     """Un fragmento -> un vector.
 
-    'modelo' ya NO decide con que se vectoriza -- eso lo fija
-    nucleo/recuperacion/embeddings.py, un solo proveedor de plataforma en vez
-    de una eleccion por llamada. Se conserva el parametro porque quien llama
-    (ingerir(), mas abajo) lo necesita igual para la columna
-    document_chunks.modelo_embeddings: sin ese registro, no se puede saber a
-    posteriori con que proveedor se vectorizo cada fila, y eso es lo que
-    distingue un corpus mezclado de uno consistente.
+    'modelo' se acepta por compatibilidad con los llamadores viejos pero se
+    IGNORA: con que se vectoriza lo decide embeddings.py, no quien llama. Ver
+    modelo_real() arriba.
     """
     from nucleo.recuperacion.embeddings import vectorizar as _vectorizar_openai
     return _vectorizar_openai(texto)
@@ -177,10 +194,14 @@ def ingerir(cur, org_id: str, doc, hash_: str, *,
         doc_id = f["id"] if isinstance(f, dict) else f[0]
         accion = "creado"
 
+    # Lo que se REGISTRA es el modelo con el que de verdad se vectoriza, no
+    # el que declare la config del tenant -- ver modelo_real() arriba.
+    modelo = modelo_real()
+
     n = 0
     for frag in doc.fragmentos:
         contextualizado = frag.contextualizar(doc)
-        vector = vectorizar(contextualizado, modelo_embeddings)
+        vector = vectorizar(contextualizado)
         cur.execute(
             """insert into asistente.document_chunks
                  (organization_id, document_id, orden, contenido,
@@ -189,7 +210,7 @@ def ingerir(cur, org_id: str, doc, hash_: str, *,
                values (%s,%s,%s,%s,%s,%s,%s,%s,%s,true)""",
             (org_id, doc_id, frag.orden, frag.contenido, contextualizado,
              str(vector), json.dumps(frag.metadata, ensure_ascii=False),
-             len(contextualizado) // 4, modelo_embeddings))
+             len(contextualizado) // 4, modelo))
         n += 1
 
     return {"accion": accion, "document_id": str(doc_id),

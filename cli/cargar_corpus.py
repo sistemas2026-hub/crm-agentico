@@ -231,15 +231,21 @@ def cargar_tenant(slug: str, forzar: bool = False) -> None:
             for frag in doc.fragmentos:
                 contextualizado = frag.contextualizar(doc)
                 vector = _vectorizar_openai(contextualizado)
+                # 'modelo_embeddings' se escribe desde el 21/08/2026: este CLI
+                # lo omitia, asi que todo lo cargado por aca quedaba en NULL y
+                # no habia forma de saber a posteriori con que se vectorizo
+                # cada fila -- justo lo que distingue un corpus consistente de
+                # uno mezclado. Se registra el modelo REAL (embeddings.py), no
+                # el que declare la config del tenant.
                 cur.execute("""insert into asistente.document_chunks
                                (organization_id, document_id, orden, contenido,
                                 contenido_contextualizado, embedding, metadata,
-                                tokens, vigente)
-                               values (%s,%s,%s,%s,%s,%s,%s,%s,true)""",
+                                tokens, modelo_embeddings, vigente)
+                               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,true)""",
                             (org_id, doc_id, frag.orden, frag.contenido,
                              contextualizado, str(vector),
                              json.dumps(frag.metadata, ensure_ascii=False),
-                             len(contextualizado) // 4))
+                             len(contextualizado) // 4, MODELO_EMBEDDINGS))
                 n += 1
             con.commit()
             total_frag += n

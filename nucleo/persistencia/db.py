@@ -430,7 +430,12 @@ def preguntas_sin_respuesta(tenant: str, dias: int,
                       (array_agg(pregunta order by creado_en desc))[1]
                         as pregunta_ejemplo,
                       (array_agg(rol_solicitante order by creado_en desc))[1]
-                        as rol_ejemplo
+                        as rol_ejemplo,
+                      -- El ultimo conteo de fragmentos que ese rol podia ver.
+                      -- Un 0 dice que el fallo fue de PERMISOS y no de
+                      -- recuperacion: no se arregla calibrando el umbral.
+                      (array_agg(chunks_elegibles order by creado_en desc))[1]
+                        as elegibles
                  from asistente.unanswered_queries
                 where organization_id = %s
                   and creado_en >= now() - (%s || ' days')::interval

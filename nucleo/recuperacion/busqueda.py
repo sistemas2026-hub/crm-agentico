@@ -54,6 +54,41 @@ class Fragmento:
         return f"[{self.codigo}{version} — {self.titulo}]\n{self.contenido}"
 
 
+def contar_elegibles(tenant: str, rol: str) -> int:
+    """
+    Cuantos fragmentos vigentes puede VER este rol, sin mirar similitud.
+
+    Es la unica forma de distinguir dos fallos que se ven idénticos desde
+    afuera y se arreglan en lugares opuestos:
+
+      0   a este rol no se le asigno ningun documento. Es configuracion
+          (se arregla en /manual), no recuperacion -- tocar el umbral o el
+          modelo de embeddings no cambiaria nada.
+      >0  habia documentos visibles y ninguno supero el umbral. Recien aca
+          tiene sentido hablar de calibracion o de vocabulario.
+
+    Confundirlos costo tiempo real (agosto 2026): 103 preguntas distintas
+    quedaron registradas como 'sin respuesta' con similitud NULL, y se
+    leyeron como un problema semantico cuando ningun documento tenia
+    asignados los roles de cara al cliente.
+
+    Se llama SOLO cuando la busqueda no devolvio nada -- ver recuperar().
+    En el camino normal no se paga esta consulta.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select count(*) as n
+                 from asistente.document_chunks c
+                 join asistente.documents d on d.id = c.document_id
+                where c.organization_id = %s and c.vigente
+                  and d.estado = 'vigente'
+                  and d.roles_permitidos is not null
+                  and %s = any(d.roles_permitidos)""",
+            (org, rol))
+        fila = cur.fetchone()
+    return int(fila["n"] if isinstance(fila, dict) else fila[0])
+
+
 def recuperar(config, tenant: str, rol: str,
               pregunta: str) -> tuple[list[Fragmento], float | None]:
     """
@@ -109,17 +144,30 @@ def registrar_sin_resultados(tenant: str, pregunta: str, rol: str,
     demasiado alto" (0.34 con umbral 0.35), que son dos problemas distintos:
     uno se arregla escribiendo documentacion y el otro ajustando un numero.
 
+    Ademas se cuenta cuantos fragmentos podia VER este rol (ver
+    contar_elegibles): un cero ahi significa que el fallo no fue de
+    recuperacion sino de permisos, y ninguna cantidad de calibracion lo
+    arreglaria. Es la distincion que faltaba cuando 103 preguntas quedaron
+    registradas con similitud NULL y se leyeron como un problema semantico.
+
     Nunca interrumpe la atencion: si esto falla, el usuario igual recibe su
     respuesta. Un registro para mejorar el corpus no puede dejar sin servicio a
     quien esta preguntando.
     """
     try:
+        elegibles = contar_elegibles(tenant, rol)
+    except Exception as e:
+        print(f"[recuperacion] no se pudo contar fragmentos elegibles: {e}")
+        elegibles = None
+
+    try:
         with sesion(tenant) as (cur, org):
             cur.execute(
                 """insert into asistente.unanswered_queries
-                     (organization_id, pregunta, rol_solicitante, mejor_similitud)
-                   values (%s, %s, %s, %s)""",
-                (org, pregunta[:2000], rol, mejor_similitud))
+                     (organization_id, pregunta, rol_solicitante,
+                      mejor_similitud, chunks_elegibles)
+                   values (%s, %s, %s, %s, %s)""",
+                (org, pregunta[:2000], rol, mejor_similitud, elegibles))
     except Exception as e:
         print(f"[recuperacion] no se pudo registrar la pregunta sin respuesta: {e}")
 
