@@ -146,6 +146,7 @@ roles:
           consultar_tickets_de_cliente, contar_tickets, contar_clientes, consultar_casos_bottlecrm,
           agendar_visita_tecnica, agendar_visita_internet, consultar_velocidad_aprovisionada,
           crear_ticket_lentitud, crear_ticket_lentitud_niveles,
+          consultar_estabilidad_enlace,
           consultar_estado_ont, consultar_senal_ont, reiniciar_ont,
           diagnosticar_falla_ont, consultar_estado_catv, activar_catv, cambiar_tipo_onu,
           consultar_incidente_red, consultar_dispositivos_conectados,
@@ -190,6 +191,9 @@ roles:
       # la velocidad configurada y no son dato personal.
       consultar_velocidad_aprovisionada: [download_speed_profile_name,
                                           upload_speed_profile_name]
+      consultar_estabilidad_enlace: [enlace_inestable, caidas_en_ventana,
+            ventana_horas, causa_dominante, veces_la_causa_dominante,
+            ultima_caida, motivo]
       reiniciar_ont: [status, response]
       # Soporte ve la causa cruda Y la interpretada (le sirve para escalar
       # con precision tecnica), mas el estado del equipo y la senal optica
@@ -868,7 +872,8 @@ roles:
           consultar_plan_tv, consultar_estado_ont, consultar_senal_ont,
           reiniciar_ont, diagnosticar_falla_ont, consultar_estado_catv, activar_catv,
           cambiar_tipo_onu, consultar_dispositivos_conectados,
-          consultar_incidente_red, consultar_velocidad_aprovisionada]
+          consultar_incidente_red, consultar_velocidad_aprovisionada,
+          consultar_estabilidad_enlace]
     campos_permitidos:
       consultar_mi_servicio: [estado, plan_internet, ssid_router_wifi]
       # Con notacion de punto, NO el objeto entero: 'ping-1' trae adentro el
@@ -893,6 +898,24 @@ roles:
       #          la ultima milla, no el camino a internet. Presentarlo como
       #          "tu ping" seria mentir con un numero de verdad.
       #
+      # BANDA DE REFERENCIA DEL RTT (recomendada, 21/08/2026). Se mide en
+      # 'XmsYus' -- "1ms611us" son 1,6 ms:
+      #
+      #   hasta 5 ms     normal. Lo tipico en GPON es 1 a 3 ms, y es lo que
+      #                  dio el equipo de prueba sano. El corte se pone en 5
+      #                  y no en 3 para dejar margen: la banda sale de UNA
+      #                  medicion, no de una distribucion.
+      #   5 a 20 ms      elevado. Vale mencionarlo, no concluye nada solo.
+      #   mas de 20 ms   muy alto para un salto de fibra de ultima milla:
+      #                  eso si es evidencia de enlace degradado.
+      #
+      # Un 'max-rtt' muy por encima del 'avg-rtt' es inestabilidad aunque el
+      # promedio de bien.
+      #
+      # La distancia NO explica estas diferencias: la propagacion en fibra es
+      # ~5 us por kilometro, asi que 5 km suman microsegundos, no
+      # milisegundos. Lo que domina es el ciclo de asignacion de la OLT.
+      #
       # Con notacion de punto, nunca el objeto entero: 'ping-1' trae 'host',
       # que es la IP del cliente (ver mas abajo, ya paso una vez).
       ping_cliente: ["ping-exitoso", "ping-1.packet-loss", "ping-2.packet-loss",
@@ -912,6 +935,9 @@ roles:
       # no el dato.
       consultar_velocidad_aprovisionada: [download_speed_profile_name,
                                           upload_speed_profile_name]
+      consultar_estabilidad_enlace: [enlace_inestable, caidas_en_ventana,
+            ventana_horas, causa_dominante, veces_la_causa_dominante,
+            ultima_caida, motivo]
       reiniciar_ont: [response]
       # 'MAC address' se suma para el caso del ping que no responde con la
       # ONU en linea: si el equipo no reporta ninguna MAC perdio la conexion
@@ -2667,6 +2693,44 @@ herramientas:
       que importan son los que se cayeron JUNTOS.
     solo_lectura: true
     roles_permitidos: [soporte_tecnico_cliente, soporte]
+    base_url_ref: SMARTOLT_SUBDOMINIO
+    auth_ref: SMARTOLT_API_KEY
+    auth_esquema: ""
+    auth_header: X-Token
+    inyectar_sesion:
+      sn_onu: sn_onu
+    reintentar_identificador_como:
+      sn_onu: gpon_hex
+
+  # El dato que hasta hoy se desperdiciaba. Ver
+  # nucleo/herramientas/estabilidad.py para el detalle de por que el conteo
+  # va en codigo y no se le pasa la lista al modelo.
+  - nombre: consultar_estabilidad_enlace
+    tipo: interno
+    resume_estabilidad: true
+    descripcion: >
+      Cuantas veces se cayo y volvio el enlace de ESTE cliente en las ultimas
+      24 horas, y por que. El veredicto ('enlace_inestable', cuantas caidas,
+      cual fue la causa dominante) ya viene calculado: no lo recalcules ni lo
+      cuestiones.
+
+      USALA cuando el cliente diga que le anda MAL A RATOS -- "a veces bien y
+      a veces no", "se cae y vuelve", "en las noches se pone lento". Ese es
+      el caso que ninguna otra herramienta puede ver: todas miden AHORA, y
+      ahora suele estar andando bien. Un equipo que responde 'Online' con
+      señal 'Very good' puede haberse caido nueve veces en el dia, y esto es
+      lo unico que lo muestra.
+
+      NO reemplaza a diagnosticar_falla_ont: esa dice por que se cayo LA
+      ULTIMA vez, y esa ultima causa puede tapar el patron. Visto el
+      21/08/2026 en la ONU de prueba: la ultima causa era un simple
+      're-register' mientras el historial del mismo dia tenia ocho alarmas de
+      perdida optica.
+
+      Si da 'enlace_inestable', ya tienes evidencia suficiente: no le hagas
+      hacer pruebas de velocidad para confirmar algo que la red ya conto.
+    solo_lectura: true
+    roles_permitidos: [cliente_final, soporte_tecnico_cliente, soporte]
     base_url_ref: SMARTOLT_SUBDOMINIO
     auth_ref: SMARTOLT_API_KEY
     auth_esquema: ""

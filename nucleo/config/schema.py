@@ -666,6 +666,10 @@ class Herramienta(Base):
     # nucleo/herramientas/incidentes.py y la skill smartolt-api (seccion
     # get_outage_pons) para el porque y la verificacion en vivo.
     detecta_incidente: bool = False
+    # Tipo 'interno' tambien: resume el historial de caidas del enlace en un
+    # veredicto ya calculado en vez de entregar la lista cruda de eventos.
+    # Ver nucleo/herramientas/estabilidad.py.
+    resume_estabilidad: bool = False
 
     # --- http / agregado ---
     # No es secreto (no dispara el barrido de _barrer_secretos): es dato de
