@@ -508,10 +508,22 @@ roles:
       repitas una que ya te respondio, aunque el resultado no te
       convenza). Con lo que devuelvan:
 
-      - Si ping_cliente NO respondio o respondio poco: la causa esta del
-        lado del cliente. Guialo con las luces del router y un reinicio
-        de 30 segundos que haga el/ella. NO uses reiniciar_ont: si el
-        equipo ni responde al ping, un reinicio remoto tampoco llega.
+      - Si ping_cliente NO respondio o respondio poco Y la ONU figura
+        CAIDA: no hay a que llegar. Guialo con las luces del router y un
+        reinicio de 30 segundos que haga el/ella. NO uses reiniciar_ont:
+        si el equipo ni responde al ping, un reinicio remoto tampoco
+        llega.
+
+      - Si ping_cliente NO respondio pero la ONU figura EN LINEA: la fibra
+        llega y el equipo esta prendido, pero perdio la conexion IP. Ahi si
+        reinicia con reiniciar_ont -- es lo que suele devolverle la WAN.
+
+        Si despues del reinicio sigue sin responder, llama
+        diagnosticar_falla_ont y mira si el equipo reporta una MAC ('ONU
+        WAN Interfaces.MAC address'). Si NO reporta ninguna, perdio la
+        conexion WAN o quedo reseteado de fabrica: eso no se arregla desde
+        aca, AGENDA LA VISITA. Si si reporta MAC y aun asi no responde,
+        pasa el caso a un colaborador humano.
 
       - Si ping_cliente SI respondio y el equipo esta en linea con señal
         'aceptable': el servicio LLEGA a la casa. Cuentaselo en una frase
@@ -532,7 +544,9 @@ roles:
 
         - En los celulares pero SI por cable: es el WiFi, no el servicio.
           Sigue el procedimiento de WiFi del manual (banda de 5 GHz, clave,
-          alcance).
+          alcance). Si con eso no se resuelve, pasa el caso a un
+          colaborador humano -- no es una visita: el internet esta llegando
+          bien a la casa.
 
         - En TODOS los aparatos: recien ahi corresponde reiniciar la ONT
           con reiniciar_ont. Es un equipo electronico que a veces lo
@@ -552,8 +566,11 @@ roles:
           pudiste ver, que no es lo mismo que "no hay nadie conectado".
           Sigue guiandote por lo que te cuenta el cliente.
 
-        Una sola vez por conversacion: si ya reiniciaste y sigue igual,
-        corresponde visita tecnica.
+        Una sola vez por conversacion. Si ya reiniciaste y sigue sin
+        andar en ningun aparato, NO agendes visita: pasa el caso a un
+        colaborador humano. Con el equipo en linea, la señal en rango y el
+        reinicio hecho, lo que queda no se resuelve mandando un tecnico a
+        mirar el mismo equipo -- necesita que alguien lo revise a fondo.
 
       - Si el equipo figura Offline: usa diagnosticar_falla_ont para saber
         POR QUE se cayo. Te devuelve la causa ya interpretada, y segun
@@ -562,6 +579,12 @@ roles:
         - 'sin energia electrica': el equipo ALCANZO a avisar que se
           quedaba sin luz, asi que es seguro. Dile que revise que este
           enchufado y que haya corriente en la casa.
+
+          Si confirma que SI tiene corriente y el equipo sigue caido, ya no
+          es electrico: AGENDA LA VISITA. El aviso de "me quedo sin luz" es
+          de mejor esfuerzo y tambien lo manda un equipo que se apago por
+          otra causa -- con corriente confirmada y sin recuperarse, hay que
+          ir a verlo.
 
         - 'sin señal optica' (la fibra): NO des por hecho que es la fibra
           todavia. Ese aviso de "me estoy quedando sin energia" es de
@@ -754,7 +777,11 @@ roles:
       consultar_estado_ont: [onu_status]
       consultar_senal_ont: [onu_signal, onu_signal_1490_veredicto]
       reiniciar_ont: [response]
-      diagnosticar_falla_ont: ["ONU details.Last down cause_interpretado"]
+      # 'MAC address' se suma para el caso del ping que no responde con la
+      # ONU en linea: si el equipo no reporta ninguna MAC perdio la conexion
+      # WAN o quedo reseteado, y eso no se arregla desde aca.
+      diagnosticar_falla_ont: ['ONU details.Last down cause_interpretado',
+                               'ONU WAN Interfaces.MAC address']
       # El unico dato duro para una falla de TV, y este es el agente que las
       # atiende. Solo el estado del servicio (Enabled/Disabled/no soportado),
       # que es accionable; nada de niveles opticos ni topologia.
@@ -2804,6 +2831,12 @@ escalamiento:
   # Apagado por defecto para cualquier otro caso.
   agendamiento_automatico:
     sin_senal_tv: agendar_visita_tecnica
+    # Agregado 21/08/2026. NO cubre todo 'no_internet': el arbol decide en
+    # que ramas corresponde visita (equipo con corriente que no vuelve,
+    # fibra, WAN perdida) y en cuales corresponde un humano (falla en todos
+    # los aparatos tras reiniciar, solo WiFi, o todo normal y el cliente
+    # insiste). El verificador contrasta contra el manual antes de agendar.
+    no_internet: agendar_visita_tecnica
 
 # -----------------------------------------------------------------------------
 #  CONVERSACIONES  -  bandeja de chats con clientes finales (ver /conversaciones)
