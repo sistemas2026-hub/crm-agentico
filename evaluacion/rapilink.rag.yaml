@@ -1,0 +1,260 @@
+# =============================================================================
+#  SET DE EVALUACION DE RECUPERACION (RAG)  -  Rapilink
+# =============================================================================
+#  Se corre con:  py -3.13 cli/evaluar_rag.py rapilink
+#
+#  QUE MIDE, Y POR QUE NO ALCANZA CON "SUBIO LA SIMILITUD"
+#  -------------------------------------------------------
+#  Un promedio de similitud mas alto no dice si el fragmento CORRECTO llego.
+#  Aca se mide por etapas, que es donde se ve que hay que arreglar:
+#
+#    elegibles     cuantos fragmentos podia ver ese rol. Un 0 es un problema
+#                  de PERMISOS y no de recuperacion -- no se arregla tocando
+#                  el umbral ni el modelo (ver supabase/21).
+#    Recall@1/3/8  si el documento correcto aparece, y que tan arriba.
+#    MRR           lo mismo, en un solo numero.
+#    gate          los dos errores que de verdad administra el umbral:
+#                    falso negativo = habia respuesta y no paso el umbral
+#                    falso positivo = no habia respuesta y algo lo paso
+#
+#  La distincion Recall@8 vs Recall@1 decide una cosa concreta: si el
+#  documento bueno ESTA entre los candidatos pero abajo, un reranker sirve;
+#  si nunca entra, un reranker no rescata nada y hay que mirar la consulta o
+#  la busqueda.
+#
+#  COMO ESTAN ETIQUETADOS  --  LEER ANTES DE CONFIAR EN UN NUMERO
+#  --------------------------------------------------------------
+#  'espera' son los codigos de documento que responderian bien la pregunta.
+#  Se etiquetaron por TEMA, a partir del titulo y alcance de cada documento,
+#  sin haberlos leido enteros. Es un primer borrador util, no una verdad
+#  revelada: cuando un caso falle, el reporte imprime que recupero de verdad
+#  para poder corregir la etiqueta en un minuto si la equivocada era ella.
+#  Un set de evaluacion con etiquetas malas miente con mas confianza que no
+#  tener set.
+#
+#  'sin_respuesta: true' marca lo que el corpus NO cubre. Son tan importantes
+#  como los positivos: sin ellos no se puede medir el falso positivo del
+#  gate, que es el que hace que el asistente conteste con material que no
+#  responde la pregunta.
+#
+#  'brecha_conocida' documenta un fallo que YA sabemos que existe. No cuenta
+#  como error de calidad -- esta para que el dia que se arregle, se note.
+# =============================================================================
+
+casos:
+
+  # --- diagnostico de fallas: como lo dice un tecnico ------------------------
+  - pregunta: como diagnostico una falla de conectividad
+    rol: soporte
+    espera: [G-GO-04]
+
+  - pregunta: que pasos sigo si el cliente reporta que no tiene servicio
+    rol: soporte
+    espera: [G-GO-04, Procedimiento_Soporte_Tecnico_V2 (Final)]
+
+  - pregunta: que niveles de potencia optica son aceptables
+    rol: soporte
+    espera: [G-GO-04, G-GO-11]
+
+  - pregunta: como mido la potencia en una caja de distribucion
+    rol: soporte
+    espera: [G-GO-11]
+
+  # --- la MISMA falla, como la dice un cliente ------------------------------
+  #  El glosario del tenant mapea justo estas frases a "perdida de senal
+  #  optica". Hoy no se aplica (expandir_con_glosario esta en false porque no
+  #  estaba implementado): estos casos son la linea base contra la que se va
+  #  a medir esa mejora.
+  - pregunta: se me cayo el internet
+    rol: soporte
+    espera: [G-GO-04]
+
+  - pregunta: no me anda el internet hace rato
+    rol: soporte
+    espera: [G-GO-04]
+
+  - pregunta: tengo una luz roja en el aparato
+    rol: soporte
+    espera: [G-GO-04, G-GO-06]
+
+  # --- ONT y configuracion --------------------------------------------------
+  - pregunta: como configuro los parametros de una ONT
+    rol: soporte
+    espera: [G-GO-06]
+
+  - pregunta: cual es la clave del wifi del cliente y como se cambia
+    rol: soporte
+    espera: [G-GO-06]
+
+  # --- fibra: tendido, empalme, conectores ----------------------------------
+  - pregunta: como se prepara un conector de fibra
+    rol: soporte
+    espera: [G-GO-05]
+
+  - pregunta: como se hace un empalme por fusion
+    rol: soporte
+    espera: [G-GO-12]
+
+  - pregunta: cuanta reserva de fibra hay que dejar en el poste
+    rol: soporte
+    espera: [G-GO-05]
+
+  - pregunta: como funcionan los splitters
+    rol: soporte
+    espera: [G-GO-11]
+
+  # --- instalacion ----------------------------------------------------------
+  - pregunta: como se instala el servicio de television
+    rol: soporte
+    espera: [G-GO-07]
+
+  - pregunta: procedimiento de instalacion de internet en el domicilio
+    rol: soporte
+    espera: [G-GO-07]
+
+  # --- herramientas y procesos internos -------------------------------------
+  - pregunta: como se crea y se cierra un ticket en wisphub
+    rol: soporte
+    espera: [G-GO-09, Instructivo de Gestion y Validacion de Ticket]
+
+  - pregunta: que datos son obligatorios al validar un ticket
+    rol: soporte
+    espera: [Instructivo de Gestion y Validacion de Ticket, G-GO-09]
+
+  - pregunta: como se usa ozmap
+    rol: soporte
+    espera: [G-GO-10]
+
+  - pregunta: como se diligencia el contrato de un cliente nuevo
+    rol: soporte
+    espera: [G-GO-08]
+
+  - pregunta: cada cuanto se inspeccionan las herramientas
+    rol: soporte
+    espera: [G-GO-13]
+
+  - pregunta: que lleva una caja de materiales
+    rol: soporte
+    espera: [Guía para la Preparacion Cajas de Materiales]
+
+  - pregunta: como se verifican los equipos recolectados
+    rol: soporte
+    espera: [Guía para la Verificación de Equipos en Recolección]
+
+  # --- por CODIGO exacto ----------------------------------------------------
+  #  La busqueda vectorial es debil con identificadores literales; la lexical
+  #  es fuerte. Estos casos son el argumento medible a favor (o en contra) de
+  #  la busqueda hibrida para NUESTRO corpus.
+  - pregunta: que dice la G-GO-04
+    rol: soporte
+    espera: [G-GO-04]
+
+  - pregunta: guia G-GO-11
+    rol: soporte
+    espera: [G-GO-11]
+
+  # --- ventas: proceso y condiciones ---------------------------------------
+  - pregunta: cuanto tarda la instalacion
+    rol: ventas
+    espera: [MANUAL-VENTAS-02]
+
+  - pregunta: que pasa despues de llenar el formulario
+    rol: ventas
+    espera: [MANUAL-VENTAS-02]
+
+  - pregunta: necesito decodificador para mi tv
+    rol: ventas
+    espera: [MANUAL-VENTAS-02]
+
+  - pregunta: hay clausula de permanencia
+    rol: ventas
+    espera: [MANUAL-VENTAS-02]
+
+  - pregunta: que requisitos piden para contratar
+    rol: ventas
+    espera: [MANUAL-VENTAS-02]
+
+  - pregunta: por que me rechazaron la solicitud
+    rol: ventas
+    espera: [MANUAL-VENTAS-02]
+
+  - pregunta: tengo PPT, puedo contratar
+    rol: ventas
+    espera: [MANUAL-VENTAS-02]
+
+  # --- ventas: tecnica ------------------------------------------------------
+  - pregunta: que le pregunto a un prospecto antes de recomendarle un plan
+    rol: ventas
+    espera: [MANUAL-VENTAS-01]
+
+  - pregunta: el cliente dice que esta caro, que hago
+    rol: ventas
+    espera: [MANUAL-VENTAS-01]
+
+  - pregunta: como cierro la venta
+    rol: ventas
+    espera: [MANUAL-VENTAS-01]
+
+  - pregunta: me estan comparando con otro proveedor
+    rol: ventas
+    espera: [MANUAL-VENTAS-01]
+
+  # --- NEGATIVOS: el corpus no cubre esto ----------------------------------
+  #  Sin estos no se puede medir el falso positivo del gate. Ojo con el
+  #  criterio: no basta con que el tema suene ajeno, tiene que ser algo que
+  #  de verdad NO este documentado.
+  - pregunta: la receta del ajiaco santafereno
+    rol: soporte
+    sin_respuesta: true
+
+  - pregunta: quien gano el mundial de 1986
+    rol: soporte
+    sin_respuesta: true
+
+  - pregunta: cuantos clientes activos tenemos hoy
+    rol: soporte
+    sin_respuesta: true      # es una herramienta (contar_clientes), no el corpus
+
+  - pregunta: cual es el saldo de la cedula 12345678
+    rol: soporte
+    sin_respuesta: true      # dato vivo de WispHub, no documentacion
+
+  - pregunta: a que hora abre la oficina
+    rol: ventas
+    sin_respuesta: true      # no esta documentado en el corpus
+
+  - pregunta: cuanto cuesta el plan mas caro
+    rol: ventas
+    sin_respuesta: true      # los precios salen de consultar_planes_venta,
+                             # y los documentos no traen ninguno a proposito
+
+  # --- BRECHAS CONOCIDAS ----------------------------------------------------
+  #  Fallos que ya sabemos que existen. No cuentan como error de calidad: son
+  #  el testigo de que la mejora, cuando llegue, de verdad ocurrio.
+
+  - pregunta: y cuanto tarda?
+    rol: ventas
+    espera: [MANUAL-VENTAS-02]
+    brecha_conocida: >
+      Mensaje corto que depende del turno anterior. Se vectoriza el mensaje
+      CRUDO (ver motor.py: recuperar(..., mensaje)), asi que no hay con que
+      recuperar nada. Lo arregla construir la consulta con el ultimo
+      intercambio en vez de solo el ultimo mensaje.
+
+  - pregunta: listo, dale
+    rol: ventas
+    espera: [MANUAL-VENTAS-02]
+    brecha_conocida: >
+      Igual que el anterior, en su forma extrema: como consulta de busqueda
+      no significa nada.
+
+  - pregunta: no tengo internet
+    rol: soporte_tecnico_cliente
+    espera: [G-GO-04]
+    brecha_conocida: >
+      La pregunta mas frecuente de todas (130 veces registradas) contra un
+      rol que ve CERO fragmentos: ningun documento tiene asignado
+      'soporte_tecnico_cliente'. Es un problema de permisos, no de
+      recuperacion -- se arregla asignando roles en /manual, y hay que
+      revisar antes que esas guias no expongan nada que no deba ver un
+      cliente.
