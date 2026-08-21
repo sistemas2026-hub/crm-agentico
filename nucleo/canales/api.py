@@ -697,7 +697,9 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                     config, tenant, id_sesion, conversation_id, estado["historial"],
                     evaluacion.get("motivo", ""), evaluacion.get("etiqueta", ""),
                     resumen=(evaluacion.get("resumen", "") + nota_ticket).strip(),
-                    necesita_humano=necesita_humano)
+                    necesita_humano=necesita_humano,
+                    no_se_pudo_comprobar=evaluacion.get("no_se_pudo_comprobar", ""),
+                    siguiente_paso=evaluacion.get("siguiente_paso", ""))
                 # La pausa (arriba, "si ya se escalo, el bot NO contesta")
                 # solo tiene sentido cuando de verdad hay un humano al que
                 # esperar -- si se agendo solo, el bot sigue atendiendo

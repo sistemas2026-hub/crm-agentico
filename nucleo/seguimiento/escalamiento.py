@@ -87,6 +87,34 @@ def _esquema_evaluacion(config) -> dict:
                 "que tiene que alcanzar por si solo, sin tener "
                 "que leer el resto para entenderlo.",
         },
+        # Los dos campos que convierten el traspaso en un relevo y no en un
+        # "aca te dejo esto". La traza ya dice QUE se midio y con que
+        # resultado (ver _que_se_probo), pero no dice lo unico que quien
+        # toma el caso no puede deducir sin volver a hacerlo todo: hasta
+        # donde llego el diagnostico y por que se detuvo ahi.
+        #
+        # Opcionales a proposito: el evaluador corre en CADA turno y la
+        # mayoria no escala. Exigirlos siempre seria pagar dos campos de
+        # redaccion por turno para tirarlos.
+        "no_se_pudo_comprobar": {
+            "type": "string",
+            "description": "Solo si escalar=true. Que quedo SIN "
+                "comprobar y por que: un dato que el cliente no "
+                "supo dar, una herramienta que fallo, algo que "
+                "no se puede medir desde los sistemas. Es lo "
+                "primero que necesita quien retome, porque es "
+                "justo donde tiene que empezar. Si se pudo "
+                "comprobar todo, dilo asi.",
+        },
+        "siguiente_paso": {
+            "type": "string",
+            "description": "Solo si escalar=true. Que le queda "
+                "por hacer a la persona que tome el caso, en una "
+                "frase concreta. No repitas lo que el asistente "
+                "ya hizo. Si la conclusion es que hace falta ir "
+                "al domicilio, dilo; si falta una revision que "
+                "solo se hace desde adentro, dilo.",
+        },
         "necesita_humano": {
             "type": "boolean",
             "description": "Solo si escalar=true. true si hace "
@@ -300,7 +328,8 @@ def _que_se_probo(historial: list[dict]) -> str:
 
 def escalar(config, tenant: str, usuario_externo: str, conversation_id: str,
            historial: list[dict], motivo: str, etiqueta: str,
-           resumen: str = "", necesita_humano: bool = True) -> None:
+           resumen: str = "", necesita_humano: bool = True,
+           no_se_pudo_comprobar: str = "", siguiente_paso: str = "") -> None:
     """
     Crea el ticket en BottleCRM y marca la conversacion como escalada.
 
@@ -351,6 +380,16 @@ def escalar(config, tenant: str, usuario_externo: str, conversation_id: str,
         # Antes de la transcripcion: es lo primero que necesita quien toma
         # el caso, y le ahorra leerla entera para saber que ya se intento.
         encabezado += _que_se_probo(historial)
+        # Y despues de los hechos, lo que los hechos NO dicen. El orden
+        # importa: primero lo medido (dato duro, sale de la traza), despues
+        # lo que quedo abierto (interpretacion del modelo). Al reves, quien
+        # lee toma la interpretacion como si fuera una medicion.
+        if no_se_pudo_comprobar.strip():
+            encabezado += ("NO SE PUDO COMPROBAR (empezar por aca): "
+                          + no_se_pudo_comprobar.strip() + chr(10) + chr(10))
+        if siguiente_paso.strip():
+            encabezado += ("SIGUIENTE PASO: " + siguiente_paso.strip()
+                          + chr(10) + chr(10))
         encabezado += nota_adjuntos
         if encabezado:
             encabezado += f"{'-' * 40}\n\n"
