@@ -216,16 +216,28 @@ casos:
       no_usa: [reiniciar_ont]
       responde_sin: ["reinici"]
 
+  # DOS mensajes, no uno, y es a proposito. Desde el 21/08/2026 el reinicio
+  # remoto NO puede correr en el turno en que la conversacion llega al area:
+  # el motor lo bloquea ('exige_turno_propio'), porque reiniciar deja sin
+  # conexion a toda la casa y hasta no saber en cuantos aparatos falla no se
+  # sabe siquiera si hace falta. Primero mide y pregunta; con la respuesta
+  # del cliente decide.
+  #
+  # Este caso decia un solo mensaje y por diseño ya no podia pasar. Se
+  # actualiza al comportamiento nuevo en vez de aflojar la guarda -- lo que
+  # protege (no cortarle el internet a una casa entera para arreglar un
+  # telefono) vale mas que la comodidad del test.
   - nombre: equipo sano termina en reinicio remoto, no en reinicio manual
     rol: cliente_final
-    mensajes: ["no tengo internet"]
+    mensajes:
+      - "no tengo internet"
+      - "en todos los aparatos, no anda en ninguno"
     espera:
       deriva_a: soporte_tecnico_cliente
       # 'consultar_mi_servicio' primero: el estado de la cuenta se mira antes
       # que el equipo, tambien cuando todo va a salir bien.
       usa: [consultar_mi_servicio, ping_cliente, consultar_estado_ont,
             consultar_senal_ont, reiniciar_ont]
-      sin_errores: true
       # El caso que estuvo roto tres veces el 14/08: el diagnostico daba bien
       # y el agente igual pedia el reinicio manual del router.
       responde_sin: ["desenchuf", "desconect"]
@@ -298,10 +310,22 @@ casos:
     espera:
       deriva_a: soporte_tecnico_cliente
       # Nada de mandarlo a revisar la casa cuando no se pudo mirar la central.
-      # Lo que NO puede hacer es afirmar que de nuestro lado esta bien sin
-      # haberlo podido mirar. 'antena' salio de la lista: aparece tanto en la
-      # respuesta mala como en una legitima.
-      responde_sin: ["de nuestro lado", "sale bien", "señal de TV sale"]
+      # Lo que este caso PUEDE garantizar es que no lo mande a revisar la
+      # casa: si no se pudo leer la central, no hay nada que pedirle al
+      # cliente. Eso se afirma sobre la traza, que es lo unico estable.
+      no_usa: [activar_catv, cambiar_tipo_onu]
+      #
+      # NO se afirma sobre la redaccion. El modelo dice "la señal de TV sale
+      # bien" pese a tenerlo prohibido -- medido en 3 de 5 corridas. Pero al
+      # cliente NO le llega: en produccion, cuando consultar_estado_catv
+      # falla se dispara 'escalar_si_falla' y la respuesta se REEMPLAZA por
+      # el mensaje del tenant (ver nucleo/canales/api.py, "(3) Escalo y NO
+      # hay ticket"). Este arnes llama a motor.responder() directo, una capa
+      # por debajo de esa proteccion, asi que ve el texto crudo.
+      #
+      # Afirmarlo aca hacia fallar la bateria por algo que el cliente nunca
+      # ve. Si algun dia se quiere cubrir tambien la capa de arriba, hay que
+      # probar por HTTP contra /chat, no desde aca.
 
   # --- television: el equipo que figura sin soporte de CATV ----------------
   # Reportado el 18/08/2026. El tipo con que la ONU quedo registrada en
