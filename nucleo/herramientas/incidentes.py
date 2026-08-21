@@ -41,6 +41,8 @@ descripcion de la herramienta en el YAML del tenant.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
+
 import requests
 
 from nucleo.herramientas import http as ejecutor_http
@@ -50,6 +52,87 @@ TIMEOUT_SEGUNDOS = 15
 
 class ErrorIncidente(Exception):
     """Fallo al resolver la ubicacion de la ONU o al consultar incidentes."""
+
+
+# Cuanto pueden separarse dos caidas para considerarlas la MISMA falla.
+# Minutos, no dias: cuando se corta algo fisico los equipos se van casi
+# juntos -- medido el 21/08/2026 sobre una caida real, SIETE ONUs del mismo
+# puerto cayeron en el MISMO instante ('2026-08-21 07:16:44.419668', hasta
+# la fraccion de segundo).
+#
+# La ventana agrupa por CERCANIA ENTRE SI, no por "hace poco". Un corte del
+# sabado sigue siendo el mismo grupo el lunes: en Rapilink no se despacha
+# tecnico en fin de semana ni festivo salvo agendado, asi que una falla
+# puede seguir abierta dias sin que eso la vuelva vieja. Por eso no hay
+# ningun corte por antiguedad -- lo que separa a un cliente caido hoy de uno
+# abandonado hace meses es que el abandonado no coincide con NADIE.
+VENTANA_MISMA_FALLA_MINUTOS = 20
+
+
+def _a_fecha(valor):
+    """El timestamp de SmartOLT a datetime, o None si no se puede leer.
+
+    Vienen en dos formas segun el endpoint ('2026-08-21 07:16:44.419668' y
+    '2026-08-21 12:16:44'), asi que se prueban las dos en vez de asumir una.
+    """
+    texto = str(valor or "").strip()
+    if not texto:
+        return None
+    for formato in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(texto, formato)
+        except ValueError:
+            continue
+    return None
+
+
+def _caidas_simultaneas(base_url, headers, olt_id, board, port, sn_onu):
+    """
+    Cuantas ONUs del MISMO puerto se cayeron junto con esta, y desde cuando.
+
+    Por que no alcanza con contar las caidas del puerto: un puerto acumula
+    equipos que llevan meses fuera -- clientes que se fueron y nadie dio de
+    baja. Medido el 21/08/2026 en una caida real: 17 ONUs caidas en el
+    puerto, de las cuales 7 se fueron en el mismo instante (la falla) y 10
+    llevaban entre mes y medio y OCHO MESES (abandono).
+
+    Contarlas todas daria 17 y ese puerto marcaria "falla masiva" todos los
+    dias, aunque no pase nada. Y un umbral por cantidad tampoco sirve: los
+    10 muertos ya lo superan solos, mientras que una falla real de 5 casas
+    quedaria por debajo.
+
+    Devuelve (cuantos, desde) o (0, None) si no se pudo saber. Nunca lanza:
+    esto ENRIQUECE el veredicto de SmartOLT, no lo reemplaza.
+    """
+    try:
+        r = requests.get(f"{base_url}/api/onu/get_all_onus_details",
+                         headers=headers, timeout=TIMEOUT_SEGUNDOS * 4)
+        r.raise_for_status()
+        onus = r.json().get("onus") or []
+    except Exception as e:
+        print(f"[incidentes] no se pudo correlacionar por tiempo: {type(e).__name__}: {e}")
+        return 0, None
+
+    del_puerto = [o for o in onus
+                  if str(o.get("olt_id")) == str(olt_id)
+                  and str(o.get("board")) == str(board)
+                  and str(o.get("port")) == str(port)]
+    caidas = [(o, _a_fecha(o.get("last_status_change"))) for o in del_puerto
+              if (o.get("status") or "") != "Online"]
+    caidas = [(o, f) for o, f in caidas if f is not None]
+    if not caidas:
+        return 0, None
+
+    # La referencia es CUANDO SE CAYO ESTE CLIENTE. Si su propia ONU no
+    # figura caida (el caso raro de que reporte sin estar caido), se toma la
+    # caida mas reciente del puerto, que es la unica candidata a ser la
+    # falla en curso.
+    propia = next((f for o, f in caidas if str(o.get("sn") or "").upper() == str(sn_onu).upper()), None)
+    referencia = propia or max(f for _, f in caidas)
+
+    ventana = timedelta(minutes=VENTANA_MISMA_FALLA_MINUTOS)
+    grupo = [f for _, f in caidas if abs(f - referencia) <= ventana]
+    return len(grupo), min(grupo).strftime("%Y-%m-%d %H:%M:%S") if grupo else None
 
 
 def detectar(herramienta, argumentos: dict, tenant: str | None = None,
@@ -116,7 +199,15 @@ def detectar(herramienta, argumentos: dict, tenant: str | None = None,
                 # (verificado en vivo) -- normalizar de los dos lados evita
                 # un falso negativo por tipo en vez de por dato.
                 if str(pon.get("board")) == str(board) and str(pon.get("port")) == str(port):
-                    return {
+                    # SmartOLT agrupa con criterio propio y no siempre coincide
+                    # con la evidencia cruda: en la caida del 21/08/2026 declaro
+                    # 8 suscriptores desde las 12:16, cuando los timestamps de
+                    # las ONUs mostraban 7 caidas simultaneas a las 07:16 --
+                    # cinco horas antes y un cliente de diferencia. Por eso se
+                    # recuenta contra los tiempos y se informan los dos.
+                    juntos, desde_real = _caidas_simultaneas(
+                        base_url, headers, olt_id, board, port, sn_onu)
+                    salida = {
                         "es_incidente_de_red": True,
                         "tipo_alerta": pon.get("alert_kind"),
                         "clientes_afectados": pon.get("affected_onus"),
@@ -125,4 +216,8 @@ def detectar(herramienta, argumentos: dict, tenant: str | None = None,
                         "zona": pon.get("zone_name"),
                         "caja": pon.get("odb_name"),
                     }
+                    if juntos:
+                        salida["clientes_caidos_a_la_vez"] = juntos
+                        salida["desde_por_tiempos"] = desde_real
+                    return salida
     return {"es_incidente_de_red": False}
