@@ -523,6 +523,12 @@ Dos cosas que se deciden junto con eso:
 
 Errores que ya costaron tiempo una vez.
 
+**`fetch failed` (o `Bad Gateway`) en mitad de una conversación que venía bien, y la respuesta SÍ está guardada en la base.** No es el motor caído: es el motor tardando de más *después* de haber hecho su trabajo. `atender_turno()` (`nucleo/canales/api.py`) calcula la respuesta, la persiste, y **recién después** — todavía dentro del mismo request, antes de devolver el HTTP — hace hasta tres llamadas más al modelo que no son parte de la respuesta del cliente: evaluar si corresponde escalar, verificar agendamiento, y auditar con el supervisor. Si alguna se demora, el proxy corta la conexión y el cliente ve un error por una respuesta que ya existía.
+
+La señal que lo identifica, y que evita perseguirlo como un problema de red: **buscar la conversación en `asistente.messages` y ver si la respuesta del asistente está ahí.** Si está (y `tool_calls` muestra todo en orden y rápido), el motor funcionó — lo que falló fue la entrega, y la causa está en lo que corre *después* de persistir.
+
+Arreglado el 21/08/2026 acotando cada llamada al modelo: hasta entonces **ninguna** llevaba timeout y se usaba el default del SDK de cada proveedor (minutos, o ninguno). Ahora `nucleo/modelo/cliente.py` define `TIMEOUT_POR_DEFECTO` (90 s, la respuesta que el cliente espera) y `TIMEOUT_SECUNDARIO` (20 s, el trabajo que no espera nadie); los tres llamadores secundarios usan el corto y, si se agota, abandonan esa vuelta y se reintentan en el turno siguiente — que es lo que ya hacían cuando el modelo no contestaba con la función. Guarda: `py -3.13 tests/test_timeouts_modelo.py`.
+
 **El asistente dice que no tiene una herramienta que SÍ está en el YAML.** No es el modelo alucinando: casi seguro está diciendo la verdad sobre la configuración que él ve. El motor lee de `asistente.tenant_config`, no del repo, y redesplegar no la sincroniza. Antes de tocar prompts, comparar:
 
 ```

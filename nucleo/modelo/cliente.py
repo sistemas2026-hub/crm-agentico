@@ -45,6 +45,32 @@ from typing import Any
 #  RESPUESTA NORMALIZADA
 # =============================================================================
 
+# =============================================================================
+#  TIMEOUTS  --  ninguna llamada al modelo puede colgarse para siempre
+# =============================================================================
+#  Hasta el 21/08/2026 NINGUNA llamada llevaba timeout: se usaba el default del
+#  SDK de cada proveedor, que son varios minutos o directamente ninguno. Eso
+#  produjo un fallo real y desconcertante en produccion -- el cliente veia
+#  "fetch failed" en mitad de una conversacion que HABIA funcionado: la
+#  respuesta ya estaba calculada y guardada en la base, pero atender_turno()
+#  (nucleo/canales/api.py) todavia no habia devuelto el HTTP porque seguia
+#  esperando una SEGUNDA llamada al modelo -- la evaluacion de escalamiento --
+#  que no es parte de la respuesta del cliente. El proxy corto la conexion
+#  antes de que esa segunda llamada terminara.
+#
+#  Por eso hay dos valores y no uno:
+#
+#    POR_DEFECTO   la llamada que genera la respuesta que el cliente espera.
+#                  Generoso: cortarla es dejarlo sin respuesta.
+#    SECUNDARIO    trabajo que NO forma parte de esa respuesta (evaluar si
+#                  corresponde escalar, verificar agendamiento, auditar).
+#                  Corto a proposito: si tarda, se abandona y se reintenta en
+#                  el turno siguiente -- cuesta mucho menos que hacer esperar
+#                  a alguien por algo que no pidio.
+TIMEOUT_POR_DEFECTO = 90.0
+TIMEOUT_SECUNDARIO = 20.0
+
+
 @dataclass
 class Llamada:
     """Una invocacion de herramienta que propuso el modelo."""
@@ -107,6 +133,16 @@ class ClienteOllama:
     def __init__(self, **_):
         import ollama                                   # import perezoso
         self._ollama = ollama
+        # Un cliente por timeout distinto: el timeout de Ollama se fija al
+        # CONSTRUIR el cliente (va al httpx de abajo), no por llamada como en
+        # los otros dos proveedores. Se cachean para no abrir un pool de
+        # conexiones nuevo en cada turno.
+        self._clientes: dict[float, Any] = {}
+
+    def _cliente(self, timeout: float):
+        if timeout not in self._clientes:
+            self._clientes[timeout] = self._ollama.Client(timeout=timeout)
+        return self._clientes[timeout]
 
     @staticmethod
     def _adaptar(mensajes: list[dict]) -> list[dict]:
@@ -126,11 +162,13 @@ class ClienteOllama:
         return salida
 
     def chat(self, modelo: str, mensajes: list[dict],
-             tools: list | None = None, temperatura: float = 0.1) -> Respuesta:
+             tools: list | None = None, temperatura: float = 0.1,
+             timeout: float = TIMEOUT_POR_DEFECTO) -> Respuesta:
         t0 = time.monotonic()
-        r = self._ollama.chat(model=modelo, messages=self._adaptar(mensajes),
-                              tools=tools or None,
-                              options={"temperature": temperatura})
+        r = self._cliente(timeout).chat(
+            model=modelo, messages=self._adaptar(mensajes),
+            tools=tools or None,
+            options={"temperature": temperatura})
         transcurrido = time.monotonic() - t0
         msg = r.get("message", {}) or {}
 
@@ -193,11 +231,12 @@ class ClienteCompatibleOpenAI:
         return salida
 
     def chat(self, modelo: str, mensajes: list[dict],
-             tools: list | None = None, temperatura: float = 0.1) -> Respuesta:
+             tools: list | None = None, temperatura: float = 0.1,
+             timeout: float = TIMEOUT_POR_DEFECTO) -> Respuesta:
         t0 = time.monotonic()
         r = self._cli.chat.completions.create(
             model=modelo, messages=self._adaptar(mensajes),
-            tools=tools or None, temperature=temperatura)
+            tools=tools or None, temperature=temperatura, timeout=timeout)
         transcurrido = time.monotonic() - t0
         msg = r.choices[0].message
 
@@ -308,10 +347,12 @@ class ClienteAnthropic:
                 for t in tools]
 
     def chat(self, modelo: str, mensajes: list[dict],
-             tools: list | None = None, temperatura: float = 0.1) -> Respuesta:
+             tools: list | None = None, temperatura: float = 0.1,
+             timeout: float = TIMEOUT_POR_DEFECTO) -> Respuesta:
         sistema, adaptados = self._adaptar(mensajes)
         argumentos: dict[str, Any] = {
-            "model": modelo, "max_tokens": 8000, "messages": adaptados}
+            "model": modelo, "max_tokens": 8000, "messages": adaptados,
+            "timeout": timeout}
         if sistema:
             argumentos["system"] = sistema
         if tools:
@@ -400,6 +441,12 @@ def resolver(referencia: str) -> tuple[str, str]:
 
 
 def chat(referencia_modelo: str, mensajes: list[dict],
-         tools: list | None = None, temperatura: float = 0.1) -> Respuesta:
+         tools: list | None = None, temperatura: float = 0.1,
+         timeout: float = TIMEOUT_POR_DEFECTO) -> Respuesta:
+    """
+    'timeout' en segundos, SIEMPRE acotado -- ver el bloque TIMEOUTS arriba.
+    Quien haga trabajo secundario (que no sea la respuesta que el cliente
+    esta esperando) deberia pasar TIMEOUT_SECUNDARIO.
+    """
     proveedor, modelo = resolver(referencia_modelo)
-    return obtener(proveedor).chat(modelo, mensajes, tools, temperatura)
+    return obtener(proveedor).chat(modelo, mensajes, tools, temperatura, timeout)

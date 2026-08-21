@@ -56,6 +56,7 @@ Cuando algo falle en producción, agregarlo al set con lo que *debería* haber p
 ```
 py -3.13 tests/test_nucleo_sin_tenants.py   # guarda de arquitectura
 py -3.13 tests/test_editor_config.py        # guarda del editor de agentes (sin base)
+py -3.13 tests/test_timeouts_modelo.py      # ninguna llamada al modelo se cuelga (sin red)
 py -3.13 cli/evaluar.py rapilink            # casos dorados contra el motor real
 py -3.13 cli/banco_pruebas.py               # compara modelos contra el prompt real
 py -3.13 cli/sondear_api.py                 # descubre endpoints de WispHub (solo lectura)

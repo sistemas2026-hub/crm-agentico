@@ -170,9 +170,14 @@ def revisar(config, rol: str, tenant: str, conversation_id: str,
         ),
     }]
     try:
+        # TIMEOUT_SECUNDARIO, mismo motivo que escalamiento.evaluar(): la
+        # auditoria corre dentro del turno que cierra la conversacion, y el
+        # cliente no esta esperando por ella. Si tarda, no se audita esta
+        # conversacion -- nunca se le hace esperar a alguien por esto.
         respuesta = cliente.chat(
             referencia_modelo, mensajes,
-            tools=[_esquema_revision(config)])
+            tools=[_esquema_revision(config)],
+            timeout=cliente.TIMEOUT_SECUNDARIO)
     except Exception as e:
         print(f"[supervisor] fallo al revisar la conversacion "
               f"{conversation_id}: {type(e).__name__}: {e}")

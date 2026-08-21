@@ -160,6 +160,15 @@ def evaluar(config, rol: str, historial: list[dict]) -> dict | None:
     Devuelve None si no hay nada configurado para evaluar contra, o si el
     modelo no llamo la funcion en este turno (se reintenta en el proximo,
     no es un fallo: el modelo puede simplemente no haber tenido motivo).
+
+    Corre con TIMEOUT_SECUNDARIO y no con el generoso por defecto: esta
+    llamada ocurre DESPUES de que la respuesta del cliente ya se calculo y
+    se guardo, pero ANTES de devolverle el HTTP (ver atender_turno en
+    nucleo/canales/api.py). Sin acotarla, una demora del proveedor deja al
+    cliente mirando un "fetch failed" por una respuesta que ya existia --
+    paso en produccion el 21/08/2026. Si se agota, se abandona esta vuelta
+    y se reintenta en el turno siguiente, que es exactamente lo que ya
+    hacia el caso "el modelo no llamo la funcion".
     """
     if not config.escalamiento.activar_si or not config.conversaciones.etiquetas:
         return None
@@ -175,7 +184,8 @@ def evaluar(config, rol: str, historial: list[dict]) -> dict | None:
     try:
         respuesta = cliente.chat(
             referencia_modelo, mensajes,
-            tools=[_esquema_evaluacion(config)])
+            tools=[_esquema_evaluacion(config)],
+            timeout=cliente.TIMEOUT_SECUNDARIO)
     except Exception as e:
         print(f"[escalamiento] fallo al evaluar: {type(e).__name__}: {e}")
         return None

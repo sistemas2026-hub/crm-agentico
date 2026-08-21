@@ -136,8 +136,12 @@ def verificar(config, tenant: str, rol: str, historial: list[dict]) -> dict | No
         ),
     }]
     try:
+        # TIMEOUT_SECUNDARIO, mismo motivo que escalamiento.evaluar(): esto
+        # corre despues de que la respuesta del cliente ya se calculo, pero
+        # antes de devolverle el HTTP. Si tarda, se abandona esta vuelta.
         respuesta = cliente.chat(
-            referencia_modelo, mensajes, tools=[_esquema_verificacion(config)])
+            referencia_modelo, mensajes, tools=[_esquema_verificacion(config)],
+            timeout=cliente.TIMEOUT_SECUNDARIO)
     except Exception as e:
         print(f"[agendamiento] fallo al verificar: {type(e).__name__}: {e}")
         return None
