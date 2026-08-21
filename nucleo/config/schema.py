@@ -1329,6 +1329,28 @@ class TenantConfig(Base):
                     f"escalamiento.agendamiento_automatico['{caso}'] apunta a "
                     f"la herramienta inexistente '{nombre_herr}'")
 
+        # Misma exigencia para el atajo por evidencia: un caso mal escrito o
+        # una herramienta que ya no existe NO rompe nada en vivo -- cae al
+        # verificador del manual, que es el camino de siempre -- y por eso
+        # mismo es peligroso: desde afuera se ve identico a "la evidencia no
+        # alcanzaba", y nadie se entera de que la condicion nunca se evaluo.
+        # Se cae al cargar, no en el turno que la necesitaba.
+        for caso, condiciones in self.escalamiento.evidencia_suficiente.items():
+            if caso not in casos_manual:
+                raise ValueError(
+                    f"escalamiento.evidencia_suficiente['{caso}'] no es un "
+                    f"caso de 'manual.casos' ({sorted(casos_manual)})")
+            if caso not in self.escalamiento.agendamiento_automatico:
+                raise ValueError(
+                    f"escalamiento.evidencia_suficiente['{caso}'] no sirve de "
+                    "nada: ese caso no tiene agendamiento automatico, asi que "
+                    "la evidencia nunca se consulta")
+            for c in condiciones:
+                if c.herramienta not in nombres_herr:
+                    raise ValueError(
+                        f"escalamiento.evidencia_suficiente['{caso}'] espera la "
+                        f"herramienta inexistente '{c.herramienta}'")
+
         # Las sustituciones de modelo deben apuntar a canales o roles reales --
         # con una excepcion: 'rol:supervisor' es una clave VIRTUAL que usa
         # nucleo/seguimiento/supervisor.py para poder redirigir la revision
