@@ -1,54 +1,72 @@
 # -*- coding: utf-8 -*-
 """
 ================================================================================
- EVALUAR LA RECUPERACION (RAG)  --  por etapas, no por promedio de similitud
+ EVALUAR LA RECUPERACION (RAG)  --  cada fallo con su causa, no un promedio
 ================================================================================
 
 Por que existe
 --------------
 Hasta ahora la unica forma de saber si el RAG andaba era abrir el simulador y
-leer la respuesta. Eso no distingue las tres cosas que fallan distinto y se
-arreglan en lugares opuestos:
+leer la respuesta. Eso no distingue cosas que fallan distinto y se arreglan en
+lugares opuestos -- y peor: un promedio de similitud alto puede convivir con
+un sistema que contesta mal.
 
-  - el rol no tiene NINGUN documento asignado   -> permisos (/manual)
-  - el documento correcto nunca entra al top-k  -> consulta o busqueda
-  - entra pero queda abajo                      -> orden (ahi si, reranker)
+Este comando corre un set etiquetado y clasifica CADA fallo en una de seis
+causas. La clase no se infiere a ojo: sale de condiciones estrictas.
 
-Y una cuarta que no se ve nunca leyendo respuestas: que el umbral deje pasar
-material que NO responde la pregunta.
+  permissions    hay documento correcto, pero el rol no puede verlo.
+                 Se arregla asignando roles en /manual. Ni el umbral ni el
+                 modelo de embeddings tienen nada que ver.
+  retrieval      el documento es elegible y NO entro al top_k.
+                 Problema de busqueda o de como se arma la consulta.
+  ranking        entro al top_k pero no quedo primero.
+                 Es la unica clase que un reranker podria arreglar -- si esta
+                 en cero, un reranker no tiene nada que rescatar.
+  threshold      esta entre los candidatos pero el gate lo rechazo por score.
+                 Aca si tiene sentido discutir calibracion.
+  answerability  paso el gate material que NO responde la pregunta.
+                 Parecido semantico confundido con evidencia.
+  tool-routing   la pregunta la resuelve una herramienta y se le inyecto
+                 documentacion igual.
 
-Que mide
---------
-  Recall@1/@3/@8   si el documento esperado aparece, y que tan arriba
-  MRR              lo anterior en un solo numero (1/posicion del primer acierto)
-  gate FN          habia respuesta documentada y nada supero el umbral
-  gate FP          NO habia respuesta y algo la supero igual
-  elegibles        cuantos fragmentos podia ver el rol (0 = problema de
-                   permisos, ver supabase/21_diagnostico_recuperacion.sql)
+La diferencia entre 'retrieval' y 'threshold' exige ver lo que quedo DEBAJO
+del umbral, por eso se usa recuperar_candidatos() (top_k sin filtrar) ademas
+de recuperar() (lo que de verdad recibe el motor).
 
 Lo que NO mide
 --------------
-Si la RESPUESTA final fue buena. Eso es cli/evaluar.py (casos dorados contra
-el motor real). Esto mide solo el paso de recuperacion, que es anterior: si el
-fragmento correcto no llega, no hay prompt que lo arregle.
+Si la RESPUESTA final fue buena, ni si el modelo llamo a la herramienta
+correcta. Eso es cli/evaluar.py, contra el motor real. Esto mide el paso
+anterior: si el fragmento correcto no llega, no hay prompt que lo arregle.
 
-Ojo con el umbral y el grounding
---------------------------------
-Superar 'umbral_similitud' significa PARECIDO SEMANTICO, no "aca esta la
-respuesta". Un fragmento sobre el procedimiento de instalacion puede sacar
-0.55 para "cuanto vale instalarlo" y no traer un solo precio. Por eso el gate
-es un filtro probabilistico de relevancia y no una garantia de respaldo -- los
-casos 'sin_respuesta' de este set existen para medir exactamente ese error.
+'docs_inyectados' es la excepcion util: replica exactamente la condicion de
+nucleo/modelo/motor.py ("if fragmentos:"), asi que dice si el motor le habria
+metido documentacion al modelo en ese turno -- que es como se detecta el
+fallo de tool-routing sin correr el motor entero.
+
+Comparar dos corridas
+---------------------
+    py -3.13 cli/evaluar_rag.py rapilink --guardar baseline_v1
+    ...se cambia una sola cosa...
+    py -3.13 cli/evaluar_rag.py rapilink --comparar baseline_v1
+
+Un cambio por corrida. Si se tocan dos cosas a la vez se sabe que mejoro pero
+no por que.
 
 Uso
 ---
     py -3.13 cli/evaluar_rag.py rapilink
-    py -3.13 cli/evaluar_rag.py rapilink --detalle    # que recupero en cada fallo
+    py -3.13 cli/evaluar_rag.py rapilink --detalle
+    py -3.13 cli/evaluar_rag.py rapilink --guardar <nombre>
+    py -3.13 cli/evaluar_rag.py rapilink --comparar <nombre>
+    py -3.13 cli/evaluar_rag.py rapilink --csv fichas.csv
 ================================================================================
 """
 
 from __future__ import annotations
 
+import csv
+import json
 import sys
 from pathlib import Path
 
@@ -65,7 +83,12 @@ load_dotenv(RAIZ / ".env", override=True)
 
 from nucleo.config import fuente                               # noqa: E402
 from nucleo.recuperacion.busqueda import (                     # noqa: E402
-    contar_elegibles, recuperar)
+    contar_elegibles, documentos_visibles, recuperar_candidatos)
+
+CLASES = ["permissions", "retrieval", "ranking", "threshold",
+          "answerability", "tool-routing"]
+
+INSTANTANEAS = RAIZ / "evaluacion" / "instantaneas"
 
 
 def _mismo_documento(codigo: str, esperado: str) -> bool:
@@ -91,133 +114,226 @@ def _mismo_documento(codigo: str, esperado: str) -> bool:
     return a[:n] == b[:n]
 
 
-def _posicion(fragmentos, esperados: list[str]) -> int | None:
-    """1-based de la primera coincidencia, o None. Compara por codigo de
-    documento, no por fragmento: cualquier parte del documento correcto
-    cuenta como acierto."""
-    for i, f in enumerate(fragmentos, start=1):
+def _rango(candidatos, esperados: list[str]) -> int | None:
+    """Posicion 1-based del primer candidato del documento esperado."""
+    for i, f in enumerate(candidatos, start=1):
         if any(_mismo_documento(f.codigo, e) for e in esperados):
             return i
     return None
 
 
-def main(slug: str, detalle: bool) -> None:
+def _clasificar(caso: dict, candidatos, umbral: float,
+                visibles: set[str], elegibles: int) -> tuple[str | None, dict]:
+    """
+    (clase_de_fallo | None si estuvo OK, ficha del caso).
+
+    El orden de las condiciones importa: se pregunta primero por la causa mas
+    de fondo. Un rol que no puede ver el documento tambien va a fallar el
+    ranking, pero llamarlo 'ranking' mandaria a optimizar el orden de una
+    lista donde el documento correcto nunca podia estar.
+    """
+    pasados = [f for f in candidatos if f.similitud >= umbral]
+    ficha = {
+        "pregunta": caso["pregunta"],
+        "rol": caso["rol"],
+        "ruta_esperada": caso.get("ruta", "documental"),
+        "espera": ",".join(caso.get("espera", [])),
+        "fragmentos_elegibles": elegibles,
+        "top1_doc": candidatos[0].codigo if candidatos else "",
+        "top1_score": round(candidatos[0].similitud, 4) if candidatos else None,
+        "rango_esperado": None,
+        "gate_paso": bool(pasados),
+        "docs_inyectados": bool(pasados),   # misma condicion que motor.py
+        "brecha_conocida": bool(caso.get("brecha_conocida")),
+    }
+
+    # --- negativos: no deberia pasar NADA el gate -------------------------
+    if caso.get("sin_respuesta"):
+        if not pasados:
+            return None, ficha
+        # Paso algo. Que clase de error es depende de donde deberia haber
+        # salido la respuesta.
+        clase = ("tool-routing" if caso.get("ruta") == "herramienta"
+                 else "answerability")
+        return clase, ficha
+
+    # --- positivos --------------------------------------------------------
+    esperados = caso["espera"]
+    ficha["rango_esperado"] = _rango(candidatos, esperados)
+
+    # 1. permisos: el rol ni siquiera puede ver el documento correcto.
+    if elegibles == 0 or not any(
+            any(_mismo_documento(v, e) for e in esperados) for v in visibles):
+        return "permissions", ficha
+
+    # 2. no entro al top_k.
+    if ficha["rango_esperado"] is None:
+        return "retrieval", ficha
+
+    # 3. entro, pero por debajo del umbral -> lo rechaza el gate.
+    gold = candidatos[ficha["rango_esperado"] - 1]
+    if gold.similitud < umbral:
+        return "threshold", ficha
+
+    # 4. paso el gate pero no quedo primero.
+    if ficha["rango_esperado"] > 1:
+        return "ranking", ficha
+
+    return None, ficha
+
+
+def main(slug: str, detalle: bool, guardar: str | None,
+         comparar: str | None, csv_salida: str | None) -> None:
     casos = yaml.safe_load(
         (RAIZ / "evaluacion" / f"{slug}.rag.yaml").read_text(encoding="utf-8"))["casos"]
     config = fuente.cargar(slug, raiz=RAIZ)
     umbral = config.rag.umbral_similitud
-    top_k = config.rag.top_k
 
-    print("=" * 74)
+    print("=" * 76)
     print(f"  Recuperacion de {slug} -- {len(casos)} caso(s)")
-    print(f"  umbral={umbral}  top_k={top_k}  modelo={config.rag.modelo_embeddings}")
-    print("=" * 74)
+    print(f"  umbral={umbral}  top_k={config.rag.top_k}  "
+          f"modelo={config.rag.modelo_embeddings}")
+    print("=" * 76)
 
-    # Un rol sin documentos hace fallar TODO lo suyo por un motivo que no es
-    # de recuperacion. Se cuenta una vez y se reporta aparte.
-    elegibles: dict[str, int] = {}
-    for c in casos:
-        rol = c["rol"]
-        if rol not in elegibles:
-            elegibles[rol] = contar_elegibles(slug, rol)
+    # Una consulta por rol, no por caso.
+    roles = {c["rol"] for c in casos}
+    elegibles = {r: contar_elegibles(slug, r) for r in roles}
+    visibles = {r: documentos_visibles(slug, r) for r in roles}
 
-    positivos = [c for c in casos if not c.get("sin_respuesta")]
-    negativos = [c for c in casos if c.get("sin_respuesta")]
+    conteo = {c: 0 for c in CLASES}
+    fichas: list[dict] = []
+    ok = 0
+    brechas = 0
 
+    # Recall/MRR se calculan solo sobre positivos que NO son brecha conocida:
+    # mezclar un fallo ya documentado con los demas esconde las regresiones
+    # nuevas detras de un numero que nunca se mueve.
+    medibles = 0
     aciertos = {1: 0, 3: 0, 8: 0}
     suma_rr = 0.0
-    gate_fn: list[dict] = []
-    brechas: list[dict] = []
-    medidos = 0
 
-    print("\n--- positivos (deberia recuperar el documento esperado) ---")
-    for c in positivos:
-        rol, pregunta = c["rol"], c["pregunta"]
-        fragmentos, mejor = recuperar(config, slug, rol, pregunta)
-        pos = _posicion(fragmentos, c["espera"])
-        recuperados = [f.codigo for f in fragmentos]
+    for caso in casos:
+        rol = caso["rol"]
+        candidatos = recuperar_candidatos(config, slug, rol, caso["pregunta"])
+        clase, ficha = _clasificar(caso, candidatos, umbral,
+                                   visibles[rol], elegibles[rol])
+        ficha["clase_fallo"] = clase or "ok"
+        fichas.append(ficha)
 
-        es_brecha = bool(c.get("brecha_conocida"))
-        marca = "ok " if pos == 1 else (f"@{pos}" if pos else "NO ")
-        if es_brecha:
-            marca = "brecha"
-            brechas.append({**c, "pos": pos, "recuperados": recuperados})
+        if caso.get("brecha_conocida"):
+            brechas += 1
+        elif clase:
+            conteo[clase] += 1
         else:
-            medidos += 1
-            if pos:
-                suma_rr += 1.0 / pos
+            ok += 1
+
+        if (not caso.get("sin_respuesta") and not caso.get("brecha_conocida")):
+            medibles += 1
+            r = ficha["rango_esperado"]
+            gold_pasa = (r is not None
+                         and candidatos[r - 1].similitud >= umbral)
+            if r and gold_pasa:
+                suma_rr += 1.0 / r
                 for k in (1, 3, 8):
-                    if pos <= k:
+                    if r <= k:
                         aciertos[k] += 1
-            else:
-                gate_fn.append({**c, "mejor": mejor, "recuperados": recuperados,
-                                "elegibles": elegibles[rol]})
 
-        sim = f"{mejor:.3f}" if mejor is not None else "  -  "
-        print(f"  [{marca:>6}] {sim}  ({rol}) {pregunta[:52]}")
-        if detalle and pos != 1:
-            print(f"           recupero: {recuperados or '(nada)'}")
-            print(f"           esperaba: {c['espera']}")
+        etiqueta = "ok" if not clase else clase
+        if caso.get("brecha_conocida"):
+            etiqueta = f"brecha/{clase}" if clase else "brecha"
+        s = f"{ficha['top1_score']:.3f}" if ficha["top1_score"] is not None else "  -  "
+        print(f"  [{etiqueta:>14}] {s}  ({rol}) {caso['pregunta'][:44]}")
+        if detalle and clase:
+            print(f"       esperaba {caso.get('espera') or '(nada)'}  "
+                  f"top1={ficha['top1_doc']!r}  rango={ficha['rango_esperado']}")
 
-    print("\n--- negativos (NO deberia pasar el umbral) ---")
-    gate_fp: list[dict] = []
-    for c in negativos:
-        rol, pregunta = c["rol"], c["pregunta"]
-        fragmentos, mejor = recuperar(config, slug, rol, pregunta)
-        paso = bool(fragmentos)
-        if paso:
-            gate_fp.append({**c, "mejor": mejor,
-                            "recuperados": [f.codigo for f in fragmentos]})
-        sim = f"{mejor:.3f}" if mejor is not None else "  -  "
-        print(f"  [{'FP ' if paso else 'ok ':>6}] {sim}  ({rol}) {pregunta[:52]}")
-        if detalle and paso:
-            print(f"           dejo pasar: {[f.codigo for f in fragmentos]}")
-
-    # --- resumen -------------------------------------------------------------
-    print("\n" + "=" * 74)
+    # --- resumen -----------------------------------------------------------
+    print("\n" + "=" * 76)
     print("  FRAGMENTOS VISIBLES POR ROL")
-    for rol, n in sorted(elegibles.items()):
-        aviso = "  <-- CERO: es un problema de permisos, no de recuperacion" if n == 0 else ""
-        print(f"    {rol:26} {n:5}{aviso}")
+    for rol in sorted(elegibles):
+        aviso = "   <-- CERO: es permisos, no recuperacion" if elegibles[rol] == 0 else ""
+        print(f"    {rol:26} {elegibles[rol]:5}{aviso}")
 
-    if medidos:
-        print(f"\n  RECUPERACION  (sobre {medidos} positivos medibles)")
-        for k in (1, 3, 8):
-            pct = 100.0 * aciertos[k] / medidos
-            print(f"    Recall@{k:<2}  {aciertos[k]:3}/{medidos}  {pct:5.1f}%")
-        print(f"    MRR       {suma_rr / medidos:.3f}")
-
-    print(f"\n  GATE  (umbral {umbral})")
-    print(f"    falsos negativos  {len(gate_fn):3}  (habia respuesta y no paso nada)")
-    print(f"    falsos positivos  {len(gate_fp):3}  (no habia respuesta y paso algo)")
-
-    if gate_fn:
-        print("\n  Falsos negativos -- revisar si la etiqueta esta bien antes de")
-        print("  concluir que es el umbral:")
-        for c in gate_fn:
-            m = f"{c['mejor']:.3f}" if c["mejor"] is not None else "sin candidatos"
-            print(f"    ({c['rol']}) {c['pregunta'][:46]:46} mejor={m}")
-
-    if gate_fp:
-        print("\n  Falsos positivos -- el umbral dejo pasar material que no responde:")
-        for c in gate_fp:
-            print(f"    ({c['rol']}) {c['pregunta'][:46]:46} "
-                  f"mejor={c['mejor']:.3f} -> {c['recuperados'][:3]}")
-
+    print(f"\n  CLASIFICACION  ({len(casos)} consultas)")
+    print(f"    {'ok':16} {ok:4}")
+    for c in CLASES:
+        if conteo[c]:
+            print(f"    {c:16} {conteo[c]:4}")
+    for c in CLASES:
+        if not conteo[c]:
+            print(f"    {c:16} {conteo[c]:4}")
     if brechas:
-        print(f"\n  BRECHAS CONOCIDAS ({len(brechas)}) -- no cuentan como error;")
-        print("  estan para que se note el dia que se arreglen:")
-        for c in brechas:
-            estado = f"recupero @{c['pos']}" if c["pos"] else "no recupero"
-            print(f"    ({c['rol']}) {c['pregunta'][:40]:40} {estado}")
+        print(f"    {'brechas':16} {brechas:4}  (conocidas, no cuentan como error)")
 
-    print("=" * 74)
-    if not detalle:
-        print("  Con --detalle se ve que recupero en cada fallo.")
+    if medibles:
+        print(f"\n  RECUPERACION  (sobre {medibles} positivos medibles)")
+        for k in (1, 3, 8):
+            print(f"    Recall@{k:<2}  {aciertos[k]:3}/{medibles}  "
+                  f"{100.0 * aciertos[k] / medibles:5.1f}%")
+        print(f"    MRR       {suma_rr / medibles:.3f}")
+
+    if conteo["ranking"] == 0:
+        print("\n  Nota: 'ranking' en cero -- un reranker no tendria nada que")
+        print("  rescatar hoy. Es la medicion que decide si vale su latencia.")
+
+    resumen = {"ok": ok, **conteo, "brechas": brechas,
+               "recall@1": aciertos[1], "recall@3": aciertos[3],
+               "recall@8": aciertos[8], "medibles": medibles,
+               "mrr": round(suma_rr / medibles, 4) if medibles else 0.0}
+
+    # --- instantanea / comparacion ----------------------------------------
+    if comparar:
+        ruta = INSTANTANEAS / f"{slug}.{comparar}.json"
+        if not ruta.exists():
+            print(f"\n  No existe la instantanea '{comparar}' ({ruta}).")
+        else:
+            previo = json.loads(ruta.read_text(encoding="utf-8"))
+            print(f"\n  CONTRA '{comparar}'")
+            for clave in ("ok", *CLASES, "recall@1", "recall@3", "mrr"):
+                antes, ahora = previo["resumen"].get(clave, 0), resumen.get(clave, 0)
+                if antes != ahora:
+                    signo = "+" if ahora > antes else ""
+                    print(f"    {clave:16} {antes} -> {ahora}  ({signo}{ahora - antes:g})")
+            if previo["resumen"] == resumen:
+                print("    (sin cambios)")
+
+    if guardar:
+        INSTANTANEAS.mkdir(parents=True, exist_ok=True)
+        ruta = INSTANTANEAS / f"{slug}.{guardar}.json"
+        ruta.write_text(json.dumps(
+            {"umbral": umbral, "top_k": config.rag.top_k,
+             "modelo": config.rag.modelo_embeddings,
+             "resumen": resumen, "fichas": fichas},
+            ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"\n  Instantanea guardada: {ruta.relative_to(RAIZ)}")
+
+    if csv_salida:
+        ruta = Path(csv_salida)
+        with ruta.open("w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=list(fichas[0]))
+            w.writeheader()
+            w.writerows(fichas)
+        print(f"  Fichas por caso: {ruta}")
+
+    print("=" * 76)
+
+
+def _valor(bandera: str) -> str | None:
+    if bandera in sys.argv:
+        i = sys.argv.index(bandera)
+        if i + 1 < len(sys.argv):
+            return sys.argv[i + 1]
+    return None
 
 
 if __name__ == "__main__":
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    if not args:
-        raise SystemExit("Uso: py -3.13 cli/evaluar_rag.py <slug> [--detalle]")
-    main(args[0], "--detalle" in sys.argv)
+    posicionales = [a for a in sys.argv[1:] if not a.startswith("--")]
+    banderas = {"--guardar", "--comparar", "--csv"}
+    valores = {b: _valor(b) for b in banderas}
+    slug = next((p for p in posicionales if p not in valores.values()), None)
+    if not slug:
+        raise SystemExit(
+            "Uso: py -3.13 cli/evaluar_rag.py <slug> [--detalle] "
+            "[--guardar <nombre>] [--comparar <nombre>] [--csv <archivo>]")
+    main(slug, "--detalle" in sys.argv, valores["--guardar"],
+         valores["--comparar"], valores["--csv"])

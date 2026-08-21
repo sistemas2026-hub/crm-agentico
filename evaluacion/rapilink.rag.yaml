@@ -203,30 +203,51 @@ casos:
   #  Sin estos no se puede medir el falso positivo del gate. Ojo con el
   #  criterio: no basta con que el tema suene ajeno, tiene que ser algo que
   #  de verdad NO este documentado.
+  #
+  #  'ruta' dice DE DONDE deberia salir la respuesta, y es lo que separa dos
+  #  fallos distintos cuando el gate deja pasar algo que no corresponde:
+  #
+  #    ruta: herramienta  -> lo resuelve una herramienta (WispHub, el catalogo
+  #                          de planes). Que ademas se le inyecte documentacion
+  #                          "recuperada para esta pregunta" es un fallo de
+  #                          ROUTING: material que no viene al caso, con una
+  #                          instruccion que le dice al modelo que lo use.
+  #    ruta: ninguna      -> no lo responde nadie. Si el gate lo deja pasar es
+  #                          un fallo de ANSWERABILITY: parecido semantico
+  #                          confundido con evidencia.
+
   - pregunta: la receta del ajiaco santafereno
     rol: soporte
     sin_respuesta: true
+    ruta: ninguna
 
   - pregunta: quien gano el mundial de 1986
     rol: soporte
     sin_respuesta: true
+    ruta: ninguna
 
   - pregunta: cuantos clientes activos tenemos hoy
     rol: soporte
-    sin_respuesta: true      # es una herramienta (contar_clientes), no el corpus
+    sin_respuesta: true
+    ruta: herramienta        # contar_clientes, no el corpus
 
   - pregunta: cual es el saldo de la cedula 12345678
     rol: soporte
-    sin_respuesta: true      # dato vivo de WispHub, no documentacion
+    sin_respuesta: true
+    ruta: herramienta        # dato vivo de WispHub, no documentacion
 
   - pregunta: a que hora abre la oficina
     rol: ventas
-    sin_respuesta: true      # no esta documentado en el corpus
+    sin_respuesta: true
+    ruta: ninguna            # no esta documentado en el corpus
 
   - pregunta: cuanto cuesta el plan mas caro
     rol: ventas
-    sin_respuesta: true      # los precios salen de consultar_planes_venta,
-                             # y los documentos no traen ninguno a proposito
+    sin_respuesta: true
+    ruta: herramienta        # los precios salen de consultar_planes_venta, y
+                             # los documentos no traen ninguno a proposito.
+                             # Caso de regresion permanente: saca 0.488 contra
+                             # MANUAL-VENTAS-02, que no tiene ni un precio.
 
   # --- BRECHAS CONOCIDAS ----------------------------------------------------
   #  Fallos que ya sabemos que existen. No cuentan como error de calidad: son

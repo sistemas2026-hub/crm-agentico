@@ -89,6 +89,68 @@ def contar_elegibles(tenant: str, rol: str) -> int:
     return int(fila["n"] if isinstance(fila, dict) else fila[0])
 
 
+def documentos_visibles(tenant: str, rol: str) -> set[str]:
+    """
+    Los CODIGOS de documento que este rol puede recuperar.
+
+    Complementa contar_elegibles(): ese dice cuantos fragmentos ve en total,
+    este dice cuales documentos. Hace falta para distinguir con precision dos
+    fallos que se parecen -- "el rol no ve NINGUN documento" y "el rol ve
+    documentos pero no el que responde esta pregunta". Los dos se arreglan
+    asignando roles en /manual, pero saber cual de los dos es evita revisar
+    el corpus entero cuando el hueco es de un solo documento.
+
+    Diagnostico, no camino caliente: lo usa cli/evaluar_rag.py, no el motor.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select distinct d.codigo
+                 from asistente.documents d
+                 join asistente.document_chunks c
+                   on c.document_id = d.id and c.vigente
+                where d.organization_id = %s and d.estado = 'vigente'
+                  and d.roles_permitidos is not null
+                  and %s = any(d.roles_permitidos)""",
+            (org, rol))
+        filas = cur.fetchall()
+    return {(f["codigo"] if isinstance(f, dict) else f[0]) or "" for f in filas}
+
+
+def recuperar_candidatos(config, tenant: str, rol: str,
+                         pregunta: str) -> list[Fragmento]:
+    """
+    El top_k COMPLETO, ya ordenado, SIN aplicar el umbral.
+
+    Es lo que recupera() usa por dentro. Se expone aparte porque sin ver lo
+    que quedo DEBAJO del umbral no se pueden distinguir dos fallos que desde
+    afuera son identicos:
+
+      el fragmento correcto no entro al top_k    -> problema de busqueda
+      entro, pero por debajo del umbral          -> problema de calibracion
+
+    El primero no lo arregla mover un numero; el segundo si. Lo usa
+    cli/evaluar_rag.py para clasificar cada fallo; el motor sigue llamando a
+    recuperar(), que aplica el umbral como siempre.
+    """
+    vector = vectorizar(pregunta)
+
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select codigo, titulo, version, contenido, similitud
+               from asistente.match_chunks(
+                 p_org => %s, p_query_embedding => %s::vector,
+                 p_match_count => %s, p_umbral => 0.0, p_rol => %s)""",
+            (org, str(vector), config.rag.top_k, rol))
+        filas = cur.fetchall()
+
+    return [
+        Fragmento(codigo=f["codigo"] or "", titulo=f["titulo"] or "",
+                  version=f["version"] or "", contenido=f["contenido"] or "",
+                  similitud=float(f["similitud"]))
+        for f in filas
+    ]
+
+
 def recuperar(config, tenant: str, rol: str,
               pregunta: str) -> tuple[list[Fragmento], float | None]:
     """
@@ -108,28 +170,20 @@ def recuperar(config, tenant: str, rol: str,
     Lista vacia = el corpus no cubre eso (o no hay nada asignado a este rol
     todavia). Es informacion, no un fallo: quien llama decide que hacer con
     ese silencio.
+
+    OJO con lo que significa superar el umbral: es PARECIDO SEMANTICO, no
+    "aca esta la respuesta". Medido el 21/08/2026: "cuanto cuesta el plan mas
+    caro" saca 0.488 contra un documento que no trae un solo precio a
+    proposito. El umbral es un filtro de pertinencia, no una garantia de
+    respaldo -- quien redacta la respuesta tiene que poder abstenerse igual.
     """
-    vector = vectorizar(pregunta)
-
-    with sesion(tenant) as (cur, org):
-        cur.execute(
-            """select codigo, titulo, version, contenido, similitud
-               from asistente.match_chunks(
-                 p_org => %s, p_query_embedding => %s::vector,
-                 p_match_count => %s, p_umbral => 0.0, p_rol => %s)""",
-            (org, str(vector), config.rag.top_k, rol))
-        filas = cur.fetchall()
-
-    if not filas:
+    candidatos = recuperar_candidatos(config, tenant, rol, pregunta)
+    if not candidatos:
         return [], None
 
-    mejor = max(float(f["similitud"]) for f in filas)
-    fragmentos = [
-        Fragmento(codigo=f["codigo"] or "", titulo=f["titulo"] or "",
-                  version=f["version"] or "", contenido=f["contenido"] or "",
-                  similitud=float(f["similitud"]))
-        for f in filas if float(f["similitud"]) >= config.rag.umbral_similitud
-    ]
+    mejor = max(f.similitud for f in candidatos)
+    fragmentos = [f for f in candidatos
+                  if f.similitud >= config.rag.umbral_similitud]
     return fragmentos, mejor
 
 
