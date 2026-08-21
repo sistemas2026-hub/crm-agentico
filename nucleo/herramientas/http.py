@@ -209,8 +209,24 @@ def ejecutar(herramienta, argumentos: dict, tenant: str | None = None,
     r.raise_for_status()
     crudo = r.json()
 
-    if herramienta.extraer_de and isinstance(crudo, dict) and herramienta.extraer_de in crudo:
-        crudo = crudo[herramienta.extraer_de]
+    if herramienta.extraer_de:
+        # Notacion con punto: hay respuestas con el dato util a dos niveles de
+        # profundidad ('response.hostlist' en get_onu_router_hosts). Sin esto
+        # habria que dejar pasar el nivel intermedio ENTERO por la lista
+        # blanca, que es justo como se filtro la IP del cliente por 'ping-1'.
+        for parte in herramienta.extraer_de.split("."):
+            if isinstance(crudo, dict) and parte in crudo:
+                crudo = crudo[parte]
+            else:
+                break
+
+    # Diccionario indexado por numero -> lista. Algunas APIs devuelven
+    # {"1": {...}, "2": {...}} donde cualquiera esperaria un arreglo (SmartOLT
+    # lo hace en la lista de equipos conectados). La lista blanca sabe filtrar
+    # una lista de registros; un dict con claves dinamicas no, porque los
+    # nombres de campo serian "1" y "2".
+    if isinstance(crudo, dict) and crudo and all(k.isdigit() for k in crudo):
+        crudo = list(crudo.values())
 
     _aplicar_veredictos(herramienta, crudo)
     _aplicar_mapeos(herramienta, crudo)

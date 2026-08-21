@@ -146,7 +146,8 @@ roles:
           consultar_tickets_de_cliente, contar_tickets, contar_clientes, consultar_casos_bottlecrm,
           agendar_visita_tecnica, consultar_estado_ont, consultar_senal_ont, reiniciar_ont,
           diagnosticar_falla_ont, consultar_estado_catv, activar_catv, cambiar_tipo_onu,
-          consultar_incidente_red, consultar_tecnicos, crear_ticket, responder_ticket,
+          consultar_incidente_red, consultar_dispositivos_conectados,
+          consultar_tecnicos, crear_ticket, responder_ticket,
           actualizar_estado_ticket]
     campos_permitidos:
       consultar_cliente: [id_servicio, nombre, cedula, estado, email, telefono, direccion, localidad,
@@ -186,6 +187,10 @@ roles:
             "ONU details.Run state", "ONU details.Last down time", "Optical status.Rx optical power(dBm)"]
       consultar_estado_catv: [catv]
       activar_catv: [response]
+      # Ni 'MACAddress' ni 'IPAddress': son datos del aparato del cliente y
+      # no aportan nada al diagnostico. Con el nombre, si esta activo y si
+      # entro por WiFi o por cable alcanza para separar los tres casos.
+      consultar_dispositivos_conectados: [HostName, Active, InterfaceType]
       cambiar_tipo_onu: [response, status]
       # zona/caja son topologia de red -- necesaria para soporte, no para
       # cliente_final (mismo criterio que olt_id/board/port en la skill
@@ -499,11 +504,56 @@ roles:
       - Si ping_cliente SI respondio y el equipo esta en linea con señal
         'aceptable': cuentale en una frase lo que encontraste ("tu equipo
         esta en linea y la señal te llega bien") -- nunca el numero en
-        dBm ni el nombre tecnico de la causa. Y reinicia la ONT con
-        reiniciar_ont: es un equipo electronico que a veces lo necesita, y
-        ya descartaste que el problema sea de red. Dile que queda sin
-        conexion uno o dos minutos. Una sola vez por conversacion: si ya
-        lo hiciste y sigue igual, deriva a un humano.
+        dBm ni el nombre tecnico de la causa.
+
+        ANTES DE REINICIAR NADA, llama consultar_dispositivos_conectados.
+        Hasta aca el diagnostico llega a la ONT; eso deja ver adentro de la
+        casa, y cambia por completo que corresponde hacer:
+
+        - VARIOS equipos activos, de WiFi y de cable: el servicio llega
+          bien y la conexion funciona. Lo que falla es UN dispositivo
+          puntual, no el internet. NO reinicies la ONT -- dejarias sin
+          conexion a toda la casa para arreglar un telefono. Diselo con lo
+          que ves ("veo tu computador y tu celular conectados ahora
+          mismo") y trabaja sobre ESE aparato: que lo reinicie, que se
+          olvide de la red y se vuelva a conectar.
+
+        - Solo equipos de CABLE activos (InterfaceType 'Ethernet') y
+          ninguno de WiFi ('802.11'): el internet llega, lo que fallo es el
+          WiFi. Sigue el procedimiento de WiFi del manual (banda de 5 GHz,
+          clave, alcance) -- no es una falla del servicio.
+
+        - Lista VACIA con la ONT en linea: no hay NADA conectado, ni por
+          WiFi ni por cable. En la mayoria de los equipos de Rapilink el
+          router ES la ONT (4.016 de 5.329 tienen WiFi integrado, medido el
+          19/08/2026), asi que un WiFi caido se arregla reiniciandola:
+          reinicia con reiniciar_ont, que ademas levanta la radio.
+
+          Solo si despues del reinicio la lista sigue vacia hay que
+          preguntar -- ahi si puede haber un router aparte del cliente,
+          apagado o desconectado.
+
+        - Si la herramienta FALLA (el equipo no contesta por TR-069, o no
+          lo tiene habilitado): no pudiste ver, que NO es lo mismo que "no
+          hay nadie conectado". Ahi vuelve a la pregunta, que es lo que se
+          hacia antes de tener esto: en cuantos aparatos falla, y si hay
+          alguno conectado por cable.
+
+          Y OJO con lo que el cliente YA te dijo. Si te conto que le falla
+          en UN aparato -- "solo en el celular", "en el computador si
+          anda" -- eso ya responde la pregunta: el internet llega, falla
+          ese aparato. NO reinicies la ONT: dejarias sin conexion a toda la
+          casa para arreglar un telefono, y encima no lo arregla. Trabaja
+          sobre ese equipo (que lo reinicie, que olvide la red WiFi y se
+          vuelva a conectar). El reinicio remoto es para cuando NO anda
+          nada, no para un aparato suelto.
+
+        Solo cuando los equipos conectados no expliquen la falla -- o no se
+        hayan podido ver -- reinicia la ONT con reiniciar_ont: es un equipo
+        electronico que a veces lo necesita, y ya descartaste que el
+        problema sea de red. Dile que queda sin conexion uno o dos minutos.
+        Una sola vez por conversacion: si ya lo hiciste y sigue igual,
+        corresponde visita tecnica.
 
       - Si el equipo figura Offline: usa diagnosticar_falla_ont para saber
         POR QUE se cayo. Te devuelve la causa ya interpretada, y segun
@@ -681,7 +731,7 @@ roles:
     puede_consultar: [consultar_mi_servicio, ping_cliente, derivar_a_area,
           consultar_plan_tv, consultar_estado_ont, consultar_senal_ont,
           reiniciar_ont, diagnosticar_falla_ont, consultar_estado_catv, activar_catv,
-          cambiar_tipo_onu]
+          cambiar_tipo_onu, consultar_dispositivos_conectados]
     campos_permitidos:
       consultar_mi_servicio: [estado, plan_internet, ssid_router_wifi]
       # Con notacion de punto, NO el objeto entero: 'ping-1' trae adentro el
@@ -711,6 +761,10 @@ roles:
       consultar_estado_catv: [catv]
       # Solo la confirmacion del proveedor ("CATV enabled"), nada mas.
       activar_catv: [response]
+      # Ni 'MACAddress' ni 'IPAddress': son datos del aparato del cliente y
+      # no aportan nada al diagnostico. Con el nombre, si esta activo y si
+      # entro por WiFi o por cable alcanza para separar los tres casos.
+      consultar_dispositivos_conectados: [HostName, Active, InterfaceType]
       cambiar_tipo_onu: [response, status]
     nunca_revelar: [password_servicio, password_cpe, password_router_wifi, usuario_router_wifi,
           cedula, direccion, coordenadas, ip, mac_cpe, sn_onu, sectorial, router.nombre]
@@ -2486,6 +2540,51 @@ herramientas:
       - herramienta: consultar_estado_catv
         campo: catv
         valor: Disabled
+
+  - nombre: consultar_dispositivos_conectados
+    tipo: http
+    descripcion: >
+      Los equipos que estan conectados AHORA al router del cliente, via
+      TR-069. Es lo unico que deja ver del lado de adentro de la casa: hasta
+      aca el diagnostico llega a la ONT y despues hay que preguntar.
+
+      Cuando el cliente dice que no tiene internet pero la ONT responde y la
+      señal esta bien, esto separa los tres casos que antes se distinguian
+      preguntando:
+
+      - Varios equipos activos, de WiFi Y de cable: el servicio llega. Falla
+        UN dispositivo puntual, no la conexion.
+      - Solo equipos de cable activos ('InterfaceType' Ethernet) y ninguno de
+        WiFi ('802.11'): el problema es el WiFi -- banda, clave o alcance.
+      - Lista vacia con la ONT en linea: no hay NADA conectado. O el router
+        del cliente esta apagado, o el WiFi entero se cayo.
+
+      'HostName' trae el nombre real del equipo ("DESKTOP-C8V2688", el
+      celular de alguien). Sirve para hablarle concreto -- "veo tu computador
+      conectado pero ningun celular" -- en vez de interrogarlo.
+
+      OJO CON EL ERROR: si responde 'The ONU is not responding to TR-069 ACS
+      requests', eso NO es "no hay equipos conectados", es "no pude mirar".
+      Medido el 19/08/2026: de 5 ONUs con TR-069 habilitado, 2 contestaron
+      con datos, 1 con lista vacia y 2 fallaron asi. Tratar un fallo como
+      lista vacia le diria a alguien que no tiene nada conectado cuando en
+      realidad no se pudo ver.
+
+      No la llames si la ONT esta caida o la señal esta fuera de rango: el
+      problema esta antes y los equipos de adentro no importan todavia.
+    solo_lectura: true
+    roles_permitidos: [soporte_tecnico_cliente, soporte]
+    base_url_ref: SMARTOLT_SUBDOMINIO
+    endpoint: /api/onu/get_onu_router_hosts/{sn_onu}
+    metodo: GET
+    auth_ref: SMARTOLT_API_KEY
+    auth_esquema: ""
+    auth_header: X-Token
+    inyectar_sesion:
+      sn_onu: sn_onu
+    # Dos niveles, y el de adentro viene indexado por numero en vez de ser
+    # una lista -- el motor lo normaliza (ver nucleo/herramientas/http.py).
+    extraer_de: response.hostlist
 
   - nombre: consultar_estado_catv
     tipo: http

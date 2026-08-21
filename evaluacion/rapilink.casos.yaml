@@ -298,7 +298,10 @@ casos:
     espera:
       deriva_a: soporte_tecnico_cliente
       # Nada de mandarlo a revisar la casa cuando no se pudo mirar la central.
-      responde_sin: ["cable", "coaxial", "sintoniz", "hdmi", "antena"]
+      # Lo que NO puede hacer es afirmar que de nuestro lado esta bien sin
+      # haberlo podido mirar. 'antena' salio de la lista: aparece tanto en la
+      # respuesta mala como en una legitima.
+      responde_sin: ["de nuestro lado", "sale bien", "señal de TV sale"]
 
   # --- television: el equipo que figura sin soporte de CATV ----------------
   # Reportado el 18/08/2026. El tipo con que la ONU quedo registrada en
@@ -348,11 +351,14 @@ casos:
       # Con una cajita aparte, el puerto de CATV de la ONU no interviene:
       # cambiarle el tipo no arregla nada y ademas toca la red sin motivo.
       no_usa: [cambiar_tipo_onu, activar_catv]
-      # Y esa cajita es PASIVA -- no lleva corriente ni tiene luces.
-      # Reportado el 18/08/2026: el agente pregunto "¿esta encendida? ¿tiene
-      # alguna lucecita prendida?" sobre un aparato que no se enchufa. Al
-      # cliente le queda claro que no sabemos que le instalamos.
-      responde_sin: ["encendid", "prendid", "lucecita", "enchuf", "corriente"]
+      # Solo 'lucecita', que es la palabra del reporte original y no aparece
+      # en ninguna respuesta legitima. Las otras ('enchufado', 'corriente',
+      # 'encendida') se cayeron: el agente las usa BIEN, sea explicando que
+      # la cajita es pasiva ("no se enchufa ni tiene luces") o preguntando
+      # por la corriente del equipo de INTERNET, que si la necesita. Tercera
+      # vez que una afirmacion sobre palabras rebota con el comportamiento
+      # correcto -- la traza es lo que hay que mirar, no la redaccion.
+      responde_sin: ["lucecita"]
 
   # El nombre del plan NO dice si incluye television: hay 'PLAN HOGAR' con TV
   # y 'PLAN INTERNET 300MB' sin ella, y quien mira solo el nombre se equivoca
