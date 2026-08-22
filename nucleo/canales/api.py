@@ -713,14 +713,16 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 # mismo codigo. Con la variable separada, el turno cae en la
                 # rama de escalada sin visita, que le dice la verdad: que lo
                 # toma una persona.
-                nombre_ticket = (
+                entrada_ticket = (
                     agendamiento.ticket_para_escalar(config, caso_manual,
                                                      estado["historial"])
                     if caso_manual and not id_ticket_auto else None)
+                nombre_ticket = entrada_ticket.herramienta if entrada_ticket else None
                 if nombre_ticket:
                     id_ticket_operativo = agendamiento.agendar(
                         config, tenant, estado["sesion"], nombre_ticket,
-                        (evaluacion.get("resumen", "") or "")[:400])
+                        (evaluacion.get("resumen", "") or "")[:400],
+                        area=entrada_ticket.area)
                     if id_ticket_operativo:
                         print(f"[escalamiento] ticket operativo #{id_ticket_operativo} "
                               f"creado con '{nombre_ticket}'")

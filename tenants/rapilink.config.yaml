@@ -1711,7 +1711,7 @@ herramientas:
     # (1=Nuevo, prioridad 2=Normal), no como la palabra que se ve al leer
     # ("Nuevo"/"Normal" fallan la validacion).
     argumentos_fijos:
-      tecnico: "1428053"                          # Mario Vasquez / sistemas@rapilink-sas
+      tecnico: "1428053"                          # Mario Vasquez -- RESPALDO, ver abajo
       email_tecnico: mario.vasquez.moreno@gmail.com
       asunto: Problemas De Tv
       asuntos_default: Problemas De Tv
@@ -1726,6 +1726,11 @@ herramientas:
     # '3' de fecha_final se edita desde Configuracion > Personalidad del
     # asistente > Plazos de tickets -- no hace falta tocar este archivo
     # para cambiarlo.
+    # El asignado sale del area del ticket cuando se puede resolver (ver
+    # 'responsable_de' en nucleo/seguimiento/agendamiento.py). El de arriba es
+    # el respaldo: sin esto TODOS los tickets, de todos los casos, caian sobre
+    # la misma persona.
+    argumentos_sobrescribibles: [tecnico]
     fechas_automaticas:
       fecha_inicio: 0
       fecha_final: 3
@@ -1777,7 +1782,7 @@ herramientas:
     auth_ref: WISPHUB_API_KEY
     auth_esquema: Api-Key
     argumentos_fijos:
-      tecnico: "1428053"                          # Mario Vasquez / sistemas@rapilink-sas
+      tecnico: "1428053"                          # Mario Vasquez -- RESPALDO, ver abajo
       email_tecnico: mario.vasquez.moreno@gmail.com
       asunto: No Tiene Internet
       asuntos_default: No Tiene Internet
@@ -1786,6 +1791,11 @@ herramientas:
       departamento: Soporte Técnico
       departamentos_default: Soporte Técnico
       origen_reporte: oficina
+    # El asignado sale del area del ticket cuando se puede resolver (ver
+    # 'responsable_de' en nucleo/seguimiento/agendamiento.py). El de arriba es
+    # el respaldo: sin esto TODOS los tickets, de todos los casos, caian sobre
+    # la misma persona.
+    argumentos_sobrescribibles: [tecnico]
     fechas_automaticas:
       fecha_inicio: 0
       fecha_final: 3
@@ -1829,7 +1839,7 @@ herramientas:
     auth_ref: WISPHUB_API_KEY
     auth_esquema: Api-Key
     argumentos_fijos:
-      tecnico: "1428053"                          # Mario Vasquez / sistemas@rapilink-sas
+      tecnico: "1428053"                          # Mario Vasquez -- RESPALDO, ver abajo
       email_tecnico: mario.vasquez.moreno@gmail.com
       asunto: Internet Lento
       asuntos_default: Internet Lento
@@ -1838,6 +1848,11 @@ herramientas:
       departamento: Soporte Técnico
       departamentos_default: Soporte Técnico
       origen_reporte: oficina
+    # El asignado sale del area del ticket cuando se puede resolver (ver
+    # 'responsable_de' en nucleo/seguimiento/agendamiento.py). El de arriba es
+    # el respaldo: sin esto TODOS los tickets, de todos los casos, caian sobre
+    # la misma persona.
+    argumentos_sobrescribibles: [tecnico]
     fechas_automaticas:
       fecha_inicio: 0
       fecha_final: 3
@@ -1867,7 +1882,7 @@ herramientas:
     auth_ref: WISPHUB_API_KEY
     auth_esquema: Api-Key
     argumentos_fijos:
-      tecnico: "1428053"                          # Mario Vasquez / sistemas@rapilink-sas
+      tecnico: "1428053"                          # Mario Vasquez -- RESPALDO, ver abajo
       email_tecnico: mario.vasquez.moreno@gmail.com
       asunto: Internet Lento/Niveles Altos
       asuntos_default: Internet Lento/Niveles Altos
@@ -1876,6 +1891,11 @@ herramientas:
       departamento: Soporte Técnico
       departamentos_default: Soporte Técnico
       origen_reporte: oficina
+    # El asignado sale del area del ticket cuando se puede resolver (ver
+    # 'responsable_de' en nucleo/seguimiento/agendamiento.py). El de arriba es
+    # el respaldo: sin esto TODOS los tickets, de todos los casos, caian sobre
+    # la misma persona.
+    argumentos_sobrescribibles: [tecnico]
     fechas_automaticas:
       fecha_inicio: 0
       fecha_final: 3
@@ -3385,11 +3405,13 @@ escalamiento:
   ticket_al_escalar:
     internet_lento:
       - herramienta: crear_ticket_lentitud_niveles
+        area: soporte_tecnico
         condiciones:
           - herramienta: consultar_senal_ont
             campo: onu_signal_1490_veredicto
             contiene: "fuera de rango"
       - herramienta: crear_ticket_lentitud
+        area: soporte_tecnico
   evidencia_suficiente:
     no_internet:
       - herramienta: diagnosticar_falla_ont

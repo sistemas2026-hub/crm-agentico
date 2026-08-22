@@ -780,7 +780,8 @@ def _veces_ejecutada(herramienta, historial: list[dict]) -> int:
     return n
 
 
-def _resolver_argumentos(herramienta, sesion, argumentos_modelo: dict) -> dict:
+def _resolver_argumentos(herramienta, sesion, argumentos_modelo: dict,
+                         sobrescribir: dict | None = None) -> dict:
     """
     Los argumentos REALES que se le mandan a una API, a partir de lo que el
     modelo propuso -- filtros traducidos (fail-closed: solo lo declarado en
@@ -812,6 +813,19 @@ def _resolver_argumentos(herramienta, sesion, argumentos_modelo: dict) -> dict:
     # Constantes del tenant, nunca decididas por el modelo (ver el comentario
     # de 'argumentos_fijos' en schema.py).
     argumentos.update(herramienta.argumentos_fijos)
+
+    # Y despues, lo que el CODIGO decidio para esta llamada puntual -- solo
+    # sobre las claves que la herramienta declaro sobrescribibles. Va DESPUES
+    # de los fijos a proposito: el valor de la config pasa a ser el respaldo,
+    # no la ultima palabra.
+    #
+    # 'sobrescribir' no llega por ningun camino del modelo: lo arma quien
+    # llama, en codigo. La lista blanca de claves esta igual, para que un
+    # llamador nuevo no pueda cambiar algo que el tenant quiso fijo sin
+    # haberlo declarado.
+    for clave, valor in (sobrescribir or {}).items():
+        if clave in herramienta.argumentos_sobrescribibles and valor:
+            argumentos[clave] = valor
 
     # Fechas calculadas en el momento (ver 'fechas_automaticas' en
     # schema.py). Formato DD/MM/AAAA HH:MM: es lo que exige WispHub hoy, el
@@ -855,7 +869,8 @@ def _resolver_argumentos(herramienta, sesion, argumentos_modelo: dict) -> dict:
 
 def _ejecutar_tool(herramienta, sesion, argumentos_modelo: dict,
                    tenant: str | None = None,
-                   variables_tenant: dict | None = None) -> dict | list:
+                   variables_tenant: dict | None = None,
+                   sobrescribir: dict | None = None) -> dict | list:
     argumentos_modelo = argumentos_modelo or {}
 
     if herramienta.tipo == "agregado":
@@ -865,7 +880,8 @@ def _ejecutar_tool(herramienta, sesion, argumentos_modelo: dict,
         # traduccion de filtros adentro.
         return ejecutor_agregado.ejecutar(herramienta, argumentos_modelo, tenant)
 
-    argumentos = _resolver_argumentos(herramienta, sesion, argumentos_modelo)
+    argumentos = _resolver_argumentos(herramienta, sesion, argumentos_modelo,
+                                      sobrescribir)
 
     if herramienta.tipo == "interno" and herramienta.detecta_incidente:
         return ejecutor_incidentes.detectar(herramienta, argumentos, tenant, variables_tenant)

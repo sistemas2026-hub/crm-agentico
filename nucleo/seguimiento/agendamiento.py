@@ -35,6 +35,7 @@ import json
 
 from nucleo.modelo import cliente
 from nucleo.modelo.motor import _buscar_campo, _ejecutar_tool
+from nucleo.persistencia import db as persistencia
 from nucleo.recuperacion import busqueda
 
 
@@ -201,7 +202,7 @@ def veto_de_agendamiento(config, caso: str, historial: list[dict]) -> str | None
         (config.escalamiento.no_agendar_si or {}).get(caso), historial)
 
 
-def ticket_para_escalar(config, caso: str, historial: list[dict]) -> str | None:
+def ticket_para_escalar(config, caso: str, historial: list[dict]):
     """
     Que herramienta crea el ticket operativo al pasar este caso a una persona.
 
@@ -219,9 +220,9 @@ def ticket_para_escalar(config, caso: str, historial: list[dict]) -> str | None:
     """
     for entrada in (config.escalamiento.ticket_al_escalar or {}).get(caso) or []:
         if not entrada.condiciones:
-            return entrada.herramienta
+            return entrada
         if _primera_que_cumple(entrada.condiciones, historial):
-            return entrada.herramienta
+            return entrada
     return None
 
 
@@ -249,8 +250,52 @@ def _primera_que_cumple(condiciones, historial: list[dict]) -> str | None:
     return None
 
 
+def responsable_de(tenant: str, area: str, sistema: str) -> tuple[str, str] | None:
+    """
+    A nombre de quien se abre el trabajo de un area: (identificador, nombre)
+    en el sistema externo.
+
+    Devuelve None -- y entonces se usa el asignado fijo de la herramienta --
+    en dos casos, y los dos a proposito:
+
+      nadie      el area no tiene gente con identidad en ese sistema. El
+                 ticket sale igual, a nombre del fijo: dejar de abrirlo seria
+                 perder el trabajo por un dato de configuracion.
+      varios     dos o mas personas del area podrian recibirlo y no hay forma
+                 de elegir sin inventar una regla. Se avisa por log en vez de
+                 tomar una al azar: un ticket asignado arbitrariamente parece
+                 correcto y no lo es.
+
+    El dia que un area tenga varias personas hara falta declarar cual es la
+    responsable. Hasta entonces esto no adivina.
+    """
+    try:
+        areas = persistencia.areas_de_colaboradores(tenant)
+        identidades = persistencia.identidades_externas(tenant, sistema)
+    except Exception as e:
+        print(f"[agendamiento] no se pudo resolver el responsable de '{area}': "
+              f"{type(e).__name__}: {e}")
+        return None
+
+    candidatos = [
+        (identidades[p]["identificador"], identidades[p].get("nombre_visible") or "")
+        for p, a in areas.items()
+        if a == area and p in identidades and identidades[p].get("identificador")
+    ]
+    if not candidatos:
+        print(f"[agendamiento] el area '{area}' no tiene a nadie con identidad "
+              f"en '{sistema}': el ticket va al asignado fijo")
+        return None
+    if len(candidatos) > 1:
+        print(f"[agendamiento] el area '{area}' tiene {len(candidatos)} personas "
+              f"con identidad en '{sistema}' y no hay una declarada como "
+              f"responsable: el ticket va al asignado fijo")
+        return None
+    return candidatos[0]
+
+
 def agendar(config, tenant: str, sesion, nombre_herramienta: str,
-           descripcion: str) -> str | None:
+           descripcion: str, area: str = "") -> str | None:
     """
     Ejecuta la herramienta de agendamiento DIRECTO, en codigo -- nunca via
     tool-calling del modelo (el especialista que atiende al cliente ni
@@ -276,8 +321,20 @@ def agendar(config, tenant: str, sesion, nombre_herramienta: str,
         return None
 
     try:
+        # A nombre de quien. Solo si el tenant declaro un sistema externo y
+        # este ticket dijo de que area es.
+        sobrescribir = None
+        cfg = getattr(config, "identidad_externa", None)
+        if area and cfg:
+            quien = responsable_de(tenant, area, cfg.sistema)
+            if quien:
+                sobrescribir = {"tecnico": quien[0]}
+                print(f"[agendamiento] el ticket se abre a nombre de "
+                      f"{quien[1] or quien[0]} (area '{area}')")
+
         respuesta = _ejecutar_tool(
-            herramienta, sesion, {"servicio": servicio, "descripcion": descripcion}, tenant)
+            herramienta, sesion, {"servicio": servicio, "descripcion": descripcion},
+            tenant, sobrescribir=sobrescribir)
         # 'id_ticket', no 'id' -- _ejecutar_tool devuelve la respuesta CRUDA
         # de WispHub (sin pasar por listas_blancas.filtrar_campos, que no
         # renombra nada), y el campo real del ticket es 'id_ticket' (ver

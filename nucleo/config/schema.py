@@ -771,6 +771,18 @@ class Herramienta(Base):
     # modelo si propone). Ej.: ping_cliente necesita 'pings'/'arp_ping' fijos
     # -- no son un dato de negocio que el modelo deba decidir cada vez.
     argumentos_fijos: dict[str, Any] = Field(default_factory=dict)
+    # Cuales de esos fijos puede decidir el CODIGO en el momento (nunca el
+    # modelo: esto no viaja por tool-calling).
+    #
+    # Existe por un caso concreto: el tecnico al que se le asigna un ticket
+    # estaba fijo, asi que TODOS los tickets de todos los casos caian sobre la
+    # misma persona. El valor de la config pasa a ser el respaldo -- lo que se
+    # usa si el codigo no pudo resolver a nadie -- en vez de la unica opcion.
+    #
+    # Sin esto, la unica salida era declarar una herramienta casi identica por
+    # cada variante, que es como ya terminamos con cuatro que solo se
+    # diferencian en el asunto.
+    argumentos_sobrescribibles: list[str] = Field(default_factory=list)
     # Como argumentos_fijos, pero calculados en el momento de la llamada en
     # vez de un valor congelado en el YAML -- ej. 'fecha_inicio' tiene que
     # ser AHORA, no la fecha en que se escribio la config. Clave: nombre del
@@ -1144,6 +1156,14 @@ class TicketEscalado(Base):
     """
     herramienta: str
     condiciones: list[Precondicion] = Field(default_factory=list)
+    # A que area del equipo le corresponde este trabajo. Con eso el codigo
+    # resuelve a nombre de QUIEN se abre el ticket, en vez de dejarlo en el
+    # tecnico fijo de la herramienta -- que hacia que todos los tickets de
+    # todos los casos cayeran sobre la misma persona.
+    #
+    # Vacio = se usa el fijo. Es el respaldo, no un error: un caso que no
+    # corresponde a ningun area declarada tiene que poder abrir ticket igual.
+    area: str = ""
 
 
 class Escalamiento(Base):
