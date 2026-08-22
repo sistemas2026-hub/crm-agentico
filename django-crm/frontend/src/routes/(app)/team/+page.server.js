@@ -64,6 +64,7 @@ export const actions = {
     const form = await request.formData();
     const email = form.get('email')?.toString().trim();
     const role = form.get('role')?.toString() || 'USER';
+    const name = form.get('name')?.toString().trim() || '';
     const area = form.get('area')?.toString().trim() || '';
     const externo = form.get('externo')?.toString().trim() || '';
     const externoNombre = form.get('externo_nombre')?.toString().trim() || '';
@@ -71,7 +72,7 @@ export const actions = {
     if (!ROLES.includes(role)) return fail(400, { invite: { error: 'Elegí un rol válido.' } });
 
     try {
-      await inviteUser({ cookies }, { email, role });
+      await inviteUser({ cookies }, { email, role, name });
     } catch (/** @type {any} */ err) {
       return fail(err?.status === 403 ? 403 : 400, {
         invite: {

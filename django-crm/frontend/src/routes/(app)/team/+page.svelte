@@ -117,7 +117,20 @@
           class="v2-card"
           style="padding:14px 15px;margin-bottom:18px;display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap"
         >
-          <div style="flex:1;min-width:220px">
+          <div style="flex:1;min-width:170px">
+            <label class="v2-label" for="invite-name" style="display:block;margin-bottom:4px">
+              Nombre
+            </label>
+            <input
+              id="invite-name"
+              name="name"
+              type="text"
+              class="v2-input"
+              style="width:100%"
+              placeholder="Nombre y apellido"
+            />
+          </div>
+          <div style="flex:1;min-width:200px">
             <label class="v2-label" for="invite-email" style="display:block;margin-bottom:4px">
               Correo de la persona
             </label>

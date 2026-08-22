@@ -175,7 +175,7 @@ export async function listTeam({ cookies }) {
  * member's role), unlike a member setting their own.
  *
  * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
- * @param {{ email: string, role: string }} body
+ * @param {{ email: string, role: string, name?: string }} body
  */
 /**
  * El id de PERFIL de alguien, por su correo.

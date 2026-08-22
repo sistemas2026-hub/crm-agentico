@@ -513,6 +513,17 @@ class CreateUserSerializer(serializers.ModelSerializer):
         model = User
         fields = (
             "email",
+            # `name` existe en el modelo desde siempre y NO estaba aca, asi que
+            # no habia forma de cargarlo al dar de alta: la persona quedaba
+            # mostrandose por su correo hasta que entrara y lo escribiera ella
+            # misma. Para una pantalla donde hay que reconocer a alguien y
+            # decidir a quien se le asigna trabajo, "quien es" no puede
+            # depender de que la persona inicie sesion primero.
+            #
+            # No es un campo que otorgue permisos -- describe a la persona, no
+            # su acceso-- asi que no entra en el criterio de PRIVILEGED_FIELDS
+            # de CreateProfileSerializer.
+            "name",
             "profile_pic",
         )
 
