@@ -201,6 +201,12 @@ def main(slug: str, detalle: bool, guardar: str | None,
     visibles = {r: documentos_visibles(slug, r) for r in roles}
 
     conteo = {c: 0 for c in CLASES}
+    # Las brechas conocidas se cuentan APARTE y por clase. Contarlas dentro
+    # de 'conteo' escondería regresiones nuevas detrás de un número que ya
+    # se sabía alto; no mostrarlas por clase produce un reporte que se lee
+    # como contradictorio ("permissions 0" arriba y un fallo de permissions
+    # listado abajo). Se cuentan las dos cosas y se dice cuál es cuál.
+    conteo_brechas = {c: 0 for c in CLASES}
     fichas: list[dict] = []
     ok = 0
     brechas = 0
@@ -222,6 +228,8 @@ def main(slug: str, detalle: bool, guardar: str | None,
 
         if caso.get("brecha_conocida"):
             brechas += 1
+            if clase:
+                conteo_brechas[clase] += 1
         elif clase:
             conteo[clase] += 1
         else:
@@ -254,16 +262,20 @@ def main(slug: str, detalle: bool, guardar: str | None,
         aviso = "   <-- CERO: es permisos, no recuperacion" if elegibles[rol] == 0 else ""
         print(f"    {rol:26} {elegibles[rol]:5}{aviso}")
 
-    print(f"\n  CLASIFICACION  ({len(casos)} consultas)")
+    medidos = len(casos) - brechas
+    print(f"\n  CLASIFICACION  ({medidos} consultas medidas"
+          f"{f' + {brechas} brechas conocidas aparte' if brechas else ''})")
     print(f"    {'ok':16} {ok:4}")
-    for c in CLASES:
-        if conteo[c]:
-            print(f"    {c:16} {conteo[c]:4}")
-    for c in CLASES:
-        if not conteo[c]:
-            print(f"    {c:16} {conteo[c]:4}")
+    for c in sorted(CLASES, key=lambda x: -conteo[x]):
+        extra = f"   (+{conteo_brechas[c]} en brechas)" if conteo_brechas[c] else ""
+        print(f"    {c:16} {conteo[c]:4}{extra}")
     if brechas:
-        print(f"    {'brechas':16} {brechas:4}  (conocidas, no cuentan como error)")
+        detalle_b = ", ".join(f"{c}={conteo_brechas[c]}"
+                              for c in CLASES if conteo_brechas[c])
+        print(f"\n    brechas conocidas {brechas:4}  ({detalle_b or 'sin clase'})")
+        print("    ^ EXCLUIDAS de los contadores de arriba y de Recall/MRR: son")
+        print("      fallos ya documentados. Estan para que se note cuando se")
+        print("      arreglen, no para inflar el error de cada corrida.")
 
     if medibles:
         print(f"\n  RECUPERACION  (sobre {medibles} positivos medibles)")
@@ -276,7 +288,9 @@ def main(slug: str, detalle: bool, guardar: str | None,
         print("\n  Nota: 'ranking' en cero -- un reranker no tendria nada que")
         print("  rescatar hoy. Es la medicion que decide si vale su latencia.")
 
-    resumen = {"ok": ok, **conteo, "brechas": brechas,
+    resumen = {"consultas": len(casos), "medidas": medidos,
+               "ok": ok, **conteo, "brechas": brechas,
+               "brechas_por_clase": {c: n for c, n in conteo_brechas.items() if n},
                "recall@1": aciertos[1], "recall@3": aciertos[3],
                "recall@8": aciertos[8], "medibles": medibles,
                "mrr": round(suma_rr / medibles, 4) if medibles else 0.0}
