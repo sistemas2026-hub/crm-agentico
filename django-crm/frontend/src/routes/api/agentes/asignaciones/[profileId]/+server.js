@@ -32,7 +32,24 @@ export async function PUT({ params, request, locals, fetch }) {
       {
         method: 'PUT',
         headers: headersMotor({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ roles: cuerpo?.roles ?? [], tenant })
+        // Se reenvia TODO lo que la pantalla mando, no solo los agentes.
+        //
+        // Esto solo pasaba 'roles', asi que el area y el usuario del sistema
+        // externo se perdian aca en silencio: el motor contestaba 200 porque
+        // desde su lado nunca llegaron esos campos, y la pantalla mostraba
+        // "guardado" sobre un cambio que no ocurrio.
+        //
+        // Se me paso porque probe el endpoint del motor directamente -- donde
+        // andaba-- y no por el camino que de verdad usa la pantalla. Un
+        // intermediario que recorta el cuerpo no falla: miente.
+        body: JSON.stringify({
+          tenant,
+          roles: cuerpo?.roles ?? [],
+          ...(cuerpo?.area !== undefined ? { area: cuerpo.area } : {}),
+          ...(cuerpo?.identidad_externa !== undefined
+            ? { identidad_externa: cuerpo.identidad_externa }
+            : {})
+        })
       }
     );
     const datos = await resp.json();
