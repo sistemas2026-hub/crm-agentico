@@ -177,6 +177,38 @@ export async function listTeam({ cookies }) {
  * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
  * @param {{ email: string, role: string }} body
  */
+/**
+ * El id de PERFIL de alguien, por su correo.
+ *
+ * Existe porque `POST /users/` no devuelve el perfil que acaba de crear --
+ * responde `{error:false, message:'User Created Successfully'}` y nada mas.
+ * Y el id de perfil es justo lo que necesita el asistente para asignarle sus
+ * agentes, asi que hay que volver a preguntar por el.
+ *
+ * Se busca en activos e inactivos: una cuenta que ya existia en otra
+ * organizacion se reutiliza tal cual, y podria no entrar como activa.
+ *
+ * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
+ * @param {string} email
+ * @returns {Promise<string|null>} el id de perfil, o null si no aparecio
+ */
+export async function perfilPorCorreo({ cookies }, email) {
+  const buscado = (email || '').trim().toLowerCase();
+  if (!buscado) return null;
+  const resp = await apiRequest('/users/', {}, { cookies });
+  const listas = [
+    resp?.active_users?.active_users ?? [],
+    resp?.inactive_users?.inactive_users ?? []
+  ];
+  for (const lista of listas) {
+    for (const p of lista) {
+      const correo = (p?.user_details?.email || '').trim().toLowerCase();
+      if (correo && correo === buscado) return p.id;
+    }
+  }
+  return null;
+}
+
 export function inviteUser({ cookies }, body) {
   return apiRequest('/users/', { method: 'POST', body }, { cookies });
 }

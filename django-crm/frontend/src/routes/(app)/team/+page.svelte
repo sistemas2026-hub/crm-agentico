@@ -128,6 +128,30 @@
               <option value="ADMIN">Administrador</option>
             </select>
           </div>
+          <!--
+            El area va en el MISMO formulario a proposito. Antes eran dos
+            pantallas para una sola decision: se creaba la persona aca y habia
+            que ir a /agentes/asignaciones a decirle con que agente trabaja.
+            Quien se saltaba el segundo paso dejaba a alguien creado y sin
+            poder hacer nada, sin ninguna señal de que faltaba algo.
+
+            Sigue siendo opcional: si el asistente no responde, 'areas' llega
+            vacio y el selector no se muestra -- invitar tiene que funcionar
+            igual.
+          -->
+          {#if data.areas?.length}
+            <div>
+              <label class="v2-label" for="invite-area" style="display:block;margin-bottom:4px">
+                Área de trabajo
+              </label>
+              <select id="invite-area" name="area" class="v2-input" style="width:170px">
+                <option value="">Sin asignar</option>
+                {#each data.areas as area}
+                  <option value={area}>{area}</option>
+                {/each}
+              </select>
+            </div>
+          {/if}
           <button class="v2-btn v2-btn-primary" disabled={busy}>Enviar invitación</button>
           <button type="button" class="v2-btn" disabled={busy} onclick={() => (inviting = false)}>
             Cancelar
@@ -141,6 +165,17 @@
             </p>
           {/if}
         </form>
+      {/if}
+
+      <!-- El area fallo pero la persona SI se creo: se avisa sin teñir de
+           error toda la invitacion, y se dice donde arreglarlo. -->
+      {#if form?.avisoArea}
+        <p
+          class="v2-sub"
+          style="color:var(--v2-rust);font-size:12.5px;margin:0 0 10px"
+        >
+          {form.avisoArea} Podés asignársela desde Agentes → Asignaciones.
+        </p>
       {/if}
 
       {#if form?.invited}

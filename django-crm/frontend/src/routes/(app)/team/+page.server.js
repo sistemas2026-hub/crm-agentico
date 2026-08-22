@@ -1,5 +1,8 @@
 import { fail } from '@sveltejs/kit';
-import { listTeam, inviteUser, setRole, setStatus, ROLES } from '$lib/server/v2/team.js';
+import { listTeam, inviteUser, setRole, setStatus, ROLES, perfilPorCorreo }
+  from '$lib/server/v2/team.js';
+import { env } from '$env/dynamic/private';
+import { headersMotor } from '$lib/server/v2/motor-headers.js';
 import { readableError } from '$lib/server/v2/form-errors.js';
 
 /**
@@ -12,8 +15,29 @@ import { readableError } from '$lib/server/v2/form-errors.js';
  *
  * @type {import('./$types').PageServerLoad}
  */
-export async function load({ cookies }) {
-  return await listTeam({ cookies });
+export async function load({ cookies, fetch }) {
+  const equipo = await listTeam({ cookies });
+
+  // Las areas de trabajo salen del asistente, no de una lista fija aca: son
+  // sus agentes internos, y cambian cuando alguien crea uno nuevo desde
+  // /agentes. Si el asistente no esta configurado o no responde, la pantalla
+  // sigue sirviendo para invitar -- solo se queda sin el selector de area.
+  let areas = [];
+  const baseUrl = env.PRIVATE_ASISTENTE_URL;
+  const tenant = env.PRIVATE_ASISTENTE_TENANT;
+  if (baseUrl && tenant) {
+    try {
+      const resp = await fetch(
+        `${baseUrl}/agentes/asignaciones?tenant=${encodeURIComponent(tenant)}`,
+        { headers: headersMotor() }
+      );
+      const datos = await resp.json();
+      if (resp.ok) areas = datos.agentes ?? [];
+    } catch {
+      areas = [];
+    }
+  }
+  return { ...equipo, areas };
 }
 
 /** @type {import('./$types').Actions} */
@@ -23,10 +47,11 @@ export const actions = {
    * this to admins, rejects a duplicate within the org with a 400, and reuses
    * an account that already exists elsewhere instead of erroring.
    */
-  invite: async ({ cookies, request }) => {
+  invite: async ({ cookies, request, fetch }) => {
     const form = await request.formData();
     const email = form.get('email')?.toString().trim();
     const role = form.get('role')?.toString() || 'USER';
+    const area = form.get('area')?.toString().trim() || '';
     if (!email) return fail(400, { invite: { error: 'Ingresá un correo electrónico.' } });
     if (!ROLES.includes(role)) return fail(400, { invite: { error: 'Elegí un rol válido.' } });
 
@@ -42,7 +67,34 @@ export const actions = {
         }
       });
     }
-    return { invited: email };
+    // El area es opcional, y su fallo NO invalida la invitacion: la persona ya
+    // quedo creada en el CRM. Devolver un error aca la dejaria pensando que
+    // no se creo nadie, y al reintentar se choca con "ya existe". Se avisa
+    // aparte para que pueda asignarla desde /agentes/asignaciones.
+    let avisoArea = null;
+    if (area) {
+      try {
+        // 'POST /users/' no devuelve el perfil que creo -- hay que buscarlo.
+        const profileId = await perfilPorCorreo({ cookies }, email);
+        if (!profileId) {
+          avisoArea = 'Se creó la persona, pero no se pudo ubicar su perfil para asignarle el área.';
+        } else {
+          const resp = await fetch(`/api/agentes/asignaciones/${encodeURIComponent(profileId)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ roles: [area] })
+          });
+          if (!resp.ok) {
+            const datos = await resp.json().catch(() => ({}));
+            avisoArea = datos.error || 'Se creó la persona, pero no se pudo asignarle el área.';
+          }
+        }
+      } catch (/** @type {any} */ err) {
+        avisoArea = err?.message || 'Se creó la persona, pero no se pudo asignarle el área.';
+      }
+    }
+
+    return { invited: email, area: area || null, avisoArea };
   },
 
   /**
