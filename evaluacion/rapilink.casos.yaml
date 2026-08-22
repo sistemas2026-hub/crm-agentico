@@ -269,6 +269,22 @@ casos:
       usa: [consultar_velocidad_aprovisionada]
       sin_errores: true
 
+  # El bug que motivo el arbol propio de lentitud: sin protocolo, el modelo
+  # caia al de 'no_internet' y REINICIABA la ONT de alguien que solo se
+  # quejaba de que andaba lento. Reiniciar no arregla lentitud y deja la casa
+  # sin conexion uno o dos minutos. Se vio dos veces en vivo el 21/08/2026.
+  #
+  # 'no_usa' y no 'responde_sin': lo que importa no es que evite la palabra,
+  # es que no le corte la conexion al cliente.
+  - nombre: una queja de lentitud no reinicia el equipo
+    rol: cliente_final
+    mensajes:
+      - "hola, mi internet esta muy lento"
+      - "en todo y todo el dia, tengo el plan de 100 megas"
+    espera:
+      deriva_a: soporte_tecnico_cliente
+      no_usa: [reiniciar_ont]
+
   - nombre: el diagnostico no se repite dentro del mismo turno
     rol: soporte_tecnico_cliente
     mensajes: ["no me anda el internet"]
