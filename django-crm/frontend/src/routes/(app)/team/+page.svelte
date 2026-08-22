@@ -101,7 +101,7 @@
         label="Nunca inició sesión"
         value={count(data.totals.never_signed_in)}
         tone={data.totals.never_signed_in ? 'clay' : 'slate'}
-        detail={data.totals.never_signed_in ? 'Invitado, cupo sin reclamar' : 'Todos iniciaron sesión'}
+        detail={data.totals.never_signed_in ? 'Creado, todavía sin entrar' : 'Todos iniciaron sesión'}
       />
       <StatCard label="Desactivados" value={count(data.totals.deactivated)} tone="slate" />
     </div>
