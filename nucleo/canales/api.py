@@ -976,6 +976,48 @@ def agentes_catalogo():
 #  cliente. Mezclarlos seria abrirle a una persona datos de terceros por la
 #  puerta de al lado -- por eso se filtra aca y se vuelve a validar al guardar.
 
+def _candidatos_externos(config, tenant: str) -> list[dict]:
+    """
+    La gente del sistema externo a la que se le puede asignar trabajo, sacada
+    ejecutando la herramienta que el tenant declaro para eso.
+
+    Se ejecuta la herramienta del catalogo en vez de llamar a una API desde
+    aca por lo de siempre: el nucleo no conoce ningun proveedor. El tenant
+    dice cual es la herramienta y con que campos viene cada persona.
+
+    Devuelve lista vacia ante cualquier fallo -- la pantalla tiene que poder
+    dibujarse igual, ofreciendo lo que ya estaba guardado, aunque el sistema
+    externo no conteste.
+    """
+    cfg = config.identidad_externa
+    herramienta = next((h for h in config.herramientas
+                        if h.nombre == cfg.herramienta_listado), None)
+    if herramienta is None:
+        print(f"[agentes] '{cfg.herramienta_listado}' no esta en el catalogo")
+        return []
+    try:
+        crudo = motor._ejecutar_tool(herramienta, None, {}, tenant,
+                                     config.variables_tenant)
+    except Exception as e:
+        print(f"[agentes] no se pudieron listar los candidatos externos: "
+              f"{type(e).__name__}: {e}")
+        return []
+
+    filas = crudo.get("results") if isinstance(crudo, dict) else crudo
+    if not isinstance(filas, list):
+        return []
+    salida = []
+    for f in filas:
+        if not isinstance(f, dict):
+            continue
+        ident = f.get(cfg.campo_identificador)
+        nombre = f.get(cfg.campo_nombre)
+        if ident:
+            salida.append({"identificador": str(ident),
+                           "nombre_visible": str(nombre or ident)})
+    return sorted(salida, key=lambda x: x["nombre_visible"])
+
+
 def _agentes_internos(config) -> list[str]:
     return sorted(n for n, r in config.roles.items()
                   if r.orientado_a == "colaborador")
@@ -1002,8 +1044,25 @@ def agentes_asignaciones():
         print(f"[agentes] fallo al listar asignaciones: {type(e).__name__}: {e}")
         return jsonify({"error": "No se pudieron leer las asignaciones."}), 500
 
+    # Las identidades ya guardadas y los candidatos posibles viajan con las
+    # asignaciones: es una sola pantalla, y pedirlos por separado la obligaria
+    # a encadenar tres llamadas para dibujar una fila.
+    identidades, candidatos = {}, []
+    if config.identidad_externa:
+        try:
+            identidades = persistencia.identidades_externas(
+                tenant, config.identidad_externa.sistema)
+        except Exception as e:
+            print(f"[agentes] fallo al leer identidades externas: "
+                  f"{type(e).__name__}: {e}")
+        candidatos = _candidatos_externos(config, tenant)
+
     return jsonify({"asignaciones": asignaciones,
-                    "agentes": _agentes_internos(config)})
+                    "agentes": _agentes_internos(config),
+                    "sistema_externo": (config.identidad_externa.etiqueta
+                                        if config.identidad_externa else None),
+                    "identidades": identidades,
+                    "candidatos_externos": candidatos})
 
 
 @app.put("/agentes/asignaciones/<profile_id>")
@@ -1044,6 +1103,32 @@ def agentes_asignar(profile_id):
     except Exception as e:
         print(f"[agentes] fallo al asignar a '{profile_id}': {type(e).__name__}: {e}")
         return jsonify({"error": "No se pudieron guardar las asignaciones."}), 500
+
+    # Quien es esta persona en el sistema operativo del tenant. Va en el MISMO
+    # PUT que los agentes, y no en un endpoint aparte, porque es la misma
+    # decision: cuando alguien da de alta a un colaborador define que puede
+    # hacer aca y a nombre de quien se le asigna el trabajo alla. Separarlo en
+    # dos llamadas es como se llega a personas creadas a medias.
+    #
+    # Opcional: si el tenant no declaro un sistema externo, no se toca nada.
+    sistema = (config.identidad_externa.sistema
+               if config.identidad_externa else None)
+    if sistema and "identidad_externa" in cuerpo:
+        ident = cuerpo.get("identidad_externa") or {}
+        try:
+            persistencia.guardar_identidad_externa(
+                tenant, profile_id, sistema,
+                str(ident.get("identificador") or ""),
+                str(ident.get("nombre_visible") or ""))
+        except Exception as e:
+            # No invalida la asignacion de agentes, que ya se guardo: se avisa
+            # y se sigue. Devolver error aca dejaria a quien lo llamo sin saber
+            # que la mitad SI quedo hecha.
+            print(f"[agentes] fallo al guardar la identidad externa de "
+                  f"'{profile_id}': {type(e).__name__}: {e}")
+            return jsonify({"profile_id": profile_id, "roles": guardados,
+                            "aviso": "Se guardaron los agentes, pero no la "
+                                     "identidad en el sistema externo."})
 
     return jsonify({"profile_id": profile_id, "roles": guardados})
 

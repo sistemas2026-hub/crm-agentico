@@ -650,6 +650,51 @@ def asignaciones_de_agentes(tenant: str) -> dict[str, list[str]]:
         return salida
 
 
+def identidades_externas(tenant: str, sistema: str) -> dict[str, dict]:
+    """
+    Quien es cada colaborador dentro de un sistema externo:
+    {profile_id: {"identificador": ..., "nombre_visible": ...}}.
+
+    Se devuelve el nombre junto al identificador porque una pantalla que solo
+    tiene el id no puede mostrar nada util, y volver a preguntarle a la API
+    externa seria una llamada por persona.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select profile_id, identificador, nombre_visible
+               from asistente.identidades_externas
+               where organization_id = %s and sistema = %s""",
+            (org, sistema))
+        return {str(f["profile_id"]): {"identificador": f["identificador"],
+                                       "nombre_visible": f["nombre_visible"] or ""}
+                for f in cur.fetchall()}
+
+
+def guardar_identidad_externa(tenant: str, profile_id: str, sistema: str,
+                              identificador: str, nombre_visible: str = "") -> None:
+    """
+    Deja a este colaborador con ESTA identidad en ese sistema. Un identificador
+    vacio la borra: es como se dice "esta persona ya no tiene cuenta alla", y
+    sin eso la unica forma de deshacer una asignacion equivocada seria por SQL.
+    """
+    with sesion(tenant) as (cur, org):
+        if not (identificador or "").strip():
+            cur.execute(
+                """delete from asistente.identidades_externas
+                   where organization_id = %s and profile_id = %s and sistema = %s""",
+                (org, profile_id, sistema))
+            return
+        cur.execute(
+            """insert into asistente.identidades_externas
+                   (organization_id, profile_id, sistema, identificador, nombre_visible)
+               values (%s, %s, %s, %s, %s)
+               on conflict (organization_id, profile_id, sistema) do update
+                   set identificador = excluded.identificador,
+                       nombre_visible = excluded.nombre_visible,
+                       actualizado_en = now()""",
+            (org, profile_id, sistema, identificador.strip(), (nombre_visible or "").strip()))
+
+
 def asignar_agentes(tenant: str, profile_id: str, roles: list[str]) -> list[str]:
     """
     Deja a este colaborador con EXACTAMENTE los agentes de 'roles'.

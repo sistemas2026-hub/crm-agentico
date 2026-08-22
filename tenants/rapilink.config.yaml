@@ -3250,6 +3250,24 @@ canales:
   web:
     activo: true
 
+# -----------------------------------------------------------------------------
+#  IDENTIDAD EXTERNA  -  quien es cada colaborador en el sistema operativo
+# -----------------------------------------------------------------------------
+#  Sin esto, el ticket que sale al escalar solo podia asignarse al usuario
+#  FIJO que estuviera escrito en la herramienta -- y quedo uno solo, asi que
+#  todos los tickets de todos los casos caian sobre la misma persona,
+#  incluidas las consultas de factura, que no son suyas.
+#
+#  'herramienta_listado' es la que ya usa el asistente para ver el personal.
+#  Los nombres de campo son los que devuelve de verdad esa API (verificado:
+#  cada persona viene como {id, username, nombre, email}).
+identidad_externa:
+  sistema: wisphub
+  etiqueta: Usuario en WispHub
+  herramienta_listado: consultar_tecnicos
+  campo_identificador: id
+  campo_nombre: nombre
+
 escalamiento:
   activar_si: [frustracion_detectada, tres_fallos_seguidos, solicitud_explicita, duda_de_identidad,
                visita_tecnica_requerida, sin_datos_para_diagnosticar]

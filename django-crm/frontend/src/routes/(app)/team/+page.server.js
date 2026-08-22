@@ -23,6 +23,9 @@ export async function load({ cookies, fetch }) {
   // /agentes. Si el asistente no esta configurado o no responde, la pantalla
   // sigue sirviendo para invitar -- solo se queda sin el selector de area.
   let areas = [];
+  /** La gente del sistema operativo a la que se le puede asignar trabajo. */
+  let externos = [];
+  let etiquetaExterna = '';
   const baseUrl = env.PRIVATE_ASISTENTE_URL;
   const tenant = env.PRIVATE_ASISTENTE_TENANT;
   if (baseUrl && tenant) {
@@ -32,12 +35,22 @@ export async function load({ cookies, fetch }) {
         { headers: headersMotor() }
       );
       const datos = await resp.json();
-      if (resp.ok) areas = datos.agentes ?? [];
-    } catch {
+      if (resp.ok) {
+        areas = datos.agentes ?? [];
+        externos = datos.candidatos_externos ?? [];
+        etiquetaExterna = datos.sistema_externo ?? '';
+      }
+      else console.warn('[equipo] el asistente respondio', resp.status, datos?.error ?? '');
+    } catch (/** @type {any} */ err) {
+      // Visible a proposito: un catch mudo aca deja la pantalla sin selector
+      // de area y sin ninguna pista de por que. Ya paso una vez.
+      console.warn('[equipo] no se pudo leer las areas del asistente:', err?.message ?? err);
       areas = [];
     }
+  } else {
+    console.warn('[equipo] falta PRIVATE_ASISTENTE_URL o PRIVATE_ASISTENTE_TENANT');
   }
-  return { ...equipo, areas };
+  return { ...equipo, areas, externos, etiquetaExterna };
 }
 
 /** @type {import('./$types').Actions} */
@@ -52,6 +65,8 @@ export const actions = {
     const email = form.get('email')?.toString().trim();
     const role = form.get('role')?.toString() || 'USER';
     const area = form.get('area')?.toString().trim() || '';
+    const externo = form.get('externo')?.toString().trim() || '';
+    const externoNombre = form.get('externo_nombre')?.toString().trim() || '';
     if (!email) return fail(400, { invite: { error: 'Ingresá un correo electrónico.' } });
     if (!ROLES.includes(role)) return fail(400, { invite: { error: 'Elegí un rol válido.' } });
 
@@ -72,7 +87,7 @@ export const actions = {
     // no se creo nadie, y al reintentar se choca con "ya existe". Se avisa
     // aparte para que pueda asignarla desde /agentes/asignaciones.
     let avisoArea = null;
-    if (area) {
+    if (area || externo) {
       try {
         // 'POST /users/' no devuelve el perfil que creo -- hay que buscarlo.
         const profileId = await perfilPorCorreo({ cookies }, email);
@@ -82,7 +97,10 @@ export const actions = {
           const resp = await fetch(`/api/agentes/asignaciones/${encodeURIComponent(profileId)}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ roles: [area] })
+            body: JSON.stringify({
+              roles: area ? [area] : [],
+              identidad_externa: { identificador: externo, nombre_visible: externoNombre }
+            })
           });
           if (!resp.ok) {
             const datos = await resp.json().catch(() => ({}));

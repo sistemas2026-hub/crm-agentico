@@ -1078,6 +1078,28 @@ class Canales(Base):
     web: dict[str, Any] = Field(default_factory=lambda: {"activo": True})
 
 
+class IdentidadExterna(Base):
+    """
+    Como se identifica a un colaborador en el sistema donde de verdad se
+    trabaja la orden -- para poder asignarle el trabajo a nombre suyo y no de
+    un usuario fijo escrito en la config.
+
+    Todo lo especifico del proveedor vive ACA, en el tenant: que herramienta
+    lista a la gente y en que campos viene su id y su nombre. El nucleo
+    ejecuta lo que se le declare y no sabe de quien se trata.
+    """
+    # Nombre interno del sistema. Es la llave con la que se guarda cada
+    # identidad, asi que cambiarlo despues deja huerfanas las ya guardadas.
+    sistema: str
+    # Como se llama en pantalla ("Usuario en WispHub").
+    etiqueta: str
+    # Herramienta del catalogo que devuelve la gente asignable.
+    herramienta_listado: str
+    # En que campos de esa respuesta viene el id y el nombre de cada persona.
+    campo_identificador: str = "id"
+    campo_nombre: str = "nombre"
+
+
 class TicketEscalado(Base):
     """
     Que ticket operativo se crea cuando un caso se pasa a una persona.
@@ -1253,6 +1275,9 @@ class TenantConfig(Base):
     variables_tenant: dict[str, str] = Field(default_factory=dict)
     canales: Canales = Field(default_factory=Canales)
     escalamiento: Escalamiento = Field(default_factory=Escalamiento)
+    # Opcional: sin esto, el asistente no intenta identificar a nadie en
+    # ningun sistema externo y la pantalla no ofrece el campo.
+    identidad_externa: IdentidadExterna | None = None
     conversaciones: Conversaciones = Field(default_factory=Conversaciones)
     limites: Limites = Field(default_factory=Limites)
     evaluacion: Evaluacion = Field(default_factory=Evaluacion)

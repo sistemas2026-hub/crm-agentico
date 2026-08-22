@@ -33,6 +33,13 @@
   let { data, form } = $props();
 
   let inviting = $state(false);
+  let externoElegido = $state('');
+  // El nombre viaja junto al id para no tener que reconsultar la API
+  // externa cada vez que haya que MOSTRAR a quien se vinculo.
+  const nombreExterno = $derived(
+    data.externos?.find((/** @type {any} */ e) => e.identificador === externoElegido)
+      ?.nombre_visible ?? ''
+  );
   let busy = $state(false);
 
   /** A submit handler that flips `busy` while the action runs. */
@@ -150,6 +157,36 @@
                   <option value={area}>{area}</option>
                 {/each}
               </select>
+            </div>
+          {/if}
+          <!--
+            A nombre de quien se le asigna el trabajo en el sistema operativo.
+            Es una LISTA y no un campo de texto a proposito: escribir el
+            nombre a mano invita a un typo, y un typo aca manda tickets a la
+            persona equivocada -- de los errores que se descubren tarde.
+
+            Va el nombre en un campo oculto ademas del id: la pantalla que lo
+            muestre despues necesita poder decir un nombre sin volver a
+            preguntarle a la API externa por cada fila.
+          -->
+          {#if data.externos?.length}
+            <div>
+              <label class="v2-label" for="invite-externo" style="display:block;margin-bottom:4px">
+                {data.etiquetaExterna || 'Usuario externo'}
+              </label>
+              <select
+                id="invite-externo"
+                name="externo"
+                class="v2-input"
+                style="width:190px"
+                bind:value={externoElegido}
+              >
+                <option value="">Sin vincular</option>
+                {#each data.externos as ex}
+                  <option value={ex.identificador}>{ex.nombre_visible}</option>
+                {/each}
+              </select>
+              <input type="hidden" name="externo_nombre" value={nombreExterno} />
             </div>
           {/if}
           <button class="v2-btn v2-btn-primary" disabled={busy}>Enviar invitación</button>
