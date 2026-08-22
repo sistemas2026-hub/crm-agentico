@@ -38,9 +38,44 @@
   let externoElegido = $state('');
   let areaElegida = $state('');
 
-  // Estado editable de cada fila: area, agentes y usuario externo. Se arranca
-  // con lo que vino del servidor y se guarda por fila -- no con un "Guardar"
-  // global, que obligaria a revisar toda la tabla para confirmar un cambio.
+  // 'busy' bloquea los botones mientras hay un envio en curso, y 'working' es
+  // el callback que use:enhance necesita para levantar y bajar esa bandera.
+  // Los formularios de rol y estado los usan.
+  let busy = $state(false);
+  /** @type {import('@sveltejs/kit').SubmitFunction} */
+  const working = () => {
+    busy = true;
+    return async ({ update }) => {
+      await update();
+      busy = false;
+    };
+  };
+
+  /** El formulario de alta se cierra solo cuando la creacion salio bien. */
+  const inviteSubmit = () => {
+    busy = true;
+    return async ({ result, update }) => {
+      await update();
+      busy = false;
+      if (result?.type === 'success' && result?.data?.invited) inviting = false;
+    };
+  };
+
+  // Los agentes que precarga el area elegida EN EL ALTA (la edicion por fila
+  // usa 'borrador', que es otra cosa).
+  const agentesDelArea = $derived(
+    data.areasTrabajo?.find((/** @type {any} */ a) => a.nombre === areaElegida)?.agentes ?? []
+  );
+
+  // El nombre del usuario externo elegido en el alta, para mandarlo junto al
+  // id y no tener que reconsultar la API externa despues.
+  const nombreExterno = $derived(
+    data.externos?.find((/** @type {any} */ e) => e.identificador === externoElegido)
+      ?.nombre_visible ?? ''
+  );
+
+  // Lo que cada persona tiene hoy. Solo se lee: el borrador de abajo es lo
+  // que se toca mientras se edita.
   /** @type {Record<string, {area: string, agentes: string[], externo: string}>} */
   let fila = $state(
     Object.fromEntries(
@@ -54,92 +89,77 @@
       ])
     )
   );
-  /** @type {Record<string, boolean>} */
-  let guardandoFila = $state({});
 
-  function tocar(/** @type {string} */ id, /** @type {string} */ campo, /** @type {string} */ valor) {
-    fila = { ...fila, [id]: { ...fila[id], [campo]: valor } };
-    // Elegir un area RECARGA sus agentes: es lo que hace util al preset
-    // tambien al corregir, no solo al dar de alta. Se puede desmarcar despues.
-    if (campo === 'area') {
-      const sug = data.areasTrabajo?.find((/** @type {any} */ a) => a.nombre === valor)?.agentes;
-      if (sug) fila = { ...fila, [id]: { ...fila[id], agentes: [...sug] } };
-    }
-    guardarFila(id);
+  // Que fila esta en edicion (null = ninguna) y su borrador.
+  //
+  // Una sola a la vez, y con Guardar/Cancelar explicitos. La primera version
+  // guardaba en cada clic sobre controles siempre activos: un clic mal dado
+  // cambiaba los permisos de alguien sin confirmar nada, y sin forma de
+  // deshacerlo salvo acordarse de como estaba.
+  /** @type {string | null} */
+  let editando = $state(null);
+  let borrador = $state({ area: '', agentes: /** @type {string[]} */ ([]), externo: '' });
+  let guardandoFila = $state(false);
+
+  const etiquetaArea = (/** @type {string} */ nombre) =>
+    data.areasTrabajo?.find((/** @type {any} */ a) => a.nombre === nombre)?.etiqueta ?? '';
+
+  function editar(/** @type {string} */ id) {
+    editando = id;
+    borrador = { ...fila[id], agentes: [...(fila[id]?.agentes ?? [])] };
   }
 
-  function alternarAgente(/** @type {string} */ id, /** @type {string} */ agente) {
-    const act = fila[id]?.agentes ?? [];
-    fila = {
-      ...fila,
-      [id]: {
-        ...fila[id],
-        agentes: act.includes(agente) ? act.filter((a) => a !== agente) : [...act, agente]
-      }
+  function cancelar() {
+    editando = null;
+  }
+
+  // Cambiar el area recarga sus agentes tambien al corregir, no solo al dar
+  // de alta: es lo que hace util al preset cuando alguien cambia de area. Se
+  // pueden desmarcar antes de guardar.
+  function recargarAgentes() {
+    const sug = data.areasTrabajo?.find(
+      (/** @type {any} */ a) => a.nombre === borrador.area
+    )?.agentes;
+    if (sug) borrador = { ...borrador, agentes: [...sug] };
+  }
+
+  function alternarAgente(/** @type {string} */ agente) {
+    borrador = {
+      ...borrador,
+      agentes: borrador.agentes.includes(agente)
+        ? borrador.agentes.filter((a) => a !== agente)
+        : [...borrador.agentes, agente]
     };
-    guardarFila(id);
   }
 
-  async function guardarFila(/** @type {string} */ id) {
-    guardandoFila = { ...guardandoFila, [id]: true };
+  async function guardarFila(/** @type {string} */ id, /** @type {string} */ nombre) {
+    guardandoFila = true;
     try {
-      const f = fila[id];
       const nombreExt =
-        data.externos?.find((/** @type {any} */ e) => e.identificador === f.externo)
+        data.externos?.find((/** @type {any} */ e) => e.identificador === borrador.externo)
           ?.nombre_visible ?? '';
       const resp = await fetch(`/api/agentes/asignaciones/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          area: f.area,
-          roles: f.agentes,
-          identidad_externa: { identificador: f.externo, nombre_visible: nombreExt }
+          area: borrador.area,
+          roles: borrador.agentes,
+          identidad_externa: { identificador: borrador.externo, nombre_visible: nombreExt }
         })
       });
+      const d = await resp.json().catch(() => ({}));
       if (!resp.ok) {
-        const d = await resp.json().catch(() => ({}));
         toast.error(d?.error || 'No se pudo guardar');
+        return;
       }
+      // La pantalla refleja lo que el servidor CONFIRMO, no lo que se pidio.
+      fila = { ...fila, [id]: { ...borrador, agentes: d.roles ?? borrador.agentes } };
+      editando = null;
+      toast.success(`${nombre}: guardado.`);
     } finally {
-      guardandoFila = { ...guardandoFila, [id]: false };
+      guardandoFila = false;
     }
   }
-  // Los agentes que precarga el area elegida. Se recalcula al cambiarla,
-  // asi las casillas siguen a la decision en vez de quedarse en la primera.
-  const agentesDelArea = $derived(
-    data.areasTrabajo?.find((/** @type {any} */ a) => a.nombre === areaElegida)?.agentes ?? []
-  );
-  // El nombre viaja junto al id para no tener que reconsultar la API
-  // externa cada vez que haya que MOSTRAR a quien se vinculo.
-  const nombreExterno = $derived(
-    data.externos?.find((/** @type {any} */ e) => e.identificador === externoElegido)
-      ?.nombre_visible ?? ''
-  );
-  let busy = $state(false);
-
-  /** A submit handler that flips `busy` while the action runs. */
-  const working = () => {
-    busy = true;
-    return async (/** @type {any} */ { update }) => {
-      await update();
-      busy = false;
-    };
-  };
-
-  // El formulario dice "agregar" y no "invitar" porque eso es lo que hace:
-  // 'POST /users/' crea la persona en el momento, activa, y NO manda ningun
-  // correo -- no hay tarea de invitacion en el backend. Decir "enviar
-  // invitacion" prometia un correo que nunca sale y sugeria que la persona
-  // queda pendiente de aceptar, cuando ya tiene acceso.
-  /** The invite form both submits and, on success, closes itself. */
-  const inviteSubmit = () => {
-    busy = true;
-    return async (/** @type {any} */ { update, result }) => {
-      await update();
-      busy = false;
-      if (result?.type === 'success' && result?.data?.invited) inviting = false;
-    };
-  };
 </script>
 
 {#if data.forbidden}
@@ -404,17 +424,22 @@
         <table class="v2-table">
           <thead>
             <tr>
+              <!-- Todo lo de una persona se lee Y se edita aca. Estaba
+                   partido en /agentes/asignaciones, que obligaba a crear en un
+                   lugar y corregir en otro.
+
+                   Los valores se muestran EN REPOSO y se cambian con "Editar".
+                   La primera version tenia listas y casillas siempre activas,
+                   guardando en cada clic: un clic mal dado le cambiaba los
+                   permisos a alguien sin confirmar nada. Para datos de acceso
+                   eso esta mal. -->
               <th>Persona</th>
-              <th>Rol</th>
-              <!-- Area, agentes y usuario externo se editan ACA, en la misma
-                   fila. Estaban en /agentes/asignaciones, que obligaba a crear
-                   en un lugar y corregir en otro -- la queja con la que
-                   arranco este rediseño. Un solo lugar, o vuelve a pasar. -->
               <th>Área</th>
               <th>Agentes</th>
               {#if data.externos?.length}<th>{data.etiquetaExterna || 'Externo'}</th>{/if}
+              <th>Rol</th>
+              <th>Estado</th>
               <th data-m="hide">Tokens</th>
-              <th class="v2-r">Último inicio de sesión</th>
               <th class="v2-r">Gestionar</th>
             </tr>
           </thead>
@@ -435,56 +460,80 @@
                     </span>
                   </span>
                 </td>
-                <td data-m="tag">
-                  <Pill tone={m.is_active ? ROLE_TONE[m.role] : 'slate'}>{ROLE_LABEL[m.role]}</Pill>
-                  {#if !m.is_active}
-                    <span class="v2-table-secondary" style="display:block">Desactivado</span>
+                <td>
+                  {#if editando === m.id}
+                    <select
+                      class="v2-input"
+                      style="width:135px;font-size:12px;padding:2px 5px"
+                      bind:value={borrador.area}
+                      onchange={recargarAgentes}
+                      aria-label="Área de {m.name}"
+                    >
+                      <option value="">Sin área</option>
+                      {#each data.areasTrabajo ?? [] as a (a.nombre)}
+                        <option value={a.nombre}>{a.etiqueta}</option>
+                      {/each}
+                    </select>
+                  {:else}
+                    {etiquetaArea(fila[m.id]?.area) || '—'}
                   {/if}
                 </td>
                 <td>
-                  <select
-                    class="v2-input"
-                    style="width:135px;font-size:12px;padding:2px 5px"
-                    value={fila[m.id]?.area ?? ''}
-                    onchange={(e) => tocar(m.id, 'area', e.currentTarget.value)}
-                    aria-label="Área de {m.name}"
-                  >
-                    <option value="">Sin área</option>
-                    {#each data.areasTrabajo ?? [] as a (a.nombre)}
-                      <option value={a.nombre}>{a.etiqueta}</option>
-                    {/each}
-                  </select>
-                </td>
-                <td>
-                  <span style="display:flex;gap:7px;flex-wrap:wrap">
-                    {#each data.areas ?? [] as agente (agente)}
-                      <label style="font-size:11.5px;display:flex;align-items:center;gap:3px">
-                        <input
-                          type="checkbox"
-                          checked={(fila[m.id]?.agentes ?? []).includes(agente)}
-                          onchange={() => alternarAgente(m.id, agente)}
-                        />
-                        {agente}
-                      </label>
-                    {/each}
-                  </span>
+                  {#if editando === m.id}
+                    <span style="display:flex;gap:7px;flex-wrap:wrap">
+                      {#each data.areas ?? [] as agente (agente)}
+                        <label style="font-size:11.5px;display:flex;align-items:center;gap:3px">
+                          <input
+                            type="checkbox"
+                            checked={borrador.agentes.includes(agente)}
+                            onchange={() => alternarAgente(agente)}
+                          />
+                          {agente}
+                        </label>
+                      {/each}
+                    </span>
+                  {:else if (fila[m.id]?.agentes ?? []).length}
+                    <span style="display:flex;gap:4px;flex-wrap:wrap">
+                      {#each fila[m.id].agentes as a (a)}
+                        <Pill tone="slate">{a}</Pill>
+                      {/each}
+                    </span>
+                  {:else}
+                    <span class="v2-muted">—</span>
+                  {/if}
                 </td>
                 {#if data.externos?.length}
                   <td>
-                    <select
-                      class="v2-input"
-                      style="width:150px;font-size:12px;padding:2px 5px"
-                      value={fila[m.id]?.externo ?? ''}
-                      onchange={(e) => tocar(m.id, 'externo', e.currentTarget.value)}
-                      aria-label="Usuario externo de {m.name}"
-                    >
-                      <option value="">Sin vincular</option>
-                      {#each data.externos as ex (ex.identificador)}
-                        <option value={ex.identificador}>{ex.nombre_visible}</option>
-                      {/each}
-                    </select>
+                    {#if editando === m.id}
+                      <select
+                        class="v2-input"
+                        style="width:150px;font-size:12px;padding:2px 5px"
+                        bind:value={borrador.externo}
+                        aria-label="Usuario externo de {m.name}"
+                      >
+                        <option value="">Sin vincular</option>
+                        {#each data.externos as ex (ex.identificador)}
+                          <option value={ex.identificador}>{ex.nombre_visible}</option>
+                        {/each}
+                      </select>
+                    {:else}
+                      <span class="v2-table-secondary"
+                        >{data.identidades?.[m.id]?.nombre_visible || '—'}</span
+                      >
+                    {/if}
                   </td>
                 {/if}
+                <td data-m="tag">
+                  <Pill tone={m.is_active ? ROLE_TONE[m.role] : 'slate'}>{ROLE_LABEL[m.role]}</Pill>
+                </td>
+                <td>
+                  <Pill tone={m.is_active ? 'moss' : 'slate'}>
+                    {m.is_active ? 'Activo' : 'Inactivo'}
+                  </Pill>
+                  {#if m.is_active && !m.last_login}
+                    <span class="v2-table-secondary" style="display:block">nunca entró</span>
+                  {/if}
+                </td>
                 <td data-m="hide">
                   {#if m.active_token_count}
                     <a
@@ -501,19 +550,38 @@
                   {/if}
                 </td>
                 <td class="v2-r">
-                  {#if m.last_login}
-                    {relativeDays(m.last_login)}
-                  {:else}
-                    <span style="color:var(--v2-clay);font-weight:600">nunca</span>
-                  {/if}
-                </td>
-                <td class="v2-r">
-                  {#if m.is_you}
+                  {#if editando === m.id}
+                    <!-- En edicion, la fila ofrece SOLO guardar o cancelar.
+                         Dejar los otros botones activos invita a cambiarle el
+                         rol a alguien con un borrador a medio hacer. -->
+                    <span style="display:inline-flex;gap:6px;justify-content:flex-end">
+                      <button
+                        class="v2-btn v2-btn-sm v2-btn-primary"
+                        disabled={guardandoFila}
+                        onclick={() => guardarFila(m.id, m.name)}
+                      >
+                        Guardar
+                      </button>
+                      <button class="v2-btn v2-btn-sm" disabled={guardandoFila} onclick={cancelar}>
+                        Cancelar
+                      </button>
+                    </span>
+                  {:else if m.is_you}
+                    <!-- Sobre uno mismo tampoco se edita area ni agentes: es
+                         el mismo criterio con el que el servidor no deja
+                         cambiarse el propio rol. -->
                     <span class="v2-muted" style="font-size:11.5px">—</span>
                   {:else}
                     <span
                       style="display:inline-flex;gap:6px;justify-content:flex-end;flex-wrap:wrap"
                     >
+                      <button
+                        class="v2-btn v2-btn-sm"
+                        disabled={busy || editando !== null}
+                        onclick={() => editar(m.id)}
+                      >
+                        Editar
+                      </button>
                       <!-- Role toggle. Two roles, so one button naming the
                            destination is clearer than a picker. The last admin
                            cannot be demoted; the server enforces it too. -->
