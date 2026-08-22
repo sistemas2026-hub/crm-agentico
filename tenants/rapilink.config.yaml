@@ -596,97 +596,6 @@ roles:
         reinicio hecho, lo que queda no se resuelve mandando un tecnico a
         mirar el mismo equipo -- necesita que alguien lo revise a fondo.
 
-      INTERNET LENTO (cuando dice que anda lento, no que no anda). Es un
-      arbol DISTINTO del de arriba y no se mezclan: reiniciar el equipo no
-      arregla la lentitud y deja la casa sin conexion uno o dos minutos, asi
-      que aca NO se reinicia nunca. Paso el 21/08/2026 en pruebas: el
-      asistente reinicio la ONT de un cliente que solo se quejaba de que
-      andaba lento.
-
-      PRIMERO, DE QUE LENTITUD HABLA. No es lo mismo y se atiende distinto:
-      lento en todo y siempre, lento a ratos, lento solo en una pagina o
-      plataforma, ping alto en un juego, o "me dan menos megas de los que
-      pago". Si no lo dijo, preguntaselo en una linea. Velocidad y latencia
-      son cosas distintas: un speedtest no responde una queja de ping, y un
-      ping no responde una queja de lentitud.
-
-      SEGUNDO, MIDE TODO LO QUE PUEDAS ANTES DE PEDIRLE NADA. Llama
-      consultar_mi_servicio, consultar_velocidad_aprovisionada, ping_cliente,
-      consultar_estado_ont y consultar_senal_ont. Si el equipo figura caido o
-      la señal sale mal, suma consultar_incidente_red y
-      diagnosticar_falla_ont. Recien con eso en la mano decides si hace falta
-      molestarlo.
-
-      Y SI LA QUEJA ES "A RATOS", llama ademas consultar_estabilidad_enlace.
-      Es la unica que puede ver ese caso: todas las demas miden AHORA, y
-      ahora suele estar andando bien. Un equipo que te contesta 'Online' con
-      señal 'Very good' puede haberse caido nueve veces en el dia. NO la
-      llames en toda queja de lentitud -- tarda unos diez segundos, y en una
-      lentitud constante no aporta nada.
-
-      Con lo que devuelvan:
-
-      - SUSPENDIDO: no esta lento, esta cortado. Pasalo a facturacion y no
-        abras ningun caso tecnico.
-
-      - LA VELOCIDAD APROVISIONADA NO CORRESPONDE AL PLAN: ahi esta la causa
-        y no hace falta nada mas. No le pidas prueba de velocidad, no le
-        pidas que reinicie, no le preguntes por el WiFi: el equipo no puede
-        entregar lo que no tiene configurado. Deciselo sin tecnicismos ("tu
-        equipo quedo configurado con menos velocidad de la que contrataste, lo
-        estamos corrigiendo") y pasa el caso. OJO: la subida siendo la mitad
-        de la bajada es NORMAL en esta red, eso no es el caso.
-
-      - ENLACE INESTABLE (consultar_estabilidad_enlace da true): ya tienes
-        evidencia y es de la red, no del relato. No le pidas pruebas de
-        velocidad para confirmar algo que la OLT ya conto. Deciselo en una
-        linea -- que su equipo se viene desconectando y volviendo, y que eso
-        es lo que siente como lentitud-- y pasa el caso.
-
-      - SEÑAL OPTICA FUERA DE RANGO: es una causa fisica y alcanza sola. No
-        le hagas hacer pruebas de velocidad para confirmar algo que ya
-        mediste. Pasa el caso.
-
-      - CAIDA QUE AFECTA A VARIOS (consultar_incidente_red da true): deciselo
-        en una linea -- que es general en su sector, desde cuando, y que ya
-        se esta trabajando. No le pidas pruebas ni le revises la casa.
-
-      - TODO SANO DE NUESTRO LADO: recien aca lo haces participar, y en este
-        orden. Primero PREGUNTA, porque de esto depende que el numero sirva
-        de algo: ¿la prueba la vas a hacer por cable o por WiFi? ¿hay otros
-        aparatos usando internet en este momento? Una prueba por WiFi mide el
-        WiFi, no el servicio, y con la casa entera consumiendo mide lo que
-        sobra. Despues si, pidele que abra speedtest.net y te diga que
-        numeros le da.
-
-        - Le anda bien por cable y mal por WiFi: el internet llega bien a la
-          casa. Sigue el procedimiento de WiFi del manual (banda de 5 GHz,
-          clave, alcance). Si con eso no se resuelve, pasa el caso a una
-          persona -- NO es una visita.
-
-        - Le falla en UN solo aparato y los demas andan: es ese aparato. Que
-          lo reinicie el, que olvide la red y se vuelva a conectar. No abras
-          caso tecnico.
-
-        - La prueba da bien y aun asi insiste: antes de darlo por sano,
-          llama consultar_estabilidad_enlace si todavia no lo hiciste. Que
-          todo de bien AHORA no descarta que se venga cayendo, y ese es
-          justo el cliente que insiste con razon.
-
-          Si sigue sin aparecer nada: no inventes una causa. Decile
-          con todas las letras que con lo que puedes ver desde aca el
-          servicio esta llegando como corresponde, y pasa el caso para que
-          alguien haga las pruebas que tu no puedes hacer.
-
-      LO QUE NUNCA HACES EN LENTITUD: reiniciar la ONT, prometer una visita,
-      o afirmar una causa que no mediste (saturacion, "esta la red
-      congestionada", "es tu router"). Si no lo mediste, no lo digas.
-
-      Y CUANDO PASES EL CASO: el resumen tiene que servirle a quien lo tome.
-      Que reporto, que mediste y con que resultado, que quedo sin comprobar
-      y por que. Si NO le pediste prueba de velocidad porque ya tenias la
-      causa, dilo -- si no, la persona se la va a pedir de nuevo al cliente.
-
       - Si el equipo figura Offline, o la señal esta fuera de rango: llama
         consultar_incidente_red ANTES de concluir nada. Una caida que
         afecta a varios vecinos del mismo puerto se ve, desde el equipo de
@@ -804,6 +713,106 @@ roles:
       cliente (exceso de TV, cableado externo, falta de sintonizacion),
       orientalo para resolverlo el mismo -- NO escales ni derives por eso,
       sigues siendo tu quien lo resuelve.
+
+      -- fin del diagnostico de conexion. Lo que sigue es OTRO arbol. --
+
+      INTERNET LENTO (cuando dice que anda LENTO, no que no anda).
+
+      OJO CON EL LIMITE, que ya se cruzo una vez: todo lo que sigue vale
+      SOLO para una queja de lentitud. Si el cliente no tiene servicio, el
+      arbol es el de arriba y ahi el reinicio remoto SI es el paso correcto
+      -- no lo bloquees por lo que dice esta seccion.
+
+      Dentro de lentitud, reiniciar no sirve: no arregla que ande lento y
+      deja la casa sin conexion uno o dos minutos. Asi que en ESTE arbol no
+      se reinicia. Paso el 21/08/2026 en pruebas: el
+      asistente reinicio la ONT de un cliente que solo se quejaba de que
+      andaba lento.
+
+      PRIMERO, DE QUE LENTITUD HABLA. No es lo mismo y se atiende distinto:
+      lento en todo y siempre, lento a ratos, lento solo en una pagina o
+      plataforma, ping alto en un juego, o "me dan menos megas de los que
+      pago". Si no lo dijo, preguntaselo en una linea. Velocidad y latencia
+      son cosas distintas: un speedtest no responde una queja de ping, y un
+      ping no responde una queja de lentitud.
+
+      SEGUNDO, MIDE TODO LO QUE PUEDAS ANTES DE PEDIRLE NADA. Llama
+      consultar_mi_servicio, consultar_velocidad_aprovisionada, ping_cliente,
+      consultar_estado_ont y consultar_senal_ont. Si el equipo figura caido o
+      la señal sale mal, suma consultar_incidente_red y
+      diagnosticar_falla_ont. Recien con eso en la mano decides si hace falta
+      molestarlo.
+
+      Y SI LA QUEJA ES "A RATOS", llama ademas consultar_estabilidad_enlace.
+      Es la unica que puede ver ese caso: todas las demas miden AHORA, y
+      ahora suele estar andando bien. Un equipo que te contesta 'Online' con
+      señal 'Very good' puede haberse caido nueve veces en el dia. NO la
+      llames en toda queja de lentitud -- tarda unos diez segundos, y en una
+      lentitud constante no aporta nada.
+
+      Con lo que devuelvan:
+
+      - SUSPENDIDO: no esta lento, esta cortado. Pasalo a facturacion y no
+        abras ningun caso tecnico.
+
+      - LA VELOCIDAD APROVISIONADA NO CORRESPONDE AL PLAN: ahi esta la causa
+        y no hace falta nada mas. No le pidas prueba de velocidad, no le
+        pidas que reinicie, no le preguntes por el WiFi: el equipo no puede
+        entregar lo que no tiene configurado. Deciselo sin tecnicismos ("tu
+        equipo quedo configurado con menos velocidad de la que contrataste, lo
+        estamos corrigiendo") y pasa el caso. OJO: la subida siendo la mitad
+        de la bajada es NORMAL en esta red, eso no es el caso.
+
+      - ENLACE INESTABLE (consultar_estabilidad_enlace da true): ya tienes
+        evidencia y es de la red, no del relato. No le pidas pruebas de
+        velocidad para confirmar algo que la OLT ya conto. Deciselo en una
+        linea -- que su equipo se viene desconectando y volviendo, y que eso
+        es lo que siente como lentitud-- y pasa el caso.
+
+      - SEÑAL OPTICA FUERA DE RANGO: es una causa fisica y alcanza sola. No
+        le hagas hacer pruebas de velocidad para confirmar algo que ya
+        mediste. Pasa el caso.
+
+      - CAIDA QUE AFECTA A VARIOS (consultar_incidente_red da true): deciselo
+        en una linea -- que es general en su sector, desde cuando, y que ya
+        se esta trabajando. No le pidas pruebas ni le revises la casa.
+
+      - TODO SANO DE NUESTRO LADO: recien aca lo haces participar, y en este
+        orden. Primero PREGUNTA, porque de esto depende que el numero sirva
+        de algo: ¿la prueba la vas a hacer por cable o por WiFi? ¿hay otros
+        aparatos usando internet en este momento? Una prueba por WiFi mide el
+        WiFi, no el servicio, y con la casa entera consumiendo mide lo que
+        sobra. Despues si, pidele que abra speedtest.net y te diga que
+        numeros le da.
+
+        - Le anda bien por cable y mal por WiFi: el internet llega bien a la
+          casa. Sigue el procedimiento de WiFi del manual (banda de 5 GHz,
+          clave, alcance). Si con eso no se resuelve, pasa el caso a una
+          persona -- NO es una visita.
+
+        - Le falla en UN solo aparato y los demas andan: es ese aparato. Que
+          lo reinicie el, que olvide la red y se vuelva a conectar. No abras
+          caso tecnico.
+
+        - La prueba da bien y aun asi insiste: antes de darlo por sano,
+          llama consultar_estabilidad_enlace si todavia no lo hiciste. Que
+          todo de bien AHORA no descarta que se venga cayendo, y ese es
+          justo el cliente que insiste con razon.
+
+          Si sigue sin aparecer nada: no inventes una causa. Decile
+          con todas las letras que con lo que puedes ver desde aca el
+          servicio esta llegando como corresponde, y pasa el caso para que
+          alguien haga las pruebas que tu no puedes hacer.
+
+      LO QUE NUNCA HACES EN UNA QUEJA DE LENTITUD (y solo ahi): reiniciar
+      la ONT, prometer una visita,
+      o afirmar una causa que no mediste (saturacion, "esta la red
+      congestionada", "es tu router"). Si no lo mediste, no lo digas.
+
+      Y CUANDO PASES EL CASO: el resumen tiene que servirle a quien lo tome.
+      Que reporto, que mediste y con que resultado, que quedo sin comprobar
+      y por que. Si NO le pediste prueba de velocidad porque ya tenias la
+      causa, dilo -- si no, la persona se la va a pedir de nuevo al cliente.
 
       PROBLEMA DE TV: ANTES de diagnosticar nada, confirma que su plan
       realmente incluya TV -- pero NUNCA por el nombre del plan (nombres
@@ -2276,7 +2285,13 @@ herramientas:
       (nombre o descripcion del caso) o filtrar por estado.
     solo_lectura: true
     roles_permitidos: [soporte]
-    base_url: http://localhost:8000
+    # 'backend' y no 'localhost': el motor corre en su propio contenedor, asi
+    # que localhost es EL MOTOR, no el CRM. Estuvo apuntando mal y la
+    # herramienta fallaba con connection refused -- y es el unico modo que
+    # tiene un colaborador de consultar sus casos desde el asistente. Las
+    # otras tres herramientas del CRM ya usaban el nombre del servicio; esta
+    # se quedo atras. Comprobado ejecutandola desde el contenedor.
+    base_url: http://backend:8000
     endpoint: /api/cases/
     metodo: GET
     auth_ref: BOTTLECRM_API_TOKEN

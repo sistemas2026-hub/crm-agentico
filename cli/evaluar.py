@@ -86,9 +86,30 @@ def correr_caso(config, caso: dict, defaults: dict, prohibido: list[str]) -> dic
     errores: list[str] = []
     respuesta = ""
 
+    # El rol se ARRASTRA entre mensajes, igual que en el canal real
+    # (nucleo/canales/api.py: atender_turno lee 'sesion.rol_siguiente', lo usa
+    # y lo limpia). Sin esto, un caso de varios mensajes corre SIEMPRE con el
+    # rol declarado: el turno 1 deriva al especialista y el turno 2 vuelve a
+    # empezar como 'cliente_final', que no tiene las herramientas del area.
+    #
+    # Lo que producia era peor que un fallo claro: el modelo intentaba una
+    # herramienta que veia en el historial, el motor la rechazaba con
+    # HERRAMIENTA_DESCONOCIDA -- y como 'usadas' cuenta los intentos, la
+    # afirmacion 'usa: [reiniciar_ont]' se daba por cumplida igual. El caso
+    # pasaba o fallaba segun como el modelo redactara la respuesta, que es
+    # justo lo que estos casos NO deben afirmar. Visto el 22/08/2026
+    # persiguiendo una regresion que no existia.
+    rol_actual = caso["rol"]
+    derivado_a = None
     for mensaje in caso["mensajes"]:
+        if getattr(sesion, "rol_siguiente", None):
+            derivado_a = sesion.rol_siguiente
+            rol_actual = derivado_a
+            sesion.rol_siguiente = None
         respuesta, registro, _medios = motor.responder(
-            config, caso["rol"], mensaje, historial, sesion)
+            config, rol_actual, mensaje, historial, sesion)
+        if getattr(sesion, "rol_siguiente", None):
+            derivado_a = sesion.rol_siguiente
         for r in registro:
             usadas.append(r["herramienta"])
             if r.get("codigo_error"):
@@ -101,10 +122,13 @@ def correr_caso(config, caso: dict, defaults: dict, prohibido: list[str]) -> dic
     rol_cfg = config.roles.get(caso["rol"])
     respuesta_norm = _sin_tildes_minusc(respuesta)
 
+    # Contra 'derivado_a' y no contra 'sesion.rol_siguiente': ahora el rol se
+    # consume al arrancar el turno siguiente, asi que al final de un caso de
+    # varios mensajes la sesion ya no lo tiene -- pero la derivacion ocurrio.
     esperado = espera.get("deriva_a")
-    if esperado and sesion.rol_siguiente != esperado:
+    if esperado and derivado_a != esperado:
         fallas.append(f"deriva_a: esperaba '{esperado}', "
-                     f"quedo en '{sesion.rol_siguiente}'")
+                     f"quedo en '{derivado_a}'")
 
     for herr in espera.get("usa") or []:
         if herr not in usadas:
