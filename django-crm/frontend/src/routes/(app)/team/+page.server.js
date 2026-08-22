@@ -21,7 +21,7 @@ export async function load({ cookies, fetch }) {
   // Las areas de trabajo salen del asistente, no de una lista fija aca: son
   // sus agentes internos, y cambian cuando alguien crea uno nuevo desde
   // /agentes. Si el asistente no esta configurado o no responde, la pantalla
-  // sigue sirviendo para invitar -- solo se queda sin el selector de area.
+  // sigue sirviendo para agregar gente -- solo se queda sin el selector de area.
   let areas = [];
   /** La gente del sistema operativo a la que se le puede asignar trabajo. */
   let externos = [];
@@ -77,12 +77,12 @@ export const actions = {
         invite: {
           error:
             err?.status === 403
-              ? 'Solo un administrador puede invitar personas.'
-              : readableError(err, 'No se pudo enviar esa invitación.')
+              ? 'Solo un administrador puede agregar personas.'
+              : readableError(err, 'No se pudo agregar a esa persona.')
         }
       });
     }
-    // El area es opcional, y su fallo NO invalida la invitacion: la persona ya
+    // El area es opcional, y su fallo NO invalida el alta: la persona ya
     // quedo creada en el CRM. Devolver un error aca la dejaria pensando que
     // no se creo nadie, y al reintentar se choca con "ya existe". Se avisa
     // aparte para que pueda asignarla desde /agentes/asignaciones.

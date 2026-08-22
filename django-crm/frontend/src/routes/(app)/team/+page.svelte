@@ -51,6 +51,11 @@
     };
   };
 
+  // El formulario dice "agregar" y no "invitar" porque eso es lo que hace:
+  // 'POST /users/' crea la persona en el momento, activa, y NO manda ningun
+  // correo -- no hay tarea de invitacion en el backend. Decir "enviar
+  // invitacion" prometia un correo que nunca sale y sugeria que la persona
+  // queda pendiente de aceptar, cuando ya tiene acceso.
   /** The invite form both submits and, on success, closes itself. */
   const inviteSubmit = () => {
     busy = true;
@@ -78,7 +83,7 @@
     {/snippet}
     {#snippet actions()}
       <button class="v2-btn v2-btn-primary" onclick={() => (inviting = !inviting)}>
-        <UserPlus />Invitar
+        <UserPlus />Agregar persona
       </button>
     {/snippet}
   </PageHeader>
@@ -114,7 +119,7 @@
         >
           <div style="flex:1;min-width:220px">
             <label class="v2-label" for="invite-email" style="display:block;margin-bottom:4px">
-              Invitar por correo
+              Correo de la persona
             </label>
             <input
               id="invite-email"
@@ -189,7 +194,7 @@
               <input type="hidden" name="externo_nombre" value={nombreExterno} />
             </div>
           {/if}
-          <button class="v2-btn v2-btn-primary" disabled={busy}>Enviar invitación</button>
+          <button class="v2-btn v2-btn-primary" disabled={busy}>Agregar</button>
           <button type="button" class="v2-btn" disabled={busy} onclick={() => (inviting = false)}>
             Cancelar
           </button>
