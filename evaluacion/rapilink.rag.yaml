@@ -269,13 +269,63 @@ casos:
       Igual que el anterior, en su forma extrema: como consulta de busqueda
       no significa nada.
 
+  # --- trafico real de soporte_tecnico_cliente ------------------------------
+  #  Las consultas mas frecuentes del sistema, tomadas de
+  #  asistente.unanswered_queries con su numero de ocurrencias. Hasta el
+  #  22/08/2026 este rol veia CERO fragmentos y todas fallaban por permisos:
+  #  ningun documento tenia asignado 'soporte_tecnico_cliente'. La solucion
+  #  NO fue darle las guias tecnicas -- G-GO-04 esta escrita para un tecnico
+  #  con Power Meter y le diria a un cliente que manipule conectores de
+  #  fibra -- sino escribir la guia que la propia empresa tenia listada como
+  #  'Por Elaborar' en su procedimiento de soporte.
+  #
+  #  Son el tramo mas importante del set: la baseline que no los incluya
+  #  mide bien y representa mal la produccion.
+
   - pregunta: no tengo internet
     rol: soporte_tecnico_cliente
-    espera: [G-GO-04]
+    espera: [GUIA-ATENCION-01]          # 130 ocurrencias reales
+
+  - pregunta: se me cayo el internet
+    rol: soporte_tecnico_cliente
+    espera: [GUIA-ATENCION-01]          # 36 ocurrencias reales
+
+  - pregunta: no me anda el internet
+    rol: soporte_tecnico_cliente
+    espera: [GUIA-ATENCION-01]          # 35 ocurrencias reales
+
+  - pregunta: se fue el internet
+    rol: soporte_tecnico_cliente
+    espera: [GUIA-ATENCION-01]
+
+  - pregunta: no navega
+    rol: soporte_tecnico_cliente
+    espera: [GUIA-ATENCION-01]
+
+  - pregunta: que hago para que vuelva el internet
+    rol: soporte_tecnico_cliente
+    espera: [GUIA-ATENCION-01]
+
+  - pregunta: cuanto se demora en arreglarse
+    rol: soporte_tecnico_cliente
+    espera: [GUIA-ATENCION-01]
+
+  - pregunta: tengo que revisar algun cable?
+    rol: soporte_tecnico_cliente
+    espera: [GUIA-ATENCION-01]
+
+  - pregunta: reinicio el modem?
+    rol: soporte_tecnico_cliente
+    espera: [GUIA-ATENCION-01]
+
+  # Falla de TV: 62 ocurrencias reales entre las dos formas de decirlo, y la
+  # guia nueva NO las cubre -- habla de fallas de servicio en general, sin
+  # contenido propio de television. Se declaran como brecha para que el hueco
+  # quede medido en vez de olvidado.
+  - pregunta: no me sale señal en el tv
+    rol: soporte_tecnico_cliente
+    espera: [GUIA-ATENCION-01]
     brecha_conocida: >
-      La pregunta mas frecuente de todas (130 veces registradas) contra un
-      rol que ve CERO fragmentos: ningun documento tiene asignado
-      'soporte_tecnico_cliente'. Es un problema de permisos, no de
-      recuperacion -- se arregla asignando roles en /manual, y hay que
-      revisar antes que esas guias no expongan nada que no deba ver un
-      cliente.
+      32 ocurrencias reales. GUIA-ATENCION-01 cubre fallas de servicio en
+      general pero no tiene contenido propio de television. Falta decidir si
+      se le agrega una seccion o si se escribe un documento aparte.
