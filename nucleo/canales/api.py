@@ -1057,8 +1057,19 @@ def agentes_asignaciones():
                   f"{type(e).__name__}: {e}")
         candidatos = _candidatos_externos(config, tenant)
 
+    try:
+        areas_por_persona = persistencia.areas_de_colaboradores(tenant)
+    except Exception as e:
+        print(f"[agentes] fallo al leer areas: {type(e).__name__}: {e}")
+        areas_por_persona = {}
+
     return jsonify({"asignaciones": asignaciones,
                     "agentes": _agentes_internos(config),
+                    # Las areas declaradas por la empresa, con que agentes
+                    # precarga cada una: la pantalla no las conoce de antemano.
+                    "areas": [{"nombre": a.nombre, "etiqueta": a.etiqueta,
+                               "agentes": list(a.agentes)} for a in config.areas],
+                    "areas_por_persona": areas_por_persona,
                     "sistema_externo": (config.identidad_externa.etiqueta
                                         if config.identidad_externa else None),
                     "identidades": identidades,
@@ -1111,6 +1122,18 @@ def agentes_asignar(profile_id):
     # dos llamadas es como se llega a personas creadas a medias.
     #
     # Opcional: si el tenant no declaro un sistema externo, no se toca nada.
+    # El area se guarda aparte de los agentes a proposito: es lo que alguien
+    # DECIDIO, y los agentes son consecuencia de esa decision mas los ajustes
+    # que se le hagan despues. Deducir una de la otra hace que alguien cambie
+    # de area sola por haber recibido una capacidad extra.
+    if "area" in cuerpo:
+        try:
+            persistencia.guardar_area_colaborador(
+                tenant, profile_id, str(cuerpo.get("area") or ""))
+        except Exception as e:
+            print(f"[agentes] fallo al guardar el area de '{profile_id}': "
+                  f"{type(e).__name__}: {e}")
+
     sistema = (config.identidad_externa.sistema
                if config.identidad_externa else None)
     if sistema and "identidad_externa" in cuerpo:

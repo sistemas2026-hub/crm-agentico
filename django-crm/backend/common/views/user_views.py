@@ -143,6 +143,21 @@ class UsersListView(APIView, LimitOffsetPagination):
                     user = User.objects.filter(email__iexact=email).first()
                     if user is None:
                         user = user_serializer.save(is_active=True)
+                        # La contrasena inicial NO pasa por el serializador: un
+                        # ModelSerializer guardaria el texto plano en la
+                        # columna. Se aplica con set_password, que es lo que
+                        # la hashea.
+                        #
+                        # Solo al CREAR y solo aca: este POST ya esta cerrado a
+                        # administradores, y es el unico momento en que alguien
+                        # legitimamente le define una clave a otra persona. En
+                        # una cuenta que ya existia (la rama de abajo) NO se
+                        # toca: el admin que suma a alguien a su organizacion
+                        # no manda sobre la clave de esa cuenta.
+                        clave = (params.get("password") or "").strip()
+                        if clave:
+                            user.set_password(clave)
+                            user.save(update_fields=["password"])
                     # An existing account is reused as-is: the inviting admin
                     # gets a profile in their own org and no say over that
                     # person's account.

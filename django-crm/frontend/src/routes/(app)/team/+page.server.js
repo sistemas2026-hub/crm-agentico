@@ -23,6 +23,8 @@ export async function load({ cookies, fetch }) {
   // /agentes. Si el asistente no esta configurado o no responde, la pantalla
   // sigue sirviendo para agregar gente -- solo se queda sin el selector de area.
   let areas = [];
+  /** Areas declaradas por la empresa, con los agentes que precarga cada una. */
+  let areasTrabajo = [];
   /** La gente del sistema operativo a la que se le puede asignar trabajo. */
   let externos = [];
   let etiquetaExterna = '';
@@ -37,6 +39,7 @@ export async function load({ cookies, fetch }) {
       const datos = await resp.json();
       if (resp.ok) {
         areas = datos.agentes ?? [];
+        areasTrabajo = datos.areas ?? [];
         externos = datos.candidatos_externos ?? [];
         etiquetaExterna = datos.sistema_externo ?? '';
       }
@@ -50,7 +53,7 @@ export async function load({ cookies, fetch }) {
   } else {
     console.warn('[equipo] falta PRIVATE_ASISTENTE_URL o PRIVATE_ASISTENTE_TENANT');
   }
-  return { ...equipo, areas, externos, etiquetaExterna };
+  return { ...equipo, areas, areasTrabajo, externos, etiquetaExterna };
 }
 
 /** @type {import('./$types').Actions} */
@@ -61,18 +64,45 @@ export const actions = {
    * an account that already exists elsewhere instead of erroring.
    */
   invite: async ({ cookies, request, fetch }) => {
+    // Las areas se releen aca: el action no comparte estado con el load, y
+    // hace falta saber que agentes precarga la elegida.
+    let areasDeclaradas = [];
+    if (env.PRIVATE_ASISTENTE_URL && env.PRIVATE_ASISTENTE_TENANT) {
+      try {
+        const r = await fetch(
+          `${env.PRIVATE_ASISTENTE_URL}/agentes/asignaciones?tenant=` +
+            encodeURIComponent(env.PRIVATE_ASISTENTE_TENANT),
+          { headers: headersMotor() }
+        );
+        if (r.ok) areasDeclaradas = (await r.json()).areas ?? [];
+      } catch {
+        areasDeclaradas = [];
+      }
+    }
     const form = await request.formData();
     const email = form.get('email')?.toString().trim();
     const role = form.get('role')?.toString() || 'USER';
     const name = form.get('name')?.toString().trim() || '';
     const area = form.get('area')?.toString().trim() || '';
+    const activo = form.get('activo')?.toString() !== 'no';
+
+    // La clave la genera el SERVIDOR, no el navegador ni el administrador. Si
+    // la escribe el admin, la conoce; y la gente reusa claves. Con
+    // crypto.getRandomValues no depende de Math.random, que no sirve para
+    // esto.
+    const abc = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    const bytes = new Uint32Array(16);
+    crypto.getRandomValues(bytes);
+    const clave = Array.from(bytes, (b) => abc[b % abc.length])
+      .join('')
+      .replace(/^(.{5})(.{5})(.{6})$/, '$1-$2-$3');
     const externo = form.get('externo')?.toString().trim() || '';
     const externoNombre = form.get('externo_nombre')?.toString().trim() || '';
     if (!email) return fail(400, { invite: { error: 'Ingresá un correo electrónico.' } });
     if (!ROLES.includes(role)) return fail(400, { invite: { error: 'Elegí un rol válido.' } });
 
     try {
-      await inviteUser({ cookies }, { email, role, name });
+      await inviteUser({ cookies }, { email, role, name, password: clave });
     } catch (/** @type {any} */ err) {
       return fail(err?.status === 403 ? 403 : 400, {
         invite: {
@@ -88,7 +118,14 @@ export const actions = {
     // no se creo nadie, y al reintentar se choca con "ya existe". Se avisa
     // aparte para que pueda asignarla desde /agentes/asignaciones.
     let avisoArea = null;
-    if (area || externo) {
+    // Los agentes salen del area, y si el formulario mando una seleccion
+    // propia, gana esa: el area precarga, no impone.
+    const agentesForm = form.getAll('agentes').map((v) => v.toString());
+    const agentes = agentesForm.length
+      ? agentesForm
+      : (areasDeclaradas.find((/** @type {any} */ a) => a.nombre === area)?.agentes ?? []);
+
+    if (area || externo || agentes.length) {
       try {
         // 'POST /users/' no devuelve el perfil que creo -- hay que buscarlo.
         const profileId = await perfilPorCorreo({ cookies }, email);
@@ -99,7 +136,8 @@ export const actions = {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              roles: area ? [area] : [],
+              area,
+              roles: agentes,
               identidad_externa: { identificador: externo, nombre_visible: externoNombre }
             })
           });
@@ -113,7 +151,22 @@ export const actions = {
       }
     }
 
-    return { invited: email, area: area || null, avisoArea };
+    if (!activo) {
+      // Se crea activa y se desactiva enseguida: el POST no acepta el estado,
+      // y hacerlo en dos pasos es preferible a que quede activa sin querer.
+      try {
+        const persona = await listTeam({ cookies });
+        const fila = [...(persona.active ?? []), ...(persona.inactive ?? [])].find(
+          (/** @type {any} */ m) => (m.email || '').toLowerCase() === email.toLowerCase()
+        );
+        if (fila?.user_id) await setStatus({ cookies }, fila.user_id, 'Inactive');
+      } catch (/** @type {any} */ err) {
+        avisoArea = (avisoArea ? avisoArea + ' ' : '') +
+          'La persona quedó activa: no se pudo dejarla inactiva.';
+      }
+    }
+
+    return { invited: email, area: area || null, avisoArea, clave };
   },
 
   /**

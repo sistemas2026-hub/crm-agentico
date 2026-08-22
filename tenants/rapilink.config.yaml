@@ -3251,6 +3251,29 @@ canales:
     activo: true
 
 # -----------------------------------------------------------------------------
+#  AREAS DE TRABAJO  -  donde trabaja cada persona del equipo
+# -----------------------------------------------------------------------------
+#  Precargan los agentes al dar de alta a alguien. Es un punto de partida: se
+#  editan despues, porque alguien de soporte que ademas atiende facturas tiene
+#  que poder tener los dos.
+#
+#  VENTAS NO ESTA, y no es un olvido: existe 'ventas' como agente que atiende
+#  al cliente en el chat, pero NO como agente interno, asi que no hay
+#  capacidades que darle a un colaborador de esa area. Declararla igual seria
+#  ofrecer en la pantalla un area que deja a la persona sin poder hacer nada.
+#  Entra cuando se diseñe su agente interno.
+areas:
+  - nombre: cartera
+    etiqueta: Cartera
+    agentes: [facturacion]
+  - nombre: soporte_tecnico
+    etiqueta: Soporte Técnico
+    agentes: [soporte]
+  - nombre: administracion
+    etiqueta: Administración
+    agentes: [administracion]
+
+# -----------------------------------------------------------------------------
 #  IDENTIDAD EXTERNA  -  quien es cada colaborador en el sistema operativo
 # -----------------------------------------------------------------------------
 #  Sin esto, el ticket que sale al escalar solo podia asignarse al usuario

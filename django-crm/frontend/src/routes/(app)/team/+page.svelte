@@ -34,6 +34,12 @@
 
   let inviting = $state(false);
   let externoElegido = $state('');
+  let areaElegida = $state('');
+  // Los agentes que precarga el area elegida. Se recalcula al cambiarla,
+  // asi las casillas siguen a la decision en vez de quedarse en la primera.
+  const agentesDelArea = $derived(
+    data.areasTrabajo?.find((/** @type {any} */ a) => a.nombre === areaElegida)?.agentes ?? []
+  );
   // El nombre viaja junto al id para no tener que reconsultar la API
   // externa cada vez que haya que MOSTRAR a quien se vinculo.
   const nombreExterno = $derived(
@@ -164,19 +170,56 @@
             vacio y el selector no se muestra -- invitar tiene que funcionar
             igual.
           -->
-          {#if data.areas?.length}
+          {#if data.areasTrabajo?.length}
             <div>
               <label class="v2-label" for="invite-area" style="display:block;margin-bottom:4px">
                 Área de trabajo
               </label>
-              <select id="invite-area" name="area" class="v2-input" style="width:170px">
-                <option value="">Sin asignar</option>
-                {#each data.areas as area}
-                  <option value={area}>{area}</option>
+              <select
+                id="invite-area"
+                name="area"
+                class="v2-input"
+                style="width:160px"
+                bind:value={areaElegida}
+              >
+                <option value="">Sin área</option>
+                {#each data.areasTrabajo as a (a.nombre)}
+                  <option value={a.nombre}>{a.etiqueta}</option>
                 {/each}
               </select>
             </div>
+            <!--
+              Los agentes que trae el area, visibles y desmarcables. Mostrarlos
+              es la diferencia entre un preset y una caja negra: quien da de
+              alta ve que capacidades le esta dando, y puede ajustar antes de
+              crear.
+            -->
+            <div style="min-width:150px">
+              <span class="v2-label" style="display:block;margin-bottom:4px">Agentes</span>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;padding-top:4px">
+                {#each data.areas as agente (agente)}
+                  <label style="font-size:12.5px;display:flex;align-items:center;gap:3px">
+                    <input
+                      type="checkbox"
+                      name="agentes"
+                      value={agente}
+                      checked={agentesDelArea.includes(agente)}
+                    />
+                    {agente}
+                  </label>
+                {/each}
+              </div>
+            </div>
           {/if}
+          <div>
+            <label class="v2-label" for="invite-activo" style="display:block;margin-bottom:4px">
+              Estado
+            </label>
+            <select id="invite-activo" name="activo" class="v2-input" style="width:105px">
+              <option value="si">Activo</option>
+              <option value="no">Inactivo</option>
+            </select>
+          </div>
           <!--
             A nombre de quien se le asigna el trabajo en el sistema operativo.
             Es una LISTA y no un campo de texto a proposito: escribir el
@@ -231,6 +274,28 @@
         >
           {form.avisoArea} Podés asignársela desde Agentes → Asignaciones.
         </p>
+      {/if}
+
+      <!-- La clave se muestra UNA vez: no se guarda legible en ningun lado y
+           no hay forma de recuperarla despues. Si se pierde, se regenera. -->
+      {#if form?.clave}
+        <div
+          style="border:1px solid var(--v2-rust);border-radius:7px;padding:12px 14px;margin:0 0 16px;background:color-mix(in srgb, var(--v2-rust) 7%, transparent)"
+        >
+          <p
+            style="font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--v2-rust);font-weight:700;margin:0 0 4px"
+          >
+            Se muestra una sola vez
+          </p>
+          <p style="margin:0 0 8px;font-size:13px">
+            {form.invited} ya puede entrar con ese correo. Pasale esta clave y pedile que la cambie
+            al entrar.
+          </p>
+          <code
+            style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:15px;letter-spacing:.04em;border:1px solid var(--v2-line,#ddd);border-radius:5px;padding:5px 9px;display:inline-block"
+            >{form.clave}</code
+          >
+        </div>
       {/if}
 
       {#if form?.invited}

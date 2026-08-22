@@ -1078,6 +1078,31 @@ class Canales(Base):
     web: dict[str, Any] = Field(default_factory=lambda: {"activo": True})
 
 
+class AreaDeTrabajo(Base):
+    """
+    Donde trabaja una persona del equipo, y que agentes le corresponden por
+    defecto.
+
+    Es un PUNTO DE PARTIDA, no una restriccion: al dar de alta a alguien se
+    eligen sus agentes a partir del area y despues se editan. Alguien de
+    soporte que ademas atiende facturas termina con los dos, y eso tiene que
+    poder expresarse.
+
+    Se declara por empresa y no en la pantalla: las areas de un ISP no son las
+    del siguiente, y hacerlas fijas en el frontend obliga a una sesion de
+    codigo por cada alta de tenant.
+    """
+    # Nombre interno, estable. Es lo que se guarda por persona, asi que
+    # cambiarlo deja huerfanas a las que ya lo tenian.
+    nombre: str
+    # Como se lee en pantalla.
+    etiqueta: str
+    # Agentes que precarga. Puede ser mas de uno, y puede estar vacio: un area
+    # que todavia no tiene agente propio se puede declarar igual para poder
+    # organizar a la gente, aunque no le de capacidades.
+    agentes: list[str] = Field(default_factory=list)
+
+
 class IdentidadExterna(Base):
     """
     Como se identifica a un colaborador en el sistema donde de verdad se
@@ -1278,6 +1303,8 @@ class TenantConfig(Base):
     # Opcional: sin esto, el asistente no intenta identificar a nadie en
     # ningun sistema externo y la pantalla no ofrece el campo.
     identidad_externa: IdentidadExterna | None = None
+    # Las areas de trabajo del equipo. Vacio = la pantalla no ofrece area.
+    areas: list[AreaDeTrabajo] = Field(default_factory=list)
     conversaciones: Conversaciones = Field(default_factory=Conversaciones)
     limites: Limites = Field(default_factory=Limites)
     evaluacion: Evaluacion = Field(default_factory=Evaluacion)
@@ -1411,6 +1438,28 @@ class TenantConfig(Base):
                     raise ValueError(
                         f"escalamiento.evidencia_suficiente['{caso}'] espera la "
                         f"herramienta inexistente '{c.herramienta}'")
+
+        # Los agentes que precarga un area tienen que existir Y ser internos.
+        # Un area que apunta a un agente inexistente no falla al usarla: deja
+        # a la persona sin capacidades y se ve igual que "todavia no le
+        # asignaron nada". Se cae al cargar, que es donde se nota.
+        internos = {n for n, r in self.roles.items()
+                    if r.orientado_a == "colaborador"}
+        vistos = set()
+        for area in self.areas:
+            if area.nombre in vistos:
+                raise ValueError(f"areas: '{area.nombre}' esta declarada dos veces")
+            vistos.add(area.nombre)
+            for agente in area.agentes:
+                if agente not in self.roles:
+                    raise ValueError(
+                        f"areas['{area.nombre}'] precarga el agente inexistente "
+                        f"'{agente}'")
+                if agente not in internos:
+                    raise ValueError(
+                        f"areas['{area.nombre}'] precarga '{agente}', que atiende "
+                        f"al cliente final -- a un colaborador solo se le asignan "
+                        f"agentes internos ({', '.join(sorted(internos))})")
 
         # El ticket que se crea al escalar: mismo criterio fail-closed. Un
         # caso mal escrito aca no rompe nada en vivo -- la escalada ocurre

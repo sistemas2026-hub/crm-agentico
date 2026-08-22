@@ -650,6 +650,36 @@ def asignaciones_de_agentes(tenant: str) -> dict[str, list[str]]:
         return salida
 
 
+def areas_de_colaboradores(tenant: str) -> dict[str, str]:
+    """{profile_id: nombre de area} de todo el tenant."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select profile_id, area from asistente.area_colaborador
+               where organization_id = %s""",
+            (org,))
+        return {str(f["profile_id"]): f["area"] for f in cur.fetchall()}
+
+
+def guardar_area_colaborador(tenant: str, profile_id: str, area: str) -> None:
+    """Un area vacia borra la fila: no todo el mundo pertenece a un area
+    operativa (un administrador del sistema, por ejemplo), y guardar la cadena
+    vacia haria que la pantalla mostrara un area en blanco como si fuera una."""
+    with sesion(tenant) as (cur, org):
+        if not (area or "").strip():
+            cur.execute(
+                """delete from asistente.area_colaborador
+                   where organization_id = %s and profile_id = %s""",
+                (org, profile_id))
+            return
+        cur.execute(
+            """insert into asistente.area_colaborador
+                   (organization_id, profile_id, area)
+               values (%s, %s, %s)
+               on conflict (organization_id, profile_id) do update
+                   set area = excluded.area, actualizado_en = now()""",
+            (org, profile_id, area.strip()))
+
+
 def identidades_externas(tenant: str, sistema: str) -> dict[str, dict]:
     """
     Quien es cada colaborador dentro de un sistema externo:
