@@ -98,16 +98,35 @@
   // deshacerlo salvo acordarse de como estaba.
   /** @type {string | null} */
   let editando = $state(null);
-  let borrador = $state({ area: '', agentes: /** @type {string[]} */ ([]), externo: '' });
+  let borrador = $state({
+    name: '',
+    email: '',
+    role: 'USER',
+    activo: true,
+    area: '',
+    agentes: /** @type {string[]} */ ([]),
+    externo: ''
+  });
   let guardandoFila = $state(false);
 
   const etiquetaArea = (/** @type {string} */ nombre) =>
     data.areasTrabajo?.find((/** @type {any} */ a) => a.nombre === nombre)?.etiqueta ?? '';
 
-  function editar(/** @type {string} */ id) {
-    editando = id;
-    borrador = { ...fila[id], agentes: [...(fila[id]?.agentes ?? [])] };
+  function editar(/** @type {any} */ m) {
+    editando = m.id;
+    borrador = {
+      name: m.name ?? '',
+      email: m.email ?? '',
+      role: m.role ?? 'USER',
+      activo: !!m.is_active,
+      area: fila[m.id]?.area ?? '',
+      agentes: [...(fila[m.id]?.agentes ?? [])],
+      externo: fila[m.id]?.externo ?? ''
+    };
   }
+
+  const nombreExternoDe = (/** @type {string} */ id) =>
+    data.externos?.find((/** @type {any} */ e) => e.identificador === id)?.nombre_visible ?? '';
 
   function cancelar() {
     editando = null;
@@ -132,34 +151,25 @@
     };
   }
 
-  async function guardarFila(/** @type {string} */ id, /** @type {string} */ nombre) {
+  /**
+   * El submit de la fila. Cierra la edicion solo si el servidor confirmo, y
+   * recarga los datos para que la tabla muestre lo que quedo guardado y no lo
+   * que se pidio.
+   */
+  const edicionSubmit = () => {
     guardandoFila = true;
-    try {
-      const nombreExt =
-        data.externos?.find((/** @type {any} */ e) => e.identificador === borrador.externo)
-          ?.nombre_visible ?? '';
-      const resp = await fetch(`/api/agentes/asignaciones/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          area: borrador.area,
-          roles: borrador.agentes,
-          identidad_externa: { identificador: borrador.externo, nombre_visible: nombreExt }
-        })
-      });
-      const d = await resp.json().catch(() => ({}));
-      if (!resp.ok) {
-        toast.error(d?.error || 'No se pudo guardar');
-        return;
-      }
-      // La pantalla refleja lo que el servidor CONFIRMO, no lo que se pidio.
-      fila = { ...fila, [id]: { ...borrador, agentes: d.roles ?? borrador.agentes } };
-      editando = null;
-      toast.success(`${nombre}: guardado.`);
-    } finally {
+    return async (/** @type {any} */ { result, update }) => {
+      await update({ reset: false });
       guardandoFila = false;
-    }
-  }
+      if (result?.type === 'success' && result?.data?.editado) {
+        editando = null;
+        if (result.data.avisoEdicion) toast.error(result.data.avisoEdicion);
+        else toast.success(`${result.data.editado}: guardado.`);
+      } else if (result?.data?.edicion?.error) {
+        toast.error(result.data.edicion.error);
+      }
+    };
+  };
 </script>
 
 {#if data.forbidden}
@@ -451,12 +461,28 @@
                   <span style="display:flex;gap:9px;align-items:center">
                     <Avatar name={m.name} size={27} />
                     <span style="min-width:0">
-                      <span class="v2-table-primary">
-                        {m.name}{#if m.is_you}<span class="v2-sub" style="font-weight:400">,
-                            vos</span
-                          >{/if}
-                      </span>
-                      <span class="v2-table-secondary" style="display:block">{m.email}</span>
+                      {#if editando === m.id}
+                        <input
+                          class="v2-input"
+                          style="width:150px;font-size:12px;padding:2px 5px;margin-bottom:3px"
+                          bind:value={borrador.name}
+                          aria-label="Nombre"
+                        />
+                        <input
+                          class="v2-input"
+                          style="width:190px;font-size:12px;padding:2px 5px"
+                          type="email"
+                          bind:value={borrador.email}
+                          aria-label="Correo"
+                        />
+                      {:else}
+                        <span class="v2-table-primary">
+                          {m.name}{#if m.is_you}<span class="v2-sub" style="font-weight:400">,
+                              vos</span
+                            >{/if}
+                        </span>
+                        <span class="v2-table-secondary" style="display:block">{m.email}</span>
+                      {/if}
                     </span>
                   </span>
                 </td>
@@ -524,14 +550,41 @@
                   </td>
                 {/if}
                 <td data-m="tag">
-                  <Pill tone={m.is_active ? ROLE_TONE[m.role] : 'slate'}>{ROLE_LABEL[m.role]}</Pill>
+                  {#if editando === m.id}
+                    <select
+                      class="v2-input"
+                      style="width:120px;font-size:12px;padding:2px 5px"
+                      bind:value={borrador.role}
+                      disabled={m.role === 'ADMIN' && isLastAdmin}
+                      aria-label="Rol de {m.name}"
+                    >
+                      <option value="USER">Miembro</option>
+                      <option value="ADMIN">Administrador</option>
+                    </select>
+                  {:else}
+                    <Pill tone={m.is_active ? ROLE_TONE[m.role] : 'slate'}>
+                      {ROLE_LABEL[m.role]}
+                    </Pill>
+                  {/if}
                 </td>
                 <td>
-                  <Pill tone={m.is_active ? 'moss' : 'slate'}>
-                    {m.is_active ? 'Activo' : 'Inactivo'}
-                  </Pill>
-                  {#if m.is_active && !m.last_login}
-                    <span class="v2-table-secondary" style="display:block">nunca entró</span>
+                  {#if editando === m.id}
+                    <select
+                      class="v2-input"
+                      style="width:105px;font-size:12px;padding:2px 5px"
+                      bind:value={borrador.activo}
+                      aria-label="Estado de {m.name}"
+                    >
+                      <option value={true}>Activo</option>
+                      <option value={false}>Inactivo</option>
+                    </select>
+                  {:else}
+                    <Pill tone={m.is_active ? 'moss' : 'slate'}>
+                      {m.is_active ? 'Activo' : 'Inactivo'}
+                    </Pill>
+                    {#if m.is_active && !m.last_login}
+                      <span class="v2-table-secondary" style="display:block">nunca entró</span>
+                    {/if}
                   {/if}
                 </td>
                 <td data-m="hide">
@@ -553,19 +606,42 @@
                   {#if editando === m.id}
                     <!-- En edicion, la fila ofrece SOLO guardar o cancelar.
                          Dejar los otros botones activos invita a cambiarle el
-                         rol a alguien con un borrador a medio hacer. -->
-                    <span style="display:inline-flex;gap:6px;justify-content:flex-end">
-                      <button
-                        class="v2-btn v2-btn-sm v2-btn-primary"
-                        disabled={guardandoFila}
-                        onclick={() => guardarFila(m.id, m.name)}
-                      >
+                         rol a alguien con un borrador a medio hacer.
+
+                         El <form> vive DENTRO de la celda porque un form no
+                         puede envolver un <tr> sin romper el HTML; lo editado
+                         viaja como campos ocultos. -->
+                    <form
+                      method="POST"
+                      action="?/actualizar"
+                      use:enhance={edicionSubmit}
+                      style="display:inline-flex;gap:6px;justify-content:flex-end"
+                    >
+                      <input type="hidden" name="userId" value={m.user_id} />
+                      <input type="hidden" name="profileId" value={m.id} />
+                      <input type="hidden" name="name" value={borrador.name} />
+                      <input type="hidden" name="email" value={borrador.email} />
+                      <input type="hidden" name="role" value={borrador.role} />
+                      <input type="hidden" name="activo" value={borrador.activo ? 'si' : 'no'} />
+                      <input type="hidden" name="eraActivo" value={m.is_active ? 'si' : 'no'} />
+                      <input type="hidden" name="area" value={borrador.area} />
+                      <input type="hidden" name="externo" value={borrador.externo} />
+                      <input type="hidden" name="externo_nombre" value={nombreExternoDe(borrador.externo)} />
+                      {#each borrador.agentes as a (a)}
+                        <input type="hidden" name="agentes" value={a} />
+                      {/each}
+                      <button class="v2-btn v2-btn-sm v2-btn-primary" disabled={guardandoFila}>
                         Guardar
                       </button>
-                      <button class="v2-btn v2-btn-sm" disabled={guardandoFila} onclick={cancelar}>
+                      <button
+                        type="button"
+                        class="v2-btn v2-btn-sm"
+                        disabled={guardandoFila}
+                        onclick={cancelar}
+                      >
                         Cancelar
                       </button>
-                    </span>
+                    </form>
                   {:else if m.is_you}
                     <!-- Sobre uno mismo tampoco se edita area ni agentes: es
                          el mismo criterio con el que el servidor no deja
@@ -578,7 +654,7 @@
                       <button
                         class="v2-btn v2-btn-sm"
                         disabled={busy || editando !== null}
-                        onclick={() => editar(m.id)}
+                        onclick={() => editar(m)}
                       >
                         Editar
                       </button>

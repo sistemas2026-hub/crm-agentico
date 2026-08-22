@@ -209,6 +209,23 @@ export async function perfilPorCorreo({ cookies }, email) {
   return null;
 }
 
+/**
+ * Cambiar nombre, correo y rol de una persona: `PATCH /api/user/<userId>/`.
+ *
+ * El id es el del USUARIO, no el del perfil -- la vista busca por `user__id`.
+ * Confundirlos no da 404 prolijo: da 404 o, peor, encuentra a otra persona.
+ *
+ * Es un PATCH y no un PUT porque solo se mandan los campos que la pantalla
+ * edita; un PUT reemplazaria el resto por vacio.
+ *
+ * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
+ * @param {string} userId
+ * @param {{ name?: string, email?: string, role?: string }} body
+ */
+export function updateUser({ cookies }, userId, body) {
+  return apiRequest(`/user/${userId}/`, { method: 'PATCH', body }, { cookies });
+}
+
 export function inviteUser({ cookies }, body) {
   return apiRequest('/users/', { method: 'POST', body }, { cookies });
 }

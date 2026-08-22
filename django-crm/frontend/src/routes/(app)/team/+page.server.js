@@ -1,5 +1,5 @@
 import { fail } from '@sveltejs/kit';
-import { listTeam, inviteUser, setRole, setStatus, ROLES, perfilPorCorreo }
+import { listTeam, inviteUser, setRole, setStatus, updateUser, ROLES, perfilPorCorreo }
   from '$lib/server/v2/team.js';
 import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
@@ -71,6 +71,88 @@ export const actions = {
    * this to admins, rejects a duplicate within the org with a 400, and reuses
    * an account that already exists elsewhere instead of erroring.
    */
+  /**
+   * Guarda TODO lo de una persona de una vez: nombre, correo, rol y estado en
+   * el CRM; area, agentes y usuario externo en el asistente.
+   *
+   * En una sola accion y no en tres llamadas desde el navegador porque el
+   * usuario aprieta UN boton: si tres pedidos sueltos fallan a mitad, la fila
+   * queda con parte de los cambios aplicados y parte no, y nadie sabe cual.
+   * Aca se aplica en orden y se informa que fallo, si algo fallo.
+   */
+  actualizar: async ({ cookies, request, fetch }) => {
+    const form = await request.formData();
+    const userId = form.get('userId')?.toString() || '';
+    const profileId = form.get('profileId')?.toString() || '';
+    const name = form.get('name')?.toString().trim() || '';
+    const email = form.get('email')?.toString().trim() || '';
+    const role = form.get('role')?.toString() || '';
+    const activo = form.get('activo')?.toString() === 'si';
+    const eraActivo = form.get('eraActivo')?.toString() === 'si';
+    const area = form.get('area')?.toString() || '';
+    const externo = form.get('externo')?.toString() || '';
+    const externoNombre = form.get('externo_nombre')?.toString() || '';
+    const agentes = form.getAll('agentes').map((v) => v.toString());
+
+    if (!userId || !profileId) {
+      return fail(400, { edicion: { error: 'Falta identificar a la persona.' } });
+    }
+    if (!email) {
+      return fail(400, { edicion: { error: 'El correo no puede quedar vacío.' } });
+    }
+
+    try {
+      await updateUser({ cookies }, userId, { name, email, role });
+    } catch (/** @type {any} */ err) {
+      return fail(err?.status === 403 ? 403 : 400, {
+        edicion: {
+          error:
+            err?.status === 403
+              ? 'Solo un administrador puede editar a otra persona.'
+              : readableError(err, 'No se pudieron guardar los datos de la persona.')
+        }
+      });
+    }
+
+    // El estado va aparte: tiene su propio endpoint y sus propias reglas (el
+    // servidor no deja desactivar al ultimo administrador). Solo se toca si
+    // de verdad cambio.
+    if (activo !== eraActivo) {
+      try {
+        await setStatus({ cookies }, userId, activo ? 'Active' : 'Inactive');
+      } catch (/** @type {any} */ err) {
+        return fail(400, {
+          edicion: {
+            error: readableError(err, 'Se guardaron los datos, pero no el estado.')
+          }
+        });
+      }
+    }
+
+    // Y lo del asistente. Su fallo NO invalida lo anterior, que ya quedo
+    // guardado: se avisa y se dice donde corregirlo.
+    let aviso = null;
+    try {
+      const resp = await fetch(`/api/agentes/asignaciones/${encodeURIComponent(profileId)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          area,
+          roles: agentes,
+          identidad_externa: { identificador: externo, nombre_visible: externoNombre }
+        })
+      });
+      if (!resp.ok) {
+        const d = await resp.json().catch(() => ({}));
+        aviso = d?.error || 'Se guardaron los datos, pero no el área ni los agentes.';
+      }
+    } catch (/** @type {any} */ err) {
+      aviso = err?.message || 'Se guardaron los datos, pero no el área ni los agentes.';
+    }
+
+    return { editado: name || email, avisoEdicion: aviso };
+  },
+
   invite: async ({ cookies, request, fetch }) => {
     // Las areas se releen aca: el action no comparte estado con el load, y
     // hace falta saber que agentes precarga la elegida.
