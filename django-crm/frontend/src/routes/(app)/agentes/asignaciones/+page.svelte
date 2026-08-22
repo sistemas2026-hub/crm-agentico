@@ -28,6 +28,24 @@
   /** @type {Record<string, boolean>} */
   let guardando = $state({});
 
+  // A nombre de quien se le asigna el trabajo en el sistema operativo. Se
+  // edita en la MISMA fila que los agentes y se guarda con el mismo boton:
+  // las dos cosas responden a la misma pregunta -- que hace esta persona y
+  // donde. Separarlas en dos pantallas fue lo que dejo gente creada a medias.
+  /** @type {Record<string, string>} */
+  let externos = $state(
+    Object.fromEntries(
+      Object.entries(data.identidades ?? {}).map(([id, v]) => [
+        id,
+        /** @type {any} */ (v)?.identificador ?? ''
+      ])
+    )
+  );
+
+  const nombreExterno = (/** @type {string} */ id) =>
+    data.candidatos_externos?.find((/** @type {any} */ c) => c.identificador === externos[id])
+      ?.nombre_visible ?? '';
+
   const tiene = (/** @type {string} */ id, /** @type {string} */ agente) =>
     (asignaciones[id] ?? []).includes(agente);
 
@@ -47,7 +65,13 @@
       const resp = await fetch(`/api/agentes/asignaciones/${persona.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ roles: asignaciones[persona.id] ?? [] })
+        body: JSON.stringify({
+          roles: asignaciones[persona.id] ?? [],
+          identidad_externa: {
+            identificador: externos[persona.id] ?? '',
+            nombre_visible: nombreExterno(persona.id)
+          }
+        })
       });
       const datos = await resp.json().catch(() => ({}));
       if (!resp.ok) {
@@ -93,6 +117,9 @@
             {#each data.agentes as agente (agente)}
               <th class="col-agente">{agente}</th>
             {/each}
+            {#if data.candidatos_externos?.length}
+              <th class="col-externo">{data.sistema_externo || 'Usuario externo'}</th>
+            {/if}
             <th></th>
           </tr>
         </thead>
@@ -113,6 +140,20 @@
                   />
                 </td>
               {/each}
+              {#if data.candidatos_externos?.length}
+                <td class="col-externo">
+                  <select
+                    class="v2-input select-externo"
+                    bind:value={externos[persona.id]}
+                    aria-label="Usuario externo de {persona.name}"
+                  >
+                    <option value="">Sin vincular</option>
+                    {#each data.candidatos_externos as c (c.identificador)}
+                      <option value={c.identificador}>{c.nombre_visible}</option>
+                    {/each}
+                  </select>
+                </td>
+              {/if}
               <td>
                 <Button
                   type="button"
@@ -134,6 +175,14 @@
 {/if}
 
 <style>
+  .col-externo {
+    white-space: nowrap;
+  }
+  .select-externo {
+    width: 180px;
+    font-size: 12.5px;
+    padding: 3px 6px;
+  }
   .aviso-error {
     color: var(--v2-rust);
     font-size: 14px;
