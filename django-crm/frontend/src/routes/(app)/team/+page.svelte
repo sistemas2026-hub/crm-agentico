@@ -30,11 +30,80 @@
   import { UserPlus, KeyRound } from '@lucide/svelte';
 
   /** @type {{ data: any, form: any }} */
+  import { toast } from 'svelte-sonner';
+
   let { data, form } = $props();
 
   let inviting = $state(false);
   let externoElegido = $state('');
   let areaElegida = $state('');
+
+  // Estado editable de cada fila: area, agentes y usuario externo. Se arranca
+  // con lo que vino del servidor y se guarda por fila -- no con un "Guardar"
+  // global, que obligaria a revisar toda la tabla para confirmar un cambio.
+  /** @type {Record<string, {area: string, agentes: string[], externo: string}>} */
+  let fila = $state(
+    Object.fromEntries(
+      [...(data.active ?? []), ...(data.inactive ?? [])].map((/** @type {any} */ m) => [
+        m.id,
+        {
+          area: data.areasPorPersona?.[m.id] ?? '',
+          agentes: data.asignaciones?.[m.id] ?? [],
+          externo: data.identidades?.[m.id]?.identificador ?? ''
+        }
+      ])
+    )
+  );
+  /** @type {Record<string, boolean>} */
+  let guardandoFila = $state({});
+
+  function tocar(/** @type {string} */ id, /** @type {string} */ campo, /** @type {string} */ valor) {
+    fila = { ...fila, [id]: { ...fila[id], [campo]: valor } };
+    // Elegir un area RECARGA sus agentes: es lo que hace util al preset
+    // tambien al corregir, no solo al dar de alta. Se puede desmarcar despues.
+    if (campo === 'area') {
+      const sug = data.areasTrabajo?.find((/** @type {any} */ a) => a.nombre === valor)?.agentes;
+      if (sug) fila = { ...fila, [id]: { ...fila[id], agentes: [...sug] } };
+    }
+    guardarFila(id);
+  }
+
+  function alternarAgente(/** @type {string} */ id, /** @type {string} */ agente) {
+    const act = fila[id]?.agentes ?? [];
+    fila = {
+      ...fila,
+      [id]: {
+        ...fila[id],
+        agentes: act.includes(agente) ? act.filter((a) => a !== agente) : [...act, agente]
+      }
+    };
+    guardarFila(id);
+  }
+
+  async function guardarFila(/** @type {string} */ id) {
+    guardandoFila = { ...guardandoFila, [id]: true };
+    try {
+      const f = fila[id];
+      const nombreExt =
+        data.externos?.find((/** @type {any} */ e) => e.identificador === f.externo)
+          ?.nombre_visible ?? '';
+      const resp = await fetch(`/api/agentes/asignaciones/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          area: f.area,
+          roles: f.agentes,
+          identidad_externa: { identificador: f.externo, nombre_visible: nombreExt }
+        })
+      });
+      if (!resp.ok) {
+        const d = await resp.json().catch(() => ({}));
+        toast.error(d?.error || 'No se pudo guardar');
+      }
+    } finally {
+      guardandoFila = { ...guardandoFila, [id]: false };
+    }
+  }
   // Los agentes que precarga el area elegida. Se recalcula al cambiarla,
   // asi las casillas siguen a la decision en vez de quedarse en la primera.
   const agentesDelArea = $derived(
@@ -337,7 +406,13 @@
             <tr>
               <th>Persona</th>
               <th>Rol</th>
-              <th>Equipos</th>
+              <!-- Area, agentes y usuario externo se editan ACA, en la misma
+                   fila. Estaban en /agentes/asignaciones, que obligaba a crear
+                   en un lugar y corregir en otro -- la queja con la que
+                   arranco este rediseño. Un solo lugar, o vuelve a pasar. -->
+              <th>Área</th>
+              <th>Agentes</th>
+              {#if data.externos?.length}<th>{data.etiquetaExterna || 'Externo'}</th>{/if}
               <th data-m="hide">Tokens</th>
               <th class="v2-r">Último inicio de sesión</th>
               <th class="v2-r">Gestionar</th>
@@ -367,12 +442,49 @@
                   {/if}
                 </td>
                 <td>
-                  {#if m.teams.length}
-                    {m.teams.join(', ')}
-                  {:else}
-                    <span class="v2-muted">—</span>
-                  {/if}
+                  <select
+                    class="v2-input"
+                    style="width:135px;font-size:12px;padding:2px 5px"
+                    value={fila[m.id]?.area ?? ''}
+                    onchange={(e) => tocar(m.id, 'area', e.currentTarget.value)}
+                    aria-label="Área de {m.name}"
+                  >
+                    <option value="">Sin área</option>
+                    {#each data.areasTrabajo ?? [] as a (a.nombre)}
+                      <option value={a.nombre}>{a.etiqueta}</option>
+                    {/each}
+                  </select>
                 </td>
+                <td>
+                  <span style="display:flex;gap:7px;flex-wrap:wrap">
+                    {#each data.areas ?? [] as agente (agente)}
+                      <label style="font-size:11.5px;display:flex;align-items:center;gap:3px">
+                        <input
+                          type="checkbox"
+                          checked={(fila[m.id]?.agentes ?? []).includes(agente)}
+                          onchange={() => alternarAgente(m.id, agente)}
+                        />
+                        {agente}
+                      </label>
+                    {/each}
+                  </span>
+                </td>
+                {#if data.externos?.length}
+                  <td>
+                    <select
+                      class="v2-input"
+                      style="width:150px;font-size:12px;padding:2px 5px"
+                      value={fila[m.id]?.externo ?? ''}
+                      onchange={(e) => tocar(m.id, 'externo', e.currentTarget.value)}
+                      aria-label="Usuario externo de {m.name}"
+                    >
+                      <option value="">Sin vincular</option>
+                      {#each data.externos as ex (ex.identificador)}
+                        <option value={ex.identificador}>{ex.nombre_visible}</option>
+                      {/each}
+                    </select>
+                  </td>
+                {/if}
                 <td data-m="hide">
                   {#if m.active_token_count}
                     <a

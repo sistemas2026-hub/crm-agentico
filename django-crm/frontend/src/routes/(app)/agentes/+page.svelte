@@ -126,7 +126,7 @@
   {#snippet actions()}
     <a class="v2-btn v2-btn-sm" href="/agentes/flujo">Flujo de derivación</a>
     {#if esAdmin}
-      <a class="v2-btn v2-btn-sm" href="/agentes/asignaciones">Quién usa cada agente</a>
+      <a class="v2-btn v2-btn-sm" href="/team">Quién usa cada agente</a>
       <Button type="button" onclick={abrirCrear}>Nuevo agente</Button>
     {/if}
   {/snippet}

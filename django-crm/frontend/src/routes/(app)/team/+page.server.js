@@ -25,6 +25,10 @@ export async function load({ cookies, fetch }) {
   let areas = [];
   /** Areas declaradas por la empresa, con los agentes que precarga cada una. */
   let areasTrabajo = [];
+  /** Lo que ya tiene cada persona, para que la tabla arranque con su estado. */
+  let asignaciones = {};
+  let areasPorPersona = {};
+  let identidades = {};
   /** La gente del sistema operativo a la que se le puede asignar trabajo. */
   let externos = [];
   let etiquetaExterna = '';
@@ -40,6 +44,9 @@ export async function load({ cookies, fetch }) {
       if (resp.ok) {
         areas = datos.agentes ?? [];
         areasTrabajo = datos.areas ?? [];
+        asignaciones = datos.asignaciones ?? {};
+        areasPorPersona = datos.areas_por_persona ?? {};
+        identidades = datos.identidades ?? {};
         externos = datos.candidatos_externos ?? [];
         etiquetaExterna = datos.sistema_externo ?? '';
       }
@@ -53,7 +60,8 @@ export async function load({ cookies, fetch }) {
   } else {
     console.warn('[equipo] falta PRIVATE_ASISTENTE_URL o PRIVATE_ASISTENTE_TENANT');
   }
-  return { ...equipo, areas, areasTrabajo, externos, etiquetaExterna };
+  return { ...equipo, areas, areasTrabajo, externos, etiquetaExterna,
+           asignaciones, areasPorPersona, identidades };
 }
 
 /** @type {import('./$types').Actions} */

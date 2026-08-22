@@ -1,53 +1,21 @@
-import { env } from '$env/dynamic/private';
-import { getOrgPeopleAndTeams } from '$lib/server/v2/org-people.js';
-import { headersMotor } from '$lib/server/v2/motor-headers.js';
+import { redirect } from '@sveltejs/kit';
 
 /**
- * Quien puede usar cada agente. Cruza dos fuentes que viven en lados
- * distintos y no se conocen entre si:
+ * Esta pantalla ya no existe: area, agentes y usuario externo se editan en
+ * Equipo y acceso, en la misma fila de cada persona.
  *
- *   las PERSONAS  salen del CRM (getOrgPeopleAndTeams -> /users/
- *                 get-teams-and-users/, ya filtrado a activos de esta
- *                 organizacion). El motor no lee las tablas del CRM.
- *   las ASIGNACIONES salen del motor (asistente.tenant_users), que es donde
- *                 vive lo nuestro.
+ * Por que redirige en vez de quedarse como estaba: eran DOS editores del
+ * mismo dato. Se daba de alta a alguien en un lugar y se lo corregia en otro,
+ * que fue exactamente la queja que origino el rediseño -- y con dos
+ * pantallas escribiendo lo mismo, la que se use menos se queda atras y
+ * empieza a mostrar un estado que no es.
  *
- * Solo lectura aca; guardar pasa por /api/agentes/asignaciones/<id>, con
- * gate de ADMIN propio -- no alcanza con esconder la pantalla.
+ * Redirige y no devuelve 404 a proposito: el enlace vive en /agentes y puede
+ * estar guardado en el navegador de alguien. Llevarlo al lugar correcto es
+ * mejor que decirle que no hay nada.
  *
  * @type {import('./$types').PageServerLoad}
  */
-export async function load({ cookies, fetch }) {
-  const baseUrl = env.PRIVATE_ASISTENTE_URL;
-  const tenant = env.PRIVATE_ASISTENTE_TENANT;
-  if (!baseUrl || !tenant) {
-    return {
-      personas: [], asignaciones: {}, agentes: [],
-      error: 'Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT)'
-    };
-  }
-
-  try {
-    const [gente, resp] = await Promise.all([
-      getOrgPeopleAndTeams(cookies),
-      fetch(`${baseUrl}/agentes/asignaciones?tenant=${encodeURIComponent(tenant)}`, { headers: headersMotor() })
-    ]);
-    const datos = await resp.json();
-    if (!resp.ok) {
-      return {
-        personas: gente.people ?? [], asignaciones: {}, agentes: [],
-        error: datos.error || 'No se pudieron leer las asignaciones'
-      };
-    }
-    return {
-      personas: gente.people ?? [],
-      asignaciones: datos.asignaciones ?? {},
-      agentes: datos.agentes ?? []
-    };
-  } catch (/** @type {any} */ err) {
-    return {
-      personas: [], asignaciones: {}, agentes: [],
-      error: err?.message || 'No se pudo contactar al asistente'
-    };
-  }
+export function load() {
+  redirect(307, '/team');
 }
