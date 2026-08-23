@@ -8,7 +8,7 @@
   import EmptyState from '$lib/v2/components/EmptyState.svelte';
   import { count, shortAge } from '$lib/v2/format.js';
   import { PRIORITY_TONE, CASE_STATUS_TONE, CASE_PRIORITY_LABEL, CASE_STATUS_LABEL } from '$lib/v2/enums.js';
-  import { Plus, LifeBuoy } from '@lucide/svelte';
+  import { LifeBuoy } from '@lucide/svelte';
 
   /** @type {{ data: any }} */
   let { data } = $props();
@@ -80,9 +80,14 @@
          queue can establish, and it is the one that decides what to open. -->
     <span class="v2-num">{count(totals.awaiting_reply)}</span> sin respuesta todavía
   {/snippet}
-  {#snippet actions()}
-    <a class="v2-btn v2-btn-primary" href="/tickets/new"><Plus />Nuevo ticket</a>
-  {/snippet}
+  <!-- Sin boton de "Nuevo ticket" a proposito. Los casos llegan solos: los
+       crea el asistente al escalar una conversacion, ya con el diagnostico,
+       la etiqueta y la persona asignada.
+       Un boton para crearlos a mano invita a abrir uno vacio -- sin
+       conversacion detras, sin cliente, sin lo que ya se probo -- que es
+       justo lo que este flujo existe para evitar. Si alguien necesita
+       registrar algo que no vino por el asistente, lo correcto es que entre
+       por el canal y se escale, no que nazca huerfano en la cola. -->
 </PageHeader>
 
 {#if page.url.search}
@@ -109,12 +114,11 @@
     <EmptyState
       title={data.showAll ? 'Todavía no hay tickets acá' : 'La cola está despejada'}
       body={data.showAll
-        ? 'No se creó nada en este espacio de trabajo. Los tickets llegan acá por correo, el portal, y cualquiera que responda a uno cerrado.'
+        ? 'Todavía no escaló ninguna conversación. Los casos llegan acá solos cuando el asistente pasa una a una persona.'
         : 'Nada está esperando a tu equipo ahora mismo. Los tickets cerrados y rechazados siguen acá. Simplemente no estorban.'}
     >
       {#snippet icon()}<LifeBuoy size={21} />{/snippet}
       {#snippet actions()}
-        <a class="v2-btn v2-btn-primary" href="/tickets/new">Nuevo ticket</a>
         {#if !data.showAll}
           <a class="v2-btn" href="/tickets?all=1">Mostrar los cerrados también</a>
         {/if}
