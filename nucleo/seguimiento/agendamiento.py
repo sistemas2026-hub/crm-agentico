@@ -250,6 +250,31 @@ def _primera_que_cumple(condiciones, historial: list[dict]) -> str | None:
     return None
 
 
+def perfil_del_area(tenant: str, area: str) -> str | None:
+    """
+    El perfil del CRM de quien atiende un area, para poder asignarle el caso.
+
+    Devuelve None si no hay nadie o si hay varios -- mismo criterio que
+    'responsable_de' y por lo mismo: repartir a dedo entre varios parece
+    correcto y no lo es. Sin asignar, el caso lo ve el administrador, que es
+    donde estaba antes.
+    """
+    if not area:
+        return None
+    try:
+        areas = persistencia.areas_de_colaboradores(tenant)
+    except Exception as e:
+        print(f"[escalamiento] no se pudo resolver quien atiende '{area}': "
+              f"{type(e).__name__}: {e}")
+        return None
+    perfiles = [p for p, a in areas.items() if a == area]
+    if len(perfiles) != 1:
+        print(f"[escalamiento] el area '{area}' tiene {len(perfiles)} personas: "
+              f"el caso queda sin asignar")
+        return None
+    return perfiles[0]
+
+
 def responsable_de(tenant: str, area: str, sistema: str) -> tuple[str, str] | None:
     """
     A nombre de quien se abre el trabajo de un area: (identificador, nombre)

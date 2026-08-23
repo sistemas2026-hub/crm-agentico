@@ -767,7 +767,11 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                     resumen=(evaluacion.get("resumen", "") + nota_ticket).strip(),
                     necesita_humano=necesita_humano,
                     no_se_pudo_comprobar=evaluacion.get("no_se_pudo_comprobar", ""),
-                    siguiente_paso=evaluacion.get("siguiente_paso", ""))
+                    siguiente_paso=evaluacion.get("siguiente_paso", ""),
+                    asignar_a=(agendamiento.perfil_del_area(
+                        tenant,
+                        config.escalamiento.area_por_caso.get(caso_manual, ""))
+                        if caso_manual else None) or "")
                 # La pausa (arriba, "si ya se escalo, el bot NO contesta")
                 # solo tiene sentido cuando de verdad hay un humano al que
                 # esperar -- si se agendo solo, el bot sigue atendiendo

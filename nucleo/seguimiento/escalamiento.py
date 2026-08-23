@@ -347,7 +347,8 @@ def _que_se_probo(historial: list[dict]) -> str:
 def escalar(config, tenant: str, usuario_externo: str, conversation_id: str,
            historial: list[dict], motivo: str, etiqueta: str,
            resumen: str = "", necesita_humano: bool = True,
-           no_se_pudo_comprobar: str = "", siguiente_paso: str = "") -> None:
+           no_se_pudo_comprobar: str = "", siguiente_paso: str = "",
+           asignar_a: str = "") -> None:
     """
     Crea el ticket en BottleCRM y marca la conversacion como escalada.
 
@@ -425,6 +426,12 @@ def escalar(config, tenant: str, usuario_externo: str, conversation_id: str,
         }
         if tag_id:
             payload["tags"] = [tag_id]
+        # A quien se le asigna. NO es cosmetico: el CRM le muestra a quien no
+        # es administrador solo los casos que creo, tiene asignados o sigue.
+        # Un caso sin dueño no queda "para todos" -- queda invisible para el
+        # equipo y visible solo para un admin.
+        if asignar_a:
+            payload["assigned_to"] = [asignar_a]
 
         respuesta = herramientas_http.ejecutar(herramienta_caso, payload)
         caso_id = respuesta.get("id") if isinstance(respuesta, dict) else None

@@ -3371,6 +3371,28 @@ escalamiento:
   # Tampoco estan los casos donde el ticket no aporta: un suspendido es
   # facturacion, no una orden de trabajo, y las consultas que el asistente
   # resuelve solo no dejan nada pendiente que anotar.
+  # Que area ATIENDE la conversacion de cada caso. Con esto el caso del CRM se
+  # crea asignado, y no es un detalle de prolijidad: el CRM le muestra a quien
+  # no es administrador SOLO lo suyo, asi que un caso sin dueño no queda
+  # "para todos" -- queda invisible para el equipo.
+  #
+  # Medido el 23/08/2026 antes de esto: 54 casos escalados en la instancia
+  # real, y las dos personas del equipo veian CERO. Solo el admin los veia.
+  #
+  # Es la lista completa de casos a proposito: uno que falte aca vuelve a caer
+  # en el agujero de antes.
+  area_por_caso:
+    no_internet: soporte_tecnico
+    internet_lento: soporte_tecnico
+    sin_senal_tv: soporte_tecnico
+    cambio_contrasena: soporte_tecnico
+    consulta_saldo: cartera
+    consulta_factura: cartera
+    estado_servicio: cartera
+    reconexion: cartera
+    reclamo_formal: cartera
+    otro: soporte_tecnico
+
   ticket_al_escalar:
     internet_lento:
       # La optica fuera de rango es una falla fisica confirmada: entra ALTA.

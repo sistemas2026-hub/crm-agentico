@@ -1205,6 +1205,18 @@ class Escalamiento(Base):
     # evalua en orden y gana el PRIMERO cuyas condiciones cumpla la traza;
     # una entrada sin condiciones es el caso por defecto. Ver TicketEscalado.
     ticket_al_escalar: dict[str, list[TicketEscalado]] = Field(default_factory=dict)
+    # Caso de 'manual.casos' -> area del equipo que ATIENDE la conversacion.
+    #
+    # Distinto del area del ticket, aunque casi siempre coincidan: una cosa es
+    # quien sigue hablando con el cliente y otra quien hace el trabajo. Pueden
+    # ser areas distintas y el modelo tiene que poder decirlo.
+    #
+    # Sin esto el caso se crea SIN asignar, y ahi no queda "visible para
+    # todos": el CRM muestra a quien no es administrador solo lo suyo, asi que
+    # un caso sin dueño es un caso que el equipo NO VE. Medido el 23/08/2026
+    # sobre la instancia real: 54 casos escalados, y las dos personas del
+    # equipo veian cero.
+    area_por_caso: dict[str, str] = Field(default_factory=dict)
     # Caso de 'manual.casos' -> condiciones sobre la TRAZA que, si se
     # cumplen, bastan para agendar SIN pasar por el verificador del manual.
     #
