@@ -36,7 +36,13 @@ import json
 from nucleo.modelo import cliente
 from nucleo.modelo.motor import _buscar_campo, _ejecutar_tool
 from nucleo.persistencia import db as persistencia
+from nucleo.seguimiento import reparto
 from nucleo.recuperacion import busqueda
+
+
+# La herramienta con la que se lee la carga de casos. Es el mismo nombre
+# que ya usa el catalogo del tenant para consultar casos.
+NOMBRE_HERRAMIENTA_CASOS = "consultar_casos_bottlecrm"
 
 
 def _esquema_verificacion(config) -> dict:
@@ -250,14 +256,19 @@ def _primera_que_cumple(condiciones, historial: list[dict]) -> str | None:
     return None
 
 
-def perfil_del_area(tenant: str, area: str) -> str | None:
+def perfil_del_area(tenant: str, area: str, config=None) -> str | None:
     """
-    El perfil del CRM de quien atiende un area, para poder asignarle el caso.
+    A quien del area se le asigna el caso: al que MENOS tiene abierto.
 
-    Devuelve None si no hay nadie o si hay varios -- mismo criterio que
-    'responsable_de' y por lo mismo: repartir a dedo entre varios parece
-    correcto y no lo es. Sin asignar, el caso lo ve el administrador, que es
-    donde estaba antes.
+    Antes, con dos o mas personas, esto devolvia None y el caso quedaba sin
+    dueño -- y un caso sin dueño no lo ve el equipo, solo un administrador.
+    Preferir eso a elegir a dedo era un piso razonable, pero deja trabajo
+    huerfano.
+
+    Ahora reparte (ver nucleo/seguimiento/reparto.py): equilibra solo y sigue
+    la disponibilidad sin contador aparte. Si no se puede leer la carga, el
+    reparto degrada a un orden estable en vez de fallar: peor que repartir
+    parejo es no asignar.
     """
     if not area:
         return None
@@ -268,14 +279,48 @@ def perfil_del_area(tenant: str, area: str) -> str | None:
               f"{type(e).__name__}: {e}")
         return None
     perfiles = [p for p, a in areas.items() if a == area]
-    if len(perfiles) != 1:
-        print(f"[escalamiento] el area '{area}' tiene {len(perfiles)} personas: "
-              f"el caso queda sin asignar")
+    if not perfiles:
+        print(f"[escalamiento] el area '{area}' no tiene a nadie: el caso queda "
+              f"sin asignar, a la vista del administrador")
         return None
-    return perfiles[0]
+    if len(perfiles) == 1:
+        return perfiles[0]
+
+    carga = _carga_de_casos(config, tenant) if config is not None else {}
+    elegido = reparto.elegir_menos_cargado(perfiles, carga)
+    print(f"[escalamiento] el area '{area}' tiene {len(perfiles)} personas; "
+          f"le toca a {elegido} (abiertos: "
+          f"{ {p: carga.get(p, 0) for p in perfiles} })")
+    return elegido
 
 
-def responsable_de(tenant: str, area: str, sistema: str) -> tuple[str, str] | None:
+def _carga_de_casos(config, tenant: str) -> dict[str, int]:
+    """
+    Cuantos casos ABIERTOS tiene cada persona, preguntandole al CRM con la
+    herramienta que el tenant ya declaro para leer casos.
+
+    Best-effort: ante cualquier fallo devuelve vacio, y entonces el reparto
+    cae en el orden estable. No se deja de asignar por no poder contar.
+    """
+    herramienta = next((h for h in config.herramientas
+                        if h.nombre == NOMBRE_HERRAMIENTA_CASOS), None)
+    if herramienta is None:
+        return {}
+    try:
+        crudo = _ejecutar_tool(herramienta, None, {"estado": "abierto"}, tenant,
+                               config.variables_tenant)
+    except Exception as e:
+        print(f"[escalamiento] no se pudo leer la carga de casos: "
+              f"{type(e).__name__}: {e}")
+        return {}
+    filas = crudo.get("cases") if isinstance(crudo, dict) else crudo
+    if filas is None and isinstance(crudo, dict):
+        filas = crudo.get("results")
+    return reparto.contar_por_responsable(filas, "assigned_to")
+
+
+def responsable_de(tenant: str, area: str, sistema: str,
+                   carga_externa: dict[str, int] | None = None) -> tuple[str, str] | None:
     """
     A nombre de quien se abre el trabajo de un area: (identificador, nombre)
     en el sistema externo.
@@ -311,12 +356,16 @@ def responsable_de(tenant: str, area: str, sistema: str) -> tuple[str, str] | No
         print(f"[agendamiento] el area '{area}' no tiene a nadie con identidad "
               f"en '{sistema}': el ticket va al asignado fijo")
         return None
-    if len(candidatos) > 1:
-        print(f"[agendamiento] el area '{area}' tiene {len(candidatos)} personas "
-              f"con identidad en '{sistema}' y no hay una declarada como "
-              f"responsable: el ticket va al asignado fijo")
-        return None
-    return candidatos[0]
+    if len(candidatos) == 1:
+        return candidatos[0]
+
+    # Varios: le toca al que menos tiene abierto. Ver reparto.py -- mismo
+    # criterio que para el caso del CRM, y por los mismos motivos.
+    por_id = {c[0]: c for c in candidatos}
+    elegido = reparto.elegir_menos_cargado(list(por_id), carga_externa or {})
+    print(f"[agendamiento] el area '{area}' tiene {len(candidatos)} personas; "
+          f"el ticket le toca a {por_id[elegido][1] or elegido}")
+    return por_id[elegido]
 
 
 def agendar(config, tenant: str, sesion, nombre_herramienta: str,
