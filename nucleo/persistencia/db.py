@@ -1082,11 +1082,15 @@ def documentos_de(tenant: str) -> list[dict]:
         cur.execute(
             """select d.id, d.codigo, d.titulo, d.version, d.estado,
                       d.fecha_vigencia, d.creado_en, d.roles_permitidos,
+                      d.aprobado_por, d.aprobado_en,
                       (select count(*) from asistente.document_chunks c
                         where c.document_id = d.id and c.vigente) as n_fragmentos
                from asistente.documents d
                where d.organization_id = %s
-               order by d.codigo, d.version desc""",
+               -- Los pendientes PRIMERO: son los que piden una decision, y
+               -- una lista que los mezcla alfabeticamente los esconde entre
+               -- los veinte que ya estan resueltos.
+               order by (d.estado = 'pendiente') desc, d.codigo, d.version desc""",
             (org,))
         return [dict(f) for f in cur.fetchall()]
 

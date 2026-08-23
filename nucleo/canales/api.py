@@ -2009,7 +2009,16 @@ def corpus_ingerir():
                     modelo_embeddings=config.rag.modelo_embeddings,
                     roles_permitidos=roles_doc or roles,
                     storage_path=request.form.get("storage_path"),
-                    forzar=forzar)
+                    forzar=forzar,
+                    # Lo subido desde la interfaz entra PENDIENTE: se
+                    # vectoriza, pero match_chunks no lo recupera hasta que
+                    # una persona lo apruebe (ver supabase/22). Subir un
+                    # archivo y publicarlo dejan de ser el mismo acto.
+                    #
+                    # El CLI mantiene 'vigente' a proposito: exige
+                    # credenciales de base y es herramienta de operacion,
+                    # como una migracion -- quien lo corre ya decidio.
+                    estado="pendiente")
     except ValueError as e:
         return jsonify({"error": f"El documento declara {e}"}), 400
     except Exception as e:
@@ -2017,6 +2026,45 @@ def corpus_ingerir():
         return jsonify({"error": f"No se pudo procesar el documento: {e}"}), 500
 
     return jsonify(resultado), 201
+
+
+@app.post("/corpus/documentos/<id_documento>/aprobar")
+def corpus_aprobar(id_documento):
+    """
+    Habilita un documento pendiente para que el asistente pueda recuperarlo.
+
+    Es la segunda capa que le faltaba al corpus. La primera --y la que de
+    verdad garantiza-- es que asistente.match_chunks filtra por
+    estado='vigente' en SQL: un documento pendiente es invisible aunque esta
+    ruta no existiera. Aca solo se abre la puerta, y queda registrado quien.
+
+    Nace de una medicion concreta (agosto 2026): la unica guia de
+    diagnostico del corpus, G-GO-04, tiene 7 de sus 8 fragmentos escritos
+    para un tecnico en campo -- abrir conectores de fibra, medir potencia
+    optica, reemplazar el cable de acometida. Asignada por error a un rol de
+    cara al cliente, eso son instrucciones peligrosas entregadas sin que
+    salte ningun error.
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+
+    try:
+        with persistencia.sesion(tenant) as (cur, org):
+            ok = ingesta.aprobar(cur, org, id_documento,
+                                 cuerpo.get("aprobado_por"))
+    except Exception as e:
+        print(f"[corpus] fallo al aprobar '{id_documento}': {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo aprobar el documento."}), 500
+
+    if not ok:
+        # Distinto de 404 a proposito: el caso normal no es que el documento
+        # no exista sino que ya este aprobado (dos personas mirando la misma
+        # pantalla), y eso no es un error que haya que investigar.
+        return jsonify({"error": "El documento no existe o no estaba "
+                                 "pendiente de aprobacion."}), 409
+    return jsonify({"aprobado": True})
 
 
 @app.post("/corpus/documentos/<id_documento>/retirar")

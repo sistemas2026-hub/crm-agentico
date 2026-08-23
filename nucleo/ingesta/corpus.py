@@ -149,12 +149,26 @@ def ingerir(cur, org_id: str, doc, hash_: str, *,
             roles_permitidos: list[str] | None = None,
             tipo: str = "guia_tecnica",
             storage_path: str | None = None,
-            forzar: bool = False) -> dict:
+            forzar: bool = False,
+            estado: str = "vigente") -> dict:
     """
-    Escribe un documento VIGENTE con sus fragmentos vectorizados.
+    Escribe un documento con sus fragmentos vectorizados.
 
     'doc' es lo que devuelve nucleo/ingesta/docx.py::procesar(). 'hash_' es el
     sha256 del archivo original: es lo que decide si hubo cambios.
+
+    'estado' decide si el asistente puede usarlo YA o si primero lo tiene que
+    aprobar una persona (ver supabase/22_aprobacion_documentos.sql):
+
+      'vigente'    el default, y lo que usa cli/cargar_corpus.py. Ese CLI es
+                   una herramienta de operacion que exige credenciales de
+                   base -- quien lo corre ya decidio.
+      'pendiente'  lo que usa la subida desde la interfaz. Se vectoriza igual
+                   pero match_chunks no lo recupera hasta que alguien lo
+                   apruebe. Es la diferencia entre subir un archivo y
+                   publicarlo: una guia escrita para un tecnico en campo,
+                   asignada por error a un rol de cliente, produce
+                   instrucciones peligrosas sin que salte ningun error.
 
     No hace commit -- la transaccion la maneja quien abrio el cursor.
     """
@@ -169,12 +183,21 @@ def ingerir(cur, org_id: str, doc, hash_: str, *,
     defectos = json.dumps(doc.defectos, ensure_ascii=False)
 
     if doc_id:
+        # Reemplazar el contenido de un documento ya aprobado lo devuelve a
+        # 'pendiente' si asi lo pide quien sube: aprobar una version no
+        # aprueba las siguientes. Se limpia el rastro de la aprobacion
+        # anterior, que ya no corresponde a este contenido.
         cur.execute(
             """update asistente.documents
-               set titulo=%s, estado='vigente', hash=%s, defectos=%s,
-                   roles_permitidos=%s, storage_path=coalesce(%s, storage_path)
+               set titulo=%s, estado=%s, hash=%s, defectos=%s,
+                   roles_permitidos=%s, storage_path=coalesce(%s, storage_path),
+                   aprobado_por = case when %s = 'pendiente' then null
+                                       else aprobado_por end,
+                   aprobado_en  = case when %s = 'pendiente' then null
+                                       else aprobado_en end
                where id=%s""",
-            (doc.titulo, hash_, defectos, roles_permitidos, storage_path, doc_id))
+            (doc.titulo, estado, hash_, defectos, roles_permitidos,
+             storage_path, estado, estado, doc_id))
         # Los fragmentos viejos quedan obsoletos, NUNCA se borran.
         cur.execute(
             """update asistente.document_chunks
@@ -186,9 +209,9 @@ def ingerir(cur, org_id: str, doc, hash_: str, *,
             """insert into asistente.documents
                  (organization_id, codigo, titulo, version, tipo, estado, hash,
                   defectos, roles_permitidos, storage_path)
-               values (%s,%s,%s,%s,%s,'vigente',%s,%s,%s,%s)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                returning id""",
-            (org_id, doc.codigo, doc.titulo, doc.version, tipo, hash_,
+            (org_id, doc.codigo, doc.titulo, doc.version, tipo, estado, hash_,
              defectos, roles_permitidos, storage_path))
         f = cur.fetchone()
         doc_id = f["id"] if isinstance(f, dict) else f[0]
@@ -216,7 +239,11 @@ def ingerir(cur, org_id: str, doc, hash_: str, *,
     return {"accion": accion, "document_id": str(doc_id),
             "codigo": doc.codigo, "titulo": doc.titulo, "version": doc.version,
             "fragmentos": n, "defectos": doc.defectos,
-            "roles_permitidos": roles_permitidos}
+            "roles_permitidos": roles_permitidos,
+            # Para que quien sube sepa si ya quedo en uso o falta aprobarlo:
+            # sin esto, la pantalla no puede distinguir "listo" de "cargado
+            # pero invisible", que es justo la diferencia que importa.
+            "estado": estado}
 
 
 def actualizar_roles(cur, org_id: str, document_id: str,
@@ -237,6 +264,29 @@ def actualizar_roles(cur, org_id: str, document_id: str,
         """update asistente.documents set roles_permitidos=%s
            where id=%s and organization_id=%s""",
         (roles_permitidos, document_id, org_id))
+    return cur.rowcount > 0
+
+
+def aprobar(cur, org_id: str, document_id: str,
+            aprobado_por: str | None = None) -> bool:
+    """
+    Habilita un documento para que el asistente pueda recuperarlo: pasa de
+    'pendiente' a 'vigente' y deja el rastro de quien lo aprobo.
+
+    La garantia de que un documento pendiente NO se use no vive aca sino en
+    asistente.match_chunks, que filtra por estado='vigente' en SQL (ver
+    supabase/22). Esta funcion solo abre la puerta; no es la puerta.
+
+    Solo actua sobre documentos en 'pendiente': aprobar uno ya vigente no
+    tiene sentido, y aprobar uno 'obsoleto' lo resucitaria sin que nadie
+    haya pedido eso -- para volver a poner en circulacion algo retirado hay
+    que subirlo de nuevo, que es lo que deja constancia de la decision.
+    """
+    cur.execute(
+        """update asistente.documents
+              set estado='vigente', aprobado_por=%s, aprobado_en=now()
+            where id=%s and organization_id=%s and estado='pendiente'""",
+        (aprobado_por, document_id, org_id))
     return cur.rowcount > 0
 
 
