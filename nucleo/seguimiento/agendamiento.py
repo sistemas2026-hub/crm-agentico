@@ -295,7 +295,8 @@ def responsable_de(tenant: str, area: str, sistema: str) -> tuple[str, str] | No
 
 
 def agendar(config, tenant: str, sesion, nombre_herramienta: str,
-           descripcion: str, area: str = "") -> str | None:
+           descripcion: str, area: str = "", asunto: str = "",
+           prioridad: str = "") -> str | None:
     """
     Ejecuta la herramienta de agendamiento DIRECTO, en codigo -- nunca via
     tool-calling del modelo (el especialista que atiende al cliente ni
@@ -323,14 +324,21 @@ def agendar(config, tenant: str, sesion, nombre_herramienta: str,
     try:
         # A nombre de quien. Solo si el tenant declaro un sistema externo y
         # este ticket dijo de que area es.
-        sobrescribir = None
+        sobrescribir = {}
         cfg = getattr(config, "identidad_externa", None)
         if area and cfg:
             quien = responsable_de(tenant, area, cfg.sistema)
             if quien:
-                sobrescribir = {"tecnico": quien[0]}
+                sobrescribir["tecnico"] = quien[0]
                 print(f"[agendamiento] el ticket se abre a nombre de "
                       f"{quien[1] or quien[0]} (area '{area}')")
+        # 'asuntos_default' viaja junto a 'asunto': WispHub exige los dos y
+        # los valida contra la misma lista. Mandar uno solo da 400.
+        if asunto:
+            sobrescribir["asunto"] = asunto
+            sobrescribir["asuntos_default"] = asunto
+        if prioridad:
+            sobrescribir["prioridad"] = prioridad
 
         respuesta = _ejecutar_tool(
             herramienta, sesion, {"servicio": servicio, "descripcion": descripcion},

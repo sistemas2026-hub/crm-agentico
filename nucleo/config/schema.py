@@ -1175,6 +1175,18 @@ class TicketEscalado(Base):
     # Vacio = se usa el fijo. Es el respaldo, no un error: un caso que no
     # corresponde a ningun area declarada tiene que poder abrir ticket igual.
     area: str = ""
+    # Con que asunto y prioridad entra. Vacios = los de la herramienta.
+    #
+    # Estan ACA y no en una herramienta por variante porque la variante la
+    # decide la traza: dos entradas del mismo caso, con condiciones distintas,
+    # abren tickets distintos. Declarar una herramienta casi identica por cada
+    # combinacion es como se llega a nueve que solo se diferencian en dos
+    # cadenas.
+    #
+    # El asunto tiene que existir en el catalogo del proveedor: verificado el
+    # 22/08/2026, WispHub RECHAZA con 400 uno que no este en su lista.
+    asunto: str = ""
+    prioridad: str = ""
 
 
 class Escalamiento(Base):

@@ -145,7 +145,7 @@ roles:
     puede_consultar: [consultar_cliente, consultar_cliente_por_cedula, consultar_ticket,
           consultar_tickets_de_cliente, contar_tickets, contar_clientes, consultar_casos_bottlecrm,
           agendar_visita_tecnica, agendar_visita_internet, consultar_velocidad_aprovisionada,
-          crear_ticket_lentitud, crear_ticket_lentitud_niveles, crear_ticket_reconexion,
+          crear_ticket_caso,
           consultar_estabilidad_enlace,
           consultar_estado_ont, consultar_senal_ont, reiniciar_ont,
           diagnosticar_falla_ont, consultar_estado_catv, activar_catv, cambiar_tipo_onu,
@@ -177,12 +177,8 @@ roles:
             fecha_creacion, servicio.id_servicio]
       agendar_visita_internet: [id_ticket, asunto, estado, prioridad, tecnico, departamento,
             fecha_creacion, servicio.id_servicio]
-      crear_ticket_lentitud: [id_ticket, asunto, estado, prioridad, tecnico, departamento,
+      crear_ticket_caso: [id_ticket, asunto, estado, prioridad, tecnico, departamento,
             fecha_creacion, servicio.id_servicio]
-      crear_ticket_lentitud_niveles: [id_ticket, asunto, estado, prioridad, tecnico,
-            departamento, fecha_creacion, servicio.id_servicio]
-      crear_ticket_reconexion: [id_ticket, asunto, estado, prioridad, tecnico,
-            departamento, fecha_creacion, servicio.id_servicio]
       # SmartOLT: 'onu_status'/'last_status_change' no traen PII (ver skill
       # smartolt-api). Soporte ve el dBm crudo ademas del veredicto -- lo
       # necesita para escalar con datos exactos, a diferencia de
@@ -1811,115 +1807,24 @@ herramientas:
         tipo: texto
         verificado_el: 2026-08-12
 
-  # Los dos tickets de lentitud. Se crean en CODIGO al escalar (ver
-  # 'ticket_al_escalar' abajo y nucleo/seguimiento/agendamiento.py), no via
-  # tool-calling: el especialista que atiende al cliente ni siquiera los
-  # tiene en su catalogo.
-  #
-  # Son dos y no uno por el ASUNTO, que es lo primero que lee quien toma el
-  # trabajo. Los dos salen del catalogo REAL de /api/tickets/asuntos-tickets/
-  # (consultado el 21/08/2026) -- un asunto inventado WispHub lo acepta sin
-  # quejarse y despues no se puede filtrar.
-  #
-  # Que sean casi identicos a las herramientas de visita es sabido: hoy
-  # 'argumentos_fijos' pisa cualquier valor que se le pase, asi que el asunto
-  # no se puede decidir por caso desde afuera. Con cuatro se tolera; si
-  # aparece una quinta, conviene un mecanismo en vez de otra copia.
-  - nombre: crear_ticket_lentitud
-    tipo: http
-    multipart: true
-    descripcion: >
-      Deja anotado en WispHub un caso de internet lento SIN causa identificada, para que una persona siga el diagnostico con las pruebas que el asistente no puede hacer.
-      NO la llames tu: la ejecuta el codigo cuando un caso de internet lento
-      se pasa a una persona.
-    solo_lectura: false
-    requiere_confirmacion: true
-    roles_permitidos: [soporte]
-    base_url: https://api.wisphub.io
-    endpoint: /api/tickets/
-    metodo: POST
-    auth_ref: WISPHUB_API_KEY
-    auth_esquema: Api-Key
-    argumentos_fijos:
-      tecnico: "1428053"                          # Mario Vasquez -- RESPALDO, ver abajo
-      email_tecnico: mario.vasquez.moreno@gmail.com
-      asunto: Internet Lento
-      asuntos_default: Internet Lento
-      estado: "1"                                 # Nuevo
-      prioridad: "2"                               # Normal
-      departamento: Soporte Técnico
-      departamentos_default: Soporte Técnico
-      origen_reporte: oficina
-    # El asignado sale del area del ticket cuando se puede resolver (ver
-    # 'responsable_de' en nucleo/seguimiento/agendamiento.py). El de arriba es
-    # el respaldo: sin esto TODOS los tickets, de todos los casos, caian sobre
-    # la misma persona.
-    argumentos_sobrescribibles: [tecnico]
-    fechas_automaticas:
-      fecha_inicio: 0
-      fecha_final: 3
-    filtros_verificados:
-      servicio:
-        param: servicio
-        tipo: id
-        verificado_el: 2026-08-12
-      descripcion:
-        param: descripcion
-        tipo: texto
-        verificado_el: 2026-08-12
 
-  - nombre: crear_ticket_lentitud_niveles
+  # UNA herramienta para todos los tickets que salen al escalar. Antes habia
+  # una por variante y solo se diferenciaban en dos cadenas: con tres ya se
+  # notaba, con nueve habria sido insostenible.
+  #
+  # Lo que cambia por caso -- asunto, prioridad y a quien se asigna -- lo
+  # decide 'escalamiento.ticket_al_escalar' y lo aplica el codigo. Los valores
+  # de abajo son el RESPALDO: lo que sale si un caso no declaro el suyo.
+  #
+  # 'asuntos_default' va junto a 'asunto' siempre: WispHub exige los dos y los
+  # valida contra la MISMA lista cerrada. Verificado el 22/08/2026 -- un
+  # asunto que no este en el catalogo devuelve 400, no se acepta en silencio.
+  - nombre: crear_ticket_caso
     tipo: http
     multipart: true
     descripcion: >
-      Mismo ticket que crear_ticket_lentitud pero para cuando la señal optica ya salio fuera de rango: el asunto se lo dice al tecnico antes de que abra la descripcion.
-      NO la llames tu: la ejecuta el codigo cuando un caso de internet lento
-      se pasa a una persona.
-    solo_lectura: false
-    requiere_confirmacion: true
-    roles_permitidos: [soporte]
-    base_url: https://api.wisphub.io
-    endpoint: /api/tickets/
-    metodo: POST
-    auth_ref: WISPHUB_API_KEY
-    auth_esquema: Api-Key
-    argumentos_fijos:
-      tecnico: "1428053"                          # Mario Vasquez -- RESPALDO, ver abajo
-      email_tecnico: mario.vasquez.moreno@gmail.com
-      asunto: Internet Lento/Niveles Altos
-      asuntos_default: Internet Lento/Niveles Altos
-      estado: "1"                                 # Nuevo
-      prioridad: "2"                               # Normal
-      departamento: Soporte Técnico
-      departamentos_default: Soporte Técnico
-      origen_reporte: oficina
-    # El asignado sale del area del ticket cuando se puede resolver (ver
-    # 'responsable_de' en nucleo/seguimiento/agendamiento.py). El de arriba es
-    # el respaldo: sin esto TODOS los tickets, de todos los casos, caian sobre
-    # la misma persona.
-    argumentos_sobrescribibles: [tecnico]
-    fechas_automaticas:
-      fecha_inicio: 0
-      fecha_final: 3
-    filtros_verificados:
-      servicio:
-        param: servicio
-        tipo: id
-        verificado_el: 2026-08-12
-      descripcion:
-        param: descripcion
-        tipo: texto
-        verificado_el: 2026-08-12
-
-  # Reconexion: el trabajo es de CARTERA, no de campo. Sale con el asunto que
-  # ya existe en el catalogo real de WispHub.
-  - nombre: crear_ticket_reconexion
-    tipo: http
-    multipart: true
-    descripcion: >
-      Deja anotada en WispHub una solicitud de reconexion para que la trabaje
-      cartera. NO la llames tu: la ejecuta el codigo cuando un caso de
-      reconexion se pasa a una persona.
+      Deja el caso anotado en WispHub para que lo trabaje una persona. NO la
+      llames tu: la ejecuta el codigo cuando una conversacion se escala.
     solo_lectura: false
     requiere_confirmacion: true
     roles_permitidos: [soporte, facturacion]
@@ -1929,16 +1834,16 @@ herramientas:
     auth_ref: WISPHUB_API_KEY
     auth_esquema: Api-Key
     argumentos_fijos:
-      tecnico: "1428053"                          # respaldo, ver argumentos_sobrescribibles
+      tecnico: "1428053"                          # respaldo
       email_tecnico: mario.vasquez.moreno@gmail.com
-      asunto: Reconexion
-      asuntos_default: Reconexion
+      asunto: Problemas De Conexion                # respaldo
+      asuntos_default: Problemas De Conexion
       estado: "1"                                 # Nuevo
-      prioridad: "3"                              # Alta: el cliente esta sin servicio
+      prioridad: "2"                              # Normal, si el caso no dice otra
       departamento: Soporte Técnico
       departamentos_default: Soporte Técnico
       origen_reporte: oficina
-    argumentos_sobrescribibles: [tecnico]
+    argumentos_sobrescribibles: [tecnico, asunto, asuntos_default, prioridad]
     fechas_automaticas:
       fecha_inicio: 0
       fecha_final: 3
@@ -3450,21 +3355,87 @@ escalamiento:
   # 'no_internet' NO esta aca a proposito: ese caso ya agenda la visita sola
   # cuando corresponde, y ese ticket ES el trabajo anotado. Duplicarlo seria
   # mandar dos veces el mismo trabajo.
+  # A que area va cada caso, con que asunto y con que prioridad. Todos los
+  # asuntos salen del catalogo REAL de /api/tickets/asuntos-tickets/.
+  #
+  # La PRIORIDAD la decide el contexto de la conversacion, no el caso a secas:
+  # dos entradas del mismo caso con condiciones distintas abren tickets
+  # distintos. Valores de WispHub: 1 baja, 2 normal, 3 alta, 4 muy alta.
+  #
+  # 'otro' NO esta: WispHub rechaza un asunto que no este en su catalogo (400,
+  # verificado), y no hay ninguno generico. Ese caso sigue llegando a una
+  # persona por la bandeja del CRM -- no se pierde -- pero sin ticket. Entra
+  # aca el dia que un admin cree el asunto.
+  #
+  # Tampoco estan los casos donde el ticket no aporta: un suspendido es
+  # facturacion, no una orden de trabajo, y las consultas que el asistente
+  # resuelve solo no dejan nada pendiente que anotar.
   ticket_al_escalar:
-    # Reconexion va a CARTERA: el cliente pago o va a pagar y hay que
-    # reactivarle el servicio. No es trabajo de campo.
-    reconexion:
-      - herramienta: crear_ticket_reconexion
-        area: cartera
     internet_lento:
-      - herramienta: crear_ticket_lentitud_niveles
+      # La optica fuera de rango es una falla fisica confirmada: entra ALTA.
+      - herramienta: crear_ticket_caso
         area: soporte_tecnico
+        asunto: Internet Lento/Niveles Altos
+        prioridad: "3"
         condiciones:
           - herramienta: consultar_senal_ont
             campo: onu_signal_1490_veredicto
             contiene: "fuera de rango"
-      - herramienta: crear_ticket_lentitud
+      # El enlace que se cae y vuelve tambien: la red ya lo conto.
+      - herramienta: crear_ticket_caso
         area: soporte_tecnico
+        asunto: Internet Intermitente
+        prioridad: "3"
+        condiciones:
+          - herramienta: consultar_estabilidad_enlace
+            campo: enlace_inestable
+            valor: true
+      # Sin causa identificada: normal, hasta que alguien mire.
+      - herramienta: crear_ticket_caso
+        area: soporte_tecnico
+        asunto: Internet Lento
+        prioridad: "2"
+
+    # Esta sin servicio mientras espera.
+    reconexion:
+      - herramienta: crear_ticket_caso
+        area: cartera
+        asunto: Reconexion
+        prioridad: "3"
+
+    cambio_contrasena:
+      - herramienta: crear_ticket_caso
+        area: soporte_tecnico
+        asunto: Cambio De Contraseña En Router Wifi
+        prioridad: "2"
+
+    # Un reclamo formal tiene plazos legales: no puede entrar como uno mas.
+    reclamo_formal:
+      - herramienta: crear_ticket_caso
+        area: cartera
+        asunto: Pqr
+        prioridad: "4"
+
+    consulta_saldo:
+      - herramienta: crear_ticket_caso
+        area: cartera
+        asunto: Asesoria Para Pago En Linea
+        prioridad: "2"
+
+    consulta_factura:
+      - herramienta: crear_ticket_caso
+        area: cartera
+        asunto: Ajuste Factura
+        prioridad: "2"
+
+    # Llega aca solo si el dato del sistema no cuadra y alguien tiene que
+    # mirarlo: el asistente resuelve solo la consulta normal.
+    estado_servicio:
+      - herramienta: crear_ticket_caso
+        area: cartera
+        asunto: Actualización De Datos
+        prioridad: "2"
+
   evidencia_suficiente:
     no_internet:
       - herramienta: diagnosticar_falla_ont

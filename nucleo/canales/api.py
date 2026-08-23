@@ -730,7 +730,9 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                     id_ticket_operativo = agendamiento.agendar(
                         config, tenant, estado["sesion"], nombre_ticket,
                         (evaluacion.get("resumen", "") or "")[:400],
-                        area=entrada_ticket.area)
+                        area=entrada_ticket.area,
+                        asunto=entrada_ticket.asunto,
+                        prioridad=entrada_ticket.prioridad)
                     if id_ticket_operativo:
                         print(f"[escalamiento] ticket operativo #{id_ticket_operativo} "
                               f"creado con '{nombre_ticket}'")
