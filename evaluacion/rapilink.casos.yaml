@@ -623,3 +623,39 @@ casos:
       no_usa: [contar_clientes]
       catalogo_sin: [contar_clientes]
       sin_errores: true
+
+  # --- la documentacion parecida NO es la respuesta (22/08/2026) -----------
+  #  El RAG corre en CADA mensaje, y el bloque de contexto se inyecta apenas
+  #  algun fragmento supera el umbral -- sin mirar si la pregunta es de las
+  #  que resuelve una herramienta. Medido: "cuantos clientes activos tenemos
+  #  hoy" recupera la guia de OZMAP a 0.367, y "cual es el saldo de la cedula
+  #  X" recupera el instructivo de tickets a 0.411. Ninguno de los dos
+  #  contiene la respuesta.
+  #
+  #  No se puede arreglar con el umbral: esos puntajes (0.367-0.488) se
+  #  superponen con los de consultas legitimas (0.426-0.440). Lo que se
+  #  cambio es COMO se le presenta al modelo -- de "documentacion recuperada
+  #  para esta pregunta, respondela usando esto" a "lo mas parecido que hay,
+  #  puede no responder" (ver nucleo/recuperacion/busqueda.py::
+  #  bloque_de_contexto). Estos dos casos son la guarda de ese cambio.
+  #
+  #  evaluar_rag.py NO puede medir esto: mide que se recupera, no que hace
+  #  el modelo con lo recuperado. Por eso la guarda vive aca.
+
+  - nombre: un numero de sistema se consulta, no se saca de un manual parecido
+    rol: soporte
+    mensajes: ["cuantos clientes activos tenemos hoy"]
+    espera:
+      usa: [contar_clientes]
+      sin_errores: true
+
+  - nombre: un precio no se improvisa desde la guia de proceso
+    rol: ventas
+    sesion:
+      verificado: false
+      nivel: 0
+      identificador_canal: "573009995555"
+    mensajes: ["vivo en doña manuela, cuanto cuesta el plan mas caro?"]
+    espera:
+      usa: [consultar_planes_venta]
+      sin_errores: true

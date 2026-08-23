@@ -232,6 +232,13 @@ def bloque_de_contexto(fragmentos: list[Fragmento], citar_fuente: bool = True) -
     rellenar huecos: el prompt es guia y no garantia (PRD 7.4), pero cuesta
     poco y ayuda.
 
+    Presenta lo recuperado como "lo mas parecido que hay", NO como la
+    respuesta. La diferencia no es de estilo: superar 'umbral_similitud' es
+    parecido semantico y nada mas. Con el encabezado anterior ("DOCUMENTACION
+    RECUPERADA PARA ESTA PREGUNTA" + "Responde usando esta documentacion") se
+    le afirmaba al modelo algo que en varios casos medidos era falso, y encima
+    se le pedia que lo usara.
+
     'citar_fuente' separa dos publicos que necesitan lo opuesto: un
     colaborador (soporte, facturacion) SI quiere saber "esto sale de
     G-GO-06 v01" para poder verificarlo o citarlo el mismo. Un cliente_final
@@ -244,18 +251,41 @@ def bloque_de_contexto(fragmentos: list[Fragmento], citar_fuente: bool = True) -
     """
     cuerpo = "\n\n".join(f.citar() for f in fragmentos)
     instruccion = (
-        "Responde usando esta documentacion y menciona de que guia sale. "
+        "Si responde, usala y menciona de que guia sale. "
         if citar_fuente else
-        "Responde usando esta documentacion, con naturalidad, como lo diria "
-        "una persona del equipo. NUNCA menciones el nombre, codigo o version "
-        "del documento interno de donde sale esto -- el cliente no tiene que "
-        "notar que estas citando una guia. "
+        "Si responde, usala con naturalidad, como lo diria una persona del "
+        "equipo. NUNCA menciones el nombre, codigo o version del documento "
+        "interno de donde sale esto -- el cliente no tiene que notar que "
+        "estas citando una guia. "
     )
     return (
-        "DOCUMENTACION INTERNA RECUPERADA PARA ESTA PREGUNTA:\n\n"
+        # El encabezado NO afirma que esto responda la pregunta, porque muchas
+        # veces no lo hace. Lo que se recupero es lo mas PARECIDO que habia, y
+        # parecido no es lo mismo que respuesta: medido el 21/08/2026, "cuanto
+        # cuesta el plan mas caro" trajo a 0.488 un documento que no tiene un
+        # solo precio, y "cual es el saldo de la cedula X" trajo el instructivo
+        # de tickets a 0.411. El encabezado anterior decia "DOCUMENTACION
+        # RECUPERADA PARA ESTA PREGUNTA" y arrancaba con "Responde usando esta
+        # documentacion" -- o sea, le afirmaba al modelo algo falso y le pedia
+        # que lo usara.
+        #
+        # No se puede filtrar por score: los falsos positivos (0.367 a 0.488)
+        # se superponen con las consultas legitimas (0.426 a 0.440). Un umbral
+        # que corte los unos corta las otras. Por eso la decision se le deja al
+        # modelo, que a diferencia del umbral SI puede leer el fragmento y ver
+        # si contiene lo que se pregunto.
+        "LO MAS PARECIDO QUE HAY EN LA DOCUMENTACION INTERNA (puede no "
+        "responder la pregunta):\n\n"
         f"{cuerpo}\n\n"
+        "Primero fijate si esto de verdad responde lo que te preguntaron. "
         f"{instruccion}"
-        "Si no alcanza para responder del todo, di que parte falta en vez de "
+        "Si NO responde, ignoralo y segui como si no lo hubieras recibido: "
+        "usa tus herramientas si el dato es de un sistema (un saldo, un "
+        "precio, el estado de un equipo, cuantos clientes hay), o deci que "
+        "no lo tenes. Nunca estires un fragmento parecido para que parezca "
+        "una respuesta, ni cites una guia que en realidad no dice lo que "
+        "estas afirmando.\n\n"
+        "Si responde solo en parte, di que parte falta en vez de "
         "completarla por tu cuenta.\n\n"
         "Esta busqueda se repite en CADA mensaje del cliente, asi que puede "
         "traer un fragmento distinto al de un turno anterior -- eso no "
