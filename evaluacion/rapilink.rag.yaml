@@ -318,14 +318,22 @@ casos:
     rol: soporte_tecnico_cliente
     espera: [GUIA-ATENCION-01]
 
-  # Falla de TV: 62 ocurrencias reales entre las dos formas de decirlo, y la
-  # guia nueva NO las cubre -- habla de fallas de servicio en general, sin
-  # contenido propio de television. Se declaran como brecha para que el hueco
-  # quede medido en vez de olvidado.
-  - pregunta: no me sale señal en el tv
-    rol: soporte_tecnico_cliente
-    espera: [GUIA-ATENCION-01]
-    brecha_conocida: >
-      32 ocurrencias reales. GUIA-ATENCION-01 cubre fallas de servicio en
-      general pero no tiene contenido propio de television. Falta decidir si
-      se le agrega una seccion o si se escribe un documento aparte.
+  # NO se agrega un caso de falla de TV a este set, y conviene dejar escrito
+  # por que para que nadie lo "arregle" mas adelante.
+  #
+  # Las 62 ocurrencias de "no me sale señal en el tv" / "se me fue la señal
+  # del tv" en unanswered_queries se registraron cuando estos roles veian
+  # CERO fragmentos: son el mismo fallo de permisos que ya se corrigio, no
+  # evidencia de que falte documentacion de TV. Leerlas como un hueco de
+  # contenido fue un error de interpretacion (22/08/2026).
+  #
+  # El diagnostico de TV NO va al corpus porque ya vive completo en el prompt
+  # del rol: confirmar el plan con consultar_plan_tv (nunca por el nombre del
+  # plan), el arbol segun consultar_estado_catv (Offline / Disabled / Not
+  # supported), y hasta el texto de la sintonizacion automatica eligiendo
+  # ANTENA. Escribirlo tambien en un documento seria una segunda fuente de
+  # verdad para una regla que ya funciona.
+  #
+  # Su guarda es un caso dorado que lo prueba de punta a punta contra el
+  # motor real, que es donde corresponde: ver "falla de TV confirma el plan y
+  # mide el puerto antes de preguntar" en rapilink.casos.yaml.
