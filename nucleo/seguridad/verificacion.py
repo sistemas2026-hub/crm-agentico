@@ -55,6 +55,14 @@ class Sesion:
     CAMPOS_PERSISTIBLES = ("sn_onu", "interfaz_lan")
 
     identificador_canal: str          # ej. numero de whatsapp, tal cual llega
+    # El nombre del COLABORADOR que esta usando el asistente, cuando lo hay.
+    # Lo manda la plataforma en el turno: el motor no lee las tablas del CRM,
+    # asi que quien sabe quien inicio sesion es la pantalla, no esto.
+    #
+    # Se usa para firmar lo que se escribe en un sistema externo a nombre de
+    # esa persona -- ver 'firmar_campo' en nucleo/config/schema.py. Vacio para
+    # un cliente final, que no firma nada.
+    nombre_colaborador: str = ""
     verificado: bool = False
     nivel: int = 0
     id_cliente: str | None = None

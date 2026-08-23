@@ -827,6 +827,18 @@ def _resolver_argumentos(herramienta, sesion, argumentos_modelo: dict,
         if clave in herramienta.argumentos_sobrescribibles and valor:
             argumentos[clave] = valor
 
+    # La firma, al final del texto y una sola vez. Se pega aca -- donde se
+    # arman los argumentos REALES -- para que valga tanto en una escritura
+    # directa como en una que pasa por aprobacion: en los dos casos el texto
+    # que sale lleva el nombre de quien lo mando.
+    firma = getattr(sesion, "nombre_colaborador", "") if sesion else ""
+    campo = herramienta.firmar_campo
+    if campo and firma and argumentos.get(campo):
+        texto = str(argumentos[campo])
+        marca = "-- " + firma
+        if not texto.rstrip().endswith(marca):
+            argumentos[campo] = texto.rstrip() + chr(10) + chr(10) + marca
+
     # Fechas calculadas en el momento (ver 'fechas_automaticas' en
     # schema.py). Formato DD/MM/AAAA HH:MM: es lo que exige WispHub hoy, el
     # unico proveedor con esta necesidad -- si aparece otro con un formato

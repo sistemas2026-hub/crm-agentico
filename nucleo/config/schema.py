@@ -783,6 +783,17 @@ class Herramienta(Base):
     # cada variante, que es como ya terminamos con cuatro que solo se
     # diferencian en el asunto.
     argumentos_sobrescribibles: list[str] = Field(default_factory=list)
+    # A que argumento se le pega, al final, el nombre de quien lo escribio.
+    #
+    # Va en CODIGO y no en el texto que redacta el modelo por lo de siempre
+    # (PRD 7.4): si el modelo escribe la firma, puede poner otro nombre o
+    # saltearla, y una atribucion equivocada en algo que queda registrado es
+    # peor que no firmar. Aca se pega siempre, con el nombre real de quien
+    # tenia la sesion.
+    #
+    # Solo se firma si hay un colaborador identificado: un cliente final no
+    # firma nada.
+    firmar_campo: str = ""
     # Como argumentos_fijos, pero calculados en el momento de la llamada en
     # vez de un valor congelado en el YAML -- ej. 'fecha_inicio' tiene que
     # ser AHORA, no la fecha en que se escribio la config. Clave: nombre del

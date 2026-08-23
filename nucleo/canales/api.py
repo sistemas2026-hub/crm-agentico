@@ -281,7 +281,8 @@ def _sesion_nueva(tenant: str, id_sesion: str, canal: str,
 
 
 def atender_turno(config, tenant: str, rol: str, id_sesion: str,
-                  mensaje: str, canal: str, profile_id: str | None = None) -> dict:
+                  mensaje: str, canal: str, profile_id: str | None = None,
+                  nombre_colaborador: str = "") -> dict:
     """
     Un turno completo de conversacion: pausa por escalamiento, modelo,
     persistencia y evaluacion de escalamiento.
@@ -330,6 +331,13 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     if nueva:
         _sesiones[clave] = _sesion_nueva(tenant, id_sesion, canal, horas)
     estado = _sesiones[clave]
+    # Quien esta escribiendo, para poder firmar a su nombre lo que se escriba
+    # en un sistema externo. Se refresca en CADA turno y no solo al abrir la
+    # conversacion: la misma sesion puede retomarla otra persona del equipo, y
+    # firmar con el nombre de quien la abrio seria atribuirle algo que no
+    # escribio.
+    if nombre_colaborador:
+        estado["sesion"].nombre_colaborador = nombre_colaborador
 
     # Al abrir una conversacion nueva, lo que se sabia del cliente entra como
     # contexto -- no el historial entero, solo el resumen de la anterior.
@@ -866,6 +874,9 @@ def chat():
     id_sesion = cuerpo.get("identificador_sesion")
     mensaje = cuerpo.get("mensaje")
     canal = cuerpo.get("canal", "api")
+    # Lo manda la plataforma: el motor no lee las tablas del CRM, asi que
+    # quien sabe el nombre de quien inicio sesion es la pantalla.
+    nombre_colaborador = (cuerpo.get("nombre_colaborador") or "").strip()
 
     faltantes = [nombre for nombre, valor in
                 {"tenant": tenant, "identificador_sesion": id_sesion,
@@ -915,7 +926,8 @@ def chat():
 
     try:
         salida = atender_turno(config, tenant, rol, id_sesion, mensaje, canal,
-                               profile_id=profile_id)
+                               profile_id=profile_id,
+                               nombre_colaborador=nombre_colaborador)
     except motor.ErrorMotor as e:
         return jsonify({"error": str(e)}), 400
 

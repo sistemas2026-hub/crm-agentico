@@ -145,7 +145,7 @@ roles:
     puede_consultar: [consultar_cliente, consultar_cliente_por_cedula, consultar_ticket,
           consultar_tickets_de_cliente, contar_tickets, contar_clientes, consultar_casos_bottlecrm,
           agendar_visita_tecnica, agendar_visita_internet, consultar_velocidad_aprovisionada,
-          crear_ticket_lentitud, crear_ticket_lentitud_niveles,
+          crear_ticket_lentitud, crear_ticket_lentitud_niveles, crear_ticket_reconexion,
           consultar_estabilidad_enlace,
           consultar_estado_ont, consultar_senal_ont, reiniciar_ont,
           diagnosticar_falla_ont, consultar_estado_catv, activar_catv, cambiar_tipo_onu,
@@ -180,6 +180,8 @@ roles:
       crear_ticket_lentitud: [id_ticket, asunto, estado, prioridad, tecnico, departamento,
             fecha_creacion, servicio.id_servicio]
       crear_ticket_lentitud_niveles: [id_ticket, asunto, estado, prioridad, tecnico,
+            departamento, fecha_creacion, servicio.id_servicio]
+      crear_ticket_reconexion: [id_ticket, asunto, estado, prioridad, tecnico,
             departamento, fecha_creacion, servicio.id_servicio]
       # SmartOLT: 'onu_status'/'last_status_change' no traen PII (ver skill
       # smartolt-api). Soporte ve el dBm crudo ademas del veredicto -- lo
@@ -1909,6 +1911,47 @@ herramientas:
         tipo: texto
         verificado_el: 2026-08-12
 
+  # Reconexion: el trabajo es de CARTERA, no de campo. Sale con el asunto que
+  # ya existe en el catalogo real de WispHub.
+  - nombre: crear_ticket_reconexion
+    tipo: http
+    multipart: true
+    descripcion: >
+      Deja anotada en WispHub una solicitud de reconexion para que la trabaje
+      cartera. NO la llames tu: la ejecuta el codigo cuando un caso de
+      reconexion se pasa a una persona.
+    solo_lectura: false
+    requiere_confirmacion: true
+    roles_permitidos: [soporte, facturacion]
+    base_url: https://api.wisphub.io
+    endpoint: /api/tickets/
+    metodo: POST
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    argumentos_fijos:
+      tecnico: "1428053"                          # respaldo, ver argumentos_sobrescribibles
+      email_tecnico: mario.vasquez.moreno@gmail.com
+      asunto: Reconexion
+      asuntos_default: Reconexion
+      estado: "1"                                 # Nuevo
+      prioridad: "3"                              # Alta: el cliente esta sin servicio
+      departamento: Soporte Técnico
+      departamentos_default: Soporte Técnico
+      origen_reporte: oficina
+    argumentos_sobrescribibles: [tecnico]
+    fechas_automaticas:
+      fecha_inicio: 0
+      fecha_final: 3
+    filtros_verificados:
+      servicio:
+        param: servicio
+        tipo: id
+        verificado_el: 2026-08-12
+      descripcion:
+        param: descripcion
+        tipo: texto
+        verificado_el: 2026-08-12
+
   - nombre: consultar_ticket
     tipo: http
     solo_lectura: true
@@ -2077,6 +2120,11 @@ herramientas:
     auth_esquema: Api-Key
     plantilla_resumen: "Responder al ticket {id_ticket}: \"{respuesta}\""
     campos_texto_libre: [respuesta]
+    # El nombre de quien la escribe se pega al final, en codigo. No lo redacta
+    # el modelo: si lo hiciera podria poner otro nombre o saltearlo, y una
+    # atribucion equivocada en algo que queda registrado es peor que no
+    # firmar. El cliente no ve estos tickets, asi que la firma es interna.
+    firmar_campo: respuesta
     # 'estado' y 'prioridad' confirmados requeridos en vivo (19/08/2026,
     # ticket real #90354): un POST solo con 'respuesta' devuelve 400
     # "Este campo es requerido" para 'ticket-estado' y 'ticket-prioridad'.
@@ -3403,6 +3451,11 @@ escalamiento:
   # cuando corresponde, y ese ticket ES el trabajo anotado. Duplicarlo seria
   # mandar dos veces el mismo trabajo.
   ticket_al_escalar:
+    # Reconexion va a CARTERA: el cliente pago o va a pagar y hay que
+    # reactivarle el servicio. No es trabajo de campo.
+    reconexion:
+      - herramienta: crear_ticket_reconexion
+        area: cartera
     internet_lento:
       - herramienta: crear_ticket_lentitud_niveles
         area: soporte_tecnico
