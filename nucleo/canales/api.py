@@ -2010,6 +2010,18 @@ def corpus_ingerir():
                     roles_permitidos=roles_doc or roles,
                     storage_path=request.form.get("storage_path"),
                     forzar=forzar,
+                    # El archivo tal cual se subio: es la evidencia de QUE se
+                    # aprueba despues. Los fragmentos son derivados; sin el
+                    # original, "Fulano aprobo esto" no se puede verificar.
+                    original=datos,
+                    nombre_archivo=nombre,
+                    mime=archivo.mimetype,
+                    perfil_fragmentacion={
+                        "max_tokens": tokens,
+                        "exigir_multinivel_sin_estilo":
+                            perfil.exigir_multinivel_sin_estilo,
+                        "titulo_un_nivel_en_tabla": perfil.titulo_un_nivel_en_tabla,
+                    },
                     # Lo subido desde la interfaz entra PENDIENTE: se
                     # vectoriza, pero match_chunks no lo recupera hasta que
                     # una persona lo apruebe (ver supabase/22). Subir un
@@ -2019,6 +2031,12 @@ def corpus_ingerir():
                     # credenciales de base y es herramienta de operacion,
                     # como una migracion -- quien lo corre ya decidio.
                     estado="pendiente")
+    except ingesta.VersionAprobadaInmutable as e:
+        # 409 y no 400: la peticion esta bien formada, lo que pasa es que el
+        # recurso esta en un estado que no admite esa operacion. Y no es un
+        # fallo que haya que investigar en los logs -- es una regla del
+        # producto contandose a quien la choco.
+        return jsonify({"error": str(e)}), 409
     except ValueError as e:
         return jsonify({"error": f"El documento declara {e}"}), 400
     except Exception as e:

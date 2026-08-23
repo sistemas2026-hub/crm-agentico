@@ -125,7 +125,10 @@ try:
         r = ingesta.ingerir(
             cur, org, _DocFalso(), "hash-de-prueba-1",
             modelo_embeddings=config.rag.modelo_embeddings,
-            roles_permitidos=[rol], estado="pendiente")
+            roles_permitidos=[rol], estado="pendiente",
+            original=b"bytes-falsos-del-docx", nombre_archivo="prueba.docx",
+            mime="application/vnd.openxmlformats-officedocument."
+                 "wordprocessingml.document")
         doc_id = r["document_id"]
 
     comprobar(r["estado"] == "pendiente", "se carga en estado 'pendiente'")
@@ -157,6 +160,61 @@ try:
         otra_vez = ingesta.aprobar(cur, org, doc_id, None)
     comprobar(not otra_vez,
               "aprobar dos veces no hace nada la segunda (solo actua sobre pendiente)")
+
+    # --- el original queda guardado ----------------------------------------
+    #  Sin esto, "Fulano aprobo este documento" no se puede verificar
+    #  despues: los fragmentos son una representacion derivada y no permiten
+    #  reconstruir el archivo con sus tablas de firma ni su formato.
+    with sesion(TENANT) as (cur, org):
+        cur.execute("""select original_content, nombre_archivo, hash
+                         from asistente.documents
+                        where organization_id=%s and codigo=%s""", (org, CODIGO))
+        fila = cur.fetchone()
+    comprobar(fila["original_content"] == b"bytes-falsos-del-docx",
+              "guarda el archivo original tal cual se subio")
+    comprobar(fila["nombre_archivo"] == "prueba.docx", "guarda el nombre del archivo")
+
+    # --- resubir el MISMO archivo no invalida la aprobacion ----------------
+    #  Bug real, encontrado probando esto en produccion (22/08/2026): una
+    #  resubida identica (con 'forzar', para re-vectorizar tras un cambio de
+    #  pipeline) devolvia el documento a 'pendiente' y lo dejaba FUERA DE
+    #  SERVICIO hasta que alguien lo re-aprobara. La aprobacion es sobre los
+    #  bytes: si los bytes no cambiaron, no hay nada nuevo que aprobar.
+    with sesion(TENANT) as (cur, org):
+        r2 = ingesta.ingerir(
+            cur, org, _DocFalso(), "hash-de-prueba-1",   # mismo hash
+            modelo_embeddings=config.rag.modelo_embeddings,
+            roles_permitidos=[rol], estado="pendiente", forzar=True,
+            original=b"bytes-falsos-del-docx")
+    comprobar(r2["estado"] == "vigente",
+              "resubir el MISMO archivo no lo devuelve a pendiente")
+
+    candidatos = recuperar_candidatos(config, TENANT, rol, CONSULTA)
+    comprobar(CODIGO in [c.codigo for c in candidatos],
+              "y sigue disponible para el asistente, sin quedar fuera de servicio")
+
+    # --- una version APROBADA no se puede pisar ----------------------------
+    #  Es lo que hace verificable la aprobacion: si los bytes se pueden
+    #  cambiar bajo el mismo codigo y version, "que aprobo esa persona" deja
+    #  de tener respuesta.
+    hubo_rechazo = False
+    try:
+        with sesion(TENANT) as (cur, org):
+            ingesta.ingerir(
+                cur, org, _DocFalso(), "hash-DISTINTO",
+                modelo_embeddings=config.rag.modelo_embeddings,
+                roles_permitidos=[rol], estado="pendiente",
+                original=b"otros-bytes")
+    except ingesta.VersionAprobadaInmutable:
+        hubo_rechazo = True
+    comprobar(hubo_rechazo,
+              "una version ya aprobada NO se puede reemplazar con otro contenido")
+
+    with sesion(TENANT) as (cur, org):
+        cur.execute("""select original_content from asistente.documents
+                        where organization_id=%s and codigo=%s""", (org, CODIGO))
+        comprobar(cur.fetchone()["original_content"] == b"bytes-falsos-del-docx",
+                  "y el original aprobado sigue intacto tras el intento")
 
     # --- un retirado no se resucita aprobandolo ----------------------------
     with sesion(TENANT) as (cur, org):

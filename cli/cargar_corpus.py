@@ -218,13 +218,21 @@ def cargar_tenant(slug: str, forzar: bool = False) -> None:
                                set vigente=false where document_id=%s and vigente""",
                             (doc_id,))
             else:
+                # Se guarda el archivo original (ver supabase/23): es la
+                # evidencia de que se aprobo, cuando alguien lo apruebe. Los
+                # fragmentos son derivados y no permiten reconstruir el
+                # documento con sus tablas de firma ni su formato.
                 cur.execute("""insert into asistente.documents
                                (organization_id, codigo, titulo, version, tipo,
-                                estado, hash, defectos, roles_permitidos)
-                               values (%s,%s,%s,%s,'guia_tecnica','vigente',%s,%s,%s)
+                                estado, hash, defectos, roles_permitidos,
+                                original_content, nombre_archivo, mime)
+                               values (%s,%s,%s,%s,'guia_tecnica','vigente',%s,%s,%s,%s,%s,%s)
                                returning id""",
                             (org_id, doc.codigo, doc.titulo, doc.version,
-                             hash_, json.dumps(doc.defectos, ensure_ascii=False), roles))
+                             hash_, json.dumps(doc.defectos, ensure_ascii=False), roles,
+                             ruta.read_bytes(), ruta.name,
+                             "application/vnd.openxmlformats-officedocument"
+                             ".wordprocessingml.document"))
                 doc_id = cur.fetchone()[0]
 
             n = 0

@@ -131,17 +131,24 @@ def vectorizar(texto: str, modelo: str | None = None) -> list[float]:
     return _vectorizar_openai(texto)
 
 
+class VersionAprobadaInmutable(RuntimeError):
+    """Se intento cambiar el contenido de una version que alguien ya aprobo."""
+
+
 def _fila(cur, org_id: str, codigo: str, version: str):
-    """(id, hash) del documento, o (None, None). Tolera tuplas y dict_row: el
-    CLI usa el cursor por defecto y el motor uno de diccionarios."""
+    """(id, hash, aprobado_en, estado) del documento, o cuatro None. Tolera
+    tuplas y dict_row: el CLI usa el cursor por defecto y el motor uno de
+    diccionarios."""
     cur.execute(
-        """select id, hash from asistente.documents
+        """select id, hash, aprobado_en, estado from asistente.documents
            where organization_id = %s and codigo = %s and version = %s""",
         (org_id, codigo, version))
     f = cur.fetchone()
     if f is None:
-        return None, None
-    return (f["id"], f["hash"]) if isinstance(f, dict) else (f[0], f[1])
+        return None, None, None, None
+    if isinstance(f, dict):
+        return f["id"], f["hash"], f["aprobado_en"], f["estado"]
+    return f[0], f[1], f[2], f[3]
 
 
 def ingerir(cur, org_id: str, doc, hash_: str, *,
@@ -150,7 +157,11 @@ def ingerir(cur, org_id: str, doc, hash_: str, *,
             tipo: str = "guia_tecnica",
             storage_path: str | None = None,
             forzar: bool = False,
-            estado: str = "vigente") -> dict:
+            estado: str = "vigente",
+            original: bytes | None = None,
+            nombre_archivo: str | None = None,
+            mime: str | None = None,
+            perfil_fragmentacion: dict | None = None) -> dict:
     """
     Escribe un documento con sus fragmentos vectorizados.
 
@@ -172,7 +183,8 @@ def ingerir(cur, org_id: str, doc, hash_: str, *,
 
     No hace commit -- la transaccion la maneja quien abrio el cursor.
     """
-    doc_id, hash_guardado = _fila(cur, org_id, doc.codigo, doc.version)
+    doc_id, hash_guardado, aprobado_en, estado_actual = _fila(
+        cur, org_id, doc.codigo, doc.version)
 
     if doc_id and hash_guardado == hash_ and not forzar:
         return {"accion": "sin_cambios", "document_id": str(doc_id),
@@ -180,24 +192,55 @@ def ingerir(cur, org_id: str, doc, hash_: str, *,
                 "fragmentos": 0, "defectos": doc.defectos,
                 "roles_permitidos": roles_permitidos}
 
+    # UNA VERSION APROBADA ES INMUTABLE. Si alguien ya reviso y aprobo estos
+    # bytes, cambiarlos por otros bajo el mismo codigo y version destruye la
+    # unica evidencia de que se aprobo -- despues no hay forma de contestar
+    # "que documento exactamente aprobo esa persona". Para cambiar el
+    # contenido hay que subir una version nueva, que es lo que deja
+    # constancia de la decision.
+    #
+    # Se mira 'aprobado_en' y no el estado: un documento cargado por
+    # cli/cargar_corpus.py entra 'vigente' sin que nadie lo aprobara
+    # explicitamente (es herramienta de operacion, exige credenciales de
+    # base), y recargar el corpus tiene que seguir funcionando como siempre.
+    # La inmutabilidad protege lo que una PERSONA aprobo, no lo que un
+    # comando cargo.
+    if doc_id and aprobado_en is not None and hash_guardado != hash_:
+        raise VersionAprobadaInmutable(
+            f"'{doc.codigo}' version {doc.version} ya fue aprobada y su "
+            f"contenido no se puede reemplazar. Para publicar un contenido "
+            f"distinto, subilo como una version nueva.")
+
     defectos = json.dumps(doc.defectos, ensure_ascii=False)
+    perfil_json = (json.dumps(perfil_fragmentacion, ensure_ascii=False)
+                   if perfil_fragmentacion else None)
+
+    # La aprobacion es sobre los BYTES, asi que solo la invalida un cambio de
+    # bytes. Volver a subir el MISMO archivo (con 'forzar', para
+    # re-vectorizar tras un cambio de pipeline) no toca el estado: mandar a
+    # aprobar de nuevo un contenido identico es pedirle a una persona que
+    # firme dos veces lo mismo, y ademas deja el documento invisible mientras
+    # tanto. Paso de verdad al probar esto (22/08/2026): una resubida
+    # identica dejo la guia fuera de servicio hasta que se re-aprobo.
+    contenido_cambio = doc_id is not None and hash_guardado != hash_
+    estado_a_guardar = estado if (doc_id is None or contenido_cambio) else estado_actual
+    limpiar_aprobacion = contenido_cambio and estado_a_guardar == "pendiente"
 
     if doc_id:
-        # Reemplazar el contenido de un documento ya aprobado lo devuelve a
-        # 'pendiente' si asi lo pide quien sube: aprobar una version no
-        # aprueba las siguientes. Se limpia el rastro de la aprobacion
-        # anterior, que ya no corresponde a este contenido.
         cur.execute(
             """update asistente.documents
                set titulo=%s, estado=%s, hash=%s, defectos=%s,
                    roles_permitidos=%s, storage_path=coalesce(%s, storage_path),
-                   aprobado_por = case when %s = 'pendiente' then null
-                                       else aprobado_por end,
-                   aprobado_en  = case when %s = 'pendiente' then null
-                                       else aprobado_en end
+                   original_content=coalesce(%s, original_content),
+                   nombre_archivo=coalesce(%s, nombre_archivo),
+                   mime=coalesce(%s, mime),
+                   perfil_fragmentacion=coalesce(%s::jsonb, perfil_fragmentacion),
+                   aprobado_por = case when %s then null else aprobado_por end,
+                   aprobado_en  = case when %s then null else aprobado_en end
                where id=%s""",
-            (doc.titulo, estado, hash_, defectos, roles_permitidos,
-             storage_path, estado, estado, doc_id))
+            (doc.titulo, estado_a_guardar, hash_, defectos, roles_permitidos,
+             storage_path, original, nombre_archivo, mime, perfil_json,
+             limpiar_aprobacion, limpiar_aprobacion, doc_id))
         # Los fragmentos viejos quedan obsoletos, NUNCA se borran.
         cur.execute(
             """update asistente.document_chunks
@@ -208,11 +251,14 @@ def ingerir(cur, org_id: str, doc, hash_: str, *,
         cur.execute(
             """insert into asistente.documents
                  (organization_id, codigo, titulo, version, tipo, estado, hash,
-                  defectos, roles_permitidos, storage_path)
-               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                  defectos, roles_permitidos, storage_path,
+                  original_content, nombre_archivo, mime, perfil_fragmentacion)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)
                returning id""",
-            (org_id, doc.codigo, doc.titulo, doc.version, tipo, estado, hash_,
-             defectos, roles_permitidos, storage_path))
+            (org_id, doc.codigo, doc.titulo, doc.version, tipo,
+             estado_a_guardar, hash_,
+             defectos, roles_permitidos, storage_path,
+             original, nombre_archivo, mime, perfil_json))
         f = cur.fetchone()
         doc_id = f["id"] if isinstance(f, dict) else f[0]
         accion = "creado"
@@ -240,10 +286,11 @@ def ingerir(cur, org_id: str, doc, hash_: str, *,
             "codigo": doc.codigo, "titulo": doc.titulo, "version": doc.version,
             "fragmentos": n, "defectos": doc.defectos,
             "roles_permitidos": roles_permitidos,
-            # Para que quien sube sepa si ya quedo en uso o falta aprobarlo:
-            # sin esto, la pantalla no puede distinguir "listo" de "cargado
-            # pero invisible", que es justo la diferencia que importa.
-            "estado": estado}
+            # El estado REAL con el que quedo, no el que se pidio: si se
+            # resubio un archivo identico, sigue como estaba. Sin esto la
+            # pantalla diria "queda pendiente de aprobacion" sobre un
+            # documento que nunca dejo de estar en uso.
+            "estado": estado_a_guardar}
 
 
 def actualizar_roles(cur, org_id: str, document_id: str,
