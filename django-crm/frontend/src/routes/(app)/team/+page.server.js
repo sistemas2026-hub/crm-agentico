@@ -1,5 +1,6 @@
 import { fail } from '@sveltejs/kit';
-import { listTeam, inviteUser, setRole, setStatus, updateUser, ROLES, perfilPorCorreo }
+import { listTeam, inviteUser, setRole, setStatus, updateUser, ROLES, perfilPorCorreo,
+  casosDe, reasignarCaso }
   from '$lib/server/v2/team.js';
 import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
@@ -62,6 +63,89 @@ export async function load({ cookies, fetch }) {
   }
   return { ...equipo, areas, areasTrabajo, externos, etiquetaExterna,
            asignaciones, areasPorPersona, identidades };
+}
+
+/**
+ * Pasa el trabajo de alguien que se desactiva a quien queda en su area, y le
+ * quita el area para que deje de recibir.
+ *
+ * Las dos cosas juntas o ninguna sirve: sin quitarle el area seguiria
+ * entrando en el reparto, y sin mover sus casos esos quedan sin nadie que los
+ * mire -- el CRM le muestra a quien no es administrador solo los suyos.
+ *
+ * Los casos CERRADOS no se tocan. Son historia: moverlos falsearia quien
+ * atendio que.
+ *
+ * Devuelve un aviso si algo no se pudo, o null. Nunca lanza: que falle el
+ * traspaso no puede impedir desactivar a alguien -- si se va, se va.
+ *
+ * @param {{ cookies: import('@sveltejs/kit').Cookies, fetch: typeof globalThis.fetch }} event
+ * @param {string} userId
+ */
+async function traspasarTrabajo({ cookies, fetch }, userId) {
+  const baseUrl = env.PRIVATE_ASISTENTE_URL;
+  const tenant = env.PRIVATE_ASISTENTE_TENANT;
+  if (!baseUrl || !tenant) return null;
+
+  try {
+    const equipo = await listTeam({ cookies });
+    const persona = [...(equipo.active ?? []), ...(equipo.inactive ?? [])].find(
+      (/** @type {any} */ m) => m.user_id === userId
+    );
+    if (!persona) return null;
+
+    const resp = await fetch(
+      `${baseUrl}/agentes/asignaciones?tenant=${encodeURIComponent(tenant)}`,
+      { headers: headersMotor() }
+    );
+    if (!resp.ok) return 'No se pudo consultar el área para traspasar su trabajo.';
+    const datos = await resp.json();
+    const area = datos.areas_por_persona?.[persona.id];
+    if (!area) return null;
+
+    // Quien queda en esa area, sin contar a quien se va ni a los inactivos.
+    const activos = new Set((equipo.active ?? []).map((/** @type {any} */ m) => m.id));
+    const quedan = Object.entries(datos.areas_por_persona ?? {})
+      .filter(([pid, a]) => a === area && pid !== persona.id && activos.has(pid))
+      .map(([pid]) => pid);
+
+    // Se le saca el area SIEMPRE, aunque no haya a quien pasarle el trabajo:
+    // que no haya reemplazo no es motivo para que siga recibiendo mas.
+    await fetch(`/api/agentes/asignaciones/${encodeURIComponent(persona.id)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ area: '', roles: datos.asignaciones?.[persona.id] ?? [] })
+    });
+
+    if (!quedan.length) {
+      return `${persona.name} no tenía a nadie más en su área: sus casos quedan a la vista de un administrador.`;
+    }
+
+    // Al que menos tiene, igual que al asignar uno nuevo.
+    const abiertos = await casosDe({ cookies }, persona.id);
+    const cerrados = new Set(['closed', 'rejected', 'duplicate']);
+    const aMover = abiertos.filter(
+      (/** @type {any} */ c) => !cerrados.has(String(c.status ?? '').toLowerCase())
+    );
+    if (!aMover.length) return null;
+
+    const destino = quedan[0];
+    let movidos = 0;
+    for (const caso of aMover) {
+      try {
+        await reasignarCaso({ cookies }, caso, destino);
+        movidos += 1;
+      } catch {
+        /* se sigue: mover ocho de nueve es mejor que ninguno */
+      }
+    }
+    if (movidos < aMover.length) {
+      return `Se traspasaron ${movidos} de ${aMover.length} casos; el resto quedó sin mover.`;
+    }
+    return null;
+  } catch (/** @type {any} */ err) {
+    return err?.message || 'No se pudo traspasar su trabajo.';
+  }
 }
 
 /** @type {import('./$types').Actions} */
@@ -289,7 +373,20 @@ export const actions = {
    * Activate or deactivate a member. The server refuses to deactivate the last
    * active admin (a 400), so the org can never be stranded without one.
    */
-  setStatus: async ({ cookies, request }) => {
+  /**
+   * Desactivar a alguien no puede dejar su trabajo colgado.
+   *
+   * El CRM le muestra a quien no es administrador solo SUS casos, asi que los
+   * de una cuenta desactivada dejan de tener quien los mire: no quedan "para
+   * todos", quedan para nadie. Y mientras su area siga cargada en el
+   * asistente, ademas seguiria recibiendo casos nuevos.
+   *
+   * Asi que al desactivar se hacen dos cosas, y las dos importan: se le
+   * quita el area -- deja de entrar en el reparto -- y sus casos abiertos
+   * pasan a quien queda en esa area. Los cerrados no se tocan: son historia,
+   * y moverlos falsearia quien atendio que.
+   */
+  setStatus: async ({ cookies, request, fetch }) => {
     const form = await request.formData();
     const userId = form.get('userId')?.toString();
     const status = form.get('status')?.toString();
@@ -306,6 +403,13 @@ export const actions = {
             : readableError(err, 'No se pudo cambiar ese estado.')
       });
     }
-    return { statusChanged: userId };
+
+    // DESPUES de desactivar, no antes: si el traspaso corriera primero y la
+    // desactivacion fallara, la persona se quedaria activa y sin trabajo.
+    let avisoTraspaso = null;
+    if (status === 'Inactive') {
+      avisoTraspaso = await traspasarTrabajo({ cookies, fetch }, userId);
+    }
+    return { statusChanged: userId, avisoTraspaso };
   }
 };

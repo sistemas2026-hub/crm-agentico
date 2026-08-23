@@ -83,6 +83,19 @@ comprobar(elegir_menos_cargado(["ana", "beto"], None) is not None,
 comprobar(elegir_menos_cargado(["ana", "beto"], {"ana": 4}) == "beto",
           "quien no figura en la carga cuenta como cero, no como desconocido")
 
+print("\nlo que ESPERA tambien ocupa")
+# Contar solo lo ya empezado dejaba invisible la cola de alguien: quien tenia
+# ocho casos sin abrir figuraba tan libre como quien no tenia ninguno, y se le
+# seguian dando mas.
+espera = contar_por_responsable(
+    [{"assigned_to": "ana", "status": "New"},
+     {"assigned_to": "ana", "status": "Assigned"},
+     {"assigned_to": "beto", "status": "Pending"}], "assigned_to")
+comprobar(espera == {"ana": 2, "beto": 1},
+          "cuentan los nuevos y los asignados, no solo los que ya se abrieron")
+comprobar(elegir_menos_cargado(["ana", "beto"], espera) == "beto",
+          "y el reparto lo usa: le toca al que tiene menos esperando")
+
 print("\nsin candidatos no se inventa uno")
 comprobar(elegir_menos_cargado([], {"ana": 1}) is None, "lista vacia devuelve None")
 

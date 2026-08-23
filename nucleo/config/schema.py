@@ -1217,6 +1217,16 @@ class Escalamiento(Base):
     # sobre la instancia real: 54 casos escalados, y las dos personas del
     # equipo veian cero.
     area_por_caso: dict[str, str] = Field(default_factory=dict)
+    # Estados en los que un caso ya NO ocupa a nadie. Todo lo demas cuenta
+    # como carga: lo que la persona ya empezo y lo que tiene esperando.
+    #
+    # Contar solo lo empezado dejaba invisible la cola de alguien: quien tiene
+    # ocho casos sin abrir figuraba tan libre como quien no tiene ninguno, y
+    # se le seguian dando mas.
+    #
+    # Se declara por empresa porque son las palabras del CRM de cada una, no
+    # del motor.
+    estados_cerrados: list[str] = Field(default_factory=list)
     # Caso de 'manual.casos' -> condiciones sobre la TRAZA que, si se
     # cumplen, bastan para agendar SIN pasar por el verificador del manual.
     #

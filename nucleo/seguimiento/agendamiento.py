@@ -307,7 +307,11 @@ def _carga_de_casos(config, tenant: str) -> dict[str, int]:
     if herramienta is None:
         return {}
     try:
-        crudo = _ejecutar_tool(herramienta, None, {"estado": "abierto"}, tenant,
+        # Sin filtro de estado: se traen todos y se descartan los cerrados
+        # aca. Filtrar por "abierto" en la API dejaba afuera lo que la persona
+        # tiene EN ESPERA, y eso tambien la ocupa -- quien tiene ocho casos sin
+        # empezar figuraba tan libre como quien no tiene ninguno.
+        crudo = _ejecutar_tool(herramienta, None, {}, tenant,
                                config.variables_tenant)
     except Exception as e:
         print(f"[escalamiento] no se pudo leer la carga de casos: "
@@ -316,7 +320,11 @@ def _carga_de_casos(config, tenant: str) -> dict[str, int]:
     filas = crudo.get("cases") if isinstance(crudo, dict) else crudo
     if filas is None and isinstance(crudo, dict):
         filas = crudo.get("results")
-    return reparto.contar_por_responsable(filas, "assigned_to")
+    cerrados = {e.lower() for e in (config.escalamiento.estados_cerrados or [])}
+    abiertos = [f for f in (filas or [])
+                if isinstance(f, dict)
+                and str(f.get("status") or "").lower() not in cerrados]
+    return reparto.contar_por_responsable(abiertos, "assigned_to")
 
 
 def responsable_de(tenant: str, area: str, sistema: str,

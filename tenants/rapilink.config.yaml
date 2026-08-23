@@ -3381,6 +3381,11 @@ escalamiento:
   #
   # Es la lista completa de casos a proposito: uno que falte aca vuelve a caer
   # en el agujero de antes.
+  # Cuando un caso deja de ocupar a alguien. Todo lo que no este en esta
+  # lista cuenta como carga al repartir: lo que ya empezo Y lo que tiene
+  # esperando. Son los estados terminales de BottleCRM.
+  estados_cerrados: [Closed, Rejected, Duplicate]
+
   area_por_caso:
     no_internet: soporte_tecnico
     internet_lento: soporte_tecnico

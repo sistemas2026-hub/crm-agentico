@@ -226,6 +226,43 @@ export function updateUser({ cookies }, userId, body) {
   return apiRequest(`/user/${userId}/`, { method: 'PATCH', body }, { cookies });
 }
 
+/**
+ * Los casos que esa persona todavia tiene encima, con su estado.
+ *
+ * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
+ * @param {string} profileId
+ */
+export async function casosDe({ cookies }, profileId) {
+  const resp = await apiRequest(`/cases/?assigned_to=${encodeURIComponent(profileId)}`,
+    {}, { cookies });
+  return resp?.cases ?? [];
+}
+
+/**
+ * Pasa un caso a otra persona: `PUT /api/cases/<id>/`.
+ *
+ * Es un PUT y el serializador exige el caso completo, asi que se reenvian los
+ * campos que ya tenia -- mandar solo 'assigned_to' lo dejaria sin nombre ni
+ * estado.
+ *
+ * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
+ * @param {any} caso
+ * @param {string} nuevoPerfilId
+ */
+export function reasignarCaso({ cookies }, caso, nuevoPerfilId) {
+  return apiRequest(`/cases/${caso.id}/`, {
+    method: 'PUT',
+    body: {
+      name: caso.name,
+      status: caso.status,
+      priority: caso.priority,
+      case_type: caso.case_type,
+      description: caso.description ?? '',
+      assigned_to: [nuevoPerfilId]
+    }
+  }, { cookies });
+}
+
 export function inviteUser({ cookies }, body) {
   return apiRequest('/users/', { method: 'POST', body }, { cookies });
 }
