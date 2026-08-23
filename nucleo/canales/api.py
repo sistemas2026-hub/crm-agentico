@@ -727,9 +727,22 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                     if caso_manual and not id_ticket_auto else None)
                 nombre_ticket = entrada_ticket.herramienta if entrada_ticket else None
                 if nombre_ticket:
+                    # La sugerencia va PRIMERO en la descripcion, no al
+                    # final: un ticket con asunto generico se abre para saber
+                    # de que es, y quien lo lee tiene que encontrar eso en la
+                    # primera linea. Al pie se lo come el resto del texto.
+                    descripcion_ticket = (evaluacion.get("resumen", "") or "")
+                    sugerido = (evaluacion.get("asunto_sugerido") or "").strip()
+                    if sugerido:
+                        descripcion_ticket = (
+                            "[Sin clasificar] El asistente sugiere la categoria "
+                            + chr(34) + sugerido + chr(34)
+                            + " para casos como este." + chr(10) + chr(10)
+                            + descripcion_ticket)
+
                     id_ticket_operativo = agendamiento.agendar(
                         config, tenant, estado["sesion"], nombre_ticket,
-                        (evaluacion.get("resumen", "") or "")[:400],
+                        descripcion_ticket[:400],
                         area=entrada_ticket.area,
                         asunto=entrada_ticket.asunto,
                         prioridad=entrada_ticket.prioridad)

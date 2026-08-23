@@ -3362,10 +3362,11 @@ escalamiento:
   # dos entradas del mismo caso con condiciones distintas abren tickets
   # distintos. Valores de WispHub: 1 baja, 2 normal, 3 alta, 4 muy alta.
   #
-  # 'otro' NO esta: WispHub rechaza un asunto que no este en su catalogo (400,
-  # verificado), y no hay ninguno generico. Ese caso sigue llegando a una
-  # persona por la bandeja del CRM -- no se pierde -- pero sin ticket. Entra
-  # aca el dia que un admin cree el asunto.
+  # 'otro' entra con el asunto 'Otros', que Rapilink creo el 23/08/2026 para
+  # esto (verificado: el POST lo acepta -- antes, con uno inventado, devolvia
+  # 400). Va con la categoria que el asistente sugiere en la primera linea de
+  # la descripcion: asi el catalogo mejora con el uso en vez de quedarse
+  # fijo, y quien administra decide si vale la pena crearla.
   #
   # Tampoco estan los casos donde el ticket no aporta: un suspendido es
   # facturacion, no una orden de trabajo, y las consultas que el asistente
@@ -3434,6 +3435,16 @@ escalamiento:
       - herramienta: crear_ticket_caso
         area: cartera
         asunto: Actualización De Datos
+        prioridad: "2"
+
+    # Lo que no encajo en ningun caso del manual. Va a soporte por ser la cola
+    # general, y normal porque justamente no se sabe que es -- ponerle una
+    # prioridad alta a algo sin clasificar desordena la cola de los que si se
+    # sabe que urgen.
+    otro:
+      - herramienta: crear_ticket_caso
+        area: soporte_tecnico
+        asunto: Otros
         prioridad: "2"
 
   evidencia_suficiente:

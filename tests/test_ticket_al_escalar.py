@@ -103,10 +103,18 @@ for caso, entradas in mapeo.items():
         comprobar(e.area in nombres_area,
                   f"'{caso}': el area '{e.area}' esta declarada en 'areas'")
 
-print("\n'otro' NO abre ticket, y es a proposito")
-comprobar("otro" not in mapeo,
-          "WispHub rechaza un asunto fuera de su catalogo y no hay uno generico: "
-          "ese caso llega por la bandeja, no con un ticket roto")
+print("\nel caso comodin tambien abre ticket")
+# Hasta el 23/08/2026 este bloque afirmaba lo CONTRARIO: que 'otro' no abria
+# ticket, porque WispHub rechaza un asunto que no este en su catalogo y no
+# habia ninguno generico. Rapilink creo 'Otros' y se verifico contra la API
+# real que el POST lo acepta (ticket 90770). La regla no se aflojo -- lo que
+# cambio es el dato del mundo.
+comprobar("otro" in mapeo,
+          "'otro' no se queda sin ticket: un caso que el sistema no supo "
+          "clasificar no puede recibir menos atencion que el resto")
+comprobar(mapeo["otro"][0].prioridad == "2",
+          "y entra con prioridad normal: subirsela a algo que justamente no se "
+          "sabe que es desordena la cola de lo que si urge")
 
 print("\nun caso sin declarar no inventa un ticket")
 comprobar(agendamiento.ticket_para_escalar(config, "sin_senal_tv", []) is None,

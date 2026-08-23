@@ -115,6 +115,24 @@ def _esquema_evaluacion(config) -> dict:
                 "al domicilio, dilo; si falta una revision que "
                 "solo se hace desde adentro, dilo.",
         },
+        # Solo tiene sentido cuando el caso no encajo en ninguno de los del
+        # manual. Es el lazo que hace que el catalogo mejore con el uso: el
+        # asistente propone el nombre que le habria correspondido, y una
+        # persona decide si vale la pena crearlo.
+        #
+        # Se pide un NOMBRE CORTO y no una explicacion porque va a terminar
+        # siendo una categoria de verdad, y una categoria con una frase adentro
+        # no sirve para agrupar nada.
+        "asunto_sugerido": {
+            "type": "string",
+            "description": "Solo si escalar=true Y el caso quedo como "
+                "'otro'. Que nombre de categoria le habria "
+                "correspondido a este caso, corto y en el estilo de "
+                "un catalogo (ej. 'Traslado De Domicilio', "
+                "'Consulta De Cobertura'). Si no sabes, dejalo "
+                "vacio -- inventar una categoria es peor que no "
+                "proponer ninguna.",
+        },
         "necesita_humano": {
             "type": "boolean",
             "description": "Solo si escalar=true. true si hace "
