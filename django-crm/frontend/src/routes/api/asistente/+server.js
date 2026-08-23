@@ -42,9 +42,22 @@ export async function POST({ request, locals, fetch }) {
 
   /** @type {string | undefined} */
   let profileId;
+  /**
+   * El nombre de quien pregunta. Sale de la MISMA consulta que el
+   * profile_id -- no cuesta una llamada extra -- y viaja al motor para que
+   * pueda firmar a su nombre lo que se escriba en un sistema externo (ver
+   * 'firmar_campo' en el esquema del asistente).
+   *
+   * Va desde aca por el mismo motivo que el profile_id: el motor no lee las
+   * tablas del CRM, asi que quien sabe quien inicio sesion es esto. Y como el
+   * profile_id, NO se acepta del cliente: se resuelve del lado del servidor.
+   * Si viniera del navegador, cualquiera podria firmar con el nombre de otro.
+   */
+  let nombreColaborador = '';
   try {
     const perfil = await apiRequest('/profile/', {}, locals);
     profileId = perfil?.user_obj?.id;
+    nombreColaborador = (perfil?.user_obj?.name || perfil?.user_obj?.email || '').trim();
   } catch (/** @type {any} */ err) {
     return json({ error: err?.message || 'No se pudo identificar tu perfil' }, { status: 502 });
   }
@@ -61,6 +74,7 @@ export async function POST({ request, locals, fetch }) {
         tenant,
         profile_id: profileId,
         identificador_sesion: locals.user.id,
+        nombre_colaborador: nombreColaborador,
         mensaje
       })
     });
