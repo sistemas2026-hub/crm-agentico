@@ -67,6 +67,29 @@
     rolesEnEdicion = { ...rolesEnEdicion, [id]: { ...actual, [rol]: !actual[rol] } };
   }
 
+  /**
+   * Los roles tildados que atienden a un CLIENTE FINAL.
+   *
+   * Es lo que decide si mostrar el aviso: el riesgo del corpus no es que
+   * falle el filtro por rol -- vive en SQL y es fail-closed -- sino que
+   * alguien tilde el rol equivocado al asignar. Los nombres se parecen
+   * ('soporte' es el técnico en campo, 'soporte_tecnico_cliente' atiende por
+   * WhatsApp) y el sistema hace exactamente lo que le dicen, sin error.
+   *
+   * @param {string} id
+   */
+  function rolesDeClienteElegidos(id) {
+    const deCliente = new Set(data.rolesDeCliente || []);
+    return Object.keys(rolesEnEdicion[id] || {})
+      .filter((r) => rolesEnEdicion[id][r] && deCliente.has(r));
+  }
+
+  /** Los roles YA guardados de un documento que atienden clientes finales. */
+  function rolesDeClienteDe(/** @type {any} */ doc) {
+    const deCliente = new Set(data.rolesDeCliente || []);
+    return (doc.roles_permitidos || []).filter((/** @type {string} */ r) => deCliente.has(r));
+  }
+
   async function guardarRoles(/** @type {any} */ doc) {
     guardandoRoles = { ...guardandoRoles, [doc.id]: true };
     try {
@@ -116,7 +139,7 @@
       }
       documentos = documentos.map((/** @type {any} */ d) =>
         d.id === doc.id ? { ...d, estado: 'vigente' } : d);
-      toast.success('Documento aprobado. El asistente ya puede usarlo.');
+      toast.success('Habilitado. El asistente ya puede usarlo.');
     } finally {
       aprobando = { ...aprobando, [doc.id]: false };
     }
@@ -312,7 +335,7 @@
                       ? 'clay'
                       : 'slate'}
                 >
-                  {doc.estado === 'pendiente' ? 'sin aprobar' : doc.estado}
+                  {doc.estado === 'pendiente' ? 'sin habilitar' : doc.estado}
                 </Pill>
                 {#if !doc.roles_permitidos || doc.roles_permitidos.length === 0}
                   <Pill tone="clay">sin roles</Pill>
@@ -320,13 +343,27 @@
               </summary>
               <div class="doc-cuerpo">
                 {#if doc.estado === 'pendiente'}
+                  <!--
+                    Se habla de HABILITAR, no de aprobar. Un documento de la
+                    empresa ya viene aprobado por su propio circuito de
+                    calidad antes de llegar acá; lo que se decide en esta
+                    pantalla es otra cosa, que nadie decidió antes: que el
+                    asistente lo use, y con qué roles. La guía técnica de un
+                    ISP puede estar perfectamente aprobada y aun así ser
+                    peligrosa si se la muestra a un cliente.
+                  -->
                   <div class="doc-pendiente">
                     <b>El asistente todavía no puede usar este documento.</b>
                     <p>
                       Está cargado y procesado, pero no se va a recuperar en ninguna conversación
-                      hasta que alguien lo apruebe. Revisá que su contenido sea apropiado para los
-                      roles que lo van a ver — una guía escrita para un técnico en campo no debería
-                      llegarle a un cliente.
+                      hasta que lo habilites. Esto no aprueba el documento — eso lo hace el circuito
+                      de calidad de la empresa — sino que decide que el asistente puede usarlo, y
+                      para qué roles.
+                      {#if rolesDeClienteDe(doc).length > 0}
+                        Va a quedar visible para <b>{rolesDeClienteDe(doc).join(', ')}</b>, que
+                        atiende clientes finales: desplegá los fragmentos y leé lo que el asistente
+                        les diría.
+                      {/if}
                     </p>
                     {#if esAdmin}
                       <button
@@ -335,10 +372,10 @@
                         disabled={aprobando[doc.id]}
                         onclick={() => aprobarDocumento(doc)}
                       >
-                        {aprobando[doc.id] ? 'Aprobando…' : 'Aprobar y habilitar'}
+                        {aprobando[doc.id] ? 'Habilitando…' : 'Habilitar para el asistente'}
                       </button>
                     {:else}
-                      <span class="v2-sub">Lo tiene que aprobar un administrador.</span>
+                      <span class="v2-sub">Lo tiene que habilitar un administrador.</span>
                     {/if}
                   </div>
                 {/if}
@@ -359,7 +396,10 @@
                   {:else}
                     <div class="doc-roles-editor">
                       {#each data.roles || [] as rol (rol)}
-                        <label class="doc-rol-check">
+                        <label
+                          class="doc-rol-check"
+                          class:doc-rol-cliente={(data.rolesDeCliente || []).includes(rol)}
+                        >
                           <input
                             type="checkbox"
                             checked={!!rolesEnEdicion[doc.id]?.[rol]}
@@ -368,6 +408,29 @@
                           {rol}
                         </label>
                       {/each}
+                      {#if rolesDeClienteElegidos(doc.id).length > 0}
+                        <!--
+                          Aparece SOLO cuando se le va a dar el documento a un
+                          rol que atiende clientes finales, no en cada
+                          edicion. Un aviso que sale siempre se deja de leer;
+                          este sale en la accion que de verdad importa.
+
+                          El riesgo no es que el filtro por rol falle -- esta
+                          en SQL y es fail-closed -- sino que alguien tilde el
+                          rol equivocado: 'soporte' es el tecnico en campo y
+                          'soporte_tecnico_cliente' atiende por WhatsApp, y
+                          el sistema hace exactamente lo que le dicen.
+                        -->
+                        <p class="doc-aviso-cliente">
+                          Le estás dando este documento a
+                          <b>{rolesDeClienteElegidos(doc.id).join(', ')}</b>, que
+                          {rolesDeClienteElegidos(doc.id).length === 1 ? 'atiende' : 'atienden'}
+                          clientes finales. Revisá que su contenido no sean instrucciones para
+                          personal técnico — abrir cajas, manipular fibra, medir señal — porque el
+                          asistente se las puede repetir a un cliente. Podés desplegar los
+                          fragmentos acá abajo para leer exactamente lo que recuperaría.
+                        </p>
+                      {/if}
                       <div class="doc-roles-acciones">
                         <button type="button" class="v2-btn v2-btn-sm" disabled={guardandoRoles[doc.id]}
                           onclick={() => guardarRoles(doc)}>
@@ -737,6 +800,27 @@
     color: var(--v2-slate);
     margin: 6px 0 10px;
     max-width: 68ch;
+  }
+
+  /* Un rol que atiende clientes finales se distingue de los internos en la
+     propia lista: es la diferencia que hay que ver ANTES de tildar, no
+     después. */
+  .doc-rol-cliente {
+    color: var(--v2-clay, #b4642e);
+    font-weight: 550;
+  }
+
+  .doc-aviso-cliente {
+    flex-basis: 100%;
+    background: color-mix(in oklab, var(--v2-clay, #b4642e) 8%, transparent);
+    border: 1px solid color-mix(in oklab, var(--v2-clay, #b4642e) 30%, transparent);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin: 4px 0 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--v2-slate);
+    max-width: 70ch;
   }
 
   .doc-roles {

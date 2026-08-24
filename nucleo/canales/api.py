@@ -1009,6 +1009,15 @@ def agentes_catalogo():
     return jsonify({
         "herramientas": editor.catalogo_herramientas(config),
         "roles_existentes": sorted(config.roles),
+        # Cuales de esos roles atienden a un CLIENTE FINAL. Lo usa /manual
+        # para avisar antes de darle un documento a uno de ellos: el riesgo
+        # real del corpus no es que el filtro por rol falle -- esta en SQL y
+        # es fail-closed -- sino que alguien tilde el rol equivocado al
+        # subir. Los nombres se parecen ('soporte' es el tecnico en campo,
+        # 'soporte_tecnico_cliente' atiende por WhatsApp) y el sistema hace
+        # exactamente lo que le dijeron, sin error.
+        "roles_de_cliente": sorted(
+            n for n, r in config.roles.items() if r.orientado_a == "cliente_final"),
     })
 
 
