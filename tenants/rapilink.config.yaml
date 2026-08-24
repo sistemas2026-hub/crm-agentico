@@ -452,9 +452,19 @@ roles:
   soporte_tecnico_cliente:
     area: Soporte Técnico
     cargo: Agente de Soporte Técnico (autoservicio)
+    # Los TRAMITES van explicitos, no solo las fallas. Hasta el 24/08/2026
+    # esto decia unicamente "algo del servicio que NO ANDA", y un pedido de
+    # cambio de clave de WiFi no es una falla: no encajaba en ninguna area,
+    # el enrutador no sabia donde ponerlo y terminaba escalandolo a una
+    # persona, salteandose el flujo entero de recoleccion y validacion.
+    # Visto en las pruebas del flujo de WiFi -- los pedidos de cambio de
+    # NOMBRE llegaban aca y los de CLAVE se escalaban.
     atiende: >-
       Algo del servicio que no anda: internet lento o caido, sin señal,
-      problemas de TV, el equipo con luces raras, WiFi
+      problemas de TV, el equipo con luces raras, WiFi. Tambien los cambios
+      de configuracion de la red inalambrica aunque el servicio funcione
+      bien: cambiar el nombre de la red o la clave del WiFi, dejarla oculta
+      o volverla visible.
     descripcion: |
       El suscriptor, ya derivado desde el agente general porque su consulta
       tecnica necesita un diagnostico mas profundo que un ping rapido.
@@ -1015,7 +1025,7 @@ roles:
       # porque el modelo no la necesita para redactar: ya sabe si el pedido
       # es valido y que corregir. Un dato que no hace falta para contestar no
       # tiene por que entrar al prompt.
-      registrar_pedido_wifi: [pedido_valido, problemas, cambia_nombre,
+      registrar_pedido_wifi: [pedido, pedido_valido, problemas, cambia_nombre,
         cambia_clave, red_oculta, nombre_nuevo, clave_debil,
         nombre_actual_segun_cliente]
       # Con notacion de punto, NO el objeto entero: 'ping-1' trae adentro el
@@ -3710,7 +3720,7 @@ escalamiento:
     no_internet: soporte_tecnico
     internet_lento: soporte_tecnico
     sin_senal_tv: soporte_tecnico
-    cambio_contrasena: soporte_tecnico
+    cambio_wifi: soporte_tecnico
     consulta_saldo: cartera
     consulta_factura: cartera
     estado_servicio: cartera
@@ -3752,15 +3762,20 @@ escalamiento:
         prioridad: "3"
 
     # Cubre TODO cambio en la red inalambrica: nombre, clave, y si la red
-    # queda oculta o visible. El identificador quedo del alcance original
-    # (solo clave) y hoy dice menos de lo que abarca -- renombrarlo dejaria
-    # huerfanas las conversaciones ya etiquetadas, asi que se documenta en vez
-    # de romperlas.
+    # queda oculta o visible.
+    #
+    # Se llamaba 'cambio_contrasena', del alcance original: decia menos de lo
+    # que abarca, y el modelo clasifica leyendo estos identificadores -- un
+    # pedido de cambio de NOMBRE tendia a caer en 'otro'. Se renombro cuando
+    # se comprobo que ninguna conversacion lo tenia asignado todavia (cero
+    # filas en asistente.conversations), asi que no hubo nada que migrar. Si
+    # se vuelve a renombrar con conversaciones ya etiquetadas, hay que
+    # actualizarlas: quedan apuntando a un caso que no existe.
     #
     # El asunto sale de lo que el cliente pidio, leido de la traza que dejo
     # 'registrar_pedido_wifi'. Gana la PRIMERA entrada que cumple, y la que no
     # tiene condiciones va ultima por obligacion del esquema.
-    cambio_contrasena:
+    cambio_wifi:
       # Nombre, o nombre Y clave juntos: entra como cambio de nombre. Es lo
       # normal -- casi nadie cambia el nombre sin cambiar tambien la clave, y
       # un solo ticket con los dos datos adentro le sirve mas al tecnico que
@@ -3878,7 +3893,7 @@ manual:
     - consulta_factura
     - estado_servicio
     - reconexion
-    - cambio_contrasena
+    - cambio_wifi
     - reclamo_formal
     # Seccion 5.9 del manual. Piloto de agendamiento automatico de visita
     # tecnica (nucleo/seguimiento/agendamiento.py) -- ver

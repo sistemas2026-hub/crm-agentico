@@ -259,7 +259,27 @@ def procesar(herramienta, argumentos: dict, tenant: str = "",
             "No se entendio que hay que cambiar: el nombre de la red, la "
             "clave, o si la red queda oculta.")
 
+    # PRIMER campo a proposito, y no por estetica: la traza que va al ticket
+    # recorta cada linea de herramienta a 160 caracteres (ver
+    # escalamiento.py::_que_se_probo). Como el JSON conserva el orden, lo
+    # que va primero es lo unico que se garantiza que sobreviva -- y esto es
+    # lo que quien tome el caso necesita leer de un vistazo. Con los valores
+    # ENTRE COMILLAS, para que un espacio al final se vea.
+    # Cada parte es una frase COMPLETA, no un fragmento con prefijo comun:
+    # "cambiar" no encabeza bien un pedido de ocultar la red.
+    partes = []
+    if cambia_nombre:
+        partes.append(f'cambiar el nombre a "{nombre}"')
+    if cambia_clave:
+        partes.append(f'cambiar la clave a "{clave}"')
+    if ocultar is True:
+        partes.append("dejar la red OCULTA")
+    elif ocultar is False:
+        partes.append("volver la red VISIBLE")
+    frase = ", ".join(partes)
+
     return {
+        "pedido": (frase[0].upper() + frase[1:]) if frase else "sin datos",
         "pedido_valido": not problemas,
         # Frases listas para leerle al cliente. Van en plural aunque haya una
         # sola: se le dicen TODAS juntas, no de a una por turno -- corregir un

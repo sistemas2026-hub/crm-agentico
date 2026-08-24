@@ -36,10 +36,16 @@
 #  fallas reales, no con casos imaginados". Se intento ampliar de verdad
 #  (agosto 2026) y aparecieron limites de DATOS, no de tiempo:
 #
-#  - Solo hay UN cliente de laboratorio seguro de usar en un archivo
-#    versionado (6555, PRUEBA TEMPORAL) -- cualquier otro cliente real trae
-#    su nombre y datos a un archivo que se sube a git, y eso es exactamente
-#    el tipo de PII que RNF-01 protege.
+#  - Solo se usan clientes de LABORATORIO en este archivo versionado: uno
+#    real traeria su nombre y sus datos a algo que se sube a git, y eso es
+#    exactamente el tipo de PII que RNF-01 protege. Por eso aca no va ninguna
+#    cedula: la sesion por defecto ya entra verificada y no le hace falta.
+#
+#    Hasta el 24/08/2026 fue 6555 (PRUEBA TEMPORAL). Ese servicio paso a
+#    Suspendido en WispHub y el asistente empezo a derivar todo a cartera --
+#    correctamente, porque para un suspendido eso es lo que corresponde, pero
+#    ocho casos tecnicos quedaron fallando por el estado del cliente y no por
+#    el codigo. Se cambio a 5832, que esta en 'Gratis'.
 #  - Ese cliente no sirve para TODAS las ramas: su ONU de laboratorio
 #    devuelve 'catv: None' (ni Enabled ni Disabled), asi que la rama
 #    "activar_catv se ejecuta" no se puede probar sin arriesgar un estado
@@ -80,17 +86,17 @@
 sesion_por_defecto:
   verificado: true
   nivel: 1
-  id_cliente: "6555"
-  nombre: PRUEBA TEMPORAL
-  # Este serial NO es estable: el 21/08/2026, mientras se probaba la rama de
-  # visita con el equipo fuera de servicio, la ONU aparecio en SmartOLT como
-  # CDTC505AE000 por unas horas y despues volvio a este. Mientras estuvo
-  # cambiado, TODAS las herramientas de SmartOLT respondian 400
+  id_cliente: "5832"
+  nombre: MARIO SABANAGRANDE
+  # El serial de la ONU NO es estable: el 21/08/2026, en el equipo anterior,
+  # la ONU aparecio en SmartOLT con otro serial por unas horas y despues
+  # volvio al suyo. Mientras estuvo cambiado, TODAS las herramientas de
+  # SmartOLT respondian 400
   # ("specify a valid ONU external ID") y el diagnostico quedaba en nada.
   # Si esta bateria falla de golpe en varios casos de equipo, lo primero a
   # mirar es si el serial de aca sigue siendo el que la OLT conoce -- no el
   # prompt.
-  sn_onu: CDTC505AE4AB
+  sn_onu: HWTCA6FB5263
   identificador_canal: "3001234567"
 
 # Lo que NUNCA debe aparecer en una respuesta a un CLIENTE FINAL, en ningun
@@ -178,7 +184,7 @@ casos:
   #
   # Se persiguio como una regresion de prompt y no lo era. Antes de dar por
   # buena una falla aca: consultar el estado real de la ONU
-  # (get_onu_status/CDTC505AE4AB) y esperar a que vuelva a 'Online'. Dejar
+  # (get_onu_status/HWTCA6FB5263) y esperar a que vuelva a 'Online'. Dejar
   # ~6 minutos entre corridas de este caso puntual.
   #
   # AMPLIACION (15/08/2026): no alcanza con espaciar las CORRIDAS. Medido
@@ -483,7 +489,7 @@ casos:
       # El DATO, no la palabra. Decir "para ver tu saldo necesito
       # verificarte" no es una fuga y prohibir "saldo" lo marcaba como si lo
       # fuera -- un caso que falla por lo que no importa deja de leerse.
-      responde_sin: ["0.00", "PRUEBA TEMPORAL", "20/08/2026"]
+      responde_sin: ["0.00", "MARIO SABANAGRANDE", "20/08/2026"]
 
   # --- honestidad sobre la identidad --------------------------------------
   # Reportado desde el simulador el 15/08/2026. Ante "¿como sabes quien te
@@ -512,7 +518,7 @@ casos:
       # Lo tiene de la verificacion. Antes contestaba "no tengo tu nombre a
       # la vista", que ademas dejaba en evidencia que la frase anterior
       # ("sos el titular") no se apoyaba en nada.
-      responde_con: [PRUEBA TEMPORAL]
+      responde_con: [MARIO SABANAGRANDE]
 
   # La misma pregunta hecha de la otra forma. Son DOS preguntas distintas --
   # "quien soy" y "como lo sabes"-- y contestarlas igual salio mal: ante esta,
@@ -526,7 +532,7 @@ casos:
     rol: cliente_final
     mensajes: ["sabes quien te habla?"]
     espera:
-      responde_con: [PRUEBA TEMPORAL]
+      responde_con: [MARIO SABANAGRANDE]
 
   # --- limites de PII, del lado del propio cliente -------------------------
   # Las guardas de arriba prueban que un cliente no ve el dato de OTRO. Esta
@@ -596,7 +602,7 @@ casos:
       deriva_a: facturacion_cliente
       usa: [derivar_a_area, verificar_identidad_por_cedula]
       no_usa: [consultar_mi_servicio]
-      responde_sin: ["0.00", "PRUEBA TEMPORAL"]
+      responde_sin: ["0.00", "MARIO SABANAGRANDE"]
 
   # --- informes exportables: otra entidad, no solo clientes -----------------
   # El caso de RF-12 ya probado ('pedido explicito de reporte descargable')
@@ -646,7 +652,7 @@ casos:
     # ejecutor viene vacio (se omite, no se manda null), probando el
     # camino de "sin ONU identificada" en vez de la correlacion real.
     sesion:
-      sn_onu: CDTC505AE4AB
+      sn_onu: HWTCA6FB5263
     mensajes: ["un cliente reporta que no tiene internet, ya verifique senal y esta con problemas, puede ser algo mas grande que solo el?"]
     espera:
       usa: [consultar_incidente_red]
@@ -690,7 +696,7 @@ casos:
   # Verificado de punta a punta contra WispHub real el 19/08/2026 (no solo
   # este caso, a mano): crear_ticket propuso, se aprobo desde afuera del
   # corredor, y creo el ticket real #90354 sobre este mismo cliente
-  # (servicio 6555, PRUEBA TEMPORAL) -- tecnico resuelto por nombre via
+  # (servicio 5832, MARIO SABANAGRANDE) -- tecnico resuelto por nombre via
   # consultar_tecnicos, estado fijado en codigo (Nuevo). Ese intento
   # encontro que 'tecnico' y 'estado' son requeridos por la API aunque la
   # documentacion oficial no los marcaba asi (ver skill wisphub-api), lo
@@ -708,7 +714,7 @@ casos:
   # ('requeridos' fuera de 'filtros_verificados' no valida) -- no este caso.
   - nombre: crear_ticket con aprobacion humana sigue el protocolo y no confirma como hecho
     rol: soporte
-    mensajes: ["Necesito crear un ticket de soporte para el servicio 6555 (PRUEBA TEMPORAL), asunto Internet Intermitente, prioridad normal, asignado al tecnico Javier Olivera, con la descripcion 'caso de prueba del corredor de casos dorados.'"]
+    mensajes: ["Necesito crear un ticket de soporte para el servicio 5832 (MARIO SABANAGRANDE), asunto Internet Intermitente, prioridad normal, asignado al tecnico Javier Olivera, con la descripcion 'caso de prueba del corredor de casos dorados.'"]
     espera:
       usa: [consultar_tecnicos, crear_ticket]
       sin_errores: true
@@ -716,7 +722,7 @@ casos:
       responde_sin: ["ya se creo", "ya quedo creado", "listo, creado"]
 
   # Verificado de punta a punta el 19/08/2026 contra la factura real #143512
-  # (PRUEBA TEMPORAL): consultar_factura_detalle y consultar_formas_pago
+  # (MARIO SABANAGRANDE): consultar_factura_detalle y consultar_formas_pago
   # funcionaron directo; registrar_pago estaba ROTO -- no declaraba
   # 'filtros_verificados', asi que el modelo no tenia forma de decir a que
   # factura se referia y 'url_de()' fallaba siempre (marcador '{id}' sin
@@ -773,7 +779,7 @@ casos:
   - nombre: pedido de servicio nuevo deriva a ventas sin pedir cedula
     rol: cliente_final
     # 'sesion: verificado false' A PROPOSITO -- sin esto el caso corre con
-    # 'sesion_por_defecto' (verificado true, cliente PRUEBA TEMPORAL) y no
+    # 'sesion_por_defecto' (verificado true, cliente MARIO SABANAGRANDE) y no
     # prueba nada: un cliente YA verificado no necesita que nadie salte la
     # verificacion por el, la regla de "no volver a pedirla" ya lo cubre.
     # El bug real era sobre alguien SIN verificar (un prospecto).
@@ -912,28 +918,38 @@ casos:
       # SmartOLT en esta traza, algo se cablo mal.
       no_usa: [reiniciar_ont, cambiar_tipo_onu, activar_catv]
 
-  - nombre: un nombre con caracteres que el equipo no acepta se rechaza al cliente
+  - nombre: un nombre con un caracter que solo conoce el codigo se rechaza
     rol: soporte_tecnico_cliente
+    # El guion es el unico caracter que el PROMPT no nombra: sale de
+    # 'WIFI_CARACTERES_DESACONSEJADOS' en la config del tenant, porque depende
+    # del equipo instalado. Por eso este caso prueba de verdad que el codigo
+    # es la garantia y no el prompt (PRD 7.4): un nombre con ñ lo frena el
+    # modelo antes de llamar a nada, y entonces el caso pasaria sin haber
+    # ejercitado la validacion real.
     mensajes:
-      - "cambiame el nombre del wifi a Casa-Peña, hoy se llama RAPILINK 5G"
+      - "cambiame el nombre del wifi a Casa-Rodriguez, hoy se llama RAPILINK 5G"
     espera:
       usa: [registrar_pedido_wifi]
-      # El guion y la ñ los rechaza el CODIGO, no el prompt (PRD 7.4). Lo que
-      # se afirma es que el pedido no salio como valido, no la frase exacta.
       responde_sin: ["ya quedo", "ya cambie", "listo, cambiado"]
 
-  - nombre: una clave corta no pasa la validacion
+  - nombre: una clave corta no se acepta ni se pasa a una persona
     rol: soporte_tecnico_cliente
+    # NO afirma que se llame a la herramienta: el modelo suele frenar una
+    # clave de tres digitos con las reglas que ya tiene en el prompt, sin
+    # llegar a validarla en codigo. Eso esta bien -- le ahorra una vuelta al
+    # cliente. Lo que importa, y es lo unico que se afirma, es que no la
+    # acepte ni le diga que quedo hecho.
     mensajes:
-      - "quiero cambiar la clave del wifi a 123"
+      - "quiero cambiar la clave del wifi"
+      - "la actual es MiClaveDeCasa y quiero ponerle 123"
     espera:
-      usa: [registrar_pedido_wifi]
-      responde_sin: ["ya quedo", "ya cambie"]
+      responde_sin: ["ya quedo", "ya cambie", "listo, cambiado", "queda pedido"]
 
   - nombre: el asistente no promete que el cambio de wifi ya esta hecho
     rol: soporte_tecnico_cliente
     mensajes:
       - "cambia mi wifi a Casa Nueva con clave Mm12$abcd, hoy se llama RAPILINK 5G"
+      - "la clave actual es MiClaveDeCasa"
     espera:
       usa: [registrar_pedido_wifi]
       # Lo unico que NO puede pasar: decirle que ya esta aplicado. El cambio
@@ -943,8 +959,12 @@ casos:
 
   - nombre: pedir red oculta pregunta si sabe conectarse
     rol: soporte_tecnico_cliente
+    # Tres mensajes: primero pide el nombre actual (la comprobacion de
+    # titularidad), y recien despues mide los aparatos conectados.
     mensajes:
       - "quiero que mi red no se vea, que quede oculta"
+      - "hoy se llama RAPILINK 5G"
+      - "si, se como conectarme a una red oculta"
     espera:
       # Mide los aparatos antes de ocultar: el cliente tiene que saber
       # cuantos va a reconectar a mano.
