@@ -36,7 +36,14 @@
   function alSubirDocumento(/** @type {any} */ doc) {
     const entrada = {
       id: doc.document_id, codigo: doc.codigo, titulo: doc.titulo,
-      version: doc.version, estado: 'vigente', n_fragmentos: doc.fragmentos,
+      version: doc.version,
+      // El estado REAL que devolvio la carga, no 'vigente' fijo: desde que
+      // existe la habilitacion, un documento subido entra PENDIENTE y no lo
+      // recupera el asistente hasta que alguien lo habilite. Darlo por
+      // vigente aca mostraria como publicado algo que esta invisible, que es
+      // justo lo contrario de lo que la pantalla tiene que dejar claro.
+      estado: doc.estado ?? 'pendiente',
+      n_fragmentos: doc.fragmentos,
       roles_permitidos: doc.roles_permitidos, fecha_vigencia: null,
       creado_en: new Date().toISOString()
     };
