@@ -56,7 +56,9 @@ if sys.stdout.encoding != "utf-8":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from dotenv import load_dotenv
-load_dotenv(override=True)
+# override=False: el entorno explicito gana, el archivo solo
+# rellena. Ver el comentario largo en cli/cargar_config.py.
+load_dotenv(override=False)
 
 import requests
 

@@ -67,7 +67,15 @@ from nucleo.recuperacion.embeddings import (                   # noqa: E402
     MODELO as MODELO_EMBEDDINGS, vectorizar as _vectorizar_openai)
 from ingerir import clasificar, perfil_de                      # noqa: E402  (reutiliza lo ya construido)
 
-load_dotenv(RAIZ / ".env", override=True)
+# override=False, y NO es un detalle: con True, el .env PISABA las variables
+# que ya trae el entorno. Dentro de un contenedor eso significa que un .env
+# viejo horneado en la imagen manda mas que la configuracion del despliegue
+# -- el 24/08/2026 hizo que toda carga de config corriera contra la base
+# local aunque el servicio apuntara a la de produccion, en silencio y
+# reportando exito. La precedencia correcta es la de siempre: lo que el
+# entorno declara explicitamente gana; el archivo solo rellena lo que falta,
+# que es justo lo que hace falta al correrlo a mano en una maquina.
+load_dotenv(RAIZ / ".env", override=False)
 
 
 def _hash(ruta: Path) -> str:
