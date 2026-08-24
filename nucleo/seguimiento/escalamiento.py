@@ -348,7 +348,7 @@ def escalar(config, tenant: str, usuario_externo: str, conversation_id: str,
            historial: list[dict], motivo: str, etiqueta: str,
            resumen: str = "", necesita_humano: bool = True,
            no_se_pudo_comprobar: str = "", siguiente_paso: str = "",
-           asignar_a: str = "") -> None:
+           asignar_a: str = "", asunto: str = "", nombre_cliente: str = "") -> None:
     """
     Crea el ticket en BottleCRM y marca la conversacion como escalada.
 
@@ -416,9 +416,18 @@ def escalar(config, tenant: str, usuario_externo: str, conversation_id: str,
         cuerpo = encabezado + transcripcion[-espacio_transcripcion:]
 
         payload = {
-            # Unico por org (verificado en vivo: un nombre repetido da 400)
-            # -- el id de conversacion de sobra lo garantiza.
-            "name": f"WhatsApp {usuario_externo} - {conversation_id[:8]}",
+            # El nombre es lo UNICO que se ve en la cola antes de abrir el
+            # caso, asi que tiene que decir de que se trata. Decia
+            # "WhatsApp <numero> - <id>": el canal y un identificador, o sea
+            # nada -- quien abria la cola tenia que entrar en cada uno para
+            # saber cual atender primero.
+            #
+            # El id se conserva al final porque el nombre tiene que ser UNICO
+            # por organizacion (verificado: uno repetido da 400) y dos clientes
+            # bien pueden tener el mismo problema el mismo dia. La pantalla lo
+            # separa con el mismo formato.
+            "name": (f"{asunto or 'Consulta'} · {nombre_cliente or usuario_externo}"
+                     f" · #{conversation_id[:8]}"),
             "description": cuerpo,
             "status": "New",
             "case_type": "Question",

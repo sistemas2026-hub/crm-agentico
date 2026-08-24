@@ -869,6 +869,36 @@ def media_de(tenant: str, conversation_id: str) -> list[dict]:
         return [dict(f) for f in cur.fetchall()]
 
 
+def conversacion_de_caso(tenant: str, caso_id: str) -> dict | None:
+    """
+    De donde salio un caso del CRM: por que canal entro, con que etiqueta y
+    por que se paso a una persona.
+
+    El CRM no guarda nada de esto -- para el, un caso escalado es un caso mas,
+    sin origen. Quien lo abre ve una conversacion transcrita y no puede saber
+    si entro por el canal de mensajeria o por la API, ni cual fue el motivo
+    que disparo la escalada. Aca si esta, porque es la misma fila que se marco
+    al escalar (ver marcar_escalada).
+
+    Devuelve None cuando el caso no lo creo el asistente: un ticket cargado a
+    mano no tiene conversacion detras, y eso no es un error.
+
+    Deliberadamente NO devuelve 'datos_sesion' ni 'id_cliente': son
+    identificadores tecnicos del equipo del cliente, y esto alimenta una
+    pantalla, no un diagnostico.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select id, canal, etiqueta, motivo_escalamiento, nombre_cliente,
+                      escalada_a_humano, necesita_atencion_humana, creado_en
+               from asistente.conversations
+               where organization_id = %s and caso_id = %s
+               limit 1""",
+            (org, caso_id))
+        fila = cur.fetchone()
+        return dict(fila) if fila else None
+
+
 def media_bytes(tenant: str, media_uuid: str) -> tuple[bytes, str] | None:
     """(contenido, mime) de un adjunto, para servirlo. None si no existe o no
     es de este tenant -- el filtro por organizacion lo hace la politica de

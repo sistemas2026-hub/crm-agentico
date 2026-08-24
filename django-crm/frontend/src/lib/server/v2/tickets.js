@@ -70,7 +70,19 @@ function fileUrl(path) {
  * @param {any} profile
  */
 function profileName(profile) {
-  return profile?.user_details?.email || profile?.user?.email || 'Desconocido';
+  // El NOMBRE primero. Estaba leyendo solo el correo, asi que la columna
+  // "Asignado a" mostraba la inicial de una direccion de correo -- una 'D'
+  // para 'desarrollo2026@gmail.com' -- aunque el backend manda el nombre en
+  // el mismo objeto (user_details.name, ver common/models.py::user_details).
+  // El correo queda de respaldo: identifica a la persona igual, y es mejor
+  // que 'Desconocido' cuando alguien todavia no cargo su nombre.
+  return (
+    profile?.user_details?.name?.trim() ||
+    profile?.user?.name?.trim() ||
+    profile?.user_details?.email ||
+    profile?.user?.email ||
+    'Desconocido'
+  );
 }
 
 /**
@@ -190,7 +202,7 @@ function toConversation(response) {
       id: `c-${comment.id}`,
       kind: 'comment',
       direction: author ? 'out' : 'in',
-      author: author ? author.user_details?.email || 'Soporte' : 'El cliente',
+      author: author ? profileName(author) : 'El cliente',
       at: comment.commented_on,
       body: comment.comment ?? ''
     });
@@ -201,7 +213,7 @@ function toConversation(response) {
       id: `n-${note.id}`,
       kind: 'note',
       direction: 'note',
-      author: note.commented_by?.user_details?.email || 'Soporte',
+      author: note.commented_by ? profileName(note.commented_by) : 'Soporte',
       at: note.commented_on,
       body: note.comment ?? ''
     });
@@ -270,20 +282,27 @@ export async function getTicket({ cookies }, id) {
       url: fileUrl(file.file_path),
       at: file.created_at
     })),
-    // `ActivitySerializer` names the time `timestamp`, not `created_at`, and
-    // supplies its own label for the verb. Both are used as given.
+    // Este bloque decia que habia DOS clases `ActivitySerializer` en
+    // `common/serializer.py` y que la segunda tapaba a la primera, dejando
+    // `metadata` y `created_at` inalcanzables -- por eso leia `timestamp` y
+    // `action_display`. Hoy hay UNA sola (linea 413) y expone justamente
+    // `created_at` y `metadata`, asi que los dos campos que se leian NO
+    // existen: la fecha llegaba `undefined` y la linea de tiempo mostraba
+    // "hace —" en todos los eventos, y el verbo caia siempre al codigo crudo.
     //
-    // Worth knowing before reading that serializer: `common/serializer.py`
-    // defines **two** classes called `ActivitySerializer`, at lines 344 and
-    // 843. The second shadows the first, so the one with `metadata` and
-    // `created_at` is unreachable and coding against it silently gets you
-    // nothing. This maps the one that actually runs.
+    // Se comprobo contando las definiciones antes de tocarlo, no confiando en
+    // el comentario: un comentario que fue cierto y dejo de serlo es peor que
+    // ninguno, porque justifica el error y desalienta revisarlo.
     activity: (response.activities ?? []).map((/** @type {any} */ row) => ({
       id: row.id,
       action: row.action,
       label: row.action_display || row.action,
-      at: row.timestamp,
-      by: row.user?.user_details?.email || row.user?.email || null
+      at: row.created_at,
+      // 'metadata' trae, por ejemplo, {"added": [<profile_id>]} en un ASSIGN.
+      // Se deja pasar para quien quiera decir a QUIEN se asigno; la linea de
+      // tiempo todavia no resuelve esos ids a nombres.
+      metadata: row.metadata ?? null,
+      by: profileName(row.user) === 'Desconocido' ? null : profileName(row.user)
     })),
     // The API's own answer about whether this person may reply, rather than a
     // guess from their role. It used to disagree with the endpoint.

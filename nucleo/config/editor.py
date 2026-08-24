@@ -527,6 +527,18 @@ def _mutar_borrar(doc: dict, nombre: str) -> None:
         for clave in [c for c in overrides if c == f"rol:{nombre}"]:
             del overrides[clave]
 
+    # Y de las areas que lo precargaban. Sin esto, borrar un agente desde la
+    # pantalla dejaba un area apuntando a un rol que ya no existe: el
+    # validador rechazaba la config entera con "precarga el agente inexistente
+    # 'x'", o sea el borrado fallaba por una referencia que el propio borrado
+    # tenia que limpiar. Un area que se queda sin agentes es valida (ver
+    # AreaDeTrabajo): sigue sirviendo para organizar gente aunque no le de
+    # capacidades, asi que se vacia, no se borra.
+    for area in doc.get("areas", []):
+        agentes = area.get("agentes", [])
+        if nombre in agentes:
+            agentes.remove(nombre)
+
     _comprobar_nadie_se_queda_sin_roles(doc)
 
 

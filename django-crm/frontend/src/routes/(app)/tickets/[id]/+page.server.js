@@ -1,10 +1,65 @@
 import { fail } from '@sveltejs/kit';
 import { getTicket, replyToTicket, updateTicket } from '$lib/server/v2/tickets.js';
 import { readableError } from '$lib/server/v2/form-errors.js';
+import { leerResumenDelAgente } from '$lib/server/v2/resumen-agente.js';
+import { env } from '$env/dynamic/private';
+import { headersMotor } from '$lib/server/v2/motor-headers.js';
 
 /** @type {import('./$types').PageServerLoad} */
-export async function load({ cookies, params }) {
-  return await getTicket({ cookies }, params.id);
+export async function load({ cookies, params, fetch }) {
+  const datos = await getTicket({ cookies }, params.id);
+
+  // El area del caso, para el panel lateral. Misma derivacion que la cola: el
+  // CRM no tiene campo de area, la tiene el asistente y es por persona.
+  let area = null;
+  try {
+    const base = env.PRIVATE_ASISTENTE_URL;
+    const tenant = env.PRIVATE_ASISTENTE_TENANT;
+    const responsable = datos.ticket?.assignee_id;
+    if (base && tenant && responsable) {
+      const r = await fetch(
+        `${base}/agentes/asignaciones?tenant=${encodeURIComponent(tenant)}`,
+        { headers: headersMotor() }
+      );
+      if (r.ok) {
+        const d = await r.json();
+        const nombre = (d.areas_por_persona ?? {})[responsable];
+        area = (d.areas ?? []).find((/** @type {any} */ a) => a.nombre === nombre) ?? null;
+      }
+    }
+  } catch {
+    area = null;
+  }
+
+  // De donde vino el caso. El CRM no lo guarda: para el, un caso escalado es
+  // un caso mas. El asistente si lo sabe, porque es la misma fila que marco
+  // al escalar. Null para un ticket cargado a mano, que no tiene conversacion
+  // detras -- y entonces la tarjeta no se dibuja, en vez de mostrar renglones
+  // vacios o un origen inventado.
+  let origen = null;
+  try {
+    const base = env.PRIVATE_ASISTENTE_URL;
+    const tenant = env.PRIVATE_ASISTENTE_TENANT;
+    if (base && tenant) {
+      const r = await fetch(
+        `${base}/conversaciones/por-caso/${params.id}?tenant=${encodeURIComponent(tenant)}`,
+        { headers: headersMotor() }
+      );
+      if (r.ok) origen = (await r.json()).conversacion ?? null;
+    }
+  } catch {
+    origen = null;
+  }
+
+  return {
+    ...datos,
+    area,
+    origen,
+    // Null cuando el caso no lo escribio el asistente (uno cargado a mano, o
+    // uno viejo con otro formato): la pantalla vuelve entonces a mostrar la
+    // descripcion tal cual, sin tarjetas a medio llenar.
+    agente: leerResumenDelAgente(datos.ticket?.description ?? '')
+  };
 }
 
 /** @type {import('./$types').Actions} */

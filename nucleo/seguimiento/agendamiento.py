@@ -256,6 +256,28 @@ def _primera_que_cumple(condiciones, historial: list[dict]) -> str | None:
     return None
 
 
+def asunto_fijo_de(config, herramienta: str) -> str:
+    """
+    El asunto con el que una herramienta de agendamiento entra al sistema
+    operativo, leido de su propia declaracion.
+
+    Existe porque hay DOS caminos que abren un ticket y solo uno pasaba su
+    asunto al caso del CRM. Cuando la visita se agenda sola, nadie elige un
+    asunto en el turno: lo trae fijo la herramienta que corresponde al caso
+    (escalamiento.agendamiento_automatico es un mapa caso -> herramienta,
+    justamente para que cada caso entre con el suyo). Sin leerlo de ahi, ese
+    caso quedaba en la bandeja titulado "Consulta" -- el titulo mas pobre de
+    todos le tocaba justo al que YA tiene un tecnico en camino.
+
+    Se lee de la config y no se deduce del caso: el asunto pertenece al
+    catalogo del ISP, y el motor no tiene por que conocer ese vocabulario.
+    """
+    for herr in config.herramientas:
+        if herr.nombre == herramienta:
+            return (herr.argumentos_fijos or {}).get("asunto", "") or ""
+    return ""
+
+
 def perfil_del_area(tenant: str, area: str, config=None) -> str | None:
     """
     A quien del area se le asigna el caso: al que MENOS tiene abierto.

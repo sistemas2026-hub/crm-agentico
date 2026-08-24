@@ -3236,15 +3236,24 @@ canales:
 #  ofrecer en la pantalla un area que deja a la persona sin poder hacer nada.
 #  Entra cuando se diseñe su agente interno.
 areas:
+  # 'icono' y 'color' son opcionales: sin ellos la pantalla deriva un color
+  # estable del nombre y dibuja las iniciales. Se declaran aca porque son de
+  # la empresa -- otra empresa tendra otras areas y otros colores.
   - nombre: cartera
     etiqueta: Cartera
     agentes: [facturacion]
+    icono: factura
+    color: '#7c5cd6'
   - nombre: soporte_tecnico
     etiqueta: Soporte Técnico
     agentes: [soporte]
+    icono: llave
+    color: '#2f6fed'
   - nombre: administracion
     etiqueta: Administración
     agentes: [administracion]
+    icono: edificio
+    color: '#0d9488'
 
 # -----------------------------------------------------------------------------
 #  IDENTIDAD EXTERNA  -  quien es cada colaborador en el sistema operativo

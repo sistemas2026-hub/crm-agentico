@@ -57,7 +57,6 @@ from datetime import date, datetime
 from io import StringIO
 from pathlib import Path
 
-import psycopg
 import yaml
 from dotenv import load_dotenv
 from ruamel.yaml import YAML
@@ -79,6 +78,11 @@ _yaml_rt.indent(mapping=2, sequence=4, offset=2)
 
 
 def _conectar():
+    # Se importa aca y no arriba a proposito: 'tests/test_editor_config.py'
+    # reusa _fusionar/_yaml_rt de este modulo y se documenta como una guarda
+    # que corre SIN BASE. Con el import al tope, una maquina sin el driver
+    # instalado no podia correr el test aunque no fuera a conectarse a nada.
+    import psycopg
     return psycopg.connect(dsn(), connect_timeout=40)
 
 

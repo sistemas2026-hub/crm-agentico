@@ -1124,6 +1124,36 @@ class AreaDeTrabajo(Base):
     # que todavia no tiene agente propio se puede declarar igual para poder
     # organizar a la gente, aunque no le de capacidades.
     agentes: list[str] = Field(default_factory=list)
+    # Como se distingue el area de un vistazo en una pantalla.
+    #
+    # Van aca y no en el frontend por el mismo motivo que 'etiqueta': las
+    # areas de un ISP no son las del siguiente. Una tabla de colores escrita
+    # en la pantalla obligaria a tocar codigo para cada empresa nueva --
+    # justo lo que 'nombre'/'etiqueta' ya existen para evitar.
+    #
+    # Los DOS son opcionales, y a proposito: sin ellos la pantalla deriva un
+    # color estable del nombre y dibuja las iniciales. Un area recien
+    # declarada se ve distinta de las demas sin que nadie elija nada; quien
+    # quiera elegir, elige.
+    #
+    # 'icono' nombra un dibujo de un catalogo generico que conoce la pantalla
+    # (llave, factura, edificio, red...), NUNCA un dibujo "de soporte de
+    # Rapilink": el vocabulario es del producto, la eleccion es de la empresa.
+    icono: str = ""
+    color: str = ""
+
+    @field_validator("color")
+    @classmethod
+    def _color_hex(cls, v: str) -> str:
+        """
+        Se acepta solo '#rrggbb'. No es purismo: el valor entra directo a un
+        'style' de la pantalla, y aceptar cualquier texto seria dejar que la
+        config escriba CSS arbitrario en la interfaz de todos.
+        """
+        if v and not re.fullmatch(r"#[0-9a-fA-F]{6}", v):
+            raise ValueError(
+                f"areas: color '{v}' invalido -- se espera '#rrggbb' (ej. '#2f6fed')")
+        return v
 
 
 class IdentidadExterna(Base):

@@ -25,7 +25,9 @@
  */
 import {
   CASE_PRIORITIES,
+  CASE_PRIORITY_LABEL,
   CASE_TYPES,
+  CASE_TYPE_LABEL,
   DOCUMENT_STATUSES,
   ESTIMATE_STATUSES,
   INDUSTRIES,
@@ -59,8 +61,24 @@ export const FILTERS = {
     ],
     fields: [
       { key: 'assigned_to', label: 'Responsable', type: 'person' },
-      { key: 'priority', label: 'Prioridad', type: 'select', options: CASE_PRIORITIES },
-      { key: 'case_type', label: 'Tipo', type: 'select', options: CASE_TYPES },
+      // Con 'labelFor', como el resto de los descriptores. Sin el, el
+      // desplegable caia al rotulo por defecto (el de estados de factura) y
+      // terminaba mostrando el valor crudo del CRM: 'High', 'Question'. La
+      // fila de al lado ya decia 'Alta' y 'Pregunta' para el mismo dato.
+      {
+        key: 'priority',
+        label: 'Prioridad',
+        type: 'select',
+        options: CASE_PRIORITIES,
+        labelFor: (v) => CASE_PRIORITY_LABEL[v] ?? v
+      },
+      {
+        key: 'case_type',
+        label: 'Tipo',
+        type: 'select',
+        options: CASE_TYPES,
+        labelFor: (v) => CASE_TYPE_LABEL[v] ?? v
+      },
       { key: 'sla_breached', label: 'Incumpliendo SLA', type: 'boolean' },
       { key: 'tags', label: 'Etiqueta', type: 'tag' }
     ]

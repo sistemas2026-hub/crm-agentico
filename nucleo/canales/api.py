@@ -768,6 +768,15 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                     necesita_humano=necesita_humano,
                     no_se_pudo_comprobar=evaluacion.get("no_se_pudo_comprobar", ""),
                     siguiente_paso=evaluacion.get("siguiente_paso", ""),
+                    # El mismo asunto con el que entra el ticket, para que
+                    # la cola del CRM y la de la operacion se lean igual.
+                    # De los DOS caminos que abren ticket, el que haya
+                    # corrido: el elegido por la traza al escalar, o el fijo
+                    # de la herramienta cuando la visita se agendo sola.
+                    asunto=(entrada_ticket.asunto if entrada_ticket
+                            else (agendamiento.asunto_fijo_de(config, herramienta_auto)
+                                  if id_ticket_auto and herramienta_auto else "")),
+                    nombre_cliente=getattr(estado["sesion"], "nombre", "") or "",
                     asignar_a=(agendamiento.perfil_del_area(
                         tenant,
                         config.escalamiento.area_por_caso.get(caso_manual, ""),
@@ -1102,6 +1111,7 @@ def agentes_asignaciones():
                     # Las areas declaradas por la empresa, con que agentes
                     # precarga cada una: la pantalla no las conoce de antemano.
                     "areas": [{"nombre": a.nombre, "etiqueta": a.etiqueta,
+                               "icono": a.icono, "color": a.color,
                                "agentes": list(a.agentes)} for a in config.areas],
                     "areas_por_persona": areas_por_persona,
                     "sistema_externo": (config.identidad_externa.etiqueta
@@ -1749,6 +1759,28 @@ def conversaciones():
         return jsonify({"error": "No se pudo leer las conversaciones."}), 500
 
     return jsonify({"tenant": tenant, "conversaciones": salida})
+
+
+@app.get("/conversaciones/por-caso/<caso_id>")
+def conversacion_por_caso(caso_id):
+    """
+    La conversacion que origino un caso del CRM.
+
+    Solo lectura y solo metadatos -- no devuelve los mensajes: para eso ya
+    esta /conversaciones/<id>/mensajes, y quien pregunta por el origen de un
+    caso no necesita la transcripcion (la tiene en el propio caso).
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        datos = persistencia.conversacion_de_caso(tenant, caso_id)
+    except Exception as e:
+        print(f"[conversaciones] fallo al buscar por caso: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo leer la conversacion."}), 500
+    if not datos:
+        return jsonify({"conversacion": None}), 200
+    return jsonify({"conversacion": datos})
 
 
 @app.get("/conversaciones/<id_conversacion>/mensajes")
