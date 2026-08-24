@@ -187,6 +187,13 @@ services:
       - ./tenants:/app/tenants
       - ./corpus:/app/corpus
       - ./cli:/app/cli
+      # Los casos dorados TAMBIEN se montan. Sin esta linea el contenedor lee
+      # la copia horneada en la imagen: 'cli/evaluar.py' esta montado y el
+      # archivo que evalua no, asi que editar un caso no cambiaba nada y la
+      # corrida seguia midiendo un set viejo -- en silencio, con aspecto de
+      # resultado bueno. Costo una tarde el 24/08/2026: tres casos "fallaban"
+      # por expectativas que ya se habian reescrito en el archivo del disco.
+      - ./evaluacion:/app/evaluacion
 
 volumes:
   # external: reusa el volumen que ya existia cuando django-crm corria como
