@@ -48,6 +48,7 @@ import time
 import uuid
 from datetime import datetime, timedelta
 
+from nucleo.config.schema import _sin_tildes
 from nucleo.herramientas import agregado as ejecutor_agregado
 from nucleo.herramientas import http as ejecutor_http
 from nucleo.herramientas import incidentes as ejecutor_incidentes
@@ -388,10 +389,26 @@ def _ejecutar_verificacion(herramienta, sesion, argumentos_modelo: dict,
                 "a escribir. Todavia NO asumas que no es cliente vos mismo, "
                 "esperá a que te lo diga. " + via_de_escape)
         else:
+            # Version anterior (18-19/08/2026) preguntaba directo "¿ya sos
+            # cliente o queres contratar?" -- tenia sentido cuando esta
+            # herramienta solo la llamaba el router, sin saber de que se
+            # trataba el pedido. Desde que la verificacion se movio a cada
+            # especialista (19/08/2026, ver Rol.deriva_verificacion en
+            # schema.py), quien llama a esta funcion YA SABE el tema (llego
+            # aca porque el router entendio que era soporte, o facturacion):
+            # asumir "capaz queres contratar" en ese contexto es un cambio
+            # de tema que no viene a cuento -- a alguien reportando una
+            # falla real de internet no se le pregunta si quiere contratar
+            # solo porque escribio mal la cedula dos veces.
             instruccion = (
-                "Van dos intentos sin encontrar coincidencia. Pregunta "
-                "directo si ya es cliente de la empresa o si en realidad "
-                "quiere CONTRATAR un servicio nuevo. " + via_de_escape)
+                "Van dos intentos sin encontrar coincidencia con lo que ya "
+                "sabes que necesita. Decile que no lograste ubicar la "
+                "cuenta con ese dato, y pedile un dato alternativo (otro "
+                "numero de documento, o el nombre completo del titular) -- "
+                "sin cambiar de tema ni asumir que dejo de ser cliente. Si "
+                "con eso tampoco se resuelve, decile que vas a pasar el "
+                "caso a un colaborador humano para que lo revise "
+                "directamente. " + via_de_escape)
         return {"verificado": False, "motivo": "no encontrado",
                "instruccion_interna": instruccion}
 
@@ -576,6 +593,53 @@ def _ejecutar_derivacion(herramienta, sesion, argumentos_modelo: dict, nombre_ro
                f"herramientas. No le anuncies al cliente que lo derivaste ni "
                f"le pidas que espere: para el es la misma conversacion y la "
                f"respuesta le llega ya."}
+
+
+def _ejecutar_consulta_planes_venta(config, argumentos_modelo: dict) -> dict:
+    """
+    Resuelve cobertura Y planes en un solo paso, leyendo config.localidades
+    (catalogo localidad -> zona(s) real(es), sincronizado bajo demanda --
+    ver LocalidadZona en schema.py y nucleo/herramientas/localidades.py) y
+    config.planes_venta (PlanVenta.zonas). NO llama a ninguna API: es la
+    razon de ser de este cambio -- 'ventas' antes llamaba a contar_clientes
+    en vivo por cada mensaje que mencionaba una localidad (1-2s de latencia
+    de red por turno, ver incidente 20/08/2026, "doña manuela"). Ahora lee
+    config, que ya esta en memoria del turno.
+
+    Localidad no encontrada en el catalogo sincronizado (puede ser una zona
+    nueva sin clientes todavia, o el nombre escrito distinto a como esta
+    cargado) -> cobertura=False, con aviso de no negarla sin mas.
+
+    Localidad encontrada pero ningun PlanVenta con una zona en comun (nadie
+    curo un plan para esa zona todavia) -> cobertura=True, planes=[], con
+    aviso de no inventar que no hay servicio.
+    """
+    localidad = str((argumentos_modelo or {}).get("localidad", "")).strip()
+    clave = _sin_tildes(localidad)
+    entrada = next(
+        (l for l in config.localidades if _sin_tildes(l.localidad) == clave), None)
+
+    if entrada is None:
+        return {"cobertura": False, "planes": [], "advertencia":
+                "No hay ningun cliente registrado en esa localidad todavia "
+                "-- puede ser una zona nueva sin clientes, o que el nombre "
+                "esta escrito distinto a como figura en el sistema. No "
+                "digas que no hay cobertura: decile que vas a confirmar "
+                "con un colaborador."}
+
+    zonas_localidad = {z.zona_id for z in entrada.zonas}
+    coincidentes = [
+        p.nombre_wisphub for p in config.planes_venta
+        if not p.zonas or (zonas_localidad & set(p.zonas))
+    ]
+    salida = {"cobertura": True, "n_clientes": entrada.n_clientes, "planes": coincidentes}
+    if not coincidentes:
+        salida["advertencia"] = (
+            "Hay cobertura en esa localidad pero todavia no hay ningun "
+            "plan curado para su zona. No inventes que no hay servicio "
+            "disponible -- decile que vas a confirmar los planes con un "
+            "colaborador humano.")
+    return salida
 
 
 def _ejecutar_sondeo(argumentos_modelo: dict, tenant: str) -> dict:
@@ -1338,6 +1402,12 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 # Idem: tiene que poder llamarse ANTES de que la sesion este
                 # verificada -- es lo que la termina de verificar.
                 salida = _ejecutar_confirmacion(sesion, llamada.argumentos)
+            elif herramienta.consulta_planes_venta:
+                # tipo 'interno', igual que las de arriba: no llama a ninguna
+                # API, solo lee TenantConfig.planes_venta. Nunca pasa por el
+                # gate de identidad -- no revela ningun dato de cliente, solo
+                # el catalogo de planes que un humano ya decidio publicar.
+                salida = _ejecutar_consulta_planes_venta(config, llamada.argumentos)
             elif (rol_cfg.orientado_a == "cliente_final" and (sesion is None or sesion.nivel < nivel_exigido)
                   # Excepcion: 'derivar_a_area' hacia un area que declara
                   # exige_verificacion=False (ej. 'ventas') tiene que poder
@@ -1360,11 +1430,14 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                              "verificar su identidad antes de continuar."}
                 codigo_error = "IDENTIDAD_NO_VERIFICADA"
             elif herramienta.deriva_rol:
-                # Despues del gate a proposito: solo tiene sentido derivar
-                # una vez que la identidad ya esta verificada (misma politica
-                # de "verificar primero, siempre" que ya rige el resto de
-                # cliente_final) -- si no, seria posible pasar de area sin
-                # haber confirmado quien es el cliente.
+                # Despues del gate a proposito, pero el gate en si mismo ya
+                # sabe dejar pasar esta llamada sin identidad verificada
+                # cuando el area de destino no la exige (ver la excepcion
+                # en el gate mas arriba, y Rol.exige_verificacion/
+                # deriva_verificacion en schema.py) -- 19/08/2026: la
+                # verificacion se movio del router a cada especialista, asi
+                # que 'derivar_a_area' tiene que poder ejecutarse ANTES de
+                # que nadie este verificado.
                 salida = _ejecutar_derivacion(herramienta, sesion, llamada.argumentos, nombre_rol)
             elif herramienta.exige_turno_propio and derivado_en_este_turno:
                 # Fail-closed: la conversacion llego a esta area en este

@@ -91,6 +91,37 @@
     }
   }
 
+  /** @type {Record<string, boolean>} */
+  let aprobando = $state({});
+
+  /**
+   * Habilita un documento pendiente para que el asistente pueda usarlo.
+   *
+   * Un documento subido queda PENDIENTE: se vectoriza pero match_chunks no
+   * lo recupera (el filtro esta en SQL, ver supabase/22). Sin este paso
+   * intermedio, subir un archivo era publicarlo -- y una guia escrita para
+   * un tecnico en campo, asignada por error a un rol de cliente, le diria a
+   * alguien que abra conectores de fibra o mida potencia optica.
+   */
+  async function aprobarDocumento(/** @type {any} */ doc) {
+    aprobando = { ...aprobando, [doc.id]: true };
+    try {
+      const resp = await fetch(`/api/corpus/documentos/${doc.id}/aprobar`, {
+        method: 'POST'
+      });
+      const datos = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        toast.error(datos?.error || 'No se pudo aprobar el documento');
+        return;
+      }
+      documentos = documentos.map((/** @type {any} */ d) =>
+        d.id === doc.id ? { ...d, estado: 'vigente' } : d);
+      toast.success('Documento aprobado. El asistente ya puede usarlo.');
+    } finally {
+      aprobando = { ...aprobando, [doc.id]: false };
+    }
+  }
+
   // Copia local mutable: quitar una marca la saca de la pantalla al toque,
   // sin esperar a recargar la pagina entera (ver quitarMarca abajo).
   let ejemplos = $state(data.ejemplos ?? []);
@@ -274,12 +305,43 @@
               <summary class="doc-resumen">
                 <span class="doc-titulo">{doc.titulo}</span>
                 <span class="v2-muted">{doc.codigo} · v{doc.version} · {doc.n_fragmentos} fragmento{doc.n_fragmentos === 1 ? '' : 's'}</span>
-                <Pill tone={doc.estado === 'vigente' ? 'moss' : 'slate'}>{doc.estado}</Pill>
+                <Pill
+                  tone={doc.estado === 'vigente'
+                    ? 'moss'
+                    : doc.estado === 'pendiente'
+                      ? 'clay'
+                      : 'slate'}
+                >
+                  {doc.estado === 'pendiente' ? 'sin aprobar' : doc.estado}
+                </Pill>
                 {#if !doc.roles_permitidos || doc.roles_permitidos.length === 0}
                   <Pill tone="clay">sin roles</Pill>
                 {/if}
               </summary>
               <div class="doc-cuerpo">
+                {#if doc.estado === 'pendiente'}
+                  <div class="doc-pendiente">
+                    <b>El asistente todavía no puede usar este documento.</b>
+                    <p>
+                      Está cargado y procesado, pero no se va a recuperar en ninguna conversación
+                      hasta que alguien lo apruebe. Revisá que su contenido sea apropiado para los
+                      roles que lo van a ver — una guía escrita para un técnico en campo no debería
+                      llegarle a un cliente.
+                    </p>
+                    {#if esAdmin}
+                      <button
+                        type="button"
+                        class="v2-btn v2-btn-primary v2-btn-sm"
+                        disabled={aprobando[doc.id]}
+                        onclick={() => aprobarDocumento(doc)}
+                      >
+                        {aprobando[doc.id] ? 'Aprobando…' : 'Aprobar y habilitar'}
+                      </button>
+                    {:else}
+                      <span class="v2-sub">Lo tiene que aprobar un administrador.</span>
+                    {/if}
+                  </div>
+                {/if}
                 <div class="doc-roles">
                   {#if !editandoRoles[doc.id]}
                     <span class="v2-sub">
@@ -654,6 +716,27 @@
     line-height: 1.6;
     white-space: pre-wrap;
     margin: 0 0 8px;
+  }
+
+  /* Un documento sin aprobar no es un detalle mas de la ficha: es la razon
+     por la que ese documento todavia no hace nada. Va arriba y se distingue
+     del resto del cuerpo. */
+  .doc-pendiente {
+    background: color-mix(in oklab, var(--v2-clay, #b4642e) 8%, transparent);
+    border: 1px solid color-mix(in oklab, var(--v2-clay, #b4642e) 35%, transparent);
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin-bottom: 14px;
+  }
+  .doc-pendiente b {
+    font-size: 12.5px;
+  }
+  .doc-pendiente p {
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--v2-slate);
+    margin: 6px 0 10px;
+    max-width: 68ch;
   }
 
   .doc-roles {

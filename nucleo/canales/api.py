@@ -38,6 +38,8 @@ from flask import Flask, jsonify, request
 from nucleo.canales import media, whatsapp
 from nucleo.config import editor, fuente
 from nucleo.config.fusion import fusionar_roles, modelo_fusionado
+from nucleo.herramientas import http as ejecutor_http
+from nucleo.herramientas import localidades as sincronizador_localidades
 from nucleo.ingesta import corpus as ingesta
 from nucleo.ingesta.docx import procesar
 from nucleo.modelo import motor
@@ -1613,6 +1615,126 @@ def configuracion_variable_borrar(nombre):
     return jsonify({"borrado": nombre})
 
 
+@app.get("/configuracion/planes-venta")
+def configuracion_planes_venta_listar():
+    """
+    Para la pantalla que arma la lista curada de planes que 'ventas' ofrece
+    a un prospecto -- ver PlanVenta/TenantConfig.planes_venta en schema.py.
+
+    Trae DOS cosas: la lista curada que ya esta guardada (siempre), y el
+    catalogo TECNICO completo de WispHub EN VIVO -- solo si se pide con
+    '?catalogo=1'. Nunca cacheado (a diferencia de como usa este mismo
+    endpoint el asistente en una conversacion): quien esta configurando
+    necesita ver el catalogo mas actual, no uno de hasta 7 dias de
+    antiguedad. El llamado a WispHub queda OPCIONAL para que el hub de
+    configuracion (que solo necesita el conteo de planes ya curados, para
+    mostrar "3 planes ofrecidos" sin abrir la pantalla) no pague ese
+    viaje de red en cada carga de /settings.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+
+    catalogo: list[dict] = []
+    error_catalogo = None
+    if request.args.get("catalogo") == "1":
+        herramienta = next((h for h in config.herramientas if h.nombre == "consultar_planes"), None)
+        if herramienta is None:
+            error_catalogo = "Este agente no tiene 'consultar_planes' en su catalogo."
+        else:
+            try:
+                crudo = ejecutor_http.ejecutar(herramienta, {}, tenant, config.variables_tenant)
+                resultados = crudo.get("results", crudo) if isinstance(crudo, dict) else crudo
+                catalogo = [{"id": r.get("id"), "nombre": r.get("nombre")}
+                           for r in (resultados or []) if isinstance(r, dict)]
+            except Exception as e:
+                error_catalogo = f"No se pudo consultar el catalogo real: {type(e).__name__}: {e}"
+
+    return jsonify({
+        "catalogo": catalogo,
+        "error_catalogo": error_catalogo,
+        "planes_venta": [p.model_dump(mode="json") for p in config.planes_venta],
+        "localidades": [l.model_dump(mode="json") for l in config.localidades],
+        "localidades_actualizado_en": config.localidades_actualizado_en,
+    })
+
+
+@app.post("/configuracion/localidades/sincronizar")
+def configuracion_localidades_sincronizar():
+    """
+    Recorre el catalogo de clientes del proveedor entero (paginado, ver
+    nucleo/herramientas/localidades.py) y reemplaza TenantConfig.localidades
+    -- el catalogo localidad -> zona(s) real(es) que 'ventas' usa para
+    resolver cobertura y planes sin pegarle a la API en cada mensaje.
+
+    Puede tardar 60-90s en una base de miles de clientes (paginas
+    secuenciales) -- es una accion de administrador bajo demanda desde
+    /settings/planes-venta, nunca participa de una conversacion.
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+
+    herramienta = next((h for h in config.herramientas if h.sincroniza_localidades), None)
+    if herramienta is None:
+        return jsonify({"error": "Este agente no tiene ninguna herramienta "
+                                 "marcada 'sincroniza_localidades'."}), 400
+
+    try:
+        localidades = sincronizador_localidades.sincronizar(
+            herramienta, tenant, config.variables_tenant)
+    except Exception as e:
+        return jsonify({"error": f"No se pudo sincronizar contra el "
+                                 f"proveedor: {type(e).__name__}: {e}"}), 502
+
+    try:
+        nuevo = editor.guardar_localidades(
+            tenant, [l.model_dump(mode="json") for l in localidades])
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
+
+    olvidar_config(tenant)
+    return jsonify({
+        "localidades": [l.model_dump(mode="json") for l in nuevo.localidades],
+        "localidades_actualizado_en": nuevo.localidades_actualizado_en,
+    })
+
+
+@app.put("/configuracion/planes-venta")
+def configuracion_planes_venta_guardar():
+    """Reemplaza entera la lista curada -- ver editor.guardar_planes_venta:
+    la pantalla manda el estado completo de los checkboxes en cada
+    guardado, asi que no hace falta (ni conviene) un merge incremental."""
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    planes = cuerpo.get("planes")
+    if planes is None or not isinstance(planes, list):
+        return jsonify({"error": "Falta el campo 'planes' (lista)."}), 400
+
+    try:
+        config = editor.guardar_planes_venta(tenant, planes)
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
+
+    olvidar_config(tenant)
+    return jsonify({"planes_venta": [p.model_dump(mode="json") for p in config.planes_venta]})
+
+
 # =============================================================================
 #  SECRETOS  -  credenciales por empresa (WhatsApp, WispHub...), cifradas
 # =============================================================================
@@ -2352,7 +2474,34 @@ def corpus_ingerir():
                     modelo_embeddings=config.rag.modelo_embeddings,
                     roles_permitidos=roles_doc or roles,
                     storage_path=request.form.get("storage_path"),
-                    forzar=forzar)
+                    forzar=forzar,
+                    # El archivo tal cual se subio: es la evidencia de QUE se
+                    # aprueba despues. Los fragmentos son derivados; sin el
+                    # original, "Fulano aprobo esto" no se puede verificar.
+                    original=datos,
+                    nombre_archivo=nombre,
+                    mime=archivo.mimetype,
+                    perfil_fragmentacion={
+                        "max_tokens": tokens,
+                        "exigir_multinivel_sin_estilo":
+                            perfil.exigir_multinivel_sin_estilo,
+                        "titulo_un_nivel_en_tabla": perfil.titulo_un_nivel_en_tabla,
+                    },
+                    # Lo subido desde la interfaz entra PENDIENTE: se
+                    # vectoriza, pero match_chunks no lo recupera hasta que
+                    # una persona lo apruebe (ver supabase/22). Subir un
+                    # archivo y publicarlo dejan de ser el mismo acto.
+                    #
+                    # El CLI mantiene 'vigente' a proposito: exige
+                    # credenciales de base y es herramienta de operacion,
+                    # como una migracion -- quien lo corre ya decidio.
+                    estado="pendiente")
+    except ingesta.VersionAprobadaInmutable as e:
+        # 409 y no 400: la peticion esta bien formada, lo que pasa es que el
+        # recurso esta en un estado que no admite esa operacion. Y no es un
+        # fallo que haya que investigar en los logs -- es una regla del
+        # producto contandose a quien la choco.
+        return jsonify({"error": str(e)}), 409
     except ValueError as e:
         return jsonify({"error": f"El documento declara {e}"}), 400
     except Exception as e:
@@ -2360,6 +2509,45 @@ def corpus_ingerir():
         return jsonify({"error": f"No se pudo procesar el documento: {e}"}), 500
 
     return jsonify(resultado), 201
+
+
+@app.post("/corpus/documentos/<id_documento>/aprobar")
+def corpus_aprobar(id_documento):
+    """
+    Habilita un documento pendiente para que el asistente pueda recuperarlo.
+
+    Es la segunda capa que le faltaba al corpus. La primera --y la que de
+    verdad garantiza-- es que asistente.match_chunks filtra por
+    estado='vigente' en SQL: un documento pendiente es invisible aunque esta
+    ruta no existiera. Aca solo se abre la puerta, y queda registrado quien.
+
+    Nace de una medicion concreta (agosto 2026): la unica guia de
+    diagnostico del corpus, G-GO-04, tiene 7 de sus 8 fragmentos escritos
+    para un tecnico en campo -- abrir conectores de fibra, medir potencia
+    optica, reemplazar el cable de acometida. Asignada por error a un rol de
+    cara al cliente, eso son instrucciones peligrosas entregadas sin que
+    salte ningun error.
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+
+    try:
+        with persistencia.sesion(tenant) as (cur, org):
+            ok = ingesta.aprobar(cur, org, id_documento,
+                                 cuerpo.get("aprobado_por"))
+    except Exception as e:
+        print(f"[corpus] fallo al aprobar '{id_documento}': {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo aprobar el documento."}), 500
+
+    if not ok:
+        # Distinto de 404 a proposito: el caso normal no es que el documento
+        # no exista sino que ya este aprobado (dos personas mirando la misma
+        # pantalla), y eso no es un error que haya que investigar.
+        return jsonify({"error": "El documento no existe o no estaba "
+                                 "pendiente de aprobacion."}), 409
+    return jsonify({"aprobado": True})
 
 
 @app.post("/corpus/documentos/<id_documento>/retirar")

@@ -56,10 +56,29 @@ def main(tenant: str, dias: int, incluir_revisadas: bool) -> None:
     print(f"Preguntas distintas: {len(filas)}  |  Ocurrencias totales: "
          f"{total_ocurrencias}\n")
 
-    for f in filas:
+    # Un rol sin ningun documento asignado no es un hueco de documentacion:
+    # es un hueco de PERMISOS, y se arregla en /manual, no escribiendo un
+    # manual nuevo. Se separan para no mandar a nadie a resolver el problema
+    # equivocado -- paso en agosto 2026 con las 103 preguntas de similitud
+    # NULL, que parecian un umbral mal calibrado.
+    sin_acceso = [f for f in filas if f.get("elegibles") == 0]
+    resto = [f for f in filas if f.get("elegibles") != 0]
+
+    if sin_acceso:
+        ocurrencias = sum(f["n"] for f in sin_acceso)
+        print(f"\n  ⚠ {len(sin_acceso)} pregunta(s) ({ocurrencias} ocurrencias) "
+             f"fallaron porque su ROL NO TIENE NINGUN DOCUMENTO ASIGNADO.")
+        print("    No es un hueco de documentacion ni un umbral mal puesto: "
+             "asignales roles desde /manual.")
+        roles = sorted({f["rol_ejemplo"] or "(sin rol)" for f in sin_acceso})
+        print(f"    Roles afectados: {', '.join(roles)}\n")
+
+    for f in resto:
         rol = f["rol_ejemplo"] or "(sin rol)"
         similitud = f"{f['peor_similitud']:.2f}" if f["peor_similitud"] is not None else "?"
-        print(f"  {f['n']:>3}x  [{similitud} similitud]  "
+        elegibles = f.get("elegibles")
+        visto = f"{elegibles} visibles" if elegibles is not None else "sin dato"
+        print(f"  {f['n']:>3}x  [{similitud} similitud, {visto}]  "
              f"({rol})  {f['pregunta_ejemplo']}")
 
 

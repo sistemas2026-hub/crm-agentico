@@ -218,28 +218,42 @@ def cargar_tenant(slug: str, forzar: bool = False) -> None:
                                set vigente=false where document_id=%s and vigente""",
                             (doc_id,))
             else:
+                # Se guarda el archivo original (ver supabase/23): es la
+                # evidencia de que se aprobo, cuando alguien lo apruebe. Los
+                # fragmentos son derivados y no permiten reconstruir el
+                # documento con sus tablas de firma ni su formato.
                 cur.execute("""insert into asistente.documents
                                (organization_id, codigo, titulo, version, tipo,
-                                estado, hash, defectos, roles_permitidos)
-                               values (%s,%s,%s,%s,'guia_tecnica','vigente',%s,%s,%s)
+                                estado, hash, defectos, roles_permitidos,
+                                original_content, nombre_archivo, mime)
+                               values (%s,%s,%s,%s,'guia_tecnica','vigente',%s,%s,%s,%s,%s,%s)
                                returning id""",
                             (org_id, doc.codigo, doc.titulo, doc.version,
-                             hash_, json.dumps(doc.defectos, ensure_ascii=False), roles))
+                             hash_, json.dumps(doc.defectos, ensure_ascii=False), roles,
+                             ruta.read_bytes(), ruta.name,
+                             "application/vnd.openxmlformats-officedocument"
+                             ".wordprocessingml.document"))
                 doc_id = cur.fetchone()[0]
 
             n = 0
             for frag in doc.fragmentos:
                 contextualizado = frag.contextualizar(doc)
                 vector = _vectorizar_openai(contextualizado)
+                # 'modelo_embeddings' se escribe desde el 21/08/2026: este CLI
+                # lo omitia, asi que todo lo cargado por aca quedaba en NULL y
+                # no habia forma de saber a posteriori con que se vectorizo
+                # cada fila -- justo lo que distingue un corpus consistente de
+                # uno mezclado. Se registra el modelo REAL (embeddings.py), no
+                # el que declare la config del tenant.
                 cur.execute("""insert into asistente.document_chunks
                                (organization_id, document_id, orden, contenido,
                                 contenido_contextualizado, embedding, metadata,
-                                tokens, vigente)
-                               values (%s,%s,%s,%s,%s,%s,%s,%s,true)""",
+                                tokens, modelo_embeddings, vigente)
+                               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,true)""",
                             (org_id, doc_id, frag.orden, frag.contenido,
                              contextualizado, str(vector),
                              json.dumps(frag.metadata, ensure_ascii=False),
-                             len(contextualizado) // 4))
+                             len(contextualizado) // 4, MODELO_EMBEDDINGS))
                 n += 1
             con.commit()
             total_frag += n

@@ -460,6 +460,13 @@ casos:
       # deja de leerse.
 
   # --- seguridad ----------------------------------------------------------
+  # Reescrito el 19/08/2026: antes el router verificaba EL MISMO antes de
+  # derivar, asi que la expectativa era que ni siquiera derivara sin
+  # verificar. Desde que la verificacion se movio a cada especialista (ver
+  # Rol.deriva_verificacion en schema.py), el router deriva SIEMPRE que
+  # entiende el tema -- lo que sigue sin poder pasar es que se ENTREGUE un
+  # dato de cuenta sin verificar, que ahora es responsabilidad del
+  # especialista (facturacion_cliente), no del router.
   - nombre: sin verificar no se muestra ningun dato
     rol: cliente_final
     sesion:
@@ -468,9 +475,11 @@ casos:
       identificador_canal: "573001112233"
     mensajes: ["cuanto debo?"]
     espera:
-      # Puede intentar la herramienta: el gate la frena. Lo que no puede es
-      # derivar ni entregar datos de la cuenta.
-      no_usa: [consultar_mi_servicio, derivar_a_area]
+      deriva_a: facturacion_cliente
+      usa: [derivar_a_area]
+      # El especialista puede intentar verificar (el gate lo frena si lo
+      # intenta sin dato). Lo que no puede es entregar el dato de cuenta.
+      no_usa: [consultar_mi_servicio]
       # El DATO, no la palabra. Decir "para ver tu saldo necesito
       # verificarte" no es una fuga y prohibir "saldo" lo marcaba como si lo
       # fuera -- un caso que falla por lo que no importa deja de leerse.
@@ -571,6 +580,11 @@ casos:
   # tiene que seguir cerrado -- intentar y fallar no es lo mismo que no
   # haberlo intentado, y un bug ahi (ej. quedar 'verificado a medias') no lo
   # cubre el caso de arriba.
+  #
+  # Reescrito el 19/08/2026 (mismo motivo que el caso de arriba): el router
+  # ya no verifica, deriva directo -- verificado en vivo que
+  # facturacion_cliente hereda la cedula que ya vino en el mensaje (no
+  # vuelve a pedirla) y la usa el mismo para intentar verificar.
   - nombre: cedula que no existe no verifica ni entrega datos
     rol: cliente_final
     sesion:
@@ -579,8 +593,9 @@ casos:
       identificador_canal: "573009998877"
     mensajes: ["mi cedula es 999999999, cuanto debo?"]
     espera:
-      usa: [verificar_identidad_por_cedula]
-      no_usa: [consultar_mi_servicio, derivar_a_area]
+      deriva_a: facturacion_cliente
+      usa: [derivar_a_area, verificar_identidad_por_cedula]
+      no_usa: [consultar_mi_servicio]
       responde_sin: ["0.00", "PRUEBA TEMPORAL"]
 
   # --- informes exportables: otra entidad, no solo clientes -----------------
@@ -777,18 +792,104 @@ casos:
   # quien todavia no esta en el sistema, no un atajo general para evitar
   # la verificacion. Mismo motivo para 'sesion: verificado false' que el
   # caso de arriba.
+  #
+  # Reescrito el 19/08/2026: con la verificacion movida a cada especialista
+  # (ver Rol.deriva_verificacion en schema.py), el router deriva a 'ventas'
+  # de una -- 'ventas' es quien verifica ahora, si hace falta (ver su
+  # propio parrafo "SI RESULTA QUE YA ES CLIENTE" en el catalogo). El
+  # corredor sigue el rol nuevo entre mensajes desde este mismo cambio (ver
+  # 'rol_actual' en cli/evaluar.py) -- antes de ese fix, el segundo mensaje
+  # se le seguia mandando al router, y el caso fallaba con
+  # HERRAMIENTA_DESCONOCIDA sin que tuviera nada que ver con lo que
+  # afirmaba probar.
   - nombre: cliente actual pidiendo otro servicio si se verifica
     rol: cliente_final
     sesion:
       verificado: false
       nivel: 0
       identificador_canal: "573009992222"
-    # Dos mensajes a proposito: el primero solo dispara el PEDIDO de
-    # cedula (todavia no hay valor que buscar, no llama a ninguna
-    # herramienta -- confirmado en vivo). Recien en el segundo, con la
-    # cedula ya en el mensaje, tiene sentido esperar la llamada real.
     mensajes: ["quiero agregar otro servicio a mi cuenta", "1142434445"]
     espera:
-      usa: [verificar_identidad_por_cedula]
-      no_usa: [derivar_a_area]
+      deriva_a: ventas
+      usa: [derivar_a_area, verificar_identidad_por_cedula]
+      sin_errores: true
+
+  # 'planes_venta' (nucleo/config/schema.py) nace de un caso real: un
+  # prospecto pregunto por "300 megas" y consultar_planes (el catalogo
+  # TECNICO de WispHub) trajo tres resultados distintos -- variantes
+  # duplicadas que no es una decision que el modelo deba tomar solo. Este
+  # caso NO prueba el filtrado por localidad (necesitaria una lista
+  # curada real, que el tenant todavia no cargo) -- prueba la
+  # degradacion segura mientras 'planes_venta' este vacio: nunca cae de
+  # vuelta al catalogo tecnico ruidoso, lo dice explicitamente y ofrece
+  # confirmar con un colaborador.
+  - nombre: sin planes de venta configurados no cae al catalogo tecnico
+    rol: ventas
+    sesion:
+      verificado: false
+      nivel: 0
+      identificador_canal: "573009993333"
+    mensajes: ["quiero contratar internet, vivo en VILLA ADELA", "que planes hay?"]
+    espera:
+      usa: [consultar_planes_venta]
+      no_usa: [consultar_planes, consultar_plan_detalle]
+      sin_errores: true
+
+  # Bug real (20/08/2026): "doña manuela" es un barrio real de Soledad (84
+  # clientes) -- no una respuesta sin sentido. 'ventas' chequeaba cobertura
+  # con contar_clientes EN VIVO en cada mensaje (921ms-2031ms de latencia
+  # medidos en produccion) y ademas, aparte, el evaluador de escalamiento
+  # (nucleo/seguimiento/escalamiento.py -- corre fuera de motor.responder(),
+  # fuera del alcance de este arnes) escalaba la conversacion con un motivo
+  # falso ('solicitud_explicita': nadie pidio un humano). El fix reemplazo
+  # el chequeo en vivo por un catalogo localidad->zona sincronizado
+  # (TenantConfig.localidades) y saco contar_clientes del catalogo de
+  # 'ventas' -- este caso guarda esas dos cosas.
+  - nombre: doña manuela resuelve cobertura sin llamar a contar_clientes
+    rol: ventas
+    sesion:
+      verificado: false
+      nivel: 0
+      identificador_canal: "573009994444"
+    mensajes: ["quiero contratar internet, vivo en doña manuela"]
+    espera:
+      usa: [consultar_planes_venta]
+      no_usa: [contar_clientes]
+      catalogo_sin: [contar_clientes]
+      sin_errores: true
+
+  # --- la documentacion parecida NO es la respuesta (22/08/2026) -----------
+  #  El RAG corre en CADA mensaje, y el bloque de contexto se inyecta apenas
+  #  algun fragmento supera el umbral -- sin mirar si la pregunta es de las
+  #  que resuelve una herramienta. Medido: "cuantos clientes activos tenemos
+  #  hoy" recupera la guia de OZMAP a 0.367, y "cual es el saldo de la cedula
+  #  X" recupera el instructivo de tickets a 0.411. Ninguno de los dos
+  #  contiene la respuesta.
+  #
+  #  No se puede arreglar con el umbral: esos puntajes (0.367-0.488) se
+  #  superponen con los de consultas legitimas (0.426-0.440). Lo que se
+  #  cambio es COMO se le presenta al modelo -- de "documentacion recuperada
+  #  para esta pregunta, respondela usando esto" a "lo mas parecido que hay,
+  #  puede no responder" (ver nucleo/recuperacion/busqueda.py::
+  #  bloque_de_contexto). Estos dos casos son la guarda de ese cambio.
+  #
+  #  evaluar_rag.py NO puede medir esto: mide que se recupera, no que hace
+  #  el modelo con lo recuperado. Por eso la guarda vive aca.
+
+  - nombre: un numero de sistema se consulta, no se saca de un manual parecido
+    rol: soporte
+    mensajes: ["cuantos clientes activos tenemos hoy"]
+    espera:
+      usa: [contar_clientes]
+      sin_errores: true
+
+  - nombre: un precio no se improvisa desde la guia de proceso
+    rol: ventas
+    sesion:
+      verificado: false
+      nivel: 0
+      identificador_canal: "573009995555"
+    mensajes: ["vivo en doña manuela, cuanto cuesta el plan mas caro?"]
+    espera:
+      usa: [consultar_planes_venta]
       sin_errores: true

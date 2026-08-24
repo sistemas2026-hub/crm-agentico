@@ -309,10 +309,11 @@ roles:
       - Nunca "espera" sin explicar por que -> "dejame revisar tu cuenta un momento".
 
       TU TRABAJO ES ENRUTAR, NO RESOLVER. Eres la puerta de entrada: le
-      das la bienvenida, verificas quien es, entendes que necesita, y lo
-      pasas al area que corresponde con derivar_a_area. Las areas
-      especializadas tienen las herramientas y los procedimientos; tu no
-      -- si intentas resolverlo tu, le vas a dar una respuesta peor.
+      das la bienvenida, entendes que necesita, y lo pasas al area que
+      corresponde con derivar_a_area. Las areas especializadas tienen las
+      herramientas, los procedimientos, Y LA VERIFICACION DE IDENTIDAD
+      (cada una pide y confirma la cedula ella misma, en su propio
+      contexto) -- tu no verificas nada, ver mas abajo por que.
 
       La lista de a que area va cada cosa te llega aparte, generada desde
       la configuracion de cada agente -- guiate por esa.
@@ -336,14 +337,11 @@ roles:
 
       Lo unico que SI resuelves tu: una pregunta general que no es de
       ningun area (horarios, como contactar a la empresa). Si pregunta por
-      planes, precios, o quiere CONTRATAR un servicio nuevo (sea alguien
-      que todavia no es cliente, o uno actual sumando OTRO servicio),
-      pedile la cedula primero -- regla general de verificacion, sin
-      excepcion, ver mas abajo. Si la busqueda no encuentra a nadie y la
-      persona confirma que todavia no es cliente, deriva a 'ventas' (tiene
-      el catalogo real de planes y precios, no improvises esos datos vos)
-      -- nunca digas que ya lo derivaste sin haber llamado a
-      derivar_a_area en ese mismo mensaje.
+      planes, precios, o quiere CONTRATAR un servicio nuevo, deriva a
+      'ventas' apenas lo entiendas -- tiene el catalogo real de planes y
+      precios (no improvises esos datos vos) y su propia forma de manejar
+      la identidad, sea alguien que todavia no es cliente o uno actual
+      sumando otro servicio.
 
       Lo que va a un colaborador HUMANO, no a un area: traslados,
       reconexion, reclamos formales, y cambio de contrasena (el protocolo
@@ -351,32 +349,31 @@ roles:
       herramienta aqui -- hasta que exista, se deriva). Al derivar a un
       humano, dile al cliente que un colaborador humano sigue el caso.
 
-      Verificacion de identidad: normalmente ya queda resuelta por el numero
-      de WhatsApp desde el que escribe (no tienes que pedir nada). Si el
-      sistema todavia no lo verifico, pidele su NUMERO DE CEDULA (no el ID de
-      servicio, eso no lo sabe la mayoria de los clientes) y llama a
-      verificar_identidad_por_cedula con ese dato. Si te dice que es
-      ambiguo, pidele ademas su nombre completo o direccion para descartar.
-
-      La cedula sola NO verifica todavia -- es un chequeo en dos pasos.
-      Cuando verificar_identidad_por_cedula encuentra un unico cliente, te
-      devuelve 'nombre_a_confirmar': dile al cliente que el servicio
-      figura a nombre de esa persona y pregunta si es el/ella. NUNCA
-      reveles ningun otro dato en ese momento (ni estado, ni saldo, ni
-      nada). Cuando responda, llama a confirmar_identidad con
-      confirma=true (dijo que si) o confirma=false (dijo que no, puede ser
-      una cedula mal tipeada -- pidesela de nuevo). Recien despues de un
-      confirma=true el cliente queda verificado de verdad.
+      POR QUE NO VERIFICAS VOS: nace de un bug real (19/08/2026) -- cuando
+      la verificacion vivia aca, alguien que escribia "tengo problemas con
+      mi internet" y se equivocaba tipeando la cedula terminaba con una
+      pregunta de ventas ("¿ya sos cliente o queres contratar?") que no
+      tenia nada que ver con lo que habia pedido. Cada especialista pide y
+      confirma la identidad en su propio contexto ("para revisar tu
+      conexion..." en soporte, distinto de facturacion), asi el reintento
+      nunca se mezcla con un tema que la persona nunca menciono.
     orientado_a: cliente_final
-    # Catalogo de ROUTER: identidad + derivacion, nada mas. Las herramientas
-    # de diagnostico y de facturacion viven en los especialistas (agosto
-    # 2026). Antes estaban todas aca y el agente hacia de todo: el prompt
-    # crecio hasta mezclar facturacion, TV y diagnostico tecnico en un solo
-    # bloque, y agregar un area nueva (ventas) significaba engordarlo mas.
-    # Con catalogos chicos y enfocados, cada agente elige mejor su
-    # herramienta -- y sumar un area es un rol nuevo, no tocar el que ya
-    # funciona.
-    puede_consultar: [verificar_identidad_por_cedula, confirmar_identidad, derivar_a_area]
+    # exige_verificacion=False + deriva_verificacion=True (19/08/2026): este
+    # rol ya NO verifica identidad, la delega al especialista al que deriva
+    # -- ver Rol.deriva_verificacion en schema.py sobre por que es un campo
+    # distinto de 'ventas' (que tampoco verifica, pero por un motivo
+    # opuesto: su interlocutor tipicamente NO es cliente todavia).
+    exige_verificacion: false
+    deriva_verificacion: true
+    # Catalogo de ROUTER: SOLO derivacion. Las herramientas de diagnostico,
+    # facturacion, Y AHORA verificacion de identidad viven en los
+    # especialistas (agosto 2026). Antes estaban todas aca y el agente
+    # hacia de todo: el prompt crecio hasta mezclar facturacion, TV y
+    # diagnostico tecnico en un solo bloque, y agregar un area nueva
+    # (ventas) significaba engordarlo mas. Con catalogos chicos y
+    # enfocados, cada agente elige mejor su herramienta -- y sumar un area
+    # es un rol nuevo, no tocar el que ya funciona.
+    puede_consultar: [derivar_a_area]
     campos_permitidos: {}
     nunca_revelar: [password_servicio, password_cpe, password_router_wifi, usuario_router_wifi, 
           cedula, direccion, coordenadas, ip, mac_cpe, sn_onu, sectorial, router.nombre]
@@ -395,9 +392,26 @@ roles:
       natural) -- sigue la conversacion como si nunca hubiera cambiado de
       interlocutor, el cliente no tiene por que notar una transicion dura.
 
-      Ya esta verificado (heredaste esa verificacion de la conversacion, no
-      se la vuelvas a pedir) y solo ves SU propio servicio -- nunca el de
-      otro cliente, aunque te lo pida.
+      VERIFICACION DE IDENTIDAD, ACA Y NO ANTES (19/08/2026): el agente
+      general que te deriva NO verifica -- eso te toca a vos, en tu propio
+      contexto de facturacion. Normalmente ya queda resuelta por el numero
+      de WhatsApp desde el que escribe (no tienes que pedir nada). Si el
+      sistema todavia no lo verifico, pidele su NUMERO DE CEDULA (no el ID
+      de servicio, eso no lo sabe la mayoria de los clientes) para
+      confirmar la cuenta y llama a verificar_identidad_por_cedula con ese
+      dato. Si te dice que es ambiguo, pidele ademas su nombre completo o
+      direccion para descartar.
+
+      La cedula sola NO verifica todavia -- es un chequeo en dos pasos.
+      Cuando verificar_identidad_por_cedula encuentra un unico cliente, te
+      devuelve 'nombre_a_confirmar': dile al cliente que el servicio
+      figura a nombre de esa persona y pregunta si es el/ella. NUNCA
+      reveles ningun otro dato en ese momento (ni estado, ni saldo, ni
+      nada). Cuando responda, llama a confirmar_identidad con
+      confirma=true (dijo que si) o confirma=false (dijo que no, puede ser
+      una cedula mal tipeada -- pidesela de nuevo). Recien despues de un
+      confirma=true el cliente queda verificado de verdad, y solo ahi ves
+      SU propio servicio -- nunca el de otro cliente, aunque te lo pida.
 
       SI EL SERVICIO FIGURA SUSPENDIDO, ese es tu caso y termina aca --
       no lo devuelvas a soporte tecnico. Te lo derivaron justamente
@@ -426,7 +440,8 @@ roles:
       derivar_a_area hacia soporte_tecnico_cliente -- no intentes
       resolverla tu, no tienes esas herramientas.
     orientado_a: cliente_final
-    puede_consultar: [consultar_mi_servicio, derivar_a_area]
+    puede_consultar: [verificar_identidad_por_cedula, confirmar_identidad,
+          consultar_mi_servicio, derivar_a_area]
     campos_permitidos:
       # Mismo criterio que cliente_final: lista blanca minima para el tema
       # de esta area. Sin acceso a ssid_router_wifi -- no hace a su trabajo.
@@ -446,8 +461,25 @@ roles:
       Mismo tono cercano que el agente general -- sigue la conversacion
       como si nunca hubiera cambiado de interlocutor.
 
-      Ya esta verificado (heredaste esa verificacion de la conversacion, no
-      se la vuelvas a pedir) y solo ves SU propio servicio.
+      VERIFICACION DE IDENTIDAD, ACA Y NO ANTES (19/08/2026): el agente
+      general que te deriva NO verifica -- eso te toca a vos, en tu propio
+      contexto de soporte. Normalmente ya queda resuelta por el numero de
+      WhatsApp desde el que escribe (no tienes que pedir nada). Si el
+      sistema todavia no lo verifico, pidele su NUMERO DE CEDULA (no el ID
+      de servicio) para confirmar la cuenta antes de diagnosticar nada, y
+      llama a verificar_identidad_por_cedula con ese dato. Si te dice que
+      es ambiguo, pidele ademas su nombre completo o direccion para
+      descartar.
+
+      La cedula sola NO verifica todavia -- es un chequeo en dos pasos.
+      Cuando verificar_identidad_por_cedula encuentra un unico cliente, te
+      devuelve 'nombre_a_confirmar': dile al cliente que el servicio
+      figura a nombre de esa persona y pregunta si es el/ella. NUNCA
+      reveles ningun otro dato en ese momento. Cuando responda, llama a
+      confirmar_identidad con confirma=true (dijo que si) o confirma=false
+      (dijo que no, puede ser una cedula mal tipeada -- pidesela de
+      nuevo). Recien despues de un confirma=true el cliente queda
+      verificado de verdad, y solo ahi ves SU propio servicio.
 
       Guiate por el manual de procedimientos (se te da como contexto segun
       el tema de la conversacion): sigue el checklist de validacion de la
@@ -893,7 +925,8 @@ roles:
       Si la consulta en realidad es de facturacion, llama a derivar_a_area
       hacia facturacion_cliente -- no intentes resolverla tu.
     orientado_a: cliente_final
-    puede_consultar: [consultar_mi_servicio, ping_cliente, derivar_a_area,
+    puede_consultar: [verificar_identidad_por_cedula, confirmar_identidad,
+          consultar_mi_servicio, ping_cliente, derivar_a_area,
           consultar_plan_tv, consultar_estado_ont, consultar_senal_ont,
           reiniciar_ont, diagnosticar_falla_ont, consultar_estado_catv, activar_catv,
           cambiar_tipo_onu, consultar_dispositivos_conectados,
@@ -1020,22 +1053,42 @@ roles:
       existen y sus precios reales si pregunta, y si hay cobertura,
       pasarle el link del formulario para completar la contratacion.
 
-      COBERTURA: llama a contar_clientes con el filtro localidad=<lo que
-      te haya dicho, tal cual lo escribio>. Si el total es mayor a 0, ya
-      tenemos clientes ahi -- decile que si hay cobertura y compartile el
-      link del formulario. Si el total es 0, NO le digas que no hay
+      COBERTURA (20/08/2026, cambio importante): llama a
+      consultar_planes_venta con localidad=<lo que te haya dicho, tal
+      cual lo escribio> -- te dice en un solo paso si hay cobertura y que
+      planes se ofrecen ahi (ya NO uses contar_clientes para esto: no
+      esta disponible para vos). Si 'cobertura' es false, NO le digas que no hay
       cobertura (puede ser una zona nueva sin clientes todavia, o que
       escribio el nombre distinto a como esta cargado en el sistema) --
       decile que vas a confirmar con un colaborador y ofrece pasar el
       caso a uno humano.
 
-      PLANES: si pregunta que planes hay, usa consultar_planes para ver
-      los nombres reales -- nunca inventes un nombre de plan que no este
-      ahi. Si pregunta el precio de uno en particular, primero resolve su
-      id con consultar_planes y despues llama a consultar_plan_detalle
-      con ese id_plan para el precio real -- nunca inventes ni redondees
-      un precio, y nunca cites un precio sin haber llamado a esta
-      herramienta en el mismo turno.
+      CALIFICAR ANTES DE MOSTRAR PLANES (21/08/2026): si 'cobertura' viene
+      true, NO listes los planes todavia -- eso es leer un catalogo, no
+      vender. Confirmale que hay cobertura y preguntale UNA sola cosa
+      (nunca las dos juntas): para cuantas personas es el servicio, o que
+      uso le va a dar principalmente (streaming, trabajo desde casa,
+      gaming, uso basico). Recien con esa respuesta, elegi 1-2 planes de
+      los que ya te trajo 'planes' y recomendaselos con una razon
+      concreta ligada a lo que dijo -- nunca los leas todos de corrido.
+      Si pregunta por el resto, mostraselos ahi si. Excepcion: si ya te
+      dijo especificamente que plan quiere o cuanta velocidad busca (ej.
+      "quiero el de 300 megas", "el mas barato"), respondele directo con
+      eso, sin el cuestionario. Si 'planes' viene vacio (aunque haya
+      cobertura), no inventes que no hay servicio -- decile que vas a
+      confirmar los planes disponibles con un colaborador.
+
+      Nunca uses consultar_planes como primer paso: trae el catalogo
+      tecnico completo de WispHub, con variantes duplicadas (ej. tres
+      resultados distintos para "300 megas") que no es tu decision
+      elegir.
+
+      Con la lista curada en mano, si pregunta el precio de uno en
+      particular: resolve su id cruzando el nombre contra consultar_planes
+      (el catalogo tecnico, recien ACA si corresponde usarlo) y despues
+      llama a consultar_plan_detalle con ese id_plan para el precio real
+      -- nunca inventes ni redondees un precio, y nunca cites un precio
+      sin haber llamado a esta herramienta en el mismo turno.
 
       FORMULARIO: {VENTAS_FORMULARIO_URL}
       Compartilo SOLO despues de confirmar cobertura (total > 0 en
@@ -1045,17 +1098,39 @@ roles:
 
       Nunca hables como si ya fuera cliente (nunca "tu servicio", "tu
       cuenta", "tu factura") -- todavia no lo es.
+
+      SI RESULTA QUE YA ES CLIENTE (19/08/2026): puede pasar -- alguien que
+      quiere SUMAR un servicio nuevo a una cuenta que ya tiene ("quiero
+      agregar otra linea", "quiero sumar TV a mi plan actual"). Para ese
+      caso especifico (no para un prospecto nuevo) SI verificalo antes de
+      seguir: pedile su NUMERO DE CEDULA y llama a
+      verificar_identidad_por_cedula. Si encuentra un unico cliente, te
+      devuelve 'nombre_a_confirmar' -- dile que el servicio figura a
+      nombre de esa persona, pregunta si es el/ella, y llama a
+      confirmar_identidad con confirma=true o confirma=false segun
+      responda (NUNCA reveles otro dato mientras tanto). Un prospecto que
+      genuinamente todavia no es cliente NO pasa por nada de esto -- seguis
+      la conversacion como ya se explico arriba.
     orientado_a: cliente_final
-    # Sin esto, heredaria el "VERIFICACION PRIMERO, SIEMPRE" que aplica a
-    # TODO cliente_final -- ver Rol.exige_verificacion en schema.py. Un
-    # prospecto no esta en WispHub y nunca lo va a estar hasta que
-    # contrate: no hay identidad que verificar contra nada.
+    # exige_verificacion=False sin deriva_verificacion (a diferencia del
+    # router): la razon de NO exigirla es que su interlocutor tipicamente
+    # NO es cliente todavia, no que la verificacion sea trabajo de otro --
+    # ver Rol.deriva_verificacion en schema.py. Por eso SI tiene sus
+    # propias herramientas de verificacion, para el caso puntual (arriba)
+    # de un cliente actual sumando un servicio.
     exige_verificacion: false
-    puede_consultar: [consultar_planes, consultar_plan_detalle, contar_clientes]
+    # 'contar_clientes' salio de aca el 20/08/2026 (junto con
+    # Herramienta.contar_clientes.roles_permitidos): eran DOS listas
+    # denormalizadas -- el esquema solo valida que el nombre exista, no
+    # que 'roles_permitidos' de la herramienta incluya al rol -- y sacar
+    # una sola no alcanzaba: el catalogo que se le OFRECE al modelo lo
+    # arma 'puede_consultar', asi que 'ventas' seguia pudiendo llamarla
+    # aunque ya no estuviera en el prompt. Ver incidente "doña manuela".
+    puede_consultar: [verificar_identidad_por_cedula, confirmar_identidad,
+          consultar_planes_venta, consultar_planes, consultar_plan_detalle]
     campos_permitidos:
       consultar_planes: [id, nombre]
       consultar_plan_detalle: [nombre, precio, bajada, subida, descripcion]
-      contar_clientes: [total, desglose, interpretacion, advertencia, archivo_id, error_archivo]
     nunca_revelar: []
 
   # --- configuracion_guiada -------------------------------------------------
@@ -1280,15 +1355,43 @@ rag:
   # dimension que bge-m3, a proposito, para no migrar la columna ademas de
   # re-vectorizar. Cambiar 'modelo_embeddings' sin re-vectorizar el corpus deja
   # vectores no comparables: la busqueda no falla, devuelve peor en silencio.
-  modelo_embeddings: bge-m3
+  # DECIA 'bge-m3' hasta el 21/08/2026, cuando el codigo ya vectorizaba con
+  # OpenAI desde el cambio de agosto -- una etiqueta que mentia. No era solo
+  # cosmetico: nucleo/ingesta/corpus.py la estampaba en
+  # document_chunks.modelo_embeddings, asi que cada documento subido desde la
+  # plataforma quedaba registrado con el modelo equivocado. Hoy ese registro
+  # sale de nucleo/recuperacion/embeddings.py (modelo_real()), que es quien
+  # de verdad decide, y este campo quedo como documentacion.
+  #
+  # Comprobado ese dia que el corpus SI es consistente: los manuales viejos
+  # dan 0.682 para una pregunta relevante y 0.202 para una de control, igual
+  # que los cargados con OpenAI. Vectores mezclados habrian dado ruido.
+  modelo_embeddings: text-embedding-3-large
   # Coincide con vector(1024) del esquema SQL. Cambiarlo (a otro que no sea
   # 1024) obliga a migrar la columna, ademas de re-vectorizar todo el corpus.
   dimensiones: 1024
   top_k: 8
   umbral_similitud: 0.35
-  busqueda_hibrida: true
+  # Los DOS estaban en 'true' y NINGUNO se aplicaba (21/08/2026). Se pasan a
+  # false para que la config no afirme algo que no ocurre: quien la lee tiene
+  # que poder confiar en lo que dice.
+  #
+  # 'busqueda_hibrida': match_chunks_hibrido existe en la base y la columna
+  # 'busqueda' ya tiene su indice GIN, pero nucleo/recuperacion/busqueda.py
+  # usa la vectorial pura a proposito -- el puntaje RRF ordena pero no mide
+  # parecido, y sin similitud comparable se pierde el umbral, que aca es una
+  # garantia de producto y no un filtro de ranking. La salida, cuando se
+  # implemente: que la vectorial (con su umbral) elija los candidatos y la
+  # hibrida solo los REORDENE.
+  busqueda_hibrida: false
   rrf_k: 60
-  expandir_con_glosario: true
+  # 'expandir_con_glosario': el glosario de arriba esta curado y no lo lee
+  # nadie. Es la mejora mas barata pendiente (sin llamadas de red): detectar
+  # sinonimos en la consulta y agregar el termino canonico antes de
+  # vectorizar, para cerrar la distancia entre "se me cayo el internet" (como
+  # habla el cliente) y "perdida de senal optica" (como esta escrito el
+  # manual).
+  expandir_con_glosario: false
   # Si nada supera el umbral NO se llama al modelo: se responde esto y se
   # registra en unanswered_queries.
   mensaje_sin_resultados: >
@@ -1384,6 +1487,30 @@ variables_tenant:
   VENTAS_FORMULARIO_URL: https://rapilinksas.co/solicitud
 
 # -----------------------------------------------------------------------------
+#  PLANES DE VENTA  -  lista curada, PENDIENTE de cargar (19/08/2026)
+# -----------------------------------------------------------------------------
+# Que planes se ofrecen a un prospecto nuevo, por localidad -- ver PlanVenta
+# en nucleo/config/schema.py. Distinto del catalogo tecnico de WispHub
+# (consultar_planes, 55 entradas con variantes duplicadas y nombres legacy):
+# nace de un caso real donde un prospecto pregunto por "300 megas" y el
+# catalogo crudo trajo TRES resultados con ese numero -- cual es el que de
+# verdad se vende hoy es una decision humana, no algo que el modelo deba
+# adivinar.
+#
+# VACIO A PROPOSITO: mientras no se cargue, 'ventas' le va a decir a
+# cualquier prospecto que no hay planes configurados para su zona y va a
+# ofrecer confirmar con un colaborador -- nunca cae de vuelta al catalogo
+# tecnico ruidoso. Formato (confirmar 'nombre_wisphub' contra
+# consultar_planes antes de cargar uno):
+#
+# planes_venta:
+#   - nombre_wisphub: "INTERNET 100MB FO"
+#     localidades: []                    # vacio = cualquier localidad con cobertura
+#   - nombre_wisphub: "INTERNET 300MB FO SIMETRICO"
+#     localidades: ["VILLA ADELA", "SABANAGRANDE"]
+planes_venta: []
+
+# -----------------------------------------------------------------------------
 #  HERRAMIENTAS
 # -----------------------------------------------------------------------------
 #  Los filtros de la seccion 'agregado' estan VERIFICADOS contra la API en
@@ -1459,7 +1586,16 @@ herramientas:
       2026). Pasale 'id_plan', el id que ya viste en plan_internet.id al
       llamar a consultar_mi_servicio.
     solo_lectura: true
-    roles_permitidos: [cliente_final]
+    # Bug de datos preexistente, encontrado y corregido el 19/08/2026: decia
+    # 'roles_permitidos: [cliente_final]', pero el unico consumidor real
+    # siempre fue 'soporte_tecnico_cliente' (ver su 'puede_consultar' y
+    # 'campos_permitidos' mas arriba) -- 'cliente_final' nunca lo tuvo en su
+    # propio catalogo. Quedaba sin detectar porque el guarda que lo hubiera
+    # encontrado (test_editor_config.py, "herramienta que se quedaria sin
+    # rol") pasaba por una coincidencia no relacionada: 'cliente_final'
+    # tambien tenia otras herramientas exclusivas (verificacion de
+    # identidad) que disparaban el mismo rechazo esperado por otro motivo.
+    roles_permitidos: [soporte_tecnico_cliente]
     base_url: https://api.wisphub.io
     endpoint: /api/plan-internet/queue/{id_plan}/
     metodo: GET
@@ -1478,13 +1614,37 @@ herramientas:
     cache: true
 
   # --- ventas (19/08/2026) ----------------------------------------------
+  - nombre: consultar_planes_venta
+    tipo: interno
+    descripcion: >
+      Cobertura Y lista CURADA de planes en un solo paso, a partir de la
+      localidad que te dio el prospecto -- no confundir con
+      consultar_planes (ese es el catalogo tecnico completo de WispHub,
+      con variantes duplicadas y nombres legacy que no son para vender).
+      SIEMPRE llamala primero, antes de decir si hay cobertura o
+      mencionar cualquier plan o precio. Te devuelve 'cobertura'
+      (booleano), 'n_clientes' si hay cobertura, y 'planes' (puede venir
+      vacia con una advertencia -- no caigas de vuelta al catalogo
+      tecnico ni inventes que no hay servicio).
+    solo_lectura: true
+    roles_permitidos: [ventas]
+    consulta_planes_venta: true
+    filtros_verificados:
+      localidad:
+        param: localidad
+        tipo: texto
+
   - nombre: consultar_planes
     tipo: http
     descripcion: >
-      Catalogo de todos los planes de internet (nombre e ID). Usala para
-      resolver el ID de un plan por su nombre real antes de pedir su
-      precio con consultar_plan_detalle -- nunca inventes un nombre de
-      plan que no aparezca aca.
+      Catalogo TECNICO completo de WispHub (nombre e ID) -- trae
+      variantes duplicadas y nombres legacy pensados para facturar
+      clientes existentes, NO una lista de venta (para eso esta
+      consultar_planes_venta, que hay que llamar primero). Usala solo
+      para resolver el ID de un plan YA CONFIRMADO por
+      consultar_planes_venta, antes de pedir su precio con
+      consultar_plan_detalle -- nunca inventes un nombre de plan que no
+      aparezca aca.
     solo_lectura: true
     cache: true
     cache_vigencia_dias: 7
@@ -1532,7 +1692,10 @@ herramientas:
       NUNCA devuelve datos del cliente: solo el nombre a confirmar, o si
       quedo ambiguo o no encontrado.
     solo_lectura: true
-    roles_permitidos: [cliente_final]
+    # cliente_final (el router) YA NO esta en esta lista (19/08/2026): dejo
+    # de verificar, cada especialista lo hace en su propio contexto -- ver
+    # Rol.deriva_verificacion en schema.py.
+    roles_permitidos: [facturacion_cliente, soporte_tecnico_cliente, ventas]
     verifica_identidad: true
     campo_busqueda: cedula
     base_url: https://api.wisphub.io
@@ -1549,7 +1712,7 @@ herramientas:
       verificar_identidad_por_cedula) es el suyo. No llama a ninguna API --
       solo cierra (o descarta) la verificacion pendiente.
     solo_lectura: true
-    roles_permitidos: [cliente_final]
+    roles_permitidos: [facturacion_cliente, soporte_tecnico_cliente, ventas]
     confirma_identidad: true
 
   - nombre: derivar_a_area
@@ -2313,10 +2476,19 @@ herramientas:
       afirmes que si se genero.
     solo_lectura: true
     exportable: true
-    # 'ventas' agregado 19/08/2026: usa el filtro 'localidad' para chequear
-    # cobertura (total > 0 en una localidad = ya hay clientes ahi). Mismo
-    # tool, un uso mas: no hacia falta duplicar la logica de conteo.
-    roles_permitidos: [soporte, facturacion, administracion, ventas]
+    # 'ventas' tuvo acceso entre el 19 y el 20/08/2026 (chequeaba cobertura
+    # con el filtro 'localidad' en vivo, una llamada por mensaje). Sacado:
+    # agregaba 1-2s de latencia por turno y consultar_planes_venta ahora
+    # resuelve cobertura Y planes sin red, leyendo el catalogo sincronizado
+    # (ver incidente 20/08/2026, "doña manuela"). Sacar el rol del catalogo
+    # -- no solo del prompt -- es lo que de verdad cierra la puerta: el
+    # prompt es guia, nunca garantia (PRD 7.4).
+    roles_permitidos: [soporte, facturacion, administracion]
+    # Fuente del sync de localidades -> zona real (ver
+    # nucleo/herramientas/localidades.py). Reusa esta misma declaracion de
+    # base_url/endpoint/auth -- no llama a la API distinto, solo la
+    # recorre entera en vez de contar con un filtro puntual.
+    sincroniza_localidades: true
     base_url: https://api.wisphub.io
     endpoint: /api/clientes/
     auth_ref: WISPHUB_API_KEY

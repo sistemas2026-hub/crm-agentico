@@ -217,6 +217,17 @@ class Rol(Base):
     # cualquier cliente_final -- un rol de ventas para prospectos quedaba
     # atrapado pidiendo una cedula que no tiene sentido pedir.
     exige_verificacion: bool = True
+    # Solo tiene efecto con exige_verificacion=False. Distingue POR QUE este
+    # rol no verifica, algo que 'exige_verificacion' por si solo no alcanza
+    # a decir: 'ventas' no verifica porque su interlocutor tipicamente NO ES
+    # cliente todavia; un ROUTER puro (agregado 19/08/2026) no verifica
+    # porque esa responsabilidad se movio al especialista al que deriva --
+    # el suyo SI suele ser cliente, solo que la identidad se confirma
+    # rio abajo, no aca. Cambia unicamente el texto del prompt (que le
+    # explica al modelo POR QUE no le pide cedula); el gate de ejecucion
+    # ya funciona igual con solo 'exige_verificacion=False' en los dos
+    # casos.
+    deriva_verificacion: bool = False
     # Solo organizativas -- para mostrar el agente ordenado en un diagrama
     # (que area, que cargo). NO cambian que puede hacer o ver el rol; eso lo
     # sigue decidiendo unicamente 'puede_consultar'/'campos_permitidos'.
@@ -233,6 +244,16 @@ class Rol(Base):
     # como destino. Es lo que hace que la pantalla pueda avisar "este agente
     # esta conectado pero nunca le va a llegar una conversacion".
     atiende: str = Field(default="", max_length=400)
+
+    @model_validator(mode="after")
+    def _coherencia(self) -> "Rol":
+        if self.exige_verificacion and self.deriva_verificacion:
+            raise ValueError(
+                f"rol '{self.area or self.cargo or ''}': 'deriva_verificacion' "
+                f"solo tiene sentido junto con exige_verificacion=False -- "
+                f"con exige_verificacion=True el rol verifica el mismo, no "
+                f"tiene a quien delegarselo.")
+        return self
 
 
 # =============================================================================
@@ -638,6 +659,28 @@ class Herramienta(Base):
     # esto no hay que ofrecerle al modelo, no hay forma de armar el enum del
     # esquema ni de validar la derivacion en codigo.
     areas_destino: list[str] = Field(default_factory=list)
+    # Tipo 'interno', igual que confirma_identidad: no llama a ninguna API,
+    # el motor filtra TenantConfig.planes_venta por la localidad que
+    # propone el modelo (via 'filtros_verificados', igual que cualquier
+    # filtro comun -- no hace falta una excepcion nueva a "sin argumentos
+    # libres", solo lee un valor ya acotado por esa lista). Ver
+    # nucleo/modelo/motor.py::_ejecutar_consulta_planes_venta.
+    consulta_planes_venta: bool = False
+    # Marca esta herramienta (tipicamente 'agregado' sobre 'clientes', ej.
+    # contar_clientes) como la FUENTE del sync de localidades -> zona real
+    # (ver LocalidadZona mas abajo). El motor nunca la corre durante una
+    # conversacion -- solo nucleo/herramientas/localidades.py::sincronizar(),
+    # bajo demanda desde /configuracion/localidades/sincronizar. Reusa
+    # base_url/endpoint/auth_ref que la herramienta ya declara, sin duplicar
+    # esa config para un job aparte.
+    sincroniza_localidades: bool = False
+    # Nombres de campo en la respuesta cruda del proveedor -- configurables
+    # por tenant para no hardcodear el vocabulario de un proveedor puntual
+    # (WispHub llama 'localidad' y 'zona') en nucleo/. 'campo_zona_sync'
+    # espera un objeto anidado {id, nombre}, igual forma que 'zona'/'router'
+    # de WispHub.
+    campo_localidad_sync: str = "localidad"
+    campo_zona_sync: str = "zona"
     # Excepcion CUARTA a "el modelo nunca propone argumentos libres" (las
     # otras tres: campo_busqueda de verifica_identidad, 'confirma' de
     # confirma_identidad, 'area' acotada de deriva_rol). Esta SI necesita ser
@@ -1366,6 +1409,62 @@ class Evaluacion(Base):
     minimo_casos: int = Field(default=50, ge=1)
 
 
+class ZonaConteo(Base):
+    """Una zona real del proveedor (nodo de red -- router/servidor) con
+    cuantos clientes tiene DENTRO de una localidad puntual. Ver
+    LocalidadZona: una misma localidad puede repartirse en mas de una
+    zona, asi que esto vive en una lista, no en un campo suelto."""
+    zona_id: int
+    zona_nombre: str
+    n_clientes: int
+
+
+class LocalidadZona(Base):
+    """
+    Una localidad observada en el proveedor, con la(s) zona(s) real(es)
+    donde tiene clientes -- nunca la escribe una persona, solo la llena
+    nucleo/herramientas/localidades.py::sincronizar() recorriendo el
+    catalogo completo de clientes. Reemplaza el chequeo de cobertura en
+    vivo que 'ventas' hacia con contar_clientes en cada turno (agregaba
+    1-2s de latencia por mensaje -- ver incidente 20/08/2026, "doña
+    manuela") y le da a PlanVenta.zonas algo real contra que comparar en
+    vez de texto libre por localidad.
+
+    Una misma localidad puede caer en mas de una zona real (verificado:
+    "DOÑA MANUELA" tiene clientes en dos routers distintos) -- por eso
+    'zonas' es una lista, nunca una zona dominante unica.
+    """
+    localidad: str                     # nombre a mostrar (variante mas comun)
+    zonas: list[ZonaConteo] = Field(default_factory=list)
+    n_clientes: int = 0                # total, suma de zonas[].n_clientes
+
+
+class PlanVenta(Base):
+    """
+    Un plan que se OFRECE a un prospecto nuevo -- lista curada por el
+    tenant, separada a proposito del catalogo tecnico del proveedor (ej.
+    WispHub trae 55 entradas para Rapilink, con variantes duplicadas y
+    nombres legacy pensados para facturar clientes existentes, no para
+    vender). Agregado 19/08/2026: un prospecto pregunto por "300 megas" y
+    el catalogo crudo devolvio TRES resultados distintos con ese numero --
+    cual de esos es el que de verdad se vende hoy es una decision humana,
+    no algo que el modelo deba adivinar ni algo que deba vivir hardcodeado
+    en un YAML que un desarrollador edita.
+    """
+    nombre_wisphub: str
+    # Tiene que coincidir EXACTO con un nombre real del catalogo del
+    # proveedor (verificar contra consultar_planes antes de cargar uno
+    # nuevo aca -- mismo principio de todo el proyecto: la documentacion,
+    # y en este caso el nombre que alguien recuerda, es una hipotesis).
+    # IDs de zona real (LocalidadZona.zonas[].zona_id -- el catalogo del
+    # proveedor, ej. /api/zonas/ de WispHub). Vacio = se ofrece en
+    # CUALQUIER zona con cobertura. Reemplaza 'localidades: list[str]'
+    # (texto libre) -- ver incidente 20/08/2026: un barrio real (Doña
+    # Manuela) puede caer en mas de una zona, y el texto libre no lo podia
+    # representar ni mantenerse sincronizado solo con la realidad.
+    zonas: list[int] = Field(default_factory=list)
+
+
 # =============================================================================
 #  RAIZ
 # =============================================================================
@@ -1393,6 +1492,17 @@ class TenantConfig(Base):
     # una sola, y esa es la diferencia entre un dato de PLATAFORMA (nucleo/,
     # igual para todas) y uno de EMPRESA (aca, distinto por tenant).
     variables_tenant: dict[str, str] = Field(default_factory=dict)
+    # Lista curada de planes para OFRECER a un prospecto nuevo -- ver
+    # PlanVenta arriba sobre por que es distinta del catalogo tecnico del
+    # proveedor. Vacio = ningun plan configurado todavia: el rol de ventas
+    # tiene que decirlo asi, nunca caer de vuelta al catalogo crudo (eso
+    # es exactamente el problema que este campo resuelve).
+    planes_venta: list[PlanVenta] = Field(default_factory=list)
+    # Catalogo localidad -> zona(s) real(es), sincronizado bajo demanda --
+    # ver LocalidadZona arriba y nucleo/herramientas/localidades.py. Nunca
+    # se edita a mano: se reemplaza entero cada vez que corre el sync.
+    localidades: list[LocalidadZona] = Field(default_factory=list)
+    localidades_actualizado_en: str | None = None  # ISO, ultima sincronizacion
     canales: Canales = Field(default_factory=Canales)
     escalamiento: Escalamiento = Field(default_factory=Escalamiento)
     # Opcional: sin esto, el asistente no intenta identificar a nadie en

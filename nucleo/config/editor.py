@@ -613,6 +613,42 @@ def borrar_variable_tenant(tenant: str, nombre: str) -> TenantConfig:
     return _editar(tenant, lambda doc: _mutar_borrar_variable_tenant(doc, nombre))
 
 
+def _mutar_planes_venta(doc: dict, planes: list[dict]) -> None:
+    """
+    Reemplaza ENTERA la lista curada de planes que 'ventas' ofrece a un
+    prospecto nuevo -- ver PlanVenta/TenantConfig.planes_venta en
+    schema.py. Reemplazo completo y no un merge incremental a proposito:
+    la pantalla manda el estado completo de los checkboxes en cada
+    guardado (que planes quedaron tildados, con que localidades cada
+    uno), asi que "lo que llega" ya ES la lista final -- un merge
+    complicaria sin necesidad la logica de "destildar uno para sacarlo".
+    """
+    doc["planes_venta"] = planes
+
+
+def guardar_planes_venta(tenant: str, planes: list[dict]) -> TenantConfig:
+    for p in planes:
+        if not (p.get("nombre_wisphub") or "").strip():
+            raise ErrorEdicion("Cada plan necesita 'nombre_wisphub'.")
+    return _editar(tenant, lambda doc: _mutar_planes_venta(doc, planes))
+
+
+def _mutar_localidades(doc: dict, localidades: list[dict]) -> None:
+    """
+    Reemplaza ENTERO el catalogo localidad -> zona(s) -- ver
+    TenantConfig.localidades/LocalidadZona en schema.py. Igual criterio
+    que _mutar_planes_venta: lo produce nucleo/herramientas/localidades.py
+    de punta a punta en cada sincronizacion, nunca un merge incremental.
+    """
+    from datetime import datetime, timezone
+    doc["localidades"] = localidades
+    doc["localidades_actualizado_en"] = datetime.now(timezone.utc).isoformat()
+
+
+def guardar_localidades(tenant: str, localidades: list[dict]) -> TenantConfig:
+    return _editar(tenant, lambda doc: _mutar_localidades(doc, localidades))
+
+
 def aprobar_herramienta_propuesta(tenant: str, herramienta_propuesta: dict) -> TenantConfig:
     """
     Agrega al catalogo real una herramienta que vino de una propuesta ya

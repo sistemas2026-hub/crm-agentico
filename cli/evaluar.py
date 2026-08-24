@@ -85,6 +85,15 @@ def correr_caso(config, caso: dict, defaults: dict, prohibido: list[str]) -> dic
     ejecutadas: list[str] = []
     errores: list[str] = []
     respuesta = ""
+    # Sigue el mismo patron que nucleo/canales/api.py::atender_turno(): si un
+    # mensaje deriva a otro rol (sesion.rol_siguiente), los mensajes
+    # SIGUIENTES de este mismo caso tienen que atenderse con el rol nuevo, no
+    # con el declarado en el caso. Bug real encontrado el 19/08/2026: sin
+    # esto, un caso de varios mensajes que espera una derivacion a mitad de
+    # conversacion le seguia mandando los mensajes de despues al rol viejo,
+    # y fallaba con HERRAMIENTA_DESCONOCIDA en vez de probar lo que decia
+    # probar.
+    rol_actual = caso["rol"]
 
     # El rol se ARRASTRA entre mensajes, igual que en el canal real
     # (nucleo/canales/api.py: atender_turno lee 'sesion.rol_siguiente', lo usa
@@ -108,6 +117,14 @@ def correr_caso(config, caso: dict, defaults: dict, prohibido: list[str]) -> dic
             sesion.rol_siguiente = None
         respuesta, registro, _medios = motor.responder(
             config, rol_actual, mensaje, historial, sesion)
+        # Las dos ramas arreglaron ESTE mismo bug por separado (el arnes no
+        # arrastraba el rol derivado) y llegaron a codigo distinto. Se
+        # conserva esta forma porque hace las dos cosas: registra a donde se
+        # derivo -- que es lo que afirma 'deriva_a' y la otra version no
+        # guardaba -- y el cambio de rol se aplica arriba, al empezar el
+        # mensaje siguiente, donde ademas se limpia la bandera. Asignar
+        # 'rol_actual' aca tambien funcionaba, pero dejaba 'rol_siguiente'
+        # puesta y sin 'derivado_a'.
         if getattr(sesion, "rol_siguiente", None):
             derivado_a = sesion.rol_siguiente
         for r in registro:

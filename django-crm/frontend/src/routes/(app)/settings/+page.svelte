@@ -204,6 +204,19 @@
                 warn: !data.smartolt.tiene_clave
               }
             ]
+          : []),
+        // Solo aparece si el tenant tiene el rol 'ventas' -- mismo criterio
+        // que SmartOLT arriba.
+        ...(data.asistente?.roles?.includes('ventas')
+          ? [
+              {
+                href: '/settings/planes-venta',
+                title: 'Planes de venta',
+                body: 'Qué planes se ofrecen a un prospecto nuevo, y en qué localidades.',
+                value: data.planesVenta ? `${count(data.planesVenta.cantidad)} planes` : null,
+                warn: !!data.planesVenta && data.planesVenta.cantidad === 0
+              }
+            ]
           : [])
       ]
     },
