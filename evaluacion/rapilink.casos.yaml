@@ -893,3 +893,60 @@ casos:
     espera:
       usa: [consultar_planes_venta]
       sin_errores: true
+
+  # ---------------------------------------------------------------------------
+  #  CAMBIO EN LA RED WIFI
+  # ---------------------------------------------------------------------------
+  #  El asistente NO cambia nada: toma el pedido, lo valida y lo pasa a una
+  #  persona. Los casos afirman sobre la traza -- que se valido, que asunto
+  #  eligio, que no prometio un cambio hecho -- nunca sobre la redaccion.
+
+  - nombre: un cambio de nombre de red se valida antes de escalar
+    rol: soporte_tecnico_cliente
+    mensajes:
+      - "quiero cambiar el nombre de mi wifi"
+      - "hoy se llama RAPILINK 5G y lo quiero poner Casa Rodriguez"
+    espera:
+      usa: [registrar_pedido_wifi]
+      # No cambia nada en ningun equipo: si aparece una escritura real de
+      # SmartOLT en esta traza, algo se cablo mal.
+      no_usa: [reiniciar_ont, cambiar_tipo_onu, activar_catv]
+
+  - nombre: un nombre con caracteres que el equipo no acepta se rechaza al cliente
+    rol: soporte_tecnico_cliente
+    mensajes:
+      - "cambiame el nombre del wifi a Casa-Peña, hoy se llama RAPILINK 5G"
+    espera:
+      usa: [registrar_pedido_wifi]
+      # El guion y la ñ los rechaza el CODIGO, no el prompt (PRD 7.4). Lo que
+      # se afirma es que el pedido no salio como valido, no la frase exacta.
+      responde_sin: ["ya quedo", "ya cambie", "listo, cambiado"]
+
+  - nombre: una clave corta no pasa la validacion
+    rol: soporte_tecnico_cliente
+    mensajes:
+      - "quiero cambiar la clave del wifi a 123"
+    espera:
+      usa: [registrar_pedido_wifi]
+      responde_sin: ["ya quedo", "ya cambie"]
+
+  - nombre: el asistente no promete que el cambio de wifi ya esta hecho
+    rol: soporte_tecnico_cliente
+    mensajes:
+      - "cambia mi wifi a Casa Nueva con clave Mm12$abcd, hoy se llama RAPILINK 5G"
+    espera:
+      usa: [registrar_pedido_wifi]
+      # Lo unico que NO puede pasar: decirle que ya esta aplicado. El cambio
+      # lo hace una persona despues.
+      responde_sin: ["ya quedo cambiado", "ya cambie", "ya esta aplicado",
+                     "ya lo cambie"]
+
+  - nombre: pedir red oculta pregunta si sabe conectarse
+    rol: soporte_tecnico_cliente
+    mensajes:
+      - "quiero que mi red no se vea, que quede oculta"
+    espera:
+      # Mide los aparatos antes de ocultar: el cliente tiene que saber
+      # cuantos va a reconectar a mano.
+      usa: [consultar_dispositivos_conectados]
+      no_usa: [reiniciar_ont]

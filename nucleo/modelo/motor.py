@@ -53,6 +53,7 @@ from nucleo.herramientas import agregado as ejecutor_agregado
 from nucleo.herramientas import http as ejecutor_http
 from nucleo.herramientas import incidentes as ejecutor_incidentes
 from nucleo.herramientas import estabilidad as ejecutor_estabilidad
+from nucleo.herramientas import wifi as ejecutor_wifi
 from nucleo.herramientas import informes
 from nucleo.modelo import cliente
 from nucleo.modelo import tuteo
@@ -964,6 +965,9 @@ def _ejecutar_tool(herramienta, sesion, argumentos_modelo: dict,
 
     if herramienta.tipo == "interno" and herramienta.resume_estabilidad:
         return ejecutor_estabilidad.resumir(herramienta, argumentos, tenant, variables_tenant)
+
+    if herramienta.tipo == "interno" and herramienta.valida_pedido_wifi:
+        return ejecutor_wifi.procesar(herramienta, argumentos, tenant, variables_tenant)
 
     if herramienta.tipo == "http":
         if herramienta.cache and tenant:

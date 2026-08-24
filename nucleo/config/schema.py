@@ -713,6 +713,11 @@ class Herramienta(Base):
     # veredicto ya calculado en vez de entregar la lista cruda de eventos.
     # Ver nucleo/herramientas/estabilidad.py.
     resume_estabilidad: bool = False
+    # Tipo 'interno' tambien: valida un pedido de cambio de red inalambrica
+    # (nombre y/o clave) ANTES de que salga hacia una persona, y deja en la
+    # traza que se pidio -- de ahi sale el asunto con el que entra el ticket.
+    # No cambia nada en ningun equipo. Ver nucleo/herramientas/wifi.py.
+    valida_pedido_wifi: bool = False
 
     # --- http / agregado ---
     # No es secreto (no dispara el barrido de _barrer_secretos): es dato de

@@ -746,6 +746,80 @@ roles:
 
       -- fin del diagnostico de conexion. Lo que sigue es OTRO arbol. --
 
+      CAMBIO EN LA RED WIFI (nombre, clave, o dejarla oculta).
+
+      VOS NO CAMBIAS NADA. Tomas el pedido, lo validas y lo pasas a una
+      persona de soporte, que es quien lo aplica en el equipo. Nunca le
+      digas al cliente que ya quedo hecho, ni "en unos minutos se aplica":
+      queda PEDIDO, y una persona lo hace. Prometer un cambio que todavia no
+      ocurrio es la peor forma de perder la confianza de alguien.
+
+      PRIMERO, MIRA SI ESTA ACTIVO. Llama consultar_mi_servicio. Si figura
+      suspendido, no tomes el pedido: decile que mientras el servicio este
+      suspendido no se puede hacer el cambio, y PREGUNTALE si quiere que lo
+      pases con cartera para revisar su servicio. Espera la respuesta. Si
+      dice que si, derivas; si dice que no, no derivas y le ofreces
+      ayudarlo en otra cosa. No lo mandes a cartera sin preguntar.
+
+      SEGUNDO, QUE QUIERE CAMBIAR. El nombre, la clave, las dos, o dejar la
+      red oculta o visible. Si pide oculta, ver mas abajo.
+
+      TERCERO, PEDI EL ACTUAL. Para el nombre, preguntale como se llama hoy
+      su red. Para la clave, cual es la que tiene hoy. NO lo compares vos
+      con nada: lo unico que tenes que mirar es que haya contestado a lo que
+      preguntaste. Quien confirma si es correcto es la persona que toma el
+      caso, que si puede verlo en el sistema. Esto es lo que evita que
+      alguien que no es el titular cambie la red de otro.
+
+      Si dice que no se acuerda de la clave actual: pedile una foto de la
+      cedula del titular del servicio. Hoy no podes leer fotos, asi que
+      decile que la mande, confirma que llego, y escala el caso anotando que
+      la validacion de la cedula queda para la persona que lo tome.
+
+      CUARTO, DECI LAS REGLAS ANTES DE QUE ESCRIBA, no despues. Nombre:
+      hasta 32 caracteres, sin ñ, sin tildes, sin emojis, sin espacios al
+      principio ni al final. Clave: entre 8 y 63 caracteres, sin ñ ni
+      tildes ni emojis, y que combine mayuscula, minuscula, numero y un
+      simbolo -- dale el ejemplo 'Mm12$'. Pedir el dato y despues rechazarlo
+      es una vuelta de mas que se podia evitar.
+
+      QUINTO, VALIDA con registrar_pedido_wifi. Si devuelve problemas, se
+      los decis TODOS juntos, no de a uno: hacerle corregir una cosa para
+      que aparezca la siguiente es la forma mas rapida de que abandone. Si
+      devuelve clave_debil, se lo decis como aviso y seguis igual si el
+      insiste -- es su red, la decision es suya.
+
+      SEXTO, MOSTRALE LO VIEJO Y LO NUEVO ANTES DE ESCALAR, con los valores
+      ENTRE COMILLAS. Las comillas no son adorno: si dejo un espacio al
+      final, en el chat es invisible y asi se ve. Ejemplo:
+
+        Nombre actual: "RAPILINK 5G"  ->  nuevo: "Casa Rodriguez"
+        Clave nueva: "Mm12$abcd"
+
+      Y avisale ANTES de confirmar que al aplicarse se van a desconectar
+      TODOS los aparatos de la casa y hay que reconectarlos uno por uno. Si
+      te esta escribiendo desde ese mismo WiFi, decile tambien que se le va
+      a cortar la conversacion. Espera que confirme y recien ahi escalas.
+
+      El cambio se aplica a las DOS bandas, 2.4 y 5 GHz. No preguntes cual:
+      cambiar una sola deja al cliente conectado a la otra sin entender que
+      paso.
+
+      RED OCULTA. Si pide que la red no se vea, preguntale si sabe conectar
+      un equipo a una red oculta, porque hay que escribir el nombre a mano y
+      no aparece en la lista. Anota la respuesta tal cual: si dice que si,
+      que confirma saber hacerlo; si dice que no, que no sabe y pide
+      orientacion. Las dos cosas van al ticket -- la segunda le dice a quien
+      lo tome que tiene que acompañarlo cuando lo aplique.
+
+      Antes de escalar un pedido de red oculta, llama
+      consultar_dispositivos_conectados y deci cuantos aparatos hay. Sirve
+      para dos cosas: el cliente sabe cuantos va a tener que reconectar a
+      mano, y quien aplique el cambio sabe a que se enfrenta. Y avisale que
+      hay equipos que directamente NO se pueden conectar a una red oculta
+      --televisores, camaras, impresoras--: si tiene alguno, conviene que lo
+      hable con la persona de soporte antes.
+
       INTERNET LENTO (cuando dice que anda LENTO, no que no anda).
 
       OJO CON EL LIMITE, que ya se cruzo una vez: todo lo que sigue vale
@@ -931,9 +1005,19 @@ roles:
           reiniciar_ont, diagnosticar_falla_ont, consultar_estado_catv, activar_catv,
           cambiar_tipo_onu, consultar_dispositivos_conectados,
           consultar_incidente_red, consultar_velocidad_aprovisionada,
-          consultar_estabilidad_enlace]
+          consultar_estabilidad_enlace, registrar_pedido_wifi]
     campos_permitidos:
       consultar_mi_servicio: [estado, plan_internet, ssid_router_wifi]
+      # El pedido de WiFi no trae datos del cliente que haya que tapar: son
+      # los valores que el mismo acaba de escribir, mas el veredicto de la
+      # validacion. Lo unico que NO pasa es la clave nueva -- no porque sea
+      # un secreto que el cliente no conozca (la acaba de escribir el), sino
+      # porque el modelo no la necesita para redactar: ya sabe si el pedido
+      # es valido y que corregir. Un dato que no hace falta para contestar no
+      # tiene por que entrar al prompt.
+      registrar_pedido_wifi: [pedido_valido, problemas, cambia_nombre,
+        cambia_clave, red_oculta, nombre_nuevo, clave_debil,
+        nombre_actual_segun_cliente]
       # Con notacion de punto, NO el objeto entero: 'ping-1' trae adentro el
       # campo 'host', que es la IP del cliente. Dejarlo pasar completo se la
       # entrega al modelo, y de ahi al cliente -- verificado el 19/08/2026,
@@ -1475,6 +1559,17 @@ llm:
 # mas abajo (ver el campo en nucleo/config/schema.py).
 variables_tenant:
   SMARTOLT_SUBDOMINIO: https://rapilinksas.smartolt.com
+  # Caracteres que los equipos de ESTE ISP manejan mal en el nombre de la red.
+  # El guion sale del manual de Rapilink, de experiencia en campo: "eliminar o
+  # reemplazar caracteres especiales, especialmente el guion (-), ya que
+  # algunos dispositivos presentan inconvenientes para identificar redes que
+  # contienen este tipo de caracteres".
+  #
+  # Vive aca y no en el codigo porque depende de la marca de ONT instalada:
+  # otro ISP con otros equipos pone los suyos sin que nadie toque el nucleo.
+  # Los limites del estandar WPA (8-63, SSID de 32 octetos) SI estan en
+  # codigo -- esos no varian por empresa.
+  WIFI_CARACTERES_DESACONSEJADOS: "-"
   # Formulario real de contratacion (datos + documentos + firma), 5 pasos:
   # datos personales, plan interesado (ya muestra nombre+precio, coherente
   # con lo que 'ventas' contesta en el chat), ubicacion (GPS + barrio --
@@ -1824,6 +1919,50 @@ herramientas:
       arp_ping: false
     inyectar_sesion:
       id_servicio: id_cliente
+
+  # ---------------------------------------------------------------------------
+  #  PEDIDO DE CAMBIO DE RED INALAMBRICA
+  # ---------------------------------------------------------------------------
+  #  Se llama 'registrar_pedido_wifi' y no 'cambiar_wifi' a proposito: el
+  #  modelo lee el nombre de la herramienta para decidir que hace y que
+  #  contestar. Uno que dijera 'cambiar' lo invita a cerrar con "listo, ya lo
+  #  cambie" -- y no cambio nada, porque el cambio lo aplica una persona.
+  #
+  #  No le pega a ninguna API: valida el pedido y lo deja en la traza. De ahi
+  #  salen dos cosas -- lo que el asistente le dice al cliente que corrija, y
+  #  el asunto con el que entra el ticket (ver escalamiento.ticket_al_escalar).
+  - nombre: registrar_pedido_wifi
+    tipo: interno
+    valida_pedido_wifi: true
+    descripcion: >
+      Registra el pedido del cliente de cambiar el nombre de su red WiFi, su
+      clave, o de dejar la red oculta o visible. NO aplica el cambio: lo
+      aplica una persona de soporte despues. Devuelve si el pedido es valido
+      y, si no lo es, que tiene que corregir el cliente.
+    # Escritura a los ojos del validador (deja un pedido en curso), aunque no
+    # toque ningun sistema externo: por eso exige confirmacion.
+    solo_lectura: false
+    requiere_confirmacion: true
+    roles_permitidos: [soporte_tecnico_cliente]
+    # Los argumentos que el modelo puede mandar. Se declaran aca porque es de
+    # donde el motor arma el esquema de la herramienta (ver motor.py) -- el
+    # campo se llama 'filtros_verificados' por su origen en las herramientas
+    # de conteo, pero es el unico lugar donde una herramienta declara que
+    # recibe. Todos opcionales: un pedido puede ser solo de nombre, solo de
+    # clave, las dos, o solo ocultar la red.
+    filtros_verificados:
+      nombre_actual: {param: nombre_actual, tipo: texto}
+      nombre_nuevo: {param: nombre_nuevo, tipo: texto}
+      clave_actual: {param: clave_actual, tipo: texto}
+      clave_nueva: {param: clave_nueva, tipo: texto}
+      # 'si' deja la red oculta, 'no' la vuelve visible. Se omite cuando el
+      # cliente no dijo nada al respecto -- distinto de decir que no.
+      red_oculta:
+        param: red_oculta
+        tipo: enum
+        # Entrecomillados: sin comillas, YAML lee 'no' como el booleano
+        # falso y la clave del enum deja de ser texto.
+        valores: {"si": "si", "no": "no"}
 
   - nombre: agendar_visita_tecnica
     tipo: http
@@ -3612,7 +3751,58 @@ escalamiento:
         asunto: Reconexion
         prioridad: "3"
 
+    # Cubre TODO cambio en la red inalambrica: nombre, clave, y si la red
+    # queda oculta o visible. El identificador quedo del alcance original
+    # (solo clave) y hoy dice menos de lo que abarca -- renombrarlo dejaria
+    # huerfanas las conversaciones ya etiquetadas, asi que se documenta en vez
+    # de romperlas.
+    #
+    # El asunto sale de lo que el cliente pidio, leido de la traza que dejo
+    # 'registrar_pedido_wifi'. Gana la PRIMERA entrada que cumple, y la que no
+    # tiene condiciones va ultima por obligacion del esquema.
     cambio_contrasena:
+      # Nombre, o nombre Y clave juntos: entra como cambio de nombre. Es lo
+      # normal -- casi nadie cambia el nombre sin cambiar tambien la clave, y
+      # un solo ticket con los dos datos adentro le sirve mas al tecnico que
+      # dos tickets que hay que cruzar.
+      - herramienta: crear_ticket_caso
+        area: soporte_tecnico
+        asunto: Cambio De Nombre De Red
+        prioridad: "2"
+        condiciones:
+          - herramienta: registrar_pedido_wifi
+            campo: cambia_nombre
+            valor: true
+      # Solo la clave.
+      - herramienta: crear_ticket_caso
+        area: soporte_tecnico
+        asunto: Cambio De Contraseña En Router Wifi
+        prioridad: "2"
+        condiciones:
+          - herramienta: registrar_pedido_wifi
+            campo: cambia_clave
+            valor: true
+      # Solo ocultar la red, sin tocar nombre ni clave: es un tramite propio
+      # en el catalogo de WispHub, no una variante de los anteriores.
+      - herramienta: crear_ticket_caso
+        area: soporte_tecnico
+        asunto: Red Oculta
+        prioridad: "2"
+        condiciones:
+          - herramienta: registrar_pedido_wifi
+            campo: red_oculta
+            valor: true
+      # Y volver a hacerla visible, que tambien tiene el suyo.
+      - herramienta: crear_ticket_caso
+        area: soporte_tecnico
+        asunto: Red Visible
+        prioridad: "2"
+        condiciones:
+          - herramienta: registrar_pedido_wifi
+            campo: red_oculta
+            valor: false
+      # Sin traza de la herramienta (el cliente lo pidio y la conversacion se
+      # corto antes de validarlo): entra igual, para que no se pierda.
       - herramienta: crear_ticket_caso
         area: soporte_tecnico
         asunto: Cambio De Contraseña En Router Wifi
