@@ -1387,7 +1387,7 @@ class Limites(Base):
     # Separada de la de arriba y mucho mas corta, a proposito: una conversacion
     # escrita es barata de guardar y util para depurar; una foto pesa y puede
     # mostrar la casa, la cedula o una cara. La foto sirve para resolver el
-    # caso, y un caso vive dias. Ver supabase/09_multimedia.sql.
+    # caso, y un caso vive dias. Ver supabase/202608121842_multimedia.sql.
     retencion_multimedia_dias: int = Field(default=30, ge=1)
 
 

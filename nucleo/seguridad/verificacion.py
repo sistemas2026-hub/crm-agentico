@@ -41,7 +41,7 @@ class Sesion:
 
     # Lo unico de la ficha del cliente que SI se persiste, y solo mientras la
     # conversacion siga abierta (asistente.conversations.datos_sesion, ver
-    # supabase/17_datos_sesion.sql). No es una excepcion a RNF-01: no son
+    # supabase/202608151253_datos_sesion.sql). No es una excepcion a RNF-01: no son
     # datos personales sino IDENTIFICADORES TECNICOS de su equipo, y sin
     # ellos un reinicio del motor deja la conversacion verificada pero con
     # todas las herramientas que los necesitan fallando -- el cliente recibe

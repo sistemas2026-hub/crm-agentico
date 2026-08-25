@@ -347,7 +347,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     'profile_id': quien pregunta, cuando /chat lo resolvio (app web). None en
     el webhook de WhatsApp -- ahi no hay un colaborador del CRM de por medio,
     solo se propaga a asistente.tool_calls.profile_id para la auditoria por
-    persona (ver supabase/19_tool_calls_profile_id.sql).
+    persona (ver supabase/202608180800_tool_calls_profile_id.sql).
 
     Devuelve {'respuesta', 'verificado', 'pausada'}. Levanta motor.ErrorMotor
     si el rol o el mensaje no son atendibles -- quien llama decide si eso es un
@@ -579,7 +579,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
         # cada turno pero solo se leia para decidir el agendamiento
         # automatico, y despues se tiraba -- una conversacion que el
         # asistente resolvio solo terminaba en la bandeja sin ninguna
-        # etiqueta de que trataba. Ver supabase/18_caso_conversacion.sql.
+        # etiqueta de que trataba. Ver supabase/202608180923_caso_conversacion.sql.
         if evaluacion and evaluacion.get("caso_manual"):
             persistencia.marcar_caso(tenant, conversation_id,
                                      evaluacion["caso_manual"])
@@ -935,7 +935,7 @@ def chat():
                   necesita fijar 'cliente_final' a proposito para probar ese
                   canal, y cualquier llamador interno que ya sepa cual quiere.
       profile_id  el perfil del CRM de quien pregunta. El motor resuelve que
-                  agentes tiene asignados (supabase/15_agentes_por_colaborador)
+                  agentes tiene asignados (supabase/202608132036_agentes_por_colaborador)
                   y le arma la union: un colaborador con Soporte y Facturacion
                   puede preguntar por el ticket Y la factura en un solo turno,
                   sin elegir a cual agente le habla.
@@ -2638,7 +2638,7 @@ def corpus_ingerir():
                     },
                     # Lo subido desde la interfaz entra PENDIENTE: se
                     # vectoriza, pero match_chunks no lo recupera hasta que
-                    # una persona lo apruebe (ver supabase/22). Subir un
+                    # una persona lo apruebe (ver supabase/202608231328_aprobacion_documentos). Subir un
                     # archivo y publicarlo dejan de ser el mismo acto.
                     #
                     # El CLI mantiene 'vigente' a proposito: exige
@@ -3042,7 +3042,7 @@ def whatsapp_webhook(tenant):
 
         # Antes de gastar un turno del modelo: si este wamid ya se atendio, es
         # un reintento de Meta y contestar de nuevo seria cobrar y responder
-        # dos veces. Ver supabase/08_webhook_eventos.sql.
+        # dos veces. Ver supabase/202608121841_webhook_eventos.sql.
         try:
             if persistencia.evento_ya_visto(tenant, wamid):
                 continue

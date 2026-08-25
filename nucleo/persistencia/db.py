@@ -279,7 +279,7 @@ def ultima_actividad(tenant: str, canal: str | None = None) -> list[dict]:
       atendida
           Si algun humano ya escribio en el hilo, O si alguien la marco a
           mano como atendida sin responder por el chat (ver
-          marcar_atendida() y supabase/12_atendida_manual.sql -- resuelto
+          marcar_atendida() y supabase/202608131419_atendida_manual.sql -- resuelto
           por telefono, en persona, etc.). Es la diferencia entre "nadie
           tomo esto" y "alguien esta en eso", que es lo que decide a cual
           entrar primero. 'escalada_a_humano' sola no alcanza: una escalada
@@ -288,7 +288,7 @@ def ultima_actividad(tenant: str, canal: str | None = None) -> list[dict]:
     'actualizado_en' viene como datetime con zona horaria, no como texto:
     es timestamptz en la base y quien consume ya no tiene que parsearlo.
 
-    'id_cliente'/'nombre_cliente' (ver supabase/14_identidad_conversacion.sql)
+    'id_cliente'/'nombre_cliente' (ver supabase/202608131433_identidad_conversacion.sql)
     son NULL hasta que _ejecutar_confirmacion verifica al cliente -- antes de
     eso, la unica identidad que hay es 'usuario_externo' (el numero o BSUID
     crudo del canal).
@@ -478,7 +478,7 @@ def marcar_escalada(tenant: str, conversation_id: str, motivo: str,
 
     'necesita_atencion_humana' es independiente de 'escalada_a_humano': toda
     escalada crea ticket y pausa el bot igual, pero no toda escalada exige
-    que alguien del equipo entre ya mismo (ver supabase/13_necesita_atencion_humana.sql).
+    que alguien del equipo entre ya mismo (ver supabase/202608131420_necesita_atencion_humana.sql).
     Decide el filtro "Sin atender" del frontend, nada mas.
     """
     with sesion(tenant) as (cur, org):
@@ -494,7 +494,7 @@ def marcar_escalada(tenant: str, conversation_id: str, motivo: str,
 def marcar_caso(tenant: str, conversation_id: str, caso: str | None) -> None:
     """
     Guarda de QUE es esta conversacion (uno de 'manual.casos' del tenant, ver
-    supabase/18_caso_conversacion.sql). Se llama en CADA turno, no solo al
+    supabase/202608180923_caso_conversacion.sql). Se llama en CADA turno, no solo al
     escalar: la clasificacion cambia mientras la conversacion se aclara -- un
     "me quede sin servicio" empieza sin caso, pasa por 'no_internet' y
     termina en 'sin_senal_tv' cuando el cliente dice que es la television. La
@@ -619,7 +619,7 @@ def agregar_mensaje_humano(tenant: str, conversation_id: str,
 def agentes_de_colaborador(tenant: str, profile_id: str) -> list[str]:
     """
     Que agentes tiene asignados este empleado del CRM (ver
-    supabase/15_agentes_por_colaborador.sql). Lista vacia = ninguno, y quien
+    supabase/202608132036_agentes_por_colaborador.sql). Lista vacia = ninguno, y quien
     llama debe tratarlo como "no accede", nunca como "accede a todos":
     fail-closed, igual que roles_permitidos en el corpus.
 
@@ -783,7 +783,7 @@ def esta_de_baja(tenant: str, usuario_externo: str, canal: str = "whatsapp") -> 
 
     Se consulta ANTES de cualquier envio que inicie el sistema. Nunca antes de
     responderle a alguien que escribio: la baja bloquea la interrupcion, no la
-    atencion -- ver supabase/10_bajas_canal.sql."""
+    atencion -- ver supabase/202608121843_bajas_canal.sql."""
     with sesion(tenant) as (cur, org):
         cur.execute(
             """select 1 from asistente.canal_bajas
@@ -838,7 +838,7 @@ def guardar_media(tenant: str, conversation_id: str, media_id: str, tipo: str,
 
     Devuelve el id de la fila, o None si ese 'media_id' ya estaba guardado --
     un reintento del webhook no duplica el archivo. Ver
-    supabase/09_multimedia.sql para por que vive en Postgres y no en un almacen
+    supabase/202608121842_multimedia.sql para por que vive en Postgres y no en un almacen
     de objetos.
     """
     with sesion(tenant) as (cur, org):
@@ -959,7 +959,7 @@ def purgar_media(tenant: str, dias: int) -> int:
     Borra los adjuntos mas viejos que 'dias'. Devuelve cuantos.
 
     Existe porque la retencion de multimedia es MAS CORTA que la de las
-    conversaciones a proposito (ver supabase/09_multimedia.sql): el texto es
+    conversaciones a proposito (ver supabase/202608121842_multimedia.sql): el texto es
     barato y util para depurar, una foto pesa y puede mostrar la casa, la
     cedula o una cara. Se llama desde una tarea programada, no desde el turno.
     """
@@ -980,7 +980,7 @@ def marcar_conservar(tenant: str, conversation_id: str, conservar: bool,
 
     Distinto de marcar un ejemplo: eso dice "esta respuesta fue buena" y
     alimenta el manual; esto dice "no la borres todavia" y no aparece en
-    ningun lado mas. Ver supabase/11_conservar_conversacion.sql.
+    ningun lado mas. Ver supabase/202608121844_conservar_conversacion.sql.
 
     Devuelve False si la conversacion no existe o no es de este tenant.
 
@@ -1005,7 +1005,7 @@ def marcar_atendida(tenant: str, conversation_id: str, por: str | None) -> bool:
     No es lo mismo que responder de verdad (eso ya marca 'atendida' solo,
     via el exists de ultima_actividad()): esto es el camino manual para
     cuando responder por el chat no corresponde. Ver
-    supabase/12_atendida_manual.sql.
+    supabase/202608131419_atendida_manual.sql.
 
     Solo prende la marca -- no hay 'desmarcar' a proposito: si alguien la
     marco por error, la forma de corregirlo es responder de verdad (que ya
@@ -1058,10 +1058,10 @@ def purgar_conversaciones(tenant: str, dias: int) -> int:
 
     1. 'conservar' -- alguien dijo explicitamente "no borres esto todavia": un
        reclamo, un incidente, algo que puede terminar en disputa. Ver
-       supabase/11_conservar_conversacion.sql.
+       supabase/202608121844_conservar_conversacion.sql.
 
     2. Tener alguna respuesta marcada como ejemplo valido. Esas alimentan el
-       manual de procedimientos (supabase/05_ejemplos_validados.sql) y cuelgan
+       manual de procedimientos (supabase/202608121018_ejemplos_validados.sql) y cuelgan
        en cascada, asi que sin la excepcion la purga nocturna destruiria en
        silencio el material que alguien marco a mano.
 
@@ -1106,7 +1106,7 @@ def evento_ya_visto(tenant: str, wamid: str, canal: str = "whatsapp") -> bool:
     que dos reintentos simultaneos leen "no visto" los dos y contestan los dos.
     Con el insert atomico, solo uno gana la clave primaria.
 
-    Ver supabase/08_webhook_eventos.sql para por que esto vive en la base y no
+    Ver supabase/202608121841_webhook_eventos.sql para por que esto vive en la base y no
     en memoria del proceso.
     """
     with sesion(tenant) as (cur, org):

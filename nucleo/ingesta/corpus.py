@@ -82,7 +82,7 @@ def roles_validos(config, roles_texto: str | None) -> list[str] | None:
     documento invisible para todo el mundo sin que nadie se entere.
 
     None si no se declara ninguno: fail-closed (ver
-    supabase/03_documentos_roles.sql) -- sin roles asignados, match_chunks no
+    supabase/202608111433_documentos_roles.sql) -- sin roles asignados, match_chunks no
     lo recupera para nadie hasta que alguien lo asigne a proposito.
 
     Levanta ValueError con los nombres desconocidos; quien llama decide si eso
@@ -169,7 +169,7 @@ def ingerir(cur, org_id: str, doc, hash_: str, *,
     sha256 del archivo original: es lo que decide si hubo cambios.
 
     'estado' decide si el asistente puede usarlo YA o si primero lo tiene que
-    aprobar una persona (ver supabase/22_aprobacion_documentos.sql):
+    aprobar una persona (ver supabase/202608231328_aprobacion_documentos.sql):
 
       'vigente'    el default, y lo que usa cli/cargar_corpus.py. Ese CLI es
                    una herramienta de operacion que exige credenciales de
@@ -322,7 +322,7 @@ def aprobar(cur, org_id: str, document_id: str,
 
     La garantia de que un documento pendiente NO se use no vive aca sino en
     asistente.match_chunks, que filtra por estado='vigente' en SQL (ver
-    supabase/22). Esta funcion solo abre la puerta; no es la puerta.
+    supabase/202608231328_aprobacion_documentos). Esta funcion solo abre la puerta; no es la puerta.
 
     Solo actua sobre documentos en 'pendiente': aprobar uno ya vigente no
     tiene sentido, y aprobar uno 'obsoleto' lo resucitaria sin que nadie

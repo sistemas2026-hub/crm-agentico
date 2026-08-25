@@ -435,7 +435,7 @@ def _mutar_casos_manual(doc: dict, casos: list[str]) -> None:
     ('manual.casos': internet_lento, sin_senal_tv, consulta_saldo, ...). El
     modelo elige uno por turno, acotado por enum -- ver
     nucleo/seguimiento/escalamiento.py -- y queda guardado en la
-    conversacion (supabase/18_caso_conversacion.sql).
+    conversacion (supabase/202608180923_caso_conversacion.sql).
 
     Editable desde la interfaz a proposito: que casos atiende una empresa es
     dato del negocio, cambia con el uso, y pedir una sesion de desarrollo

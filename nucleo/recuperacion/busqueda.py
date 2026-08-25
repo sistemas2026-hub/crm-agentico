@@ -163,7 +163,7 @@ def recuperar(config, tenant: str, rol: str,
     de un umbral mal calibrado.
 
     'rol' filtra por documents.roles_permitidos (ver
-    supabase/03_documentos_roles.sql): un documento sin roles asignados no lo
+    supabase/202608111433_documentos_roles.sql): un documento sin roles asignados no lo
     recupera NADIE, fail-closed -- no es opcional, cada rol solo ve el corpus
     que alguien le asigno a proposito.
 

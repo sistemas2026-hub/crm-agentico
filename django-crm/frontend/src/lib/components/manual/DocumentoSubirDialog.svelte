@@ -12,7 +12,7 @@
    *
    * Sin roles marcados el documento queda cargado pero invisible para TODOS
    * los agentes -- fail-closed, mismo criterio que
-   * supabase/03_documentos_roles.sql. Se avisa antes de mandarlo, no se
+   * supabase/202608111433_documentos_roles.sql. Se avisa antes de mandarlo, no se
    * bloquea: puede ser intencional (cargarlo y asignarlo despues).
    *
    * @type {{
