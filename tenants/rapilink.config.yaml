@@ -2601,6 +2601,11 @@ herramientas:
     # tiene un colaborador de consultar sus casos desde el asistente. Las
     # otras tres herramientas del CRM ya usaban el nombre del servicio; esta
     # se quedo atras. Comprobado ejecutandola desde el contenedor.
+    # 'backend' es el NOMBRE DEL SERVICIO en compose, no un host: dentro de un
+    # contenedor 'localhost' es el contenedor mismo y no llega al CRM. La base
+    # de produccion tenia 'http://localhost:8000' y esa consulta no llegaba a
+    # ningun lado; confirmado con el colaborador el 25/08/2026 que era un error
+    # y no algo puesto a proposito. No revertir a localhost.
     base_url: http://backend:8000
     endpoint: /api/cases/
     metodo: GET
