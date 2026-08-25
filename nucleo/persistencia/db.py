@@ -888,14 +888,20 @@ def conversacion_de_caso(tenant: str, caso_id: str) -> dict | None:
     Devuelve None cuando el caso no lo creo el asistente: un ticket cargado a
     mano no tiene conversacion detras, y eso no es un error.
 
-    Deliberadamente NO devuelve 'datos_sesion' ni 'id_cliente': son
-    identificadores tecnicos del equipo del cliente, y esto alimenta una
-    pantalla, no un diagnostico.
+    SI devuelve 'id_cliente' y el serial del equipo. Este comentario decia lo
+    contrario -- que eran identificadores tecnicos y que una pantalla no los
+    necesitaba -- y era cierto mientras la pantalla solo mostraba el caso.
+    Dejo de serlo cuando el ticket tiene que ofrecerle al colaborador un
+    enlace directo al cliente en los sistemas externos.
+    Y son JUSTO estos los que hay que usar, no el nombre ni la cedula: armar
+    un enlace a partir del nombre abre el perfil de cualquier homonimo. El
+    identificador es lo unico que no se parece a otro.
     """
     with sesion(tenant) as (cur, org):
         cur.execute(
             """select id, canal, etiqueta, motivo_escalamiento, nombre_cliente,
-                      escalada_a_humano, necesita_atencion_humana, creado_en
+                      escalada_a_humano, necesita_atencion_humana, creado_en,
+                      id_cliente, datos_sesion
                from asistente.conversations
                where organization_id = %s and caso_id = %s
                limit 1""",
