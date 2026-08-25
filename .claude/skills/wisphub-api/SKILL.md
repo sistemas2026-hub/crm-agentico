@@ -272,6 +272,31 @@ por API. Una herramienta de creacion NO necesita enviarlo.
 
 ## Trampas que ya costaron tiempo
 
+**El campo `usuario` SOLO viene en el listado, nunca en el detalle** (verificado
+25/08/2026). Es el identificador interno del cliente
+(`mario-sabanagrande@rapilink-sas`) y es el que arman las URLs del panel web:
+
+```
+GET /api/clientes/5832/             ->  usuario: None
+GET /api/clientes/?id_servicio=5832 ->  usuario: 'mario-sabanagrande@rapilink-sas'
+```
+
+Mismo registro, mismo proveedor, dos endpoints, respuestas distintas — el
+mismo patron que esta skill ya documenta para `usuario_rb`/`servicio`. Buscarlo
+en el detalle lleva a concluir que el campo no existe, y de ahi a **derivarlo
+del nombre** (pasar "MARIO SABANAGRANDE" a `mario-sabanagrande`). No hacerlo:
+dos clientes con nombre parecido dan un slug parecido, y el enlace abre la
+ficha de otra persona. El identificador es lo unico que no se parece a otro.
+
+Las URLs del panel (`wisphub.io`, distinto de `api.wisphub.io`):
+
+```
+perfil    /clientes/ver/{usuario}/
+trafico   /trafico/semana/servicio/{usuario}/{id_servicio}/
+ping      /clientes/ping/{usuario}/{id_servicio}/
+```
+
+
 **Un campo opcional puede aceptar AUSENTE y rechazar `null`.** Verificado en
 `/api/clientes/{id}/ping/` (agosto 2026): `interfaz` omitido responde 202, e
 `interfaz: ""` tambien, pero `{"interfaz": null}` devuelve
