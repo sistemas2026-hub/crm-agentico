@@ -50,6 +50,15 @@
   let verConversacion = $state(true);
 
   /**
+   * Los enlaces a los sistemas del ISP, si el caso vino del asistente y llego
+   * a identificar al cliente. Null en cualquier otro caso -- y eso no es un
+   * error, es lo normal en buena parte de los tickets.
+   */
+  let enlaces = $derived(
+    Object.keys(data.origen?.enlaces ?? {}).length ? data.origen.enlaces : null
+  );
+
+  /**
    * El canal por el que entro la conversacion, legible.
    *
    * Se muestra el valor REAL y no un 'WhatsApp' fijo: el canal lo declara
@@ -309,6 +318,80 @@
               </p>
             {/if}
           </section>
+
+          {#if enlaces}
+            <!-- ============================================================
+                 A DONDE SALTAR SIN VOLVER A BUSCAR AL CLIENTE
+                 Los enlaces los arma el motor, no esta pantalla: es el que
+                 conoce el identificador de cada sistema y el dominio de cada
+                 empresa. Y se arman con el IDENTIFICADOR, nunca con el
+                 nombre -- dos clientes con nombre parecido dan un enlace
+                 parecido, y ahi se abre la ficha de otra persona.
+                 ============================================================ -->
+            <section class="tecnica">
+              <h2>Información técnica del cliente</h2>
+              <div class="tecnica-grilla">
+                <article class="ficha ficha-olt">
+                  <header>
+                    <span class="ficha-nombre">Equipo del cliente — ONT</span>
+                  </header>
+                  {#if enlaces.smartolt_ont}
+                    <dl>
+                      <dt>Serial</dt>
+                      <dd><code>{enlaces.sn_onu}</code></dd>
+                    </dl>
+                    <a class="v2-btn v2-btn-sm" href={enlaces.smartolt_ont}
+                       target="_blank" rel="noopener">Ver la ONT ↗</a>
+                  {:else}
+                    <!-- Caso NORMAL, no una falla: se escala una conversacion
+                         justamente cuando el asistente no pudo avanzar, y eso
+                         muchas veces incluye no haber identificado el equipo.
+                         Medido: de 85 conversaciones, las que llegan a ticket
+                         tienden a ser las que no lo tienen. -->
+                    <p class="sin-dato">
+                      Sin identificador del equipo. El asistente no llegó a
+                      identificarlo en esta conversación.
+                    </p>
+                  {/if}
+                </article>
+
+                <article class="ficha ficha-isp">
+                  <header>
+                    <span class="ficha-nombre">Servicio del cliente</span>
+                  </header>
+                  {#if enlaces.wisphub_perfil}
+                    {#if enlaces.ip}
+                      <dl>
+                        <dt>IP</dt>
+                        <dd><code>{enlaces.ip}</code></dd>
+                      </dl>
+                    {/if}
+                    <div class="ficha-acciones">
+                      <a class="v2-btn v2-btn-sm" href={enlaces.wisphub_perfil}
+                         target="_blank" rel="noopener">Ficha ↗</a>
+                      {#if enlaces.wisphub_ping}
+                        <a class="v2-btn v2-btn-sm" href={enlaces.wisphub_ping}
+                           target="_blank" rel="noopener">Ping ↗</a>
+                      {/if}
+                      {#if enlaces.wisphub_trafico}
+                        <a class="v2-btn v2-btn-sm" href={enlaces.wisphub_trafico}
+                           target="_blank" rel="noopener">Tráfico ↗</a>
+                      {/if}
+                      {#if enlaces.router}
+                        <a class="v2-btn v2-btn-sm" href={enlaces.router}
+                           target="_blank" rel="noopener">Router ↗</a>
+                      {/if}
+                    </div>
+                  {:else}
+                    <p class="sin-dato">
+                      Sin identificador del cliente. No se puede abrir su ficha
+                      desde acá sin arriesgar abrir la de otra persona.
+                    </p>
+                  {/if}
+                </article>
+              </div>
+            </section>
+          {/if}
 
           {#if agente.turnos.length}
             <section class="conversacion-cliente">
@@ -717,6 +800,66 @@
     align-items: center;
     gap: 5px;
     flex-wrap: wrap;
+  }
+
+  .tecnica {
+    margin-bottom: 18px;
+  }
+  .tecnica h2 {
+    font-size: 11.5px;
+    font-weight: 650;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--v2-muted, #6b7378);
+    margin: 0 0 9px;
+  }
+  .tecnica-grilla {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 12px;
+  }
+  .ficha {
+    border: 1px solid var(--v2-line, #e3e4e1);
+    border-radius: 10px;
+    background: var(--v2-card, #fff);
+    padding: 12px 14px 13px;
+    /* El color entra por un filete lateral y no por el fondo: dos tarjetas
+       de fondo saturado compiten entre si y ninguna resalta. */
+    border-left: 3px solid var(--acento);
+  }
+  .ficha-olt {
+    --acento: #e8590c;
+  }
+  .ficha-isp {
+    --acento: #2f6fed;
+  }
+  .ficha-nombre {
+    font-size: 12.5px;
+    font-weight: 650;
+  }
+  .ficha dl {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 2px 10px;
+    margin: 8px 0 10px;
+    font-size: 12px;
+  }
+  .ficha dt {
+    color: var(--v2-muted, #8a9196);
+  }
+  .ficha dd {
+    margin: 0;
+  }
+  .ficha-acciones {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .sin-dato {
+    margin: 8px 0 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--v2-muted, #8a9196);
   }
 
   .quien {
