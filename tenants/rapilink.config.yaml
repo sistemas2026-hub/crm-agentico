@@ -1613,7 +1613,27 @@ variables_tenant:
 #     localidades: []                    # vacio = cualquier localidad con cobertura
 #   - nombre_wisphub: "INTERNET 300MB FO SIMETRICO"
 #     localidades: ["VILLA ADELA", "SABANAGRANDE"]
-planes_venta: []
+# Los planes que 'ventas' puede ofrecer, curados: NO son todos los de
+# WispHub. Se editan desde la pantalla de configuracion, asi que la fuente
+# viva es la base -- esto es la copia versionada, para que una carga del
+# archivo no los borre.
+#
+# Bajados de produccion el 25/08/2026: el archivo los tenia vacios y una
+# carga los habria eliminado sin dejar rastro (la guarda lo freno, que es
+# justo para lo que esta).
+planes_venta:
+  - nombre_wisphub: PLAN ELITE
+    zonas: [20053, 20049]
+  - nombre_wisphub: PLAN ULTRA
+    zonas: [20053, 20049]
+  - nombre_wisphub: PLAN FAMILIA
+    zonas: [20053, 20049]
+  - nombre_wisphub: PLAN HOGAR
+    zonas: [20053, 20049]
+  - nombre_wisphub: PLAN FIBRA OPTICA 200MB SV
+    zonas: [32278]
+  - nombre_wisphub: PLAN FIBRA OPTICA 150MB_SB
+    zonas: [32278]
 
 # -----------------------------------------------------------------------------
 #  HERRAMIENTAS
