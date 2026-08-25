@@ -827,6 +827,19 @@ roles:
       cambiar una sola deja al cliente conectado a la otra sin entender que
       paso.
 
+      SI EL SERVICIO ES DE OTRA PERSONA. Pasa seguido -- un hijo que gestiona
+      el internet de la madre. NO lo rechaces y no le hagas un
+      interrogatorio: seguis igual, le preguntas si el titular esta de
+      acuerdo, y le avisas que una persona lo va a revisar antes de
+      aplicarlo. Cuando llames a registrar_pedido_wifi manda
+      'lo_pide_el_titular' en 'no', para que quede escrito en el ticket.
+
+      Y pedile igual el nombre o la clave que tiene hoy: acá esa
+      comprobacion vale MAS que en cualquier otro caso -- alguien que no
+      sabe el valor actual del servicio de otro es justo lo que quien
+      valide tiene que mirar. Vos no decidis si corresponde o no; lo dejas
+      anotado y decide la persona.
+
       RED OCULTA. Si pide que la red no se vea, preguntale si sabe conectar
       un equipo a una red oculta, porque hay que escribir el nombre a mano y
       no aparece en la lista. Anota la respuesta tal cual: si dice que si,
@@ -1037,7 +1050,7 @@ roles:
       # porque el modelo no la necesita para redactar: ya sabe si el pedido
       # es valido y que corregir. Un dato que no hace falta para contestar no
       # tiene por que entrar al prompt.
-      registrar_pedido_wifi: [pedido, pedido_valido, problemas, cambia_nombre,
+      registrar_pedido_wifi: [pedido, lo_pide_un_tercero, pedido_valido, problemas, cambia_nombre,
         cambia_clave, red_oculta, nombre_nuevo, clave_debil,
         nombre_actual_segun_cliente]
       # Con notacion de punto, NO el objeto entero: 'ping-1' trae adentro el
@@ -2012,6 +2025,12 @@ herramientas:
       clave_nueva: {param: clave_nueva, tipo: texto}
       # 'si' deja la red oculta, 'no' la vuelve visible. Se omite cuando el
       # cliente no dijo nada al respecto -- distinto de decir que no.
+      # 'no' cuando quien escribe dijo que el servicio es de otra persona.
+      # Se omite si no dijo nada: no preguntarlo de oficio a todo el mundo.
+      lo_pide_el_titular:
+        param: lo_pide_el_titular
+        tipo: enum
+        valores: {"si": "si", "no": "no"}
       red_oculta:
         param: red_oculta
         tipo: enum

@@ -980,3 +980,26 @@ casos:
       # cuantos va a reconectar a mano.
       usa: [consultar_dispositivos_conectados]
       no_usa: [reiniciar_ont]
+
+  - nombre: pedir el wifi de otra persona queda anotado, no se rechaza
+    rol: soporte_tecnico_cliente
+    # Pasa seguido: un hijo que gestiona el internet de la madre. La decision
+    # de producto fue NO rechazarlo -- se toma el pedido y se deja escrito que
+    # lo pide un tercero, para que quien valide lo vea antes de aplicarlo.
+    #
+    # Lo que se afirma es que sigue el flujo y NO le cierra la puerta. Que el
+    # aviso quede en el ticket depende de que el modelo mande
+    # 'lo_pide_el_titular', y eso es prompt: se comprueba con la traza, no
+    # con la redaccion.
+    mensajes:
+      - "quiero cambiar la clave del wifi de mi mama"
+      - "ella es la titular, la clave actual es MiClaveDeCasa"
+      - "ponele Rapilink2026!"
+      # Cuarto turno: el flujo termina mostrando viejo/nuevo y ESPERANDO que
+      # el cliente confirme. Sin este mensaje el caso se corta antes de que la
+      # herramienta corra, y falla por una razon que no es la que prueba.
+      - "si, ella esta de acuerdo"
+    espera:
+      usa: [registrar_pedido_wifi]
+      responde_sin: ["no puedo ayudarte", "solo el titular puede",
+                     "ya quedo cambiado", "ya cambie"]

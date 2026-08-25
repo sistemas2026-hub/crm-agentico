@@ -242,6 +242,15 @@ def procesar(herramienta, argumentos: dict, tenant: str = "",
     # solo maneja cadenas; se traduce aca a un booleano, que es lo que leen
     # las condiciones de 'ticket_al_escalar'. Ausente = el cliente no dijo
     # nada de ocultarla, que NO es lo mismo que pedir que sea visible.
+    # Quien escribe puede no ser el titular -- "quiero cambiar el wifi de mi
+    # mama" es un caso real y frecuente. No se rechaza: se ANOTA, y decide la
+    # persona que valida el pedido contra el sistema antes de aplicarlo.
+    #
+    # Esto es un AVISO, no una garantia: que el modelo reconozca la frase
+    # depende del prompt, y el prompt es guia (PRD 7.4). La garantia sigue
+    # siendo el humano contrastando el valor actual que dijo el cliente.
+    tercero = str(argumentos.get("lo_pide_el_titular") or "").strip().lower() in ("no", "false")
+
     crudo = argumentos.get("red_oculta")
     ocultar = None if crudo in (None, "") else str(crudo).strip().lower() in ("si", "true", "1")
 
@@ -278,8 +287,15 @@ def procesar(herramienta, argumentos: dict, tenant: str = "",
         partes.append("volver la red VISIBLE")
     frase = ", ".join(partes)
 
+    # El aviso va DENTRO de 'pedido' y no en un campo aparte: ese campo es el
+    # unico que sobrevive al recorte de 160 caracteres de la traza, asi que un
+    # dato que puede cambiar la decision no puede quedar afuera de el.
+    if frase and tercero:
+        frase += " -- LO PIDE UN TERCERO, no el titular del servicio"
+
     return {
         "pedido": (frase[0].upper() + frase[1:]) if frase else "sin datos",
+        "lo_pide_un_tercero": tercero,
         "pedido_valido": not problemas,
         # Frases listas para leerle al cliente. Van en plural aunque haya una
         # sola: se le dicen TODAS juntas, no de a una por turno -- corregir un
