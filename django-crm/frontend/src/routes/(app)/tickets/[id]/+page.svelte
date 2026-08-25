@@ -340,9 +340,35 @@
                   </header>
                   {#if enlaces.smartolt_ont}
                     <dl>
+                      {#if enlaces.equipo?.onu_status}
+                        <dt>Estado</dt>
+                        <dd>{enlaces.equipo.onu_status}</dd>
+                      {/if}
+                      {#if enlaces.equipo?.onu_signal}
+                        <dt>Señal</dt>
+                        <dd>
+                          {enlaces.equipo.onu_signal}
+                          {#if enlaces.equipo.onu_signal_1490}
+                            <span class="v2-sub">({enlaces.equipo.onu_signal_1490})</span>
+                          {/if}
+                        </dd>
+                      {/if}
+                      {#if enlaces.equipo?.last_status_change}
+                        <dt>Últ. cambio</dt>
+                        <dd>{enlaces.equipo.last_status_change}</dd>
+                      {/if}
                       <dt>Serial</dt>
                       <dd><code>{enlaces.sn_onu}</code></dd>
                     </dl>
+                    <!-- Si la consulta no respondio, el enlace igual se
+                         muestra: sin refresco automatico, una tarjeta vacia
+                         no se arregla sola. -->
+                    {#if !enlaces.equipo || !Object.keys(enlaces.equipo).length}
+                      <p class="sin-dato">
+                        No se pudo leer el estado del equipo. El enlace sigue
+                        sirviendo para verlo en el panel.
+                      </p>
+                    {/if}
                     <a class="v2-btn v2-btn-sm" href={enlaces.smartolt_ont}
                        target="_blank" rel="noopener">Ver la ONT ↗</a>
                   {:else}
@@ -363,10 +389,32 @@
                     <span class="ficha-nombre">Servicio del cliente</span>
                   </header>
                   {#if enlaces.wisphub_perfil}
-                    {#if enlaces.ip}
+                    <!-- El orden no es casual: primero con QUIEN se habla
+                         (nombre y cedula, para confirmarlo sin salir a
+                         buscarlo), despues QUE tiene contratado, y al final
+                         el dato tecnico. -->
+                    {#if enlaces.cliente}
                       <dl>
-                        <dt>IP</dt>
-                        <dd><code>{enlaces.ip}</code></dd>
+                        {#if enlaces.cliente.nombre}
+                          <dt>Cliente</dt>
+                          <dd>{enlaces.cliente.nombre}</dd>
+                        {/if}
+                        {#if enlaces.cliente.cedula}
+                          <dt>Cédula</dt>
+                          <dd><code>{enlaces.cliente.cedula}</code></dd>
+                        {/if}
+                        {#if enlaces.cliente.estado}
+                          <dt>Servicio</dt>
+                          <dd>{enlaces.cliente.estado}</dd>
+                        {/if}
+                        {#if enlaces.cliente.plan}
+                          <dt>Plan</dt>
+                          <dd>{enlaces.cliente.plan}</dd>
+                        {/if}
+                        {#if enlaces.ip}
+                          <dt>IP</dt>
+                          <dd><code>{enlaces.ip}</code></dd>
+                        {/if}
                       </dl>
                     {/if}
                     <div class="ficha-acciones">

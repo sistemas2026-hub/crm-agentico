@@ -2067,7 +2067,12 @@ def _estado_equipo(config, sn_onu: str, tenant: str) -> dict:
 # y no se devuelve la fila entera a proposito: ese registro trae 54 campos,
 # incluidas CUATRO contraseñas y las coordenadas del domicilio (ver la skill
 # del proveedor). Una lista blanca, como en todo el resto del sistema.
-_CAMPOS_FICHA = ("usuario", "ip", "estado", "nombre")
+# 'cedula' entra por decision explicita del usuario (25/08/2026): es dato
+# personal y por eso no estaba, pero quien atiende el ticket la necesita para
+# confirmar con quien habla sin salir a buscarla. Va SOLO a la pantalla de un
+# colaborador -- nunca a una respuesta al cliente, que sigue gobernada por la
+# lista blanca del rol.
+_CAMPOS_FICHA = ("usuario", "ip", "estado", "nombre", "cedula")
 
 
 def _ficha_cliente(config, id_cliente, tenant: str) -> dict:
