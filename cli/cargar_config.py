@@ -65,6 +65,7 @@ RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ))
 
 from nucleo.config import TenantConfig, cargar_config   # noqa: E402
+from nucleo.config.editor import SECCIONES_EDITABLES    # noqa: E402
 from nucleo.persistencia.conexion import dsn            # noqa: E402
 
 load_dotenv(RAIZ / ".env", override=True)
@@ -135,8 +136,15 @@ def _organizacion(cur, slug: str, org_id: str | None = None) -> str:
 #
 # 'herramientas' entra por _mutar_plazo_visita_tecnica, que edita
 # fechas_automaticas de una herramienta puntual -- no es solo catalogo.
-SECCIONES_QUE_EDITA_LA_INTERFAZ = ("roles", "canales", "identidad", "persona",
-                                   "herramientas")
+#  Se importa de nucleo/config/editor.py en vez de repetirla aca. Estaba
+#  escrita a mano, con un comentario que pedia acordarse de actualizarla cada
+#  vez que el editor aprendiera a escribir una seccion nueva -- y no se
+#  actualizo: 'planes_venta', 'localidades', 'variables_tenant' y 'manual'
+#  quedaron fuera. La guarda daba por bueno un cambio que habria borrado 6
+#  planes curados y 128 localidades sincronizadas sin avisar (medido el
+#  23/08/2026). Ahora la lista vive junto a los mutadores que la vuelven
+#  necesaria, y esto la lee.
+SECCIONES_QUE_EDITA_LA_INTERFAZ = SECCIONES_EDITABLES
 
 
 def _hojas(valor, prefijo=""):
@@ -198,8 +206,28 @@ def _lo_que_pisaria(guardado: dict, nuevo: dict) -> list[str]:
                           f"se BORRARIA")
 
     for seccion in SECCIONES_QUE_EDITA_LA_INTERFAZ:
-        viejo = _hojas(guardado.get(seccion), seccion)
-        nuevo_plano = _hojas(nuevo.get(seccion), seccion)
+        en_base = guardado.get(seccion)
+        en_archivo = nuevo.get(seccion)
+
+        # UNA SECCION QUE SE VACIA ENTERA no la ve la comparacion hoja por
+        # hoja de mas abajo: esa recorre las rutas de la base y solo avisa si
+        # la MISMA ruta existe en el archivo. Una lista vacia no produce
+        # ninguna ruta, asi que 'la base tiene 6 planes y el archivo ninguno'
+        # no coincidia con nada y pasaba en silencio.
+        #
+        # Es el caso mas destructivo de todos y era el unico invisible.
+        # Medido el 23/08/2026: la base tenia 6 planes de venta curados y 128
+        # localidades sincronizadas que el archivo no trae, y la guarda daba
+        # el visto bueno.
+        if en_base and not en_archivo:
+            cuantos = len(en_base) if isinstance(en_base, (list, dict)) else 1
+            lineas.append(
+                f"{seccion}: la base tiene {cuantos} y el archivo lo deja "
+                f"VACIO -- se BORRARIA entero")
+            continue
+
+        viejo = _hojas(en_base, seccion)
+        nuevo_plano = _hojas(en_archivo, seccion)
         for ruta, valor in viejo.items():
             # Solo lo que ya existe en el archivo con OTRO valor. Una clave que
             # el archivo no trae la completa el esquema con su default, y

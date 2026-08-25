@@ -78,6 +78,33 @@ from .schema import RE_NOMBRE_REF, TenantConfig, _barrer_secretos
 
 _RE_NOMBRE_ROL = re.compile(r"^[a-z][a-z0-9_]{1,29}$")
 
+# Las claves de primer nivel que ALGUNA funcion de este modulo escribe, o sea
+# lo que una persona puede cambiar desde la interfaz sin tocar el YAML.
+#
+# Vive aca y no en cli/cargar_config.py a proposito: esa lista existe para
+# que cargar el archivo encima de la base no borre en silencio lo que alguien
+# edito desde una pantalla, y estaba escrita a mano en el CLI con un
+# comentario que pedia acordarse de actualizarla. No se actualizo: cuando se
+# agregaron 'planes_venta', 'localidades', 'variables_tenant' y
+# 'manual.casos' quedaron fuera, y la guarda daba por bueno un cambio que
+# habria borrado 6 planes curados y 128 localidades sincronizadas sin decir
+# una palabra (medido el 23/08/2026, antes de que alguien lo pisara).
+#
+# Poniendola junto a los mutadores, quien agregue uno la ve. Es el mismo
+# criterio que TenantConfig.SINCRONIZADOS: la declaracion vive donde esta el
+# codigo que la vuelve necesaria.
+SECCIONES_EDITABLES = (
+    "roles",              # _mutar_crear / _mutar_editar / _mutar_borrar
+    "canales",            # _mutar_canal_whatsapp
+    "identidad",          # _mutar_identidad_descripcion
+    "persona",            # _mutar_persona
+    "herramientas",       # _mutar_plazo_visita_tecnica, _mutar_agregar_herramienta
+    "planes_venta",       # _mutar_planes_venta
+    "localidades",        # _mutar_localidades
+    "variables_tenant",   # _mutar_variable_tenant / _mutar_borrar_variable_tenant
+    "manual",             # _mutar_casos_manual
+)
+
 
 class ErrorEdicion(ValueError):
     pass
