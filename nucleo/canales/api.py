@@ -1998,7 +1998,8 @@ def _enlaces_externos(config, conv: dict, tenant: str) -> dict:
     # vacio y el listado lo trae completo. Es el mismo patron que esa API
     # ya mostro otras veces: dos endpoints del mismo proveedor dicen cosas
     # distintas del mismo registro (ver la skill del proveedor en .claude/).
-    usuario, ip = _usuario_externo(config, id_cliente, tenant)
+    ficha = _ficha_cliente(config, id_cliente, tenant)
+    usuario, ip = ficha.get("usuario"), ficha.get("ip")
 
     if panel and usuario:
         enlaces["wisphub_perfil"] = f"{panel}/clientes/ver/{usuario}/"
@@ -2015,19 +2016,74 @@ def _enlaces_externos(config, conv: dict, tenant: str) -> dict:
     if olt and sn_onu:
         enlaces["smartolt_ont"] = f"{olt}/onu/details/{sn_onu}"
         enlaces["sn_onu"] = sn_onu
+        # El estado del equipo AHORA, para no tener que salir a mirarlo.
+        # Una sola vez al abrir el ticket y sin refresco automatico: quien
+        # quiera el dato fresco entra por el enlace, que siempre lo esta.
+        enlaces["equipo"] = _estado_equipo(config, sn_onu, tenant)
+
+    # La ficha del cliente va aparte de los enlaces: son datos, no destinos.
+    if ficha:
+        enlaces["cliente"] = {k: v for k, v in ficha.items() if k != "usuario"}
 
     return enlaces
 
 
-def _usuario_externo(config, id_cliente, tenant: str):
+# Las herramientas que dan el estado del equipo. Se piden por NOMBRE y no por
+# endpoint: son las livianas (2-3 s cada una). Existe una tercera que trae
+# ademas la causa de la ultima caida, pero tarda ~10 s y el proveedor pide no
+# usarla en consultas repetidas -- diez segundos al abrir cada ticket se
+# sienten, y esa causa se puede ver entrando por el enlace.
+_HERRAMIENTAS_EQUIPO = ("consultar_estado_ont", "consultar_senal_ont")
+
+
+def _estado_equipo(config, sn_onu: str, tenant: str) -> dict:
     """
-    ('usuario', 'ip') del cliente en el sistema externo, o (None, None).
+    Estado y niveles opticos del equipo, o {} si no se pudo leer.
+
+    Se consulta cada herramienta por separado y se sigue aunque una falle: que
+    no responda la señal no tiene por que ocultar que el equipo esta en linea.
+    Y si fallan las dos, la pantalla muestra el enlace igual -- sin refresco
+    automatico, una tarjeta vacia no se arregla sola.
+    """
+    salida = {}
+    por_nombre = {h.nombre: h for h in config.herramientas}
+    for nombre in _HERRAMIENTAS_EQUIPO:
+        herr = por_nombre.get(nombre)
+        if herr is None:
+            continue
+        try:
+            datos = ejecutor_http.ejecutar(
+                herr, {"sn_onu": sn_onu}, tenant,
+                variables_tenant=config.variables_tenant)
+            if isinstance(datos, dict):
+                salida.update({k: v for k, v in datos.items()
+                               if isinstance(v, (str, int, float, bool)) and v != ""})
+        except Exception as e:
+            print(f"[enlaces] '{nombre}' no respondio: {type(e).__name__}: {e}")
+    return salida
+
+
+# Lo que la ficha del cliente aporta a la pantalla del ticket. Se nombra aca
+# y no se devuelve la fila entera a proposito: ese registro trae 54 campos,
+# incluidas CUATRO contraseñas y las coordenadas del domicilio (ver la skill
+# del proveedor). Una lista blanca, como en todo el resto del sistema.
+_CAMPOS_FICHA = ("usuario", "ip", "estado", "nombre")
+
+
+def _ficha_cliente(config, id_cliente, tenant: str) -> dict:
+    """
+    Lo que se sabe del cliente en el sistema del ISP: como identificarlo, su
+    IP, su plan y si el servicio esta al dia. Diccionario vacio si no se pudo.
+
+    UNA sola llamada, la misma que ya hacia falta para armar los enlaces: esa
+    respuesta ya trae el plan y el estado, asi que llenar la ficha entera no
+    cuesta ninguna consulta extra.
 
     Nunca rompe el turno: si la API no responde, la pantalla muestra el ticket
-    sin los enlaces en vez de no mostrar el ticket.
+    sin la ficha en vez de no mostrar el ticket.
     """
     if not id_cliente:
-        return None, None
+        return {}
     try:
         # Se elige por lo que la herramienta SABE HACER, no por su endpoint.
         # Cuatro herramientas del catalogo apuntan a la misma ruta y solo una
@@ -2040,18 +2096,25 @@ def _usuario_externo(config, id_cliente, tenant: str):
                      if h.tipo == "http" and "id_servicio" in (h.filtros_verificados or {})),
                     None)
         if herr is None:
-            return None, None
+            return {}
         datos = ejecutor_http.ejecutar(
-            herr, {"id_servicio": str(id_cliente)}, tenant)
+            herr, {"id_servicio": str(id_cliente)}, tenant,
+            variables_tenant=config.variables_tenant)
         filas = datos.get("results") if isinstance(datos, dict) else None
         fila = (filas or [None])[0]
         if not isinstance(fila, dict):
-            return None, None
-        return fila.get("usuario"), fila.get("ip")
+            return {}
+        ficha = {c: fila.get(c) for c in _CAMPOS_FICHA if fila.get(c)}
+        # El plan viene anidado ({"id":..., "nombre":...}); se guarda su
+        # nombre, que es lo unico que le dice algo a quien lee el ticket.
+        plan = fila.get("plan_internet")
+        if isinstance(plan, dict) and plan.get("nombre"):
+            ficha["plan"] = plan["nombre"]
+        return ficha
     except Exception as e:
-        print(f"[enlaces] no se pudo leer el usuario del sistema externo: "
+        print(f"[enlaces] no se pudo leer la ficha del cliente: "
               f"{type(e).__name__}: {e}")
-        return None, None
+        return {}
 
 
 @app.get("/conversaciones/<id_conversacion>/mensajes")
