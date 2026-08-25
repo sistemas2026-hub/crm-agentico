@@ -508,18 +508,28 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
         # no llegaba nunca.
         por_nombre = {h.nombre: h for h in config.herramientas}
         forzado = None
+        motivo_forzado = ""
         for llamada in registro_herramientas:
-            if not llamada.get("codigo_error"):
-                continue
             herr = por_nombre.get(llamada["herramienta"])
-            if herr is not None and herr.escalar_si_falla:
-                forzado = herr.escalar_si_falla
+            if herr is None:
+                continue
+            if llamada.get("codigo_error"):
+                if herr.escalar_si_falla:
+                    forzado = herr.escalar_si_falla
+                    motivo_forzado = "no pudo ejecutarse"
+                    break
+            # El espejo: la herramienta SALIO BIEN y su exito es, justamente,
+            # un pedido que tiene que ejecutar una persona. Ver
+            # 'escalar_al_completar' en schema.py.
+            elif herr.escalar_al_completar:
+                forzado = herr.escalar_al_completar
+                motivo_forzado = "se completo y su resultado necesita una persona"
                 break
         if forzado:
             evaluacion = dict(evaluacion or {})
             if not evaluacion.get("escalar"):
                 print(f"[escalamiento] forzado por '{forzado}': una herramienta "
-                      f"con escalar_si_falla no pudo ejecutarse")
+                      f"{motivo_forzado}")
             evaluacion["escalar"] = True
             evaluacion["motivo"] = forzado
             evaluacion["necesita_humano"] = True

@@ -1973,6 +1973,11 @@ herramientas:
     # toque ningun sistema externo: por eso exige confirmacion.
     solo_lectura: false
     requiere_confirmacion: true
+    # Que esta herramienta termine bien ES el pedido de una persona: valida el
+    # cambio y lo deja tomado, pero aplicarlo no lo puede hacer el asistente.
+    # Sin esto el pedido moria en la conversacion: el cliente escuchaba "un
+    # colaborador lo aplica" y no habia ningun colaborador enterado.
+    escalar_al_completar: pedido_para_ejecutar
     roles_permitidos: [soporte_tecnico_cliente]
     # Los argumentos que el modelo puede mandar. Se declaran aca porque es de
     # donde el motor arma el esquema de la herramienta (ver motor.py) -- el
@@ -3615,8 +3620,16 @@ identidad_externa:
   campo_nombre: nombre
 
 escalamiento:
+  # 'pedido_para_ejecutar' es el septimo, y el unico que NO describe un
+  # problema: los otros seis son "algo salio mal o el cliente exige una
+  # persona". Este es lo contrario -- el asistente hizo su trabajo bien, tomo
+  # un pedido que no puede aplicar el, y por eso tiene que llegarle a alguien.
+  #
+  # Nadie lo elige a mano: lo fuerza en codigo la herramienta que lo declara
+  # con 'escalar_al_completar'. Esta en esta lista porque el validador exige
+  # que todo motivo exista, no para que el modelo lo proponga.
   activar_si: [frustracion_detectada, tres_fallos_seguidos, solicitud_explicita, duda_de_identidad,
-               visita_tecnica_requerida, sin_datos_para_diagnosticar]
+               visita_tecnica_requerida, sin_datos_para_diagnosticar, pedido_para_ejecutar]
   destino_rol: soporte
   # Este texto REEMPLAZA la respuesta del asistente cuando escala (ver
   # nucleo/canales/api.py), no se le suma -- asi que tiene que sostenerse

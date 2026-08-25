@@ -922,6 +922,22 @@ class Herramienta(Base):
     # solo", conviene que lo decida el codigo y no un modelo. Mismo criterio
     # que 'exige_turno_propio' y que el normalizador de tratamiento.
     escalar_si_falla: str | None = None
+    # El espejo del anterior: escala cuando la herramienta SALE BIEN.
+    #
+    # Suena al reves hasta que existe una herramienta cuyo exito ES el pedido
+    # de una persona: 'registrar un pedido que el asistente no puede ejecutar'
+    # termina bien y JUSTO POR ESO tiene que llegarle a alguien. Sin esto, el
+    # asistente le dice al cliente que un colaborador lo va a aplicar y no hay
+    # ningun colaborador enterado -- medido el 25/08/2026 sobre 12
+    # conversaciones reales: las 12 con escalada=False y sin ticket.
+    #
+    # Va aca y no en 'escalamiento.activar_si' a secas por dos motivos. Uno:
+    # que la herramienta corrio bien es un HECHO, no una interpretacion, y no
+    # hay por que pedirle al modelo que lo juzgue (PRD 7.4). Dos: 'activar_si'
+    # gobierna TODAS las conversaciones, y un motivo suelto ahi se puede
+    # elegir en cualquiera -- declarado por herramienta, solo alcanza a quien
+    # lo pide.
+    escalar_al_completar: str | None = None
     servicios_reportables: list[str] = Field(default_factory=list)
     exige_turno_propio: bool = False
     cache: bool = False
@@ -1555,6 +1571,12 @@ class TenantConfig(Base):
         # ningun error al ejecutarse: escalaria con una razon que el resto
         # del sistema no reconoce y que nadie puede filtrar en la bandeja.
         for h in self.herramientas:
+            if h.escalar_al_completar and h.escalar_al_completar not in self.escalamiento.activar_si:
+                raise ValueError(
+                    f"herramientas['{h.nombre}'].escalar_al_completar dice "
+                    f"'{h.escalar_al_completar}', que no esta en "
+                    f"escalamiento.activar_si -- el motivo tiene que existir "
+                    f"o la escalada quedaria sin razon declarada")
             if h.escalar_si_falla and h.escalar_si_falla not in self.escalamiento.activar_si:
                 raise ValueError(
                     f"herramienta '{h.nombre}': 'escalar_si_falla' declara el "
