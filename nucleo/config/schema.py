@@ -50,7 +50,7 @@ import re
 import unicodedata
 from datetime import date
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, ClassVar, Literal
 
 import yaml
 from pydantic import (BaseModel, ConfigDict, Field, ValidationError,
@@ -1475,6 +1475,22 @@ class PlanVenta(Base):
 # =============================================================================
 
 class TenantConfig(Base):
+    # Campos que NO son configuracion sino la SALIDA de un proceso: los
+    # produce el sistema, no los escribe una persona, y se reemplazan enteros
+    # cada vez que ese proceso corre.
+    #
+    # cli/cargar_config.py los excluye al exportar a YAML. Sin eso, un
+    # 'git diff' del archivo mostraria cientos de lineas generadas por
+    # maquina cambiando en cada sincronizacion -- hoy 'localidades' son 128
+    # localidades con sus zonas y conteos-- y el cambio real quedaria
+    # enterrado ahi. Viven solo en la base, que es donde el motor los lee.
+    #
+    # Vive aca y no en el exportador a proposito: quien agrega un campo
+    # sincronizado nuevo lo declara junto al campo, no en un archivo de cli/
+    # que no va a recordar tocar.
+    SINCRONIZADOS: ClassVar[tuple[str, ...]] = (
+        "localidades", "localidades_actualizado_en")
+
     version: int = 1
     identidad: Identidad
     marca: Marca = Field(default_factory=Marca)

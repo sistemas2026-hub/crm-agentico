@@ -340,12 +340,46 @@ def _fusionar(destino, completo, minimo):
     if not isinstance(completo, (dict, list)) and _como_json(destino) == completo:
         return destino
 
+    # VACIAR EN EL SITIO ROMPE EL ARCHIVO. Si lo que hay en la base es una
+    # coleccion vacia y el archivo tenia contenido, no se vacia el nodo
+    # original: se devuelve uno nuevo. Vaciar un CommentedMap/CommentedSeq
+    # deja sus comentarios sin nada a que colgarse, y ruamel emite YAML
+    # invalido -- el valor cae en la columna 0 y la clave siguiente termina
+    # pegada en la misma linea.
+    #
+    # Encontrado el 23/08/2026 con 'areas' e 'identidad_externa': dos campos
+    # que estaban en el YAML y todavia no en la base. --exportar quedo
+    # inutilizable (fallo cerrado, sin escribir), y sin el no habia camino
+    # base -> archivo justo cuando hacia falta para fusionar el trabajo de
+    # dos personas.
+    #
+    # Se pierden los comentarios de ADENTRO del bloque, no el encabezado que
+    # cuelga de la clave. Es la unica salida: el bloque ya no tiene contenido
+    # al que referirse.
+    if isinstance(completo, (dict, list)) and not completo and destino:
+        return type(completo)()
+
     if isinstance(destino, dict) and isinstance(completo, dict):
         minimo = minimo if isinstance(minimo, dict) else {}
         for clave in [k for k in destino if k not in completo]:
             del destino[clave]
         for clave, valor in completo.items():
             if clave in destino:
+                # Un bloque con contenido que en la base quedo VACIO o NULO se
+                # borra y se vuelve a poner, en vez de asignarle el valor
+                # nuevo encima. Los comentarios de ese bloque estan anclados a
+                # la clave en el mapa padre: si solo se pisa el valor, quedan
+                # colgados de algo que ya no existe y ruamel emite YAML
+                # invalido -- la clave siguiente termina pegada en la misma
+                # linea. Borrar la clave se lleva esa metadata con ella.
+                #
+                # Visto el 23/08/2026 con 'identidad_externa', que estaba en
+                # el archivo y todavia no en la base.
+                if (not valor and isinstance(destino[clave], (dict, list))
+                        and destino[clave]):
+                    del destino[clave]
+                    destino[clave] = valor
+                    continue
                 fusionado = _fusionar(destino[clave], valor, minimo.get(clave))
                 if fusionado is not destino[clave]:
                     destino[clave] = fusionado
@@ -446,6 +480,17 @@ def exportar(slug: str) -> None:
     datos = cfg.model_dump(mode="json")
     minimo = cfg.model_dump(mode="json", exclude_defaults=True)
 
+    # Lo SINCRONIZADO no baja al archivo: no es configuracion que alguien
+    # escribio, es la salida de un proceso que se reemplaza entera cada vez
+    # que corre (ver TenantConfig.SINCRONIZADOS). Hoy 'localidades' son 128
+    # localidades con sus zonas y conteos -- volcarlas al YAML meteria
+    # cientos de lineas generadas por maquina en un archivo escrito a mano, y
+    # cambiarian en cada sincronizacion, enterrando el cambio real en el
+    # diff. Viven solo en la base, que es de donde el motor las lee.
+    for campo in TenantConfig.SINCRONIZADOS:
+        datos.pop(campo, None)
+        minimo.pop(campo, None)
+
     ruta = RAIZ / "tenants" / f"{slug}.config.yaml"
     if ruta.exists():
         anterior = cargar_config(ruta).model_dump(mode="json")
@@ -465,6 +510,12 @@ def exportar(slug: str) -> None:
         releido = TenantConfig(**(yaml.safe_load(texto) or {})).model_dump(mode="json")
     except Exception as e:
         raise SystemExit(f"{slug}: el archivo fusionado no valida ({e}). No se escribio.")
+    # Los sincronizados se excluyeron de 'datos' mas arriba; al releer el
+    # archivo vuelven con su valor por defecto, asi que hay que sacarlos de
+    # los dos lados o la comparacion falla por un campo que a proposito no
+    # se escribio.
+    for campo in TenantConfig.SINCRONIZADOS:
+        releido.pop(campo, None)
     if releido != datos:
         distintas = sorted(k for k in set(releido) | set(datos)
                            if releido.get(k) != datos.get(k))

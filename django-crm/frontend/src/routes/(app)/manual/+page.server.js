@@ -17,6 +17,7 @@ export async function load({ fetch }) {
   if (!baseUrl || !tenant) {
     return {
       casos: [], ejemplos: [], documentos: [], revisiones: [], roles: [],
+      rolesDeCliente: [],
       error: 'Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT)'
     };
   }
@@ -33,15 +34,20 @@ export async function load({ fetch }) {
     if (!respCasos.ok) {
       return {
         casos: [], ejemplos: [], documentos: [], revisiones: [], roles: [],
+        rolesDeCliente: [],
         error: datosCasos.error || 'No se pudo cargar la lista de casos'
       };
     }
+    const catalogo = respCatalogo.ok ? await respCatalogo.json() : {};
     return {
       casos: datosCasos.casos,
       ejemplos: respEjemplos.ok ? (await respEjemplos.json()).ejemplos : [],
       documentos: respDocs.ok ? (await respDocs.json()).documentos : [],
       revisiones: respRevisiones.ok ? (await respRevisiones.json()).revisiones : [],
-      roles: respCatalogo.ok ? (await respCatalogo.json()).roles_existentes : []
+      roles: catalogo.roles_existentes ?? [],
+      // Cuales de esos roles atienden clientes finales, para avisar antes de
+      // darles un documento -- ver el aviso en +page.svelte.
+      rolesDeCliente: catalogo.roles_de_cliente ?? []
     };
   } catch (/** @type {any} */ err) {
     return {
