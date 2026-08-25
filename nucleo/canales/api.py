@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 
 from flask import Flask, jsonify, request
 
@@ -57,16 +58,63 @@ from nucleo.seguridad.verificacion import Sesion
 app = Flask(__name__)
 
 _configs: dict = {}    # tenant -> TenantConfig, cacheado por proceso
+_servidas: dict = {}   # tenant -> (config_version servida, monotonic de la ultima comprobacion)
 _sesiones: dict = {}   # (tenant, id_sesion) -> {"sesion": Sesion, "historial": [...]}
+
+# Cada cuanto se le pregunta a la base si la version cambio. Acota las dos
+# cosas que importan: cuanto puede quedarse vieja una config (este intervalo)
+# y cuantas consultas agrega (una cada tantos segundos, no una por turno).
+SEGUNDOS_ENTRE_COMPROBACIONES = 15.0
 
 
 def _config_de(tenant: str):
     # La base manda; el YAML es semilla y respaldo. Ver nucleo/config/fuente.py.
     # Es la misma fila que escribe el editor (nucleo/config/editor.py), asi que
-    # leer y guardar apuntan al mismo lugar -- por eso alcanza con vaciar este
-    # cache para que un cambio de la interfaz se vea en el turno siguiente.
-    if tenant not in _configs:
-        _configs[tenant] = fuente.cargar(tenant)
+    # leer y guardar apuntan al mismo lugar.
+    #
+    # Ademas de vaciarse cuando guarda la interfaz (olvidar_config), este cache
+    # COMPRUEBA la version contra la base cada tantos segundos. Es lo que
+    # arregla el caso silencioso: 'cli/cargar_config.py' escribe en la base
+    # desde otro proceso -- o desde otra maquina-- y no puede avisarle a este.
+    # Sin la comprobacion, el motor seguia sirviendo la config vieja sin error,
+    # sin aviso y sin forma de notarlo salvo reiniciando. Paso el 25/08/2026:
+    # se probo dos veces contra un motor que no podia haber tomado el cambio.
+    ahora = time.monotonic()
+    servida = _configs.get(tenant)
+
+    if servida is not None:
+        version, comprobada_en = _servidas.get(tenant, (None, 0.0))
+        if ahora - comprobada_en < SEGUNDOS_ENTRE_COMPROBACIONES:
+            return servida
+        try:
+            en_base = fuente.version_en_base(tenant)
+        except Exception as e:
+            # No poder comprobar la version no es motivo para cortar una
+            # conversacion: se sigue sirviendo lo que ya hay y se reintenta en
+            # el proximo intervalo. Una config de hace un minuto es mucho mejor
+            # que un turno fallido.
+            print(f"[config] {tenant}: no se pudo comprobar la version "
+                  f"({type(e).__name__}); se sigue con v{version}")
+            _servidas[tenant] = (version, ahora)
+            return servida
+        if en_base == version:
+            _servidas[tenant] = (version, ahora)
+            return servida
+        print(f"[config] {tenant}: la base tiene v{en_base} y este proceso "
+              f"servia v{version} -- recargando")
+        _configs.pop(tenant, None)
+
+    # Se pregunta la version ANTES de bajar la config, no despues. Si alguien
+    # guarda entre las dos consultas, quedar con la version vieja anotada
+    # provoca una recarga de mas en el proximo intervalo; al reves quedaria
+    # anotada una version mas nueva que la que se sirve, y no se recargaria
+    # nunca -- que es justo el bug que esto viene a cerrar.
+    try:
+        version = fuente.version_en_base(tenant)
+    except Exception:
+        version = None
+    _configs[tenant] = fuente.cargar(tenant)
+    _servidas[tenant] = (version, ahora)
     return _configs[tenant]
 
 
@@ -80,6 +128,7 @@ def olvidar_config(tenant: str) -> None:
     y un guardado que no llego a la base se nota en el siguiente turno en vez
     de quedar tapado por una copia en memoria que dice lo contrario."""
     _configs.pop(tenant, None)
+    _servidas.pop(tenant, None)
 
 
 _TOKEN_SERVICIO = os.environ.get("MOTOR_SERVICE_TOKEN")

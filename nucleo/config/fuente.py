@@ -76,6 +76,25 @@ def desde_base(tenant: str) -> tuple[TenantConfig, int] | None:
     return _validar(fila["config"], f"tenant_config[{tenant}]"), fila["config_version"]
 
 
+def version_en_base(tenant: str) -> int | None:
+    """
+    Solo el numero de version, sin traer ni validar el JSON entero.
+
+    Existe para que un proceso que ya tiene la config en memoria pueda
+    preguntar "sigue siendo la ultima?" sin pagar el costo de bajar y validar
+    la configuracion completa en cada turno. Es la consulta mas barata posible
+    contra esa tabla: una fila, una columna, por clave.
+    """
+    from nucleo.persistencia.db import sesion       # perezoso: evita ciclo
+
+    with sesion(tenant) as (cur, _org):
+        cur.execute("""select config_version from asistente.tenant_config
+                       where slug = %s""", (tenant,))
+        fila = cur.fetchone()
+
+    return fila["config_version"] if fila else None
+
+
 def cargar(tenant: str, raiz: str | Path = ".") -> TenantConfig:
     """
     La configuracion vigente del tenant.
