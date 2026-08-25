@@ -49,6 +49,9 @@
    */
   let verConversacion = $state(true);
 
+  /** Que pestaña se ve: la conversacion o lo que el cliente adjunto. */
+  let pestana = $state('conversacion');
+
   /**
    * Los enlaces a los sistemas del ISP, si el caso vino del asistente y llego
    * a identificar al cliente. Null en cualquier otro caso -- y eso no es un
@@ -396,12 +399,45 @@
           {#if agente.turnos.length}
             <section class="conversacion-cliente">
               <header class="conv-cab">
-                <h2>Conversación con el cliente</h2>
-                <button type="button" class="v2-btn v2-btn-sm" onclick={() => (verConversacion = !verConversacion)}>
-                  {verConversacion ? 'Colapsar' : 'Expandir'} conversación
-                </button>
+                <!-- Pestañas, no dos secciones: la conversacion y lo que el
+                     cliente mando son la misma evidencia mirada de dos
+                     formas. Los adjuntos siguen ademas en el panel derecho,
+                     donde estan SIEMPRE visibles -- esto no los mueve de
+                     ahi, agrega el lugar donde uno los busca cuando esta
+                     leyendo la conversacion. -->
+                <nav class="v2-tabs conv-pestanas" aria-label="Conversación">
+                  <button type="button" onclick={() => (pestana = 'conversacion')}
+                    aria-current={pestana === 'conversacion' ? 'page' : undefined}
+                    >Conversación</button>
+                  <button type="button" onclick={() => (pestana = 'adjuntos')}
+                    aria-current={pestana === 'adjuntos' ? 'page' : undefined}>
+                    Adjuntos
+                    {#if attachments.length}
+                      <span class="v2-tab-count v2-num">{attachments.length}</span>
+                    {/if}
+                  </button>
+                </nav>
+                {#if pestana === 'conversacion'}
+                  <button type="button" class="v2-btn v2-btn-sm" onclick={() => (verConversacion = !verConversacion)}>
+                    {verConversacion ? 'Colapsar' : 'Expandir'} conversación
+                  </button>
+                {/if}
               </header>
-              {#if verConversacion}
+
+              {#if pestana === 'adjuntos'}
+                {#if attachments.length}
+                  <ul class="lista-adjuntos">
+                    {#each attachments as f (f.id)}
+                      <li>
+                        <a href={f.url} target="_blank" rel="noopener">{f.name}</a>
+                        <span class="v2-sub">hace {shortAge(f.at)}</span>
+                      </li>
+                    {/each}
+                  </ul>
+                {:else}
+                  <p class="fin-conv">Esta conversación no trajo archivos.</p>
+                {/if}
+              {:else if verConversacion}
                 <div class="turnos">
                   {#each agente.turnos as t, i (i)}
                     <div class="turno" class:propio={t.quien === 'asistente'}>
@@ -802,6 +838,33 @@
     flex-wrap: wrap;
   }
 
+  .conv-pestanas {
+    margin-bottom: 0;
+  }
+  .conv-pestanas button {
+    background: none;
+    border: 0;
+    font: inherit;
+    cursor: pointer;
+  }
+  .lista-adjuntos {
+    list-style: none;
+    margin: 10px 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    font-size: 13px;
+  }
+  .lista-adjuntos li {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .lista-adjuntos .v2-sub {
+    font-size: 11.5px;
+  }
+
   .tecnica {
     margin-bottom: 18px;
   }
@@ -998,11 +1061,6 @@
     justify-content: space-between;
     gap: 12px;
     margin-bottom: 12px;
-  }
-  .conv-cab h2 {
-    font-size: 13px;
-    font-weight: 650;
-    margin: 0;
   }
   .turnos {
     display: flex;
