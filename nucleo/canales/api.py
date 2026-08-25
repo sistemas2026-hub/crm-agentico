@@ -47,6 +47,7 @@ from nucleo.persistencia import db as persistencia
 from nucleo.recuperacion.busqueda import recuperar
 from nucleo.recuperacion.prompt import piezas_del_system
 from nucleo.seguimiento import agendamiento
+from nucleo.seguimiento.forzado import escalada_forzada
 from nucleo.seguimiento import escalamiento
 from nucleo.seguimiento import resumen
 from nucleo.seguimiento import supervisor
@@ -506,25 +507,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
         # ya le habia dicho al cliente que un colaborador iba a seguir su
         # caso -- o sea que la mitad de las veces le prometia una persona que
         # no llegaba nunca.
-        por_nombre = {h.nombre: h for h in config.herramientas}
-        forzado = None
-        motivo_forzado = ""
-        for llamada in registro_herramientas:
-            herr = por_nombre.get(llamada["herramienta"])
-            if herr is None:
-                continue
-            if llamada.get("codigo_error"):
-                if herr.escalar_si_falla:
-                    forzado = herr.escalar_si_falla
-                    motivo_forzado = "no pudo ejecutarse"
-                    break
-            # El espejo: la herramienta SALIO BIEN y su exito es, justamente,
-            # un pedido que tiene que ejecutar una persona. Ver
-            # 'escalar_al_completar' en schema.py.
-            elif herr.escalar_al_completar:
-                forzado = herr.escalar_al_completar
-                motivo_forzado = "se completo y su resultado necesita una persona"
-                break
+        forzado, motivo_forzado = escalada_forzada(config, registro_herramientas)
         if forzado:
             evaluacion = dict(evaluacion or {})
             if not evaluacion.get("escalar"):
