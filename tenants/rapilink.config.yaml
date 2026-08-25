@@ -1592,6 +1592,14 @@ variables_tenant:
   # Los limites del estandar WPA (8-63, SSID de 32 octetos) SI estan en
   # codigo -- esos no varian por empresa.
   WIFI_CARACTERES_DESACONSEJADOS: "-"
+  # El panel web de WispHub, para armar los enlaces directos que abre un
+  # colaborador desde el ticket (perfil, trafico, ping). NO es la API
+  # (api.wisphub.io): son dos dominios distintos y confundirlos da 404.
+  WISPHUB_PANEL_URL: https://wisphub.io
+  # El sufijo que WispHub le pone al usuario interno de cada cliente
+  # ('mario-sabanagrande@rapilink-sas'). Es por empresa, asi que viaja aca y
+  # no escrito en el codigo -- el proximo ISP tiene el suyo.
+  WISPHUB_SUFIJO_USUARIO: "@rapilink-sas"
   # Formulario real de contratacion (datos + documentos + firma), 5 pasos:
   # datos personales, plan interesado (ya muestra nombre+precio, coherente
   # con lo que 'ventas' contesta en el chat), ubicacion (GPS + barrio --

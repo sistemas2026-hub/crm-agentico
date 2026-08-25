@@ -1921,7 +1921,97 @@ def conversacion_por_caso(caso_id):
         return jsonify({"error": "No se pudo leer la conversacion."}), 500
     if not datos:
         return jsonify({"conversacion": None}), 200
+
+    # Los enlaces directos a los sistemas externos, armados ACA y no en la
+    # pantalla: el motor es quien conoce los identificadores y los dominios de
+    # cada empresa. La pantalla solo los dibuja.
+    #
+    # Se arman con el IDENTIFICADOR, nunca con el nombre. Las URLs del panel
+    # admiten un usuario que contiene el nombre del cliente, y armarlo a mano
+    # (pasar "MARIO SABANAGRANDE" a "mario-sabanagrande") abriria la ficha de
+    # cualquier homonimo. El identificador es lo unico que no se parece a otro.
+    try:
+        config = _config_de(tenant)
+    except Exception:
+        config = None
+    datos["enlaces"] = _enlaces_externos(config, datos, tenant) if config else {}
     return jsonify({"conversacion": datos})
+
+
+def _enlaces_externos(config, conv: dict, tenant: str) -> dict:
+    """
+    A donde puede saltar un colaborador desde el ticket, con el cliente ya
+    seleccionado.
+
+    Devuelve solo los que se pueden armar de verdad. Un enlace faltante NO es
+    un error: se escala una conversacion justamente cuando el asistente no
+    pudo avanzar, y muchas veces eso incluye no haber identificado al cliente.
+    Medido sobre 85 conversaciones reales: 45 con cliente identificado y 12 con
+    ticket, y las que llegan a ticket tienden a ser las otras. Que la pantalla
+    diga "no disponible" es el caso NORMAL, no una falla que haya que reportar.
+    """
+    v = config.variables_tenant or {}
+    panel = (v.get("WISPHUB_PANEL_URL") or "").rstrip("/")
+    sufijo = v.get("WISPHUB_SUFIJO_USUARIO") or ""
+    olt = (v.get("SMARTOLT_SUBDOMINIO") or "").rstrip("/")
+
+    id_cliente = conv.get("id_cliente")
+    sesion = conv.get("datos_sesion") or {}
+    sn_onu = sesion.get("sn_onu")
+
+    enlaces = {}
+
+    # El 'usuario' del sistema externo NO viene en el detalle del cliente,
+    # solo en el LISTADO -- verificado el 25/08/2026: el detalle lo devuelve
+    # vacio y el listado lo trae completo. Es el mismo patron que esa API
+    # ya mostro otras veces: dos endpoints del mismo proveedor dicen cosas
+    # distintas del mismo registro (ver la skill del proveedor en .claude/).
+    usuario, ip = _usuario_externo(config, id_cliente, tenant)
+
+    if panel and usuario:
+        enlaces["wisphub_perfil"] = f"{panel}/clientes/ver/{usuario}/"
+        if id_cliente:
+            enlaces["wisphub_trafico"] = (
+                f"{panel}/trafico/semana/servicio/{usuario}/{id_cliente}/")
+            enlaces["wisphub_ping"] = (
+                f"{panel}/clientes/ping/{usuario}/{id_cliente}/")
+    if ip:
+        # El router del cliente, para que entre a su configuracion. Es una IP
+        # de la red del ISP: solo llega desde adentro, no desde cualquier lado.
+        enlaces["router"] = f"http://{ip}"
+        enlaces["ip"] = ip
+    if olt and sn_onu:
+        enlaces["smartolt_ont"] = f"{olt}/onu/details/{sn_onu}"
+        enlaces["sn_onu"] = sn_onu
+
+    return enlaces
+
+
+def _usuario_externo(config, id_cliente, tenant: str):
+    """
+    ('usuario', 'ip') del cliente en el sistema externo, o (None, None).
+
+    Nunca rompe el turno: si la API no responde, la pantalla muestra el ticket
+    sin los enlaces en vez de no mostrar el ticket.
+    """
+    if not id_cliente:
+        return None, None
+    try:
+        herr = next((h for h in config.herramientas
+                     if h.tipo == "http" and "/api/clientes/" in (h.endpoint or "")), None)
+        if herr is None:
+            return None, None
+        datos = ejecutor_http.ejecutar(
+            herr, {"id_servicio": str(id_cliente)}, tenant)
+        filas = datos.get("results") if isinstance(datos, dict) else None
+        fila = (filas or [None])[0]
+        if not isinstance(fila, dict):
+            return None, None
+        return fila.get("usuario"), fila.get("ip")
+    except Exception as e:
+        print(f"[enlaces] no se pudo leer el usuario del sistema externo: "
+              f"{type(e).__name__}: {e}")
+        return None, None
 
 
 @app.get("/conversaciones/<id_conversacion>/mensajes")
