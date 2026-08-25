@@ -166,6 +166,17 @@ def _hojas(valor, prefijo=""):
             salida.update(_hojas(sub, f"{prefijo}.{clave}" if prefijo else str(clave)))
         return salida
     if isinstance(valor, list):
+        # Una lista de VALORES SIMPLES se compara como conjunto, no por
+        # posicion. 'puede_consultar' o 'campos_permitidos' son permisos: lo
+        # que importa es si una herramienta esta o no esta, no en que lugar
+        # de la lista quedo. Indexando por posicion, insertar un elemento al
+        # principio corre todos los demas y la guarda reporta cada posicion
+        # siguiente como si hubiera cambiado -- 15 avisos falsos de 31 en la
+        # comparacion real del 23/08/2026, que es como se deja de leer una
+        # guarda. Se ordena para que el conjunto tenga una representacion
+        # estable.
+        if valor and all(not isinstance(v, (dict, list)) for v in valor):
+            return {prefijo: sorted(valor, key=str)}
         salida = {}
         for i, sub in enumerate(valor):
             etiqueta = sub["nombre"] if isinstance(sub, dict) and sub.get("nombre") else i
@@ -206,6 +217,13 @@ def _lo_que_pisaria(guardado: dict, nuevo: dict) -> list[str]:
                           f"se BORRARIA")
 
     for seccion in SECCIONES_QUE_EDITA_LA_INTERFAZ:
+        # Un campo sincronizado no se puede perder: 'cargar' le devuelve el
+        # valor de la base al archivo antes de escribir (ver alla). Avisar de
+        # una perdida imposible es la falsa alarma mas cara de todas, porque
+        # aparece en CADA corrida y ensena a saltear el aviso entero.
+        if seccion in TenantConfig.SINCRONIZADOS:
+            continue
+
         en_base = guardado.get(seccion)
         en_archivo = nuevo.get(seccion)
 
@@ -219,7 +237,10 @@ def _lo_que_pisaria(guardado: dict, nuevo: dict) -> list[str]:
         # Medido el 23/08/2026: la base tenia 6 planes de venta curados y 128
         # localidades sincronizadas que el archivo no trae, y la guarda daba
         # el visto bueno.
-        if en_base and not en_archivo:
+        # 'roles' ya lo cubre el bucle de arriba, rol por rol y con nombre
+        # propio. Sin esta linea, un archivo sin roles los lista uno por uno
+        # Y ADEMAS agrega un "roles: se BORRARIA entero" que dice lo mismo.
+        if en_base and not en_archivo and seccion != "roles":
             cuantos = len(en_base) if isinstance(en_base, (list, dict)) else 1
             lineas.append(
                 f"{seccion}: la base tiene {cuantos} y el archivo lo deja "
@@ -232,9 +253,24 @@ def _lo_que_pisaria(guardado: dict, nuevo: dict) -> list[str]:
             # Solo lo que ya existe en el archivo con OTRO valor. Una clave que
             # el archivo no trae la completa el esquema con su default, y
             # reportarla seria ruido en cada corrida.
-            if ruta in nuevo_plano and nuevo_plano[ruta] != valor:
-                lineas.append(f"{ruta}: la base dice {_corto(valor)} y el "
-                              f"archivo {_corto(nuevo_plano[ruta])} -- se PISARIA")
+            if ruta not in nuevo_plano or nuevo_plano[ruta] == valor:
+                continue
+
+            # En una lista de permisos lo unico que se PIERDE es lo que la base
+            # tiene y el archivo no. Si el archivo solo agrega -- el caso normal
+            # cuando alguien conecta una herramienta nueva -- no hay nada que
+            # frenar, y decir "se PISARIA" ahi es exactamente como se entrena a
+            # la gente a correr --forzar sin leer.
+            if isinstance(valor, list) and isinstance(nuevo_plano[ruta], list):
+                se_pierden = [v for v in valor if v not in nuevo_plano[ruta]]
+                if not se_pierden:
+                    continue
+                lineas.append(f"{ruta}: el archivo NO trae {_corto(se_pierden)} "
+                              f"-- se PERDERIA")
+                continue
+
+            lineas.append(f"{ruta}: la base dice {_corto(valor)} y el "
+                          f"archivo {_corto(nuevo_plano[ruta])} -- se PISARIA")
 
     ov_g = ((guardado.get("llm") or {}).get("overrides") or {})
     ov_n = ((nuevo.get("llm") or {}).get("overrides") or {})
@@ -258,6 +294,20 @@ def cargar(ruta: Path, org_id: str | None = None, forzar: bool = False) -> None:
         cur.execute("""select config, config_version from asistente.tenant_config
                        where organization_id = %s""", (org,))
         actual = cur.fetchone()
+
+        # Un campo SINCRONIZADO es propiedad de la base en las DOS direcciones:
+        # 'exportar' no lo baja al archivo, y por lo tanto el archivo nunca
+        # tiene con que pisarlo. Sin esto, declararlo sincronizado lo dejaba
+        # peor que antes: fuera del archivo Y borrado por cualquier carga, que
+        # es como se pierden 128 localidades que costaron 25 paginas de API.
+        #
+        # Se restaura lo que ya hay en la base ANTES de comparar, para que la
+        # comparacion de "sin cambios" no dispare por un campo que ni siquiera
+        # se va a tocar.
+        if actual:
+            for campo in TenantConfig.SINCRONIZADOS:
+                if campo in (actual[0] or {}):
+                    datos[campo] = actual[0][campo]
 
         if actual and actual[0] == datos:
             print(f"[=] {slug}: sin cambios (v{actual[1]})")
