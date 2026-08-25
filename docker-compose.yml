@@ -9,7 +9,7 @@
 services:
   db:
     # pgvector/pgvector, no la postgres:16-alpine de antes: el esquema
-    # 'asistente' (supabase/01_schema.sql) necesita la extension 'vector'
+    # 'asistente' (supabase/202608042055_schema.sql) necesita la extension 'vector'
     # para los embeddings del corpus, que la imagen oficial no trae. Misma
     # version mayor de Postgres (16), asi que el volumen existente sigue
     # sirviendo tal cual -- no hace falta reinicializar la base.

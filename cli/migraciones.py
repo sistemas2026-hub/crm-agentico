@@ -35,6 +35,23 @@ Tampoco sirve re-correr todas por las dudas: 13 de las 27 traen sentencias que
 no son idempotentes (politicas RLS, sobre todo), asi que aplicar a ciegas
 revienta.
 
+Como se nombra una migracion nueva
+----------------------------------
+    supabase/AAAAMMDDHHMM_lo_que_hace.sql        (ej. 202608251830_promesas_pago.sql)
+
+Con la fecha y hora de cuando se escribe. NO con el numero siguiente.
+
+Se numeraban 01, 02, 03... y con dos personas trabajando en paralelo eso
+colisiona solo: los dos hacen 'ls', ven que la ultima es la 23, y los dos
+crean una 24. Paso CUATRO veces (18, 20, 21 y 22 tenian dos archivos cada
+uno, uno de cada lado). Dos personas no eligen el mismo minuto sin darse
+cuenta; el mismo numero, si.
+
+Las 27 existentes se renombraron a este formato el 25/08/2026, usando la
+fecha del commit que las creo. Renombrarlas fue seguro porque este verificador
+mira OBJETOS en la base, no nombres de archivo -- no hay ningun registro que
+dependa de como se llame el .sql.
+
 Uso
 ---
     py -3.13 cli/migraciones.py              # que falta

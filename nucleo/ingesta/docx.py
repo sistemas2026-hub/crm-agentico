@@ -188,7 +188,7 @@ class Documento:
     # metadatos del documento (ej. 'soporte, facturacion') -- cli/cargar_corpus.py
     # los valida contra los roles reales del tenant y los sube a
     # asistente.documents.roles_permitidos. Vacio = el documento no se carga
-    # visible para ningun rol (fail-closed, ver supabase/03_documentos_roles.sql).
+    # visible para ningun rol (fail-closed, ver supabase/202608111433_documentos_roles.sql).
     roles: str = ""
     # vigente | obsoleto. Un obsoleto se carga pero no se recupera:
     # queda constancia de que existio y de con cual se respondio en su momento.

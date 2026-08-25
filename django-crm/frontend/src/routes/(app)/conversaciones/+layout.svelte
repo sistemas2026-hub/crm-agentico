@@ -283,7 +283,7 @@
 
                   <!-- De qué es la conversación, no si escaló: lo asigna el
                        asistente en cada turno y existe también en las que
-                       resolvió solo (ver supabase/18_caso_conversacion.sql).
+                       resolvió solo (ver supabase/202608180923_caso_conversacion.sql).
                        Va en tono neutro para que no compita con la píldora
                        de estado, que es la que pide una acción. -->
                   {#if c.caso_manual}

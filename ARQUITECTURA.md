@@ -129,7 +129,7 @@ Por eso `DATABASE_URL` tiene **dos usos que no hay que confundir**:
 
 | Uso | Rol efectivo | Quién |
 |---|---|---|
-| Operación: migraciones, carga de configuración y corpus | `postgres` | `cli/`, `supabase/01_schema.sql` |
+| Operación: migraciones, carga de configuración y corpus | `postgres` | `cli/`, `supabase/202608042055_schema.sql` |
 | Servir peticiones | `app_backend` | `nucleo/persistencia/db.py` |
 
 El motor abre transacción, hace `set local role app_backend` y fija `set local app.current_tenant` en cada operación — ver el encabezado de `nucleo/persistencia/db.py`. Ambos `local`, para que una petición no herede el tenant de otra al reutilizarse la conexión.

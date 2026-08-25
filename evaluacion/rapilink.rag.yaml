@@ -10,7 +10,7 @@
 #
 #    elegibles     cuantos fragmentos podia ver ese rol. Un 0 es un problema
 #                  de PERMISOS y no de recuperacion -- no se arregla tocando
-#                  el umbral ni el modelo (ver supabase/21).
+#                  el umbral ni el modelo (ver supabase/202608211448_diagnostico_recuperacion).
 #    Recall@1/3/8  si el documento correcto aparece, y que tan arriba.
 #    MRR           lo mismo, en un solo numero.
 #    gate          los dos errores que de verdad administra el umbral:

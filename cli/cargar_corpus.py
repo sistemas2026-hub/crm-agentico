@@ -105,7 +105,7 @@ def _roles_validos(cfg, roles_texto: str, ruta: Path) -> list[str] | None:
     sin que nadie se entere.
 
     None (columna NULL) si el documento no declara 'roles': fail-closed, ver
-    supabase/03_documentos_roles.sql -- sin roles asignados, match_chunks no
+    supabase/202608111433_documentos_roles.sql -- sin roles asignados, match_chunks no
     lo recupera para ningun rol hasta que alguien lo asigne a proposito.
     """
     if not roles_texto:
@@ -226,7 +226,7 @@ def cargar_tenant(slug: str, forzar: bool = False) -> None:
                                set vigente=false where document_id=%s and vigente""",
                             (doc_id,))
             else:
-                # Se guarda el archivo original (ver supabase/23): es la
+                # Se guarda el archivo original (ver supabase/202608231459_original_documentos): es la
                 # evidencia de que se aprobo, cuando alguien lo apruebe. Los
                 # fragmentos son derivados y no permiten reconstruir el
                 # documento con sus tablas de firma ni su formato.

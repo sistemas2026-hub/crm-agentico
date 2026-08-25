@@ -128,7 +128,7 @@
    * Habilita un documento pendiente para que el asistente pueda usarlo.
    *
    * Un documento subido queda PENDIENTE: se vectoriza pero match_chunks no
-   * lo recupera (el filtro esta en SQL, ver supabase/22). Sin este paso
+   * lo recupera (el filtro esta en SQL, ver supabase/202608231328_aprobacion_documentos). Sin este paso
    * intermedio, subir un archivo era publicarlo -- y una guia escrita para
    * un tecnico en campo, asignada por error a un rol de cliente, le diria a
    * alguien que abra conectores de fibra o mida potencia optica.
