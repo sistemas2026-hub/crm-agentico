@@ -1997,8 +1997,16 @@ def _usuario_externo(config, id_cliente, tenant: str):
     if not id_cliente:
         return None, None
     try:
+        # Se elige por lo que la herramienta SABE HACER, no por su endpoint.
+        # Cuatro herramientas del catalogo apuntan a la misma ruta y solo una
+        # declara el filtro por identificador de servicio; las otras filtran
+        # por cedula o lo inyectan de la sesion, asi que pasarles el id lo
+        # descartan y devuelven el primer cliente de la empresa -- otro
+        # cliente, con aspecto de respuesta correcta. Elegir "la primera que
+        # coincide por endpoint" fallaba justo asi.
         herr = next((h for h in config.herramientas
-                     if h.tipo == "http" and "/api/clientes/" in (h.endpoint or "")), None)
+                     if h.tipo == "http" and "id_servicio" in (h.filtros_verificados or {})),
+                    None)
         if herr is None:
             return None, None
         datos = ejecutor_http.ejecutar(
