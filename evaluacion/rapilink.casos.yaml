@@ -300,6 +300,16 @@ casos:
       usa_una_sola_vez: [ping_cliente, consultar_estado_ont, consultar_senal_ont]
 
   # --- television ---------------------------------------------------------
+  # DEPENDE DE UN CLIENTE CON TV, y el de la sesion por defecto no la tiene.
+  # Los casos de TV se probaron enteros y en verde con 6555 (PRUEBA TEMPORAL),
+  # que si tiene el servicio. Al pasar la sesion por defecto a 5832 el
+  # 25/08/2026 --porque 6555 quedo Suspendido y derivaba todo a cartera-- este
+  # caso quedo midiendo TV sobre un plan de fibra a secas: el asistente anota
+  # y escala sin diagnosticar, que para ese cliente es lo correcto.
+  #
+  # O sea que hoy falla por el SUJETO, no por el comportamiento. Vuelve a
+  # verde cuando haya un cliente de laboratorio activo Y con TV -- reactivar
+  # 6555 alcanza. No perseguir el prompt: ya se persiguio.
   - nombre: falla de TV confirma el plan y mide el puerto antes de preguntar
     rol: cliente_final
     mensajes: ["no me sale señal en el tv", "en todos los tv, tengo 3"]
