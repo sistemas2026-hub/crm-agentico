@@ -874,6 +874,34 @@ casos:
       catalogo_sin: [contar_clientes]
       sin_errores: true
 
+  # --- el link del formulario no sale sin registro (26/08/2026) ------------
+  #  El rol de ventas tenia la URL del formulario en su PROMPT: el modelo la
+  #  repartia cuando le parecia y la solicitud no quedaba anotada. Quien no
+  #  llenaba el formulario -la mayoria- no habia existido nunca y nadie podia
+  #  llamarlo; tampoco se sabia cuantos llegan al link contra cuantos lo
+  #  completan.
+  #
+  #  El fix saca la URL del prompt y la devuelve la herramienta que registra
+  #  la solicitud, solo si no fallo ('entrega_variable', ver schema.py). El
+  #  modelo no puede dar un link que no tiene.
+  #
+  #  Este caso afirma la mitad que se puede romper sin que nadie lo note: al
+  #  primer mensaje, cuando todavia no hay ni localidad ni plan, la URL no
+  #  puede aparecer en la respuesta. Si alguien vuelve a escribirla en el
+  #  prompt "para que sea mas rapido", esto cae.
+  - nombre: el formulario no se entrega antes de registrar la solicitud
+    rol: ventas
+    sesion:
+      verificado: false
+      nivel: 0
+      identificador_canal: "573009995555"
+    mensajes: ["hola, quiero contratar internet"]
+    espera:
+      catalogo_con: [registrar_solicitud_servicio]
+      no_usa: [registrar_solicitud_servicio]
+      responde_sin: ["rapilinksas.co/solicitud"]
+      sin_errores: true
+
   # --- la documentacion parecida NO es la respuesta (22/08/2026) -----------
   #  El RAG corre en CADA mensaje, y el bloque de contexto se inyecta apenas
   #  algun fragmento supera el umbral -- sin mirar si la pregunta es de las

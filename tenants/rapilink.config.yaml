@@ -1209,11 +1209,18 @@ roles:
       -- nunca inventes ni redondees un precio, y nunca cites un precio
       sin haber llamado a esta herramienta en el mismo turno.
 
-      FORMULARIO: {VENTAS_FORMULARIO_URL}
-      Compartilo SOLO despues de confirmar cobertura (total > 0 en
-      contar_clientes) y de que el prospecto muestre intencion clara de
-      seguir adelante -- no lo mandes de arranque ni sin haber chequeado
-      la zona primero.
+      CERRAR LA VENTA: cuando ya confirmaste cobertura y el prospecto
+      eligio un plan concreto, llama a registrar_solicitud_servicio. Deja
+      la solicitud anotada para que el equipo comercial pueda llamarlo, y
+      TE DEVUELVE el link del formulario para que se lo pases. El link no
+      esta en ninguna otra parte: sin esa llamada no tienes formulario que
+      dar, asi que no lo busques ni lo inventes.
+
+      Como es una escritura, primero preguntale si quiere que registres la
+      solicitud. Esa pregunta no es un tramite: es el momento en que la
+      persona acepta que guardemos sus datos.
+
+      Nunca la llames de arranque ni antes de haber chequeado la zona.
 
       Nunca hables como si ya fuera cliente (nunca "tu servicio", "tu
       cuenta", "tu factura") -- todavia no lo es.
@@ -1246,9 +1253,14 @@ roles:
     # arma 'puede_consultar', asi que 'ventas' seguia pudiendo llamarla
     # aunque ya no estuviera en el prompt. Ver incidente "doña manuela".
     puede_consultar: [verificar_identidad_por_cedula, confirmar_identidad,
-          consultar_planes_venta, consultar_planes, consultar_plan_detalle]
+          consultar_planes_venta, consultar_planes, consultar_plan_detalle,
+          registrar_solicitud_servicio]
     campos_permitidos:
       consultar_planes: [id, nombre]
+      # La respuesta de crear un lead trae el objeto entero del CRM. Lo unico
+      # que el modelo necesita ver es si salio bien y el link que le devuelve
+      # 'entrega_variable' -- que el motor agrega DESPUES de este filtro.
+      registrar_solicitud_servicio: [error, message]
       consultar_plan_detalle: [nombre, precio, bajada, subida, descripcion]
     nunca_revelar: []
 
@@ -1593,7 +1605,12 @@ llm:
 # que arranca. Referenciadas por 'Herramienta.base_url_ref' en 'herramientas'
 # mas abajo (ver el campo en nucleo/config/schema.py).
 variables_tenant:
-  SMARTOLT_SUBDOMINIO: https://rapilinksas.smartolt.com
+  # Con barra final: es el valor que quedo cargado en produccion desde la
+  # pantalla de variables. Da igual para la llamada -- url_de() hace
+  # rstrip('/') antes de pegar el endpoint (nucleo/herramientas/http.py) --
+  # y se adopta aca para que el archivo y la base no difieran por un caracter
+  # que no cambia nada.
+  SMARTOLT_SUBDOMINIO: https://rapilinksas.smartolt.com/
   # Caracteres que los equipos de ESTE ISP manejan mal en el nombre de la red.
   # El guion sale del manual de Rapilink, de experiencia en campo: "eliminar o
   # reemplazar caracteres especiales, especialmente el guion (-), ya que
@@ -2908,6 +2925,87 @@ herramientas:
     metodo: POST
     auth_ref: BOTTLECRM_API_TOKEN
     auth_esquema: Bearer
+
+  # El prospecto queda anotado ANTES de darle el formulario, no despues.
+  #
+  # Antes de esto, el rol de ventas tenia la URL del formulario metida en su
+  # prompt: el modelo la repartia y la solicitud no quedaba registrada en
+  # ningun lado. Quien no llenaba el formulario -la mayoria- no habia
+  # existido nunca, y nadie podia llamarlo. Tampoco se podia responder una
+  # pregunta basica del negocio: cuantos llegan al link contra cuantos lo
+  # completan.
+  #
+  # 'entrega_variable' saca la URL del prompt y la vuelve la RESPUESTA de esta
+  # herramienta (ver schema.py): el modelo no puede dar un link que no tiene.
+  # Si no registro, no hay link. El prompt es guia, esto es la garantia.
+  #
+  # OJO con 'requiere_confirmacion: true' de abajo: el validador lo exige por
+  # ser escritura, pero HOY NO FRENA NADA en tiempo de ejecucion -- el gate
+  # real es 'aprobacion_humana', que aca no corresponde (dejaria al prospecto
+  # esperando a que alguien apruebe). Asi que el "te registro la solicitud?"
+  # que pide el prompt es guia, no garantia: el modelo puede saltearselo.
+  #
+  # Se deja igual porque preguntar antes de guardar los datos de una persona
+  # es lo correcto (Ley 1581), pero no hay que leerlo como una barrera. Lo
+  # unico que SI esta garantizado en codigo es 'entrega_variable': sin
+  # registro no hay link. Si algun dia el consentimiento tiene que ser una
+  # barrera de verdad, hace falta un gate nuevo, no este campo.
+  #
+  # Verificado en vivo contra el BottleCRM real (26/08/2026) con un lead de
+  # prueba que se borro despues: los ocho campos de abajo entran y se leen de
+  # vuelta iguales. OJO -- 'POST /api/leads/' acepta un cuerpo VACIO y crea
+  # el registro igual, no valida nada; por eso los campos que importan van
+  # como 'requeridos' aca, que es la unica barrera que hay.
+  - nombre: registrar_solicitud_servicio
+    tipo: http
+    descripcion: >
+      Deja anotada la solicitud de servicio de un prospecto y te devuelve el
+      link del formulario de contratacion para pasarselo. Es el ULTIMO paso
+      de una venta: llamala solo cuando ya confirmaste cobertura con
+      consultar_planes_venta y el prospecto eligio un plan concreto. El link
+      NO esta en ninguna otra parte -- si no llamas a esta herramienta, no
+      tienes formulario que dar.
+
+      'title' arma el titulo que ve el equipo comercial: escribilo como
+      "Solicitud <PLAN> - <localidad>". En 'description' resumi lo que sabes
+      de la conversacion (para cuantas personas, que pregunto, cualquier
+      cosa util para quien lo llame).
+
+      'opportunity_amount' es el precio mensual del plan que eligio, solo el
+      numero y sin puntos ni simbolos (89900, no "$89.900"). Mandalo siempre
+      que lo sepas: es lo que hace que el equipo comercial vea cuanto vale
+      el embudo, y sin eso la solicitud aparece en cero.
+
+      No inventes email ni cedula: si el prospecto no te los dio, no los
+      mandes -- eso lo completa el formulario.
+    solo_lectura: false
+    requiere_confirmacion: true
+    roles_permitidos: [ventas]
+    base_url: http://backend:8000/api
+    endpoint: /leads/
+    metodo: POST
+    auth_ref: BOTTLECRM_API_TOKEN
+    auth_esquema: Bearer
+    entrega_variable: VENTAS_FORMULARIO_URL
+    # El telefono NO lo pide el modelo: sale de la sesion, que es el numero
+    # desde el que la persona esta escribiendo. Pedirselo a alguien que te
+    # escribe por WhatsApp es absurdo -- y ademas, si el modelo pudiera
+    # elegirlo, se le podria hacer registrar la solicitud a nombre del
+    # telefono de otro. Por eso 'phone' tampoco esta en filtros_verificados:
+    # no existe como argumento que el modelo pueda proponer.
+    inyectar_sesion: {phone: identificador_canal}
+    requeridos: [title, city, description]
+    filtros_verificados:
+      title: {param: title, tipo: texto, verificado_el: 2026-08-26}
+      city: {param: city, tipo: texto, verificado_el: 2026-08-26}
+      description: {param: description, tipo: texto, verificado_el: 2026-08-26}
+      first_name: {param: first_name, tipo: texto, verificado_el: 2026-08-26}
+      opportunity_amount: {param: opportunity_amount, tipo: texto, verificado_el: 2026-08-26}
+      # Enums reales del catalogo, leidos de GET /api/leads/ (no inventados):
+      # status: assigned/in process/converted/recycled/closed
+      # source: call/email/existing customer/partner/public relations/compaign/other
+      status: {param: status, tipo: enum, valores: {nueva: assigned}, verificado_el: 2026-08-26}
+      source: {param: source, tipo: enum, valores: {whatsapp: other}, verificado_el: 2026-08-26}
 
   # SmartOLT: control de la ONU autorizada en la OLT de fibra. Sondeado en
   # vivo contra la instancia real de Rapilink (agosto 2026, ver

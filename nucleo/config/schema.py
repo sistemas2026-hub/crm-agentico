@@ -738,6 +738,25 @@ class Herramienta(Base):
     # declara, el ejecutor resuelve el 'base_url' real desde ahi en el
     # momento de la llamada -- 'base_url' arriba queda sin usar.
     base_url_ref: str | None = None
+    # El NOMBRE de una variable de 'variables_tenant' cuyo valor se le entrega
+    # al modelo SOLO si esta herramienta se ejecuto y no fallo.
+    #
+    # Existe para un caso concreto: hay datos que el asistente puede dar, pero
+    # NO antes de haber dejado registro de algo. El primero fue el link del
+    # formulario de contratacion -- estaba en el prompt del rol de ventas, asi
+    # que el modelo lo repartia a quien quisiera y la solicitud no quedaba
+    # anotada en ningun lado. Un prospecto que no llenaba el formulario no
+    # habia existido nunca, y nadie podia llamarlo.
+    #
+    # Pedirselo al prompt ("registra antes de dar el link") no alcanza: el
+    # prompt es guia, nunca la garantia (PRD 7.4). Sacando el dato del prompt
+    # y devolviendolo aca, el modelo NO PUEDE entregarlo sin haber ejecutado la
+    # herramienta, porque no lo tiene. Es la misma idea que 'auth_ref': el
+    # valor no vive donde el modelo lo ve.
+    #
+    # Generico a proposito -- guarda el NOMBRE de la variable, no el dato. El
+    # nucleo no sabe que existe un formulario ni una empresa que lo use.
+    entrega_variable: str | None = None
     endpoint: str | None = None
     metodo: Literal["GET", "POST", "PUT", "PATCH"] = "GET"
     auth_ref: str | None = None
@@ -1566,6 +1585,19 @@ class TenantConfig(Base):
                     f"rol '{nombre_rol}': el nombre debe ser minuscula, "
                     f"empezar con letra y usar solo letras/numeros/guion bajo "
                     f"(2-30 caracteres)")
+
+        # Una 'entrega_variable' que apunte a una variable inexistente falla
+        # SIN error visible: la herramienta se ejecuta, el registro queda, y
+        # el modelo se queda sin el dato que tenia que entregar -- y como el
+        # dato ya no esta en el prompt, no tiene de donde sacarlo. El cliente
+        # ve una respuesta a medias y nadie sabe por que.
+        for h in self.herramientas:
+            if h.entrega_variable and h.entrega_variable not in self.variables_tenant:
+                raise ValueError(
+                    f"'{h.nombre}': 'entrega_variable' nombra "
+                    f"'{h.entrega_variable}', que no esta en 'variables_tenant'. "
+                    f"Declararla ahi (se edita en /configuracion/variables) o "
+                    f"quitar la referencia.")
 
         # Un 'escalar_si_falla' que apunte a un motivo no declarado no daria
         # ningun error al ejecutarse: escalaria con una razon que el resto

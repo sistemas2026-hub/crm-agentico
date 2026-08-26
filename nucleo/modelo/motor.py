@@ -1553,6 +1553,28 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                     if herramienta.solo_lectura:
                         cache_turno[clave_cache] = (salida, codigo_error)
 
+            # Un dato que el modelo NO tiene hasta que esta herramienta salio
+            # bien -- ver 'entrega_variable' en schema.py. Va aca, despues de
+            # toda la cadena de despacho, para que valga sea cual sea la rama
+            # que atendio la llamada: si manana la herramienta que entrega el
+            # dato pasa a ser 'interno' o queda detras del gate de identidad,
+            # esto sigue funcionando igual.
+            #
+            # Las tres condiciones son el punto entero: si la herramienta no
+            # existe, si fallo, o si devolvio un error, el dato NO se entrega.
+            # Asi el modelo no puede dar el link de un formulario cuando la
+            # solicitud no quedo registrada -- no lo tiene.
+            # Se mira el VALOR de 'error', no si la clave existe: BottleCRM
+            # responde {"error": false, "message": "..."} cuando todo salio
+            # bien, asi que preguntar por la clave habria dado siempre "fallo"
+            # y el link no se hubiera entregado nunca.
+            if (herramienta is not None and herramienta.entrega_variable
+                    and codigo_error is None
+                    and not (isinstance(salida, dict) and salida.get("error"))):
+                valor = (config.variables_tenant or {}).get(herramienta.entrega_variable)
+                if valor and isinstance(salida, dict):
+                    salida[herramienta.entrega_variable] = valor
+
             # asistente.tool_calls: fila por invocacion, para la auditoria en
             # /conversaciones (nucleo/canales/api.py la persiste despues, una
             # vez resuelto el conversation_id). n_registros solo tiene
