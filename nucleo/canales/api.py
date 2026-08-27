@@ -1666,6 +1666,64 @@ def configuracion_variable_borrar(nombre):
     return jsonify({"borrado": nombre})
 
 
+@app.post("/interno/herramienta/<nombre>")
+def interno_ejecutar_herramienta(nombre: str):
+    """
+    Ejecuta una herramienta del catalogo a pedido de OTRO servicio del
+    despliegue -- no de un modelo y no de una persona.
+
+    Por que existe: la credencial de WispHub vive solo en el motor. El backend
+    del CRM tambien necesita crear un ticket ahi cuando alguien envia una
+    solicitud de contratacion, y la alternativa era copiarle la clave. Dos
+    servicios con la misma credencial es lo que despues se desincroniza sin
+    que nadie sepa cual es la buena.
+
+    Tres capas, y ninguna sobra:
+
+      1. El token de servicio, que ya exige _exigir_token_de_servicio() para
+         toda ruta interna.
+      2. 'invocable_por_servicio' en la herramienta. Por defecto es False, asi
+         que esta ruta no expone "cualquier herramienta" sino las que alguien
+         declaro una por una. Sin esto, quien tuviera el token podria
+         ejecutar 'reiniciar_ont' sobre el cliente que se le ocurriera.
+      3. Sin sesion. Se pasa sesion=None a proposito: ninguna herramienta que
+         dependa de una identidad verificada puede funcionar por aca, porque
+         del otro lado no hay nadie a quien verificar.
+
+    Los argumentos pasan por el MISMO _resolver_argumentos que usa el modelo
+    -- traduccion de filtros verificados fail-closed incluida. Un servicio
+    interno no tiene mas permisos que el modelo para inventar parametros.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        config = _config_de(tenant)
+    except Exception as e:
+        return jsonify({"error": f"No se pudo cargar la config: {e}"}), 500
+
+    herramienta = next((h for h in config.herramientas if h.nombre == nombre), None)
+    if herramienta is None:
+        return jsonify({"error": f"No existe la herramienta '{nombre}'."}), 404
+    if not herramienta.invocable_por_servicio:
+        return jsonify({
+            "error": f"'{nombre}' no esta declarada como invocable por un "
+                     f"servicio. Se declara con 'invocable_por_servicio: true' "
+                     f"en la config del tenant."}), 403
+
+    argumentos = request.get_json(silent=True) or {}
+    if not isinstance(argumentos, dict):
+        return jsonify({"error": "El cuerpo tiene que ser un objeto JSON."}), 400
+
+    try:
+        salida = motor.ejecutar_para_servicio(config, herramienta, argumentos)
+    except Exception as e:
+        print(f"[interno] '{nombre}' fallo: {type(e).__name__}: {e}")
+        return jsonify({"error": f"{type(e).__name__}: {e}"}), 502
+
+    return jsonify({"resultado": salida})
+
+
 @app.get("/configuracion/planes-venta")
 def configuracion_planes_venta_listar():
     """

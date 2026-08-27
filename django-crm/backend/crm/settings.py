@@ -77,6 +77,8 @@ INSTALLED_APPS = [
     "orders",
     "business_hours",
     "macros",
+    # Nuestra, no de BottleCRM upstream: el formulario de contratacion.
+    "solicitudes",
     # "teams",  # Merged into common app
 ]
 

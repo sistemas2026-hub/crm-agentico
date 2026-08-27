@@ -35,6 +35,9 @@ urlpatterns = [
     path("api/", include("common.app_urls", namespace="common_urls")),
     # Public portal endpoints (no auth required)
     path("api/public/", include("invoices.public_urls", namespace="public_invoices")),
+    # Solicitud de contratacion: publica y anonima, el token de la URL es la
+    # unica credencial. Ver solicitudes/views.py.
+    path("api/", include("solicitudes.urls", namespace="solicitudes")),
     path(
         "logout/", views.LogoutView.as_view(), {"next_page": "/login/"}, name="logout"
     ),

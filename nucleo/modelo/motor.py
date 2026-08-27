@@ -791,6 +791,38 @@ def ejecutar_accion_aprobada(config, accion: dict) -> tuple[dict, str | None]:
         return {"error": "La API no acepto la accion."}, f"{type(e).__name__}: {e}"[:200]
 
 
+def ejecutar_para_servicio(config, herramienta, argumentos_modelo: dict) -> dict:
+    """
+    Ejecuta una herramienta a pedido de OTRO servicio del despliegue, no de un
+    modelo ni de una persona. La llama POST /interno/herramienta/<nombre>.
+
+    Existe porque la credencial de WispHub vive solo en el motor y el backend
+    del CRM tambien necesita crear un ticket ahi. Ver el docstring de esa ruta
+    en nucleo/canales/api.py, y 'invocable_por_servicio' en schema.py -- ESE
+    es el permiso; aca ya se da por concedido.
+
+    Se pasa sesion=None a proposito, y no es un descuido: del otro lado no hay
+    ninguna persona a la que verificar. Una herramienta que dependa de
+    'inyectar_sesion' va a llegar a la API sin ese campo y fallar de forma
+    controlada, en vez de ejecutarse sobre el cliente equivocado -- que es
+    exactamente lo que tiene que pasar.
+
+    Los argumentos pasan por el MISMO _resolver_argumentos que usa el modelo:
+    un servicio interno no tiene mas permisos para inventar parametros que el
+    modelo, y los filtros no verificados se descartan igual.
+    """
+    argumentos = _resolver_argumentos(herramienta, None, argumentos_modelo or {})
+
+    if herramienta.tipo == "http":
+        return (ejecutor_http.ejecutar_asincrono(herramienta, argumentos,
+                                                 tenant=config.identidad.slug)
+                if herramienta.asincrona else
+                ejecutor_http.ejecutar(herramienta, argumentos,
+                                       config.identidad.slug, config.variables_tenant))
+    raise ValueError(f"Tipo '{herramienta.tipo}' no se puede ejecutar desde un "
+                     f"servicio -- solo 'http'.")
+
+
 def _previas_no_cumplidas(herramienta, historial: list[dict]) -> list[str]:
     """Nombres de las herramientas de 'exige_previas' (schema.py) que
     TODAVIA no dieron el resultado favorable declarado, en esta conversacion.

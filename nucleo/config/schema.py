@@ -757,6 +757,20 @@ class Herramienta(Base):
     # Generico a proposito -- guarda el NOMBRE de la variable, no el dato. El
     # nucleo no sabe que existe un formulario ni una empresa que lo use.
     entrega_variable: str | None = None
+    # Si OTRO servicio del despliegue puede pedirle al motor que ejecute esta
+    # herramienta, via POST /interno/herramienta/<nombre>.
+    #
+    # Existe porque la credencial de WispHub vive SOLO en el motor, y el
+    # backend del CRM tambien necesita crear un ticket ahi (al enviarse una
+    # solicitud de contratacion). La alternativa era copiar la clave al
+    # backend: dos servicios con la misma credencial es lo que despues se
+    # desincroniza sin que nadie sepa cual es la buena.
+    #
+    # Por defecto FALSO, y esa es la parte importante: la ruta interna no
+    # expone "cualquier herramienta", expone las que alguien declaro una por
+    # una. Sin esto, quien tuviera el token de servicio podria ejecutar
+    # 'reiniciar_ont' o 'registrar_pago' sobre el cliente que quisiera.
+    invocable_por_servicio: bool = False
     endpoint: str | None = None
     metodo: Literal["GET", "POST", "PUT", "PATCH"] = "GET"
     auth_ref: str | None = None
