@@ -63,6 +63,39 @@ def _cuerpo(s) -> str:
     return "\n".join(lineas)
 
 
+def _descripcion_ticket(s) -> str:
+    """La descripcion del ticket, en el MISMO formato que los que ya existen.
+
+    Copiado de un ticket real de WispHub (27/08/2026), no inventado:
+
+        Instalacion Nueva - Andrea Leon | Tel: 3116138025 | correo@x |
+        Calle 37#9-11 apto 1, Manuela Beltran | GPS: 10.90, -74.77 | Doc: CC 326911
+
+    Es una sola linea con separadores ' | ' a proposito: asi se lee entera en
+    el listado de WispHub sin abrir el ticket, que es como Operaciones los
+    mira. Cambiar el formato obligaria a leerlos distinto segun de donde
+    vinieron.
+    """
+    partes = [f"Instalacion Nueva - {s.nombre_completo or s.telefono}"]
+    if s.telefono:
+        partes.append(f"Tel: {s.telefono}")
+    if s.correo:
+        partes.append(s.correo)
+    direccion = ", ".join(x for x in (s.direccion, s.barrio) if x)
+    if direccion:
+        partes.append(direccion)
+    if s.tiene_gps:
+        partes.append(f"GPS: {s.gps_lat}, {s.gps_lng}")
+    else:
+        partes.append("SIN GPS - verificar viabilidad en sitio")
+    doc = " ".join(x for x in (s.tipo_documento, s.numero_documento) if x)
+    if doc:
+        partes.append(f"Doc: {doc}")
+    if s.plan_interesado:
+        partes.append(f"Plan: {s.plan_interesado}")
+    return " | ".join(partes)
+
+
 def _enviar_correo(s) -> None:
     correo = EmailMessage(
         subject=f"Solicitud de servicio - {s.nombre_completo or s.telefono}",
@@ -84,25 +117,22 @@ def _crear_ticket_wisphub(s) -> str:
 
     base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
     tenant = os.environ.get("MOTOR_TENANT", "") or "rapilink"
-    herramienta = os.environ.get("SOLICITUDES_HERRAMIENTA_TICKET", "") or "crear_ticket"
+    herramienta = (os.environ.get("SOLICITUDES_HERRAMIENTA_TICKET", "")
+                   or "crear_ticket_instalacion")
 
     cabeceras = {"Content-Type": "application/json"}
     token = os.environ.get("MOTOR_SERVICE_TOKEN")
     if token:
         cabeceras["X-Servicio-Token"] = token
 
-    # El asunto se escribe EXACTAMENTE como los que ya existen ("Instalacion
-    # Nueva"): quien filtra la bandeja de WispHub por ese texto tiene que
-    # seguir encontrando estos. Ojo -- el catalogo de asuntos de WispHub trae
-    # el typo "Instatalacion Nueva" como valor distinto (ver la skill
-    # wisphub-api); no es este.
-    detalle = _cuerpo(s)
+    # El asunto, el departamento y la prioridad NO se mandan desde aca: son
+    # 'argumentos_fijos' de la herramienta, junto al id del cliente ficticio
+    # del que cuelgan estos tickets. Lo unico que aporta el backend es la
+    # descripcion, que es lo que cambia por solicitud.
     r = requests.post(
         f"{base}/interno/herramienta/{herramienta}",
         params={"tenant": tenant},
-        json={"asunto": "Instalacion Nueva",
-              "descripcion": detalle,
-              "prioridad": "media"},
+        json={"descripcion": _descripcion_ticket(s)},
         headers=cabeceras, timeout=45)
     r.raise_for_status()
     datos = (r.json() or {}).get("resultado") or {}

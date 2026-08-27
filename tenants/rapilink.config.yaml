@@ -1654,6 +1654,11 @@ variables_tenant:
   # nucleo/config/editor.py. Referenciado en el prompt del rol 'ventas'
   # con '{VENTAS_FORMULARIO_URL}' (ver nucleo/recuperacion/prompt.py).
   VENTAS_FORMULARIO_URL: https://rapilinksas.co/solicitud
+  # El cliente ficticio de WispHub del que cuelgan los tickets de instalacion.
+  # WispHub exige un cliente para crear un ticket y un prospecto todavia no lo
+  # es; la empresa resolvio eso con un registro llamado "INSTALACIONES
+  # NUEVAS". Se edita desde /configuracion/variables: cada ISP tiene el suyo.
+  WISPHUB_ID_SERVICIO_INSTALACIONES: "3545"
 
 # -----------------------------------------------------------------------------
 #  PLANES DE VENTA  -  lista curada, PENDIENTE de cargar (19/08/2026)
@@ -2939,6 +2944,54 @@ herramientas:
     metodo: POST
     auth_ref: BOTTLECRM_API_TOKEN
     auth_esquema: Bearer
+
+  # El ticket de instalacion que hoy crea el formulario del sitio web.
+  #
+  # WispHub EXIGE un cliente para crear un ticket -- verificado con un POST
+  # vacio (27/08/2026): responde 400 "Falta el id de un cliente para agregar
+  # un ticket". Y un prospecto todavia no es cliente.
+  #
+  # La empresa ya resolvio eso antes que nosotros: tiene un cliente ficticio
+  # llamado "INSTALACIONES NUEVAS" (id_servicio 3545) y TODOS los tickets de
+  # instalacion cuelgan de ahi. Se descubrio leyendo un ticket real, no
+  # preguntando: el campo 'servicio' lo trae.
+  #
+  # Ese id va en 'argumentos_desde_variables' y NO fijo aca: cada ISP va a
+  # tener el suyo con otro numero, y el dia que cambie no deberian necesitar
+  # a un desarrollador.
+  #
+  # Los demas valores replican EXACTAMENTE los tickets que ya existen
+  # (departamento Ventas, origen "Portal Cliente", prioridad Normal): quien
+  # filtra la bandeja de WispHub por cualquiera de esos tiene que seguir
+  # encontrando los nuevos igual que los viejos.
+  - nombre: crear_ticket_instalacion
+    tipo: http
+    descripcion: >
+      Crea el ticket de instalacion en WispHub cuando alguien envia el
+      formulario de contratacion. NO la llama el modelo: la llama el backend
+      al recibir la solicitud (ver 'invocable_por_servicio').
+    solo_lectura: false
+    requiere_confirmacion: true
+    invocable_por_servicio: true
+    # Nadie: no es una herramienta de conversacion. El catalogo de un rol se
+    # arma desde 'puede_consultar', asi que declarar el rol aca no se la
+    # ofrece a ningun modelo -- pero el esquema exige al menos uno.
+    roles_permitidos: [administracion]
+    base_url: https://api.wisphub.io
+    endpoint: /api/tickets/
+    metodo: POST
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    auth_header: Authorization
+    argumentos_fijos:
+      asunto: Instalacion Nueva
+      departamento: Ventas
+      origen_reporte: Portal Cliente
+      prioridad: Normal
+    argumentos_desde_variables:
+      servicio: WISPHUB_ID_SERVICIO_INSTALACIONES
+    filtros_verificados:
+      descripcion: {param: descripcion, tipo: texto, verificado_el: 2026-08-27}
 
   # El prospecto queda anotado ANTES de darle el formulario, no despues.
   #

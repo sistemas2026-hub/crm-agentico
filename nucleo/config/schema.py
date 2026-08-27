@@ -874,6 +874,20 @@ class Herramienta(Base):
     # modelo si propone). Ej.: ping_cliente necesita 'pings'/'arp_ping' fijos
     # -- no son un dato de negocio que el modelo deba decidir cada vez.
     argumentos_fijos: dict[str, Any] = Field(default_factory=dict)
+    # Igual que 'argumentos_fijos', pero el valor sale de 'variables_tenant':
+    # {argumento_de_la_llamada: NOMBRE_DE_LA_VARIABLE}.
+    #
+    # Existe por la regla que este proyecto ya aprendio a golpes: un dato que
+    # VARIA POR EMPRESA no puede quedar fijo en el YAML. El caso que lo trajo
+    # es el id del cliente ficticio "INSTALACIONES NUEVAS" de WispHub (3545 en
+    # Rapilink), del que cuelgan los tickets de instalacion -- WispHub exige un
+    # cliente para crear un ticket y un prospecto todavia no lo es. Cada ISP va
+    # a tener el suyo, con otro numero, y el dia que lo cambien no deberian
+    # necesitar a un desarrollador: se edita en /configuracion/variables.
+    #
+    # Mismo espiritu que 'auth_ref' (secretos) y 'base_url_ref' (dominios):
+    # la config guarda el NOMBRE, nunca el dato.
+    argumentos_desde_variables: dict[str, str] = Field(default_factory=dict)
     # Cuales de esos fijos puede decidir el CODIGO en el momento (nunca el
     # modelo: esto no viaja por tool-calling).
     #
@@ -1635,6 +1649,18 @@ class TenantConfig(Base):
         # el modelo se queda sin el dato que tenia que entregar -- y como el
         # dato ya no esta en el prompt, no tiene de donde sacarlo. El cliente
         # ve una respuesta a medias y nadie sabe por que.
+        # Mismo motivo, y el mismo fallo silencioso: la llamada sale sin ese
+        # argumento y la API la rechaza -- o peor, la acepta con un dato de
+        # menos.
+        for h in self.herramientas:
+            faltan_vars = [v for v in h.argumentos_desde_variables.values()
+                           if v not in self.variables_tenant]
+            if faltan_vars:
+                raise ValueError(
+                    f"'{h.nombre}': 'argumentos_desde_variables' nombra "
+                    f"{sorted(faltan_vars)}, que no esta en 'variables_tenant'. "
+                    f"Declararla ahi (se edita en /configuracion/variables).")
+
         for h in self.herramientas:
             if h.entrega_variable and h.entrega_variable not in self.variables_tenant:
                 raise ValueError(

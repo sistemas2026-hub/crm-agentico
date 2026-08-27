@@ -829,7 +829,8 @@ def ejecutar_para_servicio(config, herramienta, argumentos_modelo: dict) -> dict
     un servicio interno no tiene mas permisos para inventar parametros que el
     modelo, y los filtros no verificados se descartan igual.
     """
-    argumentos = _resolver_argumentos(herramienta, None, argumentos_modelo or {})
+    argumentos = _resolver_argumentos(herramienta, None, argumentos_modelo or {},
+                                      variables_tenant=config.variables_tenant)
 
     if herramienta.tipo == "http":
         return (ejecutor_http.ejecutar_asincrono(herramienta, argumentos,
@@ -896,7 +897,8 @@ def _veces_ejecutada(herramienta, historial: list[dict]) -> int:
 
 
 def _resolver_argumentos(herramienta, sesion, argumentos_modelo: dict,
-                         sobrescribir: dict | None = None) -> dict:
+                         sobrescribir: dict | None = None,
+                         variables_tenant: dict | None = None) -> dict:
     """
     Los argumentos REALES que se le mandan a una API, a partir de lo que el
     modelo propuso -- filtros traducidos (fail-closed: solo lo declarado en
@@ -928,6 +930,15 @@ def _resolver_argumentos(herramienta, sesion, argumentos_modelo: dict,
     # Constantes del tenant, nunca decididas por el modelo (ver el comentario
     # de 'argumentos_fijos' en schema.py).
     argumentos.update(herramienta.argumentos_fijos)
+
+    # Los fijos que viven en la config del tenant y no en el YAML -- ver
+    # 'argumentos_desde_variables' en schema.py. Van junto a los otros fijos:
+    # para la llamada son lo mismo, la unica diferencia es de donde salio el
+    # valor y quien lo puede editar.
+    for arg_llamada, nombre_variable in herramienta.argumentos_desde_variables.items():
+        valor = (variables_tenant or {}).get(nombre_variable)
+        if valor not in (None, ""):
+            argumentos[arg_llamada] = valor
 
     # Y despues, lo que el CODIGO decidio para esta llamada puntual -- solo
     # sobre las claves que la herramienta declaro sobrescribibles. Va DESPUES
@@ -1023,7 +1034,7 @@ def _ejecutar_tool(herramienta, sesion, argumentos_modelo: dict,
         return ejecutor_agregado.ejecutar(herramienta, argumentos_modelo, tenant)
 
     argumentos = _resolver_argumentos(herramienta, sesion, argumentos_modelo,
-                                      sobrescribir)
+                                      sobrescribir, variables_tenant)
 
     if herramienta.tipo == "interno" and herramienta.detecta_incidente:
         return ejecutor_incidentes.detectar(herramienta, argumentos, tenant, variables_tenant)
