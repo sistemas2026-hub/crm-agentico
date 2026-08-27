@@ -1,0 +1,162 @@
+{% comment %}
+Expediente de solicitud de servicio -- la plantilla del PDF que recibe
+Operaciones para instalar.
+
+Pensado para que se LEA EN PAPEL y en un celular: un tecnico lo abre parado en
+la calle. Por eso los datos que se usan en terreno (direccion, barrio,
+coordenadas, telefono) van arriba y grandes, y lo administrativo va despues.
+
+Las imagenes llegan como data: URI desde solicitudes/pdf.py -- no hay ninguna
+peticion de red al renderizar, que ademas es lo que hace que esto funcione
+dentro de un contenedor sin salida a internet.
+{% endcomment %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<style>
+  @page { size: letter; margin: 14mm 14mm 16mm; }
+  body { font-family: "DejaVu Sans", Helvetica, Arial, sans-serif;
+         font-size: 10pt; color: #17202b; line-height: 1.45; }
+
+  .cabecera { border-bottom: 2px solid #17202b; padding-bottom: 8px;
+              margin-bottom: 14px; }
+  .cabecera h1 { font-size: 17pt; margin: 0 0 2px; letter-spacing: -.2px; }
+  .cabecera .meta { font-size: 8.5pt; color: #5a6672; }
+
+  h2 { font-size: 10.5pt; text-transform: uppercase; letter-spacing: .6px;
+       color: #35506b; margin: 16px 0 6px; padding-bottom: 3px;
+       border-bottom: 1px solid #d3dae1; }
+
+  table.datos { width: 100%; border-collapse: collapse; }
+  table.datos td { padding: 3px 0; vertical-align: top; }
+  table.datos td.r { width: 34%; color: #5a6672; padding-right: 10px; }
+  table.datos td.v { font-weight: 600; }
+
+  .destacado { background: #f2f6fa; border: 1px solid #d3dae1;
+               padding: 9px 11px; margin: 4px 0 2px; }
+  .destacado .dir { font-size: 12.5pt; font-weight: 700; }
+  .destacado .sub { font-size: 9pt; color: #5a6672; margin-top: 2px; }
+
+  .aviso { background: #fdf6e3; border: 1px solid #e6d9ae; padding: 8px 10px;
+           font-size: 8.5pt; margin-top: 6px; }
+
+  .imgs { width: 100%; border-collapse: collapse; margin-top: 4px; }
+  .imgs td { width: 33.33%; padding: 4px; vertical-align: top; }
+  .imgs .rot { font-size: 8pt; color: #5a6672; text-transform: uppercase;
+               letter-spacing: .5px; margin-bottom: 3px; }
+  .imgs img { width: 100%; border: 1px solid #d3dae1; }
+
+  .firma img { max-height: 90px; border-bottom: 1px solid #17202b; }
+
+  .autoriz { font-size: 8.5pt; }
+  .autoriz .si { font-weight: 700; }
+  .autoriz .no { color: #8a3b3b; font-weight: 700; }
+  .textoaut { font-size: 7.5pt; color: #5a6672; white-space: pre-wrap;
+              margin-top: 5px; border-left: 1px solid #d3dae1;
+              padding-left: 8px; }
+
+  .pie { margin-top: 16px; padding-top: 6px; border-top: 1px solid #d3dae1;
+         font-size: 7.5pt; color: #7b8794; }
+</style>
+</head>
+<body>
+
+<div class="cabecera">
+  <h1>Solicitud de servicio</h1>
+  <div class="meta">
+    Radicado {{ s.id }} &nbsp;·&nbsp;
+    Enviada {{ s.enviada_en|date:"d/m/Y H:i" }} &nbsp;·&nbsp;
+    {{ s.plan_interesado|default:"plan sin especificar" }}
+  </div>
+</div>
+
+<h2>Donde se instala</h2>
+<div class="destacado">
+  <div class="dir">{{ s.direccion|default:"(sin direccion)" }}</div>
+  <div class="sub">
+    Barrio {{ s.barrio|default:"(sin barrio)" }}
+    {% if s.tiene_gps %}
+      &nbsp;·&nbsp; GPS {{ s.gps_lat }}, {{ s.gps_lng }}
+      {% if s.gps_precision_m %}(±{{ s.gps_precision_m }} m){% endif %}
+    {% endif %}
+  </div>
+  {% if mapa %}<div class="sub">{{ mapa }}</div>{% endif %}
+</div>
+{% if not s.tiene_gps %}
+  <div class="aviso">
+    <strong>Sin coordenadas GPS.</strong> No se puede confirmar la viabilidad
+    tecnica desde el expediente: hay que verificarla en sitio o volver a
+    pedirle la ubicacion al solicitante.
+  </div>
+{% endif %}
+
+<h2>Quien solicita</h2>
+<table class="datos">
+  <tr><td class="r">Nombre</td><td class="v">{{ s.nombre_completo|default:"—" }}</td></tr>
+  <tr><td class="r">Documento</td><td class="v">{{ s.tipo_documento }} {{ s.numero_documento }}</td></tr>
+  <tr><td class="r">Edad</td><td class="v">{{ s.edad|default:"—" }}</td></tr>
+  <tr><td class="r">Telefono</td><td class="v">{{ s.telefono|default:"—" }}</td></tr>
+  <tr><td class="r">Correo</td><td class="v">{{ s.correo|default:"—" }}</td></tr>
+</table>
+
+<h2>Servicio solicitado</h2>
+<table class="datos">
+  <tr><td class="r">Plan</td><td class="v">{{ s.plan_interesado|default:"—" }}</td></tr>
+  <tr><td class="r">Tipo de solicitud</td><td class="v">{{ s.tipo_solicitud|default:"—" }}</td></tr>
+  <tr><td class="r">Fecha de corte</td><td class="v">{{ s.fecha_corte|default:"—" }}</td></tr>
+  <tr><td class="r">Como se entero</td><td class="v">{{ s.como_se_entero|default:"—" }}</td></tr>
+</table>
+
+<h2>Documentos</h2>
+<table class="imgs">
+  <tr>
+    {% for i in imagenes %}
+      <td>
+        <div class="rot">{{ i.rotulo }}</div>
+        <img src="{{ i.src }}" alt="{{ i.rotulo }}">
+      </td>
+    {% endfor %}
+  </tr>
+</table>
+
+{% if firma %}
+  <h2>Firma del solicitante</h2>
+  <div class="firma"><img src="{{ firma }}" alt="Firma"></div>
+{% endif %}
+
+<h2>Autorizaciones</h2>
+<div class="autoriz">
+  <div>
+    Habeas Data (Ley 1581 de 2012):
+    {% if s.autoriza_habeas_data %}<span class="si">AUTORIZA</span>
+    {% else %}<span class="no">NO AUTORIZA</span>{% endif %}
+  </div>
+  <div>
+    Centrales de riesgo (Ley 1266 de 2008):
+    {% if s.autoriza_centrales_riesgo %}<span class="si">AUTORIZA</span>
+    {% else %}<span class="no">NO AUTORIZA</span>{% endif %}
+  </div>
+  {% if s.autorizaciones_en %}
+    <div style="margin-top:4px;color:#5a6672;">
+      Aceptadas el {{ s.autorizaciones_en|date:"d/m/Y H:i" }}
+    </div>
+  {% endif %}
+  {% comment %}
+    El texto exacto que la persona acepto, no solo que acepto. Sin esto, la
+    autorizacion no prueba nada el dia que alguien la reclame: el texto de la
+    politica cambia con el tiempo y "acepto" a secas no dice a que.
+  {% endcomment %}
+  {% if s.texto_autorizaciones %}
+    <div class="textoaut">{{ s.texto_autorizaciones }}</div>
+  {% endif %}
+</div>
+
+<div class="pie">
+  Documento generado automaticamente el {{ generado_en|date:"d/m/Y H:i" }}.
+  Contiene datos personales protegidos por la Ley 1581 de 2012 -- tratar
+  conforme a la politica de privacidad vigente.
+</div>
+
+</body>
+</html>
