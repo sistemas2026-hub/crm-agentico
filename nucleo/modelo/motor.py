@@ -71,6 +71,24 @@ class ErrorMotor(Exception):
     pass
 
 
+class FaltaIdentidadEnSesion(ErrorMotor):
+    """
+    La sesion no tiene un campo que la herramienta declaro imprescindible.
+
+    Es una EXCEPCION y no un valor de retorno para que ningun camino pueda
+    ignorarla por descuido: lo que esta en juego es que una consulta salga sin
+    el filtro que la acota a un cliente, y eso no devuelve un error -- devuelve
+    a todos los demas. Ver 'inyectados_obligatorios' en schema.py.
+    """
+
+    def __init__(self, herramienta: str, faltantes: list[str]):
+        self.herramienta = herramienta
+        self.faltantes = faltantes
+        super().__init__(
+            f"'{herramienta}' necesita {faltantes} de la sesion verificada y "
+            f"no lo tiene: la llamada no sale.")
+
+
 # 'formato' que el modelo puede pedir en una herramienta 'agregado'
 # exportable -> (funcion generadora, mime). Un solo lugar para agregar un
 # formato nuevo (ver _esquema_openai, que arma el enum desde estas mismas
@@ -966,6 +984,21 @@ def _resolver_argumentos(herramienta, sesion, argumentos_modelo: dict,
         else:
             argumentos[arg_llamada] = valor
 
+    # Y si lo que falta es un campo de IDENTIDAD, la llamada no sale.
+    #
+    # Omitir un campo vacio es correcto para uno opcional y es un agujero para
+    # uno de identidad: sin 'id_servicio', la consulta no pregunta por nadie --
+    # pregunta SIN FILTRO, y devuelve a todo el mundo con cara de exito. Ver
+    # 'inyectados_obligatorios' en schema.py y el caso medido que lo motivo.
+    #
+    # Va aca y no en el despacho a proposito: por esta funcion pasan los TRES
+    # caminos que arman argumentos -- el modelo, una accion aprobada por una
+    # persona, y la ruta interna de servicio. Ponerlo en uno solo dejaria los
+    # otros dos abiertos.
+    faltan = [c for c in herramienta.inyectados_obligatorios if not argumentos.get(c)]
+    if faltan:
+        raise FaltaIdentidadEnSesion(herramienta.nombre, faltan)
+
     # Ver Herramienta.espejar_campos en schema.py -- despues de todo lo
     # demas, para copiar el valor YA resuelto (traducido, no lo que dijo
     # el modelo en crudo).
@@ -1576,6 +1609,21 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                         if herramienta.campos_texto_libre:
                             salida = redaccion.redactar_campos(
                                 salida, herramienta.campos_texto_libre)
+                    except FaltaIdentidadEnSesion as e:
+                        # No es un fallo del sistema: es la proteccion haciendo
+                        # su trabajo. Se le dice al modelo QUE hacer -- pedir la
+                        # cedula-- en vez de dejarlo anunciar una averia que no
+                        # existe. Codigo propio para poder contarlo aparte en la
+                        # auditoria: esto tiene que poder verse.
+                        salida = {"error": "IDENTIDAD_NO_RESUELTA",
+                                 "instruccion_interna":
+                                     f"'{e.herramienta}' consulta datos de UN "
+                                     f"cliente y la sesion todavia no sabe cual. "
+                                     f"No la reintentes ni le digas al cliente "
+                                     f"que hubo un problema tecnico: pedile su "
+                                     f"numero de cedula y verifica la identidad "
+                                     f"primero."}
+                        codigo_error = "IDENTIDAD_NO_RESUELTA"
                     except Exception as e:
                         # No tumba el turno: el modelo recibe un error legible y
                         # puede decirle al cliente que hubo un problema, en vez de

@@ -626,6 +626,28 @@ class Herramienta(Base):
     # de otro id_cliente -- la identidad la resuelve la verificacion, no el
     # modelo. Ej.: {'id_servicio': 'id_cliente'}.
     inyectar_sesion: dict[str, str] = Field(default_factory=dict)
+    # Claves de 'inyectar_sesion' SIN LAS CUALES la llamada no puede salir.
+    #
+    # La inyeccion OMITE un valor vacio en vez de mandarlo nulo, por una razon
+    # buena y verificada: WispHub responde 400 a {"interfaz": null} pero acepta
+    # que el campo no venga. Para un campo opcional como 'interfaz_lan' eso es
+    # exactamente lo correcto.
+    #
+    # Para un campo de IDENTIDAD es lo contrario, y ahi la misma regla abre un
+    # agujero: omitir 'id_servicio' no consulta "el servicio de nadie", consulta
+    # SIN FILTRO -- y una consulta sin filtro devuelve el universo entero con
+    # cara de respuesta exitosa. Medido el 27/08/2026 en produccion: un numero
+    # de WhatsApp que no es cliente de nadie disparo 'consultar_mi_servicio' con
+    # la sesion sin verificar y trajo 300 filas de 7.356 clientes, con
+    # 'exito: True' en la traza y sin una sola senal de que algo anduviera mal.
+    #
+    # Las herramientas cuyo campo va en la RUTA ('/clientes/{id_servicio}/ping/')
+    # ya fallaban cerradas por la guarda de 'endpoint sin resolver' de
+    # nucleo/herramientas/http.py. Pero eso es un accidente afortunado de como
+    # quedo escrito el endpoint, no una decision: la misma herramienta con el
+    # id como parametro de consulta no tenia ninguna proteccion. Esto lo vuelve
+    # explicito, y deja de depender de donde caiga el dato en la URL.
+    inyectados_obligatorios: list[str] = Field(default_factory=list)
     # Marca esta herramienta como un METODO DE VERIFICACION DE IDENTIDAD, no
     # una consulta de datos. Cambia el comportamiento del motor:
     #   - se ofrece SIEMPRE, aunque la sesion no este verificada todavia (es
@@ -1063,6 +1085,14 @@ class Herramienta(Base):
                 f"'{self.nombre}': aprobacion_humana solo tiene sentido en una "
                 f"escritura -- una consulta de solo lectura no necesita cola de "
                 f"aprobacion.")
+
+        sobrantes_inyectados = set(self.inyectados_obligatorios) - set(self.inyectar_sesion)
+        if sobrantes_inyectados:
+            raise ValueError(
+                f"'{self.nombre}': 'inyectados_obligatorios' nombra "
+                f"{sorted(sobrantes_inyectados)}, que no esta en "
+                f"'inyectar_sesion' -- solo se puede exigir un campo que el "
+                f"motor inyecte desde la sesion.")
 
         sobrantes_requeridos = set(self.requeridos) - set(self.filtros_verificados)
         if sobrantes_requeridos:

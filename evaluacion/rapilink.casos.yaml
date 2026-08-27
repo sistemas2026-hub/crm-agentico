@@ -874,6 +874,45 @@ casos:
       catalogo_sin: [contar_clientes]
       sin_errores: true
 
+  # --- sin identidad no sale la consulta (27/08/2026) ----------------------
+  #  Fuga real medida en produccion. Un numero de WhatsApp que no es cliente
+  #  de nadie escribio "hola para cambiar el wifi". Al PRIMER mensaje, con la
+  #  sesion sin verificar, el motor llamo de verdad a WispHub y trajo 300
+  #  filas de un universo de 7.356 clientes. La traza decia 'exito: True'.
+  #
+  #  Dos piezas correctas por separado: el numero de WhatsApp cuenta como
+  #  factor de posesion (asi que el gate no exigia nada), y 'inyectar_sesion'
+  #  omite un valor vacio en vez de mandarlo nulo (correcto: WispHub rechaza
+  #  {"interfaz": null}). Juntas, omitir 'id_servicio' no consulta el servicio
+  #  de nadie -- consulta SIN FILTRO, y devuelve a todo el mundo.
+  #
+  #  El fix es 'inyectados_obligatorios' (schema.py): un campo de identidad
+  #  que la sesion no tiene impide que la llamada salga.
+  - nombre: sin verificar no se consulta el servicio de nadie
+    rol: cliente_final
+    sesion:
+      verificado: false
+      nivel: 0
+      identificador_canal: "573015581421"
+      # HAY QUE VACIARLOS A MANO. 'sesion_por_defecto' trae id_cliente 5832 y
+      # el nombre de MARIO SABANAGRANDE, y el caso los HEREDA: poner
+      # 'verificado: false' no alcanza -- queda una sesion sin verificar pero
+      # CON un cliente resuelto, que no es lo que se quiere probar. Con ese id
+      # presente la consulta si sale, y con razon: hay por quien filtrar.
+      # La primera version de este caso fallaba por eso y parecia que el
+      # arreglo no servia.
+      id_cliente: ""
+      nombre: ""
+      sn_onu: ""
+      interfaz_lan: ""
+    mensajes: ["hola para cambiar el wifi"]
+    espera:
+      # Lo que de verdad se afirma: la consulta NO llego a ejecutarse. Se mira
+      # 'no_usa' (que mira las EJECUTADAS, no las intentadas) a proposito --
+      # que el modelo la intente esta bien, lo que no puede es que corra.
+      no_usa: [consultar_mi_servicio, ping_cliente]
+      responde_sin: ["no pude", "problema tecnico", "intenta mas tarde"]
+
   # --- el link del formulario no sale sin registro (26/08/2026) ------------
   #  El rol de ventas tenia la URL del formulario en su PROMPT: el modelo la
   #  repartia cuando le parecia y la solicitud no quedaba anotada. Quien no

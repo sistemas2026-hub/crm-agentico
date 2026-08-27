@@ -1761,7 +1761,7 @@ herramientas:
     auth_esquema: Api-Key
     inyectar_sesion:
       id_servicio: id_cliente
-
+    inyectados_obligatorios: [id_servicio]
   - nombre: consultar_plan_tv
     tipo: http
     descripcion: >
@@ -2009,7 +2009,7 @@ herramientas:
       arp_ping: false
     inyectar_sesion:
       id_servicio: id_cliente
-
+    inyectados_obligatorios: [id_servicio]
   # ---------------------------------------------------------------------------
   #  PEDIDO DE CAMBIO DE RED INALAMBRICA
   # ---------------------------------------------------------------------------
@@ -3004,6 +3004,10 @@ herramientas:
     # telefono de otro. Por eso 'phone' tampoco esta en filtros_verificados:
     # no existe como argumento que el modelo pueda proponer.
     inyectar_sesion: {phone: identificador_canal}
+    # Un lead sin telefono no sirve para nada: nadie puede llamarlo, que es
+    # el unico motivo por el que existe. Antes de registrar sin numero,
+    # mejor que falle y el agente lo note.
+    inyectados_obligatorios: [phone]
     requeridos: [title, city, description]
     filtros_verificados:
       title: {param: title, tipo: texto, verificado_el: 2026-08-26}
@@ -3057,6 +3061,7 @@ herramientas:
     # igual (la llamada HTTP si funcionaba). Encontrado 14/08/2026.
     inyectar_sesion:
       sn_onu: sn_onu
+    inyectados_obligatorios: [sn_onu]
     # De 4.966 ONUs de Rapilink, 68 solo responden con el serial en su
     # forma hexadecimal (verificado en vivo, agosto 2026) -- y entre ellas
     # hay clientes ACTIVOS. WispHub guarda la forma corta, asi que sin este
@@ -3087,6 +3092,7 @@ herramientas:
     # objeto envolvente.
     inyectar_sesion:
       sn_onu: sn_onu
+    inyectados_obligatorios: [sn_onu]
     # De 4.966 ONUs de Rapilink, 68 solo responden con el serial en su
     # forma hexadecimal (verificado en vivo, agosto 2026) -- y entre ellas
     # hay clientes ACTIVOS. WispHub guarda la forma corta, asi que sin este
@@ -3163,6 +3169,7 @@ herramientas:
     auth_header: X-Token
     inyectar_sesion:
       sn_onu: sn_onu
+    inyectados_obligatorios: [sn_onu]
     reintentar_identificador_como:
       sn_onu: gpon_hex
 
@@ -3203,6 +3210,7 @@ herramientas:
     auth_header: X-Token
     inyectar_sesion:
       sn_onu: sn_onu
+    inyectados_obligatorios: [sn_onu]
     reintentar_identificador_como:
       sn_onu: gpon_hex
 
@@ -3241,6 +3249,7 @@ herramientas:
     auth_header: X-Token
     inyectar_sesion:
       sn_onu: sn_onu
+    inyectados_obligatorios: [sn_onu]
     reintentar_identificador_como:
       sn_onu: gpon_hex
 
@@ -3292,6 +3301,7 @@ herramientas:
     auth_header: X-Token
     inyectar_sesion:
       sn_onu: sn_onu
+    inyectados_obligatorios: [sn_onu]
     # De 4.966 ONUs de Rapilink, 68 solo responden con el serial en su
     # forma hexadecimal (verificado en vivo, agosto 2026) -- y entre ellas
     # hay clientes ACTIVOS. WispHub guarda la forma corta, asi que sin este
@@ -3378,6 +3388,7 @@ herramientas:
     extraer_de: full_status_json
     inyectar_sesion:
       sn_onu: sn_onu
+    inyectados_obligatorios: [sn_onu]
     # De 4.966 ONUs de Rapilink, 68 solo responden con el serial en su
     # forma hexadecimal (verificado en vivo, agosto 2026) -- y entre ellas
     # hay clientes ACTIVOS. WispHub guarda la forma corta, asi que sin este
@@ -3444,6 +3455,7 @@ herramientas:
     auth_header: X-Token
     inyectar_sesion:
       sn_onu: sn_onu
+    inyectados_obligatorios: [sn_onu]
     # El nombre del campo salio de la coleccion oficial del proveedor (ver
     # .claude/skills/smartolt-api/SKILL.md, el truco del collectionId), no de
     # adivinar: 'onu_type', form-data, con el NOMBRE del tipo como valor.
@@ -3488,6 +3500,7 @@ herramientas:
     auth_header: X-Token
     inyectar_sesion:
       sn_onu: sn_onu
+    inyectados_obligatorios: [sn_onu]
     reintentar_identificador_como:
       sn_onu: gpon_hex
     limite_por_conversacion: 1
@@ -3554,6 +3567,7 @@ herramientas:
     auth_header: X-Token
     inyectar_sesion:
       sn_onu: sn_onu
+    inyectados_obligatorios: [sn_onu]
     # Dos niveles, y el de adentro viene indexado por numero en vez de ser
     # una lista -- el motor lo normaliza (ver nucleo/herramientas/http.py).
     extraer_de: response.hostlist
@@ -3605,6 +3619,7 @@ herramientas:
     extraer_de: onu_details
     inyectar_sesion:
       sn_onu: sn_onu
+    inyectados_obligatorios: [sn_onu]
     # De 4.966 ONUs de Rapilink, 68 solo responden con el serial en su
     # forma hexadecimal (verificado en vivo, agosto 2026) -- y entre ellas
     # hay clientes ACTIVOS. WispHub guarda la forma corta, asi que sin este
