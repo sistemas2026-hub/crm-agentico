@@ -141,6 +141,38 @@ comprobar(not sin_declarar,
           f"toda herramienta que inyecta identidad la exige "
           f"(sin declarar: {sin_declarar})")
 
+# ---------------------------------------------------------------------- 7 --
+print("\n[7] El telefono solo cuenta como posesion si resolvio a un cliente")
+
+from nucleo.seguridad.verificacion import es_factor_de_posesion   # noqa: E402
+
+
+def exige_identificarse(rol_cfg, identificador, id_cliente):
+    """La MISMA regla que aplica motor.responder(). Se replica para poder
+    comprobarla sin levantar el motor entero -- lo que se fija es la decision,
+    no el andamiaje."""
+    verificable = (rol_cfg.orientado_a == "cliente_final" and rol_cfg.exige_verificacion)
+    if not verificable:
+        return False
+    posesion_util = es_factor_de_posesion(identificador) and bool(id_cliente)
+    return not posesion_util
+
+
+soporte = cfg.roles["soporte_tecnico_cliente"]
+ventas = cfg.roles["ventas"]
+
+comprobar(exige_identificarse(soporte, "573015581421", None),
+          "un telefono SIN cliente resuelto tiene que identificarse  <- el bug")
+comprobar(not exige_identificarse(soporte, "573015581421", "5832"),
+          "un telefono CON cliente resuelto no cambia en nada (sigue pasando)")
+comprobar(exige_identificarse(soporte, "bsuid_abc123", None),
+          "un BSUID sin cliente tambien -- esto ya era asi y sigue igual")
+# Lo que NO puede pasar: frenar a alguien que todavia no es cliente de nadie.
+comprobar(not exige_identificarse(ventas, "573009991010", None),
+          "un PROSPECTO en ventas se sigue atendiendo sin verificarse")
+comprobar(not exige_identificarse(cfg.roles["cliente_final"], "573009991010", None),
+          "y el agente general tampoco pide nada para derivar")
+
 print("\n" + "=" * 70)
 if fallos:
     print(f" {len(fallos)} FALLA(S):")

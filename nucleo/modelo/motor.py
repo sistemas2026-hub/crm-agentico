@@ -1371,8 +1371,28 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
     # unica forma de saber quien es, y sin esto la conversacion queda para
     # siempre como "sin identificar" en /conversaciones si nunca toca un
     # recurso protegido.
-    if (_cliente_final_verificable and sesion is not None
-            and not es_factor_de_posesion(sesion.identificador_canal)):
+    #
+    # Y EL TELEFONO SOLO CUENTA SI RESOLVIO A UN CLIENTE (27/08/2026). Poseer
+    # el numero prueba que controlas ESE numero, no que seas un cliente
+    # concreto: si no esta vinculado a ninguno, no hay contra que contrastar
+    # la posesion y el descuento no se gana. Antes bastaba con que el
+    # identificador fuera de digitos, asi que un numero cualquiera --que no es
+    # cliente de nadie-- entraba a un rol que exige verificacion con
+    # 'nivel_exigido' en 0. Medido: con eso, al primer mensaje se llamo a
+    # WispHub y volvieron 300 filas de 7.356 clientes.
+    #
+    # 'inyectados_obligatorios' ya impide que se filtre un dato de cliente por
+    # ahi, pero esto es la otra mitad: las herramientas que NO inyectan
+    # identidad seguian abiertas -- entre ellas 'registrar_pedido_wifi', que
+    # crea un ticket. Dos capas, como el resto del proyecto (PRD 7.4).
+    #
+    # No estorba a nadie que ya se identifico: si hay 'id_cliente', la sesion
+    # esta verificada y su nivel ya es 1. Y no toca a 'ventas' ni al agente
+    # general, que declaran exige_verificacion=False -- un prospecto se sigue
+    # atendiendo igual, que es justamente quien nunca va a poder verificarse.
+    _posesion_util = (es_factor_de_posesion(sesion.identificador_canal)
+                      and bool(getattr(sesion, "id_cliente", None))) if sesion else False
+    if _cliente_final_verificable and sesion is not None and not _posesion_util:
         nivel_exigido = max(nivel_exigido, 1)
 
     # Cache DENTRO DE ESTE TURNO: {(nombre, argumentos_del_modelo) -> (salida,
@@ -1743,8 +1763,16 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                                                     and rol_cfg.exige_verificacion)
                 nivel_exigido = (nivel_requerido(rol_cfg, config.seguridad)
                                 if _cliente_final_verificable_nuevo else 0)
+                # Mismo criterio que al entrar al turno: el telefono solo
+                # cuenta como posesion si resolvio a un cliente. Este es
+                # justamente el camino del caso del WiFi -- derivar_a_area
+                # cambia el rol a uno que exige verificacion a mitad de turno,
+                # y sin esto el descuento del telefono se aplicaba igual.
+                _posesion_util_nuevo = (
+                    es_factor_de_posesion(sesion.identificador_canal)
+                    and bool(getattr(sesion, "id_cliente", None))) if sesion else False
                 if (_cliente_final_verificable_nuevo and sesion is not None
-                        and not es_factor_de_posesion(sesion.identificador_canal)):
+                        and not _posesion_util_nuevo):
                     nivel_exigido = max(nivel_exigido, 1)
                 # El empujon de 'sugerir_cuando_disponible' se evalua contra
                 # el catalogo nuevo: lo ya sugerido para el rol viejo no
