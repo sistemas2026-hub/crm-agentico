@@ -113,9 +113,18 @@ cfg = cargar_config("tenants/rapilink.config.yaml")
 herr = next((h for h in cfg.herramientas
              if h.nombre == "registrar_solicitud_servicio"), None)
 comprobar(herr is not None, "existe registrar_solicitud_servicio")
-comprobar(bool(herr and herr.entrega_variable), "declara entrega_variable")
-comprobar(bool(herr and herr.entrega_variable in cfg.variables_tenant),
-          "y esa variable esta declarada en variables_tenant")
+# El link YA NO viene de 'entrega_variable'. Desde el 27/08/2026 lo devuelve
+# firmado el endpoint que crea el lead y la solicitud, asi que el modelo no
+# puede fabricarlo ni adivinarlo -- la misma garantia, sostenida por
+# criptografia en vez de por omision. 'entrega_variable' sigue existiendo como
+# mecanismo generico (casos 1 a 5), pero esta herramienta ya no lo necesita.
+comprobar(bool(herr and not herr.entrega_variable),
+          "ya no depende de entrega_variable: el link viene firmado en la respuesta")
+comprobar(bool(herr and (herr.endpoint or "").rstrip("/").endswith("/solicitudes")),
+          "apunta al endpoint que crea lead y solicitud en una transaccion")
+comprobar("link" in (cfg.roles["ventas"].campos_permitidos or {})
+          .get("registrar_solicitud_servicio", []),
+          "'link' pasa la lista blanca (sin el, el modelo no ve el formulario)")
 # 'requiere_confirmacion' se comprueba porque el validador lo exige en toda
 # escritura, NO porque frene algo: hoy no lo aplica nadie en tiempo de
 # ejecucion (el gate real es 'aprobacion_humana'). Lo que de verdad garantiza

@@ -22,10 +22,11 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework import status as http
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from common.permissions import HasOrgContext
 from common.portal_tokens import resolve_portal_org_by_hash
 from common.tasks import set_rls_context
 from solicitudes.models import SolicitudServicio
@@ -52,6 +53,71 @@ CAMPOS_TEXTO = (
 # discute el formato a quien esta escribiendo desde un celular.
 OBLIGATORIOS = ("nombre", "apellido", "telefono", "numero_documento",
                 "direccion", "barrio")
+
+
+class SolicitudCrearView(APIView):
+    """Crea el Lead y su solicitud, y devuelve el link con token.
+
+    La llama el MOTOR, no una persona: es lo que corre cuando el asistente
+    cierra una venta por WhatsApp. Autenticada con el PAT del CRM, igual que
+    el resto de lo que el motor consulta aca.
+
+    Las dos cosas se crean juntas y en una transaccion a proposito. Con dos
+    llamadas separadas -una al lead, otra a la solicitud- un fallo en la
+    segunda deja un prospecto registrado al que el asistente no le puede dar
+    ningun link, y nadie se entera hasta que el cliente pregunta.
+
+    Devolver el link ACA es ademas lo que garantiza que no se entregue sin
+    registro: el token va firmado, asi que el modelo no puede fabricarlo ni
+    adivinarlo. Antes eso se sostenia sacando la URL del prompt; ahora se
+    sostiene solo.
+    """
+
+    permission_classes = (IsAuthenticated, HasOrgContext)
+
+    def post(self, request):
+        from leads.models import Lead
+        from solicitudes.tokens import firmar, hash_token, link_de, vencimiento
+
+        org = request.profile.org
+        datos = request.data
+
+        titulo = str(datos.get("title") or "").strip()
+        telefono = str(datos.get("phone") or "").strip()
+        if not titulo or not telefono:
+            return Response({"error": "Faltan 'title' y 'phone'."},
+                            status=http.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            lead = Lead.objects.create(
+                org=org, title=titulo, phone=telefono,
+                first_name=str(datos.get("first_name") or "")[:255],
+                city=str(datos.get("city") or "")[:255],
+                description=str(datos.get("description") or ""),
+                status=str(datos.get("status") or "assigned"),
+                source=str(datos.get("source") or "other"),
+                opportunity_amount=(datos.get("opportunity_amount") or None),
+            )
+            # El token se firma sobre el id del lead: asi el link queda atado a
+            # ESTE prospecto y no a un identificador suelto que despues nadie
+            # sabe de donde salio.
+            crudo = firmar(lead.id)
+            solicitud = SolicitudServicio.objects.create(
+                org=org, lead=lead, token_hash=hash_token(crudo),
+                expira_en=vencimiento(),
+                telefono=telefono,
+                plan_interesado=str(datos.get("plan_interesado") or "")[:160],
+                barrio=str(datos.get("city") or "")[:160],
+            )
+
+        # Fuera de la transaccion: es el registro que permite resolver la
+        # organizacion de una peticion anonima, y que falle no puede deshacer
+        # una solicitud ya creada.
+        from common.portal_tokens import register_portal_token
+        register_portal_token(crudo, org.id, "solicitud", solicitud.id)
+
+        return Response({"lead_id": str(lead.id), "solicitud_id": str(solicitud.id),
+                         "link": link_de(crudo)}, status=http.HTTP_201_CREATED)
 
 
 def _cargar(token: str):

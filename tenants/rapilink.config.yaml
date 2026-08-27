@@ -1270,7 +1270,11 @@ roles:
       # La respuesta de crear un lead trae el objeto entero del CRM. Lo unico
       # que el modelo necesita ver es si salio bien y el link que le devuelve
       # 'entrega_variable' -- que el motor agrega DESPUES de este filtro.
-      registrar_solicitud_servicio: [error, message]
+      # 'link' es el unico dato que el modelo necesita ver de la respuesta:
+      # es el formulario personalizado que le pasa al prospecto. Los ids del
+      # lead y de la solicitud NO se dejan pasar -- no le sirven para nada y
+      # terminarian citados en un chat.
+      registrar_solicitud_servicio: [link]
       consultar_plan_detalle: [nombre, precio, bajada, subida, descripcion]
     nunca_revelar: []
 
@@ -2969,12 +2973,16 @@ herramientas:
   - nombre: registrar_solicitud_servicio
     tipo: http
     descripcion: >
-      Deja anotada la solicitud de servicio de un prospecto y te devuelve el
-      link del formulario de contratacion para pasarselo. Es el ULTIMO paso
-      de una venta: llamala solo cuando ya confirmaste cobertura con
-      consultar_planes_venta y el prospecto eligio un plan concreto. El link
-      NO esta en ninguna otra parte -- si no llamas a esta herramienta, no
-      tienes formulario que dar.
+      Deja anotada la solicitud de servicio de un prospecto y te devuelve en
+      'link' el formulario de contratacion, ya personalizado para el. Es el
+      ULTIMO paso de una venta: llamala solo cuando ya confirmaste cobertura
+      con consultar_planes_venta y el prospecto eligio un plan concreto.
+
+      Pasale EXACTAMENTE el link que devuelve esta llamada, sin recortarlo ni
+      reescribirlo: lleva un codigo unico que hace que el formulario le
+      llegue con sus datos ya cargados. No existe en ninguna otra parte y no
+      se puede adivinar -- si no llamas a esta herramienta, no tienes
+      formulario que dar.
 
       'title' arma el titulo que ve el equipo comercial: escribilo como
       "Solicitud <PLAN> - <localidad>". En 'description' resumi lo que sabes
@@ -2992,11 +3000,23 @@ herramientas:
     requiere_confirmacion: true
     roles_permitidos: [ventas]
     base_url: http://backend:8000/api
-    endpoint: /leads/
+    # No va directo a /leads/ del CRM: va a nuestro endpoint, que crea el lead
+    # Y la solicitud EN UNA TRANSACCION y devuelve el link con el token del
+    # prospecto. Con dos llamadas separadas, un fallo en la segunda dejaba un
+    # lead registrado al que el asistente no le podia dar ningun link, y nadie
+    # se enteraba hasta que el cliente preguntaba.
+    endpoint: /solicitudes/
     metodo: POST
     auth_ref: BOTTLECRM_API_TOKEN
     auth_esquema: Bearer
-    entrega_variable: VENTAS_FORMULARIO_URL
+    # Ya NO hace falta 'entrega_variable'. Antes la garantia de "sin registro
+    # no hay link" se sostenia sacando la URL del prompt y devolviendola desde
+    # la config; ahora el link viene FIRMADO en la respuesta de esta llamada,
+    # asi que el modelo no puede fabricarlo ni adivinarlo aunque quisiera. Es
+    # la misma garantia, sostenida por criptografia en vez de por omision.
+    #
+    # 'VENTAS_FORMULARIO_URL' se conserva en variables_tenant porque el
+    # endpoint la usa para armar el link (FRONTEND_URL del lado de Django).
     # El telefono NO lo pide el modelo: sale de la sesion, que es el numero
     # desde el que la persona esta escribiendo. Pedirselo a alguien que te
     # escribe por WhatsApp es absurdo -- y ademas, si el modelo pudiera
