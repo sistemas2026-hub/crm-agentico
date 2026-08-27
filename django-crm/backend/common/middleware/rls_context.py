@@ -146,6 +146,17 @@ class RequireOrgContext:
         # the token before querying. See docs/PORTAL_RLS.md.
         "/api/public/invoice/",
         "/api/public/estimate/",
+        # Solicitud de contratacion: el formulario que abre un prospecto desde
+        # el link que le pasa el asistente por WhatsApp. Anonimo por diseno --
+        # quien lo abre TODAVIA NO ES CLIENTE, asi que no hay sesion ni org
+        # que pedirle. Se opta por este prefijo a proposito, como pide el
+        # comentario de arriba.
+        #
+        # Cumple la condicion que la NOTA describe: la vista resuelve la org
+        # desde el token (resolve_portal_org_by_hash) y llama a
+        # set_rls_context ANTES de tocar el ORM, asi que no depende de correr
+        # con contexto vacio -- ver solicitudes/views.py::_cargar.
+        "/api/public/solicitud/",
     ]
 
     # Paths exempt on an EXACT match only, never prefix-matched like

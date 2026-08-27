@@ -54,6 +54,13 @@ services:
       # a Supabase; si no define nada, ambos se quedan en el 'db' local.
       # Los valores por defecto reproducen lo que traia .env.docker.
       DBHOST: ${DBHOST:-db}
+      # El backend le pide al motor que cree el ticket de instalacion cuando
+      # alguien envia el formulario de contratacion (solicitudes/entrega.py).
+      # Sin esto el motor responde 401: la solicitud no se pierde, pero el
+      # ticket no se crea. Ver el mismo bloque en docker-compose.prod.yml.
+      MOTOR_SERVICE_TOKEN: ${MOTOR_SERVICE_TOKEN:-}
+      MOTOR_URL: ${MOTOR_URL:-http://motor:5000}
+      MOTOR_TENANT: ${ASISTENTE_TENANT:-rapilink}
       DBPORT: ${DBPORT:-5432}
       DBNAME: ${DBNAME:-crm_db}
       DBUSER: ${DBUSER:-crm_user}

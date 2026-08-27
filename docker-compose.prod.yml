@@ -57,6 +57,22 @@ services:
       # variables de entorno, o sea las credenciales- en cualquier error.
       DEBUG: "False"
       ENV_TYPE: prod
+      # El backend le pide al motor que cree el ticket de instalacion cuando
+      # alguien envia el formulario de contratacion (solicitudes/entrega.py).
+      # La credencial de WispHub vive SOLO en el motor -- copiarla aca habria
+      # dejado la misma clave en dos servicios.
+      #
+      # Sin esta variable el motor responde 401 y el ticket no se crea. La
+      # solicitud NO se pierde (queda con el fallo anotado en
+      # 'fallo_integracion'), pero nadie va a instalar nada. Medido el
+      # 27/08/2026 en la prueba punta a punta: es la unica pieza del flujo que
+      # fallaba, y fallaba por esto.
+      #
+      # Opcional a proposito, igual que en 'frontend': sin ella no se manda el
+      # header y un despliegue que todavia no configuro el token no se rompe.
+      MOTOR_SERVICE_TOKEN: ${MOTOR_SERVICE_TOKEN:-}
+      MOTOR_URL: ${MOTOR_URL:-http://motor:5000}
+      MOTOR_TENANT: ${ASISTENTE_TENANT:-rapilink}
       # Se le agrega 'backend' al dominio publico, y no es opcional: el
       # frontend llama a Django POR DENTRO de la red, con
       # PRIVATE_DJANGO_API_URL=http://backend:8000, asi que esas peticiones
