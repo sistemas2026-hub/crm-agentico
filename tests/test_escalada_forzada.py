@@ -30,7 +30,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from nucleo.seguimiento.forzado import escalada_forzada  # noqa: E402
+from nucleo.seguimiento.forzado import (escalada_forzada,
+                                        motivos_por_hecho)  # noqa: E402
 from nucleo.config.schema import Herramienta  # noqa: E402
 
 _fallas = []
@@ -100,6 +101,20 @@ motivo, _ = escalada_forzada(CFG, [{"herramienta": "consultar_otra_cosa"},
                                    {"herramienta": "registrar_pedido"}])
 afirmar(motivo == "pedido_para_ejecutar",
         "se mira toda la traza, no solo la primera llamada")
+
+print()
+print("el motivo por hecho no entra en el menu del evaluador")
+# El evaluador lee la conversacion y elige un motivo de una lista. Un motivo
+# que significa "una herramienta ya registro el pedido" no se puede juzgar
+# leyendo: si esta en la lista, lo elige apenas la conversacion SUENA a un
+# pedido -- y como la escalada reemplaza la respuesta, corta el turno en el
+# que el asistente estaba pidiendo la confirmacion. Visto el 28/08/2026.
+afirmar(motivos_por_hecho(CFG) == {"pedido_para_ejecutar"},
+        "se reconoce cual motivo lo decide un hecho y no un juicio")
+afirmar("sin_datos_para_diagnosticar" not in motivos_por_hecho(CFG),
+        "'escalar_si_falla' NO cuenta: un fallo si se puede juzgar leyendo")
+afirmar(motivos_por_hecho(ConfigFalsa([])) == set(),
+        "un tenant sin herramientas no deja al evaluador sin motivos")
 
 print()
 print("=" * 70)

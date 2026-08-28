@@ -595,8 +595,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
         if forzado:
             evaluacion = dict(evaluacion or {})
             if not evaluacion.get("escalar"):
-                print(f"[escalamiento] forzado por '{forzado}': una herramienta "
-                      f"{motivo_forzado}")
+                print(f"[escalamiento] forzado por '{forzado}': {motivo_forzado}")
             evaluacion["escalar"] = True
             evaluacion["motivo"] = forzado
             evaluacion["necesita_humano"] = True
@@ -604,11 +603,19 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             # no vino nada (fallo entero), se completa lo minimo para que el
             # caso no llegue mudo a la bandeja.
             evaluacion.setdefault("etiqueta", "")
+            # El resumen por defecto cuenta lo UNICO que se sabe con
+            # certeza: que forzo la escalada. Antes decia siempre que una
+            # consulta no habia devuelto datos y que habia que revisar a
+            # mano -- escrito para el caso de una herramienta que FALLA, y
+            # falso cuando lo que paso fue lo contrario: una herramienta que
+            # salio bien y dejo un pedido para aplicar. Visto el 28/08/2026
+            # en un cambio de clave de WiFi, con el caso creado y el pedido
+            # anotado, mientras el resumen hablaba de un diagnostico fallido.
             evaluacion.setdefault(
                 "resumen",
-                "El asistente no pudo completar el diagnostico porque una "
-                "consulta a los sistemas no devolvio datos para este cliente. "
-                "Hay que revisarlo a mano.")
+                f"El evaluador no dejo resumen. Lo que se sabe: escalo "
+                f"porque {motivo_forzado}. El detalle exacto esta abajo, "
+                f"en lo que ya se probo.")
         # De que es esta conversacion. Se guarda SIEMPRE que el evaluador
         # haya clasificado, escale o no: el 'caso_manual' ya se calculaba en
         # cada turno pero solo se leia para decidir el agendamiento

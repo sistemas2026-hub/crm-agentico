@@ -42,6 +42,7 @@ import json
 from nucleo.herramientas import http as herramientas_http
 from nucleo.modelo import cliente
 from nucleo.persistencia import db as persistencia
+from nucleo.seguimiento import forzado
 from nucleo.seguimiento.nombres import nombre_del_caso
 
 NOMBRE_HERRAMIENTA_TAGS_LISTAR = "listar_tags_crm"
@@ -53,6 +54,12 @@ def _herramienta(config, nombre: str):
     return next((h for h in config.herramientas if h.nombre == nombre), None)
 
 
+def _motivos_a_juicio(config) -> list[str]:
+    """Los motivos que el evaluador SI puede elegir leyendo la conversacion."""
+    por_hecho = forzado.motivos_por_hecho(config)
+    return [m for m in config.escalamiento.activar_si if m not in por_hecho]
+
+
 def _esquema_evaluacion(config) -> dict:
     propiedades = {
         "escalar": {
@@ -61,7 +68,16 @@ def _esquema_evaluacion(config) -> dict:
         },
         "motivo": {
             "type": "string",
-            "enum": list(config.escalamiento.activar_si),
+            # Los motivos que decide un HECHO se le sacan del menu: si los ve,
+            # los elige en cuanto la conversacion suene a eso, que es antes de
+            # que el hecho ocurra (ver forzado.motivos_por_hecho y el caso que
+            # lo motivo). Siguen en 'activar_si' porque son parte del
+            # vocabulario del tenant; lo que cambia es quien los puede elegir.
+            #
+            # Si un tenant declarara TODOS sus motivos por hecho, dejarlo sin
+            # opciones haria invalido el esquema entero -- ahi vale mas un
+            # evaluador impreciso que un evaluador roto.
+            "enum": _motivos_a_juicio(config) or list(config.escalamiento.activar_si),
             "description": "Por que escala. Ignoralo si escalar=false.",
         },
         "etiqueta": {

@@ -16,6 +16,29 @@ Ver tests/test_escalada_forzada.py y el bug que lo motivo.
 from __future__ import annotations
 
 
+def motivos_por_hecho(config) -> set[str]:
+    """
+    Los motivos que NO puede elegir el modelo: los que declara una herramienta
+    en 'escalar_al_completar'.
+
+    Un motivo asi significa "una herramienta ya registro el pedido", y eso es
+    un hecho de la traza -- mirando el texto no se puede saber. El evaluador
+    corre igual en cada turno y ve la misma lista de motivos, asi que si el
+    motivo esta en su menu lo va a elegir en cuanto la conversacion SUENE a
+    un pedido, que es antes de que el pedido exista.
+
+    Paso el 28/08/2026 con un cambio de clave de WiFi: el asistente le habia
+    preguntado al cliente si confirmaba la clave, el evaluador escalo en ese
+    mismo turno con 'pedido_para_ejecutar', y la escalada REEMPLAZA la
+    respuesta (ver api.py) -- asi que la pregunta nunca le llego. El cliente
+    leyo "tu pedido quedo registrado" sin haber confirmado nada, la
+    herramienta que valida el pedido nunca corrio, y el caso le decia a quien
+    lo tomara que faltaba la confirmacion del cliente.
+    """
+    return {h.escalar_al_completar for h in (config.herramientas or [])
+            if h.escalar_al_completar}
+
+
 def escalada_forzada(config, registro_herramientas: list[dict]) -> tuple[str | None, str]:
     """
     (motivo, por_que) cuando una herramienta OBLIGA a escalar, o (None, "").
@@ -30,6 +53,10 @@ def escalada_forzada(config, registro_herramientas: list[dict]) -> tuple[str | N
 
     Gana la primera herramienta de la traza que lo pida, y un fallo tiene
     prioridad sobre un exito dentro de la misma llamada.
+
+    La razon nombra a la herramienta porque termina siendo el RESUMEN del
+    caso cuando el evaluador no dejo uno (ver api.py): sin el nombre, quien
+    abre el caso lee una frase que podria ser de cualquier conversacion.
     """
     por_nombre = {h.nombre: h for h in config.herramientas}
     for llamada in registro_herramientas or []:
@@ -38,10 +65,12 @@ def escalada_forzada(config, registro_herramientas: list[dict]) -> tuple[str | N
             continue
         if llamada.get("codigo_error"):
             if herr.escalar_si_falla:
-                return herr.escalar_si_falla, "no pudo ejecutarse"
+                return (herr.escalar_si_falla,
+                        f"'{herr.nombre}' no pudo ejecutarse")
         # El espejo: la herramienta SALIO BIEN y su exito es, justamente, un
         # pedido que tiene que ejecutar una persona. Ver schema.py.
         elif herr.escalar_al_completar:
             return (herr.escalar_al_completar,
-                    "se completo y su resultado necesita una persona")
+                    f"'{herr.nombre}' se completo y lo que registro tiene "
+                    f"que aplicarlo una persona")
     return None, ""
