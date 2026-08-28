@@ -614,6 +614,39 @@ def _ejecutar_derivacion(herramienta, sesion, argumentos_modelo: dict, nombre_ro
                f"respuesta le llega ya."}
 
 
+def _localidades_parecidas(config, clave: str, cuantas: int = 4) -> list[str]:
+    """
+    Los nombres del catalogo que se parecen a lo que escribio el cliente.
+
+    Existe porque cuando una localidad "no esta", casi nunca es que no haya
+    cobertura: es que se escribio distinto. Ya paso con 'DOÑA MANUELA' /
+    'DONA MANUELA', y con 128 localidades cargadas hay margen de sobra para
+    equivocarse ('las flores' por 'LAS FLORES DEL NORTE').
+
+    Dos pasadas, y la primera importa mas que la segunda: si lo que escribio
+    esta CONTENIDO en un nombre del catalogo (o al reves), eso es una
+    coincidencia mucho mas fuerte que un parecido de letras -- 'centro' contra
+    'CENTRO DE SOLEDAD' es obvio para una persona y difflib lo puntua bajo por
+    la diferencia de largo.
+
+    Sin llamadas de red: el catalogo ya esta en memoria del turno.
+    """
+    import difflib
+
+    if not clave:
+        return []
+    nombres = [l.localidad for l in config.localidades]
+    contenidos = [n for n in nombres
+                  if clave in _sin_tildes(n) or _sin_tildes(n) in clave]
+    if len(contenidos) >= cuantas:
+        return contenidos[:cuantas]
+    # Se completa con parecidos de letras, sin repetir los que ya entraron.
+    faltan = cuantas - len(contenidos)
+    restantes = {_sin_tildes(n): n for n in nombres if n not in contenidos}
+    cercanos = difflib.get_close_matches(clave, list(restantes), n=faltan, cutoff=0.72)
+    return contenidos + [restantes[c] for c in cercanos]
+
+
 def _ejecutar_consulta_planes_venta(config, argumentos_modelo: dict) -> dict:
     """
     Resuelve cobertura Y planes en un solo paso, leyendo config.localidades
@@ -639,19 +672,59 @@ def _ejecutar_consulta_planes_venta(config, argumentos_modelo: dict) -> dict:
         (l for l in config.localidades if _sin_tildes(l.localidad) == clave), None)
 
     if entrada is None:
-        return {"cobertura": False, "planes": [], "advertencia":
-                "No hay ningun cliente registrado en esa localidad todavia "
-                "-- puede ser una zona nueva sin clientes, o que el nombre "
-                "esta escrito distinto a como figura en el sistema. No "
-                "digas que no hay cobertura: decile que vas a confirmar "
-                "con un colaborador."}
+        # Antes de mandar esto a una persona: lo mas probable NO es que no
+        # haya cobertura, es que el nombre este escrito distinto. Ya paso con
+        # 'DOÑA MANUELA' / 'DONA MANUELA'. Con el catalogo en memoria, buscar
+        # los parecidos no cuesta ninguna llamada, y convierte un traspaso en
+        # una pregunta que el cliente puede contestar.
+        similares = _localidades_parecidas(config, clave)
+        salida = {"cobertura": False, "planes": [], "similares": similares}
+        salida["advertencia"] = (
+            ("No encontre esa localidad con ese nombre exacto, pero hay "
+             "parecidas: preguntale si es alguna de las de 'similares', con "
+             "esos nombres. Si dice que si, volve a llamarme con el nombre "
+             "que te confirme.")
+            if similares else
+            "No hay ningun cliente registrado en esa localidad todavia "
+            "-- puede ser una zona nueva sin clientes, o que el nombre "
+            "esta escrito distinto a como figura en el sistema. No "
+            "digas que no hay cobertura: decile que vas a confirmar "
+            "con un colaborador.")
+        return salida
 
     zonas_localidad = {z.zona_id for z in entrada.zonas}
     coincidentes = [
         p.nombre_wisphub for p in config.planes_venta
         if not p.zonas or (zonas_localidad & set(p.zonas))
     ]
-    salida = {"cobertura": True, "n_clientes": entrada.n_clientes, "planes": coincidentes}
+    salida = {"cobertura": True, "n_clientes": entrada.n_clientes, "planes": coincidentes,
+              # EN QUE NODO, y no es un detalle de color: un mismo nombre de
+              # barrio existe en varios municipios ('CENTRO' esta en todos), y
+              # el catalogo se arma por nombre de localidad. 'ciudad' no sirve
+              # para desambiguar -- es texto libre y esta escrita de 15 formas
+              # distintas para el mismo municipio (SOELDAD, SOLEDAF, SOLEDED,
+              # y hasta un correo). La ZONA si: son 5 nodos reales de un
+              # catalogo cerrado. Diciendole al modelo en cual cayo, puede
+              # confirmarselo al cliente antes de prometerle nada.
+              "zonas": [z.zona_nombre for z in entrada.zonas]}
+
+    # UN SOLO CLIENTE NO ES EVIDENCIA DE COBERTURA. Medido el 28/08/2026: un
+    # prospecto pregunto por "barrio centro" y el catalogo dijo que si, con un
+    # unico cliente -- que resulto estar en el CENTRO de Sabanagrande, otro
+    # municipio. Se le ofrecieron los planes de fibra de alla.
+    #
+    # No se convierte en "no hay cobertura", que seria el error caro (perder
+    # una venta diciendole algo falso a quien iba a contratar). Se le pide al
+    # modelo que confirme el municipio, que es lo que un vendedor haria.
+    if (entrada.n_clientes or 0) <= 2:
+        salida["confirmar_zona"] = True
+        salida["advertencia"] = (
+            f"OJO: en esa localidad hay muy pocos clientes "
+            f"({entrada.n_clientes}), y ese nombre de barrio puede existir en "
+            f"mas de un municipio. Antes de darle planes o precios, "
+            f"confirmale que su barrio queda en la zona {', '.join(salida['zonas'])} "
+            f"-- si te dice que no, es otro barrio con el mismo nombre y no "
+            f"tenemos su cobertura confirmada.")
     if not coincidentes:
         salida["advertencia"] = (
             "Hay cobertura en esa localidad pero todavia no hay ningun "
