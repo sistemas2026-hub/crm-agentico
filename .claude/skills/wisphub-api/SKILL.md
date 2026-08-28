@@ -271,6 +271,36 @@ por API. Una herramienta de creacion NO necesita enviarlo.
 > No descartado del todo: podria requerir otro formato de valor o un endpoint
 > de accion propio, igual que borrar. Sin verificar todavia.
 
+### Reasignar un ticket: PUT sirve, PATCH lo ignora en silencio
+
+Verificado en vivo sobre un ticket real (28/08/2026), en los dos sentidos:
+
+```
+PATCH {"tecnico": "3684490"}          -> 200, el tecnico NO cambia
+PATCH {"tecnico": "999999999"}        -> 200, tampoco falla   <- lo DESCARTA
+PATCH con los 10 campos completos     -> 200, sigue sin cambiar
+PUT   con los 10 campos completos     -> 200, el tecnico SI cambia
+PUT   {"tecnico": "999999999", ...}   -> 400 "Seleccione una opcion valida"
+```
+
+Las dos ultimas lineas son el hallazgo: en **PUT** el campo se valida y se
+aplica; en **PATCH** se descarta sin decir nada, ni siquiera con un valor
+imposible. Un PATCH que responde 200 no significa que haya cambiado algo.
+
+Casi se documenta como "WispHub no permite reasignar por API": el `tecnico`
+ignorado en PATCH incluso con valor imposible, y ninguna sub-ruta de accion en
+el spec, parecian concluyentes. Faltaba probar el otro verbo. **Antes de dar
+una operacion por imposible, probar GET/PUT/PATCH/POST por separado** -- que
+uno la ignore no dice nada de los demas.
+
+`email_tecnico` si cambia con PATCH, y eso confunde mas: parece que el PATCH
+funciono. Cambiar solo ese campo NO mueve el ticket de cola.
+
+PUT exige el conjunto completo, el mismo que exige crear (ver arriba):
+`asunto` + `asuntos_default`, `departamento` + `departamentos_default`,
+`estado`, `prioridad`, `origen_reporte`, `tecnico`, `descripcion`. Mandar
+menos no da error: responde 200 y no cambia lo que falta.
+
 ## Trampas que ya costaron tiempo
 
 **El campo `usuario` SOLO viene en el listado, nunca en el detalle** (verificado
