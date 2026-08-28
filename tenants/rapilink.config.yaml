@@ -3895,6 +3895,14 @@ escalamiento:
   mensaje: >-
     Entiendo tu molestia. Te paso con un compañero del equipo que va a
     revisar tu caso ahora mismo.
+  # El 'mensaje' de arriba habla de una molestia, y sirve para los motivos que
+  # SI son un problema. Un pedido que salio bien necesita otro: el cliente no
+  # se quejo de nada, y decirle que se entiende su molestia lo desconcierta --
+  # visto el 28/08/2026 con un cambio de clave de WiFi.
+  mensajes_por_motivo:
+    pedido_para_ejecutar: >-
+      Listo, tu pedido quedó registrado. Un compañero del equipo lo va a
+      aplicar y te confirma cuando esté hecho.
   siempre_disponible: true
   # Un cliente que putea por el servicio no esta pidiendo un humano: esta
   # pidiendo que le arreglen el internet, y eso el asistente lo puede hacer

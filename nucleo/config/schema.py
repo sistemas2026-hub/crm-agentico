@@ -1364,6 +1364,15 @@ class Escalamiento(Base):
     activar_si: list[str] = Field(default_factory=list)
     destino_rol: str | None = None
     mensaje: str = ""
+    # El mensaje CAMBIA segun por que se escala, porque no todos los motivos
+    # son una queja. El generico esta escrito para alguien molesto ("entiendo
+    # tu molestia") y suena mal cuando el cliente pidio un tramite y todo
+    # salio bien: se lo vio en produccion el 28/08/2026 con un cambio de clave
+    # de WiFi, donde el cliente no se habia quejado de nada.
+    #
+    # Clave = motivo de 'activar_si'. Un motivo sin entrada usa el generico,
+    # asi que agregar uno nuevo nunca deja al cliente sin respuesta.
+    mensajes_por_motivo: dict[str, str] = Field(default_factory=dict)
     # Un escape a humano SIEMPRE disponible, no solo por deteccion automatica.
     siempre_disponible: bool = True
     # Caso de 'manual.casos' -> nombre de Herramienta a ejecutar en CODIGO
@@ -1672,6 +1681,12 @@ class TenantConfig(Base):
         # Un 'escalar_si_falla' que apunte a un motivo no declarado no daria
         # ningun error al ejecutarse: escalaria con una razon que el resto
         # del sistema no reconoce y que nadie puede filtrar en la bandeja.
+        for motivo in self.escalamiento.mensajes_por_motivo:
+            if motivo not in self.escalamiento.activar_si:
+                raise ValueError(
+                    f"escalamiento.mensajes_por_motivo tiene '{motivo}', que no "
+                    f"esta en activar_si -- seria un mensaje que no se muestra "
+                    f"nunca, y nadie lo notaria")
         for h in self.herramientas:
             if h.escalar_al_completar and h.escalar_al_completar not in self.escalamiento.activar_si:
                 raise ValueError(

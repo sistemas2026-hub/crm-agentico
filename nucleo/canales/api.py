@@ -118,6 +118,23 @@ def _config_de(tenant: str):
     return _configs[tenant]
 
 
+def _mensaje_de_escalada(config, motivo: str | None) -> str:
+    """
+    Lo que se le dice al cliente al pasarlo a una persona.
+
+    El del motivo si lo hay, y si no el general. No todos los motivos son una
+    queja: el texto generico habla de una molestia, y suena mal cuando el
+    cliente pidio un tramite y todo salio bien -- visto el 28/08/2026 con un
+    cambio de clave de WiFi, donde el cliente no se habia quejado de nada.
+
+    Nunca queda vacio por elegir mal la clave: un motivo sin texto propio cae
+    al generico, que siempre existe.
+    """
+    esc = config.escalamiento
+    propio = (esc.mensajes_por_motivo or {}).get(motivo or "", "")
+    return (propio or esc.mensaje or "").strip()
+
+
 def olvidar_config(tenant: str) -> None:
     """Descarta la copia cacheada para que el proximo turno relea de la base.
     Se llama tras cada guardado del editor: sin esto, un cambio hecho desde la
@@ -888,7 +905,10 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                     # Escalar significa que el caso quedo registrado y que
                     # alguien lo va a ver, asi que el mensaje del tenant es
                     # cierto con o sin urgencia.
-                    respuesta = (config.escalamiento.mensaje or "").strip() or respuesta
+                    # El texto depende del MOTIVO: anunciar un pedido que
+                    # salio bien no se dice igual que anunciar una queja.
+                    respuesta = _mensaje_de_escalada(
+                        config, evaluacion.get("motivo")) or respuesta
                 estado["ya_escalada"] = True
                 # El mensaje del asistente ya se guardo (mas arriba, antes de
                 # poder evaluar la escalada -- necesitaba conversation_id).
