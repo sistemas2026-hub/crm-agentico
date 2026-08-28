@@ -54,6 +54,38 @@ def _herramienta(config, nombre: str):
     return next((h for h in config.herramientas if h.nombre == nombre), None)
 
 
+def _cuando_escalar(config) -> str:
+    """
+    Que se le dice al evaluador sobre cuando poner escalar=true.
+
+    La frase extra solo aparece si el tenant tiene motivos que decide un
+    hecho (una herramienta que recoge un pedido). Sin ellos seria ruido, y
+    peor: le hablaria de un camino que en ese tenant no existe.
+
+    Nace de una falla del 28/08/2026. Un cliente escribio TODO en un solo
+    mensaje -- nombre, cedula, clave vieja y clave nueva -- y el evaluador
+    escalo en ese mismo turno, con la traza vacia: sin verificar identidad,
+    sin tomar el pedido y sin ticket. El caso llego a la bandeja con una sola
+    linea de conversacion, y al cliente le llego "entiendo tu molestia" a un
+    mensaje donde no se habia quejado de nada.
+
+    El error de fondo es de categoria: leyo un TRAMITE como un pedido de
+    hablar con una persona. Son cosas distintas y hay que decirselo, porque
+    el motivo que si le correspondia no esta en su menu a proposito (lo
+    dispara el hecho, no el juicio -- ver forzado.motivos_por_hecho).
+    """
+    base = "true si corresponde escalar a un humano ahora mismo."
+    if not forzado.motivos_por_hecho(config):
+        return base
+    return (base + " NO pongas true porque el cliente pida un tramite que al "
+            "final aplica una persona: mientras el asistente esta juntando "
+            "los datos de ese pedido, la conversacion NO necesita a nadie, y "
+            "cuando el pedido queda tomado la escalada se dispara sola, con "
+            "su propio motivo. Pedir un cambio NO es pedir hablar con "
+            "alguien. Ponelo en true solo por algo que el asistente no puede "
+            "resolver ni recoger.")
+
+
 def _motivos_a_juicio(config) -> list[str]:
     """Los motivos que el evaluador SI puede elegir leyendo la conversacion."""
     por_hecho = forzado.motivos_por_hecho(config)
@@ -64,7 +96,7 @@ def _esquema_evaluacion(config) -> dict:
     propiedades = {
         "escalar": {
             "type": "boolean",
-            "description": "true si corresponde escalar a un humano ahora mismo.",
+            "description": _cuando_escalar(config),
         },
         "motivo": {
             "type": "string",
