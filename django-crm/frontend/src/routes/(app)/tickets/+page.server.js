@@ -2,8 +2,7 @@ import { listTickets, OPEN_STATUSES, FILTER_FIELDS } from '$lib/server/v2/ticket
 import { readFilters, buildFilterQuery } from '$lib/server/v2/filter-params.js';
 import { getOrgPeopleAndTeams, resolveMe } from '$lib/server/v2/org-people.js';
 import { getTags } from '$lib/server/v2/tags.js';
-import { env } from '$env/dynamic/private';
-import { headersMotor } from '$lib/server/v2/motor-headers.js';
+import { leerAreas } from '$lib/server/v2/areas.js';
 
 /**
  * Only filters the API actually applies are forwarded. A parameter that
@@ -56,26 +55,8 @@ export async function load({ cookies, url, locals, fetch }) {
   //
   // Si el asistente no responde, 'areas' queda vacio y la pantalla cae a la
   // lista de siempre: ver los tickets no puede depender de que el motor este
-  // arriba.
-  let areas = [];
-  let areaPorPersona = {};
-  try {
-    const baseUrl = env.PRIVATE_ASISTENTE_URL;
-    const tenant = env.PRIVATE_ASISTENTE_TENANT;
-    if (baseUrl && tenant) {
-      const r = await fetch(
-        `${baseUrl}/agentes/asignaciones?tenant=${encodeURIComponent(tenant)}`,
-        { headers: headersMotor() }
-      );
-      if (r.ok) {
-        const d = await r.json();
-        areas = d.areas ?? [];
-        areaPorPersona = d.areas_por_persona ?? {};
-      }
-    }
-  } catch {
-    areas = [];
-  }
+  // arriba. Ver leerAreas().
+  const { areas, areaPorPersona } = await leerAreas(fetch);
 
   const SIN_AREA = '__sin_area__';
   /**

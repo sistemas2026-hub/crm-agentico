@@ -2,6 +2,7 @@ import { fail } from '@sveltejs/kit';
 import { getTicket, replyToTicket, updateTicket } from '$lib/server/v2/tickets.js';
 import { readableError } from '$lib/server/v2/form-errors.js';
 import { leerResumenDelAgente } from '$lib/server/v2/resumen-agente.js';
+import { leerAreas } from '$lib/server/v2/areas.js';
 import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
 
@@ -11,24 +12,15 @@ export async function load({ cookies, params, fetch }) {
 
   // El area del caso, para el panel lateral. Misma derivacion que la cola: el
   // CRM no tiene campo de area, la tiene el asistente y es por persona.
+  //
+  // Se pide a '/agentes/areas', no a '/agentes/asignaciones': aquella sale
+  // ademas al sistema externo a buscar candidatos, que esta pantalla no usa.
   let area = null;
-  try {
-    const base = env.PRIVATE_ASISTENTE_URL;
-    const tenant = env.PRIVATE_ASISTENTE_TENANT;
-    const responsable = datos.ticket?.assignee_id;
-    if (base && tenant && responsable) {
-      const r = await fetch(
-        `${base}/agentes/asignaciones?tenant=${encodeURIComponent(tenant)}`,
-        { headers: headersMotor() }
-      );
-      if (r.ok) {
-        const d = await r.json();
-        const nombre = (d.areas_por_persona ?? {})[responsable];
-        area = (d.areas ?? []).find((/** @type {any} */ a) => a.nombre === nombre) ?? null;
-      }
-    }
-  } catch {
-    area = null;
+  const responsable = datos.ticket?.assignee_id;
+  if (responsable) {
+    const { areas, areaPorPersona } = await leerAreas(fetch);
+    const nombre = areaPorPersona[responsable];
+    area = areas.find((/** @type {any} */ a) => a.nombre === nombre) ?? null;
   }
 
   // De donde vino el caso. El CRM no lo guarda: para el, un caso escalado es
@@ -36,20 +28,30 @@ export async function load({ cookies, params, fetch }) {
   // al escalar. Null para un ticket cargado a mano, que no tiene conversacion
   // detras -- y entonces la tarjeta no se dibuja, en vez de mostrar renglones
   // vacios o un origen inventado.
-  let origen = null;
-  try {
-    const base = env.PRIVATE_ASISTENTE_URL;
-    const tenant = env.PRIVATE_ASISTENTE_TENANT;
-    if (base && tenant) {
+  //
+  // Va SIN await: la promesa se devuelve tal cual y el navegador la recibe
+  // cuando resuelve. Adentro hay tres consultas a sistemas externos (la ficha
+  // del cliente y el estado del equipo), y esperarlas antes de contestar
+  // dejaba el ticket sin abrirse varios segundos -- con la pantalla anterior
+  // todavia puesta, o sea el clic pareciendo perdido. El caso, la
+  // conversacion y la respuesta no dependen de esto: llegan primero y esto
+  // completa las tarjetas tecnicas cuando llega.
+  const origen = (async () => {
+    try {
+      const base = env.PRIVATE_ASISTENTE_URL;
+      const tenant = env.PRIVATE_ASISTENTE_TENANT;
+      if (!base || !tenant) return null;
       const r = await fetch(
         `${base}/conversaciones/por-caso/${params.id}?tenant=${encodeURIComponent(tenant)}`,
-        { headers: headersMotor() }
+        { headers: headersMotor(), signal: AbortSignal.timeout(20000) }
       );
-      if (r.ok) origen = (await r.json()).conversacion ?? null;
+      return r.ok ? ((await r.json()).conversacion ?? null) : null;
+    } catch {
+      // Se traga a proposito: sin esto una promesa rechazada tumba la
+      // pagina entera, y lo que hay en juego son dos tarjetas de contexto.
+      return null;
     }
-  } catch {
-    origen = null;
-  }
+  })();
 
   return {
     ...datos,

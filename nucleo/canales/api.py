@@ -1234,6 +1234,40 @@ def agentes_asignaciones():
                     "candidatos_externos": candidatos})
 
 
+@app.get("/agentes/areas")
+def agentes_areas():
+    """
+    Las areas de la empresa y de quien es cada persona. Nada mas.
+
+    Existe aparte de /agentes/asignaciones porque las pantallas de tickets
+    solo necesitan esto, y aquella ademas lee identidades, agentes y sale a
+    buscar candidatos al sistema externo -- una llamada HTTP afuera que esas
+    pantallas nunca usan y que igual esperaban. Se hacia notar: abrir un
+    ticket tardaba segundos con la pantalla quieta, como si el clic no
+    hubiera pasado (28/08/2026).
+
+    Solo lecturas locales, sin salir a ningun sistema externo.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+
+    try:
+        areas_por_persona = persistencia.areas_de_colaboradores(tenant)
+    except Exception as e:
+        print(f"[agentes] fallo al leer areas: {type(e).__name__}: {e}")
+        areas_por_persona = {}
+
+    return jsonify({"areas": [{"nombre": a.nombre, "etiqueta": a.etiqueta,
+                               "icono": a.icono, "color": a.color,
+                               "agentes": list(a.agentes)} for a in config.areas],
+                    "areas_por_persona": areas_por_persona})
+
+
 @app.put("/agentes/asignaciones/<profile_id>")
 def agentes_asignar(profile_id):
     """

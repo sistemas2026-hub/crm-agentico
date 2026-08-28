@@ -464,6 +464,30 @@
   text-decoration: underline;
 }
 
+/* Toda la fila abre el registro, no solo el texto del asunto.
+   Se pone en el <tr> de la tabla que lo quiera (hoy la cola de tickets).
+   Quien revisa una cola hace clic en la fila -- en el estado, en el nombre
+   de quien la tiene, donde caiga -- y hasta el 28/08/2026 eso no hacia nada:
+   el clic parecia perdido y la fila no se movia.
+   Es el mismo enlace estirado sobre la fila, no un onclick: sigue abriendose
+   en otra pestaña con el boton del medio y sigue saliendo en el menu del
+   navegador. Si un navegador ignorara 'position' en un <tr>, lo que queda es
+   el comportamiento de antes -- el asunto sigue siendo un enlace normal. */
+.v2-row-click {
+  position: relative;
+}
+.v2-row-click .v2-row-link::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+/* Los enlaces de otras celdas (la cuenta, por ejemplo) tienen que quedar
+   ARRIBA de la capa que cubre la fila, o dejarian de poder abrirse. */
+.v2-row-click a:not(.v2-row-link) {
+  position: relative;
+  z-index: 1;
+}
+
 /* ── section tabs ─────────────────────────────────────────────────────── */
 /* Second level inside one destination. The active tab is weight plus an ink
    underline, not an ember one. Ember marks what you can act on; "you are

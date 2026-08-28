@@ -56,10 +56,15 @@
    * Los enlaces a los sistemas del ISP, si el caso vino del asistente y llego
    * a identificar al cliente. Null en cualquier otro caso -- y eso no es un
    * error, es lo normal en buena parte de los tickets.
+   *
+   * Es una funcion y no un $derived porque 'data.origen' ya no es un objeto:
+   * es una promesa que llega despues (ver +page.server.js). El ticket abre
+   * enseguida y estas tarjetas se completan cuando responden los sistemas.
+   *
+   * @param {any} origen
    */
-  let enlaces = $derived(
-    Object.keys(data.origen?.enlaces ?? {}).length ? data.origen.enlaces : null
-  );
+  const enlacesDe = (origen) =>
+    Object.keys(origen?.enlaces ?? {}).length ? origen.enlaces : null;
 
   /**
    * El canal por el que entro la conversacion, legible.
@@ -322,7 +327,13 @@
             {/if}
           </section>
 
-          {#if enlaces}
+          <!-- Mientras los sistemas del ISP responden, el ticket ya esta en
+               pantalla. Sin bloque de espera a proposito: la mayoria de los
+               tickets no tiene estas tarjetas, y un cargando que casi siempre
+               termina en nada distrae mas de lo que informa. -->
+          {#await data.origen then origen}
+            {@const enlaces = enlacesDe(origen)}
+            {#if enlaces}
             <!-- ============================================================
                  A DONDE SALTAR SIN VOLVER A BUSCAR AL CLIENTE
                  Los enlaces los arma el motor, no esta pantalla: es el que
@@ -442,7 +453,8 @@
                 </article>
               </div>
             </section>
-          {/if}
+            {/if}
+          {/await}
 
           {#if agente.turnos.length}
             <section class="conversacion-cliente">
@@ -698,25 +710,27 @@
       {/if}
     </dl>
 
-    {#if data.origen}
-      <div class="v2-label v2-rail-head">Más información</div>
-      <dl class="v2-kv">
-        <dt>ID del caso</dt>
-        <!-- El mismo fragmento que va al final del asunto, para poder
-             cruzarlo con la bandeja de conversaciones. -->
-        <dd><code>#{data.origen.id.slice(0, 8)}</code></dd>
-        <dt>Canal</dt>
-        <dd>{canalLegible(data.origen.canal)}</dd>
-        {#if data.origen.etiqueta}
-          <dt>Etiqueta</dt>
-          <dd><Pill tone="slate">{data.origen.etiqueta}</Pill></dd>
-        {/if}
-        {#if data.origen.motivo_escalamiento}
-          <dt>Motivo del pase</dt>
-          <dd>{data.origen.motivo_escalamiento.replace(/_/g, ' ')}</dd>
-        {/if}
-      </dl>
-    {/if}
+    {#await data.origen then origen}
+      {#if origen}
+        <div class="v2-label v2-rail-head">Más información</div>
+        <dl class="v2-kv">
+          <dt>ID del caso</dt>
+          <!-- El mismo fragmento que va al final del asunto, para poder
+               cruzarlo con la bandeja de conversaciones. -->
+          <dd><code>#{origen.id.slice(0, 8)}</code></dd>
+          <dt>Canal</dt>
+          <dd>{canalLegible(origen.canal)}</dd>
+          {#if origen.etiqueta}
+            <dt>Etiqueta</dt>
+            <dd><Pill tone="slate">{origen.etiqueta}</Pill></dd>
+          {/if}
+          {#if origen.motivo_escalamiento}
+            <dt>Motivo del pase</dt>
+            <dd>{origen.motivo_escalamiento.replace(/_/g, ' ')}</dd>
+          {/if}
+        </dl>
+      {/if}
+    {/await}
 
     {#if ticket.account}
       <div class="v2-label v2-rail-head">Cuenta</div>

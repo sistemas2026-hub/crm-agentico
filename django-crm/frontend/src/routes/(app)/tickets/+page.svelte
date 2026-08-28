@@ -331,7 +331,9 @@
           {#each tickets as t (t.id)}
             {@const p = responsePressure(t)}
             {@const asunto = partirAsunto(t.name)}
-            <tr>
+            <!-- La fila entera abre el ticket, no solo el asunto: ver
+                 .v2-row-click en v2.css y el clic que no hacia nada. -->
+            <tr class="v2-row-click">
               <td data-m="title">
                 <a class="v2-row-link" href="/tickets/{t.id}">
                   <span class="v2-table-primary">{asunto.principal}</span>
