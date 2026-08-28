@@ -127,3 +127,36 @@ if fallos:
     raise SystemExit(1)
 print(" Todo en orden: cada rol escala por motivos que existen en su mundo.")
 print("=" * 70)
+
+# --- 6 ---------------------------------------------------------------------
+print("\n[6] Cada motivo le dice al cliente lo que le corresponde")
+# El texto generico habla de una MOLESTIA, y sirve para los motivos que si son
+# un problema. Usarlo para los demas desconcierta a quien no se quejo de nada:
+# pedir hablar con alguien, o no haber podido confirmar la identidad, no son
+# quejas. Se comprueba el TEXTO REAL que recibe el cliente, no la config.
+from nucleo.canales.api import _mensaje_de_escalada                # noqa: E402
+
+QUEJA = "molestia"
+for motivo in ("solicitud_explicita", "duda_de_identidad",
+               "sin_datos_para_diagnosticar", "visita_tecnica_requerida",
+               "pedido_para_ejecutar"):
+    if motivo not in cfg.escalamiento.activar_si:
+        continue
+    texto = (_mensaje_de_escalada(cfg, motivo) or "").lower()
+    comprobar(bool(texto), f"'{motivo}' tiene un mensaje")
+    comprobar(QUEJA not in texto,
+              f"'{motivo}' NO le habla de una molestia al cliente")
+
+# Y el generico sigue existiendo para los que SI son una queja: sacarlo
+# dejaria sin mensaje a los motivos que de verdad lo necesitan.
+comprobar(QUEJA in (_mensaje_de_escalada(cfg, "frustracion_detectada") or "").lower(),
+          "pero 'frustracion_detectada' si conserva el texto de la queja")
+
+print("\n" + "=" * 70)
+if fallos:
+    print(f" {len(fallos)} FALLA(S):")
+    for f in fallos:
+        print(f"   - {f}")
+    raise SystemExit(1)
+print(" Todo en orden: cada rol escala por motivos que existen en su mundo.")
+print("=" * 70)

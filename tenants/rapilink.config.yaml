@@ -4133,10 +4133,28 @@ escalamiento:
   # SI son un problema. Un pedido que salio bien necesita otro: el cliente no
   # se quejo de nada, y decirle que se entiende su molestia lo desconcierta --
   # visto el 28/08/2026 con un cambio de clave de WiFi.
+  #
+  # El generico sirve para los motivos que SI implican un problema
+  # (frustracion_detectada, tres_fallos_seguidos). Los demas necesitan el suyo:
+  # pedir hablar con alguien, o no haber podido confirmar quien sos, no son
+  # quejas, y contestarles "entiendo tu molestia" desconcierta a quien no se
+  # quejo de nada.
   mensajes_por_motivo:
     pedido_para_ejecutar: >-
       Listo, tu pedido quedó registrado. Un compañero del equipo lo va a
       aplicar y te confirma cuando esté hecho.
+    solicitud_explicita: >-
+      Claro, te paso con un compañero del equipo. Ya tiene el contexto de lo
+      que venimos hablando, así que no tienes que repetirlo.
+    duda_de_identidad: >-
+      Para seguir con esto necesito confirmar algunos datos, y prefiero que lo
+      haga una persona del equipo. Te paso con un compañero ahora mismo.
+    visita_tecnica_requerida: >-
+      Esto necesita que un técnico lo vea en el lugar. Te paso con un compañero
+      del equipo para coordinar la visita.
+    sin_datos_para_diagnosticar: >-
+      No pude leer el estado de tu equipo desde acá, así que prefiero que lo
+      revise una persona. Te paso con un compañero del equipo.
   # Y si no se pudo registrar en ningun lado. Le pide al cliente que vuelva a
   # escribir a proposito: el reintento pasa en el proximo turno, y el proximo
   # turno arranca con un mensaje suyo.
