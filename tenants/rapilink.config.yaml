@@ -1720,6 +1720,12 @@ variables_tenant:
   # tareas va a ser otro.
   WISPHUB_TECNICO_SOLICITUDES: "1408762"
   WISPHUB_EMAIL_TECNICO_SOLICITUDES: info.rapilinksas@gmail.com
+  # A quien pasa el ticket cuando alguien confirma viabilidad y factibilidad:
+  # el equipo que EJECUTA la instalacion. Los cuatro valores se eligen desde
+  # Ajustes -> Instalaciones, de una lista traida de WispHub -- en otro ISP
+  # estos dos equipos van a ser otros, con otros IDs.
+  WISPHUB_TECNICO_APROBADAS: "3684490"
+  WISPHUB_EMAIL_TECNICO_APROBADAS: instalaciones@gmail.com
 
 # -----------------------------------------------------------------------------
 #  PLANES DE VENTA  -  lista curada, PENDIENTE de cargar (19/08/2026)
@@ -2471,10 +2477,66 @@ herramientas:
     solo_lectura: true
     cache: true
     cache_vigencia_dias: 7
+    # La pantalla de Ajustes -> Instalaciones la consulta para que el admin
+    # ELIJA los dos usuarios de una lista, en vez de escribir un ID a mano.
+    # Un ID tipeado mal es un ticket que aparece a nombre de nadie.
+    invocable_por_servicio: true
     roles_permitidos: [soporte]
     base_url: https://api.wisphub.io
     endpoint: /api/staff/
     metodo: GET
+    # ESTABA SIN CREDENCIAL. Descubierto el 28/08/2026 al usarla desde la
+    # pantalla de Ajustes: WispHub responde 403 a /api/staff/ sin 'Api-Key',
+    # asi que esta herramienta nunca pudo haber funcionado. No se noto porque
+    # el modelo casi nunca la llama -- solo si un colaborador nombra a un
+    # tecnico y hay que resolver su ID.
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    auth_header: Authorization
+
+  # Mueve el ticket de instalacion de la cola de quien VALIDA a la de quien
+  # EJECUTA, cuando alguien confirma viabilidad y factibilidad.
+  #
+  # ES PUT Y NO PATCH, y eso costo un diagnostico entero (28/08/2026): con
+  # PATCH el campo 'tecnico' se DESCARTA en silencio -- responde 200 y no
+  # cambia nada, ni siquiera con un ID imposible. Con PUT si se aplica, y un
+  # ID invalido da 400. Para peor, 'email_tecnico' SI cambia con PATCH, asi
+  # que uno ve que algo se movio y da el PATCH por bueno mientras el ticket
+  # sigue en la cola de antes. Ver la skill wisphub-api.
+  #
+  # PUT exige el conjunto COMPLETO: mandar menos responde 200 y deja sin
+  # cambiar lo que falto. Por eso van todos abajo, aunque solo cambie uno.
+  - nombre: reasignar_ticket_instalacion
+    tipo: http
+    descripcion: >
+      Reasigna un ticket de instalacion al equipo que lo ejecuta. NO la llama
+      el modelo: la llama el backend cuando una persona confirma la
+      factibilidad desde la plataforma.
+    solo_lectura: false
+    requiere_confirmacion: true
+    invocable_por_servicio: true
+    roles_permitidos: [administracion]
+    base_url: https://api.wisphub.io
+    endpoint: /api/tickets/{id_ticket}/
+    metodo: PUT
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    auth_header: Authorization
+    argumentos_fijos:
+      asunto: Instalacion Nueva
+      asuntos_default: Instalacion Nueva
+      departamento: Ventas
+      departamentos_default: Ventas
+      estado: "1"
+      prioridad: "2"
+      origen_reporte: oficina
+    argumentos_desde_variables:
+      tecnico: WISPHUB_TECNICO_APROBADAS
+      email_tecnico: WISPHUB_EMAIL_TECNICO_APROBADAS
+    requeridos: [id_ticket, descripcion]
+    filtros_verificados:
+      id_ticket: {param: id_ticket, tipo: texto, verificado_el: 2026-08-28}
+      descripcion: {param: descripcion, tipo: texto, verificado_el: 2026-08-28}
     auth_ref: WISPHUB_API_KEY
     auth_esquema: Api-Key
 
