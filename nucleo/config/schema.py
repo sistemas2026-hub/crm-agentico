@@ -1373,6 +1373,12 @@ class Escalamiento(Base):
     # Clave = motivo de 'activar_si'. Un motivo sin entrada usa el generico,
     # asi que agregar uno nuevo nunca deja al cliente sin respuesta.
     mensajes_por_motivo: dict[str, str] = Field(default_factory=dict)
+    # Y que decirle cuando el traspaso NO se pudo registrar en ningun lado.
+    # Los de arriba anuncian algo que ya paso; este anuncia que no paso, y por
+    # eso no puede ser el mismo texto con otro tono: los otros cierran el
+    # tema, este tiene que pedirle al cliente que vuelva a escribir, porque
+    # el reintento necesita un mensaje suyo.
+    mensaje_si_falla: str = ""
     # Un escape a humano SIEMPRE disponible, no solo por deteccion automatica.
     siempre_disponible: bool = True
     # Caso de 'manual.casos' -> nombre de Herramienta a ejecutar en CODIGO

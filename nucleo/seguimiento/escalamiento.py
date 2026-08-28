@@ -42,6 +42,7 @@ import json
 from nucleo.herramientas import http as herramientas_http
 from nucleo.modelo import cliente
 from nucleo.persistencia import db as persistencia
+from nucleo.seguimiento.nombres import nombre_del_caso
 
 NOMBRE_HERRAMIENTA_TAGS_LISTAR = "listar_tags_crm"
 NOMBRE_HERRAMIENTA_TAGS_CREAR = "crear_tag_crm"
@@ -358,12 +359,19 @@ def escalar(config, tenant: str, usuario_externo: str, conversation_id: str,
            historial: list[dict], motivo: str, etiqueta: str,
            resumen: str = "", necesita_humano: bool = True,
            no_se_pudo_comprobar: str = "", siguiente_paso: str = "",
-           asignar_a: str = "", asunto: str = "", nombre_cliente: str = "") -> None:
+           asignar_a: str = "", asunto: str = "", nombre_cliente: str = "") -> bool:
     """
     Crea el ticket en BottleCRM y marca la conversacion como escalada.
 
+    Devuelve si el caso quedo creado. Quien llama LO NECESITA: al cliente se
+    le dice "tu caso ya quedo con un compañero", y esa frase tiene que ser
+    cierta. Antes esta funcion devolvia None pasara lo que pasara y el aviso
+    salia igual -- el 28/08/2026 un cliente pidio un cambio de clave de WiFi,
+    el CRM rechazo el caso con un 400, y se le contesto que su pedido habia
+    quedado registrado cuando no existia en ningun lado.
+
     Nunca rompe el turno: un fallo (CRM caido, token vencido, lo que sea) se
-    loguea y listo -- mismo criterio que ya usa registrar_mensaje. El
+    loguea y devuelve False -- mismo criterio que ya usa registrar_mensaje. El
     proximo turno vuelve a intentar evaluar() porque la conversacion sigue
     sin caso_id.
     """
@@ -371,7 +379,7 @@ def escalar(config, tenant: str, usuario_externo: str, conversation_id: str,
     if not herramienta_caso:
         print(f"[escalamiento] '{NOMBRE_HERRAMIENTA_CASO_CREAR}' no esta "
               f"configurada para '{tenant}', no se crea el ticket.")
-        return
+        return False
 
     try:
         tag_id = _resolver_tag(config, etiqueta)
@@ -436,8 +444,8 @@ def escalar(config, tenant: str, usuario_externo: str, conversation_id: str,
             # por organizacion (verificado: uno repetido da 400) y dos clientes
             # bien pueden tener el mismo problema el mismo dia. La pantalla lo
             # separa con el mismo formato.
-            "name": (f"{asunto or 'Consulta'} · {nombre_cliente or usuario_externo}"
-                     f" · #{conversation_id[:8]}"),
+            "name": nombre_del_caso(asunto, nombre_cliente or usuario_externo,
+                                    conversation_id),
             "description": cuerpo,
             "status": "New",
             "case_type": "Question",
@@ -455,11 +463,19 @@ def escalar(config, tenant: str, usuario_externo: str, conversation_id: str,
         respuesta = herramientas_http.ejecutar(herramienta_caso, payload)
         caso_id = respuesta.get("id") if isinstance(respuesta, dict) else None
 
+        # Se marca aunque el CRM no haya devuelto id: la conversacion igual
+        # aparece escalada en la bandeja, y sin esto el proximo mensaje del
+        # cliente vuelve a escalar y duplica el ticket de la operacion.
         persistencia.marcar_escalada(tenant, conversation_id, motivo, caso_id,
                                      etiqueta, necesita_humano)
+        if not caso_id:
+            print(f"[escalamiento] el CRM acepto el caso de {conversation_id} "
+                  f"pero no devolvio id -- no queda en la cola de nadie")
+        return bool(caso_id)
     except Exception as e:
         print(f"[escalamiento] fallo al escalar la conversacion "
               f"{conversation_id}: {type(e).__name__}: {e}")
+        return False
 
 
 # Estados en los que BottleCRM considera un caso terminado. 'Closed' es el

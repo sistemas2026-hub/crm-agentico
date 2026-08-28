@@ -135,6 +135,24 @@ def _mensaje_de_escalada(config, motivo: str | None) -> str:
     return (propio or esc.mensaje or "").strip()
 
 
+def _mensaje_si_no_quedo(config) -> str:
+    """
+    Lo que se le dice al cliente cuando el traspaso NO se pudo registrar.
+
+    Tiene que pedirle que vuelva a escribir, y no es por cortesia: la
+    conversacion no quedo marcada, asi que el reintento ocurre en el proximo
+    turno -- y el proximo turno empieza con un mensaje suyo. Sin ese mensaje
+    no hay reintento y el caso no existe para nadie.
+
+    El texto es del tenant, pero el de reserva vive aca: es justo el momento
+    en que algo ya fallo, y quedarse callado por tener un campo vacio en la
+    config seria fallar dos veces.
+    """
+    return ((config.escalamiento.mensaje_si_falla or "").strip()
+            or "No pude dejar registrado tu caso en este momento. Escribeme "
+               "de nuevo en un par de minutos y lo intento otra vez.")
+
+
 def olvidar_config(tenant: str) -> None:
     """Descarta la copia cacheada para que el proximo turno relea de la base.
     Se llama tras cada guardado del editor: sin esto, un cambio hecho desde la
@@ -822,7 +840,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                         print("[escalamiento] no se pudo crear el ticket "
                               f"operativo con '{nombre_ticket}'")
 
-                escalamiento.escalar(
+                caso_creado = escalamiento.escalar(
                     config, tenant, id_sesion, conversation_id, estado["historial"],
                     evaluacion.get("motivo", ""), evaluacion.get("etiqueta", ""),
                     resumen=(evaluacion.get("resumen", "") + nota_ticket).strip(),
@@ -907,8 +925,24 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                     # cierto con o sin urgencia.
                     # El texto depende del MOTIVO: anunciar un pedido que
                     # salio bien no se dice igual que anunciar una queja.
-                    respuesta = _mensaje_de_escalada(
-                        config, evaluacion.get("motivo")) or respuesta
+                    #
+                    # Y depende ademas de que el traspaso HAYA OCURRIDO. Los
+                    # dos avisos de arriba se escribieron para el caso feliz y
+                    # se daban por ciertos sin mirar: el 28/08/2026 el CRM
+                    # rechazo un caso con un 400 y al cliente se le contesto
+                    # igual que su pedido de cambio de clave habia quedado
+                    # registrado. Nadie lo iba a atender y el no tenia como
+                    # saberlo -- la falla era silenciosa para las dos partes.
+                    #
+                    # Alcanza con que haya quedado en UNO de los dos lados: el
+                    # caso lo pone en la cola del CRM y el ticket operativo en
+                    # la de la operacion. Cualquiera de los dos es una persona
+                    # que lo va a ver, que es lo que el aviso promete.
+                    if caso_creado or id_ticket_operativo:
+                        respuesta = _mensaje_de_escalada(
+                            config, evaluacion.get("motivo")) or respuesta
+                    else:
+                        respuesta = _mensaje_si_no_quedo(config) or respuesta
                 estado["ya_escalada"] = True
                 # El mensaje del asistente ya se guardo (mas arriba, antes de
                 # poder evaluar la escalada -- necesitaba conversation_id).

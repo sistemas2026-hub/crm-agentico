@@ -3957,6 +3957,12 @@ escalamiento:
     pedido_para_ejecutar: >-
       Listo, tu pedido quedó registrado. Un compañero del equipo lo va a
       aplicar y te confirma cuando esté hecho.
+  # Y si no se pudo registrar en ningun lado. Le pide al cliente que vuelva a
+  # escribir a proposito: el reintento pasa en el proximo turno, y el proximo
+  # turno arranca con un mensaje suyo.
+  mensaje_si_falla: >-
+    No pude dejar registrado tu caso en este momento. Escríbeme de nuevo en
+    un par de minutos para intentarlo otra vez.
   siempre_disponible: true
   # Un cliente que putea por el servicio no esta pidiendo un humano: esta
   # pidiendo que le arreglen el internet, y eso el asistente lo puede hacer
