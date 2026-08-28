@@ -314,6 +314,35 @@ def _resolver_tag(config, nombre_tag: str) -> str | None:
 _ROL_LEGIBLE = {"user": "Cliente", "assistant": "Asistente"}
 
 
+def _con_la_respuesta_real(historial: list[dict], respuesta: str) -> list[dict]:
+    """
+    El historial, con el ultimo turno del asistente cambiado por lo que el
+    cliente de verdad recibio.
+
+    Hace falta porque en un turno que termina en traspaso esas dos cosas NO
+    son la misma: el modelo contesta primero, la escalada se evalua despues, y
+    su texto REEMPLAZA al del modelo (ver api.py). El borrador del modelo no
+    llega a ningun lado -- pero era el que viajaba al caso.
+
+    Lo noto el usuario el 28/08/2026 comparando las dos pantallas: en el
+    simulador el cliente leia "tu pedido quedo registrado" y en el ticket, ese
+    mismo turno, el asistente le explicaba en que bandas se aplica el cambio y
+    con que clave reconectar. Quien atienda el caso tiene que saber que le
+    dijeron al cliente, no lo que se escribio y se tiro: contestar dando por
+    hecho algo que el cliente nunca leyo es peor que no contestar.
+
+    Sin respuesta que poner, se devuelve el historial tal cual.
+    """
+    if not (respuesta or "").strip():
+        return historial
+    copia = list(historial)
+    for i in range(len(copia) - 1, -1, -1):
+        if copia[i].get("role") == "assistant" and copia[i].get("content"):
+            copia[i] = {**copia[i], "content": respuesta.strip()}
+            break
+    return copia
+
+
 def _transcripcion_legible(historial: list[dict]) -> str:
     """
     Solo lo que de verdad se dijeron cliente y asistente -- para la
@@ -375,7 +404,8 @@ def escalar(config, tenant: str, usuario_externo: str, conversation_id: str,
            historial: list[dict], motivo: str, etiqueta: str,
            resumen: str = "", necesita_humano: bool = True,
            no_se_pudo_comprobar: str = "", siguiente_paso: str = "",
-           asignar_a: str = "", asunto: str = "", nombre_cliente: str = "") -> bool:
+           asignar_a: str = "", asunto: str = "", nombre_cliente: str = "",
+           respuesta_al_cliente: str = "") -> bool:
     """
     Crea el ticket en BottleCRM y marca la conversacion como escalada.
 
@@ -399,7 +429,8 @@ def escalar(config, tenant: str, usuario_externo: str, conversation_id: str,
 
     try:
         tag_id = _resolver_tag(config, etiqueta)
-        transcripcion = _transcripcion_legible(historial)
+        transcripcion = _transcripcion_legible(
+            _con_la_respuesta_real(historial, respuesta_al_cliente))
 
         # El resumen va PRIMERO y nunca se recorta (es corto por diseno,
         # 2-3 frases via el esquema de evaluar_conversacion). El limite de

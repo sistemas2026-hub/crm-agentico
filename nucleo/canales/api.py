@@ -860,41 +860,9 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                         print("[escalamiento] no se pudo crear el ticket "
                               f"operativo con '{nombre_ticket}'")
 
-                caso_creado = escalamiento.escalar(
-                    config, tenant, id_sesion, conversation_id, estado["historial"],
-                    evaluacion.get("motivo", ""), evaluacion.get("etiqueta", ""),
-                    resumen=(evaluacion.get("resumen", "") + nota_ticket).strip(),
-                    necesita_humano=necesita_humano,
-                    no_se_pudo_comprobar=evaluacion.get("no_se_pudo_comprobar", ""),
-                    siguiente_paso=evaluacion.get("siguiente_paso", ""),
-                    # El mismo asunto con el que entra el ticket, para que
-                    # la cola del CRM y la de la operacion se lean igual.
-                    # De los DOS caminos que abren ticket, el que haya
-                    # corrido: el elegido por la traza al escalar, o el fijo
-                    # de la herramienta cuando la visita se agendo sola.
-                    asunto=(entrada_ticket.asunto if entrada_ticket
-                            else (agendamiento.asunto_fijo_de(config, herramienta_auto)
-                                  if id_ticket_auto and herramienta_auto else "")),
-                    nombre_cliente=getattr(estado["sesion"], "nombre", "") or "",
-                    asignar_a=(agendamiento.perfil_del_area(
-                        tenant,
-                        config.escalamiento.area_por_caso.get(caso_manual, ""),
-                        config)
-                        if caso_manual else None) or "")
-                # La pausa (arriba, "si ya se escalo, el bot NO contesta")
-                # solo tiene sentido cuando de verdad hay un humano al que
-                # esperar -- si se agendo solo, el bot sigue atendiendo
-                # normal desde el proximo mensaje.
-                estado["escalada"] = necesita_humano
-                # El caso queda guardado para poder consultarlo despues: es lo
-                # que permite que la pausa de arriba sepa cuando el humano lo
-                # cerro y el asistente pueda retomar solo.
-                try:
-                    estado["caso_id"] = persistencia.caso_de_conversacion(tenant, conversation_id)
-                except Exception as e:
-                    print(f"[escalamiento] no se pudo leer el caso de la conversacion: {e}")
-                # Dos decisiones distintas, las dos aprendidas de fallas
-                # reales, y cada una manda en su caso.
+                # Lo que el cliente va a leer en este turno, decidido ANTES
+                # de escalar y no despues. Dos motivos, y el segundo es el que
+                # obliga:
                 #
                 # (1) El aviso de visita se decide por el TICKET REAL, no por
                 # 'necesita_humano'. El evaluador puede devolver
@@ -919,50 +887,72 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 # caso pasa a una persona, la pregunta que el modelo iba a
                 # hacer ya no corre. El texto es del tenant, asi que el tono
                 # se ajusta en config.escalamiento.mensaje.
+                #
+                # Y se calcula aca arriba, antes de crear el caso, porque la
+                # transcripcion que viaja al caso tiene que llevar ESTE texto
+                # y no el borrador que el modelo escribio sin saber que el
+                # turno terminaba en traspaso.
                 if id_ticket_auto:
-                    respuesta = (f"{respuesta}\n\nTu visita tecnica ya quedo agendada, "
-                                f"un tecnico te va a contactar para coordinar.").strip()
+                    respuesta_al_cliente = (
+                        f"{respuesta}\n\nTu visita tecnica ya quedo agendada, "
+                        f"un tecnico te va a contactar para coordinar.").strip()
                 else:
-                    # (3) Escalo y NO hay ticket: la respuesta del modelo no
-                    # puede quedar como la escribio.
-                    #
-                    # Antes esto solo pasaba cuando 'necesita_humano' era true.
-                    # Con necesita_humano=false y sin ticket no se tocaba nada,
-                    # y ese resulto ser el UNICO hueco donde el modelo podia
-                    # afirmar cualquier cosa sin que nadie lo corrigiera. Paso
-                    # el 19/08/2026: el cliente pregunto "¿y cuando vienen?" y
-                    # el agente contesto "Quedo agendada la visita, el sistema
-                    # te avisa con el detalle" -- no habia ninguna visita, el
-                    # verificador habia dicho checklist_completo=false.
-                    #
-                    # Es la segunda vez que el modelo anuncia una visita que no
-                    # existe teniendolo prohibido por instruccion. La primera
-                    # se corrigio pidiendoselo mejor; esta se corrige en
-                    # codigo, que es lo unico que no depende de que obedezca.
-                    #
-                    # Escalar significa que el caso quedo registrado y que
-                    # alguien lo va a ver, asi que el mensaje del tenant es
-                    # cierto con o sin urgencia.
                     # El texto depende del MOTIVO: anunciar un pedido que
                     # salio bien no se dice igual que anunciar una queja.
-                    #
-                    # Y depende ademas de que el traspaso HAYA OCURRIDO. Los
-                    # dos avisos de arriba se escribieron para el caso feliz y
-                    # se daban por ciertos sin mirar: el 28/08/2026 el CRM
-                    # rechazo un caso con un 400 y al cliente se le contesto
-                    # igual que su pedido de cambio de clave habia quedado
-                    # registrado. Nadie lo iba a atender y el no tenia como
-                    # saberlo -- la falla era silenciosa para las dos partes.
-                    #
-                    # Alcanza con que haya quedado en UNO de los dos lados: el
-                    # caso lo pone en la cola del CRM y el ticket operativo en
-                    # la de la operacion. Cualquiera de los dos es una persona
-                    # que lo va a ver, que es lo que el aviso promete.
-                    if caso_creado or id_ticket_operativo:
-                        respuesta = _mensaje_de_escalada(
-                            config, evaluacion.get("motivo")) or respuesta
-                    else:
-                        respuesta = _mensaje_si_no_quedo(config) or respuesta
+                    respuesta_al_cliente = _mensaje_de_escalada(
+                        config, evaluacion.get("motivo")) or respuesta
+
+                caso_creado = escalamiento.escalar(
+                    config, tenant, id_sesion, conversation_id, estado["historial"],
+                    evaluacion.get("motivo", ""), evaluacion.get("etiqueta", ""),
+                    resumen=(evaluacion.get("resumen", "") + nota_ticket).strip(),
+                    necesita_humano=necesita_humano,
+                    no_se_pudo_comprobar=evaluacion.get("no_se_pudo_comprobar", ""),
+                    siguiente_paso=evaluacion.get("siguiente_paso", ""),
+                    # El mismo asunto con el que entra el ticket, para que
+                    # la cola del CRM y la de la operacion se lean igual.
+                    # De los DOS caminos que abren ticket, el que haya
+                    # corrido: el elegido por la traza al escalar, o el fijo
+                    # de la herramienta cuando la visita se agendo sola.
+                    asunto=(entrada_ticket.asunto if entrada_ticket
+                            else (agendamiento.asunto_fijo_de(config, herramienta_auto)
+                                  if id_ticket_auto and herramienta_auto else "")),
+                    nombre_cliente=getattr(estado["sesion"], "nombre", "") or "",
+                    # Para que el caso muestre la conversacion como la vivio
+                    # el cliente, no como la escribio el modelo.
+                    respuesta_al_cliente=respuesta_al_cliente,
+                    asignar_a=(agendamiento.perfil_del_area(
+                        tenant,
+                        config.escalamiento.area_por_caso.get(caso_manual, ""),
+                        config)
+                        if caso_manual else None) or "")
+                # La pausa (arriba, "si ya se escalo, el bot NO contesta")
+                # solo tiene sentido cuando de verdad hay un humano al que
+                # esperar -- si se agendo solo, el bot sigue atendiendo
+                # normal desde el proximo mensaje.
+                estado["escalada"] = necesita_humano
+                # El caso queda guardado para poder consultarlo despues: es lo
+                # que permite que la pausa de arriba sepa cuando el humano lo
+                # cerro y el asistente pueda retomar solo.
+                try:
+                    estado["caso_id"] = persistencia.caso_de_conversacion(tenant, conversation_id)
+                except Exception as e:
+                    print(f"[escalamiento] no se pudo leer el caso de la conversacion: {e}")
+                # Escalo y no quedo registrado en ningun lado: no se le
+                # puede decir al cliente que si.
+                #
+                # Alcanza con que haya quedado en UNO de los dos: el caso lo
+                # pone en la cola del CRM y el ticket operativo en la de la
+                # operacion. Cualquiera de los dos es una persona que lo va a
+                # ver, que es lo que el aviso promete. Si no quedo en ninguna
+                # -- el 28/08/2026 el CRM rechazo un caso con un 400 y al
+                # cliente se le contesto igual que su pedido habia quedado
+                # registrado -- se le dice la verdad y se le pide que escriba
+                # de nuevo, que es lo que dispara el reintento.
+                if id_ticket_auto or caso_creado or id_ticket_operativo:
+                    respuesta = respuesta_al_cliente
+                else:
+                    respuesta = _mensaje_si_no_quedo(config) or respuesta
                 estado["ya_escalada"] = True
                 # El mensaje del asistente ya se guardo (mas arriba, antes de
                 # poder evaluar la escalada -- necesitaba conversation_id).
