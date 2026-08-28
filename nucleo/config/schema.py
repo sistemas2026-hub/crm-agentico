@@ -217,6 +217,24 @@ class Rol(Base):
     # cualquier cliente_final -- un rol de ventas para prospectos quedaba
     # atrapado pidiendo una cedula que no tiene sentido pedir.
     exige_verificacion: bool = True
+    # Los motivos de escalada que tienen sentido PARA ESTE ROL. Vacio = todos
+    # los del tenant, que es como venia funcionando.
+    #
+    # El evaluador ve el mismo menu de motivos en cada turno, sin importar
+    # quien esta hablando, y elige uno en cuanto la conversacion se le parece.
+    # En un rol de ventas eso significa que puede escalar por "no tengo datos
+    # para diagnosticar" -- un motivo de soporte tecnico que ahi no significa
+    # nada. Y como la escalada REEMPLAZA la respuesta (ver api.py), el cliente
+    # pierde lo que el asistente ya habia resuelto.
+    #
+    # Paso el 28/08/2026: un prospecto escribio "hola / quiero instalar /
+    # barrio centro", la consulta de planes corrio bien y encontro cobertura,
+    # y el cliente termino leyendo "entiendo tu molestia" en vez de sus planes.
+    #
+    # Mismo criterio que 'forzado.motivos_por_hecho', un eje distinto: los
+    # motivos siguen siendo vocabulario del tenant, lo que cambia es quien los
+    # puede elegir.
+    motivos_escalada: list[str] = Field(default_factory=list)
     # Solo tiene efecto con exige_verificacion=False. Distingue POR QUE este
     # rol no verifica, algo que 'exige_verificacion' por si solo no alcanza
     # a decir: 'ventas' no verifica porque su interlocutor tipicamente NO ES
@@ -1711,6 +1729,19 @@ class TenantConfig(Base):
                     f"rol '{nombre_rol}': el nombre debe ser minuscula, "
                     f"empezar con letra y usar solo letras/numeros/guion bajo "
                     f"(2-30 caracteres)")
+
+        # Un motivo de rol que el tenant no declaro no se puede elegir nunca:
+        # el enum del evaluador es la interseccion, asi que un nombre mal
+        # escrito ahi no da error -- deja al rol con menos motivos de los que
+        # se creia, en silencio. Con un solo motivo mal escrito, un rol podria
+        # quedarse sin ninguno.
+        for nombre_rol, rol in self.roles.items():
+            sobrantes = set(rol.motivos_escalada) - set(self.escalamiento.activar_si)
+            if sobrantes:
+                raise ValueError(
+                    f"rol '{nombre_rol}': 'motivos_escalada' nombra "
+                    f"{sorted(sobrantes)}, que no esta en "
+                    f"'escalamiento.activar_si'.")
 
         # Una 'entrega_variable' que apunte a una variable inexistente falla
         # SIN error visible: la herramienta se ejecuta, el registro queda, y
