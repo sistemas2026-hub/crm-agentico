@@ -23,11 +23,60 @@
   let verificado = $state(false);
   let cerrada = $state(false);
 
+  /** La conversacion en curso, para poder preguntar si llego algo nuevo. */
+  let conversacionActual = $state('');
+  /** Ids de mensajes que ya se dibujaron -- lo que evita repetirlos. */
+  let vistos = new Set();
+
   function reiniciar() {
     mensajes = [];
     verificado = false;
     cerrada = false;
+    conversacionActual = '';
+    vistos = new Set();
   }
+
+  /**
+   * Trae lo que haya llegado a la conversacion desde afuera de esta pantalla:
+   * la respuesta que un colaborador escribio desde el ticket.
+   *
+   * En WhatsApp de verdad ese mensaje viaja por el canal y aparece solo en el
+   * celular del cliente. Aca el "celular" es esta pantalla, y nadie le avisa
+   * -- habia que recargar, y probando una conversacion a dos manos eso hace
+   * perder el hilo justo cuando se quiere mirar.
+   *
+   * Se preguntan los mensajes enteros y se dibujan los que no se vieron: no
+   * hay orden de llegada que mantener ni estado que sincronizar, y una
+   * consulta que falla se resuelve sola en la siguiente.
+   */
+  async function traerNuevos() {
+    if (!conversacionActual || enviando) return;
+    try {
+      const resp = await fetch(
+        `/api/simulador-whatsapp?conversacion=${encodeURIComponent(conversacionActual)}`
+      );
+      if (!resp.ok) return;
+      const datos = await resp.json();
+      for (const m of datos.mensajes ?? []) {
+        if (vistos.has(m.id) || m.rol !== 'assistant') continue;
+        vistos.add(m.id);
+        mensajes.push({ rol: 'asistente', texto: m.texto, deOtro: true });
+      }
+      if (datos.cerrada) cerrada = true;
+    } catch {
+      // Silencio a proposito: corre cada pocos segundos.
+    }
+  }
+
+  // Cada 4 segundos mientras haya una conversacion abierta. Es una pantalla
+  // de prueba que se mira mientras se usa, asi que no hace falta nada mas
+  // fino -- y lo mas fino (una conexion abierta) es infraestructura que este
+  // caso no justifica.
+  $effect(() => {
+    if (!conversacionActual) return;
+    const reloj = setInterval(traerNuevos, 4000);
+    return () => clearInterval(reloj);
+  });
 
   async function enviar() {
     const texto = entrada.trim();
@@ -48,13 +97,20 @@
       });
       const datos = await resp.json();
       if (resp.ok) {
-        mensajes.push({
-          rol: 'asistente',
-          texto: datos.respuesta,
-          conversacionId: datos.conversacion_id,
-          mensajeId: datos.mensaje_id,
-          casoMarcado: null
-        });
+        conversacionActual = datos.conversacion_id || conversacionActual;
+        if (datos.mensaje_id) vistos.add(datos.mensaje_id);
+        // Una respuesta vacia significa que hay una persona atendiendo y el
+        // asistente se callo a proposito (ver api.py). No se dibuja nada:
+        // una burbuja en blanco parece un error y no lo es.
+        if ((datos.respuesta ?? '').trim()) {
+          mensajes.push({
+            rol: 'asistente',
+            texto: datos.respuesta,
+            conversacionId: datos.conversacion_id,
+            mensajeId: datos.mensaje_id,
+            casoMarcado: null
+          });
+        }
         verificado = !!datos.verificado;
         cerrada = !!datos.cerrada;
       } else {
