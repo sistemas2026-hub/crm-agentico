@@ -1536,6 +1536,16 @@ class Conversaciones(Base):
     nunca inventa una categoria fuera de esta lista.
     """
     etiquetas: list[str] = Field(default_factory=list)
+    # Lo que se le pregunta al cliente ANTES de cerrar su conversacion.
+    #
+    # Ninguna conversacion se cierra por lo que el modelo interprete de un
+    # "ok" o un "gracias": se le pregunta, y se cierra con lo que conteste. El
+    # 28/08/2026 se cerro un caso --chat, ticket y todo-- porque el cliente
+    # contesto "ok" a un aviso del asistente, con el trabajo sin hacer.
+    #
+    # Vacio = se cierra sin preguntar (comportamiento viejo). Se declara por
+    # empresa porque es texto que lee un cliente, y el tono es de cada una.
+    pregunta_antes_de_cerrar: str = ""
 
 
 class Manual(Base):

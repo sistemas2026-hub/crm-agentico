@@ -4366,6 +4366,12 @@ escalamiento:
 #  partida, se ajusta con uso real.
 conversaciones:
   etiquetas: [soporte_tecnico, facturacion, comercial, queja]
+  # Ninguna conversacion se cierra sin preguntarle al cliente. Un "ok" o un
+  # "gracias" son despedidas, no una confirmacion de que no quedo nada
+  # pendiente -- y el 28/08/2026 un "ok" cerro un caso con el cambio de clave
+  # todavia sin aplicar. Se pregunta, y cierra lo que el cliente conteste.
+  pregunta_antes_de_cerrar: >-
+    ¿Te queda algo más pendiente o cierro tu caso?
 
 # -----------------------------------------------------------------------------
 #  MANUAL  -  taxonomia fija de casos para marcar respuestas buenas (ver

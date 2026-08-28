@@ -139,6 +139,18 @@ def _mensaje_de_escalada(config, motivo: str | None) -> str:
     return (propio or esc.mensaje or "").strip()
 
 
+def _pregunta_de_cierre(config) -> str:
+    """
+    Lo que se le pregunta al cliente antes de cerrarle la conversacion.
+
+    Vacio si el tenant no la declaro, y entonces se cierra como antes. No hay
+    texto de reserva a proposito: los otros mensajes de reserva existen porque
+    quedarse callado seria peor, y aca callarse significa exactamente lo que
+    la empresa pidio -- no preguntar.
+    """
+    return (config.conversaciones.pregunta_antes_de_cerrar or "").strip()
+
+
 def _mensaje_de_cierre(config) -> str:
     """
     Lo que se le dice al cliente cuando el mismo da el caso por resuelto.
@@ -339,7 +351,12 @@ def _sesion_nueva(tenant: str, id_sesion: str, canal: str,
               "conversacion_id": None,
               # Por que se escalo, para que el aviso de la pausa siga
               # hablando el mismo idioma que el del traspaso.
-              "motivo_escalada": None}
+              "motivo_escalada": None,
+              # Ya se le pregunto al cliente si se puede cerrar. Vive en
+              # memoria, como 'intento_antes_de_escalar': si el motor se
+              # reinicia se le vuelve a preguntar una vez, que es el error
+              # barato de los dos posibles.
+              "cierre_propuesto": False}
     try:
         previo = persistencia.estado_de_conversacion_abierta(
             tenant, canal, id_sesion, horas_inactividad)
@@ -543,6 +560,27 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 print(f"[escalamiento] {id_sesion}: el cliente da por cerrado, "
                       "pero nadie del equipo le respondio todavia -- no se cierra")
                 cerrado = False
+            # Y aunque haya respondido una persona: primero se le PREGUNTA.
+            # Cerrar con lo que el modelo dedujo de un "ok" ya salio mal una
+            # vez; con una pregunta explicita, lo que cierra el caso es la
+            # respuesta del cliente y no una interpretacion.
+            if cerrado and _pregunta_de_cierre(config) and not estado["cierre_propuesto"]:
+                estado["cierre_propuesto"] = True
+                cerrado = False
+                respuesta = _pregunta_de_cierre(config)
+                estado["historial"].append({"role": "assistant", "content": respuesta})
+                try:
+                    persistencia.registrar_mensaje(tenant, canal, id_sesion, rol, "user", mensaje)
+                    persistencia.registrar_mensaje(tenant, canal, id_sesion, rol, "assistant", respuesta)
+                except Exception as e:
+                    print(f"[persistencia] no se pudo guardar la pregunta de cierre: {e}")
+                return {"respuesta": respuesta,
+                        "verificado": estado["sesion"].verificado,
+                        "pausada": True}
+            if not cerrado:
+                # Dijo que le falta algo: la proxima vez se le vuelve a
+                # preguntar en vez de darlo por cerrado de una.
+                estado["cierre_propuesto"] = False
 
             if cerrado:
                 respuesta = _mensaje_de_cierre(config)
@@ -1084,12 +1122,26 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                         persistencia.actualizar_contenido_mensaje(tenant, mensaje_id, respuesta)
                     except Exception as e:
                         print(f"[persistencia] no se pudo actualizar el aviso de escalada: {e}")
+        elif (evaluacion and evaluacion.get("resuelta")
+                and _pregunta_de_cierre(config) and not estado["cierre_propuesto"]):
+            # Antes de cerrar, se PREGUNTA. Vale para el camino normal igual
+            # que para el escalado: "gracias" y "ok" son despedidas, no
+            # confirmaciones de que no quedo nada pendiente, y el modelo las
+            # lee como lo mismo. Se suma a lo que ya contesto, que suele ser
+            # su propio saludo.
+            estado["cierre_propuesto"] = True
+            respuesta = f"{respuesta}\n\n{_pregunta_de_cierre(config)}".strip()
+            if mensaje_id:
+                try:
+                    persistencia.actualizar_contenido_mensaje(tenant, mensaje_id, respuesta)
+                except Exception as e:
+                    print(f"[persistencia] no se pudo agregar la pregunta de cierre: {e}")
         elif evaluacion and evaluacion.get("resuelta"):
-            # No escalada Y el cliente confirmo que ya quedo resuelto: cierra
-            # la conversacion en la bandeja (ver cerrar_conversacion en
-            # persistencia). El propio saludo de despedida del modelo ya
-            # cumple el rol de "mensaje de cierre" -- no hace falta agregar
-            # otro, sonaria repetido.
+            # Ya se le pregunto (o el tenant no quiere que se pregunte) y
+            # confirmo: cierra la conversacion en la bandeja (ver
+            # cerrar_conversacion en persistencia). El propio saludo de
+            # despedida del modelo ya cumple el rol de "mensaje de cierre" --
+            # no hace falta agregar otro, sonaria repetido.
             try:
                 persistencia.cerrar_conversacion(tenant, conversation_id)
                 cerrada = True
