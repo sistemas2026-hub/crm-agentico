@@ -31,7 +31,11 @@ export async function load({ params, fetch }) {
     // Lo que la persona ya le dijo al asistente por WhatsApp. Que el
     // formulario se lo vuelva a preguntar es la forma más rápida de que
     // abandone: son 20 campos y ya escribió parte de esto una vez.
-    prellenado: data.prellenado ?? {}
+    prellenado: data.prellenado ?? {},
+    // Los planes de su zona, para que el campo sea una lista y no texto
+    // libre: escribir el nombre a mano deja pedir un plan que ahi no se
+    // ofrece, y eso se descubre recien al ir a instalar.
+    planesDisponibles: data.planes_disponibles ?? []
   };
 }
 

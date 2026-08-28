@@ -17,6 +17,8 @@ Dos operaciones:
 
 from __future__ import annotations
 
+import os
+
 from django.core.signing import BadSignature, SignatureExpired
 from django.db import transaction
 from django.utils import timezone
@@ -120,6 +122,41 @@ class SolicitudCrearView(APIView):
                          "link": link_de(crudo)}, status=http.HTTP_201_CREATED)
 
 
+def _planes_de(localidad: str) -> list:
+    """Los planes que se ofrecen en esa localidad, segun el catalogo curado.
+
+    Se le preguntan al motor (POST /interno/herramienta/consultar_planes_venta)
+    en vez de reenviar lo que el modelo dijo en la conversacion: un plan que ya
+    no se vende, o un precio viejo, no puede colarse en un formulario que la
+    persona despues firma. El catalogo del tenant es la unica fuente.
+
+    NUNCA lanza. Si el motor no responde, se devuelve vacio y el formulario cae
+    a un campo de texto libre con lo que ya traia: una solicitud que se puede
+    enviar vale mas que una lista perfecta.
+    """
+    if not localidad:
+        return []
+    import requests
+
+    base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
+    tenant = os.environ.get("MOTOR_TENANT", "") or "rapilink"
+    cabeceras = {"Content-Type": "application/json"}
+    token = os.environ.get("MOTOR_SERVICE_TOKEN")
+    if token:
+        cabeceras["X-Servicio-Token"] = token
+    try:
+        r = requests.post(f"{base}/interno/herramienta/consultar_planes_venta",
+                          params={"tenant": tenant},
+                          json={"localidad": localidad},
+                          headers=cabeceras, timeout=20)
+        r.raise_for_status()
+        return list(((r.json() or {}).get("resultado") or {}).get("planes") or [])
+    except Exception as e:                          # noqa: BLE001
+        print(f"[solicitudes] no se pudieron leer los planes de "
+              f"{localidad!r}: {type(e).__name__}: {e}")
+        return []
+
+
 def _cargar(token: str):
     """(solicitud, estado_http, error). Exactamente uno de los dos lados."""
     try:
@@ -168,6 +205,16 @@ class SolicitudPublicaView(APIView):
             "ya_enviada": solicitud.estado == SolicitudServicio.ENVIADA,
             "enviada_en": (solicitud.enviada_en.isoformat()
                            if solicitud.enviada_en else None),
+            # Los planes que se ofrecen EN SU ZONA. Se piden al motor, que los
+            # resuelve del catalogo curado del tenant -- no se reenvia lo que
+            # el modelo dijo en la conversacion: eso es como se cuela un plan
+            # que ya no se vende, o un precio viejo, en un formulario que la
+            # persona firma.
+            #
+            # Si el motor no responde, la lista viene vacia y el formulario
+            # cae a un campo de texto libre con lo que ya venia. Una solicitud
+            # que se puede enviar vale mas que una lista perfecta.
+            "planes_disponibles": _planes_de(solicitud.barrio),
             # Lo que la persona ya le dijo a Dexter. Volver a preguntarselo
             # seria la forma mas rapida de que abandone.
             "prellenado": {

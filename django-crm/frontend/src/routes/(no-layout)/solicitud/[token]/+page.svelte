@@ -25,6 +25,9 @@
   // escribe: sin esto, un re-render del loader le pisaría lo que ya tipeó.
   // Mismo criterio que la página de CSAT.
   const p = untrack(() => data.prellenado ?? {});
+  // Los planes que se ofrecen en su zona (los resuelve el motor desde el
+  // catalogo curado). Vacio = el motor no respondio, y el campo cae a texto.
+  const planes = untrack(() => data.planesDisponibles ?? []);
 
   // Ubicación: se guarda en estado porque la da el navegador, no el teclado.
   let gps = $state({ lat: p.gps_lat ?? '', lng: p.gps_lng ?? '', precision: p.gps_precision_m ?? '' });
@@ -233,8 +236,31 @@
                 <option>Servicio adicional</option>
               </select>
             </label>
+            <!-- Los planes de SU zona, no un campo libre: escribir el nombre
+                 a mano deja pedir un plan que ahi no se ofrece, y eso lo
+                 descubre alguien recien al ir a instalar. Viene preseleccionado
+                 con el que eligió en la conversación, y puede cambiarlo por
+                 otro de la misma lista si cambió de idea.
+
+                 Si la lista viene vacía (el motor no respondió) se cae a texto
+                 libre: una solicitud que se puede enviar vale más que una
+                 lista perfecta. -->
             <label>Plan de interés
-              <input name="plan_interesado" value={p.plan_interesado ?? ''} placeholder="Ej. FAMILIA — 200 MB + TV" />
+              {#if planes.length}
+                <select name="plan_interesado" value={p.plan_interesado ?? ''}>
+                  {#each planes as plan}
+                    <option value={plan}>{plan}</option>
+                  {/each}
+                  {#if p.plan_interesado && !planes.includes(p.plan_interesado)}
+                    <!-- El plan que eligió ya no figura en su zona. Se deja
+                         igual, seleccionado: quitárselo sin avisar sería
+                         cambiarle la solicitud por atrás. -->
+                    <option value={p.plan_interesado}>{p.plan_interesado} (a confirmar)</option>
+                  {/if}
+                </select>
+              {:else}
+                <input name="plan_interesado" value={p.plan_interesado ?? ''} placeholder="Ej. FAMILIA — 200 MB + TV" />
+              {/if}
             </label>
             <label>Fecha de corte de facturación
               <select name="fecha_corte" value={p.fecha_corte ?? ''}>
