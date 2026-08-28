@@ -552,7 +552,13 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             cerrado = False
             try:
                 veredicto = escalamiento.evaluar(config, rol, estado["historial"]) or {}
-                cerrado = bool(veredicto.get("resuelta"))
+                # Un "si" explicito cierra por si solo, aunque la pregunta
+                # se le haya hecho dos turnos antes: el cliente contesto lo
+                # que se le pregunto, y volver a preguntarle lo mismo es no
+                # escucharlo. Visto en la prueba: dijo "listo entonces, ya
+                # puedes cerrar" y se le repregunto.
+                cerrado = bool(veredicto.get("resuelta")
+                               or veredicto.get("confirma_cierre"))
             except Exception as e:
                 print(f"[escalamiento] no se pudo evaluar el turno pausado: {e}")
             if cerrado and not persistencia.atendida_por_humano(
@@ -571,7 +577,8 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                     and not veredicto.get("confirma_cierre")):
                 cerrado = False
                 estado["cierre_propuesto"] = False
-            elif cerrado and _pregunta_de_cierre(config) and not estado["cierre_propuesto"]:
+            elif (cerrado and _pregunta_de_cierre(config)
+                    and not veredicto.get("confirma_cierre")):
                 estado["cierre_propuesto"] = True
                 cerrado = False
                 respuesta = _pregunta_de_cierre(config)
@@ -1097,6 +1104,12 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 # esperar -- si se agendo solo, el bot sigue atendiendo
                 # normal desde el proximo mensaje.
                 estado["escalada"] = necesita_humano
+                # Y POR QUE se escalo. Lo lee el aviso que recibe el cliente
+                # en cada mensaje mientras espera: sin esto se le contestaba
+                # con el texto generico ("entiendo tu molestia") aunque
+                # hubiera escalado por un tramite, porque el motivo solo
+                # estaba en la base y la sesion viva no lo miraba.
+                estado["motivo_escalada"] = evaluacion.get("motivo")
                 # El caso queda guardado para poder consultarlo despues: es lo
                 # que permite que la pausa de arriba sepa cuando el humano lo
                 # cerro y el asistente pueda retomar solo.
@@ -1137,7 +1150,8 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             # sin haberle preguntado por lo nuevo.
             estado["cierre_propuesto"] = False
         elif (evaluacion and evaluacion.get("resuelta")
-                and _pregunta_de_cierre(config) and not estado["cierre_propuesto"]):
+                and _pregunta_de_cierre(config)
+                and not evaluacion.get("confirma_cierre")):
             # Antes de cerrar, se PREGUNTA. Vale para el camino normal igual
             # que para el escalado: "gracias" y "ok" son despedidas, no
             # confirmaciones de que no quedo nada pendiente, y el modelo las
