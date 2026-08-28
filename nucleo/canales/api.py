@@ -334,7 +334,12 @@ def _sesion_nueva(tenant: str, id_sesion: str, canal: str,
               # 'repreguntado_agendamiento': si el motor se reinicia se
               # concede un intento mas, que es un costo aceptable frente a
               # una lectura extra a la base en cada turno.
-              "intento_antes_de_escalar": False}
+              "intento_antes_de_escalar": False,
+              # La conversacion abierta de este usuario, si ya habia una.
+              "conversacion_id": None,
+              # Por que se escalo, para que el aviso de la pausa siga
+              # hablando el mismo idioma que el del traspaso.
+              "motivo_escalada": None}
     try:
         previo = persistencia.estado_de_conversacion_abierta(
             tenant, canal, id_sesion, horas_inactividad)
@@ -354,6 +359,11 @@ def _sesion_nueva(tenant: str, id_sesion: str, canal: str,
     # esta conversacion YA tiene un caso creado. Son cosas distintas.
     estado["ya_escalada"] = previo["escalada"]
     estado["caso_id"] = previo["caso_id"]
+    # Cual es la conversacion en curso. Hace falta ANTES de que el turno
+    # cree la suya: el camino pausado decide si un "ok" del cliente puede
+    # cerrar el caso, y para eso tiene que poder preguntar por esta fila.
+    estado["conversacion_id"] = previo["conversation_id"]
+    estado["motivo_escalada"] = previo["motivo_escalada"]
     # Se guarda tal cual vino de la base, sin validar todavia contra la
     # config (esta funcion no la recibe) -- atender_turno() la revalida
     # antes de usarla, por si el rol cambio o se borro desde entonces.
@@ -507,12 +517,32 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             # cliente le volvia "tu caso ya esta con un compañero", y el caso,
             # el ticket y el chat quedaban abiertos esperando que alguien se
             # acordara de cerrarlos a mano.
+            #
+            # Y "resuelta" NO alcanza por si sola. El evaluador la pone en true
+            # tambien cuando el cliente se despide -- asi esta escrito, y para
+            # el flujo normal esta bien: ahi el asistente ya resolvio y el
+            # "gracias" cierra. Aca no: el trabajo lo tiene una persona y
+            # todavia no lo hizo.
+            #
+            # Paso el 28/08/2026. El cliente contesto "ok" al aviso del PROPIO
+            # asistente ("tu pedido quedo registrado") y se cerro todo -- chat,
+            # caso y ticket -- con el cambio de clave sin aplicar y sin que
+            # ninguna persona hubiera escrito nunca. Un "ok" a nadie no
+            # confirma nada.
+            #
+            # Asi que se exige el hecho: que alguien del equipo le haya
+            # respondido. Recien ahi un "ok" significa "si, ya quedo".
             cerrado = False
             try:
                 veredicto = escalamiento.evaluar(config, rol, estado["historial"]) or {}
                 cerrado = bool(veredicto.get("resuelta"))
             except Exception as e:
                 print(f"[escalamiento] no se pudo evaluar el turno pausado: {e}")
+            if cerrado and not persistencia.atendida_por_humano(
+                    tenant, estado["conversacion_id"]):
+                print(f"[escalamiento] {id_sesion}: el cliente da por cerrado, "
+                      "pero nadie del equipo le respondio todavia -- no se cierra")
+                cerrado = False
 
             if cerrado:
                 respuesta = _mensaje_de_cierre(config)
@@ -2469,7 +2499,8 @@ def conversaciones_responder_humano(id_conversacion):
         return jsonify({"error": "Faltan campos: tenant, mensaje"}), 400
 
     try:
-        destino = persistencia.agregar_mensaje_humano(tenant, id_conversacion, contenido)
+        destino = persistencia.agregar_mensaje_humano(
+            tenant, id_conversacion, contenido, autor)
     except RuntimeError as e:
         return jsonify({"error": str(e)}), 404
     except Exception as e:

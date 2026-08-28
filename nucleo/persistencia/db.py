@@ -155,7 +155,8 @@ def estado_de_conversacion_abierta(tenant: str, canal: str,
     """
     with sesion(tenant) as (cur, org):
         cur.execute(
-            """select id, escalada_a_humano, caso_id, id_cliente, nombre_cliente,
+            """select id, escalada_a_humano, motivo_escalamiento,
+                      caso_id, id_cliente, nombre_cliente,
                       rol_efectivo, necesita_atencion_humana, datos_sesion
                from asistente.conversations
                where organization_id = %s and canal = %s and usuario_externo = %s
@@ -170,6 +171,12 @@ def estado_de_conversacion_abierta(tenant: str, canal: str,
         return {
             "conversation_id": str(fila["id"]),
             "escalada": bool(fila["escalada_a_humano"]),
+            # POR QUE se escalo. Mientras la conversacion esta en pausa, cada
+            # mensaje del cliente recibe el texto del tenant, y ese texto
+            # depende del motivo: contestarle "entiendo tu molestia" a quien
+            # pidio un tramite y no se quejo de nada suena a libreto y
+            # desconcierta. Visto el 28/08/2026.
+            "motivo_escalada": fila["motivo_escalamiento"],
             "necesita_atencion_humana": bool(fila["necesita_atencion_humana"]),
             "caso_id": str(fila["caso_id"]) if fila["caso_id"] else None,
             "id_cliente": fila["id_cliente"],
@@ -517,6 +524,39 @@ def guardar_ticket_operativo(tenant: str, conversation_id: str,
               f"{ticket}: {type(e).__name__}: {e}")
 
 
+def atendida_por_humano(tenant: str, conversation_id: str) -> bool:
+    """
+    Si alguien del equipo ya le respondio al cliente en esta conversacion.
+
+    Misma definicion que usa la bandeja: la marca explicita, o un mensaje
+    escrito por una persona.
+
+    Decide si un "ok" del cliente puede cerrar el caso. Sin esto, el 28/08/2026
+    un cliente contesto "ok" al aviso del propio asistente --"tu pedido quedo
+    registrado"-- y se cerro todo: la conversacion, el caso y el ticket, con el
+    cambio de clave sin hacer y sin que ninguna persona hubiera escrito nunca.
+    Un "ok" a nadie no confirma nada.
+    """
+    try:
+        with sesion(tenant) as (cur, org):
+            cur.execute(
+                """select (c.atendida_manual or exists (
+                             select 1 from asistente.messages h
+                              where h.conversation_id = c.id
+                                and h.rol = 'humano')) as atendida
+                   from asistente.conversations c
+                   where c.organization_id = %s and c.id = %s""",
+                (org, conversation_id))
+            fila = cur.fetchone()
+            return bool(fila and fila["atendida"])
+    except Exception as e:
+        print(f"[persistencia] no se pudo saber si la atendio una persona: "
+              f"{type(e).__name__}: {e}")
+        # Fail-closed: ante la duda NO se cierra. Un caso abierto de mas lo
+        # cierra alguien; uno cerrado de menos deja al cliente sin el cambio.
+        return False
+
+
 def ticket_operativo_de(tenant: str, conversation_id: str) -> str | None:
     """El ticket del sistema del ISP que abrio esta conversacion, si abrio uno."""
     try:
@@ -661,7 +701,7 @@ def caso_de_conversacion(tenant: str, conversation_id: str) -> str | None:
 
 
 def agregar_mensaje_humano(tenant: str, conversation_id: str,
-                           contenido: str) -> dict | None:
+                           contenido: str, autor: str = "") -> dict | None:
     """
     Un agente humano responde directo en el hilo, sin pasar por el modelo --
     para una conversacion ya escalada (marcar_escalada le puso caso_id), que
@@ -697,10 +737,20 @@ def agregar_mensaje_humano(tenant: str, conversation_id: str,
                  (organization_id, conversation_id, rol, contenido)
                values (%s, %s, 'assistant', %s)""",
             (org, conversation_id, contenido))
+        # Y queda marcada como atendida por una persona. No es cosmetico:
+        # dos reglas dependen de saberlo -- el cierre por confirmacion del
+        # cliente (que no vale si nadie le contesto todavia) y el barrido por
+        # plazo vencido (que solo cierra lo que alguien ya atendio).
+        #
+        # El mensaje se guarda con rol 'assistant' a proposito, asi que la
+        # marca tiene que ir aparte: sin esto, responder desde el ticket no
+        # dejaba ninguna huella de que hubo una persona atras.
         cur.execute(
-            """update asistente.conversations set actualizado_en = now()
+            """update asistente.conversations
+               set actualizado_en = now(), atendida_manual = true,
+                   atendida_por = coalesce(nullif(%s, ''), atendida_por)
                where id = %s""",
-            (conversation_id,))
+            (autor or "", conversation_id))
         # La fila entera, no dos campos elegidos a mano: agregarle una columna
         # al select y olvidarse de este return deja al llamador sin el dato y
         # sin ningun error -- paso el 28/08/2026 con 'ticket_operativo', y la
