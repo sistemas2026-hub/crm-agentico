@@ -86,13 +86,34 @@ def _cuando_escalar(config) -> str:
             "resolver ni recoger.")
 
 
-def _motivos_a_juicio(config) -> list[str]:
-    """Los motivos que el evaluador SI puede elegir leyendo la conversacion."""
+def _motivos_a_juicio(config, rol_cfg=None) -> list[str]:
+    """Los motivos que el evaluador SI puede elegir leyendo la conversacion.
+
+    Dos filtros sobre el mismo menu, por dos razones distintas:
+
+      * Los que decide un HECHO se sacan siempre (forzado.motivos_por_hecho):
+        mirando el texto no se pueden saber.
+      * Los que NO SON DE ESTE ROL se sacan si el rol lo declara
+        ('Rol.motivos_escalada'). El evaluador ve el mismo menu en cada turno,
+        y si un motivo esta ahi lo va a elegir en cuanto la conversacion se le
+        parezca -- aunque no tenga sentido para quien esta hablando.
+
+    El segundo filtro nace de un caso real (28/08/2026). Un prospecto escribio
+    "hola / quiero instalar / barrio centro". 'consultar_planes_venta' corrio
+    bien y encontro cobertura, o sea que la respuesta de venta ya estaba
+    lista -- y el evaluador escalo con 'sin_datos_para_diagnosticar', un
+    motivo de soporte tecnico que en una venta no significa nada. Como la
+    escalada REEMPLAZA la respuesta, el cliente nunca leyo que habia cobertura
+    ni cuales eran los planes: leyo "entiendo tu molestia", sin haberse
+    quejado de nada.
+    """
     por_hecho = forzado.motivos_por_hecho(config)
-    return [m for m in config.escalamiento.activar_si if m not in por_hecho]
+    del_rol = set(getattr(rol_cfg, "motivos_escalada", None) or [])
+    return [m for m in config.escalamiento.activar_si
+            if m not in por_hecho and (not del_rol or m in del_rol)]
 
 
-def _esquema_evaluacion(config) -> dict:
+def _esquema_evaluacion(config, rol_cfg=None) -> dict:
     propiedades = {
         "escalar": {
             "type": "boolean",
@@ -109,7 +130,8 @@ def _esquema_evaluacion(config) -> dict:
             # Si un tenant declarara TODOS sus motivos por hecho, dejarlo sin
             # opciones haria invalido el esquema entero -- ahi vale mas un
             # evaluador impreciso que un evaluador roto.
-            "enum": _motivos_a_juicio(config) or list(config.escalamiento.activar_si),
+            "enum": (_motivos_a_juicio(config, rol_cfg)
+                     or list(config.escalamiento.activar_si)),
             "description": "Por que escala. Ignoralo si escalar=false.",
         },
         "etiqueta": {
@@ -300,7 +322,7 @@ def evaluar(config, rol: str, historial: list[dict]) -> dict | None:
     try:
         respuesta = cliente.chat(
             referencia_modelo, mensajes,
-            tools=[_esquema_evaluacion(config)],
+            tools=[_esquema_evaluacion(config, config.roles.get(rol))],
             timeout=cliente.TIMEOUT_SECUNDARIO)
     except Exception as e:
         print(f"[escalamiento] fallo al evaluar: {type(e).__name__}: {e}")

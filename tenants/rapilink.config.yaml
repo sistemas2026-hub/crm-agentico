@@ -379,6 +379,9 @@ roles:
           cedula, direccion, coordenadas, ip, mac_cpe, sn_onu, sectorial, router.nombre]
 
   facturacion_cliente:
+    # Facturacion no diagnostica equipos ni manda tecnicos.
+    motivos_escalada: [frustracion_detectada, tres_fallos_seguidos,
+                       solicitud_explicita, duda_de_identidad]
     area: Facturación
     cargo: Agente de Facturación (autoservicio)
     # Lo lee el ROUTER para saber cuando mandarle una conversacion -- se
@@ -1209,6 +1212,12 @@ roles:
   # mandar a alguien sin cobertura o sin interes real, y contesta
   # planes/precios con datos reales en vez de que el router improvise.
   ventas:
+    # Un prospecto NO tiene servicio que diagnosticar ni visita que agendar:
+    # esos motivos no son de este rol. Sin este filtro el evaluador los
+    # elegia igual -- el 28/08/2026 escalo una venta con
+    # 'sin_datos_para_diagnosticar' y el cliente perdio sus planes.
+    motivos_escalada: [frustracion_detectada, tres_fallos_seguidos,
+                       solicitud_explicita]
     area: Ventas
     cargo: Agente de Ventas Virtual
     # Lo lee el ROUTER (cliente_final) para saber cuando derivar aca --
