@@ -705,6 +705,9 @@ class Herramienta(Base):
     # 'argumentos_fijos' de cada una -- el motor no puede conocer esos numeros.
     responde_ticket_operativo: bool = False
     cierra_ticket_operativo: bool = False
+    # La que cierra el caso en el CRM. Misma idea: el motor no sabe con que
+    # palabra cierra un caso cada CRM ('Closed' aqui), eso va en la config.
+    cierra_caso: bool = False
     # Nombres de campo en la respuesta cruda del proveedor -- configurables
     # por tenant para no hardcodear el vocabulario de un proveedor puntual
     # (WispHub llama 'localidad' y 'zona') en nucleo/. 'campo_zona_sync'
@@ -1400,6 +1403,25 @@ class Escalamiento(Base):
     # tema, este tiene que pedirle al cliente que vuelva a escribir, porque
     # el reintento necesita un mensaje suyo.
     mensaje_si_falla: str = ""
+    # Horas sin que el cliente conteste antes de cerrar el caso solo. 0 = nunca
+    # se cierra por tiempo, que es el valor por defecto: un caso que se cierra
+    # sin que nadie lo decida es peor que uno viejo abierto, y ninguna empresa
+    # deberia estrenar ese comportamiento sin pedirlo.
+    #
+    # Se cuenta desde el ULTIMO mensaje del cliente. Si escribe despues de que
+    # se cerro, el asistente lo atiende normal y abre lo que haga falta -- no
+    # se pierde nada, se cierra lo que quedo esperando.
+    cerrar_sin_respuesta_horas: int = 0
+    # Que se deja escrito en el ticket del sistema del ISP al cerrarlo asi. Sin
+    # una linea que diga por que, quien lo audite tiene que reconstruirlo desde
+    # el chat -- justo lo que ese registro existe para evitar.
+    texto_cierre_sin_respuesta: str = ""
+    # Y lo que se deja escrito cuando el que cierra es el propio cliente
+    # diciendo que ya quedo resuelto.
+    texto_cierre_confirmado: str = ""
+    # Y lo que se le dice AL CLIENTE en ese ultimo mensaje. Distinto del de
+    # arriba: aquel lo lee quien audita el ticket, este lo lee el cliente.
+    mensaje_cierre_cliente: str = ""
     # Un escape a humano SIEMPRE disponible, no solo por deteccion automatica.
     siempre_disponible: bool = True
     # Caso de 'manual.casos' -> nombre de Herramienta a ejecutar en CODIGO

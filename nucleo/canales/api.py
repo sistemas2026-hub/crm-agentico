@@ -31,6 +31,7 @@ y se verifica DURANTE la conversacion, con una herramienta como
 from __future__ import annotations
 
 import os
+from pathlib import Path
 import threading
 import time
 
@@ -135,6 +136,19 @@ def _mensaje_de_escalada(config, motivo: str | None) -> str:
     esc = config.escalamiento
     propio = (esc.mensajes_por_motivo or {}).get(motivo or "", "")
     return (propio or esc.mensaje or "").strip()
+
+
+def _mensaje_de_cierre(config) -> str:
+    """
+    Lo que se le dice al cliente cuando el mismo da el caso por resuelto.
+
+    El de reserva vive aca por lo mismo que el de la escalada fallida: es el
+    ultimo mensaje de la conversacion, y quedarse callado por tener un campo
+    vacio en la config seria terminar mal un caso que salio bien.
+    """
+    return ((config.escalamiento.mensaje_cierre_cliente or "").strip()
+            or "Listo, cierro tu caso. Si necesitas algo mas, escribime "
+               "cuando quieras.")
 
 
 def _mensaje_si_no_quedo(config) -> str:
@@ -483,9 +497,47 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     # cuando el humano cierra el caso, el asistente retoma solo.
     if estado["escalada"]:
         if escalamiento.caso_sigue_abierto(config, estado["caso_id"]):
-            respuesta = (config.escalamiento.mensaje or "").strip() or \
-                "Tu caso ya esta con un compañero del equipo."
             estado["historial"].append({"role": "user", "content": mensaje})
+            # ¿El cliente esta diciendo que ya quedo?
+            #
+            # El bot no contesta mientras hay una persona atendiendo, pero
+            # SIGUE leyendo: el "listo, gracias" con el que de verdad termina
+            # un caso llega justo aca, y sin esto no tenia ningun efecto -- al
+            # cliente le volvia "tu caso ya esta con un compañero", y el caso,
+            # el ticket y el chat quedaban abiertos esperando que alguien se
+            # acordara de cerrarlos a mano.
+            cerrado = False
+            try:
+                veredicto = escalamiento.evaluar(config, rol, estado["historial"]) or {}
+                cerrado = bool(veredicto.get("resuelta"))
+            except Exception as e:
+                print(f"[escalamiento] no se pudo evaluar el turno pausado: {e}")
+
+            if cerrado:
+                respuesta = _mensaje_de_cierre(config)
+                try:
+                    conv, _ = persistencia.registrar_mensaje(
+                        tenant, canal, id_sesion, rol, "user", mensaje)
+                    persistencia.registrar_mensaje(
+                        tenant, canal, id_sesion, rol, "assistant", respuesta)
+                    operativo.cerrar_todo(
+                        config, tenant,
+                        {"id": conv, "caso_id": estado["caso_id"],
+                         "ticket_operativo": persistencia.ticket_operativo_de(tenant, conv)},
+                        (config.escalamiento.texto_cierre_confirmado or "").strip()
+                        or "El cliente confirmo que su caso quedo resuelto.")
+                    estado["escalada"] = False
+                    estado["caso_id"] = None
+                except Exception as e:
+                    print(f"[operativo] no se pudo cerrar tras la confirmacion "
+                          f"del cliente: {type(e).__name__}: {e}")
+                estado["historial"].append({"role": "assistant", "content": respuesta})
+                return {"respuesta": respuesta,
+                        "verificado": estado["sesion"].verificado,
+                        "cerrada": True, "pausada": True}
+
+            respuesta = _mensaje_de_escalada(config, estado.get("motivo_escalada")) or \
+                "Tu caso ya esta con un compañero del equipo."
             estado["historial"].append({"role": "assistant", "content": respuesta})
             try:
                 persistencia.registrar_mensaje(tenant, canal, id_sesion, rol, "user", mensaje)
@@ -2306,6 +2358,26 @@ def conversaciones_mensajes(id_conversacion):
     return jsonify(resultado)
 
 
+@app.post("/mantenimiento/cerrar-sin-respuesta")
+def mantenimiento_cerrar_sin_respuesta():
+    """
+    Cierra los casos donde el cliente dejo de contestar hace mas del plazo que
+    declare el tenant. Sin plazo declarado no hace nada.
+
+    Es un endpoint y no solo un hilo interno para que se pueda correr a mano
+    --y sobre todo, para poder VERLO correr-- sin esperar la proxima pasada.
+    """
+    tenant = request.args.get("tenant") or (
+        request.get_json(force=True, silent=True) or {}).get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+    return jsonify(operativo.cerrar_vencidas(config, tenant))
+
+
 @app.post("/casos/<caso_id>/mensajes")
 def caso_responder_humano(caso_id):
     """
@@ -3695,6 +3767,57 @@ def salud():
     return jsonify({"estado": "ok"})
 
 
+def _reloj_de_vencimientos() -> None:
+    """
+    Revisa los plazos cada tanto, para siempre.
+
+    Vive dentro del motor y no en un cron aparte por una razon simple: el motor
+    ya es el unico proceso que sabe leer la config de un tenant. Un cron
+    externo tendria que resolver credenciales, tenants y plazos por su cuenta,
+    o llamar a este mismo endpoint -- y entonces es infraestructura de mas para
+    hacer lo mismo.
+
+    Arranca solo si hay algun tenant con plazo declarado: sin eso seria un hilo
+    despertandose cada hora para no hacer nada.
+    """
+    while True:
+        time.sleep(operativo.INTERVALO_BARRIDO_SEGUNDOS)
+        for tenant in _tenants_conocidos():
+            try:
+                config = _config_de(tenant)
+            except Exception as e:
+                print(f"[operativo] no se pudo leer la config de '{tenant}': "
+                      f"{type(e).__name__}: {e}")
+                continue
+            if not config.escalamiento.cerrar_sin_respuesta_horas:
+                continue
+            try:
+                operativo.cerrar_vencidas(config, tenant)
+            except Exception as e:
+                # Un fallo NO puede matar el hilo: si muere, deja de revisar
+                # plazos para siempre y nadie se entera hasta que alguien nota
+                # que ningun caso se cierra solo.
+                print(f"[operativo] el barrido de '{tenant}' fallo: "
+                      f"{type(e).__name__}: {e}")
+
+
+def _tenants_conocidos() -> list[str]:
+    """Los tenants que este despliegue sirve, por su archivo semilla."""
+    return sorted(p.stem.replace(".config", "")
+                  for p in Path("tenants").glob("*.config.yaml"))
+
+
 if __name__ == "__main__":
+    # Arranca SIEMPRE, aunque hoy ningun tenant tenga plazo. Condicionarlo a
+    # la config del arranque parecia mas prolijo y era un bug: el plazo se
+    # activa guardando la config, que es justo lo que este proceso NO relee al
+    # decidir si crear el hilo -- se habria quedado dormido hasta el proximo
+    # reinicio, sin que nadie entendiera por que no cerraba nada.
+    #
+    # No cuesta nada: cada pasada consulta la config ya cacheada y sale por
+    # donde entro si no hay plazo declarado.
+    threading.Thread(target=_reloj_de_vencimientos, daemon=True).start()
+    print("[operativo] reloj de vencimientos activo: revisa los plazos cada "
+          f"{operativo.INTERVALO_BARRIDO_SEGUNDOS // 60} minutos.")
     puerto = int(os.environ.get("PUERTO_API", "5000"))
     app.run(host="0.0.0.0", port=puerto)

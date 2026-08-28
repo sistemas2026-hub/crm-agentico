@@ -2316,6 +2316,29 @@ herramientas:
   # es multipart, y 'ticket-estado' es OBLIGATORIO. O sea que TODA respuesta
   # mueve el ticket -- una con 'En Progreso' sobre un ticket cerrado lo
   # reabre. Ver la skill wisphub-api.
+  - nombre: cerrar_caso_crm
+    tipo: http
+    cierra_caso: true
+    descripcion: >
+      Cierra el caso en el CRM cuando el cliente confirmo que quedo resuelto o
+      cuando se vencio el plazo sin respuesta. NO la llames tu: la ejecuta el
+      codigo.
+    solo_lectura: false
+    requiere_confirmacion: true
+    roles_permitidos: [soporte]
+    base_url: http://backend:8000
+    endpoint: /api/cases/{id_caso}/
+    metodo: PATCH
+    auth_ref: BOTTLECRM_API_TOKEN
+    auth_esquema: Bearer
+    argumentos_fijos:
+      status: Closed
+    # El CRM exige la fecha de cierre y no se puede dejar fija en el YAML:
+    # seria el dia en que alguien la escribio. 0 = hoy.
+    fechas_automaticas:
+      closed_on: 0
+    formato_fechas_automaticas: "%Y-%m-%d"
+
   - nombre: responder_ticket_operativo
     tipo: http
     multipart: true
@@ -4015,6 +4038,26 @@ escalamiento:
   mensaje_si_falla: >-
     No pude dejar registrado tu caso en este momento. Escríbeme de nuevo en
     un par de minutos para intentarlo otra vez.
+  # Un caso que quedo esperando al cliente no se queda abierto para siempre.
+  # 36 h medidas desde SU ultimo mensaje, y solo si alguien del equipo ya lo
+  # atendio: uno que nadie toco no esta esperando al cliente, esta esperando
+  # al equipo, y cerrarlo enterraria trabajo sin hacer.
+  #
+  # Cerrar no corta nada: si el cliente escribe despues, su mensaje abre una
+  # conversacion nueva y el asistente lo atiende normal.
+  cerrar_sin_respuesta_horas: 36
+  # Lo que queda escrito en el ticket de WispHub al cerrarlo. Es lo unico que
+  # va a leer quien audite ese ticket dentro de seis meses.
+  texto_cierre_sin_respuesta: >-
+    Se cierra por falta de respuesta del cliente: pasaron 36 horas desde su
+    último mensaje. Si vuelve a escribir, el asistente lo atiende y se abre lo
+    que haga falta.
+  texto_cierre_confirmado: >-
+    El cliente confirmó que su caso quedó resuelto. Se cierra.
+  # Y lo ultimo que lee el cliente. El de arriba lo lee quien audite el ticket.
+  mensaje_cierre_cliente: >-
+    Listo, entonces cierro tu caso. Si necesitas algo más, escríbeme cuando
+    quieras.
   siempre_disponible: true
   # Un cliente que putea por el servicio no esta pidiendo un humano: esta
   # pidiendo que le arreglen el internet, y eso el asistente lo puede hacer

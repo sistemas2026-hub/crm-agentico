@@ -517,6 +517,22 @@ def guardar_ticket_operativo(tenant: str, conversation_id: str,
               f"{ticket}: {type(e).__name__}: {e}")
 
 
+def ticket_operativo_de(tenant: str, conversation_id: str) -> str | None:
+    """El ticket del sistema del ISP que abrio esta conversacion, si abrio uno."""
+    try:
+        with sesion(tenant) as (cur, org):
+            cur.execute(
+                """select ticket_operativo from asistente.conversations
+                   where organization_id = %s and id = %s""",
+                (org, conversation_id))
+            fila = cur.fetchone()
+            return fila["ticket_operativo"] if fila else None
+    except Exception as e:
+        print(f"[persistencia] no se pudo leer el ticket operativo: "
+              f"{type(e).__name__}: {e}")
+        return None
+
+
 def marcar_caso(tenant: str, conversation_id: str, caso: str | None) -> None:
     """
     Guarda de QUE es esta conversacion (uno de 'manual.casos' del tenant, ver
@@ -546,6 +562,46 @@ def marcar_caso(tenant: str, conversation_id: str, caso: str | None) -> None:
     except Exception as e:
         print(f"[persistencia] no se pudo guardar el caso de la conversacion "
               f"{conversation_id}: {type(e).__name__}: {e}")
+
+
+def conversaciones_sin_respuesta(tenant: str, horas: int) -> list[dict]:
+    """
+    Las conversaciones escaladas donde el cliente lleva 'horas' sin escribir.
+
+    Se cuenta desde el ULTIMO mensaje DEL CLIENTE, no desde el ultimo mensaje
+    de la conversacion: si se midiera contra este, cada respuesta que manda el
+    equipo estiraria el plazo, y una conversacion donde solo escribe el equipo
+    no se cerraria nunca -- que es exactamente la que hay que cerrar.
+
+    Una conversacion sin ningun mensaje del cliente (raro, pero posible si se
+    creo desde otra pantalla) cuenta desde que se creo, para que tampoco quede
+    colgada para siempre.
+    """
+    if not horas or horas <= 0:
+        return []
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select c.id, c.caso_id, c.ticket_operativo, c.usuario_externo,
+                      c.nombre_cliente
+               from asistente.conversations c
+               where c.organization_id = %s
+                 and c.escalada_a_humano
+                 and c.estado <> 'cerrada'
+                 -- Solo las que YA atendio alguien del equipo. Una que nadie
+                 -- toco todavia no esta esperando al cliente: esta esperando
+                 -- al equipo, y cerrarla por tiempo enterraria trabajo sin
+                 -- hacer con cara de trabajo terminado. Misma definicion de
+                 -- "atendida" que usa la bandeja, unas lineas mas arriba.
+                 and (c.atendida_manual or exists (
+                        select 1 from asistente.messages h
+                         where h.conversation_id = c.id and h.rol = 'humano'))
+                 and coalesce(
+                       (select max(m.creado_en) from asistente.messages m
+                         where m.conversation_id = c.id and m.rol = 'user'),
+                       c.creado_en) < now() - make_interval(hours => %s)
+               order by c.actualizado_en""",
+            (org, int(horas)))
+        return [dict(f) for f in cur.fetchall()]
 
 
 def cerrar_conversacion(tenant: str, conversation_id: str) -> None:
