@@ -235,6 +235,24 @@
           >
             {form.error}
           </p>
+        {:else if form?.aviso}
+          <!-- La respuesta se guardó y quedó en el ticket, pero al cliente no
+               le llegó -- casi siempre la ventana de 24 h de WhatsApp. Se dice
+               aquí y no en silencio: creer que ya se contestó es exactamente
+               lo que deja a alguien esperando. -->
+          <p
+            class="v2-card"
+            style="padding:10px 13px;margin-bottom:16px;color:var(--v2-rust);font-size:13px"
+          >
+            {form.aviso}
+          </p>
+        {:else if form?.sent && form?.entregado}
+          <p
+            class="v2-card"
+            style="padding:10px 13px;margin-bottom:16px;font-size:13px"
+          >
+            Enviado al cliente y copiado al ticket de la operación.
+          </p>
         {/if}
 
         {#if alert}
@@ -597,7 +615,9 @@
                 name="body"
                 bind:value={body}
                 rows="3"
-                placeholder={internal ? 'Nota para el equipo…' : 'Escribir una respuesta…'}
+                placeholder={internal
+                  ? 'Nota para el equipo — el cliente no la ve…'
+                  : 'Responder al cliente por donde escribió…'}
                 style="width:100%;border:none;background:transparent;resize:vertical;font:inherit;font-size:13.5px;line-height:1.55;color:var(--v2-ink);outline:none"
               ></textarea>
               <div

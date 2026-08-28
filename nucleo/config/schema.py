@@ -696,6 +696,15 @@ class Herramienta(Base):
     # base_url/endpoint/auth_ref que la herramienta ya declara, sin duplicar
     # esa config para un job aparte.
     sincroniza_localidades: bool = False
+    # Las dos que mantienen al dia el ticket del sistema operativo del ISP: una
+    # copia ahi lo que se le respondio al cliente, la otra lo cierra. Ver
+    # nucleo/seguimiento/operativo.py.
+    #
+    # Son DOS herramientas y no una con un parametro, porque el codigo de
+    # estado ('en progreso', 'cerrado') es del proveedor y va en
+    # 'argumentos_fijos' de cada una -- el motor no puede conocer esos numeros.
+    responde_ticket_operativo: bool = False
+    cierra_ticket_operativo: bool = False
     # Nombres de campo en la respuesta cruda del proveedor -- configurables
     # por tenant para no hardcodear el vocabulario de un proveedor puntual
     # (WispHub llama 'localidad' y 'zona') en nucleo/. 'campo_zona_sync'

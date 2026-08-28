@@ -75,7 +75,7 @@ export const actions = {
    * (the close gate, say) the customer has still been answered, which is the
    * order that loses the least.
    */
-  reply: async ({ cookies, params, request }) => {
+  reply: async ({ cookies, params, request, fetch, locals }) => {
     const form = await request.formData();
     const body = form.get('body')?.toString().trim() ?? '';
     const internal = form.get('internal') === 'on';
@@ -95,6 +95,41 @@ export const actions = {
       });
     }
 
+    // Al CLIENTE primero, y sólo si no es una nota interna.
+    //
+    // Hasta el 28/08/2026 esta caja escribía únicamente un comentario en el
+    // caso del CRM. Se lee como si le hablara al cliente ("una respuesta
+    // abajo es la primera respuesta") y no le llegaba a nadie: quien
+    // contestaba daba el caso por atendido mientras el cliente seguía
+    // esperando. El motor la manda por el canal por el que escribió, la deja
+    // en el hilo y la copia al ticket del sistema del ISP firmada con el
+    // nombre de quien la escribió.
+    let entrega = null;
+    if (!internal) {
+      try {
+        const base = env.PRIVATE_ASISTENTE_URL;
+        const tenant = env.PRIVATE_ASISTENTE_TENANT;
+        if (base && tenant) {
+          const r = await fetch(`${base}/casos/${params.id}/mensajes`, {
+            method: 'POST',
+            headers: { ...headersMotor(), 'content-type': 'application/json' },
+            body: JSON.stringify({
+              tenant,
+              mensaje: body,
+              autor: /** @type {any} */ (locals).user?.name || ''
+            }),
+            signal: AbortSignal.timeout(20000)
+          });
+          // 404 con 'sin_conversacion' es lo normal en un ticket cargado a
+          // mano: no hay chat detrás, y el comentario del caso alcanza.
+          entrega = r.ok ? await r.json() : null;
+        }
+      } catch (/** @type {any} */ err) {
+        console.error('[tickets] no se pudo entregar la respuesta al cliente', err);
+        entrega = { ok: false, entregado: false };
+      }
+    }
+
     try {
       await replyToTicket({ cookies }, params.id, { body, internal, file });
     } catch (/** @type {any} */ err) {
@@ -112,7 +147,16 @@ export const actions = {
       }
     }
 
-    return { sent: true, internal };
+    // 'entregado' es null cuando no había a dónde entregar (nota interna, o
+    // un ticket sin conversación detrás): eso no es un fallo y no se avisa.
+    return {
+      sent: true,
+      internal,
+      entregado: entrega ? entrega.entregado : null,
+      aviso: entrega && entrega.entregado === false
+        ? (entrega.aviso || 'La respuesta quedó guardada, pero no se pudo entregar al cliente.')
+        : ''
+    };
   },
 
   /**

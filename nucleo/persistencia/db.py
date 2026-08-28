@@ -491,6 +491,32 @@ def marcar_escalada(tenant: str, conversation_id: str, motivo: str,
             (motivo, caso_id, etiqueta, necesita_atencion_humana, org, conversation_id))
 
 
+def guardar_ticket_operativo(tenant: str, conversation_id: str,
+                             ticket: str) -> None:
+    """
+    Deja anotado que ticket abrio esta conversacion en el sistema del ISP.
+
+    Ese numero ya se escribia dentro de la descripcion del caso del CRM, pero
+    como texto suelto: servia para leerlo y para nada mas. Guardado aca se
+    puede responder y cerrar ese ticket desde el codigo cuando la persona
+    responde o el caso termina (ver nucleo/seguimiento/operativo.py).
+
+    Nunca rompe el turno: el ticket YA se creo, y no poder anotarlo no es
+    motivo para tumbar la respuesta al cliente.
+    """
+    if not ticket:
+        return
+    try:
+        with sesion(tenant) as (cur, org):
+            cur.execute(
+                """update asistente.conversations set ticket_operativo = %s
+                   where organization_id = %s and id = %s""",
+                (str(ticket), org, conversation_id))
+    except Exception as e:
+        print(f"[persistencia] no se pudo anotar el ticket operativo "
+              f"{ticket}: {type(e).__name__}: {e}")
+
+
 def marcar_caso(tenant: str, conversation_id: str, caso: str | None) -> None:
     """
     Guarda de QUE es esta conversacion (uno de 'manual.casos' del tenant, ver
@@ -590,14 +616,20 @@ def agregar_mensaje_humano(tenant: str, conversation_id: str,
     Devuelve None si la conversacion no existe o no es de este tenant -- el
     llamador (nucleo/canales/api.py) decide si eso es un 404.
 
-    Si existe, devuelve {'canal', 'usuario_externo'}: es POR DONDE hay que
-    hacerle llegar el mensaje al cliente. Guardarlo en la base no se lo entrega
-    a nadie -- una respuesta que se ve en la bandeja pero nunca sale es peor
-    que un error visible, porque el agente cree que ya atendio.
+    Si existe, devuelve {'canal', 'usuario_externo', 'ticket_operativo'}: por
+    donde hay que hacerle llegar el mensaje al cliente, y en que ticket del
+    sistema del ISP hay que copiarlo. Guardarlo en la base no se lo entrega a
+    nadie -- una respuesta que se ve en la bandeja pero nunca sale es peor que
+    un error visible, porque el agente cree que ya atendio.
+
+    El ticket viaja aca y no en una consulta aparte porque es la misma fila:
+    pedirla dos veces para leer una columna mas es una ida a la base por cada
+    respuesta que escribe una persona.
     """
     with sesion(tenant) as (cur, org):
         cur.execute(
-            """select canal, usuario_externo from asistente.conversations
+            """select canal, usuario_externo, ticket_operativo
+               from asistente.conversations
                where organization_id = %s and id = %s""",
             (org, conversation_id))
         fila = cur.fetchone()

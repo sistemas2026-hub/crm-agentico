@@ -2306,6 +2306,55 @@ herramientas:
   # 'asuntos_default' va junto a 'asunto' siempre: WispHub exige los dos y los
   # valida contra la MISMA lista cerrada. Verificado el 22/08/2026 -- un
   # asunto que no este en el catalogo devuelve 400, no se acepta en silencio.
+  # --- mantener al dia el ticket que ya se abrio -------------------------
+  # Las dos las ejecuta el CODIGO, nunca el modelo: una copia al ticket lo que
+  # una persona le respondio al cliente, la otra lo cierra. Son dos y no una
+  # con un parametro porque lo unico que cambia es 'ticket-estado', que es un
+  # codigo de WispHub -- y esos numeros viven aca, no en el motor.
+  #
+  # Verificado contra produccion el 28/08/2026: POST /respuesta/ responde 201,
+  # es multipart, y 'ticket-estado' es OBLIGATORIO. O sea que TODA respuesta
+  # mueve el ticket -- una con 'En Progreso' sobre un ticket cerrado lo
+  # reabre. Ver la skill wisphub-api.
+  - nombre: responder_ticket_operativo
+    tipo: http
+    multipart: true
+    responde_ticket_operativo: true
+    descripcion: >
+      Copia al ticket de WispHub la respuesta que una persona del equipo le
+      dio al cliente, y lo deja En Progreso. NO la llames tu: la ejecuta el
+      codigo cuando alguien responde desde la pantalla del ticket.
+    solo_lectura: false
+    requiere_confirmacion: true
+    roles_permitidos: [soporte]
+    base_url: https://api.wisphub.io
+    endpoint: /api/tickets/{id_ticket}/respuesta/
+    metodo: POST
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    argumentos_fijos:
+      ticket-estado: "2"                          # En Progreso
+      ticket-prioridad: "2"                       # Normal
+
+  - nombre: cerrar_ticket_operativo
+    tipo: http
+    multipart: true
+    cierra_ticket_operativo: true
+    descripcion: >
+      Cierra el ticket de WispHub dejando escrito con que se cerro. NO la
+      llames tu: la ejecuta el codigo cuando el caso termina.
+    solo_lectura: false
+    requiere_confirmacion: true
+    roles_permitidos: [soporte]
+    base_url: https://api.wisphub.io
+    endpoint: /api/tickets/{id_ticket}/respuesta/
+    metodo: POST
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    argumentos_fijos:
+      ticket-estado: "4"                          # Cerrado
+      ticket-prioridad: "2"                       # Normal
+
   - nombre: crear_ticket_caso
     tipo: http
     multipart: true

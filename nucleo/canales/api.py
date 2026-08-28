@@ -48,6 +48,7 @@ from nucleo.persistencia import db as persistencia
 from nucleo.recuperacion.busqueda import recuperar
 from nucleo.recuperacion.prompt import piezas_del_system
 from nucleo.seguimiento import agendamiento
+from nucleo.seguimiento import operativo
 from nucleo.seguimiento.forzado import (escalada_forzada,
                                         motivos_por_hecho)
 from nucleo.seguimiento import escalamiento
@@ -773,6 +774,11 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                         config, tenant, estado["sesion"], herramienta_auto,
                         veredicto.get("descripcion_visita", ""))
                     if id_ticket_auto:
+                        # Queda anotado en la conversacion, no solo dentro del
+                        # texto del caso: es lo que permite responder y cerrar
+                        # ese ticket despues sin parsear un parrafo.
+                        persistencia.guardar_ticket_operativo(
+                            tenant, conversation_id, id_ticket_auto)
                         necesita_humano = False
                         nota_ticket = (f"\n\nVisita tecnica agendada "
                                        f"automaticamente (ticket #{id_ticket_auto}).")
@@ -848,6 +854,8 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                     if id_ticket_operativo:
                         print(f"[escalamiento] ticket operativo #{id_ticket_operativo} "
                               f"creado con '{nombre_ticket}'")
+                        persistencia.guardar_ticket_operativo(
+                            tenant, conversation_id, id_ticket_operativo)
                         # Que el numero quede en el caso: quien lo tome en la
                         # bandeja tiene que poder saltar al ticket sin buscarlo.
                         nota_ticket += (chr(10) + chr(10) + "Ticket operativo #"
@@ -2298,6 +2306,34 @@ def conversaciones_mensajes(id_conversacion):
     return jsonify(resultado)
 
 
+@app.post("/casos/<caso_id>/mensajes")
+def caso_responder_humano(caso_id):
+    """
+    Lo mismo que responder en la conversacion, pero entrando por el CASO.
+
+    Existe porque quien atiende trabaja en la pantalla del ticket y ahi lo que
+    se conoce es el caso, no la conversacion. La alternativa era que la
+    pantalla resolviera una por la otra antes de cada respuesta, y esa consulta
+    sale a los sistemas del ISP a buscar la ficha del cliente y el estado del
+    equipo: cuatro segundos de espera para mandar una linea de texto.
+    """
+    tenant = (request.get_json(force=True, silent=True) or {}).get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    try:
+        datos = persistencia.conversacion_de_caso(tenant, caso_id)
+    except Exception as e:
+        print(f"[conversaciones] fallo al resolver el caso {caso_id}: "
+              f"{type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo resolver la conversacion."}), 500
+    if not datos:
+        # No es un error: un ticket cargado a mano no tiene conversacion
+        # detras, y quien responde ahi no le esta hablando a nadie por chat.
+        return jsonify({"error": "Este caso no vino de una conversacion.",
+                        "sin_conversacion": True}), 404
+    return conversaciones_responder_humano(datos["id"])
+
+
 @app.post("/conversaciones/<id_conversacion>/mensajes")
 def conversaciones_responder_humano(id_conversacion):
     """
@@ -2321,6 +2357,11 @@ def conversaciones_responder_humano(id_conversacion):
     cuerpo = request.get_json(force=True, silent=True) or {}
     tenant = cuerpo.get("tenant")
     contenido = cuerpo.get("mensaje")
+    # Quien contesta. Lo manda la pantalla porque el motor no lee las tablas
+    # del CRM, y sirve para firmar la copia que va al ticket del ISP: ahi toda
+    # respuesta queda a nombre de la cuenta de la API key, asi que sin esto el
+    # historico del ticket dice que contesto el sistema.
+    autor = (cuerpo.get("autor") or "").strip()
     if not tenant or not contenido:
         return jsonify({"error": "Faltan campos: tenant, mensaje"}), 400
 
@@ -2336,6 +2377,19 @@ def conversaciones_responder_humano(id_conversacion):
         return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
 
     salida = {"ok": True, "entregado": False}
+
+    # La misma respuesta, copiada al ticket del sistema del ISP. Va aparte de
+    # la entrega al cliente y no la condiciona: que la operacion no se entere
+    # es un problema, pero uno menor que no contestarle a quien espera.
+    if destino.get("ticket_operativo"):
+        try:
+            config = _config_de(tenant)
+            salida["copiado_al_ticket"] = operativo.responder(
+                config, tenant, destino["ticket_operativo"], contenido, autor)
+        except Exception as e:
+            print(f"[operativo] no se pudo copiar la respuesta al ticket: "
+                  f"{type(e).__name__}: {e}")
+            salida["copiado_al_ticket"] = False
 
     if destino["canal"] != "whatsapp":
         # El simulador y la API no tienen a donde entregar: la conversacion se
