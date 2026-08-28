@@ -392,6 +392,12 @@ def _transcripcion_legible(historial: list[dict]) -> str:
     return "\n".join(lineas)
 
 
+# El codigo con el que motor.py frena una herramienta que se pidio antes de
+# verificar la identidad. Mismo string que nucleo/seguridad/salida.py trata
+# como plomeria interna que nunca debe llegarle al cliente.
+_GATE_IDENTIDAD = "IDENTIDAD_NO_VERIFICADA"
+
+
 def _que_se_probo(historial: list[dict]) -> str:
     """
     Lo que el asistente MIDIO y EJECUTO, en orden, sacado de la traza.
@@ -414,6 +420,19 @@ def _que_se_probo(historial: list[dict]) -> str:
             dato = json.loads(msg.get("content") or "null")
         except (TypeError, ValueError):
             dato = None
+        if isinstance(dato, dict) and dato.get("error") == _GATE_IDENTIDAD:
+            # No se lista. No es un fallo: es el gate de seguridad frenando
+            # ANTES de llamar a nada, y es normal que el modelo pruebe una
+            # herramienta antes de tener con que verificar (motor.py lo
+            # excluye por lo mismo de la traza que se guarda).
+            #
+            # Listarlo lo pintaba como una X roja al lado de la MISMA
+            # herramienta que un renglon mas abajo aparece en verde, y quien
+            # abre el caso se va a averiguar que fallo en un sistema donde no
+            # fallo nada. Lo pregunto el usuario el 28/08/2026 mirando un
+            # ticket real: "el consultar servicio que sale que no se pudo,
+            # ¿cual es?".
+            continue
         if isinstance(dato, dict) and dato.get("error"):
             # Un fallo importa tanto como un exito: dice que NO se pudo ver, y
             # quien retome no tiene que volver a intentarlo a ciegas.
