@@ -251,8 +251,34 @@ def procesar(herramienta, argumentos: dict, tenant: str = "",
     # siendo el humano contrastando el valor actual que dijo el cliente.
     tercero = str(argumentos.get("lo_pide_el_titular") or "").strip().lower() in ("no", "false")
 
-    crudo = argumentos.get("red_oculta")
-    ocultar = None if crudo in (None, "") else str(crudo).strip().lower() in ("si", "true", "1")
+    # Tres estados, y los tres importan:
+    #   True  -> pidio OCULTAR la red
+    #   False -> pidio VOLVERLA VISIBLE (solo si esta oculta hoy)
+    #   None  -> no dijo nada del tema, que es lo mas comun
+    #
+    # 'no' cae en None, no en False, y esa es la correccion (27/08/2026). Antes
+    # 'no' se leia como False, o sea como "volver la red VISIBLE" -- pero 'no'
+    # es la respuesta a "¿querés ocultarla?" y significa "dejala como esta".
+    # Son cosas distintas: una no pide nada, la otra pide tocar una
+    # configuracion.
+    #
+    # Importa porque el modelo RELLENA el campo aunque nadie lo haya
+    # mencionado. Visto en vivo: un cliente pidio cambiar nombre y clave, el
+    # modelo mando red_oculta='no', y el pedido que iba al ticket decia
+    # "volver la red VISIBLE" -- una instruccion que el cliente nunca dio, que
+    # quien tome el caso no tiene como saber que es inventada.
+    #
+    # Se arregla ACA y no en el prompt porque el prompt es guia (PRD 7.4): que
+    # el modelo no rellene un campo no se puede garantizar pidiendoselo. Lo
+    # que si se puede garantizar es que un valor ambiguo no se convierta en
+    # una orden.
+    crudo = str(argumentos.get("red_oculta") or "").strip().lower()
+    if crudo in ("si", "true", "1", "ocultar"):
+        ocultar = True
+    elif crudo in ("visible", "hacer_visible", "mostrar"):
+        ocultar = False
+    else:
+        ocultar = None
 
     cambia_nombre = bool(nombre)
     cambia_clave = bool(clave)

@@ -2035,9 +2035,15 @@ herramientas:
     valida_pedido_wifi: true
     descripcion: >
       Registra el pedido del cliente de cambiar el nombre de su red WiFi, su
-      clave, o de dejar la red oculta o visible. NO aplica el cambio: lo
-      aplica una persona de soporte despues. Devuelve si el pedido es valido
-      y, si no lo es, que tiene que corregir el cliente.
+      clave, o de ocultar/mostrar la red. NO aplica el cambio: lo aplica una
+      persona de soporte despues. Devuelve si el pedido es valido y, si no lo
+      es, que tiene que corregir el cliente.
+
+      'red_oculta' SOLO se manda si el cliente lo pidio con todas las letras.
+      Si hablo del nombre o de la clave y nunca menciono ocultar ni mostrar la
+      red, OMITI ese argumento -- no lo completes por defecto. Mandarlo agrega
+      al pedido una instruccion que el cliente no dio, y quien tome el caso no
+      tiene como saber que es inventada.
     # Escritura a los ojos del validador (deja un pedido en curso), aunque no
     # toque ningun sistema externo: por eso exige confirmacion.
     solo_lectura: false
@@ -2070,9 +2076,21 @@ herramientas:
       red_oculta:
         param: red_oculta
         tipo: enum
-        # Entrecomillados: sin comillas, YAML lee 'no' como el booleano
-        # falso y la clave del enum deja de ser texto.
-        valores: {"si": "si", "no": "no"}
+        # Las DOS opciones son pedidos afirmativos, y ya no existe un 'no'.
+        #
+        # Antes eran si/no, y el modelo rellenaba 'no' aunque el cliente nunca
+        # hubiera mencionado el tema -- visto en vivo el 27/08/2026. Con 'no'
+        # como opcion, un campo si/no invita a completarlo por defecto; sin
+        # ella, el modelo tiene que elegir activamente "hacer_visible", que es
+        # un pedido concreto que nadie manda de casualidad.
+        #
+        # Es la segunda capa: la primera es que wifi.py ya no interpreta 'no'
+        # como "volver la red visible" (lee 'no' como "no dijo nada"). Esta
+        # solo hace menos probable que llegue.
+        #
+        # Entrecomillados: sin comillas, YAML lee 'no' como el booleano falso
+        # y la clave del enum deja de ser texto.
+        valores: {"ocultar": "ocultar", "hacer_visible": "visible"}
 
   - nombre: agendar_visita_tecnica
     tipo: http

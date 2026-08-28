@@ -88,6 +88,42 @@ afirmar(wifi.validar_ssid(None), "un nombre None se rechaza sin explotar")
 afirmar(wifi.validar_clave(None), "una clave None se rechaza sin explotar")
 afirmar(not wifi.clave_es_debil(None), "clave_es_debil(None) no explota")
 
+print("\nred oculta: tres estados, y 'no' NO es 'hacela visible'")
+# Bug real (27/08/2026). Un cliente pidio cambiar nombre y clave; el modelo
+# relleno red_oculta='no' aunque nadie lo hubiera mencionado, y el pedido que
+# iba al ticket decia "volver la red VISIBLE" -- una instruccion inventada que
+# quien tomara el caso no tenia como distinguir de una real.
+#
+# 'no' es la respuesta a "¿querés ocultarla?" y significa "dejala como esta".
+# Que se lea como un pedido de tocar la configuracion es el error.
+base = {"nombre_nuevo": "Casa Gonzalez", "clave_nueva": "Segura2026x"}
+
+sin_mencion = wifi.procesar(None, dict(base))
+afirmar(sin_mencion["red_oculta"] is None,
+        "sin mencionarlo queda en None (no dijo nada)")
+afirmar("VISIBLE" not in sin_mencion["pedido"] and "OCULTA" not in sin_mencion["pedido"],
+        "y el pedido no menciona la visibilidad")
+
+con_no = wifi.procesar(None, dict(base, red_oculta="no"))
+afirmar(con_no["red_oculta"] is None,
+        "'no' tambien queda en None  <- el bug: antes daba False")
+afirmar("VISIBLE" not in con_no["pedido"],
+        "y el pedido NO dice 'volver la red VISIBLE'")
+
+ocultar = wifi.procesar(None, dict(base, red_oculta="ocultar"))
+afirmar(ocultar["red_oculta"] is True, "'ocultar' si pide ocultarla")
+afirmar("OCULTA" in ocultar["pedido"], "y el pedido lo dice")
+
+visible = wifi.procesar(None, dict(base, red_oculta="visible"))
+afirmar(visible["red_oculta"] is False, "'visible' si pide volverla visible")
+afirmar("VISIBLE" in visible["pedido"], "y el pedido lo dice")
+
+# El pedido de SOLO ocultar sigue siendo valido: sin nombre ni clave, no es
+# "no se entendio que hay que cambiar".
+solo_ocultar = wifi.procesar(None, {"red_oculta": "ocultar"})
+afirmar(solo_ocultar["pedido_valido"],
+        "pedir SOLO ocultar la red sigue siendo un pedido completo")
+
 print()
 print("=" * 70)
 if _fallas:
