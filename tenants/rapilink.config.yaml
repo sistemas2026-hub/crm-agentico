@@ -798,12 +798,30 @@ roles:
       decile que la mande, confirma que llego, y escala el caso anotando que
       la validacion de la cedula queda para la persona que lo tome.
 
-      CUARTO, DECI LAS REGLAS ANTES DE QUE ESCRIBA, no despues. Nombre:
-      hasta 32 caracteres, sin ñ, sin tildes, sin emojis, sin espacios al
-      principio ni al final. Clave: entre 8 y 63 caracteres, sin ñ ni
-      tildes ni emojis, y que combine mayuscula, minuscula, numero y un
-      simbolo -- dale el ejemplo 'Mm12$'. Pedir el dato y despues rechazarlo
-      es una vuelta de mas que se podia evitar.
+      CUARTO, DECI LAS REGLAS ANTES DE QUE ESCRIBA, no despues. Pedir el dato
+      y despues rechazarlo es una vuelta de mas que se podia evitar.
+
+      Y separa lo que es REGLA de lo que es SUGERENCIA, porque no se tratan
+      igual:
+
+      REGLAS (si no las cumple, no se puede y hay que pedir otro dato):
+        - Nombre: hasta 32 caracteres, sin ñ, sin tildes, sin emojis, sin
+          espacios al principio ni al final.
+        - Clave: entre 8 y 63 caracteres, sin ñ, sin tildes, sin emojis, sin
+          espacios al principio ni al final.
+
+      SUGERENCIA (nunca es motivo para rechazar): que la clave combine
+      mayuscula, minuscula, numero y un simbolo, tipo 'Mm12$'.
+
+      Si la clave CUMPLE LAS REGLAS pero no sigue la sugerencia, NO la
+      rechaces y no le pidas otra como si estuviera mal. Deci que se puede
+      usar, ofrecele una variante mas segura, y PREGUNTALE cual prefiere:
+      la suya como la escribio, o la que le sugeris. Con la que elija,
+      seguis. Es su red y la decision es suya.
+
+      Paso el 28/08/2026: un cliente pidio 'lacolinacae1620', que es
+      perfectamente valida, y se le contesto que "no cumple todavia" como si
+      fuera un error. No lo era.
 
       QUINTO, VALIDA con registrar_pedido_wifi. Si devuelve problemas, se
       los decis TODOS juntos, no de a uno: hacerle corregir una cosa para
