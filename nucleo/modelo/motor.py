@@ -832,6 +832,15 @@ def ejecutar_para_servicio(config, herramienta, argumentos_modelo: dict) -> dict
     argumentos = _resolver_argumentos(herramienta, None, argumentos_modelo or {},
                                       variables_tenant=config.variables_tenant)
 
+    # Consultas internas que NO dependen de una sesion ni tocan datos de un
+    # cliente puntual. La que trajo esto: el formulario de contratacion
+    # necesita mostrarle al prospecto los planes de SU zona, y esa lista sale
+    # del catalogo curado del tenant -- no de lo que el modelo haya dicho en
+    # la conversacion, que es justo lo que no hay que reenviar de un sistema
+    # a otro (PRD 12.5: el modelo compone, el codigo calcula).
+    if herramienta.tipo == "interno" and herramienta.consulta_planes_venta:
+        return _ejecutar_consulta_planes_venta(config, argumentos)
+
     if herramienta.tipo == "http":
         return (ejecutor_http.ejecutar_asincrono(herramienta, argumentos,
                                                  tenant=config.identidad.slug)

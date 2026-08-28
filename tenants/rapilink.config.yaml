@@ -1713,6 +1713,13 @@ variables_tenant:
   # es; la empresa resolvio eso con un registro llamado "INSTALACIONES
   # NUEVAS". Se edita desde /configuracion/variables: cada ISP tiene el suyo.
   WISPHUB_ID_SERVICIO_INSTALACIONES: "3545"
+  # A quien nace asignado el ticket de una solicitud nueva. Es la cuenta que
+  # VALIDA viabilidad y factibilidad, no la que ejecuta: cuando eso se
+  # confirma, una persona lo reasigna a 'INSTALACIONES APROBADAS' (3684490).
+  # Editable desde /configuracion/variables -- en otro ISP el reparto de
+  # tareas va a ser otro.
+  WISPHUB_TECNICO_SOLICITUDES: "1408762"
+  WISPHUB_EMAIL_TECNICO_SOLICITUDES: info.rapilinksas@gmail.com
 
 # -----------------------------------------------------------------------------
 #  PLANES DE VENTA  -  lista curada, PENDIENTE de cargar (19/08/2026)
@@ -1877,6 +1884,11 @@ herramientas:
     solo_lectura: true
     roles_permitidos: [ventas]
     consulta_planes_venta: true
+    # El formulario de contratacion la consulta para mostrarle al prospecto
+    # los planes de SU zona. La lista sale del catalogo curado del tenant,
+    # no de lo que el modelo haya dicho en la conversacion: reenviar de un
+    # sistema a otro lo que dijo un modelo es como se cuela un precio viejo.
+    invocable_por_servicio: true
     filtros_verificados:
       localidad:
         param: localidad
@@ -3107,13 +3119,35 @@ herramientas:
     auth_ref: WISPHUB_API_KEY
     auth_esquema: Api-Key
     auth_header: Authorization
+    # OJO: WispHub exige LOS DOS NOMBRES DE CADA PAR. Los campos que se LEEN
+    # de un ticket no son los que se ESCRIBEN -- la primera version de esta
+    # herramienta copio los nombres leyendo un ticket real y la API respondio
+    # 400 pidiendo 'asuntos_default', 'departamentos_default', 'tecnico' y
+    # 'estado' (28/08/2026). Es la misma dualidad que la skill ya documenta
+    # para 'usuario_rb'.
+    #
+    # 'prioridad' y 'origen_reporte' van con los codigos que la API acepta, no
+    # con el texto que devuelve al leer: escribir "Normal" o "Portal Cliente"
+    # da "Seleccione una opcion valida". Los valores de abajo son los mismos
+    # que ya usa 'crear_ticket_caso', que lleva meses funcionando.
     argumentos_fijos:
       asunto: Instalacion Nueva
+      asuntos_default: Instalacion Nueva
       departamento: Ventas
-      origen_reporte: Portal Cliente
-      prioridad: Normal
+      departamentos_default: Ventas
+      estado: "1"
+      prioridad: "2"
+      origen_reporte: oficina
+    # El ticket nace a nombre de quien VALIDA, no de quien ejecuta: recien
+    # cuando alguien confirma viabilidad y factibilidad se reasigna a
+    # 'INSTALACIONES APROBADAS' (id 3684490), cuya cola vale justamente porque
+    # todo lo que hay ahi ya paso ese filtro. Crear el ticket directo en esa
+    # cola la llenaria de trabajo sin aprobar y le quitaria el sentido al
+    # nombre. Ver el flujo real descrito por el cliente el 28/08/2026.
     argumentos_desde_variables:
       servicio: WISPHUB_ID_SERVICIO_INSTALACIONES
+      tecnico: WISPHUB_TECNICO_SOLICITUDES
+      email_tecnico: WISPHUB_EMAIL_TECNICO_SOLICITUDES
     filtros_verificados:
       descripcion: {param: descripcion, tipo: texto, verificado_el: 2026-08-27}
 
