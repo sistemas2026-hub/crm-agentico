@@ -30,7 +30,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from nucleo.seguimiento.forzado import (escalada_forzada,
+from nucleo.seguimiento.forzado import (con_las_manos_vacias,
+                                        escalada_forzada,
                                         motivos_por_hecho)  # noqa: E402
 from nucleo.config.schema import Herramienta  # noqa: E402
 
@@ -115,6 +116,26 @@ afirmar("sin_datos_para_diagnosticar" not in motivos_por_hecho(CFG),
         "'escalar_si_falla' NO cuenta: un fallo si se puede juzgar leyendo")
 afirmar(motivos_por_hecho(ConfigFalsa([])) == set(),
         "un tenant sin herramientas no deja al evaluador sin motivos")
+
+print()
+print("no se escala sin haber intentado nada")
+# El modelo puede decidir escalar en el primer mensaje. Si no corrio ni una
+# herramienta, el caso llega a la bandeja con la traza vacia: sin identidad,
+# sin pedido y sin ticket. Paso dos veces el 28/08/2026, la segunda DESPUES de
+# pedirselo por prompt -- por eso esto es codigo.
+afirmar(con_las_manos_vacias([]),
+        "una conversacion sin nada ejecutado esta con las manos vacias")
+afirmar(con_las_manos_vacias([{"role": "user", "content": "hola"},
+                              {"role": "assistant", "content": "hola"}]),
+        "hablar no es hacer: solo mensajes sigue siendo manos vacias")
+afirmar(not con_las_manos_vacias([{"role": "user", "content": "hola"},
+                                  {"role": "tool", "name": "consultar_algo",
+                                   "content": "{}"}]),
+        "con una herramienta ejecutada, ya no")
+afirmar(not con_las_manos_vacias([{"role": "tool", "name": "x", "content": ""}]),
+        "cuenta la llamada aunque haya devuelto vacio: se intento igual")
+afirmar(con_las_manos_vacias(None),
+        "un historial None no explota")
 
 print()
 print("=" * 70)

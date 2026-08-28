@@ -16,6 +16,28 @@ Ver tests/test_escalada_forzada.py y el bug que lo motivo.
 from __future__ import annotations
 
 
+def con_las_manos_vacias(historial: list[dict]) -> bool:
+    """
+    True si el asistente todavia no ejecuto NINGUNA herramienta en toda la
+    conversacion.
+
+    Es un hecho de la traza, no una opinion: los resultados de herramientas
+    viajan en el historial como mensajes de rol 'tool'.
+
+    Sirve para frenar una escalada decidida por el modelo cuando no hay nada
+    que entregar. Un caso que llega a la bandeja con la traza vacia le pide a
+    una persona que empiece de cero -- y el asistente ni siquiera intento lo
+    que sabe hacer.
+
+    Hizo falta porque pedirselo al modelo NO alcanzo. El 28/08/2026 se le
+    agrego la instruccion de no confundir un tramite con un pedido de hablar
+    con alguien; funciono en la prueba y volvio a fallar en produccion tres
+    horas despues, con el mismo mensaje y otra conversacion. El prompt es
+    guia, la garantia es codigo (PRD 7.4).
+    """
+    return not any(m.get("role") == "tool" for m in (historial or []))
+
+
 def motivos_por_hecho(config) -> set[str]:
     """
     Los motivos que NO puede elegir el modelo: los que declara una herramienta

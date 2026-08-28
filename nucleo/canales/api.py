@@ -50,7 +50,8 @@ from nucleo.recuperacion.busqueda import recuperar
 from nucleo.recuperacion.prompt import piezas_del_system
 from nucleo.seguimiento import agendamiento
 from nucleo.seguimiento import operativo
-from nucleo.seguimiento.forzado import (escalada_forzada,
+from nucleo.seguimiento.forzado import (con_las_manos_vacias,
+                                        escalada_forzada,
                                         motivos_por_hecho)
 from nucleo.seguimiento import escalamiento
 from nucleo.seguimiento import resumen
@@ -735,7 +736,37 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             # frustracion, lamento las molestias" repetido suena a libreto y
             # lo enfurece mas; "ya vi tu equipo, la señal esta bien, te lo
             # estoy reiniciando" lo calma, porque es lo que vino a buscar.
-            if escalamiento.merece_un_intento(
+            # Nadie pasa a un humano sin haber intentado nada.
+            #
+            # Vale para CUALQUIER motivo que haya elegido el modelo, y por eso
+            # esta aparte de 'intentar_resolver_antes': aquello es una lista
+            # que el tenant declara motivo por motivo; esto es la regla de
+            # abajo de todo, y no depende de acertar que motivo va a elegir.
+            #
+            # Lo que la hizo falta: a las 14:50 se le agrego al evaluador la
+            # instruccion de no leer un tramite como un pedido de hablar con
+            # una persona. Funciono en la prueba, y a las 22:01 volvio a pasar
+            # exactamente lo mismo -- mismo mensaje, otra conversacion, motivo
+            # 'solicitud_explicita', traza vacia. El caso se abrio sin
+            # identidad verificada, sin pedido tomado y sin ticket.
+            #
+            # Una escalada forzada por una herramienta NO pasa por aca: esa ya
+            # tiene un hecho detras, que es justo lo que aca falta.
+            if (not forzado and not estado["intento_antes_de_escalar"]
+                    and con_las_manos_vacias(estado["historial"])):
+                estado["intento_antes_de_escalar"] = True
+                estado["nota_pendiente"] = (
+                    "(Nota del sistema, no del cliente) Ibas a pasar esto a "
+                    "una persona sin haber usado ninguna herramienta todavia. "
+                    "Primero intenta lo tuyo: identifica al cliente si hace "
+                    "falta y avanza con el procedimiento que corresponda. Si "
+                    "de verdad hace falta una persona, en el proximo mensaje "
+                    "se pasa.")
+                posponer = True
+                print(f"[escalamiento] {id_sesion}: se pospone '"
+                      f"{evaluacion.get('motivo')}' -- el asistente todavia no "
+                      "habia hecho nada")
+            elif escalamiento.merece_un_intento(
                     config, evaluacion.get("motivo", ""),
                     estado["intento_antes_de_escalar"]):
                 estado["intento_antes_de_escalar"] = True
