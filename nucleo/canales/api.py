@@ -48,7 +48,8 @@ from nucleo.persistencia import db as persistencia
 from nucleo.recuperacion.busqueda import recuperar
 from nucleo.recuperacion.prompt import piezas_del_system
 from nucleo.seguimiento import agendamiento
-from nucleo.seguimiento.forzado import escalada_forzada
+from nucleo.seguimiento.forzado import (escalada_forzada,
+                                        motivos_por_hecho)
 from nucleo.seguimiento import escalamiento
 from nucleo.seguimiento import resumen
 from nucleo.seguimiento import supervisor
@@ -611,8 +612,20 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             # salio bien y dejo un pedido para aplicar. Visto el 28/08/2026
             # en un cambio de clave de WiFi, con el caso creado y el pedido
             # anotado, mientras el resumen hablaba de un diagnostico fallido.
+            #
+            # Y si lo que forzo la escalada fue una herramienta que TOMO un
+            # pedido, el resumen es el pedido mismo: es lo que hay que hacer,
+            # y tiene que estar en el primer renglon del caso y no adentro de
+            # la traza. Solo cuando el motivo salio de 'escalar_al_completar':
+            # si escalo porque algo FALLO, un pedido tomado en el mismo turno
+            # no es lo que hay que resolver.
+            pedido = ""
+            if forzado in motivos_por_hecho(config):
+                pedido = next((l.get("resumen") for l in (registro_herramientas or [])
+                               if l.get("resumen")), "")
             evaluacion.setdefault(
                 "resumen",
+                f"Pedido del cliente: {pedido}" if pedido else
                 f"El evaluador no dejo resumen. Lo que se sabe: escalo "
                 f"porque {motivo_forzado}. El detalle exacto esta abajo, "
                 f"en lo que ya se probo.")

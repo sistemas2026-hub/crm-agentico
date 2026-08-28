@@ -1007,6 +1007,18 @@ class Herramienta(Base):
     # elegir en cualquiera -- declarado por herramienta, solo alcanza a quien
     # lo pide.
     escalar_al_completar: str | None = None
+    # De QUE campo de la respuesta sale el resumen del caso cuando esta
+    # herramienta fuerza la escalada.
+    #
+    # Sin esto, el caso llegaba a la bandeja con una frase sobre la mecanica
+    # ("escalo porque tal herramienta se completo") y el pedido de verdad
+    # quedaba mas abajo, adentro de la traza. Quien abre el caso tiene que
+    # leer QUE HAY QUE HACER en el primer renglon.
+    #
+    # Se declara por empresa y no se cablea el nombre del campo en el codigo:
+    # la herramienta que toma un pedido la define cada ISP, y el campo donde
+    # deja el texto tambien.
+    resumen_desde: str = ""
     servicios_reportables: list[str] = Field(default_factory=list)
     exige_turno_propio: bool = False
     cache: bool = False
@@ -1694,6 +1706,12 @@ class TenantConfig(Base):
                     f"esta en activar_si -- seria un mensaje que no se muestra "
                     f"nunca, y nadie lo notaria")
         for h in self.herramientas:
+            if h.resumen_desde and not (h.escalar_al_completar or h.escalar_si_falla):
+                raise ValueError(
+                    f"herramientas['{h.nombre}'].resumen_desde dice "
+                    f"'{h.resumen_desde}', pero esa herramienta no escala: sin "
+                    f"'escalar_al_completar' ni 'escalar_si_falla' ese resumen "
+                    f"no lo lee nadie nunca")
             if h.escalar_al_completar and h.escalar_al_completar not in self.escalamiento.activar_si:
                 raise ValueError(
                     f"herramientas['{h.nombre}'].escalar_al_completar dice "

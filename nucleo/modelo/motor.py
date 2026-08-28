@@ -1699,9 +1699,20 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
             # registrarlo como una X en "Ver proceso" parece un error cuando
             # en realidad la proteccion funciono como debia.
             if codigo_error != "IDENTIDAD_NO_VERIFICADA":
+                # Lo que la herramienta declaro como resumen del caso, si
+                # declaro alguno (Herramienta.resumen_desde). Viaja SOLO ese
+                # campo y no la respuesta entera: la traza no es lugar para un
+                # registro de cliente completo, y quien la escribe a la base
+                # ademas la ignora -- esto existe para el turno, no para
+                # guardarse.
+                resumen_pedido = ""
+                if (herramienta and herramienta.resumen_desde
+                        and codigo_error is None and isinstance(salida, dict)):
+                    resumen_pedido = str(salida.get(herramienta.resumen_desde) or "")
                 registro.append({
                     "herramienta": llamada.nombre,
                     "parametros": _enmascarar(llamada.argumentos),
+                    "resumen": resumen_pedido,
                     "exito": codigo_error is None,
                     "n_registros": len(salida) if isinstance(salida, list) else None,
                     "codigo_error": codigo_error,

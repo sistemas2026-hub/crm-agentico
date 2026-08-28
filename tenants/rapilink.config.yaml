@@ -2087,6 +2087,9 @@ herramientas:
   - nombre: registrar_pedido_wifi
     tipo: interno
     valida_pedido_wifi: true
+    # El primer renglon del caso es el pedido, no una frase sobre por que
+    # escalo: quien lo abre tiene que leer QUE hay que hacer.
+    resumen_desde: pedido
     descripcion: >
       Registra el pedido del cliente de cambiar el nombre de su red WiFi, su
       clave, o de ocultar/mostrar la red. NO aplica el cambio: lo aplica una
