@@ -115,10 +115,30 @@ class SolicitudServicio(BaseModel):
     autorizaciones_en = models.DateTimeField(null=True, blank=True)
 
     # --- estado ------------------------------------------------------------
-    NUEVA = "nueva"
-    ENVIADA = "enviada"
-    ESTADOS = ((NUEVA, "Nueva"), (ENVIADA, "Enviada"))
-    estado = models.CharField(max_length=16, choices=ESTADOS, default=NUEVA)
+    # El recorrido real de una solicitud, y por que tiene cuatro estados y no
+    # dos: entre que llega y que alguien la instala hay una DECISION -- si el
+    # servicio puede llegar a esa direccion. Antes esa decision existia pero
+    # no quedaba escrita en ningun lado: se sabia mirando a nombre de quien
+    # estaba el ticket en WispHub, y no quien la habia tomado ni cuando.
+    NUEVA = "nueva"              # el link se genero, todavia no la enviaron
+    ENVIADA = "enviada"          # llego completa, falta validar factibilidad
+    APROBADA = "aprobada"        # hay viabilidad: pasa al equipo que instala
+    SIN_FACTIBILIDAD = "sin_factibilidad"
+    ESTADOS = ((NUEVA, "Nueva"), (ENVIADA, "Enviada"),
+               (APROBADA, "Aprobada"), (SIN_FACTIBILIDAD, "Sin factibilidad"))
+    estado = models.CharField(max_length=20, choices=ESTADOS, default=NUEVA)
+
+    # Quien decidio y cuando. No es burocracia: es lo unico que permite
+    # preguntar despues por que una instalacion se aprobo, o por que una
+    # direccion quedo afuera. En WispHub esa decision no deja rastro -- solo
+    # se ve el resultado.
+    revisada_por = models.ForeignKey("common.Profile", on_delete=models.SET_NULL,
+                                     null=True, blank=True,
+                                     related_name="solicitudes_revisadas")
+    revisada_en = models.DateTimeField(null=True, blank=True)
+    # Por que no hay factibilidad, o cualquier nota de quien reviso. Se le
+    # puede leer al cliente tal cual, asi que se escribe pensando en el.
+    nota_revision = models.TextField(blank=True, default="")
 
     # Cuando se abrio el link por primera vez y cuando se envio. La distancia
     # entre los dos ES la metrica: cuantos abren y no terminan, que es lo que
