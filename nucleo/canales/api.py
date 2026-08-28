@@ -619,6 +619,21 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                         "verificado": estado["sesion"].verificado,
                         "cerrada": True, "pausada": True}
 
+            # Si YA hay una persona escribiendole, el bot se calla.
+            #
+            # Repetirle "un compañero lo va a aplicar" a alguien que acaba de
+            # leer "ya se realizo su cambio" no es redundante: lo contradice,
+            # y el cliente no sabe a cual creerle. Su mensaje queda guardado y
+            # la persona lo ve en la bandeja, que es donde esta mirando.
+            if persistencia.atendida_por_humano(tenant, estado["conversacion_id"]):
+                try:
+                    persistencia.registrar_mensaje(
+                        tenant, canal, id_sesion, rol, "user", mensaje)
+                except Exception as e:
+                    print(f"[persistencia] no se pudo guardar el mensaje del cliente: {e}")
+                return {"respuesta": "", "verificado": estado["sesion"].verificado,
+                        "pausada": True}
+
             respuesta = _mensaje_de_escalada(config, estado.get("motivo_escalada")) or \
                 "Tu caso ya esta con un compañero del equipo."
             estado["historial"].append({"role": "assistant", "content": respuesta})
@@ -664,6 +679,11 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             tenant, canal, id_sesion, rol, "user", mensaje, horas)
         conversation_id, mensaje_id = persistencia.registrar_mensaje(
             tenant, canal, id_sesion, rol, "assistant", respuesta, horas)
+        # La sesion viva se queda con el id. Solo lo tenia cuando venia de una
+        # conversacion ANTERIOR: si la creo este mismo proceso, quedaba en
+        # None y las reglas que preguntan por esta fila --si ya la atendio una
+        # persona, sobre todo-- respondian que no sin poder mirar.
+        estado["conversacion_id"] = conversation_id
         for llamada in registro_herramientas:
             persistencia.registrar_llamada_herramienta(
                 tenant, conversation_id, rol, llamada, profile_id=profile_id)
@@ -2591,6 +2611,28 @@ def conversaciones_responder_humano(id_conversacion):
     if destino is None:
         return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
 
+    # Lo que escribio la persona entra al HISTORIAL que ve el modelo, marcado
+    # como suyo.
+    #
+    # Sin esto el asistente no se entera de nada: el mensaje se guarda en la
+    # base, le llega al cliente, y el modelo sigue la conversacion donde la
+    # dejo. Paso el 28/08/2026 -- el colaborador escribio "ya se realizo su
+    # cambio de contraseña, confirmeme", el cliente contesto "listo, ya
+    # quedaron conectados los celulares", y el asistente le repitio que
+    # estaba esperando a un compañero para aplicarlo. Contradijo a su propio
+    # equipo delante del cliente.
+    #
+    # Va con rol 'assistant' porque es el mismo lado del canal --el cliente ve
+    # un solo interlocutor-- pero con el nombre adelante, que es lo que le
+    # permite al modelo NO confundirlo con algo que dijo el. Y como la
+    # transcripcion del caso sale de este mismo historial, en el ticket
+    # tambien queda claro quien escribio cada cosa.
+    clave_sesion = (tenant, destino["usuario_externo"])
+    if clave_sesion in _sesiones:
+        quien = autor or "Compañero del equipo"
+        _sesiones[clave_sesion]["historial"].append(
+            {"role": "assistant", "content": f"({quien}) {contenido}"})
+
     salida = {"ok": True, "entregado": False}
 
     # La misma respuesta, copiada al ticket del sistema del ISP. Va aparte de
@@ -3410,7 +3452,12 @@ def _procesar_mensaje_whatsapp(config, tenant: str, rol: str, entrante: dict) ->
         _guardar_adjunto(config, tenant, entrante, salida.get("conversacion_id"),
                          salida.get("mensaje_usuario_id"))
 
-        whatsapp.enviar_texto(config, tenant, de, salida["respuesta"])
+        # Una respuesta VACIA significa "no hay nada que decir", y hay que
+        # respetarlo: pasa cuando una persona del equipo esta atendiendo la
+        # conversacion y el bot se calla para no contradecirla. Mandarla igual
+        # seria un mensaje en blanco al cliente (y un 400 de Meta).
+        if (salida.get("respuesta") or "").strip():
+            whatsapp.enviar_texto(config, tenant, de, salida["respuesta"])
     except Exception as e:
         print(f"[whatsapp] fallo al atender a {de} ({wamid}): "
               f"{type(e).__name__}: {e}")
