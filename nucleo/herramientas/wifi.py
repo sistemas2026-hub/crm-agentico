@@ -24,6 +24,51 @@ cliente dijo que tiene hoy. Aca solo se mira la FORMA del valor nuevo.
 Tampoco reemplaza al criterio del tenant: los limites de WPA son del estandar
 y viven aca, pero que caracteres desaconsejar depende del equipo que ese ISP
 haya instalado -- eso viaja por configuracion.
+
+================================================================================
+ QUE PASO CON ESTE FLUJO EL 27-28/08/2026  (contexto para quien vuelva)
+================================================================================
+
+Se probo el flujo entero contra el motor y las APIs reales, a partir de una
+conversacion de produccion donde el asistente pregunto por el WiFi sin saber
+quien escribia. Salieron tres cosas. Dos ya estan arregladas y en produccion;
+la tercera esta anotada mas abajo y sin tocar.
+
+1. ARREGLADO -- IDENTIDAD ANTES QUE NADA, AHORA EN CODIGO
+
+   El prompt ya pedia verificar antes de hablar de WiFi (commit 17d0586) y el
+   modelo lo ignoraba igual. Al reproducirlo aparecio algo peor que un
+   problema de conversacion: con la sesion SIN verificar, al primer mensaje,
+   'consultar_mi_servicio' llamo de verdad a WispHub y trajo 300 filas de un
+   universo de 7.356 clientes, con 'exito: True' en la traza.
+
+   Dos piezas correctas por separado lo permitian: el numero de WhatsApp
+   contaba como factor de posesion (nivel exigido 0), e 'inyectar_sesion'
+   omite un valor vacio en vez de mandarlo nulo -- correcto para
+   'interfaz_lan', y para un campo de IDENTIDAD significa consultar SIN
+   FILTRO.
+
+   Cerrado en dos capas: 'inyectados_obligatorios' (schema.py) impide que la
+   llamada se arme sin el campo de identidad, y el descuento por posesion
+   solo se gana si la sesion ya resolvio un cliente. Ver
+   tests/test_identidad_obligatoria.py.
+
+2. ARREGLADO -- 'no' YA NO SIGNIFICA "HACELA VISIBLE"
+
+   El modelo mandaba red_oculta='no' aunque el cliente nunca mencionara el
+   tema, y el pedido que iba al ticket decia "volver la red VISIBLE" -- una
+   instruccion que nadie dio. 'no' responde a "¿queres ocultarla?" y
+   significa "dejala como esta". Ver el parseo mas abajo y el enum del
+   catalogo (ocultar / hacer_visible, ya sin un 'no' que invite a rellenar).
+
+3. PENDIENTE -- los campos "segun cliente" no llegan al ticket.
+   Anotado en detalle donde se construyen, al final de procesar().
+
+Lo unico del flujo que nunca se ejecuto de verdad es el POST final a WispHub
+que crea el ticket: dispararlo deja un "Cambio De Nombre De Red" falso en la
+cola de Operaciones y WispHub no expone DELETE para tickets. Todo lo anterior
+-- validacion, registro, escalada forzada, clasificacion del caso y eleccion
+de la regla de ticket-- si esta verificado punta a punta contra el motor real.
 """
 
 from __future__ import annotations
@@ -341,6 +386,44 @@ def procesar(herramienta, argumentos: dict, tenant: str = "",
         # una AFIRMACION que valida la persona que tome el caso. El ticket
         # tiene que decirlo con esas palabras, o quien lo lea va a creer que
         # salio del sistema.
+        #
+        # PENDIENTE, MEDIDO EL 28/08/2026 -- ESTOS DOS CAMPOS NO LLEGAN AL
+        # TICKET, Y ESO ROMPE LA COMPROBACION DE TITULARIDAD.
+        #
+        # 'escalamiento._que_se_probo' recorta cada linea de herramienta a 160
+        # caracteres. Estos dos son los ULTIMOS del diccionario, asi que el
+        # recorte se los come siempre:
+        #
+        #     llega al ticket el NOMBRE actual? -> False
+        #     llega al ticket la CLAVE actual?  -> False
+        #
+        # El recorte ya se habia contemplado -- por eso 'pedido' va primero y
+        # por eso el aviso de tercero va DENTRO de 'pedido' (ver los dos
+        # comentarios de arriba). Estos dos quedaron fuera de esa proteccion.
+        #
+        # Importa porque el nombre actual de la red ES la comprobacion de que
+        # quien pide el cambio es el titular: es toda la razon por la que el
+        # agente lo pregunta, y quien toma el caso nunca lo ve.
+        #
+        # DOS CAMINOS, y el segundo es una decision de producto, no de codigo:
+        #
+        #   1. El NOMBRE actual deberia entrar en 'pedido', que es el campo
+        #      hecho para sobrevivir el recorte. Ej: 'Cambiar el nombre (hoy
+        #      "RAPILINK_A3F2") a "Casa Gonzalez"'. Cabe: el pedido tipico
+        #      ronda los 70 caracteres de los 160.
+        #
+        #   2. La CLAVE actual conviene DEJAR DE PEDIRLA. Hoy no llega al
+        #      ticket, asi que nadie la valida -- solo queda escrita en la
+        #      conversacion. Meterla en 'pedido' para que llegue significaria
+        #      escribir la contrasena del cliente en texto plano en WispHub, y
+        #      este proyecto evita a proposito persistir contrasenas (por eso
+        #      las respuestas crudas de WispHub no se guardan). Ademas no hace
+        #      falta: el tecnico ve la clave real en el sistema, y la
+        #      titularidad ya la comprueba el nombre de la red.
+        #
+        # Se deja anotado y sin tocar a proposito: el punto 2 cambia lo que el
+        # agente le pide al cliente, y esa no es una decision para tomar sin
+        # el autor de este modulo.
         "nombre_actual_segun_cliente": argumentos.get("nombre_actual") or "",
         "clave_actual_segun_cliente": argumentos.get("clave_actual") or "",
     }
