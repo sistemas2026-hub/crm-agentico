@@ -283,7 +283,17 @@
                        lo contrario de lo que devolvio la herramienta. El
                        valor exacto esta abajo, en el detalle tecnico. -->
                   <ul class="lista-chequeos">
-                    {#each agente.verificado as v (v.herramienta)}
+                    <!-- La clave es la POSICION, no el nombre de la
+                         herramienta: la misma herramienta aparece varias veces
+                         en una conversacion normal, y con razon. En el caso que
+                         destapo esto, 'consultar_mi_servicio' figura dos veces
+                         -- fallo por identidad sin verificar, y volvio a
+                         correr bien despues de verificarla. Con el nombre de
+                         clave, Svelte tiraba 'each_key_duplicate' al renderizar
+                         y el ticket NO se abria: la direccion cambiaba y la
+                         pantalla se quedaba en la lista, como si el clic no
+                         hubiera pasado (visto en produccion el 28/08/2026). -->
+                    {#each agente.verificado as v, i (i)}
                       <li class:fallo={v.fallo}>
                         {#if v.fallo}<CircleAlert size={13} />{:else}<CircleCheck size={13} />{/if}
                         <span>
