@@ -564,7 +564,14 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             # Cerrar con lo que el modelo dedujo de un "ok" ya salio mal una
             # vez; con una pregunta explicita, lo que cierra el caso es la
             # respuesta del cliente y no una interpretacion.
-            if cerrado and _pregunta_de_cierre(config) and not estado["cierre_propuesto"]:
+            # Ya se le pregunto: cierra solo si CONTESTO que si. Con
+            # 'resuelta' a secas alcanzaba con que la conversacion volviera a
+            # parecer terminada, y una pregunta nueva del cliente la cerraba.
+            if (estado["cierre_propuesto"] and _pregunta_de_cierre(config)
+                    and not veredicto.get("confirma_cierre")):
+                cerrado = False
+                estado["cierre_propuesto"] = False
+            elif cerrado and _pregunta_de_cierre(config) and not estado["cierre_propuesto"]:
                 estado["cierre_propuesto"] = True
                 cerrado = False
                 respuesta = _pregunta_de_cierre(config)
@@ -1122,6 +1129,13 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                         persistencia.actualizar_contenido_mensaje(tenant, mensaje_id, respuesta)
                     except Exception as e:
                         print(f"[persistencia] no se pudo actualizar el aviso de escalada: {e}")
+        elif (evaluacion and estado["cierre_propuesto"] and _pregunta_de_cierre(config)
+                and not evaluacion.get("confirma_cierre")):
+            # Se le pregunto y NO dijo que si: trajo otra cosa. La pregunta
+            # queda sin usar y se le vuelve a hacer cuando corresponda -- si
+            # no se limpiara, el proximo turno que parezca terminado cerraria
+            # sin haberle preguntado por lo nuevo.
+            estado["cierre_propuesto"] = False
         elif (evaluacion and evaluacion.get("resuelta")
                 and _pregunta_de_cierre(config) and not estado["cierre_propuesto"]):
             # Antes de cerrar, se PREGUNTA. Vale para el camino normal igual
@@ -1136,7 +1150,8 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                     persistencia.actualizar_contenido_mensaje(tenant, mensaje_id, respuesta)
                 except Exception as e:
                     print(f"[persistencia] no se pudo agregar la pregunta de cierre: {e}")
-        elif evaluacion and evaluacion.get("resuelta"):
+        elif evaluacion and (evaluacion.get("resuelta")
+                             or evaluacion.get("confirma_cierre")):
             # Ya se le pregunto (o el tenant no quiere que se pregunte) y
             # confirmo: cierra la conversacion en la bandeja (ver
             # cerrar_conversacion en persistencia). El propio saludo de

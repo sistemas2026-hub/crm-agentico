@@ -117,6 +117,25 @@ def _esquema_evaluacion(config) -> dict:
             "enum": list(config.conversaciones.etiquetas),
             "description": "De que trata la conversacion, de esta lista.",
         },
+        # Distinto de 'resuelta', y la diferencia costo un cierre indebido:
+        # 'resuelta' mide "esto PARECE terminado" y se pone en true tambien
+        # cuando el cliente se despide o cuando el asistente acaba de
+        # contestarle bien. Esta mide una sola cosa, y es un hecho: si el
+        # ultimo mensaje del cliente le dice que si a la pregunta de cerrar.
+        #
+        # Visto el 28/08/2026: se le pregunto "¿te queda algo pendiente?", el
+        # cliente contesto "espera, tambien queria saber si tengo factura
+        # pendiente" -- o sea que NO-- y la conversacion se cerro igual,
+        # porque el asistente le respondio bien y todo volvio a "parecer
+        # resuelto".
+        "confirma_cierre": {
+            "type": "boolean",
+            "description": "true SOLO si el ultimo mensaje del cliente "
+                "responde que SI a la pregunta de si se puede cerrar su "
+                "caso ('si', 'dale', 'ya esta', 'nada mas'). false si "
+                "trae cualquier otra cosa: una pregunta nueva, un tema "
+                "distinto, o un pedido pendiente. Ante la duda, false.",
+        },
         "resuelta": {
             "type": "boolean",
             "description": "true si el cliente confirmo que su "
