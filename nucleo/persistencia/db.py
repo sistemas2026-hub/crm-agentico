@@ -701,7 +701,11 @@ def agregar_mensaje_humano(tenant: str, conversation_id: str,
             """update asistente.conversations set actualizado_en = now()
                where id = %s""",
             (conversation_id,))
-        return {"canal": fila["canal"], "usuario_externo": fila["usuario_externo"]}
+        # La fila entera, no dos campos elegidos a mano: agregarle una columna
+        # al select y olvidarse de este return deja al llamador sin el dato y
+        # sin ningun error -- paso el 28/08/2026 con 'ticket_operativo', y la
+        # copia al ticket del ISP no se hacia sin que nada lo dijera.
+        return dict(fila)
 
 
 def agentes_de_colaborador(tenant: str, profile_id: str) -> list[str]:
