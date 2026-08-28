@@ -114,7 +114,8 @@ OPTIONS /api/tickets/   ->  Allow: GET, POST, HEAD, OPTIONS
 | `/api/clientes/{id}/` | GET, PUT, PATCH, DELETE (segun `OPTIONS`) | **`DELETE` aqui NO funciona** — da HTTP 500. Ver aviso abajo |
 | `/api/clientes/{id}/perfil/` | DELETE | **El borrado real.** Verificado end-to-end contra produccion — ver aviso abajo |
 | `/api/tickets/` | GET, POST | Se pueden crear tickets |
-| `/api/tickets/{id}/` | GET, PUT, PATCH | Se pueden actualizar |
+| `/api/tickets/{id}/` | GET, PUT, PATCH | Se pueden actualizar, **pero `estado` por PATCH NO se aplica** — ver aviso abajo |
+| `/api/tickets/{id}/respuesta/` | POST | **Responder un ticket Y cambiarle el estado, en la misma llamada.** Verificado en produccion 28/08/2026 |
 | `/api/facturas/` | GET, POST | |
 | `/api/gastos/` | GET, POST | Vacio, pero **acepta escritura** |
 | `/api/zonas/`, `/api/plan-internet/`, `/api/staff/` | GET | Catalogos de solo lectura |
@@ -421,7 +422,49 @@ fallan con ella. Conviene reintentar con la variante contraria ante un 404.
 **`do_not_notify_client: true`** en `/api/tickets/comentarios/` permite dejar
 notas internas sin enviar correo al cliente. Es un flag no documentado
 oficialmente. Ese endpoint da 404 en esta instancia — puede ser diferencia de
-version o de plan.
+version o de plan. **La via que SI existe aca es otra** (`/respuesta/`, abajo).
+
+### Responder y cerrar un ticket: `POST /api/tickets/{id}/respuesta/`
+
+Verificado end-to-end contra produccion el 28/08/2026 (HTTP 201, y confirmado
+con un `GET` posterior, no solo por el eco de la respuesta).
+
+`multipart/form-data`, no JSON:
+
+| Campo | Req. | Valores |
+|---|---|---|
+| `respuesta` | si | El texto. Se guarda como HTML (`<p>...</p>`) |
+| `ticket-estado` | si | **1** Nuevo, **2** En Progreso, **3** Resuelto, **4** Cerrado |
+| `ticket-prioridad` | si | **1** Baja, **2** Normal, **3** Alta, **4** Muy Alta |
+| `ticket-falla` | no | Lista cerrada de ~30 fallas (incluye `Cambio de Contraseña en Router Wifi`) |
+| `archivo` | no | PDF/Word/imagen |
+| `reabrir-ticket` | no | Responde y reabre |
+
+> **No es "dejar un comentario": es responder Y MOVER EL TICKET.** `ticket-estado`
+> es obligatorio, asi que toda respuesta fija un estado. Comprobado sin querer:
+> un ticket **Cerrado** al que se le mando una respuesta con `ticket-estado=2`
+> quedo **En Progreso**. Quien use esto para "solo agregar una nota" tiene que
+> mandar el estado que el ticket YA tiene, o lo reabre.
+
+> **`PATCH /api/tickets/{id}/` con `{"estado": 4}` NO cierra el ticket.**
+> Responde `200` con el ticket entero de vuelta —parece que funciono— y la
+> lectura posterior sigue diciendo `En Progreso`. Es el mismo eco enganoso que
+> ya se documento para `PATCH` sobre clientes. **La unica forma verificada de
+> cambiar el estado de un ticket es `POST /respuesta/`.**
+
+> **`OPTIONS` sobre `/respuesta/` devuelve 500, no 404.** Un 500 ahi NO
+> significa que el endpoint no exista: la ruta existe y `POST` funciona
+> perfecto. Si se sondea con `OPTIONS` (que es lo que esta misma skill
+> recomienda para descubrir escritura), este endpoint se descartaria por
+> error. Ante un 500 en `OPTIONS`, probar el `POST` real antes de concluir.
+
+**El autor de la respuesta es la cuenta de la API key**, no quien la origino:
+las respuestas quedan firmadas como `Rapilink SAS - admin@rapilink-sas`. Si
+alguna vez importa distinguir quien contesto, hay que decirlo DENTRO del texto
+de la respuesta -- el campo `autor` no se puede elegir.
+
+El ticket leido con `GET` trae `respuestas` (lista de `{respuesta, created,
+autor}`) y `finalizado_por` con el nombre de quien lo cerro.
 
 **El asunto se guarda como `"Asunto - Cliente"`**, y el catalogo de origen trae
 errores de tipeo (`INSTATALACION NUEVA`). Al categorizar hay que cortar en
