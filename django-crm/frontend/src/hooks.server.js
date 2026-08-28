@@ -321,7 +321,16 @@ export const handle = sequence(Sentry.sentryHandle(), async function _handle({ e
   // endpoints). Without them here the guard redirects every customer who clicks
   // a link to /login, so the portal is unreachable. Server-side token→org
   // resolution + RLS is what actually protects the data (see docs/PORTAL_RLS.md).
-  const PUBLIC_ROUTES = ['/login', '/logout', '/bounce', '/portal', '/csat'];
+  // `/solicitud` es el formulario de contratacion que abre un prospecto desde
+  // el link que le pasa el asistente por WhatsApp. Mismo caso que los de
+  // arriba, y con un motivo mas fuerte todavia: quien lo abre TODAVIA NO ES
+  // CLIENTE, asi que no tiene ni podria tener con que iniciar sesion.
+  //
+  // Sin esta linea la guarda lo mandaba a /login y el formulario era
+  // inalcanzable -- medido el 28/08/2026 contra produccion: /solicitud/<token>
+  // servia la pagina de login, byte por byte igual que una ruta inexistente.
+  // Es exactamente lo que este comentario ya advertia para /portal y /csat.
+  const PUBLIC_ROUTES = ['/login', '/logout', '/bounce', '/portal', '/csat', '/solicitud'];
 
   // Define semi-protected routes (auth required, but no org)
   const AUTH_ONLY_ROUTES = ['/org'];
