@@ -174,8 +174,11 @@ def recomendaciones_nombre() -> list[str]:
 def recomendaciones_clave() -> list[str]:
     return [
         f"Entre {CLAVE_MIN} y {CLAVE_MAX} caracteres.",
-        "Combina mayuscula, minuscula, numero y un simbolo -- por ejemplo, "
-        "algo con la forma de 'Mm12$'.",
+        # El ejemplo es una clave COMPLETA y con pinta de real, no una
+        # formula: 'Mm12$' se entiende como notacion y nadie sabe que hacer
+        # con ella. Una que se pueda copiar y adaptar se entiende sola.
+        "Mejor si mezcla texto, numeros y un caracter especial -- algo como "
+        "MiCasa2026$ -- porque una clave sin eso se adivina mucho mas rapido.",
         "Sin ñ, sin tildes y sin emojis.",
         "Sin espacios al principio ni al final.",
     ]
