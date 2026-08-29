@@ -1328,15 +1328,28 @@ def _redactar(referencia_modelo: str, historial: list[dict], temperatura: float,
     respuesta que no le sirve al cliente, asi que se trata igual, no como un
     resultado valido que solo hay que sanitizar.
     """
-    for _ in range(intentos):
+    for intento in range(intentos):
         resp = cliente.chat(referencia_modelo, historial, tools=None, temperatura=temperatura)
         limpio = _sanitizar(resp.contenido, nombres_rol, tratamiento)
+        if not limpio or _RE_RESPUESTA_CRUDA.match(limpio):
+            # Por que no sirvio. Sin esto, cuando el cliente ve "no pude
+            # terminar de redactar" no queda NADA en el log: ni cuantas veces
+            # se reintento, ni si el modelo devolvio vacio o un valor suelto,
+            # ni --lo mas util-- si en vez de redactar quiso llamar otra
+            # herramienta, que es lo que explica un contenido en blanco
+            # cuando se pidio sin herramientas. Paso en produccion el
+            # 28/08/2026 y no se pudo saber por que.
+            print(f"[modelo] redaccion en blanco (intento {intento + 1}/{intentos}): "
+                  f"crudo={resp.contenido[:60]!r} "
+                  f"llamadas={[l.nombre for l in (resp.llamadas or [])]}")
         if limpio and not _RE_RESPUESTA_CRUDA.match(limpio):
             limpio, fuga = guardia_salida.verificar(limpio)
             if fuga:
                 print(f"[salida] fuga bloqueada en redaccion final: '{fuga}'")
             historial.append({"role": "assistant", "content": limpio})
             return limpio
+    print(f"[modelo] se agotaron los {intentos} intentos de redaccion -- al "
+          f"cliente le sale el aviso de reintentar")
     historial.append({"role": "assistant", "content": ""})
     # Sin conjugacion de segunda persona ('podes'/'puedes'/'puede') a
     # proposito: este texto sale de nucleo/, que no sabe -- ni tiene por que
