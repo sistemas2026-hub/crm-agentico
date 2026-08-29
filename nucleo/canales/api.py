@@ -729,8 +729,13 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     # (crea un ticket nuevo, pero no revienta nada).
     rol_cfg = config.roles.get(rol)
     cerrada = False
+    # 'ya_escalada' frena la creacion de un SEGUNDO caso, no la evaluacion
+    # entera: una conversacion que volvio de manos de una persona sigue
+    # necesitando que alguien note cuando el cliente da el tema por cerrado.
+    # Atado a esa bandera, el asistente contestaba con normalidad y no cerraba
+    # nunca -- ni el chat, ni el caso, ni el ticket.
     if (conversation_id and rol_cfg and rol_cfg.orientado_a == "cliente_final"
-            and not estado["escalada"] and not estado["ya_escalada"]):
+            and not estado["escalada"]):
         try:
             evaluacion = escalamiento.evaluar(config, rol, estado["historial"])
         except Exception as e:
@@ -748,7 +753,15 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
         # ya le habia dicho al cliente que un colaborador iba a seguir su
         # caso -- o sea que la mitad de las veces le prometia una persona que
         # no llegaba nunca.
+        # Si esta conversacion YA tuvo su caso, no se abre otro: lo que
+        # sigue vivo es la deteccion del cierre. Sin este freno, una vuelta
+        # despues de que una persona la atendio podia crear un caso duplicado.
+        if estado["ya_escalada"] and evaluacion:
+            evaluacion = {**evaluacion, "escalar": False}
+
         forzado, motivo_forzado = escalada_forzada(config, registro_herramientas)
+        if estado["ya_escalada"]:
+            forzado, motivo_forzado = None, ""
         if forzado:
             evaluacion = dict(evaluacion or {})
             if not evaluacion.get("escalar"):
@@ -1191,8 +1204,23 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             # cerrar_conversacion en persistencia). El propio saludo de
             # despedida del modelo ya cumple el rol de "mensaje de cierre" --
             # no hace falta agregar otro, sonaria repetido.
+            # Si detras hay un caso --porque esta conversacion paso por una
+            # persona y volvio-- se cierran los tres, no solo el chat. Dejar
+            # el caso y el ticket abiertos obligaria a cerrarlos a mano
+            # justo cuando el cliente ya dijo que quedo conforme.
             try:
-                persistencia.cerrar_conversacion(tenant, conversation_id)
+                caso = estado.get("caso_id") or persistencia.caso_de_conversacion(
+                    tenant, conversation_id)
+                if caso:
+                    operativo.cerrar_todo(
+                        config, tenant,
+                        {"id": conversation_id, "caso_id": caso,
+                         "ticket_operativo": persistencia.ticket_operativo_de(
+                             tenant, conversation_id)},
+                        (config.escalamiento.texto_cierre_confirmado or "").strip()
+                        or "El cliente confirmo que su caso quedo resuelto.")
+                else:
+                    persistencia.cerrar_conversacion(tenant, conversation_id)
                 cerrada = True
             except Exception as e:
                 print(f"[conversaciones] no se pudo cerrar la conversacion: {e}")
@@ -2596,6 +2624,10 @@ def conversaciones_responder_humano(id_conversacion):
     # respuesta queda a nombre de la cuenta de la API key, asi que sin esto el
     # historico del ticket dice que contesto el sistema.
     autor = (cuerpo.get("autor") or "").strip()
+    # Si con esta respuesta la persona da por terminada su parte. Lo elige
+    # ella: acaba de hacer el trabajo y sabe si le quedo algo preguntado al
+    # cliente. Ver devolver_al_asistente().
+    devolver = bool(cuerpo.get("devolver_al_asistente"))
     if not tenant or not contenido:
         return jsonify({"error": "Faltan campos: tenant, mensaje"}), 400
 
@@ -2633,7 +2665,18 @@ def conversaciones_responder_humano(id_conversacion):
         _sesiones[clave_sesion]["historial"].append(
             {"role": "assistant", "content": f"({quien}) {contenido}"})
 
-    salida = {"ok": True, "entregado": False}
+    if devolver:
+        persistencia.devolver_al_asistente(tenant, id_conversacion)
+        # Y la sesion VIVA, no solo la base: la pausa se decide con lo que
+        # tiene este proceso en memoria, asi que sin esto el asistente seguia
+        # callado hasta el proximo reinicio.
+        if clave_sesion in _sesiones:
+            _sesiones[clave_sesion]["escalada"] = False
+            # 'ya_escalada' se deja como esta: es lo que evita que la misma
+            # conversacion abra un segundo caso. Lo que se apaga es la pausa,
+            # no la memoria de que esto ya paso por una persona.
+
+    salida = {"ok": True, "entregado": False, "devuelto_al_asistente": devolver}
 
     # La misma respuesta, copiada al ticket del sistema del ISP. Va aparte de
     # la entrega al cliente y no la condiciona: que la operacion no se entere

@@ -79,6 +79,10 @@ export const actions = {
     const form = await request.formData();
     const body = form.get('body')?.toString().trim() ?? '';
     const internal = form.get('internal') === 'on';
+    // Con esta respuesta la persona da por terminada su parte y el asistente
+    // vuelve a atender. Una nota interna nunca devuelve nada: no salio de
+    // esta pantalla.
+    const devolver = !internal && form.get('devolver') === 'on';
     const status = form.get('status')?.toString().trim() ?? '';
 
     const picked = form.get('attachment');
@@ -116,7 +120,8 @@ export const actions = {
             body: JSON.stringify({
               tenant,
               mensaje: body,
-              autor: /** @type {any} */ (locals).user?.name || ''
+              autor: /** @type {any} */ (locals).user?.name || '',
+              devolver_al_asistente: devolver
             }),
             signal: AbortSignal.timeout(20000)
           });

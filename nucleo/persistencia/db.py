@@ -524,6 +524,32 @@ def guardar_ticket_operativo(tenant: str, conversation_id: str,
               f"{ticket}: {type(e).__name__}: {e}")
 
 
+def devolver_al_asistente(tenant: str, conversation_id: str) -> None:
+    """
+    Saca la conversacion de la pausa: el asistente vuelve a atenderla.
+
+    NO borra el caso ni el ticket -- siguen ahi, y por eso cuando el cliente
+    diga que ya quedo se cierran los tres juntos. Lo unico que cambia es quien
+    contesta el proximo mensaje.
+
+    Lo decide la persona al responder, no el sistema: quien acaba de aplicar
+    un cambio sabe si su parte termino o si todavia le esta preguntando algo
+    al cliente. Adivinarlo desde el codigo es como se termina con dos
+    interlocutores hablando encima.
+    """
+    try:
+        with sesion(tenant) as (cur, org):
+            cur.execute(
+                """update asistente.conversations
+                   set escalada_a_humano = false, necesita_atencion_humana = false,
+                       actualizado_en = now()
+                   where organization_id = %s and id = %s""",
+                (org, conversation_id))
+    except Exception as e:
+        print(f"[persistencia] no se pudo devolver la conversacion al "
+              f"asistente: {type(e).__name__}: {e}")
+
+
 def atendida_por_humano(tenant: str, conversation_id: str) -> bool:
     """
     Si alguien del equipo ya le respondio al cliente en esta conversacion.

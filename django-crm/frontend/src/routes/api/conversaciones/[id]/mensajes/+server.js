@@ -3,14 +3,14 @@ import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
 
 /**
- * Proxy de solo lectura para sondear mensajes nuevos sin recargar la
- * pagina -- usado por [id]/+page.svelte mientras la conversacion esta
- * abierta, para que un mensaje entrante (WhatsApp real, cuando este
- * integrado) aparezca solo. Distinto del load() de la pantalla: ese trae
- * ademas el ticket de BottleCRM, las herramientas y los casos del manual,
- * pesado para pedirlo cada pocos segundos. Este solo trae mensajes.
+ * El hilo de una conversación del asistente, para pantallas que lo miran
+ * mientras pasa.
  *
- * Ver nucleo/canales/api.py: GET /conversaciones/<id>/mensajes.
+ * Existe porque la conversación sigue viva después de que el caso llega a la
+ * bandeja: el cliente escribe, y quien atiende está mirando el ticket. La
+ * transcripción que guarda el caso es una FOTO del momento en que se escaló
+ * -- es el registro que se audita y no se toca -- así que lo que viene
+ * después hay que pedirlo aparte.
  *
  * @type {import('./$types').RequestHandler}
  */
@@ -22,21 +22,33 @@ export async function GET({ params, locals, fetch }) {
   const baseUrl = env.PRIVATE_ASISTENTE_URL;
   const tenant = env.PRIVATE_ASISTENTE_TENANT;
   if (!baseUrl || !tenant) {
-    return json({ error: 'Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT)' },
-      { status: 500 });
+    return json({ mensajes: [] });
   }
 
   try {
     const resp = await fetch(
       `${baseUrl}/conversaciones/${params.id}/mensajes?tenant=${encodeURIComponent(tenant)}`,
-      { headers: headersMotor() }
+      { headers: headersMotor(), signal: AbortSignal.timeout(8000) }
     );
+    if (!resp.ok) return json({ mensajes: [] });
     const datos = await resp.json();
-    if (!resp.ok) {
-      return json({ error: datos.error || 'No se pudo leer la conversacion' }, { status: resp.status });
-    }
-    return json(datos);
-  } catch (/** @type {any} */ err) {
-    return json({ error: err?.message || 'No se pudo contactar al asistente' }, { status: 502 });
+    return json({
+      mensajes: (datos.mensajes ?? []).map((/** @type {any} */ m) => ({
+        id: m.id,
+        // 'humano' distingue lo que escribió una persona del equipo de lo que
+        // escribió el asistente. Los dos salen por el mismo lado del canal
+        // --el cliente ve un solo interlocutor-- pero quien atiende necesita
+        // saber cuál es cuál para no responder dos veces lo mismo.
+        quien: m.rol === 'user' ? 'cliente' : m.rol === 'humano' ? 'humano' : 'asistente',
+        texto: m.contenido,
+        creado_en: m.creado_en
+      })),
+      atendida_por: datos.conversacion?.atendida_por ?? '',
+      cerrada: datos.conversacion?.estado === 'cerrada'
+    });
+  } catch {
+    // Sin ruido: la pantalla lo pregunta cada pocos segundos y un fallo
+    // puntual se resuelve en la siguiente.
+    return json({ mensajes: [] });
   }
 }

@@ -53,6 +53,50 @@
   let pestana = $state('conversacion');
 
   /**
+   * La conversación como está AHORA, no como estaba cuando se escaló.
+   *
+   * La transcripción que guarda el caso es una foto del momento del traspaso
+   * -- el registro que se audita, y por eso no se reescribe. Pero la
+   * conversación sigue: el cliente contesta, y quien atiende está mirando
+   * esta pantalla. Sin esto tenía que abrir la bandeja en otra pestaña para
+   * enterarse de si le respondieron.
+   *
+   * Vacío mientras no llegue (o si el caso no vino de una conversación), y
+   * entonces se muestra la transcripción del caso, que es lo que había antes.
+   */
+  let hilo = $state([]);
+  let conversacionId = $state('');
+
+  async function traerHilo() {
+    if (!conversacionId) return;
+    try {
+      const r = await fetch(`/api/conversaciones/${conversacionId}/mensajes`);
+      if (!r.ok) return;
+      const d = await r.json();
+      if (d.mensajes?.length) hilo = d.mensajes;
+    } catch {
+      // Silencio: corre cada pocos segundos.
+    }
+  }
+
+  $effect(() => {
+    // 'origen' llega despues que la pagina (ver +page.server.js), asi que el
+    // id se toma cuando resuelve y no al montar.
+    Promise.resolve(data.origen).then((o) => {
+      if (o?.id) conversacionId = o.id;
+    });
+  });
+
+  $effect(() => {
+    if (!conversacionId) return;
+    traerHilo();
+    // Cada 5 segundos: quien atiende mira esta pantalla mientras escribe, y
+    // el cliente contesta a ritmo de chat, no de segundo.
+    const reloj = setInterval(traerHilo, 5000);
+    return () => clearInterval(reloj);
+  });
+
+  /**
    * Los enlaces a los sistemas del ISP, si el caso vino del asistente y llego
    * a identificar al cliente. Null en cualquier otro caso -- y eso no es un
    * error, es lo normal en buena parte de los tickets.
@@ -89,6 +133,8 @@
    */
   let body = $state('');
   let internal = $state(false);
+  /** Al enviar, el asistente vuelve a atender la conversación. */
+  let devolverAlAsistente = $state(true);
   let sending = $state(false);
 
   // The picked file's name, mirrored out of the input so the composer can show
@@ -527,14 +573,22 @@
                 {/if}
               {:else if verConversacion}
                 <div class="turnos">
-                  {#each agente.turnos as t, i (i)}
-                    <div class="turno" class:propio={t.quien === 'asistente'}>
+                  <!-- El hilo VIVO si se pudo traer; si no, la transcripción
+                       que quedó guardada en el caso. Lo segundo es lo que
+                       había antes de esto y sigue sirviendo para un ticket
+                       cargado a mano, que no tiene conversación detrás. -->
+                  {#each (hilo.length ? hilo : agente.turnos) as t, i (i)}
+                    <div class="turno" class:propio={t.quien !== 'cliente'}>
                       <span class="turno-avatar" aria-hidden="true">
-                        {t.quien === 'cliente' ? 'C' : 'A'}
+                        {t.quien === 'cliente' ? 'C' : t.quien === 'humano' ? 'E' : 'A'}
                       </span>
                       <div>
                         <div class="turno-quien">
-                          {t.quien === 'cliente' ? 'Cliente' : 'Asistente IA'}
+                          {t.quien === 'cliente'
+                            ? 'Cliente'
+                            : t.quien === 'humano'
+                              ? 'Equipo'
+                              : 'Asistente IA'}
                         </div>
                         <div class="burbuja">{t.texto}</div>
                       </div>
@@ -630,6 +684,25 @@
                   <input type="checkbox" name="internal" bind:checked={internal} />
                   Nota interna
                 </label>
+                <!-- Lo decide quien responde, no el sistema: acaba de hacer el
+                     trabajo y sabe si su parte terminó o si todavía le está
+                     preguntando algo al cliente. Marcado por defecto porque
+                     ese es el caso normal --se aplicó el cambio y se avisa--
+                     y desmarcarlo es un clic para quien sigue en la charla. -->
+                {#if !internal}
+                  <label
+                    class="v2-sub"
+                    style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer"
+                    title="El asistente vuelve a atender: responde lo que siga y pregunta si puede cerrar."
+                  >
+                    <input
+                      type="checkbox"
+                      name="devolver"
+                      bind:checked={devolverAlAsistente}
+                    />
+                    Devolver al asistente
+                  </label>
+                {/if}
                 <!-- The whole chip is the click target: a label wrapping a hidden
                      input. A file may ride with the reply or go on its own. -->
                 <label class="attach" class:has-file={fileName}>
