@@ -92,6 +92,14 @@ export async function POST({ request, locals, fetch }) {
     }
     return json(datos);
   } catch (/** @type {any} */ err) {
-    return json({ error: err?.message || 'No se pudo contactar al asistente' }, { status: 502 });
+    // El mensaje crudo de la libreria ('fetch failed') no le dice nada a
+    // quien esta probando: no distingue "el motor esta reiniciandose" de
+    // "escribiste mal la URL". Va al log, que es donde sirve, y a la pantalla
+    // va lo unico accionable -- volver a intentar en un momento.
+    console.error('[simulador] no se pudo contactar al motor:', err?.message ?? err);
+    return json(
+      { error: 'No se pudo contactar al asistente. Puede estar reiniciándose por una actualización: probá de nuevo en un momento.' },
+      { status: 502 }
+    );
   }
 }
