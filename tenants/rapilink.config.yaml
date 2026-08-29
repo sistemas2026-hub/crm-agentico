@@ -2546,8 +2546,6 @@ herramientas:
     filtros_verificados:
       id_ticket: {param: id_ticket, tipo: texto, verificado_el: 2026-08-28}
       descripcion: {param: descripcion, tipo: texto, verificado_el: 2026-08-28}
-    auth_ref: WISPHUB_API_KEY
-    auth_esquema: Api-Key
 
   # --- escritura de tickets (18/08/2026) -- aprobacion_humana real -------
   # Endpoints verificados contra la documentacion oficial de WispHub
