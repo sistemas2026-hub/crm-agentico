@@ -1601,6 +1601,18 @@ class ZonaConteo(Base):
     zona_id: int
     zona_nombre: str
     n_clientes: int
+    # El municipio de esa zona, deducido de sus clientes por mayoria.
+    #
+    # El nombre de la zona es interno ('CORTE 30 - SERVIDOR 1') y no significa
+    # nada para un cliente. Se lo llego a leer en voz alta: el asistente le
+    # pregunto a un prospecto si su barrio quedaba en 'CORTE 30 - SERVIDOR 1'
+    # (28/08/2026). Lo que si puede contestar es el municipio.
+    #
+    # Se deduce y no se configura porque el campo 'ciudad' de WispHub es texto
+    # libre con typos (SOELDAD, SOLEDAF, SOLEDED...), pero la MAYORIA de cada
+    # zona es contundente: 2.328 'SOLEDAD' contra un puñado de variantes. La
+    # moda acierta; un valor fijo por ISP habria que cargarlo a mano.
+    municipio: str = ""
 
 
 class LocalidadZona(Base):

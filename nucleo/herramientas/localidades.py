@@ -32,6 +32,22 @@ TIMEOUT_SEGUNDOS = 30
 TAMANIO_PAGINA = 300
 
 
+def _municipio_de(cuenta) -> str:
+    """El municipio de una zona: el nombre de ciudad mas repetido entre sus
+    clientes.
+
+    La mayoria simple alcanza y NO hay que ayudarla. Un primer intento
+    "mejoraba" el resultado tomando el nombre mas corto contenido en el
+    ganador, para colapsar 'SOLEDAD ATLANTICO' en 'SOLEDAD' -- y devolvio
+    'SOLEDA', un typo de tres clientes que tambien esta contenido en el
+    ganador. Los typos son minoria por definicion; la moda ya los descarta
+    sola (2.328 'SOLEDAD' contra un puñado de variantes).
+    """
+    if not cuenta:
+        return ""
+    return cuenta.most_common(1)[0][0].title()
+
+
 def sincronizar(herramienta, tenant: str | None = None,
                 variables_tenant: dict | None = None) -> list[LocalidadZona]:
     """
@@ -59,6 +75,13 @@ def sincronizar(herramienta, tenant: str | None = None,
 
     # clave normalizada -> {"display": str, "zonas": {zona_id: {"nombre": str, "n": int}}}
     agregados: dict[str, dict] = {}
+    # zona_id -> Counter de ciudades. El municipio de una zona se deduce por
+    # MAYORIA y no se toma del primer cliente que aparezca: 'ciudad' es texto
+    # libre y viene con typos (SOELDAD, SOLEDAF, SOLEDED), pero la mayoria de
+    # cada zona es contundente -- 2.328 'SOLEDAD' contra un puñado de
+    # variantes. Ver ZonaConteo.municipio.
+    from collections import Counter
+    ciudades_por_zona: dict[int, Counter] = {}
 
     offset = 0
     total_esperado: int | None = None
@@ -85,6 +108,9 @@ def sincronizar(herramienta, tenant: str | None = None,
                 zid = zona["id"]
                 z = entrada["zonas"].setdefault(zid, {"nombre": zona.get("nombre", ""), "n": 0})
                 z["n"] += 1
+                ciudad = str(fila.get("ciudad") or "").strip()
+                if ciudad:
+                    ciudades_por_zona.setdefault(zid, Counter())[ciudad.upper()] += 1
 
         if not filas or len(filas) < TAMANIO_PAGINA:
             break
@@ -95,7 +121,8 @@ def sincronizar(herramienta, tenant: str | None = None,
     return [
         LocalidadZona(
             localidad=entrada["display"],
-            zonas=[ZonaConteo(zona_id=zid, zona_nombre=z["nombre"], n_clientes=z["n"])
+            zonas=[ZonaConteo(zona_id=zid, zona_nombre=z["nombre"], n_clientes=z["n"],
+                              municipio=_municipio_de(ciudades_por_zona.get(zid)))
                    for zid, z in entrada["zonas"].items()],
             n_clientes=sum(z["n"] for z in entrada["zonas"].values()),
         )

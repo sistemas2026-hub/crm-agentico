@@ -668,6 +668,35 @@ def _ejecutar_consulta_planes_venta(config, argumentos_modelo: dict) -> dict:
     """
     localidad = str((argumentos_modelo or {}).get("localidad", "")).strip()
     clave = _sin_tildes(localidad)
+
+    # UN MUNICIPIO NO ES UN BARRIO, aunque figure en el catalogo.
+    #
+    # 'localidad' es texto libre en WispHub y hay registros donde alguien
+    # escribio el municipio ahi: 'SOLEDAD' figura como localidad con 1 cliente
+    # y 'SABANAGRANDE' con 156. Consultarlos devolvia "hay cobertura", que es
+    # verdad para el municipio entero y no dice NADA del barrio de quien
+    # pregunta.
+    #
+    # Paso el 28/08/2026: el asistente le pregunto a un prospecto si su barrio
+    # quedaba en Sabanagrande, el dijo "no, Soledad", y el asistente consulto
+    # 'soledad' -- que respondio que si por ese unico registro. Le confirmo
+    # cobertura en un barrio del que no sabemos nada.
+    #
+    # Los municipios salen de los datos (ZonaConteo.municipio, deducido por
+    # mayoria en la sincronizacion), no de una lista fija: otro ISP opera en
+    # otros.
+    municipios_conocidos = {_sin_tildes(z.municipio)
+                            for l in config.localidades for z in l.zonas
+                            if z.municipio}
+    if clave in municipios_conocidos:
+        return {"cobertura": None, "planes": [], "es_un_municipio": localidad,
+                "advertencia":
+                    f"'{localidad}' es un MUNICIPIO, no un barrio. Que haya "
+                    f"clientes ahi no dice nada del barrio de esta persona. "
+                    f"Preguntale como se llama su barrio y volve a "
+                    f"consultarme con ese nombre. No le confirmes cobertura "
+                    f"todavia."}
+
     entrada = next(
         (l for l in config.localidades if _sin_tildes(l.localidad) == clave), None)
 
@@ -697,16 +726,18 @@ def _ejecutar_consulta_planes_venta(config, argumentos_modelo: dict) -> dict:
         p.nombre_wisphub for p in config.planes_venta
         if not p.zonas or (zonas_localidad & set(p.zonas))
     ]
-    salida = {"cobertura": True, "n_clientes": entrada.n_clientes, "planes": coincidentes,
-              # EN QUE NODO, y no es un detalle de color: un mismo nombre de
-              # barrio existe en varios municipios ('CENTRO' esta en todos), y
-              # el catalogo se arma por nombre de localidad. 'ciudad' no sirve
-              # para desambiguar -- es texto libre y esta escrita de 15 formas
-              # distintas para el mismo municipio (SOELDAD, SOLEDAF, SOLEDED,
-              # y hasta un correo). La ZONA si: son 5 nodos reales de un
-              # catalogo cerrado. Diciendole al modelo en cual cayo, puede
-              # confirmarselo al cliente antes de prometerle nada.
-              "zonas": [z.zona_nombre for z in entrada.zonas]}
+    # EN QUE MUNICIPIO, y no en que nodo. Un mismo nombre de barrio existe en
+    # varios municipios ('CENTRO' esta en todos), y el catalogo se arma por
+    # nombre de localidad, asi que hay que poder desambiguar.
+    #
+    # Se devuelve el MUNICIPIO y NO el nombre de la zona ('CORTE 30 - SERVIDOR
+    # 1') porque el modelo se lo lee al cliente: el 28/08/2026 le pregunto a un
+    # prospecto si su barrio quedaba en 'CORTE 30 - SERVIDOR 1'. Eso es un
+    # nombre interno de un nodo de red. Lo que una persona puede contestar es
+    # en que municipio vive.
+    municipios = sorted({z.municipio for z in entrada.zonas if z.municipio})
+    salida = {"cobertura": True, "n_clientes": entrada.n_clientes,
+              "planes": coincidentes, "municipios": municipios}
 
     # UN SOLO CLIENTE NO ES EVIDENCIA DE COBERTURA. Medido el 28/08/2026: un
     # prospecto pregunto por "barrio centro" y el catalogo dijo que si, con un
@@ -717,14 +748,18 @@ def _ejecutar_consulta_planes_venta(config, argumentos_modelo: dict) -> dict:
     # una venta diciendole algo falso a quien iba a contratar). Se le pide al
     # modelo que confirme el municipio, que es lo que un vendedor haria.
     if (entrada.n_clientes or 0) <= 2:
-        salida["confirmar_zona"] = True
+        salida["confirmar_municipio"] = True
+        donde = " o ".join(municipios) if municipios else "el municipio que tenemos registrado"
         salida["advertencia"] = (
             f"OJO: en esa localidad hay muy pocos clientes "
-            f"({entrada.n_clientes}), y ese nombre de barrio puede existir en "
-            f"mas de un municipio. Antes de darle planes o precios, "
-            f"confirmale que su barrio queda en la zona {', '.join(salida['zonas'])} "
-            f"-- si te dice que no, es otro barrio con el mismo nombre y no "
-            f"tenemos su cobertura confirmada.")
+            f"({entrada.n_clientes}), y ese nombre de barrio existe en mas de "
+            f"un municipio. Antes de darle planes o precios, preguntale si su "
+            f"barrio queda en {donde}. Si te dice que NO, es otro barrio con "
+            f"el mismo nombre: NO tenemos su cobertura confirmada, no le des "
+            f"planes ni precios y decile que lo vas a confirmar con un "
+            f"colaborador. Y NO vuelvas a consultar usando el nombre del "
+            f"municipio como si fuera el barrio -- eso responde por otro "
+            f"lugar distinto.")
     if not coincidentes:
         salida["advertencia"] = (
             "Hay cobertura en esa localidad pero todavia no hay ningun "

@@ -59,8 +59,10 @@ cfg = cargar_config("tenants/rapilink.config.yaml")
 # solo en la base (TenantConfig.SINCRONIZADOS). Se arma aca uno chico y
 # deliberado, con los tres casos que importan -- asi la guarda corre sin base
 # y no depende de que hoy Rapilink tenga tal o cual barrio cargado.
-SABANA = ZonaConteo(zona_id=32278, zona_nombre="SERVIDOR SABANAGRANDE", n_clientes=1)
-CORTE15 = ZonaConteo(zona_id=20053, zona_nombre="CORTE 15 - SERVIDOR 1", n_clientes=60)
+SABANA = ZonaConteo(zona_id=32278, zona_nombre="SERVIDOR SABANAGRANDE",
+                    n_clientes=1, municipio="Sabanagrande")
+CORTE15 = ZonaConteo(zona_id=20053, zona_nombre="CORTE 15 - SERVIDOR 1",
+                     n_clientes=60, municipio="Soledad")
 cfg.localidades = [
     # El caso real: un barrio de nombre generico con UN solo cliente, que
     # resulto estar en otro municipio.
@@ -85,20 +87,25 @@ print(" GUARDA DE COBERTURA")
 print("=" * 70)
 
 # ---------------------------------------------------------------------- 1 --
-print("\n[1] La salida dice en QUE ZONA cayo")
+print("\n[1] La salida dice el MUNICIPIO, nunca el nombre del nodo")
 r = cobertura("zarabanda")
 comprobar(r["cobertura"] is True, "una localidad conocida da cobertura")
-comprobar(bool(r.get("zonas")), "y dice a que zona(s) pertenece")
-comprobar(all(isinstance(z, str) and z for z in r["zonas"]),
-          "con el NOMBRE del nodo, no su id (el modelo se lo lee al cliente)")
+comprobar(r.get("municipios") == ["Soledad"], "y dice en que municipio queda")
+# El nombre de la zona es interno y el modelo lo LEE EN VOZ ALTA. El
+# 28/08/2026 le pregunto a un prospecto si su barrio quedaba en 'CORTE 30 -
+# SERVIDOR 1'. Eso no puede volver a salir de esta funcion.
+comprobar("CORTE" not in str(r) and "SERVIDOR" not in str(r),
+          "y NO filtra el nombre del nodo de red  <- el bug")
 
 # ---------------------------------------------------------------------- 2 --
 print("\n[2] Con muy pocos clientes, pide confirmar el municipio  <- el bug")
 r = cobertura("centro")
-comprobar(r.get("confirmar_zona") is True,
-          "'CENTRO' (1 cliente) pide confirmar la zona antes de dar precios")
-comprobar("zona" in (r.get("advertencia") or "").lower(),
-          "y el aviso le dice al modelo QUE confirmar")
+comprobar(r.get("confirmar_municipio") is True,
+          "'CENTRO' (1 cliente) pide confirmar el municipio antes de dar precios")
+comprobar("sabanagrande" in (r.get("advertencia") or "").lower(),
+          "y el aviso NOMBRA el municipio, que es lo que un cliente puede contestar")
+comprobar("CORTE" not in str(r) and "SERVIDOR" not in str(r),
+          "sin mencionar el nodo de red")
 # Lo que NO puede pasar: convertirlo en "no hay cobertura". Ese es el error
 # caro -- perder una venta diciendole algo falso a quien iba a contratar.
 comprobar(r["cobertura"] is True,
@@ -106,8 +113,26 @@ comprobar(r["cobertura"] is True,
 
 print("\n[2b] Con evidencia suficiente NO molesta con la confirmacion")
 r = cobertura("doña manuela")
-comprobar(not r.get("confirmar_zona"),
+comprobar(not r.get("confirmar_municipio"),
           "'DOÑA MANUELA' (84 clientes) responde directo, sin preguntar de mas")
+
+print("\n[2c] Un MUNICIPIO no es un barrio, aunque figure en el catalogo")
+# 'localidad' es texto libre en WispHub y hay registros con el municipio
+# escrito ahi. Consultarlos decia "hay cobertura", que es verdad para el
+# municipio entero y no dice nada del barrio de quien pregunta.
+#
+# El 28/08/2026 el asistente pregunto "¿tu barrio queda en Sabanagrande?", el
+# cliente contesto "no, Soledad", y el asistente consulto 'soledad' -- que
+# respondio que si por un unico registro. Le confirmo cobertura en un barrio
+# del que no sabemos nada.
+cfg.localidades.append(
+    LocalidadZona(localidad="SOLEDAD", zonas=[CORTE15], n_clientes=1))
+r = cobertura("soledad")
+comprobar(r["cobertura"] is None,
+          "consultar un municipio NO responde cobertura, ni si ni no  <- el bug")
+comprobar(r.get("es_un_municipio") == "soledad", "lo dice explicitamente")
+comprobar("barrio" in (r.get("advertencia") or "").lower(),
+          "y le pide al modelo el nombre del barrio")
 
 # ---------------------------------------------------------------------- 3 --
 print("\n[3] Un nombre escrito distinto ofrece parecidos, no un traspaso")
