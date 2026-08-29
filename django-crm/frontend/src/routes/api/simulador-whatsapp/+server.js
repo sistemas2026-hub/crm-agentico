@@ -43,7 +43,8 @@ export async function GET({ url, locals, fetch }) {
     const datos = await resp.json();
     return json({
       mensajes: (datos.mensajes ?? []).map((/** @type {any} */ m) => ({
-        id: m.id, rol: m.rol, texto: m.contenido, creado_en: m.creado_en
+        id: m.id, rol: m.rol, texto: m.contenido, creado_en: m.creado_en,
+        caso_marcado: m.caso_marcado ?? null
       })),
       cerrada: datos.conversacion?.estado === 'cerrada'
     });

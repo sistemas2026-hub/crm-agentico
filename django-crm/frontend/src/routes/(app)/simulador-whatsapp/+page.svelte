@@ -25,15 +25,15 @@
 
   /** La conversacion en curso, para poder preguntar si llego algo nuevo. */
   let conversacionActual = $state('');
-  /** Ids de mensajes que ya se dibujaron -- lo que evita repetirlos. */
-  let vistos = new Set();
+  /** Un error de red que no vive en la conversacion: se muestra aparte. */
+  let error = $state('');
 
   function reiniciar() {
     mensajes = [];
     verificado = false;
     cerrada = false;
     conversacionActual = '';
-    vistos = new Set();
+    error = '';
   }
 
   /**
@@ -57,11 +57,20 @@
       );
       if (!resp.ok) return;
       const datos = await resp.json();
-      for (const m of datos.mensajes ?? []) {
-        if (vistos.has(m.id) || m.rol !== 'assistant') continue;
-        vistos.add(m.id);
-        mensajes.push({ rol: 'asistente', texto: m.texto, deOtro: true });
-      }
+      const hilo = datos.mensajes ?? [];
+      if (!hilo.length) return;
+      // Se REEMPLAZA el hilo con lo que hay en la conversacion, en vez de ir
+      // agregando lo que falta. La conversacion es la que manda: llevar una
+      // copia aparte y una lista de "ya visto" obliga a mantener las dos en
+      // fase, y en cuanto un mensaje entra por otro lado --el colaborador
+      // desde el ticket-- dejan de coincidir. Asi no hay nada que sincronizar.
+      mensajes = hilo.map((/** @type {any} */ m) => ({
+        rol: m.rol === 'user' ? 'usuario' : 'asistente',
+        texto: m.texto,
+        conversacionId: conversacionActual,
+        mensajeId: m.id,
+        casoMarcado: m.caso_marcado
+      }));
       if (datos.cerrada) cerrada = true;
     } catch {
       // Silencio a proposito: corre cada pocos segundos.
@@ -83,6 +92,7 @@
     if (!texto || enviando || !telefono.trim()) return;
 
     mensajes.push({ rol: 'usuario', texto });
+    error = '';
     entrada = '';
     enviando = true;
     // Si la conversacion anterior se habia cerrado, escribir de nuevo abre
@@ -98,7 +108,6 @@
       const datos = await resp.json();
       if (resp.ok) {
         conversacionActual = datos.conversacion_id || conversacionActual;
-        if (datos.mensaje_id) vistos.add(datos.mensaje_id);
         // Una respuesta vacia significa que hay una persona atendiendo y el
         // asistente se callo a proposito (ver api.py). No se dibuja nada:
         // una burbuja en blanco parece un error y no lo es.
@@ -114,10 +123,10 @@
         verificado = !!datos.verificado;
         cerrada = !!datos.cerrada;
       } else {
-        mensajes.push({ rol: 'error', texto: datos.error || 'El asistente no pudo responder.' });
+        error = datos.error || 'El asistente no pudo responder.';
       }
     } catch (/** @type {any} */ err) {
-      mensajes.push({ rol: 'error', texto: err?.message || 'No se pudo contactar al asistente.' });
+      error = err?.message || 'No se pudo contactar al asistente.';
     } finally {
       enviando = false;
     }
@@ -179,6 +188,12 @@
       {/if}
       {#if cerrada && !enviando}
         <div class="chat-cerrada">Conversación finalizada — si el cliente vuelve a escribir, se abre una nueva.</div>
+      {/if}
+      <!-- Fuera del hilo a propósito: el hilo se refresca con lo que hay en la
+           conversación, y un error de red no está ahí. Dentro, desaparecería
+           solo a los pocos segundos. -->
+      {#if error}
+        <div class="chat-burbuja chat-error">{error}</div>
       {/if}
     </div>
 
