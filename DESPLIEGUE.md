@@ -100,7 +100,15 @@ Y esa rama la comparten dos personas, así que el commit de cualquiera redesplie
 
 Esta advertencia decía lo contrario hasta hoy (afirmaba que el disparador era manual). Estuvo desactualizada un tiempo indeterminado, y sirvió para razonar mal sobre por qué producción se comportaba distinto al motor local: se dio por hecho que allá había código viejo cuando ya estaba desplegado. **Si el disparador se cambia, hay que cambiar esta línea en el mismo momento.**
 
-⚠️ **Un cambio de CONFIGURACIÓN no es un despliegue, y a veces necesita un reinicio.** `nucleo/canales/api.py` cachea la config por proceso (`_configs`) y la lee una sola vez. Los endpoints del editor llaman a `olvidar_config()` al guardar, así que **lo que se edita desde la interfaz se ve al instante**. Lo que se escribe desde un script o desde otra máquina (`cli/cargar_config.py`, `editor._editar`) NO invalida el caché del motor que está corriendo: sigue sirviendo la versión vieja hasta que se reinicie. El síntoma es desconcertante — la base dice v36, el agente contesta como en v35 — y cuesta un rato si no se sabe.
+⚠️ **Un cambio de CONFIGURACIÓN no es un despliegue** — pero desde el 25/08/2026 tampoco necesita un reinicio. `nucleo/canales/api.py` cachea la config por proceso (`_configs`), y **recomprueba la versión en la base cada `SEGUNDOS_ENTRE_COMPROBACIONES = 15`**: si la base tiene una versión más nueva, la recarga sola. Los endpoints del editor además llaman a `olvidar_config()` al guardar, así que lo que se edita desde la interfaz se ve al instante; lo que se escribe desde un script o desde otra máquina (`cli/cargar_config.py`, `editor._editar`) tarda a lo sumo esos 15 segundos.
+
+> Esta advertencia decía lo contrario hasta el 02/09/2026: afirmaba que un cambio escrito desde un script exigía reiniciar el motor. Era cierto **antes** de que existiera esa comprobación, y quedó sin actualizar cuando se agregó — el síntoma que describía (la base dice v36 y el agente contesta como en v35) es justamente lo que ese chequeo vino a resolver. Si el intervalo se cambia o se quita, hay que cambiar esta línea en el mismo momento.
+
+⚠️ **Subir configuración a producción NO se hace con `cli/cargar_config.py`.** El YAML del repositorio **no es un superconjunto** de lo que hay en la base: hay campos que se pueblan en caliente y que el archivo no tiene. Medido el 02/09/2026 comparando producción (v98) contra `tenants/rapilink.config.yaml` — de 8 diferencias, 2 eran `localidades` (**128 entradas**, cargadas el 29/08) y `localidades_actualizado_en`. Una carga completa las habría vaciado sin decir nada: el cargador protege los ROLES creados desde la interfaz, y nada más.
+
+Para un cambio en producción, cambio quirúrgico con `nucleo/config/editor.py::_editar(tenant, mutar)` — lee la config vigente, aplica solo esa mutación, valida el resultado entero y sube `config_version`, todo en una transacción con la fila bloqueada y rollback ante cualquier error. Antes de escribir, comparar campo por campo (`fuente.cargar(slug)` contra `cargar_config(ruta)`) y mirar **qué cambia además de lo que se quiso cambiar**.
+
+⚠️ **Y el ORDEN importa cuando el cambio agrega campos nuevos al schema: primero el código, después la config.** `Base` usa `extra="forbid"` (`nucleo/config/schema.py`), así que una config con campos que el código desplegado no conoce deja al motor **sin poder leer su propia configuración**. Al revés es inofensivo: código nuevo con config vieja funciona, porque los campos nuevos tienen valor por defecto.
 
 ### 3. Variables
 
@@ -347,7 +355,19 @@ py -3.13 cli/cargar_corpus.py rapilink --forzar
 
 ### 6. Comprobar que quedó bien
 
-En este orden, porque cada paso descarta el anterior:
+⚠️ **Para saber si un commit LLEGÓ a producción, el sello del frontend no sirve casi nunca.** `https://agent.rapilinksas.co/_app/version.json` devuelve un número de build, y es tentador usarlo como señal de redespliegue. Solo vale para commits que tocan **`django-crm/frontend/`** — que es el `build.context` de ese servicio (`docker-compose.prod.yml`). Un commit que solo toca `nucleo/`, `tenants/` o `tests/` no invalida ninguna capa de esa imagen: Docker reusa la caché, el frontend no se reconstruye y **el sello no cambia aunque el despliegue haya salido perfecto**.
+
+Costó 14 minutos el 02/09/2026, vigilando un número que no podía moverse. Y el error es peor que perder tiempo: "el sello no cambió" se lee como "el deploy no corrió", que es exactamente la conclusión contraria a la verdadera.
+
+La comprobación que sí sirve es mirar el archivo dentro del contenedor, en **Dokploy → servicio `motor` → Docker Terminal**:
+
+```
+grep -c <algo que solo exista en el commit nuevo> /app/nucleo/<archivo tocado>.py
+```
+
+`0` = código viejo; cualquier otro número = el commit está desplegado. Y para no confundir el contenedor de producción con el local (que monta el repo y **siempre** tiene el código nuevo), comparar el hostname del prompt contra `docker exec crm-agentico-motor-1 hostname`: si coinciden, se está mirando la máquina propia y la comprobación no dice nada.
+
+Después, en este orden, porque cada paso descarta el anterior:
 
 ```
 # 1. Los siete contenedores arriba, ninguno en Restarting
@@ -411,6 +431,8 @@ py -3.13 cli/cargar_config.py tenants/rapilink.config.yaml   # archivo -> base
 ```
 
 **La carga se niega a pisar roles que solo existen en la base.** Es la protección que importa: un agente creado desde la interfaz no está en git y no se recupera. Cuando pasa, el comando dice exactamente qué se perdería y sale sin tocar nada; `--exportar` primero, revisar el `git diff`, y recién ahí cargar. Si de verdad hay que descartar lo de la base, `--forzar`.
+
+⚠️ **Esa protección cubre los ROLES y nada más.** El resto de la configuración se pisa con lo que diga el archivo, incluidos los campos que se pueblan en caliente y que el YAML no tiene — `localidades` es el caso conocido (128 entradas el 02/09/2026, y el archivo las traía vacías). Contra **producción**, entonces: comparar primero, y para un cambio acotado usar `editor._editar` en vez de la carga completa. Ver la advertencia de la sección 2, que explica el procedimiento y el orden respecto del despliegue.
 
 La exportación conserva los comentarios del YAML — son notas de verificación en vivo, no adorno — y es idempotente: exportar dos veces seguidas no cambia el archivo, así que lo que salga en el diff es cambio real.
 
