@@ -145,8 +145,8 @@ salida a internet.
         </td>
         <td>
           <div class="rotulo">Canal</div>
-          {# No se dice "(Movil)" salvo que se sepa: el dispositivo no se
-             registra, y afirmarlo seria inventar un dato del expediente. #}
+          {% comment %} No se dice "(Movil)" salvo que se sepa: el dispositivo no se
+             registra, y afirmarlo seria inventar un dato del expediente. {% endcomment %}
           <div class="valor">Formulario web</div>
         </td>
       </tr>
@@ -192,8 +192,8 @@ salida a internet.
     <table class="rejilla" style="margin-top:8px;border-top:1px solid #cfe3d6;padding-top:7px">
       <tr>
         <td>
-          {# El formato de OZMAP: latitud,longitud sin espacio, para copiar y
-             pegar tal cual en la herramienta donde se valida la cobertura. #}
+          {% comment %} El formato de OZMAP: latitud,longitud sin espacio, para copiar y
+             pegar tal cual en la herramienta donde se valida la cobertura. {% endcomment %}
           <div class="rotulo">Coordenadas OZMAP</div>
           <div class="ozmap">{{ ozmap|default:"—" }}</div>
         </td>
@@ -282,8 +282,8 @@ salida a internet.
         {% endfor %}
       </tr>
     </table>
-    {# "Recibidas", no "capturadas": no se registra cuando se tomo la foto,
-       solo cuando llego. Decir lo otro seria afirmar algo que no se sabe. #}
+    {% comment %} "Recibidas", no "capturadas": no se registra cuando se tomo la foto,
+       solo cuando llego. Decir lo otro seria afirmar algo que no se sabe. {% endcomment %}
     <div class="pie-fotos">
       Imágenes recibidas el {{ s.enviada_en|date:"d/m/Y  H:i" }} desde el
       dispositivo del solicitante.
@@ -315,7 +315,7 @@ salida a internet.
       <div class="sello-legal">
         {% if s.autoriza_centrales_riesgo %}
           Aceptación: {{ s.autorizaciones_en|date:"d/m/Y  H:i:s" }}
-          {% if s.ip_autorizaciones %} &nbsp;|&nbsp; IP: {{ s.ip_autorizaciones }}{% endif %}
+          {% if s.ip_autorizaciones %} &nbsp;|&nbsp; Aceptado desde la IP de conexión {{ s.ip_autorizaciones }}{% endif %}
         {% else %}<strong>NO AUTORIZA.</strong> El solicitante no marcó esta casilla.{% endif %}
       </div>
     </div>
@@ -329,14 +329,14 @@ salida a internet.
       <div class="sello-legal">
         {% if s.autoriza_habeas_data %}
           Aceptación: {{ s.autorizaciones_en|date:"d/m/Y  H:i:s" }}
-          {% if s.ip_autorizaciones %} &nbsp;|&nbsp; IP: {{ s.ip_autorizaciones }}{% endif %}
+          {% if s.ip_autorizaciones %} &nbsp;|&nbsp; Aceptado desde la IP de conexión {{ s.ip_autorizaciones }}{% endif %}
         {% else %}<strong>NO AUTORIZA.</strong>{% endif %}
       </div>
     </div>
 
-    {# El texto EXACTO que se le mostro, una sola vez y completo. Sin esto la
+    {% comment %} El texto EXACTO que se le mostro, una sola vez y completo. Sin esto la
        autorizacion no prueba nada: la politica cambia con el tiempo y un
-       "acepto" a secas no dice a que. #}
+       "acepto" a secas no dice a que. {% endcomment %}
     {% if s.texto_autorizaciones %}
       <div class="rotulo" style="margin-top:9px">Texto aceptado por el solicitante</div>
       <div class="texto-legal" style="padding-left:0">{{ s.texto_autorizaciones }}</div>
