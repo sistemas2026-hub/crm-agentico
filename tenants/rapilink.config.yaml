@@ -3331,9 +3331,17 @@ herramientas:
     # el unico motivo por el que existe. Antes de registrar sin numero,
     # mejor que falle y el agente lo note.
     inyectados_obligatorios: [phone]
-    requeridos: [title, city, description]
+    # 'plan_interesado' es REQUERIDO y no opcional: sin el, el formulario le
+    # vuelve a preguntar al prospecto que plan quiere cuando ya lo eligio en
+    # la conversacion. Estaba declarado en el endpoint pero NO aca, asi que el
+    # modelo no tenia como mandarlo y llegaba siempre vacio (02/09/2026).
+    requeridos: [title, city, description, plan_interesado]
     filtros_verificados:
       title: {param: title, tipo: texto, verificado_el: 2026-08-26}
+      plan_interesado: {param: plan_interesado, tipo: texto, verificado_el: 2026-09-02}
+      # El BARRIO, no el municipio. Si el prospecto solo dijo "Sabanagrande",
+      # eso es donde vive, no su barrio -- y con el municipio aca el
+      # formulario no puede buscar los planes de su zona.
       city: {param: city, tipo: texto, verificado_el: 2026-08-26}
       description: {param: description, tipo: texto, verificado_el: 2026-08-26}
       first_name: {param: first_name, tipo: texto, verificado_el: 2026-08-26}

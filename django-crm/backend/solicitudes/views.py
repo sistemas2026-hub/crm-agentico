@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import os
 
-from django.core.signing import BadSignature, SignatureExpired
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import status as http
@@ -32,7 +31,7 @@ from common.permissions import HasOrgContext
 from common.portal_tokens import resolve_portal_org_by_hash
 from common.tasks import set_rls_context
 from solicitudes.models import SolicitudServicio
-from solicitudes.tokens import SOLICITUD_TOKEN_TTL_DIAS, hash_token, solicitud_signer
+from solicitudes.tokens import hash_token, tiene_forma_de_token
 
 # El formulario acepta hasta 5 MB por imagen. El limite se aplica ACA tambien,
 # y no solo en el navegador: el navegador es del cliente, y este endpoint es
@@ -70,16 +69,16 @@ class SolicitudCrearView(APIView):
     ningun link, y nadie se entera hasta que el cliente pregunta.
 
     Devolver el link ACA es ademas lo que garantiza que no se entregue sin
-    registro: el token va firmado, asi que el modelo no puede fabricarlo ni
-    adivinarlo. Antes eso se sostenia sacando la URL del prompt; ahora se
-    sostiene solo.
+    registro: el token son 128 bits al azar, asi que el modelo no puede
+    fabricarlo ni adivinarlo -- y aunque lo hiciera, no existiria la fila.
+    Antes eso se sostenia sacando la URL del prompt; ahora se sostiene solo.
     """
 
     permission_classes = (IsAuthenticated, HasOrgContext)
 
     def post(self, request):
         from leads.models import Lead
-        from solicitudes.tokens import firmar, hash_token, link_de, vencimiento
+        from solicitudes.tokens import hash_token, link_de, nuevo_token, vencimiento
 
         org = request.profile.org
         datos = request.data
@@ -100,10 +99,11 @@ class SolicitudCrearView(APIView):
                 source=str(datos.get("source") or "other"),
                 opportunity_amount=(datos.get("opportunity_amount") or None),
             )
-            # El token se firma sobre el id del lead: asi el link queda atado a
-            # ESTE prospecto y no a un identificador suelto que despues nadie
-            # sabe de donde salio.
-            crudo = firmar(lead.id)
+            # Un token aleatorio, sin ningun dato adentro: el vinculo con
+            # este prospecto lo da la fila (solicitud.lead), no el texto del
+            # link. Asi el enlace es corto y no expone el id interno en algo
+            # que se reenvia por chat. Ver tokens.py.
+            crudo = nuevo_token()
             solicitud = SolicitudServicio.objects.create(
                 org=org, lead=lead, token_hash=hash_token(crudo),
                 expira_en=vencimiento(),
@@ -130,12 +130,10 @@ def _planes_de(localidad: str) -> list:
     no se vende, o un precio viejo, no puede colarse en un formulario que la
     persona despues firma. El catalogo del tenant es la unica fuente.
 
-    NUNCA lanza. Si el motor no responde, se devuelve vacio y el formulario cae
-    a un campo de texto libre con lo que ya traia: una solicitud que se puede
-    enviar vale mas que una lista perfecta.
+    NUNCA lanza. Si nada responde, se devuelve vacio y el formulario cae a un
+    campo de texto libre: una solicitud que se puede enviar vale mas que una
+    lista perfecta.
     """
-    if not localidad:
-        return []
     import requests
 
     base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
@@ -144,26 +142,49 @@ def _planes_de(localidad: str) -> list:
     token = os.environ.get("MOTOR_SERVICE_TOKEN")
     if token:
         cabeceras["X-Servicio-Token"] = token
+
+    if localidad:
+        try:
+            r = requests.post(f"{base}/interno/herramienta/consultar_planes_venta",
+                              params={"tenant": tenant},
+                              json={"localidad": localidad},
+                              headers=cabeceras, timeout=20)
+            r.raise_for_status()
+            planes = list(((r.json() or {}).get("resultado") or {}).get("planes") or [])
+            if planes:
+                return planes
+        except Exception as e:                      # noqa: BLE001
+            print(f"[solicitudes] no se pudieron leer los planes de "
+                  f"{localidad!r}: {type(e).__name__}: {e}")
+
+    # Sin planes por localidad, se cae al catalogo curado COMPLETO -- no a un
+    # campo de texto libre.
+    #
+    # Pasa mas de lo que parece: si en la conversacion el prospecto solo dijo
+    # el municipio ('Sabanagrande'), eso queda como barrio y no resuelve
+    # ninguna zona. Visto el 02/09/2026, y el formulario mostraba un cuadro de
+    # texto vacio donde la persona tenia que escribir el nombre del plan a
+    # mano -- que es exactamente como se pide un plan que no existe.
+    #
+    # Una lista con planes de mas es peor que la exacta, pero mucho mejor que
+    # texto libre: todo lo que aparece se vende de verdad.
     try:
-        r = requests.post(f"{base}/interno/herramienta/consultar_planes_venta",
-                          params={"tenant": tenant},
-                          json={"localidad": localidad},
-                          headers=cabeceras, timeout=20)
+        r = requests.get(f"{base}/configuracion", params={"tenant": tenant},
+                         headers=cabeceras, timeout=20)
         r.raise_for_status()
-        return list(((r.json() or {}).get("resultado") or {}).get("planes") or [])
+        return [p.get("nombre_wisphub") for p in ((r.json() or {}).get("planes_venta") or [])
+                if p.get("nombre_wisphub")]
     except Exception as e:                          # noqa: BLE001
-        print(f"[solicitudes] no se pudieron leer los planes de "
-              f"{localidad!r}: {type(e).__name__}: {e}")
+        print(f"[solicitudes] no se pudo leer el catalogo de planes: "
+              f"{type(e).__name__}: {e}")
         return []
 
 
 def _cargar(token: str):
     """(solicitud, estado_http, error). Exactamente uno de los dos lados."""
-    try:
-        solicitud_signer().unsign(token, max_age=SOLICITUD_TOKEN_TTL_DIAS * 24 * 3600)
-    except SignatureExpired:
-        return None, 410, "El enlace de la solicitud vencio."
-    except BadSignature:
+    # El token no lleva firma: es aleatorio y lo unico que lo valida es que
+    # exista la fila con su hash, y que no haya vencido. Ver tokens.py.
+    if not tiene_forma_de_token(token):
         return None, 400, "El enlace de la solicitud no es valido."
 
     h = hash_token(token)
