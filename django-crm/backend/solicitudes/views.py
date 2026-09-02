@@ -168,9 +168,12 @@ def _planes_de(localidad: str) -> list:
     #
     # Una lista con planes de mas es peor que la exacta, pero mucho mejor que
     # texto libre: todo lo que aparece se vende de verdad.
+    # OJO con el endpoint: '/configuracion' devuelve identidad, persona, modelo
+    # y roles -- NO los planes. El primer intento leia de ahi y la lista salia
+    # siempre vacia, que es como el campo terminaba en texto libre igual.
     try:
-        r = requests.get(f"{base}/configuracion", params={"tenant": tenant},
-                         headers=cabeceras, timeout=20)
+        r = requests.get(f"{base}/configuracion/planes-venta",
+                         params={"tenant": tenant}, headers=cabeceras, timeout=20)
         r.raise_for_status()
         return [p.get("nombre_wisphub") for p in ((r.json() or {}).get("planes_venta") or [])
                 if p.get("nombre_wisphub")]
