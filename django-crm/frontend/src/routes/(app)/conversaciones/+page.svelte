@@ -13,8 +13,14 @@
   let { data } = $props();
 
   let conversaciones = $derived(data.conversaciones ?? []);
+  // Mismo criterio que el filtro de la barra lateral (ver +layout.svelte):
+  // tambien cuentan las que quedaron marcadas sin escalada porque el
+  // evaluador no pudo decidir.
   let pendientes = $derived(
-    conversaciones.filter((/** @type {any} */ c) => c.escalada_a_humano && !c.atendida).length
+    conversaciones.filter(
+      (/** @type {any} */ c) =>
+        (c.escalada_a_humano || c.necesita_atencion_humana) && !c.atendida
+    ).length
   );
 </script>
 

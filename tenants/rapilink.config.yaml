@@ -4223,6 +4223,34 @@ escalamiento:
   mensaje_si_falla: >-
     No pude dejar registrado tu caso en este momento. Escríbeme de nuevo en
     un par de minutos para intentarlo otra vez.
+  # Las frases con las que el asistente promete que una persona va a atender.
+  # Si la respuesta trae una de estas y el traspaso NO quedo confirmado, se
+  # reemplaza por el mensaje de arriba. El 02/09/2026 el evaluador se cayo por
+  # timeout, nadie decidio escalar, y el modelo le dijo al cliente que su caso
+  # ya estaba con un colaborador humano: no habia caso, ni ticket, ni escalada.
+  #
+  # Se comparan en minusculas y sin importar los espacios de mas, asi que
+  # alcanza con el nucleo de la frase. Van los DOS generos y las formas que el
+  # modelo usa en la practica.
+  frases_de_traspaso:
+    - un compañero
+    - una compañera
+    - un colaborador
+    - una colaboradora
+    - un asesor
+    - una asesora
+    - un tecnico
+    - un técnico
+    - una persona del equipo
+    - el equipo de soporte
+    - te va a contactar
+    - te van a contactar
+    - te contactara
+    - te contactará
+    - te va a escribir
+    - sigue tu caso
+    - esta con un
+    - está con un
   # Un caso que quedo esperando al cliente no se queda abierto para siempre.
   # 36 h medidas desde SU ultimo mensaje, y solo si alguien del equipo ya lo
   # atendio: uno que nadie toco no esta esperando al cliente, esta esperando

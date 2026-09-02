@@ -325,8 +325,14 @@ def evaluar(config, rol: str, historial: list[dict]) -> dict | None:
             tools=[_esquema_evaluacion(config, config.roles.get(rol))],
             timeout=cliente.TIMEOUT_SECUNDARIO)
     except Exception as e:
+        # SE PROPAGA, no se devuelve None. Un fallo del evaluador y una
+        # decision de "no escalar" son cosas distintas, y colapsarlas en el
+        # mismo valor fue exactamente el bug del 02/09/2026: el turno siguio
+        # como si el evaluador hubiera dicho que no, y el modelo le prometio
+        # al cliente un colaborador que nadie registro. Quien llama decide que
+        # hacer con el fallo -- api.py ya lo captura.
         print(f"[escalamiento] fallo al evaluar: {type(e).__name__}: {e}")
-        return None
+        raise
 
     for llamada in respuesta.llamadas:
         if llamada.nombre == "evaluar_conversacion":

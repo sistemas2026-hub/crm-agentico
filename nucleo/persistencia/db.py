@@ -1248,6 +1248,42 @@ def marcar_conservar(tenant: str, conversation_id: str, conservar: bool,
         return cur.rowcount > 0
 
 
+def registrar_estado_escalada(tenant: str, conversation_id: str, estado: str,
+                             detalle: str, necesita_atencion: bool = False) -> None:
+    """
+    Deja escrito como termino el traspaso, y --si hace falta-- marca que la
+    conversacion necesita a una persona.
+
+    'necesita_atencion' se usa cuando el evaluador fallo (NO_DETERMINADO): no
+    se sabe si correspondia escalar, asi que NO se toca 'escalada_a_humano'
+    --eso pausaria al bot y afirmaria un traspaso que no ocurrio-- pero la
+    conversacion queda marcada para que alguien la mire. Es el registro real
+    mas barato que existe: una escritura, sin CRM ni sistema externo de por
+    medio, y la bandeja la muestra igual.
+
+    Nunca rompe el turno: la respuesta al cliente ya se decidio, y no poder
+    anotar esto no es motivo para tumbarla.
+    """
+    try:
+        with sesion(tenant) as (cur, org):
+            if necesita_atencion:
+                cur.execute(
+                    """update asistente.conversations
+                       set estado_escalada = %s, escalada_detalle = %s,
+                           necesita_atencion_humana = true, actualizado_en = now()
+                       where organization_id = %s and id = %s""",
+                    (estado, detalle[:400], org, conversation_id))
+            else:
+                cur.execute(
+                    """update asistente.conversations
+                       set estado_escalada = %s, escalada_detalle = %s
+                       where organization_id = %s and id = %s""",
+                    (estado, detalle[:400], org, conversation_id))
+    except Exception as e:
+        print(f"[escalamiento] no se pudo anotar el estado '{estado}': "
+              f"{type(e).__name__}: {e}")
+
+
 def marcar_atendida(tenant: str, conversation_id: str, por: str | None) -> bool:
     """
     Marca una conversacion escalada como atendida SIN pasar por el chat --

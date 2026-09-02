@@ -1484,6 +1484,17 @@ class Escalamiento(Base):
     # tema, este tiene que pedirle al cliente que vuelva a escribir, porque
     # el reintento necesita un mensaje suyo.
     mensaje_si_falla: str = ""
+    # Frases con las que ESTE tenant promete que una persona va a atender.
+    #
+    # Se usan para un candado y no para redactar: cuando el traspaso NO quedo
+    # confirmado, si la respuesta del modelo contiene una de estas, se
+    # sustituye por 'mensaje_si_falla'. Nace del 02/09/2026 -- el evaluador se
+    # cayo por timeout, nadie decidio escalar, y el modelo le dijo al cliente
+    # que su caso ya estaba con un colaborador humano.
+    #
+    # Van aca y no en el motor porque son las palabras de cada empresa. Vacio
+    # = no se revisa nada, asi que nadie estrena la sustitucion sin pedirla.
+    frases_de_traspaso: list[str] = Field(default_factory=list)
     # Horas sin que el cliente conteste antes de cerrar el caso solo. 0 = nunca
     # se cierra por tiempo, que es el valor por defecto: un caso que se cierra
     # sin que nadie lo decida es peor que uno viejo abierto, y ninguna empresa

@@ -94,13 +94,18 @@
   const etiquetaTone = (/** @type {string} */ e) => ETIQUETA_TONE[e] ?? 'ink';
   const etiquetaLabel = (/** @type {string} */ e) => (e ? e.replaceAll('_', ' ') : '');
 
-  /** Escalada, necesita atencion humana ahora, y sin que nadie del equipo
-      haya escrito: pide algo. 'necesita_atencion_humana' es independiente
-      de 'escalada_a_humano' -- toda escalada crea ticket y pausa el bot
-      igual, pero no toda escalada exige entrar ya mismo (ver
-      nucleo/seguimiento/escalamiento.py). */
+  /** Pide algo de una persona, y todavia nadie del equipo escribio.
+      Dos formas de llegar aca, y la segunda es la que importa:
+
+      - Escalada de verdad: hay caso y ticket detras.
+      - Sin escalar pero marcada: el evaluador se cayo y NO se pudo decidir si
+        correspondia escalar (NO_DETERMINADO, ver
+        nucleo/seguimiento/estado_escalada.py). No se inventa una escalada
+        --seria afirmar un traspaso que no ocurrio y pausaria al bot-- pero la
+        conversacion tiene que verse igual, o el pedido del cliente se pierde
+        en silencio, que es peor. */
   const pendiente = (/** @type {any} */ c) =>
-    c.escalada_a_humano && c.necesita_atencion_humana && !c.atendida;
+    (c.escalada_a_humano || c.necesita_atencion_humana) && !c.atendida;
 
   const AUTOR = { user: 'Cliente', assistant: 'Asistente', humano: 'Vos', tool: 'Herramienta' };
 

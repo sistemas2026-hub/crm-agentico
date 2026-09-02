@@ -49,6 +49,7 @@ from nucleo.persistencia import db as persistencia
 from nucleo.recuperacion.busqueda import recuperar
 from nucleo.recuperacion.prompt import piezas_del_system
 from nucleo.seguimiento import agendamiento
+from nucleo.seguimiento import estado_escalada
 from nucleo.seguimiento import operativo
 from nucleo.seguimiento import verificacion_accion
 from nucleo.seguimiento.forzado import (con_las_manos_vacias,
@@ -238,6 +239,61 @@ def _resolver_verificacion_pendiente(config, tenant: str, estado: dict) -> dict 
         salida["motivo_escalada"] = herramienta.verificacion.escalar_si_no_confirma
         salida["por_que"] = f"'{pendiente['herramienta']}' termino en {resultado}: {por_que}"
     return salida
+
+
+def _cerrar_el_traspaso(config, tenant: str, conversation_id, mensaje_id,
+                        respuesta: str, id_sesion: str, *, evaluador_fallo: bool,
+                        se_intento: bool, caso_creado: bool,
+                        ticket_creado: bool) -> str:
+    """
+    Decide en que termino el traspaso, lo deja escrito, y --si no quedo
+    confirmado-- impide que la respuesta lo prometa.
+
+    Devuelve el texto que de verdad sale al cliente.
+
+    LA GARANTIA, EN UNA LINEA: el texto del tenant solo REEMPLAZA al del
+    modelo dentro de la rama de escalada. Cuando esa rama no corre --porque el
+    evaluador se cayo-- el modelo queda libre de prometer lo que quiera, y el
+    02/09/2026 prometio "tu caso ya quedo en manos de un colaborador humano"
+    sin caso, sin ticket y sin escalada. Esto cierra esa puerta desde afuera.
+
+    NO_DETERMINADO no se convierte en escalada: no se toca
+    'escalada_a_humano' --eso pausaria al bot y afirmaria un traspaso que no
+    ocurrio-- pero la conversacion queda marcada para que una persona la mire,
+    que es un registro real y no una promesa.
+    """
+    estado, por_que = estado_escalada.calcular(
+        evaluador_fallo, se_intento, caso_creado, ticket_creado)
+    if not estado or not conversation_id:
+        return respuesta
+
+    necesita_persona = estado == estado_escalada.NO_DETERMINADO
+    persistencia.registrar_estado_escalada(
+        tenant, conversation_id, estado, por_que, necesita_atencion=necesita_persona)
+    print(f"[escalamiento] {id_sesion}: {estado} -- {por_que}")
+
+    if estado == estado_escalada.CONFIRMADO:
+        return respuesta
+
+    # No quedo confirmado: la respuesta no puede prometer una persona. Se
+    # revisa SOLO en este camino, que es lo que vuelve segura la comparacion
+    # por frases -- en un turno normal ni se ejecuta.
+    frase = estado_escalada.promete_traspaso(
+        respuesta, config.escalamiento.frases_de_traspaso)
+    if not frase:
+        return respuesta
+
+    print(f"[escalamiento] {id_sesion}: la respuesta prometia un traspaso "
+          f"('{frase}') sin nada registrado -- se reemplaza")
+    respuesta = _mensaje_si_no_quedo(config)
+    if mensaje_id:
+        # El mensaje ya se guardo con el texto del modelo: sin esto, la
+        # bandeja mostraria la promesa que el cliente nunca recibio.
+        try:
+            persistencia.actualizar_contenido_mensaje(tenant, mensaje_id, respuesta)
+        except Exception as e:
+            print(f"[persistencia] no se pudo corregir el mensaje: {e}")
+    return respuesta
 
 
 def _hay_verificacion_pendiente(tenant: str, conversation_id) -> bool:
@@ -864,6 +920,13 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     # (crea un ticket nuevo, pero no revienta nada).
     rol_cfg = config.roles.get(rol)
     cerrada = False
+    # Lo que hace falta para saber, al final del turno, si el traspaso ocurrio
+    # de verdad. Se declaran aca --y no dentro de la rama de escalada-- porque
+    # justamente el caso que hay que cubrir es cuando esa rama NO corre.
+    evaluador_fallo = False
+    se_intento_escalar = False
+    caso_creado = False
+    ticket_creado = False
     # 'ya_escalada' frena la creacion de un SEGUNDO caso, no la evaluacion
     # entera: una conversacion que volvio de manos de una persona sigue
     # necesitando que alguien note cuando el cliente da el tema por cerrado.
@@ -874,8 +937,12 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
         try:
             evaluacion = escalamiento.evaluar(config, rol, estado["historial"])
         except Exception as e:
+            # NO es lo mismo que 'evaluacion = None' por decision: el
+            # evaluador no llego a opinar. Se anota para poder distinguirlo
+            # al final del turno -- ver estado_escalada.calcular.
             print(f"[escalamiento] fallo al evaluar: {type(e).__name__}: {e}")
             evaluacion = None
+            evaluador_fallo = True
 
         # Escalamiento POR HECHO, no por juicio. Si una herramienta declarada
         # con 'escalar_si_falla' (schema.py) fallo en este turno, la
@@ -1115,6 +1182,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                         config, tenant, estado["sesion"], herramienta_auto,
                         veredicto.get("descripcion_visita", ""))
                     if id_ticket_auto:
+                        ticket_creado = True
                         # Queda anotado en la conversacion, no solo dentro del
                         # texto del caso: es lo que permite responder y cerrar
                         # ese ticket despues sin parsear un parrafo.
@@ -1193,6 +1261,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                         asunto=entrada_ticket.asunto,
                         prioridad=entrada_ticket.prioridad)
                     if id_ticket_operativo:
+                        ticket_creado = True
                         print(f"[escalamiento] ticket operativo #{id_ticket_operativo} "
                               f"creado con '{nombre_ticket}'")
                         persistencia.guardar_ticket_operativo(
@@ -1251,6 +1320,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                     respuesta_al_cliente = _mensaje_de_escalada(
                         config, evaluacion.get("motivo")) or respuesta
 
+                se_intento_escalar = True
                 caso_creado = escalamiento.escalar(
                     config, tenant, id_sesion, conversation_id, estado["historial"],
                     evaluacion.get("motivo", ""), evaluacion.get("etiqueta", ""),
@@ -1388,6 +1458,15 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 supervisor.revisar(config, rol, tenant, conversation_id, estado["historial"])
             except Exception as e:
                 print(f"[supervisor] fallo al revisar la conversacion: {e}")
+
+    # --- ¿el traspaso ocurrio de verdad? ------------------------------------
+    # Tres situaciones distintas que antes se veian iguales desde afuera, y la
+    # unica garantia que importa: no se afirma un traspaso que no quedo
+    # registrado. Ver nucleo/seguimiento/estado_escalada.py.
+    respuesta = _cerrar_el_traspaso(
+        config, tenant, conversation_id, mensaje_id, respuesta, id_sesion,
+        evaluador_fallo=evaluador_fallo, se_intento=se_intento_escalar,
+        caso_creado=caso_creado, ticket_creado=ticket_creado)
 
     return {"respuesta": respuesta, "verificado": estado["sesion"].verificado,
             "cerrada": cerrada, "conversacion_id": conversation_id,
