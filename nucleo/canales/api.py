@@ -53,8 +53,11 @@ from nucleo.seguimiento import estado_escalada
 from nucleo.seguimiento import operativo
 from nucleo.seguimiento import verificacion_accion
 from nucleo.seguimiento.forzado import (con_las_manos_vacias,
+                                        pidio_hablar_con_humano,
+                                        decidir_pedido_humano,
                                         escalada_forzada,
-                                        motivos_por_hecho)
+                                        motivos_por_hecho,
+                                        PIDE_HUMANO, PREGUNTAR, CONFIRMA)
 from nucleo.seguimiento import escalamiento
 from nucleo.seguimiento import resumen
 from nucleo.seguimiento import supervisor
@@ -151,6 +154,31 @@ def _pregunta_de_cierre(config) -> str:
     la empresa pidio -- no preguntar.
     """
     return (config.conversaciones.pregunta_antes_de_cerrar or "").strip()
+
+
+def _pregunta_pide_humano(config) -> str:
+    """
+    Lo que se le pregunta al cliente cuando SUENA a que querria una persona
+    pero no la pidio.
+
+    Vacia si el tenant no la declaro, y entonces no se pregunta nunca: el
+    comportamiento de siempre. Ver Escalamiento.pregunta_pide_humano.
+    """
+    return (config.escalamiento.pregunta_pide_humano or "").strip()
+
+
+def _decidir_pedido_humano(config, historial):
+    """(decision, evidencia) de los tres niveles. Ver forzado.py."""
+    esc = config.escalamiento
+    if not esc.motivo_pide_humano:
+        return None, ""
+    return decidir_pedido_humano(
+        historial, _pregunta_pide_humano(config),
+        frases=esc.frases_pide_humano,
+        ambiguas=esc.frases_intencion_ambigua,
+        afirmativas=esc.frases_afirmativas,
+        negativas=esc.frases_negativas,
+        maximo_preguntas=esc.maximo_preguntas_pide_humano)
 
 
 # Lo que se le dice al modelo segun como haya terminado la comprobacion. El
@@ -927,6 +955,11 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     se_intento_escalar = False
     caso_creado = False
     ticket_creado = False
+    # Los tres niveles de "quiero una persona" (ver forzado.py). Se declara
+    # aca por lo mismo: la rama de abajo no corre para un colaborador interno
+    # ni en una conversacion ya escalada, y el final del turno lo lee igual.
+    decision_humano, evidencia_humano = None, ""
+    preguntar_por_humano = False
     # 'ya_escalada' frena la creacion de un SEGUNDO caso, no la evaluacion
     # entera: una conversacion que volvio de manos de una persona sigue
     # necesitando que alguien note cuando el cliente da el tema por cerrado.
@@ -955,6 +988,42 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
         # ya le habia dicho al cliente que un colaborador iba a seguir su
         # caso -- o sea que la mitad de las veces le prometia una persona que
         # no llegaba nunca.
+        # "El cliente pidio una persona" es un HECHO de la conversacion, no
+        # una lectura: o lo dijo o no lo dijo. Si el evaluador elige ese
+        # motivo y no hay ni un mensaje SUYO que lo pida, no se acepta.
+        #
+        # El 02/09/2026 clasifico asi un "hola, cual es mi plan? cedula
+        # 000021": el asistente habia derivado a otro agente interno y se lo
+        # narro como "te paso con un compañero del equipo", y el evaluador
+        # leyo esa frase --suya, no del cliente-- como el pedido. Abrio un
+        # caso que nadie pidio.
+        #
+        # Se descarta el MOTIVO, no se cambia por otro: si el evaluador no
+        # supo por que escalaba, el turno sigue normal. Lo que de verdad
+        # necesite una persona va a volver por su propio camino -- la
+        # escalada forzada por hechos no pasa por aca, y si el cliente lo
+        # pide de verdad, lo dice y ahi si hay evidencia.
+        motivo_humano = config.escalamiento.motivo_pide_humano
+        if (motivo_humano and evaluacion and evaluacion.get("escalar")
+                and evaluacion.get("motivo") == motivo_humano
+                and config.escalamiento.frases_pide_humano
+                and not pidio_hablar_con_humano(
+                    estado["historial"], config.escalamiento.frases_pide_humano)):
+            print(f"[escalamiento] {id_sesion}: se descarta "
+                  f"'{motivo_humano}' -- el cliente nunca pidio una persona")
+            evaluacion = {**evaluacion, "escalar": False}
+
+        # El otro lado del mismo candado. Descartar el motivo cuando no hay
+        # evidencia deja el caso contrario sin resolver: el cliente SI la
+        # pide, o dice que si cuando se le pregunta, y todo depende de que el
+        # evaluador haya acertado. Es un hecho de la conversacion, asi que se
+        # decide leyendola -- ver decidir_pedido_humano en forzado.py.
+        decision_humano, evidencia_humano = _decidir_pedido_humano(
+            config, estado["historial"])
+        if decision_humano:
+            print(f"[escalamiento] {id_sesion}: pedido de una persona -> "
+                  f"{decision_humano} ({evidencia_humano[:60]!r})")
+
         # Si esta conversacion YA tuvo su caso, no se abre otro: lo que
         # sigue vivo es la deteccion del cierre. Sin este freno, una vuelta
         # despues de que una persona la atendio podia crear un caso duplicado.
@@ -970,6 +1039,22 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
         if not forzado and (veredicto_accion or {}).get("motivo_escalada"):
             forzado = veredicto_accion["motivo_escalada"]
             motivo_forzado = veredicto_accion.get("por_que", "")
+        # Y lo mismo cuando el que lo pidio fue el cliente: o lo dijo claro, o
+        # se le pregunto y contesto que si. Las dos son cosas que dijo EL, no
+        # lecturas de su tono, y por eso no dependen de que el evaluador
+        # coincida: el 18/08/2026 se midio que ante el mismo historial
+        # responde distinto en llamadas seguidas.
+        #
+        # Va despues de las herramientas a proposito: una que fallo en este
+        # turno describe mejor lo que hay que hacer que "pidio una persona".
+        # De cualquiera de las dos formas termina en manos de alguien.
+        if not forzado and decision_humano in (PIDE_HUMANO, CONFIRMA):
+            forzado = config.escalamiento.motivo_pide_humano
+            motivo_forzado = (
+                f"el cliente pidio hablar con una persona: "
+                f"\"{evidencia_humano[:120]}\"" if decision_humano == PIDE_HUMANO
+                else f"se le pregunto si queria una persona y dijo que si: "
+                     f"\"{evidencia_humano[:120]}\"")
         if estado["ya_escalada"]:
             forzado, motivo_forzado = None, ""
         if forzado:
@@ -1388,6 +1473,18 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                         persistencia.actualizar_contenido_mensaje(tenant, mensaje_id, respuesta)
                     except Exception as e:
                         print(f"[persistencia] no se pudo actualizar el aviso de escalada: {e}")
+        elif decision_humano == PREGUNTAR:
+            # Ni lo pidio ni es una consulta normal: esta diciendo que esto no
+            # se le esta resolviendo. No se decide por el --escalar aca abre
+            # casos que nadie pidio, y no escalar lo deja golpeando una
+            # pared--: se le PREGUNTA, y decide su respuesta.
+            #
+            # El texto se agrega despues de _cerrar_el_traspaso, al final del
+            # turno: esa funcion revisa si la respuesta promete una persona, y
+            # la pregunta nombra una. Ver mas abajo.
+            preguntar_por_humano = True
+            print(f"[escalamiento] {id_sesion}: se pregunta si quiere una "
+                  f"persona -- {evidencia_humano[:60]!r}")
         elif _hay_verificacion_pendiente(tenant, conversation_id):
             # CANDADO. Mientras una accion siga sin comprobarse, esta
             # conversacion no se cierra ni se pregunta si cerrarla: todavia no
@@ -1463,10 +1560,38 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     # Tres situaciones distintas que antes se veian iguales desde afuera, y la
     # unica garantia que importa: no se afirma un traspaso que no quedo
     # registrado. Ver nucleo/seguimiento/estado_escalada.py.
+    antes_del_candado = respuesta
     respuesta = _cerrar_el_traspaso(
         config, tenant, conversation_id, mensaje_id, respuesta, id_sesion,
         evaluador_fallo=evaluador_fallo, se_intento=se_intento_escalar,
         caso_creado=caso_creado, ticket_creado=ticket_creado)
+
+    # --- "¿quieres que te comunique con una persona?" -----------------------
+    # Se agrega ACA, con el candado ya corrido: la pregunta nombra a un
+    # colaborador humano, que es exactamente lo que ese candado busca en la
+    # respuesta para sustituirla. Puesta antes, cualquier turno con el
+    # evaluador caido la habria borrado.
+    #
+    # Y no se agrega si el candado sustituyo la respuesta: ese texto le pide
+    # al cliente que vuelva a escribir porque su pedido NO quedo registrado.
+    # Preguntarle ahi mismo si quiere una persona dice las dos cosas a la vez.
+    if preguntar_por_humano and respuesta == antes_del_candado:
+        pregunta = _pregunta_pide_humano(config)
+        respuesta = f"{respuesta}\n\n{pregunta}".strip()
+        # El historial en memoria tiene que quedar con la pregunta incluida:
+        # es de ahi de donde el proximo turno saca si YA se pregunto --el
+        # freno del bucle-- y si lo que el cliente acaba de contestar le
+        # responde a esto o a otra cosa.
+        for msg in reversed(estado["historial"]):
+            if msg.get("role") == "assistant":
+                msg["content"] = f"{msg.get('content') or ''}\n\n{pregunta}".strip()
+                break
+        if mensaje_id:
+            try:
+                persistencia.actualizar_contenido_mensaje(tenant, mensaje_id, respuesta)
+            except Exception as e:
+                print(f"[persistencia] no se pudo agregar la pregunta por "
+                      f"una persona: {e}")
 
     return {"respuesta": respuesta, "verificado": estado["sesion"].verificado,
             "cerrada": cerrada, "conversacion_id": conversation_id,

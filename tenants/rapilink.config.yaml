@@ -4232,6 +4232,71 @@ escalamiento:
   # Se comparan en minusculas y sin importar los espacios de mas, asi que
   # alcanza con el nucleo de la frase. Van los DOS generos y las formas que el
   # modelo usa en la practica.
+  # Cual de los motivos significa "el cliente pidio una persona", y con que
+  # palabras lo pide. El codigo exige encontrar una de estas en un mensaje DEL
+  # CLIENTE antes de aceptar ese motivo -- ver nucleo/seguimiento/forzado.py.
+  #
+  # El 02/09/2026 un "hola, cual es mi plan? cedula 000021" se clasifico como
+  # solicitud explicita y abrio un caso: el asistente habia dicho "te paso con
+  # un compañero" (una derivacion entre agentes internos) y el evaluador leyo
+  # esa frase suya como si la hubiera dicho el cliente.
+  motivo_pide_humano: solicitud_explicita
+  # Se comparan sin tildes y sin importar mayusculas ni espacios de mas.
+  #
+  # Aca va SOLO el vocabulario de la empresa. Las formas del idioma --"pasame
+  # con una persona", "que me atienda un humano", "no quiero hablar con un
+  # bot"-- las reconoce el motor con patrones, y ademas descarta las que
+  # niegan el pedido ("no quiero hablar con una persona") o lo cuentan en
+  # pasado ("ayer hable con un asesor"). Medido el 02/09/2026 sobre 22 formas
+  # legitimas y 15 que no deben disparar: los patrones solos dan 22/22 y
+  # ningun falso positivo, y esta lista antes aportaba los 4 falsos positivos
+  # --se comparaba como texto suelto, sin mirar lo que venia antes.
+  frases_pide_humano:
+    - call center
+    - callcenter
+    - centro de llamadas
+    - linea de atencion
+    - ejecutivo de cuenta
+    - asesor comercial
+    - un funcionario
+    - una funcionaria
+    - un colaborador
+    - una colaboradora
+    - la persona encargada
+  # Lo que se le pregunta cuando SUENA a que querria una persona y no la
+  # pidio. No se decide por el cliente: se le pregunta, y decide su respuesta.
+  pregunta_pide_humano: >-
+    ¿Deseas que te comunique con un colaborador humano para ayudarte?
+  # Una vez por conversacion. Es el freno del bucle: sin el, un cliente
+  # molesto que contesta "bueno..." recibiria la misma pregunta cada turno.
+  maximo_preguntas_pide_humano: 1
+  # Las tres listas de abajo son vocabulario colombiano y de Rapilink. La
+  # estructura --una queja de que esto no se soluciona, un "si" que abre la
+  # respuesta, una negacion-- la reconoce el motor.
+  frases_intencion_ambigua:
+    - esto no me sirve
+    - ya me tienen aburrido
+    - ya me tienen cansado
+    - siempre es lo mismo
+    - otra vez lo mismo
+    - no me han dado solucion
+    - sin solucion
+    - me toca ir a la oficina
+  frases_afirmativas:
+    - si senor
+    - si senora
+    - eso
+    - hagame el favor
+    - le agradezco
+    - de una pues
+    - listo pues
+  frases_negativas:
+    - asi vamos bien
+    - sigamos asi
+    - deja asi
+    - dejalo asi
+    - despues le digo
+    - luego le digo
   frases_de_traspaso:
     - un compañero
     - una compañera

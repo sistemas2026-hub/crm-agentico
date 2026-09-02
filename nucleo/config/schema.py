@@ -1495,6 +1495,38 @@ class Escalamiento(Base):
     # Van aca y no en el motor porque son las palabras de cada empresa. Vacio
     # = no se revisa nada, asi que nadie estrena la sustitucion sin pedirla.
     frases_de_traspaso: list[str] = Field(default_factory=list)
+    # Cual de los motivos de 'activar_si' significa "el cliente PIDIO hablar
+    # con una persona", y con que palabras lo pide en esta empresa.
+    #
+    # El evaluador elige el motivo de una lista de nombres pelados, y en
+    # español "solicitud explicita" se lee como "pidio algo explicitamente" --
+    # que es lo que hace cualquiera al escribir. El 02/09/2026 clasifico asi
+    # un "hola, cual es mi plan?" y abrio un caso que nadie pidio.
+    #
+    # Declarando los dos, el codigo exige EVIDENCIA en un mensaje del cliente
+    # antes de aceptar ese motivo. Faltando cualquiera de los dos no se
+    # revisa nada: ninguna empresa estrena la exigencia sin pedirla.
+    motivo_pide_humano: str = ""
+    frases_pide_humano: list[str] = Field(default_factory=list)
+    # Entre pedirlo y no pedirlo hay una franja enorme: "esto no me lo estas
+    # solucionando", "ya estoy cansado". No es un pedido --escalar ahi abre
+    # casos que nadie pidio-- pero tampoco es una consulta cualquiera.
+    #
+    # Ahi no se decide: se PREGUNTA, y decide la respuesta del cliente. Vacio
+    # = no se pregunta nunca, que es el comportamiento de siempre: ninguna
+    # empresa estrena esto sin escribir la pregunta que quiere hacer.
+    pregunta_pide_humano: str = ""
+    # Cuantas veces se puede hacer esa pregunta en una conversacion. Es el
+    # freno del bucle, y va en codigo y no en el prompt: un cliente molesto
+    # que contesta "bueno..." recibiria la misma pregunta en cada turno.
+    maximo_preguntas_pide_humano: int = 1
+    # Vocabulario propio de la empresa para las tres listas. La ESTRUCTURA del
+    # idioma (un "si" al principio, una negacion, una queja de que esto no se
+    # soluciona) la reconoce el motor; lo que cambia entre empresas y entre
+    # regiones son las palabras -- "de una", "listo pues", "asi estoy bien".
+    frases_intencion_ambigua: list[str] = Field(default_factory=list)
+    frases_afirmativas: list[str] = Field(default_factory=list)
+    frases_negativas: list[str] = Field(default_factory=list)
     # Horas sin que el cliente conteste antes de cerrar el caso solo. 0 = nunca
     # se cierra por tiempo, que es el valor por defecto: un caso que se cierra
     # sin que nadie lo decida es peor que uno viejo abierto, y ninguna empresa
@@ -1857,6 +1889,26 @@ class TenantConfig(Base):
         # Un 'escalar_si_falla' que apunte a un motivo no declarado no daria
         # ningun error al ejecutarse: escalaria con una razon que el resto
         # del sistema no reconoce y que nadie puede filtrar en la bandeja.
+        if (self.escalamiento.motivo_pide_humano
+                and self.escalamiento.motivo_pide_humano not in self.escalamiento.activar_si):
+            raise ValueError(
+                f"escalamiento.motivo_pide_humano dice "
+                f"'{self.escalamiento.motivo_pide_humano}', que no esta en "
+                f"activar_si -- se estaria exigiendo evidencia para un motivo "
+                f"que el evaluador no puede elegir")
+        # La pregunta sin el motivo seria una promesa vacia: se le pregunta al
+        # cliente si quiere una persona, dice que si, y no hay con que motivo
+        # escalarlo. Peor que no preguntar.
+        if (self.escalamiento.pregunta_pide_humano
+                and not self.escalamiento.motivo_pide_humano):
+            raise ValueError(
+                "escalamiento.pregunta_pide_humano necesita "
+                "'motivo_pide_humano': sin el, un cliente que conteste que si "
+                "queda sin escalar -- se le habria preguntado para nada")
+        if self.escalamiento.maximo_preguntas_pide_humano < 0:
+            raise ValueError(
+                "escalamiento.maximo_preguntas_pide_humano no puede ser "
+                "negativo. 0 = no se pregunta nunca")
         for motivo in self.escalamiento.mensajes_por_motivo:
             if motivo not in self.escalamiento.activar_si:
                 raise ValueError(

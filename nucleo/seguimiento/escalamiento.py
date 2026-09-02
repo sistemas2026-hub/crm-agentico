@@ -54,6 +54,32 @@ def _herramienta(config, nombre: str):
     return next((h for h in config.herramientas if h.nombre == nombre), None)
 
 
+def _que_significa_pedir_humano(config) -> str:
+    """
+    Aclara que quiere decir el motivo con el que la empresa marca "el cliente
+    pidio una persona". Vacio si no lo declaro.
+
+    Nace del 02/09/2026: el cliente escribio "hola, cual es mi plan? cedula
+    000021", el asistente le contesto "te paso con un compañero del equipo"
+    --era una derivacion entre agentes internos-- y el evaluador leyo esa
+    frase, que era SUYA, como si el cliente hubiera pedido un humano. Abrio un
+    caso que nadie pidio.
+    """
+    motivo = config.escalamiento.motivo_pide_humano
+    if not motivo:
+        return ""
+    # OJO: no se nombra el motivo. Decirle "no puedes elegir X" es escribirle
+    # X en el prompt, y evaluar() devuelve el motivo TAL CUAL, sin compararlo
+    # contra activar_si -- el enum es un pedido al proveedor, no una garantia
+    # nuestra. Nombrarlo lo vuelve mas probable, no menos.
+    return (" Que el cliente haya pedido hablar con una persona NO lo decides "
+            "vos: lo decide el sistema leyendo los mensajes del cliente, y "
+            "por eso ese caso no esta entre tus opciones. No elijas otro "
+            "motivo para compensarlo -- si el lo pidio, la conversacion "
+            "escala igual sin que vos hagas nada. Escala solo si hay una "
+            "razon PROPIA, de las de tu lista.")
+
+
 def _cuando_escalar(config) -> str:
     """
     Que se le dice al evaluador sobre cuando poner escalar=true.
@@ -91,8 +117,11 @@ def _motivos_a_juicio(config, rol_cfg=None) -> list[str]:
 
     Dos filtros sobre el mismo menu, por dos razones distintas:
 
-      * Los que decide un HECHO se sacan siempre (forzado.motivos_por_hecho):
-        mirando el texto no se pueden saber.
+      * Los que NO decide el modelo se sacan siempre
+        (forzado.motivos_que_no_elige_el_modelo): los que dependen de un
+        hecho de la traza --mirando el texto no se pueden saber-- y el de
+        "el cliente pidio una persona", que desde el 02/09/2026 lo decide el
+        codigo leyendo los mensajes del cliente.
       * Los que NO SON DE ESTE ROL se sacan si el rol lo declara
         ('Rol.motivos_escalada'). El evaluador ve el mismo menu en cada turno,
         y si un motivo esta ahi lo va a elegir en cuanto la conversacion se le
@@ -107,10 +136,10 @@ def _motivos_a_juicio(config, rol_cfg=None) -> list[str]:
     ni cuales eran los planes: leyo "entiendo tu molestia", sin haberse
     quejado de nada.
     """
-    por_hecho = forzado.motivos_por_hecho(config)
+    ajenos = forzado.motivos_que_no_elige_el_modelo(config)
     del_rol = set(getattr(rol_cfg, "motivos_escalada", None) or [])
     return [m for m in config.escalamiento.activar_si
-            if m not in por_hecho and (not del_rol or m in del_rol)]
+            if m not in ajenos and (not del_rol or m in del_rol)]
 
 
 def _esquema_evaluacion(config, rol_cfg=None) -> dict:
@@ -121,6 +150,12 @@ def _esquema_evaluacion(config, rol_cfg=None) -> dict:
         },
         "motivo": {
             "type": "string",
+            # Los motivos son nombres que declara cada empresa, asi que el
+            # motor no puede describirlos uno por uno. Si describe el unico
+            # cuyo significado NO se adivina del nombre: en español
+            # "solicitud explicita" se lee como "pidio algo explicitamente",
+            # que es lo que hace cualquiera al escribir. Ver
+            # _que_significa_pedir_humano.
             # Los motivos que decide un HECHO se le sacan del menu: si los ve,
             # los elige en cuanto la conversacion suene a eso, que es antes de
             # que el hecho ocurra (ver forzado.motivos_por_hecho y el caso que
@@ -132,7 +167,8 @@ def _esquema_evaluacion(config, rol_cfg=None) -> dict:
             # evaluador impreciso que un evaluador roto.
             "enum": (_motivos_a_juicio(config, rol_cfg)
                      or list(config.escalamiento.activar_si)),
-            "description": "Por que escala. Ignoralo si escalar=false.",
+            "description": ("Por que escala. Ignoralo si escalar=false."
+                            + _que_significa_pedir_humano(config)),
         },
         "etiqueta": {
             "type": "string",
@@ -316,7 +352,10 @@ def evaluar(config, rol: str, historial: list[dict]) -> dict | None:
         "role": "user",
         "content": (
             "(Instruccion del sistema, no del cliente) Evalua la conversacion "
-            "de arriba llamando a evaluar_conversacion. No respondas con texto."
+            "de arriba llamando a evaluar_conversacion. No respondas con texto. "
+            "Lo que pide el CLIENTE son solo los mensajes suyos: lo que "
+            "contestaste vos, las notas del sistema y los resultados de "
+            "herramientas son contexto, nunca un pedido suyo."
         ),
     }]
     try:

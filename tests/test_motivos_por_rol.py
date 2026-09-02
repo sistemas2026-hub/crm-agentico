@@ -72,8 +72,12 @@ class RolFalso:
 
 
 todos = escalamiento._motivos_a_juicio(cfg)
-acotado = escalamiento._motivos_a_juicio(cfg, RolFalso(["solicitud_explicita"]))
-comprobar(acotado == ["solicitud_explicita"], "el menu queda con lo declarado y nada mas")
+# El ejemplo era 'solicitud_explicita' y dejo de servir el 02/09/2026: ese
+# motivo ya no lo elige el evaluador, lo decide el codigo (ver [7]). Se cambia
+# por otro que SI se juzga leyendo la conversacion -- lo que este punto fija
+# es el filtro por rol, no cual motivo se usa de ejemplo.
+acotado = escalamiento._motivos_a_juicio(cfg, RolFalso(["duda_de_identidad"]))
+comprobar(acotado == ["duda_de_identidad"], "el menu queda con lo declarado y nada mas")
 comprobar(len(acotado) < len(todos), "y es mas chico que el menu completo")
 
 print("\n[2] Un rol que no declara nada los ve todos")
@@ -151,6 +155,82 @@ for motivo in ("solicitud_explicita", "duda_de_identidad",
 # dejaria sin mensaje a los motivos que de verdad lo necesitan.
 comprobar(QUEJA in (_mensaje_de_escalada(cfg, "frustracion_detectada") or "").lower(),
           "pero 'frustracion_detectada' si conserva el texto de la queja")
+
+# --- 7 ---------------------------------------------------------------------
+print("\n[7] 'pidio una persona' salio del menu del evaluador")
+# Desde el 02/09/2026 lo decide el codigo leyendo los mensajes del cliente
+# (forzado.decidir_pedido_humano). Dejarselo tambien al evaluador es pedir dos
+# veredictos para la misma pregunta, y el segundo tiene un costo: si lo elige
+# mal, el candado de api.py cancela la escalada entera -- y si en el fondo
+# queria escalar por OTRA razon, esa razon se pierde con el motivo.
+PEDIR_HUMANO = cfg.escalamiento.motivo_pide_humano
+comprobar(bool(PEDIR_HUMANO), "el tenant declara cual es ese motivo")
+comprobar(PEDIR_HUMANO in cfg.escalamiento.activar_si,
+          "sigue siendo un motivo valido del negocio: lo que cambia es quien "
+          "lo elige, no que exista")
+comprobar(PEDIR_HUMANO not in escalamiento._motivos_a_juicio(cfg),
+          f"'{PEDIR_HUMANO}' NO esta en el menu del evaluador")
+comprobar(PEDIR_HUMANO not in escalamiento._motivos_a_juicio(
+              cfg, RolFalso([PEDIR_HUMANO])),
+          "y no vuelve ni declarandolo en el rol, igual que los de hecho")
+comprobar(PEDIR_HUMANO in forzado.motivos_que_no_elige_el_modelo(cfg),
+          "el motor lo cuenta entre los que no elige el modelo")
+comprobar(PEDIR_HUMANO not in forzado.motivos_por_hecho(cfg),
+          "pero NO entre los de hecho: esos salen de la traza de herramientas, "
+          "y api.py saca de ahi el resumen del caso -- pedir una persona no "
+          "deja ninguna traza de herramienta")
+
+# Lo que se saca es UNO. El evaluador tiene que conservar todo lo demas, o
+# esto habria cambiado por que escala, no quien lo decide.
+menu = escalamiento._motivos_a_juicio(cfg)
+print("     menu del evaluador:", menu)
+for otro in ("frustracion_detectada", "tres_fallos_seguidos",
+             "duda_de_identidad", "sin_datos_para_diagnosticar",
+             "visita_tecnica_requerida"):
+    if otro in cfg.escalamiento.activar_si:
+        comprobar(otro in menu, f"'{otro}' sigue disponible")
+comprobar(set(cfg.escalamiento.activar_si) - set(menu)
+          == forzado.motivos_que_no_elige_el_modelo(cfg),
+          "no se perdio ningun otro motivo por el camino")
+
+# Y el esquema que ve el modelo sigue siendo valido: un enum vacio o con algo
+# que no es del negocio rompe la llamada entera, y ahi no escala nadie.
+esquema = escalamiento._esquema_evaluacion(cfg, cfg.roles["cliente_final"])
+opciones = esquema["function"]["parameters"]["properties"]["motivo"]["enum"]
+comprobar(PEDIR_HUMANO not in opciones,
+          "el esquema REAL que viaja al modelo tampoco lo ofrece")
+comprobar(bool(opciones), "el enum no queda vacio")
+comprobar(all(o in cfg.escalamiento.activar_si for o in opciones),
+          "y todo lo que ofrece existe en activar_si")
+comprobar(PEDIR_HUMANO not in str(esquema["function"]["parameters"]["properties"]["motivo"]
+                                  ["description"]),
+          "ni lo nombra en la descripcion, que seria ofrecerlo por la ventana")
+
+# EL BORDE QUE JUSTIFICA MANTENER EL CANDADO DE api.py: un tenant cuyo unico
+# motivo sea este se quedaria con el enum vacio, y un esquema invalido no deja
+# escalar por NADA. Ahi el motivo vuelve al menu a proposito -- vale mas un
+# evaluador impreciso que un evaluador roto-- y el candado es lo unico que
+# sigue exigiendo evidencia.
+solo_uno = cfg.model_copy(deep=True)
+solo_uno.escalamiento.activar_si = [PEDIR_HUMANO]
+comprobar(escalamiento._motivos_a_juicio(solo_uno) == [],
+          "ahi el evaluador se queda sin nada que juzgar")
+esquema_borde = escalamiento._esquema_evaluacion(solo_uno)
+comprobar(esquema_borde["function"]["parameters"]["properties"]["motivo"]["enum"] == [PEDIR_HUMANO],
+          "y el motivo vuelve al enum para no romper el esquema  <- por esto "
+          "el candado de api.py sigue haciendo falta")
+
+# La otra razon, y la mas fuerte: el enum es un PEDIDO al proveedor, no una
+# garantia nuestra. evaluar() devuelve llamada.argumentos tal cual, sin
+# comparar el motivo contra activar_si -- si el modelo contesta algo que no
+# estaba en la lista, entra igual. El candado es lo que lo detiene.
+import inspect                                                     # noqa: E402
+
+fuente_evaluar = inspect.getsource(escalamiento.evaluar)
+comprobar("return llamada.argumentos" in fuente_evaluar
+          and "activar_si" not in fuente_evaluar.split("for llamada")[-1],
+          "evaluar() no valida el motivo devuelto contra activar_si: el "
+          "candado no es redundante")
 
 print("\n" + "=" * 70)
 if fallos:
