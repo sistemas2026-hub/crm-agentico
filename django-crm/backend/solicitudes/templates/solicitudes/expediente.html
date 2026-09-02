@@ -34,8 +34,7 @@ salida a internet.
            border-bottom: 2px solid #1668c1; padding-bottom: 9px; margin-bottom: 12px; }
   .marca .empresa { font-size: 15pt; font-weight: 700; color: #1668c1;
                     letter-spacing: -.3px; }
-  .marca .empresa small { display: block; font-size: 7.5pt; font-weight: 600;
-                          color: #5a6672; letter-spacing: 1.6px; }
+  .marca .logo { height: 34px; width: auto; max-width: 46%; }
   .marca h1 { font-size: 13pt; margin: 0; text-align: right; color: #17335c;
               text-transform: uppercase; letter-spacing: .2px; max-width: 58%; }
 
@@ -125,10 +124,11 @@ salida a internet.
 {# ================= PAGINA 1 -- quien y donde ================= #}
 <div class="pagina">
   <div class="marca">
-    <div class="empresa">
-      {{ empresa|default:"Expediente" }}
-      <small>INTERNET + TV</small>
-    </div>
+    {% if logo %}
+      <img class="logo" src="{{ logo }}" alt="{{ empresa }}">
+    {% else %}
+      <div class="empresa">{{ empresa|default:"Expediente" }}</div>
+    {% endif %}
     <h1>Expediente de solicitud de servicio</h1>
   </div>
 
@@ -263,10 +263,11 @@ salida a internet.
 {# ================= PAGINA 2 -- la prueba ================= #}
 <div class="pagina">
   <div class="marca">
-    <div class="empresa">
-      {{ empresa|default:"Expediente" }}
-      <small>INTERNET + TV</small>
-    </div>
+    {% if logo %}
+      <img class="logo" src="{{ logo }}" alt="{{ empresa }}">
+    {% else %}
+      <div class="empresa">{{ empresa|default:"Expediente" }}</div>
+    {% endif %}
     <h1>Documentos y autorizaciones</h1>
   </div>
 

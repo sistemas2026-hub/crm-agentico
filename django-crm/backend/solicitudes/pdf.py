@@ -98,6 +98,33 @@ def _calidad_ubicacion(solicitud) -> dict:
                       "de asignar visita."}
 
 
+def _logo_de(org) -> str:
+    """El logo de la empresa como data: URI, o "" si no cargo ninguno.
+
+    Sale de `Org.logo` -- el mismo campo que ya usan las facturas-- y NO de un
+    archivo puesto en el repo. Es la diferencia entre que la proxima empresa
+    que se conecte suba su logo desde Ajustes, y que necesite que alguien le
+    toque el codigo. El expediente no puede depender de que exista: sin logo
+    imprime el nombre en texto y sale igual.
+
+    Se lee el archivo entero y se incrusta, como las fotos: al renderizar no
+    se hace ninguna peticion de red ni al disco, que es lo que permite generar
+    el PDF dentro de un contenedor sin salida a internet.
+    """
+    archivo = getattr(org, "logo", None)
+    if not archivo:
+        return ""
+    try:
+        with archivo.open("rb") as f:
+            contenido = f.read()
+    except (OSError, ValueError) as fallo:
+        # Un logo que no se puede leer no puede costar el expediente entero:
+        # el archivo pudo borrarse del almacenamiento y la fila seguir ahi.
+        print(f"[solicitudes] no se pudo leer el logo de la org: {fallo!r}")
+        return ""
+    return _data_uri(contenido, _mime_de(contenido))
+
+
 def _radicado(solicitud) -> str:
     """
     El numero con el que se nombra este expediente.
@@ -123,6 +150,7 @@ def armar_expediente(solicitud, imagenes: dict, firma: bytes) -> ContentFile:
         "generado_en": timezone.localtime(),
         "radicado": _radicado(solicitud),
         "empresa": getattr(getattr(solicitud, "org", None), "name", "") or "",
+        "logo": _logo_de(getattr(solicitud, "org", None)),
         "ubicacion": _calidad_ubicacion(solicitud),
         "imagenes": [
             {"numero": i, "rotulo": ROTULOS_IMAGEN[n], "src": _data_uri(b, _mime_de(b))}

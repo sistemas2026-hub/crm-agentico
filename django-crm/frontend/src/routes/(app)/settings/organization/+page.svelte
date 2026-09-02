@@ -65,6 +65,8 @@
 
   /** Disables every Apply / Clear button while any one of them is in flight. */
   let busy = $state(false);
+  /** Subida del logo. Aparte de `busy`, que gobierna las acciones de paquetes. */
+  let subiendo = $state(false);
   let confirmingClear = $state(false);
 
   /** Shared submit handler for the per-pack Apply forms. */
@@ -139,9 +141,60 @@
             <dd class="v2-num" style="font-size:12px">{org.phone || '—'}</dd>
             <dt>Sitio web</dt>
             <dd>{org.website || '—'}</dd>
-            <dt>Logo</dt>
-            <dd>{org.logo_url ? 'Configurado' : 'Sin configurar'}</dd>
           </dl>
+        </div>
+
+        <div class="v2-card" style="padding:16px 18px;margin-bottom:12px">
+          <div class="v2-label" style="margin-bottom:10px">Logo</div>
+
+          {#if org.logo_url}
+            <div class="marco-logo">
+              <img src={org.logo_url} alt="Logo de {org.name}" />
+            </div>
+          {:else}
+            <p class="v2-sub" style="font-size:12.5px;margin:0 0 10px">
+              Sin logo. El expediente de solicitud sale con el nombre de la empresa en texto.
+            </p>
+          {/if}
+
+          {#if data.can_edit}
+            <form
+              method="POST"
+              action="?/subirLogo"
+              enctype="multipart/form-data"
+              use:enhance={() => {
+                subiendo = true;
+                return async ({ update }) => {
+                  await update();
+                  subiendo = false;
+                };
+              }}
+              style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px"
+            >
+              <input
+                type="file"
+                name="logo"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                required
+                class="v2-input"
+                style="flex:1;min-width:200px;font-size:12.5px"
+              />
+              <button type="submit" class="v2-btn" disabled={subiendo}>
+                {subiendo ? 'Subiendo…' : org.logo_url ? 'Reemplazar' : 'Subir'}
+              </button>
+              {#if org.logo_url}
+                <button type="submit" formaction="?/quitarLogo" class="v2-btn" disabled={subiendo}>
+                  <Trash2 size={13} />Quitar
+                </button>
+              {/if}
+            </form>
+
+            <p class="v2-sub" style="font-size:12px;margin:10px 0 0;line-height:1.5">
+              PNG con fondo transparente es lo que mejor queda: el expediente se imprime sobre
+              papel blanco, y un JPG arrastra su propio fondo. Máximo 2 MB — se incrusta entero
+              dentro de cada PDF que se genera.
+            </p>
+          {/if}
         </div>
 
         <div class="v2-card" style="padding:14px 16px">
@@ -413,5 +466,25 @@
   }
   .danger-btn:hover {
     background: color-mix(in srgb, var(--v2-rust) 9%, transparent);
+  }
+
+  /* Fondo blanco fijo, no el de la app: el logo se va a imprimir sobre papel
+     blanco, y un PNG transparente con letras claras se ve bien en el tema
+     oscuro y desaparece en el PDF. Mostrarlo sobre blanco acá es lo que hace
+     visible ese problema antes de generar el primer expediente. */
+  .marco-logo {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #fff;
+    border: 1px solid var(--v2-line-soft);
+    border-radius: 6px;
+    padding: 14px;
+    min-height: 72px;
+  }
+  .marco-logo img {
+    max-height: 56px;
+    max-width: 100%;
+    object-fit: contain;
   }
 </style>
