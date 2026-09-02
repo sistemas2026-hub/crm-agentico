@@ -113,6 +113,11 @@ class SolicitudServicio(BaseModel):
     autoriza_habeas_data = models.BooleanField(default=False)
     texto_autorizaciones = models.TextField(blank=True, default="")
     autorizaciones_en = models.DateTimeField(null=True, blank=True)
+    # Desde donde se acepto. Es parte de la prueba, no un dato tecnico: una
+    # autorizacion de tratamiento de datos vale por QUE texto se acepto, CUANDO
+    # y DESDE DONDE. Los dos primeros ya estaban; este faltaba, y aparece
+    # impreso en el expediente junto al texto.
+    ip_autorizaciones = models.CharField(max_length=64, blank=True, default="")
 
     # --- estado ------------------------------------------------------------
     # El recorrido real de una solicitud, y por que tiene cuatro estados y no

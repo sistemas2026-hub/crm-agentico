@@ -61,6 +61,55 @@ def _mime_de(contenido: bytes) -> str:
     return "image/jpeg"
 
 
+# Los tres tramos de confianza de la ubicacion, y que hacer con cada uno. No
+# son adorno: deciden si alguien sale a la calle o llama primero.
+#
+# El corte esta en 50 y 100 metros. Arriba de 100 el punto puede caer a
+# cuadras de la casa -- pasa siempre que el formulario se abre desde una
+# computadora, donde no hay GPS y la ubicacion sale de la IP (se vieron
+# lecturas de 50.000 m).
+PRECISION_OPTIMA_M = 50
+PRECISION_MEDIA_M = 100
+
+
+def _calidad_ubicacion(solicitud) -> dict:
+    """Como se muestra la ubicacion y que se le dice a quien la lee."""
+    if not solicitud.tiene_gps:
+        return {"nivel": "baja", "rotulo": "SIN UBICACION",
+                "detalle": "El solicitante no compartio su ubicacion.",
+                "accion": "UBICACION NO CONFIABLE. Contactar al solicitante "
+                          "antes de asignar visita."}
+    try:
+        metros = int(float(solicitud.gps_precision_m or 0))
+    except (TypeError, ValueError):
+        metros = 0
+    if not metros:
+        return {"nivel": "media", "rotulo": "SIN PRECISION", "metros": None,
+                "detalle": "No se registro la precision de la lectura.",
+                "accion": "Verificar en mapa y confirmar con el solicitante."}
+    if metros <= PRECISION_OPTIMA_M:
+        return {"nivel": "optima", "rotulo": "Excelente", "metros": metros,
+                "accion": "Listo para validar cobertura y asignar visita."}
+    if metros <= PRECISION_MEDIA_M:
+        return {"nivel": "media", "rotulo": "Media", "metros": metros,
+                "accion": "Verificar en mapa y confirmar con el solicitante."}
+    return {"nivel": "baja", "rotulo": "Baja", "metros": metros,
+            "accion": "UBICACION NO CONFIABLE. Contactar al solicitante antes "
+                      "de asignar visita."}
+
+
+def _radicado(solicitud) -> str:
+    """
+    El numero con el que se nombra este expediente.
+
+    Se DERIVA de la fecha y del id, no se lleva un contador: un contador
+    necesita una secuencia que dos servicios pueden pisarse, y esto solo tiene
+    que ser legible y unico. Con la fecha adelante, ordena solo en una carpeta.
+    """
+    fecha = timezone.localtime(solicitud.enviada_en or timezone.now())
+    return f"R-{fecha:%Y-%m-%d}-{str(solicitud.id).replace('-', '')[-7:].upper()}"
+
+
 def armar_expediente(solicitud, imagenes: dict, firma: bytes) -> ContentFile:
     """El PDF completo, listo para guardar en el FileField."""
     from invoices.pdf import check_weasyprint
@@ -72,11 +121,21 @@ def armar_expediente(solicitud, imagenes: dict, firma: bytes) -> ContentFile:
     contexto = {
         "s": solicitud,
         "generado_en": timezone.localtime(),
+        "radicado": _radicado(solicitud),
+        "empresa": getattr(getattr(solicitud, "org", None), "name", "") or "",
+        "ubicacion": _calidad_ubicacion(solicitud),
         "imagenes": [
-            {"rotulo": ROTULOS_IMAGEN[n], "src": _data_uri(b, _mime_de(b))}
-            for n, b in imagenes.items() if b
+            {"numero": i, "rotulo": ROTULOS_IMAGEN[n], "src": _data_uri(b, _mime_de(b))}
+            for i, (n, b) in enumerate(
+                ((n, imagenes.get(n)) for n in ROTULOS_IMAGEN), start=1) if b
         ],
         "firma": _data_uri(firma, _mime_de(firma)) if firma else "",
+        # El formato que usa OZMAP para pegar una coordenada: latitud y
+        # longitud separadas por coma, sin espacio y sin grados. Se imprime
+        # asi para poder copiarla y pegarla tal cual, que es lo que hace
+        # quien valida la cobertura.
+        "ozmap": (f"{solicitud.gps_lat},{solicitud.gps_lng}"
+                  if solicitud.tiene_gps else ""),
         "mapa": (
             f"https://www.google.com/maps?q={solicitud.gps_lat},{solicitud.gps_lng}"
             if solicitud.tiene_gps else ""

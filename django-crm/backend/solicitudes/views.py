@@ -301,6 +301,12 @@ class SolicitudPublicaView(APIView):
         # El TEXTO que acepto, no solo que acepto. Ver el modelo.
         solicitud.texto_autorizaciones = str(datos.get("texto_autorizaciones") or "")
         solicitud.autorizaciones_en = timezone.now()
+        # La IP de quien acepto. Detras de Traefik la real viene en
+        # X-Forwarded-For; REMOTE_ADDR seria la del proxy y no diria nada.
+        adelante = request.META.get("HTTP_X_FORWARDED_FOR", "")
+        solicitud.ip_autorizaciones = (
+            adelante.split(",")[0].strip()
+            or request.META.get("REMOTE_ADDR", "") or "")[:64]
         solicitud.estado = SolicitudServicio.ENVIADA
         solicitud.enviada_en = timezone.now()
 
