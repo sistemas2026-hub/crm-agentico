@@ -3287,8 +3287,13 @@ herramientas:
       se puede adivinar -- si no llamas a esta herramienta, no tienes
       formulario que dar.
 
+      'barrio' es EL BARRIO que dijo el cliente, nunca el municipio: si te
+      dijo "Zarabanda", va Zarabanda, aunque sepas que queda en Soledad. Con
+      el municipio ahi, el formulario no le puede mostrar los planes de su
+      zona.
+
       'title' arma el titulo que ve el equipo comercial: escribilo como
-      "Solicitud <PLAN> - <localidad>". En 'description' resumi lo que sabes
+      "Solicitud <PLAN> - <barrio>". En 'description' resumi lo que sabes
       de la conversacion (para cuantas personas, que pregunto, cualquier
       cosa util para quien lo llame).
 
@@ -3326,15 +3331,34 @@ herramientas:
     # elegirlo, se le podria hacer registrar la solicitud a nombre del
     # telefono de otro. Por eso 'phone' tampoco esta en filtros_verificados:
     # no existe como argumento que el modelo pueda proponer.
+    # Si el modelo registra la solicitud y despues se olvida de pegar el
+    # link, el motor lo agrega. Pasaba en una de cada dos corridas: decia
+    # "listo, ya te llega el link" y no lo mandaba (02/09/2026).
+    campo_obligatorio_en_respuesta: link
     inyectar_sesion: {phone: identificador_canal}
     # Un lead sin telefono no sirve para nada: nadie puede llamarlo, que es
     # el unico motivo por el que existe. Antes de registrar sin numero,
     # mejor que falle y el agente lo note.
     inyectados_obligatorios: [phone]
-    requeridos: [title, city, description]
+    # 'plan_interesado' es REQUERIDO y no opcional: sin el, el formulario le
+    # vuelve a preguntar al prospecto que plan quiere cuando ya lo eligio en
+    # la conversacion. Estaba declarado en el endpoint pero NO aca, asi que el
+    # modelo no tenia como mandarlo y llegaba siempre vacio (02/09/2026).
+    requeridos: [title, barrio, description, plan_interesado]
     filtros_verificados:
       title: {param: title, tipo: texto, verificado_el: 2026-08-26}
-      city: {param: city, tipo: texto, verificado_el: 2026-08-26}
+      plan_interesado: {param: plan_interesado, tipo: texto, verificado_el: 2026-09-02}
+      # SE LLAMA 'barrio' Y NO 'city' A PROPOSITO. Con el nombre 'city' el
+      # modelo hacia lo literal: le pedian una ciudad y ponia la ciudad
+      # ("Soledad"), sobre todo desde que la consulta de cobertura le devuelve
+      # 'municipios' -- se lo acabamos de decir nosotros. Y con el municipio
+      # ahi, el formulario no puede buscar los planes de esa zona y el campo
+      # del plan cae a texto libre (visto el 02/09/2026).
+      #
+      # El 'param' sigue siendo 'city' porque asi se llama el campo del Lead
+      # en el CRM. Lo que cambia es el nombre que ve el modelo, que es lo
+      # unico que estaba induciendo el error.
+      barrio: {param: city, tipo: texto, verificado_el: 2026-08-26}
       description: {param: description, tipo: texto, verificado_el: 2026-08-26}
       first_name: {param: first_name, tipo: texto, verificado_el: 2026-08-26}
       opportunity_amount: {param: opportunity_amount, tipo: texto, verificado_el: 2026-08-26}

@@ -858,6 +858,20 @@ class Herramienta(Base):
     # Generico a proposito -- guarda el NOMBRE de la variable, no el dato. El
     # nucleo no sabe que existe un formulario ni una empresa que lo use.
     entrega_variable: str | None = None
+    # El nombre de un campo de la RESPUESTA de esta herramienta que TIENE que
+    # aparecer en lo que el asistente le escribe al cliente. Si la herramienta
+    # salio bien y ese valor no esta en el texto, el motor lo agrega.
+    #
+    # No es cosmetico. Medido el 02/09/2026: en una de cada dos corridas, el
+    # modelo registraba la solicitud y contestaba "listo, ya te llega el link
+    # del formulario"... sin el link. La herramienta habia funcionado, el link
+    # existia, y el cliente se quedaba esperando algo que nunca llegaba -- el
+    # peor final posible, porque todo el sistema hizo bien su trabajo.
+    #
+    # Se resuelve en codigo y no pidiendoselo al prompt porque "pegalo en el
+    # mensaje" ya estaba dicho y aun asi fallaba la mitad de las veces. El
+    # prompt es guia, nunca la garantia (PRD 7.4).
+    campo_obligatorio_en_respuesta: str | None = None
     # Si OTRO servicio del despliegue puede pedirle al motor que ejecute esta
     # herramienta, via POST /interno/herramienta/<nombre>.
     #

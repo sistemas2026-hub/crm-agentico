@@ -91,10 +91,18 @@ class AjustesView(APIView):
     permission_classes = (IsAuthenticated, HasOrgContext)
 
     def get(self, request):
+        # OJO con el endpoint: '/configuracion' devuelve identidad, persona,
+        # modelo y roles -- NO 'variables_tenant'. Leer de ahi dejaba los
+        # cuatro campos vacios y la pantalla se veia como si no hubiera nada
+        # configurado, con los valores correctos guardados.
+        #
+        # '/configuracion/variables' se agrego para esto: habia PUT y DELETE
+        # pero no lectura, asi que ninguna pantalla podia mostrar lo que hay.
         try:
-            r = _motor("/configuracion", metodo="GET", params={"tenant": _tenant()})
+            r = _motor("/configuracion/variables", metodo="GET",
+                       params={"tenant": _tenant()})
             r.raise_for_status()
-            variables = (r.json() or {}).get("variables_tenant") or {}
+            variables = (r.json() or {}).get("variables") or {}
         except Exception as e:                      # noqa: BLE001
             return Response({"error": f"No se pudo leer la configuracion: {e}"},
                             status=http.HTTP_502_BAD_GATEWAY)

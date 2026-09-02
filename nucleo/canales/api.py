@@ -2122,6 +2122,31 @@ def configuracion_canal_whatsapp():
     return jsonify({"activo": w.activo, "numero_visible": w.numero_visible})
 
 
+@app.get("/configuracion/variables")
+def configuracion_variables_listar():
+    """
+    Las variables del tenant, para que una pantalla pueda MOSTRAR lo que hay
+    cargado antes de dejar cambiarlo.
+
+    Habia PUT y DELETE pero no lectura, asi que cualquier pantalla que quisiera
+    mostrar el valor actual tenia que adivinarlo o dejar el campo vacio. Se
+    noto el 02/09/2026 armando Ajustes -> Instalaciones: los cuatro campos
+    salian en blanco aunque estuvieran configurados.
+
+    No son secretos -- eso vive en /secretos, cifrado. Aca hay dominios, ids de
+    cuenta y nombres de equipo: datos de la empresa que se editan desde la
+    interfaz (ver TenantConfig.variables_tenant en schema.py).
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        config = _config_de(tenant)
+    except Exception as e:
+        return jsonify({"error": f"No se pudo cargar la config: {e}"}), 500
+    return jsonify({"variables": dict(config.variables_tenant or {})})
+
+
 @app.put("/configuracion/variables/<nombre>")
 def configuracion_variable_guardar(nombre):
     """

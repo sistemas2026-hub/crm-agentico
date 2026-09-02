@@ -101,8 +101,13 @@ export async function getOrgSettings({ cookies }) {
  * Save org settings: `PATCH /api/org/settings/`. Admin-only and org-scoped
  * server-side. Partial, only the fields in `body` are touched.
  *
+ * `body` puede ser un objeto (JSON) o `FormData`. Lo segundo es para el logo:
+ * un archivo no viaja en JSON, y `apiRequest` ya distingue los dos casos y
+ * omite el `Content-Type` cuando es multipart, para que el navegador ponga el
+ * boundary. Sin `FormData` en el tipo, subir el logo no compila.
+ *
  * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
- * @param {Record<string, unknown>} body
+ * @param {Record<string, unknown> | FormData} body
  */
 export function updateOrgSettings({ cookies }, body) {
   return apiRequest('/org/settings/', { method: 'PATCH', body }, { cookies });

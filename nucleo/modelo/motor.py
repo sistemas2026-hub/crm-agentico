@@ -614,6 +614,29 @@ def _ejecutar_derivacion(herramienta, sesion, argumentos_modelo: dict, nombre_ro
                f"respuesta le llega ya."}
 
 
+def _con_obligatorios(texto: str, obligatorios: list[str]) -> str:
+    """
+    Agrega al final lo que el cliente TIENE que recibir y el modelo no escribio.
+
+    Medido el 02/09/2026: en una de cada dos corridas el asistente registraba
+    la solicitud y contestaba "listo, ya te llega el link del formulario"...
+    sin el link. La herramienta habia funcionado y el link existia; el cliente
+    se quedaba esperando algo que nunca iba a llegar. Es el peor final posible,
+    porque todo el sistema hizo bien su trabajo y el resultado igual se perdio.
+
+    Se agrega en vez de reescribir el mensaje: el texto del modelo ya dice lo
+    que hay que decir, lo unico que falta es el dato. Pegarlo al final no
+    contradice nada -- a diferencia de la escalada, donde el aviso SI puede
+    contradecir la pregunta que el modelo acababa de hacer (ver api.py).
+    """
+    if not obligatorios:
+        return texto
+    faltan = [v for v in obligatorios if v and v not in (texto or "")]
+    if not faltan:
+        return texto
+    return ((texto or "").rstrip() + "\n\n" + "\n".join(faltan)).strip()
+
+
 def _localidades_parecidas(config, clave: str, cuantas: int = 4) -> list[str]:
     """
     Los nombres del catalogo que se parecen a lo que escribio el cliente.
@@ -1441,6 +1464,10 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
 
     registro: list[dict] = []
     medios_pendientes: list[dict] = []
+    # Datos que una herramienta produjo y el cliente TIENE que recibir en este
+    # turno (ej. el link del formulario). Se llenan al ejecutar y se comprueban
+    # justo antes de contestar -- ver 'campo_obligatorio_en_respuesta'.
+    obligatorios: list[str] = []
 
     if not historial:
         historial.append({"role": "system", "content": construir_system(config, nombre_rol)})
@@ -1629,6 +1656,7 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                     limpio, fuga = guardia_salida.verificar(limpio)
                     if fuga:
                         print(f"[salida] fuga bloqueada en rol '{nombre_rol}': '{fuga}'")
+                    limpio = _con_obligatorios(limpio, obligatorios)
                     historial.append({"role": "assistant", "content": limpio})
                     return limpio, registro, medios_pendientes
                 break  # ya no pide mas herramientas: pasa a redaccion final
@@ -1871,6 +1899,16 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 if valor and isinstance(salida, dict):
                     salida[herramienta.entrega_variable] = valor
 
+            # Un dato que el cliente TIENE que recibir si esto salio bien --
+            # ver 'campo_obligatorio_en_respuesta' en schema.py. Se anota
+            # ahora, y antes de contestar se comprueba que este en el texto.
+            if (herramienta is not None and herramienta.campo_obligatorio_en_respuesta
+                    and codigo_error is None and isinstance(salida, dict)
+                    and not salida.get("error")):
+                imprescindible = salida.get(herramienta.campo_obligatorio_en_respuesta)
+                if imprescindible:
+                    obligatorios.append(str(imprescindible))
+
             # asistente.tool_calls: fila por invocacion, para la auditoria en
             # /conversaciones (nucleo/canales/api.py la persiste despues, una
             # vez resuelto el conversation_id). n_registros solo tiene
@@ -2010,9 +2048,13 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 # 'limite_iteraciones_agente'.
 
     if hubo_llamadas:
-        return (_redactar(referencia_redaccion, historial, config.llm.temperatura,
-                         nombres_rol=config.roles,
-                         tratamiento=config.persona.normalizar_tratamiento),
+        # Igual que en el retorno directo de mas arriba: la redaccion final es
+        # otra llamada al modelo, asi que tambien puede quedarse sin el dato.
+        return (_con_obligatorios(
+                    _redactar(referencia_redaccion, historial, config.llm.temperatura,
+                              nombres_rol=config.roles,
+                              tratamiento=config.persona.normalizar_tratamiento),
+                    obligatorios),
                 registro, medios_pendientes)
     return ("No pude completar la consulta en el numero de pasos permitido.",
             registro, medios_pendientes)
