@@ -50,6 +50,8 @@ Cuando algo falle en producción, agregarlo al set con lo que *debería* haber p
 - **La documentación de la API de WispHub es una hipótesis** — nunca una fuente de verdad. Antes de usar un filtro nuevo, cargar la skill `wisphub-api` y verificar con el método del valor imposible.
 - DeepSeek (`deepseek-v4-flash`) está aprobado para todos los roles, incluida PII, por la autorización de tratamiento que firma el cliente (Ley 1581 art. 26) — ver PRD RNF-01 antes de cuestionar por qué datos de cliente salen a una API externa.
 - Las respuestas crudas de la API de WispHub **no se persisten** en Supabase (traen contraseñas, GPS, cédula). La auditoría (`tool_calls`) guarda solo metadatos.
+- **`ACCION_CONFIRMADA` no significa que el problema del cliente esté resuelto.** Significa que la acción produjo el efecto técnico que el sistema puede medir — en `reiniciar_ont`, que el equipo reinició y volvió. Que la casa tenga internet no lo dice ningún endpoint: lo sabe el cliente, y hay que preguntárselo. La instrucción que el modelo recibe con ese estado se lo ordena así (`nucleo/canales/api.py`), y el mecanismo entero vive en `nucleo/seguimiento/verificacion_accion.py`.
+- **La condición de éxito de una acción no puede ser una mejora del ping.** Medido dos veces: el mismo equipo sano devuelve `1 de 3`, `2 de 3` y `3 de 3` en corridas seguidas (15/08/2026), y un reinicio real y confirmado dejó el ping en `3 de 3` **antes y después** (02/09/2026, ONT de pruebas). Con "el ping mejora" ese reinicio habría salido no confirmado y se habría escalado sin motivo. Lo que prueba un reinicio es `last_status_change` — un sello discreto, comparado contra sí mismo.
 
 ## Comandos útiles
 
