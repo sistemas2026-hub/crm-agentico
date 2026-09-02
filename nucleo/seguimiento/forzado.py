@@ -57,8 +57,18 @@ def motivos_por_hecho(config) -> set[str]:
     herramienta que valida el pedido nunca corrio, y el caso le decia a quien
     lo tomara que faltaba la confirmacion del cliente.
     """
-    return {h.escalar_al_completar for h in (config.herramientas or [])
-            if h.escalar_al_completar}
+    motivos = {h.escalar_al_completar for h in (config.herramientas or [])
+               if h.escalar_al_completar}
+    # Lo mismo vale para el que sale de una comprobacion posterior: "la accion
+    # no produjo su efecto" es una medicion, no algo que se pueda juzgar
+    # leyendo la conversacion. Si estuviera en el menu, el evaluador lo
+    # elegiria en cuanto el cliente dijera que sigue igual -- antes de que
+    # nadie haya medido nada.
+    motivos |= {h.verificacion.escalar_si_no_confirma
+                for h in (config.herramientas or [])
+                if getattr(h, "verificacion", None)
+                and h.verificacion.escalar_si_no_confirma}
+    return motivos
 
 
 def escalada_forzada(config, registro_herramientas: list[dict]) -> tuple[str | None, str]:

@@ -3654,6 +3654,39 @@ herramientas:
       - {herramienta: ping_cliente, campo: "ping-exitoso",
          valores: ["1 de 3", "2 de 3", "3 de 3"]}
     limite_por_conversacion: 1
+    # Que el comando se haya mandado no dice nada: el proveedor contesta
+    # "Device reboot command sent" en medio segundo. Esto es lo que se mide
+    # DESPUES para saber si sirvio. Ver nucleo/seguimiento/verificacion_accion.py.
+    #
+    # POR QUE NO ALCANZA EL PING SOLO. Comparar el ping de antes contra el de
+    # despues parece lo natural y no sirve: esta medido aca mismo (15/08/2026)
+    # que el MISMO equipo sano devuelve '1 de 3', '2 de 3' y '3 de 3' en
+    # corridas seguidas. Con esa varianza, "mejoro" se cumple por ruido y
+    # "no mejoro" condena a un equipo que reinicio perfecto.
+    #
+    # Lo que si prueba un reinicio es 'last_status_change': un sello discreto
+    # que solo se mueve cuando el equipo cambia de estado. Se compara SmartOLT
+    # contra SmartOLT --solo "¿cambio?", nunca "¿cuando fue en UTC?"-- asi que
+    # la trampa de zonas horarias que documenta la skill no aplica.
+    #
+    # El ping queda como segunda comprobacion para lo unico que su ruido no
+    # afecta: si el equipo CONTESTA o no contesta.
+    #
+    # 120 segundos: el ping vuelve a responder a los ~73 s (medido en vivo,
+    # 14/08/2026). Tres intentos, en turnos distintos -- si el cliente escribe
+    # antes de tiempo, se le dice que se esta confirmando y se mide en el
+    # siguiente.
+    verificacion:
+      espera_segundos: 120
+      max_intentos: 3
+      escalar_si_no_confirma: accion_sin_efecto
+      comprobaciones:
+        - {herramienta: consultar_estado_ont, campo: last_status_change, regla: cambio}
+        - {herramienta: ping_cliente, campo: "ping-exitoso", regla: valores,
+           valores: ["1 de 3", "2 de 3", "3 de 3"]}
+    # Si la llamada MISMA falla (SmartOLT caido, serial rechazado) el caso pasa
+    # a una persona por este motivo, sin que dependa de como lo lea el modelo.
+    escalar_si_falla: sin_datos_para_diagnosticar
     # Empujon de segunda oportunidad -- ver el campo en schema.py. El motor
     # inyecta esto apenas la señal y el ping YA dieron favorable en esta
     # conversacion, para que el modelo lo considere antes de redactar (no
@@ -4119,7 +4152,8 @@ escalamiento:
   # con 'escalar_al_completar'. Esta en esta lista porque el validador exige
   # que todo motivo exista, no para que el modelo lo proponga.
   activar_si: [frustracion_detectada, tres_fallos_seguidos, solicitud_explicita, duda_de_identidad,
-               visita_tecnica_requerida, sin_datos_para_diagnosticar, pedido_para_ejecutar]
+               visita_tecnica_requerida, sin_datos_para_diagnosticar, pedido_para_ejecutar,
+               accion_sin_efecto]
   destino_rol: soporte
   # Este texto REEMPLAZA la respuesta del asistente cuando escala (ver
   # nucleo/canales/api.py), no se le suma -- asi que tiene que sostenerse
@@ -4138,6 +4172,12 @@ escalamiento:
   # quejas, y contestarles "entiendo tu molestia" desconcierta a quien no se
   # quejo de nada.
   mensajes_por_motivo:
+    # El reinicio salio y no se pudo confirmar que el equipo volviera. Se le
+    # dice lo que pasa, sin prometer que quedo resuelto ni dar por hecho que
+    # se rompio algo: eso todavia no se sabe.
+    accion_sin_efecto: >-
+      Reinicié tu equipo y no logré confirmar que haya vuelto. Te paso con un
+      compañero del equipo para que lo revise.
     pedido_para_ejecutar: >-
       Listo, tu pedido quedó registrado. Un compañero del equipo lo va a
       aplicar y te confirma cuando esté hecho.

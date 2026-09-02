@@ -50,6 +50,7 @@ from nucleo.recuperacion.busqueda import recuperar
 from nucleo.recuperacion.prompt import piezas_del_system
 from nucleo.seguimiento import agendamiento
 from nucleo.seguimiento import operativo
+from nucleo.seguimiento import verificacion_accion
 from nucleo.seguimiento.forzado import (con_las_manos_vacias,
                                         escalada_forzada,
                                         motivos_por_hecho)
@@ -149,6 +150,115 @@ def _pregunta_de_cierre(config) -> str:
     la empresa pidio -- no preguntar.
     """
     return (config.conversaciones.pregunta_antes_de_cerrar or "").strip()
+
+
+# Lo que se le dice al modelo segun como haya terminado la comprobacion. El
+# estado lo calcula el codigo; esto solo lo traduce a una instruccion, porque
+# saber "ACCION_CONFIRMADA" no le dice al modelo que hacer con eso.
+#
+# El texto de ACCION_CONFIRMADA es el mas importante de los cuatro: confirmar
+# que el equipo reinicio NO es confirmar que el cliente tiene internet. Ese
+# dato no lo tiene ningun endpoint -- lo tiene el cliente, y hay que
+# preguntarselo.
+_INSTRUCCION_VERIFICACION = {
+    verificacion_accion.CONFIRMADA:
+        "El equipo hizo lo que se le pidio y volvio a responder. Eso NO "
+        "significa que el cliente ya tenga servicio: preguntale si le volvio, "
+        "con esas palabras, y espera su respuesta antes de dar nada por "
+        "resuelto.",
+    verificacion_accion.NO_CONFIRMADA:
+        "Se midio y el efecto no aparecio. NO le digas que quedo resuelto y "
+        "NO repitas la accion. El caso pasa a una persona del equipo.",
+    verificacion_accion.NO_VERIFICABLE:
+        "No se pudo comprobar -- no que haya fallado, sino que no hubo con "
+        "que medir. No afirmes que se resolvio ni que no se resolvio; dile al "
+        "cliente que estas confirmando y que un compañero sigue el caso.",
+    verificacion_accion.PENDIENTE:
+        "Todavia no se puede comprobar: hace falta que pase mas tiempo. NO "
+        "afirmes que quedo resuelto. Si el cliente pregunta, dile que estas "
+        "esperando para confirmar.",
+}
+
+
+def _resolver_verificacion_pendiente(config, tenant: str, estado: dict) -> dict | None:
+    """
+    Mide y cierra la verificacion que dejo un turno anterior, si ya vencio.
+
+    Devuelve None cuando no hay nada que comprobar. Si hay, devuelve el estado
+    calculado, la nota que se le inyecta al modelo, y --cuando corresponda-- el
+    motivo con el que hay que escalar.
+
+    Corre al empezar el turno y no al final del anterior por lo unico que
+    importa: el equipo necesita minutos para volver, y bloquear el turno
+    esperandolo deja al cliente mirando "escribiendo" por algo que no depende
+    de nosotros. Cuando vuelve a escribir, el plazo ya paso.
+    """
+    conversacion = estado.get("conversacion_id")
+    if not conversacion:
+        return None
+    pendiente = persistencia.verificacion_pendiente_de(tenant, conversacion)
+    if not pendiente:
+        return None
+
+    herramienta = next((h for h in config.herramientas
+                        if h.nombre == pendiente["herramienta"]), None)
+    if herramienta is None or not herramienta.verificacion:
+        # La herramienta dejo de declarar verificacion (cambio de config entre
+        # un turno y otro). No se puede medir contra un criterio que ya no
+        # existe, y dejarla pendiente para siempre trabaria el cierre.
+        persistencia.resolver_verificacion(
+            tenant, pendiente["id"], verificacion_accion.NO_VERIFICABLE,
+            "la herramienta ya no declara como comprobarse", None,
+            pendiente["intentos"])
+        return None
+
+    if not pendiente["vencida"]:
+        return {"estado": verificacion_accion.PENDIENTE,
+                "nota": _nota_verificacion(pendiente["herramienta"],
+                                           verificacion_accion.PENDIENTE, "")}
+
+    intentos = int(pendiente["intentos"]) + 1
+    medicion_posterior = motor.medir_para_verificar(
+        config, herramienta.verificacion, estado["sesion"],
+        config.identidad.slug, config.variables_tenant)
+    resultado, por_que = verificacion_accion.evaluar(
+        herramienta.verificacion.comprobaciones,
+        pendiente["medicion_previa"] or {}, medicion_posterior,
+        intentos, int(pendiente["max_intentos"]))
+    persistencia.resolver_verificacion(
+        tenant, pendiente["id"], resultado, por_que, medicion_posterior, intentos)
+    print(f"[verificacion] {pendiente['herramienta']} -> {resultado} "
+          f"(intento {intentos}/{pendiente['max_intentos']}): {por_que}")
+
+    salida = {"estado": resultado,
+              "nota": _nota_verificacion(pendiente["herramienta"], resultado, por_que)}
+    if (resultado in (verificacion_accion.NO_CONFIRMADA,
+                      verificacion_accion.NO_VERIFICABLE)
+            and herramienta.verificacion.escalar_si_no_confirma):
+        salida["motivo_escalada"] = herramienta.verificacion.escalar_si_no_confirma
+        salida["por_que"] = f"'{pendiente['herramienta']}' termino en {resultado}: {por_que}"
+    return salida
+
+
+def _hay_verificacion_pendiente(tenant: str, conversation_id) -> bool:
+    """
+    Si esta conversacion tiene una accion ejecutada y todavia sin comprobar.
+
+    Ante la duda dice que NO hay: un fallo al leer la base no puede dejar
+    conversaciones imposibles de cerrar para siempre. Es la eleccion menos
+    mala de las dos -- la otra es un cliente atrapado.
+    """
+    if not conversation_id:
+        return False
+    return bool(persistencia.verificacion_pendiente_de(tenant, conversation_id))
+
+
+def _nota_verificacion(herramienta: str, resultado: str, por_que: str) -> str:
+    """El resultado, ya calculado, en la forma en que el modelo lo recibe."""
+    detalle = f" ({por_que})" if por_que else ""
+    return ("(Nota del sistema, no del cliente) Comprobacion de "
+            f"'{herramienta}': {resultado}{detalle}. "
+            + _INSTRUCCION_VERIFICACION.get(resultado, ""))
 
 
 def _mensaje_de_cierre(config) -> str:
@@ -517,6 +627,14 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
         estado["historial"].append({"role": "system", "content": estado["nota_pendiente"]})
         estado["nota_pendiente"] = None
 
+    # --- ¿quedo algo sin comprobar del turno anterior? ----------------------
+    # Va antes de TODO lo que puede cortar el turno, incluida la pausa por
+    # escalada. Si esperara a la parte donde habla el modelo, una conversacion
+    # que paso a una persona no resolveria nunca su comprobacion pendiente --
+    # y como esa pendiente traba el cierre, el caso quedaria atascado hasta el
+    # barrido por inactividad.
+    veredicto_accion = _resolver_verificacion_pendiente(config, tenant, estado)
+
     # --- si ya se escalo, el bot NO contesta ---------------------------------
     # Va antes de motor.responder() a proposito. Marcar la conversacion como
     # escalada y despues dejar que el modelo siga respondiendo deja al cliente
@@ -561,6 +679,10 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                                or veredicto.get("confirma_cierre"))
             except Exception as e:
                 print(f"[escalamiento] no se pudo evaluar el turno pausado: {e}")
+            if cerrado and _hay_verificacion_pendiente(tenant, estado["conversacion_id"]):
+                print(f"[verificacion] {id_sesion}: el cliente da por cerrado, "
+                      "pero hay una accion sin comprobar -- no se cierra")
+                cerrado = False
             if cerrado and not persistencia.atendida_por_humano(
                     tenant, estado["conversacion_id"]):
                 print(f"[escalamiento] {id_sesion}: el cliente da por cerrado, "
@@ -652,6 +774,13 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
         # que un caso nuevo no seria un duplicado sino uno legitimo.
         estado["ya_escalada"] = False
 
+    # El resultado ya calculado entra al contexto del modelo ANTES de que
+    # redacte: si llegara despues, le contestaria al cliente sin saber si el
+    # equipo volvio. Le llega un ESTADO, no dos mediciones para que opine.
+    if veredicto_accion:
+        estado["historial"].append(
+            {"role": "system", "content": veredicto_accion["nota"]})
+
     respuesta, registro_herramientas, medios_pendientes = motor.responder(
         config, rol, mensaje, estado["historial"], estado["sesion"],
         nota_continuidad=nota_continuidad)
@@ -687,6 +816,12 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
         for llamada in registro_herramientas:
             persistencia.registrar_llamada_herramienta(
                 tenant, conversation_id, rol, llamada, profile_id=profile_id)
+            # La accion quedo hecha pero sin comprobar: se anota para medirla
+            # en un turno siguiente, cuando haya pasado el plazo.
+            if llamada.get("verificacion_pendiente"):
+                persistencia.guardar_verificacion_pendiente(
+                    tenant, conversation_id, llamada["herramienta"],
+                    llamada["verificacion_pendiente"])
         # Mismo motivo que el bucle de arriba: un archivo generado por una
         # herramienta 'agregado' exportable (ver nucleo/herramientas/
         # informes.py) no se pudo guardar dentro de motor.responder() porque
@@ -760,6 +895,14 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             evaluacion = {**evaluacion, "escalar": False}
 
         forzado, motivo_forzado = escalada_forzada(config, registro_herramientas)
+        # Una accion que se ejecuto y no se pudo confirmar escala por el
+        # motivo que declara su propia herramienta, no por lo que el modelo
+        # opine del resultado. Va despues de escalada_forzada y solo si esa no
+        # encontro nada: una herramienta que fallo AHORA pesa mas que una
+        # comprobacion de un turno anterior.
+        if not forzado and (veredicto_accion or {}).get("motivo_escalada"):
+            forzado = veredicto_accion["motivo_escalada"]
+            motivo_forzado = veredicto_accion.get("por_que", "")
         if estado["ya_escalada"]:
             forzado, motivo_forzado = None, ""
         if forzado:
@@ -1175,6 +1318,18 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                         persistencia.actualizar_contenido_mensaje(tenant, mensaje_id, respuesta)
                     except Exception as e:
                         print(f"[persistencia] no se pudo actualizar el aviso de escalada: {e}")
+        elif _hay_verificacion_pendiente(tenant, conversation_id):
+            # CANDADO. Mientras una accion siga sin comprobarse, esta
+            # conversacion no se cierra ni se pregunta si cerrarla: todavia no
+            # se sabe si lo que se hizo sirvio. Cerrar aca dejaria al cliente
+            # sin servicio y al caso marcado como resuelto.
+            #
+            # No se queda trabado para siempre: la verificacion se resuelve
+            # sola --confirmada, no confirmada o no verificable-- al agotar
+            # sus intentos, y una conversacion abandonada la cierra igual el
+            # barrido por inactividad.
+            print(f"[verificacion] {id_sesion}: no se cierra, hay una accion "
+                  "sin comprobar")
         elif (evaluacion and estado["cierre_propuesto"] and _pregunta_de_cierre(config)
                 and not evaluacion.get("confirma_cierre")):
             # Se le pregunto y NO dijo que si: trajo otra cosa. La pregunta

@@ -1137,6 +1137,48 @@ def _resolver_argumentos(herramienta, sesion, argumentos_modelo: dict,
     return argumentos
 
 
+def medir_para_verificar(config, verificacion, sesion, tenant: str | None,
+                         variables_tenant: dict | None = None) -> dict:
+    """
+    Toma una medicion con cada herramienta que la verificacion declara.
+
+    {nombre: respuesta cruda} -- y None en la que no se pudo medir, que es lo
+    que despues se traduce en NO_VERIFICABLE en vez de en un fallo inventado.
+
+    TRES COSAS QUE HACE A PROPOSITO:
+
+    - Devuelve la respuesta CRUDA, sin pasar por la lista blanca del rol. El
+      campo que prueba un reinicio ('last_status_change') no es algo que el
+      modelo tenga que ver ni decidir: lo compara el codigo. La lista blanca
+      sigue gobernando lo que se le muestra al modelo, que es para lo que
+      existe.
+
+    - No toca el cache del turno. Ese cache vive dentro de responder() y sirve
+      para no repetir una lectura que el modelo pidio dos veces en el mismo
+      turno; una medicion de verificacion tiene que ser FRESCA por definicion
+      -- reusar el ping de antes del reinicio daria por confirmado lo que
+      justamente hay que comprobar.
+
+    - Nunca levanta: una medicion que falla es un dato ('no se pudo medir'),
+      no un error que tumbe el turno.
+    """
+    por_nombre = {h.nombre: h for h in config.herramientas}
+    medicion: dict = {}
+    for comprobacion in verificacion.comprobaciones:
+        herr = por_nombre.get(comprobacion.herramienta)
+        if herr is None:
+            medicion[comprobacion.herramienta] = None
+            continue
+        try:
+            medicion[comprobacion.herramienta] = _ejecutar_tool(
+                herr, sesion, {}, tenant, variables_tenant)
+        except Exception as e:
+            print(f"[verificacion] no se pudo medir con "
+                  f"'{comprobacion.herramienta}': {type(e).__name__}: {e}")
+            medicion[comprobacion.herramienta] = None
+    return medicion
+
+
 def _ejecutar_tool(herramienta, sesion, argumentos_modelo: dict,
                    tenant: str | None = None,
                    variables_tenant: dict | None = None,
@@ -1616,6 +1658,11 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
             herramienta = next((h for h in herramientas if h.nombre == llamada.nombre), None)
             t0 = time.monotonic()
             codigo_error = None
+            # Se inicializa para TODA llamada, no solo para la rama que mide:
+            # la traza se arma mas abajo para cualquiera de los caminos de
+            # despacho, y una accion que salio por otra rama tiene que llegar
+            # ahi con la medicion en None, no sin definir.
+            medicion_previa = None
 
             if herramienta is None:
                 # El catalogo que vio el modelo ya estaba acotado al rol, pero
@@ -1736,6 +1783,14 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 if herramienta.solo_lectura and clave_cache in cache_turno:
                     salida, codigo_error = cache_turno[clave_cache]
                 else:
+                    # La medicion de ANTES se toma aca, pegada a la accion, y
+                    # no de lo que el modelo haya consultado antes: asi el
+                    # punto de partida es siempre el mismo instante y no
+                    # depende de que herramientas se le ocurrio pedir.
+                    if herramienta.verificacion and not herramienta.solo_lectura:
+                        medicion_previa = medir_para_verificar(
+                            config, herramienta.verificacion, sesion,
+                            config.identidad.slug, config.variables_tenant)
                     try:
                         crudo = _ejecutar_tool(herramienta, sesion, llamada.argumentos,
                                               config.identidad.slug, config.variables_tenant)
@@ -1839,10 +1894,22 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 if (herramienta and herramienta.resumen_desde
                         and codigo_error is None and isinstance(salida, dict)):
                     resumen_pedido = str(salida.get(herramienta.resumen_desde) or "")
+                # La verificacion pendiente viaja con la traza porque aca
+                # todavia no existe conversation_id -- lo resuelve api.py al
+                # persistir el turno, igual que con los archivos generados.
+                pendiente = None
+                if (herramienta and herramienta.verificacion
+                        and not herramienta.solo_lectura and codigo_error is None):
+                    pendiente = {
+                        "espera_segundos": herramienta.verificacion.espera_segundos,
+                        "max_intentos": herramienta.verificacion.max_intentos,
+                        "medicion_previa": medicion_previa,
+                    }
                 registro.append({
                     "herramienta": llamada.nombre,
                     "parametros": _enmascarar(llamada.argumentos),
                     "resumen": resumen_pedido,
+                    "verificacion_pendiente": pendiente,
                     "exito": codigo_error is None,
                     "n_registros": len(salida) if isinstance(salida, list) else None,
                     "codigo_error": codigo_error,

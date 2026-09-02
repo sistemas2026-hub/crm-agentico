@@ -583,6 +583,88 @@ def atendida_por_humano(tenant: str, conversation_id: str) -> bool:
         return False
 
 
+def guardar_verificacion_pendiente(tenant: str, conversation_id: str,
+                                   herramienta: str, pendiente: dict) -> None:
+    """
+    Anota que una accion quedo sin comprobar. Ver
+    supabase/202609021130_verificacion_accion.sql.
+
+    Nunca rompe el turno: la accion YA se ejecuto, y no poder anotarla no es
+    motivo para tumbarle la respuesta al cliente. Lo que se pierde si esto
+    falla es la comprobacion, y queda dicho en el log.
+    """
+    try:
+        with sesion(tenant) as (cur, org):
+            cur.execute(
+                """insert into asistente.verificaciones_accion
+                     (organization_id, conversation_id, herramienta,
+                      espera_segundos, max_intentos, medicion_previa)
+                   values (%s, %s, %s, %s, %s, %s)""",
+                (org, conversation_id, herramienta,
+                 int(pendiente.get("espera_segundos") or 0),
+                 int(pendiente.get("max_intentos") or 1),
+                 json.dumps(pendiente.get("medicion_previa"), ensure_ascii=False)))
+    except Exception as e:
+        print(f"[verificacion] no se pudo anotar la de '{herramienta}': "
+              f"{type(e).__name__}: {e}")
+
+
+def verificacion_pendiente_de(tenant: str, conversation_id: str) -> dict | None:
+    """
+    La verificacion sin resolver de esta conversacion, si la hay.
+
+    Devuelve tambien 'vencida': si ya paso el plazo y por lo tanto medir de
+    nuevo significa algo. El candado de cierre mira la fila entera; quien va a
+    medir mira 'vencida'.
+    """
+    try:
+        with sesion(tenant) as (cur, org):
+            cur.execute(
+                """select id, herramienta, espera_segundos, max_intentos,
+                          intentos, medicion_previa, ejecutada_en,
+                          (now() >= ejecutada_en
+                           + make_interval(secs => espera_segundos)) as vencida
+                     from asistente.verificaciones_accion
+                    where organization_id = %s and conversation_id = %s
+                      and estado = 'VERIFICACION_PENDIENTE'
+                    order by ejecutada_en
+                    limit 1""",
+                (org, conversation_id))
+            fila = cur.fetchone()
+            return dict(fila) if fila else None
+    except Exception as e:
+        print(f"[verificacion] no se pudo leer la pendiente: "
+              f"{type(e).__name__}: {e}")
+        return None
+
+
+def resolver_verificacion(tenant: str, verificacion_id: str, estado: str,
+                          por_que: str, medicion_posterior: dict | None,
+                          intentos: int) -> None:
+    """
+    Guarda el resultado de haber medido. Si el estado sigue siendo pendiente
+    solo sube el contador de intentos y la ultima medicion -- el plazo se
+    cuenta desde la ejecucion, no desde el ultimo intento.
+    """
+    from nucleo.seguimiento import verificacion_accion
+
+    try:
+        with sesion(tenant) as (cur, org):
+            cur.execute(
+                """update asistente.verificaciones_accion
+                      set estado = %s, por_que = %s, medicion_posterior = %s,
+                          intentos = %s,
+                          verificada_en = case when %s then now() else null end
+                    where organization_id = %s and id = %s""",
+                (estado, por_que[:400],
+                 json.dumps(medicion_posterior, ensure_ascii=False),
+                 intentos, estado in verificacion_accion.TERMINALES,
+                 org, verificacion_id))
+    except Exception as e:
+        print(f"[verificacion] no se pudo guardar el resultado: "
+              f"{type(e).__name__}: {e}")
+
+
 def ticket_operativo_de(tenant: str, conversation_id: str) -> str | None:
     """El ticket del sistema del ISP que abrio esta conversacion, si abrio uno."""
     try:

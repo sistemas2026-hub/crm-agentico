@@ -583,6 +583,46 @@ class Precondicion(Base):
         return leido == self.valor
 
 
+class Comprobacion(Base):
+    """
+    Una medicion que tiene que dar bien para dar la accion por confirmada.
+
+    Misma forma que 'Precondicion' -- herramienta y campo -- porque es la
+    misma idea mirada al reves: aquella dice que hace falta ANTES de actuar,
+    esta que tiene que pasar DESPUES.
+    """
+    herramienta: str
+    campo: str
+    # 'cambio'  = el valor de despues tiene que ser distinto al de antes.
+    # 'valores' = el valor de despues tiene que estar en 'valores'.
+    regla: Literal["cambio", "valores"] = "cambio"
+    valores: list[str] = Field(default_factory=list)
+
+
+class Verificacion(Base):
+    """
+    Que medir despues de una accion, cuando, y que cuenta como confirmado.
+
+    El tiempo NO se espera dentro del turno: la accion termina, el turno
+    cierra, y la medicion se toma en el turno siguiente cuando ya paso
+    'espera_segundos'. Bloquear al cliente minuto y medio mirando "escribiendo"
+    para averiguar algo que el propio equipo tarda en resolver es peor
+    atencion, no mejor.
+    """
+    comprobaciones: list[Comprobacion] = Field(default_factory=list)
+    # Cuanto tiene que pasar antes de que la medicion signifique algo. Medirlo
+    # antes solo produce un 'todavia no' caro.
+    espera_segundos: int = 120
+    # Cuantas veces se vuelve a medir antes de darla por no confirmada. Son
+    # intentos de MEDICION, no de la accion: la accion se ejecuta una sola vez
+    # (ver 'limite_por_conversacion').
+    max_intentos: int = 3
+    # Motivo con el que se escala si la verificacion no confirma. Vacio deja
+    # la decision en manos del modelo, que es justo lo que esto viene a
+    # evitar; el validador exige que el motivo exista en 'activar_si'.
+    escalar_si_no_confirma: str = ""
+
+
 class Herramienta(Base):
     nombre: str
     # 'interno': no llama a ninguna API -- el motor la resuelve el mismo
@@ -721,6 +761,15 @@ class Herramienta(Base):
     # Son DOS herramientas y no una con un parametro, porque el codigo de
     # estado ('en progreso', 'cerrado') es del proveedor y va en
     # 'argumentos_fijos' de cada una -- el motor no puede conocer esos numeros.
+    # Como se comprueba que esta accion produjo su efecto. Ver
+    # nucleo/seguimiento/verificacion_accion.py.
+    #
+    # Existe porque una herramienta de escritura confirma que el COMANDO SE
+    # MANDO, no que sirvio: 'Device reboot command sent' llega en medio
+    # segundo y el equipo tarda minutos en volver. Sin esto, lo unico que
+    # separaba "se mando" de "funciono" era que el modelo leyera bien esa
+    # palabra.
+    verificacion: Verificacion | None = None
     responde_ticket_operativo: bool = False
     cierra_ticket_operativo: bool = False
     # La que cierra el caso en el CRM. Misma idea: el motor no sabe con que
@@ -1789,7 +1838,37 @@ class TenantConfig(Base):
                     f"escalamiento.mensajes_por_motivo tiene '{motivo}', que no "
                     f"esta en activar_si -- seria un mensaje que no se muestra "
                     f"nunca, y nadie lo notaria")
+        nombres_herramientas = {h.nombre for h in self.herramientas}
         for h in self.herramientas:
+            if h.verificacion:
+                v = h.verificacion
+                if h.solo_lectura:
+                    raise ValueError(
+                        f"herramientas['{h.nombre}'] declara 'verificacion' y es "
+                        f"de solo lectura -- no hay ningun efecto que comprobar")
+                if not v.comprobaciones:
+                    raise ValueError(
+                        f"herramientas['{h.nombre}'].verificacion no declara "
+                        f"ninguna comprobacion: quedaria siempre en "
+                        f"NO_VERIFICABLE, que es peor que no declararla")
+                for c in v.comprobaciones:
+                    if c.herramienta not in nombres_herramientas:
+                        raise ValueError(
+                            f"herramientas['{h.nombre}'].verificacion mide con "
+                            f"'{c.herramienta}', que no existe en el catalogo")
+                    if c.regla == "valores" and not c.valores:
+                        raise ValueError(
+                            f"herramientas['{h.nombre}'].verificacion: la "
+                            f"comprobacion sobre '{c.campo}' usa la regla "
+                            f"'valores' y no declara ninguno")
+                if (v.escalar_si_no_confirma
+                        and v.escalar_si_no_confirma not in self.escalamiento.activar_si):
+                    raise ValueError(
+                        f"herramientas['{h.nombre}'].verificacion."
+                        f"escalar_si_no_confirma dice "
+                        f"'{v.escalar_si_no_confirma}', que no esta en "
+                        f"escalamiento.activar_si -- la escalada quedaria sin "
+                        f"motivo declarado")
             if h.resumen_desde and not (h.escalar_al_completar or h.escalar_si_falla):
                 raise ValueError(
                     f"herramientas['{h.nombre}'].resumen_desde dice "
