@@ -746,6 +746,24 @@ class Herramienta(Base):
     # libres", solo lee un valor ya acotado por esa lista). Ver
     # nucleo/modelo/motor.py::_ejecutar_consulta_planes_venta.
     consulta_planes_venta: bool = False
+    # Tipo 'interno': entrega los PASOS de un procedimiento de la empresa
+    # (asistente.habilidades) cuando el agente lo pide por su codigo.
+    #
+    # El indice -- que habilidades existen y CUANDO usar cada una -- ya viaja
+    # en el prompt de cada turno; esta herramienta trae el cuerpo. Es
+    # divulgacion progresiva: el indice es barato y va siempre, los pasos se
+    # pagan solo cuando de verdad hacen falta.
+    #
+    # No revela ningun dato de cliente: un procedimiento no menciona a nadie.
+    # Por eso, igual que consulta_planes_venta, no pasa por el gate de
+    # identidad -- si pasara, un agente de cara al cliente no podria leer el
+    # procedimiento que le dice COMO pedir la verificacion.
+    #
+    # El permiso por rol NO se resuelve aca sino en el catalogo, contra
+    # habilidades.roles_permitidos: quien puede cargar cada procedimiento es
+    # dato del tenant, no del catalogo de herramientas.
+    # Ver nucleo/habilidades/catalogo.py y motor.py::_ejecutar_carga_habilidad.
+    carga_habilidad: bool = False
     # Marca esta herramienta (tipicamente 'agregado' sobre 'clientes', ej.
     # contar_clientes) como la FUENTE del sync de localidades -> zona real
     # (ver LocalidadZona mas abajo). El motor nunca la corre durante una

@@ -40,6 +40,7 @@ from flask import Flask, jsonify, request
 from nucleo.canales import media, whatsapp
 from nucleo.config import editor, fuente
 from nucleo.config.fusion import fusionar_roles, modelo_fusionado
+from nucleo.habilidades import analista
 from nucleo.herramientas import http as ejecutor_http
 from nucleo.herramientas import localidades as sincronizador_localidades
 from nucleo.ingesta import corpus as ingesta
@@ -3409,6 +3410,173 @@ def configuracion_propuesta_rechazar(id_propuesta):
     if not existe:
         return jsonify({"error": f"La propuesta '{id_propuesta}' no existe."}), 404
     return jsonify({"ok": True, "estado": "rechazada"})
+
+
+# =============================================================================
+#  HABILIDADES  -  procedimientos que un agente carga cuando le hacen falta.
+#  Ver nucleo/habilidades/catalogo.py (que son y por que no son documentos del
+#  corpus) y analista.py (como se detecta que falta una).
+#
+#  Ninguna entra al prompt de ningun agente sin pasar por /aprobar: una
+#  habilidad aprobada es lo que el agente va a seguir "al pie de la letra".
+#  Mismo criterio que las propuestas de herramienta de aca arriba.
+# =============================================================================
+
+@app.get("/habilidades")
+def habilidades_listar():
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        with persistencia.sesion(tenant) as (cur, org):
+            cur.execute(
+                """select h.id::text, h.codigo, h.nombre, h.cuando_usarla,
+                          h.pasos, h.roles_permitidos, h.estado, h.origen,
+                          h.evidencia, h.motivo_rechazo, h.creada_en,
+                          h.aprobada_en, h.aprobada_por,
+                          (select count(*) from asistente.habilidad_usos u
+                            where u.habilidad_id = h.id) as usos
+                     from asistente.habilidades h
+                    where h.organization_id = %s
+                    order by (h.estado = 'propuesta') desc, h.codigo""",
+                (org,))
+            filas = [dict(f) for f in cur.fetchall()]
+    except Exception as e:
+        print(f"[habilidades] fallo al leer: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudieron leer las habilidades."}), 500
+    return jsonify({"habilidades": filas})
+
+
+@app.post("/habilidades")
+def habilidades_crear():
+    """Crea una habilidad escrita a mano. Nace 'propuesta', igual que las del
+    analista -- que la haya escrito una persona no la pone a operar sola."""
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    faltan = [c for c in ("codigo", "nombre", "cuando_usarla", "pasos")
+              if not str(cuerpo.get(c) or "").strip()]
+    if not tenant or faltan:
+        return jsonify({"error": f"Faltan campos: {['tenant'] if not tenant else []}"
+                                 f"{faltan}"}), 400
+    try:
+        with persistencia.sesion(tenant) as (cur, org):
+            cur.execute(
+                """insert into asistente.habilidades
+                       (organization_id, codigo, nombre, cuando_usarla, pasos,
+                        roles_permitidos, estado, origen)
+                   values (%s, %s, %s, %s, %s, %s, 'propuesta', 'manual')
+                   returning id::text""",
+                (org, str(cuerpo["codigo"]).strip()[:60],
+                 str(cuerpo["nombre"])[:200], str(cuerpo["cuando_usarla"]),
+                 str(cuerpo["pasos"]), cuerpo.get("roles_permitidos") or []))
+            fila = cur.fetchone()
+    except Exception as e:
+        print(f"[habilidades] fallo al crear: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo crear. ¿Ya existe ese codigo?"}), 400
+    return jsonify({"ok": True, "id": fila["id"]})
+
+
+@app.post("/habilidades/<id_habilidad>/aprobar")
+def habilidades_aprobar(id_habilidad):
+    """Pone la habilidad a operar. Exige roles: sin roles no la ve nadie, y
+    aprobar algo que nadie va a cargar es la forma silenciosa de creer que se
+    resolvio un hueco que sigue abierto."""
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'."}), 400
+    roles = cuerpo.get("roles_permitidos")
+    try:
+        with persistencia.sesion(tenant) as (cur, org):
+            if roles is not None:
+                cur.execute("""update asistente.habilidades set roles_permitidos = %s
+                                where organization_id = %s and id = %s""",
+                            (list(roles), org, id_habilidad))
+            cur.execute("""select roles_permitidos from asistente.habilidades
+                            where organization_id = %s and id = %s""",
+                        (org, id_habilidad))
+            fila = cur.fetchone()
+            if not fila:
+                return jsonify({"error": "Esa habilidad no existe."}), 404
+            if not (fila["roles_permitidos"] or []):
+                return jsonify({"error": "Asignale al menos un rol antes de "
+                                         "aprobarla: sin rol no la ve ningun "
+                                         "agente."}), 400
+            cur.execute(
+                """update asistente.habilidades
+                      set estado = 'vigente', aprobada_en = now(),
+                          aprobada_por = %s, motivo_rechazo = null
+                    where organization_id = %s and id = %s""",
+                (cuerpo.get("aprobada_por"), org, id_habilidad))
+    except Exception as e:
+        print(f"[habilidades] fallo al aprobar: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo aprobar."}), 500
+    return jsonify({"ok": True, "estado": "vigente"})
+
+
+@app.post("/habilidades/<id_habilidad>/retirar")
+def habilidades_retirar(id_habilidad):
+    """Saca la habilidad de circulacion sin borrarla: los usos ya registrados
+    siguen teniendo a que apuntar, y se puede saber que estuvo vigente."""
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'."}), 400
+    try:
+        with persistencia.sesion(tenant) as (cur, org):
+            cur.execute(
+                """update asistente.habilidades
+                      set estado = 'obsoleta', motivo_rechazo = %s
+                    where organization_id = %s and id = %s
+                    returning id""",
+                (cuerpo.get("motivo"), org, id_habilidad))
+            if not cur.fetchone():
+                return jsonify({"error": "Esa habilidad no existe."}), 404
+    except Exception as e:
+        print(f"[habilidades] fallo al retirar: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo retirar."}), 500
+    return jsonify({"ok": True, "estado": "obsoleta"})
+
+
+@app.get("/habilidades/huecos")
+def habilidades_huecos():
+    """Que le falta saber hacer a cada agente, segun la operacion real.
+
+    Solo detecta -- no llama al modelo ni escribe nada. Es la respuesta barata
+    a "¿que le falta a este agente?", separada a proposito de proponer(), que
+    ademas redacta. Ver nucleo/habilidades/analista.py.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        dias = int(request.args.get("dias") or analista.DIAS_POR_DEFECTO)
+        patrones = analista.detectar(tenant, dias=dias)
+    except Exception as e:
+        print(f"[habilidades] fallo al detectar huecos: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudieron analizar las conversaciones."}), 500
+    return jsonify({"dias": dias, "huecos": [
+        {"rol": p.rol, "senal": p.senal, "motivo": p.motivo,
+         "n_casos": p.n_casos, "codigo_habilidad": p.codigo_habilidad,
+         "conversaciones": p.conversaciones[:20]} for p in patrones]})
+
+
+@app.post("/habilidades/proponer")
+def habilidades_proponer():
+    """Detecta huecos Y redacta un borrador por cada uno. Todo queda en
+    'propuesta'. Puede tardar: es una llamada al modelo por patron."""
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'."}), 400
+    try:
+        config = _config_de(tenant)
+        resultados = analista.proponer(
+            config, tenant, dias=int(cuerpo.get("dias") or analista.DIAS_POR_DEFECTO))
+    except Exception as e:
+        print(f"[habilidades] fallo al proponer: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudieron generar propuestas."}), 500
+    return jsonify({"ok": True, "resultados": resultados})
 
 
 # =============================================================================

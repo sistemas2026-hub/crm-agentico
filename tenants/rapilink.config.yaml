@@ -151,7 +151,7 @@ roles:
           diagnosticar_falla_ont, consultar_estado_catv, activar_catv, cambiar_tipo_onu,
           consultar_incidente_red, consultar_dispositivos_conectados,
           consultar_tecnicos, crear_ticket, responder_ticket,
-          actualizar_estado_ticket]
+          actualizar_estado_ticket, cargar_habilidad]
     campos_permitidos:
       consultar_cliente: [id_servicio, nombre, cedula, estado, email, telefono, direccion, localidad,
         ciudad, plan_internet, zona, fecha_instalacion, estado_facturas, saldo, fecha_corte]
@@ -240,7 +240,7 @@ roles:
     cargo: Agente de Facturación
     puede_consultar: [consultar_cliente, consultar_cliente_por_cedula, consultar_facturas,
           consultar_factura_detalle, consultar_formas_pago, registrar_pago, agregar_promesa_pago,
-          contar_facturas, contar_clientes]
+          contar_facturas, contar_clientes, cargar_habilidad]
     campos_permitidos:
       # Sin datos de red ni tickets: no hacen a su trabajo.
       consultar_cliente: [id_servicio, nombre, cedula, estado, email, telefono, direccion, localidad,
@@ -275,7 +275,8 @@ roles:
     # que habia quedado sin 'administracion' -- documental, no afectaba el
     # acceso real, pero mentia en la config.)
     puede_consultar: [consultar_cliente, consultar_tickets_de_cliente, contar_clientes, 
-          contar_facturas, contar_tickets, informe_materiales, consultar_ticket]
+          contar_facturas, contar_tickets, informe_materiales, consultar_ticket,
+          cargar_habilidad]
     campos_permitidos:
       # Sin PII: ni cedula, ni contacto. Ve estado y servicio.
       consultar_cliente: [id_servicio, nombre, estado, plan_internet, zona, fecha_instalacion, 
@@ -444,7 +445,7 @@ roles:
       resolverla tu, no tienes esas herramientas.
     orientado_a: cliente_final
     puede_consultar: [verificar_identidad_por_cedula, confirmar_identidad,
-          consultar_mi_servicio, derivar_a_area]
+          consultar_mi_servicio, derivar_a_area, cargar_habilidad]
     campos_permitidos:
       # Mismo criterio que cliente_final: lista blanca minima para el tema
       # de esta area. Sin acceso a ssid_router_wifi -- no hace a su trabajo.
@@ -1097,7 +1098,8 @@ roles:
           reiniciar_ont, diagnosticar_falla_ont, consultar_estado_catv, activar_catv,
           cambiar_tipo_onu, consultar_dispositivos_conectados,
           consultar_incidente_red, consultar_velocidad_aprovisionada,
-          consultar_estabilidad_enlace, registrar_pedido_wifi]
+          consultar_estabilidad_enlace, registrar_pedido_wifi,
+          cargar_habilidad]
     campos_permitidos:
       consultar_mi_servicio: [estado, plan_internet, ssid_router_wifi]
       # El pedido de WiFi no trae datos del cliente que haya que tapar: son
@@ -1327,7 +1329,7 @@ roles:
     # aunque ya no estuviera en el prompt. Ver incidente "doña manuela".
     puede_consultar: [verificar_identidad_por_cedula, confirmar_identidad,
           consultar_planes_venta, consultar_planes, consultar_plan_detalle,
-          registrar_solicitud_servicio]
+          registrar_solicitud_servicio, cargar_habilidad]
     campos_permitidos:
       consultar_planes: [id, nombre]
       # La respuesta de crear un lead trae el objeto entero del CRM. Lo unico
@@ -1882,6 +1884,35 @@ herramientas:
     # vencimiento: si un plan cambia de verdad, se refresca borrando su
     # fila de asistente.herramientas_cache a mano.
     cache: true
+
+  # --- habilidades (03/09/2026) -----------------------------------------
+  # Trae los PASOS de un procedimiento de la empresa. El indice (que
+  # procedimientos hay y cuando usar cada uno) ya viaja en el prompt de cada
+  # turno; esta herramienta trae el cuerpo, solo cuando hace falta.
+  #
+  # roles_permitidos es amplio a proposito: quien puede cargar CADA
+  # procedimiento se decide por procedimiento (habilidades.roles_permitidos,
+  # en la base), no aca. Aca solo se dice quien tiene la llave; que abre esa
+  # llave lo decide el catalogo de habilidades. Un rol sin ningun
+  # procedimiento asignado no ve ningun indice y nunca la va a llamar.
+  - nombre: cargar_habilidad
+    tipo: interno
+    descripcion: >
+      Trae los pasos completos de un procedimiento de la empresa, por su
+      codigo. Los codigos disponibles estan en la lista de PROCEDIMIENTOS
+      DISPONIBLES de tu prompt, junto con cuando usar cada uno -- ahi estan
+      los codigos y los disparadores, pero NO los pasos. Si la situacion
+      coincide con alguno, cargalo ANTES de contestar y despues segui sus
+      pasos. Nunca adivines los pasos a partir del nombre.
+    solo_lectura: true
+    roles_permitidos: [soporte, facturacion, administracion, ventas,
+                       facturacion_cliente, soporte_tecnico_cliente]
+    carga_habilidad: true
+    requeridos: [codigo]
+    filtros_verificados:
+      codigo:
+        param: codigo
+        tipo: texto
 
   # --- ventas (19/08/2026) ----------------------------------------------
   - nombre: consultar_planes_venta

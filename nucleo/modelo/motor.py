@@ -58,6 +58,7 @@ from nucleo.herramientas import informes
 from nucleo.modelo import cliente
 from nucleo.modelo import tuteo
 from nucleo.persistencia import db as persistencia
+from nucleo.habilidades import catalogo as catalogo_habilidades
 from nucleo.recuperacion.prompt import construir_system
 from nucleo.recuperacion.busqueda import (recuperar, bloque_de_contexto,
                                           registrar_sin_resultados)
@@ -668,6 +669,61 @@ def _localidades_parecidas(config, clave: str, cuantas: int = 4) -> list[str]:
     restantes = {_sin_tildes(n): n for n in nombres if n not in contenidos}
     cercanos = difflib.get_close_matches(clave, list(restantes), n=faltan, cutoff=0.72)
     return contenidos + [restantes[c] for c in cercanos]
+
+
+def _ejecutar_carga_habilidad(config, nombre_rol: str,
+                              argumentos_modelo: dict) -> dict:
+    """
+    Entrega los PASOS de un procedimiento de la empresa, si ese rol lo tiene.
+
+    El indice (que existe y cuando usarlo) ya viaja en el prompt de cada
+    turno; aca llega el cuerpo. Ver nucleo/habilidades/catalogo.py para el
+    porque de la division.
+
+    NO llama a ninguna API y no revela ningun dato de cliente -- un
+    procedimiento no menciona a nadie. Por eso queda fuera del gate de
+    identidad, igual que consultar_planes_venta: si pasara por el gate, un
+    agente de cara al cliente no podria leer justamente el procedimiento que
+    le explica como pedir la verificacion.
+
+    El codigo que llega lo escribio el modelo, asi que puede no existir, o
+    existir y ser de otro rol. Las dos cosas devuelven lo mismo a proposito:
+    decirle "existe pero no es tuya" le contaria que hay un procedimiento que
+    no puede ver. Y la instruccion de vuelta es explicita sobre que NO hacer
+    -- sin eso, un modelo que pide un procedimiento y recibe un error tiende
+    a inventarse los pasos, que es el problema que las habilidades vienen a
+    resolver.
+    """
+    codigo = str((argumentos_modelo or {}).get("codigo", "")).strip()
+    if not codigo:
+        return {"error": "FALTA_CODIGO",
+                "instruccion_interna": "Indica el codigo exacto del "
+                    "procedimiento, tal como aparece en la lista."}
+
+    habilidad = catalogo_habilidades.cargar(config.identidad.slug, nombre_rol, codigo)
+    if habilidad is None:
+        # Sin interpolar el codigo pedido, a proposito: asi la respuesta es
+        # IDENTICA para "no existe" y para "existe pero no es de tu rol", y
+        # esa igualdad se puede verificar (tests/test_habilidades.py). Con el
+        # codigo adentro las dos respuestas difieren en algo -- no es una fuga,
+        # porque el modelo mando ese codigo, pero vuelve la propiedad
+        # imposible de comprobar, y una garantia que no se puede comprobar se
+        # rompe sin que nadie se entere.
+        return {"error": "HABILIDAD_DESCONOCIDA",
+                "instruccion_interna": "No tienes ningun procedimiento con "
+                    "ese codigo. Revisa la lista de procedimientos "
+                    "disponibles y usa uno de esos codigos, o segui adelante "
+                    "sin procedimiento. NO te inventes los pasos."}
+
+    catalogo_habilidades.registrar_uso(config.identidad.slug, codigo, nombre_rol)
+    return {"codigo": habilidad.codigo, "nombre": habilidad.nombre,
+            "pasos": habilidad.pasos,
+            "instruccion_interna": "Este es el procedimiento de la empresa "
+                "para este caso. Seguilo al pie de la letra: es lo que la "
+                "empresa decidio, no una sugerencia. Si un paso te pide un "
+                "dato que no tienes, conseguilo con tus herramientas antes de "
+                "seguir; si un paso te pide algo que no puedes hacer, decilo "
+                "en vez de saltearlo."}
 
 
 def _ejecutar_consulta_planes_venta(config, argumentos_modelo: dict) -> dict:
@@ -1515,6 +1571,30 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
     herramientas = herramientas_del_rol(config, rol_cfg)
     catalogo_openai = [_esquema_openai(h) for h in herramientas]
 
+    # --- Habilidades: que procedimientos puede cargar este rol -----------------
+    # Solo el INDICE (codigo + cuando usar cada uno), no los pasos. Es barato y
+    # va en todos los turnos porque el modelo no puede elegir lo que no sabe que
+    # existe; el cuerpo se paga solo cuando llama a cargar_habilidad. Ver
+    # nucleo/habilidades/catalogo.py.
+    #
+    # A diferencia del RAG, esto NO depende del parecido con el mensaje: una
+    # habilidad hace falta en situaciones que el mensaje no nombra. Por eso el
+    # indice entra siempre y es el modelo, leyendo el disparador, quien decide.
+    #
+    # Nunca rompe el turno: sin habilidades el agente trabaja como venia
+    # trabajando hasta hoy.
+    try:
+        indice_habilidades = catalogo_habilidades.indice_de(
+            config.identidad.slug, nombre_rol)
+    except Exception as e:
+        print(f"[habilidades] no se pudo leer el indice: {e}")
+        indice_habilidades = []
+
+    if indice_habilidades:
+        historial.append({"role": "system",
+                          "content": catalogo_habilidades.bloque_de_indice(
+                              indice_habilidades)})
+
     # --- RAG: que dice la documentacion interna sobre esto ---------------------
     # Va DESPUES del catalogo de herramientas porque la decision de que hacer
     # cuando el corpus no responde depende de si el rol tiene con que buscar el
@@ -1713,6 +1793,12 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 # gate de identidad -- no revela ningun dato de cliente, solo
                 # el catalogo de planes que un humano ya decidio publicar.
                 salida = _ejecutar_consulta_planes_venta(config, llamada.argumentos)
+            elif herramienta.carga_habilidad:
+                # Fuera del gate por el mismo motivo que las de arriba: un
+                # procedimiento no menciona a ningun cliente. Y hace falta
+                # justo antes de verificar -- el procedimiento puede ser el
+                # que explica COMO pedir la verificacion.
+                salida = _ejecutar_carga_habilidad(config, nombre_rol, llamada.argumentos)
             elif (rol_cfg.orientado_a == "cliente_final" and (sesion is None or sesion.nivel < nivel_exigido)
                   # Excepcion: 'derivar_a_area' hacia un area que declara
                   # exige_verificacion=False (ej. 'ventas') tiene que poder
