@@ -1102,7 +1102,12 @@ casos:
       sin_errores: true
 
   - nombre: un dato de sistema no pasa por la documentacion
-    rol: soporte
+    # 'facturacion' y no 'soporte': la primera version de este caso le pedia
+    # a soporte que llamara 'contar_facturas', que NO esta en su catalogo.
+    # Fallaba por estar mal escrito, no por lo que decia probar -- y con el
+    # sintoma equivocado ("nunca llamo contar_facturas"), que se lee como si
+    # el modelo hubiera elegido mal.
+    rol: facturacion
     mensajes:
       - "cuantas facturas pendientes hay este mes"
     espera:

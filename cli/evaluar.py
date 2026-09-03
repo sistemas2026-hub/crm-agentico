@@ -283,6 +283,30 @@ def main() -> None:
     print("=" * 72)
     print(f"  {ok}/{len(resultados)} casos OK ({pct:.0f}%)  --  minimo exigido: {minimo:.0f}%")
     print(f"  {round(time.monotonic() - t_total)}s en total")
+
+    # ECONOMIA DEL CAMINO -- un caso puede pasar por el camino equivocado.
+    #
+    # 'ok' dice que la traza cumplio lo que el caso afirmaba. No dice que el
+    # agente haya llegado ahi bien. Un caso que exige 'contar_facturas' pasa
+    # igual si ademas consulto la documentacion sin necesidad: funcionalmente
+    # correcto, arquitectonicamente incorrecto. Y ese camino de mas es el que
+    # despues escala -- en latencia, en tokens y en fuentes compitiendo.
+    #
+    # Se cuentan llamadas por caso y se listan los casos con mas de tres, sin
+    # opinar sobre si esta bien: encadenar cuatro herramientas para diagnosticar
+    # una falla es correcto, y llamar cuatro para contestar un saldo no. La
+    # distincion la hace quien lee, mirando cuales son.
+    llamadas = [len(r.get("herramientas") or []) for r in resultados]
+    if llamadas:
+        total = sum(llamadas)
+        print(f"  {total} llamadas a herramienta en {len(resultados)} casos "
+              f"({total / len(resultados):.1f} por caso)")
+        largos = sorted(((n, r["nombre"], r.get("herramientas") or [])
+                         for n, r in zip(llamadas, resultados) if n > 3),
+                        reverse=True)[:5]
+        for n, nombre, herr in largos:
+            print(f"    {n} llamadas  {nombre[:44]}")
+            print(f"               {' -> '.join(herr[:6])}")
     if len(resultados) < config.evaluacion.minimo_casos:
         print(f"  AVISO: el set tiene {len(resultados)} casos y la config pide al "
               f"menos {config.evaluacion.minimo_casos} para dar por buena una "

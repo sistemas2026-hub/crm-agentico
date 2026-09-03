@@ -1541,8 +1541,13 @@ def _redactar(referencia_modelo: str, historial: list[dict], temperatura: float,
     respuesta que no le sirve al cliente, asi que se trata igual, no como un
     resultado valido que solo hay que sanitizar.
     """
+    # El historial del reintento, que NO es el mismo que el del primer intento
+    # -- ver el bloque de correccion mas abajo.
+    historial_intento = historial
+
     for intento in range(intentos):
-        resp = cliente.chat(referencia_modelo, historial, tools=None, temperatura=temperatura)
+        resp = cliente.chat(referencia_modelo, historial_intento, tools=None,
+                            temperatura=temperatura)
         limpio = _sanitizar(resp.contenido, nombres_rol, tratamiento)
         if not limpio or _RE_RESPUESTA_CRUDA.match(limpio):
             # Por que no sirvio. Sin esto, cuando el cliente ve "no pude
@@ -1555,6 +1560,34 @@ def _redactar(referencia_modelo: str, historial: list[dict], temperatura: float,
             print(f"[modelo] redaccion en blanco (intento {intento + 1}/{intentos}): "
                   f"crudo={resp.contenido[:60]!r} "
                   f"llamadas={[l.nombre for l in (resp.llamadas or [])]}")
+
+            # EL REINTENTO CAMBIA LA PETICION, no la repite.
+            #
+            # Hasta ahora se mandaba el historial IDENTICO tres veces y se
+            # esperaba un resultado distinto. Con temperatura baja eso casi
+            # siempre devuelve lo mismo: medido el 03/09/2026, un turno gasto
+            # los tres intentos produciendo exactamente la misma salida, y al
+            # cliente le salio el aviso de reintentar.
+            #
+            # Y el contenido decia POR QUE: el modelo emitia el marcado de una
+            # llamada a herramienta como TEXTO. No estaba fallando al redactar
+            # -- estaba pidiendo otra herramienta, en una llamada que a
+            # proposito va sin herramientas (ya uso las que necesitaba). El
+            # comentario de arriba ya lo anticipaba; faltaba actuar sobre eso.
+            #
+            # Asi que el reintento le dice lo que le falta saber. Se agrega una
+            # sola vez y sobre una copia: el historial real no se ensucia con
+            # instrucciones de recuperacion que despues viajarian a los turnos
+            # siguientes.
+            if intento == 0:
+                historial_intento = historial + [{
+                    "role": "system",
+                    "content": "No puedes llamar mas herramientas en este "
+                        "paso: ya tienes todo lo que se pudo consultar. "
+                        "Escribi AHORA la respuesta para la persona, en "
+                        "lenguaje natural y solo con lo que ya sabes. Si algo "
+                        "quedo sin resolver, decilo con palabras en vez de "
+                        "intentar consultarlo otra vez."}]
         if limpio and not _RE_RESPUESTA_CRUDA.match(limpio):
             limpio, fuga = guardia_salida.verificar(limpio)
             if fuga:
