@@ -200,6 +200,33 @@ def _corto(valor, tope: int = 70) -> str:
     return texto if len(texto) <= tope else texto[:tope - 1] + "…"
 
 
+def _commits_sin_empujar() -> int:
+    """Cuantos commits locales todavia no estan en el remoto.
+
+    Es la comprobacion mas barata que detecta el orden invertido entre codigo
+    y configuracion (ver el bloque que la usa). No mira QUE campos trae la
+    config: mira si este codigo ya llego a donde va a leerla.
+
+    Devuelve 0 ante cualquier duda -- sin git, sin remoto configurado, o con
+    el comando fallando. Una guarda de conveniencia no puede ser la razon por
+    la que no se pueda cargar una configuracion; la que si aborta de verdad es
+    la de perdidas, que compara contra la base.
+    """
+    import subprocess
+    try:
+        salida = subprocess.run(
+            ["git", "rev-list", "--count", "@{u}..HEAD"],
+            cwd=RAIZ, capture_output=True, text=True, timeout=10)
+    except Exception:                                    # noqa: BLE001
+        return 0
+    if salida.returncode != 0:
+        return 0
+    try:
+        return int((salida.stdout or "0").strip())
+    except ValueError:
+        return 0
+
+
 def _lo_que_pisaria(guardado: dict, nuevo: dict) -> list[str]:
     """
     Que se PERDERIA de la base al cargar 'nuevo' encima.
@@ -320,6 +347,41 @@ def cargar(ruta: Path, org_id: str | None = None, forzar: bool = False) -> None:
         if actual and actual[0] == datos:
             print(f"[=] {slug}: sin cambios (v{actual[1]})")
             return
+
+        # La config puede estrenar campos que el codigo DESPLEGADO no conoce.
+        # Cuando pasa, el motor de produccion no puede cargar su propia
+        # configuracion y deja de atender: los modelos declaran
+        # extra="forbid", asi que un campo desconocido no se ignora -- rechaza
+        # el archivo entero.
+        #
+        # Paso el 03/09/2026: se agrego 'consulta_documentacion' al esquema, se
+        # cargo la config a produccion, y el codigo que entiende ese campo
+        # todavia no estaba empujado. Produccion quedo con una configuracion
+        # que su propio codigo rechazaba.
+        #
+        # La leccion es el ORDEN, y es al reves de lo que uno supone: cuando la
+        # config estrena un campo, el CODIGO va primero. Cargar config no es un
+        # paso independiente del despliegue.
+        #
+        # No se comparan campos uno por uno -- eso exigiria parsear el esquema
+        # remoto y seria fragil. Se comprueba lo unico que importa y es exacto:
+        # si este commit ya esta en el remoto. Si no lo esta, esta config puede
+        # traer algo que alla no existe todavia.
+        if not forzar:
+            sin_empujar = _commits_sin_empujar()
+            if sin_empujar:
+                raise SystemExit(
+                    f"'{slug}': hay {sin_empujar} commit(s) sin empujar en esta "
+                    f"copia.\n\n"
+                    f"  Si esta configuracion usa un campo del esquema que solo\n"
+                    f"  existe en esos commits, el motor desplegado NO va a poder\n"
+                    f"  leerla (los modelos rechazan campos desconocidos) y deja\n"
+                    f"  de atender.\n\n"
+                    f"  El orden correcto es: primero el codigo, despues la config.\n\n"
+                    f"      git push\n"
+                    f"      py -3.13 cli/cargar_config.py {ruta}\n\n"
+                    f"  Si sabes que esta config no estrena ningun campo:\n\n"
+                    f"      py -3.13 cli/cargar_config.py {ruta} --forzar")
 
         # El archivo ya no es el unico que escribe roles. Antes de pisar la
         # base hay que saber si lo que hay ahi lo puso una persona desde la

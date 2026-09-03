@@ -764,6 +764,37 @@ class Herramienta(Base):
     # dato del tenant, no del catalogo de herramientas.
     # Ver nucleo/habilidades/catalogo.py y motor.py::_ejecutar_carga_habilidad.
     carga_habilidad: bool = False
+    # Tipo 'interno': entrega fragmentos del corpus. Convierte la
+    # documentacion en una HERRAMIENTA en vez de una precarga del prompt.
+    #
+    # POR QUE. Hasta ahora el corpus se inyectaba en el historial ANTES de la
+    # primera llamada al modelo, asi que el modelo nunca decidia si lo queria:
+    # ya lo tenia puesto cuando llegaba a decidir. El corpus no le ganaba a
+    # las herramientas en una eleccion -- llegaba antes de que la eleccion
+    # existiera.
+    #
+    # Medido (03/09/2026) sobre el set etiquetado: tres de los cuatro
+    # fragmentos de mayor similitud entre los que NO deberian entrar eran
+    # preguntas con respuesta exacta disponible en una herramienta.
+    #
+    #   0.488  "cuanto cuesta el plan mas caro"      -> consultar_planes_venta
+    #   0.411  "cual es el saldo de la cedula X"     -> consultar_facturas
+    #   0.367  "cuantos clientes activos tenemos"    -> contar_clientes
+    #
+    # Ningun umbral los separa: la similitud legitima mas baja (0.343) esta
+    # por debajo del ruido mas alto. No es un problema de calibracion, es que
+    # una fuente se salteaba la decision.
+    #
+    # Como herramienta, la documentacion compite en igualdad con el resto: la
+    # misma eleccion, el mismo momento, el mismo criterio -- y esa eleccion es
+    # justamente la operacion que el modelo hace bien (100% en banco de
+    # pruebas, cero errores de seleccion en 60 dias de produccion).
+    #
+    # MIENTRAS UN ROL NO DECLARE ESTA HERRAMIENTA, el corpus se le sigue
+    # precargando como siempre. Es a proposito: deja migrar tenant por tenant
+    # y rol por rol, y volver atras sin tocar codigo.
+    # Ver nucleo/modelo/motor.py::_ejecutar_consulta_documentacion.
+    consulta_documentacion: bool = False
     # Marca esta herramienta (tipicamente 'agregado' sobre 'clientes', ej.
     # contar_clientes) como la FUENTE del sync de localidades -> zona real
     # (ver LocalidadZona mas abajo). El motor nunca la corre durante una

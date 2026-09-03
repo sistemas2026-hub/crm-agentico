@@ -1070,3 +1070,58 @@ casos:
       usa: [registrar_pedido_wifi]
       responde_sin: ["no puedo ayudarte", "solo el titular puede",
                      "ya quedo cambiado", "ya cambie"]
+
+  # ---------------------------------------------------------------------------
+  # EL CORPUS COMO HERRAMIENTA (03/09/2026)
+  #
+  # El corpus se precargaba en el prompt ANTES de la primera llamada al modelo,
+  # asi que el modelo nunca decidia si lo queria. Medido sobre el set
+  # etiquetado de recuperacion: tres de los cuatro fragmentos de MAYOR
+  # similitud entre los que NO debian entrar eran preguntas con respuesta
+  # exacta en una herramienta (precio 0.488, saldo 0.411, conteo 0.367).
+  #
+  # Ningun umbral los separa: la similitud legitima mas baja (0.343) queda por
+  # debajo del ruido mas alto. Barrido de 0.25 a 0.60, las distribuciones se
+  # solapan.
+  #
+  # Ahora la documentacion es 'consultar_documentacion' y el modelo la pide
+  # cuando la necesita. Estos casos afirman las DOS mitades: que la llama
+  # cuando corresponde, y que NO la llama cuando hay un dato exacto.
+  # Sin la segunda mitad, el cambio se podria "aprobar" con un modelo que
+  # llama documentacion para todo -- que es el bug de antes con otro disfraz.
+  # ---------------------------------------------------------------------------
+
+  - nombre: un procedimiento se busca en la documentacion, no se improvisa
+    rol: soporte
+    mensajes:
+      - "que pasos sigo para revisar la potencia optica en una caja"
+    espera:
+      # La pregunta es COMO se hace algo: no hay herramienta que devuelva un
+      # procedimiento, y la guia existe (G-GO-11, asignada a soporte).
+      usa: [consultar_documentacion]
+      sin_errores: true
+
+  - nombre: un dato de sistema no pasa por la documentacion
+    rol: soporte
+    mensajes:
+      - "cuantas facturas pendientes hay este mes"
+    espera:
+      # Hay dato exacto. Antes el corpus entraba igual y competia con el;
+      # ahora no deberia ni consultarse.
+      usa: [contar_facturas]
+      no_usa: [consultar_documentacion]
+      sin_errores: true
+
+  - nombre: la documentacion esta en el catalogo de un rol de cara al cliente
+    rol: soporte_tecnico_cliente
+    sesion:
+      verificado: false
+      nivel: 0
+      identificador_canal: '573009995555'
+    mensajes:
+      - "hola"
+    espera:
+      # No afirma que la llame -- afirma que la TIENE. Un rol al que se le
+      # quito la precarga y no se le dio la herramienta se queda sin corpus
+      # sin que nada lo avise, y eso no se ve en ninguna respuesta.
+      catalogo_con: [consultar_documentacion]
