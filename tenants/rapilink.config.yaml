@@ -151,7 +151,8 @@ roles:
           diagnosticar_falla_ont, consultar_estado_catv, activar_catv, cambiar_tipo_onu,
           consultar_incidente_red, consultar_dispositivos_conectados,
           consultar_tecnicos, crear_ticket, responder_ticket,
-          actualizar_estado_ticket, cargar_habilidad]
+          actualizar_estado_ticket, cargar_habilidad,
+          consultar_documentacion]
     campos_permitidos:
       consultar_cliente: [id_servicio, nombre, cedula, estado, email, telefono, direccion, localidad,
         ciudad, plan_internet, zona, fecha_instalacion, estado_facturas, saldo, fecha_corte]
@@ -240,7 +241,8 @@ roles:
     cargo: Agente de Facturación
     puede_consultar: [consultar_cliente, consultar_cliente_por_cedula, consultar_facturas,
           consultar_factura_detalle, consultar_formas_pago, registrar_pago, agregar_promesa_pago,
-          contar_facturas, contar_clientes, cargar_habilidad]
+          contar_facturas, contar_clientes, cargar_habilidad,
+          consultar_documentacion]
     campos_permitidos:
       # Sin datos de red ni tickets: no hacen a su trabajo.
       consultar_cliente: [id_servicio, nombre, cedula, estado, email, telefono, direccion, localidad,
@@ -276,7 +278,7 @@ roles:
     # acceso real, pero mentia en la config.)
     puede_consultar: [consultar_cliente, consultar_tickets_de_cliente, contar_clientes, 
           contar_facturas, contar_tickets, informe_materiales, consultar_ticket,
-          cargar_habilidad]
+          cargar_habilidad, consultar_documentacion]
     campos_permitidos:
       # Sin PII: ni cedula, ni contacto. Ve estado y servicio.
       consultar_cliente: [id_servicio, nombre, estado, plan_internet, zona, fecha_instalacion, 
@@ -445,7 +447,8 @@ roles:
       resolverla tu, no tienes esas herramientas.
     orientado_a: cliente_final
     puede_consultar: [verificar_identidad_por_cedula, confirmar_identidad,
-          consultar_mi_servicio, derivar_a_area, cargar_habilidad]
+          consultar_mi_servicio, derivar_a_area, cargar_habilidad,
+          consultar_documentacion]
     campos_permitidos:
       # Mismo criterio que cliente_final: lista blanca minima para el tema
       # de esta area. Sin acceso a ssid_router_wifi -- no hace a su trabajo.
@@ -1099,7 +1102,7 @@ roles:
           cambiar_tipo_onu, consultar_dispositivos_conectados,
           consultar_incidente_red, consultar_velocidad_aprovisionada,
           consultar_estabilidad_enlace, registrar_pedido_wifi,
-          cargar_habilidad]
+          cargar_habilidad, consultar_documentacion]
     campos_permitidos:
       consultar_mi_servicio: [estado, plan_internet, ssid_router_wifi]
       # El pedido de WiFi no trae datos del cliente que haya que tapar: son
@@ -1329,7 +1332,8 @@ roles:
     # aunque ya no estuviera en el prompt. Ver incidente "doña manuela".
     puede_consultar: [verificar_identidad_por_cedula, confirmar_identidad,
           consultar_planes_venta, consultar_planes, consultar_plan_detalle,
-          registrar_solicitud_servicio, cargar_habilidad]
+          registrar_solicitud_servicio, cargar_habilidad,
+          consultar_documentacion]
     campos_permitidos:
       consultar_planes: [id, nombre]
       # La respuesta de crear un lead trae el objeto entero del CRM. Lo unico
@@ -1884,6 +1888,39 @@ herramientas:
     # vencimiento: si un plan cambia de verdad, se refresca borrando su
     # fila de asistente.herramientas_cache a mano.
     cache: true
+
+  # --- documentacion como herramienta (03/09/2026) ----------------------
+  # Antes el corpus se precargaba en el prompt ANTES de que el modelo
+  # decidiera nada. Medido: tres de los cuatro fragmentos de mayor similitud
+  # entre los que NO debian entrar eran preguntas con respuesta exacta en una
+  # herramienta (precio 0.488, saldo 0.411, conteo 0.367). Ningun umbral los
+  # separa -- la similitud legitima mas baja (0.343) queda por debajo del
+  # ruido mas alto. Ver Herramienta.consulta_documentacion en schema.py.
+  #
+  # La descripcion dice CUANDO usarla, no que hace: es lo unico que el modelo
+  # lee para decidir, y una descripcion de una linea ("busca documentos") lo
+  # deja adivinando.
+  - nombre: consultar_documentacion
+    tipo: interno
+    descripcion: >
+      Busca en los manuales y procedimientos aprobados de la empresa.
+      USALA cuando la respuesta dependa de COMO se hace algo, de una
+      politica de la empresa, o de una causa que no se puede determinar
+      solo mirando datos. NO la uses cuando lo que piden es un dato
+      concreto y actual de un cliente o del sistema (saldo, factura,
+      estado del equipo, precio de un plan, cantidades): para eso hay
+      herramientas que traen el dato exacto, y un documento te va a dar
+      algo parecido pero desactualizado. Si buscas y no hay nada, decilo:
+      no completes el procedimiento por tu cuenta.
+    solo_lectura: true
+    roles_permitidos: [soporte, facturacion, administracion, ventas,
+                       facturacion_cliente, soporte_tecnico_cliente]
+    consulta_documentacion: true
+    requeridos: [pregunta]
+    filtros_verificados:
+      pregunta:
+        param: pregunta
+        tipo: texto
 
   # --- habilidades (03/09/2026) -----------------------------------------
   # Trae los PASOS de un procedimiento de la empresa. El indice (que

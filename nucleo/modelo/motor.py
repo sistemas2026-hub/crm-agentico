@@ -671,6 +671,67 @@ def _localidades_parecidas(config, clave: str, cuantas: int = 4) -> list[str]:
     return contenidos + [restantes[c] for c in cercanos]
 
 
+def _ejecutar_consulta_documentacion(config, nombre_rol: str,
+                                     argumentos_modelo: dict) -> dict:
+    """
+    Los fragmentos del corpus que responden una pregunta, cuando el modelo los
+    pide. Ver Herramienta.consulta_documentacion en schema.py para el porque.
+
+    La pregunta que se vectoriza es la que ESCRIBE EL MODELO, no el mensaje
+    crudo del cliente, y eso es una ventaja lateral del cambio: el modelo
+    reformula "no navega" como "que hacer cuando un cliente no tiene conexion
+    a internet", que es lo que se parece al texto de la guia. Los dos casos
+    legitimos que hoy se pierden por umbral (0.343 y 0.349) son exactamente
+    frases cortas y vagas de ese tipo.
+
+    Devuelve los fragmentos crudos, no el bloque de texto armado: el bloque
+    tiene formato de mensaje 'system' y esto entra por el canal 'tool', que ya
+    trae su propia envoltura. Duplicar el encuadre le diria dos veces lo mismo
+    con palabras distintas.
+
+    Fuera del gate de identidad, igual que las otras internas: una guia de
+    procedimientos no menciona a ningun cliente.
+    """
+    pregunta = str((argumentos_modelo or {}).get("pregunta", "")).strip()
+    if not pregunta:
+        return {"error": "FALTA_PREGUNTA",
+                "instruccion_interna": "Indica que necesitas buscar en la "
+                    "documentacion, con una frase completa."}
+
+    try:
+        fragmentos, mejor = recuperar(config, config.identidad.slug,
+                                      nombre_rol, pregunta)
+    except Exception as fallo:      # noqa: BLE001
+        # Mismo criterio que la precarga que esto reemplaza: un fallo de
+        # recuperacion no puede dejar al cliente sin turno. Antes se seguia
+        # sin contexto; ahora se le dice al modelo, que es mejor -- puede
+        # decidir consultar otra cosa en vez de creer que el corpus esta vacio.
+        print(f"[rag] no se pudo recuperar contexto: {fallo!r}")
+        return {"error": "BUSQUEDA_NO_DISPONIBLE",
+                "instruccion_interna": "No se pudo consultar la documentacion "
+                    "en este momento. No inventes el contenido: segui con lo "
+                    "que puedas resolver por otras vias, o decilo."}
+
+    if not fragmentos:
+        registrar_sin_resultados(config.identidad.slug, pregunta, nombre_rol, mejor)
+        return {"encontrado": False,
+                "instruccion_interna": "La documentacion de la empresa no "
+                    "cubre eso. NO improvises un procedimiento ni completes "
+                    "con lo que te parezca razonable: decilo, y ofrece pasar "
+                    "el caso a un colaborador humano si hace falta."}
+
+    citar_fuente = config.roles[nombre_rol].orientado_a != "cliente_final"
+    return {"encontrado": True,
+            "fragmentos": [
+                {"documento": f.codigo, "titulo": f.titulo,
+                 "contenido": f.contenido} if citar_fuente
+                else {"contenido": f.contenido}
+                for f in fragmentos],
+            "instruccion_interna": "Esto es lo MAS PARECIDO que hay en la "
+                "documentacion, no necesariamente la respuesta. Si no "
+                "responde lo que te preguntaron, decilo en vez de forzarlo."}
+
+
 def _ejecutar_carga_habilidad(config, nombre_rol: str,
                               argumentos_modelo: dict) -> dict:
     """
@@ -1602,17 +1663,38 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
     #
     # Nunca rompe el turno: si Ollama no responde o la base falla, se sigue sin
     # contexto documental. Peor es no atender.
-    try:
-        fragmentos, mejor = recuperar(config, config.identidad.slug, nombre_rol, mensaje)
-    except Exception as e:
-        print(f"[rag] no se pudo recuperar contexto: {e}")
+    #
+    # SALVO que el rol tenga una herramienta de documentacion declarada. En ese
+    # caso NO se precarga: el modelo la pide cuando la necesita, igual que
+    # cualquier otro dato. Ver Herramienta.consulta_documentacion (schema.py)
+    # para la medicion que motivo el cambio.
+    #
+    # La condicion existe para poder migrar rol por rol y volver atras sin
+    # tocar codigo: un rol que no declara la herramienta sigue funcionando
+    # exactamente como funcionaba.
+    if any(getattr(h, "consulta_documentacion", False) for h in herramientas):
         fragmentos, mejor = [], None
+        _corpus_es_herramienta = True
+    else:
+        _corpus_es_herramienta = False
+        try:
+            fragmentos, mejor = recuperar(config, config.identidad.slug,
+                                          nombre_rol, mensaje)
+        except Exception as e:
+            print(f"[rag] no se pudo recuperar contexto: {e}")
+            fragmentos, mejor = [], None
 
     if fragmentos:
         citar_fuente = rol_cfg.orientado_a != "cliente_final"
         historial.append({"role": "system",
                           "content": bloque_de_contexto(fragmentos, citar_fuente)})
-    else:
+    elif not _corpus_es_herramienta:
+        # Con el corpus como herramienta esta rama no corresponde: no se
+        # busco nada todavia. El registro de "el corpus no cubre esto" lo hace
+        # la herramienta cuando de verdad busca y no encuentra -- si no,
+        # quedaria una fila por CADA turno, incluidos los que nunca iban a
+        # necesitar documentacion, y ese registro es justamente el que se usa
+        # para saber que documentacion falta escribir.
         registrar_sin_resultados(config.identidad.slug, mensaje, nombre_rol, mejor)
         # Solo se corta el turno si NO hay herramientas: ahi no queda nada con
         # que responder y llamar al modelo es pedirle que invente (RF-07).
@@ -1793,6 +1875,12 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 # gate de identidad -- no revela ningun dato de cliente, solo
                 # el catalogo de planes que un humano ya decidio publicar.
                 salida = _ejecutar_consulta_planes_venta(config, llamada.argumentos)
+            elif herramienta.consulta_documentacion:
+                # Fuera del gate: una guia de procedimientos no menciona a
+                # ningun cliente. Ver el porque del cambio entero en
+                # Herramienta.consulta_documentacion (schema.py).
+                salida = _ejecutar_consulta_documentacion(
+                    config, nombre_rol, llamada.argumentos)
             elif herramienta.carga_habilidad:
                 # Fuera del gate por el mismo motivo que las de arriba: un
                 # procedimiento no menciona a ningun cliente. Y hace falta
