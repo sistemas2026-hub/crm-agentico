@@ -60,6 +60,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from dataclasses import dataclass, field
 
 from nucleo.modelo import cliente
@@ -239,9 +240,26 @@ consejos generales tipo "se empatico".
 5. Todo en español, sin markdown.
 
 Responde SOLO un objeto JSON, sin texto alrededor:
-{{"codigo": "HAB-XXXX-01", "nombre": "...", "cuando_usarla": "...", \
-"pasos": "1. ...\\n2. ..."}}
+{{"nombre": "...", "cuando_usarla": "...", "pasos": "1. ...\\n2. ..."}}
 """
+
+
+def _codigo_desde(nombre: str) -> str:
+    """El codigo se DERIVA del nombre; no se le pide al modelo.
+
+    Se le pedia, y las tres primeras corridas reales devolvieron literal el
+    'HAB-XXXX-01' que el ejemplo del prompt usaba como marcador de forma. Un
+    modelo copia el ejemplo cuando el campo no le aporta nada -- y tenia razon:
+    un identificador no es una decision de redaccion.
+
+    Importa porque el codigo no es decorativo: es lo que el agente escribe
+    para pedir el procedimiento y lo que queda en la traza de la conversacion.
+    'HAB-XXXX-01' no dice nada; 'HAB-CAMBIO-NOMBRE-WIFI' se entiende leyendolo.
+    """
+    base = unicodedata.normalize("NFKD", nombre or "")
+    base = base.encode("ascii", "ignore").decode("ascii").upper()
+    palabras = [p for p in re.split(r"[^A-Z0-9]+", base) if len(p) > 2][:4]
+    return ("HAB-" + "-".join(palabras))[:52] if palabras else "HAB-SIN-NOMBRE"
 
 
 def _extraer_json(texto: str) -> dict | None:
@@ -302,7 +320,7 @@ def redactar(config, patron: Patron, dias: int = DIAS_POR_DEFECTO) -> dict | Non
         print(f"[analista] respuesta no interpretable para {patron.rol}/{patron.senal}")
         return None
 
-    faltan = [c for c in ("codigo", "nombre", "cuando_usarla", "pasos")
+    faltan = [c for c in ("nombre", "cuando_usarla", "pasos")
               if not str(datos.get(c) or "").strip()]
     if faltan:
         print(f"[analista] borrador incompleto, falta {faltan}")
@@ -327,12 +345,16 @@ def guardar_propuesta(tenant: str, patron: Patron, borrador: dict,
         "conversaciones": patron.conversaciones[:20],
         "habilidad_previa": patron.codigo_habilidad,
     }
-    codigo = str(borrador["codigo"]).strip()[:60]
+    codigo = _codigo_desde(str(borrador["nombre"]))
     with sesion(tenant) as (cur, org):
+        # Dos analisis del mismo hueco en semanas distintas no deben pisarse:
+        # la propuesta vieja puede estar ya revisada, o incluso vigente.
         cur.execute("""select count(*) as n from asistente.habilidades
-                        where organization_id = %s and codigo = %s""", (org, codigo))
-        if (cur.fetchone() or {}).get("n"):
-            codigo = f"{codigo}-{patron.senal[:3]}{patron.n_casos}"
+                        where organization_id = %s and codigo like %s""",
+                    (org, codigo + "%"))
+        repetidas = (cur.fetchone() or {}).get("n") or 0
+        if repetidas:
+            codigo = f"{codigo}-{repetidas + 1}"
         cur.execute(
             """insert into asistente.habilidades
                    (organization_id, codigo, nombre, cuando_usarla, pasos,

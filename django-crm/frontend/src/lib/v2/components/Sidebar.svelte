@@ -25,7 +25,8 @@
     Network,
     MessageCircle,
     ListChecks,
-    PlugZap
+    PlugZap,
+    GraduationCap
   } from '@lucide/svelte';
   import { t } from '$lib/terminology.js';
 
@@ -129,7 +130,10 @@
         // alcanza esta pantalla (ver /api/configuracion-guiada, mismo gate
         // que /api/agentes). Sin esto en el menu, la unica forma de llegar
         // seria escribiendo la URL a mano.
-        { href: '/configuracion-guiada', label: 'Conectar sistema nuevo', icon: PlugZap, admin: true }
+        { href: '/configuracion-guiada', label: 'Conectar sistema nuevo', icon: PlugZap, admin: true },
+        // ADMIN-only, mismo motivo: una habilidad vigente es lo que un agente
+        // sigue "al pie de la letra" frente a un cliente.
+        { href: '/habilidades', label: 'Habilidades', icon: GraduationCap, admin: true }
       ]
     }
   ];
