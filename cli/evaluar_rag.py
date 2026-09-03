@@ -190,6 +190,91 @@ def _clasificar(caso: dict, candidatos, umbral: float,
     return None, ficha
 
 
+def barrido(slug: str, desde: float = 0.25, hasta: float = 0.60,
+            paso: float = 0.025) -> None:
+    """
+    Que umbral separa mejor "el corpus responde esto" de "no lo responde".
+
+    Por que un barrido y no elegir un numero mirando dos ejemplos: el umbral
+    tiene DOS errores opuestos y mover el numero cambia los dos al mismo
+    tiempo, en direcciones contrarias.
+
+      threshold      subio demasiado: corta respuestas que SI servian.
+      answerability  bajo demasiado: deja pasar material que no responde.
+
+    Mirar solo uno lleva a la conclusion contraria a la correcta. Medido el
+    03/09/2026: viendo un caso de 'answerability' propuse subir el umbral a
+    0.50 -- y en el set etiquetado habia un caso legitimo con score 0.349,
+    que con 0.50 se hubiera roto tambien. El barrido muestra las dos curvas
+    juntas, que es lo unico que permite elegir.
+
+    Los candidatos se calculan UNA vez y se reclasifican con cada umbral: el
+    costo de embeddings no se multiplica por la cantidad de umbrales
+    probados, asi que barrer fino es gratis.
+    """
+    casos = yaml.safe_load(
+        (RAIZ / "evaluacion" / f"{slug}.rag.yaml").read_text(encoding="utf-8"))["casos"]
+    config = fuente.cargar(slug, raiz=RAIZ)
+    actual = config.rag.umbral_similitud
+
+    roles = {c["rol"] for c in casos}
+    elegibles = {r: contar_elegibles(slug, r) for r in roles}
+    visibles = {r: documentos_visibles(slug, r) for r in roles}
+
+    print("=" * 76)
+    print(f"  Barrido de umbral -- {slug}, {len(casos)} caso(s) etiquetados")
+    print(f"  umbral vigente: {actual}")
+    print("=" * 76)
+
+    # Una sola vuelta de embeddings para todo el barrido.
+    calculados = [(c, recuperar_candidatos(config, slug, c["rol"], c["pregunta"]))
+                  for c in casos]
+
+    print(f"\n  {'umbral':>7}  {'ok':>4}  {'thresh':>6}  {'answer':>6}  "
+          f"{'otros':>5}   {'Recall@1':>8}")
+    print(f"  {'-'*7}  {'-'*4}  {'-'*6}  {'-'*6}  {'-'*5}   {'-'*8}")
+
+    filas = []
+    u = desde
+    while u <= hasta + 1e-9:
+        conteo = {c: 0 for c in CLASES}
+        ok = medibles = aciertos = 0
+        for caso, candidatos in calculados:
+            if caso.get("brecha_conocida"):
+                continue
+            clase, ficha = _clasificar(caso, candidatos, u,
+                                       visibles[caso["rol"]], elegibles[caso["rol"]])
+            if clase:
+                conteo[clase] += 1
+            else:
+                ok += 1
+            if not caso.get("sin_respuesta"):
+                medibles += 1
+                r = ficha["rango_esperado"]
+                if r == 1 and candidatos[0].similitud >= u:
+                    aciertos += 1
+        otros = sum(v for k, v in conteo.items()
+                    if k not in ("threshold", "answerability"))
+        recall = (aciertos / medibles * 100) if medibles else 0.0
+        marca = "  <-- vigente" if abs(u - actual) < 1e-9 else ""
+        print(f"  {u:7.3f}  {ok:4d}  {conteo['threshold']:6d}  "
+              f"{conteo['answerability']:6d}  {otros:5d}   {recall:7.1f}%{marca}")
+        filas.append((u, ok, conteo["threshold"], conteo["answerability"], recall))
+        u += paso
+
+    mejor_ok = max(filas, key=lambda f: (f[1], -f[2]))
+    print(f"\n  Mas casos correctos: umbral {mejor_ok[0]:.3f} "
+          f"({mejor_ok[1]} ok, {mejor_ok[2]} cortados por umbral, "
+          f"{mejor_ok[3]} coladas)")
+    print("\n  Leer con cuidado: 'ok' mas alto no es automaticamente mejor.")
+    print("  Un fallo 'answerability' le mete al modelo material que no")
+    print("  responde -- y el prompt es guia, no garantia (PRD 7.4). Un")
+    print("  fallo 'threshold' le niega documentacion que si tenia. Cual")
+    print("  duele mas depende del rol: de cara al cliente, colar material")
+    print("  equivocado es peor que quedarse sin material.")
+    print("=" * 76)
+
+
 def main(slug: str, detalle: bool, guardar: str | None,
          comparar: str | None, csv_salida: str | None) -> None:
     casos = yaml.safe_load(
@@ -356,6 +441,10 @@ if __name__ == "__main__":
     if not slug:
         raise SystemExit(
             "Uso: py -3.13 cli/evaluar_rag.py <slug> [--detalle] "
-            "[--guardar <nombre>] [--comparar <nombre>] [--csv <archivo>]")
-    main(slug, "--detalle" in sys.argv, valores["--guardar"],
-         valores["--comparar"], valores["--csv"])
+            "[--guardar <nombre>] [--comparar <nombre>] [--csv <archivo>]\n"
+            "     py -3.13 cli/evaluar_rag.py <slug> --barrido")
+    if "--barrido" in sys.argv:
+        barrido(slug)
+    else:
+        main(slug, "--detalle" in sys.argv, valores["--guardar"],
+             valores["--comparar"], valores["--csv"])
