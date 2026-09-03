@@ -868,6 +868,13 @@ class Herramienta(Base):
     # traza que se pidio -- de ahi sale el asunto con el que entra el ticket.
     # No cambia nada en ningun equipo. Ver nucleo/herramientas/wifi.py.
     valida_pedido_wifi: bool = False
+    # Tipo 'interno' tambien: junta lo que el cliente reporto sobre un
+    # comprobante de pago (valor, fecha, referencia, medio) y fuerza que un
+    # colaborador humano lo revise -- NUNCA registra el pago ni reconecta
+    # nada. El modelo no tiene vision (ver DESPLIEGUE.md): esta herramienta
+    # nunca recibe "lo que dice la imagen", solo lo que el cliente escribio.
+    # Ver nucleo/herramientas/pagos.py. Agregado en Fase #7 (03/09/2026).
+    reporta_comprobante_pago: bool = False
 
     # --- http / agregado ---
     # No es secreto (no dispara el barrido de _barrer_secretos): es dato de

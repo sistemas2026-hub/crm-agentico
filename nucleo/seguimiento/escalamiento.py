@@ -413,7 +413,20 @@ def _resolver_tag(config, nombre_tag: str) -> str | None:
     'is not a valid UUID'. POST /api/tags/ si crea por nombre, pero rechaza
     un nombre duplicado con 400 -- por eso primero se busca en la lista
     existente y solo se crea si de verdad no esta.
+
+    Sin nombre no hay nada que resolver -- y no es un caso raro: una
+    escalada forzada por hecho (ver forzado.py) puede llegar con
+    'etiqueta=""' cuando el evaluador no llego a clasificar nada, y sin
+    esta guarda 'POST /api/tags/' con un nombre vacio lo rechazaba con 400,
+    tumbando escalar() entero (el caso no se creaba y el cliente recibia el
+    mensaje generico de 'no quedo registrado' en vez de la escalada real).
+    Encontrado en la prueba controlada de Fase #7 (03/09/2026) -- 'tags' ya
+    es opcional en el payload del caso (mas abajo: 'if tag_id: ...'), asi
+    que devolver None aca no le quita nada al caso, solo evita la llamada
+    que no tenia que pasar.
     """
+    if not nombre_tag:
+        return None
     listar = _herramienta(config, NOMBRE_HERRAMIENTA_TAGS_LISTAR)
     if not listar:
         return None

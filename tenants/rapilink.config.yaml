@@ -448,11 +448,16 @@ roles:
     orientado_a: cliente_final
     puede_consultar: [verificar_identidad_por_cedula, confirmar_identidad,
           consultar_mi_servicio, derivar_a_area, cargar_habilidad,
-          consultar_documentacion]
+          consultar_documentacion, reportar_comprobante_pago]
     campos_permitidos:
       # Mismo criterio que cliente_final: lista blanca minima para el tema
       # de esta area. Sin acceso a ssid_router_wifi -- no hace a su trabajo.
       consultar_mi_servicio: [estado, estado_facturas, saldo, fecha_corte, plan_internet]
+      # Sin 'resumen': ese campo es para el colaborador humano que va a leer
+      # el caso, no para que el modelo se lo repita al cliente -- ya sabe
+      # que decir por el mensaje fijo de 'comprobante_para_validar' (Fase
+      # #7). Con 'estado'/'faltantes' alcanza para pedir lo que falte.
+      reportar_comprobante_pago: [estado, faltantes]
     nunca_revelar: [password_servicio, password_cpe, password_router_wifi, usuario_router_wifi, 
           cedula, direccion, coordenadas, ip, mac_cpe, sn_onu, sectorial, router.nombre]
 
@@ -2973,6 +2978,69 @@ herramientas:
         tipo: enum
         valores: {registrar_promesa: 0, registrar_promesa_y_activar_servicio: 1}
 
+  # --- reporte de comprobante de pago (Fase #7, 03/09/2026) ------------------
+  # NO registra nada en WispHub, NO reconecta, NO confirma el pago. Junta lo
+  # que el cliente escribio sobre su comprobante y fuerza que un colaborador
+  # de cartera lo revise -- el registro real en WispHub sigue siendo
+  # 'registrar_pago'/'agregar_promesa_pago', sin tocar en esta fase, y solo
+  # las ejecuta un colaborador humano (ver sus 'roles_permitidos': nunca
+  # incluyen a este rol de cliente).
+  - nombre: reportar_comprobante_pago
+    tipo: interno
+    reporta_comprobante_pago: true
+    # Primer campo a proposito -- ver el mismo criterio en 'pedido' de
+    # registrar_pedido_wifi: es el unico que sobrevive el recorte de 160
+    # caracteres de la traza en el ticket.
+    resumen_desde: resumen
+    descripcion: >
+      El cliente reporta que ya pago (con o sin foto del comprobante).
+      Junta lo que el cliente ESCRIBIO sobre su pago -- valor, fecha,
+      referencia, medio de pago -- y lo deja listo para que un colaborador
+      de cartera lo revise y lo registre en WispHub si corresponde.
+
+      NO TIENES VISION: no podes leer el contenido de una foto, aunque el
+      cliente la haya mandado. NUNCA digas que "viste" o "leiste" el
+      comprobante -- solo podes usar lo que el cliente te escribio en el
+      chat. Si mando la foto sin explicar nada, PREGUNTALE el valor, la
+      fecha y la referencia antes de llamar a esta herramienta.
+
+      'legible' se manda SOLO si el cliente dijo explicitamente que la foto
+      no se ve bien, no cargo, o esta borrosa -- nunca por tu cuenta, no
+      tenes forma de saberlo.
+
+      ESTA LLAMADA NO CONFIRMA EL PAGO. Nunca le digas al cliente "tu pago
+      fue confirmado", "tu pago ya esta registrado", "tu servicio sera
+      reconectado" ni "tu internet ya fue activado" -- ni antes de llamar a
+      esta herramienta, ni despues. Lo unico que podes decirle es que
+      recibiste su reporte y que un colaborador lo va a revisar.
+
+      Si el resultado es COMPROBANTE_INCOMPLETO o COMPROBANTE_ILEGIBLE,
+      pedile al cliente exactamente lo que falta ('faltantes') -- no
+      insistas con lo mismo que ya te dio.
+    solo_lectura: false
+    requiere_confirmacion: true
+    escalar_al_completar: comprobante_para_validar
+    roles_permitidos: [facturacion_cliente]
+    filtros_verificados:
+      valor_reportado: {param: valor_reportado, tipo: texto}
+      fecha_comprobante: {param: fecha_comprobante, tipo: texto}
+      referencia: {param: referencia, tipo: texto}
+      medio_pago: {param: medio_pago, tipo: texto}
+      nombre_pagador: {param: nombre_pagador, tipo: texto}
+      observaciones: {param: observaciones, tipo: texto}
+      legible:
+        param: legible
+        tipo: enum
+        valores: {"si": "si", "no": "no"}
+    # Identidad de la SESION verificada, nunca la que proponga el modelo --
+    # mismo criterio de seguridad que 'consultar_mi_servicio'/
+    # 'registrar_pedido_wifi'. Sin 'id_cliente_sesion' no hay a que cliente
+    # asociarle el caso, asi que la llamada se rechaza sola.
+    inyectar_sesion:
+      nombre_cliente: nombre
+      id_cliente_sesion: id_cliente
+    inyectados_obligatorios: [id_cliente_sesion]
+
   # --- BottleCRM (verificado en vivo, ver skill bottlecrm-api) ---------------
 
   - nombre: consultar_casos_bottlecrm
@@ -4261,7 +4329,7 @@ escalamiento:
   # que todo motivo exista, no para que el modelo lo proponga.
   activar_si: [frustracion_detectada, tres_fallos_seguidos, solicitud_explicita, duda_de_identidad,
                visita_tecnica_requerida, sin_datos_para_diagnosticar, pedido_para_ejecutar,
-               accion_sin_efecto]
+               accion_sin_efecto, comprobante_para_validar]
   destino_rol: soporte
   # Este texto REEMPLAZA la respuesta del asistente cuando escala (ver
   # nucleo/canales/api.py), no se le suma -- asi que tiene que sostenerse
@@ -4289,6 +4357,13 @@ escalamiento:
     pedido_para_ejecutar: >-
       Listo, tu pedido quedó registrado. Un compañero del equipo lo va a
       aplicar y te confirma cuando esté hecho.
+    # Fase #7 (03/09/2026). A proposito NO dice "confirmado", "registrado
+    # como pago" ni menciona reconexion: nada de eso paso todavia, y este
+    # texto REEMPLAZA lo que el modelo iba a contestar (ver
+    # nucleo/canales/api.py) -- es lo unico que el cliente lee en este turno.
+    comprobante_para_validar: >-
+      Recibimos tu comprobante. Nuestro equipo lo validará y te confirmará
+      el estado de tu pago.
     solicitud_explicita: >-
       Claro, te paso con un compañero del equipo. Ya tiene el contexto de lo
       que venimos hablando, así que no tienes que repetirlo.
@@ -4542,6 +4617,7 @@ escalamiento:
     estado_servicio: cartera
     reconexion: cartera
     reclamo_formal: cartera
+    validacion_de_pago: cartera
     otro: soporte_tecnico
 
   ticket_al_escalar:
@@ -4717,6 +4793,7 @@ manual:
     - reconexion
     - cambio_wifi
     - reclamo_formal
+    - validacion_de_pago
     # Seccion 5.9 del manual. Piloto de agendamiento automatico de visita
     # tecnica (nucleo/seguimiento/agendamiento.py) -- ver
     # escalamiento.agendamiento_automatico mas abajo.

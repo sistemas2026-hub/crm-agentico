@@ -38,8 +38,9 @@ from nucleo.herramientas.http import (ErrorHerramientaHttp, _alternativas,  # no
                                       SIN_MAPEAR,
                                       _aplicar_mapeos, _aplicar_veredictos,
                                       _gpon_hex, base_url_de, url_de)
-from nucleo.herramientas import wifi                                        # noqa: E402
+from nucleo.herramientas import pagos, wifi                                 # noqa: E402
 from nucleo.modelo.motor import (_codigo_error_de_pedido_wifi,              # noqa: E402
+                                 _codigo_error_de_reporte_pago,
                                  _previas_no_cumplidas,
                                  _recuperar_campos_de_sesion, _veces_ejecutada)
 from nucleo.seguridad.verificacion import Sesion                            # noqa: E402
@@ -419,6 +420,48 @@ comprobar(_codigo_error_de_pedido_wifi(h_otra, crudo_clave_corta) is None,
 comprobar(_codigo_error_de_pedido_wifi(h_wifi, {"algo": "sin pedido_valido"}) is None,
          "y si el dict no trae 'pedido_valido' (forma inesperada), no inventa nada")
 comprobar(_codigo_error_de_pedido_wifi(h_wifi, None) is None,
+         "ni explota con un 'crudo' que no es un dict")
+
+print()
+print("=" * 70)
+print(" FASE #7 -- _codigo_error_de_reporte_pago: reporte de pago incompleto vs completo")
+print("=" * 70)
+h_pagos = _herramienta(nombre="reportar_comprobante_pago", tipo="interno",
+                       endpoint=None, base_url=None, reporta_comprobante_pago=True)
+h_otra2 = _herramienta(nombre="consultar_algo")
+
+print("\nreporte COMPLETO -- sin cambios, no se le asigna codigo_error")
+crudo_completo = pagos.procesar_reporte(h_pagos, {
+    "valor_reportado": "50000", "fecha_comprobante": "2026-09-03"})
+comprobar(crudo_completo["estado"] == pagos.COMPROBANTE_RECIBIDO,
+         "pagos.procesar_reporte() da COMPROBANTE_RECIBIDO con valor+fecha")
+comprobar(_codigo_error_de_reporte_pago(h_pagos, crudo_completo) is None,
+         "y motor.py NO le asigna codigo_error -- puede escalar")
+
+print("\nreporte INCOMPLETO -- motor.py le asigna COMPROBANTE_NO_LISTO")
+crudo_incompleto = pagos.procesar_reporte(h_pagos, {"valor_reportado": "50000"})
+comprobar(crudo_incompleto["estado"] == pagos.COMPROBANTE_INCOMPLETO,
+         "sin fecha ni referencia, pagos.procesar_reporte() da COMPROBANTE_INCOMPLETO")
+comprobar(_codigo_error_de_reporte_pago(h_pagos, crudo_incompleto) == "COMPROBANTE_NO_LISTO",
+         "y motor.py SI le asigna COMPROBANTE_NO_LISTO -- no puede escalar")
+
+print("\nreporte ILEGIBLE -- mismo freno")
+crudo_ilegible = pagos.procesar_reporte(h_pagos, {
+    "valor_reportado": "50000", "fecha_comprobante": "2026-09-03", "legible": "no"})
+comprobar(_codigo_error_de_reporte_pago(h_pagos, crudo_ilegible) == "COMPROBANTE_NO_LISTO",
+         "un comprobante que el cliente dice que no se ve tampoco puede escalar")
+
+print("\nNO_PARECE_COMPROBANTE -- mismo freno")
+crudo_vacio = pagos.procesar_reporte(h_pagos, {})
+comprobar(_codigo_error_de_reporte_pago(h_pagos, crudo_vacio) == "COMPROBANTE_NO_LISTO",
+         "sin ningun dato de pago, tampoco escala")
+
+print("\nsolo aplica a ESTA herramienta, nunca a otra")
+comprobar(_codigo_error_de_reporte_pago(h_otra2, crudo_incompleto) is None,
+         "una herramienta que NO declara reporta_comprobante_pago nunca recibe este codigo")
+comprobar(_codigo_error_de_reporte_pago(h_pagos, {"algo": "sin estado"}) is None,
+         "y si el dict no trae 'estado' (forma inesperada), no inventa nada")
+comprobar(_codigo_error_de_reporte_pago(h_pagos, None) is None,
          "ni explota con un 'crudo' que no es un dict")
 
 if fallos:

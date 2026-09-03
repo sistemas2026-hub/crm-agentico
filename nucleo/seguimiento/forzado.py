@@ -492,8 +492,16 @@ CODIGOS_MOTOR_GUARD = frozenset({
 # valido -- y el cliente escuchaba "tu pedido quedo registrado" sobre algo
 # que nadie puede aplicar. Encontrado y reproducido en la auditoria de
 # Fase #6/#6.1 (03/09/2026).
+#
+# 'COMPROBANTE_NO_LISTO': lo pone motor.py (ver
+# _codigo_error_de_reporte_pago) cuando 'reportar_comprobante_pago'
+# (Herramienta.reporta_comprobante_pago, ver nucleo/herramientas/pagos.py)
+# recibe un reporte incompleto, ilegible segun el cliente, o que no parece
+# un comprobante -- mismo motivo que PEDIDO_INVALIDO, evitado desde el
+# diseño en vez de encontrado despues (Fase #7, 03/09/2026).
 CODIGOS_CONDICION_DE_NEGOCIO = frozenset({
     "PEDIDO_INVALIDO",
+    "COMPROBANTE_NO_LISTO",
 })
 
 

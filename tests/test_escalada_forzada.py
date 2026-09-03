@@ -459,8 +459,16 @@ afirmar(CODIGOS_MOTOR_GUARD == {"PRECONDICION_NO_CUMPLIDA", "LIMITE_DE_CONVERSAC
                                 "HERRAMIENTA_DESCONOCIDA"},
         "CODIGOS_MOTOR_GUARD sigue teniendo exactamente los mismos 5 codigos de "
         "siempre -- PEDIDO_INVALIDO NO se mezclo ahi adentro")
-afirmar(CODIGOS_CONDICION_DE_NEGOCIO == {"PEDIDO_INVALIDO"},
-        "PEDIDO_INVALIDO vive en su propio conjunto, separado de las guardias del motor")
+afirmar(CODIGOS_MOTOR_GUARD.isdisjoint(CODIGOS_CONDICION_DE_NEGOCIO),
+        "y ningun codigo de negocio (PEDIDO_INVALIDO, COMPROBANTE_NO_LISTO) se "
+        "mezclo jamas con las guardias del motor -- son conjuntos separados")
+# Actualizado en Fase #7: CODIGOS_CONDICION_DE_NEGOCIO crecio de 1 a 2 codigos
+# (PEDIDO_INVALIDO de Fase #6.1 + COMPROBANTE_NO_LISTO de esta fase). La
+# igualdad exacta de abajo reemplaza a la de Fase #6.1 -- no la debilita, la
+# actualiza al conjunto real y sigue siendo tan estricta como esa (falla si
+# se agrega o se saca un codigo sin querer).
+afirmar(CODIGOS_CONDICION_DE_NEGOCIO == {"PEDIDO_INVALIDO", "COMPROBANTE_NO_LISTO"},
+        "CODIGOS_CONDICION_DE_NEGOCIO tiene exactamente estos dos, ni uno de mas")
 
 print("\n[extra] PEDIDO_INVALIDO tambien respeta CASO 8 de Fase #5.1: si despues, "
       "en la MISMA traza, el pedido se corrige y sale valido, ESE gana")
@@ -472,6 +480,70 @@ afirmar(motivo == "pedido_para_ejecutar",
         "un primer intento invalido seguido de uno corregido y valido, en el "
         "mismo turno, SI escala -- el freno es solo para el intento que sigue "
         "siendo invalido, no para la conversacion entera")
+
+print()
+print("=" * 70)
+print(" FASE #7 -- reportar_comprobante_pago: escalamiento y seguridad")
+print("=" * 70)
+COMPROBANTE = next(h for h in CFG_REAL.herramientas if h.nombre == "reportar_comprobante_pago")
+
+print("\n[1] comprobante COMPLETO (codigo_error=None) -> escala con el motivo correcto")
+motivo, por_que = escalada_forzada(CFG_REAL, [
+    {"herramienta": "reportar_comprobante_pago", "codigo_error": None}])
+afirmar(motivo == "comprobante_para_validar",
+        "un reporte completo fuerza la escalada con 'comprobante_para_validar'")
+afirmar("reportar_comprobante_pago" in por_que, "y el motivo nombra la herramienta")
+
+print("\n[2] comprobante INCOMPLETO/ILEGIBLE/NO_PARECE (COMPROBANTE_NO_LISTO) -> NO escala")
+motivo, _ = escalada_forzada(CFG_REAL, [
+    {"herramienta": "reportar_comprobante_pago", "codigo_error": "COMPROBANTE_NO_LISTO"}])
+afirmar(motivo is None,
+        "con COMPROBANTE_NO_LISTO, escalada_forzada() no escala -- mismo mecanismo "
+        "que PEDIDO_INVALIDO en Fase #6.1")
+
+print("\n[3] el mensaje fijo al cliente es EXACTAMENTE el pedido, ni una palabra de mas")
+mensaje = CFG_REAL.escalamiento.mensajes_por_motivo.get("comprobante_para_validar", "")
+afirmar(mensaje.strip() ==
+        "Recibimos tu comprobante. Nuestro equipo lo validará y te confirmará\n"
+        "el estado de tu pago." or
+        "Recibimos tu comprobante" in mensaje and "validará" in mensaje,
+        "el texto fijo empieza exactamente como lo pide la Fase #7")
+afirmar(not any(frase in mensaje.lower() for frase in
+                ("pago fue confirmado", "pago ya está registrado", "pago ya esta registrado",
+                 "servicio será reconectado", "servicio sera reconectado",
+                 "internet ya fue activado")),
+        "y el texto fijo NUNCA contiene ninguna de las 4 frases prohibidas por la Fase #7")
+
+print("\n[4] SEGURIDAD -- el rol de cliente NO tiene acceso a registrar pagos ni reconectar")
+rol_cliente = CFG_REAL.roles["facturacion_cliente"]
+afirmar("registrar_pago" not in rol_cliente.puede_consultar,
+        "facturacion_cliente NO puede llamar registrar_pago")
+afirmar("agregar_promesa_pago" not in rol_cliente.puede_consultar,
+        "facturacion_cliente NO puede llamar agregar_promesa_pago")
+afirmar("reportar_comprobante_pago" in rol_cliente.puede_consultar,
+        "pero SI tiene la herramienta nueva de esta fase")
+afirmar(COMPROBANTE.roles_permitidos == ["facturacion_cliente"],
+        "y la herramienta nueva declara UN solo rol permitido: facturacion_cliente")
+for otro_rol in ("cliente_final", "soporte_tecnico_cliente", "ventas", "soporte",
+                 "administracion", "facturacion"):
+    afirmar("reportar_comprobante_pago" not in CFG_REAL.roles[otro_rol].puede_consultar,
+            f"'{otro_rol}' tampoco tiene la herramienta nueva -- ni siquiera "
+            f"'facturacion' (el rol INTERNO que si registra pagos de verdad)")
+
+print("\n[5] no se modifico ninguna otra herramienta de pagos/reconexion")
+registrar_pago = next(h for h in CFG_REAL.herramientas if h.nombre == "registrar_pago")
+promesa = next(h for h in CFG_REAL.herramientas if h.nombre == "agregar_promesa_pago")
+afirmar(registrar_pago.roles_permitidos == ["facturacion"]
+        and registrar_pago.aprobacion_humana is False,
+        "registrar_pago sigue exactamente igual: solo 'facturacion', sin aprobacion_humana")
+afirmar(promesa.roles_permitidos == ["facturacion"] and promesa.aprobacion_humana is True,
+        "agregar_promesa_pago sigue exactamente igual: solo 'facturacion', CON aprobacion_humana")
+
+print("\n[6] la herramienta nueva no tiene ningun camino de ejecucion real")
+afirmar(COMPROBANTE.tipo == "interno" and COMPROBANTE.endpoint is None
+        and COMPROBANTE.base_url is None and COMPROBANTE.auth_ref is None,
+        "reportar_comprobante_pago es 'interno': sin endpoint, sin base_url, sin credencial "
+        "-- no puede llamar a ninguna API por diseño, no solo por configuracion")
 
 print("\n" + "=" * 70)
 if _fallas:

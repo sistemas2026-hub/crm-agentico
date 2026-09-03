@@ -54,6 +54,7 @@ from nucleo.herramientas import http as ejecutor_http
 from nucleo.herramientas import incidentes as ejecutor_incidentes
 from nucleo.herramientas import estabilidad as ejecutor_estabilidad
 from nucleo.herramientas import wifi as ejecutor_wifi
+from nucleo.herramientas import pagos as ejecutor_pagos
 from nucleo.herramientas import informes
 from nucleo.modelo import cliente
 from nucleo.modelo import tuteo
@@ -1184,6 +1185,41 @@ def _codigo_error_de_pedido_wifi(herramienta, crudo) -> str | None:
     return None
 
 
+def _codigo_error_de_reporte_pago(herramienta, crudo) -> str | None:
+    """
+    'COMPROBANTE_NO_LISTO' si 'herramienta' es 'reportar_comprobante_pago'
+    (Herramienta.reporta_comprobante_pago, ver nucleo/herramientas/pagos.py)
+    y el reporte NO quedo en estado COMPROBANTE_RECIBIDO -- None en
+    cualquier otro caso, incluido un reporte que si esta completo.
+
+    Mismo motivo y misma forma que _codigo_error_de_pedido_wifi: esta
+    herramienta tampoco lanza nunca una excepcion (no llama a ninguna API),
+    asi que sin este codigo un comprobante incompleto, ilegible o que ni
+    siquiera parece un pago hubiera disparado 'escalar_al_completar' igual
+    que uno completo -- exactamente el defecto que la Fase #6.1 encontro y
+    corrigio para WiFi, aca evitado desde el diseño en vez de encontrado
+    despues (Fase #7, 03/09/2026).
+
+    El codigo es una CONDICION DE NEGOCIO (CODIGOS_CONDICION_DE_NEGOCIO en
+    forzado.py), no un fallo real: la herramienta funciono perfecto, es el
+    reporte del cliente el que todavia no alcanza.
+
+    Solo actua ante uno de los TRES estados explicitamente "no listos" de
+    pagos.py -- no ante "cualquier cosa que no sea COMPROBANTE_RECIBIDO".
+    Mismo criterio defensivo que _codigo_error_de_pedido_wifi (que usa
+    'is False', no '!= True'): una forma inesperada de 'crudo' (sin
+    'estado', de otra herramienta) no se interpreta como "no listo" -- se
+    deja pasar sin inventar una conclusion sobre datos que no se conocen.
+    """
+    _NO_LISTOS = ("COMPROBANTE_INCOMPLETO", "COMPROBANTE_ILEGIBLE",
+                  "NO_PARECE_COMPROBANTE")
+    if not (herramienta.reporta_comprobante_pago and isinstance(crudo, dict)):
+        return None
+    if crudo.get("estado") in _NO_LISTOS:
+        return "COMPROBANTE_NO_LISTO"
+    return None
+
+
 def _resolver_argumentos(herramienta, sesion, argumentos_modelo: dict,
                          sobrescribir: dict | None = None,
                          variables_tenant: dict | None = None) -> dict:
@@ -1374,6 +1410,9 @@ def _ejecutar_tool(herramienta, sesion, argumentos_modelo: dict,
 
     if herramienta.tipo == "interno" and herramienta.valida_pedido_wifi:
         return ejecutor_wifi.procesar(herramienta, argumentos, tenant, variables_tenant)
+
+    if herramienta.tipo == "interno" and herramienta.reporta_comprobante_pago:
+        return ejecutor_pagos.procesar_reporte(herramienta, argumentos)
 
     if herramienta.tipo == "http":
         if herramienta.cache and tenant:
@@ -2091,16 +2130,17 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                         if herramienta.campos_texto_libre:
                             salida = redaccion.redactar_campos(
                                 salida, herramienta.campos_texto_libre)
-                        # Ver _codigo_error_de_pedido_wifi: la llamada salio
-                        # bien (no hubo excepcion), pero si el pedido de
-                        # WiFi no cumple las reglas no puede quedar como un
-                        # 'exito' comun -- 'escalar_al_completar' lo tomaria
-                        # como un pedido listo para ejecutar. Codigo propio
-                        # y no un 'error' en 'salida': el modelo SIGUE
-                        # viendo 'pedido_valido'/'problemas' tal cual los
-                        # devolvio la herramienta, esto solo cambia como lo
-                        # lee escalada_forzada().
-                        codigo_error = _codigo_error_de_pedido_wifi(herramienta, crudo)
+                        # Ver _codigo_error_de_pedido_wifi/_codigo_error_de_
+                        # reporte_pago: la llamada salio bien (no hubo
+                        # excepcion), pero un pedido de WiFi invalido o un
+                        # comprobante de pago incompleto no pueden quedar
+                        # como un 'exito' comun -- 'escalar_al_completar' lo
+                        # tomaria como listo para ejecutar. Codigo propio y
+                        # no un 'error' en 'salida': el modelo SIGUE viendo
+                        # los campos tal cual los devolvio la herramienta,
+                        # esto solo cambia como lo lee escalada_forzada().
+                        codigo_error = (_codigo_error_de_pedido_wifi(herramienta, crudo)
+                                        or _codigo_error_de_reporte_pago(herramienta, crudo))
                     except FaltaIdentidadEnSesion as e:
                         # No es un fallo del sistema: es la proteccion haciendo
                         # su trabajo. Se le dice al modelo QUE hacer -- pedir la
