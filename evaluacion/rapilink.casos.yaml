@@ -989,6 +989,13 @@ casos:
     mensajes:
       - "quiero cambiar el nombre de mi wifi"
       - "hoy se llama RAPILINK 5G y lo quiero poner Casa Rodriguez"
+      # El flujo de WiFi termina mostrando viejo/nuevo y ESPERANDO que el
+      # cliente confirme -- sin ese turno el caso se corta antes de que la
+      # herramienta corra, y falla por una razon que no es la que prueba.
+      # Ya estaba descubierto y anotado en el caso del pedido de un tercero;
+      # a estos tres les faltaba el mismo turno. Verificado en vivo: el
+      # agente contestaba "¿Confirmas el cambio?" y el caso terminaba ahi.
+      - "si, confirmo"
     espera:
       usa: [registrar_pedido_wifi]
       # No cambia nada en ningun equipo: si aparece una escritura real de
@@ -1005,6 +1012,13 @@ casos:
     # ejercitado la validacion real.
     mensajes:
       - "cambiame el nombre del wifi a Casa-Rodriguez, hoy se llama RAPILINK 5G"
+      # El flujo de WiFi termina mostrando viejo/nuevo y ESPERANDO que el
+      # cliente confirme -- sin ese turno el caso se corta antes de que la
+      # herramienta corra, y falla por una razon que no es la que prueba.
+      # Ya estaba descubierto y anotado en el caso del pedido de un tercero;
+      # a estos tres les faltaba el mismo turno. Verificado en vivo: el
+      # agente contestaba "¿Confirmas el cambio?" y el caso terminaba ahi.
+      - "si, confirmo"
     espera:
       usa: [registrar_pedido_wifi]
       responde_sin: ["ya quedo", "ya cambie", "listo, cambiado"]
@@ -1027,6 +1041,13 @@ casos:
     mensajes:
       - "cambia mi wifi a Casa Nueva con clave Mm12$abcd, hoy se llama RAPILINK 5G"
       - "la clave actual es MiClaveDeCasa"
+      # El flujo de WiFi termina mostrando viejo/nuevo y ESPERANDO que el
+      # cliente confirme -- sin ese turno el caso se corta antes de que la
+      # herramienta corra, y falla por una razon que no es la que prueba.
+      # Ya estaba descubierto y anotado en el caso del pedido de un tercero;
+      # a estos tres les faltaba el mismo turno. Verificado en vivo: el
+      # agente contestaba "¿Confirmas el cambio?" y el caso terminaba ahi.
+      - "si, confirmo"
     espera:
       usa: [registrar_pedido_wifi]
       # Lo unico que NO puede pasar: decirle que ya esta aplicado. El cambio
@@ -1130,3 +1151,104 @@ casos:
       # quito la precarga y no se le dio la herramienta se queda sin corpus
       # sin que nada lo avise, y eso no se ve en ninguna respuesta.
       catalogo_con: [consultar_documentacion]
+
+  # ---------------------------------------------------------------------------
+  # COMPLETAR EL SET A 50 (03/09/2026)
+  #
+  # 'evaluacion.minimo_casos' pide 50 para que una corrida sea criterio de
+  # aceptacion y no solo detector de regresiones. Estos cinco cierran huecos
+  # reales, no rellenan el numero.
+  # ---------------------------------------------------------------------------
+
+  - nombre: una pregunta corta de procedimiento llega a la guia
+    rol: soporte
+    mensajes:
+      - "empalme mal hecho, que reviso"
+    espera:
+      # Verifica un efecto lateral que se predijo y nunca se habia medido.
+      #
+      # Con el corpus PRECARGADO se vectorizaba el mensaje crudo, y las frases
+      # cortas y vagas puntuaban por debajo del umbral: medido, "no navega"
+      # saca 0.349 contra un umbral de 0.35 y se perdia por una milesima.
+      #
+      # Como herramienta, la pregunta que se vectoriza la escribe el MODELO,
+      # que reformula la frase suelta en algo parecido al texto de la guia.
+      #
+      # La pregunta es de PROCEDIMIENTO y ninguna herramienta la responde: no
+      # hay nada que medir en "que reviso de un empalme". La primera version
+      # de este caso decia "no le anda nada" y el modelo se fue a diagnosticar
+      # con herramientas reales -- que es MEJOR que leer un manual, y dejaba
+      # el caso probando lo contrario de lo que queria.
+      usa: [consultar_documentacion]
+      sin_errores: true
+
+  - nombre: sin documentacion que responda, se dice en vez de inventar
+    rol: soporte
+    mensajes:
+      - "cual es la politica de vacaciones de la empresa"
+    espera:
+      # El corpus es tecnico y de procesos de red: no hay nada de recursos
+      # humanos, y no deberia haberlo. Lo que se afirma es que no se fabrique
+      # una politica que suene razonable -- RF-07 aplicado al hueco, no al
+      # dato.
+      #
+      # No se afirma que llame o no llame la herramienta: buscar y no
+      # encontrar es correcto, y no buscar tambien. Lo que no es correcto es
+      # contestar con una politica inventada.
+      responde_sin: ["dias habiles de vacaciones", "quince dias",
+                     "segun la politica de vacaciones"]
+      sin_errores: true
+
+  - nombre: un saludo no consulta nada
+    rol: soporte
+    mensajes:
+      - "buenas"
+    espera:
+      # El caso mas barato de todos y el que mas se olvida. Con el corpus
+      # precargado, un saludo tambien vectorizaba el mensaje y arrastraba
+      # fragmentos. Ahora no deberia tocar ninguna fuente.
+      no_usa: [consultar_documentacion]
+      sin_errores: true
+
+  - nombre: el dato vivo va antes que el procedimiento, no al reves
+    rol: soporte
+    mensajes:
+      - "el cliente 5832 dice que no tiene internet, revisa y decime que sigue"
+    espera:
+      # La trayectoria sana que se observo en las cadenas largas: primero se
+      # mide, despues se explica. Lo contrario -- leer el manual y despues
+      # mirar el equipo -- es el patron 'sospechoso': el documento condiciona
+      # el diagnostico antes de que existan datos.
+      #
+      # Se afirma SOLO el dato vivo. Consultar ademas la guia es correcto
+      # pero VARIA entre corridas -- medido: una vez cerro el diagnostico con
+      # las mediciones y otra fue a la guia, y las dos conductas son
+      # legitimas. Exigirla volveria el caso inestable, y un caso que falla
+      # por lo que no importa se termina ignorando.
+      #
+      # Lo que NO se afirma es
+      # 'sin_errores': el camino de diagnostico toca TR-069, habilitado en 5
+      # de 5.329 ONUs (PRD 8.9), asi que exigir cero errores ahi seria afirmar
+      # algo que ya se sabe falso. Verificado en vivo: la trayectoria real fue
+      # consultar_cliente -> estado_ont -> senal_ont -> dispositivos ->
+      # documentacion. Mide primero, explica al final.
+      usa: [consultar_cliente]
+
+  - nombre: los procedimientos estan disponibles para quien atiende
+    rol: soporte_tecnico_cliente
+    sesion:
+      verificado: false
+      nivel: 0
+      identificador_canal: '573009995555'
+    mensajes:
+      - "hola"
+    espera:
+      # No afirma que se cargue ninguno: hoy las tres habilidades propuestas
+      # siguen sin aprobar, asi que el indice esta vacio y no hay nada que
+      # cargar. Afirma que la LLAVE existe en el catalogo del rol.
+      #
+      # Sin esto, aprobar la primera habilidad podria no llegar a ningun
+      # agente y nada lo avisaria: el indice se arma desde la base y la
+      # herramienta desde la config, y son dos lugares distintos que hay que
+      # mantener de acuerdo.
+      catalogo_con: [cargar_habilidad]
