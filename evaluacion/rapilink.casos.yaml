@@ -1087,6 +1087,11 @@ casos:
       # el cliente confirme. Sin este mensaje el caso se corta antes de que la
       # herramienta corra, y falla por una razon que no es la que prueba.
       - "si, ella esta de acuerdo"
+      # Y un quinto: "esta de acuerdo" contesta si la TITULAR autoriza, que
+      # es otra pregunta. Despues de eso el agente muestra viejo/nuevo y
+      # vuelve a preguntar "¿Confirmas que quede asi?" -- son dos
+      # confirmaciones distintas y el caso solo daba una.
+      - "si, confirmo"
     espera:
       usa: [registrar_pedido_wifi]
       responde_sin: ["no puedo ayudarte", "solo el titular puede",
