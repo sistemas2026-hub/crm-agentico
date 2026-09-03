@@ -38,7 +38,9 @@ from nucleo.herramientas.http import (ErrorHerramientaHttp, _alternativas,  # no
                                       SIN_MAPEAR,
                                       _aplicar_mapeos, _aplicar_veredictos,
                                       _gpon_hex, base_url_de, url_de)
-from nucleo.modelo.motor import (_previas_no_cumplidas,                     # noqa: E402
+from nucleo.herramientas import wifi                                        # noqa: E402
+from nucleo.modelo.motor import (_codigo_error_de_pedido_wifi,              # noqa: E402
+                                 _previas_no_cumplidas,
                                  _recuperar_campos_de_sesion, _veces_ejecutada)
 from nucleo.seguridad.verificacion import Sesion                            # noqa: E402
 from pydantic import ValidationError                                        # noqa: E402
@@ -365,6 +367,59 @@ comprobar(not s_ajena.sn_onu,
 s_sin_verificar = Sesion(identificador_canal="3001234567")
 _recuperar_campos_de_sesion(s_sin_verificar, h_propia, CRUDO)
 comprobar(not s_sin_verificar.sn_onu, "sin verificar tampoco: no hay a quien atribuirselo")
+
+print()
+print("=" * 70)
+print(" FASE #6.1 -- _codigo_error_de_pedido_wifi: pedido invalido vs valido")
+print("=" * 70)
+# Reproduce el defecto encontrado en la auditoria de Fase #6/#6.1
+# (03/09/2026): 'registrar_pedido_wifi' nunca lanza una excepcion, asi que
+# sin esta funcion 'codigo_error' quedaba en None sea o no valido el
+# pedido, y 'escalar_al_completar' escalaba igual sobre un SSID/clave que
+# wifi.py ya habia rechazado. Se usa la salida REAL de wifi.procesar(), no
+# un dict inventado -- si el shape de esa respuesta cambia, esta prueba lo
+# nota.
+h_wifi = _herramienta(nombre="registrar_pedido_wifi", tipo="interno",
+                      endpoint=None, base_url=None, valida_pedido_wifi=True)
+h_otra = _herramienta(nombre="consultar_algo")   # NO es la herramienta de wifi
+
+print("\ninválido por CONTRASEÑA (CASO 2 de la fase)")
+crudo_clave_corta = wifi.procesar(h_wifi, {"clave_nueva": "ab"})
+comprobar(crudo_clave_corta["pedido_valido"] is False,
+         "wifi.procesar() marca invalida una clave de 2 caracteres")
+comprobar(_codigo_error_de_pedido_wifi(h_wifi, crudo_clave_corta) == "PEDIDO_INVALIDO",
+         "y motor.py le asigna PEDIDO_INVALIDO -- no queda en None")
+
+print("\ninválido por SSID (CASO 3 de la fase)")
+crudo_ssid_malo = wifi.procesar(h_wifi, {"nombre_nuevo": "Casa Peña"})  # ñ: fuera de ASCII
+comprobar(crudo_ssid_malo["pedido_valido"] is False,
+         "wifi.procesar() marca invalido un SSID con ñ")
+comprobar(_codigo_error_de_pedido_wifi(h_wifi, crudo_ssid_malo) == "PEDIDO_INVALIDO",
+         "PEDIDO_INVALIDO tambien por un SSID mal formado, no solo por la clave")
+
+print("\ninválido con VARIOS problemas a la vez (CASO 4 de la fase)")
+crudo_multiple = wifi.procesar(h_wifi, {"nombre_nuevo": "A" * 40, "clave_nueva": "x"})
+comprobar(len(crudo_multiple["problemas"]) >= 2,
+         "el nombre (40 caracteres, pasa los 32) Y la clave (1 caracter) fallan las dos")
+comprobar(_codigo_error_de_pedido_wifi(h_wifi, crudo_multiple) == "PEDIDO_INVALIDO",
+         "con multiples problemas, sigue siendo UN solo codigo: PEDIDO_INVALIDO")
+
+print("\nVALIDO (CASO 1 de la fase) -- comportamiento sin cambios")
+crudo_valido = wifi.procesar(h_wifi, {"nombre_nuevo": "Casa Rodriguez",
+                                      "clave_nueva": "Segura2026x"})
+comprobar(crudo_valido["pedido_valido"] is True,
+         "un pedido que cumple las reglas sigue dando pedido_valido=true")
+comprobar(_codigo_error_de_pedido_wifi(h_wifi, crudo_valido) is None,
+         "y NO se le asigna ningun codigo_error -- exactamente igual que antes de esta fase")
+
+print("\nsolo aplica a ESTA herramienta, nunca a otra")
+comprobar(_codigo_error_de_pedido_wifi(h_otra, crudo_clave_corta) is None,
+         "una herramienta que NO declara valida_pedido_wifi nunca recibe este codigo, "
+         "aunque el dict que le pasen tenga pedido_valido=false por casualidad")
+comprobar(_codigo_error_de_pedido_wifi(h_wifi, {"algo": "sin pedido_valido"}) is None,
+         "y si el dict no trae 'pedido_valido' (forma inesperada), no inventa nada")
+comprobar(_codigo_error_de_pedido_wifi(h_wifi, None) is None,
+         "ni explota con un 'crudo' que no es un dict")
 
 if fallos:
     print(f"\n[FALLA] {len(fallos)} caso(s):")

@@ -33,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from nucleo.seguimiento.forzado import (con_las_manos_vacias,
                                         escalada_forzada,
                                         motivos_por_hecho,
+                                        CODIGOS_CONDICION_DE_NEGOCIO,
                                         CODIGOS_MOTOR_GUARD)  # noqa: E402
 from nucleo.config.schema import Herramienta  # noqa: E402
 
@@ -378,6 +379,99 @@ afirmar(set(campos_soporte) == {"es_incidente_de_red", "tipo_alerta", "clientes_
                                 "porcentaje_afectado", "desde", "zona", "caja", "motivo",
                                 "clientes_caidos_a_la_vez", "desde_por_tiempos"},
         "y el rol 'soporte' (que ya tenia 'motivo') no cambio en nada")
+
+print()
+print("=" * 70)
+print(" FASE #6.1 -- registrar_pedido_wifi: PEDIDO_INVALIDO no escala")
+print("=" * 70)
+# Reproduce y corrige el defecto de la auditoria de Fase #6/#6.1
+# (03/09/2026): un pedido de WiFi invalido (SSID/clave que wifi.py
+# rechaza) llegaba a escalar igual que uno valido, porque
+# 'registrar_pedido_wifi' nunca lanza una excepcion y 'escalar_al_completar'
+# solo mira si hubo codigo_error. La correccion vive en dos archivos:
+# motor.py::_codigo_error_de_pedido_wifi() le asigna 'PEDIDO_INVALIDO'
+# cuando corresponde, y este archivo prueba que, con ese codigo puesto,
+# escalada_forzada() ya NO escala.
+
+print("\n[CASO 1] pedido VALIDO -- comportamiento SIN CAMBIOS: sigue escalando")
+motivo, por_que = escalada_forzada(CFG_REAL, [
+    {"herramienta": "registrar_pedido_wifi", "codigo_error": None}])
+afirmar(motivo == "pedido_para_ejecutar",
+        "un pedido valido (codigo_error=None, igual que antes de esta fase) sigue "
+        "forzando la escalada -- el flujo que ya funcionaba no se toco")
+
+print("\n[CASO 2] pedido INVALIDO por CONTRASEÑA -- NO escala")
+motivo, _ = escalada_forzada(CFG_REAL, [
+    {"herramienta": "registrar_pedido_wifi", "codigo_error": "PEDIDO_INVALIDO"}])
+afirmar(motivo is None,
+        "con PEDIDO_INVALIDO (el codigo que motor.py asigna cuando la clave no "
+        "cumple las reglas), escalada_forzada() ya NO escala")
+
+print("\n[CASO 3] pedido INVALIDO por SSID -- mismo codigo, mismo resultado")
+# El codigo no distingue SSID de clave (wifi.py ya junta ambos problemas en
+# 'problemas'), asi que la traza es identica -- lo que importa es que
+# PEDIDO_INVALIDO se comporte igual sin importar CUAL regla violo el pedido.
+motivo, _ = escalada_forzada(CFG_REAL, [
+    {"herramienta": "registrar_pedido_wifi", "codigo_error": "PEDIDO_INVALIDO"}])
+afirmar(motivo is None, "un SSID invalido tampoco escala -- mismo codigo, mismo freno")
+
+print("\n[CASO 4] pedido con VARIOS problemas a la vez -- sigue siendo un solo freno")
+motivo, _ = escalada_forzada(CFG_REAL, [
+    {"herramienta": "registrar_pedido_wifi", "codigo_error": "PEDIDO_INVALIDO",
+     "resumen": ""}])
+afirmar(motivo is None,
+        "nombre Y clave invalidos a la vez siguen resolviendo a UN solo "
+        "PEDIDO_INVALIDO, y ese solo ya alcanza para no escalar")
+
+print("\n[CASO 5] pedido INVALIDO -- el mensaje de 'quedo registrado' nunca se busca")
+# api.py solo entra a buscar 'mensajes_por_motivo[motivo]' cuando 'forzado'
+# (el motivo que devuelve escalada_forzada) no es None -- ver
+# nucleo/canales/api.py:1061 ('if forzado:'). Con motivo=None no hay 'motivo'
+# con que indexar el diccionario, asi que el texto fijo de
+# 'pedido_para_ejecutar' ("Listo, tu pedido quedo registrado...") no puede
+# llegar a reemplazar la respuesta del modelo.
+motivo_invalido, _ = escalada_forzada(CFG_REAL, [
+    {"herramienta": "registrar_pedido_wifi", "codigo_error": "PEDIDO_INVALIDO"}])
+afirmar(motivo_invalido is None,
+        "sin motivo, api.py nunca entra a la rama que reemplaza la respuesta con "
+        "el mensaje fijo -- lo que el modelo redacte (mostrando 'problemas') es "
+        "lo que de verdad le llega al cliente")
+
+print("\n[CASO 6] pedido VALIDO -- conserva el mensaje real, sin cambios")
+motivo_valido, _ = escalada_forzada(CFG_REAL, [
+    {"herramienta": "registrar_pedido_wifi", "codigo_error": None}])
+mensaje = CFG_REAL.escalamiento.mensajes_por_motivo.get(motivo_valido)
+afirmar(motivo_valido == "pedido_para_ejecutar" and mensaje
+        and "quedó registrado" in mensaje,
+        "un pedido valido SI produce el motivo, y el mensaje fijo de "
+        "'pedido_para_ejecutar' sigue siendo exactamente el mismo que antes")
+
+print("\n[CASO 7] idempotencia -- nada de esto se toco")
+# escalada_forzada() es una funcion pura: no crea casos, no escribe en la
+# base, no toca 'estado[\"ya_escalada\"]' (eso vive en api.py, sin cambios
+# en esta fase). Que PEDIDO_INVALIDO no escale significa, ademas, que un
+# pedido invalido NUNCA llega a intentar crear un caso -- no hay nada que
+# deduplicar porque no se crea nada. Se confirma aca que el mecanismo
+# CODIGOS_MOTOR_GUARD -- que SI es la base de la que la idempotencia entre
+# turnos ya dependia (Fase #2/#5) -- sigue exactamente igual:
+afirmar(CODIGOS_MOTOR_GUARD == {"PRECONDICION_NO_CUMPLIDA", "LIMITE_DE_CONVERSACION",
+                                "FALTA_HABLAR_CON_EL_CLIENTE", "IDENTIDAD_NO_RESUELTA",
+                                "HERRAMIENTA_DESCONOCIDA"},
+        "CODIGOS_MOTOR_GUARD sigue teniendo exactamente los mismos 5 codigos de "
+        "siempre -- PEDIDO_INVALIDO NO se mezclo ahi adentro")
+afirmar(CODIGOS_CONDICION_DE_NEGOCIO == {"PEDIDO_INVALIDO"},
+        "PEDIDO_INVALIDO vive en su propio conjunto, separado de las guardias del motor")
+
+print("\n[extra] PEDIDO_INVALIDO tambien respeta CASO 8 de Fase #5.1: si despues, "
+      "en la MISMA traza, el pedido se corrige y sale valido, ESE gana")
+motivo, _ = escalada_forzada(CFG_REAL, [
+    {"herramienta": "registrar_pedido_wifi", "codigo_error": "PEDIDO_INVALIDO"},
+    {"herramienta": "registrar_pedido_wifi", "codigo_error": None},
+])
+afirmar(motivo == "pedido_para_ejecutar",
+        "un primer intento invalido seguido de uno corregido y valido, en el "
+        "mismo turno, SI escala -- el freno es solo para el intento que sigue "
+        "siendo invalido, no para la conversacion entera")
 
 print("\n" + "=" * 70)
 if _fallas:

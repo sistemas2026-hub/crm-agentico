@@ -1153,6 +1153,37 @@ def _veces_ejecutada(herramienta, historial: list[dict]) -> int:
     return n
 
 
+def _codigo_error_de_pedido_wifi(herramienta, crudo) -> str | None:
+    """
+    'PEDIDO_INVALIDO' si 'herramienta' es 'registrar_pedido_wifi'
+    (Herramienta.valida_pedido_wifi, ver nucleo/herramientas/wifi.py) y el
+    pedido que trae 'crudo' no cumple las reglas -- None en cualquier otro
+    caso, incluida esta MISMA herramienta con un pedido valido.
+
+    Separada en su propia funcion, en vez de resolverlo inline en el bucle
+    de despacho, para poder probarla sin levantar el motor entero -- mismo
+    criterio que _previas_no_cumplidas/_veces_ejecutada, arriba.
+
+    Por que existe: 'registrar_pedido_wifi' nunca lanza una excepcion (no
+    hay red en wifi.py::procesar()), asi que sin esto 'codigo_error' quedaba
+    en None sea o no valido el pedido -- y 'escalar_al_completar' (schema.py)
+    solo mira eso. Un SSID o una clave que wifi.py ya rechazo igual
+    disparaba la escalada, con el cliente escuchando "tu pedido quedo
+    registrado" sobre algo que nadie puede aplicar. Encontrado y
+    reproducido en la auditoria de Fase #6/#6.1 (03/09/2026).
+
+    El codigo que devuelve es una CONDICION DE NEGOCIO, no un fallo real de
+    la herramienta -- va en CODIGOS_CONDICION_DE_NEGOCIO
+    (nucleo/seguimiento/forzado.py), no en CODIGOS_MOTOR_GUARD: la llamada
+    corrio perfecto, es el DATO que el cliente mando el que no sirve.
+    """
+    if not (herramienta.valida_pedido_wifi and isinstance(crudo, dict)):
+        return None
+    if crudo.get("pedido_valido") is False:
+        return "PEDIDO_INVALIDO"
+    return None
+
+
 def _resolver_argumentos(herramienta, sesion, argumentos_modelo: dict,
                          sobrescribir: dict | None = None,
                          variables_tenant: dict | None = None) -> dict:
@@ -2027,6 +2058,16 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                         if herramienta.campos_texto_libre:
                             salida = redaccion.redactar_campos(
                                 salida, herramienta.campos_texto_libre)
+                        # Ver _codigo_error_de_pedido_wifi: la llamada salio
+                        # bien (no hubo excepcion), pero si el pedido de
+                        # WiFi no cumple las reglas no puede quedar como un
+                        # 'exito' comun -- 'escalar_al_completar' lo tomaria
+                        # como un pedido listo para ejecutar. Codigo propio
+                        # y no un 'error' en 'salida': el modelo SIGUE
+                        # viendo 'pedido_valido'/'problemas' tal cual los
+                        # devolvio la herramienta, esto solo cambia como lo
+                        # lee escalada_forzada().
+                        codigo_error = _codigo_error_de_pedido_wifi(herramienta, crudo)
                     except FaltaIdentidadEnSesion as e:
                         # No es un fallo del sistema: es la proteccion haciendo
                         # su trabajo. Se le dice al modelo QUE hacer -- pedir la

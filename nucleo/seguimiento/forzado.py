@@ -475,6 +475,27 @@ CODIGOS_MOTOR_GUARD = frozenset({
     "HERRAMIENTA_DESCONOCIDA",
 })
 
+# Distinto de CODIGOS_MOTOR_GUARD a proposito, aunque a los ojos de
+# escalada_forzada() se traten igual (se saltan, ni fallo ni exito): un
+# MOTOR_GUARD es el motor IMPIDIENDO la llamada; esto es la herramienta
+# CORRIENDO BIEN y devolviendo una condicion de NEGOCIO que no esta lista
+# para que una persona la ejecute todavia. Separarlos evita mezclar dos
+# cosas distintas bajo el mismo nombre, y evita que este codigo nuevo
+# altere la cuenta de 5 que ya afirma un test existente sobre
+# CODIGOS_MOTOR_GUARD.
+#
+# 'PEDIDO_INVALIDO': lo pone motor.py (ver _codigo_error_de_pedido_wifi)
+# cuando 'registrar_pedido_wifi' (Herramienta.valida_pedido_wifi, ver
+# nucleo/herramientas/wifi.py) marca un SSID/clave que no cumple las
+# reglas del estandar. Sin este codigo, 'escalar_al_completar' disparaba
+# igual -- el motor solo mira si hubo excepcion, nunca si el DATO en si es
+# valido -- y el cliente escuchaba "tu pedido quedo registrado" sobre algo
+# que nadie puede aplicar. Encontrado y reproducido en la auditoria de
+# Fase #6/#6.1 (03/09/2026).
+CODIGOS_CONDICION_DE_NEGOCIO = frozenset({
+    "PEDIDO_INVALIDO",
+})
+
 
 def _superado_mas_adelante(registro: list[dict], indice: int, nombre_herramienta: str) -> bool:
     """
@@ -522,12 +543,14 @@ def escalada_forzada(config, registro_herramientas: list[dict]) -> tuple[str | N
 
     Gana la primera herramienta de la traza que lo pida, y un fallo tiene
     prioridad sobre un exito dentro de la misma llamada -- salvo que ese
-    'fallo' sea en realidad una guardia del motor (CODIGOS_MOTOR_GUARD): esa
-    entrada se salta entera, ni cuenta como fallo para 'escalar_si_falla' ni
-    como exito para 'escalar_al_completar', porque no es ninguna de las dos
-    cosas -- es el motor decidiendo no llamar a nada. Y salvo tambien que esa
-    MISMA herramienta, mas adelante en la MISMA traza, haya vuelto a
-    ejecutarse y esta vez salido bien de verdad -- ver
+    'fallo' sea en realidad una guardia del motor (CODIGOS_MOTOR_GUARD) o una
+    condicion de negocio (CODIGOS_CONDICION_DE_NEGOCIO): esa entrada se
+    salta entera, ni cuenta como fallo para 'escalar_si_falla' ni como exito
+    para 'escalar_al_completar', porque no es ninguna de las dos cosas -- es
+    el motor decidiendo no llamar a nada, o la herramienta devolviendo un
+    dato que todavia no esta listo para que una persona lo ejecute. Y salvo
+    tambien que esa MISMA herramienta, mas adelante en la MISMA traza, haya
+    vuelto a ejecutarse y esta vez salido bien de verdad -- ver
     '_superado_mas_adelante': un fallo real no pesa mas que el resultado
     definitivo de la accion en este turno (Fase #5.1, 03/09/2026).
 
@@ -542,7 +565,8 @@ def escalada_forzada(config, registro_herramientas: list[dict]) -> tuple[str | N
         if herr is None:
             continue
         codigo = llamada.get("codigo_error")
-        if codigo and codigo in CODIGOS_MOTOR_GUARD:
+        if codigo and (codigo in CODIGOS_MOTOR_GUARD
+                       or codigo in CODIGOS_CONDICION_DE_NEGOCIO):
             continue
         if codigo:
             if herr.escalar_si_falla and not _superado_mas_adelante(
