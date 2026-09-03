@@ -32,7 +32,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from nucleo.seguimiento.forzado import (con_las_manos_vacias,
                                         escalada_forzada,
-                                        motivos_por_hecho)  # noqa: E402
+                                        motivos_por_hecho,
+                                        CODIGOS_MOTOR_GUARD)  # noqa: E402
 from nucleo.config.schema import Herramienta  # noqa: E402
 
 _fallas = []
@@ -139,6 +140,175 @@ afirmar(con_las_manos_vacias(None),
 
 print()
 print("=" * 70)
+print(" GUARDIAS DEL MOTOR -- no son la herramienta fallando")
+print("=" * 70)
+# Fase #2, paso 2. Encontrado en la auditoria (02/09/2026): 'reiniciar_ont'
+# declara 'escalar_si_falla' Y 'exige_previas' a la vez, y el modelo SI
+# intenta llamarla antes de tiempo en la practica (motor.py lo documenta:
+# "un texto en el prompt no alcanzo"). Sin este filtro, esa guardia --el
+# motor funcionando exactamente como debe-- forzaba una escalada.
+
+print("\n[1] error real HTTP_500 + escalar_si_falla -> mantiene el escalamiento")
+motivo, _ = escalada_forzada(CFG, [{"herramienta": "consultar_algo",
+                                    "codigo_error": "HTTP_500"}])
+afirmar(motivo == "sin_datos_para_diagnosticar",
+        "un codigo_error que NO es guardia del motor sigue forzando la escalada")
+
+print("\n[2-6] las cinco guardias del motor -- ninguna escala")
+FRAGIL_NOMBRE = "consultar_algo"
+for codigo in sorted(CODIGOS_MOTOR_GUARD):
+    motivo, _ = escalada_forzada(CFG, [{"herramienta": FRAGIL_NOMBRE,
+                                        "codigo_error": codigo}])
+    afirmar(motivo is None,
+            f"'{codigo}' en una herramienta con escalar_si_falla NO escala")
+afirmar(CODIGOS_MOTOR_GUARD == {"PRECONDICION_NO_CUMPLIDA", "LIMITE_DE_CONVERSACION",
+                                "FALTA_HABLAR_CON_EL_CLIENTE", "IDENTIDAD_NO_RESUELTA",
+                                "HERRAMIENTA_DESCONOCIDA"},
+        "la clasificacion tiene exactamente los 5 codigos de la auditoria -- "
+        "ni uno de mas, ni uno de menos")
+
+print("\n[7] EL CASO CRITICO -- bloqueo prematuro y despues exito, en la MISMA traza")
+# Reproduce 'reiniciar_ont' de verdad: mismo nombre, mismo 'escalar_si_falla'
+# ('sin_datos_para_diagnosticar', ver tenants/rapilink.config.yaml), para que
+# esta prueba sea al mismo tiempo la regresion del caso real y no solo un
+# ejemplo generico.
+REINICIAR_ONT = herr("reiniciar_ont", solo_lectura=False, requiere_confirmacion=True,
+                     escalar_si_falla="sin_datos_para_diagnosticar")
+CFG_REINICIO = ConfigFalsa([REINICIAR_ONT])
+
+motivo, _ = escalada_forzada(CFG_REINICIO, [
+    {"herramienta": "reiniciar_ont", "codigo_error": "PRECONDICION_NO_CUMPLIDA"},
+    {"herramienta": "reiniciar_ont"},
+])
+afirmar(motivo is None,
+        "el intento prematuro (rechazado por la precondicion, correctamente) "
+        "NO escala cuando el MISMO turno reintento y reinicio de verdad -- "
+        "el bug que motivo la auditoria de Fase #2")
+
+# El orden inverso tiene que dar lo mismo: la guardia no es un fallo, asi que
+# no importa si aparece antes o despues del exito en la traza.
+motivo, _ = escalada_forzada(CFG_REINICIO, [
+    {"herramienta": "reiniciar_ont"},
+    {"herramienta": "reiniciar_ont", "codigo_error": "PRECONDICION_NO_CUMPLIDA"},
+])
+afirmar(motivo is None,
+        "y tampoco importa el orden: un exito seguido de la guardia sigue sin escalar")
+
+# Si el rechazo es la UNICA entrada del turno (el modelo lo intento, la
+# precondicion lo freno, y no volvio a intentarlo) -- sigue sin escalar. Es
+# 'FALTA_HABLAR_CON_EL_CLIENTE' y 'LIMITE_DE_CONVERSACION' en la practica: no
+# hay reintento posible dentro del mismo turno.
+motivo, _ = escalada_forzada(CFG_REINICIO, [
+    {"herramienta": "reiniciar_ont", "codigo_error": "PRECONDICION_NO_CUMPLIDA"},
+])
+afirmar(motivo is None,
+        "y aunque no haya un segundo intento en el turno, la guardia sola "
+        "tampoco escala -- nunca fue un fallo de la herramienta")
+
+# Contraprueba: SIN el filtro esto habria dado 'sin_datos_para_diagnosticar'.
+# Se deja explicito para que quede claro que esta prueba SI distingue algo,
+# no que 'motivo is None' salga por cualquier otro motivo.
+afirmar("PRECONDICION_NO_CUMPLIDA" in CODIGOS_MOTOR_GUARD,
+        "la razon de que no escale es la clasificacion, no una casualidad")
+
+print("\n[8] codigo_error real, pero la herramienta NO declara escalar_si_falla")
+motivo, _ = escalada_forzada(CFG, [{"herramienta": "consultar_otra_cosa",
+                                    "codigo_error": "ConnectionError: fallo la red"}])
+afirmar(motivo is None,
+        "sin escalar_si_falla declarado, ni un error real fuerza nada -- "
+        "comportamiento de siempre, sin cambios")
+
+print("\n[9] resultado negativo de negocio, SIN codigo_error -> no escala")
+# '0 de 3', 'Offline', 'Disabled': la herramienta corrio bien y el DATO es
+# negativo. Eso no es un error de ejecucion -- 'codigo_error' queda vacio, y
+# la traza no distingue "salio 0 de 3" de "salio 3 de 3": ambas son exito
+# desde el punto de vista de la herramienta.
+motivo, _ = escalada_forzada(CFG, [{"herramienta": "consultar_algo",
+                                    "resultado": "0 de 3"}])
+afirmar(motivo is None,
+        "un resultado negativo valido, sin codigo_error, no activa "
+        "escalar_si_falla -- la herramienta funciono")
+
+print()
+print("=" * 70)
+print(" FASE #2 PASO 3 -- 'ping_cliente' activada, y SOLO ella")
+print("=" * 70)
+# Contra la config REAL del tenant, no un doble -- es la unica forma de
+# probar que lo que se activo es lo de PRODUCCION y no una recreacion
+# parecida. cargar_config valida el YAML solo (sin red, sin base, sin
+# modelo), mismo patron que ya usan test_solicitud_explicita.py y
+# test_motivos_por_rol.py.
+from nucleo.config.schema import cargar_config                     # noqa: E402
+
+CFG_REAL = cargar_config("tenants/rapilink.config.yaml")
+PING = next(h for h in CFG_REAL.herramientas if h.nombre == "ping_cliente")
+
+print("\n[A] error REAL de ejecucion -> escala")
+for codigo in ("ConnectionError: HTTPSConnectionPool(...)",
+              "ReadTimeout: HTTPSConnectionPool(...)",
+              "HTTPError: 500 Server Error"):
+    motivo, por_que = escalada_forzada(CFG_REAL, [
+        {"herramienta": "ping_cliente", "codigo_error": codigo}])
+    afirmar(motivo == "sin_datos_para_diagnosticar",
+            f"'{codigo.split(':')[0]}' en ping_cliente fuerza la escalada")
+    afirmar("ping_cliente" in por_que, "y el motivo nombra la herramienta")
+
+print("\n[B] resultado negativo VALIDO ('0 de 3', sin codigo_error) -> NO escala")
+motivo, _ = escalada_forzada(CFG_REAL, [
+    {"herramienta": "ping_cliente", "resultado": {"ping-exitoso": "0 de 3"}}])
+afirmar(motivo is None,
+        "'0 de 3' es un dato negativo, no un fallo -- la llamada funciono, "
+        "sigue siendo el modelo quien lo lee (PRD 12.5)")
+
+print("\n[C] guardias del motor en ping_cliente -> ninguna escala")
+for codigo in ("PRECONDICION_NO_CUMPLIDA", "LIMITE_DE_CONVERSACION",
+              "FALTA_HABLAR_CON_EL_CLIENTE", "IDENTIDAD_NO_RESUELTA"):
+    motivo, _ = escalada_forzada(CFG_REAL, [
+        {"herramienta": "ping_cliente", "codigo_error": codigo}])
+    afirmar(motivo is None, f"'{codigo}' en ping_cliente NO escala")
+
+print("\n[D] exito ('3 de 3', sin codigo_error) -> NO escala")
+motivo, _ = escalada_forzada(CFG_REAL, [
+    {"herramienta": "ping_cliente", "resultado": {"ping-exitoso": "3 de 3"}}])
+afirmar(motivo is None, "un ping exitoso no activa nada")
+
+print("\n[E] caso mixto -- prematuro y despues exitoso, en la MISMA traza")
+motivo, _ = escalada_forzada(CFG_REAL, [
+    {"herramienta": "ping_cliente", "codigo_error": "PRECONDICION_NO_CUMPLIDA"},
+    {"herramienta": "ping_cliente"},
+])
+afirmar(motivo is None,
+        "el bloqueo del motor no contamina un reintento exitoso en el mismo turno")
+
+print("\n[F] otra herramienta sin escalar_si_falla, con error real -> sigue sin escalar")
+motivo, _ = escalada_forzada(CFG_REAL, [
+    {"herramienta": "consultar_mi_servicio", "codigo_error": "ConnectionError: ..."}])
+afirmar(motivo is None,
+        "consultar_mi_servicio no fue activada en este paso -- un error real "
+        "suyo no fuerza nada, comportamiento sin cambios")
+
+print("\n[G] solo se activo lo que se pidio, ni una herramienta de mas")
+con_escalar_si_falla = {h.nombre for h in CFG_REAL.herramientas if h.escalar_si_falla}
+afirmar(con_escalar_si_falla == {"ping_cliente", "reiniciar_ont", "consultar_estado_catv"},
+        f"exactamente estas tres tienen escalar_si_falla, ni una mas: "
+        f"{sorted(con_escalar_si_falla)}")
+NO_ACTIVAR = ("consultar_senal_ont", "consultar_estado_ont", "cambiar_tipo_onu",
+             "activar_catv", "verificar_identidad_por_cedula",
+             "consultar_mi_servicio", "registrar_solicitud_servicio",
+             "consultar_incidente_red")
+por_nombre_real = {h.nombre: h for h in CFG_REAL.herramientas}
+for nombre in NO_ACTIVAR:
+    afirmar(not por_nombre_real[nombre].escalar_si_falla,
+            f"'{nombre}' sigue SIN escalar_si_falla -- no era parte de este paso")
+afirmar(PING.escalar_si_falla == "sin_datos_para_diagnosticar",
+        "y ping_cliente quedo con el motivo exacto pedido")
+# Nada mas de ping_cliente se toco: sigue siendo asincrona, con los mismos
+# argumentos fijos y la misma inyeccion de sesion que antes de este paso.
+afirmar(PING.asincrona is True and PING.argumentos_fijos == {"pings": 3, "arp_ping": False}
+        and PING.inyectar_sesion == {"id_servicio": "id_cliente"},
+        "el resto de la declaracion de ping_cliente quedo intacto")
+
+print("\n" + "=" * 70)
 if _fallas:
     print(f" {len(_fallas)} falla(s):")
     for f in _fallas:

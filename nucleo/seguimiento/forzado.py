@@ -447,6 +447,35 @@ def motivos_que_no_elige_el_modelo(config) -> set[str]:
     return motivos
 
 
+# Codigos que 'motor.py' pone en 'codigo_error' cuando el MOTOR impidio la
+# llamada -- no cuando la herramienta la intento y no pudo. 'escalar_si_falla'
+# solo tiene sentido para lo segundo: una guardia interna funcionando como
+# debe no es una herramienta fallada, y no puede forzar una escalada.
+#
+# Encontrado en la auditoria de Fase #2 (02/09/2026), sobre un caso real y no
+# hipotetico: 'reiniciar_ont' declara 'escalar_si_falla' Y 'exige_previas', y
+# el propio codigo documenta que el modelo SI intenta llamarla antes de que
+# 'consultar_senal_ont'/'ping_cliente' hayan corrido en la conversacion ("un
+# texto en el prompt no alcanzo -- probado en vivo, agosto 2026"). Ese intento
+# prematuro cae en la misma traza que un reintento exitoso, en el MISMO turno
+# (motor.py corre varias iteraciones del bucle de herramientas por turno) --
+# sin este filtro, el primer intento (rechazado a proposito, correctamente)
+# forzaba la escalada aunque el segundo, dos entradas mas abajo en la misma
+# traza, hubiera reiniciado el equipo de verdad.
+#
+# 'IDENTIDAD_NO_VERIFICADA' NO esta en esta lista porque no hace falta: motor.py
+# ya la excluye de 'registro' antes de que exista la fila de traza (es el gate
+# de seguridad frenando ANTES de llamar a nada), asi que escalada_forzada()
+# nunca llega a verla.
+CODIGOS_MOTOR_GUARD = frozenset({
+    "PRECONDICION_NO_CUMPLIDA",
+    "LIMITE_DE_CONVERSACION",
+    "FALTA_HABLAR_CON_EL_CLIENTE",
+    "IDENTIDAD_NO_RESUELTA",
+    "HERRAMIENTA_DESCONOCIDA",
+})
+
+
 def escalada_forzada(config, registro_herramientas: list[dict]) -> tuple[str | None, str]:
     """
     (motivo, por_que) cuando una herramienta OBLIGA a escalar, o (None, "").
@@ -460,7 +489,11 @@ def escalada_forzada(config, registro_herramientas: list[dict]) -> tuple[str | N
     casos dorados en verde.
 
     Gana la primera herramienta de la traza que lo pida, y un fallo tiene
-    prioridad sobre un exito dentro de la misma llamada.
+    prioridad sobre un exito dentro de la misma llamada -- salvo que ese
+    'fallo' sea en realidad una guardia del motor (CODIGOS_MOTOR_GUARD): esa
+    entrada se salta entera, ni cuenta como fallo para 'escalar_si_falla' ni
+    como exito para 'escalar_al_completar', porque no es ninguna de las dos
+    cosas -- es el motor decidiendo no llamar a nada.
 
     La razon nombra a la herramienta porque termina siendo el RESUMEN del
     caso cuando el evaluador no dejo uno (ver api.py): sin el nombre, quien
@@ -471,7 +504,10 @@ def escalada_forzada(config, registro_herramientas: list[dict]) -> tuple[str | N
         herr = por_nombre.get(llamada.get("herramienta"))
         if herr is None:
             continue
-        if llamada.get("codigo_error"):
+        codigo = llamada.get("codigo_error")
+        if codigo and codigo in CODIGOS_MOTOR_GUARD:
+            continue
+        if codigo:
             if herr.escalar_si_falla:
                 return (herr.escalar_si_falla,
                         f"'{herr.nombre}' no pudo ejecutarse")

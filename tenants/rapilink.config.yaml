@@ -2131,6 +2131,16 @@ herramientas:
     inyectar_sesion:
       id_servicio: id_cliente
     inyectados_obligatorios: [id_servicio]
+    # Si la llamada MISMA falla (WispHub caido, la tarea asincrona no
+    # termina) el caso pasa a una persona por este motivo, sin que dependa de
+    # como lo lea el modelo. Un '0 de 3' NO es esto -- la llamada funciono y
+    # el dato es negativo, eso lo sigue leyendo el modelo como hasta ahora
+    # (ver forzado.escalada_forzada, que solo mira 'codigo_error').
+    #
+    # Es la mitad de la precondicion de 'reiniciar_ont' (junto con
+    # consultar_senal_ont): si esta herramienta no puede ejecutarse, tampoco
+    # hay con que diagnosticar si corresponde reiniciar el equipo.
+    escalar_si_falla: sin_datos_para_diagnosticar
   # ---------------------------------------------------------------------------
   #  PEDIDO DE CAMBIO DE RED INALAMBRICA
   # ---------------------------------------------------------------------------
