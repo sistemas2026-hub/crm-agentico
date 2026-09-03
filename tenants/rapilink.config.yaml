@@ -1198,7 +1198,13 @@ roles:
       # interno de la red -- mismo criterio que olt_id/board/port (RF-07).
       # 'desde_por_tiempos' y no 'desde': ver la descripcion de la
       # herramienta, son dos numeros que no miden lo mismo.
-      consultar_incidente_red: [es_incidente_de_red, desde_por_tiempos]
+      # 'motivo' agregado en Fase #5.1 (03/09/2026): sin el, un
+      # es_incidente_de_red=false por no poder ubicar la ONU del cliente
+      # (sn_onu ausente, o SmartOLT no la encuentra en ninguna OLT) llegaba
+      # identico a un caso realmente confirmado sin incidente -- el rol de
+      # cara al cliente no tenia como distinguir "no hay" de "no se pudo
+      # comprobar".
+      consultar_incidente_red: [es_incidente_de_red, desde_por_tiempos, motivo]
     nunca_revelar: [password_servicio, password_cpe, password_router_wifi, usuario_router_wifi,
           cedula, direccion, coordenadas, ip, mac_cpe, sn_onu, sectorial, router.nombre]
 

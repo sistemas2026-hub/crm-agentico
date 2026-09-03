@@ -476,6 +476,38 @@ CODIGOS_MOTOR_GUARD = frozenset({
 })
 
 
+def _superado_mas_adelante(registro: list[dict], indice: int, nombre_herramienta: str) -> bool:
+    """
+    True si, mas ADELANTE en la MISMA traza (mismo turno), la MISMA
+    herramienta volvio a ejecutarse y esta vez salio bien (sin codigo_error).
+
+    Encontrado en la auditoria de Fase #5 (03/09/2026): 'reiniciar_ont' puede
+    fallar con un error real (ConnectionError, timeout, HTTP 500) sin gastar
+    su 'limite_por_conversacion' -- motor.py::_veces_ejecutada() no cuenta un
+    intento que termino en error, justamente para no gastarle al cliente su
+    unica oportunidad por un fallo que no le paso nada. Eso deja abierta la
+    puerta a un reintento real, en el MISMO turno, que esta vez SI funciona.
+    Sin este chequeo, escalada_forzada() encontraba el primer fallo de la
+    traza y escalaba, ignorando que la misma herramienta, mas abajo en esa
+    misma lista, ya habia reiniciado el equipo de verdad y lo habia dejado en
+    VERIFICACION_PENDIENTE.
+
+    Solo mira hacia ADELANTE (indices > 'indice'): un exito ANTERIOR no
+    'perdona' un fallo real que viene DESPUES -- ese fallo posterior es el
+    estado mas reciente de la accion, y sigue siendo motivo real de escalar.
+    Ver el caso inverso en tests/test_escalada_forzada.py.
+
+    Una guardia del motor (CODIGOS_MOTOR_GUARD) en una entrada posterior no
+    cuenta como el exito que supera al fallo: esa entrada SI trae
+    codigo_error (aunque sea uno que el motor ya filtra en el bucle de
+    arriba), asi que 'not codigo_error' da False y no la toma como superacion
+    -- una guardia no es un reintento exitoso, es el motor sin llamar a nada.
+    """
+    return any(siguiente.get("herramienta") == nombre_herramienta
+              and not siguiente.get("codigo_error")
+              for siguiente in registro[indice + 1:])
+
+
 def escalada_forzada(config, registro_herramientas: list[dict]) -> tuple[str | None, str]:
     """
     (motivo, por_que) cuando una herramienta OBLIGA a escalar, o (None, "").
@@ -493,14 +525,19 @@ def escalada_forzada(config, registro_herramientas: list[dict]) -> tuple[str | N
     'fallo' sea en realidad una guardia del motor (CODIGOS_MOTOR_GUARD): esa
     entrada se salta entera, ni cuenta como fallo para 'escalar_si_falla' ni
     como exito para 'escalar_al_completar', porque no es ninguna de las dos
-    cosas -- es el motor decidiendo no llamar a nada.
+    cosas -- es el motor decidiendo no llamar a nada. Y salvo tambien que esa
+    MISMA herramienta, mas adelante en la MISMA traza, haya vuelto a
+    ejecutarse y esta vez salido bien de verdad -- ver
+    '_superado_mas_adelante': un fallo real no pesa mas que el resultado
+    definitivo de la accion en este turno (Fase #5.1, 03/09/2026).
 
     La razon nombra a la herramienta porque termina siendo el RESUMEN del
     caso cuando el evaluador no dejo uno (ver api.py): sin el nombre, quien
     abre el caso lee una frase que podria ser de cualquier conversacion.
     """
     por_nombre = {h.nombre: h for h in config.herramientas}
-    for llamada in registro_herramientas or []:
+    registro = registro_herramientas or []
+    for i, llamada in enumerate(registro):
         herr = por_nombre.get(llamada.get("herramienta"))
         if herr is None:
             continue
@@ -508,7 +545,8 @@ def escalada_forzada(config, registro_herramientas: list[dict]) -> tuple[str | N
         if codigo and codigo in CODIGOS_MOTOR_GUARD:
             continue
         if codigo:
-            if herr.escalar_si_falla:
+            if herr.escalar_si_falla and not _superado_mas_adelante(
+                    registro, i, llamada.get("herramienta")):
                 return (herr.escalar_si_falla,
                         f"'{herr.nombre}' no pudo ejecutarse")
         # El espejo: la herramienta SALIO BIEN y su exito es, justamente, un

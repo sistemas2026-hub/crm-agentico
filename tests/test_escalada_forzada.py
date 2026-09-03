@@ -308,6 +308,77 @@ afirmar(PING.asincrona is True and PING.argumentos_fijos == {"pings": 3, "arp_pi
         and PING.inyectar_sesion == {"id_servicio": "id_cliente"},
         "el resto de la declaracion de ping_cliente quedo intacto")
 
+print()
+print("=" * 70)
+print(" FASE #5.1 -- fallo real superado por un exito posterior de la MISMA herramienta")
+print("=" * 70)
+# Auditoria de Fase #5 (03/09/2026): 'reiniciar_ont' puede fallar con un
+# error REAL (no una guardia del motor) sin gastar su limite_por_conversacion
+# -- motor.py::_veces_ejecutada() no cuenta un intento que termino en error.
+# Eso deja abierta la puerta a un reintento real, en el MISMO turno, que esta
+# vez funciona. Reproducido antes de corregir: escalada_forzada() encontraba
+# el ConnectionError y escalaba, sin mirar que la MISMA herramienta, mas
+# abajo en la MISMA traza, ya habia reiniciado el equipo de verdad.
+
+print("\n[CASO A] fallo real + exito posterior, MISMA herramienta -> NO escala")
+traza_superada = [
+    {"herramienta": "reiniciar_ont",
+     "codigo_error": "ConnectionError: HTTPSConnectionPool(...): Max retries exceeded"},
+    {"herramienta": "reiniciar_ont", "codigo_error": None,
+     "verificacion_pendiente": {"espera_segundos": 120, "max_intentos": 3}},
+]
+copia_para_comparar = [dict(x) for x in traza_superada]
+motivo, _ = escalada_forzada(CFG_REAL, traza_superada)
+afirmar(motivo is None,
+        "el ConnectionError del primer intento queda superado por el exito "
+        "real del segundo, en la misma traza -- ya no escala")
+afirmar(traza_superada == copia_para_comparar,
+        "escalada_forzada() no toca la traza: la ejecucion exitosa (con su "
+        "'verificacion_pendiente') sigue intacta para quien la use despues -- "
+        "esta funcion solo LEE, nunca filtra ni descarta entradas")
+
+print("\n[CASO B] MOTOR_GUARD + exito posterior -> sigue sin escalar (ya cubierto arriba en [7]/[E])")
+motivo, _ = escalada_forzada(CFG_REAL, [
+    {"herramienta": "reiniciar_ont", "codigo_error": "PRECONDICION_NO_CUMPLIDA"},
+    {"herramienta": "reiniciar_ont", "codigo_error": None}])
+afirmar(motivo is None,
+        "la correccion de Fase #5.1 no toco el filtro de MOTOR_GUARD: sigue sin escalar")
+
+print("\n[CASO C] fallo real SIN exito posterior -> mantiene el escalamiento")
+motivo, por_que = escalada_forzada(CFG_REAL, [
+    {"herramienta": "reiniciar_ont",
+     "codigo_error": "ConnectionError: HTTPSConnectionPool(...): Max retries exceeded"}])
+afirmar(motivo == "sin_datos_para_diagnosticar",
+        "sin un reintento exitoso despues, el fallo real sigue forzando la "
+        "escalada -- la correccion NO perdona un fallo que quedo sin resolver")
+afirmar("reiniciar_ont" in por_que, "y el motivo sigue nombrando la herramienta")
+
+print("\n[CASO D] fallo herramienta A + exito herramienta B (DISTINTAS) -> semantica sin cambios")
+motivo, _ = escalada_forzada(CFG_REAL, [
+    {"herramienta": "reiniciar_ont",
+     "codigo_error": "ConnectionError: HTTPSConnectionPool(...): Max retries exceeded"},
+    {"herramienta": "ping_cliente", "codigo_error": None,
+     "resultado": {"ping-exitoso": "3 de 3"}},
+])
+afirmar(motivo == "sin_datos_para_diagnosticar",
+        "el exito de 'ping_cliente' NO 'perdona' el fallo real de "
+        "'reiniciar_ont' -- son herramientas distintas, la regla nueva solo "
+        "aplica cuando es la MISMA herramienta")
+
+print("\n[CASO E] consultar_incidente_red expone 'motivo' al rol de cara al cliente")
+campos_cliente = CFG_REAL.roles["soporte_tecnico_cliente"].campos_permitidos[
+    "consultar_incidente_red"]
+afirmar("motivo" in campos_cliente,
+        "'soporte_tecnico_cliente' ahora SI puede distinguir 'no se pudo "
+        "comprobar' de 'confirmado sin incidente'")
+afirmar(set(campos_cliente) == {"es_incidente_de_red", "desde_por_tiempos", "motivo"},
+        f"y los campos que ya tenia siguen ahi -- solo se agrego uno: {sorted(campos_cliente)}")
+campos_soporte = CFG_REAL.roles["soporte"].campos_permitidos["consultar_incidente_red"]
+afirmar(set(campos_soporte) == {"es_incidente_de_red", "tipo_alerta", "clientes_afectados",
+                                "porcentaje_afectado", "desde", "zona", "caja", "motivo",
+                                "clientes_caidos_a_la_vez", "desde_por_tiempos"},
+        "y el rol 'soporte' (que ya tenia 'motivo') no cambio en nada")
+
 print("\n" + "=" * 70)
 if _fallas:
     print(f" {len(_fallas)} falla(s):")
