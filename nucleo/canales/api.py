@@ -3572,7 +3572,9 @@ def consumo_guardar_tarifa():
         editor.guardar_tarifa(tenant, modelo,
                               float(cuerpo.get("entrada") or 0),
                               float(cuerpo.get("salida") or 0),
-                              None if cache in (None, "") else float(cache))
+                              None if cache in (None, "") else float(cache),
+                              descuento_fuera_pico=cuerpo.get("descuento_fuera_pico"),
+                              ventanas_pico=cuerpo.get("ventanas_pico"))
     except editor.ErrorEdicion as e:
         return jsonify({"error": str(e)}), 400
     except (TypeError, ValueError):

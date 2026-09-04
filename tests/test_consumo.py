@@ -49,6 +49,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from nucleo.config.schema import Tarifa, VentanaPico                # noqa: E402
 from nucleo.observabilidad import consumo                          # noqa: E402
 
 fallos: list[str] = []
@@ -72,7 +73,7 @@ class ConfigFalsa:
     class llm:
         # 1 USD por millon de entrada, 2 por millon de salida. Numeros redondos
         # a proposito: si el calculo mete un factor de mil, se ve a simple vista.
-        tarifas = {"prov:modelo-con-tarifa": {"entrada": 1.0, "salida": 2.0}}
+        tarifas = {"prov:modelo-con-tarifa": Tarifa(entrada=1.0, salida=2.0)}
 
     class limites:
         max_costo_usd_mes = None
@@ -270,7 +271,7 @@ print("\n== 7. el cache decide el costo, y se comprueba contra una factura real 
 # bloque comprueba que el calculo puede reproducir la factura real, y que
 # ignorar el cache la multiplica por ocho.
 
-TARIFA_FLASH = {"entrada": 0.44, "entrada_cache": 0.014, "salida": 1.32}
+TARIFA_FLASH = Tarifa(entrada=0.44, entrada_cache=0.014, salida=1.32)
 
 
 class ConCache(ConfigFalsa):
@@ -297,7 +298,7 @@ afirmar(costo_sin > costo_con * 4,
 # tope sin frenar.
 class SinPrecioCache(ConfigFalsa):
     class llm:
-        tarifas = {"m": {"entrada": 0.44, "salida": 1.32}}
+        tarifas = {"m": Tarifa(entrada=0.44, salida=1.32)}
 
 
 c1, _ = consumo._costo(SinPrecioCache(), "m", 1_000_000, 0, 1_000_000)
@@ -308,6 +309,69 @@ afirmar(abs(c1 - 0.44) < 1e-9,
 # un costo negativo.
 c2, _ = consumo._costo(ConCache(), "deepseek:deepseek-v4-flash", 1000, 0, 999999)
 afirmar(c2 >= 0, "un dato de cache incoherente no genera un costo negativo")
+
+print("\n== 8. horario pico: se cobra segun CUANDO se llamo ==")
+# DeepSeek cobra la mitad fuera de pico, y cambio sus reglas el 23/08/2026.
+# Por eso las ventanas son dato y no codigo. Se prueban con horas FIJAS: usar
+# la hora actual haria que el resultado dependiera de cuando corre la guarda.
+from datetime import datetime, timezone                            # noqa: E402
+
+VENTANAS = [VentanaPico(dias=[1, 2, 3, 4, 5], desde_utc=1, hasta_utc=4),
+            VentanaPico(dias=[1, 2, 3, 4, 5], desde_utc=6, hasta_utc=10)]
+
+
+class ConPico(ConfigFalsa):
+    class llm:
+        tarifas = {"m": Tarifa(entrada=1.0, entrada_cache=0.1, salida=2.0,
+                               descuento_fuera_pico=0.5, ventanas_pico=VENTANAS)}
+
+
+def en(dia, hora):
+    return datetime(2026, 9, dia, hora, 0, tzinfo=timezone.utc)
+
+
+# 2026-09-07 es lunes; 2026-09-05 es sabado.
+pico, _ = consumo._costo(ConPico(), "m", 1_000_000, 1_000_000, 0, en(7, 2))
+fuera, _ = consumo._costo(ConPico(), "m", 1_000_000, 1_000_000, 0, en(7, 14))
+finde, _ = consumo._costo(ConPico(), "m", 1_000_000, 1_000_000, 0, en(5, 2))
+
+afirmar(abs(pico - 3.0) < 1e-9, f"lunes 02:00 UTC cobra tarifa plena (${pico})")
+afirmar(abs(fuera - 1.5) < 1e-9, f"lunes 14:00 UTC cobra la mitad (${fuera})")
+afirmar(abs(finde - 1.5) < 1e-9,
+        f"sabado 02:00 UTC es fuera de pico aunque la hora caiga en la ventana (${finde})")
+
+borde_dentro, _ = consumo._costo(ConPico(), "m", 1_000_000, 0, 0, en(7, 1))
+borde_fuera, _ = consumo._costo(ConPico(), "m", 1_000_000, 0, 0, en(7, 4))
+afirmar(abs(borde_dentro - 1.0) < 1e-9, "la hora de inicio de la ventana ya es pico")
+afirmar(abs(borde_fuera - 0.5) < 1e-9, "la hora de fin ya NO es pico: el tramo es [desde, hasta)")
+
+# Una ventana que cruza la medianoche (22 a 2) no puede quedar siempre vacia.
+cruza = VentanaPico(dias=[1], desde_utc=22, hasta_utc=2)
+afirmar(cruza.contiene(en(7, 23)) and cruza.contiene(en(7, 0))
+        and not cruza.contiene(en(7, 12)),
+        "una ventana que cruza la medianoche se evalua bien")
+
+
+print("\n== 9. sin ventanas declaradas se cobra TODO como pico ==")
+# Nunca al reves: suponer que todo cae fuera de pico partiria la factura
+# estimada a la mitad, y el tope dejaria de frenar cuando debia.
+class SinVentanas(ConfigFalsa):
+    class llm:
+        tarifas = {"m": Tarifa(entrada=1.0, salida=0.0, descuento_fuera_pico=0.5)}
+
+
+sin_v, _ = consumo._costo(SinVentanas(), "m", 1_000_000, 0, 0, en(7, 14))
+afirmar(abs(sin_v - 1.0) < 1e-9,
+        f"con descuento cargado pero sin ventanas, se cobra pleno (${sin_v})")
+
+# Y el modelo rechaza una tarifa de cache mas cara que la de entrada nueva:
+# 0.44 y 0.014 se confunden facil de columna, y al reves el costo calculado
+# seria MAYOR que el real.
+try:
+    Tarifa(entrada=0.44, entrada_cache=9.0, salida=1.32)
+    afirmar(False, "una tarifa de cache mas cara que la de entrada se rechaza")
+except Exception as e:
+    afirmar("mas barato" in str(e), "una tarifa de cache mas cara que la de entrada se rechaza")
 
 
 print()

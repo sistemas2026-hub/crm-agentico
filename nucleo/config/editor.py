@@ -709,7 +709,9 @@ def _mutar_agregar_herramienta(doc: dict, herramienta_propuesta: dict) -> None:
 
 
 def _mutar_tarifa(doc: dict, modelo: str, entrada: float, salida: float,
-                  entrada_cache: float | None = None) -> None:
+                  entrada_cache: float | None = None,
+                  descuento: float | None = None,
+                  ventanas: list | None = None) -> None:
     """Guarda cuanto cuesta un modelo, en USD por MILLON de tokens.
 
     Por millon porque asi lo publican los proveedores: guardar el numero como
@@ -723,6 +725,19 @@ def _mutar_tarifa(doc: dict, modelo: str, entrada: float, salida: float,
     # pantalla -- diria que hay un precio de cache cargado cuando no lo hay.
     if entrada_cache is not None:
         tarifa["entrada_cache"] = float(entrada_cache)
+    # El descuento y las ventanas son propiedad del PROVEEDOR y cambian sin
+    # avisar (DeepSeek movio las suyas el 23/08/2026). Se conservan si no
+    # vienen: cargar una tarifa nueva no deberia borrar el horario que alguien
+    # configuro antes -- son dos cosas que se editan por separado.
+    previa = ((doc.get("llm") or {}).get("tarifas") or {}).get(modelo) or {}
+    if descuento is not None:
+        tarifa["descuento_fuera_pico"] = float(descuento)
+    elif previa.get("descuento_fuera_pico"):
+        tarifa["descuento_fuera_pico"] = previa["descuento_fuera_pico"]
+    if ventanas is not None:
+        tarifa["ventanas_pico"] = ventanas
+    elif previa.get("ventanas_pico"):
+        tarifa["ventanas_pico"] = previa["ventanas_pico"]
     doc.setdefault("llm", {}).setdefault("tarifas", {})[modelo] = tarifa
 
 
@@ -746,18 +761,19 @@ def _mutar_tope_gasto(doc: dict, tope: float | None, mensaje: str | None) -> Non
 
 
 def guardar_tarifa(tenant: str, modelo: str, entrada: float, salida: float,
-                   entrada_cache: float | None = None) -> TenantConfig:
+                   entrada_cache: float | None = None,
+                   descuento_fuera_pico: float | None = None,
+                   ventanas_pico: list | None = None) -> TenantConfig:
     if not str(modelo or "").strip():
         raise ErrorEdicion("Falta la referencia del modelo (ej. 'deepseek:deepseek-v4-flash').")
     if entrada < 0 or salida < 0 or (entrada_cache is not None and entrada_cache < 0):
         raise ErrorEdicion("Una tarifa no puede ser negativa.")
-    if entrada_cache is not None and entrada_cache > entrada:
+    if descuento_fuera_pico is not None and not (0 <= descuento_fuera_pico <= 1):
         raise ErrorEdicion(
-            "El precio de entrada cacheada no puede ser mayor que el de "
-            "entrada nueva: el cache existe justamente porque sale mas barato. "
-            "Si estan al reves, el costo calculado va a ser mayor que el real.")
+            "El descuento fuera de pico va de 0 a 1 (0.5 = mitad de precio).")
     return _editar(tenant, lambda d: _mutar_tarifa(
-        d, modelo.strip(), entrada, salida, entrada_cache))
+        d, modelo.strip(), entrada, salida, entrada_cache,
+        descuento_fuera_pico, ventanas_pico))
 
 
 def borrar_tarifa(tenant: str, modelo: str) -> TenantConfig:

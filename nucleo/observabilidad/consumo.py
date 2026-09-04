@@ -54,6 +54,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from contextvars import ContextVar
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 
 from nucleo.persistencia.db import sesion
@@ -89,27 +90,30 @@ class Consumo:
 
 
 def _costo(config, referencia: str, entrada: int, salida: int,
-           entrada_cache: int = 0) -> tuple[float, bool]:
+           entrada_cache: int = 0, momento=None) -> tuple[float, bool]:
     """(costo en USD, si habia tarifa). Sin tarifa: 0.0 y False, nunca un estimado.
 
     'entrada' es el TOTAL de entrada y 'entrada_cache' la parte que venia
     cacheada -- asi los reporta DeepSeek, verificado en vivo. Se cobra la
     diferencia como entrada nueva.
 
-    Sin 'entrada_cache' en la tarifa se cobra todo al precio de entrada nueva:
-    es el lado conservador (sobreestima, no subestima) y es lo que hacia antes.
+    'momento' es CUANDO se hizo la llamada, en UTC, y decide si aplica la
+    tarifa de pico o la de fuera de pico. Se calcula por llamada y no por dia:
+    una conversacion de la madrugada y una del mediodia pueden caer en tramos
+    distintos, y promediarlas seria inventar una tarifa que nadie cobra.
+
+    Por defecto es ahora, que es cierto en el camino real -- se anota en el
+    mismo instante. El parametro existe para poder probarlo con una hora fija.
     """
     tarifas = getattr(getattr(config, "llm", None), "tarifas", None) or {}
     t = tarifas.get(referencia)
     if not t:
         return 0.0, False
-    precio_nueva = float(t.get("entrada", 0.0))
-    precio_cache = float(t.get("entrada_cache", precio_nueva))
+    p_nueva, p_cache, p_salida = t.por_millon(momento or datetime.now(timezone.utc))
     cacheados = max(0, min(int(entrada_cache or 0), entrada))
     nuevos = entrada - cacheados
-    return (nuevos * precio_nueva
-            + cacheados * precio_cache
-            + salida * float(t.get("salida", 0.0))) / POR_MILLON, True
+    return (nuevos * p_nueva + cacheados * p_cache
+            + salida * p_salida) / POR_MILLON, True
 
 
 @contextmanager

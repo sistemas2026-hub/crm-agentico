@@ -423,6 +423,80 @@ class RAG(Base):
 #  MODELOS
 # =============================================================================
 
+class VentanaPico(Base):
+    """Un tramo horario en que el proveedor cobra la tarifa alta.
+
+    En UTC y en horas enteras, que es como los publican. Los dias son ISO:
+    1 = lunes ... 7 = domingo.
+
+    'desde' puede ser MAYOR que 'hasta' -- una ventana que cruza la medianoche
+    (22 a 2). Se contempla porque un proveedor puede definirla asi, no porque
+    hoy alguno lo haga.
+    """
+    dias: list[int] = Field(default_factory=lambda: [1, 2, 3, 4, 5])
+    desde_utc: int = Field(default=0, ge=0, le=23)
+    hasta_utc: int = Field(default=24, ge=0, le=24)
+
+    def contiene(self, momento) -> bool:
+        if momento.isoweekday() not in self.dias:
+            return False
+        h = momento.hour
+        if self.desde_utc <= self.hasta_utc:
+            return self.desde_utc <= h < self.hasta_utc
+        return h >= self.desde_utc or h < self.hasta_utc     # cruza medianoche
+
+
+class Tarifa(Base):
+    """Cuanto cuesta un modelo, en USD por MILLON de tokens.
+
+    Por millon porque asi lo publican los proveedores: guardar el numero como
+    viene evita el error mas aburrido y mas caro de este dominio, que es un
+    factor de mil metido al cargarlo.
+
+    'entrada_cache' aparte de 'entrada' porque un token de entrada YA CACHEADO
+    cuesta ~30 veces menos que uno nuevo ($0.014 contra $0.44 en
+    deepseek-v4-flash) y en este sistema casi todo es cache -- el prompt de
+    sistema, el catalogo de herramientas y el historial se repiten turno a
+    turno. Medido sobre 30 dias reales: 141.8 millones de tokens costaron
+    $7.48; cobrandolos todos como nuevos habrian dado entre $30 y $60.
+
+    Ausente = se cobra todo como entrada nueva. Es el lado conservador:
+    sobreestimar avisa antes de tiempo, subestimar deja pasar el tope sin
+    frenar.
+
+    HORARIO PICO. Varios proveedores cobran menos fuera de ciertas franjas --
+    DeepSeek cobra la mitad, y cambio sus reglas el 23/08/2026. Por eso las
+    ventanas son DATO y no codigo: cuando el proveedor las mueva, se corrigen
+    desde la interfaz y no con un despliegue.
+
+    SIN VENTANAS DECLARADAS SE COBRA TODO COMO PICO, aunque haya descuento
+    cargado. Nunca al reves: suponer que todo cae fuera de pico partiria la
+    factura estimada a la mitad y el tope dejaria de frenar cuando debia.
+    """
+    entrada: float = Field(default=0.0, ge=0)
+    entrada_cache: float | None = Field(default=None, ge=0)
+    salida: float = Field(default=0.0, ge=0)
+    # Cuanto se descuenta FUERA de las ventanas de pico. 0.5 = mitad de precio.
+    descuento_fuera_pico: float = Field(default=0.0, ge=0, le=1)
+    ventanas_pico: list[VentanaPico] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _cache_no_puede_ser_mas_caro(self):
+        if self.entrada_cache is not None and self.entrada_cache > self.entrada:
+            raise ValueError(
+                "el precio de entrada cacheada no puede ser mayor que el de "
+                "entrada nueva: el cache existe porque sale mas barato, y al "
+                "reves el costo calculado seria mayor que el real")
+        return self
+
+    def por_millon(self, momento) -> tuple[float, float, float]:
+        """(entrada nueva, entrada cacheada, salida) para ESE momento."""
+        cache = self.entrada_cache if self.entrada_cache is not None else self.entrada
+        en_pico = any(v.contiene(momento) for v in self.ventanas_pico)
+        factor = 1.0 if (en_pico or not self.ventanas_pico) else (1 - self.descuento_fuera_pico)
+        return self.entrada * factor, cache * factor, self.salida * factor
+
+
 class LLM(Base):
     """
     Un modelo por defecto, con sustituciones por canal o por rol.
@@ -482,7 +556,7 @@ class LLM(Base):
     # cuenta en tokens y su costo queda en cero, marcado como sin tarifa. Un
     # numero inventado seria peor que ninguno -- se veria igual de real en el
     # panel y nadie sabria que es ficcion.
-    tarifas: dict[str, dict[str, float]] = Field(default_factory=dict)
+    tarifas: dict[str, Tarifa] = Field(default_factory=dict)
 
 
 # =============================================================================
