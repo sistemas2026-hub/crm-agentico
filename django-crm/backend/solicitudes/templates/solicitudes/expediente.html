@@ -1,0 +1,359 @@
+{% comment %}
+Expediente de solicitud de servicio -- el PDF que recibe Operaciones.
+
+DOS PAGINAS, y el corte no es por espacio: son dos lecturas distintas.
+
+  Pagina 1 -- QUIEN y DONDE. La abre quien valida si el servicio llega a esa
+              direccion, y despues el tecnico que va a instalar. La ubicacion
+              va primero y en verde: es el dato sobre el que se decide, y
+              antes competia en igualdad con el resto.
+  Pagina 2 -- LA PRUEBA. Documentos, firma y autorizaciones. Se mira cuando
+              hay que verificar quien firmo, no en el dia a dia.
+
+Nadie lo lee entero: se escanea buscando un dato. Por eso cada bloque tiene un
+titulo con icono y la direccion esta en cuerpo grande.
+
+Las imagenes llegan como data: URI desde pdf.py -- ninguna peticion de red al
+renderizar, que es lo que hace que esto funcione dentro de un contenedor sin
+salida a internet.
+{% endcomment %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<style>
+  @page { size: letter; margin: 12mm 12mm 14mm; }
+  body { font-family: "DejaVu Sans", Helvetica, Arial, sans-serif;
+         font-size: 9pt; color: #1f2933; line-height: 1.45; margin: 0; }
+
+  .pagina { page-break-after: always; }
+  .pagina:last-child { page-break-after: auto; }
+
+  /* --- encabezado --------------------------------------------------- */
+  .marca { display: flex; justify-content: space-between; align-items: flex-start;
+           border-bottom: 2px solid #1668c1; padding-bottom: 9px; margin-bottom: 12px; }
+  .marca .empresa { font-size: 15pt; font-weight: 700; color: #1668c1;
+                    letter-spacing: -.3px; }
+  .marca .logo { height: 34px; width: auto; max-width: 46%; }
+  .marca h1 { font-size: 13pt; margin: 0; text-align: right; color: #17335c;
+              text-transform: uppercase; letter-spacing: .2px; max-width: 58%; }
+
+  /* --- tarjetas ----------------------------------------------------- */
+  .caja { border: 1px solid #d3dae1; border-radius: 6px; padding: 10px 12px;
+          margin-bottom: 10px; }
+  .titulo { display: flex; align-items: center; gap: 7px; font-size: 9.5pt;
+            font-weight: 700; color: #1668c1; text-transform: uppercase;
+            letter-spacing: .6px; margin-bottom: 8px; }
+  .ico { width: 17px; height: 17px; border-radius: 50%; background: #1668c1;
+         color: #fff; font-size: 8pt; line-height: 17px; text-align: center;
+         font-weight: 700; }
+
+  .rotulo { font-size: 7pt; color: #7b8794; text-transform: uppercase;
+            letter-spacing: .7px; }
+  .valor { font-size: 9.5pt; font-weight: 600; }
+
+  table.rejilla { width: 100%; border-collapse: collapse; }
+  table.rejilla td { padding: 4px 10px 4px 0; vertical-align: top; width: 50%; }
+
+  /* --- ubicacion: el bloque que se busca primero --------------------- */
+  .ubicacion { border: 2px solid #1d7a45; background: #f4fbf6; }
+  .ubicacion .titulo { color: #1d7a45; }
+  .ubicacion .ico { background: #1d7a45; }
+  .direccion { font-size: 15pt; font-weight: 700; line-height: 1.2; }
+
+  .semaforo { border-radius: 6px; padding: 8px 10px; text-align: center; }
+  .semaforo .estado { font-size: 8pt; font-weight: 700; text-transform: uppercase;
+                      letter-spacing: .5px; }
+  .semaforo .metros { font-size: 17pt; font-weight: 700; line-height: 1.1; }
+  .semaforo .sello { display: inline-block; border-radius: 10px; padding: 2px 10px;
+                     font-size: 7.5pt; font-weight: 700; color: #fff; }
+  .optima { background: #eaf7ef; border: 1px solid #b9dfc6; color: #17603a; }
+  .optima .sello { background: #1d7a45; }
+  .media  { background: #fdf6e3; border: 1px solid #e6d9ae; color: #6b5a2b; }
+  .media .sello  { background: #b3891f; }
+  .baja   { background: #fdecea; border: 1px solid #f0b8b2; color: #8a2a20; }
+  .baja .sello   { background: #b5342a; }
+
+  .ozmap { font-family: "DejaVu Sans Mono", monospace; font-size: 11pt;
+           font-weight: 700; letter-spacing: .3px; }
+
+  .aviso { display: flex; gap: 7px; border-radius: 5px; padding: 7px 9px;
+           font-size: 7.8pt; margin-top: 8px; }
+  .aviso.amarillo { background: #fdf6e3; border: 1px solid #e6d9ae; color: #6b5a2b; }
+  .aviso.azul { background: #eef4fb; border: 1px solid #cfe0f3; color: #24476e; }
+
+  /* --- fotos --------------------------------------------------------- */
+  table.fotos { width: 100%; border-collapse: separate; border-spacing: 7px 0; }
+  table.fotos td { width: 33.33%; vertical-align: top; text-align: center; }
+  table.fotos .rot { font-size: 7.5pt; font-weight: 700; color: #35404b;
+                     text-transform: uppercase; letter-spacing: .4px;
+                     margin-bottom: 5px; min-height: 22px; }
+  table.fotos img { width: 100%; max-height: 165px; object-fit: contain;
+                    border: 1px solid #d3dae1; border-radius: 4px; background: #fff; }
+  .pie-fotos { text-align: center; font-size: 7.5pt; color: #7b8794; margin-top: 7px; }
+
+  .lienzo-firma { border: 1px solid #d3dae1; border-radius: 4px; background: #fff;
+                  text-align: center; padding: 6px; }
+  .lienzo-firma img { max-height: 88px; }
+  .bajo-firma { display: flex; justify-content: space-between; font-size: 7.5pt;
+                color: #7b8794; margin-top: 5px; }
+
+  /* --- autorizaciones ------------------------------------------------ */
+  .autorizacion { border: 1px solid #d3dae1; border-radius: 5px; padding: 9px 11px;
+                  margin-bottom: 8px; }
+  .autorizacion .cabeza { display: flex; gap: 7px; align-items: flex-start; }
+  .tilde { width: 15px; height: 15px; border-radius: 3px; font-size: 9pt;
+           line-height: 15px; text-align: center; font-weight: 700; flex: none; }
+  .si { background: #eaf7ef; border: 1px solid #1d7a45; color: #1d7a45; }
+  .no { background: #fdecea; border: 1px solid #b5342a; color: #b5342a; }
+  .autorizacion h3 { font-size: 8.2pt; margin: 0; text-transform: uppercase;
+                     letter-spacing: .4px; }
+  .texto-legal { font-size: 7.8pt; color: #3d4852; font-style: italic;
+                 margin: 6px 0 0; padding-left: 22px; white-space: pre-wrap; }
+  .sello-legal { font-size: 7.5pt; color: #5a6672; margin-top: 6px;
+                 padding-left: 22px; }
+
+  .nota-pie { background: #eef4fb; border: 1px solid #cfe0f3; border-radius: 5px;
+              padding: 8px 10px; font-size: 7.8pt; color: #24476e; }
+  .numero-pagina { text-align: center; font-size: 7.5pt; color: #9aa5b1;
+                   margin-top: 10px; }
+</style>
+</head>
+<body>
+
+{# ================= PAGINA 1 -- quien y donde ================= #}
+<div class="pagina">
+  <div class="marca">
+    {% if logo %}
+      <img class="logo" src="{{ logo }}" alt="{{ empresa }}">
+    {% else %}
+      <div class="empresa">{{ empresa|default:"Expediente" }}</div>
+    {% endif %}
+    <h1>Expediente de solicitud de servicio</h1>
+  </div>
+
+  <div class="caja">
+    <table class="rejilla">
+      <tr>
+        <td style="width:38%">
+          <div class="rotulo">Radicado</div>
+          <div class="valor" style="color:#1668c1">{{ radicado }}</div>
+        </td>
+        <td style="width:36%">
+          <div class="rotulo">Fecha y hora de envío</div>
+          <div class="valor">{{ s.enviada_en|date:"d/m/Y  H:i:s" }}</div>
+        </td>
+        <td>
+          <div class="rotulo">Canal</div>
+          {% comment %} No se dice "(Movil)" salvo que se sepa: el dispositivo no se
+             registra, y afirmarlo seria inventar un dato del expediente. {% endcomment %}
+          <div class="valor">Formulario web</div>
+        </td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="caja ubicacion">
+    <div class="titulo"><span class="ico">◉</span> Ubicación (prioritario)</div>
+    <table class="rejilla">
+      <tr>
+        <td style="width:62%">
+          <div class="rotulo">Dirección completa</div>
+          <div class="direccion">{{ s.direccion|default:"(sin dirección)" }}</div>
+        </td>
+        <td>
+          <div class="semaforo {{ ubicacion.nivel }}">
+            <div class="estado">
+              {% if ubicacion.metros %}Ubicación obtenida{% else %}{{ ubicacion.rotulo }}{% endif %}
+            </div>
+            {% if ubicacion.metros %}
+              <div class="rotulo" style="margin-top:3px">Precisión</div>
+              <div class="metros">{{ ubicacion.metros }} m</div>
+              <span class="sello">{{ ubicacion.rotulo }}</span>
+            {% endif %}
+          </div>
+        </td>
+      </tr>
+      <tr>
+        <td>
+          <table class="rejilla">
+            <tr>
+              <td><div class="rotulo">Barrio</div>
+                  <div class="valor">{{ s.barrio|default:"—" }}</div></td>
+              <td><div class="rotulo">Plan solicitado</div>
+                  <div class="valor">{{ s.plan_interesado|default:"—" }}</div></td>
+            </tr>
+          </table>
+        </td>
+        <td></td>
+      </tr>
+    </table>
+
+    <table class="rejilla" style="margin-top:8px;border-top:1px solid #cfe3d6;padding-top:7px">
+      <tr>
+        <td>
+          {% comment %} El formato de OZMAP: latitud,longitud sin espacio, para copiar y
+             pegar tal cual en la herramienta donde se valida la cobertura. {% endcomment %}
+          <div class="rotulo">Coordenadas OZMAP</div>
+          <div class="ozmap">{{ ozmap|default:"—" }}</div>
+        </td>
+        <td>
+          <div class="rotulo">Ver en mapa</div>
+          {% if mapa %}<div style="font-size:8pt;color:#1668c1">{{ mapa }}</div>
+          {% else %}<div class="valor">—</div>{% endif %}
+        </td>
+      </tr>
+    </table>
+
+    <div class="aviso {% if ubicacion.nivel == 'optima' %}azul{% else %}amarillo{% endif %}">
+      <strong>{% if ubicacion.nivel == 'optima' %}✓{% else %}⚠{% endif %}</strong>
+      <span>{{ ubicacion.accion }}</span>
+    </div>
+  </div>
+
+  <div class="caja">
+    <div class="titulo"><span class="ico">◕</span> Solicitante</div>
+    <table class="rejilla">
+      <tr>
+        <td colspan="2">
+          <div class="rotulo">Nombre completo</div>
+          <div class="valor" style="font-size:11pt">{{ s.nombre_completo|default:"—" }}</div>
+        </td>
+      </tr>
+      <tr>
+        <td><div class="rotulo">Tipo y número de documento</div>
+            <div class="valor">{{ s.tipo_documento }} {{ s.numero_documento }}</div></td>
+        <td><div class="rotulo">Edad</div>
+            <div class="valor">{{ s.edad|default:"—" }}</div></td>
+      </tr>
+      <tr>
+        <td><div class="rotulo">Teléfono</div>
+            <div class="valor">{{ s.telefono|default:"—" }}</div></td>
+        <td><div class="rotulo">Correo electrónico</div>
+            <div class="valor">{{ s.correo|default:"—" }}</div></td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="caja">
+    <div class="titulo"><span class="ico">▤</span> Servicio solicitado</div>
+    <table class="rejilla">
+      <tr>
+        <td><div class="rotulo">Plan elegido</div>
+            <div class="valor">{{ s.plan_interesado|default:"—" }}</div></td>
+        <td><div class="rotulo">Tipo de solicitud</div>
+            <div class="valor">{{ s.tipo_solicitud|default:"—" }}</div></td>
+      </tr>
+      <tr>
+        <td><div class="rotulo">Fecha de corte de facturación</div>
+            <div class="valor">{{ s.fecha_corte|default:"—" }}</div></td>
+        <td><div class="rotulo">¿Cómo se enteró del servicio?</div>
+            <div class="valor">{{ s.como_se_entero|default:"—" }}</div></td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="nota-pie">
+    Este documento contiene datos personales protegidos por la Ley 1581 de 2012.
+    Uso interno exclusivo. Prohibida su divulgación.
+  </div>
+  <div class="numero-pagina">Página 1 de 2</div>
+</div>
+
+{# ================= PAGINA 2 -- la prueba ================= #}
+<div class="pagina">
+  <div class="marca">
+    {% if logo %}
+      <img class="logo" src="{{ logo }}" alt="{{ empresa }}">
+    {% else %}
+      <div class="empresa">{{ empresa|default:"Expediente" }}</div>
+    {% endif %}
+    <h1>Documentos y autorizaciones</h1>
+  </div>
+
+  <div class="caja">
+    <div class="titulo"><span class="ico">▢</span> Documentos fotográficos</div>
+    <table class="fotos">
+      <tr>
+        {% for i in imagenes %}
+          <td>
+            <div class="rot">{{ i.numero }}. {{ i.rotulo }}</div>
+            <img src="{{ i.src }}" alt="{{ i.rotulo }}">
+          </td>
+        {% endfor %}
+      </tr>
+    </table>
+    {% comment %} "Recibidas", no "capturadas": no se registra cuando se tomo la foto,
+       solo cuando llego. Decir lo otro seria afirmar algo que no se sabe. {% endcomment %}
+    <div class="pie-fotos">
+      Imágenes recibidas el {{ s.enviada_en|date:"d/m/Y  H:i" }} desde el
+      dispositivo del solicitante.
+    </div>
+  </div>
+
+  <div class="caja">
+    <div class="titulo"><span class="ico">✎</span> Firma del solicitante</div>
+    {% if firma %}
+      <div class="lienzo-firma"><img src="{{ firma }}" alt="Firma"></div>
+    {% else %}
+      <div class="lienzo-firma" style="color:#8a2a20;padding:22px">Sin firma registrada.</div>
+    {% endif %}
+    <div class="bajo-firma">
+      <span>Firma trazada en el dispositivo móvil del solicitante.</span>
+      <span>{{ s.enviada_en|date:"d/m/Y  H:i:s" }}</span>
+    </div>
+  </div>
+
+  <div class="caja">
+    <div class="titulo"><span class="ico">▣</span> Autorizaciones legales</div>
+
+    <div class="autorizacion">
+      <div class="cabeza">
+        <span class="tilde {% if s.autoriza_centrales_riesgo %}si{% else %}no{% endif %}">
+          {% if s.autoriza_centrales_riesgo %}✓{% else %}✕{% endif %}</span>
+        <h3>Autorización para consulta en centrales de riesgo — Ley 1266 de 2008</h3>
+      </div>
+      <div class="sello-legal">
+        {% if s.autoriza_centrales_riesgo %}
+          Aceptación: {{ s.autorizaciones_en|date:"d/m/Y  H:i:s" }}
+          {% if s.ip_autorizaciones %} &nbsp;|&nbsp; Aceptado desde la IP de conexión {{ s.ip_autorizaciones }}{% endif %}
+        {% else %}<strong>NO AUTORIZA.</strong> El solicitante no marcó esta casilla.{% endif %}
+      </div>
+    </div>
+
+    <div class="autorizacion">
+      <div class="cabeza">
+        <span class="tilde {% if s.autoriza_habeas_data %}si{% else %}no{% endif %}">
+          {% if s.autoriza_habeas_data %}✓{% else %}✕{% endif %}</span>
+        <h3>Autorización para tratamiento de datos personales — Ley 1581 de 2012</h3>
+      </div>
+      <div class="sello-legal">
+        {% if s.autoriza_habeas_data %}
+          Aceptación: {{ s.autorizaciones_en|date:"d/m/Y  H:i:s" }}
+          {% if s.ip_autorizaciones %} &nbsp;|&nbsp; Aceptado desde la IP de conexión {{ s.ip_autorizaciones }}{% endif %}
+        {% else %}<strong>NO AUTORIZA.</strong>{% endif %}
+      </div>
+    </div>
+
+    {% comment %} El texto EXACTO que se le mostro, una sola vez y completo. Sin esto la
+       autorizacion no prueba nada: la politica cambia con el tiempo y un
+       "acepto" a secas no dice a que. {% endcomment %}
+    {% if s.texto_autorizaciones %}
+      <div class="rotulo" style="margin-top:9px">Texto aceptado por el solicitante</div>
+      <div class="texto-legal" style="padding-left:0">{{ s.texto_autorizaciones }}</div>
+    {% endif %}
+  </div>
+
+  <div class="nota-pie">
+    <strong>Información importante.</strong> Si la ubicación no aparece o su precisión
+    supera los {{ ubicacion_media_m|default:"100" }} m, comuníquese con el solicitante
+    antes de programar la visita: el punto puede caer a cuadras de la dirección real.
+  </div>
+  <div class="numero-pagina">
+    Página 2 de 2 &nbsp;·&nbsp; Radicado {{ radicado }} &nbsp;·&nbsp;
+    Generado el {{ generado_en|date:"d/m/Y H:i" }}
+  </div>
+</div>
+
+</body>
+</html>

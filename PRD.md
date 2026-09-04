@@ -132,7 +132,7 @@ Ya implementado y funcionando:
 ## 6. Requisitos no funcionales
 
 - **RNF-01 · Privacidad:** cumplimiento con la Ley 1581 de 2012 (protección de datos personales, Colombia).
-  - **El modelo por defecto es local** (Ollama, on-premise). Sigue siendo el resguardo: cualquier rol no enrutado explícitamente, o un `override` mal escrito, se queda en casa.
+  - **Ya no hay modelo local** (agosto 2026). El diseño original dejaba Ollama on-premise como resguardo: un rol sin enrutar, o un `override` mal escrito, se quedaba en casa. Ese resguardo **dejó de existir** cuando se sacó Ollama del VPS al pasar los embeddings a la API de OpenAI — era su único consumidor y el servidor no tenía memoria de sobra. Hoy `modelo_por_defecto` es DeepSeek, así que **todo** sale a una API externa, amparado en la misma autorización de tratamiento de abajo. Un nombre de modelo mal escrito ya no se queda en casa: falla el turno (`cliente.py::resolver` lo interpreta como local y no hay local que responda).
   - **Excepción aprobada (agosto 2026): DeepSeek (`deepseek-v4-flash`) para todos los roles**, incluidos los que llevan PII (`soporte`, `facturacion`, `cliente_final`). Base legal: la autorización de tratamiento que firma el cliente al contratar **cubre transferencia internacional de datos** (Ley 1581, art. 26 — la transferencia a países sin nivel adecuado de protección es lícita con autorización expresa e inequívoca del titular). Confirmado sobre el texto vigente de Rapilink; los ~7.272 clientes activos ya lo firmaron.
   - Motivación medida, no solo de costo: el modelo local tarda 42.6 s por turno (~180 s si estaba descargado de memoria); DeepSeek, 4.7-12 s — hasta 17× más rápido en la misma tarea real (`cli/prueba_velocidad.py`). A ~$0.24 por cada 1.000 consultas, resuelve directamente la tensión de RNF-04 con el técnico en campo.
   - **La persistencia se reparte** (decisión de agosto 2026, al adoptar Supabase hospedado para la arquitectura multi-tenant). El criterio es uno solo: *sale a la nube lo que no identifica a una persona*.
@@ -154,7 +154,7 @@ Ya implementado y funcionando:
   - ⚠️ **Validación legal ahora obligatoria antes de producción**, no opcional: la adopción de infraestructura hospedada cambia el análisis que motivó este requisito.
 - **RNF-02 · Seguridad en capas:** las reglas duras (filtrado de PII, confirmación de acciones sensibles) se aplican en **código**, no solo en el prompt. El prompt guía el comportamiento; el código garantiza los límites no negociables.
 - **RNF-03 · Costo:** volumen bajo (~300 consultas/día). El modelo local no tiene costo por token; el `override` a DeepSeek (agosto 2026) agrega ~$0.24 por cada 1.000 consultas — a este volumen, unos pocos dólares al mes.
-- **RNF-04 · Rendimiento:** originalmente se priorizó calidad sobre latencia, aceptando los 42.6 s/turno de `qwen3:30b-a3b`. La tensión con el técnico en campo (§14 del diseño multi-tenant) queda **resuelta por el `override` a DeepSeek** (RNF-01): 4.7-12 s por turno con calidad de texto equivalente, medido sobre la misma tarea de producción. El modelo local sigue siendo el resguardo para roles no enrutados o si `overrides` falla.
+- **RNF-04 · Rendimiento:** originalmente se priorizó calidad sobre latencia, aceptando los 42.6 s/turno de `qwen3:30b-a3b`. La tensión con el técnico en campo (§14 del diseño multi-tenant) queda **resuelta por DeepSeek** (RNF-01): 4.7-12 s por turno con calidad de texto equivalente, medido sobre la misma tarea de producción. Desde agosto 2026 DeepSeek es el **default**, no un `override`: ya no hay modelo local al que caer.
 - **RNF-05 · Mantenibilidad:** herramientas, filtros y prompts parametrizados por área, para replicar el patrón sin reescribir el motor.
 
 ---
@@ -165,9 +165,9 @@ Ya implementado y funcionando:
 
 | Componente | Tecnología |
 |-----------|-----------|
-| Modelo (motor) | **Qwen3 30B-A3B** (MoE, Q4_K_M) vía **Ollama** (local) |
+| Modelo (motor) | **DeepSeek** (`deepseek-v4-flash`) vía API. Hasta agosto 2026 fue **Qwen3 30B-A3B** (MoE, Q4_K_M) vía **Ollama** local — ver RNF-01 |
 | Lenguaje | Python 3.13 |
-| Cliente del modelo | librería `ollama` |
+| Cliente del modelo | librería `openai` (contrato compatible; también `anthropic`). `ollama` queda solo para `cli/banco_pruebas.py` y `cli/prueba_velocidad.py`, que comparan modelos contra el Ollama de la máquina de quien los corre |
 | Llamadas HTTP | `requests` |
 | Configuración y credenciales | `python-dotenv` (archivo `.env`) |
 | API de datos | WispHub REST API (JSON, auth por API Key) |
@@ -261,18 +261,23 @@ Colaborador (respuesta / informe)
   - El filtro se aplica a **cualquier forma** de respuesta (objeto, lista, paginado). Un filtro que solo entienda objetos sueltos deja pasar listas completas con PII.
   - El filtro alcanza los **objetos anidados** (notación `servicio.id_servicio`). Dejar pasar un objeto entero porque su nombre está en la lista blanca es una fuga: el `servicio` que viene dentro de un ticket incluye la IP del cliente y el router con sus credenciales.
   - La **confirmación manual** impide ejecutar un pago sin aprobación humana.
+  - **La guardia de salida** (`nucleo/seguridad/salida.py`, agosto 2026) es una tercera capa, agregada después de que las dos de arriba demostraran ser insuficientes: ambas protegen la *entrada* de datos al modelo, ninguna mira el *texto* que el modelo redacta antes de que llegue al cliente. Los casos dorados ya declaraban `responde_sin` para atrapar fugas de plomería interna (un código de error repetido tal cual, una fabricación sobre "cómo se sabe" la identidad), pero solo en evaluación — nada lo detenía en producción. La guardia corre el mismo chequeo en tiempo real, sobre los dos puntos donde `motor.py::responder()` devuelve texto redactado. Patrón con precedente en el rubro: Decagon lo llama *"capa de supervisor que atrapa errores antes de que el cliente los vea"* (investigado agosto 2026 comparando este proyecto contra Sierra, Decagon e Intercom Fin). **Deliberadamente no reusa `Rol.nunca_revelar`**: esa lista son nombres de *campo* para filtrar datos crudos de API, no frases prohibidas en lenguaje natural — `cliente_final` tiene `cedula` y `direccion` ahí, y el agente dice "pasame tu cédula" en cada verificación; buscar esa palabra en el texto libre habría bloqueado el flujo normal. Los patrones de la guardia son solo códigos internos del motor (`IDENTIDAD_NO_VERIFICADA`, `PRECONDICION_NO_CUMPLIDA`, etc.), tokens que nunca aparecen en español legítimo. Guarda: `tests/test_guardia_salida.py`.
 
-#### Límite conocido: los campos de texto libre
+#### Campos de texto libre — redacción por patrón (RESUELTO, agosto 2026)
 
 El filtro controla **qué campos** pasan, no **qué contiene** cada campo. Un campo de texto libre puede traer embebido cualquier dato, y la lista blanca no lo ve.
 
 Caso real detectado en producción: la `descripcion` de un ticket de instalación contenía nombre completo, teléfono, email, dirección, coordenadas GPS, número de documento, plan contratado con precio y un enlace público al PDF de la solicitud — todo en un solo string de 419 caracteres.
 
-Se decidió **mantener `descripcion`**: es el contenido del ticket y Soporte no puede trabajar sin él. Pero conviene tenerlo presente:
+Se decidió **mantener `descripcion`**: es el contenido del ticket y Soporte no puede trabajar sin él. La minimización de datos que da la lista blanca **no aplica** a los campos de texto libre — ahí llega lo que el operador haya escrito — así que hacía falta una capa más.
 
-- La minimización de datos que da la lista blanca **no aplica** a los campos de texto libre. Ahí llega lo que el operador haya escrito.
-- Si en algún momento se exige minimización estricta (auditoría legal, área con acceso restringido), un campo así necesita **redacción por patrón** (regex de cédulas, teléfonos, emails, URLs) además de la lista blanca. No está implementado.
-- Al agregar un campo nuevo a una lista blanca, preguntarse si es texto libre. Si lo es, la decisión no es solo "¿este campo sirve?" sino "¿qué puede venir escrito adentro?".
+**Implementado**: `nucleo/seguridad/redaccion.py` — patrones de cédula/teléfono (8-11 dígitos), email, URL y coordenadas GPS, aplicados sobre los campos que `Herramienta.campos_texto_libre` declara (propiedad del campo, no del rol — corre para cualquiera que consulte, sin repetir la declaración por área). Reemplaza cada coincidencia por una etiqueta (`[email oculto]`, etc.), conserva el resto del texto intacto — sacar la PII sin volver el campo inútil para quien tiene que atender el ticket.
+
+**Verificado contra datos reales, no un ejemplo de laboratorio** (17/08/2026): de 300 tickets reales, **136 (45%) traían un número de 8-11 dígitos embebido en la descripción** — más frecuente de lo que el caso original hacía pensar. La redacción lo saca (`"Telefono: 3113683499"` → `"Telefono: [numero de identificacion oculto]"`) sin tocar el resto del texto.
+
+**Límite honesto, no resuelto**: solo cubre patrones estructurados (números, emails, URLs, coordenadas). Un nombre propio o una dirección en prosa libre (`"Calle 45 #12-30"`) no se detecta — eso exigiría NLP, no regex, y queda fuera de este alcance.
+
+Configurado hoy en `consultar_ticket` (roles `soporte` y `administracion`). Al agregar un campo nuevo a una lista blanca, preguntarse si es texto libre — si lo es, agregarlo también a `campos_texto_libre` de esa herramienta. Guarda: `tests/test_redaccion.py`.
 
 ### 7.5 Parametrización por área (guía para extender)
 
@@ -334,6 +339,24 @@ Documentación oficial: <https://wisphub.net/api-docs/> (el spec OpenAPI está e
 - Endpoints aún no usados que sirven al norte: `/api/clientes/{id}/saldo/`, `/api/zonas/`, `/api/plan-internet/`, `/api/staff/`, `/api/gastos/`.
 - Sandbox: `https://sandbox-api.wisphub.net` (según doc; no probado).
 
+**Trampa nueva, encontrada al integrar SmartOLT (agosto 2026):** el endpoint de ping (`POST /clientes/{id}/ping/`) usaba una `interfaz` tomada de `interfaz_lan` del cliente. Si ese campo está **vacío**, no hay problema (caso normal, documentado arriba). Pero si está **poblado con un valor que ya no corresponde** a ese equipo, el ping falla con `"input does not match any value of interface"` — mismo síntoma que "el equipo no responde", pero es un dato de WispHub desactualizado, no una falla real de red. Se decidió dejar de mandar `interfaz` del todo: `arp_ping=false` sin interfaz ya pinguea bien (verificado), y no depender de que ese campo esté siempre bien cargado evita esta clase de falso negativo silencioso.
+
+### 7.7 Notas de integración con SmartOLT
+
+SmartOLT es donde el ISP administra las ONUs autorizadas en la OLT de fibra — se integró (agosto 2026) para convertir el diagnóstico ciego de conectividad (antes solo `ping_cliente`) en uno concluyente: distinguir equipo sin energía, sin señal óptica, señal débil o equipo sano. Documentación completa y verificada en vivo: `.claude/skills/smartolt-api/SKILL.md`.
+
+**Auth:** header `X-Token: <api_key>` (no `Authorization`, no `Bearer`) — distinto de WispHub, por eso `Herramienta` tiene un campo `auth_header` configurable, no fijo en `nucleo/`.
+
+**El identificador es la misma llave que WispHub.** `sn_onu` (WispHub) funciona directo como `unique_external_id` de SmartOLT, sin traducción — confirmado con el método del valor imposible. Cubre el **68%** de los clientes activos: el resto no tiene `sn_onu` cargado en WispHub, y para esos el diagnóstico cae al camino alternativo (preguntar por las luces del equipo). Un script de backfill (`cli/proponer_sn_onu.py` + `cli/aplicar_sn_onu.py`) cruza el nombre del cliente contra el nombre de la ONU para proponer candidatos — aplicado en producción, subió la cobertura al ~93%, con 286 casos que quedaron para revisión manual por ambigüedad o falta de candidato.
+
+**Límite de tasa:** 1.000 llamadas/hora (confirmado por cabecera `X-RateLimit-*`, no por documentación de terceros — una búsqueda inicial daba 15/hora, que resultó ser la cifra de un caso de uso masivo distinto).
+
+**El reinicio de ONT no pide aprobación humana — decisión explícita del cliente.** En su lugar, precondiciones en código (`Herramienta.exige_previas`): solo se ejecuta si la señal y el ping ya dieron resultado favorable **en esa misma conversación**, mirando siempre la llamada más reciente (una señal buena hace tres mensajes que después empeoró no cuenta). Mismo principio de RNF-02 (seguridad en código, no en el prompt) aplicado a una acción de escritura, no solo a la lectura de PII.
+
+**Tiempos de recuperación, medidos en vivo — dos números que no hay que confundir:** el estado de SmartOLT (`onu_status`) tarda ~6 minutos en reflejar que la ONU volvió a estar en línea (el reregistro GPON completo). El equipo responde a un **ping real** mucho antes, ~73 segundos — y ese es el número que le importa al cliente. El texto que promete algo al cliente usa el segundo, no el primero.
+
+**El código calcula, el modelo compone (ver §12.5), aplicado también acá:** los umbrales de señal óptica (G-GO-04: -8 a -25 dBm aceptable) y la traducción de la causa de caída (`dying-gasp` → sin energía eléctrica; `LOSi/LOBi`/`LOFi` → falla óptica) se calculan en código (`Herramienta.veredictos`/`Herramienta.mapeos`, genéricos en `nucleo/`), nunca los interpreta el modelo sobre el dato crudo en inglés.
+
 ---
 
 ## 8. Roadmap por fases
@@ -342,11 +365,11 @@ Documentación oficial: <https://wisphub.net/api-docs/> (el spec OpenAPI está e
 |------|-----------|--------|
 | **0** | Prototipo de soporte en consola contra WispHub | ✅ Hecho |
 | **1** | Consolidar soporte: prompt de asesor, filtro PII, consulta por cédula | ✅ Hecho |
-| **2** | Identidad de área; parametrizar herramientas y filtros por rol | ✅ Hecho (login real pendiente, ver §8.1) |
-| **3** | Replicar patrón a Facturación y Técnica | ✅ Catálogo definido y verificado |
-| **4** | Generación de informes + exportación (Excel/PDF) | Pendiente |
-| **5** | Interfaz web interna (reemplaza la consola) | Pendiente |
-| **6** | Auditoría/logs y despliegue en servidor on-premise | Auditoría ✅ (§8.2) · despliegue pendiente |
+| **2** | Identidad de área; parametrizar herramientas y filtros por rol | ✅ Hecho — login real ya existe (JWT vía BottleCRM), ver §8.1 |
+| **3** | Replicar patrón a Facturación y Técnica | ✅ Catálogo definido y verificado — Técnica ahora incluye SmartOLT (lectura de red + reinicio de ONT, ver §7.7), no solo WispHub |
+| **4** | Generación de informes + exportación (Excel/PDF) | ✅ Excel y PDF (ver §8.4) |
+| **5** | Interfaz web interna (reemplaza la consola) | ✅ En gran parte hecho — ver §8.1 |
+| **6** | Auditoría/logs y despliegue en servidor on-premise | Auditoría ✅ (§8.2) · despliegue: pasos manuales pendientes en DESPLIEGUE.md → `## Pendientes` |
 
 ---
 
@@ -365,29 +388,184 @@ El control es doble y se aplica en código: una herramienta que no está en `her
 
 **Credenciales: ningún área.** `password_servicio`, `password_cpe`, `password_router_wifi`, `password_ssid_router_wifi` y `usuario_router_wifi` están fuera de todas las listas, incluida Técnica. Un técnico que necesite una credencial la saca de WispHub; pasarla por el modelo no le ahorra un paso y la deja escrita en el historial de la conversación.
 
-**NO hecho — pendiente para la interfaz web (Fase 5):**
+**Hecho también (agosto 2026, corrige lo que decía este párrafo antes):** identificación real, no elegir un área de una lista. `django-crm/frontend/src/hooks.server.js` implementa login con JWT emitido por BottleCRM (access + refresh token rotado, membresía de organización, `locals.user`/`locals.profile.role`) — es la app web la que gatea cada ruta (`redirect` a `/login` sin sesión). Sobre esa identidad real hay una capa de autorización propia del asistente: `asistente.tenant_users` mapea `profile_id` (el perfil real del CRM) → los agentes/roles que un ADMIN le asignó (`/agentes/asignaciones`, `persistencia.agentes_de_colaborador()`). `POST /chat` resuelve el rol a partir de ese `profile_id` — nunca lo manda el cliente — y es **fail-closed**: sin asignación, `403` ("Todavía no tienes ningún agente asignado"), no cae a un rol por defecto. Un colaborador con Soporte y Facturación asignados los ve fusionados en un solo turno, sin elegir a cuál le habla.
 
-- **Es identificación, no autenticación.** No hay contraseña: quien abre la consola elige su área de una lista. Sirve para acotar lo que cada uno ve y para probar el catálogo, pero no impide que alguien elija otra área. La autenticación real requiere la capa web.
+**Sigue sin resolver:**
+
 - **Una sola clave de API para todos.** La clave de WispHub pertenece a un usuario del staff y hereda sus permisos, así que WispHub ve todas las consultas como si fueran de esa misma persona. **La separación por área es nuestra, no de WispHub.** Para que el control fuera real de punta a punta harían falta claves por colaborador.
-- **Sin auditoría** (RF-13): no queda registro de quién consultó qué. Con la identidad ya disponible, es el paso natural siguiente.
+- **La identidad del colaborador no queda en la fila de auditoría misma** — ver el matiz en §8.2: es recuperable, pero indirecto.
 
-### 8.2 Auditoría (RF-13) — implementada
+### 8.2 Auditoría (RF-13) — implementada, en base de datos (corrige la versión anterior de esta sección)
 
-Una línea JSON por **acceso a datos** (ejecución de herramienta), no por mensaje de la conversación. Archivo `auditoria.log`, fuera del repositorio.
+**Esta sección describía un archivo `auditoria.log` en JSON que ya no es como funciona el motor multi-tenant.** Ese archivo solo lo sigue escribiendo `soporte_wisphub.py`, el prototipo de referencia de un solo tenant (ver §11) — nunca `nucleo/`. La auditoría real es una fila en Postgres por **acceso a datos** (ejecución de herramienta), no por mensaje: `asistente.tool_calls`, insertada por `persistencia.registrar_llamada_herramienta()` y mostrada en el panel "Ver proceso" de `/conversaciones`.
 
-```json
-{"ts":"2026-07-28T21:56:29-05:00","area":"soporte",
- "herramienta":"consultar_cliente_por_cedula","args":{"cedula":"******1347"},
- "estado":"ok","sensible":false,"registros":1,"ms":762}
-```
-
-**Qué se registra:** cuándo, qué área, qué herramienta, sobre qué registro, con qué resultado, cuántos registros devolvió y cuánto tardó. Los `estado` posibles distinguen los cuatro caminos: `ok`, `error_api`, `argumentos_invalidos`, `rechazado_por_area`, `cancelado_por_operador`. Este último es el que deja constancia de que un humano **negó** una acción sensible.
+Columnas: `organization_id`, `conversation_id`, `herramienta`, `parametros` (enmascarados), `rol_solicitante`, `exito`, `n_registros`, `codigo_error`, `duracion_ms`, `es_escritura`, `creado_en`.
 
 **Qué NO se registra:** ningún dato devuelto. Ni nombre, ni email, ni dirección, ni IP, ni plan. *Un log de auditoría que copia los datos que vigila deja de ser un control y pasa a ser una segunda base de datos sin proteger.*
 
-**Enmascaramiento:** los identificadores de 8 dígitos o más se ocultan salvo los últimos 4 (`1044601347` → `******1347`). Cubre cédulas y teléfonos. Los IDs cortos —servicio (4), ticket (5), factura (6)— se conservan: son los que hacen útil la auditoría y no identifican a una persona por sí solos.
+**Enmascaramiento — más simple y más parejo de lo que decía esta sección antes.** `motor.py::_enmascarar()` no distingue por tipo de campo ni por largo del identificador: **todo** argumento de más de 4 caracteres se trunca a sus últimos 4 con el prefijo `...` (`"1044601347"` → `"...1347"`), sin importar si es cédula, teléfono o un ID de ticket de 5 dígitos. La afirmación anterior de que "los IDs cortos —ticket (5), factura (6)— se conservan" era falsa: con esta regla, cualquiera de más de 4 caracteres se enmascara igual.
 
-**Pendiente:** el log registra el **área**, no la persona — porque hoy no hay autenticación (§8.1). Cuando exista login real, el campo `area` debe acompañarse del identificador del colaborador; el resto de la estructura no cambia. Tampoco hay rotación del archivo.
+**La identidad SÍ queda registrada — indirecta, no ausente.** Para los flujos disparados desde la web (`/asistente`, `/configuracion-guiada`), el frontend resuelve `profile_id` server-side (nunca del cliente, ver `routes/api/asistente/+server.js`) y manda `identificador_sesion: locals.user.id` — el motor lo guarda como `usuario_externo` de la conversación. Es decir: la conversación entera queda atada al colaborador real, no solo al área. Lo que falta es más chico que "no hay registro de quién": `asistente.tool_calls` guarda `rol_solicitante` (el rol, ya fusionado si el colaborador tiene varios asignados), no el `profile_id` como columna propia — para saber qué colaborador ejecutó una herramienta puntual hay que cruzar por `conversation_id` contra `conversations.usuario_externo`, no viene en la misma fila. Sumar esa columna (`profile_id` en `asistente.tool_calls`) es directo y queda como pendiente concreto.
+
+**Pendiente real, distinto del que decía esta sección:** no hay política de retención/purga sobre `asistente.tool_calls` (antes decía "rotación del archivo", que ya no aplica — es una tabla, no un archivo).
+
+### 8.3 Métrica de tasa de escalamiento (agosto 2026)
+
+`cli/reporte_escalamiento.py` — cuántas conversaciones de los últimos N días terminaron en un humano, y por qué motivo (`asistente.conversations.motivo_escalamiento`), agregado en SQL.
+
+Nace de un hueco concreto: el 15/08/2026 se agregó `escalamiento.intentar_resolver_antes` (una vuelta extra antes de escalar, ver `tests/test_escalamiento_paciente.py`) después de que un cliente escalara en su primer mensaje sin ningún diagnóstico intentado. El cambio se validó mirando dos conversaciones a mano — sin este reporte no había forma de saber si funcionaba sobre la población real. Mismo concepto que la "tasa de escalada" que Intercom Fin reporta como métrica de primera clase (investigado agosto 2026 comparando este proyecto contra Sierra, Decagon e Intercom Fin — ver también la guardia de salida en §7.4, del mismo relevamiento).
+
+```
+py -3.13 cli/reporte_escalamiento.py --tenant rapilink --dias 7
+```
+
+### 8.4 Informes exportables (RF-12, agosto 2026) — Excel y PDF
+
+Antes de esto no existía ningún camino para generar un archivo real desde una conversación: `informe_materiales` (el único intento de "informe") es tipo `batch` y ni siquiera tiene ejecutor en `motor.py` — solo corre como script manual. RF-12 seguía sin cumplirse.
+
+**Cómo funciona.** Una herramienta `tipo: agregado` marcada `exportable: true` (`nucleo/config/schema.py::Herramienta`) ofrece al modelo un argumento extra, `formato: texto|excel|pdf`. Si el colaborador pide explícitamente un archivo, `nucleo/herramientas/informes.py` (`generar_excel()`/`generar_pdf()`) toma el **mismo** dict que `agregado.ejecutar()` ya calculó (`total`, `desglose`, `interpretacion`) y lo vuelca al formato pedido — el código sigue calculando (PRD §12.5), esto solo cambia el empaque. `motor._GENERADORES_INFORME` mapea cada `formato` a su función y su mime; agregar un tercer formato es una entrada más en ese diccionario, no una rama nueva de lógica. PDF usa `reportlab` (pure-Python, sin dependencias de sistema — a diferencia de `weasyprint`, que necesita Cairo/Pango y complicaría la imagen de Docker). El modelo nunca ve los bytes del archivo, solo un identificador para poder mencionarlo — y su propia descripción le prohíbe explícitamente mostrar ese identificador al colaborador, porque no significa nada para una persona y el archivo ya aparece como adjunto en la conversación sin que haga falta.
+
+**Restricción de arquitectura real, no cosmética.** `motor.py::responder()` corre **antes** de que exista `conversation_id` (se resuelve recién en `api.py`, al persistir el turno) — y `asistente.media` exige `conversation_id not null`. Por eso `responder()` devuelve un tercer valor, `medios_pendientes`, con el mismo patrón que ya usa `registro_herramientas` para la auditoría: el archivo se genera durante el turno, pero se guarda en `api.py` una vez que el conversation_id existe.
+
+**Dos identificadores de `asistente.media`, no confundir.** `id` (la clave primaria, generada por Postgres) es la que usa el flujo existente de fotos de WhatsApp — no se conoce hasta después del INSERT. Un archivo generado por el motor necesita poder referenciar su propio identificador *antes* de que la fila exista, así que usa la columna `media_id` (texto, `unique(organization_id, media_id)`), elegida por código. Confirmado en vivo (17/08/2026) que confundir las dos —la misma trampa de "dos catálogos con la misma forma" que ya costó tiempo con zona/router de WispHub— hacía que el archivo se generara pero fuera irrecuperable con el identificador que el modelo mencionaba.
+
+**La entrega no necesitó tocar el frontend.** El visor de conversaciones (`/conversaciones/[id]`) ya tenía una rama genérica para adjuntos que no son foto ni audio (enlace con ícono y tamaño en KB), unida por `mensaje_id` — el mismo mecanismo que ya muestra las fotos que manda un cliente. Un archivo generado por el motor pasa por el mismo camino sin ningún cambio de UI.
+
+Guardas: `tests/test_informes.py` (el archivo refleja exactamente lo que el agregado calculó, sin inventar ni redondear — Excel y PDF, este último leído de vuelta con `pypdf` solo para el test, no es dependencia del motor) y el caso dorado "pedido explícito de reporte descargable llama al agregado" (`evaluacion/rapilink.casos.yaml`). Primer caso dorado con un rol **colaborador** (`administracion`), no `cliente_final`.
+
+`contar_clientes`, `contar_facturas` y `contar_tickets` están marcadas `exportable`, en Excel y PDF, verificado en vivo contra producción. Al mismo tiempo se corrigió `contar_facturas.agrupar_por: zona`, que estaba declarado pero nunca podía funcionar (`zona` era `tipo: id`, y el motor de agregados solo agrupa catálogos cerrados `tipo: enum`) — se pasó a `enum` con las 5 zonas reales de WispHub, verificadas con el método del valor imposible.
+
+### 8.5 Asistente de configuración guiada (agosto 2026)
+
+CLAUDE.md ya lo pedía: *"la próxima empresa que se conecte no debería necesitar una sesión de código para algo que ya se resolvió una vez"*. Hasta ahora, conectar un sistema nuevo era 100% trabajo de un desarrollador: sondear la API a mano (`cli/sondear_api.py`), verificar cada filtro con el método del valor imposible, escribir el YAML, aplicarlo. Este rol (`configuracion_guiada`, gateado a ADMIN en la capa web) hace lo mismo pero conversando con un colaborador — sin que deje de sondear de verdad ni de exigir aprobación humana.
+
+**Dos herramientas nuevas, quinta y sexta excepción a "el modelo nunca propone argumentos libres"** (las anteriores: `campo_busqueda` de verificar identidad, `confirma` de confirmar identidad, `area` acotada de derivar rol):
+
+- `sondear_api` (`Herramienta.sondea_api`): hace un GET real contra una URL que el ADMIN describe, y devuelve un resumen (`count`, `campos_disponibles`, hasta 3 filas de muestra) — nunca el volcado completo.
+- `proponer_herramienta` (`Herramienta.propone_herramienta`): guarda un borrador de `Herramienta` en `asistente.herramientas_propuestas`, `estado='pendiente'`. Nunca se activa sola.
+
+**La superficie de ataque nueva, y cómo se cerró.** Es la única parte del proyecto que llama a una URL no verificada de antemano — eso es SSRF (Server-Side Request Forgery): sin control, un ADMIN (o una cuenta comprometida) podría hacer que el servidor "sondee" su propia red interna — el motor, el pooler de Postgres, o el endpoint de metadata de la nube (`169.254.169.254`, que en AWS/GCP/Azure expone credenciales sin autenticación). `nucleo/herramientas/sondeo.py` bloquea: solo `https`, y resuelve el host rechazando cualquier IP que caiga en un rango privado/interno/de enlace local (RFC 1918, loopback, link-local). Límite conocido y dejado escrito en el propio módulo: hay una ventana de DNS rebinding entre la verificación y la conexión real; el riesgo residual es bajo (solo lo dispara un ADMIN ya autenticado) pero no es cero.
+
+**La clave de la API nueva nunca toca al modelo.** `sondear_api` recibe `auth_ref` — el NOMBRE de un secreto que el ADMIN ya guardó desde la pantalla de Secretos (cifrado, patrón ya existente) — y lo resuelve server-side. Enviar la clave completa a través del chat la mandaría a DeepSeek como parte de la conversación, exactamente el tipo de exposición de credenciales que el resto del proyecto evita.
+
+**`nucleo/config/editor.py` decía explícitamente que crear una herramienta "sigue siendo trabajo de código... esa superficie es sensible en seguridad".** Esto no relaja esa regla, la resuelve distinto: la preocupación nunca fue "una pantalla", fue "sin verificar y sin que un humano lo revise". Las dos garantías siguen intactas — nada llega al catálogo real sin pasar por el sondeo (evidencia auditable, guardada junto con la propuesta) y sin que un ADMIN apruebe el borrador exacto desde `/configuracion/propuestas/<id>/aprobar`. `editor.aprobar_herramienta_propuesta()` valida contra el mismo esquema que todo lo demás — un borrador mal armado se rechaza con el error específico, no se cuela.
+
+**Verificado en vivo, no solo en el test unitario.** Primer intento real: el modelo propuso `tipo: catalogo` (no existe) sin `roles_permitidos` (obligatorio) — la aprobación lo rechazó correctamente, con el error exacto de Pydantic. Se afinó el prompt del rol con un ejemplo concreto de la forma exacta del esquema, y el segundo intento (sondear el catálogo de zonas de WispHub, sin filtros) produjo un borrador válido de punta a punta: sondeo real → propuesta con evidencia → aprobación → herramienta viva en el catálogo. Retirada después de verificar — era una prueba, no un pedido real de Rapilink.
+
+Guardas: `tests/test_sondeo.py` (bloqueo SSRF contra IPs y hostnames reales, no solo la lógica en abstracto) y `tests/test_configuracion_guiada.py` (un borrador mal armado —incluidos los dos errores reales vistos en vivo— se rechaza antes de tocar el catálogo).
+
+**Pantalla web** (agosto 2026): `/configuracion-guiada`, entrada "Conectar sistema nuevo" en Administrar (solo ADMIN, oculta del menú y con `redirect` en el `load()` para cualquiera más). Chat a un lado — mismo patrón que el simulador de WhatsApp — y panel de propuestas pendientes al otro, con Aprobar/Rechazar por propuesta — mismo patrón que la cola de revisiones de `/manual`. Las cuatro rutas server-side (`/api/configuracion-guiada` y sus tres sub-rutas de propuestas) repiten el gate `locals.profile?.role !== 'ADMIN'` que ya usa `/api/agentes`, en vez de confiar solo en que el menú esté oculto.
+
+### 8.6 Escritura de tickets con aprobación humana real (`aprobacion_humana`, agosto 2026)
+
+Primer caso concreto de escritura donde el propio colaborador de soporte propone la acción, no un ADMIN: crear un ticket, responder uno existente, o cambiarle el estado — directo desde WispHub, a partir de la documentación oficial de sus endpoints (`POST /api/tickets/`, `POST /api/tickets/{id}/respuesta/`, `PUT /api/tickets/{id}/`).
+
+**Por qué no se reusó `requiere_confirmacion`.** Ese campo existe desde antes y el validador lo *fuerza* a `true` en toda herramienta de escritura (`if not solo_lectura and not requiere_confirmacion: raise ValueError`) — pero nunca se aplicó en tiempo de ejecución (`motor.py` no lo mira). Herramientas ya en producción y deliberadamente autónomas (`registrar_pago`, `activar_catv`, `crear_tag_crm`) lo llevan puesto solo para pasar la validación. Convertirlo en un gate real las hubiera frenado a todas de un día para el otro, sin que nadie lo pidiera. Por eso el gate nuevo es un campo separado y opt-in: `Herramienta.aprobacion_humana`, con su propia regla de coherencia (no tiene sentido en una herramienta `solo_lectura`).
+
+**El mecanismo, genérico — no específico de tickets.** Cuando el modelo llama una herramienta con `aprobacion_humana: true`, `motor.py` no ejecuta nada contra la API externa: resuelve los argumentos (misma `_resolver_argumentos()` que usa la ejecución normal — filtros verificados, argumentos fijos, fechas automáticas, inyección de sesión) y guarda la propuesta en `asistente.acciones_propuestas` (`estado='pendiente'`), con un resumen legible (`Herramienta.plantilla_resumen`, ej. `"Crear ticket '{asunto}' para el servicio {servicio}"`). Al modelo le vuelve una instrucción explícita de no confirmar que ya se hizo. Un humano aprueba o rechaza desde `/acciones/propuestas` (tres endpoints nuevos en `nucleo/canales/api.py`); solo al aprobar se ejecuta de verdad, vía `motor.ejecutar_accion_aprobada()`, contra la herramienta HTTP real del catálogo. Aprobar registra el resultado (éxito o error de la API) pero el estado queda `'aprobada'` en ambos casos — aprobar es "un humano autorizó la intención", no "necesariamente salió bien".
+
+**`espejar_campos` (nuevo, genérico).** WispHub pide el mismo valor duplicado en dos campos (`asunto`/`asuntos_default`, `departamento`/`departamentos_default`) — capricho de su API, no algo que el modelo deba resolver ni que amerite lógica especial. `Herramienta.espejar_campos: {origen: destino}` copia el valor ya resuelto de un campo a otro, como paso final de `_resolver_argumentos()`.
+
+**El catálogo de `asunto` es un enum cerrado, no texto libre.** `crear_ticket` obliga a que el modelo elija una de las ~31 opciones reales de WispHub (`filtros_verificados.asunto`, tipo enum) — mismo mecanismo que ya filtraba parámetros de consulta, reusado para el cuerpo de un POST, porque `_resolver_argumentos()` termina siempre en el mismo diccionario `argumentos` sin importar el método HTTP.
+
+**Verificado en vivo de punta a punta (19/08/2026), no solo con las guardas de esquema.** Contra el cliente de prueba (`servicio` 6555, "PRUEBA TEMPORAL"): `crear_ticket` propuso, quedó pendiente, se aprobó y creó el ticket real `#90354` (estado Nuevo, técnico resuelto por nombre vía `consultar_tecnicos`); `responder_ticket` agregó una respuesta real; `actualizar_estado_ticket` lo cerró. Los tres pasaron por el ciclo completo propuesta → `asistente.acciones_propuestas` → aprobación → escritura real, sin atajos.
+
+**Ese mismo intento encontró un hueco real en la documentación de WispHub — y en el motor.** `POST /api/tickets/` rechazó el primer intento con `400`: exige `estado` y `tecnico`, ninguno marcado como obligatorio en la documentación oficial. `estado` se resolvió fijándolo en código (`argumentos_fijos`: todo ticket nuevo nace "Nuevo") pero `tecnico` es una decisión real del modelo — y ahí apareció el hueco más serio: `motor.py` mandaba `"required": []` fijo al esquema de function-calling para **toda** herramienta, sin una sola excepción, así que no había forma de decirle al modelo que un campo era obligatorio. Se agregó `Herramienta.requeridos` (`nucleo/config/schema.py`) — lista de claves de `filtros_verificados` que sí entran al `required` real que ve el modelo — y se verificó que el modelo, con ese único cambio, resolvió `tecnico` por nombre sin que se lo pidieran explícitamente. Detalle completo, incluidos los payloads exactos, en la skill `wisphub-api`.
+
+### 8.7 Herramientas de facturas — detalle, formas de pago, promesa de pago, y un bug real corregido (agosto 2026)
+
+A partir de la documentación oficial de WispHub para `/api/facturas/` pegada por el usuario, se decidió qué construir y qué no: `consultar_facturas` y `registrar_pago` ya existían; se agregaron `consultar_factura_detalle` (una factura por ID, con sus artículos), `consultar_formas_pago` (catálogo, para resolver `forma_pago` por nombre) y `agregar_promesa_pago` (con `aprobacion_humana: true`, mismo mecanismo que las herramientas de tickets). Deliberadamente **no** se construyeron `crear_factura` (genera un documento contable con prorrateo e impuestos — le corresponde al motor de facturación de WispHub, no a este asistente), `DELETE /api/facturas/{id}/` ni el borrado masivo (`/facturas/eliminar-facturas/`, hasta 500 por request) — mismo criterio que ya excluye el borrado de clientes: ninguna herramienta de este catálogo expone destrucción de datos.
+
+**`registrar_pago` estaba roto en producción, y nadie lo había notado.** No declaraba `filtros_verificados`: el modelo no tenía forma de decirle a qué factura se refería, así que `url_de()` nunca podía resolver el marcador `{id}` del endpoint (`/api/facturas/{id}/registrar-pago/`) y la llamada fallaba siempre con `ErrorHerramientaHttp` — sin caso dorado ni prueba en vivo que lo hubiera ejercitado hasta ahora. Se corrigió y se verificó con un pago real: factura de prueba `#143512` pasó de "Pendiente de Pago" a "Pagada", con `forma_pago`, `referencia` y `total_cobrado` reflejados — confirmado leyendo la factura de nuevo desde la API, no solo confiando en la respuesta del POST.
+
+**Otro hueco de documentación, en dirección opuesta al de los tickets.** `POST /api/facturas/{id}/registrar-pago/` rechazó el primer intento real con `400 {"fecha_pago": ["Este campo es requerido."]}`, pese a que la doc la marca opcional ("solo tiene efecto con un permiso especial"). Se resolvió con `fechas_automaticas` (ya existía, para tickets) — pero ese mecanismo tenía el formato de fecha **hardcodeado** a `DD/MM/AAAA` (lo que exige WispHub en tickets) como una constante de `motor.py`, con un comentario propio que ya anticipaba el problema: *"si aparece otro con un formato distinto, esto pasa a ser un campo de config en vez de una constante"*. Este fue ese caso: `registrar-pago` exige `YYYY-MM-DD HH:mm`. Se agregó `Herramienta.formato_fechas_automaticas` (default = el formato de tickets, así que ninguna herramienta existente cambió de comportamiento) y `registrar_pago` declara el suyo propio.
+
+**Y un tercer hueco, en `POST /api/promesa-pago/`**: la doc marca `id_factura` como requerido, pero el serializer no lo valida — un valor imposible (`999999999`) no generó error junto con los demás campos vacíos. Se forzó igual vía `Herramienta.requeridos`: no hay que confiar en que la API vaya a rechazar lo que falte, sobre todo cuando ya se demostró que no siempre lo hace. El formato de fecha del ejemplo oficial (`fecha_limite: "2022/08/26"`, con barras) también estaba mal — la API real exige guiones (`YYYY-MM-DD`), confirmado con un `400` de formato real antes de acertar.
+
+Verificado en vivo: `consultar_factura_detalle` y `consultar_formas_pago` funcionaron directo contra la factura y el catálogo reales; `agregar_promesa_pago` se probó con un `POST` real exitoso (antes de que la factura quedara pagada por la prueba de `registrar_pago`) y, por separado, se confirmó que `_resolver_argumentos()` arma el payload exacto que la API acepta. Guarda nueva en los casos dorados: uno confirma que `consultar_factura_detalle` no inventa el total, y otro que el modelo no propone una promesa de pago sobre una factura que ya está saldada — verificado que razona sobre el estado antes de proponer, no que llama a ciegas.
+
+### 8.8 Rol `ventas` — el primer `cliente_final` que no verifica identidad (agosto 2026)
+
+Nace de un bug real visto en el simulador: un colaborador escribió *"para solicitar un servicio"* y el router pidió cédula de inmediato. Un prospecto (todavía no cliente) nunca iba a pasar esa verificación — genuinamente no está en WispHub. Antes de esto, "instalaciones nuevas" derivaba ciego a un colaborador humano; el flujo real de la empresa (confirmado por el usuario, con captura de pantalla de un ticket real) es: alguien escribe pidiendo contratar, un humano confirma cobertura por barrio y comparte un formulario externo (datos, documentos, firma) que termina creando un ticket sobre un cliente placeholder ("INSTALACIONES-NUEVAS") en WispHub. El rol `ventas` reemplaza la primera parte de esa conversación — calificar el interés, chequear cobertura, contestar planes y precios reales — sin tocar la parte de captura de documentos/firma, que sigue siendo el mismo formulario externo de siempre.
+
+**Decisión de diseño, después de descartar la alternativa:** se evaluó que el router reconociera la intención ("quiero contratar") y saltara la verificación desde el primer mensaje, pero el modelo se resistió a esto de forma consistente en varias reescrituras del prompt (probado en vivo, múltiples corridas) — tiene un sesgo fuerte hacia "pedir un identificador antes de ayudar con cualquier trámite de cuenta". Se volvió al diseño más simple, alineado con el proceso real de la empresa: **el router siempre intenta verificar primero**, sin excepción por intención. Si la búsqueda no encuentra a nadie, dos señales guían el resto: (1) puede ser un simple error de tipeo — se da un reintento antes de asumir otra cosa; (2) si la persona confirma explícitamente que no es cliente, recién ahí se deriva a `ventas`. Un cliente actual pidiendo sumar OTRO servicio sigue el mismo camino de verificación que cualquier otro trámite — la excepción es solo para quien genuinamente no está en el sistema.
+
+**Dos bugs de código reales, no de prompt, encontrados en el camino:**
+
+1. **El gate de ejecución no conocía `exige_verificacion` (campo nuevo, `Rol.exige_verificacion`, default `True`).** Se agregó el campo y se referenció en el prompt, pero el gate real en `motor.py` (`nivel_exigido`) seguía calculado solo a partir de `orientado_a == "cliente_final"`, ignorando el campo nuevo. Resultado: toda herramienta de `ventas` (incluso `contar_clientes`, sin ningún dato sensible) quedaba bloqueada con `IDENTIDAD_NO_VERIFICADA` aunque el prompt ya le hubiera dicho al modelo que no hacía falta verificar. Como ese error se excluye a propósito del registro de auditoría (es el gate de seguridad funcionando, no una falla), parecía que el modelo simplemente se negaba a llamar herramientas — costó varias rondas de reescritura de prompt antes de mirar el código y encontrar que el bloqueo era real.
+2. **El mismo gate bloqueaba la propia llamada a `derivar_a_area`.** Corregido el bug anterior, `ventas` ya funcionaba una vez adentro — pero el router nunca lograba derivar ahí: `derivar_a_area` es una herramienta del rol ACTUAL (el router, que sí exige verificación), así que el gate la bloqueaba a ella también, antes de que pudiera llegar al área de destino que no la necesita. Se agregó una excepción puntual: si la herramienta es una derivación y el área de destino elegida por el modelo declara `exige_verificacion=False`, el gate la deja pasar. Sin este segundo fix, el primero no alcanzaba — el modelo podía usar `ventas` una vez adentro, pero nunca conseguía entrar.
+
+El link fijo del formulario de contratación (`variables_tenant.VENTAS_FORMULARIO_URL`, `https://rapilinksas.co/solicitud` — confirmado por el usuario con capturas del formulario real) ya está cargado, reemplazando el placeholder inicial. El mecanismo para referenciar una variable de tenant dentro del prompt de un rol (`{CLAVE}`, sustituido en `piezas_del_system()`) es nuevo y genérico, reutilizable para cualquier dato similar en el futuro.
+
+Verificado en vivo, de punta a punta: cobertura por localidad (`contar_clientes` con filtro `localidad`, ya existía — solo se sumó `ventas` a sus roles permitidos), precio real de un plan (`consultar_planes` → `consultar_plan_detalle`, coincide exacto con la API — el precio no viene en el listado, solo en el detalle por ID, otro hueco de documentación encontrado en el camino), y el flujo completo router → verificación fallida → confirmación → derivación real a `ventas` (no solo anunciada). Dos casos dorados nuevos, con sesión explícitamente sin verificar (el default del set ya viene verificado, y correr estos casos sin ese ajuste no probaba nada). Cargado a producción: `cli/cargar_config.py` protege contra pisar ediciones hechas desde la interfaz — comparó valor por valor contra la base (v47, sin sincronizar desde el 17/08) antes de subir, confirmó que las 14 diferencias reportadas eran todas correcciones de texto de sesiones previas nunca sincronizadas, y no una edición real desde `/agentes`.
+
+### 8.9 La verificación se muda del router a cada especialista (agosto 2026)
+
+El diseño de §8.8 tenía un problema real, señalado por el usuario mirando el simulador: con la verificación centralizada en el router, alguien que escribía *"tengo problemas con mi internet"* (un cliente real reportando una falla) y se equivocaba tipeando la cédula dos veces terminaba con una pregunta de ventas (*"¿ya sos cliente o querés contratar?"*) que no tenía nada que ver con lo que había pedido — porque la recuperación tras un "no encontrado" repetido no sabía distinguir un simple error de tipeo de un prospecto genuino, y ofrecía la misma salida genérica sin importar el tema original.
+
+**El cambio de fondo, no un parche.** El router (`cliente_final`) dejó de verificar identidad: su catálogo quedó reducido a `[derivar_a_area]`, y deriva apenas entiende de qué se trata — sin esperar ninguna verificación. Cada especialista (`facturacion_cliente`, `soporte_tecnico_cliente`) ganó su propia copia de `verificar_identidad_por_cedula`/`confirmar_identidad`, y pide la cédula en su propio contexto ("para revisar tu conexión..." en soporte, distinto de facturación) — así el reintento nunca se mezcla con un tema que la persona nunca mencionó. `ventas` sigue sin exigir verificación por defecto (su interlocutor típico no es cliente todavía), pero ganó las mismas herramientas de forma opcional para el caso explícito que el usuario pidió cubrir: un cliente actual que quiere sumar un servicio nuevo a su cuenta existente.
+
+**`Rol.deriva_verificacion` (nuevo campo), y por qué no alcanzaba con reusar `exige_verificacion=False`.** Tanto el router como `ventas` tienen `exige_verificacion=False`, pero por motivos opuestos — `ventas` porque su interlocutor típicamente no es cliente; el router porque esa responsabilidad ahora es de otro. Con un solo booleano, el router hubiera heredado el texto de prompt de `ventas` ("todavía no es cliente, no busques verificar"), que es literalmente falso para la mayoría de quien le escribe. `deriva_verificacion=True` activa un tercer bloque de texto genérico ("no verificás vos, lo hace el área a la que derivás") — sin que el núcleo tenga que nombrar ningún rol de tenant específico.
+
+**Un segundo bug de código real, no solo de prompt, para que el router pudiera derivar sin estar verificado.** El mismo gate de `_ejecutar_derivacion` (§8.8) que se corrigió para permitir derivar HACIA un área sin verificación seguía bloqueando la llamada cuando el rol ACTUAL (ahora el router) tenía `exige_verificacion=True` — y como el router ya no tiene ninguna herramienta para subir `sesion.nivel`, quedaba en un punto muerto: nunca iba a poder derivar a ningún lado. Se resolvió poniendo `cliente_final.exige_verificacion: false` — coherente con que no le queda ninguna herramienta que gatear.
+
+**La instrucción de reintento (`_ejecutar_verificacion`, agregada en §8.8) se simplificó, no se volvió más compleja.** Ya no presupone que el segundo "no encontrado" significa "capaz quiere contratar" — ahora pide un dato alternativo (otro documento, o el nombre completo) sin cambiar de tema, y solo si eso tampoco resuelve, ofrece escalar a un colaborador humano como salida real, no como primer reflejo. La vía de escape para un prospecto que se autodeclara "todavía no soy cliente" se mantiene, disponible desde cualquier especialista, no solo desde el router.
+
+**Un bug de datos preexistente, encontrado al reescribir los casos dorados, sin relación con este cambio.** `consultar_plan_tv` declaraba `roles_permitidos: [cliente_final]`, pero su único consumidor real siempre fue `soporte_tecnico_cliente` (ver su `puede_consultar`) — `cliente_final` nunca lo tuvo en su propio catálogo. Quedaba sin detectar porque el guarda que lo hubiera encontrado (`test_editor_config.py`, "herramienta que se quedaría sin rol") pasaba por una coincidencia no relacionada: `cliente_final` también tenía las herramientas de verificación como exclusivas, y esas disparaban el mismo rechazo esperado por otro motivo. Al mover la verificación fuera del router, la coincidencia dejó de ocurrir y el bug real salió a la luz. Corregido.
+
+**Un bug real en el corredor de casos dorados, encontrado al escribir el caso de "cliente actual pidiendo otro servicio".** `cli/evaluar.py` mandaba TODOS los mensajes de un caso al mismo rol declarado, sin seguir `sesion.rol_siguiente` entre mensajes — a diferencia de `atender_turno()` en producción, que sí lo hace. Cualquier caso de varios mensajes que esperara una derivación a mitad de conversación le seguía mandando los mensajes siguientes al rol viejo, y fallaba con `HERRAMIENTA_DESCONOCIDA` por un motivo que no tenía nada que ver con lo que decía probar. Corregido con la misma lógica que ya usa producción.
+
+Tres casos dorados existentes asumían el diseño anterior (verificar antes de derivar) y se reescribieron para reflejar el nuevo: ahora afirman que el router deriva de inmediato y que es el especialista quien no entrega datos sin verificar. Verificado en vivo el escenario que motivó el cambio: *"tengo problemas con mi internet"* → deriva a soporte → pide cédula en contexto de soporte → falla dos veces → sigue pidiendo confirmación sin mencionar ventas ni escalar de entrada.
+
+### 8.10 Catálogo de venta curado, separado del catálogo técnico (agosto 2026)
+
+Probando `ventas` en vivo, un prospecto preguntó por "300 megas" y `consultar_planes` (el catálogo técnico de WispHub, 55 entradas) devolvió **tres** resultados distintos con ese número — variantes duplicadas y nombres legacy pensados para facturar clientes existentes, no una lista pensada para vender. Cuál de esos es el plan que de verdad se ofrece hoy es una decisión humana; dejársela al modelo (o hardcodearla en el YAML) repite exactamente el error que CLAUDE.md ya prohíbe para datos de empresa.
+
+**`PlanVenta`/`TenantConfig.planes_venta` (nuevo, `nucleo/config/schema.py`):** lista curada de `{nombre_wisphub, localidades}` — `localidades` vacío significa "disponible en cualquier zona con cobertura"; con entradas, solo se ofrece ahí. Se filtra por la misma `localidad` que `ventas` ya le pregunta al prospecto para chequear cobertura (`contar_clientes`) — deliberadamente no por `zona`/`router` de WispHub, que son catálogos con IDs independientes que la conversación de ventas nunca toca (ver skill `wisphub-api`).
+
+**`consultar_planes_venta` (nueva herramienta, `tipo: interno`):** no llama a ninguna API — lee `planes_venta`, filtra por localidad, listo. El modelo la llama SIEMPRE primero; `consultar_planes` (el catálogo técnico) queda reservado para resolver el ID de un plan ya confirmado por la lista curada, nunca como punto de partida. Con `planes_venta` vacío (estado inicial, real en producción hasta que el usuario cargue su lista real) la herramienta devuelve una lista vacía con una advertencia explícita, y el prompt le prohíbe al modelo caer de vuelta al catálogo ruidoso — verificado en vivo: ante "qué planes hay" sin nada cargado, dice que no tiene la lista para esa zona y ofrece confirmar con un colaborador, en vez de inventar o mostrar las 55 variantes técnicas.
+
+Verificado con datos de ejemplo en memoria (sin tocar el archivo versionado, mientras no llega la lista real del cliente): un plan sin `localidades` aparece en cualquier zona consultada; uno con `localidades` específicas solo aparece ahí. Caso dorado nuevo cubre la degradación seria con la lista vacía; el filtrado por zona con datos reales queda pendiente de un caso dorado hasta que el tenant cargue su catálogo curado real.
+
+---
+
+### 8.9 TR-069 — integrado y funcionando, pero PENDIENTE de habilitación masiva (agosto 2026)
+
+SmartOLT expone `GET /api/onu/get_onu_router_hosts/{sn}`, que devuelve los equipos conectados al router del cliente: nombre (`HostName`), si están conectados ahora (`Active`), y si entraron por WiFi (`802.11`) o por cable (`Ethernet`). Responde en 2-3 segundos, no es el endpoint pesado. Es lo único que deja ver **del lado de adentro de la casa** — hasta ahí el diagnóstico llega a la ONT y después hay que preguntar.
+
+Resuelve exactamente los tres casos de `no_internet` que hoy solo se distinguen preguntando: falla **un aparato** (varios activos, WiFi y cable), falla **el WiFi** (solo los de cable activos), o **no hay nada conectado** (lista vacía con la ONT en línea).
+
+**La herramienta (`consultar_dispositivos_conectados`) está construida y verificada**, con la lista blanca acotada a `HostName`, `Active` e `InterfaceType` — la MAC y la IP de cada aparato del cliente NO llegan al modelo. Se verificó contra un cliente con 11 equipos conectados: el filtro las descarta.
+
+**Por qué queda pendiente:** de 5.329 ONUs, **solo 5 tienen TR-069 habilitado** (medido 19/08/2026), y de esas 5 dos responden con datos, una con lista vacía y **dos fallan** con `tr069_unable_to_process_command`. Habilitar TR-069 de forma masiva es una operación de red que va junto con la integración del CRM, no una decisión del asistente. Hasta entonces, las ramas que dependen de esta herramienta se van a ejercitar en el 0,1% de los clientes.
+
+**Decisión (21/08/2026): el árbol de diagnóstico NO se apoya en TR-069.** Se diseña con lo que SÍ está disponible para todos — WispHub (estado de cuenta, ping) y SmartOLT (estado de ONU, señal, causa de caída, incidentes de red) — y el dato de dispositivos entra como confirmación *opcional* cuando existe. El respaldo cuando falla no es "no hay nadie conectado" (eso sería mentirle a alguien) sino **preguntarle al cliente**, que es como se hacía antes de tener la herramienta.
+
+**Un fallo de TR-069 no es una lista vacía.** Está escrito en la descripción de la herramienta y es la trampa más fácil de este endpoint: tratar "no pude ver" como "no hay nada conectado" le diría a un cliente que no tiene ningún equipo cuando en realidad no se pudo mirar.
+
+Cuando la habilitación masiva esté hecha, lo que falta es solo **volver a apoyarse en ella** en el árbol y agregar sus casos dorados — la herramienta, el filtro de campos y la normalización de la respuesta (`extraer_de` con notación de punto, y diccionarios indexados por número convertidos a lista) ya están construidos y probados.
+
+---
+
+### 8.10 `no_internet` — cerrado en código, con una rama que solo se confirma en una caída real (agosto 2026)
+
+El caso quedó con **once ramas** y cada una sabe dónde termina. Cuatro se resuelven sin humano y sin visita (suspensión por mora → facturación; falla en un solo aparato; solo WiFi; equipo sano en todos los aparatos → reinicio remoto). Tres agendan visita solas (fibra cortada confirmada; sin energía con corriente confirmada y sin recuperarse; ping sin respuesta con la ONU en línea, reinicio hecho y sin MAC). Cuatro terminan en una persona a propósito, porque mandar un técnico no las resolvería.
+
+**El atajo por evidencia** (`escalamiento.evidencia_suficiente`): cuando la red ya dijo la causa —pérdida de señal óptica, o el 1490 fuera de rango— no se le hace contestar al cliente el checklist del manual. El checklist está escrito para una persona que atiende por teléfono y en esas ramas pide datos que no existen: el 21/08/2026 exigía *"¿qué mensaje aparece en el dispositivo?"* a alguien sin ninguna conexión de la cual leer un mensaje. Solo se salta el verificador donde la evidencia viene de la **red**, nunca del relato del cliente — por eso "equipo sin energía" NO está en la lista: esa confirmación la da el cliente.
+
+**El veto** (`escalamiento.no_agendar_si`): una caída que afecta a varios vecinos del mismo puerto se ve, desde la ONU de uno solo, **idéntica a su propia fibra cortada** — misma causa `sin señal optica`, que es justamente la evidencia que agenda sola. Sin el veto, treinta reportes de la misma caída despachan treinta técnicos a treinta casas por una falla que no está en ninguna de ellas. Vive en código, en la ruta que escribe el ticket, y no en el prompt (RNF §7.4): el modelo compone el mensaje, pero no es quien decide la escritura.
+
+**Lo que el cliente ve de un incidente de red**: solo `es_incidente_de_red` y `desde_por_tiempos` — que su caída es general y desde cuándo, que es lo que le explica que no es su equipo. Cuántos vecinos están caídos, qué porcentaje del puerto, en qué zona y en qué caja es panorama interno de la red (mismo criterio que `olt_id`/`board`/`port`, RF-07).
+
+**Verificado en vivo (21/08/2026)** con la ONU de prueba puesta fuera de servicio a propósito: la rama de visita produjo el **ticket 90662** en WispHub, asunto `No Tiene Internet`, con el diagnóstico real en la descripción (ONU Offline, ping 100% de pérdida, sin incidente de red, corriente confirmada, reinicio hecho). El serial llegó solo desde WispHub por la recuperación de sesión, sin sembrarlo.
+
+Tres defectos salieron de esa corrida, ninguno visible en lo que el asistente contesta:
+
+- **El caso quedaba colgado.** Al repreguntar por un dato del checklist se posponía la escalada, y el caso solo volvía si el modelo decidía escalar otra vez por su cuenta. Si en el turno siguiente preguntaba otra cosa, la verificación no corría nunca más: el agente le prometía un técnico al cliente en cada turno y no había un solo ticket detrás. Es la falla con la que se abrió este trabajo. Ahora el agendamiento pospuesto se retoma solo (`estado["agendamiento_pendiente"]`), y con `repreguntado_agendamiento` ya en `True` la segunda vuelta termina sí o sí: o ticket, o persona.
+- **Una causa sin mapear dejaba al agente ciego.** `_aplicar_mapeos` se callaba ante un valor desconocido, confiando en que el dato crudo seguía disponible — falso justo para el rol que diagnostica, cuya lista blanca solo deja pasar `_interpretado`. La herramienta devolvía `{"ONU details": {}}`.
+- **El asunto del ticket era de TV.** `argumentos_fijos` pisa cualquier valor que se le pase, así que una falla de fibra entraba como `Problemas De Tv`. Se separa en `agendar_visita_internet`, que es para lo que `agendamiento_automatico` es un mapa caso→herramienta.
+
+**Lo que sigue sin poder verificarse:** las ramas que dependen de un estado que la cuenta de prueba no puede producir a demanda — señal fuera de rango, y la caída compartida (`no_agendar_si`). Esas están cubiertas por `tests/test_agendamiento_veto.py` sobre el historial ya filtrado, y se confirman en campo cuando ocurran. Tampoco tienen caso dorado, y no solo por el equipo: el corredor de casos dorados llama a `motor.responder`, que **no** incluye el agendamiento — esa ruta vive en el canal.
 
 ---
 

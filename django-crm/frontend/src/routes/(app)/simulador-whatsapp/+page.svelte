@@ -1,0 +1,332 @@
+<script>
+  /**
+   * Simula un remitente de WhatsApp para probar 'cliente_final' (el rol
+   * orientado al cliente, no al colaborador) sin depender de la API real de
+   * WhatsApp Business -- misma idea que cli/panel_pruebas.py, ahora dentro
+   * de BottleCRM en vez de en una herramienta aparte.
+   *
+   * El telefono ES la identidad: cambiarlo simula a otro cliente escribiendo
+   * de cero, y reinicia la conversacion (el motor arranca una sesion nueva
+   * para cada 'identificador_sesion' que no haya visto antes).
+   */
+  import PageHeader from '$lib/v2/components/PageHeader.svelte';
+  import MarcarEjemplo from '$lib/components/manual/MarcarEjemplo.svelte';
+
+  /** @type {{ data: any }} */
+  let { data } = $props();
+  let casos = $state(data.casos ?? []);
+
+  let telefono = $state('3001234567');
+  let mensajes = $state([]);
+  let entrada = $state('');
+  let enviando = $state(false);
+  let verificado = $state(false);
+  let cerrada = $state(false);
+
+  /** La conversacion en curso, para poder preguntar si llego algo nuevo. */
+  let conversacionActual = $state('');
+  /** Un error de red que no vive en la conversacion: se muestra aparte. */
+  let error = $state('');
+
+  function reiniciar() {
+    mensajes = [];
+    verificado = false;
+    cerrada = false;
+    conversacionActual = '';
+    error = '';
+  }
+
+  /**
+   * Trae lo que haya llegado a la conversacion desde afuera de esta pantalla:
+   * la respuesta que un colaborador escribio desde el ticket.
+   *
+   * En WhatsApp de verdad ese mensaje viaja por el canal y aparece solo en el
+   * celular del cliente. Aca el "celular" es esta pantalla, y nadie le avisa
+   * -- habia que recargar, y probando una conversacion a dos manos eso hace
+   * perder el hilo justo cuando se quiere mirar.
+   *
+   * Se preguntan los mensajes enteros y se dibujan los que no se vieron: no
+   * hay orden de llegada que mantener ni estado que sincronizar, y una
+   * consulta que falla se resuelve sola en la siguiente.
+   */
+  async function traerNuevos() {
+    if (!conversacionActual || enviando) return;
+    try {
+      const resp = await fetch(
+        `/api/simulador-whatsapp?conversacion=${encodeURIComponent(conversacionActual)}`
+      );
+      if (!resp.ok) return;
+      const datos = await resp.json();
+      const hilo = datos.mensajes ?? [];
+      if (!hilo.length) return;
+      // Se REEMPLAZA el hilo con lo que hay en la conversacion, en vez de ir
+      // agregando lo que falta. La conversacion es la que manda: llevar una
+      // copia aparte y una lista de "ya visto" obliga a mantener las dos en
+      // fase, y en cuanto un mensaje entra por otro lado --el colaborador
+      // desde el ticket-- dejan de coincidir. Asi no hay nada que sincronizar.
+      mensajes = hilo.map((/** @type {any} */ m) => ({
+        rol: m.rol === 'user' ? 'usuario' : 'asistente',
+        texto: m.texto,
+        conversacionId: conversacionActual,
+        mensajeId: m.id,
+        casoMarcado: m.caso_marcado
+      }));
+      if (datos.cerrada) cerrada = true;
+    } catch {
+      // Silencio a proposito: corre cada pocos segundos.
+    }
+  }
+
+  // Cada 4 segundos mientras haya una conversacion abierta. Es una pantalla
+  // de prueba que se mira mientras se usa, asi que no hace falta nada mas
+  // fino -- y lo mas fino (una conexion abierta) es infraestructura que este
+  // caso no justifica.
+  $effect(() => {
+    if (!conversacionActual) return;
+    const reloj = setInterval(traerNuevos, 4000);
+    return () => clearInterval(reloj);
+  });
+
+  async function enviar() {
+    const texto = entrada.trim();
+    if (!texto || enviando || !telefono.trim()) return;
+
+    mensajes.push({ rol: 'usuario', texto });
+    error = '';
+    entrada = '';
+    enviando = true;
+    // Si la conversacion anterior se habia cerrado, escribir de nuevo abre
+    // una nueva de forma transparente (mismo numero) -- ver cerrar_conversacion.
+    cerrada = false;
+
+    try {
+      const resp = await fetch('/api/simulador-whatsapp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ telefono: telefono.trim(), mensaje: texto })
+      });
+      const datos = await resp.json();
+      if (resp.ok) {
+        conversacionActual = datos.conversacion_id || conversacionActual;
+        // Una respuesta vacia significa que hay una persona atendiendo y el
+        // asistente se callo a proposito (ver api.py). No se dibuja nada:
+        // una burbuja en blanco parece un error y no lo es.
+        if ((datos.respuesta ?? '').trim()) {
+          mensajes.push({
+            rol: 'asistente',
+            texto: datos.respuesta,
+            conversacionId: datos.conversacion_id,
+            mensajeId: datos.mensaje_id,
+            casoMarcado: null
+          });
+        }
+        verificado = !!datos.verificado;
+        cerrada = !!datos.cerrada;
+      } else {
+        error = datos.error || 'El asistente no pudo responder.';
+      }
+    } catch (/** @type {any} */ err) {
+      error = err?.message || 'No se pudo contactar al asistente.';
+    } finally {
+      enviando = false;
+    }
+  }
+
+  /** @param {SubmitEvent} evento */
+  function alEnviar(evento) {
+    evento.preventDefault();
+    enviar();
+  }
+</script>
+
+<PageHeader title="Simulador de WhatsApp">
+  {#snippet sub()}
+    Prueba al agente de atención al cliente (<code>cliente_final</code>) como si fueras un cliente escribiendo por WhatsApp.
+  {/snippet}
+</PageHeader>
+
+<div class="simulador">
+  <div class="fila-telefono">
+    <label for="telefono">Número que simula escribir</label>
+    <input
+      id="telefono"
+      class="v2-input"
+      type="text"
+      bind:value={telefono}
+      placeholder="3001234567"
+    />
+    <button class="v2-btn" type="button" onclick={reiniciar}>Reiniciar conversación</button>
+    {#if mensajes.length > 0}
+      <span class="estado-verificacion" class:ok={verificado}>
+        {verificado ? '✅ Verificado' : '🔒 No verificado'}
+      </span>
+    {/if}
+  </div>
+
+  <div class="chat">
+    <div class="chat-mensajes">
+      {#if mensajes.length === 0}
+        <p class="chat-vacio">Escribí un mensaje como si fueras este cliente para empezar.</p>
+      {/if}
+      {#each mensajes as m}
+        <div class="chat-burbuja chat-{m.rol}">
+          <div>{m.texto}</div>
+          {#if m.rol === 'asistente' && casos.length > 0}
+            <MarcarEjemplo
+              conversacionId={m.conversacionId}
+              mensajeId={m.mensajeId}
+              casoInicial={m.casoMarcado}
+              {casos}
+            />
+          {/if}
+        </div>
+      {/each}
+      {#if enviando}
+        <div class="chat-burbuja chat-asistente chat-escribiendo" aria-label="Escribiendo…">
+          <span class="punto"></span><span class="punto"></span><span class="punto"></span>
+        </div>
+      {/if}
+      {#if cerrada && !enviando}
+        <div class="chat-cerrada">Conversación finalizada — si el cliente vuelve a escribir, se abre una nueva.</div>
+      {/if}
+      <!-- Fuera del hilo a propósito: el hilo se refresca con lo que hay en la
+           conversación, y un error de red no está ahí. Dentro, desaparecería
+           solo a los pocos segundos. -->
+      {#if error}
+        <div class="chat-burbuja chat-error">{error}</div>
+      {/if}
+    </div>
+
+    <form class="chat-form" onsubmit={alEnviar}>
+      <input
+        class="v2-input"
+        type="text"
+        bind:value={entrada}
+        placeholder="Escribí como si fueras el cliente…"
+        disabled={enviando}
+      />
+      <button class="v2-btn v2-btn-primary" type="submit" disabled={enviando}>Enviar</button>
+    </form>
+  </div>
+</div>
+
+<style>
+  .simulador {
+    display: flex;
+    flex-direction: column;
+    max-width: 720px;
+  }
+  .fila-telefono {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding-bottom: 12px;
+    margin-bottom: 12px;
+    border-bottom: 1px solid var(--v2-border, #e5e5e5);
+  }
+  .fila-telefono label {
+    font-size: 13px;
+    color: var(--v2-muted, #888);
+    white-space: nowrap;
+  }
+  .fila-telefono input {
+    max-width: 180px;
+  }
+  .estado-verificacion {
+    margin-left: auto;
+    font-size: 13px;
+    color: #991b1b;
+  }
+  .estado-verificacion.ok {
+    color: #15803d;
+  }
+  .chat {
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 260px);
+  }
+  .chat-mensajes {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .chat-vacio {
+    color: var(--v2-muted, #888);
+    font-size: 14px;
+  }
+  .chat-burbuja {
+    padding: 10px 14px;
+    border-radius: 12px;
+    max-width: 80%;
+    white-space: pre-wrap;
+    font-size: 14px;
+    line-height: 1.4;
+  }
+  .chat-usuario {
+    align-self: flex-end;
+    background: var(--v2-accent, #2563eb);
+    color: white;
+  }
+  .chat-asistente {
+    align-self: flex-start;
+    background: var(--v2-surface-2, #f1f1f1);
+  }
+  .chat-error {
+    align-self: flex-start;
+    background: #fee2e2;
+    color: #991b1b;
+  }
+  .chat-cerrada {
+    align-self: center;
+    font-size: 12px;
+    color: var(--v2-muted, #888);
+    padding: 4px 10px;
+    border-top: 1px dashed var(--v2-border, #e5e5e5);
+    border-bottom: 1px dashed var(--v2-border, #e5e5e5);
+    margin: 4px 0;
+  }
+  .chat-escribiendo {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 13px 16px;
+  }
+  .chat-escribiendo .punto {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: 0.35;
+    animation: chat-parpadeo 1.2s infinite ease-in-out;
+  }
+  .chat-escribiendo .punto:nth-child(2) {
+    animation-delay: 0.2s;
+  }
+  .chat-escribiendo .punto:nth-child(3) {
+    animation-delay: 0.4s;
+  }
+  @keyframes chat-parpadeo {
+    0%,
+    60%,
+    100% {
+      opacity: 0.3;
+      transform: translateY(0);
+    }
+    30% {
+      opacity: 1;
+      transform: translateY(-2px);
+    }
+  }
+  .chat-form {
+    display: flex;
+    gap: 8px;
+    padding-top: 12px;
+    border-top: 1px solid var(--v2-border, #e5e5e5);
+  }
+  .chat-form input {
+    flex: 1;
+  }
+</style>

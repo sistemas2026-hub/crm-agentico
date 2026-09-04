@@ -1,0 +1,384 @@
+# =============================================================================
+#  PRODUCCION  --  el que despliega Dokploy en el VPS
+# =============================================================================
+#  Se mantiene aparte de docker-compose.yml (desarrollo) en vez de
+#  parametrizar uno solo: dos archivos explicitos se auditan de un vistazo,
+#  y un default mal puesto en un archivo unico es lo que conecta la maquina de
+#  alguien contra la base real sin que se note.
+#
+#  DIFERENCIAS CON EL DE DESARROLLO
+#  --------------------------------
+#  - NO existe el servicio 'db'. La base es el Supabase del mismo servidor.
+#    Ademas el compose de desarrollo publica 5432, que en el VPS ya lo ocupa
+#    el pooler del Supabase viejo: levantarlo ahi da 'address already in use'.
+#  - NADIE publica puertos. Dokploy enruta por dominio con su Traefik, que
+#    habla con los contenedores por la red interna. Publicar puertos aqui los
+#    expondria a internet sin pasar por TLS.
+#  - Sin bind mounts del codigo. En produccion manda la imagen construida, no
+#    lo que haya en el disco del servidor.
+#  - Las variables NO salen de archivos .env, que no viajan en el repositorio.
+#    Se declaran aca y Dokploy las inyecta desde la seccion Environment del
+#    servicio. Explicito y auditable: lo que no este listado, no llega.
+#
+#  SERVIDORES DE PRODUCCION, NO DE DESARROLLO
+#  ------------------------------------------
+#  - El backend arranca gunicorn y no 'manage.py runserver' (un solo hilo, y
+#    Django documenta que no se use fuera de desarrollo). Lo decide ENV_TYPE
+#    en docker/backend/entrypoint.sh; gunicorn ya venia en las dependencias.
+#    Los estaticos los sirve whitenoise, que ya estaba en MIDDLEWARE.
+#  - El frontend usa el destino 'prod' de su Dockerfile: compila con
+#    'pnpm build' y sirve con adapter-node, en vez del servidor de Vite.
+# =============================================================================
+
+services:
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build:
+      context: ./django-crm
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    # Con dominio en Dokploy, este servicio necesita las DOS redes. Ver la
+    # nota al pie de este archivo: declarar una sola lo saca de 'default' y
+    # deja de ver a sus companeros del compose.
+    networks: [default, dokploy-network]
+    environment:
+      # --- Django ---
+      SECRET_KEY: ${SECRET_KEY:?definir en Dokploy, no reusar la de dev}
+      # False: con DEBUG=True Django muestra la traza completa -incluidas las
+      # variables de entorno, o sea las credenciales- en cualquier error.
+      DEBUG: "False"
+      ENV_TYPE: prod
+      # El backend le pide al motor que cree el ticket de instalacion cuando
+      # alguien envia el formulario de contratacion (solicitudes/entrega.py).
+      # La credencial de WispHub vive SOLO en el motor -- copiarla aca habria
+      # dejado la misma clave en dos servicios.
+      #
+      # Sin esta variable el motor responde 401 y el ticket no se crea. La
+      # solicitud NO se pierde (queda con el fallo anotado en
+      # 'fallo_integracion'), pero nadie va a instalar nada. Medido el
+      # 27/08/2026 en la prueba punta a punta: es la unica pieza del flujo que
+      # fallaba, y fallaba por esto.
+      #
+      # Opcional a proposito, igual que en 'frontend': sin ella no se manda el
+      # header y un despliegue que todavia no configuro el token no se rompe.
+      MOTOR_SERVICE_TOKEN: ${MOTOR_SERVICE_TOKEN:-}
+      MOTOR_URL: ${MOTOR_URL:-http://motor:5000}
+      MOTOR_TENANT: ${ASISTENTE_TENANT:-rapilink}
+      # Se le agrega 'backend' al dominio publico, y no es opcional: el
+      # frontend llama a Django POR DENTRO de la red, con
+      # PRIVATE_DJANGO_API_URL=http://backend:8000, asi que esas peticiones
+      # llegan con 'Host: backend:8000'. Si no esta en la lista, Django las
+      # rechaza con 400 DisallowedHost -- y el frontend, que solo ve un 400 sin
+      # cuerpo, muestra "correo o contraseña incorrectos". Se depura el login
+      # durante horas por un problema que no tiene que ver con credenciales.
+      # Va aqui y no en la variable de Dokploy porque 'backend' es el nombre
+      # del servicio en ESTE archivo: lo sabe el compose, no quien despliega.
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:?dominio del backend, SIN https://},backend
+      DOMAIN_NAME: ${DOMAIN_NAME:?URL publica del backend, CON https://}
+      # El navegador carga la interfaz desde el dominio del FRONTEND y de ahi
+      # llama al backend: son origenes distintos, asi que sin esto el navegador
+      # bloquea cada peticion. Su valor por defecto es http://localhost:5173
+      # (settings.py), o sea que si no se define, en el servidor no funciona
+      # nada -- y el error de CORS que se ve en consola no menciona la causa.
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?URL del frontend, CON https://}
+      # Para el admin de Django y cualquier formulario: sobre HTTPS exige que
+      # el origen este declarado o rechaza el POST con 403.
+      CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:?ambos dominios, CON https://}
+      # De aqui sale CADA enlace que el sistema manda por correo: el de
+      # inicio de sesion por magic link, el portal de facturas del cliente y
+      # la encuesta. Con el valor por defecto (localhost:5173) el sistema
+      # arranca bien y le manda a los clientes enlaces a su propia maquina,
+      # sin que nada falle visiblemente. settings.py aborta el arranque antes
+      # que permitirlo, y hace bien.
+      FRONTEND_URL: ${FRONTEND_URL:?URL publica del frontend, CON https://}
+      # Traefik es el unico ingreso -este compose no publica ningun puerto- y
+      # reescribe X-Forwarded-Proto, que son las dos condiciones que settings.py
+      # exige para confiar en esa cabecera. Sin esto, Django cree que las
+      # peticiones son HTTP y las cookies marcadas Secure no viajan.
+      TRUST_PROXY_SSL_HEADER: "True"
+      # --- Base: el Supabase de este mismo servidor ---
+      DBHOST: ${DBHOST:?}
+      DBPORT: ${DBPORT:?}
+      DBNAME: ${DBNAME:?}
+      DBUSER: ${DBUSER:?}
+      DBPASSWORD: ${DBPASSWORD:?}
+      # --- Celery ---
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      # El CRM le habla al motor por la red interna del compose: la ingesta de
+      # documentos al corpus (common/tasks.py) y la purga diaria de retencion
+      # (purgar_retencion_asistente). Sin estas dos, esas tareas no fallan --
+      # registran "el asistente no esta configurado" y no hacen nada, que es
+      # peor porque no se nota.
+      ASISTENTE_URL: ${ASISTENTE_URL:-http://motor:5000}
+      ASISTENTE_TENANT: ${ASISTENTE_TENANT:?slug del tenant, el mismo de tenants/<slug>.config.yaml}
+      # --- Correo ---
+      DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-noreply@rapilinksas.co}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?}
+      CORS_ALLOW_ALL: "False"
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: /bin/bash /entrypoint.sh
+    volumes:
+      - ./django-crm/docker/backend/entrypoint.sh:/entrypoint.sh:ro
+      # Adjuntos y archivos subidos. Van al disco porque este despliegue no usa
+      # S3; sin el volumen, cada redespliegue se los lleva.
+      - media:/app/media
+
+  celery-worker:
+    build:
+      context: ./django-crm
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      SECRET_KEY: ${SECRET_KEY:?}
+      DEBUG: "False"
+      # Sin esto corren en modo 'dev' (settings.py usa "dev" por defecto) y no
+      # cargan server_settings: misma imagen, configuracion distinta a la del
+      # backend, y las diferencias aparecen en produccion.
+      ENV_TYPE: prod
+      # De aqui sale CADA enlace que el sistema manda por correo: el de
+      # inicio de sesion por magic link, el portal de facturas del cliente y
+      # la encuesta. Con el valor por defecto (localhost:5173) el sistema
+      # arranca bien y le manda a los clientes enlaces a su propia maquina,
+      # sin que nada falle visiblemente. settings.py aborta el arranque antes
+      # que permitirlo, y hace bien.
+      FRONTEND_URL: ${FRONTEND_URL:?URL publica del frontend, CON https://}
+      # Traefik es el unico ingreso -este compose no publica ningun puerto- y
+      # reescribe X-Forwarded-Proto, que son las dos condiciones que settings.py
+      # exige para confiar en esa cabecera. Sin esto, Django cree que las
+      # peticiones son HTTP y las cookies marcadas Secure no viajan.
+      TRUST_PROXY_SSL_HEADER: "True"
+      DBHOST: ${DBHOST:?}
+      DBPORT: ${DBPORT:?}
+      DBNAME: ${DBNAME:?}
+      DBUSER: ${DBUSER:?}
+      DBPASSWORD: ${DBPASSWORD:?}
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      # El CRM le habla al motor por la red interna del compose: la ingesta de
+      # documentos al corpus (common/tasks.py) y la purga diaria de retencion
+      # (purgar_retencion_asistente). Sin estas dos, esas tareas no fallan --
+      # registran "el asistente no esta configurado" y no hacen nada, que es
+      # peor porque no se nota.
+      ASISTENTE_URL: ${ASISTENTE_URL:-http://motor:5000}
+      ASISTENTE_TENANT: ${ASISTENTE_TENANT:?slug del tenant, el mismo de tenants/<slug>.config.yaml}
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: celery -A crm worker --loglevel=info
+    volumes:
+      - media:/app/media
+
+  celery-beat:
+    build:
+      context: ./django-crm
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      SECRET_KEY: ${SECRET_KEY:?}
+      DEBUG: "False"
+      # Sin esto corren en modo 'dev' (settings.py usa "dev" por defecto) y no
+      # cargan server_settings: misma imagen, configuracion distinta a la del
+      # backend, y las diferencias aparecen en produccion.
+      ENV_TYPE: prod
+      # De aqui sale CADA enlace que el sistema manda por correo: el de
+      # inicio de sesion por magic link, el portal de facturas del cliente y
+      # la encuesta. Con el valor por defecto (localhost:5173) el sistema
+      # arranca bien y le manda a los clientes enlaces a su propia maquina,
+      # sin que nada falle visiblemente. settings.py aborta el arranque antes
+      # que permitirlo, y hace bien.
+      FRONTEND_URL: ${FRONTEND_URL:?URL publica del frontend, CON https://}
+      # Traefik es el unico ingreso -este compose no publica ningun puerto- y
+      # reescribe X-Forwarded-Proto, que son las dos condiciones que settings.py
+      # exige para confiar en esa cabecera. Sin esto, Django cree que las
+      # peticiones son HTTP y las cookies marcadas Secure no viajan.
+      TRUST_PROXY_SSL_HEADER: "True"
+      DBHOST: ${DBHOST:?}
+      DBPORT: ${DBPORT:?}
+      DBNAME: ${DBNAME:?}
+      DBUSER: ${DBUSER:?}
+      DBPASSWORD: ${DBPASSWORD:?}
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      # El CRM le habla al motor por la red interna del compose: la ingesta de
+      # documentos al corpus (common/tasks.py) y la purga diaria de retencion
+      # (purgar_retencion_asistente). Sin estas dos, esas tareas no fallan --
+      # registran "el asistente no esta configurado" y no hacen nada, que es
+      # peor porque no se nota.
+      ASISTENTE_URL: ${ASISTENTE_URL:-http://motor:5000}
+      ASISTENTE_TENANT: ${ASISTENTE_TENANT:?slug del tenant, el mismo de tenants/<slug>.config.yaml}
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: celery -A crm beat --loglevel=info
+    volumes:
+      - media:/app/media
+
+  frontend:
+    build:
+      context: ./django-crm/frontend
+      dockerfile: Dockerfile
+      # Compila con 'pnpm build' y sirve el resultado con adapter-node, en vez
+      # del servidor de desarrollo. Escucha en el puerto 3000.
+      target: prod
+    restart: unless-stopped
+    # Con dominio en Dokploy, este servicio necesita las DOS redes. Ver la
+    # nota al pie de este archivo: declarar una sola lo saca de 'default' y
+    # deja de ver a sus companeros del compose.
+    networks: [default, dokploy-network]
+    environment:
+      # PUBLIC_ lo usa el NAVEGADOR: tiene que ser el dominio publico del
+      # backend, no un nombre de la red interna que el navegador no resuelve.
+      PUBLIC_DJANGO_API_URL: ${PUBLIC_DJANGO_API_URL:?dominio publico del backend}
+      # PRIVATE_ lo usa el codigo que corre DENTRO del contenedor: ahi si vale
+      # el nombre del servicio.
+      PRIVATE_DJANGO_API_URL: http://backend:8000
+      # El motor. Nunca lleva dominio publico -- no tiene autenticacion propia,
+      # asi que la unica forma de llegarle es desde el frontend por la red
+      # interna, y quien pide se autentico antes contra Django.
+      #
+      # Sin estas dos, /agentes y /settings/asistente cargan pero muestran
+      # "Asistente no configurado": el CRM anda y la mitad del producto no, sin
+      # que nada falle visiblemente. Por eso el tenant es obligatorio y el
+      # despliegue se detiene nombrandolo, igual que el resto.
+      PRIVATE_ASISTENTE_URL: http://motor:5000
+      PRIVATE_ASISTENTE_TENANT: ${ASISTENTE_TENANT:?slug del tenant, el mismo de tenants/<slug>.config.yaml}
+      # El header que nucleo/canales/api.py exige cuando 'motor' (mas abajo)
+      # tiene MOTOR_SERVICE_TOKEN puesto. Opcional a proposito -- ':-' y no
+      # ':?': sin la variable, headersMotor() no manda nada y nada se rompe.
+      # NO cargar esto en Dokploy hasta confirmar que 'motor' tambien la
+      # tiene puesta con el MISMO valor -- ver DESPLIEGUE.md.
+      PRIVATE_MOTOR_SERVICE_TOKEN: ${MOTOR_SERVICE_TOKEN:-}
+    depends_on:
+      - backend
+
+  motor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    # Con dominio en Dokploy, este servicio necesita las DOS redes. Ver la
+    # nota al pie de este archivo: declarar una sola lo saca de 'default' y
+    # deja de ver a sus companeros del compose.
+    networks: [default, dokploy-network]
+    environment:
+      # Conexion: mismo host/base que el CRM, pero DBUSER/DBPASSWORD PROPIOS
+      # -- no ${DBUSER}/${DBPASSWORD}, que ahora son de crm_user (Django).
+      # nucleo/persistencia/conexion.py compone la cadena con estas cinco.
+      #
+      # INCIDENTE (18/08/2026): esto compartia ${DBUSER}/${DBPASSWORD} con
+      # 'backend'/'celery-*'. Al cortar el CRM a crm_user (sin acceso al
+      # esquema 'asistente'), el motor quedo sin poder leer ni escribir su
+      # propia base -- en silencio, porque varias escrituras atrapan el
+      # error y solo lo logean, sin tumbar el turno. El cliente seguia
+      # recibiendo respuesta (el historial de la conversacion vive en RAM,
+      # ver mas abajo); lo que se perdio fue todo lo que se intento
+      # persistir en esa ventana: mensajes, tool_calls, conversaciones.
+      #
+      # El motor necesita 'app_backend' (esquema asistente), crm_user
+      # necesita 'public' (esquema del CRM) -- son dos necesidades
+      # distintas y no pueden compartir una sola variable nunca mas.
+      DBHOST: ${DBHOST:?}
+      DBPORT: ${DBPORT:?}
+      DBNAME: ${DBNAME:?}
+      DBUSER: ${MOTOR_DBUSER:?}
+      DBPASSWORD: ${MOTOR_DBPASSWORD:?}
+      WISPHUB_API_KEY: ${WISPHUB_API_KEY:?}
+      WISPHUB_BASE_URL: ${WISPHUB_BASE_URL:-https://api.wisphub.io}
+      WISPHUB_MODO_REAL: ${WISPHUB_MODO_REAL:-true}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?}
+      # Embeddings del corpus (nucleo/recuperacion/embeddings.py). Reemplaza a
+      # Ollama local (agosto 2026): el VPS no tiene recursos de sobra para
+      # correr un modelo ademas de todo lo demas, y esto ya no depende de
+      # que el motor comparta red con ningun otro contenedor para vectorizar.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?}
+      # Ticket del CRM al escalar una conversacion, y la verificacion de si ese
+      # caso sigue abierto (nucleo/seguimiento/escalamiento.py). Sin esto, el
+      # bot escala y NO deja de responder: caso_sigue_abierto() no puede
+      # consultar y su fail-safe mantiene la pausa, pero el caso nunca se creo.
+      BOTTLECRM_API_TOKEN: ${BOTTLECRM_API_TOKEN:?}
+      # Descifra las credenciales por empresa de asistente.tenant_secrets
+      # (WhatsApp y cualquier otro auth_ref). Es la UNICA que se queda en el
+      # entorno, a proposito -- ver nucleo/seguridad/secretos.py.
+      #
+      # Con ':?' y no con un default: sin ella el motor arranca igual pero la
+      # pantalla de credenciales falla al guardar y el canal de WhatsApp no
+      # puede resolver un solo secreto. Es preferible que el despliegue se
+      # niegue a levantar y lo diga, a que levante y no funcione la mitad.
+      #
+      # SI SE PIERDE hay que volver a cargar todos los secretos a mano: no hay
+      # forma de recuperar los valores sin ella, y esa es la propiedad buscada.
+      SECRETOS_CLAVE_MAESTRA: ${SECRETOS_CLAVE_MAESTRA:?}
+      # Segunda capa de auth para /chat, /agentes y el resto de rutas
+      # internas (nucleo/canales/api.py::_exigir_token_de_servicio).
+      # Opcional a proposito -- ':-' y no ':?': sin ella, el motor arranca
+      # igual y no exige nada (permisivo por defecto, para no romper un
+      # despliegue que todavia no la cargo). Si se activa, 'frontend' (mas
+      # arriba) necesita la MISMA variable como PRIVATE_MOTOR_SERVICE_TOKEN,
+      # o sus 30 y pico llamadas empiezan a fallar con 401. Ver DESPLIEGUE.md.
+      MOTOR_SERVICE_TOKEN: ${MOTOR_SERVICE_TOKEN:-}
+    # UN SOLO worker, y no es por memoria: nucleo/canales/api.py guarda el
+    # historial de cada conversacion en '_sesiones', un diccionario en memoria
+    # del proceso. Con varios workers -que son procesos, no hilos- cada uno
+    # tendria su copia, y el segundo mensaje de una persona podria caer en otro
+    # worker que no sabe nada de los anteriores: el asistente "olvidaria" a
+    # mitad de conversacion, de forma intermitente y dificil de reproducir.
+    # Los hilos si comparten memoria, asi que la concurrencia va por ahi.
+    # Cuando el historial viva en asistente.conversations en vez de en RAM,
+    # esto puede subir a varios workers.
+    command: >
+      gunicorn nucleo.canales.api:app
+      --bind 0.0.0.0:5000
+      --workers 1
+      --threads 8
+      --timeout 180
+      --access-logfile -
+      --error-logfile -
+
+volumes:
+  # Archivos subidos por los usuarios. Sin S3, viven en disco.
+  media:
+
+networks:
+  # 'default' es la red que Compose crea para este proyecto y por la que los
+  # servicios se encuentran por nombre: el backend busca 'redis', el frontend
+  # y el backend (la purga de retencion) buscan 'motor'. No hace falta
+  # declararla, pero se nombra arriba para poder nombrar tambien la otra.
+  #
+  # 'dokploy-network' es de Dokploy, compartida con los demas proyectos del
+  # VPS, y es por donde Traefik alcanza a un servicio con dominio. La crea
+  # Dokploy, por eso 'external'.
+  #
+  # POR QUE ESTA ESCRITO ESTO. El motor aparecio un dia SOLO en
+  # dokploy-network, sin 'default', y dejo de resolver 'ollama' (el servicio
+  # que vectorizaba el corpus antes de pasar a la API de OpenAI, agosto 2026):
+  # el RAG se apago y nadie lo vio, porque recuperar() atrapa el error a
+  # proposito --peor es no atender-- asi que siguio contestando sin la
+  # documentacion interna.
+  #
+  # Por que se quedo sin 'default' no se sabe. La explicacion obvia (que
+  # Dokploy le escribe 'networks: [dokploy-network]' al darle dominio, y en
+  # Compose una red explicita reemplaza a 'default' en vez de sumarse) NO se
+  # sostiene: backend tambien tiene dominio y quedo con las dos.
+  #
+  # Nombrarlas aca deja de depender de averiguarlo. Se mantiene aunque
+  # 'ollama' ya no exista: motor sigue necesitando 'default' para que
+  # frontend y backend lo encuentren.
+  #
+  # Los servicios SIN dominio no van en dokploy-network: es compartida con
+  # otros proyectos del VPS, y redis y la base no tienen nada que hacer ahi.
+  default:
+  dokploy-network:
+    external: true

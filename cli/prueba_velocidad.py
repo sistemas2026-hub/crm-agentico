@@ -29,7 +29,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from dotenv import load_dotenv
-load_dotenv(override=True)
+# override=False: el entorno explicito gana, el archivo solo
+# rellena. Ver el comentario largo en cli/cargar_config.py.
+load_dotenv(override=False)
 
 SISTEMA = (
     "Eres analista de operaciones de un ISP. Redacta un informe breve en "

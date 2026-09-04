@@ -1,0 +1,1838 @@
+# -*- coding: utf-8 -*-
+"""
+================================================================================
+ PERSISTENCIA  --  Postgres (Supabase), esquema asistente.*
+================================================================================
+
+Por que existe
+--------------
+Nada se guardaba en ningun lado: nucleo/canales/api.py mantenia sesion e
+historial solo en memoria del proceso, perdidos en cada reinicio. Sin
+persistencia no hay forma de saber "cuando fue el ultimo contacto con este
+lead", que es el prerrequisito de cualquier agente proactivo (seguimiento
+de ventas, recordatorios).
+
+De SQLite a Postgres
+--------------------
+La version anterior escribia en un SQLite local y lo justificaba asi: "las
+credenciales de Supabase en .env no son reales... DATABASE_URL tiene el
+placeholder 'your-tenant-id' sin rellenar". Ese impedimento ya no existe --
+el proyecto tiene su Supabase propio, con el esquema aplicado y el CRM en la
+misma base-- asi que esto pasa a escribir donde siempre debio.
+
+Las tablas de SQLite se habian escrito replicando a proposito las columnas
+de asistente.conversations/messages, asi que la migracion fue de dialecto,
+no de modelo. Dos diferencias reales:
+
+  - El tenant deja de ser texto ('rapilink') y pasa a ser organization_id,
+    un uuid que referencia public.organization -la tabla del CRM-. El slug
+    se resuelve contra asistente.tenant_config.
+  - SQLite tenia UNIQUE(tenant, canal, usuario_externo): una sola
+    conversacion por usuario, para siempre. El esquema de Postgres permite
+    varias y las distingue por 'estado', que es lo que hace falta para
+    cerrar una conversacion y abrir otra despues. Aqui se reusa la
+    conversacion ABIERTA mas reciente, y si no hay, se crea.
+
+POR QUE SE BAJA A app_backend  (no es opcional)
+-----------------------------------------------
+El usuario que conecta (DBUSER, ver nucleo/persistencia/conexion.py) es
+'postgres', y en esta instalacion tiene BYPASSRLS: verificado contra la base,
+rolbypassrls = true. Con ese rol
+las politicas de aislamiento NO se evaluan y un olvido de filtro expondria
+las conversaciones de otro ISP.
+
+Por eso cada operacion abre transaccion, hace 'set local role app_backend'
+-que si esta sujeto a RLS- y fija app.current_tenant. El 'local' de ambos es
+lo que impide que una peticion herede el tenant de otra si se reutiliza la
+conexion.
+
+El orden importa: el slug se resuelve ANTES de bajar de rol, porque leer
+tenant_config ya requiere el tenant fijado y seria circular.
+
+Que NO guarda
+--------------
+Igual que el resto del proyecto: nunca la respuesta cruda de una API de
+negocio (WispHub, BottleCRM...) -- eso lo decide nucleo/seguridad/
+listas_blancas.py antes de que el dato llegue aca. Lo que se guarda es la
+conversacion (lo que el usuario escribio, lo que el asistente respondio),
+igual que ya decidia el PRD para 'messages'.
+================================================================================
+"""
+
+from __future__ import annotations
+
+import json
+from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
+
+import psycopg
+from psycopg.rows import dict_row
+
+from nucleo.persistencia.conexion import dsn
+
+# Cache de slug -> organization_id. El vinculo lo crea cli/cargar_config.py y
+# no cambia en caliente: si cambiara, el proceso se reinicia igual.
+_ORGS: dict[str, str] = {}
+
+
+def _organizacion(cur, tenant: str) -> str:
+    """
+    slug -> organization_id, contra asistente.tenant_config.
+
+    Se ejecuta como el usuario que conecta (con BYPASSRLS), a proposito: es
+    la consulta que AVERIGUA que tenant fijar, asi que no puede depender de
+    que ya este fijado.
+    """
+    if tenant in _ORGS:
+        return _ORGS[tenant]
+    cur.execute("select organization_id from asistente.tenant_config where slug = %s",
+                (tenant,))
+    fila = cur.fetchone()
+    if not fila:
+        raise RuntimeError(
+            f"El tenant '{tenant}' no tiene configuracion cargada, asi que no "
+            f"se sabe a que organizacion pertenece. "
+            f"Cargarla con: py -3.13 cli/cargar_config.py tenants/{tenant}.config.yaml")
+    org = fila[0] if not isinstance(fila, dict) else fila["organization_id"]
+    _ORGS[tenant] = str(org)
+    return _ORGS[tenant]
+
+
+@contextmanager
+def sesion(tenant: str):
+    """
+    Conexion con el tenant fijado y el rol degradado a app_backend.
+
+    Entrega (cursor, organization_id). Commit al salir sin excepcion.
+    """
+    con = psycopg.connect(dsn(), connect_timeout=30, row_factory=dict_row)
+    try:
+        with con.cursor() as cur:
+            org = _organizacion(cur, tenant)         # antes de bajar de rol
+            cur.execute("set local role app_backend")
+            cur.execute("select set_config('app.current_tenant', %s, true)", (org,))
+            yield cur, org
+        con.commit()
+    except BaseException:
+        con.rollback()
+        raise
+    finally:
+        con.close()
+
+
+def estado_de_conversacion_abierta(tenant: str, canal: str,
+                                   usuario_externo: str,
+                                   horas_inactividad: int | None = None) -> dict | None:
+    """
+    Lo que hay que saber de la conversacion ABIERTA de este usuario antes de
+    atenderlo: si ya se escalo a una persona, y a quien se verifico que era.
+
+    Devuelve None si no hay ninguna abierta -- entonces es un contacto nuevo y
+    no hay nada que recordar.
+
+    Existe porque ese estado vivia SOLO en memoria del motor
+    (nucleo/canales/api.py::_sesiones) y se perdia en cada reinicio, con dos
+    consecuencias que el cliente si notaba:
+
+      - Una conversacion escalada volvia a ser atendida por el bot. Se le
+        habia dicho "te paso con un companero" y el bot seguia conversando
+        como si nada. Visto en produccion el 14/08/2026: escalada a las 00:08,
+        contestando de nuevo a las 00:16, 00:25, 00:41...
+      - Habia que pedirle la cedula otra vez. El mismo cliente se verifico
+        tres veces en una tarde.
+      - Una derivacion a un area (facturacion, soporte tecnico...) se
+        perdia igual que la escalada: el reinicio devolvia al cliente al
+        agente general, en la mitad de una conversacion ya derivada.
+
+    'necesita_atencion_humana' decide si la pausa (mas abajo, en
+    atender_turno()) tiene sentido: una conversacion escalada pero agendada
+    sola (nucleo/seguimiento/agendamiento.py) no tiene a ningun humano al
+    que esperar, y pausar el bot ahi lo dejaria mudo para siempre con ese
+    cliente.
+
+    Es la MISMA fila que reusa registrar_mensaje ('abierta' mas reciente), asi
+    que lo que se lee aca es lo que despues se va a escribir.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select id, escalada_a_humano, motivo_escalamiento,
+                      caso_id, id_cliente, nombre_cliente,
+                      rol_efectivo, necesita_atencion_humana, datos_sesion
+               from asistente.conversations
+               where organization_id = %s and canal = %s and usuario_externo = %s
+                 and estado = 'abierta'
+                 and (%s::int is null
+                      or actualizado_en > now() - (%s::int * interval '1 hour'))
+               order by actualizado_en desc limit 1""",
+            (org, canal, usuario_externo, horas_inactividad, horas_inactividad))
+        fila = cur.fetchone()
+        if not fila:
+            return None
+        return {
+            "conversation_id": str(fila["id"]),
+            "escalada": bool(fila["escalada_a_humano"]),
+            # POR QUE se escalo. Mientras la conversacion esta en pausa, cada
+            # mensaje del cliente recibe el texto del tenant, y ese texto
+            # depende del motivo: contestarle "entiendo tu molestia" a quien
+            # pidio un tramite y no se quejo de nada suena a libreto y
+            # desconcierta. Visto el 28/08/2026.
+            "motivo_escalada": fila["motivo_escalamiento"],
+            "necesita_atencion_humana": bool(fila["necesita_atencion_humana"]),
+            "caso_id": str(fila["caso_id"]) if fila["caso_id"] else None,
+            "id_cliente": fila["id_cliente"],
+            "nombre_cliente": fila["nombre_cliente"],
+            "rol_efectivo": fila["rol_efectivo"],
+            # Los identificadores tecnicos capturados al verificar (ej. el
+            # serial de la ONU). Sin esto, tras un reinicio del motor la
+            # conversacion vuelve verificada pero sin con que consultar.
+            "datos_sesion": fila["datos_sesion"] or {},
+        }
+
+
+# El '::int' de las dos consultas de abajo no es decoracion. Sin el, con
+# 'horas_inactividad' en None -- que es su valor por defecto-- Postgres no
+# puede inferir el tipo de un parametro que solo aparece dentro de un
+# 'is null', y la consulta ENTERA falla con "could not determine data type of
+# parameter $4".
+#
+# Se vio el 21/08/2026, y lo que fallaba era lo peor que podia fallar: el
+# unico llamador que no pasa el valor es el turno de una conversacion
+# PAUSADA. O sea que lo que el cliente escribia MIENTRAS ESPERABA a una
+# persona era justo lo que no quedaba guardado, y quien tomaba el caso no lo
+# veia nunca. El error se imprimia y el turno seguia, asi que desde afuera no
+# se notaba nada.
+
+
+def registrar_mensaje(tenant: str, canal: str, usuario_externo: str,
+                      rol_efectivo: str, rol: str, contenido: str,
+                      horas_inactividad: int | None = None) -> tuple[str, str]:
+    """
+    Une una fila de conversacion (crea si no existe) con una fila de
+    mensaje, y actualiza 'actualizado_en' -- es la unica señal que necesita
+    un scheduler para saber "hace cuanto no le escribimos a este usuario".
+
+    Devuelve (conversation_id, message_id): lo primero lo necesita
+    nucleo/seguimiento/escalamiento.py para poder marcar la conversacion
+    despues; lo segundo, marcar_ejemplo (este mismo archivo) para poder
+    marcar UNA respuesta puntual como buen ejemplo -- evita una consulta
+    aparte para algo que esta funcion ya resolvio.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select id from asistente.conversations
+               where organization_id = %s and canal = %s and usuario_externo = %s
+                 and estado = 'abierta'
+                 and (%s::int is null
+                      or actualizado_en > now() - (%s::int * interval '1 hour'))
+               order by actualizado_en desc limit 1""",
+            (org, canal, usuario_externo, horas_inactividad, horas_inactividad))
+        fila = cur.fetchone()
+
+        if fila:
+            conv = fila["id"]
+            cur.execute(
+                """update asistente.conversations
+                   set actualizado_en = now(), rol_efectivo = %s
+                   where id = %s""",
+                (rol_efectivo, conv))
+        else:
+            cur.execute(
+                """insert into asistente.conversations
+                     (organization_id, canal, usuario_externo, rol_efectivo)
+                   values (%s, %s, %s, %s) returning id""",
+                (org, canal, usuario_externo, rol_efectivo))
+            conv = cur.fetchone()["id"]
+
+        cur.execute(
+            """insert into asistente.messages
+                 (organization_id, conversation_id, rol, contenido)
+               values (%s, %s, %s, %s) returning id""",
+            (org, conv, rol, contenido))
+        mensaje = cur.fetchone()["id"]
+
+        return str(conv), str(mensaje)
+
+
+def actualizar_contenido_mensaje(tenant: str, mensaje_id: str, contenido: str) -> None:
+    """
+    Corrige el contenido de un mensaje ya guardado. nucleo/canales/api.py
+    necesita esto porque el aviso de escalada/agendamiento se agrega a
+    'respuesta' DESPUES de llamar a registrar_mensaje() -- el bloque de
+    escalamiento necesita el conversation_id que esa llamada devuelve, asi
+    que persistir y decidir el aviso no pueden pasar en el mismo paso. Sin
+    este ajuste posterior, el HTTP response que recibe el cliente trae el
+    aviso pero lo que se lee despues en /conversaciones no.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """update asistente.messages set contenido = %s
+               where id = %s and organization_id = %s""",
+            (contenido, mensaje_id, org))
+
+
+def ultima_actividad(tenant: str, canal: str | None = None) -> list[dict]:
+    """
+    Una fila por conversacion: usuario_externo + cuando fue la ultima vez
+    que se le escribio o respondio. Insumo del detector de seguimientos y de
+    la bandeja.
+
+    Trae dos datos que no estan en la tabla y que la bandeja necesita para ser
+    legible de un vistazo:
+
+      ultimo_mensaje / ultimo_rol
+          Sin el texto del ultimo turno todas las filas se ven iguales y hay
+          que abrir cada una para saber de que va.
+
+      atendida
+          Si algun humano ya escribio en el hilo, O si alguien la marco a
+          mano como atendida sin responder por el chat (ver
+          marcar_atendida() y supabase/202608131419_atendida_manual.sql -- resuelto
+          por telefono, en persona, etc.). Es la diferencia entre "nadie
+          tomo esto" y "alguien esta en eso", que es lo que decide a cual
+          entrar primero. 'escalada_a_humano' sola no alcanza: una escalada
+          hace dos horas y ya contestada no necesita a nadie.
+
+    'actualizado_en' viene como datetime con zona horaria, no como texto:
+    es timestamptz en la base y quien consume ya no tiene que parsearlo.
+
+    'id_cliente'/'nombre_cliente' (ver supabase/202608131433_identidad_conversacion.sql)
+    son NULL hasta que _ejecutar_confirmacion verifica al cliente -- antes de
+    eso, la unica identidad que hay es 'usuario_externo' (el numero o BSUID
+    crudo del canal).
+    """
+    columnas = """c.id, c.canal, c.usuario_externo, c.rol_efectivo, c.estado,
+                  c.escalada_a_humano, c.necesita_atencion_humana,
+                  c.motivo_escalamiento, c.caso_id, c.etiqueta, c.caso_manual,
+                  c.actualizado_en, c.id_cliente, c.nombre_cliente,
+                  ultimo.contenido as ultimo_mensaje,
+                  ultimo.rol       as ultimo_rol,
+                  (c.atendida_manual or exists (
+                       select 1 from asistente.messages h
+                        where h.conversation_id = c.id
+                          and h.rol = 'humano')) as atendida"""
+    desde = """from asistente.conversations c
+               left join lateral (
+                   select contenido, rol
+                     from asistente.messages
+                    where conversation_id = c.id and contenido is not null
+                    order by creado_en desc
+                    limit 1
+               ) ultimo on true"""
+
+    with sesion(tenant) as (cur, org):
+        if canal:
+            cur.execute(
+                f"""select {columnas} {desde}
+                    where c.organization_id = %s and c.canal = %s
+                    order by c.actualizado_en desc""",
+                (org, canal))
+        else:
+            cur.execute(
+                f"""select {columnas} {desde}
+                    where c.organization_id = %s
+                    order by c.actualizado_en desc""",
+                (org,))
+        return [dict(f) for f in cur.fetchall()]
+
+
+def mensajes_de(tenant: str, conversation_id: str) -> dict:
+    """
+    El encabezado de una conversacion puntual (para el detalle de la
+    bandeja) mas su hilo de mensajes en orden. `conversacion` viene None si
+    el id no existe o no es de este tenant -- el llamador decide si eso es
+    un 404.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select id, canal, usuario_externo, rol_efectivo, estado,
+                      escalada_a_humano, necesita_atencion_humana,
+                      motivo_escalamiento, caso_id, etiqueta,
+                      actualizado_en, conservar, conservar_motivo, conservar_por,
+                      atendida_manual, atendida_por, id_cliente, nombre_cliente,
+                      (atendida_manual or exists (
+                           select 1 from asistente.messages h
+                            where h.conversation_id = conversations.id
+                              and h.rol = 'humano')) as atendida
+               from asistente.conversations
+               where organization_id = %s and id = %s""",
+            (org, conversation_id))
+        conversacion = cur.fetchone()
+        if not conversacion:
+            return {"conversacion": None, "mensajes": []}
+
+        cur.execute(
+            """select m.id, m.rol, m.contenido, m.creado_en, e.caso as caso_marcado,
+                      -- Los adjuntos de ESA burbuja, sin los bytes: la interfaz
+                      -- los pide despues por su id (/media/<id>). Devolverlos
+                      -- aca serian varios MB de base64 en cada carga del hilo.
+                      coalesce((
+                        select json_agg(json_build_object(
+                                 'id', a.id, 'tipo', a.tipo, 'mime', a.mime,
+                                 'bytes', a.bytes, 'descripcion', a.descripcion)
+                               order by a.creado_en)
+                        from asistente.media a
+                        where a.mensaje_id = m.id
+                          and a.organization_id = m.organization_id
+                      ), '[]'::json) as adjuntos
+               from asistente.messages m
+               left join asistente.ejemplos_validados e
+                 on e.mensaje_id = m.id and e.organization_id = m.organization_id
+               where m.organization_id = %s and m.conversation_id = %s
+               order by m.creado_en asc""",
+            (org, conversation_id))
+        return {"conversacion": dict(conversacion), "mensajes": [dict(f) for f in cur.fetchall()]}
+
+
+def tasa_escalamiento(tenant: str, dias: int) -> dict:
+    """
+    Cuantas conversaciones de los ultimos N dias terminaron escaladas, y por
+    que motivo -- agregado en SQL (count()), no traido fila por fila para
+    contarlo en Python (mismo principio que PRD.md 12.5: el codigo calcula).
+
+    Nace de medir si 'escalamiento.intentar_resolver_antes' (la vuelta extra
+    antes de pasar a un humano, agregada el 15/08/2026) esta funcionando en
+    la poblacion real y no solo en las dos conversaciones que se revisaron a
+    mano ese dia. Mismo concepto que la 'tasa de escalada' que reporta
+    Intercom Fin como metrica de primera clase -- ver investigacion de
+    agosto 2026 sobre el rubro.
+
+    Cuenta TODA conversacion en el periodo (escalada o no), asi que el
+    'total' de abajo incluye las que el asistente resolvio solo -- es lo que
+    hace que la proporcion tenga sentido. No filtra por rol: en Rapilink hoy
+    solo hay roles 'cliente_final' con posibilidad de escalar (ver
+    nucleo/canales/api.py::atender_turno, que ya restringe la evaluacion a
+    'orientado_a == cliente_final'), asi que toda fila que llega con
+    'escalada_a_humano' es de un cliente.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select escalada_a_humano, motivo_escalamiento, count(*) as n
+                 from asistente.conversations
+                where organization_id = %s
+                  and creado_en >= now() - (%s || ' days')::interval
+                group by escalada_a_humano, motivo_escalamiento""",
+            (org, dias))
+        filas = [dict(f) for f in cur.fetchall()]
+
+    total = sum(f["n"] for f in filas)
+    escaladas = sum(f["n"] for f in filas if f["escalada_a_humano"])
+    por_motivo: dict[str, int] = {}
+    for f in filas:
+        if f["escalada_a_humano"]:
+            motivo = f["motivo_escalamiento"] or "(sin motivo registrado)"
+            por_motivo[motivo] = por_motivo.get(motivo, 0) + f["n"]
+
+    return {"total": total, "escaladas": escaladas,
+            "tasa": (escaladas / total) if total else 0.0,
+            "por_motivo": por_motivo}
+
+
+def preguntas_sin_respuesta(tenant: str, dias: int,
+                            incluir_revisadas: bool = False) -> list[dict]:
+    """
+    Preguntas que el asistente no pudo responder con el corpus (el RAG no
+    encontro ningun fragmento por encima del umbral de similitud) en los
+    ultimos N dias -- agregado en SQL, no traido fila por fila (mismo
+    principio que PRD.md SS12.5).
+
+    asistente.unanswered_queries se llena sola desde hace meses (ver
+    nucleo/recuperacion/busqueda.py) pero nadie la habia leido -- es la
+    primera funcion que lo hace. Cada fila es, segun su propio comentario en
+    el esquema, "un hueco en la documentacion del cliente".
+
+    Se agrupa por texto EXACTO normalizado (minusculas, sin espacios de
+    mas): agarra duplicados literales, no reformulaciones del mismo tema
+    ("no tengo señal en el tv" vs "se me fue la señal" quedan separadas).
+    Agrupar por significado exigiria clustering semantico -- una version
+    futura, no esta. Ordenado por cuantas veces se repitio la MISMA
+    pregunta: la que mas se repite es la que mas vale la pena escribir en
+    el manual primero.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select lower(trim(pregunta)) as pregunta_normalizada,
+                      count(*) as n,
+                      min(mejor_similitud) as peor_similitud,
+                      max(creado_en) as ultima_vez,
+                      (array_agg(pregunta order by creado_en desc))[1]
+                        as pregunta_ejemplo,
+                      (array_agg(rol_solicitante order by creado_en desc))[1]
+                        as rol_ejemplo,
+                      -- El ultimo conteo de fragmentos que ese rol podia ver.
+                      -- Un 0 dice que el fallo fue de PERMISOS y no de
+                      -- recuperacion: no se arregla calibrando el umbral.
+                      (array_agg(chunks_elegibles order by creado_en desc))[1]
+                        as elegibles
+                 from asistente.unanswered_queries
+                where organization_id = %s
+                  and creado_en >= now() - (%s || ' days')::interval
+                  and (%s or not revisada)
+                group by pregunta_normalizada
+                order by n desc, ultima_vez desc""",
+            (org, dias, incluir_revisadas))
+        return [dict(f) for f in cur.fetchall()]
+
+
+def marcar_escalada(tenant: str, conversation_id: str, motivo: str,
+                    caso_id: str | None, etiqueta: str | None,
+                    necesita_atencion_humana: bool = True) -> None:
+    """
+    Registra que la conversacion paso a un humano: la marca escalada, guarda
+    por que (una de escalamiento.activar_si) y el caso/etiqueta que resulto
+    -- ver nucleo/seguimiento/escalamiento.py, el unico llamador. Filtra
+    tambien por organization_id aunque 'id' ya es unico: mismo estilo
+    defensivo que el resto de este archivo.
+
+    'necesita_atencion_humana' es independiente de 'escalada_a_humano': toda
+    escalada crea ticket y pausa el bot igual, pero no toda escalada exige
+    que alguien del equipo entre ya mismo (ver supabase/202608131420_necesita_atencion_humana.sql).
+    Decide el filtro "Sin atender" del frontend, nada mas.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """update asistente.conversations
+               set escalada_a_humano = true, motivo_escalamiento = %s,
+                   caso_id = %s, etiqueta = %s,
+                   necesita_atencion_humana = %s, actualizado_en = now()
+               where organization_id = %s and id = %s""",
+            (motivo, caso_id, etiqueta, necesita_atencion_humana, org, conversation_id))
+
+
+def guardar_ticket_operativo(tenant: str, conversation_id: str,
+                             ticket: str) -> None:
+    """
+    Deja anotado que ticket abrio esta conversacion en el sistema del ISP.
+
+    Ese numero ya se escribia dentro de la descripcion del caso del CRM, pero
+    como texto suelto: servia para leerlo y para nada mas. Guardado aca se
+    puede responder y cerrar ese ticket desde el codigo cuando la persona
+    responde o el caso termina (ver nucleo/seguimiento/operativo.py).
+
+    Nunca rompe el turno: el ticket YA se creo, y no poder anotarlo no es
+    motivo para tumbar la respuesta al cliente.
+    """
+    if not ticket:
+        return
+    try:
+        with sesion(tenant) as (cur, org):
+            cur.execute(
+                """update asistente.conversations set ticket_operativo = %s
+                   where organization_id = %s and id = %s""",
+                (str(ticket), org, conversation_id))
+    except Exception as e:
+        print(f"[persistencia] no se pudo anotar el ticket operativo "
+              f"{ticket}: {type(e).__name__}: {e}")
+
+
+def devolver_al_asistente(tenant: str, conversation_id: str) -> None:
+    """
+    Saca la conversacion de la pausa: el asistente vuelve a atenderla.
+
+    NO borra el caso ni el ticket -- siguen ahi, y por eso cuando el cliente
+    diga que ya quedo se cierran los tres juntos. Lo unico que cambia es quien
+    contesta el proximo mensaje.
+
+    Lo decide la persona al responder, no el sistema: quien acaba de aplicar
+    un cambio sabe si su parte termino o si todavia le esta preguntando algo
+    al cliente. Adivinarlo desde el codigo es como se termina con dos
+    interlocutores hablando encima.
+    """
+    try:
+        with sesion(tenant) as (cur, org):
+            cur.execute(
+                """update asistente.conversations
+                   set escalada_a_humano = false, necesita_atencion_humana = false,
+                       actualizado_en = now()
+                   where organization_id = %s and id = %s""",
+                (org, conversation_id))
+    except Exception as e:
+        print(f"[persistencia] no se pudo devolver la conversacion al "
+              f"asistente: {type(e).__name__}: {e}")
+
+
+def atendida_por_humano(tenant: str, conversation_id: str) -> bool:
+    """
+    Si alguien del equipo ya le respondio al cliente en esta conversacion.
+
+    Misma definicion que usa la bandeja: la marca explicita, o un mensaje
+    escrito por una persona.
+
+    Decide si un "ok" del cliente puede cerrar el caso. Sin esto, el 28/08/2026
+    un cliente contesto "ok" al aviso del propio asistente --"tu pedido quedo
+    registrado"-- y se cerro todo: la conversacion, el caso y el ticket, con el
+    cambio de clave sin hacer y sin que ninguna persona hubiera escrito nunca.
+    Un "ok" a nadie no confirma nada.
+    """
+    try:
+        with sesion(tenant) as (cur, org):
+            cur.execute(
+                """select (c.atendida_manual or exists (
+                             select 1 from asistente.messages h
+                              where h.conversation_id = c.id
+                                and h.rol = 'humano')) as atendida
+                   from asistente.conversations c
+                   where c.organization_id = %s and c.id = %s""",
+                (org, conversation_id))
+            fila = cur.fetchone()
+            return bool(fila and fila["atendida"])
+    except Exception as e:
+        print(f"[persistencia] no se pudo saber si la atendio una persona: "
+              f"{type(e).__name__}: {e}")
+        # Fail-closed: ante la duda NO se cierra. Un caso abierto de mas lo
+        # cierra alguien; uno cerrado de menos deja al cliente sin el cambio.
+        return False
+
+
+def guardar_verificacion_pendiente(tenant: str, conversation_id: str,
+                                   herramienta: str, pendiente: dict) -> None:
+    """
+    Anota que una accion quedo sin comprobar. Ver
+    supabase/202609021130_verificacion_accion.sql.
+
+    Nunca rompe el turno: la accion YA se ejecuto, y no poder anotarla no es
+    motivo para tumbarle la respuesta al cliente. Lo que se pierde si esto
+    falla es la comprobacion, y queda dicho en el log.
+    """
+    try:
+        with sesion(tenant) as (cur, org):
+            cur.execute(
+                """insert into asistente.verificaciones_accion
+                     (organization_id, conversation_id, herramienta,
+                      espera_segundos, max_intentos, medicion_previa)
+                   values (%s, %s, %s, %s, %s, %s)""",
+                (org, conversation_id, herramienta,
+                 int(pendiente.get("espera_segundos") or 0),
+                 int(pendiente.get("max_intentos") or 1),
+                 json.dumps(pendiente.get("medicion_previa"), ensure_ascii=False)))
+    except Exception as e:
+        print(f"[verificacion] no se pudo anotar la de '{herramienta}': "
+              f"{type(e).__name__}: {e}")
+
+
+def verificacion_pendiente_de(tenant: str, conversation_id: str) -> dict | None:
+    """
+    La verificacion sin resolver de esta conversacion, si la hay.
+
+    Devuelve tambien 'vencida': si ya paso el plazo y por lo tanto medir de
+    nuevo significa algo. El candado de cierre mira la fila entera; quien va a
+    medir mira 'vencida'.
+    """
+    try:
+        with sesion(tenant) as (cur, org):
+            cur.execute(
+                """select id, herramienta, espera_segundos, max_intentos,
+                          intentos, medicion_previa, ejecutada_en,
+                          (now() >= ejecutada_en
+                           + make_interval(secs => espera_segundos)) as vencida
+                     from asistente.verificaciones_accion
+                    where organization_id = %s and conversation_id = %s
+                      and estado = 'VERIFICACION_PENDIENTE'
+                    order by ejecutada_en
+                    limit 1""",
+                (org, conversation_id))
+            fila = cur.fetchone()
+            return dict(fila) if fila else None
+    except Exception as e:
+        print(f"[verificacion] no se pudo leer la pendiente: "
+              f"{type(e).__name__}: {e}")
+        return None
+
+
+def resolver_verificacion(tenant: str, verificacion_id: str, estado: str,
+                          por_que: str, medicion_posterior: dict | None,
+                          intentos: int) -> None:
+    """
+    Guarda el resultado de haber medido. Si el estado sigue siendo pendiente
+    solo sube el contador de intentos y la ultima medicion -- el plazo se
+    cuenta desde la ejecucion, no desde el ultimo intento.
+    """
+    from nucleo.seguimiento import verificacion_accion
+
+    try:
+        with sesion(tenant) as (cur, org):
+            cur.execute(
+                """update asistente.verificaciones_accion
+                      set estado = %s, por_que = %s, medicion_posterior = %s,
+                          intentos = %s,
+                          verificada_en = case when %s then now() else null end
+                    where organization_id = %s and id = %s""",
+                (estado, por_que[:400],
+                 json.dumps(medicion_posterior, ensure_ascii=False),
+                 intentos, estado in verificacion_accion.TERMINALES,
+                 org, verificacion_id))
+    except Exception as e:
+        print(f"[verificacion] no se pudo guardar el resultado: "
+              f"{type(e).__name__}: {e}")
+
+
+def ticket_operativo_de(tenant: str, conversation_id: str) -> str | None:
+    """El ticket del sistema del ISP que abrio esta conversacion, si abrio uno."""
+    try:
+        with sesion(tenant) as (cur, org):
+            cur.execute(
+                """select ticket_operativo from asistente.conversations
+                   where organization_id = %s and id = %s""",
+                (org, conversation_id))
+            fila = cur.fetchone()
+            return fila["ticket_operativo"] if fila else None
+    except Exception as e:
+        print(f"[persistencia] no se pudo leer el ticket operativo: "
+              f"{type(e).__name__}: {e}")
+        return None
+
+
+def marcar_caso(tenant: str, conversation_id: str, caso: str | None) -> None:
+    """
+    Guarda de QUE es esta conversacion (uno de 'manual.casos' del tenant, ver
+    supabase/202608180923_caso_conversacion.sql). Se llama en CADA turno, no solo al
+    escalar: la clasificacion cambia mientras la conversacion se aclara -- un
+    "me quede sin servicio" empieza sin caso, pasa por 'no_internet' y
+    termina en 'sin_senal_tv' cuando el cliente dice que es la television. La
+    ultima gana, que es la que describe de verdad el caso.
+
+    No pisa con NULL: si un turno no trajo clasificacion (el evaluador fallo,
+    o el tenant no declaro casos), se conserva la que ya habia en vez de
+    borrarla. Perder una clasificacion buena por un turno mudo seria peor que
+    no tenerla.
+
+    Nunca lanza: esto es una etiqueta para la bandeja, no parte de la
+    respuesta al cliente -- mismo criterio que registrar_llamada_herramienta.
+    """
+    if not caso:
+        return
+    try:
+        with sesion(tenant) as (cur, org):
+            cur.execute(
+                """update asistente.conversations
+                      set caso_manual = %s, actualizado_en = now()
+                    where organization_id = %s and id = %s""",
+                (caso, org, conversation_id))
+    except Exception as e:
+        print(f"[persistencia] no se pudo guardar el caso de la conversacion "
+              f"{conversation_id}: {type(e).__name__}: {e}")
+
+
+def conversaciones_sin_respuesta(tenant: str, horas: int) -> list[dict]:
+    """
+    Las conversaciones escaladas donde el cliente lleva 'horas' sin escribir.
+
+    Se cuenta desde el ULTIMO mensaje DEL CLIENTE, no desde el ultimo mensaje
+    de la conversacion: si se midiera contra este, cada respuesta que manda el
+    equipo estiraria el plazo, y una conversacion donde solo escribe el equipo
+    no se cerraria nunca -- que es exactamente la que hay que cerrar.
+
+    Una conversacion sin ningun mensaje del cliente (raro, pero posible si se
+    creo desde otra pantalla) cuenta desde que se creo, para que tampoco quede
+    colgada para siempre.
+    """
+    if not horas or horas <= 0:
+        return []
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select c.id, c.caso_id, c.ticket_operativo, c.usuario_externo,
+                      c.nombre_cliente
+               from asistente.conversations c
+               where c.organization_id = %s
+                 and c.escalada_a_humano
+                 and c.estado <> 'cerrada'
+                 -- Solo las que YA atendio alguien del equipo. Una que nadie
+                 -- toco todavia no esta esperando al cliente: esta esperando
+                 -- al equipo, y cerrarla por tiempo enterraria trabajo sin
+                 -- hacer con cara de trabajo terminado. Misma definicion de
+                 -- "atendida" que usa la bandeja, unas lineas mas arriba.
+                 and (c.atendida_manual or exists (
+                        select 1 from asistente.messages h
+                         where h.conversation_id = c.id and h.rol = 'humano'))
+                 and coalesce(
+                       (select max(m.creado_en) from asistente.messages m
+                         where m.conversation_id = c.id and m.rol = 'user'),
+                       c.creado_en) < now() - make_interval(hours => %s)
+               order by c.actualizado_en""",
+            (org, int(horas)))
+        return [dict(f) for f in cur.fetchall()]
+
+
+def cerrar_conversacion(tenant: str, conversation_id: str) -> None:
+    """
+    Marca la conversacion como 'cerrada' -- señal de bandeja, no un reinicio
+    real: no toca la sesion en memoria del canal (historial, nivel de
+    verificacion, ver nucleo/canales/api.py). El proximo mensaje del mismo
+    usuario_externo abre una fila nueva (el 'where estado = 'abierta'' de
+    registrar_mensaje ya no la encuentra), pero el modelo sigue teniendo el
+    contexto completo -- misma logica que un ticket que se cierra y se
+    reabre sin perder el historial.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """update asistente.conversations
+               set estado = 'cerrada', actualizado_en = now()
+               where organization_id = %s and id = %s""",
+            (org, conversation_id))
+
+
+def identificar_cliente(tenant: str, conversation_id: str,
+                        id_cliente: str, nombre: str | None,
+                        datos: dict | None = None) -> None:
+    """
+    Guarda a QUIEN corresponde esta conversacion, resuelto por
+    nucleo.modelo.motor._ejecutar_confirmacion -- no el identificador crudo
+    del canal (eso ya vive en usuario_externo), sino el cliente real.
+
+    Se llama en CADA turno una vez verificada la sesion (nucleo/canales/
+    api.py::atender_turno): es un UPDATE idempotente, no hay costo en
+    repetirlo. Antes de esto, Sesion.id_cliente vivia solo en memoria del
+    proceso del motor y se perdia en cada reinicio -- /conversaciones nunca
+    tenia con que mostrar un nombre, solo el BSUID o telefono crudo.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """update asistente.conversations
+               set id_cliente = %s, nombre_cliente = %s,
+                   datos_sesion = %s
+               where organization_id = %s and id = %s""",
+            (id_cliente, nombre, json.dumps(datos or {}), org, conversation_id))
+
+
+def caso_de_conversacion(tenant: str, conversation_id: str) -> str | None:
+    """
+    El caso del CRM al que se derivo esta conversacion, o None si no se
+    derivo. Lo usa nucleo/canales/api.py para saber contra que caso preguntar
+    si el humano ya termino, y asi poder despausar al asistente.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select caso_id from asistente.conversations
+               where organization_id = %s and id = %s""",
+            (org, conversation_id))
+        fila = cur.fetchone()
+        return str(fila["caso_id"]) if fila and fila["caso_id"] else None
+
+
+def agregar_mensaje_humano(tenant: str, conversation_id: str,
+                           contenido: str, autor: str = "") -> dict | None:
+    """
+    Un agente humano responde directo en el hilo, sin pasar por el modelo --
+    para una conversacion ya escalada (marcar_escalada le puso caso_id), que
+    a partir de ahi la sigue una persona, no el bot. 'rol' se guarda como
+    'assistant' a proposito: es el mismo lado del canal que el cliente ya
+    viene viendo, humano o bot no cambia esa columna, solo quien redacto.
+
+    Devuelve None si la conversacion no existe o no es de este tenant -- el
+    llamador (nucleo/canales/api.py) decide si eso es un 404.
+
+    Si existe, devuelve {'canal', 'usuario_externo', 'ticket_operativo'}: por
+    donde hay que hacerle llegar el mensaje al cliente, y en que ticket del
+    sistema del ISP hay que copiarlo. Guardarlo en la base no se lo entrega a
+    nadie -- una respuesta que se ve en la bandeja pero nunca sale es peor que
+    un error visible, porque el agente cree que ya atendio.
+
+    El ticket viaja aca y no en una consulta aparte porque es la misma fila:
+    pedirla dos veces para leer una columna mas es una ida a la base por cada
+    respuesta que escribe una persona.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select canal, usuario_externo, ticket_operativo
+               from asistente.conversations
+               where organization_id = %s and id = %s""",
+            (org, conversation_id))
+        fila = cur.fetchone()
+        if not fila:
+            return None
+
+        cur.execute(
+            """insert into asistente.messages
+                 (organization_id, conversation_id, rol, contenido)
+               values (%s, %s, 'assistant', %s)""",
+            (org, conversation_id, contenido))
+        # Y queda marcada como atendida por una persona. No es cosmetico:
+        # dos reglas dependen de saberlo -- el cierre por confirmacion del
+        # cliente (que no vale si nadie le contesto todavia) y el barrido por
+        # plazo vencido (que solo cierra lo que alguien ya atendio).
+        #
+        # El mensaje se guarda con rol 'assistant' a proposito, asi que la
+        # marca tiene que ir aparte: sin esto, responder desde el ticket no
+        # dejaba ninguna huella de que hubo una persona atras.
+        cur.execute(
+            """update asistente.conversations
+               set actualizado_en = now(), atendida_manual = true,
+                   atendida_por = coalesce(nullif(%s, ''), atendida_por)
+               where id = %s""",
+            (autor or "", conversation_id))
+        # La fila entera, no dos campos elegidos a mano: agregarle una columna
+        # al select y olvidarse de este return deja al llamador sin el dato y
+        # sin ningun error -- paso el 28/08/2026 con 'ticket_operativo', y la
+        # copia al ticket del ISP no se hacia sin que nada lo dijera.
+        return dict(fila)
+
+
+def agentes_de_colaborador(tenant: str, profile_id: str) -> list[str]:
+    """
+    Que agentes tiene asignados este empleado del CRM (ver
+    supabase/202608132036_agentes_por_colaborador.sql). Lista vacia = ninguno, y quien
+    llama debe tratarlo como "no accede", nunca como "accede a todos":
+    fail-closed, igual que roles_permitidos en el corpus.
+
+    'profile_id' es el perfil del CRM (public.profile), no un cliente final
+    -- las filas de clientes lo tienen en NULL y no aparecen aca.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select rol from asistente.tenant_users
+               where organization_id = %s and profile_id = %s and activo
+               order by rol""",
+            (org, profile_id))
+        return [f["rol"] for f in cur.fetchall()]
+
+
+def asignaciones_de_agentes(tenant: str) -> dict[str, list[str]]:
+    """
+    Todas las asignaciones del tenant: {profile_id: [agente, ...]}.
+
+    Para la pantalla de asignacion, que cruza esto contra la lista de usuarios
+    del CRM (esa la trae el frontend de la API de Django, no de aca: el motor
+    no lee las tablas del CRM).
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select profile_id, rol from asistente.tenant_users
+               where organization_id = %s and profile_id is not null and activo
+               order by profile_id, rol""",
+            (org,))
+        salida: dict[str, list[str]] = {}
+        for f in cur.fetchall():
+            salida.setdefault(str(f["profile_id"]), []).append(f["rol"])
+        return salida
+
+
+def areas_de_colaboradores(tenant: str) -> dict[str, str]:
+    """{profile_id: nombre de area} de todo el tenant."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select profile_id, area from asistente.area_colaborador
+               where organization_id = %s""",
+            (org,))
+        return {str(f["profile_id"]): f["area"] for f in cur.fetchall()}
+
+
+def guardar_area_colaborador(tenant: str, profile_id: str, area: str) -> None:
+    """Un area vacia borra la fila: no todo el mundo pertenece a un area
+    operativa (un administrador del sistema, por ejemplo), y guardar la cadena
+    vacia haria que la pantalla mostrara un area en blanco como si fuera una."""
+    with sesion(tenant) as (cur, org):
+        if not (area or "").strip():
+            cur.execute(
+                """delete from asistente.area_colaborador
+                   where organization_id = %s and profile_id = %s""",
+                (org, profile_id))
+            return
+        cur.execute(
+            """insert into asistente.area_colaborador
+                   (organization_id, profile_id, area)
+               values (%s, %s, %s)
+               on conflict (organization_id, profile_id) do update
+                   set area = excluded.area, actualizado_en = now()""",
+            (org, profile_id, area.strip()))
+
+
+def identidades_externas(tenant: str, sistema: str) -> dict[str, dict]:
+    """
+    Quien es cada colaborador dentro de un sistema externo:
+    {profile_id: {"identificador": ..., "nombre_visible": ...}}.
+
+    Se devuelve el nombre junto al identificador porque una pantalla que solo
+    tiene el id no puede mostrar nada util, y volver a preguntarle a la API
+    externa seria una llamada por persona.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select profile_id, identificador, nombre_visible
+               from asistente.identidades_externas
+               where organization_id = %s and sistema = %s""",
+            (org, sistema))
+        return {str(f["profile_id"]): {"identificador": f["identificador"],
+                                       "nombre_visible": f["nombre_visible"] or ""}
+                for f in cur.fetchall()}
+
+
+def guardar_identidad_externa(tenant: str, profile_id: str, sistema: str,
+                              identificador: str, nombre_visible: str = "") -> None:
+    """
+    Deja a este colaborador con ESTA identidad en ese sistema. Un identificador
+    vacio la borra: es como se dice "esta persona ya no tiene cuenta alla", y
+    sin eso la unica forma de deshacer una asignacion equivocada seria por SQL.
+    """
+    with sesion(tenant) as (cur, org):
+        if not (identificador or "").strip():
+            cur.execute(
+                """delete from asistente.identidades_externas
+                   where organization_id = %s and profile_id = %s and sistema = %s""",
+                (org, profile_id, sistema))
+            return
+        cur.execute(
+            """insert into asistente.identidades_externas
+                   (organization_id, profile_id, sistema, identificador, nombre_visible)
+               values (%s, %s, %s, %s, %s)
+               on conflict (organization_id, profile_id, sistema) do update
+                   set identificador = excluded.identificador,
+                       nombre_visible = excluded.nombre_visible,
+                       actualizado_en = now()""",
+            (org, profile_id, sistema, identificador.strip(), (nombre_visible or "").strip()))
+
+
+def asignar_agentes(tenant: str, profile_id: str, roles: list[str]) -> list[str]:
+    """
+    Deja a este colaborador con EXACTAMENTE los agentes de 'roles'.
+
+    Borra y reinserta en una sola transaccion en vez de calcular el delta: la
+    pantalla manda el estado completo de los checkboxes, asi que el delta seria
+    reconstruir lo que el llamador ya sabe. Y borrar de verdad (no 'activo =
+    false') mantiene la tabla legible -- una asignacion quitada no es historia
+    que haga falta conservar, a diferencia de una conversacion.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """delete from asistente.tenant_users
+               where organization_id = %s and profile_id = %s""",
+            (org, profile_id))
+        for rol in roles:
+            cur.execute(
+                """insert into asistente.tenant_users
+                     (organization_id, profile_id, rol)
+                   values (%s, %s, %s)""",
+                (org, profile_id, rol))
+        return list(roles)
+
+
+def dar_de_baja(tenant: str, usuario_externo: str, canal: str = "whatsapp",
+                motivo: str | None = None) -> None:
+    """Registra que este numero no quiere mensajes proactivos. Idempotente:
+    pedir baja dos veces no es un error."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """insert into asistente.canal_bajas
+                 (organization_id, canal, usuario_externo, motivo)
+               values (%s,%s,%s,%s)
+               on conflict (organization_id, canal, usuario_externo)
+                 do update set creado_en = now(), motivo = excluded.motivo""",
+            (org, canal, usuario_externo, motivo))
+
+
+def dar_de_alta(tenant: str, usuario_externo: str, canal: str = "whatsapp") -> bool:
+    """Revierte la baja. Devuelve si habia una."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """delete from asistente.canal_bajas
+               where organization_id = %s and canal = %s and usuario_externo = %s""",
+            (org, canal, usuario_externo))
+        return cur.rowcount > 0
+
+
+def esta_de_baja(tenant: str, usuario_externo: str, canal: str = "whatsapp") -> bool:
+    """Si este numero pidio no recibir mensajes proactivos.
+
+    Se consulta ANTES de cualquier envio que inicie el sistema. Nunca antes de
+    responderle a alguien que escribio: la baja bloquea la interrupcion, no la
+    atencion -- ver supabase/202608121843_bajas_canal.sql."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select 1 from asistente.canal_bajas
+               where organization_id = %s and canal = %s and usuario_externo = %s""",
+            (org, canal, usuario_externo))
+        return cur.fetchone() is not None
+
+
+def leer_cache(tenant: str, herramienta: str, clave: str,
+               vigencia_dias: int | None) -> dict | list | None:
+    """Respuesta cacheada de una herramienta 'http' con cache=true (ver
+    nucleo/config/schema.py:Herramienta y nucleo/modelo/motor.py), o None si
+    no hay entrada o vencio. 'vigencia_dias' None = no vence nunca."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select respuesta, actualizado_en from asistente.herramientas_cache
+               where organization_id = %s and herramienta = %s and clave = %s""",
+            (org, herramienta, clave))
+        fila = cur.fetchone()
+        if not fila:
+            return None
+        if vigencia_dias is not None:
+            vencio = fila["actualizado_en"] < datetime.now(timezone.utc) - timedelta(days=vigencia_dias)
+            if vencio:
+                return None
+        return fila["respuesta"]
+
+
+def guardar_cache(tenant: str, herramienta: str, clave: str, respuesta) -> None:
+    """Guarda (o refresca) una entrada de cache. Nunca rompe el turno: un
+    fallo aca no puede tumbar la respuesta que ya se le va a dar al
+    cliente -- mismo criterio que registrar_llamada_herramienta."""
+    try:
+        with sesion(tenant) as (cur, org):
+            cur.execute(
+                """insert into asistente.herramientas_cache
+                     (organization_id, herramienta, clave, respuesta, actualizado_en)
+                   values (%s, %s, %s, %s, now())
+                   on conflict (organization_id, herramienta, clave)
+                   do update set respuesta = excluded.respuesta, actualizado_en = now()""",
+                (org, herramienta, clave, json.dumps(respuesta, ensure_ascii=False)))
+    except Exception as e:
+        print(f"[persistencia] no se pudo guardar la cache de '{herramienta}': {e}")
+
+
+def guardar_media(tenant: str, conversation_id: str, media_id: str, tipo: str,
+                  contenido: bytes, mime: str | None = None,
+                  descripcion: str | None = None,
+                  mensaje_id: str | None = None) -> str | None:
+    """
+    Una foto o audio del cliente, ya comprimido (ver nucleo/canales/media.py).
+
+    Devuelve el id de la fila, o None si ese 'media_id' ya estaba guardado --
+    un reintento del webhook no duplica el archivo. Ver
+    supabase/202608121842_multimedia.sql para por que vive en Postgres y no en un almacen
+    de objetos.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """insert into asistente.media
+                 (organization_id, conversation_id, mensaje_id, media_id, tipo,
+                  mime, contenido, bytes, descripcion)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+               on conflict (organization_id, media_id) do nothing
+               returning id""",
+            (org, conversation_id, mensaje_id, media_id, tipo, mime,
+             contenido, len(contenido), descripcion))
+        fila = cur.fetchone()
+        return str(fila["id"]) if fila else None
+
+
+def media_de(tenant: str, conversation_id: str) -> list[dict]:
+    """
+    Los adjuntos de una conversacion, SIN los bytes.
+
+    El contenido se pide aparte (media_bytes) porque una lista de diez fotos
+    en la respuesta de la bandeja serian varios MB de JSON en base64 que nadie
+    pidio: la interfaz muestra las miniaturas por su id.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select id, media_id, tipo, mime, bytes, descripcion, mensaje_id,
+                      creado_en
+               from asistente.media
+               where organization_id = %s and conversation_id = %s
+               order by creado_en""",
+            (org, conversation_id))
+        return [dict(f) for f in cur.fetchall()]
+
+
+def conversacion_de_caso(tenant: str, caso_id: str) -> dict | None:
+    """
+    De donde salio un caso del CRM: por que canal entro, con que etiqueta y
+    por que se paso a una persona.
+
+    El CRM no guarda nada de esto -- para el, un caso escalado es un caso mas,
+    sin origen. Quien lo abre ve una conversacion transcrita y no puede saber
+    si entro por el canal de mensajeria o por la API, ni cual fue el motivo
+    que disparo la escalada. Aca si esta, porque es la misma fila que se marco
+    al escalar (ver marcar_escalada).
+
+    Devuelve None cuando el caso no lo creo el asistente: un ticket cargado a
+    mano no tiene conversacion detras, y eso no es un error.
+
+    SI devuelve 'id_cliente' y el serial del equipo. Este comentario decia lo
+    contrario -- que eran identificadores tecnicos y que una pantalla no los
+    necesitaba -- y era cierto mientras la pantalla solo mostraba el caso.
+    Dejo de serlo cuando el ticket tiene que ofrecerle al colaborador un
+    enlace directo al cliente en los sistemas externos.
+    Y son JUSTO estos los que hay que usar, no el nombre ni la cedula: armar
+    un enlace a partir del nombre abre el perfil de cualquier homonimo. El
+    identificador es lo unico que no se parece a otro.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select id, canal, etiqueta, motivo_escalamiento, nombre_cliente,
+                      escalada_a_humano, necesita_atencion_humana, creado_en,
+                      id_cliente, datos_sesion
+               from asistente.conversations
+               where organization_id = %s and caso_id = %s
+               limit 1""",
+            (org, caso_id))
+        fila = cur.fetchone()
+        return dict(fila) if fila else None
+
+
+def media_bytes(tenant: str, media_uuid: str) -> tuple[bytes, str] | None:
+    """(contenido, mime) de un adjunto, para servirlo. None si no existe o no
+    es de este tenant -- el filtro por organizacion lo hace la politica de
+    aislamiento, no un if."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select contenido, mime from asistente.media
+               where organization_id = %s and id = %s""",
+            (org, media_uuid))
+        fila = cur.fetchone()
+        if not fila:
+            return None
+        return bytes(fila["contenido"]), fila["mime"] or "application/octet-stream"
+
+
+def media_bytes_por_media_id(tenant: str, media_id: str) -> tuple[bytes, str] | None:
+    """
+    Igual que media_bytes(), pero busca por la columna 'media_id' (texto, la
+    unica que unique(organization_id, media_id) garantiza), no por 'id' (la
+    clave primaria, generada por Postgres con gen_random_uuid()).
+
+    Existe porque son dos identificadores DISTINTOS con la misma forma de
+    UUID -- 'id' no se conoce hasta despues del INSERT, y un archivo que el
+    motor genera (nucleo/herramientas/informes.py) necesita poder referenciar
+    su propio identificador ANTES de que la fila exista (se genera durante
+    motor.responder(), se inserta recien en nucleo/canales/api.py, una vez
+    resuelto conversation_id -- ver el docstring de responder()). Para eso el
+    UUID lo elige el codigo, no Postgres, y viaja en 'media_id'.
+
+    Para una foto recibida de WhatsApp, en cambio, 'media_id' es el id de
+    Meta y el que arma la URL de descarga sigue siendo 'id' (ver
+    media_bytes() y GET /media/<id_media>) -- no se toca ese camino.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select contenido, mime from asistente.media
+               where organization_id = %s and media_id = %s""",
+            (org, media_id))
+        fila = cur.fetchone()
+        if not fila:
+            return None
+        return bytes(fila["contenido"]), fila["mime"] or "application/octet-stream"
+
+
+def purgar_media(tenant: str, dias: int) -> int:
+    """
+    Borra los adjuntos mas viejos que 'dias'. Devuelve cuantos.
+
+    Existe porque la retencion de multimedia es MAS CORTA que la de las
+    conversaciones a proposito (ver supabase/202608121842_multimedia.sql): el texto es
+    barato y util para depurar, una foto pesa y puede mostrar la casa, la
+    cedula o una cara. Se llama desde una tarea programada, no desde el turno.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """delete from asistente.media
+               where organization_id = %s
+                 and creado_en < now() - make_interval(days => %s)""",
+            (org, dias))
+        return cur.rowcount
+
+
+def marcar_conservar(tenant: str, conversation_id: str, conservar: bool,
+                     motivo: str | None = None,
+                     por: str | None = None) -> bool:
+    """
+    Saca (o vuelve a meter) una conversacion en la purga por retencion.
+
+    Distinto de marcar un ejemplo: eso dice "esta respuesta fue buena" y
+    alimenta el manual; esto dice "no la borres todavia" y no aparece en
+    ningun lado mas. Ver supabase/202608121844_conservar_conversacion.sql.
+
+    Devuelve False si la conversacion no existe o no es de este tenant.
+
+    Al desmarcar se limpian motivo y autor: dejarlos colgados haria creer que
+    la conversacion sigue protegida cuando ya no lo esta.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """update asistente.conversations
+               set conservar = %s,
+                   conservar_motivo = case when %s then %s else null end,
+                   conservar_por    = case when %s then %s else null end
+               where organization_id = %s and id = %s""",
+            (conservar, conservar, motivo, conservar, por, org, conversation_id))
+        return cur.rowcount > 0
+
+
+def registrar_estado_escalada(tenant: str, conversation_id: str, estado: str,
+                             detalle: str, necesita_atencion: bool = False) -> None:
+    """
+    Deja escrito como termino el traspaso, y --si hace falta-- marca que la
+    conversacion necesita a una persona.
+
+    'necesita_atencion' se usa cuando el evaluador fallo (NO_DETERMINADO): no
+    se sabe si correspondia escalar, asi que NO se toca 'escalada_a_humano'
+    --eso pausaria al bot y afirmaria un traspaso que no ocurrio-- pero la
+    conversacion queda marcada para que alguien la mire. Es el registro real
+    mas barato que existe: una escritura, sin CRM ni sistema externo de por
+    medio, y la bandeja la muestra igual.
+
+    Nunca rompe el turno: la respuesta al cliente ya se decidio, y no poder
+    anotar esto no es motivo para tumbarla.
+    """
+    try:
+        with sesion(tenant) as (cur, org):
+            if necesita_atencion:
+                cur.execute(
+                    """update asistente.conversations
+                       set estado_escalada = %s, escalada_detalle = %s,
+                           necesita_atencion_humana = true, actualizado_en = now()
+                       where organization_id = %s and id = %s""",
+                    (estado, detalle[:400], org, conversation_id))
+            else:
+                cur.execute(
+                    """update asistente.conversations
+                       set estado_escalada = %s, escalada_detalle = %s
+                       where organization_id = %s and id = %s""",
+                    (estado, detalle[:400], org, conversation_id))
+    except Exception as e:
+        print(f"[escalamiento] no se pudo anotar el estado '{estado}': "
+              f"{type(e).__name__}: {e}")
+
+
+def marcar_atendida(tenant: str, conversation_id: str, por: str | None) -> bool:
+    """
+    Marca una conversacion escalada como atendida SIN pasar por el chat --
+    el colaborador la resolvio por telefono, en persona, o por otro canal.
+    No es lo mismo que responder de verdad (eso ya marca 'atendida' solo,
+    via el exists de ultima_actividad()): esto es el camino manual para
+    cuando responder por el chat no corresponde. Ver
+    supabase/202608131419_atendida_manual.sql.
+
+    Solo prende la marca -- no hay 'desmarcar' a proposito: si alguien la
+    marco por error, la forma de corregirlo es responder de verdad (que ya
+    la deja atendida por el otro camino) o escalar de nuevo, no un boton que
+    vuelva a poner "sin atender" un caso que ya se resolvio.
+
+    Devuelve False si la conversacion no existe o no es de este tenant.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """update asistente.conversations
+               set atendida_manual = true, atendida_por = %s
+               where organization_id = %s and id = %s""",
+            (por, org, conversation_id))
+        return cur.rowcount > 0
+
+
+def borrar_conversacion(tenant: str, conversation_id: str) -> dict | None:
+    """
+    SOLO PARA PRUEBAS: borra una conversacion de un tiro -- mensajes,
+    llamadas a herramientas y adjuntos se van en cascada (on delete
+    cascade, igual que purgar_conversaciones). A diferencia de la purga
+    automatica, esto NO respeta 'conservar' ni ejemplos marcados: es una
+    accion manual y deliberada (el boton de "reiniciar" del entrenamiento
+    por WhatsApp real, para reescribirle al bot sin arrastrar el contexto
+    de la prueba anterior -- sacar cuando termine esa etapa).
+
+    Devuelve {'usuario_externo', 'canal'} de lo borrado (para que el
+    llamador limpie tambien el estado en memoria del proceso, ver
+    nucleo/canales/api.py:_sesiones), o None si no existia.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """delete from asistente.conversations
+               where organization_id = %s and id = %s
+               returning usuario_externo, canal""",
+            (org, conversation_id))
+        fila = cur.fetchone()
+        return dict(fila) if fila else None
+
+
+def purgar_conversaciones(tenant: str, dias: int) -> int:
+    """
+    Borra las conversaciones mas viejas que 'dias'. Devuelve cuantas.
+
+    Los mensajes, las llamadas a herramientas y los adjuntos se van en cascada
+    con ellas -- estan declarados 'on delete cascade'.
+
+    DOS EXCEPCIONES, por dos razones distintas:
+
+    1. 'conservar' -- alguien dijo explicitamente "no borres esto todavia": un
+       reclamo, un incidente, algo que puede terminar en disputa. Ver
+       supabase/202608121844_conservar_conversacion.sql.
+
+    2. Tener alguna respuesta marcada como ejemplo valido. Esas alimentan el
+       manual de procedimientos (supabase/202608121018_ejemplos_validados.sql) y cuelgan
+       en cascada, asi que sin la excepcion la purga nocturna destruiria en
+       silencio el material que alguien marco a mano.
+
+    No son lo mismo y por eso son dos condiciones: un ejemplo dice "esta
+    respuesta fue buena", conservar dice "no la borres". Una conversacion
+    puede necesitar lo segundo siendo justo lo que NO hay que imitar.
+
+    Se limpia el evento de webhook por separado (no cuelga de la conversacion)
+    y con un plazo mucho mas corto: los reintentos de la plataforma ocurren en
+    minutos, guardar identificadores un ano no sirve para nada.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """delete from asistente.conversations c
+               where c.organization_id = %s
+                 and c.actualizado_en < now() - make_interval(days => %s)
+                 and not c.conservar
+                 and not exists (
+                   select 1 from asistente.ejemplos_validados e
+                   where e.conversation_id = c.id)""",
+            (org, dias))
+        borradas = cur.rowcount
+
+        # Los identificadores de webhook no cuelgan de ninguna conversacion:
+        # se limpian aparte, a 7 dias, que es margen de sobra sobre los
+        # reintentos de la plataforma.
+        cur.execute(
+            """delete from asistente.webhook_eventos
+               where organization_id = %s
+                 and visto_en < now() - interval '7 days'""",
+            (org,))
+        return borradas
+
+
+def evento_ya_visto(tenant: str, wamid: str, canal: str = "whatsapp") -> bool:
+    """
+    True si este webhook ya se proceso. False la primera vez -- y en esa misma
+    llamada lo deja registrado.
+
+    La deteccion y el registro van en UNA sentencia ('on conflict do nothing')
+    a proposito: consultar primero y escribir despues deja una ventana en la
+    que dos reintentos simultaneos leen "no visto" los dos y contestan los dos.
+    Con el insert atomico, solo uno gana la clave primaria.
+
+    Ver supabase/202608121841_webhook_eventos.sql para por que esto vive en la base y no
+    en memoria del proceso.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """insert into asistente.webhook_eventos (organization_id, wamid, canal)
+               values (%s, %s, %s)
+               on conflict (organization_id, wamid) do nothing""",
+            (org, wamid, canal))
+        return cur.rowcount == 0
+
+
+def registrar_llamada_herramienta(tenant: str, conversation_id: str, rol: str,
+                                  llamada: dict, profile_id: str | None = None) -> None:
+    """
+    Una fila de asistente.tool_calls por herramienta que el agente invoco
+    este turno -- ver nucleo/modelo/motor.py:responder(), que arma 'llamada'
+    (ya con los parametros enmascarados, nunca el dato crudo del cliente).
+    Es la base de "ver proceso" en /conversaciones: que hizo el agente, en
+    que orden, si fallo.
+
+    'profile_id' es quien ejecuto -- el perfil del CRM, cuando el turno vino
+    de la app web con profile_id (ver POST /chat). None en canales de
+    cliente final (WhatsApp): ahi no hay un colaborador que identificar.
+
+    Nunca rompe el turno: mismo criterio que registrar_mensaje. Perder una
+    fila de auditoria no puede tumbar la atencion al cliente.
+    """
+    try:
+        with sesion(tenant) as (cur, org):
+            cur.execute(
+                """insert into asistente.tool_calls
+                     (organization_id, conversation_id, herramienta, parametros,
+                      rol_solicitante, exito, n_registros, codigo_error,
+                      duracion_ms, es_escritura, profile_id)
+                   values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                (org, conversation_id, llamada["herramienta"],
+                 json.dumps(llamada["parametros"], ensure_ascii=False),
+                 rol, llamada["exito"], llamada["n_registros"],
+                 llamada["codigo_error"], llamada["duracion_ms"],
+                 llamada["es_escritura"], profile_id))
+    except Exception as e:
+        print(f"[persistencia] no se pudo guardar la llamada a herramienta: {e}")
+
+
+def herramientas_de(tenant: str, conversation_id: str) -> list[dict]:
+    """
+    El registro de herramientas que uso el agente en una conversacion, en
+    orden -- lo que muestra el panel "Ver proceso" en el detalle de
+    /conversaciones.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select herramienta, parametros, exito, n_registros, codigo_error,
+                      duracion_ms, es_escritura, creado_en
+               from asistente.tool_calls
+               where organization_id = %s and conversation_id = %s
+               order by creado_en asc""",
+            (org, conversation_id))
+        return [dict(f) for f in cur.fetchall()]
+
+
+def marcar_ejemplo(tenant: str, conversation_id: str, mensaje_id: str,
+                   caso: str, marcado_por: str | None) -> None:
+    """
+    Marca una respuesta del agente como buen ejemplo del caso/proceso
+    indicado -- base del manual de procedimientos (ver /manual). 'caso' ya
+    llega validado contra tenant_config.manual.casos (nucleo/canales/api.py,
+    el unico llamador): esta funcion no vuelve a chequear la lista.
+
+    Upsert por 'mensaje_id' (unique en la tabla): volver a marcar la misma
+    burbuja actualiza el caso en vez de duplicar fila -- una burbuja
+    solo pertenece a un caso a la vez.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """insert into asistente.ejemplos_validados
+                 (organization_id, conversation_id, mensaje_id, caso, marcado_por)
+               values (%s, %s, %s, %s, %s)
+               on conflict (mensaje_id) do update
+                 set caso = excluded.caso, marcado_por = excluded.marcado_por,
+                     creado_en = now()""",
+            (org, conversation_id, mensaje_id, caso, marcado_por))
+
+
+def desmarcar_ejemplo(tenant: str, mensaje_id: str) -> None:
+    """Deshace un marcado -- ej. si se eligio el caso equivocado por error."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """delete from asistente.ejemplos_validados
+               where organization_id = %s and mensaje_id = %s""",
+            (org, mensaje_id))
+
+
+def ejemplos_por_caso(tenant: str, caso: str | None = None) -> list[dict]:
+    """
+    Los ejemplos marcados, con el mensaje del cliente que los disparo (el
+    'user' inmediato anterior en la misma conversacion) -- lo que necesita
+    /manual para mostrar pregunta y respuesta juntas, agrupadas por caso.
+
+    'caso=None' trae todos los casos juntos (el frontend los agrupa); pasar
+    un caso puntual filtra en la consulta en vez de traer de mas.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select e.id, e.caso, e.marcado_por, e.creado_en,
+                      e.conversation_id, e.mensaje_id,
+                      m.contenido as respuesta,
+                      (select contenido from asistente.messages mu
+                        where mu.conversation_id = m.conversation_id
+                          and mu.rol = 'user' and mu.creado_en <= m.creado_en
+                        order by mu.creado_en desc limit 1) as pregunta
+               from asistente.ejemplos_validados e
+               join asistente.messages m on m.id = e.mensaje_id
+               where e.organization_id = %s
+                 and (%s::text is null or e.caso = %s)
+               order by e.caso, e.creado_en desc""",
+            (org, caso, caso))
+        return [dict(f) for f in cur.fetchall()]
+
+
+def documentos_de(tenant: str) -> list[dict]:
+    """
+    Los documentos del corpus de este tenant -- para la pantalla que muestra
+    que hay publicado (distinto de /manual/ejemplos, que muestra material
+    CRUDO todavia sin redactar). 'n_fragmentos' cuenta solo los vigentes: un
+    documento 'obsoleto' no tiene ninguno (ver cli/cargar_corpus.py,
+    _cargar_obsoleto -- solo guarda la fila de metadatos, nunca fragmenta ni
+    vectoriza).
+
+    'roles_permitidos' viaja para que esa misma pantalla pueda mostrar y
+    editar a quien se le recupera cada documento (PUT
+    /corpus/documentos/<id>/roles) sin una consulta aparte.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select d.id, d.codigo, d.titulo, d.version, d.estado,
+                      d.fecha_vigencia, d.creado_en, d.roles_permitidos,
+                      d.aprobado_por, d.aprobado_en,
+                      (select count(*) from asistente.document_chunks c
+                        where c.document_id = d.id and c.vigente) as n_fragmentos
+               from asistente.documents d
+               where d.organization_id = %s
+               -- Los pendientes PRIMERO: son los que piden una decision, y
+               -- una lista que los mezcla alfabeticamente los esconde entre
+               -- los veinte que ya estan resueltos.
+               order by (d.estado = 'pendiente') desc, d.codigo, d.version desc""",
+            (org,))
+        return [dict(f) for f in cur.fetchall()]
+
+
+def fragmentos_de(tenant: str, document_id: str) -> list[dict]:
+    """
+    El texto vigente de un documento, en orden -- lo que de verdad puede
+    recuperar match_chunks() hoy. 'metadata' trae al menos 'seccion' (el
+    numero, ej. '5.8'; ver nucleo/ingesta/docx.py) para que la pantalla
+    agrupe fragmentos consecutivos del mismo numeral sin una consulta
+    aparte.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select orden, contenido, metadata
+               from asistente.document_chunks
+               where organization_id = %s and document_id = %s and vigente
+               order by orden""",
+            (org, document_id))
+        return [dict(f) for f in cur.fetchall()]
+
+
+def guardar_herramienta_propuesta(tenant: str, descripcion_pedido: str,
+                                  sondeo: dict, herramienta_propuesta: dict,
+                                  propuesto_por: str) -> str:
+    """
+    Un borrador de Herramienta que el rol 'configuracion_guiada' arma
+    despues de sondear una API real (nucleo/herramientas/sondeo.py). Nunca
+    se activa sola -- ver aprobar_herramienta_propuesta(). Devuelve el id
+    para que el turno pueda mencionarselo al ADMIN.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """insert into asistente.herramientas_propuestas
+                 (organization_id, descripcion_pedido, sondeo,
+                  herramienta_propuesta, propuesto_por)
+               values (%s, %s, %s, %s, %s)
+               returning id""",
+            (org, descripcion_pedido, json.dumps(sondeo, ensure_ascii=False),
+             json.dumps(herramienta_propuesta, ensure_ascii=False), propuesto_por))
+        return str(cur.fetchone()["id"])
+
+
+def herramientas_propuestas_de(tenant: str, estado: str | None = None) -> list[dict]:
+    """'estado=None' trae todas (pendiente/aprobada/rechazada); pasar un
+    estado puntual filtra en la consulta -- mismo patron que revisiones_de()."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select id, descripcion_pedido, sondeo, herramienta_propuesta,
+                      propuesto_por, estado, motivo_rechazo, revisado_por,
+                      creado_en, revisado_en
+               from asistente.herramientas_propuestas
+               where organization_id = %s
+                 and (%s::text is null or estado = %s)
+               order by creado_en desc""",
+            (org, estado, estado))
+        return [dict(f) for f in cur.fetchall()]
+
+
+def herramienta_propuesta_de(tenant: str, propuesta_id: str) -> dict | None:
+    """Una propuesta puntual -- para aprobar_herramienta_propuesta(), que
+    necesita el 'herramienta_propuesta' completo antes de escribirlo al
+    catalogo real."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select id, descripcion_pedido, sondeo, herramienta_propuesta,
+                      propuesto_por, estado, motivo_rechazo, revisado_por,
+                      creado_en, revisado_en
+               from asistente.herramientas_propuestas
+               where organization_id = %s and id = %s""",
+            (org, propuesta_id))
+        fila = cur.fetchone()
+        return dict(fila) if fila else None
+
+
+def resolver_herramienta_propuesta(tenant: str, propuesta_id: str, estado: str,
+                                   revisado_por: str, motivo_rechazo: str | None = None) -> bool:
+    """Aprobar o rechazar una propuesta -- la unica forma en que una de
+    estas pasa de 'pendiente' a algo que una persona confirmo. Devuelve
+    False si el id no existe o no es de este tenant."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """update asistente.herramientas_propuestas
+               set estado = %s, revisado_por = %s, revisado_en = now(),
+                   motivo_rechazo = %s
+               where organization_id = %s and id = %s""",
+            (estado, revisado_por, motivo_rechazo, org, propuesta_id))
+        return cur.rowcount > 0
+
+
+def guardar_accion_propuesta(tenant: str, herramienta: str, argumentos: dict,
+                             resumen: str, rol_solicitante: str,
+                             propuesto_por: str) -> str:
+    """
+    Una escritura real (crear/editar algo en un sistema externo) que quedo
+    pendiente porque su Herramienta declara requiere_confirmacion -- ver
+    nucleo/modelo/motor.py, el punto donde se intercepta antes de llegar a
+    _ejecutar_tool(). 'argumentos' guarda los valores REALES (no
+    enmascarados, a diferencia de tool_calls): sin ellos no se podria
+    ejecutar la accion al aprobar. Devuelve el id para que el turno se lo
+    diga a quien pregunto.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """insert into asistente.acciones_propuestas
+                 (organization_id, herramienta, argumentos, resumen,
+                  rol_solicitante, propuesto_por)
+               values (%s, %s, %s, %s, %s, %s)
+               returning id""",
+            (org, herramienta, json.dumps(argumentos, ensure_ascii=False),
+             resumen, rol_solicitante, propuesto_por))
+        return str(cur.fetchone()["id"])
+
+
+def acciones_propuestas_de(tenant: str, estado: str | None = None) -> list[dict]:
+    """'estado=None' trae todas -- mismo patron que herramientas_propuestas_de()."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select id, herramienta, argumentos, resumen, rol_solicitante,
+                      propuesto_por, estado, motivo_rechazo, revisado_por,
+                      resultado_ejecucion, codigo_error, creado_en, revisado_en
+               from asistente.acciones_propuestas
+               where organization_id = %s
+                 and (%s::text is null or estado = %s)
+               order by creado_en desc""",
+            (org, estado, estado))
+        return [dict(f) for f in cur.fetchall()]
+
+
+def accion_propuesta_de(tenant: str, accion_id: str) -> dict | None:
+    """Una propuesta puntual -- para ejecutarla al aprobar, que necesita
+    'herramienta'+'argumentos' completos."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select id, herramienta, argumentos, resumen, rol_solicitante,
+                      propuesto_por, estado, motivo_rechazo, revisado_por,
+                      resultado_ejecucion, codigo_error, creado_en, revisado_en
+               from asistente.acciones_propuestas
+               where organization_id = %s and id = %s""",
+            (org, accion_id))
+        fila = cur.fetchone()
+        return dict(fila) if fila else None
+
+
+def resolver_accion_propuesta(tenant: str, accion_id: str, estado: str,
+                              revisado_por: str, motivo_rechazo: str | None = None,
+                              resultado_ejecucion: dict | None = None,
+                              codigo_error: str | None = None) -> bool:
+    """Aprobar o rechazar una accion. Si se aprueba y se ejecuta, el
+    llamador pasa 'resultado_ejecucion' (lo que devolvio la API real) en la
+    MISMA actualizacion -- para que 'aprobada' y 'ya se sabe que paso'
+    queden juntos, nunca una fila 'aprobada' que en realidad todavia no se
+    intento ejecutar. Devuelve False si el id no existe o no es de este
+    tenant."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """update asistente.acciones_propuestas
+               set estado = %s, revisado_por = %s, revisado_en = now(),
+                   motivo_rechazo = %s, resultado_ejecucion = %s, codigo_error = %s
+               where organization_id = %s and id = %s""",
+            (estado, revisado_por, motivo_rechazo,
+             json.dumps(resultado_ejecucion, ensure_ascii=False) if resultado_ejecucion is not None else None,
+             codigo_error, org, accion_id))
+        return cur.rowcount > 0
+
+
+def guardar_revision_supervisor(tenant: str, conversation_id: str,
+                                es_buen_ejemplo: bool, caso: str | None,
+                                justificacion: str,
+                                aporte_sugerido: str | None) -> None:
+    """
+    El veredicto del supervisor sobre una conversacion ya cerrada (ver
+    nucleo/seguimiento/supervisor.py, el unico llamador). 'on conflict do
+    nothing': el disparador (conversacion marcada 'resuelta') solo pasa una
+    vez por conversacion real, asi que una segunda fila para el mismo id
+    seria un reintento, no una revision nueva -- se descarta en silencio en
+    vez de pisar el veredicto original.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """insert into asistente.revisiones_supervisor
+                 (organization_id, conversation_id, es_buen_ejemplo, caso,
+                  justificacion, aporte_sugerido)
+               values (%s, %s, %s, %s, %s, %s)
+               on conflict (conversation_id) do nothing""",
+            (org, conversation_id, es_buen_ejemplo, caso, justificacion,
+             aporte_sugerido))
+
+
+def revisiones_de(tenant: str, estado: str | None = None) -> list[dict]:
+    """
+    Las revisiones del supervisor, con el mensaje del cliente que abrio la
+    conversacion como referencia rapida -- lo que necesita /manual para
+    mostrar de que se trataba sin abrir la conversacion completa.
+
+    'estado=None' trae todas (pendiente/aprobado/descartado); pasar un
+    estado puntual filtra en la consulta.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select r.id, r.conversation_id, r.es_buen_ejemplo, r.caso,
+                      r.justificacion, r.aporte_sugerido, r.estado,
+                      r.revisado_por, r.creado_en, r.revisado_en,
+                      c.usuario_externo,
+                      (select contenido from asistente.messages m
+                        where m.conversation_id = r.conversation_id
+                          and m.rol = 'user'
+                        order by m.creado_en asc limit 1) as primer_mensaje
+               from asistente.revisiones_supervisor r
+               join asistente.conversations c on c.id = r.conversation_id
+               where r.organization_id = %s
+                 and (%s::text is null or r.estado = %s)
+               order by r.creado_en desc""",
+            (org, estado, estado))
+        return [dict(f) for f in cur.fetchall()]
+
+
+def actualizar_estado_revision(tenant: str, revision_id: str, estado: str,
+                               revisado_por: str | None) -> bool:
+    """Aprobar o descartar una revision del supervisor -- la unica forma en
+    que una de estas pasa de 'pendiente' a algo que una persona confirmo.
+    Devuelve False si el id no existe o no es de este tenant."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """update asistente.revisiones_supervisor
+               set estado = %s, revisado_por = %s, revisado_en = now()
+               where organization_id = %s and id = %s""",
+            (estado, revisado_por, org, revision_id))
+        return cur.rowcount > 0
+
+
+def guardar_resumen(tenant: str, conversation_id: str, resumen: str) -> None:
+    """Deja el resumen en la conversacion y la marca cerrada, en un solo paso.
+
+    Nunca rompe el turno si falla: perder un resumen es feo, no poder
+    contestarle a un cliente es peor.
+    """
+    try:
+        with sesion(tenant) as (cur, org):
+            cur.execute(
+                """update asistente.conversations
+                   set resumen = %s, estado = 'cerrada', actualizado_en = now()
+                   where organization_id = %s and id = %s""",
+                (resumen, org, conversation_id))
+    except Exception as e:
+        print(f"[resumen] no se pudo guardar en {conversation_id}: "
+              f"{type(e).__name__}: {e}")
+
+
+def conversacion_vencida(tenant: str, canal: str, usuario_externo: str,
+                         horas_inactividad: int | None):
+    """
+    La conversacion de este usuario que quedo ABIERTA pero ya paso el plazo de
+    inactividad, con sus mensajes -- para resumirla y cerrarla.
+
+    Devuelve None si no hay ninguna, o si el tenant no configuro el plazo.
+    """
+    if not horas_inactividad:
+        return None
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select id, resumen from asistente.conversations
+               where organization_id = %s and canal = %s and usuario_externo = %s
+                 and estado = 'abierta'
+                 and actualizado_en <= now() - (%s * interval '1 hour')
+               order by actualizado_en desc limit 1""",
+            (org, canal, usuario_externo, horas_inactividad))
+        fila = cur.fetchone()
+        if not fila:
+            return None
+        cur.execute(
+            """select rol, contenido from asistente.messages
+               where organization_id = %s and conversation_id = %s
+               order by creado_en""",
+            (org, fila["id"]))
+        mensajes = [{"role": "user" if r["rol"] == "user" else "assistant",
+                     "content": r["contenido"] or ""} for r in cur.fetchall()]
+    return {"conversation_id": str(fila["id"]),
+            "resumen_previo": fila["resumen"],
+            "historial": mensajes}
+
+
+def resumen_anterior(tenant: str, canal: str, usuario_externo: str) -> str | None:
+    """El resumen de la ultima conversacion CERRADA de este usuario."""
+    try:
+        with sesion(tenant) as (cur, org):
+            cur.execute(
+                """select resumen from asistente.conversations
+                   where organization_id = %s and canal = %s and usuario_externo = %s
+                     and estado = 'cerrada' and resumen is not null
+                   order by actualizado_en desc limit 1""",
+                (org, canal, usuario_externo))
+            fila = cur.fetchone()
+            return fila["resumen"] if fila else None
+    except Exception as e:
+        print(f"[resumen] no se pudo leer el anterior: {type(e).__name__}: {e}")
+        return None

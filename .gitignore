@@ -6,6 +6,10 @@
 auditoria.log
 *.log
 
+# Persistencia local (SQLite) -- conversaciones, PII. Nunca al repositorio.
+datos/
+*.db
+
 # Python
 __pycache__/
 *.py[cod]
@@ -27,3 +31,12 @@ informe_materiales_*_redactado.txt
 corpus/**
 !corpus/**/
 !corpus/README.md
+
+# Reportes de backfill de sn_onu (cli/proponer_sn_onu.py, cli/aplicar_sn_onu.py).
+# Traen NOMBRE COMPLETO de cientos de clientes cruzado con el serial de su
+# equipo: es exactamente el tipo de dato que el PRD (RNF-01) mantiene fuera de
+# cualquier lugar donde no haga falta. Se generan cuando se necesitan y se
+# borran; no se versionan.
+candidatos_sn_onu.csv
+pendientes_sn_onu_manual.md
+seriales_propuestos.csv
