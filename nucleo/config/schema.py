@@ -464,6 +464,20 @@ class LLM(Base):
     # volumen, region), asi que la tarifa es tan dato de empresa como el
     # subdominio de su API.
     #
+    # Tres claves y no dos: 'entrada', 'entrada_cache' y 'salida'. Un token de
+    # entrada YA CACHEADO cuesta ~30 veces menos que uno nuevo ($0.014 contra
+    # $0.44 por millon en deepseek-v4-flash), y en este sistema casi todo es
+    # cache -- el prompt de sistema, el catalogo de herramientas y el historial
+    # se repiten turno a turno.
+    #
+    # Medido sobre 30 dias reales: 141.8 millones de tokens costaron $7.48
+    # ($0.053 por millon). Con una sola tarifa de entrada, cobrando todo como
+    # nuevo, el mismo consumo daria entre $30 y $60. Un panel que se equivoca
+    # ocho veces sobre el gasto no sirve para decidir nada.
+    #
+    # 'entrada_cache' ausente = se cobra todo como no cacheado, que es el lado
+    # conservador y el comportamiento anterior.
+    #
     # Un modelo SIN tarifa cargada no se estima ni se aproxima: su consumo se
     # cuenta en tokens y su costo queda en cero, marcado como sin tarifa. Un
     # numero inventado seria peor que ninguno -- se veria igual de real en el

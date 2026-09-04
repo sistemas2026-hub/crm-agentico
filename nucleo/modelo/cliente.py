@@ -87,6 +87,17 @@ class Respuesta:
     # y se descartan, y comparar modelos sin verlo lleva a conclusiones al reves.
     tokens_entrada: int = 0
     tokens_salida: int = 0
+    # De los de entrada, cuantos venian cacheados. Importa MUCHO para el
+    # costo: en DeepSeek un token de entrada cacheado sale ~30 veces mas
+    # barato que uno nuevo ($0.014 contra $0.44 por millon). Medido sobre 30
+    # dias reales de Rapilink: 141.8 millones de tokens costaron $7.48, o sea
+    # $0.053 por millon -- una cifra que SOLO es posible si casi todo es
+    # cache. Cobrarlos todos como nuevos daria una factura estimada de $30 a
+    # $60 para un gasto real de $7.48.
+    #
+    # Cero cuando el proveedor no lo informa; ahi se cobra todo como no
+    # cacheado, que es el lado conservador.
+    tokens_entrada_cache: int = 0
     razonamiento_chars: int = 0
     segundos: float = 0.0
     modelo: str = ""
@@ -262,6 +273,14 @@ class ClienteCompatibleOpenAI:
             llamadas=llamadas,
             tokens_entrada=getattr(uso, "prompt_tokens", 0) or 0,
             tokens_salida=getattr(uso, "completion_tokens", 0) or 0,
+            # DeepSeek lo expone suelto; otros compatibles con OpenAI lo
+            # ponen dentro de 'prompt_tokens_details.cached_tokens'. Se miran
+            # los dos: verificado en vivo contra DeepSeek el 04/09/2026, que
+            # devuelve AMBOS.
+            tokens_entrada_cache=(
+                getattr(uso, "prompt_cache_hit_tokens", None)
+                or getattr(getattr(uso, "prompt_tokens_details", None),
+                           "cached_tokens", 0) or 0),
             razonamiento_chars=razonamiento,
             segundos=transcurrido, modelo=modelo, proveedor=self.nombre)
 

@@ -78,6 +78,7 @@ class Consumo:
     # para esto.
     config: object = None
     tokens_entrada: int = 0
+    tokens_entrada_cache: int = 0
     tokens_salida: int = 0
     costo_usd: float = 0.0
     n_llamadas: int = 0
@@ -87,13 +88,27 @@ class Consumo:
     sin_tarifa: set[str] = field(default_factory=set)
 
 
-def _costo(config, referencia: str, entrada: int, salida: int) -> tuple[float, bool]:
-    """(costo en USD, si habia tarifa). Sin tarifa: 0.0 y False, nunca un estimado."""
+def _costo(config, referencia: str, entrada: int, salida: int,
+           entrada_cache: int = 0) -> tuple[float, bool]:
+    """(costo en USD, si habia tarifa). Sin tarifa: 0.0 y False, nunca un estimado.
+
+    'entrada' es el TOTAL de entrada y 'entrada_cache' la parte que venia
+    cacheada -- asi los reporta DeepSeek, verificado en vivo. Se cobra la
+    diferencia como entrada nueva.
+
+    Sin 'entrada_cache' en la tarifa se cobra todo al precio de entrada nueva:
+    es el lado conservador (sobreestima, no subestima) y es lo que hacia antes.
+    """
     tarifas = getattr(getattr(config, "llm", None), "tarifas", None) or {}
     t = tarifas.get(referencia)
     if not t:
         return 0.0, False
-    return (entrada * float(t.get("entrada", 0.0))
+    precio_nueva = float(t.get("entrada", 0.0))
+    precio_cache = float(t.get("entrada_cache", precio_nueva))
+    cacheados = max(0, min(int(entrada_cache or 0), entrada))
+    nuevos = entrada - cacheados
+    return (nuevos * precio_nueva
+            + cacheados * precio_cache
             + salida * float(t.get("salida", 0.0))) / POR_MILLON, True
 
 
@@ -121,9 +136,12 @@ def anotar(referencia_modelo: str, respuesta) -> None:
         return
     entrada = int(getattr(respuesta, "tokens_entrada", 0) or 0)
     salida = int(getattr(respuesta, "tokens_salida", 0) or 0)
-    costo, hay_tarifa = _costo(ficha.config, referencia_modelo, entrada, salida)
+    cacheados = int(getattr(respuesta, "tokens_entrada_cache", 0) or 0)
+    costo, hay_tarifa = _costo(ficha.config, referencia_modelo, entrada, salida,
+                               cacheados)
 
     ficha.tokens_entrada += entrada
+    ficha.tokens_entrada_cache += cacheados
     ficha.tokens_salida += salida
     ficha.costo_usd += costo
     ficha.n_llamadas += 1

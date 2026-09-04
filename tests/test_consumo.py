@@ -258,6 +258,58 @@ afirmar(e["accion"] in ("seguir", "frenar"),
 consumo.gasto_del_mes = _original
 
 
+
+
+print("\n== 7. el cache decide el costo, y se comprueba contra una factura real ==")
+# DATO REAL (panel de DeepSeek, 30 dias al 04/09/2026):
+#     141.852.383 tokens  ->  $7.48
+#     = $0.053 por millon
+#
+# Esa cifra SOLO es posible si casi todo es cache. Al precio de entrada nueva
+# ($0.22-0.44 por millon) los mismos tokens costarian entre $30 y $60. Este
+# bloque comprueba que el calculo puede reproducir la factura real, y que
+# ignorar el cache la multiplica por ocho.
+
+TARIFA_FLASH = {"entrada": 0.44, "entrada_cache": 0.014, "salida": 1.32}
+
+
+class ConCache(ConfigFalsa):
+    class llm:
+        tarifas = {"deepseek:deepseek-v4-flash": TARIFA_FLASH}
+
+
+# 141.85M de entrada, 97% cacheada, y una salida chica.
+ENTRADA, CACHE, SALIDA = 138_000_000, 134_000_000, 3_850_000
+costo_con, _ = consumo._costo(ConCache(), "deepseek:deepseek-v4-flash",
+                              ENTRADA, SALIDA, CACHE)
+costo_sin, _ = consumo._costo(ConCache(), "deepseek:deepseek-v4-flash",
+                              ENTRADA, SALIDA, 0)
+
+afirmar(3.0 < costo_con < 15.0,
+        f"con cache, el costo cae en el orden de la factura real (${costo_con:.2f} "
+        f"contra $7.48 reales)")
+afirmar(costo_sin > costo_con * 4,
+        f"ignorar el cache multiplica la factura (${costo_sin:.2f} contra "
+        f"${costo_con:.2f})")
+
+# Sin 'entrada_cache' en la tarifa se cobra todo como entrada nueva: el lado
+# conservador. Sobreestimar avisa antes de tiempo; subestimar deja pasar el
+# tope sin frenar.
+class SinPrecioCache(ConfigFalsa):
+    class llm:
+        tarifas = {"m": {"entrada": 0.44, "salida": 1.32}}
+
+
+c1, _ = consumo._costo(SinPrecioCache(), "m", 1_000_000, 0, 1_000_000)
+afirmar(abs(c1 - 0.44) < 1e-9,
+        "sin precio de cache se cobra todo como entrada nueva (conservador)")
+
+# Un proveedor que informe mas cacheados que entrada total no puede producir
+# un costo negativo.
+c2, _ = consumo._costo(ConCache(), "deepseek:deepseek-v4-flash", 1000, 0, 999999)
+afirmar(c2 >= 0, "un dato de cache incoherente no genera un costo negativo")
+
+
 print()
 if fallos:
     print(f"[FALLA] {len(fallos)} comprobacion(es):")
