@@ -26,7 +26,8 @@
     MessageCircle,
     ListChecks,
     PlugZap,
-    GraduationCap
+    GraduationCap,
+    Gauge
   } from '@lucide/svelte';
   import { t } from '$lib/terminology.js';
 
@@ -133,7 +134,10 @@
         { href: '/configuracion-guiada', label: 'Conectar sistema nuevo', icon: PlugZap, admin: true },
         // ADMIN-only, mismo motivo: una habilidad vigente es lo que un agente
         // sigue "al pie de la letra" frente a un cliente.
-        { href: '/habilidades', label: 'Habilidades', icon: GraduationCap, admin: true }
+        { href: '/habilidades', label: 'Habilidades', icon: GraduationCap, admin: true },
+        // ADMIN-only: es el gasto de la empresa y su tope. Un colaborador de
+        // soporte no tiene por que ver la factura.
+        { href: '/consumo', label: 'Consumo', icon: Gauge, admin: true }
       ]
     }
   ];

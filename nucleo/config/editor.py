@@ -706,3 +706,55 @@ def _mutar_agregar_herramienta(doc: dict, herramienta_propuesta: dict) -> None:
     if nombre in existentes:
         raise ErrorEdicion(f"ya existe una herramienta llamada '{nombre}' en el catalogo.")
     doc.setdefault("herramientas", []).append(herramienta_propuesta)
+
+
+def _mutar_tarifa(doc: dict, modelo: str, entrada: float, salida: float) -> None:
+    """Guarda cuanto cuesta un modelo, en USD por MILLON de tokens.
+
+    Por millon porque asi lo publican los proveedores: guardar el numero como
+    viene evita el error mas aburrido y mas caro de este dominio, que es un
+    factor de mil metido al cargarlo.
+    """
+    doc.setdefault("llm", {}).setdefault("tarifas", {})[modelo] = {
+        "entrada": float(entrada), "salida": float(salida)}
+
+
+def _mutar_borrar_tarifa(doc: dict, modelo: str) -> None:
+    ((doc.get("llm") or {}).get("tarifas") or {}).pop(modelo, None)
+
+
+def _mutar_tope_gasto(doc: dict, tope: float | None, mensaje: str | None) -> None:
+    """El tope mensual de gasto, y que se le dice al cliente si se alcanza.
+
+    None borra el tope. No es lo mismo que cero: cero seria 'frena siempre', y
+    alguien que quiere sacar el limite escribiria justamente eso.
+    """
+    limites = doc.setdefault("limites", {})
+    if tope is None:
+        limites.pop("max_costo_usd_mes", None)
+    else:
+        limites["max_costo_usd_mes"] = float(tope)
+    if mensaje is not None:
+        limites["mensaje_al_alcanzar_tope"] = mensaje.strip()
+
+
+def guardar_tarifa(tenant: str, modelo: str, entrada: float,
+                   salida: float) -> TenantConfig:
+    if not str(modelo or "").strip():
+        raise ErrorEdicion("Falta la referencia del modelo (ej. 'deepseek:deepseek-v4-flash').")
+    if entrada < 0 or salida < 0:
+        raise ErrorEdicion("Una tarifa no puede ser negativa.")
+    return _editar(tenant, lambda d: _mutar_tarifa(d, modelo.strip(), entrada, salida))
+
+
+def borrar_tarifa(tenant: str, modelo: str) -> TenantConfig:
+    return _editar(tenant, lambda d: _mutar_borrar_tarifa(d, modelo))
+
+
+def guardar_tope_gasto(tenant: str, tope: float | None,
+                       mensaje: str | None = None) -> TenantConfig:
+    if tope is not None and tope <= 0:
+        raise ErrorEdicion(
+            "El tope tiene que ser mayor que cero. Para sacar el limite, "
+            "guardalo vacio -- un tope de 0 frenaria el asistente siempre.")
+    return _editar(tenant, lambda d: _mutar_tope_gasto(d, tope, mensaje))

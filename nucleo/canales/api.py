@@ -3464,6 +3464,146 @@ def configuracion_propuesta_rechazar(id_propuesta):
 
 
 # =============================================================================
+#  CONSUMO  -  cuanto gasta la empresa, y en que punto del tope esta.
+#  Ver nucleo/observabilidad/consumo.py.
+#
+#  EL ESTADO SE DECIDE ACA, NO EN LA PANTALLA. La maqueta original mostraba
+#  "sin tope configurado", "0% del tope" y "asistente frenado por alcanzar el
+#  tope" al mismo tiempo -- tres cosas que no pueden ser ciertas juntas. Peor:
+#  sin tarifa cargada el costo es SIEMPRE cero, asi que el tope no puede
+#  alcanzarse nunca y 'frenado' es inalcanzable en ese estado.
+#
+#  Si cada tarjeta decide sola si mostrarse, tarde o temprano se contradicen.
+#  El servidor devuelve UN estado y la pantalla dibuja lo que corresponde.
+# =============================================================================
+
+@app.get("/consumo")
+def consumo_resumen():
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        dias = max(1, min(int(request.args.get("dias") or 30), 366))
+    except ValueError:
+        dias = 30
+
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+
+    modelo = config.llm.modelo_por_defecto
+    tarifas = config.llm.tarifas or {}
+    hay_tarifa = modelo in tarifas
+    gasto = consumo.estado_del_gasto(config, tenant)
+
+    try:
+        with persistencia.sesion(tenant) as (cur, org):
+            cur.execute(
+                """select dia, n_mensajes, tokens_entrada, tokens_salida, costo_usd
+                     from asistente.usage_daily
+                    where organization_id = %s
+                      and dia > current_date - make_interval(days => %s)
+                    order by dia desc""", (org, dias))
+            filas = [{"dia": f["dia"].isoformat(), "n_mensajes": f["n_mensajes"],
+                      "tokens_entrada": f["tokens_entrada"],
+                      "tokens_salida": f["tokens_salida"],
+                      "costo_usd": float(f["costo_usd"] or 0)}
+                     for f in cur.fetchall()]
+
+            # De OTRAS tablas: usage_daily tiene columnas n_conversaciones y
+            # n_tool_calls que nadie escribe y siempre valen 0. No se sirven
+            # desde ahi -- una cifra que siempre es cero se lee como "no pasa
+            # nada" en vez de "no se mide".
+            cur.execute(
+                """select count(*) n,
+                          percentile_disc(0.95) within group (order by duracion_ms) p95
+                     from asistente.tool_calls
+                    where organization_id = %s
+                      and creado_en > now() - make_interval(days => %s)""",
+                (org, dias))
+            h = cur.fetchone() or {}
+            cur.execute(
+                """select count(*) n from asistente.conversations
+                    where organization_id = %s
+                      and creado_en > now() - make_interval(days => %s)""",
+                (org, dias))
+            c = cur.fetchone() or {}
+    except Exception as e:
+        print(f"[consumo] fallo al leer: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo leer el consumo."}), 500
+
+    return jsonify({
+        "dias": dias,
+        # 'sin_tarifa' gana sobre todo lo demas: sin ella el costo no existe y
+        # cualquier cifra de gasto es ficcion. La pantalla no debe dibujar el
+        # eje de costo, el medidor del tope ni el panel de frenado en ese
+        # estado -- no porque queden feos, sino porque afirmarian algo falso.
+        "estado": ("sin_tarifa" if not hay_tarifa
+                   else "sin_tope" if not gasto["tope"]
+                   else gasto["accion"]),
+        "modelo": modelo,
+        "hay_tarifa": hay_tarifa,
+        "tarifa": tarifas.get(modelo),
+        "tope": gasto["tope"] or None,
+        "gastado": gasto["gastado"],
+        "porcentaje": gasto["porcentaje"],
+        "mensaje_al_alcanzar_tope": config.limites.mensaje_al_alcanzar_tope or "",
+        "dias_detalle": filas,
+        "totales": {
+            "n_mensajes": sum(f["n_mensajes"] for f in filas),
+            "tokens_entrada": sum(f["tokens_entrada"] for f in filas),
+            "tokens_salida": sum(f["tokens_salida"] for f in filas),
+            "costo_usd": round(sum(f["costo_usd"] for f in filas), 6),
+        },
+        "herramientas": {"n": h.get("n") or 0, "p95_ms": h.get("p95")},
+        "conversaciones": c.get("n") or 0,
+    })
+
+
+@app.put("/consumo/tarifa")
+def consumo_guardar_tarifa():
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant, modelo = cuerpo.get("tenant"), cuerpo.get("modelo")
+    if not tenant or not modelo:
+        return jsonify({"error": "Faltan 'tenant' y 'modelo'."}), 400
+    try:
+        editor.guardar_tarifa(tenant, modelo,
+                              float(cuerpo.get("entrada") or 0),
+                              float(cuerpo.get("salida") or 0))
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": str(e)}), 400
+    except (TypeError, ValueError):
+        return jsonify({"error": "Las tarifas tienen que ser numeros."}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
+    olvidar_config(tenant)
+    return jsonify({"ok": True})
+
+
+@app.put("/consumo/tope")
+def consumo_guardar_tope():
+    """Guarda el tope mensual. Vacio o null lo saca; cero se rechaza."""
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta 'tenant'."}), 400
+    crudo = cuerpo.get("tope")
+    try:
+        tope = None if crudo in (None, "") else float(crudo)
+    except (TypeError, ValueError):
+        return jsonify({"error": "El tope tiene que ser un numero."}), 400
+    try:
+        editor.guardar_tope_gasto(tenant, tope, cuerpo.get("mensaje"))
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
+    olvidar_config(tenant)
+    return jsonify({"ok": True})
+
+
+# =============================================================================
 #  HABILIDADES  -  procedimientos que un agente carga cuando le hacen falta.
 #  Ver nucleo/habilidades/catalogo.py (que son y por que no son documentos del
 #  corpus) y analista.py (como se detecta que falta una).
