@@ -454,6 +454,21 @@ class LLM(Base):
     # y aqui cada iteracion cuesta un turno completo, no milisegundos.
     limite_iteraciones_agente: int = Field(default=4, ge=1, le=10)
     descartar_thinking: bool = True
+    # Cuanto cuesta cada modelo, en USD por MILLON de tokens, por referencia
+    # ('deepseek:deepseek-v4-flash' -> {entrada: 0.28, salida: 0.42}).
+    #
+    # Va en la config del tenant y no en codigo por dos motivos. El primero es
+    # la regla de siempre: un precio cambia cuando el proveedor lo cambia, y
+    # eso no puede exigir un despliegue. El segundo es menos obvio -- dos
+    # empresas pueden pagar distinto por el MISMO modelo (contrato propio,
+    # volumen, region), asi que la tarifa es tan dato de empresa como el
+    # subdominio de su API.
+    #
+    # Un modelo SIN tarifa cargada no se estima ni se aproxima: su consumo se
+    # cuenta en tokens y su costo queda en cero, marcado como sin tarifa. Un
+    # numero inventado seria peor que ninguno -- se veria igual de real en el
+    # panel y nadie sabria que es ficcion.
+    tarifas: dict[str, dict[str, float]] = Field(default_factory=dict)
 
 
 # =============================================================================

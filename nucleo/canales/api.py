@@ -46,6 +46,7 @@ from nucleo.herramientas import localidades as sincronizador_localidades
 from nucleo.ingesta import corpus as ingesta
 from nucleo.ingesta.docx import procesar
 from nucleo.modelo import motor
+from nucleo.observabilidad import consumo
 from nucleo.persistencia import db as persistencia
 from nucleo.recuperacion.busqueda import recuperar
 from nucleo.recuperacion.prompt import piezas_del_system
@@ -866,9 +867,15 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
         estado["historial"].append(
             {"role": "system", "content": veredicto_accion["nota"]})
 
-    respuesta, registro_herramientas, medios_pendientes = motor.responder(
-        config, rol, mensaje, estado["historial"], estado["sesion"],
-        nota_continuidad=nota_continuidad)
+    # El unico lugar que abre el contador de consumo: este es el turno que se
+    # atiende de verdad. Los corredores de casos dorados y los bancos de
+    # prueba llaman al mismo motor y no lo abren, asi que sus miles de
+    # llamadas al modelo no entran en la facturacion de nadie ni disparan el
+    # tope de gasto -- ver nucleo/observabilidad/consumo.py.
+    with consumo.abrir(config):
+        respuesta, registro_herramientas, medios_pendientes = motor.responder(
+            config, rol, mensaje, estado["historial"], estado["sesion"],
+            nota_continuidad=nota_continuidad)
 
     # --- si este turno derivo a otra area, persistir YA con el rol nuevo -----
     # 'rol_siguiente' lo pone motor._ejecutar_derivacion() cuando el modelo

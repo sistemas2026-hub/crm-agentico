@@ -60,6 +60,7 @@ from nucleo.modelo import cliente
 from nucleo.modelo import tuteo
 from nucleo.persistencia import db as persistencia
 from nucleo.habilidades import catalogo as catalogo_habilidades
+from nucleo.observabilidad import consumo
 from nucleo.recuperacion.prompt import construir_system
 from nucleo.recuperacion.busqueda import (recuperar, bloque_de_contexto,
                                           registrar_sin_resultados)
@@ -1587,6 +1588,10 @@ def _redactar(referencia_modelo: str, historial: list[dict], temperatura: float,
     for intento in range(intentos):
         resp = cliente.chat(referencia_modelo, historial_intento, tools=None,
                             temperatura=temperatura)
+        # Cuenta TAMBIEN los intentos fallidos: un turno que gasta tres
+        # redacciones en blanco costo tres llamadas, y contar solo la que
+        # sirvio escondria justo el caso caro.
+        consumo.anotar(referencia_modelo, resp)
         limpio = _sanitizar(resp.contenido, nombres_rol, tratamiento)
         if not limpio or _RE_RESPUESTA_CRUDA.match(limpio):
             # Por que no sirvio. Sin esto, cuando el cliente ve "no pude
@@ -1888,6 +1893,7 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
         iteraciones += 1
         resp = cliente.chat(referencia_decision, historial,
                             tools=catalogo_openai or None, temperatura=config.llm.temperatura)
+        consumo.anotar(referencia_decision, resp)
 
         if not resp.llamadas:
             # Antes de decidir nada: si el modelo pidio herramientas
