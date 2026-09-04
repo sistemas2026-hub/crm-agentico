@@ -3544,7 +3544,11 @@ def consumo_resumen():
                    else gasto["accion"]),
         "modelo": modelo,
         "hay_tarifa": hay_tarifa,
-        "tarifa": tarifas.get(modelo),
+        # .model_dump() y no el objeto: desde que 'Tarifa' dejo de ser un
+        # diccionario suelto para ganar validacion propia, Flask no la sabe
+        # serializar y la ruta devolvia 500. La pantalla mostraba "no se pudo
+        # contactar al asistente", que apunta a la red y no al dato.
+        "tarifa": tarifas[modelo].model_dump() if hay_tarifa else None,
         "tope": gasto["tope"] or None,
         "gastado": gasto["gastado"],
         "porcentaje": gasto["porcentaje"],
