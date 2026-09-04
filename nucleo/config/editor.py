@@ -69,7 +69,9 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import re
+from pathlib import Path
 from typing import Callable
 
 from pydantic import ValidationError
@@ -114,6 +116,34 @@ class ErrorEdicion(ValueError):
 #  VALIDACION Y ESCRITURA
 # =============================================================================
 
+def commits_sin_empujar() -> int:
+    """Cuantos commits locales todavia no estan en el remoto.
+
+    Es la comprobacion mas barata que detecta el orden invertido entre codigo
+    y configuracion (ver el bloque que la usa). No mira QUE campos trae la
+    config: mira si este codigo ya llego a donde va a leerla.
+
+    Devuelve 0 ante cualquier duda -- sin git, sin remoto configurado, o con
+    el comando fallando. Una guarda de conveniencia no puede ser la razon por
+    la que no se pueda cargar una configuracion; la que si aborta de verdad es
+    la de perdidas, que compara contra la base.
+    """
+    import subprocess
+    try:
+        salida = subprocess.run(
+            ["git", "rev-list", "--count", "@{u}..HEAD"],
+            cwd=Path(__file__).resolve().parents[2], capture_output=True, text=True, timeout=10)
+    except Exception:                                    # noqa: BLE001
+        return 0
+    if salida.returncode != 0:
+        return 0
+    try:
+        return int((salida.stdout or "0").strip())
+    except ValueError:
+        return 0
+
+
+
 def _validar(tenant: str, crudo: dict) -> TenantConfig:
     """Mismo camino que cargar_config(), pero sobre el documento en memoria."""
     secretos = _barrer_secretos(crudo)
@@ -141,6 +171,31 @@ def _editar(tenant: str, mutar: Callable[[dict], None]) -> TenantConfig:
     transaccion sin escribir: nucleo/persistencia/db.py hace rollback.
     """
     from nucleo.persistencia.db import sesion     # perezoso: evita ciclo
+
+    # MISMA TRAMPA QUE cargar_config.py, POR LA OTRA PUERTA.
+    #
+    # Escribir configuracion con campos que el codigo desplegado no conoce deja
+    # a produccion con una config que su propio motor rechaza (los modelos
+    # declaran extra="forbid": un campo desconocido no se ignora, tumba el
+    # archivo entero) y el asistente deja de atender.
+    #
+    # La guarda de cargar_config.py cubria el camino del YAML. Este es el otro:
+    # correr el editor desde una copia local -- una prueba, un script -- contra
+    # la base de PRODUCCION. Paso dos veces el mismo dia, la segunda por aca.
+    #
+    # En produccion esto no dispara nunca: el editor corre dentro del codigo ya
+    # desplegado, y ahi no hay repositorio git, asi que la comprobacion
+    # devuelve 0 y no molesta. Solo aparece donde existe el desfase.
+    if not os.environ.get("PERMITIR_CONFIG_SIN_DESPLEGAR"):
+        sin_empujar = commits_sin_empujar()
+        if sin_empujar:
+            raise ErrorEdicion(
+                f"Hay {sin_empujar} commit(s) sin empujar en esta copia. "
+                "Si esta edicion usa un campo del esquema que solo existe "
+                "en esos commits, el motor desplegado NO va a poder leer la "
+                "configuracion y deja de atender. Primero el codigo, "
+                "despues la config: git push. Si sabes que no estrena "
+                "ningun campo: PERMITIR_CONFIG_SIN_DESPLEGAR=1")
 
     with sesion(tenant) as (cur, org):
         cur.execute("""select config, config_version
