@@ -209,6 +209,55 @@ afirmar(resultados == {"empresa_0": 1000, "empresa_1": 2000, "empresa_2": 3000},
         f"tres turnos a la vez no mezclan su consumo ({resultados})")
 
 
+
+
+print("\n== 6. el tope avisa antes de frenar ==")
+# Un tope que pasa de "todo normal" a "todo va a una persona" sin aviso previo
+# es inoperable: quien lo administra se entera cuando ya no hay margen.
+
+
+def _con_tope(valor):
+    class C(ConfigFalsa):
+        class limites:
+            max_costo_usd_mes = valor
+            mensaje_al_alcanzar_tope = ""
+    return C()
+
+
+consumo.gasto_del_mes = lambda tenant: 50.0
+
+e = consumo.estado_del_gasto(_con_tope(None), "t")
+afirmar(e["accion"] == "seguir", "sin tope configurado la accion es seguir")
+
+e = consumo.estado_del_gasto(_con_tope(1000.0), "t")     # 5%
+afirmar(e["accion"] == "seguir", "muy por debajo del tope: seguir")
+
+e = consumo.estado_del_gasto(_con_tope(60.0), "t")       # 83%
+afirmar(e["accion"] == "avisar",
+        f"cerca del tope avisa sin frenar (dio {e['accion']}, {e['porcentaje']:.0%})")
+
+e = consumo.estado_del_gasto(_con_tope(50.0), "t")       # 100%
+afirmar(e["accion"] == "frenar" and e["gastado"] == 50.0 and e["tope"] == 50.0,
+        "al alcanzarlo frena, y devuelve cuanto y de cuanto para poder decirlo")
+
+e = consumo.estado_del_gasto(_con_tope(40.0), "t")       # pasado
+afirmar(e["accion"] == "frenar", "pasado el tope sigue frenando")
+
+# Un fallo al consultar el gasto NO puede dejar sin servicio a una empresa que
+# quiza esta lejos de su limite.
+def _revienta(tenant):
+    raise RuntimeError("base caida")
+
+
+_original = consumo.gasto_del_mes
+consumo.sesion = _SesionFalsa   # que gasto_del_mes real falle al leer
+consumo.gasto_del_mes = consumo.__dict__["gasto_del_mes"]
+e = consumo.estado_del_gasto(_con_tope(50.0), "t")
+afirmar(e["accion"] in ("seguir", "frenar"),
+        "un fallo al leer el gasto no revienta el turno")
+consumo.gasto_del_mes = _original
+
+
 print()
 if fallos:
     print(f"[FALLA] {len(fallos)} comprobacion(es):")

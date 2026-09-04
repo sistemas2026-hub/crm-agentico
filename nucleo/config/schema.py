@@ -1697,6 +1697,17 @@ class Escalamiento(Base):
 class Limites(Base):
     max_conversaciones_dia: int | None = None
     max_costo_usd_mes: float | None = None
+    # Que se le dice al cliente cuando la empresa alcanzo su tope de gasto.
+    #
+    # Es dato de empresa y no texto del nucleo por el motivo de siempre: el
+    # dialecto. Una empresa colombiana que configuro tuteo no puede recibir un
+    # voseo rioplatense porque el limite salto un martes.
+    #
+    # Y NO dice que se alcanzo un tope: eso es asunto interno entre la
+    # plataforma y la empresa, no algo que un cliente que se quedo sin internet
+    # tenga que leer. Se le dice lo unico que le sirve -- que lo va a atender
+    # una persona.
+    mensaje_al_alcanzar_tope: str = ""
     alerta_al_porcentaje: int = Field(default=80, ge=1, le=100)
     retencion_conversaciones_dias: int = Field(default=365, ge=1)
     # Horas sin un solo mensaje despues de las cuales la conversacion se cierra

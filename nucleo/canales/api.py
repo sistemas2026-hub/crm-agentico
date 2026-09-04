@@ -867,6 +867,50 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
         estado["historial"].append(
             {"role": "system", "content": veredicto_accion["nota"]})
 
+    # --- tope de gasto de la empresa ----------------------------------------
+    # Va aca y no despues: si esperara al final, el turno que descubre el tope
+    # ya lo gasto. El control tiene que correr ANTES de la primera llamada al
+    # modelo o cuenta un turno tarde, siempre.
+    #
+    # 'frenar' NO deja al cliente sin respuesta. El tope existe para que no se
+    # dispare la factura, no para que alguien con el internet caido se quede
+    # hablando solo: se le contesta, se marca la conversacion para que una
+    # persona la tome, y no se le pide nada al modelo.
+    #
+    # Se marca 'necesita_atencion_humana' pero NO 'escalada_a_humano': lo
+    # segundo afirma un traspaso con caso y ticket, y aca no hubo ninguno --
+    # mismo criterio que NO_DETERMINADO en _cerrar_escalada(). Prometer un
+    # traspaso que no ocurrio es peor que no prometerlo.
+    gasto = consumo.estado_del_gasto(config, tenant)
+    if gasto["accion"] == "avisar":
+        print(f"[consumo] {tenant}: {gasto['gastado']} de {gasto['tope']} USD "
+              f"({gasto['porcentaje']:.0%} del tope del mes).")
+    elif gasto["accion"] == "frenar":
+        print(f"[consumo] {tenant}: TOPE ALCANZADO "
+              f"({gasto['gastado']} de {gasto['tope']} USD). El turno pasa a "
+              f"una persona sin llamar al modelo.")
+        respuesta = (config.limites.mensaje_al_alcanzar_tope or "").strip() or (
+            "En este momento no puedo atender por este medio. Un compañero "
+            "del equipo va a continuar con esta conversacion.")
+        estado["historial"].append({"role": "user", "content": mensaje})
+        estado["historial"].append({"role": "assistant", "content": respuesta})
+        try:
+            conv_id, _ = persistencia.registrar_mensaje(
+                tenant, canal, id_sesion, rol, "user", mensaje)
+            persistencia.registrar_mensaje(
+                tenant, canal, id_sesion, rol, "assistant", respuesta)
+            if conv_id:
+                persistencia.registrar_estado_escalada(
+                    tenant, conv_id, estado_escalada.NO_DETERMINADO,
+                    "tope de gasto del mes alcanzado", necesita_atencion=True)
+        except Exception as e:
+            # Igual se le contesta: quedarse callado ademas de sin servicio
+            # seria el peor de los dos mundos.
+            print(f"[consumo] no se pudo registrar el turno frenado: {e}")
+        return {"respuesta": respuesta,
+                "verificado": bool(getattr(estado["sesion"], "verificado", False)),
+                "pausada": True}
+
     # El unico lugar que abre el contador de consumo: este es el turno que se
     # atiende de verdad. Los corredores de casos dorados y los bancos de
     # prueba llaman al mismo motor y no lo abren, asi que sus miles de

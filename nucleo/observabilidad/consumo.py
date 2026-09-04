@@ -175,6 +175,12 @@ def gasto_del_mes(tenant: str) -> float:
         return 0.0
 
 
+# A partir de que porcentaje del tope se avisa, sin bloquear todavia. Un tope
+# que pasa de "todo normal" a "todo va a una persona" sin aviso previo es
+# inoperable: quien lo administra se entera cuando ya no hay margen.
+AVISO_DESDE = 0.8
+
+
 def tope_superado(config, tenant: str) -> tuple[bool, float, float]:
     """(se paso, gastado, tope). Sin tope configurado nunca se pasa.
 
@@ -187,3 +193,36 @@ def tope_superado(config, tenant: str) -> tuple[bool, float, float]:
         return False, 0.0, 0.0
     gastado = gasto_del_mes(tenant)
     return gastado >= float(tope), gastado, float(tope)
+
+
+def estado_del_gasto(config, tenant: str) -> dict:
+    """
+    En que punto del tope esta esta empresa, y que corresponde hacer.
+
+    Devuelve 'accion': 'seguir' | 'avisar' | 'frenar'.
+
+    'frenar' NO significa dejar al cliente sin respuesta. Significa que este
+    turno no se le pide nada al modelo y la conversacion pasa a una persona --
+    el tope existe para que no se dispare la factura, no para que alguien con
+    el internet caido se quede hablando solo. Quien decide que hacer con eso es
+    el canal (ver nucleo/canales/api.py); aca solo se informa.
+
+    'avisar' se cruza una vez y despues sigue cruzandose en cada turno, asi que
+    quien lo consuma tiene que decidir cada cuanto lo dice. No se guarda estado
+    aca: este modulo cuenta y responde, no recuerda.
+    """
+    tope = getattr(getattr(config, "limites", None), "max_costo_usd_mes", None)
+    if not tope:
+        return {"accion": "seguir", "gastado": 0.0, "tope": 0.0, "porcentaje": 0.0}
+
+    tope = float(tope)
+    gastado = gasto_del_mes(tenant)
+    porcentaje = (gastado / tope) if tope else 0.0
+    if gastado >= tope:
+        accion = "frenar"
+    elif porcentaje >= AVISO_DESDE:
+        accion = "avisar"
+    else:
+        accion = "seguir"
+    return {"accion": accion, "gastado": round(gastado, 4),
+            "tope": tope, "porcentaje": round(porcentaje, 3)}
