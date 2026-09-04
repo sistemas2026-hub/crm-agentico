@@ -3568,9 +3568,11 @@ def consumo_guardar_tarifa():
     if not tenant or not modelo:
         return jsonify({"error": "Faltan 'tenant' y 'modelo'."}), 400
     try:
+        cache = cuerpo.get("entrada_cache")
         editor.guardar_tarifa(tenant, modelo,
                               float(cuerpo.get("entrada") or 0),
-                              float(cuerpo.get("salida") or 0))
+                              float(cuerpo.get("salida") or 0),
+                              None if cache in (None, "") else float(cache))
     except editor.ErrorEdicion as e:
         return jsonify({"error": str(e)}), 400
     except (TypeError, ValueError):

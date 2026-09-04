@@ -708,15 +708,22 @@ def _mutar_agregar_herramienta(doc: dict, herramienta_propuesta: dict) -> None:
     doc.setdefault("herramientas", []).append(herramienta_propuesta)
 
 
-def _mutar_tarifa(doc: dict, modelo: str, entrada: float, salida: float) -> None:
+def _mutar_tarifa(doc: dict, modelo: str, entrada: float, salida: float,
+                  entrada_cache: float | None = None) -> None:
     """Guarda cuanto cuesta un modelo, en USD por MILLON de tokens.
 
     Por millon porque asi lo publican los proveedores: guardar el numero como
     viene evita el error mas aburrido y mas caro de este dominio, que es un
     factor de mil metido al cargarlo.
     """
-    doc.setdefault("llm", {}).setdefault("tarifas", {})[modelo] = {
-        "entrada": float(entrada), "salida": float(salida)}
+    tarifa = {"entrada": float(entrada), "salida": float(salida)}
+    # Se omite si no se declara, en vez de copiar 'entrada': ausente significa
+    # "cobrar todo como entrada nueva", que es el lado conservador. Guardarlo
+    # igual al de entrada seria lo mismo en el calculo pero mentiria en la
+    # pantalla -- diria que hay un precio de cache cargado cuando no lo hay.
+    if entrada_cache is not None:
+        tarifa["entrada_cache"] = float(entrada_cache)
+    doc.setdefault("llm", {}).setdefault("tarifas", {})[modelo] = tarifa
 
 
 def _mutar_borrar_tarifa(doc: dict, modelo: str) -> None:
@@ -738,13 +745,19 @@ def _mutar_tope_gasto(doc: dict, tope: float | None, mensaje: str | None) -> Non
         limites["mensaje_al_alcanzar_tope"] = mensaje.strip()
 
 
-def guardar_tarifa(tenant: str, modelo: str, entrada: float,
-                   salida: float) -> TenantConfig:
+def guardar_tarifa(tenant: str, modelo: str, entrada: float, salida: float,
+                   entrada_cache: float | None = None) -> TenantConfig:
     if not str(modelo or "").strip():
         raise ErrorEdicion("Falta la referencia del modelo (ej. 'deepseek:deepseek-v4-flash').")
-    if entrada < 0 or salida < 0:
+    if entrada < 0 or salida < 0 or (entrada_cache is not None and entrada_cache < 0):
         raise ErrorEdicion("Una tarifa no puede ser negativa.")
-    return _editar(tenant, lambda d: _mutar_tarifa(d, modelo.strip(), entrada, salida))
+    if entrada_cache is not None and entrada_cache > entrada:
+        raise ErrorEdicion(
+            "El precio de entrada cacheada no puede ser mayor que el de "
+            "entrada nueva: el cache existe justamente porque sale mas barato. "
+            "Si estan al reves, el costo calculado va a ser mayor que el real.")
+    return _editar(tenant, lambda d: _mutar_tarifa(
+        d, modelo.strip(), entrada, salida, entrada_cache))
 
 
 def borrar_tarifa(tenant: str, modelo: str) -> TenantConfig:

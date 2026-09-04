@@ -58,6 +58,7 @@
 
   let guardando = $state(false);
   let tarifaEntrada = $state('');
+  let tarifaCache = $state('');
   let tarifaSalida = $state('');
   let topeNuevo = $state('');
 
@@ -101,9 +102,14 @@
       toast.error('Poné las dos tarifas, en USD por millón de tokens.');
       return;
     }
-    if (await guardar('tarifa', { modelo: c.modelo, entrada, salida })) {
-      toast.success('Tarifa cargada. El costo ya se calcula desde ahora.');
-      tarifaEntrada = tarifaSalida = '';
+    const cache = tarifaCache.trim() === '' ? null : parseFloat(tarifaCache);
+    if (cache !== null && !(cache >= 0)) {
+      toast.error('El precio de entrada cacheada tiene que ser un número.');
+      return;
+    }
+    if (await guardar('tarifa', { modelo: c.modelo, entrada, salida, entrada_cache: cache })) {
+      toast.success('Tarifa cargada. El costo se calcula desde ahora.');
+      tarifaEntrada = tarifaCache = tarifaSalida = '';
     }
   }
 
@@ -287,8 +293,15 @@
           </div>
           {#if c.tarifa}
             <div class="pie" style="margin-top:6px">
-              {usd(c.tarifa.entrada)} entrada · {usd(c.tarifa.salida)} salida, por millón de tokens
+              Por millón de tokens: {usd(c.tarifa.entrada)} entrada nueva{#if c.tarifa.entrada_cache != null} ·
+              {usd(c.tarifa.entrada_cache)} cacheada{/if} · {usd(c.tarifa.salida)} salida
             </div>
+            {#if c.tarifa.entrada_cache == null}
+              <div class="pie" style="margin-top:4px">
+                Sin precio de entrada cacheada: se cobra todo como nueva, así que el gasto
+                mostrado es mayor que el real.
+              </div>
+            {/if}
           {:else}
             <div style="margin-top:8px"><Pill tone="clay">Sin tarifa cargada</Pill></div>
           {/if}
@@ -372,16 +385,25 @@
           <div class="v2-label" style="margin-bottom:8px">
             Tarifa de {c.modelo}
           </div>
-          <p class="pie" style="margin:0 0 8px">USD por millón de tokens, como la publica el proveedor.</p>
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <input class="v2-input" type="number" step="0.001" min="0" style="flex:1;min-width:96px"
-                   placeholder="Entrada" bind:value={tarifaEntrada} />
-            <input class="v2-input" type="number" step="0.001" min="0" style="flex:1;min-width:96px"
-                   placeholder="Salida" bind:value={tarifaSalida} />
-            <button class="v2-btn v2-btn-primary" onclick={guardarTarifa} disabled={guardando}>
-              Guardar
-            </button>
+          <p class="pie" style="margin:0 0 8px">
+            USD por millón de tokens, como los publica el proveedor. La entrada
+            <strong>cacheada</strong> es opcional pero cambia mucho la cuenta: acá casi todo el
+            prompt se repite turno a turno, y un token cacheado puede costar 30 veces menos.
+            Si se deja vacío se cobra todo como entrada nueva.
+          </p>
+          <div class="campos-tarifa">
+            <label>Entrada nueva
+              <input class="v2-input" type="number" step="0.001" min="0"
+                     placeholder="0.44" bind:value={tarifaEntrada} /></label>
+            <label>Entrada cacheada
+              <input class="v2-input" type="number" step="0.001" min="0"
+                     placeholder="0.014" bind:value={tarifaCache} /></label>
+            <label>Salida
+              <input class="v2-input" type="number" step="0.001" min="0"
+                     placeholder="1.32" bind:value={tarifaSalida} /></label>
           </div>
+          <button class="v2-btn v2-btn-primary" style="margin-top:8px"
+                  onclick={guardarTarifa} disabled={guardando}>Guardar tarifa</button>
         </div>
 
         <div class="v2-card" style="padding:14px 16px" id="configurar-tope">
@@ -493,6 +515,12 @@
     padding: 14px 16px;
     background: color-mix(in srgb, var(--v2-accent, #2563eb) 6%, transparent);
     border-color: color-mix(in srgb, var(--v2-accent, #2563eb) 22%, transparent);
+  }
+
+  .campos-tarifa { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .campos-tarifa label {
+    display: flex; flex-direction: column; gap: 4px;
+    font-size: 11px; color: var(--v2-slate);
   }
 
   .enlace { font-size: 12.5px; color: var(--v2-accent, #2563eb); text-decoration: none; }
