@@ -497,6 +497,37 @@ class Tarifa(Base):
         return self.entrada * factor, cache * factor, self.salida * factor
 
 
+class SaldoProveedor(Base):
+    """Donde preguntarle al proveedor del modelo cuanto saldo queda.
+
+    Existe para AUDITAR nuestro propio calculo de gasto, no para reemplazarlo.
+    Contamos por tokens porque es lo unico que da detalle por dia y permite
+    frenar a tiempo; el saldo confirma que ese conteo no se desvio.
+
+    Es configuracion y no codigo por la regla de siempre: cada proveedor tiene
+    su URL, su forma de autenticar y su forma de responder, y 'nucleo/' no
+    conoce proveedores concretos. Un proveedor sin endpoint de saldo
+    simplemente no lo declara y la comparacion no corre.
+
+    'campo' es la ruta al numero dentro de la respuesta, con puntos, y admite
+    indices de lista. En DeepSeek el saldo llega en
+    balance_infos[0].total_balance, asi que la ruta es
+    'balance_infos.0.total_balance'.
+    """
+    url: str = ""
+    # El NOMBRE del secreto, nunca su valor -- mismo criterio que auth_ref en
+    # el catalogo de herramientas.
+    auth_ref: str = ""
+    auth_header: str = "Authorization"
+    auth_esquema: str = "Bearer"
+    campo: str = ""
+    # Cuanto puede separarse el calculo del saldo real antes de que se avise.
+    # 0.15 = 15%. No se avisa por diferencias chicas: el saldo se lee una vez
+    # al dia y los turnos siguen ocurriendo, asi que un desfase pequeño es
+    # normal y no significa nada.
+    tolerancia: float = Field(default=0.15, ge=0, le=1)
+
+
 class LLM(Base):
     """
     Un modelo por defecto, con sustituciones por canal o por rol.
@@ -557,6 +588,8 @@ class LLM(Base):
     # numero inventado seria peor que ninguno -- se veria igual de real en el
     # panel y nadie sabria que es ficcion.
     tarifas: dict[str, Tarifa] = Field(default_factory=dict)
+    # Ver SaldoProveedor: audita el calculo contra la cifra del proveedor.
+    saldo: SaldoProveedor = Field(default_factory=SaldoProveedor)
 
 
 # =============================================================================

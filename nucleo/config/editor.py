@@ -842,3 +842,24 @@ def guardar_tope_gasto(tenant: str, tope: float | None,
             "El tope tiene que ser mayor que cero. Para sacar el limite, "
             "guardalo vacio -- un tope de 0 frenaria el asistente siempre.")
     return _editar(tenant, lambda d: _mutar_tope_gasto(d, tope, mensaje))
+
+
+def _mutar_saldo_proveedor(doc: dict, url: str, auth_ref: str, campo: str,
+                           tolerancia: float | None) -> None:
+    """Donde preguntarle al proveedor cuanto saldo queda. Ver SaldoProveedor."""
+    s = doc.setdefault("llm", {}).setdefault("saldo", {})
+    s["url"] = url.strip()
+    s["auth_ref"] = auth_ref.strip()
+    s["campo"] = campo.strip()
+    if tolerancia is not None:
+        s["tolerancia"] = float(tolerancia)
+
+
+def guardar_saldo_proveedor(tenant: str, url: str, auth_ref: str, campo: str,
+                            tolerancia: float | None = None) -> TenantConfig:
+    if url and not url.lower().startswith("https://"):
+        raise ErrorEdicion(
+            "La URL del saldo tiene que ser https: por ahi viaja la clave del "
+            "proveedor.")
+    return _editar(tenant, lambda d: _mutar_saldo_proveedor(
+        d, url, auth_ref, campo, tolerancia))

@@ -178,6 +178,12 @@ def _volcar(ficha: Consumo) -> None:
     except Exception as fallo:      # noqa: BLE001 -- ver encabezado
         print(f"[consumo] no se pudo registrar el consumo de {ficha.tenant}: {fallo!r}")
 
+    # Una vez al dia, y en un hilo: la foto del saldo es una llamada HTTP a un
+    # tercero, y un cliente no tiene por que esperar por una consulta que no
+    # tiene nada que ver con su pregunta.
+    if ficha.config is not None:
+        _quizas_fotografiar_saldo(ficha.config, ficha.tenant)
+
 
 def gasto_del_mes(tenant: str) -> float:
     """Lo gastado en el mes corriente. 0.0 si no se puede leer.
@@ -248,3 +254,187 @@ def estado_del_gasto(config, tenant: str) -> dict:
         accion = "seguir"
     return {"accion": accion, "gastado": round(gastado, 4),
             "tope": tope, "porcentaje": round(porcentaje, 3)}
+
+
+# =============================================================================
+#  CONCILIACION  --  lo que calculamos contra lo que el proveedor cobro
+# =============================================================================
+#  El conteo por tokens es un CALCULO nuestro: depende de que la tarifa cargada
+#  sea la vigente, de que el desglose de cache sea correcto y de que las
+#  ventanas de horario pico esten bien. Las tres pueden quedar viejas sin
+#  aviso.
+#
+#  Paso el 17/08/2026: DeepSeek subio precios y nadie se entero. El nivel de
+#  $0.28 por millon dejo de aplicarse y solo se vio semanas despues, mirando la
+#  facturacion real.
+#
+#  El saldo del proveedor es la unica cifra que no discute nadie. Lo que baja
+#  de un dia al otro ES lo que se gasto.
+#
+#  NO REEMPLAZA EL CONTEO: el saldo no dice por dia ni por tipo de token, y
+#  llega tarde para frenar nada. Audita, no sustituye.
+
+# Un proceso pregunta el saldo UNA vez por dia. Sin esto, cada turno miraria la
+# base para ver si ya se guardo -- una consulta por turno para un dato que
+# cambia una vez al dia.
+_saldo_visto: dict[str, str] = {}
+
+
+def _valor_en(datos, ruta: str):
+    """El valor en 'a.b.0.c', tolerando listas. None si el camino no existe."""
+    actual = datos
+    for parte in (ruta or "").split("."):
+        if isinstance(actual, list):
+            try:
+                actual = actual[int(parte)]
+            except (ValueError, IndexError):
+                return None
+        elif isinstance(actual, dict):
+            actual = actual.get(parte)
+        else:
+            return None
+        if actual is None:
+            return None
+    return actual
+
+
+def consultar_saldo(config) -> float | None:
+    """El saldo que reporta el proveedor, o None si no se puede saber.
+
+    Devuelve None ante cualquier problema -- sin endpoint declarado, sin
+    credencial, timeout, respuesta con otra forma. Es informacion de auditoria:
+    no saberla no puede afectar a nadie que este esperando una respuesta.
+    """
+    cfg = getattr(getattr(config, "llm", None), "saldo", None)
+    if not cfg or not cfg.url or not cfg.campo:
+        return None
+
+    from nucleo.seguridad import secretos
+    clave = secretos.obtener(config.identidad.slug, cfg.auth_ref) if cfg.auth_ref else None
+    if cfg.auth_ref and not clave:
+        print(f"[consumo] falta el secreto '{cfg.auth_ref}' para consultar el saldo.")
+        return None
+
+    try:
+        import requests
+        cabeceras = {}
+        if clave:
+            cabeceras[cfg.auth_header] = f"{cfg.auth_esquema} {clave}".strip()
+        r = requests.get(cfg.url, headers=cabeceras, timeout=15)
+        r.raise_for_status()
+        crudo = _valor_en(r.json(), cfg.campo)
+        return float(crudo) if crudo is not None else None
+    except Exception as fallo:      # noqa: BLE001 -- ver docstring
+        print(f"[consumo] no se pudo consultar el saldo del proveedor: {fallo!r}")
+        return None
+
+
+def _guardar_saldo_del_dia(config, tenant: str) -> None:
+    """Deja la foto del saldo de hoy, si todavia no esta. Una vez por dia."""
+    try:
+        with sesion(tenant) as (cur, org):
+            cur.execute(
+                """select saldo_proveedor_usd from asistente.usage_daily
+                    where organization_id = %s and dia = current_date""", (org,))
+            fila = cur.fetchone()
+            if fila and fila["saldo_proveedor_usd"] is not None:
+                return                      # ya esta
+        saldo = consultar_saldo(config)
+        if saldo is None:
+            return
+        with sesion(tenant) as (cur, org):
+            cur.execute(
+                """update asistente.usage_daily set saldo_proveedor_usd = %s
+                    where organization_id = %s and dia = current_date""",
+                (saldo, org))
+    except Exception as fallo:      # noqa: BLE001
+        print(f"[consumo] no se pudo guardar el saldo del dia: {fallo!r}")
+
+
+def _quizas_fotografiar_saldo(config, tenant: str) -> None:
+    """Dispara la foto en un hilo: nunca le agrega latencia al turno.
+
+    El saldo es una llamada HTTP a un tercero. Hacerla dentro del turno
+    significaria que un cliente espera por una consulta que no tiene nada que
+    ver con su pregunta -- y que un proveedor lento le arruine la respuesta.
+    """
+    # Se descarta ANTES de tocar la base. Un proveedor sin endpoint de saldo no
+    # participa de la conciliacion, y consultarle a la base todos los dias si
+    # ya guardo un dato que nunca va a existir es trabajo puro.
+    cfg = getattr(getattr(config, "llm", None), "saldo", None)
+    if not cfg or not getattr(cfg, "url", "") or not getattr(cfg, "campo", ""):
+        return
+    hoy = str(__import__("datetime").date.today())
+    if _saldo_visto.get(tenant) == hoy:
+        return
+    _saldo_visto[tenant] = hoy
+    import threading
+    threading.Thread(target=_guardar_saldo_del_dia, args=(config, tenant),
+                     daemon=True).start()
+
+
+def conciliar(tenant: str, dias: int = 14) -> list[dict]:
+    """Por dia: lo que calculamos, lo que bajo el saldo, y si se separan.
+
+    El gasto real de un dia es el saldo del dia ANTERIOR menos el de hoy. Hacen
+    falta dos fotos consecutivas: el primer dia con saldo nunca tiene con que
+    compararse, y se devuelve sin veredicto en vez de inventarle uno.
+
+    Una recarga de saldo SUBE la cifra, asi que la resta da negativa. Ese dia
+    no se puede conciliar -- se marca y se sigue, en vez de reportar un gasto
+    negativo que no significa nada.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select dia, costo_usd, saldo_proveedor_usd
+                 from asistente.usage_daily
+                where organization_id = %s
+                  and dia > current_date - make_interval(days => %s)
+                order by dia""", (org, dias))
+        filas = [dict(f) for f in cur.fetchall()]
+
+    salida, saldo_previo = [], None
+    for f in filas:
+        saldo = f["saldo_proveedor_usd"]
+        calculado = float(f["costo_usd"] or 0)
+        real = None
+        if saldo is not None and saldo_previo is not None:
+            real = float(saldo_previo) - float(saldo)
+        salida.append({
+            "dia": f["dia"].isoformat(),
+            "calculado": round(calculado, 4),
+            "real": None if real is None else round(real, 4),
+            # Negativo = hubo una recarga ese dia. No es un gasto negativo, es
+            # que la resta no aplica.
+            "hubo_recarga": real is not None and real < 0,
+            "saldo": None if saldo is None else float(saldo),
+        })
+        if saldo is not None:
+            saldo_previo = saldo
+    return salida
+
+
+def veredicto_conciliacion(config, tenant: str, dias: int = 14) -> dict:
+    """Si el calculo se esta separando de la realidad, y por cuanto.
+
+    Se compara el ACUMULADO y no dia por dia: el saldo se lee una vez al dia y
+    los turnos siguen ocurriendo, asi que un dia suelto siempre difiere. Lo que
+    importa es si la diferencia se sostiene.
+    """
+    filas = [f for f in conciliar(tenant, dias)
+             if f["real"] is not None and not f["hubo_recarga"]]
+    if not filas:
+        return {"comparables": 0, "estado": "sin_datos"}
+
+    calc = sum(f["calculado"] for f in filas)
+    real = sum(f["real"] for f in filas)
+    tolerancia = getattr(getattr(getattr(config, "llm", None), "saldo", None),
+                         "tolerancia", 0.15)
+    desvio = abs(calc - real) / real if real else 0.0
+    return {
+        "comparables": len(filas),
+        "calculado": round(calc, 4),
+        "real": round(real, 4),
+        "desvio": round(desvio, 3),
+        "estado": "ok" if desvio <= tolerancia else "desviado",
+    }

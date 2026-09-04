@@ -90,6 +90,12 @@ class _CursorFalso:
     def execute(self, *a, **k):
         volcados.append(a[1] if len(a) > 1 else None)
 
+    def fetchone(self):
+        return None
+
+    def fetchall(self):
+        return []
+
 
 class _SesionFalsa:
     def __init__(self, tenant): pass
@@ -372,6 +378,74 @@ try:
     afirmar(False, "una tarifa de cache mas cara que la de entrada se rechaza")
 except Exception as e:
     afirmar("mas barato" in str(e), "una tarifa de cache mas cara que la de entrada se rechaza")
+
+print("\n== 10. conciliacion contra el saldo del proveedor ==")
+# El conteo por tokens es un CALCULO: depende de la tarifa cargada, del
+# desglose de cache y de las ventanas de horario. Las tres pueden quedar
+# viejas sin aviso -- paso el 17/08/2026, cuando DeepSeek subio precios y solo
+# se vio semanas despues mirando la facturacion.
+#
+# El saldo del proveedor es la unica cifra que no discute nadie.
+
+afirmar(consumo._valor_en({"balance_infos": [{"total_balance": "7.50"}]},
+                          "balance_infos.0.total_balance") == "7.50",
+        "la ruta con indice de lista encuentra el saldo (forma de DeepSeek)")
+afirmar(consumo._valor_en({"a": 1}, "a.b.c") is None,
+        "una ruta que no existe devuelve None en vez de reventar")
+afirmar(consumo._valor_en({"x": [{"y": 1}]}, "x.9.y") is None,
+        "un indice fuera de rango devuelve None")
+
+# Sin endpoint declarado no se consulta nada: un proveedor que no expone saldo
+# simplemente no participa de la conciliacion.
+class SinSaldo(ConfigFalsa):
+    class llm:
+        tarifas = {}
+        saldo = None
+
+
+afirmar(consumo.consultar_saldo(SinSaldo()) is None,
+        "sin endpoint declarado no se intenta consultar")
+
+# --- el veredicto, con saldos fabricados ---------------------------------
+FILAS = []
+consumo.conciliar = lambda tenant, dias=14: FILAS
+
+
+class ConTolerancia(ConfigFalsa):
+    class llm:
+        tarifas = {}
+        class saldo:
+            tolerancia = 0.15
+
+
+FILAS[:] = []
+afirmar(consumo.veredicto_conciliacion(ConTolerancia(), "t")["estado"] == "sin_datos",
+        "sin dias comparables no se inventa un veredicto")
+
+# Calculado 1.00, real 1.05: 5% de desvio, dentro de tolerancia.
+FILAS[:] = [{"dia": "2026-09-01", "calculado": 0.50, "real": 0.52,
+             "hubo_recarga": False, "saldo": 9.0},
+            {"dia": "2026-09-02", "calculado": 0.50, "real": 0.53,
+             "hubo_recarga": False, "saldo": 8.5}]
+v1 = consumo.veredicto_conciliacion(ConTolerancia(), "t")
+afirmar(v1["estado"] == "ok" and v1["comparables"] == 2,
+        f"un desvio del {v1['desvio']:.0%} queda dentro de la tolerancia")
+
+# Calculado el doble del real: es el sintoma de cobrar todo como pico cuando
+# el trafico es fuera de pico -- medido 1.87x sobre datos reales.
+FILAS[:] = [{"dia": "2026-09-01", "calculado": 1.87, "real": 1.00,
+             "hubo_recarga": False, "saldo": 9.0}]
+v2 = consumo.veredicto_conciliacion(ConTolerancia(), "t")
+afirmar(v2["estado"] == "desviado",
+        f"un desvio del {v2['desvio']:.0%} se marca como desviado")
+
+# Una recarga de saldo SUBE la cifra y la resta da negativa. Ese dia no se
+# puede conciliar: se excluye en vez de reportar un gasto negativo.
+FILAS[:] = [{"dia": "2026-09-01", "calculado": 0.40, "real": -9.60,
+             "hubo_recarga": True, "saldo": 18.0}]
+v3 = consumo.veredicto_conciliacion(ConTolerancia(), "t")
+afirmar(v3["estado"] == "sin_datos",
+        "un dia con recarga se excluye, no genera un gasto negativo")
 
 
 print()
