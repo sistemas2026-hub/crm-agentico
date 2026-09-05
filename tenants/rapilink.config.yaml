@@ -1691,6 +1691,49 @@ llm:
   # hay modelo local corriendo en ningun lado, asi que primero habria que
   # volver a levantar ese servicio.
 
+  # --- cuanto cuesta el modelo (05/09/2026) ----------------------------------
+  # USD por MILLON de tokens, como los publica el proveedor. Estos son los
+  # precios de PICO; fuera de pico DeepSeek cobra la mitad, y de eso se encarga
+  # 'descuento_fuera_pico' con las ventanas de abajo.
+  #
+  # 'entrada_cache' NO es un detalle fino: medido sobre 30 dias reales de
+  # facturacion, el 89% de la entrada llega cacheada -- el prompt de sistema,
+  # el catalogo de herramientas y el historial se repiten turno a turno. Un
+  # token cacheado sale ~30 veces mas barato. Cobrando todo como entrada nueva,
+  # 141 millones de tokens que costaron $7.48 habrian dado entre $30 y $60.
+  #
+  # Se editan desde /consumo. Estan aqui para que una carga de este archivo no
+  # deje al tenant sin tarifa -- pasado real: el 05/09/2026 una carga las borro
+  # y el gasto volvio a mostrarse en blanco.
+  tarifas:
+    deepseek:deepseek-v4-flash:
+      entrada: 0.44
+      entrada_cache: 0.014
+      salida: 1.32
+      descuento_fuera_pico: 0.5
+      # 01:00-04:00 y 06:00-10:00 UTC, lunes a viernes. Verificado contra la
+      # facturacion real: el 94% del trafico de Rapilink cae FUERA de pico --
+      # esas horas son de madrugada en Colombia. Sin estas ventanas el gasto
+      # calculado daba 1.87x el real.
+      ventanas_pico:
+        - dias: [1, 2, 3, 4, 5]
+          desde_utc: 1
+          hasta_utc: 4
+        - dias: [1, 2, 3, 4, 5]
+          desde_utc: 6
+          hasta_utc: 10
+
+  # Donde preguntarle al proveedor cuanto saldo queda, para AUDITAR el calculo
+  # de arriba contra lo que de verdad cobra. La resta entre el saldo de dos
+  # dias es el gasto real; si se separa del calculado mas que 'tolerancia',
+  # algo cambio -- una tarifa vieja, la mezcla de cache, o las ventanas.
+  # Paso el 17/08/2026: DeepSeek subio precios y nadie se entero.
+  saldo:
+    url: https://api.deepseek.com/user/balance
+    auth_ref: DEEPSEEK_API_KEY      # el NOMBRE del secreto, nunca el valor
+    campo: balance_infos.0.total_balance
+    tolerancia: 0.15
+
 # -----------------------------------------------------------------------------
 #  VARIABLES DE TENANT  -  no son secretos, pero SI varian por empresa
 # -----------------------------------------------------------------------------
@@ -4802,7 +4845,12 @@ manual:
 
 limites:
   max_conversaciones_dia: 500
-  max_costo_usd_mes: 0.0    # modelo local: sin costo por token
+  # El asistente deja de responder solo al alcanzarlo y las conversaciones
+  # pasan a una persona (ver nucleo/observabilidad/consumo.py). Decia 0.0 con
+  # el comentario "modelo local: sin costo por token" -- cierto hasta que se
+  # saco Ollama del VPS, y desde entonces un tope que nunca podia dispararse.
+  # Ritmo medido en septiembre 2026: ~$12/mes, asi que 20 da margen de 1.7x.
+  max_costo_usd_mes: 20.0
   alerta_al_porcentaje: 80
   # Cubre depuracion, auditoria y analisis; mas alla es solo superficie de riesgo.
   retencion_conversaciones_dias: 365

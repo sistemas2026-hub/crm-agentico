@@ -105,6 +105,17 @@ SECCIONES_EDITABLES = (
     "localidades",        # _mutar_localidades
     "variables_tenant",   # _mutar_variable_tenant / _mutar_borrar_variable_tenant
     "manual",             # _mutar_casos_manual
+    # 'llm' por _mutar_tarifa y _mutar_saldo_proveedor; 'limites' por
+    # _mutar_tope_gasto. Faltaban, y paso exactamente lo que este comentario
+    # anunciaba: el 05/09/2026 una carga del YAML borro la tarifa de DeepSeek
+    # y el endpoint de saldo -- configuracion que solo existe en la base, que
+    # costo medir contra la facturacion real, y que nadie escribio en el
+    # archivo porque no se edita ahi.
+    #
+    # Sin la seccion en esta lista, el cargador ni siquiera avisa: no sabe que
+    # ahi hay algo que solo la interfaz escribe.
+    "llm",                # _mutar_tarifa / _mutar_saldo_proveedor
+    "limites",            # _mutar_tope_gasto
 )
 
 
