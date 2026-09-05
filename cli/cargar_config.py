@@ -65,6 +65,7 @@ RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ))
 
 from nucleo.config import TenantConfig, cargar_config   # noqa: E402
+from nucleo.config import editor                        # noqa: E402
 from nucleo.config.editor import SECCIONES_EDITABLES    # noqa: E402
 from nucleo.persistencia.conexion import dsn            # noqa: E402
 
