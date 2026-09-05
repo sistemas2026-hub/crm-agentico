@@ -154,6 +154,80 @@ def commits_sin_empujar() -> int:
         return 0
 
 
+def commits_atrasados() -> int | None:
+    """Cuantos commits del remoto todavia no estan en esta copia local.
+
+    Caso simetrico e inverso a commits_sin_empujar(): ese detecta codigo local
+    que la config podria usar antes de que llegue a produccion; este detecta
+    lo contrario -- una copia VIEJA escribiendo una config que ya no coincide
+    con el schema que el motor desplegado usa hoy.
+
+    Encontrado en la auditoria de Fase #20.1-20.3 (04-05/09/2026): asi
+    volvieron 'llm.tarifas' / 'limites.mensaje_al_alcanzar_tope' / 'llm.saldo'
+    a produccion -- campos que un schema mas viejo ya no reconoce, escritos
+    por una copia atrasada que todavia los validaba como buenos contra SU
+    propio 'schema.py'.
+
+    A diferencia de commits_sin_empujar() -- que degrada a 0 (permite) ante
+    cualquier duda porque la guarda de perdidas de cada puerta la respalda
+    igual -- esta NO tiene ningun respaldo equivalente: nada mas sabe si un
+    campo sigue siendo valido para el schema desplegado. Por eso, si no se
+    puede determinar el estado real (sin git, sin upstream configurado, el
+    comando falla), devuelve None -- y None se trata como bloqueo, nunca
+    como 'esta alineado'.
+    """
+    import subprocess
+    try:
+        salida = subprocess.run(
+            ["git", "rev-list", "--count", "HEAD..@{u}"],
+            cwd=Path(__file__).resolve().parents[2], capture_output=True, text=True, timeout=10)
+    except Exception:                                    # noqa: BLE001
+        return None
+    if salida.returncode != 0:
+        return None
+    try:
+        return int((salida.stdout or "").strip())
+    except ValueError:
+        return None
+
+
+def problemas_de_alineacion_git() -> list[str]:
+    """
+    Problemas de alineacion entre esta copia y el remoto, en las DOS
+    direcciones -- lista vacia si esta alineada.
+
+    Centraliza la deteccion (Fase #20.6.4) para que cargar_config.py y
+    _editar() -- las dos puertas que escriben tenant_config -- compartan UNA
+    sola implementacion en vez de dos copias que hay que acordarse de
+    mantener iguales. No decide COMO reportar el problema ni si bloquea: eso
+    lo arma cada puerta con su propia excepcion, porque una corre como CLI
+    (SystemExit tiene sentido ahi) y la otra corre dentro del proceso
+    servido, donde SystemExit lo tumbaria entero.
+    """
+    adelante = commits_sin_empujar()
+    atras = commits_atrasados()
+
+    problemas: list[str] = []
+    if adelante:
+        problemas.append(
+            f"esta copia tiene {adelante} commit(s) locales que todavia no "
+            f"llegaron al remoto -- si esta config usa un campo del esquema "
+            f"que solo existe en esos commits, el motor desplegado no va a "
+            f"poder leerla.")
+    if atras is None:
+        problemas.append(
+            "no se pudo determinar si esta copia esta al dia con el remoto "
+            "(sin git, sin upstream configurado, o el comando fallo) -- ante "
+            "la duda, no se procede.")
+    elif atras:
+        problemas.append(
+            f"esta copia esta {atras} commit(s) atras del remoto -- si un "
+            f"commit mas reciente cambio el esquema (por ejemplo, quito un "
+            f"campo que esta copia todavia declara valido), escribir esta "
+            f"config puede reintroducir en produccion algo que el codigo "
+            f"desplegado ya no reconoce.")
+    return problemas
+
 
 def _validar(tenant: str, crudo: dict) -> TenantConfig:
     """Mismo camino que cargar_config(), pero sobre el documento en memoria."""
@@ -196,17 +270,21 @@ def _editar(tenant: str, mutar: Callable[[dict], None]) -> TenantConfig:
     #
     # En produccion esto no dispara nunca: el editor corre dentro del codigo ya
     # desplegado, y ahi no hay repositorio git, asi que la comprobacion
-    # devuelve 0 y no molesta. Solo aparece donde existe el desfase.
+    # devuelve 0/None y no molesta. Solo aparece donde existe el desfase.
+    #
+    # Fase #20.6.4: ademas del caso de arriba (copia ADELANTADA), cubre el
+    # simetrico -- copia ATRASADA -- via problemas_de_alineacion_git(), que
+    # tambien usa cargar_config.py. Una sola implementacion para las dos
+    # puertas.
     if not os.environ.get("PERMITIR_CONFIG_SIN_DESPLEGAR"):
-        sin_empujar = commits_sin_empujar()
-        if sin_empujar:
+        problemas = problemas_de_alineacion_git()
+        if problemas:
             raise ErrorEdicion(
-                f"Hay {sin_empujar} commit(s) sin empujar en esta copia. "
-                "Si esta edicion usa un campo del esquema que solo existe "
-                "en esos commits, el motor desplegado NO va a poder leer la "
-                "configuracion y deja de atender. Primero el codigo, "
-                "despues la config: git push. Si sabes que no estrena "
-                "ningun campo: PERMITIR_CONFIG_SIN_DESPLEGAR=1")
+                "esta copia no esta alineada con el remoto:\n  - "
+                + "\n  - ".join(problemas) +
+                "\n\nPrimero sincronizar el codigo (git pull / git push segun "
+                "corresponda), despues editar. Si sabes que esta edicion no "
+                "se ve afectada: PERMITIR_CONFIG_SIN_DESPLEGAR=1")
 
     with sesion(tenant) as (cur, org):
         cur.execute("""select config, config_version

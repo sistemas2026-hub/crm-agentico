@@ -66,7 +66,6 @@ sys.path.insert(0, str(RAIZ))
 
 from nucleo.config import TenantConfig, cargar_config   # noqa: E402
 from nucleo.config import editor                        # noqa: E402
-from nucleo.config.editor import SECCIONES_EDITABLES    # noqa: E402
 from nucleo.persistencia.conexion import dsn            # noqa: E402
 
 # override=False, y NO es un detalle: con True, el .env PISABA las variables
@@ -153,7 +152,7 @@ def _organizacion(cur, slug: str, org_id: str | None = None) -> str:
 #  planes curados y 128 localidades sincronizadas sin avisar (medido el
 #  23/08/2026). Ahora la lista vive junto a los mutadores que la vuelven
 #  necesaria, y esto la lee.
-SECCIONES_QUE_EDITA_LA_INTERFAZ = SECCIONES_EDITABLES
+SECCIONES_QUE_EDITA_LA_INTERFAZ = editor.SECCIONES_EDITABLES
 
 
 def _hojas(valor, prefijo=""):
@@ -339,22 +338,25 @@ def cargar(ruta: Path, org_id: str | None = None, forzar: bool = False) -> None:
         #
         # No se comparan campos uno por uno -- eso exigiria parsear el esquema
         # remoto y seria fragil. Se comprueba lo unico que importa y es exacto:
-        # si este commit ya esta en el remoto. Si no lo esta, esta config puede
-        # traer algo que alla no existe todavia.
+        # si este commit ya esta en el remoto -- Y, desde la Fase #20.4, si el
+        # remoto tiene commits que esta copia todavia no bajo (el caso
+        # simetrico que dejo entrar 'llm.tarifas' / 'llm.saldo' de vuelta a
+        # produccion: una copia ATRASADA validando contra un schema viejo).
+        # La deteccion vive en editor.py (Fase #20.6.4): es la misma que usa
+        # _editar(), la otra puerta que escribe esta misma tabla.
         if not forzar:
-            sin_empujar = editor.commits_sin_empujar()
-            if sin_empujar:
+            problemas = editor.problemas_de_alineacion_git()
+            if problemas:
                 raise SystemExit(
-                    f"'{slug}': hay {sin_empujar} commit(s) sin empujar en esta "
-                    f"copia.\n\n"
-                    f"  Si esta configuracion usa un campo del esquema que solo\n"
-                    f"  existe en esos commits, el motor desplegado NO va a poder\n"
-                    f"  leerla (los modelos rechazan campos desconocidos) y deja\n"
-                    f"  de atender.\n\n"
-                    f"  El orden correcto es: primero el codigo, despues la config.\n\n"
-                    f"      git push\n"
+                    f"'{slug}': esta copia local no esta alineada con el "
+                    f"remoto:\n\n  - " + "\n  - ".join(problemas) +
+                    f"\n\n  El orden correcto es: primero sincronizar el "
+                    f"codigo (git pull / git push segun corresponda), "
+                    f"despues cargar la config.\n\n"
+                    f"      git fetch origin && git status\n"
                     f"      py -3.13 cli/cargar_config.py {ruta}\n\n"
-                    f"  Si sabes que esta config no estrena ningun campo:\n\n"
+                    f"  Si sabes que esta config no se ve afectada por la "
+                    f"diferencia:\n\n"
                     f"      py -3.13 cli/cargar_config.py {ruta} --forzar")
 
         # El archivo ya no es el unico que escribe roles. Antes de pisar la
