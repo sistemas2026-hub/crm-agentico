@@ -227,6 +227,94 @@ def _commits_sin_empujar() -> int:
         return 0
 
 
+def _commits_atrasados() -> int | None:
+    """Cuantos commits del remoto todavia no estan en esta copia local.
+
+    Caso simetrico e inverso a _commits_sin_empujar(): ese detecta codigo
+    local que la config podria usar antes de que llegue a produccion; este
+    detecta lo contrario -- una copia VIEJA escribiendo una config que ya no
+    coincide con el schema que el motor desplegado usa hoy.
+
+    Encontrado en la auditoria de Fase #20.1-20.3 (04-05/09/2026): asi
+    volvieron 'llm.tarifas' / 'limites.mensaje_al_alcanzar_tope' / 'llm.saldo'
+    a produccion -- campos que el schema actual ya no reconoce, escritos por
+    una copia atrasada que todavia los validaba como buenos contra SU
+    'schema.py', no el que el motor desplegado usa hoy.
+
+    A diferencia de _commits_sin_empujar() -- que degrada a 0 (permite) ante
+    cualquier duda porque la guarda de perdidas (_lo_que_pisaria) la respalda
+    igual -- esta NO tiene ningun respaldo equivalente: esa otra guarda
+    compara CONTENIDO de secciones conocidas, no sabe si un campo sigue
+    siendo valido para el schema desplegado. Por eso, si no se puede
+    determinar el estado real (sin git, sin upstream configurado, el comando
+    falla), devuelve None -- y None se trata como bloqueo, nunca como 'esta
+    alineado'.
+    """
+    import subprocess
+    try:
+        salida = subprocess.run(
+            ["git", "rev-list", "--count", "HEAD..@{u}"],
+            cwd=RAIZ, capture_output=True, text=True, timeout=10)
+    except Exception:                                    # noqa: BLE001
+        return None
+    if salida.returncode != 0:
+        return None
+    try:
+        return int((salida.stdout or "").strip())
+    except ValueError:
+        return None
+
+
+def _verificar_alineacion_git(slug: str, ruta: Path, forzar: bool) -> None:
+    """
+    Aborta ANTES de tocar la base si esta copia no coincide con el remoto,
+    en cualquiera de las dos direcciones -- adelantada (_commits_sin_empujar)
+    o atrasada (_commits_atrasados, Fase #20.4).
+
+    Separada de 'cargar()' para poder probarla sola, monkeypateando las dos
+    funciones de git (ver tests/test_guarda_cargar_config.py) sin necesitar
+    un repositorio real ni una base.
+    """
+    if forzar:
+        return
+
+    adelante = _commits_sin_empujar()
+    atras = _commits_atrasados()
+
+    problemas: list[str] = []
+    if adelante:
+        problemas.append(
+            f"esta copia tiene {adelante} commit(s) locales que todavia no "
+            f"llegaron al remoto -- si esta config usa un campo del esquema "
+            f"que solo existe en esos commits, el motor desplegado no va a "
+            f"poder leerla.")
+    if atras is None:
+        problemas.append(
+            "no se pudo determinar si esta copia esta al dia con el remoto "
+            "(sin git, sin upstream configurado, o el comando fallo) -- ante "
+            "la duda, no se procede.")
+    elif atras:
+        problemas.append(
+            f"esta copia esta {atras} commit(s) atras del remoto -- si un "
+            f"commit mas reciente cambio el esquema (por ejemplo, quito un "
+            f"campo que esta copia todavia declara valido), cargar esta "
+            f"config puede reintroducir en produccion algo que el codigo "
+            f"desplegado ya no reconoce.")
+
+    if not problemas:
+        return
+
+    raise SystemExit(
+        f"'{slug}': esta copia local no esta alineada con el remoto:\n\n  - "
+        + "\n  - ".join(problemas) +
+        f"\n\n  El orden correcto es: primero sincronizar el codigo (git "
+        f"pull / git push segun corresponda), despues cargar la config.\n\n"
+        f"      git fetch origin && git status\n"
+        f"      py -3.13 cli/cargar_config.py {ruta}\n\n"
+        f"  Si sabes que esta config no se ve afectada por la diferencia:\n\n"
+        f"      py -3.13 cli/cargar_config.py {ruta} --forzar")
+
+
 def _lo_que_pisaria(guardado: dict, nuevo: dict) -> list[str]:
     """
     Que se PERDERIA de la base al cargar 'nuevo' encima.
@@ -365,23 +453,12 @@ def cargar(ruta: Path, org_id: str | None = None, forzar: bool = False) -> None:
         #
         # No se comparan campos uno por uno -- eso exigiria parsear el esquema
         # remoto y seria fragil. Se comprueba lo unico que importa y es exacto:
-        # si este commit ya esta en el remoto. Si no lo esta, esta config puede
-        # traer algo que alla no existe todavia.
-        if not forzar:
-            sin_empujar = _commits_sin_empujar()
-            if sin_empujar:
-                raise SystemExit(
-                    f"'{slug}': hay {sin_empujar} commit(s) sin empujar en esta "
-                    f"copia.\n\n"
-                    f"  Si esta configuracion usa un campo del esquema que solo\n"
-                    f"  existe en esos commits, el motor desplegado NO va a poder\n"
-                    f"  leerla (los modelos rechazan campos desconocidos) y deja\n"
-                    f"  de atender.\n\n"
-                    f"  El orden correcto es: primero el codigo, despues la config.\n\n"
-                    f"      git push\n"
-                    f"      py -3.13 cli/cargar_config.py {ruta}\n\n"
-                    f"  Si sabes que esta config no estrena ningun campo:\n\n"
-                    f"      py -3.13 cli/cargar_config.py {ruta} --forzar")
+        # si este commit ya esta en el remoto -- Y, desde la Fase #20.4, si el
+        # remoto tiene commits que esta copia todavia no bajo (el caso
+        # simetrico que dejo entrar 'llm.tarifas' / 'llm.saldo' de vuelta a
+        # produccion: una copia ATRASADA validando contra un schema viejo).
+        # Ver _verificar_alineacion_git.
+        _verificar_alineacion_git(slug, ruta, forzar)
 
         # El archivo ya no es el unico que escribe roles. Antes de pisar la
         # base hay que saber si lo que hay ahi lo puso una persona desde la

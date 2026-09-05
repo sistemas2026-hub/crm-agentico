@@ -50,6 +50,11 @@ from nucleo.habilidades import analista, catalogo                      # noqa: E
 from nucleo.habilidades.catalogo import EntradaIndice, Habilidad       # noqa: E402
 from nucleo.modelo import motor                                        # noqa: E402
 
+# Guardada ANTES de que _sin_base() (mas abajo) reemplace catalogo.cargar por
+# un lambda -- ese reemplazo dura el resto del script, asi que la seccion 7-9
+# necesita esta referencia para llamar a la funcion real y no al doble.
+_cargar_real = catalogo.cargar
+
 fallos: list[str] = []
 
 
@@ -142,6 +147,95 @@ afirmar(analista._extraer_json('Claro:\n{"codigo":"X"}\nEspero sirva')
 afirmar(analista._extraer_json("no hay json aca") is None,
         "una respuesta sin JSON devuelve None, no revienta")
 
+
+print("\n== 7-9. lo que la CONSULTA REAL de catalogo.py pone en el WHERE ==")
+# Las pruebas de arriba reemplazan catalogo.cargar entero por un diccionario:
+# prueban que _ejecutar_carga_habilidad usa bien lo que catalogo LE DEVUELVE,
+# pero no prueban que catalogo.py arme la consulta SQL con los filtros que
+# describe. Fase #2.2 los leyo una vez a mano; esto los deja con guarda: si
+# alguien borra 'estado = vigente' o el filtro de organization_id sin darse
+# cuenta, esto falla, no hace falta releer el archivo para notarlo.
+#
+# Sin base de datos: se reemplaza SOLO 'sesion' (el context manager que abre
+# la conexion), por un cursor falso que graba que SQL y que parametros
+# recibio, en vez de ejecutar nada.
+
+
+class _CursorFalso:
+    def __init__(self, filas=None):
+        self.llamadas = []           # [(sql, params), ...]
+        self._filas = filas or []
+
+    def execute(self, sql, params=None):
+        self.llamadas.append((sql, params))
+
+    def fetchall(self):
+        return self._filas
+
+    def fetchone(self):
+        return self._filas[0] if self._filas else None
+
+
+class _SesionFalsa:
+    """Mismo shape que nucleo.persistencia.db.sesion: un context manager que
+    entrega (cursor, organization_id)."""
+    def __init__(self, cursor, org="org-fantasma-000"):
+        self.cursor = cursor
+        self.org = org
+
+    def __call__(self, tenant):
+        return self
+
+    def __enter__(self):
+        return self.cursor, self.org
+
+    def __exit__(self, *exc):
+        return False
+
+
+cursor = _CursorFalso()
+sesion_falsa = _SesionFalsa(cursor)
+catalogo.sesion = sesion_falsa
+
+catalogo.indice_de("cualquier_tenant", "soporte")
+sql_indice, params_indice = cursor.llamadas[-1]
+afirmar("organization_id = %s" in sql_indice,
+        "indice_de() filtra por organization_id en el SQL real")
+afirmar("estado = 'vigente'" in sql_indice,
+        "indice_de() exige estado='vigente' en el SQL real -- una propuesta u "
+        "obsoleta no puede aparecer en el indice")
+afirmar("any(roles_permitidos)" in sql_indice,
+        "indice_de() filtra por rol en el SQL real")
+afirmar(params_indice[0] == sesion_falsa.org and params_indice[1] == "soporte",
+        "los parametros que se bindean son el org de la SESION (no algo que "
+        "el modelo pueda mandar) y el rol pedido")
+
+cursor.llamadas.clear()
+_cargar_real("cualquier_tenant", "facturacion", "HAB-X")
+sql_cargar, params_cargar = cursor.llamadas[-1]
+afirmar("organization_id = %s" in sql_cargar,
+        "cargar() TAMBIEN filtra por organization_id -- doble capa, no solo "
+        "en el indice")
+afirmar("estado = 'vigente'" in sql_cargar,
+        "cargar() TAMBIEN exige estado='vigente' -- una obsoleta no se puede "
+        "cargar nombrando el codigo, aunque el indice ya la hubiera ocultado")
+afirmar("any(roles_permitidos)" in sql_cargar,
+        "cargar() repite el filtro de rol -- PRD 8.1: no alcanza con no "
+        "mostrarla, tambien se rechaza si igual la invocan")
+afirmar(sesion_falsa.org in params_cargar and "facturacion" in params_cargar
+        and "HAB-X" in params_cargar,
+        "los tres filtros -- org, rol, codigo -- viajan como parametros "
+        "reales, no interpolados en el texto (sin riesgo de inyeccion)")
+
+print("\n== 10. limite de lo que esta auditoria SI y NO prueba ==")
+# Esto prueba que el CODIGO arma bien la consulta. No prueba que Postgres
+# de verdad la responda filtrada -- eso exige RLS activo (asistente.habilidades
+# lo declara con FORCE, ver supabase/202609031100_habilidades.sql) y una base
+# real con dos organizaciones para intentar cruzarlas. Sin esa integracion
+# contra Postgres, la afirmacion de aislamiento sigue siendo "el codigo pide
+# lo correcto", no "la base lo hace cumplir". Documentado, no resuelto aca.
+afirmar(True, "aislamiento a nivel RLS/Postgres queda FUERA de esta prueba a "
+              "proposito -- requiere una base real, ver nota arriba")
 
 print()
 if fallos:
