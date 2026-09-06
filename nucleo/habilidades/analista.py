@@ -211,7 +211,11 @@ Sos un analista de procesos de un proveedor de internet. Se detecto que un \
 agente de atencion no supo resolver un tipo de caso, y hay que escribirle el \
 procedimiento.
 
-DATOS DEL PATRON
+CONTEXTO DEL ANALISIS -- SOLO PARA VOS
+Asi se detecto el patron. El agente NO ve nada de esto: no sabe que existe una
+"senal", ni un "motivo", ni cuantos casos hubo. Si algo de esto termina en el
+disparador, el procedimiento no se va a activar nunca.
+
 Rol del agente: {rol}
 Senal: {senal}
 Motivo: {motivo}
@@ -225,16 +229,20 @@ HERRAMIENTAS QUE ESE AGENTE TIENE DE VERDAD
 
 Escribi un procedimiento. Reglas, todas obligatorias:
 
-1. Los pasos solo pueden usar las herramientas de la lista de arriba, por su \
-nombre exacto. Si el caso necesita algo que no esta en esa lista, el \
-procedimiento tiene que terminar pasando el caso a un colaborador humano -- \
-nunca inventes una herramienta.
+1. Los pasos solo pueden pedir acciones que ese agente PUEDE hacer con las \
+herramientas de la lista de arriba. Vale para los nombres de herramienta Y para \
+las acciones descritas en prosa: si la lista no tiene con que verificar una \
+identidad, el procedimiento no puede decir "verifica la identidad", ni siquiera \
+sin nombrar una herramienta. Si el caso necesita algo que ese agente no tiene, \
+el procedimiento termina pasando el caso a un colaborador humano.
 2. No inventes datos de la empresa: ni precios, ni plazos, ni politicas, ni \
 nombres de sistemas que no aparezcan arriba. Si hace falta un dato asi, el \
 paso dice que hay que consultarlo, no lo afirma.
-3. "cuando_usarla" es la CONDICION OBSERVABLE que dispara el procedimiento, \
-escrita para que otro agente decida si aplica sin leer los pasos. Empieza \
-directo con la condicion, sin la palabra "cuando".
+3. "cuando_usarla" es lo que el agente VE EN LA CONVERSACION y dispara el \
+procedimiento -- lo que la persona dice o pide. Empieza directo con la \
+condicion, sin la palabra "cuando". NO menciones señales, motivos, cantidades \
+de casos ni nada del contexto de analisis: el agente no tiene forma de saber \
+eso y el procedimiento no se activaria nunca.
 4. Los pasos son imperativos, numerados, concretos y en orden. Nada de \
 consejos generales tipo "se empatico".
 5. Todo en español, sin markdown.

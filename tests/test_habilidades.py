@@ -142,6 +142,33 @@ afirmar(analista._extraer_json('Claro:\n{"codigo":"X"}\nEspero sirva')
 afirmar(analista._extraer_json("no hay json aca") is None,
         "una respuesta sin JSON devuelve None, no revienta")
 
+print("\n== 7. el prompt del analista no filtra su propio metadato ==")
+# Las dos primeras propuestas reales del analista salieron inservibles, y por
+# la misma causa: mi prompt le pasaba el contexto del analisis (senal, motivo,
+# n_casos) sin decirle que el agente NO puede ver nada de eso.
+#
+# Una salio con este disparador:
+#     "El ticket tiene señal escalada_repetida y motivo frustracion_detectada,
+#      con 5 casos en los ultimos 60 dias..."
+# Un agente no puede observar "5 casos en los ultimos 60 dias". Ese
+# procedimiento no se habria activado jamas.
+#
+# Y las dos le ordenaban al ENRUTADOR verificar identidad -- que tiene una
+# sola herramienta ('derivar_a_area') y por diseño no verifica: eso se movio a
+# cada especialista. La regla decia "no inventes una herramienta", y el modelo
+# obedecio al pie de la letra: no nombro ninguna, lo pidio en prosa.
+
+prompt = analista.PROMPT_REDACCION
+afirmar("SOLO PARA VOS" in prompt,
+        "el contexto del analisis se marca como no observable por el agente")
+afirmar("no se va a activar nunca" in prompt or "no se activaria nunca" in prompt,
+        "y se dice la consecuencia de filtrarlo, no solo que no se haga")
+afirmar("en prosa" in prompt,
+        "la restriccion de herramientas alcanza a las acciones en prosa, no "
+        "solo a los nombres")
+afirmar("VE EN LA CONVERSACION" in prompt,
+        "el disparador se define por lo que el agente ve, no por el patron")
+
 
 print()
 if fallos:
