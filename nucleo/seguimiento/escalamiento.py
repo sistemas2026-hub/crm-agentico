@@ -663,8 +663,15 @@ def escalar(config, tenant: str, usuario_externo: str, conversation_id: str,
         # Se marca aunque el CRM no haya devuelto id: la conversacion igual
         # aparece escalada en la bandeja, y sin esto el proximo mensaje del
         # cliente vuelve a escalar y duplica el ticket de la operacion.
+        # El mismo resumen que encabeza la descripcion del ticket (arriba)
+        # se guarda tambien en la conversacion. Es el que ya redacto el
+        # modelo al evaluar: no hay una llamada extra, y es lo que permite
+        # que la bandeja diga de que se trata cada caso sin abrirlo.
         persistencia.marcar_escalada(tenant, conversation_id, motivo, caso_id,
-                                     etiqueta, necesita_humano)
+                                     etiqueta, necesita_humano,
+                                     resumen=resumen,
+                                     no_comprobado=no_se_pudo_comprobar,
+                                     siguiente_paso=siguiente_paso)
         if not caso_id:
             print(f"[escalamiento] el CRM acepto el caso de {conversation_id} "
                   f"pero no devolvio id -- no queda en la cola de nadie")

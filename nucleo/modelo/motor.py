@@ -74,6 +74,24 @@ class ErrorMotor(Exception):
     pass
 
 
+# Los codigos que NO vienen de ningun sistema externo: los produce un gate del
+# motor frenando al modelo. Son lo contrario de un fallo -- son la proteccion
+# funcionando -- y por eso viajan a la traza marcados como bloqueo y no como
+# error (ver supabase/202609061400_bloqueos_en_traza.sql).
+#
+# La lista vive aca, junto a los 'codigo_error =' que la producen, para que
+# quien agregue un gate la vea. Repetirla en la pantalla o en una consulta
+# seria mantener la misma verdad en dos lugares.
+CODIGOS_DE_BLOQUEO = frozenset({
+    "IDENTIDAD_NO_VERIFICADA",
+    "IDENTIDAD_NO_RESUELTA",
+    "PRECONDICION_NO_CUMPLIDA",
+    "FALTA_HABLAR_CON_EL_CLIENTE",
+    "HERRAMIENTA_DESCONOCIDA",
+    "LIMITE_DE_CONVERSACION",
+})
+
+
 class FaltaIdentidadEnSesion(ErrorMotor):
     """
     La sesion no tiene un campo que la herramienta declaro imprescindible.
@@ -2209,45 +2227,57 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
             # sentido para una lista (results de una consulta); para
             # cualquier otra forma queda None a proposito, no un 0 enganoso.
             #
-            # IDENTIDAD_NO_VERIFICADA se excluye a proposito: no es un fallo,
-            # es el gate de seguridad frenando ANTES de llamar a nada (0ms,
-            # ninguna API externa de por medio) -- es normal que el modelo
-            # pruebe una herramienta antes de tener con que verificar, y
-            # registrarlo como una X en "Ver proceso" parece un error cuando
-            # en realidad la proteccion funciono como debia.
-            if codigo_error != "IDENTIDAD_NO_VERIFICADA":
-                # Lo que la herramienta declaro como resumen del caso, si
-                # declaro alguno (Herramienta.resumen_desde). Viaja SOLO ese
-                # campo y no la respuesta entera: la traza no es lugar para un
-                # registro de cliente completo, y quien la escribe a la base
-                # ademas la ignora -- esto existe para el turno, no para
-                # guardarse.
-                resumen_pedido = ""
-                if (herramienta and herramienta.resumen_desde
-                        and codigo_error is None and isinstance(salida, dict)):
-                    resumen_pedido = str(salida.get(herramienta.resumen_desde) or "")
-                # La verificacion pendiente viaja con la traza porque aca
-                # todavia no existe conversation_id -- lo resuelve api.py al
-                # persistir el turno, igual que con los archivos generados.
-                pendiente = None
-                if (herramienta and herramienta.verificacion
-                        and not herramienta.solo_lectura and codigo_error is None):
-                    pendiente = {
-                        "espera_segundos": herramienta.verificacion.espera_segundos,
-                        "max_intentos": herramienta.verificacion.max_intentos,
-                        "medicion_previa": medicion_previa,
-                    }
-                registro.append({
-                    "herramienta": llamada.nombre,
-                    "parametros": _enmascarar(llamada.argumentos),
-                    "resumen": resumen_pedido,
-                    "verificacion_pendiente": pendiente,
-                    "exito": codigo_error is None,
-                    "n_registros": len(salida) if isinstance(salida, list) else None,
-                    "codigo_error": codigo_error,
-                    "duracion_ms": int((time.monotonic() - t0) * 1000),
-                    "es_escritura": bool(herramienta and not herramienta.solo_lectura),
-                })
+            # IDENTIDAD_NO_VERIFICADA se EXCLUIA a proposito, con este
+            # razonamiento: no es un fallo, es el gate frenando antes de
+            # llamar a nada, y mostrarlo como una X en "Ver proceso" parece un
+            # error cuando la proteccion funciono como debia.
+            #
+            # Era cierto mientras la traza fuera una lista de exitos y fallos.
+            # Deja de serlo desde que la pantalla CUENTA los bloqueos: un panel
+            # que dice "acciones bloqueadas: 0" en una conversacion donde el
+            # sistema bloqueo tres cosas es peor que no mostrar nada.
+            #
+            # Ahora se registra, pero marcado. Sigue sin ser un fallo -- se
+            # cuenta aparte y no ensucia la tasa de error -- y ademas se ve.
+            # Ojo al alcance del cambio: esto es SOLO la traza de auditoria.
+            # 'historial' --lo que el modelo ve en el proximo paso-- se
+            # arma mas abajo y nunca dependio de esta condicion, asi que
+            # registrar los bloqueos no altera lo que el asistente decide.
+            #
+            # Lo que la herramienta declaro como resumen del caso, si
+            # declaro alguno (Herramienta.resumen_desde). Viaja SOLO ese
+            # campo y no la respuesta entera: la traza no es lugar para un
+            # registro de cliente completo, y quien la escribe a la base
+            # ademas la ignora -- esto existe para el turno, no para
+            # guardarse.
+            resumen_pedido = ""
+            if (herramienta and herramienta.resumen_desde
+                    and codigo_error is None and isinstance(salida, dict)):
+                resumen_pedido = str(salida.get(herramienta.resumen_desde) or "")
+            # La verificacion pendiente viaja con la traza porque aca
+            # todavia no existe conversation_id -- lo resuelve api.py al
+            # persistir el turno, igual que con los archivos generados.
+            pendiente = None
+            if (herramienta and herramienta.verificacion
+                    and not herramienta.solo_lectura and codigo_error is None):
+                pendiente = {
+                    "espera_segundos": herramienta.verificacion.espera_segundos,
+                    "max_intentos": herramienta.verificacion.max_intentos,
+                    "medicion_previa": medicion_previa,
+                }
+            registro.append({
+                "herramienta": llamada.nombre,
+                "parametros": _enmascarar(llamada.argumentos),
+                "resumen": resumen_pedido,
+                "verificacion_pendiente": pendiente,
+                "exito": codigo_error is None,
+                "n_registros": len(salida) if isinstance(salida, list) else None,
+                "codigo_error": codigo_error,
+                "duracion_ms": int((time.monotonic() - t0) * 1000),
+                "es_escritura": bool(herramienta and not herramienta.solo_lectura),
+                # Lo que separa "el codigo lo freno" de "el tercero fallo".
+                "es_bloqueo": codigo_error in CODIGOS_DE_BLOQUEO,
+            })
 
             historial.append({"role": "tool", "name": llamada.nombre,
                               "tool_call_id": f"call_{i}",

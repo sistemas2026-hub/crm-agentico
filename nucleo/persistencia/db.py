@@ -304,12 +304,19 @@ def ultima_actividad(tenant: str, canal: str | None = None) -> list[dict]:
                   c.escalada_a_humano, c.necesita_atencion_humana,
                   c.motivo_escalamiento, c.caso_id, c.etiqueta, c.caso_manual,
                   c.actualizado_en, c.id_cliente, c.nombre_cliente,
+                  c.escalada_en, c.resumen,
                   ultimo.contenido as ultimo_mensaje,
                   ultimo.rol       as ultimo_rol,
+                  coalesce(insiste.n, 0) as mensajes_tras_escalar,
                   (c.atendida_manual or exists (
                        select 1 from asistente.messages h
                         where h.conversation_id = c.id
                           and h.rol = 'humano')) as atendida"""
+    # 'mensajes_tras_escalar': cuantas veces volvio a escribir el cliente
+    # DESPUES de que su caso pasara a una persona. Es la señal de que se
+    # cansa de esperar, y no se puede deducir de otra forma -- se intento
+    # contando mensajes del cliente sin respuesta y da cero siempre, porque
+    # el asistente le acusa recibo a cada uno mientras espera.
     desde = """from asistente.conversations c
                left join lateral (
                    select contenido, rol
@@ -317,7 +324,15 @@ def ultima_actividad(tenant: str, canal: str | None = None) -> list[dict]:
                     where conversation_id = c.id and contenido is not null
                     order by creado_en desc
                     limit 1
-               ) ultimo on true"""
+               ) ultimo on true
+               left join lateral (
+                   select count(*) as n
+                     from asistente.messages m
+                    where m.conversation_id = c.id
+                      and m.rol = 'user'
+                      and c.escalada_en is not null
+                      and m.creado_en > c.escalada_en
+               ) insiste on true"""
 
     with sesion(tenant) as (cur, org):
         if canal:
@@ -349,6 +364,13 @@ def mensajes_de(tenant: str, conversation_id: str) -> dict:
                       motivo_escalamiento, caso_id, etiqueta,
                       actualizado_en, conservar, conservar_motivo, conservar_por,
                       atendida_manual, atendida_por, id_cliente, nombre_cliente,
+                      -- Lo que el modelo ya habia escrito al escalar y hasta
+                      -- ahora solo viajaba a la descripcion del ticket. Es lo
+                      -- que arma el resumen de arriba en el detalle: que
+                      -- queria el cliente, que no se pudo comprobar y que
+                      -- falta hacer.
+                      escalada_en, resumen, escalada_no_comprobado,
+                      escalada_siguiente_paso,
                       (atendida_manual or exists (
                            select 1 from asistente.messages h
                             where h.conversation_id = conversations.id
@@ -475,7 +497,9 @@ def preguntas_sin_respuesta(tenant: str, dias: int,
 
 def marcar_escalada(tenant: str, conversation_id: str, motivo: str,
                     caso_id: str | None, etiqueta: str | None,
-                    necesita_atencion_humana: bool = True) -> None:
+                    necesita_atencion_humana: bool = True,
+                    resumen: str = "", no_comprobado: str = "",
+                    siguiente_paso: str = "") -> None:
     """
     Registra que la conversacion paso a un humano: la marca escalada, guarda
     por que (una de escalamiento.activar_si) y el caso/etiqueta que resulto
@@ -487,15 +511,35 @@ def marcar_escalada(tenant: str, conversation_id: str, motivo: str,
     escalada crea ticket y pausa el bot igual, pero no toda escalada exige
     que alguien del equipo entre ya mismo (ver supabase/202608131420_necesita_atencion_humana.sql).
     Decide el filtro "Sin atender" del frontend, nada mas.
+
+    'escalada_en' se sella una sola vez (coalesce): si la misma conversacion
+    vuelve a pasar por aca --se re-evalua al retomar-- el reloj no se
+    reinicia. Lo que la cola necesita saber es desde cuando espera esta
+    persona, no cuando fue la ultima vez que el motor lo confirmo.
+
+    'resumen': el modelo ya lo redacta al evaluar la escalada, y hasta hoy
+    solo iba a la descripcion del ticket. Guardarlo aca no cuesta una llamada
+    mas y es lo que deja que la bandeja diga de que se trata cada caso sin
+    abrirlo. No cierra la conversacion -- eso lo hace guardar_resumen(), que
+    es otra cosa: aquel resume una conversacion TERMINADA. Si mas tarde se
+    cierra, aquel reemplaza a este, que es lo correcto: es mas completo.
     """
     with sesion(tenant) as (cur, org):
         cur.execute(
             """update asistente.conversations
                set escalada_a_humano = true, motivo_escalamiento = %s,
                    caso_id = %s, etiqueta = %s,
-                   necesita_atencion_humana = %s, actualizado_en = now()
+                   necesita_atencion_humana = %s, actualizado_en = now(),
+                   escalada_en = coalesce(escalada_en, now()),
+                   resumen = coalesce(nullif(%s, ''), resumen),
+                   escalada_no_comprobado = coalesce(nullif(%s, ''),
+                                                     escalada_no_comprobado),
+                   escalada_siguiente_paso = coalesce(nullif(%s, ''),
+                                                      escalada_siguiente_paso)
                where organization_id = %s and id = %s""",
-            (motivo, caso_id, etiqueta, necesita_atencion_humana, org, conversation_id))
+            (motivo, caso_id, etiqueta, necesita_atencion_humana,
+             (resumen or "").strip(), (no_comprobado or "").strip(),
+             (siguiente_paso or "").strip(), org, conversation_id))
 
 
 def guardar_ticket_operativo(tenant: str, conversation_id: str,
@@ -1309,6 +1353,41 @@ def marcar_atendida(tenant: str, conversation_id: str, por: str | None) -> bool:
         return cur.rowcount > 0
 
 
+def resolver_conversacion(tenant: str, conversation_id: str,
+                          por: str | None) -> str | None:
+    """
+    Da el caso por TERMINADO: lo cierra y lo saca de la bandeja.
+
+    Distinto de marcar_atendida(), y la diferencia importa:
+
+      atendida   alguien esta en esto   -> sale de "Sin atender", sigue viva
+      resuelta   esto ya termino        -> se cierra
+
+    Cerrarla es lo que hace que el proximo mensaje de esa persona empiece un
+    hilo nuevo en vez de pegarse a este -- el mismo efecto que el cierre por
+    inactividad, pero decidido por alguien en vez de por un reloj. Sin esto,
+    un caso resuelto hoy sigue arrastrando su contexto una semana despues
+    (medido el 18/08/2026: un hilo llego a 67 mensajes mezclando tres
+    problemas distintos, y el modelo citaba mediciones de horas antes como
+    si fueran de ahora).
+
+    Devuelve el 'usuario_externo' de la conversacion cerrada -- quien llama
+    lo necesita para descartar tambien la sesion viva en memoria, que si no
+    seguiria recordando el hilo aunque la base ya no. None si no existe.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """update asistente.conversations
+               set estado = 'cerrada', atendida_manual = true,
+                   atendida_por = coalesce(%s, atendida_por),
+                   actualizado_en = now()
+               where organization_id = %s and id = %s
+               returning usuario_externo""",
+            (por, org, conversation_id))
+        fila = cur.fetchone()
+        return fila["usuario_externo"] if fila else None
+
+
 def borrar_conversacion(tenant: str, conversation_id: str) -> dict | None:
     """
     SOLO PARA PRUEBAS: borra una conversacion de un tiro -- mensajes,
@@ -1426,13 +1505,17 @@ def registrar_llamada_herramienta(tenant: str, conversation_id: str, rol: str,
                 """insert into asistente.tool_calls
                      (organization_id, conversation_id, herramienta, parametros,
                       rol_solicitante, exito, n_registros, codigo_error,
-                      duracion_ms, es_escritura, profile_id)
-                   values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                      duracion_ms, es_escritura, profile_id, es_bloqueo)
+                   values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                 (org, conversation_id, llamada["herramienta"],
                  json.dumps(llamada["parametros"], ensure_ascii=False),
                  rol, llamada["exito"], llamada["n_registros"],
                  llamada["codigo_error"], llamada["duracion_ms"],
-                 llamada["es_escritura"], profile_id))
+                 llamada["es_escritura"], profile_id,
+                 # .get() y no [] : una traza de una version anterior del motor
+                 # no trae la clave, y perder la fila entera por eso seria
+                 # cambiar un dato incompleto por ninguno.
+                 bool(llamada.get("es_bloqueo"))))
     except Exception as e:
         print(f"[persistencia] no se pudo guardar la llamada a herramienta: {e}")
 
@@ -1446,7 +1529,7 @@ def herramientas_de(tenant: str, conversation_id: str) -> list[dict]:
     with sesion(tenant) as (cur, org):
         cur.execute(
             """select herramienta, parametros, exito, n_registros, codigo_error,
-                      duracion_ms, es_escritura, creado_en
+                      duracion_ms, es_escritura, es_bloqueo, creado_en
                from asistente.tool_calls
                where organization_id = %s and conversation_id = %s
                order by creado_en asc""",

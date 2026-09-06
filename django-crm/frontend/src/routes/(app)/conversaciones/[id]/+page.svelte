@@ -19,7 +19,8 @@
     PanelRight,
     X,
     Paperclip,
-    RotateCcw
+    RotateCcw,
+    ShieldCheck
   } from '@lucide/svelte';
 
   /** @type {{ data: any }} */
@@ -42,7 +43,53 @@
   let caso = $state(untrack(() => data.caso));
   let owners = $state(untrack(() => data.owners ?? []));
   let herramientas = $state(untrack(() => data.herramientas ?? []));
+  let diagnostico = $state(untrack(() => data.diagnostico ?? null));
   let casos = $state(untrack(() => data.casos ?? []));
+
+  // Que significa cada bloqueo, en el idioma de quien atiende. Un codigo como
+  // PRECONDICION_NO_CUMPLIDA no le dice nada a alguien de soporte -- y de
+  // esto depende que haga lo correcto: si el sistema lo freno por falta de
+  // identidad, la accion es pedir la cedula, no reportar que la API fallo.
+  const MOTIVO_BLOQUEO = {
+    IDENTIDAD_NO_VERIFICADA: 'pidió datos de cuenta sin haber confirmado quién es',
+    IDENTIDAD_NO_RESUELTA: 'no se pudo establecer de qué cliente se trata',
+    PRECONDICION_NO_CUMPLIDA: 'quiso ejecutar algo sin el paso previo que exige el procedimiento',
+    FALTA_HABLAR_CON_EL_CLIENTE: 'la acción interrumpe el servicio y el cliente todavía no dijo qué le pasa',
+    HERRAMIENTA_DESCONOCIDA: 'intentó usar algo que este rol no tiene permitido',
+    LIMITE_DE_CONVERSACION: 'se alcanzó el tope de pasos de la conversación'
+  };
+
+  // --- qué pasó acá, en cuatro renglones ------------------------------------
+  // Lo que se le prometió al cliente no está guardado en ningún campo: es el
+  // mensaje que el asistente mandó al escalar. Se lo busca por CERCANÍA en el
+  // tiempo a 'escalada_en' y no por su texto, porque ese texto lo redacta el
+  // modelo y cambia cada vez que alguien mejora el prompt. Después de escalar
+  // el asistente sigue acusando recibo, así que "el último" no sirve: el que
+  // importa es el de ese momento.
+  let prometido = $derived.by(() => {
+    if (!conversacion?.escalada_en) return '';
+    const t = new Date(conversacion.escalada_en).getTime();
+    let mejor = null;
+    let dist = Infinity;
+    for (const m of mensajes) {
+      if (m.rol !== 'assistant' || !m.contenido) continue;
+      const d = Math.abs(new Date(m.creado_en).getTime() - t);
+      if (d < dist) { dist = d; mejor = m; }
+    }
+    // Si el mensaje más cercano está a más de cinco minutos de la escalada,
+    // no es el anuncio: es otra cosa que pasó cerca. Mejor no decir nada que
+    // afirmar que le prometimos algo que no le dijimos.
+    return dist <= 5 * 60 * 1000 ? (mejor?.contenido ?? '') : '';
+  });
+
+  let resumenEscalada = $derived(
+    [
+      { rotulo: 'Quiere', texto: conversacion?.resumen ?? '' },
+      { rotulo: 'No se pudo comprobar', texto: conversacion?.escalada_no_comprobado ?? '' },
+      { rotulo: 'Le prometimos', texto: prometido },
+      { rotulo: 'Falta', texto: conversacion?.escalada_siguiente_paso ?? '' }
+    ].filter((f) => (f.texto ?? '').trim())
+  );
 
   let entrada = $state('');
   let enviando = $state(false);
@@ -90,6 +137,40 @@
       errorAtender = err?.message || 'No se pudo guardar.';
     } finally {
       marcandoAtendida = false;
+    }
+  }
+
+  // --- resolver: el caso termino -------------------------------------------
+  // Distinto de "Atender", que dice "alguien esta en esto". Esto dice "esto ya
+  // se resolvio": cierra la conversacion para que el proximo mensaje de esa
+  // persona empiece un hilo limpio en vez de arrastrar el caso viejo. Pide
+  // confirmacion porque no hay boton para deshacerlo.
+  let resolviendo = $state(false);
+  let errorResolver = $state('');
+
+  async function resolver() {
+    if (resolviendo || conversacion.estado === 'cerrada') return;
+    if (!confirm('¿Dar este caso por resuelto? La conversación se cierra y el próximo mensaje del cliente abre una nueva.'))
+      return;
+    resolviendo = true;
+    errorResolver = '';
+    try {
+      const resp = await fetch(`/api/conversaciones/${conversacion.id}/resolver`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const datos = await resp.json();
+      if (!resp.ok) {
+        errorResolver = datos.error || 'No se pudo guardar.';
+        return;
+      }
+      conversacion = { ...conversacion, estado: 'cerrada' };
+      atendida = true;
+      invalidate('app:conversaciones');
+    } catch (/** @type {any} */ err) {
+      errorResolver = err?.message || 'No se pudo guardar.';
+    } finally {
+      resolviendo = false;
     }
   }
 
@@ -538,8 +619,46 @@
           </span>
         {/if}
       {/if}
+      <!-- Cerrar el caso. Va junto a "Atender" porque es la otra mitad del
+           mismo momento -- se toma un caso y despues se termina-- pero en
+           tono secundario: "Atender" es lo que se hace al entrar, esto es lo
+           que se hace al salir, y una sola vez. -->
+      {#if conversacion.estado !== 'cerrada'}
+        <button
+          type="button"
+          class="v2-btn v2-btn-sm aviso-resolver"
+          onclick={resolver}
+          disabled={resolviendo}
+          title="Cierra la conversación: el próximo mensaje del cliente abre una nueva"
+        >
+          {resolviendo ? 'Cerrando…' : 'Marcar como resuelta'}
+        </button>
+      {:else}
+        <span class="aviso-atendida"><CircleCheck size={13} /> Resuelta</span>
+      {/if}
       {#if errorAtender}<span class="aviso-mal">{errorAtender}</span>{/if}
+      {#if errorResolver}<span class="aviso-mal">{errorResolver}</span>{/if}
     </p>
+  {/if}
+
+  <!-- Tomar un caso escalado empieza siempre igual: leer el hilo entero para
+       reconstruir que queria el cliente, que alcanzo a hacer el asistente,
+       que se le prometio y que falta. Los tres primeros textos los ESCRIBE el
+       modelo al evaluar la escalada y hasta ahora solo iban a la descripcion
+       del ticket del CRM -- quien atendia desde acá no los veia nunca.
+
+       Solo se dibuja lo que existe de verdad: en las conversaciones escaladas
+       antes del 06/09/2026 estos campos estan vacios, y media tarjeta con
+       renglones en blanco informa menos que ninguna. -->
+  {#if resumenEscalada.length > 0}
+    <dl class="brief">
+      {#each resumenEscalada as fila (fila.rotulo)}
+        <div class="brief-fila">
+          <dt>{fila.rotulo}</dt>
+          <dd>{fila.texto}</dd>
+        </div>
+      {/each}
+    </dl>
   {/if}
 
   <div class="hilo">
@@ -795,11 +914,53 @@
       <span class="v2-muted">
         ({herramientas.length} paso{herramientas.length === 1 ? '' : 's'}{#if herramientas.some((h) => h.es_escritura)}, con escritura{/if})
       </span>
+      <!-- Lo unico que se asoma con el panel cerrado. El resto de la traza se
+           mira cuando hay una sospecha; un bloqueo o un fallo hay que verlo
+           ANTES, porque cambia lo que quien atiende tiene que hacer. -->
+      {#if diagnostico?.errores}
+        <span class="diag-aviso diag-error">
+          {diagnostico.errores} error{diagnostico.errores === 1 ? '' : 'es'}
+        </span>
+      {/if}
+      {#if diagnostico?.bloqueadas}
+        <span class="diag-aviso diag-bloqueo">
+          {diagnostico.bloqueadas} bloqueada{diagnostico.bloqueadas === 1 ? '' : 's'}
+        </span>
+      {/if}
     </summary>
+    <!-- Diagnostico de la IA. Va ARRIBA de la lista y no al final: quien abre
+         esto lo hace porque sospecha de una respuesta, y lo primero que
+         necesita saber es si algo se rompio o si el sistema hizo su trabajo.
+         Leer catorce pasos para deducirlo es justo lo que hay que evitar. -->
+    {#if diagnostico}
+      <ul class="diag">
+        <li>
+          <CircleCheck size={14} style="color:var(--v2-moss);flex:none" />
+          <b>{diagnostico.normales}</b>
+          {diagnostico.normales === 1 ? 'ejecución normal' : 'ejecuciones normales'}
+          <span class="v2-muted">corrió y devolvió datos</span>
+        </li>
+        <li>
+          <ShieldCheck size={14} style="color:var(--v2-clay);flex:none" />
+          <b>{diagnostico.bloqueadas}</b>
+          {diagnostico.bloqueadas === 1 ? 'acción bloqueada' : 'acciones bloqueadas'}
+          <span class="v2-muted">el sistema la frenó — no es una falla</span>
+        </li>
+        <li>
+          <CircleX size={14} style="color:var(--v2-rust);flex:none" />
+          <b>{diagnostico.errores}</b>
+          {diagnostico.errores === 1 ? 'error' : 'errores'} en herramienta
+          <span class="v2-muted">falló un sistema externo</span>
+        </li>
+      </ul>
+    {/if}
+
     <ol class="proceso-lista">
       {#each herramientas as h}
-        <li class="proceso-item">
-          {#if h.exito}
+        <li class="proceso-item" class:bloqueada={h.es_bloqueo}>
+          {#if h.es_bloqueo}
+            <ShieldCheck size={15} style="color:var(--v2-clay);flex:none" />
+          {:else if h.exito}
             <CircleCheck size={15} style="color:var(--v2-moss);flex:none" />
           {:else}
             <CircleX size={15} style="color:var(--v2-rust);flex:none" />
@@ -808,7 +969,13 @@
           {#if h.n_registros !== null}
             <span class="v2-muted">{h.n_registros} resultado{h.n_registros === 1 ? '' : 's'}</span>
           {/if}
-          {#if h.codigo_error}
+          {#if h.es_bloqueo}
+            <!-- El motivo en palabras, no el codigo: el codigo queda en el
+                 title para quien depure, pero lo que se lee dice que hacer. -->
+            <span class="v2-muted" title={h.codigo_error}>
+              {MOTIVO_BLOQUEO[h.codigo_error] ?? 'el sistema frenó esta acción'}
+            </span>
+          {:else if h.codigo_error}
             <span class="v2-muted" title={h.codigo_error}>{h.codigo_error.split(':')[0]}</span>
           {/if}
           <span class="v2-muted proceso-duracion">{h.duracion_ms} ms</span>
@@ -946,6 +1113,11 @@
   }
   .aviso-atender {
     margin-left: auto;
+    flex: none;
+  }
+  /* Sin margin-left:auto a proposito: el hermano de la izquierda ya empuja al
+     grupo a la derecha, y un segundo 'auto' los separaria a los extremos. */
+  .aviso-resolver {
     flex: none;
   }
   .aviso-atendida {
@@ -1201,6 +1373,94 @@
   }
   .proceso-duracion {
     margin-left: auto;
+  }
+
+  /* ── qué pasó acá ───────────────────────────────────────────────────────
+     Rótulo a la izquierda, texto a la derecha: se leen los cuatro rótulos en
+     vertical de un vistazo y se entra al que interesa. Con el texto debajo
+     del rótulo habría que recorrer ocho renglones para lo mismo. */
+  .brief {
+    margin: 0 0 4px;
+    padding: 10px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    background: var(--v2-ember-soft);
+    border-radius: 7px;
+    font-size: 12.5px;
+    line-height: 1.45;
+  }
+  .brief-fila {
+    display: grid;
+    grid-template-columns: 8.5rem 1fr;
+    gap: 10px;
+    align-items: baseline;
+  }
+  .brief dt {
+    color: var(--v2-slate);
+    font-size: 11px;
+    font-weight: 650;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .brief dd {
+    margin: 0;
+    color: var(--v2-ink);
+  }
+  @media (max-width: 640px) {
+    /* En pantalla chica el rótulo de 8.5rem deja al texto en una columna
+       inservible: pasan a apilarse. */
+    .brief-fila {
+      grid-template-columns: 1fr;
+      gap: 1px;
+    }
+  }
+
+  /* Diagnostico: tres lineas, no tres tarjetas. Es una lectura de dos
+     segundos dentro de un panel plegable, no un tablero. */
+  .diag {
+    list-style: none;
+    margin: 10px 0 0;
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    font-size: 12.5px;
+    border: 1px solid var(--v2-line);
+    border-radius: 6px;
+  }
+  .diag li {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+  .diag b {
+    font-variant-numeric: tabular-nums;
+    min-width: 1.2em;
+    text-align: right;
+  }
+
+  /* Los dos avisos del titulo cerrado. Sin borde de color al costado: se
+     distinguen por el texto y el tono del fondo, que es lo que se lee. */
+  .diag-aviso {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 1px 7px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  .diag-error {
+    color: var(--v2-rust);
+    background: color-mix(in srgb, var(--v2-rust) 12%, transparent);
+  }
+  .diag-bloqueo {
+    color: var(--v2-clay);
+    background: color-mix(in srgb, var(--v2-clay) 14%, transparent);
+  }
+  /* Un bloqueo no es un fallo: se distingue del resto de la lista, pero sin
+     la carga visual de un error. */
+  .proceso-item.bloqueada .proceso-nombre {
+    color: var(--v2-clay);
   }
   .asignado-picker {
     position: relative;

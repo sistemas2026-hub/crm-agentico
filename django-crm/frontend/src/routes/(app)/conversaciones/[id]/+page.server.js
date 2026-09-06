@@ -50,8 +50,16 @@ export async function load({ fetch, cookies, params }) {
   // pueda revisar el caso sin tener que leer todo el hilo. No corta la
   // pagina si falla -- es un panel mas, no el contenido principal.
   let herramientas = [];
+  let diagnostico = null;
   try {
-    if (respHerr?.ok) herramientas = (await respHerr.json()).herramientas;
+    if (respHerr?.ok) {
+      const cuerpo = await respHerr.json();
+      herramientas = cuerpo.herramientas;
+      // Los tres contadores los cuenta el motor, no esta pagina: la
+      // diferencia entre "el codigo lo freno" y "el tercero fallo" sale de
+      // una columna de la base, no del texto del error.
+      diagnostico = cuerpo.diagnostico ?? null;
+    }
   } catch {
     // idem: el panel de proceso queda vacio, no se cae la conversacion.
   }
@@ -86,7 +94,7 @@ export async function load({ fetch, cookies, params }) {
     }
   }
 
-  return { conversacion: datos.conversacion, mensajes: datos.mensajes, caso, owners, herramientas, casos };
+  return { conversacion: datos.conversacion, mensajes: datos.mensajes, caso, owners, herramientas, diagnostico, casos };
 }
 
 /** @type {import('./$types').Actions} */

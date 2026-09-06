@@ -3168,7 +3168,30 @@ def conversaciones_herramientas(id_conversacion):
         print(f"[conversaciones] fallo al leer herramientas: {type(e).__name__}: {e}")
         return jsonify({"error": "No se pudo leer el registro de herramientas."}), 500
 
-    return jsonify({"herramientas": llamadas})
+    # El diagnostico se cuenta ACA y no en la pantalla: distinguir un bloqueo
+    # de un fallo depende de una columna de la base, y si la pantalla lo
+    # dedujera del texto del error habria que mantener esa regla en dos
+    # lugares. La pantalla dibuja tres numeros; no decide cual es cual.
+    #
+    # Tres categorias y no cuatro. 'bloqueada' e 'intento no ejecutado' son la
+    # misma cosa vista desde dos lados -- el codigo freno la accion-- y
+    # separarlas obligaba a explicar una diferencia que no existe.
+    return jsonify({
+        "herramientas": llamadas,
+        "diagnostico": {
+            # Corrio y devolvio datos.
+            "normales": sum(1 for l in llamadas if l["exito"]),
+            # El CODIGO la freno: identidad sin verificar, precondicion sin
+            # cumplir, accion que corta el servicio sin confirmar. NO es un
+            # fallo -- es la proteccion funcionando-- y por eso se cuenta
+            # aparte y no ensucia la tasa de error.
+            "bloqueadas": sum(1 for l in llamadas if l.get("es_bloqueo")),
+            # El sistema externo fallo: timeout, credencial, HTTP 400. Aca si
+            # hay algo roto, y quien atiende tiene que reportarlo.
+            "errores": sum(1 for l in llamadas
+                           if not l["exito"] and not l.get("es_bloqueo")),
+        },
+    })
 
 
 @app.post("/conversaciones/<id_conversacion>/mensajes/<mensaje_id>/marcar")
@@ -4673,6 +4696,43 @@ def conversaciones_atender(id_conversacion):
     if not existe:
         return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
     return jsonify({"atendida": True})
+
+
+@app.post("/conversaciones/<id_conversacion>/resolver")
+def conversaciones_resolver(id_conversacion):
+    """
+    El caso termino: cierra la conversacion y la saca de la bandeja.
+
+    No es lo mismo que 'atender' (arriba): esa dice "alguien esta en esto" y
+    la conversacion sigue viva. Esta dice "esto ya se resolvio" y la cierra,
+    para que el proximo mensaje de esa persona empiece un hilo limpio en vez
+    de arrastrar el caso viejo.
+
+    Ademas de la base, descarta la sesion VIVA en memoria. Sin eso el proceso
+    seguiria recordando el historial, si ya escalo y el rol activo -- la base
+    diria 'cerrada' y el asistente contestaria como si nada hubiera pasado.
+
+    Cuerpo: {tenant, por?}
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+
+    try:
+        usuario = persistencia.resolver_conversacion(tenant, id_conversacion,
+                                                     cuerpo.get("por"))
+    except Exception as e:
+        print(f"[conversaciones] fallo al resolver: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo guardar."}), 500
+
+    if usuario is None:
+        return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+
+    # La clave de _sesiones es (tenant, id_sesion), y el id de sesion es el
+    # usuario externo del canal -- el mismo que devuelve resolver_conversacion.
+    _sesiones.pop((tenant, usuario), None)
+    return jsonify({"resuelta": True})
 
 
 @app.delete("/conversaciones/<id_conversacion>")

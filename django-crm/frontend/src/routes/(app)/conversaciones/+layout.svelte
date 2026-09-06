@@ -127,9 +127,50 @@
 
   let filtro = $state('todas');
   let busqueda = $state('');
+  /** '' = todos. Filtra por el motivo por el que el asistente escalo. */
+  let motivo = $state('');
 
   let pendientes = $derived(conversaciones.filter(pendiente).length);
   let escaladas = $derived(conversaciones.filter((/** @type {any} */ c) => c.escalada_a_humano).length);
+
+  // --- por donde empezar ----------------------------------------------------
+  // Con decenas esperando, "la mas nueva primero" ordena al reves de lo que
+  // hace falta: quien escalo hace tres dias y no volvio a escribir se hunde
+  // al fondo, y es justo el que lleva tres dias esperando.
+  //
+  // El orden es: primero las que esperan a alguien, y entre ellas la de
+  // espera mas larga arriba. El resto queda como estaba, por ultima
+  // actividad. No hay un puntaje ponderado a proposito -- un numero que
+  // mezcla antiguedad, insistencia y motivo no se puede explicar, y quien
+  // atiende tiene que poder entender por que una fila esta donde esta.
+  const espera = (/** @type {any} */ c) =>
+    new Date(c.escalada_en ?? c.actualizado_en).getTime();
+
+  function porPrioridad(/** @type {any[]} */ lista) {
+    return [...lista].sort((a, b) => {
+      const pa = pendiente(a) ? 0 : 1;
+      const pb = pendiente(b) ? 0 : 1;
+      if (pa !== pb) return pa - pb;
+      // Entre las que esperan: la mas vieja arriba (espera mas larga).
+      if (pa === 0) return espera(a) - espera(b);
+      // Entre las demas: la mas reciente arriba, como siempre.
+      return new Date(b.actualizado_en).getTime() - new Date(a.actualizado_en).getTime();
+    });
+  }
+
+  // Los motivos que de verdad hay en la bandeja, no una lista fija: los
+  // declara cada empresa en su config, y una lista hardcodeada aca dejaria
+  // de coincidir en cuanto alguien agregue uno.
+  let motivos = $derived.by(() => {
+    const cuenta = new Map();
+    for (const c of conversaciones) {
+      if (!pendiente(c) || !c.motivo_escalamiento) continue;
+      cuenta.set(c.motivo_escalamiento, (cuenta.get(c.motivo_escalamiento) ?? 0) + 1);
+    }
+    return [...cuenta.entries()].sort((a, b) => b[1] - a[1]);
+  });
+
+  const motivoLabel = (/** @type {string} */ m) => (m ? m.replaceAll('_', ' ') : '');
 
   let pestanas = $derived([
     { id: 'todas', label: 'Todas', n: conversaciones.length },
@@ -144,13 +185,18 @@
     else if (filtro === 'escaladas') lista = lista.filter((/** @type {any} */ c) => c.escalada_a_humano);
     else if (filtro === 'bot') lista = lista.filter((/** @type {any} */ c) => !c.escalada_a_humano);
 
+    if (motivo) lista = lista.filter((/** @type {any} */ c) => c.motivo_escalamiento === motivo);
+
     const q = busqueda.trim().toLowerCase();
-    if (!q) return lista;
-    return lista.filter((/** @type {any} */ c) =>
-      [c.usuario_externo, c.ultimo_mensaje, c.etiqueta, c.caso_manual, c.motivo_escalamiento]
-        .filter(Boolean)
-        .some((campo) => String(campo).toLowerCase().includes(q))
-    );
+    if (q) {
+      lista = lista.filter((/** @type {any} */ c) =>
+        [c.usuario_externo, c.nombre_cliente, c.ultimo_mensaje, c.resumen,
+         c.etiqueta, c.caso_manual, c.motivo_escalamiento]
+          .filter(Boolean)
+          .some((campo) => String(campo).toLowerCase().includes(q))
+      );
+    }
+    return porPrioridad(lista);
   });
 </script>
 
@@ -207,6 +253,35 @@
           </button>
         {/if}
       </label>
+
+      <!-- Por que escalo. Veinte casos del mismo tipo se resuelven mas rapido
+           seguidos que mezclados con otros veinte de otra cosa: quien atiende
+           ya tiene el contexto cargado. El dato estaba guardado desde
+           siempre y no habia forma de filtrarlo.
+
+           Se dibuja solo si hay mas de un motivo entre las que esperan: con
+           uno solo, el filtro no separa nada y es una fila de ruido. -->
+      {#if motivos.length > 1}
+        <div class="motivos" role="group" aria-label="Filtrar por motivo de escalada">
+          <button
+            type="button"
+            class="motivo"
+            aria-pressed={motivo === ''}
+            onclick={() => (motivo = '')}>Todos</button
+          >
+          {#each motivos as [m, n] (m)}
+            <button
+              type="button"
+              class="motivo"
+              aria-pressed={motivo === m}
+              onclick={() => (motivo = motivo === m ? '' : m)}
+            >
+              {motivoLabel(m)}
+              <span class="v2-num">{n}</span>
+            </button>
+          {/each}
+        </div>
+      {/if}
     {/if}
 
     <div class="lista">
@@ -258,15 +333,35 @@
             <div class="cuerpo">
               <div class="alta">
                 <span class="quien">{c.nombre_cliente || quien(c.usuario_externo)}</span>
-                <span class="cuando v2-num">{shortAge(c.actualizado_en)}</span>
+                <!-- En las que esperan, el tiempo que se muestra es el de la
+                     ESPERA, no el del ultimo movimiento: es el numero que
+                     decide a cual entrar primero, y son distintos en cuanto
+                     el cliente vuelve a escribir. -->
+                {#if pendiente(c) && c.escalada_en}
+                  <span class="cuando v2-num urge" title="Esperando desde hace {shortAge(c.escalada_en)}">
+                    {shortAge(c.escalada_en)} esperando
+                  </span>
+                {:else}
+                  <span class="cuando v2-num">{shortAge(c.actualizado_en)}</span>
+                {/if}
               </div>
 
-              <p class="avance">
-                {#if c.ultimo_rol && c.ultimo_rol !== 'user'}
-                  <span class="avance-quien">{AUTOR[c.ultimo_rol] ?? c.ultimo_rol}:</span>
-                {/if}
-                {c.ultimo_mensaje || 'Sin mensajes todavía'}
-              </p>
+              <!-- De que se trata, en una linea. El ultimo mensaje casi nunca
+                   lo dice ("ok", "gracias", "listo"): quien atiende tiene que
+                   abrir la conversacion solo para enterarse. El resumen lo
+                   redacta el modelo al escalar, sin una llamada extra. Solo
+                   existe en las escaladas DESPUES del 06/09/2026; en el
+                   resto se cae al ultimo mensaje, como antes. -->
+              {#if c.resumen}
+                <p class="avance resumen">{c.resumen}</p>
+              {:else}
+                <p class="avance">
+                  {#if c.ultimo_rol && c.ultimo_rol !== 'user'}
+                    <span class="avance-quien">{AUTOR[c.ultimo_rol] ?? c.ultimo_rol}:</span>
+                  {/if}
+                  {c.ultimo_mensaje || 'Sin mensajes todavía'}
+                </p>
+              {/if}
 
               <!-- Solo se dibuja si hay algo que decir. "El bot la está
                    llevando" es el caso normal: ponerle una píldora a cada fila
@@ -278,6 +373,17 @@
                     <span class="marca" title={c.motivo_escalamiento || 'Escalada a un humano'}>
                       Sin atender
                     </span>
+                    <!-- El cliente escribio de nuevo despues de que le
+                         dijeramos que un companero lo iba a atender. Es lo
+                         mas parecido a alguien golpeando la puerta, y no se
+                         veia en ningun lado. -->
+                    {#if c.mensajes_tras_escalar > 0}
+                      <span class="insiste" title="Escribió {c.mensajes_tras_escalar} vez/veces desde que espera">
+                        Volvió a escribir{c.mensajes_tras_escalar > 1
+                          ? ` ×${c.mensajes_tras_escalar}`
+                          : ''}
+                      </span>
+                    {/if}
                   {:else if c.escalada_a_humano}
                     <Pill tone="clay" dot>En curso</Pill>
                   {/if}
@@ -503,6 +609,58 @@
     flex: none;
     font-size: 10.5px;
     color: var(--v2-slate);
+  }
+  /* El tiempo de espera no es un dato de contexto como "hace 3h": es el
+     numero por el que esta fila esta donde esta. */
+  .cuando.urge {
+    color: var(--v2-ember);
+    font-weight: 650;
+  }
+
+  /* El resumen se lee, a diferencia del ultimo mensaje, que solo orienta --
+     por eso no lleva el gris apagado de .avance. Misma linea, mismo lugar. */
+  .avance.resumen {
+    color: var(--v2-ink);
+  }
+
+  /* El cliente volvio a escribir mientras espera. Va al lado de "Sin
+     atender" y no la reemplaza: son dos hechos distintos. */
+  .insiste {
+    font-size: 11px;
+    font-weight: 650;
+    color: var(--v2-rust);
+    white-space: nowrap;
+  }
+
+  /* ── filtro por motivo ───────────────────────────────────────────────── */
+  .motivos {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    padding: 0 12px 8px;
+  }
+  .motivo {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    border: 1px solid var(--v2-line);
+    background: none;
+    border-radius: 999px;
+    padding: 2px 9px;
+    font: inherit;
+    font-size: 11px;
+    color: var(--v2-slate);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .motivo:hover {
+    color: var(--v2-ink);
+    border-color: var(--v2-slate);
+  }
+  .motivo[aria-pressed='true'] {
+    color: var(--v2-ink);
+    border-color: var(--v2-ink);
+    font-weight: 650;
   }
   /* Una sola línea: el preview orienta, no se lee. Dos líneas hacen que la
      altura de cada fila dependa de lo largo que fue el último mensaje. */
