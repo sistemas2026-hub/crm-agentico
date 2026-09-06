@@ -327,6 +327,10 @@ def ultima_actividad(tenant: str, canal: str | None = None) -> list[dict]:
                    select contenido, rol
                      from asistente.messages
                     where conversation_id = c.id and contenido is not null
+                      -- Una nota interna no es lo ultimo que se hablo con el
+                      -- cliente: mostrarla en la lista haria creer que eso se
+                      -- le dijo a el.
+                      and rol <> 'nota'
                     order by creado_en desc
                     limit 1
                ) ultimo on true
@@ -389,6 +393,9 @@ def mensajes_de(tenant: str, conversation_id: str) -> dict:
 
         cur.execute(
             """select m.id, m.rol, m.contenido, m.creado_en, e.caso as caso_marcado,
+                      -- Si le llego o no. NULL = no se sabe (otro canal, o
+                      -- anterior al registro): la pantalla no dibuja nada.
+                      m.estado_entrega, m.error_entrega,
                       -- Los adjuntos de ESA burbuja, sin los bytes: la interfaz
                       -- los pide despues por su id (/media/<id>). Devolverlos
                       -- aca serian varios MB de base64 en cada carga del hilo.
@@ -889,11 +896,18 @@ def agregar_mensaje_humano(tenant: str, conversation_id: str,
         if not fila:
             return None
 
+        # 'pendiente' solo si hay a donde entregarlo. En el simulador o la API
+        # no hay entrega que esperar, y dejarlo en NULL es lo honesto: la
+        # pantalla no dibuja un estado que nunca va a cambiar.
         cur.execute(
             """insert into asistente.messages
-                 (organization_id, conversation_id, rol, contenido)
-               values (%s, %s, 'assistant', %s)""",
-            (org, conversation_id, contenido))
+                 (organization_id, conversation_id, rol, contenido,
+                  estado_entrega)
+               values (%s, %s, 'assistant', %s, %s)
+               returning id""",
+            (org, conversation_id, contenido,
+             "pendiente" if fila["canal"] == "whatsapp" else None))
+        mensaje_id = cur.fetchone()["id"]
         # Y queda marcada como atendida por una persona. No es cosmetico:
         # dos reglas dependen de saberlo -- el cierre por confirmacion del
         # cliente (que no vale si nadie le contesto todavia) y el barrido por
@@ -912,7 +926,115 @@ def agregar_mensaje_humano(tenant: str, conversation_id: str,
         # al select y olvidarse de este return deja al llamador sin el dato y
         # sin ningun error -- paso el 28/08/2026 con 'ticket_operativo', y la
         # copia al ticket del ISP no se hacia sin que nada lo dijera.
-        return dict(fila)
+        #
+        # 'mensaje_id' se suma aparte: quien llama tiene que poder sellar el
+        # wamid en ESTA fila cuando WhatsApp le responda, y sin el id habria
+        # que adivinar cual de los mensajes de la conversacion es.
+        return {**dict(fila), "mensaje_id": mensaje_id}
+
+
+def agregar_nota_interna(tenant: str, conversation_id: str, contenido: str,
+                         autor: str) -> str | None:
+    """
+    Una nota que el equipo se deja a si mismo. NO se le envia a nadie.
+
+    POR QUE ES UN ROL PROPIO Y NO UN MENSAJE MARCADO
+    ------------------------------------------------
+    La garantia de que una nota no salga al cliente tiene que ser
+    ESTRUCTURAL, no una bandera que alguien puede olvidar mirar. Con rol
+    'nota' no existe ningun camino que la entregue: las dos rutas de envio
+    (texto y multimedia) llaman a agregar_mensaje_humano(), que escribe rol
+    'assistant' y despues entrega. Esta funcion no entrega nada porque no
+    tiene con que.
+
+    Tampoco entra al historial que ve el modelo: ese historial vive en
+    memoria (nucleo/canales/api.py::_sesiones) y se arma con lo que pasa por
+    el turno, no leyendo esta tabla. Una nota no pasa por ningun turno.
+
+    Y NO marca la conversacion como atendida: escribir una nota no es
+    haberle contestado a quien espera. Es la diferencia entre dejar
+    anotado algo y hacerse cargo del caso.
+
+    Devuelve el id de la nota, o None si la conversacion no existe.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """insert into asistente.messages
+                 (organization_id, conversation_id, rol, contenido)
+               select %s, %s, 'nota', %s
+                where exists (select 1 from asistente.conversations
+                               where organization_id = %s and id = %s)
+               returning id""",
+            (org, conversation_id, f"({autor or 'Equipo'}) {contenido}"
+             if autor else contenido, org, conversation_id))
+        fila = cur.fetchone()
+        return fila["id"] if fila else None
+
+
+def marcar_envio(tenant: str, mensaje_id: str, wamid: str | None,
+                 error: str | None = None) -> None:
+    """
+    Cierra el circuito del envio: o salio (y quedo su wamid, con el que
+    despues se casan los acuses), o no salio y se guarda por que.
+
+    Se separa del insert a proposito. Guardar y entregar son dos cosas, y el
+    orden --guardar primero-- existe para que un fallo de entrega nunca borre
+    lo que la persona escribio. Este es el segundo paso de ese mismo criterio.
+
+    Nunca rompe: si esto falla, el mensaje ya se guardo y ya se entrego. Lo
+    unico que se pierde es poder mostrar el estado.
+    """
+    try:
+        with sesion(tenant) as (cur, org):
+            cur.execute(
+                """update asistente.messages
+                   set wamid = coalesce(%s, wamid),
+                       estado_entrega = case when %s is null then 'enviado'
+                                             else 'fallido' end,
+                       error_entrega = %s
+                   where organization_id = %s and id = %s""",
+                (wamid, error, error, org, mensaje_id))
+    except Exception as e:
+        print(f"[entrega] no se pudo anotar el envio de {mensaje_id}: "
+              f"{type(e).__name__}: {e}")
+
+
+# El orden en que puede avanzar un mensaje. Los acuses de Meta NO llegan
+# ordenados -- un 'delivered' puede entrar despues de un 'read'-- y sin esto
+# un mensaje ya leido volveria a decir "entregado".
+_RANGO_ENTREGA = {"pendiente": 0, "enviado": 1, "entregado": 2, "leido": 3,
+                  "fallido": 4}
+
+
+def marcar_entrega(tenant: str, wamid: str, estado: str,
+                   error: str | None = None) -> bool:
+    """
+    Un acuse de WhatsApp, aplicado al mensaje que lo produjo.
+
+    'fallido' es el rango mas alto y por eso pisa a cualquier otro: si Meta
+    dice que no se pudo entregar, eso es lo ultimo que se sabe del mensaje
+    aunque antes hubiera dicho 'enviado'.
+
+    Devuelve False si el wamid no es de esta empresa o no se conoce -- lo
+    normal cuando el acuse corresponde a un mensaje que mando el bot antes de
+    que existiera este registro.
+    """
+    rango = _RANGO_ENTREGA.get(estado)
+    if rango is None:
+        return False
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """update asistente.messages
+               set estado_entrega = %s,
+                   error_entrega = coalesce(%s, error_entrega)
+               where organization_id = %s and wamid = %s
+                 and coalesce(%s, 0) > coalesce(
+                       case estado_entrega
+                         when 'pendiente' then 0 when 'enviado' then 1
+                         when 'entregado' then 2 when 'leido' then 3
+                         when 'fallido' then 4 end, -1)""",
+            (estado, error, org, wamid, rango))
+        return cur.rowcount > 0
 
 
 def agentes_de_colaborador(tenant: str, profile_id: str) -> list[str]:

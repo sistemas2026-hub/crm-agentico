@@ -391,6 +391,146 @@ def enviar_texto(config, tenant: str, para: str, texto: str) -> str | None:
     return mensajes[0].get("id") if mensajes else None
 
 
+# =============================================================================
+#  SALIDA DE MULTIMEDIA
+# =============================================================================
+#  Enviar un archivo son DOS peticiones, no una: primero se sube y Meta
+#  devuelve un id, despues se manda un mensaje que referencia ese id. No hay
+#  forma de mandar los bytes en el mismo POST del mensaje.
+#
+#  Los limites de abajo son los que publica Meta y NO se pueden descubrir
+#  probando: pasarse devuelve un error generico despues de haber subido el
+#  archivo entero. Se validan ANTES de subir para no gastar la subida ni
+#  hacerle esperar a nadie por un rechazo evitable.
+#
+#  El 'caption' NO es universal, y es la trampa mas facil de este bloque:
+#  imagen y documento lo aceptan, AUDIO NO. Mandar un caption con un audio
+#  no da error -- Meta lo ignora en silencio-- y el texto que alguien escribio
+#  junto a su nota de voz no le llega nunca al cliente. Por eso 'acepta_pie'
+#  es un dato del tipo y no una suposicion de quien llama.
+
+LIMITES_MEDIA = {
+    "image": {
+        "mime": ("image/jpeg", "image/png"),
+        "max_bytes": 5 * 1024 * 1024,
+        "acepta_pie": True,
+        "etiqueta": "Imagen",
+    },
+    "document": {
+        # Meta acepta practicamente cualquier tipo aca; la lista abierta es
+        # deliberada. Lo que si es fijo es el tope.
+        "mime": (),
+        "max_bytes": 100 * 1024 * 1024,
+        "acepta_pie": True,
+        "etiqueta": "Documento",
+    },
+    "audio": {
+        # 'audio/ogg' SOLO con codec opus, que es justo lo que graba
+        # MediaRecorder en un navegador. Otros ogg los rechaza.
+        "mime": ("audio/aac", "audio/mp4", "audio/mpeg", "audio/amr",
+                 "audio/ogg"),
+        "max_bytes": 16 * 1024 * 1024,
+        "acepta_pie": False,
+        "etiqueta": "Audio",
+    },
+}
+
+
+def limites_media() -> dict:
+    """Lo que el canal acepta, para que la interfaz valide antes de subir."""
+    return {t: dict(v) for t, v in LIMITES_MEDIA.items()}
+
+
+def _validar_media(tipo: str, mime: str, tamano: int) -> None:
+    limite = LIMITES_MEDIA.get(tipo)
+    if not limite:
+        raise ErrorWhatsApp(f"WhatsApp no acepta envios de tipo '{tipo}'.")
+    if limite["mime"] and mime not in limite["mime"]:
+        raise ErrorWhatsApp(
+            f"WhatsApp no acepta '{mime}' como {limite['etiqueta'].lower()}. "
+            f"Acepta: {', '.join(limite['mime'])}.")
+    if tamano > limite["max_bytes"]:
+        tope = limite["max_bytes"] // (1024 * 1024)
+        raise ErrorWhatsApp(
+            f"El archivo pesa {tamano / (1024 * 1024):.1f} MB y el tope de "
+            f"WhatsApp para {limite['etiqueta'].lower()} es {tope} MB.")
+
+
+def subir_media(config, tenant: str, contenido: bytes, mime: str,
+                nombre: str = "archivo") -> str:
+    """
+    Sube el archivo y devuelve el id que Meta le asigna.
+
+    Ese id CADUCA (Meta documenta 30 dias) y sirve una sola vez por
+    conversacion: no se guarda como si fuera una URL permanente. Lo que se
+    guarda de nuestro lado son los bytes, en asistente.media, igual que con lo
+    que entra.
+    """
+    cfg = _cfg(config)
+    token = _secreto(tenant, cfg.token_ref, "de envio (token_ref)")
+    emisor = _secreto(tenant, cfg.phone_number_id_ref,
+                      "del numero emisor (phone_number_id_ref)")
+
+    # multipart, NO json: este es el unico endpoint del canal que no manda un
+    # cuerpo JSON, y 'messaging_product' viaja como campo del formulario.
+    r = requests.post(
+        _url(config, f"{emisor}/media"),
+        headers={"Authorization": f"Bearer {token}"},
+        data={"messaging_product": "whatsapp", "type": mime},
+        files={"file": (nombre, contenido, mime)},
+        timeout=TIMEOUT_SEGUNDOS * 3)  # una subida no es una peticion de texto
+
+    if r.status_code >= 400:
+        try:
+            err = (r.json() or {}).get("error") or {}
+        except ValueError:
+            err = {}
+        raise ErrorWhatsApp(
+            f"WhatsApp rechazo la subida ({err.get('code')}): "
+            f"{err.get('message') or r.text[:200]}")
+
+    media_id = (r.json() or {}).get("id")
+    if not media_id:
+        raise ErrorWhatsApp("WhatsApp acepto la subida pero no devolvio un id.")
+    return media_id
+
+
+def enviar_media(config, tenant: str, para: str, tipo: str,
+                 contenido: bytes, mime: str, nombre: str = "archivo",
+                 pie: str = "") -> str | None:
+    """
+    Un archivo al cliente: valida, sube y envia. Devuelve el wamid.
+
+    'tipo' es image | document | audio -- las tres que esta integracion
+    soporta hoy. Video y sticker existen en la API de Meta y NO estan aca a
+    proposito: no se probaron contra esta cuenta, y declararlos sin haberlos
+    probado es exactamente lo que la regla de la API de WispHub prohibe.
+    """
+    _validar_media(tipo, mime, len(contenido or b""))
+    media_id = subir_media(config, tenant, contenido, mime, nombre)
+
+    cuerpo = {"id": media_id}
+    if tipo == "document":
+        # Sin esto el cliente recibe el documento con un nombre generado por
+        # Meta y no sabe que le mandaron.
+        cuerpo["filename"] = nombre
+    if pie.strip() and LIMITES_MEDIA[tipo]["acepta_pie"]:
+        cuerpo["caption"] = pie.strip()
+
+    cfg = _cfg(config)
+    emisor = _secreto(tenant, cfg.phone_number_id_ref,
+                      "del numero emisor (phone_number_id_ref)")
+    respuesta = _post(config, tenant, f"{emisor}/messages", {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        **_destinatario(para),
+        "type": tipo,
+        tipo: cuerpo,
+    })
+    mensajes = respuesta.get("messages") or []
+    return mensajes[0].get("id") if mensajes else None
+
+
 def enviar_plantilla(config, tenant: str, para: str, plantilla: str,
                      variables: list[str] | None = None,
                      idioma: str = "es") -> str | None:

@@ -20,7 +20,9 @@
     X,
     Paperclip,
     RotateCcw,
-    ShieldCheck
+    ShieldCheck,
+    Smile,
+    Mic
   } from '@lucide/svelte';
 
   /** @type {{ data: any }} */
@@ -176,6 +178,338 @@
       errorAtender = err?.message || 'No se pudo guardar.';
     } finally {
       marcandoAtendida = false;
+    }
+  }
+
+  // Los cuatro estados de un envío, en palabras. 'pendiente' dice "saliendo"
+  // y no "pendiente": lo segundo suena a que quedó algo por hacer, y lo que
+  // pasa es que el acuse todavía no volvió.
+  /** La extensión de un adjunto, sacada del nombre o del mime. Sirve para
+      decir "PDF" en vez de "application/pdf", que no le dice nada a nadie. */
+  function extension(/** @type {any} */ a) {
+    const delNombre = (a.descripcion || '').split('.').pop();
+    if (delNombre && delNombre.length <= 5 && delNombre !== a.descripcion) {
+      return delNombre.toUpperCase();
+    }
+    return ((a.mime || '').split('/')[1] || 'archivo').toUpperCase();
+  }
+
+  const ENTREGA_TEXTO = {
+    pendiente: 'Enviando…',
+    enviado: 'Enviado',
+    entregado: 'Entregado',
+    leido: 'Leído'
+  };
+
+  // --- responder al cliente vs. nota interna --------------------------------
+  // Dos modos, no una casilla. El compositor entero cambia de aspecto -- no
+  // sólo una pestaña chiquita-- porque el error que hay que hacer imposible es
+  // escribir algo interno creyendo que es privado y que le llegue al cliente.
+  // Y las rutas son distintas: la nota va a /nota, que NO toca el canal en
+  // ningún punto. No es que se decida no enviar; es que no hay con qué.
+  let modo = $state('responder');
+
+  async function guardarNota() {
+    const texto = entrada.trim();
+    if (!texto || enviando) return;
+    enviando = true;
+    error = '';
+    try {
+      const resp = await fetch(`/api/conversaciones/${conversacion.id}/nota`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mensaje: texto })
+      });
+      const datos = await resp.json();
+      if (!resp.ok) {
+        error = datos.error || 'No se pudo guardar la nota.';
+        return;
+      }
+      entrada = '';
+      await sondearMensajesNuevos();
+    } catch (/** @type {any} */ err) {
+      error = err?.message || 'No se pudo guardar la nota.';
+    } finally {
+      enviando = false;
+    }
+  }
+
+  /** id del mensaje que se está reintentando, o null. */
+  let reintentando = $state(/** @type {string | null} */ (null));
+
+  /** Vuelve a mandar lo que ya está escrito. No crea un mensaje nuevo en la
+      pantalla: si sale, el hilo se resincroniza y el estado cambia solo. */
+  async function reintentar(/** @type {any} */ m) {
+    if (reintentando) return;
+    reintentando = m.id;
+    error = '';
+    try {
+      const resp = await fetch(`/api/conversaciones/${conversacion.id}/humano`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mensaje: m.contenido })
+      });
+      const datos = await resp.json();
+      if (!resp.ok) {
+        error = datos.error || 'No se pudo reenviar.';
+        return;
+      }
+      if (datos.aviso) error = `Tampoco salió esta vez: ${datos.aviso}`;
+      await sondearMensajesNuevos();
+    } catch (/** @type {any} */ err) {
+      error = err?.message || 'No se pudo reenviar.';
+    } finally {
+      reintentando = null;
+    }
+  }
+
+  // ==========================================================================
+  //  COMPOSITOR -- adjuntos, emoji y nota de voz
+  // ==========================================================================
+  //  Los límites (formatos y tamaños) NO están acá: los declara el canal
+  //  (nucleo/canales/whatsapp.py) y llegan por /api/canales/limites-media. Una
+  //  copia en el frontend se desincroniza el día que Meta cambia un tope, y el
+  //  síntoma sería un archivo que se sube entero para que lo rechacen al final.
+  /** @type {any} */
+  let limites = $state(null);
+  $effect(() => {
+    fetch('/api/canales/limites-media')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => (limites = d?.limites ?? null))
+      .catch(() => {});
+  });
+
+  /** {archivo, tipo, url, error} — uno solo por vez. WhatsApp manda un
+      archivo por mensaje, así que una cola de varios daría a entender que van
+      juntos cuando en realidad saldrían como mensajes separados. */
+  let adjunto = $state(/** @type {any} */ (null));
+  let arrastrando = $state(false);
+
+  /** De qué tipo es para WhatsApp. image y audio se reconocen por su mime;
+      todo lo demás es 'document', que es el tipo abierto de la API. */
+  function tipoDe(/** @type {File} */ f) {
+    const m = f.type || '';
+    if (m.startsWith('image/')) return 'image';
+    if (m.startsWith('audio/')) return 'audio';
+    return 'document';
+  }
+
+  /** Valida contra lo que dijo el canal y deja el adjunto listo, con su
+      previsualización. Rechaza ACÁ lo que WhatsApp rechazaría igual: hacer
+      esperar una subida para dar un error evitable es maltrato. */
+  function tomarArchivo(/** @type {File} */ f) {
+    if (!f) return;
+    const tipo = tipoDe(f);
+    const lim = limites?.[tipo];
+    if (lim) {
+      if (lim.mime?.length && !lim.mime.includes(f.type)) {
+        error = `WhatsApp no acepta ${f.type || 'ese formato'} como ${lim.etiqueta.toLowerCase()}. Acepta: ${lim.mime.join(', ')}.`;
+        return;
+      }
+      if (f.size > lim.max_bytes) {
+        error = `El archivo pesa ${(f.size / 1048576).toFixed(1)} MB y el tope para ${lim.etiqueta.toLowerCase()} es ${Math.round(lim.max_bytes / 1048576)} MB.`;
+        return;
+      }
+    }
+    error = '';
+    // El objectURL anterior se libera: sin esto cada archivo elegido deja su
+    // blob en memoria hasta que se recarga la página.
+    if (adjunto?.url) URL.revokeObjectURL(adjunto.url);
+    adjunto = {
+      archivo: f,
+      tipo,
+      nombre: f.name || 'archivo',
+      bytes: f.size,
+      url: tipo === 'image' || tipo === 'audio' ? URL.createObjectURL(f) : ''
+    };
+  }
+
+  function quitarAdjunto() {
+    if (adjunto?.url) URL.revokeObjectURL(adjunto.url);
+    adjunto = null;
+  }
+
+  /** Arrastrar un archivo sobre la conversación. */
+  function alSoltar(/** @type {DragEvent} */ e) {
+    e.preventDefault();
+    arrastrando = false;
+    const f = e.dataTransfer?.files?.[0];
+    if (f) tomarArchivo(f);
+  }
+
+  /** Pegar una captura. Se trata igual que un adjunto elegido a mano: se
+      previsualiza y espera confirmación, nunca se manda sola. */
+  function alPegar(/** @type {ClipboardEvent} */ e) {
+    const item = [...(e.clipboardData?.items ?? [])].find((i) => i.kind === 'file');
+    if (!item) return;
+    const f = item.getAsFile();
+    if (!f) return;
+    e.preventDefault();
+    // Una captura pegada no trae nombre; sin esto llega como "image.png" o
+    // vacío y en el hilo del cliente no se distingue de ninguna otra.
+    tomarArchivo(
+      f.name && f.name !== 'image.png'
+        ? f
+        : new File([f], `captura-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '')}.png`, {
+            type: f.type
+          })
+    );
+  }
+
+  // --- emoji ----------------------------------------------------------------
+  // Una lista corta y fija, no un catálogo completo: esto es soporte de un
+  // ISP, no una app de mensajería. Los que están son los que de verdad se usan
+  // al contestarle a alguien que espera.
+  const EMOJIS = [
+    '🙂', '😀', '😅', '👍', '🙏', '👌', '💪', '🎉',
+    '✅', '❌', '⚠️', '📶', '📡', '🔌', '🔧', '🏠',
+    '📞', '📅', '⏰', '💬', '📄', '📷', '❤️', '👋'
+  ];
+  let emojisAbiertos = $state(false);
+  /** @type {HTMLTextAreaElement | null} */
+  let campoTexto = $state(null);
+
+  /** Inserta en la POSICIÓN DEL CURSOR, no al final: quien escribió una frase
+      y volvió al medio espera que el emoji caiga donde está mirando. */
+  function ponerEmoji(/** @type {string} */ e) {
+    const el = campoTexto;
+    const i = el?.selectionStart ?? entrada.length;
+    const j = el?.selectionEnd ?? i;
+    entrada = entrada.slice(0, i) + e + entrada.slice(j);
+    emojisAbiertos = false;
+    // El foco vuelve al texto con el cursor DESPUÉS del emoji, para poder
+    // seguir escribiendo sin tocar el mouse.
+    queueMicrotask(() => {
+      el?.focus();
+      el?.setSelectionRange(i + e.length, i + e.length);
+    });
+  }
+
+  // --- nota de voz ----------------------------------------------------------
+  // Nunca se envía sola al terminar de grabar: se para, se escucha si se
+  // quiere, y recién ahí se manda o se descarta. Una nota de voz que sale sin
+  // que nadie la haya escuchado es la forma más rápida de mandarle al cliente
+  // treinta segundos de ruido de oficina.
+  let grabando = $state(false);
+  let grabPausada = $state(false);
+  let segundos = $state(0);
+  /** @type {MediaRecorder | null} */
+  let grabador = null;
+  /** @type {any} */
+  let cronometro = null;
+
+  /** El formato que graba el navegador tiene que ser uno de los que WhatsApp
+      acepta. Chrome y Firefox dan 'audio/webm' por defecto, que NO está en la
+      lista de Meta -- ogg/opus sí, y es el mismo códec. */
+  function formatoDeGrabacion() {
+    const candidatos = ['audio/ogg;codecs=opus', 'audio/mp4', 'audio/mpeg'];
+    return candidatos.find((m) => window.MediaRecorder?.isTypeSupported?.(m)) ?? '';
+  }
+
+  async function grabar() {
+    const formato = formatoDeGrabacion();
+    if (!formato) {
+      error =
+        'Este navegador no graba en un formato que WhatsApp acepte. Podés adjuntar un audio ya grabado.';
+      return;
+    }
+    try {
+      const flujo = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const trozos = /** @type {Blob[]} */ ([]);
+      grabador = new MediaRecorder(flujo, { mimeType: formato });
+      grabador.ondataavailable = (ev) => ev.data.size && trozos.push(ev.data);
+      grabador.onstop = () => {
+        // El micrófono se suelta SIEMPRE: sin esto el navegador deja el
+        // indicador de grabación encendido hasta cerrar la pestaña.
+        flujo.getTracks().forEach((t) => t.stop());
+        clearInterval(cronometro);
+        grabando = false;
+        grabPausada = false;
+        if (!trozos.length) return;
+        const base = formato.split(';')[0];
+        tomarArchivo(
+          new File([new Blob(trozos, { type: base })], `nota-de-voz.${base.split('/')[1]}`, {
+            type: base
+          })
+        );
+      };
+      grabador.start();
+      grabando = true;
+      segundos = 0;
+      error = '';
+      cronometro = setInterval(() => {
+        if (!grabPausada) segundos += 1;
+      }, 1000);
+    } catch {
+      error = 'No se pudo usar el micrófono. Revisá el permiso del navegador.';
+    }
+  }
+
+  function pausarGrabacion() {
+    if (!grabador) return;
+    if (grabPausada) {
+      grabador.resume();
+      grabPausada = false;
+    } else {
+      grabador.pause();
+      grabPausada = true;
+    }
+  }
+
+  /** Parar deja la grabación como adjunto pendiente de confirmación. */
+  const pararGrabacion = () => grabador?.stop();
+
+  /** Cancelar la tira: el onstop no llega a armar el adjunto. */
+  function cancelarGrabacion() {
+    if (!grabador) return;
+    grabador.onstop = null;
+    grabador.stream?.getTracks().forEach((t) => t.stop());
+    grabador.stop();
+    clearInterval(cronometro);
+    grabando = false;
+    grabPausada = false;
+  }
+
+  const reloj = (/** @type {number} */ s) =>
+    `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+
+  /** Manda el adjunto. El texto del cuadro viaja como pie cuando el tipo lo
+      acepta -- el AUDIO no lo acepta (Meta lo ignora en silencio), así que en
+      ese caso el texto se manda aparte, como mensaje propio, en vez de
+      perderse. */
+  async function enviarAdjunto() {
+    if (!adjunto || enviando) return;
+    enviando = true;
+    error = '';
+    const aceptaPie = limites?.[adjunto.tipo]?.acepta_pie ?? false;
+    const pie = aceptaPie ? entrada.trim() : '';
+    try {
+      const cuerpo = new FormData();
+      cuerpo.set('archivo', adjunto.archivo, adjunto.nombre);
+      cuerpo.set('tipo', adjunto.tipo);
+      cuerpo.set('pie', pie);
+      const resp = await fetch(`/api/conversaciones/${conversacion.id}/media`, {
+        method: 'POST',
+        body: cuerpo
+      });
+      const datos = await resp.json();
+      if (!resp.ok) {
+        error = datos.error || 'No se pudo enviar el archivo.';
+        return;
+      }
+      if (datos.aviso) error = `Se guardó, pero no le llegó al cliente: ${datos.aviso}`;
+      const texto = entrada.trim();
+      quitarAdjunto();
+      if (pie) entrada = '';
+      await sondearMensajesNuevos();
+      // El texto que no cabía como pie sale como mensaje aparte, después del
+      // audio. Se manda acá y no antes para que el orden en el hilo del
+      // cliente sea el mismo que el de esta pantalla.
+      if (texto && !aceptaPie) await enviar();
+    } catch (/** @type {any} */ err) {
+      error = err?.message || 'No se pudo enviar el archivo.';
+    } finally {
+      enviando = false;
     }
   }
 
@@ -375,7 +709,17 @@
    *  aparecen hoy (nucleo/persistencia/db.py solo registra esos), pero un
    *  rol inesperado cae en un estilo neutro en vez de romper el render. */
   const burbujaClase = (rol) =>
-    rol === 'user' ? 'chat-usuario' : rol === 'assistant' ? 'chat-asistente' : 'chat-otro';
+    rol === 'user'
+      ? 'chat-usuario'
+      : rol === 'assistant'
+        ? 'chat-asistente'
+        : // Una nota interna NO se parece a un mensaje: si se ve como una
+          // burbuja mas, alguien la va a leer como algo que se le dijo al
+          // cliente. Es la mitad visual de la garantia; la otra mitad es que
+          // la ruta que la guarda no toca el canal.
+          rol === 'nota'
+          ? 'chat-nota'
+          : 'chat-otro';
 
   // Una vez que hay ticket, la caja deja de simular al cliente para que
   // conteste el bot -- pasa a ser la respuesta de la persona que tomo el
@@ -755,7 +1099,19 @@
             class="chat-burbuja {burbujaClase(item.m.rol)}"
             class:sin-entregar={item.m.sinEntregar}
           >
-            <div>{item.m.contenido}</div>
+            <!-- Un mensaje sin texto Y sin adjunto que se pueda dibujar no
+                 puede quedar como una burbuja vacía: llegó algo (una
+                 ubicación, un contacto, un sticker) que esta pantalla todavía
+                 no representa. Decirlo es mejor que un hueco, que se lee como
+                 un error de la aplicación. -->
+            {#if item.m.contenido}
+              <div>{item.m.contenido}</div>
+            {:else if !(item.m.adjuntos ?? []).length}
+              <div class="no-representable">
+                <TriangleAlert size={12} />
+                Mensaje de un tipo que todavía no mostramos acá — el cliente sí lo envió.
+              </div>
+            {/if}
             <!-- Lo que el cliente mando junto al mensaje. Para un ISP la foto
                  de las luces del router dice en un segundo lo que al cliente
                  le cuesta tres mensajes explicar: va EN el hilo, donde la
@@ -769,17 +1125,55 @@
                 <!-- svelte-ignore a11y_media_has_caption -->
                 <audio class="adjunto-audio" controls src="/api/media/{a.id}"></audio>
               {:else}
-                <a class="adjunto-otro" href="/api/media/{a.id}" target="_blank" rel="noreferrer">
-                  <Paperclip size={13} />
-                  {a.tipo || 'archivo'} · <span class="v2-num">{Math.round(a.bytes / 1024)} KB</span>
+                <!-- Documento: nombre, tipo y peso, y un botón que dice qué
+                     hace. Antes decía "document · 428 KB", que no alcanza para
+                     saber si vale la pena abrirlo. -->
+                <a class="adjunto-doc" href="/api/media/{a.id}" target="_blank" rel="noreferrer">
+                  <Paperclip size={15} />
+                  <span class="adjunto-doc-datos">
+                    <b>{a.descripcion || a.tipo || 'archivo'}</b>
+                    <span class="v2-muted v2-num">
+                      {extension(a)} · {Math.round(a.bytes / 1024)} KB
+                    </span>
+                  </span>
+                  <span class="adjunto-abrir">Abrir</span>
                 </a>
               {/if}
             {/each}
 
-            {#if item.m.sinEntregar}
+            <!-- Por qué no alcanza con 'sinEntregar': ese es el aviso del
+                 POST, existe una sola vez y se pierde al recargar. El estado
+                 viene de la base (messages.estado_entrega) y sobrevive. Se
+                 muestran los dos porque el primero llega al instante y el
+                 segundo tarda lo que tarde el acuse de Meta. -->
+            {#if item.m.sinEntregar || item.m.estado_entrega === 'fallido'}
               <div class="no-llego">
                 <TriangleAlert size={12} />
-                No le llegó al cliente — {item.m.sinEntregar}
+                <span>
+                  No le llegó al cliente — {item.m.sinEntregar ||
+                    item.m.error_entrega ||
+                    'WhatsApp lo rechazó'}
+                </span>
+                <!-- Reintentar sin volver a escribir: el texto ya está en la
+                     burbuja, y hacer que alguien lo tipee de nuevo después de
+                     un fallo del canal es cobrarle a la persona equivocada. -->
+                <button
+                  type="button"
+                  class="v2-btn v2-btn-sm reintentar"
+                  onclick={() => reintentar(item.m)}
+                  disabled={reintentando === item.m.id}
+                  aria-busy={reintentando === item.m.id}
+                >
+                  <RotateCcw size={12} />
+                  {reintentando === item.m.id ? 'Reintentando…' : 'Reintentar'}
+                </button>
+              </div>
+            {:else if item.m.rol === 'assistant' && item.m.estado_entrega}
+              <!-- NULL no dibuja nada: significa "no se sabe" (otro canal, o
+                   anterior al registro), y un tilde inventado sobre un mensaje
+                   del que no sabemos nada es peor que no decir nada. -->
+              <div class="entrega entrega-{item.m.estado_entrega}">
+                {ENTREGA_TEXTO[item.m.estado_entrega] ?? item.m.estado_entrega}
               </div>
             {/if}
             <div class="chat-hora v2-num">{hora(item.m.creado_en)}</div>
@@ -805,39 +1199,205 @@
   {#if conversacion.estado === 'abierta'}
     <div class="pie">
       {#if error}<p class="v2-error" style="margin:0 0 6px">{error}</p>{/if}
-      <form class="compositor" onsubmit={alEnviar}>
+      <!-- Los dos modos, arriba del cuadro. Van acá y no dentro del pie para
+           que se lean ANTES de escribir, no después. -->
+      <div class="modos" role="group" aria-label="Qué estás escribiendo">
+        <button
+          type="button"
+          class="modo"
+          aria-pressed={modo === 'responder'}
+          onclick={() => (modo = 'responder')}>Responder al cliente</button
+        >
+        <button
+          type="button"
+          class="modo modo-nota"
+          aria-pressed={modo === 'nota'}
+          onclick={() => (modo = 'nota')}>Nota interna</button
+        >
+      </div>
+
+      <form
+        class="compositor"
+        class:arrastrando
+        class:es-nota={modo === 'nota'}
+        onsubmit={alEnviar}
+        ondragover={(e) => {
+          e.preventDefault();
+          arrastrando = true;
+        }}
+        ondragleave={() => (arrastrando = false)}
+        ondrop={alSoltar}
+      >
+        {#if arrastrando}
+          <div class="soltar-aca">Soltá el archivo acá</div>
+        {/if}
+
+        <!-- Grabando: el cronómetro y los tres controles que el pedido exige,
+             y NINGUNO que mande. Parar deja la nota como adjunto pendiente de
+             confirmación -- se puede escuchar antes de mandarla. -->
+        {#if grabando}
+          <div class="grabando">
+            <span class="grabando-punto" aria-hidden="true"></span>
+            <span class="v2-num grabando-reloj">{reloj(segundos)}</span>
+            <button type="button" class="v2-btn v2-btn-sm" onclick={pausarGrabacion}>
+              {grabPausada ? 'Seguir' : 'Pausar'}
+            </button>
+            <button type="button" class="v2-btn v2-btn-sm v2-btn-danger" onclick={cancelarGrabacion}>
+              Cancelar
+            </button>
+            <button type="button" class="v2-btn v2-btn-sm v2-btn-strong" onclick={pararGrabacion}>
+              Listo
+            </button>
+          </div>
+        {/if}
+
+        <!-- El adjunto elegido, ANTES de mandarlo. Nada sale sin pasar por
+             acá: ni un archivo arrastrado, ni una captura pegada, ni una nota
+             de voz recién grabada. -->
+        {#if adjunto}
+          <div class="adjunto-previo">
+            {#if adjunto.tipo === 'image'}
+              <img src={adjunto.url} alt="Lo que vas a enviar" />
+            {:else if adjunto.tipo === 'audio'}
+              <!-- svelte-ignore a11y_media_has_caption -->
+              <audio controls src={adjunto.url}></audio>
+            {:else}
+              <span class="adjunto-icono"><Paperclip size={18} /></span>
+            {/if}
+            <span class="adjunto-datos">
+              <b>{adjunto.nombre}</b>
+              <span class="v2-muted v2-num">
+                {(adjunto.bytes / 1048576).toFixed(2)} MB
+                {#if !(limites?.[adjunto.tipo]?.acepta_pie ?? true)}
+                  · el texto va como mensaje aparte
+                {/if}
+              </span>
+            </span>
+            <button
+              type="button"
+              class="v2-btn v2-btn-sm v2-btn-quiet"
+              onclick={quitarAdjunto}
+              aria-label="Quitar el archivo"><X size={14} /></button
+            >
+          </div>
+        {/if}
+
         <textarea
           class="compositor-texto"
+          bind:this={campoTexto}
           bind:value={entrada}
+          onpaste={alPegar}
           rows="2"
-          placeholder={escalada ? 'Escribí tu respuesta…' : 'Continuar la conversación…'}
+          placeholder={modo === 'nota'
+            ? 'Nota para el equipo — el cliente no la ve…'
+            : escalada
+              ? 'Escribí tu respuesta…'
+              : 'Continuar la conversación…'}
           disabled={enviando}
           onkeydown={(e) => {
             // Enter envia, Shift+Enter hace salto de linea: es lo que la mano
             // ya espera de un chat.
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault();
-              enviar();
+              if (modo === 'nota') guardarNota();
+              else enviar();
             }
           }}
         ></textarea>
         <div class="compositor-pie">
+          <!-- Emoji, adjuntar y micrófono. Iconos de 34px y no de 20: esta
+               pantalla se usa con prisa, y un objetivo diminuto se falla. -->
+          <div class="herramientas" hidden={modo === 'nota'}>
+            <div class="emoji-caja">
+              <button
+                type="button"
+                class="v2-btn v2-btn-quiet accion-icono"
+                aria-label="Emoji"
+                aria-expanded={emojisAbiertos}
+                onclick={() => (emojisAbiertos = !emojisAbiertos)}><Smile size={17} /></button
+              >
+              {#if emojisAbiertos}
+                <div class="emoji-panel" role="group" aria-label="Elegí un emoji">
+                  {#each EMOJIS as e (e)}
+                    <button type="button" onclick={() => ponerEmoji(e)}>{e}</button>
+                  {/each}
+                </div>
+              {/if}
+            </div>
+
+            <!-- Un solo input, sin menú: elegir "imagen" o "documento" antes
+                 de ver los archivos es un paso de más -- el tipo se deduce
+                 del archivo (tipoDe) y el canal valida lo que no acepta. -->
+            <label class="v2-btn v2-btn-quiet accion-icono" title="Adjuntar imagen o documento">
+              <Paperclip size={17} />
+              <span class="v2-sr-only">Adjuntar archivo</span>
+              <input
+                type="file"
+                hidden
+                onchange={(e) => {
+                  const f = e.currentTarget.files?.[0];
+                  if (f) tomarArchivo(f);
+                  e.currentTarget.value = '';
+                }}
+              />
+            </label>
+
+            {#if !grabando}
+              <button
+                type="button"
+                class="v2-btn v2-btn-quiet accion-icono"
+                aria-label="Grabar una nota de voz"
+                onclick={grabar}><Mic size={17} /></button
+              >
+            {/if}
+          </div>
+
           <span class="compositor-nota">
-            {#if escalada}
-              Le llega al cliente tal cual, sin pasar por el asistente
+            {#if modo === 'nota'}
+              <strong class="nota-interna-aviso">Solo la ve el equipo</strong>
+              <span class="v2-muted">no se le envía al cliente</span>
+            {:else if escalada}
+              <!-- Más visible que antes (§11): cuando está escalada, esto sale
+                   DIRECTO al cliente. "Le llega tal cual" no decía quién
+                   habla ni que el asistente no interviene. -->
+              <strong class="nota-directo">Se envía directo al cliente</strong>
+              <span class="v2-muted">no pasa por el asistente</span>
             {:else}
               Responde el asistente
             {/if}
             · <kbd class="v2-kbd">Enter</kbd> envía
           </span>
-          <button
-            class="v2-btn v2-btn-primary"
-            type="submit"
-            disabled={enviando || !entrada.trim()}
-            aria-busy={enviando}
-          >
-            <Send size={14} />{enviando ? 'Enviando…' : 'Enviar'}
-          </button>
+
+          {#if modo === 'nota'}
+            <button
+              class="v2-btn v2-btn-strong"
+              type="button"
+              onclick={guardarNota}
+              disabled={enviando || !entrada.trim()}
+              aria-busy={enviando}
+            >
+              {enviando ? 'Guardando…' : 'Guardar nota'}
+            </button>
+          {:else if adjunto}
+            <button
+              class="v2-btn v2-btn-primary"
+              type="button"
+              onclick={enviarAdjunto}
+              disabled={enviando}
+              aria-busy={enviando}
+            >
+              <Send size={14} />{enviando ? 'Enviando…' : 'Enviar archivo'}
+            </button>
+          {:else}
+            <button
+              class="v2-btn v2-btn-primary"
+              type="submit"
+              disabled={enviando || !entrada.trim()}
+              aria-busy={enviando}
+            >
+              <Send size={14} />{enviando ? 'Enviando…' : 'Enviar'}
+            </button>
+          {/if}
         </div>
       </form>
     </div>
@@ -1524,6 +2084,281 @@
   .aviso-motivo {
     color: var(--v2-slate);
   }
+  /* ── nota interna ───────────────────────────────────────────────────── */
+  .modos {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 6px;
+  }
+  .modo {
+    border: 1px solid transparent;
+    background: none;
+    font: inherit;
+    font-size: 11.5px;
+    color: var(--v2-slate);
+    padding: 5px 10px;
+    min-height: 30px;
+    border-radius: 7px;
+    cursor: pointer;
+  }
+  .modo:hover {
+    color: var(--v2-ink);
+  }
+  .modo[aria-pressed='true'] {
+    color: var(--v2-ink);
+    font-weight: 650;
+    border-color: var(--v2-line);
+    background: var(--v2-card);
+  }
+  .modo-nota[aria-pressed='true'] {
+    color: var(--v2-clay);
+    border-color: color-mix(in srgb, var(--v2-clay) 45%, transparent);
+  }
+
+  /* El compositor entero cambia, no una pestaña chiquita: lo que hay que
+     hacer imposible es escribir algo interno creyendo que es privado. */
+  .compositor.es-nota {
+    background: color-mix(in srgb, var(--v2-clay) 9%, transparent);
+    border: 1px dashed color-mix(in srgb, var(--v2-clay) 45%, transparent);
+    border-radius: 9px;
+    padding: 8px;
+  }
+  .compositor.es-nota .compositor-texto {
+    background: transparent;
+  }
+  .nota-interna-aviso {
+    color: var(--v2-clay);
+  }
+
+  /* En el hilo tampoco se parece a un mensaje. */
+  .chat-nota {
+    align-self: stretch;
+    max-width: 100%;
+    background: color-mix(in srgb, var(--v2-clay) 8%, transparent);
+    border: 1px dashed color-mix(in srgb, var(--v2-clay) 40%, transparent);
+    color: var(--v2-ink);
+    font-size: 12.5px;
+  }
+  .chat-nota::before {
+    content: 'Nota interna · no la ve el cliente';
+    display: block;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--v2-clay);
+    margin-bottom: 3px;
+  }
+
+  /* ── entrega y multimedia recibida ──────────────────────────────────── */
+  .entrega {
+    font-size: 10.5px;
+    color: var(--v2-slate);
+    text-align: right;
+    margin-top: 2px;
+  }
+  .entrega-leido {
+    color: var(--v2-moss);
+    font-weight: 600;
+  }
+  .reintentar {
+    margin-left: auto;
+    flex: none;
+  }
+  .no-representable {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-style: italic;
+    color: var(--v2-slate);
+  }
+  .adjunto-doc {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin-top: 6px;
+    padding: 8px 10px;
+    border: 1px solid var(--v2-line);
+    border-radius: 8px;
+    color: inherit;
+    text-decoration: none;
+  }
+  .adjunto-doc:hover {
+    border-color: var(--v2-slate);
+  }
+  .adjunto-doc-datos {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+    font-size: 12px;
+  }
+  .adjunto-doc-datos b {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .adjunto-abrir {
+    margin-left: auto;
+    font-size: 11.5px;
+    font-weight: 650;
+    color: var(--v2-ember);
+    flex: none;
+  }
+
+  /* ── compositor ─────────────────────────────────────────────────────── */
+  .compositor {
+    position: relative;
+  }
+  .compositor.arrastrando {
+    outline: 2px dashed var(--v2-ember);
+    outline-offset: 3px;
+    border-radius: 8px;
+  }
+  /* La zona de destino tiene que decirse, no insinuarse: quien arrastra un
+     archivo no sabe si va a caer en el chat o en la pestaña del navegador. */
+  .soltar-aca {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    display: grid;
+    place-items: center;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--v2-ember) 10%, var(--v2-card));
+    color: var(--v2-ember);
+    font-weight: 650;
+    font-size: 13px;
+    pointer-events: none;
+  }
+
+  .herramientas {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
+  /* 34px de lado: un icono de 17px con padding llegaba a 26, que es de los
+     objetivos que se fallan cuando se atiende con prisa. */
+  .accion-icono {
+    min-width: 34px;
+    min-height: 34px;
+    padding: 0;
+    justify-content: center;
+    cursor: pointer;
+  }
+
+  .emoji-caja {
+    position: relative;
+  }
+  .emoji-panel {
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 0;
+    z-index: 5;
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 2px;
+    padding: 6px;
+    background: var(--v2-card);
+    border: 1px solid var(--v2-line);
+    border-radius: 9px;
+    box-shadow: 0 8px 24px rgb(0 0 0 / 12%);
+  }
+  .emoji-panel button {
+    border: 0;
+    background: none;
+    font-size: 18px;
+    line-height: 1;
+    padding: 5px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .emoji-panel button:hover {
+    background: var(--v2-line-soft);
+  }
+
+  .adjunto-previo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px;
+    margin-bottom: 6px;
+    border: 1px solid var(--v2-line);
+    border-radius: 8px;
+  }
+  .adjunto-previo img {
+    width: 56px;
+    height: 56px;
+    object-fit: cover;
+    border-radius: 6px;
+    flex: none;
+  }
+  .adjunto-previo audio {
+    height: 34px;
+    max-width: 240px;
+  }
+  .adjunto-icono {
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 6px;
+    background: var(--v2-line-soft);
+    color: var(--v2-slate);
+    flex: none;
+  }
+  .adjunto-datos {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+    font-size: 12px;
+  }
+  .adjunto-datos b {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .grabando {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 9px;
+    margin-bottom: 6px;
+    border: 1px solid color-mix(in srgb, var(--v2-rust) 35%, transparent);
+    border-radius: 8px;
+    font-size: 12.5px;
+  }
+  .grabando-punto {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--v2-rust);
+    animation: latir 1.1s ease-in-out infinite;
+    flex: none;
+  }
+  @keyframes latir {
+    50% {
+      opacity: 0.25;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .grabando-punto {
+      animation: none;
+    }
+  }
+  .grabando-reloj {
+    font-weight: 700;
+    color: var(--v2-rust);
+    margin-right: auto;
+  }
+
+  /* Que sale directo al cliente no puede leerse igual que "Enter envía". */
+  .nota-directo {
+    color: var(--v2-ember);
+  }
+
   .aviso-caso {
     font-size: 11px;
     font-weight: 650;
@@ -1852,6 +2687,43 @@
     .volver {
       display: grid;
       place-items: center;
+    }
+  }
+
+  /* El orden de sacrificio, angosto: lo ultimo que se pierde es poder
+     escribir. La fila del compositor tiene tres cosas --herramientas, aviso,
+     boton-- y a 420px no entran; el AVISO es lo que se va a un renglon
+     propio, nunca el boton ni los iconos, que son con lo que se trabaja.
+     Encogerlo todo para que entre en una linea los deja ilegibles a los tres. */
+  @media (max-width: 560px) {
+    .compositor-pie {
+      flex-wrap: wrap;
+      row-gap: 6px;
+    }
+    .compositor-nota {
+      order: 3;
+      flex-basis: 100%;
+    }
+    /* El panel de emoji se sale por la izquierda si se ancla al boton en una
+       pantalla angosta: pasa a ocupar el ancho del compositor. */
+    .emoji-panel {
+      left: 0;
+      right: 0;
+      grid-template-columns: repeat(auto-fill, minmax(38px, 1fr));
+    }
+    .grabando {
+      flex-wrap: wrap;
+    }
+    .grabando-reloj {
+      margin-right: 0;
+    }
+    /* Una previsualizacion de 56px al lado de un nombre largo deja el nombre
+       en dos caracteres. */
+    .adjunto-previo {
+      flex-wrap: wrap;
+    }
+    .adjunto-datos {
+      flex-basis: 100%;
     }
   }
 </style>

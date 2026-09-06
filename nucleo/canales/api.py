@@ -3136,8 +3136,14 @@ def conversaciones_responder_humano(id_conversacion):
 
     try:
         config = _config_de(tenant)
-        whatsapp.enviar_texto(config, tenant, destino["usuario_externo"], contenido)
+        wamid = whatsapp.enviar_texto(config, tenant,
+                                      destino["usuario_externo"], contenido)
+        # El wamid queda sellado en la fila del mensaje: es la unica clave con
+        # la que despues se casan los acuses de entrega, que llegan por el
+        # webhook sin ninguna otra referencia.
+        persistencia.marcar_envio(tenant, destino["mensaje_id"], wamid)
         salida["entregado"] = True
+        salida["mensaje_id"] = destino["mensaje_id"]
     except Exception as e:
         # 201 igual: el mensaje SI quedo guardado, y el agente tiene que verlo
         # en el hilo. Lo que no ocurrio es la entrega, y eso se dice con todas
@@ -3145,6 +3151,12 @@ def conversaciones_responder_humano(id_conversacion):
         print(f"[conversaciones] no se pudo entregar la respuesta humana de "
               f"'{id_conversacion}': {type(e).__name__}: {e}")
         salida["aviso"] = str(e)
+        # Que el fallo quede EN LA FILA y no solo en esta respuesta. Antes el
+        # aviso aparecia una vez y se perdia: al recargar la pagina, un
+        # mensaje que nunca salio se veia igual que uno entregado, y quien
+        # atendio se iba creyendo que habia contestado.
+        persistencia.marcar_envio(tenant, destino["mensaje_id"], None, str(e))
+        salida["mensaje_id"] = destino["mensaje_id"]
 
     return jsonify(salida), 201
 
@@ -4496,19 +4508,39 @@ def whatsapp_webhook(tenant):
     # Los acuses de entrega llegan por este mismo webhook y NO son
     # conversacion: sin separarlos, el bot contestaria a su propio "entregado".
     for estado in estados:
-        if estado.get("estado") == "failed":
+        crudo = estado.get("estado")
+        if crudo == "failed":
             print(f"[whatsapp] no se pudo entregar a {estado.get('de')}: "
                   f"codigo={estado.get('codigo')} {estado.get('error')} "
                   f"| detalle={estado.get('detalle')}")
+        else:
+            # Los acuses buenos tambien se registran. Antes solo se imprimian
+            # los fallidos, y eso obligaba a deducir del SILENCIO que un
+            # mensaje habia salido bien -- que es justo lo que no se puede
+            # distinguir de que el acuse nunca llego. La categoria es lo que
+            # factura Meta.
+            categoria = estado.get("categoria")
+            print(f"[whatsapp] {crudo} -> {estado.get('de')}"
+                  + (f" | conversacion={estado.get('conversacion')} ({categoria})"
+                     if categoria else ""))
+
+        # Y ahora, ademas de imprimirlo, se GUARDA contra el mensaje que lo
+        # produjo. Hasta hoy esto se leia, se registraba y se tiraba: no habia
+        # donde ponerlo, porque 'messages' no guardaba el wamid. La
+        # consecuencia era que un mensaje que nunca salio se veia, al recargar
+        # la pagina, exactamente igual que uno entregado.
+        nuestro = ESTADOS_DE_ENTREGA.get(crudo)
+        if not nuestro or not estado.get("wamid"):
             continue
-        # Los acuses buenos tambien se registran. Antes solo se imprimian los
-        # fallidos, y eso obligaba a deducir del SILENCIO que un mensaje habia
-        # salido bien -- que es justo lo que no se puede distinguir de que el
-        # acuse nunca llego. La categoria es lo que factura Meta.
-        categoria = estado.get("categoria")
-        print(f"[whatsapp] {estado.get('estado')} -> {estado.get('de')}"
-              + (f" | conversacion={estado.get('conversacion')} ({categoria})"
-                 if categoria else ""))
+        try:
+            persistencia.marcar_entrega(
+                tenant, estado["wamid"], nuestro,
+                _motivo_de_fallo(estado) if nuestro == "fallido" else None)
+        except Exception as e:
+            # Un acuse perdido no puede tumbar el webhook: Meta reintenta la
+            # entrega entera y volveriamos a procesar los mensajes.
+            print(f"[whatsapp] no se pudo anotar el acuse {crudo}: "
+                  f"{type(e).__name__}: {e}")
 
     return jsonify({"recibido": True, "atendidos": atendidos}), 200
 
@@ -4696,6 +4728,188 @@ def conversaciones_atender(id_conversacion):
     if not existe:
         return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
     return jsonify({"atendida": True})
+
+
+@app.post("/conversaciones/<id_conversacion>/humano/media")
+def conversaciones_enviar_media(id_conversacion):
+    """
+    Una persona le manda un archivo al cliente desde la bandeja: una foto de
+    como queda el cableado, la factura en PDF, una nota de voz.
+
+    MISMO CRITERIO QUE EL TEXTO: se guarda primero y se entrega despues.
+    Un adjunto que se ve en el hilo pero nunca salio es peor que un error
+    visible.
+
+    LO QUE ESTA API ACEPTA, Y POR QUE NO MAS
+    ---------------------------------------
+    image, document y audio. Video y sticker existen en la API de Meta y NO
+    estan aca a proposito: no se probaron contra esta cuenta. Declarar un tipo
+    sin haberlo probado es exactamente lo que costo tiempo con la API de
+    WispHub -- ver la skill 'wisphub-api'.
+
+    Los limites (formato y tamaño) los declara el canal, no esta funcion:
+    whatsapp.LIMITES_MEDIA. Se validan ANTES de subir, porque pasarse devuelve
+    un error generico DESPUES de haber subido el archivo entero.
+
+    Multipart, no JSON: mandar los bytes en base64 dentro de un JSON los
+    infla un tercio y obliga a tener el archivo entero dos veces en memoria.
+
+    Campos: archivo (file), tenant, tipo, pie?, autor?
+    """
+    subido = request.files.get("archivo")
+    tenant = request.form.get("tenant")
+    tipo = (request.form.get("tipo") or "").strip()
+    pie = (request.form.get("pie") or "").strip()
+    autor = (request.form.get("autor") or "").strip()
+
+    if not subido or not tenant or not tipo:
+        return jsonify({"error": "Faltan campos: archivo, tenant, tipo"}), 400
+
+    contenido = subido.read()
+    mime = subido.mimetype or "application/octet-stream"
+    nombre = subido.filename or "archivo"
+
+    # Validar antes de tocar la base: si WhatsApp no lo va a aceptar, no se
+    # guarda un adjunto que despues no se puede entregar nunca.
+    try:
+        whatsapp._validar_media(tipo, mime, len(contenido))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+    # Lo que ve el hilo. Un adjunto sin texto no puede quedar como una burbuja
+    # vacia: se dice que se mando, y el pie va aparte si lo hay.
+    etiqueta = whatsapp.LIMITES_MEDIA[tipo]["etiqueta"]
+    texto = pie or f"[{etiqueta} enviado: {nombre}]"
+
+    try:
+        destino = persistencia.agregar_mensaje_humano(
+            tenant, id_conversacion, texto, autor)
+    except Exception as e:
+        print(f"[media] fallo al guardar el mensaje: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo guardar."}), 500
+    if destino is None:
+        return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+
+    # Se comprime con el mismo criterio que lo que ENTRA (media.preparar):
+    # una foto de 8 MB del celular de un tecnico no tiene por que viajar
+    # entera, y ademas asi entra en el tope de 5 MB de WhatsApp.
+    guardado, mime_guardado = media.preparar(contenido, tipo, mime)
+
+    salida = {"ok": True, "entregado": False,
+              "mensaje_id": destino["mensaje_id"]}
+
+    if destino["canal"] != "whatsapp":
+        salida["entregado"] = None
+    else:
+        try:
+            config = _config_de(tenant)
+            wamid = whatsapp.enviar_media(
+                config, tenant, destino["usuario_externo"], tipo,
+                guardado, mime_guardado, nombre, pie)
+            persistencia.marcar_envio(tenant, destino["mensaje_id"], wamid)
+            salida["entregado"] = True
+        except Exception as e:
+            print(f"[media] no se pudo entregar el adjunto de "
+                  f"'{id_conversacion}': {type(e).__name__}: {e}")
+            salida["aviso"] = str(e)
+            persistencia.marcar_envio(tenant, destino["mensaje_id"], None, str(e))
+
+    # Se guarda pase lo que pase con la entrega: si fallo, quien atiende tiene
+    # que poder ver QUE quiso mandar para reintentarlo, no volver a buscar el
+    # archivo en su disco.
+    #
+    # 'media_id' propio y no el de Meta: el de Meta caduca a los 30 dias y no
+    # existe si la entrega fallo. Este es la clave estable de nuestro lado.
+    try:
+        persistencia.guardar_media(
+            tenant, id_conversacion, f"salida:{destino['mensaje_id']}", tipo,
+            guardado, mime_guardado, nombre, destino["mensaje_id"])
+    except Exception as e:
+        print(f"[media] no se pudo guardar el adjunto: {type(e).__name__}: {e}")
+
+    return jsonify(salida), 201
+
+
+@app.post("/conversaciones/<id_conversacion>/nota")
+def conversaciones_nota(id_conversacion):
+    """
+    Una nota que el equipo se deja a si mismo. NO se le envia a nadie.
+
+    Esta ruta NO tiene ninguna llamada al canal, y eso es la garantia: no es
+    que se decida no enviar, es que no hay con que. La ruta que entrega
+    (POST .../humano) es otra funcion, con otro nombre y otro verbo.
+
+    Cuerpo: {tenant, mensaje, autor?}
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    contenido = (cuerpo.get("mensaje") or "").strip()
+    if not tenant or not contenido:
+        return jsonify({"error": "Faltan campos: tenant, mensaje"}), 400
+
+    try:
+        nota_id = persistencia.agregar_nota_interna(
+            tenant, id_conversacion, contenido,
+            (cuerpo.get("autor") or "").strip())
+    except Exception as e:
+        print(f"[nota] fallo al guardar: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo guardar la nota."}), 500
+
+    if nota_id is None:
+        return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+    return jsonify({"ok": True, "nota_id": nota_id}), 201
+
+
+@app.get("/canales/limites-media")
+def canales_limites_media():
+    """
+    Que formatos y tamaños acepta el canal. La pantalla los pide para validar
+    ANTES de subir un archivo -- que alguien espere una subida de 40 MB para
+    que le digan que no se puede es evitable.
+
+    Sale del canal y no de una constante en el frontend: si Meta cambia un
+    tope, se cambia en un solo lugar y la pantalla se entera sola.
+    """
+    return jsonify({"limites": whatsapp.limites_media()})
+
+
+# Los nombres de Meta, traducidos UNA vez. La base guarda el nuestro porque es
+# lo que se muestra, y tener la traduccion en un solo lugar evita que la
+# pantalla tenga que conocer el vocabulario de un proveedor.
+ESTADOS_DE_ENTREGA = {
+    "sent": "enviado",
+    "delivered": "entregado",
+    "read": "leido",
+    "failed": "fallido",
+}
+
+# Lo que Meta manda como texto del error es el MISMO ('Message undeliverable')
+# para causas opuestas: un numero que no existe, la ventana de 24 h vencida, o
+# alguien que bloqueo a la empresa. Lo que las distingue es el codigo, y quien
+# atiende tiene que hacer cosas distintas en cada una -- por eso se guarda ya
+# traducido a algo que dice que hacer, y no el texto crudo.
+MOTIVOS_DE_FALLO = {
+    131047: "Pasaron más de 24 horas desde el último mensaje del cliente: "
+            "WhatsApp ya no acepta texto libre, hay que usar una plantilla.",
+    131026: "El número no tiene WhatsApp, o no puede recibir mensajes.",
+    131049: "Meta no entregó el mensaje para cuidar la experiencia del "
+            "usuario (límite de mensajes de marketing).",
+    131051: "Ese tipo de mensaje no está permitido para este número.",
+    470: "La ventana de servicio se cerró: hay que reabrirla con una "
+         "plantilla aprobada.",
+}
+
+
+def _motivo_de_fallo(estado: dict) -> str:
+    """El por que de un fallo, en palabras y con su codigo por si hay que
+    buscarlo. Un codigo desconocido devuelve lo que dijo Meta antes que
+    nada: es preferible un texto pobre a perder la unica pista."""
+    codigo = estado.get("codigo")
+    conocido = MOTIVOS_DE_FALLO.get(codigo)
+    if conocido:
+        return conocido
+    crudo = estado.get("detalle") or estado.get("error") or "sin detalle"
+    return f"WhatsApp no lo entregó (código {codigo}): {crudo}"
 
 
 @app.post("/conversaciones/<id_conversacion>/resolver")
