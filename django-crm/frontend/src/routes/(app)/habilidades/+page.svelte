@@ -46,9 +46,20 @@
   /** @type {Record<string, string[]>} */
   let rolesElegidos = $state({});
 
+  /**
+   * Los roles elegidos para esta habilidad, o los que ya tenía si nadie tocó
+   * nada todavía.
+   *
+   * SOLO LEE. La primera versión escribía `rolesElegidos` acá para "sembrar"
+   * el valor inicial — y como esto se llama desde la plantilla, Svelte 5 lo
+   * corta con `state_unsafe_mutation` y la página entera no carga. El estado
+   * se escribe únicamente cuando alguien hace clic (`alternarRol`).
+   *
+   * `pnpm check` no lo detecta: es un error de ejecución, no de tipos. Se ve
+   * abriendo la página.
+   */
   function rolesDe(/** @type {any} */ h) {
-    if (!rolesElegidos[h.id]) rolesElegidos = { ...rolesElegidos, [h.id]: h.roles_permitidos ?? [] };
-    return rolesElegidos[h.id];
+    return rolesElegidos[h.id] ?? h.roles_permitidos ?? [];
   }
 
   function alternarRol(/** @type {any} */ h, /** @type {string} */ rol) {
