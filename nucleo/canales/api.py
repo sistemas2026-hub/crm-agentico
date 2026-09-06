@@ -38,6 +38,7 @@ import time
 from flask import Flask, jsonify, request
 
 from nucleo.canales import media, whatsapp
+from nucleo.conectores import catalogo as conectores
 from nucleo.config import editor, fuente
 from nucleo.config.fusion import fusionar_roles, modelo_fusionado
 from nucleo.habilidades import analista
@@ -3461,6 +3462,81 @@ def configuracion_propuesta_rechazar(id_propuesta):
     if not existe:
         return jsonify({"error": f"La propuesta '{id_propuesta}' no existe."}), 404
     return jsonify({"ok": True, "estado": "rechazada"})
+
+
+# =============================================================================
+#  CONECTORES  -  conectar un sistema conocido eligiendolo de una lista.
+#  Ver nucleo/conectores/catalogo.py.
+#
+#  'preparar' devuelve lo que VA a pasar sin que pase: cuantas herramientas
+#  entran, cuales se saltean, que campos gana cada rol. Aplicar escribe datos
+#  de clientes en el catalogo de un tenant -- que se pueda mirar antes no es
+#  cortesia, es la unica forma de que la decision sea de una persona.
+# =============================================================================
+
+@app.get("/conectores")
+def conectores_listar():
+    try:
+        return jsonify({"conectores": conectores.listar()})
+    except Exception as e:
+        print(f"[conectores] fallo al listar: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudieron leer los conectores."}), 500
+
+
+@app.post("/conectores/<id_conector>/preparar")
+def conectores_preparar(id_conector):
+    """Que pasaria al aplicarlo. NO escribe nada."""
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'."}), 400
+    try:
+        plan = conectores.preparar(id_conector, cuerpo.get("areas") or {},
+                                   _config_de(tenant))
+    except conectores.ErrorConector as e:
+        return jsonify({"error": str(e)}), 400
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+    except Exception as e:
+        print(f"[conectores] fallo al preparar: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo preparar el conector."}), 500
+    return jsonify({
+        "conector": plan["conector"],
+        # Solo los nombres: quien decide no necesita 25 definiciones completas,
+        # necesita saber QUE entra y a quien.
+        "nuevas": [{"nombre": h["nombre"], "roles": h["roles_permitidos"],
+                    "escritura": not h.get("solo_lectura", True)}
+                   for h in plan["nuevas"]],
+        "salteadas": plan["salteadas"],
+        "campos_por_rol": {r: {n: len(c) for n, c in v.items()}
+                           for r, v in plan["campos_por_rol"].items()},
+        "variables": plan["variables"],
+        "secretos": plan["secretos"],
+    })
+
+
+@app.post("/conectores/<id_conector>/aplicar")
+def conectores_aplicar(id_conector):
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'."}), 400
+    try:
+        plan = conectores.aplicar(tenant, id_conector, cuerpo.get("areas") or {})
+    except conectores.ErrorConector as e:
+        return jsonify({"error": str(e)}), 400
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
+    olvidar_config(tenant)
+    return jsonify({"ok": True,
+                    "agregadas": [h["nombre"] for h in plan["nuevas"]],
+                    "salteadas": plan["salteadas"],
+                    # Lo que TODAVIA falta: sin la credencial cargada, las
+                    # herramientas estan en el catalogo y fallan al primer uso.
+                    "faltan_secretos": plan["secretos"],
+                    "faltan_variables": [v["nombre"] for v in plan["variables"]]})
 
 
 # =============================================================================
