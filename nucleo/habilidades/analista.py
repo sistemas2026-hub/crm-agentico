@@ -125,6 +125,28 @@ def detectar(tenant: str, dias: int = DIAS_POR_DEFECTO,
     """
     patrones: list[Patron] = []
     with sesion(tenant) as (cur, org):
+        # LO QUE YA ESTA CUBIERTO NO SE VUELVE A PROPONER.
+        #
+        # Sin esto, cada corrida redescubre los mismos patrones y propone
+        # duplicados de procedimientos que ya estan operando. Paso el
+        # 06/09/2026: con HAB-CAMBIO-NOMBRE-CLAVE-WIFI vigente, la corrida
+        # siguiente propuso otra habilidad identica -- mismo motivo, mismos 26
+        # casos, mismo disparador. Y se agrava solo: cuantos mas procedimientos
+        # hay, mas ruido genera cada analisis, hasta que la cola de revision no
+        # la mira nadie.
+        #
+        # La huella es (rol, motivo): el motivo de escalada es lo que define el
+        # patron, y una habilidad vigente para ese rol y ese motivo ya lo
+        # atiende. Si resulta que NO lo atiende bien, eso lo detecta la señal
+        # (3) -- "se cargo y escalo igual" -- que propone reescribirla en vez
+        # de duplicarla.
+        cur.execute(
+            """select roles_permitidos, evidencia->>'motivo' as motivo
+                 from asistente.habilidades
+                where organization_id = %s and estado = 'vigente'""", (org,))
+        cubiertos = {(rol, f["motivo"]) for f in cur.fetchall()
+                     for rol in (f["roles_permitidos"] or []) if f["motivo"]}
+
         # (1) Escaladas repetidas por el mismo motivo, en el mismo rol.
         cur.execute(
             """select rol_efectivo as rol, motivo_escalamiento as motivo,
@@ -140,6 +162,8 @@ def detectar(tenant: str, dias: int = DIAS_POR_DEFECTO,
                 order by count(*) desc""",
             (org, dias, minimo))
         for f in _filas(cur):
+            if (f["rol"], f["motivo"]) in cubiertos:
+                continue
             patrones.append(Patron(rol=f["rol"], senal="escalada_repetida",
                                    motivo=f["motivo"], n_casos=f["n"],
                                    conversaciones=list(f["ids"] or [])))
