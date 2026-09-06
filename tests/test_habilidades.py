@@ -41,6 +41,7 @@ Corre SIN BASE DE DATOS y sin red: el catalogo se sustituye por un doble.
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -127,8 +128,17 @@ afirmar(analista.MINIMO_CASOS >= 3,
         f"el piso de casos es {analista.MINIMO_CASOS}: con menos no hay patron")
 
 fuente_analista = Path("nucleo/habilidades/analista.py").read_text(encoding="utf-8")
-afirmar("'propuesta'" in fuente_analista and "'vigente'" not in fuente_analista,
-        "el analista solo escribe estado 'propuesta', nunca 'vigente'")
+# Se mira lo que ESCRIBE, no si la palabra aparece. La version anterior
+# buscaba "'vigente'" en todo el archivo y se puso en rojo al agregarse una
+# LECTURA legitima -- consultar que patrones ya estan cubiertos. Un test que
+# no distingue leer de escribir obliga a elegir entre romperlo o no leer.
+escrituras = re.findall(r"(?:insert into|update)\s+asistente\.habilidades(.*?)(?:\"\"\"|$)",
+                        fuente_analista, re.S | re.I)
+afirmar(bool(escrituras), "el analista escribe habilidades (si no, no hace nada)")
+afirmar(all("'vigente'" not in e for e in escrituras),
+        "ninguna ESCRITURA del analista pone estado 'vigente'")
+afirmar(any("'propuesta'" in e for e in escrituras),
+        "y al menos una escribe 'propuesta'")
 
 fuente_sql = Path("supabase/202609031100_habilidades.sql").read_text(encoding="utf-8")
 afirmar("default 'propuesta'" in fuente_sql,
