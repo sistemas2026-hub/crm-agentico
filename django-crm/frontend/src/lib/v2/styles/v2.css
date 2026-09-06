@@ -322,9 +322,92 @@
   font-size: calc(var(--v2-fs) - 2.6px); /* 11.8px */
   border-radius: 7px;
 }
+/* Secondary with actual contrast. Plain .v2-btn borrows --v2-line, which is a
+   hairline meant for table rules: on a card it reads as a disabled control, so
+   the real action of a screen disappeared into the background. This is still
+   not ember (there is one ember per view) but it is unmistakably a button. */
+.v2-btn-strong {
+  border-color: var(--v2-slate);
+  color: var(--v2-ink);
+  font-weight: 600;
+}
+.v2-btn-strong:hover {
+  border-color: var(--v2-ink);
+  background: var(--v2-line-soft);
+}
+
+/* Destructive, exceptional, or test-only. Never competes with the operational
+   actions next to it: no fill, rust text, and a dashed edge that reads as
+   "this is not part of the normal flow" before the label is even read --
+   colour is never the only signal. */
+.v2-btn-danger {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--v2-rust) 45%, transparent);
+  color: var(--v2-rust);
+  background: transparent;
+}
+.v2-btn-danger:hover {
+  border-style: solid;
+  border-color: var(--v2-rust);
+  background: color-mix(in srgb, var(--v2-rust) 8%, transparent);
+}
+
+/* Pressed. Without it a click on a button that navigates or posts gives no
+   acknowledgement until the result arrives, and people click twice. */
+.v2-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .v2-btn:active:not(:disabled) {
+    transform: none;
+  }
+}
+
+/* Keyboard focus. The browser default outline was being lost against the card
+   background on several screens; this one is visible on both themes. */
+.v2-btn:focus-visible {
+  outline: 2px solid var(--v2-ember);
+  outline-offset: 2px;
+}
+
 .v2-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+/* Loading. Distinct from disabled: disabled means "you cannot", loading means
+   "it is happening". They looked identical, so a slow save read as a dead
+   button. The label still says what is going on -- the dots are not the only
+   signal. */
+.v2-btn[aria-busy='true']::after {
+  content: '';
+  width: 11px;
+  height: 11px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: v2-girar 0.7s linear infinite;
+  flex: none;
+}
+@keyframes v2-girar {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .v2-btn[aria-busy='true']::after {
+    animation-duration: 2.4s;
+  }
+}
+
+/* Minimum sizes on ANY pointer, not only coarse ones. These were 31px and
+   24px; the small one in particular is under the size at which a click stops
+   being comfortable, and this screen is used in a hurry. The coarse-pointer
+   rule further down still raises them for touch. */
+.v2-btn {
+  min-height: 34px;
+}
+.v2-btn-sm {
+  min-height: 28px;
 }
 .v2-kbd {
   font-family: var(--v2-mono);

@@ -82,14 +82,53 @@
     return dist <= 5 * 60 * 1000 ? (mejor?.contenido ?? '') : '';
   });
 
+  // Qué hizo la IA, sacado de la traza. Los nombres de herramienta los declara
+  // cada empresa en su config, así que acá NO puede haber una tabla que
+  // traduzca 'consultar_mi_servicio' a "Consultó el servicio": el próximo ISP
+  // que se conecte tiene otras herramientas y esa tabla dejaría de coincidir
+  // en silencio. Se humaniza el nombre y se conjuga el verbo, que es lo que
+  // se puede hacer sin saber de qué empresa se trata.
+  //
+  // Deduplicado: el asistente llama a la misma herramienta varias veces en un
+  // caso largo, y catorce renglones repetidos no son un resumen.
+  let hizoLaIA = $derived.by(() => {
+    const vistas = new Map();
+    for (const h of herramientas) {
+      const previo = vistas.get(h.herramienta);
+      // Un bloqueo o un error pesa más que un éxito: si la misma herramienta
+      // corrió bien y además se bloqueó, lo que hay que contar es el bloqueo.
+      const rango = h.es_bloqueo ? 2 : h.exito ? 0 : 1;
+      if (!previo || rango > previo.rango) {
+        vistas.set(h.herramienta, { rango, llamada: h });
+      }
+    }
+    return [...vistas.values()]
+      // Primero lo que salió mal: es lo que cambia lo que hay que hacer.
+      .sort((a, b) => b.rango - a.rango)
+      .map(({ rango, llamada }) => ({
+        estado: rango === 2 ? 'bloqueo' : rango === 1 ? 'error' : 'ok',
+        texto: llamada.herramienta.replaceAll('_', ' '),
+        detalle: rango === 2 ? (MOTIVO_BLOQUEO[llamada.codigo_error] ?? 'el sistema la frenó')
+               : rango === 1 ? 'falló el sistema externo'
+               : ''
+      }));
+  });
+
+  const motivoLabel = (/** @type {string} */ m) => (m ? m.replaceAll('_', ' ') : '');
+
   let resumenEscalada = $derived(
     [
-      { rotulo: 'Quiere', texto: conversacion?.resumen ?? '' },
+      { rotulo: 'Qué quiere', texto: conversacion?.resumen ?? '' },
       { rotulo: 'No se pudo comprobar', texto: conversacion?.escalada_no_comprobado ?? '' },
       { rotulo: 'Le prometimos', texto: prometido },
-      { rotulo: 'Falta', texto: conversacion?.escalada_siguiente_paso ?? '' }
+      { rotulo: 'Qué falta', texto: conversacion?.escalada_siguiente_paso ?? '' }
     ].filter((f) => (f.texto ?? '').trim())
   );
+
+  // El bloque entero se dibuja si hay CUALQUIERA de las dos cosas: los textos
+  // del modelo, o lo que hizo. Una conversación vieja no tiene los primeros y
+  // sí lo segundo, y "qué hizo la IA" ya justifica el bloque solo.
+  let hayResumenDelCaso = $derived(resumenEscalada.length > 0 || hizoLaIA.length > 0);
 
   let entrada = $state('');
   let enviando = $state(false);
@@ -584,9 +623,10 @@
     <!-- SOLO PARA PRUEBAS -- ver reiniciarConversacion() mas arriba. -->
     <button
       type="button"
-      class="v2-btn v2-btn-sm reiniciar-prueba"
+      class="v2-btn v2-btn-sm v2-btn-danger"
       onclick={reiniciarConversacion}
       disabled={reiniciando}
+      aria-busy={reiniciando}
       title="Borra esta conversación para volver a probar desde cero (solo entrenamiento)"
     >
       <RotateCcw size={14} />
@@ -601,14 +641,31 @@
   {#if conversacion.escalada_a_humano}
     <p class="aviso">
       <TriangleAlert size={14} />
-      {conversacion.motivo_escalamiento || 'Escalada a un humano'}
+      <!-- "IA pausada" seria falso y no es un matiz de redaccion: el asistente
+           SIGUE leyendo y procesando cada mensaje mientras espera -- de eso
+           depende que un "listo, gracias" del cliente cierre el caso solo.
+           Lo que dejo de hacer es contestar. -->
+      <strong>Escalada · IA no responde</strong>
+      {#if conversacion.motivo_escalamiento}
+        <span class="aviso-motivo">{motivoLabel(conversacion.motivo_escalamiento)}</span>
+      {/if}
+      <!-- Estado real y aparte: el CRM es la fuente de verdad de cuando el
+           asistente puede volver a contestar, y no es lo mismo que el estado
+           de la conversacion. -->
+      <!-- Estado, no enlace: para ir al ticket ya esta "Ver ticket completo"
+           en la columna derecha, y dos caminos al mismo lugar en la misma
+           pantalla es una eleccion que nadie pidio hacer. -->
+      {#if caso?.id}
+        <span class="aviso-caso">Caso abierto en CRM</span>
+      {/if}
       {#if conversacion.necesita_atencion_humana}
         {#if !atendida}
           <button
             type="button"
-            class="v2-btn v2-btn-sm aviso-atender"
+            class="v2-btn v2-btn-sm v2-btn-strong aviso-atender"
             onclick={marcarAtendida}
             disabled={marcandoAtendida}
+            aria-busy={marcandoAtendida}
           >
             <CircleCheck size={13} />
             {marcandoAtendida ? 'Marcando…' : 'Atender'}
@@ -629,7 +686,8 @@
           class="v2-btn v2-btn-sm aviso-resolver"
           onclick={resolver}
           disabled={resolviendo}
-          title="Cierra la conversación: el próximo mensaje del cliente abre una nueva"
+          aria-busy={resolviendo}
+          title="Usá esto si el caso se resolvió por teléfono, presencialmente o por otro canal. Cierra la conversación: el próximo mensaje del cliente abre una nueva."
         >
           {resolviendo ? 'Cerrando…' : 'Marcar como resuelta'}
         </button>
@@ -650,7 +708,7 @@
        Solo se dibuja lo que existe de verdad: en las conversaciones escaladas
        antes del 06/09/2026 estos campos estan vacios, y media tarjeta con
        renglones en blanco informa menos que ninguna. -->
-  {#if resumenEscalada.length > 0}
+  {#if hayResumenDelCaso}
     <dl class="brief">
       {#each resumenEscalada as fila (fila.rotulo)}
         <div class="brief-fila">
@@ -658,6 +716,32 @@
           <dd>{fila.texto}</dd>
         </div>
       {/each}
+
+      <!-- Qué hizo la IA. Va después de "qué quiere" porque el orden en que
+           alguien entiende un caso es ese: primero qué pedían, después qué se
+           intentó. Y antes de "qué falta", que es lo que hay que hacer. -->
+      {#if hizoLaIA.length > 0}
+        <div class="brief-fila">
+          <dt>Qué hizo la IA</dt>
+          <dd>
+            <ul class="hizo">
+              {#each hizoLaIA as h (h.texto)}
+                <li class="hizo-{h.estado}">
+                  {#if h.estado === 'ok'}
+                    <CircleCheck size={13} style="color:var(--v2-moss);flex:none" />
+                  {:else if h.estado === 'bloqueo'}
+                    <ShieldCheck size={13} style="color:var(--v2-clay);flex:none" />
+                  {:else}
+                    <CircleX size={13} style="color:var(--v2-rust);flex:none" />
+                  {/if}
+                  <span>{h.texto}</span>
+                  {#if h.detalle}<span class="v2-muted">— {h.detalle}</span>{/if}
+                </li>
+              {/each}
+            </ul>
+          </dd>
+        </div>
+      {/if}
     </dl>
   {/if}
 
@@ -746,7 +830,12 @@
             {/if}
             · <kbd class="v2-kbd">Enter</kbd> envía
           </span>
-          <button class="v2-btn v2-btn-primary" type="submit" disabled={enviando || !entrada.trim()}>
+          <button
+            class="v2-btn v2-btn-primary"
+            type="submit"
+            disabled={enviando || !entrada.trim()}
+            aria-busy={enviando}
+          >
             <Send size={14} />{enviando ? 'Enviando…' : 'Enviar'}
           </button>
         </div>
@@ -908,7 +997,12 @@
   </div>
 
   {#if herramientas.length > 0}
-  <details class="proceso">
+  <!-- Abierto de entrada SOLO si hubo un bloqueo o un error. Si todo corrio
+       normal el panel es secundario y no tiene por que ocupar la columna;
+       cuando algo se freno o se rompio, el hallazgo tiene que estar a la
+       vista sin que nadie sospeche primero -- que es justo lo que no pasa
+       con un panel plegado que casi nadie abre. -->
+  <details class="proceso" open={!!(diagnostico?.bloqueadas || diagnostico?.errores)}>
     <summary class="proceso-resumen">
       Ver proceso
       <span class="v2-muted">
@@ -1133,16 +1227,10 @@
     flex: none;
     color: var(--v2-rust);
   }
-  /* SOLO PARA PRUEBAS -- ver reiniciarConversacion() en el script. Mismo
-     tono de aviso que .aviso-mal, para que se lea como una accion
-     destructiva sin inventar una variante nueva de .v2-btn. */
-  .reiniciar-prueba {
-    color: var(--v2-rust);
-    border-color: color-mix(in srgb, var(--v2-rust) 35%, transparent);
-  }
-  .reiniciar-prueba:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--v2-rust) 8%, transparent);
-  }
+  /* SOLO PARA PRUEBAS -- ver reiniciarConversacion(). El estilo local que
+     imitaba a medias una accion destructiva se fue: ahora usa .v2-btn-danger
+     del sistema, que ademas del color trae el borde punteado -- se distingue
+     de una accion operativa antes de leer la etiqueta, no solo por el tono. */
   /* El hilo es lo único que scrollea acá: el encabezado y el compositor
      quedan fijos, para no tener que bajar hasta el fondo para escribir. */
   .hilo {
@@ -1406,6 +1494,44 @@
   .brief dd {
     margin: 0;
     color: var(--v2-ink);
+  }
+  .hizo {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .hizo li {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  /* Lo que se freno o fallo se lee distinto de lo que corrio bien, y no solo
+     por el color: tambien por el peso y por el icono. */
+  .hizo-bloqueo span:first-of-type {
+    color: var(--v2-clay);
+    font-weight: 600;
+  }
+  .hizo-error span:first-of-type {
+    color: var(--v2-rust);
+    font-weight: 600;
+  }
+
+  /* El aviso de escalada: tres piezas con jerarquia distinta -- que paso
+     (fuerte), por que (medio), y el estado del CRM (chip aparte). */
+  .aviso-motivo {
+    color: var(--v2-slate);
+  }
+  .aviso-caso {
+    font-size: 11px;
+    font-weight: 650;
+    padding: 1px 8px;
+    border-radius: 999px;
+    color: var(--v2-slate);
+    border: 1px solid var(--v2-line);
+    white-space: nowrap;
   }
   @media (max-width: 640px) {
     /* En pantalla chica el rótulo de 8.5rem deja al texto en una columna

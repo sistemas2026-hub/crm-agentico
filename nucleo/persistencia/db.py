@@ -308,6 +308,11 @@ def ultima_actividad(tenant: str, canal: str | None = None) -> list[dict]:
                   ultimo.contenido as ultimo_mensaje,
                   ultimo.rol       as ultimo_rol,
                   coalesce(insiste.n, 0) as mensajes_tras_escalar,
+                  -- Aparte de 'atendida' (que lo mezcla con "un humano
+                  -- escribio"): la bandeja necesita distinguir "alguien esta
+                  -- en esto" de "esto ya se cerro a mano", y son pestañas
+                  -- distintas.
+                  c.atendida_manual,
                   (c.atendida_manual or exists (
                        select 1 from asistente.messages h
                         where h.conversation_id = c.id
