@@ -27,7 +27,8 @@
     ListChecks,
     PlugZap,
     GraduationCap,
-    Gauge
+    Gauge,
+    ClipboardCheck
   } from '@lucide/svelte';
   import { t } from '$lib/terminology.js';
 
@@ -99,6 +100,11 @@
         { href: '/simulador-whatsapp', label: 'Simulador WhatsApp', icon: Smartphone },
         { href: '/agentes', label: 'Agentes', icon: Network },
         { href: '/manual', label: 'Manual', icon: ListChecks },
+        // La bandeja donde se decide la factibilidad de cada solicitud.
+        // Existia desde el 02/09 y NO estaba enlazada en ningun lado: solo
+        // se llegaba escribiendo la URL. Una pantalla sin entrada no esta
+        // terminada, esta escondida.
+        { href: '/instalaciones', label: 'Instalaciones', icon: ClipboardCheck },
         { href: '/solutions', label: 'Base de conocimiento', icon: BookOpen },
         { href: '/documents', label: 'Documentos', icon: FileText }
       ]
