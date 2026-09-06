@@ -137,7 +137,12 @@
         // alcanza esta pantalla (ver /api/configuracion-guiada, mismo gate
         // que /api/agentes). Sin esto en el menu, la unica forma de llegar
         // seria escribiendo la URL a mano.
-        { href: '/configuracion-guiada', label: 'Conectar sistema nuevo', icon: PlugZap, admin: true },
+        // Dos caminos para lo mismo, y no se pisan: el catalogo es para un
+        // sistema YA verificado (se elige de una lista y trae sus filtros
+        // hechos); la guiada es para uno que nadie conecto todavia (se
+        // describe la API, se sondea de verdad, y sale una propuesta).
+        { href: '/conectores', label: 'Conectar sistema', icon: PlugZap, admin: true },
+        { href: '/configuracion-guiada', label: 'Conectar API nueva', icon: Network, admin: true },
         // ADMIN-only, mismo motivo: una habilidad vigente es lo que un agente
         // sigue "al pie de la letra" frente a un cliente.
         { href: '/habilidades', label: 'Habilidades', icon: GraduationCap, admin: true },
