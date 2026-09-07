@@ -22,7 +22,9 @@
     RotateCcw,
     ShieldCheck,
     Smile,
-    Mic
+    Mic,
+    Image as ImageIcon,
+    FileText
   } from '@lucide/svelte';
 
   /** @type {{ data: any }} */
@@ -118,19 +120,64 @@
 
   const motivoLabel = (/** @type {string} */ m) => (m ? m.replaceAll('_', ' ') : '');
 
-  let resumenEscalada = $derived(
-    [
-      { rotulo: 'Qué quiere', texto: conversacion?.resumen ?? '' },
-      { rotulo: 'No se pudo comprobar', texto: conversacion?.escalada_no_comprobado ?? '' },
-      { rotulo: 'Le prometimos', texto: prometido },
-      { rotulo: 'Qué falta', texto: conversacion?.escalada_siguiente_paso ?? '' }
-    ].filter((f) => (f.texto ?? '').trim())
-  );
+  /** Lo primero que escribió el cliente. Es el respaldo de "Qué quiere"
+      cuando el modelo no dejó un resumen: no es tan bueno, pero es de él y es
+      cierto -- y sirve mucho más que un renglón ausente. */
+  let primerPedido = $derived.by(() => {
+    const m = mensajes.find((x) => x.rol === 'user' && (x.contenido ?? '').trim());
+    return (m?.contenido ?? '').trim();
+  });
 
-  // El bloque entero se dibuja si hay CUALQUIERA de las dos cosas: los textos
-  // del modelo, o lo que hizo. Una conversación vieja no tiene los primeros y
-  // sí lo segundo, y "qué hizo la IA" ya justifica el bloque solo.
-  let hayResumenDelCaso = $derived(resumenEscalada.length > 0 || hizoLaIA.length > 0);
+  // Las CUATRO preguntas, siempre las cuatro. Antes se filtraban las vacías, y
+  // el resultado era que en 49 de las 51 conversaciones escaladas el bloque
+  // mostraba solo "Le prometimos" y "Qué hizo la IA" -- justo las dos que NO
+  // dicen qué pide el cliente ni qué falta hacer. Medido contra produccion:
+  // 'resumen' y 'escalada_siguiente_paso' los escribe el modelo al escalar y
+  // eso existe desde el 06/09/2026; todo lo anterior los tiene en null.
+  //
+  // Un renglón que falta se lee como que la pantalla está incompleta. Uno que
+  // dice qué falta y por qué se lee como información. Y el orden es el de
+  // quien toma el caso: qué pide, qué se intentó, qué se le dijo, qué queda.
+  let resumenEscalada = $derived([
+    {
+      rotulo: 'Qué quiere',
+      orden: 0,
+      texto: (conversacion?.resumen ?? '').trim() || primerPedido,
+      // Se dice que es el mensaje del cliente y no un resumen: quien lee
+      // tiene que saber si está viendo una síntesis o una cita.
+      nota: (conversacion?.resumen ?? '').trim() ? '' : 'lo que escribió, sin resumir',
+      vacio: 'Sin mensajes del cliente todavía.'
+    },
+    {
+      rotulo: 'Le prometimos',
+      orden: 2,
+      texto: prometido,
+      vacio: 'No se encontró el mensaje con el que se le avisó.'
+    },
+    {
+      rotulo: 'Qué falta',
+      orden: 3,
+      texto: (conversacion?.escalada_siguiente_paso ?? '').trim(),
+      // Honesto sobre POR QUÉ está vacío. "No consta" a secas haría pensar en
+      // un fallo; esto dice que es una conversación anterior al campo.
+      vacio: 'El asistente no dejó anotado el siguiente paso.'
+    },
+    {
+      rotulo: 'No se pudo comprobar',
+      orden: 4,
+      texto: (conversacion?.escalada_no_comprobado ?? '').trim(),
+      // Este SÍ se oculta si está vacío: los otros tres son preguntas que
+      // siempre tienen respuesta, y este es una excepción -- decir "no hay
+      // nada sin comprobar" en cada caso es ruido.
+      ocultarSiVacio: true
+    }
+  ].filter((f) => f.texto || !f.ocultarSiVacio));
+
+  // El bloque se dibuja siempre que la conversación haya escalado: es
+  // entonces cuando alguien tiene que entender el caso rápido.
+  let hayResumenDelCaso = $derived(
+    !!conversacion?.escalada_a_humano || resumenEscalada.some((f) => f.texto) || hizoLaIA.length > 0
+  );
 
   let entrada = $state('');
   let enviando = $state(false);
@@ -232,6 +279,28 @@
     } finally {
       enviando = false;
     }
+  }
+
+  /** El paso resaltado tras pulsar un contador del diagnóstico. */
+  let pasoMarcado = $state(/** @type {number | null} */ (null));
+
+  /** Lleva al primer paso bloqueado o fallido y lo resalta un momento. El
+      numero ya dice que paso algo; esto contesta cuál, sin que nadie tenga que
+      buscarlo entre catorce lineas de traza. */
+  function irAlPaso(/** @type {'bloqueo' | 'error'} */ tipo) {
+    const i = herramientas.findIndex((h) =>
+      tipo === 'bloqueo' ? h.es_bloqueo : !h.exito && !h.es_bloqueo
+    );
+    if (i < 0) return;
+    pasoMarcado = i;
+    queueMicrotask(() => {
+      document
+        .querySelector(`[data-paso="${i}"]`)
+        ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
+    // Se apaga solo: un resaltado permanente deja de señalar nada en cuanto
+    // alguien mira otra cosa.
+    setTimeout(() => (pasoMarcado = null), 2500);
   }
 
   /** id del mensaje que se está reintentando, o null. */
@@ -366,6 +435,16 @@
     '📞', '📅', '⏰', '💬', '📄', '📷', '❤️', '👋'
   ];
   let emojisAbiertos = $state(false);
+  let adjuntarAbierto = $state(false);
+
+  /** Compartido por las dos opciones del menú: lo único que cambia entre
+      "Imagen" y "Documento" es el filtro del diálogo del navegador. */
+  function alElegirArchivo(/** @type {any} */ e) {
+    const f = e.currentTarget.files?.[0];
+    if (f) tomarArchivo(f);
+    e.currentTarget.value = '';
+    adjuntarAbierto = false;
+  }
   /** @type {HTMLTextAreaElement | null} */
   let campoTexto = $state(null);
 
@@ -1085,6 +1164,7 @@
           <button
             type="button"
             class="v2-btn v2-btn-sm v2-btn-strong aviso-atender"
+            title="Marca que te estás haciendo cargo: pasa a la pestaña «En atención» y sale de «Por atender». No le envía nada al cliente."
             onclick={marcarAtendida}
             disabled={marcandoAtendida}
             aria-busy={marcandoAtendida}
@@ -1103,16 +1183,27 @@
            tono secundario: "Atender" es lo que se hace al entrar, esto es lo
            que se hace al salir, y una sola vez. -->
       {#if conversacion.estado !== 'cerrada'}
-        <button
-          type="button"
-          class="v2-btn v2-btn-sm aviso-resolver"
-          onclick={resolver}
-          disabled={resolviendo}
-          aria-busy={resolviendo}
-          title="Usá esto si el caso se resolvió por teléfono, presencialmente o por otro canal. Cierra la conversación: el próximo mensaje del cliente abre una nueva."
-        >
-          {resolviendo ? 'Cerrando…' : 'Marcar como resuelta'}
-        </button>
+        <!-- La ayuda va en un popover propio y no en el 'title' del navegador:
+             ese tarda casi un segundo en aparecer, no sale con el teclado, y
+             es justo el contexto que hace que alguien se anime a cerrar un
+             caso que resolvio por telefono. -->
+        <span class="con-ayuda">
+          <button
+            type="button"
+            class="v2-btn v2-btn-sm aviso-resolver"
+            onclick={resolver}
+            disabled={resolviendo}
+            aria-busy={resolviendo}
+            aria-describedby="ayuda-resolver"
+          >
+            {resolviendo ? 'Cerrando…' : 'Marcar como resuelta'}
+          </button>
+          <span class="ayuda" id="ayuda-resolver" role="tooltip">
+            Usá esto si el caso se resolvió por teléfono, presencialmente o por
+            otro canal. Cierra la conversación; el próximo mensaje del cliente
+            abre una nueva.
+          </span>
+        </span>
       {:else}
         <span class="aviso-atendida"><CircleCheck size={13} /> Resuelta</span>
       {/if}
@@ -1133,9 +1224,21 @@
   {#if hayResumenDelCaso}
     <dl class="brief">
       {#each resumenEscalada as fila (fila.rotulo)}
-        <div class="brief-fila">
+        <div
+          class="brief-fila"
+          class:brief-sin-dato={!fila.texto}
+          class:brief-primero={fila.orden === 0}
+          style="order:{fila.orden}"
+        >
           <dt>{fila.rotulo}</dt>
-          <dd>{fila.texto}</dd>
+          <dd>
+            {#if fila.texto}
+              {fila.texto}
+              {#if fila.nota}<span class="brief-nota">— {fila.nota}</span>{/if}
+            {:else}
+              <span class="brief-nada">{fila.vacio}</span>
+            {/if}
+          </dd>
         </div>
       {/each}
 
@@ -1143,7 +1246,7 @@
            alguien entiende un caso es ese: primero qué pedían, después qué se
            intentó. Y antes de "qué falta", que es lo que hay que hacer. -->
       {#if hizoLaIA.length > 0}
-        <div class="brief-fila">
+        <div class="brief-fila" style="order:1">
           <dt>Qué hizo la IA</dt>
           <dd>
             <ul class="hizo">
@@ -1391,6 +1494,7 @@
                 type="button"
                 class="v2-btn v2-btn-quiet accion-icono"
                 aria-label="Emoji"
+                title="Emoji"
                 aria-expanded={emojisAbiertos}
                 onclick={() => (emojisAbiertos = !emojisAbiertos)}><Smile size={17} /></button
               >
@@ -1403,28 +1507,40 @@
               {/if}
             </div>
 
-            <!-- Un solo input, sin menú: elegir "imagen" o "documento" antes
-                 de ver los archivos es un paso de más -- el tipo se deduce
-                 del archivo (tipoDe) y el canal valida lo que no acepta. -->
-            <label class="v2-btn v2-btn-quiet accion-icono" title="Adjuntar imagen o documento">
-              <Paperclip size={17} />
-              <span class="v2-sr-only">Adjuntar archivo</span>
-              <input
-                type="file"
-                hidden
-                onchange={(e) => {
-                  const f = e.currentTarget.files?.[0];
-                  if (f) tomarArchivo(f);
-                  e.currentTarget.value = '';
-                }}
-              />
-            </label>
+            <!-- Menú de dos opciones. El tipo se sigue deduciendo del archivo
+                 (tipoDe) -- esto no cambia qué se manda: cambia el DIÁLOGO que
+                 abre el navegador. "Imagen" filtra a jpeg/png, que es justo lo
+                 que WhatsApp acepta, y evita que alguien elija un HEIC del
+                 celular para que se lo rechacen después. -->
+            <div class="emoji-caja">
+              <button
+                type="button"
+                class="v2-btn v2-btn-quiet accion-icono"
+                aria-label="Adjuntar"
+                title="Adjuntar"
+                aria-expanded={adjuntarAbierto}
+                onclick={() => (adjuntarAbierto = !adjuntarAbierto)}><Paperclip size={17} /></button
+              >
+              {#if adjuntarAbierto}
+                <div class="menu-adjuntar" role="group" aria-label="Qué querés adjuntar">
+                  <label>
+                    <ImageIcon size={14} /> Imagen
+                    <input type="file" hidden accept="image/jpeg,image/png" onchange={alElegirArchivo} />
+                  </label>
+                  <label>
+                    <FileText size={14} /> Documento
+                    <input type="file" hidden onchange={alElegirArchivo} />
+                  </label>
+                </div>
+              {/if}
+            </div>
 
             {#if !grabando}
               <button
                 type="button"
                 class="v2-btn v2-btn-quiet accion-icono"
                 aria-label="Grabar una nota de voz"
+                title="Grabar audio"
                 onclick={grabar}><Mic size={17} /></button
               >
             {/if}
@@ -1672,24 +1788,46 @@
           {diagnostico.normales === 1 ? 'ejecución normal' : 'ejecuciones normales'}
           <span class="v2-muted">corrió y devolvió datos</span>
         </li>
-        <li>
+        <!-- Con cero, un renglon informativo. Con uno o mas, un BOTON que
+             lleva al paso: el numero contesta "paso algo", y lo siguiente que
+             se quiere es ver QUE, sin buscarlo entre catorce lineas. -->
+        <li class:diag-hay={diagnostico.bloqueadas > 0}>
           <ShieldCheck size={14} style="color:var(--v2-clay);flex:none" />
-          <b>{diagnostico.bloqueadas}</b>
-          {diagnostico.bloqueadas === 1 ? 'acción bloqueada' : 'acciones bloqueadas'}
-          <span class="v2-muted">el sistema la frenó — no es una falla</span>
+          {#if diagnostico.bloqueadas > 0}
+            <button type="button" class="diag-ir" onclick={() => irAlPaso('bloqueo')}>
+              <b>{diagnostico.bloqueadas}</b>
+              {diagnostico.bloqueadas === 1 ? 'acción bloqueada' : 'acciones bloqueadas'}
+            </button>
+            <span class="v2-muted">el sistema la frenó — no es una falla</span>
+          {:else}
+            <b>0</b> acciones bloqueadas
+            <span class="v2-muted">el sistema la frenó — no es una falla</span>
+          {/if}
         </li>
-        <li>
+        <li class:diag-hay={diagnostico.errores > 0}>
           <CircleX size={14} style="color:var(--v2-rust);flex:none" />
-          <b>{diagnostico.errores}</b>
-          {diagnostico.errores === 1 ? 'error' : 'errores'} en herramienta
-          <span class="v2-muted">falló un sistema externo</span>
+          {#if diagnostico.errores > 0}
+            <button type="button" class="diag-ir" onclick={() => irAlPaso('error')}>
+              <b>{diagnostico.errores}</b>
+              {diagnostico.errores === 1 ? 'error' : 'errores'} en herramienta
+            </button>
+            <span class="v2-muted">falló un sistema externo</span>
+          {:else}
+            <b>0</b> errores en herramienta
+            <span class="v2-muted">falló un sistema externo</span>
+          {/if}
         </li>
       </ul>
     {/if}
 
     <ol class="proceso-lista">
-      {#each herramientas as h}
-        <li class="proceso-item" class:bloqueada={h.es_bloqueo}>
+      {#each herramientas as h, i}
+        <li
+          class="proceso-item"
+          class:bloqueada={h.es_bloqueo}
+          class:paso-marcado={pasoMarcado === i}
+          data-paso={i}
+        >
           {#if h.es_bloqueo}
             <ShieldCheck size={15} style="color:var(--v2-clay);flex:none" />
           {:else if h.exito}
@@ -1728,15 +1866,14 @@
   <!-- Copiloto documental. Mismo patron plegable que "Ver proceso": es ayuda
        lateral, no el contenido de la pantalla. -->
   <details class="docs" ontoggle={alAbrirDocs}>
+  <!-- Una linea, no un bloque. Sin contenido activo ocupaba ancho para decir
+       que existe, y ese ancho lo necesita el centro: resumen, conversacion y
+       compositor. Se abre cuando hace falta. -->
   <summary class="proceso-resumen">
-    Documentación
-    <span class="v2-muted">
-      {#if sugerencias.length}
-        ({sugerencias.length} fragmento{sugerencias.length === 1 ? '' : 's'})
-      {:else}
-        (buscar en las guías internas)
-      {/if}
-    </span>
+    Buscar en las guías
+    {#if sugerencias.length}
+      <span class="v2-muted">({sugerencias.length})</span>
+    {/if}
   </summary>
 
   <form class="docs-buscar" onsubmit={alBuscarDocs}>
@@ -1840,6 +1977,8 @@
     color: var(--v2-slate);
   }
   .aviso {
+    flex-wrap: wrap;
+    row-gap: 6px;
     flex: none;
     display: flex;
     align-items: center;
@@ -1892,7 +2031,10 @@
 
   /* ── columna de la derecha: el contexto ─────────────────────────────── */
   .info {
-    width: 310px;
+    /* 310 -> 292. Lo critico de esta columna es el ticket, el diagnostico, la
+       etiqueta y la resolucion; lo demas se abre bajo demanda. Los 18px van
+       al centro, que es donde se lee y se escribe. */
+    width: 292px;
     flex: none;
     min-height: 0;
     overflow-y: auto;
@@ -2146,6 +2288,45 @@
     margin: 0;
     color: var(--v2-ink);
   }
+  /* El bloque era una sola masa rosa donde promesa, acciones y estado se
+     fundian. El fondo de alerta se queda arriba, en el aviso de escalada, que
+     es lo unico que de verdad alerta; el resumen pasa a tarjeta neutra con los
+     renglones separados por una linea, para que el ojo encuentre cada
+     pregunta sin leerlas todas. */
+  .brief {
+    background: var(--v2-card);
+    border: 1px solid var(--v2-line);
+  }
+  /* El orden en que alguien entiende un caso: que pide, que se intento, que
+     se le dijo, que queda. 'Que hizo la IA' sale de un bloque aparte --viene
+     de la traza, no de los textos del modelo-- asi que cada renglon lleva su
+     posicion como dato y no por el lugar que ocupa en el marcado. */
+  .brief {
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Con 'order' el orden visual no es el del DOM, asi que un selector de
+     hermano adyacente pondria la linea entre los renglones equivocados. Se
+     usa gap y un borde en todos menos el primero VISUAL, marcado por dato. */
+  .brief {
+    gap: 7px;
+  }
+  .brief-fila:not(.brief-primero) {
+    border-top: 1px solid var(--v2-line-soft);
+    padding-top: 7px;
+  }
+  /* Un renglon sin dato no puede pesar lo mismo que uno con dato: se ve, para
+     que las cuatro preguntas esten siempre, pero no compite. */
+  .brief-nada {
+    color: var(--v2-slate);
+    font-style: italic;
+  }
+  .brief-nota {
+    color: var(--v2-slate);
+    font-size: 11px;
+  }
+
   .hizo {
     list-style: none;
     margin: 0;
@@ -2172,15 +2353,12 @@
 
   /* El aviso de escalada: tres piezas con jerarquia distinta -- que paso
      (fuerte), por que (medio), y el estado del CRM (chip aparte). */
+  /* El recorte con puntos suspensivos lo dejaba en "sin datos pa..." -- que no
+     dice nada y es peor que partirse en dos renglones. Ahora la FILA envuelve:
+     el motivo se lleva la linea entera si hace falta, y los botones bajan con
+     el, en vez de que el motivo desaparezca para que quepan. */
   .aviso-motivo {
     color: var(--v2-slate);
-    /* Sin esto 'sin datos para diagnosticar' se parte en tres renglones en la
-       columna angosta y empuja los botones de la fila. Visto en el navegador:
-       ni los tipos ni la guarda que abre las pantallas lo detectan. */
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    min-width: 0;
   }
   /* ── nota interna ───────────────────────────────────────────────────── */
   .modos {
@@ -2337,12 +2515,24 @@
   }
   /* 34px de lado: un icono de 17px con padding llegaba a 26, que es de los
      objetivos que se fallan cuando se atiende con prisa. */
+  /* 38px, no 34: parecian decoracion. Y con hover visible -- un control sin
+     respuesta al mouse no se lee como control. */
   .accion-icono {
-    min-width: 34px;
-    min-height: 34px;
+    min-width: 38px;
+    min-height: 38px;
     padding: 0;
     justify-content: center;
     cursor: pointer;
+    color: var(--v2-slate);
+    border-radius: 8px;
+  }
+  .accion-icono:hover {
+    background: var(--v2-line-soft);
+    color: var(--v2-ink);
+  }
+  .accion-icono:focus-visible {
+    outline: 2px solid var(--v2-ember);
+    outline-offset: 2px;
   }
 
   .emoji-caja {
@@ -2372,6 +2562,33 @@
     cursor: pointer;
   }
   .emoji-panel button:hover {
+    background: var(--v2-line-soft);
+  }
+  .menu-adjuntar {
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 0;
+    z-index: 5;
+    display: flex;
+    flex-direction: column;
+    min-width: 160px;
+    padding: 4px;
+    background: var(--v2-card);
+    border: 1px solid var(--v2-line);
+    border-radius: 9px;
+    box-shadow: 0 8px 24px rgb(0 0 0 / 12%);
+  }
+  .menu-adjuntar label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    font-size: 12.5px;
+    border-radius: 6px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .menu-adjuntar label:hover {
     background: var(--v2-line-soft);
   }
 
@@ -2457,6 +2674,40 @@
     color: var(--v2-ember);
   }
 
+  /* Ayuda que aparece al pasar el mouse O al enfocar con el teclado. */
+  .con-ayuda {
+    position: relative;
+    display: inline-flex;
+  }
+  .ayuda {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 20;
+    width: 250px;
+    padding: 8px 10px;
+    font-size: 11.5px;
+    font-weight: 400;
+    line-height: 1.4;
+    color: var(--v2-ink);
+    background: var(--v2-card);
+    border: 1px solid var(--v2-line);
+    border-radius: 8px;
+    box-shadow: 0 6px 18px rgb(0 0 0 / 12%);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.12s;
+  }
+  .con-ayuda:hover .ayuda,
+  .con-ayuda:focus-within .ayuda {
+    opacity: 1;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .ayuda {
+      transition: none;
+    }
+  }
+
   .aviso-caso {
     font-size: 11px;
     font-weight: 650;
@@ -2497,6 +2748,40 @@
     font-variant-numeric: tabular-nums;
     min-width: 1.2em;
     text-align: right;
+  }
+  /* Un renglon con algo pesa mas que uno en cero. Cero bloqueadas y cero
+     errores es la noticia buena y no tiene por que competir. */
+  .diag-hay {
+    font-weight: 600;
+  }
+  .diag-ir {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 0;
+    background: none;
+    font: inherit;
+    color: inherit;
+    padding: 2px 4px;
+    margin: -2px -4px;
+    border-radius: 5px;
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .diag-ir:hover {
+    background: var(--v2-line-soft);
+  }
+  .diag-ir:focus-visible {
+    outline: 2px solid var(--v2-ember);
+    outline-offset: 1px;
+  }
+  /* El resaltado del paso al que se salto. Se apaga solo. */
+  .paso-marcado {
+    background: var(--v2-ember-soft);
+    border-radius: 6px;
+    padding-left: 6px;
+    padding-right: 6px;
   }
 
   /* Los dos avisos del titulo cerrado. Sin borde de color al costado: se

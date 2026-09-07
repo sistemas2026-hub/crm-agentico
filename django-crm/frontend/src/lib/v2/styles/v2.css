@@ -298,7 +298,15 @@
   background: var(--v2-ember);
   border-color: var(--v2-ember);
   color: #fff;
-  font-weight: 600;
+  /* 650 y no 600, y un poco mas de aire a los lados. "Enviar" es la accion
+     que alguien de soporte usa cientos de veces al dia y se leia lavada
+     contra el papel: el naranja es el mismo (es el unico ember de la vista,
+     ver la regla de arriba), lo que cambia es que pese como lo que es. */
+  font-weight: 650;
+  padding-left: 15px;
+  padding-right: 15px;
+  /* Le da borde propio contra fondos claros sin inventar otro color. */
+  box-shadow: 0 1px 2px rgb(0 0 0 / 10%);
 }
 .dark .v2-btn-primary {
   color: #1c1917;
@@ -373,6 +381,15 @@
 .v2-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+/* El primario deshabilitado NO se apaga al 50%: sobre el naranja lo dejaba
+   casi rosa, y como 'Enviar' esta deshabilitado siempre que el cuadro esta
+   vacio --o sea, casi todo el tiempo que alguien lo mira-- el boton mas
+   importante de la pantalla parecia permanentemente lavado. Se atenua mucho
+   menos y se apoya en el cursor y en aria-disabled, no en desaparecer. */
+.v2-btn-primary:disabled {
+  opacity: 0.82;
+  box-shadow: none;
 }
 /* Loading. Distinct from disabled: disabled means "you cannot", loading means
    "it is happening". They looked identical, so a slow save read as a dead

@@ -179,9 +179,20 @@
     // cliente. Se cuenta en dias para que las otras dos señales puedan
     // moverla sin taparla del todo.
     let p = horasEsperando(c) / 24;
-    // Volver a escribir mientras espera es alguien golpeando la puerta.
-    // Equivale a tres dias de espera, y se acumula si insistio varias veces.
-    if (c.mensajes_tras_escalar > 0) p += 3 + Math.min(c.mensajes_tras_escalar, 5);
+    // Volver a escribir mientras espera es alguien golpeando la puerta, y
+    // tiene que ganarle a la antiguedad: quien escribio hace dos minutos esta
+    // ahi AHORA, y quien lleva 26 dias ya se acostumbro a esperar.
+    //
+    // 30 dias equivalentes, no 3: con el peso anterior una insistencia de hoy
+    // perdia contra cualquier caso de mas de tres dias, y hay 34 con mas de
+    // una semana. En la practica no subia a nadie.
+    //
+    // Ojo con lo que esto NO arregla: hay CERO mensajes posteriores a una
+    // escalada en toda la base, y no porque nadie insista -- las
+    // conversaciones se cierran a las 24 h de inactividad, asi que quien
+    // vuelve a los dos dias abre una conversacion NUEVA y su insistencia no
+    // se cuenta como tal. Esta señal solo ve al que insiste dentro del dia.
+    if (c.mensajes_tras_escalar > 0) p += 30 + Math.min(c.mensajes_tras_escalar, 10);
     if (MOTIVO_URGENTE.has(c.motivo_escalamiento)) p += 2;
     return p;
   }
@@ -475,12 +486,25 @@
               {#if c.resumen}
                 <p class="avance resumen">{c.resumen}</p>
               {:else}
-                <p class="avance">
-                  {#if c.ultimo_rol && c.ultimo_rol !== 'user'}
-                    <span class="avance-quien">{AUTOR[c.ultimo_rol] ?? c.ultimo_rol}:</span>
-                  {/if}
-                  {c.ultimo_mensaje || 'Sin mensajes todavía'}
-                </p>
+                <!-- El RESUMEN si lo hay, y solo si no, el ultimo mensaje.
+                     "Asistente: Entiendo, eso necesita revision..." vuelve a
+                     contar la ultima respuesta del bot, que casi nunca dice de
+                     que trataba el caso. El resumen lo escribe el modelo al
+                     escalar y dice justo eso.
+
+                     Todavia no lo tienen todas: son 2 de 51 escaladas, porque
+                     el campo existe desde el 06/09/2026. Por eso el respaldo
+                     sigue siendo el ultimo mensaje y no un hueco. -->
+                {#if (c.resumen ?? '').trim()}
+                  <p class="avance avance-resumen">{c.resumen}</p>
+                {:else}
+                  <p class="avance">
+                    {#if c.ultimo_rol && c.ultimo_rol !== 'user'}
+                      <span class="avance-quien">{AUTOR[c.ultimo_rol] ?? c.ultimo_rol}:</span>
+                    {/if}
+                    {c.ultimo_mensaje || 'Sin mensajes todavía'}
+                  </p>
+                {/if}
               {/if}
 
               <!-- Solo se dibuja si hay algo que decir. "El bot la está
@@ -755,6 +779,12 @@
     font-weight: 750;
     font-size: 11.5px;
     letter-spacing: -0.01em;
+  }
+
+  /* El resumen del caso pesa mas que el eco del ultimo mensaje: es lo que
+     responde "de que iba esto" sin abrir la conversacion. */
+  .avance-resumen {
+    color: var(--v2-ink);
   }
 
   /* El motivo, como subtitulo del caso. Texto y no pildora a proposito. */
