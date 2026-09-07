@@ -344,6 +344,26 @@
   background: var(--v2-line-soft);
 }
 
+/* Filled primary that is NOT ember. Ember is reserved for one action per
+   view (see the rule at the top), and on the conversation screen that action
+   is "Send". But a case also has a primary action -- taking it -- and with
+   both drawn as outlines "Atender" and "Marcar como resuelta" read as equally
+   important, which they are not: one is what you do on the way in and the
+   other on the way out.
+
+   Ink, not a new hue: the palette already uses ink for the bulk-action bar,
+   so this adds weight without adding a colour or stealing the accent. */
+.v2-btn-ink {
+  background: var(--v2-ink);
+  border-color: var(--v2-ink);
+  color: var(--v2-paper);
+  font-weight: 650;
+}
+.v2-btn-ink:hover {
+  border-color: var(--v2-ink);
+  filter: brightness(1.25);
+}
+
 /* Destructive, exceptional, or test-only. Never competes with the operational
    actions next to it: no fill, rust text, and a dashed edge that reads as
    "this is not part of the normal flow" before the label is even read --
@@ -416,15 +436,32 @@
   }
 }
 
-/* Minimum sizes on ANY pointer, not only coarse ones. These were 31px and
-   24px; the small one in particular is under the size at which a click stops
-   being comfortable, and this screen is used in a hurry. The coarse-pointer
-   rule further down still raises them for touch. */
+/* ONE spec for every button, on any pointer -- not only coarse ones.
+   Measured on the conversation screen 07/09/2026, before this: "Atender" (the
+   primary action of a case) was 28px while the emoji icon next to it was 40,
+   and radii were mixed 7/8px. Controls that belong to the same screen looked
+   like they came from different components.
+
+      primary action    40px
+      normal button     36px
+      small / inline    32px
+      icon button       40x40 (see .accion-icono)
+      radius            8px, all of them
+
+   The small one was 24px originally and 28 after the first pass: still under
+   the size at which a click stops being comfortable, and this screen is used
+   in a hurry. The coarse-pointer rule further down raises them again for
+   touch. */
 .v2-btn {
-  min-height: 34px;
+  min-height: 36px;
+  border-radius: 8px;
+}
+.v2-btn-primary {
+  min-height: 40px;
 }
 .v2-btn-sm {
-  min-height: 28px;
+  min-height: 32px;
+  border-radius: 8px;
 }
 .v2-kbd {
   font-family: var(--v2-mono);

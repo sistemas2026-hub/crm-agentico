@@ -1138,7 +1138,7 @@
     <!-- SOLO PARA PRUEBAS -- ver reiniciarConversacion() mas arriba. -->
     <button
       type="button"
-      class="v2-btn v2-btn-sm v2-btn-danger"
+      class="v2-btn v2-btn-sm v2-btn-danger reiniciar-discreto"
       onclick={reiniciarConversacion}
       disabled={reiniciando}
       aria-busy={reiniciando}
@@ -1205,7 +1205,7 @@
         {:else}
           <button
             type="button"
-            class="v2-btn v2-btn-sm v2-btn-strong aviso-atender"
+            class="v2-btn v2-btn-ink aviso-atender"
             title="Te hacés cargo: pasa a «En atención» y sale de «Por atender». No le envía nada al cliente, y se puede soltar."
             onclick={marcarAtendida}
             disabled={marcandoAtendida}
@@ -1230,7 +1230,7 @@
         <span class="con-ayuda">
           <button
             type="button"
-            class="v2-btn v2-btn-sm aviso-resolver"
+            class="v2-btn v2-btn-sm v2-btn-quiet aviso-resolver"
             onclick={resolver}
             disabled={resolviendo}
             aria-busy={resolviendo}
@@ -1471,7 +1471,7 @@
             <button type="button" class="v2-btn v2-btn-sm" onclick={pausarGrabacion}>
               {grabPausada ? 'Seguir' : 'Pausar'}
             </button>
-            <button type="button" class="v2-btn v2-btn-sm v2-btn-danger" onclick={cancelarGrabacion}>
+            <button type="button" class="v2-btn v2-btn-sm v2-btn-danger reiniciar-discreto" onclick={cancelarGrabacion}>
               Cancelar
             </button>
             <button type="button" class="v2-btn v2-btn-sm v2-btn-strong" onclick={pararGrabacion}>
@@ -2092,6 +2092,9 @@
     border-left: 0;
   }
   .info {
+    /* Ningun contenido de esta columna puede desbordarla. Es la red por si
+       algo nuevo se agrega sin acordarse de truncarlo. */
+    overflow-x: hidden;
     /* 310 -> 292. Lo critico de esta columna es el ticket, el diagnostico, la
        etiqueta y la resolucion; lo demas se abre bajo demanda. Los 18px van
        al centro, que es donde se lee y se escribe. */
@@ -2298,18 +2301,46 @@
     flex-direction: column;
     gap: 6px;
   }
+  /* NADA de esta columna puede provocar scroll horizontal. Un nombre de
+     herramienta largo mas un mensaje de error entero (ErrorHerramientaHttp:
+     400 Client Error for url...) empujaban la fila fuera de su columna, y
+     aparecia una barra horizontal abajo.
+
+     'min-width: 0' en el item Y en el nombre: sin lo primero, un hijo flex
+     se niega a encogerse por debajo de su contenido y el ellipsis del hijo
+     nunca llega a aplicarse. Es la causa mas comun de esto y no se ve
+     leyendo el CSS del hijo. */
   .proceso-item {
     display: flex;
     align-items: center;
     gap: 8px;
     font-size: 12.5px;
     padding: 4px 0;
+    min-width: 0;
   }
   .proceso-nombre {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     font-family: var(--v2-mono, monospace);
   }
+  /* El tiempo conserva su columna a la derecha pase lo que pase: es lo que
+     se compara de un vistazo entre pasos. */
   .proceso-duracion {
     margin-left: auto;
+    flex: none;
+  }
+  /* El resto encoge antes que el nombre y el tiempo. El texto completo del
+     error sigue en el 'title'. */
+  .proceso-item > .v2-muted:not(.proceso-duracion) {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .proceso-lista {
+    min-width: 0;
   }
   .proceso-vacio {
     margin: 0;
@@ -2775,6 +2806,25 @@
     .ayuda {
       transition: none;
     }
+  }
+
+  /* Herramienta de prueba: existe, se encuentra, y no compite. Baja de
+     opacidad hasta que se la busca con el mouse. */
+  .reiniciar-discreto {
+    opacity: 0.62;
+    font-size: 10.8px;
+  }
+  .reiniciar-discreto:hover,
+  .reiniciar-discreto:focus-visible {
+    opacity: 1;
+  }
+  /* El secundario de verdad: se lee, pero no compite con "Atender". */
+  .aviso-resolver {
+    border-color: var(--v2-line);
+  }
+  .aviso-resolver:hover {
+    border-color: var(--v2-slate);
+    background: var(--v2-line-soft);
   }
 
   .aviso-tomada {
