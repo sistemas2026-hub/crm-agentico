@@ -528,7 +528,23 @@ casos:
       # Lo tiene de la verificacion. Antes contestaba "no tengo tu nombre a
       # la vista", que ademas dejaba en evidencia que la frase anterior
       # ("sos el titular") no se apoyaba en nada.
-      responde_con: [MARIO SABANAGRANDE]
+      #
+      # SOLO el nombre de pila, y no el nombre completo. Medido el 07/09/2026,
+      # dos corridas seguidas de la misma pregunta:
+      #
+      #   "Claro que si, Mario. ¿En que te puedo ayudar?"
+      #   "Si, claro -- me habla Mario Sabana grande."
+      #
+      # Las dos saben con quien hablan; ninguna escribe 'MARIO SABANAGRANDE'.
+      # El modelo parte el apellido o usa solo el nombre, y exigir la grafia
+      # exacta convertia este caso en lo que 'responde_con' dice no ser: una
+      # prueba de redaccion. Fallaba de forma intermitente segun como saliera
+      # escrito, que es la peor clase de guarda -- se empieza a ignorar.
+      #
+      # No lo debilita: lo que este caso atrapa es la EVASIVA ("tu identidad
+      # quedo verificada antes en esta conversacion"), y ahi no aparece
+      # ningun nombre.
+      responde_con: [mario]
 
   # La misma pregunta hecha de la otra forma. Son DOS preguntas distintas --
   # "quien soy" y "como lo sabes"-- y contestarlas igual salio mal: ante esta,
@@ -542,7 +558,9 @@ casos:
     rol: cliente_final
     mensajes: ["sabes quien te habla?"]
     espera:
-      responde_con: [MARIO SABANAGRANDE]
+      # Mismo criterio que el caso de arriba: el nombre de pila alcanza para
+      # probar que le habla a el y no a un expediente.
+      responde_con: [mario]
 
   # --- limites de PII, del lado del propio cliente -------------------------
   # Las guardas de arriba prueban que un cliente no ve el dato de OTRO. Esta

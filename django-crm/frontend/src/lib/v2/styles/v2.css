@@ -1866,9 +1866,10 @@ a.v2-setting:hover {
   .v2-stats {
     grid-template-columns: 1fr 1fr;
   }
-  /* Touch targets. These sat at 29-35px, and the icon-only ones cannot reach a
-     usable size on padding alone (an empty button has nothing to pad around),
-     so they get an explicit minimum instead. The pointer is a fingertip here. */
+  /* Touch targets. The base minimums (34/28px, set further up) are sized for a
+     mouse; a fingertip needs more, and the icon-only ones cannot reach a usable
+     size on padding alone -- an empty button has nothing to pad around-- so
+     they get an explicit minimum instead. */
   .v2-btn,
   .v2-view {
     min-height: 40px;
