@@ -205,7 +205,8 @@ def estado_de_conversacion_abierta(tenant: str, canal: str,
 
 def registrar_mensaje(tenant: str, canal: str, usuario_externo: str,
                       rol_efectivo: str, rol: str, contenido: str,
-                      horas_inactividad: int | None = None) -> tuple[str, str]:
+                      horas_inactividad: int | None = None,
+                      creado_en=None, latencia_ms: int | None = None) -> tuple[str, str]:
     """
     Une una fila de conversacion (crea si no existe) con una fila de
     mensaje, y actualiza 'actualizado_en' -- es la unica señal que necesita
@@ -244,10 +245,24 @@ def registrar_mensaje(tenant: str, canal: str, usuario_externo: str,
             conv = cur.fetchone()["id"]
 
         cur.execute(
+            # 'creado_en' se puede FIJAR, y hace falta.
+            #
+            # Los dos mensajes de un turno --lo que escribio el cliente y la
+            # respuesta-- se guardan los dos DESPUES de que el modelo termino
+            # (ver nucleo/canales/api.py: motor.responder va antes). Con
+            # now() por defecto, el mensaje del cliente quedaba sellado a la
+            # hora en que se ACABO el turno, no a la que llego.
+            #
+            # Consecuencia medida el 07/09/2026: en la base, todos los turnos
+            # mostraban 0.1s entre la pregunta y la respuesta. No era que
+            # fuera rapido: era que los dos sellos eran el mismo instante, y
+            # la espera real no estaba registrada en ningun lado.
             """insert into asistente.messages
-                 (organization_id, conversation_id, rol, contenido)
-               values (%s, %s, %s, %s) returning id""",
-            (org, conv, rol, contenido))
+                 (organization_id, conversation_id, rol, contenido,
+                  creado_en, latencia_ms)
+               values (%s, %s, %s, %s, coalesce(%s, now()), %s)
+               returning id""",
+            (org, conv, rol, contenido, creado_en, latencia_ms))
         mensaje = cur.fetchone()["id"]
 
         return str(conv), str(mensaje)

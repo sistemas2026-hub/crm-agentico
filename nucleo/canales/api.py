@@ -34,6 +34,7 @@ import os
 from pathlib import Path
 import threading
 import time
+from datetime import datetime, timezone
 
 from flask import Flask, jsonify, request
 
@@ -636,6 +637,13 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     # medido el 18/08/2026, uno llego a 67 mensajes y 180 horas mezclando tres
     # problemas, y el modelo terminaba repitiendo preguntas ya contestadas y
     # citando mediciones de cuatro horas antes como si fueran de ahora.
+    # La hora en que ESTE mensaje llego. Se toma antes de todo -- del cierre
+    # por inactividad, del modelo, de las herramientas-- porque es lo unico
+    # que despues permite saber cuanto espero el cliente. Ver el comentario en
+    # persistencia.registrar_mensaje: sin esto los dos mensajes del turno
+    # quedaban sellados al terminar, y la base decia 0.1s de espera SIEMPRE.
+    llego_en = datetime.now(timezone.utc)
+
     horas = config.limites.horas_inactividad_cierra
     if horas:
         try:
@@ -944,9 +952,16 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
         # hay que colgarle la foto que mando, para que aparezca en el hilo
         # donde la mando y no en una lista aparte al final.
         _, mensaje_usuario_id = persistencia.registrar_mensaje(
-            tenant, canal, id_sesion, rol, "user", mensaje, horas)
+            tenant, canal, id_sesion, rol, "user", mensaje, horas,
+            creado_en=llego_en)
+        # 'latencia_ms' es lo que el cliente ESPERO: desde que su mensaje
+        # llego hasta que la respuesta estuvo lista. La columna existia y
+        # nadie la llenaba -- por eso no habia con que responder "¿cuanto
+        # tarda?" salvo adivinando.
         conversation_id, mensaje_id = persistencia.registrar_mensaje(
-            tenant, canal, id_sesion, rol, "assistant", respuesta, horas)
+            tenant, canal, id_sesion, rol, "assistant", respuesta, horas,
+            latencia_ms=int(
+                (datetime.now(timezone.utc) - llego_en).total_seconds() * 1000))
         # La sesion viva se queda con el id. Solo lo tenia cuando venia de una
         # conversacion ANTERIOR: si la creo este mismo proceso, quedaba en
         # None y las reglas que preguntan por esta fila --si ya la atendio una
