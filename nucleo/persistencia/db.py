@@ -1668,25 +1668,51 @@ def registrar_llamada_herramienta(tenant: str, conversation_id: str, rol: str,
     Nunca rompe el turno: mismo criterio que registrar_mensaje. Perder una
     fila de auditoria no puede tumbar la atencion al cliente.
     """
+    registrar_llamadas_herramienta(tenant, conversation_id, rol, [llamada],
+                                   profile_id=profile_id)
+
+
+def registrar_llamadas_herramienta(tenant: str, conversation_id: str, rol: str,
+                                   llamadas: list[dict],
+                                   profile_id: str | None = None) -> None:
+    """
+    TODA la traza del turno en UNA ida a la base.
+
+    Antes era una insercion por herramienta, y cada una es una ida y vuelta a
+    Postgres. Medido el 07/09/2026 contra la base de produccion: 1.054 ms de
+    mediana por viaje. Un turno de diagnostico llama a cinco herramientas, asi
+    que la traza costaba casi SEIS SEGUNDOS -- y se pagaban ANTES de mandarle
+    la respuesta al cliente, que ya estaba escrita.
+
+    Visto en una conversacion real:
+
+        22:25:24.4  el cliente escribe
+        22:25:26.7  la respuesta esta lista      (2.3s de modelo y APIs)
+        22:25:27.7  se guarda derivar_a_area
+        ...
+        22:25:33.5  se guarda consultar_senal_ont
+                    -> recien aca sale el mensaje
+
+    Con executemany son 5 filas en un viaje. Sigue sin romper el turno si
+    falla: perder auditoria no puede tumbar la atencion.
+    """
+    if not llamadas:
+        return
     try:
         with sesion(tenant) as (cur, org):
-            cur.execute(
+            cur.executemany(
                 """insert into asistente.tool_calls
                      (organization_id, conversation_id, herramienta, parametros,
                       rol_solicitante, exito, n_registros, codigo_error,
                       duracion_ms, es_escritura, profile_id, es_bloqueo)
                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-                (org, conversation_id, llamada["herramienta"],
-                 json.dumps(llamada["parametros"], ensure_ascii=False),
-                 rol, llamada["exito"], llamada["n_registros"],
-                 llamada["codigo_error"], llamada["duracion_ms"],
-                 llamada["es_escritura"], profile_id,
-                 # .get() y no [] : una traza de una version anterior del motor
-                 # no trae la clave, y perder la fila entera por eso seria
-                 # cambiar un dato incompleto por ninguno.
-                 bool(llamada.get("es_bloqueo"))))
+                [(org, conversation_id, l["herramienta"],
+                  json.dumps(l["parametros"], ensure_ascii=False),
+                  rol, l["exito"], l["n_registros"], l["codigo_error"],
+                  l["duracion_ms"], l["es_escritura"], profile_id,
+                  bool(l.get("es_bloqueo"))) for l in llamadas])
     except Exception as e:
-        print(f"[persistencia] no se pudo guardar la llamada a herramienta: {e}")
+        print(f"[persistencia] no se pudo guardar la traza: {e}")
 
 
 def herramientas_de(tenant: str, conversation_id: str) -> list[dict]:
