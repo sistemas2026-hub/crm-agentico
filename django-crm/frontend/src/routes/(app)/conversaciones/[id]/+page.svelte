@@ -726,10 +726,26 @@
   // caso, tal cual la escribe, sin pasar por el modelo. El cliente del otro
   // lado no deberia notar el cambio de quien le esta escribiendo.
   //
-  // Se deriva de caso_id, no de si el panel del ticket (caso) cargo bien:
-  // si BottleCRM esta caido en ese momento, la conversacion sigue escalada
-  // igual y no hay que volver a simular al cliente por eso.
-  let escalada = $derived(!!conversacion.caso_id);
+  // LA MISMA condicion que usa el motor para callar al bot
+  // (nucleo/canales/api.py: `previo["escalada"] and previo["necesita_atencion_humana"]`).
+  //
+  // Antes se derivaba de 'caso_id', y eso produjo una contradiccion visible en
+  // la misma pantalla: el banner decia "Escalada · IA no responde" y el
+  // compositor, diez centimetros abajo, "Responde el asistente". Pasa cuando
+  // el modelo escala pero el CRM no llego a crear el ticket -- hay 2
+  // conversaciones asi en produccion.
+  //
+  // No es solo cosmetico: con el bot en pausa y el compositor creyendo que no
+  // lo esta, lo que alguien escribe se manda COMO SI FUERA EL CLIENTE, y como
+  // el bot esta callado no contesta nadie. El mensaje no sale y nada lo dice.
+  //
+  // Y la escalada 'agendada sola' (necesita_atencion_humana=false) queda del
+  // lado correcto: ahi el bot SIGUE contestando, asi que el cuadro simula al
+  // cliente, que es lo que corresponde.
+  let iaEnPausa = $derived(
+    !!conversacion.escalada_a_humano && !!conversacion.necesita_atencion_humana
+  );
+  let escalada = $derived(iaEnPausa);
 
   /** Clave de dia local, para agrupar el hilo. */
   function diaDe(/** @type {string} */ iso) {
@@ -989,9 +1005,20 @@
            SIGUE leyendo y procesando cada mensaje mientras espera -- de eso
            depende que un "listo, gracias" del cliente cierre el caso solo.
            Lo que dejo de hacer es contestar. -->
-      <strong>Escalada · IA no responde</strong>
+      <strong>
+        {#if iaEnPausa}
+          Escalada · IA no responde
+        {:else}
+          <!-- Escalo, pero no hay a quien esperar (quedo agendada, o el CRM no
+               tomo el caso): el asistente SIGUE contestando. Decir "IA no
+               responde" aca seria falso. -->
+          Escalada · el asistente sigue respondiendo
+        {/if}
+      </strong>
       {#if conversacion.motivo_escalamiento}
-        <span class="aviso-motivo">{motivoLabel(conversacion.motivo_escalamiento)}</span>
+        <!-- El separador no es adorno: sin el, "IA no responde El cliente
+             reporto una falla..." se lee como una sola frase rota. -->
+        <span class="aviso-motivo">· {motivoLabel(conversacion.motivo_escalamiento)}</span>
       {/if}
       <!-- Estado real y aparte: el CRM es la fuente de verdad de cuando el
            asistente puede volver a contestar, y no es lo mismo que el estado
@@ -1637,6 +1664,14 @@
       {/each}
     </ol>
   </details>
+  {:else}
+    <!-- Sin traza el panel entero desaparecia, y la columna quedaba con dos
+         controles sueltos y un hueco: se lee como una pantalla rota, no como
+         "no hay nada que mostrar". Es el caso normal de una conversacion que
+         el asistente resolvio hablando, sin consultar ningun sistema. -->
+    <p class="proceso-vacio">
+      El asistente no consultó ningún sistema en esta conversación.
+    </p>
   {/if}
 
   <!-- Copiloto documental. Mismo patron plegable que "Ver proceso": es ayuda
@@ -2021,6 +2056,11 @@
   }
   .proceso-duracion {
     margin-left: auto;
+  }
+  .proceso-vacio {
+    margin: 0;
+    font-size: 12px;
+    color: var(--v2-slate);
   }
 
   /* ── qué pasó acá ───────────────────────────────────────────────────────
