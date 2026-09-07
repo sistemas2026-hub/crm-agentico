@@ -693,7 +693,24 @@
       if (!resp.ok) return;
       const datos = await resp.json();
       const ahora = Date.now();
-      for (const m of datos.mensajes ?? []) {
+      for (const crudo of datos.mensajes ?? []) {
+        // LA RUTA DEVUELVE OTRA FORMA. /api/conversaciones/<id>/mensajes se
+        // escribio para la vista de TICKETS y responde {quien, texto}; esta
+        // pantalla trabaja con {rol, contenido}. Reusar la ruta sin traducir
+        // metia en el hilo mensajes sin texto y sin rol: se dibujaban como
+        // burbujas vacias, con el aviso de "tipo que todavia no mostramos" --
+        // y el texto SI estaba en la base.
+        //
+        // Se traduce aca y no se cambia la ruta: la vista de tickets espera
+        // su forma, y romperla para arreglar esta seria cambiar dos cosas
+        // para arreglar una.
+        const m = {
+          ...crudo,
+          rol: crudo.rol
+            ?? (crudo.quien === 'cliente' ? 'user'
+              : crudo.quien === 'humano' ? 'humano' : 'assistant'),
+          contenido: crudo.contenido ?? crudo.texto ?? ''
+        };
         if (!m.id || mensajes.some((loc) => loc.id === m.id)) continue;
         // Evita duplicar un mensaje que ESTA pestaña ya empujo de forma
         // optimista (sin id todavia) y que el sondeo recien ahora trae con

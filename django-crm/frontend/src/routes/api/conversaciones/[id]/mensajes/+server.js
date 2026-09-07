@@ -41,7 +41,15 @@ export async function GET({ params, locals, fetch }) {
         // saber cuál es cuál para no responder dos veces lo mismo.
         quien: m.rol === 'user' ? 'cliente' : m.rol === 'humano' ? 'humano' : 'asistente',
         texto: m.contenido,
-        creado_en: m.creado_en
+        creado_en: m.creado_en,
+        // Los adjuntos SIN los bytes -- la interfaz los pide por su id. Sin
+        // esto, una foto que entra mientras alguien mira la conversación se
+        // dibujaba sin la foto hasta recargar: el sondeo traía el mensaje y
+        // dejaba afuera lo único que ese mensaje tenía.
+        adjuntos: m.adjuntos ?? [],
+        // Estado de entrega, para que un fallo aparezca sin recargar.
+        estado_entrega: m.estado_entrega ?? null,
+        error_entrega: m.error_entrega ?? null
       })),
       atendida_por: datos.conversacion?.atendida_por ?? '',
       cerrada: datos.conversacion?.estado === 'cerrada'
