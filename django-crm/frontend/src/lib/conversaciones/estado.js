@@ -33,6 +33,9 @@
 export const pendiente = (c) =>
   (c.escalada_a_humano || c.necesita_atencion_humana) &&
   !c.atendida &&
+  // Si alguien se la adjudico, ya no espera a "una persona": espera a ESA
+  // persona, y eso es la pestaña de al lado.
+  !c.tomada_por &&
   // Una conversación cerrada no espera a nadie. Se contaban igual, y eran 28
   // de las 155 que la cabecera decía que estaban esperando.
   c.estado !== 'cerrada';
@@ -60,13 +63,21 @@ export const resuelta = (c) => c.estado === 'cerrada';
 /**
  * Alguien se hizo cargo y el caso sigue vivo.
  *
- * `atendida` mezcla dos cosas: la marca manual, y que exista un mensaje con
- * rol 'humano'. Lo segundo casi no ocurre — 1 de 1.476 mensajes— porque la
- * respuesta de una persona se guarda con rol 'assistant' a propósito (el
- * cliente ve un solo interlocutor, ver agregar_mensaje_humano). Así que en la
- * práctica esto son las que alguien marcó con "Atender" y todavía no cerró.
+ * `tomada_por` y NO `atendida_manual`. La primera versión usaba la segunda, y
+ * estaba mal de una forma que no se veía: `atendida_manual` significa
+ * "resuelto por teléfono, en persona o por otro canal" —lo dice el comentario
+ * de su propia columna— y habilita dos cierres automáticos en el motor:
  *
- * Es el lugar donde va a vivir la asignación real cuando exista.
+ *   db.py:625  un "ok, gracias" del cliente CIERRA el caso, pero solo si
+ *              alguien ya lo atendió
+ *   db.py:799  el barrido por plazo vencido cierra SOLO lo ya atendido
+ *
+ * Con esa definición, pulsar "Atender" para decir "me hago cargo" dejaba el
+ * caso cerrable por un agradecimiento del cliente y por el barrido. Y
+ * marcar_atendida() no tiene desmarcar, a propósito.
+ *
+ * Tomar es otra cosa y es reversible. Se sigue contando el caso donde una
+ * persona ya escribió en el hilo: eso también es hacerse cargo.
  * @param {any} c
  */
-export const enAtencion = (c) => c.atendida && !resuelta(c);
+export const enAtencion = (c) => (!!c.tomada_por || c.atendida) && !resuelta(c);

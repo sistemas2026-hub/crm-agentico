@@ -495,8 +495,27 @@
                      Todavia no lo tienen todas: son 2 de 51 escaladas, porque
                      el campo existe desde el 06/09/2026. Por eso el respaldo
                      sigue siendo el ultimo mensaje y no un hueco. -->
+                <!-- Que TRABAJO hay delante, no que dijo el bot.
+                     Tres fuentes, en orden de cuanto dicen:
+
+                       resumen      lo escribe el modelo al escalar y dice de
+                                    que trata el caso. Es el bueno.
+                       caso_manual  de que es la conversacion, asignado en
+                                    cada turno. Existe tambien donde el bot
+                                    resolvio solo.
+                       ultimo msj   el respaldo. "Asistente: Entiendo, eso
+                                    necesita revision..." vuelve a contar la
+                                    ultima respuesta, que casi nunca dice de
+                                    que iba el caso -- pero es mejor que un
+                                    hueco.
+
+                     Hoy 'resumen' lo tienen 2 de 51 escaladas (el campo es
+                     del 06/09/2026), asi que el respaldo se usa mucho
+                     todavia. Va a ir desapareciendo solo. -->
                 {#if (c.resumen ?? '').trim()}
                   <p class="avance avance-resumen">{c.resumen}</p>
+                {:else if c.caso_manual}
+                  <p class="avance avance-resumen">{etiquetaLabel(c.caso_manual)}</p>
                 {:else}
                   <p class="avance">
                     {#if c.ultimo_rol && c.ultimo_rol !== 'user'}
@@ -534,7 +553,10 @@
                        resolvió solo (ver supabase/202608180923_caso_conversacion.sql).
                        Solo cuando NO hay motivo -- si hay, ese dice mas y los
                        dos juntos son ruido. -->
-                  {#if c.caso_manual && !(pendiente(c) && c.motivo_escalamiento)}
+                  <!-- Solo si 'caso_manual' NO se uso ya como la linea de
+                       arriba: decir lo mismo dos veces en la misma fila es
+                       justo el ruido que se estaba sacando. -->
+                  {#if c.caso_manual && (c.resumen ?? '').trim() && !(pendiente(c) && c.motivo_escalamiento)}
                     <Pill tone="ink">{etiquetaLabel(c.caso_manual)}</Pill>
                   {/if}
                 </div>

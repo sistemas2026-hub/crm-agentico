@@ -160,7 +160,10 @@
       texto: (conversacion?.escalada_siguiente_paso ?? '').trim(),
       // Honesto sobre POR QUÉ está vacío. "No consta" a secas haría pensar en
       // un fallo; esto dice que es una conversación anterior al campo.
-      vacio: 'El asistente no dejó anotado el siguiente paso.'
+      // Se ve como advertencia y no como nota al pie: que nadie sepa cual es
+      // el proximo paso es un problema del caso, no un detalle de la ficha.
+      alerta: true,
+      vacio: 'Sin próximo paso registrado'
     },
     {
       rotulo: 'No se pudo comprobar',
@@ -175,6 +178,18 @@
 
   // El bloque se dibuja siempre que la conversación haya escalado: es
   // entonces cuando alguien tiene que entender el caso rápido.
+  /** Si la columna derecha tiene algo que valga su ancho. Lo accionable es:
+      el ticket del CRM, el diagnostico de la IA, la etiqueta y la resolucion.
+      Sin nada de eso son dos controles sueltos ocupando 292px que el chat
+      necesita -- y no se llena con tarjetas inventadas: se cierra. */
+  let hayContexto = $derived(
+    !!caso ||
+      herramientas.length > 0 ||
+      !!conversacion?.etiqueta ||
+      !!conversacion?.caso_id ||
+      conversacion?.conservar
+  );
+
   let hayResumenDelCaso = $derived(
     !!conversacion?.escalada_a_humano || resumenEscalada.some((f) => f.texto) || hizoLaIA.length > 0
   );
@@ -197,22 +212,32 @@
   let marcandoAtendida = $state(false);
   let errorAtender = $state('');
 
+  /** Quien tiene el caso, o '' si no lo tomo nadie. Reversible: soltar lo
+      devuelve a "Por atender". */
+  let tomadaPor = $state(untrack(() => data.conversacion?.tomada_por ?? ''));
+
   async function marcarAtendida() {
-    if (marcandoAtendida || atendida) return;
+    if (marcandoAtendida) return;
     marcandoAtendida = true;
     errorAtender = '';
     try {
       const resp = await fetch(`/api/conversaciones/${conversacion.id}/atender`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ caso_id: conversacion.caso_id ?? null })
+        body: JSON.stringify({
+          caso_id: conversacion.caso_id ?? null,
+          // Soltar es el mismo camino: quien lo tomo por error, o termina su
+          // turno, lo devuelve a la cola. Tomar un caso NO es resolverlo, y
+          // por eso se puede deshacer -- 'Marcar como resuelta' no.
+          soltar: !!tomadaPor
+        })
       });
       const datos = await resp.json();
       if (!resp.ok) {
         errorAtender = datos.error || 'No se pudo guardar.';
         return;
       }
-      atendida = true;
+      tomadaPor = datos.tomada ? (datos.por || 'vos') : '';
       // El servidor toma el ticket a nombre de quien dio "Atender" (ver el
       // proxy) -- reflejarlo ya mismo en "Asignado a", sin esperar a que
       // alguien reabra el ticket para verlo.
@@ -1159,24 +1184,39 @@
       {#if caso?.id}
         <span class="aviso-caso">Caso abierto en CRM</span>
       {/if}
-      {#if conversacion.necesita_atencion_humana}
-        {#if !atendida}
+      <!-- Tomar el caso, y soltarlo. Son el mismo boton porque son el mismo
+           gesto en dos sentidos, y porque tener dos ("Atender" / "Soltar")
+           obligaria a mirar cual esta activo para saber quien lo tiene. -->
+      {#if conversacion.necesita_atencion_humana && !atendida}
+        {#if tomadaPor}
+          <span class="aviso-tomada" title="Lo tomó {tomadaPor}">
+            <CircleCheck size={13} /> En atención
+          </span>
+          <button
+            type="button"
+            class="v2-btn v2-btn-sm aviso-atender"
+            title="Devuelve el caso a «Por atender» para que lo tome otra persona."
+            onclick={marcarAtendida}
+            disabled={marcandoAtendida}
+            aria-busy={marcandoAtendida}
+          >
+            {marcandoAtendida ? 'Soltando…' : 'Soltar'}
+          </button>
+        {:else}
           <button
             type="button"
             class="v2-btn v2-btn-sm v2-btn-strong aviso-atender"
-            title="Marca que te estás haciendo cargo: pasa a la pestaña «En atención» y sale de «Por atender». No le envía nada al cliente."
+            title="Te hacés cargo: pasa a «En atención» y sale de «Por atender». No le envía nada al cliente, y se puede soltar."
             onclick={marcarAtendida}
             disabled={marcandoAtendida}
             aria-busy={marcandoAtendida}
           >
             <CircleCheck size={13} />
-            {marcandoAtendida ? 'Marcando…' : 'Atender'}
+            {marcandoAtendida ? 'Tomando…' : 'Atender'}
           </button>
-        {:else}
-          <span class="aviso-atendida">
-            <CircleCheck size={13} /> Atendida
-          </span>
         {/if}
+      {:else if atendida && conversacion.estado !== 'cerrada'}
+        <span class="aviso-atendida"><CircleCheck size={13} /> Atendida</span>
       {/if}
       <!-- Cerrar el caso. Va junto a "Atender" porque es la otra mitad del
            mismo momento -- se toma un caso y despues se termina-- pero en
@@ -1235,6 +1275,8 @@
             {#if fila.texto}
               {fila.texto}
               {#if fila.nota}<span class="brief-nota">— {fila.nota}</span>{/if}
+            {:else if fila.alerta}
+              <span class="brief-alerta"><TriangleAlert size={12} /> {fila.vacio}</span>
             {:else}
               <span class="brief-nada">{fila.vacio}</span>
             {/if}
@@ -1245,10 +1287,16 @@
       <!-- Qué hizo la IA. Va después de "qué quiere" porque el orden en que
            alguien entiende un caso es ese: primero qué pedían, después qué se
            intentó. Y antes de "qué falta", que es lo que hay que hacer. -->
-      {#if hizoLaIA.length > 0}
-        <div class="brief-fila" style="order:1">
-          <dt>Qué hizo la IA</dt>
-          <dd>
+      <div class="brief-fila" style="order:1" class:brief-sin-dato={!hizoLaIA.length}>
+        <dt>Qué hizo la IA</dt>
+        <dd>
+          {#if hizoLaIA.length === 0}
+            <!-- No es lo mismo "no sabemos" que "no hizo nada". Esto ultimo se
+                 sabe con certeza --la traza esta vacia-- y le dice a quien
+                 toma el caso que arranca desde cero, sin ninguna medicion
+                 hecha. Ocultarlo perderia esa informacion. -->
+            <span class="brief-nada">No consultó ningún sistema antes de derivar.</span>
+          {:else}
             <ul class="hizo">
               {#each hizoLaIA as h (h.texto)}
                 <li class="hizo-{h.estado}">
@@ -1264,9 +1312,9 @@
                 </li>
               {/each}
             </ul>
-          </dd>
-        </div>
-      {/if}
+          {/if}
+        </dd>
+      </div>
     </dl>
   {/if}
 
@@ -1496,7 +1544,7 @@
                 aria-label="Emoji"
                 title="Emoji"
                 aria-expanded={emojisAbiertos}
-                onclick={() => (emojisAbiertos = !emojisAbiertos)}><Smile size={17} /></button
+                onclick={() => (emojisAbiertos = !emojisAbiertos)}><Smile size={18} /></button
               >
               {#if emojisAbiertos}
                 <div class="emoji-panel" role="group" aria-label="Elegí un emoji">
@@ -1541,7 +1589,7 @@
                 class="v2-btn v2-btn-quiet accion-icono"
                 aria-label="Grabar una nota de voz"
                 title="Grabar audio"
-                onclick={grabar}><Mic size={17} /></button
+                onclick={grabar}><Mic size={18} /></button
               >
             {/if}
           </div>
@@ -1613,7 +1661,12 @@
   ></button>
 {/if}
 
-<aside class="info" class:abierto={contextoAbierto} aria-label="Contexto de la conversación">
+<aside
+  class="info"
+  class:abierto={contextoAbierto}
+  class:vacia={!hayContexto && !contextoAbierto}
+  aria-label="Contexto de la conversación"
+>
   <button
     type="button"
     class="v2-btn v2-btn-sm info-cerrar"
@@ -2030,6 +2083,14 @@
   }
 
   /* ── columna de la derecha: el contexto ─────────────────────────────── */
+  /* Sin nada accionable la columna se encoge a una tira: el boton para
+     abrirla sigue estando, pero el ancho se lo lleva el chat. */
+  .info.vacia {
+    width: 0;
+    padding: 0;
+    overflow: hidden;
+    border-left: 0;
+  }
   .info {
     /* 310 -> 292. Lo critico de esta columna es el ticket, el diagnostico, la
        etiqueta y la resolucion; lo demas se abre bajo demanda. Los 18px van
@@ -2322,6 +2383,13 @@
     color: var(--v2-slate);
     font-style: italic;
   }
+  .brief-alerta {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--v2-clay);
+    font-weight: 600;
+  }
   .brief-nota {
     color: var(--v2-slate);
     font-size: 11px;
@@ -2515,11 +2583,12 @@
   }
   /* 34px de lado: un icono de 17px con padding llegaba a 26, que es de los
      objetivos que se fallan cuando se atiende con prisa. */
-  /* 38px, no 34: parecian decoracion. Y con hover visible -- un control sin
-     respuesta al mouse no se lee como control. */
+  /* 40px de AREA con el dibujo en 17: lo que se apunta es el area, no el
+     trazo. A 34 se leian como decoracion y a 38 seguian chicos -- medido en
+     la pantalla, no en el codigo. */
   .accion-icono {
-    min-width: 38px;
-    min-height: 38px;
+    min-width: 40px;
+    min-height: 40px;
     padding: 0;
     justify-content: center;
     cursor: pointer;
@@ -2706,6 +2775,16 @@
     .ayuda {
       transition: none;
     }
+  }
+
+  .aviso-tomada {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11.5px;
+    font-weight: 650;
+    color: var(--v2-moss);
+    white-space: nowrap;
   }
 
   .aviso-caso {

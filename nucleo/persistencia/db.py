@@ -312,7 +312,7 @@ def ultima_actividad(tenant: str, canal: str | None = None) -> list[dict]:
                   -- escribio"): la bandeja necesita distinguir "alguien esta
                   -- en esto" de "esto ya se cerro a mano", y son pestañas
                   -- distintas.
-                  c.atendida_manual,
+                  c.atendida_manual, c.tomada_por, c.tomada_en,
                   (c.atendida_manual or exists (
                        select 1 from asistente.messages h
                         where h.conversation_id = c.id
@@ -372,7 +372,8 @@ def mensajes_de(tenant: str, conversation_id: str) -> dict:
                       escalada_a_humano, necesita_atencion_humana,
                       motivo_escalamiento, caso_id, etiqueta,
                       actualizado_en, conservar, conservar_motivo, conservar_por,
-                      atendida_manual, atendida_por, id_cliente, nombre_cliente,
+                      atendida_manual, atendida_por, tomada_por, tomada_en,
+                      id_cliente, nombre_cliente,
                       -- Lo que el modelo ya habia escrito al escalar y hasta
                       -- ahora solo viajaba a la descripcion del ticket. Es lo
                       -- que arma el resumen de arriba en el detalle: que
@@ -1453,6 +1454,39 @@ def registrar_estado_escalada(tenant: str, conversation_id: str, estado: str,
     except Exception as e:
         print(f"[escalamiento] no se pudo anotar el estado '{estado}': "
               f"{type(e).__name__}: {e}")
+
+
+def tomar_caso(tenant: str, conversation_id: str, por: str | None,
+               soltar: bool = False) -> bool:
+    """
+    Alguien se hace cargo de este caso -- o lo suelta.
+
+    NO ES marcar_atendida(). Esa significa "resuelto por otro canal" y
+    habilita dos cierres automaticos: el "ok, gracias" del cliente y el
+    barrido por plazo vencido. Tomar un caso no resuelve nada; solo dice
+    quien lo tiene, y por eso NO toca 'atendida_manual'.
+
+    Reversible a proposito, al reves que marcar_atendida(): un caso se toma
+    por error, o se acaba el turno, o resulta que era de otra area. Soltar es
+    poner 'tomada_por' en NULL.
+
+    Devuelve False si la conversacion no existe o no es de este tenant.
+    """
+    with sesion(tenant) as (cur, org):
+        if soltar:
+            cur.execute(
+                """update asistente.conversations
+                   set tomada_por = null, tomada_en = null
+                   where organization_id = %s and id = %s""",
+                (org, conversation_id))
+        else:
+            cur.execute(
+                """update asistente.conversations
+                   set tomada_por = %s, tomada_en = now(),
+                       actualizado_en = actualizado_en
+                   where organization_id = %s and id = %s""",
+                (por or "alguien del equipo", org, conversation_id))
+        return cur.rowcount > 0
 
 
 def marcar_atendida(tenant: str, conversation_id: str, por: str | None) -> bool:

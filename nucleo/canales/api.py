@@ -4731,31 +4731,37 @@ def conversaciones_conservar(id_conversacion):
 @app.post("/conversaciones/<id_conversacion>/atender")
 def conversaciones_atender(id_conversacion):
     """
-    Marca una conversacion escalada como atendida sin pasar por el chat --
-    el colaborador la resolvio por telefono, en persona, o por otro canal, y
-    no corresponde (o no hace falta) responderle al cliente por ahi. Ver
-    persistencia.marcar_atendida().
+    Alguien se hace cargo del caso. NO lo resuelve.
 
-    Distinto de responder de verdad (POST /conversaciones/<id>/humano): esa
-    via ya deja la conversacion atendida sola, calculada. Esta es la manual,
-    para cuando esa via no aplica.
+    ESTA RUTA CAMBIO DE SIGNIFICADO EL 07/09/2026, Y ESE ES EL PUNTO.
+    Escribia 'atendida_manual', que quiere decir "resuelto por telefono, en
+    persona o por otro canal". Sirve para el boton "Marcar como resuelta"
+    --que sigue existiendo, en /resolver-- pero no para "Atender", que es lo
+    que se pulsa al ENTRAR a un caso, no al salir.
 
-    Cuerpo: {tenant, por?}
+    La diferencia no era de nombre. 'atendida_manual' habilita dos cierres
+    automaticos (ver persistencia): el "ok, gracias" del cliente cierra el
+    caso, y el barrido por plazo vencido lo cierra solo. Tomar un caso para
+    trabajarlo lo dejaba expuesto a los dos.
+
+    Cuerpo: {tenant, por?, soltar?}
     """
     cuerpo = request.get_json(force=True, silent=True) or {}
     tenant = cuerpo.get("tenant")
     if not tenant:
         return jsonify({"error": "Falta el campo 'tenant'"}), 400
 
+    soltar = bool(cuerpo.get("soltar"))
     try:
-        existe = persistencia.marcar_atendida(tenant, id_conversacion, cuerpo.get("por"))
+        existe = persistencia.tomar_caso(tenant, id_conversacion,
+                                         cuerpo.get("por"), soltar)
     except Exception as e:
-        print(f"[conversaciones] fallo al marcar atendida: {type(e).__name__}: {e}")
+        print(f"[conversaciones] fallo al tomar el caso: {type(e).__name__}: {e}")
         return jsonify({"error": "No se pudo guardar."}), 500
 
     if not existe:
         return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
-    return jsonify({"atendida": True})
+    return jsonify({"tomada": not soltar, "por": None if soltar else cuerpo.get("por")})
 
 
 @app.post("/conversaciones/<id_conversacion>/humano/media")
