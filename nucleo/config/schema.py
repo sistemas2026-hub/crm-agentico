@@ -1997,6 +1997,24 @@ class TenantConfig(Base):
     persona: Persona
     glosario: list[TerminoGlosario] = Field(default_factory=list)
     roles: dict[str, Rol]
+    # Quien atiende a quien escribe por un canal PUBLICO (WhatsApp, web).
+    #
+    # POR QUE ES CONFIGURACION Y NO SE DEDUCE
+    # Antes se tomaba el PRIMER rol con orientado_a='cliente_final'
+    # (nucleo/canales/api.py::_rol_de_cliente). Rapilink tiene CUATRO, asi que
+    # quien saluda a todos los clientes dependia del orden de las claves de un
+    # diccionario -- y ese orden cambia cuando alguien edita la configuracion
+    # desde la interfaz, porque se reserializa el JSON entero.
+    #
+    # El 07/09/2026 el primero era 'ventas', que existe para PROSPECTOS ("todavia
+    # no es cliente de Rapilink", dice su propia descripcion) y no tiene
+    # 'derivar_a_area'. Un suscriptor sin internet escribia y le contestaba el
+    # agente comercial, sin ninguna forma de pasarlo a soporte.
+    #
+    # Vacio = se sigue tomando el primero, con un aviso por consola. No se hace
+    # obligatorio para no romper a un tenant ya cargado, pero el aviso deja
+    # dicho que se esta eligiendo por un orden que nadie decidio.
+    rol_de_entrada: str | None = None
     seguridad: Seguridad = Field(default_factory=Seguridad)
     autenticacion: Autenticacion = Field(default_factory=Autenticacion)
     corpus: Corpus = Field(default_factory=Corpus)
@@ -2169,6 +2187,22 @@ class TenantConfig(Base):
                     f"({', '.join(self.escalamiento.activar_si) or 'vacio'})")
 
         # Una herramienta no puede permitir un rol inexistente.
+        # El rol que atiende los canales publicos. Un nombre mal escrito no
+        # puede caer en silencio al comportamiento viejo --tomar el primero--
+        # porque ese es justo el que se quiso dejar de usar: se veria igual
+        # que si funcionara.
+        if self.rol_de_entrada is not None:
+            if self.rol_de_entrada not in nombres_rol:
+                raise ValueError(
+                    f"rol_de_entrada '{self.rol_de_entrada}' no existe. "
+                    f"Roles definidos: {sorted(nombres_rol)}")
+            if self.roles[self.rol_de_entrada].orientado_a != "cliente_final":
+                raise ValueError(
+                    f"rol_de_entrada '{self.rol_de_entrada}' esta orientado a "
+                    f"colaborador. Quien atiende un canal publico tiene que "
+                    f"ser un rol de cliente: un rol interno no verifica "
+                    f"identidad y puede consultar a cualquier cliente.")
+
         for h in self.herramientas:
             desconocidos = set(h.roles_permitidos) - nombres_rol
             if desconocidos:

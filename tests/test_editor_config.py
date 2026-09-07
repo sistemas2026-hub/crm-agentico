@@ -167,8 +167,15 @@ def _rol_sin_exclusivas(doc: dict, excepto: str | None = None) -> str:
         # global en schema.py) -- no es el caso que esta prueba mide.
         derivables = {n for h in doc["herramientas"] if h.get("deriva_rol")
                      for n in h.get("areas_destino", [])}
+        # Ni el rol que atiende los canales publicos: pasarlo a colaborador
+        # dejaria a quien escribe por WhatsApp atendido por un rol interno,
+        # que no verifica identidad y puede consultar a cualquier cliente.
+        # El esquema lo rechaza (schema.py), y con razon -- no es lo que esta
+        # prueba mide, igual que 'exclusivas' y 'derivables'.
+        entrada = {doc.get("rol_de_entrada")} - {None}
         return [n for n in doc["roles"]
-               if n not in exclusivas and n not in derivables and n != excepto]
+               if n not in exclusivas and n not in derivables
+               and n not in entrada and n != excepto]
 
     libres = sin_exclusivas()
     if libres:
@@ -176,7 +183,8 @@ def _rol_sin_exclusivas(doc: dict, excepto: str | None = None) -> str:
 
     derivables = {n for h in doc["herramientas"] if h.get("deriva_rol")
                  for n in h.get("areas_destino", [])}
-    candidato = next((n for n in doc["roles"] if n != excepto and n not in derivables),
+    vetados = derivables | ({doc.get("rol_de_entrada")} - {None})
+    candidato = next((n for n in doc["roles"] if n != excepto and n not in vetados),
                      next(n for n in doc["roles"] if n != excepto))
     for h in doc["herramientas"]:
         if h["roles_permitidos"] == [candidato]:

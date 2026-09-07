@@ -100,6 +100,18 @@ glosario:
 #  WispHub trae 54 campos, incluidas cuatro contrasenas y las coordenadas GPS
 #  del domicilio: con lista negra, un campo nuevo del proveedor quedaria
 #  expuesto por defecto.
+# Quien atiende a quien escribe por un canal PUBLICO (WhatsApp, web).
+#
+# Antes no se elegia: el motor tomaba el primer rol con
+# orientado_a: cliente_final, y aca hay CUATRO. El orden de las claves cambia
+# solo --editar la config desde la interfaz reserializa el JSON-- y el
+# 07/09/2026 el primero era ventas, que existe para PROSPECTOS y no tiene
+# derivar_a_area: un suscriptor sin internet escribia y le contestaba el
+# agente comercial, sin forma de pasarlo a soporte.
+#
+# cliente_final es el enrutador: su unica herramienta es derivar_a_area.
+rol_de_entrada: cliente_final
+
 roles:
 
   soporte:

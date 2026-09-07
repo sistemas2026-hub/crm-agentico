@@ -96,6 +96,7 @@ _RE_NOMBRE_ROL = re.compile(r"^[a-z][a-z0-9_]{1,29}$")
 # criterio que TenantConfig.SINCRONIZADOS: la declaracion vive donde esta el
 # codigo que la vuelve necesaria.
 SECCIONES_EDITABLES = (
+    "rol_de_entrada",     # _mutar_rol_de_entrada
     "roles",              # _mutar_crear / _mutar_editar / _mutar_borrar
     "canales",            # _mutar_canal_whatsapp
     "identidad",          # _mutar_identidad_descripcion
@@ -931,6 +932,32 @@ def guardar_tope_gasto(tenant: str, tope: float | None,
             "El tope tiene que ser mayor que cero. Para sacar el limite, "
             "guardalo vacio -- un tope de 0 frenaria el asistente siempre.")
     return _editar(tenant, lambda d: _mutar_tope_gasto(d, tope, mensaje))
+
+
+def _mutar_rol_de_entrada(doc: dict, rol: str | None) -> None:
+    """
+    Quien atiende a quien escribe por un canal publico (WhatsApp, web).
+
+    Antes no se elegia: se tomaba el primer rol con orientado_a='cliente_final'
+    (nucleo/canales/api.py::_rol_de_cliente). Rapilink tiene cuatro, y el orden
+    de las claves de un diccionario cambia solo -- editar la configuracion
+    desde la interfaz reserializa el JSON entero. El 07/09/2026 el primero era
+    'ventas', que existe para prospectos y no puede derivar a soporte.
+
+    La validacion de que el rol exista y sea de cliente la hace el esquema
+    (TenantConfig), no esta funcion: asi vale por cualquier puerta, no solo
+    por esta.
+    """
+    if rol:
+        doc["rol_de_entrada"] = rol.strip()
+    else:
+        doc.pop("rol_de_entrada", None)
+
+
+def guardar_rol_de_entrada(tenant: str, rol: str | None) -> TenantConfig:
+    """Vacio vuelve al comportamiento viejo (el primero), que avisa por
+    consola. Se permite para poder revertir sin tocar codigo."""
+    return _editar(tenant, lambda d: _mutar_rol_de_entrada(d, rol))
 
 
 def _mutar_saldo_proveedor(doc: dict, url: str, auth_ref: str, campo: str,

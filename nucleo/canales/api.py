@@ -4216,13 +4216,39 @@ def corpus_actualizar_roles(id_documento):
 def _rol_de_cliente(config) -> str | None:
     """El rol con el que se atiende a quien escribe por un canal publico.
 
-    Se busca por 'orientado_a', no por nombre: el nucleo no puede saber como
-    llamo cada empresa a su rol de autoservicio (PRD 3 / ARQUITECTURA.md), y
-    fijar 'cliente_final' como literal seria conocimiento de un tenant."""
-    for nombre, rol in config.roles.items():
-        if rol.orientado_a == "cliente_final":
-            return nombre
-    return None
+    Lo dice la CONFIGURACION ('rol_de_entrada'), no el orden en que quedaron
+    las claves de un diccionario.
+
+    Antes se devolvia el primer rol con orientado_a='cliente_final'. Se
+    buscaba por 'orientado_a' y no por nombre por una razon correcta -- el
+    nucleo no puede saber como llamo cada empresa a su rol de autoservicio
+    (PRD 3 / ARQUITECTURA.md)-- pero eso resuelve QUE roles son candidatos,
+    no CUAL de ellos atiende. Rapilink tiene cuatro.
+
+    El 07/09/2026 el primero era 'ventas', que existe para PROSPECTOS
+    ("todavia no es cliente de Rapilink", dice su descripcion) y que no tiene
+    'derivar_a_area': un suscriptor sin internet escribia y le contestaba el
+    agente comercial, sin ninguna forma de pasarlo a soporte. Y el orden
+    cambia solo, porque editar la configuracion desde la interfaz reserializa
+    el JSON entero.
+
+    Sin 'rol_de_entrada' se conserva el comportamiento viejo para no dejar
+    mudo a un tenant ya cargado, pero se AVISA: que la eleccion la haga un
+    orden que nadie decidio es exactamente lo que hay que poder ver.
+    """
+    if config.rol_de_entrada:
+        return config.rol_de_entrada
+
+    candidatos = [n for n, r in config.roles.items()
+                  if r.orientado_a == "cliente_final"]
+    if not candidatos:
+        return None
+    if len(candidatos) > 1:
+        print(f"[canal] sin 'rol_de_entrada' definido y hay {len(candidatos)} "
+              f"roles de cliente ({candidatos}): se atiende con "
+              f"'{candidatos[0]}' por ser el primero del diccionario, que no "
+              f"es una decision de nadie. Definir 'rol_de_entrada'.")
+    return candidatos[0]
 
 
 # Lo que se le dice al MODELO cuando el cliente manda un archivo sin escribir
