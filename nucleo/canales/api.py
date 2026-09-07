@@ -74,6 +74,16 @@ _configs: dict = {}    # tenant -> TenantConfig, cacheado por proceso
 _servidas: dict = {}   # tenant -> (config_version servida, monotonic de la ultima comprobacion)
 _sesiones: dict = {}   # (tenant, id_sesion) -> {"sesion": Sesion, "historial": [...]}
 
+# Cuantos mensajes se vuelven a poner en contexto cuando este proceso no tiene
+# la conversacion en memoria (un reinicio, un despliegue). Ver
+# persistencia.historial_para_el_modelo.
+#
+# Veinte y no "todos": el historial en RAM crece de a poco durante una sesion
+# viva, pero volcar una conversacion de 200 mensajes de golpe seria pagar de
+# una vez un prompt que nadie decidio. Y no es config del tenant: es un
+# equilibrio entre costo y memoria del MOTOR, igual para toda empresa.
+MENSAJES_A_REHIDRATAR = 20
+
 # Cada cuanto se le pregunta a la base si la version cambio. Acota las dos
 # cosas que importan: cuanto puede quedarse vieja una config (este intervalo)
 # y cuantas consultas agrega (una cada tantos segundos, no una por turno).
@@ -675,14 +685,37 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     if nombre_colaborador:
         estado["sesion"].nombre_colaborador = nombre_colaborador
 
-    # Al abrir una conversacion nueva, lo que se sabia del cliente entra como
-    # contexto -- no el historial entero, solo el resumen de la anterior.
+    # Poner al modelo en contexto cuando este proceso no tiene memoria de esta
+    # persona -- porque es la primera vez, o porque el motor se reinicio.
+    #
+    # SON DOS COSAS DISTINTAS Y VAN EN ESTE ORDEN:
+    #
+    #   1. el resumen de la conversacion ANTERIOR, ya cerrada (si la hubo)
+    #   2. los ultimos mensajes de la conversacion EN CURSO, si sigue abierta
+    #
+    # Primero lo viejo, despues lo reciente: es el orden en que ocurrio, y es
+    # el que evita que el modelo confunda una cosa con la otra. Justamente eso
+    # paso el 07/09/2026 -- sin el paso 2, el unico contexto era el resumen de
+    # hacia seis horas, y el asistente contesto sobre esa falla en vez de la
+    # conversacion de television que tenia nueve minutos.
     if nueva and not estado["historial"]:
         anterior = persistencia.resumen_anterior(tenant, canal, id_sesion)
         if anterior:
             texto_previo, horas_previo = anterior
             estado["historial"].append(
                 resumen.como_contexto(texto_previo, horas_previo))
+
+        # El hilo en curso. Solo si hay una conversacion abierta: si no la
+        # hay, no hay nada que retomar y el resumen de arriba es todo el
+        # contexto que corresponde.
+        if estado.get("conversacion_id"):
+            retomado = persistencia.historial_para_el_modelo(
+                tenant, estado["conversacion_id"], MENSAJES_A_REHIDRATAR)
+            if retomado:
+                estado["historial"].extend(retomado)
+                print(f"[sesion] {id_sesion}: se retomo la conversacion con "
+                      f"{len(retomado)} mensaje(s) -- el proceso no la tenia "
+                      f"en memoria")
 
     # --- si la conversacion ya se derivo a otra area, seguir ahi -------------
     # Solo aplica cuando el rol que pide el LLAMADOR ya es cliente_final (para

@@ -203,6 +203,67 @@ def estado_de_conversacion_abierta(tenant: str, canal: str,
 # se notaba nada.
 
 
+def historial_para_el_modelo(tenant: str, conversation_id: str,
+                             limite: int = 20) -> list[dict]:
+    """
+    Los ultimos mensajes de una conversacion ABIERTA, con la forma que espera
+    el modelo. Para volver a poner en contexto una conversacion cuyo historial
+    se perdio al reiniciar el proceso.
+
+    POR QUE HACE FALTA
+    ------------------
+    El historial vive en RAM (nucleo/canales/api.py::_sesiones). Cada
+    despliegue lo borra, y hasta hoy no se rehidrataba -- la decision estaba
+    tomada a proposito y escrita en _sesion_nueva: "cambia el costo de cada
+    llamada y merece decidirse aparte".
+
+    Ya hay con que decidirlo. Medido el 07/09/2026 con un cliente real: el
+    motor se reinicio a mitad de una conversacion sobre television, y nueve
+    minutos despues el cliente escribio "ya desconecte". El asistente contesto
+    "Hola, buen dia" --saludando como si empezara--, dijo que "pasaron unas
+    horas" (fueron nueve minutos) y hablo de una falla de INTERNET de hacia
+    seis horas, porque sin historial se agarro del resumen de la conversacion
+    anterior. Y antes de contestar hizo NUEVE busquedas en la documentacion
+    intentando entender de que le hablaban: 8.2 de los 13.6 segundos que
+    espero el cliente.
+
+    QUE NO ENTRA, Y ESO ES LO IMPORTANTE
+    ------------------------------------
+    Las NOTAS INTERNAS (rol 'nota'). Son lo que el equipo se escribe entre
+    si, y meterlas aca se las estaria dando al modelo para que las use al
+    contestarle al cliente -- exactamente lo que ese rol existe para impedir.
+    La garantia es este filtro mas el hecho de que agregar_nota_interna las
+    guarda con un rol propio.
+
+    EL TECHO
+    --------
+    'limite' mensajes, los ultimos. El historial en RAM crece sin techo
+    durante una sesion viva, pero eso es gradual; volcar una conversacion de
+    200 mensajes de golpe al reiniciar seria pagar de una vez un prompt que
+    nadie decidio. Veinte alcanza para retomar el hilo.
+    """
+    try:
+        with sesion(tenant) as (cur, org):
+            cur.execute(
+                """select rol, contenido from (
+                     select rol, contenido, creado_en
+                       from asistente.messages
+                      where organization_id = %s and conversation_id = %s
+                        and contenido is not null and contenido <> ''
+                        and rol in ('user', 'assistant')
+                      order by creado_en desc limit %s
+                   ) ultimos order by creado_en""",
+                (org, conversation_id, limite))
+            return [{"role": f["rol"], "content": f["contenido"]}
+                    for f in cur.fetchall()]
+    except Exception as e:
+        # Igual que el resto de la rehidratacion: un fallo al leer no impide
+        # atender. Se arranca sin memoria, que es lo que pasaba siempre.
+        print(f"[sesion] no se pudo rehidratar el historial: "
+              f"{type(e).__name__}: {e}")
+        return []
+
+
 def registrar_mensaje(tenant: str, canal: str, usuario_externo: str,
                       rol_efectivo: str, rol: str, contenido: str,
                       horas_inactividad: int | None = None,

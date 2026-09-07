@@ -85,6 +85,24 @@ revisar("rol <> 'nota'" in db,
         "la nota no aparece como ultimo mensaje en la bandeja")
 
 
+# --- 1.b la nota tampoco llega al MODELO ------------------------------------
+# Desde el 07/09/2026 el motor rehidrata el historial de una conversacion
+# abierta cuando el proceso no la tiene en memoria (un reinicio, un
+# despliegue). Ese historial va DERECHO al prompt. Si arrastrara las notas
+# internas, el modelo las usaria para contestarle al cliente -- que es
+# exactamente lo que el rol 'nota' existe para impedir, por la otra puerta.
+fn_hist = _cuerpo(db, "def historial_para_el_modelo(tenant: str, conversation_id: str,")
+revisar("rol in ('user', 'assistant')" in fn_hist,
+        "el historial que se le da al modelo excluye las notas internas",
+        "historial_para_el_modelo no filtra por rol: una nota interna "
+        "entraria al prompt en el primer reinicio.")
+
+# Y con techo: volcar una conversacion entera de golpe seria pagar de una vez
+# un prompt que nadie decidio.
+revisar("limit %s" in fn_hist,
+        "el historial rehidratado tiene un tope de mensajes")
+
+
 # --- 2. no se declara lo que no se probo ------------------------------------
 PROBADOS = {"image", "document", "audio"}
 extra = set(LIMITES_MEDIA) - PROBADOS
