@@ -1355,13 +1355,13 @@
           <span class="compositor-nota">
             {#if modo === 'nota'}
               <strong class="nota-interna-aviso">Solo la ve el equipo</strong>
-              <span class="v2-muted">no se le envía al cliente</span>
+              <span class="v2-muted">· no se le envía al cliente</span>
             {:else if escalada}
               <!-- Más visible que antes (§11): cuando está escalada, esto sale
                    DIRECTO al cliente. "Le llega tal cual" no decía quién
                    habla ni que el asistente no interviene. -->
               <strong class="nota-directo">Se envía directo al cliente</strong>
-              <span class="v2-muted">no pasa por el asistente</span>
+              <span class="v2-muted">· no pasa por el asistente</span>
             {:else}
               Responde el asistente
             {/if}
@@ -2083,6 +2083,13 @@
      (fuerte), por que (medio), y el estado del CRM (chip aparte). */
   .aviso-motivo {
     color: var(--v2-slate);
+    /* Sin esto 'sin datos para diagnosticar' se parte en tres renglones en la
+       columna angosta y empuja los botones de la fila. Visto en el navegador:
+       ni los tipos ni la guarda que abre las pantallas lo detectan. */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
   }
   /* ── nota interna ───────────────────────────────────────────────────── */
   .modos {

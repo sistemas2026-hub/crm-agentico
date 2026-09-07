@@ -8,20 +8,17 @@
    */
   import EmptyState from '$lib/v2/components/EmptyState.svelte';
   import { MessagesSquare } from '@lucide/svelte';
+  import { pendiente } from '$lib/conversaciones/estado.js';
 
   /** @type {{ data: any }} */
   let { data } = $props();
 
   let conversaciones = $derived(data.conversaciones ?? []);
-  // Mismo criterio que el filtro de la barra lateral (ver +layout.svelte):
-  // tambien cuentan las que quedaron marcadas sin escalada porque el
-  // evaluador no pudo decidir.
-  let pendientes = $derived(
-    conversaciones.filter(
-      (/** @type {any} */ c) =>
-        (c.escalada_a_humano || c.necesita_atencion_humana) && !c.atendida
-    ).length
-  );
+  // El MISMO criterio que la barra lateral, importado y no copiado: esta
+  // pantalla tenia su propia version con un comentario que decia "mismo
+  // criterio que el filtro de la barra lateral", y el 07/09/2026 dejo de
+  // serlo -- la cabecera decia 41 y este panel, en la misma pantalla, 44.
+  let pendientes = $derived(conversaciones.filter(pendiente).length);
 </script>
 
 <section class="centro">

@@ -37,6 +37,7 @@
   import Avatar from '$lib/v2/components/Avatar.svelte';
   import { shortAge } from '$lib/v2/format.js';
   import { MessagesSquare, TriangleAlert, Search, X, Phone, User } from '@lucide/svelte';
+  import { pendiente, resuelta, enAtencion } from '$lib/conversaciones/estado.js';
 
   /** @type {{ data: any, children: import('svelte').Snippet }} */
   let { data, children } = $props();
@@ -91,31 +92,9 @@
   // conversacion sigue estando en 'caso_manual', que es mas especifico.
   const etiquetaLabel = (/** @type {string} */ e) => (e ? e.replaceAll('_', ' ') : '');
 
-  /** Pide algo de una persona, y todavia nadie del equipo escribio.
-      Dos formas de llegar aca, y la segunda es la que importa:
-
-      - Escalada de verdad: hay caso y ticket detras.
-      - Sin escalar pero marcada: el evaluador se cayo y NO se pudo decidir si
-        correspondia escalar (NO_DETERMINADO, ver
-        nucleo/seguimiento/estado_escalada.py). No se inventa una escalada
-        --seria afirmar un traspaso que no ocurrio y pausaria al bot-- pero la
-        conversacion tiene que verse igual, o el pedido del cliente se pierde
-        en silencio, que es peor. */
-  const pendiente = (/** @type {any} */ c) =>
-    (c.escalada_a_humano || c.necesita_atencion_humana) &&
-    !c.atendida &&
-    // Una conversacion cerrada no espera a nadie. Se contaban igual, y eran
-    // 28 de las 155 que la cabecera decia que estaban esperando.
-    c.estado !== 'cerrada';
-
-  /** Ya termino: se cerro, o alguien la dio por atendida a mano (el camino
-      que existia antes de que hubiera un boton de cerrar). */
-  const resuelta = (/** @type {any} */ c) => c.estado === 'cerrada' || c.atendida_manual;
-
-  /** Alguien del equipo ya escribio en el hilo y el caso sigue vivo. Es el
-      lugar donde va a vivir la asignacion real cuando exista -- hoy se deduce
-      de quien contesto, no de quien se la adjudico. */
-  const enAtencion = (/** @type {any} */ c) => c.atendida && !resuelta(c);
+  // pendiente / resuelta / enAtencion viven en $lib/conversaciones/estado.js:
+  // el indice necesita el mismo criterio y una copia ya se desincronizo
+  // una vez (la cabecera decia 41 y el panel vacio 44, el 07/09/2026).
 
   const AUTOR = { user: 'Cliente', assistant: 'Asistente', humano: 'Vos', tool: 'Herramienta' };
 
