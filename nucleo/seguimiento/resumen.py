@@ -91,14 +91,59 @@ def redactar(config, historial: list[dict]) -> str | None:
         return None
 
 
-def como_contexto(resumen: str) -> dict:
-    """El resumen, con la forma en que entra al historial del turno nuevo."""
+def hace_cuanto(horas: float) -> str:
+    """
+    'hace 20 minutos', 'ayer', 'hace 26 dias'. En palabras y no en una fecha
+    porque es lo que el modelo va a REPETIR: "el 12 de agosto" lo obliga a
+    calcular cuanto hace de eso; "hace 26 dias" ya es la respuesta.
+
+    Los tramos son gruesos a proposito. La diferencia que importa no es entre
+    18 y 22 horas, es entre "recien" y "hace semanas" -- que es lo que decide
+    si corresponde retomar el tema o preguntar de cero.
+    """
+    if horas < 1:
+        minutos = max(1, int(horas * 60))
+        return f"hace {minutos} minuto{'s' if minutos != 1 else ''}"
+    if horas < 24:
+        h = int(horas)
+        return f"hace {h} hora{'s' if h != 1 else ''}"
+    dias = int(horas / 24)
+    if dias == 1:
+        return "ayer"
+    if dias < 31:
+        return f"hace {dias} dias"
+    meses = int(dias / 30)
+    return f"hace {meses} {'mes' if meses == 1 else 'meses'}"
+
+
+def como_contexto(resumen: str, horas: float | None = None) -> dict:
+    """
+    El resumen, con la forma en que entra al historial del turno nuevo.
+
+    'horas' es cuanto hace que esa conversacion se cerro, y no sobra: sin
+    ella, una de hace dos horas y una de hace un mes le llegan al modelo
+    IDENTICAS. Paso en produccion el 07/09/2026 -- ante un "Hola", el
+    asistente contesto "veo que estuvimos hablando HACE UN MOMENTO sobre un
+    problema de internet", y esa conversacion era de veintiseis dias antes.
+    El resumen que se le dio era correcto; lo unico falso fue el cuando, que
+    era justo lo unico que no se le habia dicho.
+
+    Queda con valor por defecto para no romper a quien la llame sin el dato,
+    pero ahi se dice que no consta en vez de callarlo: un modelo sin fecha
+    rellena el hueco, y rellena con "recien".
+    """
+    cuando = hace_cuanto(horas) if horas is not None else "en una fecha que no consta"
     return {"role": "system", "content":
             "Contexto de una conversacion ANTERIOR con este mismo cliente, "
-            "que se cerro por inactividad. Sirve para que no le hagas repetir "
-            "lo que ya conto:\n\n"
+            f"cerrada por inactividad {cuando.upper()}. Sirve para que no le "
+            "hagas repetir lo que ya conto:\n\n"
             f"{resumen}\n\n"
-            "OJO: esto es lo que PASO, no el estado actual de nada. Si "
+            "OJO CON DOS COSAS.\n"
+            f"1) Esa conversacion fue {cuando}. Si mencionas que ya habian "
+            "hablado, di cuando fue DE VERDAD -- nunca 'hace un momento' ni "
+            "'recien' si no lo fue. Y si paso mucho tiempo, no des por hecho "
+            "que escribe por lo mismo: preguntaselo.\n"
+            "2) Esto es lo que PASO, no el estado actual de nada. Si "
             "necesitas saber como esta su servicio ahora, vuelve a medirlo con "
             "tus herramientas -- nunca repitas una lectura de aca como si "
             "siguiera vigente."}

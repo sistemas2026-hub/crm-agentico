@@ -2031,18 +2031,34 @@ def conversacion_vencida(tenant: str, canal: str, usuario_externo: str,
             "historial": mensajes}
 
 
-def resumen_anterior(tenant: str, canal: str, usuario_externo: str) -> str | None:
-    """El resumen de la ultima conversacion CERRADA de este usuario."""
+def resumen_anterior(tenant: str, canal: str,
+                     usuario_externo: str) -> tuple[str, float] | None:
+    """
+    El resumen de la ultima conversacion CERRADA de este usuario, Y CUANTAS
+    HORAS HACE que se cerro.
+
+    Las horas no son un adorno. Este resumen entra al contexto del turno
+    nuevo (nucleo/canales/api.py), y sin fecha una conversacion de hace dos
+    horas y una de hace un mes le llegan al modelo EXACTAMENTE IGUAL. Medido
+    en produccion el 07/09/2026: ante un "Hola", el asistente contesto "veo
+    que estuvimos hablando HACE UN MOMENTO sobre un problema de internet" --
+    la conversacion era del 12/08, veintiseis dias antes. El resumen era
+    correcto; lo unico falso era el cuando, que es lo unico que no se le
+    habia dicho.
+    """
     try:
         with sesion(tenant) as (cur, org):
             cur.execute(
-                """select resumen from asistente.conversations
+                """select resumen,
+                          extract(epoch from (now() - actualizado_en)) / 3600
+                            as horas
+                     from asistente.conversations
                    where organization_id = %s and canal = %s and usuario_externo = %s
                      and estado = 'cerrada' and resumen is not null
                    order by actualizado_en desc limit 1""",
                 (org, canal, usuario_externo))
             fila = cur.fetchone()
-            return fila["resumen"] if fila else None
+            return (fila["resumen"], float(fila["horas"] or 0)) if fila else None
     except Exception as e:
         print(f"[resumen] no se pudo leer el anterior: {type(e).__name__}: {e}")
         return None

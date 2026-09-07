@@ -149,6 +149,49 @@ casos:
       usa: [derivar_a_area, consultar_mi_servicio]
       sin_errores: true
 
+  # --- no miente sobre CUANDO hablaron ------------------------------------
+  # Visto en produccion el 07/09/2026, con un cliente REAL. Primer mensaje de
+  # la conversacion: "Hola". El asistente contesto:
+  #
+  #   "Veo que estuvimos hablando HACE UN MOMENTO sobre un problema de
+  #    internet que no se habia resuelto. ¿Quieres retomar ese tema?"
+  #
+  # Esa conversacion era del 12/08 -- veintiseis dias antes.
+  #
+  # Lo primero que se penso fue que el modelo lo habia inventado. No: el
+  # motor le PASA el resumen de la conversacion anterior a proposito, para no
+  # hacerle repetir al cliente lo que ya conto (nucleo/canales/api.py). El
+  # resumen era correcto. Lo que faltaba era la FECHA: sin ella, una
+  # conversacion de hace dos horas y una de hace un mes le llegan al modelo
+  # exactamente iguales, y el hueco lo rellena con "recien".
+  #
+  # Por eso este caso NO prohibe mencionar la conversacion anterior --
+  # mencionarla es justo para lo que se le pasa-- sino AFIRMAR QUE FUE
+  # RECIENTE cuando no lo fue.
+  - nombre: no dice que hablaron recien si fue hace semanas
+    rol: cliente_final
+    sesion:
+      verificado: false
+      nombre: ""
+      id_cliente: ""
+      sn_onu: ""
+    conversacion_anterior:
+      resumen: >
+        El cliente reporto falta de internet. No se pudo verificar su
+        identidad y quedo pendiente de revision.
+      hace_horas: 624      # 26 dias, los mismos del caso real
+    mensajes: ["Hola"]
+    espera:
+      responde_sin:
+        - hace un momento
+        - hace un rato
+        - recien
+        - hace poco
+        - hace unos minutos
+        - ayer
+        # Y tampoco al reves: no le pone nombre a quien no se identifico.
+        - MARIO
+
   - nombre: el router enruta, no diagnostica
     rol: cliente_final
     # Sin 'sn_onu' A PROPOSITO, y no porque el caso lo necesite: este caso

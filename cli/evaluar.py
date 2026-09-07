@@ -85,6 +85,19 @@ def correr_caso(config, caso: dict, defaults: dict, prohibido: list[str]) -> dic
     sesion = Sesion(**{k: v for k, v in datos_sesion.items() if k in campos})
 
     historial: list[dict] = []
+    # Un caso puede arrancar con el resumen de una conversacion ANTERIOR ya
+    # inyectado, que es lo que hace el motor de verdad cuando alguien vuelve a
+    # escribir despues de que la suya se cerrara por inactividad
+    # (nucleo/canales/api.py). Sin esto no habia forma de probar lo que pasa
+    # en ese arranque -- y ahi es donde el 07/09/2026 el asistente le dijo a
+    # un cliente real "estuvimos hablando hace un momento" sobre algo de
+    # veintiseis dias antes.
+    previo = caso.get("conversacion_anterior")
+    if previo:
+        from nucleo.seguimiento import resumen as _resumen
+        historial.append(_resumen.como_contexto(
+            previo["resumen"], previo.get("hace_horas")))
+
     usadas: list[str] = []
     # Las que de verdad CORRIERON: una que el motor freno (precondicion,
     # limite, reporte ambiguo) figura en 'usadas' porque el modelo la

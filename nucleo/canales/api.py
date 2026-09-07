@@ -672,7 +672,9 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     if nueva and not estado["historial"]:
         anterior = persistencia.resumen_anterior(tenant, canal, id_sesion)
         if anterior:
-            estado["historial"].append(resumen.como_contexto(anterior))
+            texto_previo, horas_previo = anterior
+            estado["historial"].append(
+                resumen.como_contexto(texto_previo, horas_previo))
 
     # --- si la conversacion ya se derivo a otra area, seguir ahi -------------
     # Solo aplica cuando el rol que pide el LLAMADOR ya es cliente_final (para
