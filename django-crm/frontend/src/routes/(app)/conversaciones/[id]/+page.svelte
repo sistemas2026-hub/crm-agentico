@@ -772,6 +772,50 @@
 
   /** El hilo con separadores de dia intercalados: un chat largo sin ellos
       obliga a pasar el mouse por cada burbuja para ubicarse en el tiempo. */
+  // --- que el hilo se vea por donde importa ---------------------------------
+  // NO habia auto-scroll en toda la pantalla. Medido el 07/09/2026 sobre una
+  // conversacion real: al enviar, la burbuja se agrega en 150 ms --el push
+  // optimista siempre funciono-- pero queda 616 px POR DEBAJO del borde
+  // visible, con el hilo en scrollTop 0. El mensaje esta ahi y no se ve, que
+  // desde el otro lado es indistinguible de que no se haya enviado.
+  //
+  // Un chat se abre por el final, no por el principio: lo ultimo que se dijo
+  // es lo que hace falta para contestar.
+  /** @type {HTMLElement | undefined} */
+  let hiloEl = $state();
+
+  const alFinal = (suave = false) => {
+    if (!hiloEl) return;
+    hiloEl.scrollTo({ top: hiloEl.scrollHeight, behavior: suave ? 'smooth' : 'auto' });
+  };
+
+  /** Si quien mira ya estaba abajo. Con un margen de 120 px porque nadie deja
+      el scroll exactamente al final, y porque una burbuja a medio entrar
+      cuenta como "estaba mirando el final". */
+  const estabaAlFinal = () =>
+    !hiloEl || hiloEl.scrollHeight - hiloEl.clientHeight - hiloEl.scrollTop < 120;
+
+  // Al abrir la conversacion, y en cada cambio del hilo.
+  //
+  // La condicion NO es "siempre": si alguien subio a leer lo que paso hace
+  // dos semanas y entra un mensaje nuevo, arrastrarlo al fondo le quita de
+  // la vista justo lo que estaba leyendo. Solo se sigue al que ya estaba
+  // mirando el final. Cuando uno MISMO envia se fuerza aparte (ver enviar()):
+  // ahi la intencion es evidente.
+  let ultimoVisto = $state(0);
+  $effect(() => {
+    const n = mensajes.length;
+    if (n === ultimoVisto) return;
+    const primeraVez = ultimoVisto === 0;
+    const seguir = primeraVez || estabaAlFinal();
+    ultimoVisto = n;
+    if (seguir) {
+      // Un tick despues: el efecto corre antes de que el DOM tenga la burbuja
+      // nueva, asi que scrollHeight todavia seria el de antes.
+      requestAnimationFrame(() => alFinal(!primeraVez));
+    }
+  });
+
   let hilo = $derived.by(() => {
     const salida = [];
     let dia = null;
@@ -880,6 +924,11 @@
         /** @type {string|null} */ sinEntregar: null
       };
       mensajes.push(burbuja);
+      // Forzado, no condicional: el efecto de arriba solo sigue al que ya
+      // estaba mirando el final, y quien acaba de apretar Enviar quiere ver
+      // lo que envio aunque hubiera subido a releer algo.
+      ultimoVisto = mensajes.length;
+      requestAnimationFrame(() => alFinal(true));
       try {
         const resp = await fetch(`/api/conversaciones/${conversacion.id}/humano`, {
           method: 'POST',
@@ -906,6 +955,8 @@
     }
 
     mensajes.push({ rol: 'user', contenido: texto, creado_en: new Date().toISOString() });
+    ultimoVisto = mensajes.length;
+    requestAnimationFrame(() => alFinal(true));
     try {
       const resp = await fetch(`/api/conversaciones/${conversacion.id}`, {
         method: 'POST',
@@ -1116,7 +1167,7 @@
     </dl>
   {/if}
 
-  <div class="hilo">
+  <div class="hilo" bind:this={hiloEl}>
     <div class="chat-mensajes">
       {#each hilo as item (item.clave)}
         {#if item.tipo === 'dia'}
