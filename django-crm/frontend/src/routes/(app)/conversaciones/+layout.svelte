@@ -125,7 +125,8 @@
       esta ADEMAS por atender, o en atencion, o resuelta. Por eso es un filtro
       que se cruza con la pestaña, y no una quinta pestaña. */
   let soloEscaladas = $state(false);
-  /** 'recomendado' | 'espera' | 'reciente' */
+  /** Ver ORDENES y ORDEN_POR_PESTANA. Arranca con el de 'Por atender', que es
+      la pestaña con la que abre la bandeja. */
   let orden = $state('recomendado');
 
   let pendientes = $derived(conversaciones.filter(pendiente).length);
@@ -149,6 +150,22 @@
     new Date(c.escalada_en ?? c.actualizado_en).getTime();
 
   const HORA = 3600 * 1000;
+
+  // Cada cuanto se recalcula "activa". El sondeo de la lista ya corre cada 8s
+  // e invalida el load, asi que la posicion se reordena sola; esto es solo
+  // para que el punto se APAGUE sin depender de que llegue algo nuevo.
+  let ahora = $state(Date.now());
+  $effect(() => {
+    const i = setInterval(() => (ahora = Date.now()), 20000);
+    return () => clearInterval(i);
+  });
+
+  /** Se movio en los ultimos minutos. Cinco y no uno: con uno el punto
+      parpadea y se pierde; con quince deja de significar "ahora". */
+  const MINUTOS_ACTIVA = 5;
+  const estaActiva = (/** @type {any} */ c) =>
+    !!c.ultimo_mensaje_en &&
+    ahora - new Date(c.ultimo_mensaje_en).getTime() < MINUTOS_ACTIVA * 60 * 1000;
 
   /** Horas que lleva esperando. 0 si no espera a nadie. */
   const horasEsperando = (/** @type {any} */ c) =>
@@ -198,16 +215,57 @@
   }
 
   const ORDENES = [
+    { id: 'actividad', label: 'Actividad reciente' },
     { id: 'recomendado', label: 'Recomendado' },
     { id: 'espera', label: 'Mayor espera' },
-    { id: 'reciente', label: 'Más reciente' }
+    { id: 'creacion', label: 'Más reciente creación' }
   ];
+
+  // Cada pestaña arranca con el orden que le corresponde POR LO QUE ES.
+  //
+  //   Por atender   decide a quien atender primero -> prioridad
+  //   En atencion   es trabajo en curso            -> lo ultimo que se movio
+  //   Resueltas     es un archivo                  -> lo ultimo cerrado
+  //   Todas         es "que esta pasando ahora"    -> actividad
+  //
+  // Todas ordenaba por prioridad, y eso la hacia inutil para vigilar: un
+  // mensaje que acababa de entrar quedaba en la posicion 40 de 169, detras de
+  // las 39 que esperan a alguien. Medido el 07/09/2026 con un mensaje real.
+  const ORDEN_POR_PESTANA = {
+    'por-atender': 'recomendado',
+    'en-atencion': 'actividad',
+    resueltas: 'creacion',
+    todas: 'actividad'
+  };
+
+  /** Cuando se cambia de pestaña, el orden vuelve al que le toca -- salvo que
+      la persona haya elegido uno a mano, que manda hasta que se cambie de
+      pestaña otra vez. */
+  let ordenElegido = $state(false);
+  function irA(/** @type {string} */ id) {
+    filtro = id;
+    ordenElegido = false;
+    orden = ORDEN_POR_PESTANA[id] ?? 'actividad';
+  }
+
+  /** La hora del ULTIMO MENSAJE, de quien sea -- cliente, asistente o
+      colaborador. No 'actualizado_en': esa la mueve cualquier cosa que toque
+      la fila, incluido cerrarla, y una conversacion cerrada hoy con su ultimo
+      mensaje de hace 26 dias quedaba arriba de una con charla de verdad ayer. */
+  const actividad = (/** @type {any} */ c) =>
+    new Date(c.ultimo_mensaje_en ?? c.actualizado_en).getTime();
 
   function ordenar(/** @type {any[]} */ lista) {
     const recientes = (/** @type {any} */ a, /** @type {any} */ b) =>
       new Date(b.actualizado_en).getTime() - new Date(a.actualizado_en).getTime();
 
-    if (orden === 'reciente') return [...lista].sort(recientes);
+    // Actividad: SIN bloque de prioridad delante. Es lo que hace que un
+    // mensaje que acaba de entrar aparezca primero aunque el bot lo este
+    // llevando solo -- que es justo para lo que sirve esta vista.
+    if (orden === 'actividad') {
+      return [...lista].sort((a, b) => actividad(b) - actividad(a));
+    }
+    if (orden === 'creacion') return [...lista].sort(recientes);
 
     return [...lista].sort((a, b) => {
       // En los dos ordenes que priorizan, lo que espera va primero: una
@@ -324,7 +382,7 @@
             type="button"
             class="tab"
             aria-current={filtro === t.id ? 'true' : undefined}
-            onclick={() => (filtro = t.id)}
+            onclick={() => irA(t.id)}
           >
             {t.label}
             <span class="tab-n v2-num" class:urge={t.urge && t.n > 0}>{t.n}</span>
@@ -362,7 +420,11 @@
       <div class="controles">
         <label class="orden">
           <span class="orden-rotulo">Ordenar por</span>
-          <select bind:value={orden} aria-label="Ordenar la lista">
+          <select
+            bind:value={orden}
+            onchange={() => (ordenElegido = true)}
+            aria-label="Ordenar la lista"
+          >
             {#each ORDENES as o (o.id)}
               <option value={o.id}>{o.label}</option>
             {/each}
@@ -560,6 +622,15 @@
                     <Pill tone="ink">{etiquetaLabel(c.caso_manual)}</Pill>
                   {/if}
                 </div>
+              {/if}
+
+              <!-- Actividad viva. Un punto y una palabra, no una pildora mas:
+                   se enciende con cualquier mensaje de los ultimos minutos
+                   --cliente, asistente o colaborador-- y se apaga solo. La
+                   conversacion CONSERVA su posicion segun la hora de esa
+                   actividad; el punto solo dice "esto se movio recien". -->
+              {#if estaActiva(c)}
+                <span class="activa">Activa</span>
               {/if}
 
               <!-- La excepcion va sola, en su propio renglon y al final: el
@@ -896,6 +967,26 @@
 
   /* El cliente volvio a escribir mientras espera. Va al lado de "Sin
      atender" y no la reemplaza: son dos hechos distintos. */
+  /* Actividad viva: verde y discreto. No pide nada -- dice que algo se movio
+     recien, que es informacion, no trabajo. Por eso no compite con el rojo de
+     "volvio a escribir" ni con el tiempo de espera. */
+  .activa {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 10.5px;
+    font-weight: 600;
+    color: var(--v2-moss);
+  }
+  .activa::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--v2-moss);
+    flex: none;
+  }
+
   /* Renglon propio. Lleva punto rojo porque es la unica excepcion de la fila
      que pide mirar: no se apoya SOLO en el color -- tambien lo dice el
      texto-- pero el punto es lo que hace que se encuentre de reojo. */

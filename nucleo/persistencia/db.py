@@ -307,6 +307,14 @@ def ultima_actividad(tenant: str, canal: str | None = None) -> list[dict]:
                   c.escalada_en, c.resumen,
                   ultimo.contenido as ultimo_mensaje,
                   ultimo.rol       as ultimo_rol,
+                  -- CUANDO fue ese ultimo mensaje. Distinto de
+                  -- 'actualizado_en': esa columna la mueve cualquier cosa que
+                  -- toque la fila, incluido cerrar la conversacion. Medido:
+                  -- una cerrada hoy por inactividad quedaba con
+                  -- actualizado_en de hoy y su ultimo mensaje de hace 26
+                  -- dias, asi que ordenar "por actividad" la ponia arriba de
+                  -- una con conversacion de verdad ayer.
+                  ultimo.creado_en as ultimo_mensaje_en,
                   coalesce(insiste.n, 0) as mensajes_tras_escalar,
                   -- Aparte de 'atendida' (que lo mezcla con "un humano
                   -- escribio"): la bandeja necesita distinguir "alguien esta
@@ -324,7 +332,7 @@ def ultima_actividad(tenant: str, canal: str | None = None) -> list[dict]:
     # el asistente le acusa recibo a cada uno mientras espera.
     desde = """from asistente.conversations c
                left join lateral (
-                   select contenido, rol
+                   select contenido, rol, creado_en
                      from asistente.messages
                     where conversation_id = c.id and contenido is not null
                       -- Una nota interna no es lo ultimo que se hablo con el
