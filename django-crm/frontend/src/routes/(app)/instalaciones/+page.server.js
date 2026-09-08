@@ -9,15 +9,15 @@ import { fail } from '@sveltejs/kit';
 import { decidir, leerBandeja } from '$lib/server/v2/solicitudes.js';
 
 /** @type {import('./$types').PageServerLoad} */
-export async function load({ fetch, url }) {
+export async function load({ cookies, url }) {
   const estado = url.searchParams.get('estado') ?? '';
-  const { solicitudes, error } = await leerBandeja(fetch, estado);
+  const { solicitudes, error } = await leerBandeja(cookies, estado);
   return { solicitudes, error, estado };
 }
 
 /** @type {import('./$types').Actions} */
 export const actions = {
-  async decidir({ request, fetch }) {
+  async decidir({ request, cookies }) {
     const form = await request.formData();
     const id = form.get('id')?.toString();
     const aprueba = form.get('aprueba')?.toString() === 'true';
@@ -28,7 +28,7 @@ export const actions = {
       return fail(400, { error: 'Para rechazar hace falta anotar el motivo.', id });
     }
     try {
-      const r = await decidir(fetch, id, aprueba, nota);
+      const r = await decidir(cookies, id, aprueba, nota);
       // El fallo de la reasignación NO invalida la decisión: se muestra para
       // que alguien lo reintente, pero la solicitud ya quedó resuelta.
       return { decidido: true, id, estado: r.estado, fallo: r.fallo || '' };

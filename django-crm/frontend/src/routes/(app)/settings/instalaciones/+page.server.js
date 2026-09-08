@@ -11,14 +11,14 @@ import { guardarAjustes, leerAjustes, leerTecnicos } from '$lib/server/v2/solici
 const SOLO_ADMIN = 'Solo un administrador puede cambiar esto.';
 
 /** @type {import('./$types').PageServerLoad} */
-export async function load({ fetch, locals }) {
-  const [ajustes, tecnicos] = await Promise.all([leerAjustes(fetch), leerTecnicos(fetch)]);
+export async function load({ cookies, locals }) {
+  const [ajustes, tecnicos] = await Promise.all([leerAjustes(cookies), leerTecnicos(cookies)]);
   return { ajustes, tecnicos, can_edit: locals.profile?.role === 'ADMIN' };
 }
 
 /** @type {import('./$types').Actions} */
 export const actions = {
-  async guardar({ request, fetch, locals }) {
+  async guardar({ request, cookies, locals }) {
     if (locals.profile?.role !== 'ADMIN') return fail(403, { error: SOLO_ADMIN });
 
     const form = await request.formData();
@@ -32,7 +32,7 @@ export const actions = {
       return fail(400, { error: 'Hay que elegir los dos equipos.' });
     }
     try {
-      await guardarAjustes(fetch, valores);
+      await guardarAjustes(cookies, valores);
     } catch (/** @type {any} */ err) {
       return fail(400, { error: err?.message || 'No se pudo guardar.' });
     }
