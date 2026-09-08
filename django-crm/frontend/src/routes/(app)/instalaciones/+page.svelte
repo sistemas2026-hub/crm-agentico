@@ -99,8 +99,8 @@
         {:else}
           <span class="chip dudoso"><AlertTriangle size={14} /> Sin coordenadas</span>
         {/if}
-        {#if s.pdf}
-          <a class="chip" href={s.pdf} target="_blank" rel="noopener">
+        {#if s.tiene_pdf}
+          <a class="chip" href="/api/solicitudes/{s.id}/expediente" target="_blank" rel="noopener">
             <FileText size={14} /> Expediente
           </a>
         {/if}

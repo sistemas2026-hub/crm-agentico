@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import os
 
+from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import status as http
 from rest_framework.permissions import IsAuthenticated
@@ -155,9 +156,11 @@ class BandejaView(APIView):
             "plan": s.plan_interesado,
             "gps": ({"lat": s.gps_lat, "lng": s.gps_lng,
                      "precision_m": s.gps_precision_m} if s.tiene_gps else None),
-            # El PDF con la cedula, el recibo y la firma. Es lo que mira quien
-            # decide, asi que la bandeja lo enlaza en vez de esconderlo.
-            "pdf": (s.pdf.url if s.pdf else None),
+            # Si HAY expediente, no donde esta. La ruta cruda de /media/ no
+            # se entrega: ese PDF trae documento de identidad, recibo y firma,
+            # y se sirve autenticado (ver ExpedienteView). La pantalla arma el
+            # enlace con el id, que ya viene arriba.
+            "tiene_pdf": bool(s.pdf),
             "enviada_en": s.enviada_en.isoformat() if s.enviada_en else None,
             "ticket_wisphub": s.ticket_wisphub,
             "fallo_integracion": s.fallo_integracion,
@@ -221,3 +224,60 @@ class DecidirView(APIView):
         return Response({"estado": s.estado,
                          "revisada_en": s.revisada_en.isoformat(),
                          "fallo": s.fallo_integracion or ""})
+
+
+class ExpedienteView(APIView):
+    """El PDF del expediente, servido con la misma llave que la bandeja.
+
+    NO se sirve por /media/. Ese PDF trae la foto del documento de identidad,
+    el recibo de servicios con la direccion, la foto del solicitante, la firma
+    y las coordenadas -- "lo mas sensible que pasa por el sistema", dice el
+    propio modulo que lo arma. Publicarlo bajo una ruta estatica lo deja
+    legible para cualquiera que tenga el link, y ese link viaja en la respuesta
+    de la bandeja, queda en el historial del navegador y en los logs del proxy.
+
+    Encontrado el 08/09/2026: el enlace del expediente daba 404 porque
+    /media/ solo se sirve con DEBUG. El arreglo obvio -- activarlo en
+    produccion-- habria convertido una funcionalidad rota en una fuga de
+    documentos de identidad.
+
+    El filtro por 'org' no es decorativo: sin el, un id de solicitud de otra
+    empresa se leeria igual. Es la misma frontera que ya aplica BandejaView.
+    """
+
+    permission_classes = (IsAuthenticated, HasOrgContext)
+
+    def get(self, request, solicitud_id: str):
+        org = request.profile.org
+        s = SolicitudServicio.objects.filter(org=org, id=solicitud_id).first()
+        if s is None:
+            return Response({"error": "No existe esa solicitud."},
+                            status=http.HTTP_404_NOT_FOUND)
+        if not s.pdf:
+            # Distinto de "no existe la solicitud": el expediente no se armo
+            # (ver 'fallo_integracion'). Decirlo con precision evita que
+            # alguien busque el archivo donde nunca estuvo.
+            return Response(
+                {"error": "Esta solicitud no tiene expediente generado.",
+                 "fallo": s.fallo_integracion or ""},
+                status=http.HTTP_404_NOT_FOUND)
+
+        try:
+            s.pdf.open("rb")
+            contenido = s.pdf.read()
+        except Exception as e:                       # noqa: BLE001
+            return Response({"error": f"No se pudo leer el expediente: {e}"},
+                            status=http.HTTP_500_INTERNAL_SERVER_ERROR)
+        finally:
+            try:
+                s.pdf.close()
+            except Exception:                        # noqa: BLE001
+                pass
+
+        respuesta = HttpResponse(contenido, content_type="application/pdf")
+        # 'inline' y no 'attachment': quien decide sobre la solicitud lo mira,
+        # no lo archiva. Descargarlo a la maquina de cada quien multiplica las
+        # copias de un documento de identidad.
+        respuesta["Content-Disposition"] = (
+            f'inline; filename="expediente-{s.id}.pdf"')
+        return respuesta

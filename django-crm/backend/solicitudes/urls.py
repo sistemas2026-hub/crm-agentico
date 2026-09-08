@@ -6,6 +6,7 @@ from solicitudes.gestion import (
     AjustesView,
     BandejaView,
     DecidirView,
+    ExpedienteView,
     TecnicosView,
 )
 from solicitudes.views import SolicitudCrearView, SolicitudPublicaView
@@ -24,4 +25,9 @@ urlpatterns = [
     path("solicitudes/tecnicos/", TecnicosView.as_view(), name="solicitud-tecnicos"),
     path("solicitudes/<uuid:solicitud_id>/decidir/", DecidirView.as_view(),
          name="solicitud-decidir"),
+    # El expediente NO va por /media/: trae documento de identidad, recibo,
+    # foto y firma. Se sirve con la misma llave que la bandeja -- ver
+    # ExpedienteView.
+    path("solicitudes/<uuid:solicitud_id>/expediente/", ExpedienteView.as_view(),
+         name="solicitud-expediente"),
 ]
