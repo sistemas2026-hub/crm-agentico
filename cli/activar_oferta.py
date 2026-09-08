@@ -84,14 +84,26 @@ def _mutar(doc: dict, archivo: dict, informe: list[str]) -> None:
     """Toca SOLO lo que necesita la oferta. Todo lo demas del documento queda
     exactamente como estaba en la base."""
 
-    # 1. Las dos herramientas nuevas.
+    # 1. Las herramientas que le faltan al catalogo.
+    #
+    # La lista NO se escribe a mano: se deduce de lo que el rol 'ventas'
+    # declara en el archivo. La version anterior tenia dos nombres fijos y por
+    # eso, al agregar las de cancelacion, el script daba acceso a herramientas
+    # que nunca habia creado -- y el validador lo rechazaba entero
+    # (08/09/2026). Deducirla evita tener que acordarse.
     existentes = {h.get("nombre") for h in doc.get("herramientas", [])}
     por_nombre = {h["nombre"]: h for h in archivo["herramientas"]}
-    for nombre in HERRAMIENTAS_NUEVAS:
+    quiere_ventas = archivo["roles"]["ventas"].get("puede_consultar") or []
+    for nombre in list(HERRAMIENTAS_NUEVAS) + [n for n in quiere_ventas
+                                               if n not in HERRAMIENTAS_NUEVAS]:
         if nombre in existentes:
-            informe.append(f"  = {nombre}: ya estaba en el catalogo, no se toca")
             continue
+        if nombre not in por_nombre:
+            raise editor.ErrorEdicion(
+                f"'{nombre}' esta en el catalogo de ventas pero no existe como "
+                f"herramienta en el archivo.")
         doc.setdefault("herramientas", []).append(por_nombre[nombre])
+        existentes.add(nombre)
         informe.append(f"  + {nombre}: se agrega al catalogo")
 
     # 2. 'ventas' suma acceso a las nuevas y a las dos que necesita para saber
