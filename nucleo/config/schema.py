@@ -561,7 +561,7 @@ class LLM(Base):
     # El modo de razonamiento del proveedor. None = no se manda nada y decide
     # el proveedor; "disabled" = se le pide que NO razone antes de contestar.
     #
-    # NO es un detalle de afinado. Medido el 08/09/2026 contra DeepSeek
+    # NO es un detalle de afinado. Medido el 07/09/2026 contra DeepSeek
     # v4-flash con el prompt real de soporte tecnico:
     #
     #     por defecto        4.26s   1.071 tokens de razonamiento
@@ -2212,7 +2212,7 @@ class TenantConfig(Base):
         # herramienta para pasarlo a quien si puede, y lo unico que le queda
         # es disculparse.
         #
-        # Visto en produccion el 08/09/2026, con un cliente real. Su
+        # Visto en produccion el 07/09/2026, con un cliente real. Su
         # conversacion quedo en 'ventas' --que no tiene ni herramientas de
         # diagnostico ni derivacion-- y ante una falla de television el
         # asistente contesto: "la documentacion que tengo disponible es para

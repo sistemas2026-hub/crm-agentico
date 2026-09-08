@@ -1,32 +1,41 @@
 # -*- coding: utf-8 -*-
 """
-Los tres numeros de un turno, por dia y por canal.
+Los numeros de un turno, por dia y por canal -- separados a proposito.
 
     py -3.13 cli/medir_turnos.py rapilink
-    py -3.13 cli/medir_turnos.py rapilink --dias 7
+    py -3.13 cli/medir_turnos.py rapilink --dias 14
 
 POR QUE EXISTE
 --------------
-El 08/09/2026 se desactivo el razonamiento del modelo ('thinking'), que en
-banco de pruebas daba 4.26s contra 1.77s por llamada, y en los 51 casos
+El 07/09/2026 se desactivo el razonamiento del modelo ('thinking'), que en
+banco de pruebas daba 4.26s contra 1.77s por llamada, y que en los 51 casos
 dorados no costo calidad (50/51, y el unico fallo era un timeout externo que
 ya fallaba antes).
 
 Un banco de pruebas y 51 casos NO son produccion. Lo que decide si el cambio
-sirve son tres numeros seguidos varios dias, y separados -- porque pueden
-moverse en direcciones opuestas y un promedio los taparia:
+sirve son varios dias de trafico real, mirando cuatro cosas a la vez:
 
-    cuanto espera el cliente
+    cuanto tarda el MODELO       (no el turno entero: ver abajo)
     cuanto cuesta el turno
-    con que frecuencia termina mal (escalado o error de herramienta)
+    con que frecuencia se escala
+    con que frecuencia falla una herramienta
 
-Si el tercero sube mientras los dos primeros bajan, el cambio esta pagando
-rapidez con calidad y hay que revertirlo. Ese es justamente el fallo que un
-promedio de latencia no muestra.
+Los ultimos dos pueden SUBIR mientras los primeros bajan, y eso significa que
+se compro velocidad a costa de resolver. Un solo numero promedio lo taparia.
 
-NO CALCULA NADA QUE NO ESTE MEDIDO. 'latencia_ms', 'llamadas_modelo' y los
-tokens por mensaje existen desde el 08/09/2026; antes de esa fecha las
-columnas estan vacias y las filas se omiten en vez de contarse como cero.
+POR QUE SE SEPARA EL TIEMPO DEL MODELO DEL TOTAL
+------------------------------------------------
+Un mal dia de la API del ISP convierte un buen dia del modelo en un p95 feo.
+Sin separarlos, un cambio en el modelo parece no haber servido cuando lo que
+empeoro fue un tercero. 'modelo' es el total menos lo que el turno paso
+esperando a un sistema externo: es una resta y no una medida directa, pero es
+la unica forma de ver el efecto de un cambio del modelo por separado.
+
+NO INVENTA DATOS
+----------------
+'latencia_ms', 'llamadas_modelo' y los tokens por mensaje existen desde la
+noche del 07/09/2026. Antes de eso las columnas estan vacias, y salen con
+guion -- un 0 se leeria como "salio gratis", que es un dato falso.
 """
 
 from __future__ import annotations
@@ -45,65 +54,129 @@ load_dotenv(RAIZ / ".env", override=False)
 
 from nucleo.persistencia.db import sesion                        # noqa: E402
 
+# La zona de la EMPRESA, no UTC. La base guarda UTC y esta bien que lo haga,
+# pero un informe operativo que corta el dia a la medianoche de Londres agrupa
+# la tarde de un ISP colombiano con la mañana del dia siguiente. Y dentro de un
+# mes nadie recuerda con que frontera se agrupo: por eso va en el titulo.
+ZONA = "America/Bogota"
+
+# Y se convierte con UN SOLO 'at time zone', nunca con dos. 'creado_en' ya
+# es timestamptz: escribir "at time zone 'UTC' at time zone 'America/Bogota'"
+# primero le quita la zona y despues lee ese valor sin zona COMO SI fuera
+# hora de Bogota -- o sea SUMA cinco horas en vez de restarlas. Se escribio
+# asi al agregar esta agrupacion, y el informe puso en el 08/09 turnos de
+# las 6 de la tarde del 07/09. No da error: solo mueve un dia entero de
+# trabajo al dia siguiente, que es justo lo que este agrupamiento existe
+# para evitar.
+
+# Con pocos turnos el p95 es, literalmente, el turno mas lento. Se muestra
+# igual --esconderlo seria peor-- pero marcado, para que nadie saque una
+# conclusion de una muestra que no la sostiene.
+MINIMO_PARA_P95 = 20
+
+
+def _velocidad(cur, org, dias):
+    """Un renglon por dia y canal: cuanto tardo, en que, y cuanto costo."""
+    cur.execute(
+        """with turnos as (
+             select m.id, m.conversation_id cid, m.creado_en, cv.canal,
+                    m.latencia_ms, m.llamadas_modelo, m.costo_usd,
+                    m.tokens_entrada,
+                    lag(m.creado_en) over (partition by m.conversation_id
+                                           order by m.creado_en) previo
+               from asistente.messages m
+               join asistente.conversations cv on cv.id = m.conversation_id
+              where m.organization_id = %s and m.rol = 'assistant'
+                and m.latencia_ms is not null
+                and m.creado_en > now() - make_interval(days => %s))
+           select (t.creado_en at time zone %s)::date d,
+                  t.canal, count(*) n,
+                  percentile_cont(0.5) within group (order by t.latencia_ms) p50,
+                  percentile_cont(0.95) within group (order by t.latencia_ms) p95,
+                  avg(t.llamadas_modelo) llamadas,
+                  sum(t.costo_usd) costo,
+                  avg(t.tokens_entrada) entrada,
+                  avg(coalesce(h.ms, 0)) tools_ms
+             from turnos t
+             -- Las herramientas se atribuyen al turno por VENTANA DE TIEMPO,
+             -- entre esta respuesta y la anterior de la misma conversacion:
+             -- tool_calls cuelga de la conversacion, no del mensaje.
+             left join lateral (
+                  select sum(tc.duracion_ms) ms from asistente.tool_calls tc
+                   where tc.conversation_id = t.cid
+                     and tc.creado_en > coalesce(
+                           t.previo, t.creado_en - interval '5 minutes')
+                     and tc.creado_en <= t.creado_en + interval '30 seconds'
+             ) h on true
+            group by 1, 2 order by 1 desc, 3 desc""",
+        (org, dias, ZONA))
+    return cur.fetchall()
+
+
+def _calidad(cur, org, dias):
+    """Por dia: cuanto se escalo y cuantas herramientas fallaron."""
+    cur.execute(
+        """select (cv.creado_en at time zone %s)::date d,
+                  count(*) conv,
+                  count(*) filter (where cv.escalada_a_humano) escaladas
+             from asistente.conversations cv
+            where cv.organization_id = %s
+              and cv.creado_en > now() - make_interval(days => %s)
+            group by 1""", (ZONA, org, dias))
+    conv = {f["d"]: f for f in cur.fetchall()}
+
+    cur.execute(
+        """select (t.creado_en at time zone %s)::date d,
+                  count(*) n,
+                  -- 'es_bloqueo' NO cuenta como error: es el codigo frenando
+                  -- una accion, o sea la proteccion funcionando.
+                  count(*) filter (where not t.exito and not t.es_bloqueo) fallidas
+             from asistente.tool_calls t
+            where t.organization_id = %s
+              and t.creado_en > now() - make_interval(days => %s)
+            group by 1""", (ZONA, org, dias))
+    return conv, {f["d"]: f for f in cur.fetchall()}
+
 
 def informe(tenant: str, dias: int = 7) -> None:
     with sesion(tenant) as (cur, org):
-        cur.execute(
-            """select m.creado_en::date d, cv.canal,
-                      count(*) turnos,
-                      percentile_cont(0.5) within group (order by m.latencia_ms) p50,
-                      percentile_cont(0.95) within group (order by m.latencia_ms) p95,
-                      avg(m.llamadas_modelo) llamadas,
-                      sum(m.costo_usd) costo,
-                      avg(m.tokens_entrada) entrada
-                 from asistente.messages m
-                 join asistente.conversations cv on cv.id = m.conversation_id
-                where m.organization_id = %s and m.rol = 'assistant'
-                  and m.latencia_ms is not null
-                  and m.creado_en > now() - make_interval(days => %s)
-                group by 1, 2 order by 1 desc, 3 desc""",
-            (org, dias))
-        filas = cur.fetchall()
-
+        filas = _velocidad(cur, org, dias)
         if not filas:
             print("Todavia no hay turnos medidos. Las columnas se llenan desde\n"
-                  "el 08/09/2026 -- hace falta trafico posterior a esa fecha.")
+                  "la noche del 07/09/2026 -- hace falta trafico posterior.")
             return
 
-        print(f"  {'dia':11s} {'canal':18s} {'turnos':>6s} {'mediana':>8s} "
-              f"{'p95':>7s} {'llamadas':>9s} {'entrada':>9s} {'costo':>9s}")
+        print(f"  {'dia':7s} {'canal':18s} {'n':>4s} {'total':>7s} {'p95':>8s} "
+              f"{'modelo':>8s} {'tools':>7s} {'llam':>5s} {'entrada':>8s} "
+              f"{'costo':>9s}")
         for f in filas:
-            # Un turno anterior al 08/09 tiene latencia pero no tokens: se
-            # muestra con guion en vez de un 0 que se leeria como "salio
-            # gratis".
-            llam = f"{f['llamadas']:9.1f}" if f['llamadas'] is not None else f"{'-':>9s}"
-            ent = f"{f['entrada']:9,.0f}" if f['entrada'] is not None else f"{'-':>9s}"
-            print(f"  {f['d']:%d/%m}       {f['canal']:18s} {f['turnos']:6d} "
-                  f"{f['p50']/1000:7.1f}s {f['p95']/1000:6.1f}s "
+            llam = f"{f['llamadas']:5.1f}" if f["llamadas"] is not None else f"{'-':>5s}"
+            ent = f"{f['entrada']:8,.0f}" if f["entrada"] is not None else f"{'-':>8s}"
+            tools = float(f["tools_ms"] or 0) / 1000
+            modelo = max(0.0, f["p50"] / 1000 - tools)
+            p95 = (f"{f['p95']/1000:7.1f}s" if f["n"] >= MINIMO_PARA_P95
+                   else f"{f['p95']/1000:6.1f}s*")
+            print(f"  {f['d']:%d/%m}   {f['canal']:18s} {f['n']:4d} "
+                  f"{f['p50']/1000:6.1f}s {p95} {modelo:7.1f}s {tools:6.1f}s "
                   f"{llam} {ent} ${float(f['costo'] or 0):8.4f}")
+        if any(f["n"] < MINIMO_PARA_P95 for f in filas):
+            print(f"\n  (*) menos de {MINIMO_PARA_P95} turnos: ese p95 es casi "
+                  f"'el turno mas lento', no una tendencia.")
 
-        # El tercer numero, y el que decide si la rapidez salio cara.
-        cur.execute(
-            """select cv.canal,
-                      count(*) conv,
-                      count(*) filter (where cv.escalada_a_humano) escaladas,
-                      (select count(*) from asistente.tool_calls t
-                        where t.organization_id = %s and not t.exito
-                          and not t.es_bloqueo
-                          and t.creado_en > now() - make_interval(days => %s)) errores
-                 from asistente.conversations cv
-                where cv.organization_id = %s
-                  and cv.creado_en > now() - make_interval(days => %s)
-                group by 1 order by 2 desc""",
-            (org, dias, org, dias))
-        print(f"\n  {'canal':18s} {'conversaciones':>14s} {'escaladas':>10s} "
-              f"{'% escalado':>11s}")
-        for f in cur.fetchall():
-            pct = 100.0 * f["escaladas"] / max(f["conv"], 1)
-            print(f"  {f['canal']:18s} {f['conv']:14d} {f['escaladas']:10d} "
-                  f"{pct:10.1f}%")
-        print("\n  Si el % escalado o los errores SUBEN mientras la latencia baja,\n"
-              "  la rapidez se esta pagando con calidad.")
+        conv, herram = _calidad(cur, org, dias)
+        print(f"\n  {'dia':7s} {'conversaciones':>14s} {'% escalado':>11s} "
+              f"{'llamadas':>9s} {'% con error':>12s}")
+        for d in sorted(set(conv) | set(herram), reverse=True):
+            c, h = conv.get(d), herram.get(d)
+            pe = (f"{100.0*c['escaladas']/max(c['conv'],1):10.1f}%" if c
+                  else f"{'-':>11s}")
+            nh = f"{h['n']:9d}" if h else f"{'-':>9s}"
+            pf = (f"{100.0*h['fallidas']/max(h['n'],1):11.1f}%" if h
+                  else f"{'-':>12s}")
+            print(f"  {d:%d/%m}   {(c['conv'] if c else 0):14d} {pe} {nh} {pf}")
+
+        print("\n  Si '% escalado' o '% con error' SUBEN mientras 'modelo' y el\n"
+              "  costo bajan, la rapidez se esta pagando con calidad.")
 
 
 if __name__ == "__main__":
@@ -111,5 +184,6 @@ if __name__ == "__main__":
     dias = 7
     if "--dias" in sys.argv:
         dias = int(sys.argv[sys.argv.index("--dias") + 1])
-    print(f"\nTurnos medidos de '{tenant}', ultimos {dias} dia(s)\n")
+    print(f"\nTurnos medidos de '{tenant}', ultimos {dias} dia(s). "
+          f"Dias en {ZONA}.\n")
     informe(tenant, dias)

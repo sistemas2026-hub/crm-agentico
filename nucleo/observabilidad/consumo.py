@@ -149,7 +149,7 @@ def seguir_anotando(padre):
 
     Consecuencia: 'asistente.usage_daily' subestimaba el gasto en una llamada
     al modelo POR TURNO de cliente, y el tope de gasto dejaba pasar mas de lo
-    que creia. Medido el 08/09/2026 sobre un turno real: la respuesta decia
+    que creia. Medido el 07/09/2026 sobre un turno real: la respuesta decia
     costar $0.00148 y le faltaba el evaluador.
 
     No se extendio el 'with' de abrir() hasta ahi porque son 150 lineas de

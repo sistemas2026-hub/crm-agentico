@@ -991,7 +991,7 @@ def guardar_razonamiento(tenant: str, modo: str | None) -> TenantConfig:
     'disabled' le pide al proveedor que NO razone antes de contestar; vacio
     deja su default, que hoy es razonar.
 
-    Medido contra DeepSeek v4-flash el 08/09/2026 con el prompt real: 4.26s
+    Medido contra DeepSeek v4-flash el 07/09/2026 con el prompt real: 4.26s
     con razonamiento contra 1.77s sin el, y 1.071 tokens de salida --los
     caros-- gastados en pensar antes de decir cosas como "hola".
     """

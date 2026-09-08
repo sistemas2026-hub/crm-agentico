@@ -145,7 +145,7 @@ for etiqueta, valor, esperado in [
 # Un rol que atiende clientes tiene que poder RESOLVER o poder DERIVAR. Si no
 # puede ninguna de las dos, la conversacion que caiga ahi queda encerrada.
 #
-# Paso en produccion el 08/09/2026: 'ventas' figuraba en 'areas_destino' de
+# Paso en produccion el 07/09/2026: 'ventas' figuraba en 'areas_destino' de
 # derivar_a_area --se podia derivar HACIA el-- pero no en 'roles_permitidos',
 # asi que no podia derivar DESDE el. Ante una falla de television el
 # asistente contesto "mi documentacion es de venta de servicios, no tengo

@@ -25,4 +25,4 @@ comment on column asistente.messages.llamadas_modelo is
   'Cuantas veces se hablo con el modelo para producir ESTA respuesta. Junto '
   'con tokens_entrada son las dos palancas sobre la latencia: un turno lento '
   'lo es por un prompt grande o por muchas idas al modelo, y sin este numero '
-  'no se distinguen. NULL en todo lo anterior al 08/09/2026.';
+  'no se distinguen. NULL en todo lo anterior a la noche del 07/09/2026.';

@@ -39,7 +39,15 @@ Como se nombra una migracion nueva
 ----------------------------------
     supabase/AAAAMMDDHHMM_lo_que_hace.sql        (ej. 202608251830_promesas_pago.sql)
 
-Con la fecha y hora de cuando se escribe. NO con el numero siguiente.
+Con la fecha y hora de cuando se escribe, EN HORA DE COLOMBIA. NO con el
+numero siguiente, y no con la hora del servidor.
+
+Lo de la hora local no es cosmetico: el servidor esta en UTC, y despues de
+las 7 de la tarde alla ya es el dia siguiente. Una migracion escrita a las
+8 PM tomando la fecha del servidor se llama como el dia que viene, y el dia
+que alguien busque 'que se cambio el lunes' no la encuentra. Paso con
+202609080100_medicion_por_turno.sql, escrita en realidad el 07/09 a las
+8 PM: se renombro a 202609072000.
 
 Se numeraban 01, 02, 03... y con dos personas trabajando en paralelo eso
 colisiona solo: los dos hacen 'ls', ven que la ultima es la 23, y los dos
