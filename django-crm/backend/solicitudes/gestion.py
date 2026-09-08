@@ -29,6 +29,7 @@ import os
 from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import status as http
+from rest_framework.renderers import BaseRenderer
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -226,6 +227,43 @@ class DecidirView(APIView):
                          "fallo": s.fallo_integracion or ""})
 
 
+class _RendererCrudo(BaseRenderer):
+    """Deja pasar el contenido tal cual. Existe por un 406.
+
+    DRF negocia el contenido ANTES de llamar al handler: mira el 'Accept' del
+    cliente contra 'renderer_classes', y si ninguno sirve responde 406 sin
+    ejecutar la vista. Con los renderers por defecto (JSON) un cliente que pide
+    'application/pdf' -- que es lo razonable al pedir un PDF-- se lleva un 406,
+    aunque la vista devuelva un HttpResponse que ni siquiera pasa por el
+    renderer.
+
+    Las vistas de factura de este proyecto devuelven PDF y no tienen este
+    problema solo porque sus clientes no piden ese Accept. Depender de eso es
+    depender de una convencion que nadie escribio: aca se declara, y el
+    endpoint deja de romperse segun quien lo llame (08/09/2026).
+    """
+
+    media_type = "*/*"
+    format = "crudo"
+    charset = None
+    render_style = "binary"
+
+    def render(self, data, accepted_media_type=None, renderer_context=None):
+        # El PDF sale por HttpResponse y ni pasa por aca. Lo que SI pasa son
+        # las respuestas de error de la misma vista ('no existe esa solicitud',
+        # 'no tiene expediente generado'), que son diccionarios: devolverlos
+        # crudos rompe la respuesta. Se serializan a JSON, que es lo que el
+        # llamador espera leer para saber que fallo.
+        if isinstance(data, (bytes, bytearray)):
+            return data
+        if data is None:
+            return b""
+        if isinstance(data, str):
+            return data.encode("utf-8")
+        import json
+        return json.dumps(data, ensure_ascii=False).encode("utf-8")
+
+
 class ExpedienteView(APIView):
     """El PDF del expediente, servido con la misma llave que la bandeja.
 
@@ -246,6 +284,9 @@ class ExpedienteView(APIView):
     """
 
     permission_classes = (IsAuthenticated, HasOrgContext)
+    # Ver _RendererCrudo: sin esto, pedir el PDF con Accept: application/pdf
+    # devuelve 406 antes de entrar aca.
+    renderer_classes = (_RendererCrudo,)
 
     def get(self, request, solicitud_id: str):
         org = request.profile.org

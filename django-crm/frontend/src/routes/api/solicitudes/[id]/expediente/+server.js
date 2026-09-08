@@ -25,7 +25,11 @@ export async function GET({ cookies, params, request }) {
     `${API_BASE_URL}/solicitudes/${encodeURIComponent(params.id)}/expediente/`,
     {
       method: 'GET',
-      headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/pdf' },
+      // Sin 'Accept: application/pdf': DRF negocia el contenido ANTES de
+      // ejecutar la vista y respondia 406 con ese encabezado. El backend ya
+      // declara un renderer que lo tolera (ver _RendererCrudo), y de este lado
+      // tampoco hace falta pedirlo: lo que vuelve es lo que la vista mande.
+      headers: { Authorization: `Bearer ${accessToken}` },
       signal: request.signal
     }
   );
