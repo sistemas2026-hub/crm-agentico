@@ -243,6 +243,17 @@ def _validar(tenant: str, crudo: dict) -> TenantConfig:
     except ValidationError as e:
         lineas = [f"{'.'.join(str(x) for x in err['loc'])}: {err['msg']}"
                   for err in e.errors()]
+        # Que quede rastro de que ALGUIEN intento guardar una config invalida.
+        # El rechazo ya protege --no se escribe nada-- pero sin registro no hay
+        # forma de saber si una regla se esta chocando seguido, y una regla que
+        # molesta todos los dias o esta mal puesta o senala un hueco en la
+        # interfaz que la produce.
+        #
+        # Es un print y no una fila en la base a proposito: esto corre DENTRO
+        # de la transaccion de _editar(), que va a hacer rollback. Una
+        # escritura aca se perderia con el resto.
+        print(f"[config] {tenant}: RECHAZADA una edicion invalida -- "
+              + " | ".join(lineas[:3]))
         raise ErrorEdicion(
             f"{tenant}: {len(lineas)} problema(s) de configuracion:\n  - "
             + "\n  - ".join(lineas)) from None

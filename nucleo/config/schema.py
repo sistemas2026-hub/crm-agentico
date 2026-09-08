@@ -2229,13 +2229,28 @@ class TenantConfig(Base):
             and not (set(r.puede_consultar) & deriva)
         ]
         if sin_salida:
+            # El mensaje dice DONDE arreglarlo, no solo que esta mal. Quien lo
+            # lea va a estar mirando un YAML de miles de lineas: "falta una
+            # herramienta con deriva_rol" lo obliga a buscar cual; nombrarla y
+            # decir en que campo agregar el rol lo convierte en una edicion.
+            #
+            # El caso real fue una asimetria: 'ventas' figuraba en
+            # 'areas_destino' de derivar_a_area --se podia derivar HACIA el--
+            # pero no en 'roles_permitidos', asi que no podia derivar DESDE
+            # el. Se ve igual en una lectura rapida y es lo contrario.
+            candidatas = sorted(deriva) or ["(ninguna declarada)"]
+            detalle = "; ".join(
+                f"'{n}' atiende clientes pero no puede derivar: agregalo a "
+                f"'roles_permitidos' de {candidatas[0]}"
+                + (f" (o de {', '.join(candidatas[1:])})" if len(candidatas) > 1 else "")
+                + f", y '{candidatas[0]}' a su 'puede_consultar'"
+                for n in sorted(sin_salida))
             raise ValueError(
-                f"rol(es) orientados a cliente_final sin ninguna herramienta "
-                f"de derivacion: {sorted(sin_salida)}. Una conversacion que "
-                f"caiga ahi queda encerrada -- cuando el cliente pida algo que "
-                f"ese rol no resuelve, no habra forma de pasarlo a quien si "
-                f"puede. Dale una herramienta con 'deriva_rol', o marcalo "
-                f"como orientado_a='colaborador' si no atiende clientes.")
+                f"{detalle}. Una conversacion que caiga en ese rol queda "
+                f"encerrada: cuando el cliente pida algo que no resuelve, no "
+                f"habra forma de pasarlo a quien si puede, y lo unico que le "
+                f"queda al modelo es disculparse. Si ese rol NO atiende "
+                f"clientes, marcalo orientado_a='colaborador'.")
 
         # El rol que atiende los canales publicos. Un nombre mal escrito no
         # puede caer en silencio al comportamiento viejo --tomar el primero--

@@ -36,6 +36,7 @@ viejo, y que ese comportamiento viejo AVISE cuando hay mas de un candidato.
 
 from __future__ import annotations
 
+import copy
 import io
 import sys
 from contextlib import redirect_stdout
@@ -138,6 +139,48 @@ for etiqueta, valor, esperado in [
                 f"se rechaza {etiqueta} como rol_de_entrada",
                 f"se rechazo, pero el motivo no menciona {esperado!r}: "
                 f"{str(e)[:120]}")
+
+
+# --- 5.b ningun rol de cliente puede quedar sin salida -----------------------
+# Un rol que atiende clientes tiene que poder RESOLVER o poder DERIVAR. Si no
+# puede ninguna de las dos, la conversacion que caiga ahi queda encerrada.
+#
+# Paso en produccion el 08/09/2026: 'ventas' figuraba en 'areas_destino' de
+# derivar_a_area --se podia derivar HACIA el-- pero no en 'roles_permitidos',
+# asi que no podia derivar DESDE el. Ante una falla de television el
+# asistente contesto "mi documentacion es de venta de servicios, no tengo
+# como revisar tu señal". Era cierto, y no tenia salida.
+#
+# La asimetria es lo peligroso: en una lectura rapida del YAML las dos listas
+# se parecen, y significan lo contrario.
+deriva = {h["nombre"] for h in base.get("herramientas", []) if h.get("deriva_rol")}
+encerrados = [
+    n for n, r in base["roles"].items()
+    if r.get("orientado_a") == "cliente_final"
+    and not (set(r.get("puede_consultar", [])) & deriva)
+]
+revisar(not encerrados,
+        "ningun rol de cliente queda sin forma de derivar",
+        f"{encerrados} atienden clientes y no pueden pasar el caso a nadie.")
+
+# Y que el esquema lo RECHACE, no solo que hoy este bien: sin eso, el proximo
+# que lo configure mal se entera con un cliente esperando.
+sin_salida = copy.deepcopy(base)
+victima = next(n for n, r in sin_salida["roles"].items()
+               if r.get("orientado_a") == "cliente_final"
+               and set(r.get("puede_consultar", [])) & deriva)
+sin_salida["roles"][victima]["puede_consultar"] = [
+    h for h in sin_salida["roles"][victima]["puede_consultar"] if h not in deriva]
+try:
+    TenantConfig(**sin_salida)
+    revisar(False, "el esquema rechaza un rol de cliente sin salida",
+            "fue aceptado")
+except Exception as e:
+    # Y que el mensaje diga DONDE arreglarlo, no solo que esta mal.
+    texto = str(e)
+    revisar("roles_permitidos" in texto and "puede_consultar" in texto,
+            "el esquema rechaza un rol de cliente sin salida, y dice como arreglarlo",
+            f"se rechazo, pero el mensaje no dice donde: {texto[:120]}")
 
 
 # --- 6. el YAML semilla lo trae ----------------------------------------------
