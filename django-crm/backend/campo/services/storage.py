@@ -5,11 +5,26 @@ from __future__ import annotations
 
 import os
 import uuid
+
 from django.conf import settings
 
 
 class CampoStorage:
-    """Proveedor base desacoplado para subida y lectura segura de evidencias."""
+    """Proveedor base desacoplado para subida y lectura segura de evidencias.
+
+    El cliente movil consume 'upload.url' y no sabe que hay debajo. Hoy hay un
+    solo backend -- el disco local bajo MEDIA_ROOT, con la subida atendida por
+    la propia API -- y manana puede haber S3, R2 o Supabase Storage emitiendo
+    una URL prefirmada al proveedor. Lo unico que la app necesita saber es que
+    hace un PUT contra lo que le devolvieron.
+    """
+
+    # Limites de la subida. Viven aca, junto al resto del almacenamiento, y no
+    # en la vista: son propiedad de lo que se puede guardar, no de una ruta.
+    MAX_BYTES = getattr(settings, "CAMPO_EVIDENCIA_MAX_BYTES", 25 * 1024 * 1024)
+    MIME_PERMITIDOS = getattr(settings, "CAMPO_EVIDENCIA_MIME_PERMITIDOS", (
+        "image/jpeg", "image/png", "image/webp", "image/heic", "application/pdf",
+    ))
 
     @classmethod
     def generar_storage_key(cls, org_id: str, orden_id: str, requisito_id: str, nombre_original: str) -> str:
@@ -18,55 +33,62 @@ class CampoStorage:
         return f"campo/{org_id}/{orden_id}/{requisito_id}_{unique_id}{ext}"
 
     @classmethod
-    def create_upload(cls, org_id: str, orden_id: str, requisito_id: str, nombre_original: str) -> dict:
+    def descriptor_subida(cls, evidencia_id) -> dict:
         """
-        Emite la storage_key y la URL de subida.
-        En entorno local/dev apunta a la ruta de subida directa de Django;
-        en producción con S3/Supabase Storage emite la presigned PUT URL.
+        Como sube el cliente ESTA evidencia.
+
+        Indexado por 'evidencia_id' y NO por la storage_key. La version
+        anterior emitia '/api/campo/evidencias/upload-directo/?key=<ruta>', que
+        ademas de no existir (nunca se registro la ruta, asi que el circuito
+        quedaba cortado) le habria pedido al servidor escribir donde dijera el
+        cliente: una ruta arbitraria por query string, con el path traversal
+        como problema a resolver despues.
+
+        Con el id, la storage_key la resuelve el servidor leyendo la fila. No
+        hay ruta que sanear porque no hay ruta que el cliente pueda proponer.
+
+        Cuando el backend sea S3/R2, este metodo devuelve la URL prefirmada del
+        proveedor y la vista local deja de existir; la app no cambia.
         """
-        key = cls.generar_storage_key(org_id, orden_id, requisito_id, nombre_original)
-        # Para el MVP servimos endpoint directo de subida con token de subida
-        upload_url = f"/api/campo/evidencias/upload-directo/?key={key}"
         return {
-            "storage_key": key,
-            "upload": {
-                "method": "PUT",
-                "url": upload_url,
-                "expires_in": 900,
-            },
+            "method": "PUT",
+            "url": f"/api/campo/evidencias/{evidencia_id}/subir/",
+            "expires_in": 900,
         }
 
     @classmethod
-    def upload_para_key(cls, storage_key: str) -> dict:
+    def ruta_absoluta(cls, storage_key: str) -> str | None:
         """
-        Reemite la URL de subida para una storage_key QUE YA EXISTE.
+        Donde vive el archivo en disco, o None si la key se sale de MEDIA_ROOT.
 
-        'create_upload' genera siempre una key nueva (uuid), asi que servia
-        para la primera vez y no para renovar: una URL firmada vence a los 15
-        minutos (expires_in), y un movil que perdio conexion, quedo sin bateria
-        o se guardo para "cuando haya senal" vuelve con la suya vencida. Sin
-        esto, el unico camino era pedir otra evidencia -- y eso reemplazaba la
-        storage_key, dejando huerfano lo que ya estuviera subido.
-
-        Renovar sobre la MISMA key es lo que permite reintentar sin duplicar ni
-        perder nada.
+        La key sale de la base y no del cliente, asi que esto es defensa en
+        profundidad: si alguna vez una fila quedara con '../..' escrito, el
+        archivo no se escribe ni se lee fuera del arbol de medios.
         """
-        return {
-            "storage_key": storage_key,
-            "upload": {
-                "method": "PUT",
-                "url": f"/api/campo/evidencias/upload-directo/?key={storage_key}",
-                "expires_in": 900,
-            },
-        }
+        if not storage_key:
+            return None
+        raiz = os.path.realpath(settings.MEDIA_ROOT)
+        destino = os.path.realpath(os.path.join(raiz, storage_key))
+        if destino != raiz and not destino.startswith(raiz + os.sep):
+            return None
+        return destino
+
+    @classmethod
+    def guardar(cls, storage_key: str, contenido: bytes) -> bool:
+        """Escribe el binario exactamente donde 'verify_upload' lo va a buscar."""
+        destino = cls.ruta_absoluta(storage_key)
+        if destino is None:
+            return False
+        os.makedirs(os.path.dirname(destino), exist_ok=True)
+        with open(destino, "wb") as f:
+            f.write(contenido)
+        return True
 
     @classmethod
     def verify_upload(cls, storage_key: str) -> bool:
         """Comprueba que el archivo exista en el backend de storage."""
-        if not storage_key:
-            return False
-        ruta = os.path.join(settings.MEDIA_ROOT, storage_key)
-        return os.path.exists(ruta)
+        destino = cls.ruta_absoluta(storage_key)
+        return bool(destino) and os.path.exists(destino)
 
     @classmethod
     def create_download_url(cls, storage_key: str) -> str:

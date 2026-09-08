@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.http import Http404
 from django.utils import timezone
@@ -311,7 +312,6 @@ class EvidenciasTrabajoView(APIView):
                         requisito_id=requisito_id,
                         nombre_original=nombre,
                     )
-                upload_data = CampoStorage.upload_para_key(evidencia.storage_key)
                 evidencia.nombre_original = nombre
                 evidencia.mime_type = mime_type
                 evidencia.bytes = tamano_bytes
@@ -324,7 +324,7 @@ class EvidenciasTrabajoView(APIView):
                     "metadatos_captura", "updated_at",
                 ])
             else:
-                upload_data = CampoStorage.create_upload(
+                key_nueva = CampoStorage.generar_storage_key(
                     org_id=str(orden.org.id),
                     orden_id=str(orden.id),
                     requisito_id=requisito_id,
@@ -349,7 +349,7 @@ class EvidenciasTrabajoView(APIView):
                             orden_trabajo=orden,
                             requisito_id=requisito_id,
                             sha256=sha256,
-                            storage_key=upload_data["storage_key"],
+                            storage_key=key_nueva,
                             nombre_original=nombre,
                             mime_type=mime_type,
                             bytes=tamano_bytes,
@@ -364,13 +364,15 @@ class EvidenciasTrabajoView(APIView):
                     evidencia = EvidenciaTrabajo.objects.get(
                         orden_trabajo=orden, requisito_id=requisito_id, sha256=sha256
                     )
-                    upload_data = CampoStorage.upload_para_key(evidencia.storage_key)
 
+        # El descriptor se arma recien aca, con el id ya resuelto: la URL de
+        # subida se indexa por EVIDENCIA, no por la storage_key, asi el cliente
+        # nunca propone una ruta. Ver CampoStorage.descriptor_subida.
         return Response({
             "evidencia_id": str(evidencia.id),
             "estado_archivo": evidencia.estado_archivo,
             "storage_key": evidencia.storage_key,
-            "upload": upload_data["upload"],
+            "upload": CampoStorage.descriptor_subida(evidencia.id),
         })
 
 
@@ -420,6 +422,107 @@ class ConfirmarEvidenciaView(APIView):
         )
 
         return Response({"estado": "recibida", "evidencia_id": str(evidencia.id)})
+
+
+class SubirEvidenciaDirectoView(APIView):
+    """Recibe el binario de UNA evidencia. Solo backend local de desarrollo.
+
+    Cierra el circuito que quedaba cortado: 'descriptor_subida' prometia un PUT
+    contra esta ruta y la ruta no existia, asi que la app registraba la
+    evidencia, recibia una URL y no tenia donde subir el archivo.
+
+    NO es un endpoint generico de escritura. La storage_key NO viaja: se
+    resuelve leyendo la evidencia, que ya esta acotada al tenant de quien pide.
+    Por eso no hay ruta que sanear -- no hay ruta que el cliente pueda
+    proponer, y el path traversal deja de ser un problema a resolver para pasar
+    a ser imposible de plantear.
+
+    En produccion con S3/R2 esta vista no participa: 'descriptor_subida' emite
+    la URL prefirmada del proveedor y el cliente sube alli. De ahi que solo
+    exista en entorno de desarrollo -- con ENV_TYPE de produccion devuelve 404,
+    no 403: quien no deberia usarla tampoco tiene por que saber que existe.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def put(self, request, pk):
+        if not getattr(settings, "IS_DEV_ENV", False):
+            raise Http404
+
+        org = getattr(request, "org", None)
+        if not org:
+            raise Http404
+
+        # El 404 tapa las dos cosas a la vez, y es deliberado: una evidencia
+        # que no existe y una de otra empresa tienen que ser indistinguibles
+        # desde afuera.
+        evidencia = EvidenciaTrabajo.objects.filter(pk=pk, org=org).first()
+        if not evidencia:
+            raise Http404
+
+        # Una evidencia que ya esta en el servidor no se reemplaza. Es el mismo
+        # criterio que el registro: el sha256 identifica la fila, no garantiza
+        # que lo que se suba despues coincida, y una VERIFICADA ya fue
+        # auditada.
+        if evidencia.estado_archivo in (EvidenciaTrabajo.RECIBIDO,
+                                        EvidenciaTrabajo.VERIFICADO):
+            return Response(
+                {
+                    "error": "EVIDENCIA_NO_MODIFICABLE",
+                    "detalle": "La evidencia ya fue recibida; su archivo no se reemplaza.",
+                    "estado_archivo": evidencia.estado_archivo,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        contenido = request.body or b""
+        if not contenido:
+            return Response(
+                {"error": "CUERPO_VACIO", "detalle": "El PUT no trae bytes."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if len(contenido) > CampoStorage.MAX_BYTES:
+            return Response(
+                {
+                    "error": "ARCHIVO_DEMASIADO_GRANDE",
+                    "detalle": f"Maximo {CampoStorage.MAX_BYTES} bytes.",
+                    "bytes": len(contenido),
+                },
+                status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            )
+
+        # Se mira el MIME que la evidencia DECLARO al registrarse, no la
+        # cabecera del PUT: la cabecera la elige quien sube, la declaracion ya
+        # quedo guardada y es contra eso que se contrasto el resto.
+        if evidencia.mime_type not in CampoStorage.MIME_PERMITIDOS:
+            return Response(
+                {
+                    "error": "MIME_NO_PERMITIDO",
+                    "detalle": f"'{evidencia.mime_type}' no esta permitido.",
+                    "permitidos": list(CampoStorage.MIME_PERMITIDOS),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not evidencia.storage_key or not CampoStorage.guardar(
+                evidencia.storage_key, contenido):
+            return Response(
+                {
+                    "error": "STORAGE_KEY_INVALIDA",
+                    "detalle": "La evidencia no tiene una ubicacion valida donde guardar.",
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        # Reintentar el PUT sobrescribe el MISMO archivo y no toca la fila: no
+        # hay forma de que un reintento cree otra EvidenciaTrabajo, porque esta
+        # vista no crea ninguna.
+        return Response({
+            "evidencia_id": str(evidencia.id),
+            "estado_archivo": evidencia.estado_archivo,
+            "storage_key": evidencia.storage_key,
+            "bytes": len(contenido),
+        })
 
 
 class ObtenerUrlEvidenciaView(APIView):
