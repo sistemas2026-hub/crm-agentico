@@ -139,6 +139,34 @@ afirmar(not con_las_manos_vacias([{"role": "tool", "name": "x", "content": ""}])
 afirmar(con_las_manos_vacias(None),
         "un historial None no explota")
 
+# 08/09/2026, mirando una conversacion real: el gate de identidad bloqueo las
+# cuatro herramientas del turno. El motor no llamo a nada -- pero deja el
+# mensaje 'tool' igual, porque el modelo tiene que leerlo para saber que le
+# falta pedir la cedula. Con eso, la conversacion parecia tener las manos
+# llenas y el empujon ("identifica al cliente si hace falta") no se daba
+# justo donde era el consejo correcto.
+BLOQUEADAS = [{"role": "user", "content": "no tengo internet"}] + [
+    {"role": "tool", "name": nombre,
+     "content": '{"error": "IDENTIDAD_NO_VERIFICADA", '
+                '"instruccion_interna": "Pidele la cedula."}'}
+    for nombre in ("consultar_mi_servicio", "ping_cliente",
+                  "consultar_estado_ont", "consultar_senal_ont")]
+afirmar(con_las_manos_vacias(BLOQUEADAS),
+        "cuatro herramientas BLOQUEADAS por el gate siguen siendo manos "
+        "vacias: el motor no llego a ejecutar ninguna")
+afirmar(not con_las_manos_vacias(BLOQUEADAS + [
+            {"role": "tool", "name": "ping_cliente", "content": '{"perdida": 0}'}]),
+        "pero si una si corrio de verdad, ya no -- el bloqueo no borra lo "
+        "que si se ejecuto")
+afirmar(not con_las_manos_vacias([{"role": "tool", "name": "x",
+                                  "content": '{"error": "HTTP_500"}'}]),
+        "un error REAL de un tercero si cuenta como intento: la herramienta "
+        "se llamo y el sistema de afuera fallo")
+afirmar(not con_las_manos_vacias([{"role": "tool", "name": "x",
+                                  "content": "no soy json"}]),
+        "contenido ilegible cuenta como ejecucion: ante la duda no se "
+        "inventa que no se intento nada")
+
 print()
 print("=" * 70)
 print(" GUARDIAS DEL MOTOR -- no son la herramienta fallando")
@@ -155,7 +183,7 @@ motivo, _ = escalada_forzada(CFG, [{"herramienta": "consultar_algo",
 afirmar(motivo == "sin_datos_para_diagnosticar",
         "un codigo_error que NO es guardia del motor sigue forzando la escalada")
 
-print("\n[2-6] las cinco guardias del motor -- ninguna escala")
+print("\n[2-7] las seis guardias del motor -- ninguna escala")
 FRAGIL_NOMBRE = "consultar_algo"
 for codigo in sorted(CODIGOS_MOTOR_GUARD):
     motivo, _ = escalada_forzada(CFG, [{"herramienta": FRAGIL_NOMBRE,
@@ -164,8 +192,8 @@ for codigo in sorted(CODIGOS_MOTOR_GUARD):
             f"'{codigo}' en una herramienta con escalar_si_falla NO escala")
 afirmar(CODIGOS_MOTOR_GUARD == {"PRECONDICION_NO_CUMPLIDA", "LIMITE_DE_CONVERSACION",
                                 "FALTA_HABLAR_CON_EL_CLIENTE", "IDENTIDAD_NO_RESUELTA",
-                                "HERRAMIENTA_DESCONOCIDA"},
-        "la clasificacion tiene exactamente los 5 codigos de la auditoria -- "
+                                "IDENTIDAD_NO_VERIFICADA", "HERRAMIENTA_DESCONOCIDA"},
+        "la clasificacion tiene exactamente los 6 codigos de gate -- "
         "ni uno de mas, ni uno de menos")
 
 print("\n[7] EL CASO CRITICO -- bloqueo prematuro y despues exito, en la MISMA traza")
@@ -456,9 +484,9 @@ print("\n[CASO 7] idempotencia -- nada de esto se toco")
 # turnos ya dependia (Fase #2/#5) -- sigue exactamente igual:
 afirmar(CODIGOS_MOTOR_GUARD == {"PRECONDICION_NO_CUMPLIDA", "LIMITE_DE_CONVERSACION",
                                 "FALTA_HABLAR_CON_EL_CLIENTE", "IDENTIDAD_NO_RESUELTA",
-                                "HERRAMIENTA_DESCONOCIDA"},
-        "CODIGOS_MOTOR_GUARD sigue teniendo exactamente los mismos 5 codigos de "
-        "siempre -- PEDIDO_INVALIDO NO se mezclo ahi adentro")
+                                "IDENTIDAD_NO_VERIFICADA", "HERRAMIENTA_DESCONOCIDA"},
+        "CODIGOS_MOTOR_GUARD tiene los seis codigos de gate -- PEDIDO_INVALIDO "
+        "NO se mezclo ahi adentro")
 afirmar(CODIGOS_MOTOR_GUARD.isdisjoint(CODIGOS_CONDICION_DE_NEGOCIO),
         "y ningun codigo de negocio (PEDIDO_INVALIDO, COMPROBANTE_NO_LISTO) se "
         "mezclo jamas con las guardias del motor -- son conjuntos separados")

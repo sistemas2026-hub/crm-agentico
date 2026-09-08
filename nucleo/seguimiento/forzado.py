@@ -367,6 +367,27 @@ def decidir_pedido_humano(historial: list[dict], pregunta: str = "",
     return None, ""
 
 
+def _freno_el_motor(mensaje: dict) -> bool:
+    """
+    True si este mensaje de rol 'tool' es el motor FRENANDO la llamada, no una
+    herramienta que corrio.
+
+    El resultado viaja como JSON (motor.py lo arma con json.dumps), y un
+    bloqueo tiene la forma {"error": "<codigo de gate>", ...}. Cualquier cosa
+    que no se pueda leer asi se trata como ejecucion real: ante la duda, no
+    inventar que no se intento nada.
+    """
+    import json
+    contenido = mensaje.get("content")
+    if not isinstance(contenido, str):
+        return False
+    try:
+        datos = json.loads(contenido)
+    except (ValueError, TypeError):
+        return False
+    return isinstance(datos, dict) and datos.get("error") in CODIGOS_MOTOR_GUARD
+
+
 def con_las_manos_vacias(historial: list[dict]) -> bool:
     """
     True si el asistente todavia no ejecuto NINGUNA herramienta en toda la
@@ -374,6 +395,16 @@ def con_las_manos_vacias(historial: list[dict]) -> bool:
 
     Es un hecho de la traza, no una opinion: los resultados de herramientas
     viajan en el historial como mensajes de rol 'tool'.
+
+    Una llamada que el motor BLOQUEO no cuenta como ejecutada -- que es lo que
+    esta funcion siempre quiso decir ("ni siquiera intento lo que sabe
+    hacer"), y lo que no sabia distinguir. El gate de identidad frena la
+    llamada ANTES de que nada corra, pero igual deja su mensaje 'tool' en el
+    historial, porque el modelo tiene que leerlo para saber que le falta
+    pedir la cedula. Sin este filtro, una conversacion con las cuatro
+    herramientas bloqueadas parecia tener las manos llenas, y el empujon de
+    abajo -- que dice, justamente, "identifica al cliente si hace falta" --
+    no se daba en el unico caso donde era exactamente el consejo correcto.
 
     Sirve para frenar una escalada decidida por el modelo cuando no hay nada
     que entregar. Un caso que llega a la bandeja con la traza vacia le pide a
@@ -386,7 +417,8 @@ def con_las_manos_vacias(historial: list[dict]) -> bool:
     horas despues, con el mismo mensaje y otra conversacion. El prompt es
     guia, la garantia es codigo (PRD 7.4).
     """
-    return not any(m.get("role") == "tool" for m in (historial or []))
+    return not any(m.get("role") == "tool" and not _freno_el_motor(m)
+                  for m in (historial or []))
 
 
 def motivos_por_hecho(config) -> set[str]:
@@ -463,15 +495,32 @@ def motivos_que_no_elige_el_modelo(config) -> set[str]:
 # forzaba la escalada aunque el segundo, dos entradas mas abajo en la misma
 # traza, hubiera reiniciado el equipo de verdad.
 #
-# 'IDENTIDAD_NO_VERIFICADA' NO esta en esta lista porque no hace falta: motor.py
-# ya la excluye de 'registro' antes de que exista la fila de traza (es el gate
-# de seguridad frenando ANTES de llamar a nada), asi que escalada_forzada()
-# nunca llega a verla.
+# Esta lista tiene que ser LA MISMA que motor.CODIGOS_DE_BLOQUEO, que es donde
+# se producen los codigos. No se importa de alla a proposito: este modulo se
+# declara sin dependencias (ver el encabezado) para poder comprobarse sin
+# arrastrar el motor entero. El precio de esa copia es que puede quedar
+# desfasada, y ya paso -- por eso la igualdad la fija
+# tests/test_bloqueos_en_traza.py, que si importa las dos y falla si difieren.
+#
+# 'IDENTIDAD_NO_VERIFICADA' faltaba aca, con este razonamiento escrito: "no
+# hace falta, motor.py ya la excluye de 'registro' antes de que exista la fila
+# de traza, asi que escalada_forzada() nunca llega a verla". Era cierto hasta
+# el 06/09/2026, cuando los bloqueos pasaron a registrarse justamente para
+# poder contarlos en la pantalla (ver el comentario de CODIGOS_DE_BLOQUEO en
+# motor.py). Desde entonces SI llegaba aca, y como no estaba clasificada se
+# contaba como un fallo de la herramienta: el gate de identidad frenando
+# 'ping_cliente' -- la proteccion funcionando -- disparaba su
+# 'escalar_si_falla: sin_datos_para_diagnosticar', y al cliente se le decia
+# "No pude leer el estado de tu equipo desde aca" cuando lo unico que pasaba
+# era que todavia no habia confirmado quien era. Encontrado el 08/09/2026
+# mirando una conversacion real en la bandeja, con las cuatro herramientas
+# marcadas "bloqueada" en la traza y el caso escalado igual.
 CODIGOS_MOTOR_GUARD = frozenset({
     "PRECONDICION_NO_CUMPLIDA",
     "LIMITE_DE_CONVERSACION",
     "FALTA_HABLAR_CON_EL_CLIENTE",
     "IDENTIDAD_NO_RESUELTA",
+    "IDENTIDAD_NO_VERIFICADA",
     "HERRAMIENTA_DESCONOCIDA",
 })
 

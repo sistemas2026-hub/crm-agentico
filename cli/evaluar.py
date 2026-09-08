@@ -150,6 +150,18 @@ def correr_caso(config, caso: dict, defaults: dict, prohibido: list[str]) -> dic
             derivado_a = sesion.rol_siguiente
         for r in registro:
             usadas.append(r["herramienta"])
+            # Un bloqueo del motor no es ninguna de las dos cosas: ni corrio
+            # (por eso no entra en 'ejecutadas', como ya decia el comentario
+            # de arriba) ni fallo nada (por eso tampoco es un error). Es la
+            # proteccion funcionando. Sin esta rama, un caso con
+            # 'sin_errores: true' donde el gate de identidad frena una
+            # llamada -- exactamente lo que debe pasar -- fallaba acusando un
+            # error que no existio. Se lee 'es_bloqueo', que el motor ya
+            # calcula en la traza (motor.py::CODIGOS_DE_BLOQUEO), en vez de
+            # repetir aca la lista de codigos: son la misma verdad y ya se
+            # separaron una vez, el 08/09/2026.
+            if r.get("es_bloqueo"):
+                continue
             if r.get("codigo_error"):
                 errores.append(f"{r['herramienta']}: {r['codigo_error']}")
             else:

@@ -123,6 +123,35 @@ revisar("es_bloqueo" in escritura,
         "db.py no menciona la columna: el motor la calcularia y se perderia")
 
 
+# --- 6. mostrar el bloqueo y NO escalarlo son la misma verdad ---------------
+# Hay dos listas de los mismos codigos, por una razon buena:
+# nucleo/seguimiento/forzado.py se declara sin dependencias para poder
+# comprobarse sin arrastrar el motor, asi que no importa CODIGOS_DE_BLOQUEO,
+# lo repite. El precio es que pueden separarse, y se separaron.
+#
+# El 06/09/2026 los bloqueos empezaron a registrarse en la traza (esa es la
+# razon de este archivo). IDENTIDAD_NO_VERIFICADA quedo en la lista de la
+# PANTALLA pero no en la de escalada_forzada(), que hasta entonces nunca la
+# veia. Resultado, medido sobre una conversacion real el 08/09/2026: la
+# pantalla la marcaba "bloqueada -- el sistema la freno, no es una falla" y al
+# mismo tiempo esa misma entrada disparaba 'escalar_si_falla' de ping_cliente.
+# Al cliente se le dijo "No pude leer el estado de tu equipo desde aca" cuando
+# el equipo nunca se consulto: faltaba que dijera quien era.
+#
+# Contar un bloqueo y escalarlo son la misma decision. Si vuelven a diferir,
+# esto falla antes de que nadie lo lea en una bandeja.
+from nucleo.seguimiento.forzado import CODIGOS_MOTOR_GUARD  # noqa: E402
+
+diferencia = CODIGOS_DE_BLOQUEO.symmetric_difference(CODIGOS_MOTOR_GUARD)
+revisar(
+    not diferencia,
+    "forzado.py clasifica exactamente los mismos codigos que motor.py",
+    f"solo en una de las dos: {sorted(diferencia)}. Un bloqueo que falte en "
+    "CODIGOS_MOTOR_GUARD se cuenta como fallo de la herramienta y fuerza la "
+    "escalada con un motivo -- y un mensaje al cliente -- que no es cierto."
+    if diferencia else "")
+
+
 print()
 if fallos:
     print(f"[FALLA] {len(fallos)} comprobacion(es) no pasaron.")
