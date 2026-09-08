@@ -180,19 +180,50 @@ def commits_atrasados() -> int | None:
     A diferencia de commits_sin_empujar() -- que degrada a 0 (permite) ante
     cualquier duda porque la guarda de perdidas de cada puerta la respalda
     igual -- esta NO tiene ningun respaldo equivalente: nada mas sabe si un
-    campo sigue siendo valido para el schema desplegado. Por eso, si no se
-    puede determinar el estado real (sin git, sin upstream configurado, el
-    comando falla), devuelve None -- y None se trata como bloqueo, nunca
-    como 'esta alineado'.
+    campo sigue siendo valido para el schema desplegado. Por eso, si HAY un
+    repositorio y aun asi no se puede determinar el estado (sin upstream, el
+    comando falla), devuelve None -- y None se trata como bloqueo, nunca como
+    'esta alineado'.
+
+    NO HAY REPOSITORIO NO ES 'NO SE PUEDE DETERMINAR'
+    ------------------------------------------------
+    Devuelve 0 cuando no existe repositorio git en absoluto, y eso no es una
+    concesion: es la unica lectura correcta. La pregunta que hace esta funcion
+    es "¿esta copia del codigo esta atrasada respecto del remoto?", y sin
+    repositorio NO HAY COPIA que pueda estar atrasada -- el codigo que corre es
+    el codigo, no un checkout de algo. El desfase que esta guarda persigue no
+    puede existir ahi.
+
+    Se separo el 08/09/2026, despues de romper produccion con esto. La version
+    anterior devolvia None tambien sin repositorio, y el contenedor productivo
+    no tiene uno: el resultado fue que NINGUNA edicion de configuracion desde
+    la interfaz funcionaba -- ni agentes, ni planes de venta, ni variables.
+    Aparecia como "esta copia no esta alineada con el remoto" en una pantalla
+    donde no hay ninguna copia. El comentario de _editar() ya afirmaba que en
+    produccion esto no dispara nunca; era cierto cuando solo se miraba la
+    direccion ADELANTADA, y dejo de serlo al agregar esta sin distinguir los
+    dos casos.
     """
     import subprocess
-    try:
-        salida = subprocess.run(
-            ["git", "rev-list", "--count", "HEAD..@{u}"],
-            cwd=Path(__file__).resolve().parents[2], capture_output=True, text=True, timeout=10)
-    except Exception:                                    # noqa: BLE001
-        return None
-    if salida.returncode != 0:
+
+    raiz = Path(__file__).resolve().parents[2]
+
+    def _git(*args) -> subprocess.CompletedProcess | None:
+        try:
+            return subprocess.run(["git", *args], cwd=raiz,
+                                  capture_output=True, text=True, timeout=10)
+        except Exception:                                # noqa: BLE001
+            return None
+
+    # Primero: ¿hay repositorio? Se pregunta explicito en vez de deducirlo del
+    # fallo de la consulta real -- 'git rev-list' falla igual por no tener
+    # upstream, y esos dos casos tienen respuestas opuestas.
+    hay_repo = _git("rev-parse", "--git-dir")
+    if hay_repo is None or hay_repo.returncode != 0:
+        return 0
+
+    salida = _git("rev-list", "--count", "HEAD..@{u}")
+    if salida is None or salida.returncode != 0:
         return None
     try:
         return int((salida.stdout or "").strip())

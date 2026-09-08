@@ -161,9 +161,41 @@ subprocess.run = lambda *a, **k: _ProcesoFalso(0, "0\n")
 comprobar(editor.commits_atrasados() == 0,
           "0 de atraso se distingue de None (alineado de verdad, no un error)")
 
-subprocess.run = lambda *a, **k: _ProcesoFalso(128, "")
+# A partir del 08/09/2026 la funcion pregunta DOS cosas a git, y la
+# diferencia entre ellas es justo lo que se rompio en produccion:
+#
+#   1. 'rev-parse --git-dir'  -> ¿existe un repositorio?
+#   2. 'rev-list HEAD..@{u}'  -> ¿cuantos commits de atraso?
+#
+# Las dos fallan con returncode != 0, y significan lo OPUESTO: sin repositorio
+# no hay copia que pueda estar atrasada (permitir); con repositorio pero sin
+# poder medir, no se sabe (bloquear). Por eso el doble tiene que mirar QUE
+# comando le estan pidiendo.
+def _git_falso(por_comando):
+    def correr(args, *a, **k):
+        cual = "rev-parse" if "rev-parse" in args else "rev-list"
+        rc, salida = por_comando[cual]
+        return _ProcesoFalso(rc, salida)
+    return correr
+
+
+subprocess.run = _git_falso({"rev-parse": (0, ".git\n"), "rev-list": (128, "")})
 comprobar(editor.commits_atrasados() is None,
-          "git devuelve error (returncode != 0, ej. sin upstream) -> None")
+          "HAY repositorio pero git no puede medir el atraso (ej. sin "
+          "upstream) -> None, o sea bloqueo: no se sabe si esta al dia")
+
+# El escenario REAL del contenedor productivo: no hay repositorio, asi que
+# TODAS las consultas a git fallan igual. 'commits_sin_empujar' ya degradaba a
+# 0 ahi; la que faltaba distinguir era esta.
+subprocess.run = _git_falso({"rev-parse": (128, ""), "rev-list": (128, "")})
+comprobar(editor.commits_atrasados() == 0,
+          "NO hay repositorio -> 0, no None. Sin checkout no existe la copia "
+          "atrasada que esta guarda persigue -- es el caso del contenedor "
+          "productivo, y tratarlo como 'no se sabe' dejo a produccion sin "
+          "poder editar NINGUNA configuracion desde la interfaz (08/09/2026)")
+comprobar(editor.problemas_de_alineacion_git() == [],
+          "y por lo tanto la guarda COMPLETA deja editar ahi -- que es lo que "
+          "devuelve la pantalla de configuracion de produccion a la vida")
 
 
 def _explota(*a, **k):
@@ -171,8 +203,10 @@ def _explota(*a, **k):
 
 
 subprocess.run = _explota
-comprobar(editor.commits_atrasados() is None,
-          "git no se puede ejecutar (excepcion) -> None, no una excepcion sin atrapar")
+comprobar(editor.commits_atrasados() == 0,
+          "git no se puede ejecutar en absoluto -> 0. Un contenedor sin el "
+          "binario de git esta en la misma situacion que uno sin repositorio: "
+          "no hay copia local que pueda estar desincronizada")
 
 subprocess.run = lambda *a, **k: _ProcesoFalso(0, "no-es-un-numero\n")
 comprobar(editor.commits_atrasados() is None,
