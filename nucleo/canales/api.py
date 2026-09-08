@@ -2727,6 +2727,70 @@ def configuracion_planes_venta_listar():
     })
 
 
+@app.get("/configuracion/oferta")
+def configuracion_oferta_listar():
+    """
+    Que vende la empresa y que canales trae la TV -- las dos cosas que el
+    agente no podia saber y terminaba improvisando (ver ServicioOfrecido en
+    schema.py sobre la falla del 08/09/2026).
+
+    Van juntas en un endpoint porque se editan en la misma pantalla y
+    ninguna de las dos justifica un viaje propio: las dos salen de config
+    que ya esta en memoria, sin red.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+
+    return jsonify({
+        "servicios_ofrecidos": [s.model_dump(mode="json")
+                                for s in config.servicios_ofrecidos],
+        "parrilla_canales": [c.nombre for c in config.parrilla_canales],
+    })
+
+
+@app.post("/configuracion/servicios")
+def configuracion_servicios_guardar():
+    tenant = (request.json or {}).get("tenant")
+    servicios = (request.json or {}).get("servicios")
+    if not tenant or not isinstance(servicios, list):
+        return jsonify({"error": "Falta 'tenant' o 'servicios'."}), 400
+    try:
+        config = editor.guardar_servicios_ofrecidos(tenant, servicios)
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"servicios_ofrecidos": [s.model_dump(mode="json")
+                                           for s in config.servicios_ofrecidos]})
+
+
+@app.post("/configuracion/parrilla")
+def configuracion_parrilla_guardar():
+    """
+    Sube la parrilla desde un Excel de UNA columna. Reemplaza la lista
+    entera: la parrilla es lo que dice el archivo que se subio, y mezclarla
+    con la anterior deja canales fantasma de una version que nadie recuerda.
+
+    Devuelve los canales cargados Y los descartados por duplicados. Lo
+    segundo no es un detalle: sin verlo, quien sube el archivo cree que
+    cargo mas de lo que cargo.
+    """
+    tenant = request.form.get("tenant")
+    archivo = request.files.get("archivo")
+    if not tenant or archivo is None:
+        return jsonify({"error": "Falta 'tenant' o el archivo."}), 400
+    try:
+        canales, descartados = editor.canales_desde_excel(archivo.read())
+        editor.guardar_parrilla_canales(tenant, canales)
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"parrilla_canales": canales, "descartados": descartados,
+                    "total": len(canales)})
+
+
 @app.post("/configuracion/localidades/sincronizar")
 def configuracion_localidades_sincronizar():
     """

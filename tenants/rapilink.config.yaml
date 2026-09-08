@@ -358,6 +358,19 @@ roles:
       la identidad, sea alguien que todavia no es cliente o uno actual
       sumando otro servicio.
 
+      TAMBIEN cuando creas que el servicio NO se ofrece. Vos no tenes el
+      catalogo: no podes saber que se vende y que no. Medido el 08/09/2026
+      -- alguien pidio telefonia fija y en tres pruebas seguidas
+      contestaste "solo tenemos internet residencial y combos con
+      television" sin derivar. Salio bien de casualidad, porque un ISP
+      vende internet; con otro servicio esa misma frase le niega al
+      cliente algo que la empresa si vende. Deriva y que conteste quien
+      tiene el dato, aunque estes seguro de la respuesta.
+
+      Y cuando derivas, NO preguntes "¿queres que te conecte?". Eso gasta
+      un turno del cliente y muchos abandonan ahi. Llama la herramienta:
+      el area contesta sola, en el mismo mensaje.
+
       Lo que va a un colaborador HUMANO, no a un area: traslados,
       reconexion, reclamos formales, y cambio de contrasena (el protocolo
       dice que esto se resuelve al instante, pero todavia no existe esa
@@ -1293,6 +1306,26 @@ roles:
       resultados distintos para "300 megas") que no es tu decision
       elegir.
 
+      QUE SE VENDE Y QUE NO: si pregunta por un servicio (telefonia fija,
+      camaras, lo que sea), llama a consultar_servicios_ofrecidos ANTES de
+      contestar. No lo deduzcas de los planes que viste ni de lo que
+      supones de un ISP: el 08/09/2026 el rol de entrada nego telefonia
+      fija de memoria y acerto de pura suerte. Si la herramienta vuelve
+      vacia, no hay dato cargado -- decilo y escala, no completes vos.
+
+      CANALES DE TV: si pregunta por un canal, llama a
+      consultar_parrilla_canales con lo que escribio, tal cual. La
+      parrilla es UNA SOLA para todos los planes con television, asi que
+      la respuesta no cambia segun el plan. Si trae varias coincidencias,
+      mostraselas y que elija cual buscaba. Si el canal no esta, decilo
+      sin ofrecer otro plan: no hay ninguno que lo traiga, todos comparten
+      la misma parrilla.
+
+      Distinto es que el cliente NO tenga television contratada: ahi el
+      canal puede estar en la parrilla y aun asi el no verlo. Si es un
+      cliente actual con un plan sin TV, ofrecele el combo que si la
+      incluye.
+
       Con la lista curada en mano, si pregunta el precio de uno en
       particular: resolve su id cruzando el nombre contra consultar_planes
       (el catalogo tecnico, recien ACA si corresponde usarlo) y despues
@@ -1355,6 +1388,7 @@ roles:
     # aunque ya no estuviera en el prompt. Ver incidente "doña manuela".
     puede_consultar: [verificar_identidad_por_cedula, confirmar_identidad,
           consultar_planes_venta, consultar_planes, consultar_plan_detalle,
+          consultar_servicios_ofrecidos, consultar_parrilla_canales,
           registrar_solicitud_servicio, cargar_habilidad,
           consultar_documentacion, derivar_a_area]
     campos_permitidos:
@@ -1838,6 +1872,27 @@ variables_tenant:
 # Bajados de produccion el 25/08/2026: el archivo los tenia vacios y una
 # carga los habria eliminado sin dejar rastro (la guarda lo freno, que es
 # justo para lo que esta).
+# Que vende la empresa. El agente NO puede deducirlo: hasta el 08/09/2026
+# no existia este campo y el rol de entrada afirmaba el catalogo de memoria
+# (nego telefonia fija tres veces seguidas, sin ninguna fuente -- acerto de
+# casualidad). Se siembra con lo que la config ya daba por cierto en otro
+# lado: 'derivar_a_area.servicios_reportables' declara internet y television,
+# y los planes de venta son de internet y combos con TV.
+servicios_ofrecidos:
+  - nombre: Internet residencial
+    activo: true
+    descripcion: Planes de fibra optica para el hogar.
+  - nombre: Television
+    activo: true
+    descripcion: Incluida en los planes combo, junto con el internet.
+
+# La parrilla de canales va VACIA a proposito. Es una sola para todos los
+# planes con TV, y se carga desde un Excel por la pantalla de configuracion
+# -- no a mano aca. Vacia, el motor responde que no tiene el dato y escala,
+# que es lo correcto: inventar un canal es mucho mas facil de creer que
+# inventar un servicio.
+parrilla_canales: []
+
 planes_venta:
   - nombre_wisphub: PLAN ELITE
     zonas: [20053, 20049]
@@ -2023,6 +2078,38 @@ herramientas:
         tipo: texto
 
   # --- ventas (19/08/2026) ----------------------------------------------
+  - nombre: consultar_servicios_ofrecidos
+    tipo: interno
+    descripcion: >
+      Que servicios vende la empresa. LLAMALA ANTES de decir que algo se
+      ofrece o que no se ofrece -- vos no sabes cual es el catalogo, y
+      afirmarlo de memoria ya salio mal (08/09/2026: se nego telefonia
+      fija sin ninguna fuente detras, y acerto de casualidad). Si vuelve
+      vacia significa que nadie lo cargo todavia, NO que la empresa no
+      venda nada: decilo asi y escala.
+    solo_lectura: true
+    roles_permitidos: [ventas]
+    consulta_servicios_ofrecidos: true
+
+  - nombre: consultar_parrilla_canales
+    tipo: interno
+    descripcion: >
+      Si un canal esta en la parrilla de TV. Pasale 'canal' con el nombre
+      tal cual lo escribio el cliente -- el codigo se encarga de
+      reconocerlo aunque lo haya escrito en minusculas, sin tildes o
+      incompleto ('discovery' encuentra 'DISCOVERY H&H'). Sin 'canal' te
+      devuelve la parrilla entera, para cuando preguntan que canales hay.
+      La parrilla es UNA SOLA para todos los planes con television, asi
+      que no depende del plan del cliente. Si devuelve varias
+      coincidencias, mostraselas y que elija; nunca elijas vos.
+    solo_lectura: true
+    roles_permitidos: [ventas]
+    consulta_parrilla: true
+    filtros_verificados:
+      canal:
+        param: canal
+        tipo: texto
+
   - nombre: consultar_planes_venta
     tipo: interno
     descripcion: >

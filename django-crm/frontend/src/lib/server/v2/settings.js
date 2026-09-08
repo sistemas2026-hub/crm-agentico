@@ -21,6 +21,7 @@ import { leerConfiguracionAsistente } from './asistente-config.js';
 import { leerCanalWhatsapp } from './canal-whatsapp.js';
 import { leerSmartOlt } from './smartolt.js';
 import { contarPlanesVenta } from './planes-venta.js';
+import { leerOferta } from './oferta.js';
 import { getBusinessHours } from './business-hours.js';
 import { getCustomFields } from './custom-fields.js';
 import { getEscalationPolicies } from './escalation.js';
@@ -114,7 +115,8 @@ export async function getSettingsHub(event) {
     asistente,
     canalWhatsapp,
     smartolt,
-    planesVenta
+    planesVenta,
+    oferta
   ] = await Promise.all([
     getOrgSettings(event),
     getBusinessHours(event),
@@ -136,7 +138,10 @@ export async function getSettingsHub(event) {
     leerSmartOlt(),
     // Solo el conteo -- no pega contra WispHub (ver contarPlanesVenta()),
     // asi el hub no paga un viaje de red a una API externa en cada carga.
-    contarPlanesVenta()
+    contarPlanesVenta(),
+    // Tampoco pega contra terceros: las dos listas salen de la config
+    // del tenant, que el motor ya tiene en memoria.
+    leerOferta()
   ]);
 
   const now = Date.now();
@@ -164,6 +169,10 @@ export async function getSettingsHub(event) {
     asistente,
     canalWhatsapp,
     smartolt,
-    planesVenta
+    planesVenta,
+    oferta: oferta
+      ? { servicios: (oferta.servicios_ofrecidos ?? []).filter((s) => s.activo).length,
+          canales: (oferta.parrilla_canales ?? []).length }
+      : null
   };
 }

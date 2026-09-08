@@ -899,6 +899,19 @@ class Herramienta(Base):
     # libres", solo lee un valor ya acotado por esa lista). Ver
     # nucleo/modelo/motor.py::_ejecutar_consulta_planes_venta.
     consulta_planes_venta: bool = False
+    # Tipo 'interno', misma familia que el anterior: leen config que ya esta
+    # en memoria del turno, sin red y sin datos de cliente, asi que tampoco
+    # pasan por el gate de identidad -- que servicios vende la empresa y que
+    # canales trae la TV es igual para todo el mundo, lo pregunte un
+    # prospecto o un suscriptor.
+    #
+    #   consulta_servicios_ofrecidos -> TenantConfig.servicios_ofrecidos
+    #   consulta_parrilla            -> TenantConfig.parrilla_canales, y
+    #                                   ademas RESUELVE el nombre que escribio
+    #                                   el cliente contra la parrilla (ver
+    #                                   nucleo/modelo/motor.py)
+    consulta_servicios_ofrecidos: bool = False
+    consulta_parrilla: bool = False
     # Tipo 'interno': entrega los PASOS de un procedimiento de la empresa
     # (asistente.habilidades) cuando el agente lo pide por su codigo.
     #
@@ -1987,6 +2000,44 @@ class PlanVenta(Base):
     zonas: list[int] = Field(default_factory=list)
 
 
+class ServicioOfrecido(Base):
+    """
+    Un servicio que la empresa VENDE. Existe porque el agente no tenia forma
+    de saberlo y lo improvisaba: medido el 08/09/2026, tres corridas del
+    simulador donde un prospecto pidio telefonia fija y el rol de entrada
+    contesto "solo tenemos internet residencial y combos con television" --
+    correcto para Rapilink, y sin ninguna fuente detras. Acerto porque un ISP
+    obviamente vende internet; el proximo tenant que si venda VoIP habria
+    recibido la misma negacion segura y falsa.
+
+    No se reusa 'Herramienta.servicios_reportables' aunque hoy coincidan:
+    eso es lo que un cliente puede REPORTAR como falla, esto es lo que la
+    empresa OFRECE. Atarlos obligaria a que toda empresa venda exactamente
+    aquello de lo que acepta reclamos.
+    """
+    nombre: str
+    # Apagar en vez de borrar: un servicio que se deja de vender vuelve, y
+    # borrarlo pierde la descripcion que alguien redacto.
+    activo: bool = True
+    # Opcional, para matizar ("solo en algunas zonas"). El agente la repite;
+    # no la interpreta.
+    descripcion: str = ""
+
+
+class Canal(Base):
+    """
+    Un canal de la parrilla de television. UNICA para todos los planes con
+    TV (decision de negocio, 08/09/2026): no cuelga de PlanVenta porque
+    cargarla una vez por plan es invitar a que se desincronicen.
+
+    Un solo campo a proposito. La lista se carga desde un Excel de una
+    columna, y el reconocimiento de lo que escribe el cliente ('discovery'
+    contra 'DISCOVERY H&H') lo resuelve el CODIGO normalizando, no una
+    columna de alias que alguien tendria que mantener a mano.
+    """
+    nombre: str
+
+
 # =============================================================================
 #  RAIZ
 # =============================================================================
@@ -2054,6 +2105,13 @@ class TenantConfig(Base):
     # tiene que decirlo asi, nunca caer de vuelta al catalogo crudo (eso
     # es exactamente el problema que este campo resuelve).
     planes_venta: list[PlanVenta] = Field(default_factory=list)
+    # Que vende la empresa, y que canales trae la TV. Vacio NO significa
+    # "no vende nada": significa que nadie lo cargo todavia, y el agente
+    # tiene que decir que no tiene el dato en vez de deducirlo -- ver
+    # ServicioOfrecido arriba sobre por que deducirlo salio mal una vez.
+    # La parrilla es una sola para todos los planes con TV.
+    servicios_ofrecidos: list[ServicioOfrecido] = Field(default_factory=list)
+    parrilla_canales: list[Canal] = Field(default_factory=list)
     # Catalogo localidad -> zona(s) real(es), sincronizado bajo demanda --
     # ver LocalidadZona arriba y nucleo/herramientas/localidades.py. Nunca
     # se edita a mano: se reemplaza entero cada vez que corre el sync.

@@ -658,6 +658,41 @@ def _con_obligatorios(texto: str, obligatorios: list[str]) -> str:
     return ((texto or "").rstrip() + "\n\n" + "\n".join(faltan)).strip()
 
 
+def _nombres_parecidos(clave: str, nombres: list[str], cuantas: int = 4) -> list[str]:
+    """
+    Los nombres de una lista que se parecen a lo que escribio una persona.
+
+    Se extrajo de '_localidades_parecidas' (abajo) cuando hizo falta lo mismo
+    para la parrilla de canales: el problema es identico -- alguien escribe
+    'discovery' y el catalogo dice 'DISCOVERY H&H', igual que escribe
+    'centro' y el catalogo dice 'CENTRO DE SOLEDAD'. Una sola implementacion
+    para que no se arreglen por separado.
+
+    Dos pasadas, y la primera importa mas que la segunda: si lo que escribio
+    esta CONTENIDO en un nombre del catalogo (o al reves), eso es una
+    coincidencia mucho mas fuerte que un parecido de letras -- difflib
+    puntua bajo esos casos por la diferencia de largo.
+
+    Sin llamadas de red: la lista ya esta en memoria del turno.
+    """
+    import difflib
+
+    # strip() ademas de _sin_tildes: esa funcion baja a minusculas y saca
+    # tildes, pero NO recorta los bordes, y ' espn ' no encuentra 'ESPN'.
+    clave = _sin_tildes(clave or "").strip()
+    if not clave:
+        return []
+    contenidos = [n for n in nombres
+                  if clave in _sin_tildes(n) or _sin_tildes(n) in clave]
+    if len(contenidos) >= cuantas:
+        return contenidos[:cuantas]
+    # Se completa con parecidos de letras, sin repetir los que ya entraron.
+    faltan = cuantas - len(contenidos)
+    restantes = {_sin_tildes(n): n for n in nombres if n not in contenidos}
+    cercanos = difflib.get_close_matches(clave, list(restantes), n=faltan, cutoff=0.72)
+    return contenidos + [restantes[c] for c in cercanos]
+
+
 def _localidades_parecidas(config, clave: str, cuantas: int = 4) -> list[str]:
     """
     Los nombres del catalogo que se parecen a lo que escribio el cliente.
@@ -675,20 +710,7 @@ def _localidades_parecidas(config, clave: str, cuantas: int = 4) -> list[str]:
 
     Sin llamadas de red: el catalogo ya esta en memoria del turno.
     """
-    import difflib
-
-    if not clave:
-        return []
-    nombres = [l.localidad for l in config.localidades]
-    contenidos = [n for n in nombres
-                  if clave in _sin_tildes(n) or _sin_tildes(n) in clave]
-    if len(contenidos) >= cuantas:
-        return contenidos[:cuantas]
-    # Se completa con parecidos de letras, sin repetir los que ya entraron.
-    faltan = cuantas - len(contenidos)
-    restantes = {_sin_tildes(n): n for n in nombres if n not in contenidos}
-    cercanos = difflib.get_close_matches(clave, list(restantes), n=faltan, cutoff=0.72)
-    return contenidos + [restantes[c] for c in cercanos]
+    return _nombres_parecidos(clave, [l.localidad for l in config.localidades], cuantas)
 
 
 def _ejecutar_consulta_documentacion(config, nombre_rol: str,
@@ -805,6 +827,83 @@ def _ejecutar_carga_habilidad(config, nombre_rol: str,
                 "dato que no tienes, conseguilo con tus herramientas antes de "
                 "seguir; si un paso te pide algo que no puedes hacer, decilo "
                 "en vez de saltearlo."}
+
+
+def _ejecutar_consulta_servicios_ofrecidos(config) -> dict:
+    """
+    Que servicios vende la empresa. Lee TenantConfig.servicios_ofrecidos, sin
+    red y sin datos de cliente.
+
+    FAIL-CLOSED: la lista vacia NO se responde como "no vendemos nada" ni se
+    deduce del resto de la config. Nace de una falla medida el 08/09/2026 --
+    el rol de entrada afirmo tres veces "solo tenemos internet residencial y
+    combos con television" sin tener de donde sacarlo. Acerto de casualidad
+    (un ISP vende internet); el mismo prompt, en un tenant que venda VoIP,
+    habria negado un servicio que si existe, con el mismo tono seguro.
+    """
+    activos = [s for s in config.servicios_ofrecidos if s.activo]
+    if not activos:
+        return {
+            "servicios": [],
+            "instruccion_interna":
+                "No hay servicios cargados en la configuracion de esta "
+                "empresa. NO deduzcas cuales son ni los nombres a partir de "
+                "otra cosa: decile al cliente que vas a confirmar esa "
+                "informacion y escala. Afirmar un catalogo sin este dato ya "
+                "produjo respuestas falsas.",
+        }
+    return {"servicios": [{"nombre": s.nombre, "descripcion": s.descripcion}
+                          for s in activos]}
+
+
+def _ejecutar_consulta_parrilla(config, argumentos_modelo: dict) -> dict:
+    """
+    Resuelve si un canal esta en la parrilla de TV. La parrilla es UNICA para
+    todos los planes con television (decision de negocio, 08/09/2026), asi
+    que la respuesta no depende del plan del cliente y no hace falta su
+    identidad.
+
+    EL CODIGO COMPARA, NO EL MODELO (PRD 12.5). El cliente escribe
+    'discovery' y la parrilla dice 'DISCOVERY H&H': con comparacion exacta
+    eso da "no lo tenemos", que es un NO falso sobre un canal que si esta.
+    Se reusa '_nombres_parecidos' -- el mismo problema que ya tenian las
+    localidades, resuelto una sola vez.
+
+    Varias coincidencias no se resuelven aca: se devuelven todas para que el
+    cliente elija ('discovery' puede ser tres canales distintos). Elegir por
+    el seria adivinar cual quiso.
+
+    Sin 'canal' devuelve la parrilla entera -- sirve para "que canales
+    tienen".
+    """
+    nombres = [c.nombre for c in config.parrilla_canales]
+    if not nombres:
+        return {
+            "parrilla_cargada": False,
+            "instruccion_interna":
+                "La parrilla de canales no esta cargada en la configuracion "
+                "de esta empresa. NO inventes canales ni digas que un canal "
+                "no esta: no tenes con que saberlo. Decile al cliente que vas "
+                "a confirmar y escala.",
+        }
+
+    canal = str((argumentos_modelo or {}).get("canal", "")).strip()
+    if not canal:
+        return {"parrilla_cargada": True, "total": len(nombres), "canales": nombres}
+
+    coincidencias = _nombres_parecidos(canal, nombres)
+    if not coincidencias:
+        return {"parrilla_cargada": True, "consultado": canal, "en_parrilla": False,
+                "instruccion_interna":
+                    "Ese canal no esta en la parrilla. Decilo tal cual, sin "
+                    "ofrecer otro plan: todos los planes con TV traen la misma "
+                    "parrilla, asi que no hay ninguno que si lo tenga."}
+    return {"parrilla_cargada": True, "consultado": canal, "en_parrilla": True,
+            "coincidencias": coincidencias,
+            "instruccion_interna":
+                "Respondele con el nombre EXACTO como figura arriba, no como "
+                "lo escribio el. Si hay mas de uno, mostraselos y que elija "
+                "cual buscaba -- no elijas vos."}
 
 
 def _ejecutar_consulta_planes_venta(config, argumentos_modelo: dict) -> dict:
@@ -1108,6 +1207,10 @@ def ejecutar_para_servicio(config, herramienta, argumentos_modelo: dict) -> dict
     # a otro (PRD 12.5: el modelo compone, el codigo calcula).
     if herramienta.tipo == "interno" and herramienta.consulta_planes_venta:
         return _ejecutar_consulta_planes_venta(config, argumentos)
+    if herramienta.tipo == "interno" and herramienta.consulta_servicios_ofrecidos:
+        return _ejecutar_consulta_servicios_ofrecidos(config)
+    if herramienta.tipo == "interno" and herramienta.consulta_parrilla:
+        return _ejecutar_consulta_parrilla(config, argumentos)
 
     if herramienta.tipo == "http":
         return (ejecutor_http.ejecutar_asincrono(herramienta, argumentos,
@@ -2005,6 +2108,15 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 # gate de identidad -- no revela ningun dato de cliente, solo
                 # el catalogo de planes que un humano ya decidio publicar.
                 salida = _ejecutar_consulta_planes_venta(config, llamada.argumentos)
+            elif herramienta.consulta_servicios_ofrecidos:
+                # Misma familia: lee config, sin red y sin datos de cliente.
+                # Que vende la empresa es igual para todo el mundo, asi que
+                # tampoco pasa por el gate de identidad.
+                salida = _ejecutar_consulta_servicios_ofrecidos(config)
+            elif herramienta.consulta_parrilla:
+                # Idem. La parrilla es unica para todos los planes con TV, asi
+                # que la respuesta no depende de quien pregunta ni de su plan.
+                salida = _ejecutar_consulta_parrilla(config, llamada.argumentos)
             elif herramienta.consulta_documentacion:
                 # Fuera del gate: una guia de procedimientos no menciona a
                 # ningun cliente. Ver el porque del cambio entero en

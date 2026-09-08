@@ -215,6 +215,17 @@
                 body: 'Qué planes se ofrecen a un prospecto nuevo, y en qué localidades.',
                 value: data.planesVenta ? `${count(data.planesVenta.cantidad)} planes` : null,
                 warn: !!data.planesVenta && data.planesVenta.cantidad === 0
+              },
+              {
+                href: '/settings/oferta',
+                title: 'Servicios y canales',
+                body: 'Qué servicios vende la empresa, y la parrilla de TV que consulta el agente.',
+                value: data.oferta
+                  ? `${count(data.oferta.servicios)} servicios · ${count(data.oferta.canales)} canales`
+                  : null,
+                // Sin parrilla el agente no puede responder por canales: no es
+                // un detalle cosmetico, es una funcionalidad apagada.
+                warn: !!data.oferta && data.oferta.canales === 0
               }
             ]
           : [])

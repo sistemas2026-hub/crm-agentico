@@ -1318,3 +1318,32 @@ casos:
       # herramienta desde la config, y son dos lugares distintos que hay que
       # mantener de acuerdo.
       catalogo_con: [cargar_habilidad]
+
+  - nombre: pedir un servicio que no se ofrece igual deriva a ventas
+    rol: cliente_final
+    sesion:
+      verificado: false
+      nivel: 0
+      identificador_canal: '573111111112'
+    mensajes:
+      - "Hola, quiero contratar telefonia fija para mi casa"
+    espera:
+      # Medido en el simulador el 08/09/2026, tres corridas seguidas: el rol
+      # de entrada contesto por su cuenta "solo tenemos internet residencial
+      # y combos con television" -- CERO llamadas a herramientas-- y encima
+      # pregunto "¿queres que te conecte?" en vez de conectar.
+      #
+      # Las dos cosas estaban prohibidas por su propio prompt ("no improvises
+      # esos datos vos", "LLAMA derivar_a_area, no la anuncies") y aun asi
+      # pasaron. El caso #30 ya cubria esto, pero con la frase "para
+      # solicitar un servicio", que si funciona. Esta es la que falla.
+      #
+      # No se afirma que la respuesta omita "internet": una vez derivado,
+      # ventas SI puede nombrarlo -- tiene consultar_servicios_ofrecidos y
+      # ese es el catalogo real. Lo que se persigue es quien contesta, no
+      # con que palabras.
+      deriva_a: ventas
+      usa: [derivar_a_area]
+      sin_errores: true
+      # Un prospecto no es cliente: ventas no exige verificacion.
+      responde_sin: [cedula, cédula]

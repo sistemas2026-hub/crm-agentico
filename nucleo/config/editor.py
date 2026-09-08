@@ -704,6 +704,93 @@ def _mutar_borrar_variable_tenant(doc: dict, nombre: str) -> None:
     (doc.get("variables_tenant") or {}).pop(nombre, None)
 
 
+def canales_desde_excel(datos: bytes) -> tuple[list[str], list[str]]:
+    """
+    (canales, descartados) a partir de un .xlsx de UNA columna, un canal por
+    fila. Funcion pura: recibe bytes y no toca ni la base ni el disco, para
+    que se pueda probar sin subir un archivo de verdad.
+
+    Se lee la PRIMERA columna de la PRIMERA hoja y nada mas. Pedirle a quien
+    carga que respete un nombre de hoja o un encabezado es pedirle que
+    adivine; una columna es lo que cualquiera arma sin instrucciones.
+
+    Los duplicados se descartan comparando SIN mayusculas ni tildes -- que es
+    como los compara despues el motor al buscar un canal. Si aca se dedujera
+    distinto, dos filas que el buscador considera el mismo canal entrarian
+    las dos. Se devuelven aparte, no en silencio: quien sube el archivo tiene
+    que poder ver que se descarto, o va a creer que cargo mas de lo que cargo.
+
+    El orden de aparicion se respeta -- es el que la empresa eligio en su
+    archivo, y reordenarlo alfabeticamente le esconde su propio criterio.
+    """
+    import io as _io
+    from openpyxl import load_workbook
+    from nucleo.config.schema import _sin_tildes
+
+    try:
+        libro = load_workbook(_io.BytesIO(datos), read_only=True, data_only=True)
+    except Exception as e:                       # archivo corrupto, .xls viejo, no-Excel
+        raise ErrorEdicion(
+            "No se pudo leer el archivo. Tiene que ser un Excel .xlsx con los "
+            f"canales en la primera columna ({type(e).__name__})."
+        ) from e
+
+    canales: list[str] = []
+    descartados: list[str] = []
+    vistos: set[str] = set()
+    for fila in libro[libro.sheetnames[0]].iter_rows(min_col=1, max_col=1, values_only=True):
+        crudo = fila[0]
+        if crudo is None:
+            continue
+        nombre = str(crudo).strip()
+        if not nombre:
+            continue
+        clave = _sin_tildes(nombre).strip()
+        if clave in vistos:
+            descartados.append(nombre)
+            continue
+        vistos.add(clave)
+        canales.append(nombre)
+    libro.close()
+
+    if not canales:
+        raise ErrorEdicion(
+            "El archivo no tiene ningun canal en la primera columna. No se "
+            "guarda una parrilla vacia por accidente: dejaria al agente sin "
+            "poder responder por canales.")
+    return canales, descartados
+
+
+def _mutar_parrilla_canales(doc: dict, canales: list[str]) -> None:
+    """
+    Reemplaza la parrilla ENTERA. No hay 'agregar un canal': la parrilla es
+    lo que dice el Excel que se subio, y mezclarla con lo anterior deja
+    canales fantasma de una version vieja que nadie recuerda haber cargado.
+
+    Una sola parrilla para todos los planes con TV (decision de negocio,
+    08/09/2026), por eso vive en la raiz y no dentro de cada PlanVenta.
+    """
+    doc["parrilla_canales"] = [{"nombre": c} for c in canales]
+
+
+def _mutar_servicios_ofrecidos(doc: dict, servicios: list[dict]) -> None:
+    """
+    Que vende la empresa. Reemplaza la lista entera -- la pantalla manda
+    siempre el estado completo, incluidos los apagados, que se conservan a
+    proposito: un servicio que se deja de vender vuelve, y borrarlo pierde la
+    descripcion que alguien redacto.
+    """
+    limpios = []
+    for s in servicios:
+        nombre = str((s or {}).get("nombre", "")).strip()
+        if not nombre:
+            continue
+        limpios.append({"nombre": nombre,
+                        "activo": bool(s.get("activo", True)),
+                        "descripcion": str(s.get("descripcion", "")).strip()})
+    doc["servicios_ofrecidos"] = limpios
+
+
 def _mutar_canal_whatsapp(doc: dict, activo: bool, numero_visible: str | None) -> None:
     """
     Prender/apagar el canal y el numero que se muestra en la pantalla de
@@ -817,6 +904,14 @@ def guardar_flujo_derivacion(tenant: str, destinos: list[str],
 
 def guardar_casos_manual(tenant: str, casos: list[str]) -> TenantConfig:
     return _editar(tenant, lambda doc: _mutar_casos_manual(doc, casos))
+
+
+def guardar_parrilla_canales(tenant: str, canales: list[str]) -> TenantConfig:
+    return _editar(tenant, lambda doc: _mutar_parrilla_canales(doc, canales))
+
+
+def guardar_servicios_ofrecidos(tenant: str, servicios: list[dict]) -> TenantConfig:
+    return _editar(tenant, lambda doc: _mutar_servicios_ofrecidos(doc, servicios))
 
 
 def guardar_variable_tenant(tenant: str, nombre: str, valor: str) -> TenantConfig:
