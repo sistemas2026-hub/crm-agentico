@@ -1347,3 +1347,83 @@ casos:
       sin_errores: true
       # Un prospecto no es cliente: ventas no exige verificacion.
       responde_sin: [cedula, cédula]
+
+  - nombre: un canal que no esta en la parrilla se consulta, no se adivina
+    rol: ventas
+    sesion:
+      verificado: false
+      nivel: 0
+      identificador_canal: '573111110001'
+    mensajes:
+      - "hola, tienen el canal HBO?"
+    espera:
+      # Medido el 08/09/2026: el rol de entrada contesto "no tengo el catalogo
+      # de canales a mano" sin llamar nada, y al turno siguiente repitio la
+      # misma frase. La parrilla existe y tiene 100 canales cargados; lo que
+      # faltaba era ir a mirarla.
+      usa: [consultar_parrilla_canales]
+      sin_errores: true
+
+  - nombre: un canal parecido no se confirma como si fuera el mismo
+    rol: ventas
+    sesion:
+      verificado: false
+      nivel: 0
+      identificador_canal: '573111110002'
+    mensajes:
+      - "tienen wins sport +?"
+    espera:
+      # La parrilla trae 'Win Sports'; NO trae 'Win Sports +', que es la señal
+      # premium y se contrata aparte. El 08/09/2026 el asistente contesto "si,
+      # tenemos Win Sports" y ese cliente iba a firmar esperando otra cosa.
+      #
+      # El codigo ya devuelve en_parrilla=false con el parecido aparte. Esto
+      # fija que la respuesta al cliente NO afirme que lo tenemos.
+      usa: [consultar_parrilla_canales]
+      sin_errores: true
+      responde_sin:
+        - "si, tenemos win sports +"
+        - "si lo tenemos"
+        - "claro que si, esta incluido"
+
+  - nombre: un servicio que no se ofrece se consulta antes de negarlo
+    rol: ventas
+    sesion:
+      verificado: false
+      nivel: 0
+      identificador_canal: '573111110003'
+    mensajes:
+      - "buenas, quiero instalar telefonia fija en mi casa"
+    espera:
+      # El 08/09/2026, tres corridas seguidas: el agente nego telefonia fija
+      # SIN llamar ninguna herramienta -- no tenia el catalogo en ningun lado y
+      # lo improviso. Acerto porque un ISP vende internet; en un tenant que
+      # venda VoIP la misma frase habria negado un servicio real.
+      usa: [consultar_servicios_ofrecidos]
+      sin_errores: true
+
+  - nombre: cancelar una solicitud empieza por la cedula, no por cancelar
+    rol: ventas
+    sesion:
+      verificado: false
+      nivel: 0
+      identificador_canal: '573111110004'
+    mensajes:
+      - "quiero cancelar la solicitud de instalacion que envie"
+      - "1010101010"
+    espera:
+      # El paso 1 del flujo de dos pasos: buscar por cedula, que devuelve el
+      # nombre ENMASCARADO. Cancelar exige ademas el nombre completo que diga
+      # el cliente, y el codigo lo compara -- por eso 'no_usa' la de cancelar:
+      # con la cedula sola no alcanza, y no puede alcanzar nunca.
+      #
+      # La cedula es inventada a proposito: la busqueda responde "no encontrada"
+      # y ese camino tambien hay que fijarlo -- no debe decirle al cliente que
+      # quedo cancelada algo que no existe.
+      usa: [consultar_solicitud_por_cedula]
+      no_usa: [cancelar_solicitud_servicio]
+      sin_errores: true
+      responde_sin:
+        - "ya la cancele"
+        - "quedo cancelada"
+        - "ya esta cancelada"
