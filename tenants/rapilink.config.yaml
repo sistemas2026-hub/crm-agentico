@@ -2182,6 +2182,7 @@ herramientas:
       llenado el formulario: ahi no hay nada que cancelar, toma la
       informacion y cerra el caso como siempre.
     base_url: http://backend:8000/api
+    auth_ref: BOTTLECRM_API_TOKEN
     endpoint: /solicitudes/buscar/
     metodo: POST
     solo_lectura: true
@@ -2202,6 +2203,7 @@ herramientas:
       literal porque leido en conjunto es lo que dice por que se caen las
       ventas.
     base_url: http://backend:8000/api
+    auth_ref: BOTTLECRM_API_TOKEN
     endpoint: /solicitudes/cancelar/
     metodo: POST
     solo_lectura: false

@@ -277,6 +277,18 @@ afirmar(real.parrilla_canales == [],
 afirmar([s.nombre for s in real.servicios_ofrecidos if s.activo] != [],
         "los servicios si vienen sembrados, con lo que la config ya daba por cierto")
 
+# TODA herramienta que salga a un backend propio tiene que llevar credencial.
+# Medido el 08/09/2026: las dos de solicitudes se cargaron sin 'auth_ref',
+# salieron sin token y Django respondio 403. El agente lo leyo como un fallo
+# suyo y escalo por 'tres_fallos_seguidos' -- el cliente recibio "no estoy
+# logrando resolverlo" por una credencial que faltaba en un YAML.
+sin_credencial = [h.nombre for h in real.herramientas
+                  if (h.base_url or "").startswith("http://backend:")
+                  and not h.auth_ref]
+afirmar(sin_credencial == [],
+        f"ninguna herramienta contra el backend propio sale sin auth_ref "
+        f"(sin credencial: {sin_credencial or 'ninguna'})")
+
 
 print("\n== 8. la carga por Excel ==")
 # 'canales_desde_excel' es pura -- recibe bytes-- asi que se prueba con un

@@ -70,6 +70,35 @@ from nucleo.config import editor, fuente                      # noqa: E402
 from nucleo.config.schema import TenantConfig                 # noqa: E402
 
 HERRAMIENTAS_NUEVAS = ("consultar_servicios_ofrecidos", "consultar_parrilla_canales")
+# Las que este script CREO y que nadie edita desde ninguna pantalla. Para esas
+# el archivo manda: si la definicion de la base difiere, se reemplaza entera.
+#
+# La distincion importa. Para el resto del catalogo el archivo NO manda -- la
+# base puede tener algo que el YAML no sabe, y pisarlo es como se perdio
+# 'ventas' de derivar_a_area. Pero estas cuatro nacieron hoy, en el archivo, y
+# no hay interfaz que las toque: si difieren, es que el archivo tiene una
+# correccion que la base todavia no.
+#
+# Hizo falta el 08/09/2026: las dos de solicitudes se cargaron sin 'auth_ref' y
+# salian al backend sin credencial. Django respondia 403 y el agente lo leia
+# como un fallo suyo -- escalo por 'tres_fallos_seguidos' en vez de decir que
+# no podia consultar.
+HERRAMIENTAS_PROPIAS = HERRAMIENTAS_NUEVAS + (
+    "consultar_solicitud_por_cedula", "cancelar_solicitud_servicio")
+
+# Herramientas que YA EXISTIAN y a las que este trabajo solo les cambio un
+# campo. No se reemplazan enteras -- eso pisaria lo que alguien haya editado
+# desde la interfaz-- : se toca la clave nombrada y nada mas.
+#
+# 'cerrar_ticket_operativo' necesita 'invocable_por_servicio' para que el
+# backend pueda cerrar el ticket al cancelar una solicitud. Sin eso la ruta
+# interna del motor responde 403, y el 08/09/2026 la cancelacion quedo hecha
+# con el ticket de WispHub abierto: alguien habria salido a instalar algo
+# cancelado. Se veia en la bandeja, anotado -- que es lo que salva el caso--
+# pero el ticket seguia vivo.
+CAMPOS_A_TOCAR = {
+    "cerrar_ticket_operativo": {"invocable_por_servicio": True},
+}
 ROLES_CON_PROMPT_NUEVO = ("cliente_final", "ventas")
 
 
@@ -78,6 +107,23 @@ def _del_archivo(slug: str) -> dict:
     if not ruta.exists():
         raise SystemExit(f"No existe {ruta}")
     return yaml.safe_load(io.open(ruta, encoding="utf-8"))
+
+
+def _ya_dice_lo_mismo(en_base, en_archivo) -> bool:
+    """Si lo que hay en la base ya contiene lo que el archivo declara.
+
+    No es igualdad: el valor de la base viene EXPANDIDO con todos los defaults
+    del esquema y el del archivo no. Comparar por igualdad marca como
+    "cambiada" cualquier herramienta con un campo anidado, siempre -- y un
+    aviso que aparece en todas las corridas es un aviso que nadie lee.
+
+    Se compara si el archivo aporta algo NUEVO, recursivamente sobre los
+    diccionarios. Un default expandido no aporta nada.
+    """
+    if isinstance(en_archivo, dict) and isinstance(en_base, dict):
+        return all(_ya_dice_lo_mismo(en_base.get(k), v)
+                   for k, v in en_archivo.items())
+    return en_base == en_archivo
 
 
 def _mutar(doc: dict, archivo: dict, informe: list[str]) -> None:
@@ -105,6 +151,34 @@ def _mutar(doc: dict, archivo: dict, informe: list[str]) -> None:
         doc.setdefault("herramientas", []).append(por_nombre[nombre])
         existentes.add(nombre)
         informe.append(f"  + {nombre}: se agrega al catalogo")
+
+    # 1b. Y las que ya estan pero quedaron distintas del archivo. Solo las
+    #     propias -- ver HERRAMIENTAS_PROPIAS sobre por que el resto no.
+    #     Se comparan SOLO las claves que el archivo declara, no el diccionario
+    #     entero: el de la base viene expandido con todos los valores por
+    #     defecto y el del archivo no, asi que compararlos enteros marca como
+    #     "cambiada" cualquier herramienta, siempre. Un aviso que aparece
+    #     siempre es un aviso que nadie lee.
+    for i, h in enumerate(doc.get("herramientas", [])):
+        nombre = h.get("nombre")
+        if nombre not in HERRAMIENTAS_PROPIAS or nombre not in por_nombre:
+            continue
+        distintas = [k for k, v in por_nombre[nombre].items()
+                     if not _ya_dice_lo_mismo(h.get(k), v)]
+        if distintas:
+            for k in distintas:
+                doc["herramientas"][i][k] = por_nombre[nombre][k]
+            informe.append(f"  ~ {nombre}: se actualiza {', '.join(sorted(distintas))}")
+
+    # 1c. Y los campos sueltos de herramientas ajenas -- ver CAMPOS_A_TOCAR.
+    for h in doc.get("herramientas", []):
+        cambios = CAMPOS_A_TOCAR.get(h.get("nombre"))
+        if not cambios:
+            continue
+        for clave, valor in cambios.items():
+            if h.get(clave) != valor:
+                h[clave] = valor
+                informe.append(f"  ~ {h['nombre']}.{clave} = {valor}")
 
     # 2. 'ventas' suma acceso a las nuevas y a las dos que necesita para saber
     #    si el plan de un cliente incluye TV. Se agrega lo que falte, no se
