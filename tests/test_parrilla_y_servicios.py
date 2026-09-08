@@ -276,6 +276,49 @@ afirmar(doc["servicios_ofrecidos"][1]["activo"] is False,
         "borrarlo pierde la descripcion que alguien redacto")
 
 
+print("\n== 9. el cliente sin TV: que 'ventas' pueda mirarlo, y solo eso ==")
+# La parrilla es unica, pero un cliente cuyo plan NO incluye television no ve
+# el canal aunque este cargado. Decirle "si, lo tenemos" y que despues no lo
+# encuentre es peor que no responder, asi que 'ventas' necesita poder mirar SU
+# plan. Eso es acceso nuevo a datos de cliente y por eso se fija aca.
+v = real.roles["ventas"]
+afirmar("consultar_mi_servicio" in v.puede_consultar
+        and "consultar_plan_tv" in v.puede_consultar,
+        "ventas puede mirar el plan del cliente y si ese plan incluye TV")
+afirmar(v.campos_permitidos.get("consultar_mi_servicio") == ["plan_internet"],
+        "y de su ficha ve UN SOLO campo: el plan. Nada mas de esa ficha le "
+        "hace falta, y la lista blanca es lo unico que lo impide")
+
+# EL PUNTO DE ESTA SECCION.
+#
+# El gate de identidad del ROL no protege esto: 'ventas' declara
+# exige_verificacion=false -- un prospecto no puede verificarse, y forzarlo
+# rompio el rol una vez (19/08/2026)-- asi que su nivel exigido es 0 y el gate
+# nunca frena nada.
+#
+# Lo que protege es la HERRAMIENTA: consultar_mi_servicio exige que
+# 'id_servicio' llegue inyectado desde la sesion, y sin verificar no hay
+# id_cliente que inyectar, asi que el motor corta con FaltaIdentidadEnSesion.
+# Si alguien saca esa linea, 'ventas' pasa a leer la ficha de cualquiera sin
+# pedir nada -- y el gate del rol no lo va a detener.
+h = {x.nombre: x for x in real.herramientas}
+afirmar(h["consultar_mi_servicio"].inyectados_obligatorios == ["id_servicio"],
+        "consultar_mi_servicio EXIGE id_servicio inyectado -- es la unica "
+        "barrera real: el gate del rol vale 0 para ventas (exige_verificacion "
+        "false) y no frena nada")
+afirmar(v.exige_verificacion is False,
+        "y se deja escrito que ventas NO exige verificacion a nivel rol, para "
+        "que nadie 'arregle' la barrera en el lugar equivocado")
+afirmar("id_servicio" in h["consultar_mi_servicio"].inyectar_sesion,
+        "el id sale de la SESION, nunca de lo que el modelo proponga")
+
+afirmar("ventas" in h["consultar_plan_tv"].roles_permitidos,
+        "consultar_plan_tv admite a ventas")
+afirmar(h["consultar_plan_tv"].endpoint == h["consultar_plan_detalle"].endpoint,
+        "y no amplia a que datos llega: es el MISMO endpoint que "
+        "consultar_plan_detalle, que ventas ya podia llamar")
+
+
 print()
 if fallos:
     print(f"[FALLA] {len(fallos)} comprobacion(es):")

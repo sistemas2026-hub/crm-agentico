@@ -1322,9 +1322,27 @@ roles:
       la misma parrilla.
 
       Distinto es que el cliente NO tenga television contratada: ahi el
-      canal puede estar en la parrilla y aun asi el no verlo. Si es un
-      cliente actual con un plan sin TV, ofrecele el combo que si la
-      incluye.
+      canal puede estar en la parrilla y aun asi el no verlo. Decir "si, lo
+      tenemos" a alguien que despues no lo encuentra es peor que no
+      responder.
+
+      Si es un CLIENTE ACTUAL, el orden es este y no otro:
+
+        1. verificar su identidad (verificar_identidad_por_cedula y
+           confirmar_identidad, como siempre);
+        2. consultar_mi_servicio -> te da su plan en 'plan_internet';
+        3. consultar_plan_tv con ese id -> te dice si ese plan incluye TV;
+        4. si NO la incluye, ofrecele el combo que si la trae.
+
+      Sin el paso 1 el paso 2 no funciona -- la herramienta necesita su
+      identidad y falla si no la tiene, no te devuelve el dato de otro. Y
+      no te saltees el paso 3 deduciendo del nombre del plan: el nombre
+      casi nunca dice si trae TV ('PLAN HOGAR', 'PLAN ELITE' pueden
+      incluirla igual, verificado en vivo).
+
+      Si es un PROSPECTO (todavia no es cliente) no hay plan que mirar:
+      contale que existe el combo con television y seguí con la venta
+      normal.
 
       Con la lista curada en mano, si pregunta el precio de uno en
       particular: resolve su id cruzando el nombre contra consultar_planes
@@ -1389,9 +1407,26 @@ roles:
     puede_consultar: [verificar_identidad_por_cedula, confirmar_identidad,
           consultar_planes_venta, consultar_planes, consultar_plan_detalle,
           consultar_servicios_ofrecidos, consultar_parrilla_canales,
+          consultar_mi_servicio, consultar_plan_tv,
           registrar_solicitud_servicio, cargar_habilidad,
           consultar_documentacion, derivar_a_area]
     campos_permitidos:
+      # Un cliente ACTUAL preguntando por un canal: la parrilla es la misma
+      # para todos, pero si su plan no incluye TV el canal esta y el no lo ve.
+      # Saberlo exige mirar SU plan, y por eso la lista blanca es de un solo
+      # campo -- 'ventas' no necesita nada mas de su ficha.
+      #
+      # La verificacion no la garantiza el gate del rol: 'ventas' tiene
+      # exige_verificacion=false (un prospecto no puede verificarse) y por eso
+      # su nivel exigido es 0. La garantia es de la herramienta --
+      # consultar_mi_servicio declara inyectados_obligatorios: [id_servicio],
+      # asi que sin sesion verificada no hay id_cliente que inyectar y la
+      # llamada no sale (FaltaIdentidadEnSesion). Falla cerrado por la
+      # herramienta, no por el rol.
+      consultar_mi_servicio: [plan_internet]
+      # Mismo endpoint que consultar_plan_detalle, que este rol ya podia
+      # llamar: no amplia a que datos llega, solo que campo lee.
+      consultar_plan_tv: [descripcion]
       consultar_planes: [id, nombre]
       # La respuesta de crear un lead trae el objeto entero del CRM. Lo unico
       # que el modelo necesita ver es si salio bien y el link que le devuelve
@@ -1997,7 +2032,7 @@ herramientas:
     # rol") pasaba por una coincidencia no relacionada: 'cliente_final'
     # tambien tenia otras herramientas exclusivas (verificacion de
     # identidad) que disparaban el mismo rechazo esperado por otro motivo.
-    roles_permitidos: [soporte_tecnico_cliente]
+    roles_permitidos: [soporte_tecnico_cliente, ventas]
     base_url: https://api.wisphub.io
     endpoint: /api/plan-internet/queue/{id_plan}/
     metodo: GET
