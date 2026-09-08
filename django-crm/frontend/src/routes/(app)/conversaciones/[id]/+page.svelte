@@ -732,8 +732,14 @@
       // no hay nada que perder). 'atendida' sigue la misma logica -- salvo
       // que este a mitad de guardarse desde ESTA pestaña ahora mismo, para
       // no pisar el propio click con una respuesta vieja del sondeo.
-      if (datos.conversacion) conversacion = datos.conversacion;
-      if (!marcandoAtendida) atendida = !!datos.conversacion?.atendida;
+      // MEZCLA, no reemplazo: la ruta de sondeo devuelve el encabezado que
+      // arma el motor, y la pantalla arranca con el que le dio el servidor.
+      // Son el mismo objeto, pero si alguno de los dos gana un campo antes
+      // que el otro, reemplazar entero lo borraria a mitad de sesion.
+      if (datos.conversacion) conversacion = { ...conversacion, ...datos.conversacion };
+      if (!marcandoAtendida && datos.conversacion) {
+        atendida = !!datos.conversacion.atendida;
+      }
     } catch {
       // un sondeo que falla no tiene que avisar nada -- se reintenta solo.
     }
@@ -1038,7 +1044,7 @@
   //  de vivo: si el reloj de acá está corrido, el que manda es el de allá.
   // ==========================================================================
 
-  /** Lo que dijo el servidor, más CUÁNDO lo dijo según este navegador. */
+  /** Lo que dijo el servidor, más el instante MONOTÓNICO en que llegó. */
   let ventanaBase = $state(
     /** @type {{abierta: boolean|null, restante_seg: number|null, recibidoEn: number}|null} */ (
       null
@@ -1048,17 +1054,35 @@
   // Se resincroniza en cada sondeo: 'conversacion' se reemplaza entera, así
   // que un mensaje nuevo del cliente reabre la ventana en pantalla sin
   // recargar, que es justo lo que hace falta cuando alguien está mirando.
+  //
+  // 'performance.now()' y no 'Date.now()': es un reloj MONOTÓNICO, que no
+  // salta si el sistema ajusta la hora (un sync de NTP, un cambio de zona, un
+  // portátil que vuelve de suspensión). Con Date.now() un ajuste de reloj
+  // hacia atrás haría que el contador CREZCA, y uno hacia adelante cerraría
+  // la ventana en pantalla antes de tiempo. Ninguno de los dos avisa.
   $effect(() => {
     const v = conversacion?.ventana_whatsapp;
-    ventanaBase = v ? { ...v, recibidoEn: Date.now() } : null;
+    ventanaBase = v ? { ...v, recibidoEn: performance.now() } : null;
   });
 
   /** Sólo para que el contador avance entre sondeos. */
-  let tic = $state(Date.now());
+  let tic = $state(performance.now());
   $effect(() => {
     if (!ventanaBase) return;
-    const id = setInterval(() => (tic = Date.now()), 15000);
-    return () => clearInterval(id);
+    const id = setInterval(() => (tic = performance.now()), 15000);
+    // Un navegador RALENTIZA los timers de una pestaña en segundo plano --
+    // hasta un tic por minuto, o ninguno. Sin esto, volver después de veinte
+    // minutos mostraba el contador congelado en donde había quedado. Al
+    // volver se recalcula de una y además el sondeo (que ya escucha 'focus')
+    // trae el dato autoritativo del servidor.
+    const alVolver = () => (tic = performance.now());
+    document.addEventListener('visibilitychange', alVolver);
+    window.addEventListener('focus', alVolver);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', alVolver);
+      window.removeEventListener('focus', alVolver);
+    };
   });
 
   // Se descuenta el tiempo TRANSCURRIDO, no se recalcula desde la fecha
@@ -1137,6 +1161,24 @@
       cargandoPlantillas = false;
     }
   }
+
+  /** Si hay alguna plantilla que sirva para RETOMAR UN CASO.
+
+      Meta clasifica cada plantilla, y la categoria no es una etiqueta
+      cosmetica: una MARKETING existe para promocionar, se le puede haber
+      dado de baja al cliente, y llega con la cara equivocada cuando lo que
+      se quiere es seguir una falla de servicio. UTILITY es la que
+      corresponde.
+
+      Se mira la categoria y no el texto: el texto lo escribio alguien y
+      puede decir cualquier cosa; la categoria la aprobo Meta.
+
+      Hoy Rapilink tiene UNA sola aprobada, MARKETING, y su encabezado dice
+      "Bienvenido a Isergy". Sin este aviso la pantalla ofreceria una salida
+      que en la practica no lo es. */
+  let hayPlantillaDeServicio = $derived(
+    plantillas.some((p) => ['UTILITY', 'SERVICE'].includes((p.categoria ?? '').toUpperCase()))
+  );
 
   function elegirPlantilla(/** @type {any} */ p) {
     plantillaElegida = p;
@@ -1662,9 +1704,6 @@
               >· el cliente no escribe hace más de 24 h. Para volver a
               contactarlo hay que usar una plantilla aprobada.</span
             >
-            <button type="button" class="v2-btn v2-btn-sm" onclick={abrirPlantillas}>
-              Elegir plantilla
-            </button>
           {:else if ventanaPorCerrarse}
             <strong>La ventana cierra en {comoDuracion(ventanaRestante ?? 0)}</strong>
             <span class="v2-muted">· después sólo se le puede escribir por plantilla</span>
@@ -1696,6 +1735,16 @@
           {/if}
 
           {#if !cargandoPlantillas && !plantillaElegida}
+            {#if plantillas.length && !hayPlantillaDeServicio}
+              <p class="plantilla-inadecuada">
+                <strong>No hay una plantilla adecuada para retomar un caso.</strong>
+                Las aprobadas de esta cuenta son de categoría MARKETING: existen para
+                promocionar, no para seguir una falla de servicio, y no le llegan a quien
+                se dio de baja de mensajes comerciales. Hace falta una plantilla UTILITY
+                propia — aprobarla en Meta lleva días. Se pueden mandar igual, pero
+                sabiendo eso.
+              </p>
+            {/if}
             {#if plantillas.length}
               <ul class="plantillas-lista">
                 {#each plantillas as p (p.nombre)}
@@ -1830,6 +1879,7 @@
 
         <textarea
           class="compositor-texto"
+          class:texto-inerte={bloqueadoPorVentana}
           bind:this={campoTexto}
           bind:value={entrada}
           onpaste={alPegar}
@@ -1926,7 +1976,11 @@
             {:else}
               Responde el asistente
             {/if}
-            · <kbd class="v2-kbd">Enter</kbd> envía
+            <!-- Con la ventana cerrada, Enter no manda nada. Dejar la pista
+                 puesta seria invitar al gesto que no funciona. -->
+            {#if !bloqueadoPorVentana}
+              · <kbd class="v2-kbd">Enter</kbd> envía
+            {/if}
           </span>
 
           {#if modo === 'nota'}
@@ -1949,11 +2003,19 @@
             >
               <Send size={14} />{enviando ? 'Enviando…' : 'Enviar archivo'}
             </button>
+          {:else if bloqueadoPorVentana}
+            <button
+              class="v2-btn v2-btn-primary"
+              type="button"
+              onclick={abrirPlantillas}
+            >
+              Elegir plantilla
+            </button>
           {:else}
             <button
               class="v2-btn v2-btn-primary"
               type="submit"
-              disabled={enviando || !entrada.trim() || bloqueadoPorVentana}
+              disabled={enviando || !entrada.trim()}
               aria-busy={enviando}
             >
               <Send size={14} />{enviando ? 'Enviando…' : 'Enviar'}
@@ -2806,6 +2868,13 @@
     margin-left: auto;
   }
 
+  /* Un cuadro deshabilitado que se ve igual que uno normal invita a
+     escribir y no avisa hasta que alguien ya escribio. */
+  .texto-inerte {
+    background: var(--v2-paper);
+    cursor: not-allowed;
+  }
+
   /* --- selector de plantillas -------------------------------------------- */
   .plantillas {
     display: flex;
@@ -2827,6 +2896,15 @@
   }
   .plantillas-top button {
     margin-left: auto;
+  }
+  .plantilla-inadecuada {
+    margin: 0;
+    padding: 8px;
+    border-radius: 8px;
+    background: var(--v2-ember-soft);
+    color: var(--v2-ink);
+    font-size: 11.5px;
+    line-height: 1.45;
   }
   .plantillas-lista {
     list-style: none;

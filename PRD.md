@@ -569,6 +569,57 @@ Tres defectos salieron de esa corrida, ninguno visible en lo que el asistente co
 
 ---
 
+### 8.11 Bandeja de conversaciones — qué le falta para ser un inbox de soporte (septiembre 2026)
+
+Comparación contra Intercom, Zendesk, Front y respond.io. **No se copia una bandeja entera**: se toman las funciones de operación diaria que faltan, y se descartan las que resuelven problemas de escala que esta operación todavía no tiene.
+
+Lo que ya tiene y esos productos no traen tan integrado: **el diagnóstico de lo que hizo realmente la IA** — qué ejecutó, qué frenó el código y qué falló un tercero (§8.2, `es_bloqueo`).
+
+| # | Funcionalidad | Estado |
+|---|---------------|--------|
+| 1 | Responder citando un mensaje (`context.message_id` de Meta) | Falta — **es lo siguiente** |
+| 2 | Estados Enviado/Entregado/Leído/Error + reintentar | ✅ Hecho (06/09/2026) |
+| 3 | Borradores persistentes (respuesta y nota, por separado) | Falta |
+| 4 | "Otro operador está escribiendo" | Falta — **depende de cuántas personas usan la bandeja** |
+| 5 | Respuestas rápidas / macros (mensaje + etiqueta + derivar + posponer) | Falta — **bloqueado a propósito**, ver abajo |
+| 6 | Ventana de WhatsApp de 24 h visible + selector de plantillas | ✅ Hecho (08/09/2026, §8.12) |
+| 7 | Posponer / snooze, con reapertura si el cliente responde | Falta |
+| 8 | @Menciones en notas internas (colaborador ≠ responsable) | Falta — depende de #4 |
+| 9 | Transcripción de audios | Falta — alto valor para un ISP, decidir proveedor y costo por minuto |
+| 10 | Galería de adjuntos del caso | Falta |
+| 11 | Buscar **dentro de** los mensajes | Falta — hoy el buscador filtra la lista ya cargada |
+| 12 | Acciones masivas | Falta — problema de escala |
+| 13 | SLA de primera respuesta / siguiente respuesta | Falta — problema de escala |
+| 14 | Atajos de teclado / Command-K | Falta — problema de escala |
+| 15 | Traducir mensajes | Falta |
+| 16 | Enlace directo a un mensaje | Falta |
+| 17 | Mensajes interactivos de WhatsApp (botones, listas) | Falta — sirve al asistente más que al operador |
+| 18 | Llamadas desde el inbox | Falta — posterior |
+| — | **"Responder con contexto técnico"**: borrador para el humano armado desde la traza | Falta — es lo único de esta lista que ningún inbox genérico puede tener de fábrica |
+
+**Dos cosas que gobiernan el orden, y no son la madurez del producto:**
+
+- **El volumen real.** Medido el 08/09/2026 sobre 21 días: **5 días con tráfico, ~5 conversaciones por día**, con un solo día de 106 turnos. Acciones masivas sobre 29 casos, SLA, carga equilibrada y atajos para "cientos de chats" resuelven un problema que esta operación no tiene. Construirlos ahora es mantenerlos durante todo el período en que no hacen nada.
+- **Macros escriben `tenant_config`.** Por la regla multi-tenant (§7), las macros de una empresa son configuración persistida, no código. Mientras corra la medición de razonamiento ON vs OFF, cada guardado de config crea una versión nueva y parte la comparación en un tercer grupo. Ver la memoria de la ventana de medición.
+
+**Lo que depende de un dato que todavía no se tiene:** cuántas personas trabajan la bandeja. Si hoy es una sola, el bloque entero de colaboración (#4, #8, borrador compartido, asignación) no resuelve nada.
+
+---
+
+### 8.12 La ventana de 24 h de WhatsApp, visible antes de escribir (08/09/2026)
+
+Meta solo acepta texto libre dentro de las 24 h desde el **último mensaje del cliente**; fuera de eso solo pasan plantillas aprobadas. El motor ya sabía enviarlas y ya manejaba el rechazo `131047` — pero eso aparecía **después** de escribir la respuesta.
+
+**El punto delicado es de dónde sale la fecha.** `conversations` tiene `actualizado_en` y `ultimo_mensaje_en` a mano, y las dos son la respuesta equivocada: se mueven cuando escribimos nosotros, así que la pantalla diría "quedan 23 h 58 min" y el envío fallaría igual. La ventana se calcula con un subselect sobre `rol = 'user'` y nada más. Fijado en `tests/test_ventana_whatsapp.py`.
+
+**La UI informa, el backend manda.** El cálculo local no autoriza: el manejo del rechazo de Meta sigue vivo, y el contador descuenta tiempo transcurrido en vez de recalcular desde una fecha absoluta.
+
+**Enviar una plantilla no reabre la ventana** — se guarda con rol `assistant`, que es el rol que el cálculo ignora. No hay bandera que alguien pueda olvidar de apagar.
+
+**Limitación real de la cuenta, que esta pantalla destapó:** Rapilink tiene **una sola plantilla aprobada** en Meta (`bienvenida`, categoría MARKETING, sin variables) y su texto dice *"Bienvenido a Isergy"*. Para retomar un caso de soporte hace falta una plantilla **UTILITY** propia, y aprobarla lleva días. **Acción operativa pendiente, independiente del desarrollo.**
+
+---
+
 ## 9. Despliegue
 
 - **Desarrollo:** laptop actual (RTX 3050, 4 GB VRAM, 32 GB RAM). Suficiente para desarrollar y probar con modelos de 3–4B.

@@ -51,6 +51,21 @@ export async function GET({ params, locals, fetch }) {
         estado_entrega: m.estado_entrega ?? null,
         error_entrega: m.error_entrega ?? null
       })),
+      // El encabezado ENTERO, tal como lo devuelve el motor. La pantalla de
+      // conversacion lo necesita para refrescar sin recargar: si se escalo,
+      // si alguien la tomo, y desde el 08/09/2026 tambien el estado de la
+      // ventana de 24 h de WhatsApp.
+      //
+      // Antes esto no viajaba, y el sondeo hacia dos cosas que parecian
+      // funcionar y no funcionaban: 'if (datos.conversacion)' no se cumplia
+      // nunca, y 'atendida = !!datos.conversacion?.atendida' evaluaba a FALSE
+      // en cada vuelta -- o sea que marcar una conversacion como atendida se
+      // deshacia solo a los pocos segundos, sin que nadie tocara nada.
+      //
+      // Se pasa el objeto completo y no una seleccion de campos: la pantalla
+      // ya recibe ese mismo objeto del servidor al cargar, asi que elegir
+      // campos aca solo agrega una lista que se desincroniza.
+      conversacion: datos.conversacion ?? null,
       atendida_por: datos.conversacion?.atendida_por ?? '',
       cerrada: datos.conversacion?.estado === 'cerrada'
     });
