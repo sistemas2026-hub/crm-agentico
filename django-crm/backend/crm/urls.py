@@ -38,6 +38,8 @@ urlpatterns = [
     # Solicitud de contratacion: publica y anonima, el token de la URL es la
     # unica credencial. Ver solicitudes/views.py.
     path("api/", include("solicitudes.urls", namespace="solicitudes")),
+    # Operaciones de campo y app de tecnicos
+    path("api/campo/", include("campo.urls", namespace="campo")),
     path(
         "logout/", views.LogoutView.as_view(), {"next_page": "/login/"}, name="logout"
     ),
