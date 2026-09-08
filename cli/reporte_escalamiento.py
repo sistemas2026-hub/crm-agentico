@@ -38,11 +38,19 @@ from dotenv import load_dotenv
 # rellena. Ver el comentario largo en cli/cargar_config.py.
 load_dotenv(override=False)
 
+from nucleo.config import cargar_config
 from nucleo.persistencia import db as persistencia
+from nucleo.seguimiento import forzado
 
 
 def main(tenant: str, dias: int) -> None:
     r = persistencia.tasa_escalamiento(tenant, dias)
+    # Que motivos son forzados lo declara el catalogo del tenant
+    # ('escalar_si_falla' / 'escalar_al_completar' por herramienta),
+    # asi que hace falta la config para clasificar.
+    config = cargar_config(
+        Path(__file__).resolve().parent.parent / 'tenants'
+        / f'{tenant}.config.yaml')
 
     print(f"Tenant: {tenant}  |  Ultimos {dias} dia(s)")
     print(f"Conversaciones: {r['total']}  |  Escaladas: {r['escaladas']}  |  "
@@ -55,6 +63,41 @@ def main(tenant: str, dias: int) -> None:
     print("\nPor motivo:")
     for motivo, n in sorted(r["por_motivo"].items(), key=lambda kv: -kv[1]):
         print(f"  {n:>4}  {motivo}")
+
+    # Cuantas llegan a la bandeja diciendo que hay que hacer. Hasta el
+    # 08/09/2026 este campo era opcional para el evaluador y salio vacio en
+    # las 52 escaladas que habia: esa es la linea base contra la que comparar.
+    #
+    # EN DOS GRUPOS, y no en una sola tasa: a una escalada FORZADA por una
+    # herramienta no se le exige relevo -- no hay de donde sacarlo, y que el
+    # asistente lo invente es justo lo que se saco del resumen. Sumarlas al
+    # mismo denominador haria ver mal al evaluador aunque estuviera
+    # funcionando bien: de las 52 de la linea base, 26 son
+    # 'pedido_para_ejecutar', todas forzadas.
+    forzados = forzado.motivos_que_no_elige_el_modelo(config)
+    grupos = {"evaluador": {"con": 0, "sin": 0}, "forzada": {"con": 0, "sin": 0}}
+    for motivo, casilla in r["relevo_por_motivo"].items():
+        destino = grupos["forzada" if motivo in forzados else "evaluador"]
+        destino["con"] += casilla["con"]
+        destino["sin"] += casilla["sin"]
+
+    ev = grupos["evaluador"]
+    print()
+    print("RELEVO -- escaladas que decidio el evaluador")
+    print(f"  {ev['con']:>4}  con proximo paso")
+    print(f"  {ev['sin']:>4}  sin proximo paso")
+    if ev["con"] + ev["sin"]:
+        print(f"        {ev['con'] / (ev['con'] + ev['sin']):.0%} lo traen")
+    else:
+        print("        (ninguna en el periodo)")
+
+    fz = grupos["forzada"]
+    if fz["con"] + fz["sin"]:
+        print()
+        print("ESCALADAS FORZADAS por una herramienta")
+        print(f"  {fz['con'] + fz['sin']:>4}  en total")
+        print("        no se les exige relevo: lo forzo un hecho de la traza,")
+        print("        no un juicio del evaluador")
 
 
 if __name__ == "__main__":

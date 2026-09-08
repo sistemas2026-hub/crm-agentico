@@ -577,24 +577,50 @@ def tasa_escalamiento(tenant: str, dias: int) -> dict:
     """
     with sesion(tenant) as (cur, org):
         cur.execute(
-            """select escalada_a_humano, motivo_escalamiento, count(*) as n
+            """select escalada_a_humano, motivo_escalamiento,
+                      nullif(trim(coalesce(escalada_siguiente_paso, '')), '')
+                          is not null as con_siguiente_paso,
+                      count(*) as n
                  from asistente.conversations
                 where organization_id = %s
                   and creado_en >= now() - (%s || ' days')::interval
-                group by escalada_a_humano, motivo_escalamiento""",
+                group by escalada_a_humano, motivo_escalamiento,
+                         con_siguiente_paso""",
             (org, dias))
         filas = [dict(f) for f in cur.fetchall()]
 
     total = sum(f["n"] for f in filas)
     escaladas = sum(f["n"] for f in filas if f["escalada_a_humano"])
     por_motivo: dict[str, int] = {}
+    # Cuantas de las escaladas llegan con el relevo escrito. Hacer el campo
+    # obligatorio en el esquema del evaluador (08/09/2026) garantiza que la
+    # CLAVE exista, no que traiga contenido: con escalar=true y el campo
+    # vacio el esquema queda conforme y quien toma el caso sigue sin saber
+    # que le falta hacer. Esto es lo que distingue "mejoro el formato" de
+    # "mejoro el contenido". Linea base para comparar: 0 de 52.
+    con_paso = 0
+    # Desglosado POR MOTIVO y no solo en total, porque no a todas las escaladas
+    # se les exige relevo: a una forzada por una herramienta no hay de donde
+    # sacarselo, y meterlas en el mismo denominador haria ver mal al evaluador
+    # aunque este funcionando bien. Quien clasifica es el CLI, que si conoce
+    # la config del tenant (forzado.motivos_que_no_elige_el_modelo); aca solo
+    # se cuenta -- este modulo no deberia tener que saber que motivo es de
+    # quien.
+    relevo_por_motivo: dict[str, dict[str, int]] = {}
     for f in filas:
         if f["escalada_a_humano"]:
             motivo = f["motivo_escalamiento"] or "(sin motivo registrado)"
             por_motivo[motivo] = por_motivo.get(motivo, 0) + f["n"]
+            casilla = relevo_por_motivo.setdefault(motivo, {"con": 0, "sin": 0})
+            casilla["con" if f["con_siguiente_paso"] else "sin"] += f["n"]
+            if f["con_siguiente_paso"]:
+                con_paso += f["n"]
 
     return {"total": total, "escaladas": escaladas,
             "tasa": (escaladas / total) if total else 0.0,
+            "con_siguiente_paso": con_paso,
+            "sin_siguiente_paso": escaladas - con_paso,
+            "relevo_por_motivo": relevo_por_motivo,
             "por_motivo": por_motivo}
 
 

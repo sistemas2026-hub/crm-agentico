@@ -220,27 +220,46 @@ def _esquema_evaluacion(config, rol_cfg=None) -> dict:
         # toma el caso no puede deducir sin volver a hacerlo todo: hasta
         # donde llego el diagnostico y por que se detuvo ahi.
         #
-        # Opcionales a proposito: el evaluador corre en CADA turno y la
-        # mayoria no escala. Exigirlos siempre seria pagar dos campos de
-        # redaccion por turno para tirarlos.
+        # Nacieron opcionales, con este razonamiento: "el evaluador corre en
+        # CADA turno y la mayoria no escala; exigirlos siempre seria pagar dos
+        # campos de redaccion por turno para tirarlos". El costo era real pero
+        # la cuenta dio al reves: medido contra produccion el 08/09/2026, de
+        # 52 conversaciones escaladas los DOS campos estaban vacios en las 52
+        # -- incluidas las que decidio el evaluador (frustracion_detectada),
+        # no solo las que forzo una herramienta. Nunca se escribio ninguno.
+        #
+        # Es exactamente la falla que este archivo ya documenta doce lineas
+        # mas abajo, para 'caso_manual': un campo opcional con redaccion
+        # cautelosa ("solo si...") el modelo lo saltea en la conversacion real
+        # aunque en una prueba aislada lo complete bien. Ahi se resolvio
+        # haciendolo obligatorio con una salida segura, y funciono. Mismo
+        # remedio aca: obligatorios, y con escalar=false la salida segura es
+        # la cadena vacia -- que db.py ya guarda como NULL (nullif), asi que
+        # no hace falta ningun valor centinela ni limpiarlo despues.
+        #
+        # Lo que se paga: dos campos vacios por turno que no escala. Lo que se
+        # compra: que quien toma el caso lea que le falta hacer, en vez del
+        # aviso "Sin proximo paso registrado" que hoy sale en el 100% de los
+        # casos de la bandeja.
         "no_se_pudo_comprobar": {
             "type": "string",
-            "description": "Solo si escalar=true. Que quedo SIN "
-                "comprobar y por que: un dato que el cliente no "
-                "supo dar, una herramienta que fallo, algo que "
-                "no se puede medir desde los sistemas. Es lo "
-                "primero que necesita quien retome, porque es "
-                "justo donde tiene que empezar. Si se pudo "
-                "comprobar todo, dilo asi.",
+            "description": "Que quedo SIN comprobar y por que: un "
+                "dato que el cliente no supo dar, una herramienta "
+                "que fallo, algo que no se puede medir desde los "
+                "sistemas. Es lo primero que necesita quien retome "
+                "el caso, porque es justo donde tiene que empezar. "
+                "Si se pudo comprobar todo, dilo asi. Con "
+                "escalar=false dejalo vacio.",
         },
         "siguiente_paso": {
             "type": "string",
-            "description": "Solo si escalar=true. Que le queda "
-                "por hacer a la persona que tome el caso, en una "
-                "frase concreta. No repitas lo que el asistente "
-                "ya hizo. Si la conclusion es que hace falta ir "
-                "al domicilio, dilo; si falta una revision que "
-                "solo se hace desde adentro, dilo.",
+            "description": "Que le queda por hacer a la PERSONA que "
+                "tome el caso, en una frase concreta y accionable. "
+                "No repitas lo que el asistente ya hizo. Si hace "
+                "falta ir al domicilio, dilo; si falta una revision "
+                "que solo se hace desde adentro, dilo; si lo que "
+                "falta es aplicar un pedido que el cliente ya "
+                "confirmo, dilo. Con escalar=false dejalo vacio.",
         },
         # Solo tiene sentido cuando el caso no encajo en ninguno de los del
         # manual. Es el lazo que hace que el catalogo mejore con el uso: el
@@ -297,9 +316,15 @@ def _esquema_evaluacion(config, rol_cfg=None) -> dict:
                 "puntual tiene agendamiento automatico de visita "
                 "tecnica habilitado, sin pasar por un humano.",
         }
-        requeridos = ["escalar", "etiqueta", "resuelta", "caso_manual"]
-    else:
-        requeridos = ["escalar", "etiqueta", "resuelta"]
+
+    # Los dos del relevo van SIEMPRE, por lo medido el 08/09/2026 (ver su
+    # comentario mas arriba): siendo opcionales salieron vacios en las 52
+    # conversaciones escaladas que hay. Con escalar=false la salida segura es
+    # la cadena vacia, que db.py ya guarda como NULL.
+    requeridos = ["escalar", "etiqueta", "resuelta",
+                  "no_se_pudo_comprobar", "siguiente_paso"]
+    if config.manual.casos:
+        requeridos.append("caso_manual")
 
     return {
         "type": "function",
@@ -383,7 +408,30 @@ def evaluar(config, rol: str, historial: list[dict]) -> dict | None:
 
     for llamada in respuesta.llamadas:
         if llamada.nombre == "evaluar_conversacion":
-            return llamada.argumentos
+            argumentos = llamada.argumentos or {}
+            # Obligatorio en el esquema garantiza que la CLAVE exista, no que
+            # traiga algo. Con escalar=true y el campo vacio el esquema queda
+            # conforme y el hueco es el mismo de antes -- quien toma el caso
+            # sigue sin saber que le falta hacer. No se corrige inventando un
+            # texto (seria el relleno que se acaba de sacar de 'resumen'): se
+            # deja constancia para poder medirlo. La linea base es 0 de 52
+            # (08/09/2026); si esto sigue apareciendo seguido, hacerlo
+            # obligatorio mejoro el formato y no el contenido, y hay que
+            # atacarlo por otro lado.
+            #
+            # OJO SI SE MUEVE: esto tiene que quedar aca adentro, mirando lo
+            # que contesto EL MODELO. Una escalada forzada por una herramienta
+            # se decide despues, en api.py ('evaluacion["escalar"] = True'), y
+            # a esa NO se le exige relevo -- no hay de donde sacarlo. Si este
+            # aviso se mudara alli, sonaria tambien en las forzadas y en pocos
+            # dias seria ruido que nadie lee.
+            if argumentos.get("escalar"):
+                vacios = [c for c in ("siguiente_paso", "no_se_pudo_comprobar")
+                          if not str(argumentos.get(c) or "").strip()]
+                if vacios:
+                    print(f"[escalamiento] escala sin {', '.join(vacios)}: "
+                          f"el caso llega a la bandeja sin esa parte del relevo")
+            return argumentos
     return None
 
 

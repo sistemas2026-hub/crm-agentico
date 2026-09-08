@@ -141,6 +141,23 @@ def _config_de(tenant: str):
     return _configs[tenant]
 
 
+def _primer_mensaje_del_cliente(historial: list[dict]) -> str:
+    """
+    Lo primero que escribio el cliente, sin resumir.
+
+    Es el respaldo cuando no hay resumen del evaluador. No es tan bueno como
+    una sintesis, pero es de el y es cierto -- que es mas de lo que se puede
+    decir de un texto de relleno. Misma eleccion que ya hace la bandeja
+    (conversaciones/[id]/+page.svelte::primerPedido); aca se repite para el
+    ticket de la operacion, que a diferencia de la pantalla no tiene el
+    historial a mano para resolverlo solo.
+    """
+    for mensaje in historial or []:
+        if mensaje.get("role") == "user" and (mensaje.get("content") or "").strip():
+            return mensaje["content"].strip()
+    return ""
+
+
 def _mensaje_de_escalada(config, motivo: str | None) -> str:
     """
     Lo que se le dice al cliente al pasarlo a una persona.
@@ -1294,12 +1311,18 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             if forzado in motivos_por_hecho(config):
                 pedido = next((l.get("resumen") for l in (registro_herramientas or [])
                                if l.get("resumen")), "")
-            evaluacion.setdefault(
-                "resumen",
-                f"Pedido del cliente: {pedido}" if pedido else
-                f"El evaluador no dejo resumen. Lo que se sabe: escalo "
-                f"porque {motivo_forzado}. El detalle exacto esta abajo, "
-                f"en lo que ya se probo.")
+            # Sin pedido tomado NO se inventa un resumen. Aca iba una frase
+            # escrita para quien programo esto ("El evaluador no dejo
+            # resumen... escalo porque 'ping_cliente' no pudo ejecutarse"):
+            # nombra una pieza interna y una herramienta, dos cosas que no
+            # significan nada para quien abre el caso en la bandeja, y se
+            # llevaba el primer renglon, que es el mas leido. La bandeja ya
+            # resuelve mejor el hueco: muestra el primer mensaje del cliente
+            # y lo rotula "lo que escribio, sin resumir", asi que quien lee
+            # sabe si tiene una sintesis o una cita. Un resumen vacio deja
+            # que ese respaldo aparezca; uno de relleno se lo tapa.
+            if pedido:
+                evaluacion.setdefault("resumen", f"Pedido del cliente: {pedido}")
         # De que es esta conversacion. Se guarda SIEMPRE que el evaluador
         # haya clasificado, escale o no: el 'caso_manual' ya se calculaba en
         # cada turno pero solo se leia para decidir el agendamiento
@@ -1452,7 +1475,14 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                           f"se agenda sin pasar por el checklist del manual")
                     veredicto = {"checklist_completo": True,
                                  "corresponde_agendar": True,
-                                 "descripcion_visita": (evaluacion.get("resumen") or "")[:400]}
+                                 # Mismo respaldo que el ticket de la
+                                 # operacion: sin resumen, lo que escribio el
+                                 # cliente. Un tecnico que recibe la visita
+                                 # con la descripcion vacia no sabe a que va.
+                                 "descripcion_visita": (
+                                     (evaluacion.get("resumen") or "").strip()
+                                     or _primer_mensaje_del_cliente(estado["historial"])
+                                 )[:400]}
                 else:
                     try:
                         veredicto = agendamiento.verificar(config, tenant, rol, estado["historial"])
@@ -1537,7 +1567,15 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                     # final: un ticket con asunto generico se abre para saber
                     # de que es, y quien lo lee tiene que encontrar eso en la
                     # primera linea. Al pie se lo come el resto del texto.
+                    # El ticket de la operacion SI necesita cuerpo -- a
+                    # diferencia de la bandeja, que sabe caer al mensaje del
+                    # cliente por su cuenta. Cuando no hay resumen se usa lo
+                    # mismo que usaria ella: lo que escribio el cliente. Es
+                    # de el y es cierto, y sirve mas que un ticket en blanco.
                     descripcion_ticket = (evaluacion.get("resumen", "") or "")
+                    if not descripcion_ticket.strip():
+                        descripcion_ticket = _primer_mensaje_del_cliente(
+                            estado["historial"])
                     sugerido = (evaluacion.get("asunto_sugerido") or "").strip()
                     if sugerido:
                         descripcion_ticket = (

@@ -63,6 +63,17 @@
     LIMITE_DE_CONVERSACION: 'se alcanzó el tope de pasos de la conversación'
   };
 
+  /** Si los renglones de bloqueos y errores valen su lugar aunque uno esté en
+      cero. El cero NO es ruido cuando el otro no lo está: con cuatro acciones
+      bloqueadas, leer "0 errores en herramienta" es lo que confirma que no se
+      rompió nada afuera y que el sistema frenó a propósito — justo la
+      distinción que este panel existe para hacer. Con los dos en cero no dicen
+      nada: son dos renglones de ceros debajo de "5 ejecuciones normales", que
+      sola ya cuenta la historia entera. */
+  let contrasteUtil = $derived(
+    (diagnostico?.bloqueadas ?? 0) > 0 || (diagnostico?.errores ?? 0) > 0
+  );
+
   // --- qué pasó acá, en cuatro renglones ------------------------------------
   // Lo que se le prometió al cliente no está guardado en ningún campo: es el
   // mensaje que el asistente mandó al escalar. Se lo busca por CERCANÍA en el
@@ -128,6 +139,11 @@
     return (m?.contenido ?? '').trim();
   });
 
+  /** Si el caso quedó en una cola de alguien. Es el ticket del CRM ya cargado,
+      o al menos su id en la conversación cuando la ficha todavía no llegó.
+      Decide si que falte el próximo paso es una alarma o solo una nota. */
+  let tieneCaso = $derived(!!caso || !!conversacion?.caso_id);
+
   // Las CUATRO preguntas, siempre las cuatro. Antes se filtraban las vacías, y
   // el resultado era que en 49 de las 51 conversaciones escaladas el bloque
   // mostraba solo "Le prometimos" y "Qué hizo la IA" -- justo las dos que NO
@@ -158,12 +174,23 @@
       rotulo: 'Qué falta',
       orden: 3,
       texto: (conversacion?.escalada_siguiente_paso ?? '').trim(),
-      // Honesto sobre POR QUÉ está vacío. "No consta" a secas haría pensar en
-      // un fallo; esto dice que es una conversación anterior al campo.
-      // Se ve como advertencia y no como nota al pie: que nadie sepa cual es
-      // el proximo paso es un problema del caso, no un detalle de la ficha.
-      alerta: true,
-      vacio: 'Sin próximo paso registrado'
+      // La advertencia se guarda para cuando de verdad no hay a quién
+      // preguntarle. Medido el 08/09/2026: este campo estaba vacío en las 52
+      // conversaciones escaladas —no solo en las anteriores al 06/09, como
+      // decía este comentario— porque el evaluador lo tenía como opcional y
+      // no lo completaba nunca (corregido en nucleo/seguimiento/
+      // escalamiento.py). Con eso, el triángulo salía en el 100% de los
+      // casos: una alarma que suena siempre deja de ser una alarma.
+      //
+      // Y sonaba aun teniendo el caso abierto en el CRM, con responsable
+      // asignado, a la vista en esta misma pantalla. Eso no es "nadie sabe
+      // qué sigue": es que el asistente no lo dejó escrito, y el caso está
+      // en una cola. Lo que SÍ merece alarma es lo otro: ni paso anotado ni
+      // caso abierto, que es un cliente esperando a nadie.
+      alerta: !tieneCaso,
+      vacio: tieneCaso
+        ? 'El asistente no dejó anotado el próximo paso. El caso quedó abierto en el CRM.'
+        : 'Sin próximo paso anotado y sin caso abierto en el CRM: no está en ninguna cola.'
     },
     {
       rotulo: 'No se pudo comprobar',
@@ -1500,9 +1527,14 @@
        modelo al evaluar la escalada y hasta ahora solo iban a la descripcion
        del ticket del CRM -- quien atendia desde acá no los veia nunca.
 
-       Solo se dibuja lo que existe de verdad: en las conversaciones escaladas
-       antes del 06/09/2026 estos campos estan vacios, y media tarjeta con
-       renglones en blanco informa menos que ninguna. -->
+       Solo se dibuja lo que existe de verdad. Ojo con la razon, que hasta el
+       08/09/2026 estaba mal escrita aca: no es que "antes del 06/09 estos
+       campos estan vacios". Medido contra produccion, estaban vacios en las
+       52 conversaciones escaladas, sin excepcion -- el evaluador los tenia
+       como opcionales y no los completaba nunca. Se corrigio del lado que
+       los produce (nucleo/seguimiento/escalamiento.py); las 52 viejas se
+       quedan vacias igual, y por eso el estado vacio tiene que seguir
+       diciendo algo util en vez de un renglon en blanco. -->
   {#if hayResumenDelCaso}
     <dl class="brief">
       {#each resumenEscalada as fila (fila.rotulo)}
@@ -2224,7 +2256,9 @@
         </li>
         <!-- Con cero, un renglon informativo. Con uno o mas, un BOTON que
              lleva al paso: el numero contesta "paso algo", y lo siguiente que
-             se quiere es ver QUE, sin buscarlo entre catorce lineas. -->
+             se quiere es ver QUE, sin buscarlo entre catorce lineas.
+             Los dos en cero no se dibujan: ver 'contrasteUtil'. -->
+        {#if contrasteUtil}
         <li class:diag-hay={diagnostico.bloqueadas > 0}>
           <ShieldCheck size={14} style="color:var(--v2-clay);flex:none" />
           {#if diagnostico.bloqueadas > 0}
@@ -2251,6 +2285,7 @@
             <span class="v2-muted">falló un sistema externo</span>
           {/if}
         </li>
+        {/if}
       </ul>
     {/if}
 

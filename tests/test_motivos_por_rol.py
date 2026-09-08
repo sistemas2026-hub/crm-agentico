@@ -227,8 +227,12 @@ comprobar(esquema_borde["function"]["parameters"]["properties"]["motivo"]["enum"
 import inspect                                                     # noqa: E402
 
 fuente_evaluar = inspect.getsource(escalamiento.evaluar)
-comprobar("return llamada.argumentos" in fuente_evaluar
-          and "activar_si" not in fuente_evaluar.split("for llamada")[-1],
+# Se afirma la INTENCION (nada mira el motivo despues de recibirlo), no una
+# linea literal: el 08/09/2026 esta comprobacion se rompio sola porque la
+# variable del return paso a llamarse 'argumentos' al agregarle el aviso de
+# relevo vacio. La funcion seguia sin validar nada -- el test fijaba la letra.
+cola = fuente_evaluar.split("for llamada")[-1]
+comprobar("activar_si" not in cola and "motivo" not in cola,
           "evaluar() no valida el motivo devuelto contra activar_si: el "
           "candado no es redundante")
 
