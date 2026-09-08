@@ -36,8 +36,10 @@ from dataclasses import dataclass, field
 
 @dataclass
 class Sesion:
-    """Estado de verificacion de UNA conversacion (vive en memoria del canal;
-    no se persiste -- ver PRD RNF-01 sobre que datos de WispHub no se guardan)."""
+    """Estado de verificacion de UNA conversacion. Vive en memoria del canal;
+    de aca solo se persiste lo que declaran las dos listas de abajo, y siempre
+    dentro de la conversacion en curso -- ver PRD RNF-01 sobre que datos de
+    WispHub no se guardan."""
 
     # Lo unico de la ficha del cliente que SI se persiste, y solo mientras la
     # conversacion siga abierta (asistente.conversations.datos_sesion, ver
@@ -53,6 +55,27 @@ class Sesion:
     # puede capturar otra cosa. Agregar un campo capturado en
     # _ejecutar_verificacion es agregarlo aca, sin tocar el esquema.
     CAMPOS_PERSISTIBLES = ("sn_onu", "interfaz_lan")
+
+    # Estado de ROUTING que tambien sobrevive al reinicio, en la misma columna
+    # pero por otra puerta. Son dos listas y no una porque la condicion de
+    # escritura es distinta, y esa diferencia es justamente el problema que
+    # habia que resolver:
+    #
+    #   CAMPOS_PERSISTIBLES  se escriben al VERIFICAR (exigen id_cliente)
+    #   esta lista           se escribe al DERIVAR, que pasa ANTES de que
+    #                        nadie verifique nada -- desde que la verificacion
+    #                        se mudo del router a cada especialista (PRD 8.9),
+    #                        el router deriva sin identidad resuelta
+    #
+    # Guardarlo con la condicion de la primera lista habria dejado sin
+    # proteccion justo el caso que mas rebota: una conversacion todavia sin
+    # verificar.
+    #
+    # Persiste por CONVERSACION, no por caso (decision de negocio, MASTER SPEC
+    # 3): al cerrarse la conversacion el anti-rebote arranca limpio. Es la
+    # misma frontera que ya rige para la identidad -- se continua una
+    # conversacion, no se recuerda a una persona para siempre.
+    CAMPOS_ROUTING_PERSISTIBLES = ("areas_visitadas",)
 
     identificador_canal: str          # ej. numero de whatsapp, tal cual llega
     # El nombre del COLABORADOR que esta usando el asistente, cuando lo hay.

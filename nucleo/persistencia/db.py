@@ -976,14 +976,57 @@ def identificar_cliente(tenant: str, conversation_id: str,
     repetirlo. Antes de esto, Sesion.id_cliente vivia solo en memoria del
     proceso del motor y se perdia en cada reinicio -- /conversaciones nunca
     tenia con que mostrar un nombre, solo el BSUID o telefono crudo.
+
+    'datos_sesion' se FUSIONA (||), no se reemplaza. Antes se pisaba entero, y
+    eso alcanzaba mientras esta fuera la unica funcion que lo escribia. Ya no
+    lo es: guardar_estado_routing() escribe ahi las areas visitadas, y con un
+    reemplazo la primera verificacion posterior a una derivacion las borraba
+    -- justo el dato que existe para que el cliente no rebote entre areas.
+
+    CONTRATO, y no es un detalle: 'datos' tiene que traer TODOS los campos de
+    identidad, con None incluido, no solo los que tienen valor. Con la fusion,
+    una clave omitida NO se borra: conserva el valor anterior. Si una segunda
+    verificacion en la misma conversacion resuelve a otro cliente que no tiene
+    'sn_onu', omitirlo dejaria el serial del cliente ANTERIOR pegado a la
+    identidad del nuevo -- y las herramientas que identifican la ONU por ese
+    serial diagnosticarian el equipo de otra persona, sin ningun error a la
+    vista. Mandandolo como None, el '||' lo sobrescribe. Quien llama arma el
+    diccionario en nucleo/canales/api.py::atender_turno.
     """
     with sesion(tenant) as (cur, org):
         cur.execute(
             """update asistente.conversations
                set id_cliente = %s, nombre_cliente = %s,
-                   datos_sesion = %s
+                   datos_sesion = datos_sesion || %s::jsonb
                where organization_id = %s and id = %s""",
             (id_cliente, nombre, json.dumps(datos or {}), org, conversation_id))
+
+
+def guardar_estado_routing(tenant: str, conversation_id: str,
+                           datos: dict | None = None) -> None:
+    """
+    El estado de routing que tiene que sobrevivir a un reinicio del motor --
+    hoy solo las areas por las que ya paso la conversacion (ver
+    Sesion.CAMPOS_ROUTING_PERSISTIBLES).
+
+    Va por su propia puerta y no por identificar_cliente() porque se escribe
+    en otro momento: al DERIVAR, que ocurre antes de que nadie verifique nada.
+    Colgarlo de la verificacion habria dejado sin anti-rebote justo a las
+    conversaciones que todavia no tienen identidad resuelta.
+
+    Misma columna ('datos_sesion') y misma fusion con '||': las dos puertas
+    escriben claves distintas del mismo JSONB y ninguna puede pisar a la otra.
+    Sin columna nueva ni migracion -- ver el comentario de
+    supabase/202608151253_datos_sesion.sql sobre por que esa columna es JSONB.
+    """
+    if not datos:
+        return                      # nada que guardar: no se toca la fila
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """update asistente.conversations
+               set datos_sesion = datos_sesion || %s::jsonb
+               where organization_id = %s and id = %s""",
+            (json.dumps(datos), org, conversation_id))
 
 
 def caso_de_conversacion(tenant: str, conversation_id: str) -> str | None:

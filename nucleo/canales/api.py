@@ -613,9 +613,24 @@ def _sesion_nueva(tenant: str, id_sesion: str, canal: str,
             if campo in Sesion.CAMPOS_PERSISTIBLES and valor:
                 setattr(estado["sesion"], campo, valor)
 
+    # El estado de ROUTING se restaura SIEMPRE, tambien sin identidad
+    # resuelta -- fuera del 'if' de arriba a proposito. El anti-rebote se
+    # llena al derivar, que pasa antes de que nadie verifique nada: dejarlo
+    # dentro habria protegido solo a las conversaciones ya verificadas y
+    # ninguna otra. Ver Sesion.CAMPOS_ROUTING_PERSISTIBLES.
+    #
+    # Se copia la lista en vez de asignar la de la base: asignarla dejaria a
+    # dos sesiones distintas compartiendo el mismo objeto si alguna vez se
+    # rehidratan del mismo diccionario, y esta lista se muta con append.
+    for campo, valor in (previo.get("datos_sesion") or {}).items():
+        if campo in Sesion.CAMPOS_ROUTING_PERSISTIBLES and valor:
+            setattr(estado["sesion"], campo, list(valor))
+
+    visitadas = getattr(estado["sesion"], "areas_visitadas", [])
     print(f"[sesion] {id_sesion}: se retoma la conversacion abierta "
           f"(escalada={previo['escalada']}, "
-          f"verificado={'si' if previo['id_cliente'] else 'no'})")
+          f"verificado={'si' if previo['id_cliente'] else 'no'}"
+          + (f", areas ya visitadas={visitadas}" if visitadas else "") + ")")
     return estado
 
 
@@ -1091,11 +1106,38 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                     estado["sesion"].id_cliente, estado["sesion"].nombre,
                     # Lo capturado al verificar, para que sobreviva a un
                     # reinicio -- ver Sesion.CAMPOS_PERSISTIBLES.
+                    #
+                    # Van TODOS los campos, incluidos los que valen None, y no
+                    # solo los que traen dato. Desde que 'datos_sesion' se
+                    # fusiona en vez de reemplazarse (para no pisar el
+                    # anti-rebote), omitir un campo ya no lo borra: deja el
+                    # valor ANTERIOR. Y una segunda verificacion en la misma
+                    # conversacion puede dejar 'sn_onu' en None -- pasa con el
+                    # ~32% de los clientes activos, que no lo tienen cargado.
+                    # El resultado seria la identidad de un cliente conviviendo
+                    # con el serial de ONU de otro, y las herramientas de
+                    # SmartOLT diagnosticando el equipo equivocado sin que nada
+                    # avise. Mandando el None explicito, el '||' lo sobrescribe
+                    # y la rehidratacion lo ignora por falsy.
                     {c: getattr(estado["sesion"], c, None)
-                     for c in Sesion.CAMPOS_PERSISTIBLES
-                     if getattr(estado["sesion"], c, None)})
+                     for c in Sesion.CAMPOS_PERSISTIBLES})
             except Exception as e:
                 print(f"[persistencia] no se pudo guardar la identidad: {e}")
+
+        # El anti-rebote, aparte y SIN exigir identidad verificada: se llena
+        # al derivar, y derivar pasa antes de que nadie verifique. Solo se
+        # escribe si hay algo que proteger, asi que el turno normal -- el que
+        # no deriva -- no paga ninguna escritura extra.
+        if estado["sesion"] is not None:
+            routing = {c: getattr(estado["sesion"], c, None)
+                       for c in Sesion.CAMPOS_ROUTING_PERSISTIBLES
+                       if getattr(estado["sesion"], c, None)}
+            if routing:
+                try:
+                    persistencia.guardar_estado_routing(
+                        tenant, conversation_id, routing)
+                except Exception as e:
+                    print(f"[persistencia] no se pudo guardar el routing: {e}")
     except Exception as e:  # nunca se rompe el turno por un fallo de persistencia
         print(f"[persistencia] no se pudo guardar el turno: {e}")
 
