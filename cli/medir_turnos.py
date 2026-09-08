@@ -112,6 +112,26 @@ def _velocidad(cur, org, dias):
              ) h on true
              -- La config tambien por ventana: la vigente en un turno es la
              -- ultima anotada antes de el. NULL = anterior al historial.
+             --
+             -- PENDIENTE, y sabido: 't.creado_en' es cuando el turno TERMINO
+             -- (el mensaje del cliente guarda el inicio, el del asistente no
+             -- -- ver creado_en=llego_en en nucleo/canales/api.py). Un turno
+             -- que empieza a las 20:37:59 con v119, con un guardado de config
+             -- a las 20:38:10, y termina 20:38:25, sale etiquetado v120 y no
+             -- corrio con v120.
+             --
+             -- No hace falta guardar nada nuevo para arreglarlo: esta misma
+             -- fila tiene 'latencia_ms', asi que el inicio del turno es
+             -- 'creado_en - latencia_ms'. Es cambiar el 'hc.creado_en <=' de
+             -- abajo por esa resta -- sin migracion y sin tocar el camino
+             -- caliente.
+             --
+             -- Se deja asi a proposito mientras se acumula trafico para
+             -- comparar razonamiento ON contra OFF: solo se equivoca en un
+             -- turno que este corriendo JUSTO cuando alguien guarda config, y
+             -- cambiar el instrumento en mitad de la medicion cuesta mas que
+             -- ese caso. Si durante la ventana no se guarda ninguna config,
+             -- el error no puede ocurrir.
              left join lateral (
                   select hc.config_version
                     from asistente.tenant_config_historial hc
