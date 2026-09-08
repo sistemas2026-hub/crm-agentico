@@ -133,6 +133,51 @@ def abrir(config):
         _volcar(ficha)
 
 
+@contextmanager
+def seguir_anotando(padre):
+    """
+    Vuelve a apuntar el acumulador a una ficha YA abierta, sin volcarla al
+    salir. Para el trabajo del turno que ocurre despues de componer la
+    respuesta y que igual le habla al modelo.
+
+    POR QUE HACE FALTA
+    ------------------
+    abrir() envuelve solo motor.responder(). El evaluador de escalamiento
+    (nucleo/seguimiento/escalamiento.py) corre DESPUES, fuera de ese bloque, y
+    anotar() no hace nada cuando el acumulador esta cerrado -- asi que su
+    llamada al modelo no se contaba en ningun lado.
+
+    Consecuencia: 'asistente.usage_daily' subestimaba el gasto en una llamada
+    al modelo POR TURNO de cliente, y el tope de gasto dejaba pasar mas de lo
+    que creia. Medido el 08/09/2026 sobre un turno real: la respuesta decia
+    costar $0.00148 y le faltaba el evaluador.
+
+    No se extendio el 'with' de abrir() hasta ahi porque son 150 lineas de
+    turno en el medio --escalamiento, tickets, agendamiento-- y reindentarlas
+    para esto seria un cambio grande donde hace falta uno chico.
+
+    ABRE SU PROPIA FICHA, no reusa la que se le pasa. La de abrir() YA se
+    volco al agregado diario cuando su 'with' termino: sumarle numeros
+    despues no llegaria a la base. Esta ficha nueva se vuelca sola --una fila
+    mas en el mismo dia, que es lo que la tabla suma-- y ademas sus totales se
+    acumulan en 'padre' para que el registro POR MENSAJE cuente el turno
+    entero y no solo la mitad.
+    """
+    hija = Consumo(tenant=padre.tenant, config=padre.config)
+    testigo = _actual.set(hija)
+    try:
+        yield hija
+    finally:
+        _actual.reset(testigo)
+        _volcar(hija)
+        padre.tokens_entrada += hija.tokens_entrada
+        padre.tokens_entrada_cache += hija.tokens_entrada_cache
+        padre.tokens_salida += hija.tokens_salida
+        padre.costo_usd += hija.costo_usd
+        padre.n_llamadas += hija.n_llamadas
+        padre.sin_tarifa |= hija.sin_tarifa
+
+
 def anotar(referencia_modelo: str, respuesta) -> None:
     """Suma una llamada al modelo al turno en curso. Sin turno, no hace nada."""
     ficha = _actual.get()

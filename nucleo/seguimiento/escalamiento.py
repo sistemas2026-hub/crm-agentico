@@ -41,6 +41,7 @@ import json
 
 from nucleo.herramientas import http as herramientas_http
 from nucleo.modelo import cliente
+from nucleo.observabilidad import consumo
 from nucleo.persistencia import db as persistencia
 from nucleo.seguimiento import forzado
 from nucleo.seguimiento.nombres import nombre_del_caso
@@ -363,6 +364,12 @@ def evaluar(config, rol: str, historial: list[dict]) -> dict | None:
             referencia_modelo, mensajes,
             tools=[_esquema_evaluacion(config, config.roles.get(rol))],
             timeout=cliente.TIMEOUT_SECUNDARIO)
+        # Esta llamada al modelo NO se contaba en ningun lado. anotar() lo
+        # hacian solo los dos puntos de nucleo/modelo/motor.py, y esta corre
+        # aca -- una vez por CADA turno de cliente que no este ya escalado.
+        # Asi que el gasto diario y el tope de gasto quedaban cortos en una
+        # llamada por turno, sistematicamente.
+        consumo.anotar(referencia_modelo, respuesta)
     except Exception as e:
         # SE PROPAGA, no se devuelve None. Un fallo del evaluador y una
         # decision de "no escalar" son cosas distintas, y colapsarlas en el

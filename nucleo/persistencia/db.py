@@ -203,6 +203,36 @@ def estado_de_conversacion_abierta(tenant: str, canal: str,
 # se notaba nada.
 
 
+def completar_medicion(tenant: str, mensaje_id: str, *, tokens_entrada: int,
+                       tokens_salida: int, costo_usd: float,
+                       llamadas_modelo: int) -> None:
+    """
+    Cierra la medicion de un turno, con lo que gasto DESPUES de componer la
+    respuesta.
+
+    El orden lo obliga: la respuesta se guarda apenas el modelo termina, y el
+    evaluador de escalamiento --que es otra llamada al modelo-- corre unos
+    150 renglones despues. Sin este cierre, el registro por mensaje contaba
+    media llamada de las que el turno hizo de verdad, que es justo el numero
+    que hace falta para saber por que un turno tardo.
+
+    Nunca rompe: si esto falla, la respuesta ya se dio y ya se entrego. Lo
+    unico que se pierde es la precision de una medida.
+    """
+    try:
+        with sesion(tenant) as (cur, org):
+            cur.execute(
+                """update asistente.messages
+                   set tokens_entrada = %s, tokens_salida = %s,
+                       costo_usd = %s, llamadas_modelo = %s
+                   where organization_id = %s and id = %s""",
+                (tokens_entrada, tokens_salida, round(costo_usd, 6),
+                 llamadas_modelo, org, mensaje_id))
+    except Exception as e:
+        print(f"[medicion] no se pudo cerrar la del turno: "
+              f"{type(e).__name__}: {e}")
+
+
 def historial_para_el_modelo(tenant: str, conversation_id: str,
                              limite: int = 20) -> list[dict]:
     """

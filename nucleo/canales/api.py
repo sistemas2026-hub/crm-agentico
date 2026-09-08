@@ -799,7 +799,13 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             # respondido. Recien ahi un "ok" significa "si, ya quedo".
             cerrado = False
             try:
-                veredicto = escalamiento.evaluar(config, rol, estado["historial"]) or {}
+                # Este camino no pasa por motor.responder --el bot esta en
+                # pausa, no compone nada-- asi que abre su PROPIO acumulador
+                # en vez de seguir uno que todavia no existe. Pero cuenta
+                # igual: es una llamada al modelo, y hasta hoy tampoco se
+                # contaba.
+                with consumo.abrir(config):
+                    veredicto = escalamiento.evaluar(config, rol, estado["historial"]) or {}
                 # Un "si" explicito cierra por si solo, aunque la pregunta
                 # se le haya hecho dos turnos antes: el cliente contesto lo
                 # que se le pregunto, y volver a preguntarle lo mismo es no
@@ -960,6 +966,12 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     # prueba llaman al mismo motor y no lo abren, asi que sus miles de
     # llamadas al modelo no entran en la facturacion de nadie ni disparan el
     # tope de gasto -- ver nucleo/observabilidad/consumo.py.
+    # El mensaje de esta respuesta, para poder completarle la medicion al
+    # final del turno (ver el cierre de esta funcion). Se declara aca y no
+    # dentro del try de persistencia porque ese try se traga sus fallos: si no
+    # se pudo guardar, esto queda en None y no se intenta actualizar nada.
+    mensaje_id_turno = None
+
     # La ficha del turno se conserva despues del 'with': trae los tokens y el
     # costo de ESTE turno, y hasta ahora se volcaban solo al agregado diario
     # (asistente.usage_daily). Con el agregado se puede decir cuanto cuesta
@@ -1010,6 +1022,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             costo_usd=ficha_consumo.costo_usd,
             llamadas_modelo=ficha_consumo.n_llamadas,
             modelo=config.llm.modelo_por_defecto)
+        mensaje_id_turno = mensaje_id
         # La sesion viva se queda con el id. Solo lo tenia cuando venia de una
         # conversacion ANTERIOR: si la creo este mismo proceso, quedaba en
         # None y las reglas que preguntan por esta fila --si ya la atendio una
@@ -1114,7 +1127,13 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     if (conversation_id and rol_cfg and rol_cfg.orientado_a == "cliente_final"
             and not estado["escalada"]):
         try:
-            evaluacion = escalamiento.evaluar(config, rol, estado["historial"])
+            # Dentro del acumulador del turno: esta es una llamada al modelo
+            # como cualquier otra, y hasta hoy no se contaba en ningun lado --
+            # abrir() envuelve solo motor.responder(), y esto corre despues.
+            # El gasto diario y el tope quedaban cortos en una llamada POR
+            # TURNO de cliente.
+            with consumo.seguir_anotando(ficha_consumo):
+                evaluacion = escalamiento.evaluar(config, rol, estado["historial"])
         except Exception as e:
             # NO es lo mismo que 'evaluacion = None' por decision: el
             # evaluador no llego a opinar. Se anota para poder distinguirlo
@@ -1738,6 +1757,22 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             except Exception as e:
                 print(f"[persistencia] no se pudo agregar la pregunta por "
                       f"una persona: {e}")
+
+    # El turno entero, ya con lo que gastaron el evaluador de escalamiento y
+    # todo lo que corre despues de componer la respuesta.
+    #
+    # Va aca y no en el insert porque el orden lo impide: la respuesta se
+    # guarda en la linea ~1010 y el evaluador corre en la ~1120. Con solo el
+    # insert, el registro por mensaje contaba media llamada de las que de
+    # verdad hizo el turno -- justo el numero que hace falta para saber por
+    # que un turno tardo.
+    if mensaje_id_turno:
+        persistencia.completar_medicion(
+            tenant, mensaje_id_turno,
+            tokens_entrada=ficha_consumo.tokens_entrada,
+            tokens_salida=ficha_consumo.tokens_salida,
+            costo_usd=ficha_consumo.costo_usd,
+            llamadas_modelo=ficha_consumo.n_llamadas)
 
     return {"respuesta": respuesta, "verificado": estado["sesion"].verificado,
             "cerrada": cerrada, "conversacion_id": conversation_id,
