@@ -267,7 +267,12 @@ def historial_para_el_modelo(tenant: str, conversation_id: str,
 def registrar_mensaje(tenant: str, canal: str, usuario_externo: str,
                       rol_efectivo: str, rol: str, contenido: str,
                       horas_inactividad: int | None = None,
-                      creado_en=None, latencia_ms: int | None = None) -> tuple[str, str]:
+                      creado_en=None, latencia_ms: int | None = None,
+                      tokens_entrada: int | None = None,
+                      tokens_salida: int | None = None,
+                      costo_usd: float | None = None,
+                      llamadas_modelo: int | None = None,
+                      modelo: str | None = None) -> tuple[str, str]:
     """
     Une una fila de conversacion (crea si no existe) con una fila de
     mensaje, y actualiza 'actualizado_en' -- es la unica señal que necesita
@@ -320,10 +325,13 @@ def registrar_mensaje(tenant: str, canal: str, usuario_externo: str,
             # la espera real no estaba registrada en ningun lado.
             """insert into asistente.messages
                  (organization_id, conversation_id, rol, contenido,
-                  creado_en, latencia_ms)
-               values (%s, %s, %s, %s, coalesce(%s, now()), %s)
+                  creado_en, latencia_ms, tokens_entrada, tokens_salida,
+                  costo_usd, modelo, llamadas_modelo)
+               values (%s, %s, %s, %s, coalesce(%s, now()), %s, %s, %s, %s, %s, %s)
                returning id""",
-            (org, conv, rol, contenido, creado_en, latencia_ms))
+            (org, conv, rol, contenido, creado_en, latencia_ms,
+             tokens_entrada, tokens_salida, costo_usd, modelo,
+             llamadas_modelo))
         mensaje = cur.fetchone()["id"]
 
         return str(conv), str(mensaje)

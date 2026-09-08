@@ -960,7 +960,13 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     # prueba llaman al mismo motor y no lo abren, asi que sus miles de
     # llamadas al modelo no entran en la facturacion de nadie ni disparan el
     # tope de gasto -- ver nucleo/observabilidad/consumo.py.
-    with consumo.abrir(config):
+    # La ficha del turno se conserva despues del 'with': trae los tokens y el
+    # costo de ESTE turno, y hasta ahora se volcaban solo al agregado diario
+    # (asistente.usage_daily). Con el agregado se puede decir cuanto cuesta
+    # una llamada en promedio, pero no CUAL turno salio caro ni por que --
+    # que es justo lo que hace falta para bajar de los 4-11 segundos que
+    # tarda el modelo. Las columnas por mensaje existian y estaban vacias.
+    with consumo.abrir(config) as ficha_consumo:
         respuesta, registro_herramientas, medios_pendientes = motor.responder(
             config, rol, mensaje, estado["historial"], estado["sesion"],
             nota_continuidad=nota_continuidad)
@@ -994,7 +1000,16 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
         conversation_id, mensaje_id = persistencia.registrar_mensaje(
             tenant, canal, id_sesion, rol, "assistant", respuesta, horas,
             latencia_ms=int(
-                (datetime.now(timezone.utc) - llego_en).total_seconds() * 1000))
+                (datetime.now(timezone.utc) - llego_en).total_seconds() * 1000),
+            # De ESTE turno, no del dia. 'n_llamadas' es cuantas veces se
+            # hablo con el modelo para producir una sola respuesta: es la otra
+            # palanca sobre la latencia, junto con el tamaño del prompt, y no
+            # se veia en ningun lado.
+            tokens_entrada=ficha_consumo.tokens_entrada,
+            tokens_salida=ficha_consumo.tokens_salida,
+            costo_usd=ficha_consumo.costo_usd,
+            llamadas_modelo=ficha_consumo.n_llamadas,
+            modelo=config.llm.modelo_por_defecto)
         # La sesion viva se queda con el id. Solo lo tenia cuando venia de una
         # conversacion ANTERIOR: si la creo este mismo proceso, quedaba en
         # None y las reglas que preguntan por esta fila --si ya la atendio una
