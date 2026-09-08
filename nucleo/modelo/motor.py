@@ -1640,6 +1640,53 @@ _RE_FUGA_TOOL_CALL = re.compile(r"<\s*/?\s*｜+[^>]*>")
 _RE_RESPUESTA_CRUDA = re.compile(r"^(true|false|null|\d+(\.\d+)?|[\{\[].*[\}\]])$",
                                  re.IGNORECASE)
 
+# UN PASE QUE YA OCURRIO NO SE ANUNCIA, Y UNA PROMESA NO ES UNA RESPUESTA.
+#
+# Cuando el modelo deriva, el area destino contesta EN ESE MISMO TURNO. Si esa
+# respuesta dice "te paso con ventas", el cliente se queda esperando a alguien
+# que ya hablo -- y como el turno termina ahi, para el es identico a que la
+# derivacion nunca hubiera pasado. Tiene que escribir de nuevo.
+#
+# Medido tres veces el 08/09/2026, con la derivacion funcionando y confirmada
+# en la traza:
+#     "Dejame revisar que servicios ofrecemos para contarte bien."
+#     "...pero te paso con el equipo de ventas que te asesora."
+#     "...pero dejame pasarte con el area de ventas que te confirma."
+#
+# La instruccion de no hacerlo YA existe, en dos lugares (el resultado de
+# derivar_a_area y persona), y se desobedecio igual. PRD 7.4: el prompt guia,
+# el codigo garantiza.
+#
+# NO se detecta por las palabras solas. Escalar a una PERSONA tambien dice "te
+# paso con un compañero", y ahi es correcto y obligatorio -- bloquearlo romperia
+# un flujo legitimo. La señal que separa los dos casos esta en la TRAZA: si este
+# turno ya llamo la herramienta de derivacion, cualquier anuncio de pase a un
+# AREA es falso. Eso es un hecho, no una interpretacion.
+_RE_ANUNCIA_PASE = re.compile(
+    r"\b(te\s+(paso|comunico|conecto|transfiero|derivo)|"
+    r"(dejame|permiteme|permitime|voy\s+a)\s+(pasarte|comunicarte|conectarte|derivarte)|"
+    r"paso\s+tu\s+caso)\b")
+_RE_SOLO_PROMESA = re.compile(
+    r"\b((dejame|permiteme|permitime|voy\s+a|deja\s+que)\s+"
+    r"(revisar|revise|consultar|consulte|verificar|verifique|confirmar|confirme)|"
+    r"dame\s+un\s+momento|ya\s+te\s+(confirmo|aviso|digo))\b")
+
+
+def _promete_en_vez_de_responder(texto: str, nombres_area: set[str]) -> str | None:
+    """
+    Por que esta respuesta deja la conversacion muerta, o None si esta bien.
+
+    Solo se llama cuando la traza confirma que este turno YA derivo -- ver el
+    comentario de los patrones arriba. Sin ese hecho no se evalua nada, que es
+    lo que mantiene fuera del alcance a la escalada hacia una persona.
+    """
+    plano = _sin_tildes(texto or "")
+    if _RE_ANUNCIA_PASE.search(plano) and any(a in plano for a in nombres_area):
+        return "anuncia un pase que ya ocurrio"
+    if _RE_SOLO_PROMESA.search(plano):
+        return "promete revisar algo que ya consulto"
+    return None
+
 
 class _LlamadaRecuperada:
     """Una llamada que el modelo pidio en texto en vez de por la API, con la
@@ -1722,7 +1769,8 @@ def _sanitizar(texto: str, nombres_rol=(), tratamiento: str | None = None) -> st
 
 def _redactar(referencia_modelo: str, historial: list[dict], temperatura: float,
               razonamiento: str | None = None,
-              intentos: int = 3, nombres_rol=(), tratamiento: str | None = None) -> str:
+              intentos: int = 3, nombres_rol=(), tratamiento: str | None = None,
+              paso_a_otra_area: bool = False, nombres_area: set[str] | None = None) -> str:
     """
     Redaccion final despues de que el modelo ya uso las herramientas que
     necesitaba. Reintenta si viene vacia -- visto en vivo con DeepSeek dos
@@ -1750,7 +1798,12 @@ def _redactar(referencia_modelo: str, historial: list[dict], temperatura: float,
         # sirvio escondria justo el caso caro.
         consumo.anotar(referencia_modelo, resp)
         limpio = _sanitizar(resp.contenido, nombres_rol, tratamiento)
-        if not limpio or _RE_RESPUESTA_CRUDA.match(limpio):
+        # Tercer motivo para rehacer la redaccion, junto a "vino vacia" y "es
+        # un valor crudo": deja la conversacion muerta. Solo se evalua si la
+        # traza confirma que este turno YA derivo -- ver _RE_ANUNCIA_PASE.
+        muerta = (_promete_en_vez_de_responder(limpio, nombres_area or set())
+                  if limpio and paso_a_otra_area else None)
+        if not limpio or _RE_RESPUESTA_CRUDA.match(limpio) or muerta:
             # Por que no sirvio. Sin esto, cuando el cliente ve "no pude
             # terminar de redactar" no queda NADA en el log: ni cuantas veces
             # se reintento, ni si el modelo devolvio vacio o un valor suelto,
@@ -1758,7 +1811,8 @@ def _redactar(referencia_modelo: str, historial: list[dict], temperatura: float,
             # herramienta, que es lo que explica un contenido en blanco
             # cuando se pidio sin herramientas. Paso en produccion el
             # 28/08/2026 y no se pudo saber por que.
-            print(f"[modelo] redaccion en blanco (intento {intento + 1}/{intentos}): "
+            print(f"[modelo] redaccion {muerta or 'en blanco'} "
+                  f"(intento {intento + 1}/{intentos}): "
                   f"crudo={resp.contenido[:60]!r} "
                   f"llamadas={[l.nombre for l in (resp.llamadas or [])]}")
 
@@ -1781,15 +1835,26 @@ def _redactar(referencia_modelo: str, historial: list[dict], temperatura: float,
             # instrucciones de recuperacion que despues viajarian a los turnos
             # siguientes.
             if intento == 0:
-                historial_intento = historial + [{
-                    "role": "system",
-                    "content": "No puedes llamar mas herramientas en este "
-                        "paso: ya tienes todo lo que se pudo consultar. "
-                        "Escribi AHORA la respuesta para la persona, en "
-                        "lenguaje natural y solo con lo que ya sabes. Si algo "
-                        "quedo sin resolver, decilo con palabras en vez de "
-                        "intentar consultarlo otra vez."}]
-        if limpio and not _RE_RESPUESTA_CRUDA.match(limpio):
+                # La correccion es distinta segun POR QUE no sirvio: a una
+                # redaccion vacia hay que decirle que escriba; a una que
+                # anuncia un pase, que el pase ya lo hizo ella.
+                correccion = ("No puedes llamar mas herramientas en este "
+                    "paso: ya tienes todo lo que se pudo consultar. "
+                    "Escribi AHORA la respuesta para la persona, en "
+                    "lenguaje natural y solo con lo que ya sabes. Si algo "
+                    "quedo sin resolver, decilo con palabras en vez de "
+                    "intentar consultarlo otra vez.")
+                if muerta:
+                    correccion = ("La derivacion YA se hizo y el area que "
+                        "atiende ahora sos VOS: no anuncies que vas a pasar "
+                        "la conversacion ni que vas a revisar algo, porque "
+                        "eso ya paso y el cliente se queda esperando a "
+                        "alguien que no va a escribir. Este mensaje es el "
+                        "ultimo del turno. Contesta AHORA con lo que las "
+                        "herramientas ya te devolvieron.")
+                historial_intento = historial + [{"role": "system",
+                                                  "content": correccion}]
+        if limpio and not _RE_RESPUESTA_CRUDA.match(limpio) and not muerta:
             limpio, fuga = guardia_salida.verificar(limpio)
             if fuga:
                 print(f"[salida] fuga bloqueada en redaccion final: '{fuga}'")
@@ -2524,11 +2589,21 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
     if hubo_llamadas:
         # Igual que en el retorno directo de mas arriba: la redaccion final es
         # otra llamada al modelo, asi que tambien puede quedarse sin el dato.
+        # Si este turno derivo, quien redacta es el area destino -- y entonces
+        # anunciar el pase es falso. Sale de la TRAZA (que herramientas se
+        # llamaron de verdad), no de adivinar por el texto: ver
+        # _promete_en_vez_de_responder.
+        deriva = {h.nombre for h in config.herramientas if h.deriva_rol}
+        paso = any(r.get("herramienta") in deriva for r in registro)
+        areas = {_sin_tildes(n) for n in config.roles} | {
+            _sin_tildes(getattr(r, "area", "") or "") for r in config.roles.values()}
         return (_con_obligatorios(
                     _redactar(referencia_redaccion, historial, config.llm.temperatura,
                               razonamiento=config.llm.razonamiento,
                               nombres_rol=config.roles,
-                              tratamiento=config.persona.normalizar_tratamiento),
+                              tratamiento=config.persona.normalizar_tratamiento,
+                              paso_a_otra_area=paso,
+                              nombres_area={a for a in areas if a}),
                     obligatorios),
                 registro, medios_pendientes)
     return ("No pude completar la consulta en el numero de pasos permitido.",
