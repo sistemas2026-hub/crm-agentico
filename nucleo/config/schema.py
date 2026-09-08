@@ -2240,9 +2240,24 @@ class TenantConfig(Base):
             return False
 
         deriva = {h.nombre for h in self.herramientas if h.deriva_rol}
+
+        # Si NINGUNA herramienta del catalogo deriva, no hay nada que sea
+        # inconsistente: es un catalogo vacio, no una configuracion mal hecha.
+        #
+        # Lo que esta regla persigue es una ASIMETRIA -- hay derivacion, unos
+        # roles la tienen y otro no, y en un YAML largo eso no se ve. Una
+        # empresa recien dada de alta tiene sus roles y todavia ninguna
+        # herramienta: el conector se aplica DESPUES (ver tests/
+        # test_conectores.py). Exigirle salida a esa config volvia imposible
+        # el paso intermedio, o sea impedia dar de alta un tenant nuevo para
+        # protegerlo de un problema que no puede tener todavia.
+        #
+        # Lo delataba el propio mensaje de error, que en ese caso mandaba a
+        # agregar el rol a "(ninguna herramienta declara deriva_rol)".
         sin_salida = [
             n for n, r in self.roles.items()
-            if r.orientado_a == "cliente_final" and not _tiene_salida(n, r)
+            if deriva and r.orientado_a == "cliente_final"
+            and not _tiene_salida(n, r)
         ]
         if sin_salida:
             # El mensaje dice DONDE arreglarlo, y distingue las DOS causas.

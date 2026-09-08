@@ -69,6 +69,15 @@ class _ConfigFalsa:
         )
         opciones.update(kwargs)
         self.canales = type("C", (), {"whatsapp": CanalWhatsApp(**opciones)})()
+        # Los campos que mira la RUTA del webhook, no el canal. Van aca --con
+        # el mismo default que el esquema real-- y no en cada prueba: el
+        # 07/09/2026 se le agrego 'rol_de_entrada' a _rol_de_cliente() y esta
+        # falsa se quedo atras, asi que las cinco comprobaciones del webhook
+        # se cayeron con AttributeError. El codigo estaba bien; el doble de
+        # mentira no seguia al original. Un fake que no sigue al esquema
+        # convierte cualquier campo nuevo en cinco falsos rojos.
+        self.rol_de_entrada = None
+        self.roles = {}
 
 
 def firmar(cuerpo: bytes, secreto: str = APP_SECRET) -> str:
@@ -392,8 +401,18 @@ def probar_rutas(config):
         w in vistos or (vistos.add(w) and False))
     # El turno no llama al modelo ni envia nada: solo deja constancia.
     api._procesar_mensaje_whatsapp = lambda cfg, t, r, e: atendidos.append(e["wamid"])
+    # El acuse de entrega SI escribe en la base. Se sustituye por la misma
+    # razon que el turno --esta guarda corre sin base, en cualquier maquina--
+    # y ademas se anota lo que le llego: asi el caso deja de comprobar solo
+    # que la ruta no explote, y comprueba que el acuse termina donde debe.
+    entregas = []
+    api.persistencia.marcar_entrega = lambda t, wamid, estado, error=None: (
+        entregas.append((wamid, estado, error)))
     # La ruta busca un rol orientado a cliente_final en la configuracion.
     config.roles = {"cliente_final": type("R", (), {"orientado_a": "cliente_final"})()}
+    # Explicito, como en produccion: quien atiende un canal publico se decide,
+    # no se hereda del orden de un diccionario (ver tests/test_rol_de_entrada.py).
+    config.rol_de_entrada = "cliente_final"
 
     cli = api.app.test_client()
     ruta = f"/canales/whatsapp/{TENANT}"
@@ -438,6 +457,8 @@ def probar_rutas(config):
          "recipient_id": "573001112233"}]}}]}]}).encode()
     r = cli.post(ruta, data=acuse, content_type="application/json",
                  headers={"X-Hub-Signature-256": firmar(acuse)})
+    check("el acuse queda registrado como entrega",
+          entregas == [("wamid.ACUSE", "entregado", None)])
     check("un acuse de entrega no despierta al modelo",
           r.status_code == 200 and atendidos == ["wamid.RUTA1"])
 

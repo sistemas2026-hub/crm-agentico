@@ -503,6 +503,20 @@ def mensajes_de(tenant: str, conversation_id: str) -> dict:
                       -- falta hacer.
                       escalada_en, resumen, escalada_no_comprobado,
                       escalada_siguiente_paso,
+                      -- Cuando escribio el CLIENTE por ultima vez. No es lo
+                      -- mismo que 'actualizado_en' ni que el ultimo mensaje
+                      -- del hilo, y la diferencia es justamente el bug facil
+                      -- de esta funcionalidad: la ventana de 24 h de WhatsApp
+                      -- la abre el cliente, y solo el. Si esto mirara
+                      -- cualquier mensaje, cada respuesta nuestra --o del
+                      -- asistente-- renovaria la ventana en la pantalla
+                      -- mientras Meta la considera cerrada, y el operador
+                      -- descubriria la verdad recien cuando Enviar falla, que
+                      -- es exactamente lo que se viene a evitar.
+                      (select max(u.creado_en) from asistente.messages u
+                        where u.conversation_id = conversations.id
+                          and u.organization_id = conversations.organization_id
+                          and u.rol = 'user') as ultimo_mensaje_cliente,
                       (atendida_manual or exists (
                            select 1 from asistente.messages h
                             where h.conversation_id = conversations.id

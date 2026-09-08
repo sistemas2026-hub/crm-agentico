@@ -58,6 +58,56 @@ TIMEOUT_SEGUNDOS = 20
 # (mandar una plantilla), no es un fallo a reintentar.
 CODIGO_FUERA_DE_VENTANA = 131047
 
+# Las horas que dura la ventana. Es la regla de Meta, no una preferencia de la
+# empresa: por eso vive aca y no en la config del tenant.
+VENTANA_HORAS = 24
+
+# Cuando avisar que esta por cerrarse. No cambia ninguna decision --la ventana
+# esta abierta hasta que no lo esta-- pero una hora es el margen razonable
+# para que alguien decida contestar ahora en vez de descubrir manana que ya
+# no puede escribir texto libre.
+VENTANA_AVISO_MINUTOS = 60
+
+
+def estado_de_ventana(ultimo_entrante, ahora=None) -> dict:
+    """
+    Si se le puede escribir texto libre a este cliente, y hasta cuando.
+
+    'ultimo_entrante' es el ultimo mensaje QUE MANDO EL CLIENTE. Solo eso
+    abre la ventana: ni una respuesta del asistente, ni una del operador, ni
+    el envio de una plantilla. Meta cuenta desde que el usuario escribio.
+
+    Esto es una AYUDA PARA LA PANTALLA, no una autorizacion. Quien decide de
+    verdad es Meta cuando recibe el envio, y el reloj de este proceso puede
+    estar corrido respecto del suyo. Por eso el manejo del error 131047 sigue
+    existiendo y no se reemplaza: aca se evita que el operador se entere
+    tarde, alla se garantiza que no se mienta sobre lo que salio.
+
+    Devuelve 'abierta' None cuando el cliente nunca escribio -- que no es lo
+    mismo que cerrada: puede ser una conversacion que abrimos nosotros, o de
+    otro canal. La pantalla no deberia afirmar nada en ese caso.
+    """
+    from datetime import datetime, timedelta, timezone
+    ahora = ahora or datetime.now(timezone.utc)
+    if ultimo_entrante is None:
+        return {"abierta": None, "hasta": None, "restante_seg": None,
+                "ultimo_mensaje_cliente": None}
+    if ultimo_entrante.tzinfo is None:
+        ultimo_entrante = ultimo_entrante.replace(tzinfo=timezone.utc)
+    hasta = ultimo_entrante + timedelta(hours=VENTANA_HORAS)
+    restante = (hasta - ahora).total_seconds()
+    return {
+        "abierta": restante > 0,
+        "hasta": hasta.isoformat(),
+        # Se manda ademas del instante para que la pantalla no tenga que
+        # confiar en el reloj del navegador para saber CUANTO falta: puede
+        # estar corrido, y un contador que arranca mal se ve igual de
+        # convincente que uno que arranca bien.
+        "restante_seg": max(0, int(restante)),
+        "por_cerrarse": 0 < restante <= VENTANA_AVISO_MINUTOS * 60,
+        "ultimo_mensaje_cliente": ultimo_entrante.isoformat(),
+    }
+
 # Tipos de mensaje que traen un archivo aparte, todos con la misma forma
 # {id, mime_type, caption} dentro de la clave que se llama igual que el tipo.
 TIPOS_CON_ARCHIVO = ("image", "audio", "video", "document", "sticker", "voice")
@@ -558,6 +608,31 @@ def enviar_plantilla(config, tenant: str, para: str, plantilla: str,
             f"canales.whatsapp.plantillas. Declaradas: "
             f"{', '.join(sorted(cfg.plantillas)) or 'ninguna'}.")
 
+    return enviar_plantilla_aprobada(config, tenant, para, nombre_real,
+                                     variables, idioma)
+
+
+def enviar_plantilla_aprobada(config, tenant: str, para: str, nombre_real: str,
+                              variables: list[str] | None = None,
+                              idioma: str = "es") -> str | None:
+    """
+    Manda una plantilla por su nombre REAL en Meta, sin pasar por el mapeo de
+    'canales.whatsapp.plantillas'.
+
+    POR QUE EXISTE, sabiendo que enviar_plantilla() ya hace casi lo mismo:
+    ese mapeo esta para que el CODIGO diga 'aviso_mora' y cada empresa lo ate
+    al nombre que registro -- indirection util cuando quien elige es un
+    programa. Cuando quien elige es una persona, mirando la lista de lo que
+    Meta ya aprobo para esta cuenta, la indirection no agrega nada y ademas
+    obliga a escribir tenant_config para poder mandar algo que ya estaba
+    aprobado.
+
+    No debilita ninguna garantia: lo que se puede mandar sigue acotado a lo
+    que Meta aprobo (la pantalla arma la lista con plantillas_aprobadas), y
+    hay una persona apretando el boton. Lo que NO debe hacer es llamarse
+    desde el motor durante un turno -- para eso esta enviar_plantilla(), que
+    exige la declaracion explicita.
+    """
     componentes = []
     if variables:
         componentes.append({
@@ -565,7 +640,7 @@ def enviar_plantilla(config, tenant: str, para: str, plantilla: str,
             "parameters": [{"type": "text", "text": str(v)} for v in variables],
         })
 
-    emisor = _secreto(tenant, cfg.phone_number_id_ref,
+    emisor = _secreto(tenant, _cfg(config).phone_number_id_ref,
                       "del numero emisor (phone_number_id_ref)")
     respuesta = _post(config, tenant, f"{emisor}/messages", {
         "messaging_product": "whatsapp",
@@ -601,9 +676,37 @@ def plantillas_aprobadas(config, tenant: str) -> list[dict]:
         raise ErrorWhatsApp(
             f"No se pudieron leer las plantillas: {r.status_code} {r.text[:200]}")
 
-    return [{"nombre": p.get("name"), "estado": p.get("status"),
-             "idioma": p.get("language"), "categoria": p.get("category")}
-            for p in (r.json().get("data") or [])]
+    return [_desarmar_plantilla(p) for p in (r.json().get("data") or [])]
+
+
+def _desarmar_plantilla(p: dict) -> dict:
+    """
+    De la forma de Meta a lo que hace falta para mostrarla y completarla.
+
+    'variables' se DEDUCE del texto ({{1}}, {{2}}...) en vez de confiar en un
+    campo aparte: Meta rechaza el envio si la cantidad no coincide con la
+    plantilla aprobada, y ese rechazo llega como un error generico que no
+    dice cual fue el problema. Contando los huecos del texto que la propia
+    API devuelve, la pantalla pide exactamente los que hay.
+    """
+    import re
+    encabezado = cuerpo = ""
+    for c in p.get("components") or []:
+        tipo = (c.get("type") or "").upper()
+        if tipo == "HEADER" and (c.get("format") or "TEXT").upper() == "TEXT":
+            encabezado = c.get("text") or ""
+        elif tipo == "BODY":
+            cuerpo = c.get("text") or ""
+    huecos = {int(n) for n in re.findall(r"\{\{(\d+)\}\}", cuerpo)}
+    return {
+        "nombre": p.get("name"), "estado": p.get("status"),
+        "idioma": p.get("language"), "categoria": p.get("category"),
+        "encabezado": encabezado, "cuerpo": cuerpo,
+        # Cuantos valores hay que pedir. Se usa max() y no len() porque una
+        # plantilla puede repetir {{1}} y saltearse un numero: lo que Meta
+        # espera es la lista completa hasta el mayor, no los distintos.
+        "variables": max(huecos) if huecos else 0,
+    }
 
 
 # =============================================================================

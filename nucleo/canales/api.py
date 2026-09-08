@@ -3110,7 +3110,130 @@ def conversaciones_mensajes(id_conversacion):
     if resultado["conversacion"] is None:
         return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
 
+    # La ventana de 24 h SOLO para WhatsApp. El simulador, la API y cualquier
+    # canal futuro no tienen esta regla, y heredarla por descuido dejaria al
+    # operador sin poder escribir donde nadie se lo impide.
+    conv = resultado["conversacion"]
+    if conv.get("canal") == "whatsapp":
+        conv["ventana_whatsapp"] = whatsapp.estado_de_ventana(
+            conv.get("ultimo_mensaje_cliente"))
+
     return jsonify(resultado)
+
+
+@app.get("/canales/plantillas")
+def canales_plantillas():
+    """
+    Las plantillas que Meta tiene aprobadas para esta empresa, con su texto.
+
+    Se consultan EN VIVO y no se cachean: una plantilla recien aprobada tiene
+    que aparecer sin esperar nada, y el caso de uso --alguien mirando una
+    conversacion con la ventana cerrada-- ocurre pocas veces por dia.
+
+    Devuelve solo las APPROVED. Ofrecer una en revision seria ofrecer un
+    envio que va a fallar.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        config = _config_de(tenant)
+        todas = whatsapp.plantillas_aprobadas(config, tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+    except Exception as e:
+        print(f"[plantillas] no se pudieron leer: {type(e).__name__}: {e}")
+        return jsonify({"error": f"No se pudieron leer las plantillas: {e}"}), 502
+
+    aprobadas = [p for p in todas if (p.get("estado") or "").upper() == "APPROVED"]
+    return jsonify({"plantillas": aprobadas, "total_en_meta": len(todas)})
+
+
+@app.post("/conversaciones/<id_conversacion>/plantilla")
+def conversaciones_enviar_plantilla(id_conversacion):
+    """
+    Mandar una plantilla aprobada, que es la unica forma de escribirle a
+    alguien con la ventana de 24 h cerrada.
+
+    Mismo orden que responder texto: se GUARDA y despues se entrega. Lo que
+    se guarda es el texto YA ARMADO con sus variables -- no el nombre de la
+    plantilla-- porque el hilo tiene que mostrar lo que el cliente leyo, y
+    porque el texto de una plantilla lo puede cambiar Meta despues.
+
+    NO abre la ventana. La ventana la abre el cliente cuando responde, y
+    nada mas: esto queda como mensaje 'humano', que es justamente el rol que
+    el calculo de la ventana ignora.
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    nombre = (cuerpo.get("plantilla") or "").strip()
+    variables = [str(v) for v in (cuerpo.get("variables") or [])]
+    autor = (cuerpo.get("autor") or "").strip()
+    if not tenant or not nombre:
+        return jsonify({"error": "Faltan campos: tenant, plantilla"}), 400
+
+    try:
+        config = _config_de(tenant)
+        disponibles = whatsapp.plantillas_aprobadas(config, tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+    except Exception as e:
+        return jsonify({"error": f"No se pudieron leer las plantillas: {e}"}), 502
+
+    # Se vuelve a mirar la lista en vez de confiar en lo que mando la
+    # pantalla: entre que se dibujo el selector y que alguien apreto Enviar
+    # puede haber pasado cualquier cosa, y el nombre viaja por la red.
+    elegida = next((p for p in disponibles
+                    if p["nombre"] == nombre
+                    and (p.get("estado") or "").upper() == "APPROVED"), None)
+    if elegida is None:
+        return jsonify({"error": f"'{nombre}' no es una plantilla aprobada de "
+                                 f"esta cuenta."}), 400
+    if len(variables) != elegida["variables"]:
+        return jsonify({"error": f"'{nombre}' necesita {elegida['variables']} "
+                                 f"variable(s) y llegaron {len(variables)}."}), 400
+
+    texto = _armar_plantilla(elegida, variables)
+
+    try:
+        destino = persistencia.agregar_mensaje_humano(
+            tenant, id_conversacion, texto, autor)
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:
+        print(f"[plantillas] fallo al guardar: {type(e).__name__}: {e}")
+        return jsonify({"error": "No se pudo guardar el mensaje."}), 500
+    if destino is None:
+        return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+
+    if destino["canal"] != "whatsapp":
+        return jsonify({"error": "Las plantillas son de WhatsApp; esta "
+                                 "conversacion es de otro canal."}), 400
+
+    salida = {"ok": True, "entregado": False, "texto": texto,
+              "mensaje_id": destino["mensaje_id"]}
+    try:
+        wamid = whatsapp.enviar_plantilla_aprobada(
+            config, tenant, destino["usuario_externo"], nombre, variables,
+            elegida.get("idioma") or "es")
+        persistencia.marcar_envio(tenant, destino["mensaje_id"], wamid)
+        salida["entregado"] = True
+    except Exception as e:
+        print(f"[plantillas] no se pudo entregar '{nombre}' en "
+              f"'{id_conversacion}': {type(e).__name__}: {e}")
+        salida["aviso"] = str(e)
+        persistencia.marcar_envio(tenant, destino["mensaje_id"], None, str(e))
+    return jsonify(salida), 201
+
+
+def _armar_plantilla(plantilla: dict, variables: list[str]) -> str:
+    """El texto final, con los {{n}} reemplazados -- lo que va a leer el
+    cliente y lo que queda en el hilo."""
+    cuerpo = plantilla.get("cuerpo") or ""
+    for i, valor in enumerate(variables, start=1):
+        cuerpo = cuerpo.replace("{{" + str(i) + "}}", valor)
+    encabezado = (plantilla.get("encabezado") or "").strip()
+    return f"{encabezado}\n\n{cuerpo}".strip() if encabezado else cuerpo
 
 
 @app.post("/mantenimiento/cerrar-sin-respuesta")

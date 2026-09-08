@@ -1027,9 +1027,192 @@
     }
   }
 
+  // ==========================================================================
+  //  VENTANA DE 24 H DE WHATSAPP
+  //
+  //  Meta solo acepta texto libre dentro de las 24 h desde el último mensaje
+  //  DEL CLIENTE. Hasta ahora eso se descubría cuando Enviar fallaba.
+  //
+  //  Esto INFORMA, no autoriza. Quien decide es Meta al recibir el envío, y
+  //  el manejo del rechazo (burbuja `sinEntregar` con el motivo) sigue igual
+  //  de vivo: si el reloj de acá está corrido, el que manda es el de allá.
+  // ==========================================================================
+
+  /** Lo que dijo el servidor, más CUÁNDO lo dijo según este navegador. */
+  let ventanaBase = $state(
+    /** @type {{abierta: boolean|null, restante_seg: number|null, recibidoEn: number}|null} */ (
+      null
+    )
+  );
+
+  // Se resincroniza en cada sondeo: 'conversacion' se reemplaza entera, así
+  // que un mensaje nuevo del cliente reabre la ventana en pantalla sin
+  // recargar, que es justo lo que hace falta cuando alguien está mirando.
+  $effect(() => {
+    const v = conversacion?.ventana_whatsapp;
+    ventanaBase = v ? { ...v, recibidoEn: Date.now() } : null;
+  });
+
+  /** Sólo para que el contador avance entre sondeos. */
+  let tic = $state(Date.now());
+  $effect(() => {
+    if (!ventanaBase) return;
+    const id = setInterval(() => (tic = Date.now()), 15000);
+    return () => clearInterval(id);
+  });
+
+  // Se descuenta el tiempo TRANSCURRIDO, no se recalcula desde la fecha
+  // absoluta: un navegador con la hora corrida daría un contador equivocado
+  // que se ve igual de convincente que uno correcto. El instante autoritativo
+  // lo puso el servidor; acá sólo se le resta lo que pasó desde que llegó.
+  let ventanaRestante = $derived(
+    ventanaBase?.restante_seg == null
+      ? null
+      : Math.max(0, ventanaBase.restante_seg - Math.floor((tic - ventanaBase.recibidoEn) / 1000))
+  );
+
+  /** true abierta · false cerrada · null no aplica (otro canal, o el cliente
+      nunca escribió). null NO es cerrada: no se bloquea por un dato que no
+      existe. */
+  let ventanaAbierta = $derived(
+    ventanaBase?.abierta == null ? null : ventanaBase.abierta && (ventanaRestante ?? 0) > 0
+  );
+
+  let ventanaPorCerrarse = $derived(
+    ventanaAbierta === true && (ventanaRestante ?? 0) <= 60 * 60
+  );
+
+  /** El cuadro de texto se bloquea SOLO para lo que va al cliente. La nota
+      interna sigue disponible: no sale por el canal, asi que la ventana de
+      Meta no la gobierna -- y anotar lo que pasa mientras no se puede
+      contestar es justo lo que alguien necesita hacer en ese momento. */
+  let bloqueadoPorVentana = $derived(ventanaAbierta === false && modo !== 'nota');
+
+  function comoDuracion(/** @type {number} */ seg) {
+    const h = Math.floor(seg / 3600);
+    const m = Math.floor((seg % 3600) / 60);
+    return h > 0 ? `${h} h ${m} min` : `${m} min`;
+  }
+
+  // --- plantillas -----------------------------------------------------------
+  //  Se piden recién cuando alguien las necesita: es una llamada en vivo a
+  //  Meta, y la mayoría de las conversaciones se atienden con la ventana
+  //  abierta. Pedirlas en cada carga del hilo sería pagarlas siempre para
+  //  usarlas casi nunca.
+
+  let eligiendoPlantilla = $state(false);
+  let plantillas = $state(/** @type {any[]} */ ([]));
+  let cargandoPlantillas = $state(false);
+  let errorPlantillas = $state('');
+  let plantillaElegida = $state(/** @type {any} */ (null));
+  let valoresPlantilla = $state(/** @type {string[]} */ ([]));
+  let enviandoPlantilla = $state(false);
+
+  async function abrirPlantillas() {
+    eligiendoPlantilla = true;
+    plantillaElegida = null;
+    if (plantillas.length || cargandoPlantillas) return;
+    cargandoPlantillas = true;
+    errorPlantillas = '';
+    try {
+      const resp = await fetch('/api/canales/plantillas');
+      const datos = await resp.json();
+      if (!resp.ok) {
+        errorPlantillas = datos.error || 'No se pudieron leer las plantillas.';
+        return;
+      }
+      plantillas = datos.plantillas ?? [];
+      // Distinguir "no hay ninguna aprobada" de "hay, pero ninguna lista":
+      // en el segundo caso alguien está esperando una aprobación de Meta y
+      // eso se resuelve solo; en el primero hay que ir a crear una.
+      if (!plantillas.length && (datos.total_en_meta ?? 0) > 0) {
+        errorPlantillas =
+          `Esta cuenta tiene ${datos.total_en_meta} plantilla(s) en Meta, pero ` +
+          `ninguna aprobada todavía. Hasta que Meta apruebe una no hay forma ` +
+          `de escribirle al cliente fuera de la ventana.`;
+      }
+    } catch (/** @type {any} */ err) {
+      errorPlantillas = err?.message || 'No se pudieron leer las plantillas.';
+    } finally {
+      cargandoPlantillas = false;
+    }
+  }
+
+  function elegirPlantilla(/** @type {any} */ p) {
+    plantillaElegida = p;
+    valoresPlantilla = Array.from({ length: p.variables ?? 0 }, () => '');
+  }
+
+  /** El texto tal como lo va a leer el cliente. Se arma acá sólo para la
+      vista previa: el que se envía y se guarda lo arma el motor, con la
+      plantilla que vuelve a leer de Meta en ese momento. */
+  let vistaPreviaPlantilla = $derived.by(() => {
+    if (!plantillaElegida) return '';
+    let cuerpo = plantillaElegida.cuerpo ?? '';
+    valoresPlantilla.forEach((v, i) => {
+      cuerpo = cuerpo.replaceAll(`{{${i + 1}}}`, v || `{{${i + 1}}}`);
+    });
+    const enc = (plantillaElegida.encabezado ?? '').trim();
+    return enc ? `${enc}\n\n${cuerpo}` : cuerpo;
+  });
+
+  let plantillaCompleta = $derived(
+    !!plantillaElegida && valoresPlantilla.every((v) => v.trim().length > 0)
+  );
+
+  async function enviarPlantilla() {
+    if (!plantillaElegida || enviandoPlantilla || !plantillaCompleta) return;
+    enviandoPlantilla = true;
+    errorPlantillas = '';
+    try {
+      const resp = await fetch(`/api/conversaciones/${conversacion.id}/plantilla`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          plantilla: plantillaElegida.nombre,
+          variables: valoresPlantilla
+        })
+      });
+      const datos = await resp.json();
+      if (!resp.ok) {
+        errorPlantillas = datos.error || 'No se pudo enviar la plantilla.';
+        return;
+      }
+      eligiendoPlantilla = false;
+      // Si el canal la rechazó, se dice acá y además queda en la burbuja: el
+      // aviso de arriba desaparece y el mensaje se queda en el hilo.
+      if (datos.aviso) error = `Se guardó pero no salió: ${datos.aviso}`;
+      await sondearMensajesNuevos();
+      requestAnimationFrame(() => alFinal(true));
+    } catch (/** @type {any} */ err) {
+      errorPlantillas = err?.message || 'No se pudo enviar la plantilla.';
+    } finally {
+      enviandoPlantilla = false;
+    }
+  }
+
   async function enviar() {
     const texto = entrada.trim();
     if (!texto || enviando) return;
+
+    // El caso frontera: empezó a escribir con la ventana abierta y pulsa
+    // Enviar después del vencimiento. El borrador NO se pierde -- se corta
+    // ANTES de vaciar 'entrada' -- y se le ofrece la salida que sí existe.
+    //
+    // Vale para las dos ramas de abajo, no sólo la escalada. Si no está
+    // escalada, lo que se escribe acá entra como si lo hubiera dicho el
+    // cliente y contesta el asistente -- y ESA respuesta también sale por
+    // WhatsApp, así que también la rechaza Meta. Dejarla pasar sería además
+    // peor que un envío fallido: escribiría un mensaje de cliente que el
+    // cliente no mandó, y la ventana pasaría a verse abierta por un mensaje
+    // nuestro. Justo lo que este cálculo existe para no hacer.
+    if (ventanaAbierta === false) {
+      error =
+        'La ventana de 24 h de WhatsApp se cerró mientras escribías. Tu texto ' +
+        'sigue acá; para volver a contactar al cliente hay que usar una plantilla.';
+      abrirPlantillas();
+      return;
+    }
 
     entrada = '';
     enviando = true;
@@ -1462,6 +1645,123 @@
         >
       </div>
 
+      <!-- LA VENTANA DE 24 H, ANTES DE ESCRIBIR Y NO DESPUÉS DE FALLAR.
+           Sólo aparece en WhatsApp: los otros canales no tienen esta regla y
+           heredarla dejaría a alguien sin poder escribir donde nadie se lo
+           impide. -->
+      {#if ventanaAbierta !== null}
+        <div
+          class="ventana"
+          class:ventana-cerrada={ventanaAbierta === false}
+          class:ventana-avisa={ventanaPorCerrarse}
+          role="status"
+        >
+          {#if ventanaAbierta === false}
+            <strong>Ventana de WhatsApp cerrada</strong>
+            <span class="v2-muted"
+              >· el cliente no escribe hace más de 24 h. Para volver a
+              contactarlo hay que usar una plantilla aprobada.</span
+            >
+            <button type="button" class="v2-btn v2-btn-sm" onclick={abrirPlantillas}>
+              Elegir plantilla
+            </button>
+          {:else if ventanaPorCerrarse}
+            <strong>La ventana cierra en {comoDuracion(ventanaRestante ?? 0)}</strong>
+            <span class="v2-muted">· después sólo se le puede escribir por plantilla</span>
+          {:else}
+            <span>Ventana abierta · quedan {comoDuracion(ventanaRestante ?? 0)}</span>
+          {/if}
+        </div>
+      {/if}
+
+      <!-- Panel y no ventana modal: el hilo tiene que seguir visible mientras
+           se elige qué mandar. Media pantalla tapada por un diálogo obliga a
+           recordar de memoria de qué se estaba hablando. -->
+      {#if eligiendoPlantilla}
+        <div class="plantillas">
+          <div class="plantillas-top">
+            <strong>Plantilla aprobada por Meta</strong>
+            <button
+              type="button"
+              class="v2-btn v2-btn-sm v2-btn-quiet"
+              onclick={() => (eligiendoPlantilla = false)}
+              aria-label="Cerrar el selector de plantillas"><X size={14} /></button
+            >
+          </div>
+
+          {#if cargandoPlantillas}
+            <p class="v2-muted" style="margin:0">Buscando las plantillas de la cuenta…</p>
+          {:else if errorPlantillas}
+            <p class="v2-error" style="margin:0">{errorPlantillas}</p>
+          {/if}
+
+          {#if !cargandoPlantillas && !plantillaElegida}
+            {#if plantillas.length}
+              <ul class="plantillas-lista">
+                {#each plantillas as p (p.nombre)}
+                  <li>
+                    <button type="button" class="plantilla-item" onclick={() => elegirPlantilla(p)}>
+                      <span class="plantilla-nombre">{p.nombre}</span>
+                      <span class="v2-muted plantilla-cuerpo">{p.cuerpo}</span>
+                      <span class="v2-sub"
+                        >{p.categoria} · {p.idioma}{p.variables
+                          ? ` · ${p.variables} dato(s) a completar`
+                          : ''}</span
+                      >
+                    </button>
+                  </li>
+                {/each}
+              </ul>
+            {:else if !errorPlantillas}
+              <p class="v2-muted" style="margin:0">
+                Esta cuenta no tiene ninguna plantilla aprobada en Meta, así que no hay forma de
+                escribirle al cliente fuera de la ventana. Crear y hacer aprobar una lleva días:
+                conviene no esperar a necesitarla.
+              </p>
+            {/if}
+          {/if}
+
+          {#if plantillaElegida}
+            {#each valoresPlantilla as _, i}
+              <label class="plantilla-var">
+                <span class="v2-sub">Dato {i + 1} — reemplaza {'{{'}{i + 1}{'}}'}</span>
+                <input class="v2-input" bind:value={valoresPlantilla[i]} />
+              </label>
+            {/each}
+
+            <!-- Vista previa: lo que va a leer el cliente, antes de mandarlo.
+                 El texto de una plantilla lo aprueba Meta y no se puede
+                 corregir después de enviada. -->
+            <div class="plantilla-previa">
+              <span class="v2-sub">Así le va a llegar</span>
+              <p>{vistaPreviaPlantilla}</p>
+            </div>
+
+            <div class="plantilla-acciones">
+              <button
+                type="button"
+                class="v2-btn v2-btn-sm"
+                onclick={() => (plantillaElegida = null)}>Volver a la lista</button
+              >
+              <button
+                type="button"
+                class="v2-btn v2-btn-primary"
+                onclick={enviarPlantilla}
+                disabled={enviandoPlantilla || !plantillaCompleta}
+                aria-busy={enviandoPlantilla}
+              >
+                <Send size={14} />{enviandoPlantilla ? 'Enviando…' : 'Enviar plantilla'}
+              </button>
+            </div>
+            {#if !plantillaCompleta}
+              <span class="v2-sub"
+                >Faltan datos por completar. Meta rechaza el envío si no van todos.</span
+              >
+            {/if}
+          {/if}
+        </div>
+      {/if}
+
       <form
         class="compositor"
         class:arrastrando
@@ -1534,12 +1834,14 @@
           bind:value={entrada}
           onpaste={alPegar}
           rows="2"
-          placeholder={modo === 'nota'
-            ? 'Nota para el equipo — el cliente no la ve…'
-            : escalada
-              ? 'Escribí tu respuesta…'
-              : 'Continuar la conversación…'}
-          disabled={enviando}
+          placeholder={bloqueadoPorVentana
+            ? 'La ventana de WhatsApp está cerrada — usá una plantilla'
+            : modo === 'nota'
+              ? 'Nota para el equipo — el cliente no la ve…'
+              : escalada
+                ? 'Escribí tu respuesta…'
+                : 'Continuar la conversación…'}
+          disabled={enviando || bloqueadoPorVentana}
           onkeydown={(e) => {
             // Enter envia, Shift+Enter hace salto de linea: es lo que la mano
             // ya espera de un chat.
@@ -1642,7 +1944,7 @@
               class="v2-btn v2-btn-primary"
               type="button"
               onclick={enviarAdjunto}
-              disabled={enviando}
+              disabled={enviando || bloqueadoPorVentana}
               aria-busy={enviando}
             >
               <Send size={14} />{enviando ? 'Enviando…' : 'Enviar archivo'}
@@ -1651,7 +1953,7 @@
             <button
               class="v2-btn v2-btn-primary"
               type="submit"
-              disabled={enviando || !entrada.trim()}
+              disabled={enviando || !entrada.trim() || bloqueadoPorVentana}
               aria-busy={enviando}
             >
               <Send size={14} />{enviando ? 'Enviando…' : 'Enviar'}
@@ -2477,6 +2779,119 @@
     color: var(--v2-slate);
   }
   /* ── nota interna ───────────────────────────────────────────────────── */
+  /* --- ventana de 24 h ---------------------------------------------------
+     Un renglon, no una tarjeta: informa antes de escribir y no compite con
+     el hilo. Solo se pone fuerte cuando cambia lo que se puede hacer. */
+  .ventana {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    font-size: 11.5px;
+    color: var(--v2-slate);
+    padding: 5px 8px;
+    margin-bottom: 6px;
+    border-radius: 8px;
+    background: var(--v2-paper);
+  }
+  .ventana-avisa {
+    color: var(--v2-ink);
+    background: var(--v2-ember-soft);
+  }
+  .ventana-cerrada {
+    color: var(--v2-ink);
+    background: var(--v2-ember-soft);
+  }
+  .ventana-cerrada button {
+    margin-left: auto;
+  }
+
+  /* --- selector de plantillas -------------------------------------------- */
+  .plantillas {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;
+    margin-bottom: 8px;
+    border: 1px solid var(--v2-line);
+    border-radius: 8px;
+    background: var(--v2-card);
+  }
+  .plantillas-top {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .plantillas-top strong {
+    font-size: 12px;
+  }
+  .plantillas-top button {
+    margin-left: auto;
+  }
+  .plantillas-lista {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .plantilla-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    width: 100%;
+    text-align: left;
+    font: inherit;
+    padding: 8px;
+    border: 1px solid var(--v2-line-soft);
+    border-radius: 8px;
+    background: var(--v2-paper);
+    cursor: pointer;
+  }
+  .plantilla-item:hover {
+    border-color: var(--v2-line);
+  }
+  .plantilla-nombre {
+    font-weight: 600;
+    font-size: 12px;
+    color: var(--v2-ink);
+  }
+  /* El cuerpo puede ser largo: se recorta en una linea para que la lista se
+     pueda barrer de un vistazo. El texto completo se ve en la vista previa,
+     que es donde importa. */
+  .plantilla-cuerpo {
+    font-size: 11.5px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+  .plantilla-var {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .plantilla-previa {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 8px;
+    border-radius: 8px;
+    background: var(--v2-paper);
+  }
+  .plantilla-previa p {
+    margin: 0;
+    font-size: 12.5px;
+    color: var(--v2-ink);
+    white-space: pre-wrap;
+  }
+  .plantilla-acciones {
+    display: flex;
+    gap: 6px;
+    justify-content: flex-end;
+  }
+
   .modos {
     display: flex;
     gap: 4px;

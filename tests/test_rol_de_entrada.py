@@ -205,6 +205,40 @@ except Exception as e:
             f"se rechazo, pero el mensaje no menciona 'areas_destino': {texto[:130]}")
 
 
+# --- 5.d un tenant SIN herramientas se acepta --------------------------------
+# La regla de arriba persigue una ASIMETRIA: hay derivacion, unos roles la
+# tienen y otro no. Una empresa recien dada de alta no tiene ninguna
+# herramienta todavia --el conector se aplica despues, ver
+# tests/test_conectores.py-- y ahi no hay nada inconsistente que detectar.
+#
+# Se fija como caso porque la version estricta parecia mas segura y no lo era:
+# volvia imposible el paso intermedio del alta, o sea impedia crear un tenant
+# nuevo para protegerlo de un problema que todavia no puede tener.
+recien_creado = copy.deepcopy(base)
+recien_creado["herramientas"] = []
+for r in recien_creado["roles"].values():
+    r["puede_consultar"] = []
+    r["campos_permitidos"] = {}
+# Las reglas de escalamiento que NOMBRAN una herramienta tampoco existen en un
+# alta nueva; se sacan igual que en tests/test_conectores.py. Lo que se mide
+# aca es la regla de "rol sin salida", no esas.
+import re as _re                                                   # noqa: E402
+motivo = ""
+for _ in range(12):
+    try:
+        TenantConfig(**recien_creado)
+        motivo = ""
+        break
+    except Exception as e:                                         # noqa: BLE001
+        motivo = str(e)
+        m = _re.search(r"escalamiento\.(\w+)", motivo)
+        if not m:
+            break
+        recien_creado.get("escalamiento", {}).pop(m.group(1), None)
+revisar(not motivo, "un tenant sin ninguna herramienta se acepta",
+        f"fue rechazado: {motivo[:200]}")
+
+
 # --- 6. el YAML semilla lo trae ----------------------------------------------
 # El YAML es la semilla de un tenant nuevo. Si no lo trae, la proxima empresa
 # que se conecte arranca con el mismo problema.
