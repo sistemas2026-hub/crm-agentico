@@ -152,6 +152,40 @@ afirmar("EXACTO" in r["instruccion_interna"],
         "para que el cliente vea lo que de verdad hay")
 
 
+print("\n== 4b. un PARECIDO no es una confirmacion ==")
+# Medido el 08/09/2026 en el simulador: alguien pregunto por "wins sport +" y
+# la parrilla solo trae "Win Sports". Son productos distintos -- el '+' es la
+# senal premium-- y el asistente contesto "si, tenemos Win Sports". Ese cliente
+# iba a contratar esperando algo que no esta incluido.
+#
+# La causa era que el codigo mezclaba dos tipos de coincidencia en una sola
+# lista y devolvia en_parrilla=True para las dos.
+c2 = _config(canales=PARRILLA + ["WIN SPORTS"])
+
+r = motor._ejecutar_consulta_parrilla(c2, {"canal": "wins sport +"})
+afirmar(r["en_parrilla"] is False,
+        "'wins sport +' contra una parrilla que solo trae 'WIN SPORTS' NO se "
+        "confirma: es otro producto, y decir que si lo manda a buscar algo "
+        "que no va a encontrar")
+afirmar(r.get("parecidos") == ["WIN SPORTS"],
+        "pero el parecido se devuelve igual -- perderlo seria empujar al "
+        "modelo a decir 'no tenemos nada' cuando hay algo cerca")
+afirmar("NO le digas que si" in r["instruccion_interna"],
+        "y la instruccion se lo prohibe con todas las letras")
+afirmar("preguntale" in r["instruccion_interna"],
+        "lo que corresponde es preguntar, no elegir por el cliente")
+
+exacto = motor._ejecutar_consulta_parrilla(c2, {"canal": "win sports"})
+afirmar(exacto["en_parrilla"] is True,
+        "el nombre real, aunque venga en minusculas, SI se confirma -- la "
+        "distincion es parecido/contenido, no exacto/inexacto")
+
+contenido = motor._ejecutar_consulta_parrilla(c2, {"canal": "discovery"})
+afirmar(contenido["en_parrilla"] is True,
+        "y un nombre CONTENIDO en el real ('discovery' dentro de 'DISCOVERY "
+        "H&H') tambien: ahi es el mismo canal escrito corto, no otro producto")
+
+
 print("\n== 5. canal ausente no ofrece otro plan ==")
 
 r = motor._ejecutar_consulta_parrilla(c, {"canal": "HBO"})

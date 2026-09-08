@@ -891,19 +891,54 @@ def _ejecutar_consulta_parrilla(config, argumentos_modelo: dict) -> dict:
     if not canal:
         return {"parrilla_cargada": True, "total": len(nombres), "canales": nombres}
 
-    coincidencias = _nombres_parecidos(canal, nombres)
-    if not coincidencias:
-        return {"parrilla_cargada": True, "consultado": canal, "en_parrilla": False,
+    # UN PARECIDO NO ES UNA CONFIRMACION, y la diferencia entre las dos cosas
+    # es un canal que el cliente va a buscar y no va a encontrar.
+    #
+    # Medido el 08/09/2026: alguien pregunto por "wins sport +" y la parrilla
+    # solo trae "Win Sports". Son productos distintos -- el '+' es el premium--
+    # y el asistente contesto "si, tenemos Win Sports". Iba a contratar
+    # esperando algo que no esta incluido.
+    #
+    # Por eso se separan los dos tipos de coincidencia, en vez de mezclarlos
+    # como hacia antes:
+    #
+    #   CONTENIDO  lo que escribio esta dentro del nombre real, o al reves
+    #              ('discovery' -> 'DISCOVERY H&H'). Es el mismo canal escrito
+    #              corto: se confirma.
+    #   PARECIDO   solo se parecen las letras ('wins sport +' -> 'Win Sports').
+    #              Puede ser otro producto: se PREGUNTA, nunca se confirma.
+    clave = _sin_tildes(canal).strip()
+    contenidos = [n for n in nombres
+                  if clave in _sin_tildes(n) or _sin_tildes(n) in clave]
+
+    if contenidos:
+        return {"parrilla_cargada": True, "consultado": canal, "en_parrilla": True,
+                "coincidencias": contenidos,
                 "instruccion_interna":
-                    "Ese canal no esta en la parrilla. Decilo tal cual, sin "
-                    "ofrecer otro plan: todos los planes con TV traen la misma "
-                    "parrilla, asi que no hay ninguno que si lo tenga."}
-    return {"parrilla_cargada": True, "consultado": canal, "en_parrilla": True,
-            "coincidencias": coincidencias,
+                    "Respondele con el nombre EXACTO como figura arriba, no "
+                    "como lo escribio el. Si hay mas de uno, mostraselos y que "
+                    "elija cual buscaba -- no elijas vos."}
+
+    parecidos = [n for n in _nombres_parecidos(canal, nombres) if n not in contenidos]
+    if parecidos:
+        return {"parrilla_cargada": True, "consultado": canal,
+                # False a proposito: ESE canal no esta. Lo que hay es otro con
+                # nombre parecido, y decir que si seria confirmar un producto
+                # distinto del que preguntaron.
+                "en_parrilla": False, "parecidos": parecidos,
+                "instruccion_interna":
+                    f"'{canal}' NO esta en la parrilla tal cual. Hay canales de "
+                    "nombre parecido (arriba), pero pueden ser OTRO producto -- "
+                    "un canal con '+', 'premium' o un numero al final suele ser "
+                    "una senal aparte que se contrata distinto. NO le digas que "
+                    "si. Decile que ese exacto no lo ves y preguntale si se "
+                    "referia a alguno de los parecidos."}
+
+    return {"parrilla_cargada": True, "consultado": canal, "en_parrilla": False,
             "instruccion_interna":
-                "Respondele con el nombre EXACTO como figura arriba, no como "
-                "lo escribio el. Si hay mas de uno, mostraselos y que elija "
-                "cual buscaba -- no elijas vos."}
+                "Ese canal no esta en la parrilla. Decilo tal cual, sin "
+                "ofrecer otro plan: todos los planes con TV traen la misma "
+                "parrilla, asi que no hay ninguno que si lo tenga."}
 
 
 def _ejecutar_consulta_planes_venta(config, argumentos_modelo: dict) -> dict:
