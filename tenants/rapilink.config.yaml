@@ -2152,9 +2152,18 @@ herramientas:
       fija sin ninguna fuente detras, y acerto de casualidad). Si vuelve
       vacia significa que nadie lo cargo todavia, NO que la empresa no
       venda nada: decilo asi y escala.
+      Si el cliente pregunto por un servicio CONCRETO, pasalo en
+      'servicio' tal cual lo dijo: te respondo si lo ofrecemos o no, en
+      vez de dejarte deducirlo de la lista. Cuando la respuesta trae
+      se_ofrece=false, decile primero que ESE no lo tenemos y despues
+      contale los que si.
     solo_lectura: true
     roles_permitidos: [ventas]
     consulta_servicios_ofrecidos: true
+    filtros_verificados:
+      servicio:
+        param: servicio
+        tipo: texto
 
   - nombre: consultar_parrilla_canales
     tipo: interno

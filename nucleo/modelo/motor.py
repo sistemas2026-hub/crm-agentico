@@ -829,7 +829,7 @@ def _ejecutar_carga_habilidad(config, nombre_rol: str,
                 "en vez de saltearlo."}
 
 
-def _ejecutar_consulta_servicios_ofrecidos(config) -> dict:
+def _ejecutar_consulta_servicios_ofrecidos(config, argumentos_modelo=None) -> dict:
     """
     Que servicios vende la empresa. Lee TenantConfig.servicios_ofrecidos, sin
     red y sin datos de cliente.
@@ -840,6 +840,15 @@ def _ejecutar_consulta_servicios_ofrecidos(config) -> dict:
     combos con television" sin tener de donde sacarlo. Acerto de casualidad
     (un ISP vende internet); el mismo prompt, en un tenant que venda VoIP,
     habria negado un servicio que si existe, con el mismo tono seguro.
+
+    Con 'servicio' RESPONDE LA PREGUNTA, no solo devuelve la lista. Sin eso,
+    alguien pedia telefonia fija y recibia "manejamos internet residencial y
+    combos con television" -- todo cierto, y sin decir nunca que lo que pidio
+    no existe. El cliente tiene que deducir el "no" de una lista donde su
+    servicio no aparece, y a veces el modelo lo decia y a veces no (medido el
+    08/09/2026, las dos formas en la misma tarde). El codigo compara, el
+    modelo redacta (PRD 12.5): asi el "no" deja de depender de que el modelo
+    se acuerde de mirar.
     """
     activos = [s for s in config.servicios_ofrecidos if s.activo]
     if not activos:
@@ -852,8 +861,25 @@ def _ejecutar_consulta_servicios_ofrecidos(config) -> dict:
                 "informacion y escala. Afirmar un catalogo sin este dato ya "
                 "produjo respuestas falsas.",
         }
-    return {"servicios": [{"nombre": s.nombre, "descripcion": s.descripcion}
-                          for s in activos]}
+
+    catalogo = [{"nombre": s.nombre, "descripcion": s.descripcion} for s in activos]
+    pedido = str((argumentos_modelo or {}).get("servicio", "")).strip()
+    if not pedido:
+        return {"servicios": catalogo}
+
+    clave = _sin_tildes(pedido).strip()
+    coincide = [s["nombre"] for s in catalogo
+                if clave in _sin_tildes(s["nombre"]) or _sin_tildes(s["nombre"]) in clave]
+    if coincide:
+        return {"servicios": catalogo, "consultado": pedido, "se_ofrece": True,
+                "coincidencias": coincide}
+    return {"servicios": catalogo, "consultado": pedido, "se_ofrece": False,
+            "instruccion_interna":
+                f"'{pedido}' NO esta entre los servicios de la empresa. DECISELO "
+                "primero y con todas las letras -- que no lo ofrecemos-- y "
+                "recien despues contale los que si hay. No alcanza con listar "
+                "lo que tenemos y esperar que lo deduzca: pregunto por algo "
+                "concreto y merece la respuesta a esa pregunta."}
 
 
 def _ejecutar_consulta_parrilla(config, argumentos_modelo: dict) -> dict:
@@ -1243,7 +1269,7 @@ def ejecutar_para_servicio(config, herramienta, argumentos_modelo: dict) -> dict
     if herramienta.tipo == "interno" and herramienta.consulta_planes_venta:
         return _ejecutar_consulta_planes_venta(config, argumentos)
     if herramienta.tipo == "interno" and herramienta.consulta_servicios_ofrecidos:
-        return _ejecutar_consulta_servicios_ofrecidos(config)
+        return _ejecutar_consulta_servicios_ofrecidos(config, argumentos)
     if herramienta.tipo == "interno" and herramienta.consulta_parrilla:
         return _ejecutar_consulta_parrilla(config, argumentos)
 
@@ -2212,7 +2238,7 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 # Misma familia: lee config, sin red y sin datos de cliente.
                 # Que vende la empresa es igual para todo el mundo, asi que
                 # tampoco pasa por el gate de identidad.
-                salida = _ejecutar_consulta_servicios_ofrecidos(config)
+                salida = _ejecutar_consulta_servicios_ofrecidos(config, llamada.argumentos)
             elif herramienta.consulta_parrilla:
                 # Idem. La parrilla es unica para todos los planes con TV, asi
                 # que la respuesta no depende de quien pregunta ni de su plan.

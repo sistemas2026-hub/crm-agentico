@@ -119,6 +119,37 @@ afirmar("instruccion_interna" in todos_off,
         "con TODOS los servicios apagados falla cerrado igual que con la lista vacia")
 
 
+print("\n== 2b. el 'no' se responde, no se deduce de una lista ==")
+# Medido el 08/09/2026: alguien pidio telefonia fija y recibio "por aca
+# manejamos internet residencial y combos que incluyen television. ¿En que
+# barrio estas?". Todo cierto, y sin decir NUNCA que lo que pidio no existe --
+# el cliente tenia que deducir el "no" de una lista donde su servicio no
+# aparecia. En otra corrida el mismo modelo si lo decia: dependia de que se
+# acordara de mirar.
+#
+# Misma solucion que ya tenia la parrilla: el codigo compara y responde la
+# pregunta; el modelo redacta (PRD 12.5).
+c = _config(servicios=[{"nombre": "Internet residencial"},
+                       {"nombre": "Television"}])
+
+r = motor._ejecutar_consulta_servicios_ofrecidos(c, {"servicio": "telefonia fija"})
+afirmar(r["se_ofrece"] is False,
+        "un servicio que no esta se responde que NO esta, explicito")
+afirmar("NO esta entre los servicios" in r["instruccion_interna"],
+        "y la instruccion manda decirlo primero, antes de listar lo que si hay")
+afirmar(len(r["servicios"]) == 2,
+        "pero el catalogo viaja igual: el 'no' se acompaña con lo que si "
+        "existe, no se deja al cliente sin nada")
+
+afirmar(motor._ejecutar_consulta_servicios_ofrecidos(
+            c, {"servicio": "internet"})["se_ofrece"] is True,
+        "'internet' contenido en 'Internet residencial' cuenta como que si "
+        "se ofrece -- es el mismo servicio dicho corto")
+afirmar("se_ofrece" not in motor._ejecutar_consulta_servicios_ofrecidos(c, {}),
+        "sin preguntar por uno concreto devuelve la lista y nada mas: no "
+        "inventa un veredicto sobre algo que nadie pregunto")
+
+
 print("\n== 3. el codigo reconoce el canal, no el modelo ==")
 
 c = _config(canales=PARRILLA)
