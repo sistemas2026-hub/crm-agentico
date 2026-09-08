@@ -1356,7 +1356,7 @@ roles:
     puede_consultar: [verificar_identidad_por_cedula, confirmar_identidad,
           consultar_planes_venta, consultar_planes, consultar_plan_detalle,
           registrar_solicitud_servicio, cargar_habilidad,
-          consultar_documentacion]
+          consultar_documentacion, derivar_a_area]
     campos_permitidos:
       consultar_planes: [id, nombre]
       # La respuesta de crear un lead trae el objeto entero del CRM. Lo unico
@@ -1910,7 +1910,12 @@ herramientas:
       argumento del modelo: lo inyecta el codigo desde la sesion. Si viniera
       del modelo, una inyeccion de prompt bastaria para pedir el de otro.
     solo_lectura: true
-    roles_permitidos: [cliente_final, facturacion_cliente, soporte_tecnico_cliente]
+    # 'ventas' incluido: estaba en areas_destino pero no aca, o sea que se
+    # podia derivar HACIA el pero no DESDE el. Una conversacion que caia en
+    # ventas quedaba encerrada -- ante una falla de television el asistente
+    # contestaba que su documentacion era de venta de servicios y que no
+    # tenia como revisar la señal. Era cierto, y no tenia salida.
+    roles_permitidos: [cliente_final, facturacion_cliente, soporte_tecnico_cliente, ventas]
     base_url: https://api.wisphub.io
     endpoint: /api/clientes/
     metodo: GET

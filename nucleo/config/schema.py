@@ -2204,6 +2204,39 @@ class TenantConfig(Base):
                     f"({', '.join(self.escalamiento.activar_si) or 'vacio'})")
 
         # Una herramienta no puede permitir un rol inexistente.
+        # UN ROL QUE ATIENDE CLIENTES NO PUEDE SER UN CALLEJON SIN SALIDA.
+        #
+        # Si un rol orientado a cliente no tiene con que derivar, una
+        # conversacion que cae ahi queda encerrada: cuando el cliente pide
+        # algo que ese rol no puede resolver, el modelo no tiene ninguna
+        # herramienta para pasarlo a quien si puede, y lo unico que le queda
+        # es disculparse.
+        #
+        # Visto en produccion el 08/09/2026, con un cliente real. Su
+        # conversacion quedo en 'ventas' --que no tiene ni herramientas de
+        # diagnostico ni derivacion-- y ante una falla de television el
+        # asistente contesto: "la documentacion que tengo disponible es para
+        # venta de nuevos servicios... no tengo una herramienta para revisar
+        # el estado de tu señal". Era CIERTO. Razono bien sobre un catalogo
+        # equivocado, y no tenia salida.
+        #
+        # Se valida aca y no en tiempo de ejecucion porque en ejecucion ya es
+        # tarde: el cliente ya esta esperando. Una config asi no se carga.
+        deriva = {h.nombre for h in self.herramientas if h.deriva_rol}
+        sin_salida = [
+            n for n, r in self.roles.items()
+            if r.orientado_a == "cliente_final"
+            and not (set(r.puede_consultar) & deriva)
+        ]
+        if sin_salida:
+            raise ValueError(
+                f"rol(es) orientados a cliente_final sin ninguna herramienta "
+                f"de derivacion: {sorted(sin_salida)}. Una conversacion que "
+                f"caiga ahi queda encerrada -- cuando el cliente pida algo que "
+                f"ese rol no resuelve, no habra forma de pasarlo a quien si "
+                f"puede. Dale una herramienta con 'deriva_rol', o marcalo "
+                f"como orientado_a='colaborador' si no atiende clientes.")
+
         # El rol que atiende los canales publicos. Un nombre mal escrito no
         # puede caer en silencio al comportamiento viejo --tomar el primero--
         # porque ese es justo el que se quiso dejar de usar: se veria igual
