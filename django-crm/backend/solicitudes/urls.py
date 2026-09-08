@@ -5,6 +5,8 @@ from django.urls import path
 from solicitudes.gestion import (
     AjustesView,
     BandejaView,
+    BuscarSolicitudView,
+    CancelarSolicitudView,
     DecidirView,
     ExpedienteView,
     TecnicosView,
@@ -30,4 +32,11 @@ urlpatterns = [
     # ExpedienteView.
     path("solicitudes/<uuid:solicitud_id>/expediente/", ExpedienteView.as_view(),
          name="solicitud-expediente"),
+    # Cancelacion por pedido del cliente, en dos pasos: buscar por cedula
+    # devuelve el nombre ENMASCARADO, y cancelar exige el nombre completo.
+    # Ver BuscarSolicitudView sobre por que la mascara es la seguridad.
+    path("solicitudes/buscar/", BuscarSolicitudView.as_view(),
+         name="solicitud-buscar"),
+    path("solicitudes/cancelar/", CancelarSolicitudView.as_view(),
+         name="solicitud-cancelar"),
 ]

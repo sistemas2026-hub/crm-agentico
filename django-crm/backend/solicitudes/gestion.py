@@ -281,3 +281,147 @@ class ExpedienteView(APIView):
         respuesta["Content-Disposition"] = (
             f'inline; filename="expediente-{s.id}.pdf"')
         return respuesta
+
+
+def _plano(texto: str) -> str:
+    """Sin tildes, sin mayusculas, sin espacios de mas. Para comparar nombres
+    escritos por una persona en un chat contra los de un formulario."""
+    import unicodedata
+    t = unicodedata.normalize("NFKD", (texto or "").strip().lower())
+    return " ".join("".join(c for c in t if not unicodedata.combining(c)).split())
+
+
+class BuscarSolicitudView(APIView):
+    """Busca por cedula una solicitud ENVIADA, para poder cancelarla.
+
+    DEVUELVE EL NOMBRE ENMASCARADO, y eso es el nucleo de la seguridad de todo
+    este flujo. Una cedula no es un secreto -- es un dato bastante publico-- y
+    con ella sola cualquiera podria cancelarle la instalacion a otro. La
+    proteccion es que el cliente CONFIRME el nombre.
+
+    Si aca se devolviera el nombre completo, el agente podria "confirmarlo"
+    solo, sin preguntarle nada a nadie: veria el dato y lo daria por
+    confirmado. Enmascarado no puede -- tiene que pedirselo a la persona, y la
+    comparacion la hace el codigo al cancelar (ver CancelarSolicitudView).
+
+    Mismo espiritu que verificar_identidad_por_cedula + confirmar_identidad,
+    que es el patron de dos pasos que este proyecto ya tiene probado.
+    """
+
+    permission_classes = (IsAuthenticated, HasOrgContext)
+
+    def post(self, request):
+        org = request.profile.org
+        documento = str(request.data.get("numero_documento") or "").strip()
+        if not documento:
+            return Response({"error": "Falta 'numero_documento'."},
+                            status=http.HTTP_400_BAD_REQUEST)
+
+        s = (SolicitudServicio.objects
+             .filter(org=org, numero_documento=documento,
+                     estado=SolicitudServicio.ENVIADA)
+             .order_by("-enviada_en").first())
+        if s is None:
+            # Se responde lo mismo exista o no la cedula en otra solicitud: si
+            # el mensaje distinguiera "no hay ninguna" de "hay una pero ya esta
+            # aprobada", esta ruta serviria para averiguar por quien tiene
+            # tramite abierto probando cedulas.
+            return Response({"encontrada": False,
+                             "instruccion_interna":
+                                 "No hay ninguna solicitud enviada con esa "
+                                 "cedula. Puede ser que la haya enviado con "
+                                 "otro documento, o que todavia no complete el "
+                                 "formulario -- en ese caso no hay nada que "
+                                 "cancelar aca: toma la informacion y cerra el "
+                                 "caso como siempre."})
+
+        partes = _plano(s.nombre_completo).split()
+        pista = " ".join(p[0].upper() + "*" * (len(p) - 1) for p in partes)
+        return Response({
+            "encontrada": True,
+            "estado": s.estado,
+            "plan": s.plan_interesado,
+            "barrio": s.barrio,
+            "nombre_pista": pista,
+            "instruccion_interna":
+                f"Hay una solicitud enviada. NO le leas la pista '{pista}' como "
+                "si fuera el nombre: pedile que te diga el nombre completo con "
+                "el que la registro, y pasalo tal cual en 'nombre_confirmado' "
+                "al cancelar. Si no coincide, la cancelacion se rechaza.",
+        })
+
+
+class CancelarSolicitudView(APIView):
+    """Cancela una solicitud ENVIADA. El nombre se verifica ACA, no en el prompt.
+
+    Tres candados, y el del medio es el que importa:
+
+      * solo estado ENVIADA -- una APROBADA ya tiene equipo asignado y una
+        instalacion en curso; eso lo decide una persona, no esta ruta.
+      * el nombre confirmado tiene que coincidir con el de la solicitud. Sin
+        esta comparacion en codigo, "confirmar el nombre" seria una
+        instruccion del prompt, y este proyecto ya midio lo que valen las
+        instrucciones que nadie hace cumplir.
+      * filtro por org, como toda consulta.
+
+    El motivo se guarda LITERAL. Lo pidio asi el negocio y tiene razon: leido
+    en conjunto dice si las ventas se caen por precio, por demora o por la
+    competencia, y un resumen perderia justo eso.
+    """
+
+    permission_classes = (IsAuthenticated, HasOrgContext)
+
+    def post(self, request):
+        org = request.profile.org
+        documento = str(request.data.get("numero_documento") or "").strip()
+        confirmado = str(request.data.get("nombre_confirmado") or "").strip()
+        motivo = str(request.data.get("motivo") or "").strip()
+        faltan = [c for c, v in (("numero_documento", documento),
+                                 ("nombre_confirmado", confirmado),
+                                 ("motivo", motivo)) if not v]
+        if faltan:
+            return Response({"error": f"Faltan datos: {', '.join(faltan)}."},
+                            status=http.HTTP_400_BAD_REQUEST)
+
+        s = (SolicitudServicio.objects
+             .filter(org=org, numero_documento=documento,
+                     estado=SolicitudServicio.ENVIADA)
+             .order_by("-enviada_en").first())
+        if s is None:
+            return Response({"error": "No hay ninguna solicitud enviada con esa cedula."},
+                            status=http.HTTP_404_NOT_FOUND)
+
+        if _plano(confirmado) != _plano(s.nombre_completo):
+            return Response(
+                {"error": "El nombre no coincide con el de la solicitud.",
+                 "instruccion_interna":
+                     "No canceles nada. Pedile de nuevo el nombre completo tal "
+                     "cual lo registro. Si insiste y no coincide, no es su "
+                     "solicitud: pasalo con un colaborador humano."},
+                status=http.HTTP_409_CONFLICT)
+
+        s.estado = SolicitudServicio.CANCELADA
+        s.motivo_cancelacion = motivo
+        s.cancelada_en = timezone.now()
+        s.save(update_fields=["estado", "motivo_cancelacion", "cancelada_en",
+                              "updated_at"])
+
+        # El ticket de WispHub queda vivo si nadie lo cierra, y alguien saldria
+        # a instalar. Va DESPUES de guardar y fuera de la transaccion, mismo
+        # criterio que el resto del modulo: si el tercero no responde, la
+        # cancelacion no se deshace -- queda anotada para reintentar.
+        fallo = ""
+        if s.ticket_wisphub:
+            from solicitudes.entrega import cerrar_ticket_wisphub
+            try:
+                cerrar_ticket_wisphub(s, motivo)
+            except Exception as e:                   # noqa: BLE001
+                fallo = f"cierre ticket: {type(e).__name__}: {e}"
+                previo = (s.fallo_integracion + " | ") if s.fallo_integracion else ""
+                s.fallo_integracion = (previo + fallo)[:1000]
+                s.save(update_fields=["fallo_integracion", "updated_at"])
+
+        return Response({"estado": s.estado,
+                         "cancelada_en": s.cancelada_en.isoformat(),
+                         "ticket_wisphub": s.ticket_wisphub,
+                         "fallo": fallo})

@@ -165,3 +165,44 @@ def entregar(s) -> None:
 
     s.save(update_fields=["correo_enviado_en", "ticket_wisphub",
                           "fallo_integracion", "updated_at"])
+
+
+def cerrar_ticket_wisphub(s, motivo: str) -> None:
+    """Responde el ticket de instalacion con el motivo y lo cierra.
+
+    Existe porque cancelar solo en el CRM deja el ticket vivo en WispHub: el
+    equipo saldria a instalar algo que el cliente ya cancelo. La cancelacion no
+    esta completa hasta que el otro lado se entera.
+
+    Va por el mismo puente que la creacion -- una herramienta del motor, no una
+    llamada a WispHub desde aca-- para que el token y el contrato de esa API
+    vivan en un solo lugar. Y la herramienta es configurable por la misma razon
+    que la de crear: el nombre lo elige el catalogo del tenant, no este codigo.
+
+    Lanza si falla. Quien llama decide que hacer -- hoy CancelarSolicitudView
+    lo anota en 'fallo_integracion' y sigue: la cancelacion ya esta guardada y
+    no se deshace porque un tercero no responda.
+    """
+    import requests
+
+    base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
+    tenant = os.environ.get("MOTOR_TENANT", "") or "rapilink"
+    herramienta = (os.environ.get("SOLICITUDES_HERRAMIENTA_CERRAR_TICKET", "")
+                   or "cerrar_ticket_operativo")
+
+    cabeceras = {"Content-Type": "application/json"}
+    token = os.environ.get("MOTOR_SERVICE_TOKEN")
+    if token:
+        cabeceras["X-Servicio-Token"] = token
+
+    # El motivo va TAL CUAL lo escribio el cliente, entre comillas y con quien
+    # lo dijo: quien lea el ticket despues tiene que poder distinguir lo que
+    # dijo la persona de lo que interpretamos nosotros.
+    texto = (f"El cliente cancelo la solicitud de instalacion.\n\n"
+             f"Motivo, en sus palabras: \"{motivo}\"")
+    r = requests.post(
+        f"{base}/interno/herramienta/{herramienta}",
+        params={"tenant": tenant},
+        json={"id_ticket": s.ticket_wisphub, "respuesta": texto},
+        headers=cabeceras, timeout=45)
+    r.raise_for_status()

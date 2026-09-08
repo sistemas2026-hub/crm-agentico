@@ -129,9 +129,26 @@ class SolicitudServicio(BaseModel):
     ENVIADA = "enviada"          # llego completa, falta validar factibilidad
     APROBADA = "aprobada"        # hay viabilidad: pasa al equipo que instala
     SIN_FACTIBILIDAD = "sin_factibilidad"
+    # El cliente se arrepintio. Es un final distinto de "no hay factibilidad":
+    # ahi el servicio no podia llegar, aca podia y ya no lo quiere. Mezclarlos
+    # perderia justo la informacion comercial que sirve -- cuantas se caen por
+    # nuestra red y cuantas por precio, competencia o demora.
+    #
+    # Solo aplica a una solicitud ENVIADA: si el cliente nunca lleno el
+    # formulario no hay expediente que cancelar, se toma la informacion y se
+    # cierra el caso (08/09/2026, decision de negocio).
+    CANCELADA = "cancelada"
     ESTADOS = ((NUEVA, "Nueva"), (ENVIADA, "Enviada"),
-               (APROBADA, "Aprobada"), (SIN_FACTIBILIDAD, "Sin factibilidad"))
+               (APROBADA, "Aprobada"), (SIN_FACTIBILIDAD, "Sin factibilidad"),
+               (CANCELADA, "Cancelada"))
     estado = models.CharField(max_length=20, choices=ESTADOS, default=NUEVA)
+
+    # Por que la cancelo, EN SUS PALABRAS. Se guarda literal, sin resumir ni
+    # reformular: leido en conjunto es lo que dice si las ventas se caen por
+    # precio, por demora o porque llego otro operador primero, y un resumen
+    # del modelo perderia justo el matiz que hace util esa lectura.
+    motivo_cancelacion = models.TextField(blank=True, default="")
+    cancelada_en = models.DateTimeField(null=True, blank=True)
 
     # Quien decidio y cuando. No es burocracia: es lo unico que permite
     # preguntar despues por que una instalacion se aprobo, o por que una

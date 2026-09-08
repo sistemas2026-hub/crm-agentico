@@ -11,6 +11,17 @@
    * decidir, y quien mira tiene que saberlo antes de confiar en el punto.
    */
   import { enhance } from '$app/forms';
+
+  // 'Recibidas' es la vista por defecto (estado vacío = lo que espera una
+  // decisión, que es para lo que se abre esta pantalla). Las otras cuatro son
+  // consulta: lo ya resuelto, y lo que todavía no llegó.
+  const PESTANAS = [
+    { estado: '', texto: 'Recibidas' },
+    { estado: 'nueva', texto: 'En proceso' },
+    { estado: 'aprobada', texto: 'Aprobadas' },
+    { estado: 'sin_factibilidad', texto: 'Sin factibilidad' },
+    { estado: 'cancelada', texto: 'Canceladas' }
+  ];
   import { CheckCircle2, AlertTriangle, MapPin, FileText, Inbox } from '@lucide/svelte';
 
   /** @type {{ data: any, form: any }} */
@@ -39,6 +50,20 @@
       ticket pasa al equipo que instala.
     </p>
   </header>
+
+  <!-- El estado viaja en la URL y no en un estado local: así una pestaña se
+       puede compartir por chat, y volver atrás en el navegador hace lo que
+       uno espera. La carga la resuelve el servidor con ?estado=. -->
+  <nav class="pestanas" aria-label="Filtrar por estado">
+    {#each PESTANAS as p}
+      <a
+        href={p.estado ? `?estado=${p.estado}` : '/instalaciones'}
+        class="pestana"
+        class:activa={(data.estado || '') === p.estado}
+        aria-current={(data.estado || '') === p.estado ? 'page' : undefined}
+      >{p.texto}</a>
+    {/each}
+  </nav>
 
   {#if data.error}
     <div class="alerta"><AlertTriangle size={16} /><span>{data.error}</span></div>
@@ -146,6 +171,28 @@
 </div>
 
 <style>
+  .pestanas {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    border-bottom: 1px solid var(--v2-border, #e3e6e4);
+    margin-bottom: 4px;
+  }
+  .pestana {
+    padding: 8px 14px;
+    font-size: 13.5px;
+    color: var(--v2-text-muted, #6b7671);
+    text-decoration: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+  }
+  .pestana:hover { color: var(--v2-text, #16211f); }
+  .pestana.activa {
+    color: var(--v2-text, #16211f);
+    font-weight: 600;
+    border-bottom-color: var(--v2-accent, #0f6e6a);
+  }
+
   .hoja { max-width: 820px; padding: 24px 20px 60px; display: flex; flex-direction: column; gap: 14px; }
   h1 { font-size: 1.6rem; margin: 0 0 4px; letter-spacing: -.02em; }
   .bajada { color: #5a6672; margin: 0; max-width: 62ch; }

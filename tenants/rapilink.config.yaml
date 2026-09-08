@@ -1392,6 +1392,30 @@ roles:
       solicitud. Esa pregunta no es un tramite: es el momento en que la
       persona acepta que guardemos sus datos.
 
+      CANCELAR UNA SOLICITUD YA ENVIADA. Si el cliente quiere dar de baja
+      una solicitud de instalacion que ya completo, el orden es este y no
+      otro:
+
+        1. pedile la cedula con la que la registro;
+        2. consultar_solicitud_por_cedula -- te devuelve el nombre
+           ENMASCARADO ('J*** P***'). NO se lo leas: es una pista para
+           vos, no una respuesta para el;
+        3. pedile que te diga el nombre completo con el que la registro;
+        4. pedile el MOTIVO, y dejalo hablar;
+        5. cancelar_solicitud_servicio con la cedula, el nombre que te
+           dijo y el motivo TAL CUAL lo escribio -- sin resumirlo, sin
+           reformularlo, sin corregirle la ortografia;
+        6. confirmale que quedo registrada la cancelacion.
+
+      El nombre lo verifica el sistema, no vos: si no coincide, la
+      cancelacion se rechaza y no hay que insistir. Una cedula no es un
+      secreto, y sin ese segundo dato cualquiera podria cancelarle la
+      instalacion a otra persona.
+
+      Si NO encuentra ninguna solicitud enviada, es que todavia no lleno
+      el formulario: ahi no hay nada que cancelar. Tomale la informacion y
+      cerra el caso como siempre.
+
       AL PASAR EL LINK, DECILE QUE VA A NECESITAR (26/08/2026): el
       formulario no es solo datos -- pide FOTO DE LA CEDULA, FOTO DE UN
       RECIBO DE AGUA O LUZ, UNA FOTO DEL SOLICITANTE, LA UBICACION GPS
@@ -1438,6 +1462,7 @@ roles:
           consultar_planes_venta, consultar_planes, consultar_plan_detalle,
           consultar_servicios_ofrecidos, consultar_parrilla_canales,
           consultar_mi_servicio, consultar_plan_tv,
+          consultar_solicitud_por_cedula, cancelar_solicitud_servicio,
           registrar_solicitud_servicio, cargar_habilidad,
           consultar_documentacion, derivar_a_area]
     campos_permitidos:
@@ -1454,6 +1479,8 @@ roles:
       # llamada no sale (FaltaIdentidadEnSesion). Falla cerrado por la
       # herramienta, no por el rol.
       consultar_mi_servicio: [plan_internet]
+      consultar_solicitud_por_cedula: [encontrada, estado, plan, barrio, nombre_pista]
+      cancelar_solicitud_servicio: [estado, cancelada_en]
       # Mismo endpoint que consultar_plan_detalle, que este rol ya podia
       # llamar: no amplia a que datos llega, solo que campo lee.
       consultar_plan_tv: [descripcion]
@@ -2143,6 +2170,55 @@ herramientas:
         tipo: texto
 
   # --- ventas (19/08/2026) ----------------------------------------------
+  - nombre: consultar_solicitud_por_cedula
+    tipo: http
+    descripcion: >
+      Busca la solicitud de instalacion YA ENVIADA de alguien, por su
+      cedula. Devuelve el nombre ENMASCARADO ('J*** P***'): NO se lo leas
+      al cliente como si fuera el nombre. Pedile que te diga el nombre
+      completo con el que la registro y pasalo despues en
+      'nombre_confirmado' al cancelar -- si no coincide, la cancelacion
+      se rechaza. Si no encuentra nada puede ser que todavia no haya
+      llenado el formulario: ahi no hay nada que cancelar, toma la
+      informacion y cerra el caso como siempre.
+    base_url: http://backend:8000/api
+    endpoint: /solicitudes/buscar/
+    metodo: POST
+    solo_lectura: true
+    roles_permitidos: [ventas]
+    requeridos: [numero_documento]
+    filtros_verificados:
+      numero_documento:
+        param: numero_documento
+        tipo: texto
+
+  - nombre: cancelar_solicitud_servicio
+    tipo: http
+    descripcion: >
+      Cancela una solicitud de instalacion ya enviada. Llamala SOLO
+      despues de consultar_solicitud_por_cedula y de que el cliente te
+      haya dicho su nombre completo. El motivo va TAL CUAL lo escribio
+      el: no lo resumas, no lo reformules, no lo interpretes -- se guarda
+      literal porque leido en conjunto es lo que dice por que se caen las
+      ventas.
+    base_url: http://backend:8000/api
+    endpoint: /solicitudes/cancelar/
+    metodo: POST
+    solo_lectura: false
+    requiere_confirmacion: true
+    roles_permitidos: [ventas]
+    requeridos: [numero_documento, nombre_confirmado, motivo]
+    filtros_verificados:
+      numero_documento:
+        param: numero_documento
+        tipo: texto
+      nombre_confirmado:
+        param: nombre_confirmado
+        tipo: texto
+      motivo:
+        param: motivo
+        tipo: texto
+
   - nombre: consultar_servicios_ofrecidos
     tipo: interno
     descripcion: >
@@ -2711,6 +2787,11 @@ herramientas:
     metodo: POST
     auth_ref: WISPHUB_API_KEY
     auth_esquema: Api-Key
+    # Lo invoca el BACKEND al cancelar una solicitud, para dejar el motivo
+    # escrito en el ticket y cerrarlo. Sin esto la ruta interna responde 403:
+    # ninguna herramienta se puede llamar desde un servicio salvo que lo
+    # declare (08/09/2026).
+    invocable_por_servicio: true
     argumentos_fijos:
       ticket-estado: "4"                          # Cerrado
       ticket-prioridad: "2"                       # Normal
