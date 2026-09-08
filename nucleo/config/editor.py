@@ -954,6 +954,26 @@ def _mutar_rol_de_entrada(doc: dict, rol: str | None) -> None:
         doc.pop("rol_de_entrada", None)
 
 
+def _mutar_razonamiento(doc: dict, modo: str | None) -> None:
+    """Si el proveedor razona antes de contestar. Ver LLM.razonamiento."""
+    if modo:
+        doc.setdefault("llm", {})["razonamiento"] = modo
+    else:
+        doc.setdefault("llm", {}).pop("razonamiento", None)
+
+
+def guardar_razonamiento(tenant: str, modo: str | None) -> TenantConfig:
+    """
+    'disabled' le pide al proveedor que NO razone antes de contestar; vacio
+    deja su default, que hoy es razonar.
+
+    Medido contra DeepSeek v4-flash el 08/09/2026 con el prompt real: 4.26s
+    con razonamiento contra 1.77s sin el, y 1.071 tokens de salida --los
+    caros-- gastados en pensar antes de decir cosas como "hola".
+    """
+    return _editar(tenant, lambda d: _mutar_razonamiento(d, modo))
+
+
 def guardar_rol_de_entrada(tenant: str, rol: str | None) -> TenantConfig:
     """Vacio vuelve al comportamiento viejo (el primero), que avisa por
     consola. Se permite para poder revertir sin tocar codigo."""

@@ -558,6 +558,23 @@ class LLM(Base):
     # Un bucle de agente puede multiplicar la factura de la noche a la manana,
     # y aqui cada iteracion cuesta un turno completo, no milisegundos.
     limite_iteraciones_agente: int = Field(default=4, ge=1, le=10)
+    # El modo de razonamiento del proveedor. None = no se manda nada y decide
+    # el proveedor; "disabled" = se le pide que NO razone antes de contestar.
+    #
+    # NO es un detalle de afinado. Medido el 08/09/2026 contra DeepSeek
+    # v4-flash con el prompt real de soporte tecnico:
+    #
+    #     por defecto        4.26s   1.071 tokens de razonamiento
+    #     thinking disabled  1.77s       0 tokens
+    #
+    # 58% menos por llamada, y un turno hace entre 2 y 6. El razonamiento
+    # ademas se cobra como tokens de SALIDA, que son los caros.
+    #
+    # Va en la config y no en el codigo porque es un equilibrio entre rapidez
+    # y profundidad que cada empresa decide: un ISP que atiende fallas quiere
+    # respuesta rapida; otro caso de uso puede querer que el modelo piense.
+    # 'null' deja el default del proveedor, que hoy es razonar.
+    razonamiento: Literal["disabled"] | None = None
     descartar_thinking: bool = True
     # Cuanto cuesta cada modelo, en USD por MILLON de tokens, por referencia
     # ('deepseek:deepseek-v4-flash' -> {entrada: 0.28, salida: 0.42}).

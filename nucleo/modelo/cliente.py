@@ -243,11 +243,18 @@ class ClienteCompatibleOpenAI:
 
     def chat(self, modelo: str, mensajes: list[dict],
              tools: list | None = None, temperatura: float = 0.1,
-             timeout: float = TIMEOUT_POR_DEFECTO) -> Respuesta:
+             timeout: float = TIMEOUT_POR_DEFECTO,
+             razonamiento: str | None = None) -> Respuesta:
         t0 = time.monotonic()
+        # 'thinking' no es parametro del SDK de OpenAI: viaja en extra_body,
+        # que es como se le pasan campos propios a una API compatible. Pasarlo
+        # como argumento suelto lo rechaza el SDK antes de salir a la red.
+        extra = ({"thinking": {"type": "disabled"}}
+                 if razonamiento == "disabled" else None)
         r = self._cli.chat.completions.create(
             model=modelo, messages=self._adaptar(mensajes),
-            tools=tools or None, temperature=temperatura, timeout=timeout)
+            tools=tools or None, temperature=temperatura, timeout=timeout,
+            **({"extra_body": extra} if extra else {}))
         transcurrido = time.monotonic() - t0
         msg = r.choices[0].message
 
@@ -461,11 +468,26 @@ def resolver(referencia: str) -> tuple[str, str]:
 
 def chat(referencia_modelo: str, mensajes: list[dict],
          tools: list | None = None, temperatura: float = 0.1,
-         timeout: float = TIMEOUT_POR_DEFECTO) -> Respuesta:
+         timeout: float = TIMEOUT_POR_DEFECTO,
+         razonamiento: str | None = None) -> Respuesta:
     """
     'timeout' en segundos, SIEMPRE acotado -- ver el bloque TIMEOUTS arriba.
     Quien haga trabajo secundario (que no sea la respuesta que el cliente
     esta esperando) deberia pasar TIMEOUT_SECUNDARIO.
+
+    'razonamiento' = "disabled" le pide al proveedor que NO razone antes de
+    contestar. Lo decide la config del tenant (LLM.razonamiento); None deja
+    el default del proveedor. Solo lo aplica el cliente compatible con
+    OpenAI: los demas lo ignoran, que es lo correcto -- un proveedor que no
+    entiende el campo no tiene por que recibirlo.
     """
     proveedor, modelo = resolver(referencia_modelo)
-    return obtener(proveedor).chat(modelo, mensajes, tools, temperatura, timeout)
+    cli = obtener(proveedor)
+    try:
+        return cli.chat(modelo, mensajes, tools, temperatura, timeout,
+                        razonamiento=razonamiento)
+    except TypeError:
+        # El cliente de este proveedor no acepta el argumento. Se llama sin
+        # el en vez de romper: la eleccion de proveedor no puede depender de
+        # que todos hayan implementado la misma opcion.
+        return cli.chat(modelo, mensajes, tools, temperatura, timeout)

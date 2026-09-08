@@ -363,7 +363,8 @@ def evaluar(config, rol: str, historial: list[dict]) -> dict | None:
         respuesta = cliente.chat(
             referencia_modelo, mensajes,
             tools=[_esquema_evaluacion(config, config.roles.get(rol))],
-            timeout=cliente.TIMEOUT_SECUNDARIO)
+            timeout=cliente.TIMEOUT_SECUNDARIO,
+            razonamiento=config.llm.razonamiento)
         # Esta llamada al modelo NO se contaba en ningun lado. anotar() lo
         # hacian solo los dos puntos de nucleo/modelo/motor.py, y esta corre
         # aca -- una vez por CADA turno de cliente que no este ya escalado.

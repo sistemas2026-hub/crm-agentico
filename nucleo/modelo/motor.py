@@ -1583,6 +1583,7 @@ def _sanitizar(texto: str, nombres_rol=(), tratamiento: str | None = None) -> st
 
 
 def _redactar(referencia_modelo: str, historial: list[dict], temperatura: float,
+              razonamiento: str | None = None,
               intentos: int = 3, nombres_rol=(), tratamiento: str | None = None) -> str:
     """
     Redaccion final despues de que el modelo ya uso las herramientas que
@@ -1605,7 +1606,7 @@ def _redactar(referencia_modelo: str, historial: list[dict], temperatura: float,
 
     for intento in range(intentos):
         resp = cliente.chat(referencia_modelo, historial_intento, tools=None,
-                            temperatura=temperatura)
+                            temperatura=temperatura, razonamiento=razonamiento)
         # Cuenta TAMBIEN los intentos fallidos: un turno que gasta tres
         # redacciones en blanco costo tres llamadas, y contar solo la que
         # sirvio escondria justo el caso caro.
@@ -1910,7 +1911,9 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
     while iteraciones < config.llm.limite_iteraciones_agente:
         iteraciones += 1
         resp = cliente.chat(referencia_decision, historial,
-                            tools=catalogo_openai or None, temperatura=config.llm.temperatura)
+                            tools=catalogo_openai or None,
+                            temperatura=config.llm.temperatura,
+                            razonamiento=config.llm.razonamiento)
         consumo.anotar(referencia_decision, resp)
 
         if not resp.llamadas:
@@ -2376,6 +2379,7 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
         # otra llamada al modelo, asi que tambien puede quedarse sin el dato.
         return (_con_obligatorios(
                     _redactar(referencia_redaccion, historial, config.llm.temperatura,
+                              razonamiento=config.llm.razonamiento,
                               nombres_rol=config.roles,
                               tratamiento=config.persona.normalizar_tratamiento),
                     obligatorios),
