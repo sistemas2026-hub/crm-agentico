@@ -924,8 +924,21 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 return {"respuesta": "", "verificado": estado["sesion"].verificado,
                         "pausada": True}
 
-            respuesta = _mensaje_de_escalada(config, estado.get("motivo_escalada")) or \
-                "Tu caso ya esta con un compañero del equipo."
+            # EL ANUNCIO NO SE REPITE.
+            #
+            # Aca el cliente ya fue escalado y vuelve a escribir. Antes se le
+            # devolvia el mensaje del motivo -- el mismo "te paso con un
+            # compañero" que ya habia leido-- y sonaba a que el pase nunca
+            # habia ocurrido. Medido el 08/09/2026: escalada 19:56:30, el
+            # cliente contesta "ok" a las 19:56:57 y recibe el anuncio
+            # identico, palabra por palabra.
+            #
+            # Lo que corresponde en este turno es el ESTADO ("ya esta con
+            # alguien"), no el anuncio. Configurable por tenant, con un texto
+            # interno de respaldo para que nunca quede mudo.
+            respuesta = (config.escalamiento.mensaje_ya_escalada or "").strip() or \
+                "Tu caso ya esta con un compañero del equipo, que lo va a " \
+                "revisar y te escribe por aca."
             estado["historial"].append({"role": "assistant", "content": respuesta})
             try:
                 persistencia.registrar_mensaje(tenant, canal, id_sesion, rol, "user", mensaje)

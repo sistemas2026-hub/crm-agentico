@@ -1700,6 +1700,19 @@ class Escalamiento(Base):
     # Clave = motivo de 'activar_si'. Un motivo sin entrada usa el generico,
     # asi que agregar uno nuevo nunca deja al cliente sin respuesta.
     mensajes_por_motivo: dict[str, str] = Field(default_factory=dict)
+    # Lo que se le dice al cliente que ESCRIBE DE NUEVO despues de haber sido
+    # escalado, mientras ninguna persona tomo el caso todavia. NO es el mismo
+    # texto del anuncio: ese dice "te paso con un compañero" y repetirlo suena
+    # a que el pase nunca ocurrio.
+    #
+    # Medido el 08/09/2026: escalada a las 19:56:30, el cliente contesta "ok"
+    # a las 19:56:57 y recibe palabra por palabra "Perdon, no estoy logrando
+    # resolverlo por aca. Te paso con un compañero..." -- el mismo anuncio,
+    # como si empezara de nuevo.
+    #
+    # Vacio cae a un texto interno para que ningun tenant se quede sin
+    # respuesta en ese turno.
+    mensaje_ya_escalada: str = ""
     # Y que decirle cuando el traspaso NO se pudo registrar en ningun lado.
     # Los de arriba anuncian algo que ya paso; este anuncia que no paso, y por
     # eso no puede ser el mismo texto con otro tono: los otros cierran el

@@ -151,10 +151,37 @@ for motivo in ("solicitud_explicita", "duda_de_identidad",
     comprobar(QUEJA not in texto,
               f"'{motivo}' NO le habla de una molestia al cliente")
 
-# Y el generico sigue existiendo para los que SI son una queja: sacarlo
-# dejaria sin mensaje a los motivos que de verdad lo necesitan.
+# Y el texto de la queja sigue existiendo, ahora en el motivo que lo amerita.
 comprobar(QUEJA in (_mensaje_de_escalada(cfg, "frustracion_detectada") or "").lower(),
           "pero 'frustracion_detectada' si conserva el texto de la queja")
+
+# EL GENERICO ES EL QUE CUBRE LO IMPREVISTO, y por eso no puede hablar de una
+# molestia: se lo lleva cualquier motivo que nadie penso todavia. Hasta el
+# 08/09/2026 decia "Entiendo tu molestia", y un prospecto al que se le ofrecio
+# pasar el caso para confirmar la cobertura de su barrio -- que no se quejo de
+# nada, dijo "esta bien"-- recibio una disculpa por una molestia inexistente.
+comprobar(QUEJA not in (cfg.escalamiento.mensaje or "").lower(),
+          "el mensaje GENERICO no habla de molestia: cubre los motivos que "
+          "nadie previo, y ahi asumir el animo del cliente se equivoca solo")
+for motivo in cfg.escalamiento.activar_si:
+    comprobar(bool((_mensaje_de_escalada(cfg, motivo) or "").strip()),
+              f"'{motivo}' tiene texto (propio o generico), nunca queda mudo")
+
+# --- 6b --------------------------------------------------------------------
+print("\n[6b] Escribir DE NUEVO tras el pase no repite el anuncio")
+# Medido el 08/09/2026: escalada a las 19:56:30, el cliente contesta "ok" a las
+# 19:56:57 y recibe palabra por palabra "Te paso con un compañero..." -- el
+# mismo anuncio, como si el pase no hubiera ocurrido nunca.
+#
+# Lo que corresponde en ese turno es el ESTADO ("ya esta con alguien"), no el
+# anuncio. Son dos textos distintos porque son dos momentos distintos.
+ya = (cfg.escalamiento.mensaje_ya_escalada or "").strip()
+comprobar(bool(ya), "el tenant declara que decirle a quien escribe de nuevo")
+anuncios = {(v or "").strip() for v in cfg.escalamiento.mensajes_por_motivo.values()}
+anuncios.add((cfg.escalamiento.mensaje or "").strip())
+comprobar(ya not in anuncios,
+          "y ese texto NO es ninguno de los anuncios: repetir el anuncio es "
+          "exactamente el defecto que esto cierra")
 
 # --- 7 ---------------------------------------------------------------------
 print("\n[7] 'pidio una persona' salio del menu del evaluador")
