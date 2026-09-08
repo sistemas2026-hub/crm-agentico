@@ -358,6 +358,13 @@ roles:
       la identidad, sea alguien que todavia no es cliente o uno actual
       sumando otro servicio.
 
+      CANALES DE TV TAMBIEN VAN A VENTAS. "¿tienen HBO?", "¿que canales
+      trae?", "¿esta ESPN?" -- eso es ventas, que tiene la parrilla
+      cargada. Vos no la tenes, y decirlo ("no tengo el catalogo de
+      canales a mano") sin llamar la herramienta deja al cliente
+      esperando: medido el 08/09/2026, y despues repitiendo la misma
+      frase cuando el cliente contesto "ok".
+
       TAMBIEN cuando creas que el servicio NO se ofrece. Vos no tenes el
       catalogo: no podes saber que se vende y que no. Medido el 08/09/2026
       -- alguien pidio telefonia fija y en tres pruebas seguidas
@@ -4516,20 +4523,31 @@ escalamiento:
   # Este texto REEMPLAZA la respuesta del asistente cuando escala (ver
   # nucleo/canales/api.py), no se le suma -- asi que tiene que sostenerse
   # solo: es lo unico que el cliente va a leer en ese turno.
-  mensaje: >-
-    Entiendo tu molestia. Te paso con un compañero del equipo que va a
-    revisar tu caso ahora mismo.
-  # El 'mensaje' de arriba habla de una molestia, y sirve para los motivos que
-  # SI son un problema. Un pedido que salio bien necesita otro: el cliente no
-  # se quejo de nada, y decirle que se entiende su molestia lo desconcierta --
-  # visto el 28/08/2026 con un cambio de clave de WiFi.
+  # NEUTRO A PROPOSITO. Este es el que sobra: se usa para cualquier motivo sin
+  # texto propio, incluido uno que todavia no exista. Hasta el 08/09/2026 decia
+  # "Entiendo tu molestia", y por eso un prospecto al que se le ofrecio pasar
+  # el caso para confirmar la cobertura de su barrio -- que no se quejo de
+  # nada, dijo "si bueno"-- recibio una disculpa por una molestia inexistente.
   #
-  # El generico sirve para los motivos que SI implican un problema
-  # (frustracion_detectada, tres_fallos_seguidos). Los demas necesitan el suyo:
-  # pedir hablar con alguien, o no haber podido confirmar quien sos, no son
-  # quejas, y contestarles "entiendo tu molestia" desconcierta a quien no se
-  # quejo de nada.
+  # La empatia vive en el mensaje del motivo que SI la amerita, no en el que
+  # cubre lo imprevisto. Un texto por defecto que asume el estado de animo del
+  # cliente se equivoca justo en los casos que nadie penso.
+  mensaje: >-
+    Te paso con un compañero del equipo que va a revisar tu caso ahora mismo.
+  # Cada motivo con su texto. Un pedido que salio bien no es una queja, y
+  # decirle a alguien que se entiende su molestia cuando no se quejo lo
+  # desconcierta -- visto el 28/08/2026 con un cambio de clave de WiFi, y otra
+  # vez el 08/09/2026 con la cobertura de un barrio nuevo.
   mensajes_por_motivo:
+    # Los dos que SI son un problema, y por eso llevan la empatia que antes
+    # estaba en el generico. Separados porque no son lo mismo: uno es como se
+    # siente el cliente, el otro es que el asistente no pudo.
+    frustracion_detectada: >-
+      Entiendo tu molestia. Te paso con un compañero del equipo que va a
+      revisar tu caso ahora mismo.
+    tres_fallos_seguidos: >-
+      Perdón, no estoy logrando resolverlo por acá. Te paso con un compañero
+      del equipo que lo va a revisar con más detalle.
     # El reinicio salio y no se pudo confirmar que el equipo volviera. Se le
     # dice lo que pasa, sin prometer que quedo resuelto ni dar por hecho que
     # se rompio algo: eso todavia no se sabe.

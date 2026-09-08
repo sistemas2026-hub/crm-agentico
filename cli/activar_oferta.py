@@ -137,6 +137,24 @@ def _mutar(doc: dict, archivo: dict, informe: list[str]) -> None:
             doc["roles"][rol]["descripcion"] = nueva
             informe.append(f"  ~ roles.{rol}.descripcion: se actualiza")
 
+    # 6. Los textos de escalamiento. Van aca y no en un script aparte porque
+    #    salieron de la misma tanda de pruebas: el generico decia "Entiendo tu
+    #    molestia" y se lo dijo a un prospecto que no se habia quejado de nada
+    #    (08/09/2026). Ahora los 9 motivos tienen texto propio y el generico
+    #    -- el que cubre lo imprevisto-- es neutro.
+    esc_archivo = archivo.get("escalamiento", {})
+    esc = doc.setdefault("escalamiento", {})
+    if esc.get("mensaje") != esc_archivo.get("mensaje"):
+        esc["mensaje"] = esc_archivo["mensaje"]
+        informe.append("  ~ escalamiento.mensaje: se vuelve neutro "
+                       "(ya no asume que el cliente se quejo)")
+    por_motivo = esc.setdefault("mensajes_por_motivo", {})
+    for motivo, texto in (esc_archivo.get("mensajes_por_motivo") or {}).items():
+        if por_motivo.get(motivo) != texto:
+            estado = "+" if motivo not in por_motivo else "~"
+            por_motivo[motivo] = texto
+            informe.append(f"  {estado} escalamiento.mensajes_por_motivo: {motivo}")
+
     # La parrilla NO se siembra: se sube por Excel desde /settings/oferta.
     # Escribir [] aca seria pisar lo que alguien pudo haber subido ya.
 
