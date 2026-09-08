@@ -33,7 +33,26 @@ Lo que se fija
    prompt.
 
 6. EL ANALISTA NO ACTIVA NADA. Toda propuesta nace 'propuesta'. Y el piso de
-   casos existe: con dos conversaciones no hay patron.
+   casos existe: con dos conversaciones no hay patron. Se mira lo que el
+   analista ESCRIBE, no si la palabra aparece: la version anterior de esta
+   guarda se ponia en rojo cuando se agregaba una LECTURA legitima.
+
+7. EL PROMPT DEL ANALISTA NO FILTRA SU PROPIO METADATO. Las dos primeras
+   propuestas reales salieron inservibles porque el contexto del analisis
+   (señal, motivo, n_casos) llegaba al procedimiento sin decirle que el
+   agente NO puede ver nada de eso. Un disparador que dice "5 casos en los
+   ultimos 60 dias" no se activa nunca.
+
+8-10. LO QUE LA CONSULTA REAL DE catalogo.py PONE EN EL WHERE. Los puntos de
+   arriba reemplazan 'catalogo.cargar' por un doble: prueban que el motor usa
+   bien lo que el catalogo DEVUELVE, no que la consulta lleve los filtros que
+   dice llevar. Aca se mira el SQL real -- organizacion, estado 'vigente' y
+   rol, en 'indice_de()' Y en 'cargar()' (doble capa, PRD 8.1), y los tres
+   como parametros bindeados, nunca interpolados en el texto.
+
+11. EL LIMITE DE ESTA AUDITORIA, DICHO. Lo de arriba prueba que el CODIGO
+   pide lo correcto, no que Postgres lo haga cumplir: eso exige RLS activo y
+   dos organizaciones reales. Documentado, no resuelto aca.
 
 Corre SIN BASE DE DATOS y sin red: el catalogo se sustituye por un doble.
 ================================================================================
@@ -50,6 +69,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from nucleo.habilidades import analista, catalogo                      # noqa: E402
 from nucleo.habilidades.catalogo import EntradaIndice, Habilidad       # noqa: E402
 from nucleo.modelo import motor                                        # noqa: E402
+
+# Guardada ANTES de que _sin_base() (mas abajo) reemplace catalogo.cargar por
+# un lambda -- ese reemplazo dura el resto del script, asi que la seccion 8-10
+# necesita esta referencia para llamar a la funcion real y no al doble.
+_cargar_real = catalogo.cargar
 
 fallos: list[str] = []
 
@@ -178,6 +202,96 @@ afirmar("en prosa" in prompt,
         "solo a los nombres")
 afirmar("VE EN LA CONVERSACION" in prompt,
         "el disparador se define por lo que el agente ve, no por el patron")
+
+
+print("\n== 8-10. lo que la CONSULTA REAL de catalogo.py pone en el WHERE ==")
+# Las pruebas de arriba reemplazan catalogo.cargar entero por un diccionario:
+# prueban que _ejecutar_carga_habilidad usa bien lo que catalogo LE DEVUELVE,
+# pero no prueban que catalogo.py arme la consulta SQL con los filtros que
+# describe. Fase #2.2 los leyo una vez a mano; esto los deja con guarda: si
+# alguien borra 'estado = vigente' o el filtro de organization_id sin darse
+# cuenta, esto falla, no hace falta releer el archivo para notarlo.
+#
+# Sin base de datos: se reemplaza SOLO 'sesion' (el context manager que abre
+# la conexion), por un cursor falso que graba que SQL y que parametros
+# recibio, en vez de ejecutar nada.
+
+
+class _CursorFalso:
+    def __init__(self, filas=None):
+        self.llamadas = []           # [(sql, params), ...]
+        self._filas = filas or []
+
+    def execute(self, sql, params=None):
+        self.llamadas.append((sql, params))
+
+    def fetchall(self):
+        return self._filas
+
+    def fetchone(self):
+        return self._filas[0] if self._filas else None
+
+
+class _SesionFalsa:
+    """Mismo shape que nucleo.persistencia.db.sesion: un context manager que
+    entrega (cursor, organization_id)."""
+    def __init__(self, cursor, org="org-fantasma-000"):
+        self.cursor = cursor
+        self.org = org
+
+    def __call__(self, tenant):
+        return self
+
+    def __enter__(self):
+        return self.cursor, self.org
+
+    def __exit__(self, *exc):
+        return False
+
+
+cursor = _CursorFalso()
+sesion_falsa = _SesionFalsa(cursor)
+catalogo.sesion = sesion_falsa
+
+catalogo.indice_de("cualquier_tenant", "soporte")
+sql_indice, params_indice = cursor.llamadas[-1]
+afirmar("organization_id = %s" in sql_indice,
+        "indice_de() filtra por organization_id en el SQL real")
+afirmar("estado = 'vigente'" in sql_indice,
+        "indice_de() exige estado='vigente' en el SQL real -- una propuesta u "
+        "obsoleta no puede aparecer en el indice")
+afirmar("any(roles_permitidos)" in sql_indice,
+        "indice_de() filtra por rol en el SQL real")
+afirmar(params_indice[0] == sesion_falsa.org and params_indice[1] == "soporte",
+        "los parametros que se bindean son el org de la SESION (no algo que "
+        "el modelo pueda mandar) y el rol pedido")
+
+cursor.llamadas.clear()
+_cargar_real("cualquier_tenant", "facturacion", "HAB-X")
+sql_cargar, params_cargar = cursor.llamadas[-1]
+afirmar("organization_id = %s" in sql_cargar,
+        "cargar() TAMBIEN filtra por organization_id -- doble capa, no solo "
+        "en el indice")
+afirmar("estado = 'vigente'" in sql_cargar,
+        "cargar() TAMBIEN exige estado='vigente' -- una obsoleta no se puede "
+        "cargar nombrando el codigo, aunque el indice ya la hubiera ocultado")
+afirmar("any(roles_permitidos)" in sql_cargar,
+        "cargar() repite el filtro de rol -- PRD 8.1: no alcanza con no "
+        "mostrarla, tambien se rechaza si igual la invocan")
+afirmar(sesion_falsa.org in params_cargar and "facturacion" in params_cargar
+        and "HAB-X" in params_cargar,
+        "los tres filtros -- org, rol, codigo -- viajan como parametros "
+        "reales, no interpolados en el texto (sin riesgo de inyeccion)")
+
+print("\n== 11. limite de lo que esta auditoria SI y NO prueba ==")
+# Esto prueba que el CODIGO arma bien la consulta. No prueba que Postgres
+# de verdad la responda filtrada -- eso exige RLS activo (asistente.habilidades
+# lo declara con FORCE, ver supabase/202609031100_habilidades.sql) y una base
+# real con dos organizaciones para intentar cruzarlas. Sin esa integracion
+# contra Postgres, la afirmacion de aislamiento sigue siendo "el codigo pide
+# lo correcto", no "la base lo hace cumplir". Documentado, no resuelto aca.
+afirmar(True, "aislamiento a nivel RLS/Postgres queda FUERA de esta prueba a "
+              "proposito -- requiere una base real, ver nota arriba")
 
 
 print()
