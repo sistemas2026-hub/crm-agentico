@@ -37,8 +37,24 @@
   let subiendo = $state(false);
   /** @type {File | null} */
   let archivo = $state(null);
+  let filtro = $state('');
 
   let activos = $derived(servicios.filter((s) => s.activo && s.nombre.trim()).length);
+
+  /**
+   * Filtro simple, sin tildes ni mayusculas. NO replica el reconocimiento del
+   * agente (que ademas encuentra por parecido de letras): esto es para que una
+   * persona confirme rapido si un canal quedo cargado, no para predecir que va
+   * a responder el asistente.
+   */
+  const _plano = (/** @type {string} */ s) =>
+    s.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+
+  let canalesVisibles = $derived.by(() => {
+    const q = _plano(filtro.trim());
+    if (!q) return data.canales;
+    return data.canales.filter((/** @type {string} */ c) => _plano(c).includes(q));
+  });
 
   function agregar() {
     servicios = [...servicios, { nombre: '', activo: true, descripcion: '' }];
@@ -241,20 +257,48 @@
       </form>
     {/if}
 
-    <h3 class="sub">
-      {#if data.canales.length}
-        Canales cargados ({data.canales.length})
-      {:else}
-        Todavía no hay parrilla cargada
+    <div class="cab-lista">
+      <h3 class="sub">
+        {#if data.canales.length}
+          Canales cargados ({data.canales.length})
+        {:else}
+          Todavía no hay parrilla cargada
+        {/if}
+      </h3>
+      {#if data.canales.length > 12}
+        <input
+          class="campo buscador"
+          type="search"
+          bind:value={filtro}
+          placeholder="Buscar un canal…"
+          aria-label="Buscar un canal en la parrilla"
+        />
       {/if}
-    </h3>
+    </div>
 
     {#if data.canales.length}
-      <ul class="canales">
-        {#each data.canales as c}
-          <li>{c}</li>
-        {/each}
-      </ul>
+      <!-- Scroll propio, como la tabla de planes-venta: el shell de la app no
+           deja que una lista de cientos de filas empuje la pagina, y sin esto
+           los canales de abajo quedan fuera de alcance. -->
+      <div class="canales-scroll">
+        <ul class="canales">
+          {#each canalesVisibles as c}
+            <li>{c}</li>
+          {/each}
+        </ul>
+        {#if filtro.trim() && canalesVisibles.length === 0}
+          <p class="vacio" style="padding:10px 2px">
+            Ningún canal coincide con «{filtro}». Ojo: el agente sí lo
+            encontraría aunque lo escribas incompleto — este buscador es más
+            literal que él.
+          </p>
+        {/if}
+      </div>
+      {#if filtro.trim()}
+        <p class="conteo-filtro">
+          {canalesVisibles.length} de {data.canales.length} canales
+        </p>
+      {/if}
     {:else}
       <p class="vacio">
         Sin parrilla, el agente no responde por canales: dice que va a confirmar y escala.
@@ -369,6 +413,17 @@
     align-items: center;
     flex-wrap: wrap;
   }
+  /* La lista lleva su propio scroll -- mismo criterio que la tabla de
+     planes-venta. Sin esto, una parrilla de cientos de canales se sale de la
+     pantalla y no hay forma de llegar a lo de abajo. */
+  .canales-scroll {
+    max-height: 340px;
+    overflow-y: auto;
+    border: 1px solid var(--v2-border, #e3e6e4);
+    border-radius: 6px;
+    padding: 10px 12px;
+    background: var(--v2-surface-2, #f8f9f8);
+  }
   .canales {
     margin: 0;
     padding: 0;
@@ -381,6 +436,25 @@
   .canales li {
     padding: 3px 0;
     border-bottom: 1px solid var(--v2-border-soft, #eff1f0);
+  }
+  .cab-lista {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-top: 6px;
+  }
+  .buscador {
+    width: auto;
+    min-width: 200px;
+    max-width: 280px;
+  }
+  .conteo-filtro {
+    margin: 0;
+    font-size: 12px;
+    color: var(--v2-text-muted, #6b7671);
+    font-variant-numeric: tabular-nums;
   }
   .vacio {
     margin: 0;
