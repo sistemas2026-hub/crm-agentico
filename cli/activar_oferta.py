@@ -144,16 +144,42 @@ def _mutar(doc: dict, archivo: dict, informe: list[str]) -> None:
     #    -- el que cubre lo imprevisto-- es neutro.
     esc_archivo = archivo.get("escalamiento", {})
     esc = doc.setdefault("escalamiento", {})
-    if esc.get("mensaje") != esc_archivo.get("mensaje"):
-        esc["mensaje"] = esc_archivo["mensaje"]
-        informe.append("  ~ escalamiento.mensaje: se vuelve neutro "
-                       "(ya no asume que el cliente se quejo)")
+    for clave in ("mensaje", "mensaje_ya_escalada"):
+        if clave in esc_archivo and esc.get(clave) != esc_archivo[clave]:
+            esc[clave] = esc_archivo[clave]
+            informe.append(f"  ~ escalamiento.{clave}: se actualiza")
     por_motivo = esc.setdefault("mensajes_por_motivo", {})
     for motivo, texto in (esc_archivo.get("mensajes_por_motivo") or {}).items():
         if por_motivo.get(motivo) != texto:
             estado = "+" if motivo not in por_motivo else "~"
             por_motivo[motivo] = texto
             informe.append(f"  {estado} escalamiento.mensajes_por_motivo: {motivo}")
+
+    # 7. Motivos de escalada. Se SUMA lo que falte, nunca se reemplaza la
+    #    lista: si alguien agrego un motivo desde la interfaz, el archivo no
+    #    tiene por que saberlo -- mismo criterio que puede_consultar.
+    activar = esc.setdefault("activar_si", [])
+    for motivo in esc_archivo.get("activar_si") or []:
+        if motivo not in activar:
+            activar.append(motivo)
+            informe.append(f"  + escalamiento.activar_si: {motivo}")
+    quiere_ventas = (archivo["roles"]["ventas"].get("motivos_escalada") or [])
+    if quiere_ventas:
+        tiene_m = ventas.setdefault("motivos_escalada", [])
+        for motivo in quiere_ventas:
+            if motivo not in tiene_m:
+                tiene_m.append(motivo)
+                informe.append(f"  + ventas.motivos_escalada: {motivo}")
+
+    # 8. El tono compartido por TODOS los roles (saludar una sola vez, entre
+    #    otras). Va en 'persona' y no en un rol porque el cliente ve UNA
+    #    conversacion, no una por area.
+    per_archivo = archivo.get("persona", {})
+    per = doc.setdefault("persona", {})
+    if per.get("instrucciones_adicionales") != per_archivo.get("instrucciones_adicionales"):
+        per["instrucciones_adicionales"] = per_archivo["instrucciones_adicionales"]
+        informe.append("  ~ persona.instrucciones_adicionales: se actualiza "
+                       "(incluye saludar una sola vez por conversacion)")
 
     # La parrilla NO se siembra: se sube por Excel desde /settings/oferta.
     # Escribir [] aca seria pisar lo que alguien pudo haber subido ya.

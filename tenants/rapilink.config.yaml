@@ -1274,7 +1274,7 @@ roles:
     # elegia igual -- el 28/08/2026 escalo una venta con
     # 'sin_datos_para_diagnosticar' y el cliente perdio sus planes.
     motivos_escalada: [frustracion_detectada, tres_fallos_seguidos,
-                       solicitud_explicita]
+                       solicitud_explicita, informacion_a_confirmar]
     area: Ventas
     cargo: Agente de Ventas Virtual
     # Lo lee el ROUTER (cliente_final) para saber cuando derivar aca --
@@ -4525,9 +4525,12 @@ escalamiento:
   # Nadie lo elige a mano: lo fuerza en codigo la herramienta que lo declara
   # con 'escalar_al_completar'. Esta en esta lista porque el validador exige
   # que todo motivo exista, no para que el modelo lo proponga.
+  # 'informacion_a_confirmar' se agrego el 08/09/2026. El evaluador ve SOLO
+  # los nombres (el motor no puede describir motivos que declara cada
+  # empresa), asi que el nombre tiene que explicarse solo.
   activar_si: [frustracion_detectada, tres_fallos_seguidos, solicitud_explicita, duda_de_identidad,
                visita_tecnica_requerida, sin_datos_para_diagnosticar, pedido_para_ejecutar,
-               accion_sin_efecto, comprobante_para_validar]
+               accion_sin_efecto, comprobante_para_validar, informacion_a_confirmar]
   destino_rol: soporte
   # Este texto REEMPLAZA la respuesta del asistente cuando escala (ver
   # nucleo/canales/api.py), no se le suma -- asi que tiene que sostenerse
@@ -4554,6 +4557,18 @@ escalamiento:
   # desconcierta -- visto el 28/08/2026 con un cambio de clave de WiFi, y otra
   # vez el 08/09/2026 con la cobertura de un barrio nuevo.
   mensajes_por_motivo:
+    # Falta un dato que el asistente no tiene de donde sacar y una persona
+    # si puede confirmar -- la cobertura de un barrio que no esta en el
+    # catalogo, por ejemplo. NO es una queja ni un fallo del asistente, y
+    # por eso no se disculpa: informa.
+    #
+    # Existe porque sin el, el evaluador metia esto en 'frustracion_detectada'
+    # o 'tres_fallos_seguidos' -- los unicos que ventas tenia-- y el cliente
+    # recibia 'Entiendo tu molestia' sin haberse quejado de nada (08/09/2026,
+    # dos veces).
+    informacion_a_confirmar: >-
+      Eso lo tengo que confirmar con un compañero del equipo. Le paso tu
+      caso y te responde por aca.
     # Los dos que SI son un problema, y por eso llevan la empatia que antes
     # estaba en el generico. Separados porque no son lo mismo: uno es como se
     # siente el cliente, el otro es que el asistente no pudo.
