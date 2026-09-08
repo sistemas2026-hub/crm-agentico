@@ -71,9 +71,18 @@ def test_contrato_en_los_tres_estados(user_client, orden_ct):
     assert a.status_code == 200
     assert set(a.json()) == {"evidencia_id", "estado_archivo", "storage_key", "upload"}
     assert a.json()["estado_archivo"] == "subiendo"
-    assert set(a.json()["upload"]) == {"method", "url", "expires_in"}
-    assert a.json()["upload"]["method"] == "PUT"
-    assert a.json()["upload"]["expires_in"] == 900
+    up = a.json()["upload"]
+    assert set(up) == {"method", "url", "headers", "requiere_auth_dexter", "expires_in"}
+    assert up["method"] == "PUT"
+    assert up["expires_in"] == 900
+    # 'headers' existe desde ahora aunque vaya vacio: con S3/R2 llevara las
+    # cabeceras firmadas del proveedor, y que aparezca recien ese dia seria un
+    # cambio rompedor para una app ya publicada.
+    assert up["headers"] == {}
+    # Hoy true porque la subida la atiende esta misma API. Con una URL
+    # prefirmada pasa a false: mandarle el JWT de Dexter a un proveedor
+    # externo seria entregarle una credencial que abre toda la API.
+    assert up["requiere_auth_dexter"] is True
 
     ev = EvidenciaTrabajo.objects.get(pk=a.json()["evidencia_id"])
 

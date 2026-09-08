@@ -53,6 +53,26 @@ class CampoStorage:
         return {
             "method": "PUT",
             "url": f"/api/campo/evidencias/{evidencia_id}/subir/",
+            # Lo que el cliente debe mandar TAL CUAL, sin interpretarlo. Hoy
+            # va vacio porque la subida local no pide nada especial; con S3/R2
+            # aca viajan las cabeceras firmadas ('x-amz-*', 'Content-MD5'...).
+            #
+            # Existe desde ahora, vacio, a proposito: si apareciera recien el
+            # dia de la migracion seria un cambio rompedor para una app ya
+            # publicada. Que la lea vacia hoy no cuesta nada y evita eso.
+            "headers": {},
+            # Si el cliente debe adjuntar SU credencial de Dexter.
+            #
+            # Hoy true: la subida la atiende esta misma API y la vista exige
+            # IsCampoAuthenticated. Con una URL prefirmada de S3 pasa a FALSE,
+            # y no es un detalle: la firma ya autoriza la operacion, el
+            # proveedor no sabe que es un JWT de Dexter, y mandarselo seria
+            # entregarle a un tercero una credencial que abre toda la API.
+            #
+            # Sin este campo, la app no tendria como saberlo: hoy adjuntar el
+            # token es lo correcto, y el dia que cambie el backend seguiria
+            # haciendolo sin que nadie lo note.
+            "requiere_auth_dexter": True,
             "expires_in": 900,
         }
 
