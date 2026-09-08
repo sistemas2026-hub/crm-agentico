@@ -2222,35 +2222,62 @@ class TenantConfig(Base):
         #
         # Se valida aca y no en tiempo de ejecucion porque en ejecucion ya es
         # tarde: el cliente ya esta esperando. Una config asi no se carga.
+        # Tener la herramienta no alcanza: tiene que llevar A ALGUN LADO.
+        #
+        # Una config puede ser formalmente correcta y aun asi dejar el rol
+        # encerrado -- figura en 'roles_permitidos', declara la herramienta en
+        # 'puede_consultar', y 'areas_destino' no tiene ningun destino que no
+        # sea el mismo. Se ve bien en las tres listas y no deriva a nadie.
+        #
+        # Por eso se mira el destino EFECTIVO por rol: los destinos de sus
+        # herramientas de derivacion, menos el propio rol.
+        def _tiene_salida(nombre: str, rol) -> bool:
+            for h in self.herramientas:
+                if not h.deriva_rol or h.nombre not in rol.puede_consultar:
+                    continue
+                if set(h.areas_destino) - {nombre}:
+                    return True
+            return False
+
         deriva = {h.nombre for h in self.herramientas if h.deriva_rol}
         sin_salida = [
             n for n, r in self.roles.items()
-            if r.orientado_a == "cliente_final"
-            and not (set(r.puede_consultar) & deriva)
+            if r.orientado_a == "cliente_final" and not _tiene_salida(n, r)
         ]
         if sin_salida:
-            # El mensaje dice DONDE arreglarlo, no solo que esta mal. Quien lo
-            # lea va a estar mirando un YAML de miles de lineas: "falta una
-            # herramienta con deriva_rol" lo obliga a buscar cual; nombrarla y
-            # decir en que campo agregar el rol lo convierte en una edicion.
+            # El mensaje dice DONDE arreglarlo, y distingue las DOS causas.
+            # Son distintas y se arreglan en campos distintos:
             #
-            # El caso real fue una asimetria: 'ventas' figuraba en
-            # 'areas_destino' de derivar_a_area --se podia derivar HACIA el--
-            # pero no en 'roles_permitidos', asi que no podia derivar DESDE
-            # el. Se ve igual en una lectura rapida y es lo contrario.
-            candidatas = sorted(deriva) or ["(ninguna declarada)"]
-            detalle = "; ".join(
-                f"'{n}' atiende clientes pero no puede derivar: agregalo a "
-                f"'roles_permitidos' de {candidatas[0]}"
-                + (f" (o de {', '.join(candidatas[1:])})" if len(candidatas) > 1 else "")
-                + f", y '{candidatas[0]}' a su 'puede_consultar'"
-                for n in sorted(sin_salida))
+            #   no declara la herramienta -> falta en 'puede_consultar' y en
+            #                                'roles_permitidos'
+            #   la declara pero no lleva
+            #   a nadie                   -> falta un destino en 'areas_destino'
+            #
+            # Un mensaje que diga siempre lo primero manda a arreglar donde no
+            # es cuando el problema es lo segundo, y quien lo lea va a mirar
+            # dos listas que ya estan bien.
+            candidatas = sorted(deriva) or ["(ninguna herramienta declara deriva_rol)"]
+            partes = []
+            for n in sorted(sin_salida):
+                rol = self.roles[n]
+                if not (set(rol.puede_consultar) & deriva):
+                    partes.append(
+                        f"'{n}' atiende clientes pero no puede derivar: "
+                        f"agregalo a 'roles_permitidos' de {candidatas[0]}, y "
+                        f"'{candidatas[0]}' a su 'puede_consultar'")
+                else:
+                    suyas = sorted(set(rol.puede_consultar) & deriva)
+                    partes.append(
+                        f"'{n}' declara {suyas} pero no lleva a ningun lado: "
+                        f"'areas_destino' no tiene ningun rol distinto de "
+                        f"'{n}'. Agrega ahi el area a la que deberia pasar "
+                        f"los casos que no resuelve")
             raise ValueError(
-                f"{detalle}. Una conversacion que caiga en ese rol queda "
-                f"encerrada: cuando el cliente pida algo que no resuelve, no "
-                f"habra forma de pasarlo a quien si puede, y lo unico que le "
-                f"queda al modelo es disculparse. Si ese rol NO atiende "
-                f"clientes, marcalo orientado_a='colaborador'.")
+                "; ".join(partes) + ". Una conversacion que caiga en ese rol "
+                "queda encerrada: cuando el cliente pida algo que no resuelve, "
+                "no habra forma de pasarlo a quien si puede, y lo unico que le "
+                "queda al modelo es disculparse. Si ese rol NO atiende "
+                "clientes, marcalo orientado_a='colaborador'.")
 
         # El rol que atiende los canales publicos. Un nombre mal escrito no
         # puede caer en silencio al comportamiento viejo --tomar el primero--

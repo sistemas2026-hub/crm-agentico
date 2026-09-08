@@ -252,8 +252,21 @@ def _validar(tenant: str, crudo: dict) -> TenantConfig:
         # Es un print y no una fila en la base a proposito: esto corre DENTRO
         # de la transaccion de _editar(), que va a hacer rollback. Una
         # escritura aca se perderia con el resto.
-        print(f"[config] {tenant}: RECHAZADA una edicion invalida -- "
-              + " | ".join(lineas[:3]))
+        #
+        # Y es un print y no logging porque el proyecto entero usa esta forma
+        # --218 lineas con prefijo '[modulo]' y cero uso de logging--. Una
+        # sola linea en otro estilo no la hace mas buscable que las demas;
+        # migrar a logging estructurado es una decision que vale la pena y que
+        # se toma para todo el codigo, no a medias por un caso.
+        #
+        # Lo que si lleva son los CAMPOS: version que se intentaba pisar, y
+        # las secciones tocadas. Eso es lo que hace falta para saber, si esto
+        # se repite, si una regla molesta seguido -- y una regla que molesta
+        # todos los dias o esta mal puesta o señala un hueco en la interfaz.
+        print(f"[config] {tenant}: RECHAZADA una edicion invalida "
+              f"(desde v{crudo.get('version', '?')}, "
+              f"secciones={sorted(k for k in crudo if k in SECCIONES_EDITABLES)}) "
+              f"-- " + " | ".join(lineas[:3]))
         raise ErrorEdicion(
             f"{tenant}: {len(lineas)} problema(s) de configuracion:\n  - "
             + "\n  - ".join(lineas)) from None

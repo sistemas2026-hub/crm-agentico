@@ -183,6 +183,28 @@ except Exception as e:
             f"se rechazo, pero el mensaje no dice donde: {texto[:120]}")
 
 
+# --- 5.c tener la herramienta no alcanza: tiene que llevar a algun lado ------
+# Una config puede ser formalmente correcta y dejar el rol igual de encerrado:
+# figura en 'roles_permitidos', declara la herramienta, y 'areas_destino' no
+# tiene ningun destino que no sea el mismo rol. Las tres listas se ven bien.
+solo_a_si_mismo = copy.deepcopy(base)
+for h in solo_a_si_mismo["herramientas"]:
+    if h.get("deriva_rol"):
+        h["areas_destino"] = [victima]
+try:
+    TenantConfig(**solo_a_si_mismo)
+    revisar(False, "se rechaza una derivacion que no lleva a ningun lado",
+            "fue aceptada")
+except Exception as e:
+    # Y que el mensaje mande al campo CORRECTO: aca el problema no es
+    # 'roles_permitidos' --que esta bien-- sino 'areas_destino'. Un error que
+    # diagnostica mal manda a mirar dos listas que ya estaban bien.
+    texto = str(e)
+    revisar("areas_destino" in texto,
+            "se rechaza una derivacion que no lleva a ningun lado, y apunta al campo justo",
+            f"se rechazo, pero el mensaje no menciona 'areas_destino': {texto[:130]}")
+
+
 # --- 6. el YAML semilla lo trae ----------------------------------------------
 # El YAML es la semilla de un tenant nuevo. Si no lo trae, la proxima empresa
 # que se conecte arranca con el mismo problema.
