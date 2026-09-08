@@ -319,6 +319,27 @@ afirmar(h["consultar_plan_tv"].endpoint == h["consultar_plan_detalle"].endpoint,
         "consultar_plan_detalle, que ventas ya podia llamar")
 
 
+print("\n== 10. una recarga del YAML no puede borrar lo que se subio ==")
+# El YAML trae 'parrilla_canales: []' a proposito -- los canales se cargan
+# desde la pantalla, no a mano. Si estas secciones no estan declaradas como
+# EDITABLES POR LA INTERFAZ, la primera recarga del archivo las pisa con la
+# lista vacia y se pierden cientos de canales sin que nadie se entere.
+#
+# No es hipotetico y por eso esta seccion existe: paso el 23/08/2026 (6 planes
+# curados y 128 localidades) y otra vez el 05/09/2026 (la tarifa de DeepSeek y
+# el endpoint de saldo). Las dos veces por el mismo motivo -- alguien agrego un
+# mutador y no agrego la seccion a esta lista.
+for seccion in ("servicios_ofrecidos", "parrilla_canales"):
+    afirmar(seccion in editor.SECCIONES_EDITABLES,
+            f"'{seccion}' esta en SECCIONES_EDITABLES -- sin eso, cargar el "
+            f"YAML encima de la base la borra en silencio")
+
+afirmar("parrilla_canales" in editor.SECCIONES_EDITABLES
+        and real.parrilla_canales == [],
+        "y el caso es justamente ese: el YAML la trae vacia, asi que una "
+        "recarga desprotegida no dejaria rastro de lo que se perdio")
+
+
 print()
 if fallos:
     print(f"[FALLA] {len(fallos)} comprobacion(es):")

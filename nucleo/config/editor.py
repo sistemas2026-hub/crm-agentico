@@ -106,6 +106,14 @@ SECCIONES_EDITABLES = (
     "localidades",        # _mutar_localidades
     "variables_tenant",   # _mutar_variable_tenant / _mutar_borrar_variable_tenant
     "manual",             # _mutar_casos_manual
+    # _mutar_servicios_ofrecidos y _mutar_parrilla_canales. La parrilla es el
+    # caso mas caro de perder de toda esta lista: son cientos de canales que
+    # alguien subio en un Excel, y el YAML los trae VACIOS a proposito (se
+    # cargan desde la pantalla, no a mano). Sin estas dos lineas, la primera
+    # recarga del archivo los borra en silencio -- exactamente lo que paso el
+    # 23/08/2026 con los planes y el 05/09/2026 con la tarifa.
+    "servicios_ofrecidos",
+    "parrilla_canales",
     # 'llm' por _mutar_tarifa y _mutar_saldo_proveedor; 'limites' por
     # _mutar_tope_gasto. Faltaban, y paso exactamente lo que este comentario
     # anunciaba: el 05/09/2026 una carga del YAML borro la tarifa de DeepSeek
