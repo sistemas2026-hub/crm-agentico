@@ -272,6 +272,31 @@ def _validar(tenant: str, crudo: dict) -> TenantConfig:
             + "\n  - ".join(lineas)) from None
 
 
+def anotar_version(cur, org, version: int, datos: dict) -> None:
+    """
+    Guarda una copia de la config que acaba de quedar vigente.
+
+    Va DENTRO de la transaccion que la escribio, a proposito: si el historial
+    fuera un paso aparte, la unica forma de que se desincronice --guardar la
+    config y no la copia-- seria tambien la mas probable (una excepcion en el
+    medio). Asi, o quedan las dos o no queda ninguna.
+
+    Existe porque 'tenant_config' se actualiza EN EL LUGAR: al subir la
+    version, lo que decia la anterior se pierde. El 07/09/2026 se desactivo el
+    razonamiento del modelo, y dos semanas despues, mirando si el cambio
+    sirvio, no habria forma de saber que config sirvio cada turno.
+
+    'do nothing' ante conflicto: la version es la clave, y una version ya
+    anotada no se reescribe -- un historial que se puede pisar no es un
+    historial. Tampoco se le dio permiso de update a app_backend.
+    """
+    cur.execute("""insert into asistente.tenant_config_historial
+                     (organization_id, config_version, config)
+                   values (%s, %s, %s)
+                   on conflict (organization_id, config_version) do nothing""",
+                (org, version, json.dumps(datos)))
+
+
 def _editar(tenant: str, mutar: Callable[[dict], None]) -> TenantConfig:
     """
     Lee la configuracion vigente, le aplica 'mutar', valida el resultado y lo
@@ -353,6 +378,7 @@ def _editar(tenant: str, mutar: Callable[[dict], None]) -> TenantConfig:
                        returning config_version""",
                     (json.dumps(datos), org))
         version = cur.fetchone()["config_version"]
+        anotar_version(cur, org, version, datos)
 
     print(f"[config] {tenant}: v{version} guardada desde el editor")
     return config

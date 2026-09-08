@@ -383,12 +383,14 @@ def cargar(ruta: Path, org_id: str | None = None, forzar: bool = False) -> None:
                            returning config_version""",
                         (json.dumps(datos), org))
             version = cur.fetchone()[0]
+            editor.anotar_version(cur, org, version, datos)
             print(f"[^] {slug}: actualizada a v{version}")
         else:
             cur.execute("""insert into asistente.tenant_config
                              (organization_id, slug, config, config_version)
                            values (%s, %s, %s, 1)""",
                         (org, slug, json.dumps(datos)))
+            editor.anotar_version(cur, org, 1, datos)
             print(f"[+] {slug}: cargada v1")
         con.commit()
 

@@ -76,7 +76,8 @@ MINIMO_PARA_P95 = 20
 
 
 def _velocidad(cur, org, dias):
-    """Un renglon por dia y canal: cuanto tardo, en que, y cuanto costo."""
+    """Un renglon por dia y canal: cuanto tardo, en que, cuanto costo y con
+    que configuracion."""
     cur.execute(
         """with turnos as (
              select m.id, m.conversation_id cid, m.creado_en, cv.canal,
@@ -96,7 +97,8 @@ def _velocidad(cur, org, dias):
                   avg(t.llamadas_modelo) llamadas,
                   sum(t.costo_usd) costo,
                   avg(t.tokens_entrada) entrada,
-                  avg(coalesce(h.ms, 0)) tools_ms
+                  avg(coalesce(h.ms, 0)) tools_ms,
+                  array_agg(distinct c.config_version) versiones
              from turnos t
              -- Las herramientas se atribuyen al turno por VENTANA DE TIEMPO,
              -- entre esta respuesta y la anterior de la misma conversacion:
@@ -108,8 +110,17 @@ def _velocidad(cur, org, dias):
                            t.previo, t.creado_en - interval '5 minutes')
                      and tc.creado_en <= t.creado_en + interval '30 seconds'
              ) h on true
+             -- La config tambien por ventana: la vigente en un turno es la
+             -- ultima anotada antes de el. NULL = anterior al historial.
+             left join lateral (
+                  select hc.config_version
+                    from asistente.tenant_config_historial hc
+                   where hc.organization_id = %s
+                     and hc.creado_en <= t.creado_en
+                   order by hc.creado_en desc limit 1
+             ) c on true
             group by 1, 2 order by 1 desc, 3 desc""",
-        (org, dias, ZONA))
+        (org, dias, ZONA, org))
     return cur.fetchall()
 
 
@@ -138,6 +149,57 @@ def _calidad(cur, org, dias):
     return conv, {f["d"]: f for f in cur.fetchall()}
 
 
+def _historial(cur, org, dias):
+    """Que configuracion empezo a servir, y cuando.
+
+    Incluye la ultima ANTERIOR a la ventana: es la que estaba vigente cuando
+    la ventana empezo, y sin ella los primeros dias no tendrian con que
+    explicarse.
+    """
+    cur.execute(
+        """(select config_version v, creado_en at time zone %s b,
+                   config->'llm'->>'razonamiento' razona, true dentro
+              from asistente.tenant_config_historial
+             where organization_id = %s
+               and creado_en > now() - make_interval(days => %s))
+           union all
+           (select config_version, creado_en at time zone %s,
+                   config->'llm'->>'razonamiento', false
+              from asistente.tenant_config_historial
+             where organization_id = %s
+               and creado_en <= now() - make_interval(days => %s)
+             order by creado_en desc limit 1)
+           order by 1""", (ZONA, org, dias, ZONA, org, dias))
+    return cur.fetchall()
+
+
+def _proporcion(parte, total, ancho):
+    """'1/5 ( 20.0%)'. El denominador va SIEMPRE, no solo cuando es chico.
+
+    Con 5 conversaciones, '20.0%' se lee como una tendencia y es UNA
+    conversacion. El porcentaje solo, sin cuantos casos lo sostienen, invita
+    a una conclusion que la muestra no aguanta -- y cuando la muestra si
+    aguanta, ver el denominador no le molesta a nadie.
+    """
+    if not total:
+        return "-".rjust(ancho)
+    return f"{parte}/{total} ({100.0 * parte / total:5.1f}%)".rjust(ancho)
+
+
+def _versiones(fila) -> str:
+    """'v120', o '? v120' si parte de esos turnos son anteriores al historial.
+
+    El '?' no se rellena con la version conocida mas vieja: un turno anterior
+    al historial NO corrio con esa config -- corrio con una que se
+    sobreescribio. Adivinarla daria una comparacion limpia y falsa, que es
+    justo lo que este informe existe para no producir.
+    """
+    crudas = fila["versiones"] or []
+    vs = sorted({v for v in crudas if v is not None})
+    marca = "? " if any(v is None for v in crudas) else ""
+    return (marca + ",".join(f"v{v}" for v in vs)).strip() or "?"
+
+
 def informe(tenant: str, dias: int = 7) -> None:
     with sesion(tenant) as (cur, org):
         filas = _velocidad(cur, org, dias)
@@ -146,36 +208,55 @@ def informe(tenant: str, dias: int = 7) -> None:
                   "la noche del 07/09/2026 -- hace falta trafico posterior.")
             return
 
-        print(f"  {'dia':7s} {'canal':18s} {'n':>4s} {'total':>7s} {'p95':>8s} "
-              f"{'modelo':>8s} {'tools':>7s} {'llam':>5s} {'entrada':>8s} "
-              f"{'costo':>9s}")
+        cab = ("dia", "canal", "n", "total", "p95", "modelo", "tools", "llam",
+               "entrada", "costo", "config")
+        print(f"  {cab[0]:7s} {cab[1]:18s} {cab[2]:>4s} {cab[3]:>7s} "
+              f"{cab[4]:>8s} {cab[5]:>8s} {cab[6]:>7s} {cab[7]:>5s} "
+              f"{cab[8]:>8s} {cab[9]:>9s}  {cab[10]:<9s}")
         for f in filas:
-            llam = f"{f['llamadas']:5.1f}" if f["llamadas"] is not None else f"{'-':>5s}"
-            ent = f"{f['entrada']:8,.0f}" if f["entrada"] is not None else f"{'-':>8s}"
+            guion5, guion8 = "-".rjust(5), "-".rjust(8)
+            llam = f"{f['llamadas']:5.1f}" if f["llamadas"] is not None else guion5
+            ent = f"{f['entrada']:8,.0f}" if f["entrada"] is not None else guion8
             tools = float(f["tools_ms"] or 0) / 1000
             modelo = max(0.0, f["p50"] / 1000 - tools)
             p95 = (f"{f['p95']/1000:7.1f}s" if f["n"] >= MINIMO_PARA_P95
                    else f"{f['p95']/1000:6.1f}s*")
             print(f"  {f['d']:%d/%m}   {f['canal']:18s} {f['n']:4d} "
                   f"{f['p50']/1000:6.1f}s {p95} {modelo:7.1f}s {tools:6.1f}s "
-                  f"{llam} {ent} ${float(f['costo'] or 0):8.4f}")
+                  f"{llam} {ent} ${float(f['costo'] or 0):8.4f}  "
+                  f"{_versiones(f):<9s}")
         if any(f["n"] < MINIMO_PARA_P95 for f in filas):
             print(f"\n  (*) menos de {MINIMO_PARA_P95} turnos: ese p95 es casi "
                   f"'el turno mas lento', no una tendencia.")
 
         conv, herram = _calidad(cur, org, dias)
-        print(f"\n  {'dia':7s} {'conversaciones':>14s} {'% escalado':>11s} "
-              f"{'llamadas':>9s} {'% con error':>12s}")
+        c2, c3 = "escalado", "herramientas con error"
+        print(f"\n  {cab[0]:7s} {c2:>16s} {c3:>26s}")
         for d in sorted(set(conv) | set(herram), reverse=True):
             c, h = conv.get(d), herram.get(d)
-            pe = (f"{100.0*c['escaladas']/max(c['conv'],1):10.1f}%" if c
-                  else f"{'-':>11s}")
-            nh = f"{h['n']:9d}" if h else f"{'-':>9s}"
-            pf = (f"{100.0*h['fallidas']/max(h['n'],1):11.1f}%" if h
-                  else f"{'-':>12s}")
-            print(f"  {d:%d/%m}   {(c['conv'] if c else 0):14d} {pe} {nh} {pf}")
+            esc = _proporcion(c["escaladas"], c["conv"], 16) if c else "-".rjust(16)
+            err = _proporcion(h["fallidas"], h["n"], 26) if h else "-".rjust(26)
+            print(f"  {d:%d/%m}   {esc} {err}")
 
-        print("\n  Si '% escalado' o '% con error' SUBEN mientras 'modelo' y el\n"
+        historia = _historial(cur, org, dias)
+        if historia:
+            print("\n  Que configuracion estuvo sirviendo:")
+            for x in historia:
+                razona = ("razonamiento OFF" if x["razona"] == "disabled"
+                          else "razonamiento por defecto (ON)")
+                ya = "" if x["dentro"] else "   (ya vigente al empezar la ventana)"
+                print(f"    {x['b']:%d/%m %H:%M}  v{x['v']:<4d} {razona}{ya}")
+            print("    El motor comprueba la version cada 15s: un turno de los "
+                  "15 segundos\n    siguientes a un cambio pudo correr todavia "
+                  "con la anterior.")
+
+        if any("?" in _versiones(f) for f in filas):
+            print("\n  Los turnos marcados '?' son anteriores al historial de "
+                  "config, que se\n  empezo a guardar el 08/09/2026. Lo de antes "
+                  "se sobreescribio: no se\n  puede saber con que configuracion "
+                  "corrieron, y no se adivina.")
+
+        print("\n  Si el escalado o los errores SUBEN mientras 'modelo' y el\n"
               "  costo bajan, la rapidez se esta pagando con calidad.")
 
 

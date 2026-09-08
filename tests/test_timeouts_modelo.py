@@ -72,11 +72,19 @@ class EspiaChat:
     def __init__(self) -> None:
         self.timeout = None
         self.llamado = False
+        self.resto: dict = {}
 
     def __call__(self, referencia_modelo, mensajes, tools=None,
-                 temperatura=0.1, timeout=None):
+                 temperatura=0.1, timeout=None, **resto):
+        # '**resto' no es pereza: sin el, agregarle un argumento nuevo a
+        # cliente.chat --paso el 07/09/2026 con 'razonamiento'-- hace que el
+        # espia tire TypeError, que la llamada figure como NO hecha, y que
+        # esta guarda acuse un timeout perdido que en realidad estaba bien.
+        # Un test que se rompe por algo que no es lo que mide gasta el tiempo
+        # de quien lo lee y, a la larga, se termina ignorando.
         self.llamado = True
         self.timeout = timeout
+        self.resto = resto
         return cliente.Respuesta(contenido="", llamadas=[])
 
 
@@ -142,6 +150,15 @@ comprobar(espia.llamado, "escalamiento.evaluar() llama al modelo")
 comprobar(espia.timeout == cliente.TIMEOUT_SECUNDARIO,
           f"escalamiento.evaluar() pide TIMEOUT_SECUNDARIO "
           f"(pidio {espia.timeout})")
+
+# El evaluador es UNA DE CADA DOS llamadas al modelo en un turno liviano. Si
+# deja de reenviar el modo de razonamiento del tenant, vuelve al default del
+# proveedor --que es razonar-- y se lleva la mitad de la mejora que se estaba
+# midiendo, sin que nada avise: la respuesta al cliente seguiria saliendo
+# rapida y el turno entero no.
+comprobar("razonamiento" in espia.resto,
+          f"escalamiento.evaluar() reenvia el modo de razonamiento del tenant "
+          f"(mando {sorted(espia.resto)})")
 
 # agendamiento.verificar() consulta el manual por RAG antes de llamar al
 # modelo, y sin eso corta antes de llegar. Se sustituye la recuperacion por
