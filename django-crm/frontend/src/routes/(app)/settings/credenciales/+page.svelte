@@ -31,6 +31,7 @@
 
   /** Cuál se está editando. Una por vez: pegar una clave es un acto deliberado. */
   let editando = $state('');
+  let agregando = $state(false);
   let busy = $state(false);
 
   const credenciales = $derived(data.credenciales ?? []);
@@ -67,14 +68,12 @@
       <NextAction
         label="Guardada"
         text={`'${form.guardado}' quedó cifrada. El asistente la usa en la próxima consulta, sin reiniciar nada.`}
-        tone="moss"
       />
     {/if}
     {#if form?.borrado}
       <NextAction
         label="Borrada"
         text={`'${form.borrado}' ya no está. Si existe una variable de entorno con ese nombre, el asistente vuelve a usarla.`}
-        tone="clay"
       />
     {/if}
 
@@ -82,7 +81,6 @@
       <NextAction
         label={faltan.length === 1 ? 'Falta una credencial' : `Faltan ${faltan.length} credenciales`}
         text={`El catálogo las pide y no están cargadas: ${faltan.map((c) => c.nombre).join(', ')}. Las herramientas que dependen de ellas van a fallar al usarse.`}
-        tone="clay"
       />
     {/if}
 
@@ -97,12 +95,12 @@
             <div>
               <code class="nombre">{c.nombre}</code>
               {#if c.cargado}
-                <Pill label="Cargada" tone="moss" />
+                <Pill tone="moss">Cargada</Pill>
               {:else}
-                <Pill label="Falta" tone="clay" />
+                <Pill tone="clay">Falta</Pill>
               {/if}
               {#if !c.declarado}
-                <Pill label="Sin usar" tone="slate" />
+                <Pill tone="slate">Sin usar</Pill>
               {/if}
             </div>
             <button
@@ -189,6 +187,65 @@
         </li>
       {/each}
     </ul>
+
+    <div class="agregar">
+      <button class="v2-btn" onclick={() => (agregando = !agregando)}>
+        {agregando ? 'Cancelar' : 'Agregar otra credencial'}
+      </button>
+      <p class="nota" style="margin-top:6px">
+        Para una clave que todavía no aparece arriba. Pasa cuando la
+        herramienta que la va a usar aún no está en el catálogo del asistente:
+        la credencial se puede cargar antes, y queda esperándola.
+      </p>
+
+      {#if agregando}
+        <form
+          method="POST"
+          action="?/guardar"
+          class="editor"
+          use:enhance={() => {
+            busy = true;
+            return async ({ update }) => {
+              await update();
+              busy = false;
+              agregando = false;
+            };
+          }}
+        >
+          <label class="v2-label" for="nueva-nombre">Nombre</label>
+          <input
+            id="nueva-nombre"
+            name="nombre"
+            class="v2-input"
+            placeholder="ej. IMPORTACION_API_TOKEN"
+            autocomplete="off"
+            spellcheck="false"
+            required
+          />
+          <label class="v2-label" for="nueva-valor">Valor</label>
+          <input
+            id="nueva-valor"
+            name="valor"
+            type="password"
+            class="v2-input"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="Pegá la clave acá"
+            required
+          />
+          <label class="v2-label" for="nueva-desc">Para qué es (opcional)</label>
+          <input id="nueva-desc" name="descripcion" class="v2-input" />
+          <p class="aviso">
+            El nombre tiene que coincidir exactamente con el `auth_ref` que
+            declara la herramienta. Si no coincide, la herramienta va a seguir
+            sin encontrarla.
+          </p>
+          <div class="acciones">
+            <button class="v2-btn v2-btn-primary" disabled={busy}>Guardar</button>
+          </div>
+        </form>
+      {/if}
+    </div>
 
     {#if huerfanas.length}
       <p class="nota">
@@ -279,5 +336,13 @@
   }
   .nota {
     margin-top: 16px;
+  }
+  .agregar {
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid var(--v2-rule, #e4e7e9);
+  }
+  .agregar .nota {
+    margin-top: 6px;
   }
 </style>
