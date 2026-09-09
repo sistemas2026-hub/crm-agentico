@@ -2837,6 +2837,11 @@ herramientas:
     metodo: POST
     auth_ref: WISPHUB_API_KEY
     auth_esquema: Api-Key
+    # Los manda el backend por /interno/herramienta/, no el modelo.
+    # Sin esta linea se descartan en silencio y la llamada muere
+    # armando la URL -- asi fue como la cancelacion de una solicitud
+    # nunca cerro su ticket (09/09/2026).
+    argumentos_sobrescribibles: [id_ticket, respuesta]
     argumentos_fijos:
       ticket-estado: "2"                          # En Progreso
       ticket-prioridad: "2"                       # Normal
@@ -2861,6 +2866,11 @@ herramientas:
     # ninguna herramienta se puede llamar desde un servicio salvo que lo
     # declare (08/09/2026).
     invocable_por_servicio: true
+    # Los manda el backend por /interno/herramienta/, no el modelo.
+    # Sin esta linea se descartan en silencio y la llamada muere
+    # armando la URL -- asi fue como la cancelacion de una solicitud
+    # nunca cerro su ticket (09/09/2026).
+    argumentos_sobrescribibles: [id_ticket, respuesta]
     argumentos_fijos:
       ticket-estado: "4"                          # Cerrado
       ticket-prioridad: "2"                       # Normal
@@ -3921,6 +3931,54 @@ herramientas:
   # (departamento Ventas, origen "Portal Cliente", prioridad Normal): quien
   # filtra la bandeja de WispHub por cualquiera de esos tiene que seguir
   # encontrando los nuevos igual que los viejos.
+  # ADJUNTAR LA ORDEN DE INSTALACION AL TICKET
+  #
+  # Todo lo de abajo salio de probarlo contra el ticket 92151 el 09/09/2026,
+  # no de la documentacion:
+  #
+  #   - El campo se llama 'archivo_ticket' y es 'file upload'. NO aparece en
+  #     GET /api/tickets/ (el listado): solo en el detalle. Mirando el listado
+  #     se concluiria que los adjuntos no existen.
+  #   - Va por PATCH sobre el ticket, no por el endpoint de respuesta:
+  #     OPTIONS sobre /respuesta/ devuelve 500 y no dice nada.
+  #   - CON EL ARCHIVO SOLO, EL ENDPOINT DEVUELVE 500. Hace falta mandar
+  #     ademas otro campo cualquiera. Medido: 'archivo_ticket' solo -> 500 en
+  #     PDF y en octet-stream; 'archivo_ticket' + otro campo -> 200.
+  #   - Ese campo acompañante NO tiene que existir en el ticket. Se manda
+  #     '_adjunto' -- un nombre inventado-- justamente para no pisar un dato
+  #     real: probado que con el la prioridad y el estado quedan intactos.
+  #
+  # Lo que se sube es la ORDEN DE INSTALACION, nunca el expediente. Lo que
+  # queda en 'archivo_ticket' es publico: se descarga de
+  # avisos.wisphub.io/media/ sin ninguna credencial (probado con un GET
+  # pelado). El expediente trae cedula, recibo, foto y firma, y se sirve por
+  # una vista que exige sesion. Ver solicitudes/pdf.py::armar_orden_instalacion.
+  - nombre: adjuntar_orden_ticket
+    tipo: http
+    descripcion: >
+      Sube la orden de instalacion como adjunto de un ticket ya creado. NO la
+      llama el modelo: la llama el backend despues de crear el ticket.
+    solo_lectura: false
+    requiere_confirmacion: true
+    invocable_por_servicio: true
+    roles_permitidos: [administracion]
+    base_url: https://api.wisphub.io
+    endpoint: /api/tickets/{id_ticket}/
+    metodo: PATCH
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    auth_header: Authorization
+    multipart: true
+    # El campo acompañante sin el cual el endpoint devuelve 500. Inventado a
+    # proposito: WispHub lo ignora y asi no se pisa ningun dato del ticket.
+    argumentos_fijos:
+      _adjunto: "1"
+    argumentos_archivo: [archivo_ticket]
+    # 'id_ticket' resuelve el marcador de la URL y lo manda el backend, no el
+    # modelo: va aca por el mismo motivo que en cerrar_ticket_operativo.
+    argumentos_sobrescribibles: [id_ticket, archivo_ticket]
+    filtros_verificados: {}
+
   - nombre: crear_ticket_instalacion
     tipo: http
     descripcion: >

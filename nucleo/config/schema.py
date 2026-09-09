@@ -1229,6 +1229,23 @@ class Herramienta(Base):
     # (Ojo al LEER esos mismos campos: vuelven como MM/DD/AAAA. Escribe en un
     # formato y lee en otro, ver la skill wisphub-api.)
     argumentos_calculados: dict[str, str] = Field(default_factory=dict)
+    # Argumentos que viajan como ARCHIVO de verdad y no como campo de texto.
+    # Solo tiene sentido con 'multipart: true'.
+    #
+    # El valor de ese argumento llega como {"nombre": "orden.pdf",
+    # "base64": "..."} -- base64 porque el puente entre servicios es JSON
+    # (/interno/herramienta/<nombre>) y ahi no cabe un binario. El motor lo
+    # decodifica y lo manda como parte de archivo.
+    #
+    # NUNCA lo propone el modelo: no esta en 'filtros_verificados', asi que
+    # solo puede llegar por 'sobrescribir' -- es decir, desde codigo. Un
+    # modelo que pudiera adjuntar un archivo arbitrario a un sistema de
+    # terceros seria otra cosa completamente.
+    #
+    # Nace del adjunto al ticket de instalacion (09/09/2026): el tecnico
+    # necesita la orden en el celular, y el token de WispHub vive en el motor,
+    # no en el backend que genera el PDF.
+    argumentos_archivo: list[str] = Field(default_factory=list)
     # Cuales de esos fijos puede decidir el CODIGO en el momento (nunca el
     # modelo: esto no viaja por tool-calling).
     #
@@ -1403,6 +1420,25 @@ class Herramienta(Base):
     def _coherencia(self):
         if self.tipo in ("http", "agregado") and not self.endpoint:
             raise ValueError(f"'{self.nombre}': tipo {self.tipo} exige 'endpoint'")
+
+        # Un archivo viaja por 'sobrescribir', y ese camino tiene lista blanca
+        # ('argumentos_sobrescribibles', ver _resolver_argumentos). Declarar
+        # uno sin el otro no da error en ningun lado: el adjunto simplemente
+        # no se manda, el ticket sale sin archivo y nadie se entera hasta
+        # abrirlo en el ISP. Se convierte en un fallo al cargar la config.
+        faltan = [a for a in self.argumentos_archivo
+                  if a not in self.argumentos_sobrescribibles]
+        if faltan:
+            raise ValueError(
+                f"'{self.nombre}': {faltan} esta en 'argumentos_archivo' pero "
+                f"no en 'argumentos_sobrescribibles'. Sin eso el archivo se "
+                f"descarta en silencio y la llamada sale sin adjunto.")
+
+        if self.argumentos_archivo and not self.multipart:
+            raise ValueError(
+                f"'{self.nombre}': declara 'argumentos_archivo' sin "
+                f"'multipart: true'. Un archivo solo puede viajar en un cuerpo "
+                f"multipart -- sin eso se mandaria el diccionario como texto.")
 
         # La gramatica cerrada de 'argumentos_calculados'. Se valida al cargar
         # y no al llamar: una expresion mal escrita tiene que reventar cuando

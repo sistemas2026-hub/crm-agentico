@@ -185,7 +185,18 @@ def ejecutar(herramienta, argumentos: dict, tenant: str | None = None,
             # con (None, valor) se manda cada campo como parte de formulario
             # comun, sin ser un archivo real. Ver el campo 'multipart' en
             # nucleo/config/schema.py:Herramienta para el motivo.
-            archivos = {c: (None, str(v)) for c, v in args.items()}
+            archivos = {}
+            for c, v in args.items():
+                if c in herramienta.argumentos_archivo and isinstance(v, dict):
+                    # Una parte de ARCHIVO de verdad: nombre, bytes y tipo.
+                    # Llega en base64 porque el puente entre servicios es JSON
+                    # -- ver 'argumentos_archivo' en schema.py.
+                    import base64
+                    archivos[c] = (v.get("nombre") or c,
+                                   base64.b64decode(v.get("base64") or ""),
+                                   v.get("tipo") or "application/octet-stream")
+                else:
+                    archivos[c] = (None, str(v))
             return requests.request(herramienta.metodo, url, headers=headers,
                                     files=archivos, timeout=TIMEOUT_SEGUNDOS)
         return requests.request(herramienta.metodo, url, headers=headers,

@@ -20,6 +20,7 @@ herramientas declaradas con 'invocable_por_servicio'.
 from __future__ import annotations
 
 import os
+import uuid
 
 from django.conf import settings
 from django.core.mail import EmailMessage
@@ -141,6 +142,60 @@ def _crear_ticket_wisphub(s) -> str:
     return ""
 
 
+def _adjuntar_orden(s) -> None:
+    """Sube la ORDEN DE INSTALACION al ticket. Nunca el expediente.
+
+    Lo que queda en 'archivo_ticket' es publico: medido el 09/09/2026, se
+    descarga de avisos.wisphub.io/media/ con un GET sin credenciales. El
+    expediente trae documento de identidad, recibo, foto del solicitante y
+    firma -- por eso se sirve desde ExpedienteView, que exige sesion, y por
+    eso mismo no se publica por /media/.
+
+    Asi que al ticket va la hoja operativa (a donde ir, con quien, que plan) y
+    el LINK al expediente. Quien tenga que ver la cedula hace clic y el CRM le
+    pide sesion, como debe ser.
+
+    El PDF viaja en base64 porque el puente con el motor es JSON. El motor lo
+    decodifica y lo manda como archivo -- ver 'argumentos_archivo' en
+    nucleo/config/schema.py.
+    """
+    import base64
+    import requests
+
+    from common.links import frontend_url
+    from solicitudes.pdf import armar_orden_instalacion
+
+    pdf = armar_orden_instalacion(
+        s, url_expediente=frontend_url(f"/instalaciones/{s.id}"))
+
+    base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
+    tenant = os.environ.get("MOTOR_TENANT", "") or "rapilink"
+    herramienta = (os.environ.get("SOLICITUDES_HERRAMIENTA_ADJUNTAR", "")
+                   or "adjuntar_orden_ticket")
+
+    cabeceras = {"Content-Type": "application/json"}
+    token = os.environ.get("MOTOR_SERVICE_TOKEN")
+    if token:
+        cabeceras["X-Servicio-Token"] = token
+
+    # El nombre del archivo es ALEATORIO a proposito. WispHub lo conserva tal
+    # cual (probado) y lo publica en una URL sin autenticacion: con un nombre
+    # predecible -- 'orden-<id>.pdf'-- cualquiera podria enumerarlas. No es
+    # control de acceso, pero sube el costo de encontrarlas de cero a
+    # imposible. Lo que ademas protege es que el contenido no lleve documentos.
+    nombre = f"orden-instalacion-{uuid.uuid4().hex}.pdf"
+
+    r = requests.post(
+        f"{base}/interno/herramienta/{herramienta}",
+        params={"tenant": tenant},
+        json={"id_ticket": s.ticket_wisphub,
+              "archivo_ticket": {"nombre": nombre,
+                                 "tipo": "application/pdf",
+                                 "base64": base64.b64encode(pdf).decode()}},
+        headers=cabeceras, timeout=60)
+    r.raise_for_status()
+
+
 def entregar(s) -> None:
     """Correo y ticket. Nunca lanza: la solicitud ya esta a salvo."""
     fallos = []
@@ -155,6 +210,17 @@ def entregar(s) -> None:
         s.ticket_wisphub = _crear_ticket_wisphub(s)
     except Exception as e:                          # noqa: BLE001
         fallos.append(f"ticket: {type(e).__name__}: {e}")
+
+    # La orden de instalacion va DESPUES y en su propio try: si el adjunto
+    # falla, el ticket ya existe y el trabajo puede salir igual -- la orden es
+    # una comodidad para el tecnico, no la solicitud. Mismo criterio que el
+    # resto del modulo: lo que se pudo hacer no se deshace porque un paso
+    # posterior falle.
+    if s.ticket_wisphub:
+        try:
+            _adjuntar_orden(s)
+        except Exception as e:                      # noqa: BLE001
+            fallos.append(f"orden adjunta: {type(e).__name__}: {e}")
 
     if fallos:
         # Se ACUMULA con lo que ya hubiera (puede venir un fallo del PDF desde

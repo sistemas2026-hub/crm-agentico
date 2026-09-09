@@ -174,3 +174,53 @@ def armar_expediente(solicitud, imagenes: dict, firma: bytes) -> ContentFile:
     salida = BytesIO()
     HTML(string=html).write_pdf(salida, font_config=FontConfiguration())
     return ContentFile(salida.getvalue())
+
+
+def armar_orden_instalacion(solicitud, url_expediente: str = "") -> bytes:
+    """
+    La hoja operativa que se adjunta al ticket del ISP. NO es el expediente.
+
+    POR QUE SON DOS PDF Y NO UNO
+    Medido el 09/09/2026 contra WispHub: lo que se sube a 'archivo_ticket'
+    queda en https://avisos.wisphub.io/media/... y se descarga SIN NINGUNA
+    credencial -- se probo con un GET pelado y devolvio el PDF entero.
+
+    El expediente trae foto de la cedula, recibo de servicios, foto del
+    solicitante y firma. Eso no puede quedar en una URL abierta: se sirve por
+    ExpedienteView, que exige sesion y organizacion, y por eso mismo el
+    08/09/2026 se decidio no publicarlo por /media/. Subirlo al ticket seria
+    deshacer esa decision por otro lado.
+
+    Asi que al ticket va esto: a donde ir, con quien y que plan. Sin numero de
+    documento, sin imagenes, sin firma, sin correo. Lo que un tecnico necesita
+    en la mano, y que si se filtra no filtra la identidad de nadie.
+
+    'url_expediente' es el link a la vista autenticada -- quien tenga que ver
+    la cedula hace clic y el CRM le pide sesion.
+
+    Devuelve bytes y no un ContentFile: esto no se guarda en el modelo, se
+    manda y se olvida. Se rearma cuando haga falta.
+    """
+    from invoices.pdf import check_weasyprint
+
+    check_weasyprint()
+    from weasyprint import HTML
+    from weasyprint.text.fonts import FontConfiguration
+
+    contexto = {
+        "s": solicitud,
+        "generado_en": timezone.localtime(),
+        "radicado": _radicado(solicitud),
+        "empresa": getattr(getattr(solicitud, "org", None), "name", "") or "",
+        "logo": _logo_de(getattr(solicitud, "org", None)),
+        "mapa": (
+            f"https://www.google.com/maps?q={solicitud.gps_lat},{solicitud.gps_lng}"
+            if solicitud.tiene_gps else ""
+        ),
+        "url_expediente": url_expediente,
+    }
+    html = render_to_string("solicitudes/orden_instalacion.html", contexto)
+
+    salida = BytesIO()
+    HTML(string=html).write_pdf(salida, font_config=FontConfiguration())
+    return salida.getvalue()

@@ -1257,7 +1257,28 @@ def ejecutar_para_servicio(config, herramienta, argumentos_modelo: dict) -> dict
     un servicio interno no tiene mas permisos para inventar parametros que el
     modelo, y los filtros no verificados se descartan igual.
     """
-    argumentos = _resolver_argumentos(herramienta, None, argumentos_modelo or {},
+    # LO QUE MANDA OTRO SERVICIO VA POR 'sobrescribir', NO POR LOS FILTROS.
+    #
+    # 'filtros_verificados' es el camino de lo que el MODELO propone, y esta
+    # cerrado a proposito. Un servicio interno manda otra clase de cosa: el id
+    # del ticket que acaba de crear, el texto de una respuesta, un archivo --
+    # datos que no salen de una conversacion y que por eso no estan ahi.
+    #
+    # Hasta el 09/09/2026 esto no existia y el efecto era invisible: los
+    # argumentos se descartaban en silencio y la llamada moria armando la URL
+    # ("endpoint sin resolver"). Asi es como la cancelacion de una solicitud
+    # NUNCA cerro su ticket de WispHub -- se veia como un fallo de red en
+    # 'fallo_integracion', y el ticket quedaba vivo con el equipo saliendo a
+    # instalar algo ya cancelado.
+    #
+    # 'argumentos_sobrescribibles' sigue siendo la lista blanca: un llamador
+    # no puede cambiar algo que el tenant quiso fijo sin haberlo declarado.
+    entrantes = dict(argumentos_modelo or {})
+    del_codigo = {c: entrantes.pop(c)
+                  for c in herramienta.argumentos_sobrescribibles
+                  if c in entrantes}
+    argumentos = _resolver_argumentos(herramienta, None, entrantes,
+                                      sobrescribir=del_codigo or None,
                                       variables_tenant=config.variables_tenant)
 
     # Consultas internas que NO dependen de una sesion ni tocan datos de un
