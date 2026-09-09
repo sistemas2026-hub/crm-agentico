@@ -2,9 +2,22 @@
   /**
    * Bandeja de solicitudes de instalación.
    *
-   * Quien abre esta pantalla tiene que responder UNA pregunta por solicitud:
-   * ¿el servicio llega a esa dirección? Todo lo que está en la tarjeta existe
-   * para contestarla — la dirección, el mapa, el expediente — y nada más.
+   * Quien abre esta pantalla en 'Recibidas' tiene que responder UNA pregunta
+   * por solicitud: ¿el servicio llega a esa dirección? Por eso la tarjeta
+   * muestra primero la dirección, el mapa y el expediente, y nada más.
+   *
+   * Pero las otras pestañas son consulta, no decisión, y ahí hace falta otra
+   * cosa: por qué se canceló, quién la aprobó, si el ticket del ISP salió.
+   * Eso vive en 'Ver detalle', cerrado por defecto — volcarle veinte campos a
+   * cada tarjeta la volvería ilegible justo para lo que se usa todos los días.
+   *
+   * Dos excepciones que van SIEMPRE visibles, sin un clic de por medio:
+   * el motivo de cancelación (es LA razón por la que alguien abre esa
+   * tarjeta) y lo que quedó pendiente con un sistema externo. Ese segundo se
+   * guardaba desde siempre y no se mostraba en ninguna parte: el 09/09/2026
+   * una cancelación dejó el ticket de WispHub abierto, el motivo estaba
+   * anotado y el fallo también, y desde la pantalla parecía que el sistema no
+   * había hecho nada.
    *
    * Las coordenadas se muestran con su precisión a la vista: un GPS de ±50 km
    * (pasa cuando el formulario se abre desde una computadora) no sirve para
@@ -30,6 +43,20 @@
   let abierta = $state('');
   let nota = $state('');
   let enviando = $state('');
+  /**
+   * Que tarjetas tienen el detalle desplegado.
+   *
+   * Cerrado por defecto y no abierto: la bandeja existe para decidir de un
+   * vistazo, y volcarle veinte campos a cada tarjeta la vuelve ilegible justo
+   * para lo que se usa todos los dias. El detalle es para cuando alguien
+   * pregunta algo puntual -- por que se cancelo, si el ticket salio.
+   */
+  let detalles = $state(new Set());
+  const alternarDetalle = (id) => {
+    const proximo = new Set(detalles);
+    proximo.has(id) ? proximo.delete(id) : proximo.add(id);
+    detalles = proximo;
+  };
 
   // Arriba de este valor, la ubicación no alcanza para decidir factibilidad:
   // son cuadras de diferencia. No se bloquea nada — se avisa, que es lo que
@@ -134,8 +161,93 @@
         {/if}
       </div>
 
+      <!-- EL MOTIVO DE CANCELACION VA SIEMPRE VISIBLE, no dentro del
+           detalle: en la pestaña 'Canceladas' es LA razon por la que alguien
+           abre esa tarjeta. Esconderlo detras de un clic seria pedirle un
+           clic para lo unico que vino a ver. -->
+      {#if s.estado === 'cancelada' && s.motivo_cancelacion}
+        <div class="motivo">
+          <div class="motivo-rotulo">Motivo de la cancelación, en palabras del cliente</div>
+          <p class="motivo-texto">“{s.motivo_cancelacion}”</p>
+          {#if s.cancelada_en}<div class="motivo-cuando">Cancelada el {fecha(s.cancelada_en)}</div>{/if}
+        </div>
+      {/if}
+
+      {#if s.nota_revision}
+        <div class="motivo revision">
+          <div class="motivo-rotulo">
+            Nota de quien revisó{s.revisada_por ? ` — ${s.revisada_por}` : ''}
+          </div>
+          <p class="motivo-texto">{s.nota_revision}</p>
+        </div>
+      {/if}
+
       {#if s.fallo_integracion}
-        <p class="fallo"><AlertTriangle size={14} /> {s.fallo_integracion}</p>
+        <!-- Esto es lo que quedo a medias con un sistema externo (el ticket
+             del ISP, el correo). Antes se guardaba y no se mostraba en
+             ninguna parte: el 09/09/2026 una cancelacion dejo el ticket
+             abierto y desde la pantalla parecia que no habia pasado nada. -->
+        <p class="fallo">
+          <AlertTriangle size={14} />
+          <span><strong>Quedó pendiente con un sistema externo:</strong> {s.fallo_integracion}</span>
+        </p>
+      {/if}
+
+      <button type="button" class="ver-detalle" onclick={() => alternarDetalle(s.id)}
+              aria-expanded={detalles.has(s.id)}>
+        {detalles.has(s.id) ? 'Ocultar detalle' : 'Ver detalle'}
+      </button>
+
+      {#if detalles.has(s.id)}
+        <div class="detalle">
+          <div class="grupo">
+            <div class="grupo-titulo">Estado del trámite</div>
+            <dl>
+              <dt>Estado</dt><dd>{s.estado || 'enviada'}</dd>
+              <dt>Enviada</dt><dd>{fecha(s.enviada_en)}</dd>
+              {#if s.revisada_en}<dt>Revisada</dt><dd>{fecha(s.revisada_en)}</dd>{/if}
+              {#if s.cancelada_en}<dt>Cancelada</dt><dd>{fecha(s.cancelada_en)}</dd>{/if}
+              <dt>Ticket del ISP</dt>
+              <dd>{s.ticket_wisphub || 'sin ticket'}</dd>
+              <dt>Correo al equipo</dt>
+              <dd>{s.correo_enviado_en ? fecha(s.correo_enviado_en) : 'no se envió'}</dd>
+            </dl>
+          </div>
+
+          <div class="grupo">
+            <div class="grupo-titulo">Lo que contó el cliente</div>
+            <dl>
+              {#if s.tipo_solicitud}<dt>Tipo</dt><dd>{s.tipo_solicitud}</dd>{/if}
+              {#if s.edad}<dt>Edad</dt><dd>{s.edad}</dd>{/if}
+              {#if s.fecha_corte}<dt>Fecha de corte</dt><dd>{s.fecha_corte}</dd>{/if}
+              {#if s.como_se_entero}<dt>Cómo nos conoció</dt><dd>{s.como_se_entero}</dd>{/if}
+              {#if s.gps}<dt>Coordenadas</dt><dd>{s.gps.lat}, {s.gps.lng}</dd>{/if}
+            </dl>
+          </div>
+
+          <!-- Las autorizaciones vivian solo dentro del expediente en PDF:
+               para comprobar que estaban habia que abrir el documento entero,
+               con la cedula adentro. Aca se ven sin exponer nada de eso. -->
+          <div class="grupo">
+            <div class="grupo-titulo">Autorizaciones</div>
+            <dl>
+              <dt>Habeas data</dt>
+              <dd class:si={s.autoriza_habeas_data}>
+                {s.autoriza_habeas_data ? 'Autorizó' : 'No autorizó'}
+              </dd>
+              <dt>Centrales de riesgo</dt>
+              <dd class:si={s.autoriza_centrales_riesgo}>
+                {s.autoriza_centrales_riesgo ? 'Autorizó' : 'No autorizó'}
+              </dd>
+              {#if s.autorizaciones_en}
+                <dt>Firmadas</dt><dd>{fecha(s.autorizaciones_en)}</dd>
+              {/if}
+              {#if s.ip_autorizaciones}
+                <dt>Desde la IP</dt><dd>{s.ip_autorizaciones}</dd>
+              {/if}
+            </dl>
+          </div>
+        </div>
       {/if}
 
       {#if abierta === s.id}
@@ -219,7 +331,45 @@
   .chip.tenue { color: #7b8794; }
   .chip.dudoso { background: #fdf6e3; border-color: #e6d9ae; color: #6b5a2b; }
 
-  .fallo { display: flex; gap: 7px; align-items: center; margin: 0; font-size: .83rem; color: #8a2a20; }
+  .fallo { display: flex; gap: 7px; align-items: flex-start; margin: 0; font-size: .83rem; color: #8a2a20; }
+
+  /* El motivo de cancelacion se lee como una cita, porque lo es: son las
+     palabras del cliente sin resumir ni corregir (ver CancelarSolicitudView). */
+  .motivo {
+    border-left: 3px solid #b45309; background: #fffbeb;
+    border-radius: 0 8px 8px 0; padding: 9px 12px;
+  }
+  .motivo.revision { border-left-color: #1668c1; background: #f2f7fd; }
+  .motivo-rotulo {
+    font-size: .72rem; text-transform: uppercase; letter-spacing: .05em;
+    color: #6b7280; margin-bottom: 4px;
+  }
+  .motivo-texto { margin: 0; font-size: .93rem; line-height: 1.45; color: #35404b; }
+  .motivo-cuando { margin-top: 5px; font-size: .78rem; color: #6b7280; }
+
+  .ver-detalle {
+    align-self: flex-start; font: inherit; font-size: .82rem; font-weight: 600;
+    background: none; border: 0; padding: 2px 0; cursor: pointer;
+    color: #1668c1; text-decoration: underline;
+  }
+  .detalle {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 14px; padding: 12px; border: 1px solid #e3e8ee; border-radius: 8px;
+    background: #fbfcfd;
+  }
+  .grupo-titulo {
+    font-size: .72rem; text-transform: uppercase; letter-spacing: .05em;
+    color: #6b7280; margin-bottom: 6px;
+  }
+  /* Rotulo y valor en dos columnas: leer 'Ticket del ISP  92151' de un
+     vistazo es lo que hace util esta tabla. */
+  .detalle dl {
+    margin: 0; display: grid; grid-template-columns: auto 1fr;
+    gap: 3px 10px; font-size: .83rem;
+  }
+  .detalle dt { color: #6b7280; }
+  .detalle dd { margin: 0; color: #23303c; font-weight: 600; word-break: break-word; }
+  .detalle dd.si { color: #1f7a4d; }
 
   .decidir, .cancelar {
     align-self: flex-start; font: inherit; font-weight: 600; background: #fff;

@@ -165,7 +165,53 @@ class BandejaView(APIView):
             "enviada_en": s.enviada_en.isoformat() if s.enviada_en else None,
             "ticket_wisphub": s.ticket_wisphub,
             "fallo_integracion": s.fallo_integracion,
-        } for s in qs.order_by("-enviada_en")[:200]]})
+
+            # EL DETALLE, PARA CUALQUIER ESTADO -- no solo para decidir.
+            #
+            # La bandeja nacio para contestar una pregunta ("¿apruebo esto?") y
+            # mostraba solo lo que hacia falta para eso. Pero una solicitud ya
+            # resuelta tambien hay que poder mirarla: por que se cancelo, quien
+            # la aprobo, si el ticket del ISP salio o no.
+            #
+            # Lo que motivo esto (09/09/2026): una cancelacion dejo el ticket de
+            # WispHub abierto y desde la pantalla no habia forma de saberlo. El
+            # motivo estaba guardado y 'fallo_integracion' tambien -- ninguno de
+            # los dos se veia, asi que parecia que el sistema "no habia hecho
+            # nada" cuando en realidad habia hecho casi todo y anotado lo que
+            # fallo.
+            "motivo_cancelacion": s.motivo_cancelacion,
+            "cancelada_en": s.cancelada_en.isoformat() if s.cancelada_en else None,
+            "nota_revision": s.nota_revision,
+            "revisada_en": s.revisada_en.isoformat() if s.revisada_en else None,
+            # El nombre de quien decidio, no su id: la pantalla lo muestra y un
+            # id no le dice nada a nadie.
+            "revisada_por": (getattr(s.revisada_por, "user", None)
+                             and s.revisada_por.user.get_full_name()
+                             or getattr(getattr(s.revisada_por, "user", None),
+                                        "email", "") or ""),
+            "correo_enviado_en": (s.correo_enviado_en.isoformat()
+                                  if s.correo_enviado_en else None),
+
+            # Lo que el prospecto conto y hoy no se veia en ninguna parte.
+            # 'como_se_entero' y 'tipo_solicitud' no sirven para decidir una
+            # instalacion, pero si para entender el caso cuando alguien lo
+            # revisa despues o llama al cliente.
+            "edad": s.edad,
+            "tipo_solicitud": s.tipo_solicitud,
+            "como_se_entero": s.como_se_entero,
+            "fecha_corte": s.fecha_corte,
+
+            # Las autorizaciones, con su fecha e IP. Es lo que respalda el
+            # tratamiento de datos (Ley 1581) y hasta ahora solo existia dentro
+            # del expediente en PDF: para comprobar que estan, habia que abrir
+            # el documento entero con la cedula adentro.
+            "autoriza_habeas_data": s.autoriza_habeas_data,
+            "autoriza_centrales_riesgo": s.autoriza_centrales_riesgo,
+            "autorizaciones_en": (s.autorizaciones_en.isoformat()
+                                  if s.autorizaciones_en else None),
+            "ip_autorizaciones": s.ip_autorizaciones,
+        } for s in qs.select_related("revisada_por__user")
+                     .order_by("-enviada_en")[:200]]})
 
 
 class DecidirView(APIView):
