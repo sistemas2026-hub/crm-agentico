@@ -24,6 +24,32 @@
 #  lo que DEBERIA haber pasado. Asi el set crece con las fallas reales en vez
 #  de con casos imaginados, y cada bug arreglado queda con su guarda.
 #
+#  DOS ERRORES QUE YA SE COMETIERON DOS VECES CADA UNO -- leer antes de
+#  escribir un caso, porque los dos dejan el caso en VERDE con el sintoma vivo
+#  y eso es peor que no tener el caso:
+#
+#  1. COPIAR LA FRASE QUE FUNCIONA, NO LA QUE FALLA.
+#     El caso #30 cubria "pedir un servicio que no se ofrece" con "para
+#     solicitar un servicio" -- que funciona. Se agrego otro con "quiero
+#     contratar telefonia fija" -- que tambien funciona. El 09/09/2026 fallo
+#     en produccion con "para instalar un servicio de telefonia", que no
+#     estaba en ninguno. Tres casos verdes sobre el mismo escenario y el
+#     sintoma vivo.
+#     -> Copiar TEXTUAL el mensaje que fallo, del simulador o de
+#        asistente.messages. No una version arreglada ni parecida. Si el
+#        escenario ya tiene un caso, este se agrega igual: una frase que
+#        funciona no cubre a la familia.
+#
+#  2. AFIRMAR QUE ALGO OCURRIO, NO QUE SIRVIO.
+#     El caso de arriba afirmaba 'deriva_a: ventas' y 'usa: [derivar_a_area]'.
+#     Los dos se cumplian -- y el cliente igual recibia "dejame pasarte con el
+#     area de ventas", escrito POR ventas. Se verificaba que derivara, no que
+#     contestara.
+#     -> Preguntarse siempre: "si el agente hace EXACTAMENTE esto y aun asi el
+#        cliente se queda igual de mal, el caso pasa?". Si la respuesta es si,
+#        falta una afirmacion -- casi siempre un 'responde_sin' con las frases
+#        medidas.
+#
 #  OJO: esto llama a las APIs de verdad (WispHub, SmartOLT) y al modelo, con
 #  su costo y su latencia. No es una prueba unitaria: es la que se corre antes
 #  de dar por bueno un cambio de prompt, de catalogo o de modelo.
