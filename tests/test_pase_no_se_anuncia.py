@@ -211,8 +211,23 @@ afirmar("reintentos_area_sin_consultar < 2" in fuente_responder,
         "(09/09/2026); con dos, 5 de 5")
 afirmar("_promete_en_vez_de_responder(limpio, nombres_area_conf)"
         in fuente_responder,
-        "y solo si lo que contesto era una promesa -- un area que contesta "
-        "bien de una, o que no necesita consultar, no paga nada")
+        "cuando contesto una promesa -- un area que contesta bien de una no "
+        "paga nada")
+
+# LOS DOS CAMINOS, y no solo el primero. El 09/09/2026 se arreglo unicamente
+# "contesto una promesa", y esa misma tarde el humo cazo el otro: el area no
+# contesto NADA, se fue directo a la redaccion final --que corre sin
+# catalogo-- y los tres intentos produjeron la misma promesa.
+#
+# El sintoma en el log era la AUSENCIA de la linea de reintento: no fallaba,
+# no se evaluaba. Por eso se afirma que el reintento se pide desde DOS sitios
+# y con una sola funcion: dos copias se arreglan una sola vez.
+afirmar(fuente_responder.count("_pedir_que_consulte(") >= 3,
+        "el reintento se pide desde los DOS caminos (contesto una promesa, y "
+        "no contesto nada), no solo del primero")
+afirmar(fuente_responder.count("def _pedir_que_consulte") == 1,
+        "y con UNA sola implementacion -- dos copias se arreglan una vez sola "
+        "y la otra se queda vieja, que es justo lo que paso")
 
 
 print("\n== 5. se REHACE, no se bloquea ==")

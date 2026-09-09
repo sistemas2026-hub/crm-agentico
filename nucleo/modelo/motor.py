@@ -2237,6 +2237,37 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
         _sin_tildes(getattr(r, "area", "") or "") for r in config.roles.values()}
     nombres_area_conf = {a for a in _areas_conf if a}
     iteraciones = 0
+
+    def _pedir_que_consulte(motivo: str) -> bool:
+        """
+        Otra vuelta del bucle para el area que acaba de entrar por derivacion
+        y no consulto nada. Devuelve si se concedio.
+
+        Vive en una funcion y no repetido en los dos sitios donde hace falta
+        porque son DOS caminos distintos al mismo problema -- el area contesta
+        una promesa, o no contesta nada-- y el 09/09/2026 arregle solo el
+        primero. El humo cazo el segundo esa misma tarde: sin la linea de
+        '[modelo] entro por derivacion...' en el log, se ve que el reintento
+        ni siquiera se evaluo.
+        """
+        nonlocal reintentos_area_sin_consultar, iteraciones
+        if not (derivado_en_este_turno
+                and len(registro) == registro_al_derivar
+                and reintentos_area_sin_consultar < 2):
+            return False
+        reintentos_area_sin_consultar += 1
+        iteraciones -= 1              # no se le cobra al presupuesto del turno
+        print(f"[modelo] '{nombre_rol}' entro por derivacion y {motivo} "
+              f"({reintentos_area_sin_consultar}/2): se le da otra vuelta "
+              f"con su catalogo")
+        historial.append({"role": "system", "content":
+            f"El area que atiende sos VOS y ya es tu turno: el cliente no va a "
+            f"escribir de nuevo, asi que no anuncies que lo vas a pasar con "
+            f"nadie. Todavia no consultaste nada. USA AHORA tus herramientas "
+            f"para buscar lo que te falta y despues contesta. Disponibles: "
+            f"{', '.join(h.nombre for h in herramientas)}."})
+        return True
+
     # Los reintentos por una llamada mal escrita se cuentan APARTE (ver mas
     # abajo): son un error de formato del modelo, no trabajo hecho, y
     # cobrarselos al presupuesto de iteraciones deja al turno sin margen para
@@ -2307,24 +2338,9 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 # informacion nueva. Una sola vez, y solo si contesto una
                 # promesa sin haber consultado nada: un area que contesta bien
                 # de una, o que de verdad no necesita consultar, no paga nada.
-                if (derivado_en_este_turno
-                        and len(registro) == registro_al_derivar
-                        and reintentos_area_sin_consultar < 2
-                        and _promete_en_vez_de_responder(limpio, nombres_area_conf)):
-                    reintentos_area_sin_consultar += 1
-                    iteraciones -= 1          # no se le cobra al presupuesto
-                    disponibles = ", ".join(h.nombre for h in herramientas)
-                    print(f"[modelo] '{nombre_rol}' entro por derivacion y "
-                          f"contesto sin consultar nada "
-                          f"({reintentos_area_sin_consultar}/2): se le da otra "
-                          f"vuelta con su catalogo")
-                    historial.append({"role": "system", "content":
-                        f"Estas anunciando que vas a pasar la conversacion, "
-                        f"pero el area que atiende sos VOS y ya es tu turno: "
-                        f"el cliente no va a escribir de nuevo. Todavia no "
-                        f"consultaste nada. USA AHORA tus herramientas para "
-                        f"buscar lo que te falta y despues contesta. "
-                        f"Disponibles: {disponibles}."})
+                if (_promete_en_vez_de_responder(limpio, nombres_area_conf)
+                        and _pedir_que_consulte("contesto una promesa sin "
+                                                "consultar nada")):
                     continue
                 break  # ya no pide mas herramientas: pasa a redaccion final
             if _RE_FUGA_TOOL_CALL.search(resp.contenido or "") and reintentos_fuga < 2:
@@ -2335,6 +2351,19 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 iteraciones -= 1
                 continue
             if hubo_llamadas:
+                # EL OTRO CAMINO AL MISMO PROBLEMA, y el que se me escapo.
+                #
+                # El area entro por derivacion, no consulto nada y ademas no
+                # escribio nada. Se iba directo a la redaccion final -- que
+                # corre sin catalogo-- y ahi el modelo solo podia inventar una
+                # promesa: los tres intentos la produjeron identica y el
+                # cliente termino con el aviso de reintentar.
+                #
+                # Medido el 09/09/2026 contra la config v132. El sintoma en el
+                # log es la AUSENCIA de la linea de reintento: no es que
+                # fallara, es que no se evaluaba.
+                if _pedir_que_consulte("no contesto nada y no consulto nada"):
+                    continue
                 break  # sin texto pero ya hubo tools: igual pasa a redaccion final
             # Sin texto y sin tool call en el primer intento: visto en vivo con
             # DeepSeek en el primer turno de una conversacion nueva (respuesta
