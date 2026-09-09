@@ -151,27 +151,68 @@ afirmar("h.deriva_rol" in fuente_motor and "paso_a_otra_area=paso" in fuente_mot
         "distinto")
 
 
-print("\n== 5b. si se agotan los intentos, se entrega igual ==")
-# Medido el 09/09/2026, y es una regresion que introdujo esta misma guarda:
-# "buenas para una instalacion de telefonia" derivo bien, la redaccion se
-# rechazo tres veces por prometer, y el cliente recibio "No pude terminar de
-# redactar la respuesta" -- o sea NADA, mas un pedido de que escriba de nuevo.
+print("\n== 5b. el respaldo NO puede devolver lo que la guarda rechazo ==")
+# Esta seccion existia el 09/09/2026 por la mañana y AFIRMABA LO CONTRARIO.
 #
-# La guarda existe para que no reciba una promesa vacia. Dejarlo sin ninguna
-# respuesta cambia un mal por uno PEOR: una respuesta que anuncia un pase al
-# menos dice algo y deja seguir la conversacion.
-afirmar("candidato" in cuerpo,
-        "se conserva el ultimo texto que ERA una respuesta, aunque la guarda "
-        "lo rechace")
+# El respaldo se agrego ese dia para un caso real: "buenas para una
+# instalacion de telefonia" derivo bien, la redaccion se rechazo tres veces
+# por prometer, y el cliente recibio "No pude terminar de redactar" -- o sea
+# nada. El razonamiento fue "una promesa al menos dice algo".
+#
+# Es falso, y esa misma tarde se midio: con el numero 312 000 000, el cliente
+# recibio "Dejame pasarte con el area de ventas" -- escrito POR ventas, un
+# pase a si misma. Las dos formas dejan al cliente teniendo que escribir de
+# nuevo, y la promesa es PEOR, porque parece que algo avanzo. La guarda habia
+# quedado anulada por su propio respaldo.
+#
+# Y esta prueba no lo vio, porque afirmaba que la VARIABLE 'candidato'
+# existiera -- no que se comportara de alguna forma. Sobrevivio intacta a una
+# inversion completa de la conducta. Por eso ahora se afirma la CONDICION.
+# La linea de guarda es la ANTERIOR a la asignacion. Se busca por indice y no
+# por 'esta en el cuerpo', porque el mismo 'if' aparece dos veces en la
+# funcion -- una para el candidato y otra para el retorno-- y buscar el texto
+# suelto daria verde teniendo la condicion mal justo en la que importa.
+_lineas = cuerpo.splitlines()
+_i = next(i for i, l in enumerate(_lineas) if l.strip() == "candidato = limpio")
+guarda = _lineas[_i - 1]
+afirmar("not muerta" in guarda,
+        "el texto que la guarda marco como promesa NO se guarda como "
+        "candidato: si no, vuelve por la puerta de atras")
 afirmar("if candidato:" in cuerpo,
-        "y al agotarse los intentos se entrega ese, no el aviso generico")
+        "el respaldo sigue existiendo -- para lo que si vino a resolver: una "
+        "redaccion vacia o un valor crudo tras varios intentos")
 afirmar(0 < cuerpo.find("if candidato:")
         < cuerpo.find("se agotaron los {intentos} intentos de redaccion"),
-        "el respaldo va ANTES del aviso de 'no pude redactar': ese aviso queda "
-        "solo para cuando no hay absolutamente nada escrito")
+        "y va ANTES del aviso generico, que queda para cuando no hay "
+        "absolutamente nada escrito")
 afirmar("guardia_salida.verificar(candidato)" in cuerpo,
-        "y el respaldo pasa igual por la guardia de salida -- degradar la "
+        "el respaldo pasa igual por la guardia de salida -- degradar la "
         "calidad de la respuesta no puede degradar lo que se filtra")
+
+
+print("\n== 5c. el reintento va donde puede entrar informacion nueva ==")
+# La leccion de fondo del 09/09/2026, y la razon de que esto se repitiera dos
+# dias seguidos: la guarda solo sabe RECHAZAR texto. Cuando el area que entro
+# por derivacion no consulto nada, no hay nada que redactar, y pedirle tres
+# veces que reescriba devolvio las tres veces la MISMA frase, byte a byte.
+#
+# El reintento tiene que estar en el bucle del agente --la unica capa donde
+# el modelo todavia puede llamar una herramienta-- y no en la redaccion final,
+# que corre a proposito sin catalogo.
+fuente_responder = fuente_motor
+afirmar("registro_al_derivar" in fuente_responder,
+        "se mide si el area que entro por derivacion consulto algo, o "
+        "contesto sin mirar nada")
+afirmar("reintentos_area_sin_consultar" in fuente_responder,
+        "y en ese caso se le da otra vuelta del bucle, con su catalogo")
+afirmar("reintentos_area_sin_consultar < 2" in fuente_responder,
+        "con tope: un reintento sin limite gira solo y se come el turno. Dos "
+        "y no una -- con una sola el area consulto en 2 de 3 corridas "
+        "(09/09/2026); con dos, 5 de 5")
+afirmar("_promete_en_vez_de_responder(limpio, nombres_area_conf)"
+        in fuente_responder,
+        "y solo si lo que contesto era una promesa -- un area que contesta "
+        "bien de una, o que no necesita consultar, no paga nada")
 
 
 print("\n== 5. se REHACE, no se bloquea ==")

@@ -1361,8 +1361,11 @@ casos:
       # mantener de acuerdo.
       catalogo_con: [cargar_habilidad]
 
+  # Sin 'humo: true' desde el 09/09/2026: lo reemplaza en el subconjunto el
+  # caso de "instalar un servicio de telefonia", que es el mismo escenario con
+  # la frase que SI falla y ademas afirma que la respuesta no sea una promesa.
+  # Este se queda en el set completo -- sigue cubriendo su redaccion.
   - nombre: pedir un servicio que no se ofrece igual deriva a ventas
-    humo: true
     rol: cliente_final
     sesion:
       verificado: false
@@ -1390,6 +1393,54 @@ casos:
       sin_errores: true
       # Un prospecto no es cliente: ventas no exige verificacion.
       responde_sin: [cedula, cédula]
+
+  # --- la MISMA pregunta, dicha de otra forma -----------------------------
+  # Medido en el simulador el 09/09/2026, numero 312 000 000:
+  #
+  #     "hola buenas para instalar un servicio de telefonia"
+  #
+  #     "Hola, que tal. Soy Dexter, un gusto saludarte.
+  #      Dejame pasarte con el area de ventas que te puede asesorar con eso."
+  #
+  # La traza dice que derivar_a_area SI se ejecuto y 'rol_efectivo' quedo en
+  # 'ventas'. O sea que quien escribio eso fue VENTAS, anunciando un pase a
+  # ventas -- a si misma. Y 'consultar_servicios_ofrecidos' no se llamo:
+  # nadie miro si hay telefonia, se difirio y listo.
+  #
+  # POR QUE ESTE CASO EXISTE SI YA ESTABA EL DE ARRIBA
+  # El de arriba pasa 3 de 3 corridas y responde bien. Dice "quiero contratar
+  # telefonia fija"; este dice "para instalar un servicio de telefonia". Una
+  # frase que funciona no cubre a la familia, y es la segunda vez seguida que
+  # pasa lo mismo: el comentario del caso de arriba dice textualmente que el
+  # caso #30 ya cubria el escenario "pero con la frase 'para solicitar un
+  # servicio', que si funciona". Se anoto la leccion y se volvio a cometer.
+  #
+  # Y lo que ninguna version anterior afirmaba -- por eso el sintoma seguia
+  # vivo con los casos en verde-- es que la respuesta NO SEA UNA PROMESA. Que
+  # se derive es la mitad; que el cliente reciba una respuesta en vez de un
+  # "ya te paso con alguien" es la otra.
+  - nombre: pedir instalacion de un servicio que no se ofrece no anuncia el pase
+    humo: true
+    rol: cliente_final
+    sesion:
+      verificado: false
+      nivel: 0
+      identificador_canal: '573120000000'
+    mensajes:
+      - "hola buenas para instalar un servicio de telefonia"
+    espera:
+      deriva_a: ventas
+      usa: [derivar_a_area, consultar_servicios_ofrecidos]
+      # Las formas medidas el 08 y el 09/09/2026, todas con la derivacion ya
+      # hecha en la traza. No se prohibe mencionar a ventas -- se prohibe
+      # anunciar que la conversacion va a pasar a alguien que ya escribio.
+      responde_sin:
+        - te paso con
+        - dejame pasarte
+        - voy a pasarte
+        - te comunico con
+        - dejame revisar
+        - permiteme revisar
 
   - nombre: un canal que no esta en la parrilla se consulta, no se adivina
     humo: true

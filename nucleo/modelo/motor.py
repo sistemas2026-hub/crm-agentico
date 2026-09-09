@@ -1830,10 +1830,25 @@ def _redactar(referencia_modelo: str, historial: list[dict], temperatura: float,
         # traza confirma que este turno YA derivo -- ver _RE_ANUNCIA_PASE.
         muerta = (_promete_en_vez_de_responder(limpio, nombres_area or set())
                   if limpio and paso_a_otra_area else None)
-        # Se conserva el ultimo texto que al menos ERA una respuesta, aunque
-        # esta guarda lo rechace. Ver el final de la funcion: quedarse sin nada
-        # es peor que entregar una respuesta imperfecta.
-        if limpio and not _RE_RESPUESTA_CRUDA.match(limpio):
+        # Se conserva el ultimo texto que al menos ERA una respuesta, para
+        # entregarlo si se agotan los intentos (ver el final de la funcion).
+        #
+        # UNA PROMESA NO CUENTA COMO CANDIDATO, y esto es una correccion de
+        # algo que rompi el 09/09/2026 por la mañana. Al agregar el respaldo
+        # escribi la condicion sin excluir 'muerta', asi que el texto que esta
+        # misma guarda acababa de rechazar volvia por la puerta de atras y se
+        # entregaba igual: la guarda quedo anulada por su propio respaldo.
+        #
+        # El razonamiento con el que lo escribi era que "una respuesta que
+        # anuncia un pase al menos dice algo". Es falso. Las dos dejan al
+        # cliente teniendo que escribir de nuevo, y la promesa es PEOR: parece
+        # que algo avanzo y no avanzo nada -- le anuncia a alguien que no va a
+        # escribir. Medido en el simulador el mismo dia, con el numero
+        # 312 000 000, y reportado como "vuelve a ocurrir lo mismo".
+        #
+        # El respaldo sigue existiendo para lo que si vino a resolver: una
+        # redaccion vacia o un valor crudo tras varios intentos.
+        if limpio and not _RE_RESPUESTA_CRUDA.match(limpio) and not muerta:
             candidato = limpio
         if not limpio or _RE_RESPUESTA_CRUDA.match(limpio) or muerta:
             # Por que no sirvio. Sin esto, cuando el cliente ve "no pude
@@ -2157,6 +2172,22 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
     # recibio la puerta, no de algo que el cliente le haya dicho a EL.
     # Lo usa 'Herramienta.exige_turno_propio'.
     derivado_en_este_turno = False
+    # Cuantas herramientas se habian llamado cuando la conversacion cambio de
+    # area, para poder saber si el area NUEVA consulto algo o contesto sin
+    # mirar nada. Ver el reintento de 'el area que entro no consulto nada'.
+    registro_al_derivar = 0
+    # Dos vueltas y no una: medido el 09/09/2026 sobre el caso real, con una
+    # sola el area consulto en 2 de 3 corridas y en la tercera volvio a
+    # contestar sin mirar nada. Cada vuelta cuesta una llamada al modelo
+    # (~2s) y solo se paga cuando ya se sabe que la respuesta iba a ser
+    # inservible, asi que es barata comparada con lo que evita.
+    reintentos_area_sin_consultar = 0
+    # Los nombres de area, para detectar un anuncio de pase. Se arman una sola
+    # vez y no en la llamada a _redactar (donde estaban): el bucle tambien los
+    # necesita ahora, y calcularlos dos veces invita a que se separen.
+    _areas_conf = {_sin_tildes(n) for n in config.roles} | {
+        _sin_tildes(getattr(r, "area", "") or "") for r in config.roles.values()}
+    nombres_area_conf = {a for a in _areas_conf if a}
     iteraciones = 0
     # Los reintentos por una llamada mal escrita se cuentan APARTE (ver mas
     # abajo): son un error de formato del modelo, no trabajo hecho, y
@@ -2206,6 +2237,47 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                     limpio = _con_obligatorios(limpio, obligatorios)
                     historial.append({"role": "assistant", "content": limpio})
                     return limpio, registro, medios_pendientes
+                # EL AREA QUE ACABA DE ENTRAR CONTESTO SIN MIRAR NADA
+                #
+                # Medido el 09/09/2026 con "hola buenas para instalar un
+                # servicio de telefonia" (numero 312 000 000, y reproducido 3
+                # de 3 contra produccion): la puerta derivo bien a ventas,
+                # ventas contesto "Dejame pasarte con el area de ventas" -- un
+                # pase a si misma-- y NO llamo consultar_servicios_ofrecidos,
+                # que tiene en su catalogo y es la que sabe si hay telefonia.
+                #
+                # Hasta aca eso caia directo en la redaccion final, y ahi la
+                # guarda de "no anuncies un pase que ya ocurrio" rechazaba las
+                # tres redacciones seguidas. Pero rechazar texto no crea el
+                # dato que nadie fue a buscar: los tres intentos devolvieron
+                # EXACTAMENTE la misma frase. El reintento estaba en la capa
+                # equivocada -- se le pedia reescribir cuando lo que le
+                # faltaba era consultar.
+                #
+                # Aca se le da una vuelta mas del bucle CON el catalogo
+                # todavia disponible, que es la unica capa donde puede entrar
+                # informacion nueva. Una sola vez, y solo si contesto una
+                # promesa sin haber consultado nada: un area que contesta bien
+                # de una, o que de verdad no necesita consultar, no paga nada.
+                if (derivado_en_este_turno
+                        and len(registro) == registro_al_derivar
+                        and reintentos_area_sin_consultar < 2
+                        and _promete_en_vez_de_responder(limpio, nombres_area_conf)):
+                    reintentos_area_sin_consultar += 1
+                    iteraciones -= 1          # no se le cobra al presupuesto
+                    disponibles = ", ".join(h.nombre for h in herramientas)
+                    print(f"[modelo] '{nombre_rol}' entro por derivacion y "
+                          f"contesto sin consultar nada "
+                          f"({reintentos_area_sin_consultar}/2): se le da otra "
+                          f"vuelta con su catalogo")
+                    historial.append({"role": "system", "content":
+                        f"Estas anunciando que vas a pasar la conversacion, "
+                        f"pero el area que atiende sos VOS y ya es tu turno: "
+                        f"el cliente no va a escribir de nuevo. Todavia no "
+                        f"consultaste nada. USA AHORA tus herramientas para "
+                        f"buscar lo que te falta y despues contesta. "
+                        f"Disponibles: {disponibles}."})
+                    continue
                 break  # ya no pide mas herramientas: pasa a redaccion final
             if _RE_FUGA_TOOL_CALL.search(resp.contenido or "") and reintentos_fuga < 2:
                 # Queria seguir usando herramientas y lo escribio mal: se le
@@ -2616,6 +2688,10 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 # aplica a herramientas que recien ahora existen.
                 ya_sugeridas_este_turno.clear()
                 derivado_en_este_turno = True
+                # Desde aca se mide si el area nueva consulta algo por su
+                # cuenta o contesta sin mirar nada -- ver el reintento en el
+                # bloque de 'contesto sin consultar' mas arriba.
+                registro_al_derivar = len(registro)
                 historial.append({"role": "system",
                                   "content": construir_system(config, nombre_rol)})
                 historial.append({"role": "system", "content":
@@ -2647,15 +2723,13 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
         # _promete_en_vez_de_responder.
         deriva = {h.nombre for h in config.herramientas if h.deriva_rol}
         paso = any(r.get("herramienta") in deriva for r in registro)
-        areas = {_sin_tildes(n) for n in config.roles} | {
-            _sin_tildes(getattr(r, "area", "") or "") for r in config.roles.values()}
         return (_con_obligatorios(
                     _redactar(referencia_redaccion, historial, config.llm.temperatura,
                               razonamiento=config.llm.razonamiento,
                               nombres_rol=config.roles,
                               tratamiento=config.persona.normalizar_tratamiento,
                               paso_a_otra_area=paso,
-                              nombres_area={a for a in areas if a}),
+                              nombres_area=nombres_area_conf),
                     obligatorios),
                 registro, medios_pendientes)
     return ("No pude completar la consulta en el numero de pasos permitido.",
