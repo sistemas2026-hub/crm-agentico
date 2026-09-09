@@ -46,7 +46,12 @@ export async function GET({ url, locals, fetch }) {
         id: m.id, rol: m.rol, texto: m.contenido, creado_en: m.creado_en,
         caso_marcado: m.caso_marcado ?? null
       })),
-      cerrada: datos.conversacion?.estado === 'cerrada'
+      cerrada: datos.conversacion?.estado === 'cerrada',
+      // Que area quedo atendiendo. Va tambien por aca --y no solo en la
+      // respuesta de un turno-- para que el dato sobreviva a recargar la
+      // pantalla: sin esto, al volver a una conversacion derivada la cabecera
+      // no dice nada hasta que alguien escriba otro mensaje.
+      rol_activo: datos.conversacion?.rol_efectivo ?? null
     });
   } catch (/** @type {any} */ err) {
     // Sin ruido: esto corre cada pocos segundos y un fallo puntual no tiene

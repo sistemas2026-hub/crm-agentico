@@ -22,6 +22,17 @@
   let enviando = $state(false);
   let verificado = $state(false);
   let cerrada = $state(false);
+  /**
+   * Que area quedo atendiendo, tal como la devuelve el motor ('rol_activo').
+   *
+   * La cabecera dice "cliente_final" porque ese es el rol de ENTRADA, pero una
+   * conversacion cambia de area a mitad de turno y desde afuera eso no se veia
+   * sin abrir la base. Los tres bugs de derivacion del 08 y 09/09/2026 se
+   * notaban aca de inmediato: saber que quien escribio "dejame pasarte con
+   * ventas" ERA ventas convierte un texto raro en un bug evidente.
+   */
+  let rolActivo = $state('');
+  let rolActivoNombre = $state('');
 
   /** La conversacion en curso, para poder preguntar si llego algo nuevo. */
   let conversacionActual = $state('');
@@ -32,6 +43,8 @@
     mensajes = [];
     verificado = false;
     cerrada = false;
+    rolActivo = '';
+    rolActivoNombre = '';
     conversacionActual = '';
     error = '';
   }
@@ -72,6 +85,13 @@
         casoMarcado: m.caso_marcado
       }));
       if (datos.cerrada) cerrada = true;
+      // Solo si vino y solo si no lo sabemos ya: el sondeo corre cada pocos
+      // segundos y una respuesta sin el dato no puede borrar lo que la
+      // ultima respuesta del motor si dijo.
+      if (datos.rol_activo) {
+        rolActivo = datos.rol_activo;
+        if (!rolActivoNombre) rolActivoNombre = datos.rol_activo;
+      }
     } catch {
       // Silencio a proposito: corre cada pocos segundos.
     }
@@ -122,6 +142,13 @@
         }
         verificado = !!datos.verificado;
         cerrada = !!datos.cerrada;
+        // Solo si vino: los caminos de escalada y de conversacion pausada
+        // devuelven antes y no lo traen. Pisarlo con '' ahi borraria de la
+        // pantalla el area que si estaba atendiendo.
+        if (datos.rol_activo) {
+          rolActivo = datos.rol_activo;
+          rolActivoNombre = datos.rol_activo_nombre || datos.rol_activo;
+        }
       } else {
         error = datos.error || 'El asistente no pudo responder.';
       }
@@ -157,6 +184,12 @@
     />
     <button class="v2-btn" type="button" onclick={reiniciar}>Reiniciar conversación</button>
     {#if mensajes.length > 0}
+      {#if rolActivo}
+        <span class="agente-activo" title="Area que atiende ahora. El proximo mensaje del cliente entra directo aca ('rol_efectivo').">
+          Atiende: <strong>{rolActivoNombre}</strong>
+          {#if rolActivo !== rolActivoNombre}<code>{rolActivo}</code>{/if}
+        </span>
+      {/if}
       <span class="estado-verificacion" class:ok={verificado}>
         {verificado ? '✅ Verificado' : '🔒 No verificado'}
       </span>
@@ -232,6 +265,19 @@
   .fila-telefono input {
     max-width: 180px;
   }
+  .agente-activo {
+    font-size: 0.85rem;
+    padding: 0.15rem 0.5rem;
+    border-radius: 999px;
+    border: 1px solid var(--v2-borde, #d7d7d7);
+    white-space: nowrap;
+  }
+  .agente-activo code {
+    font-size: 0.78rem;
+    opacity: 0.7;
+    margin-left: 0.25rem;
+  }
+
   .estado-verificacion {
     margin-left: auto;
     font-size: 13px;

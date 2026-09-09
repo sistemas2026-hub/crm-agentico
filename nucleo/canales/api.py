@@ -1869,9 +1869,24 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             costo_usd=ficha_consumo.costo_usd,
             llamadas_modelo=ficha_consumo.n_llamadas)
 
+    # QUE AREA QUEDO ATENDIENDO, para quien mire la conversacion desde afuera.
+    #
+    # 'rol' es el parametro con el que entro el turno y se REASIGNA mas arriba
+    # si el turno derivo, asi que aca vale el area que de verdad atendio -- la
+    # misma que se persiste en 'rol_efectivo' y que va a recibir el proximo
+    # mensaje del cliente.
+    #
+    # Sale en la respuesta porque sin esto no habia forma de verlo sin abrir
+    # la base. Los tres bugs de derivacion del 08 y 09/09/2026 se veian todos
+    # aca: uno anunciaba un pase que ya habia ocurrido, y saber que quien
+    # escribia era 'ventas' -- no la puerta-- lo hacia obvio de inmediato.
+    rol_cfg_final = config.roles.get(rol)
     return {"respuesta": respuesta, "verificado": estado["sesion"].verificado,
             "cerrada": cerrada, "conversacion_id": conversation_id,
             "mensaje_id": mensaje_id, "mensaje_usuario_id": mensaje_usuario_id,
+            "rol_activo": rol,
+            "rol_activo_nombre": (getattr(rol_cfg_final, "area", None)
+                                  or rol) if rol_cfg_final else rol,
             "pausada": False}
 
 
