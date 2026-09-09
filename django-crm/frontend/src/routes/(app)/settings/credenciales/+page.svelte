@@ -83,7 +83,11 @@
   {/snippet}
 </PageHeader>
 
-<div class="v2-pad" style="padding-top:24px;max-width:900px">
+<!-- El shell de la aplicacion tiene overflow:hidden, asi que el contenido tiene
+     que vivir dentro de .v2-scroll o queda recortado sin barra. Mismo patron
+     que /settings, /settings/api-tokens y las pantallas de canales. -->
+<div class="v2-scroll">
+  <div class="v2-pad" style="padding-top:24px;padding-bottom:48px;max-width:900px">
   {#if !data.disponible}
     <NextAction
       label="El asistente no respondió"
@@ -286,6 +290,7 @@
       {/if}
     </div>
   {/if}
+  </div>
 </div>
 
 <style>
