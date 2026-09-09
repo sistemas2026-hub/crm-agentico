@@ -490,16 +490,35 @@ revisar(not llamadas,
         "el filtro va ANTES del enriquecimiento, no despues")
 
 # --- external_status_at: la fecha real, o nada -------------------------
+# Las dos fechas del MISMO payload vienen en formatos distintos, y por poco se
+# escribe mal:
+#     fecha_creacion  2026-08-29T09:16:37.844072-05:00   ISO, con zona
+#     fecha_fin       09/05/2026 15:22:38                MM/DD/YYYY, sin zona
+# Guardar la segunda tal cual la habria archivado cinco horas antes de lo que
+# paso, interpretada como UTC.
+CERRADO = {"estado": "Cerrado", "fecha_fin": "09/05/2026 15:22:38",
+           "fecha_creacion": "2026-08-29T09:16:37.844072-05:00"}
+revisar(imp.momento_del_estado(CERRADO) == "2026-09-05T15:22:38-05:00",
+        "de un cerrado se toma 'fecha_fin', normalizada y con zona",
+        "la zona sale de 'fecha_creacion' del MISMO ticket: mismo sistema, "
+        "mismo reloj, sin suponer el huso de ninguna empresa")
 revisar(imp.momento_del_estado(
-    {"estado": "Cerrado", "fecha_fin": "2026-09-01T10:00:00-05:00"})
-    == "2026-09-01T10:00:00-05:00",
-    "de un cerrado se toma 'fecha_fin', que es el cambio real")
-revisar(imp.momento_del_estado(
-    {"estado": "Nuevo", "fecha_creacion": "2026-09-01T10:00:00-05:00"}) == "",
+    {"estado": "Nuevo", "fecha_creacion": CERRADO["fecha_creacion"]}) is None,
     "de un nuevo NO se inventa un momento de cambio",
     "auditado: fecha_fin viene 40/40 en cerrados y 0/40 en nuevos")
-revisar(imp.momento_del_estado({"estado": "Cerrado", "fecha_fin": None}) == "",
+revisar(imp.momento_del_estado({**CERRADO, "fecha_fin": None}) is None,
         "y sin fecha_fin tampoco se rellena con la lectura")
+revisar(imp.momento_del_estado({**CERRADO, "fecha_fin": "2026-09-05 15:22:38"})
+        is None,
+        "un formato que no es el del proveedor no se adivina")
+revisar(imp.momento_del_estado(
+    {**CERRADO, "fecha_creacion": "2026-08-29 09:16:37"}) is None,
+    "y sin zona de referencia no se afirma un instante",
+    "un datetime sin zona guardado en una columna con zona corre las horas")
+revisar(imp.momento_del_estado(CERRADO) is not None
+        and imp.momento_del_estado({"estado": "Nuevo"}) is None,
+        "devuelve None y no cadena vacia",
+        "'' en una columna de fecha revienta al guardar")
 
 # --- autoria pegajosa --------------------------------------------------
 print("\nla autoria de Dexter no se degrada sola")

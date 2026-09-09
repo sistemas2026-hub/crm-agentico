@@ -220,27 +220,53 @@ def estado_inicial(external_status) -> str | None:
     return MAPEO_ESTADO_INICIAL.get(normalizar(external_status))
 
 
-def momento_del_estado(ticket: dict) -> str:
+def momento_del_estado(ticket: dict):
     """
-    Cuando el proveedor movio el estado, o cadena vacia si no lo dice.
+    Cuando el proveedor movio el estado, o None si no se puede afirmar.
 
-    AUDITADO EN VIVO (09/09/2026), porque la tentacion era llenarlo siempre:
-    WispHub NO entrega un sello de "ultimo cambio de estado". Lo unico que
-    entrega es 'fecha_fin', y solo para el cierre -- medido sobre la ventana:
-    poblada en 40 de 40 tickets 'Cerrado' y en 0 de 40 'Nuevo'. 'fecha_inicio'
-    tambien viene vacia en los nuevos.
+    AUDITADO EN VIVO (09/09/2026), dos veces y con dos hallazgos distintos.
 
-    Asi que hay exactamente dos respuestas honestas: la fecha real del cierre,
-    o nada. Poner ahi 'fecha_creacion' diria que el ticket cambio de estado
-    cuando en realidad nacio, y poner el momento de nuestra lectura diria que
-    cambio cuando nosotros miramos. Las dos inventan una precision que el
-    proveedor no da, y las dos se leerian despues como si fueran ciertas.
+    Primero: el proveedor NO entrega un sello de "ultimo cambio de estado". Lo
+    unico que entrega es 'fecha_fin', y solo al cerrar -- medido sobre la
+    ventana: poblada en 40 de 40 tickets 'Cerrado' y en 0 de 40 'Nuevo'. Asi
+    que hay dos respuestas honestas: la fecha real del cierre, o nada. Poner
+    'fecha_creacion' diria que el ticket cambio de estado cuando nacio, y poner
+    el momento de nuestra lectura diria que cambio cuando miramos.
 
-    Cuando la API exponga un sello real de transicion, esto pasa a usarlo.
+    Segundo, y por poco se escribe mal: las dos fechas del MISMO payload vienen
+    en formatos distintos.
+
+        fecha_creacion   2026-08-29T09:16:37.844072-05:00   ISO, con zona
+        fecha_fin        09/05/2026 15:22:38                MM/DD/YYYY, sin zona
+
+    Guardar 'fecha_fin' tal cual en una columna con zona la habria interpretado
+    como UTC: un cierre de las 15:22 de Bogota archivado como las 15:22 de
+    Londres, cinco horas antes de lo que paso. Y el formato ademas es ambiguo
+    de leer -- '09/05' es 5 de septiembre solo porque el ticket nacio el 29 de
+    agosto.
+
+    La zona se toma de 'fecha_creacion' DEL MISMO TICKET, no de una constante:
+    es el mismo sistema y el mismo reloj informando el mismo registro, asi que
+    no hace falta suponer nada ni escribir el huso de una empresa en el nucleo.
+    Sin esa referencia no se devuelve nada: un instante sin zona no es un
+    instante.
     """
-    if normalizar(ticket.get("estado")) == "cerrado" and ticket.get("fecha_fin"):
-        return str(ticket["fecha_fin"])
-    return ""
+    if normalizar(ticket.get("estado")) != "cerrado":
+        return None
+    crudo = str(ticket.get("fecha_fin") or "").strip()
+    if not crudo:
+        return None
+    try:
+        cuando = datetime.strptime(crudo, "%m/%d/%Y %H:%M:%S")
+    except ValueError:
+        return None
+    try:
+        zona = datetime.fromisoformat(str(ticket.get("fecha_creacion"))).tzinfo
+    except (ValueError, TypeError):
+        return None
+    if zona is None:
+        return None
+    return cuando.replace(tzinfo=zona).isoformat()
 
 
 def clasificar_creador_persistente(creado_por, external_ticket_id, cuenta_api,
