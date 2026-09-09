@@ -19,6 +19,7 @@
  */
 import { leerConfiguracionAsistente } from './asistente-config.js';
 import { leerCanalWhatsapp } from './canal-whatsapp.js';
+import { leerCredenciales } from './credenciales.js';
 import { leerSmartOlt } from './smartolt.js';
 import { contarPlanesVenta } from './planes-venta.js';
 import { leerOferta } from './oferta.js';
@@ -116,7 +117,8 @@ export async function getSettingsHub(event) {
     canalWhatsapp,
     smartolt,
     planesVenta,
-    oferta
+    oferta,
+    credenciales
   ] = await Promise.all([
     getOrgSettings(event),
     getBusinessHours(event),
@@ -141,7 +143,11 @@ export async function getSettingsHub(event) {
     contarPlanesVenta(),
     // Tampoco pega contra terceros: las dos listas salen de la config
     // del tenant, que el motor ya tiene en memoria.
-    leerOferta()
+    leerOferta(),
+    // Tampoco sale a ningun tercero: la lista de credenciales que hacen falta
+    // la arma el motor con su propio catalogo, y de las cargadas solo trae
+    // nombre y pista. Nunca un valor.
+    leerCredenciales()
   ]);
 
   const now = Date.now();
@@ -169,6 +175,14 @@ export async function getSettingsHub(event) {
     asistente,
     canalWhatsapp,
     smartolt,
+    // Cuantas pide el catalogo y cuantas estan cargadas. La fila del hub avisa
+    // cuando falta alguna: eso es una herramienta que va a fallar al usarse.
+    credencialesTotales: credenciales.disponible
+      ? {
+          cargadas: credenciales.credenciales.filter((c) => c.cargado).length,
+          faltan: credenciales.credenciales.filter((c) => c.declarado && !c.cargado).length
+        }
+      : null,
     planesVenta,
     oferta: oferta
       ? { servicios: (oferta.servicios_ofrecidos ?? []).filter((s) => s.activo).length,

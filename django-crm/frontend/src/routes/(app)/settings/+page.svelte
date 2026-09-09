@@ -80,6 +80,21 @@
             : false
         },
         {
+          // Va en 'Personas y acceso' y no en 'Asistente' a proposito: son
+          // credenciales, y quien las administra piensa en accesos, no en
+          // integraciones. La fila avisa cuando el catalogo pide una clave
+          // que no esta cargada -- eso es una herramienta que va a fallar.
+          href: '/settings/credenciales',
+          title: 'Credenciales',
+          body: 'Las claves que el asistente usa para hablar con los sistemas de la empresa.',
+          value: data.credencialesTotales
+            ? (data.credencialesTotales.faltan
+                ? `${data.credencialesTotales.faltan} sin cargar`
+                : `${data.credencialesTotales.cargadas} cargadas`)
+            : null,
+          warn: data.credencialesTotales ? data.credencialesTotales.faltan > 0 : false
+        },
+        {
           href: '/settings/organization',
           title: 'Organización',
           body: 'Los datos de la empresa que se imprimen en cada factura y cotización.',

@@ -2953,6 +2953,72 @@ def secretos_listar():
         return jsonify({"error": "No se pudieron leer los secretos."}), 500
 
 
+@app.get("/configuracion/credenciales")
+def configuracion_credenciales():
+    """
+    Que credenciales necesita esta empresa, y cuales ya estan cargadas.
+
+    La lista NO es fija: se arma leyendo los 'auth_ref' que declara el catalogo
+    de herramientas del tenant. Por eso sirve para el ISP numero dos sin que
+    nadie toque codigo -- si su config declara 'OTRO_PROVEEDOR_API_KEY', la
+    pantalla se lo pide sola.
+
+    Existe porque hasta ahora cargar un secreto nuevo obligaba a entrar al
+    contenedor: el endpoint '/secretos' siempre fue generico, pero las unicas
+    pantallas que lo llamaban estaban cableadas a WhatsApp y a SmartOLT. Dar de
+    alta una empresa no puede depender de una sesion de consola.
+
+    Nunca devuelve valores. De cada secreto cargado salen el nombre, para que
+    sirve, cuando se cargo y una pista de los ultimos caracteres -- lo que
+    'secretos.listar' ya expone.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+
+    # Quien usa cada credencial. Se muestra para que quien la carga entienda
+    # que se rompe si falta, en vez de ver una lista de nombres sueltos.
+    usos: dict[str, list[str]] = {}
+    for h in config.herramientas:
+        if h.auth_ref:
+            usos.setdefault(h.auth_ref, []).append(h.nombre)
+    for atributo in ("token_ref", "verify_token_ref", "app_secret_ref"):
+        for h in config.herramientas:
+            ref = getattr(h, atributo, None)
+            if ref:
+                usos.setdefault(ref, []).append(h.nombre)
+
+    try:
+        cargados = {s["nombre"]: s for s in secretos.listar(tenant)}
+    except Exception as e:
+        print(f"[credenciales] no se pudieron leer los secretos: "
+              f"{type(e).__name__}: {e}")
+        cargados = {}
+
+    # Los declarados por el catalogo, mas los que ya estan cargados aunque
+    # ninguna herramienta los pida: un secreto huerfano es informacion util
+    # -- puede ser de una integracion que se saco y quedo la credencial viva.
+    salida = []
+    for nombre in sorted(set(usos) | set(cargados)):
+        s = cargados.get(nombre) or {}
+        salida.append({
+            "nombre": nombre,
+            "cargado": nombre in cargados,
+            "declarado": nombre in usos,
+            "herramientas": sorted(usos.get(nombre, []))[:12],
+            "cantidad_herramientas": len(usos.get(nombre, [])),
+            "descripcion": s.get("descripcion") or "",
+            "pista": s.get("pista") or "",
+            "actualizado_en": s.get("actualizado_en").isoformat()
+            if s.get("actualizado_en") else None,
+        })
+    return jsonify({"credenciales": salida})
+
+
 @app.post("/secretos")
 def secretos_guardar():
     """
