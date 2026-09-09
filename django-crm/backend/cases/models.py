@@ -17,6 +17,32 @@ from contacts.models import Contact
 # - Fixed case_type default from "" to None (empty string is bad default for nullable field)
 
 
+# What we are allowed to say about who opened a ticket in the provider's
+# system, and nothing more.
+#
+# Measured on 1.162 real WispHub tickets (08/09/2026): 'creado_por' comes back
+# populated on every one of them, as `Name - account@isp`. Eight accounts. Of
+# those, one is the account the API key signs with, and *everything* created
+# through the API arrives under it — Dexter, any other integration sharing the
+# key, and a person who logs into that account by hand. In the same fortnight,
+# 91 tickets arrived that way which Dexter had not recorded: the key is shared.
+#
+# So the provider gives verifiable authorship for the named accounts and
+# nothing usable for the shared one. 'externo_desconocido' is that second case
+# named honestly. Calling it 'human' would be a claim the data does not
+# support, and the alternative signals - descripcion, tecnico, origen_reporte -
+# are worse: origen_reporte has two values across 1.162 tickets.
+EXTERNAL_AUTHOR_DEXTER = "dexter"
+EXTERNAL_AUTHOR_HUMAN = "humano_verificado"
+EXTERNAL_AUTHOR_UNKNOWN = "externo_desconocido"
+
+EXTERNAL_AUTHOR_TYPE = (
+    (EXTERNAL_AUTHOR_DEXTER, "Creado por Dexter"),
+    (EXTERNAL_AUTHOR_HUMAN, "Humano verificado por el proveedor"),
+    (EXTERNAL_AUTHOR_UNKNOWN, "Externo, autoria no comprobable"),
+)
+
+
 class Case(AssignableMixin, BaseModel):
     name = models.CharField(pgettext_lazy("Name of the case", "Name"), max_length=64)
     status = models.CharField(choices=STATUS_CHOICE, max_length=64)
@@ -154,11 +180,148 @@ class Case(AssignableMixin, BaseModel):
         help_text="Marks this case as an ITIL 'problem' (umbrella ticket).",
     )
 
+    # ------------------------------------------------------------------
+    # Identity of the ticket this case mirrors in the ISP's own system
+    # ------------------------------------------------------------------
+    # A case that came out of a chat could always be traced back to the
+    # provider's ticket, but only the long way round: through the
+    # conversation that opened it (`asistente.conversations.ticket_operativo`,
+    # plus the number written into `description` as prose). A case that comes
+    # *from* the provider has no conversation, so it has to carry the identity
+    # itself or it cannot be found twice — and a poller that cannot find a row
+    # twice creates it twice.
+    #
+    # `provider` empty means the case is native to Dexter. The check
+    # constraint in Meta refuses the half-filled states, because
+    # provider='wisphub' with no ticket id is a row nothing can ever match.
+
+    provider = models.CharField(
+        max_length=32,
+        blank=True,
+        default="",
+        help_text=(
+            "External system this case mirrors, e.g. 'wisphub'. Empty means "
+            "the case is native to Dexter."
+        ),
+    )
+    external_ticket_id = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text=(
+            "Ticket id inside `provider`. Text and not an integer on purpose: "
+            "it belongs to someone else's numbering and the next ISP may use "
+            "letters — same reasoning as conversations.ticket_operativo."
+        ),
+    )
+    external_service_id = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        db_index=True,
+        help_text=(
+            "The provider's own id for the subscription this ticket is about "
+            "(WispHub 'id_servicio'). It is the bridge to the customer, and "
+            "from there to the ONU and the OLT, without going through a "
+            "conversation. Always taken from the provider's payload, never "
+            "derived from the customer's name."
+        ),
+    )
+
+    # What the provider says, kept apart from what Dexter says. `status` is
+    # owned by Dexter and no importer writes it; these two are owned by the
+    # provider and nothing but the importer writes them. Divergence between
+    # the pair is shown to a person, not resolved behind their back.
+    external_status = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text=(
+            "Last status label seen at the provider, verbatim ('Nuevo', "
+            "'En Progreso', 'Cerrado'). Deliberately the label and not a "
+            "translation into `status`: reads come back as labels and writes "
+            "go out as numeric codes, so storing either one translated would "
+            "lose which of the two vocabularies this actually is."
+        ),
+    )
+    external_status_at = models.DateTimeField(
+        blank=True,
+        null=True,
+        help_text="When the provider reported `external_status`.",
+    )
+
+    # READ direction only, and named so it cannot be mistaken for the other
+    # one. Writing back to the provider (responding to and closing the ticket)
+    # is a separate operation that will get its own `external_pushed_at` /
+    # `external_push_error`; a single 'synced' pair would have ended up
+    # meaning last-read on Mondays and last-write on Tuesdays.
+    external_fetched_at = models.DateTimeField(
+        blank=True,
+        null=True,
+        help_text="Last successful READ of this ticket from the provider.",
+    )
+    external_fetch_error = models.TextField(
+        blank=True,
+        default="",
+        help_text=(
+            "Why the last READ/import of this ticket failed, written on the "
+            "row so it is visible in the platform instead of lost in a log. "
+            "Never written by an outbound operation."
+        ),
+    )
+
+    # Authorship as the provider reports it. This is NOT `created_by`, which
+    # is the Dexter profile that created this row: the two answer different
+    # questions and merging them would make both useless.
+    external_created_by = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text=(
+            "The provider's 'creado_por' string, verbatim. Identifies an "
+            "account, not necessarily a person."
+        ),
+    )
+    external_created_by_type = models.CharField(
+        max_length=32,
+        blank=True,
+        default="",
+        choices=EXTERNAL_AUTHOR_TYPE,
+        help_text=(
+            "Classification of `external_created_by`. 'humano_verificado' "
+            "only when the provider named an individual account; anything "
+            "arriving through the shared API-key account that we did not "
+            "record ourselves is 'externo_desconocido', never 'humano'."
+        ),
+    )
+
     class Meta:
         verbose_name = "Case"
         verbose_name_plural = "Cases"
         db_table = "case"
         ordering = ("-created_at",)
+        constraints = [
+            # Two rows for the same provider ticket in the same org is the
+            # failure a poller produces on its first retry. The condition
+            # keeps native cases out of it: they all share the empty string
+            # and would otherwise collide with each other.
+            models.UniqueConstraint(
+                fields=["org", "provider", "external_ticket_id"],
+                condition=~models.Q(external_ticket_id=""),
+                name="case_external_ref_unique",
+            ),
+            # Either both halves of the external reference are set, or
+            # neither is. Half of it is a state with no meaning: a provider
+            # with no ticket can never be matched, and a ticket id with no
+            # provider cannot be resolved against anything.
+            models.CheckConstraint(
+                condition=(
+                    models.Q(provider="", external_ticket_id="")
+                    | (~models.Q(provider="") & ~models.Q(external_ticket_id=""))
+                ),
+                name="case_external_ref_complete",
+            ),
+        ]
         indexes = [
             models.Index(fields=["status"]),
             models.Index(fields=["priority"]),
