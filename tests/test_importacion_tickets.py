@@ -675,3 +675,72 @@ revisar("consultar_tickets_conocidos" in FUENTE_IO
 revisar("no se pudo consultar los tickets conocidos" in FUENTE_IO,
         "si esa consulta falla, el ciclo entero aborta",
         "seguir sin saber que existe significa volver a crearlo todo")
+
+
+# =============================================================================
+#  13. EL MAPEO DE ESTADOS  --  el bug que costo cuatro casos reales
+# =============================================================================
+
+print("\nun caso importado nace con el estado que le toca, no con uno fijo")
+
+# La primera importacion real creo 28 casos y CUATRO nacieron mal: los que
+# estaban 'En Progreso' en el proveedor quedaron 'New' en vez de 'Assigned',
+# porque el caller mandaba "status": "New" fijo. El writer aceptaba los dos, y
+# las pruebas del writer probaban el writer -- nadie probaba que el caller
+# eligiera bien.
+revisar(imp.estado_inicial("Nuevo") == "New",
+        "'Nuevo' nace como 'New'")
+revisar(imp.estado_inicial("En Progreso") == "Assigned",
+        "'En Progreso' nace como 'Assigned'",
+        "los tickets 91908, 91972, 91999 y 92137 nacieron 'New' por este bug")
+revisar(imp.estado_inicial("EN  progreso") == "Assigned",
+        "y el mapeo normaliza igual que el resto del filtro")
+
+revisar(imp.estado_inicial("Cerrado") is None,
+        "'Cerrado' NO tiene mapeo, a proposito",
+        "segunda capa: si alguien lo agregara a estados_descubrimiento, "
+        "tampoco entraria")
+revisar(imp.estado_inicial("Reabierto") is None and imp.estado_inicial("") is None,
+        "un estado desconocido tampoco tiene mapeo")
+
+# Y lo que importa: sin mapeo NO se importa, en vez de caer a un valor por
+# defecto que repetiria el error cada hora en silencio.
+raro = config_piloto(estados_descubrimiento=["Nuevo", "Cerrado", "Reabierto"])
+vs = descubrir(raro, [ticket(200, estado="Cerrado"),
+                      ticket(201, estado="Reabierto"),
+                      ticket(202, estado="Nuevo")])
+revisar(resultados(vs) == [imp.ESTADO_SIN_MAPEO, imp.ESTADO_SIN_MAPEO,
+                           imp.CANDIDATO],
+        "un estado permitido pero sin mapeo se descarta con motivo propio",
+        "fail-closed: 'no se como crearlo' no puede significar 'crealo igual'")
+
+# El cuerpo que se le manda al CRM lleva ese estado, no uno fijo.
+FUENTE_IO_2 = (RAIZ / "nucleo" / "seguimiento"
+               / "importacion_io.py").read_text(encoding="utf-8")
+revisar('"status": imp.estado_inicial(' in FUENTE_IO_2,
+        "el cuerpo que va al writer usa el mapeo, no una constante")
+revisar('"status": "New",' not in FUENTE_IO_2,
+        "y ya no queda ningun 'New' fijo en el cuerpo")
+
+
+# =============================================================================
+#  14. EL FOOTER DEL CLI  --  no puede decir lo contrario de lo que paso
+# =============================================================================
+
+print("\nel CLI no afirma que no creo nada despues de crear casos")
+
+FUENTE_CLI = (RAIZ / "cli" / "importar_tickets.py").read_text(encoding="utf-8")
+cola = FUENTE_CLI.split("Importacion aplicada en Dexter")
+revisar(len(cola) == 2, "el cierre distingue apply de dry-run")
+# La frase de dry-run tiene que estar en la rama 'else', nunca suelta.
+# La frase de dry-run tiene que estar DENTRO del else, no suelta: se comprueba
+# sobre las lineas anteriores, no sobre el texto crudo.
+_lineas = FUENTE_CLI.splitlines()
+_i = next(n for n, l in enumerate(_lineas)
+          if "No se creo ni actualizo ningun caso" in l)
+revisar(any(l.strip() == "else:" for l in _lineas[max(0, _i - 3):_i]),
+        "'no se creo ningun caso' vive dentro del else del apply",
+        "la primera importacion real creo 28 casos y el CLI cerro diciendo "
+        "que no habia creado ninguno")
+revisar("_resultado['creados']" in FUENTE_CLI,
+        "y el cierre del apply informa los numeros reales")

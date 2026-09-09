@@ -63,6 +63,7 @@ AREA_DESTINO_INVALIDA = "AREA_DESTINO_INVALIDA"
 SIN_RESPONSABLE_DISPONIBLE = "SIN_RESPONSABLE_DISPONIBLE"
 SIN_SERVICIO = "SIN_SERVICIO"
 DESCARTADO_POR_ESTADO = "DESCARTADO_POR_ESTADO"
+ESTADO_SIN_MAPEO = "ESTADO_SIN_MAPEO"
 
 # --- clasificacion de autoria ----------------------------------------------
 DEXTER = "dexter"
@@ -187,6 +188,36 @@ def clasificar_creador(creado_por, external_ticket_id,
     if autor and normalizar(autor) != normalizar(cuenta_api):
         return HUMANO_VERIFICADO
     return EXTERNO_DESCONOCIDO
+
+
+# Con que estado NACE un caso importado, segun el que tenga en el proveedor.
+#
+# El mapeo se aplica UNA sola vez, al crear. Despues el estado de Dexter es de
+# Dexter y la reconciliacion no lo toca -- el del proveedor vive aparte, en
+# 'external_status'.
+#
+# 'Cerrado' no esta, y no es un olvido: la decision de producto es no traer
+# historia resuelta, y el filtro de descubrimiento ya lo excluye. Que tampoco
+# tenga mapeo es la segunda capa: si alguien agregara 'Cerrado' a
+# 'estados_descubrimiento', el ticket no se importaria igual en vez de entrar
+# como caso cerrado que nadie va a mirar.
+MAPEO_ESTADO_INICIAL = {
+    "nuevo": "New",
+    "en progreso": "Assigned",
+}
+
+
+def estado_inicial(external_status) -> str | None:
+    """
+    El 'Case.status' con el que nace un caso importado, o None si no hay mapeo.
+
+    None significa NO IMPORTAR, no "usar el valor por defecto". La version
+    anterior mandaba 'New' fijo, sin mirar el estado externo: los cuatro
+    tickets 'En Progreso' de la primera importacion real nacieron como 'New' y
+    quedaron un escalon antes del que les tocaba. Un valor por defecto habria
+    repetido eso en silencio cada hora.
+    """
+    return MAPEO_ESTADO_INICIAL.get(normalizar(external_status))
 
 
 def momento_del_estado(ticket: dict) -> str:
@@ -367,6 +398,13 @@ def descubrir(config, tickets: list[dict], *,
         # caso ya existe y su estado externo tiene que poder cambiar.
         if v.external_status not in conf.estados_descubrimiento:
             v.resultado = DESCARTADO_POR_ESTADO
+            continue
+
+        # Que el estado este permitido no alcanza: tiene que saberse con que
+        # estado propio nace el caso. Fail-closed -- sin mapeo no se importa.
+        if estado_inicial(v.external_status) is None:
+            v.resultado = ESTADO_SIN_MAPEO
+            v.detalle = f"no hay estado inicial para '{v.external_status}'"
             continue
 
         if conf.tipos_de_creador and \

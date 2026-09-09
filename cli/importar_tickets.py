@@ -232,12 +232,13 @@ def main():
     titulo = f"DRY RUN{' -- PILOTO ' + args.piloto if args.piloto else ''}"
     imprimir(titulo, imp.resumen(veredictos), veredictos, args.detalle)
 
+    _resultado = {"creados": 0, "ya_estaban": 0, "fallidos": 0}
     if args.aplicar:
         print(f"\n{'=' * 74}\n  APLICANDO  --  esto ESCRIBE casos\n{'=' * 74}")
-        r = aplicar(config, args.tenant, veredictos)
-        print(f"  creados ......... {r['creados']}")
-        print(f"  ya estaban ...... {r['ya_estaban']}")
-        print(f"  fallidos ........ {r['fallidos']}")
+        _resultado = aplicar(config, args.tenant, veredictos)
+        print(f"  creados ......... {_resultado['creados']}")
+        print(f"  ya estaban ...... {_resultado['ya_estaban']}")
+        print(f"  fallidos ........ {_resultado['fallidos']}")
 
     if args.reconciliar:
         cambios = imp.reconciliar(
@@ -264,7 +265,15 @@ def main():
             print(f"    ticket {c.external_ticket_id}: {dif}")
 
     print(f"\n{'=' * 74}")
-    print("  No se creo ni actualizo ningun caso. Contra WispHub, solo GET.")
+    if args.aplicar:
+        # Decir "no se creo nada" despues de crear 28 casos no es un detalle de
+        # redaccion: es la ultima linea que alguien lee para saber que paso, y
+        # decia lo contrario de lo que habia pasado.
+        print(f"  Importacion aplicada en Dexter: {_resultado['creados']} creados, "
+              f"{_resultado['ya_estaban']} existentes, {_resultado['fallidos']} "
+              f"fallidos. Contra WispHub, solo GET.")
+    else:
+        print("  No se creo ni actualizo ningun caso. Contra WispHub, solo GET.")
     print(f"{'=' * 74}")
 
 

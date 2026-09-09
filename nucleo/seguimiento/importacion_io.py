@@ -279,7 +279,8 @@ def _cuerpo_de(v, config) -> dict:
         "external_fetched_at": datetime.now(timezone.utc).isoformat(),
         "assigned_to": v.responsable,
         "priority": v.prioridad or "Normal",
-        "status": "New",
+        # El estado que le corresponde por el que tiene alla, no un fijo.
+        "status": imp.estado_inicial(v.external_status),
         "name": (v.asunto or "Ticket importado")[:64],
         "description": " ".join(x for x in partes if x),
     }
