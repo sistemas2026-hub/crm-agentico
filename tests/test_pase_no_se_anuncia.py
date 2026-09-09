@@ -151,6 +151,29 @@ afirmar("h.deriva_rol" in fuente_motor and "paso_a_otra_area=paso" in fuente_mot
         "distinto")
 
 
+print("\n== 5b. si se agotan los intentos, se entrega igual ==")
+# Medido el 09/09/2026, y es una regresion que introdujo esta misma guarda:
+# "buenas para una instalacion de telefonia" derivo bien, la redaccion se
+# rechazo tres veces por prometer, y el cliente recibio "No pude terminar de
+# redactar la respuesta" -- o sea NADA, mas un pedido de que escriba de nuevo.
+#
+# La guarda existe para que no reciba una promesa vacia. Dejarlo sin ninguna
+# respuesta cambia un mal por uno PEOR: una respuesta que anuncia un pase al
+# menos dice algo y deja seguir la conversacion.
+afirmar("candidato" in cuerpo,
+        "se conserva el ultimo texto que ERA una respuesta, aunque la guarda "
+        "lo rechace")
+afirmar("if candidato:" in cuerpo,
+        "y al agotarse los intentos se entrega ese, no el aviso generico")
+afirmar(0 < cuerpo.find("if candidato:")
+        < cuerpo.find("se agotaron los {intentos} intentos de redaccion"),
+        "el respaldo va ANTES del aviso de 'no pude redactar': ese aviso queda "
+        "solo para cuando no hay absolutamente nada escrito")
+afirmar("guardia_salida.verificar(candidato)" in cuerpo,
+        "y el respaldo pasa igual por la guardia de salida -- degradar la "
+        "calidad de la respuesta no puede degradar lo que se filtra")
+
+
 print("\n== 5. se REHACE, no se bloquea ==")
 # Bloquear dejaria al cliente sin respuesta, que es el mismo mal que se
 # persigue. El bucle pide otra redaccion, igual que hace con una vacia.

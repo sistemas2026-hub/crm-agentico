@@ -1815,6 +1815,7 @@ def _redactar(referencia_modelo: str, historial: list[dict], temperatura: float,
     # El historial del reintento, que NO es el mismo que el del primer intento
     # -- ver el bloque de correccion mas abajo.
     historial_intento = historial
+    candidato = ""            # el mejor texto que se llego a redactar
 
     for intento in range(intentos):
         resp = cliente.chat(referencia_modelo, historial_intento, tools=None,
@@ -1829,6 +1830,11 @@ def _redactar(referencia_modelo: str, historial: list[dict], temperatura: float,
         # traza confirma que este turno YA derivo -- ver _RE_ANUNCIA_PASE.
         muerta = (_promete_en_vez_de_responder(limpio, nombres_area or set())
                   if limpio and paso_a_otra_area else None)
+        # Se conserva el ultimo texto que al menos ERA una respuesta, aunque
+        # esta guarda lo rechace. Ver el final de la funcion: quedarse sin nada
+        # es peor que entregar una respuesta imperfecta.
+        if limpio and not _RE_RESPUESTA_CRUDA.match(limpio):
+            candidato = limpio
         if not limpio or _RE_RESPUESTA_CRUDA.match(limpio) or muerta:
             # Por que no sirvio. Sin esto, cuando el cliente ve "no pude
             # terminar de redactar" no queda NADA en el log: ni cuantas veces
@@ -1886,6 +1892,26 @@ def _redactar(referencia_modelo: str, historial: list[dict], temperatura: float,
                 print(f"[salida] fuga bloqueada en redaccion final: '{fuga}'")
             historial.append({"role": "assistant", "content": limpio})
             return limpio
+    # SI HAY ALGO ESCRITO, SE ENTREGA -- aunque no haya pasado la guarda.
+    #
+    # Esa guarda existe para que el cliente no reciba una promesa vacia. Si
+    # ademas lo deja sin NINGUNA respuesta, cambia un mal por uno peor: una
+    # respuesta que anuncia un pase al menos dice algo y deja seguir la
+    # conversacion; el aviso de "no pude redactar" no dice nada y ademas le
+    # pide al cliente que escriba de nuevo.
+    #
+    # Medido el 09/09/2026: "buenas para una instalacion de telefonia" derivo
+    # bien y despues se agotaron los tres intentos -- el cliente se quedo con
+    # el aviso generico. La guarda se habia comido la respuesta que existia.
+    if candidato:
+        print(f"[modelo] se agotaron los {intentos} intentos, pero habia una "
+              f"redaccion utilizable: se entrega esa en vez del aviso")
+        candidato, fuga = guardia_salida.verificar(candidato)
+        if fuga:
+            print(f"[salida] fuga bloqueada en la redaccion de respaldo: '{fuga}'")
+        historial.append({"role": "assistant", "content": candidato})
+        return candidato
+
     print(f"[modelo] se agotaron los {intentos} intentos de redaccion -- al "
           f"cliente le sale el aviso de reintentar")
     historial.append({"role": "assistant", "content": ""})
