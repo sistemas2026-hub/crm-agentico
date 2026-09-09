@@ -12,6 +12,37 @@
 import { env } from '$env/dynamic/private';
 import { headersMotor } from './motor-headers.js';
 
+
+/**
+ * Que credenciales pertenecen a una integracion CON PANTALLA PROPIA.
+ *
+ * La regla de producto es: un secreto tiene UN SOLO lugar de edicion. Si la
+ * integracion tiene su pantalla --donde ademas se configura el subdominio, la
+ * URL del webhook, y donde esta el boton de probar conexion-- ese es el lugar
+ * oficial, y el inventario solo informa el estado.
+ *
+ * El motivo es concreto: SmartOLT no es una clave suelta, es subdominio + clave
+ * + prueba. Dejar cambiar la clave desde el inventario permite guardarla sin
+ * haber probado nunca la combinacion, y que todo PAREZCA bien hasta que un
+ * cliente escribe y el asistente no puede consultar la ONU.
+ *
+ * Este mapa vive en el frontend y no en la config del tenant a proposito: dice
+ * que PANTALLAS existen en esta aplicacion, que es conocimiento del frontend.
+ * Lo que varia por empresa --que credenciales hacen falta-- lo sigue diciendo
+ * el catalogo del asistente. Una credencial que no este aca simplemente no
+ * tiene pantalla propia y se edita desde el inventario, que es lo correcto
+ * para el proximo ISP: si declara MIKROTIK_API_KEY y nadie le hizo una
+ * pantalla, igual se puede cargar.
+ */
+const PANTALLA_PROPIA = {
+  SMARTOLT_API_KEY: { integracion: 'SmartOLT', href: '/settings/canales/smartolt' },
+  WHATSAPP_PHONE_NUMBER_ID: { integracion: 'WhatsApp', href: '/settings/canales/whatsapp' },
+  WHATSAPP_TOKEN: { integracion: 'WhatsApp', href: '/settings/canales/whatsapp' },
+  WHATSAPP_APP_SECRET: { integracion: 'WhatsApp', href: '/settings/canales/whatsapp' },
+  WHATSAPP_VERIFY_TOKEN: { integracion: 'WhatsApp', href: '/settings/canales/whatsapp' },
+  WHATSAPP_WABA_ID: { integracion: 'WhatsApp', href: '/settings/canales/whatsapp' }
+};
+
 function destino() {
   const baseUrl = env.PRIVATE_ASISTENTE_URL;
   const tenant = env.PRIVATE_ASISTENTE_TENANT;
@@ -30,7 +61,11 @@ export async function leerCredenciales() {
     );
     if (!r.ok) return { credenciales: [], disponible: false };
     const d = await r.json();
-    return { credenciales: d.credenciales ?? [], disponible: true };
+    const credenciales = (d.credenciales ?? []).map((c) => ({
+      ...c,
+      ...(PANTALLA_PROPIA[c.nombre] ?? { integracion: null, href: null })
+    }));
+    return { credenciales, disponible: true };
   } catch {
     // Que el asistente no responda no puede dejar la pantalla rota: se avisa
     // y se muestra vacía, igual que hace la cola de tickets con las áreas.
@@ -42,6 +77,16 @@ export async function leerCredenciales() {
 export async function guardarCredencial(nombre, valor, descripcion) {
   const cfg = destino();
   if (!cfg) return { ok: false, error: 'El asistente no está configurado.' };
+  // Un secreto tiene un solo lugar de edicion, y eso se hace cumplir ACA y no
+  // solo escondiendo el formulario: una pantalla que oculta un boton sigue
+  // aceptando el POST que alguien arme a mano.
+  const propia = PANTALLA_PROPIA[nombre];
+  if (propia) {
+    return {
+      ok: false,
+      error: `'${nombre}' se configura en ${propia.integracion}, que además prueba la conexión antes de guardar.`
+    };
+  }
   try {
     const r = await fetch(`${cfg.baseUrl}/secretos`, {
       method: 'POST',
@@ -60,6 +105,10 @@ export async function guardarCredencial(nombre, valor, descripcion) {
 export async function borrarCredencial(nombre) {
   const cfg = destino();
   if (!cfg) return { ok: false, error: 'El asistente no está configurado.' };
+  const propia = PANTALLA_PROPIA[nombre];
+  if (propia) {
+    return { ok: false, error: `'${nombre}' se administra en ${propia.integracion}.` };
+  }
   try {
     const r = await fetch(
       `${cfg.baseUrl}/secretos/${encodeURIComponent(nombre)}`,

@@ -1,24 +1,31 @@
 <script>
   /**
-   * Credenciales del asistente.
+   * Credenciales: el inventario, no un segundo formulario.
    *
-   * POR QUÉ EXISTE
-   * Hasta ahora cargar una credencial nueva obligaba a entrar al contenedor.
-   * El endpoint del asistente siempre fue genérico, pero las únicas pantallas
-   * que lo llamaban estaban cableadas a WhatsApp y a SmartOLT. Dar de alta una
-   * empresa no puede depender de una sesión de consola: esto es SaaS y el
-   * próximo ISP trae sus propias claves.
+   * LA REGLA
+   * Un secreto tiene UN SOLO lugar de edición. Si la integración tiene pantalla
+   * propia, ahí se configura y acá sólo se informa el estado. Si no la tiene,
+   * acá se edita.
    *
-   * LA LISTA NO ESTÁ ESCRITA ACÁ
-   * La arma el asistente leyendo los `auth_ref` que declara el catálogo de
-   * herramientas del tenant. Si mañana una empresa declara
-   * `OTRO_PROVEEDOR_API_KEY`, aparece sola y esta pantalla no cambia.
+   * El motivo es concreto: SmartOLT no es una clave suelta, es subdominio +
+   * clave + probar conexión. Dejar cambiarla desde el inventario permite
+   * guardar sin haber probado nunca la combinación, y que todo PAREZCA bien
+   * hasta que un cliente escribe y el asistente no puede consultar la ONU.
    *
-   * LO QUE NUNCA SE MUESTRA
-   * El valor. Ni al listar ni después de guardar: el asistente devuelve el
-   * nombre, para qué sirve, cuándo se cargó y una pista de los últimos
-   * caracteres. Una credencial que se puede volver a leer desde una pantalla
-   * es una credencial que se filtra con una captura de pantalla.
+   * LO QUE SÓLO PUEDE RESPONDER ESTA PANTALLA
+   * «¿Qué le falta a esta empresa para que Dexter funcione completo?». Ni
+   * SmartOLT ni WhatsApp por separado pueden contestarlo: cada una ve la suya.
+   *
+   * QUÉ ES DE ACÁ Y QUÉ DEL ASISTENTE
+   * La lista de credenciales que hacen falta la arma el asistente con su propio
+   * catálogo, así que el próximo ISP no necesita que nadie toque código. Lo que
+   * vive del lado del frontend es a qué pantalla mandar cada una — eso es saber
+   * qué pantallas existen en esta aplicación.
+   *
+   * EL VALOR NUNCA SALE
+   * Ni al listar ni después de guardar: viajan el nombre, para qué sirve,
+   * cuándo se cargó y los últimos caracteres. Una credencial que se puede
+   * volver a leer desde una pantalla es una que se filtra con una captura.
    */
   import { enhance } from '$app/forms';
 
@@ -36,20 +43,43 @@
 
   const credenciales = $derived(data.credenciales ?? []);
   const faltan = $derived(credenciales.filter((c) => c.declarado && !c.cargado));
-  const huerfanas = $derived(credenciales.filter((c) => !c.declarado && c.cargado));
+
+  /**
+   * Agrupadas por integración. Las que no tienen pantalla propia van juntas al
+   * final: son exactamente las que sí se editan desde acá.
+   */
+  const grupos = $derived.by(() => {
+    /** @type {Map<string, { integracion: string|null, href: string|null, items: any[] }>} */
+    const m = new Map();
+    for (const c of credenciales) {
+      const clave = c.integracion ?? '';
+      if (!m.has(clave)) {
+        m.set(clave, { integracion: c.integracion ?? null, href: c.href ?? null, items: [] });
+      }
+      m.get(clave)?.items.push(c);
+    }
+    const propias = [...m.values()]
+      .filter((g) => g.integracion)
+      .sort((a, b) => (a.integracion ?? '').localeCompare(b.integracion ?? ''));
+    const sueltas = m.get('');
+    return sueltas ? [...propias, sueltas] : propias;
+  });
 
   function cuando(iso) {
     if (!iso) return '';
-    const d = new Date(iso);
-    return d.toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' });
+    return new Date(iso).toLocaleDateString('es-CO', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric'
+    });
   }
 </script>
 
 <PageHeader title="Credenciales">
   {#snippet crumb()}<SettingsCrumb />{/snippet}
   {#snippet sub()}
-    Las claves que el asistente necesita para hablar con los sistemas de la
-    empresa. Se guardan cifradas y nunca se vuelven a mostrar.
+    Qué claves necesita esta empresa y cuáles ya están. Se guardan cifradas y
+    nunca se vuelven a mostrar.
   {/snippet}
 </PageHeader>
 
@@ -57,7 +87,7 @@
   {#if !data.disponible}
     <NextAction
       label="El asistente no respondió"
-      text="No se pudo leer qué credenciales hacen falta. La lista sale del catálogo de herramientas del asistente, así que hasta que responda esta pantalla queda vacía."
+      text="No se pudo leer qué credenciales hacen falta. La lista sale del catálogo del asistente, así que hasta que responda esta pantalla queda vacía."
       tone="rust"
     />
   {:else}
@@ -84,118 +114,128 @@
       />
     {/if}
 
-    {#if !credenciales.length}
-      <p class="vacio">Este asistente no declara ninguna credencial todavía.</p>
-    {/if}
-
-    <ul class="lista">
-      {#each credenciales as c (c.nombre)}
-        <li class="fila" class:falta={c.declarado && !c.cargado}>
-          <div class="cabeza">
-            <div>
-              <code class="nombre">{c.nombre}</code>
-              {#if c.cargado}
-                <Pill tone="moss">Cargada</Pill>
-              {:else}
-                <Pill tone="clay">Falta</Pill>
-              {/if}
-              {#if !c.declarado}
-                <Pill tone="slate">Sin usar</Pill>
-              {/if}
-            </div>
-            <button
-              class="v2-btn v2-btn-sm"
-              onclick={() => (editando = editando === c.nombre ? '' : c.nombre)}
-            >
-              {c.cargado ? 'Reemplazar' : 'Cargar'}
-            </button>
-          </div>
-
-          <p class="detalle">
-            {#if c.declarado}
-              La usan <strong>{c.cantidad_herramientas}</strong>
-              {c.cantidad_herramientas === 1 ? 'herramienta' : 'herramientas'}:
-              <span class="herramientas">{c.herramientas.join(', ')}</span>{#if c.cantidad_herramientas > c.herramientas.length}…{/if}
-            {:else}
-              Está cargada pero ninguna herramienta la pide. Puede ser de una
-              integración que se sacó y quedó la credencial viva.
-            {/if}
-          </p>
-
-          {#if c.cargado}
-            <p class="pista">
-              termina en <code>{c.pista}</code> · cargada el {cuando(c.actualizado_en)}
-              {#if c.descripcion}· {c.descripcion}{/if}
-            </p>
+    {#each grupos as g (g.integracion ?? '_sueltas')}
+      <section class="grupo">
+        <header class="titulo">
+          <h2>{g.integracion ?? 'Sin pantalla propia'}</h2>
+          {#if g.href}
+            <a class="v2-btn v2-btn-sm" href={g.href}>Configurar en {g.integracion} →</a>
           {/if}
+        </header>
 
-          {#if editando === c.nombre}
-            <form
-              method="POST"
-              action="?/guardar"
-              class="editor"
-              use:enhance={() => {
-                busy = true;
-                return async ({ update }) => {
-                  await update();
-                  busy = false;
-                  editando = '';
-                };
-              }}
-            >
-              <input type="hidden" name="nombre" value={c.nombre} />
-              <label class="v2-label" for={`v-${c.nombre}`}>Valor</label>
-              <input
-                id={`v-${c.nombre}`}
-                name="valor"
-                type="password"
-                class="v2-input"
-                autocomplete="off"
-                spellcheck="false"
-                placeholder="Pegá la clave acá"
-                required
-              />
-              <label class="v2-label" for={`d-${c.nombre}`}>Para qué es (opcional)</label>
-              <input
-                id={`d-${c.nombre}`}
-                name="descripcion"
-                class="v2-input"
-                value={c.descripcion}
-                placeholder="ej. PAT de importación WispHub → Dexter"
-              />
-              <p class="aviso">
-                Se guarda cifrada y no se puede volver a leer desde acá. Si la
-                perdés, se emite una nueva.
-              </p>
-              <div class="acciones">
-                <button class="v2-btn v2-btn-primary" disabled={busy}>Guardar</button>
-                <button type="button" class="v2-btn" onclick={() => (editando = '')}>
-                  Cancelar
-                </button>
-                {#if c.cargado}
+        {#if g.href}
+          <p class="regla">
+            Se administran desde {g.integracion}, que además prueba la conexión
+            antes de guardar. Acá sólo se ve el estado.
+          </p>
+        {/if}
+
+        <ul class="lista">
+          {#each g.items as c (c.nombre)}
+            <li class="fila" class:falta={c.declarado && !c.cargado}>
+              <div class="cabeza">
+                <div>
+                  <code class="nombre">{c.nombre}</code>
+                  {#if c.cargado}
+                    <Pill tone="moss">Configurada</Pill>
+                  {:else}
+                    <Pill tone="clay">Falta</Pill>
+                  {/if}
+                </div>
+                {#if !c.href}
                   <button
-                    class="v2-btn v2-btn-sm borrar"
-                    formaction="?/borrar"
-                    disabled={busy}
+                    class="v2-btn v2-btn-sm"
+                    onclick={() => (editando = editando === c.nombre ? '' : c.nombre)}
                   >
-                    Borrar
+                    {c.cargado ? 'Reemplazar' : 'Cargar'}
                   </button>
                 {/if}
               </div>
-            </form>
-          {/if}
-        </li>
-      {/each}
-    </ul>
+
+              <p class="detalle">
+                {#if c.declarado}
+                  La usan <strong>{c.cantidad_herramientas}</strong>
+                  {c.cantidad_herramientas === 1 ? 'herramienta' : 'herramientas'}:
+                  <span class="herramientas">{c.herramientas.join(', ')}</span>{#if c.cantidad_herramientas > c.herramientas.length}…{/if}
+                {:else if c.href}
+                  La usa el canal de {c.integracion}, no el catálogo de herramientas.
+                {:else}
+                  Está cargada pero ninguna herramienta la pide. Puede ser de una
+                  integración que se sacó y quedó la credencial viva.
+                {/if}
+              </p>
+
+              {#if c.cargado}
+                <p class="pista">
+                  termina en <code>{c.pista}</code> · cargada el {cuando(c.actualizado_en)}
+                  {#if c.descripcion}· {c.descripcion}{/if}
+                </p>
+              {/if}
+
+              {#if !c.href && editando === c.nombre}
+                <form
+                  method="POST"
+                  action="?/guardar"
+                  class="editor"
+                  use:enhance={() => {
+                    busy = true;
+                    return async ({ update }) => {
+                      await update();
+                      busy = false;
+                      editando = '';
+                    };
+                  }}
+                >
+                  <input type="hidden" name="nombre" value={c.nombre} />
+                  <label class="v2-label" for={`v-${c.nombre}`}>Valor</label>
+                  <input
+                    id={`v-${c.nombre}`}
+                    name="valor"
+                    type="password"
+                    class="v2-input"
+                    autocomplete="off"
+                    spellcheck="false"
+                    placeholder="Pegá la clave acá"
+                    required
+                  />
+                  <label class="v2-label" for={`d-${c.nombre}`}>Para qué es (opcional)</label>
+                  <input
+                    id={`d-${c.nombre}`}
+                    name="descripcion"
+                    class="v2-input"
+                    value={c.descripcion}
+                  />
+                  <p class="aviso">
+                    Se guarda cifrada y no se puede volver a leer desde acá. Si
+                    la perdés, se emite una nueva.
+                  </p>
+                  <div class="acciones">
+                    <button class="v2-btn v2-btn-primary" disabled={busy}>Guardar</button>
+                    <button type="button" class="v2-btn" onclick={() => (editando = '')}>
+                      Cancelar
+                    </button>
+                    {#if c.cargado}
+                      <button class="v2-btn v2-btn-sm borrar" formaction="?/borrar" disabled={busy}>
+                        Borrar
+                      </button>
+                    {/if}
+                  </div>
+                </form>
+              {/if}
+            </li>
+          {/each}
+        </ul>
+      </section>
+    {/each}
 
     <div class="agregar">
       <button class="v2-btn" onclick={() => (agregando = !agregando)}>
         {agregando ? 'Cancelar' : 'Agregar otra credencial'}
       </button>
-      <p class="nota" style="margin-top:6px">
-        Para una clave que todavía no aparece arriba. Pasa cuando la
-        herramienta que la va a usar aún no está en el catálogo del asistente:
-        la credencial se puede cargar antes, y queda esperándola.
+      <p class="regla" style="margin-top:6px">
+        Para una clave que todavía no aparece arriba. Pasa cuando la herramienta
+        que la va a usar aún no está en el catálogo del asistente: la credencial
+        se puede cargar antes y queda esperándola.
       </p>
 
       {#if agregando}
@@ -236,9 +276,8 @@
           <label class="v2-label" for="nueva-desc">Para qué es (opcional)</label>
           <input id="nueva-desc" name="descripcion" class="v2-input" />
           <p class="aviso">
-            El nombre tiene que coincidir exactamente con el `auth_ref` que
-            declara la herramienta. Si no coincide, la herramienta va a seguir
-            sin encontrarla.
+            El nombre tiene que coincidir exactamente con el <code>auth_ref</code>
+            que declara la herramienta, o va a seguir sin encontrarla.
           </p>
           <div class="acciones">
             <button class="v2-btn v2-btn-primary" disabled={busy}>Guardar</button>
@@ -246,22 +285,30 @@
         </form>
       {/if}
     </div>
-
-    {#if huerfanas.length}
-      <p class="nota">
-        {huerfanas.length}
-        {huerfanas.length === 1 ? 'credencial cargada no la pide' : 'credenciales cargadas no las pide'}
-        ninguna herramienta. Borrarlas no rompe nada, y una clave viva que
-        nadie usa es una que nadie va a rotar.
-      </p>
-    {/if}
   {/if}
 </div>
 
 <style>
+  .grupo {
+    margin-top: 26px;
+  }
+  .titulo {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 6px;
+  }
+  .titulo h2 {
+    font-size: 13px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--v2-muted, #5c6672);
+    margin: 0;
+  }
   .lista {
     list-style: none;
-    margin: 20px 0 0;
+    margin: 8px 0 0;
     padding: 0;
     display: flex;
     flex-direction: column;
@@ -294,8 +341,7 @@
   }
   .detalle,
   .pista,
-  .nota,
-  .vacio {
+  .regla {
     margin: 6px 0 0;
     font-size: 13px;
     color: var(--v2-muted, #5c6672);
@@ -334,15 +380,9 @@
     margin-left: auto;
     color: var(--v2-rust, #a3402f);
   }
-  .nota {
-    margin-top: 16px;
-  }
   .agregar {
-    margin-top: 20px;
+    margin-top: 28px;
     padding-top: 16px;
     border-top: 1px solid var(--v2-rule, #e4e7e9);
-  }
-  .agregar .nota {
-    margin-top: 6px;
   }
 </style>
