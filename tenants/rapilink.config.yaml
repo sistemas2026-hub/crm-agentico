@@ -2870,6 +2870,152 @@ herramientas:
     auth_ref: WISPHUB_API_KEY
     auth_esquema: Api-Key
 
+  # Listado de tickets por VENTANA DE FECHA, para el importador.
+  #
+  # No la llama el modelo -- no esta en el catalogo de ningun rol: la usa
+  # nucleo/seguimiento/importacion.py para descubrir tickets que abrio una
+  # persona del otro lado.
+  #
+  # Los cuatro filtros estan verificados en vivo, no tomados de la doc:
+  #   fecha_creacion_0 / _1   un solo guion bajo, NO '__range' (skill wisphub-api)
+  #   limit / offset          probados el 09/09/2026 con el metodo del valor
+  #                           imposible: offset=5 devuelve los cinco SIGUIENTES,
+  #                           no los mismos. Si los ignorara, paginar daria la
+  #                           primera pagina para siempre y el importador
+  #                           creeria que la empresa tiene 100 tickets.
+  #
+  # La ventana no es opcional y esto no se puede llamar sin ella: sin filtro de
+  # fecha la API aplica un recorte propio (2.635 sin filtro contra 2.637 de un
+  # solo mes -- un subconjunto mayor que el conjunto), asi que ese total no es
+  # el historico. Y mas de dos meses responde HTTP 400.
+  - nombre: listar_tickets_recientes
+    tipo: http
+    descripcion: >
+      Lista los tickets de WispHub creados dentro de una ventana de fechas.
+      NO la llames tu: la ejecuta el importador de tickets.
+    solo_lectura: true
+    roles_permitidos: [administracion]
+    base_url: https://api.wisphub.io
+    endpoint: /api/tickets/
+    metodo: GET
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    # Para que el backend pueda pedirla sin copiarse la credencial de WispHub.
+    invocable_por_servicio: true
+    # 'descripcion' es texto libre de un operador y puede traer PII embebida
+    # (PRD 7.4). El importador no la usa para decidir nada -- las heuristicas
+    # sobre este campo estan descartadas a proposito-- pero si termina en la
+    # descripcion de un caso, tiene que pasar por el redactor primero.
+    campos_texto_libre: [descripcion]
+    filtros_verificados:
+      fecha_creacion_0:
+        param: fecha_creacion_0
+        tipo: texto
+        verificado_el: 2026-09-09
+      fecha_creacion_1:
+        param: fecha_creacion_1
+        tipo: texto
+        verificado_el: 2026-09-09
+      # NUMERICO, y una peticion por estado. Verificado el 09/09/2026 sobre la
+      # ventana de 14 dias: 1 -> 102 Nuevo, 2 -> 9 En Progreso, 4 -> 936
+      # Cerrado, y 102+9+936 = 1.047 = el total sin filtro. Ademas:
+      # '?estado=1&estado=2' NO los une -- se queda con el ultimo y devuelve 9.
+      # Por eso el importador pide un estado por vez en vez de mandar la lista,
+      # que habria traido un solo estado sin avisar.
+      estado:
+        param: estado
+        tipo: id
+        verificado_el: 2026-09-09
+      limit:
+        param: limit
+        tipo: id
+        verificado_el: 2026-09-09
+      offset:
+        param: offset
+        tipo: id
+        verificado_el: 2026-09-09
+
+  # UN ticket, por su numero. Para la reconciliacion.
+  #
+  # Existe porque 'consultar_ticket' NO sirve para esto y se parece bastante a
+  # que si: apunta a '/api/tickets/' sin marcador y sin filtros verificados,
+  # asi que pedirle un id devuelve el LISTADO entero. Como el listado tambien
+  # es un dict no vacio, la reconciliacion lo daba por leido y proponia dejar
+  # 'external_status' en blanco sobre los 16 casos -- "16/16 encontrados" con
+  # cero datos adentro. Visto en el primer dry-run de reconciliacion
+  # (09/09/2026).
+  #
+  # El marcador '{id_ticket}' en el endpoint es lo que fuerza la ruta del
+  # detalle, y 'filtros_verificados' es lo que permite que el valor llegue:
+  # sin declararlo, el ejecutor lo descarta (fail-closed) y la URL queda sin
+  # resolver.
+  # --- escritura de casos importados -------------------------------------
+  # Las dos las ejecuta el IMPORTADOR, nunca el modelo. Van contra el propio
+  # CRM, por la misma capa y con la misma credencial que 'crear_caso_soporte'
+  # -- no hay un segundo mecanismo de autenticacion.
+  #
+  # Cuelgan de '/api/importacion/' y no de '/api/cases/' a proposito: el
+  # alcance de un token no interactivo se calcula con el primer segmento
+  # despues de '/api/' (ver common/scopes.py), asi que ponerlas bajo 'cases'
+  # obligaria a darle al motor permiso para escribir CUALQUIER caso del CRM.
+  # Con recurso propio, el token lleva 'importacion:write' y nada mas.
+  #
+  # La organizacion NO viaja en el cuerpo: la resuelve el middleware del CRM
+  # desde la credencial (claim firmado del JWT, o la org del PAT). Mandarla
+  # seria darle al llamante la forma de escribir en otro tenant.
+  - nombre: importar_caso_externo
+    tipo: http
+    descripcion: >
+      Crea el caso de un ticket externo, o devuelve el que ya existe. NO la
+      llames tu: la ejecuta el importador.
+    solo_lectura: false
+    requiere_confirmacion: true
+    roles_permitidos: [administracion]
+    base_url: http://backend:8000/api
+    endpoint: /importacion/casos/
+    metodo: POST
+    auth_ref: BOTTLECRM_API_TOKEN
+    auth_esquema: Bearer
+
+  - nombre: reconciliar_caso_externo
+    tipo: http
+    descripcion: >
+      Actualiza en el caso lo que informa el proveedor. Nunca el estado de
+      Dexter. NO la llames tu: la ejecuta el importador.
+    solo_lectura: false
+    requiere_confirmacion: true
+    roles_permitidos: [administracion]
+    base_url: http://backend:8000/api
+    endpoint: /importacion/casos/{id_caso}/reconciliar/
+    metodo: POST
+    auth_ref: BOTTLECRM_API_TOKEN
+    auth_esquema: Bearer
+    filtros_verificados:
+      id_caso:
+        param: id_caso
+        tipo: texto
+        verificado_el: 2026-09-09
+
+  - nombre: consultar_ticket_por_id
+    tipo: http
+    descripcion: >
+      Trae UN ticket de WispHub por su numero. NO la llames tu: la ejecuta el
+      importador para reconciliar un ticket que ya tiene caso.
+    solo_lectura: true
+    roles_permitidos: [administracion]
+    base_url: https://api.wisphub.io
+    endpoint: /api/tickets/{id_ticket}/
+    metodo: GET
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    invocable_por_servicio: true
+    campos_texto_libre: [descripcion]
+    filtros_verificados:
+      id_ticket:
+        param: id_ticket
+        tipo: texto
+        verificado_el: 2026-09-09
+
   - nombre: consultar_tecnicos
     tipo: http
     descripcion: >

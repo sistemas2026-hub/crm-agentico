@@ -61,6 +61,7 @@ API_RESOURCES = frozenset(
         "custom-fields",
         "dashboard",
         "documents",
+        "importacion",
         "invoices",
         "leads",
         "macros",

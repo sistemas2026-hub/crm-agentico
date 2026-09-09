@@ -2052,6 +2052,189 @@ class Canal(Base):
 
 
 # =============================================================================
+#  IMPORTACION DE TICKETS DEL SISTEMA OPERATIVO
+# =============================================================================
+
+class DestinoTicket(Base):
+    """
+    A que area de la empresa le toca un ticket importado.
+
+    Se declara el AREA y no una persona a proposito. Una persona se va de
+    vacaciones, entra otra, cambia de equipo -- y con el profile_id escrito en
+    la config, cada uno de esos dias normales obligaria a editar la
+    integracion. El area es una regla de negocio y cambia cuando cambia la
+    empresa, que es mucho menos seguido.
+
+    Quien recibe el ticket se resuelve en el momento del import:
+
+        area -> areas_de_colaboradores() -> candidatos -> reparto -> assigned_to
+
+    Y el area que la pantalla muestra sale de vuelta de esa persona, porque
+    'Case' no tiene columna de area (ver tickets/+page.server.js). O sea que
+    el area viaja de la config a la pantalla dando la vuelta por el
+    responsable, y en ningun punto queda escrita en la fila.
+    """
+    # Tiene que coincidir con 'AreaDeTrabajo.nombre', que el propio schema
+    # documenta como "nombre interno, estable". No hace falta un identificador
+    # aparte: ese ya lo es.
+    area: str
+    # La prioridad del CRM, no la de WispHub. Las dos escalas existen y no
+    # coinciden ('Muy Alta' alla, 'Urgent' aca), y traducir automaticamente
+    # una en la otra seria inventar una equivalencia que nadie decidio.
+    prioridad: str = "Normal"
+
+
+class ImportacionTickets(Base):
+    """
+    Que tickets del sistema del ISP entran a la bandeja de Dexter, y a quien.
+
+    TODO APAGADO POR DEFECTO, y no como precaucion generica: medido el
+    08/09/2026, WispHub crea 83 tickets por dia -- 2.400 al mes contra los 66
+    casos que la bandeja tiene en total. La mayoria son campañas
+    administrativas (encuestas de satisfaccion, avisos de cartera) que nadie
+    va a trabajar desde aca. Importar sin filtro no es "traer de mas": es
+    enterrar la bandeja.
+
+    Por eso una lista vacia significa NADA, nunca "todo". Es la unica lectura
+    segura: si alguien despliega el codigo sin configurar, no pasa nada. La
+    lectura contraria convertiria un olvido en 2.400 casos.
+
+    NOMBRES Y NO IDENTIFICADORES
+    ----------------------------
+    'GET /api/tickets/' devuelve 'departamento' y 'asunto' como texto y no
+    trae ningun id para ellos (verificado sobre 1.162 tickets reales, ninguna
+    clave anidada). Asi que el filtro compara nombres NORMALIZADOS -- minusculas,
+    sin acentos, espacios colapsados-- y eso es deuda conocida, no una
+    eleccion: el dia que la API exponga ids, esto pasa a ids y la normalizacion
+    se vuelve innecesaria.
+    """
+    # Como se llama el sistema del que se importa. Va en 'Case.provider' y es
+    # la mitad de la llave de unicidad, asi que sin esto no se puede importar
+    # nada -- vacio significa apagado, igual que el resto.
+    #
+    # No esta fijo en el codigo porque el proximo ISP puede usar otro sistema,
+    # y porque el nucleo no conoce a ningun cliente: es la regla de
+    # ARQUITECTURA.md, y la guarda 'tests/test_nucleo_sin_tenants.py' la hace
+    # cumplir.
+    proveedor: str = ""
+
+    # Con que nombre firma el proveedor lo que entra por su API.
+    #
+    # Hace falta para la clasificacion de autoria, y NO identifica a Dexter:
+    # identifica "por API". Todo lo automatico sale con esa cuenta -- Dexter,
+    # cualquier otra integracion que comparta la clave, y una persona que
+    # inicie sesion con ella. Cada empresa tiene la suya.
+    cuenta_api: str = ""
+
+    # Cada cuantas horas corre el barrido. 0 = apagado, y es el valor por
+    # defecto: desplegar este codigo no puede empezar a importar solo.
+    cada_horas: int = 0
+
+    # --- que entra (fail-closed en los dos niveles) ----------------------
+    # Filtro grueso. Vacio = no entra nada.
+    departamentos: list[str] = Field(default_factory=list)
+    # Filtro fino, en la forma 'departamento|asunto'. La clave lleva el
+    # departamento adentro porque el mismo asunto existe en dos: 'Cambio De
+    # Contraseña En Router Wifi' aparece 100 veces en Administrativo y 28 en
+    # Soporte Tecnico, y son trabajos distintos con destinos distintos.
+    #
+    # 'departamento|*' acepta todos los asuntos de ese departamento -- que es
+    # como se expresa "toda la cola de Soporte" sin listar 41 asuntos que
+    # cambian solos. Vacio = no entra nada.
+    asuntos: list[str] = Field(default_factory=list)
+    # En que estado tiene que estar un ticket ALLA para que se cree un caso
+    # aca. Vacio = ninguno, igual que los dos de arriba.
+    #
+    # Existe porque el 84,9 % de lo que la lista blanca del piloto acepta ya
+    # esta cerrado (medido: 118 de 139 en catorce dias). Importar eso seria
+    # llenar la bandeja de problemas que se resolvieron antes de que Dexter
+    # los administrara. El objetivo es gestionar el trabajo VIVO del ISP, no
+    # tener una copia de WispHub.
+    #
+    # Un ticket que se cierra DESPUES de importado no desaparece ni se
+    # reimporta: lo sigue la reconciliacion, que no mira esta lista.
+    #
+    # Los valores son las etiquetas crudas del proveedor ('Nuevo',
+    # 'En Progreso', 'Cerrado') porque es lo que devuelve la lectura. El
+    # filtro se aplica ademas en el servidor cuando se puede -- ver
+    # 'estados_para_el_proveedor'.
+    estados_descubrimiento: list[str] = Field(default_factory=list)
+    # Opcional: 'dexter', 'humano_verificado', 'externo_desconocido'. Vacio
+    # aca SI significa "cualquiera" -- a diferencia de los dos de arriba,
+    # porque este no es el filtro que contiene el volumen, y exigirlo obligaria
+    # a escribir los tres valores para no filtrar por creador.
+    tipos_de_creador: list[str] = Field(default_factory=list)
+
+    # --- a quien le toca -------------------------------------------------
+    # Misma clave que 'asuntos', con la misma caida a 'departamento|*'. Un
+    # ticket que pasa el filtro y no encuentra destino NO se importa: se
+    # reporta como SIN_DESTINO_CONFIGURADO. Crear el caso igual lo dejaria sin
+    # responsable, y sin responsable no tiene area -- terminaria invisible para
+    # todo el equipo salvo quien administra, que es peor que no crearlo.
+    destinos: dict[str, DestinoTicket] = Field(default_factory=dict)
+
+    # --- ventana de descubrimiento ---------------------------------------
+    # Cuantos dias hacia atras mira cada pasada. La ventana no es opcional: sin
+    # filtro de fecha el proveedor devuelve un recorte propio que no es el
+    # historico (2.635 sin filtro contra 2.637 de un solo mes -- un
+    # subconjunto mayor que el conjunto).
+    #
+    # 30 y no 7 porque el costo esta medido y es ridiculo: en 30 dias hay 1.047
+    # tickets, de los cuales el filtro de estado en servidor transporta 198, y
+    # la lista blanca del piloto deja 21 candidatos. A cambio, la ventana ES la
+    # red de recuperacion -- sin watermark, lo que se pierde en una caida se
+    # recupera solo mientras la caida dure menos que la ventana.
+    #
+    # El tope duro son 55 dias: el proveedor responde HTTP 400 a cualquier
+    # ventana mayor a dos meses. Se valida aca y no solo al pedir, para que un
+    # valor imposible se vea al guardar la config y no en el primer barrido.
+    ventana_dias: int = 30
+
+    @field_validator("ventana_dias")
+    @classmethod
+    def _ventana_dentro_del_limite(cls, v: int) -> int:
+        if not 1 <= v <= 55:
+            raise ValueError(
+                f"ventana_dias={v}: tiene que estar entre 1 y 55. El proveedor "
+                f"rechaza con HTTP 400 las ventanas de mas de dos meses.")
+        return v
+    # NO HAY MARCA DE AGUA, y es una decision, no un olvido.
+    #
+    # La ventana movil ya es el checkpoint. Cada pasada mira los ultimos
+    # 'ventana_dias' completos, asi que un ticket creado en ese lapso se vuelve
+    # a ver hasta 168 veces con el barrido horario -- y 167 de esas se cortan
+    # en seco contra los casos ya conocidos, antes de resolver ninguna
+    # identidad. La unicidad la garantiza UNIQUE(org, provider,
+    # external_ticket_id); volver a mirar no cuesta nada.
+    #
+    # Guardar el checkpoint aca habria sido peor que innecesario: 'tenant_config'
+    # es configuracion EDITABLE, el editor la reescribe entera, sube
+    # 'config_version' en cada cambio real y ademas guarda una copia completa en
+    # 'tenant_config_historial' -- cuya razon de existir es poder responder que
+    # configuracion estaba sirviendo en un momento dado. Un watermark horario
+    # meteria 24 versiones diarias de ruido de maquina en el registro de
+    # cambios humanos, y competiria con la pantalla de ajustes por la misma
+    # fila.
+    #
+    # Y el efecto practico es mejor: una ventana de 7 dias es una red de
+    # recuperacion de 7 dias. Un ciclo que falla entero no deja nada
+    # desincronizado, porque no habia nada que avanzar.
+    solapamiento_horas: int = 6
+
+    # --- reconciliacion ---------------------------------------------------
+    # Que casos se vuelven a consultar. Solo los que todavia se estan
+    # trabajando: releer para siempre miles de casos cerrados es trafico
+    # permanente para enterarse de nada.
+    reconciliar_estados: list[str] = Field(
+        default_factory=lambda: ["New", "Assigned", "Pending"])
+    # Y una gracia despues de cerrar, porque el cierre en Dexter y el del
+    # proveedor no son el mismo momento: un caso cerrado aca puede seguir
+    # moviendose alla unos dias, y esa divergencia es justo la que se quiere
+    # poder mostrar.
+    gracia_cierre_dias: int = 7
+
+
+# =============================================================================
 #  RAIZ
 # =============================================================================
 
@@ -2141,6 +2324,8 @@ class TenantConfig(Base):
     limites: Limites = Field(default_factory=Limites)
     evaluacion: Evaluacion = Field(default_factory=Evaluacion)
     manual: Manual = Field(default_factory=Manual)
+    importacion_tickets: ImportacionTickets = Field(
+        default_factory=ImportacionTickets)
 
     @model_validator(mode="after")
     def _coherencia_global(self):

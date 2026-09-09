@@ -40,6 +40,7 @@ urlpatterns = [
     path("api/", include("solicitudes.urls", namespace="solicitudes")),
     # Operaciones de campo y app de tecnicos
     path("api/campo/", include("campo.urls", namespace="campo")),
+    path("api/importacion/", include("cases.importacion_urls", namespace="importacion")),
     path(
         "logout/", views.LogoutView.as_view(), {"next_page": "/login/"}, name="logout"
     ),
