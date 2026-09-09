@@ -11,6 +11,7 @@
  */
 
 import axios from 'axios';
+import { comoParametro, destinoSeguro } from '$lib/destino.js';
 import { fail, redirect } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { generateCodeVerifier, generateCodeChallenge, generateState } from '$lib/utils/pkce.js';
@@ -63,11 +64,14 @@ export async function load({ url, cookies }) {
   // Check if user is already authenticated
   const jwtAccess = cookies.get('jwt_access');
   if (jwtAccess) {
-    throw redirect(307, '/org');
+    // El destino se arrastra hasta /org: es la ultima parada antes de la app,
+    // y es ahi donde se decide a donde entra la persona.
+    throw redirect(307, `/org${comoParametro(url.searchParams.get('redirect'))}`);
   }
 
   // Generate OAuth parameters and return login URL
-  return await generateOAuthUrl(cookies);
+  return await generateOAuthUrl(
+    cookies, destinoSeguro(url.searchParams.get('redirect'), ''));
 }
 
 /**
@@ -84,6 +88,8 @@ async function handleOAuthCallback(code, returnedState, cookies) {
   // Clear OAuth cookies regardless of outcome
   cookies.delete('oauth_state', { path: '/' });
   cookies.delete('oauth_code_verifier', { path: '/' });
+  const destinoOAuth = cookies.get('oauth_destino') || '';
+  cookies.delete('oauth_destino', { path: '/' });
 
   // Validate state parameter (CSRF protection)
   if (!savedState || savedState !== returnedState) {
@@ -149,7 +155,7 @@ async function handleOAuthCallback(code, returnedState, cookies) {
   }
 
   // Success - redirect to organization selection
-  throw redirect(307, '/org');
+  throw redirect(307, `/org${comoParametro(destinoOAuth)}`);
 }
 
 /**
@@ -157,7 +163,7 @@ async function handleOAuthCallback(code, returnedState, cookies) {
  * @param {import('@sveltejs/kit').Cookies} cookies - SvelteKit cookies
  * @returns {Promise<object>} Object containing the Google OAuth URL
  */
-async function generateOAuthUrl(cookies) {
+async function generateOAuthUrl(cookies, destino) {
   // Generate PKCE parameters
   const codeVerifier = generateCodeVerifier();
   const codeChallenge = await generateCodeChallenge(codeVerifier);
@@ -171,6 +177,15 @@ async function generateOAuthUrl(cookies) {
 
   cookies.set('oauth_code_verifier', codeVerifier, getCookieOptions(oauthCookieMaxAge));
   cookies.set('oauth_state', state, getCookieOptions(oauthCookieMaxAge));
+  // A donde queria ir quien fue rebotado hasta aca. Viaja en una cookie y no
+  // en el 'state' de OAuth porque el state es el anti-CSRF: mezclarle un dato
+  // de navegacion obliga a parsearlo para compararlo, y esa comparacion es lo
+  // unico que protege el intercambio. Se guarda ya validado (destinoSeguro).
+  if (destino) {
+    cookies.set('oauth_destino', destino, getCookieOptions(oauthCookieMaxAge));
+  } else {
+    cookies.delete('oauth_destino', { path: '/' });
+  }
 
   // Build Google OAuth URL with all required parameters
   const redirect_uri = env.GOOGLE_LOGIN_DOMAIN + '/login';
@@ -223,7 +238,7 @@ export const actions = {
   // HAS to reach the user -- there is no "always say success" cover here,
   // since a wrong password needs to be told apart from a wrong email so
   // someone can tell what to fix.
-  password: async ({ request, cookies }) => {
+  password: async ({ request, cookies, url }) => {
     const formData = await request.formData();
     const email = formData.get('email');
     const password = formData.get('password');
@@ -261,6 +276,6 @@ export const actions = {
       return fail(error.response?.status === 401 ? 401 : 400, { error: errorMessage });
     }
 
-    throw redirect(307, '/org');
+    throw redirect(307, `/org${comoParametro(url.searchParams.get('redirect'))}`);
   }
 };

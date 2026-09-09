@@ -1,4 +1,5 @@
 import { sequence } from '@sveltejs/kit/hooks';
+import { comoParametro } from '$lib/destino.js';
 import * as Sentry from '@sentry/sveltekit';
 /**
  * SvelteKit Server Hooks with JWT Authentication
@@ -302,8 +303,17 @@ export const handle = sequence(Sentry.sentryHandle(), async function _handle({ e
           };
         } else {
           // Org switch failed, clear org cookie and redirect
+          //
+          // Tambien conserva el destino: este camino se toma cuando la cookie
+          // de organizacion ya no vale, y quien venia de un enlace profundo
+          // tiene tanto derecho a volver ahi como el que fue rebotado por no
+          // tener sesion. Lo encontro la prueba, no yo: la busca por patron
+          // justamente porque una redireccion desnuda no falla en ningun lado
+          // -- solo pierde el enlace en silencio.
           event.cookies.delete('org', { path: '/' });
-          throw redirect(303, '/org');
+          throw redirect(
+            303,
+            `/org${comoParametro(event.url.pathname + (event.url.search || ''))}`);
         }
       }
     }
@@ -345,18 +355,30 @@ export const handle = sequence(Sentry.sentryHandle(), async function _handle({ e
     (route) => pathname === route || pathname.startsWith(route + '/')
   );
 
+  // A DONDE QUERIA IR, para poder devolverlo ahi.
+  //
+  // Sin esto, cualquier enlace profundo abierto sin sesion se perdia: rebote
+  // a /login, de ahi a /org, y al elegir organizacion la persona terminaba en
+  // '/' sin saber por que. Reportado el 09/09/2026 con el expediente de una
+  // solicitud abierto desde un ticket del ISP -- pero le pasaba a cualquier
+  // enlace compartido.
+  //
+  // Se valida en destinoSeguro(): el valor viaja en la URL y sin filtro
+  // convertiria el login en un trampolin a otro sitio. Ver ese archivo.
+  const volverA = comoParametro(pathname + (event.url.search || ''));
+
   if (isAuthOnlyRoute) {
     // Auth-only route - require user
     if (!jwtPayload) {
-      throw redirect(307, '/login');
+      throw redirect(307, `/login${volverA}`);
     }
   } else if (!isPublicRoute) {
     // Protected route - require user + org
     if (!jwtPayload) {
-      throw redirect(307, '/login');
+      throw redirect(307, `/login${volverA}`);
     }
     if (!event.locals.org) {
-      throw redirect(307, '/org');
+      throw redirect(307, `/org${volverA}`);
     }
   }
 

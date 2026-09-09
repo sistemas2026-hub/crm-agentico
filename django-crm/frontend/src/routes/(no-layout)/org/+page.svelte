@@ -51,6 +51,12 @@
               };
             }}
           >
+            <!-- A donde volver despues de elegir. Sin esto la accion no tiene
+                 forma de saberlo: recibe el POST del formulario, no la query
+                 de esta pagina. -->
+            {#if data.volverA}
+              <input type="hidden" name="redirect" value={data.volverA} />
+            {/if}
             <input type="hidden" name="org_id" value={org.id} />
             <input type="hidden" name="org_name" value={org.name} />
             <button type="submit" class="v2-auth-org" disabled={loading}>

@@ -10,6 +10,7 @@
  */
 
 import { env } from '$env/dynamic/private';
+import { destinoSeguro } from '$lib/destino.js';
 import { env as publicEnv } from '$env/dynamic/public';
 import { redirect, fail } from '@sveltejs/kit';
 import axios from 'axios';
@@ -18,17 +19,20 @@ import { describeError } from '$lib/server/log-safe.js';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** @type {import('./$types').PageServerLoad} */
-export async function load({ cookies, locals }) {
+export async function load({ cookies, locals, url }) {
+  // A donde volver despues de elegir. Viaja hasta el formulario y
+  // vuelve en el POST: la accion recibe el form, no esta query.
+  const volverA = destinoSeguro(url.searchParams.get('redirect'), '');
   const user = locals.user;
 
   if (!user) {
-    return { orgs: [] };
+    return { orgs: [], volverA };
   }
 
   try {
     const jwtAccess = cookies.get('jwt_access');
     if (!jwtAccess) {
-      return { orgs: [] };
+      return { orgs: [], volverA };
     }
 
     const apiUrl = env.PRIVATE_DJANGO_API_URL || publicEnv.PUBLIC_DJANGO_API_URL;
@@ -54,12 +58,12 @@ export async function load({ cookies, locals }) {
       }));
     }
 
-    return { orgs };
+    return { orgs, volverA };
   } catch (error) {
     // Never log the raw error: its axios `config.headers` carries the JWT.
     console.error('Error fetching organizations:', describeError(error));
     // Return empty array so user can create a new organization
-    return { orgs: [] };
+    return { orgs: [], volverA };
   }
 }
 
@@ -123,8 +127,13 @@ export const actions = {
         maxAge: 60 * 60 * 24 * 365
       });
 
-      // Redirect to app
-      throw redirect(303, '/');
+      // Redirect to app -- o a donde queria ir, si vino rebotado.
+      //
+      // Sin esto, quien abria un enlace profundo sin sesion terminaba SIEMPRE
+      // en '/': elegia organizacion y aparecia en la pantalla de inicio, sin
+      // relacion con lo que habia clickeado. Reportado el 09/09/2026 abriendo
+      // el expediente de una solicitud desde un ticket del ISP.
+      throw redirect(303, destinoSeguro(formData.get('redirect')));
     } catch (error) {
       if (error.status === 303) {
         throw error; // Re-throw redirect
