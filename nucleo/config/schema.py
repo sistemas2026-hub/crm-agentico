@@ -1203,6 +1203,32 @@ class Herramienta(Base):
     # Mismo espiritu que 'auth_ref' (secretos) y 'base_url_ref' (dominios):
     # la config guarda el NOMBRE, nunca el dato.
     argumentos_desde_variables: dict[str, str] = Field(default_factory=dict)
+    # Argumentos que no son constantes sino que se CALCULAN en el instante de
+    # la llamada. {argumento_de_la_llamada: expresion}, y la expresion solo
+    # puede ser una de estas dos:
+    #
+    #   'ahora'              el momento de la llamada, en ISO 8601
+    #   'ahora+VARIABLE'     ese momento mas los DIAS que diga esa variable
+    #                        de 'variables_tenant'
+    #
+    # Nace de las fechas estimadas del ticket de instalacion (09/09/2026): al
+    # crearlo hay que decir cuando se estima empezar y cuando terminar. La de
+    # inicio es el momento de creacion; la de fin depende de cuanto tarda esa
+    # empresa en instalar, que es un dato de operacion distinto en cada ISP --
+    # y por la regla de siempre no puede quedar fijo en el YAML, va en
+    # 'variables_tenant' y se edita en /configuracion/variables.
+    #
+    # Por que una gramatica cerrada y no una expresion libre: 'argumentos_
+    # fijos' y esto viajan a una API de terceros con la credencial del tenant.
+    # Un campo que aceptara codigo arbitrario convertiria la pantalla de
+    # configuracion en una via de ejecucion. Dos formas, validadas en carga.
+    #
+    # El formato es ISO 8601 y no es una preferencia: verificado en vivo el
+    # 09/09/2026 contra WispHub -- ISO da 200, 'DD/MM/AAAA HH:MM:SS' da 400 con
+    # el mensaje "Use uno de los siguientes formatos: YYYY-MM-DDThh:mm".
+    # (Ojo al LEER esos mismos campos: vuelven como MM/DD/AAAA. Escribe en un
+    # formato y lee en otro, ver la skill wisphub-api.)
+    argumentos_calculados: dict[str, str] = Field(default_factory=dict)
     # Cuales de esos fijos puede decidir el CODIGO en el momento (nunca el
     # modelo: esto no viaja por tool-calling).
     #
@@ -1377,6 +1403,24 @@ class Herramienta(Base):
     def _coherencia(self):
         if self.tipo in ("http", "agregado") and not self.endpoint:
             raise ValueError(f"'{self.nombre}': tipo {self.tipo} exige 'endpoint'")
+
+        # La gramatica cerrada de 'argumentos_calculados'. Se valida al cargar
+        # y no al llamar: una expresion mal escrita tiene que reventar cuando
+        # alguien guarda la config, no en medio de una instalacion real.
+        for arg, expr in self.argumentos_calculados.items():
+            if expr == "ahora":
+                continue
+            if expr.startswith("ahora+") and expr[6:].strip():
+                continue
+            raise ValueError(
+                f"'{self.nombre}': argumentos_calculados['{arg}'] = '{expr}' "
+                f"no es una expresion valida. Solo hay dos: 'ahora', o "
+                f"'ahora+NOMBRE_DE_VARIABLE' (los dias salen de esa variable "
+                f"de 'variables_tenant')")
+            # Sin 'else' que acepte cualquier cosa: lo que no esta en la lista
+            # se rechaza. Esto viaja a una API de terceros con la credencial
+            # del tenant -- una expresion libre aca seria una via de ejecucion
+            # desde la pantalla de configuracion.
 
         if self.tipo in ("http", "agregado") and not (self.base_url or self.base_url_ref):
             raise ValueError(

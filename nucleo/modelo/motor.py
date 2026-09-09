@@ -1447,6 +1447,33 @@ def _resolver_argumentos(herramienta, sesion, argumentos_modelo: dict,
         if valor not in (None, ""):
             argumentos[arg_llamada] = valor
 
+    # Los que se CALCULAN en el momento de la llamada -- hoy solo fechas
+    # relativas a ahora. Ver 'argumentos_calculados' en schema.py: la
+    # gramatica es cerrada y ya se valido al cargar la config, asi que aca
+    # solo se ejecuta.
+    #
+    # ISO 8601 y no otro formato: verificado en vivo contra WispHub el
+    # 09/09/2026 -- ISO da 200 y 'DD/MM/AAAA HH:MM:SS' da 400. Se manda sin
+    # zona horaria a proposito, igual que lo que devuelve la API al leer.
+    for arg_llamada, expresion in herramienta.argumentos_calculados.items():
+        momento = datetime.now()
+        if expresion != "ahora":
+            nombre_variable = expresion[len("ahora+"):].strip()
+            crudo = (variables_tenant or {}).get(nombre_variable)
+            try:
+                dias = float(str(crudo).strip())
+            except (TypeError, ValueError):
+                # Sin la variable no se inventa un plazo: se omite el
+                # argumento. Prometerle al cliente una fecha que salio de un
+                # default escondido es peor que no dar ninguna -- y quien mire
+                # el ticket vacio va a preguntar, que es lo que corresponde.
+                print(f"[herramienta] {herramienta.nombre}: '{arg_llamada}' "
+                      f"necesita la variable '{nombre_variable}' y no esta "
+                      f"cargada (o no es un numero): se omite la fecha")
+                continue
+            momento = momento + timedelta(days=dias)
+        argumentos[arg_llamada] = momento.isoformat(timespec="seconds")
+
     # Y despues, lo que el CODIGO decidio para esta llamada puntual -- solo
     # sobre las claves que la herramienta declaro sobrescribibles. Va DESPUES
     # de los fijos a proposito: el valor de la config pasa a ser el respaldo,

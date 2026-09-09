@@ -1926,6 +1926,18 @@ llm:
 # que arranca. Referenciadas por 'Herramienta.base_url_ref' en 'herramientas'
 # mas abajo (ver el campo en nucleo/config/schema.py).
 variables_tenant:
+  # Cuantos DIAS se estima que tarda una instalacion desde que entra la
+  # solicitud. Lo usa 'crear_ticket_instalacion' para calcular
+  # 'fecha_estimada_fin' (la de inicio es el momento de creacion).
+  #
+  # Es un dato de OPERACION, no del producto: depende de cuantas cuadrillas
+  # tiene la empresa y de como agenda. Por eso vive aca y se edita en
+  # /configuracion/variables, sin tocar codigo ni YAML -- otro ISP que instale
+  # el mismo dia pone 1, y uno con lista de espera pone 15.
+  #
+  # Si la variable falta o no es un numero, la fecha NO se manda: el ticket
+  # queda sin estimacion en vez de con una inventada por un default escondido.
+  INSTALACION_DIAS_ESTIMADOS: "3"
   # Con barra final: es el valor que quedo cargado en produccion desde la
   # pantalla de variables. Da igual para la llamada -- url_de() hace
   # rstrip('/') antes de pegar el endpoint (nucleo/herramientas/http.py) --
@@ -3957,6 +3969,22 @@ herramientas:
       servicio: WISPHUB_ID_SERVICIO_INSTALACIONES
       tecnico: WISPHUB_TECNICO_SOLICITUDES
       email_tecnico: WISPHUB_EMAIL_TECNICO_SOLICITUDES
+    # Cuando se estima empezar y cuando terminar. La de inicio es el momento
+    # de creacion; la de fin sale de una variable del tenant porque cuanto
+    # tarda una instalacion es un dato de OPERACION de cada ISP, no una
+    # constante del producto.
+    #
+    # Verificado en vivo contra WispHub el 09/09/2026: los dos campos aceptan
+    # escritura (OPTIONS los lista, y un PATCH real los dejo puestos), y el
+    # formato tiene que ser ISO 8601 -- 'DD/MM/AAAA HH:MM:SS' devuelve 400.
+    # Al LEERLOS vuelven como MM/DD/AAAA, que no es el mismo formato con el
+    # que se escriben: ver la skill wisphub-api antes de parsearlos.
+    #
+    # Y una advertencia para quien los toque: una vez puestos NO se pueden
+    # borrar. Mandar null o vacio devuelve 400 en las dos formas (probado).
+    argumentos_calculados:
+      fecha_estimada_inicio: ahora
+      fecha_estimada_fin: ahora+INSTALACION_DIAS_ESTIMADOS
     filtros_verificados:
       descripcion: {param: descripcion, tipo: texto, verificado_el: 2026-08-27}
 
