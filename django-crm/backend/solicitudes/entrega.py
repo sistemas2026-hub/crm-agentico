@@ -143,7 +143,7 @@ def _crear_ticket_wisphub(s) -> str:
 
 
 def _completar_ticket(s) -> None:
-    """Le pone al ticket las fechas estimadas y le adjunta la orden.
+    """Le pone al ticket las fechas estimadas y le adjunta el PDF.
 
     Va por PATCH y no en la creacion porque el POST de WispHub IGNORA las
     fechas estimadas: medido el 09/09/2026, el ticket 92156 salio con las dos
@@ -153,17 +153,34 @@ def _completar_ticket(s) -> None:
     De paso resuelve otra rareza: con el archivo SOLO, ese endpoint devuelve
     500. Necesita al menos un campo normal al lado, y las fechas lo son.
 
-    Nunca sube el expediente.
+    QUE PDF SE ADJUNTA -- 'SOLICITUDES_ADJUNTO_TICKET'
 
-    Lo que queda en 'archivo_ticket' es publico: medido el 09/09/2026, se
-    descarga de avisos.wisphub.io/media/ con un GET sin credenciales. El
-    expediente trae documento de identidad, recibo, foto del solicitante y
-    firma -- por eso se sirve desde ExpedienteView, que exige sesion, y por
-    eso mismo no se publica por /media/.
+        expediente  (por defecto)  el PDF completo del formulario
+        orden                      solo la hoja operativa
 
-    Asi que al ticket va la hoja operativa (a donde ir, con quien, que plan) y
-    el LINK al expediente. Quien tenga que ver la cedula hace clic y el CRM le
-    pide sesion, como debe ser.
+    LO QUE HAY QUE SABER ANTES DE ELEGIR, porque no se puede deshacer: lo que
+    queda en 'archivo_ticket' es PUBLICO. Medido el 09/09/2026 -- se descarga
+    de avisos.wisphub.io/media/ con un GET sin ninguna credencial. El
+    expediente trae documento de identidad, recibo de servicios, foto del
+    solicitante, firma y GPS del domicilio; ahi eso queda al alcance de
+    cualquiera que tenga o adivine la URL, y no hay forma de borrarlo desde la
+    API.
+
+    Con 'orden' va solo lo operativo (a donde ir, con quien, que plan) mas el
+    link al expediente, que exige sesion. El tecnico ve a donde ir y quien
+    necesite la cedula hace clic y el CRM le pide login.
+
+    Lo eligio el cliente el 09/09/2026, con el riesgo sobre la mesa y medido:
+    quiere el expediente completo en el ticket, para que el tecnico no dependa
+    de entrar al CRM. Queda en una variable de entorno y no fijo en codigo
+    justamente para poder volver atras sin un despliegue de codigo.
+
+    Si la solicitud no tiene expediente armado, se cae a la orden en vez de
+    dejar el ticket sin nada.
+
+    El nombre es aleatorio en los dos casos. No es control de acceso -- lo que
+    protege de verdad es el CONTENIDO, y con 'expediente' esa proteccion no
+    existe-- pero evita que las URLs se puedan enumerar.
 
     El PDF viaja en base64 porque el puente con el motor es JSON. El motor lo
     decodifica y lo manda como archivo -- ver 'argumentos_archivo' en
@@ -175,17 +192,24 @@ def _completar_ticket(s) -> None:
     from common.links import frontend_url
     from solicitudes.pdf import armar_orden_instalacion
 
-    # AL PDF DEL EXPEDIENTE, no a una pantalla.
-    #
-    # Aca decia '/instalaciones/<id>' y esa ruta no existe: la bandeja es
-    # '/instalaciones' a secas, con pestañas. Al abrirlo desde el ticket, el
-    # CRM pedia elegir organizacion y despues dejaba al tecnico en 'Hoy', sin
-    # ningun expediente a la vista (reportado el 09/09/2026).
-    #
-    # '/api/solicitudes/<id>/expediente' devuelve el PDF y exige la cookie de
-    # sesion -- que es justo la proteccion que se quiso: sin login, 401.
-    pdf = armar_orden_instalacion(
-        s, url_expediente=frontend_url(f"/api/solicitudes/{s.id}/expediente"))
+    que = (os.environ.get("SOLICITUDES_ADJUNTO_TICKET", "") or "expediente").lower()
+
+    if que == "expediente" and s.pdf:
+        s.pdf.open("rb")
+        try:
+            pdf = s.pdf.read()
+        finally:
+            s.pdf.close()
+        nombre = f"expediente-{uuid.uuid4().hex}.pdf"
+    else:
+        # El link va AL PDF, no a una pantalla. Decia '/instalaciones/<id>' y
+        # esa ruta no existe: la bandeja es '/instalaciones' a secas, con
+        # pestañas. Al abrirlo desde el ticket, el CRM pedia elegir
+        # organizacion y despues dejaba al tecnico en 'Hoy', sin ningun
+        # expediente a la vista (reportado el 09/09/2026).
+        pdf = armar_orden_instalacion(
+            s, url_expediente=frontend_url(f"/api/solicitudes/{s.id}/expediente"))
+        nombre = f"orden-instalacion-{uuid.uuid4().hex}.pdf"
 
     base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
     tenant = os.environ.get("MOTOR_TENANT", "") or "rapilink"
@@ -196,13 +220,6 @@ def _completar_ticket(s) -> None:
     token = os.environ.get("MOTOR_SERVICE_TOKEN")
     if token:
         cabeceras["X-Servicio-Token"] = token
-
-    # El nombre del archivo es ALEATORIO a proposito. WispHub lo conserva tal
-    # cual (probado) y lo publica en una URL sin autenticacion: con un nombre
-    # predecible -- 'orden-<id>.pdf'-- cualquiera podria enumerarlas. No es
-    # control de acceso, pero sube el costo de encontrarlas de cero a
-    # imposible. Lo que ademas protege es que el contenido no lleve documentos.
-    nombre = f"orden-instalacion-{uuid.uuid4().hex}.pdf"
 
     r = requests.post(
         f"{base}/interno/herramienta/{herramienta}",
