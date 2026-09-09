@@ -102,11 +102,23 @@ load_dotenv(RAIZ / ".env", override=False)
 
 from nucleo.config import cargar_config                      # noqa: E402
 from nucleo.config import fuente                             # noqa: E402
+from nucleo.config.schema import TenantConfig                # noqa: E402
 
 
 # 'version' es el numero de config_version, que sube en cada carga: siempre
 # difiere y nunca significa nada. Compararlo seria una linea de ruido fija.
 IGNORADAS = {"version"}
+
+# Un campo SINCRONIZADO es propiedad de la base en las dos direcciones: el
+# exportador no lo baja al archivo y el archivo no puede pisarlo (ver
+# TenantConfig.SINCRONIZADOS). Que difiera no es una noticia -- es la
+# definicion del campo.
+#
+# Se resume en una linea en vez de saltearse del todo, porque el numero SI
+# dice algo: "parrilla_canales: 100 en la base" es como se ve de un vistazo
+# que la parrilla sigue cargada. Listarlas una por una eran 228 filas que
+# enterraban las tres que habia que mirar.
+PROPIAS_DE_LA_BASE = set(TenantConfig.SINCRONIZADOS)
 
 # Mas alla de esto, una seccion se resume en vez de listarse entera. Son las
 # que se cargan desde la pantalla (980 localidades, 100 canales): imprimirlas
@@ -196,15 +208,35 @@ def _recorrer(repo: Any, base: Any, ruta: str, dif: dict) -> None:
         dif[destino].append({"ruta": ruta, "repo": repo, "base": base})
 
 
+def _resumen_sincronizado(clave: str, valor) -> dict:
+    cuantos = len(valor) if isinstance(valor, (list, dict)) else None
+    return {"ruta": clave, "repo": "<no baja al archivo>",
+            "base": f"{cuantos} en la base" if cuantos is not None else valor,
+            "sincronizado": True}
+
+
 def comparar(repo: dict, base: dict) -> dict[str, list[dict]]:
     dif: dict[str, list[dict]] = {"repo_no_aplicado": [], "solo_en_base": []}
+
+    # Los sincronizados van en un paso PROPIO, antes de los dos recorridos y
+    # no dentro de ellos. Puestos como una excepcion en cada bucle
+    # desaparecian: existen de los dos lados --vacios en el archivo, llenos en
+    # la base-- asi que el recorrido del repo los saltaba por sincronizados y
+    # el de la base los saltaba por 'ya estaba en el repo'. Cada bucle daba
+    # por hecho que el otro los reportaba y no los reportaba ninguno.
+    for clave in sorted(PROPIAS_DE_LA_BASE):
+        valor = base.get(clave)
+        if not _vacio(valor):
+            dif["solo_en_base"].append(_resumen_sincronizado(clave, valor))
+
     for k, v in repo.items():
-        if k in IGNORADAS:
+        if k in IGNORADAS or k in PROPIAS_DE_LA_BASE:
             continue
         _recorrer(v, base.get(k, AUSENTE), k, dif)
     for k, v in base.items():
-        if k not in IGNORADAS and k not in repo:
-            _recorrer(AUSENTE, v, k, dif)
+        if k in IGNORADAS or k in PROPIAS_DE_LA_BASE or k in repo:
+            continue
+        _recorrer(AUSENTE, v, k, dif)
     return dif
 
 

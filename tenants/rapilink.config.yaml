@@ -1808,6 +1808,11 @@ llm:
   # El razonamiento se descarta del historial: reenviarlo acumula 2.500-5.400
   # caracteres inutiles por turno.
   descartar_thinking: true
+  # Apagado desde la interfaz y no estaba en este archivo hasta el 09/09/2026.
+  # Es el mismo hueco que el 05/09 borro la tarifa de DeepSeek: configuracion
+  # que solo vivia en la base, que nadie escribio aca porque no se edita aca,
+  # y que la siguiente carga del YAML se llevaba puesta.
+  razonamiento: disabled
   # Solo lo que se APARTA del default de arriba. Los cuatro roles reales ya no
   # figuran aca: todos usaban deepseek-v4-flash, que ahora es el default, asi
   # que repetirlos era ruido que se desincroniza en el primer cambio.
@@ -2062,7 +2067,11 @@ herramientas:
     # ventas quedaba encerrada -- ante una falla de television el asistente
     # contestaba que su documentacion era de venta de servicios y que no
     # tenia como revisar la señal. Era cierto, y no tenia salida.
-    roles_permitidos: [cliente_final, facturacion_cliente, soporte_tecnico_cliente, ventas]
+    # 'ventas' salio el 09/09/2026, y produccion ya estaba asi: darle esta
+    # herramienta lo llevo de 9 a 15 herramientas, le crecio el prompt un 64%
+    # y las menciones de "cedula" pasaron de 3 a 8 -- empezaba a pedir la
+    # cedula a prospectos que solo preguntaban un precio.
+    roles_permitidos: [cliente_final, facturacion_cliente, soporte_tecnico_cliente]
     base_url: https://api.wisphub.io
     endpoint: /api/clientes/
     metodo: GET
@@ -2382,7 +2391,12 @@ herramientas:
       formales, traslados): eso se sigue escalando a un humano, como
       siempre.
     solo_lectura: true
-    roles_permitidos: [cliente_final, facturacion_cliente, soporte_tecnico_cliente]
+    # 'ventas' esta aca porque tambien deriva: un prospecto que empieza
+    # preguntando un precio y termina reportando una falla tiene que poder
+    # pasar a soporte sin volver a escribir. Estaba en produccion y NO en
+    # este archivo hasta el 09/09/2026 -- o sea que una carga del YAML le
+    # habria quitado la capacidad de derivar, en silencio.
+    roles_permitidos: [cliente_final, facturacion_cliente, soporte_tecnico_cliente, ventas]
     deriva_rol: true
     # Sin 'cliente_final' entre los destinos: desde agosto 2026 es un ROUTER
     # sin herramientas propias, asi que derivar de vuelta ahi seria un

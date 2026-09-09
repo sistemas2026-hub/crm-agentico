@@ -123,8 +123,32 @@ dif = dc.comparar(
 afirmar(dif[PELIGRO] == [],
         "una seccion que el YAML trae vacia y la pantalla llena NO es "
         "una diferencia peligrosa")
-afirmar(len(dif[NORMAL]) == 3,
-        "aparece del lado informativo, con una linea por elemento")
+
+# Y ademas se RESUME. Las dos son campos que el esquema declara propiedad de
+# la base (TenantConfig.SINCRONIZADOS): que difieran no es una noticia, es la
+# definicion del campo. Contra produccion eran 228 filas informativas que
+# enterraban la unica que habia que mirar.
+afirmar(len(dif[NORMAL]) == 2,
+        "un campo sincronizado ocupa UNA linea, no una por elemento")
+afirmar(all(f.get("sincronizado") for f in dif[NORMAL]),
+        "y queda marcado como tal, para poder distinguirlo en el --json")
+afirmar(any("2 en la base" in str(f["base"]) for f in dif[NORMAL]),
+        "el resumen dice CUANTOS hay -- 'parrilla: 100 en la base' es como se "
+        "ve de un vistazo que la parrilla sigue cargada")
+
+# El campo sincronizado que esta vacio de los dos lados no dice nada y no se
+# reporta: una linea que aparece siempre deja de leerse.
+dif = dc.comparar({"localidades": []}, {"localidades": []})
+afirmar(dif[NORMAL] == [],
+        "un sincronizado vacio en los dos lados no ocupa una linea")
+
+# Y en la direccion contraria: un sincronizado NUNCA acusa al repo, aunque el
+# archivo trajera algo que la base no tiene. Es propiedad de la base en las
+# dos direcciones -- el exportador no lo baja y la carga no lo pisa.
+dif = dc.comparar({"localidades": [{"nombre": "Vieja"}]}, {"localidades": []})
+afirmar(dif[PELIGRO] == [],
+        "un sincronizado no se marca como peligroso ni con el archivo lleno "
+        "y la base vacia")
 
 # Un valor escalar que solo existe en la base -- la tarifa, el razonamiento
 # del modelo: se ajustan desde la interfaz y el archivo no se entera.

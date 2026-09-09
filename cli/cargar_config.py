@@ -583,7 +583,7 @@ def _escribir_atomico(ruta: Path, texto: str) -> None:
         raise
 
 
-def exportar(slug: str) -> None:
+def exportar(slug: str, forzar: bool = False) -> None:
     with _conectar() as con, con.cursor() as cur:
         cur.execute("""select config, config_version from asistente.tenant_config
                        where slug = %s""", (slug,))
@@ -641,8 +641,53 @@ def exportar(slug: str) -> None:
             f"{slug}: la fusion no quedo fiel a la base en {distintas}. "
             f"No se escribio nada.")
 
+    # LOS COMENTARIOS SE CUENTAN ANTES DE ESCRIBIR
+    #
+    # La fusion conserva la ESTRUCTURA fielmente -- eso lo comprueba el
+    # 'releido != datos' de arriba-- pero NO conserva todos los comentarios:
+    # ruamel pierde los bloques pegados a ciertos elementos de lista. Medido
+    # el 09/09/2026 exportando la config real de rapilink: 59 lineas de
+    # comentario perdidas de 1.597, y no cualquiera. Eran las notas de
+    # verificacion en vivo de SmartOLT y BottleCRM, el porque de que
+    # 'aprobacion_humana' no corresponda ahi, y cual es la unica garantia que
+    # da el codigo en 'entrega_variable'.
+    #
+    # Es exactamente lo que este exportador dice existir para evitar ("se
+    # conservan los comentarios. No es cosmetico: en tenants/ hay 133 lineas
+    # de notas de verificacion en vivo"). Y era SILENCIOSO: el archivo
+    # validaba, la estructura coincidia con la base, y el diff se veia como un
+    # cambio grande y plausible.
+    #
+    # Corta en vez de avisar. Un aviso exige que alguien lea la salida y se
+    # detenga, y esta salida ya trae un resumen de roles que invita a seguir
+    # de largo -- es la misma clase de guarda que dejo la parrilla protegida
+    # solo por un mensaje hasta hoy. Con pocos cambios conviene aplicarlos a
+    # mano; '--forzar' queda para cuando la exportacion vale mas que las notas.
+    def _comentarios(t: str) -> int:
+        return len([x for x in t.splitlines() if x.strip().startswith("#")])
+
+    antes = _comentarios(ruta.read_text(encoding="utf-8")) if ruta.exists() else 0
+    perdidas = antes - _comentarios(texto)
+
+    if perdidas > 0 and not forzar:
+        raise SystemExit(
+            f"{slug}: la fusion perderia {perdidas} linea(s) de comentario de "
+            f"{antes}. No se escribio nada.\n\n"
+            f"    Son notas de verificacion en vivo: por que un filtro se "
+            f"descarto, que se\n"
+            f"    probo contra la API real, que garantiza el codigo y que solo "
+            f"pide el prompt.\n"
+            f"    No se reconstruyen leyendo la configuracion.\n\n"
+            f"    Si son pocos cambios, aplicarlos a mano al YAML -- "
+            f"'py -3.13 cli/diferencias_config.py\n"
+            f"    {slug}' dice exactamente cuales son. Si la exportacion vale "
+            f"mas que las notas: --forzar.")
+
     _escribir_atomico(ruta, texto)
 
+    if perdidas > 0:
+        print(f"[!] {slug}: se perdieron {perdidas} linea(s) de comentario "
+              f"(se paso --forzar)")
     print(f"[v] {slug}: v{version} de la base -> {ruta.relative_to(RAIZ)}")
     for linea in _resumen_de_roles(anterior, datos):
         print(f"    {linea}")
@@ -688,7 +733,7 @@ if __name__ == "__main__":
     if args[0] == "--ver":
         ver(args[1])
     elif args[0] == "--exportar":
-        exportar(args[1])
+        exportar(args[1], forzar=forzar)
     elif args[0] == "--todos":
         for y in sorted((RAIZ / "tenants").glob("*.config.yaml")):
             if y.name.startswith("tenant.config.example"):

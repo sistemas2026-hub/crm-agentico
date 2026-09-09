@@ -2252,8 +2252,22 @@ class TenantConfig(Base):
     # Vive aca y no en el exportador a proposito: quien agrega un campo
     # sincronizado nuevo lo declara junto al campo, no en un archivo de cli/
     # que no va a recordar tocar.
+    #
+    # 'parrilla_canales' entra por el mismo motivo, el 09/09/2026: son 100
+    # canales que alguien subio en un Excel desde la pantalla, y el YAML los
+    # trae vacios A PROPOSITO. Hasta hoy estaban protegidos solo por un AVISO
+    # de cli/cargar_config.py ("se BORRARIA entero"), que es una guarda que
+    # depende de que alguien lea la salida y no siga adelante. Declararlos
+    # sincronizados lo vuelve mecanico: el exportador no los baja al archivo,
+    # asi que el archivo nunca tiene con que pisarlos.
+    #
+    # Lo que NO entra, y la distincion es la que importa: 'planes_venta' (6) y
+    # 'servicios_ofrecidos' (2) tambien se editan desde la interfaz, pero son
+    # decisiones que una persona toma y que tiene sentido leer en un diff.
+    # El criterio no es "se edita desde la pantalla" sino "lo produjo un
+    # proceso y se reemplaza entero".
     SINCRONIZADOS: ClassVar[tuple[str, ...]] = (
-        "localidades", "localidades_actualizado_en")
+        "localidades", "localidades_actualizado_en", "parrilla_canales")
 
     version: int = 1
     identidad: Identidad
