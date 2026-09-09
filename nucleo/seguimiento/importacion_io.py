@@ -248,6 +248,98 @@ def tickets_conocidos(config, tenant: str, ids: list[str]) -> tuple[set, set]:
 
 
 # =============================================================================
+#  APLICAR  --  la unica parte que escribe, y solo con --aplicar
+# =============================================================================
+
+def _cuerpo_de(v, config) -> dict:
+    """
+    Lo que se le manda al CRM por un candidato. Ni un campo mas.
+
+    'name' lleva el asunto del proveedor tal cual: es lo que quien atiende
+    reconoce en la cola, y traducirlo lo desalinearia de WispHub. La
+    descripcion NO copia la del ticket -- ese campo es texto libre de un
+    operador y ya se sabe que trae PII embebida (PRD 7.4); lo que se guarda es
+    la referencia para ir a buscarla.
+    """
+    proveedor = config.importacion_tickets.proveedor
+    partes = [f"Importado de {proveedor}, ticket #{v.external_ticket_id}.",
+              f"Servicio {v.external_service_id}." if v.external_service_id else "",
+              f"Abierto por {v.external_created_by}." if v.external_created_by else ""]
+    if v.identidad_es_placeholder:
+        partes.append("Cuelga del registro de instalaciones: el cliente todavia "
+                      "no existe como tal.")
+    return {
+        "provider": proveedor,
+        "external_ticket_id": v.external_ticket_id,
+        "external_service_id": v.external_service_id,
+        "external_status": v.external_status,
+        "external_status_at": None,
+        "external_created_by": v.external_created_by,
+        "external_created_by_type": v.external_created_by_type,
+        "external_fetched_at": datetime.now(timezone.utc).isoformat(),
+        "assigned_to": v.responsable,
+        "priority": v.prioridad or "Normal",
+        "status": "New",
+        "name": (v.asunto or "Ticket importado")[:64],
+        "description": " ".join(x for x in partes if x),
+    }
+
+
+def aplicar(config, tenant, veredictos) -> dict:
+    """
+    Crea los casos de los candidatos. Un fallo por ticket no corta el lote.
+
+    La idempotencia NO la pone este bucle: la pone
+    UNIQUE(org, provider, external_ticket_id) del otro lado. Aca se puede
+    reintentar sin miedo porque el writer devuelve 'created=false' y el caso
+    que ya estaba, sin tocarle nada.
+    """
+    herr = _herramienta(config, "importar_caso_externo")
+    if herr is None:
+        raise SystemExit("falta 'importar_caso_externo' en el catalogo")
+
+    resumen = {"creados": 0, "ya_estaban": 0, "fallidos": 0, "ids": []}
+    for v in veredictos:
+        if v.resultado != imp.CANDIDATO:
+            continue
+        try:
+            r = ejecutor_http.ejecutar(herr, _cuerpo_de(v, config), tenant,
+                                       variables_tenant=config.variables_tenant)
+            if isinstance(r, dict) and r.get("created"):
+                resumen["creados"] += 1
+            else:
+                resumen["ya_estaban"] += 1
+            resumen["ids"].append(v.external_ticket_id)
+        except Exception as e:                              # noqa: BLE001
+            resumen["fallidos"] += 1
+            print(f"    [fallo] ticket {v.external_ticket_id}: "
+                  f"{type(e).__name__}: {e}")
+    return resumen
+
+
+def aplicar_reconciliacion(config, tenant, cambios) -> dict:
+    """Persiste los external_* de los casos ya conocidos. Nunca el estado."""
+    herr = _herramienta(config, "reconciliar_caso_externo")
+    if herr is None:
+        raise SystemExit("falta 'reconciliar_caso_externo' en el catalogo")
+
+    resumen = {"actualizados": 0, "sin_cambios": 0, "fallidos": 0}
+    for c in cambios:
+        cuerpo = {k: v for k, v in c.despues.items() if v is not None}
+        cuerpo["id_caso"] = c.caso_id
+        try:
+            r = ejecutor_http.ejecutar(herr, cuerpo, tenant,
+                                       variables_tenant=config.variables_tenant)
+            if isinstance(r, dict) and r.get("actualizados"):
+                resumen["actualizados"] += 1
+            else:
+                resumen["sin_cambios"] += 1
+        except Exception as e:                              # noqa: BLE001
+            resumen["fallidos"] += 1
+            print(f"    [fallo] caso {c.caso_id}: {type(e).__name__}: {e}")
+    return resumen
+
+# =============================================================================
 #  EL CICLO COMPLETO  --  lo que corre el reloj, y tambien el CLI
 # =============================================================================
 
