@@ -53,6 +53,40 @@ Cuando algo falle en producción, agregarlo al set con lo que *debería* haber p
 - **`ACCION_CONFIRMADA` no significa que el problema del cliente esté resuelto.** Significa que la acción produjo el efecto técnico que el sistema puede medir — en `reiniciar_ont`, que el equipo reinició y volvió. Que la casa tenga internet no lo dice ningún endpoint: lo sabe el cliente, y hay que preguntárselo. La instrucción que el modelo recibe con ese estado se lo ordena así (`nucleo/canales/api.py`), y el mecanismo entero vive en `nucleo/seguimiento/verificacion_accion.py`.
 - **La condición de éxito de una acción no puede ser una mejora del ping.** Medido dos veces: el mismo equipo sano devuelve `1 de 3`, `2 de 3` y `3 de 3` en corridas seguidas (15/08/2026), y un reinicio real y confirmado dejó el ping en `3 de 3` **antes y después** (02/09/2026, ONT de pruebas). Con "el ping mejora" ese reinicio habría salido no confirmado y se habría escalado sin motivo. Lo que prueba un reinicio es `last_status_change` — un sello discreto, comparado contra sí mismo.
 
+## Lo que se verifica no es lo que está desplegado
+
+Entre el 08 y el 09/09/2026 se arreglaron 19 cosas. Al clasificarlas, **cuatro
+no eran bugs de lógica**: eran el repo declarando algo que producción no tenía
+(una credencial `auth_ref`, una bandera `invocable_por_servicio`, herramientas
+enteras escritas y nunca aplicadas). Ninguna prueba podía verlas — las 47
+unitarias leen el YAML del disco y producción lee `asistente.tenant_config`.
+Las cuatro las encontró una persona abriendo el simulador, una simulación
+perdida cada una.
+
+**Después de aplicar config a producción, correr esto — en segundos dice si la
+base tiene lo que el repo declara:**
+
+```
+py -3.13 cli/diferencias_config.py rapilink
+```
+
+Reporta la *dirección* de cada diferencia, no un veredicto: el YAML es semilla
+y la base es la fuente de verdad una vez cargada, así que "solo la base lo
+tiene" es normal (la parrilla, las localidades, la tarifa) y "el repo lo
+declara y la base no" es la que rompe. Termina en 1 si hay algo de lo segundo.
+
+Otras cinco de esas 19 eran regresiones que un caso dorado ya existente habría
+cazado: existían, pasaban, y nadie los miró porque los 56 tardan ~23 minutos.
+Por eso hay un subconjunto de humo — ocho casos, uno por camino crítico,
+ninguno que reinicie un equipo:
+
+```
+py -3.13 cli/evaluar.py rapilink --humo --base       # ~3 min
+```
+
+`--base` no es opcional después de aplicar config: sin él el corredor lee el
+YAML, que es justo el lado donde el dato sí estaba.
+
 ## Comandos útiles
 
 ```
@@ -60,6 +94,8 @@ py -3.13 tests/test_nucleo_sin_tenants.py   # guarda de arquitectura
 py -3.13 tests/test_editor_config.py        # guarda del editor de agentes (sin base)
 py -3.13 tests/test_timeouts_modelo.py      # ninguna llamada al modelo se cuelga (sin red)
 py -3.13 cli/evaluar.py rapilink            # casos dorados contra el motor real
+py -3.13 cli/evaluar.py rapilink --humo     # los 8 del camino critico (~3 min)
+py -3.13 cli/diferencias_config.py rapilink # el repo vs lo desplegado, en segundos
 py -3.13 cli/banco_pruebas.py               # compara modelos contra el prompt real
 py -3.13 cli/sondear_api.py                 # descubre endpoints de WispHub (solo lectura)
 ```

@@ -29,10 +29,32 @@ Llama a las APIs de verdad y al modelo: tarda (~20-60s por caso) y cuesta.
 Es la prueba de antes de dar por bueno un cambio, no algo para correr en cada
 guardado.
 
+POR QUE HAY UN SUBCONJUNTO DE HUMO
+-----------------------------------
+Los 56 casos tardan ~23 minutos. Eso los saco de circulacion sin que nadie lo
+decidiera: entre el 08 y el 09/09/2026 se hicieron diecinueve arreglos y no se
+corrieron enteros ni una vez. Cinco de esos diecinueve eran regresiones que un
+caso dorado habria cazado -- los casos existian, pasaban, y nadie los miro.
+
+'--humo' corre los marcados 'humo: true' en el archivo de casos: uno por
+camino critico, ninguno que reinicie un equipo. Tarda ~3 minutos, que es lo
+que cabe despues de CADA cambio. No reemplaza la corrida completa antes de dar
+algo por bueno; reemplaza a no correr nada.
+
+Y DE DONDE SALE LA CONFIG
+--------------------------
+Por defecto, del YAML del repo -- valida lo que uno acaba de escribir, antes
+de aplicarlo, sin exigir Postgres. Pero DESPUES de aplicar config a produccion
+ese YAML no prueba nada: otras cuatro de esas diecinueve fallas eran cosas que
+el repo declaraba y la base no tenia, y este corredor no podia verlas porque
+leia el lado donde el dato SI estaba. Para eso esta '--base'.
+
 Uso
 ---
     py -3.13 cli/evaluar.py rapilink
-    py -3.13 cli/evaluar.py rapilink --caso "reinicio"    # solo los que matcheen
+    py -3.13 cli/evaluar.py rapilink --humo              # ~3 min, camino critico
+    py -3.13 cli/evaluar.py rapilink --humo --base       # despues de aplicar config
+    py -3.13 cli/evaluar.py rapilink --caso "reinicio"   # solo los que matcheen
     py -3.13 cli/evaluar.py rapilink --json informe.json
 ================================================================================
 """
@@ -47,6 +69,16 @@ from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ))
+
+# Herramientas que ESCRIBEN en un equipo o en un sistema de terceros. Se
+# listan por marcador de efecto y no por nombre exacto, para que una
+# herramienta nueva de la misma familia quede cubierta desde el dia uno.
+#
+# tests/test_casos_de_humo.py importa esta lista de aca: si viviera en los
+# dos lados, la copia del test se quedaria vieja justo cuando importa.
+ESCRIBEN_EN_SISTEMAS = ("reiniciar", "reinicio", "cambiar_", "actualizar_",
+                        "crear_ticket", "registrar_pago", "cerrar_ticket",
+                        "cancelar_")
 
 if sys.stdout.encoding != "utf-8":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -258,6 +290,10 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("tenant")
     ap.add_argument("--caso", help="Corre solo los casos cuyo nombre contenga esto")
+    ap.add_argument("--humo", action="store_true",
+                    help="Solo los casos marcados 'humo: true' (~3 min)")
+    ap.add_argument("--base", action="store_true",
+                    help="Usa la config DESPLEGADA en vez del YAML del repo")
     ap.add_argument("--json", help="Guarda el informe completo en este archivo")
     args = ap.parse_args()
 
@@ -267,15 +303,48 @@ def main() -> None:
 
     doc = yaml.safe_load(ruta_casos.read_text(encoding="utf-8")) or {}
     casos = doc.get("casos") or []
+    if args.humo:
+        casos = [c for c in casos if c.get("humo")]
+        if not casos:
+            raise SystemExit(
+                "Ningun caso marcado 'humo: true'. El subconjunto de humo "
+                "existe para poder correr algo despues de CADA cambio: sin "
+                "el, la unica opcion son los 56 casos completos y entonces "
+                "no se corre ninguno.")
     if args.caso:
         casos = [c for c in casos if args.caso.lower() in c["nombre"].lower()]
     if not casos:
         raise SystemExit("Ningun caso para correr.")
 
-    config = cargar_config(RAIZ / "tenants" / f"{args.tenant}.config.yaml")
+    # De donde sale la config, y por que importa tanto que se pueda elegir.
+    #
+    # El 09/09/2026, al clasificar diecinueve arreglos de dos dias, cuatro
+    # resultaron ser la misma falla: el repo declaraba algo que produccion no
+    # tenia (una credencial, una bandera, herramientas enteras). Este corredor
+    # no podia verlas -- leia el YAML, donde el dato SI estaba-- y por eso las
+    # cuatro las encontro una persona abriendo el simulador.
+    #
+    # El YAML sigue siendo el default: valida el cambio que uno acaba de
+    # escribir ANTES de aplicarlo, y no exige tener Postgres arriba. Pero
+    # DESPUES de aplicar config, la unica corrida que prueba algo es --base.
+    # Ver tambien cli/diferencias_config.py, que contesta lo mismo en segundos
+    # y sin gastar una llamada al modelo.
+    if args.base:
+        from nucleo.config import fuente
+        resultado = fuente.desde_base(args.tenant)
+        if resultado is None:
+            raise SystemExit(
+                f"'{args.tenant}' no esta en asistente.tenant_config.")
+        config, version_config = resultado
+        origen = f"la base (v{version_config})"
+    else:
+        config = cargar_config(RAIZ / "tenants" / f"{args.tenant}.config.yaml")
+        origen = f"tenants/{args.tenant}.config.yaml (NO es lo desplegado)"
 
     print("=" * 72)
-    print(f"  Casos dorados de {args.tenant} -- {len(casos)} caso(s)")
+    print(f"  Casos dorados de {args.tenant} -- {len(casos)} caso(s)"
+          + ("  [HUMO]" if args.humo else ""))
+    print(f"  Config: {origen}")
     print(f"  Contra el motor REAL: llama a las APIs y al modelo, tarda.")
     print("=" * 72, flush=True)
 
@@ -300,14 +369,44 @@ def main() -> None:
         for f in r["fallas"]:
             print(f"         -> {f}", flush=True)
 
+    # "NO SE PUDO LLEGAR" NO ES "EL CASO FALLA"
+    #
+    # Las herramientas contra nuestro propio backend apuntan a
+    # 'http://backend:8000' -- el nombre de servicio del compose. Es correcto
+    # en produccion, donde el motor y el backend comparten la red, e
+    # irresoluble desde una maquina de desarrollo.
+    #
+    # Contarlo como caso fallado deja toda corrida local en rojo permanente, y
+    # un chequeo que siempre falla se deja de leer: seria exactamente la
+    # enfermedad que el subconjunto de humo vino a curar. Se separa, se dice
+    # cuantos son y se dice por que -- sin ocultarlo, que es la otra forma de
+    # equivocarse aca.
+    def _inalcanzable(r: dict) -> bool:
+        f = r.get("fallas") or []
+        return bool(f) and all(
+            ("ConnectionError" in x or "Max retries exceeded" in x
+             or "NameResolutionError" in x) for x in f)
+
+    inalcanzables = [r for r in resultados if not r["ok"] and _inalcanzable(r)]
+    corridos = [r for r in resultados if r not in inalcanzables]
+
     ok = sum(1 for r in resultados if r["ok"])
-    pct = 100.0 * ok / len(resultados)
+    pct = 100.0 * ok / len(corridos) if corridos else 0.0
     minimo = config.evaluacion.minimo_acierto_pct
 
     print()
     print("=" * 72)
-    print(f"  {ok}/{len(resultados)} casos OK ({pct:.0f}%)  --  minimo exigido: {minimo:.0f}%")
+    print(f"  {ok}/{len(corridos)} casos OK ({pct:.0f}%)  --  minimo exigido: {minimo:.0f}%")
     print(f"  {round(time.monotonic() - t_total)}s en total")
+    if inalcanzables:
+        print(f"  {len(inalcanzables)} caso(s) NO se pudieron correr desde aca "
+              f"-- el sistema no responde, no es que el caso falle:")
+        for r in inalcanzables:
+            print(f"    {r['nombre']}")
+        print(f"    (las herramientas del backend propio usan el nombre de red "
+              f"del compose:")
+        print(f"     desde una maquina de desarrollo no resuelve. Corren dentro "
+              f"del contenedor.)")
 
     # ECONOMIA DEL CAMINO -- un caso puede pasar por el camino equivocado.
     #
@@ -332,6 +431,37 @@ def main() -> None:
         for n, nombre, herr in largos:
             print(f"    {n} llamadas  {nombre[:44]}")
             print(f"               {' -> '.join(herr[:6])}")
+    # UNA CORRIDA DE HUMO NO PUEDE ESCRIBIR EN NINGUN SISTEMA
+    #
+    # Se comprueba sobre la traza REAL y no sobre lo que el caso afirma, y esa
+    # diferencia no es teorica: el 09/09/2026, en la primera corrida de humo,
+    # 'falla de internet va a soporte tecnico' reinicio la ONU de laboratorio
+    # de verdad. El caso trae 'sn_onu: ""' justamente para que eso no pase, y
+    # el YAML lo documenta ("los casos de enrutamiento no tocan el equipo").
+    # Pero el motor REPONE el serial desde 'consultar_mi_servicio' cuando se
+    # perdio (nucleo: recuperacion de sesion), asi que la neutralizacion que
+    # el caso escribia quedo sin efecto el dia que esa recuperacion entro.
+    #
+    # Nadie lo noto porque la guarda estatica miraba 'espera.usa' -- lo que el
+    # caso DICE que va a pasar-- y ahi 'reiniciar_ont' no figura. Es el mismo
+    # error contra el que existe todo este corredor: verificar lo escrito en
+    # vez de lo ocurrido.
+    if args.humo:
+        escrituras = [(r["nombre"], h) for r in resultados
+                      for h in (r.get("herramientas") or [])
+                      if any(m in h for m in ESCRIBEN_EN_SISTEMAS)]
+        if escrituras:
+            print()
+            print("  [!] UNA CORRIDA DE HUMO ESCRIBIO EN UN SISTEMA REAL:")
+            for nombre, herr in escrituras:
+                print(f"      {herr}  <-  {nombre}")
+            print("      El humo se corre despues de cada cambio: no puede "
+                  "reiniciar equipos")
+            print("      ni tocar tickets. Sacar 'humo: true' de ese caso, o "
+                  "neutralizarlo")
+            print("      de verdad (y comprobar en la traza que quedo "
+                  "neutralizado).")
+
     if len(resultados) < config.evaluacion.minimo_casos:
         print(f"  AVISO: el set tiene {len(resultados)} casos y la config pide al "
               f"menos {config.evaluacion.minimo_casos} para dar por buena una "

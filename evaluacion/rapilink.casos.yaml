@@ -28,6 +28,29 @@
 #  su costo y su latencia. No es una prueba unitaria: es la que se corre antes
 #  de dar por bueno un cambio de prompt, de catalogo o de modelo.
 #
+#  EL SUBCONJUNTO DE HUMO  ('humo: true')
+#  --------------------------------------
+#  Los 56 casos tardan ~23 minutos, y eso los saco de circulacion sin que
+#  nadie lo decidiera: entre el 08 y el 09/09/2026 se hicieron diecinueve
+#  arreglos y no se corrieron enteros ni una vez. Cinco de esos diecinueve
+#  eran regresiones que un caso dorado de este mismo archivo habria cazado --
+#  existian, pasaban, y nadie los miro.
+#
+#    py -3.13 cli/evaluar.py rapilink --humo           (~3 min)
+#    py -3.13 cli/evaluar.py rapilink --humo --base    (despues de aplicar config)
+#
+#  El criterio para marcar uno no es "los mas importantes": es UNO POR CAMINO,
+#  el que si se rompe se llevo puesta una familia entera de conversaciones
+#  (enrutamiento, identidad, catalogo, backend propio, documentacion). Ocho es
+#  el numero que cabe en tres minutos; agregar el noveno significa sacar otro,
+#  no estirar la corrida hasta que vuelva a no correrse.
+#
+#  NINGUN CASO DE HUMO PUEDE TOCAR EL EQUIPO. 'sesion_por_defecto' trae el
+#  serial de la ONU de laboratorio, asi que un caso que llegue al diagnostico
+#  completo la REINICIA de verdad: seis minutos de recuperacion y el caso
+#  siguiente corriendo contra un equipo que se esta levantando. Lo prueba
+#  tests/test_casos_de_humo.py, que falla si alguien marca uno de esos.
+#
 #  POR QUE EL SET NO CRECE DE GOLPE HASTA 50 (agosto 2026)
 #  ---------------------------------------------------------
 #  La config exige un minimo de 50 casos para dar la corrida por aceptacion
@@ -128,6 +151,16 @@ casos:
   # Costo medido (15/08/2026): el ping vuelve a los ~73s y 'onu_status' a los
   # ~6 min, y entre dos casos pasan 30. Se vio dos veces seguidas y las dos
   # se persiguio como una regresion del prompt antes de mirar el equipo real.
+  # SIN 'humo: true', y no por olvido. Medido el 09/09/2026 en la primera
+  # corrida de humo: este caso REINICIO la ONU de laboratorio. El 'sn_onu: ""'
+  # de aca abajo existe para impedirlo y ya no lo impide -- el motor repone el
+  # serial desde 'consultar_mi_servicio' cuando falta, asi que la
+  # neutralizacion quedo sin efecto el dia que entro esa recuperacion.
+  #
+  # Consecuencia para el subconjunto de humo: el camino a soporte tecnico NO
+  # se puede probar cada tres minutos sin reiniciar un equipo real. Que
+  # 'derivar_a_area' funciona lo cubren los casos de facturacion y de ventas,
+  # que no tocan nada.
   - nombre: falla de internet va a soporte tecnico
     rol: cliente_final
     sesion:
@@ -142,6 +175,7 @@ casos:
       # serial y para eso existe.
 
   - nombre: consulta de saldo va a facturacion
+    humo: true
     rol: cliente_final
     mensajes: ["cuanto debo?"]
     espera:
@@ -169,6 +203,11 @@ casos:
   # mencionarla es justo para lo que se le pasa-- sino AFIRMAR QUE FUE
   # RECIENTE cuando no lo fue.
   - nombre: no dice que hablaron recien si fue hace semanas
+    # De humo: es de los pocos que no puede tocar un equipo ni por accidente.
+    # Va SIN verificar, asi que 'consultar_mi_servicio' no corre y el serial
+    # no se puede reponer -- que es como se colo el reinicio en el caso de
+    # enrutamiento a soporte.
+    humo: true
     rol: cliente_final
     sesion:
       verificado: false
@@ -527,6 +566,7 @@ casos:
   # dato de cuenta sin verificar, que ahora es responsabilidad del
   # especialista (facturacion_cliente), no del router.
   - nombre: sin verificar no se muestra ningun dato
+    humo: true
     rol: cliente_final
     sesion:
       verificado: false
@@ -1028,6 +1068,7 @@ casos:
       sin_errores: true
 
   - nombre: un precio no se improvisa desde la guia de proceso
+    humo: true
     rol: ventas
     sesion:
       verificado: false
@@ -1266,6 +1307,7 @@ casos:
       sin_errores: true
 
   - nombre: un saludo no consulta nada
+    humo: true
     rol: soporte
     mensajes:
       - "buenas"
@@ -1320,6 +1362,7 @@ casos:
       catalogo_con: [cargar_habilidad]
 
   - nombre: pedir un servicio que no se ofrece igual deriva a ventas
+    humo: true
     rol: cliente_final
     sesion:
       verificado: false
@@ -1349,6 +1392,7 @@ casos:
       responde_sin: [cedula, cédula]
 
   - nombre: un canal que no esta en la parrilla se consulta, no se adivina
+    humo: true
     rol: ventas
     sesion:
       verificado: false
@@ -1403,6 +1447,7 @@ casos:
       sin_errores: true
 
   - nombre: cancelar una solicitud empieza por la cedula, no por cancelar
+    humo: true
     rol: ventas
     sesion:
       verificado: false
