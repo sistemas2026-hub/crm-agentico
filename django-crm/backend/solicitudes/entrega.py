@@ -142,8 +142,18 @@ def _crear_ticket_wisphub(s) -> str:
     return ""
 
 
-def _adjuntar_orden(s) -> None:
-    """Sube la ORDEN DE INSTALACION al ticket. Nunca el expediente.
+def _completar_ticket(s) -> None:
+    """Le pone al ticket las fechas estimadas y le adjunta la orden.
+
+    Va por PATCH y no en la creacion porque el POST de WispHub IGNORA las
+    fechas estimadas: medido el 09/09/2026, el ticket 92156 salio con las dos
+    vacias aunque el motor las mandaba. OPTIONS las lista en actions.POST y
+    hasta las marca requeridas -- solo se habia probado la escritura por PATCH.
+
+    De paso resuelve otra rareza: con el archivo SOLO, ese endpoint devuelve
+    500. Necesita al menos un campo normal al lado, y las fechas lo son.
+
+    Nunca sube el expediente.
 
     Lo que queda en 'archivo_ticket' es publico: medido el 09/09/2026, se
     descarga de avisos.wisphub.io/media/ con un GET sin credenciales. El
@@ -165,13 +175,22 @@ def _adjuntar_orden(s) -> None:
     from common.links import frontend_url
     from solicitudes.pdf import armar_orden_instalacion
 
+    # AL PDF DEL EXPEDIENTE, no a una pantalla.
+    #
+    # Aca decia '/instalaciones/<id>' y esa ruta no existe: la bandeja es
+    # '/instalaciones' a secas, con pestañas. Al abrirlo desde el ticket, el
+    # CRM pedia elegir organizacion y despues dejaba al tecnico en 'Hoy', sin
+    # ningun expediente a la vista (reportado el 09/09/2026).
+    #
+    # '/api/solicitudes/<id>/expediente' devuelve el PDF y exige la cookie de
+    # sesion -- que es justo la proteccion que se quiso: sin login, 401.
     pdf = armar_orden_instalacion(
-        s, url_expediente=frontend_url(f"/instalaciones/{s.id}"))
+        s, url_expediente=frontend_url(f"/api/solicitudes/{s.id}/expediente"))
 
     base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
     tenant = os.environ.get("MOTOR_TENANT", "") or "rapilink"
-    herramienta = (os.environ.get("SOLICITUDES_HERRAMIENTA_ADJUNTAR", "")
-                   or "adjuntar_orden_ticket")
+    herramienta = (os.environ.get("SOLICITUDES_HERRAMIENTA_COMPLETAR", "")
+                   or "completar_ticket_instalacion")
 
     cabeceras = {"Content-Type": "application/json"}
     token = os.environ.get("MOTOR_SERVICE_TOKEN")
@@ -218,9 +237,9 @@ def entregar(s) -> None:
     # posterior falle.
     if s.ticket_wisphub:
         try:
-            _adjuntar_orden(s)
+            _completar_ticket(s)
         except Exception as e:                      # noqa: BLE001
-            fallos.append(f"orden adjunta: {type(e).__name__}: {e}")
+            fallos.append(f"completar ticket: {type(e).__name__}: {e}")
 
     if fallos:
         # Se ACUMULA con lo que ya hubiera (puede venir un fallo del PDF desde

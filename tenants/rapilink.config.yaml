@@ -3953,11 +3953,13 @@ herramientas:
   # avisos.wisphub.io/media/ sin ninguna credencial (probado con un GET
   # pelado). El expediente trae cedula, recibo, foto y firma, y se sirve por
   # una vista que exige sesion. Ver solicitudes/pdf.py::armar_orden_instalacion.
-  - nombre: adjuntar_orden_ticket
+  - nombre: completar_ticket_instalacion
     tipo: http
     descripcion: >
-      Sube la orden de instalacion como adjunto de un ticket ya creado. NO la
-      llama el modelo: la llama el backend despues de crear el ticket.
+      Completa un ticket de instalacion recien creado: le pone las fechas
+      estimadas y le adjunta la orden. Va por PATCH y no en la creacion
+      porque el POST de WispHub ignora las fechas (medido el 09/09/2026).
+      NO la llama el modelo: la llama el backend.
     solo_lectura: false
     requiere_confirmacion: true
     invocable_por_servicio: true
@@ -3973,6 +3975,13 @@ herramientas:
     # proposito: WispHub lo ignora y asi no se pisa ningun dato del ticket.
     argumentos_fijos:
       _adjunto: "1"
+    # Las fechas, aca si: por PATCH se escriben de verdad. Formato ISO 8601
+    # obligatorio -- 'DD/MM/AAAA HH:MM:SS' devuelve 400. Al LEERLAS vuelven
+    # como MM/DD/AAAA, que no es el mismo formato: ver la skill wisphub-api.
+    # Y una vez puestas NO se pueden borrar: null y vacio dan 400 los dos.
+    argumentos_calculados:
+      fecha_estimada_inicio: ahora
+      fecha_estimada_fin: ahora+INSTALACION_DIAS_ESTIMADOS
     argumentos_archivo: [archivo_ticket]
     # 'id_ticket' resuelve el marcador de la URL y lo manda el backend, no el
     # modelo: va aca por el mismo motivo que en cerrar_ticket_operativo.
@@ -4027,22 +4036,21 @@ herramientas:
       servicio: WISPHUB_ID_SERVICIO_INSTALACIONES
       tecnico: WISPHUB_TECNICO_SOLICITUDES
       email_tecnico: WISPHUB_EMAIL_TECNICO_SOLICITUDES
-    # Cuando se estima empezar y cuando terminar. La de inicio es el momento
-    # de creacion; la de fin sale de una variable del tenant porque cuanto
-    # tarda una instalacion es un dato de OPERACION de cada ISP, no una
-    # constante del producto.
+    # LAS FECHAS ESTIMADAS NO VAN ACA: EL POST LAS IGNORA.
     #
-    # Verificado en vivo contra WispHub el 09/09/2026: los dos campos aceptan
-    # escritura (OPTIONS los lista, y un PATCH real los dejo puestos), y el
-    # formato tiene que ser ISO 8601 -- 'DD/MM/AAAA HH:MM:SS' devuelve 400.
-    # Al LEERLOS vuelven como MM/DD/AAAA, que no es el mismo formato con el
-    # que se escriben: ver la skill wisphub-api antes de parsearlos.
+    # Estuvieron aca un rato el 09/09/2026 y el ticket salio igual con las dos
+    # vacias. OPTIONS sobre /api/tickets/ las lista en actions.POST y hasta
+    # las marca REQUERIDO, asi que parecia resuelto -- pero solo se habia
+    # probado la escritura por PATCH. El POST las descarta sin decir nada.
     #
-    # Y una advertencia para quien los toque: una vez puestos NO se pueden
-    # borrar. Mandar null o vacio devuelve 400 en las dos formas (probado).
-    argumentos_calculados:
-      fecha_estimada_inicio: ahora
-      fecha_estimada_fin: ahora+INSTALACION_DIAS_ESTIMADOS
+    # Es la trampa que la skill wisphub-api describe para los filtros ("la API
+    # ignora en silencio y devuelve como si nada"), en un endpoint distinto.
+    # Se descarto lo demas antes de acusar al proveedor: la config v132 estaba
+    # escrita 12 minutos antes del ticket, y _resolver_argumentos con esa misma
+    # config SI produce las dos fechas.
+    #
+    # Van en 'completar_ticket_instalacion', que corre por PATCH justo despues
+    # de crear -- y ahi ademas hacen de campo acompañante del archivo.
     filtros_verificados:
       descripcion: {param: descripcion, tipo: texto, verificado_el: 2026-08-27}
 
