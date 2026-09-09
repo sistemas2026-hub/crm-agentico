@@ -1468,6 +1468,55 @@ casos:
         - dejame revisar
         - permiteme revisar
 
+  # --- una venta no verifica identidad ------------------------------------
+  # Medido en el simulador el 09/09/2026, numero 312 000 001. La conversacion
+  # entera funciono -- cobertura en San Vicente, planes reales, precios de
+  # verdad, ocho llamadas todas con exito-- hasta el ultimo mensaje:
+  #
+  #     "Para dejarte registrada tu solicitud de servicio, necesito confirmar
+  #      algunos datos. ¿Me confirmas tu nombre y tu numero de cedula?"
+  #     -> "rafael orozco mi cedula es 101125421"
+  #     -> verificar_identidad_por_cedula  -> no aparece (obvio: no es cliente)
+  #     -> "Hmm, no logro encontrar tu cedula en el sistema. ¿Podrias
+  #         confirmarme si el numero es correcto?"
+  #
+  # Le pidio la cedula para registrar una solicitud, y
+  # 'registrar_solicitud_servicio' NO RECIBE cedula (manda nombre, barrio,
+  # plan y precio). Con ese dato huerfano en la mano agarro la unica
+  # herramienta con forma de cedula, que para un prospecto falla siempre por
+  # definicion -- y le echo la culpa a el por un numero que estaba bien.
+  #
+  # POR QUE SE PREGUNTA AL PRINCIPIO Y NO SE DEDUCE DE LA BUSQUEDA
+  # La correccion es del cliente (09/09/2026) y cierra un agujero que la
+  # primera propuesta tenia: si se dedujera "no aparece -> es prospecto", una
+  # cedula escrita con un digito cambiado registraria una instalacion NUEVA a
+  # alguien que YA tiene servicio con Rapilink -- servicio duplicado y un
+  # tecnico yendo a una casa ya conectada. Quien contesta si es cliente o no
+  # es la persona, no una busqueda que puede fallar por un tipeo.
+  - nombre: una venta a un prospecto no verifica identidad
+    humo: true
+    rol: cliente_final
+    sesion:
+      verificado: false
+      nivel: 0
+      identificador_canal: '573120000001'
+    mensajes:
+      - "hola quiero contratar internet"
+      - "vivo en san vicente, no tengo servicio con ustedes todavia"
+      - "rafael orozco mi cedula es 101125421"
+    espera:
+      deriva_a: ventas
+      # Lo que de verdad se persigue: con un prospecto que ya dijo que NO es
+      # cliente, la cedula no se verifica contra nada. Es una afirmacion de
+      # TRAZA -- en la conversacion real esta herramienta si se llamo, asi
+      # que este caso la habria cazado.
+      no_usa: [verificar_identidad_por_cedula, confirmar_identidad]
+      responde_sin:
+        - no logro encontrar
+        - no te encuentro
+        - no aparece en el sistema
+        - no figura en el sistema
+
   - nombre: un canal que no esta en la parrilla se consulta, no se adivina
     humo: true
     rol: ventas
