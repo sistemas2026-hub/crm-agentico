@@ -2977,6 +2977,66 @@ herramientas:
   # La organizacion NO viaja en el cuerpo: la resuelve el middleware del CRM
   # desde la credencial (claim firmado del JWT, o la org del PAT). Mandarla
   # seria darle al llamante la forma de escribir en otro tenant.
+  # Que sabe ya Dexter de estos tickets. Solo lectura, y solo pertenencia.
+  #
+  # Existe porque el motor NO puede leer las tablas de Django: corre con su
+  # propio usuario de base desde el incidente del 18/08/2026, en que compartia
+  # credencial con el CRM. El dry-run en produccion lo encontro de la peor
+  # forma posible -- 'permission denied for table
+  # solicitudes_solicitudservicio'-- y la respuesta a eso no es un GRANT, que
+  # desharia esa separacion y ataria el nucleo al esquema de otra app.
+  #
+  # Es GET: no escribe, y asi le alcanza 'importacion:read' en vez de write.
+  # Los casos ya importados, para la reconciliacion. Mismo motivo que
+  # 'consultar_tickets_conocidos': el motor no puede leer la tabla 'case'.
+  - nombre: consultar_casos_externos
+    tipo: http
+    descripcion: >
+      Lista los casos que ya llevan referencia externa. NO la llames tu: la
+      ejecuta el importador para reconciliar.
+    solo_lectura: true
+    roles_permitidos: [administracion]
+    base_url: http://backend:8000/api
+    endpoint: /importacion/casos-externos/
+    metodo: GET
+    auth_ref: BOTTLECRM_API_TOKEN
+    auth_esquema: Bearer
+    filtros_verificados:
+      provider:
+        param: provider
+        tipo: texto
+        verificado_el: 2026-09-09
+      limit:
+        param: limit
+        tipo: id
+        verificado_el: 2026-09-09
+      offset:
+        param: offset
+        tipo: id
+        verificado_el: 2026-09-09
+
+  - nombre: consultar_tickets_conocidos
+    tipo: http
+    descripcion: >
+      Pregunta cuales de estos tickets ya tienen caso y cuales los abrio
+      Dexter. NO la llames tu: la ejecuta el importador.
+    solo_lectura: true
+    roles_permitidos: [administracion]
+    base_url: http://backend:8000/api
+    endpoint: /importacion/tickets-conocidos/
+    metodo: GET
+    auth_ref: BOTTLECRM_API_TOKEN
+    auth_esquema: Bearer
+    filtros_verificados:
+      provider:
+        param: provider
+        tipo: texto
+        verificado_el: 2026-09-09
+      ids:
+        param: ids
+        tipo: texto
+        verificado_el: 2026-09-09
+
   - nombre: importar_caso_externo
     tipo: http
     descripcion: >

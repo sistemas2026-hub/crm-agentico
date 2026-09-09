@@ -56,8 +56,8 @@ from nucleo.persistencia import db as persistencia  # noqa: E402
 from nucleo.seguimiento import importacion as imp  # noqa: E402
 from nucleo.seguimiento import importacion_io as io  # noqa: E402
 from nucleo.seguimiento.importacion_io import (  # noqa: E402
-    aplicar, aplicar_reconciliacion, casos_externos,
-    leer_ticket, listar_tickets, registrados_por_dexter, resolver_servicios)
+    aplicar, aplicar_reconciliacion, casos_de_este_proveedor, leer_ticket,
+    listar_tickets, resolver_servicios, tickets_conocidos)
 
 # La cuenta con la que firma la API key de WispHub. Todo lo que entra por API
 # sale con este nombre, asi que NO identifica a Dexter: identifica "por API".
@@ -206,16 +206,16 @@ def main():
           f"(cada_horas={conf.cada_horas}, departamentos={len(conf.departamentos)}, "
           f"asuntos={len(conf.asuntos)}, estados={conf.estados_descubrimiento or 'ninguno'})")
 
-    registro = registrados_por_dexter(args.tenant)
-    conocidos, casos = casos_externos(conf.proveedor)
+    tickets = listar_tickets(config, args.tenant, desde, hasta)
+    print(f"[wisphub] tickets en la ventana: {len(tickets)}")
+    ids = [str(t.get("id_ticket")) for t in tickets if t.get("id_ticket")]
+    conocidos, registro = tickets_conocidos(config, args.tenant, ids)
+    casos = casos_de_este_proveedor(config, args.tenant) if args.reconciliar else []
     print(f"[casos] con referencia externa: {len(conocidos)}")
 
     areas_por_persona = persistencia.areas_de_colaboradores(args.tenant)
     print(f"[areas] colaboradores con area: {len(areas_por_persona)} "
           f"-- {sorted(set(areas_por_persona.values()))}")
-
-    tickets = listar_tickets(config, args.tenant, desde, hasta)
-    print(f"[wisphub] tickets en la ventana: {len(tickets)}")
 
     placeholder = (config.variables_tenant or {}).get(
         "WISPHUB_ID_SERVICIO_INSTALACIONES", "")

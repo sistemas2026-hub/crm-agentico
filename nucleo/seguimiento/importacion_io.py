@@ -165,142 +165,86 @@ def resolver_servicios(config, tenant):
     return resolver
 
 
-def registrados_por_dexter(tenant: str) -> set:
-    """
-    Los tickets que Dexter abrio, de las DOS tablas donde quedan anotados.
+def casos_de_este_proveedor(config, tenant: str) -> list[dict]:
+    """Los casos con referencia externa, para reconciliar. Por la API, no por SQL."""
+    herr = _herramienta(config, "consultar_casos_externos")
+    if herr is None:
+        raise SystemExit("falta 'consultar_casos_externos' en el catalogo")
+    casos, desde = [], 0
+    while True:
+        r = ejecutor_http.ejecutar(
+            herr, {"provider": config.importacion_tickets.proveedor,
+                   "limit": 200, "offset": desde},
+            tenant, variables_tenant=config.variables_tenant)
+        if not isinstance(r, dict):
+            break
+        casos.extend(r.get("casos") or [])
+        desde = r.get("next_offset")
+        if not desde:
+            break
+    return casos
 
-    Mirar solo 'conversations' es el error que ya se cometio una vez: la
-    primera version de la auditoria clasifico como externos dos tickets que
-    habia abierto el formulario de solicitudes. Si la segunda consulta falla,
-    esto REVIENTA en vez de devolver la mitad -- clasificar autoria con la
-    mitad del registro es peor que no clasificar.
-    """
-    import psycopg
 
+def tickets_conocidos(config, tenant: str, ids: list[str]) -> tuple[set, set]:
+    """
+    De estos tickets: cuales ya tienen caso, y cuales los abrio Dexter.
+
+    Le pregunta al CRM en vez de leer sus tablas. No es una vuelta larga: el
+    motor NO PUEDE leerlas -- corre con su propio usuario de base desde el
+    incidente del 18/08/2026, en que compartia credencial con Django. El
+    primer dry-run en produccion lo encontro asi:
+
+        psycopg.errors.InsufficientPrivilege:
+        permission denied for table solicitudes_solicitudservicio
+
+    La salida no era un GRANT. Habria deshecho esa separacion de credenciales
+    y habria atado 'nucleo/' al esquema interno de otra app: el dia que
+    'solicitudes' renombre una columna, se rompe el importador y nadie sabe por
+    que. Ahora Django contesta pertenencia y por dentro cambia lo que quiera.
+
+    Devuelve (con_caso, registrados_por_dexter). La segunda UNE lo que dice el
+    CRM con 'conversations.ticket_operativo', que si es del dominio del motor.
+    Las dos fuentes hacen falta: mirar una sola es el error que ya se cometio
+    en la auditoria, y clasifico como externos dos tickets nuestros.
+    """
+    con_caso: set = set()
+    del_crm: set = set()
+
+    herr = _herramienta(config, "consultar_tickets_conocidos")
+    if herr is not None and ids:
+        # En tandas: el endpoint acepta hasta 500 ids por consulta y la URL no
+        # puede crecer sin limite.
+        # Tandas de 150 contra un tope de servidor de 200: el margen deja
+        # lugar por si algun dia los ids del proveedor son mas largos.
+        for arranque in range(0, len(ids), 150):
+            tanda = ids[arranque:arranque + 150]
+            try:
+                r = ejecutor_http.ejecutar(
+                    herr, {"provider": config.importacion_tickets.proveedor,
+                           "ids": ",".join(tanda)},
+                    tenant, variables_tenant=config.variables_tenant)
+                if isinstance(r, dict):
+                    con_caso |= {str(x) for x in (r.get("con_caso") or [])}
+                    del_crm |= {str(x) for x in (r.get("creados_por_dexter") or [])}
+            except Exception as e:                          # noqa: BLE001
+                # Es un fallo GLOBAL, no de un ticket: sin saber que ya existe
+                # se crearia de nuevo todo. Que reviente aca es lo correcto.
+                raise RuntimeError(
+                    f"no se pudo consultar los tickets conocidos: "
+                    f"{type(e).__name__}: {e}") from e
+
+    # La otra fuente de autoria, esta si del dominio del motor.
     from nucleo.persistencia.conexion import dsn
+    import psycopg
 
     with psycopg.connect(dsn()) as cx:
         conv = {str(f[0]).strip() for f in cx.execute(
             "select trim(ticket_operativo) from asistente.conversations "
             "where coalesce(trim(ticket_operativo),'') <> ''").fetchall()}
-        sol = {str(f[0]).strip() for f in cx.execute(
-            "select trim(ticket_wisphub) from solicitudes_solicitudservicio "
-            "where coalesce(trim(ticket_wisphub),'') <> ''").fetchall()}
+
     print(f"[registro] tickets de Dexter: {len(conv)} en conversaciones + "
-          f"{len(sol)} en solicitudes = {len(conv | sol)}")
-    return conv | sol
-
-
-def casos_externos(provider: str) -> tuple[set, list[dict]]:
-    """Los casos que ya llevan referencia externa: sus ids y sus filas."""
-    import psycopg
-
-    from nucleo.persistencia.conexion import dsn
-
-    with psycopg.connect(dsn()) as cx:
-        filas = cx.execute(
-            "select id, external_ticket_id, status, closed_on, external_status, "
-            "       external_created_by, external_created_by_type, external_fetch_error "
-            "  from public.case where provider = %s and external_ticket_id <> ''",
-            (provider,)).fetchall()
-    casos = [{"id": f[0], "external_ticket_id": f[1], "status": f[2],
-              "closed_on": f[3], "external_status": f[4],
-              "external_created_by": f[5], "external_created_by_type": f[6],
-              "external_fetch_error": f[7]} for f in filas]
-    return {str(c["external_ticket_id"]) for c in casos}, casos
-
-
-# =============================================================================
-#  APLICAR  --  la unica parte que escribe, y solo con --aplicar
-# =============================================================================
-
-def _cuerpo_de(v, config) -> dict:
-    """
-    Lo que se le manda al CRM por un candidato. Ni un campo mas.
-
-    'name' lleva el asunto del proveedor tal cual: es lo que quien atiende
-    reconoce en la cola, y traducirlo lo desalinearia de WispHub. La
-    descripcion NO copia la del ticket -- ese campo es texto libre de un
-    operador y ya se sabe que trae PII embebida (PRD 7.4); lo que se guarda es
-    la referencia para ir a buscarla.
-    """
-    proveedor = config.importacion_tickets.proveedor
-    partes = [f"Importado de {proveedor}, ticket #{v.external_ticket_id}.",
-              f"Servicio {v.external_service_id}." if v.external_service_id else "",
-              f"Abierto por {v.external_created_by}." if v.external_created_by else ""]
-    if v.identidad_es_placeholder:
-        partes.append("Cuelga del registro de instalaciones: el cliente todavia "
-                      "no existe como tal.")
-    return {
-        "provider": proveedor,
-        "external_ticket_id": v.external_ticket_id,
-        "external_service_id": v.external_service_id,
-        "external_status": v.external_status,
-        "external_status_at": None,
-        "external_created_by": v.external_created_by,
-        "external_created_by_type": v.external_created_by_type,
-        "external_fetched_at": datetime.now(timezone.utc).isoformat(),
-        "assigned_to": v.responsable,
-        "priority": v.prioridad or "Normal",
-        "status": "New",
-        "name": (v.asunto or "Ticket importado")[:64],
-        "description": " ".join(x for x in partes if x),
-    }
-
-
-def aplicar(config, tenant, veredictos) -> dict:
-    """
-    Crea los casos de los candidatos. Un fallo por ticket no corta el lote.
-
-    La idempotencia NO la pone este bucle: la pone
-    UNIQUE(org, provider, external_ticket_id) del otro lado. Aca se puede
-    reintentar sin miedo porque el writer devuelve 'created=false' y el caso
-    que ya estaba, sin tocarle nada.
-    """
-    herr = _herramienta(config, "importar_caso_externo")
-    if herr is None:
-        raise SystemExit("falta 'importar_caso_externo' en el catalogo")
-
-    resumen = {"creados": 0, "ya_estaban": 0, "fallidos": 0, "ids": []}
-    for v in veredictos:
-        if v.resultado != imp.CANDIDATO:
-            continue
-        try:
-            r = ejecutor_http.ejecutar(herr, _cuerpo_de(v, config), tenant,
-                                       variables_tenant=config.variables_tenant)
-            if isinstance(r, dict) and r.get("created"):
-                resumen["creados"] += 1
-            else:
-                resumen["ya_estaban"] += 1
-            resumen["ids"].append(v.external_ticket_id)
-        except Exception as e:                              # noqa: BLE001
-            resumen["fallidos"] += 1
-            print(f"    [fallo] ticket {v.external_ticket_id}: "
-                  f"{type(e).__name__}: {e}")
-    return resumen
-
-
-def aplicar_reconciliacion(config, tenant, cambios) -> dict:
-    """Persiste los external_* de los casos ya conocidos. Nunca el estado."""
-    herr = _herramienta(config, "reconciliar_caso_externo")
-    if herr is None:
-        raise SystemExit("falta 'reconciliar_caso_externo' en el catalogo")
-
-    resumen = {"actualizados": 0, "sin_cambios": 0, "fallidos": 0}
-    for c in cambios:
-        cuerpo = {k: v for k, v in c.despues.items() if v is not None}
-        cuerpo["id_caso"] = c.caso_id
-        try:
-            r = ejecutor_http.ejecutar(herr, cuerpo, tenant,
-                                       variables_tenant=config.variables_tenant)
-            if isinstance(r, dict) and r.get("actualizados"):
-                resumen["actualizados"] += 1
-            else:
-                resumen["sin_cambios"] += 1
-        except Exception as e:                              # noqa: BLE001
-            resumen["fallidos"] += 1
-            print(f"    [fallo] caso {c.caso_id}: {type(e).__name__}: {e}")
-    return resumen
+          f"{len(del_crm)} en solicitudes | con caso: {len(con_caso)}")
+    return con_caso, conv | del_crm
 
 
 # =============================================================================
@@ -338,10 +282,10 @@ def barrido(config, tenant: str, *, aplicar_cambios: bool = False) -> dict:
                "creados": 0, "ya_estaban": 0, "fallidos": 0}
 
     try:
-        registro = registrados_por_dexter(tenant)
-        conocidos, _ = casos_externos(conf.proveedor)
         areas = persistencia.areas_de_colaboradores(tenant)
         tickets = listar_tickets(config, tenant, desde, hasta)
+        ids = [str(t.get("id_ticket")) for t in tickets if t.get("id_ticket")]
+        conocidos, registro = tickets_conocidos(config, tenant, ids)
     except Exception as e:                                  # noqa: BLE001
         resumen["error_global"] = f"{type(e).__name__}: {e}"
         return resumen

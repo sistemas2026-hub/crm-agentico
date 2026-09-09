@@ -17,7 +17,10 @@ from cases import importacion_views as vistas
 app_name = "importacion"
 
 urlpatterns = [
+    path("tickets-conocidos/", vistas.TicketsConocidosView.as_view(),
+         name="tickets_conocidos"),
     path("casos/", vistas.ImportarCaseView.as_view(), name="importar"),
+    path("casos-externos/", vistas.CasosExternosView.as_view(), name="casos_externos"),
     path("casos/<uuid:pk>/reconciliar/", vistas.ReconciliarCaseView.as_view(),
          name="reconciliar"),
 ]

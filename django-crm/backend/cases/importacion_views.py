@@ -225,6 +225,165 @@ class ImportarCaseView(APIView):
                 org=org, provider=proveedor, external_ticket_id=ticket).first()
 
 
+class TicketsConocidosView(APIView):
+    """
+    GET /api/importacion/tickets-conocidos/?provider=wisphub&ids=91865,91908
+
+    Que sabe ya Dexter de estos tickets. Responde PERTENENCIA y nada mas.
+
+    POR QUE EXISTE
+    --------------
+    El importador necesita dos cosas antes de decidir: si un ticket ya tiene
+    caso (para cortarlo antes de gastar consultas de identidad) y si lo creamos
+    nosotros (para clasificar la autoria). Las dos viven en tablas de Django --
+    'case' y 'solicitudes_solicitudservicio'-- y el motor no las puede leer:
+    corre con su propio usuario de base desde el incidente del 18/08/2026, en
+    que compartia credencial con el CRM.
+
+    La respuesta a eso NO es un GRANT. Darle SELECT sobre tablas de Django
+    desharia esa separacion y ademas ataria 'nucleo/' al esquema interno de
+    otra app -- el dia que 'solicitudes' renombre una columna, se rompe el
+    importador. Esta ruta es el limite correcto: Django contesta lo que sabe,
+    con la forma que el motor necesita, y por dentro puede cambiar lo que
+    quiera.
+
+    QUE NO DEVUELVE
+    ---------------
+    Nada de la solicitud ni del caso: ni cliente, ni notas, ni campos. Solo
+    cuales de los ids preguntados estan en cada conjunto. Un endpoint que
+    devolviera las filas seria una via para leer 'solicitudes' entera desde
+    afuera, que es justo lo que se esta evitando.
+
+    Es GET y no POST a proposito: no escribe, y con el vocabulario de alcances
+    (common/scopes.py: 'read' cubre GET) alcanza con 'importacion:read'. Un
+    POST habria exigido 'importacion:write' para una operacion que no escribe.
+    """
+
+    permission_classes = (IsAuthenticated, HasOrgContext)
+
+    # Cuantos ids se pueden preguntar de una vez, y cuanto puede medir la
+    # lista entera. Los dos limites hacen falta y miden cosas distintas: hoy
+    # los ids del proveedor son numeros de cinco cifras, pero la columna admite
+    # 64 caracteres, asi que "200 ids" puede ser 200 bytes o 13.000. El segundo
+    # limite es el que evita depender de cuanto tolera cada proxy de la cadena,
+    # que es justo lo que no se puede comprobar desde el codigo.
+    MAX_IDS = 200
+    MAX_LARGO_IDS = 4000
+
+    def get(self, request):
+        proveedor = (request.query_params.get("provider") or "").strip()
+        if not proveedor:
+            return _error("falta 'provider'", "PROVEEDOR_REQUERIDO")
+
+        crudo = (request.query_params.get("ids") or "").strip()
+        ids = [x.strip() for x in crudo.split(",") if x.strip()]
+        if not ids:
+            return _error("falta 'ids'", "IDS_REQUERIDOS")
+        if len(ids) > self.MAX_IDS:
+            return _error(f"maximo {self.MAX_IDS} ids por consulta, llegaron "
+                          f"{len(ids)}", "DEMASIADOS_IDS")
+        if len(crudo) > self.MAX_LARGO_IDS:
+            return _error(f"la lista de ids mide {len(crudo)} caracteres y el "
+                          f"maximo es {self.MAX_LARGO_IDS}",
+                          "IDS_DEMASIADO_LARGOS")
+
+        # Ambas consultas filtradas por request.org, que sale de la credencial.
+        # Sin ese filtro, un ticket con el mismo numero en otro ISP se
+        # reportaria como conocido y el importador lo saltearia -- un ticket
+        # que nunca se importa, y en silencio.
+        con_caso = set(Case.objects.filter(
+            org=request.org, provider=proveedor, external_ticket_id__in=ids
+        ).values_list("external_ticket_id", flat=True))
+
+        # Las dos situaciones se distinguen a proposito, y no dan lo mismo:
+        #
+        #   el modulo no esta    despliegue legitimo sin 'solicitudes'. La
+        #                        respuesta degrada a "ninguna", que clasifica
+        #                        de mas como 'externo_desconocido' --
+        #                        conservador, y nunca al reves.
+        #
+        #   la consulta fallo    tabla inexistente, permiso, esquema roto. Eso
+        #                        NO se disfraza de "no instalado": se propaga,
+        #                        porque el importador tiene que abortar el
+        #                        ciclo en vez de clasificar mal en silencio.
+        #                        Es exactamente el error que este endpoint vino
+        #                        a resolver; taparlo aca lo volveria invisible.
+        try:
+            from solicitudes.models import SolicitudServicio
+        except ImportError:
+            creados_por_dexter = set()
+        else:
+            creados_por_dexter = set(SolicitudServicio.objects.filter(
+                org=request.org, ticket_wisphub__in=ids
+            ).values_list("ticket_wisphub", flat=True))
+
+        return Response({
+            "con_caso": sorted(con_caso),
+            "creados_por_dexter": sorted(x for x in creados_por_dexter if x),
+        }, status=http.HTTP_200_OK)
+
+
+class CasosExternosView(APIView):
+    """
+    GET /api/importacion/casos/?provider=wisphub
+
+    Los casos que ya llevan referencia externa, con lo que la reconciliacion
+    necesita para decidir a cuales volver a preguntarles.
+
+    Mismo motivo que 'tickets-conocidos': el motor no puede leer 'case', y la
+    respuesta a eso no es un GRANT. Devuelve solo los campos que la politica
+    usa -- estado propio, cierre, y los external_* que se van a comparar-- y
+    nada del cliente ni del texto del caso.
+    """
+
+    permission_classes = (IsAuthenticated, HasOrgContext)
+
+    CAMPOS = ("id", "external_ticket_id", "status", "closed_on",
+              "external_status", "external_created_by",
+              "external_created_by_type", "external_fetch_error")
+
+    # Hoy son 16 casos y devolverlos todos no cuesta nada. Manana son miles, y
+    # una consulta sin tope es de las que funcionan durante meses y despues
+    # tumban el barrido en la hora pico. El orden va por 'external_ticket_id'
+    # -- estable y unico dentro de (org, provider)-- para que paginar no
+    # repita ni saltee filas, cosa que un orden por fecha no garantiza.
+    LIMITE_POR_DEFECTO = 200
+    LIMITE_MAXIMO = 500
+
+    def get(self, request):
+        proveedor = (request.query_params.get("provider") or "").strip()
+        if not proveedor:
+            return _error("falta 'provider'", "PROVEEDOR_REQUERIDO")
+
+        try:
+            limite = int(request.query_params.get("limit")
+                         or self.LIMITE_POR_DEFECTO)
+            desde = int(request.query_params.get("offset") or 0)
+        except ValueError:
+            return _error("'limit' y 'offset' tienen que ser enteros",
+                          "PAGINACION_INVALIDA")
+        if limite < 1 or limite > self.LIMITE_MAXIMO or desde < 0:
+            return _error(f"'limit' entre 1 y {self.LIMITE_MAXIMO}, 'offset' "
+                          f"no negativo", "PAGINACION_INVALIDA")
+
+        base = Case.objects.filter(
+            org=request.org, provider=proveedor
+        ).exclude(external_ticket_id="").order_by("external_ticket_id")
+        total = base.count()
+        filas = base.values(*self.CAMPOS)[desde:desde + limite]
+
+        return Response({
+            "casos": [{k: (str(v) if k == "id" else v) for k, v in f.items()}
+                      for f in filas],
+            "total": total,
+            "offset": desde,
+            "limit": limite,
+            # None cuando no queda nada: quien pagina no tiene que calcular el
+            # final ni arriesgar una vuelta de mas.
+            "next_offset": desde + limite if desde + limite < total else None,
+        }, status=http.HTTP_200_OK)
+
+
 class ReconciliarCaseView(APIView):
     """
     POST /api/importacion/casos/<uuid:pk>/reconciliar/

@@ -641,3 +641,37 @@ llamadas_externas.clear()
 reloj.una_pasada(AHORA_R + timedelta(minutes=30))
 revisar(not llamadas_externas,
         "y media hora despues todavia no le toca a ninguno")
+
+
+# =============================================================================
+#  12. LA FRONTERA CON DJANGO  --  el motor no lee tablas ajenas
+# =============================================================================
+
+print("\nel motor no consulta tablas de Django por SQL")
+
+FUENTE_IO = (RAIZ / "nucleo" / "seguimiento"
+             / "importacion_io.py").read_text(encoding="utf-8")
+
+# El dry-run en produccion se cayo con 'permission denied for table
+# solicitudes_solicitudservicio'. El motor corre con su propio usuario de base
+# desde el incidente del 18/08/2026, en que compartia credencial con el CRM, y
+# la salida no era un GRANT: habria deshecho esa separacion y atado el nucleo
+# al esquema interno de otra app.
+for tabla in ("solicitudes_solicitudservicio", "public.case", "public.profile",
+              "from case ", "join case "):
+    revisar(f"select {tabla}" not in FUENTE_IO.lower()
+            and f"from {tabla}" not in FUENTE_IO.lower(),
+            f"no hay SQL contra '{tabla.strip()}'",
+            "esas tablas son de Django y se preguntan por /api/importacion/")
+
+revisar("asistente.conversations" in FUENTE_IO,
+        "y conversations SI se consulta directo: es del dominio del motor")
+revisar("consultar_tickets_conocidos" in FUENTE_IO
+        and "consultar_casos_externos" in FUENTE_IO,
+        "las dos lecturas ajenas pasan por herramientas del catalogo")
+
+# Un fallo al preguntar que ya existe es GLOBAL: sin esa respuesta se crearia
+# de nuevo todo lo que ya estaba.
+revisar("no se pudo consultar los tickets conocidos" in FUENTE_IO,
+        "si esa consulta falla, el ciclo entero aborta",
+        "seguir sin saber que existe significa volver a crearlo todo")
