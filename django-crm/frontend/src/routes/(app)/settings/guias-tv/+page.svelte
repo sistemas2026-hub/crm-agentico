@@ -124,7 +124,22 @@
   {/snippet}
 </PageHeader>
 
-<div class="v2-page">
+<!--
+  'v2-scroll' NO ES DECORACION: es el unico contenedor que hace scroll.
+
+  El shell es 'height:100vh; overflow:hidden' y '.v2-main' tambien recorta
+  (lib/v2/styles/v2.css). Quien scrollea es '.v2-scroll' -- 'flex:1;
+  min-height:0; overflow-y:auto' -- y lo usan las 16 pantallas de /settings.
+
+  Esta usaba 'v2-page', una clase que NO existe globalmente: solo esta
+  definida DENTRO de settings/oferta, y Svelte aisla los estilos por
+  componente, asi que aca no aplicaba nada. Con el catalogo vacio no se
+  notaba; con las 19 guias cargadas, todo lo que pasaba del alto de la
+  pantalla quedaba recortado y no habia forma de llegar a las de abajo.
+  Reportado el 10/09/2026, apenas se cargaron las guias.
+-->
+<div class="v2-scroll">
+  <div class="v2-pad" style="padding-top:16px;padding-bottom:48px;max-width:980px">
   {#if !data.huboRespuesta}
     <p class="aviso aviso-error">
       No se pudo leer la configuración del asistente. Puede estar reiniciándose por una
@@ -239,7 +254,8 @@
         {guardando ? 'Guardando…' : 'Guardar guías'}
       </button>
     {/if}
-  </form>
+    </form>
+  </div>
 </div>
 
 <style>
