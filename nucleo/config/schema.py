@@ -912,6 +912,12 @@ class Herramienta(Base):
     #                                   nucleo/modelo/motor.py)
     consulta_servicios_ofrecidos: bool = False
     consulta_parrilla: bool = False
+    #   consulta_guias_tv            -> TenantConfig.guias_tv, y ademas
+    #                                   RESUELVE cual guia corresponde: la de
+    #                                   la marca, la general, o la unica de
+    #                                   TDT. Esa eleccion es de CODIGO y no
+    #                                   del modelo -- ver GuiaTV.
+    consulta_guias_tv: bool = False
     # Tipo 'interno': entrega los PASOS de un procedimiento de la empresa
     # (asistente.habilidades) cuando el agente lo pide por su codigo.
     #
@@ -2131,6 +2137,82 @@ class Canal(Base):
     nombre: str
 
 
+class GuiaTV(Base):
+    """
+    Como se sintoniza un televisor. La FUENTE OFICIAL de esas instrucciones
+    (decision de negocio, 10/09/2026).
+
+    POR QUE UN CATALOGO Y NO EL PROMPT
+    Hasta hoy el paso a paso vivia escrito en el prompt del rol ("elige
+    ANTENA") y ademas en la descripcion de 'activar_catv', duplicado en
+    tenants/ y en conectores/. Tres copias de una instruccion que cambia por
+    marca de televisor y que nadie puede corregir sin un desarrollador. El
+    corpus de RAG llego a documentar la decision CONTRARIA -- "escribirlo
+    tambien en un documento seria una segunda fuente de verdad"-- y esa es
+    justamente la que se revierte: la segunda fuente ya existia, era el
+    prompt.
+
+    LAS DOS CONEXIONES REALES DE RAPILINK, que es lo que decide la guia:
+
+      directo  fibra -> ONU -> salida CATV -> coaxial -> entrada del TV.
+               La señal es digital y la sintonia depende de la MARCA.
+
+      tdt      fibra -> ONU -> salida CATV -> coaxial -> TDT -> HDMI o AV.
+               El coaxial NO llega al televisor. Quien sintoniza es el TDT,
+               asi que la marca del TV NO cambia nada.
+
+    De ahi la regla que el validador hace cumplir mas abajo: con 'tdt' la
+    marca tiene que ir vacia. Una guia "Samsung + TDT" no es un dato
+    incompleto, es un dato IMPOSIBLE -- y si se pudiera cargar, el catalogo se
+    multiplicaria por marca sin agregar una sola instruccion distinta.
+    """
+    # Vacia = la guia GENERAL. Con 'directo' es el respaldo para una marca sin
+    # guia propia; con 'tdt' es la unica que puede existir.
+    #
+    # Texto libre y no un enum: las marcas de televisor no son un catalogo
+    # cerrado ni conocido de antemano, y el flujo entero esta pensado para que
+    # una marca nueva se agregue desde la pantalla.
+    marca: str = ""
+    tipo_conexion: Literal["directo", "tdt"] = "directo"
+    # El paso a paso que se le lee al cliente, TAL CUAL. El agente no lo
+    # reescribe ni lo resume: quien lo redacto sabe de que televisor habla.
+    instrucciones: str = ""
+    # Opcional. Un video se manda solo si esta cargado -- el agente no puede
+    # inventar un enlace.
+    url_video: str = ""
+    # Apagar en vez de borrar, igual que ServicioOfrecido: una guia que se
+    # retira porque quedo vieja vuelve corregida, y borrarla pierde el texto
+    # que alguien redacto.
+    activa: bool = True
+    # INTERNAS. Notas para quien administra el catalogo ("solo modelos
+    # posteriores a 2019", "confirmado con el tecnico"). NO se le entregan al
+    # cliente: ver la resolucion en motor.py, que las deja fuera de lo que
+    # devuelve la herramienta.
+    observaciones: str = ""
+
+    @model_validator(mode="after")
+    def _coherencia(self) -> "GuiaTV":
+        if self.tipo_conexion == "tdt" and self.marca.strip():
+            raise ValueError(
+                f"guia de TDT con marca '{self.marca}': con TDT quien sintoniza "
+                f"es la cajita, no el televisor, asi que la marca no cambia el "
+                f"procedimiento. Tiene que haber UNA sola guia de TDT, con "
+                f"'marca' vacia -- si no, el catalogo se llena de 'Samsung + "
+                f"TDT', 'LG + TDT' que dicen todos lo mismo.")
+
+        # Una guia ACTIVA sin instrucciones es peor que no tenerla: la
+        # resolucion la elige por ser la mas especifica y el agente se queda
+        # sin nada que decir, justo donde antes habia un texto en el prompt.
+        # Apagada puede estar vacia -- es un borrador.
+        if self.activa and not self.instrucciones.strip():
+            raise ValueError(
+                f"guia activa sin instrucciones (marca='{self.marca or '(general)'}', "
+                f"{self.tipo_conexion}): una guia vacia gana la resolucion y "
+                f"deja al agente sin que entregar. Cargala con su texto o "
+                f"dejala en 'activa: false' mientras se redacta.")
+        return self
+
+
 # =============================================================================
 #  IMPORTACION DE TICKETS DEL SISTEMA OPERATIVO
 # =============================================================================
@@ -2402,6 +2484,9 @@ class TenantConfig(Base):
     # La parrilla es una sola para todos los planes con TV.
     servicios_ofrecidos: list[ServicioOfrecido] = Field(default_factory=list)
     parrilla_canales: list[Canal] = Field(default_factory=list)
+    # Las guias de sintonizacion, administradas desde la pantalla. Fuente
+    # OFICIAL de esas instrucciones desde el 10/09/2026 -- ver GuiaTV.
+    guias_tv: list[GuiaTV] = Field(default_factory=list)
     # Catalogo localidad -> zona(s) real(es), sincronizado bajo demanda --
     # ver LocalidadZona arriba y nucleo/herramientas/localidades.py. Nunca
     # se edita a mano: se reemplaza entero cada vez que corre el sync.
@@ -2425,6 +2510,31 @@ class TenantConfig(Base):
     def _coherencia_global(self):
         nombres_rol = set(self.roles)
         nombres_herr = {h.nombre for h in self.herramientas}
+
+        # UNA SOLA GUIA ACTIVA POR (marca, conexion).
+        #
+        # La resolucion es de codigo y tiene que ser DETERMINISTA: con dos
+        # guias activas para Samsung, cual gana depende del orden en que
+        # quedaron guardadas, y el cliente recibe una u otra sin que nadie lo
+        # haya decidido. Se compara normalizado porque 'Samsung', 'SAMSUNG' y
+        # 'samsung' son la misma marca para quien pregunta -- y la resolucion
+        # las trata igual, asi que aca tienen que colisionar igual.
+        #
+        # Las inactivas no cuentan: tener el borrador de la guia nueva junto a
+        # la vigente es exactamente para lo que sirve 'activa'.
+        vistas: dict[tuple[str, str], str] = {}
+        for g in self.guias_tv:
+            if not g.activa:
+                continue
+            clave = (_sin_tildes(g.marca.strip().lower()), g.tipo_conexion)
+            if clave in vistas:
+                donde = g.marca.strip() or "(general)"
+                raise ValueError(
+                    f"hay dos guias de TV activas para '{donde}' / "
+                    f"{g.tipo_conexion}. Cual gana dependeria del orden en que "
+                    f"quedaron guardadas: deja una activa y la otra en "
+                    f"'activa: false'.")
+            vistas[clave] = g.marca
 
         # Mismo patron para un rol creado por la UI de edicion o a mano en el
         # YAML: el nombre es una clave que despues viaja como slug (URL de la

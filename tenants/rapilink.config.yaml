@@ -235,7 +235,7 @@ roles:
       # topologia de VLAN/perfil.
       diagnosticar_falla_ont: ["ONU details.Last down cause", "ONU details.Last down cause_interpretado",
             "ONU details.Run state", "ONU details.Last down time", "Optical status.Rx optical power(dBm)"]
-      consultar_estado_catv: [catv]
+      consultar_estado_catv: [catv, catv_interpretado]
       activar_catv: [response]
       # Ni 'MACAddress' ni 'IPAddress': son datos del aparato del cliente y
       # no aportan nada al diagnostico. Con el nombre, si esta activo y si
@@ -1246,7 +1246,7 @@ roles:
       # El unico dato duro para una falla de TV, y este es el agente que las
       # atiende. Solo el estado del servicio (Enabled/Disabled/no soportado),
       # que es accionable; nada de niveles opticos ni topologia.
-      consultar_estado_catv: [catv]
+      consultar_estado_catv: [catv, catv_interpretado]
       # Solo la confirmacion del proveedor ("CATV enabled"), nada mas.
       activar_catv: [response]
       # Ni 'MACAddress' ni 'IPAddress': son datos del aparato del cliente y
@@ -4826,6 +4826,39 @@ herramientas:
                      resolver ni que se arregle sintonizando: pasa el caso a
                      un colaborador humano, porque si su plan incluye TV hay
                      que cambiarle el equipo.
+    # QUE SIGNIFICA CADA ESTADO, CALCULADO EN CODIGO.
+    #
+    # Los tres significados ya estaban escritos arriba, en la descripcion --
+    # es decir, en el prompt. Eso es guia, no garantia (PRD 7.4), y este
+    # proyecto ya midio de sobra lo que valen las instrucciones que nadie hace
+    # cumplir. Con 'mapeos', el significado viaja PEGADO al dato en
+    # 'catv_interpretado' y el modelo no tiene que acordarse del protocolo.
+    #
+    # Un valor que el mapeo no conozca escribe SIN_MAPEAR en vez de callarse:
+    # ver _aplicar_mapeos en nucleo/herramientas/http.py, y lo que costo el
+    # 21/08/2026 que un dict vacio dejara al agente adivinando.
+    #
+    # OJO con 'Not supported by ONU-Type': la etiqueta NO dice "cambia el
+    # tipo". Con mas de un televisor la TV no pasa por la ONU y cambiar el
+    # tipo no corresponde -- lo fijan los casos dorados 'equipo sin soporte de
+    # TV pregunta cuantos equipos antes de tocar nada' y 'con dos equipos la
+    # TV no pasa por la ONU y no se cambia el tipo'. Primero se pregunta.
+    mapeos:
+      catv:
+        Enabled: >
+          El puerto de TV esta ENCENDIDO en el equipo. No hay nada que activar
+          de nuestro lado: la falla esta de la casa hacia adentro. Segui el
+          protocolo -- cuantos televisores, cableado, entrada del TV,
+          sintonizacion.
+        Disabled: >
+          El puerto de TV esta APAGADO en el equipo. ESA es la falla y la
+          resolves vos: si su plan incluye TV, activar_catv la enciende sin
+          visita ni tecnico. No le pidas que sintonice antes de encenderlo.
+        Not supported by ONU-Type: >
+          El equipo esta registrado con un tipo que no expone el puerto de TV.
+          ANTES de tocar nada preguntale cuantos televisores o decodificadores
+          tiene conectados: con mas de uno la television no pasa por la ONU y
+          cambiar el tipo no corresponde.
     solo_lectura: true
     # Si no se puede leer, la conversacion escala SOLA, en codigo. En una
     # falla de TV este es el unico dato de nuestro lado: sin el, seguir
