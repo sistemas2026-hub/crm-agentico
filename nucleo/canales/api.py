@@ -1126,6 +1126,21 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                     descripcion=medio.get("descripcion"), mensaje_id=mensaje_id)
             except Exception as e:
                 print(f"[informes] no se pudo guardar el archivo generado: {e}")
+        # Las marcas de televisor que se nombraron y no tienen guia propia.
+        #
+        # Mismo motivo que el bucle de arriba: cuando la herramienta resolvio
+        # la guia todavia no existia 'conversation_id', y sin el la marca es un
+        # nombre suelto -- quien la revise no puede leer que le pasaba a ese
+        # cliente ni si la guia general le sirvio.
+        #
+        # Se drena la lista para que una conversacion larga no vuelva a anotar
+        # lo mismo en cada turno. La deduplicacion de verdad la hace el indice
+        # unico de la tabla; esto solo evita el viaje.
+        if estado["sesion"] is not None and estado["sesion"].marcas_tv_sin_guia:
+            for marca in estado["sesion"].marcas_tv_sin_guia:
+                persistencia.registrar_marca_tv_desconocida(
+                    tenant, conversation_id, marca)
+            estado["sesion"].marcas_tv_sin_guia = []
         # Recien aca existe conversation_id (ver el docstring de
         # motor.responder): antes de esto no habia donde persistir a quien
         # verifico _ejecutar_confirmacion. Se repite cada turno una vez

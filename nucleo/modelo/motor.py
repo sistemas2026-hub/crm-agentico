@@ -882,7 +882,7 @@ def _ejecutar_consulta_servicios_ofrecidos(config, argumentos_modelo=None) -> di
                 "concreto y merece la respuesta a esa pregunta."}
 
 
-def _ejecutar_consulta_guia_tv(config, argumentos_modelo: dict) -> dict:
+def _ejecutar_consulta_guia_tv(config, argumentos_modelo: dict, sesion=None) -> dict:
     """
     Cual guia de sintonizacion corresponde. La eleccion es de CODIGO, no del
     modelo (PRD 12.5).
@@ -970,11 +970,22 @@ def _ejecutar_consulta_guia_tv(config, argumentos_modelo: dict) -> dict:
 
     general = next((g for g in directas if not g.marca.strip()), None)
     if general:
+        if marca and sesion is not None and marca not in sesion.marcas_tv_sin_guia:
+            # Queda anotada para que alguien pueda cargarle su guia. NO se
+            # escribe aca: cuando esta herramienta corre todavia no existe el
+            # 'conversation_id' con el que registrarla, asi que viaja en la
+            # sesion y la drena nucleo/canales/api.py -- mismo motivo y mismo
+            # patron que 'medios_pendientes'.
+            #
+            # Se guarda TAL CUAL la escribio el cliente ('Sansung', 'LG
+            # smart'): quien despues cree la guia necesita ver como la nombra
+            # la gente, no como deberia llamarse.
+            sesion.marcas_tv_sin_guia.append(marca)
         return {**_sirve(general), "tipo_guia": "general",
                 # Que la marca no tenga guia propia NO es un problema ni un
                 # motivo para escalar: la general resuelve la mayoria. Se
-                # avisa para que quede registrada aparte (ver el paso de
-                # marcas desconocidas), no para que el agente lo mencione.
+                # avisa para dejar constancia, no para que el agente lo
+                # mencione ni cambie de camino.
                 **({"marca_sin_guia_propia": marca} if marca else {})}
     return _sin_guia("de TV directo")
 
@@ -2540,7 +2551,8 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 # Fuera del gate por el mismo motivo: como se sintoniza un
                 # televisor Samsung es igual para todo el mundo. No menciona a
                 # ningun cliente ni depende de su plan.
-                salida = _ejecutar_consulta_guia_tv(config, llamada.argumentos)
+                salida = _ejecutar_consulta_guia_tv(
+                    config, llamada.argumentos, sesion)
             elif herramienta.consulta_documentacion:
                 # Fuera del gate: una guia de procedimientos no menciona a
                 # ningun cliente. Ver el porque del cambio entero en

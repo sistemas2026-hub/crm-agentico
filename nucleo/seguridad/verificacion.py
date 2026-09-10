@@ -132,6 +132,16 @@ class Sesion:
     # para persistir 'rol_efectivo' con el nuevo rol, y lo mantiene vivo
     # para los turnos siguientes de esta misma sesion en memoria.
     rol_siguiente: str | None = None
+    # Marcas de televisor que el cliente nombro y NO tienen guia propia (ver
+    # TenantConfig.guias_tv). Se llenan al resolver la guia y las drena
+    # nucleo/canales/api.py DESPUES de la llamada, por el mismo motivo que
+    # 'medios_pendientes': cuando la herramienta corre todavia no existe el
+    # 'conversation_id' con el que anotarlas.
+    #
+    # No es un dato del cliente ni se persiste en 'datos_sesion': es una marca
+    # de televisor, y lo unico que se guarda de ella es que aparecio y en que
+    # conversacion, para que alguien pueda cargarle su guia.
+    marcas_tv_sin_guia: list[str] = field(default_factory=list)
     # Que servicio dijo el CLIENTE que le falla, declarado por la puerta al
     # derivar (ver Herramienta.servicios_reportables). None = todavia no se
     # derivo; el valor centinela 'no_lo_dijo' = se derivo pero el mensaje era

@@ -490,6 +490,132 @@ afirmar("observaciones" not in resolver(
         "y la resolucion que consume el agente sigue SIN entregarlas")
 
 
+# =============================================================================
+#  PASO 5 -- MARCAS DESCONOCIDAS
+# =============================================================================
+#
+# Que una marca no tenga guia propia NO es un problema: la general resuelve la
+# mayoria y el agente sigue atendiendo. Lo que si es un problema es que nadie
+# se entere -- sin anotarla, cada cliente con esa marca recibe la general una
+# y otra vez y la guia especifica no se escribe nunca.
+
+from nucleo.seguridad.verificacion import Sesion                     # noqa: E402
+
+
+def sesion_nueva():
+    return Sesion(identificador_canal="573000000000")
+
+
+print("PASO5 17. la marca sin guia queda anotada, tal cual la escribio")
+ses = sesion_nueva()
+r = motor._ejecutar_consulta_guia_tv(
+    COMPLETO, {"tipo_conexion": "directo", "marca": "  Kalley  "}, ses)
+afirmar(r.get("tipo_guia") == "general", "usa la general")
+afirmar(ses.marcas_tv_sin_guia == ["Kalley"],
+        "queda anotada EXACTAMENTE como la escribio el cliente -- quien cree "
+        "la guia necesita ver como la nombra la gente, no como deberia "
+        "llamarse")
+
+# UN TIPEO NO ES UNA MARCA NUEVA, y esto casi se cuela como prueba.
+#
+# La primera version usaba 'Sansung' de ejemplo y fallo: el resolutor lo
+# encuentra por parecido y entrega la guia de Samsung, que es la conducta que
+# se decidio en el paso 2. Anotarlo como marca desconocida habria llenado la
+# cola de trabajo de erratas -- y alguien habria terminado creando una guia
+# 'Sansung' identica a la de Samsung.
+ses = sesion_nueva()
+r = motor._ejecutar_consulta_guia_tv(
+    COMPLETO, {"tipo_conexion": "directo", "marca": "Sansung"}, ses)
+afirmar(r.get("tipo_guia") == "especifica",
+        "'Sansung' resuelve a la guia de Samsung por parecido")
+afirmar(ses.marcas_tv_sin_guia == [],
+        "y NO se anota como marca desconocida: es una errata, no un televisor "
+        "que la empresa no conozca")
+
+
+print("PASO5 18. no se anota lo que no corresponde")
+ses = sesion_nueva()
+motor._ejecutar_consulta_guia_tv(
+    COMPLETO, {"tipo_conexion": "directo", "marca": "Samsung"}, ses)
+afirmar(ses.marcas_tv_sin_guia == [],
+        "una marca CON guia propia no se anota")
+
+ses = sesion_nueva()
+motor._ejecutar_consulta_guia_tv(COMPLETO, {"tipo_conexion": "tdt", "marca": "Kalley"}, ses)
+afirmar(ses.marcas_tv_sin_guia == [],
+        "con TDT tampoco: ahi la marca no interviene en la guia")
+
+ses = sesion_nueva()
+motor._ejecutar_consulta_guia_tv(COMPLETO, {"tipo_conexion": "directo"}, ses)
+afirmar(ses.marcas_tv_sin_guia == [],
+        "y sin marca no hay nada que anotar")
+
+ses = sesion_nueva()
+motor._ejecutar_consulta_guia_tv(
+    _Config([SAMSUNG]), {"tipo_conexion": "directo", "marca": "Kalley"}, ses)
+afirmar(ses.marcas_tv_sin_guia == [],
+        "sin guia general tampoco se anota: no se llego a usar ninguna")
+
+
+print("PASO5 19. no se repite dentro de la misma conversacion")
+# El agente puede volver a preguntar, o reintentarse la sintonizacion. Sin
+# esto, una sola conversacion llena la cola de trabajo con la misma marca.
+ses = sesion_nueva()
+for _ in range(4):
+    motor._ejecutar_consulta_guia_tv(
+        COMPLETO, {"tipo_conexion": "directo", "marca": "Kalley"}, ses)
+afirmar(ses.marcas_tv_sin_guia == ["Kalley"],
+        "cuatro consultas de la misma marca dejan UNA anotacion")
+motor._ejecutar_consulta_guia_tv(
+    COMPLETO, {"tipo_conexion": "directo", "marca": "Hyundai"}, ses)
+afirmar(ses.marcas_tv_sin_guia == ["Kalley", "Hyundai"],
+        "pero dos marcas distintas se anotan las dos")
+
+
+print("PASO5 20. la marca desconocida NO escala por si sola")
+# Es la regla que separa "falta un dato" de "no puedo atender". Sin ella, cada
+# televisor de marca nueva terminaria en un humano.
+ses = sesion_nueva()
+r = motor._ejecutar_consulta_guia_tv(
+    COMPLETO, {"tipo_conexion": "directo", "marca": "Kalley"}, ses)
+afirmar(r.get("guia_encontrada") is True,
+        "la resolucion sigue devolviendo una guia servible")
+afirmar(r.get("instrucciones") == GENERAL["instrucciones"],
+        "con el texto de la general")
+afirmar("escala" not in (r.get("instruccion_interna") or "").lower(),
+        "y su instruccion NO le dice al agente que escale")
+
+
+print("PASO5 21. la migracion y la escritura")
+MIG = next(RAIZ.joinpath("supabase").glob("*marcas_tv_desconocidas.sql"), None)
+sql = MIG.read_text(encoding="utf-8") if MIG else ""
+afirmar(bool(sql), "existe la migracion")
+afirmar("enable row level security" in sql and "force row level security" in sql,
+        "con RLS activado y forzado")
+afirmar("asistente.org_actual()" in sql and "tenant_aislado" in sql,
+        "y la misma politica de aislamiento por tenant que el resto")
+for col, que in (("marca ", "la marca original"),
+                 ("marca_normalizada", "la normalizada, APARTE"),
+                 ("conversation_id", "de que conversacion salio"),
+                 ("estado", "pendiente/atendida"),
+                 ("creado_en", "la fecha")):
+    afirmar(col in sql, f"guarda {que}")
+afirmar("'pendiente', 'atendida'" in sql.replace('"', "'"),
+        "y el estado esta acotado a esos dos valores")
+afirmar("create unique index" in sql and "marca_normalizada, conversation_id" in sql,
+        "una fila por marca y conversacion, no una por mencion")
+
+FUENTE_DB = texto(RAIZ / "nucleo" / "persistencia" / "db.py")
+afirmar("def registrar_marca_tv_desconocida" in FUENTE_DB,
+        "existe la funcion que escribe")
+afirmar("veces = asistente.marcas_tv_desconocidas.veces + 1" in FUENTE_DB,
+        "y una mencion repetida SUBE el contador en vez de fallar -- es lo que "
+        "permite priorizar cual guia escribir primero")
+FUENTE_API = texto(RAIZ / "nucleo" / "canales" / "api.py")
+afirmar("registrar_marca_tv_desconocida" in FUENTE_API,
+        "y se llama despues de que exista conversation_id, no antes")
+
+
 print()
 if fallos:
     print(f"[FALLA] {len(fallos)} comprobacion(es):")

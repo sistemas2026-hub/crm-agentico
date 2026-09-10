@@ -62,6 +62,7 @@ igual que ya decidia el PRD para 'messages'.
 from __future__ import annotations
 
 import json
+import unicodedata
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
@@ -1454,6 +1455,48 @@ def guardar_cache(tenant: str, herramienta: str, clave: str, respuesta) -> None:
                 (org, herramienta, clave, json.dumps(respuesta, ensure_ascii=False)))
     except Exception as e:
         print(f"[persistencia] no se pudo guardar la cache de '{herramienta}': {e}")
+
+
+def registrar_marca_tv_desconocida(tenant: str, conversation_id: str,
+                                   marca: str) -> None:
+    """
+    Anota una marca de televisor que el cliente nombro y no tiene guia propia.
+
+    La marca se guarda TAL CUAL la escribio: 'Sansung', 'LG smart', 'kalley'.
+    Quien despues cree la guia necesita ver como la nombra la gente, no como
+    deberia llamarse -- si diez clientes escriben 'Sansung', eso es un dato
+    sobre el mundo, no un error que haya que tapar. La version normalizada va
+    en una columna APARTE, solo para agrupar.
+
+    Una fila por marca y conversacion, no una por mencion: dentro de una misma
+    conversacion la marca puede repetirse varias veces (el agente vuelve a
+    preguntar, se reintenta la sintonizacion) y sin eso una sola conversacion
+    llena la cola de trabajo con la misma marca. Las menciones repetidas suben
+    'veces', que es lo que permite priorizar cual guia escribir primero.
+
+    Nunca rompe el turno: si falla, el cliente ya recibio su guia general y
+    perder la anotacion es mucho menos grave que perder la respuesta.
+    """
+    limpia = (marca or "").strip()
+    if not limpia or not conversation_id:
+        return
+    normalizada = " ".join(
+        unicodedata.normalize("NFKD", limpia.lower())
+        .encode("ascii", "ignore").decode().split())
+    try:
+        with sesion(tenant) as (cur, org):
+            cur.execute(
+                """insert into asistente.marcas_tv_desconocidas
+                     (organization_id, marca, marca_normalizada, conversation_id)
+                   values (%s, %s, %s, %s)
+                   on conflict (organization_id, marca_normalizada, conversation_id)
+                     where conversation_id is not null
+                   do update set veces = asistente.marcas_tv_desconocidas.veces + 1,
+                                 visto_por_ultima_vez = now()""",
+                (org, limpia, normalizada, conversation_id))
+    except Exception as e:                            # noqa: BLE001
+        print(f"[guias-tv] no se pudo anotar la marca '{limpia}': "
+              f"{type(e).__name__}: {e}")
 
 
 def guardar_media(tenant: str, conversation_id: str, media_id: str, tipo: str,
