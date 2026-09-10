@@ -41,6 +41,22 @@ from nucleo.seguimiento import importacion as imp
 # conoce a ningun cliente, y tests/test_nucleo_sin_tenants.py lo comprueba).
 HERRAMIENTA_LISTADO = "listar_tickets_recientes"
 
+# TODAS las herramientas del catalogo que este modulo busca por nombre.
+#
+# Existe para que el reloj pueda decir ANTES de correr si el tenant tiene lo
+# que hace falta -- las herramientas en el catalogo y sus credenciales
+# resolubles -- sin repetir la lista en otro archivo. Guarda contra la deriva:
+# tests/test_reloj.py relee este mismo modulo, junta cada nombre que se le pide
+# a _herramienta, y exige que todos esten declarados aca abajo.
+HERRAMIENTAS = frozenset({
+    HERRAMIENTA_LISTADO,
+    "consultar_ticket_por_id",
+    "consultar_tickets_conocidos",
+    "consultar_casos_externos",
+    "importar_caso_externo",
+    "reconciliar_caso_externo",
+})
+
 
 def _herramienta(config, nombre):
     return next((h for h in config.herramientas if h.nombre == nombre), None)

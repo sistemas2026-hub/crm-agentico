@@ -534,6 +534,59 @@ Eso mandó la búsqueda a todos lados menos al lugar correcto: se revisó y desc
 4. Confirmar en los logs de `motor` que dice `MOTOR_SERVICE_TOKEN activo` (no `no esta configurado`).
 5. Probar `/agentes` y un par de pantallas más — si algo devuelve "Asistente no configurado" o un error de red, revisar que el valor haya llegado igual a los dos servicios.
 
+**El reloj de tareas periódicas nunca corrió — servicio `motor-reloj`, construido y APAGADO (10/09/2026).** Cerrar conversaciones vencidas (`operativo.cerrar_vencidas`) e importar tickets del ISP (`importacion_io.barrido`) colgaban de un `threading.Thread` que arrancaba desde el bloque `__main__` de `nucleo/canales/api.py`. Producción levanta el motor con **gunicorn**, que *importa* ese módulo en vez de ejecutarlo, así que ese bloque no pasa nunca y el hilo no se creó ni una vez.
+
+No es una regresión: gunicorn se adoptó el 10/08/2026 (`b5f4311`) y `cerrar_vencidas` se escribió el 28/08/2026 (`b387613`), dieciocho días después, contra una topología que ya había cambiado. **No hubo excepción, ni log, ni alerta.** El único síntoma era que nada se cerraba solo, que es indistinguible de "todavía no venció ninguna". Se descubrió leyendo la primera línea del log del contenedor, no el código — la auditoría previa había leído el compose con un `awk` que cortó el bloque antes del `command`, y reportó lo contrario.
+
+La lógica **se movió**, no se copió: vive en `nucleo/reloj.py` y `api.py` ya no tiene nada que ver con arrancarla. Guarda: `py -3.13 tests/test_reloj.py` (comprueba, entre otras cosas, que no queden dos implementaciones y que gunicorn no sea responsable de ninguna tarea periódica).
+
+**Llega inerte, e inerte no es muerto.** `RELOJ_HABILITADO` por defecto vale `0`: el contenedor levanta, dice en el log por qué no hace nada, **y se queda vivo sin ejecutar ningún job**. Que se quede vivo es la parte que importa — el servicio corre con `restart: unless-stopped`, así que un proceso que imprime "no habilitado" y *sale*, aunque salga en 0, lo reinicia Docker en el acto, y otra vez, y otra: un contenedor rebotando con cara de servicio apagado. Guarda: `tests/test_reloj.py` levanta el daemon de verdad y comprueba que **no termina**.
+
+Tampoco relee la variable mientras corre, a propósito: el entorno de un proceso ya arrancado no cambia solo. Cambiarla en Dokploy reinicia el servicio, y ese arranque nuevo es el que la lee. Un chequeo periódico prometería una capacidad que no existe.
+
+El interruptor vive en el entorno del servicio y **no** en `tenant_config`, porque la config del tenant dice *qué* hacer y con qué reglas; si este proceso debe estar corriendo es una decisión de operación.
+
+**Las credenciales no viajan por el compose — viajan por la base.** `motor` y `motor-reloj` son contenedores distintos, así que una credencial cargada en uno no existe en el otro salvo que viaje por algún lado. `secretos.obtener` mira primero `asistente.tenant_secrets` (cifrado, por empresa, editable desde **Ajustes → Credenciales**) y solo después el entorno, así que alcanza con que el reloj tenga `SECRETOS_CLAVE_MAESTRA`.
+
+Medido el 10/09/2026 contra producción: las tres credenciales que el reloj va a necesitar —`IMPORTACION_API_TOKEN` (las cuatro herramientas internas de Fase 2), `WISPHUB_API_KEY` (responder/cerrar ticket) y `BOTTLECRM_API_TOKEN` (cerrar caso)— están en `tenant_secrets` de rapilink y **resuelven**. Las dos primeras se comprobaron desde un proceso que no las tiene en su entorno, así que la resolución por base está probada, no supuesta.
+
+Por eso `IMPORTACION_API_TOKEN` **no** se declara en el `environment` de `motor-reloj`: sería un segundo lugar de edición para el mismo secreto y, como la base gana, la copia del compose quedaría vieja sin que nadie lo note. `tests/test_reloj.py` deduce del catálogo del tenant qué `auth_ref` va a necesitar el reloj (no de una lista escrita a mano) y exige que el servicio declare `SECRETOS_CLAVE_MAESTRA`; `--once --dry-run` reporta por tenant si cada una resuelve, sin exponer ningún valor.
+
+**Una sola réplica, y es una condición.** `cerrar_vencidas` es idempotente entre pasadas sucesivas (`conversaciones_sin_respuesta` filtra por `estado <> 'cerrada'`), pero **no** ante dos ejecuciones simultáneas: dos procesos leen la misma lista antes de que ninguno escriba, y los dos responden y cierran el ticket del proveedor — el texto de cierre queda dos veces en su histórico. (Al cliente no le llega dos veces: `cerrar_todo` no manda nada por el canal.) La importación sí es idempotente, por `UNIQUE(org, provider, external_ticket_id)`. Antes de escalar este servicio hay que resolver lo primero.
+
+**Deuda anotada: `SystemExit` como error de configuración recuperable.** Los límites por tenant/tarea del reloj capturan `(Exception, SystemExit)`, y no por precaución genérica: hay **7 `raise SystemExit`** en su propia cadena de llamadas (5 en `importacion_io.py`, 2 en `conexion.py::dsn`). En un CLI eso está bien — el programa termina y lo explica. Dentro del reloj mataría el proceso, y un solo tenant mal configurado se llevaría puestos a los demás. La captura es correcta *ahí*; lo que está mal es el origen: infraestructura que señala configuración faltante debería levantar una excepción de dominio, no pedir la salida del proceso. No se refactoriza ahora para no ampliar el cambio. `KeyboardInterrupt` sigue propagándose: parar el proceso tiene que poder pararlo.
+
+**Qué tenants recorre, y cómo los descubre.** `tenants_conocidos()` lista los `tenants/*.config.yaml` de la imagen — hoy exactamente uno, `rapilink`, y `asistente.tenant_config` también tiene uno solo, así que coinciden. Es un acoplamiento a tener presente cuando entre el segundo ISP: un tenant creado solo en la base sería **invisible** para el reloj hasta que su semilla esté en la imagen.
+
+### Para activarlo en producción
+
+Son dos interruptores independientes y conviene mirarlos por separado: el del **proceso** (este) y el de **cada trabajo** (la config del tenant). Encender el proceso con los trabajos en 0 no importa nada ni cierra nada — es exactamente el estado en que conviene verlo correr la primera vez.
+
+1. Desplegar. El servicio aparece como un contenedor más (`crm-agentico-*-motor-reloj-*`), o sea uno más de los que lista §6.
+2. En el log de arranque tienen que estar las tres líneas, sin secretos:
+
+   ```
+   [reloj] motor-reloj iniciado
+   [reloj] RELOJ_HABILITADO=0
+   [reloj] scheduler inerte: no se ejecuta ningun job. ...
+   ```
+
+   Y el contenedor tiene que quedar **Running estable**: `docker ps` con uptime creciendo y *restart count* quieto. Si rebota, parar acá.
+3. Smoke sin encender nada, desde su propio contenedor:
+
+   ```
+   docker exec <motor-reloj> env RELOJ_HABILITADO=1 python -m nucleo.reloj --once --dry-run
+   ```
+
+   El `env` afecta solo a ese proceso: no toca lo que Dokploy tiene guardado ni al daemon, que sigue inerte. Usa exactamente la misma implementación. Reporta, por tenant, credenciales que resuelven, plazo y candidatas de vencidas, `cada_horas`, proveedor, y qué haría una pasada ahora. Cero efectos.
+4. Recién entonces, en Dokploy, panel del servicio **`crm`** → **Environment**: `RELOJ_HABILITADO=1`. **Reload**.
+5. En el log tiene que aparecer `[reloj] scheduler activo: un ciclo cada 60 minutos sobre N tenant(s)`, y **una hora después** el ciclo completo (`ciclo inicio` → una línea por tenant → `ciclo fin ... proximo en ~60 min`). La primera pasada no es inmediata: el proceso duerme primero, a propósito.
+6. Con `importacion_tickets.cada_horas` en 0 (el valor de hoy) la línea del tenant dice `'importacion': {'le_toca': False, 'cada_horas': 0, 'haria': 'nada: ...'}`. Eso es lo correcto: encender el reloj **no** enciende la importación.
+
+Para forzar una pasada de verdad sin esperar la hora: `docker exec <motor-reloj> python -m nucleo.reloj --once`. Respeta `RELOJ_HABILITADO`: apagado, sale sin hacer nada.
+
+`--dry-run` no tiene reglas propias — consulta la **misma** query que usa `cerrar_vencidas` para elegir a quién cerrar y llama al barrido con `aplicar_cambios=False`, así que no hay un segundo motor de reglas que pueda discrepar del real.
+
 **Dar de alta un segundo ISP: el motor está listo, el pegamento no.** El motor ya es multi-empresa de verdad —la URL del webhook lleva el tenant (`/canales/whatsapp/<slug>`), las credenciales van cifradas por empresa en `asistente.tenant_secrets`, y el aislamiento está medido: `app_backend` sin fijar empresa ve **0 filas**, no todas—. BottleCRM, por su lado, ya es multi-organización.
 
 Lo que no acompaña es lo que los une: **`PRIVATE_ASISTENTE_TENANT` es una variable de entorno usada en 23 lugares del frontend, y nunca se deriva de la organización del usuario logueado**. Con una sola empresa no se nota; con dos, hay que elegir:

@@ -54,8 +54,6 @@ from nucleo.recuperacion.busqueda import recuperar
 from nucleo.recuperacion.prompt import piezas_del_system
 from nucleo.seguimiento import agendamiento
 from nucleo.seguimiento import estado_escalada
-from nucleo.seguimiento import importacion
-from nucleo.seguimiento import importacion_io
 from nucleo.seguimiento import operativo
 from nucleo.seguimiento import verificacion_accion
 from nucleo.seguimiento.forzado import (con_las_manos_vacias,
@@ -5693,107 +5691,14 @@ def salud():
     return jsonify({"estado": "ok"})
 
 
-# Cuando se INTENTO por ultima vez importar, por tenant. No cuando se logro.
-#
-# El nombre importa porque el concepto cambio: esto no es un checkpoint de
-# "hasta donde sincronizamos" -- eso ya no existe, la ventana movil lo
-# reemplaza-- sino solo un regulador de frecuencia, "hace cuanto que no
-# intento".
-#
-# Se sella al EMPEZAR y no al terminar bien, y esa diferencia es la que evita
-# un hot-loop: con el sello solo en exito, una credencial vencida haria que el
-# reloj golpeara al proveedor en cada vuelta en vez de esperar la hora. Un
-# fallo tiene que costar lo mismo que un exito.
-#
-# En memoria y no en base a proposito: perderlo en un reinicio adelanta como
-# mucho una pasada, y una pasada de mas no hace nada porque la operacion es
-# idempotente por UNIQUE(org, provider, external_ticket_id).
-#
-# Vale porque hay UN solo proceso motor: el compose no declara replicas y el
-# contenedor corre 'python -m nucleo.canales.api', o sea el servidor de Flask
-# directo, sin pool de workers. Si algun dia se agregan replicas o gunicorn,
-# habria varios relojes -- no se duplicarian casos, la unicidad lo impide,
-# pero se pagaria el trabajo varias veces.
-_ultimo_intento_importacion: dict[str, datetime] = {}
-
-
-def _reloj_de_vencimientos() -> None:
-    """
-    Revisa los plazos cada tanto, para siempre.
-
-    Vive dentro del motor y no en un cron aparte por una razon simple: el motor
-    ya es el unico proceso que sabe leer la config de un tenant. Un cron
-    externo tendria que resolver credenciales, tenants y plazos por su cuenta,
-    o llamar a este mismo endpoint -- y entonces es infraestructura de mas para
-    hacer lo mismo.
-
-    Arranca solo si hay algun tenant con plazo declarado: sin eso seria un hilo
-    despertandose cada hora para no hacer nada.
-    """
-    while True:
-        time.sleep(operativo.INTERVALO_BARRIDO_SEGUNDOS)
-        for tenant in _tenants_conocidos():
-            try:
-                config = _config_de(tenant)
-            except Exception as e:
-                print(f"[operativo] no se pudo leer la config de '{tenant}': "
-                      f"{type(e).__name__}: {e}")
-                continue
-            # Las dos tareas van en try/except SEPARADOS y no en uno solo: que
-            # la importacion de tickets falle no puede dejar sin cerrar las
-            # conversaciones vencidas de ese mismo tenant, ni al reves. Son
-            # trabajos distintos que comparten el reloj, nada mas.
-            if config.escalamiento.cerrar_sin_respuesta_horas:
-                try:
-                    operativo.cerrar_vencidas(config, tenant)
-                except Exception as e:
-                    # Un fallo NO puede matar el hilo: si muere, deja de
-                    # revisar plazos para siempre y nadie se entera hasta que
-                    # alguien nota que ningun caso se cierra solo.
-                    print(f"[operativo] el barrido de '{tenant}' fallo: "
-                          f"{type(e).__name__}: {e}")
-
-            # Importacion de tickets del sistema del ISP.
-            #
-            # 'debe_correr' es la compuerta: con 'cada_horas' en 0 -- el valor
-            # por defecto -- devuelve False y aca no pasa NADA. Ni una llamada
-            # al proveedor, ni una al CRM, ni una escritura. Desplegar este
-            # codigo no puede empezar a importar solo.
-            #
-            # Se consulta en CADA pasada y no al arrancar: 'cada_horas' se
-            # cambia guardando la config, que es justo lo que un proceso ya
-            # arrancado no relee. Condicionarlo al arranque lo dejaria dormido
-            # hasta el proximo reinicio.
-            try:
-                if importacion.debe_correr(config.importacion_tickets,
-                                           _ultimo_intento_importacion.get(tenant)):
-                    # El sello va ANTES del trabajo: si el barrido revienta, el
-                    # proximo intento igual espera su hora.
-                    _ultimo_intento_importacion[tenant] = datetime.now(timezone.utc)
-                    r = importacion_io.barrido(config, tenant, aplicar_cambios=True)
-                    print(f"[importacion] {tenant}: {r}")
-            except Exception as e:
-                print(f"[importacion] el barrido de '{tenant}' fallo: "
-                      f"{type(e).__name__}: {e}")
-
-
-def _tenants_conocidos() -> list[str]:
-    """Los tenants que este despliegue sirve, por su archivo semilla."""
-    return sorted(p.stem.replace(".config", "")
-                  for p in Path("tenants").glob("*.config.yaml"))
-
-
 if __name__ == "__main__":
-    # Arranca SIEMPRE, aunque hoy ningun tenant tenga plazo. Condicionarlo a
-    # la config del arranque parecia mas prolijo y era un bug: el plazo se
-    # activa guardando la config, que es justo lo que este proceso NO relee al
-    # decidir si crear el hilo -- se habria quedado dormido hasta el proximo
-    # reinicio, sin que nadie entendiera por que no cerraba nada.
+    # Solo el servidor. El reloj de tareas periodicas se mudo a su propio
+    # proceso -- 'python -m nucleo.reloj', servicio 'motor-reloj' del compose.
     #
-    # No cuesta nada: cada pasada consulta la config ya cacheada y sale por
-    # donde entro si no hay plazo declarado.
-    threading.Thread(target=_reloj_de_vencimientos, daemon=True).start()
-    print("[operativo] reloj de vencimientos activo: revisa los plazos cada "
-          f"{operativo.INTERVALO_BARRIDO_SEGUNDOS // 60} minutos.")
+    # Aca vivia como un hilo arrancado desde este mismo bloque, y en produccion
+    # NUNCA corrio: el compose levanta el motor con gunicorn, que IMPORTA este
+    # modulo en vez de ejecutarlo, asi que '__main__' no pasa nunca. Colgar un
+    # trabajo periodico del arranque del servidor web lo deja atado a COMO se
+    # arranque el servidor web, y eso cambio sin que nadie lo notara.
     puerto = int(os.environ.get("PUERTO_API", "5000"))
     app.run(host="0.0.0.0", port=puerto)

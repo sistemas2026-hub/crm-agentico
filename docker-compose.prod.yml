@@ -347,6 +347,73 @@ services:
       --access-logfile -
       --error-logfile -
 
+  # ============================================================================
+  #  motor-reloj  --  las tareas periodicas, aparte del servidor web
+  # ============================================================================
+  #
+  # POR QUE EXISTE. Cerrar conversaciones vencidas e importar tickets vivian en
+  # un 'threading.Thread' que arrancaba desde el bloque '__main__' de
+  # nucleo/canales/api.py. 'motor' (aca arriba) se levanta con gunicorn, que
+  # IMPORTA ese modulo en vez de ejecutarlo, asi que ese bloque nunca corrio y
+  # el hilo nunca se creo -- desde el 10/08/2026, en silencio.
+  #
+  # Es el MISMO codigo, movido: nucleo/reloj.py. No hay una segunda copia de
+  # las reglas, y api.py ya no tiene nada que ver con arrancar el reloj.
+  #
+  # LLEGA INERTE. Con 'RELOJ_HABILITADO' en 0 el proceso levanta, lo dice en el
+  # log y no toca nada -- ni la base, ni el proveedor, ni el CRM. Encenderlo es
+  # cambiar esa variable en Dokploy y reiniciar SOLO este servicio.
+  #
+  # UNA SOLA REPLICA, y es una condicion, no una preferencia: 'cerrar_vencidas'
+  # no es idempotente ante dos ejecuciones simultaneas (dos procesos leen la
+  # misma lista de vencidas antes de que ninguno escriba, y los dos responden y
+  # cierran el ticket del proveedor -- el texto de cierre queda dos veces en su
+  # historico). Antes de escalar este servicio hay que resolver eso; el detalle
+  # esta escrito en la cabecera de nucleo/reloj.py.
+  motor-reloj:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    # Solo 'default'. Este servicio NO tiene dominio: nadie lo llama desde
+    # afuera, el llama. Necesita 'default' para resolver 'backend' por nombre
+    # -- las herramientas de importacion y de cierre de caso apuntan a
+    # http://backend:8000. Ver la nota de redes al pie de este archivo.
+    networks: [default]
+    environment:
+      # EL INTERRUPTOR. '1' y solo '1' lo pone a trabajar. Vive aca y no en
+      # 'tenant_config' a proposito: la config del tenant dice QUE hacer y con
+      # que reglas; si este proceso debe estar corriendo es una decision de
+      # despliegue, igual para todos los tenants que sirva esta instalacion.
+      RELOJ_HABILITADO: ${RELOJ_HABILITADO:-0}
+      # Las mismas cinco de 'motor', y por la misma razon: DBUSER/DBPASSWORD
+      # PROPIOS del motor, no los de crm_user. Ver el incidente del 18/08/2026
+      # documentado arriba.
+      DBHOST: ${DBHOST:?}
+      DBPORT: ${DBPORT:?}
+      DBNAME: ${DBNAME:?}
+      DBUSER: ${MOTOR_DBUSER:?}
+      DBPASSWORD: ${MOTOR_DBPASSWORD:?}
+      # Descifra tenant_secrets. Sin ella el reloj no puede resolver
+      # 'IMPORTACION_API_TOKEN' -- que se carga desde la pantalla de
+      # credenciales y solo existe cifrado en la base.
+      SECRETOS_CLAVE_MAESTRA: ${SECRETOS_CLAVE_MAESTRA:?}
+      # Respaldo por entorno de dos auth_ref que hoy todavia no estan en
+      # tenant_secrets: WISPHUB_API_KEY la usan 'responder_ticket_operativo' y
+      # 'cerrar_ticket_operativo'; BOTTLECRM_API_TOKEN, 'cerrar_caso_crm'. Si
+      # algun dia se cargan por pantalla, estas dos lineas sobran.
+      WISPHUB_API_KEY: ${WISPHUB_API_KEY:?}
+      BOTTLECRM_API_TOKEN: ${BOTTLECRM_API_TOKEN:?}
+    # Ninguna clave de modelo ni de embeddings: el reloj no llama al LLM ni
+    # vectoriza nada. Ningun MOTOR_SERVICE_TOKEN: no habla con 'motor', habla
+    # con el CRM y con el proveedor. Lo que no necesita, no lo recibe.
+    #
+    # Tampoco 'depends_on: backend'. Si el CRM todavia no levanto, la pasada de
+    # ese momento falla, queda en el log y se reintenta a la hora -- que es lo
+    # mismo que pasa si el CRM se cae despues. Atarlo al arranque solo cambia
+    # DONDE se ve el problema, no si ocurre.
+    command: python -m nucleo.reloj
+
 volumes:
   # Archivos subidos por los usuarios. Sin S3, viven en disco.
   media:

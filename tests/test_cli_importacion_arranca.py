@@ -81,7 +81,10 @@ revisar(not faltan,
 
 # --- 3. el reloj tambien --------------------------------------------------
 
-fuente_reloj = (RAIZ / "nucleo" / "canales" / "api.py").read_text(encoding="utf-8")
+# El reloj se mudo a su propio modulo el 10/09/2026 (servicio 'motor-reloj'):
+# dentro de api.py nunca corrio bajo gunicorn. Esta comprobacion tiene que
+# seguirlo, o pasa por vacio -- que es peor que fallar.
+fuente_reloj = (RAIZ / "nucleo" / "reloj.py").read_text(encoding="utf-8")
 usados = {linea.split("importacion_io.")[1].split("(")[0]
           for linea in fuente_reloj.splitlines() if "importacion_io." in linea}
 faltan_reloj = sorted(u for u in usados if not hasattr(io_mod, u))
