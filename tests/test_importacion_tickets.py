@@ -549,119 +549,31 @@ print("[OK] Lista vacia no importa nada, el area resuelve persona, "
 
 
 # =============================================================================
-#  11. EL RELOJ  --  la rama integrada, no solo debe_correr() aislado
+#  11. EL RELOJ  --  se prueba en tests/test_reloj.py, contra el reloj de verdad
 # =============================================================================
-
-print("\nel reloj: apagado no hace nada, y un tenant roto no arrastra al resto")
-
-import types  # noqa: E402
-
-FUENTE_RELOJ = (RAIZ / "nucleo" / "canales" / "api.py").read_text(encoding="utf-8")
-
-revisar("_ultimo_intento_importacion[tenant] = datetime.now(timezone.utc)"
-        in FUENTE_RELOJ.split("r = importacion_io.barrido")[0].rsplit(
-            "if importacion.debe_correr", 1)[-1],
-        "el sello del intento se pone ANTES de trabajar",
-        "si solo se sellara en exito, una credencial vencida golpearia al "
-        "proveedor en cada vuelta del reloj en vez de esperar la hora")
-
-revisar(FUENTE_RELOJ.count("except Exception as e:") >= 2
-        and "[importacion] el barrido de" in FUENTE_RELOJ
-        and "[operativo] el barrido de" in FUENTE_RELOJ,
-        "vencimientos e importacion tienen su propio try/except",
-        "que falle importar no puede dejar sin cerrar las conversaciones "
-        "vencidas del mismo tenant")
-
-
-class _RelojDePrueba:
-    """El bucle del reloj, reducido a lo que hay que poder probar.
-
-    Replica la ESTRUCTURA de _reloj_de_vencimientos -- dos tareas por tenant,
-    cada una en su try/except, el sello antes del trabajo -- sin levantar un
-    hilo ni esperar una hora. La guarda de arriba comprueba que la estructura
-    real sigue siendo esta.
-    """
-
-    def __init__(self, tenants, vencimientos, barrido):
-        self.tenants, self.vencimientos, self.barrido = tenants, vencimientos, barrido
-        self.sello, self.hechos = {}, []
-
-    def una_pasada(self, ahora):
-        for tenant, config in self.tenants:
-            if config.escalamiento_horas:
-                try:
-                    self.vencimientos(tenant)
-                    self.hechos.append(("vencimientos", tenant))
-                except Exception as e:                       # noqa: BLE001
-                    self.hechos.append(("vencimientos_fallo", tenant, str(e)))
-            try:
-                if imp.debe_correr(config.importacion_tickets,
-                                   self.sello.get(tenant), ahora):
-                    self.sello[tenant] = ahora
-                    self.barrido(tenant)
-                    self.hechos.append(("importacion", tenant))
-            except Exception as e:                           # noqa: BLE001
-                self.hechos.append(("importacion_fallo", tenant, str(e)))
-
-
-def _tenant(nombre, importacion, escalamiento_horas=1):
-    c = ConfigFalsa(importacion)
-    c.escalamiento_horas = escalamiento_horas
-    return (nombre, c)
-
-
-AHORA_R = datetime(2026, 9, 9, 12, tzinfo=timezone.utc)
-
-
-# --- A. cada_horas = 0 es un NO-OP real -----------------------------------
-llamadas_externas = []
-reloj = _RelojDePrueba(
-    [_tenant("apagado", ImportacionTickets())],
-    vencimientos=lambda t: None,
-    barrido=lambda t: llamadas_externas.append(t))
-reloj.una_pasada(AHORA_R)
-revisar(not llamadas_externas and not reloj.sello,
-        "con cada_horas=0 no se llama al proveedor, ni al CRM, ni se sella nada",
-        "es la compuerta: desplegar el codigo no puede empezar a importar solo")
-revisar(("vencimientos", "apagado") in reloj.hechos,
-        "y las otras tareas del reloj siguen corriendo igual")
-
-
-# --- B. un tenant que falla no arrastra al otro ---------------------------
-def barrido_que_revienta(tenant):
-    if tenant == "roto":
-        raise RuntimeError("WispHub 401")
-    llamadas_externas.append(tenant)
-
-
-llamadas_externas.clear()
-reloj = _RelojDePrueba(
-    [_tenant("roto", ImportacionTickets(cada_horas=1)),
-     _tenant("sano", ImportacionTickets(cada_horas=1))],
-    vencimientos=lambda t: None, barrido=barrido_que_revienta)
-reloj.una_pasada(AHORA_R)
-revisar(llamadas_externas == ["sano"],
-        "si la importacion de un tenant falla, el siguiente igual se procesa")
-revisar(any(h[0] == "importacion_fallo" for h in reloj.hechos),
-        "y el fallo queda registrado, no se traga en silencio")
-
-
-# --- C. el fallo de importar no toca los vencimientos del MISMO tenant ----
-revisar(("vencimientos", "roto") in reloj.hechos,
-        "los vencimientos del tenant roto corrieron igual",
-        "por eso las dos tareas van en try/except separados y no en uno solo")
-
-
-# --- D. el sello se pone aunque el barrido falle --------------------------
-revisar(reloj.sello.get("roto") == AHORA_R,
-        "un barrido que revienta igual consume su turno",
-        "sin esto, un error permanente seria un hot-loop contra el proveedor")
-llamadas_externas.clear()
-reloj.una_pasada(AHORA_R + timedelta(minutes=30))
-revisar(not llamadas_externas,
-        "y media hora despues todavia no le toca a ninguno")
-
-
+#
+# Aca vivia una clase '_RelojDePrueba' que reimplementaba el bucle del reloj y
+# cuatro comprobaciones contra esa copia, mas dos que leian
+# 'nucleo/canales/api.py' buscando cadenas. Se borro entero el 10/09/2026, por
+# dos motivos y los dos son lecciones caras:
+#
+#   1. El reloj se mudo a 'nucleo/reloj.py' (en api.py nunca corrio bajo
+#      gunicorn). Las dos comprobaciones de texto quedaron mirando un archivo
+#      que ya no tiene nada de esto y empezaron a FALLAR -- y nadie lo vio,
+#      porque este archivo no tenia comprobacion final: corria ochocientas
+#      lineas y salia en 0 pasara lo que pasara. Ahora si la tiene, al final.
+#
+#   2. Probar una reimplementacion del reloj no prueba el reloj. Puede quedar
+#      en verde mientras el de verdad esta roto -- que es exactamente lo que
+#      paso durante un mes.
+#
+# Lo que cubria (cada_horas=0 es no-op, un tenant roto no arrastra al otro, un
+# fallo de importacion no toca los vencimientos, el sello se pone aunque el
+# barrido falle) esta en 'tests/test_reloj.py', que entra por 'reloj.main' y
+# corre el codigo que corre en produccion.
+#
+#     py -3.13 tests/test_reloj.py
+#
 # =============================================================================
 #  12. LA FRONTERA CON DJANGO  --  el motor no lee tablas ajenas
 # =============================================================================
@@ -807,3 +719,41 @@ for nombre in ("consultar_tickets_conocidos", "consultar_casos_externos",
 revisar("IMPORTACION_API_TOKEN:" not in
         (RAIZ / "tenants" / "rapilink.config.yaml").read_text(encoding="utf-8"),
         "el YAML declara el nombre del secreto, nunca su valor")
+
+
+# =============================================================================
+#  EL SELLO DE LECTURA NO ES UN CAMBIO
+# =============================================================================
+# 'external_fetched_at' se refresca en cada lectura aunque el proveedor
+# conteste lo mismo. Contarlo como diferencia hacia que la respuesta fuera
+# siempre "todos": el primer dry-run del ciclo cableado informo 34 de 34, un
+# numero que no distinguia nada. Los que cambiaban algo de verdad eran 16.
+
+print("\nel sello de lectura no cuenta como diferencia")
+
+_solo_sello = imp.Cambio(
+    caso_id="c1", external_ticket_id="1",
+    antes={"external_status": "Nuevo"},
+    despues={"external_status": "Nuevo",
+             imp.SELLO_DE_LECTURA: "2026-09-10T20:00:00+00:00"})
+revisar(_solo_sello.hay_diferencia is False,
+        "un caso donde solo cambia el sello NO cuenta como diferencia",
+        "si contara, el contador diria siempre 'todos' y no informaria nada")
+
+_de_verdad = imp.Cambio(
+    caso_id="c2", external_ticket_id="2",
+    antes={"external_status": "Nuevo"},
+    despues={"external_status": "Cerrado",
+             imp.SELLO_DE_LECTURA: "2026-09-10T20:00:00+00:00"})
+revisar(_de_verdad.hay_diferencia is True,
+        "y uno que cambia de estado si")
+
+revisar(imp.SELLO_DE_LECTURA == "external_fetched_at",
+        "el sello se nombra una sola vez y los dos consumidores lo leen de ahi",
+        "el CLI lo tenia escrito a mano: dos lugares para el mismo concepto")
+
+
+print()
+if fallos:
+    print(f"[FALLA] {len(fallos)} comprobacion(es) no pasaron.")
+    raise SystemExit(1)

@@ -129,6 +129,11 @@ class Veredicto:
         return bool(self.sn_onu)
 
 
+# El sello de "cuando preguntamos", que no es un cambio del caso: se refresca
+# en cada lectura aunque el proveedor conteste exactamente lo mismo.
+SELLO_DE_LECTURA = "external_fetched_at"
+
+
 @dataclass
 class Cambio:
     """Lo que la reconciliacion actualizaria de un caso ya conocido."""
@@ -140,7 +145,18 @@ class Cambio:
 
     @property
     def hay_diferencia(self) -> bool:
-        return any(self.antes.get(k) != v for k, v in self.despues.items())
+        """
+        Si esto cambiaria ALGO que alguien quiera saber.
+
+        'external_fetched_at' no cuenta: es el sello de "cuando preguntamos",
+        y cambia por definicion en cada lectura. Contarlo hacia que la
+        respuesta fuera siempre que si -- medido el 10/09/2026 en el primer
+        dry-run del ciclo cableado: 34 alcanzados, 34 "con diferencia", que es
+        un numero que no informa nada. Lo que se quiere contar es cuantos
+        casos cambian de estado, de autoria o de error, y esos eran 16.
+        """
+        return any(self.antes.get(k) != v for k, v in self.despues.items()
+                   if k != SELLO_DE_LECTURA)
 
 
 # =============================================================================

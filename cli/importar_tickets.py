@@ -261,7 +261,7 @@ def main():
             if not c.hay_diferencia:
                 continue
             dif = {k: (c.antes.get(k), v) for k, v in c.despues.items()
-                   if c.antes.get(k) != v and k != "external_fetched_at"}
+                   if c.antes.get(k) != v and k != imp.SELLO_DE_LECTURA}
             print(f"    ticket {c.external_ticket_id}: {dif}")
 
     print(f"\n{'=' * 74}")
