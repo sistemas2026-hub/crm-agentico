@@ -391,6 +391,250 @@ finally:
     sin_interruptor(previo)
 
 
+
+# ==========================================================================
+#  7.b  EL CICLO REAL RECONCILIA  --  cableado, no funciones sueltas
+# ==========================================================================
+# La reconciliacion estuvo construida, probada y NO conectada a nada: el
+# 'barrido' hacia descubrimiento e importacion, y 'aplicar_reconciliacion'
+# solo se alcanzaba desde el CLI. Se descubrio auditando el primer ciclo
+# automatico real -- 3 casos creados y cero reconciliados.
+#
+# Es el mismo bug que el reloj muerto, en chico: codigo correcto que nadie
+# llama. Por eso lo que se prueba aca NO es que 'reconciliar' decida bien
+# --eso ya tiene sus pruebas-- sino que el ciclo la LLAME. Se corre el
+# 'barrido' de verdad, entrando por 'reloj.main', y se sustituye solo lo que
+# sale del proceso.
+
+print("\nel ciclo reconcilia, y lo hace el barrido de verdad")
+
+from nucleo.seguimiento import importacion_io as io_real  # noqa: E402
+
+# La funcion de verdad, capturada ANTES de que ningun escenario toque el
+# modulo. 'Escenario' reemplaza 'importacion_io.barrido' por un espia, asi
+# que leer el atributo despues devuelve el espia, no el barrido.
+BARRIDO_REAL = io_real.barrido
+
+
+class CicloReal:
+    """Sustituye SOLO lo que sale del proceso. El barrido corre entero."""
+
+    def __init__(self, *, aplicar=None, reconciliar=None, casos=None,
+                 aplicar_recon=None, descubrir=None):
+        self.orden: list[str] = []
+        self.aplicar = aplicar or (lambda *a, **k: {
+            "creados": 2, "ya_estaban": 1, "fallidos": 0, "ids": ["1", "2"]})
+        self.aplicar_recon = aplicar_recon or (lambda *a, **k: {
+            "actualizados": 3, "sin_cambios": 4, "fallidos": 0})
+        self.casos = casos if casos is not None else [
+            {"id": "c1", "external_ticket_id": "1", "status": "New"}]
+        self._reconciliar = reconciliar
+        self._descubrir = descubrir
+
+    def _envuelto(self, nombre, fn):
+        def envoltura(*a, **k):
+            self.orden.append(nombre)
+            return fn(*a, **k)
+        return envoltura
+
+    def __enter__(self):
+        from nucleo.persistencia import db
+        from nucleo.seguimiento import importacion as imp_real
+
+        self._db = db
+        self._previo = {
+            "areas": db.areas_de_colaboradores,
+            "listar": io_real.listar_tickets,
+            "conocidos": io_real.tickets_conocidos,
+            "servicios": io_real.resolver_servicios,
+            "casos": io_real.casos_de_este_proveedor,
+            "leer": io_real.leer_ticket,
+            "aplicar": io_real.aplicar,
+            "aplicar_recon": io_real.aplicar_reconciliacion,
+            "descubrir": imp_real.descubrir,
+            "reconciliar": imp_real.reconciliar,
+        }
+        self._imp = imp_real
+        db.areas_de_colaboradores = lambda t: {}
+        io_real.listar_tickets = lambda *a, **k: [{"id_ticket": "1"}]
+        io_real.tickets_conocidos = lambda *a, **k: (set(), {"1"})
+        io_real.resolver_servicios = lambda *a, **k: (lambda ids: {})
+        io_real.casos_de_este_proveedor = lambda *a, **k: list(self.casos)
+        io_real.leer_ticket = lambda *a, **k: {"id_ticket": "1"}
+        io_real.aplicar = self._envuelto("importacion", self.aplicar)
+        io_real.aplicar_reconciliacion = self._envuelto(
+            "reconciliacion", self.aplicar_recon)
+        imp_real.descubrir = self._descubrir or (lambda *a, **k: [
+            SimpleNamespace(resultado=imp_real.CANDIDATO)])
+        imp_real.reconciliar = self._reconciliar or (lambda *a, **k: [
+            SimpleNamespace(error="", hay_diferencia=True),
+            SimpleNamespace(error="lectura rota", hay_diferencia=False)])
+        return self
+
+    def __exit__(self, *_):
+        self._db.areas_de_colaboradores = self._previo["areas"]
+        io_real.listar_tickets = self._previo["listar"]
+        io_real.tickets_conocidos = self._previo["conocidos"]
+        io_real.resolver_servicios = self._previo["servicios"]
+        io_real.casos_de_este_proveedor = self._previo["casos"]
+        io_real.leer_ticket = self._previo["leer"]
+        io_real.aplicar = self._previo["aplicar"]
+        io_real.aplicar_reconciliacion = self._previo["aplicar_recon"]
+        self._imp.descubrir = self._previo["descubrir"]
+        self._imp.reconciliar = self._previo["reconciliar"]
+        return False
+
+
+def config_real(horas=0, cada_horas=1):
+    """Como config_falsa, pero con lo que el barrido de verdad necesita."""
+    c = config_falsa(horas=horas, cada_horas=cada_horas)
+    c.importacion_tickets.proveedor = "wisphub"
+    c.importacion_tickets.cuenta_api = "cuenta - api"
+    c.herramientas = []
+    c.variables_tenant = {}
+    return c
+
+
+previo = sin_interruptor("1")
+try:
+    # --- las dos corren, en orden, y los contadores no se mezclan ---------
+    with CicloReal() as ciclo:
+        with Escenario(["a"], {"a": config_real()}) as e:
+            # El barrido REAL: se le devuelve el control a importacion_io.
+            reloj.importacion_io.barrido = BARRIDO_REAL
+            # Una sola pasada: 'main(["--once"])' antes dejaria el sello de
+            # frecuencia puesto y la segunda no le tocaria.
+            r = reloj.una_pasada()[0]["importacion"]
+
+    revisar(ciclo.orden[:2] == ["importacion", "reconciliacion"],
+            "el ciclo importa y DESPUES reconcilia, en esa orden",
+            f"orden observado: {ciclo.orden}")
+    revisar("reconciliacion" in ciclo.orden,
+            "la reconciliacion se ejecuta dentro del ciclo del reloj",
+            "estuvo construida y desconectada: es lo que esta prueba existe para evitar")
+
+    revisar(r["importacion"] == {"inspeccionados": 1, "candidatos": 1,
+                                 "creados": 2, "ya_estaban": 1, "fallidos": 0},
+            "los contadores de importacion salen separados",
+            f"{r.get('importacion')}")
+    revisar(r["reconciliacion"] == {"alcanzados": 2, "con_diferencia": 1,
+                                    "actualizados": 3, "sin_cambios": 4,
+                                    "fallidos": 0, "errores_lectura": 1},
+            "y los de reconciliacion tambien, con errores_lectura aparte",
+            f"{r.get('reconciliacion')}")
+    # 'fallidos' existe en los dos a proposito -- son fallos de trabajos
+    # distintos. Lo que no puede existir es un contador PLANO, arriba, que los
+    # sume: ese es el numero que se lee mal cuando algo anda mal.
+    planos = {"creados", "fallidos", "candidatos", "actualizados",
+              "inspeccionados", "alcanzados"} & set(r)
+    revisar(not planos,
+            "no hay contadores planos arriba que mezclen los dos trabajos",
+            f"al tope del resultado aparecen: {planos}")
+    revisar(isinstance(r["importacion"], dict)
+            and isinstance(r["reconciliacion"], dict),
+            "cada trabajo tiene su propio bloque")
+
+    # --- un fallo de importacion NO impide reconciliar --------------------
+    def importacion_rota(*a, **k):
+        raise RuntimeError("el CRM rechazo el POST")
+
+    with CicloReal(aplicar=importacion_rota) as ciclo:
+        with Escenario(["a"], {"a": config_real()}):
+            reloj.importacion_io.barrido = BARRIDO_REAL
+            r = reloj.una_pasada()[0]["importacion"]
+    revisar("reconciliacion" in ciclo.orden,
+            "la importacion rota NO impide la reconciliacion del mismo tenant",
+            f"orden: {ciclo.orden}")
+    revisar("el CRM rechazo el POST" in r.get("error_global", ""),
+            "y el fallo de importacion queda escrito con su causa",
+            f"{r.get('error_global')!r}")
+    revisar(r["reconciliacion"]["actualizados"] == 3,
+            "la reconciliacion hizo su trabajo igual")
+
+    # --- un fallo de reconciliacion NO revierte ni mata nada --------------
+    def reconciliacion_rota(*a, **k):
+        raise RuntimeError("el proveedor no responde")
+
+    with CicloReal(aplicar_recon=reconciliacion_rota) as ciclo:
+        with Escenario(["a", "b"], {"a": config_real(horas=48),
+                                    "b": config_real(horas=48)}) as e:
+            reloj.importacion_io.barrido = BARRIDO_REAL
+            salida = reloj.una_pasada()
+    r = salida[0]["importacion"]
+    revisar(r["importacion"]["creados"] == 2,
+            "lo importado sigue importado: la reconciliacion no lo revierte",
+            f"{r['importacion']}")
+    revisar("el proveedor no responde" in r["reconciliacion"].get("error", ""),
+            "el fallo de reconciliacion queda en el resultado",
+            f"{r['reconciliacion']}")
+    revisar(len(salida) == 2 and "importacion" in salida[1],
+            "y no impide que se atienda al siguiente tenant",
+            f"{[s['tenant'] for s in salida]}")
+    revisar(len(e.vencidas.llamadas) == 2,
+            "ni que corran los vencimientos de los dos")
+
+    # --- cada_horas=0 apaga el subsistema ENTERO (politica elegida) -------
+    # La decision: 'cada_horas' manda sobre importacion_tickets completo. No
+    # queda un estado raro donde no se importa nada pero se sigue hablando
+    # con el proveedor cada hora.
+    with CicloReal() as ciclo:
+        with Escenario(["a"], {"a": config_real(horas=48, cada_horas=0)}):
+            reloj.importacion_io.barrido = BARRIDO_REAL
+            r = reloj.una_pasada()[0]["importacion"]
+    revisar(ciclo.orden == [],
+            "cada_horas=0: NI importacion NI reconciliacion",
+            f"corrio: {ciclo.orden}")
+    revisar(r == {"le_toca": False, "cada_horas": 0,
+                  "haria": "nada: cada_horas=0, la importacion esta apagada"},
+            "y lo dice, en vez de callarse",
+            f"{r}")
+
+    # --- en seco no escribe ninguna de las dos ----------------------------
+    with CicloReal() as ciclo:
+        with Escenario(["a"], {"a": config_real(horas=48)}):
+            reloj.importacion_io.barrido = BARRIDO_REAL
+            r = reloj.una_pasada(seco=True)[0]["importacion"]
+    revisar(ciclo.orden == [],
+            "--dry-run: ni 'aplicar' ni 'aplicar_reconciliacion' se llaman",
+            f"corrio: {ciclo.orden}")
+    revisar(r["reconciliacion"]["alcanzados"] == 2
+            and r["reconciliacion"]["con_diferencia"] == 1
+            and r["reconciliacion"]["actualizados"] == 0,
+            "pero SI informa cuantos cambiarian",
+            f"{r['reconciliacion']}")
+finally:
+    sin_interruptor(previo)
+
+
+# ==========================================================================
+#  7.c  Case.status NO ES PARTE DE NINGUNA ESCRITURA DE RECONCILIACION
+# ==========================================================================
+# El invariante entero de la fase. Se comprueba en los DOS lados, porque
+# cualquiera de los dos alcanza para romperlo: el que arma el cuerpo y el que
+# lo recibe.
+
+print("\nCase.status no se toca reconciliando")
+
+fuente_imp = (RAIZ / "nucleo" / "seguimiento"
+              / "importacion.py").read_text(encoding="utf-8")
+cuerpo_reconciliar = fuente_imp.split("def reconciliar(")[1].split("\ndef ")[0]
+for prohibido in ('"status"', "'status'", '"assigned_to"', '"priority"',
+                  '"stage"'):
+    revisar(prohibido not in cuerpo_reconciliar,
+            f"'reconciliar' no arma {prohibido} en lo que va a escribir",
+            "el estado de Dexter es de Dexter; lo del proveedor va en external_*")
+
+vista = (RAIZ / "django-crm" / "backend" / "cases"
+         / "importacion_views.py").read_text(encoding="utf-8")
+permitidos = vista.split("CAMPOS_RECONCILIACION = frozenset({")[1].split("})")[0]
+for prohibido in ("status", "assigned_to", "stage", "priority"):
+    revisar(f'"{prohibido}"' not in permitidos,
+            f"y el endpoint tampoco acepta '{prohibido}'",
+            f"CAMPOS_RECONCILIACION: {permitidos.strip()}")
+revisar("external_status" in permitidos,
+        "lo que si acepta es external_status, que es donde vive lo del proveedor")
+
+
 # ==========================================================================
 #  8. UNA SOLA IMPLEMENTACION
 # ==========================================================================

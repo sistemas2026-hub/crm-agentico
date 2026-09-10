@@ -362,7 +362,25 @@ def aplicar_reconciliacion(config, tenant, cambios) -> dict:
 
 def barrido(config, tenant: str, *, aplicar_cambios: bool = False) -> dict:
     """
-    Una pasada entera: descubrir, y opcionalmente crear los casos.
+    Una pasada entera del subsistema de importacion:
+
+        B. descubrir tickets nuevos y crear sus casos
+        C. reconciliar los casos que ya existen
+
+    (La A -- cerrar conversaciones vencidas -- no es de aca: la corre el reloj
+    antes de llamar a esto, y es de otro dominio.)
+
+    UNA SOLA COMPUERTA PARA LAS DOS
+    -------------------------------
+    Quien decide si esto corre es 'imp.debe_correr(cada_horas)', del lado del
+    reloj. O sea que 'cada_horas = 0' apaga el subsistema ENTERO: ni se importa
+    ni se reconcilia. Es deliberado y es la unica semantica que se puede
+    explicar en una frase -- "cada_horas manda sobre importacion_tickets".
+    Separarlo en dos frecuencias daria un estado raro de sostener ("no importa
+    nada pero sigue hablando con el proveedor todas las horas") y un segundo
+    interruptor que alguien tendria que recordar. Si algun dia hace falta
+    refrescar sin importar, eso es una clave nueva y explicita en la config, no
+    una excepcion escondida aca.
 
     SIN CHECKPOINT, a proposito. La ventana movil es la red de recuperacion:
     cada pasada mira los ultimos 'ventana_dias' completos, asi que lo que no se
@@ -386,19 +404,47 @@ def barrido(config, tenant: str, *, aplicar_cambios: bool = False) -> dict:
         return {"tenant": tenant, "error_global":
                 "'proveedor' no esta declarado en importacion_tickets"}
     desde, hasta = imp.ventana(conf)
-    resumen = {"tenant": tenant, "ventana": [desde, hasta], "error_global": "",
-               "inspeccionados": 0, "candidatos": 0,
-               "creados": 0, "ya_estaban": 0, "fallidos": 0}
+    # Contadores SEPARADOS. Importar y reconciliar son dos trabajos distintos
+    # sobre datos distintos -- uno crea casos que no existian, el otro refresca
+    # los que ya estan -- y sumarlos en un solo 'fallidos' hace ilegible el
+    # unico numero que alguien mira cuando algo anda mal.
+    resumen = {
+        "tenant": tenant, "ventana": [desde, hasta], "error_global": "",
+        "importacion": {"inspeccionados": 0, "candidatos": 0,
+                        "creados": 0, "ya_estaban": 0, "fallidos": 0},
+        "reconciliacion": {"alcanzados": 0, "con_diferencia": 0,
+                           "actualizados": 0, "sin_cambios": 0,
+                           "fallidos": 0, "errores_lectura": 0},
+    }
 
+    # -----------------------------------------------------------------------
+    #  B. DESCUBRIMIENTO E IMPORTACION  --  entera dentro de un try
+    # -----------------------------------------------------------------------
+    # Todo el paso B va aislado, no solo el listado. Antes 'aplicar' quedaba
+    # fuera del try y una excepcion suya salia de esta funcion: la
+    # reconciliacion no llegaba a correr. Que no se pueda importar no es
+    # motivo para dejar de refrescar los casos que YA existen -- son dos
+    # trabajos sobre datos distintos.
+    registro: set = set()
     try:
         areas = persistencia.areas_de_colaboradores(tenant)
         tickets = listar_tickets(config, tenant, desde, hasta)
         ids = [str(t.get("id_ticket")) for t in tickets if t.get("id_ticket")]
         conocidos, registro = tickets_conocidos(config, tenant, ids)
+        _importar(config, tenant, tickets, conocidos, registro, areas, conf,
+                  resumen, aplicar_cambios)
     except Exception as e:                                  # noqa: BLE001
         resumen["error_global"] = f"{type(e).__name__}: {e}"
-        return resumen
+        print(f"[importacion] el descubrimiento de '{tenant}' fallo: "
+              f"{type(e).__name__}: {e}")
 
+    _reconciliar(config, tenant, conf, registro, resumen, aplicar_cambios)
+    return resumen
+
+
+def _importar(config, tenant, tickets, conocidos, registro, areas, conf,
+              resumen, aplicar_cambios) -> None:
+    """El paso B. Escribe sus numeros en resumen['importacion']."""
     veredictos = imp.descubrir(
         config, tickets,
         conocidos=conocidos,
@@ -409,10 +455,54 @@ def barrido(config, tenant: str, *, aplicar_cambios: bool = False) -> dict:
             "WISPHUB_ID_SERVICIO_INSTALACIONES", ""),
         resolver_servicio=resolver_servicios(config, tenant))
 
-    resumen["inspeccionados"] = len(veredictos)
-    resumen["candidatos"] = sum(1 for v in veredictos if v.resultado == imp.CANDIDATO)
+    resumen["importacion"]["inspeccionados"] = len(veredictos)
+    resumen["importacion"]["candidatos"] = sum(
+        1 for v in veredictos if v.resultado == imp.CANDIDATO)
 
-    if aplicar_cambios and resumen["candidatos"]:
-        resumen.update(aplicar(config, tenant, veredictos))
-        resumen.pop("ids", None)
-    return resumen
+    if aplicar_cambios and resumen["importacion"]["candidatos"]:
+        creado = aplicar(config, tenant, veredictos)
+        creado.pop("ids", None)
+        resumen["importacion"].update(creado)
+
+
+def _reconciliar(config, tenant, conf, registro, resumen, aplicar_cambios) -> None:
+    """
+    El paso C: refrescar lo que el proveedor dice de los casos que ya existen.
+
+    Va DESPUES de importar y en su propio try/except, y las dos cosas importan:
+
+      despues   un caso recien creado entra a la PROXIMA reconciliacion, no a
+                esta. Reconciliar lo que se acaba de leer del mismo proveedor
+                en la misma pasada seria pagar dos veces por el mismo dato.
+
+      aislada   que la reconciliacion falle NO puede deshacer ni ensuciar lo ya
+                importado. Los casos creados estan creados; esto solo refresca
+                columnas 'external_*'. El fallo se anota y la proxima pasada
+                vuelve a intentar -- no hay checkpoint que quede a medias.
+
+    'Case.status' no aparece en ningun lado de este camino: lo que el
+    proveedor dice vive en 'external_status'. La ausencia es el invariante
+    entero de la fase, y ademas el endpoint la impone (CAMPOS_RECONCILIACION
+    en cases/importacion_views.py) por si alguien la olvidara aca.
+    """
+    try:
+        casos = casos_de_este_proveedor(config, tenant)
+        cambios = imp.reconciliar(
+            config, casos,
+            leer_ticket=lambda t: leer_ticket(config, tenant, t),
+            cuenta_api=conf.cuenta_api,
+            # Del mismo 'tickets_conocidos' que uso el descubrimiento. Alcanza
+            # porque 'clasificar_creador_persistente' no degrada un caso que
+            # YA tiene 'dexter' guardado: la evidencia vive en la fila, no en
+            # esta lista.
+            registrados_por_dexter=registro)
+        rec = resumen["reconciliacion"]
+        rec["alcanzados"] = len(cambios)
+        rec["errores_lectura"] = sum(1 for c in cambios if c.error)
+        rec["con_diferencia"] = sum(1 for c in cambios if c.hay_diferencia)
+        if aplicar_cambios and cambios:
+            rec.update(aplicar_reconciliacion(config, tenant, cambios))
+    except Exception as e:                                  # noqa: BLE001
+        resumen["reconciliacion"]["error"] = f"{type(e).__name__}: {e}"
+        print(f"[importacion] la reconciliacion de '{tenant}' fallo: "
+              f"{type(e).__name__}: {e}")

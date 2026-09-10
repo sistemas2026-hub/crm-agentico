@@ -85,8 +85,12 @@ revisar(not faltan,
 # dentro de api.py nunca corrio bajo gunicorn. Esta comprobacion tiene que
 # seguirlo, o pasa por vacio -- que es peor que fallar.
 fuente_reloj = (RAIZ / "nucleo" / "reloj.py").read_text(encoding="utf-8")
-usados = {linea.split("importacion_io.")[1].split("(")[0]
-          for linea in fuente_reloj.splitlines() if "importacion_io." in linea}
+# Con expresion regular y no partiendo cadenas: el troceo ingenuo levantaba
+# tambien las menciones en prosa ("...lo hace 'importacion_io.barrido'.") y
+# pedia que existiera un atributo llamado "barrido'.".
+import re  # noqa: E402
+
+usados = set(re.findall(r"importacion_io\.([A-Za-z_][A-Za-z0-9_]*)", fuente_reloj))
 faltan_reloj = sorted(u for u in usados if not hasattr(io_mod, u))
 revisar(not faltan_reloj,
         f"el reloj usa {sorted(usados)} y existen",

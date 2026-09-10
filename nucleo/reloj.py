@@ -225,11 +225,18 @@ def _vencimientos(config, tenant: str, seco: bool) -> dict:
 
 def _importacion(config, tenant: str, seco: bool, ahora: datetime) -> dict:
     """
-    Descubre e importa tickets del sistema del ISP.
+    El subsistema de importacion entero: descubrir e importar (B), y despues
+    reconciliar los casos que ya existen (C). Las dos las hace 'barrido'.
 
     'debe_correr' es la compuerta, y vive en el modulo de importacion, no aca:
     con 'cada_horas' en 0 -- el valor por defecto -- devuelve False y no pasa
     NADA. Ni una llamada al proveedor, ni una al CRM, ni una escritura.
+
+    Y NADA quiere decir tambien la reconciliacion. 'cada_horas' manda sobre
+    'importacion_tickets' completo, que es la unica semantica explicable en una
+    frase; la alternativa dejaba un estado incomodo -- "no importa nada pero
+    igual habla con el proveedor cada hora" -- y un segundo interruptor que
+    recordar. La razon larga esta en el docstring de 'importacion_io.barrido'.
     """
     cada = config.importacion_tickets.cada_horas
     if not importacion.debe_correr(config.importacion_tickets,
