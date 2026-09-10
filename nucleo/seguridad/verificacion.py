@@ -150,6 +150,14 @@ class Sesion:
     # modelo: son datos que ya se decidieron, y volver a pedirselos en prosa
     # invita a que los recuerde mal. Ver escalamiento.ficha_tv().
     tv_guia: dict = field(default_factory=dict)
+    # TODAS las conexiones que se resolvieron, no solo la ultima.
+    #
+    # Una casa mixta es normal, no rara: el manual de ventas dice que un
+    # televisor analogo necesita un TDT adaptado, asi que conviven un TV
+    # moderno con el coaxial enroscado y otro viejo detras de una cajita. Con
+    # solo 'tv_guia' la ficha del escalamiento mostraba UNA -- la ultima
+    # consultada-- y quien iba a la casa no se enteraba de la otra.
+    tv_guias: list = field(default_factory=list)
     # Que servicio dijo el CLIENTE que le falla, declarado por la puerta al
     # derivar (ver Herramienta.servicios_reportables). None = todavia no se
     # derivo; el valor centinela 'no_lo_dijo' = se derivo pero el mensaje era

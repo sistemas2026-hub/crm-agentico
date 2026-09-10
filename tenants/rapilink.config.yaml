@@ -1168,6 +1168,26 @@ roles:
         devuelve los pasos que le corresponden a SU equipo -- no los
         escribas vos.
 
+        SI TIENE LAS DOS CONEXIONES EN LA CASA (un televisor con el
+        coaxial enroscado y otro detras de una cajita), no hay una que
+        vaya primero: cada televisor se trata por su propio camino.
+        Llama a consultar_guia_sintonizacion UNA VEZ POR CADA
+        conexion --una con 'directo' y su marca, otra con 'tdt'-- y
+        atiende de a uno, sin mezclar los pasos: el procedimiento de la
+        cajita no le sirve al que tiene el coaxial enroscado, ni al
+        reves.
+
+        UN TELEVISOR ANDA Y OTRO NO: eso corresponde VISITA TECNICA, y
+        no lo sigas intentando por chat. Que uno tenga canales prueba
+        que la señal SI llega a la casa, asi que no es de nuestro lado
+        ni se arregla sintonizando el que falla: lo que esta mal es de
+        la derivacion hacia adentro --el coaxial de ese televisor, su
+        salida del splitter, un conector flojo, o el televisor mismo--
+        y eso hay que verlo en el domicilio. Deciselo con calma, cierra
+        el diagnostico como dice el parrafo de arriba, y asegurate de
+        mencionar que un televisor si tiene canales y el otro no: es el
+        dato que le ahorra a quien va la revision de la acometida.
+
       Si la consulta en realidad es de facturacion, llama a derivar_a_area
       hacia facturacion_cliente -- no intentes resolverla tu.
     orientado_a: cliente_final
@@ -2068,6 +2088,389 @@ servicios_ofrecidos:
 # que es lo correcto: inventar un canal es mucho mas facil de creer que
 # inventar un servicio.
 parrilla_canales: []
+
+# =============================================================================
+#  GUIAS DE SINTONIZACION DE TELEVISOR
+# =============================================================================
+#
+# La FUENTE OFICIAL de estas instrucciones desde el 10/09/2026. Antes vivian en
+# el prompt del rol y duplicadas en dos descripciones de herramienta, para algo
+# que cambia por marca de televisor y que nadie podia corregir sin un
+# desarrollador. Se administran desde /settings/guias-tv.
+#
+# DE DONDE SALE CADA TEXTO, porque no se invento ninguno
+# ------------------------------------------------------
+# El dato que decide todo lo demas es de MANUAL-001 5.12, confirmado con el
+# area tecnica: la señal llega por coaxial pero se sintoniza como ANTENA, no
+# como 'Cable'. Un televisor puesto en 'Cable' no encuentra nada.
+#
+# Ese mismo documento dice, textualmente, que NO hay un paso a paso exacto
+# verificado por marca -- y da seis rutas como orientativas (Samsung, LG, y las
+# de Android/Google TV: Sony, TCL, Hisense, Philips). Esas seis llevan su ruta;
+# las once restantes llevan la orientacion generica aprobada, que es la misma
+# que el manual manda usar cuando no se conoce el menu. Ninguna guia afirma una
+# ruta que nadie verifico.
+#
+# Lo que SI es especifico de cada marca en las once es el video, suministrado
+# por Rapilink. Por eso tienen guia propia aunque el texto sea el generico: sin
+# ella el cliente no recibiria su video.
+#
+# Panasonic, Iffalcon, Indurama y Simply no tienen guia a proposito -- todavia
+# no hay video ni ruta para ellas, y caen en la general, que es correcto.
+guias_tv:
+  - marca: "Samsung"
+    tipo_conexion: directo
+    instrucciones: >-
+      En tu Samsung entra a Configuración > Emisión > Sintonización
+      automática. Cuando te pregunte de dónde viene la señal, elige
+      Antena, no Cable: aunque llegue por cable coaxial, se sintoniza
+      como antena. Si el menú de tu modelo se ve distinto, busca Canales
+      o Emisión y ahí la opción Automática. La búsqueda puede tardar
+      varios minutos: déjala terminar sin interrumpirla.
+    url_video: "https://www.youtube.com/watch?v=46_B0VYb-Gk"
+    activa: true
+    observaciones: >-
+      Ruta tomada de MANUAL-001 5.12, que la da como ORIENTATIVA: puede
+      variar segun el modelo. Por eso el texto al cliente no insiste en
+      el nombre del menu. Video suministrado por Rapilink.
+
+  - marca: "LG"
+    tipo_conexion: directo
+    instrucciones: >-
+      En tu LG entra a Configuración > Canales > Sintonización
+      automática. Cuando te pregunte de dónde viene la señal, elige
+      Antena, no Cable: aunque llegue por cable coaxial, se sintoniza
+      como antena. Si el menú de tu modelo se ve distinto, busca Canales
+      o Emisión y ahí la opción Automática. La búsqueda puede tardar
+      varios minutos: déjala terminar sin interrumpirla.
+    url_video: "https://www.youtube.com/watch?v=cWVzICvYJ28"
+    activa: true
+    observaciones: >-
+      Ruta tomada de MANUAL-001 5.12, que la da como ORIENTATIVA: puede
+      variar segun el modelo. Por eso el texto al cliente no insiste en
+      el nombre del menu. Video suministrado por Rapilink.
+
+  - marca: "Hisense"
+    tipo_conexion: directo
+    instrucciones: >-
+      En tu Hisense entra a Configuración > Canales y entradas >
+      Sintonización automática. Cuando te pregunte de dónde viene la
+      señal, elige Antena, no Cable: aunque llegue por cable coaxial, se
+      sintoniza como antena. Si el menú de tu modelo se ve distinto,
+      busca Canales o Emisión y ahí la opción Automática. La búsqueda
+      puede tardar varios minutos: déjala terminar sin interrumpirla.
+    url_video: "https://www.youtube.com/watch?v=4zodP6WsSrU"
+    activa: true
+    observaciones: >-
+      Android TV / Google TV. Ruta tomada de MANUAL-001 5.12, que la da
+      como ORIENTATIVA: puede variar segun el modelo. Por eso el texto
+      al cliente no insiste en el nombre del menu. Video suministrado
+      por Rapilink. En modelos con Google TV el menu puede decir
+      'Canales y entradas' en otro lugar del arbol.
+
+  - marca: "TCL"
+    tipo_conexion: directo
+    instrucciones: >-
+      En tu TCL entra a Configuración > Canales y entradas >
+      Sintonización automática. Cuando te pregunte de dónde viene la
+      señal, elige Antena, no Cable: aunque llegue por cable coaxial, se
+      sintoniza como antena. Si el menú de tu modelo se ve distinto,
+      busca Canales o Emisión y ahí la opción Automática. La búsqueda
+      puede tardar varios minutos: déjala terminar sin interrumpirla.
+    url_video: "https://www.youtube.com/watch?v=0XJsAM-IXNw"
+    activa: true
+    observaciones: >-
+      Android TV / Google TV. Ruta tomada de MANUAL-001 5.12, que la da
+      como ORIENTATIVA: puede variar segun el modelo. Por eso el texto
+      al cliente no insiste en el nombre del menu. Video suministrado
+      por Rapilink. En modelos con Google TV el menu puede decir
+      'Canales y entradas' en otro lugar del arbol.
+
+  - marca: "Hyundai"
+    tipo_conexion: directo
+    instrucciones: >-
+      Busca en el control el botón Menú o Home y entra a Configuración
+      (o Ajustes). Adentro busca Canales, Sintonización o Emisión, y
+      elige la búsqueda Automática. Cuando te pregunte de dónde viene la
+      señal, elige Antena, no Cable: aunque llegue por cable coaxial, se
+      sintoniza como antena. Si tu televisor trae una sola opción
+      "Antena/Cable" junta, esa misma sirve. La búsqueda puede tardar
+      varios minutos: déjala terminar sin interrumpirla.
+    url_video: "https://www.youtube.com/watch?v=JOt8xAIppJ8"
+    activa: true
+    observaciones: >-
+      SIN ruta de menu verificada para esta marca. MANUAL-001 5.12 dice
+      textualmente que no hay un paso a paso exacto verificado por marca
+      de TV, asi que el texto que se entrega es la orientacion generica
+      aprobada y el video es la referencia especifica de la marca.
+      Confirmar con el area tecnica antes de particularizarla.
+
+  - marca: "Kalley"
+    tipo_conexion: directo
+    instrucciones: >-
+      Busca en el control el botón Menú o Home y entra a Configuración
+      (o Ajustes). Adentro busca Canales, Sintonización o Emisión, y
+      elige la búsqueda Automática. Cuando te pregunte de dónde viene la
+      señal, elige Antena, no Cable: aunque llegue por cable coaxial, se
+      sintoniza como antena. Si tu televisor trae una sola opción
+      "Antena/Cable" junta, esa misma sirve. La búsqueda puede tardar
+      varios minutos: déjala terminar sin interrumpirla.
+    url_video: "https://www.youtube.com/watch?v=idaAd_rcvUo"
+    activa: true
+    observaciones: >-
+      SIN ruta de menu verificada para esta marca. MANUAL-001 5.12 dice
+      textualmente que no hay un paso a paso exacto verificado por marca
+      de TV, asi que el texto que se entrega es la orientacion generica
+      aprobada y el video es la referencia especifica de la marca.
+      Confirmar con el area tecnica antes de particularizarla.
+
+  - marca: "Challenger"
+    tipo_conexion: directo
+    instrucciones: >-
+      Busca en el control el botón Menú o Home y entra a Configuración
+      (o Ajustes). Adentro busca Canales, Sintonización o Emisión, y
+      elige la búsqueda Automática. Cuando te pregunte de dónde viene la
+      señal, elige Antena, no Cable: aunque llegue por cable coaxial, se
+      sintoniza como antena. Si tu televisor trae una sola opción
+      "Antena/Cable" junta, esa misma sirve. La búsqueda puede tardar
+      varios minutos: déjala terminar sin interrumpirla.
+    url_video: "https://www.youtube.com/watch?v=nNcaF26ewrc"
+    activa: true
+    observaciones: >-
+      SIN ruta de menu verificada para esta marca. MANUAL-001 5.12 dice
+      textualmente que no hay un paso a paso exacto verificado por marca
+      de TV, asi que el texto que se entrega es la orientacion generica
+      aprobada y el video es la referencia especifica de la marca.
+      Confirmar con el area tecnica antes de particularizarla.
+
+  - marca: "JVC"
+    tipo_conexion: directo
+    instrucciones: >-
+      Busca en el control el botón Menú o Home y entra a Configuración
+      (o Ajustes). Adentro busca Canales, Sintonización o Emisión, y
+      elige la búsqueda Automática. Cuando te pregunte de dónde viene la
+      señal, elige Antena, no Cable: aunque llegue por cable coaxial, se
+      sintoniza como antena. Si tu televisor trae una sola opción
+      "Antena/Cable" junta, esa misma sirve. La búsqueda puede tardar
+      varios minutos: déjala terminar sin interrumpirla.
+    url_video: "https://www.youtube.com/watch?v=m2zNcdE_R7w"
+    activa: true
+    observaciones: >-
+      SIN ruta de menu verificada para esta marca. MANUAL-001 5.12 dice
+      textualmente que no hay un paso a paso exacto verificado por marca
+      de TV, asi que el texto que se entrega es la orientacion generica
+      aprobada y el video es la referencia especifica de la marca.
+      Confirmar con el area tecnica antes de particularizarla.
+
+  - marca: "RCA"
+    tipo_conexion: directo
+    instrucciones: >-
+      Busca en el control el botón Menú o Home y entra a Configuración
+      (o Ajustes). Adentro busca Canales, Sintonización o Emisión, y
+      elige la búsqueda Automática. Cuando te pregunte de dónde viene la
+      señal, elige Antena, no Cable: aunque llegue por cable coaxial, se
+      sintoniza como antena. Si tu televisor trae una sola opción
+      "Antena/Cable" junta, esa misma sirve. La búsqueda puede tardar
+      varios minutos: déjala terminar sin interrumpirla.
+    url_video: "https://www.youtube.com/watch?v=2FkA_9lsjjs"
+    activa: true
+    observaciones: >-
+      SIN ruta de menu verificada para esta marca. MANUAL-001 5.12 dice
+      textualmente que no hay un paso a paso exacto verificado por marca
+      de TV, asi que el texto que se entrega es la orientacion generica
+      aprobada y el video es la referencia especifica de la marca.
+      Confirmar con el area tecnica antes de particularizarla.
+
+  - marca: "Caixun"
+    tipo_conexion: directo
+    instrucciones: >-
+      Busca en el control el botón Menú o Home y entra a Configuración
+      (o Ajustes). Adentro busca Canales, Sintonización o Emisión, y
+      elige la búsqueda Automática. Cuando te pregunte de dónde viene la
+      señal, elige Antena, no Cable: aunque llegue por cable coaxial, se
+      sintoniza como antena. Si tu televisor trae una sola opción
+      "Antena/Cable" junta, esa misma sirve. La búsqueda puede tardar
+      varios minutos: déjala terminar sin interrumpirla.
+    url_video: "https://www.youtube.com/watch?v=GgcZmKhhTIM"
+    activa: true
+    observaciones: >-
+      SIN ruta de menu verificada para esta marca. MANUAL-001 5.12 dice
+      textualmente que no hay un paso a paso exacto verificado por marca
+      de TV, asi que el texto que se entrega es la orientacion generica
+      aprobada y el video es la referencia especifica de la marca.
+      Confirmar con el area tecnica antes de particularizarla.
+
+  - marca: "Sony"
+    tipo_conexion: directo
+    instrucciones: >-
+      En tu Sony entra a Configuración > Canales y entradas >
+      Sintonización automática. Cuando te pregunte de dónde viene la
+      señal, elige Antena, no Cable: aunque llegue por cable coaxial, se
+      sintoniza como antena. Si el menú de tu modelo se ve distinto,
+      busca Canales o Emisión y ahí la opción Automática. La búsqueda
+      puede tardar varios minutos: déjala terminar sin interrumpirla.
+    url_video: "https://www.youtube.com/watch?v=p3u0p-kTau8"
+    activa: true
+    observaciones: >-
+      Android TV / Google TV. Ruta tomada de MANUAL-001 5.12, que la da
+      como ORIENTATIVA: puede variar segun el modelo. Por eso el texto
+      al cliente no insiste en el nombre del menu. Video suministrado
+      por Rapilink. En modelos con Google TV el menu puede decir
+      'Canales y entradas' en otro lugar del arbol.
+
+  - marca: "Philips"
+    tipo_conexion: directo
+    instrucciones: >-
+      En tu Philips entra a Configuración > Canales y entradas >
+      Sintonización automática. Cuando te pregunte de dónde viene la
+      señal, elige Antena, no Cable: aunque llegue por cable coaxial, se
+      sintoniza como antena. Si el menú de tu modelo se ve distinto,
+      busca Canales o Emisión y ahí la opción Automática. La búsqueda
+      puede tardar varios minutos: déjala terminar sin interrumpirla.
+    url_video: "https://www.youtube.com/watch?v=W9iSm6bJLiI"
+    activa: true
+    observaciones: >-
+      Android TV / Google TV. Ruta tomada de MANUAL-001 5.12, que la da
+      como ORIENTATIVA: puede variar segun el modelo. Por eso el texto
+      al cliente no insiste en el nombre del menu. Video suministrado
+      por Rapilink. En modelos con Google TV el menu puede decir
+      'Canales y entradas' en otro lugar del arbol.
+
+  - marca: "AOC"
+    tipo_conexion: directo
+    instrucciones: >-
+      Busca en el control el botón Menú o Home y entra a Configuración
+      (o Ajustes). Adentro busca Canales, Sintonización o Emisión, y
+      elige la búsqueda Automática. Cuando te pregunte de dónde viene la
+      señal, elige Antena, no Cable: aunque llegue por cable coaxial, se
+      sintoniza como antena. Si tu televisor trae una sola opción
+      "Antena/Cable" junta, esa misma sirve. La búsqueda puede tardar
+      varios minutos: déjala terminar sin interrumpirla.
+    url_video: "https://www.youtube.com/watch?v=bg2Cpi5HcjI"
+    activa: true
+    observaciones: >-
+      SIN ruta de menu verificada para esta marca. MANUAL-001 5.12 dice
+      textualmente que no hay un paso a paso exacto verificado por marca
+      de TV, asi que el texto que se entrega es la orientacion generica
+      aprobada y el video es la referencia especifica de la marca.
+      Confirmar con el area tecnica antes de particularizarla.
+
+  - marca: "Xiaomi"
+    tipo_conexion: directo
+    instrucciones: >-
+      Busca en el control el botón Menú o Home y entra a Configuración
+      (o Ajustes). Adentro busca Canales, Sintonización o Emisión, y
+      elige la búsqueda Automática. Cuando te pregunte de dónde viene la
+      señal, elige Antena, no Cable: aunque llegue por cable coaxial, se
+      sintoniza como antena. Si tu televisor trae una sola opción
+      "Antena/Cable" junta, esa misma sirve. La búsqueda puede tardar
+      varios minutos: déjala terminar sin interrumpirla.
+    url_video: "https://www.youtube.com/watch?v=IjV5JnZ-BfY"
+    activa: true
+    observaciones: >-
+      SIN ruta de menu verificada para esta marca. MANUAL-001 5.12 dice
+      textualmente que no hay un paso a paso exacto verificado por marca
+      de TV, asi que el texto que se entrega es la orientacion generica
+      aprobada y el video es la referencia especifica de la marca.
+      Confirmar con el area tecnica antes de particularizarla.
+
+  - marca: "Olimpo"
+    tipo_conexion: directo
+    instrucciones: >-
+      Busca en el control el botón Menú o Home y entra a Configuración
+      (o Ajustes). Adentro busca Canales, Sintonización o Emisión, y
+      elige la búsqueda Automática. Cuando te pregunte de dónde viene la
+      señal, elige Antena, no Cable: aunque llegue por cable coaxial, se
+      sintoniza como antena. Si tu televisor trae una sola opción
+      "Antena/Cable" junta, esa misma sirve. La búsqueda puede tardar
+      varios minutos: déjala terminar sin interrumpirla.
+    url_video: "https://www.youtube.com/watch?v=hgricUwuyOI"
+    activa: true
+    observaciones: >-
+      SIN ruta de menu verificada para esta marca. MANUAL-001 5.12 dice
+      textualmente que no hay un paso a paso exacto verificado por marca
+      de TV, asi que el texto que se entrega es la orientacion generica
+      aprobada y el video es la referencia especifica de la marca.
+      Confirmar con el area tecnica antes de particularizarla.
+
+  - marca: "Toshiba"
+    tipo_conexion: directo
+    instrucciones: >-
+      Busca en el control el botón Menú o Home y entra a Configuración
+      (o Ajustes). Adentro busca Canales, Sintonización o Emisión, y
+      elige la búsqueda Automática. Cuando te pregunte de dónde viene la
+      señal, elige Antena, no Cable: aunque llegue por cable coaxial, se
+      sintoniza como antena. Si tu televisor trae una sola opción
+      "Antena/Cable" junta, esa misma sirve. La búsqueda puede tardar
+      varios minutos: déjala terminar sin interrumpirla.
+    url_video: "https://www.youtube.com/watch?v=IiZPZ8CecLU"
+    activa: true
+    observaciones: >-
+      SIN ruta de menu verificada para esta marca. MANUAL-001 5.12 dice
+      textualmente que no hay un paso a paso exacto verificado por marca
+      de TV, asi que el texto que se entrega es la orientacion generica
+      aprobada y el video es la referencia especifica de la marca.
+      Confirmar con el area tecnica antes de particularizarla.
+
+  - marca: "Daewoo"
+    tipo_conexion: directo
+    instrucciones: >-
+      Busca en el control el botón Menú o Home y entra a Configuración
+      (o Ajustes). Adentro busca Canales, Sintonización o Emisión, y
+      elige la búsqueda Automática. Cuando te pregunte de dónde viene la
+      señal, elige Antena, no Cable: aunque llegue por cable coaxial, se
+      sintoniza como antena. Si tu televisor trae una sola opción
+      "Antena/Cable" junta, esa misma sirve. La búsqueda puede tardar
+      varios minutos: déjala terminar sin interrumpirla.
+    url_video: "https://www.youtube.com/watch?v=iOUoOmSDttk"
+    activa: true
+    observaciones: >-
+      SIN ruta de menu verificada para esta marca. MANUAL-001 5.12 dice
+      textualmente que no hay un paso a paso exacto verificado por marca
+      de TV, asi que el texto que se entrega es la orientacion generica
+      aprobada y el video es la referencia especifica de la marca.
+      Confirmar con el area tecnica antes de particularizarla.
+
+  - marca: ""
+    tipo_conexion: directo
+    instrucciones: >-
+      Busca en el control el botón Menú o Home y entra a Configuración
+      (o Ajustes). Adentro busca Canales, Sintonización o Emisión, y
+      elige la búsqueda Automática. Cuando te pregunte de dónde viene la
+      señal, elige Antena, no Cable: aunque llegue por cable coaxial, se
+      sintoniza como antena. Si tu televisor trae una sola opción
+      "Antena/Cable" junta, esa misma sirve. La búsqueda puede tardar
+      varios minutos: déjala terminar sin interrumpirla.
+    activa: true
+    observaciones: >-
+      La de respaldo: la usa cualquier marca sin guia propia activa. Es
+      la orientacion generica de MANUAL-001 5.12 tal cual fue aprobada.
+
+  - marca: ""
+    tipo_conexion: tdt
+    instrucciones: >-
+      Revisa que el cable coaxial de Rapilink esté enroscado en la
+      entrada de antena del GUDDI, y que del GUDDI salga el cable HDMI
+      al televisor. Si tu GUDDI o tu televisor no tienen HDMI, sirve el
+      cable de tres puntas (rojo, blanco y amarillo). Enciende el
+      televisor y con el botón Source o Input elige la entrada que estés
+      usando: HDMI 1, HDMI 2 o AV. Cuando veas la pantalla del GUDDI,
+      aprieta Menú en el control del GUDDI y busca la búsqueda
+      automática de canales. Déjala terminar sin interrumpirla: puede
+      tardar varios minutos. Al final revisa que los canales se vean
+      bien.
+    activa: true
+    observaciones: >-
+      Equipo: GUDDI, decodificador DVB-T/T2 de marca colombiana, con
+      salida HDMI y busqueda automatica de canales (ficha de producto de
+      Agaval). Los pasos salen de G-GO-07 del corpus ADAPTADOS a la
+      conexion de Rapilink: el coaxial viene de la salida CATV de la
+      ONU, NO de una antena aerea -- los pasos de antena de ese
+      documento (orientarla, linea de vista) NO aplican y se dejaron
+      fuera a proposito. Las etiquetas exactas del menu del GUDDI no
+      estan en ninguna fuente disponible (MANUAL-001 5.12: el TDT es
+      uniforme entre modelos pero sin menu documentado), por eso el
+      texto no insiste en un nombre de menu. Sin video suministrado.
 
 planes_venta:
   - nombre_wisphub: PLAN ELITE

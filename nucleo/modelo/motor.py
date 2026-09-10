@@ -923,20 +923,43 @@ def _ejecutar_consulta_guia_tv(config, argumentos_modelo: dict, sesion=None) -> 
             "instruccion_interna":
                 "Todavia no sabes como esta conectado. Preguntale al cliente "
                 "si el cable coaxial entra directo al televisor o si llega "
-                "primero a una cajita (TDT), y volve a llamar con "
-                "tipo_conexion='directo' o 'tdt'.",
+                "primero a una cajita, y volve a llamar con "
+                "tipo_conexion='directo' o 'tdt'. "
+                # MUCHA GENTE NO SABE CONTESTAR ESA PREGUNTA, y sin esto el
+                # agente se queda repitiendola. La salida no es adivinar --
+                # los dos procedimientos no se parecen en nada y el
+                # equivocado lo manda a buscar opciones que su equipo no
+                # tiene-- sino cambiarla por algo que se MIRA: por donde
+                # entra el cable al televisor. Un HDMI viene de una cajita;
+                # un coaxial enroscado va directo.
+                "Si te dice que no sabe, no lo dejes ahi ni adivines: pedile "
+                "que mire el cable que entra al televisor. Si termina en una "
+                "ficha redonda que se enrosca, es 'directo'. Si es un HDMI "
+                "plano que viene de un aparatito aparte, es 'tdt'.",
         }
 
     def _anotar(g, tipo_guia: str) -> None:
         """Deja constancia de lo resuelto, para la ficha del escalamiento."""
         if sesion is None:
             return
-        sesion.tv_guia = {
+        resuelta = {
             "tipo_conexion": tipo,
             "marca": marca,
             "tipo_guia": tipo_guia,
             "url_video": g.url_video.strip(),
         }
+        sesion.tv_guia = resuelta
+        # Y ademas se ACUMULA. Una casa puede tener el TV nuevo con el coaxial
+        # enroscado y el viejo detras de un TDT -- el manual de ventas lo da
+        # por normal-- y ahi se consulta la guia dos veces. Guardando solo la
+        # ultima, la ficha del escalamiento perdia la primera y quien iba a la
+        # casa se encontraba con un televisor del que nadie le habia hablado.
+        #
+        # Se deduplica por conexion+marca: el modelo puede repetir la misma
+        # consulta en un turno posterior, y esa es la MISMA conexion, no otra.
+        if not any(v.get("tipo_conexion") == tipo and v.get("marca") == marca
+                   for v in sesion.tv_guias):
+            sesion.tv_guias.append(resuelta)
 
     def _sirve(g) -> dict:
         return {
@@ -949,7 +972,20 @@ def _ejecutar_consulta_guia_tv(config, argumentos_modelo: dict, sesion=None) -> 
                 "Entregale las instrucciones TAL CUAL estan arriba: no las "
                 "resumas, no las reescribas y no agregues pasos que no "
                 "figuran. Quien las redacto sabe de que televisor habla. "
-                "Despues preguntale si aparecieron los canales.",
+                # EL VIDEO SE MANDA, NO SE GUARDA.
+                #
+                # Sin esta linea el modelo lo dejaba afuera: medido el
+                # 10/09/2026 apenas se cargaron los 17 videos, ninguno llego
+                # al cliente en cuatro conversaciones seguidas. No es que los
+                # ignorara a proposito -- el prompt le pide mensajes de una o
+                # dos lineas, y al recortar, el enlace es lo primero que
+                # sobra. Un video cargado que nunca se entrega es trabajo
+                # tirado: para muchos clientes, ver el menu es mas facil que
+                # leerlo.
+                + ("Mandale tambien el enlace del video, completo y tal cual, "
+                   "en su propia linea: le muestra el menu de SU marca. "
+                   if g.url_video.strip() else "")
+                + "Despues preguntale si aparecieron los canales.",
         }
 
     if tipo == "tdt":
@@ -1905,6 +1941,58 @@ def _promete_en_vez_de_responder(texto: str, nombres_area: set[str]) -> str | No
     return None
 
 
+# LOS PASOS DE SINTONIZACION SALEN DEL CATALOGO O NO SALEN.
+#
+# Desde el 10/09/2026 las instrucciones de sintonizacion viven en
+# 'TenantConfig.guias_tv' y la unica forma de leerlas es la herramienta marcada
+# 'consulta_guias_tv'. La instruccion de no escribirlas de memoria esta cuatro
+# veces: tres en el prompt del rol y una en la descripcion de la herramienta,
+# en mayusculas.
+#
+# No alcanza. Medido el 10/09/2026 con "no me aparecen los canales en el tv, es
+# un Samsung y el cable coaxial entra directo al televisor" -- tres corridas
+# del MISMO mensaje: consulto la guia UNA vez, y las otras dos escribio los
+# pasos de memoria ("entra al menu, busca la opcion de Canales o Emisoras y
+# elige Sintonizacion automatica"). Con 'Kalley' y con TDT consulto siempre.
+# La diferencia no es el flujo: es que una marca famosa lo convence de que ya
+# sabe, y solo va a buscar la herramienta cuando se siente ignorante.
+#
+# Lo que entrega de memoria SUENA BIEN, y por eso no se detecta leyendo la
+# respuesta -- solo se ve en la traza. PRD 7.4 otra vez: el prompt guia, el
+# codigo garantiza.
+#
+# LA SEÑAL SON DOS COSAS A LA VEZ, NO UNA
+#
+#   1. que hable de sintonizar, del decodificador o de la cajita
+#   2. que ademas DE UN PASO -- una ruta de menu, un boton, una entrada
+#
+# Con la primera sola, "¿el cable coaxial entra directo al televisor o pasa
+# por una cajita?" quedaria marcada como invencion. Y esa pregunta no es un
+# desliz: es OBLIGATORIA antes de poder consultar, porque sin saber como esta
+# conectado no hay guia que elegir (ver _ejecutar_consulta_guia_tv). Frenarla
+# haria girar el turno justo cuando el agente hace lo correcto.
+#
+# Pedir las dos deja pasar la pregunta y frena el paso a paso, que es lo unico
+# que hay que frenar.
+_RE_TEMA_SINTONIA = re.compile(
+    r"\b(sintoniz\w*|resintoniz\w*|decodificador\w*|tdt|cajita)\b")
+_RE_DA_UN_PASO = re.compile(
+    r"\b(menu|ajustes|configuracion|opciones|antena|hdmi|"
+    r"busqueda\s+automatica|sintonizacion\s+automatica|escane\w+)\b")
+
+
+def _da_pasos_de_sintonizacion(texto: str) -> bool:
+    """
+    Si esta respuesta le esta dictando al cliente COMO sintonizar.
+
+    No mide si el tema es la television -- mide si ya le esta diciendo que
+    apretar. Ver el comentario de arriba para por que hacen falta las dos
+    señales y no una.
+    """
+    plano = _sin_tildes(texto or "")
+    return bool(_RE_TEMA_SINTONIA.search(plano) and _RE_DA_UN_PASO.search(plano))
+
+
 class _LlamadaRecuperada:
     """Una llamada que el modelo pidio en texto en vez de por la API, con la
     misma forma que las de verdad para que el bucle no tenga que distinguirlas."""
@@ -2373,6 +2461,19 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
     # (~2s) y solo se paga cuando ya se sabe que la respuesta iba a ser
     # inservible, asi que es barata comparada con lo que evita.
     reintentos_area_sin_consultar = 0
+    # LA GUIA DE SINTONIZACION, SI ESTE ROL LA TIENE.
+    #
+    # Se busca una sola vez y no dentro del bucle: el catalogo del rol no
+    # cambia a mitad de turno, y calcularlo en cada vuelta invita a que las dos
+    # copias se separen. 'None' quiere decir que este rol no atiende
+    # television -- y entonces la guarda entera no le aplica.
+    herramienta_guia_tv = next(
+        (h for h in herramientas if getattr(h, "consulta_guias_tv", False)), None)
+    # Se enciende cuando la herramienta devolvio UNA GUIA DE VERDAD, no con
+    # que figure en la traza: una llamada sin 'tipo_conexion' responde
+    # "preguntale como esta conectado" y no trae ni un paso. Ver _pedir_la_guia.
+    guia_tv_resuelta = False
+    reintentos_sin_guia_tv = 0
     # Los nombres de area, para detectar un anuncio de pase. Se arman una sola
     # vez y no en la llamada a _redactar (donde estaban): el bucle tambien los
     # necesita ahora, y calcularlos dos veces invita a que se separen.
@@ -2380,6 +2481,25 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
         _sin_tildes(getattr(r, "area", "") or "") for r in config.roles.values()}
     nombres_area_conf = {a for a in _areas_conf if a}
     iteraciones = 0
+
+    def _otra_vuelta(log: str, instruccion: str) -> None:
+        """
+        El mecanismo, sin la condicion: una vuelta mas del bucle CON el
+        catalogo todavia disponible, mas la instruccion de que le falta.
+
+        Es la unica capa donde puede entrar informacion nueva. La redaccion
+        final corre sin herramientas, asi que pedirle ahi que reescriba
+        devuelve la misma frase -- medido byte a byte el 09/09/2026.
+
+        Quien llama pone la CONDICION y su propio contador; esto pone la
+        vuelta. Son dos guardas con disparadores que no se parecen (un area
+        que entro sin consultar, una respuesta que dicta pasos que no leyo)
+        y un solo remedio.
+        """
+        nonlocal iteraciones
+        iteraciones -= 1              # no se le cobra al presupuesto del turno
+        print(f"[modelo] {log}")
+        historial.append({"role": "system", "content": instruccion})
 
     def _pedir_que_consulte(motivo: str) -> bool:
         """
@@ -2393,22 +2513,72 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
         '[modelo] entro por derivacion...' en el log, se ve que el reintento
         ni siquiera se evaluo.
         """
-        nonlocal reintentos_area_sin_consultar, iteraciones
+        nonlocal reintentos_area_sin_consultar
         if not (derivado_en_este_turno
                 and len(registro) == registro_al_derivar
                 and reintentos_area_sin_consultar < 2):
             return False
         reintentos_area_sin_consultar += 1
-        iteraciones -= 1              # no se le cobra al presupuesto del turno
-        print(f"[modelo] '{nombre_rol}' entro por derivacion y {motivo} "
-              f"({reintentos_area_sin_consultar}/2): se le da otra vuelta "
-              f"con su catalogo")
-        historial.append({"role": "system", "content":
+        _otra_vuelta(
+            f"'{nombre_rol}' entro por derivacion y {motivo} "
+            f"({reintentos_area_sin_consultar}/2): se le da otra vuelta "
+            f"con su catalogo",
             f"El area que atiende sos VOS y ya es tu turno: el cliente no va a "
             f"escribir de nuevo, asi que no anuncies que lo vas a pasar con "
             f"nadie. Todavia no consultaste nada. USA AHORA tus herramientas "
             f"para buscar lo que te falta y despues contesta. Disponibles: "
-            f"{', '.join(h.nombre for h in herramientas)}."})
+            f"{', '.join(h.nombre for h in herramientas)}.")
+        return True
+
+    def _pedir_la_guia() -> bool:
+        """
+        La respuesta dicta pasos de sintonizacion y la guia no se leyo.
+        Devuelve si se concedio otra vuelta.
+
+        LAS TRES CONDICIONES, y ninguna sobra:
+
+          - el rol TIENE la herramienta. Sin esto, un rol que no atiende
+            television pagaria vueltas por una guarda que no le toca.
+          - la guia NO se resolvio en este turno. No alcanza con que la
+            herramienta figure en la traza: cuenta haber obtenido una guia
+            de verdad ('guia_encontrada'). Una llamada sin 'tipo_conexion'
+            devuelve "preguntale como esta conectado" y no trae ni un paso,
+            asi que seguir de largo despues de esa seria inventar igual.
+          - la respuesta ya esta dictando pasos (_da_pasos_de_sintonizacion).
+
+        DOS VUELTAS, igual que el otro. La segunda existe porque la primera
+        puede perderse sola: DeepSeek a veces escribe la llamada como texto
+        con sus tokens de control en vez de usar el tool-calling, y esta en
+        particular no se puede rescatar -- '_llamadas_fugadas' solo recupera
+        herramientas SIN argumentos, y esta necesita 'tipo_conexion'. Visto
+        el 10/09/2026: 'crudo=<...invoke name="consultar_guia_sinto'. La
+        intencion existia y se perdio en el camino.
+
+        Y SI DESPUES DE LAS DOS SIGUE SIN CONSULTAR, no se le abre la puerta:
+        la instruccion le dice que sin la guia no hay pasos que dar y que
+        pregunte como esta conectado. Preguntar es una respuesta util; una
+        ruta de menu inventada manda al cliente a buscar una opcion que su
+        televisor no tiene.
+        """
+        nonlocal reintentos_sin_guia_tv
+        if not (herramienta_guia_tv is not None
+                and not guia_tv_resuelta
+                and reintentos_sin_guia_tv < 2):
+            return False
+        reintentos_sin_guia_tv += 1
+        _otra_vuelta(
+            f"'{nombre_rol}' iba a dictar pasos de sintonizacion sin haber "
+            f"leido la guia ({reintentos_sin_guia_tv}/2): se le da otra "
+            f"vuelta con su catalogo",
+            f"NO escribas pasos de sintonizacion todavia: los que tenes en la "
+            f"cabeza no son los de esta empresa y pueden mandar al cliente a "
+            f"una opcion que su televisor no tiene. La UNICA fuente es "
+            f"'{herramienta_guia_tv.nombre}'. Si ya sabes como esta conectado, "
+            f"llamala AHORA con tipo_conexion='directo' (mas 'marca' si el "
+            f"cliente la dijo) o tipo_conexion='tdt'. Si todavia no lo sabes, "
+            f"no adivines: preguntale si el cable coaxial entra directo al "
+            f"televisor o si pasa antes por una cajita, y no le des ningun "
+            f"paso en este mensaje.")
         return True
 
     # Los reintentos por una llamada mal escrita se cuentan APARTE (ver mas
@@ -2452,6 +2622,20 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
             limpio = _sanitizar(resp.contenido, config.roles,
                                 config.persona.normalizar_tratamiento)
             if limpio:
+                # VA PRIMERO, y antes de la bifurcacion por 'hubo_llamadas'.
+                #
+                # Los dos caminos de abajo terminan el turno: uno devuelve el
+                # texto tal cual y el otro pasa a la redaccion final, que corre
+                # SIN catalogo. Cualquiera de los dos entrega los pasos
+                # inventados, asi que la unica forma de que el chequeo sirva es
+                # que este arriba de los dos.
+                #
+                # Y no depende de que haya consultado otras cosas: el caso
+                # medido llamo cinco herramientas antes de improvisar la
+                # sintonizacion, y uno donde ya sepa por el historial como esta
+                # conectado puede improvisarla sin llamar ninguna.
+                if _da_pasos_de_sintonizacion(limpio) and _pedir_la_guia():
+                    continue
                 if not hubo_llamadas:
                     limpio, fuga = guardia_salida.verificar(limpio)
                     if fuga:
@@ -2567,6 +2751,14 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 # ningun cliente ni depende de su plan.
                 salida = _ejecutar_consulta_guia_tv(
                     config, llamada.argumentos, sesion)
+                # Solo cuenta si TRAJO una guia. Sin 'tipo_conexion' la
+                # herramienta contesta "preguntale como esta conectado", que
+                # es correcto pero no es un procedimiento: dar por consultada
+                # esa llamada dejaria la puerta abierta a inventar los pasos
+                # justo despues. Y con el catalogo vacio devuelve el
+                # fail-closed de _sin_guia, que tampoco es una guia.
+                if isinstance(salida, dict) and salida.get("guia_encontrada"):
+                    guia_tv_resuelta = True
             elif herramienta.consulta_documentacion:
                 # Fuera del gate: una guia de procedimientos no menciona a
                 # ningun cliente. Ver el porque del cambio entero en

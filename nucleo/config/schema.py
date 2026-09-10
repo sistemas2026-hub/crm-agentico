@@ -2210,6 +2210,38 @@ class GuiaTV(Base):
                 f"{self.tipo_conexion}): una guia vacia gana la resolucion y "
                 f"deja al agente sin que entregar. Cargala con su texto o "
                 f"dejala en 'activa: false' mientras se redacta.")
+
+        # EL VIDEO SE LE MANDA AL CLIENTE TAL CUAL, ASI QUE TIENE QUE SER UN
+        # ENLACE.
+        #
+        # 'url_video' viaja sin tocar desde el catalogo hasta el mensaje (ver
+        # _sirve en motor.py: si esta cargado, se entrega). No habia nada que
+        # comprobara que fuera una direccion: "pendiente", "ver drive de
+        # calidad" o una ruta de red interna se guardaban igual y llegaban al
+        # cliente como si fueran un video. Un enlace roto en medio de una
+        # instruccion tecnica hace dudar del resto del mensaje, que es
+        # justamente el que si es correcto.
+        #
+        # Se normaliza el espacio de sobra antes de mirar: un
+        # "  https://... " pegado desde el navegador es un enlace bueno con un
+        # descuido de copiado, no un error que valga la pena rechazarle a
+        # alguien que esta cargando el catalogo.
+        self.url_video = self.url_video.strip()
+        if self.url_video:
+            if not self.url_video.lower().startswith(("http://", "https://")):
+                raise ValueError(
+                    f"url_video de la guia '{self.marca or '(general)'}' "
+                    f"({self.tipo_conexion}) no es un enlace: "
+                    f"'{self.url_video}'. Tiene que empezar por https:// (o "
+                    f"http://), porque se le manda al cliente tal cual. Si "
+                    f"todavia no hay video, dejalo vacio: el agente no lo "
+                    f"menciona si no esta cargado.")
+            if any(c.isspace() for c in self.url_video):
+                raise ValueError(
+                    f"url_video de la guia '{self.marca or '(general)'}' "
+                    f"({self.tipo_conexion}) tiene espacios en el medio: "
+                    f"'{self.url_video}'. Suele ser una direccion cortada al "
+                    f"copiarla, y asi no le va a abrir a nadie.")
         return self
 
 

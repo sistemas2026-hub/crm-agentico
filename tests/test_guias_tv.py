@@ -729,6 +729,215 @@ afirmar("descripcion_ticket.strip() + chr(10) * 2 + ficha" in FUENTE_API2,
         "datos duros cumplen funciones distintas")
 
 
+# =============================================================================
+#  AUDITORIA DE COBERTURA (10/09/2026) -- dos huecos encontrados y cerrados
+# =============================================================================
+
+print("\nCOBERTURA 29. el video tiene que ser un enlace")
+# 'url_video' viaja SIN TOCAR del catalogo al mensaje del cliente (ver _sirve
+# en motor.py). No habia nada que comprobara que fuera una direccion: quien
+# administra podia escribir "pendiente" o "ver drive de calidad" y eso le
+# llegaba al cliente como si fuera un video. Un enlace roto en medio de una
+# instruccion tecnica hace dudar del resto del mensaje, que si es correcto.
+afirmar(acepta(marca="Samsung", instrucciones="x",
+               url_video="https://videos.rapilink.co/samsung"),
+        "https se acepta")
+afirmar(acepta(marca="Samsung", instrucciones="x",
+               url_video="http://videos.rapilink.co/samsung"),
+        "http tambien -- no se le rechaza a nadie por el esquema")
+afirmar(acepta(marca="Samsung", instrucciones="x", url_video=""),
+        "vacio se acepta: el video es opcional")
+afirmar(not acepta(marca="Samsung", instrucciones="x", url_video="pendiente"),
+        "'pendiente' se rechaza -- no es un enlace, y llegaba al cliente")
+afirmar(not acepta(marca="Samsung", instrucciones="x",
+                   url_video="ver drive de calidad"),
+        "una nota escrita en el campo del video tambien se rechaza")
+afirmar(not acepta(marca="Samsung", instrucciones="x",
+                   url_video="www.youtube.com/watch?v=abc"),
+        "sin esquema se rechaza: 'www...' no abre como enlace")
+afirmar(not acepta(marca="Samsung", instrucciones="x",
+                   url_video="https://videos.rapilink.co/ samsung"),
+        "con un espacio en el medio se rechaza -- suele ser una direccion "
+        "cortada al copiarla")
+
+g = GuiaTV(marca="Samsung", instrucciones="x",
+           url_video="  https://videos.rapilink.co/samsung  ")
+afirmar(g.url_video == "https://videos.rapilink.co/samsung",
+        "y el espacio de sobra se recorta en vez de rechazarse: pegar de mas "
+        "es un descuido de copiado, no un enlace malo")
+
+print("\nCOBERTURA 30. el cliente que NO SABE como esta conectado")
+# Sin 'tipo_conexion' la herramienta manda a preguntar. Pero mucha gente no
+# sabe contestar "¿entra directo o pasa por una cajita?", y ahi el agente se
+# quedaba repitiendo la misma pregunta. Adivinar no es opcion: los dos
+# procedimientos no se parecen y el equivocado lo manda a buscar opciones que
+# su equipo no tiene. La salida es cambiarla por algo que se MIRA.
+r = resolver(COMPLETO, marca="Samsung")
+afirmar(not r.get("guia_encontrada"),
+        "sin saber la conexion no entrega ninguna guia")
+interna = r.get("instruccion_interna", "")
+afirmar("no sabe" in interna.lower(),
+        "contempla que el cliente no sepa contestar")
+afirmar("enrosca" in interna and "HDMI" in interna,
+        "y le da los dos observables que lo distinguen: ficha redonda que se "
+        "enrosca (directo) contra HDMI plano desde un aparatito (tdt)")
+afirmar("instrucciones" not in r,
+        "y sigue sin entregar un solo paso mientras no sepa cual es")
+
+
+print("\nCOBERTURA 31. la casa con DOS conexiones distintas")
+# Un TV moderno con el coaxial enroscado y otro analogo detras de un TDT es
+# una casa normal, no rara: el propio manual de ventas dice que un televisor
+# analogo necesita un TDT adaptado. Antes se guardaba solo la ULTIMA conexion
+# resuelta, asi que la ficha mostraba una sola -- y quien iba a la casa se
+# encontraba con un televisor del que nadie le habia hablado, y encima con el
+# procedimiento del otro.
+s = sesion_nueva()
+motor._ejecutar_consulta_guia_tv(
+    COMPLETO, {"tipo_conexion": "directo", "marca": "Samsung"}, s)
+motor._ejecutar_consulta_guia_tv(COMPLETO, {"tipo_conexion": "tdt"}, s)
+afirmar(len(s.tv_guias) == 2, "quedan registradas las dos conexiones")
+f = escalamiento.ficha_tv(s, {"tv_cantidad_televisores": 2})
+afirmar("MAS DE UNA" in f, "la ficha avisa que hay mas de una conexion")
+afirmar("directo al televisor (Samsung)" in f,
+        "lista la directa CON su marca pegada -- con dos televisores, una "
+        "marca en un renglon suelto no dice a cual de los dos pertenece")
+afirmar("TDT" in f, "y lista tambien la de TDT")
+afirmar("siguio las guias" in f,
+        "y habla de las guias en plural: se probaron las dos")
+
+# La misma consulta repetida es la MISMA conexion. El modelo puede volver a
+# llamarla en un turno posterior, y eso no es un segundo televisor.
+s = sesion_nueva()
+for _ in range(3):
+    motor._ejecutar_consulta_guia_tv(COMPLETO, {"tipo_conexion": "tdt"}, s)
+afirmar(len(s.tv_guias) == 1,
+        "repetir la consulta no inventa una conexion que no existe")
+
+# Y la casa de una sola conexion sigue viendose IGUAL que antes: este arreglo
+# no puede cambiarle la ficha al caso normal, que es el 99%.
+s = sesion_nueva()
+motor._ejecutar_consulta_guia_tv(
+    COMPLETO, {"tipo_conexion": "directo", "marca": "Samsung"}, s)
+f1 = escalamiento.ficha_tv(s, {"tv_cantidad_televisores": 1})
+afirmar("MAS DE UNA" not in f1 and "Marca del televisor: Samsung" in f1,
+        "con una sola conexion la ficha queda como estaba")
+
+
+print("\nCOBERTURA 32. el video cargado se MANDA, no se guarda")
+# Medido el 10/09/2026, apenas se cargaron los 17 videos: en cuatro
+# conversaciones seguidas contra el motor real, ninguno llego al cliente. No es
+# que el modelo los ignorara a proposito -- el prompt le pide mensajes de una o
+# dos lineas, y al recortar el enlace es lo primero que sobra. Un video cargado
+# que nunca se entrega es trabajo tirado.
+r = resolver(COMPLETO, tipo_conexion="directo", marca="Samsung")
+afirmar(r.get("url_video") == SAMSUNG["url_video"], "la guia trae su video")
+afirmar("video" in r.get("instruccion_interna", "").lower(),
+        "y se le dice explicitamente que lo mande")
+
+# Y donde NO hay video, no se le menciona: una instruccion que habla de un
+# enlace inexistente es justo lo que invita a inventarlo.
+sin_video = _Config([{"marca": "LG", "instrucciones": "paso a paso"}, GENERAL])
+r2 = resolver(sin_video, tipo_conexion="directo", marca="LG")
+afirmar("url_video" not in r2, "sin video la clave no viene")
+afirmar("video" not in r2.get("instruccion_interna", "").lower(),
+        "y tampoco se lo nombra -- nombrar un enlace que no existe invita a "
+        "inventarlo")
+
+
+# =============================================================================
+#  DECISIONES DE NEGOCIO DEL 10/09/2026
+# =============================================================================
+#
+# Las tres que quedaron abiertas al cerrar la auditoria de cobertura, ya
+# resueltas por el negocio. Dos se implementan; la tercera es una decision de
+# NO implementar, y por eso tambien lleva prueba: sin ella, el proximo que lea
+# "instrucciones insuficientes" en la lista de huecos agrega un minimo de
+# caracteres y rompe guias legitimas.
+
+print("\nDECISION 33. un televisor anda y otro no -> visita tecnica")
+# El dato mas concluyente de una falla de TV, y no lo mide ningun sistema: lo
+# dice el cliente. Si UNO tiene canales, la señal llega a la casa -- la ONU, el
+# puerto CATV y la acometida quedan descartados. Sin decirlo, quien recibe el
+# caso lee "no tiene señal de TV" y sale a revisar la acometida, que es justo
+# lo unico que ya sabemos que esta bien.
+afirmar('"tv_algunos_televisores_con_senal"' in FUENTE_ESC,
+        "el campo existe en el esquema de evaluacion")
+_i_req = FUENTE_ESC.index("requeridos = [")
+afirmar("tv_algunos_televisores_con_senal" not in FUENTE_ESC[_i_req:_i_req + 400],
+        "y NO es requerido -- una conversacion de facturacion no lo contesta")
+
+s = sesion_nueva()
+motor._ejecutar_consulta_guia_tv(
+    COMPLETO, {"tipo_conexion": "directo", "marca": "Samsung"}, s)
+f = escalamiento.ficha_tv(s, {"tv_algunos_televisores_con_senal": True,
+                              "tv_cantidad_televisores": 3})
+afirmar("VISITA TECNICA" in f, "la ficha dice que corresponde visita tecnica")
+afirmar("SI tienen canales y otros que no" in f,
+        "y deja explicito que unos televisores andan y otros no")
+afirmar("señal llega a la casa" in f,
+        "explicando POR QUE: es lo que descarta la acometida")
+afirmar(f.index("OJO") < f.index("Televisores conectados"),
+        "va ARRIBA de los demas datos -- entre ellos se lee como un detalle "
+        "mas, y es lo primero que necesita quien va a la casa")
+
+f_no = escalamiento.ficha_tv(s, {"tv_algunos_televisores_con_senal": False,
+                                 "tv_cantidad_televisores": 3})
+afirmar("VISITA TECNICA" not in f_no,
+        "en false no se dice nada: que todos fallen es el caso normal")
+f_sin = escalamiento.ficha_tv(s, {"tv_cantidad_televisores": 3})
+afirmar("VISITA TECNICA" not in f_sin,
+        "y si el cliente no lo dijo, tampoco se supone")
+
+# El dato solo tambien alcanza para que haya ficha: es escalable por si mismo.
+f_solo = escalamiento.ficha_tv(sesion_nueva(),
+                               {"tv_algunos_televisores_con_senal": True})
+afirmar("VISITA TECNICA" in f_solo,
+        "aunque sea lo unico que se sepa, la ficha se arma igual")
+
+print("\nDECISION 34. casa con varias conexiones: NO hay prioridad")
+# Cada televisor se trata por su propio camino. El procedimiento de la cajita
+# no le sirve al que tiene el coaxial enroscado, ni al reves.
+s = sesion_nueva()
+a = motor._ejecutar_consulta_guia_tv(
+    COMPLETO, {"tipo_conexion": "directo", "marca": "Samsung"}, s)
+b = motor._ejecutar_consulta_guia_tv(COMPLETO, {"tipo_conexion": "tdt"}, s)
+afirmar(a.get("instrucciones") != b.get("instrucciones"),
+        "cada conexion devuelve SUS pasos, no los del otro")
+afirmar(a.get("tipo_guia") == "especifica" and b.get("tipo_guia") == "tdt",
+        "y cada una resuelve por su propio flujo")
+
+f = escalamiento.ficha_tv(s, {"tv_cantidad_televisores": 2})
+for palabra in ("principal", "primero", "prioridad", "secundaria"):
+    afirmar(palabra not in f.lower(),
+            f"la ficha no insinua prioridad: no dice '{palabra}'")
+afirmar(f.index("directo al televisor") < f.index("coaxial a un TDT"),
+        "se listan en el orden en que se resolvieron, que es el de la "
+        "conversacion -- un orden, no una jerarquia")
+
+print("\nDECISION 35. texto corto pero no vacio: lo decide el humano")
+# NO se crea un minimo de caracteres ni de pasos. Un umbral arbitrario
+# rechazaria guias legitimas ("Menu > Canales > Automatica > Antena" son 38
+# caracteres y esta completa) y no atajaria la que de verdad importa: una
+# guia larga y equivocada. Quien administra el catalogo responde por el texto.
+afirmar(acepta(marca="Samsung", instrucciones="Menu > Canales > Auto > Antena"),
+        "una guia corta y completa se acepta")
+afirmar(acepta(marca="Samsung", instrucciones="ok"),
+        "y una corta y pobre TAMBIEN -- el codigo no puede distinguirlas, y "
+        "el umbral que lo intentara rechazaria la de arriba")
+afirmar(not acepta(marca="Samsung", instrucciones="   ", activa=True),
+        "lo unico que se rechaza sigue siendo la VACIA, que es medible")
+
+import re as _re
+_fuente_schema = texto(RAIZ / "nucleo" / "config" / "schema.py")
+_clase = _fuente_schema[_fuente_schema.index("class GuiaTV"):]
+_clase = _clase[:_clase.index("class ", 10)]
+afirmar(not _re.search(r"len\(\s*self\.instrucciones", _clase),
+        "no hay ningun minimo de longitud en GuiaTV, y esta prueba existe "
+        "para que no lo agregue el proximo que lea 'instrucciones "
+        "insuficientes' en la lista de huecos")
+
+
 print()
 if fallos:
     print(f"[FALLA] {len(fallos)} comprobacion(es):")

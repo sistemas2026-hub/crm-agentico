@@ -438,6 +438,35 @@ casos:
       # agente recae en preguntarla ("¿alguna en rojo o apagada?").
       responde_sin: ["en rojo"]
 
+  # C4 de la matriz de casos: CATV YA ACTIVADO, NO SE REINTENTA ACTIVARLO.
+  #
+  # 'activar_catv' es una escritura contra el equipo del cliente. Cuando el
+  # puerto ya dice 'Enabled', volver a activarlo no arregla nada -- la falla
+  # esta de la casa hacia adentro-- y ademas gasta una accion sensible sobre
+  # un aparato que estaba bien. El dato para no hacerlo ya lo tiene: lo acaba
+  # de leer con consultar_estado_catv.
+  #
+  # Se afirma con 'no_usa', que mide lo que se EJECUTO de verdad: es la unica
+  # forma de afirmar "esto no le paso al equipo de nadie". Verificado 2 de 2
+  # el 10/09/2026 contra el laboratorio con catv='Enabled'.
+  #
+  # El caso no escribe en ningun sistema, justamente porque lo que afirma es
+  # que la escritura NO ocurre.
+  - nombre: con la TV ya habilitada en el equipo no se reintenta activarla
+    rol: soporte_tecnico_cliente
+    sesion:
+      verificado: true
+      nivel: 1
+      id_cliente: "5832"
+      nombre: MARIO SABANAGRANDE
+      sn_onu: HWTCA6FB5263
+      identificador_canal: "3001234567"
+    mensajes: ["no me aparecen los canales de television"]
+    espera:
+      usa: [consultar_estado_catv]
+      no_usa: [activar_catv]
+      sin_errores: true
+
   - nombre: el diagnostico de TV vive en el especialista, no en el router
     rol: cliente_final
     mensajes: ["se me fue la señal del tv"]

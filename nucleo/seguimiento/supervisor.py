@@ -16,7 +16,7 @@ relacionados con el tema de la conversacion -- mismo mecanismo de RAG que
 usa el agente en vivo -- y se los da como referencia: puede decir "esto
 CONTRADICE el manual" en vez de "esto me suena raro". Pero sigue sin poder
 verificar nada que el manual no cubra todavia (ej. que la sintonizacion
-real es "Antena" y no "Cable", que el maximo de TV son 4 antes de que
+real es "Antena" y no "Cable", que el maximo de TV son 5 antes de que
 alguien lo documentara) -- eso lo sabe alguien con conocimiento real del
 negocio, no un modelo leyendo la conversacion. Por eso toda revision
 arranca en 'pendiente' (asistente.revisiones_supervisor) y un humano la

@@ -243,6 +243,27 @@ def _esquema_evaluacion(config, rol_cfg=None) -> dict:
                 "es la empresa). Es una causa de falla frecuente y quien vaya "
                 "a la casa tiene que saberlo antes de salir.",
         },
+        # UN TELEVISOR ANDA Y OTRO NO. Decision de negocio del 10/09/2026:
+        # ese caso va a VISITA TECNICA, y la ficha tiene que decirlo con
+        # todas las letras.
+        #
+        # Es el dato mas concluyente de todo el diagnostico de TV y no lo
+        # mide ningun sistema: lo dice el cliente. Si un televisor tiene
+        # canales, la señal ESTA LLEGANDO a la casa -- la ONU, el puerto CATV
+        # y la acometida quedan descartados de una. Lo que falla es de la
+        # derivacion hacia adentro: el tramo de coaxial de ese televisor, su
+        # salida del splitter, un conector flojo, o el televisor mismo.
+        #
+        # Sin esta linea, quien recibe el caso lee "no tiene señal de TV" y
+        # sale a revisar la acometida, que es justo lo unico que ya sabemos
+        # que esta bien.
+        "tv_algunos_televisores_con_senal": {
+            "type": "boolean",
+            "description": "true solo si el cliente dijo que UNO de sus "
+                "televisores si tiene canales y OTRO no. No lo supongas "
+                "porque tenga varios televisores: cuenta solo si dijo que "
+                "unos andan y otros no.",
+        },
         # Los dos campos que convierten el traspaso en un relevo y no en un
         # "aca te dejo esto". La traza ya dice QUE se midio y con que
         # resultado (ver _que_se_probo), pero no dice lo unico que quien
@@ -825,6 +846,23 @@ _ETIQUETA_GUIA = {
 }
 
 
+def _una_conexion(v: dict) -> str:
+    """
+    Una linea por conexion, para la casa que tiene mas de una.
+
+    Se arma con la MARCA pegada a su conexion y no en un renglon aparte: con
+    dos televisores, "Marca: Samsung" suelto no dice a cual de los dos
+    pertenece, y quien va a la casa necesita saber cual es cual antes de
+    tocar nada. Con TDT la marca no se lista, por lo mismo de siempre --
+    ahi no influye en el procedimiento.
+    """
+    etiqueta = _ETIQUETA_GUIA.get(v.get("tipo_guia"), v.get("tipo_guia") or "")
+    if v.get("tipo_conexion") == "tdt":
+        return f"coaxial a un TDT y de ahi al TV (HDMI o AV) -- guia: {etiqueta}"
+    marca = f" ({v['marca']})" if v.get("marca") else ""
+    return f"coaxial directo al televisor{marca} -- guia: {etiqueta}"
+
+
 def ficha_tv(sesion, evaluacion: dict | None = None,
              evidencias: int = 0) -> str:
     """
@@ -836,11 +874,12 @@ def ficha_tv(sesion, evaluacion: dict | None = None,
     Volver a pedirselos al modelo en prosa lo invita a recordarlos mal, y quien
     lee el ticket no tiene forma de saber cual de las dos versiones es cierta.
 
-    Lo que SI viene del modelo son las tres cosas que solo estan en la
+    Lo que SI viene del modelo son las cosas que solo estan en la
     conversacion y ningun sistema mide -- cuantos televisores hay, si hay
-    splitter, y si el cableado lo toco el cliente. Llegan en campos con nombre
-    del esquema de 'evaluar', no en un parrafo: el modelo aporta observaciones
-    sueltas y el texto lo escribe esta funcion.
+    splitter, si el cableado lo toco el cliente, y si unos televisores andan y
+    otros no. Llegan en campos con nombre del esquema de 'evaluar', no en un
+    parrafo: el modelo aporta observaciones sueltas y el texto lo escribe esta
+    funcion.
 
     Devuelve cadena vacia si la conversacion no fue de television. No se
     inventa una ficha vacia con guiones: un bloque que dice "marca: -- ,
@@ -851,32 +890,70 @@ def ficha_tv(sesion, evaluacion: dict | None = None,
     cantidad = ev.get("tv_cantidad_televisores")
     splitter = ev.get("tv_tiene_splitter")
     cableado = ev.get("tv_cableado_del_cliente")
+    algunos_andan = ev.get("tv_algunos_televisores_con_senal")
 
-    if not guia and cantidad is None and splitter is None and cableado is None:
+    if (not guia and cantidad is None and splitter is None
+            and cableado is None and algunos_andan is None):
         return ""
 
     lineas = ["TELEVISION -- lo que se confirmo en la conversacion:"]
 
-    if guia.get("tipo_conexion") == "tdt":
-        lineas.append("  - Conexion: el coaxial va a un TDT y de ahi al TV "
-                      "(HDMI o AV). No entra directo al televisor.")
-    elif guia.get("tipo_conexion") == "directo":
-        lineas.append("  - Conexion: el coaxial entra directo al televisor.")
+    # VA ARRIBA DE TODO, Y NO ENTRE LOS DEMAS DATOS.
+    #
+    # Es lo mas concluyente que hay en una falla de TV, y lo dice el cliente,
+    # no un sistema: si UN televisor tiene canales, la señal esta llegando a
+    # la casa. La ONU, el puerto CATV y la acometida quedan descartados de
+    # una, y la falla esta de la derivacion hacia adentro -- el tramo de
+    # coaxial de ese televisor, su salida del splitter, un conector flojo, o
+    # el televisor mismo.
+    #
+    # Sepultado entre "televisores conectados: 3" y "tiene splitter", se lee
+    # como un detalle mas. Arriba y con el encabezado en mayusculas, es lo
+    # primero que ve quien va a la casa -- y le evita salir a revisar la
+    # acometida, que es justo lo unico que ya sabemos que esta bien.
+    if algunos_andan is True:
+        lineas.append("  - OJO: hay televisores que SI tienen canales y otros "
+                      "que no. La señal llega a la casa: lo que falla esta de "
+                      "la derivacion hacia adentro (el coaxial de ese "
+                      "televisor, su salida del splitter, un conector, o el "
+                      "televisor). Corresponde VISITA TECNICA.")
 
-    # Con TDT la marca no interviene en la guia, asi que no se lista aunque el
-    # cliente la haya dicho: mostrarla ahi sugiere que influyo en algo.
-    if guia.get("marca") and guia.get("tipo_conexion") != "tdt":
-        lineas.append("  - Marca del televisor: " + guia["marca"])
+    # LA CASA MIXTA SE LISTA ENTERA.
+    #
+    # Un TV moderno con el coaxial enroscado y otro analogo detras de un TDT
+    # conviven a diario (el manual de ventas lo da por normal). Con una sola
+    # conexion en la ficha, quien iba a la casa se encontraba con un televisor
+    # del que nadie le habia hablado -- y encima con el procedimiento del otro.
+    varias = [v for v in (getattr(sesion, "tv_guias", None) or [])
+              if v.get("tipo_conexion")] if sesion is not None else []
 
-    if guia.get("tipo_guia"):
-        etiqueta = _ETIQUETA_GUIA.get(guia["tipo_guia"], guia["tipo_guia"])
-        con_video = " Se le mando el video." if guia.get("url_video") else ""
-        lineas.append("  - Guia entregada: " + etiqueta + "." + con_video)
-        # Que la haya seguido y no funcionara es justamente el motivo por el
-        # que el caso llego hasta aca: se dice, para que nadie se la vuelva a
-        # mandar creyendo que no se probo.
-        lineas.append("  - Resultado: siguio la guia y NO aparecieron los "
+    if len(varias) > 1:
+        lineas.append("  - Conexion: hay MAS DE UNA en la casa.")
+        for v in varias:
+            lineas.append("      * " + _una_conexion(v))
+        lineas.append("  - Resultado: siguio las guias y NO aparecieron los "
                       "canales (por eso escalo).")
+    else:
+        if guia.get("tipo_conexion") == "tdt":
+            lineas.append("  - Conexion: el coaxial va a un TDT y de ahi al TV "
+                          "(HDMI o AV). No entra directo al televisor.")
+        elif guia.get("tipo_conexion") == "directo":
+            lineas.append("  - Conexion: el coaxial entra directo al televisor.")
+
+        # Con TDT la marca no interviene en la guia, asi que no se lista aunque
+        # el cliente la haya dicho: mostrarla ahi sugiere que influyo en algo.
+        if guia.get("marca") and guia.get("tipo_conexion") != "tdt":
+            lineas.append("  - Marca del televisor: " + guia["marca"])
+
+        if guia.get("tipo_guia"):
+            etiqueta = _ETIQUETA_GUIA.get(guia["tipo_guia"], guia["tipo_guia"])
+            con_video = " Se le mando el video." if guia.get("url_video") else ""
+            lineas.append("  - Guia entregada: " + etiqueta + "." + con_video)
+            # Que la haya seguido y no funcionara es justamente el motivo por
+            # el que el caso llego hasta aca: se dice, para que nadie se la
+            # vuelva a mandar creyendo que no se probo.
+            lineas.append("  - Resultado: siguio la guia y NO aparecieron los "
+                          "canales (por eso escalo).")
 
     if isinstance(cantidad, int) and cantidad > 0:
         # El maximo recomendado es 5 (decision de negocio, 10/09/2026). Pasarse
