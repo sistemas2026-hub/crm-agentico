@@ -25,7 +25,16 @@ class EvidenciaTrabajoInline(admin.TabularInline):
     model = EvidenciaTrabajo
     extra = 0
     fields = ("requisito_id", "nombre_original", "estado_archivo", "bytes", "recibida_en_servidor")
-    readonly_fields = ("recibida_en_servidor", "bytes", "sha256")
+    # TODOS de solo lectura, no solo tres. 'estado_archivo' quedaba editable, y
+    # es el campo que decide si el checklist esta completo: ponerlo a mano en
+    # 'recibido' deja cerrar una orden sin que exista el archivo (ver
+    # validador.verificar_checklist_completo, que solo mira el estado).
+    readonly_fields = ("requisito_id", "nombre_original", "estado_archivo",
+                       "bytes", "recibida_en_servidor", "sha256")
+
+    def has_add_permission(self, request, obj=None):
+        # Una evidencia nace subiendo un archivo, no escribiendo una fila.
+        return False
 
 
 class EventoTrabajoInline(admin.TabularInline):
@@ -65,7 +74,28 @@ class OrdenTrabajoAdmin(admin.ModelAdmin):
         "cliente_direccion",
         "origen_ref",
     )
-    readonly_fields = ("created_at", "updated_at", "revision")
+    # Lo que escribe 'services/transiciones.py' no se toca desde aca.
+    #
+    # '_aplicar_transicion' hace CUATRO cosas juntas: comprueba que el paso sea
+    # legal contra TRANSICIONES_PERMITIDAS, sube 'revision', sella las fechas y
+    # escribe la bitacora ('EventoTrabajo'). Editar 'estado_operativo' a mano
+    # se saltea las cuatro -- y la peor no es la primera: deja la bitacora con
+    # un hueco justo donde el estado cambio, que es donde alguien va a mirar.
+    #
+    # 'datos' tampoco: lo valida 'validar_campos_tecnicos' contra la plantilla
+    # inmutable, y 'revision' es el control de concurrencia con la cola offline
+    # del movil. Escribirlo crudo puede guardar lo que el esquema rechazaria y
+    # pisar el trabajo de un tecnico sin que la app se entere.
+    #
+    # 'estado_validacion' SI queda editable, a proposito: hoy ningun codigo lo
+    # escribe -- el flujo de aprobacion no existe todavia -- asi que esto es lo
+    # unico que puede moverlo. Cuando exista, entra a esta lista.
+    readonly_fields = (
+        "created_at", "updated_at", "revision", "numero",
+        "estado_operativo",
+        "iniciada_en", "completada_campo_en", "cerrada_en",
+        "datos",
+    )
     inlines = [AsignacionTrabajoInline, EvidenciaTrabajoInline, EventoTrabajoInline]
     fieldsets = (
         (
@@ -203,6 +233,20 @@ class WorkTypeVersionAdmin(admin.ModelAdmin):
 
 @admin.register(EvidenciaTrabajo)
 class EvidenciaTrabajoAdmin(admin.ModelAdmin):
+    """
+    Una evidencia es un registro de auditoria: se mira, no se corrige.
+
+    Aca 'sha256' quedaba editable mientras en el inline ya estaba protegido --
+    la misma columna, dos criterios. Es parte de
+    UniqueConstraint(orden_trabajo, requisito_id, sha256), que es lo que impide
+    que un reintento del movil duplique la evidencia; y 'storage_key' es lo que
+    ata la fila al archivo guardado. Cambiar cualquiera de los dos rompe esa
+    relacion sin que nada avise.
+
+    Se puede BORRAR una fila espuria (eso es una decision explicita y deja
+    rastro en el log del admin); lo que no se puede es reescribirla para que
+    diga otra cosa.
+    """
     list_display = (
         "orden_trabajo",
         "requisito_id",
@@ -213,4 +257,11 @@ class EvidenciaTrabajoAdmin(admin.ModelAdmin):
     )
     list_filter = ("estado_archivo", "org")
     search_fields = ("orden_trabajo__numero", "requisito_id", "nombre_original")
-    readonly_fields = ("recibida_en_servidor", "created_at", "updated_at")
+    readonly_fields = (
+        "org", "orden_trabajo", "requisito_id", "storage_key", "nombre_original",
+        "mime_type", "bytes", "sha256", "estado_archivo", "capturada_en_cliente",
+        "metadatos_captura", "recibida_en_servidor", "created_at", "updated_at",
+    )
+
+    def has_add_permission(self, request):
+        return False
