@@ -763,3 +763,47 @@ revisar(any(l.strip() == "else:" for l in _lineas[max(0, _i - 3):_i]),
         "que no habia creado ninguno")
 revisar("_resultado['creados']" in FUENTE_CLI,
         "y el cierre del apply informa los numeros reales")
+
+
+# =============================================================================
+#  15. LA CREDENCIAL DE LA IMPORTACION  --  separada del resto del CRM
+# =============================================================================
+
+print("\nla importacion no usa la credencial general del CRM")
+
+from nucleo.config.schema import cargar_config as _cargar  # noqa: E402
+
+_CFG = _cargar(RAIZ / "tenants" / "rapilink.config.yaml")
+_por_nombre = {h.nombre: h for h in _CFG.herramientas}
+
+# Medido: 'BOTTLECRM_API_TOKEN' lo comparten doce herramientas de cuatro
+# dominios, y la union de lo que necesitan incluye 'cases:write'. Con esa
+# credencial, comprometer el importador daria capacidad sobre CUALQUIER caso
+# del CRM -- justo lo que el recurso separado vino a evitar.
+for nombre in ("consultar_tickets_conocidos", "consultar_casos_externos",
+               "importar_caso_externo", "reconciliar_caso_externo"):
+    h = _por_nombre[nombre]
+    revisar(h.auth_ref == "IMPORTACION_API_TOKEN",
+            f"'{nombre}' usa la credencial dedicada",
+            f"usa {h.auth_ref!r}: le daria permisos sobre cases, solicitudes y tags")
+    revisar("/importacion/" in (h.endpoint or ""),
+            f"'{nombre}' vive bajo el recurso /importacion/",
+            "el alcance de un token se calcula con el primer segmento tras /api/")
+
+# Las de WispHub NO cambian: no hablan con el CRM.
+for nombre in ("listar_tickets_recientes", "consultar_ticket_por_id"):
+    revisar(_por_nombre[nombre].auth_ref == "WISPHUB_API_KEY",
+            f"'{nombre}' sigue con la credencial de WispHub")
+
+# Y ninguna de las cuatro esta al alcance del modelo.
+for nombre in ("consultar_tickets_conocidos", "consultar_casos_externos",
+               "importar_caso_externo", "reconciliar_caso_externo"):
+    expuesta = [r for r, rol in _CFG.roles.items()
+                if nombre in (rol.puede_consultar or [])]
+    revisar(not expuesta, f"'{nombre}' no esta en el catalogo de ningun rol",
+            f"expuesta a {expuesta}")
+
+# El secreto no puede estar en el repo: la config guarda el NOMBRE.
+revisar("IMPORTACION_API_TOKEN:" not in
+        (RAIZ / "tenants" / "rapilink.config.yaml").read_text(encoding="utf-8"),
+        "el YAML declara el nombre del secreto, nunca su valor")

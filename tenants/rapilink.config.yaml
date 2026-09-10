@@ -3060,6 +3060,22 @@ herramientas:
   # La organizacion NO viaja en el cuerpo: la resuelve el middleware del CRM
   # desde la credencial (claim firmado del JWT, o la org del PAT). Mandarla
   # seria darle al llamante la forma de escribir en otro tenant.
+  # --- credencial de la importacion -------------------------------------
+  # Las cuatro rutas de '/api/importacion/' usan IMPORTACION_API_TOKEN y no la
+  # credencial general del CRM, aunque las dos hablen con el mismo backend.
+  #
+  # El motivo esta medido: 'BOTTLECRM_API_TOKEN' lo comparten DOCE herramientas
+  # de cuatro dominios --solicitudes, cases, tags e importacion-- y su union de
+  # permisos incluye 'cases:write'. Con esa credencial, comprometer el
+  # importador daria capacidad para crear y modificar CUALQUIER caso del CRM,
+  # que es exactamente lo que el recurso separado vino a evitar. Restringir el
+  # token compartido a esa union no lo arregla: se la seguiria entregando.
+  #
+  # El token dedicado lleva SOLO 'importacion:read' e 'importacion:write', y se
+  # puede revocar sin tocar solicitudes, cases ni tags.
+  #
+  # Las de WispHub ('listar_tickets_recientes', 'consultar_ticket_por_id') no
+  # cambian: no hablan con el CRM.
   # Que sabe ya Dexter de estos tickets. Solo lectura, y solo pertenencia.
   #
   # Existe porque el motor NO puede leer las tablas de Django: corre con su
@@ -3082,7 +3098,7 @@ herramientas:
     base_url: http://backend:8000/api
     endpoint: /importacion/casos-externos/
     metodo: GET
-    auth_ref: BOTTLECRM_API_TOKEN
+    auth_ref: IMPORTACION_API_TOKEN
     auth_esquema: Bearer
     filtros_verificados:
       provider:
@@ -3108,7 +3124,7 @@ herramientas:
     base_url: http://backend:8000/api
     endpoint: /importacion/tickets-conocidos/
     metodo: GET
-    auth_ref: BOTTLECRM_API_TOKEN
+    auth_ref: IMPORTACION_API_TOKEN
     auth_esquema: Bearer
     filtros_verificados:
       provider:
@@ -3131,7 +3147,7 @@ herramientas:
     base_url: http://backend:8000/api
     endpoint: /importacion/casos/
     metodo: POST
-    auth_ref: BOTTLECRM_API_TOKEN
+    auth_ref: IMPORTACION_API_TOKEN
     auth_esquema: Bearer
 
   - nombre: reconciliar_caso_externo
@@ -3145,7 +3161,7 @@ herramientas:
     base_url: http://backend:8000/api
     endpoint: /importacion/casos/{id_caso}/reconciliar/
     metodo: POST
-    auth_ref: BOTTLECRM_API_TOKEN
+    auth_ref: IMPORTACION_API_TOKEN
     auth_esquema: Bearer
     filtros_verificados:
       id_caso:
