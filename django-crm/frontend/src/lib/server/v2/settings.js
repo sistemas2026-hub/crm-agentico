@@ -23,6 +23,7 @@ import { leerCredenciales } from './credenciales.js';
 import { leerSmartOlt } from './smartolt.js';
 import { contarPlanesVenta } from './planes-venta.js';
 import { leerOferta } from './oferta.js';
+import { leerGuiasTV } from './guias-tv.js';
 import { getBusinessHours } from './business-hours.js';
 import { getCustomFields } from './custom-fields.js';
 import { getEscalationPolicies } from './escalation.js';
@@ -118,6 +119,7 @@ export async function getSettingsHub(event) {
     smartolt,
     planesVenta,
     oferta,
+    guiasTv,
     credenciales
   ] = await Promise.all([
     getOrgSettings(event),
@@ -144,6 +146,9 @@ export async function getSettingsHub(event) {
     // Tampoco pega contra terceros: las dos listas salen de la config
     // del tenant, que el motor ya tiene en memoria.
     leerOferta(),
+    // Tampoco sale a ningun tercero: el catalogo ya esta en la config que el
+    // motor tiene en memoria.
+    leerGuiasTV(),
     // Tampoco sale a ningun tercero: la lista de credenciales que hacen falta
     // la arma el motor con su propio catalogo, y de las cargadas solo trae
     // nombre y pista. Nunca un valor.
@@ -187,6 +192,22 @@ export async function getSettingsHub(event) {
     oferta: oferta
       ? { servicios: (oferta.servicios_ofrecidos ?? []).filter((s) => s.activo).length,
           canales: (oferta.parrilla_canales ?? []).length }
+      : null,
+    // Se cuentan las ACTIVAS y, aparte, si estan las dos de respaldo. Sin la
+    // general, una marca sin guia propia deja al agente sin nada que
+    // entregar; sin la de TDT, tampoco puede orientar a quien tiene cajita.
+    // Eso no es un detalle cosmetico: es una funcionalidad apagada, y por eso
+    // el indice lo marca igual que la parrilla vacia.
+    guiasTv: guiasTv
+      ? {
+          activas: (guiasTv.guias_tv ?? []).filter((g) => g.activa).length,
+          tieneGeneral: (guiasTv.guias_tv ?? []).some(
+            (g) => g.activa && g.tipo_conexion === 'directo' && !(g.marca ?? '').trim()
+          ),
+          tieneTdt: (guiasTv.guias_tv ?? []).some(
+            (g) => g.activa && g.tipo_conexion === 'tdt'
+          )
+        }
       : null
   };
 }

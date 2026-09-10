@@ -243,7 +243,19 @@
                 warn: !!data.oferta && data.oferta.canales === 0
               }
             ]
-          : [])
+          : []),
+        // Fuera del gate de 'ventas': las guias de sintonizacion las usa
+        // soporte, no ventas. Y van sin condicion porque cualquier ISP que
+        // venda television las necesita -- si el tenant no da TV, la pantalla
+        // se abre vacia, que es mas barato que esconderla y que alguien la
+        // busque.
+        {
+          href: '/settings/guias-tv',
+          title: 'Guías de sintonización',
+          body: 'Qué le dice el agente al cliente para sintonizar el televisor, por marca y según use TDT.',
+          value: data.guiasTv ? `${count(data.guiasTv.activas)} activas` : null,
+          warn: !!data.guiasTv && (!data.guiasTv.tieneGeneral || !data.guiasTv.tieneTdt)
+        }
       ]
     },
     {

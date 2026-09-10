@@ -48,7 +48,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+RAIZ = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(RAIZ))
 
 from nucleo.config import cargar_config                              # noqa: E402
 from nucleo.config.schema import GuiaTV, Herramienta, TenantConfig    # noqa: E402
@@ -390,6 +391,103 @@ afirmar("observaciones" in guia.model_dump(mode="json"),
 afirmar("observaciones" not in resolver(_Config([guia]),
                                         tipo_conexion="directo", marca="Samsung"),
         "y la resolucion que consume el agente NO")
+
+
+# =============================================================================
+#  PASO 4 -- LA PANTALLA
+# =============================================================================
+#
+# Se afirma sobre los ARCHIVOS porque no hay navegador en esta suite. Lo que
+# se persigue no es como se ve: es que exista el camino completo, que la
+# pantalla NO reimplemente las reglas, y que la asimetria de 'observaciones'
+# siga en pie a los dos lados.
+
+FRONT = RAIZ / "django-crm" / "frontend" / "src"
+
+
+def texto(ruta) -> str:
+    return ruta.read_text(encoding="utf-8") if ruta.exists() else ""
+
+
+PUENTE = texto(FRONT / "lib" / "server" / "v2" / "guias-tv.js")
+PAGINA = texto(FRONT / "routes" / "(app)" / "settings" / "guias-tv" / "+page.svelte")
+SERVER = texto(FRONT / "routes" / "(app)" / "settings" / "guias-tv" / "+page.server.js")
+INDICE = texto(FRONT / "routes" / "(app)" / "settings" / "+page.svelte")
+HUB = texto(FRONT / "lib" / "server" / "v2" / "settings.js")
+
+
+print("PASO4 12. el camino completo existe")
+afirmar(bool(PUENTE) and bool(PAGINA) and bool(SERVER),
+        "puente, pantalla y su modulo de servidor")
+afirmar("/configuracion/guias-tv" in PUENTE,
+        "el puente apunta al endpoint del motor")
+afirmar("leerGuiasTV" in PUENTE and "guardarGuiasTV" in PUENTE,
+        "con lectura y escritura")
+afirmar("'/settings/guias-tv'" in INDICE,
+        "y esta enlazada desde el indice -- una pantalla a la que nadie llega "
+        "es una pantalla que no existe")
+
+
+print("PASO4 13. la pantalla permite todo lo que hay que administrar")
+for campo, que in (("g.marca", "marca"),
+                   ("g.tipo_conexion", "tipo de conexion"),
+                   ("g.instrucciones", "instrucciones"),
+                   ("g.url_video", "URL del video"),
+                   ("g.observaciones", "observaciones"),
+                   ("g.activa", "activar/desactivar")):
+    afirmar(f"bind:value={{{campo}}}" in PAGINA or f"bind:checked={{{campo}}}" in PAGINA,
+            f"se puede editar la {que}")
+afirmar("function agregar()" in PAGINA and "function quitar(" in PAGINA,
+        "y crear y quitar guias")
+
+
+print("PASO4 14. la pantalla NO reimplementa las reglas del schema")
+# Reescribirlas en JavaScript daria dos lugares donde corregirlas y uno donde
+# olvidarse -- y la copia del navegador se queda vieja sin que nada falle.
+afirmar("problemas" not in PAGINA,
+        "no hay un validador propio en la pantalla")
+afirmar("instrucciones.trim()" not in PAGINA,
+        "no reimplementa 'activa exige instrucciones'")
+# La afirmacion que de verdad dice "no valida": el boton de guardar no se
+# bloquea por un juicio propio de la pantalla. Contar cuantas veces aparece
+# 'tdt' no lo decia -- fallaba con cuatro apariciones que eran dos de
+# presentacion y dos de prevencion, ninguna una validacion.
+afirmar("disabled={guardando}" in PAGINA,
+        "el boton de guardar solo se bloquea mientras guarda, nunca porque la "
+        "pantalla haya decidido que algo es invalido")
+# Volver inalcanzable el error NO es duplicar una validacion: es no ofrecerlo.
+afirmar("disabled={!data.can_edit || g.tipo_conexion === 'tdt'}" in PAGINA,
+        "con TDT el campo de marca se deshabilita")
+afirmar("guias[i].marca = ''" in PAGINA,
+        "y se limpia, para que no falle por algo que ya no se ve en pantalla")
+afirmar("err?.message" in SERVER,
+        "el motivo del motor se muestra TAL CUAL: sus mensajes explican por "
+        "que la regla existe, y resumirlos deja a quien edita sin saberlo")
+
+
+print("PASO4 15. las dos de respaldo quedan identificadas")
+afirmar("Guía general" in PAGINA and "Guía de TDT" in PAGINA,
+        "la general y la de TDT se muestran aparte y con nombre propio")
+afirmar("falta={!general}" in PAGINA and "falta={!tdt}" in PAGINA,
+        "y se marcan cuando faltan -- sin la general, una marca sin guia "
+        "propia deja al agente sin nada que entregar")
+afirmar("tieneGeneral" in HUB and "tieneTdt" in HUB,
+        "el indice de configuracion tambien avisa si falta alguna")
+
+
+print("PASO4 16. la asimetria de 'observaciones', a los dos lados")
+API = texto(RAIZ / "nucleo" / "canales" / "api.py")
+admin = API[API.index('@app.get("/configuracion/guias-tv")'):][:1400]
+afirmar("model_dump" in admin,
+        "el endpoint de administracion serializa la guia entera, "
+        "'observaciones' incluidas -- quien edita tiene que leerlas")
+afirmar("observaciones" in PAGINA,
+        "y la pantalla las muestra")
+afirmar("observaciones" not in resolver(
+            _Config([GuiaTV(marca="Samsung", instrucciones="x",
+                            observaciones="nota interna")]),
+            tipo_conexion="directo", marca="Samsung"),
+        "y la resolucion que consume el agente sigue SIN entregarlas")
 
 
 print()
