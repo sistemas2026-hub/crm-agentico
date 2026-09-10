@@ -36,6 +36,7 @@ from rest_framework.views import APIView
 
 from common.permissions import HasOrgContext
 from solicitudes.models import SolicitudServicio
+from solicitudes.motivos import es_de_relleno
 
 # Los cuatro valores que definen a que equipo va cada cosa. Viven en la config
 # del tenant (variables_tenant) y no en una tabla nuestra: son datos de la
@@ -469,6 +470,35 @@ class CancelarSolicitudView(APIView):
         if faltan:
             return Response({"error": f"Faltan datos: {', '.join(faltan)}."},
                             status=http.HTTP_400_BAD_REQUEST)
+
+        if es_de_relleno(motivo):
+            # EL MOTIVO TIENE QUE HABERLO DICHO EL CLIENTE.
+            #
+            # Medido el 10/09/2026 en una conversacion real: el prompt de
+            # ventas dice, en su paso 4, "pedile el MOTIVO, y dejalo hablar".
+            # El modelo salto del paso 3 al 5 -- confirmo el nombre y contesto
+            # "Listo, tu solicitud quedo cancelada"-- y mando de motivo la
+            # frase 'El cliente no dio motivo'.
+            #
+            # La cancelacion quedo guardada con un motivo que nadie dijo, y
+            # eso vacia de sentido a la funcion entera: el motivo existe para
+            # que leidos en conjunto digan si las ventas se caen por precio,
+            # por demora o por la competencia. Un relleno contamina esa
+            # lectura y encima parece un dato.
+            #
+            # El campo no vacio ya se exigia arriba y no alcanzo: el modelo lo
+            # lleno. Se rechaza por PATRON, no por la frase exacta, para tapar
+            # la familia ("no quiso decir", "no especifico", "sin motivo").
+            return Response(
+                {"error": "El motivo no puede ser una nota tuya: tiene que "
+                          "ser lo que dijo el cliente.",
+                 "instruccion_interna":
+                     "No se cancelo nada. Preguntale al cliente POR QUE quiere "
+                     "cancelar y dejalo responder. Cuando te conteste, vuelve "
+                     "a llamar esta herramienta con sus palabras tal cual. Si "
+                     "de verdad se niega a decirlo, pasalo con un colaborador "
+                     "humano en vez de inventar un motivo."},
+                status=http.HTTP_400_BAD_REQUEST)
 
         s = (SolicitudServicio.objects
              .filter(org=org, numero_documento=documento,
