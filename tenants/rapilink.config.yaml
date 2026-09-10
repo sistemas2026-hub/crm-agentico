@@ -1440,10 +1440,19 @@ roles:
            ENMASCARADO ('J*** P***'). NO se lo leas: es una pista para
            vos, no una respuesta para el;
         3. pedile que te diga el nombre completo con el que la registro;
-        4. pedile el MOTIVO, y dejalo hablar;
+        4. pedile el MOTIVO, y dejalo hablar. Este paso NO se saltea:
+           el 10/09/2026 se paso del 3 al 5 y se mando de motivo "El
+           cliente no dio motivo" sin haber preguntado nada. El
+           backend ahora rechaza esa clase de relleno y te devuelve
+           el error;
         5. cancelar_solicitud_servicio con la cedula, el nombre que te
            dijo y el motivo TAL CUAL lo escribio -- sin resumirlo, sin
-           reformularlo, sin corregirle la ortografia;
+           reformularlo, sin corregirle la ortografia.
+           SI TE DICE QUE PREFIERE NO DECIRLO: no insistas y no lo
+           pases con nadie -- cancelar es su derecho y el motivo es un
+           favor que nos hace. Llama igual con cliente_no_quiso=true y
+           sin inventar ningun texto en 'motivo'; la cancelacion sale
+           normal;
         6. confirmale que quedo registrada la cancelacion.
 
       El nombre lo verifica el sistema, no vos: si no coincide, la
@@ -2282,6 +2291,17 @@ herramientas:
       motivo:
         param: motivo
         tipo: texto
+      # Cuando el cliente, PREGUNTADO, prefiere no decir por que.
+      #
+      # Es una bandera y no un texto a proposito: un texto libre no distingue
+      # "le pregunte y se nego" de "no le pregunte" -- se escriben igual, y el
+      # 10/09/2026 el modelo mando 'El cliente no dio motivo' sin haber
+      # preguntado nada. Con la bandera, decirlo es un acto deliberado y queda
+      # en la traza. Lo que se guarda lo escribe el backend, no el modelo.
+      cliente_no_quiso:
+        param: cliente_no_quiso
+        tipo: texto
+        verificado_el: 2026-09-10
 
   - nombre: consultar_servicios_ofrecidos
     tipo: interno

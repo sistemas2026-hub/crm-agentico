@@ -36,7 +36,7 @@ from rest_framework.views import APIView
 
 from common.permissions import HasOrgContext
 from solicitudes.models import SolicitudServicio
-from solicitudes.motivos import es_de_relleno
+from solicitudes.motivos import SIN_MOTIVO, es_de_relleno
 
 # Los cuatro valores que definen a que equipo va cada cosa. Viven en la config
 # del tenant (variables_tenant) y no en una tabla nuestra: son datos de la
@@ -371,6 +371,18 @@ class ExpedienteView(APIView):
         return respuesta
 
 
+def _es_verdadero(valor) -> bool:
+    """Un booleano que puede llegar como bool, como texto o como numero.
+
+    El modelo manda JSON pero no siempre tipa igual: 'true', True y 1 son la
+    misma intencion. Se acepta el conjunto chico y explicito -- cualquier otra
+    cosa es falso, que es el lado seguro: ante la duda, se exige el motivo.
+    """
+    if isinstance(valor, bool):
+        return valor
+    return str(valor or "").strip().lower() in ("true", "1", "si", "sí", "yes")
+
+
 def _plano(texto: str) -> str:
     """Sin tildes, sin mayusculas, sin espacios de mas. Para comparar nombres
     escritos por una persona en un chat contra los de un formulario."""
@@ -464,6 +476,25 @@ class CancelarSolicitudView(APIView):
         documento = str(request.data.get("numero_documento") or "").strip()
         confirmado = str(request.data.get("nombre_confirmado") or "").strip()
         motivo = str(request.data.get("motivo") or "").strip()
+
+        # EL CLIENTE, PREGUNTADO, NO QUISO DECIR POR QUE.
+        #
+        # Es un desenlace legitimo y frecuente, y no tiene por que costarle a
+        # nadie una escalada a un humano: cancelar es su derecho y el motivo es
+        # un favor que nos hace.
+        #
+        # Va como bandera aparte y NO como un texto que el modelo escriba. Un
+        # texto libre no distingue "le pregunte y se nego" de "no le pregunte"
+        # -- las dos cosas se escriben igual, y el 10/09/2026 el modelo mando
+        # 'El cliente no dio motivo' sin haber preguntado nada. Con la bandera,
+        # decir "se nego" es un acto deliberado y queda en la traza.
+        #
+        # Lo que se guarda lo escribe el codigo (SIN_MOTIVO), no el modelo: asi
+        # "¿cuantas cancelaciones no dieron motivo?" se contesta contando filas.
+        no_quiso = _es_verdadero(request.data.get("cliente_no_quiso"))
+        if no_quiso:
+            motivo = SIN_MOTIVO
+
         faltan = [c for c, v in (("numero_documento", documento),
                                  ("nombre_confirmado", confirmado),
                                  ("motivo", motivo)) if not v]
@@ -471,7 +502,11 @@ class CancelarSolicitudView(APIView):
             return Response({"error": f"Faltan datos: {', '.join(faltan)}."},
                             status=http.HTTP_400_BAD_REQUEST)
 
-        if es_de_relleno(motivo):
+        # La condicion cuelga de la BANDERA y no del texto. Con
+        # 'motivo != SIN_MOTIVO', un modelo que escribiera esa frase exacta se
+        # saltaba la comprobacion: la excepcion pensada para el valor canonico
+        # se convertia en la puerta de atras. Lo encontro la prueba.
+        if not no_quiso and es_de_relleno(motivo):
             # EL MOTIVO TIENE QUE HABERLO DICHO EL CLIENTE.
             #
             # Medido el 10/09/2026 en una conversacion real: el prompt de
@@ -496,8 +531,9 @@ class CancelarSolicitudView(APIView):
                      "No se cancelo nada. Preguntale al cliente POR QUE quiere "
                      "cancelar y dejalo responder. Cuando te conteste, vuelve "
                      "a llamar esta herramienta con sus palabras tal cual. Si "
-                     "de verdad se niega a decirlo, pasalo con un colaborador "
-                     "humano en vez de inventar un motivo."},
+                     "te dice que prefiere no decirlo, NO insistas y NO lo "
+                     "pases con nadie: volve a llamar con "
+                     "cliente_no_quiso=true y la cancelacion sale igual."},
                 status=http.HTTP_400_BAD_REQUEST)
 
         s = (SolicitudServicio.objects

@@ -46,7 +46,7 @@ from pathlib import Path
 RAIZ = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RAIZ / "django-crm" / "backend"))
 
-from solicitudes.motivos import es_de_relleno, plano                 # noqa: E402
+from solicitudes.motivos import SIN_MOTIVO, es_de_relleno, plano    # noqa: E402
 
 fallos: list[str] = []
 
@@ -109,10 +109,49 @@ afirmar(plano("  El   Cliente  NO Dió  Motivo ") == "el cliente no dio motivo",
 fuente = (RAIZ / "django-crm/backend/solicitudes/gestion.py").read_text(encoding="utf-8")
 afirmar("s.motivo_cancelacion = motivo" in fuente,
         "y lo que se guarda sigue siendo el texto ORIGINAL, no el normalizado")
-bloque = fuente[fuente.index("if es_de_relleno(motivo):"):][:3000]
+bloque = fuente[fuente.index("and es_de_relleno(motivo):"):][:3000]
 afirmar("instruccion_interna" in bloque and "Preguntale al cliente" in bloque,
         "al rechazar se le dice al modelo que PREGUNTE, no solo que fallo -- "
         "un error sin salida lo deja intentando lo mismo")
+
+
+print("\n== 6. si el cliente NO QUIERE decirlo, se cancela igual ==")
+# Correccion del cliente el 10/09/2026: escalar a un humano porque alguien no
+# quiso explicar por que cancela es desproporcionado -- cancelar es su derecho
+# y el motivo es un favor que nos hace.
+#
+# La salida es una BANDERA ('cliente_no_quiso'), no un texto. Un texto libre no
+# distingue "le pregunte y se nego" de "no le pregunte": se escriben igual, que
+# es como se colo el bug. Con la bandera, decirlo es deliberado y queda en la
+# traza.
+bloque = fuente[fuente.index("class CancelarSolicitudView"):]
+afirmar("cliente_no_quiso" in bloque,
+        "la vista acepta la bandera del cliente que no quiso decir")
+afirmar("motivo = SIN_MOTIVO" in bloque,
+        "y lo que se guarda lo escribe el CODIGO, no el modelo -- si el modelo "
+        "pudiera escribir esa frase, volveriamos al punto de partida")
+afirmar("if not no_quiso and es_de_relleno(motivo)" in bloque,
+        "el guardia cuelga de la BANDERA, no del texto del motivo")
+# La primera version decia 'if motivo != SIN_MOTIVO and es_de_relleno(...)', y
+# eso abria una puerta de atras: un modelo que escribiera esa frase exacta en
+# 'motivo' se saltaba la comprobacion entera. La excepcion pensada para el
+# valor canonico se volvia el agujero. Lo encontro esta prueba.
+afirmar("motivo != SIN_MOTIVO and es_de_relleno" not in bloque,
+        "y NO del valor canonico -- escribir esa frase a mano no puede saltear "
+        "la comprobacion")
+afirmar("no lo pases con nadie" in bloque.lower()
+        or "NO lo pases" in bloque or "no insistas" in bloque.lower(),
+        "y la instruccion ya NO manda escalar a un humano")
+
+# El valor canonico tiene que ser uno solo: contar filas iguales es lo que hace
+# respondible "¿cuantas cancelaciones no dieron motivo?".
+afirmar(SIN_MOTIVO and SIN_MOTIVO == SIN_MOTIVO.strip(),
+        f"el valor canonico esta definido: {SIN_MOTIVO!r}")
+# Y por construccion cae en la lista de rellenos -- por eso hay que exceptuarlo
+# explicitamente, y por eso la excepcion se prueba arriba.
+afirmar(es_de_relleno(SIN_MOTIVO),
+        "cae en la lista de rellenos, que es justo por lo que la excepcion "
+        "tiene que ser explicita y no un descuido")
 
 
 print()

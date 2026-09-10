@@ -250,7 +250,16 @@
         </div>
       {/if}
 
-      {#if abierta === s.id}
+      <!-- DECIDIR SOLO SOBRE LO QUE ESPERA UNA DECISION.
+           Una solicitud cancelada, aprobada o sin factibilidad ya se resolvio.
+           El backend lo rechaza ("Esta solicitud ya esta en estado '...'"), asi
+           que no habia riesgo de pisar nada -- pero la pantalla ofrecia el
+           boton igual en las cinco pestañas: se escribia la nota, se hacia clic
+           y salia un error. Ofrecer un camino que siempre falla es peor que no
+           ofrecerlo. Visto el 10/09/2026 en una tarjeta ya cancelada. -->
+      {#if s.estado && s.estado !== 'enviada'}
+        <!-- nada que decidir -->
+      {:else if abierta === s.id}
         <form method="POST" action="?/decidir" class="decision" use:enhance={() => {
           enviando = s.id;
           return async ({ update }) => { await update({ reset: false }); enviando = ''; abierta = ''; nota = ''; };

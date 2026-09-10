@@ -48,11 +48,28 @@ RELLENOS = (
     "no quiso decir", "sin motivo", "no proporciono", "no menciono",
     "motivo no", "no se especifica", "no informo", "no dio razon",
     "no dio un motivo", "no brindo",
+    # La forma del valor canonico, para que escribirla a mano tampoco sirva:
+    # sin esto, un modelo podia teclear la frase que usa el backend y colarse
+    # sin declarar la bandera.
+    "no quiso indicar", "no quiso dar",
 )
 
 # Un motivo de verdad tiene palabras. "ok", "ya", "x" no son un motivo, y
 # exigir dos evita que el relleno se disfrace de brevedad.
 MINIMO_PALABRAS = 2
+
+# Lo que se guarda cuando el cliente, PREGUNTADO, no quiso decir por que.
+#
+# Lo escribe el CODIGO, no el modelo, y esa es toda la diferencia. Un texto
+# libre no permite distinguir "le pregunte y se nego" de "no le pregunte":
+# las dos cosas se escriben igual. Con un valor unico y canonico, la pregunta
+# "¿cuantas cancelaciones no dieron motivo?" se contesta contando filas en vez
+# de leyendo frases, y no contamina el analisis de por que se caen las ventas.
+#
+# El modelo lo pide con una bandera aparte (ver CancelarSolicitudView), no
+# escribiendo esta frase: si pudiera escribirla, volveriamos al punto de
+# partida.
+SIN_MOTIVO = "El cliente no quiso indicar el motivo."
 
 
 def plano(texto: str) -> str:
