@@ -348,6 +348,10 @@ class EvidenciasTrabajoView(APIView):
                             org=orden.org,
                             orden_trabajo=orden,
                             requisito_id=requisito_id,
+                            # La pone el SERVIDOR desde la orden. Si viniera del
+                            # cliente, un movil podria declarar la vuelta que
+                            # quisiera y dar por corregido lo que no corrigio.
+                            vuelta=orden.vuelta,
                             sha256=sha256,
                             storage_key=key_nueva,
                             nombre_original=nombre,

@@ -152,6 +152,11 @@ class OrdenTrabajo(BaseModel):
     EN_CAMINO = "en_camino"
     EN_SITIO = "en_sitio"
     COMPLETADA_CAMPO = "completada_campo"
+    # El supervisor devolvio el trabajo. La orden vuelve a estar disponible
+    # para el tecnico, con una vuelta mas y una lista de que hay que rehacer.
+    # No es "en proceso otra vez": es un estado propio para poder contarlo,
+    # filtrarlo en la bandeja y medir cuantas ordenes se aprueban a la primera.
+    CORRECCION_REQUERIDA = "correccion_requerida"
     CERRADA = "cerrada"
     CANCELADA = "cancelada"
     ESTADOS_OPERATIVOS = (
@@ -159,6 +164,7 @@ class OrdenTrabajo(BaseModel):
         (EN_CAMINO, "En camino"),
         (EN_SITIO, "En sitio"),
         (COMPLETADA_CAMPO, "Completada en campo"),
+        (CORRECCION_REQUERIDA, "Corrección requerida"),
         (CERRADA, "Cerrada"),
         (CANCELADA, "Cancelada"),
     )
@@ -234,6 +240,34 @@ class OrdenTrabajo(BaseModel):
         max_length=32, choices=ESTADOS_VALIDACION, default=SIN_EVALUAR
     )
 
+    # Cuantas veces se presento este trabajo a validacion. Empieza en 1 y sube
+    # con cada devolucion.
+    #
+    # No es lo mismo que 'revision', que cuenta ESCRITURAS y existe para que la
+    # cola offline detecte que alguien piso sus datos. 'vuelta' cuenta INTENTOS
+    # de dar el trabajo por terminado, que es una nocion del negocio: de aca
+    # salen "aprobadas a la primera" y "cuantas veces volvio".
+    vuelta = models.PositiveIntegerField(
+        default=1,
+        help_text="Presentacion a validacion. Sube con cada devolucion a correccion.",
+    )
+
+    # Lo que se sabia del cliente y del equipo CUANDO SE DESPACHO al tecnico.
+    #
+    # Es una fotografia, no una fuente de verdad: el Case sigue resolviendo en
+    # vivo contra el sistema del ISP en cada apertura. Aca se congela porque el
+    # tecnico sale sin red y porque, al cerrar el trabajo, importa contra que
+    # datos se lo despacho -- la ONU pudo haberse reemplazado desde entonces.
+    #
+    # Solo campos ya filtrados por las listas blancas del motor: nunca la
+    # respuesta cruda del proveedor, que trae cuatro contraseñas y el GPS del
+    # domicilio. Toda medicion viva viaja con su hora adentro.
+    contexto = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Snapshot tecnico al momento de crear la orden. Historico, no vigente.",
+    )
+
     # Tiempos
     programada_para = models.DateTimeField(null=True, blank=True)
     iniciada_en = models.DateTimeField(null=True, blank=True)
@@ -248,9 +282,20 @@ class OrdenTrabajo(BaseModel):
                 fields=["org", "numero"],
                 name="unique_numero_orden_per_org",
             ),
+            # Una sola orden por identidad externa, PERO solo donde duplicar
+            # seria un error de maquina.
+            #
+            # 'wisphub' y 'solicitudes' entran por importadores automaticos: si
+            # aparecen dos ordenes para el mismo ticket, eso es un bug y la base
+            # tiene que cortarlo. 'crm' y 'manual' los origina una persona, y
+            # una segunda visita al mismo caso es normal -- la falla volvio dos
+            # dias despues, hay que rehacer el trabajo, hay una etapa mas. Ahi
+            # el duplicado accidental se evita con Idempotency-Key, que es el
+            # mecanismo para "el mismo clic dos veces", no con una restriccion
+            # que tambien prohibe la segunda visita legitima.
             models.UniqueConstraint(
                 fields=["org", "origen_sistema", "origen_tipo", "origen_ref"],
-                condition=~models.Q(origen_sistema="manual"),
+                condition=~models.Q(origen_sistema__in=["manual", "crm"]),
                 name="unique_origen_externo_por_org",
             ),
         ]
@@ -358,6 +403,15 @@ class EvidenciaTrabajo(BaseModel):
         max_length=64,
         help_text="Identificador del requisito en la versión de plantilla (ej. foto_ont)",
     )
+    # En que presentacion del trabajo se tomo esta evidencia. La pone el
+    # servidor desde 'orden.vuelta' -- nunca el cliente, que podria declarar
+    # cualquier numero y dar por corregido lo que no corrigio.
+    #
+    # Sirve para que una foto de la vuelta 1 no satisfaga un requisito que el
+    # supervisor devolvio en la vuelta 2. Sin esto la devolucion no tendria
+    # dientes: el checklist mira si EXISTE evidencia del requisito, y la vieja
+    # sigue ahi.
+    vuelta = models.PositiveIntegerField(default=1)
     storage_key = models.CharField(max_length=255, blank=True, default="")
     nombre_original = models.CharField(max_length=255)
     mime_type = models.CharField(max_length=128)

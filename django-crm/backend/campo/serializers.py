@@ -175,3 +175,57 @@ class RegistroEvidenciaSerializer(serializers.Serializer):
     capturada_en_cliente = serializers.DateTimeField(required=False, allow_null=True)
     metadatos_captura = serializers.DictField(required=False, default=dict)
     client_mutation_id = serializers.CharField(max_length=128, required=False, allow_blank=True)
+
+
+# =============================================================================
+#  DESPACHO  --  lo que la oficina manda para crear, asignar y validar
+# =============================================================================
+#
+# Ninguno acepta 'org' ni 'profile'. Los dos salen de la sesion: son
+# exactamente los campos con los que se cruza un tenant si se leen del cuerpo.
+
+
+class CrearOrdenSerializer(serializers.Serializer):
+    """Alta de una orden, con o sin caso detras."""
+
+    work_type_version_id = serializers.UUIDField()
+    # Vacio = orden manual (preventivo, inspeccion, obra). Con valor = nace de
+    # un caso del CRM y hereda su ficha tecnica congelada.
+    case_id = serializers.CharField(required=False, allow_blank=True, default="")
+    cliente_nombre = serializers.CharField(required=False, allow_blank=True, default="")
+    cliente_telefono = serializers.CharField(required=False, allow_blank=True, default="")
+    cliente_direccion = serializers.CharField(required=False, allow_blank=True, default="")
+    gps_lat = serializers.FloatField(required=False, allow_null=True)
+    gps_lng = serializers.FloatField(required=False, allow_null=True)
+    programada_para = serializers.DateTimeField(required=False, allow_null=True)
+    # A quien se le asigna de entrada. Opcional: una orden puede quedar sin
+    # asignar esperando que alguien la tome, y esa es una columna util en la
+    # bandeja del supervisor.
+    tecnico_profile_id = serializers.UUIDField(required=False, allow_null=True)
+
+
+class AsignarSerializer(serializers.Serializer):
+    profile_id = serializers.UUIDField()
+    rol = serializers.CharField(required=False, allow_blank=True, default="tecnico")
+    motivo = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class ValidarSerializer(serializers.Serializer):
+    """Aprobar, o devolver diciendo QUE hay que rehacer."""
+
+    decision = serializers.ChoiceField(choices=["aprobar", "requerir_correccion"])
+    observacion = serializers.CharField(required=False, allow_blank=True, default="")
+    requisitos_a_corregir = serializers.ListField(
+        child=serializers.CharField(), required=False, default=list)
+
+    def validate(self, attrs):
+        # Una devolucion sin requisitos deja al tecnico adivinando, y ademas el
+        # checklist no exigiria nada nuevo: la orden volveria a completarse sin
+        # que nadie corrija nada.
+        if attrs["decision"] == "requerir_correccion" and not attrs.get(
+                "requisitos_a_corregir"):
+            raise serializers.ValidationError({
+                "requisitos_a_corregir":
+                    "Hay que decir que se devuelve. Una devolucion sin "
+                    "requisitos no exige nada nuevo al completar."})
+        return attrs
