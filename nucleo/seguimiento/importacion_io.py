@@ -340,6 +340,12 @@ def aplicar_reconciliacion(config, tenant, cambios) -> dict:
     if herr is None:
         raise SystemExit("falta 'reconciliar_caso_externo' en el catalogo")
 
+    # 'sin_cambios' es, en la practica, siempre 0: toda fila que se escribe
+    # refresca 'external_fetched_at', asi que el endpoint la cuenta como
+    # actualizada aunque el proveedor haya contestado exactamente lo mismo.
+    # Se conserva porque distingue "el endpoint dijo que no toco nada" de un
+    # fallo, pero el numero que informa cuantos casos cambiaron ALGO es
+    # 'con_diferencia' (ver Cambio.hay_diferencia), no este.
     resumen = {"actualizados": 0, "sin_cambios": 0, "fallidos": 0}
     for c in cambios:
         cuerpo = {k: v for k, v in c.despues.items() if v is not None}
@@ -471,9 +477,13 @@ def _reconciliar(config, tenant, conf, registro, resumen, aplicar_cambios) -> No
 
     Va DESPUES de importar y en su propio try/except, y las dos cosas importan:
 
-      despues   un caso recien creado entra a la PROXIMA reconciliacion, no a
-                esta. Reconciliar lo que se acaba de leer del mismo proveedor
-                en la misma pasada seria pagar dos veces por el mismo dato.
+      despues   los casos recien creados SI entran a esta misma
+                reconciliacion: 'casos_de_este_proveedor' se consulta despues
+                de importar, asi que los ve. Medido el 10/09/2026 -- 34
+                alcanzados antes de importar dos, 36 despues. Cuesta un GET
+                por caso nuevo y a cambio estrenan 'external_status_at' sin
+                esperar una hora. (Este comentario decia lo contrario y era
+                falso: el orden de las llamadas manda, no la intencion.)
 
       aislada   que la reconciliacion falle NO puede deshacer ni ensuciar lo ya
                 importado. Los casos creados estan creados; esto solo refresca
