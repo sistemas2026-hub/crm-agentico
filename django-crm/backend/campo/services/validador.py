@@ -139,15 +139,46 @@ def verificar_checklist_completo(orden) -> list[dict]:
                 })
 
     # 2. Verificar evidencias requeridas
-    evidencias_recibidas = set(
-        orden.evidencias.filter(estado_archivo__in=["recibido", "verificado"]).values_list(
-            "requisito_id", flat=True
-        )
-    )
+    #
+    # Dos listas, no una, y esa es toda la diferencia entre una devolucion con
+    # dientes y una decorativa.
+    #
+    # Antes esto miraba si EXISTIA evidencia recibida del requisito, sobre toda
+    # la orden. En una segunda vuelta la evidencia de la primera sigue ahi y
+    # sigue en 'recibido', asi que '/completar/' habria pasado de inmediato sin
+    # que el tecnico subiera nada: el supervisor devolvia el trabajo y el
+    # sistema lo daba por corregido solo.
+    #
+    # Ahora los requisitos que el supervisor devolvio exigen evidencia DE LA
+    # VUELTA ACTUAL. Los que no devolvio conservan como valida la que ya tenian
+    # -- que es la razon de haber elegido vuelta dirigida y no vuelta completa:
+    # nadie repite ocho fotos porque una estaba mal.
+    recibidas = orden.evidencias.filter(
+        estado_archivo__in=["recibido", "verificado"])
+    de_cualquier_vuelta = set(recibidas.values_list("requisito_id", flat=True))
+    de_esta_vuelta = set(
+        recibidas.filter(vuelta__gte=orden.vuelta).values_list("requisito_id", flat=True))
+
+    a_corregir = requisitos_a_corregir(orden)
+
     for ev in esquema.get("evidencias", []):
         eid = ev["id"]
-        es_obligatoria = ev.get("obligatorio", False)
-        if es_obligatoria and eid not in evidencias_recibidas:
+        if not ev.get("obligatorio", False) and eid not in a_corregir:
+            continue
+
+        if eid in a_corregir:
+            if eid not in de_esta_vuelta:
+                errores.append({
+                    "codigo": "CORRECCION_PENDIENTE",
+                    "requisito_id": eid,
+                    "mensaje": (
+                        f"'{ev.get('titulo', eid)}' fue devuelto para corregir: "
+                        f"hace falta evidencia nueva, de esta vuelta. La "
+                        f"anterior queda en el historial pero no alcanza."),
+                })
+            continue
+
+        if eid not in de_cualquier_vuelta:
             errores.append({
                 "codigo": "EVIDENCIA_FALTANTE",
                 "requisito_id": eid,
@@ -155,6 +186,32 @@ def verificar_checklist_completo(orden) -> list[dict]:
             })
 
     return errores
+
+
+def requisitos_a_corregir(orden) -> set[str]:
+    """
+    Que requisitos pidio rehacer el supervisor para la vuelta que corre.
+
+    Sale de la bitacora, no de una columna. 'EventoTrabajo' es append-only y
+    esta ordenado por fecha, asi que el ultimo evento de devolucion es una
+    fuente determinista -- y ademas conserva lo que se pidio en CADA vuelta,
+    que una columna habria ido sobrescribiendo. Con el historial completo se
+    puede responder despues cual requisito se devuelve mas seguido.
+
+    En la vuelta 1 no hay devolucion todavia: devuelve vacio y el checklist se
+    comporta como siempre.
+    """
+    if orden.vuelta <= 1:
+        return set()
+    evento = (
+        orden.eventos.filter(tipo="correccion_requerida",
+                             datos__vuelta_nueva=orden.vuelta)
+        .order_by("-created_at")
+        .first()
+    )
+    if evento is None:
+        return set()
+    return {str(r) for r in (evento.datos or {}).get("requisitos_a_corregir", [])}
 
 
 def _castear_tipo(valor: Any, tipo: str) -> Any:
