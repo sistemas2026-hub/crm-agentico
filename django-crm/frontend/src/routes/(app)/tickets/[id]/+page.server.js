@@ -23,29 +23,42 @@ export async function load({ cookies, params, fetch }) {
     area = areas.find((/** @type {any} */ a) => a.nombre === nombre) ?? null;
   }
 
-  // De donde vino el caso. El CRM no lo guarda: para el, un caso escalado es
-  // un caso mas. El asistente si lo sabe, porque es la misma fila que marco
-  // al escalar. Null para un ticket cargado a mano, que no tiene conversacion
-  // detras -- y entonces la tarjeta no se dibuja, en vez de mostrar renglones
-  // vacios o un origen inventado.
+  // Una sola llamada al motor que devuelve DOS cosas distintas:
+  //
+  //   conversacion  de donde vino el caso -- canal, etiqueta, motivo de la
+  //                 escalada. El CRM no lo guarda; el asistente si, porque es
+  //                 la misma fila que marco al escalar. Null para un ticket
+  //                 cargado a mano o importado del sistema del ISP.
+  //   contexto      que hay del otro lado -- cliente, equipo, enlaces. Desde
+  //                 el 10/09/2026 existe aunque NO haya conversacion: se
+  //                 resuelve con el identificador de servicio del propio caso.
+  //
+  // Estaban pegadas en un solo objeto porque hasta entonces la segunda solo
+  // se podia obtener a traves de la primera.
   //
   // Va SIN await: la promesa se devuelve tal cual y el navegador la recibe
-  // cuando resuelve. Adentro hay tres consultas a sistemas externos (la ficha
-  // del cliente y el estado del equipo), y esperarlas antes de contestar
+  // cuando resuelve. Adentro hay hasta tres consultas a sistemas externos (la
+  // ficha del cliente y el estado del equipo), y esperarlas antes de contestar
   // dejaba el ticket sin abrirse varios segundos -- con la pantalla anterior
   // todavia puesta, o sea el clic pareciendo perdido. El caso, la
   // conversacion y la respuesta no dependen de esto: llegan primero y esto
   // completa las tarjetas tecnicas cuando llega.
-  const origen = (async () => {
+  const delMotor = (async () => {
     try {
       const base = env.PRIVATE_ASISTENTE_URL;
       const tenant = env.PRIVATE_ASISTENTE_TENANT;
       if (!base || !tenant) return null;
+      const params_ = new URLSearchParams({ tenant });
+      // El identificador de servicio del caso importado. El motor no puede
+      // leerlo por su cuenta: corre con su propio usuario de base y no ve las
+      // tablas del CRM. Se lo pasamos nosotros, que ya lo tenemos cargado.
+      const servicio = datos.ticket?.external_service_id;
+      if (servicio) params_.set('servicio', servicio);
       const r = await fetch(
-        `${base}/conversaciones/por-caso/${params.id}?tenant=${encodeURIComponent(tenant)}`,
+        `${base}/conversaciones/por-caso/${params.id}?${params_}`,
         { headers: headersMotor(), signal: AbortSignal.timeout(20000) }
       );
-      return r.ok ? ((await r.json()).conversacion ?? null) : null;
+      return r.ok ? await r.json() : null;
     } catch {
       // Se traga a proposito: sin esto una promesa rechazada tumba la
       // pagina entera, y lo que hay en juego son dos tarjetas de contexto.
@@ -56,7 +69,8 @@ export async function load({ cookies, params, fetch }) {
   return {
     ...datos,
     area,
-    origen,
+    origen: delMotor.then((d) => d?.conversacion ?? null),
+    contexto: delMotor.then((d) => d?.contexto ?? null),
     // Null cuando el caso no lo escribio el asistente (uno cargado a mano, o
     // uno viejo con otro formato): la pantalla vuelve entonces a mostrar la
     // descripcion tal cual, sin tarjetas a medio llenar.

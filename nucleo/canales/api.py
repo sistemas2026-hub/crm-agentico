@@ -3272,8 +3272,6 @@ def conversacion_por_caso(caso_id):
     except Exception as e:
         print(f"[conversaciones] fallo al buscar por caso: {type(e).__name__}: {e}")
         return jsonify({"error": "No se pudo leer la conversacion."}), 500
-    if not datos:
-        return jsonify({"conversacion": None}), 200
 
     # Los enlaces directos a los sistemas externos, armados ACA y no en la
     # pantalla: el motor es quien conoce los identificadores y los dominios de
@@ -3287,32 +3285,120 @@ def conversacion_por_caso(caso_id):
         config = _config_de(tenant)
     except Exception:
         config = None
-    datos["enlaces"] = _enlaces_externos(config, datos, tenant) if config else {}
-    return jsonify({"conversacion": datos})
+
+    # 'servicio' lo manda la pantalla desde 'Case.external_service_id'. El
+    # motor no puede leerlo por su cuenta: corre con su propio usuario de base
+    # y no ve las tablas del CRM (incidente del 18/08/2026, ver el compose).
+    # Que lo mande quien ya tiene el caso en la mano es mas barato que abrir un
+    # camino nuevo para volver a pedir algo que ya estaba cargado.
+    identidad = identidad_del_contexto(datos, request.args.get("servicio") or "")
+    contexto = contexto_tecnico(config, tenant, identidad) if config else {}
+
+    # Dos cosas distintas en dos claves distintas. 'conversacion' es DE DONDE
+    # VINO el caso -- canal, etiqueta, motivo de la escalada -- y puede ser
+    # None; 'contexto' es QUE HAY DEL OTRO LADO -- cliente, equipo, enlaces --
+    # y ahora existe aunque no haya habido ninguna conversacion. Estaban
+    # pegadas en un solo objeto porque hasta hoy la segunda solo se podia
+    # obtener a traves de la primera.
+    if datos is not None:
+        datos["enlaces"] = contexto          # compatibilidad
+    return jsonify({"conversacion": datos, "contexto": contexto})
 
 
-def _enlaces_externos(config, conv: dict, tenant: str) -> dict:
+IDENTIDAD_CASE = "case"
+IDENTIDAD_CONVERSACION = "conversacion"
+
+# Por que puede faltar la tarjeta del equipo. Son dos motivos distintos y la
+# pantalla los dice distinto: uno es "todavia no cargaron el serial en el
+# sistema del ISP", el otro es "no sabemos de quien es este ticket".
+SIN_ONU_VINCULADA = "onu_no_vinculada"
+
+
+def identidad_del_contexto(conv: dict | None, servicio_case: str) -> dict:
     """
-    A donde puede saltar un colaborador desde el ticket, con el cliente ya
-    seleccionado.
+    Con QUE servicio se resuelve el contexto tecnico. Deterministico, sin
+    ninguna aproximacion.
 
-    Devuelve solo los que se pueden armar de verdad. Un enlace faltante NO es
-    un error: se escala una conversacion justamente cuando el asistente no
-    pudo avanzar, y muchas veces eso incluye no haber identificado al cliente.
+    Un caso importado del sistema del ISP trae su propio identificador de
+    servicio y no tiene conversacion detras; uno nacido de un chat tiene la
+    conversacion y no el identificador. Los dos caminos terminan en el mismo
+    numero, asi que la unica pregunta real es cual gana cuando estan los dos.
+
+        A  el del caso    manda. Lo dijo el proveedor sobre ESE ticket.
+        B  el del chat    si el caso no trae nada.
+        C  los dos y no coinciden -> gana A y se INFORMA la discrepancia.
+        D  ninguno        sin contexto. Es lo normal en un ticket cargado a
+                          mano, no un error.
+
+    Nunca se elige por nombre, telefono ni parecido. El comentario de
+    'conversacion_de_caso' ya explica por que: armar algo con el nombre abre
+    la ficha de cualquier homonimo.
+
+    EL SERIAL DE RESPALDO SOLO VALE SI ES DEL MISMO SERVICIO. La conversacion
+    guarda un 'sn_onu' que corresponde al cliente que ELLA identifico; si el
+    caso apunta a otro servicio, ese serial es el equipo de otra persona.
+    Arrastrarlo mostraria niveles opticos ajenos con cara de dato correcto --
+    y encima justo en el caso donde ya sabemos que algo no cuadra.
+    """
+    del_caso = str(servicio_case or "").strip()
+    conv = conv or {}
+    de_conv = str(conv.get("id_cliente") or "").strip()
+    sn_conv = str((conv.get("datos_sesion") or {}).get("sn_onu") or "").strip()
+
+    if del_caso and de_conv and del_caso != de_conv:
+        return {"id_servicio": del_caso, "origen": IDENTIDAD_CASE,
+                "sn_onu_respaldo": "",
+                "conflicto": {"case": del_caso, "conversacion": de_conv}}
+    if del_caso:
+        return {"id_servicio": del_caso, "origen": IDENTIDAD_CASE,
+                "sn_onu_respaldo": sn_conv if del_caso == de_conv else "",
+                "conflicto": None}
+    if de_conv:
+        return {"id_servicio": de_conv, "origen": IDENTIDAD_CONVERSACION,
+                "sn_onu_respaldo": sn_conv, "conflicto": None}
+    return {"id_servicio": "", "origen": "", "sn_onu_respaldo": "",
+            "conflicto": None}
+
+
+def contexto_tecnico(config, tenant: str, identidad: dict) -> dict:
+    """
+    Quien es el cliente de un servicio, que equipo tiene y como esta ese
+    equipo ahora. Mas los enlaces para ir a verlo sin volver a buscarlo.
+
+    Recibe IDENTIFICADORES, no un caso ni una conversacion. Por eso sirve
+    igual al detalle del CRM, a una orden de trabajo y a la API de campo, sin
+    que ninguno de los tres le hable al sistema del ISP por su cuenta -- y sin
+    que el nucleo tenga que saber que existe un Case, que es la regla que
+    tests/test_nucleo_sin_tenants.py hace cumplir.
+
+    EL SERIAL SE RELEE SIEMPRE, no se guarda. Medido el 10/09/2026 sobre 600
+    clientes reales: el 80,8 % tiene serial cargado. El 19 % restante casi
+    nunca es un servicio sin equipo -- es un serial que todavia nadie cargo
+    del otro lado. Guardarlo aca convertiria a Dexter en una segunda fuente de
+    verdad de un dato ajeno, con la obligacion de mantener las dos iguales.
+    Releerlo no cuesta una llamada extra (la ficha del cliente se pide igual) y
+    hace que el dia que alguien lo cargue, la tarjeta aparezca sola.
+
+    Devuelve solo lo que se puede armar de verdad. Que falte algo NO es un
+    error: se escala una conversacion justamente cuando el asistente no pudo
+    avanzar, y muchas veces eso incluye no haber identificado al cliente.
     Medido sobre 85 conversaciones reales: 45 con cliente identificado y 12 con
-    ticket, y las que llegan a ticket tienden a ser las otras. Que la pantalla
-    diga "no disponible" es el caso NORMAL, no una falla que haya que reportar.
+    ticket. Que la pantalla diga "no disponible" es el caso NORMAL.
     """
     v = config.variables_tenant or {}
     panel = (v.get("WISPHUB_PANEL_URL") or "").rstrip("/")
     sufijo = v.get("WISPHUB_SUFIJO_USUARIO") or ""
     olt = (v.get("SMARTOLT_SUBDOMINIO") or "").rstrip("/")
 
-    id_cliente = conv.get("id_cliente")
-    sesion = conv.get("datos_sesion") or {}
-    sn_onu = sesion.get("sn_onu")
+    id_cliente = identidad.get("id_servicio") or ""
+    enlaces: dict = {}
 
-    enlaces = {}
+    if not id_cliente:
+        # Sin identificador no hay a quien preguntarle, y no se llama a nadie.
+        # La discrepancia, si la hubiera, viaja igual: es lo unico que se sabe.
+        if identidad.get("conflicto"):
+            enlaces["identidad_en_conflicto"] = identidad["conflicto"]
+        return enlaces
 
     # El 'usuario' del sistema externo NO viene en el detalle del cliente,
     # solo en el LISTADO -- verificado el 25/08/2026: el detalle lo devuelve
@@ -3321,6 +3407,10 @@ def _enlaces_externos(config, conv: dict, tenant: str) -> dict:
     # distintas del mismo registro (ver la skill del proveedor en .claude/).
     ficha = _ficha_cliente(config, id_cliente, tenant)
     usuario, ip = ficha.get("usuario"), ficha.get("ip")
+    # El serial VIVO del sistema del ISP manda. El de la conversacion es solo
+    # respaldo, y llega hasta aca unicamente si corresponde al mismo servicio
+    # (ver identidad_del_contexto).
+    sn_onu = str(ficha.get("sn_onu") or identidad.get("sn_onu_respaldo") or "").strip()
 
     if panel and usuario:
         enlaces["wisphub_perfil"] = f"{panel}/clientes/ver/{usuario}/"
@@ -3341,12 +3431,35 @@ def _enlaces_externos(config, conv: dict, tenant: str) -> dict:
         # Una sola vez al abrir el ticket y sin refresco automatico: quien
         # quiera el dato fresco entra por el enlace, que siempre lo esta.
         enlaces["equipo"] = _estado_equipo(config, sn_onu, tenant)
+    elif not sn_onu:
+        # El servicio esta identificado y el sistema del ISP no tiene serial.
+        # No se llama a SmartOLT -- no hay con que -- y se dice POR QUE, que no
+        # es lo mismo que una tarjeta vacia. Casi siempre significa que todavia
+        # nadie cargo el serial, no que el cliente no tenga equipo: por eso el
+        # texto de la pantalla no culpa al asistente.
+        enlaces["equipo_no_disponible"] = SIN_ONU_VINCULADA
 
     # La ficha del cliente va aparte de los enlaces: son datos, no destinos.
+    # 'sn_onu' se saca de aca porque ya viaja arriba junto a su enlace;
+    # repetirlo en la tarjeta del cliente seria el mismo dato dos veces.
     if ficha:
-        enlaces["cliente"] = {k: v for k, v in ficha.items() if k != "usuario"}
+        enlaces["cliente"] = {k: v for k, v in ficha.items()
+                              if k not in ("usuario", "sn_onu")}
+
+    # Con que servicio se resolvio todo esto, y si los dos origenes se
+    # contradecian. La discrepancia viaja como DATO y no como log: quien abre
+    # el ticket tiene que verla, y un log lo lee solo alguien que ya sospecha.
+    enlaces["identidad"] = {"servicio": id_cliente,
+                            "origen": identidad.get("origen") or ""}
+    if identidad.get("conflicto"):
+        enlaces["identidad_en_conflicto"] = identidad["conflicto"]
 
     return enlaces
+
+
+def _enlaces_externos(config, conv: dict, tenant: str) -> dict:
+    """El contexto tecnico de una conversacion. Envoltura de compatibilidad."""
+    return contexto_tecnico(config, tenant, identidad_del_contexto(conv, ""))
 
 
 # Las herramientas que dan el estado del equipo. Se piden por NOMBRE y no por
@@ -3393,7 +3506,12 @@ def _estado_equipo(config, sn_onu: str, tenant: str) -> dict:
 # confirmar con quien habla sin salir a buscarla. Va SOLO a la pantalla de un
 # colaborador -- nunca a una respuesta al cliente, que sigue gobernada por la
 # lista blanca del rol.
-_CAMPOS_FICHA = ("usuario", "ip", "estado", "nombre", "cedula")
+# 'sn_onu' entra el 10/09/2026: es el serial del equipo del cliente, y es la
+# UNICA forma de llegar a SmartOLT -- sus once herramientas se indexan por el.
+# Hasta hoy el dato pasaba por esta funcion y se tiraba, porque el serial se
+# sacaba de la sesion de la conversacion; un caso importado no tiene ninguna.
+# No es dato personal: identifica un aparato, no a una persona.
+_CAMPOS_FICHA = ("usuario", "ip", "estado", "nombre", "cedula", "sn_onu")
 
 
 def _ficha_cliente(config, id_cliente, tenant: str) -> dict:

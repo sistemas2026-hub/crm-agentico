@@ -111,6 +111,16 @@
     Object.keys(origen?.enlaces ?? {}).length ? origen.enlaces : null;
 
   /**
+   * El contexto tecnico ya no cuelga de la conversacion: un caso importado del
+   * sistema del ISP no tiene ninguna y aun asi tiene cliente y equipo. Se
+   * considera dibujable si trae algo mas que la marca de identidad, que sola
+   * no le dice nada a nadie.
+   * @param {any} contexto
+   */
+  const contextoDe = (contexto) =>
+    Object.keys(contexto ?? {}).some((k) => k !== 'identidad') ? contexto : null;
+
+  /**
    * El canal por el que entro la conversacion, legible.
    *
    * Se muestra el valor REAL y no un 'WhatsApp' fijo: el canal lo declara
@@ -405,8 +415,8 @@
                pantalla. Sin bloque de espera a proposito: la mayoria de los
                tickets no tiene estas tarjetas, y un cargando que casi siempre
                termina en nada distrae mas de lo que informa. -->
-          {#await data.origen then origen}
-            {@const enlaces = enlacesDe(origen)}
+          {#await data.contexto then contexto}
+            {@const enlaces = contextoDe(contexto)}
             {#if enlaces}
             <!-- ============================================================
                  A DONDE SALTAR SIN VOLVER A BUSCAR AL CLIENTE
@@ -418,6 +428,24 @@
                  ============================================================ -->
             <section class="tecnica">
               <h2>Información técnica del cliente</h2>
+              <!-- Los dos orígenes de identidad dicen servicios distintos. Se
+                   muestra en vez de resolverse en silencio: el motor eligió el
+                   del caso para poder mostrar algo, pero cuál de los dos está
+                   mal es una pregunta para una persona. Si esto aparece
+                   seguido, lo que falla es el emparejamiento del importador. -->
+              {#if enlaces.identidad_en_conflicto}
+                <p class="conflicto-identidad">
+                  <strong>Inconsistencia de servicio.</strong>
+                  El servicio asociado al caso no coincide con el registrado en
+                  la conversación. Se muestra la información del servicio del
+                  caso.
+                  <span class="conflicto-ids">
+                    Servicio del caso <code>{enlaces.identidad_en_conflicto.case}</code>
+                    · Servicio de la conversación
+                    <code>{enlaces.identidad_en_conflicto.conversacion}</code>
+                  </span>
+                </p>
+              {/if}
               <div class="tecnica-grilla">
                 <article class="ficha ficha-olt">
                   <header>
@@ -456,6 +484,19 @@
                     {/if}
                     <a class="v2-btn v2-btn-sm" href={enlaces.smartolt_ont}
                        target="_blank" rel="noopener">Ver la ONT ↗</a>
+                  {:else if enlaces.equipo_no_disponible === 'onu_no_vinculada'}
+                    <!-- El servicio SI se identifico; lo que falta es el
+                         serial del otro lado. Medido el 10/09/2026 sobre 600
+                         clientes: el 19 % no lo tiene cargado, y casi nunca
+                         es que no haya equipo. Por eso el texto no culpa al
+                         asistente y dice que se arregla solo: el serial se
+                         relee en cada apertura, no se guarda aca. -->
+                    <p class="sin-dato">
+                      <strong>ONU no vinculada.</strong>
+                      El servicio está identificado, pero todavía no tiene un
+                      serial de ONU registrado en WispHub. Cuando se registre,
+                      Dexter mostrará automáticamente la información del equipo.
+                    </p>
                   {:else}
                     <!-- Caso NORMAL, no una falla: se escala una conversacion
                          justamente cuando el asistente no pudo avanzar, y eso
@@ -1338,5 +1379,23 @@
   /* The whole attachment row lifts slightly on hover to read as a download. */
   .att:hover {
     background: var(--v2-hover);
+  }
+
+  /* El conflicto de identidad. Se ve, no se esconde: es el unico aviso de
+     esta pantalla que puede significar que el importador emparejo mal. */
+  .conflicto-identidad {
+    margin: 0 0 var(--v2-space-3);
+    padding: var(--v2-space-3);
+    border-left: 3px solid var(--v2-warning, #b45309);
+    background: var(--v2-surface-2, rgba(180, 83, 9, 0.06));
+    border-radius: 4px;
+    font-size: 0.875rem;
+    line-height: 1.5;
+  }
+  .conflicto-ids {
+    display: block;
+    margin-top: var(--v2-space-2);
+    font-size: 0.8125rem;
+    color: var(--v2-text-muted, #666);
   }
 </style>

@@ -129,6 +129,11 @@ function toRow(row) {
     resolution_deadline: row.resolution_sla_deadline ?? null,
     resolution_breached: Boolean(row.is_sla_resolution_breached),
     resolved_at: row.resolved_at ?? null,
+    // Identidad en el sistema del ISP, cuando el caso vino importado de ahi.
+    // La pantalla se la pasa al motor para que resuelva la ficha tecnica sin
+    // necesitar una conversacion detras.
+    provider: row.provider ?? '',
+    external_service_id: row.external_service_id ?? '',
     // Non-zero means the escalation task has already chased this one.
     escalation_count: row.escalation_count ?? 0,
     paused_at: row.sla_paused_at ?? null,

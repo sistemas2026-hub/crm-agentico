@@ -135,6 +135,12 @@ class CaseSerializer(serializers.ModelSerializer):
             "child_count",
             # Tier 3 time-tracking
             "time_summary",
+            # Identidad externa. La pantalla la necesita para pedirle al motor
+            # el contexto tecnico de un caso IMPORTADO, que no tiene ninguna
+            # conversacion de la que sacar el identificador del servicio.
+            # No agrega acceso a nada: quien ve el caso ya ve su ficha tecnica.
+            "provider",
+            "external_service_id",
         )
 
 
