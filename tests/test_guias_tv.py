@@ -52,6 +52,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from nucleo.config import cargar_config                              # noqa: E402
 from nucleo.config.schema import GuiaTV, Herramienta, TenantConfig    # noqa: E402
+from nucleo.config import editor                                     # noqa: E402
 from nucleo.modelo import motor                                      # noqa: E402
 
 fallos: list[str] = []
@@ -303,6 +304,92 @@ r = resolver(sin_video, tipo_conexion="directo", marca="LG")
 afirmar("url_video" not in r,
         "sin video cargado la clave NO viene -- una clave vacia invita al "
         "modelo a rellenarla")
+
+
+# =============================================================================
+#  PASO 3 -- LA ADMINISTRACION
+# =============================================================================
+#
+# El mutador NO repite las reglas de negocio: las hace cumplir el schema
+# cuando _editar() valida la config entera antes de guardar. Lo que se prueba
+# aca es que normalice la FORMA y que la seccion este registrada -- si no lo
+# esta, una carga del YAML borra el catalogo en silencio.
+
+
+def mutado(guias):
+    doc = {}
+    editor._mutar_guias_tv(doc, guias)
+    return doc["guias_tv"]
+
+
+print("PASO3 7. el mutador normaliza lo que manda la pantalla")
+r = mutado([{"marca": "  Samsung  ", "tipo_conexion": " DIRECTO ",
+             "instrucciones": "  Menu > ANTENA  ", "url_video": " http://v  ",
+             "observaciones": "  nota  "}])
+afirmar(r[0]["marca"] == "Samsung", "recorta la marca")
+afirmar(r[0]["tipo_conexion"] == "directo",
+        "y el tipo llega en minusculas -- 'DIRECTO' desde un formulario no "
+        "puede quedar fuera del enum por una mayuscula")
+afirmar(r[0]["instrucciones"] == "Menu > ANTENA", "recorta las instrucciones")
+afirmar(r[0]["url_video"] == "http://v", "y la URL")
+afirmar(r[0]["activa"] is True, "activa por defecto")
+
+# La fila vacia que deja un formulario cuando alguien agrega y no completa.
+afirmar(mutado([{"marca": "", "instrucciones": "", "url_video": ""}]) == [],
+        "una fila del todo vacia se descarta, no se guarda como guia rota")
+afirmar(len(mutado([{"marca": "", "instrucciones": "la general"}])) == 1,
+        "pero la GENERAL -- sin marca y con texto-- si se guarda")
+
+
+print("PASO3 8. reemplaza el catalogo entero, apagadas incluidas")
+r = mutado([{"marca": "Samsung", "instrucciones": "a"},
+            {"marca": "LG", "instrucciones": "b", "activa": False}])
+afirmar(len(r) == 2 and r[1]["activa"] is False,
+        "la apagada se conserva: es un borrador o una version vieja que "
+        "alguien quiere poder volver a encender")
+
+
+print("PASO3 9. las reglas siguen siendo del schema, no del mutador")
+# El mutador deja pasar lo que el schema rechaza. Es lo correcto: una sola
+# fuente para cada regla. Lo que garantiza que no se guarde es _editar(),
+# que valida la config entera y hace rollback.
+crudo = mutado([{"marca": "Samsung", "tipo_conexion": "tdt",
+                 "instrucciones": "x"}])
+afirmar(crudo and crudo[0]["marca"] == "Samsung",
+        "el mutador no juzga: normaliza y pasa")
+afirmar(not config_con(crudo),
+        "y el schema lo rechaza al validar -- Samsung + TDT no se guarda")
+afirmar(not config_con(mutado([{"marca": "LG", "instrucciones": ""}])),
+        "una activa sin instrucciones tampoco")
+afirmar(not config_con(mutado([{"marca": "LG", "instrucciones": "a"},
+                               {"marca": "lg", "instrucciones": "b"}])),
+        "ni dos activas para la misma marca")
+
+
+print("PASO3 10. la seccion esta registrada donde corresponde")
+afirmar("guias_tv" in editor.SECCIONES_EDITABLES,
+        "en SECCIONES_EDITABLES: sin esto, una carga del YAML borra el "
+        "catalogo sin siquiera avisar")
+# Y NO en SINCRONIZADOS, a proposito: el criterio de esa lista es "lo produjo
+# un proceso y se reemplaza entero" (128 localidades, 100 canales de un
+# Excel). Una guia la redacta una persona, se lee bien en un diff, y un tenant
+# nuevo tiene que poder nacer con guias semilla desde el YAML.
+afirmar("guias_tv" not in TenantConfig.SINCRONIZADOS,
+        "y NO en SINCRONIZADOS: es una decision de una persona, como "
+        "planes_venta, no la salida de un proceso")
+afirmar(callable(getattr(editor, "guardar_guias_tv", None)),
+        "existe guardar_guias_tv, que valida y guarda en una transaccion")
+
+
+print("PASO3 11. la administracion SI ve las observaciones")
+# Es la asimetria del diseño: quien edita el catalogo tiene que verlas; el
+# modelo que redacta, no. Se comprueban las dos puntas contra el mismo dato.
+guia = GuiaTV(marca="Samsung", instrucciones="x", observaciones="secreto interno")
+afirmar("observaciones" in guia.model_dump(mode="json"),
+        "el modelo serializado que devuelve el endpoint las incluye")
+afirmar("observaciones" not in resolver(_Config([guia]),
+                                        tipo_conexion="directo", marca="Samsung"),
+        "y la resolucion que consume el agente NO")
 
 
 print()

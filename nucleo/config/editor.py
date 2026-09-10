@@ -114,6 +114,14 @@ SECCIONES_EDITABLES = (
     # 23/08/2026 con los planes y el 05/09/2026 con la tarifa.
     "servicios_ofrecidos",
     "parrilla_canales",
+    # 'guias_tv' por _mutar_guias_tv. Va aca y NO en TenantConfig.SINCRONIZADOS
+    # a proposito: el criterio de esa otra lista es "lo produjo un proceso y se
+    # reemplaza entero" (las 128 localidades, los 100 canales de un Excel), y
+    # una guia de sintonizacion es lo contrario -- la redacta una persona, se
+    # lee bien en un diff, y un tenant nuevo tiene que poder nacer con guias
+    # semilla desde el YAML. Mismo trato que 'planes_venta' y
+    # 'servicios_ofrecidos', que tampoco son sincronizados.
+    "guias_tv",
     # 'llm' por _mutar_tarifa y _mutar_saldo_proveedor; 'limites' por
     # _mutar_tope_gasto. Faltaban, y paso exactamente lo que este comentario
     # anunciaba: el 05/09/2026 una carga del YAML borro la tarifa de DeepSeek
@@ -812,6 +820,47 @@ def _mutar_parrilla_canales(doc: dict, canales: list[str]) -> None:
     doc["parrilla_canales"] = [{"nombre": c} for c in canales]
 
 
+def _mutar_guias_tv(doc: dict, guias: list[dict]) -> None:
+    """
+    Las guias de sintonizacion. Reemplaza la lista ENTERA -- la pantalla manda
+    siempre el estado completo, apagadas incluidas: una guia que se retira
+    porque quedo vieja vuelve corregida, y borrarla pierde el texto que
+    alguien redacto.
+
+    LAS REGLAS DE NEGOCIO NO SE REPITEN ACA. Estan en GuiaTV y en
+    TenantConfig (schema.py) y las hace cumplir _editar() al validar la
+    config entera antes de guardar:
+
+      - con 'tdt' la marca va vacia;
+      - una guia activa tiene que tener instrucciones;
+      - una sola activa por (marca, conexion).
+
+    Copiarlas aca daria dos lugares donde corregirlas y uno donde olvidarse.
+    Lo unico que hace este mutador es normalizar la FORMA de lo que llega de
+    la pantalla, para que el validador juzgue datos limpios y no espacios.
+
+    Una guia sin marca Y sin instrucciones se descarta en silencio: es la fila
+    vacia que deja un formulario cuando alguien agrega y no completa.
+    """
+    limpias = []
+    for g in guias or []:
+        g = g or {}
+        marca = str(g.get("marca", "")).strip()
+        instrucciones = str(g.get("instrucciones", "")).strip()
+        tipo = str(g.get("tipo_conexion", "directo")).strip().lower()
+        if not marca and not instrucciones and not str(g.get("url_video", "")).strip():
+            continue
+        limpias.append({
+            "marca": marca,
+            "tipo_conexion": tipo,
+            "instrucciones": instrucciones,
+            "url_video": str(g.get("url_video", "")).strip(),
+            "activa": bool(g.get("activa", True)),
+            "observaciones": str(g.get("observaciones", "")).strip(),
+        })
+    doc["guias_tv"] = limpias
+
+
 def _mutar_servicios_ofrecidos(doc: dict, servicios: list[dict]) -> None:
     """
     Que vende la empresa. Reemplaza la lista entera -- la pantalla manda
@@ -951,6 +1000,11 @@ def guardar_parrilla_canales(tenant: str, canales: list[str]) -> TenantConfig:
 
 def guardar_servicios_ofrecidos(tenant: str, servicios: list[dict]) -> TenantConfig:
     return _editar(tenant, lambda doc: _mutar_servicios_ofrecidos(doc, servicios))
+
+def guardar_guias_tv(tenant: str, guias: list[dict]) -> TenantConfig:
+    """Las guias de sintonizacion, tal como quedaron en la pantalla."""
+    return _editar(tenant, lambda d: _mutar_guias_tv(d, guias))
+
 
 
 def guardar_variable_tenant(tenant: str, nombre: str, valor: str) -> TenantConfig:

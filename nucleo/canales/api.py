@@ -2821,6 +2821,60 @@ def configuracion_oferta_listar():
     })
 
 
+@app.get("/configuracion/guias-tv")
+def configuracion_guias_tv_listar():
+    """
+    Las guias de sintonizacion, para administrarlas.
+
+    A DIFERENCIA de lo que ve el agente, esto SI devuelve 'observaciones':
+    son notas de quien administra el catalogo ("confirmado con el tecnico",
+    "solo modelos posteriores a 2019") y quien edita tiene que verlas. Lo que
+    nunca las entrega es la resolucion que consume el modelo -- ver
+    _ejecutar_consulta_guia_tv en motor.py.
+
+    Se devuelven TODAS, activas y apagadas: una guia apagada es un borrador o
+    una version vieja que alguien quiere poder volver a encender, y una
+    pantalla que solo muestra las activas la vuelve invisible.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+
+    return jsonify({
+        "guias_tv": [g.model_dump(mode="json") for g in config.guias_tv],
+        # Que la pantalla no tenga que conocer las reglas de negocio para
+        # dibujar su formulario: los dos valores validos salen de aca.
+        "tipos_conexion": ["directo", "tdt"],
+    })
+
+
+@app.post("/configuracion/guias-tv")
+def configuracion_guias_tv_guardar():
+    """
+    Reemplaza el catalogo entero con lo que manda la pantalla.
+
+    Las reglas -- TDT sin marca, una sola activa por marca y conexion, activa
+    con instrucciones-- las hace cumplir el SCHEMA al validar, no este
+    endpoint. Si alguna no se cumple, _editar hace rollback y el motivo vuelve
+    tal cual para mostrarlo en el formulario.
+    """
+    cuerpo = request.json or {}
+    tenant = cuerpo.get("tenant")
+    guias = cuerpo.get("guias")
+    if not tenant or not isinstance(guias, list):
+        return jsonify({"error": "Falta 'tenant' o 'guias'."}), 400
+    try:
+        config = editor.guardar_guias_tv(tenant, guias)
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"guias_tv": [g.model_dump(mode="json")
+                                 for g in config.guias_tv]})
+
+
 @app.post("/configuracion/servicios")
 def configuracion_servicios_guardar():
     tenant = (request.json or {}).get("tenant")
