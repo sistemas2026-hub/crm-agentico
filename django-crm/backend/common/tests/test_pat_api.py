@@ -142,3 +142,71 @@ class TestPATApi:
         # layer would emit a 401. Asserting the framework's real behavior here;
         # either way the unauthenticated caller is denied (no data leak).
         assert resp.status_code == 403, resp.content
+
+
+# =============================================================================
+#  EL VOCABULARIO DE ALCANCES  --  para poder emitir minimo privilegio
+# =============================================================================
+#
+# La pantalla ofrecia dos opciones: "solo lectura" o "todo lo que puede hacer el
+# dueño". Su propio comentario remitia a "quien quiera scopes finos lo crea por
+# la API" -- pero esa API esta cerrada para credenciales (una credencial no
+# puede acuñar otra) y el JWT no sale del servidor, asi que la unica salida real
+# era una sesion de consola. Dar de alta una empresa no puede depender de eso.
+#
+# Esta vista existe para que el formulario ofrezca los alcances reales sin
+# repetir la lista: repetirla dejaria una pantalla que ofrece un recurso que el
+# middleware rechaza, o que esconde uno que existe.
+
+import pytest
+
+from common import scopes as vocabulario
+
+
+@pytest.mark.django_db
+class TestVocabularioDeAlcances:
+    RUTA = "/api/profile/tokens/scopes/"
+
+    def test_devuelve_lo_que_el_enforcement_entiende(self, admin_client):
+        r = admin_client.get(self.RUTA)
+        assert r.status_code == 200, r.content
+        d = r.json()
+        assert set(d["resources"]) == set(vocabulario.API_RESOURCES), (
+            "la pantalla ofreceria recursos que el middleware no reconoce")
+        assert set(d["actions"]) == set(vocabulario.SCOPE_ACTIONS)
+        assert d["wildcard"] == vocabulario.WILDCARD
+
+    def test_incluye_el_recurso_de_importacion(self, admin_client):
+        """El caso que motivo todo esto: sin 'importacion' en el vocabulario,
+        el token dedicado del importador no se puede emitir desde la interfaz."""
+        assert "importacion" in admin_client.get(self.RUTA).json()["resources"]
+
+    def test_sin_sesion_no_se_lee(self, unauthenticated_client):
+        assert unauthenticated_client.get(self.RUTA).status_code in (401, 403)
+
+    def test_la_ruta_no_se_confunde_con_un_id(self, admin_client):
+        """'scopes' va declarada ANTES de '<uuid:pk>'. Si se leyera como un id,
+        esto daria 404 en vez del vocabulario."""
+        assert admin_client.get(self.RUTA).status_code == 200
+
+
+@pytest.mark.django_db
+class TestEmitirConAlcancesFinos:
+    def test_se_puede_crear_un_token_de_minimo_privilegio(self, admin_client):
+        """Lo que antes solo se podia hacer por consola."""
+        r = admin_client.post(
+            "/api/profile/tokens/",
+            {"name": "importacion-wisphub",
+             "scopes": ["importacion:read", "importacion:write"]},
+            format="json")
+        assert r.status_code == 201, r.content
+        assert sorted(r.json()["scopes"]) == ["importacion:read", "importacion:write"]
+        assert "cases:write" not in r.json()["scopes"]
+
+    def test_un_recurso_inventado_se_rechaza(self, admin_client):
+        r = admin_client.post(
+            "/api/profile/tokens/",
+            {"name": "roto", "scopes": ["inventado:read"]}, format="json")
+        assert r.status_code == 400, (
+            "un recurso que el enforcement no conoce da un token que no sirve "
+            "para nada, y nadie se entera hasta que falla")

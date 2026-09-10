@@ -56,6 +56,10 @@
 
   let creating = $state(false);
   let busy = $state(false);
+  const vocabulario = $derived(data.vocabulario ?? null);
+
+  /** El select de acceso: 'custom' despliega el selector fino. */
+  let acceso = $state('read');
   let copied = $state(false);
 
   /** A submit handler that flips `busy` while the action runs. */
@@ -223,9 +227,18 @@
             <label class="v2-label" for="token-access" style="display:block;margin-bottom:4px">
               Acceso
             </label>
-            <select id="token-access" name="access" class="v2-input" style="width:180px">
+            <select
+              id="token-access"
+              name="access"
+              class="v2-input"
+              style="width:180px"
+              bind:value={acceso}
+            >
               <option value="read" selected>Solo lectura</option>
               <option value="full">Todo lo que puede hacer el dueño</option>
+              {#if vocabulario}
+                <option value="custom">Personalizado…</option>
+              {/if}
             </select>
           </div>
           <div>
@@ -239,6 +252,36 @@
               <option value="never">Nunca</option>
             </select>
           </div>
+          {#if acceso === 'custom' && vocabulario}
+            <fieldset class="alcances">
+              <legend class="v2-label">Qué puede tocar</legend>
+              <p class="v2-sub" style="margin:0 0 8px">
+                <strong>leer</strong> cubre GET; <strong>escribir</strong> cubre
+                POST, PUT, PATCH y DELETE. Escribir no implica leer: un token que
+                crea prospectos pero no puede listarlos es algo coherente de
+                querer, y un permiso que promete menos de lo que da es como un
+                límite deja de serlo.
+              </p>
+              <div class="grilla">
+                {#each vocabulario.resources as r (r)}
+                  <div class="recurso">
+                    <span class="rn">{r}</span>
+                    {#each vocabulario.actions as a (a)}
+                      <label class="chk">
+                        <input type="checkbox" name="scope" value={`${r}:${a}`} />
+                        {a === 'read' ? 'leer' : 'escribir'}
+                      </label>
+                    {/each}
+                  </div>
+                {/each}
+              </div>
+              <p class="v2-sub" style="margin:8px 0 0">
+                Sin marcar nada queda en solo lectura. Una lista vacía significa
+                <em>sin restricción</em> para el enforcement, que es lo contrario
+                de lo que se está eligiendo acá.
+              </p>
+            </fieldset>
+          {/if}
           <button class="v2-btn v2-btn-primary" disabled={busy}>Crear token</button>
           <button type="button" class="v2-btn" disabled={busy} onclick={() => (creating = false)}>
             Cancelar
@@ -375,3 +418,41 @@
     </div>
   </div>
 {/if}
+
+<style>
+  /* El selector de alcances finos. Es lo unico de esta pantalla que necesita
+     estilo propio -- el resto usa las clases de v2. */
+  .alcances {
+    flex: 1 0 100%;
+    border: 1px solid var(--v2-rule, #e4e7e9);
+    padding: 12px 14px;
+    margin: 4px 0 0;
+  }
+  .grilla {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 4px 16px;
+    /* Treinta recursos no entran en pantalla, y el formulario tiene que seguir
+       alcanzando su boton de crear. */
+    max-height: 260px;
+    overflow-y: auto;
+  }
+  .recurso {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+  }
+  .rn {
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: 12px;
+    min-width: 110px;
+  }
+  .chk {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--v2-muted, #5c6672);
+    cursor: pointer;
+  }
+</style>

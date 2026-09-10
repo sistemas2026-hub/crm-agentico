@@ -45,8 +45,20 @@ function expiryFromChoice(choice) {
  * @param {string | undefined} choice
  * @returns {string[]}
  */
-function scopesFromChoice(choice) {
-  return choice === 'read' ? ['*:read'] : [];
+function scopesFromChoice(choice, form) {
+  if (choice === 'read') return ['*:read'];
+  if (choice !== 'custom') return [];
+
+  // Alcances finos. Llegan como 'recurso:accion' repetidos en el mismo campo;
+  // el backend los vuelve a validar contra 'common/scopes.py' antes de emitir
+  // nada, asi que esto ordena la eleccion, no la autoriza.
+  const elegidos = form
+    .getAll('scope')
+    .map((/** @type {any} */ v) => v.toString().trim())
+    .filter(Boolean);
+  // Sin ninguno marcado NO se cae a lista vacia: eso significaria irrestricto,
+  // que es lo contrario de lo que pidio quien eligio 'personalizado'.
+  return elegidos.length ? [...new Set(elegidos)] : ['*:read'];
 }
 
 /** @type {import('./$types').Actions} */
@@ -60,7 +72,7 @@ export const actions = {
     const form = await request.formData();
     const name = form.get('name')?.toString().trim();
     const expires_at = expiryFromChoice(form.get('expiry')?.toString());
-    const scopes = scopesFromChoice(form.get('access')?.toString());
+    const scopes = scopesFromChoice(form.get('access')?.toString(), form);
     if (!name) return fail(400, { create: { error: 'Ponele un nombre al token.' } });
 
     try {

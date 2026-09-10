@@ -38,6 +38,7 @@ from common.views.pat_views import (
     OrgAccessTokenListView,
     PersonalAccessTokenDetailView,
     PersonalAccessTokenListCreateView,
+    ScopeVocabularyView,
 )
 from common.views.settings_views import DomainDetailView, DomainList
 from common.views.tags_views import (
@@ -117,6 +118,12 @@ urlpatterns = [
         "profile/tokens/",
         PersonalAccessTokenListCreateView.as_view(),
         name="pat_list_create",
+    ),
+    # Antes que '<uuid:pk>' para que 'scopes' no se lea como un id.
+    path(
+        "profile/tokens/scopes/",
+        ScopeVocabularyView.as_view(),
+        name="pat_scopes",
     ),
     path(
         "profile/tokens/<uuid:pk>/",

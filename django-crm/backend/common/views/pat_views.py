@@ -27,6 +27,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from common.models import PersonalAccessToken
+from common import scopes
 from common.permissions import HasOrgContext, IsOrgAdmin
 from common.serializer import (
     PersonalAccessTokenCreateSerializer,
@@ -71,6 +72,36 @@ class PersonalAccessTokenListCreateView(APIView):
         data = PersonalAccessTokenListSerializer(pat).data
         data["token"] = raw  # shown ONCE, never retrievable again
         return Response({"error": False, **data}, status=status.HTTP_201_CREATED)
+
+
+class ScopeVocabularyView(APIView):
+    """
+    GET /api/profile/tokens/scopes/
+
+    Que recursos y acciones entiende el enforcement, para que la pantalla de
+    tokens pueda ofrecer alcances finos sin repetir la lista.
+
+    Existe porque la unica forma de emitir un token de minimo privilegio era
+    la API cruda: el formulario ofrecia "solo lectura" o "todo lo que puede
+    hacer el dueño", y su propio comentario remitia a "quien quiera scopes
+    finos lo crea por la API". En la practica esa API esta cerrada para
+    credenciales --una credencial no puede acuñar otra-- y el JWT no sale del
+    servidor, asi que la unica salida real era una sesion de consola. Dar de
+    alta una empresa no puede depender de eso.
+
+    La lista sale de 'common.scopes', que es quien la hace cumplir. Duplicarla
+    en el frontend habria dejado una pantalla que ofrece un recurso que el
+    middleware rechaza, o que esconde uno que existe.
+    """
+
+    permission_classes = (IsAuthenticated, HasOrgContext)
+
+    def get(self, request):
+        return Response({
+            "resources": sorted(scopes.API_RESOURCES),
+            "actions": sorted(scopes.SCOPE_ACTIONS),
+            "wildcard": scopes.WILDCARD,
+        })
 
 
 class PersonalAccessTokenDetailView(APIView):

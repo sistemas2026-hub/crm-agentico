@@ -63,9 +63,22 @@ export async function listOrgTokens({ cookies }) {
   }
 
   const tokens = (resp?.tokens ?? []).slice().sort(byUrgency);
+
+  // El vocabulario de alcances sale del backend, que es quien lo hace cumplir.
+  // Repetirlo aca dejaria una pantalla que ofrece un recurso que el middleware
+  // rechaza, o que esconde uno que existe. Si no responde, el formulario cae a
+  // las dos opciones gruesas en vez de romperse.
+  let vocabulario = null;
+  try {
+    vocabulario = await apiRequest('/profile/tokens/scopes/', {}, { cookies });
+  } catch {
+    vocabulario = null;
+  }
+
   return {
     forbidden: false,
     tokens,
+    vocabulario,
     totals: resp?.totals ?? { count: 0, live: 0, orphaned: 0, unused_90d: 0 },
     // Ids of the live tokens on deactivated owners, so "revoke them all" can be
     // one submit instead of the admin hunting each row. Derived from the same
