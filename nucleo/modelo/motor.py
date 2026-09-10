@@ -882,6 +882,122 @@ def _ejecutar_consulta_servicios_ofrecidos(config, argumentos_modelo=None) -> di
                 "concreto y merece la respuesta a esa pregunta."}
 
 
+def _ejecutar_consulta_guia_tv(config, argumentos_modelo: dict) -> dict:
+    """
+    Cual guia de sintonizacion corresponde. La eleccion es de CODIGO, no del
+    modelo (PRD 12.5).
+
+    POR QUE NO PUEDE DECIDIRLA EL MODELO
+    Son tres reglas encadenadas, y equivocarse en cualquiera le entrega al
+    cliente un procedimiento que no corresponde a su televisor:
+
+      directo + marca con guia activa  -> esa guia          ('especifica')
+      directo + marca sin guia         -> la general        ('general')
+      tdt                              -> la unica de TDT   ('tdt')
+
+    Con TDT la marca SE IGNORA, y no es un atajo: en
+    'fibra -> ONU -> CATV -> coaxial -> TDT -> HDMI', el coaxial ni siquiera
+    llega al televisor. Quien sintoniza es la cajita, asi que la marca del TV
+    no cambia el procedimiento -- por eso el schema no deja crear guias de TDT
+    por marca (ver GuiaTV).
+
+    LA COMPARACION ES NORMALIZADA. El cliente escribe 'samsung', 'SAMSUNG' o
+    'Sansung'; la guia dice 'Samsung'. Se resuelve como ya se resuelven los
+    canales y las localidades: sin tildes y en minusculas, y despues por
+    parecido. Sin eso, una guia cargada quedaria invisible por una mayuscula.
+
+    LO QUE NO DEVUELVE: 'observaciones'. Son notas para quien administra el
+    catalogo ("confirmado con el tecnico", "solo modelos posteriores a 2019")
+    y no tienen por que llegarle al cliente ni al modelo que redacta.
+    """
+    guias = [g for g in config.guias_tv if g.activa]
+    pedido = argumentos_modelo or {}
+    tipo = str(pedido.get("tipo_conexion", "") or "").strip().lower()
+    marca = str(pedido.get("marca", "") or "").strip()
+
+    if tipo not in ("directo", "tdt"):
+        # Sin saber por donde entra la señal no hay guia que valga: la de TDT
+        # y la de TV directo no se parecen en nada. Se pregunta, no se supone.
+        return {
+            "guia_encontrada": False,
+            "instruccion_interna":
+                "Todavia no sabes como esta conectado. Preguntale al cliente "
+                "si el cable coaxial entra directo al televisor o si llega "
+                "primero a una cajita (TDT), y volve a llamar con "
+                "tipo_conexion='directo' o 'tdt'.",
+        }
+
+    def _sirve(g) -> dict:
+        return {
+            "guia_encontrada": True,
+            "instrucciones": g.instrucciones,
+            # Solo si esta cargado. El agente no puede inventar un enlace, y
+            # una clave vacia lo invita a rellenarla.
+            **({"url_video": g.url_video} if g.url_video.strip() else {}),
+            "instruccion_interna":
+                "Entregale las instrucciones TAL CUAL estan arriba: no las "
+                "resumas, no las reescribas y no agregues pasos que no "
+                "figuran. Quien las redacto sabe de que televisor habla. "
+                "Despues preguntale si aparecieron los canales.",
+        }
+
+    if tipo == "tdt":
+        # La marca llega y se descarta a proposito -- ver el docstring.
+        tdt = next((g for g in guias if g.tipo_conexion == "tdt"), None)
+        if tdt:
+            return {**_sirve(tdt), "tipo_guia": "tdt"}
+        return _sin_guia("TDT")
+
+    directas = [g for g in guias if g.tipo_conexion == "directo"]
+    if marca:
+        clave = _sin_tildes(marca).strip()
+        con_marca = [g for g in directas if g.marca.strip()]
+        exacta = next((g for g in con_marca
+                       if _sin_tildes(g.marca).strip() == clave), None)
+        if exacta is None:
+            # Un parecido SI vale aca, al reves que en la parrilla de canales:
+            # ahi 'wins sport +' contra 'Win Sports' son productos distintos y
+            # confirmar uno por el otro le promete al cliente algo que no
+            # contrato. Una marca de televisor mal escrita es la misma marca,
+            # y darle la guia general por un tipeo es peor servicio sin
+            # ninguna contrapartida.
+            parecidas = _nombres_parecidos(marca, [g.marca for g in con_marca])
+            if parecidas:
+                exacta = next(g for g in con_marca if g.marca == parecidas[0])
+        if exacta is not None:
+            return {**_sirve(exacta), "tipo_guia": "especifica",
+                    "marca_resuelta": exacta.marca}
+
+    general = next((g for g in directas if not g.marca.strip()), None)
+    if general:
+        return {**_sirve(general), "tipo_guia": "general",
+                # Que la marca no tenga guia propia NO es un problema ni un
+                # motivo para escalar: la general resuelve la mayoria. Se
+                # avisa para que quede registrada aparte (ver el paso de
+                # marcas desconocidas), no para que el agente lo mencione.
+                **({"marca_sin_guia_propia": marca} if marca else {})}
+    return _sin_guia("de TV directo")
+
+
+def _sin_guia(cual: str) -> dict:
+    """
+    Fail-closed: sin guia cargada, el agente NO improvisa un procedimiento.
+
+    Antes del catalogo, el paso a paso vivia en el prompt y el modelo siempre
+    tenia algo que decir. Ahora la fuente es el catalogo, y si esta vacio la
+    respuesta correcta es no saber -- inventar una ruta de menu que no existe
+    manda al cliente a buscar una opcion que su televisor no tiene.
+    """
+    return {
+        "guia_encontrada": False,
+        "instruccion_interna":
+            f"No hay guia {cual} cargada en la configuracion de esta empresa. "
+            f"NO inventes pasos de sintonizacion ni rutas de menu: no tenes de "
+            f"donde sacarlos. Segui con el diagnostico tecnico, y si con eso "
+            f"no se resuelve, pasalo con un colaborador humano.",
+    }
+
+
 def _ejecutar_consulta_parrilla(config, argumentos_modelo: dict) -> dict:
     """
     Resuelve si un canal esta en la parrilla de TV. La parrilla es UNICA para
@@ -1293,6 +1409,8 @@ def ejecutar_para_servicio(config, herramienta, argumentos_modelo: dict) -> dict
         return _ejecutar_consulta_servicios_ofrecidos(config, argumentos)
     if herramienta.tipo == "interno" and herramienta.consulta_parrilla:
         return _ejecutar_consulta_parrilla(config, argumentos)
+    if herramienta.tipo == "interno" and herramienta.consulta_guias_tv:
+        return _ejecutar_consulta_guia_tv(config, argumentos)
 
     if herramienta.tipo == "http":
         return (ejecutor_http.ejecutar_asincrono(herramienta, argumentos,
@@ -2418,6 +2536,11 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 # Idem. La parrilla es unica para todos los planes con TV, asi
                 # que la respuesta no depende de quien pregunta ni de su plan.
                 salida = _ejecutar_consulta_parrilla(config, llamada.argumentos)
+            elif herramienta.consulta_guias_tv:
+                # Fuera del gate por el mismo motivo: como se sintoniza un
+                # televisor Samsung es igual para todo el mundo. No menciona a
+                # ningun cliente ni depende de su plan.
+                salida = _ejecutar_consulta_guia_tv(config, llamada.argumentos)
             elif herramienta.consulta_documentacion:
                 # Fuera del gate: una guia de procedimientos no menciona a
                 # ningun cliente. Ver el porque del cambio entero en

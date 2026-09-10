@@ -52,6 +52,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from nucleo.config import cargar_config                              # noqa: E402
 from nucleo.config.schema import GuiaTV, Herramienta, TenantConfig    # noqa: E402
+from nucleo.modelo import motor                                      # noqa: E402
 
 fallos: list[str] = []
 
@@ -174,6 +175,134 @@ afirmar(h.consulta_guias_tv is True,
         "y una herramienta interna puede declararlo")
 afirmar("guias_tv" in TenantConfig.model_fields,
         "TenantConfig tiene el catalogo")
+
+
+# =============================================================================
+#  PASO 2 -- LA RESOLUCION
+# =============================================================================
+#
+# Cual guia corresponde lo decide el CODIGO, no el modelo (PRD 12.5). Son tres
+# reglas encadenadas y equivocarse en cualquiera le entrega al cliente un
+# procedimiento que no corresponde a su televisor.
+
+
+class _Config:
+    """Una config con solo lo que la resolucion mira."""
+    def __init__(self, guias):
+        self.guias_tv = [GuiaTV(**g) if isinstance(g, dict) else g for g in guias]
+
+
+SAMSUNG = {"marca": "Samsung", "instrucciones": "Menu > Canales > ANTENA",
+           "url_video": "https://v.example/samsung", "observaciones": "interno"}
+GENERAL = {"marca": "", "instrucciones": "Busca sintonizacion automatica",
+           "observaciones": "nota del administrador"}
+TDT = {"marca": "", "tipo_conexion": "tdt",
+       "instrucciones": "Enciende el TDT y pon el TV en HDMI",
+       "url_video": "https://v.example/tdt", "observaciones": "solo modelos nuevos"}
+
+COMPLETO = _Config([SAMSUNG, GENERAL, TDT])
+
+
+def resolver(config, **kw):
+    return motor._ejecutar_consulta_guia_tv(config, kw)
+
+
+print("\n== 7. marca + directo -> la guia especifica ==")
+r = resolver(COMPLETO, tipo_conexion="directo", marca="Samsung")
+afirmar(r.get("tipo_guia") == "especifica", "elige la guia de la marca")
+afirmar(r.get("instrucciones") == SAMSUNG["instrucciones"],
+        "y entrega SUS instrucciones, no las generales")
+afirmar(r.get("url_video") == SAMSUNG["url_video"], "con su video")
+
+# Normalizado: una guia cargada no puede quedar invisible por una mayuscula
+# o una tilde, ni por un tipeo del cliente.
+for escrito in ("samsung", "SAMSUNG", "  Samsung  ", "Sansung"):
+    afirmar(resolver(COMPLETO, tipo_conexion="directo",
+                     marca=escrito).get("tipo_guia") == "especifica",
+            f"la encuentra escribiendo {escrito!r}")
+
+
+print("\n== 8. marca sin guia propia -> la general ==")
+r = resolver(COMPLETO, tipo_conexion="directo", marca="Kalley")
+afirmar(r.get("tipo_guia") == "general", "cae a la general")
+afirmar(r.get("instrucciones") == GENERAL["instrucciones"],
+        "con el texto de la general")
+afirmar(r.get("marca_sin_guia_propia") == "Kalley",
+        "y avisa que esa marca no tiene guia -- para registrarla, no para "
+        "escalar")
+
+
+print("\n== 9. tdt -> la unica de TDT, ignorando la marca ==")
+# El coaxial ni llega al televisor: quien sintoniza es la cajita.
+for marca in ("Samsung", "Kalley", "", "LG"):
+    r = resolver(COMPLETO, tipo_conexion="tdt", marca=marca)
+    afirmar(r.get("tipo_guia") == "tdt"
+            and r.get("instrucciones") == TDT["instrucciones"],
+            f"con marca={marca!r} entrega la de TDT")
+afirmar("marca_sin_guia_propia" not in resolver(
+            COMPLETO, tipo_conexion="tdt", marca="Kalley"),
+        "y NO la registra como marca sin guia: en TDT la marca es irrelevante")
+
+
+print("\n== 10. una guia inactiva no se usa ==")
+apagada = _Config([{**SAMSUNG, "activa": False}, GENERAL])
+r = resolver(apagada, tipo_conexion="directo", marca="Samsung")
+afirmar(r.get("tipo_guia") == "general",
+        "con la de Samsung apagada, cae a la general en vez de usarla")
+afirmar(r.get("instrucciones") != SAMSUNG["instrucciones"],
+        "y no entrega su texto")
+
+
+print("\n== 11. sin guia: fail-closed, no se inventa nada ==")
+# Antes del catalogo el paso a paso vivia en el prompt y el modelo siempre
+# tenia algo que decir. Ahora la fuente es el catalogo: si esta vacio, la
+# respuesta correcta es no saber.
+for config, caso in ((_Config([]), "catalogo vacio"),
+                     (_Config([TDT]), "solo hay de TDT y piden directo")):
+    r = resolver(config, tipo_conexion="directo", marca="Samsung")
+    afirmar(r.get("guia_encontrada") is False, f"{caso}: no hay guia")
+    afirmar("instrucciones" not in r and "url_video" not in r,
+            f"{caso}: no devuelve instrucciones inventadas")
+    afirmar("NO inventes" in (r.get("instruccion_interna") or ""),
+            f"{caso}: y se lo dice al modelo explicitamente")
+
+r = resolver(_Config([SAMSUNG, GENERAL]), tipo_conexion="tdt")
+afirmar(r.get("guia_encontrada") is False,
+        "sin guia de TDT tampoco se cae a la general -- son procedimientos "
+        "distintos, no uno el respaldo del otro")
+
+
+print("\n== 12. sin saber la conexion, se pregunta ==")
+# La de TDT y la de TV directo no se parecen en nada: suponer cual es le
+# entrega al cliente el procedimiento del equipo que no tiene.
+for kw in ({}, {"marca": "Samsung"}, {"tipo_conexion": "cable"}):
+    r = resolver(COMPLETO, **kw)
+    afirmar(r.get("guia_encontrada") is False and "instrucciones" not in r,
+            f"con {kw or 'nada'} no entrega ninguna guia")
+afirmar("cajita" in (resolver(COMPLETO).get("instruccion_interna") or ""),
+        "y le dice al agente que pregunte por la cajita")
+
+
+print("\n== 13. las observaciones NUNCA salen ==")
+# Son notas para quien administra el catalogo ("confirmado con el tecnico"),
+# no para el cliente ni para el modelo que redacta.
+for kw in ({"tipo_conexion": "directo", "marca": "Samsung"},
+           {"tipo_conexion": "directo", "marca": "Kalley"},
+           {"tipo_conexion": "tdt"}):
+    r = resolver(COMPLETO, **kw)
+    afirmar("observaciones" not in r,
+            f"no hay clave 'observaciones' resolviendo {kw}")
+    afirmar(not any("interno" in str(v) or "administrador" in str(v)
+                    or "modelos nuevos" in str(v) for v in r.values()),
+            f"ni su texto se cuela por otra clave resolviendo {kw}")
+
+
+print("\n== 14. una guia sin video no inventa la clave ==")
+sin_video = _Config([{"marca": "LG", "instrucciones": "paso a paso"}, GENERAL])
+r = resolver(sin_video, tipo_conexion="directo", marca="LG")
+afirmar("url_video" not in r,
+        "sin video cargado la clave NO viene -- una clave vacia invita al "
+        "modelo a rellenarla")
 
 
 print()
