@@ -436,8 +436,9 @@ herramientas:
     asi que no lo intentes "por si acaso": sigue el protocolo normal.
 
     Despues de encenderla, dile al cliente que ya quedo activada y preguntale si le volvio la señal. Si
-    todavia no la ve, guialo con la sintonizacion automatica de canales eligiendo ANTENA -- el equipo
-    necesita volver a buscar los canales despues de recuperar la señal.
+    todavia no la ve, el equipo necesita volver a buscar los canales: pedile los pasos a
+    consultar_guia_sintonizacion -- son distintos segun la marca del televisor y segun use TDT, y por
+    eso no van escritos aca.
 
     Maximo UNA vez por conversacion.
 

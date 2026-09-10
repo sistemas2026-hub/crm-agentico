@@ -184,6 +184,7 @@ roles:
           consultar_estabilidad_enlace,
           consultar_estado_ont, consultar_senal_ont, reiniciar_ont,
           diagnosticar_falla_ont, consultar_estado_catv, activar_catv, cambiar_tipo_onu,
+          consultar_guia_sintonizacion,
           consultar_incidente_red, consultar_dispositivos_conectados,
           consultar_tecnicos, crear_ticket, responder_ticket,
           actualizar_estado_ticket, cargar_habilidad,
@@ -577,10 +578,12 @@ roles:
       en rojo (eso ES la señal optica), si se corto la luz en el
       domicilio, si el puerto de TV esta activo, y si el equipo responde.
 
-      Lo que SOLO sabe el cliente, y por lo tanto SI se pregunta: cuantos
-      TV/TDT tiene conectados, si el cableado lo puso la empresa o se
-      agrego despues, si esta bien ajustado y en la entrada correcta, si
-      el TV es digital o usa TDT, y si ya hizo la sintonizacion.
+      Lo que SOLO sabe el cliente, y por lo tanto SI se pregunta: si el
+      coaxial entra directo al televisor o pasa antes por una cajita (TDT),
+      que marca es el televisor, cuantos tiene conectados (maximo
+      recomendado 5, con splitter), si el cableado lo puso la empresa o lo
+      agrego/modifico el mismo, si esta bien ajustado y en la entrada
+      correcta, y si ya hizo la sintonizacion.
 
       COMO SE MANDA UN PROCEDIMIENTO POR WHATSAPP. El manual esta escrito
       para que lo lea un agente: trae el paso a paso completo y las
@@ -589,9 +592,13 @@ roles:
       no lo hace.
 
       Dale el paso siguiente en UNA o DOS lineas, con el unico detalle que
-      no puede fallar. Ej: "haz la busqueda automatica de canales en el TV
-      y, cuando te pregunte, elige ANTENA". Nada de listas numeradas de
-      cinco pasos ni de menus por marca. Si despues te dice que no
+      no puede fallar. Nada de listas numeradas de cinco pasos ni de menus
+      por marca: si la guia trae varios pasos, dale el primero y espera.
+
+      OJO: los pasos de SINTONIZACION no los escribis vos ni los recordas
+      de memoria -- salen de consultar_guia_sintonizacion, que es la fuente
+      oficial y se administra desde la interfaz. Lo que decide esta seccion
+      es COMO se los mandas, no cuales son. Si despues te dice que no
       encuentra la opcion, RECIEN AHI le explicas donde esta en su
       televisor. Un mensaje corto que se lee y se hace sirve mas que uno
       completo que se saltea.
@@ -1105,9 +1112,11 @@ roles:
         equipo. Esa ES la falla, y la resuelves TU: llama a activar_catv.
         No derives a un humano por esto y no le pidas que sintonice
         antes -- primero encendelo. Despues cuentale que ya quedo
-        activado y pidele que haga la sintonizacion automatica
-        eligiendo ANTENA, que es lo que hace falta para que el equipo
-        vuelva a encontrar los canales.
+        activado y pidele que sintonice: el equipo necesita volver a
+        buscar los canales despues de recuperar la señal. Los PASOS
+        salen de consultar_guia_sintonizacion, no de tu memoria --
+        preguntale si el coaxial entra directo al TV o pasa por una
+        cajita, y si es directo tambien la marca.
 
       - CATV en 'Not supported by ONU-Type': el TIPO con que quedo
         registrado el equipo no expone el puerto de television. Ojo, eso
@@ -1148,9 +1157,16 @@ roles:
       - Todo sano (en linea, señal bien y puerto 'up'): recien ahi el
         problema esta del lado del cliente. Cuentale en UNA frase que del
         lado nuestro la señal de TV sale bien, y AHI si hace el checklist
-        del manual -- cuantos TV/TDT (lo recomendado es hasta 4), si el
-        cableado lo puso la empresa, si esta bien ajustado y en la entrada
-        correcta, y la sintonizacion completa eligiendo ANTENA.
+        del manual -- cuantos televisores tiene conectados (el maximo
+        recomendado es 5, con splitter), si el cableado lo puso la empresa
+        o lo agrego/modifico el mismo despues, y si esta bien ajustado y en
+        la entrada correcta.
+
+        Y para la sintonizacion, consultar_guia_sintonizacion: preguntale
+        si el coaxial entra directo al televisor o pasa antes por una
+        cajita (TDT), y si es directo tambien que marca es. Con eso te
+        devuelve los pasos que le corresponden a SU equipo -- no los
+        escribas vos.
 
       Si la consulta en realidad es de facturacion, llama a derivar_a_area
       hacia facturacion_cliente -- no intentes resolverla tu.
@@ -1159,7 +1175,8 @@ roles:
           consultar_mi_servicio, ping_cliente, derivar_a_area,
           consultar_plan_tv, consultar_estado_ont, consultar_senal_ont,
           reiniciar_ont, diagnosticar_falla_ont, consultar_estado_catv, activar_catv,
-          cambiar_tipo_onu, consultar_dispositivos_conectados,
+          cambiar_tipo_onu, consultar_guia_sintonizacion,
+          consultar_dispositivos_conectados,
           consultar_incidente_red, consultar_velocidad_aprovisionada,
           consultar_estabilidad_enlace, registrar_pedido_wifi,
           cargar_habilidad, consultar_documentacion]
@@ -2323,6 +2340,50 @@ herramientas:
     filtros_verificados:
       servicio:
         param: servicio
+        tipo: texto
+
+  # LA FUENTE OFICIAL DE LA SINTONIZACION desde el 10/09/2026.
+  #
+  # Antes el paso a paso estaba escrito en TRES lugares -- el prompt de este
+  # mismo rol, la descripcion de activar_catv aca, y esa misma descripcion
+  # copiada en conectores/smartolt.yaml-- para algo que cambia por marca de
+  # televisor y que nadie podia corregir sin un desarrollador.
+  #
+  # Ahora sale del catalogo que se administra en /settings/guias-tv. El prompt
+  # dice CUANDO consultarla; el contenido viene de aca.
+  - nombre: consultar_guia_sintonizacion
+    tipo: interno
+    descripcion: >
+      Como sintonizar el televisor del cliente. ES LA UNICA FUENTE de esas
+      instrucciones: no las escribas de memoria ni las completes con pasos
+      que no vengan de aca.
+
+      Necesita saber COMO esta conectado, y eso decide todo:
+
+      - 'directo' -- el coaxial entra al televisor. Pasale ademas 'marca'
+        (tal cual la escribio el cliente): si esa marca tiene guia propia te
+        la devuelve, y si no, la general. Las dos sirven.
+      - 'tdt' -- el coaxial llega primero a una cajita. Ahi la marca del
+        televisor NO importa y hay una sola guia; no hace falta preguntarla.
+
+      Si no sabes cual de las dos es, preguntaselo antes: son procedimientos
+      distintos y darle el equivocado lo manda a buscar opciones que su
+      equipo no tiene.
+
+      Entregale 'instrucciones' TAL CUAL, sin resumirlas ni agregarles pasos,
+      y 'url_video' si viene. Despues preguntale si aparecieron los canales.
+
+      Si devuelve guia_encontrada=false NO hay guia cargada: no inventes una,
+      segui con el diagnostico tecnico.
+    solo_lectura: true
+    roles_permitidos: [soporte_tecnico_cliente, soporte]
+    consulta_guias_tv: true
+    filtros_verificados:
+      tipo_conexion:
+        param: tipo_conexion
+        tipo: texto
+      marca:
+        param: marca
         tipo: texto
 
   - nombre: consultar_parrilla_canales
@@ -4711,9 +4772,10 @@ herramientas:
       sigue el protocolo normal.
 
       Despues de encenderla, dile al cliente que ya quedo activada y
-      preguntale si le volvio la señal. Si todavia no la ve, guialo con la
-      sintonizacion automatica de canales eligiendo ANTENA -- el equipo
-      necesita volver a buscar los canales despues de recuperar la señal.
+      preguntale si le volvio la señal. Si todavia no la ve, el equipo
+      necesita volver a buscar los canales: pedile los pasos a
+      consultar_guia_sintonizacion -- son distintos segun la marca del
+      televisor y segun use TDT, y por eso no van escritos aca.
 
       Maximo UNA vez por conversacion.
     solo_lectura: false

@@ -327,12 +327,24 @@ casos:
   # evidencia de que falte documentacion de TV. Leerlas como un hueco de
   # contenido fue un error de interpretacion (22/08/2026).
   #
-  # El diagnostico de TV NO va al corpus porque ya vive completo en el prompt
-  # del rol: confirmar el plan con consultar_plan_tv (nunca por el nombre del
-  # plan), el arbol segun consultar_estado_catv (Offline / Disabled / Not
-  # supported), y hasta el texto de la sintonizacion automatica eligiendo
-  # ANTENA. Escribirlo tambien en un documento seria una segunda fuente de
-  # verdad para una regla que ya funciona.
+  # El DIAGNOSTICO de TV no va al corpus porque vive en el prompt del rol:
+  # confirmar el plan con consultar_plan_tv (nunca por el nombre del plan) y
+  # el arbol segun consultar_estado_catv (Offline / Disabled / Not supported).
+  # Escribirlo tambien en un documento seria una segunda fuente de verdad para
+  # una regla que ya funciona.
+  #
+  # LA SINTONIZACION YA NO. Hasta el 10/09/2026 este mismo parrafo decia que
+  # tambien vivia en el prompt -- "hasta el texto de la sintonizacion
+  # automatica eligiendo ANTENA"-- y ese era justamente el problema: el paso a
+  # paso estaba escrito en TRES lugares (el prompt, la descripcion de
+  # activar_catv en tenants/, y su copia en conectores/) para algo que cambia
+  # por marca de televisor y que nadie podia corregir sin un desarrollador. La
+  # segunda fuente de verdad que este comentario queria evitar ya existia.
+  #
+  # Ahora sale de un catalogo administrable (TenantConfig.guias_tv, pantalla
+  # /settings/guias-tv) y el agente lo pide con consultar_guia_sintonizacion.
+  # TAMPOCO va al corpus: seria la cuarta copia. Quien tenga que cambiar un
+  # paso de sintonizacion lo cambia en la pantalla, no en un documento.
   #
   # Su guarda es un caso dorado que lo prueba de punta a punta contra el
   # motor real, que es donde corresponde: ver "falla de TV confirma el plan y
