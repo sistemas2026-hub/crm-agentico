@@ -40,3 +40,9 @@ corpus/**
 candidatos_sn_onu.csv
 pendientes_sn_onu_manual.md
 seriales_propuestos.csv
+
+# Capturas y volcados de UI del emulador Android. Se generan trabajando en la
+# app de tecnicos y no describen nada que el repositorio tenga que recordar:
+# son 5,7 MB de PNG del estado de una pantalla en un momento. Estuvieron a
+# punto de entrar al repositorio compartido el 10/09/2026.
+.tmp/
