@@ -616,6 +616,119 @@ afirmar("registrar_marca_tv_desconocida" in FUENTE_API,
         "y se llama despues de que exista conversation_id, no antes")
 
 
+# =============================================================================
+#  PASO 7 -- LA FICHA DEL ESCALAMIENTO
+# =============================================================================
+#
+# La arma el CODIGO con lo que ya se resolvio. Marca, conexion y guia
+# entregada se decidieron cuando se resolvio la guia; volver a pedirselos al
+# modelo en prosa lo invita a recordarlos mal, y quien lee el ticket no tiene
+# forma de saber cual de las dos versiones es cierta.
+
+from nucleo.seguimiento import escalamiento                          # noqa: E402
+
+
+def con_guia(**kw):
+    """Una sesion con una guia ya resuelta."""
+    ses = sesion_nueva()
+    motor._ejecutar_consulta_guia_tv(COMPLETO, kw, ses)
+    return ses
+
+
+print("PASO7 22. lo que el codigo sabe con certeza")
+ses = con_guia(tipo_conexion="directo", marca="Samsung")
+f = escalamiento.ficha_tv(ses)
+afirmar("coaxial entra directo" in f, "dice como esta conectado")
+afirmar("Samsung" in f, "la marca del televisor")
+afirmar("la de su marca" in f, "y que guia se le entrego")
+afirmar("Se le mando el video" in f,
+        "y si llevaba video -- la guia de Samsung tiene url cargada")
+afirmar("NO aparecieron los canales" in f,
+        "y que la siguio sin resultado: por eso escalo, y decirlo evita que "
+        "el humano se la vuelva a mandar creyendo que no se probo")
+
+
+print("PASO7 23. con TDT la marca no se lista")
+# Ahi la marca no interviene en la guia. Mostrarla sugeriria que influyo.
+ses = con_guia(tipo_conexion="tdt", marca="Kalley")
+f = escalamiento.ficha_tv(ses)
+afirmar("TDT" in f and "HDMI" in f, "dice que va por TDT y como llega al TV")
+afirmar("Kalley" not in f, "y NO lista la marca")
+
+
+print("PASO7 24. la marca sin guia propia se dice, y como es")
+ses = con_guia(tipo_conexion="directo", marca="Kalley")
+f = escalamiento.ficha_tv(ses)
+afirmar("Kalley" in f, "la marca igual aparece")
+afirmar("no tiene guia propia" in f,
+        "y se aclara que se uso la general, que es lo que explica por que "
+        "puede no haber funcionado")
+
+
+print("PASO7 25. las tres que solo estan en la conversacion")
+# No las puede saber ningun sistema: llegan del modelo en campos con nombre y
+# el TEXTO lo escribe el codigo.
+ses = con_guia(tipo_conexion="directo", marca="Samsung")
+f = escalamiento.ficha_tv(ses, {"tv_cantidad_televisores": 3,
+                                "tv_tiene_splitter": True,
+                                "tv_cableado_del_cliente": True})
+afirmar("Televisores conectados: 3" in f, "cuantos televisores")
+afirmar("splitter" in f.lower(), "si hay splitter")
+afirmar("lo modifico el cliente" in f, "y si el cableado lo toco el cliente")
+
+# El maximo recomendado es 5. Pasarse degrada la señal en todos, y quien va a
+# la casa tiene que saberlo antes de buscar la falla en otro lado.
+f6 = escalamiento.ficha_tv(ses, {"tv_cantidad_televisores": 6})
+afirmar("maximo recomendado de 5" in f6, "con 6 se avisa que pasa el maximo")
+f5 = escalamiento.ficha_tv(ses, {"tv_cantidad_televisores": 5})
+afirmar("maximo recomendado" not in f5, "con 5 no, porque 5 esta permitido")
+
+# Un 'false' no se lista: "no tiene splitter" ocupa lugar y no es un hallazgo.
+f0 = escalamiento.ficha_tv(ses, {"tv_tiene_splitter": False,
+                                 "tv_cableado_del_cliente": False})
+afirmar("splitter" not in f0.lower() and "cableado" not in f0.lower(),
+        "lo que el cliente descarto no se lista")
+
+
+print("PASO7 26. la evidencia se cuenta, no se interpreta")
+# Esta etapa NO activa vision del modelo: solo dice que hay fotos para ir a
+# buscarlas a la conversacion, donde ya se guardaban desde antes.
+f = escalamiento.ficha_tv(con_guia(tipo_conexion="directo", marca="Samsung"),
+                          None, evidencias=2)
+afirmar("2 imagen(es)" in f, "dice cuantas imagenes mando el cliente")
+afirmar("guardadas en la conversacion" in f, "y donde estan")
+FUENTE_ESC = texto(RAIZ / "nucleo" / "seguimiento" / "escalamiento.py")
+afirmar("image_url" not in FUENTE_ESC and "base64" not in FUENTE_ESC,
+        "y NO se manda ninguna imagen al modelo: la vision es otra fase")
+
+
+print("PASO7 27. sin television no hay ficha")
+# Un bloque que dice "marca: --, conexion: --" ocupa lugar y no informa nada.
+afirmar(escalamiento.ficha_tv(sesion_nueva()) == "",
+        "una conversacion que nunca hablo de TV no genera ficha")
+afirmar(escalamiento.ficha_tv(None) == "",
+        "ni una sin sesion")
+afirmar(escalamiento.ficha_tv(sesion_nueva(), {"resumen": "x"}) == "",
+        "ni una evaluacion de otro tema")
+
+
+print("PASO7 28. no se toco la logica de escalamiento")
+# Los tres campos nuevos son OPCIONALES: no cambian cuando escala ni cuando
+# no. Si fueran requeridos, una conversacion de facturacion sin televisor
+# quedaria sin poder responder el esquema.
+afirmar('"tv_cantidad_televisores"' in FUENTE_ESC,
+        "los campos existen en el esquema")
+i = FUENTE_ESC.index("requeridos = [")
+for campo in ("tv_cantidad_televisores", "tv_tiene_splitter",
+              "tv_cableado_del_cliente"):
+    afirmar(campo not in FUENTE_ESC[i:i + 400],
+            f"'{campo}' NO es requerido")
+FUENTE_API2 = texto(RAIZ / "nucleo" / "canales" / "api.py")
+afirmar("descripcion_ticket.strip() + chr(10) * 2 + ficha" in FUENTE_API2,
+        "la ficha se SUMA al resumen, no lo reemplaza -- el relato y los "
+        "datos duros cumplen funciones distintas")
+
+
 print()
 if fallos:
     print(f"[FALLA] {len(fallos)} comprobacion(es):")

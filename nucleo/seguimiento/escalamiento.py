@@ -214,6 +214,35 @@ def _esquema_evaluacion(config, rol_cfg=None) -> dict:
                 "que tiene que alcanzar por si solo, sin tener "
                 "que leer el resto para entenderlo.",
         },
+        # LAS TRES COSAS DE TELEVISION QUE NINGUN SISTEMA MIDE.
+        #
+        # Todo lo demas de la ficha lo arma el codigo con lo que ya se
+        # resolvio (ver ficha_tv). Estas tres solo existen en lo que dijo el
+        # cliente, y por eso se le piden al modelo -- pero como campos con
+        # nombre, no como un parrafo: el aporta la observacion suelta y el
+        # texto lo escribe el codigo.
+        #
+        # Opcionales y acotadas a TV: en una conversacion de facturacion no
+        # aplican y se dejan sin contestar.
+        "tv_cantidad_televisores": {
+            "type": "integer",
+            "description": "Cuantos televisores dijo el cliente que tiene "
+                "conectados al servicio. Solo si lo dijo y la conversacion "
+                "fue de television; si no, no lo mandes.",
+        },
+        "tv_tiene_splitter": {
+            "type": "boolean",
+            "description": "true solo si el cliente confirmo que tiene un "
+                "splitter repartiendo la señal a varios televisores. No lo "
+                "supongas por tener varios TV.",
+        },
+        "tv_cableado_del_cliente": {
+            "type": "boolean",
+            "description": "true solo si el cliente dijo que el cableado "
+                "coaxial lo instalo o lo modifico el mismo (o alguien que no "
+                "es la empresa). Es una causa de falla frecuente y quien vaya "
+                "a la casa tiene que saberlo antes de salir.",
+        },
         # Los dos campos que convierten el traspaso en un relevo y no en un
         # "aca te dejo esto". La traza ya dice QUE se midio y con que
         # resultado (ver _que_se_probo), pero no dice lo unico que quien
@@ -783,3 +812,86 @@ def caso_sigue_abierto(config, caso_id: str) -> bool:
         print(f"[escalamiento] no se pudo verificar el caso {caso_id}, "
               f"se mantiene pausado: {type(e).__name__}: {e}")
         return True
+
+
+# =============================================================================
+#  LA FICHA DE TELEVISION
+# =============================================================================
+
+_ETIQUETA_GUIA = {
+    "especifica": "la de su marca",
+    "general": "la general (su marca no tiene guia propia todavia)",
+    "tdt": "la de TDT",
+}
+
+
+def ficha_tv(sesion, evaluacion: dict | None = None,
+             evidencias: int = 0) -> str:
+    """
+    Lo que se sabe del televisor de este cliente, para quien reciba el caso.
+
+    LA ARMA EL CODIGO, NO EL MODELO, y esa es toda la diferencia. Marca, tipo
+    de conexion, que guia se entrego y si llevaba video ya se decidieron
+    cuando se resolvio la guia (motor.py deja constancia en Sesion.tv_guia).
+    Volver a pedirselos al modelo en prosa lo invita a recordarlos mal, y quien
+    lee el ticket no tiene forma de saber cual de las dos versiones es cierta.
+
+    Lo que SI viene del modelo son las tres cosas que solo estan en la
+    conversacion y ningun sistema mide -- cuantos televisores hay, si hay
+    splitter, y si el cableado lo toco el cliente. Llegan en campos con nombre
+    del esquema de 'evaluar', no en un parrafo: el modelo aporta observaciones
+    sueltas y el texto lo escribe esta funcion.
+
+    Devuelve cadena vacia si la conversacion no fue de television. No se
+    inventa una ficha vacia con guiones: un bloque que dice "marca: -- ,
+    conexion: --" ocupa lugar y no informa nada.
+    """
+    guia = getattr(sesion, "tv_guia", None) or {} if sesion is not None else {}
+    ev = evaluacion or {}
+    cantidad = ev.get("tv_cantidad_televisores")
+    splitter = ev.get("tv_tiene_splitter")
+    cableado = ev.get("tv_cableado_del_cliente")
+
+    if not guia and cantidad is None and splitter is None and cableado is None:
+        return ""
+
+    lineas = ["TELEVISION -- lo que se confirmo en la conversacion:"]
+
+    if guia.get("tipo_conexion") == "tdt":
+        lineas.append("  - Conexion: el coaxial va a un TDT y de ahi al TV "
+                      "(HDMI o AV). No entra directo al televisor.")
+    elif guia.get("tipo_conexion") == "directo":
+        lineas.append("  - Conexion: el coaxial entra directo al televisor.")
+
+    # Con TDT la marca no interviene en la guia, asi que no se lista aunque el
+    # cliente la haya dicho: mostrarla ahi sugiere que influyo en algo.
+    if guia.get("marca") and guia.get("tipo_conexion") != "tdt":
+        lineas.append("  - Marca del televisor: " + guia["marca"])
+
+    if guia.get("tipo_guia"):
+        etiqueta = _ETIQUETA_GUIA.get(guia["tipo_guia"], guia["tipo_guia"])
+        con_video = " Se le mando el video." if guia.get("url_video") else ""
+        lineas.append("  - Guia entregada: " + etiqueta + "." + con_video)
+        # Que la haya seguido y no funcionara es justamente el motivo por el
+        # que el caso llego hasta aca: se dice, para que nadie se la vuelva a
+        # mandar creyendo que no se probo.
+        lineas.append("  - Resultado: siguio la guia y NO aparecieron los "
+                      "canales (por eso escalo).")
+
+    if isinstance(cantidad, int) and cantidad > 0:
+        # El maximo recomendado es 5 (decision de negocio, 10/09/2026). Pasarse
+        # degrada la señal en todos, y quien va a la casa tiene que saberlo
+        # antes de buscar la falla en otro lado.
+        aviso = " -- por encima del maximo recomendado de 5" if cantidad > 5 else ""
+        lineas.append(f"  - Televisores conectados: {cantidad}{aviso}")
+    if splitter is True:
+        lineas.append("  - Tiene splitter de TV.")
+    if cableado is True:
+        lineas.append("  - El cableado coaxial lo hizo o lo modifico el "
+                      "cliente, no la empresa.")
+
+    if evidencias:
+        lineas.append(f"  - Evidencia: {evidencias} imagen(es) que mando el "
+                      f"cliente, guardadas en la conversacion.")
+
+    return chr(10).join(lineas)

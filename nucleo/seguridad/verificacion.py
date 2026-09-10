@@ -142,6 +142,14 @@ class Sesion:
     # de televisor, y lo unico que se guarda de ella es que aparecio y en que
     # conversacion, para que alguien pueda cargarle su guia.
     marcas_tv_sin_guia: list[str] = field(default_factory=list)
+    # Lo que se resolvio sobre el televisor de este cliente: marca, si el
+    # coaxial entra directo o pasa por un TDT, que guia se le entrego y si
+    # llevaba video. Lo llena consultar_guia_sintonizacion al resolver.
+    #
+    # Existe para que la ficha del escalamiento la arme el CODIGO y no el
+    # modelo: son datos que ya se decidieron, y volver a pedirselos en prosa
+    # invita a que los recuerde mal. Ver escalamiento.ficha_tv().
+    tv_guia: dict = field(default_factory=dict)
     # Que servicio dijo el CLIENTE que le falla, declarado por la puerta al
     # derivar (ver Herramienta.servicios_reportables). None = todavia no se
     # derivo; el valor centinela 'no_lo_dijo' = se derivo pero el mensaje era

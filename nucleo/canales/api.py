@@ -141,6 +141,34 @@ def _config_de(tenant: str):
     return _configs[tenant]
 
 
+def _evidencias_de(tenant: str, conversation_id: str | None) -> int:
+    """
+    Cuantas imagenes mando el cliente en esta conversacion.
+
+    Solo el NUMERO: quien lea el ticket necesita saber que hay fotos para ir a
+    buscarlas, no recibirlas ahi. Las imagenes ya se guardan colgadas de la
+    conversacion desde antes (ver _guardar_adjunto); esta etapa no las
+    interpreta, solo las cuenta.
+
+    Nunca rompe el turno: sin el conteo la ficha sale igual, con una linea
+    menos.
+    """
+    if not conversation_id:
+        return 0
+    try:
+        with persistencia.sesion(tenant) as (cur, _org):
+            cur.execute(
+                """select count(*) as n from asistente.media
+                   where conversation_id = %s and tipo = 'image'""",
+                (conversation_id,))
+            fila = cur.fetchone()
+        return int((fila or {}).get("n") or 0)
+    except Exception as e:                            # noqa: BLE001
+        print(f"[escalamiento] no se pudieron contar las evidencias: "
+              f"{type(e).__name__}: {e}")
+        return 0
+
+
 def _primer_mensaje_del_cliente(historial: list[dict]) -> str:
     """
     Lo primero que escribio el cliente, sin resumir.
@@ -1604,6 +1632,21 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                     if not descripcion_ticket.strip():
                         descripcion_ticket = _primer_mensaje_del_cliente(
                             estado["historial"])
+
+                    # LA FICHA DE TV VA DEBAJO DEL RELATO, no en su lugar.
+                    #
+                    # El resumen dice que paso; la ficha dice lo que se
+                    # confirmo -- marca, conexion, que guia se entrego. Lo
+                    # arma el codigo con lo que ya se resolvio, en vez de
+                    # confiar en que el modelo lo recuerde bien al redactar
+                    # (ver escalamiento.ficha_tv). Vacia si la conversacion
+                    # no fue de television.
+                    ficha = escalamiento.ficha_tv(
+                        estado["sesion"], evaluacion,
+                        evidencias=_evidencias_de(tenant, conversation_id))
+                    if ficha:
+                        descripcion_ticket = (
+                            descripcion_ticket.strip() + chr(10) * 2 + ficha)
                     sugerido = (evaluacion.get("asunto_sugerido") or "").strip()
                     if sugerido:
                         descripcion_ticket = (

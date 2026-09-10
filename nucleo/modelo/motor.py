@@ -927,6 +927,17 @@ def _ejecutar_consulta_guia_tv(config, argumentos_modelo: dict, sesion=None) -> 
                 "tipo_conexion='directo' o 'tdt'.",
         }
 
+    def _anotar(g, tipo_guia: str) -> None:
+        """Deja constancia de lo resuelto, para la ficha del escalamiento."""
+        if sesion is None:
+            return
+        sesion.tv_guia = {
+            "tipo_conexion": tipo,
+            "marca": marca,
+            "tipo_guia": tipo_guia,
+            "url_video": g.url_video.strip(),
+        }
+
     def _sirve(g) -> dict:
         return {
             "guia_encontrada": True,
@@ -945,6 +956,7 @@ def _ejecutar_consulta_guia_tv(config, argumentos_modelo: dict, sesion=None) -> 
         # La marca llega y se descarta a proposito -- ver el docstring.
         tdt = next((g for g in guias if g.tipo_conexion == "tdt"), None)
         if tdt:
+            _anotar(tdt, "tdt")
             return {**_sirve(tdt), "tipo_guia": "tdt"}
         return _sin_guia("TDT")
 
@@ -965,6 +977,7 @@ def _ejecutar_consulta_guia_tv(config, argumentos_modelo: dict, sesion=None) -> 
             if parecidas:
                 exacta = next(g for g in con_marca if g.marca == parecidas[0])
         if exacta is not None:
+            _anotar(exacta, "especifica")
             return {**_sirve(exacta), "tipo_guia": "especifica",
                     "marca_resuelta": exacta.marca}
 
@@ -981,6 +994,7 @@ def _ejecutar_consulta_guia_tv(config, argumentos_modelo: dict, sesion=None) -> 
             # smart'): quien despues cree la guia necesita ver como la nombra
             # la gente, no como deberia llamarse.
             sesion.marcas_tv_sin_guia.append(marca)
+        _anotar(general, "general")
         return {**_sirve(general), "tipo_guia": "general",
                 # Que la marca no tenga guia propia NO es un problema ni un
                 # motivo para escalar: la general resuelve la mayoria. Se
