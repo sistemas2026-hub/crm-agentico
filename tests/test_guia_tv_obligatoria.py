@@ -342,6 +342,34 @@ comprobar(len(herramientas_tv) == 1,
           f"que no es")
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+print("\n== 10. consultar SIN la marca no desarma el candado ==")
+
+# El fallo de produccion del 10/09/2026 tenia TRES sintomas y este es el
+# tercero, el que lo volvio invisible: la herramienta devolvia la guia general
+# con guia_encontrada=true aunque nadie hubiera preguntado la marca, asi que
+# el candado daba la guia por resuelta y dejaba pasar los pasos.
+#
+# Aca el doble hace exactamente eso: llama con 'directo' y SIN marca --como en
+# la traza real-- y acto seguido intenta dictar los pasos. El candado tiene que
+# seguir armado y obligarlo a volver con la marca.
+respuesta, traza, doble = correr([
+    ("", [("consultar_guia_sintonizacion", {"tipo_conexion": "directo"})]),
+    (IMPROVISADO, []),
+    ("", [("consultar_guia_sintonizacion",
+           {"tipo_conexion": "directo", "marca": "Samsung"})]),
+    ("Probá esto: Menu > Todos los ajustes > Emision > Sintonizacion "
+     "automatica > ANTENA.", []),
+])
+
+comprobar(traza.count("consultar_guia_sintonizacion") == 2,
+          "una consulta sin marca NO cuenta como resuelta: tuvo que volver "
+          "a llamar con la marca puesta")
+comprobar(any("NO escribas pasos" in s for s in doble.sistemas),
+          "y el candado si se activo -- antes del arreglo esta llamada lo "
+          "desarmaba y los pasos inventados salian sin que nada los frenara")
+
+
 print()
 if fallos:
     print(f"[FALLA] {len(fallos)} comprobacion(es):")

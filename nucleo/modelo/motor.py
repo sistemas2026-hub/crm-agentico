@@ -888,12 +888,20 @@ def _ejecutar_consulta_guia_tv(config, argumentos_modelo: dict, sesion=None) -> 
     modelo (PRD 12.5).
 
     POR QUE NO PUEDE DECIDIRLA EL MODELO
-    Son tres reglas encadenadas, y equivocarse en cualquiera le entrega al
+    Son cuatro reglas encadenadas, y equivocarse en cualquiera le entrega al
     cliente un procedimiento que no corresponde a su televisor:
 
+      directo SIN marca                -> ninguna: PREGUNTAR la marca
       directo + marca con guia activa  -> esa guia          ('especifica')
-      directo + marca sin guia         -> la general        ('general')
+      directo + marca sin guia propia  -> la general        ('general')
       tdt                              -> la unica de TDT   ('tdt')
+
+    La primera no estaba, y costo un fallo en produccion el 10/09/2026: sin
+    marca se devolvia la general, que existe para "esta marca no tiene guia
+    propia" -- una conclusion a la que solo se llega DESPUES de preguntar.
+    "Sin marca" y "marca sin guia" son estados distintos y hay que
+    distinguirlos: el segundo es una respuesta, el primero es una pregunta
+    sin hacer. Ver la guarda, mas abajo.
 
     Con TDT la marca SE IGNORA, y no es un atajo: en
     'fibra -> ONU -> CATV -> coaxial -> TDT -> HDMI', el coaxial ni siquiera
@@ -997,25 +1005,60 @@ def _ejecutar_consulta_guia_tv(config, argumentos_modelo: dict, sesion=None) -> 
         return _sin_guia("TDT")
 
     directas = [g for g in guias if g.tipo_conexion == "directo"]
-    if marca:
-        clave = _sin_tildes(marca).strip()
-        con_marca = [g for g in directas if g.marca.strip()]
-        exacta = next((g for g in con_marca
-                       if _sin_tildes(g.marca).strip() == clave), None)
-        if exacta is None:
-            # Un parecido SI vale aca, al reves que en la parrilla de canales:
-            # ahi 'wins sport +' contra 'Win Sports' son productos distintos y
-            # confirmar uno por el otro le promete al cliente algo que no
-            # contrato. Una marca de televisor mal escrita es la misma marca,
-            # y darle la guia general por un tipeo es peor servicio sin
-            # ninguna contrapartida.
-            parecidas = _nombres_parecidos(marca, [g.marca for g in con_marca])
-            if parecidas:
-                exacta = next(g for g in con_marca if g.marca == parecidas[0])
-        if exacta is not None:
-            _anotar(exacta, "especifica")
-            return {**_sirve(exacta), "tipo_guia": "especifica",
-                    "marca_resuelta": exacta.marca}
+
+    # CON EL COAXIAL DIRECTO, SIN MARCA NO HAY GUIA QUE ELEGIR.
+    #
+    # FALLO REAL DE PRODUCCION, 10/09/2026, primer dia con las guias cargadas.
+    # El cliente confirmo que el coaxial entra directo al televisor; el agente
+    # tenia que preguntar la marca y en vez de eso le entrego la guia general
+    # con un "elige Antena, no Cable". La traza no deja lugar a dudas -- la
+    # clave 'marca' ni siquiera viaja:
+    #
+    #     parametros: {"tipo_conexion": "...ecto"}
+    #
+    # La causa no era el modelo: era que ESTA funcion trataba "directo sin
+    # marca" como una consulta valida. La general existe para "esta marca no
+    # tiene guia propia", y a eso solo se llega DESPUES de preguntar. Sin
+    # marca no hay tal conclusion: hay una pregunta sin hacer.
+    #
+    # Y como devolvia guia_encontrada=true, el candado daba la guia por
+    # resuelta y no intervenia. Los tres sintomas reportados --no pregunto la
+    # marca, entrego pasos, el candado no salto-- salian de esta sola rama.
+    #
+    # Es la misma forma que ya se usaba mas arriba para 'tipo_conexion'
+    # ausente: no se inventa una respuesta, se dice que dato falta. 'marca'
+    # llega ya recortada, asi que esto cubre ausente, vacia y solo espacios.
+    if not marca:
+        return {
+            "guia_encontrada": False,
+            "instruccion_interna":
+                "Con el coaxial directo al televisor, la MARCA decide los "
+                "pasos: no son iguales en un Samsung que en un LG. Todavia no "
+                "la sabes. Preguntale que marca es su televisor y volve a "
+                "llamar agregando 'marca'. No le des ningun paso mientras "
+                "tanto -- los que tengas en la cabeza no son los de esta "
+                "empresa.",
+        }
+
+    # De aca en adelante la marca EXISTE: la guarda de arriba ya devolvio.
+    clave = _sin_tildes(marca).strip()
+    con_marca = [g for g in directas if g.marca.strip()]
+    exacta = next((g for g in con_marca
+                   if _sin_tildes(g.marca).strip() == clave), None)
+    if exacta is None:
+        # Un parecido SI vale aca, al reves que en la parrilla de canales:
+        # ahi 'wins sport +' contra 'Win Sports' son productos distintos y
+        # confirmar uno por el otro le promete al cliente algo que no
+        # contrato. Una marca de televisor mal escrita es la misma marca,
+        # y darle la guia general por un tipeo es peor servicio sin
+        # ninguna contrapartida.
+        parecidas = _nombres_parecidos(marca, [g.marca for g in con_marca])
+        if parecidas:
+            exacta = next(g for g in con_marca if g.marca == parecidas[0])
+    if exacta is not None:
+        _anotar(exacta, "especifica")
+        return {**_sirve(exacta), "tipo_guia": "especifica",
+                "marca_resuelta": exacta.marca}
 
     general = next((g for g in directas if not g.marca.strip()), None)
     if general:

@@ -938,6 +938,72 @@ afirmar(not _re.search(r"len\(\s*self\.instrucciones", _clase),
         "insuficientes' en la lista de huecos")
 
 
+print("\nFALLO 36. 'directo' SIN marca no puede resolver a la general")
+# FALLO REAL DE PRODUCCION, 10/09/2026, primer dia con las guias cargadas.
+#
+# El cliente confirmo que el coaxial entra directo al televisor. El agente
+# tenia que preguntar la marca; en vez de eso entrego la guia general y le
+# dijo "elige Antena, no Cable".
+#
+# La traza de produccion (asistente.tool_calls) lo muestra exacto -- una sola
+# llamada, y la clave 'marca' ni siquiera viaja:
+#
+#     parametros: {"tipo_conexion": "...ecto"}
+#
+# La causa NO es el modelo. Es que _ejecutar_consulta_guia_tv trata
+# "directo sin marca" como una consulta valida y devuelve la general con
+# guia_encontrada=true. La general existe para "esta marca no tiene guia
+# propia", que es una conclusion a la que solo se llega DESPUES de preguntar.
+# Sin marca no hay tal conclusion: hay una pregunta sin hacer.
+#
+# Y como devuelve guia_encontrada=true, el candado da la guia por resuelta y
+# no interviene. Por eso el agente pudo dictar pasos sin que nada lo frenara:
+# los tres sintomas reportados salen de esta sola linea.
+r = resolver(COMPLETO, tipo_conexion="directo")
+afirmar(not r.get("guia_encontrada"),
+        "sin marca NO entrega guia: con 'directo' la marca decide, y todavia "
+        "no se pregunto")
+afirmar("marca" in (r.get("instruccion_interna") or "").lower(),
+        "y le dice al agente que pregunte la marca")
+afirmar("instrucciones" not in r,
+        "no viaja ni un paso: es lo que el agente termino leyendole al cliente")
+afirmar("url_video" not in r,
+        "ni el video: un enlace suelto, sin los pasos, invita a mandarlo igual "
+        "-- y seria el video de una marca que nadie confirmo")
+
+# Las tres formas de "no la pregunte" tienen que dar lo mismo. El modelo
+# manda cualquiera de las tres segun el dia: ausente (la traza de produccion),
+# vacia, o unos espacios de un recorte mal hecho.
+for etiqueta, kw in (("ausente", {}), ("vacia", {"marca": ""}),
+                     ("solo espacios", {"marca": "   "}),
+                     ("nula", {"marca": None})):
+    rr = resolver(COMPLETO, tipo_conexion="directo", **kw)
+    afirmar(not rr.get("guia_encontrada"),
+            f"marca {etiqueta}: cuenta como no preguntada")
+
+# Y no se ensucia la cola de marcas por registrar: sin marca no hay nada que
+# anotar, y una cadena vacia ahi seria una fila que nadie puede atender.
+_s = sesion_nueva()
+motor._ejecutar_consulta_guia_tv(COMPLETO, {"tipo_conexion": "directo"}, _s)
+afirmar(_s.marcas_tv_sin_guia == [],
+        "sin marca no se anota nada en la cola de marcas desconocidas")
+afirmar(not _s.tv_guia and not _s.tv_guias,
+        "ni se deja constancia de una guia que no se entrego -- si quedara, "
+        "la ficha del escalamiento diria que se le dio algo al cliente")
+
+# LO QUE NO DEBE CAMBIAR, para que el arreglo no se lleve nada por delante.
+r_ok = resolver(COMPLETO, tipo_conexion="directo", marca="Kalley")
+afirmar(r_ok.get("tipo_guia") == "general",
+        "con la marca DICHA y sin guia propia, la general sigue siendo la "
+        "respuesta correcta -- eso es para lo que existe")
+r_esp = resolver(COMPLETO, tipo_conexion="directo", marca="Samsung")
+afirmar(r_esp.get("tipo_guia") == "especifica", "y la especifica sigue igual")
+r_tdt = resolver(COMPLETO, tipo_conexion="tdt")
+afirmar(r_tdt.get("tipo_guia") == "tdt",
+        "TDT sin marca SIGUE siendo valido: ahi la marca no interviene, y "
+        "exigirla seria romper el otro camino")
+
+
 print()
 if fallos:
     print(f"[FALLA] {len(fallos)} comprobacion(es):")
