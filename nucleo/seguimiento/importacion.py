@@ -125,6 +125,77 @@ def limpiar_descripcion(crudo) -> str:
     return texto[:TOPE_DESCRIPCION].strip()
 
 
+def huella_respuesta(fecha: str, autor: str, cuerpo: str) -> str:
+    """
+    La identidad de una respuesta, que el proveedor no da.
+
+    El payload trae {respuesta, created, autor, archivos} y NINGUN id, asi que
+    hay que derivarla o cada pasada del reloj duplicaria el hilo entero.
+
+    Se calcula sobre fecha + autor + texto. El limite es conocido: si alguien
+    EDITA una respuesta alla, cambia la huella y entra como una segunda. Se
+    prefiere eso a sobrescribir -- esto es el registro de lo que se dijo, y
+    reemplazarlo perderia justamente lo que se audita.
+    """
+    import hashlib
+
+    crudo = f"{fecha}|{autor}|{cuerpo}"
+    return hashlib.sha256(crudo.encode("utf-8")).hexdigest()[:64]
+
+
+def leer_respuestas(ticket: dict) -> list[dict]:
+    """
+    El hilo del ticket, limpio y con su huella.
+
+    Se filtra igual que todo lo demas: del autor se guardan nombre y usuario y
+    nada mas -- el payload trae ademas su id interno del proveedor, que no le
+    sirve a nadie de este lado. De los archivos, solo cuantos hay: los bytes
+    viven alla y traerlos seria copiar adjuntos que nadie pidio.
+    """
+    salida = []
+    for r in (ticket.get("respuestas") or []):
+        if not isinstance(r, dict):
+            continue
+        cuerpo = limpiar_descripcion(r.get("respuesta"))
+        autor = r.get("autor") or {}
+        usuario = str(autor.get("username") or "").strip()
+        fecha = str(r.get("created") or "").strip()
+        if not cuerpo and not usuario:
+            continue
+        salida.append({
+            "huella": huella_respuesta(fecha, usuario, cuerpo),
+            "autor_nombre": str(autor.get("nombre") or "").strip()[:160],
+            "autor_usuario": usuario[:160],
+            "cuerpo": cuerpo,
+            "creada_en_proveedor": momento_de_respuesta(fecha),
+            "archivos": len(r.get("archivos") or []),
+        })
+    return salida
+
+
+def momento_de_respuesta(crudo: str):
+    """
+    La fecha de una respuesta, en ISO, o None.
+
+    Llega como '09/10/2026 14:15:50' -- MM/DD/YYYY y sin zona, el mismo formato
+    de 'fecha_fin' que ya costo cinco horas de diferencia una vez. Se le pone
+    la zona del tenant que informa el resto del ticket... salvo que no la hay
+    en este campo, asi que se devuelve sin zona y quien la muestre decide.
+    Inventarle una seria repetir el error de febrero al reves.
+    """
+    from datetime import datetime
+
+    crudo = (crudo or "").strip()
+    if not crudo:
+        return None
+    for formato in ("%m/%d/%Y %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return datetime.strptime(crudo[:19], formato).isoformat()
+        except ValueError:
+            continue
+    return None
+
+
 def clave(departamento, asunto) -> str:
     """La clave de filtro y de mapeo: 'departamento|asunto', normalizada.
 
@@ -193,6 +264,12 @@ class Cambio:
     external_ticket_id: str
     antes: dict = field(default_factory=dict)
     despues: dict = field(default_factory=dict)
+    # El hilo del ticket en el sistema del ISP, ya listo para persistir.
+    #
+    # Viaja aca y no en una consulta aparte porque la reconciliacion YA lee el
+    # ticket entero para saber su estado, y las respuestas vienen en ese mismo
+    # payload: sincronizar el hilo no cuesta ni una llamada mas.
+    respuestas: list = field(default_factory=list)
     error: str = ""
 
     @property
@@ -683,6 +760,10 @@ def reconciliar(config, casos: list[dict], *, leer_ticket,
             "external_fetch_error": "",
             "external_fetched_at": ahora.isoformat(),
         }
+        # El hilo viene en el MISMO payload que se acaba de leer para saber el
+        # estado. Medido el 10/09/2026: 24 de 25 tickets tienen respuestas, 70
+        # en total, asi que esto es la norma y no un caso raro.
+        cambio.respuestas = leer_respuestas(t)
         cambios.append(cambio)
 
     return cambios

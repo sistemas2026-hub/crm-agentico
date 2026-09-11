@@ -3633,6 +3633,26 @@ herramientas:
         tipo: texto
         verificado_el: 2026-09-09
 
+  - nombre: sincronizar_respuestas_externas
+    tipo: http
+    descripcion: >
+      Copia al caso el hilo de respuestas del ticket del proveedor. Hace upsert
+      por huella, asi que repetirla no duplica. NO la llames tu: la ejecuta el
+      importador en cada reconciliacion.
+    solo_lectura: false
+    requiere_confirmacion: true
+    roles_permitidos: [administracion]
+    base_url: http://backend:8000/api
+    endpoint: /importacion/casos/{id_caso}/respuestas/
+    metodo: POST
+    auth_ref: IMPORTACION_API_TOKEN
+    auth_esquema: Bearer
+    filtros_verificados:
+      id_caso:
+        param: id_caso
+        tipo: texto
+        verificado_el: 2026-09-10
+
   - nombre: consultar_ticket_por_id
     tipo: http
     descripcion: >

@@ -459,3 +459,91 @@ class ReconciliarCaseView(APIView):
             "status": caso.status,
             "external_status": caso.external_status,
         }, status=http.HTTP_200_OK)
+
+
+# Lo que se acepta de una respuesta del proveedor. Ni un campo mas: el payload
+# del ticket trae el autor con su id interno y la lista de archivos, y nada de
+# eso hace falta para leer el hilo.
+CAMPOS_RESPUESTA = frozenset({
+    "huella", "autor_nombre", "autor_usuario", "cuerpo",
+    "creada_en_proveedor", "archivos",
+})
+MAX_RESPUESTAS = 200
+
+
+class RespuestasExternasView(APIView):
+    """
+    Sincroniza el hilo del ticket del proveedor sobre un caso.
+
+    Es un UPSERT por huella y no un reemplazo: la huella sale de fecha + autor
+    + texto, asi que reenviar las mismas respuestas cada hora no duplica nada y
+    no hace falta borrar para volver a escribir. Borrar seria ademas la
+    operacion equivocada -- esto es registro de lo que se dijo, y una respuesta
+    que desaparece del proveedor no deja de haber existido.
+
+    NO toca el caso: ni su estado, ni su prioridad, ni su descripcion. Lo unico
+    que hace es agregar filas al hilo externo.
+    """
+
+    permission_classes = (IsAuthenticated, HasOrgContext)
+
+    def post(self, request, pk):
+        from cases.models import RespuestaExterna
+
+        org = getattr(request, "org", None)
+        caso = Case.objects.filter(pk=pk, org=org).first()
+        if caso is None:
+            return _error("no existe ese caso", "CASO_NO_ENCONTRADO",
+                          http.HTTP_404_NOT_FOUND)
+
+        cuerpo = request.data if isinstance(request.data, dict) else {}
+        proveedor = str(cuerpo.get("provider") or "").strip()
+        if not proveedor:
+            return _error("falta 'provider'", "CAMPO_REQUERIDO")
+        if proveedor != (caso.provider or ""):
+            # Un caso importado de un proveedor no recibe el hilo de otro.
+            return _error(
+                f"el caso es de '{caso.provider}', no de '{proveedor}'",
+                "PROVEEDOR_DISTINTO")
+
+        filas = cuerpo.get("respuestas")
+        if not isinstance(filas, list):
+            return _error("'respuestas' tiene que ser una lista", "CAMPO_INVALIDO")
+        if len(filas) > MAX_RESPUESTAS:
+            # Un hilo con mas de doscientas respuestas no es un hilo: es un
+            # error de quien llama, y aceptarlo sin mirar seria escribir
+            # cualquier cosa en la base.
+            return _error(f"demasiadas: {len(filas)} (tope {MAX_RESPUESTAS})",
+                          "DEMASIADAS_RESPUESTAS")
+
+        nuevas, repetidas = 0, 0
+        for fila in filas:
+            if not isinstance(fila, dict):
+                return _error("cada respuesta tiene que ser un objeto",
+                              "CAMPO_INVALIDO")
+            sobra = _campos_inesperados(fila, CAMPOS_RESPUESTA)
+            if sobra:
+                return _error(f"campos no aceptados: {sobra}",
+                              "CAMPO_NO_PERMITIDO")
+            huella = str(fila.get("huella") or "").strip()
+            if not huella:
+                return _error("cada respuesta necesita su 'huella'",
+                              "CAMPO_REQUERIDO")
+            try:
+                with transaction.atomic():
+                    RespuestaExterna.objects.create(
+                        org=org, case=caso, provider=proveedor, huella=huella,
+                        autor_nombre=str(fila.get("autor_nombre") or "")[:160],
+                        autor_usuario=str(fila.get("autor_usuario") or "")[:160],
+                        cuerpo=str(fila.get("cuerpo") or ""),
+                        creada_en_proveedor=fila.get("creada_en_proveedor") or None,
+                        archivos=int(fila.get("archivos") or 0),
+                    )
+                nuevas += 1
+            except IntegrityError:
+                # Ya estaba: es lo normal en cada pasada del reloj, no un fallo.
+                # El savepoint de arriba es lo que deja seguir con las demas.
+                repetidas += 1
+
+        return Response({"nuevas": nuevas, "ya_estaban": repetidas,
+                         "total": len(filas)})
