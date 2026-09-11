@@ -91,6 +91,40 @@ def normalizar(texto) -> str:
     return " ".join(sin_tildes.lower().split())
 
 
+# Cuanto se copia de la descripcion del ticket. No es un limite tecnico: es
+# minimizacion. Lo util son las primeras lineas -- que reporto el cliente y que
+# vio quien tomo el ticket-- y cuanto mas texto libre se arrastra, mas
+# probabilidad de traer un dato personal que nadie necesitaba.
+TOPE_DESCRIPCION = 800
+
+
+def limpiar_descripcion(crudo) -> str:
+    """
+    La descripcion del ticket, en texto plano y acotada.
+
+    El proveedor la entrega en HTML ('<p>No Tiene Internet</p>\\r\\n\\r\\n<p>Pago
+    reconexion en factura</p>'), asi que hay que sacarle las etiquetas: pegar
+    HTML crudo en un campo que la pantalla del CRM muestra tal cual seria, en
+    el mejor caso, ilegible, y en el peor una via para inyectar marcado que
+    nadie escribio pensando en eso.
+
+    Se resuelven las entidades ('&aacute;' -> 'a') porque si no el texto llega
+    con ruido justo donde hay acentos, que en español es en todas partes.
+    """
+    import html
+    import re
+
+    texto = "" if crudo is None else str(crudo)
+    # Los saltos de bloque se vuelven salto de linea ANTES de borrar etiquetas,
+    # o los parrafos quedarian pegados uno con otro en una sola frase.
+    texto = re.sub(r"(?i)<\s*br\s*/?>|</\s*(?:p|div|li|tr)\s*>", "\n", texto)
+    texto = re.sub(r"<[^>]+>", "", texto)
+    texto = html.unescape(texto)
+    lineas = [" ".join(l.split()) for l in texto.splitlines()]
+    texto = "\n".join(l for l in lineas if l)
+    return texto[:TOPE_DESCRIPCION].strip()
+
+
 def clave(departamento, asunto) -> str:
     """La clave de filtro y de mapeo: 'departamento|asunto', normalizada.
 
@@ -121,6 +155,24 @@ class Veredicto:
     area: str = ""
     responsable: str = ""
     prioridad: str = ""
+    # Lo que escribio quien abrio el ticket, y con que prioridad lo marco ALLA.
+    #
+    # La descripcion se copia por decision explicita del 10/09/2026, revirtiendo
+    # la exclusion anterior. El motivo de aquella sigue siendo cierto -- es
+    # texto libre de un operador y puede traer datos personales embebidos (PRD
+    # 7.4) -- y se acepta el riesgo porque sin ella quien atiende no sabe que
+    # paso: en el ticket que motivo el cambio decia "Pago reconexion en
+    # factura", que es justo el contexto que hacia falta y obligaba a saltar al
+    # otro sistema para leerlo.
+    #
+    # 'prioridad_proveedor' se GUARDA pero no se usa como prioridad del caso.
+    # Se descubrio que el proveedor manda 'Alta' y el importador escribia
+    # 'Normal' fijo: no es que el dato faltara, lo estabamos ignorando. Se
+    # conserva a la vista para que nadie crea que el 'Normal' fue un juicio.
+    # Quien decide la prioridad del caso va a ser Dexter, con un score propio,
+    # y eso es otro bloque.
+    descripcion: str = ""
+    prioridad_proveedor: str = ""
     resultado: str = ""
     detalle: str = ""
 
@@ -419,6 +471,8 @@ def descubrir(config, tickets: list[dict], *,
             asunto=t.get("asunto") or "",
             external_status=t.get("estado") or "",
             external_created_by=(t.get("creado_por") or "").strip(),
+            descripcion=limpiar_descripcion(t.get("descripcion")),
+            prioridad_proveedor=(t.get("prioridad") or "").strip(),
         )
         veredictos.append(v)
         v.external_created_by_type = clasificar_creador(

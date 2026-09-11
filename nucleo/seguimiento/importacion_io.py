@@ -284,6 +284,22 @@ def _cuerpo_de(v, config) -> dict:
     if v.identidad_es_placeholder:
         partes.append("Cuelga del registro de instalaciones: el cliente todavia "
                       "no existe como tal.")
+    # La prioridad que le puso el proveedor va COMO TEXTO, no como prioridad del
+    # caso. El ticket que destapo esto decia 'Alta' y el caso nacio 'Normal':
+    # el dato estaba y lo ignorabamos. Ponerlo a la vista evita que alguien lea
+    # ese 'Normal' como un juicio de Dexter -- hoy no lo es, es una constante de
+    # configuracion. Cuando Dexter calcule prioridad de verdad, esta linea
+    # servira ademas para comparar los dos criterios.
+    if v.prioridad_proveedor:
+        partes.append(f"Prioridad en {proveedor}: {v.prioridad_proveedor}.")
+
+    # Lo que escribio quien abrio el ticket, al final y separado de la
+    # referencia: arriba queda lo que este sistema sabe con certeza, abajo el
+    # texto libre del otro lado.
+    referencia = " ".join(x for x in partes if x)
+    descripcion = f"{referencia}\n\n{v.descripcion}".strip() if v.descripcion \
+        else referencia
+
     return {
         "provider": proveedor,
         "external_ticket_id": v.external_ticket_id,
@@ -298,7 +314,7 @@ def _cuerpo_de(v, config) -> dict:
         # El estado que le corresponde por el que tiene alla, no un fijo.
         "status": imp.estado_inicial(v.external_status),
         "name": (v.asunto or "Ticket importado")[:64],
-        "description": " ".join(x for x in partes if x),
+        "description": descripcion,
     }
 
 

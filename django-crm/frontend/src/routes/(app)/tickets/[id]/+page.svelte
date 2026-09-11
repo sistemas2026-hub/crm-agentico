@@ -111,6 +111,27 @@
     Object.keys(origen?.enlaces ?? {}).length ? origen.enlaces : null;
 
   /**
+   * La hora que reporta SmartOLT, legible.
+   *
+   * Llega como '2026-02-27 10:08:35.000000': texto crudo del proveedor, con
+   * microsegundos y SIN zona horaria. En una pantalla donde todo lo demás es
+   * hora de Bogotá, dejarlo así invita a leerlo como si lo fuera.
+   *
+   * No se convierte de zona, justamente porque el proveedor no dice cuál es:
+   * inventarle una sería peor que el formato feo. Se reformatea y se marca de
+   * dónde viene, para que quien compare sepa que está mirando el reloj de
+   * SmartOLT y no el de Dexter.
+   *
+   * @param {string} crudo
+   */
+  const fechaEquipo = (crudo) => {
+    const m = String(crudo ?? '').match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+    if (!m) return crudo;
+    const [, a, mes, d, h, min] = m;
+    return `${d}/${mes}/${a} · ${h}:${min}`;
+  };
+
+  /**
    * El contexto tecnico ya no cuelga de la conversacion: un caso importado del
    * sistema del ISP no tiene ninguna y aun asi tiene cliente y equipo. Se
    * considera dibujable si trae algo mas que la marca de identidad, que sola
@@ -550,23 +571,43 @@
                   <span class="ficha-nombre">Equipo del cliente — ONT</span>
                 </header>
                 {#if enlaces.smartolt_ont}
+                  <!-- Las dos potencias van con etiqueta de qué significan, no
+                       con el nombre de la longitud de onda que usa el
+                       proveedor. 1490 nm es la bajada -- lo que RECIBE el
+                       equipo del cliente, y el número que mira primero quien
+                       diagnostica-- y 1310 nm es la subida, lo que recibe la
+                       OLT de vuelta.
+
+                       'onu_signal_value' NO se dibuja: es esas dos mismas
+                       cifras pegadas en una sola cadena ("-20.81 dBm / -26.58
+                       dBm"), así que sería el mismo dato por tercera vez. -->
                   <dl>
                     {#if enlaces.equipo?.onu_status}
                       <dt>Estado</dt>
                       <dd>{enlaces.equipo.onu_status}</dd>
                     {/if}
-                    {#if enlaces.equipo?.onu_signal}
-                      <dt>Señal</dt>
+                    {#if enlaces.equipo?.onu_signal_1490}
+                      <dt>Recibe la ONT</dt>
                       <dd>
-                        {enlaces.equipo.onu_signal}
-                        {#if enlaces.equipo.onu_signal_1490}
-                          <span class="v2-sub">({enlaces.equipo.onu_signal_1490})</span>
+                        {enlaces.equipo.onu_signal_1490}
+                        {#if enlaces.equipo.onu_signal_1490_veredicto}
+                          <span class="veredicto-senal"
+                                class:mal={enlaces.equipo.onu_signal_1490_veredicto !== 'aceptable'}
+                          >{enlaces.equipo.onu_signal_1490_veredicto}</span>
                         {/if}
                       </dd>
                     {/if}
+                    {#if enlaces.equipo?.onu_signal_1310}
+                      <dt>Recibe la OLT</dt>
+                      <dd>{enlaces.equipo.onu_signal_1310}</dd>
+                    {/if}
+                    {#if enlaces.equipo?.onu_signal}
+                      <dt>Calificación</dt>
+                      <dd>{enlaces.equipo.onu_signal} <span class="v2-sub">(SmartOLT)</span></dd>
+                    {/if}
                     {#if enlaces.equipo?.last_status_change}
                       <dt>Últ. cambio</dt>
-                      <dd>{enlaces.equipo.last_status_change}</dd>
+                      <dd>{fechaEquipo(enlaces.equipo.last_status_change)}</dd>
                     {/if}
                     <dt>Serial</dt>
                     <dd><code>{enlaces.sn_onu}</code></dd>
@@ -630,6 +671,25 @@
                       {#if enlaces.cliente.estado}
                         <dt>Servicio</dt>
                         <dd>{enlaces.cliente.estado}</dd>
+                      {/if}
+                      {#if enlaces.cliente.telefono}
+                        <dt>Teléfono</dt>
+                        <dd>
+                          <!-- Separados y marcables: el proveedor los manda en
+                               una sola cadena con comas, y quien tiene que
+                               llamar no debería recortarlos a mano. -->
+                          {#each String(enlaces.cliente.telefono).split(',') as tel}
+                            <a class="tel" href="tel:{tel.trim()}">{tel.trim()}</a>
+                          {/each}
+                        </dd>
+                      {/if}
+                      {#if enlaces.cliente.direccion}
+                        <dt>Dirección</dt>
+                        <dd>{enlaces.cliente.direccion}</dd>
+                      {/if}
+                      {#if enlaces.cliente.localidad}
+                        <dt>Barrio</dt>
+                        <dd>{enlaces.cliente.localidad}</dd>
                       {/if}
                       {#if enlaces.cliente.plan}
                         <dt>Plan</dt>
@@ -1417,4 +1477,24 @@
     font-size: 0.8125rem;
     color: var(--v2-text-muted, #666);
   }
+
+  /* El veredicto de la potencia, al lado del numero. Cuando no es aceptable
+     el texto del proveedor explica la causa probable -- "problema en el drop
+     (conector, cable o tensores)" -- y eso es justo lo que hace falta antes de
+     mandar una cuadrilla. */
+  .veredicto-senal {
+    display: inline-block;
+    margin-left: 6px;
+    font-size: 11.5px;
+    line-height: 1.35;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: var(--v2-surface-2, rgba(0, 0, 0, 0.05));
+    color: var(--v2-text-muted, #666);
+  }
+  .veredicto-senal.mal {
+    background: rgba(180, 83, 9, 0.1);
+    color: var(--v2-warning, #b45309);
+  }
+  .tel { display: inline-block; margin-right: 10px; }
 </style>

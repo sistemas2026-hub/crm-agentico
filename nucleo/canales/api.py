@@ -3511,7 +3511,22 @@ def _estado_equipo(config, sn_onu: str, tenant: str) -> dict:
 # Hasta hoy el dato pasaba por esta funcion y se tiraba, porque el serial se
 # sacaba de la sesion de la conversacion; un caso importado no tiene ninguna.
 # No es dato personal: identifica un aparato, no a una persona.
-_CAMPOS_FICHA = ("usuario", "ip", "estado", "nombre", "cedula", "sn_onu")
+#
+# 'telefono', 'direccion' y 'localidad' entran el 10/09/2026, por decision
+# explicita y con el mismo criterio que 'cedula': son datos personales y por
+# eso no estaban, pero quien atiende un ticket de campo tiene que poder llamar
+# al cliente y saber a donde ir sin salir a buscarlo en otro sistema. Ademas
+# son los que va a necesitar el tecnico offline cuando la orden de trabajo se
+# los lleve congelados.
+#
+# 'localidad' y NO 'zona', que se le parece y no sirve: medido el 10/09/2026,
+# 'zona' es {'id': 20049, 'nombre': 'CORTE 30 - SERVIDOR 1'} -- una zona de
+# corte de facturacion, ademas anidada-- mientras que 'localidad' trae
+# 'MARTHA GISELA', que es el barrio y coincide con la zona que reporta
+# SmartOLT. Pedir "la zona" y agregar el campo que se llama asi habria puesto
+# en pantalla algo que a un tecnico no le dice nada.
+_CAMPOS_FICHA = ("usuario", "ip", "estado", "nombre", "cedula", "sn_onu",
+                 "telefono", "direccion", "localidad")
 
 
 def _ficha_cliente(config, id_cliente, tenant: str) -> dict:
