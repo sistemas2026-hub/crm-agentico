@@ -415,161 +415,6 @@
                pantalla. Sin bloque de espera a proposito: la mayoria de los
                tickets no tiene estas tarjetas, y un cargando que casi siempre
                termina en nada distrae mas de lo que informa. -->
-          {#await data.contexto then contexto}
-            {@const enlaces = contextoDe(contexto)}
-            {#if enlaces}
-            <!-- ============================================================
-                 A DONDE SALTAR SIN VOLVER A BUSCAR AL CLIENTE
-                 Los enlaces los arma el motor, no esta pantalla: es el que
-                 conoce el identificador de cada sistema y el dominio de cada
-                 empresa. Y se arman con el IDENTIFICADOR, nunca con el
-                 nombre -- dos clientes con nombre parecido dan un enlace
-                 parecido, y ahi se abre la ficha de otra persona.
-                 ============================================================ -->
-            <section class="tecnica">
-              <h2>Información técnica del cliente</h2>
-              <!-- Los dos orígenes de identidad dicen servicios distintos. Se
-                   muestra en vez de resolverse en silencio: el motor eligió el
-                   del caso para poder mostrar algo, pero cuál de los dos está
-                   mal es una pregunta para una persona. Si esto aparece
-                   seguido, lo que falla es el emparejamiento del importador. -->
-              {#if enlaces.identidad_en_conflicto}
-                <p class="conflicto-identidad">
-                  <strong>Inconsistencia de servicio.</strong>
-                  El servicio asociado al caso no coincide con el registrado en
-                  la conversación. Se muestra la información del servicio del
-                  caso.
-                  <span class="conflicto-ids">
-                    Servicio del caso <code>{enlaces.identidad_en_conflicto.case}</code>
-                    · Servicio de la conversación
-                    <code>{enlaces.identidad_en_conflicto.conversacion}</code>
-                  </span>
-                </p>
-              {/if}
-              <div class="tecnica-grilla">
-                <article class="ficha ficha-olt">
-                  <header>
-                    <span class="ficha-nombre">Equipo del cliente — ONT</span>
-                  </header>
-                  {#if enlaces.smartolt_ont}
-                    <dl>
-                      {#if enlaces.equipo?.onu_status}
-                        <dt>Estado</dt>
-                        <dd>{enlaces.equipo.onu_status}</dd>
-                      {/if}
-                      {#if enlaces.equipo?.onu_signal}
-                        <dt>Señal</dt>
-                        <dd>
-                          {enlaces.equipo.onu_signal}
-                          {#if enlaces.equipo.onu_signal_1490}
-                            <span class="v2-sub">({enlaces.equipo.onu_signal_1490})</span>
-                          {/if}
-                        </dd>
-                      {/if}
-                      {#if enlaces.equipo?.last_status_change}
-                        <dt>Últ. cambio</dt>
-                        <dd>{enlaces.equipo.last_status_change}</dd>
-                      {/if}
-                      <dt>Serial</dt>
-                      <dd><code>{enlaces.sn_onu}</code></dd>
-                    </dl>
-                    <!-- Si la consulta no respondio, el enlace igual se
-                         muestra: sin refresco automatico, una tarjeta vacia
-                         no se arregla sola. -->
-                    {#if !enlaces.equipo || !Object.keys(enlaces.equipo).length}
-                      <p class="sin-dato">
-                        No se pudo leer el estado del equipo. El enlace sigue
-                        sirviendo para verlo en el panel.
-                      </p>
-                    {/if}
-                    <a class="v2-btn v2-btn-sm" href={enlaces.smartolt_ont}
-                       target="_blank" rel="noopener">Ver la ONT ↗</a>
-                  {:else if enlaces.equipo_no_disponible === 'onu_no_vinculada'}
-                    <!-- El servicio SI se identifico; lo que falta es el
-                         serial del otro lado. Medido el 10/09/2026 sobre 600
-                         clientes: el 19 % no lo tiene cargado, y casi nunca
-                         es que no haya equipo. Por eso el texto no culpa al
-                         asistente y dice que se arregla solo: el serial se
-                         relee en cada apertura, no se guarda aca. -->
-                    <p class="sin-dato">
-                      <strong>ONU no vinculada.</strong>
-                      El servicio está identificado, pero todavía no tiene un
-                      serial de ONU registrado en WispHub. Cuando se registre,
-                      Dexter mostrará automáticamente la información del equipo.
-                    </p>
-                  {:else}
-                    <!-- Caso NORMAL, no una falla: se escala una conversacion
-                         justamente cuando el asistente no pudo avanzar, y eso
-                         muchas veces incluye no haber identificado el equipo.
-                         Medido: de 85 conversaciones, las que llegan a ticket
-                         tienden a ser las que no lo tienen. -->
-                    <p class="sin-dato">
-                      Sin identificador del equipo. El asistente no llegó a
-                      identificarlo en esta conversación.
-                    </p>
-                  {/if}
-                </article>
-
-                <article class="ficha ficha-isp">
-                  <header>
-                    <span class="ficha-nombre">Servicio del cliente</span>
-                  </header>
-                  {#if enlaces.wisphub_perfil}
-                    <!-- El orden no es casual: primero con QUIEN se habla
-                         (nombre y cedula, para confirmarlo sin salir a
-                         buscarlo), despues QUE tiene contratado, y al final
-                         el dato tecnico. -->
-                    {#if enlaces.cliente}
-                      <dl>
-                        {#if enlaces.cliente.nombre}
-                          <dt>Cliente</dt>
-                          <dd>{enlaces.cliente.nombre}</dd>
-                        {/if}
-                        {#if enlaces.cliente.cedula}
-                          <dt>Cédula</dt>
-                          <dd><code>{enlaces.cliente.cedula}</code></dd>
-                        {/if}
-                        {#if enlaces.cliente.estado}
-                          <dt>Servicio</dt>
-                          <dd>{enlaces.cliente.estado}</dd>
-                        {/if}
-                        {#if enlaces.cliente.plan}
-                          <dt>Plan</dt>
-                          <dd>{enlaces.cliente.plan}</dd>
-                        {/if}
-                        {#if enlaces.ip}
-                          <dt>IP</dt>
-                          <dd><code>{enlaces.ip}</code></dd>
-                        {/if}
-                      </dl>
-                    {/if}
-                    <div class="ficha-acciones">
-                      <a class="v2-btn v2-btn-sm" href={enlaces.wisphub_perfil}
-                         target="_blank" rel="noopener">Ficha ↗</a>
-                      {#if enlaces.wisphub_ping}
-                        <a class="v2-btn v2-btn-sm" href={enlaces.wisphub_ping}
-                           target="_blank" rel="noopener">Ping ↗</a>
-                      {/if}
-                      {#if enlaces.wisphub_trafico}
-                        <a class="v2-btn v2-btn-sm" href={enlaces.wisphub_trafico}
-                           target="_blank" rel="noopener">Tráfico ↗</a>
-                      {/if}
-                      {#if enlaces.router}
-                        <a class="v2-btn v2-btn-sm" href={enlaces.router}
-                           target="_blank" rel="noopener">Router ↗</a>
-                      {/if}
-                    </div>
-                  {:else}
-                    <p class="sin-dato">
-                      Sin identificador del cliente. No se puede abrir su ficha
-                      desde acá sin arriesgar abrir la de otra persona.
-                    </p>
-                  {/if}
-                </article>
-              </div>
-            </section>
-            {/if}
-          {/await}
 
           {#if agente.turnos.length}
             <section class="conversacion-cliente">
@@ -650,6 +495,180 @@
             </div>
           </div>
         {/if}
+        <!-- ============================================================
+             FUERA del condicional del resumen del agente, y es lo unico que
+             la hacia invisible para un caso importado.
+
+             Este bloque vivia dentro de ese condicional, que solo es cierto
+             cuando la descripcion del caso es el resumen estructurado que
+             escribe el asistente. Un caso traido de WispHub trae la
+             descripcion del importador, asi que 'agente' era null y la
+             seccion no se dibujaba -- aunque el motor ya hubiera contestado
+             con la ficha entera. Se veia en su log: 200 con el contexto
+             adentro, y la pantalla sin nada.
+
+             Antes de la Fase 3 no se notaba: un caso sin resumen del agente
+             tampoco tenia conversacion, asi que no habia ficha que mostrar.
+             La Fase 3 rompio ese acoplamiento -- ahora la ficha sale del
+             identificador de servicio -- y la plantilla se habia quedado con
+             el condicional viejo.
+             ============================================================ -->
+        {#await data.contexto then contexto}
+          {@const enlaces = contextoDe(contexto)}
+          {#if enlaces}
+          <!-- ============================================================
+               A DONDE SALTAR SIN VOLVER A BUSCAR AL CLIENTE
+               Los enlaces los arma el motor, no esta pantalla: es el que
+               conoce el identificador de cada sistema y el dominio de cada
+               empresa. Y se arman con el IDENTIFICADOR, nunca con el
+               nombre -- dos clientes con nombre parecido dan un enlace
+               parecido, y ahi se abre la ficha de otra persona.
+               ============================================================ -->
+          <section class="tecnica">
+            <h2>Información técnica del cliente</h2>
+            <!-- Los dos orígenes de identidad dicen servicios distintos. Se
+                 muestra en vez de resolverse en silencio: el motor eligió el
+                 del caso para poder mostrar algo, pero cuál de los dos está
+                 mal es una pregunta para una persona. Si esto aparece
+                 seguido, lo que falla es el emparejamiento del importador. -->
+            {#if enlaces.identidad_en_conflicto}
+              <p class="conflicto-identidad">
+                <strong>Inconsistencia de servicio.</strong>
+                El servicio asociado al caso no coincide con el registrado en
+                la conversación. Se muestra la información del servicio del
+                caso.
+                <span class="conflicto-ids">
+                  Servicio del caso <code>{enlaces.identidad_en_conflicto.case}</code>
+                  · Servicio de la conversación
+                  <code>{enlaces.identidad_en_conflicto.conversacion}</code>
+                </span>
+              </p>
+            {/if}
+            <div class="tecnica-grilla">
+              <article class="ficha ficha-olt">
+                <header>
+                  <span class="ficha-nombre">Equipo del cliente — ONT</span>
+                </header>
+                {#if enlaces.smartolt_ont}
+                  <dl>
+                    {#if enlaces.equipo?.onu_status}
+                      <dt>Estado</dt>
+                      <dd>{enlaces.equipo.onu_status}</dd>
+                    {/if}
+                    {#if enlaces.equipo?.onu_signal}
+                      <dt>Señal</dt>
+                      <dd>
+                        {enlaces.equipo.onu_signal}
+                        {#if enlaces.equipo.onu_signal_1490}
+                          <span class="v2-sub">({enlaces.equipo.onu_signal_1490})</span>
+                        {/if}
+                      </dd>
+                    {/if}
+                    {#if enlaces.equipo?.last_status_change}
+                      <dt>Últ. cambio</dt>
+                      <dd>{enlaces.equipo.last_status_change}</dd>
+                    {/if}
+                    <dt>Serial</dt>
+                    <dd><code>{enlaces.sn_onu}</code></dd>
+                  </dl>
+                  <!-- Si la consulta no respondio, el enlace igual se
+                       muestra: sin refresco automatico, una tarjeta vacia
+                       no se arregla sola. -->
+                  {#if !enlaces.equipo || !Object.keys(enlaces.equipo).length}
+                    <p class="sin-dato">
+                      No se pudo leer el estado del equipo. El enlace sigue
+                      sirviendo para verlo en el panel.
+                    </p>
+                  {/if}
+                  <a class="v2-btn v2-btn-sm" href={enlaces.smartolt_ont}
+                     target="_blank" rel="noopener">Ver la ONT ↗</a>
+                {:else if enlaces.equipo_no_disponible === 'onu_no_vinculada'}
+                  <!-- El servicio SI se identifico; lo que falta es el
+                       serial del otro lado. Medido el 10/09/2026 sobre 600
+                       clientes: el 19 % no lo tiene cargado, y casi nunca
+                       es que no haya equipo. Por eso el texto no culpa al
+                       asistente y dice que se arregla solo: el serial se
+                       relee en cada apertura, no se guarda aca. -->
+                  <p class="sin-dato">
+                    <strong>ONU no vinculada.</strong>
+                    El servicio está identificado, pero todavía no tiene un
+                    serial de ONU registrado en WispHub. Cuando se registre,
+                    Dexter mostrará automáticamente la información del equipo.
+                  </p>
+                {:else}
+                  <!-- Caso NORMAL, no una falla: se escala una conversacion
+                       justamente cuando el asistente no pudo avanzar, y eso
+                       muchas veces incluye no haber identificado el equipo.
+                       Medido: de 85 conversaciones, las que llegan a ticket
+                       tienden a ser las que no lo tienen. -->
+                  <p class="sin-dato">
+                    Sin identificador del equipo. El asistente no llegó a
+                    identificarlo en esta conversación.
+                  </p>
+                {/if}
+              </article>
+
+              <article class="ficha ficha-isp">
+                <header>
+                  <span class="ficha-nombre">Servicio del cliente</span>
+                </header>
+                {#if enlaces.wisphub_perfil}
+                  <!-- El orden no es casual: primero con QUIEN se habla
+                       (nombre y cedula, para confirmarlo sin salir a
+                       buscarlo), despues QUE tiene contratado, y al final
+                       el dato tecnico. -->
+                  {#if enlaces.cliente}
+                    <dl>
+                      {#if enlaces.cliente.nombre}
+                        <dt>Cliente</dt>
+                        <dd>{enlaces.cliente.nombre}</dd>
+                      {/if}
+                      {#if enlaces.cliente.cedula}
+                        <dt>Cédula</dt>
+                        <dd><code>{enlaces.cliente.cedula}</code></dd>
+                      {/if}
+                      {#if enlaces.cliente.estado}
+                        <dt>Servicio</dt>
+                        <dd>{enlaces.cliente.estado}</dd>
+                      {/if}
+                      {#if enlaces.cliente.plan}
+                        <dt>Plan</dt>
+                        <dd>{enlaces.cliente.plan}</dd>
+                      {/if}
+                      {#if enlaces.ip}
+                        <dt>IP</dt>
+                        <dd><code>{enlaces.ip}</code></dd>
+                      {/if}
+                    </dl>
+                  {/if}
+                  <div class="ficha-acciones">
+                    <a class="v2-btn v2-btn-sm" href={enlaces.wisphub_perfil}
+                       target="_blank" rel="noopener">Ficha ↗</a>
+                    {#if enlaces.wisphub_ping}
+                      <a class="v2-btn v2-btn-sm" href={enlaces.wisphub_ping}
+                         target="_blank" rel="noopener">Ping ↗</a>
+                    {/if}
+                    {#if enlaces.wisphub_trafico}
+                      <a class="v2-btn v2-btn-sm" href={enlaces.wisphub_trafico}
+                         target="_blank" rel="noopener">Tráfico ↗</a>
+                    {/if}
+                    {#if enlaces.router}
+                      <a class="v2-btn v2-btn-sm" href={enlaces.router}
+                         target="_blank" rel="noopener">Router ↗</a>
+                    {/if}
+                  </div>
+                {:else}
+                  <p class="sin-dato">
+                    Sin identificador del cliente. No se puede abrir su ficha
+                    desde acá sin arriesgar abrir la de otra persona.
+                  </p>
+                {/if}
+              </article>
+            </div>
+          </section>
+          {/if}
+        {/await}
+
 
         {#if conversation.length === 0}
           <p class="v2-sub" style="margin:0 0 18px;font-size:12.5px">
