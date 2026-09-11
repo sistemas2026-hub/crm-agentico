@@ -440,6 +440,14 @@ La exportación conserva los comentarios del YAML — son notas de verificación
 
 Cosas sabidas que faltan. Cada una dice por qué importa, que es lo que no se deduce del código.
 
+**Decisión revertida a propósito: la descripción del ticket SÍ se copia, aunque pueda traer PII (10/09/2026).** El importador la excluía, y el motivo está escrito en `importacion_io.py`: *«ese campo es texto libre de un operador y ya se sabe que trae PII embebida (PRD §7.4); lo que se guarda es la referencia para ir a buscarla»*. Ese motivo **sigue siendo cierto**. Se acepta el riesgo igual.
+
+Lo que lo cambió fue mirar la pantalla al lado de la de WispHub: el ticket decía *«Pago reconexión en factura»* y el caso en Dexter no lo tenía, así que quien atendía no sabía por qué el cliente estaba sin servicio y tenía que saltar al otro sistema para enterarse. El contexto operativo pesa más que el riesgo — y es una decisión de producto tomada con el riesgo a la vista, no un descuido.
+
+Con minimización, no a cambio de nada: se copia **solo la descripción**, convertida a texto plano y **acotada a 800 caracteres** (`imp.TOPE_DESCRIPCION`) porque cuanto más texto libre se arrastra, más probabilidad de traer un dato que nadie necesitaba. No se copia el payload crudo del ticket, ni contraseñas, ni coordenadas. Vive en el `description` del Case, con los permisos del Case y el aislamiento por organización de siempre.
+
+**Lo que esto implica y conviene tener presente:** ese texto queda en el CRM, alcanzable por el buscador de la bandeja y por cualquier exportación de casos. Si algún día hay que responder a un derecho de supresión, es un lugar más donde mirar.
+
 **El modelo no ve las imágenes (24/08/2026).** Cuando un cliente manda una foto, el modelo recibe el texto `[El cliente envio una foto]` y nada más (`nucleo/canales/api.py`); los bytes se guardan en `asistente.media` y se conservan 30 días, pero no viajan al modelo. No hay ningún camino de visión en el sistema.
 
 Importa porque el flujo de **cambio de WiFi** lo necesita: cuando el cliente dice que no recuerda su clave actual, se le pide foto de la cédula del titular y el agente tiene que **leer** ese dato para seguir. Hoy no puede. Queda pendiente a propósito, no olvidado.

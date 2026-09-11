@@ -757,3 +757,68 @@ print()
 if fallos:
     print(f"[FALLA] {len(fallos)} comprobacion(es) no pasaron.")
     raise SystemExit(1)
+
+
+# =============================================================================
+#  LO QUE EL CASO SE LLEVA DEL TICKET  (10/09/2026)
+# =============================================================================
+# Salio de mirar la pantalla al lado de la de WispHub: el ticket decia
+# "Prioridad: Alta" y el caso nacio "Normal"; la descripcion tenia "Pago
+# reconexion en factura" y el caso no la tenia. El dato estaba y lo
+# tirabamos.
+
+print("\nla descripcion del ticket llega limpia al caso")
+
+_CRUDO = ("<p>No Tiene Internet</p>\r\n\r\n<p>Pago reconexion en factura&nbsp;</p>"
+          "\r\n\r\n<p>Reporta Tecnico 6&nbsp;</p>")
+_LIMPIO = imp.limpiar_descripcion(_CRUDO)
+
+revisar("<p>" not in _LIMPIO and "&nbsp;" not in _LIMPIO,
+        "sin etiquetas ni entidades HTML",
+        "el proveedor la entrega en HTML; pegarla cruda en el CRM seria "
+        "ilegible en el mejor caso, y marcado que nadie escribio en el peor")
+revisar(_LIMPIO.splitlines() == ["No Tiene Internet",
+                                 "Pago reconexion en factura",
+                                 "Reporta Tecnico 6"],
+        "y los parrafos siguen siendo lineas separadas",
+        f"quedo: {_LIMPIO!r}")
+revisar(imp.limpiar_descripcion("<p>a</p><p>b</p>") == "a\nb",
+        "dos parrafos pegados no se convierten en una sola palabra",
+        "por eso las etiquetas de cierre se traducen a salto ANTES de borrar")
+revisar(imp.limpiar_descripcion(None) == "" and imp.limpiar_descripcion("") == "",
+        "sin descripcion no revienta")
+revisar(len(imp.limpiar_descripcion("<p>" + "x" * 5000 + "</p>")) == imp.TOPE_DESCRIPCION,
+        f"se corta en {imp.TOPE_DESCRIPCION} caracteres",
+        "no es un limite tecnico: es minimizacion, porque es texto libre de un "
+        "operador y puede traer datos personales que nadie pidio")
+
+
+print("\nla prioridad del proveedor se guarda pero no manda")
+
+# '_cuerpo_de' vive en el modulo de efectos, pero es puro: arma el diccionario
+# que se manda y no llama a nadie. Se prueba aca, junto a lo que decide que va
+# adentro.
+from nucleo.seguimiento import importacion_io as io  # noqa: E402
+
+_v = imp.Veredicto(external_ticket_id="92204", asunto="No Tiene Internet",
+                   prioridad_proveedor="Alta", prioridad="Normal",
+                   descripcion="Pago reconexion en factura")
+_cuerpo = io._cuerpo_de(_v, _CFG)
+
+revisar(_cuerpo["priority"] == "Normal",
+        "'priority' del caso NO toma la del proveedor",
+        "la prioridad del caso es de Dexter; hoy es una constante de la "
+        "configuracion y manana sera un score propio")
+# Sin nombrar al proveedor: en el YAML semilla viene vacio y el valor real
+# ('wisphub') vive en la base, que es la fuente de verdad. Afirmar sobre el
+# nombre haria fallar la prueba por donde se leyo la config, no por lo que
+# hace el codigo.
+revisar("Prioridad en" in _cuerpo["description"]
+        and "Alta." in _cuerpo["description"],
+        "pero la del proveedor queda escrita y a la vista",
+        "asi nadie lee ese 'Normal' como si fuera un juicio")
+revisar("Pago reconexion en factura" in _cuerpo["description"],
+        "y la descripcion del ticket viaja con el caso")
+revisar(_cuerpo["description"].startswith("Importado de"),
+        "la referencia va primero y el texto libre despues",
+        "arriba lo que este sistema sabe con certeza, abajo lo del otro lado")
