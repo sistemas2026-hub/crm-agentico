@@ -3312,6 +3312,27 @@ IDENTIDAD_CONVERSACION = "conversacion"
 # pantalla los dice distinto: uno es "todavia no cargaron el serial en el
 # sistema del ISP", el otro es "no sabemos de quien es este ticket".
 SIN_ONU_VINCULADA = "onu_no_vinculada"
+# El serial que tiene el sistema del ISP no existe en el de la OLT. Casi
+# siempre significa que le cambiaron el equipo al cliente y actualizaron un
+# sistema y no el otro -- confirmado el 10/09/2026 sobre los cuatro casos que
+# fallaban: los cuatro clientes estaban en la OLT con OTRO serial, y a dos de
+# ellos les habian cambiado la ONU ese mismo dia y el anterior.
+SERIAL_DESACTUALIZADO = "serial_desactualizado"
+
+# Cuanto vale el inventario de ONU antes de volver a pedirlo. La consulta trae
+# 4.909 equipos en 11,7 MB y tarda 2 s: cara para hacerla al abrir cada ticket,
+# barata una vez cada cinco minutos. Solo se paga cuando un serial NO responde,
+# que es el 13 % de los casos.
+_onus_por_olt: dict = {}
+SEGUNDOS_INVENTARIO_ONU = 300.0
+
+# Que porcentaje de las palabras del nombre tiene que coincidir para proponer
+# una ONU. No es un numero elegido a ojo: medido contra los cuatro casos
+# reales, 0.75 acepta "BRANDON STEVEN PATERNINA POLO" contra la ficha que en la
+# OLT dice "PARERNINA" -- un apellido mal tipeado, 3 de 4 palabras -- y rechaza
+# "EMERSON STEVEN POLO CARRANZA", que comparte dos palabras y es otra persona.
+# Con un umbral mas bajo, la pantalla ofreceria el equipo de un tercero.
+UMBRAL_NOMBRE = 0.75
 
 
 def identidad_del_contexto(conv: dict | None, servicio_case: str) -> dict:
@@ -3431,6 +3452,19 @@ def contexto_tecnico(config, tenant: str, identidad: dict) -> dict:
         # Una sola vez al abrir el ticket y sin refresco automatico: quien
         # quiera el dato fresco entra por el enlace, que siempre lo esta.
         enlaces["equipo"] = _estado_equipo(config, sn_onu, tenant)
+        if not enlaces["equipo"]:
+            # El serial existe en el sistema del ISP y la OLT no lo conoce.
+            # Antes esto se mostraba como "no se pudo leer el estado", que
+            # mandaba a buscar una falla de red donde habia un dato viejo.
+            candidatos = onus_del_cliente(
+                _inventario_onu(config, tenant), ficha.get("nombre") or "")
+            # Si el candidato es el MISMO serial, entonces no es un serial
+            # viejo: la OLT lo conoce y la consulta fallo por otra cosa.
+            candidatos = [c for c in candidatos
+                          if c["sn"].upper() != sn_onu.upper()]
+            if candidatos:
+                enlaces["equipo_no_disponible"] = SERIAL_DESACTUALIZADO
+                enlaces["equipo_candidatos"] = candidatos
     elif not sn_onu:
         # El servicio esta identificado y el sistema del ISP no tiene serial.
         # No se llama a SmartOLT -- no hay con que -- y se dice POR QUE, que no
@@ -3527,6 +3561,96 @@ def _estado_equipo(config, sn_onu: str, tenant: str) -> dict:
 # en pantalla algo que a un tecnico no le dice nada.
 _CAMPOS_FICHA = ("usuario", "ip", "estado", "nombre", "cedula", "sn_onu",
                  "telefono", "direccion", "localidad")
+
+
+def _inventario_onu(config, tenant: str) -> list:
+    """
+    Todas las ONU de la OLT, para poder buscar por nombre. Cacheado por proceso.
+
+    Es la unica forma de encontrar el equipo de un cliente cuando el serial que
+    tiene el sistema del ISP ya no existe: las once herramientas de la OLT se
+    indexan por serial, ninguna busca por cliente.
+
+    Se pide UNA vez cada cinco minutos y solo cuando hace falta. Ponerlo en el
+    camino de cada ticket seria 11,7 MB por apertura para una respuesta que casi
+    siempre no se necesita.
+    """
+    ahora = time.monotonic()
+    entrada = _onus_por_olt.get(tenant)
+    if entrada and (ahora - entrada[0]) < SEGUNDOS_INVENTARIO_ONU:
+        return entrada[1]
+
+    herr = next((h for h in config.herramientas
+                 if h.nombre in _HERRAMIENTAS_EQUIPO), None)
+    v = config.variables_tenant or {}
+    base = (v.get("SMARTOLT_SUBDOMINIO") or "").rstrip("/")
+    if herr is None or not base:
+        return []
+    try:
+        import requests
+
+        clave = secretos.obtener(tenant, herr.auth_ref)
+        if not clave:
+            return []
+        r = requests.get(f"{base}/api/onu/get_all_onus_details",
+                         headers={herr.auth_header: clave},
+                         timeout=TIMEOUT_INVENTARIO)
+        r.raise_for_status()
+        onus = (r.json() or {}).get("onus") or []
+    except Exception as e:                                  # noqa: BLE001
+        print(f"[enlaces] no se pudo leer el inventario de ONU: "
+              f"{type(e).__name__}: {e}")
+        return []
+    _onus_por_olt[tenant] = (ahora, onus)
+    return onus
+
+
+TIMEOUT_INVENTARIO = 60
+
+
+def _palabras(nombre: str) -> set:
+    """Las palabras con peso de un nombre. Las de tres letras o menos no
+    distinguen a nadie ('DE', 'LA', 'DEL')."""
+    from unicodedata import category, normalize
+
+    limpio = "".join(c for c in normalize("NFD", str(nombre or "").upper())
+                     if category(c) != "Mn")
+    return {p for p in limpio.replace(".", " ").split() if len(p) > 3}
+
+
+def onus_del_cliente(onus: list, nombre: str) -> list:
+    """
+    Las ONU que podrian ser de este cliente, por parecido de nombre.
+
+    Devuelve CANDIDATAS, nunca una respuesta. Que la pantalla las muestre y
+    decida una persona no es prudencia de mas: probado el 10/09/2026, una
+    coincidencia laxa propone el equipo de otro cliente que comparte dos
+    palabras del nombre, y mostrar su potencia optica como si fuera la del
+    titular del ticket es exactamente el error que este proyecto ya decidio no
+    cometer con los enlaces armados por nombre.
+
+    Se ordenan por fecha de alta descendente: si al cliente le cambiaron el
+    equipo, el nuevo es el de arriba. Pero eso es un orden, no un veredicto.
+    """
+    buscadas = _palabras(nombre)
+    if not buscadas:
+        return []
+    encontradas = []
+    for o in onus:
+        tiene = _palabras(o.get("name"))
+        if not tiene:
+            continue
+        comunes = len(buscadas & tiene)
+        if comunes / len(buscadas) >= UMBRAL_NOMBRE:
+            encontradas.append({
+                "sn": str(o.get("sn") or ""),
+                "nombre": str(o.get("name") or ""),
+                "zona": str(o.get("zone_name") or ""),
+                "alta": str(o.get("authorization_date") or "")[:10],
+                "estado": str(o.get("status") or ""),
+            })
+    encontradas.sort(key=lambda c: c["alta"], reverse=True)
+    return encontradas[:4]
 
 
 def _ficha_cliente(config, id_cliente, tenant: str) -> dict:

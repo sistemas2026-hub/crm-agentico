@@ -623,6 +623,37 @@
                   {/if}
                   <a class="v2-btn v2-btn-sm" href={enlaces.smartolt_ont}
                      target="_blank" rel="noopener">Ver la ONT ↗</a>
+                {:else if enlaces.equipo_no_disponible === 'serial_desactualizado'}
+                  <!-- El serial que tiene WispHub no existe en SmartOLT, y hay
+                       ONU a nombre del cliente con OTRO serial. Casi siempre le
+                       cambiaron el equipo y actualizaron un sistema y no el
+                       otro -- confirmado sobre cuatro casos reales, a dos de
+                       ellos ese mismo día y el anterior.
+
+                       Se OFRECEN candidatas, no se sustituye: probado que una
+                       coincidencia laxa propone el equipo de otro cliente que
+                       comparte palabras del nombre, y mostrar su potencia como
+                       si fuera la del titular sería exactamente el error que
+                       este proyecto ya decidió no cometer con los enlaces
+                       armados por nombre. -->
+                  <p class="sin-dato">
+                    <strong>El serial no existe en SmartOLT.</strong>
+                    WispHub tiene <code>{enlaces.sn_onu}</code>, que la OLT no
+                    reconoce. Hay {enlaces.equipo_candidatos.length === 1
+                      ? 'una ONU'
+                      : enlaces.equipo_candidatos.length + ' ONU'} a nombre de
+                    este cliente — probablemente le cambiaron el equipo y falta
+                    actualizar el serial en WispHub.
+                  </p>
+                  <ul class="candidatos-onu">
+                    {#each enlaces.equipo_candidatos as c}
+                      <li>
+                        <code>{c.sn}</code>
+                        <span class="v2-sub">alta {c.alta} · {c.zona}</span>
+                        <span class="v2-sub">{c.nombre}</span>
+                      </li>
+                    {/each}
+                  </ul>
                 {:else if enlaces.equipo_no_disponible === 'onu_no_vinculada'}
                   <!-- El servicio SI se identifico; lo que falta es el
                        serial del otro lado. Medido el 10/09/2026 sobre 600
@@ -771,6 +802,12 @@
                 <div class="v2-sub" style="font-size:11.5px;margin-bottom:5px">
                   <b style="color:var(--v2-ink);font-weight:600">{m.author}</b>
                   {#if m.kind === 'email'}· correo{/if}
+                  <!-- De dónde salió el mensaje. Sin esto, el hilo del
+                       proveedor y el de Dexter se leen como una sola
+                       conversación y nadie sabe dónde contestar para que el
+                       otro lado se entere. -->
+                  {#if m.kind === 'externo'}<span class="origen-externo">{m.origen}</span>{/if}
+                  {#if m.adjuntos}· {m.adjuntos} adjunto{m.adjuntos > 1 ? 's' : ''}{/if}
                   · hace {shortAge(m.at)}
                 </div>
                 {#if m.subject}
@@ -1497,4 +1534,35 @@
     color: var(--v2-warning, #b45309);
   }
   .tel { display: inline-block; margin-right: 10px; }
+
+  /* El origen de cada mensaje del hilo: lo que se escribio en el sistema del
+     ISP contra lo que se escribio desde Dexter. Discreto, pero en cada
+     burbuja: sin esto las dos conversaciones se leen como una sola. */
+  .origen-externo {
+    display: inline-block;
+    margin: 0 3px;
+    padding: 0 5px;
+    border-radius: 3px;
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    background: var(--v2-surface-2, rgba(0, 0, 0, 0.06));
+    color: var(--v2-text-muted, #666);
+  }
+  .candidatos-onu {
+    list-style: none;
+    margin: 8px 0 10px;
+    padding: 0;
+    display: grid;
+    gap: 6px;
+  }
+  .candidatos-onu li {
+    display: grid;
+    gap: 1px;
+    padding: 6px 8px;
+    border-left: 2px solid var(--v2-warning, #b45309);
+    background: var(--v2-surface-2, rgba(180, 83, 9, 0.05));
+    font-size: 12px;
+  }
+  .candidatos-onu .v2-sub { font-size: 11px; }
 </style>

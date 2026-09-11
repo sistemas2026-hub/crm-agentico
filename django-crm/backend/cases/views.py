@@ -39,6 +39,7 @@ from cases.serializer import (
     CaseSerializer,
     EmailMessageSerializer,
     ReopenPolicySerializer,
+    RespuestaExternaSerializer,
 )
 from cases.solution_serializers import SolutionSerializer
 from cases.tasks import send_email_to_assigned_user
@@ -685,6 +686,15 @@ class CaseDetailView(APIView):
                 "attachments": AttachmentsSerializer(attachments, many=True).data,
                 "comments": CommentSerializer(public_comments, many=True).data,
                 "internal_notes": CommentSerializer(internal_notes, many=True).data,
+                # El hilo del ticket en el sistema del ISP. Va en su propia
+                # clave y no mezclado con 'comments' porque son dos
+                # conversaciones distintas sobre el mismo trabajo: una la
+                # escribio el equipo aca, la otra alla. La pantalla las une en
+                # orden cronologico marcando de donde viene cada mensaje.
+                "respuestas_externas": RespuestaExternaSerializer(
+                    self.cases.respuestas_externas.order_by(
+                        "creada_en_proveedor", "created_at"),
+                    many=True).data,
                 "contacts": ContactSerializer(
                     self.cases.contacts.all(), many=True
                 ).data,
