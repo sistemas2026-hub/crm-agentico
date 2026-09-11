@@ -303,11 +303,27 @@ def test_revertir_no_borra_lo_que_leyo_un_importador(org_a, admin_user):
 
 # --- 11: la migracion no cambia nada de lo que ya funcionaba -------------
 
+# Los dos que la Fase 3 si expone, de solo lectura, y por que cada uno:
+# la pantalla de un ticket IMPORTADO no tiene conversacion de donde sacar el
+# identificador del servicio, asi que sin estos dos no puede pedirle al motor
+# la ficha tecnica del cliente. No abren acceso a nada nuevo -- quien ve el
+# caso ya ve esa ficha.
+LECTURA_PERMITIDA = {"provider", "external_service_id"}
+
+
 def test_los_campos_nuevos_no_llegan_a_la_interfaz(org_a, admin_user):
     """
-    Fase 1 es solo esquema. Ningun serializer expone ni acepta estos campos,
-    asi que ninguna pantalla los muestra y ninguna peticion los escribe --
-    quien los va a escribir es un proceso de fondo, en la Fase 2.
+    Nadie ESCRIBE estos campos desde afuera, y de leerlos solo salen los dos
+    que la pantalla necesita.
+
+    Nacio en la Fase 1, cuando esto era solo esquema y ningun serializer los
+    tocaba. La Fase 3 abrio dos de lectura a proposito; los otros siete siguen
+    sin salir, y esa es la parte que esta prueba cuida ahora -- entre ellos
+    `external_fetch_error`, que lleva texto crudo del proveedor, y
+    `external_created_by`, que lleva el nombre de una persona.
+
+    Escribir sigue cerrado del todo: el unico que puede llenarlos es el proceso
+    de importacion, por su propio endpoint y con su propio token.
     """
     from cases.serializer import CaseCreateSerializer, CaseSerializer
 
@@ -315,10 +331,18 @@ def test_los_campos_nuevos_no_llegan_a_la_interfaz(org_a, admin_user):
               "external_status", "external_status_at", "external_fetched_at",
               "external_fetch_error", "external_created_by",
               "external_created_by_type"}
-    for serializador in (CaseSerializer, CaseCreateSerializer):
-        expuestos = set(serializador.Meta.fields)
-        assert not (nuevos & expuestos), (
-            f"{serializador.__name__} expone {sorted(nuevos & expuestos)}")
+
+    # CaseCreateSerializer atiende creacion Y edicion: ni uno solo entra por ahi.
+    escribibles = nuevos & set(CaseCreateSerializer.Meta.fields)
+    assert not escribibles, (
+        f"CaseCreateSerializer deja escribir {sorted(escribibles)}")
+
+    # De lectura, exactamente los dos aprobados: ni menos (la pantalla del
+    # ticket importado se queda sin ficha) ni mas.
+    leibles = nuevos & set(CaseSerializer.Meta.fields)
+    assert leibles == LECTURA_PERMITIDA, (
+        f"CaseSerializer expone {sorted(leibles)}, "
+        f"se esperaba {sorted(LECTURA_PERMITIDA)}")
 
 
 def test_un_caso_normal_se_crea_y_se_cierra_igual_que_antes(org_a, admin_user):
