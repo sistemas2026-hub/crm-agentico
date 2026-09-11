@@ -52,7 +52,6 @@ Esas respuestas van aparte del guion de TV y no lo consumen.
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import sys
@@ -68,6 +67,19 @@ TENANT = os.environ.get("BATERIA_TENANT", "rapilink")
 CEDULA = os.environ.get("BATERIA_CEDULA", "000021")
 MAX_TURNOS = 16
 
+# EL TOKEN DE SERVICIO, sin el cual /chat contesta 401.
+#
+# En produccion 'MOTOR_SERVICE_TOKEN' esta cargado y el motor es fail-closed:
+# sin la cabecera no atiende (ver _exigir_token_de_servicio en
+# nucleo/canales/api.py). La primera corrida de esta bateria se fue entera sin
+# darse cuenta -- las 23 conversaciones devolvieron 401, el script leyo
+# 'respuesta' de un cuerpo de error, y quedo "" en los 23 casos. En pantalla
+# se veia al agente callado, que es lo mismo que se veria si el modelo fallara.
+# Por eso _pedir() mira el codigo HTTP y aborta: una bateria que miente en
+# silencio cuesta una corrida entera.
+TOKEN = os.environ.get("MOTOR_SERVICE_TOKEN", "")
+CABECERAS = {"X-Servicio-Token": TOKEN} if TOKEN else {}
+
 # Identidad: se contestan SIEMPRE y no gastan una linea del guion de TV.
 IDENT = [
     (r"c[eé]dula|documento|n[uú]mero de identificaci", CEDULA),
@@ -80,11 +92,9 @@ CUANTOS = r"cu[aá]ntos televisores|cu[aá]ntos TV"
 CABLEADO = r"cableado|quien.*instal|lo puso|lo agregaste"
 AJUSTE = r"enroscad|ajustad|flojo|bien puesto|entrada correcta"
 
-
 def C(num, nom, apertura, reglas, tvs="Uno solo.", splitter="No, es uno solo."):
     return dict(num=num, nom=nom, apertura=apertura, reglas=reglas,
                 tvs=tvs, splitter=splitter)
-
 
 CASOS = [
  C("315000000", "Samsung + TV directo", "Hola, no me aparecen los canales de television.",
@@ -169,7 +179,6 @@ CASOS = [
     (None, "Si, ese cable va directo al TV."), (MARCA, "Samsung.")]),
 ]
 
-
 def elegir(caso, usadas, texto):
     """Que contesta el cliente simulado. Identidad y checklist primero."""
     t = texto or ""
@@ -191,21 +200,35 @@ def elegir(caso, usadas, texto):
             return resp
     return None
 
+def _pedir(caso, msg):
+    """Un turno. Aborta la bateria si el motor no atiende -- ver TOKEN."""
+    r = requests.post(URL, headers=CABECERAS, json={
+        "tenant": TENANT, "rol": "cliente_final",
+        "identificador_sesion": caso["num"],
+        "mensaje": msg, "canal": "api"}, timeout=300)
+    if r.status_code != 200:
+        cuerpo = r.text[:200]
+        pista = ("  Falta MOTOR_SERVICE_TOKEN en el entorno: /chat es "
+                 "fail-closed y sin la cabecera contesta 401.\n"
+                 if r.status_code == 401 else "")
+        raise SystemExit(
+            f"\nEl motor contesto HTTP {r.status_code} y la bateria se "
+            f"detiene aca.\n{pista}  respuesta: {cuerpo}\n")
+    return r.json()
 
 def main() -> int:
     print(f"Bateria de TV -- {len(CASOS)} casos contra {URL}")
-    print(f"Tenant: {TENANT}   cedula de prueba: {CEDULA}\n")
+    print(f"Tenant: {TENANT}   cedula de prueba: {CEDULA}")
+    print(f"Token de servicio: {'presente' if TOKEN else 'AUSENTE'}\n")
     for n, caso in enumerate(CASOS, 1):
         print("=" * 70)
         print(f"CASO {n}/{len(CASOS)}  {caso['num']}  {caso['nom']}", flush=True)
         usadas, msg = set(), caso["apertura"]
         for _ in range(MAX_TURNOS):
             try:
-                r = requests.post(URL, json={
-                    "tenant": TENANT, "rol": "cliente_final",
-                    "identificador_sesion": caso["num"],
-                    "mensaje": msg, "canal": "api"}, timeout=300)
-                d = r.json()
+                d = _pedir(caso, msg)
+            except SystemExit:
+                raise
             except Exception as e:
                 print(f"  ERROR: {type(e).__name__}: {e}", flush=True)
                 break
@@ -218,7 +241,6 @@ def main() -> int:
     print("\nListo. La evidencia esta en la base: asistente.conversations, "
           "messages y tool_calls, por 'usuario_externo'.")
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())
