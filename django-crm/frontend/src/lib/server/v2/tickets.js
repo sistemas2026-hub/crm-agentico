@@ -236,6 +236,28 @@ function toConversation(response) {
     });
   }
 
+  // El hilo del ticket en el sistema del ISP. Se une al del CRM en orden
+  // cronologico, no en una pestaña aparte: quien atiende necesita leer una
+  // sola conversacion, no reconstruirla saltando entre dos listas. Lo que si
+  // hace falta es saber DONDE se dijo cada cosa, y para eso va 'origen'.
+  for (const r of response.respuestas_externas ?? []) {
+    entries.push({
+      id: `x-${r.id}`,
+      kind: 'externo',
+      // 'in' y no 'out': lo escribio alguien fuera de Dexter. Ponerlo como
+      // saliente lo mostraria con el estilo de una respuesta del equipo de
+      // este lado, que es justo la confusion que se quiere evitar.
+      direction: 'in',
+      origen: r.provider || 'externo',
+      author: r.autor_nombre || r.autor_usuario || 'Sin autor',
+      // La hora del proveedor. Puede venir null si su formato no se pudo
+      // interpretar, y entonces cae al final del orden en vez de mentir.
+      at: r.creada_en_proveedor,
+      adjuntos: r.archivos ?? 0,
+      body: r.cuerpo ?? ''
+    });
+  }
+
   entries.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
   return entries;
 }

@@ -10,6 +10,7 @@ from cases.models import (
     EmailMessage,
     EscalationPolicy,
     InboundMailbox,
+    RespuestaExterna,
     ReopenPolicy,
     RoutingRule,
     TimeEntry,
@@ -1106,3 +1107,19 @@ class ApprovalRequestSerializer(serializers.Serializer):
 
     rule_id = serializers.UUIDField(required=False, allow_null=True)
     note = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class RespuestaExternaSerializer(serializers.ModelSerializer):
+    """
+    Una respuesta del hilo del ticket en el sistema del ISP.
+
+    Va aparte de 'CommentSerializer' porque es otra cosa: el autor no es un
+    Profile de este CRM sino un usuario del proveedor, y la fecha es la de
+    ALLA, no la de cuando se importo. Mezclarlas en el mismo serializer
+    obligaria a inventar un Profile o a perder una de las dos fechas.
+    """
+
+    class Meta:
+        model = RespuestaExterna
+        fields = ("id", "provider", "autor_nombre", "autor_usuario",
+                  "cuerpo", "creada_en_proveedor", "archivos")
