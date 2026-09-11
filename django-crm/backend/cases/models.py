@@ -1215,6 +1215,70 @@ class TimeEntry(BaseModel):
         super().save(*args, **kwargs)
 
 
+class RespuestaExterna(BaseModel):
+    """
+    Una respuesta del hilo del ticket en el sistema del ISP.
+
+    POR QUE UN MODELO PROPIO Y NO 'Comment'
+    ---------------------------------------
+    'Comment' es el hilo del CRM y parecia el lugar natural, pero no entra por
+    tres razones medidas el 10/09/2026, y las tres dejarian la pantalla
+    mintiendo:
+
+      max_length=255    de 70 respuestas reales, 6 pasan de 255 caracteres.
+                        Truncar la respuesta de un tecnico justo donde explica
+                        que hizo es peor que no traerla.
+      commented_on      es 'auto_now_add': no se puede fijar la fecha
+                        original, asi que una respuesta del 10/09 a las 14:15
+                        aparecia con la hora de la importacion y el hilo
+                        quedaba en orden falso.
+      commented_by      es FK a Profile. Los siete autores que escriben en
+                        esos tickets son usuarios de WispHub, no de Dexter, y
+                        un autor nulo la pantalla lo dibuja como "El cliente"
+                        -- o sea que una nota interna del jefe de operaciones
+                        se veria como si la hubiera escrito el cliente.
+
+    Asi que las respuestas del proveedor viven aparte y la pantalla une los dos
+    hilos marcando de donde viene cada uno, que es exactamente lo que se pidio:
+    poder ver la conversacion completa sin confundir quien dijo que.
+    """
+
+    org = models.ForeignKey(
+        "common.Org", on_delete=models.CASCADE,
+        related_name="respuestas_externas")
+    case = models.ForeignKey(
+        Case, on_delete=models.CASCADE, related_name="respuestas_externas")
+    provider = models.CharField(max_length=32)
+
+    # La huella de la respuesta, porque el proveedor NO le da id.
+    #
+    # Se calcula sobre fecha + autor + texto, y es lo que hace que sincronizar
+    # cada hora no duplique nada. Tiene un limite conocido: si alguien EDITA
+    # una respuesta alla, cambia la huella y entra como una segunda. Se prefiere
+    # eso a sobrescribir -- esto es un registro de lo que se dijo, y perder la
+    # version anterior seria perder justamente lo que se audita.
+    huella = models.CharField(max_length=64)
+
+    autor_nombre = models.CharField(max_length=160, blank=True, default="")
+    autor_usuario = models.CharField(max_length=160, blank=True, default="")
+    cuerpo = models.TextField(blank=True, default="")
+    # La hora del proveedor, no la de la importacion.
+    creada_en_proveedor = models.DateTimeField(null=True, blank=True)
+    archivos = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        db_table = "cases_respuesta_externa"
+        ordering = ["creada_en_proveedor", "created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["case", "provider", "huella"],
+                name="respuesta_externa_unica"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.provider}:{self.case_id} {self.autor_usuario}"
+
+
 # Tier 3 approval workflows. The two model classes live in cases/approvals.py
 # but must be importable through ``cases.models`` so Django's app registry,
 # `makemigrations`, and existing reverse-related lookups all resolve them.

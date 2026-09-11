@@ -822,3 +822,69 @@ revisar("Pago reconexion en factura" in _cuerpo["description"],
 revisar(_cuerpo["description"].startswith("Importado de"),
         "la referencia va primero y el texto libre despues",
         "arriba lo que este sistema sabe con certeza, abajo lo del otro lado")
+
+
+# =============================================================================
+#  EL HILO DEL TICKET  (10/09/2026)
+# =============================================================================
+# Medido: de 25 tickets mirados, 24 tienen respuestas -- 70 en total. O sea que
+# el hilo es la norma, no un caso raro, y no traerlo dejaba fuera lo que paso
+# DESPUES de abrir el ticket, que suele ser lo que hace falta saber.
+
+print("\nel hilo del ticket se trae entero y sin duplicar")
+
+_RESP = {
+    "respuestas": [
+        {"respuesta": "<p>SE VALIDA TICKET</p>",
+         "created": "09/10/2026 14:15:50",
+         "autor": {"id": 1425058, "username": "jefe.operacion@rapilink-sas",
+                   "nombre": "TOMAS ENRIQUE MORENO"},
+         "archivos": []},
+        {"respuesta": "<p>Se reviso el drop</p>",
+         "created": "09/10/2026 15:02:11",
+         "autor": {"id": 99, "username": "tecnico6@rapilink-sas",
+                   "nombre": "TECNICO 6"},
+         "archivos": [{"url": "x"}, {"url": "y"}]},
+    ]
+}
+_hilo = imp.leer_respuestas(_RESP)
+
+revisar(len(_hilo) == 2, "las dos respuestas entran", f"{len(_hilo)}")
+revisar(_hilo[0]["cuerpo"] == "SE VALIDA TICKET",
+        "el cuerpo llega en texto plano, sin HTML")
+revisar(_hilo[0]["autor_nombre"] == "TOMAS ENRIQUE MORENO"
+        and _hilo[0]["autor_usuario"] == "jefe.operacion@rapilink-sas",
+        "con el autor del proveedor, que no es un Profile de Dexter",
+        "por eso no entra en 'Comment': su autor nulo la pantalla lo dibuja "
+        "como 'El cliente', y seria una nota del jefe de operaciones con cara "
+        "de mensaje del cliente")
+revisar("id" not in _hilo[0],
+        "y SIN el id interno del autor en el proveedor, que no le sirve a nadie")
+revisar(_hilo[1]["archivos"] == 2,
+        "de los adjuntos se guarda cuantos hay, no los bytes",
+        "los archivos viven alla; copiarlos seria traer adjuntos que nadie pidio")
+revisar(_hilo[0]["creada_en_proveedor"] == "2026-09-10T14:15:50",
+        "la fecha se interpreta como MM/DD/YYYY",
+        f"quedo {_hilo[0]['creada_en_proveedor']!r} -- es el mismo formato de "
+        f"'fecha_fin' que ya costo cinco horas de diferencia una vez")
+
+# La huella es lo que hace que sincronizar cada hora no duplique.
+_otra_vez = imp.leer_respuestas(_RESP)
+revisar([r["huella"] for r in _hilo] == [r["huella"] for r in _otra_vez],
+        "la misma respuesta da la misma huella en dos lecturas",
+        "si no, cada pasada del reloj duplicaria el hilo entero")
+revisar(_hilo[0]["huella"] != _hilo[1]["huella"],
+        "y dos respuestas distintas dan huellas distintas")
+
+_editada = imp.huella_respuesta("09/10/2026 14:15:50",
+                                "jefe.operacion@rapilink-sas", "OTRA COSA")
+revisar(_editada != _hilo[0]["huella"],
+        "editar el texto cambia la huella",
+        "limite conocido y aceptado: entra como una segunda respuesta en vez "
+        "de sobrescribir, porque esto es el registro de lo que se dijo")
+
+revisar(imp.leer_respuestas({}) == [] and imp.leer_respuestas({"respuestas": []}) == [],
+        "un ticket sin hilo no rompe nada")
+revisar(imp.momento_de_respuesta("") is None
+        and imp.momento_de_respuesta("no es fecha") is None,
+        "una fecha ilegible devuelve None en vez de inventarse un instante")

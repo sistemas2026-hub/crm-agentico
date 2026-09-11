@@ -23,4 +23,6 @@ urlpatterns = [
     path("casos-externos/", vistas.CasosExternosView.as_view(), name="casos_externos"),
     path("casos/<uuid:pk>/reconciliar/", vistas.ReconciliarCaseView.as_view(),
          name="reconciliar"),
+    path("casos/<uuid:pk>/respuestas/", vistas.RespuestasExternasView.as_view(),
+         name="respuestas"),
 ]

@@ -55,6 +55,7 @@ HERRAMIENTAS = frozenset({
     "consultar_casos_externos",
     "importar_caso_externo",
     "reconciliar_caso_externo",
+    "sincronizar_respuestas_externas",
 })
 
 
@@ -382,6 +383,46 @@ def aplicar_reconciliacion(config, tenant, cambios) -> dict:
 #  EL CICLO COMPLETO  --  lo que corre el reloj, y tambien el CLI
 # =============================================================================
 
+def sincronizar_respuestas(config, tenant, cambios) -> dict:
+    """
+    Manda el hilo de cada ticket al caso que le corresponde.
+
+    Ni una llamada al proveedor: las respuestas ya vinieron en el mismo payload
+    que 'reconciliar' leyo para saber el estado. Lo unico que sale de aca son
+    escrituras al CRM, y solo por los casos que TIENEN hilo.
+
+    El endpoint hace upsert por huella, asi que repetir la misma pasada cada
+    hora no duplica nada y aca no hace falta llevar la cuenta de que se mando
+    antes. Un fallo por caso no corta el lote: el hilo del siguiente no tiene
+    por que perderse porque uno no se pudo escribir.
+    """
+    herr = _herramienta(config, "sincronizar_respuestas_externas")
+    resumen = {"hilos": 0, "respuestas": 0, "nuevas": 0, "fallidos": 0}
+    if herr is None:
+        # Sin la herramienta en el catalogo no se sincroniza, y se dice. No es
+        # un error del barrido: es una config a la que le falta una pieza.
+        resumen["error"] = "falta 'sincronizar_respuestas_externas' en el catalogo"
+        return resumen
+
+    proveedor = config.importacion_tickets.proveedor
+    for c in cambios:
+        if not c.respuestas or not c.caso_id:
+            continue
+        resumen["hilos"] += 1
+        resumen["respuestas"] += len(c.respuestas)
+        try:
+            r = ejecutor_http.ejecutar(
+                herr, {"id_caso": c.caso_id, "provider": proveedor,
+                       "respuestas": c.respuestas},
+                tenant, variables_tenant=config.variables_tenant)
+            if isinstance(r, dict):
+                resumen["nuevas"] += int(r.get("nuevas") or 0)
+        except Exception as e:                              # noqa: BLE001
+            resumen["fallidos"] += 1
+            print(f"    [hilo] caso {c.caso_id}: {type(e).__name__}: {e}")
+    return resumen
+
+
 def barrido(config, tenant: str, *, aplicar_cambios: bool = False) -> dict:
     """
     Una pasada entera del subsistema de importacion:
@@ -436,7 +477,8 @@ def barrido(config, tenant: str, *, aplicar_cambios: bool = False) -> dict:
                         "creados": 0, "ya_estaban": 0, "fallidos": 0},
         "reconciliacion": {"alcanzados": 0, "con_diferencia": 0,
                            "actualizados": 0, "sin_cambios": 0,
-                           "fallidos": 0, "errores_lectura": 0},
+                           "fallidos": 0, "errores_lectura": 0,
+                           "respuestas": {}},
     }
 
     # -----------------------------------------------------------------------
@@ -528,6 +570,12 @@ def _reconciliar(config, tenant, conf, registro, resumen, aplicar_cambios) -> No
         rec["con_diferencia"] = sum(1 for c in cambios if c.hay_diferencia)
         if aplicar_cambios and cambios:
             rec.update(aplicar_reconciliacion(config, tenant, cambios))
+            rec["respuestas"] = sincronizar_respuestas(config, tenant, cambios)
+        else:
+            rec["respuestas"] = {
+                "hilos": sum(1 for c in cambios if c.respuestas),
+                "respuestas": sum(len(c.respuestas) for c in cambios),
+                "nuevas": 0, "seco": True}
     except Exception as e:                                  # noqa: BLE001
         resumen["reconciliacion"]["error"] = f"{type(e).__name__}: {e}"
         print(f"[importacion] la reconciliacion de '{tenant}' fallo: "
