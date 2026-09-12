@@ -251,13 +251,39 @@ def tickets_conocidos(config, tenant: str, ids: list[str]) -> tuple[set, set]:
                     f"{type(e).__name__}: {e}") from e
 
     # La otra fuente de autoria, esta si del dominio del motor.
-    from nucleo.persistencia.conexion import dsn
-    import psycopg
+    #
+    # AISLAMIENTO: esta consulta leia las conversaciones de TODAS las empresas.
+    #
+    # 'motor_user' tiene BYPASSRLS y lo necesita para UNA consulta -- la que
+    # averigua a que organizacion pertenece el tenant, antes de poder fijar
+    # cual. 'sesion()' baja a 'app_backend' en la linea siguiente, asi que esa
+    # ventana dura una consulta. Una conexion CRUDA, como habia aca, se queda
+    # arriba con el privilegio puesto.
+    #
+    # Y este conjunto decide AUTORIA: si el numero de ticket esta adentro, el
+    # importador concluye "lo abrio Dexter" y lo persiste en
+    # 'Case.external_created_by_type'. Con dos ISP en la misma base, el ticket
+    # 92100 de la empresa B haria que el 92100 de la empresa A se marcara como
+    # abierto por Dexter cuando lo abrio una persona.
+    #
+    # DOS CAPAS, a proposito:
+    #   'sesion()'            baja de rol y fija el tenant, asi que la politica
+    #                         'organization_id = asistente.org_actual()' acota
+    #                         la consulta sola. Es fail-closed: sin contexto,
+    #                         org_actual() devuelve NULL y no iguala ninguna fila.
+    #   el WHERE explicito    no confia en que la politica siga ahi. Si alguien
+    #                         la desactiva, o si esta consulta termina algun dia
+    #                         corriendo bajo un rol que la evade, el filtro sigue.
+    #                         RLS es la defensa de fondo, no el unico filtro.
+    from nucleo.persistencia.db import sesion
 
-    with psycopg.connect(dsn()) as cx:
-        conv = {str(f[0]).strip() for f in cx.execute(
-            "select trim(ticket_operativo) from asistente.conversations "
-            "where coalesce(trim(ticket_operativo),'') <> ''").fetchall()}
+    with sesion(tenant) as (cur, org):
+        cur.execute("select trim(ticket_operativo) as t "
+                    "from asistente.conversations "
+                    "where organization_id = %s "
+                    "  and coalesce(trim(ticket_operativo),'') <> ''",
+                    (org,))
+        conv = {str(f["t"]).strip() for f in cur.fetchall()}
 
     print(f"[registro] tickets de Dexter: {len(conv)} en conversaciones + "
           f"{len(del_crm)} en solicitudes | con caso: {len(con_caso)}")
