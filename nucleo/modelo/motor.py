@@ -2024,6 +2024,28 @@ _RE_DA_UN_PASO = re.compile(
     r"busqueda\s+automatica|sintonizacion\s+automatica|escane\w+)\b")
 
 
+def nota_de_identidad_al_derivar(sesion) -> str:
+    """
+    Que se le dice al area que RECIBE una conversacion derivada sobre la
+    identidad del cliente. Pura: depende solo del estado de la sesion.
+
+    Existe como funcion aparte para poder afirmarlo sin llamar al modelo --
+    el texto va dentro de un mensaje 'system' del handoff, y lo que importa
+    no es que el mensaje exista sino que DIGA COSAS DISTINTAS segun el
+    estado. Antes era una constante que afirmaba "ya esta verificado"
+    pasara lo que pasara.
+
+    Fail-closed: sin sesion se asume NO verificado. Afirmar de mas una
+    identidad es el error caro; afirmar de menos solo cuesta una pregunta.
+    """
+    if sesion is not None and getattr(sesion, "verificado", False):
+        return "ya esta verificado, no le pidas la identidad de nuevo"
+    return ("NO esta verificado todavia: no sabes quien es y no tienes su "
+            "cuenta ubicada, asi que no le digas que si. Si tu rol necesita "
+            "la identidad para lo que pidio, pedisela vos en tu propio "
+            "contexto")
+
+
 def _da_pasos_de_sintonizacion(texto: str) -> bool:
     """
     Si esta respuesta le esta dictando al cliente COMO sintonizar.
@@ -2346,6 +2368,32 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 "reconociste por su numero, por su chat, ni que 'el sistema lo "
                 "confirma') -- si no sabes como se verifico, decilo asi de "
                 "simple y ofrecele confirmarlo de nuevo con su cedula."})
+        else:
+            # EL AGUJERO SIMETRICO DEL DE ARRIBA, y se abrio por el mismo
+            # motivo. Arriba se decidio DECIRLE que ya esta verificado porque
+            # el modelo solo lo deducia cuando una herramienta le devolvia
+            # datos reales. Abajo no se dijo nada -- y sin senal, "no
+            # verificado" hay que inferirlo de una AUSENCIA, que es
+            # justamente lo que un modelo no hace bien.
+            #
+            # Lo que produjo (12/09/2026, simulador, conversacion sin
+            # verificar): el cliente escribio su cedula y se le contesto "no
+            # necesito ese numero, ya tengo tu cuenta ubicada". Las dos
+            # mitades falsas: ni la tenia ubicada ni podia. Misma familia que
+            # "el sistema me confirma que sos el titular" del 15/08/2026, que
+            # es el caso que motivo el mensaje de arriba.
+            #
+            # Se dice QUE no sabe, nunca QUE HACER: que siga es decision del
+            # rol. Un router no verifica (deriva_verificacion) y un rol de
+            # venta atiende prospectos que ni siquiera son clientes -- si
+            # este mensaje les ordenara pedir la cedula, romperia a los dos.
+            historial.append({"role": "system", "content":
+                "Este cliente TODAVIA NO esta verificado: no sabes quien es, "
+                "no tienes su cuenta ubicada y no conoces su servicio. No "
+                "afirmes ninguna de esas tres cosas y no le digas que no "
+                "necesitas su documento. Que corresponde hacer ahora lo "
+                "decide tu rol; lo que no puedes es dar por sabido lo que no "
+                "sabes."})
     historial.append({"role": "user", "content": mensaje})
 
     herramientas = herramientas_del_rol(config, rol_cfg)
@@ -3155,14 +3203,32 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 registro_al_derivar = len(registro)
                 historial.append({"role": "system",
                                   "content": construir_system(config, nombre_rol)})
+                # El parentesis sobre la identidad era FIJO y afirmaba "ya
+                # esta verificado" pasara lo que pasara. En una derivacion
+                # de una conversacion SIN verificar, eso le mentia al
+                # especialista que la recibe -- y el mensaje le gana a
+                # cualquier instruccion del prompt, porque es posterior y
+                # mas especifico.
+                #
+                # Lo que produjo (12/09/2026, simulador): un cliente sin
+                # verificar pidio dar de baja, el router derivo, el cliente
+                # escribio su cedula y facturacion le contesto "no necesito
+                # ese numero, ya tengo tu cuenta ubicada". Las dos mitades
+                # falsas. El dato no se filtro -- la guarda de identidad
+                # sigue frenando las herramientas-- pero el especialista se
+                # saltea la verificacion y el cliente escucha una mentira.
+                #
+                # El router no verifica a nadie a proposito
+                # (Rol.deriva_verificacion), asi que la derivacion sin
+                # verificar no es un borde raro: es el camino normal.
+                nota_identidad = nota_de_identidad_al_derivar(sesion)
                 historial.append({"role": "system", "content":
                     f"Tu atiendes ahora esta conversacion, en el mismo mensaje "
                     f"-- el cliente NO tiene que volver a escribir. Sigue "
-                    f"desde donde quedo (ya esta verificado, no le pidas la "
-                    f"identidad de nuevo) y resolvele lo que pidio con TUS "
-                    f"herramientas. No le digas que lo estas derivando ni que "
-                    f"lo pasas con otra area: para el es la misma "
-                    f"conversacion."})
+                    f"desde donde quedo ({nota_identidad}) y resolvele lo que "
+                    f"pidio con TUS herramientas. No le digas que lo estas "
+                    f"derivando ni que lo pasas con otra area: para el es la "
+                    f"misma conversacion."})
                 # 'sesion.rol_siguiente' NO se limpia aca a proposito:
                 # nucleo/canales/api.py lo lee DESPUES de que responder()
                 # vuelve, para persistir 'rol_efectivo' y que el proximo

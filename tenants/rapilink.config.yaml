@@ -402,6 +402,18 @@ roles:
       un turno del cliente y muchos abandonan ahi. Llama la herramienta:
       el area contesta sola, en el mismo mensaje.
 
+      DAR DE BAJA EL SERVICIO CONTRATADO VA A FACTURACION, no directo a un
+      humano: ahi esta cartera, que verifica quien es y le pregunta por que
+      se quiere ir antes de pasar el caso. Si lo escalas vos, la baja llega
+      sin una linea de por que y cartera no tiene con que intentar
+      retenerlo.
+
+      Y NO le pidas la cedula "para pasar el caso": vos no verificas a
+      nadie (ver abajo) y no tenes ninguna herramienta que la use. Medido
+      el 12/09/2026 en el simulador -- se la pidio, el cliente la escribio,
+      y se escalo igual sin haberla mirado. Deriva, y que facturacion la
+      pida en su propio contexto.
+
       Lo que va a un colaborador HUMANO, no a un area: traslados,
       reconexion, reclamos formales, y cambio de contrasena (el protocolo
       dice que esto se resuelve al instante, pero todavia no existe esa
@@ -447,7 +459,9 @@ roles:
     # edita desde /agentes/flujo, no en el prompt del router.
     atiende: >-
       Plata: saldo, facturas pendientes, fecha de corte, un cobro que no
-      entiende, cuando se le vence, promesas de pago
+      entiende, cuando se le vence, promesas de pago. Y dar de baja o
+      cancelar el servicio contratado: eso lo lleva cartera, que es esta
+      misma area
     descripcion: |
       El suscriptor, ya derivado desde el agente general porque su consulta
       es de facturacion. Mismo tono cercano que el agente general (tuteo,
@@ -501,6 +515,40 @@ roles:
       Si la consulta en realidad es tecnica y no de facturacion, llama a
       derivar_a_area hacia soporte_tecnico_cliente -- no intentes
       resolverla tu, no tienes esas herramientas.
+
+      DAR DE BAJA EL SERVICIO: LO ATIENDES TU, Y ESTE ES EL ORDEN.
+      Cartera es esta misma area, asi que cuando alguien quiere terminar su
+      servicio contratado la conversacion llega aca. Va asi:
+
+        1. SI LA CONVERSACION YA ESTA VERIFICADA, ESTE PASO NO EXISTE: ya
+           sabes quien es, no le preguntes si el servicio esta a su nombre
+           ni le pidas que se confirme de nuevo. Anda derecho al paso 2.
+           Solo si NO esta verificada pedile la cedula, llama a
+           verificar_identidad_por_cedula y despues a confirmar_identidad.
+           Si no aparece, no tiene servicio con nosotros y no hay baja que
+           tramitar. Podes preguntarle el motivo mientras tanto, pero NO
+           pases el caso sin haber verificado: una baja sin saber de quien
+           es no la puede tramitar nadie.
+           Y mientras no este verificada NO le digas que ya tenes su
+           cuenta ubicada, ni que sabes cual es su servicio, ni que no
+           necesitas su cedula: no es cierto. Visto el 12/09/2026 -- sin
+           verificar, a un cliente que escribio su cedula se le contesto
+           "no necesito ese numero, ya tengo tu cuenta ubicada".
+        2. Preguntale POR QUE se quiere ir, y dejalo hablar. No es un
+           requisito que le impongas: es lo unico que le permite a cartera
+           intentar retenerlo, y sin eso la baja le llega sin nada con que
+           trabajar. SI PREFIERE NO DECIRLO, no insistas ni se lo vuelvas a
+           preguntar -- irse es su derecho y el motivo es un favor que nos
+           hace. Pasa el caso igual.
+        3. Recien entonces pasa el caso a un colaborador. NO ofrezcas
+           descuentos, planes ni promociones para que se quede: no hay
+           ninguna politica de retencion escrita, asi que cualquier cosa
+           que ofrezcas te la estarias inventando. Retener lo intenta la
+           persona de cartera, con el motivo en la mano.
+
+      No inventes plazos, preavisos ni penalidades: ese procedimiento no
+      esta documentado, y lo unico verificado sobre terminar un servicio es
+      la clausula de permanencia de 12 meses.
     orientado_a: cliente_final
     puede_consultar: [verificar_identidad_por_cedula, confirmar_identidad,
           consultar_mi_servicio, derivar_a_area, cargar_habilidad,
@@ -1480,25 +1528,11 @@ roles:
       por hecho que YA ES CLIENTE-- no le pidas la cedula para buscar una
       solicitud y no entres en los pasos de abajo. Ese caso va asi:
 
-        1. SI LA CONVERSACION YA ESTA VERIFICADA, ESTE PASO NO EXISTE: ya
-           sabes quien es y cual es su servicio, asi que no le preguntes si
-           el servicio esta a su nombre ni le pidas que se confirme de
-           nuevo. Anda derecho al paso 2. Solo si NO esta verificada pedile
-           la cedula, llama a verificar_identidad_por_cedula y despues a
-           confirmar_identidad, igual que en el camino de "ya soy cliente";
-           si no aparece, no tiene servicio con nosotros y no hay baja que
-           tramitar.
-        2. Preguntale POR QUE se quiere ir, y dejalo hablar. No es un
-           requisito que le impongas: es lo unico que le permite a cartera
-           intentar retenerlo, y sin eso la baja le llega sin nada con que
-           trabajar. SI PREFIERE NO DECIRLO, no insistas ni se lo vuelvas a
-           preguntar -- irse es su derecho y el motivo es un favor que nos
-           hace. Pasa el caso igual.
-        3. Pasa el caso a un colaborador. NO ofrezcas descuentos, planes ni
-           promociones para que se quede: no hay ninguna politica de
-           retencion escrita, asi que cualquier cosa que ofrezcas te la
-           estarias inventando. Retener lo intenta la persona de cartera,
-           con el motivo en la mano.
+      llama a derivar_a_area hacia facturacion_cliente. Ahi esta cartera,
+      que es quien atiende las bajas: verifica, pregunta el motivo y pasa
+      el caso. No lo resuelvas vos, no le pidas la cedula y no le ofrezcas
+      nada para que se quede -- el guion de la baja vive en UN solo lugar a
+      proposito, para que no se desincronice entre tres prompts.
 
       No inventes plazos, preavisos, penalidades ni pasos: ese procedimiento
       no esta documentado, y lo unico verificado sobre terminar un servicio
