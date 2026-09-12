@@ -203,6 +203,16 @@ jobs:
           DBPASSWORD: crm_ci
           DBHOST: localhost
           DBPORT: '5432'
+          # Convierte el salto en fallo. Sin esto, el dia que alguien cambie
+          # `DBUSER` de arriba por un rol privilegiado --o que la imagen de
+          # Postgres cambie los atributos por defecto del suyo-- estas pruebas
+          # se saltarian solas y el job seguiria en verde: la comprobacion de
+          # aislamiento desapareceria sin que nada lo dijera.
+          #
+          # Paso exactamente eso en una auditoria, con un rol
+          # `rolsuper=t, rolbypassrls=t`. Con RLS_GATE=1, ese mismo rol hace
+          # fallar el paso nombrandolo.
+          RLS_GATE: '1'
         run: uv run pytest --no-cov --tb=short -q -m postgres_only
 
       # Bare `ruff check .`, so the gate is whatever `backend/ruff.toml` selects

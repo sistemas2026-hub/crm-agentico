@@ -63,7 +63,65 @@ from nucleo.recuperacion.busqueda import recuperar_candidatos  # noqa: E402
 # practica, contra la base donde esa configuracion existe, que era produccion--.
 # Con 'cli/esquema_de_pruebas.py' se puede levantar un tenant sintetico en un
 # PostgreSQL efimero y correrla ahi.
-TENANT = os.environ.get("ASISTENTE_TENANT", "rapilink")
+TENANT = os.environ.get("ASISTENTE_TENANT", "test_tenant")
+
+# ---------------------------------------------------------------------------
+#  DOS MODOS: HERMETICO POR DEFECTO, LIVE SOLO SI SE PIDE
+# ---------------------------------------------------------------------------
+#
+# Esta prueba vectorizaba llamando a la API de OpenAI. Eso la hacia depender de
+# red, de una credencial y de un costo por corrida, y mandaba texto afuera --
+# tres cosas que una prueba obligatoria no puede pedir.
+#
+# Lo que la prueba comprueba es que 'match_chunks' NO devuelva un documento en
+# estado 'pendiente'. Eso es SQL: no necesita que los vectores signifiquen
+# nada, solo que sean consistentes -- el mismo texto, el mismo vector, en la
+# ingesta y en la consulta.
+#
+# El vectorizador determinista de abajo cumple exactamente eso y nada mas. No
+# imita a OpenAI ni pretende medir calidad de recuperacion: si algun dia hace
+# falta comprobar que la busqueda ENCUENTRA cosas por significado, eso es el
+# modo live, que es otra prueba.
+LIVE = os.environ.get("EMBEDDINGS_LIVE", "") not in ("", "0", "false")
+
+
+def _vector_determinista(texto: str, modelo=None) -> list[float]:
+    """Un vector reproducible a partir del texto. Sin red, sin clave, sin costo.
+
+    1024 dimensiones porque es lo que declara la columna (ver el comentario de
+    'rag.modelo_embeddings' en la config: se pide dimensions=1024 a proposito
+    para no migrar la columna). Normalizado, para que la distancia coseno se
+    comporte.
+    """
+    import hashlib
+    import math
+
+    semilla = hashlib.sha256(texto.encode("utf-8")).digest()
+    crudo = []
+    i = 0
+    while len(crudo) < 1024:
+        bloque = hashlib.sha256(semilla + i.to_bytes(4, "big")).digest()
+        crudo.extend(b / 255.0 - 0.5 for b in bloque)
+        i += 1
+    crudo = crudo[:1024]
+    norma = math.sqrt(sum(x * x for x in crudo)) or 1.0
+    return [x / norma for x in crudo]
+
+
+def _instalar_vectorizador_hermetico() -> None:
+    """Reemplaza las DOS costuras: la de ingesta y la de consulta.
+
+    Son dos modulos distintos que importaron la funcion por su cuenta, asi que
+    parchear uno solo dejaria la consulta hablando con OpenAI. Es la misma
+    trampa de enlace de imports que ya costo una vez con 'contexto_del_caso'.
+    """
+    from nucleo.ingesta import corpus as _corpus
+    from nucleo.recuperacion import busqueda as _busqueda
+
+    _corpus.vectorizar = _vector_determinista
+    _busqueda.vectorizar = _vector_determinista
+
+
 CODIGO = "ZZ-TEST-APROBACION"
 # Texto muy especifico, para que la consigna de prueba lo traiga primero si
 # de verdad estuviera disponible. Si con esto no aparece, no aparece por
@@ -72,6 +130,19 @@ CONTENIDO = ("El procedimiento de prueba de aprobacion documental establece "
              "que el conector de calibracion violeta debe verificarse antes "
              "de cualquier medicion del equipo de prueba.")
 CONSULTA = "conector de calibracion violeta del equipo de prueba"
+
+if not LIVE:
+    _instalar_vectorizador_hermetico()
+    print("[modo] HERMETICO: vectores deterministas, sin red ni credenciales.")
+else:
+    if not os.environ.get("OPENAI_API_KEY"):
+        raise SystemExit(
+            "EMBEDDINGS_LIVE=1 pero falta OPENAI_API_KEY. El modo live pide "
+            "red y credencial a proposito; sin ella no se adivina nada.")
+    print("[modo] LIVE: se llama al proveedor de embeddings de verdad.")
+    print("[modo] el unico texto que sale es sintetico:")
+    print(f"       {CONTENIDO[:90]}...")
+
 
 fallos: list[str] = []
 

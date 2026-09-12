@@ -45,11 +45,18 @@ def _exigir_rol_que_respeta_rls():
                     "WHERE rolname = current_user")
         fila = cur.fetchone()
     if fila and (fila[0] or fila[1]):
-        pytest.skip(
-            f"El rol actual evade RLS (rolsuper={fila[0]}, "
-            f"rolbypassrls={fila[1]}): esta prueba no puede comprobar "
-            f"aislamiento. Correr con --ds=crm.test_settings_postgres y un "
-            f"DBUSER NOSUPERUSER NOBYPASSRLS.")
+        motivo = (f"El rol actual evade RLS (rolsuper={fila[0]}, "
+                  f"rolbypassrls={fila[1]}): esta prueba no puede comprobar "
+                  f"aislamiento. Correr con --ds=crm.test_settings_postgres y "
+                  f"un DBUSER NOSUPERUSER NOBYPASSRLS.")
+        # Mismos dos modos que en 'test_rls_el_rol_importa.py': en desarrollo
+        # se salta, en la compuerta de seguridad FALLA. Una compuerta que se
+        # saltea sola deja el job en verde sin haber comprobado nada.
+        import os
+
+        if os.environ.get("RLS_GATE", "") not in ("", "0", "false"):
+            pytest.fail(f"RLS_GATE=1: {motivo}")
+        pytest.skip(f"{motivo} (con RLS_GATE=1 esto seria un fallo)")
 
 
 def test_portal_access_token_table_has_no_rls_policy():

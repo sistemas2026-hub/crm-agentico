@@ -28,6 +28,8 @@ LO QUE SE AGREGA
    conexion no deje el tenant anterior puesto.
 """
 
+import os
+
 import pytest
 from django.db import connection, transaction
 from django.utils import timezone
@@ -55,23 +57,48 @@ def _rol_actual():
         return cur.fetchone()
 
 
+# DOS MODOS, Y LA DIFERENCIA ES EL PUNTO.
+#
+#   sin RLS_GATE   suite de desarrollo. Si el rol evade RLS, estas pruebas se
+#                  SALTAN diciendo por que. Correr la suite con un superusuario
+#                  es legitimo para todo lo demas.
+#
+#   RLS_GATE=1     compuerta de seguridad. El mismo rol que alla hacia saltar,
+#                  aca FALLA.
+#
+# Una compuerta que se saltea sola no es una compuerta. Si CI arranca un dia
+# con un rol privilegiado --que es exactamente lo que acaba de pasar en una
+# auditoria-- el aislamiento deja de comprobarse y el job sigue en verde. Es el
+# mismo error de esta investigacion un nivel mas arriba: lo que no se dice en
+# voz alta se lee como que esta bien.
+MODO_COMPUERTA = os.environ.get("RLS_GATE", "") not in ("", "0", "false")
+
+
+def _sin_rls(motivo: str):
+    """Saltar en desarrollo, fallar en la compuerta. Mismo motivo, dos pesos."""
+    if MODO_COMPUERTA:
+        pytest.fail(
+            f"RLS_GATE=1: {motivo}. "
+            f"La compuerta de aislamiento no puede saltarse: si no se puede "
+            f"comprobar, no esta comprobado.")
+    pytest.skip(f"{motivo} (con RLS_GATE=1 esto seria un fallo)")
+
+
 def _exigir_rol_que_respeta_rls():
     """
-    La guarda que faltaba.
+    La guarda que faltaba, en sus dos modos.
 
-    Se SALTA --no se falla-- porque correr la suite con un superusuario es una
-    configuracion legitima para todo lo demas: lo unico que no puede es
-    comprobar aislamiento. Lo que no puede pasar es lo que pasaba antes:
-    afirmar sobre RLS bajo un rol que lo evade, y leer el resultado como si
-    significara algo.
+    Lo que no puede pasar --y pasaba-- es afirmar sobre RLS bajo un rol que lo
+    evade y leer el resultado como si significara algo.
     """
     if connection.vendor != "postgresql":
-        pytest.skip("RLS es una funcion de PostgreSQL")
+        _sin_rls("la base no es PostgreSQL, y RLS es una funcion de PostgreSQL")
+        return
 
     nombre, superusuario, evade = _rol_actual()
     if superusuario or evade:
-        pytest.skip(
-            f"El rol '{nombre}' evade RLS (rolsuper={superusuario}, "
+        _sin_rls(
+            f"el rol '{nombre}' evade RLS (rolsuper={superusuario}, "
             f"rolbypassrls={evade}), asi que estas comprobaciones serian "
             f"vacuamente ciertas o enganosamente falsas. Correr con un rol de "
             f"aplicacion: --ds=crm.test_settings_postgres y DBUSER apuntando a "
@@ -113,12 +140,28 @@ def test_la_suite_sabe_bajo_que_rol_corre():
     'is None' sobre un objeto es una pista falsa.
     """
     if connection.vendor != "postgresql":
-        pytest.skip("RLS es una funcion de PostgreSQL")
+        _sin_rls("la base no es PostgreSQL")
+        return
 
     nombre, superusuario, evade = _rol_actual()
-    print(f"\n  rol de la sesion: {nombre} "
-          f"(rolsuper={superusuario}, rolbypassrls={evade})")
+    with connection.cursor() as cur:
+        cur.execute("SELECT current_database(), inet_server_addr()")
+        base, servidor = cur.fetchone()
+
+    # Se imprime el destino y el rol -- nada sensible, ninguna contrasena.
+    # Sin esto, una corrida en verde no dice CONTRA QUE corrio, que es
+    # justamente lo que hizo falta saber para entender el fallo original.
+    print(f"\n  base: {base}   servidor: {servidor}")
+    print(f"  rol: {nombre} (rolsuper={superusuario}, rolbypassrls={evade})")
+    print(f"  modo compuerta (RLS_GATE): {MODO_COMPUERTA}")
     assert nombre, "no se pudo determinar el rol de la sesion"
+
+    if MODO_COMPUERTA:
+        assert not superusuario, (
+            f"RLS_GATE=1 y el rol '{nombre}' es SUPERUSER: evade RLS, asi que "
+            f"toda afirmacion de aislamiento de esta suite seria vacua")
+        assert not evade, (
+            f"RLS_GATE=1 y el rol '{nombre}' tiene BYPASSRLS: idem")
 
 
 # --- el aislamiento que la suite no comprobaba ------------------------------
@@ -209,7 +252,8 @@ def test_la_tabla_tiene_rls_habilitado_y_forzado():
     el-- asi que sin FORCE la policy no lo alcanzaria justamente a el.
     """
     if connection.vendor != "postgresql":
-        pytest.skip("RLS es una funcion de PostgreSQL")
+        _sin_rls("la base no es PostgreSQL")
+        return
 
     tabla = Estimate._meta.db_table
     with connection.cursor() as cur:
@@ -225,32 +269,45 @@ def test_la_tabla_tiene_rls_habilitado_y_forzado():
         f"--que es el usuario con el que corren las migraciones-- la lee entera")
 
 
-# --- el defecto que aparecio al escribir estas pruebas ----------------------
+# El defecto de 'estimate_number' que aparecio escribiendo estas pruebas vive
+# en 'test_numeradores_y_rls.py', junto con el barrido de numeradores y la
+# carrera intra-tenant. Aca quedaria suelto.
 
-@pytest.mark.xfail(
-    reason="DEFECTO PREEXISTENTE, ajeno a esta entrega. 'estimate_number' es "
-           "unique=True GLOBAL, no por organizacion, y "
-           "'generate_estimate_number()' calcula el siguiente consultando los "
-           "Estimate que puede ver. Bajo RLS no ve los de las otras empresas, "
-           "asi que dos organizaciones que crean un presupuesto el mismo dia "
-           "generan ambas 'EST-AAAAMMDD-0001' y la segunda choca. Si esto "
-           "empieza a pasar (XPASS), alguien lo arreglo y hay que quitar la "
-           "marca.",
-    strict=False)
-def test_DEFECTO_dos_organizaciones_no_pueden_crear_el_mismo_dia():
-    """Dos empresas creando un presupuesto el mismo dia, sin numero explicito.
 
-    Es exactamente lo que hace la aplicacion real: el numero se autogenera.
+# --- que la compuerta sea una compuerta -------------------------------------
+
+def test_la_compuerta_falla_en_vez_de_saltarse():
+    """RLS_GATE=1 convierte el 'skip' en 'fail'. Sin esto no es una compuerta.
+
+    Se comprueba la FUNCION, no el proceso: '_sin_rls' es el unico punto por el
+    que pasan todos los motivos por los que estas pruebas no pueden comprobar
+    nada, asi que fijar su conducta fija la de todas.
+
+    La prueba de punta a punta --lanzar pytest con RLS_GATE=1 bajo un rol
+    BYPASSRLS y ver el exit distinto de cero-- esta en el comando documentado
+    arriba, y su salida va en el reporte. Aca se fija la regla para que un
+    cambio futuro no la afloje sin que nadie lo note.
     """
-    _exigir_rol_que_respeta_rls()
+    import importlib
 
-    a = Org.objects.create(name="RLS Org Num A")
-    b = Org.objects.create(name="RLS Org Num B")
+    modulo = importlib.import_module(__name__)
 
-    for org, titulo in ((a, "De la A"), (b, "De la B")):
-        _contexto(str(org.id))
-        try:
-            Estimate.objects.create(org=org, title=titulo, currency="USD",
-                                    issue_date=timezone.localdate())
-        finally:
-            _contexto("")
+    # Modo desarrollo: salta.
+    original = modulo.MODO_COMPUERTA
+    try:
+        modulo.MODO_COMPUERTA = False
+        with pytest.raises(BaseException) as salto:
+            modulo._sin_rls("motivo de prueba")
+        assert salto.typename == "Skipped", (
+            f"en modo desarrollo tendria que saltar, levanto {salto.typename}")
+
+        # Modo compuerta: falla.
+        modulo.MODO_COMPUERTA = True
+        with pytest.raises(BaseException) as fallo:
+            modulo._sin_rls("motivo de prueba")
+        assert fallo.typename == "Failed", (
+            f"en modo compuerta tendria que FALLAR, levanto {fallo.typename}")
+        assert "RLS_GATE=1" in str(fallo.value)
+        assert "no esta comprobado" in str(fallo.value)
+    finally:
+        modulo.MODO_COMPUERTA = original
