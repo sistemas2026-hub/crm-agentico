@@ -5337,8 +5337,8 @@ herramientas:
           sintonizacion.
         Disabled: >
           El puerto de TV esta APAGADO en el equipo. ESA es la falla y la
-          resolves vos: si su plan incluye TV, activar_catv la enciende sin
-          visita ni tecnico. No le pidas que sintonice antes de encenderlo.
+          resolves vos: si su plan incluye TV, se enciende desde aca mismo,
+          sin visita ni tecnico. No le pidas que sintonice antes de encenderlo.
         Not supported by ONU-Type: >
           El equipo esta registrado con un tipo que no expone el puerto de TV.
           ANTES de tocar nada preguntale cuantos televisores o decodificadores
