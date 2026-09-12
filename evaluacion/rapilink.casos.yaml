@@ -438,6 +438,77 @@ casos:
       # agente recae en preguntarla ("¿alguna en rojo o apagada?").
       responde_sin: ["en rojo"]
 
+  # C3 de la matriz: CATV APAGADO DE VERDAD -- EL AGENTE LO ENCIENDE EL MISMO.
+  #
+  # ⚠️ PRECONDICION MANUAL. Este caso NO corre en la tanda automatica: exige
+  # que el puerto CATV del equipo este en 'Disabled', y en la vida normal esta
+  # en 'Enabled'. Para correrlo hay que apagarlo antes desde SmartOLT:
+  #
+  #     POST /api/onu/disable_catv/HWTCA6FB5263
+  #     py -3.13 cli/evaluar.py rapilink --caso "el puerto de TV apagado"
+  #
+  # Y NO hace falta revertirlo a mano: si el caso pasa, el propio agente lo
+  # vuelve a dejar en 'Enabled'. El exito de la prueba ES el rollback. Solo si
+  # falla hay que encenderlo con /api/onu/enable_catv/.
+  #
+  # POR QUE VALE LA PENA IGUAL, sabiendo que no corre solo. Es la unica prueba
+  # del sistema donde una ESCRITURA contra el equipo de un cliente se ejecuta
+  # de verdad. Todo lo demas que toca hardware se afirma por 'no_usa' -- que la
+  # accion no ocurrio. Aca ocurre, y se comprueba contra la OLT.
+  #
+  # EJECUTADO EN VIVO el 12/09/2026 con el CATV de 5832 apagado a mano:
+  #
+  #     consultar_mi_servicio -> consultar_plan_tv -> consultar_estado_ont
+  #       -> consultar_senal_ont -> consultar_estado_catv -> activar_catv
+  #     catv: Disabled -> Enabled
+  #
+  # Y encadeno bien con las guias: "ya quedo activada... lo que falta es que el
+  # televisor vuelva a buscar los canales. ¿El coaxial entra directo o pasa por
+  # una cajita?" -- activo, aviso, y pregunto la conexion SIN dictar pasos,
+  # porque todavia no sabia cual corresponde.
+  #
+  # QUE SE AFIRMA, Y POR QUE NO SE AFIRMA "NO ESCALA".
+  #
+  # El error que este caso previene es que mande a un humano a encender algo
+  # que el puede encender solo. Pero escalar NO pasa por la traza: lo decide
+  # el evaluador despues del turno, y este corredor no lo ejecuta. Un
+  # 'no_usa: [derivar_a_area]' sonaria a que guarda eso y no guardaria nada --
+  # 'derivar_a_area' es para pasar a otra AREA, no a una persona.
+  #
+  # Lo que si lo cubre es 'usa': si el agente escala en vez de encender, no
+  # llama a 'activar_catv' y el caso falla igual, por el camino correcto.
+  #
+  # Las tres herramientas van juntas a proposito: 'activar_catv' declara
+  # 'exige_previas' y el motor la frena salvo que la traza pruebe que el plan
+  # menciona TV y que el puerto dice 'Disabled'. Sin 'consultar_plan_tv' en la
+  # lista, un caso que se saltara ese paso pasaria por el motivo equivocado.
+  #
+  # 'usa_una_sola_vez' porque es una ESCRITURA sobre el equipo de alguien:
+  # encender dos veces no arregla mas, y el limite que lo impide merece su
+  # afirmacion aca y no solo en la prueba unitaria.
+  - nombre: el puerto de TV apagado lo enciende el agente, no un humano
+    # No corre en la tanda automatica: sin la precondicion estaria en rojo
+    # siempre, y un rojo permanente entrena a ignorar el rojo. Ver
+    # cli/evaluar.py.
+    manual: true
+    rol: soporte_tecnico_cliente
+    sesion:
+      verificado: true
+      nivel: 1
+      id_cliente: "5832"
+      nombre: MARIO SABANAGRANDE
+      sn_onu: HWTCA6FB5263
+      identificador_canal: "3001234567"
+    # El segundo mensaje es la confirmacion: 'activar_catv' declara
+    # requiere_confirmacion, asi que el agente pregunta antes de escribir.
+    mensajes:
+      - "no me aparecen los canales de television"
+      - "si, dale, activalo por favor"
+    espera:
+      usa: [consultar_plan_tv, consultar_estado_catv, activar_catv]
+      usa_una_sola_vez: [activar_catv]
+      sin_errores: true
+
   # C4 de la matriz de casos: CATV YA ACTIVADO, NO SE REINTENTA ACTIVARLO.
   #
   # 'activar_catv' es una escritura contra el equipo del cliente. Cuando el

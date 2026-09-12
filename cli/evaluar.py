@@ -313,6 +313,26 @@ def main() -> None:
                 "no se corre ninguno.")
     if args.caso:
         casos = [c for c in casos if args.caso.lower() in c["nombre"].lower()]
+    elif not args.humo:
+        # LOS CASOS CON PRECONDICION MANUAL NO CORREN SOLOS.
+        #
+        # Hay casos que exigen un estado del mundo que no se da normalmente --
+        # el primero: 'activar_catv' solo se puede probar de verdad con el
+        # puerto CATV apagado, y en la vida normal esta encendido. Dejarlos en
+        # la tanda automatica los pone en rojo SIEMPRE, y un rojo permanente
+        # entrena a ignorar el rojo: al tercer dia nadie mira si los otros
+        # cincuenta y nueve tambien fallaron.
+        #
+        # Se saltean por defecto y se corren nombrandolos con '--caso', que es
+        # justo lo que hace quien acaba de preparar la precondicion a mano. El
+        # comentario de cada caso dice como prepararla.
+        manuales = [c["nombre"] for c in casos if c.get("manual")]
+        if manuales:
+            casos = [c for c in casos if not c.get("manual")]
+            print(f"  ({len(manuales)} caso(s) con precondicion manual, "
+                  f"salteados -- correr con --caso)")
+            for n in manuales:
+                print(f"     - {n}")
     if not casos:
         raise SystemExit("Ningun caso para correr.")
 
