@@ -251,13 +251,26 @@ def tickets_conocidos(config, tenant: str, ids: list[str]) -> tuple[set, set]:
                     f"{type(e).__name__}: {e}") from e
 
     # La otra fuente de autoria, esta si del dominio del motor.
-    from nucleo.persistencia.conexion import dsn
-    import psycopg
+    #
+    # Va por 'sesion()' y no por una conexion cruda, y la diferencia es de
+    # aislamiento, no de estilo. 'motor_user' tiene BYPASSRLS --lo necesita
+    # para UNA consulta, la que averigua a que organizacion pertenece el
+    # tenant, antes de saber cual fijar-- y 'sesion()' baja a 'app_backend'
+    # inmediatamente despues. Una conexion cruda se queda arriba.
+    #
+    # Esta consulta no lleva filtro de organizacion porque no le hace falta:
+    # 'asistente.conversations' tiene RLS habilitado Y FORZADO, asi que bajo
+    # 'app_backend' la politica la acota sola al tenant fijado. Con la conexion
+    # cruda leia los numeros de ticket de TODAS las empresas, y en un
+    # despliegue con dos ISP eso no es solo una lectura cruzada: clasificaria
+    # como "lo abrio Dexter" un ticket que abrio el Dexter de otra empresa.
+    from nucleo.persistencia.db import sesion
 
-    with psycopg.connect(dsn()) as cx:
-        conv = {str(f[0]).strip() for f in cx.execute(
-            "select trim(ticket_operativo) from asistente.conversations "
-            "where coalesce(trim(ticket_operativo),'') <> ''").fetchall()}
+    with sesion(tenant) as (cur, _org):
+        cur.execute("select trim(ticket_operativo) as t "
+                    "from asistente.conversations "
+                    "where coalesce(trim(ticket_operativo),'') <> ''")
+        conv = {str(f["t"]).strip() for f in cur.fetchall()}
 
     print(f"[registro] tickets de Dexter: {len(conv)} en conversaciones + "
           f"{len(del_crm)} en solicitudes | con caso: {len(con_caso)}")

@@ -10,10 +10,59 @@ RLS Configuration: See common/rls/__init__.py for centralized policy definitions
 RLS is enabled/disabled via Django migrations, not this command.
 """
 
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 from django.db import connection
 
 from common.rls import RLS_CONFIG, get_check_rls_status_sql, get_set_context_sql
+
+
+def inspeccionar_rol(cursor):
+    """
+    Si el rol de esta sesion esta sujeto a RLS. Dos atributos, no uno.
+
+    POR QUE NO ALCANZA 'pg_user.usesuper'
+    -------------------------------------
+    'rolsuper' y 'rolbypassrls' son atributos DISTINTOS, y cualquiera de los
+    dos evade RLS. 'pg_user' no expone el segundo.
+
+    En Supabase el rol 'postgres' tiene rolsuper=false y rolbypassrls=true.
+    Este comando miraba solo 'usesuper' y respondia "not a superuser - RLS
+    will be enforced": una afirmacion de seguridad FALSA, con el aislamiento
+    desactivado, desde la propia herramienta de verificacion. Esta escrito en
+    DESPLIEGUE.md que paso.
+
+    Devuelve (datos, problemas). 'problemas' vacio significa sujeto a RLS.
+    """
+    datos = {}
+    problemas = []
+
+    cursor.execute("SELECT current_user, session_user")
+    datos["current_user"], datos["session_user"] = cursor.fetchone()
+
+    cursor.execute(
+        "SELECT rolname, rolsuper, rolbypassrls, rolcreatedb "
+        "FROM pg_roles WHERE rolname = current_user")
+    fila = cursor.fetchone()
+
+    if fila is None:
+        # No se pudo comprobar. INDETERMINADO es un fallo, no un permiso: la
+        # unica respuesta peor que "no aisla" es "no se sabe, pasa igual".
+        problemas.append(
+            f"no se encontro el rol '{datos['current_user']}' en pg_roles: la "
+            f"comprobacion NO se pudo hacer, asi que no se afirma nada")
+        return datos, problemas
+
+    datos["rol"], datos["rolsuper"], datos["rolbypassrls"], datos["rolcreatedb"] = fila
+
+    if datos["rolsuper"]:
+        problemas.append(
+            f"el rol '{datos['rol']}' es SUPERUSER: evade RLS por completo")
+    if datos["rolbypassrls"]:
+        problemas.append(
+            f"el rol '{datos['rol']}' tiene BYPASSRLS: evade RLS aunque no sea "
+            f"superusuario -- es el caso que 'pg_user.usesuper' no ve")
+
+    return datos, problemas
 
 
 class Command(BaseCommand):
@@ -54,25 +103,26 @@ class Command(BaseCommand):
         self.stdout.write(self.style.MIGRATE_HEADING("RLS Status:"))
         self.stdout.write("")
 
+        inseguro = False
         with connection.cursor() as cursor:
-            # Check if current user is superuser
-            cursor.execute(
-                "SELECT current_user, usesuper FROM pg_user WHERE usename = current_user"
-            )
-            user, is_super = cursor.fetchone()
+            datos, problemas = inspeccionar_rol(cursor)
 
-            if is_super:
+            self.stdout.write(f"  current_user : {datos.get('current_user')}")
+            self.stdout.write(f"  session_user : {datos.get('session_user')}")
+            if "rol" in datos:
                 self.stdout.write(
-                    self.style.WARNING(
-                        f'  Database user "{user}" is a SUPERUSER - RLS will be bypassed!'
-                    )
-                )
+                    f"  rol inspeccionado: {datos['rol']} "
+                    f"(rolsuper={datos['rolsuper']}, "
+                    f"rolbypassrls={datos['rolbypassrls']})")
+
+            if problemas:
+                inseguro = True
+                for p in problemas:
+                    self.stdout.write(self.style.ERROR(f"  RLS NO SE APLICA: {p}"))
             else:
-                self.stdout.write(
-                    self.style.SUCCESS(
-                        f'  Database user "{user}" is not a superuser - RLS will be enforced'
-                    )
-                )
+                self.stdout.write(self.style.SUCCESS(
+                    f"  El rol '{datos['rol']}' esta sujeto a RLS "
+                    f"(rolsuper=False, rolbypassrls=False)"))
 
             self.stdout.write("")
 
@@ -100,6 +150,18 @@ class Command(BaseCommand):
 
             self.stdout.write("")
             self.stdout.write(f"  Enabled: {enabled_count}, Disabled: {disabled_count}")
+
+        # Salir distinto de cero. Un comando de seguridad que informa un
+        # problema y termina en 0 es un comando que nadie va a poner en un
+        # pipeline, y si alguien lo pone, no sirve de nada.
+        if inseguro:
+            raise CommandError(
+                "RLS NO se aplica con este rol: las politicas existen pero el "
+                "rol las evade. Ver arriba cual de los dos atributos es.")
+        if disabled_count:
+            raise CommandError(
+                f"{disabled_count} tabla(s) con alcance de organizacion no "
+                f"tienen RLS habilitado.")
 
     def test_rls(self):
         """Test that RLS is working correctly."""
@@ -186,33 +248,26 @@ class Command(BaseCommand):
         self.stdout.write(self.style.MIGRATE_HEADING("Verifying database user..."))
 
         with connection.cursor() as cursor:
-            cursor.execute(
-                """
-                SELECT usename, usesuper, usecreatedb
-                FROM pg_user
-                WHERE usename = current_user
-            """
-            )
-            user, is_super, can_create_db = cursor.fetchone()
+            # Tenia el MISMO defecto que check_status: 'pg_user.usesuper' no
+            # ve BYPASSRLS. DESPLIEGUE.md afirmaba que '--verify-user' si
+            # preguntaba lo correcto, y era falso: preguntaba lo mismo.
+            datos, problemas = inspeccionar_rol(cursor)
 
-            self.stdout.write(f"  Current user: {user}")
-            self.stdout.write(f"  Is superuser: {is_super}")
-            self.stdout.write(f"  Can create DB: {can_create_db}")
+            self.stdout.write(f"  current_user : {datos.get('current_user')}")
+            self.stdout.write(f"  session_user : {datos.get('session_user')}")
+            self.stdout.write(f"  rolsuper     : {datos.get('rolsuper')}")
+            self.stdout.write(f"  rolbypassrls : {datos.get('rolbypassrls')}")
+            self.stdout.write(f"  rolcreatedb  : {datos.get('rolcreatedb')}")
 
-            if is_super:
+            if problemas:
                 self.stdout.write("")
-                self.stdout.write(
-                    self.style.ERROR(
-                        "WARNING: Superusers bypass RLS!\n"
-                        "Create a non-superuser for the application:\n\n"
-                        "  CREATE USER crm_app WITH PASSWORD 'secure_password';\n"
-                        "  GRANT CONNECT ON DATABASE bottlecrm TO crm_app;\n"
-                        "  GRANT USAGE ON SCHEMA public TO crm_app;\n"
-                        "  GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO crm_app;\n"
-                        "  GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO crm_app;\n"
-                    )
-                )
-            else:
-                self.stdout.write(
-                    self.style.SUCCESS("Database user is properly configured for RLS")
-                )
+                for p in problemas:
+                    self.stdout.write(self.style.ERROR(f"  {p}"))
+                raise CommandError(
+                    "El usuario de base de datos NO esta sujeto a RLS. "
+                    "Crear uno de aplicacion: CREATE ROLE crm_app WITH "
+                    "LOGIN PASSWORD '...' NOSUPERUSER NOBYPASSRLS;")
+
+            self.stdout.write(
+                self.style.SUCCESS(
+                    "El usuario de base de datos esta sujeto a RLS"))
