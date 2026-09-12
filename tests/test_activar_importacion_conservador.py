@@ -146,6 +146,62 @@ for basura in (None, [], "nada"):
             f"una seccion invalida ({basura!r}) se reemplaza por una apagada",
             f"quedo {roto['importacion_tickets']!r}")
 
+# --- 6: aplicarla dos veces no cambia nada la segunda ------------------------
+print()
+print("=" * 74)
+print("  aplicar la activacion dos veces es idempotente")
+print("=" * 74)
+
+doc2 = copy.deepcopy(BASE_VIVA)
+completar_importacion_tickets(doc2, _importacion_tickets())
+primera = copy.deepcopy(doc2["importacion_tickets"])
+completar_importacion_tickets(doc2, _importacion_tickets())
+revisar(doc2["importacion_tickets"] == primera,
+        "la segunda pasada no cambia nada",
+        f"cambio: { {k: (primera.get(k), doc2['importacion_tickets'].get(k)) for k in set(primera) | set(doc2['importacion_tickets']) if primera.get(k) != doc2['importacion_tickets'].get(k)} }")
+revisar(doc2["importacion_tickets"]["cada_horas"] == 1,
+        "y cada_horas sigue siendo el de la base tras las dos",
+        f"{doc2['importacion_tickets'].get('cada_horas')!r}")
+
+# --- 7: una config invalida no deja el documento a medias --------------------
+print()
+print("=" * 74)
+print("  una configuracion invalida no persiste a medias")
+print("=" * 74)
+
+# El editor valida el documento ENTERO despues de mutarlo, y si no valida la
+# transaccion se deshace. Aca se comprueba la parte que vive en el nucleo: que
+# 'completar_importacion_tickets' no escriba nada cuando el documento no es
+# un dict usable, en vez de dejarlo a mitad.
+import copy as _copy                                              # noqa: E402
+
+for basura in (None, [], "texto", 42):
+    doc3 = {"importacion_tickets": _copy.deepcopy(BASE_VIVA["importacion_tickets"]),
+            "herramientas": []}
+    antes3 = _copy.deepcopy(doc3["importacion_tickets"])
+    try:
+        completar_importacion_tickets(doc3, basura if isinstance(basura, dict) else {})
+    except Exception as e:                                        # noqa: BLE001
+        revisar(False, f"con nueva={basura!r} levanto {type(e).__name__}")
+        continue
+    revisar(doc3["importacion_tickets"] == antes3,
+            f"con nueva={basura!r} el documento queda intacto",
+            f"quedo {doc3['importacion_tickets']}")
+
+# Y la guarda de verdad: el documento que sale tiene que seguir siendo valido
+# para el esquema. Si 'completar' agregara una clave que el modelo no conoce,
+# 'extra=forbid' tumbaria la config del tenant entero al cargarla.
+from nucleo.config.schema import ImportacionTickets                # noqa: E402
+
+doc4 = copy.deepcopy(BASE_VIVA)
+completar_importacion_tickets(doc4, _importacion_tickets())
+conocidas = set(ImportacionTickets.model_fields)
+agregadas = set(_importacion_tickets()) - conocidas
+revisar(not agregadas,
+        "lo que agrega el comando son claves que el esquema conoce",
+        f"el esquema no conoce: {sorted(agregadas)} -- con extra=forbid esto "
+        f"tumbaria la config del tenant entero al cargarla")
+
 print()
 print("=" * 74)
 if fallos:

@@ -40,6 +40,7 @@ Uso
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -57,7 +58,12 @@ from nucleo.ingesta import corpus as ingesta       # noqa: E402
 from nucleo.persistencia.db import sesion          # noqa: E402
 from nucleo.recuperacion.busqueda import recuperar_candidatos  # noqa: E402
 
-TENANT = "rapilink"
+# El tenant sale del entorno y no esta fijo en el codigo. Fijarlo obligaba a
+# correr esta prueba contra la configuracion de un cliente concreto --y en la
+# practica, contra la base donde esa configuracion existe, que era produccion--.
+# Con 'cli/esquema_de_pruebas.py' se puede levantar un tenant sintetico en un
+# PostgreSQL efimero y correrla ahi.
+TENANT = os.environ.get("ASISTENTE_TENANT", "rapilink")
 CODIGO = "ZZ-TEST-APROBACION"
 # Texto muy especifico, para que la consigna de prueba lo traiga primero si
 # de verdad estuviera disponible. Si con esto no aparece, no aparece por
