@@ -1756,3 +1756,57 @@ casos:
       - "me voy porque consegui uno mas barato en otra empresa"
     espera:
       no_intenta: [consultar_solicitud_por_cedula, cancelar_solicitud_servicio]
+
+  # LOS DOS PRIMEROS CASOS QUE AFIRMAN SOBRE ESCALAMIENTO.
+  #
+  # Hasta el 12/09/2026 este corredor no podia: llamaba a motor.responder() y
+  # nunca a escalamiento.evaluar(), asi que el bloque entero de pasar a un
+  # humano vivia sin un solo caso dorado. La clave 'escala' existe desde hoy.
+  #
+  # QUE VE Y QUE NO. Ve lo que decide el EVALUADOR. No ve los ajustes que
+  # nucleo/canales/api.py aplica despues -- en particular el forzado por
+  # 'frases_pide_humano', que pone escalar=True y el motivo en codigo. Por eso
+  # ninguno de estos dos afirma sobre un pedido explicito de hablar con una
+  # persona: ahi el veredicto del evaluador no es la ultima palabra, y un caso
+  # que lo afirmara podria salir rojo con produccion funcionando bien.
+  # Medido: "quiero hablar con una persona" devuelve motivo=None del evaluador
+  # -- 'solicitud_explicita' se lo pone api.py.
+
+  # Que la baja termine en CARTERA depende de una sola cosa: que se clasifique
+  # como 'baja_servicio'. De ahi sale el area (escalamiento.area_por_caso) y el
+  # asunto del ticket. Si vuelve a caer en 'otro' -- que es donde caia antes de
+  # que el caso existiera-- la baja se va a soporte tecnico y cartera nunca se
+  # entera. Eso es lo que fija este caso, y no se puede ver en la traza de
+  # herramientas: lo decide el evaluador.
+  - nombre: una baja se clasifica como baja de servicio, no como otro
+    rol: cliente_final
+    sesion:
+      verificado: true
+      nivel: 1
+      id_cliente: "5832"
+      nombre: MARIO SABANAGRANDE
+      identificador_canal: '573111110006'
+    mensajes:
+      - "quiero dar de baja el internet que tengo contratado"
+    espera:
+      escala_caso: baja_servicio
+
+  # ESCALAMIENTO PACIENTE. Nace de un caso real (15/08/2026): un cliente
+  # escalo en su PRIMER mensaje sin que se intentara ningun diagnostico, y se
+  # agrego 'escalamiento.intentar_resolver_antes'. Tenia prueba unitaria
+  # propia desde entonces, pero ninguna que lo afirmara sobre una conversacion
+  # de verdad -- no habia con que.
+  #
+  # El mensaje esta elegido para que sea tentador: trae molestia explicita
+  # ("esto es un desastre") y varios dias de falla. Lo correcto sigue siendo
+  # NO escalar en el primer turno, sino intentar el diagnostico.
+  - nombre: una queja fuerte no escala en el primer mensaje
+    rol: cliente_final
+    sesion:
+      verificado: false
+      nivel: 0
+      identificador_canal: '573111110007'
+    mensajes:
+      - "esto es un desastre, llevo dias sin internet y nadie me responde"
+    espera:
+      escala: false

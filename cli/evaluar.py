@@ -97,6 +97,7 @@ load_dotenv(RAIZ / ".env", override=False)
 
 from nucleo.config import cargar_config                      # noqa: E402
 from nucleo.modelo import motor                              # noqa: E402
+from nucleo.seguimiento import escalamiento                 # noqa: E402
 from nucleo.seguridad.verificacion import Sesion             # noqa: E402
 
 
@@ -298,6 +299,53 @@ def correr_caso(config, caso: dict, defaults: dict, prohibido: list[str]) -> dic
         for prohibida in prohibido:
             if _sin_tildes_minusc(prohibida) in respuesta_norm:
                 fallas.append(f"PII/jerga: la respuesta dice '{prohibida}'")
+
+    # --- ESCALAMIENTO: solo si el caso lo pide --------------------------
+    #
+    # Hasta hoy este corredor no podia afirmar NADA sobre escalar. Llama a
+    # motor.responder() y replica parte de atender_turno(), pero nunca
+    # invocaba escalamiento.evaluar() -- asi que todo el bloque de pasar a un
+    # humano quedaba fuera del alcance de los casos dorados, y con el, cosas
+    # con fallas reales detras (el bug del 14/08) y conductas enteras que se
+    # escribieron a ciegas.
+    #
+    # SE LLAMA SOLO CUANDO EL CASO DECLARA UNA CLAVE DE ESCALADA. El evaluador
+    # es una llamada al modelo: hacerla en los 61 casos sumaria ~61 llamadas a
+    # una corrida que ya tarda 23 minutos, para que la usen tres. Quien no
+    # afirma sobre escalada no paga nada.
+    #
+    # 'evaluar' DECIDE, no escala: no toca el CRM ni crea ningun caso (eso es
+    # escalar(), que no se llama aca). Un caso dorado no puede dejar tickets
+    # de verdad en la bandeja de nadie.
+    #
+    # El rol es 'rol_actual' -- el de despues de derivar-- igual que
+    # nucleo/canales/api.py, que evalua con el rol que efectivamente atendio.
+    CLAVES_ESCALADA = ("escala", "escala_motivo", "escala_caso")
+    if any(k in espera for k in CLAVES_ESCALADA):
+        try:
+            veredicto = escalamiento.evaluar(config, rol_actual, historial) or {}
+        except Exception as e:
+            # Que el evaluador se caiga no es "no escalo": es que no se pudo
+            # saber. Decirlo asi evita el peor resultado, un caso en verde
+            # porque la pregunta nunca se hizo.
+            fallas.append(f"escala: no se pudo evaluar ({type(e).__name__}: {e})")
+            veredicto = None
+
+        if veredicto is not None:
+            if "escala" in espera:
+                real = bool(veredicto.get("escalar"))
+                if real != bool(espera["escala"]):
+                    fallas.append(
+                        f"escala: se esperaba {espera['escala']} y fue {real}"
+                        + (f" (motivo '{veredicto.get('motivo')}')" if real else ""))
+            for clave, campo in (("escala_motivo", "motivo"),
+                                 ("escala_caso", "caso_manual")):
+                if clave in espera:
+                    real = (veredicto.get(campo) or "").strip()
+                    if real != espera[clave]:
+                        fallas.append(
+                            f"{clave}: se esperaba '{espera[clave]}' y fue "
+                            f"'{real or "(vacio)"}'")
 
     return {
         "nombre": caso["nombre"],
