@@ -32,9 +32,10 @@ nada y cada fragmento es una llamada real al modelo de embeddings.
 
 Conexion
 --------
-Mismo patron que cli/cargar_config.py: conexion directa por DATABASE_URL, sin
-cambiar a app_backend. Es una herramienta de operacion (como una migracion),
-no el backend que sirve peticiones — ese si debe usar app_backend siempre.
+Mismo patron que cli/cargar_config.py: conexion directa con el usuario del
+.env (ver nucleo/persistencia/conexion.py), sin cambiar a app_backend. Es una
+herramienta de operacion (como una migracion), no el backend que sirve
+peticiones — ese si debe usar app_backend siempre.
 
 Uso
 ---
@@ -46,8 +47,8 @@ Uso
 from __future__ import annotations
 
 import hashlib
+from fnmatch import fnmatch
 import json
-import os
 import sys
 import time
 from pathlib import Path
@@ -56,56 +57,93 @@ RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ))
 sys.path.insert(0, str(RAIZ / "cli"))
 
-import ollama                                                  # noqa: E402
 import psycopg                                                 # noqa: E402
 from dotenv import load_dotenv                                 # noqa: E402
 
 from nucleo.config import cargar_config                        # noqa: E402
 from nucleo.ingesta.docx import procesar                       # noqa: E402
+from nucleo.persistencia.conexion import dsn                   # noqa: E402
+from nucleo.recuperacion.embeddings import (                   # noqa: E402
+    MODELO as MODELO_EMBEDDINGS, vectorizar as _vectorizar_openai)
 from ingerir import clasificar, perfil_de                      # noqa: E402  (reutiliza lo ya construido)
 
-load_dotenv(RAIZ / ".env", override=True)
-URL = os.environ.get("DATABASE_URL")
-if not URL:
-    raise SystemExit("Falta DATABASE_URL en el .env")
-
-MODELO_EMBEDDINGS = "bge-m3"
-DIMENSIONES = 1024
+# override=False, y NO es un detalle: con True, el .env PISABA las variables
+# que ya trae el entorno. Dentro de un contenedor eso significa que un .env
+# viejo horneado en la imagen manda mas que la configuracion del despliegue
+# -- el 24/08/2026 hizo que toda carga de config corriera contra la base
+# local aunque el servicio apuntara a la de produccion, en silencio y
+# reportando exito. La precedencia correcta es la de siempre: lo que el
+# entorno declara explicitamente gana; el archivo solo rellena lo que falta,
+# que es justo lo que hace falta al correrlo a mano en una maquina.
+load_dotenv(RAIZ / ".env", override=False)
 
 
 def _hash(ruta: Path) -> str:
     return hashlib.sha256(ruta.read_bytes()).hexdigest()
 
 
-def _vectorizar(texto: str) -> list[float]:
+def _roles_de_respaldo(cfg, ruta: Path) -> list[str] | None:
     """
-    Un fragmento -> un vector de 1024 numeros.
+    Los roles que el YAML declara para este archivo, cuando el documento no
+    los trae adentro. Primer patron que coincide, en el orden del YAML.
 
-    NUNCA se trunca el texto de entrada: bge-m3 admite hasta 8192 tokens, muy
-    por encima de los fragmentos mas largos del corpus (~1441 tokens, medido).
-    Es justo la razon por la que se eligio este modelo y no uno de 512.
+    Es un respaldo, no la fuente: lo que manda siempre es la tabla de
+    metadatos del .docx -- ver Corpus.roles_por_defecto en
+    nucleo/config/schema.py para por que hace falta igual.
     """
-    r = ollama.embed(model=MODELO_EMBEDDINGS, input=texto)
-    return r["embeddings"][0]
+    for patron, roles in (cfg.corpus.roles_por_defecto or {}).items():
+        if fnmatch(ruta.name, patron):
+            return list(roles) or None
+    return None
+
+
+def _roles_validos(cfg, roles_texto: str, ruta: Path) -> list[str] | None:
+    """
+    'soporte, facturacion' -> ['soporte', 'facturacion'], validado contra los
+    roles reales del tenant -- un typo en la tabla de metadatos del documento
+    no debe pasar en silencio y dejar el proceso invisible para todo el mundo
+    sin que nadie se entere.
+
+    None (columna NULL) si el documento no declara 'roles': fail-closed, ver
+    supabase/202608111433_documentos_roles.sql -- sin roles asignados, match_chunks no
+    lo recupera para ningun rol hasta que alguien lo asigne a proposito.
+    """
+    if not roles_texto:
+        return None
+    nombres = [r.strip() for r in roles_texto.split(",") if r.strip()]
+    desconocidos = [r for r in nombres if r not in cfg.roles]
+    if desconocidos:
+        raise SystemExit(
+            f"{ruta.name}: declara rol(es) inexistente(s) en 'roles': "
+            f"{', '.join(desconocidos)}. Roles del tenant: {', '.join(sorted(cfg.roles))}")
+    return nombres or None
 
 
 def _conectar():
-    return psycopg.connect(URL, connect_timeout=40)
+    return psycopg.connect(dsn(), connect_timeout=40)
 
 
 def _organizacion(cur, slug: str) -> str:
-    cur.execute("select id from public.organizations where slug = %s", (slug,))
+    """
+    El slug se resuelve contra asistente.tenant_config, no contra el CRM: la
+    tabla public.organization solo tiene 'name'. Quien establece ese vinculo es
+    cli/cargar_config.py, asi que si falta aqui es que falta el paso anterior.
+    """
+    cur.execute("select organization_id from asistente.tenant_config where slug = %s",
+                (slug,))
     fila = cur.fetchone()
     if not fila:
         raise SystemExit(
-            f"No existe public.organizations con slug '{slug}'. "
-            f"El asistente no inventa organizaciones.")
+            f"'{slug}' no tiene configuracion cargada, asi que no se sabe a que "
+            f"organizacion del CRM pertenece.\n"
+            f"Cargarla primero:  py -3.13 cli/cargar_config.py tenants/{slug}.config.yaml")
     return fila[0]
 
 
-def _cargar_obsoleto(cur, org_id: str, ruta: Path, hash_: str) -> bool:
+def _cargar_obsoleto(cur, org_id: str, ruta: Path, hash_: str, cfg) -> bool:
     """Solo la fila de metadatos. Sin fragmentar, sin vectorizar."""
     doc = procesar(ruta)                      # solo para leer codigo/titulo/version
+    roles = _roles_validos(cfg, doc.roles, ruta) or _roles_de_respaldo(cfg, ruta)
     cur.execute("""select id, hash from asistente.documents
                    where organization_id = %s and codigo = %s and version = %s""",
                (org_id, doc.codigo, doc.version))
@@ -114,13 +152,15 @@ def _cargar_obsoleto(cur, org_id: str, ruta: Path, hash_: str) -> bool:
         return False                          # sin cambios
     if fila:
         cur.execute("""update asistente.documents
-                       set titulo=%s, estado='obsoleto', hash=%s where id=%s""",
-                    (doc.titulo, hash_, fila[0]))
+                       set titulo=%s, estado='obsoleto', hash=%s, roles_permitidos=%s
+                       where id=%s""",
+                    (doc.titulo, hash_, roles, fila[0]))
     else:
         cur.execute("""insert into asistente.documents
-                       (organization_id, codigo, titulo, version, tipo, estado, hash)
-                       values (%s,%s,%s,%s,'guia_tecnica','obsoleto',%s)""",
-                    (org_id, doc.codigo, doc.titulo, doc.version, hash_))
+                       (organization_id, codigo, titulo, version, tipo, estado, hash,
+                        roles_permitidos)
+                       values (%s,%s,%s,%s,'guia_tecnica','obsoleto',%s,%s)""",
+                    (org_id, doc.codigo, doc.titulo, doc.version, hash_, roles))
     return True
 
 
@@ -151,7 +191,7 @@ def cargar_tenant(slug: str, forzar: bool = False) -> None:
             hash_ = _hash(ruta)
 
             if estado == "obsoleto":
-                cambio = _cargar_obsoleto(cur, org_id, ruta, hash_)
+                cambio = _cargar_obsoleto(cur, org_id, ruta, hash_, cfg)
                 con.commit()
                 total_obsoletos += 1
                 print(f"  [obsoleto] {ruta.name[:55]}  "
@@ -160,6 +200,7 @@ def cargar_tenant(slug: str, forzar: bool = False) -> None:
 
             # --- vigente: fragmentar, vectorizar, cargar ---
             doc = procesar(ruta, perfil=perfil, max_tokens=tokens)
+            roles = _roles_validos(cfg, doc.roles, ruta) or _roles_de_respaldo(cfg, ruta)
 
             cur.execute("""select id, hash from asistente.documents
                            where organization_id = %s and codigo = %s and version = %s""",
@@ -174,41 +215,58 @@ def cargar_tenant(slug: str, forzar: bool = False) -> None:
             if fila:
                 doc_id = fila[0]
                 cur.execute("""update asistente.documents
-                               set titulo=%s, estado='vigente', hash=%s, defectos=%s
+                               set titulo=%s, estado='vigente', hash=%s, defectos=%s,
+                                   roles_permitidos=%s
                                where id=%s""",
-                            (doc.titulo, hash_, json.dumps(doc.defectos, ensure_ascii=False), doc_id))
+                            (doc.titulo, hash_, json.dumps(doc.defectos, ensure_ascii=False),
+                             roles, doc_id))
                 # Los fragmentos viejos quedan obsoletos, NUNCA se borran: es
                 # lo que permite reconstruir con que version se respondio algo.
                 cur.execute("""update asistente.document_chunks
                                set vigente=false where document_id=%s and vigente""",
                             (doc_id,))
             else:
+                # Se guarda el archivo original (ver supabase/202608231459_original_documentos): es la
+                # evidencia de que se aprobo, cuando alguien lo apruebe. Los
+                # fragmentos son derivados y no permiten reconstruir el
+                # documento con sus tablas de firma ni su formato.
                 cur.execute("""insert into asistente.documents
                                (organization_id, codigo, titulo, version, tipo,
-                                estado, hash, defectos)
-                               values (%s,%s,%s,%s,'guia_tecnica','vigente',%s,%s)
+                                estado, hash, defectos, roles_permitidos,
+                                original_content, nombre_archivo, mime)
+                               values (%s,%s,%s,%s,'guia_tecnica','vigente',%s,%s,%s,%s,%s,%s)
                                returning id""",
                             (org_id, doc.codigo, doc.titulo, doc.version,
-                             hash_, json.dumps(doc.defectos, ensure_ascii=False)))
+                             hash_, json.dumps(doc.defectos, ensure_ascii=False), roles,
+                             ruta.read_bytes(), ruta.name,
+                             "application/vnd.openxmlformats-officedocument"
+                             ".wordprocessingml.document"))
                 doc_id = cur.fetchone()[0]
 
             n = 0
             for frag in doc.fragmentos:
                 contextualizado = frag.contextualizar(doc)
-                vector = _vectorizar(contextualizado)
+                vector = _vectorizar_openai(contextualizado)
+                # 'modelo_embeddings' se escribe desde el 21/08/2026: este CLI
+                # lo omitia, asi que todo lo cargado por aca quedaba en NULL y
+                # no habia forma de saber a posteriori con que se vectorizo
+                # cada fila -- justo lo que distingue un corpus consistente de
+                # uno mezclado. Se registra el modelo REAL (embeddings.py), no
+                # el que declare la config del tenant.
                 cur.execute("""insert into asistente.document_chunks
                                (organization_id, document_id, orden, contenido,
                                 contenido_contextualizado, embedding, metadata,
-                                tokens, vigente)
-                               values (%s,%s,%s,%s,%s,%s,%s,%s,true)""",
+                                tokens, modelo_embeddings, vigente)
+                               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,true)""",
                             (org_id, doc_id, frag.orden, frag.contenido,
                              contextualizado, str(vector),
                              json.dumps(frag.metadata, ensure_ascii=False),
-                             len(contextualizado) // 4))
+                             len(contextualizado) // 4, MODELO_EMBEDDINGS))
                 n += 1
             con.commit()
             total_frag += n
-            print(f"  [cargado] {ruta.name[:55]}  {n} fragmentos vectorizados")
+            destino = f"roles: {', '.join(roles)}" if roles else "SIN ROL ASIGNADO -- no lo va a recuperar nadie"
+            print(f"  [cargado] {ruta.name[:55]}  {n} fragmentos vectorizados  ({destino})")
 
         elapsed = time.monotonic() - t0
 
