@@ -811,8 +811,28 @@ def caso_sigue_abierto(config, caso_id: str) -> bool:
     persona que ya viene; hacia el otro, lo deja hablando con un bot que le
     dijeron que no lo iba a atender.
     """
+    # SIN CASO NO SE ASUME CERRADO -- se sostiene la pausa.
+    #
+    # Decia 'return False', que es lo contrario del fail-safe que este mismo
+    # docstring declara, y el efecto era el peor de los dos: una escalada
+    # respaldada por un ticket operativo (sin caso del CRM) se daba por
+    # cerrada en el turno siguiente y el bot volvia a atender a un cliente al
+    # que se le habia prometido una persona.
+    #
+    # Llegar aca ya significa que la conversacion esta escalada, y desde el
+    # 12/09/2026 'escalada' solo queda en true si el traspaso quedo
+    # registrado en algun lado (ver atender_turno en nucleo/canales/api.py).
+    # Asi que "sin caso" ya no puede significar "no quedo nada": significa
+    # que quedo en la otra cola y que desde aca no hay como consultarla.
+    #
+    # La contrapartida, y hay que saberla: una escalada respaldada SOLO por
+    # ticket operativo no se despausa sola, porque nadie mira el estado de
+    # ese ticket. Sale por devolucion explicita de una persona. Es el lado
+    # correcto para equivocarse -- dejar a alguien esperando a una persona
+    # que ya viene, en vez de dejarlo hablando con un bot que le dijeron que
+    # no lo iba a atender.
     if not caso_id:
-        return False
+        return True
 
     herramienta = _herramienta(config, NOMBRE_HERRAMIENTA_CASO_CREAR)
     if herramienta is None:

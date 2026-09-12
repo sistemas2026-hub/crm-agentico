@@ -857,32 +857,41 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             #
             # Asi que se exige el hecho: que alguien del equipo le haya
             # respondido. Recien ahi un "ok" significa "si, ya quedo".
+            #
+            # Y ESE HECHO SE MIRA PRIMERO, antes de gastar la llamada.
+            #
+            # El cierre exige las dos cosas -- que el cliente lo confirme Y
+            # que una persona le haya escrito-- asi que sin lo segundo el
+            # veredicto del modelo no puede cerrar nada por definicion. Se
+            # estaba pagando una llamada por cada mensaje de un cliente que
+            # espera, para descartar el resultado dos lineas mas abajo.
+            # Reordenarlo no cambia nada de lo que ve el cliente: las dos
+            # ramas de salida son las mismas y en el mismo orden.
+            hubo_humano = persistencia.atendida_por_humano(
+                tenant, estado["conversacion_id"])
             cerrado = False
-            try:
-                # Este camino no pasa por motor.responder --el bot esta en
-                # pausa, no compone nada-- asi que abre su PROPIO acumulador
-                # en vez de seguir uno que todavia no existe. Pero cuenta
-                # igual: es una llamada al modelo, y hasta hoy tampoco se
-                # contaba.
-                with consumo.abrir(config):
-                    veredicto = escalamiento.evaluar(config, rol, estado["historial"]) or {}
-                # Un "si" explicito cierra por si solo, aunque la pregunta
-                # se le haya hecho dos turnos antes: el cliente contesto lo
-                # que se le pregunto, y volver a preguntarle lo mismo es no
-                # escucharlo. Visto en la prueba: dijo "listo entonces, ya
-                # puedes cerrar" y se le repregunto.
-                cerrado = bool(veredicto.get("resuelta")
-                               or veredicto.get("confirma_cierre"))
-            except Exception as e:
-                print(f"[escalamiento] no se pudo evaluar el turno pausado: {e}")
+            veredicto = {}
+            if hubo_humano:
+                try:
+                    # Este camino no pasa por motor.responder --el bot esta en
+                    # pausa, no compone nada-- asi que abre su PROPIO
+                    # acumulador en vez de seguir uno que todavia no existe.
+                    # Pero cuenta igual: es una llamada al modelo, y hasta hoy
+                    # tampoco se contaba.
+                    with consumo.abrir(config):
+                        veredicto = escalamiento.evaluar(config, rol, estado["historial"]) or {}
+                    # Un "si" explicito cierra por si solo, aunque la pregunta
+                    # se le haya hecho dos turnos antes: el cliente contesto lo
+                    # que se le pregunto, y volver a preguntarle lo mismo es no
+                    # escucharlo. Visto en la prueba: dijo "listo entonces, ya
+                    # puedes cerrar" y se le repregunto.
+                    cerrado = bool(veredicto.get("resuelta")
+                                   or veredicto.get("confirma_cierre"))
+                except Exception as e:
+                    print(f"[escalamiento] no se pudo evaluar el turno pausado: {e}")
             if cerrado and _hay_verificacion_pendiente(tenant, estado["conversacion_id"]):
                 print(f"[verificacion] {id_sesion}: el cliente da por cerrado, "
                       "pero hay una accion sin comprobar -- no se cierra")
-                cerrado = False
-            if cerrado and not persistencia.atendida_por_humano(
-                    tenant, estado["conversacion_id"]):
-                print(f"[escalamiento] {id_sesion}: el cliente da por cerrado, "
-                      "pero nadie del equipo le respondio todavia -- no se cierra")
                 cerrado = False
             # Y aunque haya respondido una persona: primero se le PREGUNTA.
             # Cerrar con lo que el modelo dedujo de un "ok" ya salio mal una
@@ -943,7 +952,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             # leer "ya se realizo su cambio" no es redundante: lo contradice,
             # y el cliente no sabe a cual creerle. Su mensaje queda guardado y
             # la persona lo ve en la bandeja, que es donde esta mirando.
-            if persistencia.atendida_por_humano(tenant, estado["conversacion_id"]):
+            if hubo_humano:
                 try:
                     persistencia.registrar_mensaje(
                         tenant, canal, id_sesion, rol, "user", mensaje)
@@ -1746,11 +1755,29 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                         config.escalamiento.area_por_caso.get(caso_manual, ""),
                         config)
                         if caso_manual else None) or "")
+                # QUEDO REGISTRADO EN ALGUN LADO, SI O NO. Una sola variable.
+                #
+                # Antes esto se calculaba dos veces y para cosas distintas:
+                # mas abajo decidia QUE se le dice al cliente, y la pausa
+                # decidia por su cuenta mirando solo 'caso_id'. Prometiamos
+                # con tres llaves y vigilabamos con una.
+                #
+                # Con ticket operativo y sin caso del CRM: al cliente se le
+                # decia que un compañero lo iba a atender, 'escalada' quedaba
+                # en true, 'caso_id' en None, y en el turno siguiente
+                # 'caso_sigue_abierto(None)' contestaba false -- el codigo
+                # concluia que el caso habia cerrado y el bot volvia a
+                # atender a alguien a quien se le prometio una persona. Dos
+                # interlocutores para el mismo cliente.
+                quedo_registrado = bool(id_ticket_auto or caso_creado
+                                        or id_ticket_operativo)
+
                 # La pausa (arriba, "si ya se escalo, el bot NO contesta")
                 # solo tiene sentido cuando de verdad hay un humano al que
                 # esperar -- si se agendo solo, el bot sigue atendiendo
-                # normal desde el proximo mensaje.
-                estado["escalada"] = necesita_humano
+                # normal desde el proximo mensaje. Y si no quedo registrado
+                # en ningun lado, tampoco: ver mas abajo.
+                estado["escalada"] = necesita_humano and quedo_registrado
                 # Y POR QUE se escalo. Lo lee el aviso que recibe el cliente
                 # en cada mensaje mientras espera: sin esto se le contestaba
                 # con el texto generico ("entiendo tu molestia") aunque
@@ -1767,19 +1794,33 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 # Escalo y no quedo registrado en ningun lado: no se le
                 # puede decir al cliente que si.
                 #
-                # Alcanza con que haya quedado en UNO de los dos: el caso lo
-                # pone en la cola del CRM y el ticket operativo en la de la
-                # operacion. Cualquiera de los dos es una persona que lo va a
-                # ver, que es lo que el aviso promete. Si no quedo en ninguna
-                # -- el 28/08/2026 el CRM rechazo un caso con un 400 y al
-                # cliente se le contesto igual que su pedido habia quedado
-                # registrado -- se le dice la verdad y se le pide que escriba
-                # de nuevo, que es lo que dispara el reintento.
-                if id_ticket_auto or caso_creado or id_ticket_operativo:
+                # Alcanza con que haya quedado en UNO de los tres: el caso lo
+                # pone en la cola del CRM y el ticket (automatico u operativo)
+                # en la de la operacion. Cualquiera de ellos es una persona
+                # que lo va a ver, que es lo que el aviso promete. Si no quedo
+                # en ninguna -- el 28/08/2026 el CRM rechazo un caso con un
+                # 400 y al cliente se le contesto igual que su pedido habia
+                # quedado registrado -- se le dice la verdad y se le pide que
+                # escriba de nuevo, que es lo que dispara el reintento.
+                if quedo_registrado:
                     respuesta = respuesta_al_cliente
                 else:
                     respuesta = _mensaje_si_no_quedo(config) or respuesta
-                estado["ya_escalada"] = True
+
+                # Y SI NO QUEDO, EL ESTADO TIENE QUE ACOMPAÑAR AL MENSAJE.
+                #
+                # Le decimos "escribime de nuevo" justamente para que el
+                # proximo mensaje reintente. Pero 'escalada' y 'ya_escalada'
+                # quedaban en true igual, asi que ese reintento no podia
+                # ocurrir: 'ya_escalada' lo bloquea como duplicado, y una
+                # pausa fail-closed se lo tragaria. Le pedimos que insista y
+                # despues no lo escuchabamos.
+                #
+                # Sin registro no hay nadie a quien esperar ni caso que
+                # consultar: se limpia todo y la conversacion sigue viva.
+                estado["ya_escalada"] = quedo_registrado
+                if not quedo_registrado:
+                    estado["caso_id"] = None
                 # El mensaje del asistente ya se guardo (mas arriba, antes de
                 # poder evaluar la escalada -- necesitaba conversation_id).
                 # Sin esto el HTTP response trae el aviso pero /conversaciones
