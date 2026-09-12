@@ -1749,5 +1749,10 @@ casos:
     mensajes:
       - "quiero dar de baja el internet que tengo contratado"
       - "mi cedula es 1010101011, cancelalo por favor"
+      # El tercer mensaje recorre el camino BUENO hasta el final: desde el
+      # 12/09/2026 el agente pide el motivo para que cartera tenga con que
+      # intentar retener. Va aca para que 'no_intenta' cubra tambien ese
+      # tramo -- dar el motivo no puede reabrir el guion de la solicitud.
+      - "me voy porque consegui uno mas barato en otra empresa"
     espera:
       no_intenta: [consultar_solicitud_por_cedula, cancelar_solicitud_servicio]

@@ -1477,12 +1477,33 @@ roles:
       servicio YA CONTRATADO y andando: son dos cosas distintas y se dicen
       casi igual. Si te dice "quiero cancelar mi servicio", "dar de baja el
       internet que tengo", "ya no lo quiero mas" -- o cualquier cosa que de
-      por hecho que YA ES CLIENTE-- no le pidas la cedula y no entres en los
-      pasos de abajo: decile que esa baja la gestiona un colaborador humano
-      y pasa el caso. No inventes plazos, preavisos, penalidades ni pasos:
-      ese procedimiento no esta documentado, y lo unico verificado sobre
-      terminar un servicio es la clausula de permanencia de 12 meses. Si no
-      te queda claro cual de las dos es, preguntaselo antes de pedir nada.
+      por hecho que YA ES CLIENTE-- no le pidas la cedula para buscar una
+      solicitud y no entres en los pasos de abajo. Ese caso va asi:
+
+        1. SI LA CONVERSACION YA ESTA VERIFICADA, ESTE PASO NO EXISTE: ya
+           sabes quien es y cual es su servicio, asi que no le preguntes si
+           el servicio esta a su nombre ni le pidas que se confirme de
+           nuevo. Anda derecho al paso 2. Solo si NO esta verificada pedile
+           la cedula, llama a verificar_identidad_por_cedula y despues a
+           confirmar_identidad, igual que en el camino de "ya soy cliente";
+           si no aparece, no tiene servicio con nosotros y no hay baja que
+           tramitar.
+        2. Preguntale POR QUE se quiere ir, y dejalo hablar. No es un
+           requisito que le impongas: es lo unico que le permite a cartera
+           intentar retenerlo, y sin eso la baja le llega sin nada con que
+           trabajar. SI PREFIERE NO DECIRLO, no insistas ni se lo vuelvas a
+           preguntar -- irse es su derecho y el motivo es un favor que nos
+           hace. Pasa el caso igual.
+        3. Pasa el caso a un colaborador. NO ofrezcas descuentos, planes ni
+           promociones para que se quede: no hay ninguna politica de
+           retencion escrita, asi que cualquier cosa que ofrezcas te la
+           estarias inventando. Retener lo intenta la persona de cartera,
+           con el motivo en la mano.
+
+      No inventes plazos, preavisos, penalidades ni pasos: ese procedimiento
+      no esta documentado, y lo unico verificado sobre terminar un servicio
+      es la clausula de permanencia de 12 meses. Si no te queda claro cual
+      de las dos cancelaciones es, preguntaselo antes de pedir nada.
 
       Medido el 12/09/2026: a "quiero cancelar mi servicio de internet, ya
       no lo quiero mas" se le contesto "para ubicar la solicitud, ¿me pasas
@@ -5883,9 +5904,19 @@ escalamiento:
     reconexion: cartera
     reclamo_formal: cartera
     validacion_de_pago: cartera
+    baja_servicio: cartera
     otro: soporte_tecnico
 
   ticket_al_escalar:
+    # Sin condiciones: que el cliente pida la baja ES el hecho, no hay una
+    # medicion que confirmarlo. Prioridad alta como 'reconexion' -- la
+    # ventana para retener a alguien que ya decidio irse es corta.
+    baja_servicio:
+      - herramienta: crear_ticket_caso
+        area: cartera
+        asunto: Baja De Servicio
+        prioridad: "3"
+        condiciones: []
     internet_lento:
       # La optica fuera de rango es una falla fisica confirmada: entra ALTA.
       - herramienta: crear_ticket_caso
@@ -6059,6 +6090,10 @@ manual:
     - cambio_wifi
     - reclamo_formal
     - validacion_de_pago
+    # La baja la atiende cartera, no soporte: no es una falla, es un cliente
+    # que se va. Sin este caso propio caia en 'otro', que enruta a soporte
+    # tecnico -- medido el 12/09/2026.
+    - baja_servicio
     # Seccion 5.9 del manual. Piloto de agendamiento automatico de visita
     # tecnica (nucleo/seguimiento/agendamiento.py) -- ver
     # escalamiento.agendamiento_automatico mas abajo.
