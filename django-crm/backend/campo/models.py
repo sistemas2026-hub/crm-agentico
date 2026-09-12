@@ -355,8 +355,51 @@ class AsignacionTrabajo(BaseModel):
         return f"{quien} -> OT #{self.orden.numero}{cargo}"
 
 
+class EventoTrabajoQuerySet(models.QuerySet):
+    """
+    Append-only de verdad, no por costumbre.
+
+    El docstring de abajo decia "append-only" desde el primer dia y nada lo
+    impedia: 'EventoTrabajo.objects.filter(...).update(tipo="otra_cosa")'
+    funcionaba, y '.delete()' tambien. Una bitacora que se puede reescribir no
+    es una bitacora -- y de esta salen 'validador.verificar_checklist_completo'
+    y la cuenta de vueltas, asi que reescribirla cambia si una orden se puede
+    cerrar.
+
+    Mismo patron que 'WorkTypeVersionQuerySet', unas lineas mas arriba, que
+    protege la inmutabilidad de las plantillas publicadas.
+
+    LO QUE ESTO NO CUBRE, dicho en voz alta: 'orden' y 'org' son FK con
+    on_delete=CASCADE, y el borrado en cascada lo ejecuta el colector de Django
+    con DELETE al nivel de SQL, sin pasar por aca. Borrar una OrdenTrabajo
+    sigue llevandose sus eventos. Cerrar ese camino exige decidir que pasa con
+    una orden que no se puede borrar nunca, y es una decision de producto y de
+    retencion legal, no una linea de codigo.
+    """
+
+    def update(self, **kwargs):
+        raise ValidationError(
+            "Operación prohibida: EventoTrabajo es append-only. Un hecho que ya "
+            "ocurrió no se corrige reescribiéndolo; se registra el hecho nuevo.")
+
+    def delete(self):
+        raise ValidationError(
+            "Operación prohibida: EventoTrabajo es append-only. La bitácora de "
+            "una orden es su auditoría operativa y no se borra.")
+
+    def bulk_update(self, objs, fields, **kwargs):
+        raise ValidationError(
+            "Operación prohibida: EventoTrabajo es append-only.")
+
+
 class EventoTrabajo(BaseModel):
-    """Bitácora append-only de eventos y auditoría operativa de campo."""
+    """Bitácora append-only de eventos y auditoría operativa de campo.
+
+    Append-only lo garantiza 'EventoTrabajoQuerySet' mas 'save'/'delete' de
+    abajo, no la buena voluntad de quien escriba el proximo servicio.
+    """
+
+    objects = EventoTrabajoQuerySet.as_manager()
 
     org = models.ForeignKey(Org, on_delete=models.CASCADE, related_name="eventos_campo")
     orden = models.ForeignKey(
@@ -374,6 +417,21 @@ class EventoTrabajo(BaseModel):
     class Meta:
         db_table = "campo_evento_trabajo"
         ordering = ["created_at"]
+
+    def save(self, *args, **kwargs):
+        # Crear si; modificar no. 'self._state.adding' distingue el INSERT del
+        # UPDATE mejor que mirar si hay pk: el id es un UUID con default, asi
+        # que una instancia nueva YA tiene pk antes de guardarse.
+        if not self._state.adding:
+            raise ValidationError(
+                "Operación prohibida: EventoTrabajo es append-only. Para "
+                "corregir el registro de un hecho, se agrega el hecho nuevo.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError(
+            "Operación prohibida: EventoTrabajo es append-only. La bitácora de "
+            "una orden es su auditoría operativa y no se borra.")
 
     def __str__(self) -> str:
         return f"OT #{self.orden.numero}: {self.tipo} ({self.created_at})"
