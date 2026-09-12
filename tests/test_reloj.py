@@ -517,11 +517,39 @@ try:
                                  "creados": 2, "ya_estaban": 1, "fallidos": 0},
             "los contadores de importacion salen separados",
             f"{r.get('importacion')}")
-    revisar(r["reconciliacion"] == {"alcanzados": 2, "con_diferencia": 1,
-                                    "actualizados": 3, "sin_cambios": 4,
-                                    "fallidos": 0, "errores_lectura": 1},
+    rec = dict(r["reconciliacion"])
+    # El hilo de respuestas es un trabajo mas dentro de la reconciliacion y
+    # lleva su propio bloque: se saca para comparar los contadores de la
+    # reconciliacion en si, y despues se afirma sobre el aparte. Compararlos
+    # todos juntos en un solo dict fue lo que dejo esta prueba en rojo cuando
+    # entro 'sincronizar_respuestas_externas', y mezclarlos otra vez volveria
+    # a esconder cual de los dos trabajos cambio.
+    hilo = rec.pop("respuestas", None)
+    revisar(rec == {"alcanzados": 2, "con_diferencia": 1,
+                    "actualizados": 3, "sin_cambios": 4,
+                    "fallidos": 0, "errores_lectura": 1},
             "y los de reconciliacion tambien, con errores_lectura aparte",
-            f"{r.get('reconciliacion')}")
+            f"{rec}")
+
+    # El bloque del hilo existe SIEMPRE, aunque el tenant no declare la
+    # herramienta. Que exista es lo que deja leer 'no se sincronizo nada'
+    # como un hecho y no como un silencio.
+    revisar(isinstance(hilo, dict),
+            "la reconciliacion informa el hilo de respuestas en su propio bloque",
+            f"respuestas={hilo!r}")
+    revisar({"hilos", "respuestas", "nuevas", "fallidos"} <= set(hilo or {}),
+            "y ese bloque trae sus cuatro contadores",
+            f"claves: {sorted(hilo or {})}")
+    # Este tenant de prueba NO declara la herramienta, y esa es justamente la
+    # condicion que se quiere fijar: la falta se DICE, no tumba el ciclo ni
+    # pasa desapercibida. El ciclo llego hasta el final -- los contadores de
+    # arriba lo prueban -- con la herramienta ausente.
+    revisar("sincronizar_respuestas_externas" in str(hilo.get("error", "")),
+            "y si la herramienta no esta en el catalogo, lo dice con su nombre",
+            f"error={hilo.get('error')!r}")
+    revisar(hilo.get("nuevas") == 0,
+            "sin herramienta no se escribe ninguna respuesta",
+            f"nuevas={hilo.get('nuevas')!r}")
     # 'fallidos' existe en los dos a proposito -- son fallos de trabajos
     # distintos. Lo que no puede existir es un contador PLANO, arriba, que los
     # sume: ese es el numero que se lee mal cuando algo anda mal.
@@ -748,9 +776,23 @@ necesarias = reloj.credenciales_necesarias(cfg_yaml)
 revisar("IMPORTACION_API_TOKEN" in necesarias,
         "el reloj sabe que va a necesitar IMPORTACION_API_TOKEN",
         f"deducidas: {sorted(necesarias)}")
-revisar(len(necesarias.get("IMPORTACION_API_TOKEN", [])) == 4,
-        "y que son las cuatro herramientas internas de Fase 2 las que la piden",
-        f"{necesarias.get('IMPORTACION_API_TOKEN')}")
+# Por NOMBRE y no por cantidad. Contarlas dejaba pasar el cambio que importa
+# --que entre o salga una herramienta del alcance del token-- y ademas rompia
+# la prueba cada vez que se agregaba una, sin decir cual. Con el conjunto
+# explicito, agregar una herramienta que use este token obliga a nombrarla
+# aca, que es exactamente la revision que se quiere forzar: este token puede
+# escribir casos importados.
+ESPERADAS_IMPORTACION = {
+    "consultar_casos_externos",
+    "consultar_tickets_conocidos",
+    "importar_caso_externo",
+    "reconciliar_caso_externo",
+    "sincronizar_respuestas_externas",
+}
+revisar(set(necesarias.get("IMPORTACION_API_TOKEN", [])) == ESPERADAS_IMPORTACION,
+        "y son exactamente las herramientas internas de importacion las que la piden",
+        f"declaradas: {sorted(necesarias.get('IMPORTACION_API_TOKEN', []))}"
+        f" / esperadas: {sorted(ESPERADAS_IMPORTACION)}")
 revisar({"WISPHUB_API_KEY", "BOTTLECRM_API_TOKEN"} <= set(necesarias),
         "y las dos del cierre de vencidas",
         f"deducidas: {sorted(necesarias)}")

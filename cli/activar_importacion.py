@@ -104,6 +104,33 @@ def _importacion_tickets() -> dict:
     }
 
 
+def completar_importacion_tickets(doc: dict, nueva: dict) -> None:
+    """
+    Agrega a 'importacion_tickets' lo que le FALTE. Nunca pisa lo que ya hay.
+
+    Antes esto era 'doc["importacion_tickets"] = nueva' dentro de main(), y esa
+    linea habria apagado el importador en produccion: la base tiene
+    'cada_horas: 1' --encendido en una edicion deliberada y aparte, como dice
+    el encabezado de este archivo-- y once ajustes mas que la semilla del YAML
+    no conoce. Reemplazar el bloque los borraba todos y dejaba 'cada_horas' en
+    0 sin que nadie lo pidiera.
+
+    La regla es la que gobierna al resto del editor: el YAML es semilla, la
+    base es la fuente de verdad una vez cargada. Lo que ya esta decidido en la
+    base gana.
+
+    Vive aca afuera y no adentro de main() para que se pueda probar sin base:
+    'tests/test_activar_importacion_conservador.py' la llama directo.
+    """
+    actual_doc = doc.get("importacion_tickets")
+    if not isinstance(actual_doc, dict):
+        # No existia: nace entera y apagada.
+        doc["importacion_tickets"] = dict(nueva)
+        return
+    for k, v in nueva.items():
+        actual_doc.setdefault(k, v)
+
+
 def main() -> None:
     args = sys.argv[1:]
     if not args:
@@ -141,8 +168,15 @@ def main() -> None:
         marca = "  (sin cambio)" if antes == v else ""
         corto = v if not isinstance(v, (list, dict)) else f"{len(v)} entrada(s)"
         print(f"      {k:<24} {corto}{marca}")
-    print(f"\n  cada_horas queda en {nueva['cada_horas']}: agrega la capacidad, "
-          f"no la importacion.")
+    faltan_claves = [k for k in nueva if k not in actual]
+    print(f"\n  claves que FALTAN y se agregarian: {faltan_claves or 'ninguna'}")
+    print(f"  las que ya estan NO se tocan: {sorted(set(nueva) & set(actual))}")
+    if "cada_horas" in actual:
+        print(f"  cada_horas se respeta como esta en la base: "
+              f"{actual['cada_horas']}")
+    else:
+        print(f"  cada_horas nace en {nueva['cada_horas']}: agrega la "
+              f"capacidad, no la importacion.")
 
     if not aplicar:
         print("\n  Nada se guardo. Con --aplicar se escribe.")
@@ -152,10 +186,22 @@ def main() -> None:
                     for n in a_agregar]
 
     def mutar(doc: dict) -> None:
-        # Solo se AGREGA. Ninguna herramienta existente se toca, y ninguna
-        # otra seccion de la config se lee siquiera.
+        # Solo se AGREGA. Ninguna herramienta existente se toca.
         doc.setdefault("herramientas", []).extend(definiciones)
-        doc["importacion_tickets"] = nueva
+
+        # 'importacion_tickets' se COMPLETA, no se reemplaza.
+        #
+        # Antes esto era 'doc["importacion_tickets"] = nueva', y esa linea
+        # habria apagado el importador en produccion: la base tiene
+        # 'cada_horas: 1' -- encendido deliberadamente, en una edicion aparte,
+        # como dice el encabezado de este archivo -- y once ajustes mas que la
+        # semilla del YAML no conoce. Reemplazar el bloque los borraba todos y
+        # dejaba 'cada_horas' en 0 sin que nadie lo pidiera.
+        #
+        # La regla es la misma que gobierna al resto del editor: el YAML es
+        # semilla, la base es la fuente de verdad una vez cargada. Lo que ya
+        # esta decidido en la base gana.
+        completar_importacion_tickets(doc, nueva)
 
     config = editor._editar(tenant, mutar)
     print(f"\n  Guardado. Herramientas ahora: {len(config.herramientas)}")
