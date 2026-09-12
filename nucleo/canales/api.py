@@ -1791,6 +1791,28 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                     estado["caso_id"] = persistencia.caso_de_conversacion(tenant, conversation_id)
                 except Exception as e:
                     print(f"[escalamiento] no se pudo leer el caso de la conversacion: {e}")
+
+                # UNA PAUSA QUE NO SE VA A DESPAUSAR SOLA: dejarla dicha.
+                #
+                # Con registro pero sin caso del CRM, la conversacion queda
+                # pausada y nadie mira el estado de la otra cola, asi que solo
+                # sale por devolucion explicita de una persona. Es el lado
+                # correcto para equivocarse, pero si empieza a pasar seguido
+                # hay clientes esperando a alguien que quiza no los vea.
+                #
+                # Hoy es raro -- 2 de 63 escalamientos historicos, los dos del
+                # 11/08/2026 y con pinta de prueba-- y por eso NO se construyo
+                # un 'ticket_sigue_abierto()': seria otra API que consultar y
+                # otro fail-safe que mantener para un caso que no ocurre. Se
+                # mide primero. Esta linea es el instrumento: la rama era muda,
+                # y sin ella la unica forma de enterarse es que alguien note un
+                # cliente callado.
+                if necesita_humano and quedo_registrado and not estado["caso_id"]:
+                    print(f"[escalamiento] {id_sesion}: traspaso registrado SIN "
+                          f"caso del CRM -- la conversacion queda pausada hasta "
+                          f"que una persona la devuelva. Si esto se repite, "
+                          f"revisar por que el caso no se crea.")
+
                 # Escalo y no quedo registrado en ningun lado: no se le
                 # puede decir al cliente que si.
                 #
