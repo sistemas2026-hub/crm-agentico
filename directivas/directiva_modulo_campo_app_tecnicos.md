@@ -1,6 +1,6 @@
 # SOP — Módulo Campo + App de Técnicos
 
-> **Procedimiento Operativo Estándar y Arquitectura de Dominio**  
+> **Procedimiento Operativo Estándar y Arquitectura de Dominio**
 > Dominio operativo `campo` en Django SaaS + Aplicación móvil Flutter independiente en `apps/tecnicos-mobile/`.
 
 ---
