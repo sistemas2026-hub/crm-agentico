@@ -6,6 +6,7 @@ for invoices and estimates with customizable templates.
 """
 
 import io
+import logging
 import os
 from decimal import Decimal
 from urllib.parse import unquote, urlparse
@@ -13,20 +14,59 @@ from urllib.parse import unquote, urlparse
 from django.conf import settings
 from django.template.loader import render_to_string
 
+logger = logging.getLogger(__name__)
+
+# Por que se atrapa OSError y no solo ImportError.
+#
+# WeasyPrint es un paquete de Python que carga librerias NATIVAS (GTK/Pango/
+# Cairo) por ctypes al importarse. Si el paquete esta instalado pero las
+# nativas faltan, no lanza ImportError: lanza OSError
+# ("cannot load library 'libgobject-2.0-0'"). Con 'except ImportError' esa
+# excepcion sube, el modulo entero no se puede importar, y cualquiera que lo
+# importe se cae con el. Django deja de cargar.
+#
+# El efecto en produccion, medido:
+#
+#   instalacion sana   identico: el try funciona igual con o sin este cambio
+#   instalacion rota   antes, el backend no levanta; ahora levanta y solo los
+#                      endpoints de PDF fallan, con un mensaje que dice que
+#                      hacer
+#
+# El registro de abajo existe porque degradar en silencio seria peor que
+# caerse: una instalacion rota se veria como "el PDF no anda" sin ninguna
+# pista. Va en ERROR y no en WARNING a proposito -- es una dependencia
+# declarada que no esta cumpliendo.
+MOTIVO_SIN_WEASYPRINT = ""
+
 try:
     from weasyprint import CSS, HTML, default_url_fetcher
     from weasyprint.text.fonts import FontConfiguration
 
     WEASYPRINT_AVAILABLE = True
-except ImportError:
+except ImportError as e:
     WEASYPRINT_AVAILABLE = False
+    MOTIVO_SIN_WEASYPRINT = f"no esta instalado ({type(e).__name__}: {e})"
+    logger.error(
+        "WeasyPrint no esta instalado: la generacion de PDF queda deshabilitada. "
+        "Instalar con: pip install weasyprint. Detalle: %s", e)
+except OSError as e:
+    # El paquete esta, las librerias nativas no.
+    WEASYPRINT_AVAILABLE = False
+    MOTIVO_SIN_WEASYPRINT = f"faltan librerias nativas ({type(e).__name__}: {e})"
+    logger.error(
+        "WeasyPrint esta instalado pero no puede cargar sus librerias nativas "
+        "(GTK/Pango/Cairo): la generacion de PDF queda deshabilitada, el resto "
+        "del backend sigue funcionando. Esto es una INSTALACION ROTA, no una "
+        "dependencia opcional. Detalle: %s", e)
 
 
 def check_weasyprint():
     """Check if WeasyPrint is available."""
     if not WEASYPRINT_AVAILABLE:
         raise ImportError(
-            "WeasyPrint is not installed. Install it with: pip install weasyprint"
+            "WeasyPrint no esta disponible: "
+            f"{MOTIVO_SIN_WEASYPRINT or 'motivo desconocido'}. "
+            "Instalarlo con: pip install weasyprint (y sus librerias nativas)."
         )
 
 
