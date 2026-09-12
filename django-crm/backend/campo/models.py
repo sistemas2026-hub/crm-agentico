@@ -369,12 +369,28 @@ class EventoTrabajoQuerySet(models.QuerySet):
     Mismo patron que 'WorkTypeVersionQuerySet', unas lineas mas arriba, que
     protege la inmutabilidad de las plantillas publicadas.
 
-    LO QUE ESTO NO CUBRE, dicho en voz alta: 'orden' y 'org' son FK con
-    on_delete=CASCADE, y el borrado en cascada lo ejecuta el colector de Django
-    con DELETE al nivel de SQL, sin pasar por aca. Borrar una OrdenTrabajo
-    sigue llevandose sus eventos. Cerrar ese camino exige decidir que pasa con
-    una orden que no se puede borrar nunca, y es una decision de producto y de
-    retencion legal, no una linea de codigo.
+    TRES NIVELES, Y SOLO DOS ESTAN CERRADOS. Dicho en voz alta porque
+    "append-only" a secas promete mas de lo que hay:
+
+      1. inmutable por ORM        CERRADO. update, delete, bulk_update,
+                                  bulk_create(update_conflicts=True) y save()
+                                  sobre una fila existente estan bloqueados.
+
+      2. protegido de la cascada  CERRADO para 'orden' (PROTECT: una orden con
+                                  bitacora no se borra). ABIERTO para 'org',
+                                  que sigue en CASCADE a proposito: borrar una
+                                  empresa toca retencion legal y derecho de
+                                  supresion, y eso no se decide desde un
+                                  on_delete.
+
+      3. inmutable en PostgreSQL  ABIERTO. Un UPDATE por SQL escribe igual, y
+                                  tambien '_base_manager', que Django usa para
+                                  resolver relaciones y que no pasa por este
+                                  queryset. Cerrarlo pide un trigger.
+
+    Los dos limites abiertos tienen prueba propia en
+    'campo/tests/test_evento_append_only.py', afirmando el comportamiento
+    ACTUAL: si alguno se cierra, esa prueba falla y obliga a mirar.
     """
 
     def update(self, **kwargs):
@@ -391,6 +407,20 @@ class EventoTrabajoQuerySet(models.QuerySet):
         raise ValidationError(
             "Operación prohibida: EventoTrabajo es append-only.")
 
+    def bulk_create(self, objs, *args, **kwargs):
+        # Crear en lote SI; usarlo como upsert NO.
+        #
+        # 'bulk_create(update_conflicts=True)' es el camino menos obvio para
+        # reescribir una fila: no pasa por save(), ni por update(), ni por
+        # bulk_update. Medido antes de cerrarlo: reescribia el evento sin
+        # ninguna queja.
+        if kwargs.get("update_conflicts"):
+            raise ValidationError(
+                "Operación prohibida: EventoTrabajo es append-only. "
+                "bulk_create(update_conflicts=True) es un upsert, y un hecho "
+                "que ya ocurrió no se corrige reescribiéndolo.")
+        return super().bulk_create(objs, *args, **kwargs)
+
 
 class EventoTrabajo(BaseModel):
     """Bitácora append-only de eventos y auditoría operativa de campo.
@@ -402,8 +432,24 @@ class EventoTrabajo(BaseModel):
     objects = EventoTrabajoQuerySet.as_manager()
 
     org = models.ForeignKey(Org, on_delete=models.CASCADE, related_name="eventos_campo")
+    # PROTECT y no CASCADE: una orden con bitacora NO se puede borrar.
+    #
+    # Es la unica de las tres salidas que preserva la historia Y su relacion
+    # con la orden. SET_NULL dejaria eventos huerfanos --imposibles de
+    # interpretar y arrastrando datos sin dueño-- y un trigger agrega
+    # complejidad antes de tener definida la politica de retencion.
+    #
+    # No obliga a inventar nada: la maquina de estados ya tiene 'CANCELADA' y
+    # es terminal, asi que dar de baja una orden ya era posible sin borrarla.
+    # Y no rompe nada existente: no hay un solo '.delete()' sobre OrdenTrabajo
+    # en el codigo de produccion -- los unicos borrados del modulo son de
+    # 'MutacionIdempotente', que es cache de idempotencia.
+    #
+    # 'org' sigue en CASCADE a proposito: borrar una empresa entera es una
+    # decision de retencion y de derecho de supresion que no se toma desde un
+    # on_delete. Queda una prueba que mide ese camino tal como esta hoy.
     orden = models.ForeignKey(
-        OrdenTrabajo, on_delete=models.CASCADE, related_name="eventos"
+        OrdenTrabajo, on_delete=models.PROTECT, related_name="eventos"
     )
     tipo = models.CharField(
         max_length=64,
