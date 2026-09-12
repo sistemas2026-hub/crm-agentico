@@ -627,7 +627,30 @@ def _sesion_nueva(tenant: str, id_sesion: str, canal: str,
     estado["escalada"] = previo["escalada"] and previo["necesita_atencion_humana"]
     # Sin el 'and': lo que interesa aca no es si el bot esta en pausa, sino si
     # esta conversacion YA tiene un caso creado. Son cosas distintas.
-    estado["ya_escalada"] = previo["escalada"]
+    #
+    # Y POR ESO TAMBIEN MIRA 'caso_id', no solo la bandera de escalada.
+    #
+    # 'escalada_a_humano' dejo de significar "tiene caso" el dia que se pudo
+    # devolver una conversacion al asistente: 'devolver_al_asistente' la apaga
+    # pero NO cierra el caso, a proposito -- sigue abierto para que cuando el
+    # cliente diga que ya quedo se cierren los tres juntos.
+    #
+    # El camino en memoria ya lo tenia bien: al devolver, api.py apaga la
+    # pausa y deja 'ya_escalada' como estaba, con su comentario explicando que
+    # es lo que evita un segundo caso. Lo que se perdia era al RECONSTRUIR la
+    # sesion desde la base, donde 'ya_escalada' volvia en false. O sea que la
+    # proteccion vivia solo en memoria -- y con autodeploy encendido este
+    # proceso se reinicia varias veces por dia.
+    #
+    # La secuencia es corta: escala (caso A abierto) -> una persona responde y
+    # devuelve -> el motor se reinicia -> el cliente escribe -> el bot no
+    # resuelve y escala -> caso B, con el A todavia abierto. Y escalar() no
+    # comprueba nada: siempre crea uno.
+    #
+    # Cuando el caso se cierra DE VERDAD no hace falta nada de esto: la rama
+    # de atender_turno que detecta el cierre pone 'ya_escalada' en false a
+    # mano, y ahi un caso nuevo es legitimo y no un duplicado.
+    estado["ya_escalada"] = bool(previo["escalada"] or previo["caso_id"])
     estado["caso_id"] = previo["caso_id"]
     # Cual es la conversacion en curso. Hace falta ANTES de que el turno
     # cree la suya: el camino pausado decide si un "ok" del cliente puede

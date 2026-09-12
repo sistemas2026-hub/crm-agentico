@@ -227,6 +227,79 @@ comprobar(t.evaluo,
           "y ahi SI se evalua: con una persona en el medio, un 'ok' del "
           "cliente puede cerrar el caso de verdad")
 
+# ---------------------------------------------------------------------------
+print("\n== 6. una persona devuelve la conversacion: el bot vuelve a atender ==")
+# 'devolver_al_asistente' lo decide la persona al responder: acaba de hacer el
+# trabajo y sabe si le quedo algo preguntado al cliente. Apaga la pausa PERO
+# NO cierra el caso -- sigue abierto para que, cuando el cliente diga que ya
+# quedo, se cierren los tres juntos (conversacion, caso y ticket).
+#
+# Asi lo deja la base: escalada_a_humano=false, necesita_atencion_humana=false,
+# y el caso donde estaba.
+t = Turno(estado_previo(escalada=False, necesita_humano=False,
+                        caso_id="caso-123"))
+r = t.correr("sigo con el mismo problema")
+comprobar(t.respondio_el_modelo,
+          "el bot atiende: es el unico camino de vuelta de una conversacion "
+          "pausada, y hasta hoy no tenia ninguna prueba")
+comprobar(not r.get("pausada"), "y el turno no se marca pausado")
+
+# ---------------------------------------------------------------------------
+print("\n== 7. devuelta y con el caso abierto, NO se abre un segundo ==")
+# EL DEFECTO QUE ESTO CIERRA (12/09/2026).
+#
+# 'ya_escalada' es lo que impide que la misma conversacion abra dos casos. El
+# camino en memoria lo tenia bien: al devolver, api.py apaga la pausa y deja
+# 'ya_escalada' como estaba, con su comentario diciendo exactamente por que.
+#
+# Lo que se perdia era al RECONSTRUIR la sesion desde la base, porque
+# 'ya_escalada' se derivaba de 'escalada_a_humano' -- la misma bandera que
+# devolver_al_asistente acaba de apagar. O sea que la proteccion vivia solo en
+# memoria, y con autodeploy este proceso se reinicia varias veces por dia:
+#
+#   escala (caso A abierto) -> una persona responde y devuelve -> el motor se
+#   reinicia -> el cliente escribe -> el bot no resuelve y escala -> caso B,
+#   con el A todavia abierto
+#
+# Y escalar() no comprueba nada: siempre crea uno.
+#
+# Se afirma sobre el ESTADO que arranca el turno, que es lo que decide si la
+# evaluacion puede crear un caso. Llegar hasta la creacion exigiria el modelo
+# real decidiendo escalar, que es una moneda.
+api._sesiones.clear()
+p = api.persistencia
+orig_estado = p.estado_de_conversacion_abierta
+p.estado_de_conversacion_abierta = lambda *a, **k: estado_previo(
+    escalada=False, necesita_humano=False, caso_id="caso-123")
+try:
+    estado = api._sesion_nueva("rapilink", "573000000000", "api", 24)
+finally:
+    p.estado_de_conversacion_abierta = orig_estado
+
+comprobar(estado["ya_escalada"] is True,
+          "con caso abierto, la conversacion sigue contando como ya escalada "
+          "-- aunque la pausa este apagada")
+comprobar(estado["escalada"] is False,
+          "pero NO esta en pausa: la persona la devolvio para que el bot "
+          "atienda")
+comprobar(estado["caso_id"] == "caso-123",
+          "y el caso queda a mano, para cerrarlo con los otros dos cuando el "
+          "cliente confirme")
+
+# Y el caso cerrado de verdad SI habilita uno nuevo: ahi no seria un
+# duplicado. Sin caso y sin escalada, no hay nada que proteger.
+api._sesiones.clear()
+p.estado_de_conversacion_abierta = lambda *a, **k: estado_previo(
+    escalada=False, necesita_humano=False, caso_id=None)
+try:
+    estado = api._sesion_nueva("rapilink", "573000000000", "api", 24)
+finally:
+    p.estado_de_conversacion_abierta = orig_estado
+comprobar(estado["ya_escalada"] is False,
+          "sin caso abierto vuelve a poder escalar: un caso nuevo ahi es "
+          "legitimo, no un duplicado")
+
+
 print()
 if fallos:
     print(f"[FALLA] {len(fallos)} comprobacion(es):")
