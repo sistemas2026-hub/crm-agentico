@@ -36,7 +36,7 @@ state a person decided.
 
 from __future__ import annotations
 
-from django.db import IntegrityError, transaction
+from django.db import DatabaseError, IntegrityError, transaction
 from rest_framework import status as http
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -514,10 +514,17 @@ def _validar_respuesta(fila):
             f"'huella' mide {len(huella)}; el maximo es {LARGO_HUELLA}",
             "CAMPO_INVALIDO")
 
-    crudo_archivos = fila.get("archivos") or 0
+    # Se mira el valor CRUDO antes de reemplazar el vacio por cero: con
+    # 'fila.get("archivos") or 0', un False se convierte en 0 antes de llegar a
+    # la comprobacion de tipo, y quedaba aceptado mientras True se rechazaba.
+    # Dos booleanos con destinos distintos es peor que aceptar los dos.
+    crudo_archivos = fila.get("archivos")
+    if crudo_archivos is None:
+        crudo_archivos = 0
     if isinstance(crudo_archivos, bool) or not isinstance(crudo_archivos, int):
-        # bool es subclase de int en Python: True pasaria como 1 sin el primer
-        # termino, y "cuantos archivos trae" no es una pregunta de si o no.
+        # bool es subclase de int en Python: sin el primer termino, True
+        # pasaria como 1, y "cuantos archivos trae" no es una pregunta de si o
+        # no.
         return None, _error(
             f"'archivos' tiene que ser un entero, llego {type(crudo_archivos).__name__}",
             "CAMPO_INVALIDO")
@@ -531,12 +538,33 @@ def _validar_respuesta(fila):
 
     return {
         "huella": huella,
-        "autor_nombre": str(fila.get("autor_nombre") or "")[:160],
-        "autor_usuario": str(fila.get("autor_usuario") or "")[:160],
-        "cuerpo": str(fila.get("cuerpo") or "")[:TOPE_CUERPO],
+        "autor_nombre": _texto(fila.get("autor_nombre"), 160),
+        "autor_usuario": _texto(fila.get("autor_usuario"), 160),
+        "cuerpo": _texto(fila.get("cuerpo"), TOPE_CUERPO),
         "creada_en_proveedor": cuando,
         "archivos": crudo_archivos,
     }, None
+
+
+def _texto(crudo, tope):
+    """
+    Texto del proveedor, acotado y sin el unico byte que PostgreSQL no acepta.
+
+    El NUL (0x00) no se puede guardar en una columna de texto de PostgreSQL:
+    llega como DataError, que no es IntegrityError, y sin esto salia un 409 en
+    vez de un rechazo determinista.
+
+    Se QUITA en vez de rechazar el lote, y la diferencia importa: el hilo se
+    reenvia entero cada hora, asi que rechazarlo por un byte de transporte
+    dejaria ese ticket sin sincronizar para siempre, reintentando igual cada
+    vez. Un NUL en el medio de un mensaje no es informacion que alguien
+    escribio; es basura de codificacion.
+
+    El resto de los caracteres de control se guardan tal cual: un salto de
+    linea, una tabulacion o una marca de direccion son cosas que una persona
+    puede haber escrito, y quien renderiza decide como mostrarlas.
+    """
+    return str(crudo or "").replace(chr(0), "")[:tope]
 
 
 def _fecha_del_proveedor(crudo):
@@ -640,22 +668,51 @@ class RespuestasExternasView(APIView):
             limpias.append(datos)
 
         # PASE 2 -- escribir. Se llega aca solo si TODO el lote es valido.
+        #
+        # DOS NIVELES DE TRANSACCION, y los dos hacen falta:
+        #
+        #   el atomic de AFUERA   el lote entero es una unidad. Si algo
+        #                         inesperado revienta en la fila 5 de 8 --un
+        #                         DataError, un corte de conexion-- se
+        #                         deshacen tambien las cuatro anteriores.
+        #                         Validar antes de escribir evita los errores
+        #                         CONOCIDOS; esto cubre los que no se
+        #                         previeron, que son los que importan.
+        #
+        #   el atomic de ADENTRO  un SAVEPOINT por fila. En PostgreSQL un
+        #                         INSERT que viola una restriccion aborta la
+        #                         transaccion entera: sin el savepoint, la
+        #                         primera huella repetida --que es lo NORMAL en
+        #                         cada pasada del reloj-- dejaria la
+        #                         transaccion inutilizable y se perderia el
+        #                         resto del lote.
+        #
+        # Django no tiene ATOMIC_REQUESTS puesto, asi que sin el atomic de
+        # afuera cada create se confirma solo y el lote queda a medias.
         nuevas, repetidas = 0, 0
-        for datos in limpias:
-            try:
-                with transaction.atomic():
-                    RespuestaExterna.objects.create(
-                        org=org, case=caso, provider=proveedor, **datos)
-                nuevas += 1
-            except IntegrityError:
-                # Ya estaba: es lo normal en cada pasada del reloj, no un fallo.
-                # El savepoint de arriba es lo que deja seguir con las demas.
-                #
-                # Gana el primero: la huella sale de fecha+autor+cuerpo, asi que
-                # la misma huella con otro contenido significa que alguien
-                # reescribio algo bajo el mismo sello. Esto es un registro de lo
-                # que se dijo, y no se reescribe.
-                repetidas += 1
+        try:
+            with transaction.atomic():
+                for datos in limpias:
+                    try:
+                        with transaction.atomic():      # savepoint por fila
+                            RespuestaExterna.objects.create(
+                                org=org, case=caso, provider=proveedor, **datos)
+                        nuevas += 1
+                    except IntegrityError:
+                        # Ya estaba: lo normal en cada pasada, no un fallo.
+                        #
+                        # Gana el primero. La huella sale de fecha+autor+cuerpo,
+                        # asi que la misma huella con otro contenido significa
+                        # que alguien reescribio algo bajo el mismo sello. Esto
+                        # es un registro de lo que se dijo, y no se reescribe.
+                        repetidas += 1
+        except DatabaseError as e:
+            # Cualquier otro fallo de base: el atomic de afuera ya deshizo el
+            # lote entero. Se responde con un codigo propio y no con un 500
+            # crudo, para que quien llama sepa que puede reintentar el lote
+            # completo sin revisar que quedo escrito -- no quedo nada.
+            return _error(f"la base rechazo el lote: {type(e).__name__}",
+                          "LOTE_NO_ESCRITO", http.HTTP_409_CONFLICT)
 
         return Response({"nuevas": nuevas, "ya_estaban": repetidas,
                          "total": len(filas)})

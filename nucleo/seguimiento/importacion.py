@@ -143,7 +143,7 @@ def huella_respuesta(fecha: str, autor: str, cuerpo: str) -> str:
     return hashlib.sha256(crudo.encode("utf-8")).hexdigest()[:64]
 
 
-def leer_respuestas(ticket: dict) -> list[dict]:
+def leer_respuestas(ticket: dict, zona=None) -> list[dict]:
     """
     El hilo del ticket, limpio y con su huella.
 
@@ -152,11 +152,8 @@ def leer_respuestas(ticket: dict) -> list[dict]:
     sirve a nadie de este lado. De los archivos, solo cuantos hay: los bytes
     viven alla y traerlos seria copiar adjuntos que nadie pidio.
     """
-    # La zona sale de 'fecha_creacion' DEL MISMO TICKET, igual que en
-    # 'momento_de_cierre': es el mismo sistema y el mismo reloj informando el
-    # mismo registro. Se calcula una vez por ticket y no una por respuesta.
-    zona = _zona_del_ticket(ticket)
-
+    # La zona entra como argumento: la decide quien tiene la config del tenant.
+    # Deducirla aca obligaria a que el nucleo conociera el huso de una empresa.
     salida = []
     for r in (ticket.get("respuestas") or []):
         if not isinstance(r, dict):
@@ -178,21 +175,51 @@ def leer_respuestas(ticket: dict) -> list[dict]:
     return salida
 
 
-def _zona_del_ticket(ticket: dict):
+def zona_del_tenant(config, ticket: dict | None = None):
     """
-    El huso que informa el propio ticket, sacado de 'fecha_creacion'.
+    El huso con el que interpretar una hora local del proveedor.
 
-    Mismo razonamiento que en 'momento_de_cierre': es el mismo sistema y el
-    mismo reloj informando el mismo registro, asi que no hay que suponer nada
-    ni escribir el huso de una empresa en el nucleo. Si el ticket no lo dice,
-    devuelve None y la fecha se descarta.
+    PRIMERO LA ZONA IANA DE LA EMPRESA, y no el offset de otra fecha.
+    ------------------------------------------------------------------
+    La primera version sacaba el huso de 'fecha_creacion' del mismo ticket, con
+    el argumento de que es el mismo sistema informando el mismo registro. Sirve
+    para Colombia y se rompe en cuanto haya un tenant con horario de verano:
+    'fecha_creacion' trae un OFFSET FIJO ('-05:00'), y un offset medido en
+    julio no es el que corre en enero. Copiarlo a una respuesta de otro mes la
+    sella una hora corrida.
+
+    'identidad.zona_horaria' es una zona IANA ('America/Bogota'), ya existe en
+    el esquema de config, es editable por empresa, y ZoneInfo resuelve el
+    offset correcto PARA CADA INSTANTE. Esa es la fuente canonica.
+
+    El ticket queda como respaldo y no como fuente: si la config trae una zona
+    que el sistema no conoce, es preferible el offset del proveedor a no
+    guardar la fecha. Si no hay ninguno de los dos, no se devuelve nada -- un
+    instante sin zona no es un instante.
     """
     from datetime import datetime
 
+    nombre = ""
     try:
-        return datetime.fromisoformat(str(ticket.get("fecha_creacion"))).tzinfo
-    except (ValueError, TypeError):
-        return None
+        nombre = str(getattr(config.identidad, "zona_horaria", "") or "")
+    except AttributeError:
+        nombre = ""
+    if nombre:
+        try:
+            from zoneinfo import ZoneInfo
+
+            return ZoneInfo(nombre)
+        except Exception:                                    # noqa: BLE001
+            # Zona desconocida en esta maquina: se avisa y se cae al respaldo.
+            print(f"[importacion] zona_horaria '{nombre}' no se pudo resolver; "
+                  f"se usa el offset que informa el ticket")
+
+    if ticket is not None:
+        try:
+            return datetime.fromisoformat(str(ticket.get("fecha_creacion"))).tzinfo
+        except (ValueError, TypeError):
+            return None
+    return None
 
 
 def momento_de_respuesta(crudo: str, zona=None):
@@ -801,7 +828,7 @@ def reconciliar(config, casos: list[dict], *, leer_ticket,
         # El hilo viene en el MISMO payload que se acaba de leer para saber el
         # estado. Medido el 10/09/2026: 24 de 25 tickets tienen respuestas, 70
         # en total, asi que esto es la norma y no un caso raro.
-        cambio.respuestas = leer_respuestas(t)
+        cambio.respuestas = leer_respuestas(t, zona_del_tenant(config, t))
         cambios.append(cambio)
 
     return cambios

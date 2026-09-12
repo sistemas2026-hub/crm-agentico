@@ -850,7 +850,11 @@ _RESP = {
          "archivos": [{"url": "x"}, {"url": "y"}]},
     ]
 }
-_hilo = imp.leer_respuestas(_RESP)
+# La zona la decide quien tiene la config del tenant, no el ticket. Aca se
+# arma la de Rapilink, que es lo que hace 'reconciliar' en el camino real.
+from zoneinfo import ZoneInfo                                     # noqa: E402
+_ZONA = ZoneInfo("America/Bogota")
+_hilo = imp.leer_respuestas(_RESP, _ZONA)
 
 revisar(len(_hilo) == 2, "las dos respuestas entran", f"{len(_hilo)}")
 revisar(_hilo[0]["cuerpo"] == "SE VALIDA TICKET",
@@ -875,15 +879,14 @@ revisar(_hilo[0]["creada_en_proveedor"] == "2026-09-10T14:15:50-05:00",
 
 # Sin zona no hay instante. Un ticket que no informa 'fecha_creacion' deja sus
 # respuestas sin fecha, y eso es preferible a sellarlas cinco horas corridas.
-_sin_zona = imp.leer_respuestas({k: v for k, v in _RESP.items()
-                                 if k != "fecha_creacion"})
+_sin_zona = imp.leer_respuestas(_RESP, None)
 revisar(len(_sin_zona) == 2 and all(r["creada_en_proveedor"] is None
                                     for r in _sin_zona),
-        "sin 'fecha_creacion' las respuestas entran pero SIN fecha",
+        "sin huso las respuestas entran pero SIN fecha",
         f"quedaron {[r['creada_en_proveedor'] for r in _sin_zona]}")
 
 # La huella es lo que hace que sincronizar cada hora no duplique.
-_otra_vez = imp.leer_respuestas(_RESP)
+_otra_vez = imp.leer_respuestas(_RESP, _ZONA)
 revisar([r["huella"] for r in _hilo] == [r["huella"] for r in _otra_vez],
         "la misma respuesta da la misma huella en dos lecturas",
         "si no, cada pasada del reloj duplicaria el hilo entero")
@@ -897,7 +900,8 @@ revisar(_editada != _hilo[0]["huella"],
         "limite conocido y aceptado: entra como una segunda respuesta en vez "
         "de sobrescribir, porque esto es el registro de lo que se dijo")
 
-revisar(imp.leer_respuestas({}) == [] and imp.leer_respuestas({"respuestas": []}) == [],
+revisar(imp.leer_respuestas({}, _ZONA) == []
+        and imp.leer_respuestas({"respuestas": []}, _ZONA) == [],
         "un ticket sin hilo no rompe nada")
 from datetime import timedelta, timezone as _tz              # noqa: E402
 _BOGOTA = _tz(timedelta(hours=-5))

@@ -163,3 +163,94 @@ def test_un_lote_rechazado_a_mitad_no_deja_filas(admin_user, org_a, admin_profil
     assert r.status_code == 400, r.content
     assert RespuestaExterna.objects.filter(case=caso).count() == 0, (
         "quedaron filas de un lote rechazado")
+
+
+@pytest.mark.postgres_only
+def test_un_error_de_base_a_mitad_de_la_escritura_no_deja_nada(
+        admin_user, org_a, admin_profile, monkeypatch):
+    """LA PRUEBA QUE LA AUDITORIA PIDIO, y tenia razon en pedirla.
+
+    "Validar todo y despues escribir" evita los errores CONOCIDOS. No evita
+    los que no se previeron: un DataError por un tipo que nadie penso, una
+    conexion que se corta, un trigger nuevo. Sin una transaccion que envuelva
+    el lote entero, la fila 5 que revienta deja las cuatro anteriores
+    confirmadas -- Django NO tiene ATOMIC_REQUESTS puesto, asi que cada create
+    se confirma solo.
+
+    Aca se fuerza exactamente eso: un fallo de base en la quinta fila de ocho,
+    durante la fase de escritura, con las cuatro primeras ya insertadas.
+    """
+    from django.db import DatabaseError
+
+    if connection.vendor != "postgresql":
+        pytest.skip("Exige PostgreSQL real: en SQLite el rollback no se prueba igual")
+
+    caso = _caso(org_a, admin_user)
+    acceso = str(OrgAwareRefreshToken.for_user_and_org(
+        admin_user, org_a, admin_profile).access_token)
+
+    # Se parchea el manager del MODELO y no un nombre del modulo de vistas: la
+    # vista hace 'from cases.models import RespuestaExterna' adentro del metodo,
+    # asi que resuelve la clase en cada llamada y no hay nada que parchear del
+    # otro lado. Es la misma trampa de enlace de imports que ya costo una vez
+    # con 'contexto_del_caso'.
+    real = RespuestaExterna.objects.create
+    llamadas = {"n": 0}
+
+    def revienta_en_la_quinta(*args, **kwargs):
+        llamadas["n"] += 1
+        if llamadas["n"] == 5:
+            raise DatabaseError("fallo simulado de la base en la fila 5")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(RespuestaExterna.objects, "create", revienta_en_la_quinta)
+
+    c = APIClient()
+    c.credentials(HTTP_AUTHORIZATION=f"Bearer {acceso}")
+    r = c.post(f"/api/importacion/casos/{caso.id}/respuestas/", _lote(8),
+               format="json")
+
+    # Se intentaron las cinco primeras: la quinta corto.
+    assert llamadas["n"] == 5, f"se llamo {llamadas['n']} veces"
+
+    # No es un 500 crudo: el llamante recibe un codigo que le dice que puede
+    # reintentar el lote entero sin averiguar que quedo escrito.
+    assert r.status_code == 409, r.content
+    assert r.json()["error"] == "LOTE_NO_ESCRITO", r.content
+
+    # Y lo que importa: CERO filas. Las cuatro que ya habian entrado se
+    # deshicieron con el rollback de la transaccion exterior.
+    assert RespuestaExterna.objects.filter(case=caso).count() == 0, (
+        f"quedaron {RespuestaExterna.objects.filter(case=caso).count()} filas "
+        f"de un lote que fallo a la mitad")
+
+
+@pytest.mark.postgres_only
+def test_los_contadores_son_correctos_con_repetidas_y_nuevas(
+        admin_user, org_a, admin_profile):
+    """'nuevas', 'ya_estaban' y 'total' tienen que cerrar en todos los casos."""
+    if connection.vendor != "postgresql":
+        pytest.skip("Exige PostgreSQL real")
+
+    caso = _caso(org_a, admin_user)
+    acceso = str(OrgAwareRefreshToken.for_user_and_org(
+        admin_user, org_a, admin_profile).access_token)
+    c = APIClient()
+    c.credentials(HTTP_AUTHORIZATION=f"Bearer {acceso}")
+    url = f"/api/importacion/casos/{caso.id}/respuestas/"
+
+    primero = c.post(url, _lote(5), format="json").json()
+    assert primero == {"nuevas": 5, "ya_estaban": 0, "total": 5}
+
+    # El hilo crece: cinco viejas mas tres nuevas.
+    segundo = c.post(url, _lote(8), format="json").json()
+    assert segundo == {"nuevas": 3, "ya_estaban": 5, "total": 8}
+    assert segundo["nuevas"] + segundo["ya_estaban"] == segundo["total"]
+
+    # Y una tanda con la misma huella repetida adentro.
+    una = _lote(1)["respuestas"][0]
+    tercero = c.post(url, {"provider": "wisphub", "respuestas": [una, una]},
+                     format="json").json()
+    assert tercero == {"nuevas": 0, "ya_estaban": 2, "total": 2}
+
+    assert RespuestaExterna.objects.filter(case=caso).count() == 8
