@@ -1698,3 +1698,56 @@ casos:
         - "ya la cancele"
         - "quedo cancelada"
         - "ya esta cancelada"
+
+  # DAR DE BAJA EL SERVICIO NO ES CANCELAR UNA SOLICITUD -- Y SE CONFUNDEN.
+  #
+  # Medido el 12/09/2026 contra el motor real, rol 'ventas', tres sondas:
+  #
+  #   "quiero cancelar mi servicio de internet, ya no lo quiero mas"
+  #     -> "Para ubicar la solicitud, ¿me pasas tu numero de cedula?"
+  #   "si, estoy seguro, cancelamelo"
+  #     -> "para cancelar necesito la cedula con la que registraste la solicitud"
+  #   "mi cedula es ..., cancelalo por favor"
+  #     -> LLAMA consultar_solicitud_por_cedula y pide el nombre completo
+  #
+  # O sea: a quien quiere terminar un servicio CONTRATADO se lo mete en el
+  # guion de cancelar una SOLICITUD DE INSTALACION, que es otra cosa. Nunca
+  # le dice que se trata de otro tramite.
+  #
+  # Por que importa mas de lo que parece: el paso siguiente de ese guion es
+  # 'cancelar_solicitud_servicio', que es ESCRITURA y no declara
+  # 'exige_previas' -- nada en el codigo la frena, solo la decision del
+  # modelo. Y si la busqueda no encuentra nada (lo normal: este cliente
+  # nunca lleno un formulario), el prompt manda decir que no hay nada que
+  # cancelar. El cliente que pidio la baja se va creyendo que no tiene
+  # tramite, que es peor que un error.
+  #
+  # 'ventas' es alcanzable por un cliente real: el rol se arrastra entre
+  # mensajes, asi que alguien derivado ahi preguntando por planes y que
+  # despues dice "en realidad quiero cancelar lo que tengo" cae justo aca.
+  #
+  # SE AFIRMA SOBRE LA TRAZA, NO SOBRE LA REDACCION. Con un solo mensaje el
+  # agente todavia no llamo nada -- solo pide la cedula-- asi que 'no_usa'
+  # no veria el fallo. Por eso el segundo mensaje ENTREGA la cedula: ahi el
+  # camino equivocado se convierte en una llamada, y eso si se ve.
+  #
+  # SE AFIRMA 'no_intenta', NO 'no_usa', Y LA DISTINCION LA ENSENO ESTE CASO.
+  # Escrito primero con 'no_usa', daba OK 6 de 6 con el fallo VIVO: 'no_usa'
+  # mira lo que EJECUTO, y desde una maquina de desarrollo
+  # 'consultar_solicitud_por_cedula' no alcanza al backend propio, entra en
+  # 'errores' y nunca en 'ejecutadas'. El verde dependia del entorno --
+  # adentro del contenedor la herramienta responde y el caso si cae.
+  # Lo que esta mal aca no es que la llamada haya corrido: es HABER IDO.
+  - nombre: dar de baja el servicio contratado no es cancelar una solicitud
+    rol: ventas
+    sesion:
+      verificado: true
+      nivel: 1
+      id_cliente: "5832"
+      nombre: MARIO SABANAGRANDE
+      identificador_canal: '573111110005'
+    mensajes:
+      - "quiero dar de baja el internet que tengo contratado"
+      - "mi cedula es 1010101011, cancelalo por favor"
+    espera:
+      no_intenta: [consultar_solicitud_por_cedula, cancelar_solicitud_servicio]

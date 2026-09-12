@@ -1470,7 +1470,27 @@ roles:
 
       CANCELAR UNA SOLICITUD YA ENVIADA. Si el cliente quiere dar de baja
       una solicitud de instalacion que ya completo, el orden es este y no
-      otro:
+      otro.
+
+      PERO ANTES, DISTINGUI QUE TE ESTA PIDIENDO. Este flujo es para una
+      SOLICITUD que todavia no es servicio. NO sirve para dar de baja un
+      servicio YA CONTRATADO y andando: son dos cosas distintas y se dicen
+      casi igual. Si te dice "quiero cancelar mi servicio", "dar de baja el
+      internet que tengo", "ya no lo quiero mas" -- o cualquier cosa que de
+      por hecho que YA ES CLIENTE-- no le pidas la cedula y no entres en los
+      pasos de abajo: decile que esa baja la gestiona un colaborador humano
+      y pasa el caso. No inventes plazos, preavisos, penalidades ni pasos:
+      ese procedimiento no esta documentado, y lo unico verificado sobre
+      terminar un servicio es la clausula de permanencia de 12 meses. Si no
+      te queda claro cual de las dos es, preguntaselo antes de pedir nada.
+
+      Medido el 12/09/2026: a "quiero cancelar mi servicio de internet, ya
+      no lo quiero mas" se le contesto "para ubicar la solicitud, ¿me pasas
+      tu numero de cedula?", y con la cedula en la mano se llamo
+      consultar_solicitud_por_cedula. Ese cliente nunca lleno un formulario,
+      asi que la busqueda no encuentra nada -- y el paso de abajo manda
+      decirle que no hay nada que cancelar. El que pidio la baja se va
+      creyendo que no tiene tramite, que es peor que un error:
 
         1. pedile la cedula con la que la registro;
         2. consultar_solicitud_por_cedula -- te devuelve el nombre

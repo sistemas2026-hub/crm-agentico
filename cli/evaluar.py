@@ -233,6 +233,29 @@ def correr_caso(config, caso: dict, defaults: dict, prohibido: list[str]) -> dic
         if herr in ejecutadas:
             fallas.append(f"no_usa: ejecuto '{herr}' y no debia")
 
+    # 'no_intenta' es el hermano estricto de 'no_usa', y la diferencia no es
+    # un matiz: mira 'usadas' -- los INTENTOS -- en vez de 'ejecutadas'.
+    #
+    # 'no_usa' afirma "al cliente no le paso nada", y por eso perdona un
+    # intento que una guarda freno. Hay casos donde eso no alcanza, porque lo
+    # que esta mal es HABER IDO: si el agente arranco el guion equivocado, que
+    # la llamada se cayera no lo salva -- en produccion, donde el sistema si
+    # responde, habria seguido.
+    #
+    # Nace de un falso verde medido el 12/09/2026. El caso "dar de baja el
+    # servicio contratado no es cancelar una solicitud" daba OK 6 de 6 con el
+    # fallo VIVO en la traza: el agente llamaba 'consultar_solicitud_por_cedula'
+    # y, desde una maquina de desarrollo, esa herramienta no alcanza al backend
+    # propio (nombre de red del compose), asi que la llamada entra en 'errores'
+    # y nunca en 'ejecutadas'. 'no_usa' no tenia con que verla.
+    #
+    # Lo peor es que el falso verde dependia del ENTORNO: dentro del contenedor
+    # la herramienta responde, entra en 'ejecutadas' y el caso si falla. Una
+    # prueba que dice cosas distintas segun donde corre no sirve para decidir.
+    for herr in espera.get("no_intenta") or []:
+        if herr in usadas:
+            fallas.append(f"no_intenta: intento llamar a '{herr}' y no debia")
+
     # Afirmacion sobre la CONFIGURACION, no sobre la corrida: que este rol no
     # tenga tal herramienta en su catalogo. No cuesta ninguna llamada y es la
     # forma correcta de fijar una decision de diseño (el router enruta, no
