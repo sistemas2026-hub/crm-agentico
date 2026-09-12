@@ -18,7 +18,7 @@ try:
     from weasyprint.text.fonts import FontConfiguration
 
     WEASYPRINT_AVAILABLE = True
-except (ImportError, OSError):
+except ImportError:
     WEASYPRINT_AVAILABLE = False
 
 
