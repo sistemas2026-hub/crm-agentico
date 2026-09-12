@@ -26,6 +26,32 @@ def _set_ctx(value):
         cur.execute("SELECT set_config('app.current_org', %s, false)", [value])
 
 
+def _exigir_rol_que_respeta_rls():
+    """
+    Sin esta guarda, esta prueba MIENTE bajo un rol equivocado.
+
+    Un superusuario de PostgreSQL --o cualquier rol con BYPASSRLS-- evade RLS
+    por completo, asi que la fila SI se ve con el contexto vacio y la
+    afirmacion de abajo falla con 'assert <Estimate: ...> is None'. Eso se lee
+    como "hay una fuga de aislamiento" cuando lo que pasa es "esta prueba no
+    puede comprobar nada aqui". Paso en una auditoria y costo una investigacion
+    entera.
+
+    El docstring del modulo ya lo advertia. Una advertencia en un docstring no
+    es una guarda.
+    """
+    with connection.cursor() as cur:
+        cur.execute("SELECT rolsuper, rolbypassrls FROM pg_roles "
+                    "WHERE rolname = current_user")
+        fila = cur.fetchone()
+    if fila and (fila[0] or fila[1]):
+        pytest.skip(
+            f"El rol actual evade RLS (rolsuper={fila[0]}, "
+            f"rolbypassrls={fila[1]}): esta prueba no puede comprobar "
+            f"aislamiento. Correr con --ds=crm.test_settings_postgres y un "
+            f"DBUSER NOSUPERUSER NOBYPASSRLS.")
+
+
 def test_portal_access_token_table_has_no_rls_policy():
     """The lookup must be readable with an empty context, so it carries no policy."""
     if connection.vendor != "postgresql":
@@ -42,6 +68,7 @@ def test_resolution_reads_estimate_that_empty_context_hides():
     """The full Option-1 chain under a role that actually enforces RLS."""
     if connection.vendor != "postgresql":
         pytest.skip("RLS requires PostgreSQL")
+    _exigir_rol_que_respeta_rls()
 
     # Org is not org-scoped, so it inserts without a context.
     org = Org.objects.create(name="RLS Portal Org")
