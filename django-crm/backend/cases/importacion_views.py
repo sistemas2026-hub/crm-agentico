@@ -470,6 +470,116 @@ CAMPOS_RESPUESTA = frozenset({
 })
 MAX_RESPUESTAS = 200
 
+# La huella es un sha256 en hexadecimal: 64 caracteres, y la columna mide
+# exactamente eso. Sin comprobarlo aca, una huella mas larga llega a PostgreSQL
+# y vuelve como DataError -- que NO es IntegrityError, asi que el 'except' del
+# upsert no lo atrapa y el resultado es un 500.
+LARGO_HUELLA = 64
+
+# Cuanto texto se acepta de una respuesta. El motor ya acota a 800, pero este
+# endpoint es una puerta del CRM y no puede suponer que quien llama sea el
+# motor: sin tope, una respuesta de 50 MB entra y queda. 20.000 deja lugar de
+# sobra para una respuesta larga de verdad y sigue siendo una cota.
+TOPE_CUERPO = 20_000
+
+# 'archivos' es un contador y la columna es PositiveSmallIntegerField.
+MAX_ARCHIVOS = 32_767
+
+
+def _validar_respuesta(fila):
+    """
+    Una fila del hilo, comprobada ANTES de tocar la base.
+
+    Devuelve (datos_limpios, None) o (None, respuesta_de_error).
+
+    Existe porque la version anterior validaba y escribia en la misma vuelta:
+    una fila mala en la posicion 5 de 8 devolvia 400 con las cuatro primeras YA
+    escritas, y desde afuera no habia forma de saber cuantas habian pasado. Y
+    porque todo lo que no se comprobaba aca --una fecha ilegible, un contador
+    que no era un numero, una huella de 500 caracteres-- terminaba en un 500.
+    """
+    if not isinstance(fila, dict):
+        return None, _error("cada respuesta tiene que ser un objeto",
+                            "CAMPO_INVALIDO")
+    sobra = _campos_inesperados(fila, CAMPOS_RESPUESTA)
+    if sobra:
+        return None, _error(f"campos no aceptados: {sobra}", "CAMPO_NO_PERMITIDO")
+
+    huella = str(fila.get("huella") or "").strip()
+    if not huella:
+        return None, _error("cada respuesta necesita su 'huella'",
+                            "CAMPO_REQUERIDO")
+    if len(huella) > LARGO_HUELLA:
+        return None, _error(
+            f"'huella' mide {len(huella)}; el maximo es {LARGO_HUELLA}",
+            "CAMPO_INVALIDO")
+
+    crudo_archivos = fila.get("archivos") or 0
+    if isinstance(crudo_archivos, bool) or not isinstance(crudo_archivos, int):
+        # bool es subclase de int en Python: True pasaria como 1 sin el primer
+        # termino, y "cuantos archivos trae" no es una pregunta de si o no.
+        return None, _error(
+            f"'archivos' tiene que ser un entero, llego {type(crudo_archivos).__name__}",
+            "CAMPO_INVALIDO")
+    if not 0 <= crudo_archivos <= MAX_ARCHIVOS:
+        return None, _error(
+            f"'archivos' fuera de rango: {crudo_archivos}", "CAMPO_INVALIDO")
+
+    cuando, malo = _fecha_del_proveedor(fila.get("creada_en_proveedor"))
+    if malo:
+        return None, malo
+
+    return {
+        "huella": huella,
+        "autor_nombre": str(fila.get("autor_nombre") or "")[:160],
+        "autor_usuario": str(fila.get("autor_usuario") or "")[:160],
+        "cuerpo": str(fila.get("cuerpo") or "")[:TOPE_CUERPO],
+        "creada_en_proveedor": cuando,
+        "archivos": crudo_archivos,
+    }, None
+
+
+def _fecha_del_proveedor(crudo):
+    """
+    La fecha de la respuesta, exigida CON ZONA.
+
+    Devuelve (datetime_o_None, respuesta_de_error_o_None).
+
+    Un instante sin zona no es un instante: guardarlo tal cual lo interpreta
+    como UTC y una respuesta de las 09:34 de Bogota queda archivada como las
+    09:34 de Londres. Eso paso -- medido en produccion el 12/09/2026 sobre dos
+    barridos seguidos -- y el arreglo del lado del motor es mandarla con la
+    zona que informa el propio ticket. Aca se exige, para que no vuelva a
+    entrar por descuido de ningun llamante.
+
+    Ausente es valido: hay respuestas cuyo ticket no informa zona, y la fila se
+    guarda sin fecha antes que con una inventada.
+    """
+    from django.utils.dateparse import parse_datetime
+
+    if crudo in (None, ""):
+        return None, None
+    if not isinstance(crudo, str):
+        return None, _error(
+            f"'creada_en_proveedor' tiene que ser texto ISO, llego "
+            f"{type(crudo).__name__}", "CAMPO_INVALIDO")
+    try:
+        cuando = parse_datetime(crudo)
+    except ValueError:
+        # parse_datetime distingue "no tiene formato de fecha" (devuelve None)
+        # de "tiene el formato pero no existe ese dia" (lanza ValueError).
+        return None, _error(f"'creada_en_proveedor' no es una fecha valida: "
+                            f"{crudo!r}", "CAMPO_INVALIDO")
+    if cuando is None:
+        return None, _error(f"'creada_en_proveedor' no es una fecha valida: "
+                            f"{crudo!r}", "CAMPO_INVALIDO")
+    if cuando.tzinfo is None:
+        return None, _error(
+            f"'creada_en_proveedor' llego sin zona horaria: {crudo!r}. Un "
+            f"instante sin zona se guardaria como UTC y correria la hora.",
+            "FECHA_SIN_ZONA")
+    return cuando, None
+
 
 class RespuestasExternasView(APIView):
     """
@@ -516,33 +626,35 @@ class RespuestasExternasView(APIView):
             return _error(f"demasiadas: {len(filas)} (tope {MAX_RESPUESTAS})",
                           "DEMASIADAS_RESPUESTAS")
 
-        nuevas, repetidas = 0, 0
+        # PASE 1 -- validar el lote entero. Nada toca la base todavia.
+        #
+        # Los dos pases son el contrato: o entra el lote o no entra ninguna.
+        # Con validacion y escritura en la misma vuelta, una fila mala en la
+        # posicion 5 de 8 devolvia 400 con las cuatro primeras ya escritas: el
+        # llamante leia "fallo", reintentaba, y lo escrito quedaba.
+        limpias = []
         for fila in filas:
-            if not isinstance(fila, dict):
-                return _error("cada respuesta tiene que ser un objeto",
-                              "CAMPO_INVALIDO")
-            sobra = _campos_inesperados(fila, CAMPOS_RESPUESTA)
-            if sobra:
-                return _error(f"campos no aceptados: {sobra}",
-                              "CAMPO_NO_PERMITIDO")
-            huella = str(fila.get("huella") or "").strip()
-            if not huella:
-                return _error("cada respuesta necesita su 'huella'",
-                              "CAMPO_REQUERIDO")
+            datos, malo = _validar_respuesta(fila)
+            if malo:
+                return malo
+            limpias.append(datos)
+
+        # PASE 2 -- escribir. Se llega aca solo si TODO el lote es valido.
+        nuevas, repetidas = 0, 0
+        for datos in limpias:
             try:
                 with transaction.atomic():
                     RespuestaExterna.objects.create(
-                        org=org, case=caso, provider=proveedor, huella=huella,
-                        autor_nombre=str(fila.get("autor_nombre") or "")[:160],
-                        autor_usuario=str(fila.get("autor_usuario") or "")[:160],
-                        cuerpo=str(fila.get("cuerpo") or ""),
-                        creada_en_proveedor=fila.get("creada_en_proveedor") or None,
-                        archivos=int(fila.get("archivos") or 0),
-                    )
+                        org=org, case=caso, provider=proveedor, **datos)
                 nuevas += 1
             except IntegrityError:
                 # Ya estaba: es lo normal en cada pasada del reloj, no un fallo.
                 # El savepoint de arriba es lo que deja seguir con las demas.
+                #
+                # Gana el primero: la huella sale de fecha+autor+cuerpo, asi que
+                # la misma huella con otro contenido significa que alguien
+                # reescribio algo bajo el mismo sello. Esto es un registro de lo
+                # que se dijo, y no se reescribe.
                 repetidas += 1
 
         return Response({"nuevas": nuevas, "ya_estaban": repetidas,

@@ -152,6 +152,11 @@ def leer_respuestas(ticket: dict) -> list[dict]:
     sirve a nadie de este lado. De los archivos, solo cuantos hay: los bytes
     viven alla y traerlos seria copiar adjuntos que nadie pidio.
     """
+    # La zona sale de 'fecha_creacion' DEL MISMO TICKET, igual que en
+    # 'momento_de_cierre': es el mismo sistema y el mismo reloj informando el
+    # mismo registro. Se calcula una vez por ticket y no una por respuesta.
+    zona = _zona_del_ticket(ticket)
+
     salida = []
     for r in (ticket.get("respuestas") or []):
         if not isinstance(r, dict):
@@ -167,30 +172,63 @@ def leer_respuestas(ticket: dict) -> list[dict]:
             "autor_nombre": str(autor.get("nombre") or "").strip()[:160],
             "autor_usuario": usuario[:160],
             "cuerpo": cuerpo,
-            "creada_en_proveedor": momento_de_respuesta(fecha),
+            "creada_en_proveedor": momento_de_respuesta(fecha, zona),
             "archivos": len(r.get("archivos") or []),
         })
     return salida
 
 
-def momento_de_respuesta(crudo: str):
+def _zona_del_ticket(ticket: dict):
     """
-    La fecha de una respuesta, en ISO, o None.
+    El huso que informa el propio ticket, sacado de 'fecha_creacion'.
+
+    Mismo razonamiento que en 'momento_de_cierre': es el mismo sistema y el
+    mismo reloj informando el mismo registro, asi que no hay que suponer nada
+    ni escribir el huso de una empresa en el nucleo. Si el ticket no lo dice,
+    devuelve None y la fecha se descarta.
+    """
+    from datetime import datetime
+
+    try:
+        return datetime.fromisoformat(str(ticket.get("fecha_creacion"))).tzinfo
+    except (ValueError, TypeError):
+        return None
+
+
+def momento_de_respuesta(crudo: str, zona=None):
+    """
+    La fecha de una respuesta, en ISO CON ZONA, o None.
 
     Llega como '09/10/2026 14:15:50' -- MM/DD/YYYY y sin zona, el mismo formato
-    de 'fecha_fin' que ya costo cinco horas de diferencia una vez. Se le pone
-    la zona del tenant que informa el resto del ticket... salvo que no la hay
-    en este campo, asi que se devuelve sin zona y quien la muestre decide.
-    Inventarle una seria repetir el error de febrero al reves.
+    de 'fecha_fin' que ya costo cinco horas de diferencia una vez.
+
+    ESTO DEVOLVIA LA FECHA SIN ZONA, Y COSTO LAS MISMAS CINCO HORAS OTRA VEZ.
+    -----------------------------------------------------------------------
+    El comentario que estaba aca decia que se devolvia sin zona a proposito,
+    para que "quien la muestre decida". Nadie decidio: del otro lado hay una
+    columna 'DateTimeField' con USE_TZ=True y TIME_ZONE='UTC', que interpreta
+    lo naive como UTC sin preguntarle a nadie. Una respuesta escrita a las
+    09:34 de Bogota quedaba archivada como las 09:34 de Londres.
+
+    Medido en produccion el 12/09/2026 sobre dos barridos seguidos: el de las
+    09:19 de Bogota dejo la respuesta mas nueva sellada a las 09:19 UTC, y el
+    de las 10:20 a las 10:20 UTC. Dos coincidencias al segundo. Y una respuesta
+    no puede haberse creado cinco horas antes del barrido que fue el primero en
+    verla.
+
+    Delegar una decision a un consumidor que no existe no es prudencia: es
+    dejar que decida el default. Ahora la zona entra como argumento y, sin
+    ella, no se devuelve nada -- un instante sin zona no es un instante.
     """
     from datetime import datetime
 
     crudo = (crudo or "").strip()
-    if not crudo:
+    if not crudo or zona is None:
         return None
     for formato in ("%m/%d/%Y %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
         try:
-            return datetime.strptime(crudo[:19], formato).isoformat()
+            return datetime.strptime(crudo[:19], formato).replace(
+                tzinfo=zona).isoformat()
         except ValueError:
             continue
     return None

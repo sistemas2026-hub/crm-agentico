@@ -834,6 +834,9 @@ revisar(_cuerpo["description"].startswith("Importado de"),
 print("\nel hilo del ticket se trae entero y sin duplicar")
 
 _RESP = {
+    # La zona de las respuestas sale de aca, igual que la de 'fecha_fin'. Es el
+    # mismo ticket informando su propio reloj.
+    "fecha_creacion": "2026-09-10T09:16:37.844072-05:00",
     "respuestas": [
         {"respuesta": "<p>SE VALIDA TICKET</p>",
          "created": "09/10/2026 14:15:50",
@@ -863,10 +866,21 @@ revisar("id" not in _hilo[0],
 revisar(_hilo[1]["archivos"] == 2,
         "de los adjuntos se guarda cuantos hay, no los bytes",
         "los archivos viven alla; copiarlos seria traer adjuntos que nadie pidio")
-revisar(_hilo[0]["creada_en_proveedor"] == "2026-09-10T14:15:50",
-        "la fecha se interpreta como MM/DD/YYYY",
+revisar(_hilo[0]["creada_en_proveedor"] == "2026-09-10T14:15:50-05:00",
+        "la fecha se interpreta como MM/DD/YYYY y sale CON zona",
         f"quedo {_hilo[0]['creada_en_proveedor']!r} -- es el mismo formato de "
-        f"'fecha_fin' que ya costo cinco horas de diferencia una vez")
+        f"'fecha_fin' que ya costo cinco horas de diferencia una vez, y sin "
+        f"zona las vuelve a costar: del otro lado hay una columna con "
+        f"USE_TZ=True que interpreta lo naive como UTC")
+
+# Sin zona no hay instante. Un ticket que no informa 'fecha_creacion' deja sus
+# respuestas sin fecha, y eso es preferible a sellarlas cinco horas corridas.
+_sin_zona = imp.leer_respuestas({k: v for k, v in _RESP.items()
+                                 if k != "fecha_creacion"})
+revisar(len(_sin_zona) == 2 and all(r["creada_en_proveedor"] is None
+                                    for r in _sin_zona),
+        "sin 'fecha_creacion' las respuestas entran pero SIN fecha",
+        f"quedaron {[r['creada_en_proveedor'] for r in _sin_zona]}")
 
 # La huella es lo que hace que sincronizar cada hora no duplique.
 _otra_vez = imp.leer_respuestas(_RESP)
@@ -885,6 +899,30 @@ revisar(_editada != _hilo[0]["huella"],
 
 revisar(imp.leer_respuestas({}) == [] and imp.leer_respuestas({"respuestas": []}) == [],
         "un ticket sin hilo no rompe nada")
-revisar(imp.momento_de_respuesta("") is None
-        and imp.momento_de_respuesta("no es fecha") is None,
+from datetime import timedelta, timezone as _tz              # noqa: E402
+_BOGOTA = _tz(timedelta(hours=-5))
+revisar(imp.momento_de_respuesta("", _BOGOTA) is None
+        and imp.momento_de_respuesta("no es fecha", _BOGOTA) is None,
         "una fecha ilegible devuelve None en vez de inventarse un instante")
+revisar(imp.momento_de_respuesta("09/10/2026 14:15:50", None) is None,
+        "y sin zona tampoco se inventa nada",
+        "un instante sin zona no es un instante")
+
+
+# =============================================================================
+#  EL CIERRE QUE NO ESTABA
+# =============================================================================
+# Este archivo tenia su ultima comprobacion de fallos en la linea 759, y las
+# 131 que seguian --todas las del hilo de respuestas-- corrian sin que nada las
+# hiciera fallar. El archivo salia con codigo 0 con '[FALLA]' impreso en
+# pantalla, que es peor que no tener la prueba: figura en verde.
+#
+# Es la misma leccion que ya esta escrita en CLAUDE.md sobre las pruebas que
+# afirman que un mecanismo EXISTE. Una prueba que no puede fallar no es una
+# prueba, es un comentario que tarda en ejecutarse.
+print()
+if fallos:
+    print(f"[FALLA] {len(fallos)} comprobacion(es) no pasaron.")
+    raise SystemExit(1)
+print("[OK] El caso se lleva del ticket lo que hace falta, y el hilo viaja "
+      "con su huella y su zona.")
