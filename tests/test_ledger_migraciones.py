@@ -82,17 +82,28 @@ def dsn(base=BASE):
             f"password={CLAVE} sslmode=disable")
 
 
-def migrar(*args, carpeta=None, entorno=None):
-    """Corre el migrador como PROCESO. Devuelve (exit, salida)."""
+# TODA la suite corre contra una COPIA del repo, no contra el repo.
+#
+# La compuerta D tiene que EDITAR un archivo ya aplicado para comprobar que el
+# checksum lo detecta. Haciendolo sobre el arbol de trabajo, una corrida que
+# muere entre la edicion y la restauracion deja un archivo historico
+# modificado bajo control de versiones. Sobre una copia, no puede pasar.
+TMP = Path(tempfile.mkdtemp(prefix="ledger-"))
+COPIA = TMP / "repo"
+shutil.copytree(RAIZ / "supabase", COPIA / "supabase")
+shutil.copytree(RAIZ / "cli", COPIA / "cli")
+MIGRADOR = COPIA / "cli" / "migrar_asistente.py"
+
+
+def migrar(*args, entorno=None):
+    """Corre el migrador como PROCESO, sobre la copia. Devuelve (exit, salida)."""
     env = dict(os.environ)
     env.update({"DBHOST": HOST, "DBPORT": PUERTO, "DBNAME": BASE,
                 "DBUSER": USUARIO, "DBPASSWORD": CLAVE})
     if entorno:
         env.update(entorno)
-    r = subprocess.run(
-        [sys.executable, str(RAIZ / "cli" / "migrar_asistente.py"), *args],
-        capture_output=True, text=True, env=env,
-        cwd=str(carpeta or RAIZ))
+    r = subprocess.run([sys.executable, str(MIGRADOR), *args],
+                       capture_output=True, text=True, env=env)
     return r.returncode, (r.stdout or "") + (r.stderr or "")
 
 
@@ -141,7 +152,7 @@ with psycopg.connect(dsn()) as con:
 revisar(hay, "y crean public.organization, que es de lo que dependen los "
              "archivos de supabase/")
 
-N = len(sorted((RAIZ / "supabase").glob("*.sql")))
+N = len(sorted((COPIA / "supabase").glob("*.sql")))
 
 # -----------------------------------------------------------------------------
 titulo("A. base vacia: todo pendiente")
@@ -186,7 +197,7 @@ revisar(codigo == 0, "y --estado termina en 0", f"exit {codigo}")
 # -----------------------------------------------------------------------------
 titulo("D. un archivo editado despues de aplicado")
 # -----------------------------------------------------------------------------
-victima = sorted((RAIZ / "supabase").glob("*.sql"))[-1]
+victima = sorted((COPIA / "supabase").glob("*.sql"))[-1]
 original = io.open(victima, encoding="utf-8").read()
 try:
     io.open(victima, "w", encoding="utf-8").write(
@@ -208,12 +219,7 @@ revisar(codigo == 0, "restaurado el archivo, vuelve a estar todo en orden",
 # -----------------------------------------------------------------------------
 titulo("E. una migracion que falla")
 # -----------------------------------------------------------------------------
-# Se trabaja sobre una COPIA de la carpeta: el repo no se toca.
-tmp = Path(tempfile.mkdtemp(prefix="ledger-"))
-copia = tmp / "repo"
-shutil.copytree(RAIZ / "supabase", copia / "supabase")
-shutil.copytree(RAIZ / "cli", copia / "cli")
-rota = copia / "supabase" / "202699999999_rota.sql"
+rota = COPIA / "supabase" / "202699999999_rota.sql"
 rota.write_text(
     "create table asistente.tabla_que_si_entra (x int);\n"
     "select 1/0;\n", encoding="utf-8")
@@ -221,8 +227,8 @@ rota.write_text(
 env = dict(os.environ)
 env.update({"DBHOST": HOST, "DBPORT": PUERTO, "DBNAME": BASE,
             "DBUSER": USUARIO, "DBPASSWORD": CLAVE})
-r = subprocess.run([sys.executable, str(copia / "cli" / "migrar_asistente.py"),
-                    "--aplicar"], capture_output=True, text=True, env=env)
+r = subprocess.run([sys.executable, str(MIGRADOR), "--aplicar"],
+                   capture_output=True, text=True, env=env)
 salida = (r.stdout or "") + (r.stderr or "")
 revisar(r.returncode == 1, "termina en 1", f"exit {r.returncode}: {salida[-300:]}")
 revisar("DivisionByZero" in salida or "division by zero" in salida,
@@ -243,7 +249,7 @@ revisar(len(anotadas()) == N,
 titulo("F. dos migradores a la vez")
 # -----------------------------------------------------------------------------
 # Un archivo nuevo, lento a proposito, y dos migradores compitiendo por el.
-lento = copia / "supabase" / "202699999998_lento.sql"
+lento = COPIA / "supabase" / "202699999998_lento.sql"
 rota.unlink()
 lento.write_text(
     "create table if not exists asistente.solo_uno (x int);\n"
@@ -255,7 +261,7 @@ cerrojo = threading.Lock()
 
 def competir():
     r = subprocess.run(
-        [sys.executable, str(copia / "cli" / "migrar_asistente.py"),
+        [sys.executable, str(MIGRADOR),
          "--aplicar", "--espera-lock", "20"],
         capture_output=True, text=True, env=env)
     with cerrojo:
@@ -291,11 +297,11 @@ revisar(veces == 1, "y el ledger tiene UNA sola fila para ese archivo",
 # -----------------------------------------------------------------------------
 titulo("G. un archivo nuevo despues de todo")
 # -----------------------------------------------------------------------------
-nuevo = copia / "supabase" / "202699999997_nuevo.sql"
+nuevo = COPIA / "supabase" / "202699999997_nuevo.sql"
 nuevo.write_text("create table if not exists asistente.recien_llegada (x int);\n",
                  encoding="utf-8")
-r = subprocess.run([sys.executable, str(copia / "cli" / "migrar_asistente.py"),
-                    "--aplicar"], capture_output=True, text=True, env=env)
+r = subprocess.run([sys.executable, str(MIGRADOR), "--aplicar"],
+                   capture_output=True, text=True, env=env)
 salida = (r.stdout or "") + (r.stderr or "")
 revisar(r.returncode == 0 and "1 aplicada(s)" in salida,
         "se aplica SOLO el archivo nuevo", f"exit {r.returncode}: {salida[-300:]}")
@@ -335,10 +341,15 @@ led = anotadas()
 revisar(len(led) == presentes,
         f"anota los {presentes} verificados y SOLO esos",
         f"anoto {len(led)}")
-revisar(len(led) < N,
+# Ojo: no se compara contra N. Las compuertas F y G agregaron archivos a la
+# copia, asi que a esta altura hay mas de los 40 del inicio; usar N aca daba un
+# "anoto 41 de 40" que no queria decir nada.
+total_ahora = len(sorted((COPIA / "supabase").glob("*.sql")))
+revisar(len(led) == total_ahora - noverif and noverif > 0,
         f"los {noverif} no verificables quedan sin anotar, esperando una "
         f"decision humana",
-        f"anoto {len(led)} de {N} -- si anotara los {N} estaria adivinando")
+        f"anoto {len(led)} de {total_ahora} con {noverif} no verificables -- "
+        f"anotarlos todos seria adivinar")
 with psycopg.connect(dsn()) as con:
     orig = {f[0] for f in con.execute(
         "select distinct origen from asistente.migraciones_aplicadas").fetchall()}
@@ -353,7 +364,7 @@ revisar(codigo == 1 and f"pendientes            : {noverif}" in salida,
         "despues del baseline quedan pendientes exactamente los no "
         "verificables", salida[:400])
 
-shutil.rmtree(tmp, ignore_errors=True)
+shutil.rmtree(TMP, ignore_errors=True)
 
 print()
 print("=" * 74)
