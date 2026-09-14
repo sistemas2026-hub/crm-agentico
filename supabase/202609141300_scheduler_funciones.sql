@@ -297,6 +297,21 @@ begin
       return;
     end if;
 
+    -- Un turno ya ejecutado para ese slot significa que 'next_run_at' apunta
+    -- hacia atras, y eso solo pasa si alguien lo movio a mano para re-correr
+    -- un turno. No se crea un duplicado --'unique (job_code, organization_id,
+    -- scheduled_slot)' no lo dejaria-- y tampoco se omite en silencio: un
+    -- intento de re-correr un slot tiene que verse.
+    if exists (select 1 from asistente.job_run r
+                where r.job_code = p_job_code
+                  and r.organization_id = p_organization_id
+                  and r.scheduled_slot = v_slot) then
+      raise exception 'el slot % ya tiene un turno: next_run_at apunta hacia atras',
+                      v_slot
+        using hint = 'para re-correr un turno hay que borrar el anterior a '
+                     'proposito, no reprogramar el reloj encima';
+    end if;
+
     -- La config se congela AHORA, y la FK a tenant_config_historial exige que
     -- esa version exista. Si no existe, el turno no arranca.
     select t.config_version, t.config into v_cfg_ver, v_cfg
