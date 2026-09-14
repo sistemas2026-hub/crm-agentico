@@ -167,30 +167,89 @@ y muestra el estado antes y después. No acepta `--force`.
 
 ---
 
+## Drenaje de un intento activo
+
+La propiedad tiene tres estados (`legacy | persistent | disabled`). El drenaje
+**no** es un cuarto estado: es la fase entre `persistent → disabled` y
+`disabled → legacy`, y su final lo decide la base, no un reloj de pared.
+
+1. `persistent → disabled`, siempre permitido. Desde esa transacción
+   `jobs_vencidos` y `job_claim` dejan de devolver el par: ni turnos nuevos ni
+   **reintentos**.
+2. El intento en curso, si hay uno, **termina o vence**. No se lo mata: el
+   ejecutor lo ve en su siguiente comprobación de lease (abajo).
+3. `disabled → legacy` solo se acepta cuando, bajo el `for update` de
+   `job_schedule_state`:
+   - no hay intento con `outcome is null`; **o**
+   - el último `lease_until` venció hace más que el período de gracia
+     (3 × `lease_duracion`), y el intento abierto se cierra en esa misma
+     transacción como `lease_lost`.
+4. Un run que quedó en `retry_wait` al deshabilitar se cierra en esa transacción
+   con el estado terminal nuevo **`cancelado_por_transferencia`** y su evento. Sin
+   esto, el día que el par vuelva a `persistent` se reintentaría un turno viejo
+   contra una grilla que ya siguió de largo.
+
+Tiempo máximo de drenaje declarado: `lease_duracion` + período de gracia. Si se
+excede —ejecutor colgado que sigue latiendo—, la función de transferencia
+informa el intento que lo impide y **no** fuerza nada; la acción siguiente es
+operativa y queda auditada.
+
+## Efectos externos: comprobar antes, aceptar lo que no se puede deshacer
+
+El ejecutor comprueba lease y fencing **antes de cada nuevo efecto externo**
+(cada llamada a WispHub, al CRM o al canal):
+
+```python
+turno.antes_de_efecto("crear_caso")   # job_heartbeat; si devuelve NULL -> LeasePerdido
+proveedor.crear_caso(..., idempotency_key=turno.clave_de_efecto("crear_caso", n))
+```
+
+- Si la comprobación falla, el handler no inicia ese efecto ni los siguientes.
+- `turno.clave_de_efecto` deriva de `job_run.idempotency_key` + nombre del efecto +
+  ordinal. Es estable entre intentos del mismo run.
+
+**Límite declarado, no mitigable desde el scheduler:** una llamada ya enviada no
+se puede cancelar. Entre la comprobación y la respuesta puede vencer el lease; el
+efecto puede quedar hecho y el intento sin registrar, y el reintento lo repetirá.
+Por eso:
+
+- **Ningún handler se cablea sin idempotencia del destino documentada y probada.**
+  `importacion_tickets`: `UNIQUE (org, provider, external_ticket_id)` en
+  `cases_case` hace converger dos creaciones. `cerrar_vencidas`: no la tiene
+  —el texto de cierre aparece dos veces en el ticket del proveedor— y sigue
+  **bloqueado**.
+- Si el destino no acepta clave de idempotencia, el handler consulta el estado
+  del destino antes de escribir, y eso también se documenta como no atómico.
+
+---
+
 ## Rollback
 
-### De código
+En este orden, y sin saltear pasos:
 
-- **Redeploy del digest de imagen anterior compatible.** Cada despliegue
-  registra el digest (`sha256:…`) que corrió; volver atrás es desplegar ese
-  digest, no reconstruir desde un `git revert` improvisado que produce una
-  imagen que nunca se probó.
-- **Compatible** quiere decir: las migraciones de P2 y P5 son *expand-only*.
-  El código anterior no conoce `job_*` ni `job_propiedad` y no las lee; que
-  existan no lo rompe.
-- **Nunca migrate-down automático.** El ledger no tiene "bajar". Una migración
-  ya aplicada es historia.
-
-### De operación
-
-- Primero `job_transferir_propiedad(..., 'legacy', motivo, v)` para cada par en
-  `persistent`: el reloj viejo retoma. Auditado.
-- Las tablas `job_*`, el ledger y toda la historia **permanecen**. Son la
-  evidencia de lo que pasó durante el incidente que motivó el rollback.
+1. **Transferencia auditada** de cada par en `persistent`, con
+   `job_transferir_propiedad`: a `disabled` si solo hay que frenar, o a `legacy`
+   si el reloj viejo debe retomar. Queda registrado quién, cuándo y por qué.
+2. **Drenaje**: esperar que no quede intento activo, o cerrar el vencido según la
+   sección anterior. La transferencia a `legacy` no se acepta antes.
+3. **Redeploy del digest de imagen anterior compatible.** Cada despliegue
+   registra el digest (`sha256:…`) que corrió; volver atrás es desplegar ese
+   digest, no reconstruir desde un `git revert` improvisado que produce una
+   imagen que nunca se probó. *Compatible* quiere decir que las migraciones de P2
+   y P5 son *expand-only*: el código anterior no conoce `job_*` ni
+   `job_propiedad` y no las lee. **Nunca migrate-down automático**: el ledger no
+   tiene "bajar".
+4. **Conservar** tablas, runs, intentos, eventos, propiedad y ledger. Son la
+   evidencia del incidente que motivó el rollback.
 
 ### Lo que NO es rollback
 
 `DROP TABLE`, `DROP FUNCTION` y `DROP ROLE` sobre el scheduler son una
-**desinstalación destructiva**: pierde la historia de turnos, intentos y
-eventos. Es un procedimiento aparte, con autorización propia, que exige
-exportar la historia antes y que no se ejecuta como respuesta a un incidente.
+**desinstalación destructiva**. Es un procedimiento aparte que exige:
+
+- autorización propia, distinta de la del rollback;
+- respaldo verificado de `job_run`, `job_attempt`, `job_run_event`,
+  `job_propiedad` y `job_propiedad_evento` antes de tocar nada;
+- una política de retención escrita que diga cuánto tiempo se guarda ese
+  respaldo y quién puede leerlo;
+- no ejecutarse nunca como respuesta a un incidente.
