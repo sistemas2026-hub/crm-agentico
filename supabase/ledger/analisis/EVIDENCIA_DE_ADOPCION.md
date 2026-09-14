@@ -16,7 +16,7 @@ manifiesto, contra qué servidor y qué se comprobó.
 | que fue una adopción, y de qué tipo | `origen` | igual |
 | motivo | `nota` | igual; **no** se duplica en la evidencia |
 | momento | `aplicada_en` (UTC) | igual |
-| rol PostgreSQL | `por_usuario` (`current_user`) | igual, y `evidencia.operacion.rol_sesion` (`session_user`) y el proceso |
+| rol PostgreSQL y proceso | `por_usuario` (`current_user`) | igual, y `evidencia.operacion`: `rol_sesion` (`session_user`) y `pid`. **No** el nombre de la máquina |
 | quién autorizó | — | `evidencia.autorizacion.declarada_por`; **obligatoria** con `--aceptar` |
 | manifiesto exacto | — (el "manifiesto v1" de la nota es la versión del **formato**, una constante) | `evidencia.manifiesto`: `sha256`, `git_blob`, referencia con su huella |
 | servidor | — | `evidencia.entorno`: `server_version`, `server_version_num`, cada extensión con versión y schema, **medidos en la base adoptada, dentro del lock** |
@@ -73,9 +73,15 @@ Ejemplo de una fila `baseline_humano`, tomado de la base efímera de la prueba
     "declarada_por": "Responsable de pruebas (acta efimera 0001)",
     "naturaleza": "declarada por quien corrio el comando; la herramienta no la autentica"
   },
-  "operacion": {"rol_sesion": "motor", "aplicacion": "migrar_asistente pid=… host=…"}
+  "operacion": {"rol_sesion": "motor", "pid": 12345}
 }
 ```
+
+- **`operacion` no guarda el hostname.** El `application_name` de la sesión lo
+  incluye, y se sigue viendo en `pg_stat_activity` mientras el comando corre,
+  pero no se persiste: un nombre de máquina puede ser el de una persona y no
+  hace falta para reconstruir la decisión. El `pid` solo tiene sentido junto
+  con el momento (`aplicada_en`).
 
 - **`manifiesto.sha256`** se calcula sobre los bytes canónicos del archivo
   **leídos una sola vez**: lo que se identifica es lo que se usó.
@@ -111,7 +117,11 @@ Esto cubre el caso de todas formas.
 | ledger v1 con… | resultado |
 |---|---|
 | solo filas `aplicada` | se actualiza a la versión 3 **sin tocar una fila**: evidencia `null`, que es lo correcto para filas ejecutadas |
-| alguna fila `baseline` o `baseline_humano` | **fail-closed**: 0002 termina con SQLSTATE `LG001` antes de cambiar nada, la transacción se deshace, el lock se suelta y el comando sale con **exit 8** diciendo cuántas filas son. Pasa con `--aplicar`, `--adoptar --escribir-baseline` y `--aceptar`. Los modos de solo lectura siguen funcionando y no actualizan nada |
+| alguna fila `baseline` o `baseline_humano` | **fail-closed**: el paso 0002 termina con SQLSTATE `LG001`, su transacción se deshace entera y 0003 no corre. El lock se suelta y el comando sale con **exit 8**, diciendo cuántas filas son y en qué versión quedó el ledger. Pasa con `--aplicar`, `--adoptar --escribir-baseline` y `--aceptar`. Los modos de solo lectura siguen funcionando y no actualizan nada |
+| **pre-versionado** (sin `migraciones_ledger_esquema`, solo existió en bases efímeras) con alguna fila adoptada | cada paso es su propia transacción: **0001 se aplica y se confirma**, 0002 se niega como arriba y 0003 no corre. El ledger queda en la **versión 1**, que es un estado válido y recuperable por el mismo camino de abajo. Las filas históricas quedan intactas y no se inventa evidencia |
+
+"Fail-closed" describe al paso que se niega, no al comando entero: los pasos
+anteriores de esa misma corrida quedan aplicados, y el mensaje lo dice.
 
 **Por qué no hay otra salida automática:**
 - **Rellenar evidencia** de esas filas sería fabricarla: el servidor, el

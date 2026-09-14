@@ -667,8 +667,10 @@ def _constructor_de_evidencia(con, m, ident, autorizado_por):
     entorno = {"server_version": con.execute("show server_version").fetchone()[0],
                "server_version_num": h["server_version_num"],
                "extensiones": h["extensiones"]}
-    rol, app = con.execute(
-        "select session_user::text, current_setting('application_name')").fetchone()
+    # Sin application_name: lleva el hostname, que puede ser el nombre de una
+    # persona y no hace falta para reconstruir la decision.
+    rol = con.execute("select session_user::text").fetchone()[0]
+    pid = os.getpid()
     autorizacion = None if autorizado_por is None else {
         "declarada_por": autorizado_por.strip(),
         "naturaleza": "declarada por quien corrio el comando; la herramienta no la autentica"}
@@ -687,7 +689,7 @@ def _constructor_de_evidencia(con, m, ident, autorizado_por):
                 "comprobaciones_coincidentes": n,
                 "efectos_sin_comprobacion": entrada["efectos_sin_comprobacion"]},
             "autorizacion": autorizacion,
-            "operacion": {"rol_sesion": rol, "aplicacion": app},
+            "operacion": {"rol_sesion": rol, "pid": pid},
         }, sort_keys=True, ensure_ascii=False)
 
     return evidencia
@@ -820,7 +822,7 @@ def adoptar(con, escribir: bool, espera: float, aceptar: str | None = None,
     except mig.LockNoObtenido as e:
         return mig.informar_lock(e, "No se verifico ni se escribio nada.")
     except mig.LedgerNoActualizable as e:
-        return mig.informar_ledger(e, "No se verifico ni se escribio nada.")
+        return mig.informar_ledger(e, "No se verifico nada ni se escribio ninguna fila de adopcion.")
 
 
 def main(argv=None) -> int:

@@ -79,7 +79,8 @@ ejecutar: un comando normal no hace DROP ni ADD de nada.
   0001  las dos tablas.
   0002  'evidencia' (jsonb) en cada fila adoptada: manifiesto, servidor,
         comprobaciones y quien DECLARO autorizar. Un ledger v1 que ya tiene
-        filas adoptadas no se actualiza (exit 8): no se fabrica evidencia.
+        filas adoptadas no pasa de la version 1 (exit 8): no se fabrica
+        evidencia. Uno pre-versionado recibe 0001 y queda en la version 1.
   0003  solo agregar: UPDATE, DELETE y TRUNCATE sobre las dos tablas fallan
         (SQLSTATE LG002). Contra errores operativos, no contra el owner.
 Detalle: supabase/ledger/analisis/EVIDENCIA_DE_ADOPCION.md.
@@ -95,7 +96,8 @@ Detalle: supabase/ledger/analisis/EVIDENCIA_DE_ADOPCION.md.
   5  HUECO: una migracion pendiente anterior a otra ya anotada
   6  base EXISTENTE sin ledger: hay que adoptarla, no aplicarle migraciones
   7  la huella del servidor (version mayor, extensiones) no es la del manifiesto
-  8  el esquema del ledger no se puede actualizar sin una decision (nada cambio)
+  8  un paso del esquema del ledger se nego: ese paso no cambio nada, los
+     siguientes no corrieron, y el ledger queda en su ultima version valida
 ================================================================================
 """
 
@@ -150,7 +152,12 @@ class LockNoObtenido(RuntimeError):
 
 
 class LedgerNoActualizable(RuntimeError):
-    """Un paso del esquema del ledger se nego (SQLSTATE LG001). No cambio nada."""
+    """
+    Un paso del esquema del ledger se nego (SQLSTATE LG001). Ese paso se deshizo
+    entero; 'version' es donde quedo el ledger, con los pasos anteriores de la
+    misma corrida ya aplicados.
+    """
+    version = 0
 
 
 # -----------------------------------------------------------------------------
@@ -449,6 +456,8 @@ def informar_lock(e: LockNoObtenido, que: str) -> int:
 def informar_ledger(e: LedgerNoActualizable, que: str) -> int:
     print(f"[migrar] EL ESQUEMA DEL LEDGER NO SE PUEDE ACTUALIZAR. {que}", flush=True)
     print(f"    {e}", flush=True)
+    print(f"    El ledger quedo en la version {e.version}, que es valida: el paso que se "
+          f"nego no cambio nada y los siguientes no corrieron.", flush=True)
     return SALIDA_LEDGER
 
 
@@ -477,9 +486,12 @@ def asegurar_ledger(con) -> None:
         except psycopg.Error as e:
             if e.sqlstate != SQLSTATE_LEDGER_NO_ACTUALIZABLE:
                 raise
-            raise LedgerNoActualizable(
-                f"{ruta.name}: {e.diag.message_primary}. {e.diag.message_hint or ''}"
-            ) from None
+            error = LedgerNoActualizable(
+                f"{ruta.name}: {e.diag.message_primary}. {e.diag.message_hint or ''}")
+            # Los pasos ANTERIORES de esta corrida (p. ej. 0001 sobre un ledger
+            # pre-versionado) ya se confirmaron: se informa donde quedo.
+            error.version = version_del_ledger(con)
+            raise error from None
         print(f"[migrar] esquema del ledger -> version {numero} ({ruta.name})",
               flush=True)
 
@@ -560,7 +572,7 @@ def aplicar(con, espera: float, carpeta: Path | None = None) -> int:
     except LockNoObtenido as e:
         return informar_lock(e, "No se aplico nada ni se creo nada.")
     except LedgerNoActualizable as e:
-        return informar_ledger(e, "No se aplico nada.")
+        return informar_ledger(e, "No se aplico ninguna migracion.")
 
 
 def estado(con, carpeta: Path | None = None) -> int:

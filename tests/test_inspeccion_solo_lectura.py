@@ -19,7 +19,9 @@ promete su cabecera:
   2. contra una COPIA de DBNAME (nunca la base original, nunca un host remoto):
      corre entero sin un error y el catalogo queda identico;
   3. contra una base sin 'asistente': cada falta falla sola y llega al final;
-  4. control: en una sesion como la del script, un CREATE TABLE falla.
+  4. control: en una sesion como la del script, un CREATE TABLE falla;
+  5. el privilegio CREATE sobre la base se informa bien en los dos sentidos:
+     'si' para el rol dueño y 'no' para un rol recien creado, sin cambiarlo.
 
 psql corre en un contenedor (IMAGEN_PSQL, por defecto postgres:16): no hace
 falta tenerlo instalado.
@@ -30,6 +32,7 @@ from __future__ import annotations
 
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -134,6 +137,8 @@ else:
     COPIA, VACIA = ORIGEN + "_inspeccion", ORIGEN + "_inspeccion_vacia"
     IMAGEN_PSQL = os.environ.get("IMAGEN_PSQL", "postgres:16")
     SOLO_LECTURA = "-c default_transaction_read_only=on"
+    SONDA = f"inspeccion_sonda_{secrets.token_hex(4)}"
+    CLAVE_SONDA = secrets.token_urlsafe(24)
 
     def conectar(base, **kw):
         return psycopg.connect(host=HOST, port=PUERTO, dbname=base, user=USUARIO,
@@ -158,15 +163,15 @@ else:
                     time.sleep(0.5)
             raise RuntimeError(f"no se pudo recrear {base}")
 
-    def psql(base, entrada, pgoptions=True):
-        env = {**os.environ, "PGPASSWORD": CLAVE}
+    def psql(base, entrada, pgoptions=True, usuario=None, clave=None):
+        env = {**os.environ, "PGPASSWORD": clave or CLAVE}
         env.pop("PGOPTIONS", None)
         if pgoptions:
             env["PGOPTIONS"] = SOLO_LECTURA
         cmd = ["docker", "run", "--rm", "-i", "--add-host=host.docker.internal:host-gateway",
                "-e", "PGPASSWORD", *(["-e", "PGOPTIONS"] if pgoptions else []),
                IMAGEN_PSQL, "psql", "-X", "-h", "host.docker.internal", "-p", PUERTO,
-               "-U", USUARIO, "-d", base, "-f", "-"]
+               "-U", usuario or USUARIO, "-d", base, "-f", "-"]
         r = subprocess.run(cmd, input=entrada, capture_output=True, text=True,
                            encoding="utf-8", env=env, timeout=300)
         return r.returncode, (r.stdout or "") + (r.stderr or "")
@@ -202,6 +207,11 @@ else:
                 f"faltan {[h for h in secciones if h not in salida]}")
         revisar("server_version_num" in salida and "extversion" in salida and "execute_para" in salida,
                 "trae la huella y los EXECUTE por funcion")
+        linea_create = next((l.strip() for l in salida.splitlines() if "CREATE=" in l and "rol_sesion=" in l), "")
+        print(f"       {linea_create}")
+        revisar(linea_create == f"rol_sesion={USUARIO} rol_actual={USUARIO} base={COPIA} CREATE=si",
+                "informa CREATE=si para el rol que corre el script, dueño de la base", linea_create)
+        revisar("rol_con_create_en_base" in salida, "y lista quien tiene CREATE por ACL")
         revisar(consultar(COPIA, FOTO) == antes,
                 "el catalogo de la copia quedo identico (relaciones, funciones, grants, roles, ajustes)")
 
@@ -233,8 +243,26 @@ else:
                 salida[-200:])
         revisar(not consultar(COPIA, "select to_regclass('public.control_escritura') is not null")[0][0],
                 "y la tabla no existe")
+
+        # =====================================================================
+        titulo("5. CREATE sobre la base, con un rol que no lo tiene")
+        # =====================================================================
+        with conectar("postgres", autocommit=True) as con:
+            con.execute(f'create role "{SONDA}" login password \'{CLAVE_SONDA}\'')
+        antes = consultar(COPIA, FOTO)
+        codigo, salida = psql(COPIA, texto, usuario=SONDA, clave=CLAVE_SONDA)
+        linea_create = next((l.strip() for l in salida.splitlines() if "CREATE=" in l and "rol_sesion=" in l), "")
+        print(f"       {linea_create}")
+        revisar(linea_create == f"rol_sesion={SONDA} rol_actual={SONDA} base={COPIA} CREATE=no",
+                "un rol sin el privilegio: CREATE=no", f"exit {codigo}: {linea_create or salida[-300:]}")
+        revisar("== fin" in salida, "y el script llega igual al final: informa, no bloquea")
+        revisar(consultar(COPIA, FOTO) == antes and not consultar(
+                    COPIA, f"select has_database_privilege('{SONDA}', current_database(), 'CREATE')")[0][0],
+                "sin cambiar ningun privilegio")
+        revisar(CLAVE_SONDA not in salida, "la clave del rol no aparece en la salida")
     finally:
         with conectar("postgres", autocommit=True) as con:
+            con.execute(f'drop role if exists "{SONDA}"')
             for base in (COPIA, VACIA):
                 con.execute("select pg_terminate_backend(pid) from pg_stat_activity "
                             "where datname = %s and pid <> pg_backend_pid()", (base,))

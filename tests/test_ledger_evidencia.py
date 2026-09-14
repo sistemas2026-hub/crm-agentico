@@ -22,7 +22,8 @@ despues esa decision no se podia reconstruir. El paso 0002 del esquema agrega
      limite medido: el owner puede desactivar el trigger
   6. ledger v1 -> v3 con el migrador v1 REAL (git archive del commit auditado):
      sin filas adoptadas actualiza sin tocar filas; con filas adoptadas se niega
-     (exit 8) sin cambiar nada; re-adoptar mide la evidencia de nuevo
+     (exit 8) y queda en la version 1; re-adoptar mide la evidencia de nuevo;
+     y uno PRE-versionado con una baseline recibe 0001 y queda en la version 1
   7. cuatro migradores actualizando el mismo ledger v1 a la vez
 ================================================================================
 """
@@ -34,6 +35,7 @@ import io
 import json
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import tarfile
@@ -316,8 +318,9 @@ try:
     revisar(all(e["autorizacion"] is None for _o, e in ev.values()),
             "autorizacion: null, porque no se declaro ninguna")
     op = muestra.get("operacion", {})
-    revisar(op.get("rol_sesion") == USUARIO and str(op.get("aplicacion", "")).startswith("migrar_asistente pid="),
-            "operacion: rol de la sesion y proceso", f"{op}")
+    revisar(set(op) == {"rol_sesion", "pid"} and op.get("rol_sesion") == USUARIO
+            and isinstance(op.get("pid"), int),
+            "operacion: rol de la sesion y pid del proceso, nada mas", f"{op}")
     revisar(len({json.dumps([e["entorno"], e["manifiesto"]], sort_keys=True) for _o, e in ev.values()}) == 1,
             "servidor y manifiesto, medidos una sola vez para toda la adopcion")
 
@@ -364,6 +367,12 @@ try:
                          (SCHEMA_DO,))[0][0]
         revisar(MOTIVO in nota and "motivo" not in e, "el motivo sigue en 'nota' y no se duplica en la evidencia",
                 nota)
+    host = socket.gethostname().lower()
+    persistido = json.dumps(consultar(A, "select archivo, sha256, algoritmo, aplicada_en::text, duro_ms, origen, "
+                                         "por_usuario, nota, evidencia from asistente.migraciones_aplicadas"),
+                            ensure_ascii=False).lower()
+    revisar(len(host) >= 3 and host not in persistido,
+            f"el hostname de esta maquina no aparece en ninguna fila del ledger ({len(evidencias(A))} filas)")
 
     # =========================================================================
     titulo("4. las constraints exigen evidencia aunque no se pase por la CLI")
@@ -487,6 +496,41 @@ try:
     codigo, salida = migrar(V1B, *aceptar, "--autorizado-por", AUTORIZA, "--escribir-baseline")
     revisar(codigo == 0 and evidencias(V1B).get(SCHEMA_DO, (None,))[0] == "baseline_humano",
             "y la aceptacion humana se repite con autorizacion declarada", salida[-200:])
+
+    # Un ledger ANTERIOR al esquema versionado (sin migraciones_ledger_esquema),
+    # con una baseline: 0001 se aplica y confirma, 0002 se niega.
+    V1D = PREFIJO + "_v1d"
+    recrear(V1D, DJANGO)
+    primero = sorted(ARCHIVOS)[0]
+    consultar(V1D, """
+        create schema asistente;
+        create table asistente.migraciones_aplicadas (
+          archivo text primary key, sha256 text not null,
+          aplicada_en timestamptz not null default now(), duro_ms integer not null,
+          origen text not null default 'aplicada', por_usuario text not null default current_user,
+          nota text,
+          constraint ma_sha_hex check (sha256 ~ '^[0-9a-f]{64}$'),
+          constraint ma_origen check (origen in ('aplicada', 'baseline')),
+          constraint ma_duro check (duro_ms >= 0))""")
+    consultar(V1D, "insert into asistente.migraciones_aplicadas (archivo, sha256, duro_ms, origen, nota) "
+                   "values (%s, %s, 0, 'baseline', 'adoptada por la version sin esquema versionado')",
+              (primero, mig.leer_migracion(RAIZ / "supabase" / primero)[1]))
+    LEGADO = ("select archivo, sha256, aplicada_en, duro_ms, origen, por_usuario, nota "
+              "from asistente.migraciones_aplicadas order by archivo")
+    antes = consultar(V1D, LEGADO)
+    revisar(pasos(V1D) == [], "6d. ledger pre-versionado: sin registro de esquema, con una baseline")
+    codigo, salida = migrar(V1D, "--aplicar")
+    revisar(codigo == 8 and "1 fila(s) adoptadas" in salida and "quedo en la version 1" in salida
+            and "Traceback" not in salida,
+            "--aplicar: exit 8, y dice que el ledger quedo en la version 1", f"exit {codigo}: {salida[-400:]}")
+    revisar(pasos(V1D) == [1], "0001 se aplico y quedo confirmado: version 1", f"{pasos(V1D)}")
+    revisar(consultar(V1D, LEGADO) == antes, "la fila historica quedo intacta")
+    revisar(not hay_columna_evidencia(V1D), "0002 no dejo nada: sin columna 'evidencia' ni evidencia inventada")
+    revisar(triggers(V1D) == [] and consultar(V1D, "select to_regnamespace('asistente_ledger') is null")[0][0],
+            "0003 no corrio: sin triggers ni schema 'asistente_ledger'")
+    revisar(consultar(V1D, "select count(*) from pg_locks where locktype = 'advisory' and database = "
+                           "(select oid from pg_database where datname = current_database())")[0][0] == 0,
+            "y el lock quedo liberado")
 
     # =========================================================================
     titulo("7. cuatro migradores actualizando el mismo ledger v1")

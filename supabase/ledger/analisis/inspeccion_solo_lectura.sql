@@ -40,9 +40,22 @@ select current_setting('default_transaction_read_only') = 'on' as solo_lectura \
 \endif
 \set ON_ERROR_STOP off
 
-\echo '== 0. contexto'
+\echo '== 0. contexto, y privilegio CREATE sobre la base'
 select current_database() as base, session_user as rol_sesion,
        current_setting('transaction_read_only') as transaccion_solo_lectura;
+-- El migrador necesita CREATE sobre la base: 'create schema if not exists' lo
+-- exige aunque el schema ya exista (medido), y el paso 0003 crea
+-- 'asistente_ledger'. Solo informa: correrlo con el rol que va a migrar.
+select format('rol_sesion=%s rol_actual=%s base=%s CREATE=%s',
+              session_user, current_user, current_database(),
+              case when has_database_privilege(current_database(), 'CREATE')
+                   then 'si' else 'no' end) as privilegio_create_en_base;
+-- Quien lo tiene por ACL. Un superusuario lo tiene sin figurar en esta lista.
+select case when a.grantee = 0 then 'PUBLIC' else pg_get_userbyid(a.grantee) end as rol_con_create_en_base
+  from pg_database d
+  cross join lateral aclexplode(coalesce(d.datacl, acldefault('d', d.datdba))) a
+ where d.datname = current_database() and a.privilege_type = 'CREATE'
+ order by 1;
 -- La zona horaria por defecto (tomar_caso uso ::date con la de la sesion).
 -- Solo TimeZone: pg_db_role_setting puede guardar secretos en otros parametros.
 select name, setting, source from pg_settings where name = 'TimeZone';
