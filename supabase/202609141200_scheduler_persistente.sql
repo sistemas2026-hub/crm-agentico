@@ -36,11 +36,30 @@
 -- =============================================================================
 
 -- --- la dependencia, comprobada antes de nada -------------------------------
+-- Las DOS firmas que este subsistema usa, por separado. 'digest' calcula los
+-- hashes de config e inputs y el de la capability; 'gen_random_bytes' genera
+-- la capability misma. Comprobar solo una dejaria pasar una instalacion
+-- parcial de pgcrypto y el fallo saldria en el primer claim, de madrugada.
+--
+-- No se usa ASSERT: 'plpgsql.check_asserts' se puede apagar por sesion o por
+-- base, y una guarda que se puede desactivar no es una guarda. RAISE EXCEPTION
+-- no se puede apagar.
 do $$
+declare
+  faltan text[] := array[]::text[];
+  f      text;
 begin
-  if to_regprocedure('ext.digest(text,text)') is null then
+  foreach f in array array['ext.digest(text,text)',
+                           'ext.gen_random_bytes(integer)']
+  loop
+    if to_regprocedure(f) is null then
+      faltan := faltan || f;
+    end if;
+  end loop;
+  if array_length(faltan, 1) is not null then
     raise exception using
-      message = 'Falta ext.digest(text,text): la extension pgcrypto no esta en el schema ext.',
+      message = 'Falta ' || array_to_string(faltan, ' y ')
+                || ': pgcrypto no esta (completo) en el schema ext.',
       hint    = 'Ejecutar como superusuario: CREATE SCHEMA IF NOT EXISTS ext; '
                 'CREATE EXTENSION pgcrypto WITH SCHEMA ext;';
   end if;

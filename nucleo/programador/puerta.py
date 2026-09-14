@@ -91,17 +91,24 @@ def reclamar(cur, job_code: str, organization_id, slot, worker_id: str,
 #  ejecutor
 # -----------------------------------------------------------------------------
 
-def abrir_contexto(cur, attempt_id, capability: str):
+def contexto(cur, run_id, capability: str) -> dict | None:
     """
-    Fija 'app.current_tenant' con la organizacion que salio del claim.
+    El turno entero, LEIDO DE LA BASE. None si el intento ya no es el vigente.
 
-    No es una contencion: 'app.current_tenant' es un GUC USERSET y cualquier
-    rol puede fijarlo. Lo que evita es que el ejecutor ELIJA el tenant -- lo
-    deriva del turno que le tocó.
+    El ejecutor no recibe el turno del coordinador: recibe 'run_id' y la
+    capability, y todo lo demas --job_code, organizacion, slot, la version de
+    config congelada y su contenido, las entradas-- sale de aca. Entre el claim
+    y el arranque pueden pasar minutos, un reinicio o un rescate; lo que
+    quedara en memoria del coordinador puede ser de otro intento.
+
+    Levanta si el historial de config o las entradas ya no coinciden con sus
+    hashes ('HISTORIAL_CONFIG_CORRUPTO', 'INPUTS_CORRUPTOS'). No hay version
+    degradada correcta de "no se contra que tengo que correr".
     """
-    cur.execute("select asistente.job_abrir_contexto(%s,%s) as org",
-                (attempt_id, capability))
-    return cur.fetchone()["org"]
+    cur.execute("select * from asistente.job_contexto(%s,%s)",
+                (run_id, capability))
+    filas = cur.fetchall()
+    return dict(filas[0]) if filas else None
 
 
 def latir(cur, attempt_id, capability: str):

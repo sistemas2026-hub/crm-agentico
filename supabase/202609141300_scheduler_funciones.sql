@@ -37,6 +37,19 @@ begin
 end $$;
 
 -- -----------------------------------------------------------------------------
+--  0b. LO QUE YA NO VA
+-- -----------------------------------------------------------------------------
+-- 'create or replace function' NO borra una funcion que cambio de nombre o de
+-- firma: la deja viva, con su GRANT y su SECURITY DEFINER puestos. Una base ya
+-- migrada se queda con una puerta de mas que no figura en ningun archivo.
+--
+-- Esto no es hipotetico: 'job_abrir_contexto' quedo huerfana al reemplazarse
+-- por 'job_contexto', y una suite entera siguio pasando en verde contra ella
+-- sin que la migracion la declarara. Los DROP explicitos son la unica forma de
+-- que el archivo describa lo que queda en la base.
+drop function if exists asistente.job_abrir_contexto(uuid, text);
+
+-- -----------------------------------------------------------------------------
 --  1. ROLES
 -- -----------------------------------------------------------------------------
 --  asistente_owner        dueño de las tablas job_*. NOLOGIN. Es el rol bajo el
@@ -114,7 +127,10 @@ grant usage on schema asistente to scheduler_coordinator, job_executor, monitor_
 --   * Solo SELECT. El scheduler no escribe configuracion de nadie.
 grant select (organization_id, config_version, config)
   on asistente.tenant_config to asistente_owner;
-grant select (organization_id, config_version)
+-- 'config' tambien en el historial: 'job_contexto' RECALCULA el hash de la
+-- version congelada en cada arranque de intento. Sin la columna no se puede
+-- recalcular, y sin recalcular el hash guardado es un adorno.
+grant select (organization_id, config_version, config)
   on asistente.tenant_config_historial to asistente_owner;
 
 drop policy if exists scheduler_congela on asistente.tenant_config;
@@ -521,9 +537,13 @@ begin
     return null;
   end if;
 
-  select * into v_r from asistente.job_run where id = v_a.run_id;
-  select * into v_s from asistente.job_schedule_state
-   where job_code = v_r.job_code and organization_id = v_r.organization_id;
+  select * into v_r from asistente.job_run r where r.id = v_a.run_id;
+  -- Los alias NO son estilo: 'job_code' y 'organization_id' son tambien
+  -- parametros OUT de esta funcion, y sin calificar la columna plpgsql corta
+  -- con 'column reference is ambiguous'.
+  select * into v_s from asistente.job_schedule_state s
+   where s.job_code = v_r.job_code
+     and s.organization_id = v_r.organization_id;
   if not found
      or v_s.current_run_id is distinct from v_a.run_id
      or v_s.lease_token   is distinct from v_a.lease_token
@@ -667,35 +687,128 @@ end;
 $$;
 
 -- -----------------------------------------------------------------------------
---  9. ABRIR CONTEXTO
+--  9. EL CONTEXTO DEL TURNO  --  lo que el ejecutor sabe, y de donde lo saca
 -- -----------------------------------------------------------------------------
--- Fija 'app.current_tenant' (local a la transaccion) con la organizacion que
--- sale del intento reclamado, y la devuelve.
+-- El ejecutor NO recibe el turno del coordinador. Recibe dos cosas --run_id y
+-- capability-- y todo lo demas sale de aca, leido de las tablas.
 --
--- Esto NO es un control de contencion y no hay que leerlo como tal.
--- 'app.current_tenant' es un GUC de contexto USERSET: cualquier rol puede
--- fijarlo a cualquier valor, y 'revoke set on parameter' no lo restringe
--- --medido en PostgreSQL 16.14. Lo que aporta esta funcion es que el ejecutor
--- no ELIJA el tenant: lo deriva del claim. Un bug de seleccion en el worker
--- deja de ser posible; un worker malicioso no estaba cubierto por nada aca ni
--- antes, y por eso job_executor es un proceso confiable.
-create or replace function asistente.job_abrir_contexto(
-  p_attempt_id uuid,
+-- No es ceremonia. Entre el claim y el arranque del intento pueden pasar
+-- minutos, un reinicio del proceso o un rescate: lo que el coordinador tenia
+-- en memoria puede ser de otro intento. Derivarlo de la base en cada arranque
+-- es la unica forma de que un reintento corra contra la config congelada y no
+-- contra un objeto que sobrevivio en un diccionario.
+--
+-- Y verifica antes de entregar:
+--
+--   HISTORIAL_CONFIG_CORRUPTO  el sha256 de la version historica ya no es el
+--                              que se congelo. Alguien edito una fila del
+--                              historial por debajo. El turno NO arranca.
+--   INPUTS_CORRUPTOS           lo mismo con las entradas del turno.
+--
+-- Las dos son excepciones, no valores de retorno: un turno que no puede
+-- reconstruir contra que corre no tiene una version degradada correcta.
+--
+-- Fija ademas 'app.current_tenant'. Eso NO es contencion: el GUC es USERSET y
+-- cualquier rol puede fijarlo --medido en PostgreSQL 16.14. Lo que aporta es
+-- que el ejecutor no ELIJA el tenant; lo deriva del turno que le tocó.
+create or replace function asistente.job_contexto(
+  p_run_id     uuid,
   p_capability text)
-returns uuid
+returns table (
+  attempt_id      uuid,
+  attempt_number  int,
+  job_code        text,
+  organization_id uuid,
+  scheduled_slot  timestamptz,
+  config_version  int,
+  config_hash     text,
+  config          jsonb,
+  inputs          jsonb,
+  inputs_hash     text,
+  lease_until     timestamptz)
 language plpgsql
 security definer
 set search_path = pg_catalog
 as $$
 declare
-  v_a asistente.job_attempt%rowtype;
+  v_a    asistente.job_attempt%rowtype;
+  v_r    asistente.job_run%rowtype;
+  v_s    asistente.job_schedule_state%rowtype;
+  v_cfg  jsonb;
+  v_hash text;
 begin
-  v_a := asistente.job_intento_vigente(p_attempt_id, p_capability);
+  v_a := asistente.job_intento_vigente_por_capability(p_capability);
   if v_a.id is null then
+    return;
+  end if;
+  -- El run_id que trae el ejecutor tiene que ser el del intento. Si no lo es,
+  -- el ejecutor esta confundido de turno y no se le contesta.
+  if v_a.run_id is distinct from p_run_id then
+    return;
+  end if;
+
+  select * into v_r from asistente.job_run r where r.id = v_a.run_id;
+  -- Los alias NO son estilo: 'job_code' y 'organization_id' son tambien
+  -- parametros OUT de esta funcion, y sin calificar la columna plpgsql corta
+  -- con 'column reference is ambiguous'.
+  select * into v_s from asistente.job_schedule_state s
+   where s.job_code = v_r.job_code
+     and s.organization_id = v_r.organization_id;
+
+  -- la config congelada, leida del historial y RECALCULADA
+  select h.config into v_cfg
+    from asistente.tenant_config_historial h
+   where h.organization_id = v_r.organization_id
+     and h.config_version  = v_r.config_version;
+  if not found then
+    raise exception 'HISTORIAL_CONFIG_CORRUPTO'
+      using detail = format('falta la version %s del historial', v_r.config_version),
+            hint   = 'el turno congelo una version que ya no esta';
+  end if;
+  v_hash := encode(ext.digest(v_cfg::text, 'sha256'), 'hex');
+  if v_hash is distinct from v_r.config_hash then
+    raise exception 'HISTORIAL_CONFIG_CORRUPTO'
+      using detail = format('la version %s cambio bajo el turno',
+                            v_r.config_version),
+            hint   = 'el historial de configuracion es append-only por contrato';
+  end if;
+
+  if encode(ext.digest(v_r.inputs::text, 'sha256'), 'hex')
+     is distinct from v_r.inputs_hash then
+    raise exception 'INPUTS_CORRUPTOS'
+      using detail = 'las entradas del turno ya no coinciden con su hash';
+  end if;
+
+  perform set_config('app.current_tenant', v_r.organization_id::text, true);
+
+  return query
+    select v_a.id, v_a.attempt_number, v_r.job_code, v_r.organization_id,
+           v_r.scheduled_slot, v_r.config_version, v_r.config_hash, v_cfg,
+           v_r.inputs, v_r.inputs_hash, v_s.lease_until;
+end;
+$$;
+
+-- Resolver el intento por la capability sola. Se puede porque
+-- 'ja_cap_unica' la hace unica en toda la tabla: no hay busqueda ambigua.
+create or replace function asistente.job_intento_vigente_por_capability(
+  p_capability text)
+returns asistente.job_attempt
+language plpgsql
+security definer
+set search_path = pg_catalog
+as $$
+declare
+  v_id uuid;
+begin
+  if p_capability is null or length(p_capability) = 0 then
     return null;
   end if;
-  perform set_config('app.current_tenant', v_a.organization_id::text, true);
-  return v_a.organization_id;
+  select id into v_id from asistente.job_attempt
+   where capability_hash = ext.digest(p_capability, 'sha256');
+  if not found then
+    return null;
+  end if;
+  return asistente.job_intento_vigente(v_id, p_capability);
 end;
 $$;
 
@@ -751,7 +864,8 @@ alter function asistente.job_cerrar_turno(uuid, text, timestamptz)       owner t
 alter function asistente.job_intento_vigente(uuid, text)                 owner to asistente_owner;
 alter function asistente.job_heartbeat(uuid, text)                       owner to asistente_owner;
 alter function asistente.job_finalize(uuid, text, text, text)            owner to asistente_owner;
-alter function asistente.job_abrir_contexto(uuid, text)                  owner to asistente_owner;
+alter function asistente.job_contexto(uuid, text)                        owner to asistente_owner;
+alter function asistente.job_intento_vigente_por_capability(text)        owner to asistente_owner;
 alter function asistente.job_salud(timestamptz)                          owner to asistente_owner;
 
 -- 'revoke from public' en cada funcion: sin esto, SECURITY DEFINER las deja
@@ -763,7 +877,8 @@ revoke all on function asistente.job_cerrar_turno(uuid, text, timestamptz)      
 revoke all on function asistente.job_intento_vigente(uuid, text)                   from public;
 revoke all on function asistente.job_heartbeat(uuid, text)                         from public;
 revoke all on function asistente.job_finalize(uuid, text, text, text)              from public;
-revoke all on function asistente.job_abrir_contexto(uuid, text)                    from public;
+revoke all on function asistente.job_contexto(uuid, text)                          from public;
+revoke all on function asistente.job_intento_vigente_por_capability(text)          from public;
 revoke all on function asistente.job_salud(timestamptz)                            from public;
 
 -- El coordinador decide y reclama. No finaliza: no es suyo el resultado.
@@ -777,10 +892,11 @@ grant execute on function asistente.job_claim(text, uuid, timestamptz, text, jso
 grant execute on function asistente.job_heartbeat(uuid, text)      to job_executor;
 grant execute on function asistente.job_finalize(uuid, text, text, text)
   to job_executor;
-grant execute on function asistente.job_abrir_contexto(uuid, text) to job_executor;
+grant execute on function asistente.job_contexto(uuid, text)       to job_executor;
 
 -- El monitor ve numeros. Nada mas.
 grant execute on function asistente.job_salud(timestamptz) to monitor_ro;
 
--- 'job_cerrar_turno' y 'job_intento_vigente' no se otorgan a nadie: son piezas
+-- 'job_cerrar_turno', 'job_intento_vigente' y su variante por capability no
+-- se otorgan a nadie: son piezas
 -- internas. Se llaman desde el cuerpo de las otras, que corren como el dueño.

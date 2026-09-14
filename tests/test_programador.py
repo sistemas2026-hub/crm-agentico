@@ -29,7 +29,8 @@ from pathlib import Path
 RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ))
 
-from nucleo.programador import coordinador, ejecutor, embudo, metricas  # noqa: E402
+from nucleo.programador import (coordinador, ejecutor, embudo,          # noqa: E402
+                                metricas, registro)
 
 fallos: list[str] = []
 
@@ -158,6 +159,47 @@ except ValueError:
                   "(fail-closed, no fail-open)")
 
 # =============================================================================
+titulo("el registro de trabajos es cerrado")
+# =============================================================================
+revisar(dict(registro.registrados()) == {},
+        "P2 no cablea NINGUN trabajo real",
+        f"registrados: {sorted(registro.registrados())}")
+revisar("cerrar_vencidas" not in registro.registrados(),
+        "'cerrar_vencidas' no esta registrado -- y no puede estarlo por config",
+        "no es idempotente: dos pasadas simultaneas dejan el texto de cierre "
+        "dos veces en el ticket del proveedor")
+
+for intruso in ("cerrar_vencidas", "importacion_tickets", "os.system",
+                "nucleo.reloj:una_pasada"):
+    try:
+        registro.registrar_para_prueba(intruso, lambda t: None)
+        revisar(False, f"registrar '{intruso}' desde una prueba se rechaza",
+                "ENTRO -- la puerta de pruebas seria la de produccion")
+    except ValueError:
+        revisar(True, f"registrar '{intruso}' desde una prueba se rechaza")
+
+registro.registrar_para_prueba("prueba_ok", lambda t: {"hizo": "nada"})
+revisar(callable(registro.resolver("prueba_ok")),
+        "un handler con prefijo 'prueba_' si se puede registrar")
+
+for desconocido in ("no_existe", "os.system", "nucleo.reloj:una_pasada",
+                    "../../etc/passwd"):
+    try:
+        registro.resolver(desconocido)
+        revisar(False, f"resolver '{desconocido}' levanta", "DEVOLVIO ALGO")
+    except registro.JobSinImplementacion:
+        revisar(True, f"resolver '{desconocido}' levanta JobSinImplementacion")
+
+try:
+    registro.resolver(lambda t: None)                      # type: ignore[arg-type]
+    revisar(False, "resolver con un callable en vez de un codigo levanta",
+            "DEVOLVIO ALGO -- un callable no puede entrar por la puerta del "
+            "job_code")
+except registro.JobSinImplementacion:
+    revisar(True, "resolver con un callable en vez de un codigo levanta")
+registro.olvidar_pruebas()
+
+# =============================================================================
 #  de aca para abajo hace falta la base
 # =============================================================================
 faltan = [v for v in ("DBHOST", "DBPORT", "DBNAME", "DBUSER", "DBPASSWORD")
@@ -169,7 +211,8 @@ else:
     import psycopg                                               # noqa: E402
     from nucleo.programador import puerta                        # noqa: E402
 
-    JOB = "importacion_tickets"
+    JOB = "prueba_p2"
+    JOB_REAL = "importacion_tickets"
     A = uuid.UUID("00000000-0000-4000-8000-00000000000a")
     B = uuid.UUID("00000000-0000-4000-8000-00000000000b")
 
@@ -221,8 +264,10 @@ else:
             vistos.append(turno)
             return {"hizo": "nada, es una prueba"}
 
+        registro.olvidar_pruebas()
+        registro.registrar_para_prueba(JOB, trabajo_ok)
         reg = metricas.Registro()
-        informe = coordinador.un_tick({JOB: trabajo_ok}, reg)
+        informe = coordinador.un_tick(reg)
 
         revisar(informe["recibidos"] == 2 and informe["alcanzados"] == 2,
                 "los dos turnos vencidos se reclaman y se ejecutan",
@@ -232,15 +277,18 @@ else:
                 and {t.organization_id for t in vistos} == {A, B},
                 "cada trabajo recibio SU organizacion, derivada del claim",
                 f"{[str(t.organization_id) for t in vistos]}")
-        revisar(all(t.config_version == 1 and len(t.config_hash) == 64
-                    for t in vistos),
-                "y la config congelada del turno, no la vigente")
+        revisar(len(vistos) == 2
+                and all(t.config_version == 1 and len(t.config_hash) == 64
+                        and t.config == {} and t.inputs == {}
+                        and len(t.inputs_hash) == 64 for t in vistos),
+                "y la config congelada del turno --contenido, no solo version--",
+                f"{[(t.config_version, t.config) for t in vistos]}")
         revisar(all(t["registrado"] == "succeeded" for t in informe["turnos"]),
                 "los dos quedan registrados como exito",
                 f"{informe['turnos']}")
 
         # El segundo tick no encuentra nada: la grilla ya avanzo.
-        informe2 = coordinador.un_tick({JOB: trabajo_ok}, reg)
+        informe2 = coordinador.un_tick(reg)
         revisar(informe2["recibidos"] == 0,
                 "el tick siguiente no encuentra nada que hacer",
                 f"{informe2} -- si encontrara lo mismo, se estaria "
@@ -255,7 +303,9 @@ else:
                 raise RuntimeError("el proveedor no contesto")
             return {"ok": True}
 
-        informe3 = coordinador.un_tick({JOB: trabajo_roto}, reg)
+        registro.olvidar_pruebas()
+        registro.registrar_para_prueba(JOB, trabajo_roto)
+        informe3 = coordinador.un_tick(reg)
         por_run = {t["run_id"]: t for t in informe3["turnos"]}
         revisar(informe3["alcanzados"] == 2 and informe3["cuadra"],
                 "los dos se reclaman igual", f"{informe3}")
@@ -267,7 +317,8 @@ else:
         titulo("un job que este despliegue no sabe hacer no se reclama")
 
         reiniciar()
-        informe4 = coordinador.un_tick({}, reg)
+        registro.olvidar_pruebas()          # ningun handler: como en produccion
+        informe4 = coordinador.un_tick(reg)
         revisar(informe4["recibidos"] == 2 and informe4["alcanzados"] == 0
                 and informe4["omitidos"].get("job_deshabilitado") == 2
                 and informe4["cuadra"],
@@ -285,14 +336,16 @@ else:
         titulo("un slot ya ejecutado no se vuelve a correr")
 
         reiniciar()
-        coordinador.un_tick({JOB: trabajo_ok}, reg)
+        registro.olvidar_pruebas()
+        registro.registrar_para_prueba(JOB, trabajo_ok)
+        coordinador.un_tick(reg)
         # el turno quedo hecho; ahora se reprograma el reloj HACIA ATRAS, que
         # es lo que haria alguien queriendo repetir el barrido
         con.execute("update asistente.job_schedule_state set next_run_at = "
                     "date_trunc('hour', now()) - interval '1 hour'")
         antes = con.execute("select count(*) as n from asistente.job_run "
                             "where estado='succeeded'").fetchone()[0]
-        informe5 = coordinador.un_tick({JOB: trabajo_ok}, reg)
+        informe5 = coordinador.un_tick(reg)
         despues = con.execute("select count(*) as n from asistente.job_run "
                               "where estado='succeeded'").fetchone()[0]
         revisar(informe5["alcanzados"] == 0

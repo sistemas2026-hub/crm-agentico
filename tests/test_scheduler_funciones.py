@@ -224,16 +224,30 @@ try:
     revisar(h2 is None, "con una capability equivocada, el heartbeat devuelve NULL")
 
     # ---- contexto -----------------------------------------------------------
-    with con.cursor() as cur:
-        cur.execute("select asistente.job_abrir_contexto(%s,%s)",
-                    (c["attempt_id"], c["capability"]))
-        org_ctx = cur.fetchone()[0]
+    with con.cursor(row_factory=dict_row) as cur:
+        cur.execute("select * from asistente.job_contexto(%s,%s)",
+                    (c["run_id"], c["capability"]))
+        ctx = cur.fetchone()
         cur.execute("select current_setting('app.current_tenant', true)")
-        guc = cur.fetchone()[0]
+        guc = cur.fetchone()["current_setting"]
     con.rollback()
-    revisar(org_ctx == A and guc == str(A),
-            "abrir contexto deja app.current_tenant en la organizacion del claim",
-            f"devolvio {org_ctx}, el GUC quedo en {guc}")
+    revisar(ctx is not None and ctx["organization_id"] == A and guc == str(A),
+            "el contexto deja app.current_tenant en la organizacion del turno",
+            f"devolvio {ctx}, el GUC quedo en {guc}")
+    revisar(ctx and ctx["job_code"] == JOB and ctx["config_version"] == 1
+            and ctx["config"] == {} and ctx["inputs"] == {}
+            and ctx["attempt_id"] == c["attempt_id"],
+            "y devuelve el turno entero leido de la base, no del claim",
+            f"{ctx}")
+
+    with con.cursor() as cur:
+        cur.execute("select count(*) from asistente.job_contexto(%s,%s)",
+                    (uuid.uuid4(), c["capability"]))
+        n = cur.fetchone()[0]
+    con.rollback()
+    revisar(n == 0,
+            "con un run_id que no es el del intento, no devuelve nada",
+            "un ejecutor confundido de turno no puede pedir el contexto de otro")
 
     # ---- finalizar ----------------------------------------------------------
     with con.cursor() as cur:

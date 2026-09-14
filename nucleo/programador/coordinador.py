@@ -47,9 +47,8 @@ import socket
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Callable
 
-from nucleo.programador import ejecutor, embudo, metricas, puerta
+from nucleo.programador import ejecutor, embudo, metricas, puerta, registro
 
 # El tick del coordinador NO es el intervalo de los jobs. Es cada cuanto mira
 # si algo vencio. Un job horario con un tick de 60 s arranca, como mucho, 60 s
@@ -88,13 +87,17 @@ def _hasta_el_proximo_borde(ahora: float, tick: int) -> float:
     return tick - resto if resto else float(tick)
 
 
-def un_tick(trabajos: dict[str, Callable[[ejecutor.Turno], dict | None]],
-            reg: metricas.Registro | None = None,
+def un_tick(reg: metricas.Registro | None = None,
             presupuesto: float = PRESUPUESTO_SEGUNDOS,
             tope: int = TOPE_POR_TICK,
             wid: str | None = None) -> dict:
     """
     Una pasada: preguntar, reclamar, ejecutar. Devuelve el informe del embudo.
+
+    NO recibe los trabajos. Antes si --'un_tick({"importacion_tickets": fn})'--
+    y eso convertia al catalogo, que es un dato que edita un operador, en una
+    via para elegir que codigo corre. Ahora los handlers salen de
+    'registro.py', que es un diccionario literal congelado al importar.
 
     No levanta. Un tick que falla es un tick que se informa; el bucle sigue.
     """
@@ -124,11 +127,15 @@ def un_tick(trabajos: dict[str, Callable[[ejecutor.Turno], dict | None]],
             reg.contar("omitidos", motivo="tope_de_tick", job_code=c["job_code"])
             continue
 
-        trabajo = trabajos.get(c["job_code"])
-        if trabajo is None:
+        if not registro.conocido(c["job_code"]):
             # El catalogo declara un job que este despliegue no sabe hacer. No
             # es un error del turno: es un despliegue viejo, o uno nuevo con un
-            # job que todavia no esta en esta imagen. No se reclama.
+            # job que todavia no esta en esta imagen. NO SE RECLAMA -- ni se
+            # abre un intento, ni se consume un reintento.
+            #
+            # Es tambien el bloqueo positivo de 'cerrar_vencidas': aunque
+            # alguien lo agregue al catalogo de produccion, no esta en el
+            # registro y este 'continue' es lo que lo frena.
             emb.omitir("job_deshabilitado")
             reg.contar("omitidos", motivo="sin_implementacion",
                        job_code=c["job_code"])
@@ -154,12 +161,13 @@ def un_tick(trabajos: dict[str, Callable[[ejecutor.Turno], dict | None]],
                        job_code=c["job_code"])
             continue
 
-        claim = dict(claim)
-        claim["job_code"] = c["job_code"]
         emb.alcanzar()
         reg.contar("reclamados", job_code=c["job_code"], motivo=c["motivo"])
 
-        r = ejecutor.ejecutar(claim, trabajo)
+        # Solo dos cosas cruzan la frontera al ejecutor. Todo lo demas lo
+        # vuelve a leer de la base: lo que hay aca en memoria puede ser de
+        # otro intento para cuando el trabajo arranque.
+        r = ejecutor.ejecutar(claim["run_id"], claim["capability"])
         hechos.append(r)
         registrado = r.get("registrado")
         reg.contar("ejecutados", job_code=c["job_code"],
@@ -177,8 +185,7 @@ def un_tick(trabajos: dict[str, Callable[[ejecutor.Turno], dict | None]],
     return informe
 
 
-def correr(trabajos: dict[str, Callable[[ejecutor.Turno], dict | None]],
-           tick: int = TICK_SEGUNDOS, vueltas: int | None = None) -> None:
+def correr(tick: int = TICK_SEGUNDOS, vueltas: int | None = None) -> None:
     """
     El bucle. Duerme hasta el borde, no un intervalo despues de trabajar.
 
@@ -186,14 +193,16 @@ def correr(trabajos: dict[str, Callable[[ejecutor.Turno], dict | None]],
     """
     wid = worker_id()
     reg = metricas.Registro()
-    print(f"[coord] coordinador arriba: {wid}, tick de {tick}s", flush=True)
+    print(f"[coord] coordinador arriba: {wid}, tick de {tick}s, "
+          f"jobs que sabe hacer: {sorted(registro.registrados())}",
+          flush=True)
     hechas = 0
     while vueltas is None or hechas < vueltas:
         espera = _hasta_el_proximo_borde(time.time(), tick)
         time.sleep(espera)
         inicio = datetime.now(timezone.utc)
         try:
-            informe = un_tick(trabajos, reg, wid=wid)
+            informe = un_tick(reg, wid=wid)
         except KeyboardInterrupt:
             raise
         except BaseException as e:                               # noqa: BLE001
