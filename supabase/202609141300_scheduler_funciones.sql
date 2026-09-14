@@ -36,6 +36,57 @@ begin
   end if;
 end $$;
 
+-- =============================================================================
+--  CONTRATO DE LA CAPABILITY  --  efectivo, no el del diseño original
+-- =============================================================================
+--  El diseño aprobado dejaba la generacion del lado del coordinador. No se
+--  pudo sostener: el hash tiene que calcularse donde se guarda, y hacer que
+--  PostgreSQL verifique un valor generado afuera obligaba a que PostgreSQL
+--  conociera el secreto -- circular. Genera PostgreSQL. Queda escrito aca
+--  porque es un apartamiento del diseño, no un detalle de implementacion.
+--
+--  QUIEN LA GENERA   'asistente.job_claim', con ext.gen_random_bytes(32).
+--                    CSPRNG del sistema, 256 bits.
+--  TIPO INTERNO      bytea de 32 bytes, nunca persistido en claro.
+--  CODIFICACION      encode(..., 'hex') -> 64 caracteres [0-9a-f].
+--                    Es la unica forma en que existe fuera de la funcion.
+--  QUE RECIBE EL COORDINADOR
+--                    esos 64 caracteres, UNA vez, como columna 'capability'
+--                    del claim. No se vuelven a emitir por ninguna via: no hay
+--                    funcion que devuelva una capability existente.
+--  QUE PRESENTA EL EJECUTOR
+--                    la misma cadena hex, textual, como segundo argumento de
+--                    job_contexto / job_heartbeat / job_finalize.
+--  QUE SE ALMACENA   ext.digest(<hex>, 'sha256') -> bytea de 32 bytes en
+--                    'job_attempt.capability_hash'. 'ja_cap_len' obliga los 32
+--                    bytes y 'ja_cap_unica' obliga que no se repita.
+--  VIGENCIA          la del INTENTO, no la de un reloj. Deja de valer cuando
+--                    el intento se cierra (outcome deja de ser null), cuando
+--                    el estado cambia de lease_token, o cuando avanza el
+--                    fencing_version. No hay expiracion por tiempo propia: el
+--                    lease es el que tiene tiempo, y vive en el estado.
+--  ROTACION          cada intento genera la suya. Un rescate cierra el intento
+--                    viejo y abre uno nuevo con capability nueva y fencing
+--                    mayor, asi que la anterior queda inerte en el acto.
+--  REVOCACION        no hay revocacion por intentos fallidos, a proposito: un
+--                    contador de fallos revocable con solo conocer el run_id
+--                    es una negacion de servicio con el run_id como munición.
+--  NO SE REGISTRA    ni en job_run_event.datos, ni en los logs, ni en las
+--                    metricas, ni en el repr del objeto Turno que recibe el
+--                    trabajo. Medido en tests/test_p2_compuertas.py, bloque B,
+--                    buscando el hash y cualquier cadena de 64 hex.
+--  LO QUE PROTEGE    la COORDINACION: que un worker zombi no siga escribiendo
+--                    sobre un turno que ya no es suyo. NO protege movimiento
+--                    lateral entre empresas -- job_executor es un proceso
+--                    confiable que opera como app_backend.
+--  LO QUE NO SE AFIRMA
+--                    comparacion en tiempo constante. La comparacion de bytea
+--                    es la normal de PostgreSQL. Con 256 bits de entropia el
+--                    ataque que eso mitigaria no es el que importa, y afirmar
+--                    una propiedad que no se puede demostrar es peor que no
+--                    tenerla.
+-- =============================================================================
+
 -- -----------------------------------------------------------------------------
 --  0b. LO QUE YA NO VA
 -- -----------------------------------------------------------------------------
