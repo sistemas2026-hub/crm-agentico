@@ -335,6 +335,47 @@ def tengo_el_lock(con) -> bool:
         (CLAVE_LOCK,)).fetchone()[0]
 
 
+# -----------------------------------------------------------------------------
+#  gancho de PRUEBA para forzar interleavings
+# -----------------------------------------------------------------------------
+# Las carreras entre dos migradores no se pueden probar confiando en el
+# scheduler del sistema operativo: una corrida observa un orden y el otro queda
+# sin ejercitar. Este gancho deja que una prueba FUERCE el orden.
+#
+# Inerte salvo que se cumplan las dos condiciones:
+#   * MIGRAR_PRUEBA_DIR apunta a un directorio existente, y
+#   * DBHOST es un host local (una variable perdida en produccion no puede
+#     colgar un despliegue).
+# Con eso registra en <dir>/orden.log cada 'espera' y cada 'lock' con el pid, y
+# si ademas MIGRAR_PRUEBA_PAUSA=1, al obtener el lock crea <dir>/pausa_<pid>.dentro
+# y espera a que exista <dir>/pausa_<pid>.seguir (hasta 120 s) antes de seguir.
+
+_HOSTS_DE_PRUEBA = {"localhost", "127.0.0.1", "host.docker.internal"}
+
+
+def _dir_de_prueba() -> Path | None:
+    d = os.environ.get("MIGRAR_PRUEBA_DIR")
+    if not d or os.environ.get("DBHOST") not in _HOSTS_DE_PRUEBA:
+        return None
+    p = Path(d)
+    return p if p.is_dir() else None
+
+
+def _gancho(evento: str) -> None:
+    d = _dir_de_prueba()
+    if d is None:
+        return
+    with open(d / "orden.log", "a", encoding="utf-8") as f:
+        f.write(f"{time.time_ns()} {os.getpid()} {evento}\n")
+    if evento == "lock" and os.environ.get("MIGRAR_PRUEBA_PAUSA") == "1":
+        (d / f"pausa_{os.getpid()}.dentro").write_text("", encoding="utf-8")
+        limite = time.monotonic() + 120
+        while not (d / f"pausa_{os.getpid()}.seguir").exists():
+            if time.monotonic() >= limite:
+                raise RuntimeError("gancho de prueba: nunca llego la señal para seguir")
+            time.sleep(0.02)
+
+
 @contextlib.contextmanager
 def seccion_serializada(con, espera: float):
     """
@@ -354,11 +395,13 @@ def seccion_serializada(con, espera: float):
             print(f"[migrar] el lock lo tiene otro migrador "
                   f"{[(d['pid'], d['aplicacion']) for d in duenos]}. Espero hasta "
                   f"{espera:.0f}s. Yo soy '{nombre_de_aplicacion()}'.", flush=True)
+            _gancho("espera")
             avisado = True
         if time.monotonic() >= limite:
             raise LockNoObtenido(espera, quien_tiene_el_lock(con))
         time.sleep(REINTENTO_LOCK)
     try:
+        _gancho("lock")
         yield
     finally:
         try:
