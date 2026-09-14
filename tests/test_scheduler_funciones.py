@@ -478,6 +478,71 @@ try:
             "el estado de B no se toco", f"{eb}")
 
     # =========================================================================
+    titulo("ocho coordinadores a la vez, un solo claim")
+    # =========================================================================
+    # 'for update skip locked' es la afirmacion; esto es la medicion. Ocho
+    # conexiones distintas llaman a job_claim sobre el MISMO turno en el mismo
+    # instante. Si salieran dos claims, dos workers estarian ejecutando el
+    # mismo barrido contra el mismo proveedor.
+    limpiar(con)
+    slot = programar(con, A)
+
+    import threading
+
+    ganadores: list[dict] = []
+    errores: list[str] = []
+    arranquen = threading.Barrier(8)
+
+    def competir(n):
+        try:
+            c = psycopg.connect(dsn(), row_factory=dict_row)
+            try:
+                arranquen.wait(timeout=10)
+                with c.cursor() as cur:
+                    cur.execute("select * from asistente.job_claim(%s,%s,%s,%s)",
+                                (JOB, A, slot, f"w{n}"))
+                    f = cur.fetchall()
+                c.commit()
+                if f:
+                    ganadores.append(f[0])
+            finally:
+                c.close()
+        except BaseException as exc:                             # noqa: BLE001
+            errores.append(type(exc).__name__)
+
+    hilos = [threading.Thread(target=competir, args=(n,)) for n in range(8)]
+    for h in hilos:
+        h.start()
+    for h in hilos:
+        h.join(timeout=30)
+
+    # Medido con una mutacion: quitando el 'for update skip locked', siete de
+    # las ocho mueren con UniqueViolation contra el UNIQUE del slot. O sea que
+    # la garantia de "un solo turno" la da la CONSTRAINT, no el candado; lo que
+    # aporta el candado es que la carrera se pierda en silencio en vez de a los
+    # gritos. Las dos cosas hacen falta y no son la misma.
+    revisar(not errores,
+            "ninguna de las ocho llamadas reventó: la carrera se pierde limpia",
+            f"{sorted(set(errores))}")
+    revisar(len(ganadores) == 1,
+            "exactamente UNO de los ocho se queda con el turno",
+            f"se lo quedaron {len(ganadores)} -- dos claims son dos workers "
+            f"ejecutando el mismo barrido contra el mismo proveedor")
+
+    with con.cursor(row_factory=dict_row) as cur:
+        cur.execute("select count(*) as n from asistente.job_attempt "
+                    "where run_id in (select id from asistente.job_run "
+                    "where job_code=%s and organization_id=%s)", (JOB, A))
+        n_intentos = cur.fetchone()["n"]
+        cur.execute("select count(*) as n from asistente.job_run "
+                    "where job_code=%s and organization_id=%s", (JOB, A))
+        n_turnos = cur.fetchone()["n"]
+    con.rollback()
+    revisar(n_turnos == 1 and n_intentos == 1,
+            "y en la base quedo un turno con un intento, no ocho",
+            f"turnos={n_turnos} intentos={n_intentos}")
+
+    # =========================================================================
     titulo("los permisos: cada rol hace lo suyo y no lee ni una fila")
     # =========================================================================
     limpiar(con)
