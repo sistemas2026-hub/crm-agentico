@@ -43,7 +43,9 @@ fi
 # con un error de columna inexistente que no se parece en nada a la causa.
 # Paso de verdad el 15/08/2026 -- una columna nueva que llego por pull dejo de
 # persistir el estado de la sesion, y la conversacion se caia al redactar.
-MIGRACIONES=$(git diff --name-only --diff-filter=A ORIG_HEAD HEAD -- 'supabase/*.sql' 2>/dev/null)
+# ':(glob)' porque en un pathspec de git '*' cruza '/': sin eso contaba como
+# migraciones los pasos de supabase/ledger/esquema/ y los scripts de analisis.
+MIGRACIONES=$(git diff --name-only --diff-filter=A ORIG_HEAD HEAD -- ':(glob)supabase/*.sql' 2>/dev/null)
 
 if [ -n "$MIGRACIONES" ]; then
     echo ""

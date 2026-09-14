@@ -1,6 +1,6 @@
 # Inventario de rutas capaces de ejecutar `supabase/*.sql`
 
-> Rama `ledger/cierre-auditoria`. Verificado estáticamente por
+> Ramas `ledger/cierre-auditoria` y `ledger/evidencia`. Verificado estáticamente por
 > `tests/test_rutas_sql.py`, que falla si aparece un módulo nuevo que lea
 > migraciones o si alguno que no sea `cli/migrar_asistente.py` pasa ese texto a
 > `execute()`.
@@ -16,7 +16,8 @@ ledger, checksum, lock y huecos. Todo lo demás lee, delega o se niega.
 |---|---|---|---|---|---|---|
 | `cli/migrar_asistente.py --aplicar` | **sí**: ejecuta cada archivo pendiente y anota su fila | `supabase/*.sql`, orden por nombre; `ledger/` queda afuera | sí | sí (`sha256-utf8-lf-v1`, antes de tocar nada) | sí, una sola sección para todo | sí (exit 5); además base existente sin ledger → exit 6 |
 | `cli/migrar_asistente.py --adoptar --escribir-baseline` | **sí**: solo filas del ledger, **no** ejecuta SQL de migraciones | archivos del manifiesto, pendientes | sí | sí | sí: huella → esquema → plan → verificación → INSERT dentro del lock | no aplica (no ejecuta); sus faltantes quedan como hueco para `--aplicar` |
-| `cli/migrar_asistente.py --adoptar --aceptar A --motivo M --escribir-baseline` | **sí**: una fila `baseline_humano` | un archivo | sí | sí | sí, re-verifica dentro | no aplica |
+| `cli/migrar_asistente.py --adoptar --aceptar A --motivo M --autorizado-por Q --escribir-baseline` | **sí**: una fila `baseline_humano`, con evidencia | un archivo | sí | sí | sí, re-verifica dentro | no aplica |
+| pasos de `supabase/ledger/esquema/` (0001 tablas, 0002 evidencia, 0003 solo agregar) | **sí**: el esquema del ledger, no migraciones | `asegurar_ledger`, dentro de la sección de cualquier escritura; cada paso una vez, anotado | su propio registro (`migraciones_ledger_esquema`) | sí | sí | 0002 se niega (exit 8) sobre un ledger v1 con filas adoptadas |
 | `cli/migrar_asistente.py --estado` | no | igual que `--aplicar` | lee (no lo crea) | sí | no | informa |
 | `cli/migrar_asistente.py --adoptar` (sin escribir) | no | archivos del manifiesto | lee (no lo crea) | sí | no | — |
 | `cli/base_desde_cero.py` | **sí**, en una base **local**: crea/borra la base, pgcrypto y Django; el paso 3 **delega** en `migrar_asistente.aplicar` | lo que decida el migrador | sí (delegado) | sí (delegado) | sí (delegado) | sí (delegado) |
@@ -27,7 +28,9 @@ ledger, checksum, lock y huecos. Todo lo demás lee, delega o se niega.
 
 | ruta | qué hace |
 |---|---|
-| `tests/test_ledger_migraciones.py`, `tests/test_ledger_carreras.py`, `tests/test_rutas_sql.py` | ejecutan migraciones **a través del migrador**, sobre copias del repo y bases efímeras |
+| `tests/test_ledger_migraciones.py`, `tests/test_ledger_carreras.py`, `tests/test_rutas_sql.py`, `tests/test_ledger_orden_forzado.py` | ejecutan migraciones **a través del migrador**, sobre copias del repo y bases efímeras |
+| `tests/test_ledger_evidencia.py` | igual, y además corre el migrador v1 **sacado de git** (`git archive 7c73b5a`) para construir ledgers v1 y probar la actualización |
+| `tests/test_inspeccion_solo_lectura.py` | corre `supabase/ledger/analisis/inspeccion_solo_lectura.sql` con `psql` (en contenedor), con la sesión en solo lectura, contra **copias locales**; se niega si `DBHOST` no es local |
 | `tests/test_bloqueos_en_traza.py`, `test_guias_tv.py`, `test_habilidades.py`, `test_tomar_no_es_resolver.py`, `test_p2_compuertas.py`, `test_ledger_checksum.py` | leen el **texto** de archivos concretos para afirmar sobre su contenido; no ejecutan |
 | `/c/tmp/rearmar_p2.py` (fuera del repo, no versionado) | reaplica los dos SQL de P2 directo sobre la base efímera `test_p2` para las suites de P2. Solo local; no es una ruta del producto |
 
@@ -58,7 +61,8 @@ pueda leer `supabase/`.
 
 | ruta | estado |
 |---|---|
-| `.githooks/post-merge` | **instruía** aplicar migraciones con `psql` a mano. Ya no: remite a `migrar_asistente.py --estado` / `--aplicar` |
+| `.githooks/post-merge` | **instruía** aplicar migraciones con `psql` a mano. Ya no: remite a `migrar_asistente.py --estado` / `--aplicar`. Su lista de "migraciones nuevas" usaba `'supabase/*.sql'`, que en git también alcanza archivos anidados; ahora `':(glob)supabase/*.sql'` |
+| `supabase/ledger/analisis/inspeccion_solo_lectura.sql` | **no es una migración** ni lo lee ningún código. Lo corre a mano, con `psql`, una persona autorizada, contra la base objetivo. Solo `SELECT` y `SET` de solo lectura; la sesión queda en solo lectura desde afuera (`PGOPTIONS`) y desde adentro. Queda fuera de `supabase/*.sql`, así que el migrador y `post-merge` no lo cuentan |
 | `docker-compose.yml` → `docker-entrypoint-initdb.d` | monta `django-crm/docker/postgres/init-rls-user.sql`, **no** `supabase/*.sql`; corre solo al inicializar un volumen vacío del Postgres de desarrollo |
 | `docker-compose.prod.yml`, `Dockerfile`, `django-crm/Dockerfile`, entrypoints | ninguna referencia a `supabase/*.sql` |
 | `django-crm/.github/workflows/tests.yml` | `psql -c` sobre la base de CI de Django; no toca `supabase/` |

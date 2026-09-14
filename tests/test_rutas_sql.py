@@ -264,6 +264,24 @@ post_merge = (RAIZ / ".githooks" / "post-merge").read_text(encoding="utf-8", err
 revisar("cli/migrar_asistente.py --aplicar" in post_merge,
         "y el aviso de post-merge remite al ledger")
 
+
+# El aviso cuenta "migraciones nuevas" con un pathspec de git, y en git '*' cruza
+# '/': 'supabase/*.sql' alcanzaba tambien los pasos del esquema del ledger y el
+# script de inspeccion, que no son migraciones. Se prueba el efecto, listando.
+def listar(spec):
+    return subprocess.run(["git", "ls-files", "--", spec], capture_output=True, text=True,
+                          cwd=str(RAIZ)).stdout.split()
+
+
+spec = next(iter(re.findall(r"--\s+'([^']*supabase[^']*)'", post_merge)), "")
+listados = listar(spec) if spec else []
+anidados = [f for f in listados if not re.fullmatch(r"supabase/[^/]+\.sql", f)]
+revisar(bool(listados) and not anidados,
+        f"el aviso de post-merge cuenta solo migraciones de nivel superior "
+        f"({len(listados)} con {spec!r})", f"alcanza archivos anidados: {anidados[:5]}")
+revisar(any("/" in f[len("supabase/"):] for f in listar("supabase/*.sql")),
+        "control: sin ':(glob)', 'supabase/*.sql' SI alcanza archivos anidados")
+
 inventario = (RAIZ / "supabase" / "ledger" / "analisis" / "INVENTARIO_RUTAS_SQL.md")
 texto_inv = inventario.read_text(encoding="utf-8") if inventario.exists() else ""
 revisar(all(l in texto_inv for l in LECTORES_ESPERADOS | {"cli/base_desde_cero.py"}),
