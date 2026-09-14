@@ -37,19 +37,27 @@ create table if not exists asistente.migraciones_aplicadas (
   -- puede pasar porque el migrador mira una sola carpeta.
   archivo       text        primary key,
 
-  -- SHA-256 del contenido, en hex. Lo que convierte al ledger en algo mas que
-  -- una lista: si el archivo cambia despues de aplicado, el migrador lo ve y
-  -- se detiene. Sin esto, editar una migracion ya corrida no da ningun aviso
-  -- y las bases quedan divergiendo en silencio.
+  -- SHA-256 del contenido CANONICO, en hex. Lo que convierte al ledger en
+  -- algo mas que una lista: si el archivo cambia despues de aplicado, el
+  -- migrador lo ve y se detiene. El contrato exacto del contenido canonico
+  -- esta en cli/migrar_asistente.py y se nombra en 'algoritmo'.
   sha256        text        not null,
+
+  -- Que contrato de hash produjo 'sha256'. Hoy hay uno solo. Existe para que
+  -- un cambio futuro de contrato no convierta cuarenta filas validas en
+  -- cuarenta "archivos que cambiaron".
+  algoritmo     text        not null default 'sha256-utf8-lf-v1',
 
   aplicada_en   timestamptz not null default now(),
   duro_ms       integer     not null,
 
   -- Como llego a estar aca:
-  --   'aplicada'  el migrador la ejecuto
-  --   'baseline'  se adopto una base que ya la tenia, con verificacion de
-  --               objetos y autorizacion humana explicita
+  --   'aplicada'         el migrador la ejecuto
+  --   'baseline'         se adopto una base existente y TODAS las
+  --                      comprobaciones de catalogo de su manifiesto pasaron
+  --   'baseline_humano'  se adopto por aceptacion humana individual, con motivo;
+  --                      es la unica via para migraciones con efectos que el
+  --                      catalogo no puede ver (datos, SQL dinamico)
   origen        text        not null default 'aplicada',
 
   -- Quien la anoto. No es auditoria fuerte --es 'current_user'-- pero al
@@ -61,9 +69,8 @@ create table if not exists asistente.migraciones_aplicadas (
   nota          text,
 
   constraint ma_sha_hex    check (sha256 ~ '^[0-9a-f]{64}$'),
-  constraint ma_origen     check (origen in ('aplicada', 'baseline')),
-  constraint ma_duro       check (duro_ms >= 0),
-  constraint ma_nota_base  check (origen <> 'baseline' or nota is not null)
+  constraint ma_algoritmo  check (algoritmo in ('sha256-utf8-lf-v1')),
+  constraint ma_duro       check (duro_ms >= 0)
 );
 
 comment on table asistente.migraciones_aplicadas is
@@ -72,3 +79,20 @@ comment on table asistente.migraciones_aplicadas is
 
 create index if not exists ma_por_fecha
   on asistente.migraciones_aplicadas (aplicada_en);
+
+-- Ledgers creados antes de que existiera 'algoritmo': la columna se agrega con
+-- el valor por defecto, que es el unico contrato que existio. Correcto porque
+-- el contrato explicito da el mismo hash que la lectura en modo texto para
+-- todo archivo sin BOM ni CR suelto -- y los 40 historicos no tienen ninguno.
+alter table asistente.migraciones_aplicadas
+  add column if not exists algoritmo text not null default 'sha256-utf8-lf-v1';
+
+-- Las dos reglas sobre 'origen' van fuera del CREATE para que CONVERJAN en un
+-- ledger creado por una version anterior de este archivo: 'create table if not
+-- exists' no actualiza un CHECK que ya existe.
+alter table asistente.migraciones_aplicadas drop constraint if exists ma_origen;
+alter table asistente.migraciones_aplicadas add constraint ma_origen
+  check (origen in ('aplicada', 'baseline', 'baseline_humano'));
+alter table asistente.migraciones_aplicadas drop constraint if exists ma_nota_base;
+alter table asistente.migraciones_aplicadas add constraint ma_nota_base
+  check (origen = 'aplicada' or nota is not null);

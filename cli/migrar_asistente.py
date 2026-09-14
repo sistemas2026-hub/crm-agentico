@@ -5,52 +5,95 @@
 ================================================================================
 
     py -3.13 cli/migrar_asistente.py --estado
-    py -3.13 cli/migrar_asistente.py --aplicar
-    py -3.13 cli/migrar_asistente.py --adoptar              (dry-run)
+    py -3.13 cli/migrar_asistente.py --aplicar [--espera-lock SEGUNDOS]
+    py -3.13 cli/migrar_asistente.py --adoptar                (dry-run)
     py -3.13 cli/migrar_asistente.py --adoptar --escribir-baseline
 
 Por que existe
 --------------
 "Aplicar las migraciones" era ejecutar los 40 archivos de 'supabase/', todos,
-siempre. Eso tiene cuatro consecuencias y las cuatro se midieron:
+siempre. Medido: la segunda corrida falla (cinco 'create policy' sin guarda,
+DuplicateObject 42710), un 'grant ... on all functions' de agosto alcanza
+funciones de hoy, nadie sabe que quedo aplicado en una base concreta, y editar
+un archivo ya aplicado no da ningun sintoma.
 
-  1. La SEGUNDA corrida falla. Cinco archivos hacen 'create policy' sin guarda
-     y chocan con DuplicateObject (42710). Un despliegue que solo funciona
-     sobre una base virgen no es un despliegue repetible.
+La respuesta no es volver idempotente cada archivo: es un registro que el
+migrador respete. NINGUN ARCHIVO HISTORICO SE TOCA.
 
-  2. Un 'grant execute on all functions in schema asistente to app_backend'
-     escrito el 11/08/2026 se vuelve a ejecutar hoy, y alcanza funciones que no
-     existian cuando se escribio. Medido: las diez funciones del scheduler
-     quedaban ejecutables por app_backend despues de una segunda pasada.
+================================================================================
+ CONTRATO DEL CHECKSUM  (algoritmo 'sha256-utf8-lf-v1')
+================================================================================
+El hash NO depende de la plataforma ni de la normalizacion implicita de Python.
+Se calcula asi, en este orden, sobre el contenido y nunca sobre la ruta:
 
-  3. Nadie puede decir que quedo aplicado en una base concreta.
+  1. leer los BYTES del archivo, sin decodificar;
+  2. si empieza con EF BB BF (BOM UTF-8)          -> RECHAZO: ContenidoNoCanonico
+  3. decodificar como UTF-8 estricto; si falla     -> RECHAZO: ContenidoNoCanonico
+  4. reemplazar cada secuencia CR LF (0D 0A) por LF (0A);
+  5. si queda algun CR (0D) suelto                 -> RECHAZO: ContenidoNoCanonico
+  6. SHA-256 de esos bytes canonicos, en hex minuscula (64 caracteres).
 
-  4. Editar un archivo ya aplicado no produce ningun sintoma.
+El nombre del archivo NO entra al hash; es la clave primaria del ledger. Mover
+el mismo contenido a otro nombre es otra migracion.
 
-La respuesta NO es volver idempotente cada archivo. Eso arregla el sintoma una
-vez por archivo y deja el problema para el archivo siguiente. La respuesta es
-que haya un registro y que el migrador lo respete.
+Por que asi, medido y no supuesto:
+  * los 40 blobs versionados en git no tienen BOM ni un solo CR;
+  * un checkout en Windows con core.autocrlf=true les pone CRLF a 39 de ellos.
+Sin el paso 4, una base migrada desde un contenedor Linux y verificada desde
+Windows diria que 39 migraciones "cambiaron". El paso 4 es explicito --antes lo
+hacia en silencio el modo texto de Python, que ademas convierte un CR suelto
+en LF sin avisar; eso es lo que el paso 5 impide.
 
-NINGUN ARCHIVO HISTORICO SE TOCA. Los 40 quedan como estan, byte a byte; dejan
-de re-ejecutarse porque el migrador los saltea.
+Lo que se EJECUTA es exactamente el texto canonico: el mismo contenido que se
+hashea. No hay una version para hashear y otra para correr.
 
-Las garantias, una por una
---------------------------
-  orden               por nombre de archivo, que en este repo es la fecha
-  una transaccion     por archivo. Si falla, se deshace ESE archivo y no se
-                      anota; los anteriores quedan aplicados y anotados
-  un solo migrador    advisory lock de sesion sobre una clave fija
-  no reejecuta        lo que esta en el ledger no se vuelve a correr
-  checksum            si el contenido cambio desde que se aplico, se detiene
-                      ANTES de tocar nada
-  bootstrap           crea el schema y el ledger si no estan
+================================================================================
+ CONTRATO DEL LOCK
+================================================================================
+  clave        advisory lock de SESION, bigint fijo 7_242_026_091_400. Escrito a
+               mano: 'hashtext' no esta documentado como estable entre versiones.
+  quien espera cualquier migrador que no lo obtiene al primer intento. Reintenta
+               cada 250 ms.
+  cuanto       '--espera-lock', por defecto 30 s, acotado a [0, 600]. Fuera de
+               ese rango: exit 2, no se conecta.
+  al vencer    exit 3, SIN aplicar nada, informando quien lo tiene: pid del
+               backend, usuario, application_name, desde cuando. Cada migrador
+               se conecta con application_name 'migrar_asistente pid=.. host=..'
+               para que esa identificacion sirva de algo.
+  liberacion   en 'finally', con verificacion del valor que devuelve
+               pg_advisory_unlock. Si el proceso muere --kill, OOM, red-- el
+               lock de sesion lo libera PostgreSQL al cerrarse la conexion.
+  muerte       con una sentencia larga en curso, un backend NO se entera de
+               que su cliente murio hasta que intenta mandarle algo: sin mas,
+               un migrador matado a mitad de un archivo de 10 minutos retiene
+               el lock 10 minutos. La conexion fija
+               client_connection_check_interval=2000, asi que el servidor lo
+               detecta en <= 2 s, aborta la transaccion y suelta el lock.
+               (Se suma a PGOPTIONS, no lo reemplaza.)
 
-Lo que este comando NO hace
----------------------------
-No baja migraciones, no borra nada, no toca produccion sin que se lo pidan con
-un host explicito, y no marca nada como aplicado por su cuenta: adoptar una
-base que ya tiene el esquema exige '--escribir-baseline' y solo escribe lo que
-pudo VERIFICAR contra el catalogo.
+Codigos de salida
+-----------------
+  0  todo en orden (incluido "0 pendientes")
+  1  una migracion fallo: se deshizo entera y no quedo anotada
+  2  checksum distinto en una migracion ya aplicada, o uso invalido
+  3  no se obtuvo el lock dentro de la espera
+  4  un archivo no cumple el contrato canonico (BOM, UTF-8 invalido, CR suelto)
+  5  hay un HUECO: una migracion pendiente anterior a otra ya anotada
+
+================================================================================
+ LOS HUECOS  --  por que '--aplicar' se niega a correr migraciones "del pasado"
+================================================================================
+Un archivo pendiente cuyo nombre ordena ANTES que el ultimo ya anotado no se
+ejecuta. Nunca, sin bandera que lo fuerce. Dos formas de llegar a eso, y las dos
+son peligrosas:
+
+  * alguien agrego una migracion con fecha vieja despues de que otras mas
+    nuevas ya corrieron: aplicarla ahora da un orden distinto al de una base
+    construida desde cero;
+  * una ADOPCION quedo incompleta: las migraciones que no se pudieron verificar
+    --datos, SQL dinamico-- quedan pendientes entre otras ya anotadas. Si
+    '--aplicar' las corriera, re-ejecutaria sobre una base existente justo lo
+    que la adopcion existe para no re-ejecutar.
 ================================================================================
 """
 
@@ -59,9 +102,8 @@ from __future__ import annotations
 import argparse
 import glob
 import hashlib
-import io
 import os
-import re
+import socket
 import sys
 import time
 from pathlib import Path
@@ -75,30 +117,83 @@ import psycopg                                                    # noqa: E402
 CARPETA = RAIZ / "supabase"
 BOOTSTRAP = CARPETA / "ledger" / "bootstrap.sql"
 
-# La clave del advisory lock. Es un numero fijo escrito a mano, no
-# 'hashtext(...)': hashtext no esta documentado como estable entre versiones de
-# PostgreSQL, y una clave que cambia con un upgrade deja de excluir justo
-# cuando hay dos migradores porque alguien esta desplegando durante un upgrade.
+ALGORITMO = "sha256-utf8-lf-v1"
 CLAVE_LOCK = 7_242_026_091_400
+ESPERA_MAXIMA = 600.0
+REINTENTO_LOCK = 0.25
+
+SALIDA_OK, SALIDA_FALLO, SALIDA_CHECKSUM, SALIDA_LOCK, SALIDA_CONTENIDO = 0, 1, 2, 3, 4
+SALIDA_HUECO = 5
 
 
-def sha256(texto: str) -> str:
-    return hashlib.sha256(texto.encode("utf-8")).hexdigest()
+class ContenidoNoCanonico(ValueError):
+    """El archivo no cumple el contrato 'sha256-utf8-lf-v1'."""
 
 
-def archivos() -> list[Path]:
+# -----------------------------------------------------------------------------
+#  el checksum canonico
+# -----------------------------------------------------------------------------
+
+def bytes_canonicos(crudo: bytes, nombre: str = "<bytes>") -> bytes:
+    """Los pasos 2 a 5 del contrato. Levanta ContenidoNoCanonico."""
+    if crudo.startswith(b"\xef\xbb\xbf"):
+        raise ContenidoNoCanonico(
+            f"{nombre}: empieza con BOM UTF-8 (EF BB BF). El contrato exige "
+            f"UTF-8 sin BOM.")
+    try:
+        crudo.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as e:
+        raise ContenidoNoCanonico(
+            f"{nombre}: no es UTF-8 valido (byte {e.start}: "
+            f"{crudo[e.start:e.start + 4].hex()}).") from None
+    canon = crudo.replace(b"\r\n", b"\n")
+    pos = canon.find(b"\r")
+    if pos != -1:
+        linea = canon.count(b"\n", 0, pos) + 1
+        raise ContenidoNoCanonico(
+            f"{nombre}: CR suelto en la linea {linea}. Solo se admiten LF y "
+            f"CRLF; un CR aislado no se normaliza porque no hay forma "
+            f"inequivoca de saber que queria decir.")
+    return canon
+
+
+def huella(crudo: bytes, nombre: str = "<bytes>") -> str:
+    return hashlib.sha256(bytes_canonicos(crudo, nombre)).hexdigest()
+
+
+def leer_migracion(ruta: Path) -> tuple[str, str]:
+    """(texto canonico que se ejecuta, sha256). Levanta ContenidoNoCanonico."""
+    canon = bytes_canonicos(ruta.read_bytes(), ruta.name)
+    return canon.decode("utf-8"), hashlib.sha256(canon).hexdigest()
+
+
+def archivos(carpeta: Path | None = None) -> list[Path]:
     """Los .sql de supabase/, en orden determinista. 'ledger/' queda afuera."""
-    return [Path(p) for p in sorted(glob.glob(str(CARPETA / "*.sql")))]
+    base = carpeta or CARPETA
+    return [Path(p) for p in sorted(glob.glob(str(base / "*.sql")))]
 
 
-def dsn_de_entorno() -> str:
+# -----------------------------------------------------------------------------
+#  conexion
+# -----------------------------------------------------------------------------
+
+def nombre_de_aplicacion() -> str:
+    return f"migrar_asistente pid={os.getpid()} host={socket.gethostname()}"[:63]
+
+
+def conectar() -> psycopg.Connection:
     faltan = [v for v in ("DBHOST", "DBPORT", "DBNAME", "DBUSER", "DBPASSWORD")
               if not os.environ.get(v)]
     if faltan:
         raise SystemExit(f"[migrar] faltan {faltan} en el entorno.")
-    return (f"host={os.environ['DBHOST']} port={os.environ['DBPORT']} "
-            f"dbname={os.environ['DBNAME']} user={os.environ['DBUSER']} "
-            f"password={os.environ['DBPASSWORD']} sslmode=disable")
+    opciones = (os.environ.get("PGOPTIONS", "")
+                + " -c client_connection_check_interval=2000").strip()
+    return psycopg.connect(
+        host=os.environ["DBHOST"], port=os.environ["DBPORT"],
+        dbname=os.environ["DBNAME"], user=os.environ["DBUSER"],
+        password=os.environ["DBPASSWORD"], sslmode="disable",
+        application_name=nombre_de_aplicacion(), options=opciones,
+        autocommit=True)
 
 
 # -----------------------------------------------------------------------------
@@ -106,277 +201,212 @@ def dsn_de_entorno() -> str:
 # -----------------------------------------------------------------------------
 
 def bootstrap(con) -> None:
-    """Crea el schema y la tabla del ledger. Idempotente por construccion."""
-    con.execute(io.open(BOOTSTRAP, encoding="utf-8").read())
+    texto, _ = leer_migracion(BOOTSTRAP)
+    con.execute(texto)
 
 
 def leer_ledger(con) -> dict[str, dict]:
     filas = con.execute(
-        "select archivo, sha256, aplicada_en, origen, por_usuario "
+        "select archivo, sha256, algoritmo, aplicada_en, origen, por_usuario "
         "from asistente.migraciones_aplicadas").fetchall()
-    return {f[0]: {"sha256": f[1], "aplicada_en": f[2], "origen": f[3],
-                   "por_usuario": f[4]} for f in filas}
+    return {f[0]: {"sha256": f[1], "algoritmo": f[2], "aplicada_en": f[3],
+                   "origen": f[4], "por_usuario": f[5]} for f in filas}
 
 
-def plan(con) -> tuple[list[Path], list[tuple[Path, str, str]], dict]:
+def plan(con, carpeta: Path | None = None):
     """
-    Devuelve (pendientes, discrepancias, ledger).
+    (pendientes, discrepancias, invalidos, ledger)
 
-    'discrepancias' son archivos anotados cuyo contenido YA NO coincide con el
-    hash con que se aplicaron. Es un error, no una advertencia: significa que
-    dos bases que dicen tener la misma migracion tienen cosas distintas.
+    pendientes    [(ruta, texto, sha)] sin anotar
+    discrepancias [(ruta, sha_anotado, sha_actual)] ya aplicadas que cambiaron
+    invalidos     [(ruta, mensaje)] que no cumplen el contrato canonico
     """
     anotadas = leer_ledger(con)
-    pendientes, discrepancias = [], []
-    for a in archivos():
-        h = sha256(io.open(a, encoding="utf-8").read())
-        if a.name not in anotadas:
-            pendientes.append(a)
-        elif anotadas[a.name]["sha256"] != h:
-            discrepancias.append((a, anotadas[a.name]["sha256"], h))
-    return pendientes, discrepancias, anotadas
+    pendientes, discrepancias, invalidos = [], [], []
+    for ruta in archivos(carpeta):
+        try:
+            texto, sha = leer_migracion(ruta)
+        except ContenidoNoCanonico as e:
+            invalidos.append((ruta, str(e)))
+            continue
+        fila = anotadas.get(ruta.name)
+        if fila is None:
+            pendientes.append((ruta, texto, sha))
+        elif fila["sha256"] != sha:
+            discrepancias.append((ruta, fila["sha256"], sha))
+    return pendientes, discrepancias, invalidos, anotadas
+
+
+# -----------------------------------------------------------------------------
+#  el lock
+# -----------------------------------------------------------------------------
+
+def quien_tiene_el_lock(con) -> list[dict]:
+    """Los backends que tienen la clave, con lo necesario para encontrarlos."""
+    filas = con.execute(
+        "select a.pid, a.usename, a.application_name, a.client_addr::text, "
+        "       a.backend_start, a.state, a.query_start "
+        "  from pg_locks l join pg_stat_activity a on a.pid = l.pid "
+        " where l.locktype = 'advisory' and l.granted and l.objsubid = 1 "
+        "   and ((l.classid::bigint << 32) | l.objid::bigint) = %s",
+        (CLAVE_LOCK,)).fetchall()
+    return [dict(zip(("pid", "usuario", "aplicacion", "cliente",
+                      "conectado_desde", "estado", "consulta_desde"), f))
+            for f in filas]
+
+
+def tomar_lock(con, espera: float) -> bool:
+    limite = time.monotonic() + espera
+    primera = True
+    while True:
+        if con.execute("select pg_try_advisory_lock(%s)", (CLAVE_LOCK,)
+                       ).fetchone()[0]:
+            return True
+        if primera:
+            duenos = quien_tiene_el_lock(con)
+            print(f"[migrar] el lock lo tiene otro migrador "
+                  f"{[(d['pid'], d['aplicacion']) for d in duenos]}. "
+                  f"Espero hasta {espera:.0f}s. Yo soy '{nombre_de_aplicacion()}'.",
+                  flush=True)
+            primera = False
+        if time.monotonic() >= limite:
+            return False
+        time.sleep(REINTENTO_LOCK)
+
+
+def soltar_lock(con) -> None:
+    try:
+        soltado = con.execute("select pg_advisory_unlock(%s)", (CLAVE_LOCK,)
+                              ).fetchone()[0]
+        if not soltado:
+            print("[migrar] AVISO: pg_advisory_unlock devolvio false -- el lock "
+                  "no estaba tomado por esta sesion.", flush=True)
+    except psycopg.Error as e:
+        # Si la conexion ya se cayo, PostgreSQL libero el lock de sesion al
+        # cerrarla. No hay nada mas que hacer, pero se dice.
+        print(f"[migrar] no se pudo soltar el lock explicitamente "
+              f"({type(e).__name__}); se libera al cerrarse la conexion.",
+              flush=True)
 
 
 # -----------------------------------------------------------------------------
 #  aplicar
 # -----------------------------------------------------------------------------
 
-def aplicar(con, espera_lock: float) -> int:
-    # El lock se toma ANTES de leer el plan: leer sin lock y aplicar despues
-    # es exactamente la carrera que el lock existe para impedir.
-    tomado = con.execute("select pg_try_advisory_lock(%s) as ok",
-                         (CLAVE_LOCK,)).fetchone()[0]
-    if not tomado:
-        print(f"[migrar] otro migrador tiene el lock. Esperando hasta "
-              f"{espera_lock:.0f}s y despues verifico el resultado.")
-        limite = time.monotonic() + espera_lock
-        while time.monotonic() < limite:
-            time.sleep(0.2)
-            tomado = con.execute("select pg_try_advisory_lock(%s) as ok",
-                                 (CLAVE_LOCK,)).fetchone()[0]
-            if tomado:
-                break
-        if not tomado:
-            print("[migrar] el otro migrador sigue trabajando. No aplico nada.")
-            return 3
+def aplicar(con, espera: float, carpeta: Path | None = None) -> int:
+    if not tomar_lock(con, espera):
+        duenos = quien_tiene_el_lock(con)
+        print(f"[migrar] NO se obtuvo el lock en {espera:.0f}s. No se aplico "
+              f"nada.", flush=True)
+        for d in duenos:
+            print(f"    lo tiene: pid={d['pid']} usuario={d['usuario']} "
+                  f"aplicacion='{d['aplicacion']}' cliente={d['cliente']} "
+                  f"conectado_desde={d['conectado_desde']} "
+                  f"estado={d['estado']}", flush=True)
+        if not duenos:
+            print("    (el dueño solto el lock justo al vencer la espera: "
+                  "reintentar)", flush=True)
+        return SALIDA_LOCK
 
     try:
-        pendientes, discrepancias, _ = plan(con)
+        pendientes, discrepancias, invalidos, anotadas = plan(con, carpeta)
+
+        if invalidos:
+            print("[migrar] HAY ARCHIVOS QUE NO CUMPLEN EL CONTRATO CANONICO. "
+                  "No se aplica nada.", flush=True)
+            for ruta, msg in invalidos:
+                print(f"    {msg}", flush=True)
+            return SALIDA_CONTENIDO
 
         if discrepancias:
-            # Antes de tocar NADA. Un archivo que cambio despues de aplicado
-            # significa que esta base y otra que corrio 'la misma' migracion
-            # tienen cosas distintas, y no hay forma automatica de saber cual
-            # es la buena.
             print("[migrar] HAY ARCHIVOS APLICADOS QUE CAMBIARON. No se "
-                  "aplica nada.")
-            for a, viejo, nuevo in discrepancias:
-                print(f"    {a.name}")
-                print(f"        anotado: {viejo}")
-                print(f"        ahora:   {nuevo}")
+                  "aplica nada.", flush=True)
+            for ruta, viejo, nuevo in discrepancias:
+                print(f"    {ruta.name}\n        anotado: {viejo}\n"
+                      f"        ahora:   {nuevo}", flush=True)
             print("  Una migracion ya aplicada es historia, no un archivo "
                   "editable. Si el cambio es correcto, va en una migracion "
-                  "nueva.")
-            return 2
+                  "nueva.", flush=True)
+            return SALIDA_CHECKSUM
 
         if not pendientes:
-            print("[migrar] 0 migraciones pendientes.")
-            return 0
+            print("[migrar] 0 migraciones pendientes.", flush=True)
+            return SALIDA_OK
 
-        print(f"[migrar] {len(pendientes)} pendiente(s):")
-        for a in pendientes:
-            texto = io.open(a, encoding="utf-8").read()
-            h = sha256(texto)
+        huecos_ = huecos(pendientes, anotadas)
+        if huecos_:
+            print("[migrar] HAY MIGRACIONES PENDIENTES ANTERIORES A OTRAS YA "
+                  "ANOTADAS. No se aplica nada.", flush=True)
+            for ruta in huecos_:
+                print(f"    {ruta.name}", flush=True)
+            print(f"  ultima anotada: {max(anotadas)}. Ver 'LOS HUECOS' en el "
+                  f"docstring: se resuelven con --adoptar, no con --aplicar.",
+                  flush=True)
+            return SALIDA_HUECO
+
+        print(f"[migrar] {len(pendientes)} pendiente(s):", flush=True)
+        for ruta, texto, sha in pendientes:
             t0 = time.monotonic()
             try:
-                # Una transaccion por archivo: si revienta, se deshace ESTE y
-                # los anteriores quedan aplicados y anotados.
                 with con.transaction():
                     con.execute(texto)
                     con.execute(
                         "insert into asistente.migraciones_aplicadas "
-                        "(archivo, sha256, duro_ms, origen) "
-                        "values (%s,%s,%s,'aplicada')",
-                        (a.name, h, int((time.monotonic() - t0) * 1000)))
+                        "(archivo, sha256, algoritmo, duro_ms, origen) "
+                        "values (%s,%s,%s,%s,'aplicada')",
+                        (ruta.name, sha, ALGORITMO,
+                         int((time.monotonic() - t0) * 1000)))
             except Exception as e:                               # noqa: BLE001
-                print(f"  [FALLA] {a.name}: {type(e).__name__}: "
-                      f"{str(e).splitlines()[0][:160]}")
+                print(f"  [FALLA] {ruta.name}: {type(e).__name__}: "
+                      f"{str(e).splitlines()[0][:160] if str(e) else ''}",
+                      flush=True)
                 print("  La migracion se deshizo entera y NO quedo anotada. "
-                      "Las anteriores si.")
-                return 1
-            print(f"  [ok] {a.name}  ({int((time.monotonic() - t0) * 1000)} ms)")
-        print(f"[migrar] {len(pendientes)} aplicada(s).")
-        return 0
+                      "Las anteriores si.", flush=True)
+                return SALIDA_FALLO
+            print(f"  [ok] {ruta.name}  ({int((time.monotonic() - t0) * 1000)} ms)",
+                  flush=True)
+        print(f"[migrar] {len(pendientes)} aplicada(s).", flush=True)
+        return SALIDA_OK
     finally:
-        con.execute("select pg_advisory_unlock(%s)", (CLAVE_LOCK,))
+        soltar_lock(con)
 
 
-# -----------------------------------------------------------------------------
-#  adoptar una base que ya tiene el esquema
-# -----------------------------------------------------------------------------
-# Lo que NO vale como evidencia: "el archivo corrio sin error". Muchos de estos
-# archivos son idempotentes por accidente --'create table if not exists'-- y
-# correrlos de nuevo no prueba que su contenido este aplicado, solo que no
-# rompieron. Aca se miran los OBJETOS que el archivo declara, contra el
-# catalogo.
+def huecos(pendientes, anotadas) -> list[Path]:
+    if not anotadas:
+        return []
+    ultima = max(anotadas)
+    return [ruta for ruta, _t, _s in pendientes if ruta.name < ultima]
 
-_TABLA = re.compile(r"create\s+table\s+(?:if\s+not\s+exists\s+)?"
-                    r"asistente\.([a-z0-9_]+)", re.I)
-_FUNCION = re.compile(r"create\s+(?:or\s+replace\s+)?function\s+"
-                      r"asistente\.([a-z0-9_]+)", re.I)
-_COLUMNA = re.compile(r"alter\s+table\s+(?:if\s+exists\s+)?asistente\."
-                      r"([a-z0-9_]+)\s+add\s+column\s+(?:if\s+not\s+exists\s+)?"
-                      r"([a-z0-9_]+)", re.I)
-_INDICE = re.compile(r"create\s+(?:unique\s+)?index\s+(?:concurrently\s+)?"
-                     r"(?:if\s+not\s+exists\s+)?([a-z0-9_]+)", re.I)
-
-
-def objetos_declarados(texto: str) -> dict[str, list]:
-    return {
-        "tablas": sorted(set(_TABLA.findall(texto))),
-        "funciones": sorted(set(_FUNCION.findall(texto))),
-        "columnas": sorted(set(_COLUMNA.findall(texto))),
-        "indices": sorted(set(_INDICE.findall(texto))),
-    }
-
-
-def verificar_presente(con, decl: dict) -> tuple[bool, list[str]]:
-    """True si TODO lo declarado existe. Devuelve lo que falta."""
-    faltan: list[str] = []
-    for t in decl["tablas"]:
-        if not con.execute("select to_regclass(%s) is not null as hay",
-                           (f"asistente.{t}",)).fetchone()[0]:
-            faltan.append(f"tabla {t}")
-    for f in decl["funciones"]:
-        if not con.execute(
-                "select exists(select 1 from pg_proc p join pg_namespace n "
-                "on n.oid=p.pronamespace where n.nspname='asistente' "
-                "and p.proname=%s) as hay", (f,)).fetchone()[0]:
-            faltan.append(f"funcion {f}")
-    for tabla, col in decl["columnas"]:
-        if not con.execute(
-                "select exists(select 1 from information_schema.columns "
-                "where table_schema='asistente' and table_name=%s "
-                "and column_name=%s) as hay", (tabla, col)).fetchone()[0]:
-            faltan.append(f"columna {tabla}.{col}")
-    for i in decl["indices"]:
-        if not con.execute(
-                "select exists(select 1 from pg_indexes where "
-                "schemaname='asistente' and indexname=%s) as hay",
-                (i,)).fetchone()[0]:
-            faltan.append(f"indice {i}")
-    return (not faltan), faltan
-
-
-def adoptar(con, escribir: bool) -> int:
-    pendientes, discrepancias, _ = plan(con)
-    if discrepancias:
-        print("[migrar] hay archivos aplicados que cambiaron; resolvelo antes "
-              "de adoptar.")
-        return 2
-    if not pendientes:
-        print("[migrar] no hay nada que adoptar: el ledger ya esta completo.")
-        return 0
-
-    verificados: list[tuple[Path, str]] = []
-    ausentes: list[tuple[Path, list[str]]] = []
-    sin_verificar: list[Path] = []
-
-    print(f"[migrar] {len(pendientes)} archivo(s) sin anotar. Verificando "
-          f"contra el catalogo:\n")
-    for a in pendientes:
-        texto = io.open(a, encoding="utf-8").read()
-        decl = objetos_declarados(texto)
-        total = sum(len(v) for v in decl.values())
-        if total == 0:
-            # No declara ningun objeto que se pueda buscar: son los archivos
-            # que solo hacen GRANT, ALTER POLICY, UPDATE de datos. No se puede
-            # decidir automaticamente y NO se marca.
-            sin_verificar.append(a)
-            print(f"  [NO VERIFICABLE] {a.name}")
-            print(f"      no declara tablas, funciones, columnas ni indices "
-                  f"que se puedan buscar en el catalogo")
-            continue
-        ok, faltan = verificar_presente(con, decl)
-        if ok:
-            resumen = ", ".join(
-                f"{len(v)} {k}" for k, v in decl.items() if v)
-            verificados.append((a, resumen))
-            print(f"  [PRESENTE] {a.name}  ({resumen})")
-        else:
-            ausentes.append((a, faltan))
-            print(f"  [AUSENTE] {a.name}")
-            for f in faltan[:5]:
-                print(f"      falta {f}")
-
-    print(f"\n  presentes y verificables : {len(verificados)}")
-    print(f"  ausentes                 : {len(ausentes)}")
-    print(f"  NO verificables          : {len(sin_verificar)}")
-
-    if ausentes:
-        print("\n[migrar] hay archivos cuyos objetos NO estan en la base. Esa "
-              "base no tiene el esquema completo: no es candidata a baseline, "
-              "hay que aplicarlos con --aplicar.")
-        return 1
-
-    if sin_verificar:
-        print("\n[migrar] los NO verificables quedan sin decidir. No se "
-              "marcan solos: un archivo que solo hace GRANT no deja rastro "
-              "que se pueda buscar, y darlo por aplicado 'porque los demas lo "
-              "estan' es adivinar. Requieren decision humana archivo por "
-              "archivo.")
-
-    if not escribir:
-        print("\n[migrar] DRY-RUN: no se escribio nada. Para anotar los "
-              f"{len(verificados)} verificados, repetir con "
-              f"--escribir-baseline.")
-        return 0
-
-    tomado = con.execute("select pg_try_advisory_lock(%s) as ok",
-                         (CLAVE_LOCK,)).fetchone()[0]
-    if not tomado:
-        print("[migrar] otro migrador tiene el lock. No se escribe baseline.")
-        return 3
-    try:
-        with con.transaction():
-            for a, resumen in verificados:
-                texto = io.open(a, encoding="utf-8").read()
-                con.execute(
-                    "insert into asistente.migraciones_aplicadas "
-                    "(archivo, sha256, duro_ms, origen, nota) "
-                    "values (%s,%s,0,'baseline',%s)",
-                    (a.name, sha256(texto),
-                     f"adoptada: verificado en el catalogo ({resumen})"))
-        print(f"\n[migrar] {len(verificados)} archivo(s) anotados como "
-              f"baseline.")
-        if sin_verificar:
-            print(f"  Quedan {len(sin_verificar)} SIN anotar, a la espera de "
-                  f"una decision humana:")
-            for a in sin_verificar:
-                print(f"    {a.name}")
-        return 0
-    finally:
-        con.execute("select pg_advisory_unlock(%s)", (CLAVE_LOCK,))
-
-
-# -----------------------------------------------------------------------------
 
 def estado(con) -> int:
-    pendientes, discrepancias, anotadas = plan(con)
+    pendientes, discrepancias, invalidos, anotadas = plan(con)
+    print(f"  algoritmo             : {ALGORITMO}")
     print(f"  archivos en supabase/ : {len(archivos())}")
     print(f"  anotados en el ledger : {len(anotadas)}")
     print(f"  pendientes            : {len(pendientes)}")
     print(f"  con checksum distinto : {len(discrepancias)}")
-    if pendientes:
-        print("\n  pendientes:")
-        for a in pendientes:
-            print(f"    {a.name}")
+    print(f"  no canonicos          : {len(invalidos)}")
+    for ruta, _, _ in pendientes:
+        print(f"    pendiente: {ruta.name}")
+    for ruta, viejo, nuevo in discrepancias:
+        print(f"    CAMBIO: {ruta.name}: {viejo[:12]}... -> {nuevo[:12]}...")
+    for ruta, msg in invalidos:
+        print(f"    NO CANONICO: {msg}")
+    for ruta in huecos(pendientes, anotadas):
+        print(f"    HUECO: {ruta.name}")
+    # Informativo, no cambia el codigo de salida: una migracion aplicada cuyo
+    # archivo ya no esta en esta carpeta. Pasa al cambiar de rama; si pasa en
+    # la rama desplegada, alguien borro historia.
+    en_carpeta = {r.name for r in archivos()}
+    sin_archivo = sorted(set(anotadas) - en_carpeta)
+    print(f"  anotadas sin archivo  : {len(sin_archivo)}")
+    for nombre in sin_archivo:
+        print(f"    ANOTADA SIN ARCHIVO: {nombre}")
+    if invalidos:
+        return SALIDA_CONTENIDO
     if discrepancias:
-        print("\n  CAMBIARON DESPUES DE APLICADOS:")
-        for a, viejo, nuevo in discrepancias:
-            print(f"    {a.name}: {viejo[:12]}... -> {nuevo[:12]}...")
-        return 2
-    return 0 if not pendientes else 1
+        return SALIDA_CHECKSUM
+    return SALIDA_OK if not pendientes else SALIDA_FALLO
 
 
 def main(argv=None) -> int:
@@ -387,17 +417,28 @@ def main(argv=None) -> int:
     g.add_argument("--adoptar", action="store_true")
     p.add_argument("--escribir-baseline", action="store_true",
                    help="con --adoptar: escribe de verdad. Sin esto, dry-run.")
-    p.add_argument("--espera-lock", type=float, default=30.0)
+    p.add_argument("--aceptar", metavar="ARCHIVO",
+                   help="con --adoptar: aceptacion humana de UNA migracion")
+    p.add_argument("--motivo", help="obligatorio con --aceptar")
+    p.add_argument("--espera-lock", type=float, default=30.0,
+                   help=f"segundos, entre 0 y {ESPERA_MAXIMA:.0f}")
     a = p.parse_args(argv)
 
-    con = psycopg.connect(dsn_de_entorno(), autocommit=True)
+    if not 0 <= a.espera_lock <= ESPERA_MAXIMA:
+        print(f"[migrar] --espera-lock tiene que estar entre 0 y "
+              f"{ESPERA_MAXIMA:.0f} segundos; vino {a.espera_lock}.")
+        return SALIDA_CHECKSUM
+
+    con = conectar()
     try:
         bootstrap(con)
         if a.estado:
             return estado(con)
         if a.aplicar:
             return aplicar(con, a.espera_lock)
-        return adoptar(con, a.escribir_baseline)
+        from cli import manifiesto_adopcion                     # noqa: E402
+        return manifiesto_adopcion.adoptar(con, a.escribir_baseline,
+                                           a.espera_lock, a.aceptar, a.motivo)
     finally:
         con.close()
 
