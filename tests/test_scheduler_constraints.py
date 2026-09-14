@@ -39,8 +39,14 @@ B = uuid.UUID("00000000-0000-4000-8000-00000000000b")
 JOB = "importacion_tickets"
 SLOT_A = datetime(2026, 9, 14, 10, 0, tzinfo=timezone.utc)
 SLOT_B = datetime(2026, 9, 14, 11, 0, tzinfo=timezone.utc)
-# 32 bytes: el largo que exige ja_cap_len (un sha256 crudo)
-CAP = bytes(32)
+def cap() -> bytes:
+    """32 bytes distintos cada vez.
+
+    El largo lo exige 'ja_cap_len'; que sean DISTINTOS lo exige 'ja_cap_unica'.
+    Con una constante compartida, la segunda comprobacion de cada bloque se
+    rechazaba por el hash repetido y enmascaraba lo que se queria medir.
+    """
+    return uuid.uuid4().bytes + uuid.uuid4().bytes
 
 fallos: list[str] = []
 
@@ -101,7 +107,7 @@ def crear_intento(con, rid, org, n=1):
             (id, run_id, organization_id, attempt_number, lease_token,
              fencing_version, capability_hash, worker_id)
             values (%s,%s,%s,%s,%s,1,%s,'w1')""",
-            (aid, rid, org, n, uuid.uuid4(), CAP))
+            (aid, rid, org, n, uuid.uuid4(), cap()))
     con.commit()
     return aid
 
@@ -131,7 +137,7 @@ try:
                (run_id, organization_id, attempt_number, lease_token,
                 fencing_version, capability_hash, worker_id)
                values (%s,%s,5,%s,1,%s,'w')""",
-            (run_b, A, uuid.uuid4(), CAP),
+            (run_b, A, uuid.uuid4(), cap()),
             "un intento de la org A sobre un turno de la org B",
             "ja_run_misma_org")
 
@@ -204,7 +210,7 @@ try:
                (run_id, organization_id, attempt_number, lease_token,
                 fencing_version, capability_hash, worker_id, outcome)
                values (%s,%s,9,%s,1,%s,'w','succeeded')""",
-            (run_a, A, uuid.uuid4(), CAP),
+            (run_a, A, uuid.uuid4(), cap()),
             "un intento terminado sin completed_at",
             "ja_completo")
 
@@ -213,7 +219,7 @@ try:
                (run_id, organization_id, attempt_number, lease_token,
                 fencing_version, capability_hash, worker_id, error_code)
                values (%s,%s,8,%s,1,%s,'w','algo')""",
-            (run_b, B, uuid.uuid4(), CAP),
+            (run_b, B, uuid.uuid4(), cap()),
             "un error_code sin fallo",
             "ja_error")
 
@@ -236,7 +242,7 @@ try:
                (run_id, organization_id, attempt_number, lease_token,
                 fencing_version, capability_hash, worker_id)
                values (%s,%s,2,%s,2,%s,'w2')""",
-            (run_a, A, uuid.uuid4(), CAP),
+            (run_a, A, uuid.uuid4(), cap()),
             "un segundo intento activo sobre el mismo turno",
             "ja_uno_activo")
 

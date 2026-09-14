@@ -66,6 +66,9 @@ create table if not exists asistente.job_catalogo (
   presupuesto_tick   interval    not null default interval '45 s',
   habilitado         boolean     not null default true,
   constraint jc_intervalo_positivo check (intervalo > interval '0'),
+  -- sin parte sub-segundo: los slots se truncan a segundo y un intervalo
+  -- con milisegundos los desalinearia a la larga
+  constraint jc_intervalo_limpio   check (date_trunc('second', intervalo) = intervalo),
   constraint jc_lease_positivo     check (lease_duracion > interval '0'),
   constraint jc_intentos           check (max_intentos between 1 and 10),
   -- los backoffs son los que van ENTRE intentos: uno menos que el maximo
@@ -202,6 +205,9 @@ create table if not exists asistente.job_attempt (
   constraint ja_error check (error_code is null or coalesce(outcome,'') in
     ('failed_retryable','failed_terminal','lease_lost')),
   constraint ja_cap_len check (octet_length(capability_hash) = 32),
+  -- 256 bits de CSPRNG: dos intentos no comparten capability. Ademas de
+  -- integridad, este indice es el que hace barata la busqueda por hash.
+  constraint ja_cap_unica unique (capability_hash),
 
   unique (run_id, attempt_number),
 
@@ -279,10 +285,15 @@ create index if not exists jre_por_run   on asistente.job_run_event (run_id, ocu
 --  RLS  --  habilitado, SIN force
 -- =============================================================================
 -- Sin FORCE a proposito: el dueño (asistente_owner, NOLOGIN) tiene que poder
--- ver todas las filas desde las funciones SECURITY DEFINER. Esa es la unica
--- excepcion, y es alcanzable solo a traves de las seis funciones auditadas --
--- ningun rol con login puede hacer SET ROLE asistente_owner ni leer estas
--- tablas directamente.
+-- ver todas las filas desde las funciones SECURITY DEFINER.
+--
+-- El alcance real de esa excepcion, sin adornos: NINGUN rol de runtime
+-- --scheduler_coordinator, job_executor, monitor_ro, app_backend-- es miembro
+-- de asistente_owner ni tiene permiso sobre estas tablas, asi que para ellos
+-- la unica puerta son las funciones auditadas. El usuario que corre las
+-- migraciones SI puede asumirlo: lo crea el mismo y necesita la membresia para
+-- entregarle las tablas. Eso no es una fuga, es la cadena de propiedad -- pero
+-- decir 'ningun rol con login puede' seria falso.
 
 alter table asistente.job_catalogo        enable row level security;
 alter table asistente.job_schedule_state  enable row level security;
