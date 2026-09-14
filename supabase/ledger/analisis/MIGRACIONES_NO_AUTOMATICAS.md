@@ -284,13 +284,23 @@ catálogo no dice.
 todos observables en el catálogo.
 
 **Riesgo de repetir: alto**, por cuatro vías:
-1. **`match_chunks` sin filtro de rol.** `202608111433_documentos_roles.sql` la
-   redefine con `p_rol` y `and p_rol = any(d.roles_permitidos)`. Re-ejecutar
-   `schema.sql` vuelve a crear la definición del 04/08. Con la firma de 5
-   argumentos queda como **otra sobrecarga sin el filtro**, y según cómo se resuelva
-   una llamada, un rol podría recuperar documentos que no le corresponden. Qué
-   sobrecarga resolvería cada llamada no está verificado aquí; que exista la
-   redefinición, sí.
+1. **`match_chunks` — CORREGIDO tras medirlo.** La versión anterior de este
+   documento decía que re-ejecutar `schema.sql` "reintroduce" una sobrecarga sin
+   filtro de rol. Medido en una base construida desde cero por el ledger:
+   - **la sobrecarga de 5 argumentos sin filtro YA EXISTE hoy.**
+     `documentos_roles.sql` agregó la de 6 (`p_rol`) con `create or replace`, y
+     como la firma es distinta no reemplazó a la vieja;
+   - una llamada con 2 o 5 argumentos da `AmbiguousFunction`: la de 5 **no se
+     puede alcanzar** por resolución de nombres mientras exista la de 6;
+   - con 6 argumentos o `p_rol =>` resuelve a la filtrada. El único llamador del
+     código (`nucleo/recuperacion/busqueda.py:140`) usa `p_rol =>`.
+
+   Re-ejecutar `schema.sql` hace `create or replace` de la de 5 argumentos, que
+   ya existe con la misma definición: **no cambia la resolución**. El riesgo
+   real es otro, y es **preexistente**: la sobrecarga sin filtro queda latente y
+   vuelve a ser alcanzable si alguna vez se borra la de 6. Además
+   `match_chunks_hibrido` **no filtra por rol**, y es ejecutable por
+   `app_backend`; hoy no la llama ningún código. Ver la matriz de decisión.
 2. **El comodín de `EXECUTE`** vuelve a dar a `app_backend` las funciones de
    todo el schema, incluidas las del scheduler de P2 si ya están instaladas.
 3. **`grant app_backend to current_user`** agrega una membresía a quien lo ejecute.
