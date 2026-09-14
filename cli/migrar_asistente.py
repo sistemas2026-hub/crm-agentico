@@ -8,7 +8,8 @@
     py -3.13 cli/migrar_asistente.py --aplicar [--espera-lock SEGUNDOS]
     py -3.13 cli/migrar_asistente.py --adoptar                    (solo lectura)
     py -3.13 cli/migrar_asistente.py --adoptar --escribir-baseline
-    py -3.13 cli/migrar_asistente.py --adoptar --aceptar ARCHIVO --motivo TEXTO
+    py -3.13 cli/migrar_asistente.py --adoptar --aceptar ARCHIVO --motivo TEXTO \\
+        --autorizado-por QUIEN
 
 Por que existe
 --------------
@@ -75,6 +76,14 @@ orden, cada uno en su transaccion y anotado en
 'asistente.migraciones_ledger_esquema'. Un paso ya anotado no se vuelve a
 ejecutar: un comando normal no hace DROP ni ADD de nada.
 
+  0001  las dos tablas.
+  0002  'evidencia' (jsonb) en cada fila adoptada: manifiesto, servidor,
+        comprobaciones y quien DECLARO autorizar. Un ledger v1 que ya tiene
+        filas adoptadas no se actualiza (exit 8): no se fabrica evidencia.
+  0003  solo agregar: UPDATE, DELETE y TRUNCATE sobre las dos tablas fallan
+        (SQLSTATE LG002). Contra errores operativos, no contra el owner.
+Detalle: supabase/ledger/analisis/EVIDENCIA_DE_ADOPCION.md.
+
 ================================================================================
  CODIGOS DE SALIDA
 ================================================================================
@@ -86,6 +95,7 @@ ejecutar: un comando normal no hace DROP ni ADD de nada.
   5  HUECO: una migracion pendiente anterior a otra ya anotada
   6  base EXISTENTE sin ledger: hay que adoptarla, no aplicarle migraciones
   7  la huella del servidor (version mayor, extensiones) no es la del manifiesto
+  8  el esquema del ledger no se puede actualizar sin una decision (nada cambio)
 ================================================================================
 """
 
@@ -117,7 +127,11 @@ REINTENTO_LOCK = 0.25
 TABLAS_DEL_LEDGER = ("migraciones_aplicadas", "migraciones_ledger_esquema")
 
 SALIDA_OK, SALIDA_FALLO, SALIDA_CHECKSUM, SALIDA_LOCK, SALIDA_CONTENIDO = 0, 1, 2, 3, 4
-SALIDA_HUECO, SALIDA_BASE_EXISTENTE, SALIDA_HUELLA = 5, 6, 7
+SALIDA_HUECO, SALIDA_BASE_EXISTENTE, SALIDA_HUELLA, SALIDA_LEDGER = 5, 6, 7, 8
+
+# Los que levantan los pasos de supabase/ledger/esquema/.
+SQLSTATE_LEDGER_NO_ACTUALIZABLE = "LG001"
+SQLSTATE_SOLO_AGREGAR = "LG002"
 
 
 class ContenidoNoCanonico(ValueError):
@@ -133,6 +147,10 @@ class LockNoObtenido(RuntimeError):
         super().__init__(f"no se obtuvo el lock en {espera:.0f}s")
         self.espera = espera
         self.duenos = duenos
+
+
+class LedgerNoActualizable(RuntimeError):
+    """Un paso del esquema del ledger se nego (SQLSTATE LG001). No cambio nada."""
 
 
 # -----------------------------------------------------------------------------
@@ -428,6 +446,12 @@ def informar_lock(e: LockNoObtenido, que: str) -> int:
     return SALIDA_LOCK
 
 
+def informar_ledger(e: LedgerNoActualizable, que: str) -> int:
+    print(f"[migrar] EL ESQUEMA DEL LEDGER NO SE PUEDE ACTUALIZAR. {que}", flush=True)
+    print(f"    {e}", flush=True)
+    return SALIDA_LEDGER
+
+
 def pasos_del_ledger() -> list[tuple[int, Path]]:
     pasos = []
     for p in sorted(ESQUEMA_LEDGER.glob("[0-9][0-9][0-9][0-9]_*.sql")):
@@ -444,11 +468,18 @@ def asegurar_ledger(con) -> None:
         if numero <= actual:
             continue
         texto, sha = leer_migracion(ruta)
-        with con.transaction():
-            con.execute(texto)
-            con.execute("insert into asistente.migraciones_ledger_esquema "
-                        "(version, archivo, sha256) values (%s,%s,%s)",
-                        (numero, ruta.name, sha))
+        try:
+            with con.transaction():
+                con.execute(texto)
+                con.execute("insert into asistente.migraciones_ledger_esquema "
+                            "(version, archivo, sha256) values (%s,%s,%s)",
+                            (numero, ruta.name, sha))
+        except psycopg.Error as e:
+            if e.sqlstate != SQLSTATE_LEDGER_NO_ACTUALIZABLE:
+                raise
+            raise LedgerNoActualizable(
+                f"{ruta.name}: {e.diag.message_primary}. {e.diag.message_hint or ''}"
+            ) from None
         print(f"[migrar] esquema del ledger -> version {numero} ({ruta.name})",
               flush=True)
 
@@ -528,6 +559,8 @@ def aplicar(con, espera: float, carpeta: Path | None = None) -> int:
             return SALIDA_OK
     except LockNoObtenido as e:
         return informar_lock(e, "No se aplico nada ni se creo nada.")
+    except LedgerNoActualizable as e:
+        return informar_ledger(e, "No se aplico nada.")
 
 
 def estado(con, carpeta: Path | None = None) -> int:
@@ -535,8 +568,9 @@ def estado(con, carpeta: Path | None = None) -> int:
     pendientes, discrepancias, invalidos, anotadas = plan(con, carpeta)
     existe = ledger_existe(con)
     print(f"  algoritmo             : {ALGORITMO}")
+    ultima = max((n for n, _ruta in pasos_del_ledger()), default=0)
     print(f"  ledger                : {'existe' if existe else 'NO existe'}"
-          f" (esquema version {version_del_ledger(con)})")
+          f" (esquema version {version_del_ledger(con)} de {ultima})")
     print(f"  archivos en supabase/ : {len(archivos(carpeta))}")
     print(f"  anotados en el ledger : {len(anotadas)}")
     print(f"  pendientes            : {len(pendientes)}")
@@ -577,6 +611,10 @@ def main(argv=None) -> int:
     p.add_argument("--aceptar", metavar="ARCHIVO",
                    help="con --adoptar: aceptacion humana de UNA migracion")
     p.add_argument("--motivo", help="obligatorio con --aceptar")
+    p.add_argument("--autorizado-por", metavar="QUIEN",
+                   help="obligatorio con --aceptar: persona o referencia (acta, ticket) "
+                        "que autorizo. Es una identidad DECLARADA por quien corre el "
+                        "comando; la herramienta no la autentica.")
     p.add_argument("--espera-lock", type=float, default=30.0,
                    help=f"segundos, entre 0 y {ESPERA_MAXIMA:.0f}")
     a = p.parse_args(argv)
@@ -594,7 +632,8 @@ def main(argv=None) -> int:
             return aplicar(con, a.espera_lock)
         from cli import manifiesto_adopcion                     # noqa: E402
         return manifiesto_adopcion.adoptar(con, a.escribir_baseline,
-                                           a.espera_lock, a.aceptar, a.motivo)
+                                           a.espera_lock, a.aceptar, a.motivo,
+                                           autorizado_por=a.autorizado_por)
     finally:
         con.close()
 

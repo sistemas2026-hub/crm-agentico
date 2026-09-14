@@ -16,7 +16,7 @@
 
     # 4. aceptacion humana individual de UNA migracion, con motivo:
     py -3.13 cli/migrar_asistente.py --adoptar --escribir-baseline \\
-        --aceptar <archivo.sql> --motivo "..."
+        --aceptar <archivo.sql> --motivo "..." --autorizado-por "<persona o acta>"
 
 Por que existe
 --------------
@@ -56,6 +56,16 @@ Toda escritura (baseline o aceptacion humana) ocurre dentro de la seccion
 serializada del migrador: lock -> huella -> esquema del ledger -> plan ->
 verificacion -> INSERT, en ese orden y sin salir del lock. La verificacion que
 cuenta es la que se hace DENTRO: un dry-run previo no autoriza nada.
+
+La evidencia de cada fila
+-------------------------
+Toda fila 'baseline' o 'baseline_humano' se escribe con 'evidencia' (jsonb,
+paso 0002 del esquema del ledger): sha256 y git blob del manifiesto usado, su
+referencia, la version exacta del servidor y sus extensiones medidas dentro del
+lock, cuantas comprobaciones pasaron, los efectos que quedaron sin comprobar, el
+rol de la sesion y, si se dio, --autorizado-por. Esa identidad la DECLARA quien
+corre el comando: la herramienta no la autentica. Con --aceptar es obligatoria.
+Formato: supabase/ledger/analisis/EVIDENCIA_DE_ADOPCION.md.
 ================================================================================
 """
 
@@ -80,6 +90,7 @@ from cli import migrar_asistente as mig                           # noqa: E402
 
 MANIFIESTO = RAIZ / "supabase" / "ledger" / "manifiesto_adopcion.json"
 VERSION = 1
+FORMATO_EVIDENCIA = 1
 
 AUTOMATICA = "verificable_automaticamente"
 HUMANA = "requiere_revision_humana"
@@ -514,21 +525,43 @@ def generar(con, carpeta: Path | None = None, descripcion: str = "") -> dict:
     }
 
 
+def _serializar(manifiesto: dict) -> bytes:
+    return (json.dumps(manifiesto, sort_keys=True, indent=1, ensure_ascii=False)
+            + "\n").encode("utf-8")
+
+
 def guardar(manifiesto: dict, ruta: Path = MANIFIESTO) -> None:
     ruta.parent.mkdir(parents=True, exist_ok=True)
-    ruta.write_bytes((json.dumps(manifiesto, sort_keys=True, indent=1,
-                                 ensure_ascii=False) + "\n").encode("utf-8"))
+    ruta.write_bytes(_serializar(manifiesto))
 
 
-def cargar(ruta: Path = MANIFIESTO) -> dict:
-    m = json.loads(ruta.read_bytes().decode("utf-8"))
+def identidad(canon: bytes, calculado_sobre: str) -> dict:
+    """
+    Con que manifiesto se decidio una adopcion. 'sha256' sobre los bytes
+    canonicos (mismo contrato que las migraciones); 'git_blob' es el id que git
+    le da a esos bytes, para encontrar el commit con
+    'git log --all --find-object=<git_blob>'.
+    """
+    return {"sha256": hashlib.sha256(canon).hexdigest(),
+            "git_blob": hashlib.sha1(b"blob %d\0" % len(canon) + canon).hexdigest(),
+            "calculado_sobre": calculado_sobre}
+
+
+def leer(ruta: Path = MANIFIESTO) -> tuple[dict, dict]:
+    """(manifiesto, identidad) de UNA lectura: lo que se usa es lo que se identifica."""
+    canon = mig.bytes_canonicos(ruta.read_bytes(), ruta.name)
+    m = json.loads(canon.decode("utf-8"))
     if m.get("version") != VERSION:
         raise SystemExit(f"[manifiesto] version {m.get('version')} no soportada "
                          f"(esta herramienta entiende la {VERSION}).")
     if m.get("algoritmo_checksum") != mig.ALGORITMO:
         raise SystemExit(f"[manifiesto] generado con otro contrato de hash: "
                          f"{m.get('algoritmo_checksum')}")
-    return m
+    return m, identidad(canon, "archivo")
+
+
+def cargar(ruta: Path = MANIFIESTO) -> dict:
+    return leer(ruta)[0]
 
 
 # =============================================================================
@@ -625,7 +658,42 @@ def _clasificar(con, m, pendientes):
     return pasan, fallan, no_auto
 
 
-def _aceptar(con, m, pendientes, archivo, motivo, escribir) -> int:
+def _constructor_de_evidencia(con, m, ident, autorizado_por):
+    """
+    Mide servidor y sesion UNA vez, dentro del lock y despues de la compuerta de
+    huella, y devuelve la funcion que arma la evidencia de cada fila.
+    """
+    h = mig.huella_servidor(con)
+    entorno = {"server_version": con.execute("show server_version").fetchone()[0],
+               "server_version_num": h["server_version_num"],
+               "extensiones": h["extensiones"]}
+    rol, app = con.execute(
+        "select session_user::text, current_setting('application_name')").fetchone()
+    autorizacion = None if autorizado_por is None else {
+        "declarada_por": autorizado_por.strip(),
+        "naturaleza": "declarada por quien corrio el comando; la herramienta no la autentica"}
+
+    def evidencia(entrada: dict) -> str:
+        n = len(entrada["verificaciones"])
+        return json.dumps({
+            "formato": FORMATO_EVIDENCIA,
+            "manifiesto": {**ident, "formato": m["version"], "referencia": m["referencia"]},
+            "entorno": entorno,
+            "verificacion": {
+                "estado_en_manifiesto": entrada["estado"],
+                "comprobaciones_totales": n,
+                # Solo se escribe una fila cuando TODAS coinciden: la adopcion
+                # automatica y la aceptacion humana se niegan con una sola falla.
+                "comprobaciones_coincidentes": n,
+                "efectos_sin_comprobacion": entrada["efectos_sin_comprobacion"]},
+            "autorizacion": autorizacion,
+            "operacion": {"rol_sesion": rol, "aplicacion": app},
+        }, sort_keys=True, ensure_ascii=False)
+
+    return evidencia
+
+
+def _aceptar(con, m, pendientes, archivo, motivo, escribir, evidencia) -> int:
     fila = next(((r, t, s) for r, t, s in pendientes if r.name == archivo), None)
     if fila is None:
         print(f"[adoptar] '{archivo}' no esta pendiente.")
@@ -655,20 +723,25 @@ def _aceptar(con, m, pendientes, archivo, motivo, escribir) -> int:
     with con.transaction():
         con.execute(
             "insert into asistente.migraciones_aplicadas "
-            "(archivo, sha256, algoritmo, duro_ms, origen, nota) "
-            "values (%s,%s,%s,0,'baseline_humano',%s)",
+            "(archivo, sha256, algoritmo, duro_ms, origen, nota, evidencia) "
+            "values (%s,%s,%s,0,'baseline_humano',%s,%s::jsonb)",
             (archivo, sha, mig.ALGORITMO,
-             f"ACEPTACION HUMANA por {quien} [{e['estado']}]: {motivo.strip()}"))
-    print(f"[adoptar] '{archivo}' anotada como baseline_humano por {quien}.")
+             f"ACEPTACION HUMANA por {quien} [{e['estado']}]: {motivo.strip()}",
+             evidencia(e)))
+    print(f"[adoptar] '{archivo}' anotada como baseline_humano por {quien}; "
+          f"autorizacion declarada: {json.loads(evidencia(e))['autorizacion']['declarada_por']}.")
     return mig.SALIDA_OK
 
 
-def _cuerpo(con, m, escribir, aceptar, motivo, carpeta) -> int:
+def _cuerpo(con, m, escribir, aceptar, motivo, carpeta, ident=None,
+            autorizado_por=None) -> int:
     """Lo mismo en solo lectura que dentro de la seccion; solo cambia el final."""
     if not _huella_compatible(con, m):
         return mig.SALIDA_HUELLA
+    evidencia = None
     if escribir:
         mig.asegurar_ledger(con)
+        evidencia = _constructor_de_evidencia(con, m, ident, autorizado_por)
     codigo, pendientes = _preparar(con, m, carpeta)
     if codigo is not None:
         return codigo
@@ -676,7 +749,7 @@ def _cuerpo(con, m, escribir, aceptar, motivo, carpeta) -> int:
         print("[adoptar] no hay nada que adoptar: el ledger ya esta completo.")
         return mig.SALIDA_OK
     if aceptar is not None:
-        return _aceptar(con, m, pendientes, aceptar, motivo, escribir)
+        return _aceptar(con, m, pendientes, aceptar, motivo, escribir, evidencia)
 
     pasan, fallan, no_auto = _clasificar(con, m, pendientes)
     if fallan:
@@ -694,11 +767,12 @@ def _cuerpo(con, m, escribir, aceptar, motivo, carpeta) -> int:
         for ruta, sha, n in pasan:
             con.execute(
                 "insert into asistente.migraciones_aplicadas "
-                "(archivo, sha256, algoritmo, duro_ms, origen, nota) "
-                "values (%s,%s,%s,0,'baseline',%s)",
+                "(archivo, sha256, algoritmo, duro_ms, origen, nota, evidencia) "
+                "values (%s,%s,%s,0,'baseline',%s,%s::jsonb)",
                 (ruta.name, sha, mig.ALGORITMO,
                  f"adoptada: {n} comprobaciones de catalogo contra manifiesto "
-                 f"v{m['version']} (referencia PostgreSQL {m['referencia']['postgres']})"))
+                 f"v{m['version']} (referencia PostgreSQL {m['referencia']['postgres']})",
+                 evidencia(m["migraciones"][ruta.name])))
     print(f"\n[adoptar] {len(pasan)} migracion(es) anotadas como baseline.")
     if no_auto:
         print(f"[adoptar] ADOPCION INCOMPLETA: quedan {len(no_auto)} sin anotar:")
@@ -709,22 +783,44 @@ def _cuerpo(con, m, escribir, aceptar, motivo, carpeta) -> int:
     return mig.SALIDA_OK
 
 
+def autorizacion_valida(texto: str | None) -> bool:
+    if texto is None:
+        return False
+    t = texto.strip()
+    return 3 <= len(t) <= 200 and all(ord(c) >= 32 and ord(c) != 127 for c in t)
+
+
 def adoptar(con, escribir: bool, espera: float, aceptar: str | None = None,
             motivo: str | None = None, carpeta: Path | None = None,
-            manifiesto: dict | None = None) -> int:
+            manifiesto: dict | None = None, autorizado_por: str | None = None) -> int:
     if aceptar is not None and (not motivo or len(motivo.strip()) < 20):
         print("[adoptar] --aceptar exige --motivo de al menos 20 caracteres: queda "
               "escrito en el ledger como la razon de dar por aplicada una migracion "
               "que no se pudo verificar sola.")
         return mig.SALIDA_CHECKSUM
-    m = manifiesto or cargar()
+    if aceptar is not None and autorizado_por is None:
+        print("[adoptar] --aceptar exige --autorizado-por: la persona, o la referencia "
+              "del acta o ticket, que autorizo dar por aplicada una migracion sin poder "
+              "verificarla entera. Queda en la evidencia como identidad DECLARADA por "
+              "quien corre el comando: la herramienta no la autentica.")
+        return mig.SALIDA_CHECKSUM
+    if autorizado_por is not None and not autorizacion_valida(autorizado_por):
+        print("[adoptar] --autorizado-por tiene que tener entre 3 y 200 caracteres, "
+              "sin saltos de linea ni caracteres de control.")
+        return mig.SALIDA_CHECKSUM
+    if manifiesto is None:
+        m, ident = leer()
+    else:
+        m, ident = manifiesto, identidad(_serializar(manifiesto), "serializacion")
     if not escribir:
         return _cuerpo(con, m, False, aceptar, motivo, carpeta)
     try:
         with mig.seccion_serializada(con, espera):
-            return _cuerpo(con, m, True, aceptar, motivo, carpeta)
+            return _cuerpo(con, m, True, aceptar, motivo, carpeta, ident, autorizado_por)
     except mig.LockNoObtenido as e:
         return mig.informar_lock(e, "No se verifico ni se escribio nada.")
+    except mig.LedgerNoActualizable as e:
+        return mig.informar_ledger(e, "No se verifico ni se escribio nada.")
 
 
 def main(argv=None) -> int:

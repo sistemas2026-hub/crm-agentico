@@ -70,7 +70,9 @@ en su guarda. No verificado contra producción.
 8. **Recién entonces**, con autorización y sobre el objetivo:
    `py -3.13 cli/migrar_asistente.py --adoptar` en **solo lectura**. Revisar
    automáticas, no equivalentes y pendientes de decisión. La escritura
-   (`--escribir-baseline`, `--aceptar`) es un paso aparte, autorizado aparte.
+   (`--escribir-baseline`, `--aceptar` con `--autorizado-por`) es un paso aparte,
+   autorizado aparte. Cada fila escrita guarda como evidencia el manifiesto y la
+   huella medida en ese momento (`EVIDENCIA_DE_ADOPCION.md`).
 
 ## Lo que no se hace
 

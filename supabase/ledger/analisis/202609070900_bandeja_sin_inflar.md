@@ -143,8 +143,9 @@ estáticas de esta migración; el efecto 3 queda sin comprobación.
 
 1. Autorizar y ejecutar en producción las tres consultas de solo lectura.
 2. Si 1 y 2 coinciden:
-   `--adoptar --aceptar 202609070900_bandeja_sin_inflar.sql --motivo "<evidencia y quién decide>" --escribir-baseline`.
-   Queda con origen `baseline_humano` y la nota con quién y por qué.
+   `--adoptar --aceptar 202609070900_bandeja_sin_inflar.sql --motivo "<evidencia>" --autorizado-por "<persona o acta>" --escribir-baseline`.
+   Queda con origen `baseline_humano`, el motivo en la nota y la evidencia
+   estructurada con la autorización declarada (`EVIDENCIA_DE_ADOPCION.md`).
 3. Si 3 > 0, decidir aparte, con información de producto, si esas filas se
    revisan. No se decide automáticamente.
 

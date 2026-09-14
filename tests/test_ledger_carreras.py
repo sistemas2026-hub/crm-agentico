@@ -206,6 +206,7 @@ class LockAjeno:
 
 
 N = len(list((COPIA / "supabase").glob("*.sql")))
+PASOS = len(list((RAIZ / "supabase" / "ledger" / "esquema").glob("[0-9][0-9][0-9][0-9]_*.sql")))
 
 try:
     # =========================================================================
@@ -254,7 +255,8 @@ try:
     revisar(len(filas(B1)) == N and set(filas(B1).values()) == {"aplicada"},
             f"ledger con {N} filas 'aplicada'")
     version = consultar(B1, "select count(*), max(version) from asistente.migraciones_ledger_esquema")[0]
-    revisar(version == (1, 1), "el esquema del ledger quedo anotado UNA vez, version 1",
+    revisar(version == (PASOS, PASOS),
+            f"cada paso del esquema del ledger quedo anotado UNA vez, hasta la version {PASOS}",
             f"{version}")
 
     # =========================================================================
@@ -371,6 +373,7 @@ try:
     ajeno = LockAjeno(B5b)
     p = lanzar(B5b, "--adoptar", "--escribir-baseline", "--aceptar", "202608042055_schema.sql",
                "--motivo", "prueba de carrera en base efimera, sin decision real",
+               "--autorizado-por", "prueba de carrera (sin decision real)",
                "--espera-lock", "60", migrador=MIG_MAN)
     revisar(esperar_conectado(B5b, p.pid), "la aceptacion humana esta esperando el lock")
     time.sleep(1.0)
@@ -468,8 +471,8 @@ try:
     revisar(o1 == o2 and len(o1) >= 5,
             "dos --aplicar mas: las constraints del ledger conservan su oid (no hubo DROP/ADD)",
             f"{o1} -> {o2}")
-    revisar(consultar(B1, "select count(*) from asistente.migraciones_ledger_esquema")[0][0] == 1,
-            "y el esquema sigue con un solo paso anotado")
+    revisar(consultar(B1, "select count(*) from asistente.migraciones_ledger_esquema")[0][0] == PASOS,
+            f"y el esquema sigue con sus {PASOS} pasos anotados una sola vez")
 
     B9 = PREFIJO + "_b9"
     recrear(B9, DJANGO)

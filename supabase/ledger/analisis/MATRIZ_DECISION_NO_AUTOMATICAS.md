@@ -83,8 +83,11 @@ persona marcó atendidas **después**, porque `marcar_atendida` no mueve
 2. `migrar_asistente.py --adoptar --aceptar 202609071900_tomar_caso.sql` en solo
    lectura: confirma que sus partes estáticas coinciden.
 3. **Si el usuario acepta** que el efecto de datos no es demostrable, la misma
-   orden con `--escribir-baseline` y un `--motivo` que lo diga explícitamente e
-   incluya los dos conteos. Queda `baseline_humano` con quién y por qué.
+   orden con `--escribir-baseline`, un `--motivo` que lo diga explícitamente e
+   incluya los dos conteos, y `--autorizado-por` con la persona o el acta que lo
+   autoriza. Queda `baseline_humano` con motivo, autorización declarada y la
+   evidencia estructurada (manifiesto, servidor, comprobaciones): ver
+   `EVIDENCIA_DE_ADOPCION.md`.
 4. Si el usuario **no** acepta, la migración queda pendiente. Eso bloquea
    `--aplicar` por hueco, a propósito: no hay forma correcta de "completarla"
    automáticamente.

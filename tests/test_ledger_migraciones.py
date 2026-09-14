@@ -33,7 +33,7 @@ historico modificado bajo control de versiones.
      default, predicado de indice) -> NO EQUIVALENTE, no escribe nada
   Q  escritura de baseline: solo las automaticas; las demas quedan como hueco
      y '--aplicar' se niega a ejecutarlas
-  R  aceptacion humana individual: motivo obligatorio, partes estaticas
+  R  aceptacion humana individual: motivo y autorizacion obligatorios, partes estaticas
      verificadas, origen 'baseline_humano'
   S  archivos fuera del manifiesto: posteriores se toleran, intercalados no
 ================================================================================
@@ -182,6 +182,13 @@ def anotadas(base=BASE):
             base, "select archivo, origen from asistente.migraciones_aplicadas")}
     except psycopg.errors.Error:
         return {}
+
+
+def sin_ledger(base):
+    """Una base con el esquema completo y SIN ledger, como la que se adopta.
+    Con el ledger de solo agregar (paso 0003) ya no se vacia con DELETE."""
+    consultar(base, "drop table if exists asistente.migraciones_aplicadas, "
+                    "asistente.migraciones_ledger_esquema")
 
 
 def duenos_del_lock(base):
@@ -518,7 +525,7 @@ AUTO = {a for a, e in versionado["migraciones"].items()
 titulo("O. adopcion de una base equivalente")
 # =============================================================================
 recrear(ADOPTA, REF)
-consultar(ADOPTA, "delete from asistente.migraciones_aplicadas")
+sin_ledger(ADOPTA)
 codigo, salida = migrar("--adoptar", base=ADOPTA, migrador=MIG_REF)
 revisar(codigo == 0, "dry-run exit 0", salida[-400:])
 revisar(salida.count("[VERIFICADA]") == len(AUTO) and "[NO EQUIVALENTE]" not in salida,
@@ -612,7 +619,7 @@ revisar(codigo == 1 and anotadas(ADOPTA) == {},
 titulo("Q. escritura de baseline y el hueco que deja")
 # =============================================================================
 recrear(ADOPTA2, REF)
-consultar(ADOPTA2, "delete from asistente.migraciones_aplicadas")
+sin_ledger(ADOPTA2)
 codigo, salida = migrar("--adoptar", "--escribir-baseline", base=ADOPTA2, migrador=MIG_REF)
 led = anotadas(ADOPTA2)
 revisar(codigo == 0 and set(led) == AUTO and set(led.values()) == {"baseline"},
@@ -636,7 +643,9 @@ e_do = versionado["migraciones"].get(DO_FILE, {})
 revisar(e_do.get("estado") == "requiere_revision_humana",
         f"'{DO_FILE}' (bloque DO) no es automatica", f"{e_do.get('estado')}")
 MOTIVO = "revisado a mano en el entorno efimero de pruebas"
+AUTORIZA = "prueba automatizada (base efimera)"
 codigo, salida = migrar("--adoptar", "--aceptar", DO_FILE, "--motivo", "corto",
+                        "--autorizado-por", AUTORIZA,
                         "--escribir-baseline", base=ADOPTA2, migrador=MIG_REF)
 revisar(codigo == 2 and DO_FILE not in anotadas(ADOPTA2),
         "un motivo de menos de 20 caracteres se rechaza", salida[-200:])
@@ -647,7 +656,7 @@ if pol:
     _, esq, tab = pol["clave"]
     nombre, p = next((n, p) for n, p in pol["esperado"].items() if p[2] != "INSERT" and p[3])
     consultar(ADOPTA2, f'alter policy "{nombre}" on "{esq}"."{tab}" using (false)')
-    codigo, salida = migrar("--adoptar", "--aceptar", DO_FILE, "--motivo", MOTIVO,
+    codigo, salida = migrar("--adoptar", "--aceptar", DO_FILE, "--motivo", MOTIVO, "--autorizado-por", AUTORIZA,
                             "--escribir-baseline", base=ADOPTA2, migrador=MIG_REF)
     revisar(codigo == 1 and DO_FILE not in anotadas(ADOPTA2),
             "si sus partes ESTATICAS no coinciden, la aceptacion humana se rechaza",
@@ -656,11 +665,11 @@ if pol:
 else:
     revisar(False, "el archivo con DO tiene una politica verificable para alterar")
 
-codigo, salida = migrar("--adoptar", "--aceptar", DO_FILE, "--motivo", MOTIVO,
+codigo, salida = migrar("--adoptar", "--aceptar", DO_FILE, "--motivo", MOTIVO, "--autorizado-por", AUTORIZA,
                         base=ADOPTA2, migrador=MIG_REF)
 revisar(codigo == 0 and DO_FILE not in anotadas(ADOPTA2), "en dry-run no escribe",
         salida[-200:])
-codigo, salida = migrar("--adoptar", "--aceptar", DO_FILE, "--motivo", MOTIVO,
+codigo, salida = migrar("--adoptar", "--aceptar", DO_FILE, "--motivo", MOTIVO, "--autorizado-por", AUTORIZA,
                         "--escribir-baseline", base=ADOPTA2, migrador=MIG_REF)
 fila = consultar(ADOPTA2, "select origen, nota from asistente.migraciones_aplicadas "
                           "where archivo=%s", (DO_FILE,))
@@ -673,7 +682,7 @@ revisar(codigo == 0 and bool(fila) and fila[0][0] == "baseline_humano"
 titulo("S. archivos fuera del manifiesto")
 # =============================================================================
 recrear(ADOPTA, REF)
-consultar(ADOPTA, "delete from asistente.migraciones_aplicadas")
+sin_ledger(ADOPTA)
 COPIA_EXT = copiar_repo(TMP / "repo_ext", solo=archivos_man)
 (COPIA_EXT / "supabase" / "202800000000_posterior.sql").write_text(
     "create table if not exists asistente.posterior (x int);\n", encoding="utf-8")
