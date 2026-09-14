@@ -4,49 +4,35 @@
  UNA BASE DESDE CERO  --  el orden canonico, ejecutable
 ================================================================================
 
-    py -3.13 cli/base_desde_cero.py --base p2_cero
-    py -3.13 cli/base_desde_cero.py --base p2_cero --sin-recrear     (2a pasada)
-    py -3.13 cli/base_desde_cero.py --base p2_cero --verificar-solo
+    DBPASSWORD=... py -3.13 cli/base_desde_cero.py --base p2_cero
+    DBPASSWORD=... py -3.13 cli/base_desde_cero.py --base p2_cero --sin-recrear
+    DBPASSWORD=... py -3.13 cli/base_desde_cero.py --base p2_cero --verificar-solo
 
-Por que existe
---------------
-"Aplicar las migraciones" no era un procedimiento: era una cosa que alguien
-sabia hacer. Y no se podia hacer sobre una base vacia, porque la mitad del
-esquema la crea Django y la otra mitad los archivos de 'supabase/', y el orden
-entre las dos mitades no estaba escrito en ninguna parte.
-
-    1. La extension pgcrypto en el schema 'ext'      (superusuario, una vez)
+    1. La extension pgcrypto en el schema 'ext'      (una vez)
     2. Las migraciones de Django                     (crea public.organization)
     3. Los archivos de supabase/, POR EL LEDGER      (cli/migrar_asistente.py)
     4. Comprobacion: tablas, constraints, funciones, RLS, grants y ledger
 
-El paso 2 va ANTES del 3 y no es negociable:
-'supabase/202608042055_schema.sql' referencia 'public.organization(id)', que la
-crea la app 'accounts' de Django. Con la base vacia y sin ese paso, los 42
-archivos fallan en cascada -- medido: el primero con UndefinedTable y los otros
-con InvalidSchemaName porque el schema 'asistente' nunca llego a existir.
+El paso 2 va ANTES del 3: 'supabase/202608042055_schema.sql' referencia
+'public.organization(id)', que la crea Django. El paso 3 va por el ledger: lo
+anotado no se reejecuta, asi que la segunda pasada termina con 0 pendientes.
 
-El paso 3 va por el ledger, no ejecutando los archivos
-------------------------------------------------------
-La version anterior de este script ejecutaba los .sql uno por uno. La primera
-pasada funcionaba; la SEGUNDA fallaba con DuplicateObject en cinco archivos
-historicos que hacen 'create policy' sin guarda, y ademas volvia a correr un
-'grant execute on all functions in schema asistente to app_backend' que
-alcanzaba funciones nuevas. Con el ledger, lo anotado no se reejecuta: la
-segunda pasada ('--sin-recrear') tiene que terminar con 0 pendientes.
+Seguridad de la propia herramienta
+----------------------------------
+Crea y BORRA bases, asi que:
 
-Django corre en su imagen
--------------------------
-'django-crm/backend' tiene sus dependencias en la imagen 'dexter-backend', no
-en el Python del host. Este script monta el codigo actual sobre /app de esa
-imagen, asi que migra la cadena del WORKTREE y no la que quedo congelada
-cuando se construyo la imagen.
-
-Que NO hace
------------
-No apunta a produccion y no puede: exige que el host sea local. No siembra
-datos. No crea el catalogo de jobs -- un job que la migracion crea habilitado
-se enciende solo al desplegar.
+  * solo acepta hosts locales;
+  * el nombre de la base se valida contra ^[a-z_][a-z0-9_]{0,62}$ ANTES de
+    conectarse, y en el SQL va como identificador de psycopg, nunca interpolado.
+    La version anterior hacia f'drop database if exists "{base}"': un nombre con
+    comillas cortaba el identificador;
+  * la contraseña sale SOLO del entorno (DBPASSWORD). No hay '--clave': un
+    argumento de linea de comandos se ve en 'ps' y queda en el historial de la
+    shell;
+  * al contenedor de Django se le pasa '-e DBPASSWORD' SIN valor: docker lo toma
+    del entorno del proceso. La version anterior armaba '-e DBPASSWORD=<valor>',
+    que queda visible en los argumentos del proceso docker, y ademas imprimia el
+    comando completo.
 ================================================================================
 """
 
@@ -55,6 +41,7 @@ from __future__ import annotations
 import argparse
 import glob
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -64,62 +51,67 @@ if str(RAIZ) not in sys.path:
     sys.path.insert(0, str(RAIZ))
 
 import psycopg                                                    # noqa: E402
+from psycopg import sql                                           # noqa: E402
 
 HOSTS_LOCALES = {"localhost", "127.0.0.1", "db", "host.docker.internal"}
 IMAGEN_DJANGO = os.environ.get("IMAGEN_DJANGO", "dexter-backend:latest")
+NOMBRE_VALIDO = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
 
 
-def dsn(base: str, host: str, puerto: str, usuario: str, clave: str) -> str:
-    return (f"host={host} port={puerto} dbname={base} user={usuario} "
-            f"password={clave} sslmode=disable")
+def conectar(base: str, host: str, puerto: str, usuario: str) -> psycopg.Connection:
+    return psycopg.connect(host=host, port=puerto, dbname=base, user=usuario,
+                           password=os.environ["DBPASSWORD"], sslmode="disable",
+                           autocommit=True)
 
 
 def paso(n: int, que: str) -> None:
     print(f"\n{'=' * 74}\n  PASO {n}: {que}\n{'=' * 74}", flush=True)
 
 
-def crear_base(base, host, puerto, usuario, clave) -> None:
-    with psycopg.connect(dsn("postgres", host, puerto, usuario, clave),
-                         autocommit=True) as con:
-        con.execute(f'drop database if exists "{base}"')
-        con.execute(f'create database "{base}"')
+def crear_base(base, host, puerto, usuario) -> None:
+    with conectar("postgres", host, puerto, usuario) as con:
+        con.execute(sql.SQL("drop database if exists {}").format(sql.Identifier(base)))
+        con.execute(sql.SQL("create database {}").format(sql.Identifier(base)))
     print(f"  base '{base}' creada, vacia")
 
 
-def pgcrypto(base, host, puerto, usuario, clave) -> None:
-    with psycopg.connect(dsn(base, host, puerto, usuario, clave),
-                         autocommit=True) as con:
+def pgcrypto(base, host, puerto, usuario) -> None:
+    with conectar(base, host, puerto, usuario) as con:
         con.execute("create schema if not exists ext")
         con.execute("create extension if not exists pgcrypto with schema ext")
         for f in ("ext.digest(text,text)", "ext.gen_random_bytes(integer)"):
-            hay = con.execute("select to_regprocedure(%s) is not null as hay",
-                              (f,)).fetchone()[0]
+            hay = con.execute("select to_regprocedure(%s) is not null", (f,)).fetchone()[0]
             print(f"  {f}: {'presente' if hay else 'FALTA'}")
             if not hay:
                 raise SystemExit(f"pgcrypto incompleto: falta {f}")
 
 
-def django(base, host, puerto, usuario, clave) -> int:
-    """Las migraciones de Django, en su propia imagen, con el codigo de aca."""
-    # Desde el contenedor, el Postgres del host no es 'localhost'.
+def comando_django(base, host, puerto, usuario) -> list[str]:
+    """
+    El comando de docker. NO contiene la contraseña: '-e DBPASSWORD' sin valor
+    hace que docker la tome del entorno del proceso que lo lanza.
+    """
     host_cont = "host.docker.internal" if host in ("localhost", "127.0.0.1") else host
     backend = (RAIZ / "django-crm" / "backend").as_posix()
-    cmd = [
+    return [
         "docker", "run", "--rm",
         "-v", f"{backend}:/app",
         "-e", f"DBHOST={host_cont}", "-e", f"DBPORT={puerto}",
         "-e", f"DBNAME={base}", "-e", f"DBUSER={usuario}",
-        "-e", f"DBPASSWORD={clave}",
+        "-e", "DBPASSWORD",
         "-e", "DJANGO_SETTINGS_MODULE=crm.settings",
         "-e", "SECRET_KEY=solo-para-migrar-una-base-local",
         "-e", "DEBUG=0", "-e", "ALLOWED_HOSTS=*",
         IMAGEN_DJANGO,
         "python3", "manage.py", "migrate", "--noinput",
     ]
+
+
+def django(base, host, puerto, usuario) -> int:
+    cmd = comando_django(base, host, puerto, usuario)
     print("  " + " ".join(cmd), flush=True)
-    r = subprocess.run(cmd, capture_output=True, text=True)
-    cola = (r.stdout or "").strip().splitlines()
-    for linea in cola[-25:]:
+    r = subprocess.run(cmd, capture_output=True, text=True, env=dict(os.environ))
+    for linea in (r.stdout or "").strip().splitlines()[-25:]:
         print(f"    {linea}")
     if r.returncode != 0:
         print(f"    [stderr] {(r.stderr or '').strip()[-2000:]}")
@@ -127,38 +119,28 @@ def django(base, host, puerto, usuario, clave) -> int:
     return r.returncode
 
 
-def asistente(base, host, puerto, usuario, clave) -> int:
-    """
-    Los archivos de supabase/, a traves del ledger. Devuelve el codigo de salida
-    del migrador: 0 aplico lo pendiente (o no habia nada), cualquier otro valor
-    es un fallo que el migrador ya explico.
-    """
+def asistente(base, host, puerto, usuario) -> int:
+    """Los archivos de supabase/, a traves del ledger. Devuelve su codigo de salida."""
     os.environ.update({"DBHOST": host, "DBPORT": str(puerto), "DBNAME": base,
-                       "DBUSER": usuario, "DBPASSWORD": clave})
+                       "DBUSER": usuario})
     from cli import migrar_asistente as mig                       # noqa: E402
 
     con = mig.conectar()
     try:
-        mig.bootstrap(con)
         return mig.aplicar(con, 60.0)
     finally:
         con.close()
 
-
-# -----------------------------------------------------------------------------
-#  comprobacion
-# -----------------------------------------------------------------------------
 
 TABLAS = ("job_catalogo", "job_schedule_state", "job_run", "job_attempt",
           "job_run_event")
 FUNCIONES = ("job_slot", "jobs_vencidos", "job_claim", "job_cerrar_turno",
              "job_intento_vigente", "job_intento_vigente_por_capability",
              "job_heartbeat", "job_finalize", "job_contexto", "job_salud")
-ROLES = ("asistente_owner", "scheduler_coordinator", "job_executor",
-         "monitor_ro")
+ROLES = ("asistente_owner", "scheduler_coordinator", "job_executor", "monitor_ro")
 
 
-def verificar(base, host, puerto, usuario, clave) -> list[str]:
+def verificar(base, host, puerto, usuario) -> list[str]:
     malas: list[str] = []
 
     def mal(q):
@@ -168,7 +150,7 @@ def verificar(base, host, puerto, usuario, clave) -> list[str]:
     def ok(q):
         print(f"  [ok] {q}")
 
-    with psycopg.connect(dsn(base, host, puerto, usuario, clave)) as con:
+    with conectar(base, host, puerto, usuario) as con:
         hay = {f[0] for f in con.execute(
             "select tablename from pg_tables where schemaname='asistente'")}
         faltan = [t for t in TABLAS if t not in hay]
@@ -176,19 +158,16 @@ def verificar(base, host, puerto, usuario, clave) -> list[str]:
             mal(f"faltan tablas: {faltan}")
 
         props = con.execute(
-            "select c.relname, r.rolname, c.relrowsecurity "
-            "from pg_class c join pg_roles r on r.oid=c.relowner "
-            "join pg_namespace n on n.oid=c.relnamespace "
-            "where n.nspname='asistente' and c.relname = any(%s)",
-            (list(TABLAS),)).fetchall()
+            "select c.relname, r.rolname, c.relrowsecurity from pg_class c "
+            "join pg_roles r on r.oid=c.relowner join pg_namespace n on n.oid=c.relnamespace "
+            "where n.nspname='asistente' and c.relname = any(%s)", (list(TABLAS),)).fetchall()
         malos = [p for p in props if p[1] != "asistente_owner" or not p[2]]
         ok("las cinco son de asistente_owner y tienen RLS") if not malos else \
             mal(f"propiedad/RLS mal: {malos}")
 
         hayf = {f[0] for f in con.execute(
-            "select proname from pg_proc p join pg_namespace n "
-            "on n.oid=p.pronamespace where n.nspname='asistente' "
-            "and proname like 'job%'")}
+            "select proname from pg_proc p join pg_namespace n on n.oid=p.pronamespace "
+            "where n.nspname='asistente' and proname like 'job%'")}
         faltanf = [f for f in FUNCIONES if f not in hayf]
         sobran = sorted(hayf - set(FUNCIONES))
         ok(f"las {len(FUNCIONES)} funciones existen") if not faltanf else \
@@ -197,36 +176,29 @@ def verificar(base, host, puerto, usuario, clave) -> list[str]:
             mal(f"funciones que la migracion ya no declara: {sobran}")
 
         hayr = {f[0] for f in con.execute(
-            "select rolname from pg_roles where rolname = any(%s)",
-            (list(ROLES),))}
+            "select rolname from pg_roles where rolname = any(%s)", (list(ROLES),))}
         faltanr = [r for r in ROLES if r not in hayr]
-        ok(f"los {len(ROLES)} roles existen") if not faltanr else \
-            mal(f"faltan roles: {faltanr}")
+        ok(f"los {len(ROLES)} roles existen") if not faltanr else mal(f"faltan roles: {faltanr}")
 
-        conlogin = con.execute(
-            "select rolname from pg_roles where rolname = any(%s) and rolcanlogin",
-            (list(ROLES),)).fetchall()
+        conlogin = con.execute("select rolname from pg_roles where rolname = any(%s) "
+                               "and rolcanlogin", (list(ROLES),)).fetchall()
         ok("ninguno de los cuatro puede hacer login") if not conlogin else \
             mal(f"roles con login: {conlogin}")
 
         n = con.execute(
-            "select count(*) from pg_constraint c join pg_class t "
-            "on t.oid=c.conrelid join pg_namespace n on n.oid=t.relnamespace "
-            "where n.nspname='asistente' and t.relname = any(%s)",
-            (list(TABLAS),)).fetchone()[0]
+            "select count(*) from pg_constraint c join pg_class t on t.oid=c.conrelid "
+            "join pg_namespace n on n.oid=t.relnamespace "
+            "where n.nspname='asistente' and t.relname = any(%s)", (list(TABLAS),)).fetchone()[0]
         ok(f"{n} constraints sobre las cinco tablas") if n >= 40 else \
             mal(f"solo {n} constraints, se esperaban 40 o mas")
 
-        pol = con.execute(
-            "select count(*) from pg_policies where schemaname='asistente' "
-            "and tablename = any(%s)", (list(TABLAS),)).fetchone()[0]
-        ok(f"{pol} politicas RLS sobre las cinco") if pol >= 5 else \
-            mal(f"solo {pol} politicas RLS")
+        pol = con.execute("select count(*) from pg_policies where schemaname='asistente' "
+                          "and tablename = any(%s)", (list(TABLAS),)).fetchone()[0]
+        ok(f"{pol} politicas RLS sobre las cinco") if pol >= 5 else mal(f"solo {pol} politicas RLS")
 
         publico = con.execute(
-            "select p.proname from pg_proc p join pg_namespace n "
-            "on n.oid=p.pronamespace where n.nspname='asistente' "
-            "and p.proname like 'job%' "
+            "select p.proname from pg_proc p join pg_namespace n on n.oid=p.pronamespace "
+            "where n.nspname='asistente' and p.proname like 'job%' "
             "and has_function_privilege('public', p.oid, 'execute')").fetchall()
         ok("PUBLIC no puede ejecutar ninguna funcion job_*") if not publico \
             else mal(f"PUBLIC puede ejecutar: {[p[0] for p in publico]}")
@@ -251,42 +223,49 @@ def main(argv=None) -> int:
     p.add_argument("--host", default=os.environ.get("DBHOST", "localhost"))
     p.add_argument("--puerto", default=os.environ.get("DBPORT", "55435"))
     p.add_argument("--usuario", default=os.environ.get("DBUSER", "motor"))
-    p.add_argument("--clave", default=os.environ.get("DBPASSWORD", "motor"))
     p.add_argument("--verificar-solo", action="store_true")
     p.add_argument("--sin-recrear", action="store_true",
                    help="no borra la base: para la SEGUNDA pasada")
     a = p.parse_args(argv)
 
+    if not NOMBRE_VALIDO.match(a.base):
+        print(f"[cero] nombre de base invalido: tiene que cumplir "
+              f"{NOMBRE_VALIDO.pattern}. No se hizo nada.")
+        return 2
     if a.host not in HOSTS_LOCALES:
         print(f"[cero] '{a.host}' no es un host local. Este script crea y "
               f"BORRA bases; no se lo apunta a un servidor remoto.")
         return 2
+    if not os.environ.get("DBPASSWORD"):
+        print("[cero] falta DBPASSWORD en el entorno. La contraseña no se acepta "
+              "por argumento.")
+        return 2
 
     if a.verificar_solo:
         paso(4, "comprobacion")
-        return 1 if verificar(a.base, a.host, a.puerto, a.usuario, a.clave) else 0
+        return 1 if verificar(a.base, a.host, a.puerto, a.usuario) else 0
 
     if not a.sin_recrear:
         paso(0, f"crear la base '{a.base}' vacia")
-        crear_base(a.base, a.host, a.puerto, a.usuario, a.clave)
+        crear_base(a.base, a.host, a.puerto, a.usuario)
 
     paso(1, "pgcrypto en el schema 'ext'")
-    pgcrypto(a.base, a.host, a.puerto, a.usuario, a.clave)
+    pgcrypto(a.base, a.host, a.puerto, a.usuario)
 
     paso(2, "migraciones de Django (crean public.organization)")
-    if django(a.base, a.host, a.puerto, a.usuario, a.clave) != 0:
+    if django(a.base, a.host, a.puerto, a.usuario) != 0:
         print("\n[cero] Django fallo. La cadena no continua: los archivos de "
               "supabase/ dependen de public.organization.")
         return 1
 
     paso(3, "migraciones de asistente, por el ledger")
-    codigo = asistente(a.base, a.host, a.puerto, a.usuario, a.clave)
+    codigo = asistente(a.base, a.host, a.puerto, a.usuario)
     if codigo != 0:
         print(f"\n[cero] el migrador termino en {codigo}; la cadena no continua.")
         return 1
 
     paso(4, "comprobacion de tablas, constraints, funciones, RLS, grants y ledger")
-    malas = verificar(a.base, a.host, a.puerto, a.usuario, a.clave)
+    malas = verificar(a.base, a.host, a.puerto, a.usuario)
     print()
     if malas:
         print(f"[cero] {len(malas)} comprobacion(es) fallaron.")
