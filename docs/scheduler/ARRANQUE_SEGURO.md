@@ -93,8 +93,11 @@ Para producción:
    como helper de pruebas. Queda técnicamente inaccesible desde producción porque:
    - ningún módulo de `nucleo/` lo importa (lo verifica una prueba estática sobre
      el AST);
-   - `.dockerignore` excluye `tests/`, así que la imagen productiva no contiene
-     el archivo (se verifica listando la imagen construida);
+   - la imagen productiva no contiene el archivo. **Hoy no es así:** el
+     `.dockerignore` de la raíz (verificado en `79b1f10`) excluye `.git`,
+     `django-crm/`, `datos/`, `__pycache__/` y otros, pero **no** `tests/`, y el
+     `Dockerfile` del motor copia el repo. P5 tiene que agregar `tests/` al
+     `.dockerignore` y verificarlo listando el contenido de la imagen construida;
    - ningún `CMD`, `command:` de compose ni `__main__` productivo lo referencia
      (prueba estática sobre `Dockerfile`, `docker-compose*.yml` y los módulos
      con `if __name__ == "__main__"`).
