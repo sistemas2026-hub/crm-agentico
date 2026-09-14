@@ -81,11 +81,13 @@ def rechaza(con, sql, params, que, esperado=""):
         con.rollback()
         nombre = getattr(getattr(e, "diag", None), "constraint_name", "") or ""
         clase = type(e).__name__
+        estado = getattr(e, "sqlstate", "") or ""
         ok = esperado in nombre if esperado else True
         revisar(ok, que, f"rechazado por {clase}/{nombre or 'sin nombre'}"
-                         f" (se esperaba {esperado})" if not ok else "")
+                         f" [SQLSTATE {estado}] (se esperaba {esperado})"
+                         if not ok else "")
         if ok:
-            print(f"         ({clase} · {nombre or 'check'})")
+            print(f"         SQLSTATE {estado}  {clase}  {nombre or 'check'}")
 
 
 def crear_run(con, org, slot, estado="running"):

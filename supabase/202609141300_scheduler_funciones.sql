@@ -870,6 +870,26 @@ alter function asistente.job_salud(timestamptz)                          owner t
 
 -- 'revoke from public' en cada funcion: sin esto, SECURITY DEFINER las deja
 -- ejecutables por CUALQUIER rol, que es la trampa clasica de este patron.
+--
+-- Y tambien de 'app_backend', que NO es lo mismo y no es defensivo:
+-- 'supabase/202608042055_schema.sql' y '202608111724_limpieza...' hacen
+--
+--     grant execute on all functions in schema asistente to app_backend;
+--
+-- Eso es un comodin sobre TODAS las funciones del schema, incluidas las que
+-- todavia no existian cuando se escribio. La cadena de 'supabase/' no tiene
+-- tabla de control de migraciones --el unico procedimiento es aplicar los 42
+-- archivos-- asi que en el proximo despliegue esos dos comodines vuelven a
+-- correr y le entregan a app_backend el scheduler entero: job_claim,
+-- job_finalize, job_contexto.
+--
+-- Medido: en una base construida desde cero y con la cadena reaplicada, el ACL
+-- de las diez funciones quedaba
+--     {asistente_owner=X/..., job_executor=X/..., app_backend=X/...}
+--
+-- Estos REVOKE corren DESPUES (este archivo es el ultimo por nombre), asi que
+-- deshacen el comodin en cada pasada. Es una curita sobre un problema que no
+-- es de P2 --la cadena sin registro-- y esta escrito aca para que se vea.
 revoke all on function asistente.job_slot(timestamptz, interval, timestamptz)      from public;
 revoke all on function asistente.jobs_vencidos(timestamptz, int)                   from public;
 revoke all on function asistente.job_claim(text, uuid, timestamptz, text, jsonb)   from public;
@@ -896,6 +916,19 @@ grant execute on function asistente.job_contexto(uuid, text)       to job_execut
 
 -- El monitor ve numeros. Nada mas.
 grant execute on function asistente.job_salud(timestamptz) to monitor_ro;
+
+-- Y el comodin de las migraciones viejas, deshecho: app_backend sirve peticiones
+-- de usuario, no coordina trabajos.
+revoke all on function asistente.job_slot(timestamptz, interval, timestamptz)    from app_backend;
+revoke all on function asistente.jobs_vencidos(timestamptz, int)                 from app_backend;
+revoke all on function asistente.job_claim(text, uuid, timestamptz, text, jsonb) from app_backend;
+revoke all on function asistente.job_cerrar_turno(uuid, text, timestamptz)       from app_backend;
+revoke all on function asistente.job_intento_vigente(uuid, text)                 from app_backend;
+revoke all on function asistente.job_intento_vigente_por_capability(text)        from app_backend;
+revoke all on function asistente.job_heartbeat(uuid, text)                       from app_backend;
+revoke all on function asistente.job_finalize(uuid, text, text, text)            from app_backend;
+revoke all on function asistente.job_contexto(uuid, text)                        from app_backend;
+revoke all on function asistente.job_salud(timestamptz)                          from app_backend;
 
 -- 'job_cerrar_turno', 'job_intento_vigente' y su variante por capability no
 -- se otorgan a nadie: son piezas
