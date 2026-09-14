@@ -9636,7 +9636,25 @@
   }
  },
  "referencia": {
-  "descripcion": "ledger infra/ledger-migraciones-asistente sobre f60beda; base efimera construida desde cero con el ledger",
+  "descripcion": "referencia efimera construida desde cero con el ledger (ledger/cierre-auditoria), exactamente los 40 archivos del manifiesto",
+  "huella": {
+   "extensiones": {
+    "pg_trgm": {
+     "schema": "public",
+     "version": "1.6"
+    },
+    "pgcrypto": {
+     "schema": "ext",
+     "version": "1.3"
+    },
+    "vector": {
+     "schema": "public",
+     "version": "0.8.6"
+    }
+   },
+   "major": 16,
+   "server_version_num": 160014
+  },
   "postgres": "16.14 (Debian 16.14-1.pgdg12+1)"
  },
  "version": 1

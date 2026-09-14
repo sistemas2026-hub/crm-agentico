@@ -434,7 +434,6 @@ carpeta_l.mkdir()
 (carpeta_l / "202800000000_falla.sql").write_text("select 1/0;\n", encoding="utf-8")
 con = mig.conectar()
 try:
-    mig.bootstrap(con)
     codigo = mig.aplicar(con, 5, carpeta=carpeta_l)
     retenidos = con.execute("select count(*) from pg_locks where locktype='advisory' "
                             "and pid = pg_backend_pid()").fetchone()[0]

@@ -8,7 +8,7 @@
     #    ledger (nunca contra la base que se quiere adoptar):
     py -3.13 cli/manifiesto_adopcion.py --generar
 
-    # 2. adoptar una base existente (dry-run; no escribe):
+    # 2. adoptar una base existente (solo lectura; no escribe):
     py -3.13 cli/migrar_asistente.py --adoptar
 
     # 3. escribir las filas que pasaron TODAS sus verificaciones:
@@ -16,60 +16,46 @@
 
     # 4. aceptacion humana individual de UNA migracion, con motivo:
     py -3.13 cli/migrar_asistente.py --adoptar --escribir-baseline \\
-        --aceptar 202609070900_bandeja_sin_inflar.sql --motivo "..."
+        --aceptar <archivo.sql> --motivo "..."
 
 Por que existe
 --------------
 La primera version de la adopcion miraba si EXISTIAN las tablas, funciones,
 columnas e indices que un archivo declaraba. Eso no prueba que el archivo este
-aplicado: no mira el cuerpo de las funciones, las politicas RLS, los grants,
-las constraints, los triggers, ni los datos que el archivo transformo. Con ese
-criterio se habian dado por demostrados 39 de 40 archivos. No lo estaban.
+aplicado. Con ese criterio se habian dado por demostrados 39 de 40 archivos.
 
 Que verifica, y contra que
 --------------------------
 Cada sentencia del archivo se clasifica y se traduce a una comprobacion de
-CATALOGO sobre el objeto que toca:
+CATALOGO sobre el objeto que toca: columnas (tipo, not null, default,
+identity) y TODAS las constraints; flags de RLS; pg_get_indexdef con predicado;
+politicas con roles, comando, USING y WITH CHECK; ACL exactas; md5 de
+pg_get_functiondef, dueño, SECURITY DEFINER, SET y comentario; triggers;
+comentarios; schema y extension.
 
-    create/alter table        columnas (tipo, not null, default, identity),
-                              TODAS las constraints con su definicion, dueño
-    enable/force rls          relrowsecurity y relforcerowsecurity
-    create/drop index         pg_get_indexdef, predicado incluido (o ausencia)
-    create/alter/drop policy  todas las politicas de la tabla: permissive,
-                              roles, comando, USING y WITH CHECK
-    grant/revoke              ACL exacta del objeto (tabla, schema, funcion, o
-                              todas las funciones / tablas del schema)
-    create/alter/drop function  md5 de pg_get_functiondef de cada sobrecarga,
-                              dueño, SECURITY DEFINER, SET, ACL, comentario
-    create trigger            pg_get_triggerdef
-    comment on                md5 del comentario
-    create schema/extension   existencia, dueño, ACL / schema de la extension
+El ESPERADO es el estado final de una referencia construida desde cero con
+exactamente esos archivos.
 
-El valor ESPERADO sale de una base de referencia construida desde cero por el
-ledger con los mismos archivos. Lo que se compara es el ESTADO FINAL, no el
-estado inmediatamente posterior a cada archivo: si el archivo 12 crea una
-funcion y el 30 la reemplaza, las dos migraciones verifican el cuerpo final.
-Es lo correcto para adoptar: lo que importa es que la base adoptada sea
-equivalente a una construida desde cero, y un archivo cuyo efecto fue
-reemplazado despues no se puede verificar de otra forma.
+UPDATE/INSERT/DELETE -> migracion_de_datos_no_repetible. DO -> requiere revision
+humana. Sentencia no reconocida -> requiere revision humana. Nunca automaticas.
 
-Lo que NO se verifica solo, y por lo tanto nunca es automatico
---------------------------------------------------------------
-    UPDATE / INSERT / DELETE  -> migracion_de_datos_no_repetible
-        El catalogo no guarda que transformacion de datos se hizo. Una
-        invariante que lo demuestre la tiene que escribir una persona.
-    DO $$ ... $$              -> requiere_revision_humana
-        SQL dinamico: lo que ejecuta no se puede leer sin ejecutarlo.
-    cualquier sentencia que el clasificador no reconoce
-                              -> requiere_revision_humana
-        Si el manifiesto no cubre un efecto, no se adivina que no lo tiene.
+La huella del servidor, como compuerta
+--------------------------------------
+Las definiciones que devuelve pg_get_*def pueden cambiar entre versiones
+mayores de PostgreSQL, y una extension en otra version u otro schema cambia
+tipos, operadores y firmas. Comparar catalogos entre servidores distintos no
+dice nada confiable. Por eso el manifiesto guarda la huella de la referencia
+--version mayor y, por extension, version y schema-- y la adopcion la compara
+ANTES de verificar nada y ANTES de crear el ledger. Si no coincide: exit 7, sin
+una sola fila y sin una sola comprobacion. Una extension de mas en la base
+adoptada no bloquea; una que falta o difiere, si.
 
-Una migracion se escribe como 'baseline' SOLO si su estado es
-'verificable_automaticamente', su hash coincide con el que tenia al generar el
-manifiesto, y TODAS sus comprobaciones pasan. No existe "aplicada en parte".
-
-La unica otra via es la aceptacion humana individual: un archivo, un motivo
-obligatorio, queda anotada con origen 'baseline_humano' y el motivo en la nota.
+Cuando escribe
+--------------
+Toda escritura (baseline o aceptacion humana) ocurre dentro de la seccion
+serializada del migrador: lock -> huella -> esquema del ledger -> plan ->
+verificacion -> INSERT, en ese orden y sin salir del lock. La verificacion que
+cuenta es la que se hace DENTRO: un dry-run previo no autoriza nada.
 ================================================================================
 """
 
@@ -113,8 +99,7 @@ def dividir(texto: str) -> list[str]:
 
     Respeta cadenas '...' (con '' escapado), identificadores "...", cuerpos
     $tag$...$tag$ y comentarios -- y /* */. Un ';' dentro de cualquiera de ellos
-    no parte la sentencia: los COMMENT ON de este repo tienen ';' adentro del
-    texto, y un split ingenuo los convertia en sentencias fantasma.
+    no parte la sentencia.
     """
     sentencias: list[str] = []
     buf: list[str] = []
@@ -187,7 +172,6 @@ def _partes(q: str, defecto: str = "public") -> tuple[str, str]:
 
 
 def _plano(sentencia: str) -> str:
-    """Minusculas y espacios colapsados FUERA de cadenas y cuerpos."""
     return " ".join(sentencia.split()).lower()
 
 
@@ -320,8 +304,8 @@ def _md5(v):
     return None if v is None else hashlib.md5(v.encode("utf-8")).hexdigest()
 
 
-def _acl(con, sql, params):
-    fila = con.execute(sql, params).fetchone()
+def _acl(con, consulta, params):
+    fila = con.execute(consulta, params).fetchone()
     return None if fila is None or fila[0] is None else sorted(fila[0])
 
 
@@ -478,18 +462,14 @@ def diferencias(esperado, actual, ruta="") -> list[str]:
 
 def generar(con, carpeta: Path | None = None, descripcion: str = "") -> dict:
     """
-    El manifiesto, sacado de una base de REFERENCIA. Se niega si la base no es
-    una construida desde cero por el ledger: generar esperados desde la base
-    que se quiere adoptar seria verificarla contra si misma.
+    El manifiesto, sacado de una base de REFERENCIA construida desde cero por el
+    ledger con EXACTAMENTE los archivos de la carpeta. Solo lectura.
     """
+    if not mig.ledger_existe(con):
+        raise SystemExit("[manifiesto] la base de referencia no tiene ledger: no fue "
+                         "construida por cli/migrar_asistente.py.")
     pendientes, discrepancias, invalidos, anotadas = mig.plan(con, carpeta)
     malas = [a for a, f in anotadas.items() if f["origen"] != "aplicada"]
-    # Tambien se rechaza una base con MAS migraciones anotadas que las de la
-    # carpeta. Sus objetos de mas entrarian en los esperados: un 'grant ... on
-    # all functions' verificaria la ACL de funciones que el conjunto del
-    # manifiesto no crea, y ninguna base real con ese conjunto coincidiria.
-    # Medido: sin esta regla, el generador acepto una base con cuatro
-    # migraciones de prueba de mas.
     en_carpeta = {r.name for r in mig.archivos(carpeta)}
     sobrantes = sorted(set(anotadas) - en_carpeta)
     if pendientes or discrepancias or invalidos or malas or sobrantes or not anotadas:
@@ -522,16 +502,14 @@ def generar(con, carpeta: Path | None = None, descripcion: str = "") -> dict:
             "sentencias": dict(sorted(tipos.items())),
             "efectos_sin_comprobacion": [list(c) for c in claves
                                          if c[0] in ("datos", "dinamico", "desconocido")],
-            # En las no automaticas tambien se guardan las comprobaciones de
-            # sus partes estaticas: no alcanzan para adoptarlas, pero son lo
-            # que una persona necesita mirar para decidir.
             "verificaciones": [{"clave": list(c), "esperado": _normal(foto(con, c))}
                                for c in verificables],
         }
     return {
         "version": VERSION,
         "algoritmo_checksum": mig.ALGORITMO,
-        "referencia": {"postgres": version_pg, "descripcion": descripcion},
+        "referencia": {"postgres": version_pg, "descripcion": descripcion,
+                       "huella": mig.huella_servidor(con)},
         "migraciones": migraciones,
     }
 
@@ -567,34 +545,41 @@ def verificar_migracion(con, entrada: dict) -> list[str]:
     return fallas
 
 
-def adoptar(con, escribir: bool, espera: float, aceptar: str | None = None,
-            motivo: str | None = None, carpeta: Path | None = None,
-            manifiesto: dict | None = None) -> int:
-    m = manifiesto or cargar()
-    pendientes, discrepancias, invalidos, anotadas = mig.plan(con, carpeta)
+def _huella_compatible(con, m) -> bool:
+    """La compuerta: antes de cualquier verificacion y antes de crear el ledger."""
+    esperada = m.get("referencia", {}).get("huella")
+    if not esperada:
+        malas = ["el manifiesto no trae huella de servidor: fue generado por una "
+                 "version anterior de esta herramienta y hay que regenerarlo"]
+    else:
+        malas = mig.comparar_huella(esperada, mig.huella_servidor(con))
+    if malas:
+        print("[adoptar] LA HUELLA DEL SERVIDOR NO ES LA DEL MANIFIESTO. No se "
+              "verifica ni se escribe nada:")
+        for linea in malas:
+            print(f"    {linea}")
+        print("  Comparar definiciones de catalogo entre versiones mayores o con "
+              "extensiones distintas no es confiable. Hay que generar el manifiesto "
+              "contra una referencia con la misma huella que esta base.")
+        return False
+    return True
+
+
+def _preparar(con, m, carpeta):
+    """Plan filtrado al conjunto del manifiesto. (codigo_de_salida | None, pendientes)"""
+    pendientes, discrepancias, invalidos, _anotadas = mig.plan(con, carpeta)
     if invalidos or discrepancias:
         print("[adoptar] hay archivos no canonicos o aplicados que cambiaron; "
               "resolver antes de adoptar.")
-        return mig.SALIDA_CHECKSUM
-
-    # El manifiesto esta atado a un CONJUNTO de migraciones: sus esperados son
-    # el estado final de una referencia construida con exactamente esos
-    # archivos. Una migracion mas nueva cambia ese estado final --por ejemplo,
-    # un 'grant ... on all functions' viejo verifica la ACL de TODAS las
-    # funciones, incluidas las que agrega la nueva--, asi que:
-    #   * si el repo no tiene un archivo del manifiesto: no se adopta;
-    #   * si el repo tiene archivos MAS NUEVOS que todo el manifiesto: se
-    #     adopta el conjunto del manifiesto y los nuevos quedan pendientes,
-    #     para --aplicar despues;
-    #   * si tiene uno que no esta en el manifiesto y ordena ANTES de su
-    #     ultimo archivo: no se adopta -- no hay referencia para ese orden.
+        return mig.SALIDA_CHECKSUM, None
+    # El manifiesto esta atado a un CONJUNTO de migraciones.
     del_manifiesto = set(m["migraciones"])
     actuales = {r.name for r in mig.archivos(carpeta)}
     faltan = sorted(del_manifiesto - actuales)
     if faltan:
         print(f"[adoptar] el manifiesto referencia archivos que no estan en el "
               f"repo: {faltan}. No se adopta.")
-        return mig.SALIDA_FALLO
+        return mig.SALIDA_FALLO, None
     ultima = max(del_manifiesto)
     extras = sorted(actuales - del_manifiesto)
     intercaladas = [e for e in extras if e < ultima]
@@ -602,28 +587,19 @@ def adoptar(con, escribir: bool, espera: float, aceptar: str | None = None,
         print(f"[adoptar] hay archivos fuera del manifiesto que ordenan antes de "
               f"su ultimo archivo ({ultima}): {intercaladas}. No hay referencia "
               f"para ese orden. No se adopta.")
-        return mig.SALIDA_FALLO
+        return mig.SALIDA_FALLO, None
     if extras:
         print(f"[adoptar] {len(extras)} archivo(s) posteriores al manifiesto quedan "
               f"FUERA de la adopcion y pendientes para --aplicar: {extras}")
-    pendientes = [p for p in pendientes if p[0].name in del_manifiesto]
+    return None, [p for p in pendientes if p[0].name in del_manifiesto]
 
-    if not pendientes:
-        print("[adoptar] no hay nada que adoptar: el ledger ya esta completo.")
-        return mig.SALIDA_OK
 
-    if aceptar is not None:
-        return _aceptar_humano(con, m, pendientes, aceptar, motivo, escribir, espera)
-
+def _clasificar(con, m, pendientes):
     pasan, fallan, no_auto = [], [], []
-    print(f"[adoptar] {len(pendientes)} migracion(es) sin anotar. Manifiesto v{m['version']}, "
-          f"referencia PostgreSQL {m['referencia']['postgres']}.\n")
+    print(f"[adoptar] {len(pendientes)} migracion(es) sin anotar. Manifiesto "
+          f"v{m['version']}, referencia PostgreSQL {m['referencia']['postgres']}.\n")
     for ruta, _texto, sha in pendientes:
         e = m["migraciones"].get(ruta.name)
-        if e is None:
-            no_auto.append((ruta, "sin_manifiesto", "el manifiesto no la conoce"))
-            print(f"  [SIN MANIFIESTO]     {ruta.name}")
-            continue
         if e["sha256"] != sha:
             no_auto.append((ruta, "manifiesto_desactualizado",
                             "el archivo cambio desde que se genero el manifiesto"))
@@ -643,60 +619,18 @@ def adoptar(con, escribir: bool, espera: float, aceptar: str | None = None,
         else:
             pasan.append((ruta, sha, len(e["verificaciones"])))
             print(f"  [VERIFICADA]         {ruta.name}  ({len(e['verificaciones'])} comprobaciones)")
-
     print(f"\n  verificadas automaticamente : {len(pasan)}")
     print(f"  no equivalentes             : {len(fallan)}")
     print(f"  sin decision automatica     : {len(no_auto)}")
-
-    if fallan:
-        print("\n[adoptar] la base NO es equivalente a una construida desde cero en "
-              "las migraciones marcadas. No se escribe nada hasta resolverlo.")
-        return mig.SALIDA_FALLO
-
-    if not escribir:
-        print("\n[adoptar] DRY-RUN: no se escribio nada.")
-        if no_auto:
-            print(f"[adoptar] ADOPCION INCOMPLETA: {len(no_auto)} migracion(es) "
-                  f"necesitan decision humana antes de que el ledger quede completo.")
-        return mig.SALIDA_OK
-
-    if not mig.tomar_lock(con, espera):
-        print("[adoptar] no se obtuvo el lock. No se escribio nada.")
-        return mig.SALIDA_LOCK
-    try:
-        with con.transaction():
-            for ruta, sha, n in pasan:
-                con.execute(
-                    "insert into asistente.migraciones_aplicadas "
-                    "(archivo, sha256, algoritmo, duro_ms, origen, nota) "
-                    "values (%s,%s,%s,0,'baseline',%s)",
-                    (ruta.name, sha, mig.ALGORITMO,
-                     f"adoptada: {n} comprobaciones de catalogo contra manifiesto "
-                     f"v{m['version']} (referencia PostgreSQL {m['referencia']['postgres']})"))
-    finally:
-        mig.soltar_lock(con)
-    print(f"\n[adoptar] {len(pasan)} migracion(es) anotadas como baseline.")
-    if no_auto:
-        print(f"[adoptar] ADOPCION INCOMPLETA: quedan {len(no_auto)} sin anotar:")
-        for ruta, est, mot in no_auto:
-            print(f"    {ruta.name}  [{est}]")
-        print("  '--aplicar' se va a NEGAR a correr mientras existan: son "
-              "migraciones anteriores a otras ya anotadas, y ejecutarlas sobre una "
-              "base existente es justo lo que la adopcion evita.")
-    return mig.SALIDA_OK
+    return pasan, fallan, no_auto
 
 
-def _aceptar_humano(con, m, pendientes, archivo, motivo, escribir, espera) -> int:
-    if not motivo or len(motivo.strip()) < 20:
-        print("[adoptar] --aceptar exige --motivo de al menos 20 caracteres: queda "
-              "escrito en el ledger como la razon de dar por aplicada una migracion "
-              "que no se pudo verificar sola.")
-        return mig.SALIDA_CHECKSUM
+def _aceptar(con, m, pendientes, archivo, motivo, escribir) -> int:
     fila = next(((r, t, s) for r, t, s in pendientes if r.name == archivo), None)
     if fila is None:
         print(f"[adoptar] '{archivo}' no esta pendiente.")
         return mig.SALIDA_FALLO
-    ruta, _texto, sha = fila
+    _ruta, _texto, sha = fila
     e = m["migraciones"].get(archivo)
     if e is None or e["sha256"] != sha:
         print(f"[adoptar] '{archivo}' no esta en el manifiesto o cambio desde que se "
@@ -716,22 +650,81 @@ def _aceptar_humano(con, m, pendientes, archivo, motivo, escribir, espera) -> in
     print(f"    efectos sin comprobacion: {e['efectos_sin_comprobacion']}")
     print(f"    partes verificables: {len(e['verificaciones'])} coinciden")
     if not escribir:
-        print("[adoptar] DRY-RUN: no se escribio nada.")
+        print("[adoptar] solo lectura: no se escribio nada.")
         return mig.SALIDA_OK
-    if not mig.tomar_lock(con, espera):
-        return mig.SALIDA_LOCK
-    try:
-        with con.transaction():
+    with con.transaction():
+        con.execute(
+            "insert into asistente.migraciones_aplicadas "
+            "(archivo, sha256, algoritmo, duro_ms, origen, nota) "
+            "values (%s,%s,%s,0,'baseline_humano',%s)",
+            (archivo, sha, mig.ALGORITMO,
+             f"ACEPTACION HUMANA por {quien} [{e['estado']}]: {motivo.strip()}"))
+    print(f"[adoptar] '{archivo}' anotada como baseline_humano por {quien}.")
+    return mig.SALIDA_OK
+
+
+def _cuerpo(con, m, escribir, aceptar, motivo, carpeta) -> int:
+    """Lo mismo en solo lectura que dentro de la seccion; solo cambia el final."""
+    if not _huella_compatible(con, m):
+        return mig.SALIDA_HUELLA
+    if escribir:
+        mig.asegurar_ledger(con)
+    codigo, pendientes = _preparar(con, m, carpeta)
+    if codigo is not None:
+        return codigo
+    if not pendientes:
+        print("[adoptar] no hay nada que adoptar: el ledger ya esta completo.")
+        return mig.SALIDA_OK
+    if aceptar is not None:
+        return _aceptar(con, m, pendientes, aceptar, motivo, escribir)
+
+    pasan, fallan, no_auto = _clasificar(con, m, pendientes)
+    if fallan:
+        print("\n[adoptar] la base NO es equivalente a una construida desde cero en "
+              "las migraciones marcadas. No se escribe nada hasta resolverlo.")
+        return mig.SALIDA_FALLO
+    if not escribir:
+        print("\n[adoptar] SOLO LECTURA: no se escribio nada. Lo que vale es la "
+              "verificacion que se repite dentro del lock al escribir.")
+        if no_auto:
+            print(f"[adoptar] ADOPCION INCOMPLETA: {len(no_auto)} migracion(es) "
+                  f"necesitan decision humana antes de que el ledger quede completo.")
+        return mig.SALIDA_OK
+    with con.transaction():
+        for ruta, sha, n in pasan:
             con.execute(
                 "insert into asistente.migraciones_aplicadas "
                 "(archivo, sha256, algoritmo, duro_ms, origen, nota) "
-                "values (%s,%s,%s,0,'baseline_humano',%s)",
-                (archivo, sha, mig.ALGORITMO,
-                 f"ACEPTACION HUMANA por {quien} [{e['estado']}]: {motivo.strip()}"))
-    finally:
-        mig.soltar_lock(con)
-    print(f"[adoptar] '{archivo}' anotada como baseline_humano por {quien}.")
+                "values (%s,%s,%s,0,'baseline',%s)",
+                (ruta.name, sha, mig.ALGORITMO,
+                 f"adoptada: {n} comprobaciones de catalogo contra manifiesto "
+                 f"v{m['version']} (referencia PostgreSQL {m['referencia']['postgres']})"))
+    print(f"\n[adoptar] {len(pasan)} migracion(es) anotadas como baseline.")
+    if no_auto:
+        print(f"[adoptar] ADOPCION INCOMPLETA: quedan {len(no_auto)} sin anotar:")
+        for ruta, est, _mot in no_auto:
+            print(f"    {ruta.name}  [{est}]")
+        print("  '--aplicar' se va a NEGAR a correr mientras existan: son "
+              "migraciones anteriores a otras ya anotadas.")
     return mig.SALIDA_OK
+
+
+def adoptar(con, escribir: bool, espera: float, aceptar: str | None = None,
+            motivo: str | None = None, carpeta: Path | None = None,
+            manifiesto: dict | None = None) -> int:
+    if aceptar is not None and (not motivo or len(motivo.strip()) < 20):
+        print("[adoptar] --aceptar exige --motivo de al menos 20 caracteres: queda "
+              "escrito en el ledger como la razon de dar por aplicada una migracion "
+              "que no se pudo verificar sola.")
+        return mig.SALIDA_CHECKSUM
+    m = manifiesto or cargar()
+    if not escribir:
+        return _cuerpo(con, m, False, aceptar, motivo, carpeta)
+    try:
+        with mig.seccion_serializada(con, espera):
+            return _cuerpo(con, m, True, aceptar, motivo, carpeta)
+    except mig.LockNoObtenido as e:
+        return mig.informar_lock(e, "No se verifico ni se escribio nada.")
 
 
 def main(argv=None) -> int:
@@ -742,7 +735,6 @@ def main(argv=None) -> int:
     a = p.parse_args(argv)
     con = mig.conectar()
     try:
-        mig.bootstrap(con)
         man = generar(con, descripcion=a.descripcion)
     finally:
         con.close()
@@ -751,6 +743,8 @@ def main(argv=None) -> int:
     print(f"[manifiesto] {len(man['migraciones'])} migraciones -> {a.salida}")
     for est, n in sorted(cuenta.items()):
         print(f"    {est}: {n}")
+    print(f"    huella: PostgreSQL {man['referencia']['huella']['major']}, "
+          f"extensiones {sorted(man['referencia']['huella']['extensiones'])}")
     return 0
 
 
