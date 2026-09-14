@@ -52,9 +52,13 @@ if [ -n "$MIGRACIONES" ]; then
     echo "$MIGRACIONES" | sed 's/^/    - /'
     echo ""
     echo "  Aplicalas ANTES de seguir probando, o el motor va a fallar en"
-    echo "  medio de una conversacion con un error que no señala la causa:"
+    echo "  medio de una conversacion con un error que no señala la causa."
     echo ""
-    echo "$MIGRACIONES" | sed 's|^|    docker exec -i crm-agentico-db-1 psql -U postgres -d crm_db < |'
+    echo "  Siempre por el ledger. NO con psql: psql se saltea el checksum,"
+    echo "  el lock y el control de huecos, y no deja registro de lo aplicado."
+    echo ""
+    echo "    py -3.13 cli/migrar_asistente.py --estado"
+    echo "    py -3.13 cli/migrar_asistente.py --aplicar"
     echo "================================================================"
     echo ""
 fi

@@ -232,6 +232,38 @@ revisar(not peligrosas,
         f"ningun compose, Dockerfile, script ni workflow ({len(no_python)} archivos) "
         f"ejecuta archivos de supabase/", f"{peligrosas}")
 
+# Los hooks de git merecen una regla propia. 'post-merge' no ejecutaba SQL, pero
+# le INDICABA a quien hace 'git pull' que aplicara las migraciones con
+# 'docker exec ... psql ... < supabase/...sql': la ruta que se saltea el ledger,
+# entregada como instruccion. Los nombres de archivo le llegaban por variable,
+# asi que la linea con psql no decia 'supabase' y la regla de arriba no la veia.
+def invoca_psql(linea: str) -> bool:
+    """Una INVOCACION de psql (con opciones o redireccion), no una mencion.
+    La primera version marcaba la propia advertencia 'NO con psql: ...'."""
+    s = linea.strip()
+    return (not s.startswith("#")) and bool(re.search(r"\bpsql\s+-|\bpsql\b[^\n]*<", s))
+
+
+revisar(invoca_psql("echo \"$M\" | sed 's|^|    docker exec -i crm-agentico-db-1 psql -U postgres -d crm_db < |'")
+        and not invoca_psql('echo "  Siempre por el ledger. NO con psql: psql se saltea el checksum,"'),
+        "la regla de hooks detecta la instruccion vieja y no marca la advertencia nueva "
+        "(control de la propia prueba)")
+
+hooks_con_psql = []
+for p in sorted((RAIZ / ".githooks").glob("*")):
+    if not p.is_file():
+        continue
+    t = p.read_text(encoding="utf-8", errors="replace")
+    if "supabase" in t:
+        hooks_con_psql += [f"{p.name}:{i}: {l.strip()[:90]}"
+                           for i, l in enumerate(t.splitlines(), 1) if invoca_psql(l)]
+revisar(not hooks_con_psql,
+        "ningun hook de git manda a aplicar migraciones con psql",
+        f"{hooks_con_psql}")
+post_merge = (RAIZ / ".githooks" / "post-merge").read_text(encoding="utf-8", errors="replace")
+revisar("cli/migrar_asistente.py --aplicar" in post_merge,
+        "y el aviso de post-merge remite al ledger")
+
 inventario = (RAIZ / "supabase" / "ledger" / "analisis" / "INVENTARIO_RUTAS_SQL.md")
 texto_inv = inventario.read_text(encoding="utf-8") if inventario.exists() else ""
 revisar(all(l in texto_inv for l in LECTORES_ESPERADOS | {"cli/base_desde_cero.py"}),
