@@ -5,6 +5,7 @@
 ================================================================================
 
     py -3.13 cli/base_desde_cero.py --base p2_cero
+    py -3.13 cli/base_desde_cero.py --base p2_cero --sin-recrear     (2a pasada)
     py -3.13 cli/base_desde_cero.py --base p2_cero --verificar-solo
 
 Por que existe
@@ -14,21 +15,25 @@ sabia hacer. Y no se podia hacer sobre una base vacia, porque la mitad del
 esquema la crea Django y la otra mitad los archivos de 'supabase/', y el orden
 entre las dos mitades no estaba escrito en ninguna parte.
 
-Eso se nota recien cuando hace falta: al levantar un entorno nuevo, al montar
-CI, o al auditar si lo desplegado es reproducible. Aca esta el orden, con sus
-dependencias explicitas:
-
     1. La extension pgcrypto en el schema 'ext'      (superusuario, una vez)
     2. Las migraciones de Django                     (crea public.organization)
-    3. Los archivos de supabase/, por nombre         (crea el schema asistente)
-    4. Comprobacion: tablas, constraints, funciones, RLS y grants
+    3. Los archivos de supabase/, POR EL LEDGER      (cli/migrar_asistente.py)
+    4. Comprobacion: tablas, constraints, funciones, RLS, grants y ledger
 
 El paso 2 va ANTES del 3 y no es negociable:
 'supabase/202608042055_schema.sql' referencia 'public.organization(id)', que la
 crea la app 'accounts' de Django. Con la base vacia y sin ese paso, los 42
-archivos fallan en cascada -- medido: 42 de 42, el primero con UndefinedTable y
-los otros 41 con InvalidSchemaName porque el schema 'asistente' nunca llego a
-existir.
+archivos fallan en cascada -- medido: el primero con UndefinedTable y los otros
+con InvalidSchemaName porque el schema 'asistente' nunca llego a existir.
+
+El paso 3 va por el ledger, no ejecutando los archivos
+------------------------------------------------------
+La version anterior de este script ejecutaba los .sql uno por uno. La primera
+pasada funcionaba; la SEGUNDA fallaba con DuplicateObject en cinco archivos
+historicos que hacen 'create policy' sin guarda, y ademas volvia a correr un
+'grant execute on all functions in schema asistente to app_backend' que
+alcanzaba funciones nuevas. Con el ledger, lo anotado no se reejecuta: la
+segunda pasada ('--sin-recrear') tiene que terminar con 0 pendientes.
 
 Django corre en su imagen
 -------------------------
@@ -49,7 +54,6 @@ from __future__ import annotations
 
 import argparse
 import glob
-import io
 import os
 import subprocess
 import sys
@@ -123,24 +127,22 @@ def django(base, host, puerto, usuario, clave) -> int:
     return r.returncode
 
 
-def asistente(base, host, puerto, usuario, clave) -> list[tuple]:
-    """Los archivos de supabase/, en orden de nombre. Devuelve los errores."""
-    errores = []
-    archivos = sorted(glob.glob(str(RAIZ / "supabase" / "*.sql")))
-    with psycopg.connect(dsn(base, host, puerto, usuario, clave),
-                         autocommit=True) as con:
-        for f in archivos:
-            nombre = Path(f).name
-            try:
-                con.execute(io.open(f, encoding="utf-8").read())
-                print(f"  [ok] {nombre}")
-            except Exception as e:                               # noqa: BLE001
-                errores.append((nombre, type(e).__name__,
-                                str(e).splitlines()[0][:140]))
-                print(f"  [FALLA] {nombre}: {type(e).__name__}: "
-                      f"{str(e).splitlines()[0][:140]}")
-    print(f"  {len(archivos)} archivo(s), {len(errores)} error(es)")
-    return errores
+def asistente(base, host, puerto, usuario, clave) -> int:
+    """
+    Los archivos de supabase/, a traves del ledger. Devuelve el codigo de salida
+    del migrador: 0 aplico lo pendiente (o no habia nada), cualquier otro valor
+    es un fallo que el migrador ya explico.
+    """
+    os.environ.update({"DBHOST": host, "DBPORT": str(puerto), "DBNAME": base,
+                       "DBUSER": usuario, "DBPASSWORD": clave})
+    from cli import migrar_asistente as mig                       # noqa: E402
+
+    con = mig.conectar()
+    try:
+        mig.bootstrap(con)
+        return mig.aplicar(con, 60.0)
+    finally:
+        con.close()
 
 
 # -----------------------------------------------------------------------------
@@ -232,6 +234,14 @@ def verificar(base, host, puerto, usuario, clave) -> list[str]:
         cat = con.execute("select count(*) from asistente.job_catalogo").fetchone()[0]
         ok("el catalogo de jobs queda VACIO") if cat == 0 else \
             mal(f"la migracion sembro {cat} job(s): se encenderian solos")
+
+        archivos = {Path(f).name for f in glob.glob(str(RAIZ / "supabase" / "*.sql"))}
+        led = {f[0]: f[1] for f in con.execute(
+            "select archivo, origen from asistente.migraciones_aplicadas").fetchall()}
+        ok(f"el ledger anota los {len(archivos)} archivos, todos 'aplicada'") \
+            if set(led) == archivos and set(led.values()) == {"aplicada"} else \
+            mal(f"ledger incompleto o con otro origen: faltan "
+                f"{sorted(archivos - set(led))}, sobran {sorted(set(led) - archivos)}")
     return malas
 
 
@@ -269,15 +279,13 @@ def main(argv=None) -> int:
               "supabase/ dependen de public.organization.")
         return 1
 
-    paso(3, "migraciones de asistente (supabase/*.sql, por nombre)")
-    errores = asistente(a.base, a.host, a.puerto, a.usuario, a.clave)
-    if errores:
-        print("\n[cero] la cadena de asistente fallo:")
-        for e in errores:
-            print(f"    {e}")
+    paso(3, "migraciones de asistente, por el ledger")
+    codigo = asistente(a.base, a.host, a.puerto, a.usuario, a.clave)
+    if codigo != 0:
+        print(f"\n[cero] el migrador termino en {codigo}; la cadena no continua.")
         return 1
 
-    paso(4, "comprobacion de tablas, constraints, funciones, RLS y grants")
+    paso(4, "comprobacion de tablas, constraints, funciones, RLS, grants y ledger")
     malas = verificar(a.base, a.host, a.puerto, a.usuario, a.clave)
     print()
     if malas:
