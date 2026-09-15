@@ -217,7 +217,7 @@ El servicio es `kong`, la pasarela de API — **no `db`**. Apuntarlo a `db` da 5
 
 Al entrar pide usuario y contraseña: son `DASHBOARD_USERNAME` y `DASHBOARD_PASSWORD` de las variables de ese proyecto.
 
-### 4.b.1 Lo que ese dominio NO debe publicar — contención del 15/09/2026
+### 4.b.1 Lo que ese dominio NO debe publicar — contención y hardening del 15/09/2026
 
 `crm.rapilinksas.co` apunta a Kong, y Kong no publica solo el Studio: la plantilla de Supabase trae también `/rest/v1` (PostgREST), `/graphql/v1`, `/auth/v1`, `/realtime/v1`, `/storage/v1` y `/functions/v1`. Dexter no usa ninguno (ver el principio de este documento), pero estaban abiertos.
 
@@ -229,6 +229,7 @@ Al entrar pide usuario y contraseña: son `DASHBOARD_USERNAME` y `DASHBOARD_PASS
 |---|---|---|
 | 07:27 | Comentados los servicios `rest-v1` y `graphql-v1` de Kong (encabezado `# CONTENCION 15/09/2026`); reiniciado **solo** `kong-1` | `/etc/dokploy/compose/automatizacion-rp-supabase-dgimpk/files/volumes/api/kong.yml` (respaldo en `/root/kong.yml.antes-contencion-20260915142704`) |
 | 08:07 | `DISABLE_SIGNUP=true` y `ENABLE_PHONE_SIGNUP=false`; redeploy (solo se recreó `auth-1`) | Variables del proyecto Supabase en Dokploy |
+| 10:26–10:27 | Revocados en la base los privilegios de `anon` y `authenticated` sobre `public`, y los default privileges que se los volvían a dar | Catálogo de Postgres; SQL en `supabase/seguridad/` (ver abajo) |
 
 La publicación `supabase_realtime` no tiene tablas, así que Realtime no emite cambios de `public`.
 
@@ -249,9 +250,41 @@ Cómo leer el `curl`, porque engaña: con la ruta cerrada **no da 404**. La ruta
 
 Para revertir la parte de Kong: `cp -a /root/kong.yml.antes-contencion-20260915142704 <archivo>` y `docker restart $P-kong-1`.
 
+**El hardening de la base, que es lo que hace que una ruta reabierta no vuelva a dar acceso.** Cerrar Kong deja a `anon` y `authenticated` sin camino HTTP; quitarles el permiso deja sin nada que alcanzar si el camino vuelve. Aplicado el 15/09/2026 con los dos SQL de `supabase/seguridad/`, bytes exactos del commit `960408d`, por conexión directa a Postgres (túnel SSH al contenedor `db`, **no** Supavisor) con `statement_timeout=30s` y `lock_timeout=1s`:
+
+1. `revocar_data_api_postgres.sql`, como `postgres`: relaciones, funciones propias, USAGE directo del schema y los default privileges de `postgres` en `public`.
+2. `revocar_data_api_supabase_admin.sql`, como `supabase_admin`: sus default privileges en `public` y el EXECUTE directo sobre las funciones de extensión, que `postgres` no puede tocar.
+
+Cada uno es una transacción con postcondiciones que miden el efecto y exigen que ninguna otra ACL cambie: si algo falla, no queda nada. Antes se probaron sobre la imagen exacta de producción (`tests/test_revocar_data_api.py`).
+
+Medido después, en producción: `anon` y `authenticated` pasaron de 129 tablas y 51 secuencias a **0 y 0**; se quitaron 2718 entradas de ACL, exactamente las suyas en `public`; los default privileges de `postgres` y `supabase_admin` en `public` ya no los nombran; `crm_user`, `motor_user`, `service_role` y `PUBLIC` quedaron idénticos. Prueba de humo: contenedores arriba, `/login` 200, `/admin/` 302, motor `/salud` 200, y 0 errores de permisos en backend, celery-worker, celery-beat, motor y motor-reloj.
+
+Lo que **no** cambia, a propósito: `PUBLIC` conserva USAGE sobre `public` y EXECUTE sobre las funciones de `vector` y `pg_trgm`, así que `anon` también. Son funciones de cálculo que no leen tablas; quitárselo a `PUBLIC` afecta a todos los roles.
+
+Para verificar (solo catálogo, como `postgres`, sin leer filas):
+
+```sql
+select r.rol,
+       count(*) filter (where c.relkind in ('r','v','m','p','f')
+         and has_table_privilege(r.rol, c.oid, 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER,MAINTAIN')) as relaciones,
+       count(*) filter (where c.relkind = 'S' and has_sequence_privilege(r.rol, c.oid, 'USAGE,SELECT,UPDATE')) as secuencias
+from pg_class c join pg_namespace n on n.oid = c.relnamespace
+cross join (values ('anon'), ('authenticated')) r(rol)
+where n.nspname = 'public'
+group by 1;                                      -- esperado: 0 y 0 en las dos filas
+
+select pg_get_userbyid(d.defaclrole), d.defaclobjtype
+from pg_default_acl d cross join lateral aclexplode(d.defaclacl) a
+where d.defaclnamespace = 'public'::regnamespace
+  and a.grantee in ('anon'::regrole, 'authenticated'::regrole);   -- esperado: ninguna fila
+```
+
+⚠️ **Después de actualizar la imagen o la plantilla de Supabase, correr las dos consultas y la verificación de Kong de arriba.** Una actualización puede traer migraciones de plataforma que vuelvan a conceder a `anon`/`authenticated`, igual que puede reponer las rutas. Los dos SQL son idempotentes: si reaparece algo, se vuelven a correr, en el mismo orden y con los mismos roles.
+
+**Reversión: no hay un SQL de reversa en el repo, a propósito.** Devolverle a `anon` el acceso a `public` es reabrir el incidente. Si alguna vez hiciera falta, quien aplicó el cambio guardó fuera del repo una foto completa de las ACL previas, y de ahí se arma el `GRANT` puntual que haga falta, con autorización.
+
 **Lo que esto NO cierra, pendiente:**
 
-- Los privilegios siguen en la base. Cerrar la ruta deja a `anon` y `authenticated` sin camino HTTP, pero si la ruta vuelve, vuelve el acceso. El arreglo de fondo es revocarlos (y sus default privileges) en la base: diseñado y en prueba local, **no aplicado**.
 - El Studio sigue publicado por HTTP detrás de basic-auth. Es una consola administrativa de la base; con credenciales robustas sigue siendo superficie que no hace falta exponer.
 - Los puertos de Postgres/Supavisor (ver Pendientes).
 
