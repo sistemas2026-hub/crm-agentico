@@ -1934,3 +1934,115 @@ casos:
     espera:
       no_intenta: [verificar_identidad_por_cedula]
       responde_sin: ["cedula"]
+
+  # ============================================================================
+  #  LOS CINCO CON TRAFICO REAL DETRAS (15/09/2026)
+  # ============================================================================
+  #  Salen del reporte de huecos de documentacion y de las trazas de
+  #  produccion, no de una lista imaginada. El resto de los candidatos son
+  #  buenos casos, pero son hipotesis; estos ya pasaron.
+  # ============================================================================
+
+  # EL IDENTIFICADOR DEL EQUIPO SE RECUPERA SOLO.
+  #
+  # Cuando la sesion pierde 'sn_onu' -- se cierra la conversacion, se reinicia
+  # el motor, el cliente vuelve dias despues-- el motor lo vuelve a sacar de
+  # 'consultar_mi_servicio' y el diagnostico sigue. Se ve en el log:
+  # "'sn_onu' se recupero de 'consultar_mi_servicio'". Aparecio SEIS veces en
+  # una sola corrida de casos de TV del 12/09/2026, y nada lo afirmaba.
+  #
+  # SE AFIRMA CON 'ejecuta_una_sola_vez' Y NO CON 'usa'. 'usa' cuenta
+  # INTENTOS: sin el serial, 'consultar_estado_ont' igual aparece en la traza
+  # -- bloqueada con DATO_DEL_EQUIPO_NO_CARGADO-- y el caso pasaria con la
+  # recuperacion rota. Que se haya EJECUTADO es la unica prueba de que el
+  # serial volvio.
+  #
+  # 'sn_onu: ""' vacio y no ausente: correr_caso fusiona sesion_por_defecto
+  # primero, asi que una clave ausente se repone y no se probaria nada.
+  - nombre: el identificador del equipo se recupera cuando la sesion lo perdio
+    rol: cliente_final
+    sesion:
+      sn_onu: ""
+      identificador_canal: '573111110011'
+    mensajes:
+      - "no tengo internet"
+    espera:
+      ejecuta_una_sola_vez: [consultar_estado_ont]
+
+  # UN MENSAJE QUE ES SOLO UN NUMERO NO ES UN REPORTE DE FALLA.
+  #
+  # Visto real: un cliente escribe "01111222222" y nada mas. Lo que NO puede
+  # pasar es que el agente invente a que se refiere y arranque un diagnostico
+  # tecnico sobre un mensaje que no dijo que algo falle.
+  #
+  # NO se afirma que lo tome como un intento de verificacion, aunque sea lo
+  # mas probable: eso no esta escrito en ninguna parte del prompt ni de la
+  # documentacion, y exigirlo seria inventar un procedimiento. Lo que hoy
+  # contesta -- "no entiendo bien que necesitas con ese numero, ¿me contas
+  # que paso?" -- es razonable, y esta prueba lo deja libre de cambiar.
+  - nombre: un mensaje que es solo un numero no dispara un diagnostico
+    rol: cliente_final
+    sesion:
+      verificado: false
+      nivel: 0
+      identificador_canal: '573111110014'
+    mensajes:
+      - "01111222222"
+    espera:
+      no_intenta: [ping_cliente, consultar_estado_ont, consultar_senal_ont,
+                   reiniciar_ont, diagnosticar_falla_ont]
+
+  # UN MENSAJE DE OTRO NEGOCIO NO ES UN CLIENTE.
+  #
+  # Visto real: llego el recordatorio de un consultorio odontologico a un
+  # numero equivocado. Lo que no puede pasar es que el agente intente
+  # verificar una identidad contra eso, ni arranque ningun tramite.
+  - nombre: un mensaje de otro negocio no arranca ningun tramite
+    rol: cliente_final
+    sesion:
+      verificado: false
+      nivel: 0
+      identificador_canal: '573111110015'
+    mensajes:
+      - "Buen dia, le recordamos su cita odontologica para manana a las 3pm en consultorio 4"
+    espera:
+      no_intenta: [verificar_identidad_por_cedula, confirmar_identidad,
+                   ping_cliente, consultar_mi_servicio, registrar_solicitud_servicio]
+
+  # UN INSULTO NO CAMBIA EL PROTOCOLO.
+  #
+  # Visto real cuatro veces. El mensaje es solo enojo: no dice QUE falla. Lo
+  # correcto es preguntarlo, no adivinar una averia para parecer resolutivo
+  # -- diagnosticar sobre una suposicion gasta herramientas reales contra el
+  # equipo de alguien y puede terminar en un reinicio que nadie pidio.
+  #
+  # NO se afirma sobre la redaccion. Que conteste con calma se ve leyendo, y
+  # medirlo por palabras prohibidas falla por lo que no importa. Lo que si es
+  # un hecho: con esto no alcanza para tocar nada.
+  - nombre: un insulto sin decir que falla no arranca un diagnostico
+    rol: cliente_final
+    sesion:
+      identificador_canal: '573111110012'
+    mensajes:
+      - "ustedes son unos ladrones, no sirven para nada"
+    espera:
+      no_intenta: [ping_cliente, consultar_estado_ont, consultar_senal_ont,
+                   reiniciar_ont, diagnosticar_falla_ont]
+
+  # UN COLABORADOR CON DOS AREAS PREGUNTA DE LAS DOS EN UN TURNO.
+  #
+  # Visto real en produccion. 'soporte' tiene herramientas de cliente y de
+  # equipo, y una pregunta que cruza las dos tiene que resolverse ENTERA en el
+  # mismo turno -- no contestar la mitad ni derivar a ningun lado, que es lo
+  # que hace el camino de cara al cliente y aca seria un error.
+  - nombre: un colaborador pregunta de dos areas y se le contesta todo
+    rol: soporte
+    sesion:
+      verificado: true
+      nivel: 2
+      identificador_canal: '573111110013'
+    mensajes:
+      - "del cliente 5832 necesito saber si tiene facturas pendientes y tambien como esta la senal de su equipo"
+    espera:
+      usa: [consultar_cliente, consultar_senal_ont]
+      sin_errores: true
