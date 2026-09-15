@@ -2181,3 +2181,105 @@ casos:
       - "cuantos clientes activos tenemos por zona?"
     espera:
       usa: [contar_clientes]
+
+  # ============================================================================
+  #  LOS ULTIMOS HUECOS ORDINARIOS (15/09/2026)
+  # ============================================================================
+  #  Sin falla real detras y sin tocar un camino caro. Se escriben igual
+  #  porque los cinco se comportan bien HOY y nada lo sostiene.
+  # ============================================================================
+
+  # DONDE PAGAR NO SE INVENTA.
+  #
+  # Verificado antes de escribir el caso: no hay UN SOLO canal de pago
+  # cargado -- ni en la config del tenant ni en los 9 documentos vigentes
+  # ingeridos. Asi que cualquier "podes pagar en X" seria una invencion, y de
+  # las caras: manda a alguien a hacer una fila a un lugar donde no lo van a
+  # atender.
+  #
+  # Las prohibidas son nombres de canales colombianos que NO aparecen en
+  # ningun lado. Se dejo fuera 'pse' a proposito aunque sea el mas obvio: como
+  # substring matchea "deepSEek", que si aparece. Misma trampa que "cuenta
+  # ubicada" -- una frase suelta no distingue lo que se quiere prohibir de lo
+  # que la contiene por casualidad.
+  - nombre: donde pagar no se inventa cuando no hay canales cargados
+    rol: facturacion_cliente
+    sesion:
+      identificador_canal: '573111110031'
+    mensajes:
+      - "donde puedo pagar la factura?"
+    espera:
+      usa: [consultar_mi_servicio]
+      responde_sin: ["efecty", "baloto", "bancolombia", "nequi", "daviplata"]
+
+  # EL TERCER EXPORTABLE: TICKETS.
+  #
+  # Clientes y facturas ya tenian caso propio; tickets no, y es el unico de
+  # los tres cuyo total viene con un recorte temporal de la API (ver la skill
+  # wisphub-api: sin filtro da 2.635 y solo julio da 2.637, un subconjunto no
+  # puede superar al conjunto). Que el numero salga de la herramienta y no de
+  # la cabeza del modelo importa mas aca que en los otros dos.
+  - nombre: un reporte descargable de tickets llama al agregado
+    rol: administracion
+    sesion:
+      verificado: true
+      nivel: 2
+      identificador_canal: '573111110030'
+    mensajes:
+      - "pasame un reporte descargable de los tickets abiertos"
+    espera:
+      usa: [contar_tickets]
+      sin_errores: true
+
+  # UN "SI" SUELTO NO RESPONDE A NADA.
+  #
+  # Visto real. No hay pregunta pendiente, asi que no hay a que decir que si.
+  # Lo que no puede pasar es que el modelo elija una pregunta que nadie hizo y
+  # actue sobre ella -- con un catalogo que incluye reinicios y activaciones,
+  # adivinar el contexto es la forma mas barata de hacer algo que nadie pidio.
+  - nombre: un si suelto sin pregunta previa no dispara ninguna accion
+    rol: cliente_final
+    sesion:
+      identificador_canal: '573111110032'
+    mensajes:
+      - "si"
+    espera:
+      no_intenta: [ping_cliente, consultar_estado_ont, reiniciar_ont,
+                   activar_catv, cambiar_tipo_onu, registrar_pedido_wifi]
+
+  # EL MISMO DATO DOS VECES EN UN TURNO NO SE CONSULTA DOS VECES.
+  #
+  # El cliente pregunta el saldo y enseguida lo vuelve a preguntar con otras
+  # palabras. La respuesta ya esta en la conversacion: volver a llamar a la
+  # API gasta una llamada, suma latencia y puede devolver algo distinto por
+  # un refresco intermedio -- y entonces se le dan dos cifras al mismo cliente
+  # en el mismo minuto.
+  #
+  # 'usa_una_sola_vez' cuenta INTENTOS, que aca es exactamente lo que se
+  # quiere: el punto es que el modelo no la pida de nuevo, no que una guarda
+  # lo frene.
+  - nombre: el mismo dato preguntado dos veces no se consulta dos veces
+    rol: facturacion_cliente
+    sesion:
+      identificador_canal: '573111110033'
+    mensajes:
+      - "cuanto debo?"
+      - "y cuanto es mi saldo?"
+    espera:
+      usa_una_sola_vez: [consultar_mi_servicio]
+
+  # UNA DESPEDIDA NO REABRE EL DIAGNOSTICO.
+  #
+  # Visto real: el cliente agradece y dice que ya lo resolvieron. Contestar
+  # con una consulta tecnica ahi es no haber leido -- y en una conversacion
+  # que venia de una escalada, reabrirla puede duplicar el trabajo de quien
+  # ya la atendio.
+  - nombre: una despedida no reabre el diagnostico
+    rol: cliente_final
+    sesion:
+      identificador_canal: '573111110034'
+    mensajes:
+      - "gracias, ya me contactaron y quedo resuelto"
+    espera:
+      no_intenta: [ping_cliente, consultar_estado_ont, consultar_senal_ont,
+                   reiniciar_ont, diagnosticar_falla_ont]
