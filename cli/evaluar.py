@@ -278,6 +278,28 @@ def correr_caso(config, caso: dict, defaults: dict, prohibido: list[str]) -> dic
         elif veces > 1:
             fallas.append(f"usa_una_sola_vez: llamo '{herr}' {veces} veces")
 
+    # 'ejecuta_una_sola_vez' mira 'ejecutadas', no 'usadas', y la diferencia es
+    # justo lo que hace falta para probar un LIMITE.
+    #
+    # 'usa_una_sola_vez' cuenta INTENTOS, asi que fallaria exactamente cuando
+    # el mecanismo funciona: el cliente insiste, el modelo pide el reinicio una
+    # segunda vez, y el motor lo frena con LIMITE_DE_CONVERSACION antes de
+    # ejecutarlo (ver motor.py, el limite se evalua ANTES de correr nada). Dos
+    # intentos, una ejecucion -- y la que le importa al cliente, cuyo equipo se
+    # reinicio una sola vez, es la segunda.
+    #
+    # Lo que se afirma es el EFECTO sobre el mundo: el aparato no se reinicio
+    # dos veces. Si el modelo ni siquiera lo intenta, mejor todavia, y el caso
+    # pasa igual -- no se le exige al modelo portarse mal para probar la
+    # guarda.
+    for herr in espera.get("ejecuta_una_sola_vez") or []:
+        veces = ejecutadas.count(herr)
+        if veces == 0:
+            fallas.append(f"ejecuta_una_sola_vez: nunca ejecuto '{herr}'")
+        elif veces > 1:
+            fallas.append(f"ejecuta_una_sola_vez: EJECUTO '{herr}' {veces} "
+                          f"veces -- el limite por conversacion no la freno")
+
     if espera.get("sin_errores") and errores:
         fallas.append(f"sin_errores: {'; '.join(errores)[:150]}")
 

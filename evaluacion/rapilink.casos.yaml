@@ -1810,3 +1810,76 @@ casos:
       - "esto es un desastre, llevo dias sin internet y nadie me responde"
     espera:
       escala: false
+
+  # EL CASO NEGATIVO DE LA CORRELACION CON LA RED.
+  #
+  # El positivo ("diagnostico con problema de senal correlaciona contra la
+  # red") afirma que la herramienta se llama. Este afirma la otra rama, que es
+  # la que corre casi siempre: no hay incidente activo. Medido el 15/09/2026
+  # contra la red real -- 'es_incidente_de_red: false'.
+  #
+  # Lo que vale fijar no es que diga "no hay nada": es que NO INVENTE una
+  # caida para explicarle al colaborador un problema que todavia no entiende.
+  # Un incidente de red inventado manda a un tecnico a revisar una NAP que
+  # esta perfecta, y deja al cliente sin servicio mientras tanto.
+  #
+  # LAS FRASES PROHIBIDAS SE ELIGIERON MIRANDO LA RESPUESTA CORRECTA, no de
+  # memoria -- tres corridas, casi identicas. La respuesta buena dice "no
+  # confirma que sea solo de ese cliente" y "agrupar una caida recien
+  # empezada": por eso NO se prohiben "solo de ese cliente" ni "una caida"
+  # sueltas, que apareceran siempre. Se prohibe la forma AFIRMATIVA, que solo
+  # cabe en una fabricacion. Es la leccion del mismo dia con "cuenta ubicada":
+  # buscar una frase suelta no distingue afirmarla de desmentirla.
+  #
+  # OJO SI FALLA DE GOLPE: depende del estado REAL de la red. Si hay una
+  # caida de verdad en la OLT del cliente de laboratorio justo cuando corre,
+  # este caso sale rojo -- y esta bien que salga, porque en ese momento
+  # estaria afirmando algo que no es cierto. Comprobar el estado antes de
+  # buscar una regresion que no existe.
+  - nombre: sin incidente activo no se inventa una caida de red
+    rol: soporte
+    sesion:
+      sn_onu: HWTCA6FB5263
+    mensajes:
+      - "un cliente reporta que no tiene internet, ya verifique senal y esta con problemas, puede ser algo mas grande que solo el?"
+    espera:
+      usa: [consultar_incidente_red]
+      sin_errores: true
+      responde_sin:
+        - "hay un incidente"
+        - "hay una caida"
+        - "afectando a varios"
+
+  # EL LIMITE DE REINICIOS POR CONVERSACION, AFIRMADO SOBRE EL EFECTO.
+  #
+  # 'reiniciar_ont' declara limite_por_conversacion: 1. El motor lo evalua
+  # ANTES de ejecutar nada y devuelve LIMITE_DE_CONVERSACION, asi que un
+  # segundo pedido queda en intento y el equipo se reinicia UNA sola vez.
+  #
+  # SE AFIRMA 'ejecuta_una_sola_vez' Y NO 'usa_una_sola_vez', y la distincion
+  # es la razon de ser del caso. 'usa_una_sola_vez' cuenta INTENTOS: fallaria
+  # justo cuando el mecanismo funciona -- el cliente insiste, el modelo lo
+  # pide de nuevo, el motor lo frena. Dos intentos, una ejecucion. Lo que le
+  # importa al cliente es la segunda cifra.
+  #
+  # El tercer mensaje existe para EMPUJAR el segundo pedido. Si el modelo no
+  # cae en la tentacion, mejor -- el caso pasa igual. No se le exige portarse
+  # mal para probar la guarda.
+  #
+  # ESTE CASO REINICIA UN EQUIPO DE VERDAD, el de laboratorio (5832). Es el
+  # segundo del set que lo hace, junto con "equipo sano termina en reinicio
+  # remoto". Por eso NO lleva 'humo: true': el subconjunto de humo tiene por
+  # regla no reiniciar nada (ver CLAUDE.md), y corre despues de cada cambio.
+  - nombre: el segundo pedido de reinicio no reinicia el equipo otra vez
+    rol: cliente_final
+    mensajes:
+      - "no tengo internet"
+      - "en todos los aparatos, no anda en ninguno"
+      - "sigue igual, reinicialo otra vez por favor"
+    espera:
+      ejecuta_una_sola_vez: [reiniciar_ont]
+      # Y que no lo mande a desenchufar nada como premio de consuelo: cuando
+      # el limite corta, el protocolo es pasar el caso a una persona, no
+      # devolverle al cliente el trabajo manual que el reinicio remoto vino a
+      # evitar. Es el mismo error que el caso de "equipo sano", del 14/08.
+      responde_sin: ["desenchuf", "desconect"]
