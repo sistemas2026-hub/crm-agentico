@@ -24,7 +24,12 @@ adapto a lo segundo antes de aplicarse en ningun entorno real.
   4. una base con los bytes VIEJOS de P2 falla cerrado por checksum
   5. P2 aplicado por un rol como el 'postgres' de Supabase --sin superusuario,
      con CREATEROLE, dueño de 'extensions', EXECUTE con grant option-- en un
-     PostgreSQL efimero propio: roles, dueños y grants
+     PostgreSQL efimero propio: la cadena entera en el ledger, roles, los 15
+     dueños, sin CREATE residual, grants de pgcrypto; y el control negativo:
+     sin el CREATE temporal, ese rol no puede pasarle una tabla a asistente_owner
+
+  En 3 ademas: los 15 dueños, sin CREATE, y las postcondiciones de P2 abortando
+  cuando se les rompe una tabla, una funcion o se deja CREATE puesto.
 
 Lo que NO prueba: supautils ni PostgreSQL 17. Eso es la referencia con la
 imagen exacta de produccion.
@@ -96,6 +101,17 @@ P2 = ("202609141200_scheduler_persistente.sql", "202609141300_scheduler_funcione
 FIRMA_6 = ("p_org uuid, p_query_embedding vector, p_match_count integer, "
            "p_umbral real, p_filtros jsonb, p_rol text")
 FUNCIONES_PGCRYPTO = {"extensions.digest(text,text)", "extensions.gen_random_bytes(integer)"}
+TABLAS_P2 = ("job_catalogo", "job_schedule_state", "job_run", "job_attempt", "job_run_event")
+FUNCIONES_P2 = ("asistente.job_slot(timestamptz, interval, timestamptz)",
+                "asistente.jobs_vencidos(timestamptz, int)",
+                "asistente.job_claim(text, uuid, timestamptz, text, jsonb)",
+                "asistente.job_cerrar_turno(uuid, text, timestamptz)",
+                "asistente.job_intento_vigente(uuid, text)",
+                "asistente.job_heartbeat(uuid, text)",
+                "asistente.job_finalize(uuid, text, text, text)",
+                "asistente.job_contexto(uuid, text)",
+                "asistente.job_intento_vigente_por_capability(text)",
+                "asistente.job_salud(timestamptz)")
 REVOCA_PUBLIC = ("revoke execute on function extensions.digest(text,text), "
                  "extensions.gen_random_bytes(integer) from public")
 USA_PGCRYPTO = ("select length(extensions.digest('x', 'sha256')), "
@@ -176,6 +192,17 @@ def explicitos(base, **kw) -> dict:
                          'extensions.gen_random_bytes(integer)'::regprocedure)
            and a.privilege_type = 'EXECUTE'
            and a.grantee = (select oid from pg_roles where rolname = 'asistente_owner')""", **kw))
+
+
+def duenos_15(base, **kw):
+    """(objeto, dueño) de las 5 tablas y las 10 funciones de P2, por nombre y firma exactos."""
+    return consultar(base, """
+        select 'asistente.' || t,
+               (select pg_get_userbyid(relowner) from pg_class where oid = to_regclass('asistente.' || t))
+          from unnest(%s::text[]) t
+        union all
+        select f, (select pg_get_userbyid(proowner) from pg_proc where oid = to_regprocedure(f))
+          from unnest(%s::text[]) f""", (list(TABLAS_P2), list(FUNCIONES_P2)), **kw)
 
 
 def fila_minima(cur, esquema, tabla, fijos):
@@ -341,6 +368,25 @@ try:
     revisar(estado is not None and "USAGE en el schema extensions" in msg,
             "si falta el USAGE en extensions, tambien aborta", f"{estado}: {msg}")
 
+    d15 = duenos_15(BASE)
+    revisar(len(d15) == 15 and all(d == "asistente_owner" for _o, d in d15),
+            "los 15 objetos de P2 (5 tablas, 10 funciones) son de asistente_owner", f"{d15}")
+    revisar(consultar(BASE, "select has_schema_privilege('asistente_owner', 'asistente', 'CREATE')")[0][0] is False,
+            "asistente_owner NO conserva CREATE en el schema asistente")
+    postcond = sentencia(P2[1], "conserva CREATE")
+    estado, msg = error_en(BASE, postcond)
+    revisar(estado is None, "las postcondiciones de dueños y CREATE pasan", f"{estado}: {msg}")
+    estado, msg = error_en(BASE, "grant create on schema asistente to asistente_owner", postcond)
+    revisar(estado is not None and "conserva CREATE" in msg,
+            "si asistente_owner conservara CREATE, la postcondicion ABORTA", f"{estado}: {msg}")
+    estado, msg = error_en(BASE, "alter table asistente.job_run owner to current_user", postcond)
+    revisar(estado is not None and "asistente.job_run" in msg,
+            "si una tabla no quedara de asistente_owner, ABORTA nombrandola", f"{estado}: {msg}")
+    estado, msg = error_en(BASE, "alter function asistente.job_claim(text, uuid, timestamptz, text, jsonb) "
+                                 "owner to current_user", postcond)
+    revisar(estado is not None and "job_claim" in msg,
+            "si una funcion no quedara de asistente_owner, ABORTA nombrandola", f"{estado}: {msg}")
+
     recrear(VACIA)
     guardas = {a: sentencia(a, "to_regprocedure") for a in P2}
     for a, g in guardas.items():
@@ -474,6 +520,30 @@ try:
                                  "join pg_namespace n on n.oid = p.pronamespace "
                                  "where n.nspname = 'asistente' and p.proname like 'job%'", **super_kw)
     revisar(duenos == [("asistente_owner",)], "las funciones job_* son de asistente_owner", f"{duenos}")
+
+    ledger5 = consultar("dexter", "select archivo, origen from asistente.migraciones_aplicadas order by 1",
+                        **super_kw)
+    revisar([f[0] for f in ledger5] == archivos and {f[1] for f in ledger5} == {"aplicada"},
+            f"{len(ledger5)}/{len(archivos)} en el ledger como 'postgres', {P2[1][:12]} incluido, todos 'aplicada'",
+            f"faltan {sorted(set(archivos) - {f[0] for f in ledger5})}")
+    d15 = duenos_15("dexter", **super_kw)
+    revisar(len(d15) == 15 and all(d == "asistente_owner" for _o, d in d15),
+            "15/15: las 5 tablas y las 10 funciones de P2 son de asistente_owner", f"{d15}")
+    revisar(consultar("dexter", "select has_schema_privilege('asistente_owner', 'asistente', 'CREATE')",
+                      **super_kw)[0][0] is False,
+            "al terminar, asistente_owner NO conserva CREATE en asistente")
+
+    # Control negativo con los roles reales y 'postgres' sin superusuario: el
+    # CREATE temporal es lo que hace pasar el cambio de dueño.
+    estado, msg = error_en("dexter", "create table asistente.zz_prueba_owner (x int)",
+                           "alter table asistente.zz_prueba_owner owner to asistente_owner", **rol_kw)
+    revisar(estado == "42501" and "schema asistente" in msg,
+            "control: sin CREATE temporal, 'postgres' no puede darle una tabla a asistente_owner (42501)",
+            f"{estado}: {msg}")
+    estado, msg = error_en("dexter", "grant create on schema asistente to asistente_owner",
+                           "create table asistente.zz_prueba_owner (x int)",
+                           "alter table asistente.zz_prueba_owner owner to asistente_owner", **rol_kw)
+    revisar(estado is None, "y con el CREATE temporal si puede (deshecho)", f"{estado}: {msg}")
     estado, msg = error_en("dexter", REVOCA_PUBLIC, "set local role asistente_owner", USA_PGCRYPTO, **super_kw)
     revisar(estado is None, "y ahi tambien usa pgcrypto sin depender de PUBLIC", f"{estado}: {msg}")
 finally:

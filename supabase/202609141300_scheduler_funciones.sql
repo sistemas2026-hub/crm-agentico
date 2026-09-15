@@ -132,6 +132,19 @@ begin
   execute format('grant asistente_owner to %I', current_user);
 end $$;
 
+-- CREATE TEMPORAL para el cambio de dueño. Quien migra en produccion ('postgres'
+-- de Supabase) NO es superusuario, y para un no-superusuario PostgreSQL exige
+-- que el NUEVO dueño tenga CREATE sobre el schema del objeto: sin esto, los 15
+-- 'owner to asistente_owner' de este archivo fallan con "permission denied for
+-- schema asistente" (medido el 15/09/2026, cadena completa como postgres
+-- NOSUPERUSER CREATEROLE). Como superusuario no pasaba nada, y por eso ninguna
+-- prueba lo veia.
+--
+-- Se quita inmediatamente despues del ultimo 'owner to' (seccion 11) y al final
+-- se comprueba que no haya quedado. Todo corre en la transaccion del archivo:
+-- si algo falla en el medio, este grant se deshace con lo demas.
+grant create on schema asistente to asistente_owner;
+
 -- Las tablas pasan a ser del dueño. A partir de aca, ningun rol de runtime
 -- tiene permiso sobre ellas: se revoca todo y no se otorga nada.
 alter table asistente.job_catalogo       owner to asistente_owner;
@@ -961,6 +974,11 @@ alter function asistente.job_contexto(uuid, text)                        owner t
 alter function asistente.job_intento_vigente_por_capability(text)        owner to asistente_owner;
 alter function asistente.job_salud(timestamptz)                          owner to asistente_owner;
 
+-- Ultimo 'owner to' hecho: se retira el CREATE temporal de la seccion 1. El
+-- dueño no lo necesita para seguir siendolo, y no se deja un privilegio que
+-- nadie pidio. Comprobado al final del archivo.
+revoke create on schema asistente from asistente_owner;
+
 -- 'revoke from public' en cada funcion: sin esto, SECURITY DEFINER las deja
 -- ejecutables por CUALQUIER rol, que es la trampa clasica de este patron.
 --
@@ -1026,3 +1044,51 @@ revoke all on function asistente.job_salud(timestamptz)                         
 -- 'job_cerrar_turno', 'job_intento_vigente' y su variante por capability no
 -- se otorgan a nadie: son piezas
 -- internas. Se llaman desde el cuerpo de las otras, que corren como el dueño.
+
+-- -----------------------------------------------------------------------------
+--  12. POSTCONDICIONES
+-- -----------------------------------------------------------------------------
+-- Que los 'owner to' y el 'revoke' no hayan dado error no alcanza: se exige el
+-- estado final. Si no se cumple, la migracion aborta y la transaccion se deshace
+-- entera, CREATE temporal incluido. Sin EXCEPTION que absorba nada.
+do $$
+declare
+  malas text[] := array[]::text[];
+  t     text;
+  f     text;
+begin
+  foreach t in array array['job_catalogo', 'job_schedule_state', 'job_run',
+                           'job_attempt', 'job_run_event']
+  loop
+    if (select pg_get_userbyid(c.relowner) from pg_class c
+         where c.oid = to_regclass('asistente.' || t)) is distinct from 'asistente_owner' then
+      malas := malas || ('tabla asistente.' || t || ' no es de asistente_owner');
+    end if;
+  end loop;
+  foreach f in array array[
+      'asistente.job_slot(timestamptz, interval, timestamptz)',
+      'asistente.jobs_vencidos(timestamptz, int)',
+      'asistente.job_claim(text, uuid, timestamptz, text, jsonb)',
+      'asistente.job_cerrar_turno(uuid, text, timestamptz)',
+      'asistente.job_intento_vigente(uuid, text)',
+      'asistente.job_heartbeat(uuid, text)',
+      'asistente.job_finalize(uuid, text, text, text)',
+      'asistente.job_contexto(uuid, text)',
+      'asistente.job_intento_vigente_por_capability(text)',
+      'asistente.job_salud(timestamptz)']
+  loop
+    if (select pg_get_userbyid(p.proowner) from pg_proc p
+         where p.oid = to_regprocedure(f)) is distinct from 'asistente_owner' then
+      malas := malas || ('funcion ' || f || ' no es de asistente_owner');
+    end if;
+  end loop;
+  if has_schema_privilege('asistente_owner', 'asistente', 'CREATE') then
+    malas := malas || 'asistente_owner conserva CREATE en el schema asistente'::text;
+  end if;
+  if array_length(malas, 1) is not null then
+    raise exception using
+      message = 'P2 no quedo como se exige: ' || array_to_string(malas, '; '),
+      hint    = 'Se exigen 15 objetos de asistente_owner y ningun CREATE suyo sobre '
+                'asistente. Nada de esta migracion quedo aplicado.';
+  end if;
+end $$;
