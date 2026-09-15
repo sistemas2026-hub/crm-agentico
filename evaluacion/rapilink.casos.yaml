@@ -2046,3 +2046,40 @@ casos:
     espera:
       usa: [consultar_cliente, consultar_senal_ont]
       sin_errores: true
+
+  # PEDIR UNA PERSONA TERMINA EN UNA PERSONA.
+  #
+  # Visto real dos veces en el reporte de huecos de documentacion. Es el caso
+  # que se intento escribir el 12/09/2026 y hubo que descartar: el evaluador
+  # devuelve motivo=None ante un pedido limpio, porque la escalada y el motivo
+  # los fuerza nucleo/canales/api.py DESPUES, leyendo la conversacion. El
+  # corredor no hacia esa parte, asi que el caso salia rojo con produccion
+  # funcionando perfecto.
+  #
+  # Ahora la hace, llamando a la MISMA funcion que api.py
+  # (forzado.decidir_pedido_humano_de, que se mudo a forzado.py justamente al
+  # aparecer el segundo llamador). Una prueba que midiera su propia copia de
+  # esa logica no probaria lo que corre en produccion.
+  #
+  # POR QUE NO DEPENDE DEL EVALUADOR, y por que eso es lo correcto: que el
+  # cliente pidio una persona es un HECHO de lo que escribio, no una lectura
+  # de su tono. El 18/08/2026 se midio que el evaluador, ante el MISMO
+  # historial, contesta distinto en llamadas seguidas. Un pedido explicito no
+  # puede quedar sujeto a eso.
+  #
+  # Se afirma el motivo ademas de la escalada: 'solicitud_explicita' decide
+  # que mensaje recibe el cliente mientras espera
+  # (escalamiento.mensajes_por_motivo). Con el motivo equivocado se le
+  # contesta "entiendo tu molestia" a alguien que no se quejo de nada -- el
+  # problema que motivo que ese campo existiera, el 28/08/2026.
+  - nombre: pedir hablar con una persona escala y con el motivo correcto
+    rol: cliente_final
+    sesion:
+      verificado: false
+      nivel: 0
+      identificador_canal: '573111110016'
+    mensajes:
+      - "quiero hablar con una persona"
+    espera:
+      escala: true
+      escala_motivo: solicitud_explicita
