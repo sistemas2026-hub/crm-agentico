@@ -197,7 +197,7 @@ try:
         cur.execute("select capability_hash from asistente.job_attempt "
                     "where id=%s", (c["attempt_id"],))
         guardado = cur.fetchone()["capability_hash"]
-        cur.execute("select ext.digest(%s,'sha256') as h", (c["capability"],))
+        cur.execute("select extensions.digest(%s,'sha256') as h", (c["capability"],))
         esperado = cur.fetchone()["h"]
     con.rollback()
     revisar(bytes(guardado) == bytes(esperado) and len(bytes(guardado)) == 32,

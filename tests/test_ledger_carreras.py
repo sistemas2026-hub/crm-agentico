@@ -109,6 +109,18 @@ def recrear(base, plantilla=None):
         raise RuntimeError(f"no se pudo crear {base}")
 
 
+def pgcrypto_en(base, schema):
+    """
+    pgcrypto por base y no en la plantilla. La cadena completa (con P2) la exige
+    en 'extensions', como en produccion. La referencia del manifiesto la lleva
+    en 'ext' solo porque asi la registra la huella del manifiesto PG16 vigente;
+    se alinea cuando se regenere contra la referencia PG17.
+    """
+    with psycopg.connect(dsn(base), autocommit=True) as con:
+        con.execute(f'create schema if not exists "{schema}"')
+        con.execute(f'create extension if not exists pgcrypto with schema "{schema}"')
+
+
 TMP = Path(tempfile.mkdtemp(prefix="carreras-"))
 
 
@@ -213,9 +225,6 @@ try:
     titulo("preparando: base con solo Django, y la referencia del manifiesto")
     # =========================================================================
     recrear(DJANGO)
-    with psycopg.connect(dsn(DJANGO), autocommit=True) as con:
-        con.execute("create schema if not exists ext")
-        con.execute("create extension if not exists pgcrypto with schema ext")
     host_cont = "host.docker.internal" if HOST in ("localhost", "127.0.0.1") else HOST
     r = subprocess.run([
         "docker", "run", "--rm", "-v", f"{(RAIZ / 'django-crm' / 'backend').as_posix()}:/app",
@@ -230,6 +239,7 @@ try:
     revisar(not hay_schema(DJANGO), "y la base con solo Django no tiene schema 'asistente'")
 
     recrear(REF, DJANGO)
+    pgcrypto_en(REF, "ext")
     codigo, salida = migrar(REF, "--aplicar", migrador=MIG_MAN)
     revisar(codigo == 0 and f"{len(ARCHIVOS_MAN)} aplicada(s)" in salida,
             f"referencia con los {len(ARCHIVOS_MAN)} archivos del manifiesto", salida[-300:])
@@ -239,6 +249,7 @@ try:
     # =========================================================================
     B1 = PREFIJO + "_b1"
     recrear(B1, DJANGO)
+    pgcrypto_en(B1, "extensions")
     procesos = [lanzar(B1, "--aplicar", "--espera-lock", "180") for _ in range(5)]
     resultados = terminar(procesos)
     codigos = [c for c, _ in resultados]
@@ -476,6 +487,7 @@ try:
 
     B9 = PREFIJO + "_b9"
     recrear(B9, DJANGO)
+    pgcrypto_en(B9, "extensions")
     consultar(B9, """
         create schema asistente;
         create table asistente.migraciones_aplicadas (

@@ -8,7 +8,7 @@
     DBPASSWORD=... py -3.13 cli/base_desde_cero.py --base p2_cero --sin-recrear
     DBPASSWORD=... py -3.13 cli/base_desde_cero.py --base p2_cero --verificar-solo
 
-    1. La extension pgcrypto en el schema 'ext'      (una vez)
+    1. La extension pgcrypto en el schema 'extensions' (una vez; como Supabase)
     2. Las migraciones de Django                     (crea public.organization)
     3. Los archivos de supabase/, POR EL LEDGER      (cli/migrar_asistente.py)
     4. Comprobacion: tablas, constraints, funciones, RLS, grants y ledger
@@ -77,9 +77,12 @@ def crear_base(base, host, puerto, usuario) -> None:
 
 def pgcrypto(base, host, puerto, usuario) -> None:
     with conectar(base, host, puerto, usuario) as con:
-        con.execute("create schema if not exists ext")
-        con.execute("create extension if not exists pgcrypto with schema ext")
-        for f in ("ext.digest(text,text)", "ext.gen_random_bytes(integer)"):
+        # 'extensions', como en Supabase y en produccion. Si pgcrypto ya estuviera
+        # en otro schema, 'if not exists' no la mueve y la comprobacion de abajo
+        # lo detiene.
+        con.execute("create schema if not exists extensions")
+        con.execute("create extension if not exists pgcrypto with schema extensions")
+        for f in ("extensions.digest(text,text)", "extensions.gen_random_bytes(integer)"):
             hay = con.execute("select to_regprocedure(%s) is not null", (f,)).fetchone()[0]
             print(f"  {f}: {'presente' if hay else 'FALTA'}")
             if not hay:
@@ -203,6 +206,19 @@ def verificar(base, host, puerto, usuario) -> list[str]:
         ok("PUBLIC no puede ejecutar ninguna funcion job_*") if not publico \
             else mal(f"PUBLIC puede ejecutar: {[p[0] for p in publico]}")
 
+        explicitos = {f[0] for f in con.execute(
+            "select 'schema' from pg_namespace n cross join lateral aclexplode(n.nspacl) a "
+            " where n.nspname = 'extensions' and a.privilege_type = 'USAGE' "
+            "   and a.grantee = 'asistente_owner'::regrole "
+            "union all "
+            "select p.oid::regprocedure::text from pg_proc p cross join lateral aclexplode(p.proacl) a "
+            " where p.oid in ('extensions.digest(text,text)'::regprocedure, "
+            "                 'extensions.gen_random_bytes(integer)'::regprocedure) "
+            "   and a.privilege_type = 'EXECUTE' and a.grantee = 'asistente_owner'::regrole")}
+        ok("asistente_owner: USAGE en extensions y EXECUTE explicito sobre digest y "
+           "gen_random_bytes") if len(explicitos) == 3 else \
+            mal(f"grants explicitos de asistente_owner incompletos: {sorted(explicitos)}")
+
         cat = con.execute("select count(*) from asistente.job_catalogo").fetchone()[0]
         ok("el catalogo de jobs queda VACIO") if cat == 0 else \
             mal(f"la migracion sembro {cat} job(s): se encenderian solos")
@@ -249,7 +265,7 @@ def main(argv=None) -> int:
         paso(0, f"crear la base '{a.base}' vacia")
         crear_base(a.base, a.host, a.puerto, a.usuario)
 
-    paso(1, "pgcrypto en el schema 'ext'")
+    paso(1, "pgcrypto en el schema 'extensions'")
     pgcrypto(a.base, a.host, a.puerto, a.usuario)
 
     paso(2, "migraciones de Django (crean public.organization)")

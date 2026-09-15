@@ -29,10 +29,16 @@
 --
 -- DEPENDENCIA DE DESPLIEGUE
 -- -------------------------
--- 'pgcrypto' en el schema 'ext'. Crearla exige superusuario, asi que es un
--- paso previo del despliegue y no algo que este archivo pueda hacer solo en
+-- 'pgcrypto' en el schema 'extensions', que es donde lo instala Supabase y
+-- donde esta en produccion (medido el 14/09/2026). Instalarla exige permisos
+-- que este archivo no puede asumir, asi que es un paso previo del despliegue
+-- (en local lo hace cli/base_desde_cero.py) y no algo que haga solo en
 -- cualquier entorno. Se comprueba abajo y se falla con un mensaje que dice
 -- exactamente que falta.
+--
+-- Hasta el 15/09/2026 este archivo exigia el schema 'ext'. Se cambio antes de
+-- aplicarse en ningun entorno real; una base local que ya lo tenia aplicado con
+-- 'ext' falla por checksum en el ledger y se reconstruye.
 -- =============================================================================
 
 -- --- la dependencia, comprobada antes de nada -------------------------------
@@ -49,8 +55,8 @@ declare
   faltan text[] := array[]::text[];
   f      text;
 begin
-  foreach f in array array['ext.digest(text,text)',
-                           'ext.gen_random_bytes(integer)']
+  foreach f in array array['extensions.digest(text,text)',
+                           'extensions.gen_random_bytes(integer)']
   loop
     if to_regprocedure(f) is null then
       faltan := faltan || f;
@@ -59,9 +65,9 @@ begin
   if array_length(faltan, 1) is not null then
     raise exception using
       message = 'Falta ' || array_to_string(faltan, ' y ')
-                || ': pgcrypto no esta (completo) en el schema ext.',
-      hint    = 'Ejecutar como superusuario: CREATE SCHEMA IF NOT EXISTS ext; '
-                'CREATE EXTENSION pgcrypto WITH SCHEMA ext;';
+                || ': pgcrypto no esta (completo) en el schema extensions.',
+      hint    = 'Ejecutar como superusuario: CREATE SCHEMA IF NOT EXISTS extensions; '
+                'CREATE EXTENSION pgcrypto WITH SCHEMA extensions;';
   end if;
 end $$;
 

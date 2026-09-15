@@ -22,10 +22,13 @@ de alguna de esas extensiones, o las tiene en otro schema (Supabase suele usar
 correcto: `pg_get_*def` puede cambiar entre versiones mayores, y comparar
 definiciones entre servidores distintos no es confiable.
 
-**Consecuencia a tener presente para P2:** la migración del scheduler exige
-`ext.digest` y `ext.gen_random_bytes`, es decir, `pgcrypto` **en el schema
-`ext`**. Si la base objetivo lo tiene en otro schema, la migración de P2 falla
-en su guarda. No verificado contra producción.
+**P2 y `pgcrypto` (actualizado el 15/09/2026):** la inspección de solo lectura
+midió producción con `pgcrypto` 1.3 en el schema **`extensions`** y sin schema
+`ext`. P2 se adaptó antes de aplicarse en ningún entorno real: ahora exige
+`extensions.digest` y `extensions.gen_random_bytes` y le otorga a
+`asistente_owner` `USAGE` y `EXECUTE` explícitos, comprobados. La huella de la
+tabla de arriba (`pgcrypto` en `ext`) es la del manifiesto PG16 vigente y se
+reemplaza al regenerarlo contra la referencia PG17.
 
 ## Procedimiento
 

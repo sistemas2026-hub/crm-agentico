@@ -126,6 +126,18 @@ def recrear(base, plantilla=None):
         raise RuntimeError(f"no se pudo crear {base} desde {plantilla}")
 
 
+def pgcrypto_en(base, schema):
+    """
+    pgcrypto por base y no en la plantilla. La cadena completa (con P2) la exige
+    en 'extensions', como en produccion. La referencia del manifiesto la lleva
+    en 'ext' solo porque asi la registra la huella del manifiesto PG16 vigente;
+    se alinea cuando se regenere contra la referencia PG17.
+    """
+    with psycopg.connect(dsn(base), autocommit=True) as con:
+        con.execute(f'create schema if not exists "{schema}"')
+        con.execute(f'create extension if not exists pgcrypto with schema "{schema}"')
+
+
 # --- copias del repo ----------------------------------------------------------
 TMP = Path(tempfile.mkdtemp(prefix="ledger-"))
 
@@ -222,9 +234,6 @@ LENTO = ("create table if not exists asistente.{tabla} (x int);\n"
 titulo("preparando: base con Django, y sus copias")
 # =============================================================================
 recrear(DJANGO)
-with psycopg.connect(dsn(DJANGO), autocommit=True) as con:
-    con.execute("create schema if not exists ext")
-    con.execute("create extension if not exists pgcrypto with schema ext")
 host_cont = "host.docker.internal" if HOST in ("localhost", "127.0.0.1") else HOST
 r = subprocess.run([
     "docker", "run", "--rm",
@@ -240,6 +249,7 @@ revisar(r.returncode == 0, "migraciones de Django (exit 0)", (r.stderr or "")[-4
 hay = consultar(DJANGO, "select to_regclass('public.organization') is not null")[0][0]
 revisar(hay, "public.organization existe: de eso dependen los archivos de supabase/")
 recrear(BASE, DJANGO)
+pgcrypto_en(BASE, "extensions")
 
 N = len(list((COPIA / "supabase").glob("*.sql")))
 
@@ -487,6 +497,7 @@ COPIA_REF = copiar_repo(TMP / "repo_ref", solo=archivos_man)
 MIG_REF = COPIA_REF / "cli" / "migrar_asistente.py"
 generado_p = TMP / "manifiesto_regenerado.json"
 recrear(REF, DJANGO)
+pgcrypto_en(REF, "ext")
 codigo, salida = migrar("--aplicar", base=REF, migrador=MIG_REF)
 revisar(codigo == 0 and f"{len(archivos_man)} aplicada(s)" in salida,
         f"la referencia se construye con exactamente los {len(archivos_man)} archivos "

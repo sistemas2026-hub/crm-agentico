@@ -120,7 +120,7 @@ try:
     for f in con.execute(
             "select n.nspname as schema, r.rolname as dueño from pg_namespace n "
             "join pg_roles r on r.oid=n.nspowner where n.nspname "
-            "in ('asistente','ext','public')").fetchall():
+            "in ('asistente','extensions','public')").fetchall():
         print(f"    schema {f['schema']:<12} -> {f['dueño']}")
 
     props = con.execute(
@@ -168,7 +168,7 @@ try:
     # =========================================================================
     for f in con.execute(
             "select nspname, nspacl::text from pg_namespace "
-            "where nspname in ('asistente','ext')").fetchall():
+            "where nspname in ('asistente','extensions')").fetchall():
         print(f"    schema {f['nspname']}: {f['nspacl']}")
 
     print()
