@@ -131,10 +131,13 @@ def recrear(base, plantilla=None):
 
 
 TMP = Path(tempfile.mkdtemp(prefix="evidencia-"))
-MANIFIESTO_P = RAIZ / "supabase" / "ledger" / "manifiesto_adopcion.json"
-MANIFIESTO = json.loads(MANIFIESTO_P.read_bytes().decode("utf-8"))
-ARCHIVOS = set(MANIFIESTO["migraciones"])
-AUTO = {a for a, e in MANIFIESTO["migraciones"].items() if e["estado"] == "verificable_automaticamente"}
+# El manifiesto lo genera esta suite contra SU referencia PostgreSQL 16; el versionado
+# describe produccion (PG17) y su huella no corresponde a este servidor.
+# Ver tests/manifiesto_de_laboratorio.py.
+import manifiesto_de_laboratorio as lab                            # noqa: E402
+ARCHIVOS = lab.archivos_de_adopcion(RAIZ)
+MANIFIESTO: dict = {}
+AUTO: set[str] = set()
 PASOS = sorted(int(p.name[:4]) for p in (RAIZ / "supabase" / "ledger" / "esquema").glob("[0-9][0-9][0-9][0-9]_*.sql"))
 
 
@@ -250,7 +253,23 @@ try:
     recrear(REF, DJANGO)
     codigo, salida = migrar(REF, "--aplicar")
     revisar(codigo == 0 and f"{len(ARCHIVOS)} aplicada(s)" in salida,
-            f"referencia con los {len(ARCHIVOS)} archivos del manifiesto", salida[-300:])
+            f"referencia con los {len(ARCHIVOS)} archivos de adopcion", salida[-300:])
+    # El manifiesto de ESTA referencia (PG16), en las tres copias que adoptan.
+    COPIA_PPAL = TMP / "repo"
+    MANIFIESTO = lab.generar(COPIA_PPAL, entorno(REF))
+    lab.replicar(COPIA_PPAL, TMP / "repo_ext")
+    AUTO = lab.automaticas(MANIFIESTO)
+    # El migrador v1 se audita con SUS herramientas: su manifiesto lo genera su propio
+    # generador, que no conoce acl_secuencias ni default_acl (son posteriores). Pedirle
+    # que lea un manifiesto nuevo seria inventarle una capacidad que no tenia.
+    MANIFIESTO_V1 = lab.generar(V1, entorno(REF))
+    AUTO_V1 = lab.automaticas(MANIFIESTO_V1)
+    revisar(AUTO_V1 <= AUTO and len(AUTO_V1) <= len(AUTO),
+            f"manifiesto del migrador v1: {len(AUTO_V1)} automaticas (el nuevo ve {len(AUTO)}: "
+            f"{sorted(AUTO - AUTO_V1) or 'las mismas'})")
+    revisar(set(MANIFIESTO["migraciones"]) == ARCHIVOS,
+            f"manifiesto de laboratorio: {len(MANIFIESTO['migraciones'])} archivos, {len(AUTO)} automaticas, "
+            f"huella PostgreSQL {MANIFIESTO['referencia']['huella']['major']}")
 
     # =========================================================================
     titulo("1. desde cero: los pasos del esquema, una vez cada uno")
@@ -290,10 +309,8 @@ try:
     ev = evidencias(A)
     revisar(set(ev) == AUTO and all(o == "baseline" and isinstance(e, dict) for o, e in ev.values()),
             "cada fila 'baseline' tiene evidencia")
-    canon = mig.bytes_canonicos(MANIFIESTO_P.read_bytes())
-    sha_man = hashlib.sha256(canon).hexdigest()
-    blob = subprocess.run(["git", "rev-parse", "HEAD:supabase/ledger/manifiesto_adopcion.json"],
-                          capture_output=True, text=True, cwd=str(RAIZ)).stdout.strip()
+    # El manifiesto que USO la adopcion es el de laboratorio, el de la copia del migrador.
+    sha_man, blob = lab.identidad(COPIA_PPAL)
     srv = servidor(A)
     muestra = next(iter(ev.values()))[1] if ev else {}
     revisar(set(muestra) == {"formato", "manifiesto", "entorno", "verificacion", "autorizacion", "operacion"},
@@ -302,7 +319,8 @@ try:
     revisar(man.get("sha256") == sha_man and man.get("calculado_sobre") == "archivo",
             "manifiesto: sha256 de los bytes del archivo usado", f"{man.get('sha256')} vs {sha_man}")
     revisar(man.get("git_blob") == blob,
-            f"y su git blob es el del commit ({blob[:12]}): se encuentra con 'git log --find-object'",
+            f"y el id de blob de git de esos mismos bytes ({blob[:12]}): con el artefacto versionado, "
+            f"'git log --all --find-object' encuentra su commit",
             f"{man.get('git_blob')} vs {blob}")
     revisar(man.get("referencia") == MANIFIESTO["referencia"],
             "y la referencia del manifiesto, con su huella")
@@ -463,7 +481,7 @@ try:
     sin_ledger(V1B)
     codigo, salida = migrar(V1B, "--adoptar", "--escribir-baseline", migrador=MIG_V1)
     c2, s2 = migrar(V1B, *aceptar, "--escribir-baseline", migrador=MIG_V1)
-    adoptadas = len(AUTO) + 1
+    adoptadas = len(AUTO_V1) + 1          # las automaticas SEGUN EL MANIFIESTO V1, mas la aceptada a mano
     revisar(codigo == 0 and c2 == 0 and pasos(V1B) == [1]
             and sum(1 for f in filas(V1B) if f[5] != "aplicada") == adoptadas,
             f"6b. el migrador v1 adopta: {adoptadas} filas sin evidencia en un ledger version 1",

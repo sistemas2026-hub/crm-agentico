@@ -113,9 +113,12 @@ def recrear(base, plantilla=None):
 
 
 TMP = Path(tempfile.mkdtemp(prefix="orden-"))
-MANIFIESTO = json.loads((RAIZ / "supabase" / "ledger" / "manifiesto_adopcion.json").read_bytes().decode("utf-8"))
-ARCHIVOS = set(MANIFIESTO["migraciones"])
-AUTO = {a for a, e in MANIFIESTO["migraciones"].items() if e["estado"] == "verificable_automaticamente"}
+# El manifiesto lo genera esta suite contra SU referencia PostgreSQL 16, no se toma
+# el versionado (que describe produccion, PG17). Ver tests/manifiesto_de_laboratorio.py.
+import manifiesto_de_laboratorio as lab                            # noqa: E402
+ARCHIVOS = lab.archivos_de_adopcion(RAIZ)
+MANIFIESTO: dict = {}
+AUTO: set[str] = set()
 
 COPIA = TMP / "repo"
 (COPIA / "supabase").mkdir(parents=True)
@@ -224,7 +227,14 @@ try:
     recrear(REF, DJANGO)
     r = subprocess.run([sys.executable, str(MIG), "--aplicar"], capture_output=True, text=True, env=entorno(REF))
     revisar(r.returncode == 0 and f"{len(ARCHIVOS)} aplicada(s)" in r.stdout,
-            f"referencia con los {len(ARCHIVOS)} archivos del manifiesto", r.stdout[-200:])
+            f"referencia con los {len(ARCHIVOS)} archivos de adopcion", r.stdout[-200:])
+    # El manifiesto de ESTA referencia (PG16), dentro de la copia que usa el migrador.
+    MANIFIESTO = lab.generar(COPIA, entorno(REF))
+    AUTO = lab.automaticas(MANIFIESTO)
+    revisar(set(MANIFIESTO["migraciones"]) == ARCHIVOS and MANIFIESTO["referencia"]["huella"]["major"]
+            == int(consultar(REF, "show server_version_num")[0][0]) // 10000,
+            f"manifiesto de laboratorio: {len(MANIFIESTO['migraciones'])} archivos, huella de ESTE servidor "
+            f"(PostgreSQL {MANIFIESTO['referencia']['huella']['major']}), {len(AUTO)} automaticas")
 
     # -------------------------------------------------------------------------
     titulo("control: el gancho es inerte sin sus variables")

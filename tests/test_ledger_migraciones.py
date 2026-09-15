@@ -490,35 +490,48 @@ revisar(codigo == 2 and "entre 0 y 600" in salida, "exit 2 sin intentar nada",
 # =============================================================================
 titulo("N. el manifiesto se regenera y coincide con el versionado")
 # =============================================================================
+# El manifiesto de esta suite es el de LABORATORIO: se genera contra la referencia
+# PostgreSQL 16 de aca. El artefacto versionado describe produccion (PG17) y su
+# igualdad con lo regenerado se certifica en la suite del artefacto oficial, sobre la
+# imagen exacta: comparar catalogos entre versiones mayores no dice nada confiable, y
+# la compuerta de huella existe justamente para impedirlo.
+import manifiesto_de_laboratorio as lab                            # noqa: E402
+
 versionado_p = RAIZ / "supabase" / "ledger" / "manifiesto_adopcion.json"
-revisar(versionado_p.exists(), "hay un manifiesto versionado en el repo")
-versionado = (json.loads(versionado_p.read_bytes().decode("utf-8"))
-              if versionado_p.exists() else {"migraciones": {}})
-archivos_man = set(versionado.get("migraciones", {}))
-COPIA_REF = copiar_repo(TMP / "repo_ref", solo=archivos_man)
+revisar(versionado_p.exists(), "hay un manifiesto versionado en el repo (el artefacto de produccion)")
+ARCHIVOS_ADOPCION = lab.archivos_de_adopcion(RAIZ)
+COPIA_REF = copiar_repo(TMP / "repo_ref", solo=ARCHIVOS_ADOPCION)
 MIG_REF = COPIA_REF / "cli" / "migrar_asistente.py"
-generado_p = TMP / "manifiesto_regenerado.json"
 recrear(REF, DJANGO)
 pgcrypto_en(REF, "ext")
 codigo, salida = migrar("--aplicar", base=REF, migrador=MIG_REF)
-revisar(codigo == 0 and f"{len(archivos_man)} aplicada(s)" in salida,
-        f"la referencia se construye con exactamente los {len(archivos_man)} archivos "
-        f"del manifiesto", salida[-300:])
+revisar(codigo == 0 and f"{len(ARCHIVOS_ADOPCION)} aplicada(s)" in salida,
+        f"la referencia se construye con exactamente los {len(ARCHIVOS_ADOPCION)} archivos "
+        f"de adopcion", salida[-300:])
 codigo, salida = migrar("--estado", base=REF, migrador=MIG_REF)
 revisar(codigo == 0, "la referencia esta completa segun el ledger", salida[:300])
+
+MANIFIESTO_LAB = lab.generar(COPIA_REF, entorno(REF))
+mayor = int(consultar(REF, "show server_version_num")[0][0]) // 10000
+revisar(set(MANIFIESTO_LAB["migraciones"]) == ARCHIVOS_ADOPCION
+        and MANIFIESTO_LAB["referencia"]["huella"]["major"] == mayor,
+        f"se genera contra la referencia: {len(MANIFIESTO_LAB['migraciones'])} archivos y la huella de ESTE "
+        f"servidor (PostgreSQL {mayor})",
+        f"{MANIFIESTO_LAB['referencia']['huella']}")
+otra_vez_p = TMP / "manifiesto_otra_vez.json"
 r = subprocess.run([sys.executable, str(COPIA_REF / "cli" / "manifiesto_adopcion.py"),
-                    "--generar", "--salida", str(generado_p)],
+                    "--generar", "--salida", str(otra_vez_p), "--descripcion",
+                    "manifiesto de laboratorio: referencia efimera de esta suite, NO el artefacto de produccion"],
                    capture_output=True, text=True, env=entorno(REF))
-revisar(r.returncode == 0, "se genera contra la referencia", (r.stdout + r.stderr)[-300:])
-generado = (json.loads(generado_p.read_bytes().decode("utf-8"))
-            if generado_p.exists() else {})
-comparable_g = json.loads(json.dumps(generado))
-comparable_v = json.loads(json.dumps(versionado))
-for d in (comparable_g, comparable_v):
-    d.get("referencia", {}).pop("descripcion", None)
-revisar(comparable_g == comparable_v and bool(generado),
-        "regenerado == versionado: el manifiesto es reproducible",
-        "difieren -- el manifiesto versionado no sale de esta referencia")
+revisar(r.returncode == 0 and otra_vez_p.exists(), "se genera una segunda vez", (r.stdout + r.stderr)[-300:])
+revisar(otra_vez_p.read_bytes() == lab.ruta(COPIA_REF).read_bytes(),
+        "reproducible: dos generaciones sobre la MISMA referencia dan los mismos bytes",
+        "difieren -- el manifiesto no seria reproducible")
+huella_oficial = json.loads(versionado_p.read_bytes().decode("utf-8"))["referencia"]["huella"]
+print(f"       huella de laboratorio: PostgreSQL {MANIFIESTO_LAB['referencia']['huella']['major']}; "
+      f"artefacto versionado: PostgreSQL {huella_oficial['major']} -- "
+      f"{'la misma' if huella_oficial == MANIFIESTO_LAB['referencia']['huella'] else 'distinta: son servidores distintos'}. "
+      f"La igualdad del artefacto oficial con lo regenerado se certifica en su propia suite, sobre la imagen exacta.")
 
 rehusado = subprocess.run([sys.executable, str(COPIA_REF / "cli" / "manifiesto_adopcion.py"),
                            "--generar", "--salida", str(TMP / "no.json")],
@@ -528,11 +541,10 @@ revisar(rehusado.returncode != 0,
         (rehusado.stdout + rehusado.stderr)[-200:])
 
 est: dict[str, int] = {}
-for e in versionado["migraciones"].values():
+for e in MANIFIESTO_LAB["migraciones"].values():
     est[e["estado"]] = est.get(e["estado"], 0) + 1
-print(f"       estados en el manifiesto: {est}")
-AUTO = {a for a, e in versionado["migraciones"].items()
-        if e["estado"] == "verificable_automaticamente"}
+print(f"       estados en el manifiesto de laboratorio: {est}")
+AUTO = lab.automaticas(MANIFIESTO_LAB)
 
 # =============================================================================
 titulo("O. adopcion de una base equivalente")
@@ -553,7 +565,7 @@ revisar("ADOPCION INCOMPLETA" in salida and "202609070900_bandeja_sin_inflar.sql
 # =============================================================================
 titulo("P. adopcion de una base ALTERADA")
 # =============================================================================
-auto_man = {a: e for a, e in versionado["migraciones"].items() if a in AUTO}
+auto_man = {a: e for a, e in MANIFIESTO_LAB["migraciones"].items() if a in AUTO}
 
 
 def buscar(tipo, condicion):
@@ -652,7 +664,7 @@ revisar(set(anotadas(ADOPTA2)) == AUTO, "y no anoto nada")
 titulo("R. aceptacion humana individual")
 # =============================================================================
 DO_FILE = "202608042055_schema.sql"
-e_do = versionado["migraciones"].get(DO_FILE, {})
+e_do = MANIFIESTO_LAB["migraciones"].get(DO_FILE, {})
 revisar(e_do.get("estado") == "requiere_revision_humana",
         f"'{DO_FILE}' (bloque DO) no es automatica", f"{e_do.get('estado')}")
 MOTIVO = "revisado a mano en el entorno efimero de pruebas"
@@ -696,7 +708,8 @@ titulo("S. archivos fuera del manifiesto")
 # =============================================================================
 recrear(ADOPTA, REF)
 sin_ledger(ADOPTA)
-COPIA_EXT = copiar_repo(TMP / "repo_ext", solo=archivos_man)
+COPIA_EXT = copiar_repo(TMP / "repo_ext", solo=ARCHIVOS_ADOPCION)
+lab.replicar(COPIA_REF, COPIA_EXT)          # el mismo manifiesto de laboratorio
 (COPIA_EXT / "supabase" / "202800000000_posterior.sql").write_text(
     "create table if not exists asistente.posterior (x int);\n", encoding="utf-8")
 codigo, salida = migrar("--adoptar", base=ADOPTA,

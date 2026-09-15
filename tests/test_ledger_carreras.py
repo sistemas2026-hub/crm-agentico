@@ -136,11 +136,12 @@ def copiar_repo(destino: Path, solo: set[str] | None = None) -> Path:
     return destino
 
 
-MANIFIESTO = json.loads((RAIZ / "supabase" / "ledger" / "manifiesto_adopcion.json")
-                        .read_bytes().decode("utf-8"))
-ARCHIVOS_MAN = set(MANIFIESTO["migraciones"])
-AUTO = {a for a, e in MANIFIESTO["migraciones"].items()
-        if e["estado"] == "verificable_automaticamente"}
+# El manifiesto lo genera esta suite contra SU referencia PostgreSQL 16; el versionado
+# describe produccion (PG17). Ver tests/manifiesto_de_laboratorio.py.
+import manifiesto_de_laboratorio as lab                            # noqa: E402
+ARCHIVOS_MAN = lab.archivos_de_adopcion(RAIZ)
+MANIFIESTO: dict = {}
+AUTO: set[str] = set()
 COPIA = copiar_repo(TMP / "todo")
 COPIA_MAN = copiar_repo(TMP / "manifiesto", solo=ARCHIVOS_MAN)
 MIG = COPIA / "cli" / "migrar_asistente.py"
@@ -244,7 +245,14 @@ try:
     pgcrypto_en(REF, "ext")
     codigo, salida = migrar(REF, "--aplicar", migrador=MIG_MAN)
     revisar(codigo == 0 and f"{len(ARCHIVOS_MAN)} aplicada(s)" in salida,
-            f"referencia con los {len(ARCHIVOS_MAN)} archivos del manifiesto", salida[-300:])
+            f"referencia con los {len(ARCHIVOS_MAN)} archivos de adopcion", salida[-300:])
+    # El manifiesto de ESTA referencia (PG16), en las dos copias del repo que se usan.
+    MANIFIESTO = lab.generar(COPIA_MAN, entorno(REF))
+    lab.replicar(COPIA_MAN, COPIA)
+    AUTO = lab.automaticas(MANIFIESTO)
+    revisar(set(MANIFIESTO["migraciones"]) == ARCHIVOS_MAN,
+            f"manifiesto de laboratorio: {len(MANIFIESTO['migraciones'])} archivos, {len(AUTO)} automaticas, "
+            f"huella PostgreSQL {MANIFIESTO['referencia']['huella']['major']}")
 
     # =========================================================================
     titulo("1. cinco migradores a la vez sobre una base sin asistente ni ledger")
