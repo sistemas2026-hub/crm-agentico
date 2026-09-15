@@ -520,6 +520,12 @@ CODIGOS_MOTOR_GUARD = frozenset({
     "LIMITE_DE_CONVERSACION",
     "FALTA_HABLAR_CON_EL_CLIENTE",
     "IDENTIDAD_NO_RESUELTA",
+    # Hermano del anterior: la identidad SI esta resuelta, lo que falta es un
+    # dato del equipo que el ISP nunca cargo (ver motor.py,
+    # falta_un_dato_de_la_sesion). Tiene que estar aca o el bloqueo se cuenta
+    # como fallo de la herramienta y fuerza una escalada con un motivo -- y un
+    # mensaje al cliente -- que no es cierto.
+    "DATO_DEL_EQUIPO_NO_CARGADO",
     "IDENTIDAD_NO_VERIFICADA",
     "HERRAMIENTA_DESCONOCIDA",
 })

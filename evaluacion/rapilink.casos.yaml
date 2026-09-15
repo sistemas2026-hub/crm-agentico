@@ -1883,3 +1883,54 @@ casos:
       # devolverle al cliente el trabajo manual que el reinicio remoto vino a
       # evitar. Es el mismo error que el caso de "equipo sano", del 14/08.
       responde_sin: ["desenchuf", "desconect"]
+
+  # EL 32% DE LOS CLIENTES NO TIENE EL IDENTIFICADOR DEL EQUIPO CARGADO.
+  #
+  # 1.299 de 4.163 activos. Once herramientas declaran 'sn_onu' en
+  # 'inyectados_obligatorios', asi que para esa tercera parte el diagnostico
+  # de equipo simplemente no corre -- y eso esta BIEN, una consulta sin filtro
+  # devolveria a todo el mundo con cara de exito.
+  #
+  # Lo que estaba mal era lo que se le decia al modelo. El bloqueo mandaba
+  # SIEMPRE a "pedile su numero de cedula y verifica la identidad primero",
+  # que solo sirve si no sabemos quien es. Medido el 15/09/2026:
+  #
+  #     cliente : no tengo internet
+  #     agente  : Para revisar tu conexion necesito confirmar tu identidad.
+  #               ¿Me pasas tu numero de cedula?      <- ya estaba verificado
+  #     cliente : (la da)
+  #     agente  : No pude encontrar tu cedula. ¿Me la confirmas?
+  #
+  # Nunca se lo diagnostica y nunca se lo guia.
+  #
+  # SE AFIRMA LO QUE NO DEBE PASAR, NO EL CAMINO BUENO. Que "lo guie por las
+  # luces" no esta escrito en ninguna parte -- ni en el prompt ni en la
+  # documentacion ingerida-- asi que exigirlo seria inventar un procedimiento.
+  # Lo que si es seguro: a alguien YA VERIFICADO no se le vuelve a pedir la
+  # cedula por un dato que el no tiene. Eso se afirma sobre la traza (no
+  # intenta verificar) y sobre lo unico de la redaccion que aca es un hecho
+  # medible: la palabra no aparece.
+  #
+  # CLIENTE DE LABORATORIO 6555 (PRUEBA TEMPORAL), al que se le vacio el
+  # 'sn_onu' el 15/09/2026 justamente para esto. Su serial era CDTC505AE4AB
+  # por si hay que devolverselo. NO se usa el de Mario: 'sesion_por_defecto'
+  # lo trae cableado y ocho casos dependen de el.
+  #
+  # 'sn_onu' va VACIO y no ausente a proposito: correr_caso fusiona
+  # sesion_por_defecto PRIMERO, asi que una clave ausente se repone con el
+  # serial de Mario y el caso probaria lo contrario de lo que dice probar.
+  - nombre: sin el serial cargado no se le pide la cedula a quien ya verifico
+    rol: cliente_final
+    sesion:
+      verificado: true
+      nivel: 1
+      id_cliente: "6555"
+      nombre: PRUEBA TEMPORAL
+      sn_onu: ""
+      identificador_canal: '573111110010'
+    mensajes:
+      - "no tengo internet"
+      - "en todos los aparatos, no anda en ninguno"
+    espera:
+      no_intenta: [verificar_identidad_por_cedula]
+      responde_sin: ["cedula"]

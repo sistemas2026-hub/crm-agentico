@@ -85,6 +85,7 @@ class ErrorMotor(Exception):
 CODIGOS_DE_BLOQUEO = frozenset({
     "IDENTIDAD_NO_VERIFICADA",
     "IDENTIDAD_NO_RESUELTA",
+    "DATO_DEL_EQUIPO_NO_CARGADO",
     "PRECONDICION_NO_CUMPLIDA",
     "FALTA_HABLAR_CON_EL_CLIENTE",
     "HERRAMIENTA_DESCONOCIDA",
@@ -2024,6 +2025,56 @@ _RE_DA_UN_PASO = re.compile(
     r"busqueda\s+automatica|sintonizacion\s+automatica|escane\w+)\b")
 
 
+def falta_un_dato_de_la_sesion(herramienta: str, faltantes: list[str],
+                               sesion) -> tuple[dict, str]:
+    """
+    (salida, codigo) cuando 'inyectados_obligatorios' no se pudo completar.
+
+    SON DOS CAUSAS DISTINTAS Y LA RESPUESTA NO ES LA MISMA. "Pedile la cedula"
+    solo sirve si el problema es que no sabemos QUIEN es. Cuando la sesion ya
+    lo sabe --verificada y con id_cliente-- lo que falta es un dato del EQUIPO
+    que el ISP nunca cargo, y que el cliente no puede darte por mas cedulas
+    que escriba.
+
+    Medido el 15/09/2026 con un cliente sin 'sn_onu': reporta que no tiene
+    internet, las herramientas de equipo se bloquean, y se le contesta "para
+    revisar tu conexion necesito confirmar tu identidad, ¿me pasas tu cedula?"
+    -- a alguien ya verificado. Da la cedula, y vuelve a lo mismo. Nunca se lo
+    diagnostica ni se lo guia. No es un borde: 1.299 de 4.163 clientes activos
+    no tienen el identificador cargado.
+
+    El nucleo no sabe que 'sn_onu' es un equipo ni tiene por que saberlo. Lo
+    que si puede distinguir, sin conocer a ningun tenant, es si la identidad
+    ya esta resuelta -- y con eso alcanza para no mandar a pedir un dato que
+    no arregla nada.
+
+    Funcion aparte para poder afirmarla sin llamar al modelo: lo que importa
+    no es que exista un mensaje, es que diga COSAS DISTINTAS segun el estado.
+    """
+    identidad_resuelta = bool(sesion is not None
+                              and getattr(sesion, "verificado", False)
+                              and getattr(sesion, "id_cliente", None))
+    if identidad_resuelta:
+        return ({"error": "DATO_DEL_EQUIPO_NO_CARGADO",
+                 "instruccion_interna":
+                     f"'{herramienta}' necesita {', '.join(faltantes)}, y esta "
+                     f"cuenta no lo tiene cargado en el sistema. NO le pidas la "
+                     f"cedula: ya sabes quien es, y el dato que falta no lo "
+                     f"tiene el cliente. Tampoco se lo menciones ni le digas "
+                     f"que hubo un problema tecnico. Esa via de revision no "
+                     f"esta disponible para el: segui con lo que SI puedas "
+                     f"hacer, y si no queda nada, pasa el caso a un colaborador "
+                     f"humano."},
+                "DATO_DEL_EQUIPO_NO_CARGADO")
+    return ({"error": "IDENTIDAD_NO_RESUELTA",
+             "instruccion_interna":
+                 f"'{herramienta}' consulta datos de UN cliente y la sesion "
+                 f"todavia no sabe cual. No la reintentes ni le digas al "
+                 f"cliente que hubo un problema tecnico: pedile su numero de "
+                 f"cedula y verifica la identidad primero."},
+            "IDENTIDAD_NO_RESUELTA")
+
+
 def nota_de_identidad_al_derivar(sesion) -> str:
     """
     Que se le dice al area que RECIBE una conversacion derivada sobre la
@@ -3015,19 +3066,34 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                                         or _codigo_error_de_reporte_pago(herramienta, crudo))
                     except FaltaIdentidadEnSesion as e:
                         # No es un fallo del sistema: es la proteccion haciendo
-                        # su trabajo. Se le dice al modelo QUE hacer -- pedir la
-                        # cedula-- en vez de dejarlo anunciar una averia que no
-                        # existe. Codigo propio para poder contarlo aparte en la
-                        # auditoria: esto tiene que poder verse.
-                        salida = {"error": "IDENTIDAD_NO_RESUELTA",
-                                 "instruccion_interna":
-                                     f"'{e.herramienta}' consulta datos de UN "
-                                     f"cliente y la sesion todavia no sabe cual. "
-                                     f"No la reintentes ni le digas al cliente "
-                                     f"que hubo un problema tecnico: pedile su "
-                                     f"numero de cedula y verifica la identidad "
-                                     f"primero."}
-                        codigo_error = "IDENTIDAD_NO_RESUELTA"
+                        # su trabajo. Se le dice al modelo QUE hacer en vez de
+                        # dejarlo anunciar una averia que no existe. Codigo
+                        # propio para poder contarlo aparte en la auditoria:
+                        # esto tiene que poder verse.
+                        #
+                        # PERO SON DOS CAUSAS DISTINTAS Y LA RESPUESTA NO ES LA
+                        # MISMA. "Pedile la cedula" solo sirve si el problema es
+                        # que no sabemos QUIEN es. Cuando la sesion YA lo sabe
+                        # --verificada y con id_cliente-- lo que falta es un
+                        # dato del EQUIPO que el ISP nunca cargo, y que el
+                        # cliente no puede darte por mas cedulas que escriba.
+                        #
+                        # Medido el 15/09/2026 con un cliente sin 'sn_onu':
+                        # reporta que no tiene internet, las herramientas de
+                        # equipo se bloquean, y se le contesta "para revisar tu
+                        # conexion necesito confirmar tu identidad, ¿me pasas tu
+                        # cedula?" -- a alguien ya verificado. Da la cedula, y
+                        # vuelve a lo mismo. Nunca se lo diagnostica ni se lo
+                        # guia. No es un borde: 1.299 de 4.163 clientes activos
+                        # no tienen el identificador cargado.
+                        #
+                        # El nucleo no sabe que 'sn_onu' es un equipo ni tiene
+                        # por que saberlo. Lo que si puede distinguir, sin
+                        # conocer a ningun tenant, es si la identidad ya esta
+                        # resuelta -- y con eso alcanza para no mandar a pedir
+                        # un dato que no arregla nada.
+                        salida, codigo_error = falta_un_dato_de_la_sesion(
+                            e.herramienta, e.faltantes, sesion)
                     except Exception as e:
                         # No tumba el turno: el modelo recibe un error legible y
                         # puede decirle al cliente que hubo un problema, en vez de
