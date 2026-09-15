@@ -329,6 +329,20 @@ services:
       # arriba) necesita la MISMA variable como PRIVATE_MOTOR_SERVICE_TOKEN,
       # o sus 30 y pico llamadas empiezan a fallar con 401. Ver DESPLIEGUE.md.
       MOTOR_SERVICE_TOKEN: ${MOTOR_SERVICE_TOKEN:-}
+      # Con que nombre aparece este proceso en pg_stat_activity. Ver el porque
+      # en nucleo/persistencia/conexion.py: sin esto todas las sesiones llegan
+      # firmadas 'Supavisor' y no se puede saber cual las abrio.
+      DB_APPLICATION_NAME: dexter-motor
+    # APAGADO ORDENADO. Los dos tiempos van explicitos porque los dos defaults
+    # se contradicen: Compose espera 10 s tras el SIGTERM y despues manda
+    # SIGKILL, mientras gunicorn se toma 30 s para cerrar sus workers. Con esos
+    # valores, un despliegue mata procesos a mitad de una transaccion -- y
+    #'sesion()' no alcanza a ejecutar su 'finally', asi que no hay commit,
+    # rollback ni close. Medido el 15/09/2026: una transaccion asi sobrevivio
+    # casi ocho dias del lado del pooler y bloqueo una migracion.
+    # 45 > 30 deja que gunicorn termine primero; el kill forzado queda como
+    # ultimo recurso y no como camino normal.
+    stop_grace_period: 45s
     # UN SOLO worker, y no es por memoria: nucleo/canales/api.py guarda el
     # historial de cada conversacion en '_sesiones', un diccionario en memoria
     # del proceso. Con varios workers -que son procesos, no hilos- cada uno
@@ -344,6 +358,7 @@ services:
       --workers 1
       --threads 8
       --timeout 180
+      --graceful-timeout 30
       --access-logfile -
       --error-logfile -
 
@@ -404,6 +419,13 @@ services:
       # algun dia se cargan por pantalla, estas dos lineas sobran.
       WISPHUB_API_KEY: ${WISPHUB_API_KEY:?}
       BOTTLECRM_API_TOKEN: ${BOTTLECRM_API_TOKEN:?}
+      # Distinto del de 'motor' a proposito: los dos corren el mismo codigo
+      # desde la misma imagen, asi que el nombre es lo unico que los separa en
+      # pg_stat_activity. Ver nucleo/persistencia/conexion.py.
+      DB_APPLICATION_NAME: dexter-reloj
+    # El mismo margen de apagado que 'motor', y por el mismo motivo: una pasada
+    # del reloj puede estar a mitad de una transaccion cuando llega el SIGTERM.
+    stop_grace_period: 45s
     # Ninguna clave de modelo ni de embeddings: el reloj no llama al LLM ni
     # vectoriza nada. Ningun MOTOR_SERVICE_TOKEN: no habla con 'motor', habla
     # con el CRM y con el proveedor. Lo que no necesita, no lo recibe.

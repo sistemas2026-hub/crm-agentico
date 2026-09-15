@@ -63,12 +63,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ))
+
+# Con que nombre se ve esta corrida en pg_stat_activity. 'setdefault' y no
+# asignacion: si alguien ya lo declaro en el entorno, manda el suyo.
+os.environ.setdefault("DB_APPLICATION_NAME", "dexter-cli-evaluar")
 
 # Herramientas que ESCRIBEN en un equipo o en un sistema de terceros. Se
 # listan por marcador de efecto y no por nombre exacto, para que una

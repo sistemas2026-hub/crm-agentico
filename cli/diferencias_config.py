@@ -83,12 +83,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
 
 RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ))
+
+# Con que nombre se ve esta corrida en pg_stat_activity. 'setdefault' y no
+# asignacion: si alguien ya lo declaro en el entorno, manda el suyo.
+os.environ.setdefault("DB_APPLICATION_NAME", "dexter-cli-diferencias-config")
 
 if sys.stdout.encoding != "utf-8":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")

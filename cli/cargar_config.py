@@ -64,6 +64,10 @@ from ruamel.yaml import YAML
 RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ))
 
+# Con que nombre se ve esta corrida en pg_stat_activity. 'setdefault' y no
+# asignacion: si alguien ya lo declaro en el entorno, manda el suyo.
+os.environ.setdefault("DB_APPLICATION_NAME", "dexter-cli-cargar-config")
+
 from nucleo.config import TenantConfig, cargar_config   # noqa: E402
 from nucleo.config import editor                        # noqa: E402
 from nucleo.persistencia.conexion import dsn            # noqa: E402
