@@ -15,6 +15,12 @@ Dar de alta un ISP nuevo es: fila en `tenants` (tabla), archivo en `tenants/` (c
 
 Si al escribir código en el núcleo aparece la necesidad de distinguir un cliente, no se resuelve con un `if`: significa que **falta un campo en la configuración**.
 
+### Un matiz sobre esa regla: dato de tenant no siempre es secreto
+
+`auth_ref` (nombre de un secreto, valor cifrado en `asistente.tenant_secrets`) resuelve el caso de las credenciales. Pero hay datos que **varían por empresa sin ser secretos** — un subdominio, un ID de cuenta externa. Ahí no corresponde ni un literal fijo en el YAML (viola la regla: sería un dato de una empresa mezclado con el motor si `nucleo/` lo asumiera fijo) ni cifrarlo sin necesidad.
+
+Solución (agosto 2026, ver CLAUDE.md "Esto es SaaS multi-tenant"): `TenantConfig.variables_tenant` (texto plano, editable desde la interfaz, persistido por tenant en `asistente.tenant_config`) + `Herramienta.base_url_ref` (el NOMBRE de la variable, mismo patrón que `auth_ref`). Primer y único uso hoy: el subdominio de SmartOLT (`SMARTOLT_SUBDOMINIO`, ver PRD §7.7) — el próximo ISP que se conecte carga el suyo desde `/settings/canales/smartolt`, sin tocar ningún YAML.
+
 ### Y no depende de que alguien se acuerde
 
 ```
@@ -47,11 +53,28 @@ tenants/                   DATOS por empresa — sin código
 
 supabase/                  migraciones SQL
 cli/                       utilidades operativas
-evaluacion/                sets dorados por tenant
+evaluacion/                sets dorados por tenant (<slug>.casos.yaml)
 tests/                     incluye la guarda del núcleo
+
+django-crm/                LA PLATAFORMA — CRM (BottleCRM/Django-CRM)
+  backend/                 Django + DRF
+  frontend/                SvelteKit — incluye /agentes, /asistente,
+                            /simulador-whatsapp (hablan con nucleo/canales/api.py)
 ```
 
 **`tenants/` no contiene código a propósito.** El validador vive en `nucleo/config/schema.py`: la configuración es dato, y lo que la interpreta es motor.
+
+### `django-crm/`
+
+Es el proyecto [Django-CRM/Django-CRM](https://github.com/Django-CRM/Django-CRM) (BottleCRM), **vendorizado sin su historial de git** — se copió el estado del código, no se clonó ni se agregó como submódulo. Motivo: unificar todo en un solo repo (`sistemas2026-hub/crm-agentico`) para que cloná-y-arrancá alcance con un solo `docker compose up`, sin manejar dos remotos.
+
+Costo de esa decisión: **actualizar del proyecto original a futuro es manual** (no hay `git pull` que traiga cambios de upstream — hay que copiar lo que corresponda a mano). A cambio, no se carga el historial de miles de commits ajenos dentro de este repo.
+
+Sigue siendo, en espíritu, la misma separación núcleo/tenant: `django-crm/` es la plataforma (genérica, de terceros), y lo que le agregamos encima para hablarle al motor (`frontend/src/routes/(app)/agentes/`, `/asistente/`, `/simulador-whatsapp/`, y sus proxies en `frontend/src/routes/api/`) es la integración específica de este producto — no se tocó el resto del CRM.
+
+`docker-compose.yml` (en la raíz) levanta todo junto: `db`, `redis`, `backend`, `celery-worker`, `celery-beat`, `frontend` (de `django-crm/`) y `motor` (`nucleo/`), en la misma red — el frontend le habla al motor por `http://motor:5000`, igual que le habla a Postgres por `db:5432`.
+
+Los embeddings del corpus (`nucleo/recuperacion/embeddings.py`) van a la API de OpenAI (`text-embedding-3-large`), no a un modelo local: hasta agosto 2026 corría un contenedor `ollama` aparte con `bge-m3` (~2-3 GB de RAM) solo para esto, pero el VPS no tenía recursos de sobra para sostenerlo junto con todo lo demás, y era su único consumidor — los cinco roles de chat ya estaban redirigidos a `deepseek-v4-flash`. Tampoco se puede resolver con DeepSeek — su API expone `/models` y `/chat/completions`, pero `/embeddings` devuelve 404 (verificado); un modelo de chat no produce vectores. El motor requiere `OPENAI_API_KEY` en el entorno.
 
 ## Dónde aterriza lo que ya existía
 
@@ -75,22 +98,49 @@ El sistema actual se **absorbe**, no se rescribe. Casi todo era ya configuració
 
 Ninguna vive en los YAML. La configuración solo guarda **nombres** (`auth_ref: WISPHUB_API_KEY`); el validador rechaza el archivo si detecta un valor con pinta de credencial.
 
+**Retiradas del `.env` (18/08/2026): `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY`.** Esta tabla las listaba como si el frontend hablara directo con Supabase (cliente en el browser, protegido por RLS con la clave anónima) — un diseño que quedó atrás: la app web habla con Django (JWT vía BottleCRM, ver `hooks.server.js`), nunca con un cliente Supabase del lado del navegador. Grep sobre todo el repo (`nucleo/`, `django-crm/backend/`, `django-crm/frontend/`) no encontró ni una referencia a ninguna de las dos — probable residuo de `isp-reports-app`, que sí usa ese patrón.
+
 ```
 WISPHUB_API_KEY            clave del ISP
 WISPHUB_BASE_URL
 WISPHUB_MODO_REAL
 
-VITE_SUPABASE_URL          proyecto
-VITE_SUPABASE_ANON_KEY     pública por diseño — protegida por RLS
+SMARTOLT_API_KEY           clave del ISP (header X-Token, ver PRD §7.7)
+SMARTOLT_BASE_URL          seed local -- una vez cargado el tenant, el
+                            subdominio real vive en variables_tenant (DB),
+                            no en el .env (ver el porqué mas abajo)
+
 SUPABASE_SERVICE_ROLE_KEY  ⚠️  solo migraciones (ver abajo)
 
-DATABASE_URL               ⏳ pendiente: conexión como rol app_backend
+DATABASE_URL               conexión al Postgres del Supabase propio
+POSTGRES_PASSWORD          la usa DATABASE_URL; separada para poder rearmarla
+POOLER_TENANT_ID           lo exige Supavisor en el usuario: postgres.<id>
 ```
 
-### ⚠️ Sobre `SUPABASE_SERVICE_ROLE_KEY`
+`django-crm/.env.docker.local` (ignorado por git) apunta Django al mismo Postgres, sobreescribiendo el bloque de base de datos de `.env.docker`. El servicio `db` del compose sigue existiendo pero ya no se usa.
+
+### ⚠️ `BYPASSRLS` no es solo de `SUPABASE_SERVICE_ROLE_KEY`
 
 Ese rol tiene `BYPASSRLS`: **las políticas de aislamiento no se evalúan para él**. Comprobado en la prueba del esquema — como superusuario se ven los datos de todos los tenants.
 
-Por eso el backend **no** debe usarlo para consultar datos de tenant. Se conecta como `app_backend`, que sí respeta RLS, fijando `set local app.current_tenant` en cada petición. `SUPABASE_SERVICE_ROLE_KEY` queda para migraciones y mantenimiento.
+**Y el rol `postgres` de esta instalación también lo tiene.** Verificado contra la base: `select rolbypassrls from pg_roles where rolname='postgres'` devuelve `true`. Como `DATABASE_URL` conecta justamente como `postgres`, cualquier consulta que se quede en ese rol ve los datos de todas las organizaciones sin que nada lo impida.
 
-Falta agregar `DATABASE_URL` con esa conexión.
+Por eso `DATABASE_URL` tiene **dos usos que no hay que confundir**:
+
+| Uso | Rol efectivo | Quién |
+|---|---|---|
+| Operación: migraciones, carga de configuración y corpus | `postgres` | `cli/`, `supabase/202608042055_schema.sql` |
+| Servir peticiones | `app_backend` | `nucleo/persistencia/db.py` |
+
+El motor abre transacción, hace `set local role app_backend` y fija `set local app.current_tenant` en cada operación — ver el encabezado de `nucleo/persistencia/db.py`. Ambos `local`, para que una petición no herede el tenant de otra al reutilizarse la conexión.
+
+Medido sobre `asistente.conversations` con una fila cargada:
+
+| Conexión | Filas visibles |
+|---|---|
+| `postgres` (BYPASSRLS), sin fijar tenant | 1 |
+| `app_backend` + tenant correcto | 1 |
+| `app_backend` + tenant de otra empresa | 0 |
+| `app_backend` **sin** fijar tenant | 0 |
+
+La última fila es la propiedad que importa: olvidar fijar el tenant no devuelve todo, devuelve nada. Falla cerrado.

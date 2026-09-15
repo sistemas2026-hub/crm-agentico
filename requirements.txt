@@ -1,3 +1,58 @@
 ollama
 requests
 python-dotenv
+pydantic
+PyYAML
+# Solo cli/cargar_config.py --exportar, para bajar la configuracion de la base
+# al YAML sin borrarle los comentarios (PyYAML los perderia: son 133 lineas de
+# notas de verificacion en vivo). El motor no lo usa.
+ruamel.yaml
+streamlit
+flask
+# nucleo/persistencia/db.py, desde que la persistencia dejo de ser SQLite.
+# El extra [binary] trae la libpq compilada: sin el, la imagen necesitaria
+# gcc y libpq-dev para construirlo, que no estan en python:3.13-slim.
+psycopg[binary]
+
+# DeepSeek, qwen, glm y kimi hablan la API de OpenAI: nucleo/modelo/cliente.py
+# los atiende a todos con ClienteCompatibleOpenAI. El import es PEREZOSO, dentro
+# del constructor, asi que faltando el paquete el motor arranca igual y solo
+# revienta cuando alguien hace la primera consulta.
+openai
+
+# Claude (Anthropic). Formato propio, no compatible con OpenAI -- por eso
+# ClienteAnthropic es una clase aparte en cliente.py, no otra entrada de
+# ClienteCompatibleOpenAI. Mismo import perezoso que 'openai'.
+anthropic
+
+# nucleo/ingesta/docx.py, que fragmenta el corpus.
+python-docx
+
+# Servidor WSGI. El de Flask ('app.run') avisa el mismo que no es para
+# produccion; ver el comando del servicio 'motor' en docker-compose.prod.yml.
+gunicorn
+
+# nucleo/seguridad/secretos.py, para cifrar las credenciales por empresa
+# (Fernet). El import es PEREZOSO: sin el paquete el motor arranca igual y solo
+# falla cuando alguien pide un secreto guardado en la base -- lo que sigue
+# resolviendose contra el entorno no lo necesita.
+cryptography
+
+# nucleo/canales/media.py, para achicar las fotos que manda el cliente antes de
+# guardarlas (3-8 MB de un telefono moderno -> ~200 KB). El import es PEREZOSO:
+# sin el paquete la foto se guarda tal cual, pesa mas y nada se rompe.
+Pillow
+
+# nucleo/herramientas/informes.py, para exportar un agregado a Excel/PDF
+# (RF-12). Import perezoso en los dos: sin el paquete, generar_excel()/
+# generar_pdf() fallan con un error legible en vez de romper el turno --
+# pero a diferencia de Pillow, el fallo SI debe ser visible (el modelo pidio
+# un archivo explicitamente). reportlab es pure-Python, sin dependencias de
+# sistema (a diferencia de weasyprint, que necesita Cairo/Pango).
+openpyxl
+reportlab
+
+# Solo tests/test_informes.py, para leer el texto de un PDF generado y
+# verificar que trae los numeros correctos. El motor nunca lee un PDF, solo
+# lo escribe (reportlab, arriba) -- esto no es una dependencia de la app.
+pypdf

@@ -1,0 +1,415 @@
+import { fail } from '@sveltejs/kit';
+import { listTeam, inviteUser, setRole, setStatus, updateUser, ROLES, perfilPorCorreo,
+  casosDe, reasignarCaso }
+  from '$lib/server/v2/team.js';
+import { env } from '$env/dynamic/private';
+import { headersMotor } from '$lib/server/v2/motor-headers.js';
+import { readableError } from '$lib/server/v2/form-errors.js';
+
+/**
+ * Team and access.
+ *
+ * Server load, so the JWT cookie stays server-side. The list, the totals and
+ * the per-person token counts all arrive from the real org; a non-admin gets
+ * `forbidden` back rather than a broken page, because the underlying endpoints
+ * are admin-only.
+ *
+ * @type {import('./$types').PageServerLoad}
+ */
+export async function load({ cookies, fetch }) {
+  const equipo = await listTeam({ cookies });
+
+  // Las areas de trabajo salen del asistente, no de una lista fija aca: son
+  // sus agentes internos, y cambian cuando alguien crea uno nuevo desde
+  // /agentes. Si el asistente no esta configurado o no responde, la pantalla
+  // sigue sirviendo para agregar gente -- solo se queda sin el selector de area.
+  let areas = [];
+  /** Areas declaradas por la empresa, con los agentes que precarga cada una. */
+  let areasTrabajo = [];
+  /** Lo que ya tiene cada persona, para que la tabla arranque con su estado. */
+  let asignaciones = {};
+  let areasPorPersona = {};
+  let identidades = {};
+  /** La gente del sistema operativo a la que se le puede asignar trabajo. */
+  let externos = [];
+  let etiquetaExterna = '';
+  const baseUrl = env.PRIVATE_ASISTENTE_URL;
+  const tenant = env.PRIVATE_ASISTENTE_TENANT;
+  if (baseUrl && tenant) {
+    try {
+      const resp = await fetch(
+        `${baseUrl}/agentes/asignaciones?tenant=${encodeURIComponent(tenant)}`,
+        { headers: headersMotor() }
+      );
+      const datos = await resp.json();
+      if (resp.ok) {
+        areas = datos.agentes ?? [];
+        areasTrabajo = datos.areas ?? [];
+        asignaciones = datos.asignaciones ?? {};
+        areasPorPersona = datos.areas_por_persona ?? {};
+        identidades = datos.identidades ?? {};
+        externos = datos.candidatos_externos ?? [];
+        etiquetaExterna = datos.sistema_externo ?? '';
+      }
+      else console.warn('[equipo] el asistente respondio', resp.status, datos?.error ?? '');
+    } catch (/** @type {any} */ err) {
+      // Visible a proposito: un catch mudo aca deja la pantalla sin selector
+      // de area y sin ninguna pista de por que. Ya paso una vez.
+      console.warn('[equipo] no se pudo leer las areas del asistente:', err?.message ?? err);
+      areas = [];
+    }
+  } else {
+    console.warn('[equipo] falta PRIVATE_ASISTENTE_URL o PRIVATE_ASISTENTE_TENANT');
+  }
+  return { ...equipo, areas, areasTrabajo, externos, etiquetaExterna,
+           asignaciones, areasPorPersona, identidades };
+}
+
+/**
+ * Pasa el trabajo de alguien que se desactiva a quien queda en su area, y le
+ * quita el area para que deje de recibir.
+ *
+ * Las dos cosas juntas o ninguna sirve: sin quitarle el area seguiria
+ * entrando en el reparto, y sin mover sus casos esos quedan sin nadie que los
+ * mire -- el CRM le muestra a quien no es administrador solo los suyos.
+ *
+ * Los casos CERRADOS no se tocan. Son historia: moverlos falsearia quien
+ * atendio que.
+ *
+ * Devuelve un aviso si algo no se pudo, o null. Nunca lanza: que falle el
+ * traspaso no puede impedir desactivar a alguien -- si se va, se va.
+ *
+ * @param {{ cookies: import('@sveltejs/kit').Cookies, fetch: typeof globalThis.fetch }} event
+ * @param {string} userId
+ */
+async function traspasarTrabajo({ cookies, fetch }, userId) {
+  const baseUrl = env.PRIVATE_ASISTENTE_URL;
+  const tenant = env.PRIVATE_ASISTENTE_TENANT;
+  if (!baseUrl || !tenant) return null;
+
+  try {
+    const equipo = await listTeam({ cookies });
+    const persona = [...(equipo.active ?? []), ...(equipo.inactive ?? [])].find(
+      (/** @type {any} */ m) => m.user_id === userId
+    );
+    if (!persona) return null;
+
+    const resp = await fetch(
+      `${baseUrl}/agentes/asignaciones?tenant=${encodeURIComponent(tenant)}`,
+      { headers: headersMotor() }
+    );
+    if (!resp.ok) return 'No se pudo consultar el área para traspasar su trabajo.';
+    const datos = await resp.json();
+    const area = datos.areas_por_persona?.[persona.id];
+    if (!area) return null;
+
+    // Quien queda en esa area, sin contar a quien se va ni a los inactivos.
+    const activos = new Set((equipo.active ?? []).map((/** @type {any} */ m) => m.id));
+    const quedan = Object.entries(datos.areas_por_persona ?? {})
+      .filter(([pid, a]) => a === area && pid !== persona.id && activos.has(pid))
+      .map(([pid]) => pid);
+
+    // Se le saca el area SIEMPRE, aunque no haya a quien pasarle el trabajo:
+    // que no haya reemplazo no es motivo para que siga recibiendo mas.
+    await fetch(`/api/agentes/asignaciones/${encodeURIComponent(persona.id)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ area: '', roles: datos.asignaciones?.[persona.id] ?? [] })
+    });
+
+    if (!quedan.length) {
+      return `${persona.name} no tenía a nadie más en su área: sus casos quedan a la vista de un administrador.`;
+    }
+
+    // Al que menos tiene, igual que al asignar uno nuevo.
+    const abiertos = await casosDe({ cookies }, persona.id);
+    const cerrados = new Set(['closed', 'rejected', 'duplicate']);
+    const aMover = abiertos.filter(
+      (/** @type {any} */ c) => !cerrados.has(String(c.status ?? '').toLowerCase())
+    );
+    if (!aMover.length) return null;
+
+    const destino = quedan[0];
+    let movidos = 0;
+    for (const caso of aMover) {
+      try {
+        await reasignarCaso({ cookies }, caso, destino);
+        movidos += 1;
+      } catch {
+        /* se sigue: mover ocho de nueve es mejor que ninguno */
+      }
+    }
+    if (movidos < aMover.length) {
+      return `Se traspasaron ${movidos} de ${aMover.length} casos; el resto quedó sin mover.`;
+    }
+    return null;
+  } catch (/** @type {any} */ err) {
+    return err?.message || 'No se pudo traspasar su trabajo.';
+  }
+}
+
+/** @type {import('./$types').Actions} */
+export const actions = {
+  /**
+   * Invite a new member: email + role. The server is the boundary. It gates
+   * this to admins, rejects a duplicate within the org with a 400, and reuses
+   * an account that already exists elsewhere instead of erroring.
+   */
+  /**
+   * Guarda TODO lo de una persona de una vez: nombre, correo, rol y estado en
+   * el CRM; area, agentes y usuario externo en el asistente.
+   *
+   * En una sola accion y no en tres llamadas desde el navegador porque el
+   * usuario aprieta UN boton: si tres pedidos sueltos fallan a mitad, la fila
+   * queda con parte de los cambios aplicados y parte no, y nadie sabe cual.
+   * Aca se aplica en orden y se informa que fallo, si algo fallo.
+   */
+  actualizar: async ({ cookies, request, fetch }) => {
+    const form = await request.formData();
+    const userId = form.get('userId')?.toString() || '';
+    const profileId = form.get('profileId')?.toString() || '';
+    const name = form.get('name')?.toString().trim() || '';
+    const email = form.get('email')?.toString().trim() || '';
+    const role = form.get('role')?.toString() || '';
+    const activo = form.get('activo')?.toString() === 'si';
+    const eraActivo = form.get('eraActivo')?.toString() === 'si';
+    const area = form.get('area')?.toString() || '';
+    const externo = form.get('externo')?.toString() || '';
+    const externoNombre = form.get('externo_nombre')?.toString() || '';
+    const agentes = form.getAll('agentes').map((v) => v.toString());
+
+    if (!userId || !profileId) {
+      return fail(400, { edicion: { error: 'Falta identificar a la persona.' } });
+    }
+    if (!email) {
+      return fail(400, { edicion: { error: 'El correo no puede quedar vacío.' } });
+    }
+
+    try {
+      await updateUser({ cookies }, userId, { name, email, role });
+    } catch (/** @type {any} */ err) {
+      return fail(err?.status === 403 ? 403 : 400, {
+        edicion: {
+          error:
+            err?.status === 403
+              ? 'Solo un administrador puede editar a otra persona.'
+              : readableError(err, 'No se pudieron guardar los datos de la persona.')
+        }
+      });
+    }
+
+    // El estado va aparte: tiene su propio endpoint y sus propias reglas (el
+    // servidor no deja desactivar al ultimo administrador). Solo se toca si
+    // de verdad cambio.
+    if (activo !== eraActivo) {
+      try {
+        await setStatus({ cookies }, userId, activo ? 'Active' : 'Inactive');
+      } catch (/** @type {any} */ err) {
+        return fail(400, {
+          edicion: {
+            error: readableError(err, 'Se guardaron los datos, pero no el estado.')
+          }
+        });
+      }
+    }
+
+    // Y lo del asistente. Su fallo NO invalida lo anterior, que ya quedo
+    // guardado: se avisa y se dice donde corregirlo.
+    let aviso = null;
+    try {
+      const resp = await fetch(`/api/agentes/asignaciones/${encodeURIComponent(profileId)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          area,
+          roles: agentes,
+          identidad_externa: { identificador: externo, nombre_visible: externoNombre }
+        })
+      });
+      if (!resp.ok) {
+        const d = await resp.json().catch(() => ({}));
+        aviso = d?.error || 'Se guardaron los datos, pero no el área ni los agentes.';
+      }
+    } catch (/** @type {any} */ err) {
+      aviso = err?.message || 'Se guardaron los datos, pero no el área ni los agentes.';
+    }
+
+    return { editado: name || email, avisoEdicion: aviso };
+  },
+
+  invite: async ({ cookies, request, fetch }) => {
+    // Las areas se releen aca: el action no comparte estado con el load, y
+    // hace falta saber que agentes precarga la elegida.
+    let areasDeclaradas = [];
+    if (env.PRIVATE_ASISTENTE_URL && env.PRIVATE_ASISTENTE_TENANT) {
+      try {
+        const r = await fetch(
+          `${env.PRIVATE_ASISTENTE_URL}/agentes/asignaciones?tenant=` +
+            encodeURIComponent(env.PRIVATE_ASISTENTE_TENANT),
+          { headers: headersMotor() }
+        );
+        if (r.ok) areasDeclaradas = (await r.json()).areas ?? [];
+      } catch {
+        areasDeclaradas = [];
+      }
+    }
+    const form = await request.formData();
+    const email = form.get('email')?.toString().trim();
+    const role = form.get('role')?.toString() || 'USER';
+    const name = form.get('name')?.toString().trim() || '';
+    const area = form.get('area')?.toString().trim() || '';
+    const activo = form.get('activo')?.toString() !== 'no';
+
+    // La clave la genera el SERVIDOR, no el navegador ni el administrador. Si
+    // la escribe el admin, la conoce; y la gente reusa claves. Con
+    // crypto.getRandomValues no depende de Math.random, que no sirve para
+    // esto.
+    const abc = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    const bytes = new Uint32Array(16);
+    crypto.getRandomValues(bytes);
+    const clave = Array.from(bytes, (b) => abc[b % abc.length])
+      .join('')
+      .replace(/^(.{5})(.{5})(.{6})$/, '$1-$2-$3');
+    const externo = form.get('externo')?.toString().trim() || '';
+    const externoNombre = form.get('externo_nombre')?.toString().trim() || '';
+    if (!email) return fail(400, { invite: { error: 'Ingresá un correo electrónico.' } });
+    if (!ROLES.includes(role)) return fail(400, { invite: { error: 'Elegí un rol válido.' } });
+
+    try {
+      await inviteUser({ cookies }, { email, role, name, password: clave });
+    } catch (/** @type {any} */ err) {
+      return fail(err?.status === 403 ? 403 : 400, {
+        invite: {
+          error:
+            err?.status === 403
+              ? 'Solo un administrador puede agregar personas.'
+              : readableError(err, 'No se pudo agregar a esa persona.')
+        }
+      });
+    }
+    // El area es opcional, y su fallo NO invalida el alta: la persona ya
+    // quedo creada en el CRM. Devolver un error aca la dejaria pensando que
+    // no se creo nadie, y al reintentar se choca con "ya existe". Se avisa
+    // aparte para que pueda asignarla desde /agentes/asignaciones.
+    let avisoArea = null;
+    // Los agentes salen del area, y si el formulario mando una seleccion
+    // propia, gana esa: el area precarga, no impone.
+    const agentesForm = form.getAll('agentes').map((v) => v.toString());
+    const agentes = agentesForm.length
+      ? agentesForm
+      : (areasDeclaradas.find((/** @type {any} */ a) => a.nombre === area)?.agentes ?? []);
+
+    if (area || externo || agentes.length) {
+      try {
+        // 'POST /users/' no devuelve el perfil que creo -- hay que buscarlo.
+        const profileId = await perfilPorCorreo({ cookies }, email);
+        if (!profileId) {
+          avisoArea = 'Se creó la persona, pero no se pudo ubicar su perfil para asignarle el área.';
+        } else {
+          const resp = await fetch(`/api/agentes/asignaciones/${encodeURIComponent(profileId)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              area,
+              roles: agentes,
+              identidad_externa: { identificador: externo, nombre_visible: externoNombre }
+            })
+          });
+          if (!resp.ok) {
+            const datos = await resp.json().catch(() => ({}));
+            avisoArea = datos.error || 'Se creó la persona, pero no se pudo asignarle el área.';
+          }
+        }
+      } catch (/** @type {any} */ err) {
+        avisoArea = err?.message || 'Se creó la persona, pero no se pudo asignarle el área.';
+      }
+    }
+
+    if (!activo) {
+      // Se crea activa y se desactiva enseguida: el POST no acepta el estado,
+      // y hacerlo en dos pasos es preferible a que quede activa sin querer.
+      try {
+        const persona = await listTeam({ cookies });
+        const fila = [...(persona.active ?? []), ...(persona.inactive ?? [])].find(
+          (/** @type {any} */ m) => (m.email || '').toLowerCase() === email.toLowerCase()
+        );
+        if (fila?.user_id) await setStatus({ cookies }, fila.user_id, 'Inactive');
+      } catch (/** @type {any} */ err) {
+        avisoArea = (avisoArea ? avisoArea + ' ' : '') +
+          'La persona quedó activa: no se pudo dejarla inactiva.';
+      }
+    }
+
+    return { invited: email, area: area || null, avisoArea, clave };
+  },
+
+  /**
+   * Change someone's role. The page only shows this control for another
+   * person's row and never for the last admin, mirroring the server's rules,
+   * but the server is what enforces them: a member cannot promote themselves
+   * and nobody can change their own role here.
+   */
+  setRole: async ({ cookies, request }) => {
+    const form = await request.formData();
+    const userId = form.get('userId')?.toString();
+    const role = form.get('role')?.toString();
+    if (!userId || !role || !ROLES.includes(role)) {
+      return fail(400, { error: '¿Qué persona, y a qué rol?' });
+    }
+    try {
+      await setRole({ cookies }, userId, role);
+    } catch (/** @type {any} */ err) {
+      return fail(err?.status === 403 ? 403 : 400, {
+        error:
+          err?.status === 403
+            ? 'Eso no es tuyo para cambiarlo.'
+            : readableError(err, 'No se pudo cambiar ese rol.')
+      });
+    }
+    return { roleChanged: userId };
+  },
+
+  /**
+   * Activate or deactivate a member. The server refuses to deactivate the last
+   * active admin (a 400), so the org can never be stranded without one.
+   */
+  /**
+   * Desactivar a alguien no puede dejar su trabajo colgado.
+   *
+   * El CRM le muestra a quien no es administrador solo SUS casos, asi que los
+   * de una cuenta desactivada dejan de tener quien los mire: no quedan "para
+   * todos", quedan para nadie. Y mientras su area siga cargada en el
+   * asistente, ademas seguiria recibiendo casos nuevos.
+   *
+   * Asi que al desactivar se hacen dos cosas, y las dos importan: se le
+   * quita el area -- deja de entrar en el reparto -- y sus casos abiertos
+   * pasan a quien queda en esa area. Los cerrados no se tocan: son historia,
+   * y moverlos falsearia quien atendio que.
+   */
+  setStatus: async ({ cookies, request, fetch }) => {
+    const form = await request.formData();
+    const userId = form.get('userId')?.toString();
+    const status = form.get('status')?.toString();
+    if (!userId || (status !== 'Active' && status !== 'Inactive')) {
+      return fail(400, { error: '¿Qué persona, y activa o no?' });
+    }
+    try {
+      await setStatus({ cookies }, userId, status);
+    } catch (/** @type {any} */ err) {
+      return fail(err?.status === 403 ? 403 : 400, {
+        error:
+          err?.status === 403
+            ? 'Solo un administrador puede cambiar quién está activo.'
+            : readableError(err, 'No se pudo cambiar ese estado.')
+      });
+    }
+
+    // DESPUES de desactivar, no antes: si el traspaso corriera primero y la
+    // desactivacion fallara, la persona se quedaria activa y sin trabajo.
+    let avisoTraspaso = null;
+    if (status === 'Inactive') {
+      avisoTraspaso = await traspasarTrabajo({ cookies, fetch }, userId);
+    }
+    return { statusChanged: userId, avisoTraspaso };
+  }
+};

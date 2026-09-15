@@ -9,6 +9,10 @@ Antes de proponer o hacer cualquier cambio, lee completos:
 - [PRD.md](PRD.md) — producto, requisitos, decisiones y su motivo. Fuente de verdad de **qué** se construye y **por qué**.
 - [ARQUITECTURA.md](ARQUITECTURA.md) — estructura del repo y la regla de separación núcleo/tenant. Fuente de verdad de **cómo** se organiza el código.
 
+Y antes de tocar el servidor, el despliegue o la conexión a la base:
+
+- [DESPLIEGUE.md](DESPLIEGUE.md) — cómo se pone a andar en el VPS, qué falta, y los errores que ya costaron tiempo una vez. Consultar su sección de diagnóstico **antes** de depurar un fallo de conexión o de despliegue: varios de esos errores señalan a la causa equivocada.
+
 Estos dos archivos cambian seguido y son la fuente de verdad — no un resumen de este archivo. Léelos del disco en cada sesión, no asumas que el contenido sigue igual a la última vez. Si `git log -5 -- PRD.md ARQUITECTURA.md` muestra commits que no reconoces, son cambios de otro colaborador: revísalos antes de tocar nada relacionado.
 
 ## La única regla de arquitectura
@@ -19,6 +23,26 @@ Estos dos archivos cambian seguido y son la fuente de verdad — no un resumen d
 py -3.13 tests/test_nucleo_sin_tenants.py
 ```
 
+## Esto es SaaS multi-tenant: diseñar para muchas empresas, no para Rapilink
+
+Rapilink es el primer despliegue, no el único que va a existir. Toda decisión de diseño asume que **se van a conectar muchas empresas**, cada una con sus propios valores — no solo Rapilink con los suyos hardcodeados.
+
+La consecuencia concreta: un dato que varía por empresa (el subdominio de una API externa, un ID de cuenta, cualquier config que no es igual para todo el mundo) se modela como **configuración editable desde la interfaz y persistida en la config del tenant** — nunca como un valor fijo en código, ni en un YAML que solo un desarrollador sabe editar. "Hoy solo hay un tenant" no es excusa para hardcodear: la próxima empresa que se conecte no debería necesitar una sesión de código para algo que ya se resolvió una vez. Ver el patrón ya construido para esto: `TenantConfig.variables_tenant` + `Herramienta.base_url_ref` (`nucleo/config/schema.py`) — mismo espíritu que `auth_ref` para secretos, pero para datos que no son secretos y aun así varían por empresa. `nucleo/config/editor.py` ya persiste config por tenant en base de datos (`asistente.tenant_config`), versionada — el YAML en `tenants/*.yaml` es solo la semilla inicial, no la fuente de verdad una vez cargado.
+
+Esto no es una sugerencia de "buena práctica" en abstracto: nace de una corrección directa de un colaborador después de que se declarara un dato de empresa (el subdominio de SmartOLT) como fijo en el YAML "porque hoy solo hay un tenant y cambiarlo es más trabajo". No repetir ese razonamiento.
+
+## Antes de dar por bueno un cambio de prompt, catálogo o modelo
+
+```
+py -3.13 cli/evaluar.py rapilink
+```
+
+Casos dorados (`evaluacion/<slug>.casos.yaml`) contra el motor **real**. Afirman sobre la **traza** —qué herramientas se llamaron, a qué área se derivó, si hubo errores, qué no puede aparecer en la respuesta— y nunca sobre la redacción: el modelo dice lo mismo de diez formas y un test que exige una frase exacta falla por lo que no importa.
+
+Nace de una lección cara (14/08/2026): tres bugs estuvieron rotos horas —una herramienta devolviendo un *error* donde debía haber un dato, un veredicto que no se calculaba, una precondición imposible de cumplir— y **ninguno se veía leyendo la respuesta**. Los tres se ven en la traza. Validar a mano abriendo el simulador no los detecta.
+
+Cuando algo falle en producción, agregarlo al set con lo que *debería* haber pasado: así crece con fallas reales, no con casos imaginados, y cada bug arreglado queda con su guarda.
+
 ## Decisiones que no hay que redescubrir
 
 - **El modelo compone, el código calcula** (PRD §12.5): ninguna consulta agregada le pide al modelo sumar, contar o promediar filas. Python calcula; el modelo traduce lenguaje a parámetros y redacta el resultado.
@@ -26,11 +50,66 @@ py -3.13 tests/test_nucleo_sin_tenants.py
 - **La documentación de la API de WispHub es una hipótesis** — nunca una fuente de verdad. Antes de usar un filtro nuevo, cargar la skill `wisphub-api` y verificar con el método del valor imposible.
 - DeepSeek (`deepseek-v4-flash`) está aprobado para todos los roles, incluida PII, por la autorización de tratamiento que firma el cliente (Ley 1581 art. 26) — ver PRD RNF-01 antes de cuestionar por qué datos de cliente salen a una API externa.
 - Las respuestas crudas de la API de WispHub **no se persisten** en Supabase (traen contraseñas, GPS, cédula). La auditoría (`tool_calls`) guarda solo metadatos.
+- **`ACCION_CONFIRMADA` no significa que el problema del cliente esté resuelto.** Significa que la acción produjo el efecto técnico que el sistema puede medir — en `reiniciar_ont`, que el equipo reinició y volvió. Que la casa tenga internet no lo dice ningún endpoint: lo sabe el cliente, y hay que preguntárselo. La instrucción que el modelo recibe con ese estado se lo ordena así (`nucleo/canales/api.py`), y el mecanismo entero vive en `nucleo/seguimiento/verificacion_accion.py`.
+- **Una conversación escalada le sigue contestando al cliente, a propósito.** Mientras está en pausa esperando a un humano, cada mensaje del cliente recibe el texto del tenant ("ya te estamos atendiendo"), y el texto varía según el motivo de la escalada. Se evaluó callar — una vez y después silencio, o silencio total — y se decidió NO hacerlo el 12/09/2026: medido sobre la población real, solo **7 de 63** conversaciones escaladas reciben algún mensaje posterior, así que la redundancia que ahorraría es chica, y el costo del silencio es asimétrico — quien escribe y no recibe nada no puede distinguir "me están leyendo" de "esto está roto". Repetirlo es redundante; callar es ambiguo, y ambiguo es peor. No reabrir sin una medición nueva que mueva ese 7 de 63.
+- **Un reintento solo sirve en la capa donde puede entrar información nueva.** La redacción final corre a propósito *sin* catálogo: si el área que entró por derivación no consultó nada, pedirle tres veces que reescriba devuelve tres veces la misma frase — medido byte a byte el 09/09/2026. El reintento va en el bucle del agente, que es donde el modelo todavía puede llamar una herramienta. Una guarda que solo sabe *rechazar* texto no puede crear el dato que nadie fue a buscar.
+- **Una prueba que afirma que un mecanismo EXISTE no prueba que funcione.** El mismo día, tres pruebas estaban en verde con el síntoma vivo: el caso dorado afirmaba `deriva_a` y `usa` pero no que la respuesta no fuera una promesa; usaba además la frase que sí funciona (`"quiero contratar telefonía fija"`) y no la que falla (`"para instalar un servicio de telefonía"`) — el mismo error que su propio comentario decía haber cometido antes; y el test de la guarda afirmaba que la variable `candidato` existiera, así que **sobrevivió intacto a una inversión completa de la conducta**. Afirmar sobre el efecto, nunca sobre la presencia del mecanismo.
+- **La condición de éxito de una acción no puede ser una mejora del ping.** Medido dos veces: el mismo equipo sano devuelve `1 de 3`, `2 de 3` y `3 de 3` en corridas seguidas (15/08/2026), y un reinicio real y confirmado dejó el ping en `3 de 3` **antes y después** (02/09/2026, ONT de pruebas). Con "el ping mejora" ese reinicio habría salido no confirmado y se habría escalado sin motivo. Lo que prueba un reinicio es `last_status_change` — un sello discreto, comparado contra sí mismo.
+
+## Lo que se verifica no es lo que está desplegado
+
+Entre el 08 y el 09/09/2026 se arreglaron 19 cosas. Al clasificarlas, **cuatro
+no eran bugs de lógica**: eran el repo declarando algo que producción no tenía
+(una credencial `auth_ref`, una bandera `invocable_por_servicio`, herramientas
+enteras escritas y nunca aplicadas). Ninguna prueba podía verlas — las 47
+unitarias leen el YAML del disco y producción lee `asistente.tenant_config`.
+Las cuatro las encontró una persona abriendo el simulador, una simulación
+perdida cada una.
+
+**Después de aplicar config a producción, correr esto — en segundos dice si la
+base tiene lo que el repo declara:**
+
+```
+py -3.13 cli/diferencias_config.py rapilink
+```
+
+Reporta la *dirección* de cada diferencia, no un veredicto: el YAML es semilla
+y la base es la fuente de verdad una vez cargada, así que "solo la base lo
+tiene" es normal (la parrilla, las localidades, la tarifa) y "el repo lo
+declara y la base no" es la que rompe. Termina en 1 si hay algo de lo segundo.
+
+Otras cinco de esas 19 eran regresiones que un caso dorado ya existente habría
+cazado: existían, pasaban, y nadie los miró porque los 56 tardan ~23 minutos.
+Por eso hay un subconjunto de humo — ocho casos, uno por camino crítico,
+ninguno que reinicie un equipo:
+
+```
+py -3.13 cli/evaluar.py rapilink --humo --base       # ~3 min
+```
+
+`--base` no es opcional después de aplicar config: sin él el corredor lee el
+YAML, que es justo el lado donde el dato sí estaba.
 
 ## Comandos útiles
 
 ```
 py -3.13 tests/test_nucleo_sin_tenants.py   # guarda de arquitectura
+py -3.13 tests/test_editor_config.py        # guarda del editor de agentes (sin base)
+py -3.13 tests/test_timeouts_modelo.py      # ninguna llamada al modelo se cuelga (sin red)
+py -3.13 cli/evaluar.py rapilink            # casos dorados contra el motor real
+py -3.13 cli/evaluar.py rapilink --humo     # los 8 del camino critico (~3 min)
+py -3.13 cli/diferencias_config.py rapilink # el repo vs lo desplegado, en segundos
 py -3.13 cli/banco_pruebas.py               # compara modelos contra el prompt real
 py -3.13 cli/sondear_api.py                 # descubre endpoints de WispHub (solo lectura)
 ```
+
+## Configuración de una sola vez por máquina (cada colaborador)
+
+Git no versiona hooks ni alias — hay que activarlos a mano una vez por copia local del repo:
+
+```
+git config core.hooksPath .githooks
+git config alias.novedades '!git fetch origin && echo "--- commits nuevos ---" && git log HEAD..origin/fix/integracion-wisphub --oneline && echo "--- archivos que cambiaron ---" && git diff --stat HEAD origin/fix/integracion-wisphub'
+```
+
+`git novedades` trae del remoto (sin mezclar nada localmente) y muestra qué commits y qué archivos cambió el otro colaborador desde la última vez — para revisar antes de hacer `git pull`.

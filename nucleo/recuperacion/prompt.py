@@ -1,0 +1,334 @@
+# -*- coding: utf-8 -*-
+"""
+================================================================================
+ CONSTRUCCION DEL SYSTEM PROMPT  -  por config, no por diccionario hardcodeado
+================================================================================
+
+Equivalente generico de construir_system(area) en soporte_wisphub.py, pero
+armado desde 'Persona'/'Identidad'/'Rol' (nucleo/config/schema.py) en vez de
+un diccionario Python por nombre de area. La diferencia que importa: la base
+del prototipo original asume "quien te escribe es SIEMPRE un colaborador,
+NUNCA el cliente final" -- lo contrario de lo que necesita un rol
+'cliente_final'. Esa bifurcacion la decide 'Rol.orientado_a', no un nombre de
+rol hardcodeado (eso violaria la regla de nucleo/tenants).
+
+La verificacion de identidad se recuerda en el prompt como defensa en
+profundidad, pero la garantia real la aplica el motor en codigo
+(nucleo/seguridad/verificacion.py) ANTES de ejecutar una herramienta -- el
+prompt no es lo unico que la exige.
+================================================================================
+"""
+
+from __future__ import annotations
+
+# De donde sale cada pieza. Texto para una PERSONA (a que pantalla ir), no
+# una ruta que el codigo resuelva.
+AJUSTES = "Ajustes -> Personalidad del asistente"
+ORIGEN_CODIGO = "fijo en el codigo, no se edita"
+GEN = "se genera segun 'orientado_a' del agente"
+
+
+_DIAS = ("lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo")
+_MESES = ("enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
+          "agosto", "septiembre", "octubre", "noviembre", "diciembre")
+
+
+def _hoy_en(zona: str) -> str:
+    """
+    Que dia es hoy, en la zona horaria del tenant.
+
+    NO ES UN ADORNO. Sin esto el modelo no puede comparar una fecha contra el
+    presente, y eso lo lleva a inventar. Visto en produccion (14/08/2026): a
+    una clienta con una factura pendiente y fecha de corte el 20/08 le dijo
+    que esa deuda "puede estar limitando tu servicio". Ella tuvo que
+    corregirlo dos veces -- "hoy apenas es 13"-- y recien ahi acepto que
+    tenia razon. Sabia razonarlo; le faltaba el dato.
+
+    SOLO EL DIA, sin hora: el prompt se arma en cada turno, y si trajera la
+    hora cambiaria cada minuto, rompiendo el cacheo de prefijo del proveedor
+    en todas las llamadas (RNF-03). Con granularidad de dia, el prompt es
+    identico durante toda la jornada. Lo que se pierde es responder "¿estan
+    abiertos AHORA?"; para eso puede decir el horario y que la persona
+    juzgue.
+
+    Los nombres van escritos a mano y no por locale: un contenedor no suele
+    traer el locale español instalado, y strftime devolveria 'Friday'.
+    """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+    try:
+        ahora = datetime.now(ZoneInfo(zona))
+    except (ZoneInfoNotFoundError, ValueError):
+        # Zona mal escrita en la config: mejor la fecha del servidor que
+        # ninguna. Sin esto el modelo vuelve a quedarse sin referencia.
+        print(f"[prompt] zona horaria desconocida '{zona}', se usa la del servidor")
+        ahora = datetime.now()
+
+    return (f"Hoy es {_DIAS[ahora.weekday()]} {ahora.day} de "
+            f"{_MESES[ahora.month - 1]} de {ahora.year}. Usalo para cualquier "
+            f"cuenta con fechas -- si una fecha de corte, de vencimiento o de "
+            f"cita todavia no llego, NO hables de ella como si ya hubiera "
+            f"pasado.")
+
+
+def construir_system(config, nombre_rol: str) -> str:
+    """El system prompt completo, tal cual lo recibe el modelo."""
+    return "\n\n".join(p["texto"] for p in piezas_del_system(config, nombre_rol))
+
+
+def _tabla_de_derivacion(config, rol) -> str:
+    """
+    Las areas a las que este rol puede derivar y QUE atiende cada una, en el
+    formato que el modelo necesita para decidir.
+
+    Se arma leyendo la configuracion, no de un texto escrito a mano: los
+    destinos salen de la herramienta que declara 'deriva_rol' (su
+    'areas_destino') y el criterio de cada uno sale del 'atiende' de ese rol.
+    Conectar un agente nuevo pasa a ser marcarlo como destino y describir que
+    atiende -- sin tocar el prompt de nadie.
+
+    Devuelve '' si este rol no deriva a ningun lado (la mayoria): 'agregar()'
+    descarta las piezas vacias, asi que el prompt de un especialista no
+    carga con una seccion que no le corresponde.
+
+    Un destino SIN 'atiende' se nombra igual, pero avisando que no se sabe
+    cuando usarlo -- preferible a omitirlo en silencio: el sintoma seria "cree
+    un agente y nunca le llega nada", que es dificil de diagnosticar desde
+    afuera.
+    """
+    destinos: list[str] = []
+    for nombre_herr in rol.puede_consultar:
+        herr = next((h for h in config.herramientas if h.nombre == nombre_herr), None)
+        if herr is not None and getattr(herr, "deriva_rol", False):
+            destinos.extend(herr.areas_destino)
+
+    if not destinos:
+        return ""
+
+    lineas = []
+    for destino in dict.fromkeys(destinos):        # sin repetir, orden estable
+        rol_destino = config.roles.get(destino)
+        if rol_destino is None:
+            continue
+        atiende = (rol_destino.atiende or "").strip()
+        if atiende:
+            aviso = ""
+            if not rol_destino.exige_verificacion:
+                # Generico a proposito: nucleo/ no puede nombrar un rol de
+                # tenant especifico (ej. 'ventas') -- se marca por el campo,
+                # no por el nombre, para que el router sepa cuando saltar la
+                # verificacion sin que el motor conozca a ese cliente.
+                aviso = ("\n  (NO requiere verificar identidad -- deriva "
+                        "directo, sin pedir cedula)")
+            lineas.append(f"- {atiende}\n  -> derivar_a_area('{destino}'){aviso}")
+        else:
+            lineas.append(
+                f"- (a '{destino}' no se le describio todavia que atiende, asi "
+                f"que no derives ahi salvo que el cliente lo pida por su "
+                f"nombre)")
+
+    if not lineas:
+        return ""
+
+    return ("A que area deriva cada cosa:\n" + "\n".join(lineas) +
+            "\n\nSi ninguna encaja, no fuerces una derivacion: resuelvelo tu "
+            "si puedes, o pasalo a un colaborador humano.")
+
+
+def piezas_del_system(config, nombre_rol: str) -> list[dict]:
+    """
+    Las mismas partes que construir_system(), pero cada una con su titulo y
+    DONDE se edita. Es lo que le permite a la pantalla de agentes contestar
+    "por que dijo eso" sin que nadie tenga que reconstruir el prompt de
+    memoria cruzando cuatro secciones de la configuracion.
+
+    Una sola fuente a proposito: construir_system() se arma desde esto, no al
+    reves ni en paralelo. Dos funciones que generan "el mismo" prompt divergen
+    en el primer cambio, y el dia que diverjan la pantalla estaria mintiendo
+    justo cuando alguien la consulta para depurar.
+
+    'origen' es texto para una persona, no una ruta que el codigo resuelva:
+    dice a que pantalla ir. 'editable' distingue lo que se cambia desde la
+    plataforma de lo que esta fijo en codigo o se genera solo -- un bloque
+    generado (a quien le habla el agente) no tiene donde editarse porque no
+    lo escribio nadie, y ese es justamente el punto.
+    """
+    rol = config.roles[nombre_rol]
+    persona = config.persona
+    identidad = config.identidad
+
+    piezas: list[dict] = []
+
+    def agregar(titulo: str, origen: str, texto: str, editable: bool = True):
+        if texto and texto.strip():
+            piezas.append({"titulo": titulo, "origen": origen,
+                           "texto": texto, "editable": editable})
+
+    agregar(
+        "Identidad y tono", AJUSTES,
+        f"Eres {persona.nombre_asistente}, el asistente de "
+        f"{identidad.nombre_comercial or identidad.nombre_legal}, un "
+        f"proveedor de internet (ISP). Respondes en {identidad.idioma}, con "
+        f"tono {persona.tono} y respuestas {persona.longitud_respuesta}s.")
+
+    agregar(
+        "No inventar", ORIGEN_CODIGO,
+        "No inventes datos: si una herramienta no te da un dato, decilo "
+        "explicitamente en vez de completarlo. Tampoco inventes un "
+        "procedimiento, un paso a seguir, ni el nombre de una herramienta "
+        "que no tienes en tu lista -- tu unica fuente de procedimientos es "
+        "lo que te llega en este prompt (guias del corpus, tus "
+        "herramientas reales), nunca tu propio criterio de que 'suena "
+        "razonable'. Esto vale incluso para un servicio real de la "
+        "empresa: si no tienes una guia cargada para ese caso puntual, no "
+        "improvises pasos -- decilo ('no tengo el procedimiento para esto "
+        "todavia') y ofrece pasar el caso a un colaborador humano. Y si "
+        "preguntan por algo que la empresa directamente no ofrece, decilo "
+        "con la misma honestidad ('ese servicio no lo ofrecemos') en vez "
+        "de fabricar una respuesta o simular que consultaste algo que no "
+        "existe.", editable=False)
+
+    # Contexto de negocio SIEMPRE presente (a diferencia del corpus, que solo
+    # se trae si la pregunta matchea por RAG): que servicios y planes existen
+    # de verdad. Sin esto el modelo no tiene forma de saber si un servicio que
+    # preguntan (ej. TV) existe o no, y improvisa en cualquier direccion.
+    agregar("Que ofrece la empresa", AJUSTES,
+            f"Que ofrece la empresa: {identidad.descripcion}"
+            if identidad.descripcion else "")
+
+    # Esta pieza NO la escribe nadie: la decide 'orientado_a'. Es lo que
+    # impide que alguien cree un agente de cara al cliente y se olvide de
+    # decirle que quien escribe es un desconocido hasta verificarse.
+    if rol.orientado_a == "cliente_final":
+        if rol.exige_verificacion:
+            bloque_identidad = (
+                "Es un desconocido hasta que su identidad quede verificada "
+                "por el sistema (no por ti): no muestres ningun dato de "
+                "cuenta antes de que el codigo confirme la verificacion.\n"
+                "VERIFICACION PRIMERO, SIEMPRE -- SIN EXCEPCION, incluso si "
+                "el pedido suena a contratar un servicio nuevo: apenas el "
+                "cliente cuenta cual es su problema, tu SIGUIENTE mensaje "
+                "tiene que pedir la verificacion de identidad (ej. numero "
+                "de cedula, con la herramienta correspondiente) -- ANTES de "
+                "hacer cualquier pregunta de diagnostico (cuantos "
+                "televisores tiene, si las luces del equipo estan "
+                "normales, etc.), aunque esas preguntas en si no muestren "
+                "ningun dato de la cuenta. No arranques el diagnostico y "
+                "despues pidas la cedula: el orden es verificar, y RECIEN "
+                "AHI seguir con el problema. Unica excepcion: si el canal "
+                "ya la trae verificada de antes (ver el punto de abajo), no "
+                "hace falta volver a pedirla.\n"
+                "Si la verificacion no encuentra a nadie con el dato, la "
+                "herramienta te va a decir que hacer segun cuantas veces ya "
+                "paso -- seguila al pie de la letra, no improvises tu propio "
+                "criterio ahi (puede ser un simple error de tipeo, o alguien "
+                "que todavia no es cliente).\n"
+                "Como saber si YA esta verificado: hay dos senales, y "
+                "cualquiera de las dos alcanza por si sola, no hace falta "
+                "esperar a la otra. (1) Si confirmar_identidad te devuelve "
+                "verificado:true, la sesion QUEDO VERIFICADA en ese mismo "
+                "momento -- no existe ninguna otra herramienta ni ningun otro "
+                "paso que 'cierre' la verificacion, y puedes seguir de "
+                "inmediato con el problema del cliente en ese mismo mensaje. "
+                "(2) Si el resultado de CUALQUIER OTRA herramienta trae datos "
+                "reales (no un mensaje de error pidiendo identidad), es porque "
+                "el codigo ya verifico antes de ejecutarla -- en ese caso "
+                "mostra esos datos directo. En ninguno de los dos casos "
+                "vuelvas a pedir verificacion de nuevo, ni digas que falta un "
+                "paso o que el canal no lo permite.\n"
+            )
+        elif rol.deriva_verificacion:
+            # Un ROUTER puro (agregado 19/08/2026): a diferencia de 'ventas'
+            # (bloque de abajo), quien le escribe SI suele ser cliente -- lo
+            # que no hace este rol es verificarlo el mismo. Nace de un bug
+            # real: cuando la verificacion vivia aca, alguien que reportaba
+            # una falla real de servicio y se equivocaba tipeando la cedula
+            # dos veces terminaba con una pregunta de ventas ("¿queres
+            # contratar?") que no tenia nada que ver con lo que habia
+            # pedido. Mover la verificacion a cada especialista (que la
+            # hace en su propio contexto: "para revisar tu conexion..." en
+            # soporte, distinto de facturacion) evita esa mezcla de raiz.
+            bloque_identidad = (
+                "NO verificas identidad vos mismo -- esa responsabilidad es "
+                "del area especializada a la que derivas (cada una tiene su "
+                "propia herramienta para eso, en su propio contexto). Tu "
+                "trabajo es identificar de que se trata y derivar apenas lo "
+                "tengas claro -- ver la tabla de derivacion mas abajo. No le "
+                "pidas cedula ni ningun dato de identidad antes de derivar: "
+                "no es tu funcion, y solo demora la atencion.\n"
+            )
+        else:
+            # Un cliente_final que TODAVIA NO ES CLIENTE (ej. un prospecto
+            # pidiendo contratar) -- no hay identidad que verificar contra
+            # WispHub, no esta en esa base y nunca lo va a estar hasta que
+            # se de de alta. Ver Rol.exige_verificacion en schema.py.
+            bloque_identidad = (
+                "Todavia NO es cliente de la empresa -- no busques verificar "
+                "su identidad contra ningun sistema, no tiene sentido: nunca "
+                "va a aparecer registrado hasta que efectivamente contrate. "
+                "No le pidas cedula para 'confirmar quien es', segui la "
+                "conversacion con lo que te cuenta.\n"
+            )
+        agregar(
+            "A quien le hablas", GEN,
+            "Quien te escribe es el CLIENTE FINAL, en segunda persona, por "
+            "un canal como WhatsApp -- no un colaborador interno. "
+            + bloque_identidad +
+            f"Al inicio de la conversacion, saluda presentandote por tu nombre ({persona.nombre_asistente}) "
+            f"de forma natural y cercana, como lo haria una persona real del "
+            f"equipo de atencion -- nunca digas que eres un bot, un asistente "
+            f"automatizado, ni uses frases con sonido de guion o de robot.\n"
+            "Nunca uses formato markdown (nada de **negrita**, _cursiva_, "
+            "ni # titulos): este canal no lo renderiza, y quedan simbolos "
+            "sueltos a la vista en vez de texto resaltado. Escribe en texto "
+            "plano; si hace falta estructurar pasos, usa una lista numerada "
+            "simple (1. 2. 3.) en lineas separadas, nunca asteriscos.",
+            editable=False)
+    else:
+        agregar(
+            "A quien le hablas", GEN,
+            "Quien te escribe es SIEMPRE un colaborador de la empresa, "
+            "nunca el cliente final. Habla del cliente en tercera persona; "
+            "no lo saludes a el, saluda a quien te escribe.", editable=False)
+
+    # 'rol.descripcion' puede referenciar un dato propio del tenant con
+    # '{clave}' (mismo patron que los marcadores de endpoint en
+    # nucleo/herramientas/http.py::url_de()) -- ej. el link fijo de un
+    # formulario externo, que por regla del proyecto no puede vivir
+    # hardcodeado en el YAML (CLAUDE.md: "disenar para SaaS multi-tenant").
+    # .replace() y no .format(): un texto libre puede traer llaves sueltas
+    # que no son marcadores (ej. una aclaracion entre {llaves}), y .format()
+    # rompe con KeyError ante la primera que no reconoce.
+    descripcion_rol = rol.descripcion or ""
+    for clave, valor in (config.variables_tenant or {}).items():
+        descripcion_rol = descripcion_rol.replace("{" + clave + "}", str(valor))
+    agregar("Tu rol especifico", "este mismo agente",
+            f"Tu rol especifico: {descripcion_rol}" if descripcion_rol else "")
+
+    # Tabla de enrutamiento GENERADA, no escrita a mano. Si este rol tiene una
+    # herramienta que deriva a otras areas, se arma la lista de destinos
+    # leyendo el 'atiende' de cada uno.
+    #
+    # Es lo que permite conectar un agente nuevo desde la pantalla: se lo marca
+    # como destino y se completa su 'atiende', y el router se entera solo. La
+    # alternativa -- que alguien edite el prompt del router cada vez -- es
+    # justo lo que hace que agregar un area sea trabajo de codigo.
+    agregar("A que area deriva cada cosa", GEN, _tabla_de_derivacion(config, rol),
+            editable=False)
+
+    agregar("Instrucciones adicionales", AJUSTES,
+            persona.instrucciones_adicionales)
+
+    agregar("Reglas absolutas",
+            "configuracion del tenant (seguridad.reglas_absolutas)",
+            "Reglas que no puedes romper bajo ninguna circunstancia:\n- "
+            + "\n- ".join(config.seguridad.reglas_absolutas)
+            if config.seguridad.reglas_absolutas else "")
+
+    # ULTIMA a proposito, ver _hoy_en(). Es la unica pieza que cambia con el
+    # tiempo: dejandola al final, todo lo de arriba es un prefijo identico
+    # entre turnos y el proveedor lo puede cachear.
+    agregar("Fecha de hoy", GEN, _hoy_en(identidad.zona_horaria), editable=False)
+
+    return piezas
