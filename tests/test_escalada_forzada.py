@@ -190,10 +190,17 @@ for codigo in sorted(CODIGOS_MOTOR_GUARD):
                                         "codigo_error": codigo}])
     afirmar(motivo is None,
             f"'{codigo}' en una herramienta con escalar_si_falla NO escala")
+# 'DATO_DEL_EQUIPO_NO_CARGADO' se sumo el 15/09/2026: es el hermano de
+# IDENTIDAD_NO_RESUELTA para cuando la identidad SI esta resuelta y lo que
+# falta es un dato del equipo que el ISP nunca cargo (motor.py,
+# falta_un_dato_de_la_sesion). Tiene que estar aca por lo mismo que los otros
+# seis -- el motor IMPIDIO la llamada, la herramienta no fallo-- y el bucle de
+# arriba ya comprobo que no escala.
 afirmar(CODIGOS_MOTOR_GUARD == {"PRECONDICION_NO_CUMPLIDA", "LIMITE_DE_CONVERSACION",
                                 "FALTA_HABLAR_CON_EL_CLIENTE", "IDENTIDAD_NO_RESUELTA",
+                                "DATO_DEL_EQUIPO_NO_CARGADO",
                                 "IDENTIDAD_NO_VERIFICADA", "HERRAMIENTA_DESCONOCIDA"},
-        "la clasificacion tiene exactamente los 6 codigos de gate -- "
+        "la clasificacion tiene exactamente los 7 codigos de gate -- "
         "ni uno de mas, ni uno de menos")
 
 print("\n[7] EL CASO CRITICO -- bloqueo prematuro y despues exito, en la MISMA traza")
@@ -484,8 +491,9 @@ print("\n[CASO 7] idempotencia -- nada de esto se toco")
 # turnos ya dependia (Fase #2/#5) -- sigue exactamente igual:
 afirmar(CODIGOS_MOTOR_GUARD == {"PRECONDICION_NO_CUMPLIDA", "LIMITE_DE_CONVERSACION",
                                 "FALTA_HABLAR_CON_EL_CLIENTE", "IDENTIDAD_NO_RESUELTA",
+                                "DATO_DEL_EQUIPO_NO_CARGADO",
                                 "IDENTIDAD_NO_VERIFICADA", "HERRAMIENTA_DESCONOCIDA"},
-        "CODIGOS_MOTOR_GUARD tiene los seis codigos de gate -- PEDIDO_INVALIDO "
+        "CODIGOS_MOTOR_GUARD tiene los siete codigos de gate -- PEDIDO_INVALIDO "
         "NO se mezclo ahi adentro")
 afirmar(CODIGOS_MOTOR_GUARD.isdisjoint(CODIGOS_CONDICION_DE_NEGOCIO),
         "y ningun codigo de negocio (PEDIDO_INVALIDO, COMPROBANTE_NO_LISTO) se "

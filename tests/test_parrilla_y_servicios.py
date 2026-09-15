@@ -362,9 +362,26 @@ v = real.roles["ventas"]
 afirmar("consultar_mi_servicio" in v.puede_consultar
         and "consultar_plan_tv" in v.puede_consultar,
         "ventas puede mirar el plan del cliente y si ese plan incluye TV")
-afirmar(v.campos_permitidos.get("consultar_mi_servicio") == ["plan_internet"],
-        "y de su ficha ve UN SOLO campo: el plan. Nada mas de esa ficha le "
-        "hace falta, y la lista blanca es lo unico que lo impide")
+# Se amplio de UNO a TRES campos el 15/09/2026, y la lista sigue siendo cerrada
+# a proposito: lo que se fija no es el numero, es que nadie agregue un cuarto
+# sin pasar por aca.
+#
+# 'estado' y 'estado_facturas' entraron por una regla de negocio: un PUNTO DE
+# TV ADICIONAL exige servicio activo, factura al dia y plan con TV. Sin esos
+# dos campos ventas no podia comprobar ninguna de las dos primeras -- y lo que
+# hacia en su lugar era pedirle el barrio a un cliente ya verificado, "para
+# revisar la cobertura", a alguien a cuya casa ya le llegamos (medido en el
+# simulador ese mismo dia).
+#
+# Son datos de SU PROPIO servicio y los mismos dos que 'facturacion_cliente'
+# ya veia, que es un rol del mismo nivel de cara al cliente. No se sumo
+# 'saldo' ni 'fecha_corte': la regla se responde con el estado, y un importe
+# no hace falta para decidir si se puede sumar un televisor.
+afirmar(v.campos_permitidos.get("consultar_mi_servicio")
+        == ["plan_internet", "estado", "estado_facturas"],
+        "y de su ficha ve TRES campos y solo esos: el plan y los dos estados. "
+        "Nada mas de esa ficha le hace falta, y la lista blanca es lo unico "
+        "que lo impide")
 
 # EL PUNTO DE ESTA SECCION.
 #

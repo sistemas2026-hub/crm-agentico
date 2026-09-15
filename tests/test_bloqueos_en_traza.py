@@ -21,7 +21,7 @@ Medido antes del cambio: 570 llamadas registradas, CERO bloqueos. No porque
 no ocurrieran.
 
 Este test corre SIN RED y SIN BASE: no llama al modelo ni a WispHub. Lo que
-fija es que los seis codigos de gate esten clasificados como bloqueo, y que
+fija es que los siete codigos de gate esten clasificados como bloqueo, y que
 ningun mensaje de excepcion de un tercero se cuele en esa lista.
 """
 
@@ -56,13 +56,14 @@ def revisar(condicion: bool, descripcion: str, detalle: str = "") -> None:
 ESPERADOS = {
     "IDENTIDAD_NO_VERIFICADA",
     "IDENTIDAD_NO_RESUELTA",
+    "DATO_DEL_EQUIPO_NO_CARGADO",
     "PRECONDICION_NO_CUMPLIDA",
     "FALTA_HABLAR_CON_EL_CLIENTE",
     "HERRAMIENTA_DESCONOCIDA",
     "LIMITE_DE_CONVERSACION",
 }
 faltan = ESPERADOS - CODIGOS_DE_BLOQUEO
-revisar(not faltan, "los seis codigos de gate cuentan como bloqueo",
+revisar(not faltan, "los siete codigos de gate cuentan como bloqueo",
         f"sin clasificar: {sorted(faltan)}" if faltan else "")
 
 

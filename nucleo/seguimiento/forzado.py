@@ -515,11 +515,41 @@ def motivos_que_no_elige_el_modelo(config) -> set[str]:
 # era que todavia no habia confirmado quien era. Encontrado el 08/09/2026
 # mirando una conversacion real en la bandeja, con las cuatro herramientas
 # marcadas "bloqueada" en la traza y el caso escalado igual.
+def decidir_pedido_humano_de(config, historial: list[dict]):
+    """
+    (decision, evidencia) leyendo la config del tenant. Ver
+    decidir_pedido_humano mas arriba para los tres niveles.
+
+    Vivia en nucleo/canales/api.py, que era su unico llamador. Se movio aca
+    -- junto a la logica que envuelve-- cuando aparecio el segundo:
+    cli/evaluar.py, para que un caso dorado pueda afirmar sobre una escalada
+    pedida por el cliente. Duplicar el cableado en el corredor habria dejado
+    la prueba midiendo SU copia en vez de lo que corre en produccion, que es
+    exactamente lo que un caso dorado no puede permitirse.
+    """
+    esc = config.escalamiento
+    if not esc.motivo_pide_humano:
+        return None, ""
+    return decidir_pedido_humano(
+        historial, (esc.pregunta_pide_humano or "").strip(),
+        frases=esc.frases_pide_humano,
+        ambiguas=esc.frases_intencion_ambigua,
+        afirmativas=esc.frases_afirmativas,
+        negativas=esc.frases_negativas,
+        maximo_preguntas=esc.maximo_preguntas_pide_humano)
+
+
 CODIGOS_MOTOR_GUARD = frozenset({
     "PRECONDICION_NO_CUMPLIDA",
     "LIMITE_DE_CONVERSACION",
     "FALTA_HABLAR_CON_EL_CLIENTE",
     "IDENTIDAD_NO_RESUELTA",
+    # Hermano del anterior: la identidad SI esta resuelta, lo que falta es un
+    # dato del equipo que el ISP nunca cargo (ver motor.py,
+    # falta_un_dato_de_la_sesion). Tiene que estar aca o el bloqueo se cuenta
+    # como fallo de la herramienta y fuerza una escalada con un motivo -- y un
+    # mensaje al cliente -- que no es cierto.
+    "DATO_DEL_EQUIPO_NO_CARGADO",
     "IDENTIDAD_NO_VERIFICADA",
     "HERRAMIENTA_DESCONOCIDA",
 })

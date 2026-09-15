@@ -98,6 +98,7 @@ load_dotenv(RAIZ / ".env", override=False)
 from nucleo.config import cargar_config                      # noqa: E402
 from nucleo.modelo import motor                              # noqa: E402
 from nucleo.seguimiento import escalamiento                 # noqa: E402
+from nucleo.seguimiento import forzado                     # noqa: E402
 from nucleo.seguridad.verificacion import Sesion             # noqa: E402
 
 
@@ -278,6 +279,28 @@ def correr_caso(config, caso: dict, defaults: dict, prohibido: list[str]) -> dic
         elif veces > 1:
             fallas.append(f"usa_una_sola_vez: llamo '{herr}' {veces} veces")
 
+    # 'ejecuta_una_sola_vez' mira 'ejecutadas', no 'usadas', y la diferencia es
+    # justo lo que hace falta para probar un LIMITE.
+    #
+    # 'usa_una_sola_vez' cuenta INTENTOS, asi que fallaria exactamente cuando
+    # el mecanismo funciona: el cliente insiste, el modelo pide el reinicio una
+    # segunda vez, y el motor lo frena con LIMITE_DE_CONVERSACION antes de
+    # ejecutarlo (ver motor.py, el limite se evalua ANTES de correr nada). Dos
+    # intentos, una ejecucion -- y la que le importa al cliente, cuyo equipo se
+    # reinicio una sola vez, es la segunda.
+    #
+    # Lo que se afirma es el EFECTO sobre el mundo: el aparato no se reinicio
+    # dos veces. Si el modelo ni siquiera lo intenta, mejor todavia, y el caso
+    # pasa igual -- no se le exige al modelo portarse mal para probar la
+    # guarda.
+    for herr in espera.get("ejecuta_una_sola_vez") or []:
+        veces = ejecutadas.count(herr)
+        if veces == 0:
+            fallas.append(f"ejecuta_una_sola_vez: nunca ejecuto '{herr}'")
+        elif veces > 1:
+            fallas.append(f"ejecuta_una_sola_vez: EJECUTO '{herr}' {veces} "
+                          f"veces -- el limite por conversacion no la freno")
+
     if espera.get("sin_errores") and errores:
         fallas.append(f"sin_errores: {'; '.join(errores)[:150]}")
 
@@ -330,6 +353,25 @@ def correr_caso(config, caso: dict, defaults: dict, prohibido: list[str]) -> dic
             # porque la pregunta nunca se hizo.
             fallas.append(f"escala: no se pudo evaluar ({type(e).__name__}: {e})")
             veredicto = None
+
+        # EL FORZADO POR PEDIDO EXPLICITO, IGUAL QUE EN PRODUCCION.
+        #
+        # El veredicto del evaluador no es la ultima palabra cuando el cliente
+        # PIDIO una persona: nucleo/canales/api.py lo fuerza despues, leyendo
+        # la conversacion con decidir_pedido_humano_de(). Es un hecho de lo que
+        # el cliente dijo, no una lectura de su tono -- y por eso no depende de
+        # que el evaluador coincida (el 18/08/2026 se midio que ante el mismo
+        # historial responde distinto en llamadas seguidas).
+        #
+        # Sin esto, un caso sobre "quiero hablar con una persona" podia salir
+        # ROJO con produccion funcionando perfecto. Se llama a la MISMA funcion
+        # que api.py, no a una copia: una prueba que mide su propia version de
+        # la logica no prueba lo que corre.
+        if veredicto is not None:
+            decision, _evidencia = forzado.decidir_pedido_humano_de(config, historial)
+            if decision in (forzado.PIDE_HUMANO, forzado.CONFIRMA):
+                veredicto = {**veredicto, "escalar": True,
+                             "motivo": config.escalamiento.motivo_pide_humano}
 
         if veredicto is not None:
             if "escala" in espera:

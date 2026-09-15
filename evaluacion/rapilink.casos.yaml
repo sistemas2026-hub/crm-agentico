@@ -1810,3 +1810,620 @@ casos:
       - "esto es un desastre, llevo dias sin internet y nadie me responde"
     espera:
       escala: false
+
+  # EL CASO NEGATIVO DE LA CORRELACION CON LA RED.
+  #
+  # El positivo ("diagnostico con problema de senal correlaciona contra la
+  # red") afirma que la herramienta se llama. Este afirma la otra rama, que es
+  # la que corre casi siempre: no hay incidente activo. Medido el 15/09/2026
+  # contra la red real -- 'es_incidente_de_red: false'.
+  #
+  # Lo que vale fijar no es que diga "no hay nada": es que NO INVENTE una
+  # caida para explicarle al colaborador un problema que todavia no entiende.
+  # Un incidente de red inventado manda a un tecnico a revisar una NAP que
+  # esta perfecta, y deja al cliente sin servicio mientras tanto.
+  #
+  # LAS FRASES PROHIBIDAS SE ELIGIERON MIRANDO LA RESPUESTA CORRECTA, no de
+  # memoria -- tres corridas, casi identicas. La respuesta buena dice "no
+  # confirma que sea solo de ese cliente" y "agrupar una caida recien
+  # empezada": por eso NO se prohiben "solo de ese cliente" ni "una caida"
+  # sueltas, que apareceran siempre. Se prohibe la forma AFIRMATIVA, que solo
+  # cabe en una fabricacion. Es la leccion del mismo dia con "cuenta ubicada":
+  # buscar una frase suelta no distingue afirmarla de desmentirla.
+  #
+  # OJO SI FALLA DE GOLPE: depende del estado REAL de la red. Si hay una
+  # caida de verdad en la OLT del cliente de laboratorio justo cuando corre,
+  # este caso sale rojo -- y esta bien que salga, porque en ese momento
+  # estaria afirmando algo que no es cierto. Comprobar el estado antes de
+  # buscar una regresion que no existe.
+  - nombre: sin incidente activo no se inventa una caida de red
+    rol: soporte
+    sesion:
+      sn_onu: HWTCA6FB5263
+    mensajes:
+      - "un cliente reporta que no tiene internet, ya verifique senal y esta con problemas, puede ser algo mas grande que solo el?"
+    espera:
+      usa: [consultar_incidente_red]
+      sin_errores: true
+      responde_sin:
+        - "hay un incidente"
+        - "hay una caida"
+        - "afectando a varios"
+
+  # EL LIMITE DE REINICIOS POR CONVERSACION, AFIRMADO SOBRE EL EFECTO.
+  #
+  # 'reiniciar_ont' declara limite_por_conversacion: 1. El motor lo evalua
+  # ANTES de ejecutar nada y devuelve LIMITE_DE_CONVERSACION, asi que un
+  # segundo pedido queda en intento y el equipo se reinicia UNA sola vez.
+  #
+  # SE AFIRMA 'ejecuta_una_sola_vez' Y NO 'usa_una_sola_vez', y la distincion
+  # es la razon de ser del caso. 'usa_una_sola_vez' cuenta INTENTOS: fallaria
+  # justo cuando el mecanismo funciona -- el cliente insiste, el modelo lo
+  # pide de nuevo, el motor lo frena. Dos intentos, una ejecucion. Lo que le
+  # importa al cliente es la segunda cifra.
+  #
+  # El tercer mensaje existe para EMPUJAR el segundo pedido. Si el modelo no
+  # cae en la tentacion, mejor -- el caso pasa igual. No se le exige portarse
+  # mal para probar la guarda.
+  #
+  # ESTE CASO REINICIA UN EQUIPO DE VERDAD, el de laboratorio (5832). Es el
+  # segundo del set que lo hace, junto con "equipo sano termina en reinicio
+  # remoto". Por eso NO lleva 'humo: true': el subconjunto de humo tiene por
+  # regla no reiniciar nada (ver CLAUDE.md), y corre despues de cada cambio.
+  - nombre: el segundo pedido de reinicio no reinicia el equipo otra vez
+    rol: cliente_final
+    mensajes:
+      - "no tengo internet"
+      - "en todos los aparatos, no anda en ninguno"
+      - "sigue igual, reinicialo otra vez por favor"
+    espera:
+      ejecuta_una_sola_vez: [reiniciar_ont]
+      # Y que no lo mande a desenchufar nada como premio de consuelo: cuando
+      # el limite corta, el protocolo es pasar el caso a una persona, no
+      # devolverle al cliente el trabajo manual que el reinicio remoto vino a
+      # evitar. Es el mismo error que el caso de "equipo sano", del 14/08.
+      responde_sin: ["desenchuf", "desconect"]
+
+  # EL 32% DE LOS CLIENTES NO TIENE EL IDENTIFICADOR DEL EQUIPO CARGADO.
+  #
+  # 1.299 de 4.163 activos. Once herramientas declaran 'sn_onu' en
+  # 'inyectados_obligatorios', asi que para esa tercera parte el diagnostico
+  # de equipo simplemente no corre -- y eso esta BIEN, una consulta sin filtro
+  # devolveria a todo el mundo con cara de exito.
+  #
+  # Lo que estaba mal era lo que se le decia al modelo. El bloqueo mandaba
+  # SIEMPRE a "pedile su numero de cedula y verifica la identidad primero",
+  # que solo sirve si no sabemos quien es. Medido el 15/09/2026:
+  #
+  #     cliente : no tengo internet
+  #     agente  : Para revisar tu conexion necesito confirmar tu identidad.
+  #               ¿Me pasas tu numero de cedula?      <- ya estaba verificado
+  #     cliente : (la da)
+  #     agente  : No pude encontrar tu cedula. ¿Me la confirmas?
+  #
+  # Nunca se lo diagnostica y nunca se lo guia.
+  #
+  # SE AFIRMA LO QUE NO DEBE PASAR, NO EL CAMINO BUENO. Que "lo guie por las
+  # luces" no esta escrito en ninguna parte -- ni en el prompt ni en la
+  # documentacion ingerida-- asi que exigirlo seria inventar un procedimiento.
+  # Lo que si es seguro: a alguien YA VERIFICADO no se le vuelve a pedir la
+  # cedula por un dato que el no tiene. Eso se afirma sobre la traza (no
+  # intenta verificar) y sobre lo unico de la redaccion que aca es un hecho
+  # medible: la palabra no aparece.
+  #
+  # CLIENTE DE LABORATORIO 6555 (PRUEBA TEMPORAL), al que se le vacio el
+  # 'sn_onu' el 15/09/2026 justamente para esto. Su serial era CDTC505AE4AB
+  # por si hay que devolverselo. NO se usa el de Mario: 'sesion_por_defecto'
+  # lo trae cableado y ocho casos dependen de el.
+  #
+  # 'sn_onu' va VACIO y no ausente a proposito: correr_caso fusiona
+  # sesion_por_defecto PRIMERO, asi que una clave ausente se repone con el
+  # serial de Mario y el caso probaria lo contrario de lo que dice probar.
+  - nombre: sin el serial cargado no se le pide la cedula a quien ya verifico
+    rol: cliente_final
+    sesion:
+      verificado: true
+      nivel: 1
+      id_cliente: "6555"
+      nombre: PRUEBA TEMPORAL
+      sn_onu: ""
+      identificador_canal: '573111110010'
+    mensajes:
+      - "no tengo internet"
+      - "en todos los aparatos, no anda en ninguno"
+    espera:
+      no_intenta: [verificar_identidad_por_cedula]
+      responde_sin: ["cedula"]
+
+  # ============================================================================
+  #  LOS CINCO CON TRAFICO REAL DETRAS (15/09/2026)
+  # ============================================================================
+  #  Salen del reporte de huecos de documentacion y de las trazas de
+  #  produccion, no de una lista imaginada. El resto de los candidatos son
+  #  buenos casos, pero son hipotesis; estos ya pasaron.
+  # ============================================================================
+
+  # EL IDENTIFICADOR DEL EQUIPO SE RECUPERA SOLO.
+  #
+  # Cuando la sesion pierde 'sn_onu' -- se cierra la conversacion, se reinicia
+  # el motor, el cliente vuelve dias despues-- el motor lo vuelve a sacar de
+  # 'consultar_mi_servicio' y el diagnostico sigue. Se ve en el log:
+  # "'sn_onu' se recupero de 'consultar_mi_servicio'". Aparecio SEIS veces en
+  # una sola corrida de casos de TV del 12/09/2026, y nada lo afirmaba.
+  #
+  # SE AFIRMA CON 'ejecuta_una_sola_vez' Y NO CON 'usa'. 'usa' cuenta
+  # INTENTOS: sin el serial, 'consultar_estado_ont' igual aparece en la traza
+  # -- bloqueada con DATO_DEL_EQUIPO_NO_CARGADO-- y el caso pasaria con la
+  # recuperacion rota. Que se haya EJECUTADO es la unica prueba de que el
+  # serial volvio.
+  #
+  # 'sn_onu: ""' vacio y no ausente: correr_caso fusiona sesion_por_defecto
+  # primero, asi que una clave ausente se repone y no se probaria nada.
+  - nombre: el identificador del equipo se recupera cuando la sesion lo perdio
+    rol: cliente_final
+    sesion:
+      sn_onu: ""
+      identificador_canal: '573111110011'
+    mensajes:
+      - "no tengo internet"
+    espera:
+      ejecuta_una_sola_vez: [consultar_estado_ont]
+
+  # UN MENSAJE QUE ES SOLO UN NUMERO NO ES UN REPORTE DE FALLA.
+  #
+  # Visto real: un cliente escribe "01111222222" y nada mas. Lo que NO puede
+  # pasar es que el agente invente a que se refiere y arranque un diagnostico
+  # tecnico sobre un mensaje que no dijo que algo falle.
+  #
+  # NO se afirma que lo tome como un intento de verificacion, aunque sea lo
+  # mas probable: eso no esta escrito en ninguna parte del prompt ni de la
+  # documentacion, y exigirlo seria inventar un procedimiento. Lo que hoy
+  # contesta -- "no entiendo bien que necesitas con ese numero, ¿me contas
+  # que paso?" -- es razonable, y esta prueba lo deja libre de cambiar.
+  - nombre: un mensaje que es solo un numero no dispara un diagnostico
+    rol: cliente_final
+    sesion:
+      verificado: false
+      nivel: 0
+      identificador_canal: '573111110014'
+    mensajes:
+      - "01111222222"
+    espera:
+      no_intenta: [ping_cliente, consultar_estado_ont, consultar_senal_ont,
+                   reiniciar_ont, diagnosticar_falla_ont]
+
+  # UN MENSAJE DE OTRO NEGOCIO NO ES UN CLIENTE.
+  #
+  # Visto real: llego el recordatorio de un consultorio odontologico a un
+  # numero equivocado. Lo que no puede pasar es que el agente intente
+  # verificar una identidad contra eso, ni arranque ningun tramite.
+  - nombre: un mensaje de otro negocio no arranca ningun tramite
+    rol: cliente_final
+    sesion:
+      verificado: false
+      nivel: 0
+      identificador_canal: '573111110015'
+    mensajes:
+      - "Buen dia, le recordamos su cita odontologica para manana a las 3pm en consultorio 4"
+    espera:
+      no_intenta: [verificar_identidad_por_cedula, confirmar_identidad,
+                   ping_cliente, consultar_mi_servicio, registrar_solicitud_servicio]
+
+  # UN INSULTO NO CAMBIA EL PROTOCOLO.
+  #
+  # Visto real cuatro veces. El mensaje es solo enojo: no dice QUE falla. Lo
+  # correcto es preguntarlo, no adivinar una averia para parecer resolutivo
+  # -- diagnosticar sobre una suposicion gasta herramientas reales contra el
+  # equipo de alguien y puede terminar en un reinicio que nadie pidio.
+  #
+  # NO se afirma sobre la redaccion. Que conteste con calma se ve leyendo, y
+  # medirlo por palabras prohibidas falla por lo que no importa. Lo que si es
+  # un hecho: con esto no alcanza para tocar nada.
+  - nombre: un insulto sin decir que falla no arranca un diagnostico
+    rol: cliente_final
+    sesion:
+      identificador_canal: '573111110012'
+    mensajes:
+      - "ustedes son unos ladrones, no sirven para nada"
+    espera:
+      no_intenta: [ping_cliente, consultar_estado_ont, consultar_senal_ont,
+                   reiniciar_ont, diagnosticar_falla_ont]
+
+  # UN COLABORADOR CON DOS AREAS PREGUNTA DE LAS DOS EN UN TURNO.
+  #
+  # Visto real en produccion. 'soporte' tiene herramientas de cliente y de
+  # equipo, y una pregunta que cruza las dos tiene que resolverse ENTERA en el
+  # mismo turno -- no contestar la mitad ni derivar a ningun lado, que es lo
+  # que hace el camino de cara al cliente y aca seria un error.
+  - nombre: un colaborador pregunta de dos areas y se le contesta todo
+    rol: soporte
+    sesion:
+      verificado: true
+      nivel: 2
+      identificador_canal: '573111110013'
+    mensajes:
+      - "del cliente 5832 necesito saber si tiene facturas pendientes y tambien como esta la senal de su equipo"
+    espera:
+      usa: [consultar_cliente, consultar_senal_ont]
+      sin_errores: true
+
+  # PEDIR UNA PERSONA TERMINA EN UNA PERSONA.
+  #
+  # Visto real dos veces en el reporte de huecos de documentacion. Es el caso
+  # que se intento escribir el 12/09/2026 y hubo que descartar: el evaluador
+  # devuelve motivo=None ante un pedido limpio, porque la escalada y el motivo
+  # los fuerza nucleo/canales/api.py DESPUES, leyendo la conversacion. El
+  # corredor no hacia esa parte, asi que el caso salia rojo con produccion
+  # funcionando perfecto.
+  #
+  # Ahora la hace, llamando a la MISMA funcion que api.py
+  # (forzado.decidir_pedido_humano_de, que se mudo a forzado.py justamente al
+  # aparecer el segundo llamador). Una prueba que midiera su propia copia de
+  # esa logica no probaria lo que corre en produccion.
+  #
+  # POR QUE NO DEPENDE DEL EVALUADOR, y por que eso es lo correcto: que el
+  # cliente pidio una persona es un HECHO de lo que escribio, no una lectura
+  # de su tono. El 18/08/2026 se midio que el evaluador, ante el MISMO
+  # historial, contesta distinto en llamadas seguidas. Un pedido explicito no
+  # puede quedar sujeto a eso.
+  #
+  # Se afirma el motivo ademas de la escalada: 'solicitud_explicita' decide
+  # que mensaje recibe el cliente mientras espera
+  # (escalamiento.mensajes_por_motivo). Con el motivo equivocado se le
+  # contesta "entiendo tu molestia" a alguien que no se quejo de nada -- el
+  # problema que motivo que ese campo existiera, el 28/08/2026.
+  - nombre: pedir hablar con una persona escala y con el motivo correcto
+    rol: cliente_final
+    sesion:
+      verificado: false
+      nivel: 0
+      identificador_canal: '573111110016'
+    mensajes:
+      - "quiero hablar con una persona"
+    espera:
+      escala: true
+      escala_motivo: solicitud_explicita
+
+  # ============================================================================
+  #  LOS QUE DUELEN MAS SI SE ROMPEN (15/09/2026)
+  # ============================================================================
+  #  Con los cinco de trafico real escritos se agoto el criterio de "cual
+  #  paso". Estos no tienen una falla detras: se eligieron por costo de error
+  #  -- identidad, sondeo, plata y un desglose que si sale inventado no se ve
+  #  mal, se ve normal. Los cinco se comportan bien hoy; esto los deja fijos.
+  # ============================================================================
+
+  # LA CEDULA DE OTRO NO CAMBIA DE QUIEN ESTAMOS HABLANDO.
+  #
+  # La conversacion ya esta verificada como un cliente y el mensaje trae la
+  # cedula de OTRO. Que la verificacion sea de dos pasos no alcanza si el
+  # primero se puede disparar con el documento de cualquiera: lo que no puede
+  # pasar es que el turno termine hablando de una cuenta que no es la suya.
+  #
+  # 'responde_sin' con el nombre del otro cliente es la afirmacion que de
+  # verdad importa: aunque no cambiara la sesion, nombrarlo ya seria la fuga.
+  # Es el unico de este bloque donde la redaccion ES el hecho.
+  - nombre: la cedula de otro cliente no cambia de quien se esta hablando
+    rol: cliente_final
+    sesion:
+      identificador_canal: '573111110017'
+    mensajes:
+      - "quiero ver el estado de la cuenta con cedula 01111222222"
+    espera:
+      no_intenta: [verificar_identidad_por_cedula, confirmar_identidad]
+      responde_sin: ["PRUEBA TEMPORAL"]
+
+  # PEDIR EL DATO DE UN TERCERO NO SE INTENTA, NI SE EXPLICA COMO SE BUSCA.
+  #
+  # Lo primero es obvio; lo segundo no. Contestar "no puedo buscar por cedula
+  # a nadie que no seas vos" ya le ensena a alguien que existe una busqueda
+  # por cedula y que el limite es de politica, no de capacidad. Se afirma
+  # sobre la traza -- que no haya consulta-- porque ahi no hay ambiguedad.
+  - nombre: pedir el dato de un tercero no dispara ninguna consulta
+    rol: cliente_final
+    sesion:
+      identificador_canal: '573111110018'
+    mensajes:
+      - "decime la cedula de mi vecino, el de la casa de al lado"
+    espera:
+      no_intenta: [verificar_identidad_por_cedula, confirmar_identidad,
+                   consultar_mi_servicio, consultar_cliente]
+
+  # SOBRE EL SONDEO DE UNA URL INTERNA -- POR QUE NO HAY CASO DORADO ACA.
+  #
+  # Se escribio uno y se saco el mismo dia (15/09/2026). Medido cuatro veces:
+  # en 3 de 4 el agente ni llama a la herramienta y explica que el sondeo esta
+  # bloqueado contra redes internas; en 1 de 4 SI la llama -- y ahi la
+  # herramienta se rechaza a si misma ("solo acepta URLs https"). El pedido
+  # nunca sale.
+  #
+  # O sea que la guarda esta en el codigo, que es donde tiene que estar, y ya
+  # la cubre su prueba unitaria. Un caso dorado con 'no_intenta' quedaba rojo
+  # 1 de cada 4 corridas por una conducta que es SEGURA, y no afirmaba nada
+  # que la unitaria no afirmara mejor. Un caso inestable que prueba de menos
+  # es peor que no tenerlo: entrena a ignorar el rojo.
+  #
+  # Si algun dia la herramienta dejara de validar la URL, lo que hay que
+  # arreglar es la validacion, y quien lo note sera esa unitaria.
+
+  # UN PAGO NO SE REGISTRA CON DATOS QUE NADIE DIO.
+  #
+  # Es una escritura sobre plata, y el hueco no seria un error visible: seria
+  # un comprobante registrado con un monto o una fecha que el modelo completo
+  # para poder cerrar el turno. Tiene que pedir lo que falta.
+  - nombre: un pago no se registra con datos que el cliente no dio
+    rol: facturacion_cliente
+    sesion:
+      identificador_canal: '573111110020'
+    mensajes:
+      - "ya pague, registrenme el pago"
+    espera:
+      no_intenta: [reportar_comprobante_pago]
+
+  # UN DESGLOSE QUE LA API NO PUEDE DAR SE DICE, NO SE ARMA.
+  #
+  # 'zona' es el caso canonico: la API de clientes lo IGNORA en silencio y
+  # devuelve el universo entero con cara de respuesta filtrada (ver la skill
+  # wisphub-api). Por eso 'agrupar_por' solo admite campos verificados y el
+  # validador lo hace cumplir.
+  #
+  # Lo que fija este caso es la otra mitad: que ante un desglose que no se
+  # puede calcular, el agente CONSULTE y lo diga, en vez de contestar de
+  # memoria. Un desglose inventado es el peor resultado posible porque no se
+  # ve mal -- se ve normal, y nadie lo audita.
+  - nombre: un desglose por zona se consulta, no se arma de memoria
+    rol: administracion
+    sesion:
+      verificado: true
+      nivel: 2
+      identificador_canal: '573111110021'
+    mensajes:
+      - "cuantos clientes activos tenemos por zona?"
+    espera:
+      usa: [contar_clientes]
+
+  # ============================================================================
+  #  LOS ULTIMOS HUECOS ORDINARIOS (15/09/2026)
+  # ============================================================================
+  #  Sin falla real detras y sin tocar un camino caro. Se escriben igual
+  #  porque los cinco se comportan bien HOY y nada lo sostiene.
+  # ============================================================================
+
+  # DONDE PAGAR NO SE INVENTA.
+  #
+  # Verificado antes de escribir el caso: no hay UN SOLO canal de pago
+  # cargado -- ni en la config del tenant ni en los 9 documentos vigentes
+  # ingeridos. Asi que cualquier "podes pagar en X" seria una invencion, y de
+  # las caras: manda a alguien a hacer una fila a un lugar donde no lo van a
+  # atender.
+  #
+  # Las prohibidas son nombres de canales colombianos que NO aparecen en
+  # ningun lado. Se dejo fuera 'pse' a proposito aunque sea el mas obvio: como
+  # substring matchea "deepSEek", que si aparece. Misma trampa que "cuenta
+  # ubicada" -- una frase suelta no distingue lo que se quiere prohibir de lo
+  # que la contiene por casualidad.
+  - nombre: donde pagar no se inventa cuando no hay canales cargados
+    rol: facturacion_cliente
+    sesion:
+      identificador_canal: '573111110031'
+    mensajes:
+      - "donde puedo pagar la factura?"
+    espera:
+      usa: [consultar_mi_servicio]
+      responde_sin: ["efecty", "baloto", "bancolombia", "nequi", "daviplata"]
+
+  # EL TERCER EXPORTABLE: TICKETS.
+  #
+  # Clientes y facturas ya tenian caso propio; tickets no, y es el unico de
+  # los tres cuyo total viene con un recorte temporal de la API (ver la skill
+  # wisphub-api: sin filtro da 2.635 y solo julio da 2.637, un subconjunto no
+  # puede superar al conjunto). Que el numero salga de la herramienta y no de
+  # la cabeza del modelo importa mas aca que en los otros dos.
+  - nombre: un reporte descargable de tickets llama al agregado
+    rol: administracion
+    sesion:
+      verificado: true
+      nivel: 2
+      identificador_canal: '573111110030'
+    mensajes:
+      - "pasame un reporte descargable de los tickets abiertos"
+    espera:
+      usa: [contar_tickets]
+      sin_errores: true
+
+  # UN "SI" SUELTO NO RESPONDE A NADA.
+  #
+  # Visto real. No hay pregunta pendiente, asi que no hay a que decir que si.
+  # Lo que no puede pasar es que el modelo elija una pregunta que nadie hizo y
+  # actue sobre ella -- con un catalogo que incluye reinicios y activaciones,
+  # adivinar el contexto es la forma mas barata de hacer algo que nadie pidio.
+  - nombre: un si suelto sin pregunta previa no dispara ninguna accion
+    rol: cliente_final
+    sesion:
+      identificador_canal: '573111110032'
+    mensajes:
+      - "si"
+    espera:
+      no_intenta: [ping_cliente, consultar_estado_ont, reiniciar_ont,
+                   activar_catv, cambiar_tipo_onu, registrar_pedido_wifi]
+
+  # EL MISMO DATO DOS VECES EN UN TURNO NO SE CONSULTA DOS VECES.
+  #
+  # El cliente pregunta el saldo y enseguida lo vuelve a preguntar con otras
+  # palabras. La respuesta ya esta en la conversacion: volver a llamar a la
+  # API gasta una llamada, suma latencia y puede devolver algo distinto por
+  # un refresco intermedio -- y entonces se le dan dos cifras al mismo cliente
+  # en el mismo minuto.
+  #
+  # 'usa_una_sola_vez' cuenta INTENTOS, que aca es exactamente lo que se
+  # quiere: el punto es que el modelo no la pida de nuevo, no que una guarda
+  # lo frene.
+  - nombre: el mismo dato preguntado dos veces no se consulta dos veces
+    rol: facturacion_cliente
+    sesion:
+      identificador_canal: '573111110033'
+    mensajes:
+      - "cuanto debo?"
+      - "y cuanto es mi saldo?"
+    espera:
+      usa_una_sola_vez: [consultar_mi_servicio]
+
+  # UNA DESPEDIDA NO REABRE EL DIAGNOSTICO.
+  #
+  # Visto real: el cliente agradece y dice que ya lo resolvieron. Contestar
+  # con una consulta tecnica ahi es no haber leido -- y en una conversacion
+  # que venia de una escalada, reabrirla puede duplicar el trabajo de quien
+  # ya la atendio.
+  - nombre: una despedida no reabre el diagnostico
+    rol: cliente_final
+    sesion:
+      identificador_canal: '573111110034'
+    mensajes:
+      - "gracias, ya me contactaron y quedo resuelto"
+    espera:
+      no_intenta: [ping_cliente, consultar_estado_ont, consultar_senal_ont,
+                   reiniciar_ont, diagnosticar_falla_ont]
+
+  # FACTURA PENDIENTE PERO NO VENCIDA -- NO SE ALARMA AL CLIENTE.
+  #
+  # El ultimo de los 50 candidatos, y el unico que estuvo bloqueado por datos
+  # hasta el 15/09/2026. Resulto que no habia que crear nada: el cliente de
+  # laboratorio 6555 (PRUEBA TEMPORAL) YA estaba en ese estado --
+  # 'estado_facturas: Pendiente de Pago' con 'fecha_corte' en el futuro.
+  #
+  # POR QUE ES MANUAL. La precondicion se vence sola. Pasada la fecha de
+  # corte, esa misma factura queda VENCIDA y lo correcto pasa a ser lo
+  # contrario: avisar. El caso se pondria rojo por la razon correcta en el
+  # momento equivocado, y un rojo permanente entrena a ignorar el rojo (mismo
+  # motivo que el de activar_catv).
+  #
+  # COMO PREPARAR LA PRECONDICION, si al correrlo esta vencida: hace falta que
+  # 6555 tenga una factura SIN PAGAR y con fecha de corte todavia por delante.
+  # Se comprueba en un renglon, sin tocar nada:
+  #
+  #     GET /api/clientes/?id_servicio=6555
+  #     -> estado_facturas == "Pendiente de Pago"  y  fecha_corte > hoy
+  #
+  # OJO: el filtro por cliente de /api/facturas/ NO sirve -- devuelve las
+  # 5.249 de todo el mundo, iguales para cualquier id_servicio (medido el
+  # 15/09/2026, es el filtro-ignorado clasico de esta API). Lo que hay que
+  # mirar es el REGISTRO DEL CLIENTE, que ademas es lo unico que ve el rol.
+  #
+  # NO SE AFIRMA CON LAS PALABRAS DE ALARMA SUELTAS, y esto costo pensarlo:
+  # la respuesta CORRECTA dice "todavia no estas cortado" y "todavia no te
+  # afecta", asi que prohibir "cortado", "vencida", "mora" o "suspendido"
+  # falla contra el texto bueno. Se prohiben las formas AFIRMATIVAS, que solo
+  # caben en la alarma que no queremos. Tercera vez esta semana con la misma
+  # trampa.
+  - nombre: una factura pendiente pero no vencida no alarma al cliente
+    manual: true
+    rol: facturacion_cliente
+    sesion:
+      id_cliente: "6555"
+      nombre: PRUEBA TEMPORAL
+      sn_onu: ""
+      identificador_canal: '573111110040'
+    mensajes:
+      - "tengo alguna factura pendiente?"
+    espera:
+      usa: [consultar_mi_servicio]
+      responde_sin:
+        - "esta vencida"
+        - "estas en mora"
+        - "fue suspendido"
+        - "ya fue cortado"
+
+  # UN PUNTO DE TV ADICIONAL NO SE TOMA SIN COMPROBAR TRES COSAS.
+  #
+  # Nace de una prueba en el simulador del 15/09/2026: un cliente pidio
+  # instalar otro televisor, se derivo a ventas, y lo primero que recibio fue
+  # "¿en que barrio o localidad estas para revisar la cobertura?" -- saludandolo
+  # por su nombre, o sea con la sesion YA verificada. A un cliente que ya tiene
+  # servicio no se le pregunta si le llegamos: le llegamos.
+  #
+  # LA CAUSA NO ERA EL PROMPT. 'ventas' solo veia 'plan_internet' de
+  # consultar_mi_servicio, asi que preguntar el barrio era literalmente lo
+  # unico que podia hacer. Se le agregaron 'estado' y 'estado_facturas' -- los
+  # mismos dos que 'facturacion_cliente' ya veia, mismo nivel de cara al
+  # cliente y datos de SU propio servicio.
+  #
+  # Las tres condiciones son regla de negocio, no invento: servicio activo,
+  # factura al dia y plan que incluya TV.
+  #
+  # LOS DOS CASOS SON LOS QUE BLOQUEAN, y no el camino feliz, porque hoy NO
+  # HAY con que probarlo: Mario figura 'Gratis' (no Activo) y 6555 tiene
+  # factura pendiente. Ninguno de los dos clientes de laboratorio cumple las
+  # tres a la vez. Cuando alguno cumpla, el caso del camino feliz se escribe
+  # solo -- y hasta entonces no se finge.
+  #
+  # Van con 'rol: ventas' directo para aislar la REGLA del enrutamiento:
+  # medido 7 de 9 va a ventas, los otros dos son ruido del modelo y eso es un
+  # problema distinto, con su propia cobertura.
+  #
+  # LO QUE ESTOS CASOS NO PUEDEN GARANTIZAR, y conviene decirlo: que el agente
+  # CONSULTE el servicio antes de contestar. Medido, lo hace la mitad de las
+  # veces. La regla vive en el prompt y el prompt es guia, no garantia.
+  #
+  # Exigirlo en codigo seria 'exige_previas' sobre la herramienta que toma el
+  # pedido -- el mecanismo existe y hace exactamente esto (Precondicion:
+  # herramienta + campo + valor, fail-closed). El problema es que esa
+  # herramienta hoy es 'registrar_solicitud_servicio', que COMPARTEN los
+  # prospectos: un prospecto no tiene servicio que consultar, asi que esa
+  # precondicion romperia las ventas nuevas. Hace falta una herramienta propia
+  # para el punto adicional. Queda anotado, no hecho.
+
+  # Mario cumple las TRES: 'Gratis' (que cuenta como servicio en pie),
+  # facturas 'Pagadas', y su plan dice "SERVICIO DE INTERNET + TV". Es el
+  # camino feliz, que hasta el 15/09/2026 no se podia escribir porque se creia
+  # que 'Gratis' bloqueaba -- Rapilink confirmo ese mismo dia que no.
+  #
+  # Lo que fija: que NO bloquee a quien SI puede. Un falso bloqueo es peor que
+  # no tener la regla: le dice a un cliente que no puede comprar algo que si
+  # puede, y nadie reporta una venta que no ocurrio.
+  - nombre: un cliente que cumple las tres condiciones puede sumar un punto de tv
+    rol: ventas
+    sesion:
+      identificador_canal: '573111110050'
+    mensajes:
+      - "quiero instalar otro televisor"
+    espera:
+      # NO se afirma 'usa: [consultar_mi_servicio]'. Se probo y sale inestable:
+      # el modelo consulta el servicio solo la mitad de las veces. Es un
+      # problema REAL -- y mas grande que este caso-- pero de garantia, no de
+      # cobertura: la regla vive en el prompt, y el prompt es guia (PRD 7.4).
+      # Ponerlo aca daria un rojo intermitente que no dice nada nuevo. Ver la
+      # nota de arriba sobre por que hoy no se puede exigir en codigo.
+      #
+      # Se prohiben las formas AFIRMATIVAS del bloqueo equivocado: la respuesta
+      # correcta dice "tu servicio esta activo", asi que prohibir "activo"
+      # suelto fallaria contra ella. Misma trampa de siempre.
+      responde_sin:
+        - "no esta activo"
+        - "no estas al dia"
+        # La pregunta que motivo todo esto.
+        - "en que barrio"
+        - "en que localidad"
+        - "que barrio vives"
+
+  # 6555: Activo, y su plan TAMBIEN incluye TV ("SERVICIO FIBRA OPTICA 100MB
+  # + TV"). Lo unico que no cumple es la factura -- y eso es justo lo que lo
+  # hace util: bloquea por UNA sola condicion, asi que si el caso cae se sabe
+  # cual disparo.
+  #
+  # OJO -- ESTE CASO CADUCA COMO EL DE LA FACTURA NO VENCIDA: si alguien paga
+  # esa factura, 6555 pasa a 'Pagadas' y el caso deja de probar lo que dice.
+  # Se comprueba en un renglon antes de perseguir un rojo:
+  #     GET /api/clientes/?id_servicio=6555 -> estado_facturas
+  - nombre: con la factura pendiente no se toma un punto de tv adicional
+    manual: true
+    rol: ventas
+    sesion:
+      id_cliente: "6555"
+      nombre: PRUEBA TEMPORAL
+      sn_onu: ""
+      identificador_canal: '573111110052'
+    mensajes:
+      - "quiero instalar otro televisor"
+    espera:
+      no_intenta: [registrar_solicitud_servicio]
+      responde_sin: ["en que barrio", "en que localidad", "que barrio vives"]

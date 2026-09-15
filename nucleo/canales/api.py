@@ -57,6 +57,7 @@ from nucleo.seguimiento import estado_escalada
 from nucleo.seguimiento import operativo
 from nucleo.seguimiento import verificacion_accion
 from nucleo.seguimiento.forzado import (con_las_manos_vacias,
+                                        decidir_pedido_humano_de,
                                         pidio_hablar_con_humano,
                                         decidir_pedido_humano,
                                         escalada_forzada,
@@ -227,17 +228,15 @@ def _pregunta_pide_humano(config) -> str:
 
 
 def _decidir_pedido_humano(config, historial):
-    """(decision, evidencia) de los tres niveles. Ver forzado.py."""
-    esc = config.escalamiento
-    if not esc.motivo_pide_humano:
-        return None, ""
-    return decidir_pedido_humano(
-        historial, _pregunta_pide_humano(config),
-        frases=esc.frases_pide_humano,
-        ambiguas=esc.frases_intencion_ambigua,
-        afirmativas=esc.frases_afirmativas,
-        negativas=esc.frases_negativas,
-        maximo_preguntas=esc.maximo_preguntas_pide_humano)
+    """
+    (decision, evidencia) de los tres niveles.
+
+    El cuerpo se mudo a nucleo/seguimiento/forzado.py cuando aparecio un
+    segundo llamador (cli/evaluar.py): una sola implementacion, o la prueba
+    termina midiendo su propia copia. Se deja este nombre porque lo usan
+    varios puntos de este archivo.
+    """
+    return decidir_pedido_humano_de(config, historial)
 
 
 # Lo que se le dice al modelo segun como haya terminado la comprobacion. El
@@ -1417,9 +1416,13 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
         # automatico, y despues se tiraba -- una conversacion que el
         # asistente resolvio solo terminaba en la bandeja sin ninguna
         # etiqueta de que trataba. Ver supabase/202608180923_caso_conversacion.sql.
-        if evaluacion and evaluacion.get("caso_manual"):
+        # 'etiqueta' va junto con el caso y por el mismo motivo: sale de la
+        # misma llamada al evaluador y hasta el 15/09/2026 se persistia SOLO
+        # al escalar. Medido: 62 de 178 conversaciones reales sin etiquetar.
+        if evaluacion and (evaluacion.get("caso_manual") or evaluacion.get("etiqueta")):
             persistencia.marcar_caso(tenant, conversation_id,
-                                     evaluacion["caso_manual"])
+                                     evaluacion.get("caso_manual"),
+                                     evaluacion.get("etiqueta") or "")
 
         # Un agendamiento pospuesto tiene que VOLVER, aunque el modelo no
         # pida escalar de nuevo. Cuando el verificador pide un dato que

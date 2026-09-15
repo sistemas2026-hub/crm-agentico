@@ -92,6 +92,7 @@ los campos que vienen anidados (`{"id": 12, "nombre": "..."}`): se prueba con el
 | clientes | `saldo` | — |
 | clientes | fechas (cualquier forma) | No se pueden contar altas de un mes |
 | facturas | `facturadas` | — |
+| facturas | `id_servicio` (el cliente) | Verificado 15/09/2026: devuelve las MISMAS 5.249 facturas para cualquier id_servicio -- se probo con dos clientes distintos y la lista salio identica, misma primera factura y mismo `count`. Para el estado de cobranza de UN cliente hay que leer su registro en `/api/clientes/?id_servicio=`, que trae `estado_facturas`, `saldo` y `fecha_corte` |
 | tickets | `departamento`, `tecnico`, `prioridad` | — |
 | tickets | cliente (8 nombres probados) | Filtrar por estado y cruzar en codigo, solo sobre los abiertos |
 

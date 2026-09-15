@@ -901,7 +901,8 @@ def ticket_operativo_de(tenant: str, conversation_id: str) -> str | None:
         return None
 
 
-def marcar_caso(tenant: str, conversation_id: str, caso: str | None) -> None:
+def marcar_caso(tenant: str, conversation_id: str, caso: str | None,
+                etiqueta: str = "") -> None:
     """
     Guarda de QUE es esta conversacion (uno de 'manual.casos' del tenant, ver
     supabase/202608180923_caso_conversacion.sql). Se llama en CADA turno, no solo al
@@ -915,18 +916,36 @@ def marcar_caso(tenant: str, conversation_id: str, caso: str | None) -> None:
     borrarla. Perder una clasificacion buena por un turno mudo seria peor que
     no tenerla.
 
+    'etiqueta' viaja junto porque sale de la MISMA llamada al evaluador y
+    tenia el mismo problema, medido el 15/09/2026: se guardaba solo dentro de
+    marcar_escalada, asi que una conversacion que el asistente resolvia solo
+    la calculaba y la tiraba. Resultado sobre 178 conversaciones reales -- 62
+    sin etiquetar (34.8%), mientras 'caso_manual' si estaba en casi todas. Es
+    exactamente el agujero que este mismo comentario describe arriba para
+    'caso_manual', un campo mas tarde.
+
+    Importa para algo concreto: un supervisor no puede priorizar lo que no
+    sabe nombrar, y con dos de cada tres conversaciones sin nombre no hay
+    tablero que sirva.
+
+    Se guarda con 'coalesce' y no a secas: una escalada posterior escribe la
+    suya via marcar_escalada, y un turno mudo no puede borrar la que ya habia
+    -- mismo criterio que 'caso'.
+
     Nunca lanza: esto es una etiqueta para la bandeja, no parte de la
     respuesta al cliente -- mismo criterio que registrar_llamada_herramienta.
     """
-    if not caso:
+    if not caso and not (etiqueta or "").strip():
         return
     try:
         with sesion(tenant) as (cur, org):
             cur.execute(
                 """update asistente.conversations
-                      set caso_manual = %s, actualizado_en = now()
+                      set caso_manual = coalesce(nullif(%s, ''), caso_manual),
+                          etiqueta = coalesce(nullif(%s, ''), etiqueta),
+                          actualizado_en = now()
                     where organization_id = %s and id = %s""",
-                (caso, org, conversation_id))
+                (caso or "", (etiqueta or "").strip(), org, conversation_id))
     except Exception as e:
         print(f"[persistencia] no se pudo guardar el caso de la conversacion "
               f"{conversation_id}: {type(e).__name__}: {e}")
