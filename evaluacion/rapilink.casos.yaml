@@ -2283,3 +2283,52 @@ casos:
     espera:
       no_intenta: [ping_cliente, consultar_estado_ont, consultar_senal_ont,
                    reiniciar_ont, diagnosticar_falla_ont]
+
+  # FACTURA PENDIENTE PERO NO VENCIDA -- NO SE ALARMA AL CLIENTE.
+  #
+  # El ultimo de los 50 candidatos, y el unico que estuvo bloqueado por datos
+  # hasta el 15/09/2026. Resulto que no habia que crear nada: el cliente de
+  # laboratorio 6555 (PRUEBA TEMPORAL) YA estaba en ese estado --
+  # 'estado_facturas: Pendiente de Pago' con 'fecha_corte' en el futuro.
+  #
+  # POR QUE ES MANUAL. La precondicion se vence sola. Pasada la fecha de
+  # corte, esa misma factura queda VENCIDA y lo correcto pasa a ser lo
+  # contrario: avisar. El caso se pondria rojo por la razon correcta en el
+  # momento equivocado, y un rojo permanente entrena a ignorar el rojo (mismo
+  # motivo que el de activar_catv).
+  #
+  # COMO PREPARAR LA PRECONDICION, si al correrlo esta vencida: hace falta que
+  # 6555 tenga una factura SIN PAGAR y con fecha de corte todavia por delante.
+  # Se comprueba en un renglon, sin tocar nada:
+  #
+  #     GET /api/clientes/?id_servicio=6555
+  #     -> estado_facturas == "Pendiente de Pago"  y  fecha_corte > hoy
+  #
+  # OJO: el filtro por cliente de /api/facturas/ NO sirve -- devuelve las
+  # 5.249 de todo el mundo, iguales para cualquier id_servicio (medido el
+  # 15/09/2026, es el filtro-ignorado clasico de esta API). Lo que hay que
+  # mirar es el REGISTRO DEL CLIENTE, que ademas es lo unico que ve el rol.
+  #
+  # NO SE AFIRMA CON LAS PALABRAS DE ALARMA SUELTAS, y esto costo pensarlo:
+  # la respuesta CORRECTA dice "todavia no estas cortado" y "todavia no te
+  # afecta", asi que prohibir "cortado", "vencida", "mora" o "suspendido"
+  # falla contra el texto bueno. Se prohiben las formas AFIRMATIVAS, que solo
+  # caben en la alarma que no queremos. Tercera vez esta semana con la misma
+  # trampa.
+  - nombre: una factura pendiente pero no vencida no alarma al cliente
+    manual: true
+    rol: facturacion_cliente
+    sesion:
+      id_cliente: "6555"
+      nombre: PRUEBA TEMPORAL
+      sn_onu: ""
+      identificador_canal: '573111110040'
+    mensajes:
+      - "tengo alguna factura pendiente?"
+    espera:
+      usa: [consultar_mi_servicio]
+      responde_sin:
+        - "esta vencida"
+        - "estas en mora"
+        - "fue suspendido"
+        - "ya fue cortado"
