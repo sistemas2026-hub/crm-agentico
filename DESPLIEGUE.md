@@ -14,6 +14,8 @@ Un solo VPS (`86.48.18.185`) gestionado con **Dokploy**, con varios proyectos qu
 
 De Supabase esta plataforma usa **solo Postgres**. Ni Kong, ni GoTrue, ni Storage, ni Realtime: el CRM tiene su propia autenticación en Django y el motor habla a la base con psycopg. Si algún día pesa la complejidad operativa, esa es la pregunta a hacerse.
 
+Que no se usen **no quiere decir que estén apagados**: la plantilla de Supabase los publica igual, y el 15/09/2026 PostgREST estaba exponiendo la base del CRM por HTTP. Ver §4.b.1 antes de tocar el proyecto Supabase en Dokploy.
+
 ## Desarrollo local contra la base real
 
 Para probar un cambio sin pasar por Dokploy: `docker compose up` (el compose de **desarrollo**, no el de producción) ya puede apuntar el CRM y el motor al Supabase real del VPS en vez de al Postgres local del propio compose. No hace falta tocar código ni el compose — la traducción ya está armada, ver el comentario en el servicio `backend` de `docker-compose.yml`. Lo único que decide a cuál base se conecta es **el `.env` de la raíz**.
@@ -214,6 +216,44 @@ Va aparte, en el proyecto del Supabase (`automatizacion-rp-supabase-dgimpk`), no
 El servicio es `kong`, la pasarela de API — **no `db`**. Apuntarlo a `db` da 502 permanente: Postgres escucha en 5432 y no tiene nada en el 8000. Ya pasó una vez.
 
 Al entrar pide usuario y contraseña: son `DASHBOARD_USERNAME` y `DASHBOARD_PASSWORD` de las variables de ese proyecto.
+
+### 4.b.1 Lo que ese dominio NO debe publicar — contención del 15/09/2026
+
+`crm.rapilinksas.co` apunta a Kong, y Kong no publica solo el Studio: la plantilla de Supabase trae también `/rest/v1` (PostgREST), `/graphql/v1`, `/auth/v1`, `/realtime/v1`, `/storage/v1` y `/functions/v1`. Dexter no usa ninguno (ver el principio de este documento), pero estaban abiertos.
+
+**Lo que se encontró.** Los default privileges de Supabase le dan a `anon` y `authenticated` CRUD sobre **todas** las tablas de `public` — medidas 129, de las cuales 69 sin RLS — y `PGRST_DB_SCHEMAS` incluía `public`. Con la clave `anon` se podía leer y escribir la base del CRM por HTTP. Además el registro de GoTrue estaba abierto con `phone_autoconfirm=true` y sin proveedor de SMS: con la misma clave cualquiera obtenía un token `authenticated` sin verificar nada.
+
+**Lo que se hizo:**
+
+| Hora (Bogotá) | Cambio | Dónde vive |
+|---|---|---|
+| 07:27 | Comentados los servicios `rest-v1` y `graphql-v1` de Kong (encabezado `# CONTENCION 15/09/2026`); reiniciado **solo** `kong-1` | `/etc/dokploy/compose/automatizacion-rp-supabase-dgimpk/files/volumes/api/kong.yml` (respaldo en `/root/kong.yml.antes-contencion-20260915142704`) |
+| 08:07 | `DISABLE_SIGNUP=true` y `ENABLE_PHONE_SIGNUP=false`; redeploy (solo se recreó `auth-1`) | Variables del proyecto Supabase en Dokploy |
+
+La publicación `supabase_realtime` no tiene tablas, así que Realtime no emite cambios de `public`.
+
+⚠️ **No se apaga el contenedor `rest`, se cierra la ruta.** `storage` lo usa por dentro (`POSTGREST_URL: http://rest:3000`, con `depends_on`), sin pasar por Kong. Detenerlo rompe Storage; quitar la ruta de Kong no.
+
+⚠️ **Un cambio que vive solo en el servidor se puede perder sin aviso.** Kong monta ese archivo del host como `/home/kong/temp.yml` y su entrypoint genera el `kong.yml` real al arrancar. Medido: un redeploy del proyecto Supabase **no** reescribió el archivo. **No medido**: que una actualización de la plantilla de Supabase en Dokploy lo respete. Después de cualquier cambio en ese proyecto, verificar:
+
+```
+P=automatizacion-rp-supabase-dgimpk
+grep -c CONTENCION /etc/dokploy/compose/$P/files/volumes/api/kong.yml                 # 1
+docker exec $P-kong-1 grep -cE '^\s*url:\s*http://rest:3000' /usr/local/kong/kong.yml  # 0
+curl -s -D - -o /dev/null https://crm.rapilinksas.co/rest/v1/ | grep -i www-authenticate
+#   -> www-authenticate: Basic realm="service"
+docker exec $P-auth-1 wget -qO- http://localhost:9999/settings                        # "disable_signup":true
+```
+
+Cómo leer el `curl`, porque engaña: con la ruta cerrada **no da 404**. La ruta del Studio (`/`, con basic-auth) atrapa todo lo que no tenga ruta propia, así que `/rest/v1/` devuelve **401 con `www-authenticate: Basic`**. Si la ruta de PostgREST volviera, también daría 401 (falta de `apikey`), pero **sin** `Basic realm="service"`. El código solo no distingue; la cabecera sí.
+
+Para revertir la parte de Kong: `cp -a /root/kong.yml.antes-contencion-20260915142704 <archivo>` y `docker restart $P-kong-1`.
+
+**Lo que esto NO cierra, pendiente:**
+
+- Los privilegios siguen en la base. Cerrar la ruta deja a `anon` y `authenticated` sin camino HTTP, pero si la ruta vuelve, vuelve el acceso. El arreglo de fondo es revocarlos (y sus default privileges) en la base: diseñado y en prueba local, **no aplicado**.
+- El Studio sigue publicado por HTTP detrás de basic-auth. Es una consola administrativa de la base; con credenciales robustas sigue siendo superficie que no hace falta exponer.
+- Los puertos de Postgres/Supavisor (ver Pendientes).
 
 `motor` y `redis` **no llevan dominio**. El frontend alcanza al motor por la red interna (`http://motor:5000`); exponerlo sería abrir el asistente a internet sin autenticación.
 
@@ -625,7 +665,7 @@ Dos cosas que se deciden junto con eso:
 - **El nombre del dominio del webhook.** `motor.rapilinksas.co` está bajo la marca del primer cliente; el segundo ISP estaría pegando el dominio de otra empresa en su configuración de Meta. Si el camino es "una plataforma", conviene un dominio neutro desde el principio: cambiarlo después obliga a que **cada** cliente reconfigure su webhook en Meta a mano.
 - **El motor corre con `--workers 1`** (ver el comentario en `docker-compose.prod.yml`). No es por memoria: `_sesiones` guarda el historial caliente en RAM del proceso. Aguanta bien con hilos, pero es un techo real con varios ISPs, y se levanta el día que ese historial viva en `asistente.conversations` en vez de en memoria.
 
-**El 502 de `crm.rapilinksas.co`.** Ese dominio tiene ruta en Traefik apuntando a algo que no responde. No afecta a la base —el pooler escucha en TCP directo, sin pasar por Traefik— pero quien espere llegar al Studio de Supabase por ahí, hoy no puede.
+**El 502 de `crm.rapilinksas.co` — ya no pasa (medido el 15/09/2026).** Ese dominio devolvía 502; hoy responde el Studio a través de Kong (`401` con basic-auth, ver §4.b). Lo que queda pendiente sobre ese dominio es otra cosa: que no publique más de lo necesario (§4.b.1).
 
 **Variables muertas en `.env` — retiradas (18/08/2026).** `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` no las usaba nadie en este repositorio (confirmado por grep completo, no solo por sospecha) — residuo de un diseño anterior donde el frontend hablaba directo con Supabase; ARQUITECTURA.md también las listaba y quedó corregido. Solo en el `.env` local, no versionado — cada colaborador con su propia copia debe quitarlas a mano si las tiene.
 
