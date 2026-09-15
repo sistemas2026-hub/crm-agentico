@@ -92,7 +92,9 @@ def consultar(base, sql, params=None):
 
 
 def recrear(base, plantilla=None):
+    from cli import base_desde_cero as cero                      # noqa: E402
     with psycopg.connect(dsn("postgres"), autocommit=True) as con:
+        cero.preparar_roles_de_despliegue(con)      # crm_user/motor_user: prerrequisito de despliegue
         for _ in range(40):
             con.execute("select pg_terminate_backend(pid) from pg_stat_activity "
                         "where datname = any(%s) and pid <> pg_backend_pid()",

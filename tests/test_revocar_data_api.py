@@ -213,19 +213,18 @@ try:
                        text=True, env=env_db("postgres"), timeout=1500)
     if not revisar(r.returncode == 0, "Django migra como postgres", (r.stderr or "")[-800:].replace(CLAVE, "<clave>")):
         raise SystemExit(1)
+    # crm_user y motor_user son prerrequisitos de despliegue: existen ANTES del ledger.
+    # Sus permisos sobre public los da la cadena (202609141110_roles_operativos_public.sql).
+    with psycopg.connect(dsn("supabase_admin"), autocommit=True) as con:
+        cero.preparar_roles_de_despliegue(con)
     r = subprocess.run([sys.executable, str(RAIZ / "cli" / "migrar_asistente.py"), "--aplicar"],
                        capture_output=True, text=True, env=env_db("postgres"), timeout=1500)
     if not revisar(r.returncode == 0, "el ledger aplica la cadena como postgres",
                    ((r.stdout or "") + (r.stderr or ""))[-800:].replace(CLAVE, "<clave>")):
         raise SystemExit(1)
 
-    q("create role crm_user login; create role motor_user login bypassrls", usuario="postgres")
-    q("grant all on schema public to crm_user; grant all on all tables in schema public to crm_user; "
-      "grant all on all sequences in schema public to crm_user; grant all on all functions in schema public to crm_user; "
-      "alter default privileges for role postgres in schema public grant all on tables to crm_user; "
-      "alter default privileges for role postgres in schema public grant all on sequences to crm_user; "
-      "alter default privileges for role postgres in schema public grant all on functions to crm_user; "
-      "grant app_backend to motor_user; grant select on public.organization to motor_user", usuario="postgres")
+    # La membresia de motor_user en app_backend tambien es del despliegue, no de la cadena.
+    q("grant app_backend to motor_user", usuario="postgres")
     tablas, sin_rls = q("select count(*), count(*) filter (where not c.relrowsecurity) from pg_class c "
                         "join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind='r'")[0]
     print(f"       public: {tablas} tablas, {sin_rls} sin RLS")

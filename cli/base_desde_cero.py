@@ -75,6 +75,50 @@ def crear_base(base, host, puerto, usuario) -> None:
     print(f"  base '{base}' creada, vacia")
 
 
+# PRERREQUISITOS DEL ENTORNO, NO DEL LEDGER.
+#
+# supabase/202609141110_roles_operativos_public.sql nombra TRES roles que no crea:
+#
+#   postgres     rol de PLATAFORMA de PostgreSQL/Supabase. En produccion ya existe
+#                y es quien crea las tablas; la migracion declara SUS default
+#                privileges ('alter default privileges for role postgres ...').
+#   crm_user     roles OPERATIVOS de Dexter. Existen en produccion desde el
+#   motor_user   18/08/2026 con LOGIN, contraseña (Dokploy), el BYPASSRLS de
+#                motor_user y su membresia en app_backend: todo eso es del
+#                despliegue; la migracion solo declara sus grants.
+#
+# Si falta cualquiera, la sentencia que lo nombra falla con 42704 y el migrador
+# revierte el archivo entero. El ledger no administra la existencia de ninguno.
+#
+# En un cluster de PRUEBA se preparan aca, solo si faltan, NOLOGIN y SIN
+# contraseña: la migracion solo necesita que existan. Si ya existen, no se toca
+# NINGUN atributo. El 'postgres' artificial existe solo para que un cluster local
+# cuyo superusuario no se llama asi (pg-motor usa 'motor') pueda reproducir la
+# precondicion de ALTER DEFAULT PRIVILEGES FOR ROLE postgres: no se le da ningun
+# atributo, ninguna membresia ni ningun objeto, y nadie hace SET ROLE a el. Los
+# objetos de ese cluster siguen siendo de quien los creo.
+ROLES_DE_DESPLIEGUE = ("postgres", "crm_user", "motor_user")
+_ATRIBUTOS = {
+    "postgres": "nologin nosuperuser nocreatedb nocreaterole nobypassrls",
+    "crm_user": "nologin",
+    "motor_user": "nologin",
+}
+
+
+def preparar_roles_de_despliegue(con) -> list[str]:
+    """Crea los prerrequisitos que falten, sin contraseña ni membresias. Devuelve los creados."""
+    creados = []
+    for rol in ROLES_DE_DESPLIEGUE:
+        if con.execute("select 1 from pg_roles where rolname = %s", (rol,)).fetchone():
+            continue
+        try:
+            con.execute(sql.SQL("create role {} " + _ATRIBUTOS[rol]).format(sql.Identifier(rol)))
+            creados.append(rol)
+        except psycopg.errors.DuplicateObject:
+            pass                    # otro proceso lo creo entre la consulta y el CREATE
+    return creados
+
+
 def pgcrypto(base, host, puerto, usuario) -> None:
     with conectar(base, host, puerto, usuario) as con:
         # 'extensions', como en Supabase y en produccion. Si pgcrypto ya estuviera
@@ -278,6 +322,10 @@ def main(argv=None) -> int:
         return 1
 
     paso(3, "migraciones de asistente, por el ledger")
+    with conectar("postgres", a.host, a.puerto, a.usuario) as con:
+        creados = preparar_roles_de_despliegue(con)
+    print(f"  prerrequisitos de despliegue {list(ROLES_DE_DESPLIEGUE)}: "
+          f"{'creados ' + str(creados) + ' (nologin, sin contraseña)' if creados else 'ya existian'}")
     codigo = asistente(a.base, a.host, a.puerto, a.usuario)
     if codigo != 0:
         print(f"\n[cero] el migrador termino en {codigo}; la cadena no continua.")

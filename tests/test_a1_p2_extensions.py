@@ -259,10 +259,15 @@ try:
     led = consultar(BASE, "select archivo, origen from asistente.migraciones_aplicadas order by 1")
     revisar([f[0] for f in led] == archivos and {f[1] for f in led} == {"aplicada"},
             f"el ledger anota los {len(archivos)} archivos, todos 'aplicada'")
-    i = archivos.index(A1)
-    revisar(archivos[i - 1] == "202609101200_marcas_tv_desconocidas.sql" and archivos[i + 1] == P2[0],
-            "A1 ordena despues del ultimo archivo del manifiesto y antes de P2",
-            f"{archivos[i - 1:i + 2]}")
+    # Orden RELATIVO, no vecinos inmediatos: entre A1 y P2 entran los archivos que
+    # declaran estado que ya existe en produccion (roles operativos, y despues los
+    # comentarios canonicos), y esta comprobacion no tiene que romperse por eso.
+    ULTIMO_MANIFIESTO = "202609101200_marcas_tv_desconocidas.sql"
+    ROLES_OP = "202609141110_roles_operativos_public.sql"
+    u, i, j, k = (archivos.index(x) for x in (ULTIMO_MANIFIESTO, A1, ROLES_OP, P2[0]))
+    revisar(u < i < j < k < archivos.index(P2[1]),
+            "orden: el ultimo del manifiesto, A1, los roles operativos y al final los dos de P2",
+            f"{archivos[u:k + 2]}")
     r = subprocess.run([sys.executable, str(RAIZ / "cli" / "migrar_asistente.py"), "--estado"],
                        capture_output=True, text=True, env={**env_local, "DBNAME": BASE})
     revisar(r.returncode == 0 and "pendientes            : 0" in r.stdout and "HUECO" not in r.stdout
@@ -481,6 +486,10 @@ try:
                     "extensions.gen_random_bytes(integer) to postgres with grant option")
         con.execute("create extension vector with schema public")
         con.execute("create extension pg_trgm with schema public")
+    # crm_user y motor_user: prerrequisitos de despliegue, antes del ledger
+    # (202609141110_roles_operativos_public.sql les da permisos, no los crea).
+    with psycopg.connect(dsn("postgres", **super_kw), autocommit=True) as con:
+        cero.preparar_roles_de_despliegue(con)
     atributos = consultar("postgres", "select rolsuper, rolcreaterole, rolbypassrls from pg_roles "
                                       "where rolname = 'postgres'", **super_kw)
     revisar(atributos == [(False, True, True)], "el rol 'postgres': sin superusuario, con CREATEROLE y BYPASSRLS",
