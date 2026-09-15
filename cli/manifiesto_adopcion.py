@@ -33,6 +33,14 @@ politicas con roles, comando, USING y WITH CHECK; ACL exactas; md5 de
 pg_get_functiondef, dueño, SECURITY DEFINER, SET y comentario; triggers;
 comentarios; schema y extension.
 
+Desde el 15/09/2026 tambien la ACL de las SECUENCIAS de un schema
+('acl_secuencias', por 'grant ... on all sequences in schema') y los DEFAULT
+PRIVILEGES de un rol en un schema ('default_acl', por 'alter default privileges
+for role R in schema S ...', con todos sus tipos en una sola foto). Antes esas
+sentencias caian como desconocidas y mandaban a revision humana un archivo que
+se podia verificar. Solo se reconoce la forma con un rol y un schema
+explicitos; ver tests/test_manifiesto_acl_secuencias_default.py.
+
 El ESPERADO es el estado final de una referencia construida desde cero con
 exactamente esos archivos.
 
@@ -261,12 +269,24 @@ def clasificar(sentencia: str) -> list[tuple]:
         if clase == "index":
             return [("indice",) + _partes(obj)]
 
+    # Default privileges: solo la forma con UN rol y UN schema explicitos, sobre
+    # tablas, secuencias o funciones. Cualquier otra (sin FOR ROLE, sin IN SCHEMA,
+    # listas, TYPES, SCHEMAS) sigue siendo 'desconocido'. Una sola clave por par
+    # rol+schema: la foto trae todos los tipos juntos.
+    m = re.match(rf"alter default privileges for (?:role|user) ({_ID}) in schema ({_ID}) "
+                 rf"(?:grant|revoke) .*? on (?:tables|sequences|functions) (?:to|from) ", s)
+    if m:
+        return [("default_acl", m.group(1).strip('"'), m.group(2).strip('"'))]
+
     m = re.match(r"(?:grant|revoke) .*? on (.+?) (?:to|from) ", s)
     if m:
         obj = m.group(1)
         mm = re.match(rf"all functions in schema ({_ID})$", obj)
         if mm:
             return [("acl_funciones", mm.group(1).strip('"'))]
+        mm = re.match(rf"all sequences in schema ({_ID})$", obj)
+        if mm:
+            return [("acl_secuencias", mm.group(1).strip('"'))]
         mm = re.match(rf"all tables in schema ({_ID})$", obj)
         if mm:
             return [("acl_tablas", mm.group(1).strip('"'))]
@@ -423,6 +443,31 @@ def foto(con, clave: tuple):
                     "join pg_namespace n on n.oid=c.relnamespace "
                     "where n.nspname=%s and c.relkind in ('r','p','v')",
                     (esquema,)).fetchall()}
+
+    if tipo == "acl_secuencias":
+        # Solo relkind='S'. Lista ordenada por nombre en Python (no depende de
+        # collation); ACL ordenada; None = sin grants explicitos; [] = no hay
+        # secuencias en el schema (o el schema no existe).
+        _, esquema = clave
+        filas = con.execute(
+            "select c.relname, pg_get_userbyid(c.relowner), c.relacl::text[] from pg_class c "
+            "join pg_namespace n on n.oid=c.relnamespace "
+            "where n.nspname=%s and c.relkind='S'", (esquema,)).fetchall()
+        return sorted(({"schema": esquema, "nombre": f[0], "dueño": f[1],
+                        "acl": sorted(f[2]) if f[2] is not None else None} for f in filas),
+                      key=lambda x: x["nombre"])
+
+    if tipo == "default_acl":
+        # pg_default_acl de ESE rol en ESE schema, todos los tipos juntos
+        # (r tablas, S secuencias, f funciones, T tipos, n schemas). [] = sin filas,
+        # tambien si el rol no existe.
+        _, rol, esquema = clave
+        filas = con.execute(
+            "select d.defaclobjtype::text, d.defaclacl::text[] from pg_default_acl d "
+            "join pg_namespace n on n.oid=d.defaclnamespace join pg_roles r on r.oid=d.defaclrole "
+            "where r.rolname=%s and n.nspname=%s", (rol, esquema)).fetchall()
+        return sorted(({"rol": rol, "schema": esquema, "tipo": f[0], "acl": sorted(f[1] or [])} for f in filas),
+                      key=lambda x: x["tipo"])
 
     if tipo == "vista":
         _, esquema, nombre = clave
