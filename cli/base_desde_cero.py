@@ -206,15 +206,18 @@ def verificar(base, host, puerto, usuario) -> list[str]:
         ok("PUBLIC no puede ejecutar ninguna funcion job_*") if not publico \
             else mal(f"PUBLIC puede ejecutar: {[p[0] for p in publico]}")
 
+        # Por oid desde pg_roles y to_regprocedure: si el rol o las funciones no
+        # existen, la comprobacion tiene que FALLAR con su mensaje, no romperse.
         explicitos = {f[0] for f in con.execute(
             "select 'schema' from pg_namespace n cross join lateral aclexplode(n.nspacl) a "
             " where n.nspname = 'extensions' and a.privilege_type = 'USAGE' "
-            "   and a.grantee = 'asistente_owner'::regrole "
+            "   and a.grantee = (select oid from pg_roles where rolname = 'asistente_owner') "
             "union all "
             "select p.oid::regprocedure::text from pg_proc p cross join lateral aclexplode(p.proacl) a "
-            " where p.oid in ('extensions.digest(text,text)'::regprocedure, "
-            "                 'extensions.gen_random_bytes(integer)'::regprocedure) "
-            "   and a.privilege_type = 'EXECUTE' and a.grantee = 'asistente_owner'::regrole")}
+            " where p.oid in (to_regprocedure('extensions.digest(text,text)'), "
+            "                 to_regprocedure('extensions.gen_random_bytes(integer)')) "
+            "   and a.privilege_type = 'EXECUTE' "
+            "   and a.grantee = (select oid from pg_roles where rolname = 'asistente_owner')")}
         ok("asistente_owner: USAGE en extensions y EXECUTE explicito sobre digest y "
            "gen_random_bytes") if len(explicitos) == 3 else \
             mal(f"grants explicitos de asistente_owner incompletos: {sorted(explicitos)}")

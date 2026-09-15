@@ -35,7 +35,6 @@ from __future__ import annotations
 
 import ast
 import io
-import json
 import os
 import secrets
 import shutil
@@ -104,7 +103,13 @@ USA_PGCRYPTO = ("select length(extensions.digest('x', 'sha256')), "
 
 
 def dsn(base, puerto=PUERTO, usuario=USUARIO, clave=CLAVE, host=HOST):
-    return f"host={host} port={puerto} dbname={base} user={usuario} password={clave} sslmode=disable"
+    # connect_timeout: una conexion que no llega tiene que fallar, no colgar la prueba.
+    return (f"host={host} port={puerto} dbname={base} user={usuario} password={clave} "
+            f"sslmode=disable connect_timeout=15")
+
+
+def paso(texto):
+    print(f"       -> {texto}", flush=True)
 
 
 def consultar(base, q, params=None, **kw):
@@ -176,17 +181,18 @@ def explicitos(base, **kw) -> dict:
 def fila_minima(cur, esquema, tabla, fijos):
     """Inserta una fila con los valores dados y relleno para cada NOT NULL sin default."""
     cols = cur.execute(
-        "select column_name, data_type, udt_name from information_schema.columns "
+        "select column_name, data_type, udt_name, character_maximum_length "
+        "from information_schema.columns "
         "where table_schema=%s and table_name=%s and is_nullable='NO' and column_default is null "
         "and is_identity='NO' and is_generated='NEVER'", (esquema, tabla)).fetchall()
     valores = dict(fijos)
-    for nombre, tipo, udt in cols:
+    for nombre, tipo, udt, largo in cols:
         if nombre in valores:
             continue
         if udt == "uuid":
             valores[nombre] = uuid.uuid4()
         elif tipo in ("text", "character varying", "character"):
-            valores[nombre] = f"prueba-a1-{secrets.token_hex(4)}"
+            valores[nombre] = f"a1{secrets.token_hex(8)}"[:largo] if largo else f"prueba-a1-{secrets.token_hex(4)}"
         elif udt == "bool":
             valores[nombre] = False
         elif udt in ("int2", "int4", "int8", "numeric", "float4", "float8"):
@@ -265,9 +271,10 @@ try:
         doc = fila_minima(cur, "asistente", "documents",
                           {"organization_id": org, "codigo": CODIGO, "titulo": "prueba A1",
                            "version": "01", "estado": "vigente", "roles_permitidos": [ROL]})
-        cur.execute("insert into asistente.document_chunks (organization_id, document_id, contenido, "
-                    "embedding, vigente, metadata) values (%s, %s, 'fragmento de prueba A1', "
-                    "%s::vector, true, '{}'::jsonb)", (org, doc, vec))
+        fila_minima(cur, "asistente", "document_chunks",
+                    {"organization_id": org, "document_id": doc, "orden": 1,
+                     "contenido": "fragmento de prueba A1", "embedding": vec,
+                     "vigente": True, "metadata": Jsonb({})})
 
         cur.execute(consultas[0], (org, vec, 8, ROL))
         filas = cur.fetchall()
@@ -393,8 +400,11 @@ try:
                        capture_output=True, text=True, env={**os.environ, "POSTGRES_PASSWORD": clave_super})
     revisar(r.returncode == 0, f"PostgreSQL efimero propio ({IMAGEN_PG}) en 127.0.0.1:{PUERTO_EFIMERO}",
             (r.stderr or "")[-300:])
-    super_kw = {"puerto": PUERTO_EFIMERO, "usuario": "supabase_admin", "clave": clave_super, "host": "localhost"}
-    rol_kw = {"puerto": PUERTO_EFIMERO, "usuario": "postgres", "clave": clave_rol, "host": "localhost"}
+    # 127.0.0.1 y no 'localhost': el puerto se publica solo en IPv4, y en Windows
+    # 'localhost' puede intentar ::1 primero.
+    super_kw = {"puerto": PUERTO_EFIMERO, "usuario": "supabase_admin", "clave": clave_super, "host": "127.0.0.1"}
+    rol_kw = {"puerto": PUERTO_EFIMERO, "usuario": "postgres", "clave": clave_rol, "host": "127.0.0.1"}
+    paso("esperando que el PostgreSQL efimero acepte conexiones")
     limite = time.monotonic() + 90
     while True:
         try:
@@ -407,6 +417,7 @@ try:
                 raise
             time.sleep(1)
 
+    paso("creando el rol 'postgres' sin superusuario y la base 'dexter'")
     with psycopg.connect(dsn("postgres", **super_kw), autocommit=True) as con:
         con.execute(sql.SQL("alter role postgres login nosuperuser createrole createdb bypassrls "
                             "password {}").format(sql.Literal(clave_rol))
@@ -414,6 +425,7 @@ try:
                     else sql.SQL("create role postgres login nosuperuser createrole createdb bypassrls "
                                  "password {}").format(sql.Literal(clave_rol)))
         con.execute("create database dexter owner postgres")
+    paso("preparando 'extensions', pgcrypto, vector y pg_trgm como en produccion")
     with psycopg.connect(dsn("dexter", **super_kw), autocommit=True) as con:
         # La disposicion medida en produccion: 'extensions' de postgres, pgcrypto
         # del superusuario con EXECUTE para PUBLIC y para postgres con grant option.
@@ -428,11 +440,13 @@ try:
     revisar(atributos == [(False, True, True)], "el rol 'postgres': sin superusuario, con CREATEROLE y BYPASSRLS",
             f"{atributos}")
 
-    env_rol = {**env_local, "DBHOST": "localhost", "DBPORT": PUERTO_EFIMERO, "DBNAME": "dexter",
+    env_rol = {**env_local, "DBHOST": "127.0.0.1", "DBPORT": PUERTO_EFIMERO, "DBNAME": "dexter",
                "DBUSER": "postgres", "DBPASSWORD": clave_rol}
-    r = subprocess.run(cero.comando_django("dexter", "localhost", PUERTO_EFIMERO, "postgres"),
+    paso("migraciones de Django como 'postgres'")
+    r = subprocess.run(cero.comando_django("dexter", "127.0.0.1", PUERTO_EFIMERO, "postgres"),
                        capture_output=True, text=True, env=env_rol, timeout=900)
     revisar(r.returncode == 0, "Django migra como 'postgres' sin superusuario", (r.stderr or "")[-600:])
+    paso("ledger --aplicar como 'postgres'")
     r = subprocess.run([sys.executable, str(RAIZ / "cli" / "migrar_asistente.py"), "--aplicar"],
                        capture_output=True, text=True, env=env_rol, timeout=900)
     salida = (r.stdout or "") + (r.stderr or "")
@@ -443,7 +457,7 @@ try:
     os.environ["DBPASSWORD_ANTERIOR_A1P2"] = os.environ["DBPASSWORD"]
     os.environ["DBPASSWORD"] = clave_rol
     try:
-        malas = cero.verificar("dexter", "localhost", PUERTO_EFIMERO, "postgres")
+        malas = cero.verificar("dexter", "127.0.0.1", PUERTO_EFIMERO, "postgres")
     finally:
         os.environ["DBPASSWORD"] = os.environ.pop("DBPASSWORD_ANTERIOR_A1P2")
     revisar(not malas, "la verificacion de base_desde_cero pasa entera sobre esa base", f"{malas}")
