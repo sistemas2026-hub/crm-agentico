@@ -2332,3 +2332,82 @@ casos:
         - "estas en mora"
         - "fue suspendido"
         - "ya fue cortado"
+
+  # UN PUNTO DE TV ADICIONAL NO SE TOMA SIN COMPROBAR TRES COSAS.
+  #
+  # Nace de una prueba en el simulador del 15/09/2026: un cliente pidio
+  # instalar otro televisor, se derivo a ventas, y lo primero que recibio fue
+  # "¿en que barrio o localidad estas para revisar la cobertura?" -- saludandolo
+  # por su nombre, o sea con la sesion YA verificada. A un cliente que ya tiene
+  # servicio no se le pregunta si le llegamos: le llegamos.
+  #
+  # LA CAUSA NO ERA EL PROMPT. 'ventas' solo veia 'plan_internet' de
+  # consultar_mi_servicio, asi que preguntar el barrio era literalmente lo
+  # unico que podia hacer. Se le agregaron 'estado' y 'estado_facturas' -- los
+  # mismos dos que 'facturacion_cliente' ya veia, mismo nivel de cara al
+  # cliente y datos de SU propio servicio.
+  #
+  # Las tres condiciones son regla de negocio, no invento: servicio activo,
+  # factura al dia y plan que incluya TV.
+  #
+  # LOS DOS CASOS SON LOS QUE BLOQUEAN, y no el camino feliz, porque hoy NO
+  # HAY con que probarlo: Mario figura 'Gratis' (no Activo) y 6555 tiene
+  # factura pendiente. Ninguno de los dos clientes de laboratorio cumple las
+  # tres a la vez. Cuando alguno cumpla, el caso del camino feliz se escribe
+  # solo -- y hasta entonces no se finge.
+  #
+  # Van con 'rol: ventas' directo para aislar la REGLA del enrutamiento:
+  # medido 7 de 9 va a ventas, los otros dos son ruido del modelo y eso es un
+  # problema distinto, con su propia cobertura.
+  #
+  # LO QUE ESTOS CASOS NO PUEDEN GARANTIZAR, y conviene decirlo: que el agente
+  # CONSULTE el servicio antes de contestar. Medido, lo hace la mitad de las
+  # veces. La regla vive en el prompt y el prompt es guia, no garantia.
+  #
+  # Exigirlo en codigo seria 'exige_previas' sobre la herramienta que toma el
+  # pedido -- el mecanismo existe y hace exactamente esto (Precondicion:
+  # herramienta + campo + valor, fail-closed). El problema es que esa
+  # herramienta hoy es 'registrar_solicitud_servicio', que COMPARTEN los
+  # prospectos: un prospecto no tiene servicio que consultar, asi que esa
+  # precondicion romperia las ventas nuevas. Hace falta una herramienta propia
+  # para el punto adicional. Queda anotado, no hecho.
+
+  # Mario: estado 'Gratis'. La primera condicion no se cumple.
+  - nombre: sin el servicio activo no se toma un punto de tv adicional
+    rol: ventas
+    sesion:
+      identificador_canal: '573111110050'
+    mensajes:
+      - "quiero instalar otro televisor"
+    espera:
+      # NO se afirma 'usa: [consultar_mi_servicio]'. Se probo y sale inestable:
+      # el modelo consulta el servicio solo la mitad de las veces. Eso es un
+      # problema REAL -- y mas grande que este caso-- pero es de garantia, no
+      # de cobertura: la regla vive en el prompt y el prompt es guia (PRD 7.4).
+      # Ponerlo aca daria un rojo intermitente que no dice nada nuevo. Ver la
+      # nota de abajo sobre por que hoy no se puede exigir en codigo.
+      no_intenta: [registrar_solicitud_servicio]
+      # La pregunta que motivo todo esto. Se prohibe la forma en que se
+      # PREGUNTA, no la palabra suelta: "cobertura" podria aparecer en una
+      # frase que justamente aclare que no hace falta revisarla.
+      responde_sin: ["en que barrio", "en que localidad", "que barrio vives"]
+
+  # 6555: Activo pero con factura 'Pendiente de Pago'. La segunda no se cumple.
+  #
+  # OJO -- ESTE CASO CADUCA COMO EL DE LA FACTURA NO VENCIDA: si alguien paga
+  # esa factura, 6555 pasa a 'Pagadas' y el caso deja de probar lo que dice.
+  # Se comprueba en un renglon antes de perseguir un rojo:
+  #     GET /api/clientes/?id_servicio=6555 -> estado_facturas
+  - nombre: con la factura pendiente no se toma un punto de tv adicional
+    manual: true
+    rol: ventas
+    sesion:
+      id_cliente: "6555"
+      nombre: PRUEBA TEMPORAL
+      sn_onu: ""
+      identificador_canal: '573111110052'
+    mensajes:
+      - "quiero instalar otro televisor"
+    espera:
+      no_intenta: [registrar_solicitud_servicio]
+      responde_sin: ["en que barrio", "en que localidad", "que barrio vives"]

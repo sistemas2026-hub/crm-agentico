@@ -1605,6 +1605,37 @@ roles:
       responda (NUNCA reveles otro dato mientras tanto). Un prospecto que
       genuinamente todavia no es cliente NO pasa por nada de esto -- seguis
       la conversacion como ya se explico arriba.
+
+      UN PUNTO DE TV ADICIONAL TIENE TRES CONDICIONES, Y SE COMPRUEBAN ANTES
+      DE HABLAR DE NADA MAS (15/09/2026). Es el caso de un cliente que ya
+      tiene servicio y quiere sumar un televisor: "quiero instalar otro TV",
+      "otro punto de television", "sumar un televisor".
+
+      NO le preguntes el barrio ni le hables de cobertura. Ya es cliente: le
+      llegamos a la casa, esa pregunta no aporta nada y suena a que no sabes
+      quien es. Medido el 15/09/2026 -- a un cliente verificado, saludandolo
+      por su nombre, se le pidio "en que barrio o localidad estas para
+      revisar la cobertura".
+
+      Con la conversacion YA VERIFICADA llama a consultar_mi_servicio y
+      comproba, en este orden:
+
+        1. EL SERVICIO ESTA ACTIVO. Si 'estado' no dice Activo, no hay punto
+           que sumar. Decile en que estado figura su servicio y que eso se
+           resuelve primero; no inventes como ni cuanto tarda.
+        2. LA FACTURA ESTA AL DIA. Si 'estado_facturas' no dice Pagadas, hay
+           que ponerse al dia antes de sumar nada. Decis que es lo que falta;
+           no inventes plazos, montos ni lugares de pago.
+        3. EL PLAN INCLUYE TV. Pasale el 'id' de 'plan_internet' a
+           consultar_plan_tv: el NOMBRE del plan casi nunca lo dice. Si NO lo
+           incluye, esto no es un punto adicional -- es un cambio a un plan
+           con television, que es otra venta y sigue el camino normal de
+           planes.
+
+      Si alguna no se cumple, te detenes ahi y se lo explicas: no sirve
+      tomarle el pedido de algo que no va a poder instalarse. Recien con las
+      tres cumplidas seguis con el pedido como cualquier servicio que se suma
+      a una cuenta que ya existe.
     orientado_a: cliente_final
     # exige_verificacion=False sin deriva_verificacion (a diferencia del
     # router): la razon de NO exigirla es que su interlocutor tipicamente
@@ -1640,7 +1671,14 @@ roles:
       # asi que sin sesion verificada no hay id_cliente que inyectar y la
       # llamada no sale (FaltaIdentidadEnSesion). Falla cerrado por la
       # herramienta, no por el rol.
-      consultar_mi_servicio: [plan_internet]
+      # 'estado' y 'estado_facturas' entran el 15/09/2026 para poder
+      # comprobar las condiciones de un PUNTO DE TV ADICIONAL (ver el
+      # bloque en la descripcion). Sin ellos, ventas solo veia el plan y
+      # no tenia con que verificar nada: terminaba preguntandole el barrio
+      # a un cliente verificado, como si fuera un prospecto. Son los
+      # mismos dos campos que 'facturacion_cliente' ya ve, mismo nivel de
+      # cara al cliente, y son datos de SU propio servicio.
+      consultar_mi_servicio: [plan_internet, estado, estado_facturas]
       consultar_solicitud_por_cedula: [encontrada, estado, plan, barrio, nombre_pista]
       cancelar_solicitud_servicio: [estado, cancelada_en]
       # Mismo endpoint que consultar_plan_detalle, que este rol ya podia
