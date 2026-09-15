@@ -131,7 +131,10 @@ for archivo, entrada in sorted(versionado["migraciones"].items()):
     tipos_nuevos = sorted({c[0] for c in cl} & {"acl_secuencias", "default_acl"})
     if tipos_nuevos:
         nuevas[archivo] = tipos_nuevos
-revisar(len(versionado["migraciones"]) == 40, f"el manifiesto versionado tiene 40 archivos ({len(versionado['migraciones'])})")
+import manifiesto_de_laboratorio as lab                            # noqa: E402
+revisar(set(versionado["migraciones"]) == lab.archivos_de_adopcion(RAIZ),
+        f"el manifiesto versionado lista los {len(versionado['migraciones'])} archivos de adopcion (P2 fuera)",
+        f"{set(versionado['migraciones']) ^ lab.archivos_de_adopcion(RAIZ)}")
 revisar(not cambios, "ningun historico cambia de categoria con el clasificador nuevo", f"{cambios}")
 print(f"       historicos que ganan claves nuevas (pueden ganar verificaciones, no categoria): {nuevas or 'ninguno'}")
 

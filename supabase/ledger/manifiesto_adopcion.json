@@ -50,10 +50,10 @@
      ],
      "esperado": {
       "acl": [
-       "app_backend=U/motor",
-       "motor=UC/motor"
+       "app_backend=U/postgres",
+       "postgres=UC/postgres"
       ],
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -65,10 +65,13 @@
      ],
      "esperado": {
       "acl": [
-       "app_backend=r/motor",
-       "motor=arwdDxt/motor"
+       "app_backend=r/postgres",
+       "crm_user=arwdDxtm/postgres",
+       "motor_user=r/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
       ],
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -81,14 +84,14 @@
      "esperado": {
       "org_actual()": {
        "acl": [
-        "=X/motor",
-        "app_backend=X/motor",
-        "motor=X/motor"
+        "=X/postgres",
+        "app_backend=X/postgres",
+        "postgres=X/postgres"
        ],
        "comentario": null,
        "config": [],
        "definicion": "208f9a8949bc7976ee3a7865137b5e57",
-       "dueño": "motor",
+       "dueño": "postgres",
        "secdef": false
       }
      }
@@ -164,7 +167,7 @@
        "tenant_config_slug_check": "CHECK (slug ~ '^[a-z][a-z0-9_-]*$'::text)",
        "tenant_config_slug_key": "UNIQUE (slug)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -257,7 +260,7 @@
        "tenant_users_organization_id_fkey": "FOREIGN KEY (organization_id) REFERENCES organization(id) ON DELETE CASCADE",
        "tenant_users_pkey": "PRIMARY KEY (id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -440,7 +443,7 @@
        "documents_organization_id_fkey": "FOREIGN KEY (organization_id) REFERENCES organization(id) ON DELETE CASCADE",
        "documents_pkey": "PRIMARY KEY (id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -559,7 +562,7 @@
        "document_chunks_organization_id_fkey": "FOREIGN KEY (organization_id) REFERENCES organization(id) ON DELETE CASCADE",
        "document_chunks_pkey": "PRIMARY KEY (id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -841,7 +844,7 @@
        "conversations_pkey": "PRIMARY KEY (id)",
        "conversations_tenant_user_id_fkey": "FOREIGN KEY (tenant_user_id) REFERENCES asistente.tenant_users(id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -998,7 +1001,7 @@
        "messages_organization_id_fkey": "FOREIGN KEY (organization_id) REFERENCES organization(id) ON DELETE CASCADE",
        "messages_pkey": "PRIMARY KEY (id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -1149,7 +1152,7 @@
        "tool_calls_organization_id_fkey": "FOREIGN KEY (organization_id) REFERENCES organization(id) ON DELETE CASCADE",
        "tool_calls_pkey": "PRIMARY KEY (id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -1267,7 +1270,7 @@
        "unanswered_queries_organization_id_fkey": "FOREIGN KEY (organization_id) REFERENCES organization(id) ON DELETE CASCADE",
        "unanswered_queries_pkey": "PRIMARY KEY (id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -1337,7 +1340,7 @@
        "evaluation_sets_organization_id_nombre_key": "UNIQUE (organization_id, nombre)",
        "evaluation_sets_pkey": "PRIMARY KEY (id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -1439,7 +1442,7 @@
        "evaluation_runs_organization_id_fkey": "FOREIGN KEY (organization_id) REFERENCES organization(id) ON DELETE CASCADE",
        "evaluation_runs_pkey": "PRIMARY KEY (id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -1529,7 +1532,7 @@
        "usage_daily_organization_id_fkey": "FOREIGN KEY (organization_id) REFERENCES organization(id) ON DELETE CASCADE",
        "usage_daily_pkey": "PRIMARY KEY (organization_id, dia)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -1542,14 +1545,14 @@
      "esperado": {
       "gasto_del_mes(p_org uuid, p_fecha date)": {
        "acl": [
-        "=X/motor",
-        "app_backend=X/motor",
-        "motor=X/motor"
+        "=X/postgres",
+        "app_backend=X/postgres",
+        "postgres=X/postgres"
        ],
        "comentario": null,
        "config": [],
        "definicion": "3271693eeadbdb4e1e54c27503ba6414",
-       "dueño": "motor",
+       "dueño": "postgres",
        "secdef": false
       }
      }
@@ -1637,7 +1640,7 @@
        "audit_log_organization_id_fkey": "FOREIGN KEY (organization_id) REFERENCES organization(id) ON DELETE CASCADE",
        "audit_log_pkey": "PRIMARY KEY (id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -1686,28 +1689,16 @@
       "match_chunks"
      ],
      "esperado": {
-      "match_chunks(p_org uuid, p_query_embedding vector, p_match_count integer, p_umbral real, p_filtros jsonb)": {
-       "acl": [
-        "=X/motor",
-        "app_backend=X/motor",
-        "motor=X/motor"
-       ],
-       "comentario": null,
-       "config": [],
-       "definicion": "03fae26cc1da4c90dd58e35aae54f40c",
-       "dueño": "motor",
-       "secdef": false
-      },
       "match_chunks(p_org uuid, p_query_embedding vector, p_match_count integer, p_umbral real, p_filtros jsonb, p_rol text)": {
        "acl": [
-        "=X/motor",
-        "app_backend=X/motor",
-        "motor=X/motor"
+        "=X/postgres",
+        "app_backend=X/postgres",
+        "postgres=X/postgres"
        ],
        "comentario": null,
        "config": [],
        "definicion": "79b9388ac8f84d42b1240de3e1c34e6f",
-       "dueño": "motor",
+       "dueño": "postgres",
        "secdef": false
       }
      }
@@ -1721,14 +1712,14 @@
      "esperado": {
       "match_chunks_hibrido(p_org uuid, p_query_embedding vector, p_query_texto text, p_match_count integer, p_filtros jsonb, p_k integer)": {
        "acl": [
-        "=X/motor",
-        "app_backend=X/motor",
-        "motor=X/motor"
+        "=X/postgres",
+        "app_backend=X/postgres",
+        "postgres=X/postgres"
        ],
        "comentario": null,
        "config": [],
        "definicion": "ab35c0c5ec4bb49160881fae042b1b88",
-       "dueño": "motor",
+       "dueño": "postgres",
        "secdef": false
       }
      }
@@ -1740,29 +1731,24 @@
      ],
      "esperado": {
       "gasto_del_mes(p_org uuid, p_fecha date)": [
-       "=X/motor",
-       "app_backend=X/motor",
-       "motor=X/motor"
-      ],
-      "match_chunks(p_org uuid, p_query_embedding vector, p_match_count integer, p_umbral real, p_filtros jsonb)": [
-       "=X/motor",
-       "app_backend=X/motor",
-       "motor=X/motor"
+       "=X/postgres",
+       "app_backend=X/postgres",
+       "postgres=X/postgres"
       ],
       "match_chunks(p_org uuid, p_query_embedding vector, p_match_count integer, p_umbral real, p_filtros jsonb, p_rol text)": [
-       "=X/motor",
-       "app_backend=X/motor",
-       "motor=X/motor"
+       "=X/postgres",
+       "app_backend=X/postgres",
+       "postgres=X/postgres"
       ],
       "match_chunks_hibrido(p_org uuid, p_query_embedding vector, p_query_texto text, p_match_count integer, p_filtros jsonb, p_k integer)": [
-       "=X/motor",
-       "app_backend=X/motor",
-       "motor=X/motor"
+       "=X/postgres",
+       "app_backend=X/postgres",
+       "postgres=X/postgres"
       ],
       "org_actual()": [
-       "=X/motor",
-       "app_backend=X/motor",
-       "motor=X/motor"
+       "=X/postgres",
+       "app_backend=X/postgres",
+       "postgres=X/postgres"
       ]
      }
     }
@@ -2015,7 +2001,7 @@
        "conversations_pkey": "PRIMARY KEY (id)",
        "conversations_tenant_user_id_fkey": "FOREIGN KEY (tenant_user_id) REFERENCES asistente.tenant_users(id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     }
@@ -2179,7 +2165,7 @@
        "documents_organization_id_fkey": "FOREIGN KEY (organization_id) REFERENCES organization(id) ON DELETE CASCADE",
        "documents_pkey": "PRIMARY KEY (id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -2202,28 +2188,16 @@
       "match_chunks"
      ],
      "esperado": {
-      "match_chunks(p_org uuid, p_query_embedding vector, p_match_count integer, p_umbral real, p_filtros jsonb)": {
-       "acl": [
-        "=X/motor",
-        "app_backend=X/motor",
-        "motor=X/motor"
-       ],
-       "comentario": null,
-       "config": [],
-       "definicion": "03fae26cc1da4c90dd58e35aae54f40c",
-       "dueño": "motor",
-       "secdef": false
-      },
       "match_chunks(p_org uuid, p_query_embedding vector, p_match_count integer, p_umbral real, p_filtros jsonb, p_rol text)": {
        "acl": [
-        "=X/motor",
-        "app_backend=X/motor",
-        "motor=X/motor"
+        "=X/postgres",
+        "app_backend=X/postgres",
+        "postgres=X/postgres"
        ],
        "comentario": null,
        "config": [],
        "definicion": "79b9388ac8f84d42b1240de3e1c34e6f",
-       "dueño": "motor",
+       "dueño": "postgres",
        "secdef": false
       }
      }
@@ -2249,28 +2223,16 @@
       "match_chunks"
      ],
      "esperado": {
-      "match_chunks(p_org uuid, p_query_embedding vector, p_match_count integer, p_umbral real, p_filtros jsonb)": {
-       "acl": [
-        "=X/motor",
-        "app_backend=X/motor",
-        "motor=X/motor"
-       ],
-       "comentario": null,
-       "config": [],
-       "definicion": "03fae26cc1da4c90dd58e35aae54f40c",
-       "dueño": "motor",
-       "secdef": false
-      },
       "match_chunks(p_org uuid, p_query_embedding vector, p_match_count integer, p_umbral real, p_filtros jsonb, p_rol text)": {
        "acl": [
-        "=X/motor",
-        "app_backend=X/motor",
-        "motor=X/motor"
+        "=X/postgres",
+        "app_backend=X/postgres",
+        "postgres=X/postgres"
        ],
        "comentario": null,
        "config": [],
        "definicion": "79b9388ac8f84d42b1240de3e1c34e6f",
-       "dueño": "motor",
+       "dueño": "postgres",
        "secdef": false
       }
      }
@@ -2422,7 +2384,7 @@
        "documents_organization_id_fkey": "FOREIGN KEY (organization_id) REFERENCES organization(id) ON DELETE CASCADE",
        "documents_pkey": "PRIMARY KEY (id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -2531,7 +2493,7 @@
        "document_chunks_organization_id_fkey": "FOREIGN KEY (organization_id) REFERENCES organization(id) ON DELETE CASCADE",
        "document_chunks_pkey": "PRIMARY KEY (id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -2554,29 +2516,24 @@
      ],
      "esperado": {
       "gasto_del_mes(p_org uuid, p_fecha date)": [
-       "=X/motor",
-       "app_backend=X/motor",
-       "motor=X/motor"
-      ],
-      "match_chunks(p_org uuid, p_query_embedding vector, p_match_count integer, p_umbral real, p_filtros jsonb)": [
-       "=X/motor",
-       "app_backend=X/motor",
-       "motor=X/motor"
+       "=X/postgres",
+       "app_backend=X/postgres",
+       "postgres=X/postgres"
       ],
       "match_chunks(p_org uuid, p_query_embedding vector, p_match_count integer, p_umbral real, p_filtros jsonb, p_rol text)": [
-       "=X/motor",
-       "app_backend=X/motor",
-       "motor=X/motor"
+       "=X/postgres",
+       "app_backend=X/postgres",
+       "postgres=X/postgres"
       ],
       "match_chunks_hibrido(p_org uuid, p_query_embedding vector, p_query_texto text, p_match_count integer, p_filtros jsonb, p_k integer)": [
-       "=X/motor",
-       "app_backend=X/motor",
-       "motor=X/motor"
+       "=X/postgres",
+       "app_backend=X/postgres",
+       "postgres=X/postgres"
       ],
       "org_actual()": [
-       "=X/motor",
-       "app_backend=X/motor",
-       "motor=X/motor"
+       "=X/postgres",
+       "app_backend=X/postgres",
+       "postgres=X/postgres"
       ]
      }
     }
@@ -2660,7 +2617,7 @@
        "ejemplos_validados_organization_id_fkey": "FOREIGN KEY (organization_id) REFERENCES organization(id) ON DELETE CASCADE",
        "ejemplos_validados_pkey": "PRIMARY KEY (id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -2694,10 +2651,10 @@
      ],
      "esperado": {
       "acl": [
-       "app_backend=arwd/motor",
-       "motor=arwdDxt/motor"
+       "app_backend=arwd/postgres",
+       "postgres=arwdDxtm/postgres"
       ],
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -2826,7 +2783,7 @@
        "revisiones_supervisor_organization_id_fkey": "FOREIGN KEY (organization_id) REFERENCES organization(id) ON DELETE CASCADE",
        "revisiones_supervisor_pkey": "PRIMARY KEY (id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -2870,10 +2827,10 @@
      ],
      "esperado": {
       "acl": [
-       "app_backend=arwd/motor",
-       "motor=arwdDxt/motor"
+       "app_backend=arwd/postgres",
+       "postgres=arwdDxtm/postgres"
       ],
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -2973,7 +2930,7 @@
        "tenant_secrets_organization_id_fkey": "FOREIGN KEY (organization_id) REFERENCES organization(id) ON DELETE CASCADE",
        "tenant_secrets_pkey": "PRIMARY KEY (organization_id, nombre)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -3008,10 +2965,10 @@
      ],
      "esperado": {
       "acl": [
-       "app_backend=arwd/motor",
-       "motor=arwdDxt/motor"
+       "app_backend=arwd/postgres",
+       "postgres=arwdDxtm/postgres"
       ],
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -3090,7 +3047,7 @@
        "webhook_eventos_organization_id_fkey": "FOREIGN KEY (organization_id) REFERENCES organization(id) ON DELETE CASCADE",
        "webhook_eventos_pkey": "PRIMARY KEY (organization_id, wamid)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -3135,10 +3092,10 @@
      ],
      "esperado": {
       "acl": [
-       "app_backend=arwd/motor",
-       "motor=arwdDxt/motor"
+       "app_backend=arwd/postgres",
+       "postgres=arwdDxtm/postgres"
       ],
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -3269,7 +3226,7 @@
        "media_organization_id_media_id_key": "UNIQUE (organization_id, media_id)",
        "media_pkey": "PRIMARY KEY (id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -3324,10 +3281,10 @@
      ],
      "esperado": {
       "acl": [
-       "app_backend=arwd/motor",
-       "motor=arwdDxt/motor"
+       "app_backend=arwd/postgres",
+       "postgres=arwdDxtm/postgres"
       ],
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -3412,7 +3369,7 @@
        "canal_bajas_organization_id_fkey": "FOREIGN KEY (organization_id) REFERENCES organization(id) ON DELETE CASCADE",
        "canal_bajas_pkey": "PRIMARY KEY (organization_id, canal, usuario_externo)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -3447,10 +3404,10 @@
      ],
      "esperado": {
       "acl": [
-       "app_backend=arwd/motor",
-       "motor=arwdDxt/motor"
+       "app_backend=arwd/postgres",
+       "postgres=arwdDxtm/postgres"
       ],
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -3723,7 +3680,7 @@
        "conversations_pkey": "PRIMARY KEY (id)",
        "conversations_tenant_user_id_fkey": "FOREIGN KEY (tenant_user_id) REFERENCES asistente.tenant_users(id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -3999,7 +3956,7 @@
        "conversations_pkey": "PRIMARY KEY (id)",
        "conversations_tenant_user_id_fkey": "FOREIGN KEY (tenant_user_id) REFERENCES asistente.tenant_users(id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -4265,7 +4222,7 @@
        "conversations_pkey": "PRIMARY KEY (id)",
        "conversations_tenant_user_id_fkey": "FOREIGN KEY (tenant_user_id) REFERENCES asistente.tenant_users(id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -4531,7 +4488,7 @@
        "conversations_pkey": "PRIMARY KEY (id)",
        "conversations_tenant_user_id_fkey": "FOREIGN KEY (tenant_user_id) REFERENCES asistente.tenant_users(id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -4656,7 +4613,7 @@
        "herramientas_cache_organization_id_fkey": "FOREIGN KEY (organization_id) REFERENCES organization(id) ON DELETE CASCADE",
        "herramientas_cache_pkey": "PRIMARY KEY (organization_id, herramienta, clave)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -4691,10 +4648,10 @@
      ],
      "esperado": {
       "acl": [
-       "app_backend=arwd/motor",
-       "motor=arwdDxt/motor"
+       "app_backend=arwd/postgres",
+       "postgres=arwdDxtm/postgres"
       ],
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -4966,7 +4923,7 @@
        "conversations_pkey": "PRIMARY KEY (id)",
        "conversations_tenant_user_id_fkey": "FOREIGN KEY (tenant_user_id) REFERENCES asistente.tenant_users(id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -5087,7 +5044,7 @@
        "herramientas_propuestas_organization_id_fkey": "FOREIGN KEY (organization_id) REFERENCES organization(id) ON DELETE CASCADE",
        "herramientas_propuestas_pkey": "PRIMARY KEY (id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -5121,10 +5078,10 @@
      ],
      "esperado": {
       "acl": [
-       "app_backend=arwd/motor",
-       "motor=arwdDxt/motor"
+       "app_backend=arwd/postgres",
+       "postgres=arwdDxtm/postgres"
       ],
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -5286,7 +5243,7 @@
        "tool_calls_organization_id_fkey": "FOREIGN KEY (organization_id) REFERENCES organization(id) ON DELETE CASCADE",
        "tool_calls_pkey": "PRIMARY KEY (id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -5563,7 +5520,7 @@
        "conversations_pkey": "PRIMARY KEY (id)",
        "conversations_tenant_user_id_fkey": "FOREIGN KEY (tenant_user_id) REFERENCES asistente.tenant_users(id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -5839,7 +5796,7 @@
        "conversations_pkey": "PRIMARY KEY (id)",
        "conversations_tenant_user_id_fkey": "FOREIGN KEY (tenant_user_id) REFERENCES asistente.tenant_users(id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -5981,7 +5938,7 @@
        "acciones_propuestas_organization_id_fkey": "FOREIGN KEY (organization_id) REFERENCES organization(id) ON DELETE CASCADE",
        "acciones_propuestas_pkey": "PRIMARY KEY (id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -6015,10 +5972,10 @@
      ],
      "esperado": {
       "acl": [
-       "app_backend=arwd/motor",
-       "motor=arwdDxt/motor"
+       "app_backend=arwd/postgres",
+       "postgres=arwdDxtm/postgres"
       ],
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -6143,7 +6100,7 @@
        "unanswered_queries_organization_id_fkey": "FOREIGN KEY (organization_id) REFERENCES organization(id) ON DELETE CASCADE",
        "unanswered_queries_pkey": "PRIMARY KEY (id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -6229,7 +6186,7 @@
        "identidades_externas_organization_id_fkey": "FOREIGN KEY (organization_id) REFERENCES organization(id) ON DELETE CASCADE",
        "identidades_externas_pkey": "PRIMARY KEY (organization_id, profile_id, sistema)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -6264,10 +6221,10 @@
      ],
      "esperado": {
       "acl": [
-       "app_backend=arwd/motor",
-       "motor=arwdDxt/motor"
+       "app_backend=arwd/postgres",
+       "postgres=arwdDxtm/postgres"
       ],
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -6345,7 +6302,7 @@
        "area_colaborador_organization_id_fkey": "FOREIGN KEY (organization_id) REFERENCES organization(id) ON DELETE CASCADE",
        "area_colaborador_pkey": "PRIMARY KEY (organization_id, profile_id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -6380,10 +6337,10 @@
      ],
      "esperado": {
       "acl": [
-       "app_backend=arwd/motor",
-       "motor=arwdDxt/motor"
+       "app_backend=arwd/postgres",
+       "postgres=arwdDxtm/postgres"
       ],
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -6564,7 +6521,7 @@
        "documents_organization_id_fkey": "FOREIGN KEY (organization_id) REFERENCES organization(id) ON DELETE CASCADE",
        "documents_pkey": "PRIMARY KEY (id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -6763,7 +6720,7 @@
        "documents_organization_id_fkey": "FOREIGN KEY (organization_id) REFERENCES organization(id) ON DELETE CASCADE",
        "documents_pkey": "PRIMARY KEY (id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -7053,7 +7010,7 @@
        "conversations_pkey": "PRIMARY KEY (id)",
        "conversations_tenant_user_id_fkey": "FOREIGN KEY (tenant_user_id) REFERENCES asistente.tenant_users(id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -7065,7 +7022,7 @@
       "ticket_operativo"
      ],
      "esperado": {
-      "comentario": "47eea3d6ddc93ea934ef1e6f683ddb03",
+      "comentario": "f553093b634c406f881effc91b2238b1",
       "existe": true
      }
     }
@@ -7190,7 +7147,7 @@
        "verificaciones_accion_organization_id_fkey": "FOREIGN KEY (organization_id) REFERENCES organization(id) ON DELETE CASCADE",
        "verificaciones_accion_pkey": "PRIMARY KEY (id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -7224,10 +7181,10 @@
      ],
      "esperado": {
       "acl": [
-       "app_backend=arwd/motor",
-       "motor=arwdDxt/motor"
+       "app_backend=arwd/postgres",
+       "postgres=arwdDxtm/postgres"
       ],
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -7256,7 +7213,7 @@
       "verificaciones_accion"
      ],
      "esperado": {
-      "comentario": "166203c391e28349b63e5b337dde5102",
+      "comentario": "0d61f178d1a95cdfa1be9f4760afe024",
       "existe": true
      }
     }
@@ -7510,7 +7467,7 @@
        "conversations_pkey": "PRIMARY KEY (id)",
        "conversations_tenant_user_id_fkey": "FOREIGN KEY (tenant_user_id) REFERENCES asistente.tenant_users(id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -7522,7 +7479,7 @@
       "estado_escalada"
      ],
      "esperado": {
-      "comentario": "c94f273e9a8106102c09dc22540e8640",
+      "comentario": "20647bcacffd2bebee45a99a8df0c463",
       "existe": true
      }
     },
@@ -7534,7 +7491,7 @@
       "escalada_detalle"
      ],
      "esperado": {
-      "comentario": "fafb73dd0ea55786eb4014c9ccfbef53",
+      "comentario": "d0525ba3c1580c69d6493ba619aaad0f",
       "existe": true
      }
     }
@@ -7672,7 +7629,7 @@
        "habilidades_organization_id_fkey": "FOREIGN KEY (organization_id) REFERENCES organization(id) ON DELETE CASCADE",
        "habilidades_pkey": "PRIMARY KEY (id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -7742,7 +7699,7 @@
        "habilidad_usos_organization_id_fkey": "FOREIGN KEY (organization_id) REFERENCES organization(id) ON DELETE CASCADE",
        "habilidad_usos_pkey": "PRIMARY KEY (id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -7776,10 +7733,10 @@
      ],
      "esperado": {
       "acl": [
-       "app_backend=arwd/motor",
-       "motor=arwdDxt/motor"
+       "app_backend=arwd/postgres",
+       "postgres=arwdDxtm/postgres"
       ],
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -7821,10 +7778,10 @@
      ],
      "esperado": {
       "acl": [
-       "app_backend=arwd/motor",
-       "motor=arwdDxt/motor"
+       "app_backend=arwd/postgres",
+       "postgres=arwdDxtm/postgres"
       ],
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -7934,7 +7891,7 @@
        "usage_daily_organization_id_fkey": "FOREIGN KEY (organization_id) REFERENCES organization(id) ON DELETE CASCADE",
        "usage_daily_pkey": "PRIMARY KEY (organization_id, dia)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -8097,7 +8054,7 @@
        "tool_calls_organization_id_fkey": "FOREIGN KEY (organization_id) REFERENCES organization(id) ON DELETE CASCADE",
        "tool_calls_pkey": "PRIMARY KEY (id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -8381,7 +8338,7 @@
        "conversations_pkey": "PRIMARY KEY (id)",
        "conversations_tenant_user_id_fkey": "FOREIGN KEY (tenant_user_id) REFERENCES asistente.tenant_users(id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -8688,7 +8645,7 @@
        "conversations_pkey": "PRIMARY KEY (id)",
        "conversations_tenant_user_id_fkey": "FOREIGN KEY (tenant_user_id) REFERENCES asistente.tenant_users(id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -8850,7 +8807,7 @@
        "messages_organization_id_fkey": "FOREIGN KEY (organization_id) REFERENCES organization(id) ON DELETE CASCADE",
        "messages_pkey": "PRIMARY KEY (id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -9146,7 +9103,7 @@
        "conversations_pkey": "PRIMARY KEY (id)",
        "conversations_tenant_user_id_fkey": "FOREIGN KEY (tenant_user_id) REFERENCES asistente.tenant_users(id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -9329,7 +9286,7 @@
        "messages_organization_id_fkey": "FOREIGN KEY (organization_id) REFERENCES organization(id) ON DELETE CASCADE",
        "messages_pkey": "PRIMARY KEY (id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -9341,7 +9298,7 @@
       "llamadas_modelo"
      ],
      "esperado": {
-      "comentario": "f12ebea893e840910d15778c5c3a6f32",
+      "comentario": "c50757c7294f633209f8efed0a37a030",
       "existe": true
      }
     }
@@ -9408,7 +9365,7 @@
        "tenant_config_historial_organization_id_fkey": "FOREIGN KEY (organization_id) REFERENCES organization(id) ON DELETE CASCADE",
        "tenant_config_historial_pkey": "PRIMARY KEY (organization_id, config_version)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -9443,10 +9400,10 @@
      ],
      "esperado": {
       "acl": [
-       "app_backend=ar/motor",
-       "motor=arwdDxt/motor"
+       "app_backend=ar/postgres",
+       "postgres=arwdDxtm/postgres"
       ],
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -9562,7 +9519,7 @@
        "marcas_tv_desconocidas_organization_id_fkey": "FOREIGN KEY (organization_id) REFERENCES organization(id) ON DELETE CASCADE",
        "marcas_tv_desconocidas_pkey": "PRIMARY KEY (id)"
       },
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -9607,10 +9564,10 @@
      ],
      "esperado": {
       "acl": [
-       "app_backend=arwd/motor",
-       "motor=arwdDxt/motor"
+       "app_backend=arwd/postgres",
+       "postgres=arwdDxtm/postgres"
       ],
-      "dueño": "motor",
+      "dueño": "postgres",
       "existe": true
      }
     },
@@ -9633,29 +9590,1406 @@
      }
     }
    ]
+  },
+  "202609141100_match_chunks_firma_5_obsoleta.sql": {
+   "efectos_sin_comprobacion": [],
+   "estado": "verificable_automaticamente",
+   "motivo": "todas sus sentencias tienen comprobacion de catalogo",
+   "sentencias": {
+    "funcion": 1
+   },
+   "sha256": "88f82f68726c20706375c21ea0e0a269029e9b3d9a946c087c0fda8335cb3161",
+   "verificaciones": [
+    {
+     "clave": [
+      "funcion",
+      "asistente",
+      "match_chunks"
+     ],
+     "esperado": {
+      "match_chunks(p_org uuid, p_query_embedding vector, p_match_count integer, p_umbral real, p_filtros jsonb, p_rol text)": {
+       "acl": [
+        "=X/postgres",
+        "app_backend=X/postgres",
+        "postgres=X/postgres"
+       ],
+       "comentario": null,
+       "config": [],
+       "definicion": "79b9388ac8f84d42b1240de3e1c34e6f",
+       "dueño": "postgres",
+       "secdef": false
+      }
+     }
+    }
+   ]
+  },
+  "202609141110_roles_operativos_public.sql": {
+   "efectos_sin_comprobacion": [],
+   "estado": "verificable_automaticamente",
+   "motivo": "todas sus sentencias tienen comprobacion de catalogo",
+   "sentencias": {
+    "acl_secuencias": 1,
+    "acl_tabla": 1,
+    "acl_tablas": 1,
+    "default_acl": 3,
+    "schema": 1
+   },
+   "sha256": "f8a348737b419855bae12cd5687aead9735297bfdc4fcb8bd5ba2278d0c365e2",
+   "verificaciones": [
+    {
+     "clave": [
+      "schema",
+      "public"
+     ],
+     "esperado": {
+      "acl": [
+       "=U/pg_database_owner",
+       "crm_user=UC/pg_database_owner",
+       "pg_database_owner=UC/pg_database_owner",
+       "postgres=U/pg_database_owner",
+       "service_role=U/pg_database_owner"
+      ],
+      "dueño": "pg_database_owner",
+      "existe": true
+     }
+    },
+    {
+     "clave": [
+      "acl_tablas",
+      "public"
+     ],
+     "esperado": {
+      "account_email": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "account_email_recipients": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "accounts": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "accounts_assigned_to": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "accounts_contacts": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "accounts_tags": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "accounts_teams": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "activity": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "address": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "apiSettings": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "apiSettings_lead_assigned_to": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "apiSettings_tags": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "approval": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "approval_rule": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "approval_rule_approvers": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "attachments": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "auth_group": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "auth_group_permissions": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "auth_permission": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "board": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "board_column": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "board_member": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "board_task": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "board_task_assigned_to": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "business_calendar": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "business_holiday": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "campo_asignacion_trabajo": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "campo_evento_trabajo": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "campo_evidencia_trabajo": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "campo_mutacion_idempotente": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "campo_orden_trabajo": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "campo_work_type": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "campo_work_type_version": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "case": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "case_assigned_to": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "case_contacts": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "case_pipeline": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "case_stage": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "case_tags": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "case_teams": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "case_watcher": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "cases_respuesta_externa": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "comment": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "commentFiles": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "contact_form_submission": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "contacts": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "contacts_assigned_to": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "contacts_tags": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "contacts_teams": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "csat_survey": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "custom_field_definition": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "django_admin_log": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "django_content_type": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "django_migrations": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "django_ses_blacklistedemail": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "django_ses_sesstat": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "django_session": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "document": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "document_shared_to": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "document_teams": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "emailLogs": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "email_message": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "escalation_policy": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "estimate": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "estimate_assigned_to": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "estimate_line_item": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "estimate_teams": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "inbound_mailbox": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "invoice": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "invoice_assigned_to": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "invoice_history": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "invoice_line_item": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "invoice_teams": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "invoice_template": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "lead": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "lead_assigned_to": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "lead_contacts": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "lead_pipeline": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "lead_stage": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "lead_tags": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "lead_teams": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "macro": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "magic_link_token": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "notification": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "opportunity": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "opportunity_assigned_to": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "opportunity_contacts": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "opportunity_line_item": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "opportunity_tags": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "opportunity_teams": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "order_line_item": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "orders": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "organization": [
+       "app_backend=r/postgres",
+       "crm_user=arwdDxtm/postgres",
+       "motor_user=r/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "pack_application": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "payment": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "personal_access_token": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "portal_access_token": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "product": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "profile": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "recurring_invoice": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "recurring_invoice_assigned_to": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "recurring_invoice_line_item": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "recurring_invoice_teams": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "reopen_policy": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "routing_rule": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "routing_rule_state": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "routing_rule_target_assignees": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "sales_goal": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "security_audit_log": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "solicitudes_solicitudservicio": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "solution": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "solution_cases": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "stage_aging_config": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "tags": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "task": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "task_assigned_to": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "task_contacts": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "task_pipeline": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "task_stage": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "task_tags": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "task_teams": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "teams": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "teams_users": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "time_entry": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "token_blacklist_blacklistedtoken": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "token_blacklist_outstandingtoken": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "users": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "users_groups": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "users_user_permissions": [
+       "crm_user=arwdDxtm/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ]
+     }
+    },
+    {
+     "clave": [
+      "acl_secuencias",
+      "public"
+     ],
+     "esperado": [
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "account_email_recipients_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "accounts_assigned_to_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "accounts_contacts_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "accounts_tags_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "accounts_teams_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "apiSettings_lead_assigned_to_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "apiSettings_tags_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "approval_rule_approvers_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "auth_group_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "auth_group_permissions_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "auth_permission_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "board_task_assigned_to_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "case_assigned_to_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "case_contacts_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "case_tags_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "case_teams_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "contacts_assigned_to_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "contacts_tags_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "contacts_teams_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "django_admin_log_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "django_content_type_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "django_migrations_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "django_ses_blacklistedemail_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "django_ses_sesstat_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "document_shared_to_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "document_teams_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "estimate_assigned_to_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "estimate_teams_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "invoice_assigned_to_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "invoice_teams_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "lead_assigned_to_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "lead_contacts_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "lead_tags_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "lead_teams_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "opportunity_assigned_to_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "opportunity_contacts_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "opportunity_tags_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "opportunity_teams_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "recurring_invoice_assigned_to_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "recurring_invoice_teams_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "routing_rule_target_assignees_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "solution_cases_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "task_assigned_to_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "task_contacts_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "task_tags_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "task_teams_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "teams_users_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "token_blacklist_blacklistedtoken_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "token_blacklist_outstandingtoken_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "users_groups_id_seq",
+       "schema": "public"
+      },
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "dueño": "postgres",
+       "nombre": "users_user_permissions_id_seq",
+       "schema": "public"
+      }
+     ]
+    },
+    {
+     "clave": [
+      "default_acl",
+      "postgres",
+      "public"
+     ],
+     "esperado": [
+      {
+       "acl": [
+        "crm_user=rwU/postgres",
+        "postgres=rwU/postgres",
+        "service_role=rwU/postgres"
+       ],
+       "rol": "postgres",
+       "schema": "public",
+       "tipo": "S"
+      },
+      {
+       "acl": [
+        "crm_user=X/postgres",
+        "postgres=X/postgres",
+        "service_role=X/postgres"
+       ],
+       "rol": "postgres",
+       "schema": "public",
+       "tipo": "f"
+      },
+      {
+       "acl": [
+        "crm_user=arwdDxtm/postgres",
+        "postgres=arwdDxtm/postgres",
+        "service_role=arwdDxtm/postgres"
+       ],
+       "rol": "postgres",
+       "schema": "public",
+       "tipo": "r"
+      }
+     ]
+    },
+    {
+     "clave": [
+      "acl_tabla",
+      "public",
+      "organization"
+     ],
+     "esperado": {
+      "acl": [
+       "app_backend=r/postgres",
+       "crm_user=arwdDxtm/postgres",
+       "motor_user=r/postgres",
+       "postgres=arwdDxtm/postgres",
+       "service_role=arwdDxtm/postgres"
+      ],
+      "dueño": "postgres",
+      "existe": true
+     }
+    }
+   ]
+  },
+  "202609141120_comentarios_catalogo_canonicos.sql": {
+   "efectos_sin_comprobacion": [],
+   "estado": "verificable_automaticamente",
+   "motivo": "todas sus sentencias tienen comprobacion de catalogo",
+   "sentencias": {
+    "comentario_columna": 4,
+    "comentario_tabla": 1
+   },
+   "sha256": "3cbcdbb09edfdf6e22d2c624ccc4e64d167a7e6a034980e06b7d45303500f77d",
+   "verificaciones": [
+    {
+     "clave": [
+      "comentario_columna",
+      "asistente",
+      "conversations",
+      "ticket_operativo"
+     ],
+     "esperado": {
+      "comentario": "f553093b634c406f881effc91b2238b1",
+      "existe": true
+     }
+    },
+    {
+     "clave": [
+      "comentario_tabla",
+      "asistente",
+      "verificaciones_accion"
+     ],
+     "esperado": {
+      "comentario": "0d61f178d1a95cdfa1be9f4760afe024",
+      "existe": true
+     }
+    },
+    {
+     "clave": [
+      "comentario_columna",
+      "asistente",
+      "conversations",
+      "estado_escalada"
+     ],
+     "esperado": {
+      "comentario": "20647bcacffd2bebee45a99a8df0c463",
+      "existe": true
+     }
+    },
+    {
+     "clave": [
+      "comentario_columna",
+      "asistente",
+      "conversations",
+      "escalada_detalle"
+     ],
+     "esperado": {
+      "comentario": "d0525ba3c1580c69d6493ba619aaad0f",
+      "existe": true
+     }
+    },
+    {
+     "clave": [
+      "comentario_columna",
+      "asistente",
+      "messages",
+      "llamadas_modelo"
+     ],
+     "esperado": {
+      "comentario": "c50757c7294f633209f8efed0a37a030",
+      "existe": true
+     }
+    }
+   ]
   }
  },
  "referencia": {
-  "descripcion": "referencia efimera construida desde cero con el ledger (ledger/cierre-auditoria), exactamente los 40 archivos del manifiesto",
+  "descripcion": "CANDIDATO PG17 DE ADOPCION (43): supabase/postgres@sha256:f371b5f3f2ac0a05703f33d6e6134515fb2498cab708fb948a0aeb7481467c00; 40 historicos + A1 + roles operativos + comentarios canonicos, por el ledger como postgres NOSUPERUSER; despues supabase/seguridad de 960408d (postgres + supabase_admin), fuera de la cadena; local, 15/09/2026",
   "huella": {
    "extensiones": {
+    "pg_stat_statements": {
+     "schema": "extensions",
+     "version": "1.11"
+    },
     "pg_trgm": {
      "schema": "public",
      "version": "1.6"
     },
     "pgcrypto": {
-     "schema": "ext",
+     "schema": "extensions",
      "version": "1.3"
+    },
+    "supabase_vault": {
+     "schema": "vault",
+     "version": "0.3.1"
+    },
+    "uuid-ossp": {
+     "schema": "extensions",
+     "version": "1.1"
     },
     "vector": {
      "schema": "public",
-     "version": "0.8.6"
+     "version": "0.8.2"
     }
    },
-   "major": 16,
-   "server_version_num": 160014
+   "major": 17,
+   "server_version_num": 170006
   },
-  "postgres": "16.14 (Debian 16.14-1.pgdg12+1)"
+  "postgres": "17.6"
  },
  "version": 1
 }
