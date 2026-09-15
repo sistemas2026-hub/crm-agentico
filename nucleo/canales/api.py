@@ -1416,9 +1416,13 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
         # automatico, y despues se tiraba -- una conversacion que el
         # asistente resolvio solo terminaba en la bandeja sin ninguna
         # etiqueta de que trataba. Ver supabase/202608180923_caso_conversacion.sql.
-        if evaluacion and evaluacion.get("caso_manual"):
+        # 'etiqueta' va junto con el caso y por el mismo motivo: sale de la
+        # misma llamada al evaluador y hasta el 15/09/2026 se persistia SOLO
+        # al escalar. Medido: 62 de 178 conversaciones reales sin etiquetar.
+        if evaluacion and (evaluacion.get("caso_manual") or evaluacion.get("etiqueta")):
             persistencia.marcar_caso(tenant, conversation_id,
-                                     evaluacion["caso_manual"])
+                                     evaluacion.get("caso_manual"),
+                                     evaluacion.get("etiqueta") or "")
 
         # Un agendamiento pospuesto tiene que VOLVER, aunque el modelo no
         # pida escalar de nuevo. Cuando el verificador pide un dato que
