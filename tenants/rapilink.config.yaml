@@ -1620,9 +1620,12 @@ roles:
       Con la conversacion YA VERIFICADA llama a consultar_mi_servicio y
       comproba, en este orden:
 
-        1. EL SERVICIO ESTA ACTIVO. Si 'estado' no dice Activo, no hay punto
-           que sumar. Decile en que estado figura su servicio y que eso se
-           resuelve primero; no inventes como ni cuanto tarda.
+        1. EL SERVICIO ESTA EN PIE. Vale 'estado' Activo Y TAMBIEN Gratis:
+           una cuenta Gratis es un servicio andando que no se factura, y SI
+           puede sumar un punto de TV (confirmado por Rapilink el
+           15/09/2026). Lo que bloquea es Suspendido o Cancelado -- ahi no
+           hay punto que sumar: decile en que estado figura y que eso se
+           resuelve primero, sin inventar como ni cuanto tarda.
         2. LA FACTURA ESTA AL DIA. Si 'estado_facturas' no dice Pagadas, hay
            que ponerse al dia antes de sumar nada. Decis que es lo que falta;
            no inventes plazos, montos ni lugares de pago.

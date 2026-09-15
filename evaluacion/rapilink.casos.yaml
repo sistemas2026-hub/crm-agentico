@@ -2372,8 +2372,15 @@ casos:
   # precondicion romperia las ventas nuevas. Hace falta una herramienta propia
   # para el punto adicional. Queda anotado, no hecho.
 
-  # Mario: estado 'Gratis'. La primera condicion no se cumple.
-  - nombre: sin el servicio activo no se toma un punto de tv adicional
+  # Mario cumple las TRES: 'Gratis' (que cuenta como servicio en pie),
+  # facturas 'Pagadas', y su plan dice "SERVICIO DE INTERNET + TV". Es el
+  # camino feliz, que hasta el 15/09/2026 no se podia escribir porque se creia
+  # que 'Gratis' bloqueaba -- Rapilink confirmo ese mismo dia que no.
+  #
+  # Lo que fija: que NO bloquee a quien SI puede. Un falso bloqueo es peor que
+  # no tener la regla: le dice a un cliente que no puede comprar algo que si
+  # puede, y nadie reporta una venta que no ocurrio.
+  - nombre: un cliente que cumple las tres condiciones puede sumar un punto de tv
     rol: ventas
     sesion:
       identificador_canal: '573111110050'
@@ -2381,18 +2388,27 @@ casos:
       - "quiero instalar otro televisor"
     espera:
       # NO se afirma 'usa: [consultar_mi_servicio]'. Se probo y sale inestable:
-      # el modelo consulta el servicio solo la mitad de las veces. Eso es un
-      # problema REAL -- y mas grande que este caso-- pero es de garantia, no
-      # de cobertura: la regla vive en el prompt y el prompt es guia (PRD 7.4).
+      # el modelo consulta el servicio solo la mitad de las veces. Es un
+      # problema REAL -- y mas grande que este caso-- pero de garantia, no de
+      # cobertura: la regla vive en el prompt, y el prompt es guia (PRD 7.4).
       # Ponerlo aca daria un rojo intermitente que no dice nada nuevo. Ver la
-      # nota de abajo sobre por que hoy no se puede exigir en codigo.
-      no_intenta: [registrar_solicitud_servicio]
-      # La pregunta que motivo todo esto. Se prohibe la forma en que se
-      # PREGUNTA, no la palabra suelta: "cobertura" podria aparecer en una
-      # frase que justamente aclare que no hace falta revisarla.
-      responde_sin: ["en que barrio", "en que localidad", "que barrio vives"]
+      # nota de arriba sobre por que hoy no se puede exigir en codigo.
+      #
+      # Se prohiben las formas AFIRMATIVAS del bloqueo equivocado: la respuesta
+      # correcta dice "tu servicio esta activo", asi que prohibir "activo"
+      # suelto fallaria contra ella. Misma trampa de siempre.
+      responde_sin:
+        - "no esta activo"
+        - "no estas al dia"
+        # La pregunta que motivo todo esto.
+        - "en que barrio"
+        - "en que localidad"
+        - "que barrio vives"
 
-  # 6555: Activo pero con factura 'Pendiente de Pago'. La segunda no se cumple.
+  # 6555: Activo, y su plan TAMBIEN incluye TV ("SERVICIO FIBRA OPTICA 100MB
+  # + TV"). Lo unico que no cumple es la factura -- y eso es justo lo que lo
+  # hace util: bloquea por UNA sola condicion, asi que si el caso cae se sabe
+  # cual disparo.
   #
   # OJO -- ESTE CASO CADUCA COMO EL DE LA FACTURA NO VENCIDA: si alguien paga
   # esa factura, 6555 pasa a 'Pagadas' y el caso deja de probar lo que dice.
