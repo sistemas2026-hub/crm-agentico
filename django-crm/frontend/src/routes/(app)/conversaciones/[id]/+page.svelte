@@ -420,7 +420,9 @@
       previsualización. Rechaza ACÁ lo que WhatsApp rechazaría igual: hacer
       esperar una subida para dar un error evitable es maltrato. */
   function tomarArchivo(/** @type {File} */ f) {
-    if (!f) return;
+    // Pegar, arrastrar y elegir pasan todos por aca: un adjunto le llega al
+    // cliente igual que un texto, asi que con la IA atendiendo no se toma.
+    if (!f || bloqueadoPorIA) return;
     const tipo = tipoDe(f);
     const lim = limites?.[tipo];
     if (lim) {
@@ -539,6 +541,7 @@
   }
 
   async function grabar() {
+    if (bloqueadoPorIA) return;
     const formato = formatoDeGrabacion();
     if (!formato) {
       error =
@@ -610,7 +613,7 @@
       ese caso el texto se manda aparte, como mensaje propio, en vez de
       perderse. */
   async function enviarAdjunto() {
-    if (!adjunto || enviando) return;
+    if (!adjunto || enviando || bloqueadoPorIA) return;
     enviando = true;
     error = '';
     const aceptaPie = limites?.[adjunto.tipo]?.acepta_pie ?? false;
@@ -1146,8 +1149,9 @@
       que el cliente no escribió y le movía la ventana de 24 h. El motor ya lo
       rechaza (403); esto evita ofrecer un gesto que no puede funcionar.
       Tomar el control para responder como persona es "Intervenir", que llega
-      en una fase posterior (SPEC/CONTRATO_RELEVO_IA_HUMANO.md, T8). La nota
-      interna y los adjuntos siguen: no pasan por el asistente. */
+      en una fase posterior (SPEC/CONTRATO_RELEVO_IA_HUMANO.md, T8).
+      Cubre TODO lo que le llega al cliente: texto, imagen, documento, nota de
+      voz y plantilla. Solo la nota interna sigue, porque no sale del equipo. */
   let bloqueadoPorIA = $derived(
     !escalada && conversacion.canal === 'whatsapp' && modo !== 'nota'
   );
@@ -1173,6 +1177,7 @@
   let enviandoPlantilla = $state(false);
 
   async function abrirPlantillas() {
+    if (bloqueadoPorIA) return;
     eligiendoPlantilla = true;
     plantillaElegida = null;
     if (plantillas.length || cargandoPlantillas) return;
@@ -1243,7 +1248,7 @@
   );
 
   async function enviarPlantilla() {
-    if (!plantillaElegida || enviandoPlantilla || !plantillaCompleta) return;
+    if (!plantillaElegida || enviandoPlantilla || !plantillaCompleta || bloqueadoPorIA) return;
     enviandoPlantilla = true;
     errorPlantillas = '';
     try {
@@ -1958,7 +1963,9 @@
         <div class="compositor-pie">
           <!-- Emoji, adjuntar y micrófono. Iconos de 34px y no de 20: esta
                pantalla se usa con prisa, y un objetivo diminuto se falla. -->
-          <div class="herramientas" hidden={modo === 'nota'}>
+          <!-- Sin herramientas con la IA atendiendo un hilo real: imagen,
+               documento y nota de voz le llegan al cliente, igual que el texto. -->
+          <div class="herramientas" hidden={modo === 'nota' || bloqueadoPorIA}>
             <div class="emoji-caja">
               <button
                 type="button"
@@ -2053,12 +2060,12 @@
               class="v2-btn v2-btn-primary"
               type="button"
               onclick={enviarAdjunto}
-              disabled={enviando || bloqueadoPorVentana}
+              disabled={enviando || bloqueadoPorVentana || bloqueadoPorIA}
               aria-busy={enviando}
             >
               <Send size={14} />{enviando ? 'Enviando…' : 'Enviar archivo'}
             </button>
-          {:else if bloqueadoPorVentana}
+          {:else if bloqueadoPorVentana && !bloqueadoPorIA}
             <button
               class="v2-btn v2-btn-primary"
               type="button"
