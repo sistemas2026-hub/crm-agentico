@@ -63,6 +63,7 @@ from __future__ import annotations
 
 import json
 import unicodedata
+import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
@@ -295,6 +296,60 @@ def historial_para_el_modelo(tenant: str, conversation_id: str,
         return []
 
 
+# =============================================================================
+#  ORIGEN Y AUTOR DE UN MENSAJE  (supabase/202609161600_origen_de_mensajes.sql)
+# =============================================================================
+#  'rol' es el protocolo del modelo y del canal; 'origen' es quien produjo el
+#  mensaje. La base admite origen NULL solo por el legado: TODA fila nueva lo
+#  lleva, y eso se exige aca, en el unico lugar por donde se escribe
+#  (SPEC/CONTRATO_RELEVO_IA_HUMANO.md, I4).
+ORIGENES = frozenset({"cliente", "ia", "humano", "sistema"})
+
+# Que origenes tienen sentido para cada rol. Un 'user' que no es del lado
+# cliente, o una nota que no escribio una persona, es un error de quien llama.
+_ORIGENES_POR_ROL = {
+    "user": frozenset({"cliente"}),
+    "assistant": frozenset({"ia", "sistema", "humano"}),
+    "nota": frozenset({"humano"}),
+}
+
+
+class AutorInvalido(ValueError):
+    """Un mensaje de una persona sin autor identificable."""
+
+
+class CanalNoAdmite(ValueError):
+    """La conversacion es de un canal que no puede recibir este envio."""
+
+
+def validar_origen(rol: str, origen: str) -> None:
+    """Levanta ValueError si 'origen' falta, es desconocido o no corresponde
+    al rol. Se llama antes de cualquier escritura."""
+    if origen not in ORIGENES:
+        raise ValueError(f"origen invalido o ausente: {origen!r}")
+    if origen not in _ORIGENES_POR_ROL.get(rol, frozenset()):
+        raise ValueError(f"origen {origen!r} no corresponde al rol {rol!r}")
+
+
+def validar_autor(autor_nombre: str | None, autor_usuario_id: str | None) -> tuple[str, str]:
+    """
+    (nombre, usuario_id) normalizados, o AutorInvalido.
+
+    Un mensaje humano sin autor no se guarda. Los dos datos: el id identifica
+    a la persona aunque cambie de nombre; el nombre es lo que se firma y lo que
+    ve el modelo. Los arma el proxy con la sesion autenticada, nunca el
+    navegador.
+    """
+    nombre = (autor_nombre or "").strip()
+    if not nombre:
+        raise AutorInvalido("falta el nombre de quien escribe")
+    try:
+        usuario = str(uuid.UUID(str(autor_usuario_id)))
+    except (ValueError, TypeError, AttributeError):
+        raise AutorInvalido("falta o es invalido el id de quien escribe") from None
+    return nombre, usuario
+
+
 def registrar_mensaje(tenant: str, canal: str, usuario_externo: str,
                       rol_efectivo: str, rol: str, contenido: str,
                       horas_inactividad: int | None = None,
@@ -303,7 +358,7 @@ def registrar_mensaje(tenant: str, canal: str, usuario_externo: str,
                       tokens_salida: int | None = None,
                       costo_usd: float | None = None,
                       llamadas_modelo: int | None = None,
-                      modelo: str | None = None) -> tuple[str, str]:
+                      modelo: str | None = None, *, origen: str) -> tuple[str, str]:
     """
     Une una fila de conversacion (crea si no existe) con una fila de
     mensaje, y actualiza 'actualizado_en' -- es la unica señal que necesita
@@ -314,7 +369,15 @@ def registrar_mensaje(tenant: str, canal: str, usuario_externo: str,
     despues; lo segundo, marcar_ejemplo (este mismo archivo) para poder
     marcar UNA respuesta puntual como buen ejemplo -- evita una consulta
     aparte para algo que esta funcion ya resolvio.
+
+    'origen' es obligatorio y va sin valor por defecto a proposito: un
+    llamador nuevo que lo olvide falla en el acto (TypeError), no guarda
+    filas sin procedencia. Solo 'cliente' con 'user'; 'ia' o 'sistema' con
+    'assistant'. Las personas escriben por agregar_mensaje_humano().
     """
+    validar_origen(rol, origen)
+    if origen == "humano":
+        raise ValueError("los mensajes de personas van por agregar_mensaje_humano()")
     with sesion(tenant) as (cur, org):
         cur.execute(
             """select id from asistente.conversations
@@ -357,12 +420,12 @@ def registrar_mensaje(tenant: str, canal: str, usuario_externo: str,
             """insert into asistente.messages
                  (organization_id, conversation_id, rol, contenido,
                   creado_en, latencia_ms, tokens_entrada, tokens_salida,
-                  costo_usd, modelo, llamadas_modelo)
-               values (%s, %s, %s, %s, coalesce(%s, now()), %s, %s, %s, %s, %s, %s)
+                  costo_usd, modelo, llamadas_modelo, origen)
+               values (%s, %s, %s, %s, coalesce(%s, now()), %s, %s, %s, %s, %s, %s, %s)
                returning id""",
             (org, conv, rol, contenido, creado_en, latencia_ms,
              tokens_entrada, tokens_salida, costo_usd, modelo,
-             llamadas_modelo))
+             llamadas_modelo, origen))
         mensaje = cur.fetchone()["id"]
 
         return str(conv), str(mensaje)
@@ -534,6 +597,9 @@ def mensajes_de(tenant: str, conversation_id: str) -> dict:
                       -- Si le llego o no. NULL = no se sabe (otro canal, o
                       -- anterior al registro): la pantalla no dibuja nada.
                       m.estado_entrega, m.error_entrega,
+                      -- La clave con la que se guardo: "Reintentar" la reusa
+                      -- para no crear otra fila (D15).
+                      m.clave_idempotencia,
                       -- Los adjuntos de ESA burbuja, sin los bytes: la interfaz
                       -- los pide despues por su id (/media/<id>). Devolverlos
                       -- aca serian varios MB de base64 en cada carga del hilo.
@@ -1091,7 +1157,10 @@ def caso_de_conversacion(tenant: str, conversation_id: str) -> str | None:
 
 
 def agregar_mensaje_humano(tenant: str, conversation_id: str,
-                           contenido: str, autor: str = "") -> dict | None:
+                           contenido: str, autor: str, *,
+                           autor_usuario_id: str,
+                           clave_idempotencia: str | None = None,
+                           solo_canal: str | None = None) -> dict | None:
     """
     Un agente humano responde directo en el hilo, sin pasar por el modelo --
     para una conversacion ya escalada (marcar_escalada le puso caso_id), que
@@ -1111,7 +1180,24 @@ def agregar_mensaje_humano(tenant: str, conversation_id: str,
     El ticket viaja aca y no en una consulta aparte porque es la misma fila:
     pedirla dos veces para leer una columna mas es una ida a la base por cada
     respuesta que escribe una persona.
+
+    AUTOR, ORIGEN E IDEMPOTENCIA (B2)
+    ---------------------------------
+    'autor' (nombre) y 'autor_usuario_id' son obligatorios: sin ellos,
+    AutorInvalido y nada se escribe. La fila queda con origen = 'humano'.
+
+    'clave_idempotencia' la genera quien compone el mensaje. Si ya existe una
+    fila con esa clave en esta conversacion, NO se inserta otra: se devuelve
+    la existente con 'existente': True y su 'estado_entrega', y quien llama
+    decide si reintentar la entrega (solo si fallo). Antes, cada "Reintentar"
+    insertaba una copia del mensaje.
+
+    'solo_canal': si la conversacion no es de ese canal, CanalNoAdmite ANTES
+    de insertar. La plantilla lo usa: guardaba la fila y recien despues
+    descubria que la conversacion no era de WhatsApp (D16).
     """
+    nombre, usuario = validar_autor(autor, autor_usuario_id)
+    clave = (clave_idempotencia or "").strip() or None
     with sesion(tenant) as (cur, org):
         cur.execute(
             """select canal, usuario_externo, ticket_operativo
@@ -1121,6 +1207,9 @@ def agregar_mensaje_humano(tenant: str, conversation_id: str,
         fila = cur.fetchone()
         if not fila:
             return None
+        if solo_canal is not None and fila["canal"] != solo_canal:
+            raise CanalNoAdmite(
+                f"la conversacion es del canal '{fila['canal']}', no '{solo_canal}'")
 
         # 'pendiente' solo si hay a donde entregarlo. En el simulador o la API
         # no hay entrega que esperar, y dejarlo en NULL es lo honesto: la
@@ -1128,12 +1217,29 @@ def agregar_mensaje_humano(tenant: str, conversation_id: str,
         cur.execute(
             """insert into asistente.messages
                  (organization_id, conversation_id, rol, contenido,
-                  estado_entrega)
-               values (%s, %s, 'assistant', %s, %s)
+                  estado_entrega, origen, autor_usuario_id, autor_nombre,
+                  clave_idempotencia)
+               values (%s, %s, 'assistant', %s, %s, 'humano', %s, %s, %s)
+               on conflict (organization_id, conversation_id, clave_idempotencia)
+                 where clave_idempotencia is not null
+               do nothing
                returning id""",
             (org, conversation_id, contenido,
-             "pendiente" if fila["canal"] == "whatsapp" else None))
-        mensaje_id = cur.fetchone()["id"]
+             "pendiente" if fila["canal"] == "whatsapp" else None,
+             usuario, nombre, clave))
+        insertada = cur.fetchone()
+        if insertada is None:
+            # La clave ya estaba: es un reintento del MISMO mensaje.
+            cur.execute(
+                """select id, estado_entrega from asistente.messages
+                   where organization_id = %s and conversation_id = %s
+                     and clave_idempotencia = %s""",
+                (org, conversation_id, clave))
+            previa = cur.fetchone()
+            return {**dict(fila), "mensaje_id": previa["id"], "existente": True,
+                    "estado_entrega": previa["estado_entrega"]}
+        mensaje_id = insertada["id"]
+        autor = nombre
         # Y queda marcada como atendida por una persona. No es cosmetico:
         # dos reglas dependen de saberlo -- el cierre por confirmacion del
         # cliente (que no vale si nadie le contesto todavia) y el barrido por
@@ -1156,11 +1262,12 @@ def agregar_mensaje_humano(tenant: str, conversation_id: str,
         # 'mensaje_id' se suma aparte: quien llama tiene que poder sellar el
         # wamid en ESTA fila cuando WhatsApp le responda, y sin el id habria
         # que adivinar cual de los mensajes de la conversacion es.
-        return {**dict(fila), "mensaje_id": mensaje_id}
+        return {**dict(fila), "mensaje_id": mensaje_id, "existente": False,
+                "estado_entrega": "pendiente" if fila["canal"] == "whatsapp" else None}
 
 
 def agregar_nota_interna(tenant: str, conversation_id: str, contenido: str,
-                         autor: str) -> str | None:
+                         autor: str, *, autor_usuario_id: str) -> str | None:
     """
     Una nota que el equipo se deja a si mismo. NO se le envia a nadie.
 
@@ -1182,17 +1289,23 @@ def agregar_nota_interna(tenant: str, conversation_id: str, contenido: str,
     anotado algo y hacerse cargo del caso.
 
     Devuelve el id de la nota, o None si la conversacion no existe.
+
+    Autor obligatorio, como en agregar_mensaje_humano (AutorInvalido). El
+    contenido conserva el prefijo "(autor)" que la pantalla ya muestra; el
+    autor ademas queda en sus columnas (origen = 'humano').
     """
+    nombre, usuario = validar_autor(autor, autor_usuario_id)
     with sesion(tenant) as (cur, org):
         cur.execute(
             """insert into asistente.messages
-                 (organization_id, conversation_id, rol, contenido)
-               select %s, %s, 'nota', %s
+                 (organization_id, conversation_id, rol, contenido,
+                  origen, autor_usuario_id, autor_nombre)
+               select %s, %s, 'nota', %s, 'humano', %s, %s
                 where exists (select 1 from asistente.conversations
                                where organization_id = %s and id = %s)
                returning id""",
-            (org, conversation_id, f"({autor or 'Equipo'}) {contenido}"
-             if autor else contenido, org, conversation_id))
+            (org, conversation_id, f"({nombre}) {contenido}",
+             usuario, nombre, org, conversation_id))
         fila = cur.fetchone()
         return fila["id"] if fila else None
 

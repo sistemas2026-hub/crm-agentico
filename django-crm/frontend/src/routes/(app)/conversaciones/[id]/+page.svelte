@@ -363,13 +363,20 @@
       pantalla: si sale, el hilo se resincroniza y el estado cambia solo. */
   async function reintentar(/** @type {any} */ m) {
     if (reintentando) return;
-    reintentando = m.id;
+    // Sin su clave, "reintentar" solo podria mandar OTRO mensaje igual: es lo
+    // que pasaba antes -- cada intento dejaba una copia en el hilo (D15). Los
+    // mensajes guardados antes de que existiera la clave no se reintentan.
+    if (!m.clave_idempotencia) {
+      error = 'Este mensaje no se puede reintentar sin duplicarlo. Escribilo de nuevo.';
+      return;
+    }
+    reintentando = m.id ?? m.clave_idempotencia;
     error = '';
     try {
       const resp = await fetch(`/api/conversaciones/${conversacion.id}/humano`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mensaje: m.contenido })
+        body: JSON.stringify({ mensaje: m.contenido, clave_idempotencia: m.clave_idempotencia })
       });
       const datos = await resp.json();
       if (!resp.ok) {
@@ -441,6 +448,9 @@
     if (adjunto?.url) URL.revokeObjectURL(adjunto.url);
     adjunto = {
       archivo: f,
+      // Una por adjunto compuesto: si el envio se corta y se vuelve a apretar
+      // Enviar, el motor reconoce el mismo adjunto en vez de guardar otro.
+      clave_idempotencia: crypto.randomUUID(),
       tipo,
       nombre: f.name || 'archivo',
       bytes: f.size,
@@ -623,6 +633,7 @@
       cuerpo.set('archivo', adjunto.archivo, adjunto.nombre);
       cuerpo.set('tipo', adjunto.tipo);
       cuerpo.set('pie', pie);
+      cuerpo.set('clave_idempotencia', adjunto.clave_idempotencia);
       const resp = await fetch(`/api/conversaciones/${conversacion.id}/media`, {
         method: 'POST',
         body: cuerpo
@@ -1257,7 +1268,8 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           plantilla: plantillaElegida.nombre,
-          variables: valoresPlantilla
+          variables: valoresPlantilla,
+          clave_idempotencia: crypto.randomUUID()
         })
       });
       const datos = await resp.json();
@@ -1318,6 +1330,9 @@
         rol: 'assistant',
         contenido: texto,
         creado_en: new Date().toISOString(),
+        // La clave viaja con la burbuja: "Reintentar" la reusa y el motor
+        // reintenta la entrega de ESA fila en vez de guardar otra (D15).
+        clave_idempotencia: crypto.randomUUID(),
         /** @type {string|null} */ sinEntregar: null
       };
       mensajes.push(burbuja);
@@ -1330,7 +1345,7 @@
         const resp = await fetch(`/api/conversaciones/${conversacion.id}/humano`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ mensaje: texto })
+          body: JSON.stringify({ mensaje: texto, clave_idempotencia: burbuja.clave_idempotencia })
         });
         const datos = await resp.json();
         if (!resp.ok) {

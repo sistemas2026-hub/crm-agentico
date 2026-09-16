@@ -74,6 +74,10 @@ class Espia:
             f = getattr(p, nombre)
             if nombre.startswith("_") or not callable(f) or isinstance(f, type):
                 continue
+            # Las validadoras son funciones puras (no tocan la base): se dejan
+            # reales, o el espia convertiria un autor valido en None.
+            if nombre.startswith("validar_"):
+                continue
             if getattr(f, "__module__", None) != p.__name__:
                 continue
             self._orig[(p, nombre)] = f
@@ -308,7 +312,8 @@ with Espia(respuestas={"agregar_mensaje_humano":
                         "ticket_operativo": None, "mensaje_id": "m-1"}}):
     resp = cliente.post("/conversaciones/conv-sim/mensajes",
                         json={"tenant": "rapilink", "mensaje": "ya quedo",
-                              "autor": "Ana", "devolver_al_asistente": True})
+                              "autor": "Ana", "autor_usuario_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+                              "devolver_al_asistente": True})
 comprobar(resp.status_code == 201, f"la respuesta humana se guarda (fue {resp.status_code})")
 comprobar(s_ses["historial"] and s_ses["escalada"] is False,
           "la respuesta y la devolucion llegan a la sesion SIMULADA")

@@ -5,6 +5,7 @@ import { leerResumenDelAgente } from '$lib/server/v2/resumen-agente.js';
 import { leerAreas } from '$lib/server/v2/areas.js';
 import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
+import { autorDeSesion, claveIdempotencia } from '$lib/server/v2/autor.js';
 
 /** @type {import('./$types').PageServerLoad} */
 export async function load({ cookies, params, fetch }) {
@@ -134,7 +135,10 @@ export const actions = {
             body: JSON.stringify({
               tenant,
               mensaje: body,
-              autor: /** @type {any} */ (locals).user?.name || '',
+              ...autorDeSesion(locals),
+              // Una por envío del formulario: evita el doble POST, no un
+              // reenvío manual del formulario (que es otro mensaje).
+              clave_idempotencia: claveIdempotencia(null),
               devolver_al_asistente: devolver
             }),
             signal: AbortSignal.timeout(20000)

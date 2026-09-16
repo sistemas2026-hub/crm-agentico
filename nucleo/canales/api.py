@@ -942,8 +942,10 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 respuesta = _pregunta_de_cierre(config)
                 estado["historial"].append({"role": "assistant", "content": respuesta})
                 try:
-                    persistencia.registrar_mensaje(tenant, canal, id_sesion, rol, "user", mensaje)
-                    persistencia.registrar_mensaje(tenant, canal, id_sesion, rol, "assistant", respuesta)
+                    persistencia.registrar_mensaje(tenant, canal, id_sesion, rol, "user", mensaje,
+                                                   origen="cliente")
+                    persistencia.registrar_mensaje(tenant, canal, id_sesion, rol, "assistant", respuesta,
+                                                   origen="sistema")
                 except Exception as e:
                     print(f"[persistencia] no se pudo guardar la pregunta de cierre: {e}")
                 return {"respuesta": respuesta,
@@ -958,9 +960,9 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 respuesta = _mensaje_de_cierre(config)
                 try:
                     conv, _ = persistencia.registrar_mensaje(
-                        tenant, canal, id_sesion, rol, "user", mensaje)
+                        tenant, canal, id_sesion, rol, "user", mensaje, origen="cliente")
                     persistencia.registrar_mensaje(
-                        tenant, canal, id_sesion, rol, "assistant", respuesta)
+                        tenant, canal, id_sesion, rol, "assistant", respuesta, origen="sistema")
                     operativo.cerrar_todo(
                         config, tenant,
                         {"id": conv, "caso_id": estado["caso_id"],
@@ -986,7 +988,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             if hubo_humano:
                 try:
                     persistencia.registrar_mensaje(
-                        tenant, canal, id_sesion, rol, "user", mensaje)
+                        tenant, canal, id_sesion, rol, "user", mensaje, origen="cliente")
                 except Exception as e:
                     print(f"[persistencia] no se pudo guardar el mensaje del cliente: {e}")
                 return {"respuesta": "", "verificado": estado["sesion"].verificado,
@@ -1009,8 +1011,10 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 "revisar y te escribe por aca."
             estado["historial"].append({"role": "assistant", "content": respuesta})
             try:
-                persistencia.registrar_mensaje(tenant, canal, id_sesion, rol, "user", mensaje)
-                persistencia.registrar_mensaje(tenant, canal, id_sesion, rol, "assistant", respuesta)
+                persistencia.registrar_mensaje(tenant, canal, id_sesion, rol, "user", mensaje,
+                                               origen="cliente")
+                persistencia.registrar_mensaje(tenant, canal, id_sesion, rol, "assistant", respuesta,
+                                               origen="sistema")
             except Exception as e:
                 print(f"[persistencia] no se pudo guardar el turno pausado: {e}")
             return {"respuesta": respuesta,
@@ -1059,9 +1063,9 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
         estado["historial"].append({"role": "assistant", "content": respuesta})
         try:
             conv_id, _ = persistencia.registrar_mensaje(
-                tenant, canal, id_sesion, rol, "user", mensaje)
+                tenant, canal, id_sesion, rol, "user", mensaje, origen="cliente")
             persistencia.registrar_mensaje(
-                tenant, canal, id_sesion, rol, "assistant", respuesta)
+                tenant, canal, id_sesion, rol, "assistant", respuesta, origen="sistema")
             if conv_id:
                 persistencia.registrar_estado_escalada(
                     tenant, conv_id, estado_escalada.NO_DETERMINADO,
@@ -1117,13 +1121,18 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
         # donde la mando y no en una lista aparte al final.
         _, mensaje_usuario_id = persistencia.registrar_mensaje(
             tenant, canal, id_sesion, rol, "user", mensaje, horas,
-            creado_en=llego_en)
+            creado_en=llego_en, origen="cliente")
         # 'latencia_ms' es lo que el cliente ESPERO: desde que su mensaje
         # llego hasta que la respuesta estuvo lista. La columna existia y
         # nadie la llenaba -- por eso no habia con que responder "¿cuanto
         # tarda?" salvo adivinando.
         conversation_id, mensaje_id = persistencia.registrar_mensaje(
             tenant, canal, id_sesion, rol, "assistant", respuesta, horas,
+            # 'ia' aunque una guarda del codigo reescriba despues el texto
+            # (actualizar_contenido_mensaje): sigue siendo el turno del
+            # asistente, del lado maquina. 'sistema' queda para los textos
+            # fijos que salen sin turno del modelo.
+            origen="ia",
             latencia_ms=int(
                 (datetime.now(timezone.utc) - llego_en).total_seconds() * 1000),
             # De ESTE turno, no del dia. 'n_llamadas' es cuantas veces se
@@ -3878,6 +3887,30 @@ def canales_plantillas():
     return jsonify({"plantillas": aprobadas, "total_en_meta": len(todas)})
 
 
+def _autor_y_clave(campos) -> tuple[str, str, str | None]:
+    """
+    (autor_nombre, autor_usuario_id, clave_idempotencia) de un cuerpo JSON o
+    de un formulario multipart. Levanta persistencia.AutorInvalido si falta
+    el autor: un mensaje de persona sin autor no se guarda (D2). Los arma el
+    proxy del frontend con la sesion autenticada, nunca el navegador.
+    """
+    nombre, usuario = persistencia.validar_autor(
+        campos.get("autor"), campos.get("autor_usuario_id"))
+    return nombre, usuario, (campos.get("clave_idempotencia") or "").strip() or None
+
+
+def _ya_guardado(destino: dict) -> bool:
+    """
+    True si 'destino' es un REINTENTO de un mensaje que ya existia (misma
+    clave de idempotencia) y NO hay que volver a entregarlo: solo se reenvia
+    lo que fallo. Un 'pendiente' sin resultado puede estar en vuelo o haber
+    salido sin que se anotara; reenviarlo arriesga un duplicado ante el
+    cliente, asi que tampoco se reenvia (SPEC/CONTRATO_RELEVO_IA_HUMANO.md,
+    §9.5).
+    """
+    return bool(destino.get("existente")) and destino.get("estado_entrega") != "fallido"
+
+
 @app.post("/conversaciones/<id_conversacion>/plantilla")
 def conversaciones_enviar_plantilla(id_conversacion):
     """
@@ -3890,16 +3923,23 @@ def conversaciones_enviar_plantilla(id_conversacion):
     porque el texto de una plantilla lo puede cambiar Meta despues.
 
     NO abre la ventana. La ventana la abre el cliente cuando responde, y
-    nada mas: esto queda como mensaje 'humano', que es justamente el rol que
-    el calculo de la ventana ignora.
+    nada mas: esto queda con rol 'assistant' (origen 'humano'), y el calculo
+    de la ventana solo cuenta los mensajes del cliente.
+
+    El canal se valida ANTES de guardar (D16): antes la fila quedaba escrita
+    y recien despues se respondia 400 porque la conversacion no era de
+    WhatsApp.
     """
     cuerpo = request.get_json(force=True, silent=True) or {}
     tenant = cuerpo.get("tenant")
     nombre = (cuerpo.get("plantilla") or "").strip()
     variables = [str(v) for v in (cuerpo.get("variables") or [])]
-    autor = (cuerpo.get("autor") or "").strip()
     if not tenant or not nombre:
         return jsonify({"error": "Faltan campos: tenant, plantilla"}), 400
+    try:
+        autor, autor_id, clave = _autor_y_clave(cuerpo)
+    except persistencia.AutorInvalido as e:
+        return jsonify({"error": f"Autor invalido: {e}"}), 400
 
     try:
         config = _config_de(tenant)
@@ -3926,7 +3966,11 @@ def conversaciones_enviar_plantilla(id_conversacion):
 
     try:
         destino = persistencia.agregar_mensaje_humano(
-            tenant, id_conversacion, texto, autor)
+            tenant, id_conversacion, texto, autor, autor_usuario_id=autor_id,
+            clave_idempotencia=clave, solo_canal=canales.WHATSAPP)
+    except persistencia.CanalNoAdmite:
+        return jsonify({"error": "Las plantillas son de WhatsApp; esta "
+                                 "conversacion es de otro canal."}), 400
     except RuntimeError as e:
         return jsonify({"error": str(e)}), 404
     except Exception as e:
@@ -3934,10 +3978,10 @@ def conversaciones_enviar_plantilla(id_conversacion):
         return jsonify({"error": "No se pudo guardar el mensaje."}), 500
     if destino is None:
         return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
-
-    if destino["canal"] != "whatsapp":
-        return jsonify({"error": "Las plantillas son de WhatsApp; esta "
-                                 "conversacion es de otro canal."}), 400
+    if _ya_guardado(destino):
+        return jsonify({"ok": True, "ya_existia": True, "texto": texto,
+                        "mensaje_id": destino["mensaje_id"],
+                        "estado_entrega": destino["estado_entrega"]}), 200
 
     salida = {"ok": True, "texto": texto, "mensaje_id": destino["mensaje_id"]}
     salida.update(_entregar_y_registrar(
@@ -4030,21 +4074,25 @@ def conversaciones_responder_humano(id_conversacion):
     cuerpo = request.get_json(force=True, silent=True) or {}
     tenant = cuerpo.get("tenant")
     contenido = cuerpo.get("mensaje")
-    # Quien contesta. Lo manda la pantalla porque el motor no lee las tablas
-    # del CRM, y sirve para firmar la copia que va al ticket del ISP: ahi toda
-    # respuesta queda a nombre de la cuenta de la API key, asi que sin esto el
-    # historico del ticket dice que contesto el sistema.
-    autor = (cuerpo.get("autor") or "").strip()
     # Si con esta respuesta la persona da por terminada su parte. Lo elige
     # ella: acaba de hacer el trabajo y sabe si le quedo algo preguntado al
     # cliente. Ver devolver_al_asistente().
     devolver = bool(cuerpo.get("devolver_al_asistente"))
     if not tenant or not contenido:
         return jsonify({"error": "Faltan campos: tenant, mensaje"}), 400
+    # Quien contesta, OBLIGATORIO (D2). Lo manda el proxy porque el motor no
+    # lee las tablas del CRM; firma la copia al ticket del ISP (ahi toda
+    # respuesta queda a nombre de la cuenta de la API key) y el historial que
+    # ve el modelo.
+    try:
+        autor, autor_id, clave = _autor_y_clave(cuerpo)
+    except persistencia.AutorInvalido as e:
+        return jsonify({"error": f"Autor invalido: {e}"}), 400
 
     try:
         destino = persistencia.agregar_mensaje_humano(
-            tenant, id_conversacion, contenido, autor)
+            tenant, id_conversacion, contenido, autor, autor_usuario_id=autor_id,
+            clave_idempotencia=clave)
     except RuntimeError as e:
         return jsonify({"error": str(e)}), 404
     except Exception as e:
@@ -4053,6 +4101,13 @@ def conversaciones_responder_humano(id_conversacion):
 
     if destino is None:
         return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+    if _ya_guardado(destino):
+        # Reintento de un mensaje que no fallo: ni otra fila, ni otra copia al
+        # ticket, ni otra entrada al historial, ni otro envio.
+        return jsonify({"ok": True, "ya_existia": True,
+                        "mensaje_id": destino["mensaje_id"],
+                        "estado_entrega": destino["estado_entrega"]}), 200
+    reintento = bool(destino.get("existente"))
 
     # Lo que escribio la persona entra al HISTORIAL que ve el modelo, marcado
     # como suyo.
@@ -4072,8 +4127,8 @@ def conversaciones_responder_humano(id_conversacion):
     # tambien queda claro quien escribio cada cosa.
     clave_sesion = canales.clave_sesion_de_fila(
         tenant, destino.get("canal"), destino["usuario_externo"])
-    if clave_sesion in _sesiones:
-        quien = autor or "Compañero del equipo"
+    if clave_sesion in _sesiones and not reintento:
+        quien = autor
         _sesiones[clave_sesion]["historial"].append(
             {"role": "assistant", "content": f"({quien}) {contenido}"})
 
@@ -4093,7 +4148,7 @@ def conversaciones_responder_humano(id_conversacion):
     # La misma respuesta, copiada al ticket del sistema del ISP. Va aparte de
     # la entrega al cliente y no la condiciona: que la operacion no se entere
     # es un problema, pero uno menor que no contestarle a quien espera.
-    if destino.get("ticket_operativo"):
+    if destino.get("ticket_operativo") and not reintento:
         try:
             config = _config_de(tenant)
             salida["copiado_al_ticket"] = operativo.responder(
@@ -5763,10 +5818,13 @@ def conversaciones_enviar_media(id_conversacion):
     tenant = request.form.get("tenant")
     tipo = (request.form.get("tipo") or "").strip()
     pie = (request.form.get("pie") or "").strip()
-    autor = (request.form.get("autor") or "").strip()
 
     if not subido or not tenant or not tipo:
         return jsonify({"error": "Faltan campos: archivo, tenant, tipo"}), 400
+    try:
+        autor, autor_id, clave = _autor_y_clave(request.form)
+    except persistencia.AutorInvalido as e:
+        return jsonify({"error": f"Autor invalido: {e}"}), 400
 
     contenido = subido.read()
     mime = subido.mimetype or "application/octet-stream"
@@ -5786,12 +5844,17 @@ def conversaciones_enviar_media(id_conversacion):
 
     try:
         destino = persistencia.agregar_mensaje_humano(
-            tenant, id_conversacion, texto, autor)
+            tenant, id_conversacion, texto, autor, autor_usuario_id=autor_id,
+            clave_idempotencia=clave)
     except Exception as e:
         print(f"[media] fallo al guardar el mensaje: {type(e).__name__}: {e}")
         return jsonify({"error": "No se pudo guardar."}), 500
     if destino is None:
         return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+    if _ya_guardado(destino):
+        return jsonify({"ok": True, "ya_existia": True,
+                        "mensaje_id": destino["mensaje_id"],
+                        "estado_entrega": destino["estado_entrega"]}), 200
 
     # Se comprime con el mismo criterio que lo que ENTRA (media.preparar):
     # una foto de 8 MB del celular de un tecnico no tiene por que viajar
@@ -5836,7 +5899,7 @@ def conversaciones_nota(id_conversacion):
     que se decida no enviar, es que no hay con que. La ruta que entrega
     (POST .../humano) es otra funcion, con otro nombre y otro verbo.
 
-    Cuerpo: {tenant, mensaje, autor?}
+    Cuerpo: {tenant, mensaje, autor, autor_usuario_id} -- autor obligatorio.
     """
     cuerpo = request.get_json(force=True, silent=True) or {}
     tenant = cuerpo.get("tenant")
@@ -5845,9 +5908,12 @@ def conversaciones_nota(id_conversacion):
         return jsonify({"error": "Faltan campos: tenant, mensaje"}), 400
 
     try:
+        autor, autor_id, _clave = _autor_y_clave(cuerpo)
+    except persistencia.AutorInvalido as e:
+        return jsonify({"error": f"Autor invalido: {e}"}), 400
+    try:
         nota_id = persistencia.agregar_nota_interna(
-            tenant, id_conversacion, contenido,
-            (cuerpo.get("autor") or "").strip())
+            tenant, id_conversacion, contenido, autor, autor_usuario_id=autor_id)
     except Exception as e:
         print(f"[nota] fallo al guardar: {type(e).__name__}: {e}")
         return jsonify({"error": "No se pudo guardar la nota."}), 500

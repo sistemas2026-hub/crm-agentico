@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
+import { autorDeSesion, claveIdempotencia } from '$lib/server/v2/autor.js';
 
 /**
  * Proxy para que un agente humano responda directo en una conversacion ya
@@ -16,7 +17,7 @@ export async function POST({ request, params, locals, fetch }) {
     return json({ error: 'No autenticado' }, { status: 401 });
   }
 
-  const { mensaje } = await request.json();
+  const { mensaje, clave_idempotencia } = await request.json();
   if (!mensaje) {
     return json({ error: 'Falta el mensaje' }, { status: 400 });
   }
@@ -32,7 +33,14 @@ export async function POST({ request, params, locals, fetch }) {
     const resp = await fetch(`${baseUrl}/conversaciones/${params.id}/mensajes`, {
       method: 'POST',
       headers: headersMotor({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ tenant, mensaje })
+      // Autor de la sesión (D2) y la clave que generó la pantalla: reintentar
+      // con la misma clave reintenta la entrega, no crea otra fila (D15).
+      body: JSON.stringify({
+        tenant,
+        mensaje,
+        ...autorDeSesion(locals),
+        clave_idempotencia: claveIdempotencia(clave_idempotencia)
+      })
     });
     const datos = await resp.json();
     if (!resp.ok) {

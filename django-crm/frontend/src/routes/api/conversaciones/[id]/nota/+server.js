@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
+import { autorDeSesion, claveIdempotencia } from '$lib/server/v2/autor.js';
 
 /**
  * Nota interna: queda en el hilo para el equipo y NO se le envía al cliente.
@@ -38,7 +39,7 @@ export async function POST({ params, locals, fetch, request }) {
       headers: headersMotor({ 'Content-Type': 'application/json' }),
       // El autor sale de la sesión: una nota firmada por quien dice el
       // navegador no sirve para nada.
-      body: JSON.stringify({ tenant, mensaje, autor: locals.user.email ?? '' })
+      body: JSON.stringify({ tenant, mensaje, ...autorDeSesion(locals) })
     });
     const datos = await resp.json();
     return json(datos, { status: resp.status });

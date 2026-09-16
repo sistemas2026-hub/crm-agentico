@@ -49,7 +49,9 @@ export async function GET({ params, locals, fetch }) {
         adjuntos: m.adjuntos ?? [],
         // Estado de entrega, para que un fallo aparezca sin recargar.
         estado_entrega: m.estado_entrega ?? null,
-        error_entrega: m.error_entrega ?? null
+        error_entrega: m.error_entrega ?? null,
+        // Para que "Reintentar" reuse la clave y no cree otra fila (D15).
+        clave_idempotencia: m.clave_idempotencia ?? null
       })),
       // El encabezado ENTERO, tal como lo devuelve el motor. La pantalla de
       // conversacion lo necesita para refrescar sin recargar: si se escalo,

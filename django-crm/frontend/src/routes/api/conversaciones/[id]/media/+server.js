@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
+import { autorDeSesion, claveIdempotencia } from '$lib/server/v2/autor.js';
 
 /**
  * Proxy para mandarle un archivo al cliente desde la bandeja. Ver
@@ -46,7 +47,12 @@ export async function POST({ params, locals, fetch, request }) {
   // Estos dos NUNCA salen del navegador: el tenant es del entorno y el autor
   // de la sesión, igual que en la ruta de texto.
   salida.set('tenant', tenant);
-  salida.set('autor', locals.user.email ?? '');
+  const { autor, autor_usuario_id } = autorDeSesion(locals);
+  salida.set('autor', autor);
+  salida.set('autor_usuario_id', autor_usuario_id);
+  // La clave sí la manda la pantalla (una por adjunto compuesto): es lo que
+  // hace que reintentar no cree otra fila.
+  salida.set('clave_idempotencia', claveIdempotencia(entrante.get('clave_idempotencia')));
 
   try {
     const resp = await fetch(`${baseUrl}/conversaciones/${params.id}/humano/media`, {

@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
+import { autorDeSesion, claveIdempotencia } from '$lib/server/v2/autor.js';
 
 /**
  * Enviar una plantilla aprobada de WhatsApp.
@@ -44,7 +45,8 @@ export async function POST({ params, locals, fetch, request }) {
         tenant,
         plantilla,
         variables,
-        autor: locals.user.email ?? ''
+        ...autorDeSesion(locals),
+        clave_idempotencia: claveIdempotencia(cuerpo?.clave_idempotencia)
       })
     });
     const datos = await resp.json();
