@@ -517,11 +517,29 @@ try:
                                  "creados": 2, "ya_estaban": 1, "fallidos": 0},
             "los contadores de importacion salen separados",
             f"{r.get('importacion')}")
-    revisar(r["reconciliacion"] == {"alcanzados": 2, "con_diferencia": 1,
-                                    "actualizados": 3, "sin_cambios": 4,
-                                    "fallidos": 0, "errores_lectura": 1},
+    # 'respuestas' es un bloque propio dentro de reconciliacion, agregado con la
+    # sincronizacion de respuestas externas. Se comprueba aparte y no se mezcla
+    # con la igualdad de arriba a proposito: lo que esta prueba defiende es que
+    # los contadores NO se contaminen entre trabajos, asi que un trabajo nuevo
+    # tiene que traer su propio bloque y dejar intactos los de reconciliacion.
+    recon = {k: v for k, v in r["reconciliacion"].items() if k != "respuestas"}
+    revisar(recon == {"alcanzados": 2, "con_diferencia": 1,
+                      "actualizados": 3, "sin_cambios": 4,
+                      "fallidos": 0, "errores_lectura": 1},
             "y los de reconciliacion tambien, con errores_lectura aparte",
             f"{r.get('reconciliacion')}")
+    respuestas = r["reconciliacion"].get("respuestas")
+    revisar(isinstance(respuestas, dict),
+            "la sincronizacion de respuestas trae su propio bloque",
+            f"'respuestas' llego como {type(respuestas).__name__}")
+    # config_real() deja el catalogo vacio a proposito, asi que esta corrida NO
+    # puede sincronizar respuestas. Lo que se exige es que eso se reporte DENTRO
+    # de su bloque y no como un fallo de reconciliacion: sin esto, un trabajo
+    # que no puede correr subiria el 'fallidos' del de al lado.
+    revisar(isinstance(respuestas, dict) and respuestas.get("error")
+            and recon["fallidos"] == 0,
+            "y su error queda en su bloque, sin sumar a los fallos de reconciliacion",
+            f"respuestas={respuestas}  fallidos_reconciliacion={recon.get('fallidos')}")
     # 'fallidos' existe en los dos a proposito -- son fallos de trabajos
     # distintos. Lo que no puede existir es un contador PLANO, arriba, que los
     # sume: ese es el numero que se lee mal cuando algo anda mal.
@@ -748,8 +766,20 @@ necesarias = reloj.credenciales_necesarias(cfg_yaml)
 revisar("IMPORTACION_API_TOKEN" in necesarias,
         "el reloj sabe que va a necesitar IMPORTACION_API_TOKEN",
         f"deducidas: {sorted(necesarias)}")
-revisar(len(necesarias.get("IMPORTACION_API_TOKEN", [])) == 4,
-        "y que son las cuatro herramientas internas de Fase 2 las que la piden",
+# No se cuenta: se deriva del catalogo. La version anterior exigia CUATRO, y
+# quedo vieja el dia que se agrego 'sincronizar_respuestas_externas' -- una
+# suite en rojo por su propio numero magico deja de avisar de lo que importa.
+# Lo que importa es que la deduccion salga del catalogo del tenant (que es lo
+# que dice hacer credenciales_necesarias) y que solo la pidan herramientas
+# internas de Fase 2.
+del_catalogo = {h.nombre for h in cfg_yaml.herramientas
+                if getattr(h, "auth_ref", "") == "IMPORTACION_API_TOKEN"}
+piden = set(necesarias.get("IMPORTACION_API_TOKEN", []))
+revisar(piden == del_catalogo and piden,
+        "las que piden la credencial son exactamente las que la declaran en el catalogo",
+        f"deducidas={sorted(piden)}  catalogo={sorted(del_catalogo)}")
+revisar(piden <= io_mod.HERRAMIENTAS,
+        "y todas son herramientas internas de Fase 2, ninguna ajena",
         f"{necesarias.get('IMPORTACION_API_TOKEN')}")
 revisar({"WISPHUB_API_KEY", "BOTTLECRM_API_TOKEN"} <= set(necesarias),
         "y las dos del cierre de vencidas",
