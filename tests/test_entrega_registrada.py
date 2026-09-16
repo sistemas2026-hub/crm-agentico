@@ -80,23 +80,35 @@ class RespuestaFalsa:
 # =============================================================================
 titulo("1. el texto del error lo escribe Dexter")
 # =============================================================================
+def no_retiene_crudo(error) -> bool:
+    """Ni en el texto ni en NINGUN atributo: lo que no se guarda no se filtra."""
+    return CRUDO not in str(error) and all(CRUDO not in str(v) for v in vars(error).values())
+
+
 sin_json = whatsapp._rechazo(RespuestaFalsa(502, None, CRUDO), "el envío")
-revisar(CRUDO not in str(sin_json),
-        "una respuesta no-JSON NO mete el cuerpo crudo en el texto del error", str(sin_json))
+revisar(no_retiene_crudo(sin_json),
+        "una respuesta no-JSON no deja su cuerpo crudo ni en el texto ni en un atributo",
+        f"{sin_json} {vars(sin_json)}")
 revisar(sin_json.http_status == 502 and "HTTP 502" in str(sin_json),
         "y en su lugar dice el estado HTTP, que es lo que sirve para buscar", str(sin_json))
-revisar(sin_json.detalle_proveedor == CRUDO,
-        "lo que dijo Meta queda aparte, en detalle_proveedor (para el log)")
 
 con_mensaje = whatsapp._rechazo(
-    RespuestaFalsa(400, {"error": {"code": 131026, "message": CRUDO}}), "el envío")
-revisar(CRUDO not in str(con_mensaje) and con_mensaje.codigo == 131026,
-        "un error JSON con mensaje tampoco lo copia: queda el codigo", str(con_mensaje))
+    RespuestaFalsa(400, {"error": {"code": 131026, "message": CRUDO,
+                                   "error_data": {"details": CRUDO}}}), "el envío")
+revisar(no_retiene_crudo(con_mensaje) and con_mensaje.codigo == 131026,
+        "un error JSON con mensaje tampoco lo retiene: queda solo el codigo",
+        f"{con_mensaje} {vars(con_mensaje)}")
+
+acuses = whatsapp.estados_entrantes({"entry": [{"changes": [{"value": {"statuses": [{
+    "id": "wamid.ACUSE", "status": "failed", "recipient_id": "573001234567",
+    "errors": [{"code": 131026, "message": CRUDO, "error_data": {"details": CRUDO}}]}]}}]}]})
+revisar(len(acuses) == 1 and acuses[0].get("codigo") == 131026
+        and CRUDO not in str(acuses[0]),
+        "el parser de acuses se queda con el codigo y descarta el texto de Meta", f"{acuses}")
 
 from nucleo.canales import api                                    # noqa: E402
 
-conocido = api._motivo_de_envio(whatsapp.ErrorWhatsApp(
-    "x", codigo=131026, detalle_proveedor=CRUDO))
+conocido = api._motivo_de_envio(whatsapp.ErrorWhatsApp("x", codigo=131026))
 revisar(conocido == api.MOTIVOS_DE_FALLO[131026],
         "un codigo conocido se traduce con la misma tabla que los acuses", conocido)
 revisar(CRUDO not in api._motivo_de_envio(con_mensaje),
@@ -227,35 +239,73 @@ else:
                     f"lanzo {type(e).__name__}")
 
         titulo("4. el mecanismo unico contra la base")
+        import contextlib                                         # noqa: E402
+        import io                                                 # noqa: E402
+
+        def con_log(funcion):
+            """Corre funcion() capturando lo que imprime: lo que iria al log."""
+            salida = io.StringIO()
+            with contextlib.redirect_stdout(salida):
+                resultado = funcion()
+            return resultado, salida.getvalue()
+
         m = mensaje_pendiente(ORG, conv)
         r = api._entregar_y_registrar(TENANT, m, lambda: "wamid.MECANISMO", "prueba")
-        revisar(r == {"entregado": True, "registrado": True} and fila(m)[1] == "enviado",
-                "Meta acepta: entregado y registrado", f"{r} {fila(m)}")
+        revisar(r == {"resultado": "aceptado", "entregado": True, "registrado": True}
+                and fila(m)[1] == "enviado",
+                "Meta acepta: resultado 'aceptado', entregado y registrado", f"{r} {fila(m)}")
 
         m = mensaje_pendiente(ORG, conv)
 
         def rechaza():
-            raise whatsapp.ErrorWhatsApp("x", codigo=131026, detalle_proveedor=CRUDO)
-        r = api._entregar_y_registrar(TENANT, m, rechaza, "prueba")
-        revisar(r["entregado"] is False and r["registrado"] is True
-                and r["aviso"] == api.MOTIVOS_DE_FALLO[131026] and fila(m)[1] == "fallido",
+            # Un rechazo armado como lo arma _post, desde una respuesta que trae
+            # el texto de Meta: si ese texto sobreviviera, apareceria abajo.
+            raise whatsapp._rechazo(RespuestaFalsa(
+                400, {"error": {"code": 131026, "message": CRUDO,
+                                "error_data": {"details": CRUDO}}}), "el envío")
+        r, log = con_log(lambda: api._entregar_y_registrar(TENANT, m, rechaza, "prueba"))
+        revisar(r["resultado"] == "rechazado" and r["entregado"] is False
+                and r["registrado"] is True and r["aviso"] == api.MOTIVOS_DE_FALLO[131026]
+                and fila(m)[1] == "fallido",
                 "Meta rechaza: 'fallido', aviso legible, registrado", f"{r} {fila(m)}")
         revisar(all(CRUDO not in (c or "") for c in fila(m)) and CRUDO not in str(r),
-                "y lo que dijo Meta no llega ni a la base ni a la respuesta")
+                "lo que dijo Meta no llega ni a la base ni a la respuesta")
+        revisar(CRUDO not in log and "codigo=131026" in log and "http_status=400" in log,
+                "y tampoco al LOG: queda solo metadata (codigo, estado HTTP)", log.strip())
+
+        m = mensaje_pendiente(ORG, conv)
+        r, log = con_log(lambda: api._entregar_y_registrar(
+            TENANT, m, lambda: (_ for _ in ()).throw(requests.ConnectionError(CRUDO)), "prueba"))
+        revisar(r["resultado"] == "rechazado" and CRUDO not in log and CRUDO not in str(r)
+                and CRUDO not in (fila(m)[2] or ""),
+                "una excepcion ajena no filtra su texto al log, la respuesta ni la base",
+                log.strip())
 
         m = mensaje_pendiente(ORG, conv)
         r = api._entregar_y_registrar(TENANT, m, lambda: None, "prueba")
-        revisar(r == {"entregado": False, "registrado": True} and "aviso" not in r
+        revisar(r == {"resultado": "sin_id", "entregado": False, "registrado": True}
                 and fila(m)[1] == "pendiente",
-                "200 sin id: no se da por entregado y no hay aviso de reintento", f"{r} {fila(m)}")
+                "200 sin id: 'sin_id', no se da por entregado y no hay aviso", f"{r} {fila(m)}")
 
+        titulo("4b. Meta acepto y la base NO lo guardo: entrega incierta")
         m = mensaje_pendiente(ORG, conv)
-        r = api._entregar_y_registrar(SIN_CONFIG, m, lambda: "wamid.NO_GUARDADO", "prueba")
-        revisar(r["entregado"] is True and r["registrado"] is False,
-                "Meta acepto pero la base no guardo: registrado=False, no un exito silencioso",
-                f"{r}")
-        revisar(fila(m) == (None, "pendiente", None),
-                "y la fila no finge un estado que no pudo escribir", f"{fila(m)}")
+        llamadas = []
+
+        def acepta():
+            llamadas.append(1)
+            return "wamid.NO_GUARDADO"
+        r, log = con_log(lambda: api._entregar_y_registrar(SIN_CONFIG, m, acepta, "prueba"))
+        revisar(r["resultado"] == "aceptado_sin_registro" and r["entregado"] is True
+                and r["registrado"] is False,
+                "se distingue como 'aceptado_sin_registro', no como exito ni como fallo", f"{r}")
+        revisar(len(llamadas) == 1,
+                "el envio se hizo UNA sola vez: no hay reenvio automatico", f"{len(llamadas)} envios")
+        revisar("aviso" not in r,
+                "sin aviso: la bandeja no dice 'No le llego al cliente' ni ofrece Reintentar")
+        revisar(fila(m)[1] != "fallido",
+                "y la fila no queda 'fallido', que tambien ofreceria reintentar", f"{fila(m)}")
+        revisar("ENTREGA INCIERTA" in log and "no reenviar" in log,
+                "el log lo dice como entrega incierta, para que nadie la reenvie a mano", log.strip())
 
         titulo("5. punta a punta: la respuesta humana desde el endpoint")
         enviar_original, config_original = whatsapp.enviar_texto, api._config_de

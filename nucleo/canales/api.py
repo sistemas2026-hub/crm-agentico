@@ -5464,10 +5464,17 @@ def whatsapp_webhook(tenant):
     # conversacion: sin separarlos, el bot contestaria a su propio "entregado".
     for estado in estados:
         crudo = estado.get("estado")
+        # Metadata solamente: estado, codigo, a que wamid corresponde y la
+        # categoria que factura Meta. Ni el telefono completo del cliente ni el
+        # texto de error de Meta van al log -- un log de produccion persiste, y
+        # antes se imprimian los dos en CADA acuse. Del destinatario quedan los
+        # ultimos 4 digitos: alcanzan para distinguir dos clientes en el log
+        # sin dejar el numero entero.
+        destinatario = str(estado.get("de") or "")
+        destinatario = f"****{destinatario[-4:]}" if destinatario else "(sin destinatario)"
         if crudo == "failed":
-            print(f"[whatsapp] no se pudo entregar a {estado.get('de')}: "
-                  f"codigo={estado.get('codigo')} {estado.get('error')} "
-                  f"| detalle={estado.get('detalle')}")
+            print(f"[whatsapp] acuse estado=failed codigo={estado.get('codigo')} "
+                  f"wamid={estado.get('wamid')} destinatario={destinatario}")
         else:
             # Los acuses buenos tambien se registran. Antes solo se imprimian
             # los fallidos, y eso obligaba a deducir del SILENCIO que un
@@ -5475,8 +5482,9 @@ def whatsapp_webhook(tenant):
             # distinguir de que el acuse nunca llego. La categoria es lo que
             # factura Meta.
             categoria = estado.get("categoria")
-            print(f"[whatsapp] {crudo} -> {estado.get('de')}"
-                  + (f" | conversacion={estado.get('conversacion')} ({categoria})"
+            print(f"[whatsapp] acuse estado={crudo} wamid={estado.get('wamid')} "
+                  f"destinatario={destinatario}"
+                  + (f" conversacion_meta={estado.get('conversacion')} categoria={categoria}"
                      if categoria else ""))
 
         # Y ahora, ademas de imprimirlo, se GUARDA contra el mensaje que lo
@@ -5859,8 +5867,8 @@ def _motivo_de_fallo(estado: dict) -> str:
     """El por que de un fallo, en palabras y con su codigo por si hay que
     buscarlo. Se guarda en messages.error_entrega, asi que lo escribe Dexter:
     un codigo desconocido deja solo el codigo, que es la pista que sirve para
-    buscar la causa. Lo que dijo Meta queda en el log (el webhook ya lo
-    imprime), no en la base -- no se persisten respuestas de APIs externas."""
+    buscar la causa. Lo que dijo Meta no se guarda ni se imprime -- no se
+    persisten respuestas de APIs externas, y un log de produccion persiste."""
     codigo = estado.get("codigo")
     return MOTIVOS_DE_FALLO.get(codigo) or f"WhatsApp no lo entregó (código {codigo})."
 
@@ -5893,31 +5901,49 @@ def _entregar_y_registrar(tenant: str, mensaje_id: str, enviar, etiqueta: str) -
     reintentarlo.
 
     Devuelve lo que el endpoint agrega a su respuesta:
-      entregado   True solo si Meta devolvio un wamid. Sin id no se puede
-                  confirmar, y confirmar es lo que decide esta clave.
-      registrado  si el resultado quedo escrito en la base. False significa que
-                  la bandeja no va a poder mostrar el estado real: no es un
-                  detalle cosmetico, y la devolucion a la IA no puede apoyarse
-                  en un envio que no quedo registrado.
-      aviso       solo si fallo: texto saneado para el operador.
+      resultado   que paso, sin ambiguedad:
+                    'aceptado'               Meta dio wamid y quedo registrado
+                    'rechazado'              Meta (o la red) lo rechazo: NO salio
+                    'sin_id'                 Meta respondio bien pero sin wamid
+                    'aceptado_sin_registro'  Meta dio wamid y la base NO lo guardo
+      entregado   True solo si Meta devolvio un wamid.
+      registrado  si el resultado quedo escrito en la base.
+      aviso       SOLO en 'rechazado': texto saneado para el operador.
+
+    'aceptado_sin_registro' es una ENTREGA INCIERTA, no un fallo. El cliente
+    probablemente ya recibio el mensaje; lo que se perdio es la constancia. Por
+    eso no lleva aviso: el aviso es lo que hace que la bandeja muestre "No le
+    llego al cliente" y ofrezca Reintentar, y reintentar mandaria el mensaje dos
+    veces. Tampoco se reenvia nada desde aca, ni ahora ni despues. La fila queda
+    como estaba ('pendiente'), que es lo honesto: no se sabe mas que eso.
+
+    Los logs llevan solo metadata: nunca el texto de una excepcion ajena ni lo
+    que respondio Meta, porque un log de produccion tambien persiste.
     """
     try:
         wamid = enviar()
     except Exception as e:
-        # En el log si va el detalle completo, incluido lo que dijo Meta: es
-        # lo que permite diagnosticar. En la base y en la respuesta, no.
-        detalle = getattr(e, "detalle_proveedor", None)
-        print(f"[{etiqueta}] no se pudo entregar {mensaje_id}: "
-              f"{type(e).__name__}: {e}" + (f" | proveedor: {detalle}" if detalle else ""))
         motivo = _motivo_de_envio(e)
-        return {"entregado": False, "aviso": motivo,
-                "registrado": persistencia.marcar_envio(tenant, mensaje_id, None, motivo)}
+        registrado = persistencia.marcar_envio(tenant, mensaje_id, None, motivo)
+        print(f"[entrega] proveedor=meta operacion={etiqueta} resultado=rechazado "
+              f"mensaje={mensaje_id} error={type(e).__name__} "
+              f"http_status={getattr(e, 'http_status', None)} "
+              f"codigo={getattr(e, 'codigo', None)} registrado={registrado}")
+        return {"resultado": "rechazado", "entregado": False, "aviso": motivo,
+                "registrado": registrado}
 
     registrado = persistencia.marcar_envio(tenant, mensaje_id, wamid)
     if not wamid:
-        print(f"[{etiqueta}] WhatsApp respondio sin id para {mensaje_id}: "
-              f"entrega sin confirmar")
-    return {"entregado": bool(wamid), "registrado": registrado}
+        resultado = "sin_id"
+    elif not registrado:
+        resultado = "aceptado_sin_registro"
+    else:
+        resultado = "aceptado"
+    if resultado != "aceptado":
+        print(f"[entrega] proveedor=meta operacion={etiqueta} resultado={resultado} "
+              f"mensaje={mensaje_id} registrado={registrado}"
+              + (" | ENTREGA INCIERTA: no reenviar" if resultado == "aceptado_sin_registro" else ""))
+    return {"resultado": resultado, "entregado": bool(wamid), "registrado": registrado}
 
 
 @app.post("/conversaciones/<id_conversacion>/resolver")
