@@ -36,6 +36,7 @@ import threading
 import time
 from datetime import datetime, timezone
 
+import requests
 from flask import Flask, jsonify, request
 
 from nucleo.canales import media, whatsapp
@@ -3906,19 +3907,13 @@ def conversaciones_enviar_plantilla(id_conversacion):
         return jsonify({"error": "Las plantillas son de WhatsApp; esta "
                                  "conversacion es de otro canal."}), 400
 
-    salida = {"ok": True, "entregado": False, "texto": texto,
-              "mensaje_id": destino["mensaje_id"]}
-    try:
-        wamid = whatsapp.enviar_plantilla_aprobada(
+    salida = {"ok": True, "texto": texto, "mensaje_id": destino["mensaje_id"]}
+    salida.update(_entregar_y_registrar(
+        tenant, destino["mensaje_id"],
+        lambda: whatsapp.enviar_plantilla_aprobada(
             config, tenant, destino["usuario_externo"], nombre, variables,
-            elegida.get("idioma") or "es")
-        persistencia.marcar_envio(tenant, destino["mensaje_id"], wamid)
-        salida["entregado"] = True
-    except Exception as e:
-        print(f"[plantillas] no se pudo entregar '{nombre}' en "
-              f"'{id_conversacion}': {type(e).__name__}: {e}")
-        salida["aviso"] = str(e)
-        persistencia.marcar_envio(tenant, destino["mensaje_id"], None, str(e))
+            elegida.get("idioma") or "es"),
+        f"plantillas '{nombre}'"))
     return jsonify(salida), 201
 
 
@@ -4081,30 +4076,17 @@ def conversaciones_responder_humano(id_conversacion):
         salida["entregado"] = None
         return jsonify(salida), 201
 
-    try:
-        config = _config_de(tenant)
-        wamid = whatsapp.enviar_texto(config, tenant,
-                                      destino["usuario_externo"], contenido)
-        # El wamid queda sellado en la fila del mensaje: es la unica clave con
-        # la que despues se casan los acuses de entrega, que llegan por el
-        # webhook sin ninguna otra referencia.
-        persistencia.marcar_envio(tenant, destino["mensaje_id"], wamid)
-        salida["entregado"] = True
-        salida["mensaje_id"] = destino["mensaje_id"]
-    except Exception as e:
-        # 201 igual: el mensaje SI quedo guardado, y el agente tiene que verlo
-        # en el hilo. Lo que no ocurrio es la entrega, y eso se dice con todas
-        # las letras en vez de devolver un error que sugiera que se perdio todo.
-        print(f"[conversaciones] no se pudo entregar la respuesta humana de "
-              f"'{id_conversacion}': {type(e).__name__}: {e}")
-        salida["aviso"] = str(e)
-        # Que el fallo quede EN LA FILA y no solo en esta respuesta. Antes el
-        # aviso aparecia una vez y se perdia: al recargar la pagina, un
-        # mensaje que nunca salio se veia igual que uno entregado, y quien
-        # atendio se iba creyendo que habia contestado.
-        persistencia.marcar_envio(tenant, destino["mensaje_id"], None, str(e))
-        salida["mensaje_id"] = destino["mensaje_id"]
-
+    # 201 aunque la entrega falle: el mensaje SI quedo guardado, y el agente
+    # tiene que verlo en el hilo. Lo que no ocurrio es la entrega, y eso se dice
+    # con todas las letras (aviso + fila en 'fallido') en vez de devolver un
+    # error que sugiera que se perdio todo. El wamid queda sellado en la fila:
+    # es la unica clave con la que despues se casan los acuses del webhook.
+    salida["mensaje_id"] = destino["mensaje_id"]
+    salida.update(_entregar_y_registrar(
+        tenant, destino["mensaje_id"],
+        lambda: whatsapp.enviar_texto(_config_de(tenant), tenant,
+                                      destino["usuario_externo"], contenido),
+        f"conversaciones '{id_conversacion}'"))
     return jsonify(salida), 201
 
 
@@ -5780,18 +5762,12 @@ def conversaciones_enviar_media(id_conversacion):
     if destino["canal"] != "whatsapp":
         salida["entregado"] = None
     else:
-        try:
-            config = _config_de(tenant)
-            wamid = whatsapp.enviar_media(
-                config, tenant, destino["usuario_externo"], tipo,
-                guardado, mime_guardado, nombre, pie)
-            persistencia.marcar_envio(tenant, destino["mensaje_id"], wamid)
-            salida["entregado"] = True
-        except Exception as e:
-            print(f"[media] no se pudo entregar el adjunto de "
-                  f"'{id_conversacion}': {type(e).__name__}: {e}")
-            salida["aviso"] = str(e)
-            persistencia.marcar_envio(tenant, destino["mensaje_id"], None, str(e))
+        salida.update(_entregar_y_registrar(
+            tenant, destino["mensaje_id"],
+            lambda: whatsapp.enviar_media(
+                _config_de(tenant), tenant, destino["usuario_externo"], tipo,
+                guardado, mime_guardado, nombre, pie),
+            f"media '{id_conversacion}'"))
 
     # Se guarda pase lo que pase con la entrega: si fallo, quien atiende tiene
     # que poder ver QUE quiso mandar para reintentarlo, no volver a buscar el
@@ -5881,14 +5857,67 @@ MOTIVOS_DE_FALLO = {
 
 def _motivo_de_fallo(estado: dict) -> str:
     """El por que de un fallo, en palabras y con su codigo por si hay que
-    buscarlo. Un codigo desconocido devuelve lo que dijo Meta antes que
-    nada: es preferible un texto pobre a perder la unica pista."""
+    buscarlo. Se guarda en messages.error_entrega, asi que lo escribe Dexter:
+    un codigo desconocido deja solo el codigo, que es la pista que sirve para
+    buscar la causa. Lo que dijo Meta queda en el log (el webhook ya lo
+    imprime), no en la base -- no se persisten respuestas de APIs externas."""
     codigo = estado.get("codigo")
-    conocido = MOTIVOS_DE_FALLO.get(codigo)
-    if conocido:
-        return conocido
-    crudo = estado.get("detalle") or estado.get("error") or "sin detalle"
-    return f"WhatsApp no lo entregó (código {codigo}): {crudo}"
+    return MOTIVOS_DE_FALLO.get(codigo) or f"WhatsApp no lo entregó (código {codigo})."
+
+
+def _motivo_de_envio(e: Exception) -> str:
+    """
+    Lo que se guarda y se le muestra al operador cuando un envio falla.
+
+    Nunca str(e) de algo que no escribio Dexter: termina en
+    messages.error_entrega y en la pantalla. ErrorWhatsApp si trae un texto
+    propio (ver nucleo/canales/whatsapp.py), y un codigo conocido se traduce
+    con la misma tabla que los acuses del webhook.
+    """
+    if isinstance(e, whatsapp.ErrorWhatsApp):
+        return MOTIVOS_DE_FALLO.get(e.codigo) or str(e)
+    if isinstance(e, requests.RequestException):
+        return "No se pudo contactar a WhatsApp. El mensaje no salió."
+    return "No se pudo enviar el mensaje por WhatsApp."
+
+
+def _entregar_y_registrar(tenant: str, mensaje_id: str, enviar, etiqueta: str) -> dict:
+    """
+    El UNICO camino por el que una respuesta humana sale por WhatsApp y deja su
+    resultado en la fila. Lo usan texto, plantilla y multimedia.
+
+    'enviar' es una funcion sin argumentos que devuelve el wamid. Se separan
+    las dos mitades a proposito: antes el registro del exito estaba DENTRO del
+    try del envio, y si algo fallaba despues de que Meta aceptara, el except
+    marcaba 'fallido' un mensaje que si habia salido -- y la pantalla ofrecia
+    reintentarlo.
+
+    Devuelve lo que el endpoint agrega a su respuesta:
+      entregado   True solo si Meta devolvio un wamid. Sin id no se puede
+                  confirmar, y confirmar es lo que decide esta clave.
+      registrado  si el resultado quedo escrito en la base. False significa que
+                  la bandeja no va a poder mostrar el estado real: no es un
+                  detalle cosmetico, y la devolucion a la IA no puede apoyarse
+                  en un envio que no quedo registrado.
+      aviso       solo si fallo: texto saneado para el operador.
+    """
+    try:
+        wamid = enviar()
+    except Exception as e:
+        # En el log si va el detalle completo, incluido lo que dijo Meta: es
+        # lo que permite diagnosticar. En la base y en la respuesta, no.
+        detalle = getattr(e, "detalle_proveedor", None)
+        print(f"[{etiqueta}] no se pudo entregar {mensaje_id}: "
+              f"{type(e).__name__}: {e}" + (f" | proveedor: {detalle}" if detalle else ""))
+        motivo = _motivo_de_envio(e)
+        return {"entregado": False, "aviso": motivo,
+                "registrado": persistencia.marcar_envio(tenant, mensaje_id, None, motivo)}
+
+    registrado = persistencia.marcar_envio(tenant, mensaje_id, wamid)
+    if not wamid:
+        print(f"[{etiqueta}] WhatsApp respondio sin id para {mensaje_id}: "
+              f"entrega sin confirmar")
+    return {"entregado": bool(wamid), "registrado": registrado}
 
 
 @app.post("/conversaciones/<id_conversacion>/resolver")

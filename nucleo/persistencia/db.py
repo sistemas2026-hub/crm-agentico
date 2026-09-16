@@ -1197,8 +1197,14 @@ def agregar_nota_interna(tenant: str, conversation_id: str, contenido: str,
         return fila["id"] if fila else None
 
 
+# Lo que se guarda cuando WhatsApp respondio bien pero sin decir con que id:
+# no se puede confirmar la entrega ni casar un acuse, y tampoco es un fallo.
+SIN_IDENTIFICADOR = ("WhatsApp aceptó la petición pero no devolvió el id del "
+                     "mensaje: no se puede confirmar la entrega.")
+
+
 def marcar_envio(tenant: str, mensaje_id: str, wamid: str | None,
-                 error: str | None = None) -> None:
+                 error: str | None = None) -> bool:
     """
     Cierra el circuito del envio: o salio (y quedo su wamid, con el que
     despues se casan los acuses), o no salio y se guarda por que.
@@ -1207,22 +1213,50 @@ def marcar_envio(tenant: str, mensaje_id: str, wamid: str | None,
     orden --guardar primero-- existe para que un fallo de entrega nunca borre
     lo que la persona escribio. Este es el segundo paso de ese mismo criterio.
 
-    Nunca rompe: si esto falla, el mensaje ya se guardo y ya se entrego. Lo
-    unico que se pierde es poder mostrar el estado.
+    Devuelve True solo si la fila quedo escrita. Nunca lanza, pero TAMPOCO
+    oculta: quien llama recibe False y decide. Medido el 16/09/2026 en
+    produccion: esta funcion fallaba en TODAS las llamadas desde que existe
+    (el 'case when %s is null' no tiene tipo para psycopg 3 y PostgreSQL lo
+    rechaza con IndeterminateDatatype), se tragaba el error, y ningun mensaje
+    humano paso nunca de 'pendiente'. Un exito que no quedo guardado no es un
+    exito: la devolucion a la IA (T6 del contrato del relevo) depende de este
+    valor.
+
+    El estado lo decide Python y no el SQL, para no depender de que el servidor
+    infiera el tipo de un parametro suelto:
+      - con error ............. 'fallido'  (la pantalla ofrece reintentar)
+      - con wamid ............. 'enviado'  (los acuses lo pueden alcanzar)
+      - sin error y sin wamid . 'pendiente' con SIN_IDENTIFICADOR. NO 'fallido':
+        Meta no lo rechazo y pudo haberlo entregado, y 'fallido' ofreceria
+        reintentar -- el cliente recibiria el mensaje dos veces.
+
+    'error' tiene que venir ya saneado por quien llama: se guarda y se muestra
+    tal cual, y nunca puede ser la respuesta cruda de una API externa.
     """
+    if error is not None:
+        estado = "fallido"
+    elif wamid:
+        estado = "enviado"
+    else:
+        estado, error = "pendiente", SIN_IDENTIFICADOR
     try:
         with sesion(tenant) as (cur, org):
             cur.execute(
                 """update asistente.messages
-                   set wamid = coalesce(%s, wamid),
-                       estado_entrega = case when %s is null then 'enviado'
-                                             else 'fallido' end,
-                       error_entrega = %s
+                   set wamid = coalesce(%s::text, wamid),
+                       estado_entrega = %s::text,
+                       error_entrega = %s::text
                    where organization_id = %s and id = %s""",
-                (wamid, error, error, org, mensaje_id))
+                (wamid, estado, error, org, mensaje_id))
+            escrita = cur.rowcount == 1
     except Exception as e:
-        print(f"[entrega] no se pudo anotar el envio de {mensaje_id}: "
-              f"{type(e).__name__}: {e}")
+        print(f"[entrega] NO se pudo anotar el envio de {mensaje_id} "
+              f"({estado}): {type(e).__name__}: {e}")
+        return False
+    if not escrita:
+        print(f"[entrega] NO se anoto el envio de {mensaje_id} ({estado}): "
+              f"la fila no existe o no es de esta empresa")
+    return escrita
 
 
 # El orden en que puede avanzar un mensaje. Los acuses de Meta NO llegan

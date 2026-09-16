@@ -114,7 +114,46 @@ TIPOS_CON_ARCHIVO = ("image", "audio", "video", "document", "sticker", "voice")
 
 
 class ErrorWhatsApp(Exception):
-    """Fallo al hablar con la Cloud API, o configuracion incompleta."""
+    """
+    Fallo al hablar con la Cloud API, o configuracion incompleta.
+
+    El TEXTO del error lo escribe siempre Dexter. Lo que dijo Meta viaja
+    aparte, en 'detalle_proveedor', y solo sirve para el log: el texto termina
+    en la pantalla del operador y en messages.error_entrega, y ninguno de los
+    dos puede llevar lo que responde una API externa. Antes se armaba con
+    'err.message or r.text[:200]', y cuando Meta no traia mensaje se guardaban
+    hasta 200 caracteres del cuerpo crudo.
+
+    'codigo' es el codigo de error de Meta (si lo hubo) y 'http_status' el de
+    la respuesta: con eso se busca el motivo sin guardar la respuesta.
+    """
+
+    def __init__(self, mensaje: str, codigo: int | None = None,
+                 http_status: int | None = None,
+                 detalle_proveedor: str | None = None):
+        super().__init__(mensaje)
+        self.codigo = codigo
+        self.http_status = http_status
+        self.detalle_proveedor = detalle_proveedor
+
+
+def _rechazo(r, que: str) -> ErrorWhatsApp:
+    """
+    El error de una respuesta >= 400, con el texto escrito por Dexter.
+
+    El codigo y el estado HTTP van en el texto porque son lo que permite
+    buscar la causa; el mensaje de Meta y el cuerpo crudo van solo al log.
+    """
+    try:
+        err = (r.json() or {}).get("error") or {}
+    except ValueError:
+        err = {}
+    codigo = err.get("code")
+    referencia = f"código {codigo}" if codigo is not None else f"HTTP {r.status_code}"
+    return ErrorWhatsApp(
+        f"WhatsApp rechazó {que} ({referencia}).",
+        codigo=codigo, http_status=r.status_code,
+        detalle_proveedor=err.get("message") or r.text[:200])
 
 
 # =============================================================================
@@ -368,18 +407,15 @@ def _post(config, tenant: str, recurso: str, payload: dict) -> dict:
         json=payload, timeout=TIMEOUT_SEGUNDOS)
 
     if r.status_code >= 400:
-        try:
-            err = (r.json() or {}).get("error") or {}
-        except ValueError:
-            err = {}
-        codigo = err.get("code")
-        detalle = err.get("message") or r.text[:200]
-        if codigo == CODIGO_FUERA_DE_VENTANA:
+        error = _rechazo(r, "el envío")
+        if error.codigo == CODIGO_FUERA_DE_VENTANA:
             raise ErrorWhatsApp(
                 "Pasaron mas de 24 horas desde el ultimo mensaje del cliente, "
                 "asi que WhatsApp ya no acepta texto libre: hay que usar una "
-                "plantilla aprobada.")
-        raise ErrorWhatsApp(f"WhatsApp rechazo el envio ({codigo}): {detalle}")
+                "plantilla aprobada.",
+                codigo=error.codigo, http_status=error.http_status,
+                detalle_proveedor=error.detalle_proveedor)
+        raise error
 
     return r.json()
 
@@ -531,13 +567,7 @@ def subir_media(config, tenant: str, contenido: bytes, mime: str,
         timeout=TIMEOUT_SEGUNDOS * 3)  # una subida no es una peticion de texto
 
     if r.status_code >= 400:
-        try:
-            err = (r.json() or {}).get("error") or {}
-        except ValueError:
-            err = {}
-        raise ErrorWhatsApp(
-            f"WhatsApp rechazo la subida ({err.get('code')}): "
-            f"{err.get('message') or r.text[:200]}")
+        raise _rechazo(r, "la subida del archivo")
 
     media_id = (r.json() or {}).get("id")
     if not media_id:
