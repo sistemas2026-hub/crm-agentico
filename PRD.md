@@ -569,40 +569,68 @@ Tres defectos salieron de esa corrida, ninguno visible en lo que el asistente co
 
 ---
 
-### 8.11 Bandeja de conversaciones — qué le falta para ser un inbox de soporte (septiembre 2026)
+### 8.11 Bandeja de conversaciones — el relevo entre la IA y una persona (reescrita el 16/09/2026)
 
-Comparación contra Intercom, Zendesk, Front y respond.io. **No se copia una bandeja entera**: se toman las funciones de operación diaria que faltan, y se descartan las que resuelven problemas de escala que esta operación todavía no tiene.
+**Por qué se reescribió.** La versión anterior era una tabla de 18 funciones copiadas de Intercom, Zendesk, Front y respond.io, y tenía dos errores de método:
 
-Lo que ya tiene y esos productos no traen tan integrado: **el diagnóstico de lo que hizo realmente la IA** — qué ejecutó, qué frenó el código y qué falló un tercero (§8.2, `es_bloqueo`).
+1. **Esos productos están hechos para que una persona atienda desde el primer mensaje**, así que lo que optimizan es escribir rápido (citar, macros, atajos). Aquí la IA atiende primero y la persona entra en el relevo: recibe un caso, entiende qué hizo la IA, actúa, y lo devuelve o lo cierra. Las etapas que no existen en un inbox genérico —devolver a la IA, intervenir sin escalada, aprobar lo que la IA propone— no estaban en la lista, y "citar un mensaje" figuraba como lo siguiente mientras el relevo estaba roto.
+2. **Frenaba funciones con datos de Rapilink** (cuántos operadores tiene, ~5 conversaciones por día). Eso varía por empresa —una trabaja con 1 operador, otra con 10— y la bandeja es la misma para todas. Es el mismo error que la regla multi-tenant prohíbe para la configuración, aplicado a la priorización.
 
-| # | Funcionalidad | Estado |
-|---|---------------|--------|
-| 1 | Responder citando un mensaje (`context.message_id` de Meta) | Falta — **es lo siguiente** |
-| 2 | Estados Enviado/Entregado/Leído/Error + reintentar | ✅ Hecho (06/09/2026) |
-| 3 | Borradores persistentes (respuesta y nota, por separado) | Falta |
-| 4 | "Otro operador está escribiendo" | Falta — **depende de cuántas personas usan la bandeja** |
-| 5 | Respuestas rápidas / macros (mensaje + etiqueta + derivar + posponer) | Falta — **bloqueado a propósito**, ver abajo |
-| 6 | Ventana de WhatsApp de 24 h visible + selector de plantillas | ✅ Hecho (08/09/2026, §8.12) |
-| 7 | Posponer / snooze, con reapertura si el cliente responde | Falta |
-| 8 | @Menciones en notas internas (colaborador ≠ responsable) | Falta — depende de #4 |
-| 9 | Transcripción de audios | Falta — alto valor para un ISP, decidir proveedor y costo por minuto |
-| 10 | Galería de adjuntos del caso | Falta |
-| 11 | Buscar **dentro de** los mensajes | Falta — hoy el buscador filtra la lista ya cargada |
-| 12 | Acciones masivas | Falta — problema de escala |
-| 13 | SLA de primera respuesta / siguiente respuesta | Falta — problema de escala |
-| 14 | Atajos de teclado / Command-K | Falta — problema de escala |
-| 15 | Traducir mensajes | Falta |
-| 16 | Enlace directo a un mensaje | Falta |
-| 17 | Mensajes interactivos de WhatsApp (botones, listas) | Falta — sirve al asistente más que al operador |
-| 18 | Llamadas desde el inbox | Falta — posterior |
-| — | **"Responder con contexto técnico"**: borrador para el humano armado desde la traza | Falta — es lo único de esta lista que ningún inbox genérico puede tener de fábrica |
+**Fuente de verdad del diseño: [SPEC/CONTRATO_RELEVO_IA_HUMANO.md](SPEC/CONTRATO_RELEVO_IA_HUMANO.md).** Esta sección resume el porqué y el orden; el modelo de estados, las transiciones, las invariantes, los 16 defectos con su evidencia y los tests viven en el contrato. Si difieren, manda el contrato.
 
-**Dos cosas que gobiernan el orden, y no son la madurez del producto:**
+**Cómo se llegó.** Dos revisiones independientes del código coincidieron en el hueco principal (no se puede devolver a la IA desde la bandeja). Después, un auditor externo (IA de OpenAI, sin acceso al repo) marcó que D1–D7 no eran siete problemas sino síntomas de una carencia: **no existía un modelo explícito del relevo IA ↔ humano**, solo cinco booleanos con combinaciones ambiguas. El contrato se escribió sobre un mapeo del código en `92ebe78` y pasó una ronda de auditoría (arquitectura base aprobada; 14 correcciones incorporadas en la versión 2).
 
-- **El volumen real.** Medido el 08/09/2026 sobre 21 días: **5 días con tráfico, ~5 conversaciones por día**, con un solo día de 106 turnos. Acciones masivas sobre 29 casos, SLA, carga equilibrada y atajos para "cientos de chats" resuelven un problema que esta operación no tiene. Construirlos ahora es mantenerlos durante todo el período en que no hacen nada.
-- **Macros escriben `tenant_config`.** Por la regla multi-tenant (§7), las macros de una empresa son configuración persistida, no código. Mientras corra la medición de razonamiento ON vs OFF, cada guardado de config crea una versión nueva y parte la comparación en un tercer grupo. Ver la memoria de la ventana de medición.
+**Qué define el contrato, en una línea cada cosa:**
+- **Control** (`ia`/`humano`) y **asignación** se guardan en base; la memoria del proceso nunca decide la pausa.
+- **A quién le toca actuar** se calcula con reglas en orden sobre hechos guardados (control, asignación, origen de los mensajes, aprobaciones, pendiente interno), nunca se guarda.
+- **Origen y autor** de cada mensaje van aparte del `rol` que usa el modelo, y el `rol` nunca se reemplaza.
+- **Eventos del relevo** en una tabla donde solo se agregan filas, con esquema versionado y sin datos crudos.
+- **Efectos externos** (caso CRM, ticket) en una cola con reintento: un fallo de integración no le devuelve la conversación a la IA.
+- **Devolver a la IA** solo se completa cuando el mensaje que la acompaña fue aceptado por el canal.
+- **Acciones aprobables** con revalidación declarada por herramienta y vigencia; si no se puede comprobar, no se ejecuta.
 
-**Lo que depende de un dato que todavía no se tiene:** cuántas personas trabajan la bandeja. Si hoy es una sola, el bloque entero de colaboración (#4, #8, borrador compartido, asignación) no resuelve nada.
+**Defectos encontrados (detalle y evidencia en el contrato, §13):** D1–D7 de la primera revisión, más D8 (tras un reinicio la IA toma como propio lo que escribió una persona), D9–D10 (la pausa se pone o se levanta solo en memoria), D11 (aprobar una acción: doble ejecución posible, quién aprobó sale del request, sin revalidación), D12 (notas internas en el insumo de resúmenes), D13 (el cierre por inactividad cierra conversaciones que esperan a una persona), D14–D16. **D7 estaba mal descrito en la versión anterior de esta sección:** las acciones de la IA que esperan aprobación no se aprueban en `/tickets/approvals` (ese es el cierre de casos del CRM); no aparecen en **ninguna** pantalla.
+
+**Verificado después:** la lista de conversaciones se pide entera cada 8 s y la consulta no tiene `LIMIT` (`+layout.svelte:65-67`, `db.py:469-481`). **De otro alcance:** cada instalación del frontend atiende un solo tenant (`PRIVATE_ASISTENTE_TENANT`).
+
+**Ya hecho:** estados de entrega + reintentar (06/09/2026); ventana de 24 h + plantillas (08/09/2026, §8.12); buscador de documentación dentro de la conversación (`/api/sugerencias`; copia, no inserta).
+
+#### Orden de construcción (acordado con el auditor, 16/09/2026)
+
+| # | Trabajo | Por qué en esta posición |
+|---|---------|--------------------------|
+| 0 | **Contrato del relevo + invariantes** | Sin modelo, cada arreglo parcha booleanos y rompe el anterior |
+| 1 | **D3 falla cerrado** (UI + backend) | Hoy se contaminan historiales con mensajes que el cliente no escribió |
+| 2 | **Origen y autor de mensajes + D8** | Integridad del historial que reconstruye la IA tras cada deploy |
+| 3 | **D1: devolver a la IA** (en fases, con entrega aceptada) | Cierra el ciclo humano → IA |
+| 4 | **D4 + D5: asignación y cola** | La cola deja de mentir |
+| 5 | **Intervenir completo** | Tomar el control sin escalada |
+| 6 | **D7: aprobación en contexto** + revalidación | La intervención humana propia del producto |
+| 7 | **Desenlace + cierre + sincronización del ticket** | Cierre operacional verdadero y dato para aprender |
+| 8 | **Paginación y búsqueda en servidor** | Deuda de escala; va después de los problemas de corrección |
+| 9 | **Ficha de handoff con fuente y frescura** | Entender el caso en segundos (extiende la ficha que ya arma el código) |
+| 10 | **Transcripción de audio** | Hoy la IA recibe `"[El cliente envio un audio]"`; es entrada de negocio en WhatsApp |
+| 11 | **Borrador asistido** | Depende de 9 |
+| 12 | **Comodidades** (citar, borradores, @menciones, macros, atajos) | Las de equipos grandes, diseñadas para no estorbar a quien trabaja solo |
+
+Fuera de la bandeja, anotadas por el auditor como de alto valor: **correlación de averías** (varios clientes de la misma PON escalando a la vez → posible incidencia común; verificar antes qué expone SmartOLT) y **datos con frescura** en toda ficha técnica (fuente + hora de cada medición).
+
+**Construcción en fases B1–B7** (contrato §15), cada una auditada antes de integrarse; IA de Bandeja construye en `feature/bandeja-relevo` y **solo IA de Plataforma integra y despliega**. B1 D3 falla cerrado · B2 origen y autor de mensajes · B3 control, asignación y eventos · B4 sincronizaciones externas y reconciliador · B5 acciones y revalidación · B6 frontend del relevo y desenlaces · B7 lectores del legado y backfill.
+
+**Gates antes de desplegar** (contrato §16): G1 el motor exige `MOTOR_SERVICE_TOKEN` · G2 reloj activo (medido por Plataforma: sí, ciclo ~60 min) · G3 acciones pendientes contadas · G4 evidencia del backfill · G5 casos dorados · G6 preflight de DDL y backfill (sin sesiones retenidas, volumen medido) · G7 reconciliador con cadencia propia de 1–5 min. Restricción transversal: **ninguna transacción de base abierta mientras se espera una operación externa** (`idle_in_transaction_session_timeout = 60s` en producción).
+
+**Dos decisiones de la auditoría que no hay que redescubrir:** (1) si el evaluador decidió que hace falta una persona, un fallo del CRM o de WispHub **no** le devuelve la conversación a la IA; (2) la medición de razonamiento ON/OFF **nunca** justifica quitar una aprobación humana: la config nueva de revalidación se activa cuando la medición cierre.
+
+#### Reglas que gobiernan este orden
+
+- **Ninguna métrica de una empresa decide si algo se construye.** Puede ordenar prioridades; no puede descartar una función que otra empresa necesita.
+- **Las macros siguen bloqueadas por método, no por tamaño:** se guardan en `tenant_config`, y cada guardado parte la medición de razonamiento ON vs OFF en un grupo nuevo. Se destraban cuando termine esa medición.
+
+#### Descartado, con motivo
+
+- **Traducir mensajes:** los clientes de un ISP local escriben en el idioma del ISP. Reabrir si entra una empresa con clientela multilingüe.
+- **Llamadas desde la bandeja, enlace directo a un mensaje, galería de adjuntos:** no resuelven ninguna etapa del relevo.
+- **Mensajes interactivos de WhatsApp (botones, listas):** no son de la bandeja; son del roadmap del asistente.
 
 ---
 
