@@ -1140,6 +1140,18 @@
       contestar es justo lo que alguien necesita hacer en ese momento. */
   let bloqueadoPorVentana = $derived(ventanaAbierta === false && modo !== 'nota');
 
+  /* Hilo REAL de WhatsApp que atiende la IA: acá no se puede "continuar la
+      conversación". Ese camino le hablaba al asistente como si fuera el
+      cliente -- /chat nunca envía a Meta--, así que dejaba guardado un mensaje
+      que el cliente no escribió y le movía la ventana de 24 h. El motor ya lo
+      rechaza (403); esto evita ofrecer un gesto que no puede funcionar.
+      Tomar el control para responder como persona es "Intervenir", que llega
+      en una fase posterior (SPEC/CONTRATO_RELEVO_IA_HUMANO.md, T8). La nota
+      interna y los adjuntos siguen: no pasan por el asistente. */
+  let bloqueadoPorIA = $derived(
+    !escalada && conversacion.canal === 'whatsapp' && modo !== 'nota'
+  );
+
   function comoDuracion(/** @type {number} */ seg) {
     const h = Math.floor(seg / 3600);
     const m = Math.floor((seg % 3600) / 60);
@@ -1276,6 +1288,12 @@
     // peor que un envío fallido: escribiría un mensaje de cliente que el
     // cliente no mandó, y la ventana pasaría a verse abierta por un mensaje
     // nuestro. Justo lo que este cálculo existe para no hacer.
+    //
+    // (Corrección 16/09/2026: esa respuesta NO sale por WhatsApp -- /chat no
+    // envía a ningún medio. El daño era igual: el mensaje falso del cliente
+    // quedaba guardado. Hoy ese camino está cerrado para hilos reales; ver
+    // bloqueadoPorIA.)
+    if (bloqueadoPorIA) return;
     if (ventanaAbierta === false) {
       error =
         'La ventana de 24 h de WhatsApp se cerró mientras escribías. Tu texto ' +
@@ -1912,19 +1930,21 @@
 
         <textarea
           class="compositor-texto"
-          class:texto-inerte={bloqueadoPorVentana}
+          class:texto-inerte={bloqueadoPorVentana || bloqueadoPorIA}
           bind:this={campoTexto}
           bind:value={entrada}
           onpaste={alPegar}
           rows="2"
-          placeholder={bloqueadoPorVentana
+          placeholder={bloqueadoPorIA
+            ? 'La IA está atendiendo — dejá una nota interna para el equipo'
+            : bloqueadoPorVentana
             ? 'La ventana de WhatsApp está cerrada — usá una plantilla'
             : modo === 'nota'
               ? 'Nota para el equipo — el cliente no la ve…'
               : escalada
                 ? 'Escribí tu respuesta…'
                 : 'Continuar la conversación…'}
-          disabled={enviando || bloqueadoPorVentana}
+          disabled={enviando || bloqueadoPorVentana || bloqueadoPorIA}
           onkeydown={(e) => {
             // Enter envia, Shift+Enter hace salto de linea: es lo que la mano
             // ya espera de un chat.
@@ -2006,12 +2026,14 @@
                    habla ni que el asistente no interviene. -->
               <strong class="nota-directo">Se envía directo al cliente</strong>
               <span class="v2-muted">· no pasa por el asistente</span>
+            {:else if bloqueadoPorIA}
+              La atiende la IA · para escribirle al cliente hace falta tomar el control
             {:else}
               Responde el asistente
             {/if}
             <!-- Con la ventana cerrada, Enter no manda nada. Dejar la pista
                  puesta seria invitar al gesto que no funciona. -->
-            {#if !bloqueadoPorVentana}
+            {#if !bloqueadoPorVentana && !bloqueadoPorIA}
               · <kbd class="v2-kbd">Enter</kbd> envía
             {/if}
           </span>
@@ -2048,7 +2070,7 @@
             <button
               class="v2-btn v2-btn-primary"
               type="submit"
-              disabled={enviando || !entrada.trim()}
+              disabled={enviando || bloqueadoPorIA || !entrada.trim()}
               aria-busy={enviando}
             >
               <Send size={14} />{enviando ? 'Enviando…' : 'Enviar'}

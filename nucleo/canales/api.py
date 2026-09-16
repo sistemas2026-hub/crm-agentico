@@ -40,6 +40,7 @@ from datetime import datetime, timezone
 import requests
 from flask import Flask, jsonify, request
 
+from nucleo.canales import canal as canales
 from nucleo.canales import media, whatsapp
 from nucleo.conectores import catalogo as conectores
 from nucleo.config import editor, fuente
@@ -75,7 +76,7 @@ app = Flask(__name__)
 
 _configs: dict = {}    # tenant -> TenantConfig, cacheado por proceso
 _servidas: dict = {}   # tenant -> (config_version servida, monotonic de la ultima comprobacion)
-_sesiones: dict = {}   # (tenant, id_sesion) -> {"sesion": Sesion, "historial": [...]}
+_sesiones: dict = {}   # canales.clave_sesion(tenant, canal, id_sesion) -> {"sesion": Sesion, "historial": [...]}
 
 # Cuantos mensajes se vuelven a poner en contexto cuando este proceso no tiene
 # la conversacion en memoria (un reinicio, un despliegue). Ver
@@ -724,7 +725,14 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     si el rol o el mensaje no son atendibles -- quien llama decide si eso es un
     400 (HTTP) o una linea de registro (webhook, donde no hay a quien
     devolverle un error).
+
+    'canal' se normaliza ANTES de cualquier lectura o escritura: un canal
+    desconocido levanta canales.CanalInvalido sin haber tocado la base ni la
+    memoria. /chat ya lo valida antes de llamar; esto cubre a cualquier otro
+    llamador.
     """
+    clave = canales.clave_sesion(tenant, canal, id_sesion)
+    canal = clave[1]
     # Antes de nada: si la conversacion anterior de esta persona quedo abierta
     # pero ya paso el plazo de inactividad, se la resume y se la cierra. Asi el
     # turno que sigue empieza limpio en vez de pegarse a un hilo de dias --
@@ -749,14 +757,13 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 # La sesion en memoria tambien se descarta: si no, el turno
                 # nuevo arrancaria con el historial viejo igual y el cierre no
                 # habria servido de nada.
-                _sesiones.pop((tenant, id_sesion), None)
+                _sesiones.pop(clave, None)
                 print(f"[conversacion] {id_sesion}: cerrada por {horas}h sin "
                       f"actividad, resumida en {len(texto)} caracteres")
         except Exception as e:
             print(f"[conversacion] no se pudo cerrar por inactividad: "
                   f"{type(e).__name__}: {e}")
 
-    clave = (tenant, id_sesion)
     nueva = clave not in _sesiones
     if nueva:
         _sesiones[clave] = _sesion_nueva(tenant, id_sesion, canal, horas)
@@ -2052,12 +2059,36 @@ def chat():
                   sin elegir a cual agente le habla.
     """
     cuerpo = request.get_json(force=True, silent=True) or {}
+
+    # EL CANAL SE DECIDE PRIMERO, antes de leer config, crear sesion o
+    # escribir nada. /chat no envia a ningun medio externo: un turno con canal
+    # real que entra por aca guarda como mensaje del cliente algo que el
+    # cliente no escribio, y le mueve la ventana de 24 h y el cierre por plazo
+    # (SPEC/CONTRATO_RELEVO_IA_HUMANO.md, D3 y X1). El cliente real solo entra
+    # por su webhook firmado. Rechazar despues de haber tocado algo no seria
+    # fallar cerrado.
+    #
+    # Sin 'canal' sigue valiendo "api", como siempre (el asistente interno y
+    # el smoke de DESPLIEGUE.md no lo mandan). Presente pero desconocido o
+    # vacio NO cae en ese default: se rechaza.
+    canal_pedido = cuerpo["canal"] if cuerpo.get("canal") is not None else canales.API
+    try:
+        canal = canales.normalizar_canal(canal_pedido)
+    except canales.CanalInvalido:
+        return jsonify({"error": "Canal desconocido."}), 400
+    if canal in canales.REALES:
+        # Sin identificador ni texto en el registro: son datos del cliente.
+        print(f"[chat] rechazado un turno con canal real '{canal}' "
+              f"(tenant={cuerpo.get('tenant')!r}, desde={request.remote_addr})")
+        return jsonify({"error": f"El canal '{canal}' no se atiende por /chat: "
+                                 "sus mensajes solo entran por el webhook del "
+                                 "proveedor."}), 403
+
     tenant = cuerpo.get("tenant")
     rol = cuerpo.get("rol")
     profile_id = cuerpo.get("profile_id")
     id_sesion = cuerpo.get("identificador_sesion")
     mensaje = cuerpo.get("mensaje")
-    canal = cuerpo.get("canal", "api")
     # Lo manda la plataforma: el motor no lee las tablas del CRM, asi que
     # quien sabe el nombre de quien inicio sesion es la pantalla.
     nombre_colaborador = (cuerpo.get("nombre_colaborador") or "").strip()
@@ -4039,7 +4070,8 @@ def conversaciones_responder_humano(id_conversacion):
     # permite al modelo NO confundirlo con algo que dijo el. Y como la
     # transcripcion del caso sale de este mismo historial, en el ticket
     # tambien queda claro quien escribio cada cosa.
-    clave_sesion = (tenant, destino["usuario_externo"])
+    clave_sesion = canales.clave_sesion_de_fila(
+        tenant, destino.get("canal"), destino["usuario_externo"])
     if clave_sesion in _sesiones:
         quien = autor or "Compañero del equipo"
         _sesiones[clave_sesion]["historial"].append(
@@ -5992,9 +6024,10 @@ def conversaciones_resolver(id_conversacion):
     if usuario is None:
         return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
 
-    # La clave de _sesiones es (tenant, id_sesion), y el id de sesion es el
-    # usuario externo del canal -- el mismo que devuelve resolver_conversacion.
-    _sesiones.pop((tenant, usuario), None)
+    # La clave de _sesiones lleva el canal: sin el, resolver un hilo del
+    # simulador descartaba tambien la sesion real del mismo telefono.
+    _sesiones.pop(canales.clave_sesion_de_fila(
+        tenant, usuario["canal"], usuario["usuario_externo"]), None)
     return jsonify({"resuelta": True})
 
 
@@ -6025,7 +6058,8 @@ def conversaciones_borrar(id_conversacion):
     if not borrada:
         return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
 
-    _sesiones.pop((tenant, borrada["usuario_externo"]), None)
+    _sesiones.pop(canales.clave_sesion_de_fila(
+        tenant, borrada.get("canal"), borrada["usuario_externo"]), None)
     return "", 204
 
 

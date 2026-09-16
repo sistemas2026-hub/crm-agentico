@@ -1816,7 +1816,7 @@ def marcar_atendida(tenant: str, conversation_id: str, por: str | None) -> bool:
 
 
 def resolver_conversacion(tenant: str, conversation_id: str,
-                          por: str | None) -> str | None:
+                          por: str | None) -> dict | None:
     """
     Da el caso por TERMINADO: lo cierra y lo saca de la bandeja.
 
@@ -1833,9 +1833,11 @@ def resolver_conversacion(tenant: str, conversation_id: str,
     problemas distintos, y el modelo citaba mediciones de horas antes como
     si fueran de ahora).
 
-    Devuelve el 'usuario_externo' de la conversacion cerrada -- quien llama
-    lo necesita para descartar tambien la sesion viva en memoria, que si no
-    seguiria recordando el hilo aunque la base ya no. None si no existe.
+    Devuelve {'usuario_externo', 'canal'} de la conversacion cerrada -- quien
+    llama los necesita para descartar tambien la sesion viva en memoria, que
+    si no seguiria recordando el hilo aunque la base ya no. El canal va porque
+    la clave de esa sesion lo incluye (nucleo/canales/canal.py). None si no
+    existe.
     """
     with sesion(tenant) as (cur, org):
         cur.execute(
@@ -1844,10 +1846,10 @@ def resolver_conversacion(tenant: str, conversation_id: str,
                    atendida_por = coalesce(%s, atendida_por),
                    actualizado_en = now()
                where organization_id = %s and id = %s
-               returning usuario_externo""",
+               returning usuario_externo, canal""",
             (por, org, conversation_id))
         fila = cur.fetchone()
-        return fila["usuario_externo"] if fila else None
+        return dict(fila) if fila else None
 
 
 def borrar_conversacion(tenant: str, conversation_id: str) -> dict | None:
