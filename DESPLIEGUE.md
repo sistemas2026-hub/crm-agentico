@@ -761,3 +761,9 @@ docker logs <contenedor-backend> --tail 20
 **El backend no arranca y habla del `SECRET_KEY`** — Con `ENV_TYPE=prod`, Django rechaza cualquier clave que empiece por `django-insecure` y exige mínimo 32 bytes, porque esa clave firma todos los JWT. Es deliberado: falla el despliegue en vez de firmar tokens débiles.
 
 **`Permission denied ... 403` al hacer push** — Credenciales de GitHub, no del repositorio. Suele aparecer después de tocar la instalación de la GitHub App de Dokploy.
+
+**Una acción `default` de formulario llega a una página que no la implementa — cerrado como no reproducible, sin cambio de código.** La petición tenía la firma esperada de una acción SvelteKit (`x-sveltekit-action`), por lo que es consistente con una interacción del cliente de la aplicación y no con un POST HTTP genérico — aunque esa cabecera se puede fabricar, y no hay indicios de que haya pasado.
+
+Sobre el commit `67f5eab` no se encontró ningún camino estático que envíe una acción `default` a una página que no la implemente. El incidente no es reproducible con el código desplegado y no hay una corrección concreta que aplicar. La hipótesis más consistente con la evidencia disponible es una pestaña abierta con una versión anterior del frontend, pero no puede demostrarse retrospectivamente al no existir access log con la ruta.
+
+Si reaparece: registrar ruta, método, timestamp y status en el access log de Traefik permite identificar el origen de inmediato. Sin la URL de la petición, esto se vuelve a quedar en hipótesis.
