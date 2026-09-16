@@ -578,7 +578,7 @@ Tres defectos salieron de esa corrida, ninguno visible en lo que el asistente co
 
 **Fuente de verdad del diseño: [SPEC/CONTRATO_RELEVO_IA_HUMANO.md](SPEC/CONTRATO_RELEVO_IA_HUMANO.md).** Esta sección resume el porqué y el orden; el modelo de estados, las transiciones, las invariantes, los 16 defectos con su evidencia y los tests viven en el contrato. Si difieren, manda el contrato.
 
-**Cómo se llegó.** Dos revisiones independientes del código coincidieron en el hueco principal (no se puede devolver a la IA desde la bandeja). Después, un auditor externo (IA de OpenAI, sin acceso al repo) marcó que D1–D7 no eran siete problemas sino síntomas de una carencia: **no existía un modelo explícito del relevo IA ↔ humano**, solo cinco booleanos con combinaciones ambiguas. El contrato se escribió sobre un mapeo del código en `92ebe78` y pasó una ronda de auditoría (arquitectura base aprobada; 14 correcciones incorporadas en la versión 2).
+**Cómo se llegó.** Dos revisiones independientes del código coincidieron en el hueco principal (no se puede devolver a la IA desde la bandeja). Después, una auditoría externa (sin acceso al repo) marcó que D1–D7 no eran siete problemas sino síntomas de una carencia: **no existía un modelo explícito del relevo IA ↔ humano**, solo cinco booleanos con combinaciones ambiguas. El contrato se escribió sobre un mapeo del código en `92ebe78` y pasó una ronda de auditoría (arquitectura base aprobada; 14 correcciones incorporadas en la versión 2).
 
 **Qué define el contrato, en una línea cada cosa:**
 - **Control** (`ia`/`humano`) y **asignación** se guardan en base; la memoria del proceso nunca decide la pausa.
@@ -595,7 +595,7 @@ Tres defectos salieron de esa corrida, ninguno visible en lo que el asistente co
 
 **Ya hecho:** estados de entrega + reintentar (06/09/2026); ventana de 24 h + plantillas (08/09/2026, §8.12); buscador de documentación dentro de la conversación (`/api/sugerencias`; copia, no inserta).
 
-#### Orden de construcción (acordado con el auditor, 16/09/2026)
+#### Orden de construcción (acordado en auditoría, 16/09/2026)
 
 | # | Trabajo | Por qué en esta posición |
 |---|---------|--------------------------|
@@ -613,11 +613,11 @@ Tres defectos salieron de esa corrida, ninguno visible en lo que el asistente co
 | 11 | **Borrador asistido** | Depende de 9 |
 | 12 | **Comodidades** (citar, borradores, @menciones, macros, atajos) | Las de equipos grandes, diseñadas para no estorbar a quien trabaja solo |
 
-Fuera de la bandeja, anotadas por el auditor como de alto valor: **correlación de averías** (varios clientes de la misma PON escalando a la vez → posible incidencia común; verificar antes qué expone SmartOLT) y **datos con frescura** en toda ficha técnica (fuente + hora de cada medición).
+Fuera de la bandeja, anotadas en la auditoría como de alto valor: **correlación de averías** (varios clientes de la misma PON escalando a la vez → posible incidencia común; verificar antes qué expone SmartOLT) y **datos con frescura** en toda ficha técnica (fuente + hora de cada medición).
 
-**Construcción en fases B1–B7** (contrato §15), cada una auditada antes de integrarse; IA de Bandeja construye en `feature/bandeja-relevo` y **solo IA de Plataforma integra y despliega**. B1 D3 falla cerrado · B2 origen y autor de mensajes · B3 control, asignación y eventos · B4 sincronizaciones externas y reconciliador · B5 acciones y revalidación · B6 frontend del relevo y desenlaces · B7 lectores del legado y backfill.
+**Construcción en fases B1–B7** (contrato §15), cada una auditada antes de integrarse; se construye en `feature/bandeja-relevo` y **un único responsable integra y despliega** (separación de git, no de diseño: es un solo desarrollo). B1 D3 falla cerrado · B2 origen y autor de mensajes · B3 control, asignación y eventos · B4 sincronizaciones externas y reconciliador · B5 acciones y revalidación · B6 frontend del relevo y desenlaces · B7 lectores del legado y backfill.
 
-**Gates antes de desplegar** (contrato §16): G1 el motor exige `MOTOR_SERVICE_TOKEN` · G2 reloj activo (medido por Plataforma: sí, ciclo ~60 min) · G3 acciones pendientes contadas · G4 evidencia del backfill · G5 casos dorados · G6 preflight de DDL y backfill (sin sesiones retenidas, volumen medido) · G7 reconciliador con cadencia propia de 1–5 min. Restricción transversal: **ninguna transacción de base abierta mientras se espera una operación externa** (`idle_in_transaction_session_timeout = 60s` en producción).
+**Gates antes de desplegar** (contrato §16): G1 el motor exige `MOTOR_SERVICE_TOKEN` · G2 reloj activo (medido en producción: sí, ciclo ~60 min) · G3 acciones pendientes contadas · G4 evidencia del backfill · G5 casos dorados · G6 preflight de DDL y backfill (sin sesiones retenidas, volumen medido) · G7 reconciliador con cadencia propia de 1–5 min. · G8 revisión de las 16 conversaciones reales de legado · G9 recibo de entrega (envío controlado → `wamid` en base → webhook; sin reinicio provocado) Restricción transversal: **ninguna transacción de base abierta mientras se espera una operación externa** (`idle_in_transaction_session_timeout = 60s` en producción).
 
 **Dos decisiones de la auditoría que no hay que redescubrir:** (1) si el evaluador decidió que hace falta una persona, un fallo del CRM o de WispHub **no** le devuelve la conversación a la IA; (2) la medición de razonamiento ON/OFF **nunca** justifica quitar una aprobación humana: la config nueva de revalidación se activa cuando la medición cierre.
 
