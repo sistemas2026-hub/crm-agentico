@@ -203,8 +203,15 @@ try:
     (COPIA / "supabase").mkdir(parents=True)
     shutil.copytree(RAIZ / "cli", COPIA / "cli", ignore=shutil.ignore_patterns("__pycache__"))
     shutil.copytree(RAIZ / "supabase" / "ledger", COPIA / "supabase" / "ledger")
+    # Solo la cadena adoptada: P2 y toda migracion posterior se APLICAN despues
+    # de adoptar, no forman parte de la referencia. El conjunto sigue siendo
+    # exacto (43, mismos nombres que el artefacto) -- lo que cambio es que una
+    # migracion nueva ya no rompe esta suite por existir. La validez de las
+    # posteriores la exige tests/test_cadena_migraciones.py.
+    import manifiesto_de_laboratorio as lab
+    adopcion = lab.archivos_de_adopcion(RAIZ)
     for p in sorted((RAIZ / "supabase").glob("*.sql")):
-        if p.name not in P2:
+        if p.name in adopcion:
             shutil.copy2(p, COPIA / "supabase" / p.name)
     nombres = sorted(p.name for p in (COPIA / "supabase").glob("*.sql"))
     oficial = json.loads(OFICIAL.read_bytes().decode("utf-8"))

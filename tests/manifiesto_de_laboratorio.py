@@ -43,10 +43,30 @@ from pathlib import Path
 # se adopta. Ver supabase/202609141200_* y 202609141300_*.
 P2 = ("202609141200_scheduler_persistente.sql", "202609141300_scheduler_funciones.sql")
 
+# El ULTIMO archivo de la cadena adoptada. Es un corte por NOMBRE, fijo, y a
+# proposito no se lee del manifiesto: si la cadena se definiera como "lo que
+# dice el manifiesto", comparar el manifiesto contra ella seria una tautologia
+# (test_manifiesto_acl_secuencias_default dejaria de probar nada).
+#
+# Antes la cadena era "todo supabase/ menos P2". Eso servia mientras no hubiera
+# migraciones nuevas: la primera posterior a la adopcion (B2, 16/09/2026) habria
+# entrado sola a la cadena, adoptada como baseline en el laboratorio en vez de
+# aplicada, y test_manifiesto_oficial_pg17 habria fallado por contar 44.
+CORTE_ADOPCION = "202609141120_comentarios_catalogo_canonicos.sql"
+
 
 def archivos_de_adopcion(raiz: Path) -> set[str]:
-    """Los SQL que se adoptan: todos los de supabase/ menos los dos de P2."""
-    return {p.name for p in (raiz / "supabase").glob("*.sql")} - set(P2)
+    """Los SQL que se adoptan: los de supabase/ hasta CORTE_ADOPCION inclusive.
+    P2 queda afuera por nombre (sus prefijos son posteriores al corte)."""
+    return {p.name for p in (raiz / "supabase").glob("*.sql")
+            if p.name <= CORTE_ADOPCION} - set(P2)
+
+
+def archivos_posteriores(raiz: Path) -> list[str]:
+    """Todo lo que se APLICA despues de la adopcion, en orden: P2 y cualquier
+    migracion nueva de Dexter."""
+    return sorted({p.name for p in (raiz / "supabase").glob("*.sql")}
+                  - archivos_de_adopcion(raiz))
 
 
 def ruta(copia: Path) -> Path:
