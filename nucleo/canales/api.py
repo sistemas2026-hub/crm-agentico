@@ -30,6 +30,7 @@ y se verifica DURANTE la conversacion, con una herramienta como
 
 from __future__ import annotations
 
+import hashlib
 import os
 from pathlib import Path
 import threading
@@ -5464,17 +5465,20 @@ def whatsapp_webhook(tenant):
     # conversacion: sin separarlos, el bot contestaria a su propio "entregado".
     for estado in estados:
         crudo = estado.get("estado")
-        # Metadata solamente: estado, codigo, a que wamid corresponde y la
-        # categoria que factura Meta. Ni el telefono completo del cliente ni el
-        # texto de error de Meta van al log -- un log de produccion persiste, y
-        # antes se imprimian los dos en CADA acuse. Del destinatario quedan los
-        # ultimos 4 digitos: alcanzan para distinguir dos clientes en el log
-        # sin dejar el numero entero.
-        destinatario = str(estado.get("de") or "")
-        destinatario = f"****{destinatario[-4:]}" if destinatario else "(sin destinatario)"
+        # Metadata solamente. Ni el telefono del cliente (ni siquiera sus
+        # ultimos digitos) ni el texto de error de Meta ni el wamid entero van al
+        # log -- un log de produccion persiste, y antes se imprimian el telefono
+        # completo y el texto de Meta en CADA acuse. El wamid entero vive en la
+        # base, que es donde hace falta para casar el acuse; en el log va su
+        # huella (_huella_wamid), que alcanza para ubicar la fila:
+        #   select id from asistente.messages
+        #    where left(encode(sha256(convert_to(wamid, 'UTF8')), 'hex'), 12) = '<huella>';
+        # (convert_to y no wamid::bytea: el cast interpreta las barras invertidas
+        # como escapes, y un wamid con una no se encontraria.)
+        huella = _huella_wamid(estado.get("wamid"))
         if crudo == "failed":
             print(f"[whatsapp] acuse estado=failed codigo={estado.get('codigo')} "
-                  f"wamid={estado.get('wamid')} destinatario={destinatario}")
+                  f"wamid_huella={huella}")
         else:
             # Los acuses buenos tambien se registran. Antes solo se imprimian
             # los fallidos, y eso obligaba a deducir del SILENCIO que un
@@ -5482,10 +5486,8 @@ def whatsapp_webhook(tenant):
             # distinguir de que el acuse nunca llego. La categoria es lo que
             # factura Meta.
             categoria = estado.get("categoria")
-            print(f"[whatsapp] acuse estado={crudo} wamid={estado.get('wamid')} "
-                  f"destinatario={destinatario}"
-                  + (f" conversacion_meta={estado.get('conversacion')} categoria={categoria}"
-                     if categoria else ""))
+            print(f"[whatsapp] acuse estado={crudo} wamid_huella={huella}"
+                  + (f" categoria={categoria}" if categoria else ""))
 
         # Y ahora, ademas de imprimirlo, se GUARDA contra el mensaje que lo
         # produjo. Hasta hoy esto se leia, se registraba y se tiraba: no habia
@@ -5871,6 +5873,19 @@ def _motivo_de_fallo(estado: dict) -> str:
     persisten respuestas de APIs externas, y un log de produccion persiste."""
     codigo = estado.get("codigo")
     return MOTIVOS_DE_FALLO.get(codigo) or f"WhatsApp no lo entregó (código {codigo})."
+
+
+def _huella_wamid(wamid) -> str:
+    """
+    Una referencia al wamid que puede ir al log sin ser el wamid.
+
+    Los 12 primeros hex de su sha256: suficiente para ubicar la fila en la base
+    y distinguir un mensaje de otro, sin repetir en un log que persiste el
+    identificador entero que Meta asigna al mensaje del cliente.
+    """
+    if not wamid:
+        return "(sin wamid)"
+    return hashlib.sha256(str(wamid).encode()).hexdigest()[:12]
 
 
 def _motivo_de_envio(e: Exception) -> str:
