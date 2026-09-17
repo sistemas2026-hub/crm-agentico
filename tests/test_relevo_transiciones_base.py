@@ -23,6 +23,11 @@ B3.2 de SPEC/CONTRATO_RELEVO_IA_HUMANO.md. Base efimera del ledger.
   5. La escalada en un turno real de atender_turno(): cuando se llama al
      ticket operativo y al CRM, el control YA es humano en la base y NO hay
      ninguna transaccion abierta; si el CRM falla, el control no vuelve a la IA.
+  8. B3.3b en turnos reales: tras /intervenir el cliente escribe y el modelo NO
+     corre, sin acuse de escalada ni banderas ni tasa; devolver reanuda; la
+     memoria nunca decide contra la base (en las dos direcciones); reintento
+     de la misma clave; dos operadores a la vez (uno gana, el otro 409); legado
+     escalado no se puede intervenir.
 ================================================================================
 """
 
@@ -478,6 +483,122 @@ try:
     finally:
         api.whatsapp.enviar_texto = orig_texto
         api._TOKEN_SERVICIO = token
+
+    # -----------------------------------------------------------------------
+    print("\n== 8. B3.3b: intervenir, y la compuerta lee la base ==")
+    modelo8 = []
+
+    def responder8(config, rol, mensaje, historial, sesion, nota_continuidad=None):
+        modelo8.append(mensaje)
+        historial.append({"role": "assistant", "content": "respuesta de la IA"})
+        return "respuesta de la IA", [], []
+    base8 = {
+        (api.motor, "responder"): responder8,
+        (api.escalamiento, "evaluar"): lambda *a, **k: {},
+        (api.escalamiento, "caso_sigue_abierto"): lambda *a, **k: True,
+        (api, "_cerrar_el_traspaso"): lambda config, tenant, conversation_id, mensaje_id, respuesta, id_sesion, **k: respuesta,
+        (api.consumo, "estado_del_gasto"): lambda *a, **k: {"accion": "seguir", "gastado": 0, "tope": 0, "porcentaje": 0.0},
+    }
+    orig8 = {k: getattr(*k) for k in base8}
+    for (m, n), f in base8.items():
+        setattr(m, n, f)
+    token8 = api._TOKEN_SERVICIO
+    api._TOKEN_SERVICIO = None
+
+    def turno(tel, texto):
+        return api.atender_turno(CONFIG, TENANT, "cliente_final", tel, texto, "whatsapp-simulado")
+
+    def conv_de(tel):
+        return q("select id::text from asistente.conversations where usuario_externo = %s and estado = 'abierta'",
+                 (tel,))[0][0]
+
+    def intervenir_http(conv, operador, clave):
+        return api.app.test_client().post(f"/conversaciones/{conv}/intervenir", json={
+            "tenant": TENANT, "autor": operador[1], "autor_usuario_id": operador[0], "clave_operacion": clave})
+
+    def escaladas():
+        return db.tasa_escalamiento(TENANT, 30)
+    try:
+        api._sesiones.clear()
+        tel = "573000000080"
+        turno(tel, "hola, tengo una duda")
+        cv = conv_de(tel)
+        comprobar(len(modelo8) == 1, "turno normal: la IA responde")
+        antes_tasa = escaladas()
+        r = intervenir_http(cv, ANA, "int-ana")
+        e = estado(cv)
+        comprobar(r.status_code == 200 and e[:3] == ("humano", "intervencion", "Ana Perez"),
+                  f"Ana interviene: 200, humano/intervencion, asignada a Ana ({r.status_code} {e[:3]})")
+        comprobar(e[5] is False and e[6] is False,
+                  "intervenir NO toca las banderas de escalada")
+        salida = turno(tel, "hola? alguien?")
+        comprobar(len(modelo8) == 1 and salida.get("respuesta") == "" and salida.get("pausada"),
+                  f"mensaje del cliente con la conversacion intervenida: la IA NO corre y no hay acuse ({salida})")
+        ult = q("""select rol, origen, contenido from asistente.messages where conversation_id = %s
+                   order by creado_en desc limit 1""", (cv,))[0]
+        comprobar(ult == ("user", "cliente", "hola? alguien?"), f"el mensaje del cliente queda guardado ({ult})")
+        comprobar(escaladas() == antes_tasa, "la tasa de escalamiento no cambia: intervenir no es escalar")
+        r_b = intervenir_http(cv, LUIS, "int-luis")
+        comprobar(r_b.status_code == 409 and estado(cv)[2] == "Ana Perez",
+                  f"Luis intenta intervenir despues: 409 y NO le roba la conversacion a Ana ({r_b.status_code})")
+        v = estado(cv)[3]
+        r_re = intervenir_http(cv, ANA, "int-ana")
+        comprobar(r_re.status_code == 200 and r_re.get_json().get("reintento") and estado(cv)[3] == v
+                  and [x[0] for x in eventos(cv)].count("intervencion") == 1,
+                  "el mismo clic reintentado: 200 reintento, sin otra version ni otro evento")
+        resp = api.app.test_client().post(f"/conversaciones/{cv}/mensajes", json={
+            "tenant": TENANT, "mensaje": "Soy Ana, te ayudo yo", "autor": ANA[1], "autor_usuario_id": ANA[0]})
+        comprobar(resp.status_code == 201, f"Ana responde: 201 ({resp.status_code})")
+        T.devolver_a_ia(TENANT, cv, operador_id=ANA[0], operador_nombre=ANA[1])
+        turno(tel, "gracias, otra pregunta")
+        comprobar(len(modelo8) == 2, "devuelta a la IA: el siguiente mensaje vuelve a la IA")
+
+        # La memoria no decide.
+        api._sesiones[(TENANT, "whatsapp-simulado", tel)]["escalada"] = True
+        turno(tel, "y otra cosa")
+        comprobar(len(modelo8) == 3, "memoria dice pausa y la base dice IA: la IA responde (manda la base)")
+        tel2 = "573000000081"
+        turno(tel2, "hola")
+        cv2 = conv_de(tel2)
+        T.escalar(TENANT, cv2)                 # "otro proceso" escala; esta memoria no se entero
+        n = len(modelo8)
+        salida2 = turno(tel2, "sigo esperando")
+        comprobar(len(modelo8) == n and salida2.get("pausada"),
+                  "memoria sin pausa y la base dice humano (escalada en otro lado): la IA NO corre")
+
+        # Dos operadores a la vez, con claves distintas.
+        tel3 = "573000000082"
+        turno(tel3, "hola")
+        cv3 = conv_de(tel3)
+        resultados = []
+        barrera = threading.Barrier(2)
+
+        def carrera(op, clave):
+            barrera.wait()
+            resultados.append((op[1], intervenir_http(cv3, op, clave).status_code))
+        hilos = [threading.Thread(target=carrera, args=(ANA, "c-ana")),
+                 threading.Thread(target=carrera, args=(LUIS, "c-luis"))]
+        for h in hilos:
+            h.start()
+        for h in hilos:
+            h.join()
+        codigos = sorted(c for _, c in resultados)
+        ganador = [op for op, c in resultados if c == 200]
+        comprobar(codigos == [200, 409] and ganador and estado(cv3)[2] == ganador[0]
+                  and [x[0] for x in eventos(cv3)].count("intervencion") == 1,
+                  f"dos operadores intervienen a la vez: uno gana, el otro 409, una sola intervencion ({resultados})")
+
+        leg = str(q("""insert into asistente.conversations
+                         (organization_id, canal, usuario_externo, escalada_a_humano, necesita_atencion_humana)
+                       values (%s, 'whatsapp-simulado', '573000000083', true, true) returning id""", (org,))[0][0])
+        r_leg = intervenir_http(leg, ANA, "int-leg")
+        comprobar(r_leg.status_code == 409 and estado(leg)[3] == 0 and estado(leg)[0] == "ia",
+                  "legado escalado (control efectivo humano): intervenir 409, no se le roba a la escalada")
+    finally:
+        for (m, n), f in orig8.items():
+            setattr(m, n, f)
+        api._TOKEN_SERVICIO = token8
+        api._sesiones.clear()
 finally:
     try:
         with psycopg.connect(dsn("postgres"), autocommit=True) as con:

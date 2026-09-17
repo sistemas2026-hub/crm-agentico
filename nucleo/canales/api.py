@@ -44,6 +44,7 @@ from nucleo.canales import canal as canales
 from nucleo.canales import media, whatsapp
 from nucleo.relevo import historial as regla_historial
 from nucleo.relevo import transiciones
+from nucleo.relevo.control import control_efectivo
 from nucleo.conectores import catalogo as conectores
 from nucleo.config import editor, fuente
 from nucleo.config.fusion import fusionar_roles, modelo_fusionado
@@ -882,6 +883,40 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     # y como esa pendiente traba el cierre, el caso quedaria atascado hasta el
     # barrido por inactividad.
     veredicto_accion = _resolver_verificacion_pendiente(config, tenant, estado)
+
+    # --- QUIEN CONTROLA LA CONVERSACION: LO DICE LA BASE ---------------------
+    # B3.3b. Antes lo decidia estado["escalada"], la memoria del proceso: una
+    # devolucion, una intervencion o un reinicio en otro lado no se enteraban.
+    # Ahora se lee en cada turno con control_efectivo() (nucleo/relevo/control.py),
+    # la misma regla que las guardas: legado -> las banderas de siempre;
+    # gobernada -> la columna control. La memoria solo refleja lo leido.
+    #
+    # Si la base no responde, FALLA CERRADO: sin saber quien controla, no se
+    # corre el modelo. Un silencio es un problema; que la IA le conteste a un
+    # cliente que una persona esta atendiendo es otro peor.
+    try:
+        control_actual = persistencia.control_de_conversacion_abierta(tenant, canal, id_sesion)
+    except Exception as e:
+        print(f"[relevo] {id_sesion}: no se pudo leer quien controla la conversacion "
+              f"({type(e).__name__}); no se corre el modelo")
+        return {"respuesta": "", "verificado": estado["sesion"].verificado,
+                "pausada": True, "control_desconocido": True}
+    if control_actual is None:
+        estado["escalada"] = False
+    else:
+        estado["escalada"] = control_actual["control_efectivo"] == "humano"
+        if estado["escalada"] and control_actual["control_motivo"] == "intervencion":
+            # Una persona tomo la conversacion por su cuenta. La IA no corre y
+            # NO se usa nada de la escalada: ni el acuse "ya te estamos
+            # atendiendo", ni el cierre por confirmacion, ni el CRM. Quien
+            # intervino esta ahi; el mensaje queda guardado para que lo lea.
+            estado["historial"].append({"role": "user", "content": mensaje})
+            try:
+                persistencia.registrar_mensaje(tenant, canal, id_sesion, rol, "user", mensaje,
+                                               origen="cliente")
+            except Exception as e:
+                print(f"[persistencia] no se pudo guardar el mensaje durante la intervencion: {e}")
+            return {"respuesta": "", "verificado": estado["sesion"].verificado, "pausada": True}
 
     # --- si ya se escalo, el bot NO contesta ---------------------------------
     # Va antes de motor.responder() a proposito. Marcar la conversacion como
@@ -3937,6 +3972,8 @@ def conversaciones_mensajes(id_conversacion):
     if conv.get("canal") == "whatsapp":
         conv["ventana_whatsapp"] = whatsapp.estado_de_ventana(
             conv.get("ultimo_mensaje_cliente"))
+    # Quien controla HOY, ya calculado: la pantalla no reimplementa la regla.
+    conv["control_efectivo"] = control_efectivo(conv)
 
     return jsonify(resultado)
 
@@ -5880,6 +5917,49 @@ def conversaciones_conservar(id_conversacion):
     if not existe:
         return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
     return jsonify({"conservar": conservar, "motivo": motivo})
+
+
+@app.post("/conversaciones/<id_conversacion>/intervenir")
+def conversaciones_intervenir(id_conversacion):
+    """
+    Una persona toma el control de una conversacion que atendia la IA. B3.3b.
+
+    Solo adquiere el control: NO le envia nada al cliente. Responder es otra
+    llamada, despues, y pasa por la guarda de control como cualquier respuesta.
+    Mezclar las dos cosas meteria el envio a Meta y su incertidumbre (D17)
+    dentro de la toma de control.
+
+    No es una escalada: no toca escalada_a_humano ni necesita_atencion_humana,
+    asi que no cuenta en la tasa de escalamiento ni dispara nada de ella.
+
+    Cuerpo: {tenant, autor, autor_usuario_id, motivo?, clave_operacion?}
+      200  intervenida (o reintento de la misma operacion)
+      409  ya no la controla la IA: otra persona intervino o esta escalada
+      404  no existe
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    try:
+        autor, autor_id, _ = _autor_y_clave(cuerpo)
+    except persistencia.AutorInvalido as e:
+        return jsonify({"error": f"Autor invalido: {e}"}), 400
+    try:
+        r = transiciones.intervenir(
+            tenant, id_conversacion, operador_id=autor_id, operador_nombre=autor,
+            motivo_texto=(cuerpo.get("motivo") or "").strip(),
+            clave=(cuerpo.get("clave_operacion") or "").strip() or None)
+    except Exception as e:
+        print(f"[relevo] fallo al intervenir '{id_conversacion}': {type(e).__name__}")
+        return jsonify({"error": "No se pudo tomar el control."}), 500
+    if r.motivo == "no_existe":
+        return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+    if r.aplicada or r.motivo == "reintento":
+        return jsonify({"intervenida": True, "relevo_version": r.version,
+                        "reintento": r.motivo == "reintento"}), 200
+    return jsonify({"error": "Esta conversacion ya no la atiende la IA: otra persona la tomo "
+                             "o esta escalada.", "codigo": "no_es_de_la_ia"}), 409
 
 
 @app.post("/conversaciones/<id_conversacion>/atender")

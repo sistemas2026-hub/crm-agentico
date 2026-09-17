@@ -568,6 +568,10 @@ def mensajes_de(tenant: str, conversation_id: str) -> dict:
                       actualizado_en, conservar, conservar_motivo, conservar_por,
                       atendida_manual, atendida_por, tomada_por, tomada_en,
                       id_cliente, nombre_cliente,
+                      -- El control del relevo (B3): la pantalla recibe el
+                      -- control EFECTIVO ya calculado (api.py), no la regla.
+                      relevo_version, control, control_motivo,
+                      asignada_a_nombre, aviso_relevo,
                       -- Lo que el modelo ya habia escrito al escalar y hasta
                       -- ahora solo viajaba a la descripcion del ticket. Es lo
                       -- que arma el resumen de arriba en el detalle: que
@@ -1850,6 +1854,35 @@ def registrar_estado_escalada(tenant: str, conversation_id: str, estado: str,
     except Exception as e:
         print(f"[escalamiento] no se pudo anotar el estado '{estado}': "
               f"{type(e).__name__}: {e}")
+
+
+def control_de_conversacion_abierta(tenant: str, canal: str,
+                                    usuario_externo: str) -> dict | None:
+    """
+    Quien controla la conversacion ABIERTA de este usuario, leido de la base en
+    cada turno. None si no hay ninguna abierta (un contacto nuevo: no hay nada
+    que controlar). LEVANTA si la base no responde: quien llama falla cerrado y
+    no corre el modelo -- la memoria del proceso nunca decide el control.
+
+    Devuelve {'conversation_id', 'control_efectivo', 'control_motivo',
+    'relevo_version'}.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select id, relevo_version, control, control_motivo,
+                      escalada_a_humano, necesita_atencion_humana
+               from asistente.conversations
+               where organization_id = %s and canal = %s and usuario_externo = %s
+                 and estado = 'abierta'
+               order by actualizado_en desc limit 1""",
+            (org, canal, usuario_externo))
+        fila = cur.fetchone()
+    if not fila:
+        return None
+    return {"conversation_id": str(fila["id"]),
+            "control_efectivo": regla_control.control_efectivo(fila),
+            "control_motivo": fila["control_motivo"],
+            "relevo_version": fila["relevo_version"]}
 
 
 def control_efectivo_de(tenant: str, conversation_id: str) -> str | None:

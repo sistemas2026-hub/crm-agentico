@@ -70,6 +70,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from nucleo.persistencia import db
+from nucleo.relevo import control as regla_control
 
 # Punto de inyeccion de fallas para las pruebas: se llama DENTRO de la
 # transaccion, despues de escribir estado y evento y antes del commit.
@@ -127,7 +128,8 @@ def _evento_previo(cur, org, conversation_id, clave):
 
 def _fila(cur, org, conversation_id):
     cur.execute("""select control, control_motivo, asignada_a_usuario_id, asignada_a_nombre,
-                          relevo_version, estado, pendiente_interno_desde
+                          relevo_version, estado, pendiente_interno_desde,
+                          escalada_a_humano, necesita_atencion_humana
                    from asistente.conversations
                    where organization_id = %s and id = %s
                    for update""", (org, conversation_id))
@@ -200,7 +202,7 @@ def escalar(tenant: str, conversation_id: str, *, motivo: str = "",
     es otra cosa y se reconcilia aparte (B4).
     """
     def cuerpo(cur, org, f):
-        if f["estado"] != "abierta" or f["control"] == "humano":
+        if f["estado"] != "abierta" or regla_control.control_efectivo(f) == "humano":
             return Resultado(False, f["relevo_version"] > 0, f["relevo_version"], None, "sin_cambio")
         version = _subir_version(
             cur, org, conversation_id,
@@ -219,7 +221,12 @@ def intervenir(tenant: str, conversation_id: str, *, operador_id: str, operador_
     nombre, usuario = db.validar_autor(operador_nombre, operador_id)
 
     def cuerpo(cur, org, f):
-        if f["estado"] != "abierta" or f["control"] == "humano":
+        # Precondicion por control EFECTIVO: una conversacion de legado escalada
+        # (control 'ia' por default) ya esta en manos de personas -- intervenir
+        # ahi seria robarle la conversacion a la escalada. Con el lock de la fila,
+        # de dos operadores que intervienen a la vez solo el primero la encuentra
+        # en manos de la IA; el segundo recibe sin_cambio y no reasigna nada.
+        if f["estado"] != "abierta" or regla_control.control_efectivo(f) == "humano":
             return Resultado(False, f["relevo_version"] > 0, f["relevo_version"], None, "sin_cambio")
         if tomar:
             version = _subir_version(

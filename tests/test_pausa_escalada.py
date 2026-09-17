@@ -126,6 +126,14 @@ class Turno:
         # prueba mide la DECISION de pausar, no la persistencia.
         postizos = {
             p: {"estado_de_conversacion_abierta": lambda *a, **k: self.previo,
+                # B3.3b: el control se lee de la base en cada turno. Se deriva del
+                # mismo estado previo, con la regla de legado de control_efectivo.
+                "control_de_conversacion_abierta": lambda *a, **k: (
+                    None if not self.previo else {
+                        "conversation_id": self.previo.get("conversation_id") or "conv-1",
+                        "control_efectivo": "humano" if (self.previo.get("escalada")
+                                                         and self.previo.get("necesita_atencion_humana")) else "ia",
+                        "control_motivo": None, "relevo_version": 0}),
                 "atendida_por_humano": lambda *a, **k: self.hubo_humano,
                 "registrar_mensaje": lambda t_, c_, i_, r_, rol_, txt_, *a, **k:
                     (self.guardados.append((rol_, txt_)), ("conv-1", "msg-1"))[1],

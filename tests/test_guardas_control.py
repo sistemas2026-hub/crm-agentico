@@ -168,6 +168,75 @@ with Mundo(control="ia") as m:
 comprobar(r.status_code == 201 and "agregar_nota_interna" in m.llamadas and "control_efectivo_de" not in m.llamadas,
           f"nota con la IA atendiendo: 201 sin consultar el control ({r.status_code})")
 
+# ---------------------------------------------------------------------------
+print("\n== 5. B3.3b: /intervenir ==")
+from nucleo.relevo import transiciones as T                         # noqa: E402
+
+llamadas_meta = []
+for nombre_m in ("enviar_texto", "enviar_media", "enviar_plantilla_aprobada", "plantillas_aprobadas"):
+    setattr(api.whatsapp, nombre_m, (lambda n: lambda *a, **k: llamadas_meta.append(n))(nombre_m))
+visto = {}
+
+
+def intervenir_falso(resultado):
+    def f(tenant, conv, **k):
+        visto.update(k)
+        return resultado
+    return f
+
+
+real_intervenir = T.intervenir
+api._TOKEN_SERVICIO = None
+try:
+    r = cliente.post("/conversaciones/c1/intervenir", json={"tenant": "t"})
+    comprobar(r.status_code == 400, f"sin autor: 400 ({r.status_code})")
+    for resultado, codigo, que in (
+            (T.Resultado(True, True, 3, "ev"), 200, "aplicada"),
+            (T.Resultado(False, True, 3, "ev", "reintento"), 200, "reintento de la misma operacion"),
+            (T.Resultado(False, True, 3, None, "sin_cambio"), 409, "ya no es de la IA (otra persona o escalada)"),
+            (T.Resultado(False, False, None, None, "no_existe"), 404, "no existe")):
+        T.intervenir = intervenir_falso(resultado)
+        r = cliente.post("/conversaciones/c1/intervenir",
+                         json={"tenant": "t", "clave_operacion": "op-9", "motivo": "respuesta mala", **AUTOR})
+        comprobar(r.status_code == codigo, f"{que}: {codigo} ({r.status_code})")
+    comprobar(visto.get("operador_id") == AUTOR["autor_usuario_id"] and visto.get("operador_nombre") == AUTOR["autor"]
+              and visto.get("clave") == "op-9", "el actor y la clave llegan a la transicion")
+    comprobar(llamadas_meta == [], "intervenir no le manda nada al cliente (cero llamadas a Meta)")
+finally:
+    T.intervenir = real_intervenir
+
+print("\n== 6. B3.3b: la compuerta falla cerrado ==")
+modelo = []
+reemplazos = {
+    (api.persistencia, "control_de_conversacion_abierta"):
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("base caida")),
+    (api.persistencia, "conversacion_vencida"): lambda *a, **k: None,
+    (api.persistencia, "estado_de_conversacion_abierta"): lambda *a, **k: None,
+    (api.persistencia, "resumen_anterior"): lambda *a, **k: None,
+    (api.persistencia, "identificar_cliente"): lambda *a, **k: None,
+    (api.motor, "responder"): lambda *a, **k: modelo.append(1) or ("hola", [], []),
+    (api, "_resolver_verificacion_pendiente"): lambda *a, **k: None,
+}
+orig = {k: getattr(*k) for k in reemplazos}
+for (m, n), f in reemplazos.items():
+    setattr(m, n, f)
+api._sesiones.clear()
+try:
+    from nucleo.config import cargar_config                         # noqa: E402
+    try:
+        salida = api.atender_turno(cargar_config(RAIZ / "tenants" / "rapilink.config.yaml"), "rapilink",
+                                   "cliente_final", "573000000000", "hola", "whatsapp-simulado")
+    except (Exception, SystemExit) as e:
+        # Si la compuerta no corta, el turno sigue de largo hasta otra lectura
+        # de la base (que aca no existe): eso tambien es fallar abierto.
+        salida = {"siguio_de_largo": type(e).__name__}
+    comprobar(not modelo and salida.get("respuesta") == "" and salida.get("control_desconocido"),
+              f"no se pudo leer el control: el modelo NO corre y no se responde nada ({salida})")
+finally:
+    for (m, n), f in orig.items():
+        setattr(m, n, f)
+    api._sesiones.clear()
+
 if fallos:
     print(f"\n[FALLA] {len(fallos)} caso(s):")
     for f in fallos:

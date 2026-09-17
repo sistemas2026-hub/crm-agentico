@@ -160,6 +160,14 @@ class Mundo:
 
         self.postizos = {
             p: {"estado_de_conversacion_abierta": lambda *a, **k: previo,
+                # B3.3b: el control se lee de la base en cada turno. Se deriva del
+                # mismo estado previo, con la regla de legado de control_efectivo.
+                "control_de_conversacion_abierta": lambda *a, **k: (
+                    None if not previo else {
+                        "conversation_id": previo.get("conversation_id") or "conv-1",
+                        "control_efectivo": "humano" if (previo.get("escalada")
+                                                         and previo.get("necesita_atencion_humana")) else "ia",
+                        "control_motivo": None, "relevo_version": 0}),
                 "atendida_por_humano": lambda *a, **k: False,
                 "registrar_mensaje": _registrar,
                 "actualizar_contenido_mensaje": _actualizar,

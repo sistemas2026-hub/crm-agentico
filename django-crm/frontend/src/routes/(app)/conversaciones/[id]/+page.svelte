@@ -918,7 +918,13 @@
   let iaEnPausa = $derived(
     !!conversacion.escalada_a_humano && !!conversacion.necesita_atencion_humana
   );
-  let escalada = $derived(iaEnPausa);
+  // Quien controla la conversacion HOY lo calcula el motor (control_efectivo,
+  // B3.3b): legado -> las banderas; gobernada -> la columna control, que
+  // incluye una intervencion. Si el motor todavia no lo manda, se cae a la
+  // regla de siempre.
+  let escalada = $derived(
+    conversacion.control_efectivo ? conversacion.control_efectivo === 'humano' : iaEnPausa
+  );
 
   /** Clave de dia local, para agrupar el hilo. */
   function diaDe(/** @type {string} */ iso) {
@@ -1170,6 +1176,35 @@
   let bloqueadoPorIA = $derived(
     !escalada && conversacion.canal === 'whatsapp' && modo !== 'nota'
   );
+
+  let interviniendo = $state(false);
+  let errorIntervenir = $state('');
+
+  /* Tomar el control de una conversacion que atiende la IA. Solo adquiere el
+      control: no le manda nada al cliente. El compositor se habilita cuando el
+      motor CONFIRMA (se relee la conversacion), nunca antes: si otra persona
+      intervino primero, el 409 lo dice y no se habilita nada. */
+  async function intervenir() {
+    if (interviniendo) return;
+    interviniendo = true;
+    errorIntervenir = '';
+    try {
+      const resp = await fetch(`/api/conversaciones/${conversacion.id}/intervenir`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clave_operacion: crypto.randomUUID() })
+      });
+      const datos = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        errorIntervenir = datos.error || 'No se pudo tomar el control.';
+      }
+      await sondearMensajesNuevos();
+    } catch (/** @type {any} */ err) {
+      errorIntervenir = err?.message || 'No se pudo tomar el control.';
+    } finally {
+      interviniendo = false;
+    }
+  }
 
   function comoDuracion(/** @type {number} */ seg) {
     const h = Math.floor(seg / 3600);
@@ -2054,6 +2089,16 @@
               <span class="v2-muted">· no pasa por el asistente</span>
             {:else if bloqueadoPorIA}
               La atiende la IA · para escribirle al cliente hace falta tomar el control
+              <button
+                type="button"
+                class="v2-btn v2-btn-sm v2-btn-strong"
+                onclick={intervenir}
+                disabled={interviniendo}
+                aria-busy={interviniendo}
+              >
+                {interviniendo ? 'Tomando el control…' : 'Intervenir'}
+              </button>
+              {#if errorIntervenir}<span class="aviso-mal">{errorIntervenir}</span>{/if}
             {:else}
               Responde el asistente
             {/if}
