@@ -92,10 +92,20 @@ revisar("rol <> 'nota'" in db,
 # internas, el modelo las usaria para contestarle al cliente -- que es
 # exactamente lo que el rol 'nota' existe para impedir, por la otra puerta.
 fn_hist = _cuerpo(db, "def historial_para_el_modelo(tenant: str, conversation_id: str,")
-revisar("rol in ('user', 'assistant')" in fn_hist,
+fn_venc = _cuerpo(db, "def conversacion_vencida(tenant: str, canal: str, usuario_externo: str,")
+# Desde B2.3 los dos lectores (historial del modelo e insumo del resumen)
+# pasan por UNA regla, nucleo/relevo/historial.py. Se afirma el EFECTO de esa
+# regla sobre una nota, y que los dos lectores la usan. Contra PostgreSQL lo
+# comprueba tests/test_origen_mensajes_base.py, seccion 5.
+from nucleo.relevo import historial as _regla                     # noqa: E402
+_con_nota = _regla.construir([{"rol": "user", "contenido": "hola"},
+                              {"rol": "nota", "contenido": "SECRETO", "origen": "humano"},
+                              {"rol": "assistant", "contenido": "ok", "origen": "ia"}])
+revisar(all("SECRETO" not in m["content"] for m in _con_nota)
+        and "nota" not in _regla.ROLES_DEL_MODELO
+        and "regla_historial.construir" in fn_hist and "regla_historial.construir" in fn_venc,
         "el historial que se le da al modelo excluye las notas internas",
-        "historial_para_el_modelo no filtra por rol: una nota interna "
-        "entraria al prompt en el primer reinicio.")
+        "ni el historial rehidratado ni el insumo del resumen pueden traer una nota")
 
 # Y con techo: volcar una conversacion entera de golpe seria pagar de una vez
 # un prompt que nadie decidio.

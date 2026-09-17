@@ -230,7 +230,7 @@ with Mundo(destino={**base_destino, "existente": False, "estado_entrega": "pendi
 llamada = next((c for c in m.llamadas if c[0] == "agregar_mensaje_humano"), None)
 hist = api._sesiones[("t", "whatsapp", TEL)]["historial"]
 comprobar(r.status_code == 201 and m.nombres().count("enviar_texto") == 1 and "ticket" in m.nombres()
-          and len(hist) == 1 and hist[0]["content"].startswith("(Ana Perez) "),
+          and len(hist) == 1 and hist[0]["content"] == "(Ana Perez, del equipo) hola",
           f"mensaje nuevo: se entrega, se copia al ticket y entra al historial firmado "
           f"(fue {r.status_code}, {m.nombres()}, {hist})")
 comprobar(llamada is not None and llamada[2].get("autor_usuario_id") == AUTOR["autor_usuario_id"]

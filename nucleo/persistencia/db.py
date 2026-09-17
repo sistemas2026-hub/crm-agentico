@@ -71,6 +71,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 from nucleo.persistencia.conexion import dsn
+from nucleo.relevo import historial as regla_historial
 
 # Cache de slug -> organization_id. El vinculo lo crea cli/cargar_config.py y
 # no cambia en caliente: si cambiara, el proceso se reinicia igual.
@@ -277,17 +278,23 @@ def historial_para_el_modelo(tenant: str, conversation_id: str,
     try:
         with sesion(tenant) as (cur, org):
             cur.execute(
-                """select rol, contenido from (
-                     select rol, contenido, creado_en
+                # La regla de que entra y como la decide nucleo/relevo/
+                # historial.py, la MISMA que usa el camino en vivo. Antes esto
+                # devolvia 'rol, contenido' a secas: lo que habia escrito una
+                # persona volvia sin firma y la IA lo tomaba como propio (D8),
+                # y la unica fila de legado con rol 'humano' ni siquiera entraba.
+                # El filtro de rol va en el SQL para que el limite cuente solo
+                # filas que el modelo va a ver: las notas no le roban lugar.
+                """select rol, contenido, origen, autor_nombre from (
+                     select rol, contenido, origen, autor_nombre, creado_en
                        from asistente.messages
                       where organization_id = %s and conversation_id = %s
                         and contenido is not null and contenido <> ''
-                        and rol in ('user', 'assistant')
+                        and rol = any(%s)
                       order by creado_en desc limit %s
                    ) ultimos order by creado_en""",
-                (org, conversation_id, limite))
-            return [{"role": f["rol"], "content": f["contenido"]}
-                    for f in cur.fetchall()]
+                (org, conversation_id, list(regla_historial.ROLES_DEL_MODELO), limite))
+            return regla_historial.construir(cur.fetchall())
     except Exception as e:
         # Igual que el resto de la rehidratacion: un fallo al leer no impide
         # atender. Se arranca sin memoria, que es lo que pasaba siempre.
@@ -2495,13 +2502,20 @@ def conversacion_vencida(tenant: str, canal: str, usuario_externo: str,
         fila = cur.fetchone()
         if not fila:
             return None
+        # El insumo del resumen pasa por la MISMA regla que el historial del
+        # modelo (nucleo/relevo/historial.py). Antes eran todas las filas, y
+        # todo lo que no era 'user' se volvia 'assistant': una nota interna
+        # entraba al resumen como si el asistente se la hubiera dicho al
+        # cliente, y ese resumen es contexto del modelo en la conversacion
+        # siguiente (D12). Las notas se excluyen en el SQL y otra vez en la
+        # regla.
         cur.execute(
-            """select rol, contenido from asistente.messages
+            """select rol, contenido, origen, autor_nombre from asistente.messages
                where organization_id = %s and conversation_id = %s
+                 and rol = any(%s)
                order by creado_en""",
-            (org, fila["id"]))
-        mensajes = [{"role": "user" if r["rol"] == "user" else "assistant",
-                     "content": r["contenido"] or ""} for r in cur.fetchall()]
+            (org, fila["id"], list(regla_historial.ROLES_DEL_MODELO)))
+        mensajes = regla_historial.construir(cur.fetchall())
     return {"conversation_id": str(fila["id"]),
             "resumen_previo": fila["resumen"],
             "historial": mensajes}

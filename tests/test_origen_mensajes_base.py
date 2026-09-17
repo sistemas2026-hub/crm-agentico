@@ -19,6 +19,9 @@ degradado (app_backend) y RLS, como en produccion:
   3. lo que se rechaza no deja filas: origen incoherente, autor invalido,
      plantilla (solo_canal) en una conversacion que no es de WhatsApp
   4. la base: CHECK de origen, y el legado (origen NULL, rol 'humano') admitido
+  5. B2.3: historial_para_el_modelo y conversacion_vencida siguen la regla unica
+     (nucleo/relevo/historial.py); la nota no llega ni al modelo ni a lo que
+     resumen.redactar le manda; bloque de legado una vez; bytes intactos
 
 Se salta si faltan DBHOST/DBPORT/DBUSER/DBPASSWORD o Docker (igual que las
 suites de ledger). Borra su base al terminar, pase lo que pase.
@@ -238,6 +241,77 @@ try:
         comprobar(False, "clave duplicada deberia violar el indice unico")
     except psycopg.errors.UniqueViolation:
         comprobar(True, "el indice unico parcial rechaza la clave repetida en la misma conversacion")
+
+    # -----------------------------------------------------------------------
+    print("\n== 5. B2.3: el historial y el resumen leidos de la base ==")
+    from nucleo.relevo import historial as H                        # noqa: E402
+    from nucleo.seguimiento import resumen                          # noqa: E402
+
+    conv_leg = q("""insert into asistente.conversations (organization_id, canal, usuario_externo)
+                    values (%s, 'whatsapp', '573111111111') returning id""", (org,))[0][0]
+    AMBIGUO = "Te reviso la conexion.  (bytes: ñ á \n fin)  "
+    NOTA = "NOTA INTERNA: el cliente debe tres meses"
+    filas_leg = [("user", "hola, sin internet", None, None),
+                 ("assistant", AMBIGUO, None, None),
+                 ("humano", "Ya reinicie tu equipo", None, None),
+                 ("nota", NOTA, None, None),
+                 ("user", "sigue igual", None, None),
+                 ("assistant", "Te paso con Maria", "ia", None),
+                 ("assistant", "Soy Maria, lo reviso", "humano", "Maria Gomez"),
+                 ("user", "gracias", "cliente", None)]
+    for i, (rol, contenido, origen, autor) in enumerate(filas_leg):
+        q("""insert into asistente.messages
+               (organization_id, conversation_id, rol, contenido, origen, autor_nombre, creado_en)
+             values (%s, %s, %s, %s, %s, %s, now() - make_interval(hours => 48) + make_interval(secs => %s))""",
+          (org, conv_leg, rol, contenido, origen, autor, i))
+    q("update asistente.conversations set actualizado_en = now() - interval '48 hours' where id = %s", (conv_leg,))
+    antes_bytes = q("select id, contenido from asistente.messages where conversation_id = %s order by creado_en",
+                    (conv_leg,))
+
+    rec = db.historial_para_el_modelo(TENANT, str(conv_leg), 20)
+    esperado = H.construir([{"rol": r, "contenido": c, "origen": o, "autor_nombre": a}
+                            for r, c, o, a in filas_leg])
+    comprobar(rec == esperado, "historial_para_el_modelo == la regla unica sobre las mismas filas",
+              f"\n rec={rec}\n esp={esperado}")
+    comprobar(sum(1 for m in rec if m["content"] == H.BLOQUE_LEGADO) == 1,
+              "un assistant sin origen: el bloque de legado aparece exactamente una vez")
+    comprobar(all(NOTA not in m["content"] for m in rec), "la nota NO esta en el historial del modelo")
+    comprobar({"role": "assistant", "content": AMBIGUO} in rec,
+              "el assistant de legado entra con sus bytes, sin prefijo")
+    comprobar({"role": "assistant", "content": "(del equipo) Ya reinicie tu equipo"} in rec,
+              "la fila de legado rol='humano' entra como assistant del equipo, autor desconocido")
+    comprobar({"role": "assistant", "content": "(Maria Gomez, del equipo) Soy Maria, lo reviso"} in rec,
+              "el mensaje humano nuevo entra firmado con su autor")
+
+    vencida = db.conversacion_vencida(TENANT, "whatsapp", "573111111111", 24)
+    comprobar(vencida is not None and all(NOTA not in m["content"] for m in vencida["historial"]),
+              "conversacion_vencida: la nota NO esta en el insumo del resumen")
+    comprobar(vencida is not None and vencida["historial"] == esperado,
+              "el insumo del resumen sale de la misma regla que el historial")
+    enviado = []
+    real_chat = resumen.cliente.chat
+    resumen.cliente.chat = lambda modelo, mensajes, **k: (enviado.append(mensajes),
+                                                          type("R", (), {"contenido": "resumen"})())[1]
+    try:
+        resumen.redactar(type("C", (), {"llm": type("L", (), {"modelo_por_defecto": "x"})()})(),
+                         vencida["historial"])
+    finally:
+        resumen.cliente.chat = real_chat
+    comprobar(enviado and all(NOTA not in m["content"] for m in enviado[0]),
+              "lo que resumen.redactar le manda al modelo no contiene la nota")
+
+    despues_bytes = q("select id, contenido from asistente.messages where conversation_id = %s order by creado_en",
+                      (conv_leg,))
+    comprobar(antes_bytes == despues_bytes, "leer y resumir no modifico ni un byte de las filas")
+
+    conv_sin = q("""insert into asistente.conversations (organization_id, canal, usuario_externo)
+                    values (%s, 'whatsapp', '573222222222') returning id""", (org,))[0][0]
+    for i, (rol, contenido) in enumerate((("user", "hola"), ("humano", "te ayudo"), ("user", "ok"))):
+        q("""insert into asistente.messages (organization_id, conversation_id, rol, contenido, creado_en)
+             values (%s, %s, %s, %s, now() + make_interval(secs => %s))""", (org, conv_sin, rol, contenido, i))
+    rec2 = db.historial_para_el_modelo(TENANT, str(conv_sin), 20)
+    comprobar(len(rec2) == 3 and all(m["content"] != H.BLOQUE_LEGADO for m in rec2),
+              "solo user/NULL y humano/NULL: ningun bloque de legado")
 finally:
     try:
         borrar_base()

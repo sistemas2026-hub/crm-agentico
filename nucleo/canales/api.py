@@ -42,6 +42,7 @@ from flask import Flask, jsonify, request
 
 from nucleo.canales import canal as canales
 from nucleo.canales import media, whatsapp
+from nucleo.relevo import historial as regla_historial
 from nucleo.conectores import catalogo as conectores
 from nucleo.config import editor, fuente
 from nucleo.config.fusion import fusionar_roles, modelo_fusionado
@@ -704,6 +705,18 @@ def _sesion_nueva(tenant: str, id_sesion: str, canal: str,
     return estado
 
 
+def _sincronizar_respuesta_en_memoria(historial: list[dict], desde: int,
+                                      respuesta: str) -> None:
+    """Deja la ULTIMA respuesta del asistente agregada en este turno (a partir
+    del indice 'desde') con el texto que de verdad salio. No toca lo anterior
+    al turno ni agrega nada si el turno no produjo respuesta."""
+    for msg in reversed(historial[desde:]):
+        if msg.get("role") == "assistant":
+            if msg.get("content") != respuesta:
+                msg["content"] = respuesta
+            return
+
+
 def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                   mensaje: str, canal: str, profile_id: str | None = None,
                   nombre_colaborador: str = "") -> dict:
@@ -837,6 +850,10 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                     "derivar a otra area salvo que el mensaje ACTUAL sea "
                     "claramente de un tema distinto al tuyo.")
             rol = estado["rol_activo"]
+
+    # Desde aca, todo lo que se agregue al historial es de ESTE turno. Lo usa
+    # _sincronizar_respuesta_en_memoria() al final para no tocar turnos previos.
+    inicio_turno = len(estado["historial"])
 
     # --- repregunta pendiente del verificador de agendamiento -----------------
     # nucleo/seguimiento/agendamiento.py dejo esto en un turno anterior porque
@@ -2043,6 +2060,15 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     # la base. Los tres bugs de derivacion del 08 y 09/09/2026 se veian todos
     # aca: uno anunciaba un pase que ya habia ocurrido, y saber que quien
     # escribia era 'ventas' -- no la puerta-- lo hacia obvio de inmediato.
+    # LO QUE EL MODELO RECUERDA ES LO QUE EL CLIENTE LEYO.
+    #
+    # Varias guardas reescriben la respuesta DESPUES de que el motor la agrego
+    # al historial (la promesa de traspaso sin registro, el aviso de escalada,
+    # la pregunta de cierre) y corregian solo la fila guardada. En vivo el
+    # modelo seguia recordando su texto original; tras un reinicio, el
+    # reconstruido traia el corregido. Un solo punto al final, para todas.
+    _sincronizar_respuesta_en_memoria(estado["historial"], inicio_turno, respuesta)
+
     rol_cfg_final = config.roles.get(rol)
     return {"respuesta": respuesta, "verificado": estado["sesion"].verificado,
             "cerrada": cerrada, "conversacion_id": conversation_id,
@@ -4128,9 +4154,10 @@ def conversaciones_responder_humano(id_conversacion):
     clave_sesion = canales.clave_sesion_de_fila(
         tenant, destino.get("canal"), destino["usuario_externo"])
     if clave_sesion in _sesiones and not reintento:
-        quien = autor
+        # La misma regla que la reconstruccion tras un reinicio: en vivo y
+        # reconstruido el modelo ve exactamente lo mismo (D8).
         _sesiones[clave_sesion]["historial"].append(
-            {"role": "assistant", "content": f"({quien}) {contenido}"})
+            regla_historial.entrada("assistant", "humano", contenido, autor))
 
     if devolver:
         persistencia.devolver_al_asistente(tenant, id_conversacion)
