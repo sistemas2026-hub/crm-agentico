@@ -27,6 +27,8 @@ escondio el problema.
   3. marcar_envio contra la base: exito, fallo, sin id, fila ajena, base rota
   4. el mecanismo completo contra la base, incluido "Meta acepto y no se guardo"
   5. punta a punta: POST de la respuesta humana -> fila con wamid
+  6. D15 + D17: Meta acepta y el recibo no se guarda; repetir con la misma clave
+     de idempotencia NUNCA produce un segundo POST
 ================================================================================
 """
 
@@ -50,6 +52,7 @@ from nucleo.canales import whatsapp                               # noqa: E402
 
 fallos: list[str] = []
 CRUDO = "CUERPO-CRUDO-DE-META-que-no-puede-persistirse"
+AUTOR = {"autor": "Operador de prueba", "autor_usuario_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7"}
 
 
 def revisar(condicion, que, porque=""):
@@ -324,8 +327,11 @@ else:
         api._config_de = lambda tenant: object()
         try:
             cliente = api.app.test_client()
+            # Desde B2.2 una respuesta de persona exige autor (nombre + id de
+            # usuario) y lleva su clave de idempotencia: lo arma el proxy.
             resp = cliente.post(f"/conversaciones/{conv}/mensajes",
-                                json={"tenant": TENANT, "mensaje": "respuesta de prueba"})
+                                json={"tenant": TENANT, "mensaje": "respuesta de prueba",
+                                      **AUTOR, "clave_idempotencia": str(uuid.uuid4())})
             datos = resp.get_json() or {}
             mid = datos.get("mensaje_id")
             revisar(resp.status_code == 201 and datos.get("entregado") is True
@@ -345,6 +351,45 @@ else:
                     f"{casado} {fila(mid)}")
         finally:
             whatsapp.enviar_texto, api._config_de = enviar_original, config_original
+
+        titulo("6. D15 + D17: Meta acepta, el recibo no se guarda, y se repite la accion")
+        # Cada mitad esta probada por separado (4b aca, reintento en
+        # tests/test_autor_y_reintento.py). Esto prueba que JUNTAS no reenvian:
+        # una entrega incierta deja la fila en 'pendiente', y un reintento con
+        # la misma clave sobre un 'pendiente' no vuelve a llamar a Meta.
+        posts = []
+        enviar_original, config_original = whatsapp.enviar_texto, api._config_de
+        marcar_original = api.persistencia.marcar_envio
+        whatsapp.enviar_texto = lambda config, tenant, para, texto: posts.append(texto) or "wamid.INCIERTO"
+        api._config_de = lambda tenant: object()
+        api.persistencia.marcar_envio = lambda *a, **k: False   # la base no guarda el recibo
+        try:
+            cliente = api.app.test_client()
+            clave = str(uuid.uuid4())
+            cuerpo = {"tenant": TENANT, "mensaje": "incierto", **AUTOR, "clave_idempotencia": clave}
+            r1, _log = con_log(lambda: cliente.post(f"/conversaciones/{conv}/mensajes", json=cuerpo))
+            d1 = r1.get_json() or {}
+            revisar(r1.status_code == 201 and d1.get("resultado") == "aceptado_sin_registro"
+                    and "aviso" not in d1,
+                    "primer envio: 'aceptado_sin_registro', sin aviso de fallo", f"{r1.status_code} {d1}")
+            mid = d1.get("mensaje_id")
+            revisar(bool(mid) and fila(mid)[1] == "pendiente",
+                    "la fila queda 'pendiente' (no 'fallido')", f"{fila(mid) if mid else None}")
+            for intento in (2, 3):
+                r, _log = con_log(lambda: cliente.post(f"/conversaciones/{conv}/mensajes", json=cuerpo))
+                d = r.get_json() or {}
+                revisar(r.status_code == 200 and d.get("ya_existia") is True
+                        and str(d.get("mensaje_id")) == str(mid),
+                        f"intento {intento} con la misma clave: reconoce el mensaje existente",
+                        f"{r.status_code} {d}")
+            revisar(len(posts) == 1, "Meta recibio UN solo POST en total: nunca hay segundo envio automatico",
+                    f"{len(posts)} POST")
+            filas_clave = admin.execute("select count(*) from asistente.messages where clave_idempotencia = %s",
+                                        (clave,)).fetchone()[0]
+            revisar(filas_clave == 1, "y hay UNA sola fila para esa clave", f"{filas_clave}")
+        finally:
+            whatsapp.enviar_texto, api._config_de = enviar_original, config_original
+            api.persistencia.marcar_envio = marcar_original
     finally:
         admin.execute("delete from public.organization where id in (%s, %s)", (str(ORG), str(OTRA)))
         admin.close()
