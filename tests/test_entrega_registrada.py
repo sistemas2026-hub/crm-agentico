@@ -120,16 +120,19 @@ revisar(CRUDO not in api._motivo_de_envio(KeyError(CRUDO)),
 revisar(CRUDO not in api._motivo_de_fallo({"codigo": 999999, "detalle": CRUDO, "error": CRUDO}),
         "el acuse fallido del webhook tampoco guarda lo que dijo Meta")
 
+from nucleo.observabilidad.registro import ref_proveedor           # noqa: E402
+
 WAMID = "wamid.HBgMNTczMDAxMjM0NTY3FQIAERgSQUJDREVGMTIzNDU2Nzg5MAA="
-huella = api._huella_wamid(WAMID)
-revisar(len(huella) == 12 and WAMID not in huella and huella == api._huella_wamid(WAMID),
+huella = ref_proveedor(WAMID)
+revisar(len(huella) == len("prv-") + 12 and WAMID not in huella and huella == ref_proveedor(WAMID),
         "el log lleva una huella estable del wamid, no el wamid", huella)
 fuente_api = (RAIZ / "nucleo" / "canales" / "api.py").read_text(encoding="utf-8")
-bloque_acuses = fuente_api[fuente_api.index("huella = _huella_wamid"):
+bloque_acuses = fuente_api[fuente_api.index("huella = ref_proveedor"):
                            fuente_api.index("nuestro = ESTADOS_DE_ENTREGA.get(crudo)")]
 revisar("estado.get(\"de\")" not in bloque_acuses and "estado.get('de')" not in bloque_acuses
-        and "estado.get('wamid')}" not in bloque_acuses,
-        "el log de acuses no imprime el telefono (ni parcial) ni el wamid entero")
+        and "estado.get(\"wamid\")" not in bloque_acuses.replace("ref_proveedor(estado.get(\"wamid\"))", ""),
+        "el log de acuses no imprime el telefono (ni parcial) ni el wamid entero "
+        "(el resto de los caminos: tests/test_registro_sin_pii.py)")
 
 # =============================================================================
 titulo("2. un solo mecanismo de envio")

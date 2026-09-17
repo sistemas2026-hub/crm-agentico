@@ -115,7 +115,24 @@ SUPABASE_SERVICE_ROLE_KEY  ⚠️  solo migraciones (ver abajo)
 DATABASE_URL               conexión al Postgres del Supabase propio
 POSTGRES_PASSWORD          la usa DATABASE_URL; separada para poder rearmarla
 POOLER_TENANT_ID           lo exige Supavisor en el usuario: postgres.<id>
+
+REGISTRO_CLAVE_HMAC        opcional: clave del HMAC con que el log nombra a una
+                            persona sin escribir su telefono
+                            (nucleo/observabilidad/registro.py). Sin ella se
+                            deriva de SECRETOS_CLAVE_MAESTRA
 ```
+
+### El log del motor no lleva datos de clientes
+
+Todo lo que el camino de un turno escribe en su log pasa por
+`nucleo/observabilidad/registro.py::registrar(componente, evento, **campos)`:
+evento de texto fijo, lo variable en campos que se redactan si tienen forma de
+telefono, wamid o texto libre, y las excepciones por tipo, sqlstate y
+`archivo:linea` -- nunca `str(e)`, que es donde viaja el valor que fallo. Para
+seguir un caso se usan ids internos (`conversation_id`, `mensaje`); a una
+persona se la nombra con `ref_sesion()` (HMAC, no hash plano: un telefono se
+enumera). `tests/test_registro_sin_pii.py` prohibe `print` en esos modulos e
+inyecta valores canario por cada camino de WhatsApp. Motivo y medicion: D20.
 
 `django-crm/.env.docker.local` (ignorado por git) apunta Django al mismo Postgres, sobreescribiendo el bloque de base de datos de `.env.docker`. El servicio `db` del compose sigue existiendo pero ya no se usa.
 

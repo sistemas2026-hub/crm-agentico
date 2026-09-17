@@ -46,6 +46,7 @@ from datetime import datetime, timedelta
 import requests
 
 from nucleo.herramientas import http as ejecutor_http
+from nucleo.observabilidad.registro import registrar
 
 TIMEOUT_SEGUNDOS = 15
 
@@ -110,7 +111,7 @@ def _caidas_simultaneas(base_url, headers, olt_id, board, port, sn_onu):
         r.raise_for_status()
         onus = r.json().get("onus") or []
     except Exception as e:
-        print(f"[incidentes] no se pudo correlacionar por tiempo: {type(e).__name__}: {e}")
+        registrar("incidentes", "no se pudo correlacionar por tiempo", error=e)
         return 0, None
 
     del_puerto = [o for o in onus

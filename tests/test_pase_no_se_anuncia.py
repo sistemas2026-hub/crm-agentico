@@ -182,7 +182,7 @@ afirmar("if candidato:" in cuerpo,
         "el respaldo sigue existiendo -- para lo que si vino a resolver: una "
         "redaccion vacia o un valor crudo tras varios intentos")
 afirmar(0 < cuerpo.find("if candidato:")
-        < cuerpo.find("se agotaron los {intentos} intentos de redaccion"),
+        < cuerpo.find("se agotaron los intentos de redaccion"),
         "y va ANTES del aviso generico, que queda para cuando no hay "
         "absolutamente nada escrito")
 afirmar("guardia_salida.verificar(candidato)" in cuerpo,
