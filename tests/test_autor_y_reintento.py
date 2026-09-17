@@ -141,6 +141,9 @@ class Mundo:
             return self.destino
         reemplazos = {
             (p, "agregar_mensaje_humano"): agregar,
+            # B3.3: la guarda de control; esta suite mide autor y reintento con
+            # la conversacion en manos de una persona.
+            (p, "control_efectivo_de"): lambda *a, **k: "humano",
             (p, "agregar_nota_interna"): lambda *a, **k: self.llamadas.append(("nota", a, k)) or "nota-1",
             (p, "marcar_envio"): lambda *a, **k: self.llamadas.append(("marcar_envio", a, k)),
             (p, "guardar_media"): lambda *a, **k: self.llamadas.append(("guardar_media", a, k)),

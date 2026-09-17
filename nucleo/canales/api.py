@@ -3981,6 +3981,37 @@ def _autor_y_clave(campos) -> tuple[str, str, str | None]:
     return nombre, usuario, (campos.get("clave_idempotencia") or "").strip() or None
 
 
+def _exigir_control_humano(tenant: str, id_conversacion: str):
+    """
+    GUARDA DEL RELEVO (B3.3, contrato X25): nada que escribe una persona le
+    llega al cliente mientras la conversacion la atiende la IA. Texto, media y
+    plantilla la llaman ANTES de guardar nada y antes de hablar con Meta.
+
+    Devuelve None si se puede seguir, o (respuesta, codigo) para devolver:
+      409  la controla la IA -- hay que intervenir primero
+      404  no existe o no es de este tenant
+      503  no se pudo leer el control: falla cerrado, no se envia a ciegas
+
+    Decide con control_efectivo() (nucleo/relevo/control.py), la misma regla
+    para todas las rutas: en una conversacion de legado escalada, que todavia
+    tiene control 'ia' por default, cuenta como humana y no se bloquea a quien
+    la esta atendiendo. La nota interna NO pasa por aca: no sale del equipo.
+    """
+    try:
+        control = persistencia.control_efectivo_de(tenant, id_conversacion)
+    except Exception as e:
+        print(f"[relevo] no se pudo leer el control de '{id_conversacion}': {type(e).__name__}")
+        return jsonify({"error": "No se pudo comprobar quien atiende la conversacion. "
+                                 "No se envio nada.", "codigo": "control_desconocido"}), 503
+    if control is None:
+        return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+    if control != "humano":
+        return jsonify({"error": "La IA esta atendiendo esta conversacion. Para escribirle "
+                                 "al cliente hay que intervenir primero.",
+                        "codigo": "control_ia", "control": control}), 409
+    return None
+
+
 def _ya_guardado(destino: dict) -> bool:
     """
     True si 'destino' es un REINTENTO de un mensaje que ya existia (misma
@@ -4022,6 +4053,9 @@ def conversaciones_enviar_plantilla(id_conversacion):
         autor, autor_id, clave = _autor_y_clave(cuerpo)
     except persistencia.AutorInvalido as e:
         return jsonify({"error": f"Autor invalido: {e}"}), 400
+    bloqueo = _exigir_control_humano(tenant, id_conversacion)
+    if bloqueo:
+        return bloqueo
 
     try:
         config = _config_de(tenant)
@@ -4170,6 +4204,9 @@ def conversaciones_responder_humano(id_conversacion):
         autor, autor_id, clave = _autor_y_clave(cuerpo)
     except persistencia.AutorInvalido as e:
         return jsonify({"error": f"Autor invalido: {e}"}), 400
+    bloqueo = _exigir_control_humano(tenant, id_conversacion)
+    if bloqueo:
+        return bloqueo
 
     try:
         destino = persistencia.agregar_mensaje_humano(
@@ -5927,6 +5964,9 @@ def conversaciones_enviar_media(id_conversacion):
         autor, autor_id, clave = _autor_y_clave(request.form)
     except persistencia.AutorInvalido as e:
         return jsonify({"error": f"Autor invalido: {e}"}), 400
+    bloqueo = _exigir_control_humano(tenant, id_conversacion)
+    if bloqueo:
+        return bloqueo
 
     contenido = subido.read()
     mime = subido.mimetype or "application/octet-stream"

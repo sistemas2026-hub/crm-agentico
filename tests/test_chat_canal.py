@@ -325,7 +325,9 @@ comprobar(resp.status_code == 204
 
 # respuesta de una persona en un hilo simulado, devolviendo al asistente
 r_ses, s_ses = dos_sesiones()
-with Espia(respuestas={"agregar_mensaje_humano":
+# B3.3: la respuesta humana pasa por la guarda de control; este caso mide las
+# sesiones, asi que la conversacion esta en manos de una persona.
+with Espia(respuestas={"control_efectivo_de": "humano", "agregar_mensaje_humano":
                        {"canal": "whatsapp-simulado", "usuario_externo": TEL,
                         "ticket_operativo": None, "mensaje_id": "m-1"}}):
     resp = cliente.post("/conversaciones/conv-sim/mensajes",

@@ -164,6 +164,8 @@ class Mundo:
                 "registrar_mensaje": _registrar,
                 "actualizar_contenido_mensaje": _actualizar,
                 "agregar_mensaje_humano": _agregar_humano,
+                # B3.3: la guarda de control (la persona tiene la conversacion).
+                "control_efectivo_de": lambda *a, **k: "humano",
                 "conversacion_vencida": lambda *a, **k: None,
                 "identificar_cliente": lambda *a, **k: None,
                 "resumen_anterior": lambda *a, **k: None,

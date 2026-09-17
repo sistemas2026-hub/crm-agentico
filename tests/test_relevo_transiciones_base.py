@@ -437,6 +437,47 @@ try:
         else:
             comprobar(not r6.get("pausada") and llamadas_modelo,
                       "legado (version 0): se retoma como hasta hoy, hasta la reconciliacion de G8")
+
+    # -----------------------------------------------------------------------
+    print("\n== 7. B3.3: la guarda de control con la base real ==")
+    envios = []
+    orig_texto = api.whatsapp.enviar_texto
+    api.whatsapp.enviar_texto = lambda *a, **k: envios.append(1) or "wamid.G"
+    token = api._TOKEN_SERVICIO
+    api._TOKEN_SERVICIO = None
+    cliente = api.app.test_client()
+
+    def responder(conv):
+        antes = q("select count(*) from asistente.messages where conversation_id = %s", (conv,))[0][0]
+        r = cliente.post(f"/conversaciones/{conv}/mensajes",
+                         json={"tenant": TENANT, "mensaje": "hola, soy Ana", "autor": ANA[1],
+                               "autor_usuario_id": ANA[0]})
+        despues = q("select count(*) from asistente.messages where conversation_id = %s", (conv,))[0][0]
+        return r.status_code, despues - antes
+    try:
+        agendada = str(q("""insert into asistente.conversations
+                              (organization_id, canal, usuario_externo, escalada_a_humano, necesita_atencion_humana)
+                            values (%s, 'whatsapp', '573000000070', true, false) returning id""", (org,))[0][0])
+        comprobar(responder(agendada) == (409, 0) and not envios,
+                  "legado agendado solo (la IA sigue atendiendo): 409, cero filas, cero envios a Meta")
+        leg_h = str(q("""insert into asistente.conversations
+                           (organization_id, canal, usuario_externo, escalada_a_humano, necesita_atencion_humana)
+                         values (%s, 'whatsapp-simulado', '573000000071', true, true) returning id""", (org,))[0][0])
+        comprobar(responder(leg_h) == (201, 1),
+                  "legado escalado con control 'ia' por default: NO se bloquea (control efectivo humano)")
+        gob = nueva_conv(org, "573000000072")
+        T.escalar(TENANT, gob)
+        comprobar(responder(gob) == (201, 1), "gobernada escalada: la persona responde")
+        T.devolver_a_ia(TENANT, gob, operador_id=ANA[0], operador_nombre=ANA[1])
+        comprobar(responder(gob) == (409, 0), "devuelta a la IA: 409, cero filas")
+        T.intervenir(TENANT, gob, operador_id=ANA[0], operador_nombre=ANA[1])
+        comprobar(responder(gob) == (201, 1), "despues de intervenir: la persona responde")
+        nota = cliente.post(f"/conversaciones/{agendada}/nota",
+                            json={"tenant": TENANT, "mensaje": "revisar", "autor": ANA[1], "autor_usuario_id": ANA[0]})
+        comprobar(nota.status_code == 201, "la nota interna no se bloquea con la IA atendiendo")
+    finally:
+        api.whatsapp.enviar_texto = orig_texto
+        api._TOKEN_SERVICIO = token
 finally:
     try:
         with psycopg.connect(dsn("postgres"), autocommit=True) as con:
