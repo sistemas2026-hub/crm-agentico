@@ -104,6 +104,37 @@ except TypeError as e:
     choque = f"TypeError: {e}"
 revisar(choque == "[x] contador evento=control_no_determinado componente=relevo",
         "un campo llamado 'evento' o 'componente' no choca con los parametros", choque)
+
+
+class ValorQueRevienta(int):
+    """Un valor cuyo formateo levanta: la observabilidad no puede propagarlo."""
+
+    def __str__(self):
+        raise RuntimeError(MSG)
+
+
+class SalidaCerrada(io.StringIO):
+    def write(self, *_):
+        raise ValueError("I/O operation on closed file")
+
+
+with contextlib.redirect_stdout(io.StringIO()) as capturada:
+    try:
+        registro.registrar("x", "evento", valor=ValorQueRevienta(3), otro={ValorQueRevienta(1), "a"})
+        levanto = None
+    except Exception as e:                                        # noqa: BLE001
+        levanto = type(e).__name__
+revisar(levanto is None and "[registro] no se pudo formatear" in capturada.getvalue()
+        and MSG not in capturada.getvalue(),
+        "D26: un valor que no se puede formatear no levanta: sale una linea fija, sin su texto",
+        f"levanto={levanto} salida={capturada.getvalue()!r}")
+try:
+    with contextlib.redirect_stdout(SalidaCerrada()):
+        registro.registrar("x", "evento", n=1)
+    levanto = None
+except Exception as e:                                            # noqa: BLE001
+    levanto = type(e).__name__
+revisar(levanto is None, "D26: si no se puede escribir el log, registrar() no levanta", f"{levanto}")
 revisar(f("x", "evento", obj=object()) == "[x] evento obj=<object>",
         "un objeto cualquiera se describe por su tipo, nunca por su repr")
 
