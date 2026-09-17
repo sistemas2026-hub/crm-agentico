@@ -817,32 +817,6 @@ def guardar_ticket_operativo(tenant: str, conversation_id: str,
               f"{ticket}: {type(e).__name__}: {e}")
 
 
-def devolver_al_asistente(tenant: str, conversation_id: str) -> None:
-    """
-    Saca la conversacion de la pausa: el asistente vuelve a atenderla.
-
-    NO borra el caso ni el ticket -- siguen ahi, y por eso cuando el cliente
-    diga que ya quedo se cierran los tres juntos. Lo unico que cambia es quien
-    contesta el proximo mensaje.
-
-    Lo decide la persona al responder, no el sistema: quien acaba de aplicar
-    un cambio sabe si su parte termino o si todavia le esta preguntando algo
-    al cliente. Adivinarlo desde el codigo es como se termina con dos
-    interlocutores hablando encima.
-    """
-    try:
-        with sesion(tenant) as (cur, org):
-            cur.execute(
-                """update asistente.conversations
-                   set escalada_a_humano = false, necesita_atencion_humana = false,
-                       actualizado_en = now()
-                   where organization_id = %s and id = %s""",
-                (org, conversation_id))
-    except Exception as e:
-        print(f"[persistencia] no se pudo devolver la conversacion al "
-              f"asistente: {type(e).__name__}: {e}")
-
-
 def atendida_por_humano(tenant: str, conversation_id: str) -> bool:
     """
     Si alguien del equipo ya le respondio al cliente en esta conversacion.
@@ -1877,39 +1851,6 @@ def registrar_estado_escalada(tenant: str, conversation_id: str, estado: str,
               f"{type(e).__name__}: {e}")
 
 
-def tomar_caso(tenant: str, conversation_id: str, por: str | None,
-               soltar: bool = False) -> bool:
-    """
-    Alguien se hace cargo de este caso -- o lo suelta.
-
-    NO ES marcar_atendida(). Esa significa "resuelto por otro canal" y
-    habilita dos cierres automaticos: el "ok, gracias" del cliente y el
-    barrido por plazo vencido. Tomar un caso no resuelve nada; solo dice
-    quien lo tiene, y por eso NO toca 'atendida_manual'.
-
-    Reversible a proposito, al reves que marcar_atendida(): un caso se toma
-    por error, o se acaba el turno, o resulta que era de otra area. Soltar es
-    poner 'tomada_por' en NULL.
-
-    Devuelve False si la conversacion no existe o no es de este tenant.
-    """
-    with sesion(tenant) as (cur, org):
-        if soltar:
-            cur.execute(
-                """update asistente.conversations
-                   set tomada_por = null, tomada_en = null
-                   where organization_id = %s and id = %s""",
-                (org, conversation_id))
-        else:
-            cur.execute(
-                """update asistente.conversations
-                   set tomada_por = %s, tomada_en = now(),
-                       actualizado_en = actualizado_en
-                   where organization_id = %s and id = %s""",
-                (por or "alguien del equipo", org, conversation_id))
-        return cur.rowcount > 0
-
-
 def marcar_atendida(tenant: str, conversation_id: str, por: str | None) -> bool:
     """
     Marca una conversacion escalada como atendida SIN pasar por el chat --
@@ -1933,43 +1874,6 @@ def marcar_atendida(tenant: str, conversation_id: str, por: str | None) -> bool:
                where organization_id = %s and id = %s""",
             (por, org, conversation_id))
         return cur.rowcount > 0
-
-
-def resolver_conversacion(tenant: str, conversation_id: str,
-                          por: str | None) -> dict | None:
-    """
-    Da el caso por TERMINADO: lo cierra y lo saca de la bandeja.
-
-    Distinto de marcar_atendida(), y la diferencia importa:
-
-      atendida   alguien esta en esto   -> sale de "Sin atender", sigue viva
-      resuelta   esto ya termino        -> se cierra
-
-    Cerrarla es lo que hace que el proximo mensaje de esa persona empiece un
-    hilo nuevo en vez de pegarse a este -- el mismo efecto que el cierre por
-    inactividad, pero decidido por alguien en vez de por un reloj. Sin esto,
-    un caso resuelto hoy sigue arrastrando su contexto una semana despues
-    (medido el 18/08/2026: un hilo llego a 67 mensajes mezclando tres
-    problemas distintos, y el modelo citaba mediciones de horas antes como
-    si fueran de ahora).
-
-    Devuelve {'usuario_externo', 'canal'} de la conversacion cerrada -- quien
-    llama los necesita para descartar tambien la sesion viva en memoria, que
-    si no seguiria recordando el hilo aunque la base ya no. El canal va porque
-    la clave de esa sesion lo incluye (nucleo/canales/canal.py). None si no
-    existe.
-    """
-    with sesion(tenant) as (cur, org):
-        cur.execute(
-            """update asistente.conversations
-               set estado = 'cerrada', atendida_manual = true,
-                   atendida_por = coalesce(%s, atendida_por),
-                   actualizado_en = now()
-               where organization_id = %s and id = %s
-               returning usuario_externo, canal""",
-            (por, org, conversation_id))
-        fila = cur.fetchone()
-        return dict(fila) if fila else None
 
 
 def borrar_conversacion(tenant: str, conversation_id: str) -> dict | None:

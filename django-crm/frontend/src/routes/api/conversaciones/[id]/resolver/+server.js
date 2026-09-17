@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
+import { autorDeSesion } from '$lib/server/v2/autor.js';
 
 /**
  * Proxy para dar un caso por TERMINADO. Ver nucleo/canales/api.py:
@@ -18,7 +19,7 @@ import { headersMotor } from '$lib/server/v2/motor-headers.js';
  *
  * @type {import('./$types').RequestHandler}
  */
-export async function POST({ params, locals, fetch }) {
+export async function POST({ params, locals, fetch, request }) {
   if (!locals.user) {
     return json({ error: 'No autenticado' }, { status: 401 });
   }
@@ -37,7 +38,11 @@ export async function POST({ params, locals, fetch }) {
       method: 'POST',
       headers: headersMotor({ 'Content-Type': 'application/json' }),
       // 'por' sale de la sesion, nunca del cuerpo que manda el navegador.
-      body: JSON.stringify({ tenant, por: locals.user.email })
+      body: JSON.stringify({
+        tenant,
+        ...autorDeSesion(locals),
+        clave_operacion: (await request.json().catch(() => ({})))?.clave_operacion
+      })
     });
     const datos = await resp.json();
     if (!resp.ok) {

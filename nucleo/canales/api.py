@@ -43,6 +43,7 @@ from flask import Flask, jsonify, request
 from nucleo.canales import canal as canales
 from nucleo.canales import media, whatsapp
 from nucleo.relevo import historial as regla_historial
+from nucleo.relevo import transiciones
 from nucleo.conectores import catalogo as conectores
 from nucleo.config import editor, fuente
 from nucleo.config.fusion import fusionar_roles, modelo_fusionado
@@ -1038,6 +1039,15 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                     "verificado": estado["sesion"].verificado,
                     "pausada": True}
         # El caso se cerro: el asistente vuelve a atender desde este turno.
+        # En la verdad nueva (B3.2), si alguien la tiene a cargo o dejo un
+        # pendiente interno NO se le quita: queda un aviso. La pausa de este
+        # turno la sigue decidiendo el legado, como hasta hoy.
+        if estado.get("conversacion_id"):
+            try:
+                transiciones.caso_externo_cerrado(tenant, estado["conversacion_id"])
+            except Exception as e:
+                print(f"[relevo] no se pudo registrar el cierre externo del caso: "
+                      f"{type(e).__name__}")
         estado["escalada"] = False
         estado["caso_id"] = None
         # Y vuelve a poder escalar: el caso anterior ya no esta abierto, asi
@@ -1666,6 +1676,22 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                     posponer = True
 
             if not posponer:
+                # RESERVA DEL CONTROL HUMANO, antes de cualquier efecto de la
+                # escalada (ticket operativo, caso del CRM). Escritura en
+                # paralelo (B3.2): la verdad nueva queda en 'humano' aunque
+                # despues fallen el ticket o el CRM, y nunca vuelve sola a la
+                # IA. Todavia no decide la pausa -- eso sigue en el legado
+                # hasta el corte de control --, por eso un fallo aca se anota
+                # y no detiene el turno. Si ya se agendo una visita sola
+                # (necesita_humano=False) no hay nada que reservar.
+                if necesita_humano:
+                    try:
+                        transiciones.escalar(
+                            tenant, conversation_id, motivo=evaluacion.get("motivo", ""),
+                            clave=f"escalada:{mensaje_id}" if mensaje_id else None)
+                    except Exception as e:
+                        print(f"[relevo] no se pudo reservar el control humano: "
+                              f"{type(e).__name__}")
                 # El trabajo queda anotado donde la operacion lo ve, con un
                 # tecnico asignado -- no solo en la bandeja interna del
                 # asistente. Distinto del agendamiento automatico: eso decide
@@ -4160,7 +4186,17 @@ def conversaciones_responder_humano(id_conversacion):
             regla_historial.entrada("assistant", "humano", contenido, autor))
 
     if devolver:
-        persistencia.devolver_al_asistente(tenant, id_conversacion)
+        # La ruta de tickets ya ofrecia devolver: se conserva tal cual, ahora
+        # por la transicion unica. En legado (version 0) escribe solo las
+        # banderas, como antes. "Responder y devolver" desde la bandeja (T6)
+        # NO se habilita hasta G9.
+        try:
+            transiciones.devolver_a_ia(
+                tenant, id_conversacion, operador_id=autor_id, operador_nombre=autor,
+                clave=f"devolver:{clave}" if clave else None)
+        except Exception as e:
+            print(f"[relevo] no se pudo devolver la conversacion al asistente: "
+                  f"{type(e).__name__}")
         # Y la sesion VIVA, no solo la base: la pausa se decide con lo que
         # tiene este proceso en memoria, asi que sin esto el asistente seguia
         # callado hasta el proximo reinicio.
@@ -5795,24 +5831,33 @@ def conversaciones_atender(id_conversacion):
     caso, y el barrido por plazo vencido lo cierra solo. Tomar un caso para
     trabajarlo lo dejaba expuesto a los dos.
 
-    Cuerpo: {tenant, por?, soltar?}
+    Cuerpo: {tenant, autor, autor_usuario_id, soltar?, clave_operacion?}
+
+    Tomar asigna; soltar quita la asignacion y la conversacion SIGUE esperando
+    a una persona (no vuelve a la IA). Ver nucleo/relevo/transiciones.py.
     """
     cuerpo = request.get_json(force=True, silent=True) or {}
     tenant = cuerpo.get("tenant")
     if not tenant:
         return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    try:
+        autor, autor_id, _ = _autor_y_clave(cuerpo)
+    except persistencia.AutorInvalido as e:
+        return jsonify({"error": f"Autor invalido: {e}"}), 400
 
     soltar = bool(cuerpo.get("soltar"))
+    clave = (cuerpo.get("clave_operacion") or "").strip() or None
     try:
-        existe = persistencia.tomar_caso(tenant, id_conversacion,
-                                         cuerpo.get("por"), soltar)
+        hacer = transiciones.soltar if soltar else transiciones.tomar
+        r = hacer(tenant, id_conversacion, operador_id=autor_id, operador_nombre=autor, clave=clave)
     except Exception as e:
-        print(f"[conversaciones] fallo al tomar el caso: {type(e).__name__}: {e}")
+        print(f"[conversaciones] fallo al tomar el caso: {type(e).__name__}")
         return jsonify({"error": "No se pudo guardar."}), 500
 
-    if not existe:
+    if r.motivo == "no_existe":
         return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
-    return jsonify({"tomada": not soltar, "por": None if soltar else cuerpo.get("por")})
+    return jsonify({"tomada": not soltar, "por": None if soltar else autor,
+                    "aplicada": r.aplicada, "relevo_version": r.version})
 
 
 @app.post("/conversaciones/<id_conversacion>/humano/media")
@@ -6100,27 +6145,36 @@ def conversaciones_resolver(id_conversacion):
     seguiria recordando el historial, si ya escalo y el rol activo -- la base
     diria 'cerrada' y el asistente contestaria como si nada hubiera pasado.
 
-    Cuerpo: {tenant, por?}
+    Cuerpo: {tenant, autor, autor_usuario_id, clave_operacion?}
+
+    Cerrar NO es devolver a la IA: libera la asignacion y deja la
+    conversacion cerrada. Ver nucleo/relevo/transiciones.py.
     """
     cuerpo = request.get_json(force=True, silent=True) or {}
     tenant = cuerpo.get("tenant")
     if not tenant:
         return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    try:
+        autor, autor_id, _ = _autor_y_clave(cuerpo)
+    except persistencia.AutorInvalido as e:
+        return jsonify({"error": f"Autor invalido: {e}"}), 400
 
     try:
-        usuario = persistencia.resolver_conversacion(tenant, id_conversacion,
-                                                     cuerpo.get("por"))
+        r = transiciones.resolver(tenant, id_conversacion, operador_id=autor_id,
+                                  operador_nombre=autor,
+                                  clave=(cuerpo.get("clave_operacion") or "").strip() or None)
     except Exception as e:
-        print(f"[conversaciones] fallo al resolver: {type(e).__name__}: {e}")
+        print(f"[conversaciones] fallo al resolver: {type(e).__name__}")
         return jsonify({"error": "No se pudo guardar."}), 500
 
-    if usuario is None:
+    if r.motivo == "no_existe":
         return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
 
     # La clave de _sesiones lleva el canal: sin el, resolver un hilo del
     # simulador descartaba tambien la sesion real del mismo telefono.
-    _sesiones.pop(canales.clave_sesion_de_fila(
-        tenant, usuario["canal"], usuario["usuario_externo"]), None)
+    if r.datos.get("usuario_externo"):
+        _sesiones.pop(canales.clave_sesion_de_fila(
+            tenant, r.datos.get("canal"), r.datos["usuario_externo"]), None)
     return jsonify({"resuelta": True})
 
 

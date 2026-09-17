@@ -144,7 +144,7 @@ class Mundo:
             (p, "agregar_nota_interna"): lambda *a, **k: self.llamadas.append(("nota", a, k)) or "nota-1",
             (p, "marcar_envio"): lambda *a, **k: self.llamadas.append(("marcar_envio", a, k)),
             (p, "guardar_media"): lambda *a, **k: self.llamadas.append(("guardar_media", a, k)),
-            (p, "devolver_al_asistente"): lambda *a, **k: self.llamadas.append(("devolver", a, k)),
+            (api.transiciones, "devolver_a_ia"): lambda *a, **k: self.llamadas.append(("devolver", a, k)),
             (api.whatsapp, "enviar_texto"): lambda *a, **k: self.llamadas.append(("enviar_texto", a, k)) or "wamid.1",
             (api.whatsapp, "enviar_media"): lambda *a, **k: self.llamadas.append(("enviar_media", a, k)) or "wamid.2",
             (api.whatsapp, "enviar_plantilla_aprobada"): lambda *a, **k: self.llamadas.append(("enviar_plantilla", a, k)) or "wamid.3",

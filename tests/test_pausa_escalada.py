@@ -138,6 +138,9 @@ class Turno:
             esc: {"caso_sigue_abierto": _caso_sigue_abierto,
                   "evaluar": _evaluar},
             mot: {"responder": _responder},
+            # B3.2: el cierre externo del caso tambien se anota en la verdad
+            # nueva; aca se mide la DECISION de pausar, no esa escritura.
+            api.transiciones: {"caso_externo_cerrado": lambda *a, **k: None},
             api: {"_resolver_verificacion_pendiente": lambda *a, **k: None,
                   "_hay_verificacion_pendiente": lambda *a, **k: False},
             api.consumo: {"estado_del_gasto": lambda *a, **k:

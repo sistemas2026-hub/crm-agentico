@@ -285,11 +285,29 @@ def dos_sesiones():
     api._sesiones[("rapilink", "whatsapp-simulado", TEL)] = s
     return r, s
 
+AUTOR = {"autor": "Ana", "autor_usuario_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7"}
+
+
+from contextlib import contextmanager                              # noqa: E402
+from nucleo.relevo import transiciones as _T                       # noqa: E402
+
+
+@contextmanager
+def resolver_devuelve(ident):
+    """Desde B3.2 /resolver pasa por transiciones.resolver(): se sustituye para
+    que devuelva la identidad de la conversacion sin tocar una base."""
+    real = _T.resolver
+    _T.resolver = lambda *a, **k: _T.Resultado(True, False, 0, None, "legado", datos=ident)
+    try:
+        yield
+    finally:
+        _T.resolver = real
+
+
 # resolver un hilo simulado
 r_ses, s_ses = dos_sesiones()
-with Espia(respuestas={"resolver_conversacion":
-                       {"usuario_externo": TEL, "canal": "whatsapp-simulado"}}):
-    resp = cliente.post("/conversaciones/conv-sim/resolver", json={"tenant": "rapilink"})
+with Espia(), resolver_devuelve({"usuario_externo": TEL, "canal": "whatsapp-simulado"}):
+    resp = cliente.post("/conversaciones/conv-sim/resolver", json={"tenant": "rapilink", **AUTOR})
 comprobar(resp.status_code == 200
           and ("rapilink", "whatsapp-simulado", TEL) not in api._sesiones
           and api._sesiones.get(("rapilink", "whatsapp", TEL)) is r_ses,
@@ -322,9 +340,8 @@ comprobar(r_ses["historial"] == [] and r_ses["escalada"] is True,
 
 # una fila con un canal historico desconocido no rompe una operacion ya guardada
 r_ses, s_ses = dos_sesiones()
-with Espia(respuestas={"resolver_conversacion":
-                       {"usuario_externo": TEL, "canal": "canal-viejo"}}):
-    resp = cliente.post("/conversaciones/conv-vieja/resolver", json={"tenant": "rapilink"})
+with Espia(), resolver_devuelve({"usuario_externo": TEL, "canal": "canal-viejo"}):
+    resp = cliente.post("/conversaciones/conv-vieja/resolver", json={"tenant": "rapilink", **AUTOR})
 comprobar(resp.status_code == 200 and len(api._sesiones) == 2,
           "resolver con canal historico desconocido: 200 y ninguna sesion tocada")
 

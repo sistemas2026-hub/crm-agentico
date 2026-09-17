@@ -257,7 +257,10 @@
           // Soltar es el mismo camino: quien lo tomo por error, o termina su
           // turno, lo devuelve a la cola. Tomar un caso NO es resolverlo, y
           // por eso se puede deshacer -- 'Marcar como resuelta' no.
-          soltar: !!tomadaPor
+          soltar: !!tomadaPor,
+          // Una por clic: si la respuesta se pierde y se vuelve a pulsar, el
+          // motor reconoce la misma operacion y no deja dos eventos.
+          clave_operacion: crypto.randomUUID()
         })
       });
       const datos = await resp.json();
@@ -676,7 +679,8 @@
     try {
       const resp = await fetch(`/api/conversaciones/${conversacion.id}/resolver`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clave_operacion: crypto.randomUUID() })
       });
       const datos = await resp.json();
       if (!resp.ok) {
