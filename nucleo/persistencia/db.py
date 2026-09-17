@@ -80,6 +80,11 @@ from nucleo.observabilidad.registro import id_interno, registrar
 _ORGS: dict[str, str] = {}
 
 
+class TenantSinConfiguracion(RuntimeError):
+    """El slug no tiene fila en asistente.tenant_config. Mensaje escrito por
+    Dexter: se puede mostrar (ver nucleo/canales/errores.py)."""
+
+
 def _organizacion(cur, tenant: str) -> str:
     """
     slug -> organization_id, contra asistente.tenant_config.
@@ -94,7 +99,7 @@ def _organizacion(cur, tenant: str) -> str:
                 (tenant,))
     fila = cur.fetchone()
     if not fila:
-        raise RuntimeError(
+        raise TenantSinConfiguracion(
             f"El tenant '{tenant}' no tiene configuracion cargada, asi que no "
             f"se sabe a que organizacion pertenece. "
             f"Cargarla con: py -3.13 cli/cargar_config.py tenants/{tenant}.config.yaml")

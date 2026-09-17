@@ -133,8 +133,8 @@ def _cargar(tenant: str) -> dict[str, str]:
             filas = cur.fetchall()
     except Exception as e:
         raise ErrorSecreto(
-            f"No se pudieron leer los secretos de '{tenant}': "
-            f"{type(e).__name__}: {e}") from e
+            f"No se pudieron leer los secretos de '{tenant}' "
+            f"({type(e).__name__}).") from e
 
     if not filas:
         return {}

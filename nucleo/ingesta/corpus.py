@@ -75,6 +75,11 @@ def perfil_desde_config(config):
     ), tokens
 
 
+class RolesInvalidos(ValueError):
+    """Roles declarados que el tenant no tiene. Mensaje escrito por Dexter:
+    se puede mostrar (ver nucleo/canales/errores.py)."""
+
+
 def roles_validos(config, roles_texto: str | None) -> list[str] | None:
     """
     'soporte, facturacion' -> ['soporte', 'facturacion'], validado contra los
@@ -93,7 +98,7 @@ def roles_validos(config, roles_texto: str | None) -> list[str] | None:
     nombres = [r.strip() for r in str(roles_texto).split(",") if r.strip()]
     desconocidos = [r for r in nombres if r not in config.roles]
     if desconocidos:
-        raise ValueError(
+        raise RolesInvalidos(
             f"rol(es) inexistente(s): {', '.join(desconocidos)}. "
             f"Roles del tenant: {', '.join(sorted(config.roles))}")
     return nombres or None

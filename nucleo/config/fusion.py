@@ -55,6 +55,11 @@ from nucleo.config.schema import Rol
 from nucleo.observabilidad.registro import registrar
 
 
+class FusionInvalida(ValueError):
+    """No se puede armar la union de agentes pedida. Mensaje escrito por
+    Dexter: se puede mostrar (ver nucleo/canales/errores.py)."""
+
+
 def fusionar_roles(config, nombres: list[str]) -> tuple[str, Rol]:
     """
     Devuelve (nombre_sintetico, Rol) con la union de los roles pedidos.
@@ -69,11 +74,11 @@ def fusionar_roles(config, nombres: list[str]) -> tuple[str, Rol]:
     nucleo/seguridad/verificacion.py::nivel_requerido.
     """
     if not nombres:
-        raise ValueError("No hay ningun agente asignado.")
+        raise FusionInvalida("No hay ningun agente asignado.")
 
     desconocidos = [n for n in nombres if n not in config.roles]
     if desconocidos:
-        raise ValueError(
+        raise FusionInvalida(
             f"agente(s) inexistente(s): {', '.join(sorted(desconocidos))}. "
             f"Agentes del tenant: {', '.join(sorted(config.roles))}")
 
@@ -84,7 +89,7 @@ def fusionar_roles(config, nombres: list[str]) -> tuple[str, Rol]:
 
     audiencias = {r.orientado_a for r in roles}
     if len(audiencias) > 1:
-        raise ValueError(
+        raise FusionInvalida(
             "No se pueden fusionar agentes que le hablan a audiencias "
             "distintas (colaborador y cliente_final): el de cliente final "
             "verifica identidad y solo ve SU propio servicio, el interno da "

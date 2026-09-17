@@ -42,6 +42,7 @@ from werkzeug.exceptions import HTTPException
 
 from nucleo.canales import canal as canales
 from nucleo.canales import media, whatsapp
+from nucleo.canales.errores import estado_http_de, fallo, mensaje_publico
 from nucleo.relevo import historial as regla_historial
 from nucleo.relevo import transiciones
 from nucleo.relevo.control import control_efectivo
@@ -549,8 +550,8 @@ def _error_al_guardar(e: Exception):
     inalcanzable, el tenant sin cargar) es un fallo del servidor, no del
     formulario: no se devuelve 400 porque no hay nada que el usuario pueda
     corregir escribiendo distinto."""
-    registrar("editor", "fallo al guardar la configuracion", error=e)
-    return jsonify({"error": f"No se pudo guardar en la base: {type(e).__name__}: {e}"}), 500
+    return fallo(500, "guardado_fallido", "No se pudo guardar la configuracion en la base.",
+                 componente="editor", e=e)
 
 
 def _agente_supervisor_json(config) -> dict | None:
@@ -2426,7 +2427,7 @@ def chat():
         try:
             rol, rol_fusionado = fusionar_roles(config, asignados)
         except ValueError as e:
-            return jsonify({"error": str(e)}), 400
+            return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
         # Copia por peticion, no se muta el config cacheado: el rol fusionado
         # existe solo para este turno. Si se registrara en el compartido,
         # apareceria como un agente mas en GET /agentes y en el editor.
@@ -2448,7 +2449,7 @@ def chat():
                                profile_id=profile_id,
                                nombre_colaborador=nombre_colaborador)
     except motor.ErrorMotor as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
 
     # 'pausada' solo viaja cuando es cierto: es la forma que ya devolvia /chat
     # antes de que existiera el webhook, y el simulador depende de ella.
@@ -2811,7 +2812,7 @@ def agentes_flujo_guardar():
         config = editor.guardar_flujo_derivacion(
             tenant, destinos, cuerpo.get("atiende") or {})
     except editor.ErrorEdicion as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
         return _error_al_guardar(e)
 
@@ -2836,7 +2837,7 @@ def agentes_crear():
             herramientas=cuerpo.get("herramientas", []),
         )
     except editor.ErrorEdicion as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
         return _error_al_guardar(e)
 
@@ -2860,7 +2861,7 @@ def agentes_editar(nombre):
             herramientas=cuerpo.get("herramientas", []),
         )
     except editor.ErrorEdicion as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
         return _error_al_guardar(e)
 
@@ -2877,7 +2878,7 @@ def agentes_borrar(nombre):
     try:
         editor.borrar_rol(tenant, nombre)
     except editor.ErrorEdicion as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
         return _error_al_guardar(e)
 
@@ -2967,7 +2968,7 @@ def configuracion_persona():
             instrucciones_adicionales=cuerpo.get("instrucciones_adicionales", ""),
         )
     except editor.ErrorEdicion as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
         return _error_al_guardar(e)
 
@@ -2986,7 +2987,7 @@ def configuracion_identidad():
         config = editor.guardar_identidad_descripcion(
             tenant, descripcion=cuerpo.get("descripcion", ""))
     except editor.ErrorEdicion as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
         return _error_al_guardar(e)
 
@@ -3009,7 +3010,7 @@ def configuracion_plazo_visita_tecnica():
     try:
         config = editor.guardar_plazo_visita_tecnica(tenant, dias)
     except editor.ErrorEdicion as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
         return _error_al_guardar(e)
 
@@ -3089,7 +3090,7 @@ def configuracion_canal_whatsapp():
             tenant, activo=bool(cuerpo.get("activo", False)),
             numero_visible=cuerpo.get("numero_visible") or None)
     except editor.ErrorEdicion as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
         return _error_al_guardar(e)
 
@@ -3119,7 +3120,8 @@ def configuracion_variables_listar():
     try:
         config = _config_de(tenant)
     except Exception as e:
-        return jsonify({"error": f"No se pudo cargar la config: {e}"}), 500
+        return fallo(500, "config_no_cargada", "No se pudo cargar la configuracion.",
+                     componente="configuracion", e=e)
     return jsonify({"variables": dict(config.variables_tenant or {})})
 
 
@@ -3145,7 +3147,7 @@ def configuracion_variable_guardar(nombre):
     try:
         config = editor.guardar_variable_tenant(tenant, nombre, valor)
     except editor.ErrorEdicion as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
         return _error_al_guardar(e)
 
@@ -3162,7 +3164,7 @@ def configuracion_variable_borrar(nombre):
     try:
         editor.borrar_variable_tenant(tenant, nombre)
     except editor.ErrorEdicion as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
         return _error_al_guardar(e)
 
@@ -3204,7 +3206,8 @@ def interno_ejecutar_herramienta(nombre: str):
     try:
         config = _config_de(tenant)
     except Exception as e:
-        return jsonify({"error": f"No se pudo cargar la config: {e}"}), 500
+        return fallo(500, "config_no_cargada", "No se pudo cargar la configuracion.",
+                     componente="interno", e=e)
 
     herramienta = next((h for h in config.herramientas if h.nombre == nombre), None)
     if herramienta is None:
@@ -3222,9 +3225,8 @@ def interno_ejecutar_herramienta(nombre: str):
     try:
         salida = motor.ejecutar_para_servicio(config, herramienta, argumentos)
     except Exception as e:
-        registrar("interno", "fallo la herramienta invocada por servicio",
-                  herramienta=nombre, error=e)
-        return jsonify({"error": f"{type(e).__name__}: {e}"}), 502
+        return fallo(502, "herramienta_fallo", "La herramienta no pudo completarse.",
+                     componente="interno", e=e, estado_proveedor=estado_http_de(e))
 
     return jsonify({"resultado": salida})
 
@@ -3352,7 +3354,7 @@ def configuracion_guias_tv_guardar():
     try:
         config = editor.guardar_guias_tv(tenant, guias)
     except editor.ErrorEdicion as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     return jsonify({"guias_tv": [g.model_dump(mode="json")
                                  for g in config.guias_tv]})
 
@@ -3366,7 +3368,7 @@ def configuracion_servicios_guardar():
     try:
         config = editor.guardar_servicios_ofrecidos(tenant, servicios)
     except editor.ErrorEdicion as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     return jsonify({"servicios_ofrecidos": [s.model_dump(mode="json")
                                            for s in config.servicios_ofrecidos]})
 
@@ -3390,7 +3392,7 @@ def configuracion_parrilla_guardar():
         canales, descartados = editor.canales_desde_excel(archivo.read())
         editor.guardar_parrilla_canales(tenant, canales)
     except editor.ErrorEdicion as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     return jsonify({"parrilla_canales": canales, "descartados": descartados,
                     "total": len(canales)})
 
@@ -3425,14 +3427,17 @@ def configuracion_localidades_sincronizar():
         localidades = sincronizador_localidades.sincronizar(
             herramienta, tenant, config.variables_tenant)
     except Exception as e:
-        return jsonify({"error": f"No se pudo sincronizar contra el "
-                                 f"proveedor: {type(e).__name__}: {e}"}), 502
+        # D19: antes devolvia el texto del proveedor tal cual. Queda su codigo
+        # HTTP, que es lo que dice si fue una clave, una ruta o una caida.
+        return fallo(502, "proveedor_no_sincronizo",
+                     "No se pudieron sincronizar las localidades con el proveedor.",
+                     componente="localidades", e=e, estado_proveedor=estado_http_de(e))
 
     try:
         nuevo = editor.guardar_localidades(
             tenant, [l.model_dump(mode="json") for l in localidades])
     except editor.ErrorEdicion as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
         return _error_al_guardar(e)
 
@@ -3459,7 +3464,7 @@ def configuracion_planes_venta_guardar():
     try:
         config = editor.guardar_planes_venta(tenant, planes)
     except editor.ErrorEdicion as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
         return _error_al_guardar(e)
 
@@ -3483,7 +3488,7 @@ def secretos_listar():
     try:
         return jsonify({"secretos": secretos.listar(tenant)})
     except secretos.ErrorSecreto as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 500
     except Exception as e:
         registrar("secretos", "fallo al listar", error=e)
         return jsonify({"error": "No se pudieron leer los secretos."}), 500
@@ -3574,7 +3579,7 @@ def secretos_guardar():
     try:
         secretos.guardar(tenant, nombre, valor, cuerpo.get("descripcion"))
     except secretos.ErrorSecreto as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
         registrar("secretos", "fallo al guardar", nombre=nombre, error=e)
         return jsonify({"error": "No se pudo guardar el secreto."}), 500
@@ -3635,7 +3640,9 @@ def diagnostico_smartolt():
     except requests.exceptions.Timeout:
         return jsonify({"ok": False, "detalle": "El servidor no respondio a tiempo."})
     except Exception as e:
-        return jsonify({"ok": False, "detalle": f"{type(e).__name__}: {e}"})
+        registrar("diagnostico", "fallo inesperado al probar la conexion", error=e)
+        return jsonify({"ok": False, "codigo": "fallo_inesperado",
+                        "detalle": "No se pudo probar la conexion por un error inesperado."})
 
     if r.status_code == 200:
         try:
@@ -3656,7 +3663,8 @@ def diagnostico_smartolt():
     if r.status_code == 404:
         return jsonify({"ok": False, "detalle": "HTTP 404 -- el subdominio responde, pero esta ruta "
                          "no existe en esta cuenta (la API real puede diferir de la hipotesis)."})
-    return jsonify({"ok": False, "detalle": f"HTTP {r.status_code}: {r.text[:200]}"})
+    # Solo el codigo: el cuerpo es del proveedor y puede traer cualquier cosa.
+    return jsonify({"ok": False, "detalle": f"El servidor respondio HTTP {r.status_code}."})
 
 
 # =============================================================================
@@ -3672,7 +3680,7 @@ def conversaciones():
     try:
         salida = persistencia.ultima_actividad(tenant, canal=request.args.get("canal"))
     except RuntimeError as e:
-        return jsonify({"error": str(e)}), 404
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 404
     except Exception as e:
         registrar("conversaciones", "fallo al listar", error=e)
         return jsonify({"error": "No se pudo leer las conversaciones."}), 500
@@ -4133,7 +4141,7 @@ def conversaciones_mensajes(id_conversacion):
     try:
         resultado = persistencia.mensajes_de(tenant, id_conversacion)
     except RuntimeError as e:
-        return jsonify({"error": str(e)}), 404
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 404
     except Exception as e:
         registrar("conversaciones", "fallo al leer mensajes", error=e)
         return jsonify({"error": "No se pudo leer la conversacion."}), 500
@@ -4175,8 +4183,9 @@ def canales_plantillas():
     except FileNotFoundError:
         return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
     except Exception as e:
-        registrar("plantillas", "no se pudieron leer", error=e)
-        return jsonify({"error": f"No se pudieron leer las plantillas: {e}"}), 502
+        return fallo(502, "plantillas_no_leidas",
+                     mensaje_publico(e, "No se pudieron leer las plantillas."),
+                     componente="plantillas", e=e)
 
     aprobadas = [p for p in todas if (p.get("estado") or "").upper() == "APPROVED"]
     return jsonify({"plantillas": aprobadas, "total_en_meta": len(todas)})
@@ -4266,7 +4275,7 @@ def conversaciones_enviar_plantilla(id_conversacion):
     try:
         autor, autor_id, clave = _autor_y_clave(cuerpo)
     except persistencia.AutorInvalido as e:
-        return jsonify({"error": f"Autor invalido: {e}"}), 400
+        return jsonify({"error": f"Autor invalido: {mensaje_publico(e, 'datos de autor incompletos')}"}), 400
     bloqueo = _exigir_control_humano(tenant, id_conversacion)
     if bloqueo:
         return bloqueo
@@ -4277,7 +4286,9 @@ def conversaciones_enviar_plantilla(id_conversacion):
     except FileNotFoundError:
         return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
     except Exception as e:
-        return jsonify({"error": f"No se pudieron leer las plantillas: {e}"}), 502
+        return fallo(502, "plantillas_no_leidas",
+                     mensaje_publico(e, "No se pudieron leer las plantillas."),
+                     componente="plantillas", e=e)
 
     # Se vuelve a mirar la lista en vez de confiar en lo que mando la
     # pantalla: entre que se dibujo el selector y que alguien apreto Enviar
@@ -4302,7 +4313,7 @@ def conversaciones_enviar_plantilla(id_conversacion):
         return jsonify({"error": "Las plantillas son de WhatsApp; esta "
                                  "conversacion es de otro canal."}), 400
     except RuntimeError as e:
-        return jsonify({"error": str(e)}), 404
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 404
     except Exception as e:
         registrar("plantillas", "fallo al guardar", error=e)
         return jsonify({"error": "No se pudo guardar el mensaje."}), 500
@@ -4416,7 +4427,7 @@ def conversaciones_responder_humano(id_conversacion):
     try:
         autor, autor_id, clave = _autor_y_clave(cuerpo)
     except persistencia.AutorInvalido as e:
-        return jsonify({"error": f"Autor invalido: {e}"}), 400
+        return jsonify({"error": f"Autor invalido: {mensaje_publico(e, 'datos de autor incompletos')}"}), 400
     bloqueo = _exigir_control_humano(tenant, id_conversacion)
     if bloqueo:
         return bloqueo
@@ -4426,7 +4437,7 @@ def conversaciones_responder_humano(id_conversacion):
             tenant, id_conversacion, contenido, autor, autor_usuario_id=autor_id,
             clave_idempotencia=clave)
     except RuntimeError as e:
-        return jsonify({"error": str(e)}), 404
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 404
     except Exception as e:
         registrar("conversaciones", "fallo al guardar respuesta humana", error=e)
         return jsonify({"error": "No se pudo guardar la respuesta."}), 500
@@ -4533,7 +4544,7 @@ def conversaciones_herramientas(id_conversacion):
     try:
         llamadas = persistencia.herramientas_de(tenant, id_conversacion)
     except RuntimeError as e:
-        return jsonify({"error": str(e)}), 404
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 404
     except Exception as e:
         registrar("conversaciones", "fallo al leer herramientas", error=e)
         return jsonify({"error": "No se pudo leer el registro de herramientas."}), 500
@@ -4707,7 +4718,7 @@ def manual_casos_guardar():
     try:
         config = editor.guardar_casos_manual(tenant, casos)
     except editor.ErrorEdicion as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
         return _error_al_guardar(e)
 
@@ -4820,7 +4831,7 @@ def configuracion_propuesta_aprobar(id_propuesta):
     try:
         editor.aprobar_herramienta_propuesta(tenant, propuesta["herramienta_propuesta"])
     except editor.ErrorEdicion as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
         return _error_al_guardar(e)
 
@@ -4886,7 +4897,7 @@ def conectores_preparar(id_conector):
         plan = conectores.preparar(id_conector, cuerpo.get("areas") or {},
                                    _config_de(tenant))
     except conectores.ErrorConector as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except FileNotFoundError:
         return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
     except Exception as e:
@@ -4916,9 +4927,9 @@ def conectores_aplicar(id_conector):
     try:
         plan = conectores.aplicar(tenant, id_conector, cuerpo.get("areas") or {})
     except conectores.ErrorConector as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except editor.ErrorEdicion as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
         return _error_al_guardar(e)
     olvidar_config(tenant)
@@ -5048,7 +5059,7 @@ def consumo_guardar_tarifa():
                               descuento_fuera_pico=cuerpo.get("descuento_fuera_pico"),
                               ventanas_pico=cuerpo.get("ventanas_pico"))
     except editor.ErrorEdicion as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except (TypeError, ValueError):
         return jsonify({"error": "Las tarifas tienen que ser numeros."}), 400
     except Exception as e:
@@ -5072,7 +5083,7 @@ def consumo_guardar_tope():
     try:
         editor.guardar_tope_gasto(tenant, tope, cuerpo.get("mensaje"))
     except editor.ErrorEdicion as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
         return _error_al_guardar(e)
     olvidar_config(tenant)
@@ -5391,7 +5402,7 @@ def corpus_ingerir():
     try:
         roles = ingesta.roles_validos(config, request.form.get("roles"))
     except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
 
     datos = archivo.read()
     hash_ = hashlib.sha256(datos).hexdigest()
@@ -5446,12 +5457,12 @@ def corpus_ingerir():
         # recurso esta en un estado que no admite esa operacion. Y no es un
         # fallo que haya que investigar en los logs -- es una regla del
         # producto contandose a quien la choco.
-        return jsonify({"error": str(e)}), 409
-    except ValueError as e:
-        return jsonify({"error": f"El documento declara {e}"}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 409
+    except ingesta.RolesInvalidos as e:
+        return jsonify({"error": f"El documento declara {mensaje_publico(e, 'roles invalidos')}"}), 400
     except Exception as e:
-        registrar("corpus", "fallo la ingesta", documento=nombre, error=e)
-        return jsonify({"error": f"No se pudo procesar el documento: {e}"}), 500
+        return fallo(500, "documento_no_procesado", "No se pudo procesar el documento.",
+                     componente="corpus", e=e)
 
     return jsonify(resultado), 201
 
@@ -5511,7 +5522,7 @@ def corpus_retirar(id_documento):
         with persistencia.sesion(tenant) as (cur, org):
             ok = ingesta.retirar(cur, org, id_documento)
     except RuntimeError as e:
-        return jsonify({"error": str(e)}), 404
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 404
     except Exception as e:
         registrar("corpus", "fallo el retiro", id_documento=id_documento, error=e)
         return jsonify({"error": "No se pudo retirar el documento."}), 500
@@ -5543,7 +5554,7 @@ def corpus_actualizar_roles(id_documento):
     try:
         roles = ingesta.roles_validos(config, ",".join(cuerpo.get("roles") or []))
     except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
 
     try:
         with persistencia.sesion(tenant) as (cur, org):
@@ -6038,7 +6049,7 @@ def whatsapp_avisar(tenant):
             config, tenant, para, plantilla,
             cuerpo.get("variables"), cuerpo.get("idioma", "es"))
     except whatsapp.ErrorWhatsApp as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
         registrar("whatsapp", "fallo el aviso", tenant=tenant, destinatario=ref_sesion(para),
                   plantilla=plantilla, error=e)
@@ -6065,7 +6076,7 @@ def whatsapp_plantillas(tenant):
     try:
         en_meta = whatsapp.plantillas_aprobadas(config, tenant)
     except whatsapp.ErrorWhatsApp as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
         registrar("whatsapp", "fallo al leer plantillas", error=e)
         return jsonify({"error": "No se pudieron leer las plantillas."}), 502
@@ -6147,7 +6158,7 @@ def conversaciones_intervenir(id_conversacion):
     try:
         autor, autor_id, _ = _autor_y_clave(cuerpo)
     except persistencia.AutorInvalido as e:
-        return jsonify({"error": f"Autor invalido: {e}"}), 400
+        return jsonify({"error": f"Autor invalido: {mensaje_publico(e, 'datos de autor incompletos')}"}), 400
     try:
         r = transiciones.intervenir(
             tenant, id_conversacion, operador_id=autor_id, operador_nombre=autor,
@@ -6199,7 +6210,7 @@ def conversaciones_atender(id_conversacion):
     try:
         autor, autor_id, _ = _autor_y_clave(cuerpo)
     except persistencia.AutorInvalido as e:
-        return jsonify({"error": f"Autor invalido: {e}"}), 400
+        return jsonify({"error": f"Autor invalido: {mensaje_publico(e, 'datos de autor incompletos')}"}), 400
 
     soltar = bool(cuerpo.get("soltar"))
     clave = (cuerpo.get("clave_operacion") or "").strip() or None
@@ -6252,7 +6263,7 @@ def conversaciones_enviar_media(id_conversacion):
     try:
         autor, autor_id, clave = _autor_y_clave(request.form)
     except persistencia.AutorInvalido as e:
-        return jsonify({"error": f"Autor invalido: {e}"}), 400
+        return jsonify({"error": f"Autor invalido: {mensaje_publico(e, 'datos de autor incompletos')}"}), 400
     bloqueo = _exigir_control_humano(tenant, id_conversacion)
     if bloqueo:
         return bloqueo
@@ -6266,7 +6277,7 @@ def conversaciones_enviar_media(id_conversacion):
     try:
         whatsapp._validar_media(tipo, mime, len(contenido))
     except Exception as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
 
     # Lo que ve el hilo. Un adjunto sin texto no puede quedar como una burbuja
     # vacia: se dice que se mando, y el pie va aparte si lo hay.
@@ -6341,7 +6352,7 @@ def conversaciones_nota(id_conversacion):
     try:
         autor, autor_id, _clave = _autor_y_clave(cuerpo)
     except persistencia.AutorInvalido as e:
-        return jsonify({"error": f"Autor invalido: {e}"}), 400
+        return jsonify({"error": f"Autor invalido: {mensaje_publico(e, 'datos de autor incompletos')}"}), 400
     try:
         nota_id = persistencia.agregar_nota_interna(
             tenant, id_conversacion, contenido, autor, autor_usuario_id=autor_id)
@@ -6506,7 +6517,7 @@ def conversaciones_resolver(id_conversacion):
     try:
         autor, autor_id, _ = _autor_y_clave(cuerpo)
     except persistencia.AutorInvalido as e:
-        return jsonify({"error": f"Autor invalido: {e}"}), 400
+        return jsonify({"error": f"Autor invalido: {mensaje_publico(e, 'datos de autor incompletos')}"}), 400
 
     try:
         r = transiciones.resolver(tenant, id_conversacion, operador_id=autor_id,
