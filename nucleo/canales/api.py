@@ -725,6 +725,85 @@ def _sincronizar_respuesta_en_memoria(historial: list[dict], desde: int,
             return
 
 
+# --- D24: el control puede cambiar mientras el modelo piensa -----------------
+#
+# La compuerta de B3.3b lee el control ANTES de llamar al modelo, y el modelo
+# tarda segundos. Si en ese intervalo una persona interviene, la respuesta que
+# vuelve se calculo con un control que ya no existe. Por eso el turno guarda que
+# autorizo (conversacion y relevo_version) y lo vuelve a comprobar en dos
+# puntos, siempre fuera de cualquier transaccion:
+#
+#   1. al volver del modelo, antes de guardar la respuesta o tocar la memoria;
+#   2. justo antes del POST a Meta (whatsapp_webhook).
+#
+# PUNTO DE NO RETORNO: una intervencion impide todo envio de la IA cuyo POST al
+# proveedor todavia no empezo cuando la intervencion queda durable. Un POST que
+# ya estaba en vuelo puede completar. No se sostiene una transaccion abierta
+# esperando a Meta (P-A); la garantia absoluta pediria una reserva durable de
+# salida (outbox), que no es de esta fase.
+#
+# Contadores por proceso, para que operaciones vea si esto pasa seguido. Los
+# logs llevan el id de la conversacion y versiones: nunca el telefono ni el
+# contenido.
+contadores_relevo = {"control_no_determinado": 0,
+                     "respuesta_ia_descartada_por_cambio_de_control": 0}
+
+
+def _contar_relevo(evento: str, detalle: str) -> None:
+    contadores_relevo[evento] = contadores_relevo.get(evento, 0) + 1
+    print(f"[relevo] {evento} {detalle}")
+
+
+def _autorizacion_de(control_actual: dict | None) -> dict:
+    """Lo que autorizo el turno: la conversacion abierta (None si no habia) y
+    su relevo_version (0 si no habia: una conversacion nueva nace en 0)."""
+    if control_actual is None:
+        return {"conversation_id": None, "relevo_version": 0}
+    return {"conversation_id": control_actual["conversation_id"],
+            "relevo_version": control_actual["relevo_version"]}
+
+
+def _turno_sigue_autorizado(tenant: str, canal: str, id_sesion: str,
+                            autorizacion: dict, *, exigir_ia: bool) -> bool:
+    """
+    True solo si la conversacion sigue abierta, es la misma, no cambio de
+    relevo_version y (si se pide) su control efectivo sigue siendo 'ia'. Si la
+    base no responde, False: falla cerrado.
+
+    'exigir_ia' es False en el segundo punto porque el mismo turno puede haber
+    escalado (y entonces el control es humano con la version que ESE turno
+    escribio, que ya esta en la autorizacion): lo que se compara es que nadie
+    mas haya movido la version.
+    """
+    try:
+        actual = persistencia.control_de_conversacion_abierta(tenant, canal, id_sesion)
+    except Exception as e:
+        _contar_relevo("control_no_determinado",
+                       f"conv={autorizacion.get('conversation_id')} al revalidar ({type(e).__name__})")
+        return False
+    esperado = autorizacion.get("conversation_id")
+    if actual is None:
+        return esperado is None
+    if esperado is not None and actual["conversation_id"] != esperado:
+        return False
+    if exigir_ia and actual["control_efectivo"] != "ia":
+        return False
+    return actual["relevo_version"] == autorizacion.get("relevo_version")
+
+
+def _quitar_respuesta_de_memoria(historial: list, desde: int | None = None) -> None:
+    """Saca de la memoria lo que produjo el modelo en este turno y deja el
+    mensaje del cliente. 'desde' es el largo antes del modelo; sin el, se corta
+    despues del ultimo mensaje del cliente."""
+    if desde is None:
+        ultimos = [i for i, m in enumerate(historial) if m.get("role") == "user"]
+        if not ultimos:
+            return
+        del historial[ultimos[-1] + 1:]
+        return
+    del historial[desde:]
+
+
 def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                   mensaje: str, canal: str, profile_id: str | None = None,
                   nombre_colaborador: str = "") -> dict:
@@ -897,10 +976,14 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     try:
         control_actual = persistencia.control_de_conversacion_abierta(tenant, canal, id_sesion)
     except Exception as e:
-        print(f"[relevo] {id_sesion}: no se pudo leer quien controla la conversacion "
-              f"({type(e).__name__}); no se corre el modelo")
+        _contar_relevo("control_no_determinado",
+                       f"conv={estado.get('conversacion_id')} antes del modelo "
+                       f"({type(e).__name__}); no se corre el modelo")
         return {"respuesta": "", "verificado": estado["sesion"].verificado,
                 "pausada": True, "control_desconocido": True}
+    # Lo que autoriza ESTE turno (D24). Se vuelve a comprobar al salir del
+    # modelo y antes de enviar.
+    estado["autorizacion_turno"] = _autorizacion_de(control_actual)
     if control_actual is None:
         estado["escalada"] = False
     else:
@@ -1102,6 +1185,10 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
         # Y vuelve a poder escalar: el caso anterior ya no esta abierto, asi
         # que un caso nuevo no seria un duplicado sino uno legitimo.
         estado["ya_escalada"] = False
+        # Este turno decidio retomar un legado cuyas banderas siguen en la
+        # base: al volver del modelo no se exige control 'ia' (seguiria
+        # diciendo humano), solo que nadie haya movido la version (D24).
+        estado["autorizacion_turno"]["legado_retomado"] = True
 
     # El resultado ya calculado entra al contexto del modelo ANTES de que
     # redacte: si llegara despues, le contestaria al cliente sin saber si el
@@ -1171,10 +1258,37 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     # una llamada en promedio, pero no CUAL turno salio caro ni por que --
     # que es justo lo que hace falta para bajar de los 4-11 segundos que
     # tarda el modelo. Las columnas por mensaje existian y estaban vacias.
+    antes_del_modelo = len(estado["historial"])
     with consumo.abrir(config) as ficha_consumo:
         respuesta, registro_herramientas, medios_pendientes = motor.responder(
             config, rol, mensaje, estado["historial"], estado["sesion"],
             nota_continuidad=nota_continuidad)
+
+    # --- D24, punto 1: el control no cambio mientras el modelo pensaba ------
+    # Si cambio (una persona intervino, se cerro, otra version), la respuesta
+    # se DESCARTA: no se guarda como dicha, no entra a la memoria y no se
+    # envia. El consumo del modelo ya ocurrio y queda medido; el texto no se
+    # registra en ningun lado. El mensaje del cliente si se guarda: lo escribio
+    # y quien tomo la conversacion tiene que leerlo.
+    if not _turno_sigue_autorizado(
+            tenant, canal, id_sesion, estado["autorizacion_turno"],
+            exigir_ia=not estado["autorizacion_turno"].get("legado_retomado")):
+        _quitar_respuesta_de_memoria(estado["historial"], antes_del_modelo)
+        estado["historial"].append({"role": "user", "content": mensaje})
+        if estado["sesion"] is not None:
+            estado["sesion"].rol_siguiente = None
+        _contar_relevo("respuesta_ia_descartada_por_cambio_de_control",
+                       f"conv={estado['autorizacion_turno'].get('conversation_id')} "
+                       f"version={estado['autorizacion_turno'].get('relevo_version')} "
+                       f"punto=al_volver_del_modelo")
+        try:
+            persistencia.registrar_mensaje(tenant, canal, id_sesion, rol, "user", mensaje,
+                                           horas, creado_en=llego_en, origen="cliente")
+        except Exception as e:
+            print(f"[persistencia] no se pudo guardar el mensaje del turno descartado: "
+                  f"{type(e).__name__}")
+        return {"respuesta": "", "verificado": estado["sesion"].verificado,
+                "pausada": True, "descartada": True}
 
     # --- si este turno derivo a otra area, persistir YA con el rol nuevo -----
     # 'rol_siguiente' lo pone motor._ejecutar_derivacion() cuando el modelo
@@ -1221,6 +1335,8 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             llamadas_modelo=ficha_consumo.n_llamadas,
             modelo=config.llm.modelo_por_defecto)
         mensaje_id_turno = mensaje_id
+        if estado["autorizacion_turno"].get("conversation_id") is None and conversation_id:
+            estado["autorizacion_turno"]["conversation_id"] = str(conversation_id)
         # La sesion viva se queda con el id. Solo lo tenia cuando venia de una
         # conversacion ANTERIOR: si la creo este mismo proceso, quedaba en
         # None y las reglas que preguntan por esta fila --si ya la atendio una
@@ -1742,6 +1858,13 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                         # Reservado = la base YA dice humano, se haya aplicado
                         # ahora o por un reintento de la misma escalada.
                         reservado = r_reserva.aplicada or r_reserva.motivo in ("reintento", "sin_cambio")
+                        # La version que escribio ESTE turno es la esperada al
+                        # enviar (D24, punto 2). 'sin_cambio' no la mueve: si
+                        # otro ya la paso a humano, el envio tiene que frenar.
+                        if r_reserva.aplicada or r_reserva.motivo == "reintento":
+                            estado["autorizacion_turno"] = {
+                                "conversation_id": str(conversation_id),
+                                "relevo_version": r_reserva.version}
                     except Exception as e:
                         print(f"[relevo] no se pudo reservar el control humano: "
                               f"{type(e).__name__}")
@@ -2167,7 +2290,9 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             "rol_activo": rol,
             "rol_activo_nombre": (getattr(rol_cfg_final, "area", None)
                                   or rol) if rol_cfg_final else rol,
-            "pausada": False}
+            "pausada": False,
+            # Para el punto 2 de D24 (antes del POST a Meta). No sale por /chat.
+            "_autorizacion": dict(estado["autorizacion_turno"])}
 
 
 @app.post("/chat")
@@ -2276,6 +2401,7 @@ def chat():
     # antes de que existiera el webhook, y el simulador depende de ella.
     if not salida.get("pausada"):
         salida.pop("pausada", None)
+    salida.pop("_autorizacion", None)
     return jsonify(salida)
 
 
@@ -5572,10 +5698,35 @@ def _procesar_mensaje_whatsapp(config, tenant: str, rol: str, entrante: dict) ->
         # conversacion y el bot se calla para no contradecirla. Mandarla igual
         # seria un mensaje en blanco al cliente (y un 400 de Meta).
         if (salida.get("respuesta") or "").strip():
+            # D24, punto 2: lo ultimo antes del POST. Entre el punto 1 y aca
+            # corren el evaluador de escalamiento, el CRM y el adjunto, y
+            # tardan. Si una persona intervino en ese intervalo, no se envia.
+            if (salida.get("_autorizacion") is not None
+                    and not _turno_sigue_autorizado(tenant, "whatsapp", de, salida["_autorizacion"],
+                                                    exigir_ia=False)):
+                _descartar_respuesta_guardada(tenant, "whatsapp", de, salida)
+                return
             whatsapp.enviar_texto(config, tenant, de, salida["respuesta"])
     except Exception as e:
         print(f"[whatsapp] fallo al atender a {de} ({wamid}): "
               f"{type(e).__name__}: {e}")
+
+
+def _descartar_respuesta_guardada(tenant: str, canal: str, id_sesion: str, salida: dict) -> None:
+    """La respuesta ya estaba guardada y no se va a enviar (D24, punto 2): la
+    fila queda 'descartado' y sale de la memoria viva."""
+    autorizacion = salida.get("_autorizacion") or {}
+    _contar_relevo("respuesta_ia_descartada_por_cambio_de_control",
+                   f"conv={autorizacion.get('conversation_id')} "
+                   f"version={autorizacion.get('relevo_version')} punto=antes_del_envio")
+    if salida.get("mensaje_id"):
+        try:
+            persistencia.descartar_respuesta_ia(tenant, salida["mensaje_id"])
+        except Exception as e:
+            print(f"[relevo] no se pudo marcar la respuesta descartada: {type(e).__name__}")
+    estado = _sesiones.get(canales.clave_sesion(tenant, canal, id_sesion))
+    if estado is not None:
+        _quitar_respuesta_de_memoria(estado["historial"])
 
 
 @app.get("/canales/whatsapp/<tenant>")
@@ -5955,6 +6106,11 @@ def conversaciones_intervenir(id_conversacion):
         return jsonify({"error": "No se pudo tomar el control."}), 500
     if r.motivo == "no_existe":
         return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+    if r.motivo == "clave_ajena":
+        # La clave ya la uso otra operacion u otro operador: no se le responde
+        # exito a quien no fue el que intervino.
+        return jsonify({"error": "Esa clave de operacion ya pertenece a otra operacion.",
+                        "codigo": "clave_de_otra_operacion"}), 409
     if r.aplicada or r.motivo == "reintento":
         return jsonify({"intervenida": True, "relevo_version": r.version,
                         "reintento": r.motivo == "reintento"}), 200

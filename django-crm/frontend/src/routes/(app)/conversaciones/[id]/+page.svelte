@@ -301,7 +301,10 @@
     pendiente: 'Enviando…',
     enviado: 'Enviado',
     entregado: 'Entregado',
-    leido: 'Leído'
+    leido: 'Leído',
+    // D24: la IA la calculó, pero una persona tomó el control antes de que
+    // saliera. No se envió y no se ofrece reintentar: ya atiende una persona.
+    descartado: 'No enviada: una persona tomó el control'
   };
 
   // --- responder al cliente vs. nota interna --------------------------------

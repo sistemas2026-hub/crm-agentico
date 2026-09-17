@@ -37,6 +37,10 @@ LA SEMANTICA DE CADA FILA
   assistant  NULL (legado)    assistant, intacto                 SI  -- pudo ser la IA o una
                                                                      persona: activa el bloque
   nota       cualquiera       NUNCA
+
+  Y una respuesta de la IA DESCARTADA (estado_entrega = 'descartado', D24) no
+  entra nunca: se calculo, no se le envio al cliente, y el modelo no puede
+  recordar como dicho algo que el cliente no leyo.
 """
 
 from __future__ import annotations
@@ -48,6 +52,11 @@ BLOQUE_LEGADO = (
     "escritos por la IA o por una persona del equipo.\n"
     "No atribuyas su autoria con certeza."
 )
+
+# Una respuesta de la IA que se calculo y no salio: una persona tomo el control
+# mientras el modelo pensaba (D24). Queda en la base para auditoria, fuera del
+# contexto del modelo.
+DESCARTADO = "descartado"
 
 # Los roles que pueden llegar al modelo. 'nota' queda afuera por definicion:
 # es lo que el equipo se escribe entre si.
@@ -101,6 +110,8 @@ def construir(filas) -> list[dict]:
     salida: list[dict] = []
     ambiguo = False
     for f in filas:
+        if f.get("estado_entrega") == DESCARTADO:
+            continue
         rol, origen = f.get("rol"), f.get("origen")
         e = entrada(rol, origen, f.get("contenido"), f.get("autor_nombre"))
         if e is None:

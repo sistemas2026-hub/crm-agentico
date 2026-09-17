@@ -97,6 +97,13 @@ comprobar([m["content"] for m in r if m["role"] != "system"] == [TEXTO, TEXTO],
           "el contenido de legado y de cliente pasa byte a byte, sin prefijo")
 r = H.construir([fila("user", "a"), fila("nota", "SECRETO DEL EQUIPO", "humano", "Ana"), fila("assistant", "b", "ia")])
 comprobar(all("SECRETO" not in m["content"] for m in r), "las notas no aparecen en el historial")
+# D24: una respuesta de la IA descartada (no salio) no entra. El resumen de una
+# conversacion vencida solo tiene esta regla como filtro.
+r = H.construir([{"rol": "user", "contenido": "hola", "origen": "cliente"},
+                 {"rol": "assistant", "contenido": "NO-SALIO", "origen": "ia", "estado_entrega": "descartado"},
+                 {"rol": "assistant", "contenido": "si salio", "origen": "ia", "estado_entrega": "enviado"}])
+comprobar([m["content"] for m in r] == ["hola", "si salio"],
+          f"una respuesta descartada (D24) no entra al historial ni al resumen ({r})")
 
 
 # ---------------------------------------------------------------------------

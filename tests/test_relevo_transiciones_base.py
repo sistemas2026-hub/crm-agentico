@@ -23,6 +23,12 @@ B3.2 de SPEC/CONTRATO_RELEVO_IA_HUMANO.md. Base efimera del ledger.
   5. La escalada en un turno real de atender_turno(): cuando se llama al
      ticket operativo y al CRM, el control YA es humano en la base y NO hay
      ninguna transaccion abierta; si el CRM falla, el control no vuelve a la IA.
+  9. D24, IA en vuelo contra Intervenir, por el camino real de WhatsApp: el
+     modelo queda frenado, una persona interviene y hace commit, el modelo
+     termina -> cero POST a Meta, cero respuesta de la IA guardada, nada en
+     memoria. Y la intervencion entre la respuesta guardada y el POST: no se
+     envia y la fila queda 'descartado', fuera del historial.
+ 10. Una clave de operacion ya usada por otro operador no le devuelve exito.
   8. B3.3b en turnos reales: tras /intervenir el cliente escribe y el modelo NO
      corre, sin acuse de escalada ni banderas ni tasa; devolver reanuda; la
      memoria nunca decide contra la base (en las dos direcciones); reintento
@@ -261,10 +267,14 @@ try:
     c6 = nueva_conv(org, "573000000030")
     T.escalar(TENANT, c6)
     a = T.tomar(TENANT, c6, operador_id=ANA[0], operador_nombre=ANA[1], clave="op-1")
-    b = T.tomar(TENANT, c6, operador_id=LUIS[0], operador_nombre=LUIS[1], clave="op-1")
+    b = T.tomar(TENANT, c6, operador_id=ANA[0], operador_nombre=ANA[1], clave="op-1")
     comprobar(a.aplicada and not b.aplicada and b.motivo == "reintento" and b.version == a.version
               and estado(c6)[2] == "Ana Perez" and len(eventos(c6)) == 2,
               "misma clave dos veces: un cambio, un evento, la version del primero")
+    b2 = T.tomar(TENANT, c6, operador_id=LUIS[0], operador_nombre=LUIS[1], clave="op-1")
+    comprobar(not b2.aplicada and b2.motivo == "clave_ajena" and b2.evento_id is None
+              and estado(c6)[2] == "Ana Perez" and len(eventos(c6)) == 2,
+              f"la misma clave desde OTRO operador: clave_ajena, no un reintento a su nombre ({b2.motivo})")
     c7 = nueva_conv(org, "573000000031")
     T.escalar(TENANT, c7)
     resultados = []
@@ -377,6 +387,8 @@ try:
         salida_turno = api.atender_turno(CONFIG, TENANT, "cliente_final", TEL,
                                          "hay cobertura en el barrio Los Almendros?", "whatsapp-simulado")
         memoria_pausada = api._sesiones[(TENANT, "whatsapp-simulado", TEL)]["escalada"]
+        autorizado_propio = api._turno_sigue_autorizado(
+            TENANT, "whatsapp-simulado", TEL, salida_turno.get("_autorizacion") or {}, exigir_ia=False)
         modelo_antes = len(llamadas_modelo)
         segunda = api.atender_turno(CONFIG, TENANT, "cliente_final", TEL, "hola? sigue ahi?",
                                     "whatsapp-simulado")
@@ -401,6 +413,8 @@ try:
               and [x[0] for x in eventos(conv_turno)] == ["escalada"],
               f"el CRM fallo: control humano Y legado pausado en la base; un solo evento ({e})")
     comprobar(memoria_pausada is True, "y la memoria del proceso tambien quedo en pausa (sin split-brain)")
+    comprobar(autorizado_propio is True,
+              "D24: la escalada que hizo ESTE turno no le frena su propio aviso al cliente")
     texto = (salida_turno or {}).get("respuesta") or ""
     comprobar("confirmar con un compañero" in texto and "de nuevo" not in texto.lower(),
               f"al cliente: el anuncio de atencion humana, NO 'escribime de nuevo' ({texto!r})")
@@ -598,6 +612,132 @@ try:
         for (m, n), f in orig8.items():
             setattr(m, n, f)
         api._TOKEN_SERVICIO = token8
+        api._sesiones.clear()
+
+    # -----------------------------------------------------------------------
+    print("\n== 9. D24: la IA en vuelo no sobrevive a una intervencion ==")
+    posts = []
+    empezo, liberar = threading.Event(), threading.Event()
+    modo = {"frenar": False, "en_el_medio": None}
+
+    def responder9(config, rol, mensaje, historial, sesion, nota_continuidad=None):
+        historial.append({"role": "user", "content": mensaje})
+        if modo["frenar"]:
+            empezo.set()
+            liberar.wait(60)
+        historial.append({"role": "assistant", "content": "RESPUESTA-IA-D24"})
+        return "RESPUESTA-IA-D24", [], []
+
+    def adjunto9(config, tenant, entrante, conversacion_id, mensaje_id=None):
+        if modo["en_el_medio"]:
+            modo["en_el_medio"]()
+    base9 = {
+        (api.motor, "responder"): responder9,
+        (api.escalamiento, "evaluar"): lambda *a, **k: {},
+        (api.escalamiento, "caso_sigue_abierto"): lambda *a, **k: True,
+        (api, "_cerrar_el_traspaso"): lambda config, tenant, conversation_id, mensaje_id, respuesta, id_sesion, **k: respuesta,
+        (api.consumo, "estado_del_gasto"): lambda *a, **k: {"accion": "seguir", "gastado": 0, "tope": 0, "porcentaje": 0.0},
+        (api.whatsapp, "enviar_texto"): lambda config, tenant, para, texto: posts.append(texto) or "wamid.x",
+        (api.whatsapp, "marcar_leido"): lambda *a, **k: None,
+        (api, "_atendio_baja_o_alta"): lambda *a, **k: False,
+        (api, "_guardar_adjunto"): adjunto9,
+    }
+    orig9 = {k: getattr(*k) for k in base9}
+    for (m, n), f in base9.items():
+        setattr(m, n, f)
+    token9 = api._TOKEN_SERVICIO
+    api._TOKEN_SERVICIO = None
+
+    def whatsapp_turno(tel, texto):
+        api._procesar_mensaje_whatsapp(CONFIG, TENANT, "cliente_final",
+                                       {"de": tel, "telefono": tel, "texto": texto})
+
+    def conv_wa(tel):
+        return q("""select id::text from asistente.conversations
+                    where usuario_externo = %s and canal = 'whatsapp' and estado = 'abierta'""", (tel,))[0][0]
+
+    def filas_ia(conv):
+        return q("""select contenido, estado_entrega from asistente.messages
+                    where conversation_id = %s and rol = 'assistant' and origen = 'ia'
+                    order by creado_en""", (conv,))
+    try:
+        api._sesiones.clear()
+        tel = "573000000090"
+        whatsapp_turno(tel, "hola")
+        cv = conv_wa(tel)
+        comprobar(posts == ["RESPUESTA-IA-D24"], f"turno sin intervencion: sale un POST ({len(posts)})")
+        posts.clear()
+        ia_antes = len(filas_ia(cv))
+        v_antes = estado(cv)[3]
+        descartes_antes = api.contadores_relevo["respuesta_ia_descartada_por_cambio_de_control"]
+
+        # 9a. el modelo esta pensando cuando la persona interviene
+        modo["frenar"] = True
+        hilo = threading.Thread(target=whatsapp_turno, args=(tel, "me ayudas con la factura?"))
+        hilo.start()
+        comprobar(empezo.wait(30), "el modelo arranco (leyo control = ia)")
+        r9 = intervenir_http(cv, ANA, "d24-ana")
+        comprobar(r9.status_code == 200, f"la persona interviene mientras el modelo piensa: 200 ({r9.status_code})")
+        liberar.set()
+        hilo.join(60)
+        modo["frenar"] = False
+        e = estado(cv)
+        comprobar(posts == [], f"cero POST a Meta con la respuesta calculada antes ({len(posts)})")
+        comprobar(len(filas_ia(cv)) == ia_antes, "cero respuestas de la IA guardadas en ese turno")
+        memoria = api._sesiones[(TENANT, "whatsapp", tel)]["historial"]
+        comprobar(sum("RESPUESTA-IA-D24" in (m.get("content") or "") for m in memoria) == 1
+                  and memoria[-1] == {"role": "user", "content": "me ayudas con la factura?"},
+                  f"la memoria termina en el mensaje del cliente; solo queda la respuesta del turno "
+                  f"anterior, que si salio ({memoria[-2:]})")
+        ult = q("""select rol, origen, contenido from asistente.messages where conversation_id = %s
+                   order by creado_en desc limit 1""", (cv,))[0]
+        comprobar(ult == ("user", "cliente", "me ayudas con la factura?"),
+                  f"el mensaje del cliente queda guardado para quien intervino ({ult})")
+        comprobar(e[:3] == ("humano", "intervencion", "Ana Perez") and e[3] == v_antes + 1
+                  and [x[0] for x in eventos(cv)].count("intervencion") == 1,
+                  f"control humano, asignada a Ana, relevo_version +1, un evento ({e[:4]})")
+        comprobar(api.contadores_relevo["respuesta_ia_descartada_por_cambio_de_control"] == descartes_antes + 1,
+                  "queda contado como respuesta_ia_descartada_por_cambio_de_control")
+
+        # 9b. la persona interviene despues de guardada la respuesta y antes del POST
+        tel2 = "573000000091"
+        whatsapp_turno(tel2, "hola")
+        cv2 = conv_wa(tel2)
+        posts.clear()
+        modo["en_el_medio"] = lambda: intervenir_http(cv2, LUIS, "d24-luis")
+        whatsapp_turno(tel2, "cuanto debo?")
+        modo["en_el_medio"] = None
+        filas = filas_ia(cv2)
+        comprobar(posts == [], f"intervencion justo antes del envio: cero POST a Meta ({len(posts)})")
+        comprobar(filas[-1] == ("RESPUESTA-IA-D24", "descartado"),
+                  f"la respuesta guardada queda 'descartado' ({filas[-1]})")
+        reconstruido = db.historial_para_el_modelo(TENANT, cv2)
+        comprobar(sum("RESPUESTA-IA-D24" in (m.get("content") or "") for m in reconstruido) == 1,
+                  "el historial reconstruido no la incluye (solo la del primer turno, que si salio)")
+        memoria2 = api._sesiones[(TENANT, "whatsapp", tel2)]["historial"]
+        comprobar(memoria2[-1] == {"role": "user", "content": "cuanto debo?"},
+                  f"y sale de la memoria viva ({memoria2[-1]})")
+        comprobar(estado(cv2)[:3] == ("humano", "intervencion", "Luis Rojas"), "control de Luis")
+
+        # 10. la clave de otro operador
+        tel3 = "573000000092"
+        whatsapp_turno(tel3, "hola")
+        cv3 = conv_wa(tel3)
+        r_a = intervenir_http(cv3, ANA, "clave-compartida")
+        r_b = intervenir_http(cv3, LUIS, "clave-compartida")
+        comprobar(r_a.status_code == 200 and r_b.status_code == 409
+                  and (r_b.get_json() or {}).get("codigo") == "clave_de_otra_operacion"
+                  and estado(cv3)[2] == "Ana Perez",
+                  f"== 10 == otro operador con la misma clave: 409, no aparece como quien intervino "
+                  f"({r_a.status_code} {r_b.status_code})")
+        r_tipo = T.devolver_a_ia(TENANT, cv3, operador_id=ANA[0], operador_nombre=ANA[1], clave="clave-compartida")
+        comprobar(r_tipo.motivo == "clave_ajena" and estado(cv3)[0] == "humano",
+                  f"la misma clave para OTRA operacion del mismo actor: clave_ajena, nada cambia ({r_tipo.motivo})")
+    finally:
+        liberar.set()
+        for (m, n), f in orig9.items():
+            setattr(m, n, f)
+        api._TOKEN_SERVICIO = token9
         api._sesiones.clear()
 finally:
     try:

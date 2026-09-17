@@ -120,7 +120,7 @@ def validar_datos(tipo: str, datos: dict) -> dict:
 def _evento_previo(cur, org, conversation_id, clave):
     if not clave:
         return None
-    cur.execute("""select id, datos from asistente.relevo_eventos
+    cur.execute("""select id, datos, tipo, actor_usuario_id from asistente.relevo_eventos
                    where organization_id = %s and conversation_id = %s
                      and clave_idempotencia = %s""", (org, conversation_id, clave))
     return cur.fetchone()
@@ -146,19 +146,35 @@ def _evento(cur, org, conversation_id, tipo, actor_tipo, actor_id, actor_nombre,
     return str(cur.fetchone()["id"])
 
 
-def _ejecutar(tenant, conversation_id, clave, cuerpo) -> Resultado:
+def _replay(previo, tipo, actor_id) -> Resultado:
+    """
+    Lo que se responde cuando la clave ya se uso. Es un reintento SOLO si es la
+    misma operacion (mismo tipo de evento) del mismo actor. Otro operador con
+    la misma clave -- un id repetido, un cliente mal hecho -- no puede recibir
+    exito como si hubiera sido el quien intervino o tomo la conversacion.
+    """
+    version = (previo["datos"] or {}).get("version")
+    actor_previo = str(previo["actor_usuario_id"]) if previo["actor_usuario_id"] else None
+    if previo["tipo"] != tipo or actor_previo != (str(actor_id) if actor_id else None):
+        return Resultado(False, True, version, None, "clave_ajena")
+    return Resultado(False, True, version, str(previo["id"]), "reintento")
+
+
+def _ejecutar(tenant, conversation_id, clave, cuerpo, *, tipo, actor_id=None) -> Resultado:
     """
     Corre 'cuerpo(cur, org, fila)' en UNA transaccion. Resuelve aca lo comun:
     conversacion inexistente, reintento con la misma clave (antes de tocar
     nada, y tambien si dos pedidos iguales llegan a la vez y el segundo choca
     con el indice unico), y el gancho de fallas.
+
+    'tipo' y 'actor_id' son los del evento que escribiria esta llamada: un
+    reintento solo es reintento si los dos coinciden con el evento previo.
     """
     try:
         with db.sesion(tenant) as (cur, org):
             previo = _evento_previo(cur, org, conversation_id, clave)
             if previo:
-                return Resultado(False, True, (previo["datos"] or {}).get("version"),
-                                 str(previo["id"]), "reintento")
+                return _replay(previo, tipo, actor_id)
             fila = _fila(cur, org, conversation_id)
             if fila is None:
                 return Resultado(False, False, None, None, "no_existe")
@@ -170,8 +186,7 @@ def _ejecutar(tenant, conversation_id, clave, cuerpo) -> Resultado:
         with db.sesion(tenant) as (cur, org):
             previo = _evento_previo(cur, org, conversation_id, clave)
         if previo:
-            return Resultado(False, True, (previo["datos"] or {}).get("version"),
-                             str(previo["id"]), "reintento")
+            return _replay(previo, tipo, actor_id)
         raise
 
 
@@ -213,7 +228,7 @@ def escalar(tenant: str, conversation_id: str, *, motivo: str = "",
         datos = {"version": version, "motivo": (motivo or "")[:MAX_TEXTO] or None}
         ev = _evento(cur, org, conversation_id, "escalada", "ia", None, None, datos, clave)
         return Resultado(True, True, version, ev, datos=datos)
-    return _ejecutar(tenant, conversation_id, clave, cuerpo)
+    return _ejecutar(tenant, conversation_id, clave, cuerpo, tipo="escalada")
 
 
 def intervenir(tenant: str, conversation_id: str, *, operador_id: str, operador_nombre: str,
@@ -241,7 +256,7 @@ def intervenir(tenant: str, conversation_id: str, *, operador_id: str, operador_
                  "tomada": bool(tomar)}
         ev = _evento(cur, org, conversation_id, "intervencion", "operador", usuario, nombre, datos, clave)
         return Resultado(True, True, version, ev, datos=datos)
-    return _ejecutar(tenant, conversation_id, clave, cuerpo)
+    return _ejecutar(tenant, conversation_id, clave, cuerpo, tipo="intervencion", actor_id=usuario)
 
 
 # =============================================================================
@@ -271,7 +286,7 @@ def tomar(tenant: str, conversation_id: str, *, operador_id: str, operador_nombr
         datos = {"version": version, "anterior_nombre": f["asignada_a_nombre"]}
         ev = _evento(cur, org, conversation_id, "tomada", "operador", usuario, nombre, datos, clave)
         return Resultado(True, True, version, ev, datos=datos)
-    return _ejecutar(tenant, conversation_id, clave, cuerpo)
+    return _ejecutar(tenant, conversation_id, clave, cuerpo, tipo="tomada", actor_id=usuario)
 
 
 def soltar(tenant: str, conversation_id: str, *, operador_id: str, operador_nombre: str,
@@ -294,7 +309,7 @@ def soltar(tenant: str, conversation_id: str, *, operador_id: str, operador_nomb
         datos = {"version": version, "anterior_nombre": f["asignada_a_nombre"]}
         ev = _evento(cur, org, conversation_id, "soltada", "operador", usuario, nombre, datos, clave)
         return Resultado(True, True, version, ev, datos=datos)
-    return _ejecutar(tenant, conversation_id, clave, cuerpo)
+    return _ejecutar(tenant, conversation_id, clave, cuerpo, tipo="soltada", actor_id=usuario)
 
 
 def resolver(tenant: str, conversation_id: str, *, operador_id: str, operador_nombre: str,
@@ -323,7 +338,7 @@ def resolver(tenant: str, conversation_id: str, *, operador_id: str, operador_no
         datos = {"version": version, "por": "operador"}
         ev = _evento(cur, org, conversation_id, "cerrada", "operador", usuario, nombre, datos, clave)
         return Resultado(True, True, version, ev, datos=ident)
-    return _ejecutar(tenant, conversation_id, clave, cuerpo)
+    return _ejecutar(tenant, conversation_id, clave, cuerpo, tipo="cerrada", actor_id=usuario)
 
 
 def devolver_a_ia(tenant: str, conversation_id: str, *, operador_id: str, operador_nombre: str,
@@ -346,7 +361,7 @@ def devolver_a_ia(tenant: str, conversation_id: str, *, operador_id: str, operad
         datos = {"version": version}
         ev = _evento(cur, org, conversation_id, "devuelta_a_ia", "operador", usuario, nombre, datos, clave)
         return Resultado(True, True, version, ev, datos=datos)
-    return _ejecutar(tenant, conversation_id, clave, cuerpo)
+    return _ejecutar(tenant, conversation_id, clave, cuerpo, tipo="devuelta_a_ia", actor_id=usuario)
 
 
 def caso_externo_cerrado(tenant: str, conversation_id: str, *, clave: str | None = None) -> Resultado:
@@ -364,4 +379,4 @@ def caso_externo_cerrado(tenant: str, conversation_id: str, *, clave: str | None
         datos = {"version": version, "aplicado": False}
         ev = _evento(cur, org, conversation_id, "caso_externo_cerrado", "sistema", None, None, datos, clave)
         return Resultado(True, True, version, ev, datos=datos)
-    return _ejecutar(tenant, conversation_id, clave, cuerpo)
+    return _ejecutar(tenant, conversation_id, clave, cuerpo, tipo="caso_externo_cerrado")

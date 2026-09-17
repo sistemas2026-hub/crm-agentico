@@ -286,12 +286,13 @@ def historial_para_el_modelo(tenant: str, conversation_id: str,
                 # y la unica fila de legado con rol 'humano' ni siquiera entraba.
                 # El filtro de rol va en el SQL para que el limite cuente solo
                 # filas que el modelo va a ver: las notas no le roban lugar.
-                """select rol, contenido, origen, autor_nombre from (
-                     select rol, contenido, origen, autor_nombre, creado_en
+                """select rol, contenido, origen, autor_nombre, estado_entrega from (
+                     select rol, contenido, origen, autor_nombre, estado_entrega, creado_en
                        from asistente.messages
                       where organization_id = %s and conversation_id = %s
                         and contenido is not null and contenido <> ''
                         and rol = any(%s)
+                        and coalesce(estado_entrega, '') <> 'descartado'
                       order by creado_en desc limit %s
                    ) ultimos order by creado_en""",
                 (org, conversation_id, list(regla_historial.ROLES_DEL_MODELO), limite))
@@ -1885,6 +1886,26 @@ def control_de_conversacion_abierta(tenant: str, canal: str,
             "relevo_version": fila["relevo_version"]}
 
 
+def descartar_respuesta_ia(tenant: str, mensaje_id: str) -> bool:
+    """
+    Marca una respuesta de la IA que quedo guardada y NO se le envio al cliente
+    porque el control cambio antes del envio (D24). La fila se conserva --es
+    auditoria: la IA la calculo y se pago-- pero con estado_entrega
+    'descartado' no entra al historial del modelo ni al resumen.
+
+    Solo toca filas 'assistant' de origen 'ia' que todavia no tienen wamid: una
+    respuesta que Meta ya acepto no se puede descartar.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """update asistente.messages
+               set estado_entrega = 'descartado', error_entrega = 'cambio_de_control'
+               where organization_id = %s and id = %s
+                 and rol = 'assistant' and origen = 'ia' and wamid is null""",
+            (org, mensaje_id))
+        return cur.rowcount > 0
+
+
 def control_efectivo_de(tenant: str, conversation_id: str) -> str | None:
     """
     Quien controla la conversacion hoy ('ia' | 'humano'), por la regla unica de
@@ -2464,7 +2485,7 @@ def conversacion_vencida(tenant: str, canal: str, usuario_externo: str,
         # siguiente (D12). Las notas se excluyen en el SQL y otra vez en la
         # regla.
         cur.execute(
-            """select rol, contenido, origen, autor_nombre from asistente.messages
+            """select rol, contenido, origen, autor_nombre, estado_entrega from asistente.messages
                where organization_id = %s and conversation_id = %s
                  and rol = any(%s)
                order by creado_en""",
