@@ -825,53 +825,53 @@ def _turno_sigue_autorizado(tenant: str, canal: str, id_sesion: str,
                        conversation_id=id_interno(autorizacion.get("conversation_id")),
                        punto="al_revalidar", error=e)
         return False
-    esperado = autorizacion.get("conversation_id")
-    if actual is None:
-        return esperado is None
-    if esperado is not None and actual["conversation_id"] != esperado:
+    return autorizacion_relevo.regla_turno(autorizacion, actual, exigir_ia=exigir_ia)
+
+
+def _escalada_sigue_vigente(tenant: str, escalada: dict) -> bool:
+    """SYNC_ESCALADA (autorizacion.regla_escalada), leido de la base. Si la base
+    no responde, False: falla cerrado."""
+    try:
+        vigencia = persistencia.vigencia_de_escalada(
+            tenant, escalada["conversation_id"], escalada["version"],
+            autorizacion_relevo.INVALIDAN_ESCALADA)
+    except Exception as e:
+        _contar_relevo("control_no_determinado",
+                       conversation_id=id_interno(escalada.get("conversation_id")),
+                       punto="vigencia_de_escalada", error=e)
         return False
-    if exigir_ia and actual["control_efectivo"] != "ia":
-        return False
-    return actual["relevo_version"] == autorizacion.get("relevo_version")
+    return autorizacion_relevo.regla_escalada(vigencia)
 
 
 def _efecto_del_turno(tenant: str, canal: str, id_sesion: str, estado: dict, que: str, *,
-                      de_escalada_propia: bool = False) -> bool:
+                      clase: str = autorizacion_relevo.AUTONOMO_IA) -> bool:
     """
-    D25: si un efecto que escribe, originado por ESTE turno de la IA, todavia
-    puede empezar. Se pregunta justo antes de iniciarlo.
+    D25: si un efecto que escribe, originado por este turno, todavia puede
+    empezar. Se pregunta justo antes de iniciarlo. Las reglas de cada clase
+    viven en nucleo/relevo/autorizacion.py; aca solo se lee la base.
 
-    Dos clases de efecto, y la diferencia es el punto:
-
-      autonomo de la IA        (una herramienta del modelo, la visita que se
-                               agenda sola, cerrar el caso porque el cliente
-                               confirmo): exige que la IA siga controlando y
-                               que nadie haya movido relevo_version.
-      de la escalada propia    (el ticket y el caso del CRM de la escalada que
-                               ESTE turno ya dejo comprometida en la base):
-                               el control ya es humano por esa escalada, y lo
-                               que se exige es que la version siga siendo la
-                               que escribio ella. No es la IA actuando: es
-                               terminar de sincronizar una transicion hecha.
-
-    Una denegacion dura todo el turno: despues de una intervencion no se vuelve
-    a preguntar ni se reintenta.
+    Una denegacion AUTONOMO_IA dura todo el turno: despues de una intervencion
+    la IA no vuelve a preguntar ni reintenta. SYNC_ESCALADA no se revoca por
+    eso: su obligacion es de la escalada, no de la IA.
     """
     autorizacion = estado["autorizacion_turno"]
-    if autorizacion.get("revocada"):
-        permitido = False
-    elif de_escalada_propia:
+    if clase == autorizacion_relevo.SYNC_ESCALADA:
+        escalada = estado.get("escalada_del_turno")
+        permitido = bool(escalada) and _escalada_sigue_vigente(tenant, escalada)
+    elif clase == autorizacion_relevo.AUTOMATICO_EN_PAUSA:
         permitido = _turno_sigue_autorizado(tenant, canal, id_sesion, autorizacion, exigir_ia=False)
+    elif autorizacion.get("revocada"):
+        permitido = False
     else:
         permitido = _turno_sigue_autorizado(
             tenant, canal, id_sesion, autorizacion,
             exigir_ia=not autorizacion.get("legado_retomado"))
-    if not permitido:
-        if not autorizacion.get("revocada"):
+        if not permitido:
             autorizacion["revocada"] = True
+    if not permitido:
         _contar_relevo("accion_ia_cancelada_por_cambio_de_control",
                        conversation_id=id_interno(autorizacion.get("conversation_id")),
-                       version=autorizacion.get("relevo_version"), efecto=que)
+                       version=autorizacion.get("relevo_version"), efecto=que, clase=clase)
     return permitido
 
 
@@ -1072,6 +1072,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     # Lo que autoriza ESTE turno (D24). Se vuelve a comprobar al salir del
     # modelo y antes de enviar.
     estado["autorizacion_turno"] = _autorizacion_de(control_actual)
+    estado["escalada_del_turno"] = None
     if control_actual is None:
         estado["escalada"] = False
     else:
@@ -1208,7 +1209,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             # humano es lo esperado aca, asi que se compara solo la version.
             if cerrado and not _efecto_del_turno(tenant, canal, id_sesion, estado,
                                                  "cierre_confirmado_en_pausa",
-                                                 de_escalada_propia=True):
+                                                 clase=autorizacion_relevo.AUTOMATICO_EN_PAUSA):
                 cerrado = False
 
             if cerrado:
@@ -1975,9 +1976,13 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                         # otro ya la paso a humano, el envio tiene que frenar.
                         if r_reserva.aplicada or r_reserva.motivo == "reintento":
                             escalada_propia = True
+                            estado["escalada_del_turno"] = {
+                                "conversation_id": str(conversation_id),
+                                "version": r_reserva.version}
                             estado["autorizacion_turno"] = {
                                 "conversation_id": str(conversation_id),
-                                "relevo_version": r_reserva.version}
+                                "relevo_version": r_reserva.version,
+                                "escalada_version": r_reserva.version}
                     except Exception as e:
                         registrar("relevo", "no se pudo reservar el control humano", error=e)
                 # El trabajo queda anotado donde la operacion lo ve, con un
@@ -2005,9 +2010,11 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 # D25: el ticket y el caso del CRM son de ESTA escalada si la
                 # reserva la escribio este turno; si no, son un efecto autonomo
                 # y piden que la IA siga controlando.
+                clase_escalada = (autorizacion_relevo.SYNC_ESCALADA if escalada_propia
+                                  else autorizacion_relevo.AUTONOMO_IA)
                 if nombre_ticket and not _efecto_del_turno(
                         tenant, canal, id_sesion, estado, "ticket_de_escalada",
-                        de_escalada_propia=escalada_propia):
+                        clase=clase_escalada):
                     nombre_ticket = None
                 if nombre_ticket:
                     # La sugerencia va PRIMERO en la descripcion, no al
@@ -2117,7 +2124,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 se_intento_escalar = True
                 caso_creado = _efecto_del_turno(
                     tenant, canal, id_sesion, estado, "caso_de_escalada",
-                    de_escalada_propia=escalada_propia) and escalamiento.escalar(
+                    clase=clase_escalada) and escalamiento.escalar(
                     config, tenant, id_sesion, conversation_id, estado["historial"],
                     evaluacion.get("motivo", ""), evaluacion.get("etiqueta", ""),
                     resumen=(evaluacion.get("resumen", "") + nota_ticket).strip(),
@@ -5826,14 +5833,27 @@ def _procesar_mensaje_whatsapp(config, tenant: str, rol: str, entrante: dict) ->
             # corren el evaluador de escalamiento, el CRM y el adjunto, y
             # tardan. Si una persona intervino en ese intervalo, no se envia.
             if (salida.get("_autorizacion") is not None
-                    and not _turno_sigue_autorizado(tenant, "whatsapp", de, salida["_autorizacion"],
-                                                    exigir_ia=False)):
+                    and not _respuesta_sigue_autorizada(tenant, "whatsapp", de, salida)):
                 _descartar_respuesta_guardada(tenant, "whatsapp", de, salida)
                 return
             whatsapp.enviar_texto(config, tenant, de, salida["respuesta"])
     except Exception as e:
         registrar("whatsapp", "fallo al atender un mensaje entrante",
                   tenant=tenant, remitente=ref_sesion(de), wamid=ref_proveedor(wamid), error=e)
+
+
+def _respuesta_sigue_autorizada(tenant: str, canal: str, id_sesion: str, salida: dict) -> bool:
+    """
+    D24, punto 2. Si el turno escalo, su respuesta es el aviso de ESA escalada
+    y sigue la regla SYNC_ESCALADA: que un operador la haya tomado no le quita
+    al cliente el aviso de que lo atiende una persona; una devolucion o un
+    cierre, si. Si no escalo, la version no puede haber cambiado.
+    """
+    autorizacion = salida["_autorizacion"]
+    if autorizacion.get("escalada_version") is not None:
+        return _escalada_sigue_vigente(tenant, {"conversation_id": autorizacion.get("conversation_id"),
+                                                "version": autorizacion["escalada_version"]})
+    return _turno_sigue_autorizado(tenant, canal, id_sesion, autorizacion, exigir_ia=False)
 
 
 def _descartar_respuesta_guardada(tenant: str, canal: str, id_sesion: str, salida: dict) -> None:

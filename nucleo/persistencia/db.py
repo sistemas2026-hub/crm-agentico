@@ -1901,6 +1901,41 @@ def descartar_respuesta_ia(tenant: str, mensaje_id: str) -> bool:
         return cur.rowcount > 0
 
 
+def vigencia_de_escalada(tenant: str, conversation_id: str, version: int,
+                         invalidan: tuple[str, ...]) -> dict | None:
+    """
+    Si la escalada que dejo la conversacion en relevo_version 'version' sigue
+    vigente (nucleo/relevo/autorizacion.py, SYNC_ESCALADA). None si la
+    conversacion no existe. LEVANTA si la base no responde: quien llama falla
+    cerrado.
+
+    'invalidada' mira los eventos POSTERIORES a esa escalada, por la version
+    que cada evento guarda en 'datos': una toma o una reasignacion suben la
+    version y no invalidan; una devolucion o un cierre, si.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select c.estado, c.relevo_version, c.control, c.control_motivo,
+                      c.escalada_a_humano, c.necesita_atencion_humana,
+                      exists(select 1 from asistente.relevo_eventos e
+                              where e.organization_id = c.organization_id
+                                and e.conversation_id = c.id and e.tipo = 'escalada'
+                                and (e.datos->>'version')::int = %s) as originada,
+                      exists(select 1 from asistente.relevo_eventos e
+                              where e.organization_id = c.organization_id
+                                and e.conversation_id = c.id and e.tipo = any(%s)
+                                and (e.datos->>'version')::int > %s) as invalidada
+               from asistente.conversations c
+               where c.organization_id = %s and c.id = %s""",
+            (int(version), list(invalidan), int(version), org, conversation_id))
+        fila = cur.fetchone()
+    if not fila:
+        return None
+    return {"estado": fila["estado"], "control_efectivo": regla_control.control_efectivo(fila),
+            "relevo_version": fila["relevo_version"], "originada": bool(fila["originada"]),
+            "invalidada": bool(fila["invalidada"])}
+
+
 def control_efectivo_de(tenant: str, conversation_id: str) -> str | None:
     """
     Quien controla la conversacion hoy ('ia' | 'humano'), por la regla unica de

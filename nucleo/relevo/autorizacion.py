@@ -47,6 +47,66 @@ def autorizando(autorizador: Callable[[str], bool]):
         _autorizador.reset(token)
 
 
+# --- las reglas, en un solo lugar ---------------------------------------------
+#
+# Tres clases de efecto. La clase la decide QUIEN origina el efecto, no que
+# sistema toca:
+#
+#   AUTONOMO_IA          lo decide la IA en su turno: una herramienta del modelo
+#                        que escribe, una propuesta, la visita que se agenda
+#                        sola, cerrar porque el cliente confirmo. Exige que la IA
+#                        siga controlando y que nadie haya movido relevo_version.
+#
+#   SYNC_ESCALADA        el ticket y el caso del CRM de una escalada que ESTE
+#                        turno ya dejo durable. La obligacion nacio con la
+#                        escalada: tomarla, soltarla o reasignarla cambia QUIEN
+#                        atiende, no la borra. Solo una transicion que deja la
+#                        escalada obsoleta -- devolverla a la IA, cerrarla --
+#                        impide un efecto que todavia no empezo.
+#
+#   AUTOMATICO_EN_PAUSA  lo que el motor hace solo mientras la conversacion esta
+#                        en manos de personas (cerrar porque el cliente confirmo
+#                        durante la pausa). Nadie lo pidio en este turno: si
+#                        alguien movio el relevo mientras se evaluaba, no empieza.
+#
+# B4 convierte SYNC_ESCALADA en una sincronizacion durable y reconciliable; hasta
+# entonces la regla vive aca y no en cada llamador.
+AUTONOMO_IA = "autonomo_ia"
+SYNC_ESCALADA = "sync_escalada"
+AUTOMATICO_EN_PAUSA = "automatico_en_pausa"
+
+# Las transiciones que dejan obsoleta una escalada. Tomar, soltar o reasignar NO.
+INVALIDAN_ESCALADA = ("devuelta_a_ia", "cerrada")
+
+
+def regla_turno(autorizacion: dict, actual: dict | None, *, exigir_ia: bool) -> bool:
+    """
+    AUTONOMO_IA (exigir_ia) y AUTOMATICO_EN_PAUSA (sin exigir_ia): la misma
+    conversacion abierta, la misma relevo_version y, si se pide, control ia.
+    'actual' es lo que leyo db.control_de_conversacion_abierta (None si no hay
+    ninguna abierta).
+    """
+    esperado = autorizacion.get("conversation_id")
+    if actual is None:
+        return esperado is None
+    if esperado is not None and actual["conversation_id"] != esperado:
+        return False
+    if exigir_ia and actual["control_efectivo"] != "ia":
+        return False
+    return actual["relevo_version"] == autorizacion.get("relevo_version")
+
+
+def regla_escalada(vigencia: dict | None) -> bool:
+    """
+    SYNC_ESCALADA: la escalada originadora sigue vigente. 'vigencia' es lo que
+    leyo db.vigencia_de_escalada: la conversacion sigue abierta y en manos de
+    personas, el evento de ESA escalada existe, y despues de el no hubo ninguna
+    transicion de INVALIDAN_ESCALADA. La version actual puede ser mayor.
+    """
+    return bool(vigencia and vigencia["originada"] and vigencia["estado"] == "abierta"
+                and vigencia["control_efectivo"] == "humano" and not vigencia["invalidada"])
+
+
 def efecto_autorizado(que: str) -> bool:
     """
     True si el efecto 'que' (el nombre de la herramienta o del paso) puede

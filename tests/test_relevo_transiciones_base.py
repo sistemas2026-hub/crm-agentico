@@ -35,6 +35,10 @@ B3.2 de SPEC/CONTRATO_RELEVO_IA_HUMANO.md. Base efimera del ledger.
      intervencion, una). Y el cierre por confirmacion no empieza si alguien
      intervino mientras corria el evaluador. La escalada PROPIA sigue
      sincronizando con el CRM (seccion 5).
+ 12. La sincronizacion de una escalada ya comprometida (SYNC_ESCALADA): una
+     toma posterior NO la cancela (ticket, caso y aviso salen); una devolucion
+     o un cierre antes del efecto SI; y el punto de no retorno: una llamada
+     que ya empezo completa, la siguiente no empieza.
   8. B3.3b en turnos reales: tras /intervenir el cliente escribe y el modelo NO
      corre, sin acuse de escalada ni banderas ni tasa; devolver reanuda; la
      memoria nunca decide contra la base (en las dos direcciones); reintento
@@ -887,6 +891,115 @@ try:
         finally:
             guion["al_evaluar"], guion["veredicto"] = None, {}
             for (m, n), f in orig11c.items():
+                setattr(m, n, f)
+
+        # ---------------------------------------------------------------
+        print("\n== 12. SYNC_ESCALADA: la escalada comprometida y lo que la invalida ==")
+        externos12 = []
+        en_medio = {"antes_del_ticket": None, "durante_el_ticket": None}
+
+        def ticket12(*a, **k):
+            if en_medio["antes_del_ticket"]:
+                en_medio["antes_del_ticket"]()
+            return types.SimpleNamespace(herramienta="crear_ticket_caso", area="soporte",
+                                         asunto="Revision", prioridad="media")
+
+        def agendar12(*a, **k):
+            externos12.append("ticket")            # la llamada YA empezo
+            if en_medio["durante_el_ticket"]:
+                en_medio["durante_el_ticket"]()
+            return "T-12"
+        base12 = {
+            (api.agendamiento, "ticket_para_escalar"): ticket12,
+            (api.agendamiento, "agendar"): agendar12,
+            (api.escalamiento, "escalar"): lambda *a, **k: externos12.append("crm") or True,
+            (api.agendamiento, "perfil_del_area"): lambda *a, **k: "",
+            (api, "con_las_manos_vacias"): lambda *a, **k: False,
+            (api, "_cerrar_el_traspaso"): lambda config, tenant, conversation_id, mensaje_id, respuesta, id_sesion, **k: respuesta,
+        }
+        orig12 = {k: getattr(*k) for k in base12}
+        for (m, n), f in base12.items():
+            setattr(m, n, f)
+        escala12 = {"escalar": True, "necesita_humano": True, "motivo": "informacion_a_confirmar",
+                    "etiqueta": "", "caso_manual": "caso_de_prueba_d25", "resumen": "cobertura sin catalogo"}
+
+        def escalar_con(tel, antes=None, durante=None):
+            guion["herramienta"], guion["veredicto"] = False, {}
+            turno11(tel, "hola")
+            conv = conv_wa(tel)
+            externos12.clear()
+            posts11.clear()
+            en_medio["antes_del_ticket"] = (lambda: antes(conv)) if antes else None
+            en_medio["durante_el_ticket"] = (lambda: durante(conv)) if durante else None
+            guion["veredicto"] = escala12
+            turno11(tel, "hay cobertura en Los Almendros?")
+            guion["veredicto"] = {}
+            en_medio["antes_del_ticket"] = en_medio["durante_el_ticket"] = None
+            return conv
+        try:
+            # 12.1 toma posterior: la obligacion de la escalada sigue
+            c1 = escalar_con("573000000120",
+                             antes=lambda conv: T.tomar(TENANT, conv, operador_id=ANA[0], operador_nombre=ANA[1]))
+            e1 = estado(c1)
+            tipos1 = [x[0] for x in eventos(c1)]
+            comprobar(tipos1 == ["escalada", "tomada"] and e1[2] == "Ana Perez",
+                      f"la escalada quedo durable y despues Ana la tomo (version movida) ({tipos1}, {e1[:4]})")
+            comprobar(externos12 == ["ticket", "crm"],
+                      f"toma posterior: el ticket y el caso de ESA escalada SI se sincronizan ({externos12})")
+            comprobar(len(posts11) == 1,
+                      f"y el cliente recibe el aviso de la escalada: la toma no se lo quita ({len(posts11)})")
+
+            # 12.2 devolucion a la IA antes del efecto
+            c2 = escalar_con("573000000121",
+                             antes=lambda conv: T.devolver_a_ia(TENANT, conv, operador_id=ANA[0],
+                                                                operador_nombre=ANA[1]))
+            comprobar(externos12 == [] and estado(c2)[0] == "ia",
+                      f"devuelta a la IA antes del efecto: ni ticket ni caso ({externos12})")
+            comprobar(posts11 == [], "ni el aviso de una escalada que ya no existe")
+
+            # 12.3 cierre antes del efecto
+            c3 = escalar_con("573000000122",
+                             antes=lambda conv: T.resolver(TENANT, conv, operador_id=ANA[0],
+                                                           operador_nombre=ANA[1]))
+            comprobar(externos12 == [] and estado(c3)[4] == "cerrada",
+                      f"cerrada antes del efecto: ni ticket ni caso ({externos12})")
+
+            # 12.4 punto de no retorno: la llamada al ticket ya empezo cuando se
+            # devuelve a la IA -> completa; el caso del CRM, que no empezo, no.
+            escalar_con("573000000123",
+                        durante=lambda conv: T.devolver_a_ia(TENANT, conv, operador_id=ANA[0],
+                                                             operador_nombre=ANA[1]))
+            comprobar(externos12 == ["ticket"],
+                      f"punto de no retorno: el ticket ya en vuelo completa, el caso no empieza ({externos12})")
+
+            # 12.5 la herramienta autonoma ya en vuelo cuando alguien interviene
+            http11.clear()
+            posts11.clear()
+            tel5 = "573000000124"
+            guion["herramienta"] = False
+            turno11(tel5, "hola")
+            c5 = conv_wa(tel5)
+            http11.clear()
+            posts11.clear()
+            orig_http = api.motor.ejecutor_http.ejecutar
+
+            def http_con_intervencion(herramienta, argumentos, tenant=None, *a, **k):
+                http11.append(herramienta.nombre)            # ya empezo
+                intervenir_http(c5, LUIS, "d25-luis-vuelo")
+                return {"ok": True}
+            api.motor.ejecutor_http.ejecutar = http_con_intervencion
+            try:
+                guion["herramienta"] = True
+                turno11(tel5, "quiero cancelar mi solicitud")
+            finally:
+                api.motor.ejecutor_http.ejecutar = orig_http
+                guion["herramienta"] = False
+            comprobar(http11 == ["cancelar_solicitud_servicio"] and posts11 == []
+                      and estado(c5)[:3] == ("humano", "intervencion", "Luis Rojas"),
+                      f"una escritura ya en vuelo completa una sola vez, sin reintento, y la respuesta "
+                      f"no sale ({http11}, posts={len(posts11)})")
+        finally:
+            for (m, n), f in orig12.items():
                 setattr(m, n, f)
     finally:
         liberar11.set()

@@ -148,6 +148,28 @@ for rama, efecto in (("elif herramienta.propone_herramienta:", "_ejecutar_propue
               f"la rama '{rama}' pregunta antes de {efecto[:-1]}")
 
 # ---------------------------------------------------------------------------
+print("\n== 1b. las reglas de autorizacion.py ==")
+A = {"conversation_id": "c1", "relevo_version": 5}
+comprobar(autorizacion.regla_turno(A, {"conversation_id": "c1", "control_efectivo": "ia", "relevo_version": 5},
+                                   exigir_ia=True), "AUTONOMO_IA: misma conversacion, ia y misma version -> si")
+comprobar(not autorizacion.regla_turno(A, {"conversation_id": "c1", "control_efectivo": "humano",
+                                           "relevo_version": 6}, exigir_ia=True),
+          "AUTONOMO_IA: humano y otra version -> no")
+comprobar(not autorizacion.regla_turno(A, {"conversation_id": "c1", "control_efectivo": "humano",
+                                           "relevo_version": 6}, exigir_ia=False),
+          "AUTOMATICO_EN_PAUSA: una toma mueve la version -> no")
+V = {"estado": "abierta", "control_efectivo": "humano", "relevo_version": 6, "originada": True, "invalidada": False}
+comprobar(autorizacion.regla_escalada(V), "SYNC_ESCALADA: tomada despues (version 6) -> si")
+comprobar(not autorizacion.regla_escalada({**V, "invalidada": True}), "SYNC_ESCALADA: devuelta o cerrada despues -> no")
+comprobar(not autorizacion.regla_escalada({**V, "estado": "cerrada"}), "SYNC_ESCALADA: conversacion cerrada -> no")
+comprobar(not autorizacion.regla_escalada({**V, "control_efectivo": "ia"}), "SYNC_ESCALADA: control ia -> no")
+comprobar(not autorizacion.regla_escalada({**V, "originada": False}),
+          "SYNC_ESCALADA: sin el evento de ESA escalada -> no")
+comprobar(not autorizacion.regla_escalada(None), "SYNC_ESCALADA: conversacion inexistente -> no")
+comprobar(set(autorizacion.INVALIDAN_ESCALADA) == {"devuelta_a_ia", "cerrada"},
+          "invalidan una escalada: devolver y cerrar; tomar, soltar y reasignar no")
+
+# ---------------------------------------------------------------------------
 print("\n== 2. inventario de los efectos de atender_turno ==")
 from nucleo.canales import api                                      # noqa: E402
 
