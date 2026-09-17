@@ -1,6 +1,6 @@
 # Contrato del relevo IA ↔ humano
 
-**Versión:** 2.3 (16/09/2026): v2.2 + correcciones de auditoría sobre B1 (adjuntos, bloque de legado, G9 sin reinicio). **Estado: CERRADO como arquitectura** después de dos rondas de auditoría. Autoriza preparar la implementación por fases (§15) en `feature/bandeja-relevo`, **sin push a producción**. Cada fase vuelve a auditoría antes de integrarse.
+**Versión:** 2.4 (16/09/2026): v2.3 + decisiones de auditoría durante B2 y B3.2 (D21, D22, escalada fail-closed con legado, cierre externo sin devolución, control efectivo). **Estado: CERRADO como arquitectura** después de dos rondas de auditoría. Autoriza preparar la implementación por fases (§15) en `feature/bandeja-relevo`, **sin push a producción**. Cada fase vuelve a auditoría antes de integrarse.
 **Commit base:** `92ebe78` (`origin/fix/integracion-wisphub`, verificado con `git fetch` el 16/09/2026).
 **Alcance:** la bandeja de conversaciones (PRD §8.11) y lo que el motor hace con una conversación mientras la atiende la IA, una persona o nadie.
 
@@ -46,6 +46,16 @@
 | 11 | Restricciones de producción: transacciones cortas (`idle_in_transaction_session_timeout = 60s`), DDL con `lock_timeout = 1s` y preflight, backfill en lotes con volumen medido, referencias por servicio y no por línea | §11.5, §16.1 |
 | 12 | Gates G6 (preflight de DDL y backfill) y G7 (reconciliador) | §16 |
 | 13 | Construcción en fases B1–B7 | §15 |
+
+### Cambios desde la versión 2.3 (auditoría durante B2 y B3.2)
+| # | Decisión | Dónde |
+|---|---|---|
+| C1 | **Escalar escribe el control nuevo Y las banderas de legado que deciden la pausa, en la misma transacción**, antes del ticket y del CRM. Si fallan, la conversación sigue pausada (base y memoria). Adelanta a B3.2 la parte de conducta de Q5; la cola de reintentos sigue en B4. | T1, §15 |
+| C2 | Con la reserva hecha, al cliente se le dice el anuncio de atención humana (promete una persona, no un número de caso). "No quedó registrado, escribime de nuevo" queda solo para cuando ni la reserva se pudo guardar. | T1 |
+| C3 | **Un caso cerrado en el CRM nunca devuelve la conversación a la IA**, haya o no alguien a cargo: aviso + evento. El único camino de vuelta es `devolver_a_ia` (T7). En runtime, una conversación gobernada sigue en pausa; el legado retoma como siempre hasta G8. | T11, X16, I14 |
+| C4 | `control_efectivo()` (`nucleo/relevo/control.py`): regla única para las guardas mientras dure la transición. `relevo_version > 0` → la columna `control`; `= 0` → humano si `escalada_a_humano` y `necesita_atencion_humana`. | §4.7, B3.3 |
+| C5 | Una vez `relevo_version > 0` la conversación nunca vuelve a modo legado. G8 adopta las de legado con una transición explícita, con evento, no con un UPDATE anónimo. | I21, §11.2 |
+| C6 | D21 (memoria ≠ lo que leyó el cliente) resuelto en B2.3; D22 ("Soltar" no llegaba al motor) resuelto en B3.2. | §13 |
 
 ### Cambios desde la versión 2.1 (mediciones de producción)
 No reabre la arquitectura: corrige supuestos con datos y agrega dos gates. Afecta B2 en adelante; B1 no cambia.
@@ -284,6 +294,12 @@ Las vistas **operativas** muestran solo canales reales (`canales.REALES`); las c
 - **Esperando al cliente:** `necesita_accion_de = 'cliente'`.
 - **Resueltas:** `estado = 'cerrada'`, con marca si `sincronizacion` no es `hecha`.
 
+### 4.7 `control_efectivo` (transición) [AUDITORÍA C4]
+Mientras existan conversaciones de legado sin reconciliar, **todas** las guardas usan una única función (`nucleo/relevo/control.py`):
+- `relevo_version > 0` → la columna `control`.
+- `relevo_version = 0` → `humano` si `escalada_a_humano` y `necesita_atencion_humana`; si no, `ia` (la misma regla que hoy decide la pausa al reconstruir una sesión).
+Sin esto, una guarda que leyera solo `control` bloquearía a los operadores en las conversaciones escaladas antes del corte (B3.1 las dejó en `ia` por default, sin backfill). Se retira cuando G8 deje sin filas la rama de legado.
+
 ### 4.6 `atendida` (legado)
 `atendida_manual`. Se elimina la rama `exists(rol = 'humano')`: ningún código la escribe hoy. La **única fila de legado** con `rol = 'humano'` se trata como un mensaje humano de autor desconocido (§10); su conversación se revisa en la migración para confirmar que `atendida_manual` ya la cubre.
 
@@ -321,7 +337,7 @@ Cada transición es **un UPDATE condicionado + su evento (+ sus sincronizaciones
 | **T8** | E0 → E2 | Intervenir | `control = 'ia'`, abierta | `control = humano`, `control_motivo = intervencion`, asignación = yo, evento `intervencion` {motivo opcional}. Sin caso CRM y sin contar en la tasa de escalamiento. | Nada. |
 | **T9** | E0 → E0 | Cliente escribe | — | Mensaje `cliente`; responde la IA. Si hay una acción pendiente de la conversación, el modelo recibe el bloqueo estructurado (§9.7). | Respuesta de la IA. |
 | **T10** | E1/E2 → igual | Cliente escribe | — | Mensaje `cliente`. Si ninguna persona escribió con entrega aceptada desde que se abrió el control: texto `mensaje_ya_escalada` (`sistema`). Si ya escribió: **silencio**, como hoy (`api.py:977-984`) [VERIFICADO]. | Texto de espera o nada. |
-| **T11** | ver columna "Efecto" | Caso CRM observado cerrado (motor o reconciliador) | `control = humano`, `control_motivo = escalada`, caso en `Closed/Rejected/Duplicate` | **Sin asignación y sin pendiente interno** → `control = ia`, evento `caso_externo_cerrado` {aplicado: true}. **Con asignación o pendiente interno** [AUDITORÍA] → **no cambia el control**: `aviso_relevo = caso_externo_cerrado`, evento {aplicado: false}. El operador decide devolver (T7) o resolver (T17). | Primer caso: lo que responda la IA. Segundo: sin cambios. |
+| **T11** | E1/E2 → igual (control intacto) | Caso CRM observado cerrado (motor o reconciliador) | `control = humano`, `control_motivo = escalada`, caso en `Closed/Rejected/Duplicate` | **Solo** `aviso_relevo = caso_externo_cerrado` + evento `caso_externo_cerrado` {aplicado: false}, **haya o no asignación** [AUDITORÍA C3]. El CRM es un sistema relacionado, no la autoridad sobre quién atiende. La persona decide devolver (T7) o resolver (T17). | Nada: la pausa sigue. |
 | **T12** | cualquiera abierta | IA propone una acción | Controles actuales + la herramienta cumple §3.7 | Si existe una equivalente viva (misma `clave_equivalencia`): **no se crea otra**, evento `accion_propuesta_duplicada` y el modelo recibe la existente. Si no: fila `pendiente` con `conversation_id` y `vence_en`. | "Todavía no se ejecutó". |
 | **T13** | acción `pendiente` → `ejecutando` → `ejecutada_ok` / `ejecutada_fallo` (o → `vencida`) | Aprobar (operador) | Operador autenticado + las cuatro condiciones de §3.7 | Reserva condicionada → revalidación → ejecución → resultado; evento `accion_aprobada` o `accion_vencida`. | Nada automático [AUDITORÍA P4]. |
 | **T14** | acción `pendiente` → `rechazada` | Rechazar (operador) | Acción `pendiente` | Evento `accion_rechazada` {motivo}. | Nada automático. |
@@ -357,7 +373,7 @@ Cada transición es **un UPDATE condicionado + su evento (+ sus sincronizaciones
 | **X13** | Mensaje de persona sin autor (D2). | El proxy toma el autor de la sesión; el motor rechaza `origen = humano` sin autor. |
 | **X14** | Completar una devolución sin entrega aceptada del mensaje que la acompaña [AUDITORÍA]. | T6 en fases. |
 | **X15** | Que la IA recupere el control porque fallaron integraciones, después de que el evaluador decidió que hace falta una persona [AUDITORÍA]. | T1: el fallo solo deja una sincronización pendiente. |
-| **X16** | Que un cierre externo del caso le quite el control a una conversación asignada o con pendiente interno [AUDITORÍA]. | T11 en dos ramas. |
+| **X16** | Que un cierre externo del caso cambie el control o la asignación de una conversación, con o sin alguien a cargo [AUDITORÍA C3]. | T11 solo avisa. |
 | **X17** | Ejecutar una acción aprobada sin su revalidación específica, con la revalidación fallida o sin poder correrla, o después de `vence_en` [AUDITORÍA]. | §3.7 y T13. |
 | **X18** | Dos propuestas equivalentes vivas a la vez [AUDITORÍA]. | Índice único parcial sobre `clave_equivalencia`. |
 | **X19** | Respuestas crudas de APIs, argumentos completos, datos del cliente o secretos en `relevo_eventos.datos` o en `sincronizaciones_externas` [AUDITORÍA]. | Validación de esquema por tipo; solo el código de error. |
@@ -386,7 +402,8 @@ Cada transición es **un UPDATE condicionado + su evento (+ sus sincronizaciones
 | **I11** | A lo sumo una escalada abierta por conversación. Se decide con `relevo_eventos`, no con `ya_escalada` en memoria. |
 | **I12** | Toda transición inserta su evento en la misma transacción que el cambio de estado. No hay cambio sin evento ni evento sin cambio. |
 | **I13** | El historial reconstruido desde la base es igual al armado en vivo para las mismas filas. Para legado se conserva `rol`. |
-| **I14** | `control` pasa de `humano` a `ia` solo por T6 (paso 4, tras aceptación guardada en el paso 3), T7, T11 (rama sin asignación) o T19→T7. Nunca por un fallo de integración. |
+| **I14** | `control` pasa de `humano` a `ia` solo por T6 (paso 4, tras aceptación guardada en el paso 3), T7 o T19→T7 — todas por `devolver_a_ia`. Nunca por un fallo de integración ni por un cierre externo. |
+| **I21** | `relevo_version` nunca baja. Una conversación con `relevo_version > 0` nunca vuelve a modo legado; las de legado entran al modelo solo por una transición explícita (escalar, intervenir o la adopción de G8), con evento. |
 | **I15** | A lo sumo una acción viva (`pendiente`/`ejecutando`) por `clave_equivalencia`. |
 | **I16** | Todo código de desenlace propio de un tenant tiene una `categoria_base` válida. |
 | **I17** | Toda sincronización termina en `hecha`, `fallida_definitiva` o `desconocida`; las dos últimas, visibles en la conversación. Ninguna queda `en_curso` más de N minutos sin que el reconciliador la retome. |
@@ -638,6 +655,8 @@ Afirman **efectos** en la base, la traza o las llamadas HTTP simuladas, nunca la
 | D14 | El barrido por plazo no revisa verificaciones pendientes | `db.py:954-991`, `operativo.py:164-202` | MAPEO | T16, S13 |
 | D15 | "Reintentar" inserta una fila nueva | `+page.svelte:363-372` → `agregar_mensaje_humano` | VERIFICADO | X11, S15 |
 | D16 | La plantilla guarda la fila antes de validar el canal | `api.py` ~3895 vs ~3905 | MAPEO | X12, S21 |
+| D21 | Tres guardas reescribían la respuesta después de que el motor la agregara al historial y corregían solo la fila: el modelo recordaba en vivo un texto que el cliente nunca leyó | `atender_turno`, rewrites de traspaso, aviso de escalada y pregunta de cierre | VERIFICADO | Resuelto en B2.3 (un punto al final del turno); I13 |
+| D22 | "Soltar" nunca funcionó: la pantalla mandaba `soltar: true` y el proxy de `/atender` lo descartaba; el motor volvía a tomar la conversación | `api/conversaciones/[id]/atender/+server.js` | VERIFICADO | Resuelto en B3.2 |
 
 **Relacionados, fuera de este contrato:**
 - Sin `MOTOR_SERVICE_TOKEN` configurado, el motor no exige token (`api.py:486-487`) [MAPEO]. Condición previa al deploy (§16, G1).
@@ -670,7 +689,7 @@ Afirman **efectos** en la base, la traza o las llamadas HTTP simuladas, nunca la
 | Q2 | Deduplicación de `crear_ticket` en WispHub | **Sin reintento automático** hasta demostrar deduplicación (§3.6). Resultado incierto → `desconocida`, no un segundo ticket. |
 | Q3 | Revalidación vs medición ON/OFF | **No se quita la aprobación humana.** Se construye todo lo que no escribe config; la config de Rapilink se activa al cerrar la medición; el validador pasa de advertencia a error en ese mismo cambio (§3.7). |
 | Q4 | Tiempos por defecto | Aprobados **como defaults de plataforma**, junto con la taxonomía de §9.6: hasta 8 intentos con espera creciente y *jitter*, con tope ~6 h, **solo para errores transitorios**; 10 min `ejecutando` → `desconocida`; 15 min mensaje sin `wamid` → `desconocido`. **Corregido por A5:** las acciones de legado **no** reciben 24 h de vigencia; pasan por la revisión de G3. No son configuración por tenant. |
-| Q5 | Fail-closed al escalar | **Aprobado.** Si el evaluador decidió que hace falta una persona, un fallo de integración no le devuelve la conversación a la IA. Los casos dorados que afirmaban la conducta vieja se actualizan **en el mismo commit funcional**, con el mensaje diciendo que es una política nueva y no una regresión. |
+| Q5 | Fail-closed al escalar | **Aprobado, y adelantado a B3.2 (C1).** Si el evaluador decidió que hace falta una persona, un fallo de integración no le devuelve la conversación a la IA. Los casos dorados que afirmaban la conducta vieja se actualizan **en el mismo commit funcional**, con el mensaje diciendo que es una política nueva y no una regresión. |
 
 ### 14.3 Abiertas
 Ninguna de arquitectura. Las verificaciones pendientes (deduplicación en WispHub, escritores para el backfill, llamadores de `/chat`) son **precondiciones de fase** (§15), no decisiones de diseño.
@@ -690,8 +709,8 @@ se construye en feature/bandeja-relevo → tests → commits → auditoría de D
 |---|---|---|---|
 | **B1** | D3 falla cerrado (`/chat` rechaza canal real) + clave de sesión con canal + en la pantalla, con la IA atendiendo un hilo real, nada se le envía al cliente (texto, adjunto, voz, plantilla; X25) | Buscar todos los llamadores de `/chat` (cli, baterías, n8n) | S8 |
 | **B2** | `messages.origen` (obligatorio desde el corte) + autor + clave de idempotencia; escritura en paralelo; formateo único del historial con marca neutral para legado (D8, A3, A4); notas fuera del resumen (D12); reintentar sin duplicar (D15); plantilla valida antes de guardar (D16) | G4 ya resuelto: sin backfill de procedencia | S3, S14, S15, S16, S21, S26, S34 |
-| **B3** | `control`, asignación, `relevo_eventos`, `relevo_version`, proyección `necesita_accion_de`, cola operativa separada de la simulación; T2–T8, T10, T11, T19; D1, D4, D5, D9, D10, D13 | **G8** antes del corte de control; política para los 30 hilos de prueba de legado; **T6 en canal real espera G9** | S1, S2, S4, S11, S12, S17–S20, S22, S24, S29, S30, S31, S35, S36 |
-| **B4** | `sincronizaciones_externas` + T20 con cadencia propia + taxonomía de errores; T1 fail-closed; casos dorados de Q5 | Verificar deduplicación en WispHub (Q2); cadencia de T20 acordada con producción (G7) | S23, S27, S33 |
+| **B3** | En cinco pasos: **B3.1** esquema aditivo; **B3.2** transiciones con escritura en paralelo (escalar fail-closed con legado, cierre externo solo aviso) y `control_efectivo`; **B3.3** guardas del backend por `control_efectivo` en texto, media y plantilla; **B3.4** toma atómica y reasignación ADMIN (D4); **B3.5** proyección `necesita_accion_de` y cola operativa separada de la simulación. T2–T8, T10, T11, T19; D1, D4, D5, D9, D10, D13, D22 | **G8** antes del corte de control, con adopción explícita (I21); política para los 30 hilos de prueba de legado; **T6 en canal real espera G9** | S1, S2, S4, S11, S12, S17–S20, S22, S24, S29, S30, S31, S35, S36 |
+| **B4** | `sincronizaciones_externas` + T20 con cadencia propia + taxonomía de errores (la parte de conducta de T1 fail-closed ya entró en B3.2) | Verificar deduplicación en WispHub (Q2); cadencia de T20 acordada con producción (G7) | S23, S27, S33 |
 | **B5** | Acciones propuestas: `conversation_id`, estados, reserva, vigencia, deduplicación, bloqueo estructurado; motor y validador de revalidación en modo advertencia | **G3 (bloqueante):** revisión de las 36 acciones de legado; la activación de la config de Rapilink espera el cierre de la medición (Q3) | S5, S6, S7, S9, S10, S25, S28, S32 |
 | **B6** | Frontend completo del relevo (controles, tarjeta de acción, estado de sincronización, compositor) + cierre con desenlace (T15a, T15b, T16, T17) y catálogo con `categoria_base` | — | S13 + recorrido de pantalla |
 | **B7** | Migración de lectores del legado + backfill histórico en lotes + retiro gradual de `escalada_a_humano` / `necesita_atencion_humana` / `tomada_por` como fuente | Volumen medido y mecánica aprobada por producción (G6) | Consultas de invariantes sobre la base |
