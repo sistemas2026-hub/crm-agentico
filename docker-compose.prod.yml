@@ -352,6 +352,12 @@ services:
     # Los hilos si comparten memoria, asi que la concurrencia va por ahi.
     # Cuando el historial viva en asistente.conversations en vez de en RAM,
     # esto puede subir a varios workers.
+    #
+    # EL REGISTRO DE ACCESO VA SIN QUERY STRING (%(U)s y no %(r)s, D20). El
+    # formato por defecto escribe la URL entera, y el alta del webhook es
+    # GET /canales/whatsapp/<tenant>?hub.verify_token=<secreto>: el token
+    # quedaba en el log. Metodo, ruta, estado, bytes y duracion alcanzan para
+    # diagnosticar; ninguna ruta del motor lleva datos de cliente en el camino.
     command: >
       gunicorn nucleo.canales.api:app
       --bind 0.0.0.0:5000
@@ -360,6 +366,7 @@ services:
       --timeout 180
       --graceful-timeout 30
       --access-logfile -
+      --access-logformat '%(h)s %(t)s "%(m)s %(U)s" %(s)s %(b)s %(L)s'
       --error-logfile -
 
   # ============================================================================

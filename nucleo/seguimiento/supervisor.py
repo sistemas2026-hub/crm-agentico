@@ -30,6 +30,7 @@ que tenant es, y nunca rompe el turno si algo falla.
 from __future__ import annotations
 
 from nucleo.modelo import cliente
+from nucleo.observabilidad.registro import id_interno, registrar
 from nucleo.persistencia import db as persistencia
 from nucleo.recuperacion import busqueda
 
@@ -153,8 +154,8 @@ def revisar(config, rol: str, tenant: str, conversation_id: str,
         fragmentos, _ = busqueda.recuperar(config, tenant, rol, pregunta) \
             if pregunta.strip() else ([], None)
     except Exception as e:
-        print(f"[supervisor] no se pudo consultar el manual para "
-              f"{conversation_id}: {type(e).__name__}: {e}")
+        registrar("supervisor", "no se pudo consultar el manual",
+                  conversation_id=id_interno(conversation_id), error=e)
         fragmentos = []
 
     referencia_modelo = config.llm.overrides.get(
@@ -179,8 +180,8 @@ def revisar(config, rol: str, tenant: str, conversation_id: str,
             tools=[_esquema_revision(config)],
             timeout=cliente.TIMEOUT_SECUNDARIO)
     except Exception as e:
-        print(f"[supervisor] fallo al revisar la conversacion "
-              f"{conversation_id}: {type(e).__name__}: {e}")
+        registrar("supervisor", "fallo al revisar la conversacion",
+                  conversation_id=id_interno(conversation_id), error=e)
         return
 
     for llamada in respuesta.llamadas:
@@ -195,6 +196,6 @@ def revisar(config, rol: str, tenant: str, conversation_id: str,
                 justificacion=args.get("justificacion", ""),
                 aporte_sugerido=args.get("aporte_sugerido"))
         except Exception as e:
-            print(f"[supervisor] no se pudo guardar la revision de "
-                  f"{conversation_id}: {type(e).__name__}: {e}")
+            registrar("supervisor", "no se pudo guardar la revision",
+                      conversation_id=id_interno(conversation_id), error=e)
         return

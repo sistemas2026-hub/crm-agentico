@@ -69,6 +69,16 @@ from nucleo.seguridad import listas_blancas
 from nucleo.seguridad import redaccion
 from nucleo.seguridad import salida as guardia_salida
 from nucleo.seguridad.verificacion import Sesion, nivel_requerido, es_factor_de_posesion
+from nucleo.observabilidad.registro import registrar
+
+
+def _indice_patron(patron: str | None) -> int | None:
+    """Cual patron interno se bloqueo, por su posicion: el patron mismo es un
+    fragmento del prompt y no va al log."""
+    try:
+        return list(guardia_salida.PATRONES_INTERNOS).index(patron)
+    except ValueError:
+        return None
 
 
 class ErrorMotor(Exception):
@@ -382,8 +392,9 @@ def _recuperar_campos_de_sesion(sesion, herramienta, crudo) -> None:
         valor = _buscar_campo(crudo, campo)
         if valor:
             setattr(sesion, campo, valor)
-            print(f"[sesion] '{campo}' se recupero de '{herramienta.nombre}' "
-                  "(se habia perdido; la conversacion vuelve a tener diagnostico)")
+            registrar("sesion", "campo recuperado de una herramienta (se habia perdido; la "
+                                "conversacion vuelve a tener diagnostico)",
+                      campo=campo, herramienta=herramienta.nombre)
 
 
 def _ejecutar_verificacion(herramienta, sesion, argumentos_modelo: dict,
@@ -770,7 +781,7 @@ def _ejecutar_consulta_documentacion(config, nombre_rol: str,
         # recuperacion no puede dejar al cliente sin turno. Antes se seguia
         # sin contexto; ahora se le dice al modelo, que es mejor -- puede
         # decidir consultar otra cosa en vez de creer que el corpus esta vacio.
-        print(f"[rag] no se pudo recuperar contexto: {fallo!r}")
+        registrar("rag", "no se pudo consultar la documentacion", rol=nombre_rol, error=fallo)
         return {"error": "BUSQUEDA_NO_DISPONIBLE",
                 "instruccion_interna": "No se pudo consultar la documentacion "
                     "en este momento. No inventes el contenido: segui con lo "
@@ -1732,9 +1743,10 @@ def _resolver_argumentos(herramienta, sesion, argumentos_modelo: dict,
                 # argumento. Prometerle al cliente una fecha que salio de un
                 # default escondido es peor que no dar ninguna -- y quien mire
                 # el ticket vacio va a preguntar, que es lo que corresponde.
-                print(f"[herramienta] {herramienta.nombre}: '{arg_llamada}' "
-                      f"necesita la variable '{nombre_variable}' y no esta "
-                      f"cargada (o no es un numero): se omite la fecha")
+                registrar("herramienta", "falta la variable del tenant para calcular una "
+                                         "fecha (o no es un numero): se omite",
+                          herramienta=herramienta.nombre, argumento=arg_llamada,
+                          variable=nombre_variable)
                 continue
             momento = momento + timedelta(days=dias)
         argumentos[arg_llamada] = momento.isoformat(timespec="seconds")
@@ -1855,8 +1867,8 @@ def medir_para_verificar(config, verificacion, sesion, tenant: str | None,
             medicion[comprobacion.herramienta] = _ejecutar_tool(
                 herr, sesion, {}, tenant, variables_tenant)
         except Exception as e:
-            print(f"[verificacion] no se pudo medir con "
-                  f"'{comprobacion.herramienta}': {type(e).__name__}: {e}")
+            registrar("verificacion", "no se pudo medir", herramienta=comprobacion.herramienta,
+                      error=e)
             medicion[comprobacion.herramienta] = None
     return medicion
 
@@ -2274,10 +2286,13 @@ def _redactar(referencia_modelo: str, historial: list[dict], temperatura: float,
             # herramienta, que es lo que explica un contenido en blanco
             # cuando se pidio sin herramientas. Paso en produccion el
             # 28/08/2026 y no se pudo saber por que.
-            print(f"[modelo] redaccion {muerta or 'en blanco'} "
-                  f"(intento {intento + 1}/{intentos}): "
-                  f"crudo={resp.contenido[:60]!r} "
-                  f"llamadas={[l.nombre for l in (resp.llamadas or [])]}")
+            # Del texto del modelo se dice su FORMA, no su contenido: puede
+            # repetir lo que escribio el cliente.
+            registrar("modelo", "redaccion descartada",
+                      motivo=muerta or "en_blanco", intento=intento + 1, de=intentos,
+                      caracteres=len(resp.contenido or ""),
+                      valor_crudo=bool(limpio and _RE_RESPUESTA_CRUDA.match(limpio)),
+                      llamadas=[l.nombre for l in (resp.llamadas or [])])
 
             # EL REINTENTO CAMBIA LA PETICION, no la repite.
             #
@@ -2320,7 +2335,8 @@ def _redactar(referencia_modelo: str, historial: list[dict], temperatura: float,
         if limpio and not _RE_RESPUESTA_CRUDA.match(limpio) and not muerta:
             limpio, fuga = guardia_salida.verificar(limpio)
             if fuga:
-                print(f"[salida] fuga bloqueada en redaccion final: '{fuga}'")
+                registrar("salida", "fuga bloqueada en redaccion final",
+                          patron=_indice_patron(fuga))
             historial.append({"role": "assistant", "content": limpio})
             return limpio
     # SI HAY ALGO ESCRITO, SE ENTREGA -- aunque no haya pasado la guarda.
@@ -2335,16 +2351,17 @@ def _redactar(referencia_modelo: str, historial: list[dict], temperatura: float,
     # bien y despues se agotaron los tres intentos -- el cliente se quedo con
     # el aviso generico. La guarda se habia comido la respuesta que existia.
     if candidato:
-        print(f"[modelo] se agotaron los {intentos} intentos, pero habia una "
-              f"redaccion utilizable: se entrega esa en vez del aviso")
+        registrar("modelo", "se agotaron los intentos, pero habia una redaccion utilizable: "
+                            "se entrega esa en vez del aviso", intentos=intentos)
         candidato, fuga = guardia_salida.verificar(candidato)
         if fuga:
-            print(f"[salida] fuga bloqueada en la redaccion de respaldo: '{fuga}'")
+            registrar("salida", "fuga bloqueada en la redaccion de respaldo",
+                      patron=_indice_patron(fuga))
         historial.append({"role": "assistant", "content": candidato})
         return candidato
 
-    print(f"[modelo] se agotaron los {intentos} intentos de redaccion -- al "
-          f"cliente le sale el aviso de reintentar")
+    registrar("modelo", "se agotaron los intentos de redaccion -- al cliente le sale el "
+                        "aviso de reintentar", intentos=intentos)
     historial.append({"role": "assistant", "content": ""})
     # Sin conjugacion de segunda persona ('podes'/'puedes'/'puede') a
     # proposito: este texto sale de nucleo/, que no sabe -- ni tiene por que
@@ -2487,7 +2504,7 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
         indice_habilidades = catalogo_habilidades.indice_de(
             config.identidad.slug, nombre_rol)
     except Exception as e:
-        print(f"[habilidades] no se pudo leer el indice: {e}")
+        registrar("habilidades", "no se pudo leer el indice", error=e)
         indice_habilidades = []
 
     if indice_habilidades:
@@ -2520,7 +2537,7 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
             fragmentos, mejor = recuperar(config, config.identidad.slug,
                                           nombre_rol, mensaje)
         except Exception as e:
-            print(f"[rag] no se pudo recuperar contexto: {e}")
+            registrar("rag", "no se pudo recuperar contexto", error=e)
             fragmentos, mejor = [], None
 
     if fragmentos:
@@ -2645,7 +2662,7 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
     nombres_area_conf = {a for a in _areas_conf if a}
     iteraciones = 0
 
-    def _otra_vuelta(log: str, instruccion: str) -> None:
+    def _otra_vuelta(motivo: str, intento: int, instruccion: str) -> None:
         """
         El mecanismo, sin la condicion: una vuelta mas del bucle CON el
         catalogo todavia disponible, mas la instruccion de que le falta.
@@ -2661,7 +2678,8 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
         """
         nonlocal iteraciones
         iteraciones -= 1              # no se le cobra al presupuesto del turno
-        print(f"[modelo] {log}")
+        registrar("modelo", "se le da otra vuelta con su catalogo",
+                  rol=nombre_rol, motivo=motivo, intento=intento, de=2)
         historial.append({"role": "system", "content": instruccion})
 
     def _pedir_que_consulte(motivo: str) -> bool:
@@ -2683,9 +2701,7 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
             return False
         reintentos_area_sin_consultar += 1
         _otra_vuelta(
-            f"'{nombre_rol}' entro por derivacion y {motivo} "
-            f"({reintentos_area_sin_consultar}/2): se le da otra vuelta "
-            f"con su catalogo",
+            motivo, reintentos_area_sin_consultar,
             f"El area que atiende sos VOS y ya es tu turno: el cliente no va a "
             f"escribir de nuevo, asi que no anuncies que lo vas a pasar con "
             f"nadie. Todavia no consultaste nada. USA AHORA tus herramientas "
@@ -2730,9 +2746,7 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
             return False
         reintentos_sin_guia_tv += 1
         _otra_vuelta(
-            f"'{nombre_rol}' iba a dictar pasos de sintonizacion sin haber "
-            f"leido la guia ({reintentos_sin_guia_tv}/2): se le da otra "
-            f"vuelta con su catalogo",
+            "pasos_de_sintonizacion_sin_guia", reintentos_sin_guia_tv,
             f"NO escribas pasos de sintonizacion todavia: los que tenes en la "
             f"cabeza no son los de esta empresa y pueden mandar al cliente a "
             f"una opcion que su televisor no tiene. La UNICA fuente es "
@@ -2764,9 +2778,8 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
             # no lo corrige, pero el texto dice exactamente que queria.
             rescatadas = _llamadas_fugadas(resp.contenido, herramientas)
             if rescatadas:
-                print(f"[motor] el modelo escribio {len(rescatadas)} llamada(s) "
-                      f"en vez de invocarlas; se ejecutan igual: "
-                      f"{[l.nombre for l in rescatadas]}")
+                registrar("motor", "el modelo escribio llamadas en vez de invocarlas; se "
+                                   "ejecutan igual", llamadas=[l.nombre for l in rescatadas])
                 resp.llamadas = rescatadas
                 resp.contenido = ""
 
@@ -2802,7 +2815,8 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 if not hubo_llamadas:
                     limpio, fuga = guardia_salida.verificar(limpio)
                     if fuga:
-                        print(f"[salida] fuga bloqueada en rol '{nombre_rol}': '{fuga}'")
+                        registrar("salida", "fuga bloqueada", rol=nombre_rol,
+                                  patron=_indice_patron(fuga))
                     limpio = _con_obligatorios(limpio, obligatorios)
                     historial.append({"role": "assistant", "content": limpio})
                     return limpio, registro, medios_pendientes
@@ -2829,8 +2843,7 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 # promesa sin haber consultado nada: un area que contesta bien
                 # de una, o que de verdad no necesita consultar, no paga nada.
                 if (_promete_en_vez_de_responder(limpio, nombres_area_conf)
-                        and _pedir_que_consulte("contesto una promesa sin "
-                                                "consultar nada")):
+                        and _pedir_que_consulte("derivado_promete_sin_consultar")):
                     continue
                 break  # ya no pide mas herramientas: pasa a redaccion final
             if _RE_FUGA_TOOL_CALL.search(resp.contenido or "") and reintentos_fuga < 2:
@@ -2852,7 +2865,7 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 # Medido el 09/09/2026 contra la config v132. El sintoma en el
                 # log es la AUSENCIA de la linea de reintento: no es que
                 # fallara, es que no se evaluaba.
-                if _pedir_que_consulte("no contesto nada y no consulto nada"):
+                if _pedir_que_consulte("derivado_sin_respuesta_ni_consulta"):
                     continue
                 break  # sin texto pero ya hubo tools: igual pasa a redaccion final
             # Sin texto y sin tool call en el primer intento: visto en vivo con

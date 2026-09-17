@@ -48,6 +48,7 @@ import hmac
 
 import requests
 
+from nucleo.observabilidad.registro import ref_proveedor, registrar
 from nucleo.seguridad import secretos
 
 API_BASE_POR_DEFECTO = "https://graph.facebook.com"
@@ -219,8 +220,7 @@ def firma_valida(config, tenant: str, cuerpo_crudo: bytes,
         # convertiria un webhook no verificable en un 500. No verificar es no
         # procesar, y eso se dice con un 401 -- pero se registra, porque desde
         # afuera es indistinguible de un atacante y desde adentro es una caida.
-        print(f"[whatsapp] no se pudo verificar la firma de '{tenant}': "
-              f"{type(e).__name__}: {e}")
+        registrar("whatsapp", "no se pudo verificar la firma", tenant=tenant, error=e)
         return False
     esperado = hmac.new(secreto.encode(), cuerpo_crudo, hashlib.sha256).hexdigest()
     # compare_digest y no '==': comparar en tiempo constante evita filtrar la
@@ -237,8 +237,7 @@ def token_de_verificacion_valido(config, tenant: str, recibido: str | None) -> b
         esperado = _secreto(tenant, _cfg(config).verify_token_ref,
                             "del handshake (verify_token_ref)")
     except Exception as e:
-        print(f"[whatsapp] no se pudo verificar el handshake de '{tenant}': "
-              f"{type(e).__name__}: {e}")
+        registrar("whatsapp", "no se pudo verificar el handshake", tenant=tenant, error=e)
         return False
     return hmac.compare_digest(esperado, recibido)
 
@@ -814,4 +813,5 @@ def marcar_leido(config, tenant: str, wamid: str) -> None:
             "message_id": wamid,
         })
     except Exception as e:
-        print(f"[whatsapp] no se pudo marcar leido {wamid}: {type(e).__name__}: {e}")
+        registrar("whatsapp", "no se pudo marcar leido", tenant=tenant,
+                  wamid=ref_proveedor(wamid), error=e)

@@ -48,6 +48,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 
+from nucleo.observabilidad.registro import registrar
 from nucleo.programador import ejecutor, embudo, metricas, puerta, registro
 
 # El tick del coordinador NO es el intervalo de los jobs. Es cada cuanto mira
@@ -111,8 +112,7 @@ def un_tick(reg: metricas.Registro | None = None,
         with puerta.sesion(puerta.COORDINADOR) as cur:
             candidatos = puerta.vencidos(cur, limite=tope)
     except Exception as e:                                       # noqa: BLE001
-        print(f"[coord] no se pudo preguntar que vence: "
-              f"{type(e).__name__}: {e}", flush=True)
+        registrar("coord", "no se pudo preguntar que vence", error=e)
         reg.contar("tick_fallido")
         return {**emb.informe(), "error": f"{type(e).__name__}: {e}"}
 
@@ -148,8 +148,7 @@ def un_tick(reg: metricas.Registro | None = None,
         except Exception as e:                                   # noqa: BLE001
             emb.omitir("error")
             reg.contar("omitidos", motivo="error", job_code=c["job_code"])
-            print(f"[coord] el claim de '{c['job_code']}' fallo: "
-                  f"{type(e).__name__}: {e}", flush=True)
+            registrar("coord", "el claim fallo", job_code=c["job_code"], error=e)
             continue
 
         if claim is None:
@@ -208,8 +207,7 @@ def correr(tick: int = TICK_SEGUNDOS, vueltas: int | None = None) -> None:
         except BaseException as e:                               # noqa: BLE001
             # La ultima red. Nada puede matar el bucle -- es la leccion
             # completa del reloj que estuvo un mes muerto sin un solo log.
-            print(f"[coord] el tick entero fallo: {type(e).__name__}: {e}",
-                  flush=True)
+            registrar("coord", "el tick entero fallo", error=e)
             hechas += 1
             continue
         duro = (datetime.now(timezone.utc) - inicio).total_seconds()

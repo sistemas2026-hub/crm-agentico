@@ -38,6 +38,7 @@ from nucleo.modelo.motor import _buscar_campo, _ejecutar_tool
 from nucleo.persistencia import db as persistencia
 from nucleo.seguimiento import reparto
 from nucleo.recuperacion import busqueda
+from nucleo.observabilidad.registro import registrar
 
 
 # La herramienta con la que se lee la carga de casos. Es el mismo nombre
@@ -118,8 +119,7 @@ def verificar(config, tenant: str, rol: str, historial: list[dict]) -> dict | No
         fragmentos, _ = busqueda.recuperar(config, tenant, rol, pregunta) \
             if pregunta.strip() else ([], None)
     except Exception as e:
-        print(f"[agendamiento] no se pudo consultar el manual: "
-              f"{type(e).__name__}: {e}")
+        registrar("agendamiento", "no se pudo consultar el manual", error=e)
         fragmentos = []
 
     if not fragmentos:
@@ -127,8 +127,8 @@ def verificar(config, tenant: str, rol: str, historial: list[dict]) -> dict | No
         # checklist -- no se inventa un criterio general aca (a diferencia
         # del supervisor, que si puede opinar sin manual). Cae al camino de
         # siempre.
-        print("[agendamiento] no se encontro el procedimiento del manual "
-              "para este caso, se cae al camino humano")
+        registrar("agendamiento", "no se encontro el procedimiento del manual "
+                                  "para este caso, se cae al camino humano")
         return None
 
     cuerpo_manual = "\n\n".join(f.citar() for f in fragmentos)
@@ -152,7 +152,7 @@ def verificar(config, tenant: str, rol: str, historial: list[dict]) -> dict | No
             referencia_modelo, mensajes, tools=[_esquema_verificacion(config)],
             timeout=cliente.TIMEOUT_SECUNDARIO)
     except Exception as e:
-        print(f"[agendamiento] fallo al verificar: {type(e).__name__}: {e}")
+        registrar("agendamiento", "fallo al verificar", error=e)
         return None
 
     for llamada in respuesta.llamadas:
@@ -301,22 +301,21 @@ def perfil_del_area(tenant: str, area: str, config=None) -> str | None:
     try:
         areas = persistencia.areas_de_colaboradores(tenant)
     except Exception as e:
-        print(f"[escalamiento] no se pudo resolver quien atiende '{area}': "
-              f"{type(e).__name__}: {e}")
+        registrar("escalamiento", "no se pudo resolver quien atiende el area", area=area, error=e)
         return None
     perfiles = [p for p, a in areas.items() if a == area]
     if not perfiles:
-        print(f"[escalamiento] el area '{area}' no tiene a nadie: el caso queda "
-              f"sin asignar, a la vista del administrador")
+        registrar("escalamiento", "el area no tiene a nadie: el caso queda sin asignar, a la "
+                                  "vista del administrador", area=area)
         return None
     if len(perfiles) == 1:
         return perfiles[0]
 
     carga = _carga_de_casos(config, tenant) if config is not None else {}
     elegido = reparto.elegir_menos_cargado(perfiles, carga)
-    print(f"[escalamiento] el area '{area}' tiene {len(perfiles)} personas; "
-          f"le toca a {elegido} (abiertos: "
-          f"{ {p: carga.get(p, 0) for p in perfiles} })")
+    registrar("escalamiento", "reparto del caso en el area", area=area,
+              personas=len(perfiles), elegido=elegido,
+              abiertos={p: carga.get(p, 0) for p in perfiles})
     return elegido
 
 
@@ -340,8 +339,7 @@ def _carga_de_casos(config, tenant: str) -> dict[str, int]:
         crudo = _ejecutar_tool(herramienta, None, {}, tenant,
                                config.variables_tenant)
     except Exception as e:
-        print(f"[escalamiento] no se pudo leer la carga de casos: "
-              f"{type(e).__name__}: {e}")
+        registrar("escalamiento", "no se pudo leer la carga de casos", error=e)
         return {}
     filas = crudo.get("cases") if isinstance(crudo, dict) else crudo
     if filas is None and isinstance(crudo, dict):
@@ -377,8 +375,8 @@ def responsable_de(tenant: str, area: str, sistema: str,
         areas = persistencia.areas_de_colaboradores(tenant)
         identidades = persistencia.identidades_externas(tenant, sistema)
     except Exception as e:
-        print(f"[agendamiento] no se pudo resolver el responsable de '{area}': "
-              f"{type(e).__name__}: {e}")
+        registrar("agendamiento", "no se pudo resolver el responsable del area", area=area,
+                  error=e)
         return None
 
     candidatos = [
@@ -387,8 +385,9 @@ def responsable_de(tenant: str, area: str, sistema: str,
         if a == area and p in identidades and identidades[p].get("identificador")
     ]
     if not candidatos:
-        print(f"[agendamiento] el area '{area}' no tiene a nadie con identidad "
-              f"en '{sistema}': el ticket va al asignado fijo")
+        registrar("agendamiento", "el area no tiene a nadie con identidad en el sistema "
+                                  "externo: el ticket va al asignado fijo",
+                  area=area, sistema=sistema)
         return None
     if len(candidatos) == 1:
         return candidatos[0]
@@ -397,8 +396,9 @@ def responsable_de(tenant: str, area: str, sistema: str,
     # criterio que para el caso del CRM, y por los mismos motivos.
     por_id = {c[0]: c for c in candidatos}
     elegido = reparto.elegir_menos_cargado(list(por_id), carga_externa or {})
-    print(f"[agendamiento] el area '{area}' tiene {len(candidatos)} personas; "
-          f"el ticket le toca a {por_id[elegido][1] or elegido}")
+    # Se registra el perfil, no el nombre visible de la persona.
+    registrar("agendamiento", "reparto del ticket en el area", area=area,
+              personas=len(candidatos), perfil_elegido=elegido)
     return por_id[elegido]
 
 
@@ -418,15 +418,15 @@ def agendar(config, tenant: str, sesion, nombre_herramienta: str,
     """
     herramienta = next((h for h in config.herramientas if h.nombre == nombre_herramienta), None)
     if herramienta is None:
-        print(f"[agendamiento] '{nombre_herramienta}' no esta configurada "
-              f"para '{tenant}', no se agenda.")
+        registrar("agendamiento", "la herramienta no esta configurada, no se agenda",
+                  herramienta=nombre_herramienta, tenant=tenant)
         return None
 
     servicio = getattr(sesion, "id_cliente", None) if sesion is not None else None
     descripcion = (descripcion or "").strip()
     if not servicio or not descripcion:
-        print(f"[agendamiento] faltan datos minimos (servicio={bool(servicio)}, "
-              f"descripcion={bool(descripcion)}), no se agenda.")
+        registrar("agendamiento", "faltan datos minimos, no se agenda",
+                  servicio=bool(servicio), descripcion=bool(descripcion))
         return None
 
     try:
@@ -438,8 +438,8 @@ def agendar(config, tenant: str, sesion, nombre_herramienta: str,
             quien = responsable_de(tenant, area, cfg.sistema)
             if quien:
                 sobrescribir["tecnico"] = quien[0]
-                print(f"[agendamiento] el ticket se abre a nombre de "
-                      f"{quien[1] or quien[0]} (area '{area}')")
+                registrar("agendamiento", "el ticket se abre a nombre del responsable del area",
+                          area=area)
         # 'asuntos_default' viaja junto a 'asunto': WispHub exige los dos y
         # los valida contra la misma lista. Mandar uno solo da 400.
         if asunto:
@@ -457,6 +457,6 @@ def agendar(config, tenant: str, sesion, nombre_herramienta: str,
         # campos_permitidos.agendar_visita_tecnica en el config del tenant).
         return respuesta.get("id_ticket") if isinstance(respuesta, dict) else None
     except Exception as e:
-        print(f"[agendamiento] fallo al ejecutar '{nombre_herramienta}': "
-              f"{type(e).__name__}: {e}")
+        registrar("agendamiento", "fallo al ejecutar la herramienta",
+                  herramienta=nombre_herramienta, error=e)
         return None

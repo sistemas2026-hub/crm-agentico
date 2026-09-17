@@ -28,6 +28,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 from nucleo.herramientas import http as ejecutor_http
+from nucleo.observabilidad.registro import id_interno, registrar
 
 
 def _herramienta(config, atributo: str):
@@ -88,8 +89,8 @@ def _ejecutar(config, tenant: str, atributo: str, ticket: str,
         ejecutor_http.ejecutar(herr, argumentos, tenant)
         return True
     except Exception as e:
-        print(f"[operativo] '{herr.nombre}' fallo sobre el ticket {ticket}: "
-              f"{type(e).__name__}: {e}")
+        registrar("operativo", "fallo la herramienta sobre el ticket",
+                  herramienta=herr.nombre, ticket=ticket, error=e)
         return False
 
 
@@ -118,8 +119,7 @@ def cerrar_caso_crm(config, tenant: str, caso_id: str) -> bool:
         ejecutor_http.ejecutar(herr, argumentos, tenant)
         return True
     except Exception as e:
-        print(f"[operativo] no se pudo cerrar el caso {caso_id}: "
-              f"{type(e).__name__}: {e}")
+        registrar("operativo", "no se pudo cerrar el caso", caso_id=id_interno(caso_id), error=e)
         return False
 
 
@@ -148,8 +148,8 @@ def cerrar_todo(config, tenant: str, conversacion: dict, texto: str,
             persistencia.cerrar_conversacion(tenant, conversacion["id"])
             hecho["conversacion"] = True
         except Exception as e:
-            print(f"[operativo] no se pudo cerrar la conversacion "
-                  f"{conversacion['id']}: {type(e).__name__}: {e}")
+            registrar("operativo", "no se pudo cerrar la conversacion",
+                      conversation_id=id_interno(conversacion["id"]), error=e)
     return hecho
 
 
@@ -187,8 +187,7 @@ def cerrar_vencidas(config, tenant: str) -> dict:
     try:
         pendientes = persistencia.conversaciones_sin_respuesta(tenant, horas)
     except Exception as e:
-        print(f"[operativo] no se pudieron listar las vencidas de '{tenant}': "
-              f"{type(e).__name__}: {e}")
+        registrar("operativo", "no se pudieron listar las vencidas", tenant=tenant, error=e)
         return resumen
 
     resumen["revisadas"] = len(pendientes)
@@ -196,7 +195,6 @@ def cerrar_vencidas(config, tenant: str) -> dict:
         hecho = cerrar_todo(config, tenant, conv, texto)
         if hecho["conversacion"]:
             resumen["cerradas"] += 1
-        print(f"[operativo] vencida {str(conv['id'])[:8]}: ticket="
-              f"{hecho['ticket']} caso={hecho['caso']} conversacion="
-              f"{hecho['conversacion']}")
+        registrar("operativo", "vencida", conversation_id=id_interno(conv["id"]),
+                  ticket=hecho["ticket"], caso=hecho["caso"], conversacion=hecho["conversacion"])
     return resumen

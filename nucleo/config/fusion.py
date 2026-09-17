@@ -52,6 +52,7 @@ colaborador hablando con un asistente mudo, sin que nadie entienda por que.
 from __future__ import annotations
 
 from nucleo.config.schema import Rol
+from nucleo.observabilidad.registro import registrar
 
 
 def fusionar_roles(config, nombres: list[str]) -> tuple[str, Rol]:
@@ -153,7 +154,7 @@ def modelo_fusionado(config, nombres: list[str]) -> str | None:
     if not declarados:
         return None
     if len(set(declarados)) > 1:
-        print(f"[agentes] {'+'.join(nombres)} mezcla roles con modelos "
-              f"distintos ({', '.join(sorted(set(declarados)))}); se usa "
-              f"{declarados[0]}. Revisar llm.overrides del tenant.")
+        registrar("agentes", "la union mezcla roles con modelos distintos; se usa el primero. "
+                             "Revisar llm.overrides del tenant.",
+                  roles=list(nombres), modelos=sorted(set(declarados)), elegido=declarados[0])
     return declarados[0]

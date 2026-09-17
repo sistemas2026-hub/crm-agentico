@@ -45,6 +45,7 @@ from nucleo.observabilidad import consumo
 from nucleo.persistencia import db as persistencia
 from nucleo.seguimiento import forzado
 from nucleo.seguimiento.nombres import nombre_del_caso
+from nucleo.observabilidad.registro import id_interno, registrar
 
 NOMBRE_HERRAMIENTA_TAGS_LISTAR = "listar_tags_crm"
 NOMBRE_HERRAMIENTA_TAGS_CREAR = "crear_tag_crm"
@@ -453,7 +454,7 @@ def evaluar(config, rol: str, historial: list[dict]) -> dict | None:
         # como si el evaluador hubiera dicho que no, y el modelo le prometio
         # al cliente un colaborador que nadie registro. Quien llama decide que
         # hacer con el fallo -- api.py ya lo captura.
-        print(f"[escalamiento] fallo al evaluar: {type(e).__name__}: {e}")
+        registrar("escalamiento", "fallo al evaluar", error=e)
         raise
 
     for llamada in respuesta.llamadas:
@@ -479,8 +480,8 @@ def evaluar(config, rol: str, historial: list[dict]) -> dict | None:
                 vacios = [c for c in ("siguiente_paso", "no_se_pudo_comprobar")
                           if not str(argumentos.get(c) or "").strip()]
                 if vacios:
-                    print(f"[escalamiento] escala sin {', '.join(vacios)}: "
-                          f"el caso llega a la bandeja sin esa parte del relevo")
+                    registrar("escalamiento", "escala sin parte del relevo: el caso llega a la "
+                                              "bandeja sin esa parte", faltan=vacios)
             return argumentos
     return None
 
@@ -679,8 +680,8 @@ def escalar(config, tenant: str, usuario_externo: str, conversation_id: str,
     """
     herramienta_caso = _herramienta(config, NOMBRE_HERRAMIENTA_CASO_CREAR)
     if not herramienta_caso:
-        print(f"[escalamiento] '{NOMBRE_HERRAMIENTA_CASO_CREAR}' no esta "
-              f"configurada para '{tenant}', no se crea el ticket.")
+        registrar("escalamiento", "la herramienta de casos no esta configurada, no se crea el "
+                                  "ticket", herramienta=NOMBRE_HERRAMIENTA_CASO_CREAR, tenant=tenant)
         return False
 
     try:
@@ -706,7 +707,7 @@ def escalar(config, tenant: str, usuario_externo: str, conversation_id: str,
         try:
             adjuntos = persistencia.media_de(tenant, conversation_id)
         except Exception as e:
-            print(f"[escalamiento] no se pudieron leer los adjuntos: {e}")
+            registrar("escalamiento", "no se pudieron leer los adjuntos", error=e)
             adjuntos = []
         if adjuntos:
             detalle = ", ".join(sorted({a["tipo"] for a in adjuntos}))
@@ -779,12 +780,13 @@ def escalar(config, tenant: str, usuario_externo: str, conversation_id: str,
                                      no_comprobado=no_se_pudo_comprobar,
                                      siguiente_paso=siguiente_paso)
         if not caso_id:
-            print(f"[escalamiento] el CRM acepto el caso de {conversation_id} "
-                  f"pero no devolvio id -- no queda en la cola de nadie")
+            registrar("escalamiento", "el CRM acepto el caso pero no devolvio id -- no queda en "
+                                      "la cola de nadie",
+                      conversation_id=id_interno(conversation_id))
         return bool(caso_id)
     except Exception as e:
-        print(f"[escalamiento] fallo al escalar la conversacion "
-              f"{conversation_id}: {type(e).__name__}: {e}")
+        registrar("escalamiento", "fallo al escalar la conversacion",
+                  conversation_id=id_interno(conversation_id), error=e)
         return False
 
 
@@ -850,8 +852,8 @@ def caso_sigue_abierto(config, caso_id: str) -> bool:
         caso = cuerpo.get("cases_obj", cuerpo) if isinstance(cuerpo, dict) else {}
         return caso.get("status") not in ESTADOS_CERRADOS
     except Exception as e:
-        print(f"[escalamiento] no se pudo verificar el caso {caso_id}, "
-              f"se mantiene pausado: {type(e).__name__}: {e}")
+        registrar("escalamiento", "no se pudo verificar el caso, se mantiene pausado",
+                  caso_id=id_interno(caso_id), error=e)
         return True
 
 

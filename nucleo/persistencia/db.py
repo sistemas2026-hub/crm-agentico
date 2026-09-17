@@ -73,6 +73,7 @@ from psycopg.rows import dict_row
 from nucleo.persistencia.conexion import dsn
 from nucleo.relevo import control as regla_control
 from nucleo.relevo import historial as regla_historial
+from nucleo.observabilidad.registro import id_interno, registrar
 
 # Cache de slug -> organization_id. El vinculo lo crea cli/cargar_config.py y
 # no cambia en caliente: si cambiara, el proceso se reinicia igual.
@@ -233,8 +234,7 @@ def completar_medicion(tenant: str, mensaje_id: str, *, tokens_entrada: int,
                 (tokens_entrada, tokens_salida, round(costo_usd, 6),
                  llamadas_modelo, org, mensaje_id))
     except Exception as e:
-        print(f"[medicion] no se pudo cerrar la del turno: "
-              f"{type(e).__name__}: {e}")
+        registrar("medicion", "no se pudo cerrar la del turno", error=e)
 
 
 def historial_para_el_modelo(tenant: str, conversation_id: str,
@@ -300,8 +300,7 @@ def historial_para_el_modelo(tenant: str, conversation_id: str,
     except Exception as e:
         # Igual que el resto de la rehidratacion: un fallo al leer no impide
         # atender. Se arranca sin memoria, que es lo que pasaba siempre.
-        print(f"[sesion] no se pudo rehidratar el historial: "
-              f"{type(e).__name__}: {e}")
+        registrar("sesion", "no se pudo rehidratar el historial", error=e)
         return []
 
 
@@ -819,8 +818,8 @@ def guardar_ticket_operativo(tenant: str, conversation_id: str,
                    where organization_id = %s and id = %s""",
                 (str(ticket), org, conversation_id))
     except Exception as e:
-        print(f"[persistencia] no se pudo anotar el ticket operativo "
-              f"{ticket}: {type(e).__name__}: {e}")
+        registrar("persistencia", "no se pudo anotar el ticket operativo", ticket=ticket,
+                  conversation_id=id_interno(conversation_id), error=e)
 
 
 def atendida_por_humano(tenant: str, conversation_id: str) -> bool:
@@ -849,8 +848,7 @@ def atendida_por_humano(tenant: str, conversation_id: str) -> bool:
             fila = cur.fetchone()
             return bool(fila and fila["atendida"])
     except Exception as e:
-        print(f"[persistencia] no se pudo saber si la atendio una persona: "
-              f"{type(e).__name__}: {e}")
+        registrar("persistencia", "no se pudo saber si la atendio una persona", error=e)
         # Fail-closed: ante la duda NO se cierra. Un caso abierto de mas lo
         # cierra alguien; uno cerrado de menos deja al cliente sin el cambio.
         return False
@@ -878,8 +876,8 @@ def guardar_verificacion_pendiente(tenant: str, conversation_id: str,
                  int(pendiente.get("max_intentos") or 1),
                  json.dumps(pendiente.get("medicion_previa"), ensure_ascii=False)))
     except Exception as e:
-        print(f"[verificacion] no se pudo anotar la de '{herramienta}': "
-              f"{type(e).__name__}: {e}")
+        registrar("verificacion", "no se pudo anotar la pendiente", herramienta=herramienta,
+                  conversation_id=id_interno(conversation_id), error=e)
 
 
 def verificacion_pendiente_de(tenant: str, conversation_id: str) -> dict | None:
@@ -906,8 +904,7 @@ def verificacion_pendiente_de(tenant: str, conversation_id: str) -> dict | None:
             fila = cur.fetchone()
             return dict(fila) if fila else None
     except Exception as e:
-        print(f"[verificacion] no se pudo leer la pendiente: "
-              f"{type(e).__name__}: {e}")
+        registrar("verificacion", "no se pudo leer la pendiente", error=e)
         return None
 
 
@@ -934,8 +931,7 @@ def resolver_verificacion(tenant: str, verificacion_id: str, estado: str,
                  intentos, estado in verificacion_accion.TERMINALES,
                  org, verificacion_id))
     except Exception as e:
-        print(f"[verificacion] no se pudo guardar el resultado: "
-              f"{type(e).__name__}: {e}")
+        registrar("verificacion", "no se pudo guardar el resultado", error=e)
 
 
 def ticket_operativo_de(tenant: str, conversation_id: str) -> str | None:
@@ -949,8 +945,7 @@ def ticket_operativo_de(tenant: str, conversation_id: str) -> str | None:
             fila = cur.fetchone()
             return fila["ticket_operativo"] if fila else None
     except Exception as e:
-        print(f"[persistencia] no se pudo leer el ticket operativo: "
-              f"{type(e).__name__}: {e}")
+        registrar("persistencia", "no se pudo leer el ticket operativo", error=e)
         return None
 
 
@@ -1000,8 +995,8 @@ def marcar_caso(tenant: str, conversation_id: str, caso: str | None,
                     where organization_id = %s and id = %s""",
                 (caso or "", (etiqueta or "").strip(), org, conversation_id))
     except Exception as e:
-        print(f"[persistencia] no se pudo guardar el caso de la conversacion "
-              f"{conversation_id}: {type(e).__name__}: {e}")
+        registrar("persistencia", "no se pudo guardar el caso de la conversacion",
+                  conversation_id=id_interno(conversation_id), error=e)
 
 
 def conversaciones_sin_respuesta(tenant: str, horas: int) -> list[dict]:
@@ -1350,12 +1345,12 @@ def marcar_envio(tenant: str, mensaje_id: str, wamid: str | None,
                 (wamid, estado, error, org, mensaje_id))
             escrita = cur.rowcount == 1
     except Exception as e:
-        print(f"[entrega] NO se pudo anotar el envio de {mensaje_id} "
-              f"({estado}): {type(e).__name__}: {e}")
+        registrar("entrega", "NO se pudo anotar el envio", mensaje=id_interno(mensaje_id),
+                  estado=estado, error=e)
         return False
     if not escrita:
-        print(f"[entrega] NO se anoto el envio de {mensaje_id} ({estado}): "
-              f"la fila no existe o no es de esta empresa")
+        registrar("entrega", "NO se anoto el envio: la fila no existe o no es de esta empresa",
+                  mensaje=id_interno(mensaje_id), estado=estado)
     return escrita
 
 
@@ -1607,7 +1602,7 @@ def guardar_cache(tenant: str, herramienta: str, clave: str, respuesta) -> None:
                    do update set respuesta = excluded.respuesta, actualizado_en = now()""",
                 (org, herramienta, clave, json.dumps(respuesta, ensure_ascii=False)))
     except Exception as e:
-        print(f"[persistencia] no se pudo guardar la cache de '{herramienta}': {e}")
+        registrar("persistencia", "no se pudo guardar la cache", herramienta=herramienta, error=e)
 
 
 def registrar_marca_tv_desconocida(tenant: str, conversation_id: str,
@@ -1648,8 +1643,8 @@ def registrar_marca_tv_desconocida(tenant: str, conversation_id: str,
                                  visto_por_ultima_vez = now()""",
                 (org, limpia, normalizada, conversation_id))
     except Exception as e:                            # noqa: BLE001
-        print(f"[guias-tv] no se pudo anotar la marca '{limpia}': "
-              f"{type(e).__name__}: {e}")
+        registrar("guias-tv", "no se pudo anotar la marca desconocida",
+                  conversation_id=id_interno(conversation_id), error=e)
 
 
 def guardar_media(tenant: str, conversation_id: str, media_id: str, tipo: str,
@@ -1853,8 +1848,8 @@ def registrar_estado_escalada(tenant: str, conversation_id: str, estado: str,
                        where organization_id = %s and id = %s""",
                     (estado, detalle[:400], org, conversation_id))
     except Exception as e:
-        print(f"[escalamiento] no se pudo anotar el estado '{estado}': "
-              f"{type(e).__name__}: {e}")
+        registrar("escalamiento", "no se pudo anotar el estado", estado=estado,
+                  conversation_id=id_interno(conversation_id), error=e)
 
 
 def control_de_conversacion_abierta(tenant: str, canal: str,
@@ -2102,7 +2097,7 @@ def registrar_llamadas_herramienta(tenant: str, conversation_id: str, rol: str,
                   l["duracion_ms"], l["es_escritura"], profile_id,
                   bool(l.get("es_bloqueo"))) for l in llamadas])
     except Exception as e:
-        print(f"[persistencia] no se pudo guardar la traza: {e}")
+        registrar("persistencia", "no se pudo guardar la traza", error=e)
 
 
 def herramientas_de(tenant: str, conversation_id: str) -> list[dict]:
@@ -2452,8 +2447,8 @@ def guardar_resumen(tenant: str, conversation_id: str, resumen: str) -> None:
                    where organization_id = %s and id = %s""",
                 (resumen, org, conversation_id))
     except Exception as e:
-        print(f"[resumen] no se pudo guardar en {conversation_id}: "
-              f"{type(e).__name__}: {e}")
+        registrar("resumen", "no se pudo guardar", conversation_id=id_interno(conversation_id),
+                  error=e)
 
 
 def conversacion_vencida(tenant: str, canal: str, usuario_externo: str,
@@ -2525,5 +2520,5 @@ def resumen_anterior(tenant: str, canal: str,
             fila = cur.fetchone()
             return (fila["resumen"], float(fila["horas"] or 0)) if fila else None
     except Exception as e:
-        print(f"[resumen] no se pudo leer el anterior: {type(e).__name__}: {e}")
+        registrar("resumen", "no se pudo leer el anterior", error=e)
         return None
