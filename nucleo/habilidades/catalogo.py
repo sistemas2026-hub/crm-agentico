@@ -59,6 +59,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from nucleo.observabilidad.registro import id_interno, registrar
 from nucleo.persistencia.db import sesion
 
 
@@ -150,7 +151,8 @@ def registrar_uso(tenant: str, codigo: str, rol: str,
                       and estado = 'vigente' limit 1""",
                 (org, conversation_id, rol, org, codigo))
     except Exception as fallo:            # noqa: BLE001 -- ver docstring
-        print(f"[habilidades] no se pudo registrar el uso de {codigo}: {fallo!r}")
+        registrar("habilidades", "no se pudo registrar el uso", codigo=codigo,
+                  conversation_id=id_interno(conversation_id), error=fallo)
 
 
 def bloque_de_indice(entradas: list[EntradaIndice]) -> str:

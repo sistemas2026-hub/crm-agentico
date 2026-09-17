@@ -21,6 +21,8 @@ prompt no es lo unico que la exige.
 
 from __future__ import annotations
 
+from nucleo.observabilidad.registro import registrar
+
 # De donde sale cada pieza. Texto para una PERSONA (a que pantalla ir), no
 # una ruta que el codigo resuelva.
 AJUSTES = "Ajustes -> Personalidad del asistente"
@@ -62,7 +64,7 @@ def _hoy_en(zona: str) -> str:
     except (ZoneInfoNotFoundError, ValueError):
         # Zona mal escrita en la config: mejor la fecha del servidor que
         # ninguna. Sin esto el modelo vuelve a quedarse sin referencia.
-        print(f"[prompt] zona horaria desconocida '{zona}', se usa la del servidor")
+        registrar("prompt", "zona horaria desconocida, se usa la del servidor", zona=zona)
         ahora = datetime.now()
 
     return (f"Hoy es {_DIAS[ahora.weekday()]} {ahora.day} de "

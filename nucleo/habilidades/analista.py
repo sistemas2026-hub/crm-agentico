@@ -64,6 +64,7 @@ import unicodedata
 from dataclasses import dataclass, field
 
 from nucleo.modelo import cliente
+from nucleo.observabilidad.registro import registrar
 from nucleo.persistencia.db import sesion
 
 # Por debajo de esto no hay patron, hay casualidad. Es el numero que separa
@@ -344,18 +345,19 @@ def redactar(config, patron: Patron, dias: int = DIAS_POR_DEFECTO) -> dict | Non
             config.llm.modelo_por_defecto, [{"role": "user", "content": prompt}],
             temperatura=0.2, timeout=TIMEOUT_REDACCION)
     except Exception as fallo:      # noqa: BLE001
-        print(f"[analista] el modelo no pudo redactar: {fallo!r}")
+        registrar("analista", "el modelo no pudo redactar", error=fallo)
         return None
 
     datos = _extraer_json(getattr(respuesta, "contenido", "") or "")
     if not datos:
-        print(f"[analista] respuesta no interpretable para {patron.rol}/{patron.senal}")
+        # 'senal' sale de las conversaciones: se nombra el rol, no la senal.
+        registrar("analista", "respuesta no interpretable", rol=patron.rol)
         return None
 
     faltan = [c for c in ("nombre", "cuando_usarla", "pasos")
               if not str(datos.get(c) or "").strip()]
     if faltan:
-        print(f"[analista] borrador incompleto, falta {faltan}")
+        registrar("analista", "borrador incompleto", faltan=faltan)
         return None
     return datos
 

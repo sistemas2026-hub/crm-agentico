@@ -120,6 +120,7 @@ if str(RAIZ) not in sys.path:
     sys.path.insert(0, str(RAIZ))
 
 from nucleo.config import fuente
+from nucleo.observabilidad.registro import registrar
 from nucleo.seguimiento import importacion, importacion_io, operativo
 
 # Cuando se intento importar por ultima vez en cada tenant. Vive en memoria a
@@ -281,18 +282,18 @@ def una_pasada(seco: bool = False) -> list[dict]:
     """
     ahora = datetime.now(timezone.utc)
     tenants = tenants_conocidos()
-    print(f"[reloj] ciclo inicio {ahora.isoformat(timespec='seconds')}"
-          f"{' EN SECO' if seco else ''} -- {len(tenants)} tenant(s): "
-          f"{tenants}", flush=True)
+    registrar("reloj", "ciclo inicio", en_seco=seco, tenants=tenants)
     salida = []
     for tenant in tenants:
         r: dict = {"tenant": tenant}
         try:
             config = fuente.cargar(tenant, RAIZ)
         except (Exception, SystemExit) as e:                     # noqa: BLE001
+            # El texto del error queda en lo que DEVUELVE la pasada (lo leen
+            # las pruebas y quien la corre a mano); al log va sin texto. Ver
+            # nucleo/observabilidad/registro.py (D20).
             r["error_config"] = f"{type(e).__name__}: {e}"
-            print(f"[reloj] no se pudo leer la config de '{tenant}': "
-                  f"{r['error_config']}", flush=True)
+            registrar("reloj", "no se pudo leer la config", tenant=tenant, error=e)
             salida.append(r)
             continue
 
@@ -309,23 +310,43 @@ def una_pasada(seco: bool = False) -> list[dict]:
             r["vencimientos"] = _vencimientos(config, tenant, seco)
         except (Exception, SystemExit) as e:                     # noqa: BLE001
             r["vencimientos"] = {"error": f"{type(e).__name__}: {e}"}
-            print(f"[reloj] los vencimientos de '{tenant}' fallaron: "
-                  f"{r['vencimientos']['error']}", flush=True)
+            registrar("reloj", "los vencimientos fallaron", tenant=tenant, error=e)
 
         try:
             r["importacion"] = _importacion(config, tenant, seco, ahora)
         except (Exception, SystemExit) as e:                     # noqa: BLE001
             r["importacion"] = {"error": f"{type(e).__name__}: {e}"}
-            print(f"[reloj] la importacion de '{tenant}' fallo: "
-                  f"{r['importacion']['error']}", flush=True)
+            registrar("reloj", "la importacion fallo", tenant=tenant, error=e)
 
-        print(f"[reloj] {tenant}: {r}", flush=True)
+        # El resumen del tenant, solo con lo que es seguro escribir: contadores
+        # y banderas. El dict completo trae textos de error, ids de tickets del
+        # ISP y frases armadas con datos -- sigue estando en lo que se devuelve.
+        registrar("reloj", "tenant", tenant=tenant,
+                  credenciales=r.get("credenciales"),
+                  vencimientos=_solo_contadores(r.get("vencimientos")),
+                  importacion=_solo_contadores(r.get("importacion")))
         salida.append(r)
     duro = (datetime.now(timezone.utc) - ahora).total_seconds()
-    print(f"[reloj] ciclo fin -- {len(salida)} tenant(s) en {duro:.1f}s"
-          + ("" if seco else
-             f", proximo en ~{operativo.INTERVALO_BARRIDO_SEGUNDOS // 60} min"),
-          flush=True)
+    registrar("reloj", "ciclo fin", tenants=len(salida), segundos=round(duro, 1),
+              proximo_en_min=None if seco else operativo.INTERVALO_BARRIDO_SEGUNDOS // 60)
+    return salida
+
+
+def _solo_contadores(datos) -> dict | None:
+    """Numeros y banderas de un resumen (un nivel de anidamiento), y si hubo
+    error, solo que lo hubo."""
+    if not isinstance(datos, dict):
+        return None
+    salida: dict = {}
+    for clave, valor in datos.items():
+        if isinstance(valor, (bool, int, float)):
+            salida[clave] = valor
+        elif isinstance(valor, dict):
+            anidado = {k: v for k, v in valor.items() if isinstance(v, (bool, int, float))}
+            if anidado:
+                salida[clave] = anidado
+        elif clave.startswith("error") and valor:
+            salida[clave] = True
     return salida
 
 
@@ -333,7 +354,8 @@ def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     desconocidos = [a for a in argv if a not in ("--once", "--dry-run")]
     if desconocidos:
-        print(f"[reloj] no entiendo {desconocidos}.", flush=True)
+        registrar("reloj", "argumentos desconocidos: solo --once y --dry-run",
+                  cuantos=len(desconocidos))
         return 2
     una_vez = "--once" in argv
     seco = "--dry-run" in argv
@@ -341,8 +363,7 @@ def main(argv: list[str] | None = None) -> int:
     if seco and not una_vez:
         # Un bucle "en seco" para siempre no le sirve a nadie y es una trampa:
         # queda corriendo con toda la pinta de un reloj sin serlo.
-        print("[reloj] --dry-run solo tiene sentido junto con --once.",
-              flush=True)
+        registrar("reloj", "--dry-run solo tiene sentido junto con --once.")
         return 2
 
     minutos = operativo.INTERVALO_BARRIDO_SEGUNDOS // 60
@@ -353,14 +374,19 @@ def main(argv: list[str] | None = None) -> int:
     # dentro del contenedor sin tocar lo que Dokploy tiene guardado.
     if una_vez:
         if not encendido:
-            print("[reloj] RELOJ_HABILITADO=0: no se hace nada.", flush=True)
+            registrar("reloj", "RELOJ_HABILITADO=0: no se hace nada.")
             return 0
         una_pasada(seco=seco)
         return 0
 
     # De aca para abajo, el daemon.
-    print("[reloj] motor-reloj iniciado", flush=True)
-    print(f"[reloj] RELOJ_HABILITADO={'1' if encendido else '0'}", flush=True)
+    registrar("reloj", "motor-reloj iniciado")
+    # Texto fijo por estado, y no un campo: 'RELOJ_HABILITADO=0' es lo que se
+    # busca en el log del contenedor para saber si arranco apagado.
+    if encendido:
+        registrar("reloj", "RELOJ_HABILITADO=1")
+    else:
+        registrar("reloj", "RELOJ_HABILITADO=0")
 
     if not encendido:
         # INERTE, PERO VIVO. Con 'restart: unless-stopped', un proceso que
@@ -372,14 +398,14 @@ def main(argv: list[str] | None = None) -> int:
         # arrancado no cambia solo. Cambiarla en Dokploy reinicia el servicio,
         # y ese arranque nuevo es el que la lee. Un chequeo periodico aca solo
         # prometeria una capacidad que no existe.
-        print("[reloj] scheduler inerte: no se ejecuta ningun job. Para "
-              "encenderlo, RELOJ_HABILITADO=1 en Dokploy (redespliega el "
-              "servicio).", flush=True)
+        registrar("reloj", "scheduler inerte: no se ejecuta ningun job. Para "
+                           "encenderlo, RELOJ_HABILITADO=1 en Dokploy (redespliega el "
+                           "servicio).")
         while True:
             time.sleep(operativo.INTERVALO_BARRIDO_SEGUNDOS)
 
-    print(f"[reloj] scheduler activo: un ciclo cada {minutos} minutos sobre "
-          f"{len(tenants_conocidos())} tenant(s).", flush=True)
+    registrar("reloj", "scheduler activo", ciclo_min=minutos,
+              tenants=len(tenants_conocidos()))
     while True:
         # Duerme PRIMERO: al desplegar, el proceso no dispara en el segundo
         # cero, cuando quien mira los logs todavia no termino de leer el
@@ -389,8 +415,7 @@ def main(argv: list[str] | None = None) -> int:
             una_pasada()
         except (Exception, SystemExit) as e:                     # noqa: BLE001
             # La ultima red. Nada puede matar el bucle.
-            print(f"[reloj] el ciclo entero fallo: {type(e).__name__}: {e}",
-                  flush=True)
+            registrar("reloj", "el ciclo entero fallo", error=e)
 
 
 if __name__ == "__main__":
