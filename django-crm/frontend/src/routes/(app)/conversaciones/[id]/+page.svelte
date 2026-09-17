@@ -61,7 +61,8 @@
     PRECONDICION_NO_CUMPLIDA: 'quiso ejecutar algo sin el paso previo que exige el procedimiento',
     FALTA_HABLAR_CON_EL_CLIENTE: 'la acción interrumpe el servicio y el cliente todavía no dijo qué le pasa',
     HERRAMIENTA_DESCONOCIDA: 'intentó usar algo que este rol no tiene permitido',
-    LIMITE_DE_CONVERSACION: 'se alcanzó el tope de pasos de la conversación'
+    LIMITE_DE_CONVERSACION: 'se alcanzó el tope de pasos de la conversación',
+    CAMBIO_DE_CONTROL: 'una persona tomó la conversación antes de que la acción empezara'
   };
 
   /** Si los renglones de bloqueos y errores valen su lugar aunque uno esté en

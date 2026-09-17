@@ -29,6 +29,12 @@ B3.2 de SPEC/CONTRATO_RELEVO_IA_HUMANO.md. Base efimera del ledger.
      memoria. Y la intervencion entre la respuesta guardada y el POST: no se
      envia y la fila queda 'descartado', fuera del historial.
  10. Una clave de operacion ya usada por otro operador no le devuelve exito.
+ 11. D25, con el motor.responder REAL y el modelo guionado: el modelo queda
+     frenado, una persona interviene, el modelo pide una herramienta que
+     escribe -> cero llamadas al proveedor (control positivo: sin
+     intervencion, una). Y el cierre por confirmacion no empieza si alguien
+     intervino mientras corria el evaluador. La escalada PROPIA sigue
+     sincronizando con el CRM (seccion 5).
   8. B3.3b en turnos reales: tras /intervenir el cliente escribe y el modelo NO
      corre, sin acuse de escalada ni banderas ni tasa; devolver reanuda; la
      memoria nunca decide contra la base (en las dos direcciones); reintento
@@ -415,6 +421,8 @@ try:
     comprobar(memoria_pausada is True, "y la memoria del proceso tambien quedo en pausa (sin split-brain)")
     comprobar(autorizado_propio is True,
               "D24: la escalada que hizo ESTE turno no le frena su propio aviso al cliente")
+    comprobar(bool(crm),
+              "D25: la sincronizacion de la escalada PROPIA (el caso del CRM) corre aunque el control ya sea humano")
     texto = (salida_turno or {}).get("respuesta") or ""
     comprobar("confirmar con un compañero" in texto and "de nuevo" not in texto.lower(),
               f"al cliente: el anuncio de atencion humana, NO 'escribime de nuevo' ({texto!r})")
@@ -738,6 +746,153 @@ try:
         for (m, n), f in orig9.items():
             setattr(m, n, f)
         api._TOKEN_SERVICIO = token9
+        api._sesiones.clear()
+
+    # -----------------------------------------------------------------------
+    print("\n== 11. D25: la IA no empieza efectos despues de una intervencion ==")
+    from nucleo.modelo import cliente as cliente_modelo              # noqa: E402
+    http11, posts11 = [], []
+    empezo11, liberar11 = threading.Event(), threading.Event()
+    guion = {"frenar": False, "herramienta": True, "al_evaluar": None, "veredicto": {}}
+    ARGS = {"numero_documento": "1000000000", "nombre_confirmado": "CLIENTE DE PRUEBA",
+            "motivo": "ya no la necesito"}
+
+    def chat11(referencia_modelo, mensajes, tools=None, temperatura=0.1, timeout=None, **resto):
+        # Pide la herramienta solo en la primera vuelta del turno (lo ultimo
+        # es el mensaje del cliente); despues de ver su resultado, contesta.
+        pide = tools is not None and guion["herramienta"] and mensajes[-1].get("role") == "user"
+        if pide:
+            if guion["frenar"]:
+                empezo11.set()
+                liberar11.wait(60)
+            return cliente_modelo.Respuesta(contenido="", llamadas=[
+                cliente_modelo.Llamada(nombre="cancelar_solicitud_servicio", argumentos=dict(ARGS))])
+        return cliente_modelo.Respuesta(contenido="Listo.", llamadas=[])
+
+    def http_11(herramienta, argumentos, tenant=None, *a, **k):
+        http11.append(herramienta.nombre)
+        return {"ok": True}
+
+    def evaluar11(*a, **k):
+        if guion["al_evaluar"]:
+            guion["al_evaluar"]()
+        return dict(guion["veredicto"])
+    base11 = {
+        (api.motor.cliente, "chat"): chat11,
+        (api.motor.ejecutor_http, "ejecutar"): http_11,
+        (api.motor.catalogo_habilidades, "indice_de"): lambda *a, **k: [],
+        (api.escalamiento, "evaluar"): evaluar11,
+        (api.escalamiento, "caso_sigue_abierto"): lambda *a, **k: True,
+        (api.consumo, "estado_del_gasto"): lambda *a, **k: {"accion": "seguir", "gastado": 0, "tope": 0, "porcentaje": 0.0},
+        (api.whatsapp, "enviar_texto"): lambda config, tenant, para, texto: posts11.append(texto) or "wamid.y",
+        (api.whatsapp, "marcar_leido"): lambda *a, **k: None,
+        (api, "_atendio_baja_o_alta"): lambda *a, **k: False,
+        (api, "_guardar_adjunto"): lambda *a, **k: None,
+    }
+    orig11 = {k: getattr(*k) for k in base11}
+    for (m, n), f in base11.items():
+        setattr(m, n, f)
+    token11 = api._TOKEN_SERVICIO
+    api._TOKEN_SERVICIO = None
+
+    def turno11(tel, texto):
+        api._procesar_mensaje_whatsapp(CONFIG, TENANT, "ventas", {"de": tel, "telefono": tel, "texto": texto})
+    try:
+        api._sesiones.clear()
+        # control positivo: sin intervencion la escritura SI sale
+        tel = "573000000110"
+        guion["herramienta"] = False
+        turno11(tel, "hola")
+        cv = conv_wa(tel)
+        guion["herramienta"] = True
+        turno11(tel, "quiero cancelar mi solicitud")
+        comprobar(http11.count("cancelar_solicitud_servicio") == 1,
+                  f"control positivo: sin intervencion, la herramienta que escribe SI llega al proveedor ({http11})")
+
+        # 11a. la carrera
+        http11.clear()
+        posts11.clear()
+        v_antes = estado(cv)[3]
+        canceladas = api.contadores_relevo["accion_ia_cancelada_por_cambio_de_control"]
+        guion["frenar"] = True
+        hilo = threading.Thread(target=turno11, args=(tel, "cancelala otra vez por favor"))
+        hilo.start()
+        comprobar(empezo11.wait(60), "el modelo arranco con control = ia y quedo frenado")
+        r11 = intervenir_http(cv, ANA, "d25-ana")
+        comprobar(r11.status_code == 200, f"una persona interviene y hace commit ({r11.status_code})")
+        liberar11.set()
+        hilo.join(90)
+        guion["frenar"] = False
+        comprobar(http11.count("cancelar_solicitud_servicio") == 0,
+                  f"el modelo pidio la escritura DESPUES del commit: cero llamadas al proveedor ({http11})")
+        comprobar(posts11 == [], "y cero POST a Meta")
+        e = estado(cv)
+        comprobar(e[:3] == ("humano", "intervencion", "Ana Perez") and e[3] == v_antes + 1
+                  and [x[0] for x in eventos(cv)].count("intervencion") == 1,
+                  f"control humano, asignada a Ana, version +1, un evento ({e[:4]})")
+        comprobar(api.contadores_relevo["accion_ia_cancelada_por_cambio_de_control"] == canceladas + 1,
+                  "queda contado como accion_ia_cancelada_por_cambio_de_control")
+
+        # 11b. el cierre por confirmacion no empieza si alguien intervino mientras evaluaba
+        tel2 = "573000000111"
+        guion["herramienta"] = False
+        turno11(tel2, "hola")
+        cv2 = conv_wa(tel2)
+        guion["veredicto"] = {"resuelta": True, "confirma_cierre": True}
+        guion["al_evaluar"] = lambda: intervenir_http(cv2, LUIS, "d25-luis")
+        turno11(tel2, "listo, ya quedo, gracias")
+        guion["al_evaluar"], guion["veredicto"] = None, {}
+        e2 = estado(cv2)
+        comprobar(e2[4] == "abierta" and e2[:3] == ("humano", "intervencion", "Luis Rojas"),
+                  f"intervencion durante el evaluador: la conversacion NO se cierra sola ({e2[:5]})")
+
+        # 11c. la escalada que ya NO es de este turno no sincroniza nada
+        import types                                                  # noqa: E402
+        externos = []
+        base11c = {
+            (api.agendamiento, "ticket_para_escalar"): lambda *a, **k: types.SimpleNamespace(
+                herramienta="crear_ticket_caso", area="soporte", asunto="Revision", prioridad="media"),
+            (api.agendamiento, "agendar"): lambda *a, **k: externos.append("ticket") or "T-1",
+            (api.escalamiento, "escalar"): lambda *a, **k: externos.append("crm") or True,
+            (api.agendamiento, "perfil_del_area"): lambda *a, **k: "",
+            (api, "con_las_manos_vacias"): lambda *a, **k: False,
+            (api, "_cerrar_el_traspaso"): lambda config, tenant, conversation_id, mensaje_id, respuesta, id_sesion, **k: respuesta,
+        }
+        orig11c = {k: getattr(*k) for k in base11c}
+        for (m, n), f in base11c.items():
+            setattr(m, n, f)
+        try:
+            tel3 = "573000000112"
+            turno11(tel3, "hola")
+            cv3 = conv_wa(tel3)
+            veredicto_escala = {"escalar": True, "necesita_humano": True, "motivo": "informacion_a_confirmar",
+                                "etiqueta": "", "caso_manual": "caso_de_prueba_d25", "resumen": "cobertura sin catalogo"}
+            # control positivo: sin intervencion, la escalada propia SI crea ticket y caso
+            guion["veredicto"] = veredicto_escala
+            turno11(tel3, "hay cobertura en Los Almendros?")
+            comprobar(externos == ["ticket", "crm"],
+                      f"control positivo: la escalada propia crea ticket y caso con control humano ({externos})")
+            externos.clear()
+            tel4 = "573000000113"
+            guion["veredicto"] = {}
+            turno11(tel4, "hola")
+            cv4 = conv_wa(tel4)
+            guion["veredicto"] = veredicto_escala
+            guion["al_evaluar"] = lambda: intervenir_http(cv4, ANA, "d25-ana-esc")
+            turno11(tel4, "hay cobertura en Los Almendros?")
+            e4 = estado(cv4)
+            comprobar(externos == [] and e4[:3] == ("humano", "intervencion", "Ana Perez")
+                      and "escalada" not in [x[0] for x in eventos(cv4)],
+                      f"intervencion antes de reservar: la escalada no es de este turno, ni ticket ni caso ({externos}, {e4[:3]})")
+        finally:
+            guion["al_evaluar"], guion["veredicto"] = None, {}
+            for (m, n), f in orig11c.items():
+                setattr(m, n, f)
+    finally:
+        liberar11.set()
+        for (m, n), f in orig11.items():
+            setattr(m, n, f)
+        api._TOKEN_SERVICIO = token11
         api._sesiones.clear()
 finally:
     try:

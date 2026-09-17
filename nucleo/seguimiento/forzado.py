@@ -552,6 +552,10 @@ CODIGOS_MOTOR_GUARD = frozenset({
     "DATO_DEL_EQUIPO_NO_CARGADO",
     "IDENTIDAD_NO_VERIFICADA",
     "HERRAMIENTA_DESCONOCIDA",
+    # D25: una persona tomo la conversacion y el motor no inicio la accion. No
+    # fallo nada afuera; contarlo como fallo forzaria una escalada -- con su
+    # ticket y su caso -- sobre una conversacion que ya atiende una persona.
+    "CAMBIO_DE_CONTROL",
 })
 
 # Distinto de CODIGOS_MOTOR_GUARD a proposito, aunque a los ojos de

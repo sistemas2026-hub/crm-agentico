@@ -199,8 +199,9 @@ for codigo in sorted(CODIGOS_MOTOR_GUARD):
 afirmar(CODIGOS_MOTOR_GUARD == {"PRECONDICION_NO_CUMPLIDA", "LIMITE_DE_CONVERSACION",
                                 "FALTA_HABLAR_CON_EL_CLIENTE", "IDENTIDAD_NO_RESUELTA",
                                 "DATO_DEL_EQUIPO_NO_CARGADO",
-                                "IDENTIDAD_NO_VERIFICADA", "HERRAMIENTA_DESCONOCIDA"},
-        "la clasificacion tiene exactamente los 7 codigos de gate -- "
+                                "IDENTIDAD_NO_VERIFICADA", "HERRAMIENTA_DESCONOCIDA",
+                                "CAMBIO_DE_CONTROL"},
+        "la clasificacion tiene exactamente los 8 codigos de gate -- "
         "ni uno de mas, ni uno de menos")
 
 print("\n[7] EL CASO CRITICO -- bloqueo prematuro y despues exito, en la MISMA traza")
@@ -492,7 +493,8 @@ print("\n[CASO 7] idempotencia -- nada de esto se toco")
 afirmar(CODIGOS_MOTOR_GUARD == {"PRECONDICION_NO_CUMPLIDA", "LIMITE_DE_CONVERSACION",
                                 "FALTA_HABLAR_CON_EL_CLIENTE", "IDENTIDAD_NO_RESUELTA",
                                 "DATO_DEL_EQUIPO_NO_CARGADO",
-                                "IDENTIDAD_NO_VERIFICADA", "HERRAMIENTA_DESCONOCIDA"},
+                                "IDENTIDAD_NO_VERIFICADA", "HERRAMIENTA_DESCONOCIDA",
+                                "CAMBIO_DE_CONTROL"},
         "CODIGOS_MOTOR_GUARD tiene los siete codigos de gate -- PEDIDO_INVALIDO "
         "NO se mezclo ahi adentro")
 afirmar(CODIGOS_MOTOR_GUARD.isdisjoint(CODIGOS_CONDICION_DE_NEGOCIO),

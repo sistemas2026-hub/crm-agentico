@@ -44,6 +44,7 @@ from nucleo.canales import canal as canales
 from nucleo.canales import media, whatsapp
 from nucleo.relevo import historial as regla_historial
 from nucleo.relevo import transiciones
+from nucleo.relevo import autorizacion as autorizacion_relevo
 from nucleo.relevo.control import control_efectivo
 from nucleo.conectores import catalogo as conectores
 from nucleo.config import editor, fuente
@@ -746,7 +747,8 @@ def _sincronizar_respuesta_en_memoria(historial: list[dict], desde: int,
 # logs llevan el id de la conversacion y versiones: nunca el telefono ni el
 # contenido.
 contadores_relevo = {"control_no_determinado": 0,
-                     "respuesta_ia_descartada_por_cambio_de_control": 0}
+                     "respuesta_ia_descartada_por_cambio_de_control": 0,
+                     "accion_ia_cancelada_por_cambio_de_control": 0}
 
 
 def _contar_relevo(evento: str, detalle: str) -> None:
@@ -791,6 +793,46 @@ def _turno_sigue_autorizado(tenant: str, canal: str, id_sesion: str,
     return actual["relevo_version"] == autorizacion.get("relevo_version")
 
 
+def _efecto_del_turno(tenant: str, canal: str, id_sesion: str, estado: dict, que: str, *,
+                      de_escalada_propia: bool = False) -> bool:
+    """
+    D25: si un efecto que escribe, originado por ESTE turno de la IA, todavia
+    puede empezar. Se pregunta justo antes de iniciarlo.
+
+    Dos clases de efecto, y la diferencia es el punto:
+
+      autonomo de la IA        (una herramienta del modelo, la visita que se
+                               agenda sola, cerrar el caso porque el cliente
+                               confirmo): exige que la IA siga controlando y
+                               que nadie haya movido relevo_version.
+      de la escalada propia    (el ticket y el caso del CRM de la escalada que
+                               ESTE turno ya dejo comprometida en la base):
+                               el control ya es humano por esa escalada, y lo
+                               que se exige es que la version siga siendo la
+                               que escribio ella. No es la IA actuando: es
+                               terminar de sincronizar una transicion hecha.
+
+    Una denegacion dura todo el turno: despues de una intervencion no se vuelve
+    a preguntar ni se reintenta.
+    """
+    autorizacion = estado["autorizacion_turno"]
+    if autorizacion.get("revocada"):
+        permitido = False
+    elif de_escalada_propia:
+        permitido = _turno_sigue_autorizado(tenant, canal, id_sesion, autorizacion, exigir_ia=False)
+    else:
+        permitido = _turno_sigue_autorizado(
+            tenant, canal, id_sesion, autorizacion,
+            exigir_ia=not autorizacion.get("legado_retomado"))
+    if not permitido:
+        if not autorizacion.get("revocada"):
+            autorizacion["revocada"] = True
+        _contar_relevo("accion_ia_cancelada_por_cambio_de_control",
+                       f"conv={autorizacion.get('conversation_id')} "
+                       f"version={autorizacion.get('relevo_version')} que={que}")
+    return permitido
+
+
 def _quitar_respuesta_de_memoria(historial: list, desde: int | None = None) -> None:
     """Saca de la memoria lo que produjo el modelo en este turno y deja el
     mensaje del cliente. 'desde' es el largo antes del modelo; sin el, se corta
@@ -802,6 +844,10 @@ def _quitar_respuesta_de_memoria(historial: list, desde: int | None = None) -> N
         del historial[ultimos[-1] + 1:]
         return
     del historial[desde:]
+
+
+class _CierreCancelado(Exception):
+    """El cierre por confirmacion no empieza: cambio el control (D25)."""
 
 
 def atender_turno(config, tenant: str, rol: str, id_sesion: str,
@@ -1114,6 +1160,14 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 # preguntar en vez de darlo por cerrado de una.
                 estado["cierre_propuesto"] = False
 
+            # D25: el evaluador tardo; si mientras tanto alguien movio el relevo
+            # (tomo, solto, intervino), el cierre automatico no empieza. Control
+            # humano es lo esperado aca, asi que se compara solo la version.
+            if cerrado and not _efecto_del_turno(tenant, canal, id_sesion, estado,
+                                                 "cierre_confirmado_en_pausa",
+                                                 de_escalada_propia=True):
+                cerrado = False
+
             if cerrado:
                 respuesta = _mensaje_de_cierre(config)
                 try:
@@ -1259,7 +1313,10 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     # que es justo lo que hace falta para bajar de los 4-11 segundos que
     # tarda el modelo. Las columnas por mensaje existian y estaban vacias.
     antes_del_modelo = len(estado["historial"])
-    with consumo.abrir(config) as ficha_consumo:
+    # D25: mientras el modelo corre, cada herramienta que escribe le pregunta a
+    # este autorizador justo antes de empezar.
+    with consumo.abrir(config) as ficha_consumo, autorizacion_relevo.autorizando(
+            lambda que: _efecto_del_turno(tenant, canal, id_sesion, estado, que)):
         respuesta, registro_herramientas, medios_pendientes = motor.responder(
             config, rol, mensaje, estado["historial"], estado["sesion"],
             nota_continuidad=nota_continuidad)
@@ -1800,7 +1857,9 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                           f"corresponde_agendar={veredicto.get('corresponde_agendar')} "
                           f"falta={veredicto.get('pregunta_faltante') or '-'}")
 
-                if veredicto and veredicto.get("checklist_completo") and veredicto.get("corresponde_agendar"):
+                if (veredicto and veredicto.get("checklist_completo") and veredicto.get("corresponde_agendar")
+                        and _efecto_del_turno(tenant, canal, id_sesion, estado,
+                                              "agendamiento_automatico")):
                     id_ticket_auto = agendamiento.agendar(
                         config, tenant, estado["sesion"], herramienta_auto,
                         veredicto.get("descripcion_visita", ""))
@@ -1850,6 +1909,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 # y no detiene el turno. Si ya se agendo una visita sola
                 # (necesita_humano=False) no hay nada que reservar.
                 reservado = False
+                escalada_propia = False
                 if necesita_humano:
                     try:
                         r_reserva = transiciones.escalar(
@@ -1862,6 +1922,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                         # enviar (D24, punto 2). 'sin_cambio' no la mueve: si
                         # otro ya la paso a humano, el envio tiene que frenar.
                         if r_reserva.aplicada or r_reserva.motivo == "reintento":
+                            escalada_propia = True
                             estado["autorizacion_turno"] = {
                                 "conversation_id": str(conversation_id),
                                 "relevo_version": r_reserva.version}
@@ -1890,6 +1951,13 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                                                      estado["historial"])
                     if caso_manual and not id_ticket_auto else None)
                 nombre_ticket = entrada_ticket.herramienta if entrada_ticket else None
+                # D25: el ticket y el caso del CRM son de ESTA escalada si la
+                # reserva la escribio este turno; si no, son un efecto autonomo
+                # y piden que la IA siga controlando.
+                if nombre_ticket and not _efecto_del_turno(
+                        tenant, canal, id_sesion, estado, "ticket_de_escalada",
+                        de_escalada_propia=escalada_propia):
+                    nombre_ticket = None
                 if nombre_ticket:
                     # La sugerencia va PRIMERO en la descripcion, no al
                     # final: un ticket con asunto generico se abre para saber
@@ -1994,7 +2062,9 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                         config, evaluacion.get("motivo")) or respuesta
 
                 se_intento_escalar = True
-                caso_creado = escalamiento.escalar(
+                caso_creado = _efecto_del_turno(
+                    tenant, canal, id_sesion, estado, "caso_de_escalada",
+                    de_escalada_propia=escalada_propia) and escalamiento.escalar(
                     config, tenant, id_sesion, conversation_id, estado["historial"],
                     evaluacion.get("motivo", ""), evaluacion.get("etiqueta", ""),
                     resumen=(evaluacion.get("resumen", "") + nota_ticket).strip(),
@@ -2184,6 +2254,8 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             # el caso y el ticket abiertos obligaria a cerrarlos a mano
             # justo cuando el cliente ya dijo que quedo conforme.
             try:
+                if not _efecto_del_turno(tenant, canal, id_sesion, estado, "cierre_por_confirmacion"):
+                    raise _CierreCancelado()
                 caso = estado.get("caso_id") or persistencia.caso_de_conversacion(
                     tenant, conversation_id)
                 if caso:
@@ -2197,6 +2269,8 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 else:
                     persistencia.cerrar_conversacion(tenant, conversation_id)
                 cerrada = True
+            except _CierreCancelado:
+                pass
             except Exception as e:
                 print(f"[conversaciones] no se pudo cerrar la conversacion: {e}")
             # El supervisor audita la conversacion ya cerrada y deja un
@@ -2204,10 +2278,11 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             # /manual -- nunca publica solo (ver nucleo/seguimiento/
             # supervisor.py). Aparte del cierre: un fallo aca no debe
             # revertir que la conversacion ya quedo cerrada.
-            try:
-                supervisor.revisar(config, rol, tenant, conversation_id, estado["historial"])
-            except Exception as e:
-                print(f"[supervisor] fallo al revisar la conversacion: {e}")
+            if cerrada:
+                try:
+                    supervisor.revisar(config, rol, tenant, conversation_id, estado["historial"])
+                except Exception as e:
+                    print(f"[supervisor] fallo al revisar la conversacion: {e}")
 
     # --- ¿el traspaso ocurrio de verdad? ------------------------------------
     # Tres situaciones distintas que antes se veian iguales desde afuera, y la

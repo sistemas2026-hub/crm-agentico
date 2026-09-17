@@ -58,6 +58,7 @@ from nucleo.herramientas import pagos as ejecutor_pagos
 from nucleo.herramientas import informes
 from nucleo.modelo import cliente
 from nucleo.modelo import tuteo
+from nucleo.relevo import autorizacion as autorizacion_relevo
 from nucleo.persistencia import db as persistencia
 from nucleo.habilidades import catalogo as catalogo_habilidades
 from nucleo.observabilidad import consumo
@@ -90,7 +91,27 @@ CODIGOS_DE_BLOQUEO = frozenset({
     "FALTA_HABLAR_CON_EL_CLIENTE",
     "HERRAMIENTA_DESCONOCIDA",
     "LIMITE_DE_CONVERSACION",
+    "CAMBIO_DE_CONTROL",
 })
+
+
+class _AccionCancelada(Exception):
+    """Un efecto que escribe no empieza: una persona tomo la conversacion
+    mientras el turno de la IA estaba en curso (D25)."""
+
+
+def _cancelada_por_cambio_de_control(nombre: str) -> dict | None:
+    """
+    None si el efecto 'nombre' puede empezar. Si no, la salida que ve el modelo.
+    Se pregunta JUSTO antes de iniciar el efecto -- despues de cualquier
+    medicion previa, que tarda --, y nunca para una lectura.
+    """
+    if autorizacion_relevo.efecto_autorizado(nombre):
+        return None
+    return {"error": "CAMBIO_DE_CONTROL",
+            "instruccion_interna": "Una persona del equipo tomo esta conversacion. "
+                "No ejecutes ninguna accion ni la reintentes, y no le prometas "
+                "nada al cliente: la persona sigue desde aca."}
 
 
 class FaltaIdentidadEnSesion(ErrorMotor):
@@ -2970,7 +2991,11 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 salida = _ejecutar_sondeo(llamada.argumentos, config.identidad.slug)
             elif herramienta.propone_herramienta:
                 quien = sesion.identificador_canal if sesion else "desconocido"
-                salida = _ejecutar_propuesta(llamada.argumentos, config.identidad.slug, quien)
+                salida = _cancelada_por_cambio_de_control(herramienta.nombre)
+                if salida is not None:
+                    codigo_error = "CAMBIO_DE_CONTROL"
+                else:
+                    salida = _ejecutar_propuesta(llamada.argumentos, config.identidad.slug, quien)
             elif (faltantes := _previas_no_cumplidas(herramienta, historial)):
                 # Fail-closed en codigo, no aprobacion humana -- ver
                 # Precondicion en schema.py. Ninguna herramienta actual la
@@ -3002,9 +3027,13 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 # precondiciones/limite: no tiene sentido proponer una
                 # accion que de entrada no se podria ejecutar.
                 quien = sesion.identificador_canal if sesion else "desconocido"
-                salida = _ejecutar_propuesta_de_accion(
-                    herramienta, sesion, llamada.argumentos,
-                    config.identidad.slug, nombre_rol, quien)
+                salida = _cancelada_por_cambio_de_control(herramienta.nombre)
+                if salida is not None:
+                    codigo_error = "CAMBIO_DE_CONTROL"
+                else:
+                    salida = _ejecutar_propuesta_de_accion(
+                        herramienta, sesion, llamada.argumentos,
+                        config.identidad.slug, nombre_rol, quien)
             else:
                 clave_cache = (herramienta.nombre,
                               json.dumps(llamada.argumentos or {}, sort_keys=True))
@@ -3020,6 +3049,12 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                             config, herramienta.verificacion, sesion,
                             config.identidad.slug, config.variables_tenant)
                     try:
+                        # D25: lo ultimo antes de un efecto que escribe. Una
+                        # lectura no pregunta.
+                        if not herramienta.solo_lectura:
+                            cancelada = _cancelada_por_cambio_de_control(herramienta.nombre)
+                            if cancelada is not None:
+                                raise _AccionCancelada(cancelada)
                         crudo = _ejecutar_tool(herramienta, sesion, llamada.argumentos,
                                               config.identidad.slug, config.variables_tenant)
                         _recuperar_campos_de_sesion(sesion, herramienta, crudo)
@@ -3064,6 +3099,8 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                         # esto solo cambia como lo lee escalada_forzada().
                         codigo_error = (_codigo_error_de_pedido_wifi(herramienta, crudo)
                                         or _codigo_error_de_reporte_pago(herramienta, crudo))
+                    except _AccionCancelada as e:
+                        salida, codigo_error = e.args[0], "CAMBIO_DE_CONTROL"
                     except FaltaIdentidadEnSesion as e:
                         # No es un fallo del sistema: es la proteccion haciendo
                         # su trabajo. Se le dice al modelo QUE hacer en vez de
