@@ -183,12 +183,18 @@ def pedir(nombre, funcion, estado, *extra, debe_contener=None, codigo=None):
         r = funcion()
     cuerpo = r.get_data(as_text=True)
     datos = r.get_json(silent=True) or {}
+    # Las cabeceras enteras (nombre y valor): Location, WWW-Authenticate,
+    # Set-Cookie, X-*... No se espera que el texto ajeno llegue ahi; se revisa
+    # para cerrar el borde HTTP completo y no solo el cuerpo.
+    cabeceras = "\n".join(f"{k}: {v}" for k, v in r.headers.items())
     revisar(r.status_code == estado and CANARIO not in cuerpo and CANARIO not in buf.getvalue()
+            and CANARIO not in cabeceras
             and (debe_contener is None or debe_contener in cuerpo)
             and (codigo is None or datos.get("codigo") == codigo),
-            f"{nombre}: {estado}, sin el texto ajeno en respuesta ni log"
+            f"{nombre}: {estado}, sin el texto ajeno en cuerpo, cabeceras ni log"
             + (f", con '{debe_contener}'" if debe_contener else ""),
-            f"status={r.status_code} cuerpo={cuerpo[:200]!r} log={buf.getvalue()[:200]!r}")
+            f"status={r.status_code} cuerpo={cuerpo[:200]!r} cabeceras={cabeceras[:200]!r} "
+            f"log={buf.getvalue()[:200]!r}")
     return datos
 
 
@@ -275,6 +281,23 @@ pedir("secretos: la base falla al leerlos",
       lambda: cliente.get(f"/secretos?tenant={TENANT}"),
       500, (db, "sesion", lambda tenant: SesionQueFalla()),
       debe_contener="No se pudieron leer los secretos")
+
+# Control de la propia prueba: una respuesta que SI mete el texto ajeno en una
+# cabecera tiene que ser detectada. Sin esto, 'sin canario en cabeceras' podria
+# pasar porque la comprobacion no mira donde cree.
+from flask import jsonify as _jsonify                            # noqa: E402
+
+
+def _con_cabecera_filtrada():
+    r = _jsonify({"error": "fijo"})
+    r.headers["X-Detalle"] = CANARIO
+    return r
+
+
+with api.app.test_request_context():
+    control = _con_cabecera_filtrada()
+revisar(CANARIO in "\n".join(f"{k}: {v}" for k, v in control.headers.items()),
+        "control: la revision de cabeceras detecta un canario puesto en una X-*")
 
 revisar(isinstance(fusion.FusionInvalida("x"), ValueError)
         and isinstance(db.TenantSinConfiguracion("x"), RuntimeError),
