@@ -138,8 +138,8 @@ try:
     e = estado(c)
     comprobar(r1.aplicada and e[:4] == ("humano", "escalada", None, 1),
               f"escalar: humano/escalada, sin asignacion, version 1 ({e[:4]})")
-    comprobar(e[5] is False and e[6] is False,
-              "escalar NO escribe las banderas de legado (las sigue escribiendo marcar_escalada despues del CRM)")
+    comprobar(e[5] is True and e[6] is True,
+              "escalar escribe TAMBIEN las banderas de legado que deciden la pausa, en la misma transaccion")
     ev = eventos(c)
     comprobar(len(ev) == 1 and ev[0][:2] == ("escalada", "ia") and ev[0][3] == 1,
               f"un evento 'escalada' del actor ia con version 1 ({ev})")
@@ -194,8 +194,12 @@ try:
     c4 = nueva_conv(org, "573000000013")
     T.escalar(TENANT, c4)
     T.caso_externo_cerrado(TENANT, c4)
-    comprobar(estado(c4)[0] == "ia" and eventos(c4)[-1][4].get("aplicado") is True,
-              "caso cerrado afuera sin nadie a cargo: control ia, aplicado=true")
+    e = estado(c4)
+    comprobar(e[0] == "humano" and e[5] is True and e[9] == "caso_externo_cerrado"
+              and eventos(c4)[-1][4].get("aplicado") is False,
+              f"caso cerrado afuera SIN nadie a cargo: tampoco devuelve a la IA, solo aviso ({e})")
+    comprobar([x[0] for x in eventos(c4)].count("devuelta_a_ia") == 0,
+              "el unico camino de vuelta a la IA sigue siendo devolver_a_ia")
 
     c5 = nueva_conv(org, "573000000014")
     r7 = T.intervenir(TENANT, c5, operador_id=ANA[0], operador_nombre=ANA[1], motivo_texto="respuesta incorrecta")
@@ -205,6 +209,28 @@ try:
     ev = eventos(c5)[-1]
     comprobar(ev[:3] == ("intervencion", "operador", "Ana Perez") and ev[4].get("tomada") is True,
               "evento 'intervencion' del operador")
+
+    c9 = nueva_conv(org, "573000000015")
+    db.cerrar_conversacion(TENANT, c9)
+    comprobar(estado(c9)[4] == "cerrada" and estado(c9)[8] is False,
+              "T15b: el cierre que hace la IA (cerrar_conversacion) NO marca atendida_manual")
+
+    print("\n== 1b. control efectivo ==")
+    leg_esc = str(q("""insert into asistente.conversations
+                         (organization_id, canal, usuario_externo, escalada_a_humano, necesita_atencion_humana)
+                       values (%s, 'whatsapp', '573000000016', true, true) returning id""", (org,))[0][0])
+    leg_agenda = str(q("""insert into asistente.conversations
+                            (organization_id, canal, usuario_externo, escalada_a_humano, necesita_atencion_humana)
+                          values (%s, 'whatsapp', '573000000017', true, false) returning id""", (org,))[0][0])
+    comprobar(db.control_efectivo_de(TENANT, leg_esc) == "humano",
+              "legado escalado (version 0, control 'ia' por default): control efectivo HUMANO")
+    comprobar(db.control_efectivo_de(TENANT, leg_agenda) == "ia",
+              "legado agendado solo (no necesita persona): control efectivo ia")
+    comprobar(db.control_efectivo_de(TENANT, nueva_conv(org, "573000000018")) == "ia",
+              "conversacion nueva sin escalar: ia")
+    comprobar(db.control_efectivo_de(TENANT, c) == "ia" and db.control_efectivo_de(TENANT, c3) == "humano",
+              "gobernadas: manda la columna control (devuelta = ia, escalada = humano)")
+    comprobar(db.control_efectivo_de(TENANT, str(uuid.uuid4())) is None, "inexistente: None")
 
     # -----------------------------------------------------------------------
     print("\n== 2. legado (version 0) ==")
@@ -329,13 +355,30 @@ try:
     originales = {k: getattr(*k) for k in reemplazos}
     for (m, n), f in reemplazos.items():
         setattr(m, n, f)
+    llamadas_modelo = []
+    responder_real_stub = reemplazos[(api.motor, "responder")]
+
+    def responder_contado(*a, **k):
+        llamadas_modelo.append(1)
+        return responder_real_stub(*a, **k)
+    reemplazos[(api.motor, "responder")] = responder_contado
+    setattr(api.motor, "responder", responder_contado)
     api._sesiones.clear()
+    salida_turno = {}
     try:
         # 'informacion_a_confirmar' y no el motivo de "pide una persona": ese
         # tiene su propia guarda (se descarta si el cliente no lo pidio con
         # palabras), que no es lo que se mide aca.
-        api.atender_turno(CONFIG, TENANT, "cliente_final", TEL,
-                          "hay cobertura en el barrio Los Almendros?", "whatsapp-simulado")
+        salida_turno = api.atender_turno(CONFIG, TENANT, "cliente_final", TEL,
+                                         "hay cobertura en el barrio Los Almendros?", "whatsapp-simulado")
+        memoria_pausada = api._sesiones[(TENANT, "whatsapp-simulado", TEL)]["escalada"]
+        modelo_antes = len(llamadas_modelo)
+        segunda = api.atender_turno(CONFIG, TENANT, "cliente_final", TEL, "hola? sigue ahi?",
+                                    "whatsapp-simulado")
+        # Mismo proceso reiniciado: la sesion se reconstruye desde la base.
+        api._sesiones.clear()
+        tercera = api.atender_turno(CONFIG, TENANT, "cliente_final", TEL, "alguien me atiende?",
+                                    "whatsapp-simulado")
     except Exception as ex:                                          # noqa: BLE001
         comprobar(False, "el turno de escalada corre", f"{type(ex).__name__}: {ex}")
     finally:
@@ -348,8 +391,52 @@ try:
     comprobar(bool(vistos) and all(v[1] == 0 for v in vistos),
               f"ningun efecto externo corre con una transaccion abierta ({vistos})")
     conv_turno = q("select id::text from asistente.conversations where usuario_externo = %s", (TEL,))[0][0]
-    comprobar(estado(conv_turno)[0] == "humano" and [x[0] for x in eventos(conv_turno)] == ["escalada"],
-              "el CRM fallo y el control NO volvio a la IA; un solo evento 'escalada'")
+    e = estado(conv_turno)
+    comprobar(e[0] == "humano" and e[5] is True and e[6] is True
+              and [x[0] for x in eventos(conv_turno)] == ["escalada"],
+              f"el CRM fallo: control humano Y legado pausado en la base; un solo evento ({e})")
+    comprobar(memoria_pausada is True, "y la memoria del proceso tambien quedo en pausa (sin split-brain)")
+    texto = (salida_turno or {}).get("respuesta") or ""
+    comprobar("confirmar con un compañero" in texto and "de nuevo" not in texto.lower(),
+              f"al cliente: el anuncio de atencion humana, NO 'escribime de nuevo' ({texto!r})")
+    comprobar(len(llamadas_modelo) == modelo_antes and segunda.get("pausada") and tercera.get("pausada"),
+              f"el mensaje siguiente, y despues de reconstruir la sesion, NO llega a la IA "
+              f"(modelo llamado {len(llamadas_modelo) - modelo_antes} veces)")
+
+    print("\n== 6. caso cerrado en el CRM durante la pausa ==")
+    for tel, gobernada in (("573000000097", True), ("573000000096", False)):
+        if gobernada:
+            cid = nueva_conv(org, tel)
+            T.escalar(TENANT, cid)
+        else:
+            cid = str(q("""insert into asistente.conversations
+                             (organization_id, canal, usuario_externo, escalada_a_humano,
+                              necesita_atencion_humana, caso_id)
+                           values (%s, 'whatsapp-simulado', %s, true, true, gen_random_uuid()) returning id""",
+                        (org, tel))[0][0])
+        q("update asistente.conversations set caso_id = gen_random_uuid() where id = %s", (cid,))
+        llamadas_modelo.clear()
+        extra = dict(reemplazos)
+        extra[(api.escalamiento, "caso_sigue_abierto")] = lambda *a, **k: False   # el CRM dice: cerrado
+        extra[(api.escalamiento, "evaluar")] = lambda *a, **k: {}
+        orig2 = {k: getattr(*k) for k in extra}
+        for (m, n), f in extra.items():
+            setattr(m, n, f)
+        api._sesiones.clear()
+        try:
+            r6 = api.atender_turno(CONFIG, TENANT, "cliente_final", tel, "ya me resolvieron?", "whatsapp-simulado")
+        finally:
+            for (m, n), f in orig2.items():
+                setattr(m, n, f)
+            api._sesiones.clear()
+        if gobernada:
+            e = estado(cid)
+            comprobar(r6.get("pausada") and not llamadas_modelo and e[0] == "humano"
+                      and e[9] == "caso_externo_cerrado",
+                      f"gobernada: el cierre externo deja aviso y la IA NO retoma ({e}, modelo={len(llamadas_modelo)})")
+        else:
+            comprobar(not r6.get("pausada") and llamadas_modelo,
+                      "legado (version 0): se retoma como hasta hoy, hasta la reconciliacion de G8")
 finally:
     try:
         with psycopg.connect(dsn("postgres"), autocommit=True) as con:

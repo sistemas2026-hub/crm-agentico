@@ -335,7 +335,7 @@ def _resolver_verificacion_pendiente(config, tenant: str, estado: dict) -> dict 
 def _cerrar_el_traspaso(config, tenant: str, conversation_id, mensaje_id,
                         respuesta: str, id_sesion: str, *, evaluador_fallo: bool,
                         se_intento: bool, caso_creado: bool,
-                        ticket_creado: bool) -> str:
+                        ticket_creado: bool, reservado: bool = False) -> str:
     """
     Decide en que termino el traspaso, lo deja escrito, y --si no quedo
     confirmado-- impide que la respuesta lo prometa.
@@ -364,6 +364,12 @@ def _cerrar_el_traspaso(config, tenant: str, conversation_id, mensaje_id,
     print(f"[escalamiento] {id_sesion}: {estado} -- {por_que}")
 
     if estado == estado_escalada.CONFIRMADO:
+        return respuesta
+    # Con el control humano reservado en la base, prometer una persona es
+    # cierto aunque no haya caso ni ticket: la conversacion ya esta en la cola
+    # de personas. El estado NO_CONFIRMADO queda anotado igual (el efecto
+    # externo fallo), pero la respuesta no se reemplaza.
+    if reservado:
         return respuesta
 
     # No quedo confirmado: la respuesta no puede prometer una persona. Se
@@ -855,6 +861,9 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     # Desde aca, todo lo que se agregue al historial es de ESTE turno. Lo usa
     # _sincronizar_respuesta_en_memoria() al final para no tocar turnos previos.
     inicio_turno = len(estado["historial"])
+    # Si ESTE turno reservo el control humano (escalada). Lo lee el candado del
+    # traspaso al final: con la reserva hecha, prometer una persona es cierto.
+    reservado_turno = False
 
     # --- repregunta pendiente del verificador de agendamiento -----------------
     # nucleo/seguimiento/agendamiento.py dejo esto en un turno anterior porque
@@ -881,7 +890,20 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     # una persona. Se verifica contra el CRM en vez de confiar en la marca:
     # cuando el humano cierra el caso, el asistente retoma solo.
     if estado["escalada"]:
-        if escalamiento.caso_sigue_abierto(config, estado["caso_id"]):
+        seguir_en_pausa = escalamiento.caso_sigue_abierto(config, estado["caso_id"])
+        if not seguir_en_pausa and estado.get("conversacion_id"):
+            # Caso cerrado en el CRM. En una conversacion que ya esta en el
+            # modelo nuevo (relevo_version > 0) eso NO la devuelve a la IA:
+            # queda un aviso para la persona y la pausa sigue, porque el unico
+            # camino de vuelta es devolver_a_ia(). En el legado (version 0)
+            # se retoma como siempre, hasta la reconciliacion de G8.
+            try:
+                if transiciones.caso_externo_cerrado(tenant, estado["conversacion_id"]).gobernada:
+                    seguir_en_pausa = True
+            except Exception as e:
+                print(f"[relevo] no se pudo registrar el cierre externo del caso: "
+                      f"{type(e).__name__}")
+        if seguir_en_pausa:
             estado["historial"].append({"role": "user", "content": mensaje})
             # ¿El cliente esta diciendo que ya quedo?
             #
@@ -1038,16 +1060,8 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             return {"respuesta": respuesta,
                     "verificado": estado["sesion"].verificado,
                     "pausada": True}
-        # El caso se cerro: el asistente vuelve a atender desde este turno.
-        # En la verdad nueva (B3.2), si alguien la tiene a cargo o dejo un
-        # pendiente interno NO se le quita: queda un aviso. La pausa de este
-        # turno la sigue decidiendo el legado, como hasta hoy.
-        if estado.get("conversacion_id"):
-            try:
-                transiciones.caso_externo_cerrado(tenant, estado["conversacion_id"])
-            except Exception as e:
-                print(f"[relevo] no se pudo registrar el cierre externo del caso: "
-                      f"{type(e).__name__}")
+        # El caso se cerro y la conversacion es de legado: el asistente
+        # vuelve a atender desde este turno, como hasta hoy.
         estado["escalada"] = False
         estado["caso_id"] = None
         # Y vuelve a poder escalar: el caso anterior ya no esta abierto, asi
@@ -1684,11 +1698,15 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 # hasta el corte de control --, por eso un fallo aca se anota
                 # y no detiene el turno. Si ya se agendo una visita sola
                 # (necesita_humano=False) no hay nada que reservar.
+                reservado = False
                 if necesita_humano:
                     try:
-                        transiciones.escalar(
+                        r_reserva = transiciones.escalar(
                             tenant, conversation_id, motivo=evaluacion.get("motivo", ""),
                             clave=f"escalada:{mensaje_id}" if mensaje_id else None)
+                        # Reservado = la base YA dice humano, se haya aplicado
+                        # ahora o por un reintento de la misma escalada.
+                        reservado = r_reserva.aplicada or r_reserva.motivo in ("reintento", "sin_cambio")
                     except Exception as e:
                         print(f"[relevo] no se pudo reservar el control humano: "
                               f"{type(e).__name__}")
@@ -1864,7 +1882,13 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 # esperar -- si se agendo solo, el bot sigue atendiendo
                 # normal desde el proximo mensaje. Y si no quedo registrado
                 # en ningun lado, tampoco: ver mas abajo.
-                estado["escalada"] = necesita_humano and quedo_registrado
+                # FAIL-CLOSED (Q5): si la reserva quedo en la base, la pausa es
+                # un hecho aunque el ticket y el CRM hayan fallado -- la base
+                # ya dice que esta conversacion espera a una persona, y la
+                # memoria no puede decir otra cosa. Solo si ni siquiera la
+                # reserva se pudo guardar se vuelve a lo de antes.
+                estado["escalada"] = necesita_humano and (quedo_registrado or reservado)
+                reservado_turno = reservado
                 # Y POR QUE se escalo. Lo lee el aviso que recibe el cliente
                 # en cada mensaje mientras espera: sin esto se le contestaba
                 # con el texto generico ("entiendo tu molestia") aunque
@@ -1911,7 +1935,12 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 # 400 y al cliente se le contesto igual que su pedido habia
                 # quedado registrado -- se le dice la verdad y se le pide que
                 # escriba de nuevo, que es lo que dispara el reintento.
-                if quedo_registrado:
+                #
+                # Con la reserva hecha, el pedido de atencion humana SI quedo:
+                # se le dice el anuncio normal, que promete una persona y no
+                # un numero de caso. Pedirle que escriba de nuevo seria
+                # mandarlo a insistirle a un bot que ya no le va a contestar.
+                if quedo_registrado or reservado:
                     respuesta = respuesta_al_cliente
                 else:
                     respuesta = _mensaje_si_no_quedo(config) or respuesta
@@ -1927,7 +1956,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 #
                 # Sin registro no hay nadie a quien esperar ni caso que
                 # consultar: se limpia todo y la conversacion sigue viva.
-                estado["ya_escalada"] = quedo_registrado
+                estado["ya_escalada"] = quedo_registrado or reservado
                 if not quedo_registrado:
                     estado["caso_id"] = None
                 # El mensaje del asistente ya se guardo (mas arriba, antes de
@@ -2030,7 +2059,8 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     respuesta = _cerrar_el_traspaso(
         config, tenant, conversation_id, mensaje_id, respuesta, id_sesion,
         evaluador_fallo=evaluador_fallo, se_intento=se_intento_escalar,
-        caso_creado=caso_creado, ticket_creado=ticket_creado)
+        caso_creado=caso_creado, ticket_creado=ticket_creado,
+        reservado=reservado_turno)
 
     # --- "¿quieres que te comunique con una persona?" -----------------------
     # Se agrega ACA, con el candado ya corrido: la pregunta nombra a un

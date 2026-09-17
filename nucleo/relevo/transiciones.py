@@ -37,9 +37,11 @@ G8, no por un efecto lateral de un clic.
 
 LO QUE CADA UNA SIGNIFICA (y no significa)
 ------------------------------------------
-  escalar          control humano / escalada, sin asignacion. Se reserva ANTES
-                   de crear ticket o caso; si esos efectos fallan despues, el
-                   control NO vuelve a la IA.
+  escalar          control humano / escalada, sin asignacion, Y las banderas
+                   de legado que hoy deciden la pausa, en la misma transaccion.
+                   Se reserva ANTES de crear ticket o caso; si esos efectos
+                   fallan despues, el control NO vuelve a la IA (politica
+                   fail-closed, Q5).
   intervenir       control humano / intervencion; con tomar=True, asignada al
                    actor en la misma transaccion. No tiene equivalente de
                    legado y no hay ruta que la exponga todavia.
@@ -53,8 +55,11 @@ LO QUE CADA UNA SIGNIFICA (y no significa)
                    la funcion "Responder y devolver" (T6) no se habilita hasta
                    G9.
   caso_externo_cerrado
-                   con alguien a cargo o un pendiente interno: aviso, sin
-                   tocar control ni asignacion. Sin nadie: control ia.
+                   SOLO un aviso y su evento: nunca cambia control ni
+                   asignacion. El CRM es un sistema relacionado, no la
+                   autoridad sobre quien atiende una conversacion de Dexter;
+                   devolverla a la IA es siempre devolver_a_ia(), un solo
+                   camino.
 """
 
 from __future__ import annotations
@@ -186,21 +191,23 @@ def escalar(tenant: str, conversation_id: str, *, motivo: str = "",
     Reserva el control humano por escalada. Sin asignacion. No-op si la
     conversacion ya esta en control humano o cerrada.
 
-    NO escribe las banderas de legado (escalada_a_humano,
-    necesita_atencion_humana): hoy las decide marcar_escalada() DESPUES de
-    crear el caso, y moverlas antes cambiaria lo que el cliente vive en este
-    mismo despliegue (se pausaria aunque nada quedara registrado, y el aviso
-    "no quedo registrado, escribime de nuevo" le pediria insistir a un bot
-    callado). Ese cambio de conducta es la politica fail-closed aprobada (Q5)
-    y entra con la cola de sincronizaciones (B4), no con la escritura en
-    paralelo. Hasta el corte, la verdad nueva puede decir 'humano' donde el
-    legado todavia no pauso: es la direccion segura y no la lee nadie.
+    Escribe TAMBIEN las banderas de legado que hoy deciden la pausa
+    (escalada_a_humano, necesita_atencion_humana), en la misma transaccion.
+    Sin eso la verdad nueva diria 'humano' mientras el runtime deja hablar a
+    la IA: con las guardas de B3.3 una persona y la IA podrian atender a la
+    vez. Si despues fallan el ticket o el CRM, la conversacion SIGUE pausada
+    (fail-closed, Q5): la atencion humana ya quedo pedida; el efecto externo
+    es otra cosa y se reconcilia aparte (B4).
     """
     def cuerpo(cur, org, f):
         if f["estado"] != "abierta" or f["control"] == "humano":
             return Resultado(False, f["relevo_version"] > 0, f["relevo_version"], None, "sin_cambio")
-        version = _subir_version(cur, org, conversation_id,
-                                 "control = 'humano', control_motivo = 'escalada'", ())
+        version = _subir_version(
+            cur, org, conversation_id,
+            "control = 'humano', control_motivo = 'escalada', escalada_a_humano = true, "
+            "necesita_atencion_humana = true, escalada_en = coalesce(escalada_en, now()), "
+            "motivo_escalamiento = coalesce(%s, motivo_escalamiento), actualizado_en = now()",
+            ((motivo or None),))
         datos = {"version": version, "motivo": (motivo or "")[:MAX_TEXTO] or None}
         ev = _evento(cur, org, conversation_id, "escalada", "ia", None, None, datos, clave)
         return Resultado(True, True, version, ev, datos=datos)
@@ -340,19 +347,14 @@ def caso_externo_cerrado(tenant: str, conversation_id: str, *, clave: str | None
         if (f["relevo_version"] == 0 or f["estado"] != "abierta" or f["control"] != "humano"
                 or f["control_motivo"] != "escalada"):
             return Resultado(False, f["relevo_version"] > 0, f["relevo_version"], None, "no_aplica")
-        if f["asignada_a_nombre"] is not None or f["pendiente_interno_desde"] is not None:
-            # Alguien la esta trabajando: se le avisa, no se le quita.
-            cur.execute("""select aviso_relevo from asistente.conversations
-                           where organization_id = %s and id = %s""", (org, conversation_id))
-            if cur.fetchone()["aviso_relevo"] == "caso_externo_cerrado":
-                return Resultado(False, True, f["relevo_version"], None, "ya_avisado")
-            version = _subir_version(cur, org, conversation_id,
-                                     "aviso_relevo = 'caso_externo_cerrado'", ())
-            datos = {"version": version, "aplicado": False}
-        else:
-            version = _subir_version(cur, org, conversation_id,
-                                     "control = 'ia', control_motivo = null", ())
-            datos = {"version": version, "aplicado": True}
+        cur.execute("""select aviso_relevo from asistente.conversations
+                       where organization_id = %s and id = %s""", (org, conversation_id))
+        if cur.fetchone()["aviso_relevo"] == "caso_externo_cerrado":
+            return Resultado(False, True, f["relevo_version"], None, "ya_avisado")
+        # Haya o no alguien a cargo: aviso, y nada mas. Ni control ni asignacion.
+        version = _subir_version(cur, org, conversation_id,
+                                 "aviso_relevo = 'caso_externo_cerrado'", ())
+        datos = {"version": version, "aplicado": False}
         ev = _evento(cur, org, conversation_id, "caso_externo_cerrado", "sistema", None, None, datos, clave)
         return Resultado(True, True, version, ev, datos=datos)
     return _ejecutar(tenant, conversation_id, clave, cuerpo)

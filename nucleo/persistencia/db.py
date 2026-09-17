@@ -71,6 +71,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 from nucleo.persistencia.conexion import dsn
+from nucleo.relevo import control as regla_control
 from nucleo.relevo import historial as regla_historial
 
 # Cache de slug -> organization_id. El vinculo lo crea cli/cargar_config.py y
@@ -1849,6 +1850,22 @@ def registrar_estado_escalada(tenant: str, conversation_id: str, estado: str,
     except Exception as e:
         print(f"[escalamiento] no se pudo anotar el estado '{estado}': "
               f"{type(e).__name__}: {e}")
+
+
+def control_efectivo_de(tenant: str, conversation_id: str) -> str | None:
+    """
+    Quien controla la conversacion hoy ('ia' | 'humano'), por la regla unica de
+    nucleo/relevo/control.py. None si no existe o no es de este tenant. La usan
+    las guardas del backend; ninguna ruta deriva el control por su cuenta.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select relevo_version, control, escalada_a_humano, necesita_atencion_humana
+               from asistente.conversations
+               where organization_id = %s and id = %s""",
+            (org, conversation_id))
+        fila = cur.fetchone()
+    return regla_control.control_efectivo(fila) if fila else None
 
 
 def marcar_atendida(tenant: str, conversation_id: str, por: str | None) -> bool:

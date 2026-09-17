@@ -36,6 +36,14 @@ queda en true si el traspaso quedo registrado en algun lado. Recien entonces
 "sin caso" significa sin ambiguedad "quedo en la otra cola", y el fail-safe de
 caso_sigue_abierto es correcto.
 
+ACTUALIZACION 16/09/2026 (B3.2, politica fail-closed Q5): desde que la escalada
+RESERVA el control humano en la base antes del ticket y del CRM, "registrado"
+incluye esa reserva. Si despues fallan el ticket y el CRM, la conversacion sigue
+pausada y al cliente se le da el anuncio de atencion humana, no "escribime de
+nuevo". Ese texto queda solo para cuando ni la reserva se pudo guardar. Lo
+prueba contra PostgreSQL tests/test_relevo_transiciones_base.py, seccion 5;
+esta suite sigue midiendo la compuerta de pausa a partir del estado previo.
+
 POR QUE A NIVEL DE TURNO
 ------------------------
 La regla no vive en una funcion: vive en el acuerdo entre tres piezas -- lo
