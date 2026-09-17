@@ -251,7 +251,7 @@ def tickets_conocidos(config, tenant: str, ids: list[str]) -> tuple[set, set]:
                 # se crearia de nuevo todo. Que reviente aca es lo correcto.
                 raise RuntimeError(
                     f"no se pudo consultar los tickets conocidos: "
-                    f"{type(e).__name__}: {e}") from e
+                    f"{type(e).__name__}") from e
 
     # La otra fuente de autoria, esta si del dominio del motor.
     #
