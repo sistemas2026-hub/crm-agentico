@@ -509,10 +509,26 @@ def _error_no_manejado(e):
     PostgreSQL con el valor que fallo, uno de requests con la URL. Ver
     nucleo/observabilidad/registro.py (D20).
 
-    Los HTTPException (404, 405...) no son fallos: siguen su camino normal.
+    LOS HTTPException NO SON FALLOS DEL MOTOR y conservan su codigo: un 404 de
+    ruta inexistente, un 405, o cualquier abort(401/403/409/503) sigue siendo
+    ese codigo, nunca un 500. Se responden con un JSON generico (el nombre
+    estandar del codigo) en vez de la pagina HTML de werkzeug, que repite la
+    'description' de quien hizo abort(); y se conservan sus cabeceras propias
+    (Allow en un 405, WWW-Authenticate en un 401). Las redirecciones de ruteo
+    (308 por la barra final) pasan tal cual.
+
+    Las rutas que devuelven su error con jsonify(..., 4xx) ni pasan por aca:
+    eso es una respuesta, no una excepcion.
     """
     if isinstance(e, HTTPException):
-        return e
+        if e.code is None or e.code < 400:
+            return e
+        respuesta = jsonify({"error": e.name})
+        respuesta.status_code = e.code
+        for nombre, valor in e.get_headers():
+            if nombre.lower() not in ("content-type", "content-length"):
+                respuesta.headers[nombre] = valor
+        return respuesta
     registrar("http", "error no manejado", metodo=request.method,
               ruta=request.url_rule.rule if request.url_rule else None, error=e)
     return jsonify({"error": "Error interno del motor."}), 500

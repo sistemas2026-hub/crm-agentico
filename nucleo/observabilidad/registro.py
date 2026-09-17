@@ -51,12 +51,17 @@ exista la conversacion -- se usa:
                       recalcular en SQL para ubicar la fila:
                         left(encode(sha256(convert_to(wamid,'UTF8')),'hex'),12)
 
-La clave del HMAC es REGISTRO_CLAVE_HMAC si existe; si no, se deriva de
-SECRETOS_CLAVE_MAESTRA (un HMAC de ella, que no la expone). Sin ninguna de las
-dos se usa una clave aleatoria del proceso: la referencia sigue siendo
-irreversible y sirve para correlacionar dentro de esa vida del proceso, y el
-prefijo 'sesx-' avisa que no es estable entre reinicios. Nunca se cae a un
-hash plano.
+La clave del HMAC se DERIVA (HKDF, contexto 'dexter/log-ref/v1') de
+REGISTRO_CLAVE_HMAC si existe, o si no de SECRETOS_CLAVE_MAESTRA: ninguna de
+las dos se usa directamente. Sin ninguna se usa una clave aleatoria del
+proceso: la referencia sigue siendo irreversible y sirve para correlacionar
+dentro de esa vida del proceso, y el prefijo 'sesx-' avisa que no es estable
+entre reinicios. Nunca se cae a un hash plano, y nunca se deja de atender por
+falta de clave: es una degradacion del log, no del servicio.
+
+Las referencias son SOLO para buscar en el log. ref_proveedor en particular es
+una huella corta que puede colisionar: nunca se usa como clave de base, como
+identidad de negocio ni para autorizar nada.
 ================================================================================
 """
 
@@ -89,13 +94,31 @@ class Referencia(str):
     """Un valor ya anonimizado por este modulo: pasa sin volver a revisarse."""
 
 
+# Separacion de dominio. La clave con que se firman las referencias del log NO
+# es la clave maestra ni la variable dedicada tal cual: es una derivada HKDF
+# (RFC 5869) con este contexto. Asi la misma maestra que descifra credenciales
+# no se usa, directamente, para una segunda finalidad; y si el formato de las
+# referencias cambia, se sube la version del contexto y las viejas no casan
+# con las nuevas por accidente.
+CONTEXTO_CLAVE = b"dexter/log-ref/v1"
+_SAL_HKDF = b"dexter/observabilidad/registro"
+
+
+def hkdf_sha256(ikm: bytes, sal: bytes, info: bytes, largo: int = 32) -> bytes:
+    """HKDF-SHA256, RFC 5869: extraer y expandir. Solo biblioteca estandar."""
+    prk = hmac.new(sal or bytes(32), ikm, hashlib.sha256).digest()
+    salida, bloque, n = b"", b"", 1
+    while len(salida) < largo:
+        bloque = hmac.new(prk, bloque + info + bytes([n]), hashlib.sha256).digest()
+        salida += bloque
+        n += 1
+    return salida[:largo]
+
+
 def _clave() -> tuple[bytes, str]:
-    propia = os.environ.get("REGISTRO_CLAVE_HMAC")
-    if propia:
-        return propia.encode(), "ses"
-    maestra = os.environ.get("SECRETOS_CLAVE_MAESTRA")
-    if maestra:
-        return hmac.new(maestra.encode(), b"dexter-registro-v1", hashlib.sha256).digest(), "ses"
+    origen = os.environ.get("REGISTRO_CLAVE_HMAC") or os.environ.get("SECRETOS_CLAVE_MAESTRA")
+    if origen:
+        return hkdf_sha256(origen.encode(), _SAL_HKDF, CONTEXTO_CLAVE), "ses"
     return _CLAVE_DEL_PROCESO, "sesx"
 
 
@@ -114,7 +137,11 @@ def ref_sesion(valor) -> Referencia | None:
 
 def ref_proveedor(valor) -> Referencia | None:
     """Huella corta de un identificador ALEATORIO del proveedor (wamid,
-    media_id). Recalculable en SQL; ver el docstring del modulo."""
+    media_id). Recalculable en SQL; ver el docstring del modulo.
+
+    SOLO observabilidad: 48 bits pueden colisionar, y eso no importa mientras
+    nadie la use como clave, identidad o permiso. Para ids de poca entropia
+    (secuenciales, telefonos) va ref_sesion, que es HMAC."""
     if not valor:
         return None
     return Referencia("prv-" + hashlib.sha256(str(valor).encode("utf-8")).hexdigest()[:12])

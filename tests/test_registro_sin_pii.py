@@ -126,6 +126,24 @@ else:
     os.environ["SECRETOS_CLAVE_MAESTRA"] = maestra_previa
 os.environ["REGISTRO_CLAVE_HMAC"] = "clave-de-prueba-d20"
 
+# Separacion de dominio: ni la variable dedicada ni la maestra se usan tal
+# cual como clave del HMAC; se derivan con HKDF y un contexto propio.
+okm = registro.hkdf_sha256(bytes([0x0b]) * 22, bytes(range(0x0d)), bytes(range(0xf0, 0xfa)), 42)
+revisar(okm.hex() == "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865",
+        "hkdf_sha256 reproduce el vector de prueba 1 del RFC 5869")
+revisar(registro.CONTEXTO_CLAVE == b"dexter/log-ref/v1", "el contexto de la derivacion es dexter/log-ref/v1")
+for variable in ("REGISTRO_CLAVE_HMAC", "SECRETOS_CLAVE_MAESTRA"):
+    previas = {v: os.environ.pop(v, None) for v in ("REGISTRO_CLAVE_HMAC", "SECRETOS_CLAVE_MAESTRA")}
+    os.environ[variable] = "valor-de-la-clave"
+    clave, _ = registro._clave()
+    directa = "ses-" + registro.hmac.new(b"valor-de-la-clave", TEL.encode(), hashlib.sha256).hexdigest()[:12]
+    revisar(clave != b"valor-de-la-clave" and len(clave) == 32 and registro.ref_sesion(TEL) != directa,
+            f"con {variable}: la clave del log es una derivada, no la variable usada directamente")
+    del os.environ[variable]
+    for v, valor in previas.items():
+        if valor is not None:
+            os.environ[v] = valor
+
 prv = registro.ref_proveedor(WAMID)
 revisar(prv == "prv-" + hashlib.sha256(WAMID.encode()).hexdigest()[:12],
         "ref_proveedor (wamid, media_id) es recalculable en SQL: prv- + 12 hex del sha256", prv)
@@ -172,18 +190,17 @@ titulo("2. el codigo: ningun print, registrar() con evento fijo")
 # =============================================================================
 # Los modulos que PUEDEN seguir usando print, y por que. Todo modulo nuevo del
 # nucleo queda cubierto por defecto: no hay que acordarse de agregarlo.
+# Estar exento NO es estar sin revisar: mas abajo se exige que ningun print de
+# estos modulos interpole una excepcion, un repr o una variable de PII.
 EXENTOS = {
-    "nucleo/observabilidad/registro.py": "es la puerta: el unico print del camino del turno",
-    "nucleo/reloj.py": "proceso aparte (motor-reloj); no atiende WhatsApp. Deuda anotada en D20",
-    "nucleo/programador/coordinador.py": "proceso del reloj. Deuda anotada en D20",
-    "nucleo/programador/ejecutor.py": "proceso del reloj. Deuda anotada en D20",
-    "nucleo/seguimiento/importacion_io.py": "importacion de WispHub en el reloj. Deuda anotada en D20",
-    "nucleo/config/editor.py": "edicion de config desde la interfaz: no toca datos de clientes",
-    "nucleo/config/schema.py": "bloque __main__ de diagnostico por consola",
-    "nucleo/persistencia/conexion.py": "aviso de arranque con el DBHOST",
-    "nucleo/conectores/catalogo.py": "lee YAML del repo",
-    "nucleo/habilidades/analista.py": "analista fuera del turno. Deuda anotada en D20",
+    "nucleo/observabilidad/registro.py": "es la puerta: imprime la linea ya saneada",
+    "nucleo/programador/coordinador.py": "arranque y contadores del embudo con etiquetas en "
+                                         "lista blanca; sus errores van por registrar()",
+    "nucleo/programador/ejecutor.py": "solo el TIPO de la excepcion del latido y texto fijo",
+    "nucleo/persistencia/conexion.py": "aviso de arranque con el DBHOST (infraestructura)",
 }
+# Los bloques 'if __name__ == "__main__"' no cuentan: corren solo como
+# herramienta de consola ('python -m ...'), nunca dentro del motor ni del reloj.
 # Nombres que en el nucleo SIEMPRE son datos de una persona o de su mensaje.
 # Pasarlos sueltos a registrar() es el error; envueltos en ref_sesion,
 # ref_proveedor o id_interno, no.
@@ -191,15 +208,43 @@ PII = {"de", "para", "telefono", "id_sesion", "wamid", "texto", "mensaje", "cont
        "crudo", "respuesta", "evidencia_humano", "motivo_forzado", "por_que", "frase", "media_id",
        "nombre_cliente", "descripcion", "pregunta", "resumen", "bsuid", "recibido", "token"}
 
-con_print, mal_llamado, exentos_vacios = [], [], []
+def nombres_peligrosos(expr) -> list[str]:
+    """Lo que un print exento interpola y no puede: la excepcion (salvo su
+    tipo), un repr, o una variable de PII."""
+    malos = []
+    tipos = {id(n.value.args[0]) for n in ast.walk(expr)
+             if isinstance(n, ast.Attribute) and n.attr == "__name__"
+             and isinstance(n.value, ast.Call) and isinstance(n.value.func, ast.Name)
+             and n.value.func.id == "type" and n.value.args}
+    for n in ast.walk(expr):
+        if isinstance(n, ast.FormattedValue) and n.conversion == ord("r"):
+            malos.append(f"!r de {ast.unparse(n.value)}")
+        if isinstance(n, ast.Name) and id(n) not in tipos and n.id in PII | {"e", "fallo"}:
+            malos.append(n.id)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in ("str", "repr"):
+            malos.append(ast.unparse(n))
+    return malos
+
+
+con_print, mal_llamado, exentos_vacios, exentos_inseguros = [], [], [], []
 for ruta in sorted((RAIZ / "nucleo").rglob("*.py")):
     rel = ruta.relative_to(RAIZ).as_posix()
     arbol = ast.parse(ruta.read_text(encoding="utf-8"))
-    prints = [n.lineno for n in ast.walk(arbol) if isinstance(n, ast.Call)
-              and isinstance(n.func, ast.Name) and n.func.id == "print"]
+    de_consola = {id(x) for n in arbol.body if isinstance(n, ast.If)
+                  and ast.unparse(n.test).replace("'", '"') == '__name__ == "__main__"'
+                  for x in ast.walk(n)}
+    llamadas_print = [n for n in ast.walk(arbol) if isinstance(n, ast.Call)
+                      and isinstance(n.func, ast.Name) and n.func.id == "print"
+                      and id(n) not in de_consola]
+    prints = [n.lineno for n in llamadas_print]
     if rel in EXENTOS:
         if not prints:
             exentos_vacios.append(rel)
+        if rel != "nucleo/observabilidad/registro.py":
+            for n in llamadas_print:
+                malos = [m for a in n.args for m in nombres_peligrosos(a)]
+                if malos:
+                    exentos_inseguros.append(f"{rel}:{n.lineno} {malos}")
         continue
     con_print += [f"{rel}:{l}" for l in prints]
     for n in ast.walk(arbol):
@@ -228,12 +273,29 @@ revisar(not mal_llamado, "registrar() siempre con evento fijo y sin PII suelta e
         "\n         ".join(mal_llamado))
 revisar(not exentos_vacios, "ninguna exencion sobra (si un modulo ya no imprime, sale de la lista)",
         f"{exentos_vacios}")
+revisar(not exentos_inseguros,
+        "los print exentos no interpolan excepciones, repr ni variables de PII (revisados por "
+        "contenido, no por ubicacion)", "\n         ".join(exentos_inseguros))
 
 
 # =============================================================================
 titulo("3. la salida: canarios por cada camino de WhatsApp")
 # =============================================================================
+from flask import abort                                           # noqa: E402
+
 from nucleo.canales import api                                    # noqa: E402
+
+# Rutas SOLO de prueba para la parte 5, registradas antes de la primera
+# peticion (Flask no admite agregarlas despues). Hacen abort() con una
+# descripcion llena de canarios: werkzeug la pondria en el cuerpo HTML.
+CODIGOS_ABORT = (400, 401, 403, 404, 409, 503)
+
+
+def _abortar(codigo):
+    abort(codigo, description=f"{TEL} {WAMID} {MSG} {ERR_META}")
+
+
+api.app.add_url_rule("/_prueba_d20/abort/<int:codigo>", "_prueba_d20_abort", _abortar)
 
 
 class Captura:
@@ -473,6 +535,66 @@ for nombre, log, marcadores in escenarios:
             (f"canarios filtrados: {filtrados}" if filtrados else "")
             + (f" marcadores ausentes: {faltan}" if faltan else "")
             + f"\n         log: {log.strip()[:900]}")
+
+
+# =============================================================================
+titulo("5. el manejador de errores no cambia los codigos HTTP")
+# =============================================================================
+# El manejador global existe para que una excepcion no atrapada no escriba su
+# traza. No puede convertir un 401, un 404 o un 409 en un 500.
+
+
+@contextlib.contextmanager
+def sesion_falsa(tenant):
+    yield None, "org"
+
+
+def pedir(nombre, funcion, esperado, *extra, cabecera=None):
+    with parches(*BASE, *extra), Captura() as cap:
+        r = funcion()
+    cuerpo = r.get_data(as_text=True)
+    filtrados = [c for c in CANARIOS if c in cuerpo or c in cap.texto]
+    ok = revisar(r.status_code == esperado and not filtrados
+                 and (cabecera is None or cabecera in r.headers),
+                 f"{nombre}: {esperado}, sin canarios en respuesta ni log",
+                 f"status={r.status_code} filtrados={filtrados} cabeceras={dict(r.headers)} "
+                 f"cuerpo={cuerpo[:160]!r}")
+    return r if ok else None
+
+
+pedir("400 real (aviso sin campos)",
+      lambda: cliente.post(f"/avisos/whatsapp/{TENANT}", json={"texto": MSG}), 400)
+pedir("401 real (webhook con firma invalida)",
+      lambda: webhook(entrante()), 401,
+      (api.whatsapp, "firma_valida", lambda *a, **k: False))
+pedir("401 real (token de servicio ausente)",
+      lambda: cliente.get(f"/conversaciones?tenant={TENANT}&q={TEL}"), 401,
+      (api, "_TOKEN_SERVICIO", "token-de-prueba"))
+pedir("403 real (handshake con verify token equivocado)",
+      lambda: cliente.get(f"/canales/whatsapp/{TENANT}?hub.mode=subscribe"
+                          f"&hub.verify_token={VERIFY}&hub.challenge=1"), 403,
+      (api.whatsapp, "_secreto", lambda *a: "EL-TOKEN-BUENO"))
+pedir("404 real (ruta inexistente)", lambda: cliente.get(f"/no-existe/{TEL}"), 404)
+pedir("405 real (metodo no permitido, conserva Allow)",
+      lambda: cliente.get(f"/avisos/whatsapp/{TENANT}"), 405, cabecera="Allow")
+pedir("409 real (documento que ya no esta pendiente)",
+      lambda: cliente.post(f"/corpus/documentos/{uuid.uuid4()}/aprobar",
+                           json={"tenant": TENANT, "aprobado_por": MSG}), 409,
+      (api.persistencia, "sesion", sesion_falsa),
+      (api.ingesta, "aprobar", lambda *a: False))
+pedir("503 real (no se puede comprobar la baja)",
+      lambda: cliente.post(f"/avisos/whatsapp/{TENANT}", json={"para": TEL, "plantilla": "x"}), 503,
+      (api.persistencia, "esta_de_baja", lanza(error_pg)))
+r = pedir("500 inesperado (excepcion no atrapada)",
+          lambda: cliente.get(f"/canales/whatsapp/{TENANT}?hub.verify_token={VERIFY}"), 500,
+          (api, "_config_de", lanza(RuntimeError(f"{TEL} {ERR_META}"))))
+for codigo in CODIGOS_ABORT:
+    r = pedir(f"abort({codigo}) con descripcion llena de canarios",
+              lambda: cliente.get(f"/_prueba_d20/abort/{codigo}"), codigo)
+    if r is not None:
+        revisar(r.is_json and set(r.get_json()) == {"error"},
+                f"abort({codigo}) responde JSON generico, no la pagina HTML con la descripcion",
+                r.get_data(as_text=True)[:120])
 
 
 # =============================================================================

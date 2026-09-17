@@ -76,6 +76,8 @@ from typing import Callable
 
 from pydantic import ValidationError
 
+from nucleo.observabilidad.registro import registrar
+
 from .schema import RE_NOMBRE_REF, TenantConfig, _barrer_secretos
 
 _RE_NOMBRE_ROL = re.compile(r"^[a-z][a-z0-9_]{1,29}$")
@@ -296,24 +298,21 @@ def _validar(tenant: str, crudo: dict) -> TenantConfig:
         # molesta todos los dias o esta mal puesta o senala un hueco en la
         # interfaz que la produce.
         #
-        # Es un print y no una fila en la base a proposito: esto corre DENTRO
+        # Va al log y no a una fila en la base a proposito: esto corre DENTRO
         # de la transaccion de _editar(), que va a hacer rollback. Una
         # escritura aca se perderia con el resto.
         #
-        # Y es un print y no logging porque el proyecto entero usa esta forma
-        # --218 lineas con prefijo '[modulo]' y cero uso de logging--. Una
-        # sola linea en otro estilo no la hace mas buscable que las demas;
-        # migrar a logging estructurado es una decision que vale la pena y que
-        # se toma para todo el codigo, no a medias por un caso.
-        #
-        # Lo que si lleva son los CAMPOS: version que se intentaba pisar, y
-        # las secciones tocadas. Eso es lo que hace falta para saber, si esto
-        # se repite, si una regla molesta seguido -- y una regla que molesta
-        # todos los dias o esta mal puesta o señala un hueco en la interfaz.
-        print(f"[config] {tenant}: RECHAZADA una edicion invalida "
-              f"(desde v{crudo.get('version', '?')}, "
-              f"secciones={sorted(k for k in crudo if k in SECCIONES_EDITABLES)}) "
-              f"-- " + " | ".join(lineas[:3]))
+        # Lo que lleva son los CAMPOS: version que se intentaba pisar, las
+        # secciones tocadas y cuantos problemas hubo. Eso es lo que hace falta
+        # para saber, si esto se repite, si una regla molesta seguido. Los
+        # mensajes de validacion NO van al log: pydantic cita el valor que
+        # rechazo, y ese valor es lo que alguien escribio en la configuracion.
+        # Siguen llegando enteros a quien edito, en la excepcion de abajo.
+        # Ver nucleo/observabilidad/registro.py (D20).
+        registrar("config", "RECHAZADA una edicion invalida", tenant=tenant,
+                  desde_version=crudo.get("version"),
+                  secciones=sorted(k for k in crudo if k in SECCIONES_EDITABLES),
+                  problemas=len(lineas))
         raise ErrorEdicion(
             f"{tenant}: {len(lineas)} problema(s) de configuracion:\n  - "
             + "\n  - ".join(lineas)) from None
@@ -414,7 +413,7 @@ def _editar(tenant: str, mutar: Callable[[dict], None]) -> TenantConfig:
         # la version. Asi 'config_version' cuenta cambios reales y no clics en
         # el boton de guardar.
         if datos == fila["config"]:
-            print(f"[config] {tenant}: sin cambios (v{fila['config_version']})")
+            registrar("config", "sin cambios", tenant=tenant, version=fila["config_version"])
             return config
 
         cur.execute("""update asistente.tenant_config
@@ -427,7 +426,7 @@ def _editar(tenant: str, mutar: Callable[[dict], None]) -> TenantConfig:
         version = cur.fetchone()["config_version"]
         anotar_version(cur, org, version, datos)
 
-    print(f"[config] {tenant}: v{version} guardada desde el editor")
+    registrar("config", "guardada desde el editor", tenant=tenant, version=version)
     return config
 
 

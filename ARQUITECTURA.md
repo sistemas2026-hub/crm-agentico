@@ -130,8 +130,11 @@ evento de texto fijo, lo variable en campos que se redactan si tienen forma de
 telefono, wamid o texto libre, y las excepciones por tipo, sqlstate y
 `archivo:linea` -- nunca `str(e)`, que es donde viaja el valor que fallo. Para
 seguir un caso se usan ids internos (`conversation_id`, `mensaje`); a una
-persona se la nombra con `ref_sesion()` (HMAC, no hash plano: un telefono se
-enumera). `tests/test_registro_sin_pii.py` prohibe `print` en esos modulos e
+persona se la nombra con `ref_sesion()` (HMAC con una clave derivada por HKDF,
+contexto `dexter/log-ref/v1`; no hash plano: un telefono se enumera). Las
+referencias sirven solo para buscar en el log: nunca como clave, identidad ni
+permiso. Un error HTTP (404, 409, un `abort()`) conserva su codigo y sale como
+JSON generico; solo lo no atrapado es un 500. `tests/test_registro_sin_pii.py` prohibe `print` en esos modulos e
 inyecta valores canario por cada camino de WhatsApp. Motivo y medicion: D20.
 
 `django-crm/.env.docker.local` (ignorado por git) apunta Django al mismo Postgres, sobreescribiendo el bloque de base de datos de `.env.docker`. El servicio `db` del compose sigue existiendo pero ya no se usa.
