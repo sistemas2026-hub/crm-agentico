@@ -2313,6 +2313,20 @@
     white-space: nowrap;
   }
 
+  /* El boton Cancelar de la grabacion comparte clase con "Reiniciar (prueba)",
+     que se fue a ConversationHeader en 0A.2 y se llevo esta regla -- dejando a
+     este sin estilo. `pnpm check` no lo vio: avisa de reglas sin clase, nunca
+     de clases sin regla. Restaurada verbatim.
+     Herramienta de prueba: existe, se encuentra, y no compite. Baja de
+     opacidad hasta que se la busca con el mouse. */
+  .reiniciar-discreto {
+    opacity: 0.62;
+    font-size: 10.8px;
+  }
+  .reiniciar-discreto:hover,
+  .reiniciar-discreto:focus-visible {
+    opacity: 1;
+  }
   .grabando {
     display: flex;
     align-items: center;
