@@ -1,5 +1,5 @@
 <script>
-  import { untrack } from 'svelte';
+  import { untrack, onDestroy } from 'svelte';
   import { invalidate, goto } from '$app/navigation';
   import { enhance } from '$app/forms';
   import Pill from '$lib/v2/components/Pill.svelte';
@@ -15,6 +15,10 @@
   import DocumentationPanel from '$lib/conversaciones/context/DocumentationPanel.svelte';
   import MessageThread from '$lib/conversaciones/messages/MessageThread.svelte';
   import { diaDe, etiquetaDia } from '$lib/conversaciones/formato.js';
+  import {
+    sesionDeGrabacion,
+    soltarRecursosDelCompositor
+  } from '$lib/conversaciones/grabacion.js';
   import {
     TriangleAlert,
     ChevronDown,
@@ -610,83 +614,38 @@
   let grabando = $state(false);
   let grabPausada = $state(false);
   let segundos = $state(0);
-  /** @type {MediaRecorder | null} */
-  let grabador = null;
-  /** @type {any} */
-  let cronometro = null;
 
-  /** El formato que graba el navegador tiene que ser uno de los que WhatsApp
-      acepta. Chrome y Firefox dan 'audio/webm' por defecto, que NO está en la
-      lista de Meta -- ogg/opus sí, y es el mismo códec. */
-  function formatoDeGrabacion() {
-    const candidatos = ['audio/ogg;codecs=opus', 'audio/mp4', 'audio/mpeg'];
-    return candidatos.find((m) => window.MediaRecorder?.isTypeSupported?.(m)) ?? '';
-  }
+  // El micrófono, el MediaRecorder y el cronómetro viven en `grabacion.js`
+  // (D29). Esta página sigue siendo la dueña -- crea la sesión, refleja su
+  // estado y la suelta al desmontar -- pero el recurso tiene un solo camino de
+  // liberación y se puede probar sin montar un componente.
+  const voz = sesionDeGrabacion({
+    alArchivo: (f) => tomarArchivo(f),
+    alFallar: (m) => (error = m),
+    alCambiar: ({ grabando: g, pausada }) => {
+      grabando = g;
+      grabPausada = pausada;
+    },
+    alSegundo: (s) => (segundos = s)
+  });
 
-  async function grabar() {
+  function grabar() {
     if (bloqueadoPorIA) return;
-    const formato = formatoDeGrabacion();
-    if (!formato) {
-      error =
-        'Este navegador no graba en un formato que WhatsApp acepte. Podés adjuntar un audio ya grabado.';
-      return;
-    }
-    try {
-      const flujo = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const trozos = /** @type {Blob[]} */ ([]);
-      grabador = new MediaRecorder(flujo, { mimeType: formato });
-      grabador.ondataavailable = (ev) => ev.data.size && trozos.push(ev.data);
-      grabador.onstop = () => {
-        // El micrófono se suelta SIEMPRE: sin esto el navegador deja el
-        // indicador de grabación encendido hasta cerrar la pestaña.
-        flujo.getTracks().forEach((t) => t.stop());
-        clearInterval(cronometro);
-        grabando = false;
-        grabPausada = false;
-        if (!trozos.length) return;
-        const base = formato.split(';')[0];
-        tomarArchivo(
-          new File([new Blob(trozos, { type: base })], `nota-de-voz.${base.split('/')[1]}`, {
-            type: base
-          })
-        );
-      };
-      grabador.start();
-      grabando = true;
-      segundos = 0;
-      error = '';
-      cronometro = setInterval(() => {
-        if (!grabPausada) segundos += 1;
-      }, 1000);
-    } catch {
-      error = 'No se pudo usar el micrófono. Revisá el permiso del navegador.';
-    }
+    voz.iniciar();
   }
 
-  function pausarGrabacion() {
-    if (!grabador) return;
-    if (grabPausada) {
-      grabador.resume();
-      grabPausada = false;
-    } else {
-      grabador.pause();
-      grabPausada = true;
-    }
-  }
-
+  const pausarGrabacion = () => voz.pausar();
   /** Parar deja la grabación como adjunto pendiente de confirmación. */
-  const pararGrabacion = () => grabador?.stop();
-
+  const pararGrabacion = () => voz.parar();
   /** Cancelar la tira: el onstop no llega a armar el adjunto. */
-  function cancelarGrabacion() {
-    if (!grabador) return;
-    grabador.onstop = null;
-    grabador.stream?.getTracks().forEach((t) => t.stop());
-    grabador.stop();
-    clearInterval(cronometro);
-    grabando = false;
-    grabPausada = false;
-  }
+  const cancelarGrabacion = () => voz.cancelar();
+
+  // D29. La conversación se REMONTA entera al cambiar de chat (el {#key
+  // abierta} de +layout.svelte), y hasta acá no había un solo onDestroy: el
+  // micrófono podía quedar abierto, el cronómetro vivo y el object URL del
+  // adjunto sin revocar. Irse de una conversación no es terminar de grabar, así
+  // que esto suelta sin armar ningún adjunto.
+  onDestroy(() => soltarRecursosDelCompositor({ sesion: voz, adjunto }));
 
   const reloj = (/** @type {number} */ s) =>
     `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
