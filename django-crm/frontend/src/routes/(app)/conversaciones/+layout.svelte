@@ -38,6 +38,7 @@
   import { shortAge } from '$lib/v2/format.js';
   import { MessagesSquare, TriangleAlert, Search, X, Phone, User } from '@lucide/svelte';
   import { pendiente, resuelta, enAtencion } from '$lib/conversaciones/estado.js';
+  import { ordenar, horasEsperando } from '$lib/conversaciones/cola/ordenamiento.js';
 
   /** @type {{ data: any, children: import('svelte').Snippet }} */
   let { data, children } = $props();
@@ -148,19 +149,12 @@
   );
 
   // --- por donde empezar ----------------------------------------------------
-  // Con decenas esperando, "la mas nueva primero" ordena al reves de lo que
-  // hace falta: quien escalo hace tres dias y no volvio a escribir se hunde
-  // al fondo, y es justo el que lleva tres dias esperando.
-  //
-  // El orden es: primero las que esperan a alguien, y entre ellas la de
-  // espera mas larga arriba. El resto queda como estaba, por ultima
-  // actividad. No hay un puntaje ponderado a proposito -- un numero que
-  // mezcla antiguedad, insistencia y motivo no se puede explicar, y quien
-  // atiende tiene que poder entender por que una fila esta donde esta.
-  const espera = (/** @type {any} */ c) =>
-    new Date(c.escalada_en ?? c.actualizado_en).getTime();
-
-  const HORA = 3600 * 1000;
+  // El orden vive en $lib/conversaciones/cola/ordenamiento.js -- las MISMAS
+  // funciones que se importan acá, no una copia. De ahí depende D18 (que una
+  // escalada nueva sin dueño no quede enterrada detrás de las viejas) y es lo
+  // único de esta pantalla que puede romperse sin que se note mirándola: una
+  // lista mal ordenada se ve perfecta. El harness no compila .svelte, así que
+  // sin extraerlas no había forma de ponerles una guarda.
 
   // Cada cuanto se recalcula "activa". El sondeo de la lista ya corre cada 8s
   // e invalida el load, asi que la posicion se reordena sola; esto es solo
@@ -178,10 +172,6 @@
     !!c.ultimo_mensaje_en &&
     ahora - new Date(c.ultimo_mensaje_en).getTime() < MINUTOS_ACTIVA * 60 * 1000;
 
-  /** Horas que lleva esperando. 0 si no espera a nadie. */
-  const horasEsperando = (/** @type {any} */ c) =>
-    pendiente(c) ? Math.max(0, (Date.now() - espera(c)) / HORA) : 0;
-
   // Tres tramos, no un gradiente: el ojo no distingue 61h de 58h, y si
   // distingue "hoy" de "hace mas de una semana". Los cortes son a un dia y a
   // una semana porque es como habla la gente de esto, no por un umbral
@@ -192,61 +182,6 @@
     if (h >= 24) return 'viejo';
     return 'fresco';
   };
-
-  // Los motivos donde hay una persona molesta del otro lado pesan mas que un
-  // tramite. No es un puntaje afinado -- es un desempate, y por eso son dos
-  // valores y no cinco: cualquier cosa mas fina seria inventada.
-  const MOTIVO_URGENTE = new Set(['frustracion_detectada', 'tres_fallos_seguidos']);
-
-  /* B3.5 (D18): "Recomendado" ya NO se calcula aca. El motor manda la
-     proyeccion de cada conversacion (nucleo/relevo/proyeccion.py): en que
-     banda cae, desde cuando espera y por que, todo derivado de la verdad
-     durable. Esta pantalla solo ordena por (banda, esperando_desde) y muestra
-     el motivo en palabras.
-
-     El puntaje que vivia aca ordenaba por antiguedad, y por eso una escalada
-     nueva sin dueno entraba detras de decenas de conversaciones viejas: es
-     D18. Se conserva 'peso' solo como respaldo para una respuesta del motor
-     sin proyeccion (un motor viejo durante un despliegue). */
-  const bandaDe = (/** @type {any} */ c) => (typeof c.banda === 'number' ? c.banda : 99);
-  const esperaDesde = (/** @type {any} */ c) =>
-    c.esperando_desde ? new Date(c.esperando_desde).getTime() : null;
-
-  /** El orden de la cola, igual que proyeccion.orden_de_cola en el motor. */
-  function porBanda(/** @type {any} */ a, /** @type {any} */ b) {
-    if (bandaDe(a) !== bandaDe(b)) return bandaDe(a) - bandaDe(b);
-    const ea = esperaDesde(a);
-    const eb = esperaDesde(b);
-    if (ea === null && eb === null) return 0;
-    if (ea === null) return 1;          // sin fecha: al final de su banda
-    if (eb === null) return -1;
-    return ea - eb;                     // el que mas espera, primero
-  }
-
-  /** Respaldo si el motor no manda proyeccion. Ver el comentario de arriba. */
-  function peso(/** @type {any} */ c) {
-    if (!pendiente(c)) return -1;
-    // La espera es la base y manda: es lo que de verdad mide el maltrato al
-    // cliente. Se cuenta en dias para que las otras dos señales puedan
-    // moverla sin taparla del todo.
-    let p = horasEsperando(c) / 24;
-    // Volver a escribir mientras espera es alguien golpeando la puerta, y
-    // tiene que ganarle a la antiguedad: quien escribio hace dos minutos esta
-    // ahi AHORA, y quien lleva 26 dias ya se acostumbro a esperar.
-    //
-    // 30 dias equivalentes, no 3: con el peso anterior una insistencia de hoy
-    // perdia contra cualquier caso de mas de tres dias, y hay 34 con mas de
-    // una semana. En la practica no subia a nadie.
-    //
-    // Ojo con lo que esto NO arregla: hay CERO mensajes posteriores a una
-    // escalada en toda la base, y no porque nadie insista -- las
-    // conversaciones se cierran a las 24 h de inactividad, asi que quien
-    // vuelve a los dos dias abre una conversacion NUEVA y su insistencia no
-    // se cuenta como tal. Esta señal solo ve al que insiste dentro del dia.
-    if (c.mensajes_tras_escalar > 0) p += 30 + Math.min(c.mensajes_tras_escalar, 10);
-    if (MOTIVO_URGENTE.has(c.motivo_escalamiento)) p += 2;
-    return p;
-  }
 
   const ORDENES = [
     { id: 'actividad', label: 'Actividad reciente' },
@@ -280,41 +215,6 @@
     filtro = id;
     ordenElegido = false;
     orden = ORDEN_POR_PESTANA[id] ?? 'actividad';
-  }
-
-  /** La hora del ULTIMO MENSAJE, de quien sea -- cliente, asistente o
-      colaborador. No 'actualizado_en': esa la mueve cualquier cosa que toque
-      la fila, incluido cerrarla, y una conversacion cerrada hoy con su ultimo
-      mensaje de hace 26 dias quedaba arriba de una con charla de verdad ayer. */
-  const actividad = (/** @type {any} */ c) =>
-    new Date(c.ultimo_mensaje_en ?? c.actualizado_en).getTime();
-
-  function ordenar(/** @type {any[]} */ lista) {
-    const recientes = (/** @type {any} */ a, /** @type {any} */ b) =>
-      new Date(b.actualizado_en).getTime() - new Date(a.actualizado_en).getTime();
-
-    // Actividad: SIN bloque de prioridad delante. Es lo que hace que un
-    // mensaje que acaba de entrar aparezca primero aunque el bot lo este
-    // llevando solo -- que es justo para lo que sirve esta vista.
-    if (orden === 'actividad') {
-      return [...lista].sort((a, b) => actividad(b) - actividad(a));
-    }
-    if (orden === 'creacion') return [...lista].sort(recientes);
-
-    return [...lista].sort((a, b) => {
-      // En los dos ordenes que priorizan, lo que espera va primero: una
-      // conversacion resuelta no compite por el lugar de arriba.
-      const pa = pendiente(a) ? 0 : 1;
-      const pb = pendiente(b) ? 0 : 1;
-      if (pa !== pb) return pa - pb;
-      if (pa === 1) return recientes(a, b);
-      // 'Mayor espera' es a proposito el orden CRUDO, sin ponderar: existe
-      // para poder comprobar el otro. Si "Recomendado" pone algo arriba que
-      // no lleva la espera mas larga, se puede ver por que cambiando aca.
-      if (orden === 'espera') return espera(a) - espera(b);
-      if (typeof a.banda === 'number' || typeof b.banda === 'number') return porBanda(a, b);
-      return peso(b) - peso(a);
-    });
   }
 
   // Los motivos que de verdad hay en la bandeja, no una lista fija: los
@@ -392,7 +292,7 @@
           .some((campo) => String(campo).toLowerCase().includes(q))
       );
     }
-    return ordenar(lista);
+    return ordenar(lista, orden);
   });
 </script>
 
