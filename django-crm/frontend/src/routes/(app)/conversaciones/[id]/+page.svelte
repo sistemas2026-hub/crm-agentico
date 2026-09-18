@@ -6,6 +6,8 @@
   import Avatar from '$lib/v2/components/Avatar.svelte';
   import { relativeTime } from '$lib/v2/format.js';
   import ConversationHeader from '$lib/conversaciones/conversation/ConversationHeader.svelte';
+  import EscalationSummary from '$lib/conversaciones/conversation/EscalationSummary.svelte';
+  import HandoffControls from '$lib/conversaciones/conversation/HandoffControls.svelte';
   import MessageThread from '$lib/conversaciones/messages/MessageThread.svelte';
   import { diaDe, etiquetaDia } from '$lib/conversaciones/formato.js';
   import {
@@ -1429,147 +1431,16 @@
     <p class="aviso">{errorReiniciar}</p>
   {/if}
 
-  {#if conversacion.escalada_a_humano}
-    <p class="aviso">
-      <TriangleAlert size={14} />
-      <!-- "IA pausada" seria falso y no es un matiz de redaccion: el asistente
-           SIGUE leyendo y procesando cada mensaje mientras espera -- de eso
-           depende que un "listo, gracias" del cliente cierre el caso solo.
-           Lo que dejo de hacer es contestar. -->
-      <strong>
-        {#if iaEnPausa}
-          Escalada · IA no responde
-        {:else}
-          <!-- Escalo, pero no hay a quien esperar (quedo agendada, o el CRM no
-               tomo el caso): el asistente SIGUE contestando. Decir "IA no
-               responde" aca seria falso. -->
-          Escalada · el asistente sigue respondiendo
-        {/if}
-      </strong>
-      {#if conversacion.motivo_escalamiento}
-        <!-- El separador no es adorno: sin el, "IA no responde El cliente
-             reporto una falla..." se lee como una sola frase rota. -->
-        <span class="aviso-motivo">· {motivoLabel(conversacion.motivo_escalamiento)}</span>
-      {/if}
-      <!-- Estado real y aparte: el CRM es la fuente de verdad de cuando el
-           asistente puede volver a contestar, y no es lo mismo que el estado
-           de la conversacion. -->
-      <!-- Estado, no enlace: para ir al ticket ya esta "Ver ticket completo"
-           en la columna derecha, y dos caminos al mismo lugar en la misma
-           pantalla es una eleccion que nadie pidio hacer. -->
-      {#if caso?.id}
-        <span class="aviso-caso">Caso abierto en CRM</span>
-      {/if}
-      <!-- Tomar el caso, y soltarlo. Son el mismo boton porque son el mismo
-           gesto en dos sentidos, y porque tener dos ("Atender" / "Soltar")
-           obligaria a mirar cual esta activo para saber quien lo tiene. -->
-      {#if escalada && !atendida && conversacion.estado !== 'cerrada'}
-        {#if esMia}
-          <span class="aviso-tomada">
-            <CircleCheck size={13} /> Asignada a mí
-          </span>
-          <button
-            type="button"
-            class="v2-btn v2-btn-sm aviso-atender"
-            title="Devuelve el caso a «Por atender» para que lo tome otra persona. Sigue en manos del equipo, no vuelve a la IA."
-            onclick={marcarAtendida}
-            disabled={marcandoAtendida}
-            aria-busy={marcandoAtendida}
-          >
-            {marcandoAtendida ? 'Soltando…' : 'Soltar'}
-          </button>
-        {:else if asignadaA}
-          <!-- De otra persona: no se ofrece soltar ni tomar. Pasarla es
-               reasignar, y eso es de un administrador. -->
-          <span class="aviso-tomada" title="La tiene {asignadaA}">
-            <CircleCheck size={13} /> En atención: {asignadaA}
-          </span>
-        {:else}
-          <button
-            type="button"
-            class="v2-btn v2-btn-ink aviso-atender"
-            title="Te hacés cargo: pasa a «En atención» y sale de «Por atender». No le envía nada al cliente, y se puede soltar."
-            onclick={marcarAtendida}
-            disabled={marcandoAtendida}
-            aria-busy={marcandoAtendida}
-          >
-            <CircleCheck size={13} />
-            {marcandoAtendida ? 'Tomando…' : 'Tomar'}
-          </button>
-        {/if}
-        {#if esAdmin && gobernada && data.operadores?.length}
-          <button
-            type="button"
-            class="v2-btn v2-btn-sm v2-btn-quiet aviso-atender"
-            onclick={() => { reasignando = !reasignando; errorReasignar = ''; }}
-            aria-expanded={reasignando}
-          >
-            Reasignar
-          </button>
-        {/if}
-      {:else if atendida && conversacion.estado !== 'cerrada'}
-        <span class="aviso-atendida"><CircleCheck size={13} /> Atendida</span>
-      {/if}
-      <!-- Cerrar el caso. Va junto a "Atender" porque es la otra mitad del
-           mismo momento -- se toma un caso y despues se termina-- pero en
-           tono secundario: "Atender" es lo que se hace al entrar, esto es lo
-           que se hace al salir, y una sola vez. -->
-      {#if conversacion.estado !== 'cerrada'}
-        <!-- La ayuda va en un popover propio y no en el 'title' del navegador:
-             ese tarda casi un segundo en aparecer, no sale con el teclado, y
-             es justo el contexto que hace que alguien se anime a cerrar un
-             caso que resolvio por telefono. -->
-        <span class="con-ayuda">
-          <button
-            type="button"
-            class="v2-btn v2-btn-sm v2-btn-quiet aviso-resolver"
-            onclick={resolver}
-            disabled={resolviendo}
-            aria-busy={resolviendo}
-            aria-describedby="ayuda-resolver"
-          >
-            {resolviendo ? 'Cerrando…' : 'Marcar como resuelta'}
-          </button>
-          <span class="ayuda" id="ayuda-resolver" role="tooltip">
-            Usá esto si el caso se resolvió por teléfono, presencialmente o por
-            otro canal. Cierra la conversación; el próximo mensaje del cliente
-            abre una nueva.
-          </span>
-        </span>
-      {:else}
-        <span class="aviso-atendida"><CircleCheck size={13} /> Resuelta</span>
-      {/if}
-      {#if errorAtender}<span class="aviso-mal">{errorAtender}</span>{/if}
-      {#if errorResolver}<span class="aviso-mal">{errorResolver}</span>{/if}
-    </p>
-    {#if reasignando && esAdmin && gobernada}
-      <form class="reasignar" onsubmit={(e) => { e.preventDefault(); reasignar(); }}>
-        <label>
-          <span>Pasar a</span>
-          <select bind:value={destinoReasignar} required>
-            <option value="" disabled>Elegí a quién…</option>
-            {#each data.operadores as o (o.usuario_id)}
-              <option value={o.usuario_id}>{o.nombre}</option>
-            {/each}
-          </select>
-        </label>
-        <label>
-          <span>Motivo (obligatorio)</span>
-          <textarea bind:value={motivoReasignar} rows="2" maxlength="500" required></textarea>
-        </label>
-        <div class="reasignar-acciones">
-          <button type="submit" class="v2-btn v2-btn-sm v2-btn-ink" disabled={guardandoReasignar}
-                  aria-busy={guardandoReasignar}>
-            {guardandoReasignar ? 'Reasignando…' : 'Confirmar reasignación'}
-          </button>
-          <button type="button" class="v2-btn v2-btn-sm v2-btn-quiet" onclick={() => (reasignando = false)}>
-            Cancelar
-          </button>
-          {#if errorReasignar}<span class="aviso-mal">{errorReasignar}</span>{/if}
-        </div>
-      </form>
-    {/if}
-  {/if}
+  <HandoffControls
+    {conversacion}
+    {caso}
+    operadores={data.operadores ?? []}
+    {iaEnPausa} {escalada} {atendida} {esMia} {asignadaA} {esAdmin} {gobernada}
+    {marcandoAtendida} {errorAtender} onAtender={marcarAtendida}
+    {resolviendo} {errorResolver} onResolver={resolver}
+    bind:reasignando bind:destinoReasignar bind:motivoReasignar
+    {guardandoReasignar} {errorReasignar} onReasignar={reasignar}
+  />
 
   <!-- Tomar un caso escalado empieza siempre igual: leer el hilo entero para
        reconstruir que queria el cliente, que alcanzo a hacer el asistente,
@@ -1586,60 +1457,7 @@
        quedan vacias igual, y por eso el estado vacio tiene que seguir
        diciendo algo util en vez de un renglon en blanco. -->
   {#if hayResumenDelCaso}
-    <dl class="brief">
-      {#each resumenEscalada as fila (fila.rotulo)}
-        <div
-          class="brief-fila"
-          class:brief-sin-dato={!fila.texto}
-          class:brief-primero={fila.orden === 0}
-          style="order:{fila.orden}"
-        >
-          <dt>{fila.rotulo}</dt>
-          <dd>
-            {#if fila.texto}
-              {fila.texto}
-              {#if fila.nota}<span class="brief-nota">— {fila.nota}</span>{/if}
-            {:else if fila.alerta}
-              <span class="brief-alerta"><TriangleAlert size={12} /> {fila.vacio}</span>
-            {:else}
-              <span class="brief-nada">{fila.vacio}</span>
-            {/if}
-          </dd>
-        </div>
-      {/each}
-
-      <!-- Qué hizo la IA. Va después de "qué quiere" porque el orden en que
-           alguien entiende un caso es ese: primero qué pedían, después qué se
-           intentó. Y antes de "qué falta", que es lo que hay que hacer. -->
-      <div class="brief-fila" style="order:1" class:brief-sin-dato={!hizoLaIA.length}>
-        <dt>Qué hizo la IA</dt>
-        <dd>
-          {#if hizoLaIA.length === 0}
-            <!-- No es lo mismo "no sabemos" que "no hizo nada". Esto ultimo se
-                 sabe con certeza --la traza esta vacia-- y le dice a quien
-                 toma el caso que arranca desde cero, sin ninguna medicion
-                 hecha. Ocultarlo perderia esa informacion. -->
-            <span class="brief-nada">No consultó ningún sistema antes de derivar.</span>
-          {:else}
-            <ul class="hizo">
-              {#each hizoLaIA as h (h.texto)}
-                <li class="hizo-{h.estado}">
-                  {#if h.estado === 'ok'}
-                    <CircleCheck size={13} style="color:var(--v2-moss);flex:none" />
-                  {:else if h.estado === 'bloqueo'}
-                    <ShieldCheck size={13} style="color:var(--v2-clay);flex:none" />
-                  {:else}
-                    <CircleX size={13} style="color:var(--v2-rust);flex:none" />
-                  {/if}
-                  <span>{h.texto}</span>
-                  {#if h.detalle}<span class="v2-muted">— {h.detalle}</span>{/if}
-                </li>
-              {/each}
-            </ul>
-          {/if}
-        </dd>
-      </div>
-    </dl>
+    <EscalationSummary {resumenEscalada} {hizoLaIA} />
   {/if}
 
   <MessageThread
@@ -2388,24 +2206,6 @@
     background: color-mix(in srgb, var(--v2-rust) 6%, transparent);
     border-bottom: 1px solid var(--v2-line);
   }
-  .aviso-atender {
-    margin-left: auto;
-    flex: none;
-  }
-  /* Sin margin-left:auto a proposito: el hermano de la izquierda ya empuja al
-     grupo a la derecha, y un segundo 'auto' los separaria a los extremos. */
-  .aviso-resolver {
-    flex: none;
-  }
-  .aviso-atendida {
-    margin-left: auto;
-    flex: none;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    color: var(--v2-moss, #15803d);
-    font-weight: 600;
-  }
   .aviso-mal {
     flex: none;
     color: var(--v2-rust);
@@ -2682,118 +2482,6 @@
   .proceso-vacio {
     margin: 0;
     font-size: 12px;
-    color: var(--v2-slate);
-  }
-
-  /* ── qué pasó acá ───────────────────────────────────────────────────────
-     Rótulo a la izquierda, texto a la derecha: se leen los cuatro rótulos en
-     vertical de un vistazo y se entra al que interesa. Con el texto debajo
-     del rótulo habría que recorrer ocho renglones para lo mismo. */
-  .brief {
-    margin: 0 0 4px;
-    padding: 10px 14px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    background: var(--v2-ember-soft);
-    border-radius: 7px;
-    font-size: 12.5px;
-    line-height: 1.45;
-  }
-  .brief-fila {
-    display: grid;
-    grid-template-columns: 8.5rem 1fr;
-    gap: 10px;
-    align-items: baseline;
-  }
-  .brief dt {
-    color: var(--v2-slate);
-    font-size: 11px;
-    font-weight: 650;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-  .brief dd {
-    margin: 0;
-    color: var(--v2-ink);
-  }
-  /* El bloque era una sola masa rosa donde promesa, acciones y estado se
-     fundian. El fondo de alerta se queda arriba, en el aviso de escalada, que
-     es lo unico que de verdad alerta; el resumen pasa a tarjeta neutra con los
-     renglones separados por una linea, para que el ojo encuentre cada
-     pregunta sin leerlas todas. */
-  .brief {
-    background: var(--v2-card);
-    border: 1px solid var(--v2-line);
-  }
-  /* El orden en que alguien entiende un caso: que pide, que se intento, que
-     se le dijo, que queda. 'Que hizo la IA' sale de un bloque aparte --viene
-     de la traza, no de los textos del modelo-- asi que cada renglon lleva su
-     posicion como dato y no por el lugar que ocupa en el marcado. */
-  .brief {
-    display: flex;
-    flex-direction: column;
-  }
-
-  /* Con 'order' el orden visual no es el del DOM, asi que un selector de
-     hermano adyacente pondria la linea entre los renglones equivocados. Se
-     usa gap y un borde en todos menos el primero VISUAL, marcado por dato. */
-  .brief {
-    gap: 7px;
-  }
-  .brief-fila:not(.brief-primero) {
-    border-top: 1px solid var(--v2-line-soft);
-    padding-top: 7px;
-  }
-  /* Un renglon sin dato no puede pesar lo mismo que uno con dato: se ve, para
-     que las cuatro preguntas esten siempre, pero no compite. */
-  .brief-nada {
-    color: var(--v2-slate);
-    font-style: italic;
-  }
-  .brief-alerta {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    color: var(--v2-clay);
-    font-weight: 600;
-  }
-  .brief-nota {
-    color: var(--v2-slate);
-    font-size: 11px;
-  }
-
-  .hizo {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-  }
-  .hizo li {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  /* Lo que se freno o fallo se lee distinto de lo que corrio bien, y no solo
-     por el color: tambien por el peso y por el icono. */
-  .hizo-bloqueo span:first-of-type {
-    color: var(--v2-clay);
-    font-weight: 600;
-  }
-  .hizo-error span:first-of-type {
-    color: var(--v2-rust);
-    font-weight: 600;
-  }
-
-  /* El aviso de escalada: tres piezas con jerarquia distinta -- que paso
-     (fuerte), por que (medio), y el estado del CRM (chip aparte). */
-  /* El recorte con puntos suspensivos lo dejaba en "sin datos pa..." -- que no
-     dice nada y es peor que partirse en dos renglones. Ahora la FILA envuelve:
-     el motivo se lleva la linea entera si hace falta, y los botones bajan con
-     el, en vez de que el motivo desaparezca para que quepan. */
-  .aviso-motivo {
     color: var(--v2-slate);
   }
   /* ── nota interna ───────────────────────────────────────────────────── */
@@ -3162,106 +2850,6 @@
   /* Que sale directo al cliente no puede leerse igual que "Enter envía". */
   .nota-directo {
     color: var(--v2-ember);
-  }
-
-  /* Ayuda que aparece al pasar el mouse O al enfocar con el teclado. */
-  .con-ayuda {
-    position: relative;
-    display: inline-flex;
-  }
-  .ayuda {
-    position: absolute;
-    top: calc(100% + 6px);
-    right: 0;
-    z-index: 20;
-    width: 250px;
-    padding: 8px 10px;
-    font-size: 11.5px;
-    font-weight: 400;
-    line-height: 1.4;
-    color: var(--v2-ink);
-    background: var(--v2-card);
-    border: 1px solid var(--v2-line);
-    border-radius: 8px;
-    box-shadow: 0 6px 18px rgb(0 0 0 / 12%);
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.12s;
-  }
-  .con-ayuda:hover .ayuda,
-  .con-ayuda:focus-within .ayuda {
-    opacity: 1;
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .ayuda {
-      transition: none;
-    }
-  }
-
-  /* El secundario de verdad: se lee, pero no compite con "Atender". */
-  .aviso-resolver {
-    border-color: var(--v2-line);
-  }
-  .aviso-resolver:hover {
-    border-color: var(--v2-slate);
-    background: var(--v2-line-soft);
-  }
-
-  .reasignar {
-    display: grid;
-    gap: 8px;
-    max-width: 100%;
-    margin: 6px 0 10px;
-    padding: 10px 12px;
-    border: 1px solid var(--v2-line, #ddd);
-    border-radius: 8px;
-  }
-
-  .reasignar label {
-    display: grid;
-    gap: 4px;
-    font-size: 12px;
-  }
-
-  .reasignar select,
-  .reasignar textarea {
-    width: 100%;
-    font: inherit;
-  }
-
-  .reasignar-acciones {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .aviso-tomada {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    font-size: 11.5px;
-    font-weight: 650;
-    color: var(--v2-moss);
-    white-space: nowrap;
-  }
-
-  .aviso-caso {
-    font-size: 11px;
-    font-weight: 650;
-    padding: 1px 8px;
-    border-radius: 999px;
-    color: var(--v2-slate);
-    border: 1px solid var(--v2-line);
-    white-space: nowrap;
-  }
-  @media (max-width: 640px) {
-    /* En pantalla chica el rótulo de 8.5rem deja al texto en una columna
-       inservible: pasan a apilarse. */
-    .brief-fila {
-      grid-template-columns: 1fr;
-      gap: 1px;
-    }
   }
 
   /* Diagnostico: tres lineas, no tres tarjetas. Es una lectura de dos
