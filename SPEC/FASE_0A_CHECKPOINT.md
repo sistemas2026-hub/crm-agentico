@@ -64,7 +64,7 @@ routes/(app)/conversaciones/[id]/+page.svelte   1665   estado · red · lifecycl
 
 lib/conversaciones/
   formato.js                                       72   helpers puros
-  grabacion.js                                    213   el micrófono (D29, no es un componente)
+  grabacion.js                                    212   el micrófono (D29, no es un componente)
   messages/MessageThread.svelte                   395   + el scroll del hilo
   conversation/ConversationHeader.svelte          170
   conversation/EscalationSummary.svelte           180
