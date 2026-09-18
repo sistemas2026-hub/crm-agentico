@@ -5,22 +5,18 @@
   import Pill from '$lib/v2/components/Pill.svelte';
   import Avatar from '$lib/v2/components/Avatar.svelte';
   import { relativeTime } from '$lib/v2/format.js';
+  import ConversationHeader from '$lib/conversaciones/conversation/ConversationHeader.svelte';
   import MessageThread from '$lib/conversaciones/messages/MessageThread.svelte';
   import { diaDe, etiquetaDia } from '$lib/conversaciones/formato.js';
   import {
     TriangleAlert,
     ChevronDown,
     ArrowRight,
-    ArrowLeft,
     CircleCheck,
     CircleX,
     Send,
-    Phone,
-    User,
-    PanelRight,
     X,
     Paperclip,
-    RotateCcw,
     ShieldCheck,
     Smile,
     Mic,
@@ -918,26 +914,11 @@
     }
   }
 
-  const CANAL_LABEL = { whatsapp: 'WhatsApp', 'whatsapp-simulado': 'Simulador' };
-  const canalLabel = (c) => CANAL_LABEL[c] ?? c;
-  const canalTone = (c) => (c === 'whatsapp' ? 'moss' : 'slate');
-  const estadoTone = (e) => (e === 'abierta' ? 'clay' : 'slate');
 
   const ETIQUETA_TONE = { soporte_tecnico: 'clay', facturacion: 'moss', comercial: 'slate', queja: 'rust' };
   const etiquetaTone = (e) => ETIQUETA_TONE[e] ?? 'ink';
   const etiquetaLabel = (e) => (e ? e.replaceAll('_', ' ') : '');
 
-  // Mismo criterio que la lista del layout: un telefono o un uuid no dan
-  // iniciales, y diez digitos seguidos no se leen.
-  const esTelefono = (/** @type {string} */ v) => !!v && /^\+?\d[\d\s-]{5,}$/.test(v);
-  const esUuid = (/** @type {string} */ v) =>
-    !!v && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
-  function quien(/** @type {string} */ v) {
-    if (!v) return 'Sin identificar';
-    const d = v.replace(/\D/g, '');
-    if (esTelefono(v) && d.length === 10) return `${d.slice(0, 3)} ${d.slice(3, 6)} ${d.slice(6)}`;
-    return v;
-  }
 
   let asignadoA = $state(caso?.assignee_id ?? '');
   let ownerActual = $derived(owners.find((o) => o.id === asignadoA) ?? null);
@@ -1436,54 +1417,13 @@
 
 <!-- ── CENTRO: la conversación ────────────────────────────────────────────── -->
 <section class="centro">
-  <header class="centro-top">
-    <a class="volver" href="/conversaciones" aria-label="Volver a la lista">
-      <ArrowLeft size={16} />
-    </a>
-
-    {#if conversacion.nombre_cliente}
-      <Avatar name={conversacion.nombre_cliente} size={32} />
-    {:else if esTelefono(conversacion.usuario_externo)}
-      <span class="ident" aria-hidden="true"><Phone size={15} /></span>
-    {:else if !conversacion.usuario_externo || esUuid(conversacion.usuario_externo)}
-      <span class="ident" aria-hidden="true"><User size={15} /></span>
-    {:else}
-      <Avatar name={conversacion.usuario_externo} size={32} />
-    {/if}
-
-    <div class="centro-quien">
-      <h2>{conversacion.nombre_cliente || quien(conversacion.usuario_externo)}</h2>
-      <div class="centro-meta">
-        <Pill tone={canalTone(conversacion.canal)}>{canalLabel(conversacion.canal)}</Pill>
-        <Pill tone={estadoTone(conversacion.estado)}>{conversacion.estado}</Pill>
-      </div>
-    </div>
-
-    <!-- Solo aparece cuando la columna de contexto no cabe al lado. Ahí se
-         abre como panel, no se pierde: el ticket y la documentación siguen a
-         un clic. -->
-    <button
-      type="button"
-      class="v2-btn v2-btn-sm contexto-toggle"
-      onclick={() => (contextoAbierto = !contextoAbierto)}
-      aria-expanded={contextoAbierto}
-    >
-      <PanelRight size={14} /> Contexto
-    </button>
-
-    <!-- SOLO PARA PRUEBAS -- ver reiniciarConversacion() mas arriba. -->
-    <button
-      type="button"
-      class="v2-btn v2-btn-sm v2-btn-danger reiniciar-discreto"
-      onclick={reiniciarConversacion}
-      disabled={reiniciando}
-      aria-busy={reiniciando}
-      title="Borra esta conversación para volver a probar desde cero (solo entrenamiento)"
-    >
-      <RotateCcw size={14} />
-      {reiniciando ? 'Borrando…' : 'Reiniciar (prueba)'}
-    </button>
-  </header>
+  <ConversationHeader
+    {conversacion}
+    {contextoAbierto}
+    {reiniciando}
+    onAlternarContexto={() => (contextoAbierto = !contextoAbierto)}
+    onReiniciar={reiniciarConversacion}
+  />
 
   {#if errorReiniciar}
     <p class="aviso">{errorReiniciar}</p>
@@ -2434,47 +2374,6 @@
     display: flex;
     flex-direction: column;
   }
-  .centro-top {
-    flex: none;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 10px 16px;
-    border-bottom: 1px solid var(--v2-line);
-  }
-  .centro-quien {
-    min-width: 0;
-  }
-  .centro-top h2 {
-    margin: 0;
-    font-size: 14.5px;
-    font-weight: 640;
-    letter-spacing: -0.01em;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .centro-meta {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-top: 3px;
-  }
-  .ident {
-    flex: none;
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    display: grid;
-    place-items: center;
-    background: var(--v2-line-soft);
-    color: var(--v2-slate);
-  }
-  /* Volver sólo tiene sentido cuando la lista no está al lado. */
-  .volver {
-    display: none;
-    color: var(--v2-slate);
-  }
   .aviso {
     flex-wrap: wrap;
     row-gap: 6px;
@@ -2544,8 +2443,8 @@
     border-left: 1px solid var(--v2-line);
   }
   /* Por encima de 1240px la columna está siempre a la vista: ni botón para
-     abrirla, ni botón para cerrarla, ni fondo que interceptar. */
-  .contexto-toggle,
+     cerrarla, ni fondo que interceptar. El del encabezado que la abre vive
+     con el encabezado. */
   .info-cerrar,
   .info-fondo {
     display: none;
@@ -3299,16 +3198,6 @@
     }
   }
 
-  /* Herramienta de prueba: existe, se encuentra, y no compite. Baja de
-     opacidad hasta que se la busca con el mouse. */
-  .reiniciar-discreto {
-    opacity: 0.62;
-    font-size: 10.8px;
-  }
-  .reiniciar-discreto:hover,
-  .reiniciar-discreto:focus-visible {
-    opacity: 1;
-  }
   /* El secundario de verdad: se lee, pero no compite con "Atender". */
   .aviso-resolver {
     border-color: var(--v2-line);
@@ -3566,11 +3455,6 @@
      estar fijo al lado y pasa a abrirse con el botón del encabezado -- no
      desaparece: el ticket y la documentación siguen estando a un clic. */
   @media (max-width: 1240px) {
-    .contexto-toggle {
-      display: inline-flex;
-      margin-left: auto;
-      flex: none;
-    }
     .info {
       display: none;
     }
@@ -3588,14 +3472,6 @@
     .info-cerrar {
       display: inline-flex;
       margin-bottom: 12px;
-    }
-  }
-  /* Y debajo de 1000px la lista deja de estar al lado (ver el layout), así que
-     hace falta una forma de volver. */
-  @media (max-width: 1000px) {
-    .volver {
-      display: grid;
-      place-items: center;
     }
   }
 
