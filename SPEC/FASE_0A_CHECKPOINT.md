@@ -33,6 +33,8 @@ aa96916  0A.3 — EscalationSummary + HandoffControls
 2cdcf44  checkpoint con 0A.4
 8ab8bb3  micro-fix: el Cancelar de la grabación recupera .reiniciar-discreto
 2ae5241  0A.5 — MessageComposer  ← cierra la Fase 0A
+521f128  checkpoint final de la Fase 0A
+450d4e4  D29 — el micrófono se suelta al salir de la conversación
 ```
 
 Nada de esto está pusheado.
@@ -62,6 +64,7 @@ routes/(app)/conversaciones/[id]/+page.svelte   1665   estado · red · lifecycl
 
 lib/conversaciones/
   formato.js                                       72   helpers puros
+  grabacion.js                                    213   el micrófono (D29, no es un componente)
   messages/MessageThread.svelte                   395   + el scroll del hilo
   conversation/ConversationHeader.svelte          170
   conversation/EscalationSummary.svelte           180
@@ -99,13 +102,13 @@ FASE 0A            ✅ CERRADA
 Lo que sigue, en este orden y no en otro:
 
 ```
-D29        ← pista funcional aislada, con regresión propia
-FASE 0B    ← componentizar la cola: +layout.svelte, ~1193 líneas
+D29        ✅ cerrado   450d4e4
+FASE 0B    ← el próximo: componentizar la cola, +layout.svelte, ~1193 líneas
 FASE 1     ← recién ahí, el rediseño visual con los tokens de Stitch
 ```
 
-**D29 va antes de 0B**: dejar el micrófono potencialmente abierto al abandonar una conversación pesa
-más que seguir componentizando la cola.
+**D29 fue antes de 0B**: dejar el micrófono potencialmente abierto al abandonar una conversación
+pesaba más que seguir componentizando la cola.
 
 ### La regla de autoridad, que vale para todo lo que queda
 
@@ -378,7 +381,7 @@ poder auditarse.
 ## D29 — los recursos del compositor no se liberan al desmontar
 
 ```
-ESTADO:  ABIERTO
+ESTADO:  ✅ CERRADO en 450d4e4
 ORIGEN:  PREEXISTENTE — no lo introdujo la Fase 0A
          no se corrigió en 0A.5, para conservar la equivalencia
 ```
@@ -399,13 +402,65 @@ El primero es el que importa: **el micrófono puede seguir abierto después de a
 declara no alterar conducta, y arreglar esto la altera — para bien, pero dentro de un commit que
 dejaría de poder auditarse por equivalencia.
 
-**Pista obligatoria:**
+### Cómo quedó cerrado
+
+El micrófono, el `MediaRecorder` y el cronómetro se mudaron a
+[`lib/conversaciones/grabacion.js`](../django-crm/frontend/src/lib/conversaciones/grabacion.js), con
+**un solo camino de liberación**, y la página lo suelta en un `onDestroy`.
+
+**Por qué un módulo y no el arreglo escrito en la página:** porque en la página **no se puede
+probar**. El harness de vitest corre en `node` sin plugin de Svelte —lo dice su propio comentario—,
+no compila `.svelte`, y ningún test del repo monta un componente. Un `onDestroy` inline no tendría
+ninguna guarda, que es exactamente cómo `.reiniciar-discreto` sobrevivió cuatro commits.
+
+| | |
+|---|---|
+| carrera de `getUserMedia` | ✅ cubierta — `soltada` se relee **después** del `await`; el stream que llega tarde se detiene y no se construye recorder |
+| grabación ya activa | ✅ cubierta — `onstop` se desarma **antes** de parar: desmontar no es terminar de grabar |
+| cronómetro | ✅ cubierto — `clearInterval` + `null`, verificado por ausencia de tics posteriores |
+| object URL | ✅ cubierto — ver la cadena abajo |
+| cleanup idempotente | ✅ — `stop()` sólo si `state !== 'inactive'`; soltar dos veces, tras cancelar, o sin haber grabado nunca |
+| camino normal del audio | ✅ preservado — `parar()` sigue armando el adjunto |
+| cancelación manual | ✅ preservada — y además deja la sesión lista para volver a grabar |
+| mutación | ✅ tres, las tres detectadas y revertidas |
+
+**La cadena del object URL**, porque el inventario de recursos puede confundir:
 
 ```
-cerrar 0A.5  →  corregir D29 aislado  →  regresión  →  recién entonces Fase 0B
+onDestroy(() => soltarRecursosDelCompositor({ sesion: voz, adjunto }))
+  → revocar  (parámetro por omisión, en grabacion.js)
+  → URL.revokeObjectURL(adjunto.url)
 ```
 
-**D29 se resuelve antes de empezar el rediseño visual de la Fase 1.**
+Es local con certeza: **`adjunto.url` tiene una sola asignación en todo el archivo** y siempre sale
+de `createObjectURL`. Los medios que llegan en el hilo son otra cosa y no pasan por ahí. Las otras
+dos llamadas a `revokeObjectURL` que quedan en la página son las preexistentes de `tomarArchivo` y
+`quitarAdjunto`.
+
+**Una sesión por página, nunca una global.** El único binding a nivel de módulo es `const FORMATOS`;
+todo lo mutable vive dentro de `sesionDeGrabacion()`. Si `soltada` fuera del módulo, irse de una
+conversación dejaría a la siguiente sin poder grabar nunca más. Importar el módulo tampoco evalúa
+`navigator`, `window` ni `MediaRecorder`: se consultan dentro de las operaciones, así que es seguro
+en SSR. Las dos cosas tienen guarda.
+
+**Las tres mutaciones**, que es lo que prueba que las guardas sirven:
+
+```
+anular la protección de la carrera  →  falla 1 test, exactamente ese
+mover `soltada` al módulo           →  fallan 9, incluida su guarda propia
+quitar el default de `revocar`      →  falla 1, exactamente ese
+```
+
+La tercera existe porque la primera versión de ese test **inyectaba** `revocar` y por eso no
+protegía el camino real. Inyectar la dependencia que se quiere verificar deja la prueba verde
+mientras el código de producción se rompe.
+
+**Límite conocido:** que el `onDestroy` llame a `soltarRecursosDelCompositor` está verificado **por
+lectura, no por prueba** — el harness no compila `.svelte`. Es el único eslabón sin guarda, y se
+cierra el día que exista un harness de componentes.
+
+**De paso, la misma clase de fuga:** si `new MediaRecorder(...)` falla *después* de que
+`getUserMedia` entregó el flujo, el micrófono quedaba abierto. Ahora el `catch` cierra los tracks.
 
 ## Baseline de regresión
 
@@ -413,9 +468,12 @@ cerrar 0A.5  →  corregir D29 aislado  →  regresión  →  recién entonces F
 |---|---|
 | `pnpm check` | 2 errores, ambos en `(no-layout)/org/`; **0 en `conversaciones/`** |
 | warnings | **24**. 22 originales + `.ventana-cerrada button` (0A.1) + `.adjunto-otro` (0A.3). Sin cambio en 0A.4 ni en 0A.5 |
-| vitest | 17 failed \| 7 passed (24) · 63 failed \| 261 passed (324) |
+| vitest, hasta 0A.5 | 17 failed \| 7 passed (24) · 63 failed \| 261 passed (324) |
+| vitest, desde D29 | 17 failed \| 8 passed (25) · **63 failed** \| 278 passed (341) |
 
-Los fallos de vitest son el baseline histórico del CRM v2, ajenos a la Bandeja.
+Los fallos de vitest son el baseline histórico del CRM v2, ajenos a la Bandeja. **Lo que se compara
+es el número de FALLOS: 63, y los mismos 17 archivos.** Los pasados suben cuando se agregan guardas
+—D29 sumó 17— y eso es lo esperado, no una desviación.
 
 **Cómo usar esta tabla:** una diferencia respecto de estos números es una regresión del incremento
 en curso, no ruido. Un error nuevo dentro de `conversaciones/` bloquea el incremento.
