@@ -1,5 +1,8 @@
 # Fase 0A — checkpoint
 
+> **Estado: ✅ CERRADA** (0A.1 … 0A.5). `[id]/+page.svelte`: **4036 → 1665 líneas**.
+> Lo siguiente **no** es el rediseño: es **D29**, en su propia pista funcional. Ver el final.
+
 Componentizar `[id]/+page.svelte` **sin cambiar ni un píxel ni una conducta**.
 Cirugía estructural primero, pintura después. El diseño congelado está en
 [`BANDEJA_STITCH_REFERENCIAS.md`](BANDEJA_STITCH_REFERENCIAS.md) y **solo se consulta para decidir
@@ -27,6 +30,9 @@ edcfd12  0A.2 — ConversationHeader extraído
 aa96916  0A.3 — EscalationSummary + HandoffControls
 71a8b49  checkpoint con 0A.3
 0aa283e  0A.4 — los cuatro paneles de contexto
+2cdcf44  checkpoint con 0A.4
+8ab8bb3  micro-fix: el Cancelar de la grabación recupera .reiniciar-discreto
+2ae5241  0A.5 — MessageComposer  ← cierra la Fase 0A
 ```
 
 Nada de esto está pusheado.
@@ -44,9 +50,28 @@ Nada de esto está pusheado.
 | `HandoffControls` | ✅ **0A.3 cerrado** | `lib/conversaciones/conversation/HandoffControls.svelte` |
 | `CasePanel` · `RetentionToggle` · `TracePanel` · `DocumentationPanel` | ✅ **0A.4 cerrado** | `lib/conversaciones/context/` |
 | Cáscara del contexto: `<aside>`, overlay, `contextoAbierto` | ✅ se queda en la página, a propósito | `[id]/+page.svelte` |
-| Compositor (`.pie`), con `Intervenir` | ⬜ **0A.5, el último** | `[id]/+page.svelte` |
+| `MessageComposer` (`.pie`), con el botón `Intervenir` | ✅ **0A.5 cerrado** | `lib/conversaciones/composer/MessageComposer.svelte` |
+| `MediaRecorder`, cronómetro, object URLs, ventana 24 h, `intervenir()`, los 6 envíos | ✅ se quedan en la página, a propósito | `[id]/+page.svelte` |
 
-`[id]/+page.svelte`: 4036 → 3638 → 3514 → 3102 → **2467 líneas**.
+`[id]/+page.svelte`: 4036 → 3638 → 3514 → 3102 → 2467 → **1665 líneas**.
+
+### Arquitectura final de la Fase 0A
+
+```
+routes/(app)/conversaciones/[id]/+page.svelte   1665   estado · red · lifecycle · autoridad
+
+lib/conversaciones/
+  formato.js                                       72   helpers puros
+  messages/MessageThread.svelte                   395   + el scroll del hilo
+  conversation/ConversationHeader.svelte          170
+  conversation/EscalationSummary.svelte           180
+  conversation/HandoffControls.svelte             347
+  composer/MessageComposer.svelte                 963
+  context/CasePanel.svelte                        207
+  context/RetentionToggle.svelte                  120
+  context/TracePanel.svelte                       305
+  context/DocumentationPanel.svelte               189
+```
 
 Los rangos son orientativos: se corren en cada extracción. Confirmarlos contra el marcado antes de
 cortar, nunca contra esta tabla.
@@ -66,8 +91,21 @@ y de red, y es donde el próximo que lea el código va a buscar esa lógica.
 0A.2 Header          ✅ cerrado   edcfd12
 0A.3 Escalada+relevo ✅ cerrado   aa96916
 0A.4 Contexto        ✅ cerrado   0aa283e
-0A.5 Compositor          ← el próximo y el de mayor riesgo (se lleva Intervenir)
+0A.5 Compositor      ✅ cerrado   2ae5241   (se llevó el botón Intervenir)
+
+FASE 0A            ✅ CERRADA
 ```
+
+Lo que sigue, en este orden y no en otro:
+
+```
+D29        ← pista funcional aislada, con regresión propia
+FASE 0B    ← componentizar la cola: +layout.svelte, ~1193 líneas
+FASE 1     ← recién ahí, el rediseño visual con los tokens de Stitch
+```
+
+**D29 va antes de 0B**: dejar el micrófono potencialmente abierto al abandonar una conversación pesa
+más que seguir componentizando la cola.
 
 ### La regla de autoridad, que vale para todo lo que queda
 
@@ -135,14 +173,58 @@ durante la Fase 0.
 **La traza no gana nada durante la Fase 0:** ni AI Confidence, ni scores, ni diagnósticos
 inventados, ni datos del mock de Stitch.
 
-### Lo que viene, y su riesgo
+### Decisiones de frontera tomadas en 0A.5
 
-**0A.5 — Compositor + `Intervenir`.** El de mayor riesgo, y el que hay que hacer más despacio: ahí
-conviven `MediaRecorder`, el cronómetro, blobs y object URLs, drag & drop, clipboard, adjuntos,
-plantillas, la ventana de WhatsApp con su `setInterval(15 s)` y `Intervenir`.
+Era el corte de mayor riesgo: ahí conviven `MediaRecorder`, el cronómetro, blobs y object URLs,
+drag & drop, clipboard, adjuntos, plantillas, la ventana de WhatsApp con su `setInterval(15 s)` y
+`Intervenir`. Se resolvió con una auditoría del ciclo de vida **antes** de mover una línea, y la
+frontera quedó trazada así:
 
-**Antes de mover una línea, auditoría del ciclo de vida completa**, como se hizo con Contexto. Y el
-criterio de corte no es el tamaño: **se corta según qué efectos nacen y mueren juntos**.
+```
+MessageComposer  =  presentación
+[id]/+page.svelte =  lifecycle + red + recursos + autoridad
+```
+
+Verificado por conteo, y es la forma de comprobarlo de nuevo si alguien duda:
+
+| | `MessageComposer` | `[id]/+page.svelte` |
+|---|---|---|
+| `fetch(` | **0** | 16 |
+| `MediaRecorder` / `getUserMedia` | **0** | 3 / 1 |
+| `setInterval` / `setTimeout` | **0** | 3 |
+| `createObjectURL` / `revokeObjectURL` | **0** | 1 / 2 |
+| `addEventListener` | **0** | sí |
+| `$effect` | **0** | 4 |
+
+Los cuatro efectos que quedan son los mismos cuatro de antes: límites de media, sondeo de 5 s,
+resincronización de `ventanaBase` y el `tic` de 15 s. **La única mención de `MediaRecorder` en el
+componente está en su comentario de cabecera**, explicando por qué no está ahí.
+
+**Por qué el compositor no se lleva su propio ciclo de vida, aunque sería lo prolijo.** Porque hoy
+esos recursos **no se liberan al desmontar** (D29, más abajo). Mover el dueño ahora cambiaría cuándo
+nacen y mueren, que es exactamente lo que la Fase 0 promete no cambiar: se arreglaría un bug real
+dentro de un commit que declara no alterar conducta, y la equivalencia dejaría de ser auditable.
+
+**24 props, 9 `bind:` y 16 callbacks son deliberados.** Esa interfaz solo se achica moviendo
+comportamiento, y mover comportamiento es justo lo que esta fase no hace. **No «optimizarla» sin una
+fase explícita que lo autorice.**
+
+**`Intervenir`: el botón viajó, la función no.** `intervenir()` y la decisión durable siguen en la
+página. El componente recibe `bloqueadoPorIA` **ya resuelto** y **nunca calcula `control_efectivo`**
+(B3.3b).
+
+**El scroll conserva sus dos caminos distintos. No unificarlos:**
+
+```
+plantilla        → sondeo → hiloRef.alFinal(true)
+humano/cliente   → push   → hiloRef.forzarAlFinal(mensajes.length)
+```
+
+Una plantilla enviada no vuelve en la respuesta inmediata, así que hay que sondear; un mensaje
+humano o del cliente se agrega al arreglo, y `forzarAlFinal` además avanza `ultimoVisto` — el
+acoplamiento que 0A.1 tuvo que exportar a propósito (ver el contrato más abajo).
+
+### El ritmo, que se ganó con errores
 
 **Una extracción por vez**, y entre cada una: `pnpm check` → vitest → revisar el diff. Se llegó a
 este ritmo después de que una sola extracción produjera **dos errores propios**, los dos cazados por
@@ -235,6 +317,27 @@ por cada regla movida               →  comprobar qué consumidores tenía
 por cada selector agrupado          →  abrirlo y revisar cada selector
 ```
 
+**5. `pnpm check` avisa de REGLAS SIN CLASE, nunca de CLASES SIN REGLA.** Esa asimetría dejó una
+regresión viva cuatro commits:
+
+```
+.reiniciar-discreto   la comparten el botón «Reiniciar (prueba)» y el
+                      «Cancelar» que aparece mientras se graba una nota de voz
+```
+
+0A.2 mudó el encabezado y la regla se fue con él; el `Cancelar`, que seguía en la página, perdió su
+`opacity: .62` y su `font-size: 10.8px` desde `edcfd12`. **Ninguna guarda lo vio**: en el componente
+la regla sí se usa, así que allá no hay warning; acá la clase quedó huérfana en silencio.
+Restaurada verbatim desde `edcfd12^` en `8ab8bb3`, **antes** de tocar el compositor.
+
+Después, en `2ae5241`, la regla **viajó con su botón** al `MessageComposer` y la copia de la página
+se fue con ella porque ya no le quedaba ningún consumidor — consecuencia mecánica de la extracción,
+no limpieza. `ConversationHeader` conserva la suya. Quedan **dos copias scoped**, a consolidar en la
+Fase 1.
+
+Moraleja operativa: revisar el delta de warnings **no alcanza**. Hay que comprobar además que cada
+clase del marcado que **se queda** siga teniendo su regla.
+
 ## Polling — una sola cadena, en el padre
 
 ```
@@ -250,8 +353,9 @@ simultáneos duplican las llamadas y hacen que los mensajes entren dos veces.
 ## Deuda anotada, deliberadamente sin tocar
 
 - `.ventana-cerrada button` — CSS muerto preexistente. La frontera nueva hizo que Svelte pudiera
-  verlo y lo reporta como selector sin usar (22 → 23 warnings). La pantalla canónica de Stitch sí
-  tiene ahí un botón «Choose Template», así que la Fase 4 probablemente lo reviva.
+  verlo y lo reporta como selector sin usar (22 → 23 warnings). **En 0A.5 viajó con el compositor y
+  sigue muerta allá.** La pantalla canónica de Stitch sí tiene ahí un botón «Choose Template», así
+  que la Fase 4 probablemente lo reviva.
 - `.adjunto-otro` — definido y nunca usado, desde antes. Se dejó en el padre; en 0A.3 el marcado
   encogió lo suficiente como para que Svelte por fin lo detectara.
 
@@ -265,21 +369,57 @@ efectivamente ya estaba muerto antes. **No se limpian en Fase 0.**
 - `quien()` / `esTelefono()` / `esUuid()` están **duplicados** entre `ConversationHeader` y
   `+layout.svelte` — el comentario original ya decía «mismo criterio que la lista del layout». Es el
   mismo patrón que hizo nacer `estado.js`: dos copias que nadie ve separarse hasta que una cambia.
-  Unificarlas en `formato.js` es refactor, no movimiento; **no se hizo**. Candidato para 0A.4 o una
-  fase posterior.
+  Unificarlas en `formato.js` es refactor, no movimiento; **no se hizo** en toda la Fase 0A.
+  Candidato natural para la **0B**, que es justo cuando se toca `+layout.svelte`.
 
 Esta fase mueve código; no ordena ni limpia. Mezclar refactor con limpieza hace que el diff deje de
 poder auditarse.
+
+## D29 — los recursos del compositor no se liberan al desmontar
+
+```
+ESTADO:  ABIERTO
+ORIGEN:  PREEXISTENTE — no lo introdujo la Fase 0A
+         no se corrigió en 0A.5, para conservar la equivalencia
+```
+
+La página se remonta por conversación (`{#key abierta}`) y **no existe un solo `onDestroy` en el
+archivo**. Al cambiar de conversación mientras hay una grabación en curso pueden quedar vivos:
+
+```
+- el MediaRecorder, todavía activo;
+- los tracks del stream del micrófono, abiertos;
+- el cronómetro de 1 s;
+- el object URL de un adjunto, sin revocar.
+```
+
+El primero es el que importa: **el micrófono puede seguir abierto después de abandonar la pantalla.**
+
+**Es un defecto funcional, no de componentización.** Por eso no entró en el diff de 0A.5: ese commit
+declara no alterar conducta, y arreglar esto la altera — para bien, pero dentro de un commit que
+dejaría de poder auditarse por equivalencia.
+
+**Pista obligatoria:**
+
+```
+cerrar 0A.5  →  corregir D29 aislado  →  regresión  →  recién entonces Fase 0B
+```
+
+**D29 se resuelve antes de empezar el rediseño visual de la Fase 1.**
 
 ## Baseline de regresión
 
 | Chequeo | Valor esperado |
 |---|---|
 | `pnpm check` | 2 errores, ambos en `(no-layout)/org/`; **0 en `conversaciones/`** |
-| warnings | **24**. 22 originales + `.ventana-cerrada button` (0A.1) + `.adjunto-otro` (0A.3). Sin cambio en 0A.4 |
+| warnings | **24**. 22 originales + `.ventana-cerrada button` (0A.1) + `.adjunto-otro` (0A.3). Sin cambio en 0A.4 ni en 0A.5 |
 | vitest | 17 failed \| 7 passed (24) · 63 failed \| 261 passed (324) |
 
 Los fallos de vitest son el baseline histórico del CRM v2, ajenos a la Bandeja.
 
 **Cómo usar esta tabla:** una diferencia respecto de estos números es una regresión del incremento
 en curso, no ruido. Un error nuevo dentro de `conversaciones/` bloquea el incremento.
+
+**Diferencia visual acumulada de la Fase 0A:** *no detectada* mediante equivalencia de marcado/CSS y
+chequeos estáticos; **comparación por píxel no ejecutada**. La frase importa: no es lo mismo que
+«ninguna».
