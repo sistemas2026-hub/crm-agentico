@@ -35,6 +35,11 @@ B3.2 de SPEC/CONTRATO_RELEVO_IA_HUMANO.md. Base efimera del ledger.
      intervencion, una). Y el cierre por confirmacion no empieza si alguien
      intervino mientras corria el evaluador. La escalada PROPIA sigue
      sincronizando con el CRM (seccion 5).
+ 14. B3.5 (D18) por la ruta real /conversaciones: 45 de legado viejas y una
+     escalada nueva -> la nueva primero; el cliente que vuelve a escribir sube
+     a la banda 1 con su hora; dentro de una banda gana la espera mas larga;
+     los canales de prueba quedan marcados como no operativos; el legado se
+     muestra como revision y sigue en version 0.
  13. B3.4 (D4), por las rutas HTTP reales: tomar normal; un segundo operador
      no roba (409 ya_asignada); dos a la vez con claves distintas -> uno gana;
      reintento del mismo actor y clave ajena; tomar bajo control ia -> 409
@@ -1257,6 +1262,104 @@ try:
             db.sesion = real_sesion
     finally:
         api._TOKEN_SERVICIO = token13
+
+    # -----------------------------------------------------------------------
+    print("\n== 14. B3.5: la cola de la bandeja (D18) ==")
+    token14 = api._TOKEN_SERVICIO
+    api._TOKEN_SERVICIO = None
+    http14 = api.app.test_client()
+
+    def conv_con(tel, *, canal="whatsapp", legado=False, minutos=60):
+        """Una conversacion en manos de personas, con su antiguedad."""
+        cid = str(q("""insert into asistente.conversations (organization_id, canal, usuario_externo)
+                       values (%s, %s, %s) returning id""", (org, canal, tel))[0][0])
+        if legado:
+            q("""update asistente.conversations
+                 set escalada_a_humano = true, necesita_atencion_humana = true,
+                     escalada_en = now() - make_interval(mins => %s),
+                     actualizado_en = now() - make_interval(mins => %s)
+                 where id = %s""", (minutos, minutos, cid))
+        else:
+            T.escalar(TENANT, cid)
+            q("""update asistente.conversations
+                 set escalada_en = now() - make_interval(mins => %s),
+                     actualizado_en = now() - make_interval(mins => %s)
+                 where id = %s""", (minutos, minutos, cid))
+        return cid
+
+    def mensaje(cid, rol, origen, minutos, contenido="x"):
+        q("""insert into asistente.messages
+               (organization_id, conversation_id, rol, contenido, origen, creado_en)
+             values (%s, %s, %s, %s, %s, now() - make_interval(mins => %s))""",
+          (org, cid, rol, contenido, origen, minutos))
+
+    def cola(vista_operativa=True):
+        r = http14.get(f"/conversaciones?tenant={TENANT}")
+        filas = (r.get_json() or {}).get("conversaciones", [])
+        return [f for f in filas if f["canal_operativo"]] if vista_operativa else filas
+    try:
+        q("delete from asistente.conversations where organization_id = %s", (org,))
+        legados = [conv_con(f"5730000002{i:02d}", legado=True, minutos=60 * 24 * (3 + i))
+                   for i in range(45)]
+        nueva = conv_con("573000000300", minutos=4)                 # escalada de hace 4 minutos
+        filas = cola()
+        comprobar(filas and filas[0]["id"] == nueva and filas[0]["banda"] == 2
+                  and filas[0]["motivo_cola"] == "Escalada, sin asignar",
+                  f"D18: la escalada de hace 4 minutos queda primera sobre 45 de legado de dias "
+                  f"({filas[0]['motivo_cola'] if filas else '(vacia)'})")
+        comprobar(all(f["banda"] == 6 and f["es_legado"] and f["necesita_accion_de"] == "revision"
+                      for f in filas[1:]),
+                  "las 45 de legado quedan detras, como revision")
+        comprobar(all(q("select relevo_version from asistente.conversations where id = %s", (c,))[0][0] == 0
+                      for c in legados[:5]),
+                  "y mirarlas en la cola NO las adopta: siguen en version 0 (G8)")
+
+        # el cliente vuelve a escribir en una que ya tiene dueno
+        conversada = conv_con("573000000301", minutos=120)
+        atender(conversada, ANA, "cola-ana")
+        mensaje(conversada, "assistant", "humano", 90, "Soy Ana, lo reviso")
+        mensaje(conversada, "user", "cliente", 7, "sigo sin internet")
+        filas = cola()
+        primera = filas[0]
+        comprobar(primera["id"] == conversada and primera["banda"] == 1
+                  and primera["motivo_cola"] == "Cliente respondió — espera a Ana Perez",
+                  f"el cliente que responde a su operadora sube a la banda 1 ({primera['motivo_cola']})")
+        # La espera tiene que ser la de SU mensaje (hace 7 minutos), no la de la
+        # escalada (hace 2 horas): es el numero que la pantalla muestra y con el
+        # que el motor ordena.
+        minutos = q("""select extract(epoch from (now() - %s::timestamptz)) / 60""",
+                    (primera["esperando_desde"],))[0][0]
+        comprobar(5 <= float(minutos) <= 15,
+                  f"y la espera se cuenta desde SU mensaje (~7 min), no desde la escalada "
+                  f"(~120 min): dio {float(minutos):.0f} min")
+
+        # dentro de la banda 2, la espera mas larga primero
+        vieja = conv_con("573000000302", minutos=300)
+        filas = cola()
+        banda2 = [f["id"] for f in filas if f["banda"] == 2]
+        comprobar(banda2[:2] == [vieja, nueva],
+                  f"dentro de la banda 2, 5 horas esperando va antes que 4 minutos ({banda2[:2] == [vieja, nueva]})")
+
+        # canales de prueba
+        simulada = conv_con("573000000303", canal="whatsapp-simulado", minutos=2)
+        todas = cola(vista_operativa=False)
+        operativas = cola()
+        comprobar(any(f["id"] == simulada and f["canal_operativo"] is False for f in todas)
+                  and all(f["id"] != simulada for f in operativas),
+                  "una conversacion del simulador queda marcada no operativa y fuera de la vista de trabajo")
+        comprobar(all(f["canal_operativo"] for f in operativas),
+                  "en la vista operativa solo quedan canales reales")
+
+        # una que atiende la IA no compite en la cola
+        deia = str(q("""insert into asistente.conversations (organization_id, canal, usuario_externo)
+                        values (%s, 'whatsapp', '573000000304') returning id""", (org,))[0][0])
+        filas = cola(vista_operativa=False)
+        suya = next(f for f in filas if f["id"] == deia)
+        comprobar(suya["banda"] is None and suya["necesita_accion_de"] == "ia"
+                  and filas.index(suya) > 0,
+                  f"la que atiende la IA queda fuera de la cola, al final ({suya['motivo_cola']})")
+    finally:
+        api._TOKEN_SERVICIO = token14
 finally:
     try:
         with psycopg.connect(dsn("postgres"), autocommit=True) as con:

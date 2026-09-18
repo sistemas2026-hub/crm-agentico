@@ -119,6 +119,17 @@
   // de hace un mes ya resuelto.
   let filtro = $state('por-atender');
   let busqueda = $state('');
+  /* Que canales se ven. Por defecto SOLO los reales: el simulador, el
+     asistente interno y las baterias escriben en las mismas tablas, y mezclar
+     una prueba de hace dos horas con un cliente esperando hace que la cola
+     deje de servir para trabajar. El motor marca cada fila con
+     'canal_operativo' (canal.REALES); aca no hay una lista de canales. */
+  let vista = $state('operativo');
+  const VISTAS = [
+    { id: 'operativo', label: 'Operativo' },
+    { id: 'pruebas', label: 'Pruebas' },
+    { id: 'todos', label: 'Todos' }
+  ];
   /** '' = todos. Filtra por el motivo por el que el asistente escalo. */
   let motivo = $state('');
   /** Escalada no es un estado paralelo a los otros: una conversacion escalada
@@ -187,9 +198,32 @@
   // valores y no cinco: cualquier cosa mas fina seria inventada.
   const MOTIVO_URGENTE = new Set(['frustracion_detectada', 'tres_fallos_seguidos']);
 
-  /** Cuanto pesa una conversacion en el orden "Recomendado". Mas alto, mas
-      arriba. Se calcula con lo que ya existe: tiempo esperando, si el cliente
-      volvio a escribir, y el motivo. */
+  /* B3.5 (D18): "Recomendado" ya NO se calcula aca. El motor manda la
+     proyeccion de cada conversacion (nucleo/relevo/proyeccion.py): en que
+     banda cae, desde cuando espera y por que, todo derivado de la verdad
+     durable. Esta pantalla solo ordena por (banda, esperando_desde) y muestra
+     el motivo en palabras.
+
+     El puntaje que vivia aca ordenaba por antiguedad, y por eso una escalada
+     nueva sin dueno entraba detras de decenas de conversaciones viejas: es
+     D18. Se conserva 'peso' solo como respaldo para una respuesta del motor
+     sin proyeccion (un motor viejo durante un despliegue). */
+  const bandaDe = (/** @type {any} */ c) => (typeof c.banda === 'number' ? c.banda : 99);
+  const esperaDesde = (/** @type {any} */ c) =>
+    c.esperando_desde ? new Date(c.esperando_desde).getTime() : null;
+
+  /** El orden de la cola, igual que proyeccion.orden_de_cola en el motor. */
+  function porBanda(/** @type {any} */ a, /** @type {any} */ b) {
+    if (bandaDe(a) !== bandaDe(b)) return bandaDe(a) - bandaDe(b);
+    const ea = esperaDesde(a);
+    const eb = esperaDesde(b);
+    if (ea === null && eb === null) return 0;
+    if (ea === null) return 1;          // sin fecha: al final de su banda
+    if (eb === null) return -1;
+    return ea - eb;                     // el que mas espera, primero
+  }
+
+  /** Respaldo si el motor no manda proyeccion. Ver el comentario de arriba. */
   function peso(/** @type {any} */ c) {
     if (!pendiente(c)) return -1;
     // La espera es la base y manda: es lo que de verdad mide el maltrato al
@@ -278,6 +312,7 @@
       // para poder comprobar el otro. Si "Recomendado" pone algo arriba que
       // no lleva la espera mas larga, se puede ver por que cambiando aca.
       if (orden === 'espera') return espera(a) - espera(b);
+      if (typeof a.banda === 'number' || typeof b.banda === 'number') return porBanda(a, b);
       return peso(b) - peso(a);
     });
   }
@@ -334,6 +369,13 @@
 
   let visibles = $derived.by(() => {
     let lista = conversaciones;
+    if (vista !== 'todos') {
+      const operativo = vista === 'operativo';
+      // 'canal_operativo' puede faltar si el motor todavia no la manda: en ese
+      // caso no se esconde nada (mejor de mas que ocultar un cliente real).
+      lista = lista.filter((/** @type {any} */ c) =>
+        c.canal_operativo === undefined ? true : c.canal_operativo === operativo);
+    }
     if (filtro === 'por-atender') lista = lista.filter(pendiente);
     else if (filtro === 'en-atencion') lista = lista.filter(enAtencion);
     else if (filtro === 'resueltas') lista = lista.filter(resuelta);
@@ -418,6 +460,17 @@
            Se dibuja solo si hay mas de un motivo entre las que esperan: con
            uno solo, el filtro no separa nada y es una fila de ruido. -->
       <div class="controles">
+        <!-- Que canales se miran. Operativo (los reales) es el default: una
+             prueba del simulador no puede competir con un cliente. -->
+        <label class="orden">
+          <span class="orden-rotulo">Canales</span>
+          <select bind:value={vista} aria-label="Qué canales se ven">
+            {#each VISTAS as v (v.id)}
+              <option value={v.id}>{v.label}</option>
+            {/each}
+          </select>
+        </label>
+
         <label class="orden">
           <span class="orden-rotulo">Ordenar por</span>
           <select
@@ -523,11 +576,19 @@
             <div class="cuerpo">
               <div class="alta">
                 <span class="quien">{c.nombre_cliente || quien(c.usuario_externo)}</span>
-                <!-- En las que esperan, el tiempo que se muestra es el de la
-                     ESPERA, no el del ultimo movimiento: es el numero que
-                     decide a cual entrar primero, y son distintos en cuanto
-                     el cliente vuelve a escribir. -->
-                {#if pendiente(c) && c.escalada_en}
+                <!-- La espera que se muestra es la de la NECESIDAD actual
+                     (esperando_desde, B3.5): si el cliente volvio a escribir,
+                     es desde ese mensaje y no desde la escalada. Es el mismo
+                     dato con el que el motor ordena, asi que la lista no dice
+                     un numero y ordena por otro. -->
+                {#if c.esperando_desde}
+                  <span
+                    class="cuando v2-num espera-{tramoEspera(c)}"
+                    title="Esperando desde hace {shortAge(c.esperando_desde)}"
+                  >
+                    {shortAge(c.esperando_desde)} esperando
+                  </span>
+                {:else if pendiente(c) && c.escalada_en}
                   <span
                     class="cuando v2-num espera-{tramoEspera(c)}"
                     title="Esperando desde hace {shortAge(c.escalada_en)}"
@@ -538,6 +599,14 @@
                   <span class="cuando v2-num">{shortAge(c.actualizado_en)}</span>
                 {/if}
               </div>
+
+              <!-- POR QUE esta fila esta donde esta, en palabras. No un
+                   numero de prioridad: quien atiende tiene que poder leer
+                   "Cliente respondio - espera a Ana" y decidir. Lo redacta el
+                   motor (proyeccion.motivo_cola), no esta pantalla. -->
+              {#if c.motivo_cola && typeof c.banda === 'number'}
+                <span class="por-que" class:por-que-legado={c.es_legado}>{c.motivo_cola}</span>
+              {/if}
 
               <!-- De que se trata, en una linea. El ultimo mensaje casi nunca
                    lo dice ("ok", "gracias", "listo"): quien atiende tiene que
@@ -1040,6 +1109,27 @@
   }
   /* Una sola línea: el preview orienta, no se lee. Dos líneas hacen que la
      altura de cada fila dependa de lo largo que fue el último mensaje. */
+  .por-que {
+    display: inline-flex;
+    align-self: flex-start;
+    margin: 1px 0 2px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: var(--v2-hueso, #f1efe9);
+    color: var(--v2-tinta-suave, #5c5850);
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+  }
+
+  .por-que-legado {
+    background: transparent;
+    border: 1px dashed var(--v2-line, #ddd);
+  }
+
   .avance {
     margin: 2px 0 0;
     font-size: 12px;

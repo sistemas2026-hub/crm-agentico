@@ -44,6 +44,7 @@ from nucleo.canales import canal as canales
 from nucleo.canales import media, whatsapp
 from nucleo.canales.errores import estado_http_de, fallo, mensaje_publico
 from nucleo.relevo import historial as regla_historial
+from nucleo.relevo import proyeccion
 from nucleo.relevo import transiciones
 from nucleo.relevo import autorizacion as autorizacion_relevo
 from nucleo.relevo.control import control_efectivo
@@ -3767,6 +3768,13 @@ def conversaciones():
         registrar("conversaciones", "fallo al listar", error=e)
         return jsonify({"error": "No se pudo leer las conversaciones."}), 500
 
+    # B3.5 (D18): la proyeccion viaja calculada. Que necesita cada
+    # conversacion, en que banda de la cola cae, desde cuando espera y por que
+    # -- para que la pantalla ordene y lo explique sin reimplementar la regla.
+    for fila in salida:
+        fila.update(proyeccion.proyectar(fila))
+        fila["canal_operativo"] = fila.get("canal") in canales.REALES
+    salida.sort(key=proyeccion.orden_de_cola)
     return jsonify({"tenant": tenant, "conversaciones": salida})
 
 

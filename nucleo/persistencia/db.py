@@ -512,6 +512,27 @@ def ultima_actividad(tenant: str, canal: str | None = None) -> list[dict]:
                   -- en esto" de "esto ya se cerro a mano", y son pestañas
                   -- distintas.
                   c.atendida_manual, c.tomada_por, c.tomada_en,
+                  -- B3.5 (D18): lo durable que necesita la proyeccion de la
+                  -- bandeja (nucleo/relevo/proyeccion.py). El orden de la cola
+                  -- sale de aca, no de un puntaje en la pantalla.
+                  c.relevo_version, c.control, c.control_motivo,
+                  c.asignada_a_usuario_id, c.asignada_a_nombre, c.asignada_en,
+                  c.pendiente_interno_desde, c.estado_escalada,
+                  -- La ultima vez que le respondio UNA PERSONA. Con esto se
+                  -- sabe si el mensaje del cliente es posterior, que es la
+                  -- diferencia entre "alguien espera respuesta" y "ya le
+                  -- contestaron". 'humano' es el rol de legado; desde B2 una
+                  -- respuesta de persona es rol 'assistant' con origen
+                  -- 'humano'.
+                  humana.creado_en as ultima_atencion_humana,
+                  cliente.creado_en as ultimo_mensaje_cliente,
+                  -- T19: si la evaluacion que quedo NO_DETERMINADO ya la
+                  -- reviso alguien. Sin esto, una conversacion vieja pediria
+                  -- revision para siempre.
+                  exists (select 1 from asistente.relevo_eventos ev
+                           where ev.organization_id = c.organization_id
+                             and ev.conversation_id = c.id
+                             and ev.tipo = 'evaluacion_revisada') as evaluacion_revisada,
                   (c.atendida_manual or exists (
                        select 1 from asistente.messages h
                         where h.conversation_id = c.id
@@ -540,7 +561,18 @@ def ultima_actividad(tenant: str, canal: str | None = None) -> list[dict]:
                       and m.rol = 'user'
                       and c.escalada_en is not null
                       and m.creado_en > c.escalada_en
-               ) insiste on true"""
+               ) insiste on true
+               left join lateral (
+                   select max(creado_en) as creado_en
+                     from asistente.messages
+                    where conversation_id = c.id
+                      and (rol = 'humano' or (rol = 'assistant' and origen = 'humano'))
+               ) humana on true
+               left join lateral (
+                   select max(creado_en) as creado_en
+                     from asistente.messages
+                    where conversation_id = c.id and rol = 'user'
+               ) cliente on true"""
 
     with sesion(tenant) as (cur, org):
         if canal:
