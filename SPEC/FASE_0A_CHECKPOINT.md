@@ -1,7 +1,8 @@
 # Fase 0A — checkpoint
 
 > **Estado: ✅ CERRADA** (0A.1 … 0A.5). `[id]/+page.svelte`: **4036 → 1665 líneas**.
-> Lo siguiente **no** es el rediseño: es **D29**, en su propia pista funcional. Ver el final.
+> **D29 también está cerrado** (`450d4e4`) — ver el final.
+> Lo siguiente **no** es el rediseño todavía: es la **Fase 0B**, la cola en `+layout.svelte`.
 
 Componentizar `[id]/+page.svelte` **sin cambiar ni un píxel ni una conducta**.
 Cirugía estructural primero, pintura después. El diseño congelado está en
