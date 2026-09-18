@@ -25,6 +25,8 @@ eb5b4bf  B3.5 / D18 cerrado
 edcfd12  0A.2 — ConversationHeader extraído
 3cf03d5  checkpoint con 0A.2
 aa96916  0A.3 — EscalationSummary + HandoffControls
+71a8b49  checkpoint con 0A.3
+0aa283e  0A.4 — los cuatro paneles de contexto
 ```
 
 Nada de esto está pusheado.
@@ -40,10 +42,11 @@ Nada de esto está pusheado.
 | Autoscroll | ✅ vive en `MessageThread` | — |
 | `EscalationSummary` | ✅ **0A.3 cerrado** | `lib/conversaciones/conversation/EscalationSummary.svelte` |
 | `HandoffControls` | ✅ **0A.3 cerrado** | `lib/conversaciones/conversation/HandoffControls.svelte` |
-| Contexto (`<aside>`) | ⬜ **0A.4, el próximo** | `[id]/+page.svelte` |
-| Compositor (`.pie`), con `Intervenir` | ⬜ 0A.5, el último | `[id]/+page.svelte` |
+| `CasePanel` · `RetentionToggle` · `TracePanel` · `DocumentationPanel` | ✅ **0A.4 cerrado** | `lib/conversaciones/context/` |
+| Cáscara del contexto: `<aside>`, overlay, `contextoAbierto` | ✅ se queda en la página, a propósito | `[id]/+page.svelte` |
+| Compositor (`.pie`), con `Intervenir` | ⬜ **0A.5, el último** | `[id]/+page.svelte` |
 
-`[id]/+page.svelte`: 4036 → 3638 → 3514 → **3102 líneas**.
+`[id]/+page.svelte`: 4036 → 3638 → 3514 → 3102 → **2467 líneas**.
 
 Los rangos son orientativos: se corren en cada extracción. Confirmarlos contra el marcado antes de
 cortar, nunca contra esta tabla.
@@ -62,8 +65,8 @@ y de red, y es donde el próximo que lea el código va a buscar esa lógica.
 0A.1 MessageThread   ✅ cerrado   7a41bdc
 0A.2 Header          ✅ cerrado   edcfd12
 0A.3 Escalada+relevo ✅ cerrado   aa96916
-0A.4 Contexto            ← el próximo
-0A.5 Compositor      ← último, es el de mayor riesgo (y se lleva Intervenir)
+0A.4 Contexto        ✅ cerrado   0aa283e
+0A.5 Compositor          ← el próximo y el de mayor riesgo (se lleva Intervenir)
 ```
 
 ### La regla de autoridad, que vale para todo lo que queda
@@ -100,15 +103,46 @@ la conducta.
 Cerrar una conversación **no es relevo** — su ubicación conceptual se reconsidera en la fase visual,
 no ahora.
 
+### Decisiones de frontera tomadas en 0A.4
+
+**La cáscara del contexto se queda en la página.** El overlay `.info-fondo` **no está dentro del
+`<aside>`**: son dos hermanos coordinados por `contextoAbierto`. Así que se extrajo el contenido y la
+cáscara —`<aside class="info">`, el overlay, el botón Cerrar, el CSS `.info*` y sus media queries—
+sigue en `[id]/+page.svelte`.
+
+Los cuatro componentes de `context/` **representan contenido; no abren ni cierran el panel**. Nada
+del responsive se partió y `ConversationHeader`, que dispara la apertura, no se tocó.
+
+**Dos «Asignado a» que no son el mismo (D28):**
+
+```
+CasePanel        → caso.assignee_id, owners del CRM, action="?/asignar"
+                   = dueño del TICKET del CRM
+
+HandoffControls  → asignadaA
+                   = dueño durable de la CONVERSACIÓN en Dexter
+```
+
+**No son intercambiables.** Nunca usar `caso.assignee_id` para el relevo ni para la cola. Están en
+componentes distintos a propósito y **D28 sigue reservado para B4**.
+
+**El `use:enhance` del formulario del CRM** se movió intacto con su formulario, incluido el
+`bind:this={formularioAsignar}` que la página usa para dispararlo. Ese flujo no se reinterpreta
+durante la Fase 0.
+
+**Los cuatro componentes tienen 0 `fetch()`.** Red, mutaciones y derivados siguen en la página.
+
+**La traza no gana nada durante la Fase 0:** ni AI Confidence, ni scores, ni diagnósticos
+inventados, ni datos del mock de Stitch.
+
 ### Lo que viene, y su riesgo
 
-**0A.4 — Contexto.** Merece auditoría previa como la tuvo 0A.3. Ahí conviven el caso del CRM, la
-retención, la traza y la documentación: el riesgo específico es **mezclar el contexto de la
-conversación de Dexter con los datos del ticket del CRM**, que D28 manda mantener separados.
+**0A.5 — Compositor + `Intervenir`.** El de mayor riesgo, y el que hay que hacer más despacio: ahí
+conviven `MediaRecorder`, el cronómetro, blobs y object URLs, drag & drop, clipboard, adjuntos,
+plantillas, la ventana de WhatsApp con su `setInterval(15 s)` y `Intervenir`.
 
-**0A.5 — Compositor**, al final a propósito: `MediaRecorder`, cronómetro, object URLs, drag & drop,
-clipboard, ventana de 24 h con su propio `setInterval(15 s)`, plantillas, audio — y `Intervenir`. No
-hay premio por apurarlo.
+**Antes de mover una línea, auditoría del ciclo de vida completa**, como se hizo con Contexto. Y el
+criterio de corte no es el tamaño: **se corta según qué efectos nacen y mueren juntos**.
 
 **Una extracción por vez**, y entre cada una: `pnpm check` → vitest → revisar el diff. Se llegó a
 este ritmo después de que una sola extracción produjera **dos errores propios**, los dos cazados por
@@ -183,6 +217,24 @@ cada `@media`, comprobar si contiene **solo** reglas de ese conjunto —entonces
 está mezclado —entonces hay que decidir regla por regla—. Un script de veinte líneas hace esto y
 evita las dos formas de romperlo descritas arriba.
 
+**4. Clasificar por prefijo del selector NO alcanza.** En 0A.4 falló tres veces, y las tres eran
+cambios de apariencia reales:
+
+| Caso | Qué pasó |
+|---|---|
+| `.proceso, .docs` | Regla **agrupada**. Clasificada por su última línea se fue entera a `DocumentationPanel`, y el `<details class="proceso">` de la traza perdió su padding |
+| `.proceso-resumen` | Lo usan los `<summary>` de **los dos** paneles. Hubo que copiarlo, como `.aviso` |
+| `.paso-marcado` | La usa `TracePanel`, pero ningún prefijo la capturaba: quedó **huérfana** en la página |
+
+Las tres las delataron warnings nuevos de `pnpm check` — otra razón para mirar el delta de warnings
+y no solo el de errores. La verificación obligatoria a partir de 0A.5:
+
+```
+por cada clase del marcado movido   →  localizar su regla efectiva
+por cada regla movida               →  comprobar qué consumidores tenía
+por cada selector agrupado          →  abrirlo y revisar cada selector
+```
+
 ## Polling — una sola cadena, en el padre
 
 ```
@@ -224,7 +276,7 @@ poder auditarse.
 | Chequeo | Valor esperado |
 |---|---|
 | `pnpm check` | 2 errores, ambos en `(no-layout)/org/`; **0 en `conversaciones/`** |
-| warnings | **24**. 22 originales + `.ventana-cerrada button` (0A.1) + `.adjunto-otro` (0A.3) |
+| warnings | **24**. 22 originales + `.ventana-cerrada button` (0A.1) + `.adjunto-otro` (0A.3). Sin cambio en 0A.4 |
 | vitest | 17 failed \| 7 passed (24) · 63 failed \| 261 passed (324) |
 
 Los fallos de vitest son el baseline histórico del CRM v2, ajenos a la Bandeja.
