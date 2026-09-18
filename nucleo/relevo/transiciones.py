@@ -45,9 +45,12 @@ LO QUE CADA UNA SIGNIFICA (y no significa)
   intervenir       control humano / intervencion; con tomar=True, asignada al
                    actor en la misma transaccion. No tiene equivalente de
                    legado y no hay ruta que la exponga todavia.
-  tomar            asigna; control y motivo intactos. La exclusion entre dos
-                   operadores simultaneos NO es de esta fase (B3.4, D4).
-  soltar           quita la asignacion; SIGUE HUMANA. No es devolver.
+  tomar            asigna una conversacion de personas LIBRE; control y motivo
+                   intactos. Si ya tiene dueno, 'ya_asignada': nunca lo pisa
+                   (B3.4, D4). Bajo control ia, 'control_ia': eso es intervenir.
+  soltar           solo quien la tiene; SIGUE HUMANA. No es devolver.
+  reasignar        la unica que cambia una asignacion ajena. ADMIN (lo exige
+                   la ruta), motivo obligatorio, evento con anterior y nuevo.
   resolver         cierra y libera la asignacion; con persona, atendida_manual.
                    Tampoco es devolver: la conversacion queda cerrada, no en
                    manos de la IA.
@@ -94,6 +97,8 @@ ESQUEMAS: dict[str, frozenset[str]] = {
     "intervencion": frozenset({"version", "motivo_texto", "tomada"}),
     "tomada": frozenset({"version", "anterior_nombre"}),
     "soltada": frozenset({"version", "anterior_nombre"}),
+    "reasignada": frozenset({"version", "anterior_usuario_id", "anterior_nombre",
+                             "nuevo_usuario_id", "nuevo_nombre", "motivo"}),
     "cerrada": frozenset({"version", "por"}),
     "devuelta_a_ia": frozenset({"version"}),
     "caso_externo_cerrado": frozenset({"version", "aplicado"}),
@@ -129,7 +134,7 @@ def _evento_previo(cur, org, conversation_id, clave):
 def _fila(cur, org, conversation_id):
     cur.execute("""select control, control_motivo, asignada_a_usuario_id, asignada_a_nombre,
                           relevo_version, estado, pendiente_interno_desde,
-                          escalada_a_humano, necesita_atencion_humana
+                          escalada_a_humano, necesita_atencion_humana, tomada_por
                    from asistente.conversations
                    where organization_id = %s and id = %s
                    for update""", (org, conversation_id))
@@ -188,6 +193,17 @@ def _ejecutar(tenant, conversation_id, clave, cuerpo, *, tipo, actor_id=None) ->
         if previo:
             return _replay(previo, tipo, actor_id)
         raise
+
+
+def _es_de_personas(f) -> Resultado | None:
+    """Precondicion de tomar y reasignar: abierta y en manos de personas por
+    control EFECTIVO (legado: las banderas; gobernada: la columna)."""
+    gobernada = f["relevo_version"] > 0
+    if f["estado"] != "abierta":
+        return Resultado(False, gobernada, f["relevo_version"], None, "no_abierta")
+    if regla_control.control_efectivo(f) != "humano":
+        return Resultado(False, gobernada, f["relevo_version"], None, "control_ia")
+    return None
 
 
 def _subir_version(cur, org, conversation_id, set_sql, params) -> int:
@@ -265,25 +281,44 @@ def intervenir(tenant: str, conversation_id: str, *, operador_id: str, operador_
 
 def tomar(tenant: str, conversation_id: str, *, operador_id: str, operador_nombre: str,
           clave: str | None = None) -> Resultado:
+    """
+    B3.4 (D4). Una conversacion en manos de personas y SIN asignar la toma
+    exactamente un operador. Con la fila bloqueada (_fila, FOR UPDATE), de dos
+    que toman a la vez el segundo la encuentra asignada y recibe 'ya_asignada':
+    nunca se pisa al primero. Pasar una conversacion de una persona a otra es
+    reasignar(), explicito y solo ADMIN.
+
+    'control_ia' si la atiende la IA: tomar no es un segundo camino para
+    intervenir. Legado (version 0): la misma exclusion sobre 'tomada_por', sin
+    evento ni version -- G8 adopta, no un clic.
+    """
     nombre, usuario = db.validar_autor(operador_nombre, operador_id)
 
     def cuerpo(cur, org, f):
+        precondicion = _es_de_personas(f)
+        if precondicion:
+            return precondicion
         if f["relevo_version"] == 0:
-            # Legado: lo mismo que hacia tomar_caso(), nada del modelo nuevo.
+            if f["tomada_por"]:
+                if f["tomada_por"] == nombre:
+                    return Resultado(False, False, 0, None, "ya_era_suya")
+                return Resultado(False, False, 0, None, "ya_asignada",
+                                 datos={"asignada_a_nombre": f["tomada_por"]})
             cur.execute("""update asistente.conversations
                            set tomada_por = %s, tomada_en = now(), actualizado_en = actualizado_en
                            where organization_id = %s and id = %s""", (nombre, org, conversation_id))
             return Resultado(True, False, 0, None, "legado")
-        if f["estado"] != "abierta" or f["control"] != "humano":
-            return Resultado(False, True, f["relevo_version"], None, "no_es_humana")
-        if f["asignada_a_usuario_id"] and str(f["asignada_a_usuario_id"]) == usuario:
-            return Resultado(False, True, f["relevo_version"], None, "ya_era_suya")
+        if f["asignada_a_usuario_id"]:
+            if str(f["asignada_a_usuario_id"]) == usuario:
+                return Resultado(False, True, f["relevo_version"], None, "ya_era_suya")
+            return Resultado(False, True, f["relevo_version"], None, "ya_asignada",
+                             datos={"asignada_a_nombre": f["asignada_a_nombre"]})
         version = _subir_version(
             cur, org, conversation_id,
             "asignada_a_usuario_id = %s, asignada_a_nombre = %s, asignada_en = now(), "
             "tomada_por = %s, tomada_en = now(), actualizado_en = actualizado_en",
             (usuario, nombre, nombre))
-        datos = {"version": version, "anterior_nombre": f["asignada_a_nombre"]}
+        datos = {"version": version, "anterior_nombre": None}
         ev = _evento(cur, org, conversation_id, "tomada", "operador", usuario, nombre, datos, clave)
         return Resultado(True, True, version, ev, datos=datos)
     return _ejecutar(tenant, conversation_id, clave, cuerpo, tipo="tomada", actor_id=usuario)
@@ -291,17 +326,28 @@ def tomar(tenant: str, conversation_id: str, *, operador_id: str, operador_nombr
 
 def soltar(tenant: str, conversation_id: str, *, operador_id: str, operador_nombre: str,
            clave: str | None = None) -> Resultado:
+    """
+    Solo quien la tiene asignada la suelta. Otro operador recibe 'no_es_suya';
+    sacarsela a alguien es reasignar(), de ADMIN. Soltar deja la conversacion
+    esperando a OTRA persona: el control no se toca.
+    """
     nombre, usuario = db.validar_autor(operador_nombre, operador_id)
 
     def cuerpo(cur, org, f):
         if f["relevo_version"] == 0:
+            if not f["tomada_por"]:
+                return Resultado(False, False, 0, None, "sin_asignacion")
+            if f["tomada_por"] != nombre:
+                return Resultado(False, False, 0, None, "no_es_suya",
+                                 datos={"asignada_a_nombre": f["tomada_por"]})
             cur.execute("""update asistente.conversations set tomada_por = null, tomada_en = null
                            where organization_id = %s and id = %s""", (org, conversation_id))
             return Resultado(True, False, 0, None, "legado")
-        if f["asignada_a_nombre"] is None:
+        if f["asignada_a_usuario_id"] is None:
             return Resultado(False, True, f["relevo_version"], None, "sin_asignacion")
-        # El control NO se toca: soltar deja la conversacion esperando a OTRA
-        # persona, no a la IA.
+        if str(f["asignada_a_usuario_id"]) != usuario:
+            return Resultado(False, True, f["relevo_version"], None, "no_es_suya",
+                             datos={"asignada_a_nombre": f["asignada_a_nombre"]})
         version = _subir_version(
             cur, org, conversation_id,
             "asignada_a_usuario_id = null, asignada_a_nombre = null, asignada_en = null, "
@@ -310,6 +356,53 @@ def soltar(tenant: str, conversation_id: str, *, operador_id: str, operador_nomb
         ev = _evento(cur, org, conversation_id, "soltada", "operador", usuario, nombre, datos, clave)
         return Resultado(True, True, version, ev, datos=datos)
     return _ejecutar(tenant, conversation_id, clave, cuerpo, tipo="soltada", actor_id=usuario)
+
+
+def reasignar(tenant: str, conversation_id: str, *, admin_id: str, admin_nombre: str,
+              destino_id: str, destino_nombre: str, motivo: str,
+              clave: str | None = None) -> Resultado:
+    """
+    T4 (D4). Pasa la conversacion a 'destino', este asignada a otro o libre.
+    Es la UNICA escritura que cambia una asignacion ajena, y la autoriza quien
+    llama: la ruta exige rol ADMIN (403) y valida el destino contra la
+    organizacion antes de llegar aca. Motivo obligatorio.
+
+    Evento 'reasignada' con quien la hizo (actor), el anterior y el nuevo
+    asignado, el motivo y la version.
+
+    Legado (version 0): 'legado_sin_relevo', no se escribe nada. Una
+    reasignacion tiene que quedar auditada, y el legado no tiene eventos:
+    se adopta primero (G8).
+    """
+    nombre_admin, id_admin = db.validar_autor(admin_nombre, admin_id)
+    nombre_destino, id_destino = db.validar_autor(destino_nombre, destino_id)
+    motivo = (motivo or "").strip()
+    if not motivo:
+        raise ValueError("la reasignacion exige un motivo")
+    if len(motivo) > MAX_TEXTO:
+        raise ValueError(f"el motivo supera {MAX_TEXTO} caracteres")
+
+    def cuerpo(cur, org, f):
+        if f["relevo_version"] == 0:
+            return Resultado(False, False, 0, None, "legado_sin_relevo")
+        precondicion = _es_de_personas(f)
+        if precondicion:
+            return precondicion
+        if f["asignada_a_usuario_id"] and str(f["asignada_a_usuario_id"]) == id_destino:
+            return Resultado(False, True, f["relevo_version"], None, "ya_era_del_destino")
+        version = _subir_version(
+            cur, org, conversation_id,
+            "asignada_a_usuario_id = %s, asignada_a_nombre = %s, asignada_en = now(), "
+            "tomada_por = %s, tomada_en = now(), actualizado_en = actualizado_en",
+            (id_destino, nombre_destino, nombre_destino))
+        datos = {"version": version,
+                 "anterior_usuario_id": str(f["asignada_a_usuario_id"]) if f["asignada_a_usuario_id"] else None,
+                 "anterior_nombre": f["asignada_a_nombre"],
+                 "nuevo_usuario_id": id_destino, "nuevo_nombre": nombre_destino,
+                 "motivo": motivo}
+        ev = _evento(cur, org, conversation_id, "reasignada", "operador", id_admin, nombre_admin, datos, clave)
+        return Resultado(True, True, version, ev, datos=datos)
+    return _ejecutar(tenant, conversation_id, clave, cuerpo, tipo="reasignada", actor_id=id_admin)
 
 
 def resolver(tenant: str, conversation_id: str, *, operador_id: str, operador_nombre: str,

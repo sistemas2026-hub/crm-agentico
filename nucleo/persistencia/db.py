@@ -571,7 +571,7 @@ def mensajes_de(tenant: str, conversation_id: str) -> dict:
                       -- El control del relevo (B3): la pantalla recibe el
                       -- control EFECTIVO ya calculado (api.py), no la regla.
                       relevo_version, control, control_motivo,
-                      asignada_a_nombre, aviso_relevo,
+                      asignada_a_usuario_id, asignada_a_nombre, aviso_relevo,
                       -- Lo que el modelo ya habia escrito al escalar y hasta
                       -- ahora solo viajaba a la descripcion del ticket. Es lo
                       -- que arma el resumen de arriba en el detalle: que

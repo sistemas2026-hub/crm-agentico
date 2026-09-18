@@ -241,9 +241,23 @@
   let marcandoAtendida = $state(false);
   let errorAtender = $state('');
 
-  /** Quien tiene el caso, o '' si no lo tomo nadie. Reversible: soltar lo
-      devuelve a "Por atender". */
-  let tomadaPor = $state(untrack(() => data.conversacion?.tomada_por ?? ''));
+  /* Quien tiene la conversacion, leido SIEMPRE del encabezado que manda el
+      motor -- nunca puesto a mano por un clic (B3.4, D4). Si dos personas la
+      toman a la vez, la pantalla de la que perdio no puede creer que gano: el
+      409 refresca y muestra a quien quedo.
+      Gobernada: asignada_a_* por id de usuario. Legado: tomada_por, que es un
+      nombre, hasta que G8 la adopte. */
+  let gobernada = $derived((conversacion.relevo_version ?? 0) > 0);
+  let asignadaA = $derived(
+    (gobernada ? conversacion.asignada_a_nombre : conversacion.tomada_por) ?? ''
+  );
+  let esMia = $derived(
+    gobernada
+      ? !!conversacion.asignada_a_usuario_id &&
+          String(conversacion.asignada_a_usuario_id) === String(data.yo?.id ?? '')
+      : !!conversacion.tomada_por && conversacion.tomada_por === (data.yo?.nombre ?? '')
+  );
+  let esAdmin = $derived(data.rol === 'ADMIN');
 
   async function marcarAtendida() {
     if (marcandoAtendida) return;
@@ -258,18 +272,21 @@
           // Soltar es el mismo camino: quien lo tomo por error, o termina su
           // turno, lo devuelve a la cola. Tomar un caso NO es resolverlo, y
           // por eso se puede deshacer -- 'Marcar como resuelta' no.
-          soltar: !!tomadaPor,
+          soltar: esMia,
           // Una por clic: si la respuesta se pierde y se vuelve a pulsar, el
           // motor reconoce la misma operacion y no deja dos eventos.
           clave_operacion: crypto.randomUUID()
         })
       });
-      const datos = await resp.json();
+      const datos = await resp.json().catch(() => ({}));
       if (!resp.ok) {
-        errorAtender = datos.error || 'No se pudo guardar.';
+        errorAtender = conflictoDeAsignacion(datos);
+        // Otra persona gano, o ya no era de quien la soltaba: se relee para
+        // mostrar como quedo, en vez de dejar la pantalla con lo que se creia.
+        await sondearMensajesNuevos();
         return;
       }
-      tomadaPor = datos.tomada ? (datos.por || 'vos') : '';
+      await sondearMensajesNuevos();
       // El servidor toma el ticket a nombre de quien dio "Atender" (ver el
       // proxy) -- reflejarlo ya mismo en "Asignado a", sin esperar a que
       // alguien reabra el ticket para verlo.
@@ -282,6 +299,69 @@
       errorAtender = err?.message || 'No se pudo guardar.';
     } finally {
       marcandoAtendida = false;
+    }
+  }
+
+  /** Un 409 de asignacion, dicho como lo que paso. */
+  function conflictoDeAsignacion(/** @type {any} */ datos) {
+    const quien = datos?.asignada_a;
+    switch (datos?.codigo) {
+      case 'ya_asignada':
+        return quien ? `La tomó ${quien} antes.` : 'Otra persona la tomó antes.';
+      case 'no_es_suya':
+        return quien ? `La tiene ${quien}: solo esa persona puede soltarla.` : 'Ya no la tenés asignada.';
+      case 'control_ia':
+        return 'La atiende la IA: para tomarla usá «Intervenir».';
+      case 'no_abierta':
+        return 'La conversación ya está cerrada.';
+      default:
+        return datos?.error || 'No se pudo guardar.';
+    }
+  }
+
+  // --- reasignar (solo ADMIN, B3.4 / T4) -------------------------------------
+  let reasignando = $state(false);
+  let destinoReasignar = $state('');
+  let motivoReasignar = $state('');
+  let guardandoReasignar = $state(false);
+  let errorReasignar = $state('');
+
+  async function reasignar() {
+    if (guardandoReasignar) return;
+    errorReasignar = '';
+    if (!destinoReasignar) {
+      errorReasignar = 'Elegí a quién.';
+      return;
+    }
+    if (!motivoReasignar.trim()) {
+      errorReasignar = 'El motivo es obligatorio.';
+      return;
+    }
+    guardandoReasignar = true;
+    try {
+      const resp = await fetch(`/api/conversaciones/${conversacion.id}/reasignar`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          destino_usuario_id: destinoReasignar,
+          motivo: motivoReasignar.trim(),
+          clave_operacion: crypto.randomUUID()
+        })
+      });
+      const datos = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        errorReasignar = conflictoDeAsignacion(datos);
+      } else {
+        reasignando = false;
+        destinoReasignar = '';
+        motivoReasignar = '';
+        invalidate('app:conversaciones');
+      }
+      await sondearMensajesNuevos();
+    } catch (/** @type {any} */ err) {
+      errorReasignar = err?.message || 'No se pudo reasignar.';
+    } finally {
+      guardandoReasignar = false;
     }
   }
 
@@ -1538,21 +1618,27 @@
       <!-- Tomar el caso, y soltarlo. Son el mismo boton porque son el mismo
            gesto en dos sentidos, y porque tener dos ("Atender" / "Soltar")
            obligaria a mirar cual esta activo para saber quien lo tiene. -->
-      {#if conversacion.necesita_atencion_humana && !atendida}
-        {#if tomadaPor}
-          <span class="aviso-tomada" title="Lo tomó {tomadaPor}">
-            <CircleCheck size={13} /> En atención
+      {#if escalada && !atendida && conversacion.estado !== 'cerrada'}
+        {#if esMia}
+          <span class="aviso-tomada">
+            <CircleCheck size={13} /> Asignada a mí
           </span>
           <button
             type="button"
             class="v2-btn v2-btn-sm aviso-atender"
-            title="Devuelve el caso a «Por atender» para que lo tome otra persona."
+            title="Devuelve el caso a «Por atender» para que lo tome otra persona. Sigue en manos del equipo, no vuelve a la IA."
             onclick={marcarAtendida}
             disabled={marcandoAtendida}
             aria-busy={marcandoAtendida}
           >
             {marcandoAtendida ? 'Soltando…' : 'Soltar'}
           </button>
+        {:else if asignadaA}
+          <!-- De otra persona: no se ofrece soltar ni tomar. Pasarla es
+               reasignar, y eso es de un administrador. -->
+          <span class="aviso-tomada" title="La tiene {asignadaA}">
+            <CircleCheck size={13} /> En atención: {asignadaA}
+          </span>
         {:else}
           <button
             type="button"
@@ -1563,7 +1649,17 @@
             aria-busy={marcandoAtendida}
           >
             <CircleCheck size={13} />
-            {marcandoAtendida ? 'Tomando…' : 'Atender'}
+            {marcandoAtendida ? 'Tomando…' : 'Tomar'}
+          </button>
+        {/if}
+        {#if esAdmin && gobernada && data.operadores?.length}
+          <button
+            type="button"
+            class="v2-btn v2-btn-sm v2-btn-quiet aviso-atender"
+            onclick={() => { reasignando = !reasignando; errorReasignar = ''; }}
+            aria-expanded={reasignando}
+          >
+            Reasignar
           </button>
         {/if}
       {:else if atendida && conversacion.estado !== 'cerrada'}
@@ -1601,6 +1697,33 @@
       {#if errorAtender}<span class="aviso-mal">{errorAtender}</span>{/if}
       {#if errorResolver}<span class="aviso-mal">{errorResolver}</span>{/if}
     </p>
+    {#if reasignando && esAdmin && gobernada}
+      <form class="reasignar" onsubmit={(e) => { e.preventDefault(); reasignar(); }}>
+        <label>
+          <span>Pasar a</span>
+          <select bind:value={destinoReasignar} required>
+            <option value="" disabled>Elegí a quién…</option>
+            {#each data.operadores as o (o.usuario_id)}
+              <option value={o.usuario_id}>{o.nombre}</option>
+            {/each}
+          </select>
+        </label>
+        <label>
+          <span>Motivo (obligatorio)</span>
+          <textarea bind:value={motivoReasignar} rows="2" maxlength="500" required></textarea>
+        </label>
+        <div class="reasignar-acciones">
+          <button type="submit" class="v2-btn v2-btn-sm v2-btn-ink" disabled={guardandoReasignar}
+                  aria-busy={guardandoReasignar}>
+            {guardandoReasignar ? 'Reasignando…' : 'Confirmar reasignación'}
+          </button>
+          <button type="button" class="v2-btn v2-btn-sm v2-btn-quiet" onclick={() => (reasignando = false)}>
+            Cancelar
+          </button>
+          {#if errorReasignar}<span class="aviso-mal">{errorReasignar}</span>{/if}
+        </div>
+      </form>
+    {/if}
   {/if}
 
   <!-- Tomar un caso escalado empieza siempre igual: leer el hilo entero para
@@ -3468,6 +3591,35 @@
   .aviso-resolver:hover {
     border-color: var(--v2-slate);
     background: var(--v2-line-soft);
+  }
+
+  .reasignar {
+    display: grid;
+    gap: 8px;
+    max-width: 100%;
+    margin: 6px 0 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--v2-line, #ddd);
+    border-radius: 8px;
+  }
+
+  .reasignar label {
+    display: grid;
+    gap: 4px;
+    font-size: 12px;
+  }
+
+  .reasignar select,
+  .reasignar textarea {
+    width: 100%;
+    font: inherit;
+  }
+
+  .reasignar-acciones {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
   }
 
   .aviso-tomada {

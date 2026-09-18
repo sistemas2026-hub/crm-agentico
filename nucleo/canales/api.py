@@ -6307,8 +6307,88 @@ def conversaciones_atender(id_conversacion):
 
     if r.motivo == "no_existe":
         return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+    conflicto = _conflicto_de_asignacion(r)
+    if conflicto:
+        return conflicto
+    # Exito, o nada que hacer porque ya estaba como se pidio (ya era suya, ya
+    # estaba libre, el mismo clic reintentado).
     return jsonify({"tomada": not soltar, "por": None if soltar else autor,
-                    "aplicada": r.aplicada, "relevo_version": r.version})
+                    "aplicada": r.aplicada, "relevo_version": r.version,
+                    "reintento": r.motivo == "reintento"})
+
+
+# Los 409 de la asignacion (B3.4). 'codigo' es lo que lee la pantalla para
+# refrescar y decir que paso; 'asignada_a' dice quien gano, cuando lo hay.
+_CONFLICTOS_DE_ASIGNACION = {
+    "ya_asignada": "Esta conversacion ya la tomo otra persona.",
+    "no_es_suya": "Solo quien tiene la conversacion puede soltarla.",
+    "control_ia": "Esta conversacion la atiende la IA: para tomarla, usa Intervenir.",
+    "no_abierta": "Esta conversacion ya esta cerrada.",
+    "clave_ajena": "Esa clave de operacion ya pertenece a otra operacion.",
+    "legado_sin_relevo": "Esta conversacion es anterior al relevo: no se puede reasignar hasta adoptarla.",
+}
+
+
+def _conflicto_de_asignacion(r):
+    mensaje = _CONFLICTOS_DE_ASIGNACION.get(r.motivo)
+    if not mensaje:
+        return None
+    codigo = "clave_de_otra_operacion" if r.motivo == "clave_ajena" else r.motivo
+    return jsonify({"error": mensaje, "codigo": codigo,
+                    "asignada_a": (r.datos or {}).get("asignada_a_nombre")}), 409
+
+
+@app.post("/conversaciones/<id_conversacion>/reasignar")
+def conversaciones_reasignar(id_conversacion):
+    """
+    T4 (B3.4, D4): un ADMIN pasa la conversacion a otra persona, o a si mismo.
+
+    Cuerpo: {tenant, autor, autor_usuario_id, autor_rol, destino_usuario_id,
+             destino_nombre, motivo, clave_operacion?}
+
+    El actor, su rol y el destino los arma el proxy DESDE LA SESION (el rol del
+    JWT verificado; el destino, contra las personas activas de la
+    organizacion), nunca el navegador. Esta ruta queda detras del token de
+    servicio (G1), y ademas exige el rol: un pedido sin 'ADMIN' es 403 aunque
+    traiga todo lo demas -- no 409, el problema es de autorizacion.
+
+      200  reasignada (o ya era del destino, o reintento de la misma operacion)
+      400  sin motivo, o autor/destino invalidos
+      403  el actor no es ADMIN
+      404  no existe
+      409  cerrada, bajo control ia, legado sin adoptar, o clave ajena
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    try:
+        autor, autor_id, _ = _autor_y_clave(cuerpo)
+    except persistencia.AutorInvalido as e:
+        return jsonify({"error": f"Autor invalido: {e}"}), 400
+    if (cuerpo.get("autor_rol") or "").strip().upper() != "ADMIN":
+        return jsonify({"error": "Solo un administrador puede reasignar una conversacion.",
+                        "codigo": "no_es_admin"}), 403
+    try:
+        r = transiciones.reasignar(
+            tenant, id_conversacion, admin_id=autor_id, admin_nombre=autor,
+            destino_id=cuerpo.get("destino_usuario_id") or "",
+            destino_nombre=cuerpo.get("destino_nombre") or "",
+            motivo=cuerpo.get("motivo") or "",
+            clave=(cuerpo.get("clave_operacion") or "").strip() or None)
+    except (persistencia.AutorInvalido, ValueError) as e:
+        return jsonify({"error": f"Reasignacion invalida: {e}"}), 400
+    except Exception as e:
+        registrar("conversaciones", "fallo al reasignar", error=e)
+        return jsonify({"error": "No se pudo guardar."}), 500
+    if r.motivo == "no_existe":
+        return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+    conflicto = _conflicto_de_asignacion(r)
+    if conflicto:
+        return conflicto
+    return jsonify({"reasignada": True, "aplicada": r.aplicada, "relevo_version": r.version,
+                    "asignada_a": (r.datos or {}).get("nuevo_nombre") if r.aplicada else None,
+                    "reintento": r.motivo == "reintento"})
 
 
 @app.post("/conversaciones/<id_conversacion>/humano/media")

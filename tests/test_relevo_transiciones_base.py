@@ -35,6 +35,13 @@ B3.2 de SPEC/CONTRATO_RELEVO_IA_HUMANO.md. Base efimera del ledger.
      intervencion, una). Y el cierre por confirmacion no empieza si alguien
      intervino mientras corria el evaluador. La escalada PROPIA sigue
      sincronizando con el CRM (seccion 5).
+ 13. B3.4 (D4), por las rutas HTTP reales: tomar normal; un segundo operador
+     no roba (409 ya_asignada); dos a la vez con claves distintas -> uno gana;
+     reintento del mismo actor y clave ajena; tomar bajo control ia -> 409
+     control_ia; soltar solo el dueno; reasignar solo ADMIN (403), con motivo
+     (400), auditado y no sobre legado; el legado con la misma exclusion sobre
+     tomada_por sin eventos ni version; y tomar contra reasignar a la vez deja
+     un solo dueno coherente con el ultimo evento.
  12. La sincronizacion de una escalada ya comprometida (SYNC_ESCALADA): una
      toma posterior NO la cancela (ticket, caso y aviso salen); una devolucion
      o un cierre antes del efecto SI; y el punto de no retorno: una llamada
@@ -124,7 +131,12 @@ def estado(conv):
 
 def eventos(conv):
     return q("""select tipo, actor_tipo, actor_nombre, (datos->>'version')::int, datos
-                from asistente.relevo_eventos where conversation_id = %s order by creado_en""", (conv,))
+                from asistente.relevo_eventos where conversation_id = %s
+                order by (datos->>'version')::int nulls first, creado_en""", (conv,))
+# ORDEN POR VERSION, NO POR creado_en (D27). creado_en es now(): la hora en que
+# EMPEZO la transaccion. Con dos transiciones concurrentes, la que espero el
+# lock de la fila puede tener una hora anterior y haber escrito despues --
+# visto en la seccion 13 (tomar contra reasignar).
 
 
 def nueva_conv(org, tel):
@@ -1007,6 +1019,199 @@ try:
             setattr(m, n, f)
         api._TOKEN_SERVICIO = token11
         api._sesiones.clear()
+
+    # -----------------------------------------------------------------------
+    print("\n== 13. B3.4: toma atomica y reasignacion (D4) ==")
+    ADMIN = ("9b2d5c1e-3f4a-4b6c-8d7e-1a2b3c4d5e6f", "Marta Admin")
+    token13 = api._TOKEN_SERVICIO
+    api._TOKEN_SERVICIO = None
+    http = api.app.test_client()
+
+    def atender(conv, op, clave=None, soltar=False):
+        return http.post(f"/conversaciones/{conv}/atender", json={
+            "tenant": TENANT, "autor": op[1], "autor_usuario_id": op[0],
+            "soltar": soltar, "clave_operacion": clave})
+
+    def reasignar_http(conv, op, destino, motivo="cambio de turno", rol="ADMIN", clave=None):
+        return http.post(f"/conversaciones/{conv}/reasignar", json={
+            "tenant": TENANT, "autor": op[1], "autor_usuario_id": op[0], "autor_rol": rol,
+            "destino_usuario_id": destino[0], "destino_nombre": destino[1],
+            "motivo": motivo, "clave_operacion": clave})
+
+    def escalada_libre(tel):
+        conv = nueva_conv(org, tel)
+        T.escalar(TENANT, conv)
+        return conv
+
+    def codigo(r):
+        return (r.get_json() or {}).get("codigo")
+    try:
+        # 1. toma normal
+        c = escalada_libre("573000000130")
+        v0 = estado(c)[3]
+        r = atender(c, ANA, "t-ana")
+        e = estado(c)
+        comprobar(r.status_code == 200 and e[2] == "Ana Perez" and e[3] == v0 + 1
+                  and [x[0] for x in eventos(c)] == ["escalada", "tomada"],
+                  f"toma normal: 200, asignada a Ana, version +1, evento tomada ({r.status_code}, {e[:4]})")
+
+        # 2. intento de robo
+        r = atender(c, LUIS, "t-luis")
+        comprobar(r.status_code == 409 and codigo(r) == "ya_asignada"
+                  and (r.get_json() or {}).get("asignada_a") == "Ana Perez"
+                  and estado(c)[2] == "Ana Perez" and estado(c)[3] == v0 + 1 and len(eventos(c)) == 2,
+                  f"Luis intenta tomarla: 409 ya_asignada, dice que la tiene Ana, nada cambia ({r.status_code})")
+
+        # 3. reintento del mismo actor y clave ajena
+        r = atender(c, ANA, "t-ana")
+        comprobar(r.status_code == 200 and (r.get_json() or {}).get("reintento")
+                  and estado(c)[3] == v0 + 1 and len(eventos(c)) == 2,
+                  "Ana reintenta la misma operacion: 200 reintento, sin evento ni version")
+        r = atender(c, LUIS, "t-ana")
+        comprobar(r.status_code == 409 and codigo(r) == "clave_de_otra_operacion" and estado(c)[2] == "Ana Perez",
+                  f"Luis con la clave de Ana: 409 clave_de_otra_operacion ({r.status_code} {codigo(r)})")
+
+        # 4. soltar: solo la duena
+        r = atender(c, LUIS, "s-luis", soltar=True)
+        comprobar(r.status_code == 409 and codigo(r) == "no_es_suya" and estado(c)[2] == "Ana Perez",
+                  f"Luis intenta soltarla: 409 no_es_suya, sigue de Ana ({r.status_code})")
+        r = atender(c, ANA, "s-ana", soltar=True)
+        e = estado(c)
+        comprobar(r.status_code == 200 and e[2] is None and e[0] == "humano",
+                  f"Ana la suelta: libre y SIGUE en manos de personas ({e[:3]})")
+
+        # 5. carrera con claves distintas (varias vueltas)
+        ganadores_ok = True
+        for vuelta in range(5):
+            cc = escalada_libre(f"57300000014{vuelta}")
+            barrera = threading.Barrier(2)
+            res = []
+
+            def correr_toma(op, clave, conv=cc, b=barrera, salida=res):
+                b.wait()
+                rr = atender(conv, op, clave)
+                salida.append((op[1], rr.status_code, codigo(rr)))
+            hilos = [threading.Thread(target=correr_toma, args=(ANA, f"c-ana-{vuelta}")),
+                     threading.Thread(target=correr_toma, args=(LUIS, f"c-luis-{vuelta}"))]
+            for h in hilos:
+                h.start()
+            for h in hilos:
+                h.join()
+            ganador = [n for n, st, _ in res if st == 200]
+            perdedor = [cd for _, st, cd in res if st == 409]
+            ev = [x for x in eventos(cc) if x[0] == "tomada"]
+            ganadores_ok = ganadores_ok and (len(ganador) == 1 and perdedor == ["ya_asignada"]
+                                             and estado(cc)[2] == ganador[0] and len(ev) == 1
+                                             and ev[0][2] == ganador[0])
+        comprobar(ganadores_ok, "dos operadores a la vez, 5 vueltas: siempre uno 200 y otro 409 ya_asignada, "
+                                "un dueno, un evento tomada, del ganador")
+
+        # 6. tomar bajo control ia -> intervenir
+        cia = nueva_conv(org, "573000000150")          # nunca escalo: la atiende la IA
+        r = atender(cia, ANA, "ia-ana")
+        comprobar(r.status_code == 409 and codigo(r) == "control_ia" and estado(cia)[2] is None
+                  and estado(cia)[3] == 0 and estado(cia)[7] is None,
+                  f"tomar una conversacion de la IA: 409 control_ia, nada cambia ({r.status_code} {codigo(r)})")
+        cdev = escalada_libre("573000000151")
+        T.devolver_a_ia(TENANT, cdev, operador_id=ANA[0], operador_nombre=ANA[1])
+        vdev = estado(cdev)[3]
+        r = atender(cdev, LUIS, "dev-luis")
+        comprobar(r.status_code == 409 and codigo(r) == "control_ia" and estado(cdev)[3] == vdev,
+                  "gobernada devuelta a la IA: 409 control_ia, sin version")
+
+        # 7. reasignar
+        cr = escalada_libre("573000000160")
+        atender(cr, ANA, "r-ana")
+        vr = estado(cr)[3]
+        r = reasignar_http(cr, LUIS, LUIS, rol="USER", clave="r-user")
+        comprobar(r.status_code == 403 and codigo(r) == "no_es_admin" and estado(cr)[2] == "Ana Perez"
+                  and estado(cr)[3] == vr,
+                  f"un operador no ADMIN intenta reasignar: 403, nada cambia ({r.status_code})")
+        r = reasignar_http(cr, ADMIN, LUIS, motivo="  ", clave="r-sin-motivo")
+        comprobar(r.status_code == 400 and estado(cr)[2] == "Ana Perez",
+                  f"ADMIN sin motivo: 400 ({r.status_code})")
+        r = reasignar_http(cr, ADMIN, LUIS, motivo="Ana termino su turno", clave="r-admin")
+        e = estado(cr)
+        ev = eventos(cr)[-1]
+        comprobar(r.status_code == 200 and e[2] == "Luis Rojas" and e[3] == vr + 1 and ev[0] == "reasignada"
+                  and ev[2] == "Marta Admin" and ev[4].get("anterior_nombre") == "Ana Perez"
+                  and ev[4].get("anterior_usuario_id") == ANA[0] and ev[4].get("nuevo_nombre") == "Luis Rojas"
+                  and ev[4].get("nuevo_usuario_id") == LUIS[0] and ev[4].get("motivo") == "Ana termino su turno"
+                  and ev[3] == vr + 1,
+                  f"ADMIN reasigna Ana -> Luis: evento con actor, anterior, nuevo, motivo y version ({e[:4]})")
+        r = reasignar_http(cr, ADMIN, LUIS, motivo="Ana termino su turno", clave="r-admin")
+        comprobar(r.status_code == 200 and (r.get_json() or {}).get("reintento") and estado(cr)[3] == vr + 1,
+                  "reintento de la misma reasignacion: 200 reintento, sin evento ni version")
+        r = atender(cr, ANA, "r-ana-2", soltar=True)
+        comprobar(r.status_code == 409 and codigo(r) == "no_es_suya",
+                  "despues de reasignada, Ana ya no puede soltarla")
+
+        # 8. legado (version 0): misma exclusion, sin eventos ni version
+        leg = str(q("""insert into asistente.conversations
+                         (organization_id, canal, usuario_externo, escalada_a_humano, necesita_atencion_humana)
+                       values (%s, 'whatsapp-simulado', '573000000170', true, true) returning id""", (org,))[0][0])
+        r1 = atender(leg, ANA, "l-ana")
+        r2 = atender(leg, LUIS, "l-luis")
+        r3 = atender(leg, LUIS, "l-luis-s", soltar=True)
+        e = estado(leg)
+        comprobar(r1.status_code == 200 and r2.status_code == 409 and codigo(r2) == "ya_asignada"
+                  and r3.status_code == 409 and codigo(r3) == "no_es_suya"
+                  and e[7] == "Ana Perez" and e[3] == 0 and e[2] is None and eventos(leg) == [],
+                  f"legado: Ana la toma, Luis no la roba ni la suelta; sin evento, version 0, sin adopcion ({e})")
+        r = reasignar_http(leg, ADMIN, LUIS, clave="l-admin")
+        comprobar(r.status_code == 409 and codigo(r) == "legado_sin_relevo" and estado(leg)[7] == "Ana Perez"
+                  and estado(leg)[3] == 0,
+                  f"reasignar legado: 409 legado_sin_relevo, no se adopta por un clic ({r.status_code})")
+        leg2 = str(q("""insert into asistente.conversations
+                          (organization_id, canal, usuario_externo, escalada_a_humano, necesita_atencion_humana)
+                        values (%s, 'whatsapp-simulado', '573000000171', true, true) returning id""", (org,))[0][0])
+        barrera = threading.Barrier(2)
+        res_leg = []
+
+        def toma_legado(op, clave):
+            barrera.wait()
+            res_leg.append(atender(leg2, op, clave).status_code)
+        hilos = [threading.Thread(target=toma_legado, args=(ANA, "l2-ana")),
+                 threading.Thread(target=toma_legado, args=(LUIS, "l2-luis"))]
+        for h in hilos:
+            h.start()
+        for h in hilos:
+            h.join()
+        comprobar(sorted(res_leg) == [200, 409] and estado(leg2)[7] in ("Ana Perez", "Luis Rojas")
+                  and estado(leg2)[3] == 0,
+                  f"legado, dos a la vez: uno gana, el otro 409 ({res_leg}, {estado(leg2)[7]})")
+
+        # 9. tomar contra reasignar a la vez: un dueno, coherente con el ultimo evento
+        coherente = True
+        for vuelta in range(5):
+            cx = escalada_libre(f"57300000018{vuelta}")
+            barrera = threading.Barrier(2)
+
+            def toma_x(conv=cx, b=barrera):
+                b.wait()
+                atender(conv, ANA, f"x-ana-{vuelta}")
+
+            def reasigna_x(conv=cx, b=barrera):
+                b.wait()
+                reasignar_http(conv, ADMIN, LUIS, motivo="balanceo", clave=f"x-admin-{vuelta}")
+            hilos = [threading.Thread(target=toma_x), threading.Thread(target=reasigna_x)]
+            for h in hilos:
+                h.start()
+            for h in hilos:
+                h.join()
+            evs = [x for x in eventos(cx) if x[0] in ("tomada", "reasignada")]
+            ultimo = evs[-1] if evs else None
+            dueno = estado(cx)[2]
+            esperado = (ultimo[2] if ultimo and ultimo[0] == "tomada"
+                        else (ultimo[4].get("nuevo_nombre") if ultimo else None))
+            versiones = [x[3] for x in eventos(cx)]
+            coherente = coherente and (dueno == "Luis Rojas" and dueno == esperado
+                                       and versiones == sorted(versiones) and len(set(versiones)) == len(versiones)
+                                       and estado(cx)[3] == versiones[-1])
+        comprobar(coherente, "tomar contra reasignar a la vez, 5 vueltas: la reasignacion siempre queda, el dueno "
+                             "coincide con el ultimo evento y las versiones no se repiten")
+    finally:
+        api._TOKEN_SERVICIO = token13
 finally:
     try:
         with psycopg.connect(dsn("postgres"), autocommit=True) as con:

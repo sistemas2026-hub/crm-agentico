@@ -47,13 +47,19 @@ export async function POST({ params, locals, fetch, cookies, request }) {
         clave_operacion: typeof cuerpo?.clave_operacion === 'string' ? cuerpo.clave_operacion : undefined
       })
     });
-    const datos = await resp.json();
+    const datos = await resp.json().catch(() => ({}));
     if (!resp.ok) {
-      return json({ error: datos.error || 'No se pudo guardar' }, { status: resp.status });
+      // El 409 viaja entero: 'codigo' y 'asignada_a' son lo que la pantalla
+      // necesita para decir que paso (otra persona la tomo primero) en vez de
+      // un error generico (B3.4).
+      return json({ error: datos.error || 'No se pudo guardar', codigo: datos.codigo,
+        asignada_a: datos.asignada_a }, { status: resp.status });
     }
 
     let asignado = null;
-    if (casoId) {
+    // Solo al TOMAR y solo si de verdad se tomo ahora: al soltar, o si el
+    // motor no cambio nada, asignarse el ticket seria mentirle al CRM.
+    if (casoId && !cuerpo?.soltar && datos.aplicada) {
       try {
         const { owners } = await getTicketFormOptions({ cookies });
         const propio = owners.find(

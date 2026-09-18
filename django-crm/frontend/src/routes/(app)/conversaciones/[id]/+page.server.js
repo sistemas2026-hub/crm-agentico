@@ -3,6 +3,7 @@ import { env } from '$env/dynamic/private';
 import { getTicket, getTicketFormOptions, updateTicket } from '$lib/server/v2/tickets.js';
 import { readableError } from '$lib/server/v2/form-errors.js';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
+import { operadoresDeLaOrg, rolDeSesion } from '$lib/server/v2/operadores.js';
 
 /**
  * Server load: el hilo de una conversacion puntual, mas -- si ya se escalo
@@ -14,7 +15,7 @@ import { headersMotor } from '$lib/server/v2/motor-headers.js';
  *
  * @type {import('./$types').PageServerLoad}
  */
-export async function load({ fetch, cookies, params }) {
+export async function load({ fetch, cookies, params, locals }) {
   const baseUrl = env.PRIVATE_ASISTENTE_URL;
   const tenant = env.PRIVATE_ASISTENTE_TENANT;
   if (!baseUrl || !tenant) {
@@ -94,7 +95,21 @@ export async function load({ fetch, cookies, params }) {
     }
   }
 
-  return { conversacion: datos.conversacion, mensajes: datos.mensajes, caso, owners, herramientas, diagnostico, casos };
+  // Quien mira y con que rol, para que la pantalla sepa si la conversacion es
+  // suya y si puede reasignar (B3.4). Solo muestra: el motor decide.
+  const rol = rolDeSesion(locals);
+  let operadores = [];
+  if (rol === 'ADMIN') {
+    try {
+      operadores = await operadoresDeLaOrg(cookies);
+    } catch {
+      // Sin la lista no se ofrece reasignar; el resto de la pantalla sigue.
+    }
+  }
+  const yo = { id: locals.user?.id ?? '', nombre: (locals.user?.name || locals.user?.email || '').trim() };
+
+  return { conversacion: datos.conversacion, mensajes: datos.mensajes, caso, owners, herramientas, diagnostico, casos,
+    yo, rol, operadores };
 }
 
 /** @type {import('./$types').Actions} */
