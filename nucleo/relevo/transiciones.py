@@ -142,10 +142,20 @@ def _fila(cur, org, conversation_id):
 
 
 def _evento(cur, org, conversation_id, tipo, actor_tipo, actor_id, actor_nombre, datos, clave):
+    # 'creado_en' explicito con clock_timestamp() y NO el default now() (D27).
+    # now() es la hora en que EMPEZO la transaccion: de dos transiciones a la
+    # vez sobre la misma conversacion, la que espero el lock de la fila puede
+    # quedar con una hora ANTERIOR habiendo escrito despues -- visto con una
+    # reasignacion (v3) fechada antes que la toma (v2) que reemplazo.
+    # clock_timestamp() se evalua al insertar, ya con la fila bloqueada, asi
+    # que sigue el mismo orden que las versiones.
+    #
+    # El orden CAUSAL sigue siendo datos.version; esto hace que la hora que se
+    # MUESTRA no lo contradiga. No se reescribe nada de lo ya guardado.
     cur.execute("""insert into asistente.relevo_eventos
                      (organization_id, conversation_id, tipo, datos_version, actor_tipo,
-                      actor_usuario_id, actor_nombre, datos, clave_idempotencia)
-                   values (%s, %s, %s, %s, %s, %s, %s, %s, %s) returning id""",
+                      actor_usuario_id, actor_nombre, datos, clave_idempotencia, creado_en)
+                   values (%s, %s, %s, %s, %s, %s, %s, %s, %s, clock_timestamp()) returning id""",
                 (org, conversation_id, tipo, DATOS_VERSION, actor_tipo, actor_id, actor_nombre,
                  Jsonb(validar_datos(tipo, datos)), clave))
     return str(cur.fetchone()["id"])

@@ -61,6 +61,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
@@ -130,7 +131,7 @@ def estado(conv):
 
 
 def eventos(conv):
-    return q("""select tipo, actor_tipo, actor_nombre, (datos->>'version')::int, datos
+    return q("""select tipo, actor_tipo, actor_nombre, (datos->>'version')::int, datos, creado_en
                 from asistente.relevo_eventos where conversation_id = %s
                 order by (datos->>'version')::int nulls first, creado_en""", (conv,))
 # ORDEN POR VERSION, NO POR creado_en (D27). creado_en es now(): la hora en que
@@ -1205,11 +1206,55 @@ try:
             esperado = (ultimo[2] if ultimo and ultimo[0] == "tomada"
                         else (ultimo[4].get("nuevo_nombre") if ultimo else None))
             versiones = [x[3] for x in eventos(cx)]
+            # D27: con la hora tomada DESPUES del lock (clock_timestamp), el
+            # orden por hora ya no contradice al de versiones.
+            horas = [x[5] for x in sorted(eventos(cx), key=lambda x: x[3])]
             coherente = coherente and (dueno == "Luis Rojas" and dueno == esperado
                                        and versiones == sorted(versiones) and len(set(versiones)) == len(versiones)
-                                       and estado(cx)[3] == versiones[-1])
+                                       and estado(cx)[3] == versiones[-1]
+                                       and horas == sorted(horas))
         comprobar(coherente, "tomar contra reasignar a la vez, 5 vueltas: la reasignacion siempre queda, el dueno "
-                             "coincide con el ultimo evento y las versiones no se repiten")
+                             "coincide con el ultimo evento, las versiones no se repiten y las horas no decrecen (D27)")
+        # 10. D27, forzado: una transicion que ABRE su transaccion antes y
+        # escribe DESPUES no puede quedar fechada antes. Con el default now()
+        # (la hora del BEGIN) quedaba invertida; con clock_timestamp(), no.
+        # Se provoca a proposito en vez de esperar a que la carrera lo pegue:
+        # en 5 vueltas al azar puede no pasar nunca.
+        demora = threading.local()
+        real_sesion = db.sesion
+
+        @contextmanager
+        def sesion_demorada(tenant):
+            with real_sesion(tenant) as par:
+                if getattr(demora, "activa", False):
+                    par[0].execute("select 1")      # aca empieza la transaccion: now() queda fijado
+                    time.sleep(1.2)
+                yield par
+        db.sesion = sesion_demorada
+        try:
+            cd27 = escalada_libre("573000000190")
+            lento = {}
+
+            def toma_lenta():
+                demora.activa = True
+                try:
+                    lento["r"] = T.tomar(TENANT, cd27, operador_id=ANA[0], operador_nombre=ANA[1])
+                finally:
+                    demora.activa = False
+            h = threading.Thread(target=toma_lenta)
+            h.start()
+            time.sleep(0.4)                          # la otra transicion entra y termina primero
+            T.caso_externo_cerrado(TENANT, cd27)
+            h.join(30)
+            evs = sorted(eventos(cd27), key=lambda x: x[3])
+            horas = [x[5] for x in evs]
+            comprobar(lento.get("r") is not None and lento["r"].aplicada
+                      and [x[0] for x in evs] == ["escalada", "caso_externo_cerrado", "tomada"]
+                      and horas == sorted(horas),
+                      f"D27: la transicion que empezo antes y escribio despues queda fechada despues "
+                      f"({[x[0] for x in evs]})")
+        finally:
+            db.sesion = real_sesion
     finally:
         api._TOKEN_SERVICIO = token13
 finally:
