@@ -57,14 +57,26 @@ Nada de esto está pusheado.
 1.4B.2b-iii   estados de la ventana  ✅ cerrada   25aacba
 
 FASE 1.4B                            ✅ COMPLETA
-1.4C · T6 Return to AI               🔒 el siguiente
-   **1.4B.2 NO está cerrada.**
-1.4C  T6 · Return to AI        🔒 pendiente, fuera de 1.4B
-1.5  Case + Tools             pendiente
-1.6  Activity                 pendiente
+1.4C backend T6                      ✅ cerrada   04d835e
+1.4C UI                              ✅ cerrada   d033e58
+FASE 1.4C                            ✅ COMPLETA
+1.5  Case + Tools                    ✅ cerrada   5f30f74
+1.6  Activity                 pendiente  ← el siguiente
 1.7  Customer                 pendiente
 1.8  Network                  pendiente
 1.9  Branding                 pendiente
+```
+
+Abierto al cerrar 1.5, y ninguno bloquea 1.6:
+
+```
+G6 sobre messages poblada   🔒 gate de DESPLIEGUE, no de desarrollo
+smoke visual integral       ⏭ nada de 1.4C ni 1.5 se vio renderizado
+D28                         ⏭ abierto para B4: la pantalla lo muestra,
+                               no reconcilia CRM y Dexter
+hot path ③a/③c              ⏭ idempotencia del outbound automático
+T7                          ⏭ capacidad distinta, no el recovery de T6
+semánticos fuera de context/ ⏭ se resuelven en la fase de su pantalla
 ```
 
 ## El scope: `.bandeja`
@@ -766,6 +778,54 @@ props 24 · binds 9 · callbacks 16 · lifecycle 0 · v2 1 (--v2-fs) · T6 0
 funcional desde cero — un `200` no es sinónimo de que la IA recuperó el control.
 
 
+## Fase 1.5 — COMPLETA
+
+```
+Case      panel de contexto, D28 visible      ✅  commit 5f30f74
+Tools     proceso y documentación             ✅  sin cambio funcional
+```
+
+Los tres paneles ya existían y `TracePanel` ya hacía lo que la referencia muestra
+—con una distinción que la referencia pierde: «el código frenó la acción» ≠ «el
+sistema externo falló»—. Lo que faltaba era decir en pantalla algo que el
+contrato ya sabía.
+
+### D28 en pantalla, sin fingir identidad
+
+```
+A cargo en Dexter    el dueño durable, autoridad operacional
+Dueño del ticket     el del CRM, informativo
+nombres distintos →  aviso ámbar con los dos nombres
+siempre           →  «La asignación del CRM es informativa. Quién atiende
+                      esta conversación lo determina Dexter.»
+```
+
+La aclaración va **fuera** del condicional, y ahí está el matiz: se comparan
+**nombres** porque es lo único que hay —el CRM y Dexter no comparten identidad de
+usuario, que es justamente lo que D28 deja abierto—. La comparación sólo sirve en
+una dirección: dos nombres distintos prueban dos asignaciones distintas; dos
+nombres iguales **no** prueban que sean la misma persona. Sin la aclaración
+permanente, dos homónimos se leerían como «está bien asignado».
+
+**D28 sigue abierto para B4.** La pantalla lo muestra, no lo resuelve.
+
+### Los cuatro semánticos, resueltos
+
+1.1 los dejó sin remapear a propósito, «para la fase de su pantalla, consumidor
+por consumidor». Ésta lo era para `context/`:
+
+```
+moss  → --bandeja-ok      ejecución normal
+rust  → --bandeja-error   fallo del sistema externo
+clay  → --bandeja-aviso   bloqueo: ámbar, porque no es un fallo
+ember → --bandeja-aviso   lo que pide atención
+```
+
+Cero `var(--v2-ember|clay|rust|moss)` quedan en `context/`, con prueba que lo fija.
+Siguen pendientes los consumidores de **otras** pantallas.
+
+Evidencia: [auditorias/1.5-CASE-TOOLS.md](auditorias/1.5-CASE-TOOLS.md).
+
 ## Fase 1.4C — COMPLETA
 
 ```
@@ -932,14 +992,14 @@ voltajes, firmwares, OLT/slot/port, operadores, teléfonos o documentos inventad
 
 ## Baseline
 
-Medido el 19/09/2026 al cerrar 1.4C:
+Medido el 19/09/2026 al cerrar 1.5:
 
 | Chequeo | Valor esperado |
 |---|---|
 | `svelte-check` | 2 errores en `(no-layout)/org/`; **0 en `conversaciones/`** |
 | warnings | **25** |
-| vitest | 17 failed \| 12 passed (29) · **63 failed** \| 350 passed (413) |
-| guardas `conversaciones/` | 89/89 — ordenamiento 20 · grabación 17 · formato 17 · devolución 13 · cableado 22 |
+| vitest | 17 failed \| 13 passed (30) · **63 failed** \| 367 passed (430) |
+| guardas `conversaciones/` | 106/106 — ordenamiento 20 · grabación 17 · formato 17 · devolución 13 · cableado T6 22 · contexto 17 |
 | D30, backend | 18/18 — **se reporta aparte, no se suma a vitest** |
 | backend con PostgreSQL real | 9 suites verdes (ver `DEXTER_BASELINES.md`) |
 

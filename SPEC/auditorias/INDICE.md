@@ -13,6 +13,7 @@ Un archivo por gate. El agente lee sólo los que el prompt le nombre.
 | **1.4C.0-D2** | [1.4C-D2.md](1.4C-D2.md) | **implementado** | Separación del hot path, recovery B1/B2, 4 defectos del draft, 20 tests nuevos. **Pendiente de auditoría externa.** |
 | **1.4C-D3** | [1.4C-D3.md](1.4C-D3.md) | **criterio de cierre cumplido** | PostgreSQL real: migración aplica y el ledger la anota sola; 6 hallazgos que los dobles no veían; concurrencia y aislamiento medidos. **Entrada del próximo gate.** |
 | **1.4C-UI** | [1.4C-UI.md](1.4C-UI.md) | **aprobado** | El botón y sus cuatro estados, failed vs unknown, idempotencia de punta a punta. 3 defectos del draft corregidos. **Cierra la Fase 1.4C.** |
+| **1.5** | [1.5-CASE-TOOLS.md](1.5-CASE-TOOLS.md) | **aprobado** | Case + Tools. D28 en pantalla sin fingir identidad; los cuatro semánticos resueltos en `context/`. |
 | — | [1.4C-hotpath-diferido.md](1.4C-hotpath-diferido.md) | diferido | Los hunks de ③a/③c retirados, recuperables con `git apply -R`. |
 
 Los gates sin archivo viven sólo en la transcripción; sus conclusiones vigentes

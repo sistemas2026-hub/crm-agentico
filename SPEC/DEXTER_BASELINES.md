@@ -67,21 +67,21 @@ py -3.13 cli/diferencias_config.py rapilink       repo vs desplegado
 ```
 No re-ejecutadas en esta sesión.
 
-## FRONTEND — medido 19/09/2026 al cerrar 1.4C
+## FRONTEND — medido 19/09/2026 al cerrar 1.5
 
 ```
 cd django-crm/frontend
 
 npx svelte-check     2 errores · 25 warnings · 0 errores en conversaciones/
-npx vitest run       29 archivos: 17 failed / 12 passed
-                     413 tests:   63 failed / 350 passed
+npx vitest run       30 archivos: 17 failed / 13 passed
+                     430 tests:   63 failed / 367 passed
 ```
 
 Los 63 fallos y 17 archivos son **históricos**, preexistentes a la Fase 1 y
 ajenos a `conversaciones/`. Se identifican por conteo estable: cualquier cambio
 en ese número es una regresión hasta demostrar lo contrario.
 
-Guardas de `conversaciones/`, 89/89:
+Guardas de `conversaciones/`, 106/106:
 
 ```
 ordenamiento (0B.0)     20
@@ -89,6 +89,7 @@ grabación (D29)         17
 formato (1.3B)          17
 devolución (1.4C)       13
 cableado T6 (1.4C)      22
+contexto (1.5)          17
 D30, backend            18   se reporta aparte, no suma a vitest
 ```
 
