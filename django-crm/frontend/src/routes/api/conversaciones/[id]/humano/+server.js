@@ -17,9 +17,23 @@ export async function POST({ request, params, locals, fetch }) {
     return json({ error: 'No autenticado' }, { status: 401 });
   }
 
-  const { mensaje, clave_idempotencia } = await request.json();
+  const { mensaje, clave_idempotencia, devolver_al_asistente = false } = await request.json();
   if (!mensaje) {
     return json({ error: 'Falta el mensaje' }, { status: 400 });
+  }
+  // Devolver a la IA EXIGE que la clave venga de la pantalla, y acá no se
+  // inventa una. claveIdempotencia() genera un uuid cuando el valor no sirve:
+  // para un envío normal eso es mejor que nada, pero en T6 significaría que
+  // dos intentos del mismo envío viajan con claves distintas -- y el segundo
+  // le llega al cliente como un mensaje nuevo. Fallar acá es lo correcto:
+  // el motor responde lo mismo, y así el error no queda enmascarado por una
+  // clave que el proxy fabricó.
+  const CLAVE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (devolver_al_asistente && !CLAVE.test(String(clave_idempotencia ?? ''))) {
+    return json(
+      { error: 'Devolver al asistente requiere clave_idempotencia.', codigo: 'clave_requerida' },
+      { status: 400 }
+    );
   }
 
   const baseUrl = env.PRIVATE_ASISTENTE_URL;
@@ -39,7 +53,8 @@ export async function POST({ request, params, locals, fetch }) {
         tenant,
         mensaje,
         ...autorDeSesion(locals),
-        clave_idempotencia: claveIdempotencia(clave_idempotencia)
+        clave_idempotencia: claveIdempotencia(clave_idempotencia),
+        devolver_al_asistente: Boolean(devolver_al_asistente)
       })
     });
     const datos = await resp.json();

@@ -34,6 +34,13 @@
     plantillas = [], cargandoPlantillas = false, errorPlantillas = '',
     enviandoPlantilla = false, plantillaCompleta = false,
     vistaPreviaPlantilla = '', hayPlantillaDeServicio = false,
+    // --- T6: el desenlace del ultimo intento de devolver a la IA, ya traducido
+    //     por devolucion.js. null = el ultimo envio no pidio devolver. Llega
+    //     resuelto a proposito: si este componente lo dedujera de la respuesta
+    //     del motor, tendria que saber la diferencia entre 'rechazado' e
+    //     'incierto', y esa regla vive en un solo lugar.
+    /** @type {{estado: string, tono: string, texto: string}|null} */
+    avisoDevolucion = null,
     // --- lo que el marcado escribe
     entrada = $bindable(''),
     modo = $bindable('responder'),
@@ -73,7 +80,34 @@
         aria-pressed={modo === 'nota'}
         onclick={() => (modo = 'nota')}>Nota interna</button
       >
+      <!-- Sólo con la conversación en manos de una persona: devolverla supone
+           tenerla. Con la IA atendiendo, el motor responde 409 y el botón no
+           tendría a qué. -->
+      {#if escalada}
+        <button
+          type="button"
+          class="modo modo-devolver"
+          aria-pressed={modo === 'responder_y_devolver'}
+          onclick={() => (modo = 'responder_y_devolver')}
+          disabled={enviando}
+          >Responder y devolver a IA</button
+        >
+      {/if}
     </div>
+
+    <!-- EL DESENLACE DE LA DEVOLUCIÓN, cuando la hubo. No se mezcla con
+         `error` a propósito: "no salió" y "no sabemos si salió" son dos cosas
+         distintas, y la segunda no es un error -- es lo único honesto que se
+         puede decir. El texto lo arma devolucion.js. -->
+    {#if avisoDevolucion}
+      <p
+        class="devolucion devolucion-{avisoDevolucion.tono}"
+        role="status"
+        aria-live="polite"
+      >
+        {avisoDevolucion.texto}
+      </p>
+    {/if}
 
     <!-- LA VENTANA DE 24 H, ANTES DE ESCRIBIR Y NO DESPUÉS DE FALLAR.
          Sólo aparece en WhatsApp: los otros canales no tienen esta regla y
@@ -391,6 +425,12 @@
           {#if modo === 'nota'}
             <strong class="nota-interna-aviso">Solo la ve el equipo</strong>
             <span class="v2-muted">· no se le envía al cliente</span>
+          {:else if modo === 'responder_y_devolver'}
+            <!-- Lo que va a pasar, dicho antes de apretar: el mensaje sale Y la
+                 conversación deja de ser tuya. Y la condición, que no es
+                 obvia: si el mensaje no sale, la conversación se queda. -->
+            <strong class="nota-directo">Se envía y la conversación vuelve a la IA</strong>
+            <span class="v2-muted">· solo si el mensaje sale</span>
           {:else if escalada}
             <!-- Más visible que antes (§11): cuando está escalada, esto sale
                  DIRECTO al cliente. "Le llega tal cual" no decía quién
@@ -454,7 +494,9 @@
             disabled={enviando || bloqueadoPorIA || !entrada.trim()}
             aria-busy={enviando}
           >
-            <Send size={14} />{enviando ? 'Enviando…' : 'Enviar'}
+            <Send size={14} />{#if modo === 'responder_y_devolver'}
+              {enviando ? 'Enviando y devolviendo…' : 'Enviar y devolver'}
+            {:else}{enviando ? 'Enviando…' : 'Enviar'}{/if}
           </button>
         {/if}
       </div>
@@ -657,8 +699,12 @@
   }
 
 
+  /* Con wrap desde que son tres: "Responder y devolver a IA" es mucho más
+     largo que los dos de antes, y sin esto los tres se comprimen hasta que el
+     texto se corta en pantallas angostas. */
   .modos {
     display: flex;
+    flex-wrap: wrap;
     gap: 4px;
     margin-bottom: 6px;
   }
@@ -684,6 +730,46 @@
     font-weight: 650;
     border-color: var(--bandeja-borde);
     background: var(--bandeja-superficie);
+  }
+
+  /* Devolver a la IA se pinta con el violeta de la IA, el mismo de la cola y
+     del encabezado: es la misma pregunta -- quién la lleva -- y conviene que
+     se responda con el mismo color en las tres pantallas. */
+  .modo-devolver[aria-pressed='true'] {
+    color: var(--bandeja-ia);
+    border-color: var(--bandeja-ia-borde);
+    background: var(--bandeja-ia-fondo);
+  }
+
+  .modo:disabled {
+    opacity: 0.55;
+    cursor: default;
+  }
+
+  .devolucion {
+    margin: 0 0 6px;
+    padding: 7px 10px;
+    border: 1px solid;
+    border-radius: var(--bandeja-radio-sm);
+    font-size: 12.5px;
+    line-height: 1.45;
+  }
+  .devolucion-ok {
+    color: var(--bandeja-ia);
+    background: var(--bandeja-ia-fondo);
+    border-color: var(--bandeja-ia-borde);
+  }
+  /* Ámbar, no rojo: "no pudimos confirmar" no es un fallo, y pintarlo de rojo
+     empujaría a reintentar un mensaje que pudo haber salido. */
+  .devolucion-aviso {
+    color: var(--bandeja-aviso);
+    background: var(--bandeja-aviso-fondo);
+    border-color: var(--bandeja-aviso-borde);
+  }
+  .devolucion-mal {
+    color: var(--bandeja-error);
+    background: var(--bandeja-error-fondo);
+    border-color: var(--bandeja-error-borde);
   }
 
   .modo-nota[aria-pressed='true'] {
@@ -975,8 +1061,12 @@
     cursor: not-allowed;
   }
 
+  /* Igual que los modos: "Enviar y devolver" y su "Enviando y devolviendo…"
+     son mas anchos que "Enviar", y el pie tambien lleva la pista del canal a
+     la izquierda. Que baje en vez de apretarse. */
   .compositor-pie {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
     gap: 10px;

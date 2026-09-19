@@ -15,6 +15,7 @@
   import DocumentationPanel from '$lib/conversaciones/context/DocumentationPanel.svelte';
   import MessageThread from '$lib/conversaciones/messages/MessageThread.svelte';
   import { diaDe, etiquetaDia } from '$lib/conversaciones/formato.js';
+  import { estadoDeDevolucion } from '$lib/conversaciones/devolucion.js';
   import {
     sesionDeGrabacion,
     soltarRecursosDelCompositor
@@ -234,6 +235,10 @@
   let entrada = $state('');
   let enviando = $state(false);
   let error = $state('');
+  /** Desenlace del último intento de devolver a la IA (T6), o null si el
+      último envío no lo pidió. Lo calcula devolucion.js: la pantalla no
+      deduce el desenlace, lo traduce. */
+  let avisoDevolucion = $state(/** @type {any} */ (null));
   /** Solo se usa por debajo de 1240px, donde la columna de contexto no cabe
       al lado y pasa a abrirse como panel. */
   let contextoAbierto = $state(false);
@@ -455,21 +460,43 @@
     }
     reintentando = m.id ?? m.clave_idempotencia;
     error = '';
+    // El desenlace del intento anterior deja de valer en cuanto empieza otro:
+    // mostrarlo mientras este está en vuelo diría algo de un envío que ya no es
+    // el que el operador está mirando.
+    avisoDevolucion = null;
     try {
       const resp = await fetch(`/api/conversaciones/${conversacion.id}/humano`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mensaje: m.contenido, clave_idempotencia: m.clave_idempotencia })
+        // MISMA clave y MISMA intención. La clave evita el segundo mensaje al
+        // cliente; la intención evita que un T6 se convierta en un envío normal
+        // y la conversación se quede en manos de la persona sin que nadie lo
+        // haya decidido.
+        body: JSON.stringify({
+          mensaje: m.contenido,
+          clave_idempotencia: m.clave_idempotencia,
+          devolver_al_asistente: m.devolver === true
+        })
       });
       const datos = await resp.json();
+      avisoDevolucion = estadoDeDevolucion({ pedida: m.devolver === true, ok: resp.ok, datos });
       if (!resp.ok) {
         error = datos.error || 'No se pudo reenviar.';
         return;
       }
       if (datos.aviso) error = `Tampoco salió esta vez: ${datos.aviso}`;
+      if (datos.devuelto_al_asistente) {
+        conversacion.control_efectivo = 'ia';
+        conversacion.control = 'ia';
+        conversacion.escalada_a_humano = false;
+        conversacion.necesita_atencion_humana = false;
+        modo = 'responder';
+        invalidate('app:conversaciones');
+      }
       await sondearMensajesNuevos();
     } catch (/** @type {any} */ err) {
       error = err?.message || 'No se pudo reenviar.';
+      avisoDevolucion = estadoDeDevolucion({ pedida: m.devolver === true, ok: false, datos: null });
     } finally {
       reintentando = null;
     }
@@ -1245,7 +1272,12 @@
 
   async function enviar() {
     const texto = entrada.trim();
+    // `enviando` es la guarda del doble envío: Enter repetido, doble clic y el
+    // botón entran todos por acá y salen sin hacer nada mientras el anterior
+    // siga en vuelo. Es lo que impide que la clave de idempotencia se
+    // regenere: no hay segundo intento hasta que el primero termina.
     if (!texto || enviando) return;
+    avisoDevolucion = null;
 
     // El caso frontera: empezó a escribir con la ventana abierta y pulsa
     // Enviar después del vencimiento. El borrador NO se pierde -- se corta
@@ -1279,6 +1311,10 @@
     if (escalada) {
       // Una sola burbuja: lo que el agente escribio ES la respuesta, no hay
       // nada que "contestar" del otro lado.
+      // La intención se congela ACÁ, con la burbuja. Si se leyera `modo` más
+      // tarde, un clic en otra pestaña del compositor mientras el envío está
+      // en vuelo cambiaría lo que el reintento le pide al motor.
+      const devolviendo = modo === 'responder_y_devolver';
       const burbuja = {
         rol: 'assistant',
         contenido: texto,
@@ -1286,6 +1322,10 @@
         // La clave viaja con la burbuja: "Reintentar" la reusa y el motor
         // reintenta la entrega de ESA fila en vez de guardar otra (D15).
         clave_idempotencia: crypto.randomUUID(),
+        // Y la intención viaja con ella por el mismo motivo: reintentar un T6
+        // como si fuera un envío normal dejaría la conversación en manos de la
+        // persona sin que nadie lo hubiera decidido.
+        devolver: devolviendo,
         /** @type {string|null} */ sinEntregar: null
       };
       mensajes.push(burbuja);
@@ -1297,9 +1337,14 @@
         const resp = await fetch(`/api/conversaciones/${conversacion.id}/humano`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ mensaje: texto, clave_idempotencia: burbuja.clave_idempotencia })
+          body: JSON.stringify({
+            mensaje: texto,
+            clave_idempotencia: burbuja.clave_idempotencia,
+            devolver_al_asistente: devolviendo
+          })
         });
         const datos = await resp.json();
+        avisoDevolucion = estadoDeDevolucion({ pedida: devolviendo, ok: resp.ok, datos });
         if (!resp.ok) {
           error = datos.error || 'No se pudo guardar la respuesta.';
         } else if (datos.aviso) {
@@ -1310,8 +1355,19 @@
           burbuja.sinEntregar = datos.aviso;
           error = datos.aviso;
         }
+        if (datos.devuelto_al_asistente) {
+          conversacion.control_efectivo = 'ia';
+          conversacion.control = 'ia';
+          conversacion.escalada_a_humano = false;
+          conversacion.necesita_atencion_humana = false;
+          modo = 'responder';
+          invalidate('app:conversaciones');
+        }
       } catch (/** @type {any} */ err) {
         error = err?.message || 'No se pudo guardar la respuesta.';
+        // Un error de transporte NO es "no salió": la petición pudo haber
+        // llegado. Se dice que no se sabe, y el control se queda donde está.
+        avisoDevolucion = estadoDeDevolucion({ pedida: devolviendo, ok: false, datos: null });
       } finally {
         enviando = false;
       }
@@ -1409,7 +1465,7 @@
 
   {#if conversacion.estado === 'abierta'}
     <MessageComposer
-      {conversacion} {error} {escalada} {enviando}
+      {conversacion} {error} {escalada} {enviando} {avisoDevolucion}
       {bloqueadoPorIA} {bloqueadoPorVentana}
       {interviniendo} {errorIntervenir}
       {adjunto} {grabando} {grabPausada} {segundos} {limites}

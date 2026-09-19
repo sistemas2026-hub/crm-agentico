@@ -149,7 +149,8 @@ export const actions = {
         }
       } catch (/** @type {any} */ err) {
         console.error('[tickets] no se pudo entregar la respuesta al cliente', err);
-        entrega = { ok: false, entregado: false };
+        entrega = { ok: false, aceptado_por_meta: false,
+          aceptacion_registrada: false, resultado: 'incierto' };
       }
     }
 
@@ -170,13 +171,15 @@ export const actions = {
       }
     }
 
-    // 'entregado' es null cuando no había a dónde entregar (nota interna, o
+    // 'aceptado_por_meta' es null cuando no había a dónde entregar (nota interna, o
     // un ticket sin conversación detrás): eso no es un fallo y no se avisa.
     return {
       sent: true,
       internal,
-      entregado: entrega ? entrega.entregado : null,
-      aviso: entrega && entrega.entregado === false
+      aceptado_por_meta: entrega ? entrega.aceptado_por_meta : null,
+      aceptacion_registrada: entrega ? entrega.aceptacion_registrada : null,
+      resultado: entrega ? entrega.resultado : null,
+      aviso: entrega && entrega.resultado === 'rechazado'
         ? (entrega.aviso || 'La respuesta quedó guardada, pero no se pudo entregar al cliente.')
         : ''
     };
