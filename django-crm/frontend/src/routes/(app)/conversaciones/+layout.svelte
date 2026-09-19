@@ -32,16 +32,16 @@
   import { page } from '$app/state';
   import { invalidate } from '$app/navigation';
   import PageHeader from '$lib/v2/components/PageHeader.svelte';
-  import EmptyState from '$lib/v2/components/EmptyState.svelte';
   import Pill from '$lib/v2/components/Pill.svelte';
   import Avatar from '$lib/v2/components/Avatar.svelte';
   import { shortAge } from '$lib/v2/format.js';
-  import { MessagesSquare, TriangleAlert, Search, Phone, User } from '@lucide/svelte';
+  import { Phone, User } from '@lucide/svelte';
   import { pendiente, resuelta, enAtencion } from '$lib/conversaciones/estado.js';
   import { ordenar, horasEsperando } from '$lib/conversaciones/cola/ordenamiento.js';
   import QueueTabs from '$lib/conversaciones/cola/QueueTabs.svelte';
   import QueueSearch from '$lib/conversaciones/cola/QueueSearch.svelte';
   import QueueFilters from '$lib/conversaciones/cola/QueueFilters.svelte';
+  import QueueEmptyState from '$lib/conversaciones/cola/QueueEmptyState.svelte';
 
   /** @type {{ data: any, children: import('svelte').Snippet }} */
   let { data, children } = $props();
@@ -333,31 +333,11 @@
 
     <div class="lista">
       {#if data.error}
-        <div class="hueco">
-          <EmptyState title="No se pudo cargar la bandeja" body={data.error}>
-            {#snippet icon()}<TriangleAlert size={21} />{/snippet}
-          </EmptyState>
-        </div>
+        <QueueEmptyState variante="error" error={data.error} />
       {:else if conversaciones.length === 0}
-        <div class="hueco">
-          <EmptyState
-            title="Todavía no hay conversaciones"
-            body="Acá van a aparecer los chats de WhatsApp con tus clientes."
-          >
-            {#snippet icon()}<MessagesSquare size={21} />{/snippet}
-          </EmptyState>
-        </div>
+        <QueueEmptyState variante="sin-datos" />
       {:else if visibles.length === 0}
-        <div class="hueco">
-          <EmptyState
-            title="Nada acá"
-            body={busqueda
-              ? `Ninguna coincide con «${busqueda}».`
-              : 'No hay conversaciones en este estado.'}
-          >
-            {#snippet icon()}<Search size={20} />{/snippet}
-          </EmptyState>
-        </div>
+        <QueueEmptyState variante="sin-coincidencias" {busqueda} />
       {:else}
         {#each visibles as c (c.id)}
           <a
@@ -570,9 +550,6 @@
     min-height: 0;
     overflow-y: auto;
     padding: 4px 6px 10px;
-  }
-  .hueco {
-    padding: 18px 10px;
   }
   .fila {
     display: flex;
