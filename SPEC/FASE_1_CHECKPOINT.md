@@ -24,6 +24,8 @@ ade3bdf  checkpoint Fase 1
 4a701cd  1.3A — D30, el hilo proyecta origen y autor
 07c73fa  checkpoint con D30
 610a19b  1.3B — autores en el hilo
+9ae12f5  checkpoint con 1.3B
+2a2497d  1.4B.1 — tokens + retiro del reset de prueba
 ```
 
 Nada de esto está pusheado.
@@ -35,7 +37,10 @@ Nada de esto está pusheado.
 1.2  Cola Stitch              ✅ cerrada   9875e34
 1.3A D30 · read-side          ✅ cerrada   4a701cd
 1.3B Thread / autores         ✅ cerrada   610a19b
-1.4  Header · Handoff · Composer   ← el próximo
+1.4A · 1.4A.2  auditorías      ✅ cerradas
+1.4B.1 tokens + reset          ✅ cerrada   2a2497d
+1.4B.2 composición visual      ← el próximo
+1.4C  T6 · Return to AI        🔒 pendiente, fuera de 1.4B
 1.5  Case + Tools             pendiente
 1.6  Activity                 pendiente
 1.7  Customer                 pendiente
@@ -389,6 +394,92 @@ rol=user → Cliente sin mirar origen →  3 de 17 fallan, justo los que faltaba
 ```
 
 Las dos revertidas.
+
+
+## 1.4 — el centro operativo
+
+### T6 está FUERA de 1.4B, y no es un olvido
+
+El motor **sí** sabe devolver el control a la IA (`transiciones.py::devolver_a_ia()`, evento
+`devuelta_a_ia`). **La UI no lo expone**, y el contrato dice por qué:
+
+> **C9** — «Que G9 esté verde no activa T6: T6 entra con el control durable, en su fase.»
+
+**Los cuatro estados de Stitch NO son los cuatro pasos de Dexter.** Esto hay que leerlo antes de
+diseñar nada de T6:
+
+```
+Stitch                          Dexter (contrato T6)
+A  IDLE                         (estado previo, no un paso)
+B  IN PROGRESS · MUTEX LOCK     comprime intención + solicitud + aceptación
+C  CONFIRMED · «Handoff logged» ≠ receipt durable del proveedor
+D  «Reverted safely»            Dexter distingue «falló» de «no se sabe» (§3.6)
+```
+
+`MUTEX LOCK` y «syncing thread lock state» son **vocabulario del mock**: Dexter no tiene un mutex de
+hilo. Y la tarjeta D afirma que volvió a humano — una afirmación fuerte que el estado `desconocida`
+no permite hacer.
+
+**Eso es 1.4C**, con su propia fase funcional.
+
+### Lo que las seis referencias pedían ya existía
+
+Ninguna de las seis pide capacidad nueva. `Reassign` coincide al pie de la letra con C16 («Reason ·
+Required — stored in the audit trail»), el 409 con «the view has been refreshed with the current
+owner», y `WA closed` con las plantillas que el Composer ya tiene.
+
+**Se confirma la predicción del checkpoint de 0A**: `.ventana-cerrada button` estaba anotada como CSS
+muerto con la nota «la Fase 4 probablemente lo reviva». Es exacto — recupera consumidor en 1.4B.2.
+
+### 1.4B.1 — los tokens, y por qué no fue mecánico
+
+```
+Header      4 → 0        Handoff    16 → 0        Composer   58 → 1
+```
+
+**`ember` significaba tres cosas distintas** en el Composer:
+
+```
+.ventana-avisa · .plantilla-inadecuada    ember-soft → aviso    (avisos de verdad)
+.compositor.arrastrando · .soltar-aca
+                        · .accion-icono:focus  ember → humano   (gestos de una persona)
+```
+
+Un `ember → aviso` mecánico habría pintado de ámbar el arrastre y el foco. `clay` sí era siempre el
+modo nota → `--bandeja-nota`; `rust` → error; `moss` → ok.
+
+**El único `--v2-*` que queda es `var(--v2-fs)`**: la métrica del tamaño base de tipografía, no un
+color. **No se inventó un equivalente** para llegar a cero — un token sin significado sería peor que
+la referencia.
+
+### El reset de prueba: sale de la UI, no del backend
+
+```
+botón + prop + regla · estado · reiniciarConversacion() · cableado   →  retirados
+endpoint DELETE y backend                                            →  intactos
+```
+
+Cero consumidores y cero tests dependientes tras el retiro.
+
+**Y una consecuencia que el check cazó:** los warnings subieron a 27 por `.aviso` en el padre —la
+regla del mensaje de error del reset, cuyo único consumidor era ése—. Se retiró, y con eso **se cerró
+la duplicación que 0A.3 había dejado anotada**: `.aviso` se copió a `HandoffControls` porque el padre
+la necesitaba, y ya no. Vuelta a 26.
+
+**No fue limpieza oportunista: el huérfano lo creó este mismo cambio.**
+
+`.reiniciar-discreto` **sobrevive** en el Composer — es el botón Cancelar de la grabación, ahora su
+único consumidor. El nombre quedó heredado y sin sentido; **no se renombra**, eso es limpieza. Sus
+dos comentarios sí se actualizaron: referenciaban una función que ya no existe.
+
+### Lo que 1.4B.2 tiene pendiente
+
+**Composición, no color.** El layout del Header, el banner de Handoff, el Composer, y la experiencia
+real de ventana cerrada con plantillas (`plantillas`, `plantillaElegida`, `valoresPlantilla`,
+`enviandoPlantilla`) — de punta a punta, sin inventar HSMs.
+
+Y comparar **estado por estado** contra su referencia: IA controla · humano sin dueño · asignada a mí
+· asignada a otro · ADMIN reasigna · 409 tras una carrera.
 
 
 ## El puente `--v2-*` — transitorio, y con un orden para retirarlo
