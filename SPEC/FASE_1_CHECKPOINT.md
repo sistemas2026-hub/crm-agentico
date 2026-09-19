@@ -62,16 +62,16 @@ FASE 1.4B                            ✅ COMPLETA
 FASE 1.4C                            ✅ COMPLETA
 1.5  Case + Tools                    ✅ cerrada   5f30f74
 1.6  Activity                        ✅ cerrada   4d73ea8
-1.7  Customer                 pendiente  ← el siguiente
-1.8  Network                  pendiente
+1.7  Customer                        ✅ cerrada   f61fd4d
+1.8  Network                  pendiente  ← el siguiente
 1.9  Branding                 pendiente
 ```
 
-Abierto al cerrar 1.6, y ninguno bloquea 1.7:
+Abierto al cerrar 1.7, y ninguno bloquea 1.8:
 
 ```
 G6 sobre messages poblada   🔒 gate de DESPLIEGUE, no de desarrollo
-smoke visual integral       ⏭ nada de 1.4C, 1.5 ni 1.6 se vio renderizado
+smoke visual integral       ⏭ nada de 1.4C a 1.7 se vio renderizado
 D28                         ⏭ abierto para B4: la pantalla lo muestra,
                                no reconcilia CRM y Dexter
 hot path ③a/③c              ⏭ idempotencia del outbound automático
@@ -778,6 +778,36 @@ props 24 · binds 9 · callbacks 16 · lifecycle 0 · v2 1 (--v2-fs) · T6 0
 funcional desde cero — un `200` no es sinónimo de que la IA recuperó el control.
 
 
+## Fase 1.7 — COMPLETA
+
+```
+Customer   quién es el cliente, y qué Dexter no sabe de él   ✅  commit f61fd4d
+```
+
+**La referencia marca sus propios campos como MOCK**: dirección, localidad,
+velocidades, saldo y facturas. Su pie lo dice — «read live from the ISP, not
+stored by Dexter». De un cliente Dexter guarda su identidad y los
+identificadores técnicos de su equipo, y nada más: PRD RNF-01 prohíbe persistir
+las respuestas del ISP porque traen contraseñas, GPS y cédula.
+
+**No se consulta en vivo.** Habría sido una segunda fuente de verdad en la UI y
+PII donde hoy no la hay. El panel lo dice en pantalla en vez de dejar tres
+secciones vacías: un estado vacío honesto explica, una sección vacía deja
+pensando si se rompió.
+
+**La verificación no necesitó bandera nueva.** Los campos técnicos se escriben
+al verificar y verificar exige `id_cliente`; su presencia **es** la prueba. Se
+deriva, no se inventa. Sin verificar avisa en ámbar, no en rojo: la mayoría de
+las consultas no lo necesitan.
+
+**El filtro de `datos_sesion` no es cosmético.** Esa columna tiene dos
+inquilinos —la identidad y el estado del anti-rebote— y se filtra por
+`Sesion.CAMPOS_PERSISTIBLES`, no por una lista escrita en `api.py`: así el motor
+sigue sin conocer el vocabulario del tenant, y cuando esa lista crezca el panel
+crece solo.
+
+Evidencia: [auditorias/1.7-CUSTOMER.md](auditorias/1.7-CUSTOMER.md).
+
 ## Fase 1.6 — COMPLETA
 
 ```
@@ -1022,14 +1052,14 @@ voltajes, firmwares, OLT/slot/port, operadores, teléfonos o documentos inventad
 
 ## Baseline
 
-Medido el 19/09/2026 al cerrar 1.6:
+Medido el 19/09/2026 al cerrar 1.7:
 
 | Chequeo | Valor esperado |
 |---|---|
 | `svelte-check` | 2 errores en `(no-layout)/org/`; **0 en `conversaciones/`** |
 | warnings | **25** |
-| vitest | 17 failed \| 14 passed (31) · **63 failed** \| 386 passed (449) |
-| guardas `conversaciones/` | 125/125 — ordenamiento 20 · grabación 17 · formato 17 · devolución 13 · cableado T6 22 · contexto 24 · actividad 12 |
+| vitest | 17 failed \| 14 passed (31) · **63 failed** \| 393 passed (456) |
+| guardas `conversaciones/` | 132/132 — ordenamiento 20 · grabación 17 · formato 17 · devolución 13 · cableado T6 22 · contexto 31 · actividad 12 |
 | D30, backend | 18/18 — **se reporta aparte, no se suma a vitest** |
 | backend con PostgreSQL real | 9 suites verdes (ver `DEXTER_BASELINES.md`) |
 

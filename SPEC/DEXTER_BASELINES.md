@@ -11,7 +11,7 @@ comando · exit code · passed/failed/skipped · sólo el traceback de los fallo
 
 ---
 
-## BACKEND — medido 19/09/2026 al cerrar 1.6, CONTRA POSTGRESQL REAL
+## BACKEND — medido 19/09/2026 al cerrar 1.7, CONTRA POSTGRESQL REAL
 
 Base: PostgreSQL 16.14, contenedor `pg-motor` :55435, base `t6_d3` construida
 desde cero por el ledger. Ninguna parte quedó `[saltado]`.
@@ -28,7 +28,8 @@ test_relevo_esquema_base        OK   27 ok
 test_pausa_escalada             OK   17 ok
 test_registro_sin_pii           OK
 test_nucleo_sin_tenants         OK
-test_relevo_eventos_lectura     OK   12 ok   (nuevo en 1.6)
+test_relevo_eventos_lectura     OK   18 ok   (1.6 + 1.7)
+test_anti_rebote_persistente    OK
 test_timeouts_modelo            OK   (19/09, sin base)
 test_editor_config              OK   (19/09, sin base)
 ```
@@ -68,21 +69,21 @@ py -3.13 cli/diferencias_config.py rapilink       repo vs desplegado
 ```
 No re-ejecutadas en esta sesión.
 
-## FRONTEND — medido 19/09/2026 al cerrar 1.6
+## FRONTEND — medido 19/09/2026 al cerrar 1.7
 
 ```
 cd django-crm/frontend
 
 npx svelte-check     2 errores · 25 warnings · 0 errores en conversaciones/
 npx vitest run       31 archivos: 17 failed / 14 passed
-                     449 tests:   63 failed / 386 passed
+                     456 tests:   63 failed / 393 passed
 ```
 
 Los 63 fallos y 17 archivos son **históricos**, preexistentes a la Fase 1 y
 ajenos a `conversaciones/`. Se identifican por conteo estable: cualquier cambio
 en ese número es una regresión hasta demostrar lo contrario.
 
-Guardas de `conversaciones/`, 125/125:
+Guardas de `conversaciones/`, 132/132:
 
 ```
 ordenamiento (0B.0)     20
@@ -90,7 +91,7 @@ grabación (D29)         17
 formato (1.3B)          17
 devolución (1.4C)       13
 cableado T6 (1.4C)      22
-contexto (1.5 + 1.6)    24
+contexto (1.5–1.7)      31
 actividad (1.6)         12
 D30, backend            18   se reporta aparte, no suma a vitest
 ```

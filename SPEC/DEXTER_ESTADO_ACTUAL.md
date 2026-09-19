@@ -7,7 +7,7 @@ Si contradice a una conversación, gana este archivo.
 se actualiza: una sección que quedó vieja no es inocua — la siguiente sesión la
 lee como verdad. La historia detallada vive en `auditorias/`, no acá.
 
-Última actualización: 19/09/2026, al cerrar la Fase 1.6.
+Última actualización: 19/09/2026, al cerrar la Fase 1.7.
 
 ---
 
@@ -28,6 +28,8 @@ fa6b91a  cierre de 1.4C + corrección de la lista de warnings
 5f30f74  1.5 Case + Tools
 178d749  cierre de 1.5
 4d73ea8  1.6 Activity
+139f8ca  cierre de 1.6
+f61fd4d  1.7 Customer
 ```
 
 ## WORKTREE
@@ -51,17 +53,18 @@ Fase 1.1–1.4B (visual)        ✅
 FASE 1.4C  backend + UI de T6 ✅
 FASE 1.5   Case + Tools       ✅
 FASE 1.6   Activity           ✅  el relevo se lee por primera vez
+FASE 1.7   Customer           ✅  lo que sabe del cliente, y lo que no
 ```
 
-## ABIERTO — nada de esto bloquea 1.7
+## ABIERTO — nada de esto bloquea 1.8
 
 ```
 G6 sobre messages poblada   🔒 gate de DESPLIEGUE. La migración aplica limpia
                                desde cero y el ledger la anota sola, pero no se
                                midió sobre una tabla con datos. No bloquea
                                desarrollo; sí bloquea cualquier push.
-smoke visual integral       ⏭ nada de 1.4C, 1.5 ni 1.6 se vio renderizado, en
-                               ningún viewport. Hay auditoría estática de CSS.
+smoke visual integral       ⏭ nada de 1.4C a 1.7 se vio renderizado, en ningún
+                               viewport. Hay auditoría estática de CSS.
 D28                         ⏭ abierto para B4. La pantalla lo MUESTRA (1.5): el
                                dueño del CRM es informativo, el de Dexter manda.
                                No se reconcilian — no comparten identidad de
@@ -78,7 +81,7 @@ rust/moss                      otras pantallas, en la fase de cada una
 ## SIGUIENTE GATE
 
 ```
-Fase 1.7   Customer
+Fase 1.8   Network
 ```
 
 Entrada: `SPEC/FASE_1_CHECKPOINT.md`.
@@ -96,6 +99,8 @@ clave idempotente     una por intento; viaja con la burbuja junto a la intenció
 T7                    no es el recovery de T6
 D28                   dueño del ticket CRM ≠ dueño durable de Dexter;
                       nombres iguales NO prueban identidad
+ficha del cliente     Dexter guarda identidad + equipo y nada más (RNF-01);
+                      no se consulta el ISP en vivo desde la Bandeja
 bloqueo               ≠ error: el código frenando la acción es la protección
                       funcionando, y no ensucia la tasa de error
 ```

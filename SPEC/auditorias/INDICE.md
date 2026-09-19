@@ -15,6 +15,7 @@ Un archivo por gate. El agente lee sólo los que el prompt le nombre.
 | **1.4C-UI** | [1.4C-UI.md](1.4C-UI.md) | **aprobado** | El botón y sus cuatro estados, failed vs unknown, idempotencia de punta a punta. 3 defectos del draft corregidos. **Cierra la Fase 1.4C.** |
 | **1.5** | [1.5-CASE-TOOLS.md](1.5-CASE-TOOLS.md) | **aprobado** | Case + Tools. D28 en pantalla sin fingir identidad; los cuatro semánticos resueltos en `context/`. |
 | **1.6** | [1.6-ACTIVITY.md](1.6-ACTIVITY.md) | **aprobado** | Activity. Los eventos del relevo existían sin vía de lectura; se agregó solo lectura + panel, con refresco por hecho y no por reloj. |
+| **1.7** | [1.7-CUSTOMER.md](1.7-CUSTOMER.md) | **aprobado** | Customer. La referencia marcaba sus campos como MOCK; se muestra lo que Dexter guarda y se dice por qué el resto no está. |
 | — | [1.4C-hotpath-diferido.md](1.4C-hotpath-diferido.md) | diferido | Los hunks de ③a/③c retirados, recuperables con `git apply -R`. |
 
 Los gates sin archivo viven sólo en la transcripción; sus conclusiones vigentes
