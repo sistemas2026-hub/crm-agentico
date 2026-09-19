@@ -10,6 +10,7 @@
   import HandoffControls from '$lib/conversaciones/conversation/HandoffControls.svelte';
   import MessageComposer from '$lib/conversaciones/composer/MessageComposer.svelte';
   import CasePanel from '$lib/conversaciones/context/CasePanel.svelte';
+  import ActivityPanel from '$lib/conversaciones/context/ActivityPanel.svelte';
   import RetentionToggle from '$lib/conversaciones/context/RetentionToggle.svelte';
   import TracePanel from '$lib/conversaciones/context/TracePanel.svelte';
   import DocumentationPanel from '$lib/conversaciones/context/DocumentationPanel.svelte';
@@ -56,6 +57,33 @@
   let caso = $state(untrack(() => data.caso));
   let owners = $state(untrack(() => data.owners ?? []));
   let herramientas = $state(untrack(() => data.herramientas ?? []));
+  // El registro del relevo. Mismo patrón que el resto: untrack porque el
+  // componente se remonta entero al cambiar de conversación ({#key abierta}).
+  let relevo = $state(untrack(() => data.relevo ?? []));
+
+  /**
+   * Vuelve a leer el registro del relevo desde el motor.
+   *
+   * Se llama DESPUÉS de que una transición terminó bien, nunca antes: si se
+   * refrescara al lanzarla, el panel mostraría un movimiento que todavía puede
+   * no haber ocurrido. Nada de optimismo acá — es un registro de auditoría.
+   *
+   * Sin esto, la pantalla sabía que acababa de reasignar la conversación y el
+   * panel seguía mostrando el estado anterior hasta que alguien recargara.
+   *
+   * No hay sondeo ni temporizador: se refresca por un hecho, no por el paso
+   * del tiempo. Un movimiento hecho desde OTRA pantalla aparece la próxima vez
+   * que esta se abra, que es cuando alguien va a leerlo.
+   */
+  async function refrescarRelevo() {
+    try {
+      await invalidate('app:relevo');
+      relevo = data.relevo ?? [];
+    } catch {
+      // El panel queda como estaba. Un registro desactualizado es mejor que
+      // uno inventado, y la conversación se sigue atendiendo igual.
+    }
+  }
   let diagnostico = $state(untrack(() => data.diagnostico ?? null));
   let casos = $state(untrack(() => data.casos ?? []));
 
@@ -308,6 +336,7 @@
       // no se entera hasta el proximo sondeo -- hasta 8s despues. Con
       // invalidate() se refresca al instante, apenas se guarda.
       invalidate('app:conversaciones');
+      await refrescarRelevo();
     } catch (/** @type {any} */ err) {
       errorAtender = err?.message || 'No se pudo guardar.';
     } finally {
@@ -375,6 +404,7 @@
         destinoReasignar = '';
         motivoReasignar = '';
         invalidate('app:conversaciones');
+        await refrescarRelevo();
       }
       await sondearMensajesNuevos();
     } catch (/** @type {any} */ err) {
@@ -493,6 +523,10 @@
         modo = 'responder';
         invalidate('app:conversaciones');
       }
+      // Igual que en el envío: reintentar un T6 deja evento haya vuelto o no
+      // a la IA. Un reenvío que no pedía devolver no toca el relevo, y por eso
+      // no se refresca nada.
+      if (m.devolver === true) await refrescarRelevo();
       await sondearMensajesNuevos();
     } catch (/** @type {any} */ err) {
       error = err?.message || 'No se pudo reenviar.';
@@ -752,6 +786,7 @@
       conversacion = { ...conversacion, estado: 'cerrada' };
       atendida = true;
       invalidate('app:conversaciones');
+      await refrescarRelevo();
     } catch (/** @type {any} */ err) {
       errorResolver = err?.message || 'No se pudo guardar.';
     } finally {
@@ -1138,6 +1173,8 @@
       const datos = await resp.json().catch(() => ({}));
       if (!resp.ok) {
         errorIntervenir = datos.error || 'No se pudo tomar el control.';
+      } else {
+        await refrescarRelevo();
       }
       await sondearMensajesNuevos();
     } catch (/** @type {any} */ err) {
@@ -1363,6 +1400,10 @@
           modo = 'responder';
           invalidate('app:conversaciones');
         }
+        // Fuera del `if`: una devolución que NO se aplicó también deja su
+        // evento ('devolucion_fallida'), y ese es justo el movimiento que
+        // alguien va a querer ver en el registro.
+        if (devolviendo) await refrescarRelevo();
       } catch (/** @type {any} */ err) {
         error = err?.message || 'No se pudo guardar la respuesta.';
         // Un error de transporte NO es "no salió": la petición pudo haber
@@ -1523,6 +1564,11 @@
     asignadaDexter={asignadaA}
     bind:asignadoA bind:listaAbierta bind:formularioAsignar
   />
+
+  <!-- Después del caso y antes del proceso de la IA: primero qué es esta
+       conversación, después cómo llegó acá, y recién entonces qué hizo el
+       asistente dentro de ella. -->
+  <ActivityPanel eventos={relevo} />
 
   <RetentionToggle
     {conservada} {guardandoConservar} {errorConservar}

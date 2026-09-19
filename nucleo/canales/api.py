@@ -4722,6 +4722,39 @@ def conversaciones_herramientas(id_conversacion):
     })
 
 
+@app.get("/conversaciones/<id_conversacion>/relevo")
+def conversaciones_relevo(id_conversacion):
+    """
+    Como llego esta conversacion a las manos en las que esta.
+
+    El relevo escribe un evento por transicion desde B3.3, y hasta ahora nadie
+    los leia: la pantalla decia QUIEN la lleva, no COMO llego. Una reasignacion
+    de supervisor y una devolucion a la IA se veian igual desde afuera -- la
+    conversacion aparecia en otras manos y no habia donde mirar por que.
+
+    Solo lectura, mismo criterio de auditoria que /herramientas: lo que sale
+    son tipos de transicion, quien actuo y los datos que el propio contrato
+    declara para cada tipo (ver ESQUEMAS en nucleo/relevo/transiciones.py).
+    Nunca texto del cliente ni respuestas de un sistema externo.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+
+    try:
+        eventos = persistencia.eventos_de_relevo(tenant, id_conversacion)
+    except RuntimeError as e:
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 404
+    except Exception as e:
+        # Sin el nombre de quien actuo en el log: autor_nombre no va a
+        # telemetria (D2), ni siquiera cuando algo falla leyendolo.
+        registrar("relevo", "fallo al leer el registro de relevo",
+                  conversation_id=id_interno(id_conversacion), error=e)
+        return jsonify({"error": "No se pudo leer el registro de relevo."}), 500
+
+    return jsonify({"eventos": eventos})
+
+
 @app.post("/conversaciones/<id_conversacion>/mensajes/<mensaje_id>/marcar")
 def conversaciones_marcar_ejemplo(id_conversacion, mensaje_id):
     """

@@ -15,7 +15,14 @@ import { operadoresDeLaOrg, rolDeSesion } from '$lib/server/v2/operadores.js';
  *
  * @type {import('./$types').PageServerLoad}
  */
-export async function load({ fetch, cookies, params, locals }) {
+export async function load({ fetch, cookies, params, locals, depends }) {
+  // Identificador PROPIO, no 'app:conversaciones'. Ese lo invalida el sondeo
+  // del layout cada pocos segundos para refrescar la lista de la izquierda: si
+  // este load dependiera de él, el hilo entero, las herramientas y el ticket
+  // del CRM se recargarían en cada vuelta del reloj. Con uno propio, el
+  // registro del relevo se refresca cuando algo lo cambió y sólo entonces.
+  depends('app:relevo');
+
   const baseUrl = env.PRIVATE_ASISTENTE_URL;
   const tenant = env.PRIVATE_ASISTENTE_TENANT;
   if (!baseUrl || !tenant) {
@@ -27,7 +34,7 @@ export async function load({ fetch, cookies, params, locals }) {
   // DESPUES casos: cada salto de conversacion pagaba la suma de las tres
   // idas y vueltas al motor en vez del maximo de las tres, y esa espera es
   // la que se sentia como si la pagina entera se recargara.
-  const [respMensajes, respHerr, respCasos] = await Promise.all([
+  const [respMensajes, respHerr, respCasos, respRelevo] = await Promise.all([
     fetch(
       `${baseUrl}/conversaciones/${encodeURIComponent(params.id)}/mensajes?tenant=${encodeURIComponent(tenant)}`,
       { headers: headersMotor() }
@@ -36,7 +43,11 @@ export async function load({ fetch, cookies, params, locals }) {
       `${baseUrl}/conversaciones/${encodeURIComponent(params.id)}/herramientas?tenant=${encodeURIComponent(tenant)}`,
       { headers: headersMotor() }
     ).catch(() => null),
-    fetch(`${baseUrl}/manual/casos?tenant=${encodeURIComponent(tenant)}`, { headers: headersMotor() }).catch(() => null)
+    fetch(`${baseUrl}/manual/casos?tenant=${encodeURIComponent(tenant)}`, { headers: headersMotor() }).catch(() => null),
+    fetch(
+      `${baseUrl}/conversaciones/${encodeURIComponent(params.id)}/relevo?tenant=${encodeURIComponent(tenant)}`,
+      { headers: headersMotor() }
+    ).catch(() => null)
   ]);
 
   const datos = await respMensajes.json();
@@ -63,6 +74,16 @@ export async function load({ fetch, cookies, params, locals }) {
     }
   } catch {
     // idem: el panel de proceso queda vacio, no se cae la conversacion.
+  }
+
+  // Como llego la conversacion a estas manos: un evento por transicion del
+  // relevo. Mismo criterio que arriba -- es un panel, no el contenido: si el
+  // motor no contesta, la actividad queda vacia y el hilo se lee igual.
+  let relevo = [];
+  try {
+    if (respRelevo?.ok) relevo = (await respRelevo.json()).eventos ?? [];
+  } catch {
+    // idem
   }
 
   // Casos fijos para marcar una respuesta como buen ejemplo (ver
@@ -109,7 +130,7 @@ export async function load({ fetch, cookies, params, locals }) {
   const yo = { id: locals.user?.id ?? '', nombre: (locals.user?.name || locals.user?.email || '').trim() };
 
   return { conversacion: datos.conversacion, mensajes: datos.mensajes, caso, owners, herramientas, diagnostico, casos,
-    yo, rol, operadores };
+    relevo, yo, rol, operadores };
 }
 
 /** @type {import('./$types').Actions} */

@@ -2327,6 +2327,33 @@ def herramientas_de(tenant: str, conversation_id: str) -> list[dict]:
         return [dict(f) for f in cur.fetchall()]
 
 
+def eventos_de_relevo(tenant: str, conversation_id: str) -> list[dict]:
+    """
+    Quien tuvo esta conversacion, en orden -- el registro del relevo.
+
+    Los eventos se escriben en cada transicion desde que existe el relevo
+    (B3.3) y hasta ahora NADIE los leia: la pantalla mostraba el estado
+    ACTUAL --quien la lleva-- pero no como se llego ahi. Una reasignacion y
+    una devolucion a la IA se veian igual desde afuera: la conversacion
+    simplemente aparecia en otras manos.
+
+    Solo lectura y tenant-scoped, mismo criterio que herramientas_de. 'datos'
+    sale tal cual: lo que hay ahi son versiones del relevo, nombres de quienes
+    actuaron y motivos que escribio el equipo -- nunca texto del cliente ni
+    respuestas de un sistema externo. El esquema de cada tipo esta declarado
+    en nucleo/relevo/transiciones.py (ESQUEMAS) y la base lo valida.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select tipo, actor_tipo, actor_usuario_id, actor_nombre,
+                      datos, creado_en
+               from asistente.relevo_eventos
+               where organization_id = %s and conversation_id = %s
+               order by creado_en asc, id asc""",
+            (org, conversation_id))
+        return [dict(f) for f in cur.fetchall()]
+
+
 def marcar_ejemplo(tenant: str, conversation_id: str, mensaje_id: str,
                    caso: str, marcado_por: str | None) -> None:
     """

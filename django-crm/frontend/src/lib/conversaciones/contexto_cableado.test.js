@@ -120,6 +120,62 @@ describe('los cuatro semánticos quedaron resueltos en esta pantalla', () => {
   });
 });
 
+describe('la actividad no se queda vieja', () => {
+  const pagina = readFileSync(
+    fileURLToPath(new URL('../../routes/(app)/conversaciones/[id]/+page.svelte', import.meta.url)),
+    'utf-8'
+  );
+  const server = readFileSync(
+    fileURLToPath(new URL('../../routes/(app)/conversaciones/[id]/+page.server.js', import.meta.url)),
+    'utf-8'
+  );
+
+  it('el load declara un identificador PROPIO, no el del sondeo del layout', () => {
+    // 'app:conversaciones' lo invalida el reloj del layout cada pocos segundos
+    // para refrescar la lista. Colgar este load de ahí recargaría el hilo
+    // entero, las herramientas y el ticket del CRM en cada vuelta.
+    expect(server).toMatch(/depends\('app:relevo'\)/);
+    expect(server).not.toMatch(/depends\('app:conversaciones'\)/);
+  });
+
+  it('refrescar lee de nuevo del motor y no arma el evento en la pantalla', () => {
+    const fn = pagina.slice(pagina.indexOf('async function refrescarRelevo'));
+    expect(fn.slice(0, 500)).toMatch(/await invalidate\('app:relevo'\)/);
+    expect(fn.slice(0, 500)).toMatch(/relevo = data\.relevo/);
+    // Nada de empujar una línea inventada mientras llega la de verdad.
+    expect(fn.slice(0, 500)).not.toMatch(/relevo\.push|\.unshift/);
+  });
+
+  it('toda transición que deja evento lo refresca', () => {
+    // tomar · reasignar · intervenir · cerrar · enviar T6 · reintentar T6
+    const veces = (pagina.match(/await refrescarRelevo\(\)/g) ?? []).length;
+    expect(veces).toBeGreaterThanOrEqual(6);
+  });
+
+  it('y lo hace DESPUÉS de que la petición respondió, nunca antes', () => {
+    // Si se refrescara al lanzarla, el panel mostraría un movimiento que
+    // todavía puede no haber ocurrido. Es un registro de auditoría.
+    for (const bloque of pagina.split('await refrescarRelevo()').slice(0, -1)) {
+      expect(bloque).toMatch(/await fetch\([\s\S]*$/);
+    }
+  });
+
+  it('sin sondeo ni temporizadores propios', () => {
+    const fn = pagina.slice(
+      pagina.indexOf('async function refrescarRelevo'),
+      pagina.indexOf('async function refrescarRelevo') + 700
+    );
+    expect(fn).not.toMatch(/setInterval|setTimeout/);
+  });
+
+  it('un T6 que NO volvió a la IA también refresca', () => {
+    // 'devolucion_fallida' es un evento, y es justo el que alguien va a
+    // querer ver: refrescar sólo en el éxito escondería el movimiento.
+    expect(pagina).toMatch(/if \(devolviendo\) await refrescarRelevo\(\)/);
+    expect(pagina).toMatch(/if \(m\.devolver === true\) await refrescarRelevo\(\)/);
+  });
+});
+
 describe('el proceso sigue contando lo que cuenta el motor', () => {
   it('la pantalla no recalcula bloqueos ni errores', () => {
     // El backend los cuenta porque distinguir un bloqueo de un fallo depende
