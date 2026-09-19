@@ -1,329 +1,561 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
-import 'package:uuid/uuid.dart';
-import '../../core/storage/local_database.dart';
-import '../../core/storage/secure_storage_service.dart';
+
+import '../../core/estado/ordenes_jornada.dart';
+import '../../core/mock/field_mock_data.dart';
+import '../../core/sync/sync_presentacion.dart';
 import '../../core/sync/sync_queue_service.dart';
 import '../../core/theme/app_theme.dart';
-import '../../core/widgets/sync_badge.dart';
+import '../../core/widgets/dexter_card.dart';
+import '../../core/widgets/dexter_empty_state.dart';
+import '../../core/widgets/dexter_metric_tile.dart';
+import '../../core/widgets/dexter_status_badge.dart';
+import '../../core/widgets/dexter_sync_badge.dart';
 import '../ejecucion/ejecucion_screen.dart';
+import '../trabajo/estado_trabajo.dart';
+import '../trabajo/trabajo_vista.dart';
+import 'acciones_orden.dart';
+import 'pasos_orden.dart';
 
+/// La orden, abierta.
+///
+/// Sirve para entender qué hay que hacer y para avanzar el estado. El
+/// formulario y las fotos siguen viviendo en la pantalla de ejecución.
+///
+/// No carga órdenes por su cuenta: lee la que le toca de [OrdenesJornada], la
+/// misma lista que muestran Inicio y Trabajo, y la refresca después de cada
+/// transición para que las tres queden iguales.
 class DetalleOrdenScreen extends StatefulWidget {
-  final String ordenId;
+  const DetalleOrdenScreen({
+    super.key,
+    required this.ordenId,
+    required this.ordenes,
+    required this.acciones,
+    this.resumenes,
+    this.resumenInicial,
+    this.abrirEjecucion,
+    this.mostrarDatosFuturos = FieldMockData.modoDemo,
+  });
 
-  const DetalleOrdenScreen({super.key, required this.ordenId});
+  final String ordenId;
+  final OrdenesJornada ordenes;
+  final AccionesOrden acciones;
+
+  /// Estado de la cola. Esta pantalla vive fuera del contenedor, así que se
+  /// suscribe por su cuenta y se da de baja al cerrarse.
+  final Stream<SyncSummary>? resumenes;
+  final SyncSummary? resumenInicial;
+
+  /// Qué hacer al tocar "Ejecutar el trabajo". Por defecto, la pantalla de
+  /// ejecución que ya existe.
+  final Future<void> Function(BuildContext contexto, TrabajoVista trabajo)? abrirEjecucion;
+
+  final bool mostrarDatosFuturos;
 
   @override
   State<DetalleOrdenScreen> createState() => _DetalleOrdenScreenState();
 }
 
 class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
-  final LocalDatabase _localDb = LocalDatabase();
-  final SecureStorageService _storage = SecureStorageService();
-  final SyncQueueService _syncService = SyncQueueService();
-
-  Map<String, dynamic>? _orden;
-  String? _orgId;
-  String? _profileId;
-  bool _isLoading = true;
+  StreamSubscription<SyncSummary>? _suscripcionResumen;
+  SyncSummary? _resumen;
+  bool _trabajando = false;
 
   @override
   void initState() {
     super.initState();
-    _loadOrden();
+    _resumen = widget.resumenInicial;
+    widget.ordenes.addListener(_alCambiar);
+    // Normalmente se llega desde Inicio o Trabajo, con la lista ya cargada.
+    // Pero si alguien abre esta pantalla antes —o la lista se vacia— hay que
+    // pedirla: sin esto, la pantalla diria que la orden no existe.
+    widget.ordenes.asegurarCargado();
+    _suscripcionResumen = widget.resumenes?.listen(
+      (SyncSummary resumen) {
+        if (mounted) setState(() => _resumen = resumen);
+      },
+      onError: (Object _) {},
+    );
   }
 
-  Future<void> _loadOrden() async {
-    _orgId = await _storage.getOrgId();
-    _profileId = await _storage.getProfileId();
+  @override
+  void dispose() {
+    widget.ordenes.removeListener(_alCambiar);
+    _suscripcionResumen?.cancel();
+    super.dispose();
+  }
 
-    if (_orgId != null && _profileId != null) {
-      final item = await _localDb.getOrden(
-        orgId: _orgId!,
-        profileId: _profileId!,
-        id: widget.ordenId,
+  void _alCambiar() {
+    if (mounted) setState(() {});
+  }
+
+  TrabajoVista? get _trabajo {
+    for (final TrabajoVista t in widget.ordenes.trabajos) {
+      if (t.id == widget.ordenId) return t;
+    }
+    return null;
+  }
+
+  Future<void> _ejecutarAccion(TrabajoVista trabajo, AccionOrden accion) async {
+    if (_trabajando) return;
+
+    if (accion.abreEjecucion) {
+      final abrir = widget.abrirEjecucion ?? _abrirEjecucionPorDefecto;
+      await abrir(context, trabajo);
+      await widget.ordenes.recargar();
+      return;
+    }
+
+    setState(() => _trabajando = true);
+    try {
+      await widget.acciones.transicionar(
+        ordenId: trabajo.id,
+        nuevoEstadoLocal: accion.nuevoEstadoLocal!,
+        tipoAccion: accion.tipoAccion!,
+        revisionBase: trabajo.revision,
       );
-      if (mounted) {
-        setState(() {
-          _orden = item;
-          _isLoading = false;
-        });
-      }
+      // La lista compartida se relee: Inicio y Trabajo ven el estado nuevo.
+      await widget.ordenes.recargar();
+    } finally {
+      if (mounted) setState(() => _trabajando = false);
     }
   }
 
-  Future<void> _avanzarEstado({
-    required String nuevoEstadoLocal,
-    required String tipoAccion,
-  }) async {
-    if (_orden == null || _orgId == null || _profileId == null) return;
-
-    final revisionBase = _orden!['revision'] as int? ?? 0;
-    final idempotencyKey = const Uuid().v4();
-
-    // Transición local atómica (guarda en DB y encola mutación)
-    await _localDb.transicionarEstadoLocal(
-      orgId: _orgId!,
-      profileId: _profileId!,
-      ordenId: widget.ordenId,
-      nuevoEstadoLocal: nuevoEstadoLocal,
-      tipoAccion: tipoAccion,
-      revisionBase: revisionBase,
-      idempotencyKey: idempotencyKey,
+  Future<void> _abrirEjecucionPorDefecto(
+      BuildContext contexto, TrabajoVista trabajo) async {
+    await Navigator.of(contexto).push(
+      MaterialPageRoute<void>(
+        builder: (_) => EjecucionScreen(ordenId: trabajo.id),
+      ),
     );
-
-    // Disparar sincronización oportunista de fondo
-    _syncService.procesarCola();
-
-    await _loadOrden();
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
-    }
+    final trabajo = _trabajo;
 
-    if (_orden == null) {
+    if (trabajo == null && widget.ordenes.cargando) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Orden no encontrada')),
-        body: const Center(child: Text('No se encontró la información de la orden.')),
+        appBar: AppBar(title: const Text('Orden')),
+        body: const Center(child: CircularProgressIndicator()),
       );
     }
 
-    final estado = _orden!['estado'] as String;
-    final schemaVersion = _orden!['schema_version'] as int? ?? 1;
-    final diagnosticoIa = _orden!['diagnostico_previo_ia'] as String?;
+    if (trabajo == null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Orden')),
+        body: const Center(
+          child: DexterEmptyState(
+            icono: Icons.search_off,
+            titulo: 'No encontramos esta orden',
+            mensaje: 'Puede haber sido reasignada. Volvé y actualizá la lista.',
+            esAdvertencia: true,
+          ),
+        ),
+      );
+    }
+
+    final lectura = LecturaDePasos.de(trabajo.estado);
+    final acciones = AccionesDisponibles.para(trabajo.estado);
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('Orden #${_orden!['numero'] ?? '---'}'),
-        actions: [
+        title: Text(
+          trabajo.numero == null ? 'Orden' : 'Orden #${trabajo.numero}',
+        ),
+        actions: <Widget>[
           Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: SyncBadge(),
+            padding: const EdgeInsets.only(right: AppSpacing.sm),
+            child: Center(
+              child: DexterSyncBadge(
+                estado: SyncPresentacion.estado(_resumen),
+                detalle: SyncPresentacion.detalle(_resumen),
+                onTap: widget.acciones.sincronizar,
+              ),
+            ),
           ),
         ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // Alerta si schema_version > 1 (Fallo seguro por actualización requerida)
-            if (schemaVersion > 1) ...[
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: AppTheme.errorRed.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: AppTheme.errorRed),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.warning, color: AppTheme.errorRed),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Esta orden requiere una versión más reciente de la aplicación móvil (Schema v$schemaVersion). Actualice la app para completarla.',
-                        style: const TextStyle(color: AppTheme.errorRed, fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-            ],
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.margen,
+          AppSpacing.lg,
+          AppSpacing.margen,
+          AppSpacing.xl,
+        ),
+        children: <Widget>[
+          if (trabajo.requiereActualizacion) _avisoActualizacion(),
+          _cabecera(trabajo),
+          const SizedBox(height: AppSpacing.md),
+          _BarraDePasos(lectura: lectura),
+          if (lectura.avisoExcepcion != null) ...<Widget>[
+            const SizedBox(height: AppSpacing.md),
+            _avisoExcepcion(trabajo, lectura),
+          ],
+          if (trabajo.estado == EstadoTrabajo.completadaSinEnviar) ...<Widget>[
+            const SizedBox(height: AppSpacing.md),
+            _avisoSinEnviar(),
+          ],
+          const SizedBox(height: AppSpacing.md),
+          _datosDelCliente(trabajo),
+          if (trabajo.diagnosticoPrevio.isNotEmpty) ...<Widget>[
+            const SizedBox(height: AppSpacing.md),
+            _diagnostico(trabajo),
+          ],
+          if (widget.mostrarDatosFuturos) ...<Widget>[
+            const SizedBox(height: AppSpacing.md),
+            _telemetria(trabajo),
+          ],
+          const SizedBox(height: AppSpacing.lg),
+          _acciones(trabajo, acciones),
+        ],
+      ),
+    );
+  }
 
-            // Tarjeta de Información del Cliente
-            Card(
-              margin: EdgeInsets.zero,
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'DATOS DEL CLIENTE',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        color: AppTheme.textMuted,
-                        letterSpacing: 1,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      _orden!['cliente_nombre'] ?? 'Sin cliente',
-                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        const Icon(Icons.location_on, size: 16, color: AppTheme.primaryBlue),
-                        const SizedBox(width: 4),
-                        Expanded(
-                          child: Text(
-                            _orden!['direccion'] ?? 'Sin dirección',
-                            style: const TextStyle(fontSize: 14),
-                          ),
-                        ),
-                      ],
-                    ),
-                    if (_orden!['telefono'] != null && _orden!['telefono'].toString().isNotEmpty) ...[
-                      const SizedBox(height: 6),
-                      Row(
-                        children: [
-                          const Icon(Icons.phone, size: 16, color: AppTheme.successGreen),
-                          const SizedBox(width: 4),
-                          Text(
-                            _orden!['telefono'].toString(),
-                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ],
-                ),
+  Widget _avisoActualizacion() {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.md),
+      child: DexterCard(
+        colorAcento: AppColors.error,
+        child: Row(
+          children: <Widget>[
+            const Icon(Icons.system_update, size: 18, color: AppColors.error),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: Text(
+                'Esta orden necesita una versión más nueva de la aplicación. '
+                'Actualizala antes de trabajarla.',
+                style: AppTypography.cuerpo.copyWith(color: AppColors.error),
               ),
             ),
-            const SizedBox(height: 16),
-
-            // Diagnóstico previo de IA (si existe)
-            if (diagnosticoIa != null && diagnosticoIa.isNotEmpty) ...[
-              Card(
-                margin: EdgeInsets.zero,
-                color: const Color(0xFFF0F4FF),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  side: const BorderSide(color: Color(0xFFC7D2FE)),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Row(
-                        children: [
-                          Icon(Icons.auto_awesome, size: 18, color: AppTheme.primaryBlue),
-                          SizedBox(width: 6),
-                          Text(
-                            'DIAGNÓSTICO PREVIO ASISTENTE IA',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                              color: AppTheme.primaryBlue,
-                              letterSpacing: 0.5,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        diagnosticoIa,
-                        style: const TextStyle(fontSize: 13, color: AppTheme.textMain),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-            ],
-
-            // Resumen de estado actual
-            Card(
-              margin: EdgeInsets.zero,
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'ESTADO ACTUAL',
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppTheme.textMuted),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      estado.toUpperCase(),
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.primaryDark),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Tipo: ${_orden!['tipo_nombre']} (${_orden!['tipo_codigo']})',
-                      style: const TextStyle(fontSize: 13, color: AppTheme.textMuted),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 32),
-
-            // Botón de acción según la máquina de estados
-            _buildBotonAccion(estado, schemaVersion),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildBotonAccion(String estado, int schemaVersion) {
-    if (schemaVersion > 1) {
+  Widget _cabecera(TrabajoVista trabajo) {
+    return DexterCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  trabajo.tipoNombre.toUpperCase(),
+                  style: AppTypography.etiquetaChica.copyWith(
+                    color: AppColors.azulMarino,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              DexterStatusBadge(
+                estado: trabajo.estado.presentacion,
+                etiqueta: trabajo.estado.etiqueta,
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Text(trabajo.clienteNombre, style: AppTypography.tituloMedio),
+          if (trabajo.compromiso != null) ...<Widget>[
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              'Comprometido para ${_fechaYHora(trabajo.compromiso!)}',
+              style: AppTypography.etiqueta,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _datosDelCliente(TrabajoVista trabajo) {
+    return DexterCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text('DATOS DEL CLIENTE', style: AppTypography.etiquetaChica),
+          const SizedBox(height: AppSpacing.sm),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              const Icon(Icons.location_on_outlined,
+                  size: 16, color: AppColors.azulAccion),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(trabajo.direccion, style: AppTypography.cuerpo),
+              ),
+            ],
+          ),
+          if (trabajo.telefono.isNotEmpty) ...<Widget>[
+            const SizedBox(height: AppSpacing.sm),
+            Row(
+              children: <Widget>[
+                const Icon(Icons.phone_outlined, size: 16, color: AppColors.exito),
+                const SizedBox(width: AppSpacing.sm),
+                Text(
+                  trabajo.telefono,
+                  style: AppTypography.etiquetaGrande,
+                ),
+              ],
+            ),
+          ],
+          if (trabajo.familia != FamiliaTrabajo.otro) ...<Widget>[
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              '${trabajo.familia.etiqueta} · ${trabajo.tipoCodigo}',
+              style: AppTypography.etiquetaChica,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _diagnostico(TrabajoVista trabajo) {
+    return DexterCard(
+      colorAcento: AppColors.azulAccion,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              const Icon(Icons.auto_awesome, size: 16, color: AppColors.azulAccion),
+              const SizedBox(width: AppSpacing.xs),
+              Text(
+                'DIAGNÓSTICO PREVIO',
+                style: AppTypography.etiquetaChica.copyWith(
+                  color: AppColors.azulAccion,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          // Tal cual llega. No se parte en checks ni en causas: el backend
+          // manda un texto, no campos estructurados, y fabricar la estructura
+          // sería inventar un diagnóstico que nadie hizo.
+          Text(trabajo.diagnosticoPrevio, style: AppTypography.cuerpo),
+        ],
+      ),
+    );
+  }
+
+  /// CAMPO-DATA-001 y CAMPO-DATA-011. Ningún sistema entrega esto para campo
+  /// todavía; se ve solo en modo demostración.
+  Widget _telemetria(TrabajoVista trabajo) {
+    return DexterCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text('SEÑAL DEL CLIENTE', style: AppTypography.etiquetaChica),
+          const SizedBox(height: AppSpacing.sm),
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: DexterMetricTile(
+                  etiqueta: 'Potencia RX',
+                  valor: trabajo.futuro.potenciaRxDbm.toStringAsFixed(1),
+                  unidad: 'dBm',
+                  tono: DexterMetricTone.precaucion,
+                  nota: 'Rango aceptable: -8 a -25',
+                ),
+              ),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text('CTO ${FieldMockData.cto}', style: AppTypography.etiqueta),
+                    const SizedBox(height: AppSpacing.xs),
+                    Text(FieldMockData.puertoPon, style: AppTypography.etiqueta),
+                    const SizedBox(height: AppSpacing.xs),
+                    Text(
+                      'ONT ${FieldMockData.serialOnt}',
+                      style: AppTypography.etiquetaChica,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _avisoExcepcion(TrabajoVista trabajo, LecturaDePasos lectura) {
+    final esCancelada = trabajo.estado == EstadoTrabajo.cancelada;
+    return DexterCard(
+      colorFondo: esCancelada ? AppColors.inactivoFondo : AppColors.precaucionFondo,
+      colorBorde: esCancelada ? AppColors.bordeFuerte : AppColors.precaucion,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Icon(
+            esCancelada ? Icons.block : Icons.assignment_return_outlined,
+            size: 18,
+            color: esCancelada ? AppColors.inactivo : AppColors.precaucion,
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Text(lectura.avisoExcepcion!, style: AppTypography.cuerpo),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Terminada en el teléfono, sin confirmar el servidor. La diferencia
+  /// importa: hasta que la cola no la envíe, para la empresa ese trabajo no
+  /// está hecho.
+  Widget _avisoSinEnviar() {
+    return DexterCard(
+      colorFondo: AppColors.precaucionFondo,
+      colorBorde: AppColors.precaucion,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              const Icon(Icons.cloud_upload_outlined,
+                  size: 18, color: AppColors.precaucion),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
+                  'Completado en campo · pendiente de enviar',
+                  style: AppTypography.cuerpoGrande,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            'Lo que hiciste está guardado en el teléfono. Se envía solo cuando '
+            'haya señal; no hace falta repetirlo.',
+            style: AppTypography.cuerpoChico,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _acciones(TrabajoVista trabajo, AccionesDisponibles acciones) {
+    if (trabajo.requiereActualizacion) {
       return const ElevatedButton(
         onPressed: null,
-        child: Text('ACTUALIZACIÓN REQUERIDA'),
+        child: Text('Actualizá la aplicación para trabajar esta orden'),
       );
     }
 
-    switch (estado) {
-      case 'asignada':
-        return ElevatedButton.icon(
-          icon: const Icon(Icons.directions_car),
-          label: const Text('INICIAR VIAJE (EN CAMINO)'),
-          onPressed: () => _avanzarEstado(
-            nuevoEstadoLocal: 'en_camino',
-            tipoAccion: 'en_camino',
-          ),
-        );
-      case 'en_camino':
-        return ElevatedButton.icon(
-          style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accentAmber),
-          icon: const Icon(Icons.pin_drop),
-          label: const Text('LLEGUÉ AL SITIO (EN SITIO)'),
-          onPressed: () => _avanzarEstado(
-            nuevoEstadoLocal: 'en_sitio',
-            tipoAccion: 'iniciar',
-          ),
-        );
-      case 'en_sitio':
-        return ElevatedButton.icon(
-          icon: const Icon(Icons.assignment_turned_in),
-          label: const Text('EJECUTAR FORMULARIO Y FOTOS'),
-          onPressed: () async {
-            await Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => EjecucionScreen(ordenId: widget.ordenId),
-              ),
-            );
-            _loadOrden();
-          },
-        );
-      case 'completada_pendiente_sync':
-        return ElevatedButton.icon(
-          icon: const Icon(Icons.cloud_upload),
-          label: const Text('COMPLETADA (PENDIENTE DE SINCRONIZAR)'),
-          style: const ButtonStyle(backgroundColor: WidgetStatePropertyAll(AppTheme.warningOrange)),
-          onPressed: null,
-        );
-      case 'completada_campo':
-        return ElevatedButton.icon(
-          icon: const Icon(Icons.check_circle),
-          label: const Text('ORDEN FINALIZADA EN CAMPO'),
-          style: const ButtonStyle(backgroundColor: WidgetStatePropertyAll(AppTheme.successGreen)),
-          onPressed: null,
-        );
-      default:
-        return const SizedBox.shrink();
+    if (acciones.primaria == null) {
+      return Text(
+        _sinAccionesPorque(trabajo.estado),
+        style: AppTypography.cuerpoChico,
+        textAlign: TextAlign.center,
+      );
     }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        ElevatedButton(
+          onPressed:
+              _trabajando ? null : () => _ejecutarAccion(trabajo, acciones.primaria!),
+          child: _trabajando
+              ? const SizedBox(
+                  height: 20,
+                  width: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Text(acciones.primaria!.etiqueta),
+        ),
+        for (final AccionOrden secundaria in acciones.secundarias) ...<Widget>[
+          const SizedBox(height: AppSpacing.sm),
+          OutlinedButton(
+            onPressed: _trabajando ? null : () => _ejecutarAccion(trabajo, secundaria),
+            child: Text(secundaria.etiqueta),
+          ),
+        ],
+      ],
+    );
+  }
+
+  String _sinAccionesPorque(EstadoTrabajo estado) => switch (estado) {
+        EstadoTrabajo.completadaSinEnviar =>
+          'Ya está hecho. Falta que se envíe al servidor.',
+        EstadoTrabajo.completadaCampo =>
+          'Trabajo entregado. Queda esperar la revisión del supervisor.',
+        EstadoTrabajo.cerrada => 'Este trabajo está cerrado.',
+        EstadoTrabajo.cancelada => 'Este trabajo fue cancelado.',
+        _ => 'No hay ninguna acción disponible para este estado.',
+      };
+
+  static String _fechaYHora(DateTime fecha) {
+    final dd = fecha.day.toString().padLeft(2, '0');
+    final mm = fecha.month.toString().padLeft(2, '0');
+    final hh = fecha.hour.toString().padLeft(2, '0');
+    final min = fecha.minute.toString().padLeft(2, '0');
+    return '$dd/$mm a las $hh:$min';
+  }
+}
+
+/// La línea de pasos del diseño, alimentada por [LecturaDePasos].
+class _BarraDePasos extends StatelessWidget {
+  const _BarraDePasos({required this.lectura});
+
+  final LecturaDePasos lectura;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: lectura.pasoActual < 0
+          ? 'Sin avance'
+          : 'Paso ${lectura.pasoActual + 1} de ${PasoOrden.values.length}: '
+              '${PasoOrden.values[lectura.pasoActual].etiqueta}',
+      excludeSemantics: true,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              for (int i = 0; i < PasoOrden.values.length; i++) ...<Widget>[
+                if (i > 0) const SizedBox(width: AppSpacing.xs),
+                Expanded(
+                  child: Container(
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: _colorDelPaso(i),
+                      borderRadius: AppRadius.brChico,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            lectura.pasoActual < 0
+                ? 'Sin avance'
+                : 'Paso ${lectura.pasoActual + 1} de ${PasoOrden.values.length}: '
+                    '${PasoOrden.values[lectura.pasoActual].etiqueta}',
+            style: AppTypography.etiquetaChica,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Color _colorDelPaso(int indice) {
+    if (lectura.pasoActual < 0) return AppColors.borde;
+    if (indice > lectura.pasoActual) return AppColors.borde;
+    // El paso donde está parada una orden devuelta se pinta en ámbar: llegó
+    // hasta ahí, pero no por el camino normal.
+    if (indice == lectura.pasoActual && lectura.excepcion) {
+      return AppColors.precaucion;
+    }
+    return AppColors.azulMarino;
   }
 }

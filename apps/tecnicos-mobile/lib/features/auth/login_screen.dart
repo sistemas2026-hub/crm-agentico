@@ -7,7 +7,7 @@ import '../../core/api/api_endpoints.dart';
 import '../../core/storage/secure_storage_service.dart';
 import '../../core/sync/sync_queue_service.dart';
 import '../../core/theme/app_theme.dart';
-import '../jornada/jornada_screen.dart';
+import '../shell/app_shell.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -44,7 +44,7 @@ class _LoginScreenState extends State<LoginScreen> {
     final hasSession = await _storage.hasValidSession();
     if (hasSession && mounted) {
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const JornadaScreen()),
+        MaterialPageRoute(builder: (_) => AppShell()),
       );
     }
   }
@@ -126,7 +126,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
         if (mounted) {
           Navigator.of(context).pushReplacement(
-            MaterialPageRoute(builder: (_) => const JornadaScreen()),
+            MaterialPageRoute(builder: (_) => AppShell()),
           );
         }
       } else {

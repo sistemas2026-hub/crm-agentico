@@ -1,14 +1,26 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../../core/storage/local_database.dart';
 import '../../core/storage/secure_storage_service.dart';
 import '../../core/sync/sync_queue_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/sync_badge.dart';
-import '../detalle_orden/detalle_orden_screen.dart';
 import '../auth/login_screen.dart';
 
+/// La lista de órdenes anterior.
+///
+/// Desde la Fase 4 la reemplaza `TrabajoScreen` y ya no la abre nadie: quedó
+/// sin llamadores. No se borra todavía a propósito — las pantallas de detalle
+/// y ejecución se rediseñan en las Fases 6 y 7, y hasta confirmar ahí que no
+/// falta nada de lo que esta hacía, conviene tenerla a mano para comparar.
+/// Cuando esas fases cierren, se elimina junto con su `SyncBadge`.
 class JornadaScreen extends StatefulWidget {
-  const JornadaScreen({super.key});
+  const JornadaScreen({super.key, this.mostrarBarraSuperior = true});
+
+  /// Dentro de [AppShell] el encabezado lo pone el contenedor, así que esta
+  /// pantalla no dibuja el suyo. Fuera del shell sigue trayendo el propio.
+  final bool mostrarBarraSuperior;
 
   @override
   State<JornadaScreen> createState() => _JornadaScreenState();
@@ -19,6 +31,12 @@ class _JornadaScreenState extends State<JornadaScreen> {
   final SecureStorageService _storage = SecureStorageService();
   final SyncQueueService _syncService = SyncQueueService();
 
+  /// Recarga las órdenes cuando termina una sincronización. Es su propia
+  /// suscripción y no la del contenedor: aquella muestra el estado, esta trae
+  /// datos. Se cancela en [dispose] — sin eso, cada vez que la pantalla se
+  /// recreaba quedaba una escucha viva de más.
+  StreamSubscription<SyncStatus>? _suscripcionSync;
+
   List<Map<String, dynamic>> _ordenes = [];
   String _tecnicoNombre = '';
   String _orgNombre = '';
@@ -28,13 +46,19 @@ class _JornadaScreenState extends State<JornadaScreen> {
   void initState() {
     super.initState();
     _loadData();
-    _syncService.syncStatusStream.listen((status) {
+    _suscripcionSync = _syncService.syncStatusStream.listen((status) {
       if (status == SyncStatus.success && mounted) {
         _loadData();
       }
     });
     // Sincronizar órdenes automáticamente al entrar
     _syncService.procesarCola();
+  }
+
+  @override
+  void dispose() {
+    _suscripcionSync?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadData() async {
@@ -116,29 +140,31 @@ class _JornadaScreenState extends State<JornadaScreen> {
     final completadas = _ordenes.where((o) => o['estado'] == 'completada_campo' || o['estado'] == 'completada_pendiente_sync').length;
 
     return Scaffold(
-      appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('¡Hola, $_tecnicoNombre!'),
-            Text(
-              _orgNombre,
-              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.normal, color: Colors.white70),
+      appBar: !widget.mostrarBarraSuperior
+          ? null
+          : AppBar(
+              title: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('¡Hola, $_tecnicoNombre!'),
+                  Text(
+                    _orgNombre,
+                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.normal, color: Colors.white70),
+                  ),
+                ],
+              ),
+              actions: [
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: SyncBadge(),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.logout, size: 20),
+                  tooltip: 'Cerrar sesión',
+                  onPressed: _logout,
+                ),
+              ],
             ),
-          ],
-        ),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: SyncBadge(),
-          ),
-          IconButton(
-            icon: const Icon(Icons.logout, size: 20),
-            tooltip: 'Cerrar sesión',
-            onPressed: _logout,
-          ),
-        ],
-      ),
       body: RefreshIndicator(
         onRefresh: _onRefresh,
         child: _isLoading
@@ -186,14 +212,15 @@ class _JornadaScreenState extends State<JornadaScreen> {
                               return Card(
                                 child: InkWell(
                                   borderRadius: BorderRadius.circular(12),
-                                  onTap: () async {
-                                    await Navigator.of(context).push(
-                                      MaterialPageRoute(
-                                        builder: (_) => DetalleOrdenScreen(ordenId: orden['id']),
-                                      ),
-                                    );
-                                    await _loadData();
-                                  },
+                                  // Pantalla heredada y sin llamadores desde la
+                                  // Fase 4: no se cablea al detalle nuevo, que
+                                  // necesita la lista compartida de la jornada.
+                                  // Se elimina entera al cerrar la Fase 7.
+                                  onTap: () => ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('Pantalla heredada. Usá la pestaña Trabajo.'),
+                                    ),
+                                  ),
                                   child: Padding(
                                     padding: const EdgeInsets.all(16),
                                     child: Column(

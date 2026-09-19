@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'core/storage/secure_storage_service.dart';
 import 'core/theme/app_theme.dart';
 import 'features/auth/login_screen.dart';
-import 'features/jornada/jornada_screen.dart';
+import 'features/shell/app_shell.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -24,7 +24,9 @@ class DexterCampoApp extends StatelessWidget {
       title: 'Dexter IA',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
-      home: hasValidSession ? const JornadaScreen() : const LoginScreen(),
+      // Sin sesión no hay contenedor: el shell existe solo del otro lado del
+      // login, igual que antes lo hacía la pantalla de jornada.
+      home: hasValidSession ? AppShell() : const LoginScreen(),
     );
   }
 }
