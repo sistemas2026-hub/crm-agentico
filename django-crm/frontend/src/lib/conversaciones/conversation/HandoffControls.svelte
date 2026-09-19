@@ -184,6 +184,12 @@
       </label>
       <label>
         <span>Motivo (obligatorio)</span>
+        <!-- Que quede en la auditoría no es un detalle legal: cambia cómo se
+             escribe. «pasa a Ana» y «Ana tiene el historial del caso con la
+             cooperativa» cuestan lo mismo, y dentro de tres semanas sólo uno
+             de los dos sirve. El evento `reasignada` lo guarda con actor,
+             anterior, nuevo y versión (C16). -->
+        <span class="ayuda-campo">Queda registrado en la auditoría del caso</span>
         <textarea bind:value={motivoReasignar} rows="2" maxlength="500" required></textarea>
       </label>
       <div class="reasignar-acciones">
@@ -194,7 +200,11 @@
         <button type="button" class="v2-btn v2-btn-sm v2-btn-quiet" onclick={() => (reasignando = false)}>
           Cancelar
         </button>
-        {#if errorReasignar}<span class="aviso-mal">{errorReasignar}</span>{/if}
+        <!-- El mismo tratamiento que el 409 de Tomar/Soltar: `reasignar()`
+             usa conflictoDeAsignacion(), así que acá llega el mismo tipo de
+             mensaje -- «la tomó Ana antes», «es anterior al relevo». Verlo en
+             rojo acá y en azul allá haría parecer que son cosas distintas. -->
+        {#if errorReasignar}<span class="aviso-conflicto">{errorReasignar}</span>{/if}
       </div>
     </form>
   {/if}
@@ -303,6 +313,12 @@
   /* El conflicto de asignación: informativo, no destructivo. Se distingue del
      resto por el filete y no por el color del texto, para que se lea como una
      nota al margen y no como una alarma. */
+  .ayuda-campo {
+    font-size: 10.5px;
+    color: var(--bandeja-texto-3);
+    font-weight: 400;
+  }
+
   .aviso-conflicto {
     flex: none;
     display: inline-flex;
