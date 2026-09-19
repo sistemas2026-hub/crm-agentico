@@ -19,6 +19,8 @@ componentizar  ≠  limpiar  ≠  rediseñar  ≠  modificar funcionalidad
 0a809d0  0B.0 — guarda del orden operacional
 256c244  checkpoint Fase 0B
 dc587a3  0B.1 — QueueTabs + QueueSearch
+73c2b42  checkpoint con 0B.1
+76f54f9  0B.2 — QueueFilters
 ```
 
 Nada de esto está pusheado.
@@ -28,13 +30,13 @@ Nada de esto está pusheado.
 ```
 0B.0  Guarda de ordenar()       ✅ cerrado   0a809d0
 0B.1  QueueTabs + QueueSearch   ✅ cerrado   dc587a3
-0B.2  QueueFilters              ← el próximo
-0B.3  QueueEmptyState           pendiente
+0B.2  QueueFilters              ✅ cerrado   76f54f9
+0B.3  QueueEmptyState           ← el próximo
 0B.4  ConversationRow           pendiente — auditoría previa OBLIGATORIA
 0B.5  ConversationList          pendiente
 ```
 
-`+layout.svelte`: 1193 → 1093 → **949 líneas**.
+`+layout.svelte`: 1193 → 1093 → 949 → **813 líneas**.
 
 ```
 lib/conversaciones/cola/
@@ -42,6 +44,7 @@ lib/conversaciones/cola/
   ordenamiento.test.js    287
   QueueTabs.svelte        119   nav.tabs   + 8 reglas
   QueueSearch.svelte       77   label.buscar + 5 reglas
+  QueueFilters.svelte     210   .controles + .motivos + 10 reglas
 ```
 
 ### Decisiones de frontera tomadas en 0B.1
@@ -49,8 +52,8 @@ lib/conversaciones/cola/
 **`filtro` y `vista` no son el mismo concepto**, aunque los nombres se parezcan:
 
 ```
-filtro   la pestaña seleccionada      → va a QueueTabs
-vista    el filtro de CANAL           → vive en .controles, se va en 0B.2
+filtro   la pestaña seleccionada      → QueueTabs
+vista    el filtro de CANAL           → QueueFilters (0B.2)
 ```
 
 **`irA()` se queda íntegra en el layout.** Hace tres cosas a la vez y ése es justamente el motivo:
@@ -79,6 +82,43 @@ QueueSearch   0 fetch · 0 invalidate · 0 setInterval · 0 $effect
 caso que `forzarAlFinal` en 0A.1: la misma función, invocada por el nombre de su prop. **Correr el
 check antes de mirar cualquier otra cosa**, porque un callback mal cableado es un error de tipos y
 sale en la primera pasada.
+
+### Decisiones de frontera tomadas en 0B.2
+
+**`VISTAS` viaja al componente; `ORDENES` no.** No es un capricho:
+
+```
+ORDEN_POR_PESTANA = { 'por-atender': 'recomendado', … }   ← se queda en el layout
+ORDENES           = [{ id: 'recomendado', … }]            ← los mismos ids
+```
+
+Si `ORDENES` viviera en `QueueFilters`, esa correspondencia quedaría repartida en dos archivos **sin
+nada que la mantenga junta**: el día que alguien renombre un id, la pestaña abriría con un orden
+inexistente y el `?? 'actividad'` lo taparía en silencio. Por eso se declara al lado de su mapa y
+**llega como prop**. `VISTAS` sí se va: ningún otro lugar la usa.
+
+**No mover `ORDENES` al hijo durante la Fase 0B.**
+
+**`ordenElegido` NO está muerto — se corrige la clasificación de la auditoría previa.** El marcado lo
+escribe de verdad:
+
+```js
+onchange={() => (ordenElegido = true)}
+```
+
+Significa «el orden lo eligió una persona», y es lo que hace que `irA()` no lo pise al cambiar de
+pestaña. Sigue congelado igual —**no eliminar, no reinterpretar, no simplificar**— pero ya no debe
+describirse como estado muerto.
+
+**`QueueFilters` sólo modifica valores.** `motivos`, `motivosVisibles` y el `$effect` que despliega
+los chips cuando el motivo activo queda escondido **se quedan en el layout**; el hijo los dibuja, no
+los calcula. `visibles` sigue siendo la única autoridad y **no migra a componentes durante 0B**.
+
+`motivoLabel` se pasa como prop en vez de duplicarse: también lo usa `.motivo-fila`, en la fila.
+
+```
+QueueFilters   0 fetch · 0 invalidate · 0 setInterval · 0 $effect · 0 porBanda · 0 peso
+```
 
 ## Lo que la auditoría previa encontró, y hay que tener presente
 
@@ -148,7 +188,7 @@ por cada clase del marcado   →  localizar su regla efectiva
 por cada regla movida        →  comprobar qué consumidores tenía
 ```
 
-**Resultado en 0B.1**, que es cómo se ve un corte sano:
+**Resultado en 0B.1 y 0B.2**, que es cómo se ve un corte sano:
 
 ```
 clases movidas sin regla        0
@@ -161,6 +201,18 @@ Se verifica **en los dos momentos**: antes de mover, con el script abortando por
 cualquiera de los tres casos; y después, por archivo. No hizo falta duplicar ninguna regla, a
 diferencia de `.aviso` en 0A.3.
 
+**`.motivo` en 0B.2 — por qué el inventario va por selector y nunca por prefijo:**
+
+```
+.motivo       la comparten «Solo escaladas» (.controles) y los chips (.motivos)
+              → los dos dentro del bloque, así que la regla viajó entera
+
+.motivo-fila  OTRA clase, vive en a.fila, se queda
+```
+
+Un inventario por prefijo se habría llevado `.motivo-fila` con las demás — es el mismo fallo de
+`.proceso, .docs` en 0A.4. El patrón que hay que usar es `\.motivo(?![\w-])`.
+
 **No alcanza con mirar el delta de warnings.** Y ojo con el efecto secundario: cuando `.cuando` viaje
 a `ConversationRow`, la interpolación se va con él. El layout **recupera** la vista y aparecerán
 warnings de CSS muerto preexistente — eso **no será una regresión** —, mientras el componente que la
@@ -168,6 +220,31 @@ reciba hereda la ceguera.
 
 **`.activa` significa dos cosas:** `.fila.activa` es la conversación seleccionada; `<span
 class="activa">` es el punto de actividad reciente. Mismo nombre, dos propósitos, y viajan juntos.
+
+## Los dos huecos del tooling, y la auditoría mínima que salen de ellos
+
+`pnpm check` tiene **dos puntos ciegos** que en este archivo importan:
+
+```
+1.  CSS muerto con una clase interpolada en el marcado   → no lo ve (ver arriba)
+2.  constantes JS sin referencias                        → tampoco lo ve
+```
+
+El segundo apareció en 0B.2: el primer intento dejó `VISTAS` y `ORDENES` **duplicadas** —copiadas al
+componente y todavía declaradas en el layout, ya sin consumidores— y el check pasó limpio. Se
+encontró contando referencias a mano.
+
+**La auditoría mínima de cada corte de 0B es, entonces, tres cosas y no una:**
+
+```
+1.  pnpm check                          errores de tipos y props mal cruzadas
+2.  inventario CSS bidireccional        clase → regla · regla → consumidores
+3.  referencias de cada símbolo movido  ¿quedó una copia huérfana del otro lado?
+```
+
+Ninguna de las tres cubre a las otras dos. El check es el más rápido y **se corre primero**, porque
+un callback mal cableado sale ahí en la primera pasada; las otras dos no las hace ninguna
+herramienta.
 
 ## Polling — los dos ciclos se quedan en el layout
 
@@ -212,7 +289,8 @@ los mockups responsive de Stitch.
 
 | | |
 |---|---|
-| `ordenElegido` | se escribe en dos sitios y **no se lee en ninguno**. No eliminar, no reinterpretar |
+| `ordenElegido` | **congelado, pero NO es estado muerto** — la auditoría previa lo clasificó mal y 0B.2 lo corrigió. `onchange` lo pone en `true` al elegir un orden a mano, y eso evita que `irA()` lo pise. No eliminar, no reinterpretar |
+| `peso()` | el respaldo pre-D18, vivo a propósito. Ver arriba |
 | `tramoEspera` | el texto de la fila muestra `esperando_desde` (B3.5) pero el **color** sale de `escalada_en ?? actualizado_en`. Pueden discrepar. Preexistente |
 | `.marca` · `.marca::before` | CSS muerto, invisible para `pnpm check` por lo de arriba |
 | `.activa` | dos significados |
