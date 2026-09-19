@@ -25,6 +25,8 @@ dc587a3  0B.1 — QueueTabs + QueueSearch
 5df9c57  0B.3 — QueueEmptyState
 28d2f7e  checkpoint con 0B.3
 b340071  0B.4 — ConversationRow
+9d9f1dc  checkpoint con 0B.4
+f927026  0B.5 — ConversationList  ← cierra la Fase 0
 ```
 
 Nada de esto está pusheado.
@@ -38,10 +40,15 @@ Nada de esto está pusheado.
 0B.3  QueueEmptyState           ✅ cerrado   5df9c57
 0B.4A Auditoría de Row          ✅ cerrada
 0B.4B ConversationRow           ✅ cerrado   b340071
-0B.5  ConversationList          ← el último
+0B.5  ConversationList          ✅ cerrado   f927026
+
+FASE 0B                         ✅ CERRADA
+FASE 0                          ✅ CERRADA
+
+PRÓXIMO:  FASE 1 — sistema visual Stitch
 ```
 
-`+layout.svelte`: 1193 → 1093 → 949 → 813 → 790 → **395 líneas**.
+`+layout.svelte`: 1193 → 1093 → 949 → 813 → 790 → 395 → **379 líneas**.
 
 ```
 lib/conversaciones/cola/
@@ -51,11 +58,41 @@ lib/conversaciones/cola/
   QueueSearch.svelte       77   label.buscar + 5 reglas
   QueueFilters.svelte     210   .controles + .motivos + 10 reglas
   QueueEmptyState.svelte   62   los tres huecos + 1 regla
+  ConversationList.svelte  61   la cáscara .lista + 1 regla
   ConversationRow.svelte  478   el <a class="fila"> entero + 27 reglas
 ```
 
-**478 líneas no son motivo para volver a partirlo.** El tamaño no es el criterio; la frontera sí. No
-fragmentarlo antes del rediseño salvo necesidad funcional real.
+```
++layout.svelte
+├─ QueueTabs
+├─ QueueSearch
+├─ QueueFilters
+├─ ConversationList
+│  ├─ QueueEmptyState
+│  └─ ConversationRow
+└─ {#key abierta}
+   └─ la conversación abierta
+```
+
+Y aparte, `ordenamiento.js` con sus 20 guardas: **la lógica operacional del orden, probada**.
+
+**Las 478 líneas de `ConversationRow` no son motivo para volver a partirlo.** El tamaño nunca fue el
+criterio; la frontera sí. No fragmentarlo antes del rediseño salvo necesidad funcional real.
+
+## La autoridad se quedó donde estaba
+
+Esto es lo que hay que comprobar antes de cualquier cambio de la Fase 1. Todo sigue en
+`+layout.svelte`:
+
+```
+visibles            ordenar()          polling de 8 s
+cadena de filtrado  irA()              reloj de 20 s
+motivos             ORDENES            master-detail (.mesa · .columna · @media)
+motivosVisibles     abierta            {#key abierta}
+```
+
+**Ninguno de los seis componentes redefine autoridad operacional.** Ese es el resultado que importa,
+no el conteo de líneas: la cola se repartió en piezas sin repartir las decisiones.
 
 ### Decisiones de frontera tomadas en 0B.1
 
@@ -244,6 +281,37 @@ un solo archivo**. No renombrar durante 0B.
 **La redundancia de `.avance` se movió tal cual**: hay un guard exterior `{#if c.resumen}` y otro
 interior `{#if (c.resumen ?? '').trim()}` cuya rama es inalcanzable. Preexistente, **no corregida a
 propósito**.
+
+### Decisiones de frontera tomadas en 0B.5
+
+```svelte
+<ConversationList
+  {visibles} {conversaciones} error={data.error} {busqueda}
+  {abierta} {ahora} {tramoEspera} {motivoLabel}
+/>
+```
+
+Deliberadamente mecánica. **No rediseñarla todavía.**
+
+**La lista no ordena ni filtra.** `visibles` llega resuelta:
+
+```
+ConversationList   0 .sort() · 0 ordenar() · 0 filter() · 0 router
+                   0 fetch · 0 invalidate · 0 timers · 0 $effect
+```
+
+Si esta lista volviera a ordenar, **las 20 guardas de `ordenamiento.js` dejarían de proteger lo que
+se ve**. Es la razón concreta por la que no puede haber un `.sort()` acá.
+
+**Las tres condiciones de estado vacío viajaron, y eso no es mover autoridad:** son la decisión de
+*qué dibujar adentro* de `.lista`, y operan sólo sobre props ya resueltas. El componente no conoce
+`vista`, `filtro`, `motivo`, `soloEscaladas`, `orden` ni `canal_operativo`.
+
+`conversaciones` va **entero** en vez de un `total={…}`: conserva la condición literal, igual que `c`
+en la fila. Inventar una API más prolija es justo lo que esta fase no hace.
+
+**La regla `.lista` se copió y después se verificó verbatim contra el original** — es el error que
+costó caro en 0A.1 con `extension()`, donde una transcripción perdió media condición.
 
 ## Lo que la auditoría previa encontró, y hay que tener presente
 
@@ -487,5 +555,70 @@ anteriores estaba separado: `ahora` cruzando la frontera, nueve helpers, la clas
 helpers tenían consumidores ocultos, y exactamente qué iba a pasar con los warnings. Para 0B.5 el
 corte es chico, pero el orden —mirar antes de mover— es el que quedó demostrado.
 
-Cuando 0B cierre, se termina la preparación estructural y **la Fase 1 empieza a cambiar visualmente
-la Bandeja**. Hasta entonces: nada de Tailwind, tokens, colores, badges, textos ni estados nuevos.
+## El método, que es lo que se lleva a la Fase 1
+
+Tres guardas, y **ninguna cubre a las otras dos**:
+
+```
+1.  pnpm check                          errores de tipos y props mal cruzadas — va primero
+2.  inventario CSS bidireccional        clase → regla · regla → consumidores
+3.  referencias de cada símbolo movido  ¿quedó una copia o un import huérfano?
+```
+
+La tercera encontró algo en **cuatro de los seis cortes** (`VISTAS`/`ORDENES`, `Search` y compañía,
+los cinco imports de la fila, los dos de la lista). Ninguna de esas las reporta `svelte-check`.
+
+**Y para la reactividad silenciosa al cruzar una frontera: mirar el compilado.** Cuando `ahora` pasó
+a ser prop en 0B.4, su fallo posible —el punto «Activa» congelado— no era un error de tipos ni un
+warning de CSS: no lo habría visto nadie. Compilar el componente y encontrar `ahora()` dentro de un
+`$.derived` envuelto en `$.if` lo resolvió en un minuto. Sirve para cualquier prop cuyo fallo sea
+mudo.
+
+## Lo que la Fase 0 NO corrigió, a propósito
+
+```
+.marca · .marca::before   CSS muerto preexistente; los dos warnings del baseline
+.activa                   dos significados dentro de ConversationRow
+quien · esTelefono · esUuid   duplicados con ConversationHeader
+.avance                   guard exterior e interior; la rama interior es inalcanzable
+tramoEspera               el color sale de escalada_en, el texto de esperando_desde
+peso()                    el respaldo pre-D18, vivo deliberadamente
+ordenElegido              congelado, pero NO es estado muerto
+```
+
+Ninguna es urgente y todas están donde se pueden encontrar. **La Fase 1 tampoco es el momento de
+limpiarlas**: mezclar limpieza con rediseño vuelve el diff igual de inauditable que mezclarla con
+componentización.
+
+## Contratos que sobreviven a la Fase 1
+
+El rediseño cambia cómo se ve la Bandeja. **No cambia nada de esto:**
+
+```
+Stitch manda visualmente.  Dexter manda funcionalmente.
+
+B3.5 manda en la cola — el frontend no inventa prioridad, ni score, ni SLA.
+
+owner de la conversación = la asignación durable de Dexter.
+El owner del ticket del CRM es otra cosa (D28), y sigue reservado para B4.
+
+Mostrar una conversación legada no la adopta, ni toca relevo_version (G8).
+
+El sondeo y el ciclo de vida no se duplican: siguen viviendo donde están hoy.
+```
+
+Cuando el diseño y el contrato se contradigan, **gana el contrato** — la regla ya está escrita en
+[`BANDEJA_STITCH_REFERENCIAS.md`](BANDEJA_STITCH_REFERENCIAS.md) y no cambia.
+
+## Fase 0, cerrada
+
+```
+[id]/+page.svelte    4036 → 1665   (Fase 0A)
++layout.svelte       1193 →  379   (Fase 0B)
+```
+
+Las líneas documentan el alcance, **no son una métrica de arquitectura**: lo que hace que la fase
+haya valido la pena es que la autoridad no se movió de sitio.
+
+Lo siguiente es la **Fase 1 — sistema visual Stitch**: tokens, tipografía, color, bordes, radios,
+superficies y la semántica IA/humano, y recién después aplicarlos pantalla por pantalla.
