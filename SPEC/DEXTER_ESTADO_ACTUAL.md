@@ -49,21 +49,25 @@ G9 (recibo punta a punta)   ✅ verde en producción 16/09/2026
 Fase 1.1-1.4B (visual)      ✅
 Contrato T6/T7              ✅ entendido y congelado
 1.4C backend T6             ✅ commit 04d835e, medido contra PostgreSQL 16.14
+1.4C UI                     ✅ commit d033e58
+FASE 1.4C                   ✅ COMPLETA
 ```
 
 ## ABIERTO
 
 ```
-1.4C UI                 ⏭ SIGUIENTE. El draft visual ya existe, sin commitear.
 G6 sobre messages       🔒 gate de DESPLIEGUE: la migración no se midió sobre
-                           una tabla poblada. NO bloquea el commit funcional.
-hot path ③a/③c          ⏸ retirado y preservado, gate propio
-T7 endpoint             ⏸ fuera de T6, capacidad manual futura
-Fases 1.5-1.9           ⏸
-smoke visual Fase 1     ⏸ QA multi-viewport diferida
+                           una tabla poblada. NO bloquea el desarrollo.
+smoke visual integral   ⏭ ningún estado de T6 se vio renderizado, en ningún
+                           viewport. Auditoría estática de CSS, sí.
+hot path ③a/③c          ⏭ idempotencia del outbound automático, trabajo aparte
+                           (auditorias/1.4C-hotpath-diferido.md)
+T7 endpoint             ⏭ devolver sin responder: capacidad distinta, no el
+                           recovery de T6
+Fases 1.5-1.9           ⏸ Case+Tools, Activity, Customer, Network, Branding
 ```
 
-**Fase 1.4C NO está completa**: falta la UI.
+**T6 no se retoca más** salvo que aparezca una regresión concreta.
 
 ### El draft T6 se separa en cuatro asuntos, no uno
 
@@ -79,11 +83,24 @@ smoke visual Fase 1     ⏸ QA multi-viewport diferida
 ## SIGUIENTE GATE
 
 ```
-1.4C UI   el botón «Responder y devolver a IA» y sus estados
+Fase 1.5   Case + Tools
 ```
 
-Entrada: `SPEC/FASE_1_CHECKPOINT.md` (sección 1.4C) y `auditorias/1.4C-D3.md`.
-Lo que la UI puede dar por cierto y lo que NO debe hacer está en el checkpoint.
+Entrada: `SPEC/FASE_1_CHECKPOINT.md`. Antes de empezar, leer también qué quedó
+abierto arriba: nada de eso bloquea 1.5, pero G6 sí bloquea cualquier despliegue.
+
+## CONTRATO T6, CONGELADO
+
+Lo que quedó demostrado y no hace falta volver a auditar:
+
+```
+control = ia por T6   sólo con wamid + estado_entrega='enviado' durables
+cambio optimista      no existe: sólo con devuelto_al_asistente === true
+rechazado             ≠ incierto/sin_id/aceptado_sin_registro
+unknown               conserva el control humano y NO ofrece reintentar
+clave idempotente     una por intento, viaja con la burbuja junto a la intención
+T7                    no es el recovery de T6
+```
 
 ## BLOQUEANTES — estado tras 1.4C.0-D2
 

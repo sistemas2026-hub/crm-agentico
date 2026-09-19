@@ -766,14 +766,15 @@ props 24 · binds 9 · callbacks 16 · lifecycle 0 · v2 1 (--v2-fs) · T6 0
 funcional desde cero — un `200` no es sinónimo de que la IA recuperó el control.
 
 
-## Fase 1.4C — backend T6 cerrado, UI pendiente
+## Fase 1.4C — COMPLETA
 
 ```
 1.4B              rediseño del centro operativo        ✅
 1.4C backend T6   responder y devolver, salida durable ✅  commit 04d835e
-1.4C UI           el botón y sus estados               ⏭  siguiente
+1.4C UI           el botón y sus estados               ✅  commit d033e58
 G6 poblada        migración sobre messages con datos   🔒 gate de despliegue
 T7                devolver sin responder               —  fuera de T6
+hot path ③a/③c    idempotencia del outbound automático ⏭  trabajo separado
 ```
 
 La auditoría que este checkpoint pedía se hizo, y encontró bastante más que un flujo: el backend de
@@ -794,11 +795,30 @@ Lo que quedó demostrado, y es lo que la UI puede dar por cierto:
 - **Durante `devolucion_solicitada` la conversación es indistinguible de una normal**: el paso 1 no
   escribe ninguna columna de estado. Un indicador de "devolviendo…" tendría que leer `relevo_eventos`.
 
-**Nota para quien commitee la UI:** el backend renombró el contrato de entrega
-(`entregado` → `aceptado_por_meta` / `aceptacion_registrada` / `resultado`). Los cuatro archivos de
-frontend que lo consumen están actualizados en el árbol de trabajo pero **no en este commit**, así
-que entre `04d835e` y el commit de UI la rama queda temporalmente incoherente en ese punto. No se
-pushea nada hasta cerrarlo.
+La incoherencia temporal del contrato de entrega (`entregado` → `aceptado_por_meta` /
+`aceptacion_registrada` / `resultado`) **quedó cerrada en `d033e58`**: los archivos de `tickets/` ya
+consumen el contrato nuevo, y de paso se tapó un hueco que el renombre dejaba — con un resultado
+incierto no hay `aviso` y `aceptado_por_meta` es `false`, así que la pantalla no decía **nada** y se
+leía como éxito.
+
+### Lo que la UI de T6 hace, y por qué
+
+| | |
+|---|---|
+| CONFIRMADO | sólo con `devuelto_al_asistente === true`. Nunca optimista. |
+| `rechazado` | rojo, «el mensaje no salió». Es el **único** caso que ofrece reintentar. |
+| `incierto` / `sin_id` / `aceptado_sin_registro` / transporte | ámbar, «no podemos confirmar». Reintentar mandaría el mensaje dos veces. |
+| clave de idempotencia | una por intento, viaja con la burbuja junto a la intención de devolver |
+| aislamiento entre conversaciones | lo da el `{#key abierta}` del layout, no un `$effect` |
+
+La regla vive en [`lib/conversaciones/devolucion.js`](../django-crm/frontend/src/lib/conversaciones/devolucion.js),
+fuera de Svelte y con pruebas. La pantalla no clasifica: traduce.
+
+**Guarda estructural del remonte.** `t6_cableado.test.js` fija que el layout siga envolviendo al
+hijo en `{#key abierta}`. No es un test E2E de navegación —no hay navegador— sino la guarda de una
+dependencia frágil: ya se intentó **dos veces** reemplazar ese `{#key}` por un `$effect` para evitar
+el parpadeo, y las dos veces el panel se quedó mostrando la conversación anterior. Sin ese remonte,
+el resultado de un T6 de una conversación se vería en otra.
 
 
 ## El puente `--v2-*` — transitorio, y con un orden para retirarlo
@@ -912,18 +932,31 @@ voltajes, firmwares, OLT/slot/port, operadores, teléfonos o documentos inventad
 
 ## Baseline
 
+Medido el 19/09/2026 al cerrar 1.4C:
+
 | Chequeo | Valor esperado |
 |---|---|
-| `pnpm check` | 2 errores en `(no-layout)/org/`; **0 en `conversaciones/`** |
-| warnings | **26** — los dos conocidos son `.marca` y `.marca::before` en `+layout.svelte` |
-| vitest | 17 failed \| 10 passed (27) · **63 failed** \| 315 passed (378) |
-| guardas 0B.0 | 20/20 |
-| guardas D29 | 17/17 |
-| guardas `formato` (1.3B) | 17/17 |
+| `svelte-check` | 2 errores en `(no-layout)/org/`; **0 en `conversaciones/`** |
+| warnings | **25** |
+| vitest | 17 failed \| 12 passed (29) · **63 failed** \| 350 passed (413) |
+| guardas `conversaciones/` | 89/89 — ordenamiento 20 · grabación 17 · formato 17 · devolución 13 · cableado 22 |
 | D30, backend | 18/18 — **se reporta aparte, no se suma a vitest** |
+| backend con PostgreSQL real | 9 suites verdes (ver `DEXTER_BASELINES.md`) |
 
-**Los warnings se identifican por nombre, no por conteo.** Un tercero es una regresión hasta que se
-demuestre lo contrario.
+**Los warnings se identifican por nombre, no por conteo.** Un cuarto es una regresión hasta que se
+demuestre lo contrario. Los conocidos en `conversaciones/` son **tres**:
+
+```
+.marca            +layout.svelte:353
+.marca::before    +layout.svelte:362
+.adjunto-otro     [id]/+page.svelte:1601
+```
+
+**Corrección a la baseline anterior**, que decía «26 warnings, los dos conocidos son `.marca` y
+`.marca::before`». Medido hoy son 25, y el tercero (`.adjunto-otro`) **ya existe en `d0d6be9`** —
+ningún diff de la Fase 1 lo toca. Era la lista la que estaba incompleta, no una regresión nueva. La
+diferencia 26 → 25 no se pudo reconciliar contra una medición fechada: el número anterior no tenía
+fecha, que es justamente el motivo por el que ahora las llevan.
 
 ## Evidencia visual
 
