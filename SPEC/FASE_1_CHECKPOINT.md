@@ -35,6 +35,8 @@ a916410  checkpoint con 1.4B.2b-i
 fb93ddf  corrige los comentarios de .aviso
 9c4ed16  checkpoint con ii(a)
 95f13ee  1.4B.2b-ii(b) — ADMIN reasigna
+b61ef4a  checkpoint con ii(b)
+25aacba  1.4B.2b-iii — estados de la ventana  ← cierra 1.4B
 ```
 
 Nada de esto está pusheado.
@@ -52,7 +54,10 @@ Nada de esto está pusheado.
 1.4B.2b-i  IA controla + 409    ✅ cerrada   16ab44e
 1.4B.2b-ii(a) ownership · 3 estados  ✅ cerrada   8dafad4
 1.4B.2b-ii(b) ADMIN reasigna         ✅ cerrada   95f13ee
-1.4B.2b-iii   WA abierta · por cerrar   ← lo último de 1.4B
+1.4B.2b-iii   estados de la ventana  ✅ cerrada   25aacba
+
+FASE 1.4B                            ✅ COMPLETA
+1.4C · T6 Return to AI               🔒 el siguiente
    **1.4B.2 NO está cerrada.**
 1.4C  T6 · Return to AI        🔒 pendiente, fuera de 1.4B
 1.5  Case + Tools             pendiente
@@ -680,6 +685,85 @@ Dexter 1.4B   panel inline
 —focus trap, `Escape`, retorno de foco, bloqueo de scroll— y eso ya no es composición. Además el
 panel inline deja el hilo visible mientras se decide a quién pasar el caso, que es justo cuando hace
 falta mirarlo.
+
+
+### 1.4B.2b-iii — los tres estados de la ventana
+
+```
+abierta        línea discreta, sin rótulo    «quedan 3 h 20 m»
+por cerrarse   rótulo + filete ámbar         «cierra en 42 m»
+cerrada        rótulo + filete gris          «cerrada» + Elegir plantilla
+```
+
+**El rótulo aparece en dos de tres, deliberadamente:** dice *de qué sistema viene el límite*, y
+mientras la ventana está abierta **no hay ningún límite operando**. Un distintivo permanente en el
+estado normal es ruido que compite con el que sí importa.
+
+**«Por cerrarse» es una advertencia, no un bloqueo.** Lleva el mismo filete ámbar que el handoff sin
+dueño: se puede seguir escribiendo con normalidad, sólo conviene hacerlo ahora. Tratarla como si ya
+estuviera cerrada sería cerrar la ventana antes de tiempo. **Cerrada** sí es un límite en vigor, con
+filete gris y **no rojo**: no se rompió nada, hay otra forma de escribir.
+
+### Ventana abierta ≠ permiso para escribir
+
+```js
+bloqueadoPorVentana = ventanaAbierta === false && modo !== 'nota'
+bloqueadoPorIA      = !escalada && canal === 'whatsapp' && modo !== 'nota'
+disabled            = enviando || bloqueadoPorVentana || bloqueadoPorIA
+```
+
+**Dos guardas independientes combinadas con OR.** Ventana abierta + IA controlando **sigue
+bloqueado**, y el `placeholder` prioriza el motivo de IA. Las dos llevan `modo !== 'nota'`: la nota
+interna conserva su excepción en ambas.
+
+`ventanaRestante` viene resuelto del padre. El Composer agregó **0 `Date.now`, 0 timers, 0
+lifecycle**.
+
+### Responsive: auditoría estática, NO validación visual
+
+**No se levantó el frontend en tres viewports.** Lo entregado es la búsqueda de las tres causas
+reales de desborde —`nowrap` sin recorte, anchos fijos, `min-width` que impidan achicar—, el mismo
+método que encontró el defecto de `.duenio`.
+
+```
+del diff actual   .ventana-marca   nowrap, texto fijo y corto, contenedor flex-wrap
+                                   → sin causa estática de desborde
+```
+
+**No escribir «desktop/tablet/mobile OK»: eso no ocurrió.** La QA visual multi-viewport queda para el
+**smoke visual integral de la Fase 1**, y no bloqueó este corte.
+
+**Riesgos preexistentes, anotados sin tocar:**
+
+```
+.menu-adjuntar         width / min-width 160px
+.menu-adjuntar label   nowrap
+.adjunto-previo audio  width 240px
+```
+
+**Ninguno está demostrado como defecto**, y 240 px por sí solos no prueban desborde en 360. **No se
+arregla preventivamente lo que no se vio fallar.** El Composer ya tiene su breakpoint en 560 px.
+
+## Fase 1.4B — completa
+
+```
+1.4B.1        tokens + retiro del reset       ✅
+1.4B.2a       WA cerrada + plantillas         ✅
+1.4B.2b-i     IA controla + 409               ✅
+1.4B.2b-ii(a) ownership · 3 estados           ✅
+1.4B.2b-ii(b) ADMIN reasigna                  ✅
+1.4B.2b-iii   estados de la ventana           ✅
+```
+
+**API del Composer, sin cambios en toda la fase** — recontada con parser sobre el bloque `$props()`,
+no contando líneas:
+
+```
+props 24 · binds 9 · callbacks 16 · lifecycle 0 · v2 1 (--v2-fs) · T6 0
+```
+
+**Queda fuera a propósito: `Return to AI` / T6.** Antes de implementarlo hay que auditar el flujo
+funcional desde cero — un `200` no es sinónimo de que la IA recuperó el control.
 
 
 ## El puente `--v2-*` — transitorio, y con un orden para retirarlo
