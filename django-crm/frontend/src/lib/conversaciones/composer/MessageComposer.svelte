@@ -433,13 +433,9 @@
 
   .aviso-mal {
     flex: none;
-    color: var(--v2-rust);
+    color: var(--bandeja-error);
   }
 
-  /* SOLO PARA PRUEBAS -- ver reiniciarConversacion(). El estilo local que
-     imitaba a medias una accion destructiva se fue: ahora usa .v2-btn-danger
-     del sistema, que ademas del color trae el borde punteado -- se distingue
-     de una accion operativa antes de leer la etiqueta, no solo por el tono. */
   .pie {
     flex: none;
     padding: 0 16px 14px;
@@ -455,21 +451,21 @@
     gap: 6px;
     flex-wrap: wrap;
     font-size: 11.5px;
-    color: var(--v2-slate);
+    color: var(--bandeja-texto-2);
     padding: 5px 8px;
     margin-bottom: 6px;
     border-radius: 8px;
-    background: var(--v2-paper);
+    background: var(--bandeja-canvas);
   }
 
   .ventana-avisa {
-    color: var(--v2-ink);
-    background: var(--v2-ember-soft);
+    color: var(--bandeja-texto);
+    background: var(--bandeja-aviso-fondo);
   }
 
   .ventana-cerrada {
-    color: var(--v2-ink);
-    background: var(--v2-ember-soft);
+    color: var(--bandeja-texto);
+    background: var(--bandeja-aviso-fondo);
   }
 
   .ventana-cerrada button {
@@ -480,7 +476,7 @@
   /* Un cuadro deshabilitado que se ve igual que uno normal invita a
      escribir y no avisa hasta que alguien ya escribio. */
   .texto-inerte {
-    background: var(--v2-paper);
+    background: var(--bandeja-canvas);
     cursor: not-allowed;
   }
 
@@ -492,9 +488,9 @@
     gap: 8px;
     padding: 10px;
     margin-bottom: 8px;
-    border: 1px solid var(--v2-line);
+    border: 1px solid var(--bandeja-borde);
     border-radius: 8px;
-    background: var(--v2-card);
+    background: var(--bandeja-superficie);
   }
 
   .plantillas-top {
@@ -515,8 +511,8 @@
     margin: 0;
     padding: 8px;
     border-radius: 8px;
-    background: var(--v2-ember-soft);
-    color: var(--v2-ink);
+    background: var(--bandeja-aviso-fondo);
+    color: var(--bandeja-texto);
     font-size: 11.5px;
     line-height: 1.45;
   }
@@ -538,20 +534,20 @@
     text-align: left;
     font: inherit;
     padding: 8px;
-    border: 1px solid var(--v2-line-soft);
+    border: 1px solid var(--bandeja-superficie-suave);
     border-radius: 8px;
-    background: var(--v2-paper);
+    background: var(--bandeja-canvas);
     cursor: pointer;
   }
 
   .plantilla-item:hover {
-    border-color: var(--v2-line);
+    border-color: var(--bandeja-borde);
   }
 
   .plantilla-nombre {
     font-weight: 600;
     font-size: 12px;
-    color: var(--v2-ink);
+    color: var(--bandeja-texto);
   }
 
   /* El cuerpo puede ser largo: se recorta en una linea para que la lista se
@@ -577,13 +573,13 @@
     gap: 3px;
     padding: 8px;
     border-radius: 8px;
-    background: var(--v2-paper);
+    background: var(--bandeja-canvas);
   }
 
   .plantilla-previa p {
     margin: 0;
     font-size: 12.5px;
-    color: var(--v2-ink);
+    color: var(--bandeja-texto);
     white-space: pre-wrap;
   }
 
@@ -605,7 +601,7 @@
     background: none;
     font: inherit;
     font-size: 11.5px;
-    color: var(--v2-slate);
+    color: var(--bandeja-texto-2);
     padding: 5px 10px;
     min-height: 30px;
     border-radius: 7px;
@@ -613,27 +609,27 @@
   }
 
   .modo:hover {
-    color: var(--v2-ink);
+    color: var(--bandeja-texto);
   }
 
   .modo[aria-pressed='true'] {
-    color: var(--v2-ink);
+    color: var(--bandeja-texto);
     font-weight: 650;
-    border-color: var(--v2-line);
-    background: var(--v2-card);
+    border-color: var(--bandeja-borde);
+    background: var(--bandeja-superficie);
   }
 
   .modo-nota[aria-pressed='true'] {
-    color: var(--v2-clay);
-    border-color: color-mix(in srgb, var(--v2-clay) 45%, transparent);
+    color: var(--bandeja-nota);
+    border-color: color-mix(in srgb, var(--bandeja-nota) 45%, transparent);
   }
 
 
   /* El compositor entero cambia, no una pestaña chiquita: lo que hay que
      hacer imposible es escribir algo interno creyendo que es privado. */
   .compositor.es-nota {
-    background: color-mix(in srgb, var(--v2-clay) 9%, transparent);
-    border: 1px dashed color-mix(in srgb, var(--v2-clay) 45%, transparent);
+    background: color-mix(in srgb, var(--bandeja-nota) 9%, transparent);
+    border: 1px dashed color-mix(in srgb, var(--bandeja-nota) 45%, transparent);
     border-radius: 9px;
     padding: 8px;
   }
@@ -643,7 +639,7 @@
   }
 
   .nota-interna-aviso {
-    color: var(--v2-clay);
+    color: var(--bandeja-nota);
   }
 
 
@@ -654,7 +650,7 @@
   }
 
   .compositor.arrastrando {
-    outline: 2px dashed var(--v2-ember);
+    outline: 2px dashed var(--bandeja-humano);
     outline-offset: 3px;
     border-radius: 8px;
   }
@@ -668,8 +664,8 @@
     display: grid;
     place-items: center;
     border-radius: 8px;
-    background: color-mix(in srgb, var(--v2-ember) 10%, var(--v2-card));
-    color: var(--v2-ember);
+    background: color-mix(in srgb, var(--bandeja-humano) 10%, var(--bandeja-superficie));
+    color: var(--bandeja-humano);
     font-weight: 650;
     font-size: 13px;
     pointer-events: none;
@@ -693,17 +689,17 @@
     padding: 0;
     justify-content: center;
     cursor: pointer;
-    color: var(--v2-slate);
+    color: var(--bandeja-texto-2);
     border-radius: 8px;
   }
 
   .accion-icono:hover {
-    background: var(--v2-line-soft);
-    color: var(--v2-ink);
+    background: var(--bandeja-superficie-suave);
+    color: var(--bandeja-texto);
   }
 
   .accion-icono:focus-visible {
-    outline: 2px solid var(--v2-ember);
+    outline: 2px solid var(--bandeja-humano);
     outline-offset: 2px;
   }
 
@@ -721,8 +717,8 @@
     grid-template-columns: repeat(8, 1fr);
     gap: 2px;
     padding: 6px;
-    background: var(--v2-card);
-    border: 1px solid var(--v2-line);
+    background: var(--bandeja-superficie);
+    border: 1px solid var(--bandeja-borde);
     border-radius: 9px;
     box-shadow: 0 8px 24px rgb(0 0 0 / 12%);
   }
@@ -738,7 +734,7 @@
   }
 
   .emoji-panel button:hover {
-    background: var(--v2-line-soft);
+    background: var(--bandeja-superficie-suave);
   }
 
   .menu-adjuntar {
@@ -750,8 +746,8 @@
     flex-direction: column;
     min-width: 160px;
     padding: 4px;
-    background: var(--v2-card);
-    border: 1px solid var(--v2-line);
+    background: var(--bandeja-superficie);
+    border: 1px solid var(--bandeja-borde);
     border-radius: 9px;
     box-shadow: 0 8px 24px rgb(0 0 0 / 12%);
   }
@@ -768,7 +764,7 @@
   }
 
   .menu-adjuntar label:hover {
-    background: var(--v2-line-soft);
+    background: var(--bandeja-superficie-suave);
   }
 
 
@@ -778,7 +774,7 @@
     gap: 10px;
     padding: 8px;
     margin-bottom: 6px;
-    border: 1px solid var(--v2-line);
+    border: 1px solid var(--bandeja-borde);
     border-radius: 8px;
   }
 
@@ -801,8 +797,8 @@
     width: 40px;
     height: 40px;
     border-radius: 6px;
-    background: var(--v2-line-soft);
-    color: var(--v2-slate);
+    background: var(--bandeja-superficie-suave);
+    color: var(--bandeja-texto-2);
     flex: none;
   }
 
@@ -821,12 +817,13 @@
   }
 
 
-  /* El boton Cancelar de la grabacion comparte clase con "Reiniciar (prueba)",
-     que se fue a ConversationHeader en 0A.2 y se llevo esta regla -- dejando a
-     este sin estilo. `pnpm check` no lo vio: avisa de reglas sin clase, nunca
-     de clases sin regla. Restaurada verbatim.
-     Herramienta de prueba: existe, se encuentra, y no compite. Baja de
-     opacidad hasta que se la busca con el mouse. */
+  /* El Cancelar de la grabacion. La clase se llama asi por herencia: nacio
+     compartida con "Reiniciar (prueba)", que vivio en ConversationHeader
+     hasta 1.4B y ya no existe -- este boton quedo como su unico consumidor.
+     El nombre no se cambia ahora: renombrar es limpieza, y esta fase pinta.
+
+     Baja de opacidad hasta que se la busca con el mouse: cancelar una
+     grabacion existe, se encuentra, y no compite con Enviar. */
   .reiniciar-discreto {
     opacity: 0.62;
     font-size: 10.8px;
@@ -843,7 +840,7 @@
     gap: 8px;
     padding: 7px 9px;
     margin-bottom: 6px;
-    border: 1px solid color-mix(in srgb, var(--v2-rust) 35%, transparent);
+    border: 1px solid color-mix(in srgb, var(--bandeja-error) 35%, transparent);
     border-radius: 8px;
     font-size: 12.5px;
   }
@@ -852,7 +849,7 @@
     width: 9px;
     height: 9px;
     border-radius: 50%;
-    background: var(--v2-rust);
+    background: var(--bandeja-error);
     animation: latir 1.1s ease-in-out infinite;
     flex: none;
   }
@@ -865,14 +862,14 @@
 
   .grabando-reloj {
     font-weight: 700;
-    color: var(--v2-rust);
+    color: var(--bandeja-error);
     margin-right: auto;
   }
 
 
   /* Que sale directo al cliente no puede leerse igual que "Enter envía". */
   .nota-directo {
-    color: var(--v2-ember);
+    color: var(--bandeja-humano);
   }
 
 
@@ -882,32 +879,32 @@
     gap: 8px;
     margin-top: 14px;
     padding-top: 12px;
-    border-top: 1px solid var(--v2-line);
+    border-top: 1px solid var(--bandeja-borde);
   }
 
   .compositor-texto {
     width: 100%;
     resize: vertical;
     min-height: 44px;
-    border: 1px solid var(--v2-line);
+    border: 1px solid var(--bandeja-borde);
     border-radius: 8px;
     padding: 9px 11px;
-    background: var(--v2-card);
-    color: var(--v2-ink);
+    background: var(--bandeja-superficie);
+    color: var(--bandeja-texto);
     font-family: inherit;
     font-size: calc(var(--v2-fs) - 0.5px);
     line-height: 1.4;
   }
 
   .compositor-texto:focus {
-    outline: 2px solid var(--v2-ember);
+    outline: 2px solid var(--bandeja-humano);
     outline-offset: -1px;
     border-color: transparent;
   }
 
   .compositor-texto:disabled {
-    background: var(--v2-line-soft);
-    color: var(--v2-slate);
+    background: var(--bandeja-superficie-suave);
+    color: var(--bandeja-texto-2);
     cursor: not-allowed;
   }
 
@@ -920,7 +917,7 @@
 
   .compositor-nota {
     font-size: 11.5px;
-    color: var(--v2-slate);
+    color: var(--bandeja-texto-2);
   }
 
 

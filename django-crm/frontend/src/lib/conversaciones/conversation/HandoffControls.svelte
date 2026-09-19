@@ -195,9 +195,9 @@
     margin: 0;
     padding: 8px 16px;
     font-size: 12.5px;
-    color: var(--v2-rust);
-    background: color-mix(in srgb, var(--v2-rust) 6%, transparent);
-    border-bottom: 1px solid var(--v2-line);
+    color: var(--bandeja-error);
+    background: color-mix(in srgb, var(--bandeja-error) 6%, transparent);
+    border-bottom: 1px solid var(--bandeja-borde);
   }
 
   .aviso-atender {
@@ -217,7 +217,7 @@
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    color: var(--v2-moss, #15803d);
+    color: var(--bandeja-ok);
     font-weight: 600;
   }
   /* Duplicación temporal por CSS scoped durante Fase 0A: la misma regla
@@ -226,7 +226,7 @@
 
   .aviso-mal {
     flex: none;
-    color: var(--v2-rust);
+    color: var(--bandeja-error);
   }
 
 
@@ -238,7 +238,7 @@
      el motivo se lleva la linea entera si hace falta, y los botones bajan con
      el, en vez de que el motivo desaparezca para que quepan. */
   .aviso-motivo {
-    color: var(--v2-slate);
+    color: var(--bandeja-texto-2);
   }
 
 
@@ -258,9 +258,9 @@
     font-size: 11.5px;
     font-weight: 400;
     line-height: 1.4;
-    color: var(--v2-ink);
-    background: var(--v2-card);
-    border: 1px solid var(--v2-line);
+    color: var(--bandeja-texto);
+    background: var(--bandeja-superficie);
+    border: 1px solid var(--bandeja-borde);
     border-radius: 8px;
     box-shadow: 0 6px 18px rgb(0 0 0 / 12%);
     opacity: 0;
@@ -282,12 +282,12 @@
 
   /* El secundario de verdad: se lee, pero no compite con "Atender". */
   .aviso-resolver {
-    border-color: var(--v2-line);
+    border-color: var(--bandeja-borde);
   }
 
   .aviso-resolver:hover {
-    border-color: var(--v2-slate);
-    background: var(--v2-line-soft);
+    border-color: var(--bandeja-texto-2);
+    background: var(--bandeja-superficie-suave);
   }
 
 
@@ -297,7 +297,7 @@
     max-width: 100%;
     margin: 6px 0 10px;
     padding: 10px 12px;
-    border: 1px solid var(--v2-line, #ddd);
+    border: 1px solid var(--bandeja-borde);
     border-radius: 8px;
   }
 
@@ -330,7 +330,7 @@
     gap: 5px;
     font-size: 11.5px;
     font-weight: 650;
-    color: var(--v2-moss);
+    color: var(--bandeja-ok);
     white-space: nowrap;
   }
 
@@ -340,8 +340,8 @@
     font-weight: 650;
     padding: 1px 8px;
     border-radius: 999px;
-    color: var(--v2-slate);
-    border: 1px solid var(--v2-line);
+    color: var(--bandeja-texto-2);
+    border: 1px solid var(--bandeja-borde);
     white-space: nowrap;
   }
 </style>

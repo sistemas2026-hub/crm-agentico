@@ -726,36 +726,6 @@
     }
   }
 
-  // --- SOLO PARA PRUEBAS: reiniciar la conversacion para el entrenamiento
-  // por WhatsApp real -- borra todo (mensajes, rol derivado, si ya escalo)
-  // para poder reescribirle al bot de cero sin abrir otro numero. Sacar
-  // este bloque, el boton en el header y el endpoint DELETE
-  // (api/conversaciones/[id]/+server.js, nucleo/canales/api.py) cuando
-  // termine esa etapa.
-  let reiniciando = $state(false);
-  let errorReiniciar = $state('');
-
-  async function reiniciarConversacion() {
-    if (reiniciando) return;
-    if (!confirm('¿Borrar esta conversación de prueba? No se puede deshacer.')) return;
-    reiniciando = true;
-    errorReiniciar = '';
-    try {
-      const resp = await fetch(`/api/conversaciones/${conversacion.id}`, { method: 'DELETE' });
-      if (!resp.ok) {
-        const datos = await resp.json().catch(() => ({}));
-        errorReiniciar = datos.error || 'No se pudo borrar.';
-        return;
-      }
-      invalidate('app:conversaciones');
-      goto('/conversaciones');
-    } catch (/** @type {any} */ err) {
-      errorReiniciar = err?.message || 'No se pudo borrar.';
-    } finally {
-      reiniciando = false;
-    }
-  }
-
   // --- sondeo: mensajes nuevos sin recargar (para cuando WhatsApp real este
   // integrado y el cliente escriba mientras esta pantalla esta abierta) ----
   // Todavia no hay WebSocket -- sondea cada pocos segundos mientras la
@@ -1386,14 +1356,8 @@
   <ConversationHeader
     {conversacion}
     {contextoAbierto}
-    {reiniciando}
     onAlternarContexto={() => (contextoAbierto = !contextoAbierto)}
-    onReiniciar={reiniciarConversacion}
   />
-
-  {#if errorReiniciar}
-    <p class="aviso">{errorReiniciar}</p>
-  {/if}
 
   <HandoffControls
     {conversacion}
@@ -1522,20 +1486,6 @@
     min-height: 0;
     display: flex;
     flex-direction: column;
-  }
-  .aviso {
-    flex-wrap: wrap;
-    row-gap: 6px;
-    flex: none;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin: 0;
-    padding: 8px 16px;
-    font-size: 12.5px;
-    color: var(--v2-rust);
-    background: color-mix(in srgb, var(--v2-rust) 6%, transparent);
-    border-bottom: 1px solid var(--v2-line);
   }
 
   /* ── columna de la derecha: el contexto ─────────────────────────────── */

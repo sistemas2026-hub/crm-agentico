@@ -7,7 +7,7 @@
    * contexto y el reinicio siguen viviendo en la página, que es la que tiene
    * que saber de fetches y de rutas. Acá sólo llegan props y salen avisos.
    */
-  import { ArrowLeft, Phone, User, PanelRight, RotateCcw } from '@lucide/svelte';
+  import { ArrowLeft, Phone, User, PanelRight } from '@lucide/svelte';
   import Pill from '$lib/v2/components/Pill.svelte';
   import Avatar from '$lib/v2/components/Avatar.svelte';
 
@@ -16,9 +16,7 @@
     /** Si la columna de contexto está abierta. La abre y la cierra la página:
         el mismo valor lo lee el `<aside>`, que no es hijo de este componente. */
     contextoAbierto = false,
-    reiniciando = false,
-    onAlternarContexto,
-    onReiniciar
+    onAlternarContexto
   } = $props();
 
   const CANAL_LABEL = { whatsapp: 'WhatsApp', 'whatsapp-simulado': 'Simulador' };
@@ -74,18 +72,6 @@
     <PanelRight size={14} /> Contexto
   </button>
 
-  <!-- SOLO PARA PRUEBAS -- ver reiniciarConversacion() en la pagina. -->
-  <button
-    type="button"
-    class="v2-btn v2-btn-sm v2-btn-danger reiniciar-discreto"
-    onclick={() => onReiniciar?.()}
-    disabled={reiniciando}
-    aria-busy={reiniciando}
-    title="Borra esta conversación para volver a probar desde cero (solo entrenamiento)"
-  >
-    <RotateCcw size={14} />
-    {reiniciando ? 'Borrando…' : 'Reiniciar (prueba)'}
-  </button>
 </header>
 
 <style>
@@ -95,7 +81,7 @@
     align-items: center;
     gap: 10px;
     padding: 10px 16px;
-    border-bottom: 1px solid var(--v2-line);
+    border-bottom: 1px solid var(--bandeja-borde);
   }
   .centro-quien {
     min-width: 0;
@@ -122,13 +108,13 @@
     border-radius: 50%;
     display: grid;
     place-items: center;
-    background: var(--v2-line-soft);
-    color: var(--v2-slate);
+    background: var(--bandeja-superficie-suave);
+    color: var(--bandeja-texto-2);
   }
   /* Volver sólo tiene sentido cuando la lista no está al lado. */
   .volver {
     display: none;
-    color: var(--v2-slate);
+    color: var(--bandeja-texto-2);
   }
   /* Por encima de 1240px la columna está siempre a la vista: ni botón para
      abrirla, ni botón para cerrarla, ni fondo que interceptar.
@@ -137,16 +123,6 @@
      calculado: es la misma declaracion para los mismos elementos. */
   .contexto-toggle {
     display: none;
-  }
-  /* Herramienta de prueba: existe, se encuentra, y no compite. Baja de
-     opacidad hasta que se la busca con el mouse. */
-  .reiniciar-discreto {
-    opacity: 0.62;
-    font-size: 10.8px;
-  }
-  .reiniciar-discreto:hover,
-  .reiniciar-discreto:focus-visible {
-    opacity: 1;
   }
 
   /* Debajo de 1240px las tres columnas ahogan el hilo. El contexto deja de
