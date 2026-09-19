@@ -87,11 +87,29 @@
         role="status"
       >
         {#if ventanaAbierta === false}
+          <span class="ventana-marca">WhatsApp · ventana inactiva</span>
           <strong>Ventana de WhatsApp cerrada</strong>
           <span class="v2-muted"
             >· el cliente no escribe hace más de 24 h. Para volver a
             contactarlo hay que usar una plantilla aprobada.</span
           >
+          <!-- La salida, al lado del problema y no en la barra de abajo: si el
+               aviso dice "hay que usar una plantilla", el botón para elegirla
+               tiene que estar ahí mismo. Es lo que esperaba la regla
+               `.ventana-cerrada button`, que estuvo sin consumidor desde 0A.1.
+
+               No se repite si el selector ya está abierto: dos puertas a lo
+               mismo en la misma pantalla es una elección que nadie pidió. -->
+          {#if !eligiendoPlantilla}
+            <button
+              type="button"
+              class="v2-btn v2-btn-sm v2-btn-ink"
+              onclick={() => onAbrirPlantillas?.()}
+              disabled={interviniendo}
+            >
+              Elegir plantilla
+            </button>
+          {/if}
         {:else if ventanaPorCerrarse}
           <strong>La ventana cierra en {comoDuracion(ventanaRestante ?? 0)}</strong>
           <span class="v2-muted">· después sólo se le puede escribir por plantilla</span>
@@ -108,6 +126,12 @@
       <div class="plantillas">
         <div class="plantillas-top">
           <strong>Plantilla aprobada por Meta</strong>
+          <!-- Cuántas hay. El motor ya filtra a APPROVED antes de mandarlas
+               (api.py::canales_plantillas), así que todas las de esta lista lo
+               están y no hace falta un distintivo por fila diciéndolo. -->
+          {#if plantillas.length}
+            <span class="plantillas-cuenta v2-num">{plantillas.length} disponibles</span>
+          {/if}
           <button
             type="button"
             class="v2-btn v2-btn-sm v2-btn-quiet"
@@ -468,8 +492,33 @@
     background: var(--bandeja-aviso-fondo);
   }
 
+  /* Empuja el botón al extremo: el aviso se lee de izquierda a derecha y la
+     acción queda al final, no metida entre el texto. */
   .ventana-cerrada button {
     margin-left: auto;
+  }
+
+  /* El rótulo del canal, con la misma forma que los distintivos de la cola:
+     mono, versalita y un filete. Dice DE QUÉ sistema viene el límite -- no es
+     una decisión de Dexter, es la ventana de 24 h de WhatsApp. */
+  .plantillas-cuenta {
+    font-family: var(--bandeja-mono);
+    font-size: 10.5px;
+    color: var(--bandeja-texto-2);
+  }
+
+  .ventana-marca {
+    font-family: var(--bandeja-mono);
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    padding: 1px 5px;
+    border: 1px solid var(--bandeja-borde-fuerte);
+    border-radius: var(--bandeja-radio-sm);
+    color: var(--bandeja-texto-2);
+    background: var(--bandeja-superficie);
+    white-space: nowrap;
   }
 
 
