@@ -30,6 +30,9 @@ ade3bdf  checkpoint Fase 1
 cfc82c6  1.4B.2a — plantillas en la ventana cerrada
 f5b657a  checkpoint con 1.4B.2a
 16ab44e  1.4B.2b-i — control en el Header + conflictos 409
+a916410  checkpoint con 1.4B.2b-i
+8dafad4  1.4B.2b-ii(a) — ownership del handoff
+fb93ddf  corrige los comentarios de .aviso
 ```
 
 Nada de esto está pusheado.
@@ -45,7 +48,9 @@ Nada de esto está pusheado.
 1.4B.1 tokens + reset          ✅ cerrada   2a2497d
 1.4B.2a WA cerrada + plantillas ✅ cerrada   cfc82c6
 1.4B.2b-i  IA controla + 409    ✅ cerrada   16ab44e
-1.4B.2b-ii seis estados         ← el próximo
+1.4B.2b-ii(a) ownership · 3 estados  ✅ cerrada   8dafad4
+1.4B.2b-ii(b) ADMIN reasigna         ← el próximo
+1.4B.2b-iii   WA abierta · por cerrar   pendiente
    **1.4B.2 NO está cerrada.**
 1.4C  T6 · Return to AI        🔒 pendiente, fuera de 1.4B
 1.5  Case + Tools             pendiente
@@ -584,6 +589,45 @@ ADMIN reasigna · WA abierta · WA por cerrarse
 ```
 
 El banner de `HandoffControls` sigue sin reestructurar.
+
+
+### 1.4B.2b-ii(a) — una alarma que estaba siempre encendida
+
+El banner abría con `TriangleAlert` en **los cuatro estados**, incluido «asignada a mí» — que no es
+una alerta sino trabajo normal en curso. **Una alarma permanente deja de significar algo**, y entrena
+a quien atiende a ignorarla.
+
+```
+sin dueño                 TriangleAlert + filete ámbar
+con dueño (mía o ajena)   UserCheck, sin filete
+```
+
+El ámbar vuelve a decir algo concreto: hay trabajo humano esperando que alguien se lo apropie.
+
+**Los dos dueños eran el mismo concepto y se veían distinto.** «Asignada a mí» y «En atención: X»
+responden la misma pregunta; ahora comparten gramática visual y sólo cambia a quién nombran. El azul
+marca el único caso sobre el que este operador puede actuar. Es el mismo distintivo que el pie de la
+fila en la cola.
+
+**Un defecto de responsive que apareció al verificar:** `.duenio` tenía `white-space: nowrap` **sin
+recorte**, así que un nombre largo empujaba los botones fuera de la franja. Se agregó `max-width` con
+ellipsis y —lo que lo hace funcionar— **`min-width: 0`**: sin él un hijo flex no achica por debajo de
+su contenido y el ellipsis nunca se aplica. El nombre completo sigue en el `title`.
+
+```
+sin asignar       sin dueño · Tomar (+ Reasignar si ADMIN)
+asignada a mí     dueño azul · Soltar (+ Reasignar si ADMIN)
+asignada a otro   dueño gris · NINGUNA acción — sólo Reasignar si ADMIN
+```
+
+**Control, ownership y permisos quedan como tres cosas distintas**, que era el objetivo.
+
+**La duplicación de `.aviso` de 0A.3 quedó cerrada.** Su copia del padre se fue en 1.4B.1 al retirar
+el reset de prueba, que era su único consumidor. Los dos comentarios que decían «sigue en
++page.svelte, que todavía la necesita» se corrigieron: mandaban a buscar una copia inexistente.
+
+**`ADMIN reasigna` NO está cerrado**: el botón funciona, pero su diálogo no se comparó ni compuso
+contra la referencia. Eso es ii(b).
 
 
 ## El puente `--v2-*` — transitorio, y con un orden para retirarlo
