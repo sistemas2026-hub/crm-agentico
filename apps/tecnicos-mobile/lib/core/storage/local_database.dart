@@ -55,7 +55,7 @@ class LocalDatabase {
 
     final db = await openDatabase(
       path,
-      version: 5,
+      version: 6,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -111,6 +111,31 @@ class LocalDatabase {
         await db.execute('ALTER TABLE cola_mutaciones ADD COLUMN next_attempt_at INTEGER NOT NULL DEFAULT 0;');
       }
     }
+
+    if (oldVersion < 6) {
+      // Cinco datos que el backend ya entregaba y esta base tiraba al guardar
+      // la orden. Se agregan como columnas nuevas y anulables, con el mismo
+      // patron que las cuatro migraciones anteriores: nada se recrea, nada se
+      // borra, y una orden o una mutacion que ya estaba sigue estando.
+      final infoOrdenes = await db.rawQuery('PRAGMA table_info(local_ordenes);');
+      final colsOrdenes = infoOrdenes.map((c) => c['name'] as String).toSet();
+
+      const nuevas = <String, String>{
+        'estado_validacion': 'TEXT',
+        'cliente_lat': 'REAL',
+        'cliente_lng': 'REAL',
+        'iniciada_en': 'TEXT',
+        'completada_campo_en': 'TEXT',
+      };
+
+      for (final entrada in nuevas.entries) {
+        if (!colsOrdenes.contains(entrada.key)) {
+          await db.execute(
+            'ALTER TABLE local_ordenes ADD COLUMN ${entrada.key} ${entrada.value};',
+          );
+        }
+      }
+    }
   }
 
   Future<void> _onCreate(Database db, int version) async {
@@ -135,6 +160,11 @@ class LocalDatabase {
         diagnostico_previo_ia TEXT,
         datos_json TEXT,
         fecha_compromiso TEXT,
+        estado_validacion TEXT,
+        cliente_lat REAL,
+        cliente_lng REAL,
+        iniciada_en TEXT,
+        completada_campo_en TEXT,
         updated_at INTEGER NOT NULL,
         PRIMARY KEY (id, org_id, profile_id)
       )
@@ -245,6 +275,35 @@ class LocalDatabase {
 
     final clienteObj = ordenData['cliente'] ?? {};
 
+    // Los cinco campos que el backend entrega y antes se descartaban.
+    //
+    // Este upsert reemplaza la fila entera, así que lo que no se escriba se
+    // pierde. Y el payload no siempre es el mismo: cuando la llamada al detalle
+    // falla se guarda lo que trajo el listado, que no incluye
+    // `completada_campo_en`. Para que una sincronización a medias no borre un
+    // dato que ya estaba, la clave ausente conserva el valor guardado; una
+    // clave presente —aunque venga en null— sí manda, porque ahí el servidor
+    // está diciendo algo.
+    final previas = await db.query(
+      'local_ordenes',
+      columns: <String>[
+        'estado_validacion',
+        'cliente_lat',
+        'cliente_lng',
+        'iniciada_en',
+        'completada_campo_en',
+      ],
+      where: 'id = ? AND org_id = ? AND profile_id = ?',
+      whereArgs: <Object?>[id, orgId, profileId],
+      limit: 1,
+    );
+    final anterior = previas.isEmpty ? const <String, Object?>{} : previas.first;
+
+    Object? conservando(Map<dynamic, dynamic> origen, String clave, String columna) {
+      if (origen.containsKey(clave)) return origen[clave];
+      return anterior[columna];
+    }
+
     await db.insert(
       'local_ordenes',
       {
@@ -266,10 +325,31 @@ class LocalDatabase {
         'diagnostico_previo_ia': diagnosticoTexto,
         'datos_json': jsonEncode(ordenData['datos'] ?? {}),
         'fecha_compromiso': ordenData['programada_para']?.toString() ?? ordenData['fecha_compromiso']?.toString(),
+        // Estado de la máquina de validación. Se guarda tal cual llega y no
+        // toca `estado`: son dos máquinas distintas, y una orden puede estar
+        // completada en campo y devuelta al mismo tiempo.
+        'estado_validacion':
+            conservando(ordenData, 'estado_validacion', 'estado_validacion')?.toString(),
+        // Coordenadas del cliente. Se guardan como vienen; puede existir una
+        // sin la otra.
+        'cliente_lat': _comoDecimal(conservando(clienteObj, 'lat', 'cliente_lat')),
+        'cliente_lng': _comoDecimal(conservando(clienteObj, 'lng', 'cliente_lng')),
+        // Marcas de tiempo del servidor. No se regeneran con la hora del
+        // teléfono: dicen cuándo pasó algo allá, no cuándo sincronizamos acá.
+        'iniciada_en': conservando(ordenData, 'iniciada_en', 'iniciada_en')?.toString(),
+        'completada_campo_en':
+            conservando(ordenData, 'completada_campo_en', 'completada_campo_en')?.toString(),
         'updated_at': DateTime.now().millisecondsSinceEpoch,
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
+  }
+
+  /// Una coordenada puede llegar como número o como texto según el serializador.
+  static double? _comoDecimal(Object? valor) {
+    if (valor == null) return null;
+    if (valor is num) return valor.toDouble();
+    return double.tryParse(valor.toString());
   }
 
   Future<List<Map<String, dynamic>>> getOrdenes({

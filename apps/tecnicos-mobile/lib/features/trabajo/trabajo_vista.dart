@@ -1,5 +1,6 @@
 import '../../core/mock/field_mock_data.dart';
 import 'estado_trabajo.dart';
+import 'estado_validacion.dart';
 
 /// Un trabajo, tal como lo muestra la lista.
 ///
@@ -23,6 +24,11 @@ class TrabajoVista {
     required this.familia,
     required this.compromiso,
     required this.revision,
+    required this.estadoValidacion,
+    required this.latitud,
+    required this.longitud,
+    required this.iniciadaEn,
+    required this.completadaEn,
     required this.diagnosticoPrevio,
     required this.requiereActualizacion,
     required this.futuro,
@@ -43,6 +49,20 @@ class TrabajoVista {
   /// Version de la orden en el servidor. La transicion la manda como base para
   /// que el backend detecte si alguien la movio mientras tanto.
   final int revision;
+
+  /// Si el supervisor ya la revisó, y qué decidió. Es **otra máquina**: no
+  /// tiene nada que ver con [estado] y no lo mueve. Ver `estado_validacion.dart`.
+  final EstadoValidacion estadoValidacion;
+
+  /// Dónde queda el cliente, tal como lo manda el servidor. Puede llegar una
+  /// coordenada sin la otra.
+  final double? latitud;
+  final double? longitud;
+
+  /// Cuándo arrancó y cuándo se completó en campo, según el servidor. No son
+  /// la hora del teléfono.
+  final DateTime? iniciadaEn;
+  final DateTime? completadaEn;
 
   final String diagnosticoPrevio;
 
@@ -73,10 +93,28 @@ class TrabajoVista {
       compromiso: DateTime.tryParse(orden['fecha_compromiso']?.toString() ?? '')
           ?.toLocal(),
       revision: orden['revision'] as int? ?? 0,
+      estadoValidacion:
+          EstadoValidacion.desde(orden['estado_validacion']?.toString()),
+      latitud: _decimal(orden['cliente_lat']),
+      longitud: _decimal(orden['cliente_lng']),
+      iniciadaEn: _fecha(orden['iniciada_en']),
+      completadaEn: _fecha(orden['completada_campo_en']),
       diagnosticoPrevio: orden['diagnostico_previo_ia']?.toString() ?? '',
       requiereActualizacion: (orden['schema_version'] as int? ?? 1) > 1,
       futuro: FieldMockData.trabajoFuturo(id),
     );
+  }
+
+  static double? _decimal(Object? valor) {
+    if (valor == null) return null;
+    if (valor is num) return valor.toDouble();
+    return double.tryParse(valor.toString());
+  }
+
+  static DateTime? _fecha(Object? valor) {
+    final texto = valor?.toString();
+    if (texto == null || texto.isEmpty) return null;
+    return DateTime.tryParse(texto)?.toLocal();
   }
 }
 
