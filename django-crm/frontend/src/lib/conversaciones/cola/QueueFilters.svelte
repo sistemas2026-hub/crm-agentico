@@ -144,7 +144,7 @@
     align-items: center;
     gap: 6px;
     font-size: 11px;
-    color: var(--v2-slate);
+    color: var(--bandeja-texto-2);
   }
 
   .orden-rotulo {
@@ -154,10 +154,10 @@
   .orden select {
     font: inherit;
     font-size: 11.5px;
-    color: var(--v2-ink);
+    color: var(--bandeja-texto);
     background: none;
-    border: 1px solid var(--v2-line);
-    border-radius: 6px;
+    border: 1px solid var(--bandeja-borde);
+    border-radius: var(--bandeja-radio);
     /* 28px de alto: por debajo de eso un select deja de ser comodo de
        apuntar, y esta pantalla se usa con prisa. */
     min-height: 28px;
@@ -166,7 +166,7 @@
   }
 
   .orden select:hover {
-    border-color: var(--v2-slate);
+    border-color: var(--bandeja-texto-2);
   }
 
   .motivo-mas {
@@ -186,25 +186,30 @@
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    border: 1px solid var(--v2-line);
-    background: none;
-    border-radius: 999px;
-    padding: 2px 9px;
+    border: 1px solid var(--bandeja-borde);
+    background: var(--bandeja-superficie);
+    /* Radio chico, no píldora: el lenguaje del diseño separa con borde y
+       superficie, no con esquinas redondas. */
+    border-radius: var(--bandeja-radio-sm);
+    padding: 2px 8px;
     font: inherit;
     font-size: 11px;
-    color: var(--v2-slate);
+    color: var(--bandeja-texto-2);
     cursor: pointer;
     white-space: nowrap;
   }
 
   .motivo:hover {
-    color: var(--v2-ink);
-    border-color: var(--v2-slate);
+    color: var(--bandeja-texto);
+    border-color: var(--bandeja-texto-2);
   }
 
+  /* El filtro puesto se marca en azul, igual que la pestaña activa: las dos
+     dicen "esto lo elegiste vos". */
   .motivo[aria-pressed='true'] {
-    color: var(--v2-ink);
-    border-color: var(--v2-ink);
+    color: var(--bandeja-humano);
+    background: var(--bandeja-humano-fondo);
+    border-color: var(--bandeja-humano-borde);
     font-weight: 650;
   }
 </style>

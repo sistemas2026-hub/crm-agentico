@@ -9,10 +9,14 @@
    * se dibuja lo que ya vino decidido. Si alguna vez aparece la tentación de
    * calcular prioridad o banda en este archivo, la frontera está mal trazada.
    *
-   * No muestra dueño, a propósito (D28): el owner del ticket del CRM no es la
-   * asignación durable de Dexter, y la cola no usa ninguno de los dos para
-   * nada. `es_legado` sólo pinta una clase -- abrir una fila legada no la
-   * adopta ni toca `relevo_version` (G8).
+   * EL DUEÑO QUE MUESTRA ES `c.asignada_a` -- la ASIGNACIÓN DURABLE DE DEXTER,
+   * que sale de `asignada_a_nombre` en la proyección. NO es el dueño del
+   * ticket del CRM: ése es otra cosa, vive en CasePanel, y usarlo acá sería
+   * exactamente lo que D28 prohíbe. Si alguna vez esta fila necesita un
+   * nombre y `asignada_a` viene vacío, la respuesta es dejarlo vacío.
+   *
+   * `es_legado` sólo pinta una clase -- abrir una fila legada no la adopta ni
+   * toca `relevo_version` (G8). Este archivo no escribe nada, nunca.
    *
    * `c` llega entero y no desarmado en quince props: la fila consume quince
    * campos, y convertirlos en quince props sería inventar una API en una fase
@@ -32,7 +36,6 @@
    * del resto, pero la colisión de nombres es real. No se renombra en Fase 0.
    */
   import Pill from '$lib/v2/components/Pill.svelte';
-  import Avatar from '$lib/v2/components/Avatar.svelte';
   import { Phone, User } from '@lucide/svelte';
   import { shortAge } from '$lib/v2/format.js';
   import { pendiente, resuelta } from '$lib/conversaciones/estado.js';
@@ -63,6 +66,37 @@
   const etiquetaLabel = (/** @type {string} */ e) => (e ? e.replaceAll('_', ' ') : '');
 
   const AUTOR = { user: 'Cliente', assistant: 'Asistente', humano: 'Vos', tool: 'Herramienta' };
+
+  /**
+   * El distintivo de la fila: SIEMPRE la banda que mandó el motor.
+   *
+   * Los seis nombres salen de `nucleo/relevo/proyeccion.py` y el mapa es uno a
+   * uno: esta pantalla no clasifica nada, sólo le pone palabras y color a lo
+   * que ya vino decidido. Si mañana el motor agrega una banda, acá cae en
+   * `undefined` y no se dibuja distintivo -- que es mejor que inventarle uno.
+   *
+   * El texto va en español porque la aplicación está en español; el diseño
+   * congelado está en inglés y eso es una diferencia deliberada, igual que el
+   * resto de la Bandeja.
+   */
+  const BANDAS = {
+    cliente_espera: { texto: 'Cliente respondió', clase: 'b-cliente' },
+    sin_asignar: { texto: 'Sin asignar', clase: 'b-sin-asignar' },
+    revisar_evaluacion: { texto: 'Falta revisar', clase: 'b-revisar' },
+    interno_pendiente: { texto: 'Pendiente interno', clase: 'b-interno' },
+    en_curso: { texto: 'En atención', clase: 'b-en-curso' },
+    legado: { texto: 'Legado · revisar', clase: 'b-legado' }
+  };
+
+  /** Fuera de la cola y la lleva la IA: el único distintivo que no es banda. */
+  const LA_LLEVA_LA_IA = { texto: 'La atiende la IA', clase: 'b-ia' };
+
+  const distintivo = (/** @type {any} */ c) =>
+    typeof c.banda === 'number'
+      ? BANDAS[c.banda_nombre]
+      : c.necesita_accion_de === 'ia'
+        ? LA_LLEVA_LA_IA
+        : null;
   // Quien escribe por WhatsApp se identifica con un telefono, y quien prueba
   // desde el CRM con un uuid. Ninguno de los dos tiene iniciales: initials()
   // devuelve '3' o 'B', un circulo con una letra que no significa nada. Un
@@ -94,19 +128,15 @@
   href="/conversaciones/{c.id}"
   aria-current={c.id === abierta ? 'page' : undefined}
 >
-  {#if c.nombre_cliente}
-    <Avatar name={c.nombre_cliente} size={30} />
-  {:else if esTelefono(c.usuario_externo)}
-    <span class="ident" aria-hidden="true"><Phone size={14} /></span>
-  {:else if !c.usuario_externo || esUuid(c.usuario_externo)}
-    <span class="ident" aria-hidden="true"><User size={14} /></span>
-  {:else}
-    <Avatar name={c.usuario_externo} size={30} />
-  {/if}
-
   <div class="cuerpo">
-    <div class="alta">
-      <span class="quien">{c.nombre_cliente || quien(c.usuario_externo)}</span>
+    <!-- Primer renglón: POR QUÉ está en la cola, y desde cuándo espera. El
+         diseño pone estas dos cosas arriba de todo y tiene razón: son las que
+         deciden si esta fila es la próxima. -->
+    <div class="tope">
+      {#if distintivo(c)}
+        {@const d = distintivo(c)}
+        <span class="marca-banda {d.clase}"><span class="punto"></span>{d.texto}</span>
+      {/if}
       <!-- La espera que se muestra es la de la NECESIDAD actual
            (esperando_desde, B3.5): si el cliente volvio a escribir,
            es desde ese mensaje y no desde la escalada. Es el mismo
@@ -117,18 +147,32 @@
           class="cuando v2-num espera-{tramoEspera(c)}"
           title="Esperando desde hace {shortAge(c.esperando_desde)}"
         >
-          {shortAge(c.esperando_desde)} esperando
+          Espera: {shortAge(c.esperando_desde)}
         </span>
       {:else if pendiente(c) && c.escalada_en}
         <span
           class="cuando v2-num espera-{tramoEspera(c)}"
           title="Esperando desde hace {shortAge(c.escalada_en)}"
         >
-          {shortAge(c.escalada_en)} esperando
+          Espera: {shortAge(c.escalada_en)}
         </span>
-      {:else}
-        <span class="cuando v2-num">{shortAge(c.actualizado_en)}</span>
       {/if}
+    </div>
+
+    <div class="alta">
+      <span class="quien">
+        <!-- Quien escribe por WhatsApp se identifica con un telefono y quien
+             prueba desde el CRM con un uuid. El icono se queda -- mas chico y
+             pegado al nombre en vez de una columna propia -- porque distinguir
+             un cliente real de una prueba de un vistazo sigue haciendo falta. -->
+        {#if !c.nombre_cliente && esTelefono(c.usuario_externo)}
+          <span class="ident" aria-hidden="true"><Phone size={11} /></span>
+        {:else if !c.nombre_cliente && (!c.usuario_externo || esUuid(c.usuario_externo))}
+          <span class="ident" aria-hidden="true"><User size={11} /></span>
+        {/if}
+        {c.nombre_cliente || quien(c.usuario_externo)}
+      </span>
+      <span class="cuando v2-num">{shortAge(c.actualizado_en)}</span>
     </div>
 
     <!-- POR QUE esta fila esta donde esta, en palabras. No un
@@ -245,57 +289,193 @@
       </span>
     {/if}
 
-    <span class="canal">{canalLabel(c.canal)}</span>
+    <!-- El pie: quién la tiene, y por dónde entró.
+         `asignada_a` es la ASIGNACIÓN DURABLE DE DEXTER (proyeccion.py, sale
+         de asignada_a_nombre). NO es el dueño del ticket del CRM, que es otra
+         cosa y vive en CasePanel -- D28, y sigue reservado para B4. La cola
+         nunca mostró dueño hasta acá: el dato estaba proyectado y sin usar. -->
+    <div class="pie">
+      {#if c.asignada_a}
+        <span class="duenio"><span class="punto"></span>{c.asignada_a}</span>
+      {:else if c.es_legado}
+        <!-- Lo dice con todas las letras en vez de dejar el hueco: una legada
+             NO tiene dueño en Dexter porque nunca entró al relevo
+             (relevo_version = 0). Verlo escrito es parte de G8 -- que quede
+             claro que abrirla no le asigna a nadie.
+
+             OJO: esta rama es el `else` de `c.asignada_a`, así que la
+             condición real es `!c.asignada_a && c.es_legado`. Si alguien
+             reordena las ramas, una legada QUE SÍ tiene dueño diría "sin
+             dueño", que es una afirmación falsa. Mantener este bloque
+             después del de `asignada_a`, o volver la condición explícita. -->
+        <span class="duenio duenio-sin-dexter">Sin dueño en Dexter</span>
+      {:else if c.banda === 2}
+        <span class="duenio duenio-vacante"><span class="punto"></span>Sin asignar</span>
+      {:else}
+        <span></span>
+      {/if}
+      <span class="canal">{canalLabel(c.canal)}</span>
+    </div>
   </div>
 </a>
 
 <style>
 
+  /* Las filas se separan con una línea, no con aire y esquinas redondeadas:
+     así entra más cola en la misma altura y la lista se lee como una lista.
+     La separación la dibuja ConversationList entre hermanas. */
   .fila {
-    display: flex;
-    gap: 10px;
-    padding: 9px 9px 10px;
-    border-radius: 8px;
+    display: block;
+    padding: 10px 12px;
     color: inherit;
     text-decoration: none;
+    border-left: 3px solid transparent;
+    /* La línea que separa de la fila anterior. Va acá y no en la lista con un
+       `:global(a + a)`: el `<a>` es el elemento raíz de este componente, así
+       que `:first-child` se evalúa contra sus hermanas REALES del DOM y la
+       primera no arrastra un borde suelto. Sin cruzar la frontera de scope. */
+    border-top: 1px solid var(--bandeja-borde);
+  }
+
+  .fila:first-child {
+    border-top-color: transparent;
   }
 
   .fila:hover {
-    background: var(--v2-hover);
+    background: var(--bandeja-superficie-suave);
   }
 
-  /* La abierta se marca con la superficie, no con ember: "estoy acá" no es
-     trabajo pendiente. */
+  /* La abierta se marca con el filete azul y un fondo apenas teñido: es la
+     única fila con la que se está trabajando ahora mismo. */
   .fila.activa {
-    background: var(--v2-line-soft);
+    background: var(--bandeja-humano-fondo);
+    border-left-color: var(--bandeja-humano);
   }
 
-  /* Un tinte apenas perceptible, no un bloque. Lo que marca "sin atender" es
-     el punto ember de abajo; el fondo solo tiene que hacer que la fila salte
-     al pasar la vista, no gritar. */
+  /* Lo que pide una persona lleva el filete rojo. Es el mismo lenguaje: el
+     borde izquierdo dice de quién es la fila. */
   .fila.pide {
-    background: color-mix(in srgb, var(--v2-ember) 5%, transparent);
+    border-left-color: var(--bandeja-error);
   }
 
-  .fila.pide:hover,
-  .fila.pide.activa {
-    background: color-mix(in srgb, var(--v2-ember) 9%, transparent);
+  .fila.pide:hover {
+    background: var(--bandeja-error-fondo);
   }
 
-  /* Círculo para quien no tiene nombre: un teléfono o un uuid no dan iniciales. */
+  /* Un teléfono o un uuid no dan iniciales, así que va un icono chico pegado
+     al nombre en vez de un círculo con una letra que no significa nada. */
   .ident {
-    flex: none;
-    width: 30px;
-    height: 30px;
-    border-radius: 50%;
-    display: grid;
-    place-items: center;
-    background: var(--v2-line-soft);
-    color: var(--v2-slate);
+    display: inline-flex;
+    vertical-align: -1px;
+    margin-right: 3px;
+    color: var(--bandeja-texto-3);
   }
 
-  .fila.activa .ident {
-    background: var(--v2-card);
+  /* ── el distintivo de banda ──────────────────────────────────────────── */
+  /* Lo que el motor decidió, en palabras y con color. Nunca un puntaje. */
+  .marca-banda {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 5px;
+    border: 1px solid;
+    border-radius: var(--bandeja-radio-sm);
+    font-family: var(--bandeja-mono);
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .marca-banda .punto {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: currentColor;
+    flex: none;
+  }
+
+  .b-cliente {
+    background: var(--bandeja-error-fondo);
+    color: var(--bandeja-error);
+    border-color: var(--bandeja-error-borde);
+  }
+  .b-sin-asignar,
+  .b-interno {
+    background: var(--bandeja-aviso-fondo);
+    color: var(--bandeja-aviso);
+    border-color: var(--bandeja-aviso-borde);
+  }
+  .b-revisar,
+  .b-legado {
+    background: var(--bandeja-superficie-suave);
+    color: var(--bandeja-texto-2);
+    border-color: var(--bandeja-borde-fuerte);
+  }
+  .b-en-curso {
+    background: var(--bandeja-humano-fondo);
+    color: var(--bandeja-humano);
+    border-color: var(--bandeja-humano-borde);
+  }
+  /* El violeta de la IA. Va con su palabra al lado, nunca solo: el color no
+     alcanza para decir quién está atendiendo. */
+  .b-ia {
+    background: var(--bandeja-ia-fondo);
+    color: var(--bandeja-ia);
+    border-color: var(--bandeja-ia-borde);
+  }
+
+  .tope {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 3px;
+    min-height: 15px;
+  }
+
+  /* ── el pie: quién la tiene ──────────────────────────────────────────── */
+  .pie {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 5px;
+    padding-top: 4px;
+    border-top: 1px solid var(--bandeja-borde);
+  }
+
+  .duenio {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-family: var(--bandeja-mono);
+    font-size: 10.5px;
+    font-weight: 500;
+    color: var(--bandeja-humano);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .duenio .punto {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: currentColor;
+    flex: none;
+  }
+
+  /* Vacante: el hueco se ve, pero no compite con una fila que sí tiene dueño. */
+  .duenio-vacante {
+    color: var(--bandeja-aviso);
+  }
+
+  /* Legada: apagado. No es un hueco que alguien deba llenar desde acá. */
+  .duenio-sin-dexter {
+    color: var(--bandeja-texto-3);
   }
 
   .cuerpo {

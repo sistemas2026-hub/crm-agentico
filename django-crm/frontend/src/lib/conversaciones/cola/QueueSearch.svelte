@@ -40,14 +40,14 @@
     flex: none;
     margin: 9px 10px 3px;
     padding: 5px 9px;
-    border: 1px solid var(--v2-line);
+    border: 1px solid var(--bandeja-borde);
     border-radius: 8px;
-    background: var(--v2-card);
-    color: var(--v2-slate);
+    background: var(--bandeja-superficie);
+    color: var(--bandeja-texto-2);
   }
 
   .buscar:focus-within {
-    border-color: var(--v2-slate);
+    border-color: var(--bandeja-texto-2);
   }
 
   .buscar input {
@@ -55,7 +55,7 @@
     min-width: 0;
     border: 0;
     background: none;
-    color: var(--v2-ink);
+    color: var(--bandeja-texto);
     font: inherit;
     font-size: 12.5px;
     outline: none;
@@ -64,7 +64,7 @@
   .limpiar {
     border: 0;
     background: none;
-    color: var(--v2-slate);
+    color: var(--bandeja-texto-2);
     cursor: pointer;
     display: grid;
     place-items: center;
@@ -72,6 +72,6 @@
   }
 
   .limpiar:hover {
-    color: var(--v2-ink);
+    color: var(--bandeja-texto);
   }
 </style>

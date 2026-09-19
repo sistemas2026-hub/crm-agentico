@@ -52,10 +52,14 @@
 </div>
 
 <style>
+  /* Sin padding lateral y sin aire entre filas: las filas ocupan todo el
+     ancho y se separan con una línea, como en el diseño congelado. Así entra
+     más cola en la misma altura y el conjunto se lee como una lista en vez de
+     como una pila de tarjetas. */
   .lista {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-    padding: 4px 6px 10px;
+    background: var(--bandeja-superficie);
   }
 </style>

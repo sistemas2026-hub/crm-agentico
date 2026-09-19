@@ -50,7 +50,7 @@
     align-items: stretch;
     gap: 1px;
     padding: 8px 6px 0;
-    border-bottom: 1px solid var(--v2-line);
+    border-bottom: 1px solid var(--bandeja-borde);
     flex: none;
     min-width: 0;
     overflow-x: auto;
@@ -83,20 +83,22 @@
   }
 
   .tab:hover {
-    color: var(--v2-ink);
+    color: var(--bandeja-texto);
   }
 
-  /* Activa = peso y tinta. Ember marca lo que hay que hacer, no dónde estás. */
+  /* Activa = peso y el azul de "acá estás vos". El filete inferior es la
+     misma señal que usa el diseño congelado. */
   .tab[aria-current='true'] {
-    color: var(--v2-ink);
+    color: var(--bandeja-humano);
     font-weight: 640;
-    border-bottom-color: var(--v2-ink);
+    border-bottom-color: var(--bandeja-humano);
   }
 
   /* El numero es parte de la pestaña, no una pildora aparte flotando al lado:
      sin fondo propio, mismo color que su texto, y solo se separa por el peso.
      Asi las cuatro se leen como cuatro unidades y no como ocho elementos. */
   .tab-n {
+    font-family: var(--bandeja-mono);
     font-size: 10.5px;
     font-weight: 650;
     color: inherit;
@@ -109,11 +111,11 @@
     opacity: 1;
   }
 
-  /* El unico numero con color propio, y NO es el naranja de accion: trabajo
-     que espera a alguien es una ALARMA, no algo que se pulsa. Ver la
-     semantica de color en v2.css. */
+  /* El unico numero con color propio, y NO es el azul de la pestaña activa:
+     trabajo que espera a alguien es una ALARMA, no algo que se pulsa ni el
+     lugar donde estás parado. */
   .tab-n.urge {
-    color: var(--v2-rust);
+    color: var(--bandeja-error);
     opacity: 1;
   }
 </style>

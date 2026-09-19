@@ -68,13 +68,27 @@
   --bandeja-humano: #2563eb;
   --bandeja-navy: #1e3a8a;
 
+  /* Fondos y filetes de los dos, para los badges. Salen del `tailwind.config`
+     del diseño canónico (aiLight / aiBorder), no elegidos a ojo. */
+  --bandeja-ia-fondo: #f5f3ff;
+  --bandeja-ia-borde: #ddd6fe;
+  --bandeja-humano-fondo: #eff6ff;
+  --bandeja-humano-borde: #bfdbfe;
+
   /* ── estados ─────────────────────────────────────────────────────────── */
-  /* La paleta de arriba es Tailwind slate/blue/violet, así que los semánticos
-     salen de la misma familia en vez de elegirse a ojo. */
+  /* CORREGIDOS EN 1.2 contra el `tailwind.config` de las pantallas canónicas.
+     En 1.1 el ámbar se eligió por familia (#d97706) sin tener el HTML a mano;
+     el diseño fija #92400E, que es bastante más oscuro. Los otros tres ya
+     coincidían. */
   --bandeja-ok: #059669;
-  --bandeja-aviso: #d97706;
+  --bandeja-aviso: #92400e;
+  --bandeja-aviso-fondo: #fffbeb;
+  --bandeja-aviso-borde: #fde68a;
   --bandeja-error: #dc2626;
-  --bandeja-nota: #b45309;
+  --bandeja-error-fondo: #fef2f2;
+  --bandeja-error-borde: #fecaca;
+  --bandeja-nota: #92400e;
+  --bandeja-nota-fondo: #fef3c7;
 
   /* ── forma ───────────────────────────────────────────────────────────── */
   /* Radios chicos y sin sombra: lo que separa es el borde, la superficie y el
