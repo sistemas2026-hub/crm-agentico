@@ -338,10 +338,25 @@ r_ses, s_ses = dos_sesiones()
 with Espia(respuestas={"control_efectivo_de": "humano", "agregar_mensaje_humano":
                        {"canal": "whatsapp-simulado", "usuario_externo": TEL,
                         "ticket_operativo": None, "mensaje_id": "m-1"}}):
-    resp = cliente.post("/conversaciones/conv-sim/mensajes",
-                        json={"tenant": "rapilink", "mensaje": "ya quedo",
-                              "autor": "Ana", "autor_usuario_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
-                              "devolver_al_asistente": True})
+    # T6 no pasa por agregar_mensaje_humano: el paso 1 es solicitar_devolucion,
+    # que guarda el mensaje Y la intencion en la misma transaccion. Y exige
+    # clave de idempotencia, porque sin ella una devolucion cortada a la mitad
+    # no se puede reintentar sin arriesgar un segundo mensaje al cliente.
+    from nucleo.relevo.transiciones import Resultado
+    _orig_t6 = (api.transiciones.solicitar_devolucion, api.transiciones.devolver_a_ia)
+    api.transiciones.solicitar_devolucion = lambda *a, **k: {
+        "canal": "whatsapp-simulado", "usuario_externo": TEL, "ticket_operativo": None,
+        "mensaje_id": "m-1", "existente": False, "estado_entrega": None}
+    api.transiciones.devolver_a_ia = lambda *a, **k: Resultado(True, True, 2, None)
+    try:
+        resp = cliente.post("/conversaciones/conv-sim/mensajes",
+                            json={"tenant": "rapilink", "mensaje": "ya quedo",
+                                  "autor": "Ana", "autor_usuario_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+                                  "devolver_al_asistente": True,
+                                  "clave_idempotencia": "k-sim-1"})
+    finally:
+        (api.transiciones.solicitar_devolucion,
+         api.transiciones.devolver_a_ia) = _orig_t6
 comprobar(resp.status_code == 201, f"la respuesta humana se guarda (fue {resp.status_code})")
 comprobar(s_ses["historial"] and s_ses["escalada"] is False,
           "la respuesta y la devolucion llegan a la sesion SIMULADA")

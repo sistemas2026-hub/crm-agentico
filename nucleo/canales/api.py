@@ -4518,14 +4518,23 @@ def conversaciones_responder_humano(id_conversacion):
         autor, autor_id, clave = _autor_y_clave(cuerpo)
     except persistencia.AutorInvalido as e:
         return jsonify({"error": f"Autor invalido: {mensaje_publico(e, 'datos de autor incompletos')}"}), 400
+    # T6 sin clave no se puede reintentar sin arriesgar un segundo mensaje al
+    # cliente, y el reintento es justo lo que recupera una devolucion cortada a
+    # la mitad. Se exige antes de escribir nada, y se dice por que.
+    if devolver and not (clave or "").strip():
+        return jsonify({"error": "Devolver al asistente requiere clave_idempotencia.",
+                        "codigo": "clave_requerida"}), 400
     bloqueo = _exigir_control_humano(tenant, id_conversacion)
     if bloqueo:
         return bloqueo
 
     try:
-        destino = persistencia.agregar_mensaje_humano(
-            tenant, id_conversacion, contenido, autor, autor_usuario_id=autor_id,
-            clave_idempotencia=clave)
+        destino = (transiciones.solicitar_devolucion(
+            tenant, id_conversacion, contenido, operador_id=autor_id,
+            operador_nombre=autor, clave=clave)
+                   if devolver else persistencia.agregar_mensaje_humano(
+                       tenant, id_conversacion, contenido, autor,
+                       autor_usuario_id=autor_id, clave_idempotencia=clave))
     except RuntimeError as e:
         return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 404
     except Exception as e:
@@ -4537,9 +4546,47 @@ def conversaciones_responder_humano(id_conversacion):
     if _ya_guardado(destino):
         # Reintento de un mensaje que no fallo: ni otra fila, ni otra copia al
         # ticket, ni otra entrada al historial, ni otro envio.
+        #
+        # El estado de la FILA no alcanza para decidir. Un 'pendiente' puede ser
+        # "el proceso se cayo antes de hablar con Meta" o "Meta acepto y el
+        # proceso se cayo antes de anotarlo": lo primero no ocurrio, lo segundo
+        # si le llego al cliente, y la fila los escribe igual. El desempate esta
+        # en whatsapp_salidas, que es lo unico que se reservo ANTES del POST.
+        estado_previo = destino["estado_entrega"]
+        if estado_previo in ("enviado", "entregado", "leido"):
+            # La fila ya lleva el sello durable: Meta acepto y quedo anotado.
+            entrega = {"resultado": "aceptado", "aceptado_por_meta": True,
+                       "aceptacion_registrada": True}
+        else:
+            entrega = _salida_previa(tenant, f"humano:{clave}")
+        aceptado = entrega["resultado"] == "aceptado" and entrega["aceptacion_registrada"]
+        devuelto = False
+        if devolver and aceptado:
+            r = transiciones.devolver_a_ia(
+                tenant, id_conversacion, operador_id=autor_id,
+                operador_nombre=autor, clave=f"devolver:{clave}")
+            devuelto = r.aplicada or r.motivo == "reintento"
+            if devuelto:
+                clave_viva = canales.clave_sesion_de_fila(
+                    tenant, destino.get("canal"), destino["usuario_externo"])
+                if clave_viva in _sesiones:
+                    _sesiones[clave_viva]["escalada"] = False
+        elif devolver:
+            # B1/B2: el primer intento se corto sin dejar rastro. Sin esto la
+            # conversacion queda con el control humano correcto pero SIN una
+            # sola linea que diga que alguien quiso devolverla y no se pudo --
+            # y el operador no tiene como saber que su accion no llego.
+            transiciones.registrar_devolucion_fallida(
+                tenant, id_conversacion, destino["mensaje_id"],
+                operador_id=autor_id, operador_nombre=autor,
+                resultado=entrega["resultado"], clave=f"fallo:{clave}")
         return jsonify({"ok": True, "ya_existia": True,
                         "mensaje_id": destino["mensaje_id"],
-                        "estado_entrega": destino["estado_entrega"]}), 200
+                        "estado_entrega": estado_previo,
+                        "resultado": entrega["resultado"],
+                        "aceptado_por_meta": entrega["aceptado_por_meta"],
+                        "aceptacion_registrada": entrega["aceptacion_registrada"],
+                        "devuelto_al_asistente": devuelto}), 200
     reintento = bool(destino.get("existente"))
 
     # Lo que escribio la persona entra al HISTORIAL que ve el modelo, marcado
@@ -4566,27 +4613,9 @@ def conversaciones_responder_humano(id_conversacion):
         _sesiones[clave_sesion]["historial"].append(
             regla_historial.entrada("assistant", "humano", contenido, autor))
 
-    if devolver:
-        # La ruta de tickets ya ofrecia devolver: se conserva tal cual, ahora
-        # por la transicion unica. En legado (version 0) escribe solo las
-        # banderas, como antes. "Responder y devolver" desde la bandeja (T6)
-        # NO se habilita hasta G9.
-        try:
-            transiciones.devolver_a_ia(
-                tenant, id_conversacion, operador_id=autor_id, operador_nombre=autor,
-                clave=f"devolver:{clave}" if clave else None)
-        except Exception as e:
-            registrar("relevo", "no se pudo devolver la conversacion al asistente", error=e)
-        # Y la sesion VIVA, no solo la base: la pausa se decide con lo que
-        # tiene este proceso en memoria, asi que sin esto el asistente seguia
-        # callado hasta el proximo reinicio.
-        if clave_sesion in _sesiones:
-            _sesiones[clave_sesion]["escalada"] = False
-            # 'ya_escalada' se deja como esta: es lo que evita que la misma
-            # conversacion abra un segundo caso. Lo que se apaga es la pausa,
-            # no la memoria de que esto ya paso por una persona.
-
-    salida = {"ok": True, "entregado": False, "devuelto_al_asistente": devolver}
+    salida = {"ok": True, "aceptado_por_meta": False,
+              "aceptacion_registrada": False, "resultado": None,
+              "devuelto_al_asistente": False}
 
     # La misma respuesta, copiada al ticket del sistema del ISP. Va aparte de
     # la entrega al cliente y no la condiciona: que la operacion no se entere
@@ -4603,7 +4632,20 @@ def conversaciones_responder_humano(id_conversacion):
     if destino["canal"] != "whatsapp":
         # El simulador y la API no tienen a donde entregar: la conversacion se
         # lee desde la misma pantalla. No es un fallo.
-        salida["entregado"] = None
+        salida["aceptado_por_meta"] = None
+        salida["aceptacion_registrada"] = True
+        salida["resultado"] = "aceptado"
+        if devolver:
+            r = transiciones.devolver_a_ia(
+                tenant, id_conversacion, operador_id=autor_id,
+                operador_nombre=autor, clave=f"devolver:{clave}")
+            salida["devuelto_al_asistente"] = r.aplicada or r.motivo == "reintento"
+            # La sesion viva tambien: sin esto la base dice 'ia' y la sesion en
+            # memoria sigue en pausa, asi que el asistente no reanuda hasta que
+            # se reconstruya. Los otros dos caminos de T6 ya lo hacen; este se
+            # quedaba afuera.
+            if salida["devuelto_al_asistente"] and clave_sesion in _sesiones:
+                _sesiones[clave_sesion]["escalada"] = False
         return jsonify(salida), 201
 
     # 201 aunque la entrega falle: el mensaje SI quedo guardado, y el agente
@@ -4616,7 +4658,22 @@ def conversaciones_responder_humano(id_conversacion):
         tenant, destino["mensaje_id"],
         lambda: whatsapp.enviar_texto(_config_de(tenant), tenant,
                                       destino["usuario_externo"], contenido),
-        f"conversaciones '{id_conversacion}'"))
+        f"conversaciones '{id_conversacion}'", clave_salida=f"humano:{clave}",
+        conversation_id=id_conversacion))
+    if devolver:
+        if salida["resultado"] == "aceptado" and salida["aceptacion_registrada"]:
+            # T6 paso 4: solo después del commit que guardó el wamid.
+            r = transiciones.devolver_a_ia(
+                tenant, id_conversacion, operador_id=autor_id,
+                operador_nombre=autor, clave=f"devolver:{clave}")
+            salida["devuelto_al_asistente"] = r.aplicada or r.motivo == "reintento"
+            if salida["devuelto_al_asistente"] and clave_sesion in _sesiones:
+                _sesiones[clave_sesion]["escalada"] = False
+        else:
+            transiciones.registrar_devolucion_fallida(
+                tenant, id_conversacion, destino["mensaje_id"],
+                operador_id=autor_id, operador_nombre=autor,
+                resultado=salida["resultado"], clave=f"fallo:{clave}")
     return jsonify(salida), 201
 
 
@@ -5944,14 +6001,15 @@ def whatsapp_webhook(tenant):
 
     cuerpo = request.get_json(force=True, silent=True) or {}
 
-    rol = _rol_de_cliente(config)
-    if not rol:
-        registrar("whatsapp", "no hay ningun rol orientado a cliente_final: no hay con que "
-                              "atender el mensaje", tenant=tenant)
-        return jsonify({"recibido": True}), 200
-
     entrantes = whatsapp.mensajes_entrantes(cuerpo)
     estados = whatsapp.estados_entrantes(cuerpo)
+    rol = _rol_de_cliente(config)
+    if not rol and entrantes:
+        registrar("whatsapp", "no hay ningun rol orientado a cliente_final: no hay con que "
+                              "atender mensajes; los statuses se procesan igual", tenant=tenant)
+        # La ausencia de rol solo cierra la puerta conversacional. Los acuses
+        # ya autenticados son hechos del canal y se conservan abajo.
+        entrantes = []
 
     # Que trajo esta entrega. Sin esto, un webhook que llega y no produce nada
     # es indistinguible de uno que no llego: los dos se ven como un 200 en el
@@ -6490,11 +6548,14 @@ def conversaciones_enviar_media(id_conversacion):
     # entera, y ademas asi entra en el tope de 5 MB de WhatsApp.
     guardado, mime_guardado = media.preparar(contenido, tipo, mime)
 
-    salida = {"ok": True, "entregado": False,
+    salida = {"ok": True, "aceptado_por_meta": False,
+              "aceptacion_registrada": False, "resultado": None,
               "mensaje_id": destino["mensaje_id"]}
 
     if destino["canal"] != "whatsapp":
-        salida["entregado"] = None
+        salida["aceptado_por_meta"] = None
+        salida["aceptacion_registrada"] = True
+        salida["resultado"] = "aceptado"
     else:
         salida.update(_entregar_y_registrar(
             tenant, destino["mensaje_id"],
@@ -6618,7 +6679,45 @@ def _motivo_de_envio(e: Exception) -> str:
     return "No se pudo enviar el mensaje por WhatsApp."
 
 
-def _entregar_y_registrar(tenant: str, mensaje_id: str, enviar, etiqueta: str) -> dict:
+def _rechazo_es_definitivo(e: Exception) -> bool:
+    """Solo un rechazo inequívoco habilita el aviso de que no salió."""
+    if not isinstance(e, whatsapp.ErrorWhatsApp):
+        return False
+    if e.http_status is None:  # configuración/validación antes del POST
+        return True
+    return 400 <= e.http_status < 500 and e.http_status not in (408, 429)
+
+
+def _salida_previa(tenant: str, clave: str) -> dict:
+    """
+    Que se sabe de una salida que YA fue adquirida con esta clave.
+
+    Es el unico desempate entre "no salio nunca" y "pudo haber salido y no
+    sabemos": la fila de messages no distingue los dos casos --en los dos queda
+    'pendiente'-- y whatsapp_salidas si. 'adquirido' es el estado de una salida
+    que se reservo y nunca se resolvio: el proceso se cayo entre el POST y el
+    registro, o esta en vuelo ahora mismo. Los dos son INCIERTO, no fallo: no se
+    reenvia nada y tampoco se afirma que no salio.
+    """
+    previa = persistencia.salida_whatsapp(tenant, clave) or {}
+    estado = previa.get("estado")
+    resultado = ({"aceptado": "aceptado", "rechazado": "rechazado",
+                  "sin_id": "sin_id"}.get(estado, "incierto"))
+    return _contrato_entrega(resultado, previa.get("wamid"), estado == "aceptado")
+
+
+def _contrato_entrega(resultado: str, wamid: str | None, registrado: bool,
+                      aviso: str | None = None) -> dict:
+    salida = {"resultado": resultado, "aceptado_por_meta": bool(wamid),
+              "aceptacion_registrada": bool(wamid) and registrado}
+    if aviso:
+        salida["aviso"] = aviso
+    return salida
+
+
+def _entregar_y_registrar(tenant: str, mensaje_id: str | None, enviar, etiqueta: str,
+                           *, clave_salida: str | None = None,
+                           conversation_id: str | None = None) -> dict:
     """
     El UNICO camino por el que una respuesta humana sale por WhatsApp y deja su
     resultado en la fila. Lo usan texto, plantilla y multimedia.
@@ -6649,19 +6748,47 @@ def _entregar_y_registrar(tenant: str, mensaje_id: str, enviar, etiqueta: str) -
     Los logs llevan solo metadata: nunca el texto de una excepcion ajena ni lo
     que respondio Meta, porque un log de produccion tambien persiste.
     """
+    clave = clave_salida or f"mensaje:{mensaje_id}"
+    try:
+        adquirida = persistencia.adquirir_salida_whatsapp(
+            tenant, clave, proposito=etiqueta, mensaje_id=mensaje_id,
+            conversation_id=conversation_id)
+    except Exception as e:
+        registrar("entrega", "no se pudo adquirir el derecho a enviar", operacion=etiqueta,
+                  mensaje=id_interno(mensaje_id), error=e)
+        return _contrato_entrega("incierto", None, False)
+    if not adquirida:
+        return _salida_previa(tenant, clave)
+
     try:
         wamid = enviar()
     except Exception as e:
         motivo = _motivo_de_envio(e)
-        registrado = persistencia.marcar_envio(tenant, mensaje_id, None, motivo)
+        definitivo = _rechazo_es_definitivo(e)
+        resultado = "rechazado" if definitivo else "incierto"
+        if mensaje_id:
+            registrado = persistencia.marcar_envio(
+                tenant, mensaje_id, None, motivo if definitivo else None,
+                clave_salida=clave, resultado=resultado)
+        else:
+            registrado = persistencia.resolver_salida_whatsapp(
+                tenant, clave, resultado, error=motivo if definitivo else None)
         # error_seguro ya aporta tipo, codigo y http_status del rechazo.
-        registrar("entrega", "rechazado", proveedor="meta", operacion=etiqueta,
-                  resultado="rechazado", mensaje=id_interno(mensaje_id),
-                  registrado=registrado, error=e)
-        return {"resultado": "rechazado", "entregado": False, "aviso": motivo,
-                "registrado": registrado}
+        # El evento es fijo y el desenlace va como campo: un evento armado con
+        # una variable no se puede buscar en el log (tests/test_registro_sin_pii).
+        registrar("entrega", "el envio no fue aceptado", proveedor="meta",
+                  operacion=etiqueta, resultado=resultado,
+                  mensaje=id_interno(mensaje_id), registrado=registrado, error=e)
+        return _contrato_entrega(resultado, None, registrado,
+                                 motivo if definitivo else None)
 
-    registrado = persistencia.marcar_envio(tenant, mensaje_id, wamid)
+    if mensaje_id:
+        registrado = persistencia.marcar_envio(
+            tenant, mensaje_id, wamid, clave_salida=clave,
+            resultado="aceptado" if wamid else "sin_id")
+    else:
+        registrado = persistencia.resolver_salida_whatsapp(
+            tenant, clave, "aceptado" if wamid else "sin_id", wamid=wamid)
     if not wamid:
         resultado = "sin_id"
     elif not registrado:
@@ -6675,7 +6802,7 @@ def _entregar_y_registrar(tenant: str, mensaje_id: str, enviar, etiqueta: str) -
     elif resultado != "aceptado":
         registrar("entrega", "sin identificador", proveedor="meta", operacion=etiqueta,
                   resultado=resultado, mensaje=id_interno(mensaje_id), registrado=registrado)
-    return {"resultado": resultado, "entregado": bool(wamid), "registrado": registrado}
+    return _contrato_entrega(resultado, wamid, registrado)
 
 
 @app.post("/conversaciones/<id_conversacion>/resolver")

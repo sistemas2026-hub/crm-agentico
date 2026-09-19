@@ -535,12 +535,19 @@ escenario("aviso: la red se cae", aviso, "fallo el aviso", "error=ConnectionErro
           extra=((api.persistencia, "esta_de_baja", lambda *a: False),
                  (api.whatsapp, "enviar_plantilla", lanza(error_red()))))
 
+# El derecho durable a enviar se adquiere contra la base y su FK exige que el
+# mensaje exista de verdad: aca el id es inventado, asi que se dobla. Lo que
+# estos dos escenarios miden es el LOG, no la compuerta.
+_adquiere = (api.persistencia, "adquirir_salida_whatsapp", lambda *a, **k: True)
+# El evento es fijo ('el envio no fue aceptado') y el desenlace va como campo:
+# una caida de red es 'incierto', no 'rechazado' -- no consta que no haya salido.
 escenario("respuesta humana: la red se cae", lambda: api._entregar_y_registrar(
-    TENANT, str(uuid.uuid4()), lanza(error_red()), "texto"), "rechazado", "error=ConnectionError",
-    extra=((api.persistencia, "marcar_envio", lambda *a: True),))
+    TENANT, str(uuid.uuid4()), lanza(error_red()), "texto"),
+    "el envio no fue aceptado", "error=ConnectionError",
+    extra=(_adquiere, (api.persistencia, "marcar_envio", lambda *a, **k: True)))
 escenario("respuesta humana: aceptada y no registrada", lambda: api._entregar_y_registrar(
     TENANT, str(uuid.uuid4()), lambda: WAMID, "texto"), "ENTREGA INCIERTA", "wamid=prv-",
-    extra=((api.persistencia, "marcar_envio", lambda *a: False),))
+    extra=(_adquiere, (api.persistencia, "marcar_envio", lambda *a, **k: False)))
 
 escenario("sesion: no se puede leer el estado previo", lambda: api._sesion_nueva(
     TENANT, TEL, "whatsapp"), "no se pudo leer el estado previo", "sesion=ses-",

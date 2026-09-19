@@ -268,7 +268,7 @@ else:
 
         m = mensaje_pendiente(ORG, conv)
         r = api._entregar_y_registrar(TENANT, m, lambda: "wamid.MECANISMO", "prueba")
-        revisar(r == {"resultado": "aceptado", "entregado": True, "registrado": True}
+        revisar(r == {"resultado": "aceptado", "aceptado_por_meta": True, "aceptacion_registrada": True}
                 and fila(m)[1] == "enviado",
                 "Meta acepta: resultado 'aceptado', entregado y registrado", f"{r} {fila(m)}")
 
@@ -281,8 +281,8 @@ else:
                 400, {"error": {"code": 131026, "message": CRUDO,
                                 "error_data": {"details": CRUDO}}}), "el envío")
         r, log = con_log(lambda: api._entregar_y_registrar(TENANT, m, rechaza, "prueba"))
-        revisar(r["resultado"] == "rechazado" and r["entregado"] is False
-                and r["registrado"] is True and r["aviso"] == api.MOTIVOS_DE_FALLO[131026]
+        revisar(r["resultado"] == "rechazado" and r["aceptado_por_meta"] is False
+                and r["aceptacion_registrada"] is False and r["aviso"] == api.MOTIVOS_DE_FALLO[131026]
                 and fila(m)[1] == "fallido",
                 "Meta rechaza: 'fallido', aviso legible, registrado", f"{r} {fila(m)}")
         revisar(all(CRUDO not in (c or "") for c in fila(m)) and CRUDO not in str(r),
@@ -293,14 +293,21 @@ else:
         m = mensaje_pendiente(ORG, conv)
         r, log = con_log(lambda: api._entregar_y_registrar(
             TENANT, m, lambda: (_ for _ in ()).throw(requests.ConnectionError(CRUDO)), "prueba"))
-        revisar(r["resultado"] == "rechazado" and CRUDO not in log and CRUDO not in str(r)
+        # 'incierto', no 'rechazado': un fallo de red ocurre SIN respuesta de
+        # Meta, asi que no consta que el mensaje no haya salido. Decir
+        # 'rechazado' seria afirmar algo que no se sabe, y ademas haria que la
+        # bandeja ofreciera reintentar un mensaje que pudo haber llegado.
+        revisar(r["resultado"] == "incierto" and CRUDO not in log and CRUDO not in str(r)
                 and CRUDO not in (fila(m)[2] or ""),
                 "una excepcion ajena no filtra su texto al log, la respuesta ni la base",
                 log.strip())
+        revisar(fila(m)[1] != "fallido",
+                "y un fallo de red no deja la fila 'fallido': eso ofreceria reintentar",
+                f"{fila(m)}")
 
         m = mensaje_pendiente(ORG, conv)
         r = api._entregar_y_registrar(TENANT, m, lambda: None, "prueba")
-        revisar(r == {"resultado": "sin_id", "entregado": False, "registrado": True}
+        revisar(r == {"resultado": "sin_id", "aceptado_por_meta": False, "aceptacion_registrada": False}
                 and fila(m)[1] == "pendiente",
                 "200 sin id: 'sin_id', no se da por entregado y no hay aviso", f"{r} {fila(m)}")
 
@@ -311,9 +318,20 @@ else:
         def acepta():
             llamadas.append(1)
             return "wamid.NO_GUARDADO"
-        r, log = con_log(lambda: api._entregar_y_registrar(SIN_CONFIG, m, acepta, "prueba"))
-        revisar(r["resultado"] == "aceptado_sin_registro" and r["entregado"] is True
-                and r["registrado"] is False,
+        # Antes este caso se provocaba con un tenant sin configuracion. Ya no
+        # sirve: desde la compuerta durable, un tenant que no puede escribir
+        # falla al ADQUIRIR el derecho a enviar y no llega a hablar con Meta --
+        # que es mas seguro, pero deja de ejercitar este estado. El camino por
+        # el que 'aceptado_sin_registro' sigue siendo alcanzable es el real:
+        # Meta acepto y la escritura POSTERIOR del wamid no quedo.
+        marcar_original = db.marcar_envio
+        db.marcar_envio = lambda *a, **k: False
+        try:
+            r, log = con_log(lambda: api._entregar_y_registrar(TENANT, m, acepta, "prueba"))
+        finally:
+            db.marcar_envio = marcar_original
+        revisar(r["resultado"] == "aceptado_sin_registro" and r["aceptado_por_meta"] is True
+                and r["aceptacion_registrada"] is False,
                 "se distingue como 'aceptado_sin_registro', no como exito ni como fallo", f"{r}")
         revisar(len(llamadas) == 1,
                 "el envio se hizo UNA sola vez: no hay reenvio automatico", f"{len(llamadas)} envios")
@@ -337,8 +355,8 @@ else:
                                       **AUTOR, "clave_idempotencia": str(uuid.uuid4())})
             datos = resp.get_json() or {}
             mid = datos.get("mensaje_id")
-            revisar(resp.status_code == 201 and datos.get("entregado") is True
-                    and datos.get("registrado") is True,
+            revisar(resp.status_code == 201 and datos.get("aceptado_por_meta") is True
+                    and datos.get("aceptacion_registrada") is True,
                     "el endpoint responde entregado y registrado", f"{resp.status_code} {datos}")
             revisar(bool(mid) and fila(mid) == ("wamid.PUNTA_A_PUNTA", "enviado", None),
                     "y la fila creada por el endpoint tiene el wamid y 'enviado' (G9-A en local)",
@@ -348,8 +366,10 @@ else:
             revisar(atendida is True, "la conversacion queda atendida por una persona")
 
             # Y el acuse posterior del webhook ahora SI tiene con que casar.
+            # marcar_entrega dejo de devolver bool: ahora dice QUE paso con el
+            # acuse (actualizado / ya aplicado / regresivo / no encontrado).
             casado = db.marcar_entrega(TENANT, "wamid.PUNTA_A_PUNTA", "entregado")
-            revisar(casado is True and fila(mid)[1] == "entregado",
+            revisar(casado is db.ResultadoEntrega.ACTUALIZADO and fila(mid)[1] == "entregado",
                     "un acuse con ese wamid avanza la misma fila a 'entregado' (G9-B en local)",
                     f"{casado} {fila(mid)}")
         finally:

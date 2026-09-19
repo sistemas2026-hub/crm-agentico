@@ -100,6 +100,8 @@ ESQUEMAS: dict[str, frozenset[str]] = {
     "reasignada": frozenset({"version", "anterior_usuario_id", "anterior_nombre",
                              "nuevo_usuario_id", "nuevo_nombre", "motivo"}),
     "cerrada": frozenset({"version", "por"}),
+    "devolucion_solicitada": frozenset({"mensaje_id"}),
+    "devolucion_fallida": frozenset({"mensaje_id", "resultado"}),
     "devuelta_a_ia": frozenset({"version"}),
     "caso_externo_cerrado": frozenset({"version", "aplicado"}),
 }
@@ -465,6 +467,70 @@ def devolver_a_ia(tenant: str, conversation_id: str, *, operador_id: str, operad
         ev = _evento(cur, org, conversation_id, "devuelta_a_ia", "operador", usuario, nombre, datos, clave)
         return Resultado(True, True, version, ev, datos=datos)
     return _ejecutar(tenant, conversation_id, clave, cuerpo, tipo="devuelta_a_ia", actor_id=usuario)
+
+
+def solicitar_devolucion(tenant: str, conversation_id: str, contenido: str, *,
+                         operador_id: str, operador_nombre: str,
+                         clave: str) -> dict | None:
+    """T6 paso 1: mensaje + intención, sin cambiar control ni asignación."""
+    nombre, usuario = db.validar_autor(operador_nombre, operador_id)
+    if not (clave or "").strip():
+        raise ValueError("T6 necesita clave de idempotencia")
+    with db.sesion(tenant) as (cur, org):
+        fila = _fila(cur, org, conversation_id)
+        if fila is None:
+            return None
+        if regla_control.control_efectivo(fila) != "humano" or fila["estado"] != "abierta":
+            raise RuntimeError("la conversación no está bajo control humano")
+        cur.execute(
+            """select canal, usuario_externo, ticket_operativo
+               from asistente.conversations
+               where organization_id = %s and id = %s""", (org, conversation_id))
+        destino = cur.fetchone()
+        cur.execute(
+            """insert into asistente.messages
+                 (organization_id, conversation_id, rol, contenido, estado_entrega,
+                  origen, autor_usuario_id, autor_nombre, clave_idempotencia)
+               values (%s, %s, 'assistant', %s, %s, 'humano', %s, %s, %s)
+               on conflict (organization_id, conversation_id, clave_idempotencia)
+                 where clave_idempotencia is not null do nothing returning id""",
+            (org, conversation_id, contenido,
+             "pendiente" if destino["canal"] == "whatsapp" else None,
+             usuario, nombre, clave))
+        nueva = cur.fetchone()
+        if not nueva:
+            cur.execute(
+                """select id, estado_entrega from asistente.messages
+                   where organization_id = %s and conversation_id = %s
+                     and clave_idempotencia = %s""", (org, conversation_id, clave))
+            previa = cur.fetchone()
+            return {**dict(destino), "mensaje_id": previa["id"], "existente": True,
+                    "estado_entrega": previa["estado_entrega"]}
+        mensaje_id = str(nueva["id"])
+        cur.execute(
+            """update asistente.conversations
+               set actualizado_en = now(), atendida_manual = true,
+                   atendida_por = coalesce(nullif(%s, ''), atendida_por)
+               where organization_id = %s and id = %s""", (nombre, org, conversation_id))
+        _evento(cur, org, conversation_id, "devolucion_solicitada", "operador",
+                usuario, nombre, {"mensaje_id": mensaje_id}, f"solicitar:{clave}")
+        return {**dict(destino), "mensaje_id": mensaje_id, "existente": False,
+                "estado_entrega": "pendiente" if destino["canal"] == "whatsapp" else None}
+
+
+def registrar_devolucion_fallida(tenant: str, conversation_id: str, mensaje_id: str, *,
+                                 operador_id: str, operador_nombre: str,
+                                 resultado: str, clave: str) -> Resultado:
+    """T6 paso 3 fallido: deja evidencia sin soltar control ni asignación."""
+    nombre, usuario = db.validar_autor(operador_nombre, operador_id)
+
+    def cuerpo(cur, org, f):
+        datos = {"mensaje_id": str(mensaje_id), "resultado": resultado}
+        ev = _evento(cur, org, conversation_id, "devolucion_fallida", "operador",
+                     usuario, nombre, datos, clave)
+        return Resultado(True, f["relevo_version"] > 0, f["relevo_version"], ev, datos=datos)
+    return _ejecutar(tenant, conversation_id, clave, cuerpo,
+                     tipo="devolucion_fallida", actor_id=usuario)
 
 
 def caso_externo_cerrado(tenant: str, conversation_id: str, *, clave: str | None = None) -> Resultado:

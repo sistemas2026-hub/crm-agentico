@@ -66,6 +66,7 @@ import unicodedata
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+from enum import Enum
 
 import psycopg
 from psycopg.rows import dict_row
@@ -1348,8 +1349,92 @@ SIN_IDENTIFICADOR = ("WhatsApp aceptó la petición pero no devolvió el id del 
                      "mensaje: no se puede confirmar la entrega.")
 
 
+class ResultadoEntrega(str, Enum):
+    ACTUALIZADO = "actualizado"
+    YA_APLICADO = "ya_aplicado"
+    REGRESIVO = "regresivo"
+    NO_ENCONTRADO = "no_encontrado"
+
+
+def adquirir_salida_whatsapp(tenant: str, clave: str, *, proposito: str,
+                              mensaje_id: str | None = None,
+                              conversation_id: str | None = None) -> bool:
+    """Adquiere una sola vez el derecho durable a hacer el POST a Meta."""
+    if not (clave or "").strip():
+        raise ValueError("la salida de WhatsApp necesita clave de idempotencia")
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """insert into asistente.whatsapp_salidas
+                 (organization_id, clave_idempotencia, mensaje_id,
+                  conversation_id, proposito)
+               values (%s, %s, %s, %s, %s)
+               on conflict (organization_id, clave_idempotencia) do nothing
+               returning clave_idempotencia""",
+            (org, clave, mensaje_id, conversation_id, proposito))
+        return cur.fetchone() is not None
+
+
+def salida_whatsapp(tenant: str, clave: str) -> dict | None:
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select estado, wamid, error from asistente.whatsapp_salidas
+               where organization_id = %s and clave_idempotencia = %s""", (org, clave))
+        fila = cur.fetchone()
+        return dict(fila) if fila else None
+
+
+def resolver_salida_whatsapp(tenant: str, clave: str, resultado: str,
+                              wamid: str | None = None,
+                              error: str | None = None) -> bool:
+    """Sella una salida sin message asociado (avisos automaticos/proactivos)."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """update asistente.whatsapp_salidas
+               set estado = %s, wamid = %s, error = %s,
+                   estado_entrega = case when %s::text is not null then 'enviado' end,
+                   resuelto_en = clock_timestamp()
+               where organization_id = %s and clave_idempotencia = %s
+                 and estado = 'adquirido'""",
+            (resultado, wamid, error, wamid, org, clave))
+        escrita = cur.rowcount == 1
+        if escrita and wamid:
+            cur.execute(
+                """select estado, error from asistente.whatsapp_acuses_pendientes
+                   where organization_id = %s and wamid = %s for update""", (org, wamid))
+            acuse = cur.fetchone()
+            if acuse:
+                cur.execute(
+                    """update asistente.whatsapp_salidas
+                       set estado_entrega = %s,
+                           error_entrega = coalesce(%s, error_entrega)
+                       where organization_id = %s and clave_idempotencia = %s""",
+                    (acuse["estado"], acuse["error"], org, clave))
+                cur.execute(
+                    """delete from asistente.whatsapp_acuses_pendientes
+                       where organization_id = %s and wamid = %s""", (org, wamid))
+        return escrita
+
+
+def _aplicar_acuse_pendiente(cur, org: str, mensaje_id: str, wamid: str) -> None:
+    cur.execute(
+        """select estado, error from asistente.whatsapp_acuses_pendientes
+           where organization_id = %s and wamid = %s for update""", (org, wamid))
+    acuse = cur.fetchone()
+    if not acuse:
+        return
+    cur.execute(
+        """update asistente.messages
+           set estado_entrega = %s, error_entrega = coalesce(%s, error_entrega)
+           where organization_id = %s and id = %s""",
+        (acuse["estado"], acuse["error"], org, mensaje_id))
+    cur.execute(
+        """delete from asistente.whatsapp_acuses_pendientes
+           where organization_id = %s and wamid = %s""", (org, wamid))
+
+
 def marcar_envio(tenant: str, mensaje_id: str, wamid: str | None,
-                 error: str | None = None) -> bool:
+                 error: str | None = None, *, clave_salida: str | None = None,
+                 resultado: str | None = None) -> bool:
     """
     Cierra el circuito del envio: o salio (y quedo su wamid, con el que
     despues se casan los acuses), o no salio y se guarda por que.
@@ -1378,7 +1463,9 @@ def marcar_envio(tenant: str, mensaje_id: str, wamid: str | None,
     'error' tiene que venir ya saneado por quien llama: se guarda y se muestra
     tal cual, y nunca puede ser la respuesta cruda de una API externa.
     """
-    if error is not None:
+    if resultado == "incierto":
+        estado = "desconocido"
+    elif error is not None:
         estado = "fallido"
     elif wamid:
         estado = "enviado"
@@ -1394,6 +1481,17 @@ def marcar_envio(tenant: str, mensaje_id: str, wamid: str | None,
                    where organization_id = %s and id = %s""",
                 (wamid, estado, error, org, mensaje_id))
             escrita = cur.rowcount == 1
+            if escrita and wamid:
+                _aplicar_acuse_pendiente(cur, org, mensaje_id, wamid)
+            if clave_salida:
+                cur.execute(
+                    """update asistente.whatsapp_salidas
+                       set estado = %s, wamid = %s, error = %s,
+                           resuelto_en = clock_timestamp()
+                       where organization_id = %s and clave_idempotencia = %s
+                         and estado = 'adquirido'""",
+                    (resultado or ("aceptado" if wamid else "rechazado"),
+                     wamid, error, org, clave_salida))
     except Exception as e:
         registrar("entrega", "NO se pudo anotar el envio", mensaje=id_interno(mensaje_id),
                   estado=estado, error=e)
@@ -1412,7 +1510,7 @@ _RANGO_ENTREGA = {"pendiente": 0, "enviado": 1, "entregado": 2, "leido": 3,
 
 
 def marcar_entrega(tenant: str, wamid: str, estado: str,
-                   error: str | None = None) -> bool:
+                   error: str | None = None) -> ResultadoEntrega:
     """
     Un acuse de WhatsApp, aplicado al mensaje que lo produjo.
 
@@ -1420,26 +1518,53 @@ def marcar_entrega(tenant: str, wamid: str, estado: str,
     dice que no se pudo entregar, eso es lo ultimo que se sabe del mensaje
     aunque antes hubiera dicho 'enviado'.
 
-    Devuelve False si el wamid no es de esta empresa o no se conoce -- lo
-    normal cuando el acuse corresponde a un mensaje que mando el bot antes de
-    que existiera este registro.
+    Si la salida aun no existe, conserva el mejor acuse tenant-scoped para que
+    marcar_envio lo reconcilie atomicamente, y devuelve no_encontrado: no
+    afirma haber actualizado una salida que todavia no pudo correlacionar.
     """
     rango = _RANGO_ENTREGA.get(estado)
     if rango is None:
-        return False
+        return ResultadoEntrega.NO_ENCONTRADO
     with sesion(tenant) as (cur, org):
         cur.execute(
-            """update asistente.messages
-               set estado_entrega = %s,
-                   error_entrega = coalesce(%s, error_entrega)
-               where organization_id = %s and wamid = %s
-                 and coalesce(%s, 0) > coalesce(
-                       case estado_entrega
-                         when 'pendiente' then 0 when 'enviado' then 1
-                         when 'entregado' then 2 when 'leido' then 3
-                         when 'fallido' then 4 end, -1)""",
-            (estado, error, org, wamid, rango))
-        return cur.rowcount > 0
+            """select estado_entrega from asistente.messages
+               where organization_id = %s and wamid = %s for update""", (org, wamid))
+        fila = cur.fetchone()
+        tabla = "messages"
+        if not fila:
+            cur.execute(
+                """select estado_entrega from asistente.whatsapp_salidas
+                   where organization_id = %s and wamid = %s for update""", (org, wamid))
+            fila = cur.fetchone()
+            tabla = "whatsapp_salidas"
+        if fila:
+            actual = _RANGO_ENTREGA.get(fila["estado_entrega"], 0)
+            if rango == actual:
+                return ResultadoEntrega.YA_APLICADO
+            if rango < actual:
+                return ResultadoEntrega.REGRESIVO
+            cur.execute(
+                f"""update asistente.{tabla}
+                    set estado_entrega = %s,
+                        error_entrega = coalesce(%s, error_entrega)
+                    where organization_id = %s and wamid = %s""",
+                (estado, error, org, wamid))
+            return ResultadoEntrega.ACTUALIZADO
+
+        cur.execute(
+            """insert into asistente.whatsapp_acuses_pendientes
+                 (organization_id, wamid, estado, precedencia, error)
+               values (%s, %s, %s, %s, %s)
+               on conflict (organization_id, wamid) do update
+                 set estado = excluded.estado,
+                     precedencia = excluded.precedencia,
+                     error = coalesce(excluded.error,
+                                      asistente.whatsapp_acuses_pendientes.error),
+                     actualizado_en = clock_timestamp()
+               where excluded.precedencia >
+                     asistente.whatsapp_acuses_pendientes.precedencia""",
+            (org, wamid, estado, rango, error))
+        return ResultadoEntrega.NO_ENCONTRADO
 
 
 def agentes_de_colaborador(tenant: str, profile_id: str) -> list[str]:
