@@ -766,6 +766,41 @@ props 24 · binds 9 · callbacks 16 · lifecycle 0 · v2 1 (--v2-fs) · T6 0
 funcional desde cero — un `200` no es sinónimo de que la IA recuperó el control.
 
 
+## Fase 1.4C — backend T6 cerrado, UI pendiente
+
+```
+1.4B              rediseño del centro operativo        ✅
+1.4C backend T6   responder y devolver, salida durable ✅  commit 04d835e
+1.4C UI           el botón y sus estados               ⏭  siguiente
+G6 poblada        migración sobre messages con datos   🔒 gate de despliegue
+T7                devolver sin responder               —  fuera de T6
+```
+
+La auditoría que este checkpoint pedía se hizo, y encontró bastante más que un flujo: el backend de
+T6 existía en el árbol de trabajo **sin commitear y sin compilar**, y lo que parecía una auditoría de
+UI terminó siendo la recuperación de un draft interrumpido. La historia completa, gate por gate, está
+en [auditorias/INDICE.md](auditorias/INDICE.md).
+
+Lo que quedó demostrado, y es lo que la UI puede dar por cierto:
+
+- **El control vuelve a la IA sólo con aceptación durable** (`wamid` + `estado_entrega = 'enviado'`).
+  No hay camino que lo viole; medido contra PostgreSQL 16.14, no con mocks.
+- **`incierto` no es `rechazado`.** La UI lee `datos.resultado` del evento, **nunca** su nombre:
+  `devolucion_fallida` con `resultado = 'incierto'` significa *no pudimos confirmar*, no *falló*.
+  Mostrarlo como fallo ofrecería reintentar algo que el cliente quizá ya recibió.
+- **La clave de idempotencia la genera el cliente y hay que reutilizarla en el reintento.** El motor
+  la exige (`400 clave_requerida`) pero no puede comprobar que sea la misma. Una clave nueva por
+  intento no es idempotencia: es un segundo mensaje.
+- **Durante `devolucion_solicitada` la conversación es indistinguible de una normal**: el paso 1 no
+  escribe ninguna columna de estado. Un indicador de "devolviendo…" tendría que leer `relevo_eventos`.
+
+**Nota para quien commitee la UI:** el backend renombró el contrato de entrega
+(`entregado` → `aceptado_por_meta` / `aceptacion_registrada` / `resultado`). Los cuatro archivos de
+frontend que lo consumen están actualizados en el árbol de trabajo pero **no en este commit**, así
+que entre `04d835e` y el commit de UI la rama queda temporalmente incoherente en ese punto. No se
+pushea nada hasta cerrarlo.
+
+
 ## El puente `--v2-*` — transitorio, y con un orden para retirarlo
 
 La Bandeja consume hoy **~190 usos de `--v2-*`** en ocho componentes. Como las custom properties
