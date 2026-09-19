@@ -111,6 +111,17 @@ services:
       DBNAME: ${DBNAME:?}
       DBUSER: ${DBUSER:?}
       DBPASSWORD: ${DBPASSWORD:?}
+      # --- Migraciones: credencial APARTE de la de trafico ---
+      # Este es el UNICO servicio que corre 'entrypoint.sh' (los dos celery
+      # arrancan 'celery' directo), asi que es el unico que migra y el unico que
+      # necesita esto. Ponerlo en celery-* no haria nada salvo repartir una
+      # credencial con permiso de DDL por donde no hace falta.
+      #
+      # OPCIONALES a proposito ('-' y no ':?'): sin ellas el entrypoint migra
+      # como siempre, con ${DBUSER}. Asi este archivo se puede desplegar antes
+      # de que exista el rol. Ver DESPLIEGUE.md, "Credencial de migraciones".
+      MIGRATOR_DBUSER: ${MIGRATOR_DBUSER:-}
+      MIGRATOR_DBPASSWORD: ${MIGRATOR_DBPASSWORD:-}
       # --- Celery ---
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
