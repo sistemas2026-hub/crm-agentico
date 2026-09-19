@@ -63,15 +63,15 @@ FASE 1.4C                            ✅ COMPLETA
 1.5  Case + Tools                    ✅ cerrada   5f30f74
 1.6  Activity                        ✅ cerrada   4d73ea8
 1.7  Customer                        ✅ cerrada   f61fd4d
-1.8  Network                  pendiente  ← el siguiente
-1.9  Branding                 pendiente
+1.8  Network                        ✅ cerrada   4541423
+1.9  Branding                 pendiente  ← el siguiente
 ```
 
-Abierto al cerrar 1.7, y ninguno bloquea 1.8:
+Abierto al cerrar 1.8, y ninguno bloquea 1.9:
 
 ```
 G6 sobre messages poblada   🔒 gate de DESPLIEGUE, no de desarrollo
-smoke visual integral       ⏭ nada de 1.4C a 1.7 se vio renderizado
+smoke visual integral       ⏭ nada de 1.4C a 1.8 se vio renderizado
 D28                         ⏭ abierto para B4: la pantalla lo muestra,
                                no reconcilia CRM y Dexter
 hot path ③a/③c              ⏭ idempotencia del outbound automático
@@ -778,6 +778,44 @@ props 24 · binds 9 · callbacks 16 · lifecycle 0 · v2 1 (--v2-fs) · T6 0
 funcional desde cero — un `200` no es sinónimo de que la IA recuperó el control.
 
 
+## Fase 1.8 — COMPLETA
+
+```
+Network   qué se le hizo al equipo, y si funcionó   ✅  commit 4541423
+```
+
+La referencia separa ella misma «confirmed, live from SmartOLT» de «stitch mock
+/ future data — not available today», y propone dos botones: **Ping ONT** y
+**Reboot ONT**. Ninguno entra, y las razones están medidas:
+
+```
+telemetría en vivo   no: misma decisión que cerró 1.7 (no hay segunda fuente
+                     de verdad en la Bandeja; RNF-01)
+botón Reiniciar      no: CORTA EL SERVICIO de alguien y pasa por la cola de
+                     acciones con confirmación (PRD §7.4). Un botón acá sería
+                     una segunda puerta a la misma acción, sin esa confirmación
+botón Ping           no: el mismo equipo sano da 1/3, 2/3 y 3/3 en corridas
+                     seguidas (15/08/2026), y un reinicio confirmado dejó el
+                     ping igual antes y después (02/09/2026)
+```
+
+Lo que sí hay: el veredicto de `verificaciones_accion`, que **sí** está ligada a
+la conversación (a diferencia de `acciones_propuestas`, que es una cola global).
+Lectura nueva, sin migración, **sin las mediciones crudas** — se guardan enteras
+para rehacer la conclusión a mano, pero son respuestas del sistema externo.
+
+### Las dos distinciones que el panel sostiene
+
+```
+ACCION_CONFIRMADA   ≠  el cliente tiene internet
+                       el equipo hizo lo que se le pidió; el servicio lo sabe
+                       el cliente. Va en el cuerpo de la tarjeta, no al pie
+NO_VERIFICABLE      ≠  ACCION_NO_CONFIRMADA
+                       «no se pudo medir» ≠ «se midió y el efecto no está»
+```
+
+Evidencia: [auditorias/1.8-NETWORK.md](auditorias/1.8-NETWORK.md).
+
 ## Fase 1.7 — COMPLETA
 
 ```
@@ -1052,14 +1090,14 @@ voltajes, firmwares, OLT/slot/port, operadores, teléfonos o documentos inventad
 
 ## Baseline
 
-Medido el 19/09/2026 al cerrar 1.7:
+Medido el 19/09/2026 al cerrar 1.8:
 
 | Chequeo | Valor esperado |
 |---|---|
 | `svelte-check` | 2 errores en `(no-layout)/org/`; **0 en `conversaciones/`** |
 | warnings | **25** |
-| vitest | 17 failed \| 14 passed (31) · **63 failed** \| 393 passed (456) |
-| guardas `conversaciones/` | 132/132 — ordenamiento 20 · grabación 17 · formato 17 · devolución 13 · cableado T6 22 · contexto 31 · actividad 12 |
+| vitest | 17 failed \| 15 passed (32) · **63 failed** \| 410 passed (473) |
+| guardas `conversaciones/` | 149/149 — ordenamiento 20 · grabación 17 · formato 17 · devolución 13 · cableado T6 22 · contexto 37 · actividad 12 · red 11 |
 | D30, backend | 18/18 — **se reporta aparte, no se suma a vitest** |
 | backend con PostgreSQL real | 9 suites verdes (ver `DEXTER_BASELINES.md`) |
 
