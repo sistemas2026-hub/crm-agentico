@@ -14,7 +14,7 @@
    */
   import { TriangleAlert, RotateCcw, Paperclip } from '@lucide/svelte';
   import MarcarEjemplo from '$lib/components/manual/MarcarEjemplo.svelte';
-  import { burbujaClase, extension, hora, ENTREGA_TEXTO } from '../formato.js';
+  import { autorDe, burbujaClase, extension, hora, ENTREGA_TEXTO } from '../formato.js';
 
   let {
     /** El hilo ya agrupado por día: {tipo:'dia'|'msg'} */
@@ -82,10 +82,24 @@
       {#if item.tipo === 'dia'}
         <div class="dia"><span>{item.texto}</span></div>
       {:else}
+        {@const autor = autorDe(item.m)}
         <div
-          class="chat-burbuja {burbujaClase(item.m.rol)}"
+          class="chat-burbuja {burbujaClase(item.m.rol)} {autor.clase}"
           class:sin-entregar={item.m.sinEntregar}
         >
+          <!-- QUIEN escribio esto, dicho con palabras y no solo con un color
+               (D30). Antes la burbuja se clasificaba por `rol`, y `rol`
+               'assistant' cubre por igual a la IA, a una persona y a las filas
+               historicas sin origen: las tres se veian como si las hubiera
+               escrito Dexter.
+
+               El cliente no lleva rotulo: su burbuja ya esta del otro lado y
+               es el unico que no puede confundirse con nadie. -->
+          {#if autor.clase !== 'a-cliente'}
+            <div class="autor">
+              <span class="autor-punto" aria-hidden="true"></span>{autor.etiqueta}
+            </div>
+          {/if}
           <!-- Un mensaje sin texto Y sin adjunto que se pueda dibujar no
                puede quedar como una burbuja vacía: llegó algo (una
                ubicación, un contacto, un sticker) que esta pantalla todavía
@@ -185,6 +199,52 @@
 
 
 <style>
+  /* ── quién escribió (D30) ─────────────────────────────────────────────── */
+  /* El rótulo va SIEMPRE con palabra. El color solo no alcanza: un 8% de la
+     gente no distingue violeta de azul, y un punto de color sin texto no dice
+     QUÉ pasó. El punto es refuerzo, no la señal. */
+  .autor {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-bottom: 4px;
+    font-family: var(--bandeja-mono);
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--bandeja-texto-2);
+  }
+
+  .autor-punto {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: currentColor;
+    flex: none;
+  }
+
+  .a-ia .autor {
+    color: var(--bandeja-ia);
+  }
+
+  .a-humano .autor {
+    color: var(--bandeja-humano);
+  }
+
+  .a-nota .autor {
+    color: var(--bandeja-nota);
+  }
+
+  /* Sistema y "origen no registrado" quedan en gris a propósito: ninguno de
+     los dos es alguien con quien se pueda hablar, y el segundo además es la
+     admisión de que no sabemos. Un color propio le daría una identidad que
+     justamente no tiene. */
+  .a-sistema .autor,
+  .a-sin-registro .autor {
+    color: var(--bandeja-texto-3);
+  }
+
   /* El hilo es lo único que scrollea acá: el encabezado y el compositor
      quedan fijos, para no tener que bajar hasta el fondo para escribir. */
   .hilo {
