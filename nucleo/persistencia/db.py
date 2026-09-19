@@ -643,6 +643,19 @@ def mensajes_de(tenant: str, conversation_id: str) -> dict:
 
         cur.execute(
             """select m.id, m.rol, m.contenido, m.creado_en, e.caso as caso_marcado,
+                      -- QUIEN produjo el mensaje, y su nombre si fue una
+                      -- persona (D30). 'rol' es el protocolo del canal y NO
+                      -- alcanza: desde B2 una respuesta humana es rol
+                      -- 'assistant' con origen 'humano', igual que una de la
+                      -- IA, asi que sin esta columna la pantalla no puede
+                      -- distinguirlas y termina mostrando las dos como si las
+                      -- hubiera escrito Dexter.
+                      --
+                      -- NULL es un valor con significado y se devuelve TAL
+                      -- CUAL: son las filas anteriores al registro de origen.
+                      -- No se rellena, ni por rol ni por nada -- afirmar quien
+                      -- escribio algo que no sabemos es peor que no decirlo.
+                      m.origen, m.autor_nombre,
                       -- Si le llego o no. NULL = no se sabe (otro canal, o
                       -- anterior al registro): la pantalla no dibuja nada.
                       m.estado_entrega, m.error_entrega,
