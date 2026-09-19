@@ -34,7 +34,7 @@ export async function load({ fetch, cookies, params, locals, depends }) {
   // DESPUES casos: cada salto de conversacion pagaba la suma de las tres
   // idas y vueltas al motor en vez del maximo de las tres, y esa espera es
   // la que se sentia como si la pagina entera se recargara.
-  const [respMensajes, respHerr, respCasos, respRelevo] = await Promise.all([
+  const [respMensajes, respHerr, respCasos, respRelevo, respEquipo] = await Promise.all([
     fetch(
       `${baseUrl}/conversaciones/${encodeURIComponent(params.id)}/mensajes?tenant=${encodeURIComponent(tenant)}`,
       { headers: headersMotor() }
@@ -46,6 +46,10 @@ export async function load({ fetch, cookies, params, locals, depends }) {
     fetch(`${baseUrl}/manual/casos?tenant=${encodeURIComponent(tenant)}`, { headers: headersMotor() }).catch(() => null),
     fetch(
       `${baseUrl}/conversaciones/${encodeURIComponent(params.id)}/relevo?tenant=${encodeURIComponent(tenant)}`,
+      { headers: headersMotor() }
+    ).catch(() => null),
+    fetch(
+      `${baseUrl}/conversaciones/${encodeURIComponent(params.id)}/equipo?tenant=${encodeURIComponent(tenant)}`,
       { headers: headersMotor() }
     ).catch(() => null)
   ]);
@@ -82,6 +86,17 @@ export async function load({ fetch, cookies, params, locals, depends }) {
   let relevo = [];
   try {
     if (respRelevo?.ok) relevo = (await respRelevo.json()).eventos ?? [];
+  } catch {
+    // idem
+  }
+
+  // Que se le hizo al equipo del cliente y si funciono. Es el veredicto del
+  // seguimiento de acciones, no una consulta en vivo al ISP: nada se pregunta
+  // al abrir la pantalla. Si el motor no contesta, el panel dice que no hubo
+  // acciones registradas y la conversacion se atiende igual.
+  let equipo = [];
+  try {
+    if (respEquipo?.ok) equipo = (await respEquipo.json()).acciones ?? [];
   } catch {
     // idem
   }
@@ -130,7 +145,7 @@ export async function load({ fetch, cookies, params, locals, depends }) {
   const yo = { id: locals.user?.id ?? '', nombre: (locals.user?.name || locals.user?.email || '').trim() };
 
   return { conversacion: datos.conversacion, mensajes: datos.mensajes, caso, owners, herramientas, diagnostico, casos,
-    relevo, yo, rol, operadores };
+    relevo, equipo, yo, rol, operadores };
 }
 
 /** @type {import('./$types').Actions} */

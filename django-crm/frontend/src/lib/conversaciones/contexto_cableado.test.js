@@ -222,6 +222,43 @@ describe('el panel del cliente no inventa la ficha', () => {
   });
 });
 
+describe('el panel de red no ejecuta ni inventa', () => {
+  const red = leer('NetworkPanel.svelte');
+  const visible = red
+    .slice(red.indexOf('</script>'), red.indexOf('<style>'))
+    .replace(/<!--[\s\S]*?-->/g, '');
+  const campos = visible.replace(/<p class="nota-fuente">[\s\S]*?<\/p>/, '');
+
+  it('no hay botones de Ping ni de Reiniciar', () => {
+    // Reiniciar corta el servicio de alguien y pasa por la cola de acciones
+    // con confirmación (PRD §7.4). Un botón acá sería una segunda puerta a la
+    // misma acción, sin esa confirmación.
+    expect(visible).not.toMatch(/<button/);
+    expect(campos).not.toMatch(/\bping\b|reiniciar|reboot/i);
+  });
+
+  it('el panel no dispara ninguna consulta: es presentación', () => {
+    expect(red).not.toMatch(/fetch\(|onMount|\$effect|setInterval/);
+  });
+
+  it('no muestra los campos que la referencia marca como MOCK', () => {
+    for (const campo of [/dBm/i, /\bOLT\b/, /\bPON\b/, /\bCTO\b/, /\bMAC\b/,
+                         /firmware/i, /temperatura/i, /splitter/i,
+                         /dispositivos conectados/i]) {
+      expect(campos).not.toMatch(campo);
+    }
+  });
+
+  it('distingue «no se hizo nada» de «no se pudo consultar»', () => {
+    expect(visible).toMatch(/No se ejecutó ninguna acción sobre el equipo/i);
+  });
+
+  it('dice por qué no hay telemetría ni botón de reinicio', () => {
+    expect(visible).toMatch(/no se guardan acá/i);
+    expect(visible).toMatch(/cola de acciones con confirmación/i);
+  });
+});
+
 describe('el proceso sigue contando lo que cuenta el motor', () => {
   it('la pantalla no recalcula bloqueos ni errores', () => {
     // El backend los cuenta porque distinguir un bloqueo de un fallo depende

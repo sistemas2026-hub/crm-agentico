@@ -2354,6 +2354,33 @@ def eventos_de_relevo(tenant: str, conversation_id: str) -> list[dict]:
         return [dict(f) for f in cur.fetchall()]
 
 
+def acciones_sobre_el_equipo(tenant: str, conversation_id: str) -> list[dict]:
+    """
+    Que se le hizo al equipo del cliente en esta conversacion, y si funciono.
+
+    SIN las mediciones. 'medicion_previa' y 'medicion_posterior' se guardan
+    crudas a proposito --para poder rehacer la conclusion a mano si alguna vez
+    el estado no se entiende-- y son respuestas del sistema externo: no salen
+    de la base por esta puerta, igual que herramientas_de no devuelve el dato
+    consultado. Lo que la pantalla necesita es el veredicto y su motivo, que
+    los escribe Dexter.
+
+    Ojo con 'ACCION_CONFIRMADA': significa que la accion produjo el efecto
+    tecnico que el sistema PUEDE medir --en reiniciar_ont, que el equipo
+    reinicio y volvio-- y no que el cliente tenga internet. Eso no lo dice
+    ningun endpoint; lo sabe el cliente y hay que preguntarselo.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select id, herramienta, ejecutada_en, estado, por_que,
+                      intentos, max_intentos, verificada_en
+               from asistente.verificaciones_accion
+               where organization_id = %s and conversation_id = %s
+               order by ejecutada_en desc""",
+            (org, conversation_id))
+        return [dict(f) for f in cur.fetchall()]
+
+
 def marcar_ejemplo(tenant: str, conversation_id: str, mensaje_id: str,
                    caso: str, marcado_por: str | None) -> None:
     """

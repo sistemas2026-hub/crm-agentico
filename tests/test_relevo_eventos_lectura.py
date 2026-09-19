@@ -224,6 +224,41 @@ try:
     revisar(not c2.get("id_cliente") and c2.get("equipo") == {},
             "una conversacion sin verificar no trae identidad ni equipo inventados",
             f"{c2.get('id_cliente')} {c2.get('equipo')}")
+    # =========================================================================
+    titulo("5. lo que se le hizo al equipo (1.8)")
+    # =========================================================================
+    conv5 = conversacion(ORG_A)
+    admin.execute(
+        "insert into asistente.verificaciones_accion (organization_id, conversation_id, "
+        "herramienta, espera_segundos, max_intentos, intentos, estado, por_que, "
+        "medicion_previa, medicion_posterior) "
+        "values (%s, %s, 'reiniciar_ont', 120, 3, 2, 'ACCION_CONFIRMADA', "
+        "'El equipo volvio a las 14:07.', %s::jsonb, %s::jsonb)",
+        (str(ORG_A), conv5,
+         '{"last_status_change": "2026-09-19T14:02:00Z", "senha_pppoe": "SECRETO-123"}',
+         '{"last_status_change": "2026-09-19T14:07:00Z", "gps": "-34.5,-58.4"}'))
+
+    r5 = cliente_http.get(f"/conversaciones/{conv5}/equipo?tenant={T_A}")
+    acciones = (r5.get_json() or {}).get("acciones") or []
+    revisar(len(acciones) == 1 and acciones[0]["estado"] == "ACCION_CONFIRMADA"
+            and acciones[0]["herramienta"] == "reiniciar_ont",
+            "la accion y su veredicto llegan a la pantalla", f"{acciones}")
+    revisar(acciones[0].get("por_que") == "El equipo volvio a las 14:07.",
+            "con el motivo que escribio Dexter")
+
+    crudo5 = str(r5.get_json())
+    revisar("SECRETO-123" not in crudo5 and "gps" not in crudo5
+            and "medicion_previa" not in crudo5 and "medicion_posterior" not in crudo5,
+            "y las mediciones CRUDAS no salen: son del sistema externo")
+
+    revisar(cliente_http.get(f"/conversaciones/{conv5}/equipo?tenant={T_B}")
+            .get_json().get("acciones") == [],
+            "otra empresa no ve las acciones de esta conversacion")
+
+    vacia = conversacion(ORG_A)
+    revisar(cliente_http.get(f"/conversaciones/{vacia}/equipo?tenant={T_A}")
+            .get_json().get("acciones") == [],
+            "una conversacion sin acciones devuelve vacio, no error")
 finally:
     admin.close()
 

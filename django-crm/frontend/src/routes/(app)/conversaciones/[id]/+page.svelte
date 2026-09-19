@@ -12,6 +12,7 @@
   import CasePanel from '$lib/conversaciones/context/CasePanel.svelte';
   import ActivityPanel from '$lib/conversaciones/context/ActivityPanel.svelte';
   import CustomerPanel from '$lib/conversaciones/context/CustomerPanel.svelte';
+  import NetworkPanel from '$lib/conversaciones/context/NetworkPanel.svelte';
   import RetentionToggle from '$lib/conversaciones/context/RetentionToggle.svelte';
   import TracePanel from '$lib/conversaciones/context/TracePanel.svelte';
   import DocumentationPanel from '$lib/conversaciones/context/DocumentationPanel.svelte';
@@ -61,6 +62,8 @@
   // El registro del relevo. Mismo patrón que el resto: untrack porque el
   // componente se remonta entero al cambiar de conversación ({#key abierta}).
   let relevo = $state(untrack(() => data.relevo ?? []));
+  // Lo que se le hizo al equipo del cliente, con su veredicto.
+  let accionesEquipo = $state(untrack(() => data.equipo ?? []));
 
   /**
    * Vuelve a leer el registro del relevo desde el motor.
@@ -1573,6 +1576,10 @@
   <!-- Después del caso y antes del proceso de la IA: primero qué es esta
        conversación, después cómo llegó acá, y recién entonces qué hizo el
        asistente dentro de ella. -->
+  <!-- Después de quién es el cliente y antes del relevo: qué se intentó
+       arreglar es contexto del caso, no del traspaso. -->
+  <NetworkPanel acciones={accionesEquipo} serial={conversacion?.equipo?.sn_onu ?? null} />
+
   <ActivityPanel eventos={relevo} />
 
   <RetentionToggle

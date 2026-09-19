@@ -4734,6 +4734,36 @@ def conversaciones_herramientas(id_conversacion):
     })
 
 
+@app.get("/conversaciones/<id_conversacion>/equipo")
+def conversaciones_equipo(id_conversacion):
+    """
+    Que se le hizo al equipo del cliente en esta conversacion, y si funciono.
+
+    Solo lectura y SIN las mediciones crudas: son respuestas del sistema
+    externo, y por esta puerta no salen -- mismo criterio que /herramientas,
+    que devuelve el resultado de cada llamada y nunca el dato consultado.
+
+    Esta ruta NO ejecuta nada. Reiniciar una ONU corta el servicio de alguien
+    y pasa por la cola de acciones propuestas (PRD 7.4, fail-closed en
+    codigo); exponer un boton que la ejecute desde aca seria abrir una segunda
+    puerta a la misma accion, sin la confirmacion que la primera exige.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+
+    try:
+        acciones = persistencia.acciones_sobre_el_equipo(tenant, id_conversacion)
+    except RuntimeError as e:
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 404
+    except Exception as e:
+        registrar("verificacion", "fallo al leer las acciones sobre el equipo",
+                  conversation_id=id_interno(id_conversacion), error=e)
+        return jsonify({"error": "No se pudo leer el registro de acciones."}), 500
+
+    return jsonify({"acciones": acciones})
+
+
 @app.get("/conversaciones/<id_conversacion>/relevo")
 def conversaciones_relevo(id_conversacion):
     """
