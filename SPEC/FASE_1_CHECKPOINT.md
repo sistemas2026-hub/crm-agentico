@@ -61,17 +61,17 @@ FASE 1.4B                            ✅ COMPLETA
 1.4C UI                              ✅ cerrada   d033e58
 FASE 1.4C                            ✅ COMPLETA
 1.5  Case + Tools                    ✅ cerrada   5f30f74
-1.6  Activity                 pendiente  ← el siguiente
-1.7  Customer                 pendiente
+1.6  Activity                        ✅ cerrada   4d73ea8
+1.7  Customer                 pendiente  ← el siguiente
 1.8  Network                  pendiente
 1.9  Branding                 pendiente
 ```
 
-Abierto al cerrar 1.5, y ninguno bloquea 1.6:
+Abierto al cerrar 1.6, y ninguno bloquea 1.7:
 
 ```
 G6 sobre messages poblada   🔒 gate de DESPLIEGUE, no de desarrollo
-smoke visual integral       ⏭ nada de 1.4C ni 1.5 se vio renderizado
+smoke visual integral       ⏭ nada de 1.4C, 1.5 ni 1.6 se vio renderizado
 D28                         ⏭ abierto para B4: la pantalla lo muestra,
                                no reconcilia CRM y Dexter
 hot path ③a/③c              ⏭ idempotencia del outbound automático
@@ -778,6 +778,36 @@ props 24 · binds 9 · callbacks 16 · lifecycle 0 · v2 1 (--v2-fs) · T6 0
 funcional desde cero — un `200` no es sinónimo de que la IA recuperó el control.
 
 
+## Fase 1.6 — COMPLETA
+
+```
+Activity   el registro del relevo, leído por primera vez   ✅  commit 4d73ea8
+```
+
+**Los eventos existían y nadie los leía.** `relevo_eventos` se escribe en cada
+transición desde B3.3 y no había vía de lectura: ni función, ni endpoint, ni
+panel. La pantalla decía **quién** lleva la conversación, nunca **cómo** llegó.
+
+Se agregó lectura —`eventos_de_relevo()` + `GET /conversaciones/<id>/relevo`,
+calcado de `/herramientas`—: solo lectura, sin migración, sin tocar ninguna
+transición. Probado contra PostgreSQL real que no cruza empresas y que no saca
+el texto del mensaje ni el teléfono del cliente.
+
+```
+no se infiere quién actuó    cuando no consta, se dice que no consta
+un tipo desconocido          se muestra, no se esconde: es un registro
+devolucion_fallida           se cuenta por su `resultado`, no por su nombre
+refresco                     por un hecho, no por el paso del tiempo
+```
+
+**El refresco usa identificador propio** (`app:relevo`), no el del layout: ese lo
+invalida el reloj de la lista cada pocos segundos, y colgar el page load de ahí
+recargaría el hilo entero, las herramientas y el ticket del CRM en cada vuelta.
+Se engancha en las seis transiciones que dejan evento, siempre **después** de que
+la petición respondió.
+
+Evidencia: [auditorias/1.6-ACTIVITY.md](auditorias/1.6-ACTIVITY.md).
+
 ## Fase 1.5 — COMPLETA
 
 ```
@@ -992,14 +1022,14 @@ voltajes, firmwares, OLT/slot/port, operadores, teléfonos o documentos inventad
 
 ## Baseline
 
-Medido el 19/09/2026 al cerrar 1.5:
+Medido el 19/09/2026 al cerrar 1.6:
 
 | Chequeo | Valor esperado |
 |---|---|
 | `svelte-check` | 2 errores en `(no-layout)/org/`; **0 en `conversaciones/`** |
 | warnings | **25** |
-| vitest | 17 failed \| 13 passed (30) · **63 failed** \| 367 passed (430) |
-| guardas `conversaciones/` | 106/106 — ordenamiento 20 · grabación 17 · formato 17 · devolución 13 · cableado T6 22 · contexto 17 |
+| vitest | 17 failed \| 14 passed (31) · **63 failed** \| 386 passed (449) |
+| guardas `conversaciones/` | 125/125 — ordenamiento 20 · grabación 17 · formato 17 · devolución 13 · cableado T6 22 · contexto 24 · actividad 12 |
 | D30, backend | 18/18 — **se reporta aparte, no se suma a vitest** |
 | backend con PostgreSQL real | 9 suites verdes (ver `DEXTER_BASELINES.md`) |
 

@@ -7,7 +7,7 @@ Si contradice a una conversación, gana este archivo.
 se actualiza: una sección que quedó vieja no es inocua — la siguiente sesión la
 lee como verdad. La historia detallada vive en `auditorias/`, no acá.
 
-Última actualización: 19/09/2026, al cerrar la Fase 1.5.
+Última actualización: 19/09/2026, al cerrar la Fase 1.6.
 
 ---
 
@@ -26,6 +26,8 @@ df7eb7c  checkpoint + esta memoria operativa
 d033e58  UI de T6
 fa6b91a  cierre de 1.4C + corrección de la lista de warnings
 5f30f74  1.5 Case + Tools
+178d749  cierre de 1.5
+4d73ea8  1.6 Activity
 ```
 
 ## WORKTREE
@@ -48,17 +50,18 @@ G9 recibo punta a punta       ✅ verde en producción 16/09/2026
 Fase 1.1–1.4B (visual)        ✅
 FASE 1.4C  backend + UI de T6 ✅
 FASE 1.5   Case + Tools       ✅
+FASE 1.6   Activity           ✅  el relevo se lee por primera vez
 ```
 
-## ABIERTO — nada de esto bloquea 1.6
+## ABIERTO — nada de esto bloquea 1.7
 
 ```
 G6 sobre messages poblada   🔒 gate de DESPLIEGUE. La migración aplica limpia
                                desde cero y el ledger la anota sola, pero no se
                                midió sobre una tabla con datos. No bloquea
                                desarrollo; sí bloquea cualquier push.
-smoke visual integral       ⏭ nada de 1.4C ni 1.5 se vio renderizado, en ningún
-                               viewport. Lo que hay es auditoría estática de CSS.
+smoke visual integral       ⏭ nada de 1.4C, 1.5 ni 1.6 se vio renderizado, en
+                               ningún viewport. Hay auditoría estática de CSS.
 D28                         ⏭ abierto para B4. La pantalla lo MUESTRA (1.5): el
                                dueño del CRM es informativo, el de Dexter manda.
                                No se reconcilian — no comparten identidad de
@@ -75,7 +78,7 @@ rust/moss                      otras pantallas, en la fase de cada una
 ## SIGUIENTE GATE
 
 ```
-Fase 1.6   Activity
+Fase 1.7   Customer
 ```
 
 Entrada: `SPEC/FASE_1_CHECKPOINT.md`.
