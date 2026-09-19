@@ -13,6 +13,14 @@
 
   let {
     conversacion,
+    /** Quién controla la conversación AHORA, ya resuelto por el motor
+        (`control_efectivo`, B3.3b) y derivado en la página. Llega como prop y
+        NO se recalcula acá: si este componente dedujera el control por su
+        cuenta, dos partes de la pantalla podrían decir cosas distintas. */
+    escalada = false,
+    /** El dueño durable de Dexter, o '' si no tiene. Nunca el del ticket del
+        CRM: eso es D28 y es otra cosa. */
+    asignadaA = '',
     /** Si la columna de contexto está abierta. La abre y la cierra la página:
         el mismo valor lo lee el `<aside>`, que no es hijo de este componente. */
     contextoAbierto = false,
@@ -55,6 +63,19 @@
   <div class="centro-quien">
     <h2>{conversacion.nombre_cliente || quien(conversacion.usuario_externo)}</h2>
     <div class="centro-meta">
+      <!-- QUIÉN LA LLEVA, arriba de todo y con palabra. Antes esto solo se
+           deducía del compositor bloqueado, así que alguien que miraba el
+           encabezado no sabía si estaba leyendo una conversación de la IA o
+           una suya. Es la misma pregunta que responde la cola, y conviene que
+           la respondan igual. -->
+      <span class="control {escalada ? 'control-humano' : 'control-ia'}">
+        <span class="control-punto"></span>
+        {#if escalada}
+          {asignadaA ? `Humano · ${asignadaA}` : 'Humano · sin asignar'}
+        {:else}
+          La atiende la IA
+        {/if}
+      </span>
       <Pill tone={canalTone(conversacion.canal)}>{canalLabel(conversacion.canal)}</Pill>
       <Pill tone={estadoTone(conversacion.estado)}>{conversacion.estado}</Pill>
     </div>
@@ -75,6 +96,44 @@
 </header>
 
 <style>
+  /* El distintivo de control, con la misma forma que los de la cola: mono,
+     versalita, punto y filete. Que se lean igual en las dos pantallas es
+     deliberado -- es la misma pregunta. */
+  .control {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 6px;
+    border: 1px solid;
+    border-radius: var(--bandeja-radio-sm);
+    font-family: var(--bandeja-mono);
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .control-punto {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: currentColor;
+    flex: none;
+  }
+
+  .control-ia {
+    color: var(--bandeja-ia);
+    background: var(--bandeja-ia-fondo);
+    border-color: var(--bandeja-ia-borde);
+  }
+
+  .control-humano {
+    color: var(--bandeja-humano);
+    background: var(--bandeja-humano-fondo);
+    border-color: var(--bandeja-humano-borde);
+  }
+
   .centro-top {
     flex: none;
     display: flex;

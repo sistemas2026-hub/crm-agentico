@@ -149,7 +149,15 @@
     {:else}
       <span class="aviso-atendida"><CircleCheck size={13} /> Resuelta</span>
     {/if}
-    {#if errorAtender}<span class="aviso-mal">{errorAtender}</span>{/if}
+    <!-- Un 409 de asignación NO es un error de quien apretó: es la realidad
+         -- otra persona la tomó primero, o la IA la controla. El mensaje ya
+         dice QUIÉN quedó (conflictoDeAsignacion en la página), así que se
+         presenta como información y no como falla: filete azul, sin rojo y
+         sin modal, igual que el diseño congelado.
+
+         Un rojo acá le diría al operador que hizo algo mal cuando lo único
+         que pasó es que llegó segundo. -->
+    {#if errorAtender}<span class="aviso-conflicto">{errorAtender}</span>{/if}
     {#if errorResolver}<span class="aviso-mal">{errorResolver}</span>{/if}
   </p>
   {#if reasignando && esAdmin && gobernada}
@@ -227,6 +235,21 @@
   .aviso-mal {
     flex: none;
     color: var(--bandeja-error);
+  }
+
+  /* El conflicto de asignación: informativo, no destructivo. Se distingue del
+     resto por el filete y no por el color del texto, para que se lea como una
+     nota al margen y no como una alarma. */
+  .aviso-conflicto {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-left: 3px solid var(--bandeja-humano);
+    background: var(--bandeja-humano-fondo);
+    border-radius: var(--bandeja-radio-sm);
+    color: var(--bandeja-texto);
+    font-size: 12px;
   }
 
 

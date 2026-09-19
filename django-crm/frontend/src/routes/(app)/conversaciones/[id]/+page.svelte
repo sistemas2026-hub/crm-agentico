@@ -322,6 +322,12 @@
         return 'La atiende la IA: para tomarla usá «Intervenir».';
       case 'no_abierta':
         return 'La conversación ya está cerrada.';
+      // Solo puede venir de Reasignar (transiciones.py::reasignar): una
+      // reasignación deja evento de auditoría y el legado no tiene eventos,
+      // así que primero hay que adoptarla -- eso es G8 y todavía no existe.
+      // Se dice lo que pasa y por qué, sin sugerir que mirarla la adopte.
+      case 'legado_sin_relevo':
+        return 'Es anterior al relevo: no se puede reasignar hasta adoptarla.';
       default:
         return datos?.error || 'No se pudo guardar.';
     }
@@ -1355,6 +1361,8 @@
 <section class="centro">
   <ConversationHeader
     {conversacion}
+    {escalada}
+    {asignadaA}
     {contextoAbierto}
     onAlternarContexto={() => (contextoAbierto = !contextoAbierto)}
   />
