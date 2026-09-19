@@ -18,7 +18,7 @@
    * porque está físicamente en este bloque; su lugar se reconsidera en la fase
    * visual, no ahora.
    */
-  import { TriangleAlert, CircleCheck } from '@lucide/svelte';
+  import { TriangleAlert, CircleCheck, UserCheck } from '@lucide/svelte';
 
   let {
     conversacion,
@@ -40,8 +40,19 @@
   const motivoLabel = (/** @type {string} */ m) => (m ? m.replaceAll('_', ' ') : '');
 </script>
 
-  <p class="aviso">
-    <TriangleAlert size={14} />
+  <!-- El icono dice QUÉ tipo de situación es, y no era así: el triángulo de
+       alerta salía en los cuatro estados, incluido "asignada a mí", que no es
+       una alerta sino trabajo normal en curso. Una alarma que está siempre
+       encendida deja de significar algo.
+
+       Alerta sólo cuando falta alguien; cuando ya hay dueño, la señal es que
+       está en manos de una persona. -->
+  <p class="aviso" class:aviso-sin-dueno={escalada && !atendida && !esMia && !asignadaA}>
+    {#if escalada && !atendida && !esMia && !asignadaA}
+      <TriangleAlert size={14} />
+    {:else}
+      <UserCheck size={14} />
+    {/if}
     <!-- "IA pausada" seria falso y no es un matiz de redaccion: el asistente
          SIGUE leyendo y procesando cada mensaje mientras espera -- de eso
          depende que un "listo, gracias" del cliente cierre el caso solo.
@@ -75,8 +86,8 @@
          obligaria a mirar cual esta activo para saber quien lo tiene. -->
     {#if escalada && !atendida && conversacion.estado !== 'cerrada'}
       {#if esMia}
-        <span class="aviso-tomada">
-          <CircleCheck size={13} /> Asignada a mí
+        <span class="duenio duenio-mio">
+          <span class="duenio-punto"></span>Asignada a mí
         </span>
         <button
           type="button"
@@ -91,8 +102,8 @@
       {:else if asignadaA}
         <!-- De otra persona: no se ofrece soltar ni tomar. Pasarla es
              reasignar, y eso es de un administrador. -->
-        <span class="aviso-tomada" title="La tiene {asignadaA}">
-          <CircleCheck size={13} /> En atención: {asignadaA}
+        <span class="duenio" title="La tiene {asignadaA}">
+          <span class="duenio-punto"></span>{asignadaA}
         </span>
       {:else}
         <button
@@ -232,6 +243,54 @@
      sigue en +page.svelte, que todavía la necesita. Consolidar en Fase 1
      sin cambiar apariencia. */
 
+  /* Sin dueño: lo único de los cuatro estados que pide que alguien haga algo.
+     Se marca con el filete, no tiñendo el texto -- el resto de la línea tiene
+     que seguir leyéndose igual de bien. */
+  /* QUIÉN LA TIENE. Los dos casos --mía y de otra persona-- comparten forma
+     porque son el mismo concepto: sólo cambia a quién nombran. Antes se veían
+     distintos y eso hacía pensar que eran estados de distinta naturaleza.
+
+     Es el mismo distintivo que usa el pie de la fila en la cola: la misma
+     pregunta, la misma respuesta visual. */
+  .duenio {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-family: var(--bandeja-mono);
+    font-size: 10.5px;
+    font-weight: 600;
+    color: var(--bandeja-texto-2);
+    white-space: nowrap;
+    /* Un nombre largo se recorta en vez de empujar los botones fuera de la
+       franja. El `title` de la etiqueta sigue teniendo el nombre completo, así
+       que no se pierde: sólo deja de competir por el ancho.
+       `min-width: 0` es obligatorio -- sin él un hijo flex no achica por
+       debajo de su contenido y el ellipsis no llega a aplicarse. */
+    min-width: 0;
+    max-width: 22ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Cuando es mía va en azul: es la única de las dos sobre la que este
+     operador puede actuar. */
+  .duenio-mio {
+    color: var(--bandeja-humano);
+  }
+
+  .duenio-punto {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: currentColor;
+    flex: none;
+  }
+
+  .aviso-sin-dueno {
+    border-left: 3px solid var(--bandeja-aviso);
+  }
+
   .aviso-mal {
     flex: none;
     color: var(--bandeja-error);
@@ -347,15 +406,6 @@
   }
 
 
-  .aviso-tomada {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    font-size: 11.5px;
-    font-weight: 650;
-    color: var(--bandeja-ok);
-    white-space: nowrap;
-  }
 
 
   .aviso-caso {
