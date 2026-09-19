@@ -20,6 +20,8 @@ Dexter no tiene, **no se inventa**.
 cdeb69e  1.1 — foundation visual
 ade3bdf  checkpoint Fase 1
 9875e34  1.2 — cola Stitch
+8910a88  checkpoint con 1.2
+4a701cd  1.3A — D30, el hilo proyecta origen y autor
 ```
 
 Nada de esto está pusheado.
@@ -29,7 +31,8 @@ Nada de esto está pusheado.
 ```
 1.1  Foundation visual        ✅ cerrada   cdeb69e
 1.2  Cola Stitch              ✅ cerrada   9875e34
-1.3  Thread / autores         ← el próximo
+1.3A D30 · read-side          ✅ cerrada   4a701cd
+1.3B Thread / autores         ← el próximo, ya desbloqueado
 1.4  Header · Handoff · Composer   pendiente
 1.5  Case + Tools             pendiente
 1.6  Activity                 pendiente
@@ -192,6 +195,93 @@ QueueEmptyState     v2:  0    bandeja:  0
 
 **El puente sigue en pie.** Las 17 de `ConversationRow` son los semánticos `ember/clay/rust/moss`, y
 se migran mirando cada consumidor — no por parecido de color.
+
+
+## 1.3A — D30, el hilo no sabía quién había escrito
+
+La auditoría previa de 1.3 encontró un bloqueo **antes de tocar un píxel**, y parar fue lo correcto.
+
+### La causa
+
+`mensajes_de()` —la única función que sirve el hilo a la pantalla— devolvía `rol` pero **no `origen`
+ni `autor_nombre`**, aunque las dos columnas existen y son durables desde B2.
+
+`rol` no alcanza, porque el contrato admite tres orígenes bajo el mismo:
+
+```
+assistant  →  {ia, sistema, humano}
+```
+
+Así que **una respuesta escrita por una persona llegaba indistinguible de una de la IA**, y
+`burbujaClase()` —que clasifica sólo por `rol`— las dibujaba iguales. Las filas históricas, también.
+
+La interfaz venía afirmando «esto lo dijo Dexter» sobre mensajes que no sabía quién había escrito.
+
+### La matriz durable
+
+```
+rol=user       origen=cliente   →  Cliente
+rol=assistant  origen=ia        →  Dexter IA
+rol=assistant  origen=humano    →  Humano, con autor_nombre cuando exista
+rol=assistant  origen=sistema   →  Sistema
+rol=nota       origen=humano    →  Nota interna, con autor_nombre
+               origen=NULL      →  histórico sin atribución verificable
+```
+
+**`origen` NULL no se rellena**: ni por rol, ni por contenido, ni por quién controla hoy la
+conversación. Son las filas anteriores al registro de origen, y afirmar quién escribió algo que no
+sabemos es peor que no decirlo.
+
+### El cambio y la cadena
+
+Una línea de SQL: `m.origen, m.autor_nombre`. **Sin migración, sin backfill, sin escritura.**
+
+```
+mensajes_de() → dict(f) → jsonify(resultado) → +page.server.js → data.mensajes → MessageThread
+```
+
+Todas las capas posteriores son **pass-through**: ninguna elimina, renombra ni normaliza. Por eso dos
+columnas bastaron y no hizo falta tocar ningún loader.
+
+### Las guardas, y lo que cada una puede
+
+`tests/test_origen_en_el_hilo.py` — **18/18, sin base.** Sustituye `db.sesion` por un doble que
+devuelve filas preparadas.
+
+Cubre los cinco orígenes, el NULL histórico, que **dos filas con el mismo `rol` queden distinguidas
+por su origen**, y que `autor_nombre` ausente no rompa nada.
+
+**Limitación honesta del harness: el doble no ejecuta expresiones SQL.** Por eso hay dos clases de
+aserción, y **ninguna demuestra lo de la otra**:
+
+```
+sobre las filas     el NULL llega como None y el dato viaja
+sobre el SELECT     no hay coalesce ni case/when sobre m.origen
+```
+
+Se vio en las mutaciones:
+
+```
+coalesce(m.origen,'ia')  →  la atrapó la ESTRUCTURAL; la comportamental siguió
+                            pasando, porque el doble no evalúa el coalesce
+quitar m.autor_nombre    →  la atrapó la del SELECT
+```
+
+**Esto no es una prueba de integración contra PostgreSQL.** Lo que necesita un motor de verdad —el
+CHECK de la columna— ya vive en `tests/test_origen_mensajes_base.py`.
+
+### Las diferencias, con precisión
+
+```
+read-side   la respuesta de mensajes incorpora dos campos durables
+escritura   ninguna
+visual      ninguna todavía: el dato llega y nadie lo lee aún
+```
+
+**No decir «diferencias funcionales: ninguna»**: el contrato de la API sí se enriqueció.
+
+`autor_nombre` viaja sólo en la respuesta autenticada que la UI ya consume. **No se agregó a logs,
+trazas, excepciones ni telemetría** (D19/D20/D23).
 
 
 ## El puente `--v2-*` — transitorio, y con un orden para retirarlo
