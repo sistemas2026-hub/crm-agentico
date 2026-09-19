@@ -33,6 +33,8 @@ f5b657a  checkpoint con 1.4B.2a
 a916410  checkpoint con 1.4B.2b-i
 8dafad4  1.4B.2b-ii(a) — ownership del handoff
 fb93ddf  corrige los comentarios de .aviso
+9c4ed16  checkpoint con ii(a)
+95f13ee  1.4B.2b-ii(b) — ADMIN reasigna
 ```
 
 Nada de esto está pusheado.
@@ -49,8 +51,8 @@ Nada de esto está pusheado.
 1.4B.2a WA cerrada + plantillas ✅ cerrada   cfc82c6
 1.4B.2b-i  IA controla + 409    ✅ cerrada   16ab44e
 1.4B.2b-ii(a) ownership · 3 estados  ✅ cerrada   8dafad4
-1.4B.2b-ii(b) ADMIN reasigna         ← el próximo
-1.4B.2b-iii   WA abierta · por cerrar   pendiente
+1.4B.2b-ii(b) ADMIN reasigna         ✅ cerrada   95f13ee
+1.4B.2b-iii   WA abierta · por cerrar   ← lo último de 1.4B
    **1.4B.2 NO está cerrada.**
 1.4C  T6 · Return to AI        🔒 pendiente, fuera de 1.4B
 1.5  Case + Tools             pendiente
@@ -628,6 +630,56 @@ el reset de prueba, que era su único consumidor. Los dos comentarios que decía
 
 **`ADMIN reasigna` NO está cerrado**: el botón funciona, pero su diálogo no se comparó ni compuso
 contra la referencia. Eso es ii(b).
+
+
+### 1.4B.2b-ii(b) — ADMIN reasigna, y una inconsistencia propia
+
+El diálogo estaba bien. **Lo que había era una inconsistencia creada en 1.4B.2b-i:** allí convertí el
+409 de Tomar/Soltar en banner informativo, pero `reasignar()` **usa la misma
+`conflictoDeAsignacion()`** y su error seguía en rojo.
+
+```
+Tomar/Soltar + 409   «La tomó Ana antes.»        azul
+Reasignar    + 409   «Es anterior al relevo…»    ROJO
+```
+
+Mismo mensaje, mismo origen, dos colores. **Arreglar sólo la mitad fue peor que no haber empezado.**
+La regla queda:
+
+```
+conflicto de ownership  →  banner informativo
+error operacional real  →  error
+```
+
+Por eso **`.aviso-mal` sigue con consumidor y no se limpia**: `errorResolver` —cerrar la conversación
+y que falle— es un error de verdad.
+
+**El motivo ahora dice qué pasa con él:**
+
+```
+Motivo (obligatorio)
+Queda registrado en la auditoría del caso
+```
+
+No es un detalle legal: **cambia cómo se escribe**. «pasa a Ana» y «Ana tiene el historial del caso
+con la cooperativa» cuestan lo mismo, y en tres semanas sólo uno sirve. C16 lo persiste con actor,
+anterior, nuevo y versión.
+
+**Lo que ya estaba bien:** condición `esAdmin && gobernada && operadores.length`, operadores reales,
+`required` en el motivo, Cancelar sin callback ni efecto, Confirmar que espera respuesta, y
+`disabled` + `aria-busy` contra el doble envío.
+
+### La divergencia con Stitch, deliberada
+
+```
+Stitch        modal + scrim + sombra («el único elemento del sistema con sombra»)
+Dexter 1.4B   panel inline
+```
+
+**ADAPTACIÓN POR CONTRATO, no implementación incompleta.** El modal exigiría comportamiento nuevo
+—focus trap, `Escape`, retorno de foco, bloqueo de scroll— y eso ya no es composición. Además el
+panel inline deja el hilo visible mientras se decide a quién pasar el caso, que es justo cuando hace
+falta mirarlo.
 
 
 ## El puente `--v2-*` — transitorio, y con un orden para retirarlo
