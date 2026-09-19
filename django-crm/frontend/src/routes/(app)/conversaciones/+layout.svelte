@@ -37,8 +37,7 @@
   import QueueTabs from '$lib/conversaciones/cola/QueueTabs.svelte';
   import QueueSearch from '$lib/conversaciones/cola/QueueSearch.svelte';
   import QueueFilters from '$lib/conversaciones/cola/QueueFilters.svelte';
-  import QueueEmptyState from '$lib/conversaciones/cola/QueueEmptyState.svelte';
-  import ConversationRow from '$lib/conversaciones/cola/ConversationRow.svelte';
+  import ConversationList from '$lib/conversaciones/cola/ConversationList.svelte';
 
   /** @type {{ data: any, children: import('svelte').Snippet }} */
   let { data, children } = $props();
@@ -294,19 +293,10 @@
       />
     {/if}
 
-    <div class="lista">
-      {#if data.error}
-        <QueueEmptyState variante="error" error={data.error} />
-      {:else if conversaciones.length === 0}
-        <QueueEmptyState variante="sin-datos" />
-      {:else if visibles.length === 0}
-        <QueueEmptyState variante="sin-coincidencias" {busqueda} />
-      {:else}
-        {#each visibles as c (c.id)}
-          <ConversationRow {c} {abierta} {ahora} {tramoEspera} {motivoLabel} />
-        {/each}
-      {/if}
-    </div>
+    <ConversationList
+      {visibles} {conversaciones} error={data.error} {busqueda}
+      {abierta} {ahora} {tramoEspera} {motivoLabel}
+    />
   </aside>
 
   <!-- 'abierta' (el id de la URL) como key: [id]/+page.svelte inicializa su
@@ -348,12 +338,6 @@
   }
 
   /* ── filas ──────────────────────────────────────────────────────────── */
-  .lista {
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-    padding: 4px 6px 10px;
-  }
   /* El unico numero de la cabecera que pide una reaccion. */
   .critico {
     color: var(--v2-rust);
