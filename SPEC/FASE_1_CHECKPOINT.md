@@ -26,6 +26,8 @@ ade3bdf  checkpoint Fase 1
 610a19b  1.3B — autores en el hilo
 9ae12f5  checkpoint con 1.3B
 2a2497d  1.4B.1 — tokens + retiro del reset de prueba
+2383224  checkpoint con 1.4B.1
+cfc82c6  1.4B.2a — plantillas en la ventana cerrada
 ```
 
 Nada de esto está pusheado.
@@ -39,7 +41,9 @@ Nada de esto está pusheado.
 1.3B Thread / autores         ✅ cerrada   610a19b
 1.4A · 1.4A.2  auditorías      ✅ cerradas
 1.4B.1 tokens + reset          ✅ cerrada   2a2497d
-1.4B.2 composición visual      ← el próximo
+1.4B.2a WA cerrada + plantillas ✅ cerrada   cfc82c6
+1.4B.2b Header · Handoff · 8 estados  ← el próximo
+   **1.4B.2 NO está cerrada.**
 1.4C  T6 · Return to AI        🔒 pendiente, fuera de 1.4B
 1.5  Case + Tools             pendiente
 1.6  Activity                 pendiente
@@ -480,6 +484,56 @@ real de ventana cerrada con plantillas (`plantillas`, `plantillaElegida`, `valor
 
 Y comparar **estado por estado** contra su referencia: IA controla · humano sin dueño · asignada a mí
 · asignada a otro · ADMIN reasigna · 409 tras una carrera.
+
+
+### 1.4B.2a — la ventana cerrada, y una predicción que se cumple
+
+El problema era de **composición, no de capacidad**. El aviso decía «hay que usar una plantilla
+aprobada» y el botón para elegirla estaba en la barra de abajo:
+
+```
+[WhatsApp · ventana inactiva]   Ventana cerrada · …   [Elegir plantilla]
+```
+
+Si el aviso nombra la salida, la puerta va ahí mismo. No se repite cuando el selector ya está
+abierto.
+
+**`.ventana-cerrada button` recuperó consumidor.** Figuraba como regla muerta desde 0A.1, con esta
+nota en el checkpoint de la Fase 0:
+
+> «La pantalla canónica de Stitch sí tiene ahí un botón *Choose Template*, así que la Fase 4
+> probablemente lo reviva.»
+
+```
+pnpm check   26 → 25 warnings TOTALES
+delta:       .ventana-cerrada button dejó de estar sin consumidor
+```
+
+**25 es el total que reporta `pnpm check`**, no «quedan dos». Las dos deudas conocidas de
+`conversaciones/+layout.svelte` —`.marca` y `.marca::before`— siguen ahí, pero no son los únicos
+warnings del proyecto.
+
+**Cero lógica nueva:** se reutilizan `plantillas`, `plantillaElegida`, `valoresPlantilla` y
+`enviandoPlantilla`, que ya estaban entre las 24 props.
+
+**Tres cosas del diseño que NO se copiaron, y ninguna es funcionalidad faltante:**
+
+```
+«1 WhatsApp HSM billing credit»    Dexter no sabe de créditos de Meta
+«Variable {{1}} (Customer Name)»   Meta no da etiquetas semánticas; Dexter sabe
+                                   CUÁNTAS variables hay, no qué significan
+«Meta Approved» por fila           el motor ya filtra a APPROVED: repetirlo N veces
+```
+
+### 1.4B.2b — los ocho estados que faltan
+
+```
+IA controla · humano sin asignar · asignada a mí · asignada a otro
+ADMIN reasigna · 409 · WA abierta · WA por cerrar
+```
+
+El Header y el banner de Handoff **no se tocaron** en 1.4B.2a. Cada estado se demuestra contra su
+referencia, uno por uno — «se parece» no es evidencia.
 
 
 ## El puente `--v2-*` — transitorio, y con un orden para retirarlo
