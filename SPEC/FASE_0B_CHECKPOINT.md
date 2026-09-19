@@ -23,6 +23,8 @@ dc587a3  0B.1 — QueueTabs + QueueSearch
 76f54f9  0B.2 — QueueFilters
 5e913e3  checkpoint con 0B.2
 5df9c57  0B.3 — QueueEmptyState
+28d2f7e  checkpoint con 0B.3
+b340071  0B.4 — ConversationRow
 ```
 
 Nada de esto está pusheado.
@@ -34,12 +36,12 @@ Nada de esto está pusheado.
 0B.1  QueueTabs + QueueSearch   ✅ cerrado   dc587a3
 0B.2  QueueFilters              ✅ cerrado   76f54f9
 0B.3  QueueEmptyState           ✅ cerrado   5df9c57
-0B.4A Auditoría de Row          ← el próximo, SIN mover una línea
-0B.4B ConversationRow           pendiente — sólo si se aprueba la frontera
-0B.5  ConversationList          pendiente
+0B.4A Auditoría de Row          ✅ cerrada
+0B.4B ConversationRow           ✅ cerrado   b340071
+0B.5  ConversationList          ← el último
 ```
 
-`+layout.svelte`: 1193 → 1093 → 949 → 813 → **790 líneas**.
+`+layout.svelte`: 1193 → 1093 → 949 → 813 → 790 → **395 líneas**.
 
 ```
 lib/conversaciones/cola/
@@ -49,7 +51,11 @@ lib/conversaciones/cola/
   QueueSearch.svelte       77   label.buscar + 5 reglas
   QueueFilters.svelte     210   .controles + .motivos + 10 reglas
   QueueEmptyState.svelte   62   los tres huecos + 1 regla
+  ConversationRow.svelte  478   el <a class="fila"> entero + 27 reglas
 ```
+
+**478 líneas no son motivo para volver a partirlo.** El tamaño no es el criterio; la frontera sí. No
+fragmentarlo antes del rediseño salvo necesidad funcional real.
 
 ### Decisiones de frontera tomadas en 0B.1
 
@@ -166,6 +172,79 @@ irse el bloque, dejó de usarlo nadie. La regla `.hueco` salió por lo mismo.
 Ahí es donde la tercera guarda hizo trabajo real: `pnpm check` no avisa de imports ni constantes que
 se quedan sin uso.
 
+### Decisiones de frontera tomadas en 0B.4
+
+**La interfaz, y por qué `c` va entero:**
+
+```svelte
+<ConversationRow {c} {abierta} {ahora} {tramoEspera} {motivoLabel} />
+```
+
+La fila consume quince campos de la conversación. Convertirlos en quince props sería inventar una API
+en una fase que promete equivalencia, y cada campo nuevo obligaría a tocar dos archivos. **No
+desarmar `c` durante la Fase 0.**
+
+**El reloj sigue siendo del layout** — un solo `setInterval(20 s)`. `ConversationRow` no crea timers.
+
+**`ahora` cruza la frontera, igual que `ultimoVisto` en 0A.1**, y con el mismo peligro: si la prop no
+quedara conectada reactivamente, el punto «Activa» se congelaría **en silencio** — no es un error de
+tipos ni un warning de CSS, y ninguna guarda lo vería. Se verificó **compilando el componente**:
+
+```js
+const estaActiva = (c) => … ahora() - new Date(…) < …
+var d_10 = $.derived(() => estaActiva($$props.c));
+$.if(node_12, …)
+```
+
+`ahora()` **con paréntesis** es un getter de señal: la lectura se rastrea, y la llamada vive dentro de
+un `$.derived` envuelto en `$.if`. Al avanzar el reloj, el bloque se reevalúa.
+
+**Helpers que viajaron** (exclusivos de la fila): `quien`, `esTelefono`, `esUuid`, `estaActiva`,
+`MINUTOS_ACTIVA`, `canalLabel`, `CANAL_LABEL`, `etiquetaLabel`, `AUTOR`.
+
+**Helpers que se quedaron**, porque tienen consumidores fuera: `tramoEspera` (el contador de críticas
+del encabezado) y `motivoLabel` (también `QueueFilters`). Van como props, sin duplicar.
+`pendiente` y `resuelta` se importan de `estado.js` en los dos lados.
+
+La duplicación de `quien` / `esTelefono` / `esUuid` con `ConversationHeader` **sigue sin resolverse a
+propósito**.
+
+**Cinco imports quedaron huérfanos y salieron:** `Avatar`, `Pill`, `shortAge`, `Phone`, `User`. Otra
+vez la tercera guarda: `pnpm check` no los reporta, y `Pill` daba dos hits de los cuales uno era un
+comentario de CSS.
+
+**La fila no decide nada:**
+
+```
+ConversationRow   0 fetch · 0 invalidate · 0 setInterval · 0 setTimeout
+                  0 $effect · 0 onMount · 0 onDestroy · 0 goto · 0 onclick
+```
+
+No muestra dueño (D28), `es_legado` sólo pinta una clase y no adopta nada (G8), `banda` /
+`esperando_desde` / `motivo_cola` se representan pero no se recalculan (B3.5), y `canal_operativo`
+no entra: sigue siendo criterio de `visibles`.
+
+**27 reglas de CSS**, con aserción explícita en el script — aborta si no son exactamente 27, si
+alguna trae selectores ajenos o si una media query toca la fila.
+
+Las **cinco reglas de `.activa`** viajaron juntas y conservan sus dos significados:
+
+```
+.fila.activa · .fila.pide.activa · .fila.activa .ident   → la conversación abierta
+.activa · .activa::before                                 → el punto de «se movió recién»
+```
+
+El scope las mantiene separadas del resto, pero **la colisión de nombres es real y ahora convive en
+un solo archivo**. No renombrar durante 0B.
+
+`.motivo-fila` está en `ConversationRow`; `.motivo`, en `QueueFilters`. Las tres clases
+`espera-fresco` / `espera-viejo` / `espera-critico` son **las tres alcanzables** y siguen asociadas a
+`espera-{tramoEspera(c)}`.
+
+**La redundancia de `.avance` se movió tal cual**: hay un guard exterior `{#if c.resumen}` y otro
+interior `{#if (c.resumen ?? '').trim()}` cuya rama es inalcanzable. Preexistente, **no corregida a
+propósito**.
+
 ## Lo que la auditoría previa encontró, y hay que tener presente
 
 **La cola no hace un solo `fetch`.** Todo entra por `+layout.server.js`, que declara
@@ -259,10 +338,24 @@ diferencia de `.aviso` en 0A.3.
 Un inventario por prefijo se habría llevado `.motivo-fila` con las demás — es el mismo fallo de
 `.proceso, .docs` en 0A.4. El patrón que hay que usar es `\.motivo(?![\w-])`.
 
-**No alcanza con mirar el delta de warnings.** Y ojo con el efecto secundario: cuando `.cuando` viaje
-a `ConversationRow`, la interpolación se va con él. El layout **recupera** la vista y aparecerán
-warnings de CSS muerto preexistente — eso **no será una regresión** —, mientras el componente que la
-reciba hereda la ceguera.
+**No alcanza con mirar el delta de warnings.**
+
+**Lo anticipado ocurrió, y exactamente como se previó.** En 0B.4 la interpolación viajó a
+`ConversationRow`, el layout **recuperó** la detección, y aparecieron dos warnings:
+
+```
+24  →  26
++layout.svelte  .marca
++layout.svelte  .marca::before
+```
+
+**Ninguno más.** Verificado por archivo: el layout pasó de 0 a 2, `ConversationRow` no aparece en la
+lista, y ningún otro archivo cambió su conteo. Son CSS muerto preexistente que el punto ciego
+tapaba — **no una regresión**. No se limpian.
+
+**El punto ciego ahora lo hereda `ConversationRow`:** allá `svelte-check` tampoco detecta CSS muerto,
+porque la interpolación vive en ese archivo. El inventario bidireccional sigue siendo obligatorio
+dentro de ese componente, y la ausencia de warnings ahí **no prueba nada**.
 
 **`.activa` significa dos cosas:** `.fila.activa` es la conversación seleccionada; `<span
 class="activa">` es el punto de actividad reciente. Mismo nombre, dos propósitos, y viajan juntos.
@@ -338,7 +431,7 @@ los mockups responsive de Stitch.
 | `ordenElegido` | **congelado, pero NO es estado muerto** — la auditoría previa lo clasificó mal y 0B.2 lo corrigió. `onchange` lo pone en `true` al elegir un orden a mano, y eso evita que `irA()` lo pise. No eliminar, no reinterpretar |
 | `peso()` | el respaldo pre-D18, vivo a propósito. Ver arriba |
 | `tramoEspera` | el texto de la fila muestra `esperando_desde` (B3.5) pero el **color** sale de `escalada_en ?? actualizado_en`. Pueden discrepar. Preexistente |
-| `.marca` · `.marca::before` | CSS muerto, invisible para `pnpm check` por lo de arriba |
+| `.marca` · `.marca::before` | CSS muerto. Estuvo invisible hasta 0B.4; **desde entonces son los dos warnings del baseline**. Siguen sin limpiarse |
 | `.activa` | dos significados |
 | `quien` · `esTelefono` · `esUuid` | duplicados con `ConversationHeader` desde 0A.2 |
 
@@ -351,13 +444,18 @@ Fase 0 preferimos una duplicación conocida a un diff más ancho.
 | Chequeo | Valor esperado |
 |---|---|
 | `pnpm check` | 2 errores, ambos en `(no-layout)/org/`; **0 en `conversaciones/`** |
-| warnings | **24** |
+| warnings, hasta 0B.3 | 24 |
+| warnings, **desde 0B.4** | **26** — los dos nuevos son `.marca` y `.marca::before` en el layout |
 | vitest | 17 failed \| 9 passed (26) · **63 failed** \| 298 passed (361) |
 | guardas 0B.0 | 20/20 |
 | guardas D29 | 17/17 |
 
 Lo que se compara es el número de **fallos: 63**, y los mismos 17 archivos. Los pasados suben al
 agregar guardas y eso es lo esperado.
+
+**26 es el baseline documentado desde 0B.4**, mientras esas dos deudas sigan ahí. No convertirlo en
+permiso genérico: **los warnings se identifican por nombre**. Un tercero, o cualquier otro selector
+distinto de esos dos, es una regresión hasta que se demuestre lo contrario.
 
 **Mutaciones corridas en 0B.0**, las dos detectadas y **revertidas**:
 
@@ -374,36 +472,20 @@ comparación por píxel no ejecutada.
 Los dos `$effect`, `visibles` y toda la cadena de filtrado, el import de `ordenar`, `.mesa`,
 `.columna`, `.lista`, el media query, y el `{#key abierta}`.
 
-## 0B.4 va en dos pasos, y el primero no mueve nada
+## Partir 0B.4 en dos funcionó, y conviene recordarlo
 
-**`ConversationRow` es el único corte sensible que queda**, porque en `a.fila` confluyen cosas que
-en los cuatro anteriores estaban separadas:
-
-```
-ahora                        estado del layout que cruza hacia la fila (estaActiva)
-tramoEspera                  y con él horasEsperando, que ya vive en ordenamiento.js
-quien · esTelefono · esUuid  duplicados con ConversationHeader — NO unificar
-canalLabel · etiquetaLabel   rótulos
-motivoLabel                  ya compartido con QueueFilters
-AUTOR
-espera-{tramoEspera(c)}      la clase interpolada
-.activa                      con sus dos significados
-.motivo-fila                 la vecina de .motivo, que NO es la misma
-href + aria-current          navegación y selección
-```
-
-**Lo esperado, escrito por adelantado para que no se lea como regresión:** cuando la clase
-interpolada salga del layout, **el layout recupera la detección de CSS muerto** y van a aparecer
-warnings de `.marca` y `.marca::before`, que llevan muertas desde antes de empezar. Eso **no es una
-regresión de 0B.4** — es el punto ciego levantándose. Identificar cada warning nuevo uno por uno
-antes de clasificarlo.
-
-Por eso 0B.4 se parte:
+`ConversationRow` era el único corte sensible, porque en `a.fila` confluía lo que en los cuatro
+anteriores estaba separado: `ahora` cruzando la frontera, nueve helpers, la clase interpolada,
+`.activa` con dos sentidos, `.motivo-fila` vecina de `.motivo`, y la navegación.
 
 ```
-0B.4A   auditoría, sin mover una línea
-0B.4B   extracción, sólo si se aprueba la frontera
+0B.4A   auditoría, sin mover una línea    → predijo los dos warnings, y acertó
+0B.4B   extracción                        → mecánica, sin bloqueos
 ```
+
+**La auditoría previa se pagó sola**: entró sabiendo cuántas reglas mover (27, con aserción), qué
+helpers tenían consumidores ocultos, y exactamente qué iba a pasar con los warnings. Para 0B.5 el
+corte es chico, pero el orden —mirar antes de mover— es el que quedó demostrado.
 
 Cuando 0B cierre, se termina la preparación estructural y **la Fase 1 empieza a cambiar visualmente
 la Bandeja**. Hasta entonces: nada de Tailwind, tokens, colores, badges, textos ni estados nuevos.
