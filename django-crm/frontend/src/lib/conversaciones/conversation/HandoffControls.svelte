@@ -200,9 +200,11 @@
   {/if}
 
 <style>
-  /* Duplicación temporal por CSS scoped durante Fase 0A: la misma regla
-     sigue en +page.svelte, que todavía la necesita. Consolidar en Fase 1
-     sin cambiar apariencia. */
+  /* Nació duplicada en 0A.3: el CSS de Svelte es por componente, así que al
+     mudar este banner hubo que copiar la regla porque `+page.svelte` también
+     la usaba. Esa copia del padre se fue en 1.4B.1, cuando el retiro del reset
+     de prueba eliminó su único consumidor -- así que la duplicación quedó
+     cerrada y ésta es ahora la única. */
 
   .aviso {
     flex-wrap: wrap;
@@ -239,9 +241,11 @@
     color: var(--bandeja-ok);
     font-weight: 600;
   }
-  /* Duplicación temporal por CSS scoped durante Fase 0A: la misma regla
-     sigue en +page.svelte, que todavía la necesita. Consolidar en Fase 1
-     sin cambiar apariencia. */
+  /* Nació duplicada en 0A.3: el CSS de Svelte es por componente, así que al
+     mudar este banner hubo que copiar la regla porque `+page.svelte` también
+     la usaba. Esa copia del padre se fue en 1.4B.1, cuando el retiro del reset
+     de prueba eliminó su único consumidor -- así que la duplicación quedó
+     cerrada y ésta es ahora la única. */
 
   /* Sin dueño: lo único de los cuatro estados que pide que alguien haga algo.
      Se marca con el filete, no tiñendo el texto -- el resto de la línea tiene
