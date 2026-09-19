@@ -28,6 +28,8 @@ ade3bdf  checkpoint Fase 1
 2a2497d  1.4B.1 — tokens + retiro del reset de prueba
 2383224  checkpoint con 1.4B.1
 cfc82c6  1.4B.2a — plantillas en la ventana cerrada
+f5b657a  checkpoint con 1.4B.2a
+16ab44e  1.4B.2b-i — control en el Header + conflictos 409
 ```
 
 Nada de esto está pusheado.
@@ -42,7 +44,8 @@ Nada de esto está pusheado.
 1.4A · 1.4A.2  auditorías      ✅ cerradas
 1.4B.1 tokens + reset          ✅ cerrada   2a2497d
 1.4B.2a WA cerrada + plantillas ✅ cerrada   cfc82c6
-1.4B.2b Header · Handoff · 8 estados  ← el próximo
+1.4B.2b-i  IA controla + 409    ✅ cerrada   16ab44e
+1.4B.2b-ii seis estados         ← el próximo
    **1.4B.2 NO está cerrada.**
 1.4C  T6 · Return to AI        🔒 pendiente, fuera de 1.4B
 1.5  Case + Tools             pendiente
@@ -534,6 +537,53 @@ ADMIN reasigna · 409 · WA abierta · WA por cerrar
 
 El Header y el banner de Handoff **no se tocaron** en 1.4B.2a. Cada estado se demuestra contra su
 referencia, uno por uno — «se parece» no es evidencia.
+
+
+### 1.4B.2b-i — quién controla, y el 409 que no era un error
+
+**El Header no decía quién lleva la conversación.** Que la atendiera la IA sólo se deducía del
+compositor bloqueado.
+
+```
+[● LA ATIENDE LA IA]  violeta      [● HUMANO · Ana Pérez]  azul
+                                   [● HUMANO · SIN ASIGNAR]
+```
+
+Con la **misma forma que los distintivos de la cola**: es la misma pregunta en dos pantallas.
+
+**`escalada` y `asignadaA` llegan como props**, ya derivadas en la página. El Header **no las
+recalcula** — si dedujera el control por su cuenta, dos partes de la pantalla podrían decir cosas
+distintas sobre lo mismo. Las props pasan de 4 a 6 por eso.
+
+**El 409 ya estaba bien funcionalmente y se veía como un error.** `conflictoDeAsignacion()` dice
+*quién* quedó, no un «falló» genérico. Lo que estaba mal era el tono: rojo, como si quien apretó
+hubiera hecho algo malo. No lo hizo — llegó segundo. Ahora es un banner informativo con filete azul.
+
+**Faltaba un caso del contrato.** `legado_sin_relevo` caía al `default`, y **es alcanzable**: sale de
+reasignar (`transiciones.py:397`), y esa ruta también usa `conflictoDeAsignacion`. Según C17 una
+reasignación deja evento de auditoría y el legado no tiene eventos — hay que adoptarla primero, y eso
+es G8:
+
+```
+ya_asignada · no_es_suya · control_ia · no_abierta · legado_sin_relevo   → trato explícito
+default                                                                  → lo desconocido
+```
+
+**Sin test**: `conflictoDeAsignacion()` vive dentro de `+page.svelte` y el harness no compila
+`.svelte`. Extraerla sería refactor fuera de alcance. Lo comprobado fue el contrato C17, el backend
+(`transiciones.py` y el mensaje de `api.py:6347`) y las dos rutas que la llaman.
+
+**Que el Header muestre «HUMANO · Ana Pérez» NO cierra «asignada a mí» ni «asignada a otro»:** falta
+cómo `HandoffControls` presenta permisos y acciones en esos estados.
+
+### 1.4B.2b-ii — los seis que faltan
+
+```
+humano sin asignar (completo) · asignada a mí · asignada a otro
+ADMIN reasigna · WA abierta · WA por cerrarse
+```
+
+El banner de `HandoffControls` sigue sin reestructurar.
 
 
 ## El puente `--v2-*` — transitorio, y con un orden para retirarlo
