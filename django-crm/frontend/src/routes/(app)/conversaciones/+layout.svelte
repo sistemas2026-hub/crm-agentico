@@ -41,6 +41,7 @@
   import { ordenar, horasEsperando } from '$lib/conversaciones/cola/ordenamiento.js';
   import QueueTabs from '$lib/conversaciones/cola/QueueTabs.svelte';
   import QueueSearch from '$lib/conversaciones/cola/QueueSearch.svelte';
+  import QueueFilters from '$lib/conversaciones/cola/QueueFilters.svelte';
 
   /** @type {{ data: any, children: import('svelte').Snippet }} */
   let { data, children } = $props();
@@ -128,11 +129,6 @@
      deje de servir para trabajar. El motor marca cada fila con
      'canal_operativo' (canal.REALES); aca no hay una lista de canales. */
   let vista = $state('operativo');
-  const VISTAS = [
-    { id: 'operativo', label: 'Operativo' },
-    { id: 'pruebas', label: 'Pruebas' },
-    { id: 'todos', label: 'Todos' }
-  ];
   /** '' = todos. Filtra por el motivo por el que el asistente escalo. */
   let motivo = $state('');
   /** Escalada no es un estado paralelo a los otros: una conversacion escalada
@@ -185,6 +181,10 @@
     return 'fresco';
   };
 
+  // Se dibuja en QueueFilters pero se declara acá, al lado de
+  // ORDEN_POR_PESTANA: ese mapa apunta a estos mismos ids, y separarlos
+  // dejaría la correspondencia repartida en dos archivos sin nada que la
+  // mantenga junta.
   const ORDENES = [
     { id: 'actividad', label: 'Actividad reciente' },
     { id: 'recomendado', label: 'Recomendado' },
@@ -324,79 +324,11 @@
 
       <QueueSearch bind:busqueda />
 
-      <!-- Por que escalo. Veinte casos del mismo tipo se resuelven mas rapido
-           seguidos que mezclados con otros veinte de otra cosa: quien atiende
-           ya tiene el contexto cargado. El dato estaba guardado desde
-           siempre y no habia forma de filtrarlo.
-
-           Se dibuja solo si hay mas de un motivo entre las que esperan: con
-           uno solo, el filtro no separa nada y es una fila de ruido. -->
-      <div class="controles">
-        <!-- Que canales se miran. Operativo (los reales) es el default: una
-             prueba del simulador no puede competir con un cliente. -->
-        <label class="orden">
-          <span class="orden-rotulo">Canales</span>
-          <select bind:value={vista} aria-label="Qué canales se ven">
-            {#each VISTAS as v (v.id)}
-              <option value={v.id}>{v.label}</option>
-            {/each}
-          </select>
-        </label>
-
-        <label class="orden">
-          <span class="orden-rotulo">Ordenar por</span>
-          <select
-            bind:value={orden}
-            onchange={() => (ordenElegido = true)}
-            aria-label="Ordenar la lista"
-          >
-            {#each ORDENES as o (o.id)}
-              <option value={o.id}>{o.label}</option>
-            {/each}
-          </select>
-        </label>
-
-        <button
-          type="button"
-          class="motivo"
-          aria-pressed={soloEscaladas}
-          onclick={() => (soloEscaladas = !soloEscaladas)}
-          title="Escalada no es un estado aparte: se cruza con la pestaña que estés viendo"
-        >
-          Solo escaladas
-        </button>
-      </div>
-
-      {#if motivos.length > 1}
-        <div class="motivos" role="group" aria-label="Filtrar por motivo de escalada">
-          <button
-            type="button"
-            class="motivo"
-            aria-pressed={motivo === ''}
-            onclick={() => (motivo = '')}>Todos</button
-          >
-          {#each motivosVisibles as [m, n] (m)}
-            <button
-              type="button"
-              class="motivo"
-              aria-pressed={motivo === m}
-              onclick={() => (motivo = motivo === m ? '' : m)}
-            >
-              {motivoLabel(m)}
-              <span class="v2-num">{n}</span>
-            </button>
-          {/each}
-          {#if motivos.length > motivosVisibles.length}
-            <button
-              type="button"
-              class="motivo motivo-mas"
-              onclick={() => (motivosDesplegados = true)}
-            >
-              +{motivos.length - motivosVisibles.length} más
-            </button>
-          {/if}
-        </div>
-      {/if}
+      <QueueFilters
+        bind:vista bind:orden bind:ordenElegido
+        bind:soloEscaladas bind:motivo bind:motivosDesplegados
+        {motivos} {motivosVisibles} {motivoLabel} {ORDENES}
+      />
     {/if}
 
     <div class="lista">
@@ -741,43 +673,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
-
-  /* ── orden y filtro de escalada ──────────────────────────────────────── */
-  .controles {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 0 12px 8px;
-  }
-  .orden {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 11px;
-    color: var(--v2-slate);
-  }
-  .orden-rotulo {
-    white-space: nowrap;
-  }
-  .orden select {
-    font: inherit;
-    font-size: 11.5px;
-    color: var(--v2-ink);
-    background: none;
-    border: 1px solid var(--v2-line);
-    border-radius: 6px;
-    /* 28px de alto: por debajo de eso un select deja de ser comodo de
-       apuntar, y esta pantalla se usa con prisa. */
-    min-height: 28px;
-    padding: 2px 6px;
-    cursor: pointer;
-  }
-  .orden select:hover {
-    border-color: var(--v2-slate);
-  }
-  .motivo-mas {
-    border-style: dashed;
-  }
   /* El unico numero de la cabecera que pide una reaccion. */
   .critico {
     color: var(--v2-rust);
@@ -831,37 +726,6 @@
     border-radius: 50%;
     background: var(--v2-rust);
     flex: none;
-  }
-
-  /* ── filtro por motivo ───────────────────────────────────────────────── */
-  .motivos {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 5px;
-    padding: 0 12px 8px;
-  }
-  .motivo {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    border: 1px solid var(--v2-line);
-    background: none;
-    border-radius: 999px;
-    padding: 2px 9px;
-    font: inherit;
-    font-size: 11px;
-    color: var(--v2-slate);
-    cursor: pointer;
-    white-space: nowrap;
-  }
-  .motivo:hover {
-    color: var(--v2-ink);
-    border-color: var(--v2-slate);
-  }
-  .motivo[aria-pressed='true'] {
-    color: var(--v2-ink);
-    border-color: var(--v2-ink);
-    font-weight: 650;
   }
   /* Una sola línea: el preview orienta, no se lee. Dos líneas hacen que la
      altura de cada fila dependa de lo largo que fue el último mensaje. */
