@@ -21,6 +21,8 @@ componentizar  ≠  limpiar  ≠  rediseñar  ≠  modificar funcionalidad
 dc587a3  0B.1 — QueueTabs + QueueSearch
 73c2b42  checkpoint con 0B.1
 76f54f9  0B.2 — QueueFilters
+5e913e3  checkpoint con 0B.2
+5df9c57  0B.3 — QueueEmptyState
 ```
 
 Nada de esto está pusheado.
@@ -31,12 +33,13 @@ Nada de esto está pusheado.
 0B.0  Guarda de ordenar()       ✅ cerrado   0a809d0
 0B.1  QueueTabs + QueueSearch   ✅ cerrado   dc587a3
 0B.2  QueueFilters              ✅ cerrado   76f54f9
-0B.3  QueueEmptyState           ← el próximo
-0B.4  ConversationRow           pendiente — auditoría previa OBLIGATORIA
+0B.3  QueueEmptyState           ✅ cerrado   5df9c57
+0B.4A Auditoría de Row          ← el próximo, SIN mover una línea
+0B.4B ConversationRow           pendiente — sólo si se aprueba la frontera
 0B.5  ConversationList          pendiente
 ```
 
-`+layout.svelte`: 1193 → 1093 → 949 → **813 líneas**.
+`+layout.svelte`: 1193 → 1093 → 949 → 813 → **790 líneas**.
 
 ```
 lib/conversaciones/cola/
@@ -45,6 +48,7 @@ lib/conversaciones/cola/
   QueueTabs.svelte        119   nav.tabs   + 8 reglas
   QueueSearch.svelte       77   label.buscar + 5 reglas
   QueueFilters.svelte     210   .controles + .motivos + 10 reglas
+  QueueEmptyState.svelte   62   los tres huecos + 1 regla
 ```
 
 ### Decisiones de frontera tomadas en 0B.1
@@ -120,6 +124,48 @@ los calcula. `visibles` sigue siendo la única autoridad y **no migra a componen
 QueueFilters   0 fetch · 0 invalidate · 0 setInterval · 0 $effect · 0 porBanda · 0 peso
 ```
 
+### Decisiones de frontera tomadas en 0B.3
+
+**El layout decide la variante; el componente la presenta.** Las tres condiciones siguen
+literalmente en `+layout.svelte`:
+
+```
+data.error
+conversaciones.length === 0
+visibles.length === 0
+```
+
+`QueueEmptyState` **no inspecciona ninguna colección** ni decide nada de la cola.
+
+**Los tres estados no se fusionan.** Se parecen lo suficiente como para que alguien lo intente:
+
+```
+error              algo se rompió; quien atiende no sabe qué hay
+sin-datos          la bandeja está vacía de verdad
+sin-coincidencias  hay conversaciones, pero los filtros las escondieron
+```
+
+Sólo la tercera tiene como salida «cambiá el filtro», y por eso es la única con texto distinto según
+haya o no una búsqueda escrita. **No hay estado de carga, y no hay que inventarlo:** la cola llega ya
+cargada desde el `load`.
+
+**`busqueda` se pasa únicamente para resolver ese texto.** No implica mover filtrado al componente.
+
+**`.hueco` viajó completo** — sus tres consumidores estaban en el bloque. **`.lista` se queda en el
+layout**: envuelve también el `{#each}` de las filas, así que no es del estado vacío aunque lo
+contenga.
+
+Cuidado repetible: la palabra `hueco` aparece dos veces más en el layout, **dentro de comentarios**
+de `a.fila`. Un `grep` crudo las cuenta como consumidores.
+
+**Los imports que salieron son consecuencia mecánica, no limpieza:** `EmptyState`, `TriangleAlert`,
+`MessagesSquare` y `Search` quedaron sin consumidores al mover el bloque. **`Search` es el caso
+ilustrativo** — en 0B.1 se quedó en el layout *precisamente* porque lo usaba este `EmptyState`; al
+irse el bloque, dejó de usarlo nadie. La regla `.hueco` salió por lo mismo.
+
+Ahí es donde la tercera guarda hizo trabajo real: `pnpm check` no avisa de imports ni constantes que
+se quedan sin uso.
+
 ## Lo que la auditoría previa encontró, y hay que tener presente
 
 **La cola no hace un solo `fetch`.** Todo entra por `+layout.server.js`, que declara
@@ -188,7 +234,7 @@ por cada clase del marcado   →  localizar su regla efectiva
 por cada regla movida        →  comprobar qué consumidores tenía
 ```
 
-**Resultado en 0B.1 y 0B.2**, que es cómo se ve un corte sano:
+**Resultado en 0B.1, 0B.2 y 0B.3**, que es cómo se ve un corte sano:
 
 ```
 clases movidas sin regla        0
@@ -326,7 +372,38 @@ comparación por píxel no ejecutada.
 ## Qué se queda en el layout, pase lo que pase
 
 Los dos `$effect`, `visibles` y toda la cadena de filtrado, el import de `ordenar`, `.mesa`,
-`.columna`, el media query, y el `{#key abierta}`.
+`.columna`, `.lista`, el media query, y el `{#key abierta}`.
+
+## 0B.4 va en dos pasos, y el primero no mueve nada
+
+**`ConversationRow` es el único corte sensible que queda**, porque en `a.fila` confluyen cosas que
+en los cuatro anteriores estaban separadas:
+
+```
+ahora                        estado del layout que cruza hacia la fila (estaActiva)
+tramoEspera                  y con él horasEsperando, que ya vive en ordenamiento.js
+quien · esTelefono · esUuid  duplicados con ConversationHeader — NO unificar
+canalLabel · etiquetaLabel   rótulos
+motivoLabel                  ya compartido con QueueFilters
+AUTOR
+espera-{tramoEspera(c)}      la clase interpolada
+.activa                      con sus dos significados
+.motivo-fila                 la vecina de .motivo, que NO es la misma
+href + aria-current          navegación y selección
+```
+
+**Lo esperado, escrito por adelantado para que no se lea como regresión:** cuando la clase
+interpolada salga del layout, **el layout recupera la detección de CSS muerto** y van a aparecer
+warnings de `.marca` y `.marca::before`, que llevan muertas desde antes de empezar. Eso **no es una
+regresión de 0B.4** — es el punto ciego levantándose. Identificar cada warning nuevo uno por uno
+antes de clasificarlo.
+
+Por eso 0B.4 se parte:
+
+```
+0B.4A   auditoría, sin mover una línea
+0B.4B   extracción, sólo si se aprueba la frontera
+```
 
 Cuando 0B cierre, se termina la preparación estructural y **la Fase 1 empieza a cambiar visualmente
 la Bandeja**. Hasta entonces: nada de Tailwind, tokens, colores, badges, textos ni estados nuevos.
