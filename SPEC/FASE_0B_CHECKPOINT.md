@@ -17,6 +17,8 @@ componentizar  ≠  limpiar  ≠  rediseñar  ≠  modificar funcionalidad
 ```
 4ea9fc0  cierre de la Fase 0A + D29
 0a809d0  0B.0 — guarda del orden operacional
+256c244  checkpoint Fase 0B
+dc587a3  0B.1 — QueueTabs + QueueSearch
 ```
 
 Nada de esto está pusheado.
@@ -25,14 +27,58 @@ Nada de esto está pusheado.
 
 ```
 0B.0  Guarda de ordenar()       ✅ cerrado   0a809d0
-0B.1  QueueTabs + QueueSearch   ← el próximo
-0B.2  QueueFilters              pendiente
+0B.1  QueueTabs + QueueSearch   ✅ cerrado   dc587a3
+0B.2  QueueFilters              ← el próximo
 0B.3  QueueEmptyState           pendiente
 0B.4  ConversationRow           pendiente — auditoría previa OBLIGATORIA
 0B.5  ConversationList          pendiente
 ```
 
-`+layout.svelte`: 1193 → **1093 líneas**.
+`+layout.svelte`: 1193 → 1093 → **949 líneas**.
+
+```
+lib/conversaciones/cola/
+  ordenamiento.js         133   el orden, con su guarda (0B.0)
+  ordenamiento.test.js    287
+  QueueTabs.svelte        119   nav.tabs   + 8 reglas
+  QueueSearch.svelte       77   label.buscar + 5 reglas
+```
+
+### Decisiones de frontera tomadas en 0B.1
+
+**`filtro` y `vista` no son el mismo concepto**, aunque los nombres se parezcan:
+
+```
+filtro   la pestaña seleccionada      → va a QueueTabs
+vista    el filtro de CANAL           → vive en .controles, se va en 0B.2
+```
+
+**`irA()` se queda íntegra en el layout.** Hace tres cosas a la vez y ése es justamente el motivo:
+
+```js
+filtro = id;
+ordenElegido = false;
+orden = ORDEN_POR_PESTANA[id] ?? 'actividad';
+```
+
+Ese acople es del dueño de la lista, no de una barra de botones. **No dividirla ni reinterpretarla
+durante la Fase 0B.** `QueueTabs` sólo llama `onIr(t.id)`.
+
+**`busqueda` sigue siendo estado del layout**, con `bind:`. El componente no implementa ningún
+filtrado: **`visibles` sigue siendo la única autoridad**.
+
+**Ninguno de los dos hijos tiene ciclo de vida:**
+
+```
+QueueTabs     0 fetch · 0 invalidate · 0 setInterval · 0 $effect
+QueueSearch   0 fetch · 0 invalidate · 0 setInterval · 0 $effect
+```
+
+**El renombre al cruzar la frontera.** El marcado movido conservaba `onclick={() => irA(t.id)}` e
+`irA` ya no existía en el componente — lo cazó `pnpm check` como error, no como warning. Es el mismo
+caso que `forzarAlFinal` en 0A.1: la misma función, invocada por el nombre de su prop. **Correr el
+check antes de mirar cualquier otra cosa**, porque un callback mal cableado es un error de tipos y
+sale en la primera pasada.
 
 ## Lo que la auditoría previa encontró, y hay que tener presente
 
@@ -101,6 +147,19 @@ disponible**. El control tiene que ser un inventario bidireccional explícito:
 por cada clase del marcado   →  localizar su regla efectiva
 por cada regla movida        →  comprobar qué consumidores tenía
 ```
+
+**Resultado en 0B.1**, que es cómo se ve un corte sano:
+
+```
+clases movidas sin regla        0
+reglas movidas sin consumidor   0
+reglas compartidas              0
+media queries compartidas       0
+```
+
+Se verifica **en los dos momentos**: antes de mover, con el script abortando por aserción si aparece
+cualquiera de los tres casos; y después, por archivo. No hizo falta duplicar ninguna regla, a
+diferencia de `.aviso` en 0A.3.
 
 **No alcanza con mirar el delta de warnings.** Y ojo con el efecto secundario: cuando `.cuando` viaje
 a `ConversationRow`, la interpolación se va con él. El layout **recupera** la vista y aparecerán
