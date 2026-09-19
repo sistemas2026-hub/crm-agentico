@@ -64,10 +64,13 @@ FASE 1.4C                            ✅ COMPLETA
 1.6  Activity                        ✅ cerrada   4d73ea8
 1.7  Customer                        ✅ cerrada   f61fd4d
 1.8  Network                        ✅ cerrada   4541423
-1.9  Branding                 pendiente  ← el siguiente
+1.9  cierre visual                   ✅ cerrada   b7bc9ea
+1.9  Branding                        —  FUERA de esta fase (ver abajo)
+
+FASE 1                               ✅ COMPLETA
 ```
 
-Abierto al cerrar 1.8, y ninguno bloquea 1.9:
+Abierto al cerrar la Fase 1:
 
 ```
 G6 sobre messages poblada   🔒 gate de DESPLIEGUE, no de desarrollo
@@ -778,6 +781,54 @@ props 24 · binds 9 · callbacks 16 · lifecycle 0 · v2 1 (--v2-fs) · T6 0
 funcional desde cero — un `200` no es sinónimo de que la IA recuperó el control.
 
 
+## Fase 1.9 — cierre visual, y por qué Branding no entra
+
+```
+cierre visual de 1.4–1.9   ✅  commit b7bc9ea
+Branding                   —   es otra pantalla, ver abajo
+```
+
+### Branding queda fuera
+
+La referencia `099ebdec…` no es un panel de la Bandeja: es **«Settings ·
+Appearance & Branding»**, con subida de archivo (SVG/PNG, 512 KB, altura mínima),
+almacenamiento del asset, comparación lado a lado y alcance «every operator in
+your organization». Hoy existe `Marca.logo_url` en el esquema del tenant **sin
+ningún consumidor**, y nada de lo demás.
+
+El scope de esta fase es `.bandeja`, con `PageHeader` explícitamente afuera. Una
+pantalla de ajustes con subida de assets **es esa fase posterior**, no el cierre
+de ésta.
+
+### Lo que el cierre encontró
+
+Los cuatro paneles de contexto tenían copiadas sus utilidades de CSS. Tres
+copias idénticas; `.mono` **no** — y el mismo identificador técnico se veía
+distinto en tres paneles apilados en la misma columna. El CSS scopeado de Svelte
+hace que ninguna herramienta pueda verlo: cada archivo es correcto por separado.
+Unificadas en `bandeja.css` como `.bandeja .panel-*`, con guarda.
+
+### El smoke visual NO es ejecutable, y la vía que este documento proponía no sirve
+
+Este checkpoint decía que bastaba con «levantar el dev server *sin* esas
+variables» para ver el estado de error dentro de `.mesa.bandeja`. **Medido: no
+funciona.**
+
+```
+GET /                 307 → /login
+GET /conversaciones   307 → /login
+GET /login            200
+```
+
+`hooks.server.js:373` redirige **antes** de montar el layout, así que ese estado
+de error nunca se dibuja. Entrar exige un JWT del backend de producción. Y una
+ruta de prueba con datos falsos está prohibida por contrato.
+
+**No falta hacer la QA multi-viewport: falta una forma de hacerla.** Queda así
+anotado para que nadie repita el intento creyendo que la alternativa sirve.
+
+Evidencia: [auditorias/1.9-CIERRE-VISUAL.md](auditorias/1.9-CIERRE-VISUAL.md).
+
 ## Fase 1.8 — COMPLETA
 
 ```
@@ -1090,14 +1141,14 @@ voltajes, firmwares, OLT/slot/port, operadores, teléfonos o documentos inventad
 
 ## Baseline
 
-Medido el 19/09/2026 al cerrar 1.8:
+Medido el 19/09/2026 al cerrar la Fase 1:
 
 | Chequeo | Valor esperado |
 |---|---|
 | `svelte-check` | 2 errores en `(no-layout)/org/`; **0 en `conversaciones/`** |
 | warnings | **25** |
-| vitest | 17 failed \| 15 passed (32) · **63 failed** \| 410 passed (473) |
-| guardas `conversaciones/` | 149/149 — ordenamiento 20 · grabación 17 · formato 17 · devolución 13 · cableado T6 22 · contexto 37 · actividad 12 · red 11 |
+| vitest | 17 failed \| 15 passed (32) · **63 failed** \| 420 passed (483) |
+| guardas `conversaciones/` | 159/159 — ordenamiento 20 · grabación 17 · formato 17 · devolución 13 · cableado T6 22 · contexto 47 · actividad 12 · red 11 |
 | D30, backend | 18/18 — **se reporta aparte, no se suma a vitest** |
 | backend con PostgreSQL real | 9 suites verdes (ver `DEXTER_BASELINES.md`) |
 

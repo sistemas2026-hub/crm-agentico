@@ -11,7 +11,7 @@ comando · exit code · passed/failed/skipped · sólo el traceback de los fallo
 
 ---
 
-## BACKEND — medido 19/09/2026 al cerrar 1.8, CONTRA POSTGRESQL REAL
+## BACKEND — medido 19/09/2026 al cerrar la Fase 1, CONTRA POSTGRESQL REAL
 
 Base: PostgreSQL 16.14, contenedor `pg-motor` :55435, base `t6_d3` construida
 desde cero por el ledger. Ninguna parte quedó `[saltado]`.
@@ -69,21 +69,21 @@ py -3.13 cli/diferencias_config.py rapilink       repo vs desplegado
 ```
 No re-ejecutadas en esta sesión.
 
-## FRONTEND — medido 19/09/2026 al cerrar 1.8
+## FRONTEND — medido 19/09/2026 al cerrar la Fase 1
 
 ```
 cd django-crm/frontend
 
 npx svelte-check     2 errores · 25 warnings · 0 errores en conversaciones/
 npx vitest run       32 archivos: 17 failed / 15 passed
-                     473 tests:   63 failed / 410 passed
+                     483 tests:   63 failed / 420 passed
 ```
 
 Los 63 fallos y 17 archivos son **históricos**, preexistentes a la Fase 1 y
 ajenos a `conversaciones/`. Se identifican por conteo estable: cualquier cambio
 en ese número es una regresión hasta demostrar lo contrario.
 
-Guardas de `conversaciones/`, 149/149:
+Guardas de `conversaciones/`, 159/159:
 
 ```
 ordenamiento (0B.0)     20
@@ -91,7 +91,7 @@ grabación (D29)         17
 formato (1.3B)          17
 devolución (1.4C)       13
 cableado T6 (1.4C)      22
-contexto (1.5–1.8)      37
+contexto (1.5–1.9)      47
 red (1.8)               11
 actividad (1.6)         12
 D30, backend            18   se reporta aparte, no suma a vitest
@@ -112,12 +112,17 @@ estas cifras llevan fecha.
 ### No medido
 
 ```
-QA visual multi-viewport   ningún estado de T6 se vio renderizado
+QA visual multi-viewport   NO EJECUTABLE con los medios disponibles
 ```
 
-Renderizar la Bandeja con datos exige `PRIVATE_ASISTENTE_URL`, que apunta a
-producción, y no se conecta producción para obtener evidencia estética. Lo que
-hay es auditoría estática de CSS. Pendiente del smoke integral de Fase 1.
+No es que falte hacerla: **falta una forma de hacerla**. El dev server levanta,
+pero `hooks.server.js:373` redirige a `/login` antes de montar el layout, así que
+ni siquiera se ve el estado de error dentro de `.mesa.bandeja` — la alternativa
+que el checkpoint de 1.1 proponía. Entrar exige un JWT del backend de producción,
+y una ruta de prueba con datos falsos está prohibida por contrato.
+
+Lo que hay es auditoría estática de CSS, y encontró cosas reales (ver
+`auditorias/1.9-CIERRE-VISUAL.md`). Ningún píxel de 1.4C a 1.9 se vio.
 
 ## DEUDAS CONOCIDAS — no son regresiones
 

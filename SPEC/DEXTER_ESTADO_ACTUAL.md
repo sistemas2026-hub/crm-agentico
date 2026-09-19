@@ -7,7 +7,7 @@ Si contradice a una conversación, gana este archivo.
 se actualiza: una sección que quedó vieja no es inocua — la siguiente sesión la
 lee como verdad. La historia detallada vive en `auditorias/`, no acá.
 
-Última actualización: 19/09/2026, al cerrar la Fase 1.8.
+Última actualización: 19/09/2026, al cerrar la Fase 1.
 
 ---
 
@@ -32,6 +32,8 @@ fa6b91a  cierre de 1.4C + corrección de la lista de warnings
 f61fd4d  1.7 Customer
 929b86e  cierre de 1.7
 4541423  1.8 Network
+d5cc765  cierre de 1.8
+b7bc9ea  1.9 cierre visual
 ```
 
 ## WORKTREE
@@ -63,17 +65,25 @@ FASE 1.5   Case + Tools       ✅
 FASE 1.6   Activity           ✅  el relevo se lee por primera vez
 FASE 1.7   Customer           ✅  lo que sabe del cliente, y lo que no
 FASE 1.8   Network            ✅  qué se le hizo al equipo, sin botones
+FASE 1.9   cierre visual      ✅  utilidades de panel unificadas
+FASE 1     Bandeja rediseñada ✅  COMPLETA
 ```
 
-## ABIERTO — nada de esto bloquea 1.9
+## ABIERTO al cerrar la Fase 1
 
 ```
 G6 sobre messages poblada   🔒 gate de DESPLIEGUE. La migración aplica limpia
                                desde cero y el ledger la anota sola, pero no se
                                midió sobre una tabla con datos. No bloquea
                                desarrollo; sí bloquea cualquier push.
-smoke visual integral       ⏭ nada de 1.4C a 1.8 se vio renderizado, en ningún
-                               viewport. Hay auditoría estática de CSS.
+QA visual multi-viewport    🔴 NO EJECUTABLE con los medios disponibles, y no
+                               por falta de intento: el dev server levanta pero
+                               hooks.server.js:373 redirige a /login antes de
+                               montar el layout, así que ni el estado de error
+                               dentro de .mesa.bandeja se dibuja. Entrar exige
+                               un JWT del backend de producción; una ruta de
+                               prueba con datos falsos está prohibida.
+                               NINGÚN píxel de 1.4C a 1.9 se vio renderizado.
 D28                         ⏭ abierto para B4. La pantalla lo MUESTRA (1.5): el
                                dueño del CRM es informativo, el de Dexter manda.
                                No se reconcilian — no comparten identidad de
@@ -90,8 +100,13 @@ rust/moss                      otras pantallas, en la fase de cada una
 ## SIGUIENTE GATE
 
 ```
-Fase 1.9   Branding
+Branding   pantalla de ajustes, FUERA de la Fase 1
 ```
+
+No es la Bandeja: es «Settings · Appearance & Branding», con subida de archivo,
+almacenamiento de assets y alcance por organización. Hoy existe `Marca.logo_url`
+en el esquema del tenant **sin ningún consumidor**, y nada más. Necesita su
+propio scope.
 
 Entrada: `SPEC/FASE_1_CHECKPOINT.md`.
 
