@@ -4249,6 +4249,18 @@ def conversaciones_mensajes(id_conversacion):
     # Quien controla HOY, ya calculado: la pantalla no reimplementa la regla.
     conv["control_efectivo"] = control_efectivo(conv)
 
+    # Los identificadores tecnicos del equipo del cliente, FILTRADOS por la
+    # misma lista que decide que se persiste al verificar. 'datos_sesion'
+    # guarda ademas el estado de anti-rebote (las areas ya visitadas), que es
+    # del ROUTING y no del cliente: mandarlo entero seria enviar a la pantalla
+    # cosas que no le tocan. Se filtra por Sesion.CAMPOS_PERSISTIBLES y no por
+    # una lista escrita aca, para que el motor siga sin conocer el vocabulario
+    # del tenant: 'sn_onu' es de un ISP de fibra y el proximo puede capturar
+    # otra cosa -- cuando esa lista crezca, esto crece solo.
+    sesion_guardada = conv.pop("datos_sesion", None) or {}
+    conv["equipo"] = {c: sesion_guardada.get(c) for c in Sesion.CAMPOS_PERSISTIBLES
+                      if sesion_guardada.get(c)}
+
     return jsonify(resultado)
 
 

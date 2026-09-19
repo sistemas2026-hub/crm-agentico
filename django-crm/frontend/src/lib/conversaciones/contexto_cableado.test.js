@@ -176,6 +176,52 @@ describe('la actividad no se queda vieja', () => {
   });
 });
 
+describe('el panel del cliente no inventa la ficha', () => {
+  const cli = leer('CustomerPanel.svelte');
+  const visible = cli
+    .slice(cli.indexOf('</script>'), cli.indexOf('<style>'))
+    .replace(/<!--[\s\S]*?-->/g, '');
+  // La nota que explica qué NO está nombra esos mismos campos; buscarlos ahí
+  // haría fallar la prueba por decir bien la verdad.
+  const campos = visible.replace(/<p class="nota-fuente">[\s\S]*?<\/p>/, '');
+
+  it('no muestra los campos que la referencia marca como MOCK', () => {
+    // Dirección, plan, velocidades, saldo y facturas viven en el ISP y Dexter
+    // no los guarda (PRD RNF-01). Un campo inventado en un panel de contexto
+    // se lee como un dato del cliente.
+    for (const campo of [/direcci[oó]n/i, /localidad/i, /\bplan\b/i, /saldo/i,
+                         /factura/i, /\bpago\b/i, /Mbps/i]) {
+      expect(campos).not.toMatch(campo);
+    }
+  });
+
+  it('dice por qué no están, en vez de dejar secciones vacías', () => {
+    expect(visible).toMatch(/viven en el sistema del ISP y no se traen/i);
+  });
+
+  it('no consulta nada en vivo: es presentación', () => {
+    expect(cli).not.toMatch(/fetch\(|onMount|\$effect/);
+  });
+
+  it('la verificación se deriva de id_cliente, que es lo que la prueba', () => {
+    // Los campos técnicos sólo se escriben al verificar, y verificar exige
+    // id_cliente. No hay bandera aparte que inventar.
+    expect(cli).toMatch(/verificado = \$derived\(!!conversacion\?\.id_cliente\)/);
+  });
+
+  it('sin verificar se avisa que nada está confirmado, y en ámbar', () => {
+    expect(visible).toMatch(/nada de lo de abajo está confirmado/i);
+    expect(cli).toMatch(/\.v-no \{[\s\S]{0,200}--bandeja-aviso/);
+    expect(cli).not.toMatch(/\.v-no \{[\s\S]{0,200}--bandeja-error/);
+  });
+
+  it('un campo de equipo que el tenant agregue se muestra igual', () => {
+    // El motor ya lo manda (filtra por CAMPOS_PERSISTIBLES); esconderlo acá
+    // perdería un dato que alguien fue a buscar.
+    expect(cli).toMatch(/ROTULO_EQUIPO\[clave\] \?\? clave\.replaceAll/);
+  });
+});
+
 describe('el proceso sigue contando lo que cuenta el motor', () => {
   it('la pantalla no recalcula bloqueos ni errores', () => {
     // El backend los cuenta porque distinguir un bloqueo de un fallo depende

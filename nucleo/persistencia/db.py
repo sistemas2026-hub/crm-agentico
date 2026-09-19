@@ -605,7 +605,7 @@ def mensajes_de(tenant: str, conversation_id: str) -> dict:
                       motivo_escalamiento, caso_id, etiqueta,
                       actualizado_en, conservar, conservar_motivo, conservar_por,
                       atendida_manual, atendida_por, tomada_por, tomada_en,
-                      id_cliente, nombre_cliente,
+                      id_cliente, nombre_cliente, datos_sesion,
                       -- El control del relevo (B3): la pantalla recibe el
                       -- control EFECTIVO ya calculado (api.py), no la regla.
                       relevo_version, control, control_motivo,

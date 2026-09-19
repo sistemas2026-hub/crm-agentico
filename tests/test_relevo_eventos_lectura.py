@@ -175,6 +175,55 @@ try:
             "el registro no lleva el texto del mensaje ni el telefono del cliente")
     revisar("usuario_externo" not in crudo and "contenido" not in crudo,
             "ni campos de la conversacion que no le corresponden")
+    # =========================================================================
+    titulo("4. lo del cliente que la pantalla recibe (1.7)")
+    # =========================================================================
+    from nucleo.seguridad.verificacion import Sesion                # noqa: E402
+
+    conv4 = conversacion(ORG_A)
+    # Lo que escriben las dos puertas de datos_sesion: la verificacion (campos
+    # tecnicos del equipo) y el anti-rebote (areas ya visitadas, que es
+    # ROUTING y no es del cliente).
+    admin.execute(
+        "update asistente.conversations set id_cliente = %s, nombre_cliente = %s, "
+        "datos_sesion = %s::jsonb where id = %s",
+        ("CX-90214", "Carlos Perez",
+         '{"sn_onu": "ALCL12345678", "interfaz_lan": "gpon0/1", '
+         '"areas_visitadas": ["soporte", "facturacion"], "ultimo_area": "soporte"}',
+         conv4))
+
+    # Contra el ENDPOINT, no contra db.mensajes_de: el filtro vive en api.py y
+    # replicar su regla acá probaría mi copia de la regla, no la regla.
+    os.environ.pop("MOTOR_SERVICE_TOKEN", None)
+    from nucleo.canales import api                                 # noqa: E402
+    api.app.config["TESTING"] = True
+    cliente_http = api.app.test_client()
+
+    r = cliente_http.get(f"/conversaciones/{conv4}/mensajes?tenant={T_A}")
+    conv_json = (r.get_json() or {}).get("conversacion") or {}
+    revisar(conv_json.get("id_cliente") == "CX-90214"
+            and conv_json.get("nombre_cliente") == "Carlos Perez",
+            "la identidad verificada llega a la pantalla", f"{conv_json.get('id_cliente')}")
+
+    equipo = conv_json.get("equipo")
+    revisar(equipo == {"sn_onu": "ALCL12345678", "interfaz_lan": "gpon0/1"},
+            "los identificadores del equipo salen completos", f"{equipo}")
+    revisar("areas_visitadas" not in str(conv_json) and "ultimo_area" not in str(conv_json),
+            "y el estado de routing NO sale: es del motor, no del cliente",
+            f"{sorted(equipo or {})}")
+    revisar("datos_sesion" not in conv_json,
+            "la columna cruda tampoco viaja entera a la pantalla")
+
+    # Y crece solo cuando el tenant captura un campo nuevo, sin tocar api.py.
+    revisar(set(equipo or {}) <= set(Sesion.CAMPOS_PERSISTIBLES),
+            "lo que sale es exactamente lo que la verificacion declara persistible")
+
+    sin_ident = conversacion(ORG_A)
+    r2 = cliente_http.get(f"/conversaciones/{sin_ident}/mensajes?tenant={T_A}")
+    c2 = (r2.get_json() or {}).get("conversacion") or {}
+    revisar(not c2.get("id_cliente") and c2.get("equipo") == {},
+            "una conversacion sin verificar no trae identidad ni equipo inventados",
+            f"{c2.get('id_cliente')} {c2.get('equipo')}")
 finally:
     admin.close()
 

@@ -11,6 +11,7 @@
   import MessageComposer from '$lib/conversaciones/composer/MessageComposer.svelte';
   import CasePanel from '$lib/conversaciones/context/CasePanel.svelte';
   import ActivityPanel from '$lib/conversaciones/context/ActivityPanel.svelte';
+  import CustomerPanel from '$lib/conversaciones/context/CustomerPanel.svelte';
   import RetentionToggle from '$lib/conversaciones/context/RetentionToggle.svelte';
   import TracePanel from '$lib/conversaciones/context/TracePanel.svelte';
   import DocumentationPanel from '$lib/conversaciones/context/DocumentationPanel.svelte';
@@ -1558,6 +1559,10 @@
   >
     <X size={14} /> Cerrar
   </button>
+
+  <!-- Quién es el cliente va PRIMERO: antes de mirar el caso o cómo llegó la
+       conversación, quien la abre necesita saber con quién está hablando. -->
+  <CustomerPanel {conversacion} />
 
   <CasePanel
     {caso} {conversacion} {owners} {ownerActual}
