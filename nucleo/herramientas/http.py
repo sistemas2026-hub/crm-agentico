@@ -23,6 +23,7 @@ import time
 
 import requests
 
+from nucleo.observabilidad.registro import registrar
 from nucleo.seguridad import secretos
 
 TIMEOUT_SEGUNDOS = 15
@@ -213,8 +214,9 @@ def ejecutar(herramienta, argumentos: dict, tenant: str | None = None,
     if not r.ok:
         alternativos = _alternativas(herramienta, argumentos)
         if alternativos:
-            print(f"[http] '{herramienta.nombre}': {r.status_code} con el "
-                  f"identificador original, reintentando con la forma alternativa")
+            registrar("http", "fallo con el identificador original, reintentando con la "
+                              "forma alternativa",
+                      herramienta=herramienta.nombre, http_status=r.status_code)
             r = _pedir(alternativos)
 
     r.raise_for_status()

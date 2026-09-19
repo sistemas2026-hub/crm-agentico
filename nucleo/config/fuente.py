@@ -42,6 +42,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from nucleo.config.schema import TenantConfig, cargar_config
+from nucleo.observabilidad.registro import registrar
 
 
 class ErrorConfig(ValueError):
@@ -111,15 +112,15 @@ def cargar(tenant: str, raiz: str | Path = ".") -> TenantConfig:
         resultado = desde_base(tenant)
         if resultado is not None:
             config, version = resultado
-            print(f"[config] {tenant}: v{version} desde la base")
+            registrar("config", "cargada desde la base", tenant=tenant, version=version)
             return config
-        motivo = "el tenant no esta en asistente.tenant_config"
+        motivo = "tenant_no_esta_en_la_base"
     except ErrorConfig:
         raise
     except Exception as e:
-        motivo = f"no se pudo leer la base ({type(e).__name__})"
+        motivo = f"base_ilegible:{type(e).__name__}"
 
     ruta = Path(raiz) / "tenants" / f"{tenant}.config.yaml"
-    print(f"[config] {tenant}: usando {ruta} -- {motivo}. "
-          f"Los cambios hechos desde la interfaz NO se veran aqui.")
+    registrar("config", "usando el YAML semilla: los cambios hechos desde la interfaz NO "
+                        "se veran aqui", tenant=tenant, archivo=ruta.name, motivo=motivo)
     return cargar_config(ruta)

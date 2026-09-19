@@ -36,9 +36,12 @@ import threading
 import time
 from datetime import datetime, timezone
 
+import requests
 from flask import Flask, jsonify, request
+from werkzeug.exceptions import HTTPException
 
 from nucleo.canales import media, whatsapp
+from nucleo.canales.errores import estado_http_de, fallo, mensaje_publico
 from nucleo.conectores import catalogo as conectores
 from nucleo.config import editor, fuente
 from nucleo.config.fusion import fusionar_roles, modelo_fusionado
@@ -68,6 +71,7 @@ from nucleo.seguimiento import resumen
 from nucleo.seguimiento import supervisor
 from nucleo.seguridad import secretos
 from nucleo.seguridad.verificacion import Sesion
+from nucleo.observabilidad.registro import id_interno, ref_proveedor, ref_sesion, registrar
 
 app = Flask(__name__)
 
@@ -117,15 +121,15 @@ def _config_de(tenant: str):
             # conversacion: se sigue sirviendo lo que ya hay y se reintenta en
             # el proximo intervalo. Una config de hace un minuto es mucho mejor
             # que un turno fallido.
-            print(f"[config] {tenant}: no se pudo comprobar la version "
-                  f"({type(e).__name__}); se sigue con v{version}")
+            registrar("config", "no se pudo comprobar la version; se sigue con la servida",
+                      tenant=tenant, version=version, error=e)
             _servidas[tenant] = (version, ahora)
             return servida
         if en_base == version:
             _servidas[tenant] = (version, ahora)
             return servida
-        print(f"[config] {tenant}: la base tiene v{en_base} y este proceso "
-              f"servia v{version} -- recargando")
+        registrar("config", "la base tiene otra version: recargando",
+                  tenant=tenant, en_base=en_base, servida=version)
         _configs.pop(tenant, None)
 
     # Se pregunta la version ANTES de bajar la config, no despues. Si alguien
@@ -165,8 +169,7 @@ def _evidencias_de(tenant: str, conversation_id: str | None) -> int:
             fila = cur.fetchone()
         return int((fila or {}).get("n") or 0)
     except Exception as e:                            # noqa: BLE001
-        print(f"[escalamiento] no se pudieron contar las evidencias: "
-              f"{type(e).__name__}: {e}")
+        registrar("escalamiento", "no se pudieron contar las evidencias", error=e)
         return 0
 
 
@@ -314,8 +317,12 @@ def _resolver_verificacion_pendiente(config, tenant: str, estado: dict) -> dict 
         intentos, int(pendiente["max_intentos"]))
     persistencia.resolver_verificacion(
         tenant, pendiente["id"], resultado, por_que, medicion_posterior, intentos)
-    print(f"[verificacion] {pendiente['herramienta']} -> {resultado} "
-          f"(intento {intentos}/{pendiente['max_intentos']}): {por_que}")
+    # El 'por que' queda en la fila (resolver_verificacion), no en el log: lo
+    # arma la medicion de un equipo externo y puede traer sus datos.
+    registrar("verificacion", "accion comprobada",
+              herramienta=pendiente["herramienta"], resultado=resultado,
+              intento=intentos, max_intentos=pendiente["max_intentos"],
+              verificacion_id=str(pendiente["id"]))
 
     salida = {"estado": resultado,
               "nota": _nota_verificacion(pendiente["herramienta"], resultado, por_que)}
@@ -356,7 +363,8 @@ def _cerrar_el_traspaso(config, tenant: str, conversation_id, mensaje_id,
     necesita_persona = estado == estado_escalada.NO_DETERMINADO
     persistencia.registrar_estado_escalada(
         tenant, conversation_id, estado, por_que, necesita_atencion=necesita_persona)
-    print(f"[escalamiento] {id_sesion}: {estado} -- {por_que}")
+    registrar("escalamiento", "traspaso registrado",
+              conversation_id=str(conversation_id), estado=estado)
 
     if estado == estado_escalada.CONFIRMADO:
         return respuesta
@@ -369,8 +377,9 @@ def _cerrar_el_traspaso(config, tenant: str, conversation_id, mensaje_id,
     if not frase:
         return respuesta
 
-    print(f"[escalamiento] {id_sesion}: la respuesta prometia un traspaso "
-          f"('{frase}') sin nada registrado -- se reemplaza")
+    registrar("escalamiento", "la respuesta prometia un traspaso sin nada registrado: se reemplaza",
+              conversation_id=str(conversation_id),
+              mensaje_id=str(mensaje_id) if mensaje_id else None)
     respuesta = _mensaje_si_no_quedo(config)
     if mensaje_id:
         # El mensaje ya se guardo con el texto del modelo: sin esto, la
@@ -378,7 +387,7 @@ def _cerrar_el_traspaso(config, tenant: str, conversation_id, mensaje_id,
         try:
             persistencia.actualizar_contenido_mensaje(tenant, mensaje_id, respuesta)
         except Exception as e:
-            print(f"[persistencia] no se pudo corregir el mensaje: {e}")
+            registrar("persistencia", "no se pudo corregir el mensaje", error=e)
     return respuesta
 
 
@@ -449,12 +458,12 @@ def olvidar_config(tenant: str) -> None:
 
 _TOKEN_SERVICIO = os.environ.get("MOTOR_SERVICE_TOKEN")
 if _TOKEN_SERVICIO:
-    print("[auth] MOTOR_SERVICE_TOKEN activo: /chat, /agentes y el resto de "
-         "rutas internas exigen el token de servicio.")
+    registrar("auth", "MOTOR_SERVICE_TOKEN activo: /chat, /agentes y el resto de "
+                      "rutas internas exigen el token de servicio.")
 else:
-    print("[auth] MOTOR_SERVICE_TOKEN no esta configurado -- las rutas "
-         "internas quedan abiertas a quien alcance el motor por red. Ver "
-         "DESPLIEGUE.md, 'Autenticar /chat y /agentes en el motor'.")
+    registrar("auth", "MOTOR_SERVICE_TOKEN no esta configurado -- las rutas "
+                      "internas quedan abiertas a quien alcance el motor por red. Ver "
+                      "DESPLIEGUE.md, 'Autenticar /chat y /agentes en el motor'.")
 
 # Rutas que se autentican con OTRO mecanismo (no el token de servicio), asi
 # que quedan afuera de la comprobacion de abajo:
@@ -493,13 +502,46 @@ def _exigir_token_de_servicio():
     return None
 
 
+@app.errorhandler(Exception)
+def _error_no_manejado(e):
+    """
+    Una excepcion que ninguna ruta atrapo. Sin esto Flask la registra con su
+    traza completa, y la ultima linea de una traza es str(e): un error de
+    PostgreSQL con el valor que fallo, uno de requests con la URL. Ver
+    nucleo/observabilidad/registro.py (D20).
+
+    LOS HTTPException NO SON FALLOS DEL MOTOR y conservan su codigo: un 404 de
+    ruta inexistente, un 405, o cualquier abort(401/403/409/503) sigue siendo
+    ese codigo, nunca un 500. Se responden con un JSON generico (el nombre
+    estandar del codigo) en vez de la pagina HTML de werkzeug, que repite la
+    'description' de quien hizo abort(); y se conservan sus cabeceras propias
+    (Allow en un 405, WWW-Authenticate en un 401). Las redirecciones de ruteo
+    (308 por la barra final) pasan tal cual.
+
+    Las rutas que devuelven su error con jsonify(..., 4xx) ni pasan por aca:
+    eso es una respuesta, no una excepcion.
+    """
+    if isinstance(e, HTTPException):
+        if e.code is None or e.code < 400:
+            return e
+        respuesta = jsonify({"error": e.name})
+        respuesta.status_code = e.code
+        for nombre, valor in e.get_headers():
+            if nombre.lower() not in ("content-type", "content-length"):
+                respuesta.headers[nombre] = valor
+        return respuesta
+    registrar("http", "error no manejado", metodo=request.method,
+              ruta=request.url_rule.rule if request.url_rule else None, error=e)
+    return jsonify({"error": "Error interno del motor."}), 500
+
+
 def _error_al_guardar(e: Exception):
     """Todo lo que no sea un problema de la configuracion en si (la base
     inalcanzable, el tenant sin cargar) es un fallo del servidor, no del
     formulario: no se devuelve 400 porque no hay nada que el usuario pueda
     corregir escribiendo distinto."""
-    print(f"[editor] fallo al guardar la configuracion: {type(e).__name__}: {e}")
-    return jsonify({"error": f"No se pudo guardar en la base: {type(e).__name__}: {e}"}), 500
+    return fallo(500, "guardado_fallido", "No se pudo guardar la configuracion en la base.",
+                 componente="editor", e=e)
 
 
 def _agente_supervisor_json(config) -> dict | None:
@@ -613,8 +655,8 @@ def _sesion_nueva(tenant: str, id_sesion: str, canal: str,
         previo = persistencia.estado_de_conversacion_abierta(
             tenant, canal, id_sesion, horas_inactividad)
     except Exception as e:
-        print(f"[sesion] no se pudo leer el estado previo de {id_sesion}: "
-              f"{type(e).__name__}: {e}")
+        registrar("sesion", "no se pudo leer el estado previo",
+                  tenant=tenant, canal=canal, sesion=ref_sesion(id_sesion), error=e)
         return estado
     if not previo:
         return estado
@@ -694,10 +736,11 @@ def _sesion_nueva(tenant: str, id_sesion: str, canal: str,
             setattr(estado["sesion"], campo, list(valor))
 
     visitadas = getattr(estado["sesion"], "areas_visitadas", [])
-    print(f"[sesion] {id_sesion}: se retoma la conversacion abierta "
-          f"(escalada={previo['escalada']}, "
-          f"verificado={'si' if previo['id_cliente'] else 'no'}"
-          + (f", areas ya visitadas={visitadas}" if visitadas else "") + ")")
+    registrar("sesion", "se retoma la conversacion abierta",
+              conversation_id=str(previo["conversation_id"]),
+              escalada=bool(previo["escalada"]),
+              verificado=bool(previo["id_cliente"]),
+              areas_visitadas=list(visitadas))
     return estado
 
 
@@ -748,11 +791,11 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 # nuevo arrancaria con el historial viejo igual y el cierre no
                 # habria servido de nada.
                 _sesiones.pop((tenant, id_sesion), None)
-                print(f"[conversacion] {id_sesion}: cerrada por {horas}h sin "
-                      f"actividad, resumida en {len(texto)} caracteres")
+                registrar("conversacion", "cerrada por inactividad y resumida",
+                          conversation_id=str(vencida["conversation_id"]),
+                          horas=horas, caracteres_resumen=len(texto))
         except Exception as e:
-            print(f"[conversacion] no se pudo cerrar por inactividad: "
-                  f"{type(e).__name__}: {e}")
+            registrar("conversacion", "no se pudo cerrar por inactividad", error=e)
 
     clave = (tenant, id_sesion)
     nueva = clave not in _sesiones
@@ -795,9 +838,9 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 tenant, estado["conversacion_id"], MENSAJES_A_REHIDRATAR)
             if retomado:
                 estado["historial"].extend(retomado)
-                print(f"[sesion] {id_sesion}: se retomo la conversacion con "
-                      f"{len(retomado)} mensaje(s) -- el proceso no la tenia "
-                      f"en memoria")
+                registrar("sesion", "se retomo el historial: el proceso no lo tenia en memoria",
+                          conversation_id=str(estado["conversacion_id"]),
+                          mensajes=len(retomado))
 
     # --- si la conversacion ya se derivo a otra area, seguir ahi -------------
     # Solo aplica cuando el rol que pide el LLAMADOR ya es cliente_final (para
@@ -910,10 +953,11 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                     cerrado = bool(veredicto.get("resuelta")
                                    or veredicto.get("confirma_cierre"))
                 except Exception as e:
-                    print(f"[escalamiento] no se pudo evaluar el turno pausado: {e}")
+                    registrar("escalamiento", "no se pudo evaluar el turno pausado", error=e)
             if cerrado and _hay_verificacion_pendiente(tenant, estado["conversacion_id"]):
-                print(f"[verificacion] {id_sesion}: el cliente da por cerrado, "
-                      "pero hay una accion sin comprobar -- no se cierra")
+                registrar("verificacion", "el cliente da por cerrado, pero hay una accion "
+                                          "sin comprobar -- no se cierra",
+                          conversation_id=str(estado["conversacion_id"]))
                 cerrado = False
             # Y aunque haya respondido una persona: primero se le PREGUNTA.
             # Cerrar con lo que el modelo dedujo de un "ok" ya salio mal una
@@ -936,7 +980,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                     persistencia.registrar_mensaje(tenant, canal, id_sesion, rol, "user", mensaje)
                     persistencia.registrar_mensaje(tenant, canal, id_sesion, rol, "assistant", respuesta)
                 except Exception as e:
-                    print(f"[persistencia] no se pudo guardar la pregunta de cierre: {e}")
+                    registrar("persistencia", "no se pudo guardar la pregunta de cierre", error=e)
                 return {"respuesta": respuesta,
                         "verificado": estado["sesion"].verificado,
                         "pausada": True}
@@ -961,8 +1005,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                     estado["escalada"] = False
                     estado["caso_id"] = None
                 except Exception as e:
-                    print(f"[operativo] no se pudo cerrar tras la confirmacion "
-                          f"del cliente: {type(e).__name__}: {e}")
+                    registrar("operativo", "no se pudo cerrar tras la confirmacion del cliente", error=e)
                 estado["historial"].append({"role": "assistant", "content": respuesta})
                 return {"respuesta": respuesta,
                         "verificado": estado["sesion"].verificado,
@@ -979,7 +1022,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                     persistencia.registrar_mensaje(
                         tenant, canal, id_sesion, rol, "user", mensaje)
                 except Exception as e:
-                    print(f"[persistencia] no se pudo guardar el mensaje del cliente: {e}")
+                    registrar("persistencia", "no se pudo guardar el mensaje del cliente", error=e)
                 return {"respuesta": "", "verificado": estado["sesion"].verificado,
                         "pausada": True}
 
@@ -1003,7 +1046,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 persistencia.registrar_mensaje(tenant, canal, id_sesion, rol, "user", mensaje)
                 persistencia.registrar_mensaje(tenant, canal, id_sesion, rol, "assistant", respuesta)
             except Exception as e:
-                print(f"[persistencia] no se pudo guardar el turno pausado: {e}")
+                registrar("persistencia", "no se pudo guardar el turno pausado", error=e)
             return {"respuesta": respuesta,
                     "verificado": estado["sesion"].verificado,
                     "pausada": True}
@@ -1037,12 +1080,12 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     # traspaso que no ocurrio es peor que no prometerlo.
     gasto = consumo.estado_del_gasto(config, tenant)
     if gasto["accion"] == "avisar":
-        print(f"[consumo] {tenant}: {gasto['gastado']} de {gasto['tope']} USD "
-              f"({gasto['porcentaje']:.0%} del tope del mes).")
+        registrar("consumo", "gasto del mes cerca del tope", tenant=tenant,
+                  gastado_usd=gasto["gastado"], tope_usd=gasto["tope"],
+                  porcentaje=round(gasto["porcentaje"] * 100))
     elif gasto["accion"] == "frenar":
-        print(f"[consumo] {tenant}: TOPE ALCANZADO "
-              f"({gasto['gastado']} de {gasto['tope']} USD). El turno pasa a "
-              f"una persona sin llamar al modelo.")
+        registrar("consumo", "TOPE ALCANZADO: el turno pasa a una persona sin llamar al modelo",
+                  tenant=tenant, gastado_usd=gasto["gastado"], tope_usd=gasto["tope"])
         respuesta = (config.limites.mensaje_al_alcanzar_tope or "").strip() or (
             "En este momento no puedo atender por este medio. Un compañero "
             "del equipo va a continuar con esta conversacion.")
@@ -1060,7 +1103,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
         except Exception as e:
             # Igual se le contesta: quedarse callado ademas de sin servicio
             # seria el peor de los dos mundos.
-            print(f"[consumo] no se pudo registrar el turno frenado: {e}")
+            registrar("consumo", "no se pudo registrar el turno frenado", error=e)
         return {"respuesta": respuesta,
                 "verificado": bool(getattr(estado["sesion"], "verificado", False)),
                 "pausada": True}
@@ -1165,7 +1208,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                             tenant, cid, llamada["herramienta"],
                             llamada["verificacion_pendiente"])
             except Exception as e:
-                print(f"[traza] no se pudo guardar: {type(e).__name__}: {e}")
+                registrar("traza", "no se pudo guardar", error=e)
 
         if registro_herramientas:
             threading.Thread(target=_guardar_traza, daemon=True).start()
@@ -1182,7 +1225,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                     medio["contenido"], mime=medio.get("mime"),
                     descripcion=medio.get("descripcion"), mensaje_id=mensaje_id)
             except Exception as e:
-                print(f"[informes] no se pudo guardar el archivo generado: {e}")
+                registrar("informes", "no se pudo guardar el archivo generado", error=e)
         # Las marcas de televisor que se nombraron y no tienen guia propia.
         #
         # Mismo motivo que el bucle de arriba: cuando la herramienta resolvio
@@ -1226,7 +1269,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                     {c: getattr(estado["sesion"], c, None)
                      for c in Sesion.CAMPOS_PERSISTIBLES})
             except Exception as e:
-                print(f"[persistencia] no se pudo guardar la identidad: {e}")
+                registrar("persistencia", "no se pudo guardar la identidad", error=e)
 
         # El anti-rebote, aparte y SIN exigir identidad verificada: se llena
         # al derivar, y derivar pasa antes de que nadie verifique. Solo se
@@ -1241,9 +1284,9 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                     persistencia.guardar_estado_routing(
                         tenant, conversation_id, routing)
                 except Exception as e:
-                    print(f"[persistencia] no se pudo guardar el routing: {e}")
+                    registrar("persistencia", "no se pudo guardar el routing", error=e)
     except Exception as e:  # nunca se rompe el turno por un fallo de persistencia
-        print(f"[persistencia] no se pudo guardar el turno: {e}")
+        registrar("persistencia", "no se pudo guardar el turno", error=e)
 
     # Solo conversaciones con un cliente final pueden terminar en un ticket
     # humano -- escalar la sesion de un colaborador no tiene destino. 'ya
@@ -1284,7 +1327,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             # NO es lo mismo que 'evaluacion = None' por decision: el
             # evaluador no llego a opinar. Se anota para poder distinguirlo
             # al final del turno -- ver estado_escalada.calcular.
-            print(f"[escalamiento] fallo al evaluar: {type(e).__name__}: {e}")
+            registrar("escalamiento", "fallo al evaluar", error=e)
             evaluacion = None
             evaluador_fallo = True
 
@@ -1320,8 +1363,9 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 and config.escalamiento.frases_pide_humano
                 and not pidio_hablar_con_humano(
                     estado["historial"], config.escalamiento.frases_pide_humano)):
-            print(f"[escalamiento] {id_sesion}: se descarta "
-                  f"'{motivo_humano}' -- el cliente nunca pidio una persona")
+            registrar("escalamiento", "se descarta el motivo: el cliente nunca pidio una persona",
+                      conversation_id=id_interno(estado.get("conversacion_id")),
+                      motivo=motivo_humano)
             evaluacion = {**evaluacion, "escalar": False}
 
         # El otro lado del mismo candado. Descartar el motivo cuando no hay
@@ -1332,8 +1376,10 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
         decision_humano, evidencia_humano = _decidir_pedido_humano(
             config, estado["historial"])
         if decision_humano:
-            print(f"[escalamiento] {id_sesion}: pedido de una persona -> "
-                  f"{decision_humano} ({evidencia_humano[:60]!r})")
+            # La evidencia es lo que ESCRIBIO el cliente: no va al log.
+            registrar("escalamiento", "pedido de una persona",
+                      conversation_id=id_interno(estado.get("conversacion_id")),
+                      decision=decision_humano)
 
         # Si esta conversacion YA tuvo su caso, no se abre otro: lo que
         # sigue vivo es la deteccion del cierre. Sin este freno, una vuelta
@@ -1371,7 +1417,10 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
         if forzado:
             evaluacion = dict(evaluacion or {})
             if not evaluacion.get("escalar"):
-                print(f"[escalamiento] forzado por '{forzado}': {motivo_forzado}")
+                # motivo_forzado cita al cliente: queda en la evaluacion, no en el log.
+                registrar("escalamiento", "escalada forzada",
+                          conversation_id=id_interno(estado.get("conversacion_id")),
+                          motivo=forzado)
             evaluacion["escalar"] = True
             evaluacion["motivo"] = forzado
             evaluacion["necesita_humano"] = True
@@ -1435,8 +1484,9 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
         # cliente en cada turno, sin un solo ticket detras. Es exactamente la
         # falla con la que se abrio este trabajo.
         if estado.get("agendamiento_pendiente") and not (evaluacion or {}).get("escalar"):
-            print("[agendamiento] se retoma el caso pospuesto: el modelo no "
-                  "volvio a escalar por su cuenta")
+            registrar("agendamiento", "se retoma el caso pospuesto: el modelo no "
+                                      "volvio a escalar por su cuenta",
+                      conversation_id=id_interno(estado.get("conversacion_id")))
             evaluacion = {**(evaluacion or {}), **estado["agendamiento_pendiente"],
                          "escalar": True}
 
@@ -1494,9 +1544,9 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                     "de verdad hace falta una persona, en el proximo mensaje "
                     "se pasa.")
                 posponer = True
-                print(f"[escalamiento] {id_sesion}: se pospone '"
-                      f"{evaluacion.get('motivo')}' -- el asistente todavia no "
-                      "habia hecho nada")
+                registrar("escalamiento", "se pospone: el asistente todavia no habia hecho nada",
+                          conversation_id=id_interno(estado.get("conversacion_id")),
+                          motivo=evaluacion.get("motivo"))
             elif escalamiento.merece_un_intento(
                     config, evaluacion.get("motivo", ""),
                     estado["intento_antes_de_escalar"]):
@@ -1510,8 +1560,9 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                     "pedile la cedula UNA vez y segui de una. Si con eso no "
                     "alcanza, en el proximo mensaje se pasa a un companero.")
                 posponer = True
-                print(f"[escalamiento] {id_sesion}: '{evaluacion.get('motivo')}' "
-                      "se pospone una vuelta -- el asistente lo intenta primero")
+                registrar("escalamiento", "se pospone una vuelta: el asistente lo intenta primero",
+                          conversation_id=id_interno(estado.get("conversacion_id")),
+                          motivo=evaluacion.get("motivo"))
 
             # --- verificacion automatica de agendamiento --------------------
             # Solo corre si el tenant declaro ESTE caso puntual en
@@ -1545,8 +1596,8 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                                                       estado["historial"])
                     if herramienta_auto and caso_manual else None)
             if veto:
-                print(f"[agendamiento] VETADO por {veto}: no se agenda visita "
-                      "individual, el caso sigue el camino normal")
+                registrar("agendamiento", "VETADO: no se agenda visita individual, el caso "
+                                          "sigue el camino normal", veto=veto)
                 herramienta_auto = None
 
             if herramienta_auto and not posponer and not forzado:
@@ -1562,8 +1613,8 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 directo = agendamiento.evidencia_ya_alcanza(
                     config, caso_manual, estado["historial"])
                 if directo:
-                    print(f"[agendamiento] evidencia suficiente ({directo}): "
-                          f"se agenda sin pasar por el checklist del manual")
+                    registrar("agendamiento", "evidencia suficiente: se agenda sin pasar por "
+                                              "el checklist del manual", evidencia=directo)
                     veredicto = {"checklist_completo": True,
                                  "corresponde_agendar": True,
                                  # Mismo respaldo que el ticket de la
@@ -1578,17 +1629,19 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                     try:
                         veredicto = agendamiento.verificar(config, tenant, rol, estado["historial"])
                     except Exception as e:
-                        print(f"[agendamiento] fallo al verificar: {type(e).__name__}: {e}")
+                        registrar("agendamiento", "fallo al verificar", error=e)
                         veredicto = None
 
                 # Sin esta linea, un veredicto que dice "no" es invisible: no
                 # hay ticket, no hay error, y desde afuera se ve igual que si
                 # el agendamiento no estuviera configurado.
                 if veredicto:
-                    print(f"[agendamiento] caso='{caso_manual}' "
-                          f"checklist_completo={veredicto.get('checklist_completo')} "
-                          f"corresponde_agendar={veredicto.get('corresponde_agendar')} "
-                          f"falta={veredicto.get('pregunta_faltante') or '-'}")
+                    # 'pregunta_faltante' la redacta el modelo sobre la
+                    # conversacion: se dice SI falta algo, no que.
+                    registrar("agendamiento", "veredicto", caso=caso_manual,
+                              checklist_completo=veredicto.get("checklist_completo"),
+                              corresponde_agendar=veredicto.get("corresponde_agendar"),
+                              falta_dato=bool(veredicto.get("pregunta_faltante")))
 
                 if veredicto and veredicto.get("checklist_completo") and veredicto.get("corresponde_agendar"):
                     id_ticket_auto = agendamiento.agendar(
@@ -1698,8 +1751,9 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                         prioridad=entrada_ticket.prioridad)
                     if id_ticket_operativo:
                         ticket_creado = True
-                        print(f"[escalamiento] ticket operativo #{id_ticket_operativo} "
-                              f"creado con '{nombre_ticket}'")
+                        registrar("escalamiento", "ticket operativo creado",
+                                  ticket=id_ticket_operativo, herramienta=nombre_ticket,
+                                  conversation_id=id_interno(conversation_id))
                         persistencia.guardar_ticket_operativo(
                             tenant, conversation_id, id_ticket_operativo)
                         # Que el numero quede en el caso: quien lo tome en la
@@ -1711,8 +1765,9 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                         # Que NO haya salido importa: quien lea el caso en la
                         # bandeja tiene que saber que la operacion no lo
                         # recibio, en vez de suponer que si.
-                        print("[escalamiento] no se pudo crear el ticket "
-                              f"operativo con '{nombre_ticket}'")
+                        registrar("escalamiento", "no se pudo crear el ticket operativo",
+                                  herramienta=nombre_ticket,
+                                  conversation_id=id_interno(conversation_id))
 
                 # Lo que el cliente va a leer en este turno, decidido ANTES
                 # de escalar y no despues. Dos motivos, y el segundo es el que
@@ -1816,7 +1871,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 try:
                     estado["caso_id"] = persistencia.caso_de_conversacion(tenant, conversation_id)
                 except Exception as e:
-                    print(f"[escalamiento] no se pudo leer el caso de la conversacion: {e}")
+                    registrar("escalamiento", "no se pudo leer el caso de la conversacion", error=e)
 
                 # UNA PAUSA QUE NO SE VA A DESPAUSAR SOLA: dejarla dicha.
                 #
@@ -1834,10 +1889,11 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 # y sin ella la unica forma de enterarse es que alguien note un
                 # cliente callado.
                 if necesita_humano and quedo_registrado and not estado["caso_id"]:
-                    print(f"[escalamiento] {id_sesion}: traspaso registrado SIN "
-                          f"caso del CRM -- la conversacion queda pausada hasta "
-                          f"que una persona la devuelva. Si esto se repite, "
-                          f"revisar por que el caso no se crea.")
+                    registrar("escalamiento", "traspaso registrado SIN caso del CRM -- la "
+                                              "conversacion queda pausada hasta que una persona "
+                                              "la devuelva. Si esto se repite, revisar por que "
+                                              "el caso no se crea.",
+                              conversation_id=id_interno(conversation_id))
 
                 # Escalo y no quedo registrado en ningun lado: no se le
                 # puede decir al cliente que si.
@@ -1877,7 +1933,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                     try:
                         persistencia.actualizar_contenido_mensaje(tenant, mensaje_id, respuesta)
                     except Exception as e:
-                        print(f"[persistencia] no se pudo actualizar el aviso de escalada: {e}")
+                        registrar("persistencia", "no se pudo actualizar el aviso de escalada", error=e)
         elif decision_humano == PREGUNTAR:
             # Ni lo pidio ni es una consulta normal: esta diciendo que esto no
             # se le esta resolviendo. No se decide por el --escalar aca abre
@@ -1888,8 +1944,8 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             # turno: esa funcion revisa si la respuesta promete una persona, y
             # la pregunta nombra una. Ver mas abajo.
             preguntar_por_humano = True
-            print(f"[escalamiento] {id_sesion}: se pregunta si quiere una "
-                  f"persona -- {evidencia_humano[:60]!r}")
+            registrar("escalamiento", "se pregunta si quiere una persona",
+                      conversation_id=id_interno(conversation_id))
         elif _hay_verificacion_pendiente(tenant, conversation_id):
             # CANDADO. Mientras una accion siga sin comprobarse, esta
             # conversacion no se cierra ni se pregunta si cerrarla: todavia no
@@ -1900,8 +1956,8 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             # sola --confirmada, no confirmada o no verificable-- al agotar
             # sus intentos, y una conversacion abandonada la cierra igual el
             # barrido por inactividad.
-            print(f"[verificacion] {id_sesion}: no se cierra, hay una accion "
-                  "sin comprobar")
+            registrar("verificacion", "no se cierra, hay una accion sin comprobar",
+                      conversation_id=id_interno(conversation_id))
         elif (evaluacion and estado["cierre_propuesto"] and _pregunta_de_cierre(config)
                 and not evaluacion.get("confirma_cierre")):
             # Se le pregunto y NO dijo que si: trajo otra cosa. La pregunta
@@ -1923,7 +1979,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 try:
                     persistencia.actualizar_contenido_mensaje(tenant, mensaje_id, respuesta)
                 except Exception as e:
-                    print(f"[persistencia] no se pudo agregar la pregunta de cierre: {e}")
+                    registrar("persistencia", "no se pudo agregar la pregunta de cierre", error=e)
         elif evaluacion and (evaluacion.get("resuelta")
                              or evaluacion.get("confirma_cierre")):
             # Ya se le pregunto (o el tenant no quiere que se pregunte) y
@@ -1950,7 +2006,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                     persistencia.cerrar_conversacion(tenant, conversation_id)
                 cerrada = True
             except Exception as e:
-                print(f"[conversaciones] no se pudo cerrar la conversacion: {e}")
+                registrar("conversaciones", "no se pudo cerrar la conversacion", error=e)
             # El supervisor audita la conversacion ya cerrada y deja un
             # veredicto PENDIENTE para que una persona lo confirme desde
             # /manual -- nunca publica solo (ver nucleo/seguimiento/
@@ -1959,7 +2015,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             try:
                 supervisor.revisar(config, rol, tenant, conversation_id, estado["historial"])
             except Exception as e:
-                print(f"[supervisor] fallo al revisar la conversacion: {e}")
+                registrar("supervisor", "fallo al revisar la conversacion", error=e)
 
     # --- ¿el traspaso ocurrio de verdad? ------------------------------------
     # Tres situaciones distintas que antes se veian iguales desde afuera, y la
@@ -1995,8 +2051,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             try:
                 persistencia.actualizar_contenido_mensaje(tenant, mensaje_id, respuesta)
             except Exception as e:
-                print(f"[persistencia] no se pudo agregar la pregunta por "
-                      f"una persona: {e}")
+                registrar("persistencia", "no se pudo agregar la pregunta por una persona", error=e)
 
     # El turno entero, ya con lo que gastaron el evaluador de escalamiento y
     # todo lo que corre despues de componer la respuesta.
@@ -2077,8 +2132,8 @@ def chat():
         try:
             asignados = persistencia.agentes_de_colaborador(tenant, profile_id)
         except Exception as e:
-            print(f"[agentes] fallo al resolver los de '{profile_id}': "
-                  f"{type(e).__name__}: {e}")
+            registrar("agentes", "fallo al resolver los del colaborador",
+                      profile_id=profile_id, error=e)
             return jsonify({"error": "No se pudieron resolver los agentes."}), 500
         # Fail-closed: sin asignacion no se atiende. Caer a un agente por
         # defecto seria darle a alguien un acceso que nadie le concedio.
@@ -2089,7 +2144,7 @@ def chat():
         try:
             rol, rol_fusionado = fusionar_roles(config, asignados)
         except ValueError as e:
-            return jsonify({"error": str(e)}), 400
+            return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
         # Copia por peticion, no se muta el config cacheado: el rol fusionado
         # existe solo para este turno. Si se registrara en el compartido,
         # apareceria como un agente mas en GET /agentes y en el editor.
@@ -2111,7 +2166,7 @@ def chat():
                                profile_id=profile_id,
                                nombre_colaborador=nombre_colaborador)
     except motor.ErrorMotor as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
 
     # 'pausada' solo viaja cuando es cierto: es la forma que ya devolvia /chat
     # antes de que existiera el webhook, y el simulador depende de ella.
@@ -2198,14 +2253,14 @@ def _candidatos_externos(config, tenant: str) -> list[dict]:
     herramienta = next((h for h in config.herramientas
                         if h.nombre == cfg.herramienta_listado), None)
     if herramienta is None:
-        print(f"[agentes] '{cfg.herramienta_listado}' no esta en el catalogo")
+        registrar("agentes", "la herramienta de listado no esta en el catalogo",
+                  herramienta=cfg.herramienta_listado)
         return []
     try:
         crudo = motor._ejecutar_tool(herramienta, None, {}, tenant,
                                      config.variables_tenant)
     except Exception as e:
-        print(f"[agentes] no se pudieron listar los candidatos externos: "
-              f"{type(e).__name__}: {e}")
+        registrar("agentes", "no se pudieron listar los candidatos externos", error=e)
         return []
 
     filas = crudo.get("results") if isinstance(crudo, dict) else crudo
@@ -2246,7 +2301,7 @@ def agentes_asignaciones():
     try:
         asignaciones = persistencia.asignaciones_de_agentes(tenant)
     except Exception as e:
-        print(f"[agentes] fallo al listar asignaciones: {type(e).__name__}: {e}")
+        registrar("agentes", "fallo al listar asignaciones", error=e)
         return jsonify({"error": "No se pudieron leer las asignaciones."}), 500
 
     # Las identidades ya guardadas y los candidatos posibles viajan con las
@@ -2258,14 +2313,13 @@ def agentes_asignaciones():
             identidades = persistencia.identidades_externas(
                 tenant, config.identidad_externa.sistema)
         except Exception as e:
-            print(f"[agentes] fallo al leer identidades externas: "
-                  f"{type(e).__name__}: {e}")
+            registrar("agentes", "fallo al leer identidades externas", error=e)
         candidatos = _candidatos_externos(config, tenant)
 
     try:
         areas_por_persona = persistencia.areas_de_colaboradores(tenant)
     except Exception as e:
-        print(f"[agentes] fallo al leer areas: {type(e).__name__}: {e}")
+        registrar("agentes", "fallo al leer areas", error=e)
         areas_por_persona = {}
 
     return jsonify({"asignaciones": asignaciones,
@@ -2307,7 +2361,7 @@ def agentes_areas():
     try:
         areas_por_persona = persistencia.areas_de_colaboradores(tenant)
     except Exception as e:
-        print(f"[agentes] fallo al leer areas: {type(e).__name__}: {e}")
+        registrar("agentes", "fallo al leer areas", error=e)
         areas_por_persona = {}
 
     return jsonify({"areas": [{"nombre": a.nombre, "etiqueta": a.etiqueta,
@@ -2352,7 +2406,7 @@ def agentes_asignar(profile_id):
     try:
         guardados = persistencia.asignar_agentes(tenant, profile_id, roles)
     except Exception as e:
-        print(f"[agentes] fallo al asignar a '{profile_id}': {type(e).__name__}: {e}")
+        registrar("agentes", "fallo al asignar", profile_id=profile_id, error=e)
         return jsonify({"error": "No se pudieron guardar las asignaciones."}), 500
 
     # Quien es esta persona en el sistema operativo del tenant. Va en el MISMO
@@ -2371,8 +2425,7 @@ def agentes_asignar(profile_id):
             persistencia.guardar_area_colaborador(
                 tenant, profile_id, str(cuerpo.get("area") or ""))
         except Exception as e:
-            print(f"[agentes] fallo al guardar el area de '{profile_id}': "
-                  f"{type(e).__name__}: {e}")
+            registrar("agentes", "fallo al guardar el area", profile_id=profile_id, error=e)
 
     sistema = (config.identidad_externa.sistema
                if config.identidad_externa else None)
@@ -2387,8 +2440,8 @@ def agentes_asignar(profile_id):
             # No invalida la asignacion de agentes, que ya se guardo: se avisa
             # y se sigue. Devolver error aca dejaria a quien lo llamo sin saber
             # que la mitad SI quedo hecha.
-            print(f"[agentes] fallo al guardar la identidad externa de "
-                  f"'{profile_id}': {type(e).__name__}: {e}")
+            registrar("agentes", "fallo al guardar la identidad externa",
+                      profile_id=profile_id, error=e)
             return jsonify({"profile_id": profile_id, "roles": guardados,
                             "aviso": "Se guardaron los agentes, pero no la "
                                      "identidad en el sistema externo."})
@@ -2475,7 +2528,7 @@ def agentes_flujo_guardar():
         config = editor.guardar_flujo_derivacion(
             tenant, destinos, cuerpo.get("atiende") or {})
     except editor.ErrorEdicion as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
         return _error_al_guardar(e)
 
@@ -2500,7 +2553,7 @@ def agentes_crear():
             herramientas=cuerpo.get("herramientas", []),
         )
     except editor.ErrorEdicion as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
         return _error_al_guardar(e)
 
@@ -2524,7 +2577,7 @@ def agentes_editar(nombre):
             herramientas=cuerpo.get("herramientas", []),
         )
     except editor.ErrorEdicion as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
         return _error_al_guardar(e)
 
@@ -2541,7 +2594,7 @@ def agentes_borrar(nombre):
     try:
         editor.borrar_rol(tenant, nombre)
     except editor.ErrorEdicion as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
         return _error_al_guardar(e)
 
@@ -2577,7 +2630,7 @@ def reporte_escalamiento():
     try:
         r = persistencia.tasa_escalamiento(tenant, dias)
     except Exception as e:
-        print(f"[reportes] fallo al calcular escalamiento: {type(e).__name__}: {e}")
+        registrar("reportes", "fallo al calcular escalamiento", error=e)
         return jsonify({"error": "No se pudo calcular el reporte."}), 500
 
     return jsonify({"dias": dias, **r})
@@ -2631,7 +2684,7 @@ def configuracion_persona():
             instrucciones_adicionales=cuerpo.get("instrucciones_adicionales", ""),
         )
     except editor.ErrorEdicion as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
         return _error_al_guardar(e)
 
@@ -2650,7 +2703,7 @@ def configuracion_identidad():
         config = editor.guardar_identidad_descripcion(
             tenant, descripcion=cuerpo.get("descripcion", ""))
     except editor.ErrorEdicion as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
         return _error_al_guardar(e)
 
@@ -2673,7 +2726,7 @@ def configuracion_plazo_visita_tecnica():
     try:
         config = editor.guardar_plazo_visita_tecnica(tenant, dias)
     except editor.ErrorEdicion as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
         return _error_al_guardar(e)
 
@@ -2753,7 +2806,7 @@ def configuracion_canal_whatsapp():
             tenant, activo=bool(cuerpo.get("activo", False)),
             numero_visible=cuerpo.get("numero_visible") or None)
     except editor.ErrorEdicion as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
         return _error_al_guardar(e)
 
@@ -2783,7 +2836,8 @@ def configuracion_variables_listar():
     try:
         config = _config_de(tenant)
     except Exception as e:
-        return jsonify({"error": f"No se pudo cargar la config: {e}"}), 500
+        return fallo(500, "config_no_cargada", "No se pudo cargar la configuracion.",
+                     componente="configuracion", e=e)
     return jsonify({"variables": dict(config.variables_tenant or {})})
 
 
@@ -2809,7 +2863,7 @@ def configuracion_variable_guardar(nombre):
     try:
         config = editor.guardar_variable_tenant(tenant, nombre, valor)
     except editor.ErrorEdicion as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
         return _error_al_guardar(e)
 
@@ -2826,7 +2880,7 @@ def configuracion_variable_borrar(nombre):
     try:
         editor.borrar_variable_tenant(tenant, nombre)
     except editor.ErrorEdicion as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
         return _error_al_guardar(e)
 
@@ -2868,7 +2922,8 @@ def interno_ejecutar_herramienta(nombre: str):
     try:
         config = _config_de(tenant)
     except Exception as e:
-        return jsonify({"error": f"No se pudo cargar la config: {e}"}), 500
+        return fallo(500, "config_no_cargada", "No se pudo cargar la configuracion.",
+                     componente="interno", e=e)
 
     herramienta = next((h for h in config.herramientas if h.nombre == nombre), None)
     if herramienta is None:
@@ -2886,8 +2941,8 @@ def interno_ejecutar_herramienta(nombre: str):
     try:
         salida = motor.ejecutar_para_servicio(config, herramienta, argumentos)
     except Exception as e:
-        print(f"[interno] '{nombre}' fallo: {type(e).__name__}: {e}")
-        return jsonify({"error": f"{type(e).__name__}: {e}"}), 502
+        return fallo(502, "herramienta_fallo", "La herramienta no pudo completarse.",
+                     componente="interno", e=e, estado_proveedor=estado_http_de(e))
 
     return jsonify({"resultado": salida})
 
@@ -3015,7 +3070,7 @@ def configuracion_guias_tv_guardar():
     try:
         config = editor.guardar_guias_tv(tenant, guias)
     except editor.ErrorEdicion as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     return jsonify({"guias_tv": [g.model_dump(mode="json")
                                  for g in config.guias_tv]})
 
@@ -3029,7 +3084,7 @@ def configuracion_servicios_guardar():
     try:
         config = editor.guardar_servicios_ofrecidos(tenant, servicios)
     except editor.ErrorEdicion as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     return jsonify({"servicios_ofrecidos": [s.model_dump(mode="json")
                                            for s in config.servicios_ofrecidos]})
 
@@ -3053,7 +3108,7 @@ def configuracion_parrilla_guardar():
         canales, descartados = editor.canales_desde_excel(archivo.read())
         editor.guardar_parrilla_canales(tenant, canales)
     except editor.ErrorEdicion as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     return jsonify({"parrilla_canales": canales, "descartados": descartados,
                     "total": len(canales)})
 
@@ -3088,14 +3143,17 @@ def configuracion_localidades_sincronizar():
         localidades = sincronizador_localidades.sincronizar(
             herramienta, tenant, config.variables_tenant)
     except Exception as e:
-        return jsonify({"error": f"No se pudo sincronizar contra el "
-                                 f"proveedor: {type(e).__name__}: {e}"}), 502
+        # D19: antes devolvia el texto del proveedor tal cual. Queda su codigo
+        # HTTP, que es lo que dice si fue una clave, una ruta o una caida.
+        return fallo(502, "proveedor_no_sincronizo",
+                     "No se pudieron sincronizar las localidades con el proveedor.",
+                     componente="localidades", e=e, estado_proveedor=estado_http_de(e))
 
     try:
         nuevo = editor.guardar_localidades(
             tenant, [l.model_dump(mode="json") for l in localidades])
     except editor.ErrorEdicion as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
         return _error_al_guardar(e)
 
@@ -3122,7 +3180,7 @@ def configuracion_planes_venta_guardar():
     try:
         config = editor.guardar_planes_venta(tenant, planes)
     except editor.ErrorEdicion as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
         return _error_al_guardar(e)
 
@@ -3146,9 +3204,9 @@ def secretos_listar():
     try:
         return jsonify({"secretos": secretos.listar(tenant)})
     except secretos.ErrorSecreto as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 500
     except Exception as e:
-        print(f"[secretos] fallo al listar: {type(e).__name__}: {e}")
+        registrar("secretos", "fallo al listar", error=e)
         return jsonify({"error": "No se pudieron leer los secretos."}), 500
 
 
@@ -3194,8 +3252,7 @@ def configuracion_credenciales():
     try:
         cargados = {s["nombre"]: s for s in secretos.listar(tenant)}
     except Exception as e:
-        print(f"[credenciales] no se pudieron leer los secretos: "
-              f"{type(e).__name__}: {e}")
+        registrar("credenciales", "no se pudieron leer los secretos", error=e)
         cargados = {}
 
     # Los declarados por el catalogo, mas los que ya estan cargados aunque
@@ -3238,9 +3295,9 @@ def secretos_guardar():
     try:
         secretos.guardar(tenant, nombre, valor, cuerpo.get("descripcion"))
     except secretos.ErrorSecreto as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
-        print(f"[secretos] fallo al guardar '{nombre}': {type(e).__name__}: {e}")
+        registrar("secretos", "fallo al guardar", nombre=nombre, error=e)
         return jsonify({"error": "No se pudo guardar el secreto."}), 500
 
     return jsonify({"ok": True})
@@ -3256,7 +3313,7 @@ def secretos_borrar(nombre):
     try:
         borrado = secretos.borrar(tenant, nombre)
     except Exception as e:
-        print(f"[secretos] fallo al borrar '{nombre}': {type(e).__name__}: {e}")
+        registrar("secretos", "fallo al borrar", nombre=nombre, error=e)
         return jsonify({"error": "No se pudo borrar el secreto."}), 500
 
     return jsonify({"borrado": borrado})
@@ -3299,7 +3356,9 @@ def diagnostico_smartolt():
     except requests.exceptions.Timeout:
         return jsonify({"ok": False, "detalle": "El servidor no respondio a tiempo."})
     except Exception as e:
-        return jsonify({"ok": False, "detalle": f"{type(e).__name__}: {e}"})
+        registrar("diagnostico", "fallo inesperado al probar la conexion", error=e)
+        return jsonify({"ok": False, "codigo": "fallo_inesperado",
+                        "detalle": "No se pudo probar la conexion por un error inesperado."})
 
     if r.status_code == 200:
         try:
@@ -3320,7 +3379,8 @@ def diagnostico_smartolt():
     if r.status_code == 404:
         return jsonify({"ok": False, "detalle": "HTTP 404 -- el subdominio responde, pero esta ruta "
                          "no existe en esta cuenta (la API real puede diferir de la hipotesis)."})
-    return jsonify({"ok": False, "detalle": f"HTTP {r.status_code}: {r.text[:200]}"})
+    # Solo el codigo: el cuerpo es del proveedor y puede traer cualquier cosa.
+    return jsonify({"ok": False, "detalle": f"El servidor respondio HTTP {r.status_code}."})
 
 
 # =============================================================================
@@ -3336,9 +3396,9 @@ def conversaciones():
     try:
         salida = persistencia.ultima_actividad(tenant, canal=request.args.get("canal"))
     except RuntimeError as e:
-        return jsonify({"error": str(e)}), 404
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 404
     except Exception as e:
-        print(f"[conversaciones] fallo al listar: {type(e).__name__}: {e}")
+        registrar("conversaciones", "fallo al listar", error=e)
         return jsonify({"error": "No se pudo leer las conversaciones."}), 500
 
     return jsonify({"tenant": tenant, "conversaciones": salida})
@@ -3359,7 +3419,7 @@ def conversacion_por_caso(caso_id):
     try:
         datos = persistencia.conversacion_de_caso(tenant, caso_id)
     except Exception as e:
-        print(f"[conversaciones] fallo al buscar por caso: {type(e).__name__}: {e}")
+        registrar("conversaciones", "fallo al buscar por caso", error=e)
         return jsonify({"error": "No se pudo leer la conversacion."}), 500
 
     # Los enlaces directos a los sistemas externos, armados ACA y no en la
@@ -3616,7 +3676,8 @@ def _estado_equipo(config, sn_onu: str, tenant: str) -> dict:
                 salida.update({k: v for k, v in datos.items()
                                if isinstance(v, (str, int, float, bool)) and v != ""})
         except Exception as e:
-            print(f"[enlaces] '{nombre}' no respondio: {type(e).__name__}: {e}")
+            registrar("enlaces", "la herramienta de equipo no respondio",
+                      herramienta=nombre, error=e)
     return salida
 
 
@@ -3687,8 +3748,7 @@ def _inventario_onu(config, tenant: str) -> list:
         r.raise_for_status()
         onus = (r.json() or {}).get("onus") or []
     except Exception as e:                                  # noqa: BLE001
-        print(f"[enlaces] no se pudo leer el inventario de ONU: "
-              f"{type(e).__name__}: {e}")
+        registrar("enlaces", "no se pudo leer el inventario de ONU", error=e)
         return []
     _onus_por_olt[tenant] = (ahora, onus)
     return onus
@@ -3784,8 +3844,7 @@ def _ficha_cliente(config, id_cliente, tenant: str) -> dict:
             ficha["plan"] = plan["nombre"]
         return ficha
     except Exception as e:
-        print(f"[enlaces] no se pudo leer la ficha del cliente: "
-              f"{type(e).__name__}: {e}")
+        registrar("enlaces", "no se pudo leer la ficha del cliente", error=e)
         return {}
 
 
@@ -3798,9 +3857,9 @@ def conversaciones_mensajes(id_conversacion):
     try:
         resultado = persistencia.mensajes_de(tenant, id_conversacion)
     except RuntimeError as e:
-        return jsonify({"error": str(e)}), 404
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 404
     except Exception as e:
-        print(f"[conversaciones] fallo al leer mensajes: {type(e).__name__}: {e}")
+        registrar("conversaciones", "fallo al leer mensajes", error=e)
         return jsonify({"error": "No se pudo leer la conversacion."}), 500
 
     if resultado["conversacion"] is None:
@@ -3838,8 +3897,9 @@ def canales_plantillas():
     except FileNotFoundError:
         return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
     except Exception as e:
-        print(f"[plantillas] no se pudieron leer: {type(e).__name__}: {e}")
-        return jsonify({"error": f"No se pudieron leer las plantillas: {e}"}), 502
+        return fallo(502, "plantillas_no_leidas",
+                     mensaje_publico(e, "No se pudieron leer las plantillas."),
+                     componente="plantillas", e=e)
 
     aprobadas = [p for p in todas if (p.get("estado") or "").upper() == "APPROVED"]
     return jsonify({"plantillas": aprobadas, "total_en_meta": len(todas)})
@@ -3874,7 +3934,9 @@ def conversaciones_enviar_plantilla(id_conversacion):
     except FileNotFoundError:
         return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
     except Exception as e:
-        return jsonify({"error": f"No se pudieron leer las plantillas: {e}"}), 502
+        return fallo(502, "plantillas_no_leidas",
+                     mensaje_publico(e, "No se pudieron leer las plantillas."),
+                     componente="plantillas", e=e)
 
     # Se vuelve a mirar la lista en vez de confiar en lo que mando la
     # pantalla: entre que se dibujo el selector y que alguien apreto Enviar
@@ -3895,9 +3957,9 @@ def conversaciones_enviar_plantilla(id_conversacion):
         destino = persistencia.agregar_mensaje_humano(
             tenant, id_conversacion, texto, autor)
     except RuntimeError as e:
-        return jsonify({"error": str(e)}), 404
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 404
     except Exception as e:
-        print(f"[plantillas] fallo al guardar: {type(e).__name__}: {e}")
+        registrar("plantillas", "fallo al guardar", error=e)
         return jsonify({"error": "No se pudo guardar el mensaje."}), 500
     if destino is None:
         return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
@@ -3906,19 +3968,13 @@ def conversaciones_enviar_plantilla(id_conversacion):
         return jsonify({"error": "Las plantillas son de WhatsApp; esta "
                                  "conversacion es de otro canal."}), 400
 
-    salida = {"ok": True, "entregado": False, "texto": texto,
-              "mensaje_id": destino["mensaje_id"]}
-    try:
-        wamid = whatsapp.enviar_plantilla_aprobada(
+    salida = {"ok": True, "texto": texto, "mensaje_id": destino["mensaje_id"]}
+    salida.update(_entregar_y_registrar(
+        tenant, destino["mensaje_id"],
+        lambda: whatsapp.enviar_plantilla_aprobada(
             config, tenant, destino["usuario_externo"], nombre, variables,
-            elegida.get("idioma") or "es")
-        persistencia.marcar_envio(tenant, destino["mensaje_id"], wamid)
-        salida["entregado"] = True
-    except Exception as e:
-        print(f"[plantillas] no se pudo entregar '{nombre}' en "
-              f"'{id_conversacion}': {type(e).__name__}: {e}")
-        salida["aviso"] = str(e)
-        persistencia.marcar_envio(tenant, destino["mensaje_id"], None, str(e))
+            elegida.get("idioma") or "es"),
+        f"plantillas '{nombre}'"))
     return jsonify(salida), 201
 
 
@@ -3969,8 +4025,7 @@ def caso_responder_humano(caso_id):
     try:
         datos = persistencia.conversacion_de_caso(tenant, caso_id)
     except Exception as e:
-        print(f"[conversaciones] fallo al resolver el caso {caso_id}: "
-              f"{type(e).__name__}: {e}")
+        registrar("conversaciones", "fallo al resolver el caso", caso_id=caso_id, error=e)
         return jsonify({"error": "No se pudo resolver la conversacion."}), 500
     if not datos:
         # No es un error: un ticket cargado a mano no tiene conversacion
@@ -4019,9 +4074,9 @@ def conversaciones_responder_humano(id_conversacion):
         destino = persistencia.agregar_mensaje_humano(
             tenant, id_conversacion, contenido, autor)
     except RuntimeError as e:
-        return jsonify({"error": str(e)}), 404
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 404
     except Exception as e:
-        print(f"[conversaciones] fallo al guardar respuesta humana: {type(e).__name__}: {e}")
+        registrar("conversaciones", "fallo al guardar respuesta humana", error=e)
         return jsonify({"error": "No se pudo guardar la respuesta."}), 500
 
     if destino is None:
@@ -4071,8 +4126,7 @@ def conversaciones_responder_humano(id_conversacion):
             salida["copiado_al_ticket"] = operativo.responder(
                 config, tenant, destino["ticket_operativo"], contenido, autor)
         except Exception as e:
-            print(f"[operativo] no se pudo copiar la respuesta al ticket: "
-                  f"{type(e).__name__}: {e}")
+            registrar("operativo", "no se pudo copiar la respuesta al ticket", error=e)
             salida["copiado_al_ticket"] = False
 
     if destino["canal"] != "whatsapp":
@@ -4081,30 +4135,17 @@ def conversaciones_responder_humano(id_conversacion):
         salida["entregado"] = None
         return jsonify(salida), 201
 
-    try:
-        config = _config_de(tenant)
-        wamid = whatsapp.enviar_texto(config, tenant,
-                                      destino["usuario_externo"], contenido)
-        # El wamid queda sellado en la fila del mensaje: es la unica clave con
-        # la que despues se casan los acuses de entrega, que llegan por el
-        # webhook sin ninguna otra referencia.
-        persistencia.marcar_envio(tenant, destino["mensaje_id"], wamid)
-        salida["entregado"] = True
-        salida["mensaje_id"] = destino["mensaje_id"]
-    except Exception as e:
-        # 201 igual: el mensaje SI quedo guardado, y el agente tiene que verlo
-        # en el hilo. Lo que no ocurrio es la entrega, y eso se dice con todas
-        # las letras en vez de devolver un error que sugiera que se perdio todo.
-        print(f"[conversaciones] no se pudo entregar la respuesta humana de "
-              f"'{id_conversacion}': {type(e).__name__}: {e}")
-        salida["aviso"] = str(e)
-        # Que el fallo quede EN LA FILA y no solo en esta respuesta. Antes el
-        # aviso aparecia una vez y se perdia: al recargar la pagina, un
-        # mensaje que nunca salio se veia igual que uno entregado, y quien
-        # atendio se iba creyendo que habia contestado.
-        persistencia.marcar_envio(tenant, destino["mensaje_id"], None, str(e))
-        salida["mensaje_id"] = destino["mensaje_id"]
-
+    # 201 aunque la entrega falle: el mensaje SI quedo guardado, y el agente
+    # tiene que verlo en el hilo. Lo que no ocurrio es la entrega, y eso se dice
+    # con todas las letras (aviso + fila en 'fallido') en vez de devolver un
+    # error que sugiera que se perdio todo. El wamid queda sellado en la fila:
+    # es la unica clave con la que despues se casan los acuses del webhook.
+    salida["mensaje_id"] = destino["mensaje_id"]
+    salida.update(_entregar_y_registrar(
+        tenant, destino["mensaje_id"],
+        lambda: whatsapp.enviar_texto(_config_de(tenant), tenant,
+                                      destino["usuario_externo"], contenido),
+        f"conversaciones '{id_conversacion}'"))
     return jsonify(salida), 201
 
 
@@ -4122,9 +4163,9 @@ def conversaciones_herramientas(id_conversacion):
     try:
         llamadas = persistencia.herramientas_de(tenant, id_conversacion)
     except RuntimeError as e:
-        return jsonify({"error": str(e)}), 404
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 404
     except Exception as e:
-        print(f"[conversaciones] fallo al leer herramientas: {type(e).__name__}: {e}")
+        registrar("conversaciones", "fallo al leer herramientas", error=e)
         return jsonify({"error": "No se pudo leer el registro de herramientas."}), 500
 
     # El diagnostico se cuenta ACA y no en la pantalla: distinguir un bloqueo
@@ -4182,7 +4223,7 @@ def conversaciones_marcar_ejemplo(id_conversacion, mensaje_id):
     try:
         persistencia.marcar_ejemplo(tenant, id_conversacion, mensaje_id, caso, marcado_por)
     except Exception as e:
-        print(f"[manual] fallo al marcar ejemplo: {type(e).__name__}: {e}")
+        registrar("manual", "fallo al marcar ejemplo", error=e)
         return jsonify({"error": "No se pudo guardar el marcado."}), 500
 
     return jsonify({"ok": True, "caso": caso}), 201
@@ -4197,7 +4238,7 @@ def conversaciones_desmarcar_ejemplo(id_conversacion, mensaje_id):
     try:
         persistencia.desmarcar_ejemplo(tenant, mensaje_id)
     except Exception as e:
-        print(f"[manual] fallo al desmarcar ejemplo: {type(e).__name__}: {e}")
+        registrar("manual", "fallo al desmarcar ejemplo", error=e)
         return jsonify({"error": "No se pudo deshacer el marcado."}), 500
 
     return "", 204
@@ -4243,7 +4284,7 @@ def sugerencias():
     except Exception as e:
         # Nunca rompe la pantalla del colaborador: es una ayuda lateral, no el
         # contenido principal. Mismo criterio que el RAG dentro de motor.py.
-        print(f"[sugerencias] no se pudo recuperar: {type(e).__name__}: {e}")
+        registrar("sugerencias", "no se pudo recuperar", error=e)
         return jsonify({"error": "No se pudo consultar la documentacion."}), 502
 
     return jsonify({
@@ -4296,7 +4337,7 @@ def manual_casos_guardar():
     try:
         config = editor.guardar_casos_manual(tenant, casos)
     except editor.ErrorEdicion as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
         return _error_al_guardar(e)
 
@@ -4312,7 +4353,7 @@ def manual_ejemplos():
     try:
         ejemplos = persistencia.ejemplos_por_caso(tenant, request.args.get("caso"))
     except Exception as e:
-        print(f"[manual] fallo al leer ejemplos: {type(e).__name__}: {e}")
+        registrar("manual", "fallo al leer ejemplos", error=e)
         return jsonify({"error": "No se pudieron leer los ejemplos."}), 500
 
     return jsonify({"ejemplos": ejemplos})
@@ -4327,7 +4368,7 @@ def manual_revisiones():
     try:
         revisiones = persistencia.revisiones_de(tenant, request.args.get("estado"))
     except Exception as e:
-        print(f"[supervisor] fallo al leer revisiones: {type(e).__name__}: {e}")
+        registrar("supervisor", "fallo al leer revisiones", error=e)
         return jsonify({"error": "No se pudieron leer las revisiones."}), 500
 
     return jsonify({"revisiones": revisiones})
@@ -4343,7 +4384,7 @@ def _actualizar_revision(id_revision, estado_nuevo):
         existe = persistencia.actualizar_estado_revision(
             tenant, id_revision, estado_nuevo, cuerpo.get("revisado_por"))
     except Exception as e:
-        print(f"[supervisor] fallo al actualizar revision: {type(e).__name__}: {e}")
+        registrar("supervisor", "fallo al actualizar revision", error=e)
         return jsonify({"error": "No se pudo guardar."}), 500
 
     if not existe:
@@ -4377,7 +4418,7 @@ def configuracion_propuestas():
     try:
         propuestas = persistencia.herramientas_propuestas_de(tenant, request.args.get("estado"))
     except Exception as e:
-        print(f"[configuracion-guiada] fallo al leer propuestas: {type(e).__name__}: {e}")
+        registrar("configuracion-guiada", "fallo al leer propuestas", error=e)
         return jsonify({"error": "No se pudieron leer las propuestas."}), 500
     return jsonify({"propuestas": propuestas})
 
@@ -4398,7 +4439,7 @@ def configuracion_propuesta_aprobar(id_propuesta):
     try:
         propuesta = persistencia.herramienta_propuesta_de(tenant, id_propuesta)
     except Exception as e:
-        print(f"[configuracion-guiada] fallo al leer la propuesta: {type(e).__name__}: {e}")
+        registrar("configuracion-guiada", "fallo al leer la propuesta", error=e)
         return jsonify({"error": "No se pudo leer la propuesta."}), 500
     if not propuesta:
         return jsonify({"error": f"La propuesta '{id_propuesta}' no existe."}), 404
@@ -4409,7 +4450,7 @@ def configuracion_propuesta_aprobar(id_propuesta):
     try:
         editor.aprobar_herramienta_propuesta(tenant, propuesta["herramienta_propuesta"])
     except editor.ErrorEdicion as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
         return _error_al_guardar(e)
 
@@ -4420,8 +4461,7 @@ def configuracion_propuesta_aprobar(id_propuesta):
     except Exception as e:
         # La herramienta YA quedo escrita en el catalogo -- esto solo afecta
         # el rotulo de la propuesta. No se revierte lo ya guardado por esto.
-        print(f"[configuracion-guiada] la herramienta se agrego pero no se "
-             f"pudo marcar la propuesta como aprobada: {type(e).__name__}: {e}")
+        registrar("configuracion-guiada", "la herramienta se agrego pero no se pudo marcar la propuesta como aprobada", error=e)
 
     return jsonify({"ok": True, "estado": "aprobada"})
 
@@ -4438,7 +4478,7 @@ def configuracion_propuesta_rechazar(id_propuesta):
             tenant, id_propuesta, "rechazada", cuerpo.get("revisado_por"),
             motivo_rechazo=cuerpo.get("motivo"))
     except Exception as e:
-        print(f"[configuracion-guiada] fallo al rechazar: {type(e).__name__}: {e}")
+        registrar("configuracion-guiada", "fallo al rechazar", error=e)
         return jsonify({"error": "No se pudo guardar."}), 500
 
     if not existe:
@@ -4461,7 +4501,7 @@ def conectores_listar():
     try:
         return jsonify({"conectores": conectores.listar()})
     except Exception as e:
-        print(f"[conectores] fallo al listar: {type(e).__name__}: {e}")
+        registrar("conectores", "fallo al listar", error=e)
         return jsonify({"error": "No se pudieron leer los conectores."}), 500
 
 
@@ -4476,11 +4516,11 @@ def conectores_preparar(id_conector):
         plan = conectores.preparar(id_conector, cuerpo.get("areas") or {},
                                    _config_de(tenant))
     except conectores.ErrorConector as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except FileNotFoundError:
         return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
     except Exception as e:
-        print(f"[conectores] fallo al preparar: {type(e).__name__}: {e}")
+        registrar("conectores", "fallo al preparar", error=e)
         return jsonify({"error": "No se pudo preparar el conector."}), 500
     return jsonify({
         "conector": plan["conector"],
@@ -4506,9 +4546,9 @@ def conectores_aplicar(id_conector):
     try:
         plan = conectores.aplicar(tenant, id_conector, cuerpo.get("areas") or {})
     except conectores.ErrorConector as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except editor.ErrorEdicion as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
         return _error_al_guardar(e)
     olvidar_config(tenant)
@@ -4588,7 +4628,7 @@ def consumo_resumen():
                 (org, dias))
             c = cur.fetchone() or {}
     except Exception as e:
-        print(f"[consumo] fallo al leer: {type(e).__name__}: {e}")
+        registrar("consumo", "fallo al leer", error=e)
         return jsonify({"error": "No se pudo leer el consumo."}), 500
 
     return jsonify({
@@ -4638,7 +4678,7 @@ def consumo_guardar_tarifa():
                               descuento_fuera_pico=cuerpo.get("descuento_fuera_pico"),
                               ventanas_pico=cuerpo.get("ventanas_pico"))
     except editor.ErrorEdicion as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except (TypeError, ValueError):
         return jsonify({"error": "Las tarifas tienen que ser numeros."}), 400
     except Exception as e:
@@ -4662,7 +4702,7 @@ def consumo_guardar_tope():
     try:
         editor.guardar_tope_gasto(tenant, tope, cuerpo.get("mensaje"))
     except editor.ErrorEdicion as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
         return _error_al_guardar(e)
     olvidar_config(tenant)
@@ -4699,7 +4739,7 @@ def habilidades_listar():
                 (org,))
             filas = [dict(f) for f in cur.fetchall()]
     except Exception as e:
-        print(f"[habilidades] fallo al leer: {type(e).__name__}: {e}")
+        registrar("habilidades", "fallo al leer", error=e)
         return jsonify({"error": "No se pudieron leer las habilidades."}), 500
     return jsonify({"habilidades": filas})
 
@@ -4728,7 +4768,7 @@ def habilidades_crear():
                  str(cuerpo["pasos"]), cuerpo.get("roles_permitidos") or []))
             fila = cur.fetchone()
     except Exception as e:
-        print(f"[habilidades] fallo al crear: {type(e).__name__}: {e}")
+        registrar("habilidades", "fallo al crear", error=e)
         return jsonify({"error": "No se pudo crear. ¿Ya existe ese codigo?"}), 400
     return jsonify({"ok": True, "id": fila["id"]})
 
@@ -4766,7 +4806,7 @@ def habilidades_aprobar(id_habilidad):
                     where organization_id = %s and id = %s""",
                 (cuerpo.get("aprobada_por"), org, id_habilidad))
     except Exception as e:
-        print(f"[habilidades] fallo al aprobar: {type(e).__name__}: {e}")
+        registrar("habilidades", "fallo al aprobar", error=e)
         return jsonify({"error": "No se pudo aprobar."}), 500
     return jsonify({"ok": True, "estado": "vigente"})
 
@@ -4790,7 +4830,7 @@ def habilidades_retirar(id_habilidad):
             if not cur.fetchone():
                 return jsonify({"error": "Esa habilidad no existe."}), 404
     except Exception as e:
-        print(f"[habilidades] fallo al retirar: {type(e).__name__}: {e}")
+        registrar("habilidades", "fallo al retirar", error=e)
         return jsonify({"error": "No se pudo retirar."}), 500
     return jsonify({"ok": True, "estado": "obsoleta"})
 
@@ -4810,7 +4850,7 @@ def habilidades_huecos():
         dias = int(request.args.get("dias") or analista.DIAS_POR_DEFECTO)
         patrones = analista.detectar(tenant, dias=dias)
     except Exception as e:
-        print(f"[habilidades] fallo al detectar huecos: {type(e).__name__}: {e}")
+        registrar("habilidades", "fallo al detectar huecos", error=e)
         return jsonify({"error": "No se pudieron analizar las conversaciones."}), 500
     return jsonify({"dias": dias, "huecos": [
         {"rol": p.rol, "senal": p.senal, "motivo": p.motivo,
@@ -4831,7 +4871,7 @@ def habilidades_proponer():
         resultados = analista.proponer(
             config, tenant, dias=int(cuerpo.get("dias") or analista.DIAS_POR_DEFECTO))
     except Exception as e:
-        print(f"[habilidades] fallo al proponer: {type(e).__name__}: {e}")
+        registrar("habilidades", "fallo al proponer", error=e)
         return jsonify({"error": "No se pudieron generar propuestas."}), 500
     return jsonify({"ok": True, "resultados": resultados})
 
@@ -4853,7 +4893,7 @@ def acciones_propuestas():
     try:
         acciones = persistencia.acciones_propuestas_de(tenant, request.args.get("estado"))
     except Exception as e:
-        print(f"[acciones] fallo al leer propuestas: {type(e).__name__}: {e}")
+        registrar("acciones", "fallo al leer propuestas", error=e)
         return jsonify({"error": "No se pudieron leer las acciones propuestas."}), 500
     return jsonify({"acciones": acciones})
 
@@ -4874,7 +4914,7 @@ def acciones_propuesta_aprobar(id_accion):
     try:
         accion = persistencia.accion_propuesta_de(tenant, id_accion)
     except Exception as e:
-        print(f"[acciones] fallo al leer la accion: {type(e).__name__}: {e}")
+        registrar("acciones", "fallo al leer la accion", error=e)
         return jsonify({"error": "No se pudo leer la accion."}), 500
     if not accion:
         return jsonify({"error": f"La accion '{id_accion}' no existe."}), 404
@@ -4894,8 +4934,7 @@ def acciones_propuesta_aprobar(id_accion):
             tenant, id_accion, "aprobada", cuerpo.get("revisado_por"),
             resultado_ejecucion=resultado, codigo_error=codigo_error)
     except Exception as e:
-        print(f"[acciones] la accion se ejecuto pero no se pudo guardar el "
-             f"resultado: {type(e).__name__}: {e}")
+        registrar("acciones", "la accion se ejecuto pero no se pudo guardar el resultado", error=e)
 
     if codigo_error:
         return jsonify({"ok": False, "estado": "aprobada", "error_ejecucion": codigo_error,
@@ -4915,7 +4954,7 @@ def acciones_propuesta_rechazar(id_accion):
             tenant, id_accion, "rechazada", cuerpo.get("revisado_por"),
             motivo_rechazo=cuerpo.get("motivo"))
     except Exception as e:
-        print(f"[acciones] fallo al rechazar: {type(e).__name__}: {e}")
+        registrar("acciones", "fallo al rechazar", error=e)
         return jsonify({"error": "No se pudo guardar."}), 500
 
     if not existe:
@@ -4982,7 +5021,7 @@ def corpus_ingerir():
     try:
         roles = ingesta.roles_validos(config, request.form.get("roles"))
     except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
 
     datos = archivo.read()
     hash_ = hashlib.sha256(datos).hexdigest()
@@ -5037,12 +5076,12 @@ def corpus_ingerir():
         # recurso esta en un estado que no admite esa operacion. Y no es un
         # fallo que haya que investigar en los logs -- es una regla del
         # producto contandose a quien la choco.
-        return jsonify({"error": str(e)}), 409
-    except ValueError as e:
-        return jsonify({"error": f"El documento declara {e}"}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 409
+    except ingesta.RolesInvalidos as e:
+        return jsonify({"error": f"El documento declara {mensaje_publico(e, 'roles invalidos')}"}), 400
     except Exception as e:
-        print(f"[corpus] fallo la ingesta de '{nombre}': {type(e).__name__}: {e}")
-        return jsonify({"error": f"No se pudo procesar el documento: {e}"}), 500
+        return fallo(500, "documento_no_procesado", "No se pudo procesar el documento.",
+                     componente="corpus", e=e)
 
     return jsonify(resultado), 201
 
@@ -5074,7 +5113,7 @@ def corpus_aprobar(id_documento):
             ok = ingesta.aprobar(cur, org, id_documento,
                                  cuerpo.get("aprobado_por"))
     except Exception as e:
-        print(f"[corpus] fallo al aprobar '{id_documento}': {type(e).__name__}: {e}")
+        registrar("corpus", "fallo al aprobar", id_documento=id_documento, error=e)
         return jsonify({"error": "No se pudo aprobar el documento."}), 500
 
     if not ok:
@@ -5102,9 +5141,9 @@ def corpus_retirar(id_documento):
         with persistencia.sesion(tenant) as (cur, org):
             ok = ingesta.retirar(cur, org, id_documento)
     except RuntimeError as e:
-        return jsonify({"error": str(e)}), 404
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 404
     except Exception as e:
-        print(f"[corpus] fallo el retiro de '{id_documento}': {type(e).__name__}: {e}")
+        registrar("corpus", "fallo el retiro", id_documento=id_documento, error=e)
         return jsonify({"error": "No se pudo retirar el documento."}), 500
 
     if not ok:
@@ -5134,13 +5173,13 @@ def corpus_actualizar_roles(id_documento):
     try:
         roles = ingesta.roles_validos(config, ",".join(cuerpo.get("roles") or []))
     except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
 
     try:
         with persistencia.sesion(tenant) as (cur, org):
             ok = ingesta.actualizar_roles(cur, org, id_documento, roles)
     except Exception as e:
-        print(f"[corpus] fallo al actualizar roles de '{id_documento}': {type(e).__name__}: {e}")
+        registrar("corpus", "fallo al actualizar roles", id_documento=id_documento, error=e)
         return jsonify({"error": "No se pudieron actualizar los roles."}), 500
 
     if not ok:
@@ -5189,10 +5228,10 @@ def _rol_de_cliente(config) -> str | None:
     if not candidatos:
         return None
     if len(candidatos) > 1:
-        print(f"[canal] sin 'rol_de_entrada' definido y hay {len(candidatos)} "
-              f"roles de cliente ({candidatos}): se atiende con "
-              f"'{candidatos[0]}' por ser el primero del diccionario, que no "
-              f"es una decision de nadie. Definir 'rol_de_entrada'.")
+        registrar("canal", "sin 'rol_de_entrada' definido y hay varios roles de cliente: "
+                           "se atiende con el primero del diccionario, que no es una "
+                           "decision de nadie. Definir 'rol_de_entrada'.",
+                  candidatos=candidatos, elegido=candidatos[0])
     return candidatos[0]
 
 
@@ -5232,18 +5271,18 @@ def _atendio_baja_o_alta(config, tenant: str, de: str, texto: str) -> bool:
         if limpio in [p.lower() for p in cfg.palabras_baja]:
             persistencia.dar_de_baja(tenant, de, "whatsapp", limpio)
             whatsapp.enviar_texto(config, tenant, de, cfg.respuesta_baja)
-            print(f"[whatsapp] baja de avisos: {de}")
+            registrar("whatsapp", "baja de avisos", tenant=tenant, remitente=ref_sesion(de))
             return True
         if limpio in [p.lower() for p in cfg.palabras_alta]:
             persistencia.dar_de_alta(tenant, de, "whatsapp")
             whatsapp.enviar_texto(config, tenant, de, cfg.respuesta_alta)
-            print(f"[whatsapp] alta de avisos: {de}")
+            registrar("whatsapp", "alta de avisos", tenant=tenant, remitente=ref_sesion(de))
             return True
     except Exception as e:
         # Si falla, se deja seguir al modelo: peor que no registrar la baja
         # seria dejar el mensaje sin ninguna respuesta.
-        print(f"[whatsapp] fallo al procesar baja/alta de {de}: "
-              f"{type(e).__name__}: {e}")
+        registrar("whatsapp", "fallo al procesar baja/alta de avisos",
+                  tenant=tenant, remitente=ref_sesion(de), error=e)
     return False
 
 
@@ -5266,11 +5305,13 @@ def _guardar_adjunto(config, tenant: str, entrante: dict,
         persistencia.guardar_media(
             tenant, conversacion_id, media_id, entrante.get("tipo", ""),
             contenido, mime, entrante.get("descripcion") or None, mensaje_id)
-        print(f"[whatsapp] adjunto {media_id} guardado "
-              f"({len(crudo) // 1024} KB -> {len(contenido) // 1024} KB)")
+        registrar("whatsapp", "adjunto guardado", conversation_id=id_interno(conversacion_id),
+                  media=ref_proveedor(media_id), kb_recibidos=len(crudo) // 1024,
+                  kb_guardados=len(contenido) // 1024)
     except Exception as e:
-        print(f"[whatsapp] no se pudo guardar el adjunto {media_id}: "
-              f"{type(e).__name__}: {e}")
+        registrar("whatsapp", "no se pudo guardar el adjunto",
+                  conversation_id=id_interno(conversacion_id),
+                  media=ref_proveedor(media_id), error=e)
 
 
 def _procesar_mensaje_whatsapp(config, tenant: str, rol: str, entrante: dict) -> None:
@@ -5288,8 +5329,9 @@ def _procesar_mensaje_whatsapp(config, tenant: str, rol: str, entrante: dict) ->
     # con la base del ISP, porque un BSUID no es un numero: esa persona va a
     # tener que identificarse con su cedula como cualquier numero desconocido.
     if not entrante.get("telefono"):
-        print(f"[whatsapp] {de} llega sin telefono (BSUID): se contesta igual, "
-              f"pero no se puede reconocer al cliente sin que se identifique.")
+        registrar("whatsapp", "remitente sin telefono (BSUID): se contesta igual, pero no se "
+                              "puede reconocer al cliente sin que se identifique",
+                  tenant=tenant, remitente=ref_sesion(de), wamid=ref_proveedor(wamid))
 
     try:
         if wamid:
@@ -5337,8 +5379,8 @@ def _procesar_mensaje_whatsapp(config, tenant: str, rol: str, entrante: dict) ->
         if (salida.get("respuesta") or "").strip():
             whatsapp.enviar_texto(config, tenant, de, salida["respuesta"])
     except Exception as e:
-        print(f"[whatsapp] fallo al atender a {de} ({wamid}): "
-              f"{type(e).__name__}: {e}")
+        registrar("whatsapp", "fallo al atender un mensaje entrante",
+                  tenant=tenant, remitente=ref_sesion(de), wamid=ref_proveedor(wamid), error=e)
 
 
 @app.get("/canales/whatsapp/<tenant>")
@@ -5354,7 +5396,7 @@ def whatsapp_handshake(tenant):
 
     recibido = request.args.get("hub.verify_token")
     if not whatsapp.token_de_verificacion_valido(config, tenant, recibido):
-        print(f"[whatsapp] handshake rechazado para '{tenant}': token invalido")
+        registrar("whatsapp", "handshake rechazado: token invalido", tenant=tenant)
         return jsonify({"error": "verify_token invalido"}), 403
 
     return request.args.get("hub.challenge", ""), 200, {"Content-Type": "text/plain"}
@@ -5388,15 +5430,15 @@ def whatsapp_webhook(tenant):
     # --- la firma es la autenticacion de esta ruta, y falla cerrado ----------
     if not whatsapp.firma_valida(config, tenant, crudo,
                                  request.headers.get("X-Hub-Signature-256")):
-        print(f"[whatsapp] firma invalida en el webhook de '{tenant}'")
+        registrar("whatsapp", "firma invalida en el webhook", tenant=tenant)
         return jsonify({"error": "firma invalida"}), 401
 
     cuerpo = request.get_json(force=True, silent=True) or {}
 
     rol = _rol_de_cliente(config)
     if not rol:
-        print(f"[whatsapp] '{tenant}' no tiene ningun rol orientado a "
-              f"cliente_final: no hay con que atender el mensaje")
+        registrar("whatsapp", "no hay ningun rol orientado a cliente_final: no hay con que "
+                              "atender el mensaje", tenant=tenant)
         return jsonify({"recibido": True}), 200
 
     entrantes = whatsapp.mensajes_entrantes(cuerpo)
@@ -5412,9 +5454,11 @@ def whatsapp_webhook(tenant):
             for cambio in entrada.get("changes", []) or []:
                 campos.append(cambio.get("field"))
                 valor = cambio.get("value") or {}
-                campos.append("value:" + ",".join(sorted(valor)))
-        print(f"[whatsapp] entrega SIN mensajes ni estados. Contenido: "
-              f"{campos or list((cuerpo or {}).keys())}")
+                campos.extend(f"value.{clave}" for clave in sorted(valor))
+        # Solo NOMBRES de campos de la estructura de Meta; aun asi pasan por el
+        # registro, que redacta cualquier cosa que no tenga forma de nombre.
+        registrar("whatsapp", "entrega SIN mensajes ni estados", tenant=tenant,
+                  claves=campos or list((cuerpo or {}).keys()))
     else:
         # Se dice de que forma llego el remitente, no solo cuantos mensajes.
         # Un identificador opaco ('CO.1360...') en vez de un telefono rompe la
@@ -5424,8 +5468,8 @@ def whatsapp_webhook(tenant):
         # vistazo en vez de deducir.
         formas = [("telefono" if (e.get("de") or "").isdigit() else "OPACO")
                   for e in entrantes]
-        print(f"[whatsapp] entrega con {len(entrantes)} mensaje(s) y "
-              f"{len(estados)} estado(s). Remitente(s): {formas}")
+        registrar("whatsapp", "entrega recibida", tenant=tenant, mensajes=len(entrantes),
+                  estados=len(estados), remitentes=formas)
 
         # Si el remitente vino opaco, hace falta saber que SI trajo la entrega
         # para encontrar donde esta el telefono. Se registran las CLAVES de
@@ -5435,11 +5479,11 @@ def whatsapp_webhook(tenant):
                 for cambio in entrada.get("changes", []) or []:
                     valor = cambio.get("value") or {}
                     contactos = valor.get("contacts") or []
-                    print(f"[whatsapp] remitente opaco. field={cambio.get('field')!r} "
-                          f"value={sorted(valor)} "
-                          f"contacts={len(contactos)} "
-                          f"claves_contacto={sorted(contactos[0]) if contactos else '-'} "
-                          f"metadata={sorted(valor.get('metadata') or {})}")
+                    registrar("whatsapp", "remitente opaco: claves de la entrega",
+                              tenant=tenant, field=cambio.get("field"),
+                              claves_value=sorted(valor), contactos=len(contactos),
+                              claves_contacto=sorted(contactos[0]) if contactos else None,
+                              claves_metadata=sorted(valor.get("metadata") or {}))
 
     atendidos = 0
     for entrante in entrantes:
@@ -5452,10 +5496,10 @@ def whatsapp_webhook(tenant):
             # mensaje" y despues no pasaba nada, sin ninguna linea que
             # explicara por que. Se dice que se descarto y con que forma
             # llego -- las CLAVES, nunca el contenido, que es de un cliente.
-            print(f"[whatsapp] mensaje descartado: sin "
-                  f"{'wamid' if not wamid else 'remitente'}. "
-                  f"tipo={entrante.get('tipo')!r} "
-                  f"claves={sorted((entrante.get('crudo') or {}).keys())}")
+            registrar("whatsapp", "mensaje descartado: incompleto", tenant=tenant,
+                      falta="wamid" if not wamid else "remitente",
+                      tipo=entrante.get("tipo"),
+                      claves=sorted((entrante.get("crudo") or {}).keys()))
             continue
 
         # Antes de gastar un turno del modelo: si este wamid ya se atendio, es
@@ -5468,8 +5512,8 @@ def whatsapp_webhook(tenant):
             # Sin poder deduplicar se prefiere NO atender: un mensaje perdido
             # se recupera cuando el cliente insiste; uno duplicado ya le llego
             # dos veces y no hay vuelta atras.
-            print(f"[whatsapp] no se pudo verificar duplicado de {wamid}, "
-                  f"se descarta por precaucion: {type(e).__name__}: {e}")
+            registrar("whatsapp", "no se pudo verificar si es duplicado: se descarta por precaucion",
+                      tenant=tenant, wamid=ref_proveedor(wamid), error=e)
             continue
 
         hilo = threading.Thread(
@@ -5482,20 +5526,28 @@ def whatsapp_webhook(tenant):
     # conversacion: sin separarlos, el bot contestaria a su propio "entregado".
     for estado in estados:
         crudo = estado.get("estado")
+        # Metadata solamente. Ni el telefono del cliente (ni siquiera sus
+        # ultimos digitos) ni el texto de error de Meta ni el wamid entero van al
+        # log -- un log de produccion persiste, y antes se imprimian el telefono
+        # completo y el texto de Meta en CADA acuse. El wamid entero vive en la
+        # base, que es donde hace falta para casar el acuse; en el log va su
+        # huella (ref_proveedor, 'prv-' + 12 hex), que alcanza para ubicar la fila:
+        #   select id from asistente.messages
+        #    where left(encode(sha256(convert_to(wamid, 'UTF8')), 'hex'), 12) = '<huella sin prv->';
+        # (convert_to y no wamid::bytea: el cast interpreta las barras invertidas
+        # como escapes, y un wamid con una no se encontraria.)
+        huella = ref_proveedor(estado.get("wamid"))
         if crudo == "failed":
-            print(f"[whatsapp] no se pudo entregar a {estado.get('de')}: "
-                  f"codigo={estado.get('codigo')} {estado.get('error')} "
-                  f"| detalle={estado.get('detalle')}")
+            registrar("whatsapp", "acuse", tenant=tenant, estado="failed",
+                      codigo=estado.get("codigo"), wamid=huella)
         else:
             # Los acuses buenos tambien se registran. Antes solo se imprimian
             # los fallidos, y eso obligaba a deducir del SILENCIO que un
             # mensaje habia salido bien -- que es justo lo que no se puede
             # distinguir de que el acuse nunca llego. La categoria es lo que
             # factura Meta.
-            categoria = estado.get("categoria")
-            print(f"[whatsapp] {crudo} -> {estado.get('de')}"
-                  + (f" | conversacion={estado.get('conversacion')} ({categoria})"
-                     if categoria else ""))
+            registrar("whatsapp", "acuse", tenant=tenant, estado=estado.get("estado"),
+                      wamid=huella, categoria=estado.get("categoria"))
 
         # Y ahora, ademas de imprimirlo, se GUARDA contra el mensaje que lo
         # produjo. Hasta hoy esto se leia, se registraba y se tiraba: no habia
@@ -5512,8 +5564,8 @@ def whatsapp_webhook(tenant):
         except Exception as e:
             # Un acuse perdido no puede tumbar el webhook: Meta reintenta la
             # entrega entera y volveriamos a procesar los mensajes.
-            print(f"[whatsapp] no se pudo anotar el acuse {crudo}: "
-                  f"{type(e).__name__}: {e}")
+            registrar("whatsapp", "no se pudo anotar el acuse", tenant=tenant,
+                      estado=estado.get("estado"), wamid=huella, error=e)
 
     return jsonify({"recibido": True, "atendidos": atendidos}), 200
 
@@ -5527,7 +5579,7 @@ def corpus_documentos():
     try:
         documentos = persistencia.documentos_de(tenant)
     except Exception as e:
-        print(f"[corpus] fallo al listar documentos: {type(e).__name__}: {e}")
+        registrar("corpus", "fallo al listar documentos", error=e)
         return jsonify({"error": "No se pudieron leer los documentos."}), 500
 
     return jsonify({"documentos": documentos})
@@ -5542,7 +5594,7 @@ def corpus_fragmentos(id_documento):
     try:
         fragmentos = persistencia.fragmentos_de(tenant, id_documento)
     except Exception as e:
-        print(f"[corpus] fallo al leer fragmentos: {type(e).__name__}: {e}")
+        registrar("corpus", "fallo al leer fragmentos", error=e)
         return jsonify({"error": "No se pudieron leer los fragmentos."}), 500
 
     return jsonify({"fragmentos": fragmentos})
@@ -5582,7 +5634,8 @@ def whatsapp_avisar(tenant):
         if persistencia.esta_de_baja(tenant, para, "whatsapp"):
             return jsonify({"enviado": False, "motivo": "el numero pidio no recibir avisos"}), 200
     except Exception as e:
-        print(f"[whatsapp] no se pudo comprobar la baja de {para}: {e}")
+        registrar("whatsapp", "no se pudo comprobar la baja antes de un aviso",
+                  tenant=tenant, destinatario=ref_sesion(para), error=e)
         return jsonify({"error": "No se pudo comprobar si el numero acepta avisos."}), 503
 
     try:
@@ -5590,9 +5643,10 @@ def whatsapp_avisar(tenant):
             config, tenant, para, plantilla,
             cuerpo.get("variables"), cuerpo.get("idioma", "es"))
     except whatsapp.ErrorWhatsApp as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
-        print(f"[whatsapp] fallo el aviso a {para}: {type(e).__name__}: {e}")
+        registrar("whatsapp", "fallo el aviso", tenant=tenant, destinatario=ref_sesion(para),
+                  plantilla=plantilla, error=e)
         return jsonify({"error": "No se pudo enviar el aviso."}), 502
 
     return jsonify({"enviado": True, "wamid": wamid}), 200
@@ -5616,9 +5670,9 @@ def whatsapp_plantillas(tenant):
     try:
         en_meta = whatsapp.plantillas_aprobadas(config, tenant)
     except whatsapp.ErrorWhatsApp as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
-        print(f"[whatsapp] fallo al leer plantillas: {type(e).__name__}: {e}")
+        registrar("whatsapp", "fallo al leer plantillas", error=e)
         return jsonify({"error": "No se pudieron leer las plantillas."}), 502
 
     declaradas = config.canales.whatsapp.plantillas
@@ -5665,7 +5719,7 @@ def conversaciones_conservar(id_conversacion):
         existe = persistencia.marcar_conservar(
             tenant, id_conversacion, conservar, motivo, cuerpo.get("por"))
     except Exception as e:
-        print(f"[conversaciones] fallo al marcar conservar: {type(e).__name__}: {e}")
+        registrar("conversaciones", "fallo al marcar conservar", error=e)
         return jsonify({"error": "No se pudo guardar."}), 500
 
     if not existe:
@@ -5701,7 +5755,7 @@ def conversaciones_atender(id_conversacion):
         existe = persistencia.tomar_caso(tenant, id_conversacion,
                                          cuerpo.get("por"), soltar)
     except Exception as e:
-        print(f"[conversaciones] fallo al tomar el caso: {type(e).__name__}: {e}")
+        registrar("conversaciones", "fallo al tomar el caso", error=e)
         return jsonify({"error": "No se pudo guardar."}), 500
 
     if not existe:
@@ -5753,7 +5807,7 @@ def conversaciones_enviar_media(id_conversacion):
     try:
         whatsapp._validar_media(tipo, mime, len(contenido))
     except Exception as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
 
     # Lo que ve el hilo. Un adjunto sin texto no puede quedar como una burbuja
     # vacia: se dice que se mando, y el pie va aparte si lo hay.
@@ -5764,7 +5818,7 @@ def conversaciones_enviar_media(id_conversacion):
         destino = persistencia.agregar_mensaje_humano(
             tenant, id_conversacion, texto, autor)
     except Exception as e:
-        print(f"[media] fallo al guardar el mensaje: {type(e).__name__}: {e}")
+        registrar("media", "fallo al guardar el mensaje", error=e)
         return jsonify({"error": "No se pudo guardar."}), 500
     if destino is None:
         return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
@@ -5780,18 +5834,12 @@ def conversaciones_enviar_media(id_conversacion):
     if destino["canal"] != "whatsapp":
         salida["entregado"] = None
     else:
-        try:
-            config = _config_de(tenant)
-            wamid = whatsapp.enviar_media(
-                config, tenant, destino["usuario_externo"], tipo,
-                guardado, mime_guardado, nombre, pie)
-            persistencia.marcar_envio(tenant, destino["mensaje_id"], wamid)
-            salida["entregado"] = True
-        except Exception as e:
-            print(f"[media] no se pudo entregar el adjunto de "
-                  f"'{id_conversacion}': {type(e).__name__}: {e}")
-            salida["aviso"] = str(e)
-            persistencia.marcar_envio(tenant, destino["mensaje_id"], None, str(e))
+        salida.update(_entregar_y_registrar(
+            tenant, destino["mensaje_id"],
+            lambda: whatsapp.enviar_media(
+                _config_de(tenant), tenant, destino["usuario_externo"], tipo,
+                guardado, mime_guardado, nombre, pie),
+            f"media '{id_conversacion}'"))
 
     # Se guarda pase lo que pase con la entrega: si fallo, quien atiende tiene
     # que poder ver QUE quiso mandar para reintentarlo, no volver a buscar el
@@ -5804,7 +5852,7 @@ def conversaciones_enviar_media(id_conversacion):
             tenant, id_conversacion, f"salida:{destino['mensaje_id']}", tipo,
             guardado, mime_guardado, nombre, destino["mensaje_id"])
     except Exception as e:
-        print(f"[media] no se pudo guardar el adjunto: {type(e).__name__}: {e}")
+        registrar("media", "no se pudo guardar el adjunto", error=e)
 
     return jsonify(salida), 201
 
@@ -5831,7 +5879,7 @@ def conversaciones_nota(id_conversacion):
             tenant, id_conversacion, contenido,
             (cuerpo.get("autor") or "").strip())
     except Exception as e:
-        print(f"[nota] fallo al guardar: {type(e).__name__}: {e}")
+        registrar("nota", "fallo al guardar", error=e)
         return jsonify({"error": "No se pudo guardar la nota."}), 500
 
     if nota_id is None:
@@ -5881,14 +5929,88 @@ MOTIVOS_DE_FALLO = {
 
 def _motivo_de_fallo(estado: dict) -> str:
     """El por que de un fallo, en palabras y con su codigo por si hay que
-    buscarlo. Un codigo desconocido devuelve lo que dijo Meta antes que
-    nada: es preferible un texto pobre a perder la unica pista."""
+    buscarlo. Se guarda en messages.error_entrega, asi que lo escribe Dexter:
+    un codigo desconocido deja solo el codigo, que es la pista que sirve para
+    buscar la causa. Lo que dijo Meta no se guarda ni se imprime -- no se
+    persisten respuestas de APIs externas, y un log de produccion persiste."""
     codigo = estado.get("codigo")
-    conocido = MOTIVOS_DE_FALLO.get(codigo)
-    if conocido:
-        return conocido
-    crudo = estado.get("detalle") or estado.get("error") or "sin detalle"
-    return f"WhatsApp no lo entregó (código {codigo}): {crudo}"
+    return MOTIVOS_DE_FALLO.get(codigo) or f"WhatsApp no lo entregó (código {codigo})."
+
+
+def _motivo_de_envio(e: Exception) -> str:
+    """
+    Lo que se guarda y se le muestra al operador cuando un envio falla.
+
+    Nunca str(e) de algo que no escribio Dexter: termina en
+    messages.error_entrega y en la pantalla. ErrorWhatsApp si trae un texto
+    propio (ver nucleo/canales/whatsapp.py), y un codigo conocido se traduce
+    con la misma tabla que los acuses del webhook.
+    """
+    if isinstance(e, whatsapp.ErrorWhatsApp):
+        return MOTIVOS_DE_FALLO.get(e.codigo) or str(e)
+    if isinstance(e, requests.RequestException):
+        return "No se pudo contactar a WhatsApp. El mensaje no salió."
+    return "No se pudo enviar el mensaje por WhatsApp."
+
+
+def _entregar_y_registrar(tenant: str, mensaje_id: str, enviar, etiqueta: str) -> dict:
+    """
+    El UNICO camino por el que una respuesta humana sale por WhatsApp y deja su
+    resultado en la fila. Lo usan texto, plantilla y multimedia.
+
+    'enviar' es una funcion sin argumentos que devuelve el wamid. Se separan
+    las dos mitades a proposito: antes el registro del exito estaba DENTRO del
+    try del envio, y si algo fallaba despues de que Meta aceptara, el except
+    marcaba 'fallido' un mensaje que si habia salido -- y la pantalla ofrecia
+    reintentarlo.
+
+    Devuelve lo que el endpoint agrega a su respuesta:
+      resultado   que paso, sin ambiguedad:
+                    'aceptado'               Meta dio wamid y quedo registrado
+                    'rechazado'              Meta (o la red) lo rechazo: NO salio
+                    'sin_id'                 Meta respondio bien pero sin wamid
+                    'aceptado_sin_registro'  Meta dio wamid y la base NO lo guardo
+      entregado   True solo si Meta devolvio un wamid.
+      registrado  si el resultado quedo escrito en la base.
+      aviso       SOLO en 'rechazado': texto saneado para el operador.
+
+    'aceptado_sin_registro' es una ENTREGA INCIERTA, no un fallo. El cliente
+    probablemente ya recibio el mensaje; lo que se perdio es la constancia. Por
+    eso no lleva aviso: el aviso es lo que hace que la bandeja muestre "No le
+    llego al cliente" y ofrezca Reintentar, y reintentar mandaria el mensaje dos
+    veces. Tampoco se reenvia nada desde aca, ni ahora ni despues. La fila queda
+    como estaba ('pendiente'), que es lo honesto: no se sabe mas que eso.
+
+    Los logs llevan solo metadata: nunca el texto de una excepcion ajena ni lo
+    que respondio Meta, porque un log de produccion tambien persiste.
+    """
+    try:
+        wamid = enviar()
+    except Exception as e:
+        motivo = _motivo_de_envio(e)
+        registrado = persistencia.marcar_envio(tenant, mensaje_id, None, motivo)
+        # error_seguro ya aporta tipo, codigo y http_status del rechazo.
+        registrar("entrega", "rechazado", proveedor="meta", operacion=etiqueta,
+                  resultado="rechazado", mensaje=id_interno(mensaje_id),
+                  registrado=registrado, error=e)
+        return {"resultado": "rechazado", "entregado": False, "aviso": motivo,
+                "registrado": registrado}
+
+    registrado = persistencia.marcar_envio(tenant, mensaje_id, wamid)
+    if not wamid:
+        resultado = "sin_id"
+    elif not registrado:
+        resultado = "aceptado_sin_registro"
+    else:
+        resultado = "aceptado"
+    if resultado == "aceptado_sin_registro":
+        registrar("entrega", "ENTREGA INCIERTA: no reenviar", proveedor="meta",
+                  operacion=etiqueta, resultado=resultado, mensaje=id_interno(mensaje_id),
+                  registrado=registrado, wamid=ref_proveedor(wamid))
+    elif resultado != "aceptado":
+        registrar("entrega", "sin identificador", proveedor="meta", operacion=etiqueta,
+                  resultado=resultado, mensaje=id_interno(mensaje_id), registrado=registrado)
+    return {"resultado": resultado, "entregado": bool(wamid), "registrado": registrado}
 
 
 @app.post("/conversaciones/<id_conversacion>/resolver")
@@ -5916,7 +6038,7 @@ def conversaciones_resolver(id_conversacion):
         usuario = persistencia.resolver_conversacion(tenant, id_conversacion,
                                                      cuerpo.get("por"))
     except Exception as e:
-        print(f"[conversaciones] fallo al resolver: {type(e).__name__}: {e}")
+        registrar("conversaciones", "fallo al resolver", error=e)
         return jsonify({"error": "No se pudo guardar."}), 500
 
     if usuario is None:
@@ -5949,7 +6071,7 @@ def conversaciones_borrar(id_conversacion):
     try:
         borrada = persistencia.borrar_conversacion(tenant, id_conversacion)
     except Exception as e:
-        print(f"[conversaciones] fallo al borrar: {type(e).__name__}: {e}")
+        registrar("conversaciones", "fallo al borrar", error=e)
         return jsonify({"error": "No se pudo borrar."}), 500
 
     if not borrada:
@@ -5969,7 +6091,7 @@ def conversaciones_media(id_conversacion):
     try:
         return jsonify({"media": persistencia.media_de(tenant, id_conversacion)})
     except Exception as e:
-        print(f"[media] fallo al listar: {type(e).__name__}: {e}")
+        registrar("media", "fallo al listar", error=e)
         return jsonify({"error": "No se pudieron leer los adjuntos."}), 500
 
 
@@ -5988,7 +6110,7 @@ def media_archivo(id_media):
     try:
         encontrado = persistencia.media_bytes(tenant, id_media)
     except Exception as e:
-        print(f"[media] fallo al leer {id_media}: {type(e).__name__}: {e}")
+        registrar("media", "fallo al leer", id_media=id_interno(id_media), error=e)
         return jsonify({"error": "No se pudo leer el archivo."}), 500
 
     if not encontrado:
@@ -6019,7 +6141,7 @@ def informe_archivo(media_id):
     try:
         encontrado = persistencia.media_bytes_por_media_id(tenant, media_id)
     except Exception as e:
-        print(f"[informes] fallo al leer {media_id}: {type(e).__name__}: {e}")
+        registrar("informes", "fallo al leer", media_id=id_interno(media_id), error=e)
         return jsonify({"error": "No se pudo leer el archivo."}), 500
 
     if not encontrado:
@@ -6065,13 +6187,12 @@ def mantenimiento_purgar(tenant):
         salida["conversaciones_borradas"] = persistencia.purgar_conversaciones(
             tenant, dias_conv)
     except Exception as e:
-        print(f"[mantenimiento] fallo la purga de '{tenant}': "
-              f"{type(e).__name__}: {e}")
+        registrar("mantenimiento", "fallo la purga", tenant=tenant, error=e)
         return jsonify({"error": "No se pudo completar la purga."}), 500
 
-    print(f"[mantenimiento] purga de '{tenant}': "
-          f"{salida['media_borrada']} archivos (>{dias_media}d), "
-          f"{salida['conversaciones_borradas']} conversaciones (>{dias_conv}d)")
+    registrar("mantenimiento", "purga", tenant=tenant,
+              archivos_borrados=salida["media_borrada"], dias_media=dias_media,
+              conversaciones_borradas=salida["conversaciones_borradas"], dias_conversaciones=dias_conv)
     return jsonify(salida)
 
 

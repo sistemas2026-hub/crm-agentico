@@ -48,6 +48,7 @@ import hmac
 
 import requests
 
+from nucleo.observabilidad.registro import ref_proveedor, registrar
 from nucleo.seguridad import secretos
 
 API_BASE_POR_DEFECTO = "https://graph.facebook.com"
@@ -114,7 +115,45 @@ TIPOS_CON_ARCHIVO = ("image", "audio", "video", "document", "sticker", "voice")
 
 
 class ErrorWhatsApp(Exception):
-    """Fallo al hablar con la Cloud API, o configuracion incompleta."""
+    """
+    Fallo al hablar con la Cloud API, o configuracion incompleta.
+
+    El TEXTO del error lo escribe siempre Dexter, y lo que respondio Meta NO
+    se conserva en ningun lado: ni en la base, ni en la pantalla, ni en el log.
+    Antes se armaba con 'err.message or r.text[:200]', y cuando Meta no traia
+    mensaje terminaban hasta 200 caracteres del cuerpo crudo de su respuesta en
+    messages.error_entrega y en los logs de produccion. La regla es la misma
+    para todo proveedor externo: no se persisten sus respuestas.
+
+    Lo que si queda es lo que alcanza para buscar la causa sin guardar la
+    respuesta: 'codigo' (el codigo de error de Meta, si lo hubo),
+    'http_status' y 'operacion' (que se estaba haciendo).
+    """
+
+    def __init__(self, mensaje: str, codigo: int | None = None,
+                 http_status: int | None = None, operacion: str | None = None):
+        super().__init__(mensaje)
+        self.codigo = codigo
+        self.http_status = http_status
+        self.operacion = operacion
+
+
+def _rechazo(r, que: str) -> ErrorWhatsApp:
+    """
+    El error de una respuesta >= 400, con el texto escrito por Dexter.
+
+    Del cuerpo de la respuesta se lee SOLO el codigo de error. El mensaje de
+    Meta y el cuerpo crudo se descartan aca mismo, antes de que puedan llegar a
+    un log o a la base.
+    """
+    try:
+        err = (r.json() or {}).get("error") or {}
+    except ValueError:
+        err = {}
+    codigo = err.get("code")
+    referencia = f"código {codigo}" if codigo is not None else f"HTTP {r.status_code}"
+    return ErrorWhatsApp(f"WhatsApp rechazó {que} ({referencia}).",
+                         codigo=codigo, http_status=r.status_code, operacion=que)
 
 
 # =============================================================================
@@ -181,8 +220,7 @@ def firma_valida(config, tenant: str, cuerpo_crudo: bytes,
         # convertiria un webhook no verificable en un 500. No verificar es no
         # procesar, y eso se dice con un 401 -- pero se registra, porque desde
         # afuera es indistinguible de un atacante y desde adentro es una caida.
-        print(f"[whatsapp] no se pudo verificar la firma de '{tenant}': "
-              f"{type(e).__name__}: {e}")
+        registrar("whatsapp", "no se pudo verificar la firma", tenant=tenant, error=e)
         return False
     esperado = hmac.new(secreto.encode(), cuerpo_crudo, hashlib.sha256).hexdigest()
     # compare_digest y no '==': comparar en tiempo constante evita filtrar la
@@ -199,8 +237,7 @@ def token_de_verificacion_valido(config, tenant: str, recibido: str | None) -> b
         esperado = _secreto(tenant, _cfg(config).verify_token_ref,
                             "del handshake (verify_token_ref)")
     except Exception as e:
-        print(f"[whatsapp] no se pudo verificar el handshake de '{tenant}': "
-              f"{type(e).__name__}: {e}")
+        registrar("whatsapp", "no se pudo verificar el handshake", tenant=tenant, error=e)
         return False
     return hmac.compare_digest(esperado, recibido)
 
@@ -339,9 +376,12 @@ def estados_entrantes(cuerpo: dict) -> list[dict]:
                     # que mensajes_entrantes(), y sin este respaldo el acuse
                     # de un BSUID queda con 'de: None' en el log.
                     "de": s.get("recipient_id") or s.get("recipient_user_id"),
-                    "error": err.get("message"),
+                    # Solo el codigo. El texto ('message') y el detalle
+                    # ('error_data.details') de Meta se leian y terminaban en
+                    # el log de cada acuse fallido; no se extraen, asi nadie
+                    # los puede volver a imprimir ni guardar. El motivo legible
+                    # lo arma Dexter desde el codigo (api._motivo_de_fallo).
                     "codigo": err.get("code"),
-                    "detalle": (err.get("error_data") or {}).get("details"),
                     "conversacion": conv.get("id"),
                     "categoria": ((conv.get("origin") or {}).get("type")
                                   or conv.get("category")),
@@ -368,18 +408,15 @@ def _post(config, tenant: str, recurso: str, payload: dict) -> dict:
         json=payload, timeout=TIMEOUT_SEGUNDOS)
 
     if r.status_code >= 400:
-        try:
-            err = (r.json() or {}).get("error") or {}
-        except ValueError:
-            err = {}
-        codigo = err.get("code")
-        detalle = err.get("message") or r.text[:200]
-        if codigo == CODIGO_FUERA_DE_VENTANA:
+        error = _rechazo(r, "el envío")
+        if error.codigo == CODIGO_FUERA_DE_VENTANA:
             raise ErrorWhatsApp(
                 "Pasaron mas de 24 horas desde el ultimo mensaje del cliente, "
                 "asi que WhatsApp ya no acepta texto libre: hay que usar una "
-                "plantilla aprobada.")
-        raise ErrorWhatsApp(f"WhatsApp rechazo el envio ({codigo}): {detalle}")
+                "plantilla aprobada.",
+                codigo=error.codigo, http_status=error.http_status,
+                operacion=error.operacion)
+        raise error
 
     return r.json()
 
@@ -531,13 +568,7 @@ def subir_media(config, tenant: str, contenido: bytes, mime: str,
         timeout=TIMEOUT_SEGUNDOS * 3)  # una subida no es una peticion de texto
 
     if r.status_code >= 400:
-        try:
-            err = (r.json() or {}).get("error") or {}
-        except ValueError:
-            err = {}
-        raise ErrorWhatsApp(
-            f"WhatsApp rechazo la subida ({err.get('code')}): "
-            f"{err.get('message') or r.text[:200]}")
+        raise _rechazo(r, "la subida del archivo")
 
     media_id = (r.json() or {}).get("id")
     if not media_id:
@@ -673,8 +704,7 @@ def plantillas_aprobadas(config, tenant: str) -> list[dict]:
                      headers={"Authorization": f"Bearer {token}"},
                      params={"limit": 100}, timeout=TIMEOUT_SEGUNDOS)
     if r.status_code >= 400:
-        raise ErrorWhatsApp(
-            f"No se pudieron leer las plantillas: {r.status_code} {r.text[:200]}")
+        raise _rechazo(r, "la lectura de plantillas")
 
     return [_desarmar_plantilla(p) for p in (r.json().get("data") or [])]
 
@@ -783,4 +813,5 @@ def marcar_leido(config, tenant: str, wamid: str) -> None:
             "message_id": wamid,
         })
     except Exception as e:
-        print(f"[whatsapp] no se pudo marcar leido {wamid}: {type(e).__name__}: {e}")
+        registrar("whatsapp", "no se pudo marcar leido", tenant=tenant,
+                  wamid=ref_proveedor(wamid), error=e)

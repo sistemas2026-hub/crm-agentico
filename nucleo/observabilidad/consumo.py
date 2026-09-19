@@ -57,6 +57,7 @@ from contextvars import ContextVar
 from datetime import datetime, timezone
 from dataclasses import dataclass, field
 
+from nucleo.observabilidad.registro import registrar
 from nucleo.persistencia.db import sesion
 
 # El acumulador del turno en curso. None = no hay turno real abierto y anotar()
@@ -203,9 +204,9 @@ def _volcar(ficha: Consumo) -> None:
     if not ficha.n_llamadas:
         return
     if ficha.sin_tarifa:
-        print(f"[consumo] {ficha.tenant}: sin tarifa cargada para "
-              f"{sorted(ficha.sin_tarifa)} -- se cuentan tokens, el costo "
-              f"queda en 0. Cargala en la configuracion del agente.")
+        registrar("consumo", "sin tarifa cargada -- se cuentan tokens, el costo queda en 0. "
+                             "Cargala en la configuracion del agente.",
+                  tenant=ficha.tenant, modelos=sorted(ficha.sin_tarifa))
     try:
         with sesion(ficha.tenant) as (cur, org):
             cur.execute(
@@ -221,7 +222,7 @@ def _volcar(ficha: Consumo) -> None:
                 (org, ficha.tokens_entrada, ficha.tokens_salida,
                  round(ficha.costo_usd, 6)))
     except Exception as fallo:      # noqa: BLE001 -- ver encabezado
-        print(f"[consumo] no se pudo registrar el consumo de {ficha.tenant}: {fallo!r}")
+        registrar("consumo", "no se pudo registrar el consumo", tenant=ficha.tenant, error=fallo)
 
     # Una vez al dia, y en un hilo: la foto del saldo es una llamada HTTP a un
     # tercero, y un cliente no tiene por que esperar por una consulta que no
@@ -244,7 +245,7 @@ def gasto_del_mes(tenant: str) -> float:
             fila = cur.fetchone()
         return float((fila or {}).get("gasto") or 0.0)
     except Exception as fallo:      # noqa: BLE001
-        print(f"[consumo] no se pudo leer el gasto de {tenant}: {fallo!r}")
+        registrar("consumo", "no se pudo leer el gasto", tenant=tenant, error=fallo)
         return 0.0
 
 
@@ -357,7 +358,7 @@ def consultar_saldo(config) -> float | None:
     from nucleo.seguridad import secretos
     clave = secretos.obtener(config.identidad.slug, cfg.auth_ref) if cfg.auth_ref else None
     if cfg.auth_ref and not clave:
-        print(f"[consumo] falta el secreto '{cfg.auth_ref}' para consultar el saldo.")
+        registrar("consumo", "falta el secreto para consultar el saldo", auth_ref=cfg.auth_ref)
         return None
 
     try:
@@ -370,7 +371,7 @@ def consultar_saldo(config) -> float | None:
         crudo = _valor_en(r.json(), cfg.campo)
         return float(crudo) if crudo is not None else None
     except Exception as fallo:      # noqa: BLE001 -- ver docstring
-        print(f"[consumo] no se pudo consultar el saldo del proveedor: {fallo!r}")
+        registrar("consumo", "no se pudo consultar el saldo del proveedor", error=fallo)
         return None
 
 
@@ -393,7 +394,7 @@ def _guardar_saldo_del_dia(config, tenant: str) -> None:
                     where organization_id = %s and dia = current_date""",
                 (saldo, org))
     except Exception as fallo:      # noqa: BLE001
-        print(f"[consumo] no se pudo guardar el saldo del dia: {fallo!r}")
+        registrar("consumo", "no se pudo guardar el saldo del dia", tenant=tenant, error=fallo)
 
 
 def _quizas_fotografiar_saldo(config, tenant: str) -> None:

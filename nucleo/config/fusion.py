@@ -52,6 +52,12 @@ colaborador hablando con un asistente mudo, sin que nadie entienda por que.
 from __future__ import annotations
 
 from nucleo.config.schema import Rol
+from nucleo.observabilidad.registro import registrar
+
+
+class FusionInvalida(ValueError):
+    """No se puede armar la union de agentes pedida. Mensaje escrito por
+    Dexter: se puede mostrar (ver nucleo/canales/errores.py)."""
 
 
 def fusionar_roles(config, nombres: list[str]) -> tuple[str, Rol]:
@@ -68,11 +74,11 @@ def fusionar_roles(config, nombres: list[str]) -> tuple[str, Rol]:
     nucleo/seguridad/verificacion.py::nivel_requerido.
     """
     if not nombres:
-        raise ValueError("No hay ningun agente asignado.")
+        raise FusionInvalida("No hay ningun agente asignado.")
 
     desconocidos = [n for n in nombres if n not in config.roles]
     if desconocidos:
-        raise ValueError(
+        raise FusionInvalida(
             f"agente(s) inexistente(s): {', '.join(sorted(desconocidos))}. "
             f"Agentes del tenant: {', '.join(sorted(config.roles))}")
 
@@ -83,7 +89,7 @@ def fusionar_roles(config, nombres: list[str]) -> tuple[str, Rol]:
 
     audiencias = {r.orientado_a for r in roles}
     if len(audiencias) > 1:
-        raise ValueError(
+        raise FusionInvalida(
             "No se pueden fusionar agentes que le hablan a audiencias "
             "distintas (colaborador y cliente_final): el de cliente final "
             "verifica identidad y solo ve SU propio servicio, el interno da "
@@ -153,7 +159,7 @@ def modelo_fusionado(config, nombres: list[str]) -> str | None:
     if not declarados:
         return None
     if len(set(declarados)) > 1:
-        print(f"[agentes] {'+'.join(nombres)} mezcla roles con modelos "
-              f"distintos ({', '.join(sorted(set(declarados)))}); se usa "
-              f"{declarados[0]}. Revisar llm.overrides del tenant.")
+        registrar("agentes", "la union mezcla roles con modelos distintos; se usa el primero. "
+                             "Revisar llm.overrides del tenant.",
+                  roles=list(nombres), modelos=sorted(set(declarados)), elegido=declarados[0])
     return declarados[0]

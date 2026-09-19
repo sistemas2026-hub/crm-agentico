@@ -108,7 +108,9 @@ def resumir(herramienta, argumentos: dict, tenant: str | None = None,
     try:
         respuesta = requests.get(ruta, headers=headers, timeout=TIMEOUT_SEGUNDOS)
     except requests.RequestException as e:
-        raise ErrorEstabilidad(f"no se pudo consultar el historial: {e}") from e
+        # El tipo y no el texto: el de requests trae la URL con el serial del equipo.
+        raise ErrorEstabilidad(f"no se pudo consultar el historial: "
+                               f"{type(e).__name__}") from e
     if respuesta.status_code != 200:
         raise ErrorEstabilidad(
             f"el proveedor respondio {respuesta.status_code} al pedir el historial")

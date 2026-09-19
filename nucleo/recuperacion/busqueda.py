@@ -37,6 +37,7 @@ from dataclasses import dataclass
 
 from nucleo.persistencia.db import sesion
 from nucleo.recuperacion.embeddings import vectorizar
+from nucleo.observabilidad.registro import registrar
 
 
 @dataclass(frozen=True)
@@ -211,7 +212,7 @@ def registrar_sin_resultados(tenant: str, pregunta: str, rol: str,
     try:
         elegibles = contar_elegibles(tenant, rol)
     except Exception as e:
-        print(f"[recuperacion] no se pudo contar fragmentos elegibles: {e}")
+        registrar("recuperacion", "no se pudo contar fragmentos elegibles", error=e)
         elegibles = None
 
     try:
@@ -223,7 +224,7 @@ def registrar_sin_resultados(tenant: str, pregunta: str, rol: str,
                    values (%s, %s, %s, %s, %s)""",
                 (org, pregunta[:2000], rol, mejor_similitud, elegibles))
     except Exception as e:
-        print(f"[recuperacion] no se pudo registrar la pregunta sin respuesta: {e}")
+        registrar("recuperacion", "no se pudo registrar la pregunta sin respuesta", error=e)
 
 
 def bloque_de_contexto(fragmentos: list[Fragmento], citar_fuente: bool = True) -> str:

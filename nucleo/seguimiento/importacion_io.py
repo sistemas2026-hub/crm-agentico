@@ -32,6 +32,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from nucleo.herramientas import http as ejecutor_http
+from nucleo.observabilidad.registro import id_interno, ref_sesion, registrar
 from nucleo.persistencia import db as persistencia
 from nucleo.seguimiento import importacion as imp
 
@@ -176,7 +177,9 @@ def resolver_servicios(config, tenant):
                                         "usuario": fila.get("usuario") or "",
                                         "estado": fila.get("estado") or ""}
             except Exception as e:                          # noqa: BLE001
-                print(f"    [aviso] servicio {sid}: {type(e).__name__}: {e}")
+                # El id de servicio del ISP identifica a un cliente y es secuencial (se enumera): HMAC, no hash plano.
+                registrar("importacion", "no se pudo resolver un servicio",
+                          servicio=ref_sesion(sid), error=e)
         return salida
 
     return resolver
@@ -248,7 +251,7 @@ def tickets_conocidos(config, tenant: str, ids: list[str]) -> tuple[set, set]:
                 # se crearia de nuevo todo. Que reviente aca es lo correcto.
                 raise RuntimeError(
                     f"no se pudo consultar los tickets conocidos: "
-                    f"{type(e).__name__}: {e}") from e
+                    f"{type(e).__name__}") from e
 
     # La otra fuente de autoria, esta si del dominio del motor.
     #
@@ -285,8 +288,8 @@ def tickets_conocidos(config, tenant: str, ids: list[str]) -> tuple[set, set]:
                     (org,))
         conv = {str(f["t"]).strip() for f in cur.fetchall()}
 
-    print(f"[registro] tickets de Dexter: {len(conv)} en conversaciones + "
-          f"{len(del_crm)} en solicitudes | con caso: {len(con_caso)}")
+    registrar("registro", "tickets de Dexter", en_conversaciones=len(conv),
+              en_solicitudes=len(del_crm), con_caso=len(con_caso))
     return con_caso, conv | del_crm
 
 
@@ -372,8 +375,8 @@ def aplicar(config, tenant, veredictos) -> dict:
             resumen["ids"].append(v.external_ticket_id)
         except Exception as e:                              # noqa: BLE001
             resumen["fallidos"] += 1
-            print(f"    [fallo] ticket {v.external_ticket_id}: "
-                  f"{type(e).__name__}: {e}")
+            registrar("importacion", "fallo al importar un ticket",
+                      ticket=ref_sesion(v.external_ticket_id), error=e)
     return resumen
 
 
@@ -402,7 +405,8 @@ def aplicar_reconciliacion(config, tenant, cambios) -> dict:
                 resumen["sin_cambios"] += 1
         except Exception as e:                              # noqa: BLE001
             resumen["fallidos"] += 1
-            print(f"    [fallo] caso {c.caso_id}: {type(e).__name__}: {e}")
+            registrar("importacion", "fallo al reconciliar un caso",
+                      caso_id=id_interno(c.caso_id), error=e)
     return resumen
 
 # =============================================================================
@@ -445,7 +449,8 @@ def sincronizar_respuestas(config, tenant, cambios) -> dict:
                 resumen["nuevas"] += int(r.get("nuevas") or 0)
         except Exception as e:                              # noqa: BLE001
             resumen["fallidos"] += 1
-            print(f"    [hilo] caso {c.caso_id}: {type(e).__name__}: {e}")
+            registrar("importacion", "fallo al sincronizar el hilo de un caso",
+                      caso_id=id_interno(c.caso_id), error=e)
     return resumen
 
 
@@ -525,8 +530,7 @@ def barrido(config, tenant: str, *, aplicar_cambios: bool = False) -> dict:
                   resumen, aplicar_cambios)
     except Exception as e:                                  # noqa: BLE001
         resumen["error_global"] = f"{type(e).__name__}: {e}"
-        print(f"[importacion] el descubrimiento de '{tenant}' fallo: "
-              f"{type(e).__name__}: {e}")
+        registrar("importacion", "el descubrimiento fallo", tenant=tenant, error=e)
 
     _reconciliar(config, tenant, conf, registro, resumen, aplicar_cambios)
     return resumen
@@ -604,5 +608,4 @@ def _reconciliar(config, tenant, conf, registro, resumen, aplicar_cambios) -> No
                 "nuevas": 0, "seco": True}
     except Exception as e:                                  # noqa: BLE001
         resumen["reconciliacion"]["error"] = f"{type(e).__name__}: {e}"
-        print(f"[importacion] la reconciliacion de '{tenant}' fallo: "
-              f"{type(e).__name__}: {e}")
+        registrar("importacion", "la reconciliacion fallo", tenant=tenant, error=e)

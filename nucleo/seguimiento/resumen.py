@@ -44,6 +44,7 @@ para evitar. Por eso el prompt de abajo pide hechos de la conversacion
 from __future__ import annotations
 
 from nucleo.modelo import cliente
+from nucleo.observabilidad.registro import registrar
 
 # Corto a proposito: viaja delante de cada primer turno, y un resumen largo
 # compite por atencion con el problema que el cliente esta contando AHORA.
@@ -87,7 +88,7 @@ def redactar(config, historial: list[dict]) -> str | None:
         texto = (resp.contenido or "").strip()
         return texto[:MAX_CARACTERES] or None
     except Exception as e:
-        print(f"[resumen] no se pudo redactar: {type(e).__name__}: {e}")
+        registrar("resumen", "no se pudo redactar", error=e)
         return None
 
 

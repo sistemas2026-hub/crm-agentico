@@ -51,6 +51,8 @@ from pathlib import Path
 
 import yaml
 
+from nucleo.observabilidad.registro import registrar
+
 RAIZ = Path(__file__).resolve().parents[2]
 CARPETA = RAIZ / "conectores"
 
@@ -73,7 +75,7 @@ def listar() -> list[dict]:
         try:
             doc = yaml.safe_load(ruta.read_text(encoding="utf-8")) or {}
         except Exception as fallo:      # noqa: BLE001
-            print(f"[conectores] {ruta.name} no se pudo leer: {fallo!r}")
+            registrar("conectores", "no se pudo leer un conector", archivo=ruta.name, error=fallo)
             continue
         salida.append({
             "id": doc.get("id") or ruta.stem,

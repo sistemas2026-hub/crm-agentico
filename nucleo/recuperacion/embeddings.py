@@ -62,5 +62,9 @@ def vectorizar(texto: str) -> list[float]:
     try:
         r = cliente.embeddings.create(model=MODELO, input=texto, dimensions=DIMENSIONES)
     except Exception as e:
-        raise RuntimeError(f"OpenAI rechazo el embedding ({MODELO}): {e}") from e
+        # Sin el texto de OpenAI: lo que contesto el proveedor no es de Dexter y
+        # esta excepcion termina en respuestas y logs (D19/D23). La causa sigue
+        # encadenada (from e) para quien depura dentro del proceso.
+        raise RuntimeError(f"OpenAI rechazo el embedding ({MODELO}): "
+                           f"{type(e).__name__}") from e
     return r.data[0].embedding
