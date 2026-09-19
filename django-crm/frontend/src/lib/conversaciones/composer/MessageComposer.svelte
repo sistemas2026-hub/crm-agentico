@@ -111,9 +111,17 @@
             </button>
           {/if}
         {:else if ventanaPorCerrarse}
+          <!-- El rótulo del canal aparece acá y en cerrada, pero NO en abierta:
+               dice de qué sistema viene el límite, y mientras la ventana está
+               abierta no hay ningún límite operando. Un distintivo permanente
+               en el estado normal es ruido que compite con el que sí importa. -->
+          <span class="ventana-marca">WhatsApp · 24 h</span>
           <strong>La ventana cierra en {comoDuracion(ventanaRestante ?? 0)}</strong>
           <span class="v2-muted">· después sólo se le puede escribir por plantilla</span>
         {:else}
+          <!-- Estado normal: una línea discreta. Se puede escribir como
+               siempre, así que no hay nada que advertir -- sólo cuánto queda,
+               por si alguien está calculando si conviene esperar. -->
           <span>Ventana abierta · quedan {comoDuracion(ventanaRestante ?? 0)}</span>
         {/if}
       </div>
@@ -482,9 +490,19 @@
     background: var(--bandeja-canvas);
   }
 
+  /* Advertencia, no error: el filete ámbar es la misma señal que usa el
+     handoff sin dueño. Se puede seguir escribiendo con normalidad -- lo que
+     cambia es que conviene hacerlo ahora. */
   .ventana-avisa {
     color: var(--bandeja-texto);
     background: var(--bandeja-aviso-fondo);
+    border-left: 3px solid var(--bandeja-aviso);
+  }
+
+  /* Cerrada SÍ es un límite en vigor, y lleva el filete del mismo color que
+     su distintivo. No es rojo: no se rompió nada, hay otra forma de escribir. */
+  .ventana-cerrada {
+    border-left: 3px solid var(--bandeja-borde-fuerte);
   }
 
   .ventana-cerrada {
