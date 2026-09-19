@@ -32,6 +32,10 @@
   import { page } from '$app/state';
   import { invalidate } from '$app/navigation';
   import PageHeader from '$lib/v2/components/PageHeader.svelte';
+  // El sistema visual de la Bandeja. Todo cuelga de `.bandeja`, que es la
+  // clase de la mesa de abajo: cubre las tres columnas y la conversación
+  // abierta, y no puede alcanzar ninguna otra ruta del CRM.
+  import '$lib/conversaciones/estilos/bandeja.css';
   import { pendiente, resuelta, enAtencion } from '$lib/conversaciones/estado.js';
   import { ordenar, horasEsperando } from '$lib/conversaciones/cola/ordenamiento.js';
   import QueueTabs from '$lib/conversaciones/cola/QueueTabs.svelte';
@@ -276,7 +280,7 @@
   {/snippet}
 </PageHeader>
 
-<div class="mesa">
+<div class="mesa bandeja">
   <aside class="columna" class:hay-abierta={abierta} aria-label="Conversaciones">
     {#if !data.error && conversaciones.length > 0}
       <!-- Pestanas de estado. Nunca ember en la activa: "donde estoy" no es una

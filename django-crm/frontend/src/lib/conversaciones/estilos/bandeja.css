@@ -1,0 +1,115 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   BANDEJA — sistema visual (Fase 1.1)
+
+   Los tokens del diseño congelado en SPEC/BANDEJA_STITCH_REFERENCIAS.md,
+   acotados a la Bandeja.
+
+   POR QUÉ ESTE ARCHIVO EXISTE Y NO SE TOCA v2.css
+   ------------------------------------------------
+   v2.css es el sistema del CRM entero y ya está scoped bajo `.v2-root` — su
+   propia cabecera explica que ningún selector puede filtrar fuera. Este
+   archivo hace lo mismo un nivel más adentro: TODO cuelga de `.bandeja`, que
+   es la clase del `<div class="mesa">` de `conversaciones/+layout.svelte`.
+   Esa mesa envuelve las tres columnas Y el `{@render children()}` de la
+   conversación abierta, así que la Bandeja entera queda cubierta y ninguna
+   otra ruta del CRM puede verse afectada.
+
+   El encabezado de página (`PageHeader`) queda FUERA a propósito: está sobre
+   la mesa, es cromo del CRM, y su rediseño es de una fase posterior.
+
+   EL REMAPEO, QUE ES LA DECISIÓN IMPORTANTE
+   ------------------------------------------
+   La Bandeja consume hoy ~190 variables `--v2-*` repartidas en ocho
+   componentes. Migrarlas una por una tomaría todas las fases, y mientras
+   tanto la pantalla quedaría mitad paleta vieja y mitad nueva.
+
+   Como las custom properties heredan, redefinir un `--v2-*` acá lo cambia
+   para todo el subárbol sin tocar un solo componente. Así que los NEUTROS
+   ESTRUCTURALES se remapean abajo, y los componentes siguen escribiendo
+   `var(--v2-line)` hasta que su fase los migre a un token propio.
+
+   Lo que NO se remapea: ember, clay, rust y moss. Esos no son superficie,
+   son SIGNIFICADO -- ember marca lo que pide una acción, clay lo que está en
+   curso, rust lo vencido, moss lo resuelto. Cambiarles el valor sin decidir
+   antes su equivalente en el lenguaje nuevo sería mover semántica de
+   contrabando dentro de un cambio de pintura. Cada uno se resuelve en la fase
+   de su pantalla.
+
+   MODO OSCURO
+   -----------
+   El remapeo corre sólo en claro (`html:not(.dark)`). El diseño congelado no
+   tiene referencia oscura, y v2 sí tiene su propia paleta para `.dark`:
+   inventar una aquí sería adivinar. En oscuro la Bandeja sigue con los tokens
+   de v2 hasta que exista una referencia.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.bandeja {
+  /* ── superficies ─────────────────────────────────────────────────────── */
+  --bandeja-canvas: #f8fafc;
+  --bandeja-superficie: #ffffff;
+  --bandeja-superficie-suave: #f1f5f9;
+
+  /* ── líneas ──────────────────────────────────────────────────────────── */
+  --bandeja-borde: #e2e8f0;
+  --bandeja-borde-fuerte: #cbd5e1;
+
+  /* ── texto ───────────────────────────────────────────────────────────── */
+  --bandeja-texto: #0f172a;
+  --bandeja-texto-2: #64748b;
+  --bandeja-texto-3: #94a3b8;
+
+  /* ── quién actúa ─────────────────────────────────────────────────────── */
+  /* La distinción estructural del lenguaje visual. OJO: el color NO puede ser
+     la única señal -- hace falta además rótulo, texto o icono, porque un 8%
+     de la gente no distingue estos dos tonos y porque un punto de color sin
+     palabra no dice QUÉ pasó. Los consumidores llegan en las fases 1.3 y
+     siguientes; acá sólo quedan definidos. */
+  --bandeja-ia: #7c3aed;
+  --bandeja-humano: #2563eb;
+  --bandeja-navy: #1e3a8a;
+
+  /* ── estados ─────────────────────────────────────────────────────────── */
+  /* La paleta de arriba es Tailwind slate/blue/violet, así que los semánticos
+     salen de la misma familia en vez de elegirse a ojo. */
+  --bandeja-ok: #059669;
+  --bandeja-aviso: #d97706;
+  --bandeja-error: #dc2626;
+  --bandeja-nota: #b45309;
+
+  /* ── forma ───────────────────────────────────────────────────────────── */
+  /* Radios chicos y sin sombra: lo que separa es el borde, la superficie y el
+     espacio, no una tarjeta flotando. */
+  --bandeja-radio-sm: 4px;
+  --bandeja-radio: 6px;
+  --bandeja-esp: 4px;
+
+  /* ── tipografía ──────────────────────────────────────────────────────── */
+  /* Geist y JetBrains Mono YA se cargan en app.html -- no hace falta ninguna
+     dependencia ni link nuevo. Mono queda para lo que se lee como dato:
+     números, ids, contadores. */
+  --bandeja-sans: Geist, Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --bandeja-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+}
+
+/* Los neutros de v2, redefinidos para el subárbol de la Bandeja. Ver arriba
+   por qué sólo estos cuatro pares y por qué sólo en claro. */
+html:not(.dark) .bandeja {
+  --v2-paper: var(--bandeja-canvas);
+  --v2-card: var(--bandeja-superficie);
+  --v2-ink: var(--bandeja-texto);
+  --v2-slate: var(--bandeja-texto-2);
+  --v2-line: var(--bandeja-borde);
+  --v2-line-soft: var(--bandeja-superficie-suave);
+  --v2-hover: rgba(15, 23, 42, 0.03);
+
+  --v2-sans: var(--bandeja-sans);
+  --v2-mono: var(--bandeja-mono);
+}
+
+/* La mesa pinta su propio fondo y su tipografía. El resto de la Bandeja los
+   hereda, igual que hace `.v2-root` con los del CRM. */
+.bandeja {
+  background: var(--bandeja-canvas);
+  color: var(--bandeja-texto);
+  font-family: var(--bandeja-sans);
+}
