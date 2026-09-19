@@ -18,6 +18,8 @@ Dexter no tiene, **no se inventa**.
 ```
 3545ccd  cierre de la Fase 0
 cdeb69e  1.1 — foundation visual
+ade3bdf  checkpoint Fase 1
+9875e34  1.2 — cola Stitch
 ```
 
 Nada de esto está pusheado.
@@ -26,8 +28,8 @@ Nada de esto está pusheado.
 
 ```
 1.1  Foundation visual        ✅ cerrada   cdeb69e
-1.2  Cola Stitch              ← el próximo
-1.3  Thread / autores         pendiente
+1.2  Cola Stitch              ✅ cerrada   9875e34
+1.3  Thread / autores         ← el próximo
 1.4  Header · Handoff · Composer   pendiente
 1.5  Case + Tools             pendiente
 1.6  Activity                 pendiente
@@ -55,7 +57,7 @@ consumidores de .bandeja                      1
 **`PageHeader` queda fuera de la frontera, a propósito:** está sobre la mesa, es cromo del CRM, y su
 rediseño es de una fase posterior.
 
-## Los 18 tokens
+## Los tokens
 
 ```
 superficies   --bandeja-canvas #f8fafc · --bandeja-superficie #ffffff
@@ -64,8 +66,13 @@ líneas        --bandeja-borde #e2e8f0 · --bandeja-borde-fuerte #cbd5e1
 texto         --bandeja-texto #0f172a · --bandeja-texto-2 #64748b
               --bandeja-texto-3 #94a3b8
 quién actúa   --bandeja-ia #7c3aed · --bandeja-humano #2563eb · --bandeja-navy #1e3a8a
-estados       --bandeja-ok #059669 · --bandeja-aviso #d97706
-              --bandeja-error #dc2626 · --bandeja-nota #b45309
+estados       --bandeja-ok #059669 · --bandeja-aviso #92400e
+              --bandeja-error #dc2626 · --bandeja-nota #92400e
+fondos        --bandeja-ia-fondo #f5f3ff · --bandeja-ia-borde #ddd6fe
+              --bandeja-humano-fondo #eff6ff · --bandeja-humano-borde #bfdbfe
+              --bandeja-aviso-fondo #fffbeb · --bandeja-aviso-borde #fde68a
+              --bandeja-error-fondo #fef2f2 · --bandeja-error-borde #fecaca
+              --bandeja-nota-fondo #fef3c7
 forma         --bandeja-radio-sm 4px · --bandeja-radio 6px · --bandeja-esp 4px
 tipografía    --bandeja-sans (Geist) · --bandeja-mono (JetBrains Mono)
 ```
@@ -73,8 +80,10 @@ tipografía    --bandeja-sans (Geist) · --bandeja-mono (JetBrains Mono)
 **Un sistema chico y suficiente.** No agregar tokens antes de necesitarlos: ochenta tokens sin
 consumidor son ochenta decisiones que nadie tomó mirando una pantalla.
 
-Los semánticos salen de la misma familia Tailwind que la paleta canónica, no elegidos a ojo. Radios
-de 4 y 6 px **sin sombras**: lo que separa es el borde, la superficie y el espacio.
+**Los valores salen del `tailwind.config` del HTML canónico**, leído en 1.2. En 1.1 los semánticos se
+eligieron «por familia Tailwind» porque la fuente no era accesible todavía, y uno salió mal — ver la
+corrección abajo. Radios de 4 y 6 px **sin sombras**: lo que separa es el borde, la superficie y el
+espacio.
 
 ## IA y humano
 
@@ -86,6 +95,104 @@ humano  → azul     #2563EB
 **El color no puede ser la única señal.** Un 8% de la gente no distingue esos dos tonos, y un punto
 de color sin palabra no dice *qué* pasó. Los componentes que los consuman deben sumar rótulo, texto o
 iconografía. En 1.1 sólo quedaron definidos; los consumidores llegan en 1.3 y siguientes.
+
+## 1.2 — la cola
+
+### `get_screen` volvió a funcionar
+
+El SPEC de Stitch decía que fallaba con «invalid argument». **En esta sesión respondió**, y las seis
+referencias de cola se leyeron directamente del HTML canónico:
+
+```
+AI Handling            1714196c413f403f9aa69f3145d0c50a
+Human Assigned to Me   c427b43a84534a489891f111217439a4
+Other operator         a845526e367544578d2991da3ee24df9
+Legacy                 64cfb00cd593478a87a0408e5465f04c
+Customer replied       23bdda329b764e56b0f80aeb7edbc3c4
+Queue States           9b5e969b91ca4558b28c615b52a5e410
+```
+
+Esa nota del SPEC describía **una limitación observada entonces, que ya no es cierta**. Tampoco
+asumir que va a funcionar siempre: si vuelve a fallar, se reporta y no se infiere.
+
+**Eso corrigió un token de 1.1**, porque el `tailwind.config` estaba en el HTML:
+
+```
+--bandeja-aviso   #d97706  →  #92400E
+```
+
+**No reabre 1.1**: la fuente canónica no estaba disponible durante esa fase. Se incorporaron además
+`aiLight #F5F3FF`, `aiBorder #DDD6FE` y `amberBg #FEF3C7`, más los pares de fondo y filete de error y
+humano.
+
+### El mapeo banda → distintivo
+
+```
+1 cliente_espera       Cliente respondió    rojo
+2 sin_asignar          Sin asignar          ámbar
+3 revisar_evaluacion   Falta revisar        gris
+4 interno_pendiente    Pendiente interno    ámbar
+5 en_curso             En atención          azul
+6 legado               Legado · revisar     gris
+sin banda + ia         La atiende la IA     violeta
+```
+
+**La fila no calcula nada**: toma `c.banda_nombre` y le pone palabras y color. Cero score, cero
+reorden, cero `.sort()`.
+
+**Valor de banda desconocido → fallback neutro**: `BANDAS[c.banda_nombre]` cae en `undefined` y no se
+dibuja distintivo. Nunca etiquetar con uno de los seis conocidos algo que el motor no dijo.
+
+El distintivo violeta **siempre lleva su texto**. Ningún estado se comunica sólo por color.
+
+### El dueño
+
+```
+c.asignada_a  ←  asignada_a_nombre  ←  la asignación durable de Dexter
+```
+
+**Nunca el `assignee_id` del CRM** (D28). Tres casos:
+
+```
+sin asignar (banda 2)      «Sin asignar», ámbar
+asignada                   el nombre durable, azul con punto
+legada sin asignación      «Sin dueño en Dexter», apagado
+```
+
+El tercero equivale al `[NO DEXTER OWNER]` del diseño, y decirlo con todas las letras es parte de G8.
+
+**Su condición real es `!c.asignada_a && c.es_legado`** — la rama es el `else` de `asignada_a`. Está
+escrito en el marcado: si alguien reordena las ramas, una legada **con** dueño diría «sin dueño», y
+sería una afirmación falsa en silencio.
+
+### Lo que el diseño muestra y Dexter no implementó
+
+| | por qué |
+|---|---|
+| `Plan 500M · Belgrano` | no está en la proyección de cola; el SPEC lo marca «read live, not stored» |
+| `Owner: Ana P. **(you)**` | **gap real.** El dato existe en `locals.user` y `[id]/+page.server.js` ya lo expone como `yo`, pero `conversaciones/+layout.server.js` **no lo proyecta a la cola**. Implementarlo pide tocar el `load`, fuera del alcance de 1.2 |
+| `Show all` · `Clear search` · `Reset filters` | escribirían en los filtros del layout: comportamiento nuevo, no pintura |
+| panel offline / retry | la cola no detecta offline. No hay dato |
+
+El `(you)` **queda como gap para una fase posterior**, no como olvido. Es un cambio chico en el
+`load`, pero es una decisión de alcance, no de implementación.
+
+Y siguen prohibidos los mocks: AI Confidence, ids de diagnóstico, SLA, telemetría.
+
+### Estado del puente tras 1.2
+
+```
+ConversationList    v2:  0    bandeja:  1
+QueueFilters        v2:  0    bandeja: 14
+QueueSearch         v2:  0    bandeja:  7
+QueueTabs           v2:  1    bandeja:  6
+ConversationRow     v2: 17    bandeja: 28
+QueueEmptyState     v2:  0    bandeja:  0
+```
+
+**El puente sigue en pie.** Las 17 de `ConversationRow` son los semánticos `ember/clay/rust/moss`, y
+se migran mirando cada consumidor — no por parecido de color.
+
 
 ## El puente `--v2-*` — transitorio, y con un orden para retirarlo
 
@@ -212,12 +319,17 @@ demuestre lo contrario.
 ## Evidencia visual
 
 ```
-1.1  →  sin screenshot
+referencias Stitch  →  comparadas por HTML canónico (1.2)
+screenshot local    →  no obtenido
 ```
 
 Renderizar la Bandeja con datos exige `PRIVATE_ASISTENTE_URL`, que apunta al motor de producción, y
-**no se conecta producción para obtener evidencia estética**. No es un fallo del corte: es una
-restricción respetada.
+**no se conecta producción para obtener evidencia estética**. No es un fallo: es una restricción
+respetada.
+
+Desde 1.2 hay algo mejor que un screenshot: **el HTML canónico se compara directamente**. Eso da los
+valores exactos —tokens, tamaños, clases— en vez de un parecido a ojo, y fue lo que detectó el token
+mal elegido en 1.1 y el `[NO DEXTER OWNER]` que la primera lectura no tenía.
 
 Para 1.2 —que cambia composición, jerarquía, spacing, filas y badges— **sí hace falta evidencia
 visual**, si existe una forma segura de conseguirla. Una alternativa sin tocar producción: levantar
