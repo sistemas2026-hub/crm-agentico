@@ -115,6 +115,6 @@
   .conservar-mal {
     margin: 6px 0 0;
     font-size: 11.5px;
-    color: var(--v2-rust);
+    color: var(--bandeja-error);
   }
 </style>

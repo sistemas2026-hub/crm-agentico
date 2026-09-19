@@ -10,13 +10,17 @@
    * verdad del relevo es Dexter. No usar este valor para decidir Tomar,
    * Soltar, Reasignar ni nada de la cola.
    */
-  import { ChevronDown, ArrowRight } from '@lucide/svelte';
+  import { ChevronDown, ArrowRight, TriangleAlert } from '@lucide/svelte';
   import Pill from '$lib/v2/components/Pill.svelte';
   import Avatar from '$lib/v2/components/Avatar.svelte';
   import { enhance } from '$app/forms';
 
   let {
     caso, conversacion, owners = [], ownerActual,
+    /** El dueño DURABLE de Dexter, ya resuelto por la página (legado vs
+        gobernada). Llega para poder decir cuándo NO coincide con el del
+        ticket, que es lo que el panel antes callaba. */
+    asignadaDexter = '',
     asignadoA = $bindable(''),
     listaAbierta = $bindable(false),
     formularioAsignar = $bindable()
@@ -25,12 +29,39 @@
   const ETIQUETA_TONE = { soporte_tecnico: 'clay', facturacion: 'moss', comercial: 'slate', queja: 'rust' };
   const etiquetaTone = (e) => ETIQUETA_TONE[e] ?? 'ink';
   const etiquetaLabel = (e) => (e ? e.replaceAll('_', ' ') : '');
+  const CANAL = { whatsapp: 'WhatsApp', 'whatsapp-simulado': 'Simulador' };
+
+  // D28 HECHO VISIBLE. Son dos dueños distintos y no se reconcilian: el del
+  // ticket del CRM y el de la conversación en Dexter. Hasta ahora el panel
+  // mostraba el primero rotulado sólo como "Asignado a", y era fácil leerlo
+  // como si dijera quién atiende -- que es justo lo que no dice.
+  //
+  // Se comparan NOMBRES porque es lo único que hay: el CRM y Dexter no
+  // comparten identidad de usuario, y eso es precisamente lo que D28 dice que
+  // todavía no está resuelto. Por eso la comparación sólo sirve en una
+  // dirección: dos nombres distintos prueban que son dos asignaciones
+  // distintas; dos nombres iguales NO prueban que sean la misma persona, y el
+  // panel no lo insinúa. La aclaración de abajo va siempre, coincidan o no.
+  const nombreCrm = $derived((ownerActual?.name ?? '').trim());
+  const duenosDistintos = $derived(
+    !!nombreCrm && !!asignadaDexter && nombreCrm !== asignadaDexter.trim()
+  );
 </script>
 
   {#if caso}
   <div class="caso-panel">
+  <!-- LO DE DEXTER PRIMERO, y separado de lo del CRM. Antes los campos de las
+       dos cosas iban mezclados en una sola lista, y "Asignado a" se leía como
+       si dijera quién atiende la conversación. -->
+  <p class="bloque-titulo">Conversación · Dexter</p>
+
   <div class="caso-campo">
-    <span class="v2-sub">Etiqueta</span>
+    <span class="v2-sub">Canal</span>
+    <span class="dato">{CANAL[conversacion.canal] ?? conversacion.canal}</span>
+  </div>
+
+  <div class="caso-campo">
+    <span class="v2-sub">Clasificación</span>
     {#if conversacion.etiqueta}
       <Pill tone={etiquetaTone(conversacion.etiqueta)}>{etiquetaLabel(conversacion.etiqueta)}</Pill>
     {:else}
@@ -39,7 +70,23 @@
   </div>
 
   <div class="caso-campo">
-    <span class="v2-sub">Asignado a</span>
+    <span class="v2-sub">A cargo en Dexter</span>
+    {#if asignadaDexter}
+      <span class="dato">{asignadaDexter}</span>
+    {:else}
+      <span class="v2-muted">Sin asignar</span>
+    {/if}
+  </div>
+
+  <p class="bloque-titulo bloque-crm">Caso del CRM</p>
+
+  <div class="caso-campo">
+    <span class="v2-sub">Estado</span>
+    <span class="dato">{caso.status ?? '—'}</span>
+  </div>
+
+  <div class="caso-campo">
+    <span class="v2-sub">Dueño del ticket</span>
     <form
       method="POST"
       action="?/asignar"
@@ -107,9 +154,44 @@
     </form>
   </div>
 
+  <!-- El aviso que faltaba. No es un error ni algo que haya que arreglar: el
+       ticket del CRM y la conversación de Dexter se asignan por separado a
+       propósito. Lo que no puede pasar es que alguien lea el nombre de arriba
+       y crea que dice quién está atendiendo. -->
+  {#if duenosDistintos}
+    <p class="aviso-duenos">
+      <TriangleAlert size={13} />
+      <span>
+        El ticket lo lleva <b>{nombreCrm}</b> y la conversación la atiende
+        <b>{asignadaDexter}</b>. Son dos asignaciones distintas.
+      </span>
+    </p>
+  {/if}
+
+  <!-- SIEMPRE, coincidan los nombres o no. Que dos nombres sean iguales no
+       prueba que sean la misma persona: el CRM y Dexter no comparten identidad
+       de usuario, así que lo único que hay para comparar es un texto. Sin esta
+       línea, dos homónimos se leerían como "está bien asignado" -- una
+       afirmación que Dexter no puede hacer. Lo que sí puede decir es de dónde
+       sale cada dato y cuál manda. -->
+  <p class="nota-autoridad">
+    La asignación del CRM es informativa. Quién atiende esta conversación lo
+    determina Dexter.
+  </p>
+
   <a class="v2-btn v2-btn-sm caso-link" href="/tickets/{caso.id}">
     Ver ticket completo <ArrowRight size={14} />
   </a>
+
+  <!-- Sólo si la conversación tiene uno. La mayoría no: no se muestra un
+       campo vacío para completar la composición. -->
+  {#if conversacion.ticket_operativo}
+    <p class="bloque-titulo">Ticket operativo</p>
+    <div class="caso-campo">
+      <span class="v2-sub">Identificador</span>
+      <span class="dato mono">{conversacion.ticket_operativo}</span>
+    </div>
+  {/if}
   </div>
   {/if}
 
@@ -124,6 +206,66 @@
     gap: 12px;
     padding-bottom: 16px;
     border-bottom: 1px solid var(--v2-line-soft);
+  }
+
+  /* Encabezado de bloque: mono y versalita, el mismo recurso con el que la
+     cola y el encabezado separan "qué es esto" de "cuánto vale". Acá separa
+     lo de Dexter de lo del CRM, que es la distinción que el panel existe
+     para sostener. */
+  .bloque-titulo {
+    margin: 0;
+    font-family: var(--bandeja-mono);
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--bandeja-texto-2);
+  }
+  .bloque-crm {
+    margin-top: 4px;
+    padding-top: 12px;
+    border-top: 1px solid var(--bandeja-borde);
+  }
+
+  .dato {
+    font-size: 13px;
+    color: var(--bandeja-texto);
+  }
+  /* El identificador del ticket operativo lo emite un sistema externo y puede
+     ser largo. La columna de contexto es fija (340-400px), así que se parte
+     en vez de empujarla -- mismo criterio que el nombre del dueño en 1.4B. */
+  .mono {
+    font-family: var(--bandeja-mono);
+    font-size: 12px;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  .aviso-duenos {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    margin: 0;
+    padding: 7px 9px;
+    border: 1px solid var(--bandeja-aviso-borde);
+    border-radius: var(--bandeja-radio-sm);
+    background: var(--bandeja-aviso-fondo);
+    color: var(--bandeja-aviso);
+    font-size: 11.5px;
+    line-height: 1.45;
+  }
+  .aviso-duenos :global(svg) {
+    flex: none;
+    margin-top: 1px;
+  }
+
+  /* Discreta pero permanente: no es una alarma, es la regla de autoridad. Si
+     gritara, el aviso de arriba --que sí es un hallazgo-- dejaría de destacar. */
+  .nota-autoridad {
+    margin: -4px 0 0;
+    font-size: 11px;
+    line-height: 1.45;
+    color: var(--bandeja-texto-2);
   }
 
   .caso-campo {

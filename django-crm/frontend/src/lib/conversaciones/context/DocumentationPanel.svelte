@@ -121,7 +121,7 @@
   }
 
   .docs-malo {
-    color: var(--v2-rust);
+    color: var(--bandeja-error);
   }
 
   /* Sin tarjeta: son citas de un documento, no objetos que se manipulan. */

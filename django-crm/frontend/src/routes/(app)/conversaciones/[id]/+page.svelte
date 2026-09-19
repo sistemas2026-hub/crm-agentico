@@ -1520,6 +1520,7 @@
 
   <CasePanel
     {caso} {conversacion} {owners} {ownerActual}
+    asignadaDexter={asignadaA}
     bind:asignadoA bind:listaAbierta bind:formularioAsignar
   />
 

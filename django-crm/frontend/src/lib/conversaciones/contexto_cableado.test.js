@@ -1,0 +1,131 @@
+/**
+ * Los paneles de contexto (fase 1.5).
+ *
+ * Dos cosas que ninguna otra guarda ve:
+ *
+ * 1. D28 — el dueño del ticket del CRM NO es quien atiende la conversación.
+ *    El panel mostraba el primero rotulado sólo como «Asignado a», y era fácil
+ *    leerlo como si dijera quién está atendiendo. Ahora lo dice cuando no
+ *    coinciden; el riesgo nuevo es que lo diga cuando SÍ coinciden, o cuando
+ *    falta uno de los dos, y entonces el aviso se vuelve ruido que nadie lee.
+ *
+ * 2. Los cuatro tokens semánticos (ember/clay/rust/moss) que 1.1 dejó sin
+ *    remapear a propósito, para resolverlos «en la fase de su pantalla,
+ *    consumidor por consumidor». Ésta es esa fase para los paneles de
+ *    contexto: si vuelve a aparecer uno, es que alguien agregó un consumidor
+ *    sin decidir su significado.
+ */
+import { describe, it, expect } from 'vitest';
+import { readFileSync, readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+const dir = fileURLToPath(new URL('./context/', import.meta.url));
+const leer = (f) => readFileSync(dir + f, 'utf-8');
+const paneles = readdirSync(dir).filter((f) => f.endsWith('.svelte'));
+const caso = leer('CasePanel.svelte');
+
+describe('D28: los dos dueños no se confunden', () => {
+  it('el aviso exige que los DOS nombres consten', () => {
+    // Sin el dueño de Dexter no hay nada que contrastar, y avisar seria
+    // afirmar una diferencia que no se midio.
+    expect(caso).toMatch(/!!nombreCrm && !!asignadaDexter/);
+  });
+
+  it('y que sean distintos, comparando sin espacios de sobra', () => {
+    expect(caso).toMatch(/nombreCrm !== asignadaDexter\.trim\(\)/);
+  });
+
+  it('el aviso solo se dibuja bajo esa condición', () => {
+    expect(caso).toMatch(/\{#if duenosDistintos\}[\s\S]{0,600}aviso-duenos/);
+  });
+
+  it('el rótulo del CRM dice de quién es el ticket, no quién atiende', () => {
+    expect(caso).toMatch(/Dueño del ticket/);
+    expect(caso).toMatch(/A cargo en Dexter/);
+    // El rotulo viejo, ambiguo, no vuelve.
+    expect(caso).not.toMatch(/>Asignado a</);
+  });
+
+  it('la aclaración de autoridad va SIEMPRE, no dentro del if del aviso', () => {
+    // Éste es el caso homónimo: dos nombres iguales no prueban que sean la
+    // misma persona -- el CRM y Dexter no comparten identidad de usuario.
+    // Sin esta línea, dos "Juan Pérez" se leerían como "está bien asignado".
+    // En el MARKUP: la clase sola no alcanza, porque una regla huérfana en el
+    // <style> la dejaría "presente" con el párrafo ya borrado.
+    const markup = caso.slice(caso.indexOf('</script>'), caso.indexOf('<style>'));
+    expect(markup).toMatch(/class="nota-autoridad"/);
+    const bloqueSiDistintos = caso.slice(
+      caso.indexOf('{#if duenosDistintos}'),
+      caso.indexOf('{/if}', caso.indexOf('{#if duenosDistintos}'))
+    );
+    expect(bloqueSiDistintos).not.toMatch(/nota-autoridad/);
+  });
+
+  it('y dice cuál de los dos sistemas manda', () => {
+    expect(caso).toMatch(/asignación del CRM es informativa/i);
+    expect(caso).toMatch(/lo\s+determina Dexter/);
+  });
+
+  it('nunca afirma que los dueños sean la misma persona', () => {
+    // Sobre el TEXTO VISIBLE, no sobre el archivo: los comentarios del código
+    // dicen justamente lo contrario (que no se puede afirmar), y buscarlos ahí
+    // haría fallar la prueba por explicar bien la regla.
+    const visible = caso
+      .slice(caso.indexOf('</script>'), caso.indexOf('<style>'))
+      .replace(/<!--[\s\S]*?-->/g, '');
+    for (const frase of [
+      /misma persona/i, /coinciden/i, /sincronizad/i,
+      /correctamente asignad/i, /mismo (dueño|responsable)/i
+    ]) {
+      expect(visible).not.toMatch(frase);
+    }
+  });
+
+  it('no inventa un id compartido para comparar', () => {
+    // Comparar por id exigiria una reconciliacion CRM/Dexter que no existe.
+    // D28 sigue abierto: la pantalla lo dice, no lo resuelve.
+    expect(caso).not.toMatch(/ownerActual\??\.id\s*===|assigned_to\s*===/);
+  });
+
+  it('el dueño durable llega resuelto de la página, no se deduce acá', () => {
+    // Si el panel lo dedujera (legado vs gobernada), esa regla viviria en dos
+    // lugares y podria decir algo distinto que el encabezado.
+    expect(caso).not.toMatch(/asignada_a_nombre|tomada_por|relevo_version/);
+  });
+});
+
+describe('no se inventan campos', () => {
+  it('el ticket operativo sólo se muestra si la conversación tiene uno', () => {
+    expect(caso).toMatch(/\{#if conversacion\.ticket_operativo\}/);
+  });
+
+  it('no aparecen área ni prioridad del ticket operativo', () => {
+    // Stitch los muestra; Dexter no los tiene. Un campo inventado en un panel
+    // de contexto se lee como un dato del cliente.
+    expect(caso).not.toMatch(/Prioridad|Área operativa/);
+  });
+});
+
+describe('los cuatro semánticos quedaron resueltos en esta pantalla', () => {
+  it.each(paneles)('%s no usa ember/clay/rust/moss sin decidir', (f) => {
+    expect(leer(f)).not.toMatch(/var\(--v2-(ember|clay|rust|moss)/);
+  });
+
+  it('y se resolvieron a los tokens de la Bandeja, no a colores sueltos', () => {
+    const trace = leer('TracePanel.svelte');
+    expect(trace).toMatch(/var\(--bandeja-ok\)/);       // ejecución normal
+    expect(trace).toMatch(/var\(--bandeja-aviso\)/);    // bloqueo: no es un fallo
+    expect(trace).toMatch(/var\(--bandeja-error\)/);    // error real del sistema
+    expect(trace).not.toMatch(/#[0-9a-f]{6}/i);
+  });
+});
+
+describe('el proceso sigue contando lo que cuenta el motor', () => {
+  it('la pantalla no recalcula bloqueos ni errores', () => {
+    // El backend los cuenta porque distinguir un bloqueo de un fallo depende
+    // de una columna de la base. La pantalla dibuja tres numeros.
+    const trace = leer('TracePanel.svelte');
+    expect(trace).toMatch(/diagnostico\?\.(bloqueadas|errores)/);
+    expect(trace).not.toMatch(/filter\([^)]*es_bloqueo/);
+  });
+});

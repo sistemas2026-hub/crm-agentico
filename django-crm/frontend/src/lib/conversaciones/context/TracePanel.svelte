@@ -47,7 +47,7 @@
   {#if diagnostico}
     <ul class="diag">
       <li>
-        <CircleCheck size={14} style="color:var(--v2-moss);flex:none" />
+        <CircleCheck size={14} style="color:var(--bandeja-ok);flex:none" />
         <b>{diagnostico.normales}</b>
         {diagnostico.normales === 1 ? 'ejecución normal' : 'ejecuciones normales'}
         <span class="v2-muted">corrió y devolvió datos</span>
@@ -58,7 +58,7 @@
            Los dos en cero no se dibujan: ver 'contrasteUtil'. -->
       {#if contrasteUtil}
       <li class:diag-hay={diagnostico.bloqueadas > 0}>
-        <ShieldCheck size={14} style="color:var(--v2-clay);flex:none" />
+        <ShieldCheck size={14} style="color:var(--bandeja-aviso);flex:none" />
         {#if diagnostico.bloqueadas > 0}
           <button type="button" class="diag-ir" onclick={() => onIrAlPaso?.('bloqueo')}>
             <b>{diagnostico.bloqueadas}</b>
@@ -71,7 +71,7 @@
         {/if}
       </li>
       <li class:diag-hay={diagnostico.errores > 0}>
-        <CircleX size={14} style="color:var(--v2-rust);flex:none" />
+        <CircleX size={14} style="color:var(--bandeja-error);flex:none" />
         {#if diagnostico.errores > 0}
           <button type="button" class="diag-ir" onclick={() => onIrAlPaso?.('error')}>
             <b>{diagnostico.errores}</b>
@@ -96,11 +96,11 @@
         data-paso={i}
       >
         {#if h.es_bloqueo}
-          <ShieldCheck size={15} style="color:var(--v2-clay);flex:none" />
+          <ShieldCheck size={15} style="color:var(--bandeja-aviso);flex:none" />
         {:else if h.exito}
-          <CircleCheck size={15} style="color:var(--v2-moss);flex:none" />
+          <CircleCheck size={15} style="color:var(--bandeja-ok);flex:none" />
         {:else}
-          <CircleX size={15} style="color:var(--v2-rust);flex:none" />
+          <CircleX size={15} style="color:var(--bandeja-error);flex:none" />
         {/if}
         <span class="proceso-nombre">{h.herramienta}</span>
         {#if h.n_registros !== null}
@@ -137,7 +137,7 @@
 
   /* El resaltado del paso al que se salto. Se apaga solo. */
   .paso-marcado {
-    background: var(--v2-ember-soft);
+    background: var(--bandeja-aviso-fondo);
     border-radius: 6px;
     padding-left: 6px;
     padding-right: 6px;
@@ -272,7 +272,7 @@
   }
 
   .diag-ir:focus-visible {
-    outline: 2px solid var(--v2-ember);
+    outline: 2px solid var(--bandeja-aviso);
     outline-offset: 1px;
   }
 
@@ -288,18 +288,18 @@
   }
 
   .diag-error {
-    color: var(--v2-rust);
-    background: color-mix(in srgb, var(--v2-rust) 12%, transparent);
+    color: var(--bandeja-error);
+    background: var(--bandeja-error-fondo);
   }
 
   .diag-bloqueo {
-    color: var(--v2-clay);
-    background: color-mix(in srgb, var(--v2-clay) 14%, transparent);
+    color: var(--bandeja-aviso);
+    background: var(--bandeja-aviso-fondo);
   }
 
   /* Un bloqueo no es un fallo: se distingue del resto de la lista, pero sin
      la carga visual de un error. */
   .proceso-item.bloqueada .proceso-nombre {
-    color: var(--v2-clay);
+    color: var(--bandeja-aviso);
   }
 </style>
