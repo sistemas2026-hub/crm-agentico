@@ -37,7 +37,7 @@
 
 {#if lineas.length > 0}
   <section class="actividad">
-    <p class="bloque-titulo">Relevo · {lineas.length} movimiento{lineas.length === 1 ? '' : 's'}</p>
+    <p class="panel-titulo">Relevo · {lineas.length} movimiento{lineas.length === 1 ? '' : 's'}</p>
 
     <ol class="linea-tiempo">
       {#each lineas as l, i (i)}
@@ -68,15 +68,6 @@
     border-bottom: 1px solid var(--v2-line-soft);
   }
 
-  .bloque-titulo {
-    margin: 0;
-    font-family: var(--bandeja-mono);
-    font-size: 9.5px;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--bandeja-texto-2);
-  }
 
   .linea-tiempo {
     list-style: none;

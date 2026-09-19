@@ -44,7 +44,7 @@
 </script>
 
 <section class="red">
-  <p class="bloque-titulo">Equipo del cliente</p>
+  <p class="panel-titulo">Equipo del cliente</p>
 
   {#if lineas.length === 0}
     <!-- Estado vacío honesto: no es que falte el dato, es que no se hizo nada.
@@ -81,11 +81,11 @@
   {#if serial}
     <p class="serial">
       <span class="v2-sub">Equipo identificado</span>
-      <span class="mono">{serial}</span>
+      <span class="panel-mono">{serial}</span>
     </p>
   {/if}
 
-  <p class="nota-fuente">
+  <p class="panel-nota">
     La potencia óptica, la OLT y el estado de la ONU se consultan desde el
     sistema del ISP cuando el asistente los necesita, y no se guardan acá.
     Reiniciar un equipo pasa por la cola de acciones con confirmación: no se
@@ -102,15 +102,6 @@
     border-bottom: 1px solid var(--v2-line-soft);
   }
 
-  .bloque-titulo {
-    margin: 0;
-    font-family: var(--bandeja-mono);
-    font-size: 9.5px;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--bandeja-texto-2);
-  }
 
   .vacio {
     margin: 0;
@@ -198,18 +189,5 @@
   .serial > .v2-sub {
     font-size: 11.5px;
   }
-  .mono {
-    font-family: var(--bandeja-mono);
-    font-size: 12px;
-    font-variant-numeric: tabular-nums;
-    color: var(--bandeja-texto);
-    overflow-wrap: anywhere;
-  }
 
-  .nota-fuente {
-    margin: 2px 0 0;
-    font-size: 11px;
-    line-height: 1.45;
-    color: var(--bandeja-texto-2);
-  }
 </style>

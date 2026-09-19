@@ -53,11 +53,11 @@
   <!-- LO DE DEXTER PRIMERO, y separado de lo del CRM. Antes los campos de las
        dos cosas iban mezclados en una sola lista, y "Asignado a" se leía como
        si dijera quién atiende la conversación. -->
-  <p class="bloque-titulo">Conversación · Dexter</p>
+  <p class="panel-titulo">Conversación · Dexter</p>
 
   <div class="caso-campo">
     <span class="v2-sub">Canal</span>
-    <span class="dato">{CANAL[conversacion.canal] ?? conversacion.canal}</span>
+    <span class="panel-dato">{CANAL[conversacion.canal] ?? conversacion.canal}</span>
   </div>
 
   <div class="caso-campo">
@@ -72,17 +72,17 @@
   <div class="caso-campo">
     <span class="v2-sub">A cargo en Dexter</span>
     {#if asignadaDexter}
-      <span class="dato">{asignadaDexter}</span>
+      <span class="panel-dato">{asignadaDexter}</span>
     {:else}
       <span class="v2-muted">Sin asignar</span>
     {/if}
   </div>
 
-  <p class="bloque-titulo bloque-crm">Caso del CRM</p>
+  <p class="panel-titulo bloque-crm">Caso del CRM</p>
 
   <div class="caso-campo">
     <span class="v2-sub">Estado</span>
-    <span class="dato">{caso.status ?? '—'}</span>
+    <span class="panel-dato">{caso.status ?? '—'}</span>
   </div>
 
   <div class="caso-campo">
@@ -186,10 +186,10 @@
   <!-- Sólo si la conversación tiene uno. La mayoría no: no se muestra un
        campo vacío para completar la composición. -->
   {#if conversacion.ticket_operativo}
-    <p class="bloque-titulo">Ticket operativo</p>
+    <p class="panel-titulo">Ticket operativo</p>
     <div class="caso-campo">
       <span class="v2-sub">Identificador</span>
-      <span class="dato mono">{conversacion.ticket_operativo}</span>
+      <span class="panel-dato panel-mono">{conversacion.ticket_operativo}</span>
     </div>
   {/if}
   </div>
@@ -208,38 +208,12 @@
     border-bottom: 1px solid var(--v2-line-soft);
   }
 
-  /* Encabezado de bloque: mono y versalita, el mismo recurso con el que la
-     cola y el encabezado separan "qué es esto" de "cuánto vale". Acá separa
-     lo de Dexter de lo del CRM, que es la distinción que el panel existe
-     para sostener. */
-  .bloque-titulo {
-    margin: 0;
-    font-family: var(--bandeja-mono);
-    font-size: 9.5px;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--bandeja-texto-2);
-  }
   .bloque-crm {
     margin-top: 4px;
     padding-top: 12px;
     border-top: 1px solid var(--bandeja-borde);
   }
 
-  .dato {
-    font-size: 13px;
-    color: var(--bandeja-texto);
-  }
-  /* El identificador del ticket operativo lo emite un sistema externo y puede
-     ser largo. La columna de contexto es fija (340-400px), así que se parte
-     en vez de empujarla -- mismo criterio que el nombre del dueño en 1.4B. */
-  .mono {
-    font-family: var(--bandeja-mono);
-    font-size: 12px;
-    max-width: 100%;
-    overflow-wrap: anywhere;
-  }
 
   .aviso-duenos {
     display: flex;

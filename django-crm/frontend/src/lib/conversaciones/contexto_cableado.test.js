@@ -120,6 +120,45 @@ describe('los cuatro semánticos quedaron resueltos en esta pantalla', () => {
   });
 });
 
+describe('los paneles comparten sus piezas, no las copian', () => {
+  // Hasta el cierre de la Fase 1 cada panel tenía su propia copia de estas
+  // cuatro reglas. Tres eran idénticas; `.mono` NO -- y el mismo tipo de dato
+  // se veía distinto en tres paneles apilados en la misma columna. Con el CSS
+  // scopeado de Svelte eso no lo ve ninguna herramienta: hay que mirar los
+  // tres juntos.
+  const COMPARTIDAS = ['bloque-titulo', 'dato', 'mono', 'nota-fuente'];
+
+  it.each(paneles)('%s no redefine las utilidades de panel', (f) => {
+    const estilo = leer(f).split('<style>')[1] ?? '';
+    for (const c of COMPARTIDAS) {
+      expect(estilo).not.toContain(`\n  .${c} {`);
+    }
+  });
+
+  it('y las usan con el prefijo propio, que no colisiona con el CRM', () => {
+    // `.dato` y `.mono` ya existen en componentes del CRM fuera de la mesa.
+    const usados = paneles.map(leer).join('\n');
+    expect(usados).toMatch(/class="panel-titulo/);
+    expect(usados).toMatch(/panel-mono/);
+  });
+
+  it('las utilidades viven en bandeja.css, scopeadas a la mesa', () => {
+    const css = readFileSync(
+      fileURLToPath(new URL('./estilos/bandeja.css', import.meta.url)), 'utf-8');
+    for (const c of ['panel-titulo', 'panel-dato', 'panel-mono', 'panel-nota']) {
+      expect(css).toContain(`.bandeja .${c} {`);
+    }
+  });
+
+  it('y `panel-mono` lleva las dos propiedades que estaban repartidas', () => {
+    const css = readFileSync(
+      fileURLToPath(new URL('./estilos/bandeja.css', import.meta.url)), 'utf-8');
+    const regla = css.slice(css.indexOf('.bandeja .panel-mono'));
+    expect(regla.slice(0, 220)).toMatch(/tabular-nums/);
+    expect(regla.slice(0, 220)).toMatch(/overflow-wrap: anywhere/);
+  });
+});
+
 describe('la actividad no se queda vieja', () => {
   const pagina = readFileSync(
     fileURLToPath(new URL('../../routes/(app)/conversaciones/[id]/+page.svelte', import.meta.url)),
@@ -183,7 +222,7 @@ describe('el panel del cliente no inventa la ficha', () => {
     .replace(/<!--[\s\S]*?-->/g, '');
   // La nota que explica qué NO está nombra esos mismos campos; buscarlos ahí
   // haría fallar la prueba por decir bien la verdad.
-  const campos = visible.replace(/<p class="nota-fuente">[\s\S]*?<\/p>/, '');
+  const campos = visible.replace(/<p class="panel-nota">[\s\S]*?<\/p>/, '');
 
   it('no muestra los campos que la referencia marca como MOCK', () => {
     // Dirección, plan, velocidades, saldo y facturas viven en el ISP y Dexter
@@ -227,7 +266,7 @@ describe('el panel de red no ejecuta ni inventa', () => {
   const visible = red
     .slice(red.indexOf('</script>'), red.indexOf('<style>'))
     .replace(/<!--[\s\S]*?-->/g, '');
-  const campos = visible.replace(/<p class="nota-fuente">[\s\S]*?<\/p>/, '');
+  const campos = visible.replace(/<p class="panel-nota">[\s\S]*?<\/p>/, '');
 
   it('no hay botones de Ping ni de Reiniciar', () => {
     // Reiniciar corta el servicio de alguien y pasa por la cola de acciones

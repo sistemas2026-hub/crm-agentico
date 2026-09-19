@@ -50,7 +50,7 @@
 </script>
 
 <section class="cliente">
-  <p class="bloque-titulo">Cliente</p>
+  <p class="panel-titulo">Cliente</p>
 
   <p class="verificacion" class:v-si={verificado} class:v-no={!verificado}>
     {#if verificado}
@@ -67,14 +67,14 @@
   {#if conversacion?.nombre_cliente}
     <div class="campo">
       <span class="v2-sub">Nombre</span>
-      <span class="dato">{conversacion.nombre_cliente}</span>
+      <span class="panel-dato">{conversacion.nombre_cliente}</span>
     </div>
   {/if}
 
   <div class="campo">
     <span class="v2-sub">{esIdOpaco ? 'Identificador del canal' : 'Teléfono'}</span>
     {#if conversacion?.usuario_externo}
-      <span class="dato mono">{telefono(conversacion.usuario_externo)}</span>
+      <span class="panel-dato panel-mono">{telefono(conversacion.usuario_externo)}</span>
     {:else}
       <span class="v2-muted">Sin identificar</span>
     {/if}
@@ -83,24 +83,24 @@
   {#if conversacion?.id_cliente}
     <div class="campo">
       <span class="v2-sub">Cliente en el ISP</span>
-      <span class="dato mono">{conversacion.id_cliente}</span>
+      <span class="panel-dato panel-mono">{conversacion.id_cliente}</span>
     </div>
   {/if}
 
   {#if equipo.length > 0}
-    <p class="bloque-titulo separado">Equipo</p>
+    <p class="panel-titulo separado">Equipo</p>
     {#each equipo as [clave, valor] (clave)}
       <div class="campo">
         <!-- Si el tenant captura un campo nuevo, aparece con su clave cruda en
              vez de no aparecer: el motor ya lo manda, y esconderlo sería
              perder un dato que alguien fue a buscar. -->
         <span class="v2-sub">{ROTULO_EQUIPO[clave] ?? clave.replaceAll('_', ' ')}</span>
-        <span class="dato mono">{valor}</span>
+        <span class="panel-dato panel-mono">{valor}</span>
       </div>
     {/each}
   {/if}
 
-  <p class="nota-fuente">
+  <p class="panel-nota">
     Dexter guarda de cada cliente lo que hizo falta para atenderlo: su identidad
     y los identificadores de su equipo. El plan, la dirección, el saldo y las
     facturas viven en el sistema del ISP y no se traen acá.
@@ -116,15 +116,6 @@
     border-bottom: 1px solid var(--v2-line-soft);
   }
 
-  .bloque-titulo {
-    margin: 0;
-    font-family: var(--bandeja-mono);
-    font-size: 9.5px;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--bandeja-texto-2);
-  }
   .separado {
     margin-top: 4px;
     padding-top: 12px;
@@ -168,24 +159,5 @@
     font-size: 11.5px;
   }
 
-  .dato {
-    font-size: 13px;
-    color: var(--bandeja-texto);
-    max-width: 100%;
-    overflow-wrap: anywhere;
-  }
-  /* Los identificadores técnicos en mono y con cifras tabulares: se comparan
-     contra otro sistema carácter por carácter. */
-  .mono {
-    font-family: var(--bandeja-mono);
-    font-size: 12px;
-    font-variant-numeric: tabular-nums;
-  }
 
-  .nota-fuente {
-    margin: 2px 0 0;
-    font-size: 11px;
-    line-height: 1.45;
-    color: var(--bandeja-texto-2);
-  }
 </style>

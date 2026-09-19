@@ -127,3 +127,57 @@ html:not(.dark) .bandeja {
   color: var(--bandeja-texto);
   font-family: var(--bandeja-sans);
 }
+
+/* ── los paneles de contexto ────────────────────────────────────────────────
+   Case, Customer, Network y Activity comparten cuatro piezas, y hasta el
+   cierre de la Fase 1 cada uno tenía su propia copia. Idénticas tres de ellas
+   -- y la cuarta NO, que es el motivo real de unificarlas:
+
+     .mono   CasePanel llevaba overflow-wrap y no tabular-nums
+             CustomerPanel tabular-nums y no overflow-wrap
+             NetworkPanel las dos
+
+   O sea que el MISMO tipo de dato --un identificador técnico-- se veía
+   distinto en tres paneles apilados en la misma columna. Con el CSS scopeado
+   de Svelte eso no lo detecta ninguna herramienta: hay que mirar los tres
+   juntos, que es lo que un cierre visual existe para hacer.
+
+   Llevan prefijo `panel-` y no nombres genéricos a propósito: `.dato` y
+   `.mono` ya existen en componentes del CRM fuera de la mesa, y aunque este
+   archivo esté scopeado a `.bandeja`, un nombre que se repite invita a que
+   alguien los cruce más adelante. */
+.bandeja .panel-titulo {
+  margin: 0;
+  font-family: var(--bandeja-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--bandeja-texto-2);
+}
+
+.bandeja .panel-dato {
+  font-size: 13px;
+  color: var(--bandeja-texto);
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+/* Cifras tabulares porque estos valores se comparan contra otro sistema
+   carácter por carácter, y quiebre en cualquier punto porque el largo de un
+   serial o de un id del ISP no está garantizado. */
+.bandeja .panel-mono {
+  font-family: var(--bandeja-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+/* Lo que el panel NO trae, y por qué. Discreta pero presente: es lo que
+   distingue un estado vacío honesto de una sección que parece rota. */
+.bandeja .panel-nota {
+  margin: 2px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--bandeja-texto-2);
+}
