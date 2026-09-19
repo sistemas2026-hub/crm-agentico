@@ -22,6 +22,8 @@ ade3bdf  checkpoint Fase 1
 9875e34  1.2 — cola Stitch
 8910a88  checkpoint con 1.2
 4a701cd  1.3A — D30, el hilo proyecta origen y autor
+07c73fa  checkpoint con D30
+610a19b  1.3B — autores en el hilo
 ```
 
 Nada de esto está pusheado.
@@ -32,8 +34,8 @@ Nada de esto está pusheado.
 1.1  Foundation visual        ✅ cerrada   cdeb69e
 1.2  Cola Stitch              ✅ cerrada   9875e34
 1.3A D30 · read-side          ✅ cerrada   4a701cd
-1.3B Thread / autores         ← el próximo, ya desbloqueado
-1.4  Header · Handoff · Composer   pendiente
+1.3B Thread / autores         ✅ cerrada   610a19b
+1.4  Header · Handoff · Composer   ← el próximo
 1.5  Case + Tools             pendiente
 1.6  Activity                 pendiente
 1.7  Customer                 pendiente
@@ -284,6 +286,111 @@ visual      ninguna todavía: el dato llega y nadie lo lee aún
 trazas, excepciones ni telemetría** (D19/D20/D23).
 
 
+## 1.3B — quién escribió cada cosa
+
+### La clasificación canónica
+
+```
+rol=nota                      →  Nota interna          + autor si consta
+origen ausente / null         →  Origen no registrado
+user      + cliente           →  Cliente
+assistant + ia                →  Dexter IA
+assistant + humano            →  autor_nombre, o «Atención humana»
+assistant + sistema           →  Sistema
+cualquier otra combinación    →  Origen no registrado
+```
+
+**La regla de fondo: el rol por sí solo NO atribuye autoría.** La única excepción es `nota`, y sólo
+porque ahí el rol identifica *qué tipo de elemento* es, no quién lo escribió.
+
+Un origen suelto tampoco alcanza: `cliente` bajo rol `assistant`, o `ia` bajo rol `user`, son estados
+que el motor no produce. Tratarlos como válidos sería inventar una lectura de datos inconsistentes.
+
+Vive en `formato.js::autorDe(m)` — función pura, testeable sin montar Svelte.
+
+### El defecto propio, encontrado en la auditoría antes de commitear
+
+La primera versión decía:
+
+```js
+if (origen === 'cliente' || rol === 'user')
+```
+
+Ese `||` **reintroducía por la puerta lateral justo lo que D30 vino a eliminar**: un `user` histórico
+sin origen registrado salía afirmado como Cliente.
+
+**Nunca estuvo en producción** — se corrigió antes del commit. **No es una regresión.**
+
+Y lo que importa para la próxima vez: **los trece tests originales pasaban con el código malo**,
+porque ninguno probaba `user` con un origen que no fuera `cliente`. Cada caso alimentaba la
+combinación coherente. Es el patrón que el repo ya tiene documentado — *un caso dorado que usa la
+frase que sí funciona no prueba nada sobre la que falla*.
+
+**Los cuatro casos que faltaban son negativos:**
+
+```
+user + NULL              no es Cliente
+user + origen futuro     no es Cliente
+assistant + cliente      neutro
+user + ia                neutro
+```
+
+Ahora la guarda del NULL va **primera**, antes de cualquier identidad, y las tres salidas neutras son
+**una única constante congelada** para que no puedan divergir.
+
+### El histórico y el humano
+
+`origen` NULL **no se rellena**: ni por rol, ni por contenido, ni por quién controla hoy la
+conversación. Cero backfill.
+
+```
+origen=humano + autor_nombre   →  el nombre real
+origen=humano sin nombre       →  «Atención humana»
+```
+
+**Nunca como autor histórico**: el dueño actual, el `assignee` del CRM o el control actual. Pueden no
+ser quien escribió.
+
+### El lenguaje visual
+
+```
+IA       violeta + etiqueta         Humano   azul + nombre o etiqueta
+Nota     ámbar + «Nota interna»     Sistema  neutral
+NULL     neutral                    Cliente  estructura diferenciada, sin rótulo
+```
+
+**Ninguna identidad depende únicamente del color.** El rótulo va siempre con palabra; el punto es
+refuerzo. Un 8% de la gente no distingue violeta de azul, y un punto sin texto no dice *qué* pasó.
+
+Sistema y «sin registro» quedan en gris **a propósito**: ninguno de los dos es alguien con quien se
+pueda hablar, y el segundo además es la admisión de que no sabemos. Un color propio le daría una
+identidad que justamente no tiene.
+
+El cliente no lleva rótulo: su burbuja ya está del otro lado y es el único que no puede confundirse
+con nadie.
+
+### Lo que no se tocó
+
+`forzarAlFinal(n)` y `alFinal(true)` siguen siendo caminos distintos. Cero timers, observers,
+`$effect` u `onMount` nuevos. Adjuntos, `estado_entrega`, `error_entrega` y timestamps intactos.
+
+**CSS conocido, sin limpiar:**
+
+```
+a-cliente    marcador semántico deliberado, sin regla propia
+entrega-*    clases históricas; sólo .entrega y .entrega-leido tienen regla
+```
+
+### Mutaciones
+
+```
+todo assistant → IA                 →  9 de 13 fallan
+rol=user → Cliente sin mirar origen →  3 de 17 fallan, justo los que faltaban
+```
+
+Las dos revertidas.
+
+
 ## El puente `--v2-*` — transitorio, y con un orden para retirarlo
 
 La Bandeja consume hoy **~190 usos de `--v2-*`** en ocho componentes. Como las custom properties
@@ -399,9 +506,11 @@ voltajes, firmwares, OLT/slot/port, operadores, teléfonos o documentos inventad
 |---|---|
 | `pnpm check` | 2 errores en `(no-layout)/org/`; **0 en `conversaciones/`** |
 | warnings | **26** — los dos conocidos son `.marca` y `.marca::before` en `+layout.svelte` |
-| vitest | 17 failed \| 9 passed (26) · **63 failed** \| 298 passed (361) |
+| vitest | 17 failed \| 10 passed (27) · **63 failed** \| 315 passed (378) |
 | guardas 0B.0 | 20/20 |
 | guardas D29 | 17/17 |
+| guardas `formato` (1.3B) | 17/17 |
+| D30, backend | 18/18 — **se reporta aparte, no se suma a vitest** |
 
 **Los warnings se identifican por nombre, no por conteo.** Un tercero es una regresión hasta que se
 demuestre lo contrario.
