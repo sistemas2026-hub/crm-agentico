@@ -628,6 +628,18 @@ def enviar_plantilla(config, tenant: str, para: str, plantilla: str,
     envio si la cantidad no coincide con la plantilla aprobada, y ese error
     llega como un rechazo generico -- por eso se valida antes lo que se puede.
 
+    ⚠️ RIESGO LATENTE (20/09/2026). Este camino manda todo al CUERPO y en orden
+    posicional, porque NO lee la plantilla de Meta: hacerlo pondria una llamada
+    HTTP en el camino de un aviso. Asi que una plantilla declarada que tuviera
+    variables en el ENCABEZADO, o parametros NOMBRADOS, se enviaria mal -- es
+    el mismo defecto que se corrigio para el camino de la pantalla, donde la
+    ficha si se lee (enviar_plantilla_aprobada).
+
+    Hoy no es un defecto activo: el unico tenant declara 'plantillas: {}', asi
+    que este camino no puede mandar nada. Se vuelve activo en cuanto alguien
+    declare una plantilla con encabezado variable o nombrada. Medido sobre el
+    repo; la fuente de verdad es 'asistente.tenant_config', que no se consulto.
+
     ⚠️ El texto de una plantilla lo aprueba Meta, no nosotros. Cambiarlo exige
     volver a pasar por su revision (dias). Lo que se puede cambiar sin tramite
     son las variables.

@@ -34,6 +34,13 @@
     plantillas = [], cargandoPlantillas = false, errorPlantillas = '',
     enviandoPlantilla = false, plantillaCompleta = false,
     vistaPreviaPlantilla = '', hayPlantillaDeServicio = false,
+    // Un rotulo por campo, ya resuelto por plantillas.js: la etiqueta de un
+    // parametro nombrado es su nombre, y la de uno posicional solo puede
+    // decir donde va. Llega resuelto porque el reparto entre encabezado y
+    // cuerpo tiene que ser el mismo que usa el envio.
+    /** @type {{hueco: string, parte: string, titulo: string, donde: string, reemplaza: string}[]} */
+    etiquetasPlantilla = [],
+    plantillaBloqueada = '',
     // --- T6: el desenlace del ultimo intento de devolver a la IA, ya traducido
     //     por devolucion.js. null = el ultimo envio no pidio devolver. Llega
     //     resuelto a proposito: si este componente lo dedujera de la respuesta
@@ -225,9 +232,14 @@
         {/if}
 
         {#if plantillaElegida}
-          {#each valoresPlantilla as _, i}
+          {#if plantillaBloqueada}
+            <p class="v2-error" style="margin:0">{plantillaBloqueada}</p>
+          {/if}
+          {#each etiquetasPlantilla as etiqueta, i (etiqueta.parte + etiqueta.hueco)}
             <label class="plantilla-var">
-              <span class="v2-sub">Dato {i + 1} — reemplaza {'{{'}{i + 1}{'}}'}</span>
+              <span class="v2-sub"
+                >{etiqueta.titulo}{etiqueta.donde ? ` · ${etiqueta.donde}` : ''} — reemplaza {etiqueta.reemplaza}</span
+              >
               <input class="v2-input" bind:value={valoresPlantilla[i]} />
             </label>
           {/each}

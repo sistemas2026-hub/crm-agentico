@@ -15,6 +15,9 @@
   import NetworkPanel from '$lib/conversaciones/context/NetworkPanel.svelte';
   import SyncPanel from '$lib/conversaciones/context/SyncPanel.svelte';
   import RetentionToggle from '$lib/conversaciones/context/RetentionToggle.svelte';
+  import {
+    etiquetasDe, vistaPrevia, cuantosValores, sePuedeEnviar, motivoDeBloqueo
+  } from '$lib/conversaciones/plantillas.js';
   import TracePanel from '$lib/conversaciones/context/TracePanel.svelte';
   import DocumentationPanel from '$lib/conversaciones/context/DocumentationPanel.svelte';
   import MessageThread from '$lib/conversaciones/messages/MessageThread.svelte';
@@ -1262,25 +1265,23 @@
 
   function elegirPlantilla(/** @type {any} */ p) {
     plantillaElegida = p;
-    valoresPlantilla = Array.from({ length: p.variables ?? 0 }, () => '');
+    valoresPlantilla = Array.from({ length: cuantosValores(p) }, () => '');
   }
+
+  /** Cómo se rotula cada campo: el nombre real si la plantilla usa parámetros
+      nombrados, y de qué parte es cuando el encabezado también tiene. */
+  let etiquetasPlantilla = $derived(etiquetasDe(plantillaElegida));
 
   /** El texto tal como lo va a leer el cliente. Se arma acá sólo para la
       vista previa: el que se envía y se guarda lo arma el motor, con la
-      plantilla que vuelve a leer de Meta en ese momento. */
-  let vistaPreviaPlantilla = $derived.by(() => {
-    if (!plantillaElegida) return '';
-    let cuerpo = plantillaElegida.cuerpo ?? '';
-    valoresPlantilla.forEach((v, i) => {
-      cuerpo = cuerpo.replaceAll(`{{${i + 1}}}`, v || `{{${i + 1}}}`);
-    });
-    const enc = (plantillaElegida.encabezado ?? '').trim();
-    return enc ? `${enc}\n\n${cuerpo}` : cuerpo;
-  });
+      plantilla que vuelve a leer de Meta en ese momento. El reparto de los
+      valores es el mismo de los dos lados (plantillas.js lo explica). */
+  let vistaPreviaPlantilla = $derived(vistaPrevia(plantillaElegida, valoresPlantilla));
 
-  let plantillaCompleta = $derived(
-    !!plantillaElegida && valoresPlantilla.every((v) => v.trim().length > 0)
-  );
+  let plantillaCompleta = $derived(sePuedeEnviar(plantillaElegida, valoresPlantilla));
+
+  /** Por qué no se puede enviar, cuando el motivo no es un campo sin llenar. */
+  let plantillaBloqueada = $derived(motivoDeBloqueo(plantillaElegida));
 
   async function enviarPlantilla() {
     if (!plantillaElegida || enviandoPlantilla || !plantillaCompleta || bloqueadoPorIA) return;
@@ -1521,6 +1522,7 @@
       {plantillas} {cargandoPlantillas} {errorPlantillas}
       {enviandoPlantilla} {plantillaCompleta}
       {vistaPreviaPlantilla} {hayPlantillaDeServicio}
+      {etiquetasPlantilla} {plantillaBloqueada}
       bind:entrada bind:modo bind:campoTexto
       bind:adjuntarAbierto bind:emojisAbiertos bind:arrastrando
       bind:eligiendoPlantilla bind:plantillaElegida bind:valoresPlantilla
