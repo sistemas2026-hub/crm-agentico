@@ -117,7 +117,72 @@ def crear_caso(config, tenant: str, datos: dict, referencia: str | None,
     return ResultadoEfecto("exito", referencia=str(caso_id))
 
 
-def ejecutor(config, tenant: str, *, crear, buscar_por_nombre):
+def asignar_caso(config, tenant: str, datos: dict, referencia: str | None,
+                 *, agregar_asignado, leer_asignados) -> ResultadoEfecto:
+    """
+    Pone al operador de Dexter en el conjunto de asignados del caso (D28).
+
+    ES ADITIVO. No manda el conjunto entero: los demas asignados del CRM se
+    quedan donde estan. Podrian ser un segundo tecnico que un supervisor sumo
+    hoy, y el CRM no guarda quien creo cada relacion -- reemplazar el conjunto
+    borraria ese trabajo sin dejar rastro.
+
+    SE RELEE DESPUES DE ESCRIBIR, y esto no es prolijidad: el endpoint de
+    asignacion masiva del CRM responde 200 y deja el caso SIN NADIE cuando el
+    perfil no resuelve dentro de la organizacion. Un codigo de estado no prueba
+    el efecto. Si la relectura no confirma que el perfil quedo, el resultado es
+    INCIERTO -- nunca 'exito'.
+    """
+    caso_id = (datos or {}).get("caso_id")
+    perfil_id = (datos or {}).get("perfil_id")
+    if not caso_id or not perfil_id:
+        return ResultadoEfecto("permanente", codigo="sin_caso_o_perfil")
+
+    try:
+        agregar_asignado(caso_id, perfil_id)
+    except Exception as e:
+        clase, codigo = _clase_de_error(e)
+        if clase == "permanente":
+            return ResultadoEfecto("permanente", codigo=codigo)
+        # Transitorio o incierto: el pedido pudo haber llegado. NO se decide
+        # todavia -- se comprueba abajo, que es lo unico que puede resolverlo.
+        # Reintentar tampoco duplicaria nada (agregar es idempotente), pero
+        # confirmar es mejor que suponer.
+        try:
+            if perfil_id in _ids_asignados(leer_asignados(caso_id)):
+                return ResultadoEfecto("exito", referencia=str(perfil_id))
+        except Exception:
+            pass
+        return ResultadoEfecto(clase, codigo=codigo)
+
+    # Escribio sin error. Igual se comprueba: el 200 no es la evidencia.
+    try:
+        asignados = _ids_asignados(leer_asignados(caso_id))
+    except Exception as e:
+        _, codigo = _clase_de_error(e)
+        # El efecto muy probablemente ocurrio, pero no se puede demostrar.
+        # 'incierto' y no 'exito': afirmar que el caso quedo asignado sin
+        # haberlo visto es exactamente lo que X22 prohibe.
+        registrar("reconciliador", "se asigno el caso y no se pudo confirmar",
+                  tenant=tenant)
+        return ResultadoEfecto("incierto", codigo=f"sin_confirmacion:{codigo}")
+
+    if str(perfil_id) in asignados:
+        return ResultadoEfecto("exito", referencia=str(perfil_id))
+    # Se escribio, no hubo error, y el perfil NO esta. Es el caso del 200 que
+    # no hizo nada: no se reintenta a ciegas, queda para una persona.
+    return ResultadoEfecto("incierto", codigo="asignado_no_confirmado")
+
+
+def _ids_asignados(respuesta) -> set[str]:
+    """Los Profile.id que el CRM dice que tiene el caso ahora."""
+    if isinstance(respuesta, dict):
+        respuesta = respuesta.get("assigned_to") or []
+    return {str(p.get("id")) for p in respuesta or [] if isinstance(p, dict)}
+
+
+def ejecutor(config, tenant: str, *, crear, buscar_por_nombre,
+             agregar_asignado=None, leer_asignados=None):
     """
     El `ejecutar` que espera el reconciliador, ya atado a este tenant.
 
@@ -130,5 +195,15 @@ def ejecutor(config, tenant: str, *, crear, buscar_por_nombre):
         if tipo == "crear_caso":
             return crear_caso(config, tenant, datos, referencia,
                               crear=crear, buscar_por_nombre=buscar_por_nombre)
+        if tipo == "asignar_caso":
+            if agregar_asignado is None or leer_asignados is None:
+                # Sin las dos, no hay forma de escribir Y comprobar. Falta una
+                # capacidad del tenant, no un dato del efecto: permanente y
+                # visible, nunca 'incierto' -- no hay ninguna duda sobre si
+                # ocurrio.
+                return ResultadoEfecto("permanente", codigo="sin_ejecutor:asignar_caso")
+            return asignar_caso(config, tenant, datos, referencia,
+                                agregar_asignado=agregar_asignado,
+                                leer_asignados=leer_asignados)
         return ResultadoEfecto("permanente", codigo=f"sin_ejecutor:{tipo}")
     return _ejecutar
