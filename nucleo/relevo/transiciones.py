@@ -127,7 +127,7 @@ ESQUEMAS: dict[str, frozenset[str]] = {
     # dos eventos 'cerrada' en el mismo expediente se leerian como dos
     # cierres, y esto no vuelve a cerrar nada.
     "desenlace_completado": frozenset({"version", "desenlace", "categoria",
-                                       "nota", "cerrada_por"}),
+                                       "nota", "cerrada_por", "legado"}),
     "devolucion_solicitada": frozenset({"mensaje_id"}),
     "devolucion_fallida": frozenset({"mensaje_id", "resultado"}),
     "devuelta_a_ia": frozenset({"version", "legado", "g8"}),
@@ -980,6 +980,12 @@ def completar_desenlace(tenant: str, conversation_id: str, *, desenlace: str,
         cambia nada en el CRM ni en WispHub, y hacerlo de paso seria mover
         sistemas de afuera desde una pantalla de estadistica.
 
+    SOBRE LEGADO TAMBIEN DEJA EVENTO. La version se queda en 0 --adoptar es
+    otra cosa y tiene su propia puerta (G8)-- pero el rastro se escribe igual,
+    con 'legado: true'. Una escritura durable sin evento es justo lo que este
+    expediente existe para que no pase: que una conversacion sea vieja no
+    convierte en anonima la decision de una persona sobre ella.
+
     SOLO SOBRE NULL, Y UNA SOLA VEZ. Si ya tiene desenlace, 'ya_completado' y
     no se escribe: pisar el que puso otra persona --o el que puso el plazo--
     convertiria esta funcion en una via silenciosa para reescribir el pasado,
@@ -1018,25 +1024,32 @@ def completar_desenlace(tenant: str, conversation_id: str, *, desenlace: str,
             return Resultado(False, gobernada, f["relevo_version"], None,
                              "ya_completado")
 
-        if not gobernada:
-            # Legado (§11, I21): se escribe el dato, no se adopta. Subir la
-            # version meteria al modelo una conversacion de version 0 por la
-            # puerta de atras, y esa puerta es G8 y ninguna otra (C5). El
-            # precio es que aqui no hay evento; el dato queda igual, que es lo
-            # que la persona vino a dejar.
-            return Resultado(True, False, 0, None, "legado",
-                             datos={"desenlace": codigo, "categoria": categoria})
+        # ADOPTAR y DEJAR RASTRO son cosas distintas, y esta funcion hace una
+        # sola. Sobre legado la version se queda en 0 --meter al modelo una
+        # conversacion de version 0 es una decision humana explicita y esa
+        # puerta es G8 y ninguna otra (C5, I21)-- pero el evento se escribe
+        # igual. Una escritura durable sin rastro es lo que este expediente
+        # existe para que no pase: dentro de un año, "¿quien le puso este
+        # desenlace, y cuando?" tiene que tener respuesta tambien aqui.
+        #
+        # 'legado: true' y 'version: 0' dicen exactamente eso: hubo una
+        # decision humana sobre una conversacion que nunca entro al modelo.
+        version = f["relevo_version"]
+        if gobernada:
+            # La version sube porque esto SI cambia algo durable. El estado no.
+            version = _subir_version(cur, org, conversation_id,
+                                     "actualizado_en = actualizado_en", ())
 
-        # La version sube porque esto SI cambia algo durable. El estado no.
-        version = _subir_version(cur, org, conversation_id,
-                                 "actualizado_en = actualizado_en", ())
         datos = {"version": version, "desenlace": codigo,
                  "categoria": categoria, "cerrada_por": fila["cerrada_por_tipo"]}
         if nota:
             datos["nota"] = nota
+        if not gobernada:
+            datos["legado"] = True
         ev = _evento(cur, org, conversation_id, "desenlace_completado",
                      "operador", usuario, nombre, datos, clave)
-        return Resultado(True, True, version, ev, datos=datos)
+        return Resultado(True, gobernada, version, ev,
+                         "" if gobernada else "legado", datos=datos)
 
     return _ejecutar(tenant, conversation_id, clave, cuerpo,
                      tipo="desenlace_completado", actor_id=usuario)

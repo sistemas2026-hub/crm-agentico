@@ -843,18 +843,78 @@ try:
 finally:
     admin.execute("delete from public.organization where id = %s", (str(otra_org),))
 
-# --- legado ---------------------------------------------------------------
+# --- legado: NO se adopta, pero SI deja rastro ----------------------------
 c = conversacion(relevo_version=0, atendida_manual=True)
 T.cerrar(TEN, c, por="cliente")
+antes = fila_de(c)
 r = T.completar_desenlace(TEN, c, desenlace="otro", operador_id=OP_ID,
-                          operador_nombre=OP)
+                          operador_nombre=OP, nota="lo dijo por telefono")
 f = fila_de(c)
-revisar(r.aplicada and f["desenlace_codigo"] == "otro",
+revisar(r.aplicada and f["desenlace_codigo"] == "otro"
+        and f["desenlace_categoria_base"] == "otro",
         "una de legado tambien se puede completar")
-revisar(f["relevo_version"] == 0 and eventos_de(c) == [],
-        "pero NO sube de version ni deja evento",
+revisar(f["relevo_version"] == 0,
+        f"y NO sube de version ({f['relevo_version']})",
         "Subirla meteria al modelo una conversacion de version 0 por la puerta "
         "de atras, y esa puerta es G8 y ninguna otra (C5, I21).")
+revisar(f["control"] == antes["control"]
+        and f["control_motivo"] == antes["control_motivo"]
+        and f["asignada_a_usuario_id"] == antes["asignada_a_usuario_id"]
+        and f["asignada_a_nombre"] == antes["asignada_a_nombre"],
+        "no la adopta: control y asignacion intactos")
+revisar(not r.gobernada and r.motivo == "legado",
+        f"y lo dice en el resultado ({r.gobernada}, {r.motivo!r})")
+
+evs = eventos_de(c)
+revisar([e["tipo"] for e in evs] == ["desenlace_completado"],
+        f"pero SI deja su evento, exactamente uno ({[e['tipo'] for e in evs]})",
+        "Una escritura durable sin rastro es lo que el expediente existe para "
+        "que no pase. Que la conversacion sea vieja no convierte en anonima la "
+        "decision de una persona sobre ella.")
+d = evs[0]["datos"]
+revisar(d.get("legado") is True and d.get("version") == 0,
+        f"con legado y version 0 ({d})",
+        "Dicen exactamente lo que paso: una decision humana sobre una "
+        "conversacion que nunca entro al modelo.")
+revisar(d.get("desenlace") == "otro" and d.get("nota") == "lo dijo por telefono",
+        "con el codigo y la nota")
+revisar(evs[0]["actor_nombre"] == OP and str(evs[0]["actor_usuario_id"]) == OP_ID,
+        "y quien lo decidio")
+
+# El actor sigue siendo obligatorio aqui tambien.
+c = conversacion(relevo_version=0, atendida_manual=True)
+T.cerrar(TEN, c, por="cliente")
+antes = fila_de(c)
+try:
+    T.completar_desenlace(TEN, c, desenlace="otro", operador_id="",
+                          operador_nombre=OP)
+    revisar(False, "sobre legado tampoco se completa sin actor")
+except Exception:
+    revisar(True, "sobre legado tampoco se completa sin actor")
+revisar(fila_de(c) == antes and eventos_de(c) == [], "y no cambia nada")
+
+# Si falla el evento, el desenlace tampoco queda. En la MISMA transaccion.
+T._gancho_antes_del_commit = lambda: (_ for _ in ()).throw(RuntimeError("falla"))
+try:
+    T.completar_desenlace(TEN, c, desenlace="otro", operador_id=OP_ID,
+                          operador_nombre=OP)
+    revisar(False, "sobre legado, si falla el evento se deshace el desenlace")
+except Exception:
+    revisar(True, "sobre legado, si falla el evento se deshace el desenlace")
+finally:
+    T._gancho_antes_del_commit = None
+revisar(fila_de(c) == antes, "la conversacion sigue exactamente como estaba")
+revisar(eventos_de(c) == [], "y no quedo ningun evento suelto")
+
+# Y sigue siendo una sola vez.
+T.completar_desenlace(TEN, c, desenlace="wifi_cliente", operador_id=OP_ID,
+                      operador_nombre=OP)
+r2 = T.completar_desenlace(TEN, c, desenlace="facturacion", operador_id=OP_ID,
+                           operador_nombre=OP)
+revisar(not r2.aplicada and r2.motivo == "ya_completado",
+        "sobre legado tambien se completa una sola vez")
+revisar(len(eventos_de(c)) == 1, f"con un solo evento ({len(eventos_de(c))})")
+revisar(fila_de(c)["desenlace_codigo"] == "wifi_cliente", "y sin pisarlo")
 
 # --- no toca nada de afuera -----------------------------------------------
 # La cuenta se toma sobre ESTA conversacion y alrededor de la completada
