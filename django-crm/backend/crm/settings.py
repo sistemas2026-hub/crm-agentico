@@ -81,6 +81,11 @@ INSTALLED_APPS = [
     "solicitudes",
     # Nuestra: operaciones de campo y cuadrillas tecnicas.
     "campo",
+    # Nuestra: M02 actividades, M03 programacion y M09 Supervisor NOC IA en
+    # Shadow Mode. Mismo patron que 'campo' y 'solicitudes' -- es un modulo de
+    # ESTE CRM, no un producto aparte: comparte Org, Profile, Case y
+    # OrdenTrabajo en vez de duplicarlos.
+    "operaciones",
     # "teams",  # Merged into common app
 ]
 
