@@ -108,8 +108,9 @@ panel        «Sincronización externa», read-only, sin botón de reintentar
 commits      b5bfb84 · 62487db
 ```
 
-**G7 es ahora sólo activar**: `RECONCILIADOR_HABILITADO=1` y desplegar el
-servicio. El mecanismo existe entero. El reloj general sigue en ~60 min y **no
+**G7 es ahora sólo activar**, y en este orden: declarar `busca_caso` en el
+catálogo del tenant → comprobar que funciona → recién entonces
+`RECONCILIADOR_HABILITADO=1` y desplegar el servicio. El mecanismo existe entero. El reloj general sigue en ~60 min y **no
 se tocó**: el worker tiene interruptor propio, para que encender uno no encienda
 el otro por descuido.
 
@@ -148,6 +149,34 @@ para ser el camino normal de la mitad de la cola. Eso arrastra dos cosas a
 decidir antes de escribir la migración: dónde se muestra un pendiente de
 revisión en la conversación, y que el reintento automático de `crear_ticket`
 **no se escribe**, ni detrás de una bandera.
+
+## G3 — ROJO. Y el bloqueo 1 no puede esperar a B5
+
+```
+36 acciones de legado en 'pendiente' (34 create_ticket · 2 promise_payment),
+sin conversation_id, de hace más de 7 días. Invisibles: no hay pantalla.
+```
+
+**El endpoint de aprobar las ejecuta.** `POST /acciones/propuestas/<id>/aprobar`
+comprueba sólo que estén `pendiente` y hace la escritura real contra la API
+externa. No valida `conversation_id` —la columna no existe hasta B5— así que
+hoy cualquiera con acceso al motor puede crear 34 tickets con 34 peticiones,
+sin revalidación y sin forma de detectar duplicados (Q2 rojo).
+
+Tres cosas chicas, ninguna necesita B5:
+
+```
+1. que aprobar RECHACE una acción de legado (409, sin ejecutar nada)
+2. estado 'cancelada' declarado, con su evento y motivo
+3. una superficie mínima para revisarlas: 36 filas y un botón de cancelar,
+   sin botón de aprobar
+```
+
+Propuesta, ya escrita en `auditorias/G3-ACCIONES-LEGACY.md`: **ninguna se
+aprueba**; las 34 de ticket se cancelan —si el problema sigue vivo, la
+conversación actual lo vuelve a proponer con `conversation_id`— y las 2 de pago
+se miran a mano antes de cancelar. Primero se cierra el camino de ejecución,
+después se cancela.
 
 ## SIGUIENTE GATE
 
