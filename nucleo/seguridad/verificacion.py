@@ -142,6 +142,16 @@ class Sesion:
     # de televisor, y lo unico que se guarda de ella es que aparecio y en que
     # conversacion, para que alguien pueda cargarle su guia.
     marcas_tv_sin_guia: list[str] = field(default_factory=list)
+    # Las acciones que el turno dejo propuestas, esperando su conversation_id
+    # (B5). Mismo problema y mismo patron que las dos de arriba: cuando la
+    # herramienta corre, la conversacion todavia no existe -- se crea o se
+    # reusa recien al persistir el turno. Cada entrada es
+    # {'accion_id', 'herramienta'} y la drena nucleo/canales/api.py.
+    #
+    # Mientras una accion no tiene conversacion NO SE PUEDE APROBAR: sin ella
+    # es indistinguible de una de legado, y el legado esta bloqueado (X24).
+    # Falla cerrado, que es el lado correcto de esa ventana.
+    acciones_por_vincular: list[dict] = field(default_factory=list)
     # Lo que se resolvio sobre el televisor de este cliente: marca, si el
     # coaxial entra directo o pasa por un TDT, que guia se le entrego y si
     # llevaba video. Lo llena consultar_guia_sintonizacion al resolver.

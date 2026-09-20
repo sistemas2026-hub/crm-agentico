@@ -111,12 +111,16 @@ def sembrar_org(org, slug):
 
 def proponer(tenant, herramienta="crear_ticket", resumen="Ticket de hace dos semanas"):
     """Una accion de legado: como las 36, sin conversacion."""
-    return db.guardar_accion_propuesta(
+    # Sin conversation_id, como las 36 de produccion. guardar_accion_propuesta
+    # devuelve (id, ya_existia) desde B5: aca la segunda siempre es False
+    # porque sin conversacion no hay clave de equivalencia que colisionar.
+    accion_id, _ = db.guardar_accion_propuesta(
         tenant, herramienta,
         # Argumentos con datos reales, como los de produccion: sirven para
         # comprobar que NO salen en la lista.
         {"servicio": 6555, "telefono": "573001112233", "asunto": "Sin internet"},
         resumen, "soporte", "ia")
+    return accion_id
 
 
 def fila(accion_id):

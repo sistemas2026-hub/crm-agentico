@@ -776,6 +776,68 @@ class Verificacion(Base):
     escalar_si_no_confirma: str = ""
 
 
+class CondicionRevalidacion(Base):
+    """
+    Una condicion sobre lo que devuelve la lectura de revalidacion (§3.7).
+
+    'campo' se busca en el resultado; 'operador' dice como se compara. El valor
+    de comparacion viene de UNO de dos lados y nunca de los dos:
+
+        valor                 un literal declarado aca
+        valor_de_propuesta    el nombre de un argumento de la propuesta, para
+                              "el estado actual es el MISMO que se vio al
+                              proponer" -- comparar y cambiar. Sin esto, dos
+                              operadores que aprueban a la vez pisan el cambio
+                              del otro sin enterarse.
+    """
+    campo: str
+    operador: Literal["igual_a", "distinto_de", "en", "no_en",
+                      "menor_que", "mayor_que"] = "igual_a"
+    valor: Any = None
+    valor_de_propuesta: str | None = None
+
+    @model_validator(mode="after")
+    def _un_solo_origen(self):
+        if (self.valor is None) == (self.valor_de_propuesta is None):
+            raise ValueError(
+                f"condicion sobre '{self.campo}': declara 'valor' O "
+                f"'valor_de_propuesta', exactamente uno de los dos.")
+        return self
+
+
+class Revalidacion(Base):
+    """
+    La comprobacion que corre AL APROBAR, antes de ejecutar (§3.7).
+
+    Es una lectura del MISMO catalogo -- no una URL suelta-- porque asi hereda
+    credenciales, timeouts y el resto de las guardas que ya tiene una
+    herramienta declarada. 'argumentos' toma sus valores de la propuesta con
+    marcadores '{clave}'.
+    """
+    herramienta: str
+    argumentos: dict[str, str] = Field(default_factory=dict)
+    condiciones: list[CondicionRevalidacion] = Field(default_factory=list)
+
+
+class Aprobacion(Base):
+    """
+    Lo que una herramienta aprobable tiene que declarar (§3.7).
+
+    Los dos campos son obligatorios en el contrato. El validador que lo EXIGE
+    todavia no se puede encender: activarlo hoy romperia la config vigente de
+    Rapilink, que no los declara, y escribir esa config parte la medicion de
+    razonamiento ON vs OFF (Q3). Asi que la regla se despliega en modo
+    ADVERTENCIA -- ver Herramienta.advertencias_de_aprobacion().
+
+    El paso a error va en el mismo cambio que activa la config nueva. Mientras
+    tanto, una herramienta aprobable sin esto sigue el flujo de aprobacion
+    actual MAS las guardas que no dependen de config: transicion condicionada,
+    conversacion abierta y operador autenticado.
+    """
+    vigencia_minutos: int = Field(gt=0)
+    revalidar: Revalidacion
+
+
 class Herramienta(Base):
     nombre: str
     # 'interno': no llama a ninguna API -- el motor la resuelve el mismo
@@ -803,6 +865,12 @@ class Herramienta(Base):
     # todo lo existente -- no cambia el comportamiento de ninguna
     # herramienta que no la declare explicitamente.
     aprobacion_humana: bool = False
+    # Vigencia y revalidacion (§3.7). El contrato las exige para toda
+    # herramienta aprobable, pero el validador NO puede fallar todavia: la
+    # config vigente de Rapilink no las declara, y escribirla parte la medicion
+    # ON vs OFF (Q3). Hasta entonces esto es opcional y su ausencia se reporta
+    # como advertencia -- ver advertencias_de_aprobacion().
+    aprobacion: Aprobacion | None = None
     # Solo tiene efecto con aprobacion_humana=True. Texto con marcadores
     # '{clave}' que se rellenan con los argumentos YA resueltos (los mismos
     # que se le mandarian a la API) -- para que quien aprueba lea "Crear
@@ -1512,6 +1580,13 @@ class Herramienta(Base):
                 f"'{self.nombre}': aprobacion_humana solo tiene sentido en una "
                 f"escritura -- una consulta de solo lectura no necesita cola de "
                 f"aprobacion.")
+
+        if self.aprobacion and not self.aprobacion_humana:
+            raise ValueError(
+                f"'{self.nombre}': declara 'aprobacion' (vigencia y "
+                f"revalidacion) sin 'aprobacion_humana: true'. Esos campos solo "
+                f"corren al aprobar, asi que declararlos sin la cola promete "
+                f"una comprobacion que nunca se hace.")
 
         sobrantes_inyectados = set(self.inyectados_obligatorios) - set(self.inyectar_sesion)
         if sobrantes_inyectados:
@@ -2537,6 +2612,48 @@ class TenantConfig(Base):
     manual: Manual = Field(default_factory=Manual)
     importacion_tickets: ImportacionTickets = Field(
         default_factory=ImportacionTickets)
+
+    def advertencias_de_aprobacion(self) -> list[str]:
+        """
+        Lo que §3.7 exigiria y todavia no se puede exigir (Q3).
+
+        Devuelve texto en vez de levantar: activar la regla hoy romperia la
+        config vigente de Rapilink --que no declara vigencia ni revalidacion--
+        y escribir esa config parte la medicion ON vs OFF. El paso a error va
+        en el mismo cambio que active la config nueva; entonces esto se vuelve
+        un ValueError y este metodo desaparece.
+
+        Lo que SI falla cerrado hoy es lo que no depende de config: una accion
+        sin revalidacion declarada no se ejecuta con menos guardas, se ejecuta
+        con las que no necesitan catalogo (§9.3) -- y una revalidacion
+        declarada que no se puede correr NUNCA ejecuta (X17).
+        """
+        avisos: list[str] = []
+        por_nombre = {h.nombre: h for h in self.herramientas}
+        for h in self.herramientas:
+            if not h.aprobacion_humana:
+                continue
+            if h.aprobacion is None:
+                avisos.append(
+                    f"'{h.nombre}' es aprobable y no declara 'aprobacion' "
+                    f"(vigencia_minutos + revalidar). Sin vigencia, una "
+                    f"propuesta se puede aprobar semanas despues con los "
+                    f"argumentos de entonces (§3.7).")
+                continue
+            lectura = por_nombre.get(h.aprobacion.revalidar.herramienta)
+            if lectura is None:
+                avisos.append(
+                    f"'{h.nombre}' revalida con "
+                    f"'{h.aprobacion.revalidar.herramienta}', que no esta en el "
+                    f"catalogo: la revalidacion no va a poder correr, y una que "
+                    f"no corre impide ejecutar (X17).")
+            elif not lectura.solo_lectura:
+                avisos.append(
+                    f"'{h.nombre}' revalida con "
+                    f"'{lectura.nombre}', que NO es de solo lectura. Revalidar "
+                    f"no puede escribir: correria un efecto antes de decidir si "
+                    f"se ejecuta el efecto.")
+        return avisos
 
     @model_validator(mode="after")
     def _coherencia_global(self):

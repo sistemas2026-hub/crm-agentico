@@ -45,6 +45,7 @@ from nucleo.canales import media, whatsapp
 from nucleo.canales.errores import estado_http_de, fallo, mensaje_publico
 from nucleo.relevo import historial as regla_historial
 from nucleo.relevo import proyeccion
+from nucleo.relevo import revalidacion
 from nucleo.relevo import transiciones
 from nucleo.relevo import autorizacion as autorizacion_relevo
 from nucleo.relevo.control import control_efectivo
@@ -1510,6 +1511,26 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 persistencia.registrar_marca_tv_desconocida(
                     tenant, conversation_id, marca)
             estado["sesion"].marcas_tv_sin_guia = []
+        # Las acciones que el turno dejo propuestas: recien aca existe el
+        # conversation_id con el que ligarlas (B5). Hasta este punto no se
+        # pueden aprobar --sin conversacion son indistinguibles del legado, que
+        # esta bloqueado-- asi que la ventana falla cerrado.
+        if estado["sesion"] is not None and estado["sesion"].acciones_por_vincular:
+            for pendiente in estado["sesion"].acciones_por_vincular:
+                try:
+                    herr = next((h for h in config.herramientas
+                                 if h.nombre == pendiente["herramienta"]), None)
+                    aprob = getattr(herr, "aprobacion", None) if herr else None
+                    persistencia.vincular_accion_a_conversacion(
+                        tenant, pendiente["accion_id"], conversation_id,
+                        aprob.vigencia_minutos if aprob else None)
+                except Exception as e:
+                    # La accion existe y sigue sin conversacion: no se puede
+                    # aprobar, que es el lado seguro. Se registra para que no
+                    # quede invisible.
+                    registrar("acciones", "no se pudo ligar la accion a su conversacion",
+                              tenant=tenant, error=e)
+            estado["sesion"].acciones_por_vincular = []
         # Recien aca existe conversation_id (ver el docstring de
         # motor.responder): antes de esto no habia donde persistir a quien
         # verifico _ejecutar_confirmacion. Se repite cada turno una vez
@@ -4791,6 +4812,35 @@ def conversaciones_sincronizaciones(id_conversacion):
     return jsonify({"sincronizaciones": pendientes})
 
 
+@app.get("/conversaciones/<id_conversacion>/acciones")
+def conversaciones_acciones(id_conversacion):
+    """
+    Las acciones que la IA propuso en esta conversacion, con su estado REAL (B5).
+
+    Antes de B5 una accion terminaba en 'aprobada' y nada mas -- que es lo que
+    alguien decidio, no lo que paso. Ahora el estado dice como termino:
+    ejecutada_ok, ejecutada_fallo, vencida o desconocida. Decir 'aprobada' de
+    algo que fallo es afirmar un efecto que no ocurrio.
+
+    Solo lectura y SIN 'argumentos': ahi estan los valores reales con los que
+    se iba a escribir afuera. Para decidir alcanza el resumen.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+
+    try:
+        acciones = persistencia.acciones_de_conversacion(tenant, id_conversacion)
+    except RuntimeError as e:
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 404
+    except Exception as e:
+        registrar("acciones", "fallo al leer las acciones de la conversacion",
+                  conversation_id=id_interno(id_conversacion), error=e)
+        return jsonify({"error": "No se pudieron leer las acciones."}), 500
+
+    return jsonify({"acciones": acciones})
+
+
 @app.get("/conversaciones/<id_conversacion>/equipo")
 def conversaciones_equipo(id_conversacion):
     """
@@ -5629,19 +5679,113 @@ def acciones_propuesta_aprobar(id_accion):
     except FileNotFoundError:
         return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
 
-    resultado, codigo_error = motor.ejecutar_accion_aprobada(config, accion)
+    quien = (cuerpo.get("revisado_por") or "").strip()
+    if not quien:
+        # Quien aprueba da la cara. El proxy lo saca de la sesion autenticada,
+        # nunca del cuerpo que arma el navegador (§3.4) -- este endpoint solo
+        # comprueba que llegue.
+        return jsonify({"error": "Falta 'revisado_por': una ejecucion aprobada "
+                                 "sin responsable no se puede auditar."}), 400
 
+    # ---- PASO 1: reservar. Transaccion corta y condicionada (§9.3) ----------
     try:
-        persistencia.resolver_accion_propuesta(
-            tenant, id_accion, "aprobada", cuerpo.get("revisado_por"),
-            resultado_ejecucion=resultado, codigo_error=codigo_error)
+        reserva = persistencia.reservar_accion(tenant, id_accion, quien)
     except Exception as e:
-        registrar("acciones", "la accion se ejecuto pero no se pudo guardar el resultado", error=e)
+        registrar("acciones", "fallo al reservar la accion", error=e)
+        return jsonify({"error": "No se pudo tomar la accion."}), 500
 
+    if not reserva["ok"]:
+        return jsonify(_NEGATIVAS.get(reserva["motivo"], {
+            "error": "No se pudo aprobar esta accion.",
+            "codigo": reserva["motivo"]})), _CODIGO_HTTP.get(reserva["motivo"], 409)
+
+    reservada = reserva["accion"]
+    conv = str(reservada.get("conversation_id") or "") or None
+    herramienta = next((h for h in config.herramientas
+                        if h.nombre == reservada["herramienta"]), None)
+    if herramienta is None or not herramienta.aprobacion_humana:
+        # El catalogo cambio entre proponer y aprobar (§3.7, condicion 3). No
+        # se ejecuta, y vuelve a pendiente: puede que alguien este editando el
+        # catalogo justo ahora.
+        persistencia.liberar_accion(tenant, id_accion, "herramienta_fuera_de_catalogo")
+        return jsonify({"error": "La herramienta de esta accion ya no esta "
+                                 "disponible para aprobacion.",
+                        "codigo": "herramienta_fuera_de_catalogo"}), 409
+
+    # ---- PASO 2: revalidar. FUERA de transaccion (§3.7, X23) ----------------
+    veredicto = revalidacion.revalidar(config, tenant, herramienta, reservada)
+
+    if veredicto.desenlace == revalidacion.NO_SE_PUDO:
+        # No se pudo comprobar != no se cumple. No se ejecuta nada y la accion
+        # vuelve a estar disponible: el operador reintenta cuando la API
+        # responda.
+        persistencia.liberar_accion(tenant, id_accion, veredicto.codigo)
+        return jsonify({"error": "No se pudo comprobar que esta accion siga "
+                                 "aplicando. No se ejecuto nada: se puede "
+                                 "reintentar.",
+                        "codigo": "revalidacion_indeterminada",
+                        "detalle": veredicto.codigo, "estado": "pendiente"}), 503
+
+    if veredicto.desenlace == revalidacion.NO_CUMPLE:
+        persistencia.vencer_accion(tenant, id_accion, veredicto.codigo, conv)
+        return jsonify({"error": veredicto.detalle or "Esta accion ya no aplica.",
+                        "codigo": "revalidacion_fallida",
+                        "detalle": veredicto.codigo, "estado": "vencida"}), 409
+
+    # ---- PASO 3: ejecutar. FUERA de transaccion -----------------------------
+    resultado, codigo_error = motor.ejecutar_accion_aprobada(config, reservada)
+    incierto = bool(codigo_error) and _es_incierto(codigo_error)
+
+    # ---- PASO 4: el desenlace, con su evento --------------------------------
+    try:
+        persistencia.resolver_ejecucion_de_accion(
+            tenant, id_accion, resultado=resultado, codigo_error=codigo_error,
+            incierto=incierto, aprobada_por=quien, conversation_id=conv)
+    except Exception as e:
+        # El efecto pudo haber ocurrido y no se pudo anotar. Queda
+        # 'ejecutando', que es lo correcto: T20 la pasa a 'desconocida' y nadie
+        # la reejecuta sola (§9.3 paso 5).
+        registrar("acciones", "la accion se ejecuto y no se pudo guardar el desenlace",
+                  error=e)
+
+    if incierto:
+        return jsonify({"ok": False, "estado": "desconocida",
+                        "error_ejecucion": codigo_error,
+                        "mensaje": "No se sabe si la accion llegó a hacerse. NO se "
+                                   "reintenta: hay que comprobarlo a mano."}), 502
     if codigo_error:
-        return jsonify({"ok": False, "estado": "aprobada", "error_ejecucion": codigo_error,
-                        "resultado": resultado}), 502
-    return jsonify({"ok": True, "estado": "aprobada", "resultado": resultado})
+        return jsonify({"ok": False, "estado": "ejecutada_fallo",
+                        "error_ejecucion": codigo_error, "resultado": resultado}), 502
+    return jsonify({"ok": True, "estado": "ejecutada_ok", "resultado": resultado})
+
+
+#: Lo que se le responde a cada negativa de la reserva. Texto propio por motivo:
+#: "no se pudo" a secas obliga a adivinar si hay que reintentar, esperar o
+#: avisarle a alguien.
+_NEGATIVAS = {
+    "no_existe": {"error": "Esta accion no existe.", "codigo": "no_existe"},
+    "de_legado": {"error": MOTIVO_LEGADO, "codigo": "accion_de_legado"},
+    "vencida": {"error": "Esta accion pasó su plazo de vigencia y ya no se "
+                         "ejecuta. Si el problema sigue, hay que proponerla de "
+                         "nuevo desde la conversación.",
+                "codigo": "vencida", "estado": "vencida"},
+    "conversacion_cerrada": {"error": "La conversación de esta accion está "
+                                      "cerrada.",
+                             "codigo": "conversacion_cerrada"},
+    "ya_no_pendiente": {"error": "Alguien más ya resolvió esta accion.",
+                        "codigo": "ya_no_pendiente"},
+}
+_CODIGO_HTTP = {"no_existe": 404}
+
+#: Fallos donde NO se puede afirmar que el efecto no ocurrio: el pedido pudo
+#: haber viajado antes de cortarse. Mismo criterio que B4 -- unknown != failed,
+#: y por eso terminan en 'desconocida' en vez de 'ejecutada_fallo'.
+_ERRORES_INCIERTOS = ("Timeout", "ConnectionError", "ChunkedEncoding",
+                      "ReadTimeout", "ConnectTimeout", "RemoteDisconnected")
+
+
+def _es_incierto(codigo_error: str) -> bool:
+    return any(marca in (codigo_error or "") for marca in _ERRORES_INCIERTOS)
 
 
 @app.post("/acciones/propuestas/<id_accion>/rechazar")

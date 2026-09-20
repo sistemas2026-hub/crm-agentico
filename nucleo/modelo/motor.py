@@ -1450,8 +1450,23 @@ def _ejecutar_propuesta_de_accion(herramienta, sesion, argumentos_modelo: dict,
 
     argumentos = _resolver_argumentos(herramienta, sesion, argumentos_modelo)
     resumen = _resumen_de_accion(herramienta, argumentos)
-    accion_id = persistencia.guardar_accion_propuesta(
+    accion_id, ya_existia = persistencia.guardar_accion_propuesta(
         tenant, herramienta.nombre, argumentos, resumen, rol, propuesto_por)
+    if sesion is not None and not ya_existia:
+        # Queda anotada para que api.py le ponga su conversation_id en cuanto
+        # exista -- mismo patron que 'medios_pendientes' y las marcas de TV.
+        sesion.acciones_por_vincular.append(
+            {"accion_id": accion_id, "herramienta": herramienta.nombre})
+    if ya_existia:
+        # Habia una equivalente viva: el modelo recibe ESA y no una copia
+        # (T12). Si recibiera una nueva, le hablaria al cliente de una accion
+        # que nadie va a aprobar, mientras la que espera sigue sin resolverse.
+        return {"accion_id": accion_id, "estado": "pendiente", "resumen": resumen,
+                "ya_propuesta": True,
+                "instruccion_interna": f"Esto YA estaba propuesto y sigue "
+                    f"esperando aprobacion ({resumen}). No lo propongas otra "
+                    f"vez ni digas que se hizo: decile a quien pregunta que ya "
+                    f"quedo pedido y que todavia falta que alguien lo apruebe."}
     return {"accion_id": accion_id, "estado": "pendiente", "resumen": resumen,
            "instruccion_interna": f"Decile a quien te pidio esto que la accion "
                f"quedo pendiente de aprobacion ({resumen}) -- todavia NO se "

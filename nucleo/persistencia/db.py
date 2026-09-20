@@ -61,6 +61,7 @@ igual que ya decidia el PRD para 'messages'.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import unicodedata
 import uuid
@@ -2708,28 +2709,98 @@ def resolver_herramienta_propuesta(tenant: str, propuesta_id: str, estado: str,
         return cur.rowcount > 0
 
 
+def clave_de_equivalencia(conversation_id: str | None, herramienta: str,
+                          argumentos: dict) -> str | None:
+    """
+    Hash de (conversacion, herramienta, argumentos en forma canonica) (§3.4).
+
+    Sirve para una sola cosa: que la IA no proponga dos veces lo mismo mientras
+    la primera sigue viva. Canonica = claves ordenadas y separadores fijos, o
+    el mismo pedido escrito en otro orden daria otro hash y pasaria como
+    distinto.
+
+    Sin conversacion no hay clave: una accion de legado no se compara con nada,
+    y darle una la haria colisionar con las demas de legado.
+    """
+    if not conversation_id:
+        return None
+    canonico = json.dumps(argumentos or {}, sort_keys=True, ensure_ascii=False,
+                          separators=(",", ":"))
+    crudo = f"{conversation_id}|{herramienta}|{canonico}"
+    return hashlib.sha256(crudo.encode("utf-8")).hexdigest()
+
+
 def guardar_accion_propuesta(tenant: str, herramienta: str, argumentos: dict,
                              resumen: str, rol_solicitante: str,
-                             propuesto_por: str) -> str:
+                             propuesto_por: str,
+                             conversation_id: str | None = None,
+                             vigencia_minutos: int | None = None
+                             ) -> tuple[str, bool]:
     """
     Una escritura real (crear/editar algo en un sistema externo) que quedo
     pendiente porque su Herramienta declara requiere_confirmacion -- ver
     nucleo/modelo/motor.py, el punto donde se intercepta antes de llegar a
     _ejecutar_tool(). 'argumentos' guarda los valores REALES (no
     enmascarados, a diferencia de tool_calls): sin ellos no se podria
-    ejecutar la accion al aprobar. Devuelve el id para que el turno se lo
-    diga a quien pregunto.
+    ejecutar la accion al aprobar.
+
+    Devuelve (id, ya_existia). 'ya_existia' es True cuando habia una propuesta
+    EQUIVALENTE viva y se devuelve esa en vez de crear otra (T12): misma
+    conversacion, misma herramienta, mismos argumentos. Sin eso, un cliente que
+    insiste tres veces deja tres tickets para el mismo problema, y quien
+    aprueba no tiene como saber que son el mismo.
+
+    La deduplicacion la sostiene el INDICE, no una consulta previa: comprobar
+    antes y escribir despues deja una ventana entre las dos, y ocho hilos
+    concurrentes la encuentran.
+
+    'vigencia_minutos' sale de la herramienta (§3.7). Si no la declara, la fila
+    nace sin 'vence_en' -- fabricar un plazo seria inventar una decision que
+    nadie tomo. Sin vence_en no vence; con el, aprobar despues es imposible.
     """
+    clave = clave_de_equivalencia(conversation_id, herramienta, argumentos)
     with sesion(tenant) as (cur, org):
         cur.execute(
             """insert into asistente.acciones_propuestas
                  (organization_id, herramienta, argumentos, resumen,
-                  rol_solicitante, propuesto_por)
-               values (%s, %s, %s, %s, %s, %s)
+                  rol_solicitante, propuesto_por, conversation_id, vence_en,
+                  clave_equivalencia)
+               values (%s, %s, %s, %s, %s, %s, %s,
+                       case when %s::int is null then null
+                            else now() + make_interval(mins => %s::int) end,
+                       %s)
+               on conflict (organization_id, clave_equivalencia)
+                 where estado in ('pendiente', 'ejecutando')
+                 do nothing
                returning id""",
             (org, herramienta, json.dumps(argumentos, ensure_ascii=False),
-             resumen, rol_solicitante, propuesto_por))
-        return str(cur.fetchone()["id"])
+             resumen, rol_solicitante, propuesto_por, conversation_id,
+             vigencia_minutos, vigencia_minutos, clave))
+        fila = cur.fetchone()
+        if fila is not None:
+            return str(fila["id"]), False
+
+        # La equivalente viva gano la carrera (o ya estaba). No se crea otra y
+        # se devuelve la que existe: el modelo tiene que recibir ESA, no una
+        # copia -- si recibiera una nueva, hablaria de una accion que nadie va
+        # a aprobar (T12).
+        cur.execute(
+            """select id from asistente.acciones_propuestas
+               where organization_id = %s and clave_equivalencia = %s
+                 and estado in ('pendiente', 'ejecutando')""",
+            (org, clave))
+        existente = cur.fetchone()
+        if existente is None:
+            # Carrera perdida contra algo que ya no esta vivo: el conflicto
+            # existio y para cuando se fue a leer, la otra ya se resolvio.
+            # Reintentar aca seria abrir un bucle; el turno lo informa.
+            raise RuntimeError("no se pudo guardar la accion propuesta")
+        if conversation_id:
+            registrar_evento_de_accion(
+                cur, org, str(existente["id"]), "accion_propuesta_duplicada",
+                motivo="ya habia una propuesta equivalente viva",
+                actor_tipo="sistema", conversation_id=conversation_id)
+        return str(existente["id"]), True
 
 
 def acciones_propuestas_de(tenant: str, estado: str | None = None) -> list[dict]:
@@ -2763,7 +2834,8 @@ def accion_propuesta_de(tenant: str, accion_id: str) -> dict | None:
         cur.execute(
             """select id, herramienta, argumentos, resumen, rol_solicitante,
                       propuesto_por, estado, motivo_rechazo, revisado_por,
-                      resultado_ejecucion, codigo_error, creado_en, revisado_en
+                      resultado_ejecucion, codigo_error, creado_en, revisado_en,
+                      conversation_id, vence_en, clave_equivalencia
                from asistente.acciones_propuestas
                where organization_id = %s and id = %s""",
             (org, accion_id))
@@ -2822,6 +2894,7 @@ def registrar_evento_de_accion(cur, org, accion_id: str, tipo: str, *,
                                motivo: str | None = None,
                                actor_tipo: str = "operador",
                                actor_nombre: str | None = None,
+                               conversation_id: str | None = None,
                                datos: dict | None = None) -> None:
     """
     Un evento en el expediente de una accion.
@@ -2833,11 +2906,11 @@ def registrar_evento_de_accion(cur, org, accion_id: str, tipo: str, *,
     """
     cur.execute(
         """insert into asistente.acciones_eventos
-             (organization_id, accion_id, tipo, motivo, actor_tipo,
-              actor_nombre, datos)
-           values (%s, %s, %s, %s, %s, %s, %s)""",
-        (org, accion_id, tipo, motivo, actor_tipo, actor_nombre,
-         json.dumps(datos or {}, ensure_ascii=False)))
+             (organization_id, accion_id, conversation_id, tipo, motivo,
+              actor_tipo, actor_nombre, datos)
+           values (%s, %s, %s, %s, %s, %s, %s, %s)""",
+        (org, accion_id, conversation_id, tipo, motivo, actor_tipo,
+         actor_nombre, json.dumps(datos or {}, ensure_ascii=False)))
 
 
 def cancelar_accion_propuesta(tenant: str, accion_id: str, motivo: str,
@@ -2899,6 +2972,270 @@ def registrar_aprobacion_rechazada(tenant: str, accion_id: str, motivo: str,
             cur, org, accion_id, "accion_aprobacion_rechazada", motivo=motivo,
             actor_tipo="operador" if intentada_por else "sistema",
             actor_nombre=intentada_por)
+
+
+# =============================================================================
+#  B5 -- aprobar una accion, en los cuatro pasos de §9.3
+# =============================================================================
+#  1. reservar   transaccion corta y CONDICIONADA. Quien obtiene la fila sigue.
+#  2. revalidar  fuera de transaccion (§3.7). Lo hace el llamador.
+#  3. ejecutar   fuera de transaccion. Lo hace el llamador.
+#  4. resolver   transaccion corta con el desenlace.
+#
+#  Los pasos 2 y 3 NO estan aca a proposito: mantener una transaccion abierta
+#  mientras se espera una API deja sesiones 'idle in transaction' detras del
+#  pooler, y eso ya se midio una vez (X23). El estado 'ejecutando' existe
+#  justamente para cubrir ese hueco sin lock: dice "alguien la tomo" sin que
+#  nadie tenga una transaccion abierta.
+
+def reservar_accion(tenant: str, accion_id: str, reservada_por: str) -> dict:
+    """
+    Paso 1: toma la accion para ejecutarla, o explica por que no se puede.
+
+    Devuelve {'ok': True, 'accion': fila} o {'ok': False, 'motivo': <codigo>}.
+
+    Las tres condiciones viajan DENTRO del UPDATE y no antes: comprobarlas en
+    una consulta aparte deja una ventana entre la comprobacion y la escritura,
+    y dos operadores que aprueban a la vez la encuentran. Solo el que obtiene
+    la fila sigue; el otro recibe 'ya_no_pendiente' y no ejecuta nada.
+
+    Motivos posibles:
+        no_existe          otro tenant, o nunca existio
+        de_legado          sin conversation_id (X24). No se reserva jamas.
+        vencida            paso su vence_en -- se marca 'vencida' al pasar
+        conversacion_cerrada
+        ya_no_pendiente    alguien llego primero
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select id, estado, conversation_id, vence_en, herramienta,
+                      argumentos,
+                      (vence_en is not null and vence_en <= now()) as expirada,
+                      (select estado from asistente.conversations c
+                        where c.id = a.conversation_id) as estado_conversacion
+               from asistente.acciones_propuestas a
+               where organization_id = %s and id = %s""",
+            (org, accion_id))
+        previa = cur.fetchone()
+        if previa is None:
+            return {"ok": False, "motivo": "no_existe"}
+        if not previa["conversation_id"]:
+            return {"ok": False, "motivo": "de_legado", "estado": previa["estado"]}
+
+        # Vencida: se marca al pasar por aca. No hay proceso que venza acciones
+        # solo --§11.4 lo prohibe para el legado y no hace falta para el resto--
+        # asi que el momento de descubrirlo es cuando alguien la toca.
+        if previa["expirada"] and previa["estado"] == "pendiente":
+            cur.execute(
+                """update asistente.acciones_propuestas
+                   set estado = 'vencida', revisado_en = now()
+                   where organization_id = %s and id = %s and estado = 'pendiente'""",
+                (org, accion_id))
+            if cur.rowcount:
+                registrar_evento_de_accion(
+                    cur, org, accion_id, "accion_vencida",
+                    motivo="paso su plazo de vigencia antes de que alguien la aprobara",
+                    actor_tipo="sistema",
+                    conversation_id=str(previa["conversation_id"]))
+            return {"ok": False, "motivo": "vencida"}
+
+        cur.execute(
+            """update asistente.acciones_propuestas a
+               set estado = 'ejecutando', revisado_por = %s, revisado_en = now()
+               where a.organization_id = %s and a.id = %s
+                 and a.estado = 'pendiente'
+                 and (a.vence_en is null or a.vence_en > now())
+                 and a.conversation_id is not null
+                 and exists (select 1 from asistente.conversations c
+                              where c.id = a.conversation_id
+                                and c.organization_id = a.organization_id
+                                and c.estado = 'abierta')
+               returning a.id, a.herramienta, a.argumentos, a.conversation_id""",
+            (reservada_por, org, accion_id))
+        fila = cur.fetchone()
+        if fila is None:
+            if (previa["estado_conversacion"] or "") != "abierta":
+                return {"ok": False, "motivo": "conversacion_cerrada"}
+            return {"ok": False, "motivo": "ya_no_pendiente",
+                    "estado": previa["estado"]}
+        return {"ok": True, "accion": dict(fila)}
+
+
+def liberar_accion(tenant: str, accion_id: str, motivo: str) -> bool:
+    """
+    Devuelve una accion reservada a 'pendiente' (§9.3 paso 2).
+
+    Es para UN solo caso: la revalidacion no se pudo correr --API caida,
+    timeout-- asi que no se sabe si la condicion se cumple. Como no se ejecuto
+    nada, la accion vuelve a estar disponible y el operador ve "no se pudo
+    comprobar, reintentar".
+
+    NO se usa cuando la revalidacion corre y falla: eso es 'vencida', porque la
+    condicion se comprobo y no se cumple. La diferencia es la misma de siempre:
+    no saber no es lo mismo que saber que no.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """update asistente.acciones_propuestas
+               set estado = 'pendiente', revisado_por = null, revisado_en = null,
+                   codigo_error = %s
+               where organization_id = %s and id = %s and estado = 'ejecutando'""",
+            (motivo[:200], org, accion_id))
+        return cur.rowcount > 0
+
+
+def vencer_accion(tenant: str, accion_id: str, codigo: str,
+                  conversation_id: str | None = None) -> bool:
+    """
+    La revalidacion corrio y su condicion NO se cumple (§3.7): la accion ya no
+    aplica y no se va a ejecutar. 'codigo' dice cual condicion fallo.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """update asistente.acciones_propuestas
+               set estado = 'vencida', revisado_en = now(), codigo_error = %s
+               where organization_id = %s and id = %s
+                 and estado in ('ejecutando', 'pendiente')""",
+            (codigo[:200], org, accion_id))
+        if not cur.rowcount:
+            return False
+        registrar_evento_de_accion(
+            cur, org, accion_id, "accion_vencida", motivo=codigo[:500],
+            actor_tipo="sistema", conversation_id=conversation_id)
+        return True
+
+
+def resolver_ejecucion_de_accion(tenant: str, accion_id: str, *,
+                                 resultado: dict | None, codigo_error: str | None,
+                                 incierto: bool = False,
+                                 aprobada_por: str | None = None,
+                                 conversation_id: str | None = None) -> bool:
+    """
+    Paso 4: el desenlace de la ejecucion, con su evento (I12).
+
+        codigo_error None      -> ejecutada_ok
+        incierto               -> desconocida       (unknown != failed)
+        resto                  -> ejecutada_fallo
+
+    'desconocida' es terminal y NO se reintenta sola (§9.3 paso 5): el pedido
+    pudo haber llegado al sistema externo. Reintentar a ciegas un ticket que
+    quiza ya existe manda dos visitas tecnicas al mismo cliente.
+
+    La condicion 'estado = ejecutando' es lo que hace que una doble aprobacion
+    no pueda escribir dos veces: la segunda no reservo, asi que nunca llega
+    aca, y si llegara no encontraria fila.
+    """
+    if incierto:
+        estado, tipo = "desconocida", "accion_desconocida"
+    elif codigo_error:
+        estado, tipo = "ejecutada_fallo", "accion_aprobada"
+    else:
+        estado, tipo = "ejecutada_ok", "accion_aprobada"
+
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """update asistente.acciones_propuestas
+               set estado = %s, revisado_en = now(),
+                   resultado_ejecucion = %s, codigo_error = %s
+               where organization_id = %s and id = %s and estado = 'ejecutando'""",
+            (estado, json.dumps(resultado, ensure_ascii=False) if resultado is not None else None,
+             (codigo_error or None) and codigo_error[:200], org, accion_id))
+        if not cur.rowcount:
+            return False
+        registrar_evento_de_accion(
+            cur, org, accion_id, tipo,
+            motivo=(codigo_error or None) and codigo_error[:500],
+            actor_tipo="operador" if aprobada_por else "sistema",
+            actor_nombre=aprobada_por, conversation_id=conversation_id,
+            datos={"desenlace": estado})
+        return True
+
+
+def vincular_accion_a_conversacion(tenant: str, accion_id: str,
+                                   conversation_id: str,
+                                   vigencia_minutos: int | None = None) -> str:
+    """
+    Le pone conversacion, vigencia y clave de equivalencia a una accion recien
+    propuesta.
+
+    POR QUE EN DOS PASOS Y NO AL INSERTAR: durante el turno todavia NO existe
+    el conversation_id -- la conversacion se crea o se reusa recien al
+    persistir el turno, en api.py. Es el mismo problema que ya tenian
+    'tool_calls' y los archivos generados, y se resuelve igual: el motor
+    escribe lo que sabe, y api.py completa cuando el id existe.
+
+    La ventana entre los dos pasos es segura y NO hay que taparla: mientras la
+    accion no tiene conversacion se la trata como de legado, asi que NO SE
+    PUEDE APROBAR (X24). Falla cerrado, que es el lado correcto -- y nadie
+    puede aprobar en ese lapso porque el operador todavia no la vio.
+
+    Devuelve 'vinculada', 'duplicada' (ya habia una equivalente viva: esta se
+    cancela en vez de quedar como segunda propuesta del mismo pedido) o
+    'no_encontrada'.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select herramienta, argumentos, estado
+               from asistente.acciones_propuestas
+               where organization_id = %s and id = %s""",
+            (org, accion_id))
+        fila = cur.fetchone()
+        if fila is None:
+            return "no_encontrada"
+
+        clave = clave_de_equivalencia(conversation_id, fila["herramienta"],
+                                      fila["argumentos"] or {})
+        try:
+            cur.execute(
+                """update asistente.acciones_propuestas
+                   set conversation_id = %s, clave_equivalencia = %s,
+                       vence_en = case when %s::int is null then null
+                                       else creado_en + make_interval(mins => %s::int) end
+                   where organization_id = %s and id = %s
+                     and conversation_id is null""",
+                (conversation_id, clave, vigencia_minutos, vigencia_minutos,
+                 org, accion_id))
+        except psycopg.errors.UniqueViolation:
+            # Ya hay una equivalente viva en esta conversacion: el cliente
+            # pidio dos veces lo mismo. La segunda se cancela --con su motivo,
+            # como cualquier cancelacion-- en vez de quedar viva sin
+            # conversacion, que la volveria indistinguible del legado.
+            cur.execute(
+                """update asistente.acciones_propuestas
+                   set estado = 'cancelada',
+                       motivo_rechazo = 'duplicada: ya habia una propuesta '
+                                        'equivalente viva en esta conversacion',
+                       revisado_en = now()
+                   where organization_id = %s and id = %s and estado = 'pendiente'""",
+                (org, accion_id))
+            if cur.rowcount:
+                registrar_evento_de_accion(
+                    cur, org, accion_id, "accion_propuesta_duplicada",
+                    motivo="ya habia una propuesta equivalente viva",
+                    actor_tipo="sistema", conversation_id=conversation_id)
+            return "duplicada"
+        return "vinculada" if cur.rowcount else "no_encontrada"
+
+
+def acciones_de_conversacion(tenant: str, conversation_id: str) -> list[dict]:
+    """
+    Las acciones de una conversacion, para la pantalla del hilo.
+
+    SIN 'argumentos', igual que la lista general: son los valores reales sin
+    enmascarar. El resumen existe para que quien aprueba lea "Crear ticket 'No
+    tiene internet' para el servicio 1234" en vez del JSON crudo.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select id, herramienta, resumen, estado, motivo_rechazo,
+                      revisado_por, codigo_error, creado_en, revisado_en,
+                      vence_en,
+                      (vence_en is not null and vence_en <= now()) as expirada
+               from asistente.acciones_propuestas
+               where organization_id = %s and conversation_id = %s
+               order by creado_en desc""",
+            (org, conversation_id))
+        return [dict(f) for f in cur.fetchall()]
 
 
 def eventos_de_accion(tenant: str, accion_id: str) -> list[dict]:
