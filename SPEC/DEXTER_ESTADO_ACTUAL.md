@@ -150,33 +150,39 @@ decidir antes de escribir la migración: dónde se muestra un pendiente de
 revisión en la conversación, y que el reintento automático de `crear_ticket`
 **no se escribe**, ni detrás de una bandera.
 
-## G3 — ROJO. Y el bloqueo 1 no puede esperar a B5
+## G3 — VERDE. El camino de ejecución está cerrado
 
 ```
 36 acciones de legado en 'pendiente' (34 create_ticket · 2 promise_payment),
-sin conversation_id, de hace más de 7 días. Invisibles: no hay pantalla.
+sin conversation_id. SIGUEN pendientes: cancelarlas es trabajo de una persona
+con la pantalla delante, y ese es el punto.
 ```
 
-**El endpoint de aprobar las ejecuta.** `POST /acciones/propuestas/<id>/aprobar`
-comprueba sólo que estén `pendiente` y hace la escritura real contra la API
-externa. No valida `conversation_id` —la columna no existe hasta B5— así que
-hoy cualquiera con acceso al motor puede crear 34 tickets con 34 peticiones,
-sin revalidación y sin forma de detectar duplicados (Q2 rojo).
-
-Tres cosas chicas, ninguna necesita B5:
+Cerrado en `5055c20` (motor) y `e67875b` (pantalla). Detalle en
+`auditorias/G3-CIERRE.md`.
 
 ```
-1. que aprobar RECHACE una acción de legado (409, sin ejecutar nada)
-2. estado 'cancelada' declarado, con su evento y motivo
-3. una superficie mínima para revisarlas: 36 filas y un botón de cancelar,
-   sin botón de aprobar
+1. aprobar responde 409 y no llega al ejecutor. La guarda corre ANTES del
+   chequeo de estado y de leer la config.
+2. 'cancelada' es estado declarado, con motivo obligatorio y evento durable
+   en la misma transacción (I12). Tabla nueva acciones_eventos: el
+   conversation_id de relevo_eventos es NOT NULL y estas 36 no tienen.
+3. /acciones-legado lista las pendientes. Sin botón de aprobar —ausente, no
+   deshabilitado— y sin 'argumentos' (valores reales sin enmascarar).
 ```
 
-Propuesta, ya escrita en `auditorias/G3-ACCIONES-LEGACY.md`: **ninguna se
-aprueba**; las 34 de ticket se cancelan —si el problema sigue vivo, la
-conversación actual lo vuelve a proponer con `conversation_id`— y las 2 de pago
-se miran a mano antes de cancelar. Primero se cierra el camino de ejecución,
-después se cancela.
+El criterio de legado es **la falta de `conversation_id`**, nunca la edad ni el
+tipo. Cuando B5 traiga la columna, la misma función deja pasar las que la
+tengan sin tocarla.
+
+**Lo que este gate NO hizo, a propósito:** tocar las 36 filas. El contrato pide
+revisión humana una por una, no un `UPDATE` en lote. Las 2 de promesa de pago
+quedan para revisión: si el cliente pagó no se puede saber sin consultar
+producción, y no se consultó.
+
+Migración `202609201400_acciones_legado.sql` **sin aplicar en producción**.
+
+B5 queda desbloqueado.
 
 ## SIGUIENTE GATE
 

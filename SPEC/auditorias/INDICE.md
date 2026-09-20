@@ -20,7 +20,8 @@ Un archivo por gate. El agente lee sólo los que el prompt le nombre.
 | **1.9** | [1.9-CIERRE-VISUAL.md](1.9-CIERRE-VISUAL.md) | **aprobado** | Cierre visual: utilidades de panel duplicadas cuatro veces y una de ellas distinta. Branding fuera de la fase; el smoke visual, no ejecutable. |
 | **B4 · Q2** | [B4-Q2-WISPHUB.md](B4-Q2-WISPHUB.md) | **ROJO** | `crear_ticket` no es reintentable: ninguna de las tres vías del contrato existe. Cerrado por documentación, sin tocar producción. |
 | **B4** | [B4-IMPLEMENTACION.md](B4-IMPLEMENTACION.md) | **implementado** | La cola de efectos externos, T20 con cadencia propia y el panel de sincronización. T20 sin enganchar: G7. |
-| **G3** | [G3-ACCIONES-LEGACY.md](G3-ACCIONES-LEGACY.md) | **ROJO** | Las 36 acciones de legado. El endpoint de aprobar las ejecuta hoy: el bloqueo 1 no puede esperar a B5. |
+| **G3** | [G3-ACCIONES-LEGACY.md](G3-ACCIONES-LEGACY.md) | ROJO → cerrado | Las 36 acciones de legado. El endpoint de aprobar las ejecutaba: el bloqueo 1 no podía esperar a B5. |
+| **G3** | [G3-CIERRE.md](G3-CIERRE.md) | **VERDE** | Aprobar rechaza con 409 sin ejecutar, `cancelada` es estado declarado con evento, y hay pantalla para revisar. Las 36 siguen `pendiente`: cancelarlas es trabajo de una persona. B5 desbloqueado. |
 | — | [1.4C-hotpath-diferido.md](1.4C-hotpath-diferido.md) | diferido | Los hunks de ③a/③c retirados, recuperables con `git apply -R`. |
 
 Los gates sin archivo viven sólo en la transcripción; sus conclusiones vigentes
