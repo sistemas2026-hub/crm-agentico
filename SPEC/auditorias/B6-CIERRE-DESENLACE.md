@@ -2,8 +2,9 @@
 
 ```
 BASE       feature/bandeja-relevo, sobre df13919 (G8)
-VEREDICTO  el cierre con desenlace queda cerrado en código. Desbloquea la
-           tercera decisión de G8.
+VEREDICTO  CERRADO EN CÓDIGO. El cierre dice por qué, se puede completar
+           después, y el cierre externo hace sólo lo que las APIs permiten
+           sin dañar nada. Desbloquea la tercera decisión de G8.
 FECHA      20/09/2026
 ALCANCE    código y pruebas. Producción no se tocó ni se consultó. Sin push.
 ```
@@ -195,10 +196,27 @@ El candado está en el propio UPDATE (`and desenlace_codigo is null`), no en una
 lectura previa: dos revisores a la vez son lo normal, y el segundo tiene que
 enterarse de que llegó tarde. Probado con dos hilos.
 
-Sobre una conversación de legado escribe el dato pero **no sube la versión ni
-deja evento**: adoptar una de versión 0 es una decisión humana explícita y esa
-puerta es G8 y ninguna otra (C5, I21). El dato queda igual, que es lo que la
-persona vino a dejar.
+### Sobre legado: no se adopta, pero sí deja rastro
+
+Adoptar y dejar rastro son cosas distintas, y esta transición hace una sola.
+
+```
+relevo_version    se queda en 0. Meter al modelo una de versión 0 es una
+                  decisión humana explícita y esa puerta es G8 (C5, I21).
+control/asignación intactos.
+evento            SÍ, con `legado: true` y `version: 0`.
+```
+
+La primera versión de esto no escribía el evento, con el argumento de que sin
+adopción no hay expediente. Estaba mal, y el auditor lo marcó: **una escritura
+durable sin rastro es exactamente lo que este expediente existe para que no
+pase**. Que una conversación sea vieja no convierte en anónima la decisión de
+una persona sobre ella; dentro de un año, «¿quién le puso este desenlace, y
+cuándo?» tiene que tener respuesta también aquí.
+
+`legado: true` y `version: 0` dicen lo que pasó sin fingir otra cosa: una
+decisión humana sobre una conversación que nunca entró al modelo. Dato y evento
+en la misma transacción, probado con falla inyectada.
 
 ## La pantalla
 
@@ -253,12 +271,13 @@ Más ~45 sobre completar el desenlace (sección 10) y la cola de `cerrar_caso`
 en `tests/test_b4_sincronizaciones.py`, y **7 contra el CRM real** en
 `django-crm/backend/cases/tests/test_cierre_idempotente.py`.
 
-**Mutaciones: 21 probadas, 21 rojas.** Entre ellas: el catálogo acepta
+**Mutaciones: 23 probadas, 23 rojas.** Entre ellas: el catálogo acepta
 cualquier código; un desconocido cae a `otro`; el cierre manual sin código usa
 `otro`; un automático guarda el desenlace que le manden; el plazo lo deja en
 NULL; T15a/T15b dejan de mirar `atendida_manual`; también se cancelan las
 `ejecutando`; cerrar una de legado la adopta; completar pisa el desenlace que
-ya estaba; completar se apropia del cierre ajeno; el cierre encola
+ya estaba; completar se apropia del cierre ajeno; completar sobre legado no
+deja evento; su evento no se distingue de uno gobernado; el cierre encola
 `cerrar_ticket`; `cerrar_caso` escribe sin leer antes; da por bueno sin releer;
 se intenta sin la capacidad de leer.
 

@@ -25,10 +25,14 @@ lee_asignados   consultar_asignados_caso_crm   GET  /cases/<id>/assignees/
 lee_perfiles    consultar_perfiles_crm         GET  /users/get-teams-and-users/
 ```
 
-**B6 agrega una quinta, y sin ella la cola no cierra casos:**
+**Son CINCO desde B6, no cuatro. La quinta falta declararla:**
 
 ```
-lee_caso        (falta declararla)             GET  /api/cases/<id>/
+busca_caso      consultar_casos_bottlecrm      declarada
+asigna_caso     asignar_caso_crm               declarada
+lee_asignados   consultar_asignados_caso_crm   declarada
+lee_perfiles    consultar_perfiles_crm         declarada
+lee_caso        —                              FALTA    GET /api/cases/<id>/
 ```
 
 `cierra_caso` ya existe en el catálogo. Pero `cerrar_caso` exige **las dos**:
