@@ -32,6 +32,7 @@ import importlib.util
 import json
 import os
 import sys
+import threading
 import uuid
 from pathlib import Path
 
@@ -278,6 +279,271 @@ try:
     for escritura in ("insert into", "update ", "delete from", "alter table"):
         revisar(escritura not in codigo.lower(),
                 f"el codigo no contiene '{escritura.strip()}'")
+
+
+    # =============================================================================
+    titulo("6. registrar la decision humana (adopcion de G8)")
+    # =============================================================================
+    from nucleo.relevo import transiciones as T                       # noqa: E402
+
+    admin.execute("insert into asistente.tenant_config (organization_id, slug) "
+                  "values (%s, %s) on conflict do nothing", (str(ORG), TEN))
+
+    OP_ID = str(uuid.uuid4())
+    OP = "Ana Gomez"
+
+
+    def fila_de(cid):
+        return admin.execute(
+            """select control, control_motivo, relevo_version, estado,
+                      asignada_a_nombre, asignada_a_usuario_id, tomada_por,
+                      escalada_a_humano, necesita_atencion_humana
+               from asistente.conversations where id = %s""", (cid,)).fetchone()
+
+
+    def eventos_de(cid):
+        return admin.execute(
+            """select tipo, actor_tipo, actor_nombre, actor_usuario_id, datos
+               from asistente.relevo_eventos where conversation_id = %s
+               order by creado_en, id""", (cid,)).fetchall()
+
+
+    # --- seguir_humano --------------------------------------------------------
+    c1 = conversacion(caso_id=str(uuid.uuid4()), tomada_por="Luis Paz")
+    mensaje(c1, "user", "sin internet", 3)
+    r = T.adoptar_de_legado(TEN, c1, decision="seguir_humano",
+                            operador_id=OP_ID, operador_nombre=OP)
+    f = fila_de(c1)
+    revisar(r.aplicada and f["relevo_version"] == 1,
+            f"seguir_humano adopta y sube la version a 1 ({f['relevo_version']})")
+    revisar(f["control"] == "humano" and f["control_motivo"] == "escalada",
+            "deja control humano con motivo escalada (§11.2)")
+    revisar(f["asignada_a_nombre"] == "Luis Paz",
+            "copia 'tomada_por' como NOMBRE")
+    revisar(f["asignada_a_usuario_id"] is None,
+            "y deja el id de usuario en NULL",
+            "Un nombre no prueba identidad: inventar el id le atribuiria a una "
+            "persona concreta una conversacion que quiza no es suya.")
+
+    evs = eventos_de(c1)
+    revisar([e["tipo"] for e in evs] == ["escalada"],
+            f"deja un evento 'escalada' ({[e['tipo'] for e in evs]})")
+    revisar(evs[0]["datos"].get("legado") is True
+            and evs[0]["datos"].get("g8") == "seguir_humano",
+            f"con datos.legado y datos.g8 ({evs[0]['datos']})",
+            "Sin esas dos claves nadie podria distinguir una escalada real de una "
+            "adopcion administrativa.")
+    revisar(evs[0]["actor_nombre"] == OP and str(evs[0]["actor_usuario_id"]) == OP_ID,
+            "y dice QUIEN decidio, con nombre e id")
+
+    # --- volver_ia ------------------------------------------------------------
+    c2 = conversacion(caso_id=str(uuid.uuid4()))
+    mensaje(c2, "user", "ya se soluciono", 1)
+    r = T.adoptar_de_legado(TEN, c2, decision="volver_ia",
+                            operador_id=OP_ID, operador_nombre=OP)
+    f = fila_de(c2)
+    revisar(r.aplicada and f["control"] == "ia" and f["control_motivo"] is None,
+            "volver_ia deja control ia sin motivo")
+    revisar(not f["escalada_a_humano"] and not f["necesita_atencion_humana"],
+            "y apaga las banderas de legado, en la misma escritura",
+            "Si quedaran puestas, la reconstruccion seguiria pausandola y la "
+            "decision no tendria efecto.")
+    evs = eventos_de(c2)
+    revisar(evs[0]["datos"].get("g8") == "volver_ia",
+            "con su evento 'devuelta_a_ia' y datos.g8")
+
+    # --- las dos que NO se pueden registrar -----------------------------------
+    for decision in ("cerrar_con_desenlace", "resolver_estado_externo"):
+        c = conversacion(caso_id=str(uuid.uuid4()))
+        antes = fila_de(c)
+        try:
+            T.adoptar_de_legado(TEN, c, decision=decision,
+                                operador_id=OP_ID, operador_nombre=OP)
+            revisar(False, f"'{decision}' se rechaza con su motivo")
+        except NotImplementedError as e:
+            # Que el motivo ESTE, sea cual sea el texto: rechazar sin decirlo
+            # dejaria a quien revisa sin saber si el error es suyo. Atarlo a
+            # una frase concreta hace que reescribir el mensaje rompa la
+            # prueba sin que nada real haya cambiado.
+            revisar(decision in str(e) and len(str(e)) > 60,
+                    f"'{decision}' se rechaza nombrandola y explicando por que")
+        revisar(fila_de(c) == antes,
+                f"y la conversacion no se toco ({decision})",
+                "Hacer algo parecido seria peor: quien revisa creeria que decidio "
+                "algo que el sistema no registro.")
+
+    # Una decision inventada tampoco pasa.
+    try:
+        T.adoptar_de_legado(TEN, c1, decision="archivar",
+                            operador_id=OP_ID, operador_nombre=OP)
+        revisar(False, "una decision que no existe se rechaza")
+    except ValueError:
+        revisar(True, "una decision que no existe se rechaza")
+
+    # --- el actor es obligatorio ----------------------------------------------
+    c3 = conversacion(caso_id=str(uuid.uuid4()))
+    for oid, onombre, caso in ((OP_ID, "", "sin nombre"),
+                               ("", OP, "sin id"),
+                               ("no-es-uuid", OP, "con un id que no es uuid")):
+        antes = fila_de(c3)
+        try:
+            T.adoptar_de_legado(TEN, c3, decision="seguir_humano",
+                                operador_id=oid, operador_nombre=onombre)
+            revisar(False, f"se rechaza una adopcion {caso}")
+        except Exception:
+            revisar(True, f"se rechaza una adopcion {caso}")
+        revisar(fila_de(c3) == antes, f"y no cambia nada ({caso})")
+
+    # --- repetir no duplica ---------------------------------------------------
+    c4 = conversacion(caso_id=str(uuid.uuid4()))
+    clave = f"g8-{uuid.uuid4()}"
+    r1 = T.adoptar_de_legado(TEN, c4, decision="seguir_humano", operador_id=OP_ID,
+                             operador_nombre=OP, clave=clave)
+    r2 = T.adoptar_de_legado(TEN, c4, decision="seguir_humano", operador_id=OP_ID,
+                             operador_nombre=OP, clave=clave)
+    revisar(r1.aplicada and not r2.aplicada,
+            "la misma decision con la misma clave se aplica UNA vez")
+    revisar(len(eventos_de(c4)) == 1,
+            f"y deja un solo evento ({len(eventos_de(c4))})")
+    revisar(fila_de(c4)["relevo_version"] == 1,
+            "sin subir la version dos veces")
+
+    # Sin clave, una ya adoptada no se vuelve a tocar.
+    r3 = T.adoptar_de_legado(TEN, c4, decision="volver_ia", operador_id=OP_ID,
+                             operador_nombre=OP)
+    revisar(not r3.aplicada and r3.motivo == "ya_adoptada",
+            f"una ya adoptada responde 'ya_adoptada' ({r3.motivo})")
+    revisar(fila_de(c4)["control"] == "humano",
+            "y conserva la decision anterior: no se pisa la de otra persona")
+    revisar(len(eventos_de(c4)) == 1, "sin escribir un evento mas")
+
+    # --- dos operadores a la vez ----------------------------------------------
+    c5 = conversacion(caso_id=str(uuid.uuid4()))
+    resultados = []
+    barrera = threading.Barrier(2)
+
+
+    def decidir(decision):
+        def _():
+            barrera.wait()
+            try:
+                resultados.append(T.adoptar_de_legado(
+                    TEN, c5, decision=decision, operador_id=str(uuid.uuid4()),
+                    operador_nombre=f"Op {decision}"))
+            except Exception as e:
+                resultados.append(e)
+        return _
+
+
+    hilos = [threading.Thread(target=decidir("seguir_humano")),
+             threading.Thread(target=decidir("volver_ia"))]
+    for h in hilos:
+        h.start()
+    for h in hilos:
+        h.join()
+
+    aplicadas = [r for r in resultados
+                 if not isinstance(r, Exception) and r.aplicada]
+    revisar(len(aplicadas) == 1,
+            f"de dos operadores decidiendo a la vez, gana UNO ({len(aplicadas)})",
+            "La fila se bloquea con FOR UPDATE: el segundo la encuentra adoptada.")
+    revisar(len(eventos_de(c5)) == 1,
+            f"y queda un solo evento ({len(eventos_de(c5))})")
+    revisar(fila_de(c5)["relevo_version"] == 1,
+            "con la version en 1, no en 2")
+
+    # --- rollback completo si falla el evento ---------------------------------
+    c6 = conversacion(caso_id=str(uuid.uuid4()))
+    antes = fila_de(c6)
+    T._gancho_antes_del_commit = lambda: (_ for _ in ()).throw(
+        RuntimeError("falla al escribir el evento"))
+    try:
+        T.adoptar_de_legado(TEN, c6, decision="seguir_humano",
+                            operador_id=OP_ID, operador_nombre=OP)
+        revisar(False, "si falla el evento, la adopcion entera se deshace")
+    except Exception:
+        revisar(True, "si falla el evento, la adopcion entera se deshace")
+    finally:
+        T._gancho_antes_del_commit = None
+    revisar(fila_de(c6) == antes,
+            "la conversacion sigue exactamente como estaba",
+            "Nunca una adopcion sin quien ni por que.")
+    revisar(eventos_de(c6) == [], "y no quedo ningun evento suelto")
+
+    # --- aislamiento entre empresas -------------------------------------------
+    otra_org = uuid.uuid4()
+    otro_ten = f"prueba-g8b-{uuid.uuid4().hex[:8]}"
+    oblig = admin.execute(
+        "select column_name, data_type from information_schema.columns "
+        "where table_schema='public' and table_name='organization' "
+        "and is_nullable='NO' and column_default is null").fetchall()
+    vals = {"id": str(otra_org), "name": otro_ten, "api_key": f"k-{otra_org}",
+            "company_name": otro_ten}
+    for fl in oblig:
+        campo, tipo = fl["column_name"], fl["data_type"]
+        if campo in vals:
+            continue
+        vals[campo] = ("now()" if "timestamp" in tipo or tipo == "date"
+                       else True if tipo == "boolean"
+                       else 0 if tipo in ("integer", "bigint", "smallint", "numeric")
+                       else "{}" if tipo in ("json", "jsonb", "ARRAY") else "")
+    cols = ", ".join('"' + k + '"' for k in vals)
+    marcas = ", ".join("now()" if v == "now()" else "%s" for v in vals.values())
+    admin.execute("insert into public.organization (" + cols + ") values (" + marcas + ")",
+                  [v for v in vals.values() if v != "now()"])
+    admin.execute("insert into asistente.tenant_config (organization_id, slug) "
+                  "values (%s, %s)", (str(otra_org), otro_ten))
+    try:
+        c7 = conversacion(caso_id=str(uuid.uuid4()))
+        antes = fila_de(c7)
+        r = T.adoptar_de_legado(otro_ten, c7, decision="seguir_humano",
+                                operador_id=OP_ID, operador_nombre=OP)
+        revisar(not r.aplicada,
+                f"otra empresa no puede adoptar esta conversacion ({r.motivo})")
+        revisar(fila_de(c7) == antes, "y la conversacion no cambia")
+        revisar(eventos_de(c7) == [], "sin eventos escritos en el expediente ajeno")
+    finally:
+        admin.execute("delete from public.organization where id = %s", (str(otra_org),))
+
+    # --- ninguna ruta adopta sola ---------------------------------------------
+    fuente_rev = (RAIZ / "cli" / "revision_g8.py").read_text(encoding="utf-8")
+    revisar("adoptar_de_legado" not in fuente_rev,
+            "la herramienta de revision NO puede adoptar: ni la nombra",
+            "La clasificacion A/B/C no llega a ninguna escritura.")
+
+    # Sobre el PARSER, no sobre el archivo: el docstring de decidir_g8.py
+    # nombra '--todas' justamente para decir que no existe, asi que buscar la
+    # cadena daba rojo por su propia explicacion. Es la quinta vez en esta fase
+    # que ese error aparece, y por eso ahora se mide lo que el comando ACEPTA.
+    _spec_d = importlib.util.spec_from_file_location(
+        "dec", RAIZ / "cli" / "decidir_g8.py")
+    dec = importlib.util.module_from_spec(_spec_d)
+    _spec_d.loader.exec_module(dec)
+
+    por_nombre = {o: a for a in dec.construir_parser()._actions
+                  for o in a.option_strings}
+    for masivo in ("--todas", "--desde-archivo", "--lote", "--archivo"):
+        revisar(masivo not in por_nombre,
+                f"el comando de decision no acepta '{masivo}'",
+                "§11.2 dice UNA POR UNA: un comando en lote lo volveria un tramite.")
+    revisar(por_nombre["--conversacion"].nargs is None,
+            "y toma UNA conversacion, no una lista")
+    for obligatorio in ("--conversacion", "--decision", "--operador-id", "--operador"):
+        revisar(por_nombre[obligatorio].required is True,
+                f"'{obligatorio}' es obligatorio")
+    revisar(set(por_nombre["--decision"].choices) == set(T.DECISIONES_G8),
+            "y las decisiones posibles salen del contrato, no de una lista aparte")
+
+    # Ninguna otra parte del motor llama a la adopcion.
+    llamadores = []
+    for archivo in (RAIZ / "nucleo").rglob("*.py"):
+        texto = archivo.read_text(encoding="utf-8")
+        for linea in texto.splitlines():
+            if "adoptar_de_legado" in linea and "def " not in linea:
+                llamadores.append(archivo.name)
+    revisar(not llamadores,
+            f"ningun modulo del motor la llama por su cuenta ({llamadores})",
+            "Solo el comando, que exige un operador en cada invocacion.")
 
 finally:
     admin.execute("delete from public.organization where id = %s", (str(ORG),))

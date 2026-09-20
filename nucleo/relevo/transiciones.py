@@ -94,7 +94,11 @@ class Resultado:
 # El esquema de 'datos' por tipo (contrato §3.3, X19): solo estas claves y solo
 # valores simples. Nunca respuestas de APIs externas ni datos del cliente.
 ESQUEMAS: dict[str, frozenset[str]] = {
-    "escalada": frozenset({"version", "motivo"}),
+    # 'legado' y 'g8' solo aparecen en la adopcion de G8: dicen que esta
+    # conversacion venia de antes del corte y que fue una PERSONA la que
+    # decidio que hacer con ella. Sin esas dos claves, dentro de un año nadie
+    # podria distinguir una escalada real de una adopcion administrativa.
+    "escalada": frozenset({"version", "motivo", "legado", "g8"}),
     "intervencion": frozenset({"version", "motivo_texto", "tomada"}),
     "tomada": frozenset({"version", "anterior_nombre"}),
     "soltada": frozenset({"version", "anterior_nombre"}),
@@ -103,7 +107,7 @@ ESQUEMAS: dict[str, frozenset[str]] = {
     "cerrada": frozenset({"version", "por"}),
     "devolucion_solicitada": frozenset({"mensaje_id"}),
     "devolucion_fallida": frozenset({"mensaje_id", "resultado"}),
-    "devuelta_a_ia": frozenset({"version"}),
+    "devuelta_a_ia": frozenset({"version", "legado", "g8"}),
     "caso_externo_cerrado": frozenset({"version", "aplicado"}),
 }
 DATOS_VERSION = 1
@@ -475,6 +479,128 @@ def reasignar(tenant: str, conversation_id: str, *, admin_id: str, admin_nombre:
         _encolar_asignacion_crm(cur, org, conversation_id, f, id_destino)
         return Resultado(True, True, version, ev, datos=datos)
     return _ejecutar(tenant, conversation_id, clave, cuerpo, tipo="reasignada", actor_id=id_admin)
+
+
+# =============================================================================
+#  G8 -- la adopcion de una conversacion de legado
+# =============================================================================
+
+#: Las cuatro decisiones que §11.2 pone en manos de una persona. Dos estan
+#: implementadas y dos NO, y la diferencia no es de esfuerzo:
+#:
+#:   seguir_humano           implementada
+#:   volver_ia               implementada
+#:   cerrar_con_desenlace    FALTA EL DESENLACE. §3.5 dice que el cierre manual
+#:                           exige un codigo de desenlace, y ni la columna ni el
+#:                           catalogo existen todavia: son B6. Cerrar sin el
+#:                           seria cerrar 16 conversaciones de clientes sin
+#:                           decir por que, justo en el registro que existe para
+#:                           poder decirlo.
+#:   resolver_estado_externo NO ES UNA TRANSICION DEL RELEVO. Es cerrar el caso
+#:                           o el ticket afuera, o sea un efecto externo
+#:                           ('cerrar_caso'/'cerrar_ticket' de B4), y esos tipos
+#:                           no tienen productor. Ademas 'cerrar_ticket' esta
+#:                           bloqueado por el gate Q2.
+#:
+#: Las dos que faltan se rechazan explicitamente, con su motivo. Inventarlas a
+#: medias seria peor que no tenerlas: quien revise creeria que decidio algo que
+#: el sistema no registro.
+DECISIONES_G8 = ("seguir_humano", "cerrar_con_desenlace",
+                 "resolver_estado_externo", "volver_ia")
+
+DECISIONES_G8_IMPLEMENTADAS = ("seguir_humano", "volver_ia")
+
+_POR_QUE_FALTA = {
+    "cerrar_con_desenlace":
+        "cerrar exige un codigo de desenlace (§3.5) y todavia no existe: "
+        "llega en B6. Cerrar sin el seria cerrar la conversacion de un cliente "
+        "sin registrar por que.",
+    "resolver_estado_externo":
+        "no es una transicion del relevo: es cerrar el caso o el ticket afuera, "
+        "y esos efectos no tienen productor todavia (B4). 'cerrar_ticket' ademas "
+        "esta bloqueado por el gate Q2.",
+}
+
+
+def adoptar_de_legado(tenant: str, conversation_id: str, *, decision: str,
+                      operador_id: str, operador_nombre: str,
+                      clave: str | None = None) -> Resultado:
+    """
+    G8. Una PERSONA decidio que hacer con una conversacion de legado, y esto lo
+    escribe.
+
+    Es la unica via por la que una conversacion con 'relevo_version = 0' entra
+    al modelo nuevo fuera de escalar e intervenir (C5, I21). No hay UPDATE
+    masivo ni adopcion automatica: ninguna clasificacion A/B/C llega hasta aca,
+    porque la clasificacion vive en una herramienta de SOLO LECTURA que no puede
+    escribir aunque quisiera.
+
+    El operador es obligatorio y se valida: una adopcion sin responsable no se
+    puede auditar, y el registro entero existe para poder auditarla.
+
+    La transicion y su evento van en la MISMA transaccion (I12). Si el evento
+    falla, no queda la conversacion adoptada sin quien ni por que.
+
+    Repetir la misma decision con la misma clave NO duplica: devuelve el evento
+    anterior sin escribir otra vez (el replay de _ejecutar). Sin clave, una
+    conversacion que ya fue adoptada responde 'ya_adoptada' y no se toca.
+    """
+    if decision not in DECISIONES_G8:
+        raise ValueError(f"decision de G8 desconocida: {decision!r}. "
+                         f"Son {list(DECISIONES_G8)}")
+    if decision not in DECISIONES_G8_IMPLEMENTADAS:
+        raise NotImplementedError(
+            f"'{decision}' no se puede registrar todavia: {_POR_QUE_FALTA[decision]}")
+
+    nombre, usuario = db.validar_autor(operador_nombre, operador_id)
+
+    def cuerpo(cur, org, f):
+        # Ya gobernada: no se vuelve a adoptar. I21 dice que relevo_version
+        # nunca baja, y adoptar de nuevo pisaria una decision que ya se tomo
+        # --quiza la de otra persona, quiza con otro criterio.
+        if f["relevo_version"] != 0:
+            return Resultado(False, True, f["relevo_version"], None, "ya_adoptada",
+                             datos={"version": f["relevo_version"]})
+        if f["estado"] != "abierta":
+            return Resultado(False, False, 0, None, "no_esta_abierta")
+
+        if decision == "seguir_humano":
+            # §11.2 al pie de la letra: control humano con motivo 'escalada', y
+            # la asignacion copiada de 'tomada_por' SOLO como nombre.
+            #
+            # 'asignada_a_usuario_id' queda NULL a proposito: 'tomada_por' es un
+            # nombre, y un nombre no prueba identidad. Inventar el id seria
+            # atribuirle a una persona concreta una conversacion que quiza no
+            # es suya -- el mismo error que D28 existe para no cometer.
+            version = _subir_version(
+                cur, org, conversation_id,
+                "control = 'humano', control_motivo = 'escalada', "
+                "asignada_a_nombre = tomada_por, asignada_a_usuario_id = null, "
+                "asignada_en = case when tomada_por is not null "
+                "                   then coalesce(tomada_en, now()) end, "
+                "escalada_a_humano = true, necesita_atencion_humana = true, "
+                "actualizado_en = actualizado_en", ())
+            tipo_evento = "escalada"
+        else:  # volver_ia
+            # Las banderas de legado se apagan junto con el control, en la misma
+            # escritura: si quedaran puestas, la reconstruccion seguiria
+            # pausando la conversacion y la decision no tendria efecto.
+            version = _subir_version(
+                cur, org, conversation_id,
+                "control = 'ia', control_motivo = null, "
+                "asignada_a_usuario_id = null, asignada_a_nombre = null, "
+                "asignada_en = null, escalada_a_humano = false, "
+                "necesita_atencion_humana = false, actualizado_en = actualizado_en", ())
+            tipo_evento = "devuelta_a_ia"
+
+        datos = {"version": version, "legado": True, "g8": decision}
+        ev = _evento(cur, org, conversation_id, tipo_evento, "operador",
+                     usuario, nombre, datos, clave)
+        return Resultado(True, True, version, ev, datos=datos)
+
+    return _ejecutar(tenant, conversation_id, clave, cuerpo,
+                     tipo=("escalada" if decision == "seguir_humano" else "devuelta_a_ia"),
+                     actor_id=usuario)
 
 
 def resolver(tenant: str, conversation_id: str, *, operador_id: str, operador_nombre: str,
