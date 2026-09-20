@@ -97,6 +97,27 @@ semánticos ember/clay/      ⏭ resueltos en context/ (1.5); los consumidores d
 rust/moss                      otras pantallas, en la fase de cada una
 ```
 
+## B4 — implementado, con T20 sin enganchar
+
+```
+migración    202609201000_sincronizaciones_externas.sql   aplica limpia
+T20          nucleo/relevo/reconciliador.py, cadencia propia de 5 min
+panel        «Sincronización externa», read-only, sin botón de reintentar
+commit       b5bfb84
+```
+
+**Lo que falta para que B4 funcione de verdad**, y es deliberado:
+
+```
+T20 no está enganchado a ningún reloj   G7: la cadencia se activa en despliegue.
+                                        Hoy la cola se llena y no se vacía sola.
+el ejecutor real no está escrito        procesar_una recibe `ejecutar` inyectado;
+                                        conectarlo al CRM es chico, a WispHub NO
+                                        se hace mientras Q2 siga rojo
+sólo crear_caso se encola               los otros tres tipos existen en esquema y
+                                        panel, sin productor
+```
+
 ## B4 — lo que Q2 ya decidió
 
 ```

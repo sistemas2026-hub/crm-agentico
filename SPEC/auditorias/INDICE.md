@@ -19,6 +19,7 @@ Un archivo por gate. El agente lee sólo los que el prompt le nombre.
 | **1.8** | [1.8-NETWORK.md](1.8-NETWORK.md) | **aprobado** | Network. Sin telemetría en vivo y sin botones de ping/reinicio, con las razones medidas; se muestra el veredicto de las acciones. |
 | **1.9** | [1.9-CIERRE-VISUAL.md](1.9-CIERRE-VISUAL.md) | **aprobado** | Cierre visual: utilidades de panel duplicadas cuatro veces y una de ellas distinta. Branding fuera de la fase; el smoke visual, no ejecutable. |
 | **B4 · Q2** | [B4-Q2-WISPHUB.md](B4-Q2-WISPHUB.md) | **ROJO** | `crear_ticket` no es reintentable: ninguna de las tres vías del contrato existe. Cerrado por documentación, sin tocar producción. |
+| **B4** | [B4-IMPLEMENTACION.md](B4-IMPLEMENTACION.md) | **implementado** | La cola de efectos externos, T20 con cadencia propia y el panel de sincronización. T20 sin enganchar: G7. |
 | — | [1.4C-hotpath-diferido.md](1.4C-hotpath-diferido.md) | diferido | Los hunks de ③a/③c retirados, recuperables con `git apply -R`. |
 
 Los gates sin archivo viven sólo en la transcripción; sus conclusiones vigentes
