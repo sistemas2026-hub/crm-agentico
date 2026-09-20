@@ -14,6 +14,7 @@
   import CustomerPanel from '$lib/conversaciones/context/CustomerPanel.svelte';
   import NetworkPanel from '$lib/conversaciones/context/NetworkPanel.svelte';
   import SyncPanel from '$lib/conversaciones/context/SyncPanel.svelte';
+  import ActionsPanel from '$lib/conversaciones/context/ActionsPanel.svelte';
   import RetentionToggle from '$lib/conversaciones/context/RetentionToggle.svelte';
   import {
     etiquetasDe, vistaPrevia, cuantosValores, sePuedeEnviar, motivoDeBloqueo
@@ -70,6 +71,30 @@
   let accionesEquipo = $state(untrack(() => data.equipo ?? []));
   // Lo que quedó sin hacer afuera: estado actual, no historia.
   let sincronizaciones = $state(untrack(() => data.sincronizaciones ?? []));
+  let acciones = $state(untrack(() => data.acciones ?? []));
+  let aprobandoAccion = $state(/** @type {string|null} */ (null));
+
+  /** Aprobar es EJECUTAR. Quien decide si se puede es el motor: esta pantalla
+      sólo ofrece el botón donde el backend lo aceptaría, y relee después
+      porque el desenlace puede no ser el que se esperaba -- puede quedar
+      'desconocida', que no es ni hecha ni fallada. */
+  async function aprobarAccion(/** @type {string} */ id) {
+    if (aprobandoAccion) return;
+    aprobandoAccion = id;
+    try {
+      await fetch(`/api/conversaciones/${conversacion.id}/acciones/${id}/aprobar`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+      // Se relee pase lo que pase: el estado real lo tiene la base, no la
+      // respuesta de este fetch.
+      const r = await fetch(`/api/conversaciones/${conversacion.id}/acciones`);
+      if (r.ok) acciones = (await r.json()).acciones ?? [];
+    } finally {
+      aprobandoAccion = null;
+    }
+  }
 
   /**
    * Vuelve a leer el registro del relevo desde el motor.
@@ -1583,6 +1608,7 @@
        asistente dentro de ella. -->
   <!-- Arriba del todo cuando hay algo que revisar: un caso que no se creó es
        más urgente que cualquier otro contexto de la conversación. -->
+  <ActionsPanel {acciones} aprobando={aprobandoAccion} onAprobar={aprobarAccion} />
   <SyncPanel {sincronizaciones} />
 
   <!-- Después de quién es el cliente y antes del relevo: qué se intentó

@@ -34,7 +34,8 @@ export async function load({ fetch, cookies, params, locals, depends }) {
   // DESPUES casos: cada salto de conversacion pagaba la suma de las tres
   // idas y vueltas al motor en vez del maximo de las tres, y esa espera es
   // la que se sentia como si la pagina entera se recargara.
-  const [respMensajes, respHerr, respCasos, respRelevo, respEquipo, respSync] = await Promise.all([
+  const [respMensajes, respHerr, respCasos, respRelevo, respEquipo, respSync,
+         respAcciones] = await Promise.all([
     fetch(
       `${baseUrl}/conversaciones/${encodeURIComponent(params.id)}/mensajes?tenant=${encodeURIComponent(tenant)}`,
       { headers: headersMotor() }
@@ -54,6 +55,10 @@ export async function load({ fetch, cookies, params, locals, depends }) {
     ).catch(() => null),
     fetch(
       `${baseUrl}/conversaciones/${encodeURIComponent(params.id)}/sincronizaciones?tenant=${encodeURIComponent(tenant)}`,
+      { headers: headersMotor() }
+    ).catch(() => null),
+    fetch(
+      `${baseUrl}/conversaciones/${encodeURIComponent(params.id)}/acciones?tenant=${encodeURIComponent(tenant)}`,
       { headers: headersMotor() }
     ).catch(() => null)
   ]);
@@ -115,6 +120,17 @@ export async function load({ fetch, cookies, params, locals, depends }) {
     // idem
   }
 
+  // Las acciones que la IA propuso acá, con su estado REAL (B5). Antes una
+  // acción terminaba en «aprobada» y nada más -- que es lo que alguien
+  // decidió, no lo que pasó: el efecto podía haber fallado y la pantalla decía
+  // lo mismo.
+  let acciones = [];
+  try {
+    if (respAcciones?.ok) acciones = (await respAcciones.json()).acciones ?? [];
+  } catch {
+    // idem
+  }
+
   // Casos fijos para marcar una respuesta como buen ejemplo (ver
   // MarcarEjemplo.svelte). Igual que arriba: si falla, el boton de marcar
   // simplemente no tiene opciones -- no se cae la conversacion por esto.
@@ -159,7 +175,7 @@ export async function load({ fetch, cookies, params, locals, depends }) {
   const yo = { id: locals.user?.id ?? '', nombre: (locals.user?.name || locals.user?.email || '').trim() };
 
   return { conversacion: datos.conversacion, mensajes: datos.mensajes, caso, owners, herramientas, diagnostico, casos,
-    relevo, equipo, sincronizaciones, yo, rol, operadores };
+    relevo, equipo, sincronizaciones, acciones, yo, rol, operadores };
 }
 
 /** @type {import('./$types').Actions} */
