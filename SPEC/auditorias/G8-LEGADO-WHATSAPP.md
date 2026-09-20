@@ -103,6 +103,8 @@ y después** de llamar a `revisar()` — que mide el efecto, no el estado.
 ```
 hecho      la herramienta de revisión, probada, sin PII y sin escrituras
            el criterio de clasificación, con su porqué
+           la transición de adopción y el comando que la usa, con evento
+           durable — dos de las cuatro decisiones; las otras dos bloqueadas
 falta      leer las 16 reales (necesita autorización de lectura de producción)
            que una persona decida cada una
            registrar cada decisión como evento del relevo
@@ -110,6 +112,60 @@ falta      leer las 16 reales (necesita autorización de lectura de producción)
 
 Mientras G8 siga rojo, **no hay corte de control**: B3 lo tiene como gate, y
 `relevo_version = 0` no se adopta por un clic ni por un UPDATE anónimo (C5, I21).
+
+## El registro durable de la decision (df13919)
+
+Ya hay donde escribir lo que una persona decida. Antes no lo habia: ninguna
+transicion adoptaba una conversacion de legado, y el esquema de eventos no
+admitia las claves que §11.2 pide.
+
+`transiciones.adoptar_de_legado()` es la unica via por la que una conversacion
+con `relevo_version = 0` entra al modelo fuera de escalar e intervenir (C5,
+I21). Transicion y evento en la misma transaccion: si el evento falla, no queda
+una conversacion adoptada sin quien ni por que — probado con falla inyectada.
+
+```
+seguir_humano   control humano + motivo escalada, asignada_a_nombre = tomada_por
+                y asignada_a_usuario_id NULL. Evento escalada.
+volver_ia       control ia, banderas de legado apagadas en la misma escritura.
+                Evento devuelta_a_ia.
+```
+
+Los dos con `datos = {legado: true, g8: <decision>}`. Sin esas claves nadie
+podria distinguir, dentro de un año, una escalada real de una adopcion
+administrativa.
+
+**El id del usuario queda NULL a proposito.** `tomada_por` es un nombre, y un
+nombre no prueba identidad: inventar el id le atribuiria a una persona concreta
+una conversacion que quiza no es suya — el mismo error que D28 existe para no
+cometer. Es lo que §11.2 manda.
+
+### Las dos que NO se pueden registrar, y por que
+
+```
+cerrar_con_desenlace      el desenlace es B6: ni la columna ni el catalogo
+                          existen todavia
+resolver_estado_externo   no es una transicion del relevo, es un efecto externo
+                          (cerrar_caso / cerrar_ticket), sin productor y con
+                          cerrar_ticket bloqueado por Q2
+```
+
+Se rechazan con su motivo en vez de hacer algo parecido. Registrar un cierre
+sin desenlace seria cerrar la conversacion de un cliente sin decir por que,
+justo en el registro que existe para poder decirlo. Y quien revise creeria que
+decidio algo que el sistema no guardo.
+
+### El comando
+
+`cli/decidir_g8.py`, una conversacion por invocacion. No acepta `--todas` ni
+`--desde-archivo`, y `--conversacion` toma una sola: §11.2 dice **una por una**,
+y un comando en lote lo volveria el tramite que el gate existe para impedir.
+
+La clasificacion A/B/C no llega a ninguna escritura: `revision_g8.py` ni
+nombra la adopcion, y ningun modulo del motor la llama por su cuenta.
+
+Seis mutaciones mas, seis rojas. Concurrencia real: de dos operadores
+decidiendo a la vez gana uno, con un solo evento y la version en 1.
 
 ## Lo que hace falta autorizar
 
