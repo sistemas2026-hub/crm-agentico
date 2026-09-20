@@ -2087,6 +2087,38 @@ class Limites(Base):
     retencion_multimedia_dias: int = Field(default=30, ge=1)
 
 
+class DesenlacePropio(Base):
+    """
+    Un codigo de desenlace de ESTA empresa (contrato §3.5, B6).
+
+    'categoria_base' es obligatoria y tiene que ser uno de los doce codigos de
+    plataforma (I16). No es burocracia: es lo unico que permite que las
+    metricas sumen entre empresas que le ponen nombres distintos a la misma
+    falla. Sin ella, 'fibra_poste_17' seria un dato que solo entiende quien lo
+    escribio.
+
+    El catalogo base vive en codigo (nucleo/relevo/desenlaces.py) y funciona
+    sin que nadie configure nada. Esto es la extension, no el reemplazo: un
+    codigo base no se puede redefinir aca.
+    """
+    codigo: str
+    nombre: str
+    categoria_base: str
+
+
+class Desenlaces(Base):
+    """
+    Que puede elegir un operador al cerrar a mano (T17).
+
+    'ocultos' saca codigos base de la LISTA, no del significado: lo ya cerrado
+    con ellos conserva su categoria, y la plataforma sigue escribiendo
+    'sin_respuesta_cliente' en el cierre por plazo aunque este oculto -- ahi no
+    hay ninguna eleccion que ocultar.
+    """
+    propios: list[DesenlacePropio] = Field(default_factory=list)
+    ocultos: list[str] = Field(default_factory=list)
+
+
 class Conversaciones(Base):
     """
     Configuracion de la bandeja de conversaciones con clientes finales.
@@ -2637,6 +2669,11 @@ class TenantConfig(Base):
     # Las areas de trabajo del equipo. Vacio = la pantalla no ofrece area.
     areas: list[AreaDeTrabajo] = Field(default_factory=list)
     conversaciones: Conversaciones = Field(default_factory=Conversaciones)
+    # Los codigos de cierre propios de esta empresa (B6, §3.5). Vacio es el
+    # caso normal y funciona: el catalogo base de plataforma alcanza para
+    # cerrar, asi que activar B6 no obliga a escribir 'tenant_config' -- y
+    # escribirla hoy partiria la medicion ON vs OFF (Q3).
+    desenlaces: Desenlaces = Field(default_factory=Desenlaces)
     limites: Limites = Field(default_factory=Limites)
     evaluacion: Evaluacion = Field(default_factory=Evaluacion)
     manual: Manual = Field(default_factory=Manual)
@@ -2684,6 +2721,25 @@ class TenantConfig(Base):
                     f"no puede escribir: correria un efecto antes de decidir si "
                     f"se ejecuta el efecto.")
         return avisos
+
+    @model_validator(mode="after")
+    def _desenlaces_validos(self):
+        """
+        I16: todo codigo propio tiene una categoria base valida.
+
+        Esta regla SI falla cerrado, a diferencia de la de aprobacion (Q3), y
+        la diferencia es que aca no hay config vigente que romper: hoy ningun
+        tenant declara desenlaces, asi que exigirlo desde el primero no deja a
+        nadie afuera. Una regla que nace en modo advertencia rara vez pasa a
+        error; esta nace en error porque puede.
+        """
+        from nucleo.relevo import desenlaces as catalogo_desenlaces
+
+        fallos = catalogo_desenlaces.problemas(
+            self.desenlaces.propios, self.desenlaces.ocultos)
+        if fallos:
+            raise ValueError("desenlaces: " + "; ".join(fallos))
+        return self
 
     @model_validator(mode="after")
     def _coherencia_global(self):

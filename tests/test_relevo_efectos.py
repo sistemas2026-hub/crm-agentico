@@ -74,8 +74,12 @@ def correr(rol, guion, autorizador):
         (motor.catalogo_habilidades, "indice_de"): lambda *a, **k: [],
         (motor.persistencia, "leer_cache"): lambda *a, **k: None,
         (motor.persistencia, "guardar_cache"): lambda *a, **k: None,
+        # Devuelve (id, ya_existia) igual que la real: desde B5 (T12) la
+        # funcion informa si habia una equivalente viva, y un sustituto que
+        # devuelve solo el id rompe el desempaquetado -- que es justo lo que
+        # pasaba aqui, sin que ninguna asercion lo dijera.
         (motor.persistencia, "guardar_accion_propuesta"):
-            lambda *a, **k: propuestas.append(a) or "accion-1",
+            lambda *a, **k: (propuestas.append(a) or "accion-1", False),
     }
     orig = {k: getattr(*k) for k in reemplazos}
     for (m, n), f in reemplazos.items():

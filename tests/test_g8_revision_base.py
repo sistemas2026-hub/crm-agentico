@@ -352,8 +352,37 @@ try:
     revisar(evs[0]["datos"].get("g8") == "volver_ia",
             "con su evento 'devuelta_a_ia' y datos.g8")
 
-    # --- las dos que NO se pueden registrar -----------------------------------
-    for decision in ("cerrar_con_desenlace", "resolver_estado_externo"):
+    # --- cerrar_con_desenlace: la desbloqueo B6 -------------------------------
+    # Hasta B6 estaba en esta lista, rechazada porque no existia el catalogo de
+    # desenlaces. Ahora cierra Y adopta, y sigue exigiendo el codigo: lo que se
+    # levanto es la imposibilidad, no la regla. El detalle se prueba en
+    # tests/test_b6_cierre_desenlace.py; aqui solo que la puerta de G8 la
+    # acepta y la registra como decision de la revision.
+    c_cierre = conversacion(caso_id=str(uuid.uuid4()))
+    r = T.adoptar_de_legado(TEN, c_cierre, decision="cerrar_con_desenlace",
+                            operador_id=OP_ID, operador_nombre=OP,
+                            desenlace="otro")
+    f = fila_de(c_cierre)
+    revisar(r.aplicada and f["estado"] == "cerrada" and f["relevo_version"] == 1,
+            "'cerrar_con_desenlace' cierra y adopta (B6)")
+    evs = eventos_de(c_cierre)
+    revisar([e["tipo"] for e in evs] == ["cerrada"]
+            and evs[0]["datos"].get("g8") == "cerrar_con_desenlace",
+            "con un evento 'cerrada' que dice que fue una decision de G8")
+
+    c_sin = conversacion(caso_id=str(uuid.uuid4()))
+    antes = fila_de(c_sin)
+    try:
+        T.adoptar_de_legado(TEN, c_sin, decision="cerrar_con_desenlace",
+                            operador_id=OP_ID, operador_nombre=OP)
+        revisar(False, "y sin codigo de desenlace sigue sin cerrar")
+    except ValueError:
+        revisar(True, "y sin codigo de desenlace sigue sin cerrar",
+                "Que sea de legado no la hace menos de un cliente.")
+    revisar(fila_de(c_sin) == antes, "sin tocar la conversacion")
+
+    # --- la que TODAVIA no se puede registrar ---------------------------------
+    for decision in ("resolver_estado_externo",):
         c = conversacion(caso_id=str(uuid.uuid4()))
         antes = fila_de(c)
         try:
@@ -534,13 +563,28 @@ try:
     revisar(set(por_nombre["--decision"].choices) == set(T.DECISIONES_G8),
             "y las decisiones posibles salen del contrato, no de una lista aparte")
 
-    # Ninguna otra parte del motor llama a la adopcion.
+    # Ninguna otra parte del motor LLAMA a la adopcion.
+    #
+    # Se mide sobre el arbol de sintaxis y no buscando la cadena en el texto.
+    # La version anterior contaba cualquier mencion, asi que se puso roja el
+    # dia que un docstring de transiciones.py explico que cerrar una
+    # conversacion de legado NO la adopta y que para eso esta esta funcion --
+    # o sea, por una frase que dice exactamente lo que la prueba defiende.
+    # Es el mismo error que ya aparecio varias veces en esta rama: afirmar
+    # sobre la prosa en vez de sobre el efecto.
+    import ast
+
     llamadores = []
     for archivo in (RAIZ / "nucleo").rglob("*.py"):
-        texto = archivo.read_text(encoding="utf-8")
-        for linea in texto.splitlines():
-            if "adoptar_de_legado" in linea and "def " not in linea:
-                llamadores.append(archivo.name)
+        arbol = ast.parse(archivo.read_text(encoding="utf-8"))
+        for nodo in ast.walk(arbol):
+            if not isinstance(nodo, ast.Call):
+                continue
+            f = nodo.func
+            nombre = (f.attr if isinstance(f, ast.Attribute)
+                      else f.id if isinstance(f, ast.Name) else "")
+            if nombre == "adoptar_de_legado":
+                llamadores.append(f"{archivo.name}:{nodo.lineno}")
     revisar(not llamadores,
             f"ningun modulo del motor la llama por su cuenta ({llamadores})",
             "Solo el comando, que exige un operador en cada invocacion.")

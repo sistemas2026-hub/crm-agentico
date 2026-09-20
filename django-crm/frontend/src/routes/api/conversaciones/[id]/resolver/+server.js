@@ -17,6 +17,12 @@ import { autorDeSesion } from '$lib/server/v2/autor.js';
  * Por eso 'atender' toma ademas el ticket del CRM y esta no: asignarse un
  * caso que se acaba de cerrar no le sirve a nadie.
  *
+ * DESDE B6 lleva 'desenlace' y, opcional, 'nota'. El desenlace se pasa tal
+ * como llega y NO se completa aca si falta: el motor lo rechaza con 400, y esa
+ * es la respuesta correcta. Un proxy que rellenara 'otro' por comodidad
+ * convertiria en ruido la columna que existe para contar en que terminan los
+ * casos -- y lo haria en silencio, que es lo peor de todo.
+ *
  * @type {import('./$types').RequestHandler}
  */
 export async function POST({ params, locals, fetch, request }) {
@@ -33,6 +39,8 @@ export async function POST({ params, locals, fetch, request }) {
     );
   }
 
+  const cuerpo = await request.json().catch(() => ({}));
+
   try {
     const resp = await fetch(`${baseUrl}/conversaciones/${params.id}/resolver`, {
       method: 'POST',
@@ -41,7 +49,9 @@ export async function POST({ params, locals, fetch, request }) {
       body: JSON.stringify({
         tenant,
         ...autorDeSesion(locals),
-        clave_operacion: (await request.json().catch(() => ({})))?.clave_operacion
+        desenlace: cuerpo?.desenlace,
+        nota: cuerpo?.nota,
+        clave_operacion: cuerpo?.clave_operacion
       })
     });
     const datos = await resp.json();

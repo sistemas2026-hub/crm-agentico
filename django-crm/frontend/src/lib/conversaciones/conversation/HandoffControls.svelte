@@ -153,8 +153,8 @@
         </button>
         <span class="ayuda" id="ayuda-resolver" role="tooltip">
           Usá esto si el caso se resolvió por teléfono, presencialmente o por
-          otro canal. Cierra la conversación; el próximo mensaje del cliente
-          abre una nueva.
+          otro canal. Abajo elegís en qué terminó y se cierra la conversación;
+          el próximo mensaje del cliente abre una nueva.
         </span>
       </span>
     {:else}

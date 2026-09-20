@@ -8,6 +8,8 @@
   import ConversationHeader from '$lib/conversaciones/conversation/ConversationHeader.svelte';
   import EscalationSummary from '$lib/conversaciones/conversation/EscalationSummary.svelte';
   import HandoffControls from '$lib/conversaciones/conversation/HandoffControls.svelte';
+  import CierrePanel from '$lib/conversaciones/conversation/CierrePanel.svelte';
+  import { cargarDesenlaces, cuerpoDeCierre } from '$lib/conversaciones/desenlaces.js';
   import MessageComposer from '$lib/conversaciones/composer/MessageComposer.svelte';
   import CasePanel from '$lib/conversaciones/context/CasePanel.svelte';
   import ActivityPanel from '$lib/conversaciones/context/ActivityPanel.svelte';
@@ -801,18 +803,33 @@
   // confirmacion porque no hay boton para deshacerlo.
   let resolviendo = $state(false);
   let errorResolver = $state('');
+  // B6: cerrar dejo de ser un '¿seguro?'. Ahora se elige en que termino el
+  // caso, y sin eso no se cierra -- ver CierrePanel.svelte.
+  let panelCierre = $state(false);
+  let catalogoDesenlaces = $state(/** @type {any[]} */ ([]));
+  let errorCatalogo = $state('');
 
   async function resolver() {
     if (resolviendo || conversacion.estado === 'cerrada') return;
-    if (!confirm('¿Dar este caso por resuelto? La conversación se cierra y el próximo mensaje del cliente abre una nueva.'))
-      return;
+    errorResolver = '';
+    panelCierre = true;
+    if (!catalogoDesenlaces.length) {
+      const r = await cargarDesenlaces(fetch);
+      catalogoDesenlaces = r.desenlaces;
+      errorCatalogo = r.error;
+    }
+  }
+
+  /** @param {{codigo: string, nota: string}} eleccion */
+  async function confirmarCierre(eleccion) {
+    if (resolviendo || conversacion.estado === 'cerrada') return;
     resolviendo = true;
     errorResolver = '';
     try {
       const resp = await fetch(`/api/conversaciones/${conversacion.id}/resolver`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clave_operacion: crypto.randomUUID() })
+        body: JSON.stringify(cuerpoDeCierre(eleccion))
       });
       const datos = await resp.json();
       if (!resp.ok) {
@@ -821,6 +838,7 @@
       }
       conversacion = { ...conversacion, estado: 'cerrada' };
       atendida = true;
+      panelCierre = false;
       invalidate('app:conversaciones');
       await refrescarRelevo();
     } catch (/** @type {any} */ err) {
@@ -1508,6 +1526,17 @@
     bind:reasignando bind:destinoReasignar bind:motivoReasignar
     {guardandoReasignar} {errorReasignar} onReasignar={reasignar}
   />
+
+  {#if panelCierre && conversacion.estado !== 'cerrada'}
+    <CierrePanel
+      catalogo={catalogoDesenlaces}
+      {errorCatalogo}
+      guardando={resolviendo}
+      error={errorResolver}
+      onCerrar={confirmarCierre}
+      onCancelar={() => (panelCierre = false)}
+    />
+  {/if}
 
   <!-- Tomar un caso escalado empieza siempre igual: leer el hilo entero para
        reconstruir que queria el cliente, que alcanzo a hacer el asistente,

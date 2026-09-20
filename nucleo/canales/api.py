@@ -43,6 +43,7 @@ from werkzeug.exceptions import HTTPException
 from nucleo.canales import canal as canales
 from nucleo.canales import media, whatsapp
 from nucleo.canales.errores import estado_http_de, fallo, mensaje_publico
+from nucleo.relevo import desenlaces
 from nucleo.relevo import historial as regla_historial
 from nucleo.relevo import proyeccion
 from nucleo.relevo import revalidacion
@@ -1222,14 +1223,20 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                         tenant, canal, id_sesion, rol, "user", mensaje, origen="cliente")
                     persistencia.registrar_mensaje(
                         tenant, canal, id_sesion, rol, "assistant", respuesta, origen="sistema")
-                    operativo.cerrar_todo(
+                    hecho = operativo.cerrar_todo(
                         config, tenant,
                         {"id": conv, "caso_id": estado["caso_id"],
                          "ticket_operativo": persistencia.ticket_operativo_de(tenant, conv)},
                         (config.escalamiento.texto_cierre_confirmado or "").strip()
                         or "El cliente confirmo que su caso quedo resuelto.")
-                    estado["escalada"] = False
-                    estado["caso_id"] = None
+                    # La memoria solo se limpia si la base cerro de verdad. Si
+                    # la transicion se nego --queda una accion viva o una
+                    # verificacion sin resolver-- dejar aca 'escalada = False'
+                    # haria justo lo que D9/D10 costaron: que la memoria diga
+                    # una cosa y la base otra.
+                    if hecho["conversacion"]:
+                        estado["escalada"] = False
+                        estado["caso_id"] = None
                 except Exception as e:
                     registrar("operativo", "no se pudo cerrar tras la confirmacion del cliente", error=e)
                 estado["historial"].append({"role": "assistant", "content": respuesta})
@@ -2343,16 +2350,31 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 caso = estado.get("caso_id") or persistencia.caso_de_conversacion(
                     tenant, conversation_id)
                 if caso:
-                    operativo.cerrar_todo(
+                    hecho = operativo.cerrar_todo(
                         config, tenant,
                         {"id": conversation_id, "caso_id": caso,
                          "ticket_operativo": persistencia.ticket_operativo_de(
                              tenant, conversation_id)},
                         (config.escalamiento.texto_cierre_confirmado or "").strip()
                         or "El cliente confirmo que su caso quedo resuelto.")
+                    cerrada = hecho["conversacion"]
                 else:
-                    persistencia.cerrar_conversacion(tenant, conversation_id)
-                cerrada = True
+                    # T15a/T15b: lo cierra la confirmacion del cliente. La
+                    # transicion mira 'atendida_manual' para saber cual de las
+                    # dos es, y deja el desenlace en NULL: que el cliente diga
+                    # "ya funciona" no dice si era la ONT, el WiFi o la fibra,
+                    # y esa columna existe para contar eso (B6, §3.5).
+                    r_cierre = transiciones.cerrar(tenant, conversation_id,
+                                                   por="cliente", config=config)
+                    cerrada = r_cierre.aplicada or r_cierre.motivo == "ya_cerrada"
+                if not cerrada:
+                    # Quedo algo vivo (una accion propuesta, una verificacion
+                    # sin resolver): no se cierra. Decirle al cliente que su
+                    # caso quedo cerrado mientras el sistema sigue esperando
+                    # una respuesta de afuera es la clase de mentira chica que
+                    # despues nadie puede explicar.
+                    registrar("conversaciones", "el cierre por confirmacion no procedio",
+                              conversation_id=id_interno(conversation_id))
             except _CierreCancelado:
                 pass
             except Exception as e:
@@ -7168,6 +7190,28 @@ def _entregar_y_registrar(tenant: str, mensaje_id: str | None, enviar, etiqueta:
     return _contrato_entrega(resultado, wamid, registrado)
 
 
+@app.get("/conversaciones/desenlaces")
+def conversaciones_desenlaces():
+    """
+    El catalogo de cierre de esta empresa: que puede elegir un operador (B6).
+
+    Sale del backend y no de una lista en la pantalla por la misma razon de
+    siempre: la lista de la pantalla se copia, se desincroniza y termina
+    ofreciendo un codigo que el motor rechaza. Aca el que ofrece y el que
+    valida leen lo mismo (nucleo/relevo/desenlaces.py).
+    """
+    tenant = (request.args.get("tenant") or "").strip()
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'"}), 400
+    try:
+        config = _config_de(tenant)
+    except Exception:
+        # Sin config cargada quedan los doce de plataforma, que es justo lo que
+        # una empresa sin nada configurado tiene que poder usar (§3.5).
+        config = None
+    return jsonify({"desenlaces": desenlaces.catalogo(config)})
+
+
 @app.post("/conversaciones/<id_conversacion>/resolver")
 def conversaciones_resolver(id_conversacion):
     """
@@ -7182,10 +7226,16 @@ def conversaciones_resolver(id_conversacion):
     seguiria recordando el historial, si ya escalo y el rol activo -- la base
     diria 'cerrada' y el asistente contestaria como si nada hubiera pasado.
 
-    Cuerpo: {tenant, autor, autor_usuario_id, clave_operacion?}
+    Cuerpo: {tenant, autor, autor_usuario_id, desenlace, nota?,
+             clave_operacion?}
 
     Cerrar NO es devolver a la IA: libera la asignacion y deja la
     conversacion cerrada. Ver nucleo/relevo/transiciones.py.
+
+    'desenlace' es OBLIGATORIO desde B6 (T17, §3.5) y sale del catalogo de
+    /conversaciones/desenlaces. No hay valor por defecto a proposito: uno
+    --'otro', el mas probable-- convertiria la columna en ruido, y la columna
+    existe justo para poder contar en que terminan los casos.
     """
     cuerpo = request.get_json(force=True, silent=True) or {}
     tenant = cuerpo.get("tenant")
@@ -7199,7 +7249,15 @@ def conversaciones_resolver(id_conversacion):
     try:
         r = transiciones.resolver(tenant, id_conversacion, operador_id=autor_id,
                                   operador_nombre=autor,
+                                  desenlace=(cuerpo.get("desenlace") or "").strip(),
+                                  nota=(cuerpo.get("nota") or "").strip() or None,
+                                  config=_config_de(tenant),
                                   clave=(cuerpo.get("clave_operacion") or "").strip() or None)
+    except ValueError as e:
+        # Desenlace ausente, fuera del catalogo o nota demasiado larga. Es un
+        # error del pedido, no una falla: 400 y el motivo, para que la pantalla
+        # pueda decirlo en vez de mostrar "no se pudo guardar".
+        return jsonify({"error": mensaje_publico(e, "desenlace invalido")}), 400
     except Exception as e:
         registrar("conversaciones", "fallo al resolver", error=e)
         return jsonify({"error": "No se pudo guardar."}), 500

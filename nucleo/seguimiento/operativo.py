@@ -124,7 +124,7 @@ def cerrar_caso_crm(config, tenant: str, caso_id: str) -> bool:
 
 
 def cerrar_todo(config, tenant: str, conversacion: dict, texto: str,
-                autor: str = "") -> dict:
+                autor: str = "", *, por: str = "cliente") -> dict:
     """
     Termina un caso en los TRES lados donde dejo rastro: el ticket del ISP, el
     caso del CRM y la conversacion.
@@ -134,8 +134,14 @@ def cerrar_todo(config, tenant: str, conversacion: dict, texto: str,
     no cierre queda en el log y se vuelve a intentar la proxima pasada, porque
     la conversacion recien se cierra si el caso tambien se cerro -- si no,
     seguiria apareciendo como pendiente sin que nadie la mire.
+
+    'por' dice cual de los caminos de §6 es este, y por lo tanto que queda
+    escrito en la conversacion (B6): 'cliente' cuando el cliente confirmo
+    (T15a/T15b, la transicion distingue cual segun 'atendida_manual') y
+    'plazo' cuando lo cierra el barrido (T16, desenlace 'sin_respuesta_cliente').
+    Sin ese dato el cierre no diria por que, que es lo que B6 vino a arreglar.
     """
-    from nucleo.persistencia import db as persistencia
+    from nucleo.relevo import transiciones
 
     hecho = {"ticket": False, "caso": False, "conversacion": False}
     if conversacion.get("ticket_operativo"):
@@ -145,8 +151,18 @@ def cerrar_todo(config, tenant: str, conversacion: dict, texto: str,
         hecho["caso"] = cerrar_caso_crm(config, tenant, conversacion["caso_id"])
     if hecho["caso"] or not conversacion.get("caso_id"):
         try:
-            persistencia.cerrar_conversacion(tenant, conversacion["id"])
-            hecho["conversacion"] = True
+            r = transiciones.cerrar(tenant, conversacion["id"], por=por,
+                                    config=config)
+            # 'ya_cerrada' cuenta como cerrada: alguien se adelanto, y el
+            # resultado es el que se buscaba. Lo que NO cuenta es una negativa
+            # con motivo ('accion_viva', 'verificacion_pendiente'): ahi la
+            # conversacion sigue abierta a proposito y el barrido tiene que
+            # volver a pasar.
+            hecho["conversacion"] = r.aplicada or r.motivo == "ya_cerrada"
+            if not hecho["conversacion"]:
+                registrar("operativo", "el cierre no procedio",
+                          conversation_id=id_interno(conversacion["id"]),
+                          motivo=r.motivo)
         except Exception as e:
             registrar("operativo", "no se pudo cerrar la conversacion",
                       conversation_id=id_interno(conversacion["id"]), error=e)
@@ -192,7 +208,7 @@ def cerrar_vencidas(config, tenant: str) -> dict:
 
     resumen["revisadas"] = len(pendientes)
     for conv in pendientes:
-        hecho = cerrar_todo(config, tenant, conv, texto)
+        hecho = cerrar_todo(config, tenant, conv, texto, por="plazo")
         if hecho["conversacion"]:
             resumen["cerradas"] += 1
         registrar("operativo", "vencida", conversation_id=id_interno(conv["id"]),

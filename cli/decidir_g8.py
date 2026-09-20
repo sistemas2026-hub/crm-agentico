@@ -22,16 +22,21 @@ No hay '--todas'. No hay '--desde-archivo'. Y la clasificacion A/B/C que
 produce 'revision_g8.py' NO llega hasta aca: esa herramienta es de solo lectura
 y no puede escribir aunque alguien se lo pidiera.
 
-LAS CUATRO DECISIONES, Y LAS DOS QUE NO SE PUEDEN REGISTRAR TODAVIA
--------------------------------------------------------------------
+LAS CUATRO DECISIONES, Y LA QUE NO SE PUEDE REGISTRAR TODAVIA
+--------------------------------------------------------------
   seguir_humano            queda en manos de una persona, como hoy
   volver_ia                la IA la retoma
-  cerrar_con_desenlace     NO todavia: el desenlace es B6
+  cerrar_con_desenlace     cierra Y adopta, con un codigo elegido (--desenlace).
+                           Disponible desde B6.
   resolver_estado_externo  NO todavia: es un efecto externo, no una transicion
 
-Las dos ultimas fallan con su motivo en vez de hacer algo parecido. Registrar
-un cierre sin desenlace seria cerrar la conversacion de un cliente sin decir
-por que, en el registro que existe para poder decirlo.
+La ultima falla con su motivo en vez de hacer algo parecido: registrar un
+cierre que no cierra nada afuera seria decirle a quien revisa que el caso y el
+ticket quedaron resueltos cuando siguen abiertos.
+
+Si el desenlace falta o no esta en el catalogo, el comando imprime los codigos
+validos y no escribe nada. No sugiere uno: elegir por el operador es
+exactamente lo que B6 prohibe.
 ================================================================================
 """
 
@@ -45,6 +50,8 @@ from pathlib import Path
 RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ))
 
+from nucleo.config import fuente                                  # noqa: E402
+from nucleo.relevo import desenlaces                              # noqa: E402
 from nucleo.relevo import transiciones                            # noqa: E402
 
 
@@ -62,6 +69,13 @@ def construir_parser():
                    help="el id del usuario que decide. Obligatorio: una "
                         "adopcion sin responsable no se puede auditar")
     p.add_argument("--operador", required=True, metavar="NOMBRE")
+    p.add_argument("--desenlace", default=None, metavar="CODIGO",
+                   help="obligatorio con 'cerrar_con_desenlace'. Sale del "
+                        "catalogo: --listar-desenlaces lo imprime. No hay "
+                        "valor por defecto a proposito")
+    p.add_argument("--nota", default=None,
+                   help="texto corto del operador sobre el cierre. Sin datos "
+                        "del cliente (X19)")
     p.add_argument("--clave", default=None,
                    help="clave de idempotencia. Repetir la misma decision con "
                         "la misma clave no escribe dos veces")
@@ -77,10 +91,20 @@ def main():
         print(f"[g8] faltan variables de conexion: {faltan}")
         return 2
 
+    # El catalogo de la empresa, si se puede leer. Sin config quedan los doce
+    # de plataforma, que es lo que una empresa sin nada configurado tiene.
+    try:
+        config = fuente.cargar(args.tenant, RAIZ)
+    except Exception as e:
+        print(f"  [aviso] sin config de '{args.tenant}' ({type(e).__name__}): "
+              f"solo el catalogo base de plataforma")
+        config = None
+
     try:
         r = transiciones.adoptar_de_legado(
             args.tenant, args.conversacion, decision=args.decision,
             operador_id=args.operador_id, operador_nombre=args.operador,
+            desenlace=args.desenlace, nota=args.nota, config=config,
             clave=args.clave)
     except NotImplementedError as e:
         print(f"\n  [NO SE PUEDE REGISTRAR] {e}\n")
@@ -89,6 +113,11 @@ def main():
         return 3
     except ValueError as e:
         print(f"\n  [RECHAZADO] {e}\n")
+        if "desenlace" in str(e):
+            print("  Codigos validos para este tenant:")
+            for d in desenlaces.catalogo(config):
+                print(f"    {d['codigo']:<24} {d['nombre']}")
+            print("\n  Ninguno se elige solo: el que cierra decide cual.")
         return 2
 
     if r.aplicada:

@@ -51,9 +51,13 @@ LO QUE CADA UNA SIGNIFICA (y no significa)
   soltar           solo quien la tiene; SIGUE HUMANA. No es devolver.
   reasignar        la unica que cambia una asignacion ajena. ADMIN (lo exige
                    la ruta), motivo obligatorio, evento con anterior y nuevo.
-  resolver         cierra y libera la asignacion; con persona, atendida_manual.
-                   Tampoco es devolver: la conversacion queda cerrada, no en
-                   manos de la IA.
+  cerrar           termina la conversacion Y deja dicho por que (B6): quien la
+                   cerro (los cinco caminos de §6) y, cuando lo eligio una
+                   persona, con que desenlace. Libera la asignacion. NO es
+                   devolver: queda cerrada, no en manos de la IA. Y NO cierra
+                   el caso ni el ticket de afuera: eso es la cola de §3.6.
+  resolver         el cierre manual (T17), o sea cerrar(por='operador'). El
+                   desenlace es obligatorio y no se infiere.
   devolver_a_ia    la UNICA que deja control ia. El mecanismo queda probado;
                    la funcion "Responder y devolver" (T6) no se habilita hasta
                    G9.
@@ -104,7 +108,15 @@ ESQUEMAS: dict[str, frozenset[str]] = {
     "soltada": frozenset({"version", "anterior_nombre"}),
     "reasignada": frozenset({"version", "anterior_usuario_id", "anterior_nombre",
                              "nuevo_usuario_id", "nuevo_nombre", "motivo"}),
-    "cerrada": frozenset({"version", "por"}),
+    # B6. 'por' es QUIEN cerro (el camino: T15a/T15b/T16/T17/T18) y 'desenlace'
+    # es QUE le paso al cliente. Son datos distintos y ninguno se deduce del
+    # otro: un cierre por plazo y uno manual pueden terminar en el mismo
+    # desenlace, y dos cierres manuales del mismo operador, en desenlaces
+    # opuestos. 'categoria' viaja con el codigo porque la config de la empresa
+    # puede cambiar y este evento no (§3.6).
+    "cerrada": frozenset({"version", "por", "desenlace", "categoria", "nota",
+                          "acciones_canceladas", "acciones_en_vuelo",
+                          "legado", "g8"}),
     "devolucion_solicitada": frozenset({"mensaje_id"}),
     "devolucion_fallida": frozenset({"mensaje_id", "resultado"}),
     "devuelta_a_ia": frozenset({"version", "legado", "g8"}),
@@ -142,7 +154,7 @@ def _fila(cur, org, conversation_id):
     cur.execute("""select control, control_motivo, asignada_a_usuario_id, asignada_a_nombre,
                           relevo_version, estado, pendiente_interno_desde,
                           escalada_a_humano, necesita_atencion_humana, tomada_por,
-                          caso_id
+                          caso_id, atendida_manual
                    from asistente.conversations
                    where organization_id = %s and id = %s
                    for update""", (org, conversation_id))
@@ -485,36 +497,42 @@ def reasignar(tenant: str, conversation_id: str, *, admin_id: str, admin_nombre:
 #  G8 -- la adopcion de una conversacion de legado
 # =============================================================================
 
-#: Las cuatro decisiones que §11.2 pone en manos de una persona. Dos estan
-#: implementadas y dos NO, y la diferencia no es de esfuerzo:
+#: Las cuatro decisiones que §11.2 pone en manos de una persona. TRES estan
+#: implementadas y una NO, y la diferencia no es de esfuerzo:
 #:
 #:   seguir_humano           implementada
 #:   volver_ia               implementada
-#:   cerrar_con_desenlace    FALTA EL DESENLACE. §3.5 dice que el cierre manual
-#:                           exige un codigo de desenlace, y ni la columna ni el
-#:                           catalogo existen todavia: son B6. Cerrar sin el
-#:                           seria cerrar 16 conversaciones de clientes sin
-#:                           decir por que, justo en el registro que existe para
-#:                           poder decirlo.
+#:   cerrar_con_desenlace    implementada desde B6, que trajo las columnas y el
+#:                           catalogo. Antes se rechazaba: cerrar sin codigo
+#:                           habria sido cerrar 16 conversaciones de clientes
+#:                           sin decir por que, justo en el registro que existe
+#:                           para poder decirlo.
 #:   resolver_estado_externo NO ES UNA TRANSICION DEL RELEVO. Es cerrar el caso
 #:                           o el ticket afuera, o sea un efecto externo
 #:                           ('cerrar_caso'/'cerrar_ticket' de B4), y esos tipos
 #:                           no tienen productor. Ademas 'cerrar_ticket' esta
 #:                           bloqueado por el gate Q2.
 #:
-#: Las dos que faltan se rechazan explicitamente, con su motivo. Inventarlas a
-#: medias seria peor que no tenerlas: quien revise creeria que decidio algo que
-#: el sistema no registro.
+#: La que falta se rechaza explicitamente, con su motivo. Inventarla a medias
+#: seria peor que no tenerla: quien revise creeria que decidio algo que el
+#: sistema no registro.
 DECISIONES_G8 = ("seguir_humano", "cerrar_con_desenlace",
                  "resolver_estado_externo", "volver_ia")
 
-DECISIONES_G8_IMPLEMENTADAS = ("seguir_humano", "volver_ia")
+DECISIONES_G8_IMPLEMENTADAS = ("seguir_humano", "volver_ia",
+                               "cerrar_con_desenlace")
+
+#: Las que exigen un desenlace elegido por la persona que decide.
+DECISIONES_G8_CON_DESENLACE = ("cerrar_con_desenlace",)
+
+#: Que evento deja cada decision. Importa para el replay: una clave repetida
+#: solo es reintento si coincide el TIPO de evento y el actor, asi que este
+#: mapa tiene que decir la verdad o dos decisiones distintas con la misma clave
+#: se leerian como la misma.
+_EVENTO_G8 = {"seguir_humano": "escalada", "volver_ia": "devuelta_a_ia",
+              "cerrar_con_desenlace": "cerrada"}
 
 _POR_QUE_FALTA = {
-    "cerrar_con_desenlace":
-        "cerrar exige un codigo de desenlace (§3.5) y todavia no existe: "
-        "llega en B6. Cerrar sin el seria cerrar la conversacion de un cliente "
-        "sin registrar por que.",
     "resolver_estado_externo":
         "no es una transicion del relevo: es cerrar el caso o el ticket afuera, "
         "y esos efectos no tienen productor todavia (B4). 'cerrar_ticket' ademas "
@@ -524,7 +542,8 @@ _POR_QUE_FALTA = {
 
 def adoptar_de_legado(tenant: str, conversation_id: str, *, decision: str,
                       operador_id: str, operador_nombre: str,
-                      clave: str | None = None) -> Resultado:
+                      desenlace: str | None = None, nota: str | None = None,
+                      config=None, clave: str | None = None) -> Resultado:
     """
     G8. Una PERSONA decidio que hacer con una conversacion de legado, y esto lo
     escribe.
@@ -551,6 +570,26 @@ def adoptar_de_legado(tenant: str, conversation_id: str, *, decision: str,
     if decision not in DECISIONES_G8_IMPLEMENTADAS:
         raise NotImplementedError(
             f"'{decision}' no se puede registrar todavia: {_POR_QUE_FALTA[decision]}")
+
+    from nucleo.relevo import desenlaces as catalogo
+
+    codigo = categoria = None
+    if decision in DECISIONES_G8_CON_DESENLACE:
+        # Mismo criterio que T17 y por la misma puerta: una conversacion de
+        # legado se cierra con un codigo elegido, o no se cierra. Que sea vieja
+        # no la hace menos de un cliente.
+        if not (desenlace or "").strip():
+            raise ValueError(
+                "'cerrar_con_desenlace' exige un codigo de desenlace (§3.5)")
+        codigo, categoria = catalogo.resolver_para_cerrar(desenlace, config)
+    elif desenlace:
+        raise ValueError(f"'{decision}' no lleva desenlace")
+
+    nota = (nota or "").strip() or None
+    if nota and decision not in DECISIONES_G8_CON_DESENLACE:
+        raise ValueError(f"'{decision}' no lleva nota de cierre")
+    if nota and len(nota) > catalogo.MAX_NOTA:
+        raise ValueError(f"la nota supera {catalogo.MAX_NOTA} caracteres")
 
     nombre, usuario = db.validar_autor(operador_nombre, operador_id)
 
@@ -581,6 +620,29 @@ def adoptar_de_legado(tenant: str, conversation_id: str, *, decision: str,
                 "escalada_a_humano = true, necesita_atencion_humana = true, "
                 "actualizado_en = actualizado_en", ())
             tipo_evento = "escalada"
+        elif decision == "cerrar_con_desenlace":
+            # Cierra Y adopta, en la misma escritura. La adopcion no es un
+            # tramite previo: es lo que hace que este cierre quede en el
+            # expediente del relevo con quien lo decidio, que es justo lo que
+            # §11.2 pide y lo que un cierre por el boton de siempre no deja
+            # (sobre una conversacion en version 0 no escribe ningun evento).
+            #
+            # El control queda en 'ia' como estaba: no se le entrega a nadie
+            # una conversacion que acaba de terminar, y 'tomada_por' sigue sin
+            # probar identidad. Las banderas de legado tampoco se tocan --una
+            # conversacion cerrada no vuelve a ninguna cola, que selecciona
+            # por estado 'abierta'.
+            sets = ("estado = 'cerrada', cerrada_por_tipo = 'operador', "
+                    "cerrada_por_usuario_id = %s, atendida_manual = true, "
+                    "atendida_por = coalesce(%s, atendida_por), "
+                    "desenlace_codigo = %s, desenlace_categoria_base = %s, "
+                    "actualizado_en = now()")
+            params: tuple = (usuario, nombre, codigo, categoria)
+            if nota:
+                sets += ", desenlace_nota = %s"
+                params += (nota,)
+            version = _subir_version(cur, org, conversation_id, sets, params)
+            tipo_evento = "cerrada"
         else:  # volver_ia
             # Las banderas de legado se apagan junto con el control, en la misma
             # escritura: si quedaran puestas, la reconstruccion seguiria
@@ -594,42 +656,271 @@ def adoptar_de_legado(tenant: str, conversation_id: str, *, decision: str,
             tipo_evento = "devuelta_a_ia"
 
         datos = {"version": version, "legado": True, "g8": decision}
+        if codigo:
+            datos["por"] = "operador"
+            datos["desenlace"] = codigo
+            datos["categoria"] = categoria
+            if nota:
+                datos["nota"] = nota
         ev = _evento(cur, org, conversation_id, tipo_evento, "operador",
                      usuario, nombre, datos, clave)
         return Resultado(True, True, version, ev, datos=datos)
 
     return _ejecutar(tenant, conversation_id, clave, cuerpo,
-                     tipo=("escalada" if decision == "seguir_humano" else "devuelta_a_ia"),
+                     tipo=_EVENTO_G8[decision], actor_id=usuario)
+
+
+# =============================================================================
+#  B6 -- el cierre dice por que
+# =============================================================================
+
+#: Los cinco caminos de cierre de §6. El nombre dice QUIEN cerro, no por que.
+#:
+#:   cliente      T15a. El cliente confirmo, con una persona a cargo.
+#:   ia_cliente   T15b. El cliente confirmo con la IA atendiendo.
+#:   plazo        T16.  Barrido: el cliente dejo de contestar.
+#:   inactividad  T18.  La conversacion quedo vieja y llego un mensaje nuevo.
+#:   operador     T17.  Una persona la resolvio.
+CERRADA_POR = ("cliente", "ia_cliente", "plazo", "inactividad", "operador")
+
+#: Quien figura como actor del evento en cada camino. 'ia_cliente' es
+#: 'cliente' y no 'ia' a proposito: el que decide que el caso termino es
+#: siempre el cliente al confirmar; lo que cambia entre T15a y T15b es quien
+#: estaba atendiendo, y eso ya lo dice 'por'.
+_ACTOR_DE = {"cliente": "cliente", "ia_cliente": "cliente",
+             "plazo": "sistema", "inactividad": "sistema",
+             "operador": "operador"}
+
+#: Los que exigen que una PERSONA elija el desenlace (§3.5: "el cierre manual
+#: exige codigo").
+_EXIGEN_DESENLACE = ("operador",)
+
+
+def _acciones_vivas(cur, org, conversation_id) -> tuple[list[str], int]:
+    """(ids de las 'pendiente', cuantas 'ejecutando' hay).
+
+    Las dos se cuentan por separado porque se tratan distinto, y la diferencia
+    no es de grado. Una 'pendiente' espera a que alguien decida: cerrar la
+    conversacion la deja sin destinatario, asi que se cancela. Una 'ejecutando'
+    ya salio hacia afuera y su desenlace lo escribe quien la ejecuta o el
+    reconciliador (T20c); pisarla con 'cancelada' registraria que no se hizo
+    algo que quiza si se hizo -- exactamente lo que X21 prohibe.
+    """
+    cur.execute(
+        """select id, estado from asistente.acciones_propuestas
+           where organization_id = %s and conversation_id = %s
+             and estado in ('pendiente', 'ejecutando')""",
+        (org, conversation_id))
+    filas = cur.fetchall()
+    return ([str(f["id"]) for f in filas if f["estado"] == "pendiente"],
+            sum(1 for f in filas if f["estado"] == "ejecutando"))
+
+
+def _verificacion_pendiente(cur, org, conversation_id) -> bool:
+    cur.execute(
+        """select 1 from asistente.verificaciones_accion
+           where organization_id = %s and conversation_id = %s
+             and estado = 'VERIFICACION_PENDIENTE' limit 1""",
+        (org, conversation_id))
+    return cur.fetchone() is not None
+
+
+def cerrar(tenant: str, conversation_id: str, *, por: str,
+           desenlace: str | None = None, nota: str | None = None,
+           operador_id: str | None = None, operador_nombre: str | None = None,
+           config=None, clave: str | None = None) -> Resultado:
+    """
+    T15a, T15b, T16, T17 y T18: la conversacion termina, y queda dicho por que.
+
+    EL DESENLACE NO SE INFIERE, NUNCA
+    ---------------------------------
+    Es la regla central de B6 y esta escrita como guarda, no como intencion:
+
+      operador     lo elige una persona. Sin codigo no se cierra (ValueError).
+      plazo        'sin_respuesta_cliente' fijo, porque eso es lo que significa
+                   que el cliente dejara de contestar. Mandar otro es un error.
+      cliente / ia_cliente / inactividad
+                   NULL. El cliente dijo "ya quedo" o la conversacion envejecio;
+                   ninguna de las dos cosas dice cual era la falla. Mandar un
+                   codigo por estos caminos tambien es un error, y por eso se
+                   rechaza en vez de guardarse: el unico que podria completarlo
+                   es alguien que lo revise despues (§3.5), y eso todavia no
+                   tiene transicion definida.
+
+    Deducirlo del veredicto del evaluador seria la tentacion obvia --"resuelta"
+    parece un desenlace-- y seria falso: que el cliente diga que ya funciona no
+    dice si era la ONT, el WiFi o un corte de fibra. Un dato inventado en una
+    tabla que existe para aprender es peor que la columna vacia.
+
+    CERRAR LA CONVERSACION NO ES CERRAR EL CASO NI EL TICKET
+    --------------------------------------------------------
+    Esto cierra la conversacion de Dexter y nada mas. El caso del CRM y el
+    ticket del ISP son sistemas de afuera: se cierran por la cola de efectos
+    externos (§3.6) y hoy no tienen ejecutor (ver BLOQUEOS en
+    SPEC/auditorias/B6-CIERRE-DESENLACE.md). Un fallo alla NO reabre esto
+    (T17), y por eso ninguno de los dos entra en esta transaccion.
+
+    ATOMICO
+    -------
+    Estado de cierre, desenlace, cancelacion de las acciones pendientes con sus
+    eventos, y el evento 'cerrada': todo en la misma transaccion (I12). No
+    existe el estado donde la conversacion quedo cerrada y nadie sabe por que.
+
+    En 'datos' del Resultado van 'usuario_externo' y 'canal', que quien llama
+    necesita para descartar la sesion en memoria (tambien en legado).
+    """
+    from nucleo.relevo import desenlaces as catalogo
+
+    if por not in CERRADA_POR:
+        raise ValueError(f"'por' desconocido: {por!r}. Son {list(CERRADA_POR)}")
+
+    nombre = usuario = None
+    if por == "operador":
+        # Un cierre manual sin responsable no se puede auditar, y es el unico
+        # camino donde hay alguien a quien atribuirselo.
+        nombre, usuario = db.validar_autor(operador_nombre, operador_id)
+    elif operador_id or operador_nombre:
+        raise ValueError(f"un cierre '{por}' no lo hace un operador")
+
+    nota = (nota or "").strip() or None
+    if nota and por != "operador":
+        raise ValueError(f"un cierre '{por}' no lleva nota de operador")
+    if nota and len(nota) > catalogo.MAX_NOTA:
+        raise ValueError(f"la nota supera {catalogo.MAX_NOTA} caracteres")
+
+    codigo = categoria = None
+    if por in _EXIGEN_DESENLACE:
+        if not (desenlace or "").strip():
+            raise ValueError(
+                "un cierre manual exige codigo de desenlace (§3.5, T17)")
+        codigo, categoria = catalogo.resolver_para_cerrar(desenlace, config)
+    elif por == "plazo":
+        if desenlace and desenlace != catalogo.POR_PLAZO:
+            raise ValueError(
+                f"el cierre por plazo es siempre '{catalogo.POR_PLAZO}'")
+        codigo, categoria = catalogo.resolver_para_cerrar(
+            catalogo.POR_PLAZO, config)
+    elif desenlace:
+        raise ValueError(
+            f"un cierre '{por}' deja el desenlace en NULL (§3.5): nadie eligio "
+            f"uno y no se infiere")
+
+    def cuerpo(cur, org, f):
+        cur.execute("""select usuario_externo, canal from asistente.conversations
+                       where organization_id = %s and id = %s""",
+                    (org, conversation_id))
+        ident = dict(cur.fetchone())
+        gobernada = f["relevo_version"] > 0
+        if f["estado"] == "cerrada":
+            return Resultado(False, gobernada, f["relevo_version"], None,
+                             "ya_cerrada", datos=ident)
+
+        # Los cierres automaticos esperan; el manual no. T15a, T15b, T16 y T18
+        # exigen que no haya nada vivo, y T17 dice "de inmediato" a proposito:
+        # una persona que decide cerrar no deberia quedar bloqueada por una
+        # propuesta que ella misma esta por cancelar.
+        pendientes, en_vuelo = _acciones_vivas(cur, org, conversation_id)
+        if por != "operador":
+            if pendientes or en_vuelo:
+                return Resultado(False, gobernada, f["relevo_version"], None,
+                                 "accion_viva", datos=ident)
+            if _verificacion_pendiente(cur, org, conversation_id):
+                return Resultado(False, gobernada, f["relevo_version"], None,
+                                 "verificacion_pendiente", datos=ident)
+
+        # T15a contra T15b, decidido con la fila ya bloqueada. Quien llama
+        # sabe que el CLIENTE confirmo; lo que no siempre sabe es si alguna
+        # persona llego a atenderla, y esa es la unica diferencia entre las dos
+        # (§6: T15a exige 'atendida_manual', T15b no). Es un hecho ya escrito,
+        # no una inferencia: se lee, no se adivina.
+        efectivo = ("ia_cliente" if por == "cliente" and not f["atendida_manual"]
+                    else por)
+
+        sets = ["estado = 'cerrada'", "actualizado_en = now()",
+                "cerrada_por_tipo = %s"]
+        params: list = [efectivo]
+        if por == "operador":
+            # Hecho historico: alguien actuo. No decide la cola (§3.1).
+            sets += ["atendida_manual = true",
+                     "atendida_por = coalesce(%s, atendida_por)",
+                     "cerrada_por_usuario_id = %s"]
+            params += [nombre, usuario]
+        if codigo:
+            sets += ["desenlace_codigo = %s", "desenlace_categoria_base = %s"]
+            params += [codigo, categoria]
+        if nota:
+            sets.append("desenlace_nota = %s")
+            params.append(nota)
+
+        # Las acciones que esperaban una decision se quedaron sin quien la
+        # tome. 'cancelada' y no 'rechazada': nadie las evaluo.
+        canceladas = 0
+        for accion_id in pendientes:
+            cur.execute(
+                """update asistente.acciones_propuestas
+                   set estado = 'cancelada', motivo_rechazo = %s,
+                       revisado_por = %s, revisado_en = now()
+                   where organization_id = %s and id = %s and estado = 'pendiente'
+                   returning id""",
+                ("conversacion cerrada", nombre or f"cierre:{por}", org, accion_id))
+            if cur.fetchone() is None:
+                continue          # otro la resolvio entre la lectura y esto
+            canceladas += 1
+            # El expediente de una ACCION solo distingue 'operador' y
+            # 'sistema' (acciones_eventos): un cierre por confirmacion del
+            # cliente no lo cancelo el cliente -- lo cancelo el sistema al
+            # cerrar. El quien fino esta en el evento 'cerrada' del relevo.
+            db.registrar_evento_de_accion(
+                cur, org, accion_id, "accion_cancelada",
+                motivo="conversacion cerrada",
+                actor_tipo=("operador" if por == "operador" else "sistema"),
+                actor_nombre=nombre, conversation_id=conversation_id)
+
+        if not gobernada:
+            # Legado (§11): se escribe el cierre y su desenlace --que es un
+            # dato de la conversacion, no del relevo-- pero NO entra al modelo.
+            # Adoptar una conversacion de version 0 es una decision humana
+            # explicita y tiene su propia puerta (adoptar_de_legado, C5/I21):
+            # no puede pasar por el efecto lateral de un boton de cerrar.
+            cur.execute(
+                f"""update asistente.conversations set {', '.join(sets)}
+                    where organization_id = %s and id = %s""",
+                (*params, org, conversation_id))
+            return Resultado(True, False, 0, None, "legado", datos=ident)
+
+        # Libera la asignacion y NO toca el control: cerrar no es devolver.
+        version = _subir_version(
+            cur, org, conversation_id,
+            ", ".join(sets) + ", asignada_a_usuario_id = null, "
+            "asignada_a_nombre = null, asignada_en = null", tuple(params))
+        datos = {"version": version, "por": efectivo}
+        if codigo:
+            datos["desenlace"] = codigo
+            datos["categoria"] = categoria
+        if nota:
+            datos["nota"] = nota
+        if canceladas:
+            datos["acciones_canceladas"] = canceladas
+        if en_vuelo:
+            # Queda escrito que al cerrar habia algo afuera sin desenlace. Es
+            # lo que despues explica una sincronizacion 'desconocida' en una
+            # conversacion que ya nadie mira.
+            datos["acciones_en_vuelo"] = en_vuelo
+        ev = _evento(cur, org, conversation_id, "cerrada", _ACTOR_DE[por],
+                     usuario, nombre, datos, clave)
+        return Resultado(True, True, version, ev, datos={**ident, **datos})
+
+    return _ejecutar(tenant, conversation_id, clave, cuerpo, tipo="cerrada",
                      actor_id=usuario)
 
 
 def resolver(tenant: str, conversation_id: str, *, operador_id: str, operador_nombre: str,
+             desenlace: str, nota: str | None = None, config=None,
              clave: str | None = None) -> Resultado:
-    """Cierra la conversacion. datos del Resultado: usuario_externo y canal,
-    para descartar la sesion en memoria (los devuelve aun en legado)."""
-    nombre, usuario = db.validar_autor(operador_nombre, operador_id)
-
-    def cuerpo(cur, org, f):
-        cur.execute("""select usuario_externo, canal from asistente.conversations
-                       where organization_id = %s and id = %s""", (org, conversation_id))
-        ident = dict(cur.fetchone())
-        legado_sql = ("estado = 'cerrada', atendida_manual = true, "
-                      "atendida_por = coalesce(%s, atendida_por), actualizado_en = now()")
-        if f["relevo_version"] == 0:
-            cur.execute(f"""update asistente.conversations set {legado_sql}
-                            where organization_id = %s and id = %s""", (nombre, org, conversation_id))
-            return Resultado(True, False, 0, None, "legado", datos=ident)
-        if f["estado"] == "cerrada":
-            return Resultado(False, True, f["relevo_version"], None, "ya_cerrada", datos=ident)
-        # Libera la asignacion y NO toca el control: cerrar no es devolver.
-        version = _subir_version(
-            cur, org, conversation_id,
-            legado_sql + ", asignada_a_usuario_id = null, asignada_a_nombre = null, asignada_en = null",
-            (nombre,))
-        datos = {"version": version, "por": "operador"}
-        ev = _evento(cur, org, conversation_id, "cerrada", "operador", usuario, nombre, datos, clave)
-        return Resultado(True, True, version, ev, datos=ident)
-    return _ejecutar(tenant, conversation_id, clave, cuerpo, tipo="cerrada", actor_id=usuario)
+    """T17: una persona resuelve y cierra. El desenlace es obligatorio."""
+    return cerrar(tenant, conversation_id, por="operador", desenlace=desenlace,
+                  nota=nota, operador_id=operador_id,
+                  operador_nombre=operador_nombre, config=config, clave=clave)
 
 
 def devolver_a_ia(tenant: str, conversation_id: str, *, operador_id: str, operador_nombre: str,
