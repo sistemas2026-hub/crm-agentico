@@ -3,6 +3,7 @@ from django.urls import path
 from cases import (
     analytics_views,
     approval_views,
+    assignee_views,
     bulk_views,
     csat_views,
     escalation_views,
@@ -219,6 +220,13 @@ urlpatterns = [
         "<uid:pk>/solution-suggestions/",
         kb_views.SolutionSuggestionsView.as_view(),
         name="case_solution_suggestions",
+    ),
+    # Add one assignee without replacing the set (D28). Must be before the
+    # <uid:pk>/ pattern, same as the watch routes.
+    path(
+        "<uid:pk>/assignees/",
+        assignee_views.CaseAssigneesView.as_view(),
+        name="case_assignees",
     ),
     # Watch toggle + watchers list (must be before <uid:pk>/ pattern)
     path(
