@@ -184,6 +184,34 @@ Migración `202609201400_acciones_legado.sql` **sin aplicar en producción**.
 
 B5 queda desbloqueado.
 
+## B5 — IMPLEMENTADO. Falta la config del tenant (Q3)
+
+Commits `1bad6f3` (motor) y `f779d07` (pantalla). Detalle en
+`auditorias/B5-ACCIONES.md`.
+
+```
+aprobar = reservar -> revalidar -> ejecutar -> resolver  (§9.3)
+          los dos del medio FUERA de transaccion (X23)
+```
+
+La revalidacion tiene **tres** desenlaces y no dos: «no se pudo comprobar» no
+ejecuta y devuelve la accion a `pendiente`. Tratarlo como «cumple» ejecutaria a
+ciegas con la API externa caida; como «no cumple» mataria una accion valida.
+
+Dos aprobaciones concurrentes producen **un** efecto: probado con dos peticiones
+reales compitiendo.
+
+**Lo que falta, y no es codigo:** la config de Rapilink no declara
+`vigencia_minutos` ni `revalidar`, y no puede hacerlo hasta que cierre la
+medicion ON vs OFF (Q3). Hasta entonces las acciones nacen sin plazo y se
+aprueban sin revalidar, con las guardas que no dependen de config. El validador
+esta en modo **advertencia** a proposito.
+
+Las cuatro revalidaciones de §3.7 tampoco estan escritas: el contrato exige
+confirmarlas con la skill `wisphub-api` contra la API real antes de escribirlas.
+
+Migracion `202609201800_acciones_b5.sql` **sin aplicar en produccion**.
+
 ## SIGUIENTE GATE
 
 ```
