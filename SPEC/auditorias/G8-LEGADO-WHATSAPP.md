@@ -104,7 +104,8 @@ y después** de llamar a `revisar()` — que mide el efecto, no el estado.
 hecho      la herramienta de revisión, probada, sin PII y sin escrituras
            el criterio de clasificación, con su porqué
            la transición de adopción y el comando que la usa, con evento
-           durable — dos de las cuatro decisiones; las otras dos bloqueadas
+           durable — TRES de las cuatro decisiones desde B6; la cuarta
+           (resolver_estado_externo) sigue bloqueada
 falta      leer las 16 reales (necesita autorización de lectura de producción)
            que una persona decida cada una
            registrar cada decisión como evento del relevo
@@ -140,20 +141,33 @@ nombre no prueba identidad: inventar el id le atribuiria a una persona concreta
 una conversacion que quiza no es suya — el mismo error que D28 existe para no
 cometer. Es lo que §11.2 manda.
 
-### Las dos que NO se pueden registrar, y por que
+### cerrar_con_desenlace: desbloqueada por B6 (20/09/2026)
+
+B6 trajo las columnas de cierre y el catalogo de desenlaces, asi que la tercera
+decision ya se puede registrar. Cierra **y** adopta en la misma escritura, con
+el codigo que la persona elige — y sin codigo sigue sin cerrar: que la
+conversacion sea vieja no la hace menos de un cliente.
 
 ```
-cerrar_con_desenlace      el desenlace es B6: ni la columna ni el catalogo
-                          existen todavia
+cerrar_con_desenlace   estado cerrada, cerrada_por_tipo 'operador' con su
+                       usuario, desenlace + categoria + nota, evento 'cerrada'
+                       con legado, g8 y el desenlace.
+```
+
+Ver SPEC/auditorias/B6-CIERRE-DESENLACE.md. El comando toma `--desenlace` y
+`--nota`; si el codigo falta o no esta en el catalogo, imprime los validos y
+**no sugiere ninguno**.
+
+### La que TODAVIA no se puede registrar, y por que
+
+```
 resolver_estado_externo   no es una transicion del relevo, es un efecto externo
                           (cerrar_caso / cerrar_ticket), sin productor y con
                           cerrar_ticket bloqueado por Q2
 ```
 
-Se rechazan con su motivo en vez de hacer algo parecido. Registrar un cierre
-sin desenlace seria cerrar la conversacion de un cliente sin decir por que,
-justo en el registro que existe para poder decirlo. Y quien revise creeria que
-decidio algo que el sistema no guardo.
+Se rechaza con su motivo en vez de hacer algo parecido: quien revise creeria
+que decidio algo que el sistema no guardo.
 
 ### El comando
 
