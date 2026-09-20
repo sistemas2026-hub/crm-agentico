@@ -201,6 +201,38 @@ catálogo de perfiles se adivina igual.
 
 Los 826 del módulo `cases` del CRM siguen pasando.
 
+## La atomicidad (`3a7e79f`)
+
+El primer intento tenía una contradicción que encontró el auditor: «encola en
+la misma transacción» y «si encolar falla, la toma no se cae» juntos permiten
+**operador cambiado + ninguna intención durable + nada que lo diga**. Ahí D28
+reaparece en silencio.
+
+El `try/except` estaba mal por dos motivos, y el segundo es el que importa:
+
+1. **No salvaba nada.** Corre con el cursor de la transacción: un error de base
+   la deja abortada, así que atraparlo no permite seguir — el COMMIT termina en
+   ROLLBACK igual. Prometía una resistencia que no existía.
+2. **Si hubiera funcionado**, habría dejado justo el estado prohibido.
+
+Quitado. Ahora la transición entera hace rollback: **o las dos cosas, o
+ninguna**. El operador ve un error y reintenta, que es mejor que una
+divergencia que nadie nota.
+
+Una clave repetida no es un fallo, y no hizo falta tocar nada para eso:
+`encolar_sincronizacion` ya hace `on conflict do nothing`. La intención
+existente se adopta — probado soltando y volviendo a tomar.
+
+La garantía se afirma entera, con una consulta:
+
+```sql
+-- ninguna conversación con caso y operador sin su intención
+select count(*) from conversations c
+ where c.caso_id is not null and c.asignada_a_usuario_id is not null
+   and not exists (select 1 from sincronizaciones_externas s
+                    where s.conversation_id = c.id and s.tipo = 'asignar_caso')
+```
+
 ## D28: CERRADO EN CÓDIGO
 
 Lo que queda es despliegue, no diseño:
