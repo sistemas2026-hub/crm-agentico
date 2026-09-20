@@ -24,6 +24,7 @@ Un archivo por gate. El agente lee sólo los que el prompt le nombre.
 | **G3** | [G3-CIERRE.md](G3-CIERRE.md) | **VERDE** | Aprobar rechaza con 409 sin ejecutar, `cancelada` es estado declarado con evento, y hay pantalla para revisar. Las 36 siguen `pendiente`: cancelarlas es trabajo de una persona. B5 desbloqueado. |
 | **B5** | [B5-ACCIONES.md](B5-ACCIONES.md) | **CERRADO EN CÓDIGO** | Aprobar es reservar, revalidar, ejecutar y resolver. La revalidación tiene tres desenlaces: «no se pudo comprobar» no ejecuta. Validador en modo advertencia hasta que cierre la medición (Q3). |
 | **D28** | [D28-ASIGNADO-CRM.md](D28-ASIGNADO-CRM.md) | **CERRADO EN CÓDIGO** | `assigned_to` es un conjunto, no un dueño. Endpoint aditivo nuevo en el CRM, identidad por id y relectura obligatoria. Sin DELETE: el CRM no guarda quién asignó a quién. Falta el productor que lo encole. |
+| **G7** | [G7-PREDEPLOY.md](G7-PREDEPLOY.md) | **listo para activación** | Las cuatro capacidades declaradas,  al endpoint aditivo y a ningún otro. Worker apagado por defecto, cadencia 300 s. NO verde: falta aplicar config, desplegar y encender. |
 | — | [1.4C-hotpath-diferido.md](1.4C-hotpath-diferido.md) | diferido | Los hunks de ③a/③c retirados, recuperables con `git apply -R`. |
 
 Los gates sin archivo viven sólo en la transcripción; sus conclusiones vigentes
