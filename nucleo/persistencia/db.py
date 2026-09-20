@@ -804,7 +804,8 @@ def marcar_escalada(tenant: str, conversation_id: str, motivo: str,
                     caso_id: str | None, etiqueta: str | None,
                     necesita_atencion_humana: bool = True,
                     resumen: str = "", no_comprobado: str = "",
-                    siguiente_paso: str = "") -> None:
+                    siguiente_paso: str = "",
+                    nombre_caso: str = "", descripcion_caso: str = "") -> None:
     """
     Registra que la conversacion paso a un humano: la marca escalada, guarda
     por que (una de escalamiento.activar_si) y el caso/etiqueta que resulto
@@ -859,7 +860,12 @@ def marcar_escalada(tenant: str, conversation_id: str, motivo: str,
             encolar_sincronizacion(
                 cur, org, conversation_id, tipo="crear_caso",
                 clave=f"crear_caso:{conversation_id}",
-                datos={"motivo": motivo, "etiqueta": etiqueta})
+                datos={"motivo": motivo, "etiqueta": etiqueta,
+                       # El nombre canonico es la idempotencia: lleva el
+                       # conversation_id y es unico por organizacion. Sin el,
+                       # el reconciliador no puede preguntar si ya existe.
+                       "nombre_caso": (nombre_caso or "").strip(),
+                       "descripcion": (descripcion_caso or "").strip()})
 
 
 def guardar_ticket_operativo(tenant: str, conversation_id: str,

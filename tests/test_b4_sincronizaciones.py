@@ -296,6 +296,109 @@ try:
     revisar(cliente.get(f"/conversaciones/{c}/sincronizaciones?tenant={T_B}")
             .get_json().get("sincronizaciones") == [],
             "y otra empresa no ve nada por el endpoint")
+    # =========================================================================
+    titulo("6. el ejecutor real de crear_caso")
+    # =========================================================================
+    from nucleo.relevo import efectos_externos                   # noqa: E402
+
+    NOMBRE = f"Sin internet - Ana - {uuid.uuid4()}"
+
+    def ejecutar_con(crear, buscar):
+        c = conversacion(ORG_A)
+        s = encolar(T_A, ORG_A, c, "crear_caso", f"ej:{c}",
+                    datos={"nombre_caso": NOMBRE, "descripcion": "x"})
+        trabajo = next(t for t in db.sincronizaciones_elegibles(T_A, 200)
+                       if str(t["id"]) == s)
+        reconciliador.procesar_una(
+            T_A, trabajo,
+            efectos_externos.ejecutor(None, T_A, crear=crear, buscar_por_nombre=buscar))
+        return fila(s)
+
+    creados = []
+
+    def crear_ok(nombre, datos):
+        creados.append(nombre)
+        return "CASO-NUEVO"
+
+    f = ejecutar_con(crear_ok, lambda n: None)
+    revisar(f[0] == "hecha" and f[4] == "CASO-NUEVO",
+            "no existia: se crea y queda su id", f"{f}")
+
+    # EL CASO QUE HACE SEGURO EL REINTENTO.
+    creados.clear()
+    f = ejecutar_con(crear_ok, lambda n: "CASO-VIEJO")
+    revisar(f[0] == "hecha" and f[4] == "CASO-VIEJO" and creados == [],
+            "si YA existia se adopta y NO se crea un segundo caso",
+            f"{f} creados={creados}")
+
+    # Buscar primero no es un detalle de orden: es lo que evita el duplicado.
+    def crear_no_deberia(nombre, datos):
+        creados.append(nombre)
+        return "NO-DEBIO-CREARSE"
+
+    creados.clear()
+    f = ejecutar_con(crear_no_deberia, lambda n: "YA-ESTA")
+    revisar(creados == [], "no se llama a crear cuando la busqueda encontro uno",
+            f"creados={creados}")
+
+    # Si no se puede BUSCAR, no se crea a ciegas.
+    def buscar_roto(n):
+        raise RuntimeError("CRM caido")
+
+    creados.clear()
+    f = ejecutar_con(crear_no_deberia, buscar_roto)
+    revisar(f[0] == "pendiente" and creados == [],
+            "si la busqueda falla NO se crea a ciegas: se reintenta entero",
+            f"{f} creados={creados}")
+
+    # El CRM acepta y no devuelve id: pudo quedar creado. No se crea otro.
+    f = ejecutar_con(lambda n, d: None, lambda n: None)
+    revisar(f[0] == "pendiente" and f[2] == "incierto",
+            "sin id de vuelta queda incierto: el proximo ciclo lo adopta", f"{f}")
+
+    # Carrera: 400 de nombre repetido entre la busqueda y la creacion.
+    class Repetido(Exception):
+        http_status = 400
+
+    def crear_choca(n, d):
+        raise Repetido()
+
+    llamadas = {"n": 0}
+
+    def buscar_despues(n):
+        llamadas["n"] += 1
+        return None if llamadas["n"] == 1 else "CASO-DE-LA-CARRERA"
+
+    f = ejecutar_con(crear_choca, buscar_despues)
+    revisar(f[0] == "hecha" and f[4] == "CASO-DE-LA-CARRERA",
+            "una carrera con 400 se resuelve adoptando el que gano", f"{f}")
+
+    # Un tipo sin ejecutor no es una duda: no ocurrio y no va a ocurrir solo.
+    c = conversacion(ORG_A)
+    s = encolar(T_A, ORG_A, c, "cerrar_ticket", f"sinej:{c}")
+    trabajo = next(t for t in db.sincronizaciones_elegibles(T_A, 200) if str(t["id"]) == s)
+    reconciliador.procesar_una(
+        T_A, trabajo,
+        efectos_externos.ejecutor(None, T_A, crear=crear_ok, buscar_por_nombre=lambda n: None))
+    revisar(fila(s)[0] == "fallida_definitiva" and fila(s)[2] == "permanente",
+            "un tipo sin ejecutor queda fallida_definitiva, no 'desconocida'",
+            f"{fila(s)}")
+
+    # =========================================================================
+    titulo("7. el worker")
+    # =========================================================================
+    from nucleo.relevo import worker_reconciliador as worker      # noqa: E402
+
+    revisar(worker.INTERVALO_SEGUNDOS == 300,
+            "la cadencia es de 5 minutos", f"{worker.INTERVALO_SEGUNDOS}")
+    os.environ.pop("RECONCILIADOR_HABILITADO", None)
+    revisar(worker.encendido() is False,
+            "apagado por defecto: encenderlo es G7, no un descuido")
+    revisar(worker.main(["--once"]) == 0,
+            "con el interruptor en 0, una pasada no hace nada y sale bien")
+    os.environ["RECONCILIADOR_HABILITADO"] = "1"
+    revisar(worker.encendido() is True, "y su interruptor es PROPIO, no el del reloj general")
+    os.environ.pop("RECONCILIADOR_HABILITADO", None)
 finally:
     admin.close()
 

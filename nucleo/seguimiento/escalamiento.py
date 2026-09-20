@@ -778,7 +778,14 @@ def escalar(config, tenant: str, usuario_externo: str, conversation_id: str,
                                      etiqueta, necesita_humano,
                                      resumen=resumen,
                                      no_comprobado=no_se_pudo_comprobar,
-                                     siguiente_paso=siguiente_paso)
+                                     siguiente_paso=siguiente_paso,
+                                     # B4: si no hubo caso, la intencion queda
+                                     # encolada con el nombre CANONICO. Sin el
+                                     # no hay idempotencia posible -- es lo
+                                     # unico con lo que el reconciliador puede
+                                     # preguntar despues "¿esto ya se creo?".
+                                     nombre_caso=payload["name"],
+                                     descripcion_caso=asunto)
         if not caso_id:
             registrar("escalamiento", "el CRM acepto el caso pero no devolvio id -- no queda en "
                                       "la cola de nadie",
