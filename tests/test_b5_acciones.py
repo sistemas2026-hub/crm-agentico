@@ -489,6 +489,103 @@ try:
     revisar("ejecutada_ok" in estados and "vencida" in estados,
             f"y los estados son los de verdad, no 'aprobada' para todo ({estados})")
 
+    # =========================================================================
+    titulo("10. T20 barre lo que quedo a medias, sin tocar nada de afuera")
+    # =========================================================================
+    from nucleo.relevo import reconciliador                        # noqa: E402
+
+    conv10 = conversacion(ORG_A)
+    espia_t20 = Espia()
+    api.motor.ejecutar_accion_aprobada = espia_t20
+
+    # (a) Una 'ejecutando' RECIENTE no se toca: puede estar corriendo ahora.
+    reciente, _ = proponer(T_A, conv10, args={"servicio": 10, "asunto": "reciente"})
+    admin.execute("update asistente.acciones_propuestas set estado = 'ejecutando', "
+                  "revisado_en = now() where id = %s", (reciente,))
+
+    # (b) Una 'ejecutando' colgada: el proceso murio entre reserva y desenlace.
+    huerfana, _ = proponer(T_A, conv10, args={"servicio": 11, "asunto": "huerfana"})
+    admin.execute("update asistente.acciones_propuestas set estado = 'ejecutando', "
+                  "revisado_en = now() - interval '11 minutes' where id = %s", (huerfana,))
+
+    # (c) Una 'pendiente' que paso su plazo.
+    caduca, _ = proponer(T_A, conv10, args={"servicio": 12, "asunto": "caduca"})
+    admin.execute("update asistente.acciones_propuestas set vence_en = now() - interval '1 minute' "
+                  "where id = %s", (caduca,))
+
+    # (d) Una de legado 'ejecutando': NO tiene vence_en y no debe vencerse
+    #     (§11.4), pero SI puede quedar colgada, y eso hay que cerrarlo.
+    legado_colgado, _ = db.guardar_accion_propuesta(
+        T_A, "crear_ticket", {"servicio": 13}, "legado colgado", "soporte", "ia")
+    admin.execute("update asistente.acciones_propuestas set estado = 'ejecutando', "
+                  "revisado_en = now() - interval '30 minutes' where id = %s",
+                  (legado_colgado,))
+
+    # (e) Una de legado 'pendiente': NO se vence jamas.
+    legado_quieto, _ = db.guardar_accion_propuesta(
+        T_A, "crear_ticket", {"servicio": 14}, "legado quieto", "soporte", "ia")
+
+    conteo = reconciliador.barrer_acciones(T_A)
+
+    revisar(espia_t20.llamadas == [],
+            "el barrido NO llama al ejecutor externo ni una vez",
+            "Reintentar lo que pudo haber ocurrido manda dos visitas al mismo cliente.")
+    revisar(fila(reciente)["estado"] == "ejecutando",
+            "una 'ejecutando' reciente no se toca: puede estar corriendo")
+    revisar(fila(huerfana)["estado"] == "desconocida",
+            "una 'ejecutando' colgada pasa a 'desconocida', no a 'pendiente'",
+            "Devolverla a la cola la invitaria a ejecutarse otra vez (X21).")
+    revisar("accion_desconocida" in eventos(huerfana),
+            "con su evento durable")
+    revisar(fila(caduca)["estado"] == "vencida" and "accion_vencida" in eventos(caduca),
+            "una 'pendiente' pasada de plazo queda 'vencida', con evento")
+    revisar(fila(legado_colgado)["estado"] == "desconocida",
+            "una de legado colgada tambien se cierra: quedo a medias igual")
+    revisar(fila(legado_quieto)["estado"] == "pendiente",
+            "pero una de legado 'pendiente' NO se vence jamas (§11.4)",
+            "No tiene vence_en, asi que el filtro la deja fuera por construccion.")
+    revisar(conteo.get("acciones_desconocidas") == 2
+            and conteo.get("acciones_vencidas") == 1,
+            f"el conteo dice que hizo: {conteo}")
+
+    # El umbral sale del contrato, no de este codigo.
+    revisar(reconciliador.MINUTOS_EJECUTANDO_HUERFANA == 10,
+            "el umbral es el de §14.1 Q4: 10 minutos")
+
+    # --- dos T20 a la vez resuelven la fila UNA sola vez --------------------
+    conv11 = conversacion(ORG_A)
+    disputada, _ = proponer(T_A, conv11, args={"servicio": 15, "asunto": "dos worker"})
+    admin.execute("update asistente.acciones_propuestas set estado = 'ejecutando', "
+                  "revisado_en = now() - interval '20 minutes' where id = %s", (disputada,))
+
+    resultados = []
+    barrera2 = threading.Barrier(2)
+
+    def barrer():
+        barrera2.wait()
+        resultados.append(reconciliador.barrer_acciones(T_A))
+
+    hilos = [threading.Thread(target=barrer) for _ in range(2)]
+    for h in hilos:
+        h.start()
+    for h in hilos:
+        h.join()
+
+    tomadas = sum(r.get("acciones_desconocidas", 0) for r in resultados)
+    revisar(tomadas == 1,
+            f"dos reconciliadores la resuelven UNA vez (fueron {tomadas})")
+    revisar(eventos(disputada).count("accion_desconocida") == 1,
+            "y hay un solo evento, no dos")
+
+    # Una empresa no barre las de otra.
+    conv_b2 = conversacion(ORG_B)
+    de_b2, _ = proponer(T_B, conv_b2, args={"servicio": 16, "asunto": "de B"})
+    admin.execute("update asistente.acciones_propuestas set estado = 'ejecutando', "
+                  "revisado_en = now() - interval '30 minutes' where id = %s", (de_b2,))
+    reconciliador.barrer_acciones(T_A)
+    revisar(fila(de_b2)["estado"] == "ejecutando",
+            "el barrido de A no toca las acciones de B")
+
 finally:
     api.motor.ejecutar_accion_aprobada = original_exec
     api._config_de = original_cfg

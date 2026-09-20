@@ -146,9 +146,61 @@ def procesar_una(tenant: str, trabajo: dict, ejecutar) -> str:
     return estado
 
 
+#: Cuanto puede estar una accion en 'ejecutando' antes de darla por colgada
+#: (§14.1 Q4). Es un default de PLATAFORMA, no configuracion por tenant: el
+#: plazo no describe al ISP sino cuanto tarda en ser evidente que un proceso
+#: murio a mitad de camino.
+MINUTOS_EJECUTANDO_HUERFANA = 10
+
+
+def barrer_acciones(tenant: str, limite: int = 50) -> dict:
+    """
+    T20 (c) y (d): lo que quedo a medias en las acciones aprobables (B5).
+
+        ejecutando vieja   -> desconocida    el proceso murio entre la reserva
+                                             y el desenlace. NO se reejecuta.
+        pendiente vencida  -> vencida        paso su plazo y nadie la aprobo.
+
+    NO TOCA NINGUN SISTEMA EXTERNO. Este barrido solo cierra estados que
+    quedaron abiertos; el efecto de una 'desconocida' pudo haber ocurrido y
+    nadie puede demostrar lo contrario, asi que reintentarlo es apostar (X21).
+    Por eso la funcion no recibe 'ejecutar': no hay nada que ejecutar.
+    """
+    conteo: dict[str, int] = {}
+    try:
+        huerfanas = db.barrer_acciones_ejecutando(
+            tenant, MINUTOS_EJECUTANDO_HUERFANA, limite)
+        if huerfanas:
+            # Sin ids ni conversaciones en el log: solo cuantas. Lo que hace
+            # falta para saber que esta pasando, sin que el log sea un indice
+            # de conversaciones.
+            registrar("reconciliador", "acciones colgadas pasadas a desconocida",
+                      tenant=tenant, cuantas=len(huerfanas))
+            conteo["acciones_desconocidas"] = len(huerfanas)
+    except Exception as e:
+        registrar("reconciliador", "no se pudieron barrer las acciones colgadas",
+                  tenant=tenant, error=e)
+
+    try:
+        vencidas = db.barrer_acciones_vencidas(tenant, limite)
+        if vencidas:
+            registrar("reconciliador", "acciones vencidas por plazo",
+                      tenant=tenant, cuantas=len(vencidas))
+            conteo["acciones_vencidas"] = len(vencidas)
+    except Exception as e:
+        registrar("reconciliador", "no se pudieron vencer las acciones del plazo",
+                  tenant=tenant, error=e)
+    return conteo
+
+
 def correr(tenant: str, ejecutar, limite: int = 50) -> dict:
     """
-    Un ciclo. Devuelve el conteo por desenlace, para la traza del reloj.
+    Un ciclo de la cola de efectos externos. Devuelve el conteo por desenlace.
+
+    NO barre acciones: eso es barrer_acciones(), y el worker llama a las dos
+    por separado. Estan separadas porque una necesita hablar con sistemas
+    externos y la otra tiene prohibido hacerlo -- juntarlas obligaria a que el
+    barrido dependiera de tener un ejecutor que no usa.
 
     No lanza: un tenant que falla no puede dejar sin reconciliar a los demas.
     """

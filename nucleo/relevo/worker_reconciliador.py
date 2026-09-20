@@ -132,6 +132,14 @@ def una_vuelta(*, seco: bool = False) -> dict:
             total["elegibles"] = total.get("elegibles", 0) + pendientes
             continue
 
+        # El barrido de acciones va PRIMERO y fuera del if: no toca ningun
+        # sistema externo, asi que un tenant sin ejecutor --sin catalogo, sin
+        # la herramienta del caso-- igual tiene que poder cerrar lo que quedo
+        # colgado. Dejarlo dentro del if lo condicionaria a algo que no
+        # necesita, y esas acciones quedarian 'ejecutando' para siempre.
+        for estado, n in reconciliador.barrer_acciones(tenant, POR_VUELTA).items():
+            total[estado] = total.get(estado, 0) + n
+
         ejecutar = _ejecutor_de(tenant)
         if ejecutar is None:
             continue

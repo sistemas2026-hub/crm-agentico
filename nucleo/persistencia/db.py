@@ -3217,6 +3217,92 @@ def vincular_accion_a_conversacion(tenant: str, accion_id: str,
         return "vinculada" if cur.rowcount else "no_encontrada"
 
 
+def barrer_acciones_ejecutando(tenant: str, minutos: int, limite: int = 50) -> list[dict]:
+    """
+    T20 (c): las `ejecutando` que quedaron colgadas pasan a `desconocida`.
+
+    Se llega a este estado de una sola forma: el proceso murio entre la reserva
+    (§9.3 paso 1) y el desenlace (paso 4). Y eso significa que el pedido PUDO
+    haber salido -- la unica respuesta honesta es que no se sabe.
+
+    POR QUE 'desconocida' Y NO 'pendiente': devolverla a la cola seria
+    invitarla a ejecutarse otra vez, y nadie puede demostrar que la primera no
+    llego. Un ticket duplicado son dos visitas tecnicas al mismo cliente, y eso
+    no se deshace. X21 lo prohibe expresamente: el reconciliador nunca
+    reejecuta una accion por su cuenta.
+
+    El UPDATE es la transicion completa --seleccionar y escribir en un solo
+    paso, condicionado a que siga 'ejecutando'-- asi que dos reconciliadores
+    corriendo a la vez no pueden resolver la misma fila dos veces: el segundo
+    no la encuentra.
+
+    'minutos' NO se elige aca: viene de §14.1 Q4, que lo fijo como default de
+    plataforma y no como configuracion por tenant.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """update asistente.acciones_propuestas
+               set estado = 'desconocida', revisado_en = now(),
+                   codigo_error = 'ejecutando_huerfana'
+               where id in (
+                 select id from asistente.acciones_propuestas
+                  where organization_id = %s and estado = 'ejecutando'
+                    and revisado_en < now() - make_interval(mins => %s::int)
+                  order by revisado_en
+                  limit %s
+                  for update skip locked)
+               returning id, conversation_id""",
+            (org, minutos, limite))
+        barridas = [dict(f) for f in cur.fetchall()]
+        for fila in barridas:
+            registrar_evento_de_accion(
+                cur, org, str(fila["id"]), "accion_desconocida",
+                motivo=f"quedo 'ejecutando' mas de {minutos} min: el proceso murio "
+                       f"entre la reserva y el desenlace, y no se sabe si el "
+                       f"efecto llego a ocurrir",
+                actor_tipo="sistema",
+                conversation_id=str(fila["conversation_id"]) if fila["conversation_id"] else None)
+        return barridas
+
+
+def barrer_acciones_vencidas(tenant: str, limite: int = 50) -> list[dict]:
+    """
+    T20 (d): las `pendiente` que pasaron su plazo -> `vencida`, con evento.
+
+    Es lo mismo que hace reservar_accion() al tropezarse con una, pero sin
+    esperar a que alguien la toque: una propuesta vencida que sigue figurando
+    como 'pendiente' invita a aprobarla, y quien lo intente recibe un 409 que
+    parece una falla del sistema.
+
+    NO alcanza a las de legado: no tienen vence_en, asi que el filtro las deja
+    fuera solo. Es lo que §11.4 pide --nada de vencerlas para que
+    desaparezcan-- y conviene que sea por construccion y no por una condicion
+    aparte que alguien pueda borrar.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """update asistente.acciones_propuestas
+               set estado = 'vencida', revisado_en = now(),
+                   codigo_error = coalesce(codigo_error, 'plazo_cumplido')
+               where id in (
+                 select id from asistente.acciones_propuestas
+                  where organization_id = %s and estado = 'pendiente'
+                    and vence_en is not null and vence_en <= now()
+                  order by vence_en
+                  limit %s
+                  for update skip locked)
+               returning id, conversation_id""",
+            (org, limite))
+        vencidas = [dict(f) for f in cur.fetchall()]
+        for fila in vencidas:
+            registrar_evento_de_accion(
+                cur, org, str(fila["id"]), "accion_vencida",
+                motivo="paso su plazo de vigencia sin que nadie la aprobara",
+                actor_tipo="sistema",
+                conversation_id=str(fila["conversation_id"]) if fila["conversation_id"] else None)
+        return vencidas
+
+
 def acciones_de_conversacion(tenant: str, conversation_id: str) -> list[dict]:
     """
     Las acciones de una conversacion, para la pantalla del hilo.
