@@ -4266,7 +4266,13 @@ herramientas:
 
   # --- BottleCRM (verificado en vivo, ver skill bottlecrm-api) ---------------
 
+  # 'busca_caso': la usa el reconciliador (T20) para ADOPTAR un caso que ya
+  # existe en vez de crear un segundo cuando un reintento no se pudo confirmar
+  # (B4). Sin esta bandera, buscar_por_nombre devuelve None y todo reintento
+  # intentaria crear -- no es inseguro (el CRM rechaza el nombre repetido con
+  # 400 y esa carrera se maneja) pero es un viaje de mas y un 400 evitable.
   - nombre: consultar_casos_bottlecrm
+    busca_caso: true
     tipo: http
     descripcion: >
       Casos/tickets registrados en BottleCRM. Se puede buscar por texto libre
@@ -4545,6 +4551,70 @@ herramientas:
     base_url: http://backend:8000/api
     endpoint: /cases/
     metodo: POST
+    auth_ref: BOTTLECRM_API_TOKEN
+    auth_esquema: Bearer
+
+  # ===========================================================================
+  #  D28 -- reflejar en el caso del CRM quien lo esta atendiendo
+  # ===========================================================================
+  #  Las tres las ejecuta el RECONCILIADOR, nunca el modelo: no estan en el
+  #  catalogo para que la IA las llame, sino para que T20 sepa con que hacerlo.
+  #  Por eso ninguna lleva 'roles_permitidos' util mas alla del minimo que el
+  #  validador exige.
+  #
+  #  Dexter decide quien atiende; el CRM muestra un CONJUNTO de personas
+  #  asociadas al caso. El efecto es ADITIVO y no hay forma de quitar a nadie:
+  #  la tabla intermedia del CRM no guarda quien creo cada relacion, asi que
+  #  nada distingue una asignacion automatica vieja de una colaboracion que
+  #  alguien armo a mano.
+
+  - nombre: asignar_caso_crm
+    tipo: http
+    asigna_caso: true
+    descripcion: >
+      Agrega UNA persona a los asignados del caso, sin tocar a las demas. NO la
+      llames tu: la ejecuta el reconciliador cuando alguien toma o reasigna una
+      conversacion.
+    solo_lectura: false
+    requiere_confirmacion: true
+    roles_permitidos: [administracion]
+    base_url: http://backend:8000
+    # ⚠️ EXCLUSIVAMENTE este endpoint. 'bulk/update' y el PUT del detalle
+    # REEMPLAZAN el conjunto: borrarian a cualquier colaborador que un
+    # supervisor haya sumado, y el PUT ademas vacia contacts, teams y tags.
+    # Este es el unico aditivo -- ver django-crm/backend/cases/assignee_views.py
+    # y SPEC/auditorias/D28-ASIGNADO-CRM.md.
+    endpoint: /api/cases/{id_caso}/assignees/
+    metodo: POST
+    auth_ref: BOTTLECRM_API_TOKEN
+    auth_esquema: Bearer
+
+  - nombre: consultar_asignados_caso_crm
+    tipo: http
+    lee_asignados: true
+    descripcion: >
+      Quienes figuran en el caso AHORA. La usa el reconciliador para confirmar
+      una asignacion: el codigo de estado no prueba el efecto.
+    solo_lectura: true
+    roles_permitidos: [administracion]
+    base_url: http://backend:8000
+    endpoint: /api/cases/{id_caso}/assignees/
+    metodo: GET
+    auth_ref: BOTTLECRM_API_TOKEN
+    auth_esquema: Bearer
+
+  - nombre: consultar_perfiles_crm
+    tipo: http
+    lee_perfiles: true
+    descripcion: >
+      Los perfiles de la organizacion en el CRM. Sirve para traducir el usuario
+      de Dexter al perfil de alla POR ID (user_details.id), nunca por nombre:
+      dos personas pueden llamarse igual.
+    solo_lectura: true
+    roles_permitidos: [administracion]
+    base_url: http://backend:8000
+    endpoint: /api/users/get-teams-and-users/
+    metodo: GET
     auth_ref: BOTTLECRM_API_TOKEN
     auth_esquema: Bearer
 
