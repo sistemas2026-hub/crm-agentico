@@ -895,6 +895,11 @@ class Herramienta(Base):
     #: Lista los perfiles de la organizacion en el CRM, para traducir el
     #: usuario durable de Dexter al perfil de alla POR ID.
     lee_perfiles: bool = False
+    #: Lee UN caso del CRM y devuelve su 'status'. Es lo que permite cerrar sin
+    #: escribir a ciegas (B6): medido contra el CRM real, un PATCH sobre un
+    #: caso ya cerrado responde 200 y le reescribe la fecha de cierre. Sin esta
+    #: capacidad, 'cerrar_caso' no se intenta -- queda visible y sin reintentos.
+    lee_caso: bool = False
     # Vigencia y revalidacion (§3.7). El contrato las exige para toda
     # herramienta aprobable, pero el validador NO puede fallar todavia: la
     # config vigente de Rapilink no las declara, y escribirla parte la medicion

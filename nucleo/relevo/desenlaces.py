@@ -183,7 +183,8 @@ def categoria_de(codigo: str, config=None) -> str | None:
     return None
 
 
-def resolver_para_cerrar(codigo: str, config=None) -> tuple[str, str]:
+def resolver_para_cerrar(codigo: str, config=None, *,
+                         por_persona: bool = True) -> tuple[str, str]:
     """
     (codigo, categoria_base) listos para escribir, o ValueError.
 
@@ -191,13 +192,25 @@ def resolver_para_cerrar(codigo: str, config=None) -> tuple[str, str]:
     normaliza mayusculas ni parecidos: un codigo que no esta en el catalogo de
     esta empresa se rechaza. Aceptar uno desconocido "por si acaso" llenaria la
     columna de erratas que despues nadie puede agrupar.
+
+    'por_persona' distingue quien elige, y no es lo mismo:
+
+      True   lo elige un operador -> tiene que estar VISIBLE. Ocultar existe
+             para que una empresa saque de la lista lo que no usa; si igual se
+             pudiera elegir, ocultar no significaria nada.
+      False  lo escribe la plataforma (hoy solo el cierre por plazo) -> basta
+             con que el codigo exista. Ahi no hay ninguna eleccion que ocultar,
+             y negarse dejaria a T16 sin poder cerrar nada en una empresa que
+             oculto ese codigo de su lista.
     """
     codigo = (codigo or "").strip()
     if not codigo:
         raise ValueError("falta el codigo de desenlace")
-    elegibles = {d["codigo"] for d in catalogo(config)}
-    # El de plazo se acepta siempre: lo escribe la plataforma, no un operador.
-    if codigo not in elegibles and codigo != POR_PLAZO:
+    if por_persona:
+        if codigo not in {d["codigo"] for d in catalogo(config)}:
+            raise ValueError(f"'{codigo}' no esta en el catalogo de desenlaces")
+    elif not es_base(codigo) and codigo not in {
+            (getattr(d, "codigo", "") or "").strip() for d in _propios_de(config)}:
         raise ValueError(f"'{codigo}' no esta en el catalogo de desenlaces")
     categoria = categoria_de(codigo, config)
     if categoria is None:

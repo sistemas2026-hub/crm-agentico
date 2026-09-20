@@ -224,11 +224,18 @@ revisar("facturacion" not in {d["codigo"] for d in desenlaces.catalogo(oculto)},
 revisar(desenlaces.categoria_de("facturacion", oculto) == "facturacion",
         "pero lo ya cerrado con el conserva su categoria",
         "Ocultar no es borrar: el pasado no se reescribe.")
-revisar(desenlaces.resolver_para_cerrar(desenlaces.POR_PLAZO,
-                                        _Config([], ["sin_respuesta_cliente"]))[0]
+sin_plazo = _Config([], ["sin_respuesta_cliente"])
+revisar(desenlaces.resolver_para_cerrar(desenlaces.POR_PLAZO, sin_plazo,
+                                        por_persona=False)[0]
         == desenlaces.POR_PLAZO,
         "y el cierre por plazo sigue funcionando con el suyo oculto",
         "T16 no es una eleccion de nadie: ocultarlo de la lista no lo desactiva.")
+try:
+    desenlaces.resolver_para_cerrar(desenlaces.POR_PLAZO, sin_plazo)
+    revisar(False, "pero una PERSONA no lo puede elegir si esta oculto")
+except ValueError:
+    revisar(True, "pero una PERSONA no lo puede elegir si esta oculto",
+            "Quien escribe cambia la regla: la plataforma no elige, elige.")
 try:
     desenlaces.resolver_para_cerrar("facturacion", oculto)
     revisar(False, "un operador NO puede cerrar con un codigo oculto")
@@ -422,31 +429,64 @@ revisar(T.resolver(TEN, c, operador_id=OP_ID, operador_nombre=OP,
 
 
 # =============================================================================
-titulo("6. cerrar la conversacion NO cierra el caso ni el ticket")
+titulo("6. el cierre ANOTA la intencion externa; no la ejecuta")
 # =============================================================================
-antes_sync = admin.execute(
-    "select count(*) as n from asistente.sincronizaciones_externas "
-    "where organization_id = %s", (str(ORG),)).fetchone()["n"]
-c = conversacion(caso_id=str(uuid.uuid4()), ticket_operativo="90354",
+def sincronizaciones(cid):
+    return admin.execute(
+        """select tipo, estado, datos_intencion from asistente.sincronizaciones_externas
+           where conversation_id = %s order by creado_en""", (cid,)).fetchall()
+
+
+caso = str(uuid.uuid4())
+c = conversacion(caso_id=caso, ticket_operativo="90354",
                  control="humano", control_motivo="escalada")
 T.resolver(TEN, c, operador_id=OP_ID, operador_nombre=OP, desenlace="red_central")
-despues_sync = admin.execute(
-    "select count(*) as n from asistente.sincronizaciones_externas "
-    "where organization_id = %s", (str(ORG),)).fetchone()["n"]
-revisar(despues_sync == antes_sync,
-        f"la transicion no encola ningun efecto externo ({antes_sync} -> {despues_sync})",
-        "Son sistemas de afuera y no tienen ejecutor todavia (B4). Encolar "
-        "ahora daria una 'fallida_definitiva' en cada cierre, sobre un caso "
-        "que el camino en linea de hoy SI cierra: una alarma falsa.")
+syncs = sincronizaciones(c)
+revisar([s["tipo"] for s in syncs] == ["cerrar_caso"],
+        f"encola SOLO 'cerrar_caso' ({[s['tipo'] for s in syncs]})",
+        "El ticket de WispHub no: su unica via verificada de cierre publica un "
+        "comentario en el mismo pedido, asi que cada reintento le deja al "
+        "cliente otra copia del texto de cierre.")
+revisar(syncs[0]["estado"] == "pendiente"
+        and syncs[0]["datos_intencion"] == {"caso_id": caso},
+        f"con la intencion minima y en 'pendiente' ({syncs[0]['datos_intencion']})",
+        "Solo el id. Nunca payloads crudos ni datos del cliente (X19).")
 revisar(fila_de(c)["estado"] == "cerrada",
         "y la conversacion se cierra igual: un fallo externo no la reabre (T17)")
+revisar(eventos_de(c)[0]["datos"].get("ticket_pendiente") is True,
+        "y el evento DICE que quedo un ticket abierto del otro lado",
+        "Callarlo dejaria el ticket vivo sin que nadie se entere. Es menos de "
+        "lo que el contrato pide y mas de lo que habia.")
 
+# Sin caso no se encola nada: no hay nada que cerrar.
+c = conversacion(control="humano", control_motivo="escalada")
+T.resolver(TEN, c, operador_id=OP_ID, operador_nombre=OP, desenlace="otro")
+revisar(sincronizaciones(c) == [], "sin caso no encola nada")
+revisar(eventos_de(c)[0]["datos"].get("ticket_pendiente") is None,
+        "y sin ticket no avisa de ninguno")
+
+# La misma transicion reintentada no encola dos veces.
+c = conversacion(caso_id=str(uuid.uuid4()))
+clave_sync = f"b6sync-{uuid.uuid4()}"
+T.resolver(TEN, c, operador_id=OP_ID, operador_nombre=OP, desenlace="otro",
+           clave=clave_sync)
+T.resolver(TEN, c, operador_id=OP_ID, operador_nombre=OP, desenlace="otro",
+           clave=clave_sync)
+revisar(len(sincronizaciones(c)) == 1,
+        f"un reintento de la misma transicion encola UNA vez ({len(sincronizaciones(c))})",
+        "La clave sale del evento que la origino (§3.6).")
+
+# Y no hay HTTP dentro de la transaccion (X23).
 fuente_t = (RAIZ / "nucleo" / "relevo" / "transiciones.py").read_text(encoding="utf-8")
 cuerpo_cerrar = fuente_t[fuente_t.index("def cerrar("):fuente_t.index("def resolver(")]
 codigo_cerrar = "\n".join(l for l in cuerpo_cerrar.splitlines()
                           if not l.strip().startswith("#"))
-revisar("encolar_sincronizacion" not in codigo_cerrar,
-        "y no hay ninguna llamada a la cola escondida en el cierre")
+for prohibido in ("requests", "herramientas_http", "ejecutor_http",
+                  "cerrar_ticket"):
+    revisar(prohibido not in codigo_cerrar,
+            f"y no hay ningun '{prohibido}' dentro de la transaccion",
+            "Una TX abierta esperando una operacion externa deja la fila "
+            "bloqueada y la sesion 'idle in transaction' tras el pooler (X23).")
 
 
 # =============================================================================
@@ -625,7 +665,224 @@ except NotImplementedError as e:
 
 
 # =============================================================================
-titulo("10. la base tambien lo sostiene")
+titulo("10. completar el desenlace despues del cierre (§3.5)")
+# =============================================================================
+# La frase del contrato que hasta hoy no tenia transicion: los cierres por el
+# cliente y por inactividad dejan NULL "y se completan despues si una persona
+# revisa".
+c = conversacion(atendida_manual=True)
+T.cerrar(TEN, c, por="cliente")
+antes = fila_de(c)
+revisar(antes["desenlace_codigo"] is None, "una cerrada por el cliente no tiene desenlace")
+
+r = T.completar_desenlace(TEN, c, desenlace="equipo_cliente",
+                          operador_id=OP_ID, operador_nombre=OP,
+                          nota="era la ONT, se reemplazo")
+f = fila_de(c)
+revisar(r.aplicada and f["desenlace_codigo"] == "equipo_cliente"
+        and f["desenlace_categoria_base"] == "equipo_cliente",
+        "una persona se lo completa despues, con su categoria")
+revisar(f["desenlace_nota"] == "era la ONT, se reemplazo", "y su nota")
+revisar(f["estado"] == "cerrada", "NO reabre la conversacion")
+revisar(f["cerrada_por_tipo"] == "cliente",
+        f"y NO cambia quien la cerro ({f['cerrada_por_tipo']})",
+        "La cerro el cliente. Completar el desenlace despues no convierte a "
+        "quien revisa en el que cerro, y confundirlo rompe cualquier metrica "
+        "de 'cuantas cerro el cliente solo'.")
+revisar(f["cerrada_por_usuario_id"] is None,
+        "ni le pone un usuario al cierre ajeno")
+revisar(f["control"] == antes["control"]
+        and f["asignada_a_usuario_id"] == antes["asignada_a_usuario_id"],
+        "no toca el control ni la asignacion")
+revisar(f["relevo_version"] == antes["relevo_version"] + 1,
+        "la version sube: esto SI cambia algo durable")
+
+evs = eventos_de(c)
+revisar([e["tipo"] for e in evs] == ["cerrada", "desenlace_completado"],
+        f"deja un evento propio, no un segundo 'cerrada' ({[e['tipo'] for e in evs]})",
+        "Dos eventos 'cerrada' en el mismo expediente se leerian como dos "
+        "cierres, y esto no vuelve a cerrar nada.")
+d = evs[1]["datos"]
+revisar(d.get("desenlace") == "equipo_cliente" and d.get("categoria") == "equipo_cliente"
+        and d.get("cerrada_por") == "cliente",
+        f"con el codigo, la categoria y sobre que cierre se completo ({d})")
+revisar(evs[1]["actor_nombre"] == OP and str(evs[1]["actor_usuario_id"]) == OP_ID,
+        "y quien lo completo")
+
+# --- una sola vez ---------------------------------------------------------
+antes = fila_de(c)
+r2 = T.completar_desenlace(TEN, c, desenlace="facturacion",
+                           operador_id=str(uuid.uuid4()), operador_nombre="Otro")
+revisar(not r2.aplicada and r2.motivo == "ya_completado",
+        f"un segundo intento responde 'ya_completado' ({r2.motivo})")
+revisar(fila_de(c)["desenlace_codigo"] == "equipo_cliente",
+        "sin pisar el que ya estaba",
+        "Pisar el de otra persona convertiria esto en una via silenciosa para "
+        "reescribir el pasado, que es lo contrario de para que existe.")
+revisar(len(eventos_de(c)) == 2, "y sin escribir otro evento")
+revisar(fila_de(c)["relevo_version"] == antes["relevo_version"],
+        "ni subir la version")
+
+# Tampoco sobre una que se cerro CON desenlace.
+c = conversacion()
+T.resolver(TEN, c, operador_id=OP_ID, operador_nombre=OP, desenlace="red_central")
+r = T.completar_desenlace(TEN, c, desenlace="otro", operador_id=OP_ID,
+                          operador_nombre=OP)
+revisar(not r.aplicada and r.motivo == "ya_completado",
+        "un cierre manual ya trae desenlace: no se completa")
+revisar(fila_de(c)["desenlace_codigo"] == "red_central", "y se conserva")
+
+# Ni sobre el del plazo, que lo puso la plataforma.
+c = conversacion()
+T.cerrar(TEN, c, por="plazo")
+T.completar_desenlace(TEN, c, desenlace="otro", operador_id=OP_ID,
+                      operador_nombre=OP)
+revisar(fila_de(c)["desenlace_codigo"] == "sin_respuesta_cliente",
+        "el desenlace del plazo tampoco se pisa")
+
+# --- una abierta se cierra, no se completa --------------------------------
+c = conversacion()
+antes = fila_de(c)
+r = T.completar_desenlace(TEN, c, desenlace="otro", operador_id=OP_ID,
+                          operador_nombre=OP)
+revisar(not r.aplicada and r.motivo == "no_esta_cerrada",
+        f"una conversacion ABIERTA no se completa ({r.motivo})")
+revisar(fila_de(c) == antes, "y no se toca")
+
+# --- el actor es obligatorio ----------------------------------------------
+c = conversacion(atendida_manual=True)
+T.cerrar(TEN, c, por="cliente")
+for oid, onombre, caso in ((OP_ID, "", "sin nombre"), ("", OP, "sin id"),
+                           ("no-es-uuid", OP, "con un id que no es uuid")):
+    antes = fila_de(c)
+    try:
+        T.completar_desenlace(TEN, c, desenlace="otro", operador_id=oid,
+                              operador_nombre=onombre)
+        revisar(False, f"se rechaza completar {caso}")
+    except Exception:
+        revisar(True, f"se rechaza completar {caso}")
+    revisar(fila_de(c) == antes, f"y no cambia nada ({caso})")
+
+# --- el codigo tiene que estar VISIBLE ------------------------------------
+for codigo, caso in (("inventado", "un codigo que no existe"),
+                     ("", "sin codigo")):
+    try:
+        T.completar_desenlace(TEN, c, desenlace=codigo, operador_id=OP_ID,
+                              operador_nombre=OP)
+        revisar(False, f"se rechaza completar con {caso}")
+    except ValueError:
+        revisar(True, f"se rechaza completar con {caso}")
+try:
+    T.completar_desenlace(TEN, c, desenlace="facturacion", operador_id=OP_ID,
+                          operador_nombre=OP, config=_Config([], ["facturacion"]))
+    revisar(False, "se rechaza completar con un codigo que la empresa oculto")
+except ValueError:
+    revisar(True, "se rechaza completar con un codigo que la empresa oculto",
+            "Lo elige una persona: tiene que estar en la lista que esa persona "
+            "ve hoy.")
+revisar(fila_de(c)["desenlace_codigo"] is None,
+        "y despues de los cuatro rechazos sigue sin desenlace")
+
+# --- rollback -------------------------------------------------------------
+antes = fila_de(c)
+T._gancho_antes_del_commit = lambda: (_ for _ in ()).throw(RuntimeError("falla"))
+try:
+    T.completar_desenlace(TEN, c, desenlace="otro", operador_id=OP_ID,
+                          operador_nombre=OP)
+    revisar(False, "si falla el evento, el desenlace no queda escrito")
+except Exception:
+    revisar(True, "si falla el evento, el desenlace no queda escrito")
+finally:
+    T._gancho_antes_del_commit = None
+revisar(fila_de(c) == antes, "la conversacion sigue exactamente como estaba")
+
+# --- dos revisores a la vez -----------------------------------------------
+c = conversacion(atendida_manual=True)
+T.cerrar(TEN, c, por="cliente")
+resultados = []
+barrera = threading.Barrier(2)
+
+
+def completar_en_hilo(codigo):
+    def _():
+        barrera.wait()
+        try:
+            resultados.append(T.completar_desenlace(
+                TEN, c, desenlace=codigo, operador_id=str(uuid.uuid4()),
+                operador_nombre=f"Rev {codigo}"))
+        except Exception as e:
+            resultados.append(e)
+    return _
+
+
+hilos = [threading.Thread(target=completar_en_hilo("wifi_cliente")),
+         threading.Thread(target=completar_en_hilo("configuracion"))]
+for h in hilos:
+    h.start()
+for h in hilos:
+    h.join()
+aplicadas = [x for x in resultados if not isinstance(x, Exception) and x.aplicada]
+revisar(len(aplicadas) == 1,
+        f"de dos revisores a la vez, gana UNO ({len(aplicadas)})",
+        "El candado esta en el UPDATE ('and desenlace_codigo is null'), no en "
+        "una lectura previa.")
+revisar([e["tipo"] for e in eventos_de(c)].count("desenlace_completado") == 1,
+        "con un solo evento")
+
+# --- otra empresa ---------------------------------------------------------
+otra_org, otro_ten = uuid.uuid4(), f"prueba-b6c-{uuid.uuid4().hex[:8]}"
+sembrar_org(otra_org, otro_ten)
+try:
+    c = conversacion(atendida_manual=True)
+    T.cerrar(TEN, c, por="cliente")
+    antes = fila_de(c)
+    r = T.completar_desenlace(otro_ten, c, desenlace="otro", operador_id=OP_ID,
+                              operador_nombre=OP)
+    revisar(not r.aplicada, f"otra empresa no puede completarla ({r.motivo})")
+    revisar(fila_de(c) == antes, "y la conversacion no cambia")
+finally:
+    admin.execute("delete from public.organization where id = %s", (str(otra_org),))
+
+# --- legado ---------------------------------------------------------------
+c = conversacion(relevo_version=0, atendida_manual=True)
+T.cerrar(TEN, c, por="cliente")
+r = T.completar_desenlace(TEN, c, desenlace="otro", operador_id=OP_ID,
+                          operador_nombre=OP)
+f = fila_de(c)
+revisar(r.aplicada and f["desenlace_codigo"] == "otro",
+        "una de legado tambien se puede completar")
+revisar(f["relevo_version"] == 0 and eventos_de(c) == [],
+        "pero NO sube de version ni deja evento",
+        "Subirla meteria al modelo una conversacion de version 0 por la puerta "
+        "de atras, y esa puerta es G8 y ninguna otra (C5, I21).")
+
+# --- no toca nada de afuera -----------------------------------------------
+# La cuenta se toma sobre ESTA conversacion y alrededor de la completada
+# sola: el cierre previo si encola 'cerrar_caso', y medir sobre la empresa
+# entera haria que este numero hablara del cierre y no de lo que se prueba.
+c = conversacion(atendida_manual=True, caso_id=str(uuid.uuid4()),
+                 ticket_operativo="90355")
+T.cerrar(TEN, c, por="cliente")
+antes_sync = sincronizaciones(c)
+T.completar_desenlace(TEN, c, desenlace="facturacion", operador_id=OP_ID,
+                      operador_nombre=OP)
+revisar(sincronizaciones(c) == antes_sync,
+        f"completar no encola ningun efecto externo ({len(antes_sync)} antes y despues)",
+        "Escribir un codigo en una fila no cambia nada en el CRM ni en "
+        "WispHub. Hacerlo de paso seria mover sistemas de afuera desde una "
+        "pantalla de estadistica.")
+
+cuerpo_completar = fuente_t[fuente_t.index("def completar_desenlace("):]
+codigo_completar = "\n".join(l for l in cuerpo_completar.splitlines()
+                             if not l.strip().startswith("#"))
+for prohibido in ("encolar_sincronizacion", "estado = 'abierta'",
+                  "cerrada_por_tipo ="):
+    revisar(prohibido not in codigo_completar,
+            f"y no hay ningun '{prohibido}' escondido")
+
+
+# =============================================================================
+titulo("11. la base tambien lo sostiene")
 # =============================================================================
 c = conversacion()
 try:

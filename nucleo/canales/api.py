@@ -7212,6 +7212,57 @@ def conversaciones_desenlaces():
     return jsonify({"desenlaces": desenlaces.catalogo(config)})
 
 
+@app.post("/conversaciones/<id_conversacion>/desenlace")
+def conversaciones_completar_desenlace(id_conversacion):
+    """
+    Ponerle desenlace a una conversacion que se cerro sin uno (B6, §3.5).
+
+    Los cierres por confirmacion del cliente (T15a, T15b) y por inactividad
+    (T18) dejan el codigo en NULL a proposito: ahi nadie eligio nada. Esto es
+    la otra mitad de esa frase del contrato -- "se completan despues si una
+    persona revisa".
+
+    NO reabre la conversacion, NO cambia quien la cerro y NO toca el caso ni
+    el ticket de afuera. Solo escribe sobre NULL: si ya tiene desenlace
+    responde 409, porque pisar el que puso otra persona seria reescribir el
+    pasado en silencio.
+
+    Cuerpo: {tenant, autor, autor_usuario_id, desenlace, nota?, clave_operacion?}
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    try:
+        autor, autor_id, _ = _autor_y_clave(cuerpo)
+    except persistencia.AutorInvalido as e:
+        return jsonify({"error": f"Autor invalido: {mensaje_publico(e, 'datos de autor incompletos')}"}), 400
+
+    try:
+        r = transiciones.completar_desenlace(
+            tenant, id_conversacion,
+            desenlace=(cuerpo.get("desenlace") or "").strip(),
+            nota=(cuerpo.get("nota") or "").strip() or None,
+            operador_id=autor_id, operador_nombre=autor,
+            config=_config_de(tenant),
+            clave=(cuerpo.get("clave_operacion") or "").strip() or None)
+    except ValueError as e:
+        return jsonify({"error": mensaje_publico(e, "desenlace invalido")}), 400
+    except Exception as e:
+        registrar("conversaciones", "fallo al completar el desenlace", error=e)
+        return jsonify({"error": "No se pudo guardar."}), 500
+
+    if r.motivo == "no_existe":
+        return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+    if r.motivo == "no_esta_cerrada":
+        return jsonify({"error": "La conversacion sigue abierta: se cierra, no se completa."}), 409
+    if r.motivo == "ya_completado":
+        # 409 y no 200: el segundo tiene que enterarse de que llego tarde.
+        return jsonify({"error": "Esta conversacion ya tiene desenlace."}), 409
+    return jsonify({"completado": True, "desenlace": r.datos.get("desenlace"),
+                    "categoria": r.datos.get("categoria")})
+
+
 @app.post("/conversaciones/<id_conversacion>/resolver")
 def conversaciones_resolver(id_conversacion):
     """

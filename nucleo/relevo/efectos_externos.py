@@ -26,7 +26,23 @@ QUE HAY Y QUE NO
                 No se escribe ni detras de una bandera: una bandera es una
                 invitacion a encenderla.
 
-  cerrar_*      sin productor todavia. Ver el estado en DEXTER_ESTADO_ACTUAL.
+  cerrar_caso   implementado (B6). LEE PRIMERO y solo escribe si sigue
+                abierto. Medido contra el CRM real
+                (cases/tests/test_cierre_idempotente.py): un PATCH ciego sobre
+                un caso ya cerrado responde 200 y REESCRIBE 'closed_on' con la
+                fecha del reintento, asi que el caso pasa a decir que se cerro
+                un dia en el que no se cerro. No falla nada; solo se corre la
+                fecha, y con ella toda metrica de tiempo de resolucion.
+
+  cerrar_ticket NO implementado, y no por falta de tiempo. La unica via
+                verificada para cerrar un ticket de WispHub
+                (POST /api/tickets/{id}/respuesta/) PUBLICA UN COMENTARIO en
+                el mismo pedido: cada reintento le deja al cliente otra copia
+                del texto de cierre en su ticket. Y leer antes para evitarlo
+                exige saber que devuelve el GET, que viene como ETIQUETA
+                ('Cerrado') mientras la escritura va por CODIGO (4) -- una
+                asimetria que nuestro propio importador documenta y que nadie
+                verifico contra la API real. Ver B6-CIERRE-DESENLACE.md.
 """
 
 from __future__ import annotations
@@ -115,6 +131,93 @@ def crear_caso(config, tenant: str, datos: dict, referencia: str | None,
         # El CRM acepto y no devolvio id. El caso pudo quedar creado: NO se
         # crea otro. El proximo ciclo lo busca por nombre y lo adopta.
         return ResultadoEfecto("incierto", codigo="sin_id")
+    return ResultadoEfecto("exito", referencia=str(caso_id))
+
+
+#: Lo que el CRM considera terminado. Uno solo de estos ya significa que el
+#: caso no esta en la cola de nadie: no hace falta --ni conviene-- volver a
+#: escribirlo. Es la misma lista que usa la lectura de escalamiento.py; vive
+#: alla porque alla nacio, y se importa para no tener dos verdades.
+def _estados_cerrados():
+    from nucleo.seguimiento.escalamiento import ESTADOS_CERRADOS
+    return ESTADOS_CERRADOS
+
+
+def _estado_de(respuesta) -> str | None:
+    """El 'status' del caso, venga envuelto o no. None si no se entiende."""
+    if not isinstance(respuesta, dict):
+        return None
+    caso = respuesta.get("cases_obj", respuesta)
+    if not isinstance(caso, dict):
+        return None
+    estado = caso.get("status")
+    return str(estado) if estado else None
+
+
+def cerrar_caso(config, tenant: str, datos: dict, referencia: str | None,
+                *, leer_caso, cerrar) -> ResultadoEfecto:
+    """
+    Cierra el caso del CRM, o adopta el cierre que ya estaba.
+
+    LEE PRIMERO, Y NO ES UNA PRECAUCION ABSTRACTA. Medido contra el CRM real
+    (django-crm/backend/cases/tests/test_cierre_idempotente.py): un PATCH sobre
+    un caso YA cerrado responde 200 y reescribe 'closed_on' con la fecha que
+    lleve el pedido. Un reintento tres dias despues no falla: deja el caso
+    diciendo que se cerro un dia en el que no se cerro, y toda metrica de
+    tiempo de resolucion construida sobre esa columna se corre con el.
+
+    Asi que el orden es el mismo que en crear_caso y por el mismo motivo: si
+    ya esta cerrado, se ADOPTA y no se escribe nada.
+
+    UN RECHAZO PUEDE SER LEGITIMO. El CRM puede exigir una aprobacion antes de
+    cerrar (ApprovalRule 'pre_close') y responder 400. Eso no es una falla que
+    se resuelva insistiendo: necesita que una persona apruebe. Cae en
+    'permanente' por la clase de error, que es donde tiene que quedar --
+    visible, sin reintentos, esperando a alguien.
+
+    CERRADO NO ES PARA SIEMPRE. Un caso cerrado se puede reabrir (probado). Por
+    eso esto devuelve 'exito' sobre lo que HIZO, no sobre lo que es cierto
+    ahora: la cola registra actos, no estados del mundo.
+    """
+    caso_id = (datos or {}).get("caso_id") or referencia
+    if not caso_id:
+        return ResultadoEfecto("permanente", codigo="sin_caso")
+
+    # 1. ¿Ya esta cerrado? Si no se puede leer, NO se escribe a ciegas: el
+    #    precio de escribir sin saber es mover la fecha de cierre de un caso
+    #    que ya estaba bien.
+    try:
+        estado = _estado_de(leer_caso(str(caso_id)))
+    except Exception as e:
+        clase, codigo = _clase_de_error(e)
+        return ResultadoEfecto("transitorio" if clase != "permanente" else clase,
+                               codigo=codigo)
+    if estado is None:
+        # Respondio algo que no se entiende. Tampoco se escribe.
+        return ResultadoEfecto("transitorio", codigo="estado_ilegible")
+    if estado in _estados_cerrados():
+        registrar("reconciliador", "el caso ya estaba cerrado: no se reescribe",
+                  tenant=tenant)
+        return ResultadoEfecto("exito", referencia=str(caso_id))
+
+    # 2. Sigue abierto: cerrarlo.
+    try:
+        cerrar(str(caso_id))
+    except Exception as e:
+        clase, codigo = _clase_de_error(e)
+        return ResultadoEfecto(clase, codigo=codigo)
+
+    # 3. RELEER SIEMPRE. El codigo de estado dice que el pedido se acepto, no
+    #    que el caso quedo cerrado -- misma disciplina que asignar_caso (D28).
+    try:
+        estado = _estado_de(leer_caso(str(caso_id)))
+    except Exception:
+        estado = None
+    if estado is None:
+        return ResultadoEfecto("incierto", codigo="sin_confirmacion")
+    if estado not in _estados_cerrados():
+        # Acepto y no cerro. Insistir daria lo mismo.
+        return ResultadoEfecto("permanente", codigo="no_quedo_cerrado")
     return ResultadoEfecto("exito", referencia=str(caso_id))
 
 
@@ -209,7 +312,8 @@ def _ids_asignados(respuesta) -> set[str]:
 
 
 def ejecutor(config, tenant: str, *, crear, buscar_por_nombre,
-             agregar_asignado=None, leer_asignados=None, leer_perfiles=None):
+             agregar_asignado=None, leer_asignados=None, leer_perfiles=None,
+             leer_caso=None, cerrar_caso_crm=None):
     """
     El `ejecutar` que espera el reconciliador, ya atado a este tenant.
 
@@ -233,5 +337,13 @@ def ejecutor(config, tenant: str, *, crear, buscar_por_nombre,
                                 agregar_asignado=agregar_asignado,
                                 leer_asignados=leer_asignados,
                                 leer_perfiles=leer_perfiles)
+        if tipo == "cerrar_caso":
+            if leer_caso is None or cerrar_caso_crm is None:
+                # Sin LEER no se escribe: un PATCH a ciegas sobre un caso ya
+                # cerrado le corre la fecha de cierre. Falta una capacidad del
+                # tenant, no un dato del efecto.
+                return ResultadoEfecto("permanente", codigo="sin_ejecutor:cerrar_caso")
+            return cerrar_caso(config, tenant, datos, referencia,
+                               leer_caso=leer_caso, cerrar=cerrar_caso_crm)
         return ResultadoEfecto("permanente", codigo=f"sin_ejecutor:{tipo}")
     return _ejecutar

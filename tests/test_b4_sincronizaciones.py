@@ -373,6 +373,112 @@ try:
     revisar(f[0] == "hecha" and f[4] == "CASO-DE-LA-CARRERA",
             "una carrera con 400 se resuelve adoptando el que gano", f"{f}")
 
+    # =========================================================================
+    titulo("6b. el ejecutor real de cerrar_caso (B6)")
+    # =========================================================================
+    # Lo que hace seguro este efecto es LEER PRIMERO. Medido contra el CRM real
+    # (django-crm/backend/cases/tests/test_cierre_idempotente.py): un PATCH
+    # sobre un caso ya cerrado responde 200 y le reescribe 'closed_on' con la
+    # fecha del reintento, asi que el caso pasa a decir que se cerro un dia en
+    # el que no se cerro.
+    CASO = str(uuid.uuid4())
+
+    def cerrar_con(lecturas, cerrar):
+        """`lecturas` se consume en orden: la primera es el ANTES, la segunda
+        la relectura de confirmacion."""
+        c = conversacion(ORG_A)
+        s = encolar(T_A, ORG_A, c, "cerrar_caso", f"cc:{c}",
+                    datos={"caso_id": CASO})
+        trabajo = next(t for t in db.sincronizaciones_elegibles(T_A, 200)
+                       if str(t["id"]) == s)
+        pendientes = list(lecturas)
+
+        def leer(_id):
+            r = pendientes.pop(0)
+            if isinstance(r, Exception):
+                raise r
+            return r
+        reconciliador.procesar_una(
+            T_A, trabajo,
+            efectos_externos.ejecutor(None, T_A, crear=crear_ok,
+                                      buscar_por_nombre=lambda n: None,
+                                      leer_caso=leer, cerrar_caso_crm=cerrar))
+        return fila(s)
+
+    escrituras = []
+
+    def cerrar_ok(caso_id):
+        escrituras.append(caso_id)
+        return {"id": caso_id}
+
+    f = cerrar_con([{"status": "New"}, {"status": "Closed"}], cerrar_ok)
+    revisar(f[0] == "hecha" and escrituras == [CASO],
+            "abierto: se cierra y se CONFIRMA releyendo", f"{f}")
+
+    # EL CASO QUE HACE SEGURO EL REINTENTO, y el que la medicion justifica.
+    escrituras.clear()
+    f = cerrar_con([{"status": "Closed"}], cerrar_ok)
+    revisar(f[0] == "hecha" and escrituras == [],
+            "ya cerrado: se adopta y NO se reescribe",
+            "Un PATCH ciego le correria la fecha de cierre (medido). Esta "
+            "linea es la que impide que un reintento reescriba el pasado.")
+
+    escrituras.clear()
+    f = cerrar_con([{"status": "Rejected"}], cerrar_ok)
+    revisar(f[0] == "hecha" and escrituras == [],
+            "y 'Rejected' tambien cuenta como terminado")
+
+    # No poder LEER no autoriza a escribir.
+    escrituras.clear()
+    f = cerrar_con([RuntimeError("CRM caido")], cerrar_ok)
+    revisar(f[0] == "pendiente" and escrituras == [],
+            "si no se puede leer, NO se escribe: vuelve a la cola", f"{f}")
+
+    escrituras.clear()
+    f = cerrar_con([{"sin": "status"}], cerrar_ok)
+    revisar(f[0] == "pendiente" and escrituras == [],
+            "y una respuesta que no se entiende tampoco autoriza a escribir")
+
+    # Acepto y no cerro: insistir daria lo mismo.
+    escrituras.clear()
+    f = cerrar_con([{"status": "New"}, {"status": "New"}], cerrar_ok)
+    revisar(f[0] == "fallida_definitiva" and f[2] == "permanente",
+            "acepto y el caso NO quedo cerrado: permanente y visible", f"{f}")
+
+    # No se pudo confirmar. El pedido PUDO haber llegado -- y aqui, a
+    # diferencia de crear_ticket, eso SI se puede resolver preguntando: el
+    # proximo intento lee primero y adopta el cierre si ya ocurrio. Por eso
+    # vuelve a la cola en vez de quedar 'desconocida'.
+    f = cerrar_con([{"status": "New"}, RuntimeError("timeout")], cerrar_ok)
+    revisar(f[0] == "pendiente" and f[2] == "incierto",
+            "sin confirmacion vuelve a la cola: el reintento pregunta antes",
+            f"Esa es toda la diferencia con Q2: alli no hay a quien preguntar. {f}")
+
+    # Un rechazo legitimo del CRM: la regla de aprobacion previa al cierre.
+    def cerrar_400(caso_id):
+        e = RuntimeError("approval required")
+        e.codigo_http = 400
+        raise e
+
+    f = cerrar_con([{"status": "New"}], cerrar_400)
+    revisar(f[0] == "fallida_definitiva" and f[2] == "permanente",
+            "un 400 del CRM (hace falta una aprobacion) no se reintenta",
+            "Necesita que una persona apruebe, no un temporizador. Medido: "
+            "TestCerrarCasoPuedeSerRechazado.")
+
+    # Sin LAS DOS capacidades no se intenta nada.
+    c = conversacion(ORG_A)
+    s = encolar(T_A, ORG_A, c, "cerrar_caso", f"sincap:{c}", datos={"caso_id": CASO})
+    trabajo = next(t for t in db.sincronizaciones_elegibles(T_A, 200) if str(t["id"]) == s)
+    reconciliador.procesar_una(
+        T_A, trabajo,
+        efectos_externos.ejecutor(None, T_A, crear=crear_ok,
+                                  buscar_por_nombre=lambda n: None,
+                                  leer_caso=None, cerrar_caso_crm=cerrar_ok))
+    revisar(fila(s)[0] == "fallida_definitiva"
+            and "sin_ejecutor" in (fila(s)[3] or ""),
+            "sin la capacidad de LEER no se cierra nada", f"{fila(s)}")
+
     # Un tipo sin ejecutor no es una duda: no ocurrio y no va a ocurrir solo.
     c = conversacion(ORG_A)
     s = encolar(T_A, ORG_A, c, "cerrar_ticket", f"sinej:{c}")

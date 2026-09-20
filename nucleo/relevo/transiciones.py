@@ -58,6 +58,11 @@ LO QUE CADA UNA SIGNIFICA (y no significa)
                    el caso ni el ticket de afuera: eso es la cola de §3.6.
   resolver         el cierre manual (T17), o sea cerrar(por='operador'). El
                    desenlace es obligatorio y no se infiere.
+  completar_desenlace
+                   una cerrada SIN desenlace (T15a, T15b, T18) al que una
+                   persona le pone uno despues (§3.5). NO reabre, NO cambia
+                   control ni quien la cerro, NO toca sistemas de afuera, y
+                   solo escribe sobre NULL: una sola vez, o 'ya_completado'.
   devolver_a_ia    la UNICA que deja control ia. El mecanismo queda probado;
                    la funcion "Responder y devolver" (T6) no se habilita hasta
                    G9.
@@ -116,7 +121,13 @@ ESQUEMAS: dict[str, frozenset[str]] = {
     # puede cambiar y este evento no (§3.6).
     "cerrada": frozenset({"version", "por", "desenlace", "categoria", "nota",
                           "acciones_canceladas", "acciones_en_vuelo",
-                          "legado", "g8"}),
+                          "ticket_pendiente", "legado", "g8"}),
+    # B6. Una conversacion cerrada sin desenlace (T15a, T15b, T18) al que
+    # alguien le pone uno despues. Tipo PROPIO y no un segundo 'cerrada':
+    # dos eventos 'cerrada' en el mismo expediente se leerian como dos
+    # cierres, y esto no vuelve a cerrar nada.
+    "desenlace_completado": frozenset({"version", "desenlace", "categoria",
+                                       "nota", "cerrada_por"}),
     "devolucion_solicitada": frozenset({"mensaje_id"}),
     "devolucion_fallida": frozenset({"mensaje_id", "resultado"}),
     "devuelta_a_ia": frozenset({"version", "legado", "g8"}),
@@ -154,7 +165,7 @@ def _fila(cur, org, conversation_id):
     cur.execute("""select control, control_motivo, asignada_a_usuario_id, asignada_a_nombre,
                           relevo_version, estado, pendiente_interno_desde,
                           escalada_a_humano, necesita_atencion_humana, tomada_por,
-                          caso_id, atendida_manual
+                          caso_id, atendida_manual, ticket_operativo
                    from asistente.conversations
                    where organization_id = %s and id = %s
                    for update""", (org, conversation_id))
@@ -754,11 +765,18 @@ def cerrar(tenant: str, conversation_id: str, *, por: str,
 
     CERRAR LA CONVERSACION NO ES CERRAR EL CASO NI EL TICKET
     --------------------------------------------------------
-    Esto cierra la conversacion de Dexter y nada mas. El caso del CRM y el
-    ticket del ISP son sistemas de afuera: se cierran por la cola de efectos
-    externos (§3.6) y hoy no tienen ejecutor (ver BLOQUEOS en
-    SPEC/auditorias/B6-CIERRE-DESENLACE.md). Un fallo alla NO reabre esto
-    (T17), y por eso ninguno de los dos entra en esta transaccion.
+    Lo unico que esta transaccion cierra es la conversacion de Dexter. Del
+    caso del CRM solo se anota la INTENCION en la cola (§3.6), que es una fila
+    mas en la misma base; el pedido HTTP lo hace el reconciliador despues,
+    fuera de aqui (X23). Un fallo alla NO reabre la conversacion (T17): queda
+    como sincronizacion pendiente, visible y reintentable.
+
+    El ticket de WispHub NO se encola, y es una decision medida, no un olvido:
+    la unica via verificada para cerrarlo publica un comentario en el mismo
+    pedido, asi que cada reintento le deja al cliente otra copia del texto de
+    cierre. Cuando el cierre manual deja un ticket abierto, queda dicho en el
+    evento ('ticket_pendiente') para que alguien lo vea, que es lo honesto
+    mientras no se pueda hacer sin riesgo.
 
     ATOMICO
     -------
@@ -799,7 +817,7 @@ def cerrar(tenant: str, conversation_id: str, *, por: str,
             raise ValueError(
                 f"el cierre por plazo es siempre '{catalogo.POR_PLAZO}'")
         codigo, categoria = catalogo.resolver_para_cerrar(
-            catalogo.POR_PLAZO, config)
+            catalogo.POR_PLAZO, config, por_persona=False)
     elif desenlace:
         raise ValueError(
             f"un cierre '{por}' deja el desenlace en NULL (§3.5): nadie eligio "
@@ -906,8 +924,26 @@ def cerrar(tenant: str, conversation_id: str, *, por: str,
             # lo que despues explica una sincronizacion 'desconocida' en una
             # conversacion que ya nadie mira.
             datos["acciones_en_vuelo"] = en_vuelo
+        if por == "operador" and f["ticket_operativo"]:
+            # El cierre manual no pasa por el camino en linea que hoy cierra el
+            # ticket, y la cola no puede cerrarlo sin duplicarle un comentario
+            # al cliente. Asi que queda DICHO, en el expediente de esta
+            # conversacion, que hay un ticket abierto del otro lado. Es menos
+            # de lo que el contrato pide y mas de lo que habia: callarlo
+            # dejaria el ticket vivo sin que nadie se entere.
+            datos["ticket_pendiente"] = True
         ev = _evento(cur, org, conversation_id, "cerrada", _ACTOR_DE[por],
                      usuario, nombre, datos, clave)
+
+        # La INTENCION de cerrar el caso, en la misma transaccion (§3.6). El
+        # pedido HTTP lo hace el reconciliador despues: aqui no hay red.
+        # La clave sale del evento que la origino, asi que la misma transicion
+        # reintentada no encola dos veces.
+        if f["caso_id"]:
+            db.encolar_sincronizacion(
+                cur, org, conversation_id, tipo="cerrar_caso",
+                clave=f"cerrar_caso:{conversation_id}:{ev}",
+                datos={"caso_id": str(f["caso_id"])})
         return Resultado(True, True, version, ev, datos={**ident, **datos})
 
     return _ejecutar(tenant, conversation_id, clave, cuerpo, tipo="cerrada",
@@ -921,6 +957,89 @@ def resolver(tenant: str, conversation_id: str, *, operador_id: str, operador_no
     return cerrar(tenant, conversation_id, por="operador", desenlace=desenlace,
                   nota=nota, operador_id=operador_id,
                   operador_nombre=operador_nombre, config=config, clave=clave)
+
+
+def completar_desenlace(tenant: str, conversation_id: str, *, desenlace: str,
+                        operador_id: str, operador_nombre: str,
+                        nota: str | None = None, config=None,
+                        clave: str | None = None) -> Resultado:
+    """
+    §3.5, la frase que hasta hoy no tenia transicion: los cierres por el
+    cliente (T15a, T15b) y por inactividad (T18) dejan el desenlace en NULL "y
+    se completan despues si una persona revisa".
+
+    ESTO NO ES CERRAR OTRA VEZ, y por eso no comparte camino con cerrar():
+
+      * la conversacion YA esta cerrada y sigue igual de cerrada. No se reabre,
+        no se toca el control, no se toca la asignacion, no se toca
+        'cerrada_por_tipo' -- quien la cerro fue el cliente o el reloj, y
+        completar el desenlace despues no convierte a quien revisa en el que
+        cerro. Confundir las dos cosas rompe cualquier metrica de "cuantas
+        cerro el cliente solo".
+      * no ejecuta ningun efecto externo. Escribir un codigo en una fila no
+        cambia nada en el CRM ni en WispHub, y hacerlo de paso seria mover
+        sistemas de afuera desde una pantalla de estadistica.
+
+    SOLO SOBRE NULL, Y UNA SOLA VEZ. Si ya tiene desenlace, 'ya_completado' y
+    no se escribe: pisar el que puso otra persona --o el que puso el plazo--
+    convertiria esta funcion en una via silenciosa para reescribir el pasado,
+    que es justo lo contrario de para que existe la columna. El candado esta en
+    el UPDATE ('and desenlace_codigo is null'), no en una lectura previa: dos
+    revisores a la vez son lo normal, y el segundo tiene que enterarse de que
+    llego tarde.
+    """
+    from nucleo.relevo import desenlaces as catalogo
+
+    # Lo elige una persona: tiene que estar VISIBLE en el catalogo de hoy.
+    codigo, categoria = catalogo.resolver_para_cerrar(desenlace, config)
+    nota = (nota or "").strip() or None
+    if nota and len(nota) > catalogo.MAX_NOTA:
+        raise ValueError(f"la nota supera {catalogo.MAX_NOTA} caracteres")
+    nombre, usuario = db.validar_autor(operador_nombre, operador_id)
+
+    def cuerpo(cur, org, f):
+        gobernada = f["relevo_version"] > 0
+        if f["estado"] != "cerrada":
+            # Una conversacion abierta se cierra, no se completa. Ademas el
+            # CHECK de la base lo rechazaria: datos de cierre solo en cerradas.
+            return Resultado(False, gobernada, f["relevo_version"], None,
+                             "no_esta_cerrada")
+
+        cur.execute(
+            """update asistente.conversations
+               set desenlace_codigo = %s, desenlace_categoria_base = %s,
+                   desenlace_nota = coalesce(%s, desenlace_nota)
+               where organization_id = %s and id = %s
+                 and estado = 'cerrada' and desenlace_codigo is null
+               returning cerrada_por_tipo""",
+            (codigo, categoria, nota, org, conversation_id))
+        fila = cur.fetchone()
+        if fila is None:
+            return Resultado(False, gobernada, f["relevo_version"], None,
+                             "ya_completado")
+
+        if not gobernada:
+            # Legado (§11, I21): se escribe el dato, no se adopta. Subir la
+            # version meteria al modelo una conversacion de version 0 por la
+            # puerta de atras, y esa puerta es G8 y ninguna otra (C5). El
+            # precio es que aqui no hay evento; el dato queda igual, que es lo
+            # que la persona vino a dejar.
+            return Resultado(True, False, 0, None, "legado",
+                             datos={"desenlace": codigo, "categoria": categoria})
+
+        # La version sube porque esto SI cambia algo durable. El estado no.
+        version = _subir_version(cur, org, conversation_id,
+                                 "actualizado_en = actualizado_en", ())
+        datos = {"version": version, "desenlace": codigo,
+                 "categoria": categoria, "cerrada_por": fila["cerrada_por_tipo"]}
+        if nota:
+            datos["nota"] = nota
+        ev = _evento(cur, org, conversation_id, "desenlace_completado",
+                     "operador", usuario, nombre, datos, clave)
+        return Resultado(True, True, version, ev, datos=datos)
+
+    return _ejecutar(tenant, conversation_id, clave, cuerpo,
+                     tipo="desenlace_completado", actor_id=usuario)
 
 
 def devolver_a_ia(tenant: str, conversation_id: str, *, operador_id: str, operador_nombre: str,

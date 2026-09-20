@@ -38,6 +38,7 @@ from __future__ import annotations
 import os
 import sys
 import time
+from datetime import datetime, timedelta
 
 from nucleo.observabilidad.registro import registrar
 from nucleo.relevo import reconciliador
@@ -144,6 +145,30 @@ def _ejecutor_de(tenant: str):
             raise RuntimeError("el tenant no declara una herramienta para leer los perfiles")
         return herramientas_http.ejecutar(herr, {})
 
+    def leer_caso(caso_id: str):
+        """UN caso con su 'status'. Es lo que permite cerrar sin escribir a
+        ciegas: un PATCH sobre un caso ya cerrado le corre la fecha de cierre
+        (medido, cases/tests/test_cierre_idempotente.py)."""
+        herr = next((h for h in config.herramientas
+                     if getattr(h, "lee_caso", False)), None)
+        if not herr:
+            raise RuntimeError("el tenant no declara una herramienta para leer el caso")
+        return herramientas_http.ejecutar(herr, {"id_caso": caso_id})
+
+    def cerrar_caso_crm(caso_id: str):
+        """Cierra el caso. Los argumentos fijos del catalogo llevan el estado
+        y la fecha; aca solo va el id."""
+        herr = next((h for h in config.herramientas
+                     if getattr(h, "cierra_caso", False)), None)
+        if not herr:
+            raise RuntimeError("el tenant no declara una herramienta para cerrar el caso")
+        argumentos = dict(herr.argumentos_fijos or {})
+        for campo, dias in (herr.fechas_automaticas or {}).items():
+            fecha = datetime.now() + timedelta(days=dias)
+            argumentos[campo] = fecha.strftime(herr.formato_fechas_automaticas)
+        argumentos["id_caso"] = str(caso_id)
+        return herramientas_http.ejecutar(herr, argumentos)
+
     # Fail-closed: sin LAS TRES, el ejecutor devuelve 'permanente' para
     # asignar_caso -- visible, y nunca 'desconocida'. Escribir sin poder
     # comprobar despues seria afirmar un efecto que no se vio, y traducir el
@@ -155,11 +180,24 @@ def _ejecutor_de(tenant: str):
         registrar("reconciliador", "el tenant no puede reflejar la asignacion en el CRM",
                   tenant=tenant)
 
+    # Mismo criterio para cerrar: hacen falta LAS DOS. Con la de cerrar sola se
+    # podria escribir, y eso es justo lo que no se quiere -- escribir sin poder
+    # mirar antes es lo que le corre la fecha de cierre a un caso que ya estaba
+    # cerrado.
+    puede_cerrar = all(
+        any(getattr(h, bandera, False) for h in config.herramientas)
+        for bandera in ("lee_caso", "cierra_caso"))
+    if not puede_cerrar:
+        registrar("reconciliador", "el tenant no puede cerrar casos del CRM desde la cola",
+                  tenant=tenant)
+
     return efectos_externos.ejecutor(
         config, tenant, crear=crear, buscar_por_nombre=buscar_por_nombre,
         agregar_asignado=agregar_asignado if puede_asignar else None,
         leer_asignados=leer_asignados if puede_asignar else None,
-        leer_perfiles=leer_perfiles if puede_asignar else None)
+        leer_perfiles=leer_perfiles if puede_asignar else None,
+        leer_caso=leer_caso if puede_cerrar else None,
+        cerrar_caso_crm=cerrar_caso_crm if puede_cerrar else None)
 
 
 def una_vuelta(*, seco: bool = False) -> dict:
