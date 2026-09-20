@@ -555,6 +555,27 @@ warnings del proyecto.
 «Meta Approved» por fila           el motor ya filtra a APPROVED: repetirlo N veces
 ```
 
+> **Corrección del 20/09/2026 sobre la línea de la variable.** La afirmación era
+> cierta a medias y encima escondía dos defectos de envío.
+>
+> Meta tiene **dos formatos** de parámetro, y la frase sólo describe el primero:
+>
+> ```
+> posicional   {{1}}, {{2}}       no hay etiqueta: la afirmación se sostiene
+> nombrado     {{customer_name}}  el nombre ES la etiqueta, y viene en el texto
+> ```
+>
+> Dexter no leía ninguno de los dos bien: contaba los huecos **sólo del cuerpo**
+> —una variable en el encabezado se enviaba de menos— y con un regex que exige
+> dígitos, así que una plantilla nombrada salía **sin un solo parámetro**. Los
+> dos daban el mismo rechazo genérico de Meta. Corregido y probado en
+> `tests/test_plantillas_variables.py`.
+>
+> Queda pendiente, y sigue siendo mejora de pantalla y no defecto:
+> `components[].example.body_text` trae los **valores de ejemplo** con los que se
+> aprobó la plantilla («Carlos Pérez»). No son etiquetas, pero son lo más cerca
+> que se puede estar de una sin pedirle nada a nadie. Dexter todavía no los lee.
+
 ### 1.4B.2b — los ocho estados que faltan
 
 ```

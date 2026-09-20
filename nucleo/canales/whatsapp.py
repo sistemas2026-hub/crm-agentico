@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import re
 
 import requests
 
@@ -645,7 +646,8 @@ def enviar_plantilla(config, tenant: str, para: str, plantilla: str,
 
 def enviar_plantilla_aprobada(config, tenant: str, para: str, nombre_real: str,
                               variables: list[str] | None = None,
-                              idioma: str = "es") -> str | None:
+                              idioma: str = "es",
+                              plantilla: dict | None = None) -> str | None:
     """
     Manda una plantilla por su nombre REAL en Meta, sin pasar por el mapeo de
     'canales.whatsapp.plantillas'.
@@ -663,13 +665,23 @@ def enviar_plantilla_aprobada(config, tenant: str, para: str, nombre_real: str,
     hay una persona apretando el boton. Lo que NO debe hacer es llamarse
     desde el motor durante un turno -- para eso esta enviar_plantilla(), que
     exige la declaracion explicita.
+
+    'plantilla' es la ficha ya leida de Meta (_desarmar_plantilla). Con ella,
+    los valores se reparten entre encabezado y cuerpo y los nombrados viajan
+    con su nombre. SIN ella se cae al camino viejo -- todo al cuerpo, en orden
+    posicional-- que es lo que puede hacer quien no leyo la plantilla: sirve
+    para una plantilla declarada en el YAML del tenant, cuyo texto se conoce,
+    y NO para una elegida de la lista de aprobadas.
     """
-    componentes = []
-    if variables:
-        componentes.append({
+    if plantilla is not None:
+        componentes = componentes_de_plantilla(plantilla, list(variables or []))
+    elif variables:
+        componentes = [{
             "type": "body",
             "parameters": [{"type": "text", "text": str(v)} for v in variables],
-        })
+        }]
+    else:
+        componentes = []
 
     emisor = _secreto(tenant, _cfg(config).phone_number_id_ref,
                       "del numero emisor (phone_number_id_ref)")
@@ -709,17 +721,66 @@ def plantillas_aprobadas(config, tenant: str) -> list[dict]:
     return [_desarmar_plantilla(p) for p in (r.json().get("data") or [])]
 
 
+#: Un hueco de plantilla. Meta acepta DOS formatos y no los mezcla en una
+#: misma plantilla: posicional ({{1}}) y nombrado ({{customer_name}}, desde
+#: 2024). Sin espacios a proposito: el reemplazo del texto es literal, y un
+#: regex mas permisivo que el reemplazo deja huecos contados pero sin llenar.
+_HUECO = re.compile(r"\{\{([A-Za-z0-9_]+)\}\}")
+
+
+def huecos_de(texto: str) -> tuple[str, list[str]]:
+    """
+    Que variables pide un texto de plantilla, y en que formato.
+
+    Devuelve ('posicional'|'nombrado'|'mixto'|'', los huecos EN ORDEN).
+
+    Posicional: la lista va COMPLETA hasta el mayor numero, aunque el texto
+    repita {{1}} o se saltee el {{2}}. Meta espera un parametro por posicion,
+    no uno por hueco distinto.
+
+    Nombrado: en orden de primera aparicion y sin repetir -- Meta identifica
+    cada parametro por su nombre, asi que un nombre que aparece dos veces es
+    un solo valor.
+
+    'mixto' no es un formato de Meta: es una plantilla que no deberia existir.
+    Se devuelve como tal en vez de adivinar, porque cualquiera de las dos
+    lecturas manda un valor en el lugar equivocado.
+    """
+    encontrados = _HUECO.findall(texto or "")
+    if not encontrados:
+        return "", []
+    numeros = [n for n in encontrados if n.isdigit()]
+    nombres = [n for n in encontrados if not n.isdigit()]
+    if numeros and nombres:
+        return "mixto", []
+    if numeros:
+        return "posicional", [str(i) for i in range(1, max(int(n) for n in numeros) + 1)]
+    return "nombrado", list(dict.fromkeys(nombres))
+
+
+def _formato_comun(*formatos: str) -> str:
+    """El formato de la plantilla entera. Dos componentes que no coinciden son
+    tan inservibles como un componente mixto."""
+    presentes = {f for f in formatos if f}
+    if "mixto" in presentes or len(presentes) > 1:
+        return "mixto"
+    return presentes.pop() if presentes else ""
+
+
 def _desarmar_plantilla(p: dict) -> dict:
     """
     De la forma de Meta a lo que hace falta para mostrarla y completarla.
 
-    'variables' se DEDUCE del texto ({{1}}, {{2}}...) en vez de confiar en un
-    campo aparte: Meta rechaza el envio si la cantidad no coincide con la
-    plantilla aprobada, y ese rechazo llega como un error generico que no
-    dice cual fue el problema. Contando los huecos del texto que la propia
-    API devuelve, la pantalla pide exactamente los que hay.
+    Los huecos se DEDUCEN del texto en vez de confiar en un campo aparte: Meta
+    rechaza el envio si lo que se manda no coincide con la plantilla aprobada,
+    y ese rechazo llega como un error generico que no dice cual fue el
+    problema. Leyendo el texto que la propia API devuelve, la pantalla pide
+    exactamente los que hay.
+
+    SE MIRAN LOS DOS COMPONENTES, no solo el cuerpo: un encabezado de texto
+    tambien puede tener variables, y Meta las cuenta aparte. Una plantilla asi
+    se enviaba con un valor de menos y el rechazo no decia por que.
     """
-    import re
     encabezado = cuerpo = ""
     for c in p.get("components") or []:
         tipo = (c.get("type") or "").upper()
@@ -727,16 +788,58 @@ def _desarmar_plantilla(p: dict) -> dict:
             encabezado = c.get("text") or ""
         elif tipo == "BODY":
             cuerpo = c.get("text") or ""
-    huecos = {int(n) for n in re.findall(r"\{\{(\d+)\}\}", cuerpo)}
+
+    formato_e, del_encabezado = huecos_de(encabezado)
+    formato_c, del_cuerpo = huecos_de(cuerpo)
+    formato = _formato_comun(formato_e, formato_c)
     return {
         "nombre": p.get("name"), "estado": p.get("status"),
         "idioma": p.get("language"), "categoria": p.get("category"),
         "encabezado": encabezado, "cuerpo": cuerpo,
-        # Cuantos valores hay que pedir. Se usa max() y no len() porque una
-        # plantilla puede repetir {{1}} y saltearse un numero: lo que Meta
-        # espera es la lista completa hasta el mayor, no los distintos.
-        "variables": max(huecos) if huecos else 0,
+        "formato_variables": formato,
+        # Los huecos de cada componente, por separado y en orden. Separados
+        # porque en posicional CADA COMPONENTE numera desde 1: el {{1}} del
+        # encabezado y el {{1}} del cuerpo son dos valores distintos.
+        "variables_encabezado": del_encabezado,
+        "variables_cuerpo": del_cuerpo,
+        # Cuantos valores hay que pedir en total. Sigue siendo un numero
+        # porque es lo que la pantalla pregunta y lo que el endpoint valida.
+        "variables": len(del_encabezado) + len(del_cuerpo),
     }
+
+
+def componentes_de_plantilla(plantilla: dict, variables: list) -> list[dict]:
+    """
+    Los 'components' que Meta espera, repartiendo la lista plana de valores
+    entre encabezado y cuerpo.
+
+    EL ORDEN ES CONTRACTUAL: primero los del ENCABEZADO, despues los del
+    CUERPO -- el mismo en el que se leen en la pantalla y el mismo que usa
+    _armar_plantilla para el texto que queda en el hilo. Cambiarlo en un solo
+    lado manda un valor y guarda otro, y nadie lo nota hasta que un cliente
+    recibe el nombre de otro.
+    """
+    del_encabezado = list(plantilla.get("variables_encabezado") or [])
+    del_cuerpo = list(plantilla.get("variables_cuerpo") or [])
+    nombrado = plantilla.get("formato_variables") == "nombrado"
+    corte = len(del_encabezado)
+
+    componentes = []
+    for tipo, huecos, valores in (
+            ("header", del_encabezado, variables[:corte]),
+            ("body", del_cuerpo, variables[corte:corte + len(del_cuerpo)])):
+        if not huecos:
+            continue
+        parametros = []
+        for hueco, valor in zip(huecos, valores):
+            parametro = {"type": "text", "text": str(valor)}
+            if nombrado:
+                # Con parametros nombrados Meta ata cada valor por su nombre,
+                # no por su posicion. Sin este campo el envio se rechaza.
+                parametro["parameter_name"] = hueco
+            parametros.append(parametro)
+        componentes.append({"type": tipo, "parameters": parametros})
+    return componentes
 
 
 # =============================================================================

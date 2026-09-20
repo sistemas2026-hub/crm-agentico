@@ -4401,6 +4401,13 @@ def conversaciones_enviar_plantilla(id_conversacion):
     if elegida is None:
         return jsonify({"error": f"'{nombre}' no es una plantilla aprobada de "
                                  f"esta cuenta."}), 400
+    # Una plantilla que mezcla {{1}} con {{nombre}} no es un formato de Meta.
+    # No se adivina cual de las dos lecturas vale: se rechaza, porque
+    # cualquiera de las dos pondria un valor en el lugar de otro.
+    if elegida.get("formato_variables") == "mixto":
+        return jsonify({"error": f"'{nombre}' mezcla variables numeradas y con "
+                                 f"nombre. Hay que corregirla en Meta antes de "
+                                 f"poder enviarla."}), 400
     if len(variables) != elegida["variables"]:
         return jsonify({"error": f"'{nombre}' necesita {elegida['variables']} "
                                  f"variable(s) y llegaron {len(variables)}."}), 400
@@ -4431,18 +4438,38 @@ def conversaciones_enviar_plantilla(id_conversacion):
         tenant, destino["mensaje_id"],
         lambda: whatsapp.enviar_plantilla_aprobada(
             config, tenant, destino["usuario_externo"], nombre, variables,
-            elegida.get("idioma") or "es"),
+            elegida.get("idioma") or "es", plantilla=elegida),
         f"plantillas '{nombre}'"))
     return jsonify(salida), 201
 
 
+def _rellenar(texto: str, huecos: list[str], valores: list[str]) -> str:
+    """Cada hueco con su valor, por posicion en la lista de huecos."""
+    for hueco, valor in zip(huecos, valores):
+        texto = texto.replace("{{" + hueco + "}}", valor)
+    return texto
+
+
 def _armar_plantilla(plantilla: dict, variables: list[str]) -> str:
-    """El texto final, con los {{n}} reemplazados -- lo que va a leer el
-    cliente y lo que queda en el hilo."""
-    cuerpo = plantilla.get("cuerpo") or ""
-    for i, valor in enumerate(variables, start=1):
-        cuerpo = cuerpo.replace("{{" + str(i) + "}}", valor)
-    encabezado = (plantilla.get("encabezado") or "").strip()
+    """
+    El texto final, con los huecos reemplazados -- lo que va a leer el cliente
+    y lo que queda en el hilo.
+
+    Reparte la lista plana igual que whatsapp.componentes_de_plantilla:
+    primero el encabezado, despues el cuerpo. Y rellena CADA componente con
+    los suyos, porque en posicional los dos numeran desde 1 -- el {{1}} del
+    cuerpo no es el mismo valor que el {{1}} del encabezado.
+
+    Si este reparto dejara de coincidir con el del envio, el cliente leeria
+    una cosa y el hilo guardaria otra.
+    """
+    del_encabezado = list(plantilla.get("variables_encabezado") or [])
+    del_cuerpo = list(plantilla.get("variables_cuerpo") or [])
+    corte = len(del_encabezado)
+    encabezado = _rellenar(plantilla.get("encabezado") or "",
+                           del_encabezado, variables[:corte]).strip()
+    cuerpo = _rellenar(plantilla.get("cuerpo") or "", del_cuerpo,
+                       variables[corte:corte + len(del_cuerpo)])
     return f"{encabezado}\n\n{cuerpo}".strip() if encabezado else cuerpo
 
 
