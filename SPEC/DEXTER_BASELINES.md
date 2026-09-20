@@ -30,7 +30,7 @@ test_registro_sin_pii           OK
 test_nucleo_sin_tenants         OK
 test_relevo_eventos_lectura     OK   23 ok   (1.6–1.8)
 test_anti_rebote_persistente    OK
-test_b4_sincronizaciones        OK   26 ok   (B4, contra PostgreSQL real)
+test_b4_sincronizaciones        OK   40 ok   (B4, contra PostgreSQL real)
 test_timeouts_modelo            OK   (19/09, sin base)
 test_editor_config              OK   (19/09, sin base)
 ```

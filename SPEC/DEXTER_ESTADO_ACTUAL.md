@@ -97,25 +97,34 @@ semánticos ember/clay/      ⏭ resueltos en context/ (1.5); los consumidores d
 rust/moss                      otras pantallas, en la fase de cada una
 ```
 
-## B4 — implementado, con T20 sin enganchar
+## B4 — CERRADO EN CÓDIGO. Falta encenderlo (G7)
 
 ```
 migración    202609201000_sincronizaciones_externas.sql   aplica limpia
-T20          nucleo/relevo/reconciliador.py, cadencia propia de 5 min
+T20          nucleo/relevo/reconciliador.py               la regla de reintento
+worker       nucleo/relevo/worker_reconciliador.py        proceso propio, 5 min
+ejecutor     nucleo/relevo/efectos_externos.py            crear_caso real
 panel        «Sincronización externa», read-only, sin botón de reintentar
-commit       b5bfb84
+commits      b5bfb84 · 62487db
 ```
 
-**Lo que falta para que B4 funcione de verdad**, y es deliberado:
+**G7 es ahora sólo activar**: `RECONCILIADOR_HABILITADO=1` y desplegar el
+servicio. El mecanismo existe entero. El reloj general sigue en ~60 min y **no
+se tocó**: el worker tiene interruptor propio, para que encender uno no encienda
+el otro por descuido.
+
+Lo que sigue sin conectar, y es deliberado:
 
 ```
-T20 no está enganchado a ningún reloj   G7: la cadencia se activa en despliegue.
-                                        Hoy la cola se llena y no se vacía sola.
-el ejecutor real no está escrito        procesar_una recibe `ejecutar` inyectado;
-                                        conectarlo al CRM es chico, a WispHub NO
-                                        se hace mientras Q2 siga rojo
-sólo crear_caso se encola               los otros tres tipos existen en esquema y
-                                        panel, sin productor
+crear_ticket sin ejecutor      y no lo tendrá mientras Q2 siga rojo. Uno que
+                               llegue hoy a la cola termina en
+                               fallida_definitiva con 'sin_ejecutor', visible
+sólo crear_caso se encola      los otros tres tipos existen en esquema y panel,
+                               sin productor
+falta declarar `busca_caso`    ningún tenant declara la herramienta de búsqueda.
+en el catálogo                 Sin ella todo reintento intentaría crear — no es
+                               inseguro (el 400 se maneja) pero conviene tenerla
+                               antes de encender el worker
 ```
 
 ## B4 — lo que Q2 ya decidió

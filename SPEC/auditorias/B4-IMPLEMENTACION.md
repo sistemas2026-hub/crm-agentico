@@ -99,12 +99,15 @@ Probado con un campo `secreto_interno` dentro de la intención.
 ## Tests
 
 ```
-tests/test_b4_sincronizaciones.py   26 aserciones, contra PostgreSQL real
+tests/test_b4_sincronizaciones.py   40 aserciones, contra PostgreSQL real
   la cola · idempotencia de la clave · elegibles y terminales
   el candado, con dos conexiones reales compitiendo
   los cinco desenlaces, con la regla de Q2 en los dos sentidos
   aislamiento entre empresas (4 aserciones)
   lo que NO sale a la pantalla
+  el ejecutor real: adopta en vez de duplicar, no crea a ciegas, resuelve la
+    carrera del 400, y un tipo sin ejecutor no queda como 'desconocida'
+  el worker: cadencia de 5 min, apagado por defecto, interruptor propio
 
 sincronizacion.test.js              13 aserciones
   desconocida ≠ falló: ni texto, ni tono, ni color
@@ -118,24 +121,32 @@ sincronizacion.test.js              13 aserciones
 | `crear_ticket` incierto vuelve a la cola | 3 rojas |
 | se quita el candado de `tomar_sincronizacion` | 2 rojas |
 
-## G7 — queda como gate de despliegue
+**Una regresión encontrada por una guarda existente:** el worker armaba el
+evento del log con una f-string (`f"RECONCILIADOR_HABILITADO={...}"`) y
+`test_registro_sin_pii` lo rechazó — el evento tiene que ser texto fijo o no se
+puede buscar en el log. Corregido con el mismo patrón que usa el reloj general.
 
-La implementación está completa en código: `CADENCIA_SEGUNDOS = 300` y el
-reconciliador listo para ser llamado. **La activación real de esa cadencia en
-producción no se tocó.** El reloj general sigue en ~60 min y ese cambio es
-acuerdo con producción, no de desarrollo.
+## G7 — sólo queda activar
+
+El mecanismo existe entero: worker ejecutable, cadencia de 300 s, ejecutor real
+de `crear_caso` y la cola con su candado. Lo que falta es **encenderlo**:
+`RECONCILIADOR_HABILITADO=1` y el servicio desplegado. Eso es acuerdo con
+producción, no desarrollo.
+
+El reloj general sigue en ~60 min y **no se tocó**.
 
 ## Riesgos abiertos
 
-1. **T20 no está enganchado a ningún reloj todavía.** `correr()` existe y está
-   probado, pero nada lo llama periódicamente. Es deliberado —G7— pero conviene
-   decirlo: hoy la cola se llena y no se vacía sola.
-2. **El ejecutor real no está escrito.** `procesar_una` recibe `ejecutar`
-   inyectado y los tests usan uno de prueba. Conectarlo al CRM es trabajo
-   pequeño y con idempotencia demostrada; conectarlo a WispHub **no se hace**
-   mientras Q2 siga rojo.
-3. **Sólo `crear_caso` se encola hoy**, desde `marcar_escalada`. Los otros tres
-   tipos existen en el esquema y en el panel, sin productor. Encolar
-   `crear_ticket` exige decidir antes qué pasa cuando queda `desconocida` en el
-   flujo real, que es una decisión de operación.
+1. **`crear_ticket` no tiene ejecutor, y no lo va a tener mientras Q2 siga
+   rojo.** Un trabajo de ese tipo que llegue a la cola hoy termina en
+   `fallida_definitiva` con código `sin_ejecutor:crear_ticket` — visible, no
+   silencioso. Es el comportamiento correcto, pero conviene saberlo.
+2. **Sólo `crear_caso` se encola**, desde `marcar_escalada`. Los otros tres
+   tipos existen en esquema y panel sin productor: encolar `crear_ticket` exige
+   decidir antes qué pasa cuando queda `desconocida` en el flujo real.
+3. **La búsqueda del caso depende de una herramienta con `busca_caso` en el
+   catálogo del tenant, que hoy ningún tenant declara.** Sin ella,
+   `buscar_por_nombre` devuelve `None` y todo reintento intentaría crear. No es
+   inseguro —el CRM rechaza el nombre repetido con 400 y esa carrera se maneja—
+   pero conviene declararla antes de encender el worker.
 4. Nada se vio renderizado, como toda la Fase 1.
