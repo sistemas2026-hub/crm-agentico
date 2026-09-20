@@ -367,6 +367,178 @@ revisar("vistaDeAsignados" in panel,
         "la vista sale de asignados.js y no se decide en el panel")
 
 
+# =============================================================================
+titulo("9. la atomicidad: owner nuevo sin intencion es imposible")
+# =============================================================================
+# Contra PostgreSQL real. El riesgo que cierra esta seccion: que Dexter cambie
+# de operador y NO quede ninguna intencion durable de reflejarlo -- porque ahi
+# D28 vuelve en silencio, que es exactamente de donde venimos.
+faltan_db = [v for v in ("DBHOST", "DBPORT", "DBNAME", "DBUSER", "DBPASSWORD")
+             if not os.environ.get(v)]
+if faltan_db:
+    print(f"  [saltado] esta seccion necesita {faltan_db}")
+else:
+    import psycopg
+    from psycopg.rows import dict_row
+    from nucleo.relevo import transiciones as T
+
+    DATOS_DB = dict(host=os.environ["DBHOST"], port=os.environ["DBPORT"],
+                    dbname=os.environ["DBNAME"], user=os.environ["DBUSER"],
+                    password=os.environ["DBPASSWORD"])
+    admin = psycopg.connect(**DATOS_DB, autocommit=True, row_factory=dict_row)
+    ORG = uuid.uuid4()
+    TEN = f"prueba-d28-{uuid.uuid4().hex[:8]}"
+
+    try:
+        oblig = admin.execute(
+            "select column_name, data_type from information_schema.columns "
+            "where table_schema='public' and table_name='organization' "
+            "and is_nullable='NO' and column_default is null").fetchall()
+        valores = {"id": str(ORG), "name": TEN, "api_key": f"k-{ORG}",
+                   "company_name": TEN}
+        for fl in oblig:
+            campo, tipo = fl["column_name"], fl["data_type"]
+            if campo in valores:
+                continue
+            valores[campo] = ("now()" if "timestamp" in tipo or tipo == "date"
+                              else True if tipo == "boolean"
+                              else 0 if tipo in ("integer", "bigint", "smallint", "numeric")
+                              else "{}" if tipo in ("json", "jsonb", "ARRAY") else "")
+        cols = ", ".join('"' + k + '"' for k in valores)
+        marcas = ", ".join("now()" if v == "now()" else "%s" for v in valores.values())
+        admin.execute("insert into public.organization (" + cols + ") values (" + marcas + ")",
+                      [v for v in valores.values() if v != "now()"])
+        admin.execute("insert into asistente.tenant_config (organization_id, slug) "
+                      "values (%s, %s)", (str(ORG), TEN))
+
+        def conversacion_humana(caso=None):
+            cid = admin.execute(
+                "insert into asistente.conversations "
+                "(organization_id, canal, usuario_externo, estado, control, "
+                " control_motivo, relevo_version, caso_id) "
+                "values (%s,'whatsapp',%s,'abierta','humano','escalada',1,%s) "
+                "returning id",
+                (str(ORG), f"57300{uuid.uuid4().int % 10**7:07d}",
+                 str(caso or uuid.uuid4()))).fetchone()["id"]
+            return str(cid)
+
+        def intenciones(cid):
+            return admin.execute(
+                "select clave_idempotencia, datos_intencion, estado "
+                "from asistente.sincronizaciones_externas "
+                "where conversation_id = %s and tipo = 'asignar_caso'",
+                (cid,)).fetchall()
+
+        def duenio(cid):
+            f = admin.execute("select asignada_a_usuario_id, relevo_version "
+                              "from asistente.conversations where id = %s",
+                              (cid,)).fetchone()
+            return (str(f["asignada_a_usuario_id"]) if f["asignada_a_usuario_id"] else None,
+                    f["relevo_version"])
+
+        ANA_ID = str(uuid.uuid4())
+        LUIS_ID = str(uuid.uuid4())
+
+        # --- (a) camino normal: los dos quedan -------------------------------
+        cid = conversacion_humana()
+        r = T.tomar(TEN, cid, operador_id=ANA_ID, operador_nombre="Ana Gomez")
+        revisar(r.aplicada is True, "la toma se aplica")
+        filas = intenciones(cid)
+        revisar(len(filas) == 1,
+                f"y queda UNA intencion durable de reflejarlo ({len(filas)})")
+        revisar(filas and filas[0]["datos_intencion"].get("usuario_id") == ANA_ID,
+                "con el usuario durable, para que el ejecutor lo traduzca")
+        revisar(duenio(cid)[0] == ANA_ID, "el operador quedo asignado")
+
+        # --- (b) clave repetida: no es fallo ---------------------------------
+        # Soltar y volver a tomar la MISMA persona da la misma clave. La
+        # intencion ya existe y se adopta; la toma se aplica igual.
+        T.soltar(TEN, cid, operador_id=ANA_ID, operador_nombre="Ana Gomez")
+        r2 = T.tomar(TEN, cid, operador_id=ANA_ID, operador_nombre="Ana Gomez")
+        revisar(r2.aplicada is True,
+                "volver a tomar con la clave ya existente NO falla",
+                "Un 'on conflict do nothing' devuelve None, y eso no es un error.")
+        revisar(len(intenciones(cid)) == 1,
+                "y no se duplica la intencion: se adopta la que habia")
+        revisar(duenio(cid)[0] == ANA_ID, "el operador vuelve a quedar asignado")
+
+        # --- (c) reasignar: otra persona, otra intencion ---------------------
+        r3 = T.reasignar(TEN, cid, admin_id=str(uuid.uuid4()), admin_nombre="Jefa",
+                         destino_id=LUIS_ID, destino_nombre="Luis Paz",
+                         motivo="rota de turno")
+        revisar(r3.aplicada is True, "la reasignacion se aplica")
+        filas = intenciones(cid)
+        revisar(len(filas) == 2,
+                f"y genera una intencion NUEVA para el nuevo operador ({len(filas)})")
+        usuarios = {f["datos_intencion"].get("usuario_id") for f in filas}
+        revisar(usuarios == {ANA_ID, LUIS_ID},
+                "una por persona: reasignar no se descarta como repetido")
+
+        # --- (d) LO QUE NO PUEDE PASAR ---------------------------------------
+        # Un fallo real al escribir la intencion no puede dejar al operador
+        # cambiado. Se inyecta la falla en el punto que corre DENTRO de la
+        # transaccion, despues de escribir estado y evento.
+        cid2 = conversacion_humana()
+        antes = duenio(cid2)
+        T._gancho_antes_del_commit = lambda: (_ for _ in ()).throw(
+            RuntimeError("fallo al escribir la intencion"))
+        try:
+            T.tomar(TEN, cid2, operador_id=ANA_ID, operador_nombre="Ana Gomez")
+            revisar(False, "un fallo al encolar aborta la transicion entera")
+        except Exception:
+            revisar(True, "un fallo al encolar aborta la transicion entera")
+        finally:
+            T._gancho_antes_del_commit = None
+
+        revisar(duenio(cid2) == antes,
+                "el operador NO quedo cambiado",
+                "Operador nuevo sin intencion durable es el estado que D28 "
+                "existe para impedir, y volveria en silencio.")
+        revisar(intenciones(cid2) == [],
+                "y tampoco quedo una intencion suelta")
+
+        # Y la conversacion sigue tomable: el rollback no la dejo a medias.
+        r4 = T.tomar(TEN, cid2, operador_id=ANA_ID, operador_nombre="Ana Gomez")
+        revisar(r4.aplicada is True and len(intenciones(cid2)) == 1,
+                "reintentar despues del fallo deja las dos cosas, juntas")
+
+        # --- (e) sin caso todavia: no se encola, y la toma igual funciona ----
+        cid3 = admin.execute(
+            "insert into asistente.conversations "
+            "(organization_id, canal, usuario_externo, estado, control, "
+            " control_motivo, relevo_version) "
+            "values (%s,'whatsapp',%s,'abierta','humano','escalada',1) returning id",
+            (str(ORG), f"57300{uuid.uuid4().int % 10**7:07d}")).fetchone()["id"]
+        r5 = T.tomar(TEN, str(cid3), operador_id=ANA_ID, operador_nombre="Ana Gomez")
+        revisar(r5.aplicada is True and intenciones(str(cid3)) == [],
+                "sin caso no hay nada que reflejar, y la toma funciona igual")
+
+        # --- la garantia, dicha de una vez -----------------------------------
+        huerfanas = admin.execute(
+            "select count(*) as n from asistente.conversations c "
+            "where c.organization_id = %s and c.caso_id is not null "
+            "  and c.asignada_a_usuario_id is not null and c.relevo_version > 0 "
+            "  and not exists (select 1 from asistente.sincronizaciones_externas s "
+            "                   where s.conversation_id = c.id "
+            "                     and s.tipo = 'asignar_caso')",
+            (str(ORG),)).fetchone()["n"]
+        revisar(huerfanas == 0,
+                f"ninguna conversacion con caso y operador quedo sin intencion "
+                f"({huerfanas})")
+
+        # Y el codigo no tiene un except que pueda tragarse ese fallo.
+        cuerpo_helper = fuente_tr[fuente_tr.index("def _encolar_asignacion_crm"):]
+        cuerpo_helper = cuerpo_helper[:cuerpo_helper.index(chr(10) + "def ")]
+        sin_comentarios = "\n".join(l for l in cuerpo_helper.splitlines()
+                                    if not l.strip().startswith("#"))
+        revisar("except" not in sin_comentarios,
+                "el helper no atrapa excepciones: deja que la transicion caiga",
+                "Un except aqui no salvaria nada --la transaccion ya quedo "
+                "abortada-- y prometeria una resistencia que no existe.")
+    finally:
+        admin.execute("delete from public.organization where id = %s", (str(ORG),))
+        admin.close()
+
 print()
 if fallos:
     print(f"[FALLA] {len(fallos)} comprobacion(es) no pasaron.")

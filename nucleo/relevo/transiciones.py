@@ -73,7 +73,6 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from nucleo.persistencia import db
-from nucleo.observabilidad.registro import registrar
 from nucleo.relevo import asignados_crm
 from nucleo.relevo import control as regla_control
 
@@ -317,19 +316,34 @@ def _encolar_asignacion_crm(cur, org, conversation_id, f, usuario_id: str) -> No
     caso_id = f.get("caso_id") if hasattr(f, "get") else None
     if not caso_id or not usuario_id:
         return
-    try:
-        db.encolar_sincronizacion(
-            cur, org, conversation_id, tipo="asignar_caso",
-            clave=asignados_crm.clave_de_asignacion(
-                conversation_id, str(caso_id), str(usuario_id)),
-            datos={"caso_id": str(caso_id), "usuario_id": str(usuario_id)})
-    except Exception as e:
-        # Que no se pueda encolar el reflejo en el CRM NO puede tumbar la toma:
-        # quien atiende ya cambio en Dexter, que es la autoridad. Queda la
-        # divergencia, visible, que es justo lo que D28 prefiere sobre romper
-        # la transicion.
-        registrar("relevo", "no se pudo encolar la asignacion del caso en el CRM",
-                  error=e)
+
+    # SIN try/except, y es deliberado. Antes habia uno, con el argumento de que
+    # "no se puede tumbar la toma por no poder reflejarla". Estaba mal por dos
+    # motivos:
+    #
+    #   1. NO SALVABA NADA. Esto corre con el cursor de la transaccion. Un error
+    #      de base aqui deja la transaccion abortada, asi que atraparlo no
+    #      permite seguir: el COMMIT termina en ROLLBACK igual. El except
+    #      prometia una resistencia que no existia.
+    #
+    #   2. SI hubiera funcionado --para un error que no fuera de base-- habria
+    #      dejado el estado que D28 existe para impedir: el operador cambiado en
+    #      Dexter, ninguna intencion encolada, y nada durable que lo diga. La
+    #      divergencia volveria en silencio, que es de donde venimos.
+    #
+    # Dejandolo propagar, la transicion entera hace rollback: o cambia el
+    # operador Y queda la intencion, o no cambia nada. El operador ve un error y
+    # reintenta, que es mucho mejor que una divergencia que nadie nota.
+    #
+    # Una clave repetida NO es un fallo: encolar_sincronizacion hace
+    # 'on conflict do nothing' y devuelve None. La intencion ya existe y se
+    # adopta -- que es justo lo que tiene que pasar cuando alguien toma dos
+    # veces la misma conversacion.
+    db.encolar_sincronizacion(
+        cur, org, conversation_id, tipo="asignar_caso",
+        clave=asignados_crm.clave_de_asignacion(
+            conversation_id, str(caso_id), str(usuario_id)),
+        datos={"caso_id": str(caso_id), "usuario_id": str(usuario_id)})
 
 
 def tomar(tenant: str, conversation_id: str, *, operador_id: str, operador_nombre: str,
