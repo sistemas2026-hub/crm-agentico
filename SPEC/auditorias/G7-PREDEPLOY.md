@@ -25,6 +25,19 @@ lee_asignados   consultar_asignados_caso_crm   GET  /cases/<id>/assignees/
 lee_perfiles    consultar_perfiles_crm         GET  /users/get-teams-and-users/
 ```
 
+**B6 agrega una quinta, y sin ella la cola no cierra casos:**
+
+```
+lee_caso        (falta declararla)             GET  /api/cases/<id>/
+```
+
+`cierra_caso` ya existe en el catálogo. Pero `cerrar_caso` exige **las dos**:
+medido contra el CRM real, un PATCH sobre un caso ya cerrado responde 200 y le
+reescribe `closed_on` con la fecha del reintento. Con la de escribir sola se
+podría escribir sin mirar antes, que es exactamente el daño. Sin ambas, el
+efecto queda `fallida_definitiva` con su código, visible y sin reintentos —
+nunca `desconocida`. Ver SPEC/auditorias/B6-CIERRE-DESENLACE.md.
+
 **`asigna_caso` apunta al endpoint aditivo y a ningún otro.** `bulk/update` usa
 `.set()` y el PUT del detalle hace `clear()`+`add()`: los dos reemplazan el
 conjunto y borrarían a los colaboradores que un supervisor haya sumado; el PUT

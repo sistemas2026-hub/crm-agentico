@@ -104,9 +104,101 @@ propuesta que ella misma está por cancelar.
 
 ## Cerrar la conversación NO es cerrar el caso ni el ticket
 
-La transición cierra la conversación de Dexter y nada más. Hay una aserción que
-lo mide —ninguna sincronización nueva— y otra que comprueba que no hay una
-llamada a la cola escondida en el cuerpo.
+La transacción cierra la conversación de Dexter y **anota la intención** de
+cerrar el caso (§3.6). El pedido HTTP lo hace el reconciliador después, fuera
+de la transacción: una TX abierta esperando una operación externa deja la fila
+bloqueada y la sesión `idle in transaction` tras el pooler (X23). Hay
+aserciones que lo miden.
+
+El ticket de WispHub **no se encola**. Ver «El cierre externo» abajo.
+
+## El cierre externo, auditado contra las APIs reales
+
+El contrato dice «por defecto sí» para «cerrar también caso y ticket» (T17,
+P5). Antes de convertir eso en llamadas, se midió qué permite cada API.
+
+### `cerrar_caso` (CRM) — SEGURO, implementado
+
+Se ejercitó el endpoint real:
+`django-crm/backend/cases/tests/test_cierre_idempotente.py`, **7 pruebas en
+verde** contra Django y PostgreSQL. Las cuatro capacidades existen:
+
+```
+escribir     PATCH /api/cases/{id}/ {status: Closed, closed_on}
+verificar    GET /api/cases/{id}/ devuelve `status`
+repetir      un segundo cierre responde 200, incluso con una regla armada:
+             el gate de aprobación mira la TRANSICIÓN (old_status == Closed
+             sale temprano), así que una regla nueva no rompe un reintento
+rechazo      400 cuando falta una aprobación previa — legítimo y permanente
+```
+
+**Y un daño que sólo se ve ejecutándolo**: un PATCH sobre un caso ya cerrado
+responde 200 y **reescribe `closed_on`** con la fecha del pedido. Nada falla;
+el caso simplemente pasa a decir que se cerró un día en el que no se cerró, y
+toda métrica de tiempo de resolución se corre con él.
+
+Por eso el ejecutor **lee primero** y sólo escribe si sigue abierto — mismo
+orden que `crear_caso` y por el mismo motivo. Después **relee siempre**: el
+código de estado dice que el pedido se aceptó, no que el caso quedó cerrado
+(disciplina de D28).
+
+Hace falta una capacidad nueva del tenant, `lee_caso`. **Sin las dos
+(`lee_caso` + `cierra_caso`) no se intenta nada**: con la de escribir sola se
+podría escribir, que es exactamente lo que corre la fecha.
+
+Un `incierto` aquí vuelve a la cola en vez de quedar `desconocida`, y esa es
+toda la diferencia con Q2: aquí **sí hay a quién preguntar**.
+
+### `cerrar_ticket` (WispHub) — NO automatizado
+
+No por falta de tiempo. La única vía verificada para cerrar un ticket
+(`POST /api/tickets/{id}/respuesta/`, con `ticket-estado: 4`, verificada en
+producción el 28/08/2026) **publica un comentario en el mismo pedido**: cada
+reintento le deja al cliente otra copia del texto de cierre en su ticket.
+
+Y leer antes para evitarlo exige saber qué devuelve el GET. Nuestro propio
+importador documenta la asimetría: **las lecturas vuelven como etiqueta**
+(`"Cerrado"`) **y las escrituras van por código** (`4`)
+—`cases/models.py::external_status`—. Ese vocabulario de etiquetas no está
+verificado contra la API real, y verificarlo exige credenciales de producción.
+
+Con eso, la regla del brief se aplica sola: **no se automatiza**. El cierre
+manual que deja un ticket abierto lo dice en su evento (`ticket_pendiente`),
+para que alguien lo vea. Es menos de lo que el contrato pide y más de lo que
+había: callarlo dejaría el ticket vivo sin que nadie se entere.
+
+No es lo mismo que Q2, y conviene no mezclarlos: Q2 es sobre **crear** un
+ticket que después no se puede encontrar. Aquí el id se conoce; lo que falta es
+poder cerrarlo sin escribirle al cliente de más.
+
+## Completar el desenlace después del cierre
+
+`transiciones.completar_desenlace()`. Es la frase de §3.5 que hasta ahora no
+tenía transición: los cierres por el cliente y por inactividad dejan NULL «y se
+completan después si una persona revisa».
+
+```
+sólo sobre NULL        una sola vez. Si ya tiene, 'ya_completado' → 409.
+sólo cerradas          una abierta se cierra, no se completa.
+operador autenticado   obligatorio, validado.
+código visible         del catálogo de hoy; uno oculto se rechaza.
+NO reabre              el estado no se toca.
+NO cambia quién cerró  la cerró el cliente o el reloj. Completar el código
+                       después no convierte a quien revisa en el que cerró, y
+                       confundirlo rompe «cuántas cerró el cliente solo».
+NO toca nada de afuera escribir un código en una fila no cambia nada en el CRM.
+evento propio          'desenlace_completado', en la misma TX. No un segundo
+                       'cerrada': dos se leerían como dos cierres.
+```
+
+El candado está en el propio UPDATE (`and desenlace_codigo is null`), no en una
+lectura previa: dos revisores a la vez son lo normal, y el segundo tiene que
+enterarse de que llegó tarde. Probado con dos hilos.
+
+Sobre una conversación de legado escribe el dato pero **no sube la versión ni
+deja evento**: adoptar una de versión 0 es una decisión humana explícita y esa
+puerta es G8 y ninguna otra (C5, I21). El dato queda igual, que es lo que la
+persona vino a dejar.
 
 ## La pantalla
 
@@ -157,11 +249,18 @@ G8 cerrar_con_desenlace                               10
 los CHECK de la base                                   4
 ```
 
-**Mutaciones: 10 probadas, 10 rojas.** Entre ellas: el catálogo acepta
+Más ~45 sobre completar el desenlace (sección 10) y la cola de `cerrar_caso`
+en `tests/test_b4_sincronizaciones.py`, y **7 contra el CRM real** en
+`django-crm/backend/cases/tests/test_cierre_idempotente.py`.
+
+**Mutaciones: 21 probadas, 21 rojas.** Entre ellas: el catálogo acepta
 cualquier código; un desconocido cae a `otro`; el cierre manual sin código usa
 `otro`; un automático guarda el desenlace que le manden; el plazo lo deja en
 NULL; T15a/T15b dejan de mirar `atendida_manual`; también se cancelan las
-`ejecutando`; cerrar una de legado la adopta.
+`ejecutando`; cerrar una de legado la adopta; completar pisa el desenlace que
+ya estaba; completar se apropia del cierre ajeno; el cierre encola
+`cerrar_ticket`; `cerrar_caso` escribe sin leer antes; da por bueno sin releer;
+se intenta sin la capacidad de leer.
 
 Regresión: **9 de 9** suites del relevo en verde contra la misma base, más la
 guarda de arquitectura y el editor de config. Frontend: 242 pruebas en verde,
@@ -188,19 +287,26 @@ guarda de arquitectura y el editor de config. Frontend: 242 pruebas en verde,
 ## BLOQUEOS
 
 ```
-T17 «cerrar también caso y ticket»  NO implementado. Las filas cerrar_caso /
-                                    cerrar_ticket no tienen ejecutor (B4), y
-                                    encolarlas hoy daría una fallida_definitiva
-                                    en cada cierre sobre un caso que el camino
-                                    en línea de hoy SÍ cierra: una alarma falsa.
-                                    No se agregó una bandera que no hace nada.
+cerrar_ticket (WispHub)             NO automatizado, con la razón medida
+                                    arriba: la única vía verificada publica un
+                                    comentario en cada intento, y el GET
+                                    devuelve etiquetas cuyo vocabulario no está
+                                    verificado. Queda visible en el evento.
+                                    Para levantarlo hace falta, contra la API
+                                    real y con el método del valor imposible:
+                                    (1) qué devuelve GET /api/tickets/{id}/ en
+                                    el campo estado, y (2) si existe alguna vía
+                                    de cierre que no publique un comentario.
 
-completar el desenlace después      §3.5 dice que los cierres por el cliente y
-                                    por inactividad dejan NULL «y se completan
-                                    después si una persona revisa». Esa
-                                    completada NO tiene transición en §6, ni
-                                    tipo de evento en §3.3, ni precondición.
-                                    NO se inventó.
+lee_caso                            capacidad NUEVA del tenant. Sin ella (y sin
+                                    cierra_caso) la cola no cierra casos: queda
+                                    'fallida_definitiva' con su código, visible.
+                                    Declararla en el catálogo es trabajo de G7,
+                                    que ahora tiene CINCO capacidades, no cuatro.
+
+pantalla para completar             el endpoint y el proxy existen y están
+                                    probados; no hay todavía una vista que liste
+                                    las cerradas sin desenlace para revisarlas.
 
 T18 (inactividad)                   la columna lo admite y la transición lo
                                     acepta, pero el productor sigue siendo el
