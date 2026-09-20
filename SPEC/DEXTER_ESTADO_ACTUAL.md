@@ -97,6 +97,28 @@ semánticos ember/clay/      ⏭ resueltos en context/ (1.5); los consumidores d
 rust/moss                      otras pantallas, en la fase de cada una
 ```
 
+## B4 — lo que Q2 ya decidió
+
+```
+Q2                    🔴 ROJO, cerrado el 20/09/2026 (auditorias/B4-Q2-WISPHUB.md)
+crear_ticket WispHub  NO es reintentable automáticamente: la API no acepta
+                      clave de idempotencia, no hay filtro para buscar el
+                      ticket, WispHub reescribe el asunto y el histórico se
+                      recorta sin rango de fecha (tope 2 meses)
+fallo incierto        → estado 'desconocida'. NUNCA se crea otro ticket
+                      automáticamente: un ticket pendiente de revisión es
+                      preferible a dos visitas técnicas al mismo cliente
+crear_caso (CRM)      SÍ reintentable: el nombre incluye el conversation_id y
+                      es único por organización; un repetido da 400 y se adopta
+```
+
+**La cola de B4 no puede diseñarse homogénea.** Los dos tipos de efecto tienen
+estrategias distintas, y `desconocida` deja de ser un caso teórico del esquema
+para ser el camino normal de la mitad de la cola. Eso arrastra dos cosas a
+decidir antes de escribir la migración: dónde se muestra un pendiente de
+revisión en la conversación, y que el reintento automático de `crear_ticket`
+**no se escribe**, ni detrás de una bandera.
+
 ## SIGUIENTE GATE
 
 ```
