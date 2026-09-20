@@ -25,6 +25,7 @@ Un archivo por gate. El agente lee sólo los que el prompt le nombre.
 | **B5** | [B5-ACCIONES.md](B5-ACCIONES.md) | **CERRADO EN CÓDIGO** | Aprobar es reservar, revalidar, ejecutar y resolver. La revalidación tiene tres desenlaces: «no se pudo comprobar» no ejecuta. Validador en modo advertencia hasta que cierre la medición (Q3). |
 | **D28** | [D28-ASIGNADO-CRM.md](D28-ASIGNADO-CRM.md) | **CERRADO EN CÓDIGO** | `assigned_to` es un conjunto, no un dueño. Endpoint aditivo nuevo en el CRM, identidad por id y relectura obligatoria. Sin DELETE: el CRM no guarda quién asignó a quién. Falta el productor que lo encole. |
 | **G7** | [G7-PREDEPLOY.md](G7-PREDEPLOY.md) | **listo para activación** | Las cuatro capacidades declaradas, con asigna_caso al endpoint aditivo y a ningún otro. Worker apagado por defecto, cadencia 300 s. NO verde: falta aplicar config, desplegar y encender. |
+| **G6** | [G6-PREFLIGHT-DDL.md](G6-PREFLIGHT-DDL.md) | **verde en lo medible** | El DDL de mensajes cuesta 10 ms al volumen real y 124 ms a 193 veces ese volumen. No reescribe la tabla, el indice nace vacio, no hace falta CONCURRENTLY. Falta el preflight del dia contra produccion. |
 | — | [1.4C-hotpath-diferido.md](1.4C-hotpath-diferido.md) | diferido | Los hunks de ③a/③c retirados, recuperables con `git apply -R`. |
 
 Los gates sin archivo viven sólo en la transcripción; sus conclusiones vigentes
