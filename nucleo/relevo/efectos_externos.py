@@ -32,6 +32,7 @@ QUE HAY Y QUE NO
 from __future__ import annotations
 
 from nucleo.observabilidad.registro import registrar
+from nucleo.relevo import asignados_crm
 from nucleo.relevo.reconciliador import ResultadoEfecto
 
 #: Lo que el CRM responde cuando el nombre ya existe. Es la senal de que el
@@ -118,7 +119,8 @@ def crear_caso(config, tenant: str, datos: dict, referencia: str | None,
 
 
 def asignar_caso(config, tenant: str, datos: dict, referencia: str | None,
-                 *, agregar_asignado, leer_asignados) -> ResultadoEfecto:
+                 *, agregar_asignado, leer_asignados,
+                 leer_perfiles=None) -> ResultadoEfecto:
     """
     Pone al operador de Dexter en el conjunto de asignados del caso (D28).
 
@@ -135,6 +137,31 @@ def asignar_caso(config, tenant: str, datos: dict, referencia: str | None,
     """
     caso_id = (datos or {}).get("caso_id")
     perfil_id = (datos or {}).get("perfil_id")
+    usuario_id = (datos or {}).get("usuario_id")
+
+    if not perfil_id and usuario_id:
+        # La intencion viaja con el usuario DURABLE de Dexter, no con el perfil
+        # del CRM: resolverlo exige preguntar, y eso no puede pasar dentro de
+        # la transaccion que cambia la asignacion (X23). Se traduce aca, que ya
+        # esta fuera.
+        if leer_perfiles is None:
+            return ResultadoEfecto("permanente", codigo="sin_catalogo_de_perfiles")
+        try:
+            perfiles = leer_perfiles()
+        except Exception as e:
+            clase, codigo = _clase_de_error(e)
+            # No se pudo preguntar quien es. No se escribio nada, asi que esto
+            # se reintenta entero: 'transitorio', no 'incierto'.
+            return ResultadoEfecto("transitorio" if clase != "permanente" else clase,
+                                   codigo=codigo)
+        perfil = asignados_crm.perfil_de_usuario(perfiles, str(usuario_id))
+        if perfil is None:
+            # El operador no tiene perfil en esta organizacion del CRM. No es
+            # una falla a reintentar --reintentar no lo va a crear-- y no se
+            # fuerza contra nadie: queda visible.
+            return ResultadoEfecto("permanente", codigo="operador_sin_perfil_en_crm")
+        perfil_id = perfil.get("id")
+
     if not caso_id or not perfil_id:
         return ResultadoEfecto("permanente", codigo="sin_caso_o_perfil")
 
@@ -182,7 +209,7 @@ def _ids_asignados(respuesta) -> set[str]:
 
 
 def ejecutor(config, tenant: str, *, crear, buscar_por_nombre,
-             agregar_asignado=None, leer_asignados=None):
+             agregar_asignado=None, leer_asignados=None, leer_perfiles=None):
     """
     El `ejecutar` que espera el reconciliador, ya atado a este tenant.
 
@@ -204,6 +231,7 @@ def ejecutor(config, tenant: str, *, crear, buscar_por_nombre,
                 return ResultadoEfecto("permanente", codigo="sin_ejecutor:asignar_caso")
             return asignar_caso(config, tenant, datos, referencia,
                                 agregar_asignado=agregar_asignado,
-                                leer_asignados=leer_asignados)
+                                leer_asignados=leer_asignados,
+                                leer_perfiles=leer_perfiles)
         return ResultadoEfecto("permanente", codigo=f"sin_ejecutor:{tipo}")
     return _ejecutar

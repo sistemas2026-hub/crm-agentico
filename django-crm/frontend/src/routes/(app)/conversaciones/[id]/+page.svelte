@@ -14,6 +14,7 @@
   import CustomerPanel from '$lib/conversaciones/context/CustomerPanel.svelte';
   import NetworkPanel from '$lib/conversaciones/context/NetworkPanel.svelte';
   import SyncPanel from '$lib/conversaciones/context/SyncPanel.svelte';
+  import AssigneesPanel from '$lib/conversaciones/context/AssigneesPanel.svelte';
   import ActionsPanel from '$lib/conversaciones/context/ActionsPanel.svelte';
   import RetentionToggle from '$lib/conversaciones/context/RetentionToggle.svelte';
   import {
@@ -1608,6 +1609,8 @@
        asistente dentro de ella. -->
   <!-- Arriba del todo cuando hay algo que revisar: un caso que no se creó es
        más urgente que cualquier otro contexto de la conversación. -->
+  <AssigneesPanel asignados={data.asignados_crm ?? null}
+                  aCargoEnDexter={conversacion.asignada_a_nombre ?? ''} />
   <ActionsPanel {acciones} aprobando={aprobandoAccion} onAprobar={aprobarAccion} />
   <SyncPanel {sincronizaciones} />
 

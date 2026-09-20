@@ -73,6 +73,8 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from nucleo.persistencia import db
+from nucleo.observabilidad.registro import registrar
+from nucleo.relevo import asignados_crm
 from nucleo.relevo import control as regla_control
 
 # Punto de inyeccion de fallas para las pruebas: se llama DENTRO de la
@@ -136,7 +138,8 @@ def _evento_previo(cur, org, conversation_id, clave):
 def _fila(cur, org, conversation_id):
     cur.execute("""select control, control_motivo, asignada_a_usuario_id, asignada_a_nombre,
                           relevo_version, estado, pendiente_interno_desde,
-                          escalada_a_humano, necesita_atencion_humana, tomada_por
+                          escalada_a_humano, necesita_atencion_humana, tomada_por,
+                          caso_id
                    from asistente.conversations
                    where organization_id = %s and id = %s
                    for update""", (org, conversation_id))
@@ -291,6 +294,44 @@ def intervenir(tenant: str, conversation_id: str, *, operador_id: str, operador_
 #  transiciones sobre una conversacion en manos de personas
 # =============================================================================
 
+def _encolar_asignacion_crm(cur, org, conversation_id, f, usuario_id: str) -> None:
+    """
+    Anota que el caso del CRM tiene que mostrar a este operador (D28).
+
+    VA EN LA MISMA TRANSACCION que el cambio de asignacion, y eso NO contradice
+    "no escribir en el CRM dentro de la transaccion": lo que se escribe aca es
+    la INTENCION, en una tabla propia. Al CRM lo llama el reconciliador,
+    despues del COMMIT y fuera de toda transaccion (§3.6, X23). Si se hiciera
+    al reves --primero el CRM, despues el commit-- un fallo dejaria el caso
+    asignado a alguien que en Dexter no lo tiene.
+
+    Sin caso todavia no hay nada que asignar: una conversacion puede cambiar de
+    manos antes de que exista el caso, y forzar uno aca seria inventar un
+    efecto sobre algo que no esta. Cuando el caso se cree, la siguiente
+    transicion lo encola.
+
+    El PERFIL del CRM no se resuelve aca a proposito: eso exige preguntarle al
+    CRM, y una llamada HTTP dentro de esta transaccion es justo lo que X23
+    prohibe. Viaja el usuario durable y el ejecutor lo traduce.
+    """
+    caso_id = f.get("caso_id") if hasattr(f, "get") else None
+    if not caso_id or not usuario_id:
+        return
+    try:
+        db.encolar_sincronizacion(
+            cur, org, conversation_id, tipo="asignar_caso",
+            clave=asignados_crm.clave_de_asignacion(
+                conversation_id, str(caso_id), str(usuario_id)),
+            datos={"caso_id": str(caso_id), "usuario_id": str(usuario_id)})
+    except Exception as e:
+        # Que no se pueda encolar el reflejo en el CRM NO puede tumbar la toma:
+        # quien atiende ya cambio en Dexter, que es la autoridad. Queda la
+        # divergencia, visible, que es justo lo que D28 prefiere sobre romper
+        # la transicion.
+        registrar("relevo", "no se pudo encolar la asignacion del caso en el CRM",
+                  error=e)
+
+
 def tomar(tenant: str, conversation_id: str, *, operador_id: str, operador_nombre: str,
           clave: str | None = None) -> Resultado:
     """
@@ -332,6 +373,7 @@ def tomar(tenant: str, conversation_id: str, *, operador_id: str, operador_nombr
             (usuario, nombre, nombre))
         datos = {"version": version, "anterior_nombre": None}
         ev = _evento(cur, org, conversation_id, "tomada", "operador", usuario, nombre, datos, clave)
+        _encolar_asignacion_crm(cur, org, conversation_id, f, usuario)
         return Resultado(True, True, version, ev, datos=datos)
     return _ejecutar(tenant, conversation_id, clave, cuerpo, tipo="tomada", actor_id=usuario)
 
@@ -413,6 +455,10 @@ def reasignar(tenant: str, conversation_id: str, *, admin_id: str, admin_nombre:
                  "nuevo_usuario_id": id_destino, "nuevo_nombre": nombre_destino,
                  "motivo": motivo}
         ev = _evento(cur, org, conversation_id, "reasignada", "operador", id_admin, nombre_admin, datos, clave)
+        # El que entra, no el que sale: el efecto es aditivo y al anterior NO se
+        # lo quita (D28). El CRM no guarda quien asigno a quien, asi que sacarlo
+        # podria borrar una colaboracion que nadie automatizo.
+        _encolar_asignacion_crm(cur, org, conversation_id, f, id_destino)
         return Resultado(True, True, version, ev, datos=datos)
     return _ejecutar(tenant, conversation_id, clave, cuerpo, tipo="reasignada", actor_id=id_admin)
 

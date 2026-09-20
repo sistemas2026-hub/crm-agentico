@@ -95,14 +95,21 @@ def diferencia(asignados_crm: list[dict], usuario_id: str | None,
             "colaboradores": colaboradores, "sin_perfil": False}
 
 
-def clave_de_asignacion(conversation_id: str, caso_id: str, perfil_id: str) -> str:
+def clave_de_asignacion(conversation_id: str, caso_id: str, quien: str) -> str:
     """
     La clave de idempotencia del efecto.
 
-    Lleva el PERFIL y no solo la conversacion: reasignar a otra persona es otro
-    efecto, y tiene que poder encolarse aunque el anterior ya se haya hecho. Sin
-    el perfil, la segunda asignacion se descartaria como repetida y el CRM
+    Lleva A QUIEN se asigna, no solo la conversacion: reasignar a otra persona
+    es otro efecto, y tiene que poder encolarse aunque el anterior ya se haya
+    hecho. Sin eso, la segunda asignacion se descartaria como repetida y el CRM
     quedaria mostrando al operador anterior -- que es exactamente el defecto que
     D28 describe.
+
+    'quien' es el identificador DURABLE de Dexter (el User.id), no el
+    Profile.id del CRM. No es una preferencia: resolver el perfil exige
+    preguntarle al CRM, y la clave se arma dentro de la transaccion que cambia
+    la asignacion -- meter una llamada HTTP ahi es exactamente lo que X23
+    prohibe. Dentro de una organizacion la correspondencia es uno a uno, asi
+    que discrimina igual: dos operadores distintos dan dos claves distintas.
     """
-    return f"asignar_caso:{conversation_id}:{caso_id}:{perfil_id}"
+    return f"asignar_caso:{conversation_id}:{caso_id}:{quien}"

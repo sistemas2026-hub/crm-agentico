@@ -113,8 +113,53 @@ def _ejecutor_de(tenant: str):
                     return fila.get("id")
         return None
 
-    return efectos_externos.ejecutor(config, tenant,
-                                     crear=crear, buscar_por_nombre=buscar_por_nombre)
+    def agregar_asignado(caso_id: str, perfil_id: str):
+        """Pone a una persona en el caso SIN reemplazar a las demas (D28).
+
+        Exige una herramienta declarada con 'asigna_caso'. Sin ella no se
+        intenta nada: el unico endpoint que agrega sin pisar es el aditivo, y
+        caer al de asignacion masiva reemplazaria el conjunto -- que es
+        exactamente lo que este trabajo existe para no hacer."""
+        herr = next((h for h in config.herramientas
+                     if getattr(h, "asigna_caso", False)), None)
+        if not herr:
+            raise RuntimeError("el tenant no declara una herramienta para asignar el caso")
+        return herramientas_http.ejecutar(herr, {"id": caso_id, "profile_id": perfil_id})
+
+    def leer_asignados(caso_id: str):
+        """Quien figura en el caso AHORA. Es lo que permite confirmar el
+        efecto: el codigo de estado no lo prueba."""
+        herr = next((h for h in config.herramientas
+                     if getattr(h, "lee_asignados", False)), None)
+        if not herr:
+            raise RuntimeError("el tenant no declara una herramienta para leer los asignados")
+        return herramientas_http.ejecutar(herr, {"id": caso_id})
+
+    def leer_perfiles():
+        """Los perfiles del CRM, para traducir el usuario durable al perfil de
+        alla POR ID. Nunca por nombre: dos personas pueden llamarse igual."""
+        herr = next((h for h in config.herramientas
+                     if getattr(h, "lee_perfiles", False)), None)
+        if not herr:
+            raise RuntimeError("el tenant no declara una herramienta para leer los perfiles")
+        return herramientas_http.ejecutar(herr, {})
+
+    # Fail-closed: sin LAS TRES, el ejecutor devuelve 'permanente' para
+    # asignar_caso -- visible, y nunca 'desconocida'. Escribir sin poder
+    # comprobar despues seria afirmar un efecto que no se vio, y traducir el
+    # usuario sin el catalogo de perfiles obligaria a adivinar por nombre.
+    puede_asignar = all(
+        any(getattr(h, bandera, False) for h in config.herramientas)
+        for bandera in ("asigna_caso", "lee_asignados", "lee_perfiles"))
+    if not puede_asignar:
+        registrar("reconciliador", "el tenant no puede reflejar la asignacion en el CRM",
+                  tenant=tenant)
+
+    return efectos_externos.ejecutor(
+        config, tenant, crear=crear, buscar_por_nombre=buscar_por_nombre,
+        agregar_asignado=agregar_asignado if puede_asignar else None,
+        leer_asignados=leer_asignados if puede_asignar else None,
+        leer_perfiles=leer_perfiles if puede_asignar else None)
 
 
 def una_vuelta(*, seco: bool = False) -> dict:

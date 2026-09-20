@@ -241,6 +241,132 @@ malos = [p.name for p in proxies
 revisar(not malos, f"ningun proxy de asignados usa PUT ({malos})")
 
 
+# =============================================================================
+titulo("5. el catalogo puede declarar las capacidades")
+# =============================================================================
+# Las cuatro banderas NO existian en el schema y el codigo de B4 ya leia
+# 'busca_caso' con getattr(..., False): se consultaba una capacidad que ningun
+# YAML podia declarar --extra="forbid" hacia fallar la carga entera-- y el
+# getattr devolvia False en silencio. G7 dependia de eso.
+from nucleo.config.schema import Herramienta                      # noqa: E402
+
+_BASE = dict(nombre="x", tipo="http", descripcion="d", solo_lectura=True,
+             roles_permitidos=["soporte"], endpoint="/api/x/",
+             base_url="https://x.co")
+for bandera in ("busca_caso", "asigna_caso", "lee_asignados", "lee_perfiles"):
+    try:
+        h = Herramienta(**_BASE, **{bandera: True})
+        revisar(getattr(h, bandera) is True,
+                f"el catalogo acepta '{bandera}' y lo conserva")
+    except Exception as e:
+        revisar(False, f"el catalogo acepta '{bandera}'", str(e)[:120])
+
+# Y siguen siendo banderas, no nombres fijos: cada empresa llama a sus
+# herramientas como quiere.
+revisar(Herramienta(**_BASE).asigna_caso is False,
+        "sin declararla, la capacidad es False y el efecto falla cerrado")
+
+
+# =============================================================================
+titulo("6. el productor: quien encola, y quien no")
+# =============================================================================
+fuente_tr = (RAIZ / "nucleo" / "relevo" / "transiciones.py").read_text(encoding="utf-8")
+
+
+def cuerpo_de(nombre):
+    i = fuente_tr.index(f"def {nombre}(tenant: str")
+    j = fuente_tr.index(chr(10) + "def ", i + 10)
+    return fuente_tr[i:j]
+
+
+for transicion in ("tomar", "reasignar"):
+    revisar("_encolar_asignacion_crm" in cuerpo_de(transicion),
+            f"{transicion} encola la asignacion del caso")
+
+for transicion in ("soltar", "devolver_a_ia", "resolver", "escalar"):
+    revisar("_encolar_asignacion_crm" not in cuerpo_de(transicion),
+            f"{transicion} NO encola nada",
+            "Soltar no limpia el caso: deja divergencia visible, que es "
+            "preferible a borrar una colaboracion.")
+
+# Reasignar encola al que ENTRA, no al que sale.
+revisar("_encolar_asignacion_crm(cur, org, conversation_id, f, id_destino)"
+        in cuerpo_de("reasignar"),
+        "reasignar encola al destino, no al anterior")
+
+# El efecto se encola DESPUES del evento, dentro de la misma transaccion: si
+# se encolara antes, un fallo al escribir el evento dejaria encolado un reflejo
+# de algo que no paso.
+cuerpo_tomar = cuerpo_de("tomar")
+revisar(cuerpo_tomar.index('"tomada", "operador"') < cuerpo_tomar.index("_encolar_asignacion_crm"),
+        "se encola despues de escribir el evento, en la misma transaccion")
+
+# Y no hay ninguna llamada HTTP dentro de la transaccion (X23).
+revisar("requests" not in fuente_tr and "herramientas_http" not in fuente_tr,
+        "las transiciones no hablan con el CRM: solo anotan la intencion")
+
+
+# =============================================================================
+titulo("7. el worker: fail-closed sin las tres capacidades")
+# =============================================================================
+fuente_w = (RAIZ / "nucleo" / "relevo" / "worker_reconciliador.py").read_text(encoding="utf-8")
+revisar('for bandera in ("asigna_caso", "lee_asignados", "lee_perfiles")' in fuente_w,
+        "se exigen LAS TRES capacidades, no una")
+revisar("agregar_asignado=agregar_asignado if puede_asignar else None" in fuente_w,
+        "y sin ellas no se inyecta nada: el efecto queda permanente y visible")
+
+# Traducir el usuario al perfil sin catalogo es permanente, no incierto.
+r = efectos_externos.ejecutor(
+    None, "t", crear=None, buscar_por_nombre=None,
+    agregar_asignado=lambda c, p: None, leer_asignados=lambda c: [],
+)("asignar_caso", {"caso_id": "c", "usuario_id": "user-ana"}, None)
+revisar(r.clase == "permanente" and r.codigo == "sin_catalogo_de_perfiles",
+        "sin catalogo de perfiles no se adivina: permanente")
+
+# Con catalogo, se traduce por id.
+ejec = efectos_externos.ejecutor(
+    None, "t", crear=None, buscar_por_nombre=None,
+    agregar_asignado=lambda c, p: {"added": True},
+    leer_asignados=lambda c: {"assigned_to": [ANA, LUIS]},
+    leer_perfiles=lambda: [OTRA_ANA, ANA, LUIS])
+r = ejec("asignar_caso", {"caso_id": "c", "usuario_id": "user-ana"}, None)
+revisar(r.clase == "exito" and r.referencia == "perfil-ana",
+        "el usuario durable se traduce al perfil correcto, no al homonimo",
+        "OTRA_ANA se llama igual y va primero en la lista.")
+
+# Un operador sin perfil en el CRM: permanente, no se fuerza contra nadie.
+r = ejec("asignar_caso", {"caso_id": "c", "usuario_id": "user-fantasma"}, None)
+revisar(r.clase == "permanente" and r.codigo == "operador_sin_perfil_en_crm",
+        "un operador sin perfil en el CRM queda visible, sin reintentos inutiles")
+
+# Si no se puede leer el catalogo, se reintenta entero: no se escribio nada.
+def perfiles_rotos():
+    raise TimeoutError("sin respuesta")
+
+r = efectos_externos.ejecutor(
+    None, "t", crear=None, buscar_por_nombre=None,
+    agregar_asignado=lambda c, p: {"added": True},
+    leer_asignados=lambda c: {"assigned_to": []},
+    leer_perfiles=perfiles_rotos)("asignar_caso", {"caso_id": "c", "usuario_id": "u"}, None)
+revisar(r.clase in ("transitorio", "incierto") and r.clase != "exito",
+        "si no se puede traducir, no se escribe y se reintenta")
+
+
+# =============================================================================
+titulo("8. la pantalla esta cableada")
+# =============================================================================
+FRONT = RAIZ / "django-crm" / "frontend" / "src"
+panel = (FRONT / "lib" / "conversaciones" / "context" / "AssigneesPanel.svelte").read_text(encoding="utf-8")
+pagina = (FRONT / "routes" / "(app)" / "conversaciones" / "[id]" / "+page.svelte").read_text(encoding="utf-8")
+
+marcado = panel[panel.rindex("</script>"):]
+revisar("AssigneesPanel" in pagina, "el panel esta montado en la conversacion")
+revisar("ETIQUETAS.dexter" in marcado and "ETIQUETAS.crm" in marcado,
+        "y usa las etiquetas del modulo, no texto propio")
+revisar("vistaDeAsignados" in panel,
+        "la vista sale de asignados.js y no se decide en el panel")
+
+
 print()
 if fallos:
     print(f"[FALLA] {len(fallos)} comprobacion(es) no pasaron.")

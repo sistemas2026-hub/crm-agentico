@@ -865,6 +865,36 @@ class Herramienta(Base):
     # todo lo existente -- no cambia el comportamiento de ninguna
     # herramienta que no la declare explicitamente.
     aprobacion_humana: bool = False
+    # =========================================================================
+    #  CAPACIDADES QUE EL RECONCILIADOR BUSCA POR BANDERA
+    # =========================================================================
+    #  El reconciliador (T20) no puede pedir herramientas por nombre: cada
+    #  empresa las llama como quiere. Las busca por estas banderas, y sin la
+    #  bandera NO intenta el efecto -- falla cerrado y visible.
+    #
+    #  ⚠️ LAS CUATRO SON NUEVAS AQUI Y ANTES NO SE PODIAN DECLARAR. El modelo
+    #  usa extra="forbid", asi que un YAML con 'busca_caso: true' fallaba la
+    #  carga entera -- y el codigo de B4 ya lo leia con getattr(..., False),
+    #  que devuelve False en silencio. O sea: la capacidad se consultaba, no
+    #  se podia declarar, y nadie se enteraba. Encontrado al construir D28.
+    #
+    #  Que cada una sea una BANDERA y no un nombre fijo es lo que deja que el
+    #  tenant elija el suyo sin tocar codigo -- mismo criterio que
+    #  'invocable_por_servicio'.
+
+    #: Busca un caso del CRM por su nombre exacto. La usa la reconciliacion de
+    #: 'crear_caso' para adoptar el que ya existe en vez de crear un segundo.
+    busca_caso: bool = False
+    #: Agrega UNA persona al caso sin reemplazar a las demas (D28). Tiene que
+    #: apuntar a un endpoint aditivo: uno que mande el conjunto entero borraria
+    #: a los colaboradores que alguien sumo a mano.
+    asigna_caso: bool = False
+    #: Lee quienes figuran en el caso AHORA. Sin esto no se puede confirmar una
+    #: asignacion, y una asignacion sin confirmar no se declara hecha.
+    lee_asignados: bool = False
+    #: Lista los perfiles de la organizacion en el CRM, para traducir el
+    #: usuario durable de Dexter al perfil de alla POR ID.
+    lee_perfiles: bool = False
     # Vigencia y revalidacion (§3.7). El contrato las exige para toda
     # herramienta aprobable, pero el validador NO puede fallar todavia: la
     # config vigente de Rapilink no las declara, y escribirla parte la medicion
