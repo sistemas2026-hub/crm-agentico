@@ -5555,7 +5555,22 @@ def acciones_propuestas():
     except Exception as e:
         registrar("acciones", "fallo al leer propuestas", error=e)
         return jsonify({"error": "No se pudieron leer las acciones propuestas."}), 500
+
+    # Que sea de legado lo decide el motor, no la pantalla: es la misma regla
+    # que usa la guarda de aprobar, y tenerla en dos lugares es tenerla en
+    # ninguno. La lista NO trae 'argumentos' (valores reales sin enmascarar).
+    for accion in acciones:
+        accion["es_legado"] = persistencia.es_accion_de_legado(accion)
     return jsonify({"acciones": acciones})
+
+
+#: Lo que se le dice a quien intenta aprobar una accion de legado. Explica el
+#: camino, porque un 409 sin salida se lee como una falla del sistema.
+MOTIVO_LEGADO = (
+    "Esta accion no esta vinculada a ninguna conversacion, asi que no hay "
+    "contexto actual contra el cual comprobar que todavia tiene sentido. No se "
+    "puede aprobar: si el problema sigue vivo, la conversacion de hoy la vuelve "
+    "a proponer; si no, se cancela.")
 
 
 @app.post("/acciones/propuestas/<id_accion>/aprobar")
@@ -5565,6 +5580,15 @@ def acciones_propuesta_aprobar(id_accion):
     la accion como 'aprobada' -- mismo orden que aprobar una herramienta
     propuesta: si la API la rechaza, el resultado (y el error) quedan
     visibles en la misma fila, no se pierde ni se finge que salio bien.
+
+    ⚠️ SALVO QUE SEA DE LEGADO (X24, gate G3). Una accion sin conversacion no
+    tiene contra que revalidarse (§3.7) y sus argumentos son los de hace
+    semanas: aprobarla ejecutaria a ciegas. Se rechaza con 409 ANTES de tocar
+    nada -- ni la API externa, ni el estado de la fila.
+
+    Hoy eso alcanza a las 36 (A5), porque la columna 'conversation_id' todavia
+    no existe. Cuando B5 la traiga, la misma guarda deja pasar las que la
+    tengan sin que haya que tocarla.
     """
     cuerpo = request.get_json(force=True, silent=True) or {}
     tenant = cuerpo.get("tenant")
@@ -5578,6 +5602,24 @@ def acciones_propuesta_aprobar(id_accion):
         return jsonify({"error": "No se pudo leer la accion."}), 500
     if not accion:
         return jsonify({"error": f"La accion '{id_accion}' no existe."}), 404
+
+    # ANTES del chequeo de estado y ANTES de leer la config: lo que se prohibe
+    # es llegar al ejecutor, y cualquier paso previo que pueda fallar o
+    # escribir es un paso de mas en un camino que no deberia existir.
+    if persistencia.es_accion_de_legado(accion):
+        try:
+            persistencia.registrar_aprobacion_rechazada(
+                tenant, id_accion, MOTIVO_LEGADO, cuerpo.get("revisado_por"))
+        except Exception as e:
+            # Que no se pueda dejar constancia no puede convertir un rechazo en
+            # una ejecucion: se registra el fallo y se rechaza igual.
+            registrar("acciones", "no se pudo registrar el intento de aprobar legado",
+                      error=e)
+        registrar("acciones", "se rechazo aprobar una accion de legado", tenant=tenant)
+        return jsonify({"error": MOTIVO_LEGADO, "codigo": "accion_de_legado",
+                        "estado": accion["estado"],
+                        "puede_cancelarse": accion["estado"] == "pendiente"}), 409
+
     if accion["estado"] != "pendiente":
         return jsonify({"error": f"Esta accion ya esta '{accion['estado']}', "
                                  f"no se puede volver a aprobar."}), 400
@@ -5620,6 +5662,51 @@ def acciones_propuesta_rechazar(id_accion):
     if not existe:
         return jsonify({"error": f"La accion '{id_accion}' no existe."}), 404
     return jsonify({"ok": True, "estado": "rechazada"})
+
+
+@app.post("/acciones/propuestas/<id_accion>/cancelar")
+def acciones_propuesta_cancelar(id_accion):
+    """
+    Cancela una accion que quedo obsoleta, con su motivo y su evento (§11.4).
+
+    NO es rechazar. Rechazada es "alguien la evaluo y dijo que no"; cancelada
+    es "quedo obsoleta y nadie la va a evaluar". Ninguna de las dos ejecuta
+    nada, pero en un registro que existe para auditar la diferencia es el
+    registro entero -- y es la que §11.4 pide para las 36.
+
+    El motivo es obligatorio: 36 filas canceladas sin explicacion no le dicen
+    nada a quien las mire el mes que viene. Quien cancela tambien da la cara,
+    igual que en cualquier otro evento de operador.
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    motivo = (cuerpo.get("motivo") or "").strip()
+    quien = (cuerpo.get("cancelada_por") or "").strip()
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'."}), 400
+    if not motivo:
+        return jsonify({"error": "Falta el campo 'motivo': una cancelacion sin "
+                                 "motivo no explica nada."}), 400
+    if not quien:
+        return jsonify({"error": "Falta el campo 'cancelada_por'."}), 400
+
+    try:
+        estado, la_cancele = persistencia.cancelar_accion_propuesta(
+            tenant, id_accion, motivo, quien)
+    except Exception as e:
+        registrar("acciones", "fallo al cancelar", error=e)
+        return jsonify({"error": "No se pudo cancelar la accion."}), 500
+
+    if estado is None:
+        return jsonify({"error": f"La accion '{id_accion}' no existe."}), 404
+    if not la_cancele:
+        # Ya la habia resuelto alguien -- incluso si tambien fue cancelando.
+        # Se dice cual es su estado en vez de pisarlo: dos operadores mirando
+        # la misma lista es lo normal, y el segundo tiene que enterarse de que
+        # llego tarde en vez de creer que hizo algo.
+        return jsonify({"error": f"Esta accion ya esta '{estado}'.",
+                        "estado": estado}), 409
+    return jsonify({"ok": True, "estado": "cancelada"})
 
 
 # =============================================================================

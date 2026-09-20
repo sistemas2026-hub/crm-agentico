@@ -2733,10 +2733,19 @@ def guardar_accion_propuesta(tenant: str, herramienta: str, argumentos: dict,
 
 
 def acciones_propuestas_de(tenant: str, estado: str | None = None) -> list[dict]:
-    """'estado=None' trae todas -- mismo patron que herramientas_propuestas_de()."""
+    """
+    'estado=None' trae todas -- mismo patron que herramientas_propuestas_de().
+
+    SIN 'argumentos'. A diferencia de tool_calls, ahi estan los valores REALES
+    y sin enmascarar (ver guardar_accion_propuesta): el telefono, la cedula, la
+    direccion con los que se iba a escribir afuera. Para revisar una accion
+    alcanza el resumen --que existe justamente para eso-- y quien la necesita
+    completa para ejecutarla usa accion_propuesta_de(), que es otro camino y
+    otra decision.
+    """
     with sesion(tenant) as (cur, org):
         cur.execute(
-            """select id, herramienta, argumentos, resumen, rol_solicitante,
+            """select id, herramienta, resumen, rol_solicitante,
                       propuesto_por, estado, motivo_rechazo, revisado_por,
                       resultado_ejecucion, codigo_error, creado_en, revisado_en
                from asistente.acciones_propuestas
@@ -2782,6 +2791,126 @@ def resolver_accion_propuesta(tenant: str, accion_id: str, estado: str,
              json.dumps(resultado_ejecucion, ensure_ascii=False) if resultado_ejecucion is not None else None,
              codigo_error, org, accion_id))
         return cur.rowcount > 0
+
+
+# =============================================================================
+#  G3 -- el legado de acciones propuestas (contrato §11.4, X24, I6, I12)
+# =============================================================================
+
+def es_accion_de_legado(accion: dict) -> bool:
+    """
+    Si esta accion NO tiene con que revalidarse.
+
+    El criterio es UNO SOLO y sale del contrato: sin `conversation_id` no hay
+    contexto actual contra el cual comprobar que lo que se iba a hacer todavia
+    tiene sentido (§3.7), asi que aprobarla es ejecutar a ciegas argumentos
+    congelados -- lo que X24 prohibe.
+
+    NO se mira la edad ni el tipo. Una accion de hace un minuto sin
+    conversacion es igual de inejecutable que una de hace un mes: el problema
+    nunca fue el tiempo, fue que no hay nada contra que revalidar. Y una regla
+    por edad ademas se vuelve falsa sola, en silencio, el dia que alguien
+    cambie el plazo.
+
+    Hoy la columna no existe --llega en B5-- asi que esto es True para todas.
+    Cuando exista, la misma funcion deja pasar las que la tengan, sin tocarla.
+    """
+    return not (accion or {}).get("conversation_id")
+
+
+def registrar_evento_de_accion(cur, org, accion_id: str, tipo: str, *,
+                               motivo: str | None = None,
+                               actor_tipo: str = "operador",
+                               actor_nombre: str | None = None,
+                               datos: dict | None = None) -> None:
+    """
+    Un evento en el expediente de una accion.
+
+    Recibe el cursor en vez de abrir su propia sesion: I12 exige que el evento
+    y el cambio de estado entren en la MISMA transaccion. Con una sesion propia
+    existiria el estado intermedio donde la accion ya esta cancelada y nadie
+    registro quien ni por que.
+    """
+    cur.execute(
+        """insert into asistente.acciones_eventos
+             (organization_id, accion_id, tipo, motivo, actor_tipo,
+              actor_nombre, datos)
+           values (%s, %s, %s, %s, %s, %s, %s)""",
+        (org, accion_id, tipo, motivo, actor_tipo, actor_nombre,
+         json.dumps(datos or {}, ensure_ascii=False)))
+
+
+def cancelar_accion_propuesta(tenant: str, accion_id: str, motivo: str,
+                              cancelada_por: str) -> tuple[str | None, bool]:
+    """
+    Cancela una accion pendiente y deja su evento, en una sola transaccion.
+
+    Devuelve (estado, la_cancelo_esta_llamada):
+
+        (None, False)         no existe, o es de otro tenant
+        ('cancelada', True)   la cancelo esta llamada
+        ('cancelada', False)  ya estaba cancelada por alguien mas
+        (<otro>, False)       ya estaba resuelta de otra forma
+
+    Los dos booleanos importan y por eso el estado solo no alcanza: devolver
+    'cancelada' a secas hacia indistinguible "la cancele" de "ya lo estaba", y
+    el endpoint respondia 200 a la segunda. Dos operadores sobre la misma lista
+    es lo normal, y el segundo tiene que enterarse de que llego tarde.
+
+    'cancelada' NO es 'rechazada'. Rechazada es "alguien la evaluo y dijo que
+    no"; cancelada es "quedo obsoleta y nadie la va a evaluar". Las dos evitan
+    la ejecucion, pero en un registro que existe para auditar decir cual fue es
+    el registro entero.
+    """
+    with sesion(tenant) as (cur, org):
+        # El 'and estado' del UPDATE es el candado: dos operadores cancelando a
+        # la vez, o un doble clic, escriben una sola vez y el segundo se entera.
+        cur.execute(
+            """update asistente.acciones_propuestas
+               set estado = 'cancelada', motivo_rechazo = %s,
+                   revisado_por = %s, revisado_en = now()
+               where organization_id = %s and id = %s and estado = 'pendiente'
+               returning id""",
+            (motivo, cancelada_por, org, accion_id))
+        if cur.fetchone() is None:
+            cur.execute(
+                """select estado from asistente.acciones_propuestas
+                   where organization_id = %s and id = %s""", (org, accion_id))
+            fila = cur.fetchone()
+            return (fila["estado"], False) if fila else (None, False)
+
+        registrar_evento_de_accion(
+            cur, org, accion_id, "accion_cancelada", motivo=motivo,
+            actor_nombre=cancelada_por)
+        return "cancelada", True
+
+
+def registrar_aprobacion_rechazada(tenant: str, accion_id: str, motivo: str,
+                                   intentada_por: str | None) -> None:
+    """
+    Deja constancia de que alguien intento aprobar una accion de legado.
+
+    Un 409 se responde y se pierde. Un intento repetido contra el legado es
+    algo que deberia poder verse -- si pasa seguido, lo que falta es explicar
+    mejor por que esas acciones no se aprueban, no repetir el rechazo.
+    """
+    with sesion(tenant) as (cur, org):
+        registrar_evento_de_accion(
+            cur, org, accion_id, "accion_aprobacion_rechazada", motivo=motivo,
+            actor_tipo="operador" if intentada_por else "sistema",
+            actor_nombre=intentada_por)
+
+
+def eventos_de_accion(tenant: str, accion_id: str) -> list[dict]:
+    """El expediente de una accion, en orden. Solo lectura y tenant-scoped."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select tipo, motivo, actor_tipo, actor_nombre, datos, creado_en
+               from asistente.acciones_eventos
+               where organization_id = %s and accion_id = %s
+               order by creado_en asc, id asc""",
+            (org, accion_id))
+        return [dict(f) for f in cur.fetchall()]
 
 
 def guardar_revision_supervisor(tenant: str, conversation_id: str,
