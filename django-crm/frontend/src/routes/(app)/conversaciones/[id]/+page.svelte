@@ -13,6 +13,7 @@
   import ActivityPanel from '$lib/conversaciones/context/ActivityPanel.svelte';
   import CustomerPanel from '$lib/conversaciones/context/CustomerPanel.svelte';
   import NetworkPanel from '$lib/conversaciones/context/NetworkPanel.svelte';
+  import SyncPanel from '$lib/conversaciones/context/SyncPanel.svelte';
   import RetentionToggle from '$lib/conversaciones/context/RetentionToggle.svelte';
   import TracePanel from '$lib/conversaciones/context/TracePanel.svelte';
   import DocumentationPanel from '$lib/conversaciones/context/DocumentationPanel.svelte';
@@ -64,6 +65,8 @@
   let relevo = $state(untrack(() => data.relevo ?? []));
   // Lo que se le hizo al equipo del cliente, con su veredicto.
   let accionesEquipo = $state(untrack(() => data.equipo ?? []));
+  // Lo que quedó sin hacer afuera: estado actual, no historia.
+  let sincronizaciones = $state(untrack(() => data.sincronizaciones ?? []));
 
   /**
    * Vuelve a leer el registro del relevo desde el motor.
@@ -1576,6 +1579,10 @@
   <!-- Después del caso y antes del proceso de la IA: primero qué es esta
        conversación, después cómo llegó acá, y recién entonces qué hizo el
        asistente dentro de ella. -->
+  <!-- Arriba del todo cuando hay algo que revisar: un caso que no se creó es
+       más urgente que cualquier otro contexto de la conversación. -->
+  <SyncPanel {sincronizaciones} />
+
   <!-- Después de quién es el cliente y antes del relevo: qué se intentó
        arreglar es contexto del caso, no del traspaso. -->
   <NetworkPanel acciones={accionesEquipo} serial={conversacion?.equipo?.sn_onu ?? null} />

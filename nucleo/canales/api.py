@@ -4734,6 +4734,36 @@ def conversaciones_herramientas(id_conversacion):
     })
 
 
+@app.get("/conversaciones/<id_conversacion>/sincronizaciones")
+def conversaciones_sincronizaciones(id_conversacion):
+    """
+    Que efectos externos de esta conversacion quedaron sin hacer (B4).
+
+    Solo lectura y SIN 'datos_intencion': lo que la pantalla necesita es que
+    falto y si alguien tiene que mirarlo, no los parametros con los que se iba
+    a hacer. Tampoco sale nunca el cuerpo de la respuesta del sistema externo
+    -- de el solo se guarda el codigo (X19).
+
+    Esta ruta NO reintenta nada. El reconciliador (T20) corre aparte con su
+    propia cadencia, y lo que quedo 'desconocida' no vuelve a intentarse solo:
+    espera a una persona, que es justo lo que este panel deja ver.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+
+    try:
+        pendientes = persistencia.sincronizaciones_de(tenant, id_conversacion)
+    except RuntimeError as e:
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 404
+    except Exception as e:
+        registrar("reconciliador", "fallo al leer las sincronizaciones",
+                  conversation_id=id_interno(id_conversacion), error=e)
+        return jsonify({"error": "No se pudo leer el estado de sincronizacion."}), 500
+
+    return jsonify({"sincronizaciones": pendientes})
+
+
 @app.get("/conversaciones/<id_conversacion>/equipo")
 def conversaciones_equipo(id_conversacion):
     """

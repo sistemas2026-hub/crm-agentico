@@ -846,6 +846,21 @@ def marcar_escalada(tenant: str, conversation_id: str, motivo: str,
              (resumen or "").strip(), (no_comprobado or "").strip(),
              (siguiente_paso or "").strip(), org, conversation_id))
 
+        # B4: si el CRM no devolvio caso, la intencion queda ENCOLADA en la
+        # misma transaccion que la marca de escalada. Antes de esto el except
+        # de escalar() la mandaba al log y se perdia: la conversacion quedaba
+        # escalada, visible en la bandeja, y sin caso -- y nadie se enteraba
+        # hasta que alguien lo buscaba a mano.
+        #
+        # La clave se deriva de (conversacion, tipo): reintentar la misma
+        # escalada no encola dos veces el mismo efecto. Y 'datos_intencion'
+        # lleva solo lo minimo para rehacerlo, nunca el texto del cliente.
+        if not caso_id:
+            encolar_sincronizacion(
+                cur, org, conversation_id, tipo="crear_caso",
+                clave=f"crear_caso:{conversation_id}",
+                datos={"motivo": motivo, "etiqueta": etiqueta})
+
 
 def guardar_ticket_operativo(tenant: str, conversation_id: str,
                              ticket: str) -> None:
@@ -2350,6 +2365,137 @@ def eventos_de_relevo(tenant: str, conversation_id: str) -> list[dict]:
                from asistente.relevo_eventos
                where organization_id = %s and conversation_id = %s
                order by creado_en asc, id asc""",
+            (org, conversation_id))
+        return [dict(f) for f in cur.fetchall()]
+
+
+# =============================================================================
+#  B4 -- la cola de efectos externos (contrato §3.6)
+# =============================================================================
+
+#: Cuanto espera cada reintento, en segundos. Creciente, y con tope: pasados
+#: estos, el trabajo es 'fallida_definitiva' y lo mira una persona. No es
+#: exponencial puro -- lo que se gana pasada la media hora es despreciable
+#: frente a que alguien lo vea.
+ESPERAS_REINTENTO = (30, 120, 600, 1800)
+MAX_INTENTOS_SINCRONIZACION = len(ESPERAS_REINTENTO)
+
+
+def encolar_sincronizacion(cur, org: str, conversation_id: str, *, tipo: str,
+                           clave: str, datos: dict, datos_version: int = 1) -> str | None:
+    """
+    Anota que un efecto externo HAY QUE hacerlo. Recibe el cursor: va en la
+    MISMA transaccion que la transicion que lo necesita, para que no exista un
+    estado donde la conversacion quedo escalada y la intencion se perdio.
+
+    'datos' es la intencion, no el resultado: exactamente lo que habia que
+    hacer cuando se decidio. El reconciliador no lo reconstruye con la config
+    actual, que pudo cambiar entre el intento y el reintento.
+
+    Devuelve el id, o None si esa clave ya estaba encolada -- la misma
+    transicion reintentada no encola dos veces el mismo efecto.
+    """
+    cur.execute(
+        """insert into asistente.sincronizaciones_externas
+             (organization_id, conversation_id, tipo, estado, datos_version,
+              datos_intencion, proximo_intento_en, clave_idempotencia)
+           values (%s, %s, %s, 'pendiente', %s, %s::jsonb, now(), %s)
+           on conflict (organization_id, clave_idempotencia) do nothing
+           returning id""",
+        (org, conversation_id, tipo, datos_version,
+         json.dumps(datos or {}, ensure_ascii=False), clave))
+    fila = cur.fetchone()
+    return str(fila["id"]) if fila else None
+
+
+def sincronizaciones_elegibles(tenant: str, limite: int = 50) -> list[dict]:
+    """
+    Lo que el reconciliador puede tomar AHORA: pendientes cuya hora llego.
+
+    'desconocida' y 'fallida_definitiva' no salen nunca de aca -- son
+    terminales y esperan a una persona, no a un reloj. Es la diferencia entre
+    una cola de reintentos y una de revision, y mezclarlas es justo lo que el
+    gate Q2 prohibe para crear_ticket.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select id, conversation_id, tipo, estado, datos_version,
+                      datos_intencion, intentos, referencia_externa,
+                      clave_idempotencia
+               from asistente.sincronizaciones_externas
+               where organization_id = %s
+                 and estado = 'pendiente'
+                 and proximo_intento_en <= now()
+               order by proximo_intento_en asc
+               limit %s
+               for update skip locked""",
+            (org, limite))
+        return [dict(f) for f in cur.fetchall()]
+
+
+def tomar_sincronizacion(tenant: str, sincronizacion_id: str) -> bool:
+    """
+    Reserva un trabajo antes de salir a la red. Devuelve False si otro proceso
+    llego primero: el 'and estado = pendiente' es el candado, y sin el dos
+    reconciliadores podrian crear dos casos para la misma conversacion.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """update asistente.sincronizaciones_externas
+               set estado = 'en_curso', intentos = intentos + 1,
+                   actualizado_en = now()
+               where organization_id = %s and id = %s and estado = 'pendiente'""",
+            (org, sincronizacion_id))
+        return cur.rowcount == 1
+
+
+def resolver_sincronizacion(tenant: str, sincronizacion_id: str, *, estado: str,
+                            referencia: str | None = None,
+                            error_clase: str | None = None,
+                            error_codigo: str | None = None) -> bool:
+    """
+    Sella el desenlace de un intento.
+
+    'pendiente' vuelve a la cola con su espera calculada por el numero de
+    intentos; el resto es terminal. La espera se calcula en SQL contra la
+    columna de intentos y no con un valor de Python para que dos procesos que
+    resuelvan el mismo trabajo no se pisen la hora.
+    """
+    esperas = ", ".join(str(s) for s in ESPERAS_REINTENTO)
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            f"""update asistente.sincronizaciones_externas
+                set estado = %s,
+                    referencia_externa = coalesce(%s, referencia_externa),
+                    ultimo_error_clase = %s,
+                    ultimo_error_codigo = %s,
+                    proximo_intento_en = case
+                      when %s = 'pendiente' then
+                        now() + make_interval(secs =>
+                          (array[{esperas}])[least(greatest(intentos, 1), {len(ESPERAS_REINTENTO)})])
+                      else null end,
+                    actualizado_en = now()
+                where organization_id = %s and id = %s""",
+            (estado, referencia, error_clase, error_codigo, estado,
+             org, sincronizacion_id))
+        return cur.rowcount == 1
+
+
+def sincronizaciones_de(tenant: str, conversation_id: str) -> list[dict]:
+    """
+    Que le falta a ESTA conversacion, para el panel de la bandeja.
+
+    Sin 'datos_intencion': lo que la pantalla necesita es que quedo sin hacer y
+    si alguien tiene que mirarlo, no los parametros con los que se iba a hacer.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select id, tipo, estado, intentos, ultimo_error_clase,
+                      ultimo_error_codigo, referencia_externa,
+                      proximo_intento_en, creado_en, actualizado_en
+               from asistente.sincronizaciones_externas
+               where organization_id = %s and conversation_id = %s
+               order by creado_en asc""",
             (org, conversation_id))
         return [dict(f) for f in cur.fetchall()]
 
