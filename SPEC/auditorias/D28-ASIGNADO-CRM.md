@@ -2,7 +2,7 @@
 
 ```
 BASE       e419431
-VEREDICTO  implementado. La sincronización automática NO está enganchada todavía
+VEREDICTO  CERRADO EN CÓDIGO. No corre hasta G7
 FECHA      20/09/2026
 DECISIÓN   (b) + salvedad conservadora, cerrada por el auditor
 ```
@@ -133,22 +133,86 @@ asignados.test.js                    9
 
 Los 826 tests del módulo `cases` del CRM siguen pasando.
 
-## Lo que falta para que esto corra solo
+## Las tres piezas que faltaban (`86879aa`)
 
-**La sincronización no está enganchada.** Existe el endpoint, el ejecutor, la
-detección y el tipo en la cola — pero nada **encola** todavía un `asignar_caso`
-al tomar, reasignar o transferir. Falta:
+**Productor.** `tomar()` y `reasignar()` encolan en la **misma transacción** que
+el cambio de asignación. Eso no contradice «no escribir en el CRM dentro de la
+transacción»: lo que se escribe es la *intención*, en una tabla propia; al CRM
+lo llama el reconciliador después del commit (§3.6, X23). Al revés —primero el
+CRM, después el commit— un fallo dejaría el caso asignado a alguien que en
+Dexter no lo tiene.
 
 ```
-1. el productor: encolar desde T2/T5 (tomar, reasignar), en la misma
-   transacción que el cambio de asignación
-2. las dos capacidades en el worker: agregar_asignado y leer_asignados,
-   atadas al catálogo del tenant como ya se hace con crear_caso
-3. el panel que muestre la diferencia (la lógica y sus etiquetas ya están)
+tomar        encola al operador
+reasignar    encola al que ENTRA; al que sale no se lo quita
+soltar       NO encola          devolver_a_ia   NO encola
 ```
 
-Sin el punto 2, un `asignar_caso` que llegue a la cola hoy termina en
-`fallida_definitiva` con `sin_ejecutor:asignar_caso` — visible, no silencioso.
-Es el comportamiento correcto, pero conviene saberlo.
+Sin caso todavía no se encola. Y si encolar falla, la toma **no se cae**: quien
+atiende ya cambió en Dexter, que es la autoridad.
 
-Y como todo lo de B4: no corre hasta G7.
+**Worker.** Tres capacidades, fail-closed sin cualquiera: `asigna_caso`,
+`lee_asignados`, `lee_perfiles`. La tercera traduce el usuario durable al perfil
+del CRM **por id** — sin ella habría que adivinar por nombre.
+
+**UI.** Panel propio, «A cargo en Dexter» / «Asignados en CRM», sin botón para
+quitar a nadie.
+
+### La clave lleva el usuario, no el perfil
+
+El brief pedía conversación + caso + **profile**. Lleva conversación + caso +
+**usuario durable**, y la razón es dura: resolver el perfil exige preguntarle al
+CRM, y la clave se arma dentro de la transacción que cambia la asignación —
+meter una llamada HTTP ahí es exactamente lo que X23 prohíbe. Dentro de una
+organización la correspondencia es uno a uno, así que discrimina igual: dos
+operadores distintos dan dos claves distintas, que es lo único que el requisito
+necesitaba.
+
+## El hallazgo que apareció en el camino
+
+**Las banderas de capacidad no existían en el schema.** `Herramienta` usa
+`extra="forbid"`, así que un YAML con `busca_caso: true` hacía fallar la carga
+entera — y el código de B4 ya la leía con `getattr(..., False)`, que devuelve
+False en silencio.
+
+O sea: la capacidad se consultaba, no se podía declarar, y nadie se enteraba.
+**G7 dependía de eso**: «declarar `busca_caso` en el catálogo del tenant» era
+imposible tal como estaba. Quedan declaradas las cuatro.
+
+No lo encontró una prueba: apareció al intentar declarar `asigna_caso` y ver que
+el modelo lo rechazaba.
+
+## Tests
+
+```
+cases/tests/test_case_assignees.py   12, ejercitando el endpoint (pytest-django)
+tests/test_d28_asignado_crm.py       47
+  identidad por id, con homónimos · colaboradores preservados
+  quién encola y quién NO · el orden dentro de la transacción
+  las transiciones no hablan con el CRM
+  el worker exige las tres capacidades · la pantalla está cableada
+asignados.test.js                     9
+```
+
+**Mutaciones: 23 probadas, 23 rojas.** Entre ellas: `add()` se vuelve `set()`,
+la identidad se cruza por nombre, soltar empieza a encolar una limpieza,
+reasignar encola al anterior, el worker se conforma con una capacidad, sin
+catálogo de perfiles se adivina igual.
+
+Los 826 del módulo `cases` del CRM siguen pasando.
+
+## D28: CERRADO EN CÓDIGO
+
+Lo que queda es despliegue, no diseño:
+
+```
+1. declarar las cuatro herramientas en el catálogo del tenant
+   (asigna_caso apuntando al endpoint aditivo nuevo, no a bulk/update)
+2. G7: encender el reconciliador
+```
+
+Sin el punto 1, un `asignar_caso` termina en `fallida_definitiva` con
+`sin_ejecutor:asignar_caso` — visible, no silencioso.
+
+**No se automatiza quitar a nadie**, y esa decisión no cambia hasta que el CRM
+guarde la procedencia de cada asignación.
