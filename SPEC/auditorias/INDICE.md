@@ -22,7 +22,7 @@ Un archivo por gate. El agente lee sólo los que el prompt le nombre.
 | **B4** | [B4-IMPLEMENTACION.md](B4-IMPLEMENTACION.md) | **implementado** | La cola de efectos externos, T20 con cadencia propia y el panel de sincronización. T20 sin enganchar: G7. |
 | **G3** | [G3-ACCIONES-LEGACY.md](G3-ACCIONES-LEGACY.md) | ROJO → cerrado | Las 36 acciones de legado. El endpoint de aprobar las ejecutaba: el bloqueo 1 no podía esperar a B5. |
 | **G3** | [G3-CIERRE.md](G3-CIERRE.md) | **VERDE** | Aprobar rechaza con 409 sin ejecutar, `cancelada` es estado declarado con evento, y hay pantalla para revisar. Las 36 siguen `pendiente`: cancelarlas es trabajo de una persona. B5 desbloqueado. |
-| **B5** | [B5-ACCIONES.md](B5-ACCIONES.md) | **implementado** | Aprobar es reservar, revalidar, ejecutar y resolver. La revalidación tiene tres desenlaces: «no se pudo comprobar» no ejecuta. Validador en modo advertencia hasta que cierre la medición (Q3). |
+| **B5** | [B5-ACCIONES.md](B5-ACCIONES.md) | **CERRADO EN CÓDIGO** | Aprobar es reservar, revalidar, ejecutar y resolver. La revalidación tiene tres desenlaces: «no se pudo comprobar» no ejecuta. Validador en modo advertencia hasta que cierre la medición (Q3). |
 | — | [1.4C-hotpath-diferido.md](1.4C-hotpath-diferido.md) | diferido | Los hunks de ③a/③c retirados, recuperables con `git apply -R`. |
 
 Los gates sin archivo viven sólo en la transcripción; sus conclusiones vigentes

@@ -2,7 +2,7 @@
 
 ```
 BASE       d13bcb1
-VEREDICTO  implementado, sin aplicar en producción
+VEREDICTO  CERRADO EN CÓDIGO, sin aplicar en producción
 ENTRADA    G3 cerrado (auditorias/G3-CIERRE.md)
 FECHA      20/09/2026
 ```
@@ -179,8 +179,56 @@ tenían conversación. Fallaba cerrado, pero fallaba.
 2. **Las cuatro revalidaciones de §3.7 no están escritas todavía.** El contrato
    las propone [MAPEO] y exige confirmarlas con la skill `wisphub-api` antes de
    escribirlas. Eso es trabajo contra la API real, no contra el repo.
-3. **`ejecutando` que queda huérfano** (el proceso muere entre los pasos 2 y 4)
-   espera a T20 para pasar a `desconocida`. Hoy T20 no barre acciones: sólo
-   sincronizaciones. El índice `acciones_propuestas_a_revisar_idx` ya está para
-   eso, pero el barrido no está escrito.
-4. Nada se vio renderizado, como toda la Fase 1.
+3. Nada se vio renderizado, como toda la Fase 1.
+
+## El barrido de T20 (cierre, commit `155bb15`)
+
+Era el único hueco mecánico: una acción podía quedarse en `ejecutando` para
+siempre si el proceso moría entre la reserva y el desenlace.
+
+```
+T20 (c)   'ejecutando' vieja      -> desconocida     NUNCA -> pendiente
+T20 (d)   'pendiente' sin plazo   -> vencida         con evento
+```
+
+**`desconocida` y no `pendiente`**: que haya quedado a medias significa que el
+pedido *pudo* haber salido. Devolverla a la cola la invitaría a ejecutarse otra
+vez, y nadie puede demostrar que la primera no llegó (X21). `barrer_acciones()`
+ni siquiera recibe un `ejecutar`: no hay nada que ejecutar.
+
+**El umbral no se inventó**: son los 10 minutos de §14.1 Q4, default de
+plataforma y no configuración por tenant. El plazo no describe al ISP —describe
+cuánto tarda en ser evidente que un proceso murió a mitad de camino.
+
+**El legado, donde corresponde y sólo ahí**: una `ejecutando` colgada se cierra
+(quedó a medias igual que cualquier otra), pero una `pendiente` **no se vence
+jamás** — no tiene `vence_en` y el filtro la deja fuera *por construcción*.
+§11.4 lo exige, y así no depende de una condición aparte que alguien pueda
+borrar.
+
+El UPDATE es la transición entera, con `for update skip locked`: dos
+reconciliadores no resuelven la misma fila dos veces. Probado con dos hilos
+reales — una transición, un evento.
+
+El barrido corre **fuera** del `if ejecutar is None` del worker: no toca nada
+externo, así que un tenant sin catálogo igual cierra lo que quedó colgado.
+Dentro del `if`, esas acciones quedarían `ejecutando` para siempre por una
+razón que no es suya.
+
+Seis mutaciones más, seis rojas.
+
+## Verificación sobre base limpia
+
+El archivo de migración se corrigió **después** de aplicarlo en la base de
+desarrollo, así que aquel ledger quedó con un checksum distinto. Se construyó
+una base nueva (`b5_limpia`) aplicando el ledger entero desde cero con los
+archivos finales:
+
+```
+archivos en supabase/ : 51
+anotados en el ledger : 51
+pendientes            : 0
+con checksum distinto : 0
+```
+
+Los doce tests de backend pasan contra esa base.

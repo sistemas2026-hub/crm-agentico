@@ -184,9 +184,10 @@ Migración `202609201400_acciones_legado.sql` **sin aplicar en producción**.
 
 B5 queda desbloqueado.
 
-## B5 — IMPLEMENTADO. Falta la config del tenant (Q3)
+## B5 — CERRADO EN CÓDIGO. Falta la config del tenant (Q3)
 
-Commits `1bad6f3` (motor) y `f779d07` (pantalla). Detalle en
+Commits `1bad6f3` (motor), `f779d07` (pantalla) y `155bb15` (barrido T20).
+Detalle en
 `auditorias/B5-ACCIONES.md`.
 
 ```
@@ -210,7 +211,12 @@ esta en modo **advertencia** a proposito.
 Las cuatro revalidaciones de §3.7 tampoco estan escritas: el contrato exige
 confirmarlas con la skill `wisphub-api` contra la API real antes de escribirlas.
 
+T20 cierra lo que queda a medias: `ejecutando` vieja -> `desconocida` a los
+10 min (§14.1 Q4), `pendiente` pasada de plazo -> `vencida`. Nunca reejecuta
+(X21). Una de legado `pendiente` no se vence jamas, por construccion.
+
 Migracion `202609201800_acciones_b5.sql` **sin aplicar en produccion**.
+Verificado sobre base limpia (`b5_limpia`): 51 archivos, 0 checksum distinto.
 
 ## SIGUIENTE GATE
 
