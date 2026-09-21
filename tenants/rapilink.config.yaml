@@ -3477,6 +3477,9 @@ herramientas:
 
   - nombre: crear_ticket_caso
     tipo: http
+    # Capacidad de la cola (B4): el ticket que respalda una escalada. El
+    # reconciliador le embebe un DEXTER_REF en la descripcion.
+    crea_ticket_operativo: true
     multipart: true
     descripcion: >
       Deja el caso anotado en WispHub para que lo trabaje una persona. NO la
@@ -3567,6 +3570,9 @@ herramientas:
   # el historico. Y mas de dos meses responde HTTP 400.
   - nombre: listar_tickets_recientes
     tipo: http
+    # Capacidad de la cola (B4): recuperar un ticket por su DEXTER_REF
+    # barriendo una ventana, cuando el id se perdio (Q2.1).
+    lista_tickets: true
     descripcion: >
       Lista los tickets de WispHub creados dentro de una ventana de fechas.
       NO la llames tu: la ejecuta el importador de tickets.
@@ -3771,6 +3777,8 @@ herramientas:
 
   - nombre: consultar_ticket_por_id
     tipo: http
+    # Capacidad de la cola (B4): leer antes de cerrar.
+    lee_ticket: true
     descripcion: >
       Trae UN ticket de WispHub por su numero. NO la llames tu: la ejecuta el
       importador para reconciliar un ticket que ya tiene caso.
@@ -4708,6 +4716,46 @@ herramientas:
     metodo: GET
     auth_ref: BOTTLECRM_API_TOKEN
     auth_esquema: Bearer
+
+  # ===========================================================================
+  #  CERRAR EL TICKET DEL ISP -- por PUT, y nunca por /respuesta/
+  # ===========================================================================
+  # Aparte de 'actualizar_estado_ticket', que existe para que el modelo mueva
+  # un ticket entre estados y por eso le deja elegir 'estado'. Esta es de la
+  # COLA (B4): cierra y nada mas, con el codigo fijo, para que ninguna otra
+  # transicion pueda colarse por aca.
+  #
+  # POR QUE PUT Y NO /respuesta/, medido el 21/09/2026 sobre un ticket real:
+  #   * '/api/tickets/{id}/respuesta/' exige un texto y lo PUBLICA en el
+  #     ticket. Cada reintento le deja al cliente otra copia del mensaje de
+  #     cierre.
+  #   * el PUT con SOLO 'estado' no publica nada --las respuestas quedaron en
+  #     0 antes y despues-- y no vacia ningun otro campo: 16 de 17 campos
+  #     intactos. El unico que se mueve es 'fecha_fin', que es el sello del
+  #     cierre y le corresponde moverse.
+  #
+  # Y por eso el ejecutor LEE ANTES: un PUT repetido sobre un ticket ya
+  # cerrado le corre 'fecha_fin' (de 14:42:10 a 14:42:12, medido) sin dar
+  # ningun error. Mismo daño que 'closed_on' en el CRM.
+  - nombre: cerrar_ticket_operativo_estado
+    tipo: http
+    cierra_ticket_estado: true
+    descripcion: >
+      Cierra el ticket del ISP cambiando SOLO su estado. NO la llames tu: la
+      ejecuta el reconciliador cuando una conversacion se cierra.
+    solo_lectura: false
+    requiere_confirmacion: true
+    roles_permitidos: [soporte]
+    base_url: https://api.wisphub.io
+    endpoint: /api/tickets/{id_ticket}/
+    metodo: PUT
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    # 4 = Cerrado. Fijo: esta herramienta cierra, no cambia de estado.
+    # Se ESCRIBE por codigo y se LEE por etiqueta ('Cerrado') -- asimetria
+    # verificada, y por eso el ejecutor compara contra la etiqueta.
+    argumentos_fijos:
+      estado: 4
 
   - nombre: consultar_caso_crm
     tipo: http

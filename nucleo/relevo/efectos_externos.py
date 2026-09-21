@@ -16,15 +16,12 @@ QUE HAY Y QUE NO
                 por organizacion, y un repetido responde 400 -- asi que ante un
                 reintento se busca y se adopta el que ya existe.
 
-  crear_ticket  NO implementado, y no por falta de tiempo. La API de WispHub no
-                acepta clave de idempotencia, no deja buscar el ticket despues,
-                reescribe el asunto y recorta el historico (gate Q2,
-                SPEC/auditorias/B4-Q2-WISPHUB.md). Sin forma de preguntar "¿esto
-                ya se hizo?", un reintento es una apuesta -- y perderla manda
-                dos visitas tecnicas al mismo cliente.
-
-                No se escribe ni detras de una bandera: una bandera es una
-                invitacion a encenderla.
+  crear_ticket  implementado desde Q2.1, y con una regla propia: A LO SUMO UN
+                POST POR INTENCION. WispHub no acepta clave de idempotencia y
+                no deja buscar por nada util (Q2), pero SI se puede embeber una
+                referencia propia en 'descripcion' --sobrevive exacta, viene en
+                el listado-- y recuperarla barriendo una ventana. Asi que la
+                politica es asimetrica: adoptar si, recrear nunca.
 
   cerrar_caso   implementado (B6). LEE PRIMERO y solo escribe si sigue
                 abierto. Medido contra el CRM real
@@ -34,15 +31,11 @@ QUE HAY Y QUE NO
                 un dia en el que no se cerro. No falla nada; solo se corre la
                 fecha, y con ella toda metrica de tiempo de resolucion.
 
-  cerrar_ticket NO implementado, y no por falta de tiempo. La unica via
-                verificada para cerrar un ticket de WispHub
-                (POST /api/tickets/{id}/respuesta/) PUBLICA UN COMENTARIO en
-                el mismo pedido: cada reintento le deja al cliente otra copia
-                del texto de cierre en su ticket. Y leer antes para evitarlo
-                exige saber que devuelve el GET, que viene como ETIQUETA
-                ('Cerrado') mientras la escritura va por CODIGO (4) -- una
-                asimetria que nuestro propio importador documenta y que nadie
-                verifico contra la API real. Ver B6-CIERRE-DESENLACE.md.
+  cerrar_ticket implementado, por PUT y nunca por '/respuesta/'. Esa via
+                publica un comentario en cada intento; el PUT con solo
+                'estado' no publica nada y no vacia ningun otro campo
+                (verificado sobre un ticket real, 21/09/2026). Lee primero:
+                un PUT repetido sobre uno ya cerrado le mueve 'fecha_fin'.
 """
 
 from __future__ import annotations
@@ -221,6 +214,187 @@ def cerrar_caso(config, tenant: str, datos: dict, referencia: str | None,
     return ResultadoEfecto("exito", referencia=str(caso_id))
 
 
+#: El prefijo de la referencia que Dexter embebe en la descripcion del ticket.
+#: Medido el 21/09/2026 contra la API real: 'descripcion' sobrevive EXACTA
+#: --184 caracteres enviados, 184 devueltos, cadena identica-- viene completa
+#: en el listado y no la envuelve en HTML. Es lo que hace posible recuperar un
+#: ticket cuyo id se perdio. Ver SPEC/auditorias/B4-Q2-WISPHUB.md.
+PREFIJO_REFERENCIA = "DEXTER_REF:"
+
+#: La ETIQUETA que devuelve el GET, no el codigo que toma el PUT. WispHub
+#: escribe por numero (4) y lee por texto ('Cerrado') -- verificado sobre un
+#: ticket real. Misma deuda que en promesas.py: es vocabulario del proveedor
+#: viviendo en nucleo/, y con otro sistema de tickets hay que moverlo a config.
+ESTADO_TICKET_CERRADO = "Cerrado"
+
+#: Cuantos dias hacia atras se busca la referencia. La ventana tiene que
+#: incluir el instante del intento original; el reconciliador reintenta
+#: durante horas, asi que siete dias sobra. El tope duro de la API es 2 meses
+#: (medido), y el volumen real son ~17 tickets por dia: recorrerla es barato.
+VENTANA_BUSQUEDA_DIAS = 7
+
+
+def referencia_de(clave_idempotencia: str) -> str:
+    """
+    La referencia estable de una intencion.
+
+    Sale de 'sincronizaciones_externas.clave_idempotencia', que §3.6 deriva de
+    (conversacion, tipo, evento que la origino) y es unica por organizacion.
+    NO del conversation_id: una misma conversacion puede generar mas de un
+    ticket legitimo --dos fallas, dos visitas-- y esa clave los confundiria,
+    haciendo que el segundo adopte el primero y nunca se cree.
+
+    Determinista: la misma intencion da siempre la misma referencia, que es lo
+    que permite que un reintento la reuse en vez de inventar otra.
+    """
+    import hashlib
+
+    crudo = str(clave_idempotencia or "").encode()
+    return PREFIJO_REFERENCIA + hashlib.sha256(crudo).hexdigest()[:32]
+
+
+def crear_ticket(config, tenant: str, datos: dict, referencia: str | None,
+                 *, crear, buscar_por_referencia) -> ResultadoEfecto:
+    """
+    Crea el ticket, o adopta el que ya exista con la misma referencia.
+
+    A LO SUMO UN POST POR INTENCION, y de ahi sale todo lo demas. WispHub no
+    acepta clave de idempotencia y no deja buscar un ticket por nada util
+    (gate Q2), asi que dos POST con la misma intencion son dos tickets y dos
+    visitas tecnicas al mismo cliente. Lo que SI se puede es embeber una
+    referencia propia en 'descripcion' y buscarla despues (Q2.1).
+
+    EL ORDEN, y es lo unico delicado:
+
+        buscar -> si aparece, adoptar -> si no, crear UNA vez -> si el
+        resultado queda incierto, buscar otra vez
+
+    Se busca ANTES incluso en el primer intento. Cuesta un GET de mas y cubre
+    el caso que no se puede distinguir desde aca: que un intento anterior haya
+    creado el ticket y muerto antes de anotarlo.
+
+    Y si la BUSQUEDA falla, no se crea a ciegas. Es la misma decision que
+    crear_caso: no poder preguntar no autoriza a escribir.
+    """
+    ref = (datos or {}).get("referencia")
+    if not ref or not str(ref).startswith(PREFIJO_REFERENCIA):
+        # Sin referencia no hay idempotencia posible: ni se busca ni se crea.
+        # Permanente, porque reintentarlo daria lo mismo.
+        return ResultadoEfecto("permanente", codigo="sin_referencia")
+
+    def buscar():
+        """(encontrados, resultado_de_error). Solo uno de los dos."""
+        try:
+            return buscar_por_referencia(ref), None
+        except Exception as e:
+            clase, codigo = _clase_de_error(e)
+            return None, ResultadoEfecto(
+                "transitorio" if clase != "permanente" else clase, codigo=codigo)
+
+    def resolver(encontrados, codigo_si_ninguno):
+        """De lo encontrado al desenlace. >1 nunca se resuelve solo."""
+        if len(encontrados) == 1:
+            registrar("reconciliador", "ticket adoptado por referencia",
+                      tenant=tenant)
+            return ResultadoEfecto("exito", referencia=str(encontrados[0]))
+        if len(encontrados) > 1:
+            # Dos tickets con la misma referencia: ya hay un duplicado. Elegir
+            # uno seria tapar el problema, y crear otro lo empeoraria.
+            return ResultadoEfecto("incierto", codigo="varias_coincidencias")
+        return ResultadoEfecto("incierto", codigo=codigo_si_ninguno)
+
+    # 1. ¿ya existe?
+    encontrados, fallo = buscar()
+    if fallo is not None:
+        return fallo
+    if encontrados:
+        return resolver(encontrados, "")
+
+    # 2. No existe: crear. UNA vez.
+    try:
+        id_ticket = crear(ref, datos or {})
+    except Exception as e:
+        clase, codigo = _clase_de_error(e)
+        if clase != "incierto":
+            # Se sabe que no se hizo. Que lo resuelva la cola.
+            return ResultadoEfecto(clase, codigo=codigo)
+        # Incierto: el pedido PUDO haber llegado. NO se crea otro -- se busca.
+        encontrados, fallo = buscar()
+        if fallo is not None:
+            return ResultadoEfecto("incierto", codigo=codigo)
+        return resolver(encontrados, codigo or "incierto")
+
+    if not id_ticket:
+        # Acepto y no devolvio id. El ticket pudo quedar creado: NO se crea
+        # otro, se busca.
+        encontrados, fallo = buscar()
+        if fallo is not None:
+            return ResultadoEfecto("incierto", codigo="sin_id")
+        return resolver(encontrados, "sin_id")
+    return ResultadoEfecto("exito", referencia=str(id_ticket))
+
+
+def cerrar_ticket(config, tenant: str, datos: dict, referencia: str | None,
+                  *, leer_ticket, cerrar) -> ResultadoEfecto:
+    """
+    Cierra el ticket del ISP, o adopta el cierre que ya estaba.
+
+    LEE PRIMERO, por dos razones medidas el 21/09/2026 sobre un ticket de
+    prueba real:
+
+      * un PUT repetido sobre un ticket ya cerrado mueve 'fecha_fin' --de
+        14:42:10 a 14:42:12-- sin error ninguno. El ticket pasa a decir que se
+        cerro en un momento en que no se cerro. Mismo daño que 'closed_on' en
+        el CRM.
+      * el estado se ESCRIBE por codigo (4) y se LEE por etiqueta ('Cerrado').
+        Comparar el numero contra lo que devuelve el GET no funciona nunca.
+
+    NUNCA por '/api/tickets/{id}/respuesta/'. Esa via exige un texto y lo
+    PUBLICA en el ticket: cada reintento le deja al cliente otra copia del
+    mensaje de cierre. El PUT con solo 'estado' no publica nada -- verificado,
+    las respuestas del ticket quedaron en 0 antes y despues.
+    """
+    id_ticket = (datos or {}).get("ticket") or (datos or {}).get("id_ticket") or referencia
+    if not id_ticket:
+        return ResultadoEfecto("permanente", codigo="sin_ticket")
+
+    def estado_de(t):
+        return str((t or {}).get("estado") or "").strip() if isinstance(t, dict) else ""
+
+    # 1. ¿ya esta cerrado? Si no se puede leer, NO se escribe.
+    try:
+        actual = estado_de(leer_ticket(str(id_ticket)))
+    except Exception as e:
+        clase, codigo = _clase_de_error(e)
+        return ResultadoEfecto("transitorio" if clase != "permanente" else clase,
+                               codigo=codigo)
+    if not actual:
+        return ResultadoEfecto("transitorio", codigo="estado_ilegible")
+    if actual == ESTADO_TICKET_CERRADO:
+        registrar("reconciliador", "el ticket ya estaba cerrado: no se reescribe",
+                  tenant=tenant)
+        return ResultadoEfecto("exito", referencia=str(id_ticket))
+
+    # 2. Sigue abierto: cerrarlo.
+    try:
+        cerrar(str(id_ticket))
+    except Exception as e:
+        clase, codigo = _clase_de_error(e)
+        return ResultadoEfecto(clase, codigo=codigo)
+
+    # 3. RELEER SIEMPRE. El codigo de estado dice que el pedido se acepto, no
+    #    que el ticket quedo cerrado.
+    try:
+        actual = estado_de(leer_ticket(str(id_ticket)))
+    except Exception:
+        actual = ""
+    if not actual:
+        return ResultadoEfecto("incierto", codigo="sin_confirmacion")
+    if actual != ESTADO_TICKET_CERRADO:
+        return ResultadoEfecto("permanente", codigo="no_quedo_cerrado")
+    return ResultadoEfecto("exito", referencia=str(id_ticket))
+
+
 def asignar_caso(config, tenant: str, datos: dict, referencia: str | None,
                  *, agregar_asignado, leer_asignados,
                  leer_perfiles=None) -> ResultadoEfecto:
@@ -313,7 +487,9 @@ def _ids_asignados(respuesta) -> set[str]:
 
 def ejecutor(config, tenant: str, *, crear, buscar_por_nombre,
              agregar_asignado=None, leer_asignados=None, leer_perfiles=None,
-             leer_caso=None, cerrar_caso_crm=None):
+             leer_caso=None, cerrar_caso_crm=None,
+             crear_ticket_isp=None, buscar_ticket_por_referencia=None,
+             leer_ticket=None, cerrar_ticket_isp=None):
     """
     El `ejecutar` que espera el reconciliador, ya atado a este tenant.
 
@@ -345,5 +521,21 @@ def ejecutor(config, tenant: str, *, crear, buscar_por_nombre,
                 return ResultadoEfecto("permanente", codigo="sin_ejecutor:cerrar_caso")
             return cerrar_caso(config, tenant, datos, referencia,
                                leer_caso=leer_caso, cerrar=cerrar_caso_crm)
+        if tipo == "crear_ticket":
+            if crear_ticket_isp is None or buscar_ticket_por_referencia is None:
+                # Sin BUSCAR no se crea. Poder escribir sin poder preguntar es
+                # exactamente lo que produce dos visitas tecnicas al mismo
+                # cliente, que es lo que el gate Q2 existe para impedir.
+                return ResultadoEfecto("permanente", codigo="sin_ejecutor:crear_ticket")
+            return crear_ticket(config, tenant, datos, referencia,
+                                crear=crear_ticket_isp,
+                                buscar_por_referencia=buscar_ticket_por_referencia)
+        if tipo == "cerrar_ticket":
+            if leer_ticket is None or cerrar_ticket_isp is None:
+                # Sin LEER no se escribe: un PUT sobre un ticket ya cerrado le
+                # corre la fecha de cierre (medido).
+                return ResultadoEfecto("permanente", codigo="sin_ejecutor:cerrar_ticket")
+            return cerrar_ticket(config, tenant, datos, referencia,
+                                 leer_ticket=leer_ticket, cerrar=cerrar_ticket_isp)
         return ResultadoEfecto("permanente", codigo=f"sin_ejecutor:{tipo}")
     return _ejecutar

@@ -80,7 +80,8 @@ por_bandera = {}
 # cerrar exige leer antes, porque un PATCH sobre un caso ya cerrado le reescribe
 # la fecha de cierre (medido, cases/tests/test_cierre_idempotente.py).
 for bandera in ("busca_caso", "asigna_caso", "lee_asignados", "lee_perfiles",
-                "lee_caso"):
+                "lee_caso", "crea_ticket_operativo", "lista_tickets",
+                "lee_ticket", "cierra_ticket_estado"):
     encontradas = [h for h in config.herramientas if getattr(h, bandera, False)]
     por_bandera[bandera] = encontradas
     revisar(len(encontradas) == 1,
@@ -172,6 +173,63 @@ for herr in config.herramientas:
         break
 else:
     revisar(True, "NINGUNA herramienta usa PUT ni DELETE sobre un caso")
+
+# =============================================================================
+titulo("3c. las capacidades de TICKETS")
+# =============================================================================
+leer_t = por_bandera["lee_ticket"][0] if por_bandera["lee_ticket"] else None
+cerrar_t = (por_bandera["cierra_ticket_estado"][0]
+            if por_bandera["cierra_ticket_estado"] else None)
+listar_t = por_bandera["lista_tickets"][0] if por_bandera["lista_tickets"] else None
+crear_t = (por_bandera["crea_ticket_operativo"][0]
+           if por_bandera["crea_ticket_operativo"] else None)
+
+if leer_t is not None:
+    revisar(leer_t.solo_lectura is True and (leer_t.metodo or "GET").upper() == "GET",
+            f"'{leer_t.nombre}' lee por GET y es solo_lectura")
+    revisar("{id_ticket}" in (leer_t.endpoint or ""),
+            f"y apunta a UN ticket ({leer_t.endpoint})",
+            "Una lista no dice el estado de este.")
+
+if cerrar_t is not None:
+    revisar((cerrar_t.metodo or "").upper() == "PUT",
+            f"el cierre del ticket usa PUT ({cerrar_t.metodo})",
+            "PATCH descarta campos en silencio (medido); /respuesta/ publica un "
+            "comentario en cada intento.")
+    revisar("respuesta" not in (cerrar_t.endpoint or "").lower(),
+            f"y NO apunta a /respuesta/ ({cerrar_t.endpoint})",
+            "Esa via le deja al cliente otra copia del texto de cierre cada vez.")
+    revisar(cerrar_t.argumentos_fijos.get("estado") in (4, "4"),
+            f"con el estado FIJO en 4 = Cerrado ({cerrar_t.argumentos_fijos.get('estado')!r})",
+            "Esta herramienta cierra; no mueve un ticket a cualquier estado.")
+    revisar("estado" not in cerrar_t.filtros_verificados,
+            "y el modelo no elige el estado por esta via")
+
+if listar_t is not None:
+    revisar(listar_t.solo_lectura is True,
+            f"'{listar_t.nombre}' es solo_lectura")
+    filtros = set(listar_t.filtros_verificados)
+    revisar({"fecha_creacion_0", "fecha_creacion_1"} <= filtros,
+            f"acepta los DOS extremos de la ventana ({sorted(filtros)})",
+            "La API exige ambos --medido-- y sin ventana el conteo es un "
+            "recorte silencioso, no el total.")
+    revisar({"limit", "offset"} <= filtros,
+            "y pagina con limit/offset")
+
+if crear_t is not None:
+    revisar("descripcion" in crear_t.filtros_verificados,
+            "la de crear ticket deja escribir 'descripcion'",
+            "Es donde va el DEXTER_REF: sin eso no hay forma de recuperar el "
+            "ticket si se pierde el id.")
+
+# Ninguna herramienta de la COLA puede cerrar por /respuesta/.
+for bandera in ("cierra_ticket_estado",):
+    h = por_bandera[bandera][0] if por_bandera[bandera] else None
+    if h is not None and "respuesta" in (h.endpoint or ""):
+        revisar(False, f"'{h.nombre}' cierra por /respuesta/")
+        break
+else:
+    revisar(True, "ninguna capacidad de la cola cierra por /respuesta/")
 
 # =============================================================================
 titulo("4. el reconciliador encuentra sus ejecutores")

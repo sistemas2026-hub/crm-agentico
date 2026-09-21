@@ -919,6 +919,17 @@ class Herramienta(Base):
     #: caso ya cerrado responde 200 y le reescribe la fecha de cierre. Sin esta
     #: capacidad, 'cerrar_caso' no se intenta -- queda visible y sin reintentos.
     lee_caso: bool = False
+    #: Lee UN ticket del ISP por su id y devuelve su 'estado'. Sin esto,
+    #: 'cerrar_ticket' no se intenta: un PUT sobre uno ya cerrado le corre
+    #: 'fecha_fin' (medido, 21/09/2026).
+    lee_ticket: bool = False
+    #: Cambia el ESTADO de un ticket por PUT, mandando solo ese campo. NUNCA
+    #: la que responde el ticket: esa publica un comentario en cada intento.
+    cierra_ticket_estado: bool = False
+    #: Lista tickets por ventana de fechas, para recuperar uno por su
+    #: DEXTER_REF cuando el id se perdio (Q2.1). Tiene que aceptar
+    #: 'fecha_creacion_0/_1', 'limit' y 'offset'.
+    lista_tickets: bool = False
     # Vigencia y revalidacion (§3.7). El contrato las exige para toda
     # herramienta aprobable, pero el validador NO puede fallar todavia: la
     # config vigente de Rapilink no las declara, y escribirla parte la medicion
@@ -1127,6 +1138,10 @@ class Herramienta(Base):
     verificacion: Verificacion | None = None
     responde_ticket_operativo: bool = False
     cierra_ticket_operativo: bool = False
+    #: Crea el ticket del ISP que respalda una escalada. La usa la cola de
+    #: efectos externos (B4), que le embebe un DEXTER_REF en la descripcion
+    #: para poder recuperarlo si el id se pierde (Q2.1).
+    crea_ticket_operativo: bool = False
     # La que cierra el caso en el CRM. Misma idea: el motor no sabe con que
     # palabra cierra un caso cada CRM ('Closed' aqui), eso va en la config.
     cierra_caso: bool = False

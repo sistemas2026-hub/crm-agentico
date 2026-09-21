@@ -490,6 +490,236 @@ try:
             "un tipo sin ejecutor queda fallida_definitiva, no 'desconocida'",
             f"{fila(s)}")
 
+
+    # =========================================================================
+    titulo("6c. crear_ticket: a lo sumo UN POST por intencion (Q2.1)")
+    # =========================================================================
+    # WispHub no acepta clave de idempotencia y no deja buscar por nada util
+    # (Q2). Lo que si se puede es embeber una referencia propia en
+    # 'descripcion' --medido: sobrevive exacta y viene en el listado-- y
+    # recuperarla barriendo una ventana. De ahi sale toda la regla.
+    REF = efectos_externos.referencia_de("crear_ticket:conv-1:ev-1")
+
+    revisar(REF.startswith("DEXTER_REF:") and len(REF) == len("DEXTER_REF:") + 32,
+            f"la referencia sale de la clave idempotente ({REF[:24]}...)")
+    revisar(efectos_externos.referencia_de("a") != efectos_externos.referencia_de("b"),
+            "dos intenciones distintas dan referencias distintas",
+            "Una misma conversacion puede generar mas de un ticket legitimo.")
+
+    posts = []
+
+    def crear_ok(ref, datos):
+        posts.append(ref)
+        return "T-NUEVO"
+
+    def ticket_con(busquedas, crear=crear_ok):
+        """`busquedas` se consume en orden: antes del POST y, si hace falta,
+        despues."""
+        pendientes = list(busquedas)
+
+        def buscar(ref):
+            r = pendientes.pop(0) if pendientes else []
+            if isinstance(r, Exception):
+                raise r
+            return r
+        c = conversacion(ORG_A)
+        s = encolar(T_A, ORG_A, c, "crear_ticket", f"ct:{c}",
+                    datos={"referencia": REF, "servicio": 6555})
+        trabajo = next(t for t in db.sincronizaciones_elegibles(T_A, 200)
+                       if str(t["id"]) == s)
+        reconciliador.procesar_una(
+            T_A, trabajo,
+            efectos_externos.ejecutor(None, T_A, crear=crear_ok,
+                                      buscar_por_nombre=lambda n: None,
+                                      crear_ticket_isp=crear,
+                                      buscar_ticket_por_referencia=buscar))
+        return fila(s)
+
+    posts.clear()
+    f = ticket_con([[]])                       # no existe -> se crea
+    revisar(f[0] == "hecha" and f[4] == "T-NUEVO" and posts == [REF],
+            f"no existia: se crea UNA vez y queda su id ({f[0]}, {posts})")
+
+    # EL CASO QUE HACE SEGURA LA VIA. Un intento anterior lo creo y murio
+    # antes de anotarlo: se busca ANTES, aparece, y NO se crea otro.
+    posts.clear()
+    f = ticket_con([["T-VIEJO"]])
+    revisar(f[0] == "hecha" and f[4] == "T-VIEJO" and posts == [],
+            f"ya existia con esa referencia: se adopta y NO se crea otro ({posts})",
+            "Sin esto, dos POST de la misma intencion son dos visitas tecnicas "
+            "al mismo cliente.")
+
+    # No poder BUSCAR no autoriza a crear.
+    posts.clear()
+    f = ticket_con([RuntimeError("API caida")])
+    revisar(f[0] == "pendiente" and posts == [],
+            f"si no se puede buscar, NO se crea a ciegas ({f[0]}, {posts})")
+
+    # Timeout del POST: se busca, aparece, se adopta. UN solo POST.
+    def crear_incierto(ref, datos):
+        posts.append(ref)
+        raise RuntimeError("timeout")
+
+    posts.clear()
+    f = ticket_con([[], ["T-QUEDO"]], crear=crear_incierto)
+    revisar(f[0] == "hecha" and f[4] == "T-QUEDO" and len(posts) == 1,
+            f"POST incierto -> se BUSCA y se adopta, sin segundo POST ({f[0]}, {len(posts)})",
+            "Es la unica recuperacion posible: WispHub no devuelve nada con que "
+            "reconciliar un reintento.")
+
+    posts.clear()
+    f = ticket_con([[], []], crear=crear_incierto)
+    revisar(f[0] == "desconocida" and len(posts) == 1,
+            f"POST incierto y no aparece -> desconocida, NUNCA otro POST ({f[0]})",
+            "0 coincidencias no autoriza a recrear: puede ser que no exista o "
+            "que todavia no se vea. Ninguna de las dos habilita un segundo POST.")
+
+    posts.clear()
+    f = ticket_con([["T-1", "T-2"]])
+    revisar(f[0] == "desconocida" and posts == []
+            and f[3] == "varias_coincidencias",
+            f">1 coincidencia -> desconocida, y el motivo lo DICE ({f[0]}/{f[3]})",
+            "Ya hay un duplicado. Elegir uno lo tapa; crear otro lo empeora.")
+
+    # Acepto y no devolvio id: tampoco se crea otro.
+    posts.clear()
+    f = ticket_con([[], ["T-SIN-ID"]], crear=lambda r, d: posts.append(r) or None)
+    revisar(f[0] == "hecha" and f[4] == "T-SIN-ID" and len(posts) == 1,
+            f"acepto sin devolver id -> se busca y se adopta ({f[0]})")
+
+    # Sin referencia no hay idempotencia: no se intenta.
+    c = conversacion(ORG_A)
+    s = encolar(T_A, ORG_A, c, "crear_ticket", f"ctsr:{c}", datos={"servicio": 1})
+    trabajo = next(t for t in db.sincronizaciones_elegibles(T_A, 200) if str(t["id"]) == s)
+    posts.clear()
+    reconciliador.procesar_una(
+        T_A, trabajo,
+        efectos_externos.ejecutor(None, T_A, crear=crear_ok,
+                                  buscar_por_nombre=lambda n: None,
+                                  crear_ticket_isp=crear_ok,
+                                  buscar_ticket_por_referencia=lambda r: []))
+    revisar(fila(s)[0] == "fallida_definitiva" and posts == [],
+            f"sin referencia NO se crea nada ({fila(s)[0]})")
+
+    # Sin capacidad de buscar, no se intenta siquiera.
+    c = conversacion(ORG_A)
+    s = encolar(T_A, ORG_A, c, "crear_ticket", f"ctsc:{c}", datos={"referencia": REF})
+    trabajo = next(t for t in db.sincronizaciones_elegibles(T_A, 200) if str(t["id"]) == s)
+    posts.clear()
+    reconciliador.procesar_una(
+        T_A, trabajo,
+        efectos_externos.ejecutor(None, T_A, crear=crear_ok,
+                                  buscar_por_nombre=lambda n: None,
+                                  crear_ticket_isp=crear_ok,
+                                  buscar_ticket_por_referencia=None))
+    revisar(fila(s)[0] == "fallida_definitiva" and posts == [],
+            "sin la capacidad de BUSCAR no se crea ningun ticket",
+            "Poder escribir sin poder preguntar es lo que Q2 prohibe.")
+
+    # =========================================================================
+    titulo("6d. cerrar_ticket: leer, cerrar por PUT, releer (B6)")
+    # =========================================================================
+    escrituras = []
+
+    def cerrar_ok(tid):
+        escrituras.append(tid)
+        return {"id_ticket": tid}
+
+    def cerrar_con(lecturas, cerrar=cerrar_ok):
+        pendientes = list(lecturas)
+
+        def leer(tid):
+            r = pendientes.pop(0)
+            if isinstance(r, Exception):
+                raise r
+            return r
+        c = conversacion(ORG_A)
+        s = encolar(T_A, ORG_A, c, "cerrar_ticket", f"xt:{c}",
+                    datos={"ticket": "90354"})
+        trabajo = next(t for t in db.sincronizaciones_elegibles(T_A, 200)
+                       if str(t["id"]) == s)
+        reconciliador.procesar_una(
+            T_A, trabajo,
+            efectos_externos.ejecutor(None, T_A, crear=crear_ok,
+                                      buscar_por_nombre=lambda n: None,
+                                      leer_ticket=leer, cerrar_ticket_isp=cerrar))
+        return fila(s)
+
+    escrituras.clear()
+    f = cerrar_con([{"estado": "Nuevo"}, {"estado": "Cerrado"}])
+    revisar(f[0] == "hecha" and escrituras == ["90354"],
+            f"abierto: se cierra y se CONFIRMA releyendo ({f[0]})")
+
+    escrituras.clear()
+    f = cerrar_con([{"estado": "Cerrado"}])
+    revisar(f[0] == "hecha" and escrituras == [],
+            "ya cerrado: se adopta y NO se reescribe",
+            "Medido el 21/09/2026: un PUT repetido le mueve 'fecha_fin' de "
+            "14:42:10 a 14:42:12, sin error. El ticket pasa a decir que se "
+            "cerro en un momento en que no se cerro.")
+
+    escrituras.clear()
+    f = cerrar_con([RuntimeError("500")])
+    revisar(f[0] == "pendiente" and escrituras == [],
+            f"si no se puede leer, NO se escribe ({f[0]})")
+
+    escrituras.clear()
+    f = cerrar_con([{"sin": "estado"}])
+    revisar(f[0] == "pendiente" and escrituras == [],
+            "y un estado ilegible tampoco autoriza a escribir")
+
+    escrituras.clear()
+    f = cerrar_con([{"estado": "Nuevo"}, {"estado": "Nuevo"}])
+    revisar(f[0] == "fallida_definitiva" and f[2] == "permanente",
+            f"acepto y el ticket NO quedo cerrado -> permanente y visible ({f[0]})",
+            "El codigo de estado dice que el pedido se acepto, no que el "
+            "ticket se haya cerrado.")
+
+    f = cerrar_con([{"estado": "Nuevo"}, RuntimeError("timeout")])
+    revisar(f[0] == "desconocida",
+            f"sin confirmacion -> desconocida, espera a una persona ({f[0]})")
+
+    # La etiqueta, no el codigo: se escribe 4 y se lee 'Cerrado'.
+    escrituras.clear()
+    f = cerrar_con([{"estado": "4"}, {"estado": "Cerrado"}])
+    revisar(escrituras == ["90354"],
+            "un '4' en la LECTURA no cuenta como cerrado",
+            "WispHub escribe por codigo y lee por etiqueta. Comparar el numero "
+            "contra el GET no funciona nunca.")
+
+    c = conversacion(ORG_A)
+    s = encolar(T_A, ORG_A, c, "cerrar_ticket", f"xtsc:{c}", datos={"ticket": "1"})
+    trabajo = next(t for t in db.sincronizaciones_elegibles(T_A, 200) if str(t["id"]) == s)
+    escrituras.clear()
+    reconciliador.procesar_una(
+        T_A, trabajo,
+        efectos_externos.ejecutor(None, T_A, crear=crear_ok,
+                                  buscar_por_nombre=lambda n: None,
+                                  leer_ticket=None, cerrar_ticket_isp=cerrar_ok))
+    revisar(fila(s)[0] == "fallida_definitiva" and escrituras == [],
+            "sin la capacidad de LEER no se cierra ningun ticket")
+
+    # Y NUNCA por /respuesta/: esa via publica un comentario en cada intento.
+    #
+    # Se mide sobre el CODIGO, sin el docstring. El docstring nombra
+    # '/respuesta/' justamente para decir que NO se usa, asi que una busqueda
+    # de texto se pone roja por la frase que defiende la regla -- es el mismo
+    # error que ya aparecio varias veces en esta rama.
+    import ast as _ast
+
+    fuente_ef = (RAIZ / "nucleo" / "relevo" / "efectos_externos.py").read_text(encoding="utf-8")
+    funcion = next(n for n in _ast.walk(_ast.parse(fuente_ef))
+                   if isinstance(n, _ast.FunctionDef) and n.name == "cerrar_ticket")
+    cuerpo = list(funcion.body)
+    if (cuerpo and isinstance(cuerpo[0], _ast.Expr)
+            and isinstance(cuerpo[0].value, _ast.Constant)):
+        cuerpo = cuerpo[1:]                      # fuera el docstring
+    codigo_cerrar = "\n".join(_ast.unparse(n) for n in cuerpo)
+    revisar("respuesta" not in codigo_cerrar,
+            "el cierre no usa '/respuesta/' en ninguna parte de su codigo",
+            "Esa via exige un texto y lo PUBLICA: cada reintento le deja al "
+            "cliente otra copia del mensaje de cierre.")
+
     # =========================================================================
     titulo("7. el worker")
     # =========================================================================

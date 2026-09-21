@@ -51,6 +51,13 @@ INTERVALO_SEGUNDOS = reconciliador.CADENCIA_SEGUNDOS
 #: mantiene abiertas decenas de conexiones a sistemas externos.
 POR_VUELTA = 50
 
+#: Tope del barrido que busca un ticket por su referencia. A 17 tickets por
+#: dia medidos, una ventana de 7 dias son ~120 filas: 2000 deja margen de
+#: sobra y evita que un tenant con mucho volumen pagine para siempre. Si se
+#: alcanza, la busqueda devuelve lo que encontro -- y no encontrar nada
+#: termina en 'desconocida', que es revision humana y no un segundo POST.
+MAX_FILAS_BUSQUEDA = 2000
+
 
 def encendido() -> bool:
     return os.environ.get("RECONCILIADOR_HABILITADO", "0").strip() == "1"
@@ -169,6 +176,86 @@ def _ejecutor_de(tenant: str):
         argumentos["id_caso"] = str(caso_id)
         return herramientas_http.ejecutar(herr, argumentos)
 
+    def _herramienta(bandera):
+        return next((h for h in config.herramientas
+                     if getattr(h, bandera, False)), None)
+
+    def leer_ticket(id_ticket: str):
+        """UN ticket con su 'estado'. Es lo que permite cerrar sin escribir a
+        ciegas: un PUT sobre uno ya cerrado le corre 'fecha_fin'."""
+        herr = _herramienta("lee_ticket")
+        if not herr:
+            raise RuntimeError("el tenant no declara una herramienta para leer el ticket")
+        return herramientas_http.ejecutar(herr, {"id_ticket": id_ticket})
+
+    def cerrar_ticket_isp(id_ticket: str):
+        """PUT con SOLO el estado. Los argumentos fijos del catalogo llevan el
+        codigo (4); aca solo va el id. Nunca '/respuesta/': esa via publica un
+        comentario en el ticket del cliente en cada intento."""
+        herr = _herramienta("cierra_ticket_estado")
+        if not herr:
+            raise RuntimeError("el tenant no declara una herramienta para cerrar el ticket")
+        argumentos = dict(herr.argumentos_fijos or {})
+        argumentos["id_ticket"] = str(id_ticket)
+        return herramientas_http.ejecutar(herr, argumentos)
+
+    def buscar_ticket_por_referencia(ref: str):
+        """Los id de los tickets cuya 'descripcion' contiene la referencia.
+
+        Barrido exhaustivo de una ventana acotada, con los DOS extremos --la
+        API exige ambos y topa en 2 meses-- y comparacion EXACTA. Nunca sin
+        ventana: el conteo sin filtro de fechas es un recorte silencioso, no
+        el total (medido: 1807 sin filtro contra 5040 a 60 dias).
+        """
+        herr = _herramienta("lista_tickets")
+        if not herr:
+            raise RuntimeError("el tenant no declara una herramienta para listar tickets")
+        desde = (datetime.now()
+                 - timedelta(days=efectos_externos.VENTANA_BUSQUEDA_DIAS)).strftime("%Y-%m-%d")
+        hasta = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+        hallados, off = [], 0
+        while off < MAX_FILAS_BUSQUEDA:
+            respuesta = herramientas_http.ejecutar(
+                herr, {"limit": 50, "offset": off,
+                       "fecha_creacion_0": desde, "fecha_creacion_1": hasta})
+            filas = (respuesta or {}).get("results") if isinstance(respuesta, dict) else None
+            if not filas:
+                break
+            hallados += [f.get("id_ticket") for f in filas
+                         if ref in (f.get("descripcion") or "")]
+            off += 50
+        return hallados
+
+    def crear_ticket_isp(ref: str, datos: dict):
+        """Crea el ticket con la referencia embebida en la descripcion.
+
+        La referencia va al FINAL y en su propia linea: 'descripcion' es lo
+        que lee el tecnico en su celular a las 7 de la mañana, y un
+        identificador opaco en el medio del texto le estorba.
+        """
+        herr = _herramienta("crea_ticket_operativo")
+        if not herr:
+            raise RuntimeError("el tenant no declara una herramienta para crear el ticket")
+        argumentos = dict(herr.argumentos_fijos or {})
+        argumentos.update({k: v for k, v in (datos or {}).items()
+                           if k not in ("referencia",)})
+        base = str(argumentos.get("descripcion") or "").rstrip()
+        argumentos["descripcion"] = f"{base}\n{ref}" if base else ref
+        respuesta = herramientas_http.ejecutar(herr, argumentos)
+        if isinstance(respuesta, dict):
+            return respuesta.get("id_ticket") or respuesta.get("id")
+        return None
+
+    puede_crear_ticket = all(_herramienta(b) for b in
+                             ("crea_ticket_operativo", "lista_tickets"))
+    puede_cerrar_ticket = all(_herramienta(b) for b in
+                              ("lee_ticket", "cierra_ticket_estado"))
+    for etiqueta, puede in (("crear tickets", puede_crear_ticket),
+                            ("cerrar tickets", puede_cerrar_ticket)):
+        if not puede:
+            registrar("reconciliador", f"el tenant no puede {etiqueta} desde la cola",
+                      tenant=tenant)
+
     # Fail-closed: sin LAS TRES, el ejecutor devuelve 'permanente' para
     # asignar_caso -- visible, y nunca 'desconocida'. Escribir sin poder
     # comprobar despues seria afirmar un efecto que no se vio, y traducir el
@@ -197,7 +284,12 @@ def _ejecutor_de(tenant: str):
         leer_asignados=leer_asignados if puede_asignar else None,
         leer_perfiles=leer_perfiles if puede_asignar else None,
         leer_caso=leer_caso if puede_cerrar else None,
-        cerrar_caso_crm=cerrar_caso_crm if puede_cerrar else None)
+        cerrar_caso_crm=cerrar_caso_crm if puede_cerrar else None,
+        crear_ticket_isp=crear_ticket_isp if puede_crear_ticket else None,
+        buscar_ticket_por_referencia=(buscar_ticket_por_referencia
+                                      if puede_crear_ticket else None),
+        leer_ticket=leer_ticket if puede_cerrar_ticket else None,
+        cerrar_ticket_isp=cerrar_ticket_isp if puede_cerrar_ticket else None)
 
 
 def una_vuelta(*, seco: bool = False) -> dict:
