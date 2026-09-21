@@ -149,7 +149,23 @@ def _argumentos_de(plantilla: dict, argumentos: dict) -> tuple[dict, str | None]
     return resueltos, None
 
 
-def revalidar(config, tenant: str, herramienta, accion: dict, *, leer=None) -> Veredicto:
+def _evaluar_politica(config, tenant, herramienta, accion):
+    """La politica de plataforma, con los hechos LEIDOS DE NUEVO.
+
+    Se le pasan los argumentos de la accion --de ahi sale sobre que factura
+    es-- y nada mas: todo lo demas se vuelve a leer. Ese es el punto de
+    revalidar.
+    """
+    from nucleo.facturacion import politicas
+    from nucleo.persistencia import db as persistencia
+
+    return politicas.evaluar(
+        config, tenant, herramienta, accion.get("argumentos") or {},
+        historial=persistencia.ultima_promesa_registrada)
+
+
+def revalidar(config, tenant: str, herramienta, accion: dict, *, leer=None,
+              politica=None) -> Veredicto:
     """
     Corre la revalidacion declarada por 'herramienta' para esta accion.
 
@@ -163,6 +179,26 @@ def revalidar(config, tenant: str, herramienta, accion: dict, *, leer=None) -> V
     guardas que no dependen de config (Q3, §3.7). Lo que no puede pasar --y no
     pasa-- es que una revalidacion DECLARADA se saltee por no poder correr.
     """
+    # ---- la politica de plataforma, si la herramienta declara una ----------
+    # Va PRIMERO y es la comprobacion ancha: mira si la accion sigue
+    # correspondiendo --el cliente pago, aparecio otra factura, ya hay una
+    # promesa-- mientras que 'aprobacion.revalidar' mira una condicion puntual
+    # declarada en el catalogo. Las dos hacen falta y ninguna reemplaza a la
+    # otra.
+    #
+    # NO SE CONFIA EN LOS HECHOS DE CUANDO SE PROPUSO. Entre proponer y
+    # aprobar pasa tiempo: eso es lo que esta funcion existe para cubrir, y
+    # una politica que se evaluara con los datos guardados no cubriria nada.
+    if getattr(herramienta, "politica", None) is not None:
+        v = (politica or _evaluar_politica)(config, tenant, herramienta, accion)
+        if v is not None:
+            from nucleo.facturacion import promesas
+
+            if v.resultado == promesas.NO_SE_PUDO:
+                return Veredicto(NO_SE_PUDO, f"politica:{v.motivo}", v.detalle)
+            if v.resultado != promesas.ELEGIBLE:
+                return Veredicto(NO_CUMPLE, f"politica:{v.motivo}", v.detalle)
+
     aprobacion = getattr(herramienta, "aprobacion", None)
     if aprobacion is None or aprobacion.revalidar is None:
         return Veredicto(CUMPLE, "sin_revalidacion_declarada")

@@ -518,6 +518,267 @@ finally:
     persistencia_real.guardar_accion_propuesta = original
     motor._politica_de = politica_original
 
+
+
+# =============================================================================
+titulo("11. al APROBAR se vuelve a leer todo")
+# =============================================================================
+# Entre proponer y aprobar pasa tiempo. Si la revalidacion usara los hechos
+# guardados al proponer, no cubriria nada -- seria mirar una foto vieja y
+# llamarla comprobacion.
+from nucleo.relevo import revalidacion                            # noqa: E402
+
+CONF_COMPLETA = config.model_copy(update={"promesas_pago": COMPLETA})
+ACCION = {"herramienta": "registrar_promesa_y_reactivar",
+          "argumentos": {"id_factura": 147121, "fecha_limite": "2026-10-01",
+                         "accion": 1}}
+
+
+def revalidar_con(**kw):
+    historial = kw.pop("historial", lambda t, f: None)
+    registro = kw.pop("registro", None)
+    leer = lector(registro=registro, **kw)
+
+    def politica(cfg, ten, herr, acc):
+        return politicas.evaluar(cfg, ten, herr, acc.get("argumentos") or {},
+                                 leer=leer, historial=historial)
+    return revalidacion.revalidar(CONF_COMPLETA, "rapilink", HERR, ACCION,
+                                  politica=politica)
+
+
+llamadas = []
+v = revalidar_con(registro=llamadas)
+revisar(v.desenlace == revalidacion.CUMPLE,
+        f"si todo sigue igual, cumple ({v.desenlace})")
+revisar([n for n, _ in llamadas] == ["consultar_factura_detalle",
+                                     "consultar_cliente", "consultar_facturas"],
+        f"y volvio a leer las TRES fuentes ({len(llamadas)} lecturas)",
+        "No se confia en los hechos de cuando se propuso: eso es justo lo que "
+        "esta comprobacion existe para cubrir.")
+
+# --- el cliente pago entre proponer y aprobar ----------------------------
+v = revalidar_con(cliente={"usuario": "prueba@rapilink-sas", "estado": "Activo"})
+revisar(v.desenlace == revalidacion.NO_CUMPLE and "no_esta_suspendido" in v.codigo,
+        f"si ya pago y esta Activo -> NO CUMPLE ({v.codigo})",
+        "Reactivar a quien ya tiene servicio no significa nada, y el efecto "
+        "seria una promesa que nadie pidio.")
+
+v = revalidar_con(facturas=())
+revisar(v.desenlace == revalidacion.NO_CUMPLE and "sin_factura_pendiente" in v.codigo,
+        f"si ya no tiene facturas pendientes -> NO CUMPLE ({v.codigo})")
+
+# --- aparecio otra factura -----------------------------------------------
+otra = dict(FACTURA_OK, id_factura=999)
+v = revalidar_con(facturas=(FACTURA_OK, otra))
+revisar(v.desenlace == revalidacion.NO_CUMPLE and "varias_pendientes" in v.codigo,
+        f"si ahora tiene DOS pendientes -> NO CUMPLE ({v.codigo})",
+        "La deuda acumulada la decide una persona, no una aprobacion de tramite.")
+
+# --- la lectura falla -> no se ejecuta, y no se mata la accion ------------
+for etiqueta, kw in (("el cliente no responde", {"cliente": RuntimeError("timeout")}),
+                     ("las facturas no responden", {"facturas": RuntimeError("500")}),
+                     ("la factura no responde", {"detalle": RuntimeError("500")})):
+    v = revalidar_con(**kw)
+    revisar(v.desenlace == revalidacion.NO_SE_PUDO,
+            f"{etiqueta} -> NO SE PUDO ({v.codigo})",
+            "Y NO_SE_PUDO no es NO_CUMPLE: la accion vuelve a pendiente en vez "
+            "de morir. Puede seguir siendo valida.")
+
+v = revalidar_con(historial=lambda t, f: date(2026, 9, 20))
+revisar(v.desenlace == revalidacion.NO_CUMPLE and "promesa_reciente" in v.codigo,
+        f"y si aparecio una promesa nuestra entremedio -> NO CUMPLE ({v.codigo})")
+
+# --- una herramienta SIN politica no cambia de conducta ------------------
+v = revalidacion.revalidar(CONF_COMPLETA, "rapilink", simple_h, ACCION)
+revisar(v.desenlace == revalidacion.CUMPLE
+        and v.codigo == "sin_revalidacion_declarada",
+        f"sin politica ni revalidacion declarada, cumple como siempre ({v.codigo})",
+        "El enganche es aditivo: no cambia lo que ya existia.")
+
+
+# =============================================================================
+titulo("12. aceptado, confirmado y no se sabe: tres cosas distintas")
+# =============================================================================
+ARGS = {"id_factura": 147121, "fecha_limite": "2026-10-01"}
+
+ok, detalle = politicas.confirmar(CONF_COMPLETA, "rapilink", HERR, ARGS,
+                                  leer=lector(cliente={"usuario": "x", "estado": "Activo"}))
+revisar(ok is True and detalle == "Activo",
+        f"POST aceptado + cliente Activo -> confirmado ({ok}, {detalle})")
+
+ok, detalle = politicas.confirmar(CONF_COMPLETA, "rapilink", HERR, ARGS,
+                                  leer=lector(cliente={"usuario": "x", "estado": "Suspendido"}))
+revisar(ok is False and detalle == "Suspendido",
+        f"POST aceptado + sigue Suspendido -> NO confirmado ({ok}, {detalle})",
+        "Un 201 dice que el pedido se acepto, no que el servicio volvio.")
+
+ok, detalle = politicas.confirmar(CONF_COMPLETA, "rapilink", HERR, ARGS,
+                                  leer=lector(cliente=RuntimeError("timeout")))
+revisar(ok is None,
+        f"si no se pudo releer -> ni si ni no ({ok}, {detalle})",
+        "None y False no se mezclan: uno manda a revisar la lectura, el otro a "
+        "revisar por que el sistema externo no hizo lo que dijo.")
+
+ok, detalle = politicas.confirmar(CONF_COMPLETA, "rapilink", simple_h, ARGS,
+                                  leer=lector())
+revisar(ok is None and detalle == "sin_politica",
+        f"una herramienta sin politica no se confirma ({detalle})")
+
+# El endpoint tiene que DISTINGUIR los tres, no colapsarlos en 'ok'.
+fuente_api = (RAIZ / "nucleo" / "canales" / "api.py").read_text(encoding="utf-8")
+bloque = fuente_api[fuente_api.index("# ---- PASO 3b"):]
+bloque = bloque[:bloque.index("\n#: Lo que se le responde")]
+revisar('salida["confirmado"] = confirmado' in bloque,
+        "la respuesta lleva 'confirmado' aparte de 'ok'")
+revisar("confirmado is False" in bloque and "confirmado is None" in bloque,
+        "y distingue 'no quedo activo' de 'no se pudo comprobar'")
+codigo_api = "\n".join(l for l in bloque.splitlines()
+                       if not l.strip().startswith("#"))
+revisar("reintent" not in codigo_api.lower().replace("reintenta:", "").replace("reintenta.", ""),
+        "y en ningun lado reintenta el POST",
+        "Maximo un POST por accion aprobada: WispHub no permite recuperar una "
+        "promesa por referencia, asi que un segundo intento no se podria "
+        "reconciliar con el primero.")
+
+
+# =============================================================================
+titulo("13. un solo efecto por accion aprobada")
+# =============================================================================
+# La garantia no la agrega esta fase: ya la da la reserva condicionada de B5
+# (§9.3 paso 1). Se comprueba que siga estando, porque es de lo que depende
+# todo lo de arriba.
+fuente_db = (RAIZ / "nucleo" / "persistencia" / "db.py").read_text(encoding="utf-8")
+cuerpo_reserva = fuente_db[fuente_db.index("def reservar_accion("):]
+cuerpo_reserva = cuerpo_reserva[:cuerpo_reserva.index("\ndef ")]
+revisar("estado = 'ejecutando'" in cuerpo_reserva
+        and "and estado = 'pendiente'" in cuerpo_reserva,
+        "la reserva es un UPDATE condicionado a 'pendiente'",
+        "Es el candado: dos aprobaciones a la vez, y la segunda no encuentra "
+        "nada que reservar.")
+
+bloque_aprobar = fuente_api[fuente_api.index("# ---- PASO 1: reservar"):]
+bloque_aprobar = bloque_aprobar[:bloque_aprobar.index("# ---- PASO 3b")]
+revisar(bloque_aprobar.index("reservar_accion") < bloque_aprobar.index("revalidar"),
+        "y se reserva ANTES de revalidar y de ejecutar",
+        "Al reves, dos aprobaciones simultaneas revalidarian las dos y "
+        "ejecutarian las dos.")
+
+
+
+# =============================================================================
+titulo("14. las dos cosas que las mutaciones destaparon")
+# =============================================================================
+# Dos mutaciones salieron VERDES: apagar la confirmacion del endpoint, y hacer
+# que la revalidacion evaluara la politica sin los argumentos de la accion.
+# Las dos pasaban porque estas pruebas miraban el TEXTO del archivo en vez de
+# lo que las funciones devuelven. Se corrige ejercitandolas.
+import ast as _ast                                                # noqa: E402
+
+# --- 14a. la respuesta distingue las cuatro situaciones ------------------
+from nucleo.canales import api as api_mod                         # noqa: E402
+
+s = api_mod._salida_ejecutada_ok({"x": 1}, None, None)
+revisar(s == {"ok": True, "estado": "ejecutada_ok", "resultado": {"x": 1}},
+        "sin confirmacion declarada, la respuesta es la de siempre",
+        "Las herramientas que no declaran politica no cambian de forma.")
+
+s = api_mod._salida_ejecutada_ok({}, True, "Activo")
+revisar(s["ok"] is True and s["confirmado"] is True and "mensaje" not in s,
+        "confirmado -> ok y confirmado, sin advertencia")
+
+s = api_mod._salida_ejecutada_ok({}, False, "Suspendido")
+revisar(s["ok"] is True and s["confirmado"] is False and "NO se pudo verificar" in s["mensaje"],
+        "aceptado pero NO activo -> ok True y confirmado False",
+        "El pedido se acepto de verdad; lo que no ocurrio es el efecto. "
+        "Mentir en 'ok' seria peor que el aviso.")
+
+s = api_mod._salida_ejecutada_ok({}, None, "lectura_fallida:Timeout")
+revisar(s["confirmado"] is None and "no se pudo comprobar" in s["mensaje"].lower(),
+        "no se pudo releer -> confirmado None, y se dice")
+revisar("NO se reintenta" in s["mensaje"],
+        "y en los dos casos dudosos se dice que NO se reintenta",
+        "Un segundo POST no se podria reconciliar con el primero: WispHub no "
+        "permite recuperar una promesa por referencia.")
+
+# --- 14b. el endpoint SI llama a confirmar -------------------------------
+# Medido sobre el arbol de sintaxis, no buscando una cadena: el comentario que
+# explica la confirmacion contiene la palabra y daria un falso verde.
+fuente_api = (RAIZ / "nucleo" / "canales" / "api.py").read_text(encoding="utf-8")
+arbol = _ast.parse(fuente_api)
+llama_confirmar = False
+for nodo in _ast.walk(arbol):
+    if isinstance(nodo, _ast.FunctionDef) and "aprobar" in nodo.name:
+        for hijo in _ast.walk(nodo):
+            if isinstance(hijo, _ast.Call) and isinstance(hijo.func, _ast.Name):
+                if hijo.func.id == "_confirmar_efecto":
+                    llama_confirmar = True
+revisar(llama_confirmar,
+        "la ruta de aprobacion llama a la guarda de confirmacion",
+        "Sin esto, 'confirmado' nunca se calcularia y la respuesta diria que "
+        "se hizo apoyandose solo en el 2xx.")
+
+# Pero el arbol ve la llamada aunque este MUERTA. Asi que la guarda se ejecuta.
+llamadas_conf = []
+real_confirmar = politicas.confirmar
+
+
+def _espia_confirmar(cfg, ten, herr, args, **kw):
+    llamadas_conf.append(herr.nombre)
+    return True, "Activo"
+
+
+try:
+    politicas.confirmar = _espia_confirmar
+    RESERVADA = {"argumentos": {"id_factura": 147121}}
+
+    r = api_mod._confirmar_efecto(CONF_COMPLETA, "rapilink", HERR, RESERVADA, None)
+    revisar(r == (True, "Activo") and llamadas_conf == ["registrar_promesa_y_reactivar"],
+            f"con politica y sin error, SI se confirma ({r})")
+
+    llamadas_conf.clear()
+    r = api_mod._confirmar_efecto(CONF_COMPLETA, "rapilink", HERR, RESERVADA, "HTTP_500")
+    revisar(r == (None, None) and llamadas_conf == [],
+            "si el POST fallo, NO se relee",
+            "Releer no cambiaria el desenlace y puede confundirlo: el efecto "
+            "ya se sabe que no ocurrio, o que quedo incierto.")
+
+    llamadas_conf.clear()
+    r = api_mod._confirmar_efecto(CONF_COMPLETA, "rapilink", simple_h, RESERVADA, None)
+    revisar(r == (None, None) and llamadas_conf == [],
+            "y una herramienta sin politica tampoco",
+            "No declara como comprobarse: inventar una comprobacion seria peor.")
+finally:
+    politicas.confirmar = real_confirmar
+
+# --- 14c. la revalidacion pasa los argumentos DE LA ACCION ---------------
+# Antes esto no se ejercitaba: el test inyectaba un doble de politica y la
+# funcion real quedaba sin tocar.
+vistos = {}
+real_evaluar = politicas.evaluar
+
+
+def _espia_evaluar(cfg, ten, herr, argumentos, **kw):
+    vistos["argumentos"] = argumentos
+    vistos["historial"] = kw.get("historial")
+    return promesas.Veredicto(promesas.ELEGIBLE)
+
+
+try:
+    politicas.evaluar = _espia_evaluar
+    revalidacion._evaluar_politica(
+        CONF_COMPLETA, "rapilink", HERR,
+        {"argumentos": {"id_factura": 147121, "fecha_limite": "2026-10-01"}})
+finally:
+    politicas.evaluar = real_evaluar
+
+revisar(vistos.get("argumentos") == {"id_factura": 147121,
+                                     "fecha_limite": "2026-10-01"},
+        f"al revalidar se le pasan los argumentos de la accion ({vistos.get('argumentos')})",
+        "De ahi sale sobre que factura es. Sin ellos la politica no sabria que "
+        "mirar, y se dejaria pasar cualquier cosa.")
+revisar(callable(vistos.get("historial")),
+        "y el historial real de Dexter, no un doble vacio")
+
 print()
 if fallos:
     print(f"  {len(fallos)} FALLA(S):")

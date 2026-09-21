@@ -119,11 +119,93 @@ def _politica_promesa_reactivacion(config, tenant, argumentos, lecturas, leer,
     return promesas.evaluar(hechos, politica)
 
 
+def _confirmar_promesa_reactivacion(config, tenant, argumentos, lecturas, leer):
+    """
+    Despues del POST: ¿el servicio quedo activo?
+
+    UN 201 NO ES UNA REACTIVACION. Dice que el pedido se acepto. Lo unico que
+    prueba el efecto es volver a leer al cliente y ver su estado -- la misma
+    disciplina que 'asignar_caso' en D28 y que 'cerrar_caso' en B6.
+
+    Y lo que NO prueba, y hay que decirlo: que la promesa haya quedado
+    registrada. Eso no se puede confirmar por ninguna via -- '/promesa-pago/'
+    solo declara POST, el detalle de factura no trae promesas y el cliente
+    tampoco (medido el 21/09/2026). Son dos hechos distintos y esta funcion
+    solo contesta el primero.
+    """
+    id_factura = argumentos.get("id_factura")
+    try:
+        detalle = leer(lecturas["factura"], {"id_factura": id_factura})
+        usuario = ((detalle or {}).get("cliente") or {}).get("usuario")
+        if not usuario:
+            return None, "no_se_pudo_identificar_al_cliente"
+        respuesta = leer(lecturas["cliente"], {"usuario": usuario})
+        filas = (respuesta or {}).get("results") if isinstance(respuesta, dict) else None
+        cliente = (filas or [None])[0] if filas is not None else respuesta
+    except Exception as e:
+        registrar("promesas", "no se pudo confirmar la reactivacion",
+                  tenant=tenant, error=e)
+        # None NO es False: no se sabe. Quien llama no puede afirmar la
+        # reactivacion, y tampoco puede negarla.
+        return None, f"lectura_fallida:{type(e).__name__}"
+
+    estado = str((cliente or {}).get("estado") or "").strip()
+    if not estado:
+        return None, "sin_estado"
+    return (estado == "Activo"), estado
+
+
 #: Las politicas que la plataforma ofrece, por nombre. El tenant elige cual
 #: aplica a cada herramienta; el nucleo nunca elige por el.
 REGISTRO = {
     "promesa_reactivacion": _politica_promesa_reactivacion,
 }
+
+#: Como se COMPRUEBA el efecto de cada politica, despues de ejecutarlo. Una
+#: politica puede no tener confirmacion; tenerla es lo que permite decir "se
+#: hizo" en vez de "se pidio".
+CONFIRMACIONES = {
+    "promesa_reactivacion": _confirmar_promesa_reactivacion,
+}
+
+
+def confirmar(config, tenant: str, herramienta, argumentos: dict, *, leer=None):
+    """
+    ¿El efecto ocurrio? Devuelve (confirmado, detalle).
+
+        True   se leyo y el efecto esta
+        False  se leyo y NO esta  -> no afirmar que se hizo
+        None   no se pudo leer    -> tampoco afirmarlo, y tampoco negarlo
+
+    None y False no se mezclan: uno manda a revisar por que fallo la lectura,
+    el otro manda a mirar por que el sistema externo no hizo lo que dijo.
+    """
+    declarada = getattr(herramienta, "politica", None)
+    if declarada is None:
+        return None, "sin_politica"
+    regla = CONFIRMACIONES.get(declarada.nombre)
+    if regla is None:
+        return None, f"sin_confirmacion:{declarada.nombre}"
+
+    por_nombre = {h.nombre: h for h in config.herramientas}
+    lecturas = {}
+    for rol, nombre in (declarada.lecturas or {}).items():
+        lectura = por_nombre.get(nombre)
+        if lectura is None or not lectura.solo_lectura:
+            return None, f"lectura_no_disponible:{nombre}"
+        lecturas[rol] = lectura
+
+    if leer is None:
+        from nucleo.herramientas import http as herramientas_http
+
+        def leer(h, a):
+            return herramientas_http.ejecutar(h, a, tenant, config.variables_tenant)
+
+    try:
+        return regla(config, tenant, argumentos, lecturas, leer)
+    except Exception as e:
+        registrar("promesas", "la confirmacion fallo", tenant=tenant, error=e)
+        return None, f"confirmacion_fallo:{type(e).__name__}"
 
 
 def evaluar(config, tenant: str, herramienta, argumentos: dict, *,

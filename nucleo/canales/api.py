@@ -5758,6 +5758,17 @@ def acciones_propuesta_aprobar(id_accion):
     resultado, codigo_error = motor.ejecutar_accion_aprobada(config, reservada)
     incierto = bool(codigo_error) and _es_incierto(codigo_error)
 
+    # ---- PASO 3b: confirmar el efecto, releyendo ----------------------------
+    # Un 2xx dice que el pedido se acepto, no que el efecto ocurrio. Para las
+    # herramientas cuya politica sabe como comprobarlo, se vuelve a leer.
+    #
+    # Y NO se reintenta el POST pase lo que pase: WispHub no permite consultar
+    # promesas ni recuperarlas por referencia, asi que un segundo intento no
+    # se puede reconciliar con el primero. Maximo un POST por accion aprobada
+    # (misma regla que Q2 para crear_ticket).
+    confirmado, detalle_confirmacion = _confirmar_efecto(
+        config, tenant, herramienta, reservada, codigo_error)
+
     # ---- PASO 4: el desenlace, con su evento --------------------------------
     try:
         persistencia.resolver_ejecucion_de_accion(
@@ -5778,7 +5789,64 @@ def acciones_propuesta_aprobar(id_accion):
     if codigo_error:
         return jsonify({"ok": False, "estado": "ejecutada_fallo",
                         "error_ejecucion": codigo_error, "resultado": resultado}), 502
-    return jsonify({"ok": True, "estado": "ejecutada_ok", "resultado": resultado})
+
+    return jsonify(_salida_ejecutada_ok(resultado, confirmado, detalle_confirmacion))
+
+
+def _confirmar_efecto(config, tenant, herramienta, reservada, codigo_error):
+    """
+    Releer para comprobar que el efecto ocurrio. Devuelve (confirmado, detalle).
+
+    Dos casos no se comprueban, y por razones opuestas:
+      con codigo_error   el pedido ya fallo o quedo incierto; releer no
+                         cambiaria el desenlace y puede confundirlo
+      sin politica       la herramienta no declara como comprobarse
+
+    Vive aparte del endpoint porque el 'if' es la guarda: dentro, una mutacion
+    que lo apagaba entero dejaba el test verde -- el arbol de sintaxis ve la
+    llamada aunque este muerta, y una prueba que mira el archivo no distingue
+    codigo alcanzable de codigo presente.
+    """
+    if codigo_error or getattr(herramienta, "politica", None) is None:
+        return None, None
+    from nucleo.facturacion import politicas as politicas_facturacion
+
+    confirmado, detalle = politicas_facturacion.confirmar(
+        config, tenant, herramienta, reservada.get("argumentos") or {})
+    registrar("acciones", "confirmacion del efecto", herramienta=herramienta.nombre,
+              confirmado=confirmado, detalle=detalle)
+    return confirmado, detalle
+
+
+def _salida_ejecutada_ok(resultado, confirmado, detalle):
+    """
+    La respuesta cuando el sistema externo ACEPTO el pedido.
+
+    Son TRES hechos distintos y no se colapsan en uno:
+
+        ok: True          el pedido se acepto. Siempre, si llegamos aca.
+        confirmado: True  ademas se releyo y el efecto ESTA
+        confirmado: False se releyo y NO esta
+        confirmado: None  no se pudo releer -- ni si ni no
+
+    Vive aparte del endpoint para poder ejercitar las cuatro ramas sin montar
+    Flask ni una base. Antes estaba dentro, y una mutacion que apagaba la
+    confirmacion entera dejaba el test verde: se estaba afirmando sobre el
+    TEXTO del archivo en vez de sobre lo que devuelve.
+    """
+    salida = {"ok": True, "estado": "ejecutada_ok", "resultado": resultado}
+    if detalle is None:
+        return salida
+    salida["confirmado"] = confirmado
+    salida["confirmacion"] = detalle
+    if confirmado is False:
+        salida["mensaje"] = ("El pedido se aceptó pero el efecto NO se pudo "
+                             "verificar en el sistema externo. No se reintenta: "
+                             "hay que revisarlo a mano.")
+    elif confirmado is None:
+        salida["mensaje"] = ("El pedido se aceptó y no se pudo comprobar el "
+                             "efecto. NO se reintenta.")
+    return salida
 
 
 #: Lo que se le responde a cada negativa de la reserva. Texto propio por motivo:
