@@ -779,6 +779,58 @@ revisar(vistos.get("argumentos") == {"id_factura": 147121,
 revisar(callable(vistos.get("historial")),
         "y el historial real de Dexter, no un doble vacio")
 
+
+
+# =============================================================================
+titulo("15. lo que SE ENVIA, no lo que se declara")
+# =============================================================================
+# La seccion 4 comprueba que 'argumentos_fijos' dice accion=1. Eso es el
+# catalogo, no el efecto: entre lo declarado y lo enviado esta
+# _resolver_argumentos, y es ahi donde los fijos pisan lo del modelo.
+#
+# La hermana simple ya se prueba asi en test_b5_promesa_accion.py; esta no se
+# probaba, y era la que puede reactivar un servicio.
+ACTIVA = 1
+
+for etiqueta, propuesta in (
+        ("el modelo no manda accion",
+         {"id_factura": 147121, "fecha_limite": "2026-10-01"}),
+        ("el modelo manda la simple",
+         {"id_factura": 147121, "fecha_limite": "2026-10-01",
+          "accion": "registrar_promesa"}),
+        ("el modelo manda 0 crudo",
+         {"id_factura": 147121, "fecha_limite": "2026-10-01", "accion": 0}),
+        ("el modelo manda '0' como texto",
+         {"id_factura": 147121, "fecha_limite": "2026-10-01", "accion": "0"}),
+        ("el modelo inventa un valor",
+         {"id_factura": 147121, "fecha_limite": "2026-10-01", "accion": "solo_registrar"}),
+):
+    args = motor._resolver_argumentos(HERR, None, propuesta)
+    revisar(args.get("accion") == ACTIVA,
+            f"{etiqueta} -> se envia accion={args.get('accion')!r}",
+            "Los fijos pisan lo del modelo. Si esto fallara, el modelo podria "
+            "convertir esta accion en la simple sin que nadie lo note -- y el "
+            "cliente se quedaria sin internet despues de que le dijeron que "
+            "se lo reconectaban.")
+
+# Y los argumentos que SI decide el modelo llegan intactos.
+args = motor._resolver_argumentos(
+    HERR, None, {"id_factura": 147121, "fecha_limite": "2026-10-01",
+                 "comentarios": "acordado por telefono"})
+revisar(args.get("id_factura") == 147121
+        and args.get("fecha_limite") == "2026-10-01"
+        and args.get("comentarios") == "acordado por telefono",
+        "y lo que el modelo si decide llega sin tocar")
+
+# Las dos herramientas mandan valores OPUESTOS, y ninguna los mezcla.
+args_simple = motor._resolver_argumentos(
+    simple_h, None, {"id_factura": 1, "fecha_limite": "2026-10-01",
+                     "accion": "registrar_promesa_y_activar_servicio"})
+revisar(args_simple.get("accion") == 0,
+        f"la simple sigue enviando 0 aunque le pidan la otra ({args_simple.get('accion')})",
+        "Son dos acciones distintas justamente para que ninguna pueda "
+        "convertirse en la otra.")
+
 print()
 if fallos:
     print(f"  {len(fallos)} FALLA(S):")
