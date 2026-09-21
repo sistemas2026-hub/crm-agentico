@@ -1,11 +1,22 @@
 # Gate Q2 — ¿se puede reintentar `crear_ticket` en WispHub?
 
 ```
-BASE       01a4471
-VEREDICTO  Q2 ROJO — crear_ticket NO es reintentable automáticamente
-ALCANCE    auditoría. Sin código, sin migración, sin tocar producción.
-FECHA      20/09/2026
+BASE       01a4471 · ampliado con medición en vivo el 21/09/2026
+VEREDICTO  crear_ticket NO se reintenta. Pero ya no por no poder buscar:
+           ahora SÍ se puede buscar, y por eso la política es
+           AT MOST ONE POST POR INTENCIÓN.
+ALCANCE    20/09: auditoría documental, sin tocar producción.
+           21/09: medición en vivo autorizada contra api.wisphub.io,
+                  5 tickets de prueba sobre el cliente 6555, todos cerrados.
+FECHA      20/09/2026 · Q2.1 el 21/09/2026
 ```
+
+> **Lo que cambió el 21/09.** La auditoría de abajo sigue siendo correcta en
+> todo: las tres vías del contrato no se cumplen **tal como están escritas**.
+> Lo que se descubrió después es que una referencia propia embebida en
+> `descripcion` sobrevive intacta y se puede recuperar — así que la
+> reconciliación deja de ser imposible y pasa a ser *asimétrica*: **adoptar
+> sí, recrear nunca**. Ver «Q2.1» al final.
 
 El contrato (§3.6) condiciona el reintento de `crear_ticket` a demostrar **una
 de tres cosas, en orden**. Las tres se examinaron. Ninguna se sostiene.
@@ -129,3 +140,93 @@ que espere a una persona.
    veredictos de acciones sin ejecutarlas.
 3. El reintento automático de `crear_ticket` **no se implementa**. Escribirlo
    «por si acaso» es exactamente lo que produce dos visitas al mismo cliente.
+
+---
+
+# Q2.1 — la referencia en `descripcion` (21/09/2026)
+
+Medido en vivo contra `api.wisphub.io`, con autorización explícita. Cinco
+tickets de prueba sobre el cliente **6555 (PRUEBA TEMPORAL)**, todos nacidos
+`Cerrado` para no entrar a la cola de soporte: `93341`–`93345`. Ningún cliente
+real fue tocado.
+
+## Lo que se verificó, y no estaba en la documentación
+
+```
+descripcion viene en el LISTADO          SÍ — 21 campos reales (la doc: 20)
+viaja COMPLETA, sin truncar              SÍ — mismo largo en listado y detalle
+la referencia vuelve EXACTA              SÍ — 184 → 184, cadena idéntica
+se recupera el id sin conocerlo          SÍ — 1 coincidencia, id correcto
+la ventana acotada es exhaustiva         SÍ — 946/946, 0 repetidos, estable
+WispHub deduplica por referencia         NO — el duplicado se acepta (201)
+```
+
+El HTML que traen casi todas las descripciones lo pone **el editor del panel
+web**, no la plataforma: la cuenta de la API tiene descripciones planas. Por
+eso una referencia plana sobrevive plana.
+
+**Tres errores más de la documentación**, para la skill:
+- `fecha_creacion_0` solo NO sirve: la API exige los dos extremos.
+- El tope real del rango es de **2 meses**, y lo dice al rechazar.
+- El `count` **sin** filtro de fecha es un recorte, no el total: 1807 sin
+  filtro, 2629 a 30 días, 5040 a 60. Explica la anomalía de julio medida el
+  20/09. **Nunca consultar sin ventana.**
+
+## La latencia NO se pudo medir, y es lo que fija la política
+
+Cuatro tickets aparecieron en 2.7–3.3 s. Pero un barrido **vacío** cuesta
+2.0–4.3 s: los cuatro estaban visibles en el primer barrido, o sea antes de
+que el instrumento pudiera mirar.
+
+> Esos segundos son el costo del bucle, no la latencia de WispHub.
+
+Lo único que sostienen es «es rápido». No dan el peor caso, que es justo lo
+que haría falta para decir «pasaron N segundos, luego no existe». **Fijar un
+umbral con esos cuatro puntos sería inventarlo.**
+
+## La política, que ya no depende de inventar un timeout
+
+**AT MOST ONE POST POR INTENCIÓN.** La asimetría es deliberada: buscar es
+barato y seguro, crear no tiene vuelta atrás.
+
+```
+intención nueva          UN POST, una sola vez.
+resultado con id         adoptar el id. hecha.
+resultado INCIERTO       buscar DEXTER_REF en descripcion, ventana acotada:
+    1 coincidencia         adoptar id_ticket → hecha
+   >1 coincidencias        desconocida + revisión humana. Jamás otro POST.
+    0 coincidencias        desconocida. Seguir buscando / revisar a mano.
+                           NUNCA un segundo POST automático.
+```
+
+Un `0` no autoriza a recrear **y ya no hace falta que lo autorice**: la
+política no necesita distinguir «no existe» de «todavía no lo veo», porque
+ninguna de las dos habilita un segundo POST. Eso es lo que saca a Q2 de
+depender de una medición que no se pudo hacer.
+
+## La clave de la referencia
+
+```
+DEXTER_REF:<derivada de sincronizaciones_externas.clave_idempotencia>
+```
+
+**NO de `conversation_id + tipo`.** Una misma conversación puede generar más
+de un ticket legítimo —dos fallas distintas, dos visitas— y esa clave los
+confundiría, haciendo que el segundo adopte el primero y nunca se cree.
+
+La clave de esa fila ya es lo correcto: §3.6 la deriva de (conversación, tipo,
+**evento que la originó**), es `not null`, tiene índice único por organización,
+y **se escribe dentro de la transacción de la transición** — o sea antes de
+cualquier HTTP. La referencia queda persistida antes del primer POST sin
+mecanismo nuevo: sale de lo que B4 ya guarda.
+
+## Lo que queda por implementar
+
+1. el productor de `crear_ticket` (hoy no existe ninguno);
+2. derivar `DEXTER_REF` de la clave durable y embeberla en `descripcion`;
+3. la búsqueda exhaustiva por ventana, comparando la referencia exacta;
+4. adopción con 1 coincidencia; `desconocida` con 0 o con más de 1;
+5. ningún reintento de creación después de un resultado incierto.
+
+`cerrar_ticket` es **otro flujo** y no cambia acá: sigue sin automatizarse por
+lo medido en B6 (su única vía de cierre publica un comentario en cada intento).
