@@ -267,6 +267,257 @@ revisar("201" not in codigo and "status_code" not in codigo,
         "y no mira codigos de estado HTTP en ningun lado",
         "Confirmar la reactivacion es releer el cliente, no leer un 2xx.")
 
+
+
+# =============================================================================
+titulo("8. el productor: reune los hechos y NO propone si no procede")
+# =============================================================================
+# Hasta aca la politica era una funcion que nadie llamaba. Esto prueba la
+# cadena real --catalogo, lecturas, evaluacion-- con dobles en lugar de red.
+from nucleo.facturacion import politicas                          # noqa: E402
+
+HERR = next(h for h in config.herramientas
+            if h.nombre == "registrar_promesa_y_reactivar")
+
+CLIENTE_OK = {"usuario": "prueba@rapilink-sas", "estado": "Suspendido"}
+FACTURA_OK = {"id_factura": 147121, "estado": "Pendiente de Pago",
+              "fecha_vencimiento": "2026-09-10", "total": 69900.0}
+DETALLE_OK = {"id_factura": 147121, "cliente": {"usuario": "prueba@rapilink-sas"}}
+
+COMPLETA = PromesasPago(dias_maximos_promesa=15, monto_maximo_promesa=200000,
+                        dias_entre_promesas=30)
+
+
+def lector(detalle=DETALLE_OK, cliente=CLIENTE_OK, facturas=(FACTURA_OK,),
+           registro=None):
+    """Un doble de las tres lecturas del catalogo. Anota a quien llamo."""
+    def _leer(herr, args):
+        if registro is not None:
+            registro.append((herr.nombre, args))
+        if herr.nombre == "consultar_factura_detalle":
+            if isinstance(detalle, Exception):
+                raise detalle
+            return detalle
+        if herr.nombre == "consultar_cliente":
+            if isinstance(cliente, Exception):
+                raise cliente
+            return {"results": [cliente] if cliente else []}
+        if herr.nombre == "consultar_facturas":
+            if isinstance(facturas, Exception):
+                raise facturas
+            return {"results": list(facturas)}
+        raise AssertionError(f"lectura inesperada: {herr.nombre}")
+    return _leer
+
+
+def correr(cfg=None, **kw):
+    conf = cfg or config.model_copy(update={"promesas_pago": COMPLETA})
+    registro = kw.pop("registro", None)
+    historial = kw.pop("historial", lambda t, f: None)
+    return politicas.evaluar(conf, "rapilink", HERR,
+                             {"id_factura": 147121, "fecha_limite": "2026-10-01"},
+                             leer=lector(registro=registro, **kw),
+                             historial=historial)
+
+
+# --- el camino feliz, y QUE lecturas hizo --------------------------------
+llamadas = []
+v = correr(registro=llamadas)
+revisar(v is not None and v.elegible,
+        f"con todo en regla, la politica dice que si ({v.resultado if v else None})")
+revisar([n for n, _ in llamadas] == ["consultar_factura_detalle",
+                                     "consultar_cliente", "consultar_facturas"],
+        f"y leyo las tres, en orden ({[n for n, _ in llamadas]})",
+        "La cadena empieza por la factura: es lo unico que trae la propuesta.")
+revisar(llamadas[2][1] == {"cliente": "prueba@rapilink-sas", "estado": 1},
+        f"las facturas se piden por SLUG y estado pendiente ({llamadas[2][1]})",
+        "'id_servicio' esta medido como IGNORADO en ese listado: filtrar por el "
+        "devolveria las facturas de todos los clientes.")
+
+# --- una herramienta sin politica no paga nada ---------------------------
+simple_h = next(h for h in config.herramientas if h.nombre == "agregar_promesa_pago")
+revisar(politicas.evaluar(config, "rapilink", simple_h, {}, leer=None) is None,
+        "una herramienta SIN politica declarada devuelve None",
+        "Es lo que hace que esto sea aditivo: todo lo demas sigue igual.")
+
+# --- si no hay politica cargada, no se propone ---------------------------
+v = correr(cfg=config)          # Rapilink todavia no cargo los valores
+revisar(v.resultado == promesas.NO_SE_PUDO and v.motivo == "politica_sin_cargar",
+        f"sin valores del tenant no se propone ({v.motivo})")
+
+# --- cada lectura que falla termina en NO_SE_PUDO ------------------------
+for etiqueta, kw, motivo in (
+        ("la factura no se pudo leer", {"detalle": RuntimeError("500")},
+         "sin_cliente_de_la_factura"),
+        ("la factura no dice de quien es", {"detalle": {"id_factura": 1}},
+         "sin_cliente_de_la_factura"),
+        ("el cliente no se pudo leer", {"cliente": RuntimeError("timeout")},
+         "sin_cliente"),
+        ("las facturas no se pudieron leer", {"facturas": RuntimeError("timeout")},
+         "sin_facturas")):
+    v = correr(**kw)
+    revisar(v.resultado == promesas.NO_SE_PUDO and v.motivo == motivo,
+            f"{etiqueta} -> {v.resultado}/{v.motivo}")
+
+# --- el historial: consultado vs no consultado ---------------------------
+
+
+def revienta(t, f):
+    raise RuntimeError("base caida")
+
+
+v = correr(historial=revienta)
+revisar(v.resultado == promesas.NO_SE_PUDO and v.motivo == "sin_historial",
+        f"si el historial no se puede consultar, NO se propone ({v.motivo})",
+        "Una base caida no puede parecerse a un cliente sin promesas previas.")
+
+v = correr(historial=lambda t, f: date(2026, 9, 15))
+revisar(v.resultado == promesas.NO_ELEGIBLE and v.motivo == "promesa_reciente",
+        f"y una promesa de hace 6 dias bloquea ({v.motivo})")
+
+# --- el catalogo miente: lectura ausente o que escribe -------------------
+sin_lectura = config.model_copy(update={"promesas_pago": COMPLETA})
+herr_mala = HERR.model_copy(deep=True)
+herr_mala.politica.lecturas["cliente"] = "no_existe_esta"
+v = politicas.evaluar(sin_lectura, "rapilink", herr_mala, {"id_factura": 1},
+                      leer=lector())
+revisar(v.resultado == promesas.NO_SE_PUDO and "lectura_ausente" in v.motivo,
+        f"una lectura declarada y ausente impide proponer ({v.motivo})",
+        "Misma regla que X17: una comprobacion declarada que no puede correr "
+        "nunca autoriza nada.")
+
+herr_escribe = HERR.model_copy(deep=True)
+herr_escribe.politica.lecturas["cliente"] = "agregar_promesa_pago"   # NO es lectura
+v = politicas.evaluar(sin_lectura, "rapilink", herr_escribe, {"id_factura": 1},
+                      leer=lector())
+revisar(v.resultado == promesas.NO_SE_PUDO and "no_es_lectura" in v.motivo,
+        f"y una que escribe, tampoco ({v.motivo})",
+        "Comprobar no puede escribir: correria un efecto antes de decidir si "
+        "se corre el efecto.")
+
+herr_rara = HERR.model_copy(deep=True)
+herr_rara.politica.nombre = "politica_que_no_existe"
+v = politicas.evaluar(sin_lectura, "rapilink", herr_rara, {"id_factura": 1},
+                      leer=lector())
+revisar(v.resultado == promesas.NO_SE_PUDO and "desconocida" in v.motivo,
+        f"una politica que el motor no conoce falla CERRADO ({v.motivo})")
+
+
+# =============================================================================
+titulo("9. el motor no propone lo que la politica rechaza")
+# =============================================================================
+from nucleo.modelo import motor                                   # noqa: E402
+
+revisar(motor._politica_de(None, "rapilink", HERR, {}) is None,
+        "sin config, el motor no evalua politica (y no rompe)")
+revisar(motor._politica_de(config, "rapilink", simple_h, {}) is None,
+        "una herramienta sin politica no la evalua")
+
+salida = motor._no_se_propone(HERR, promesas.Veredicto(
+    promesas.NO_ELEGIBLE, "varias_pendientes", "Tiene 3 facturas pendientes."))
+revisar(salida.get("error") == "POLITICA_NO_ELEGIBLE",
+        f"un rechazo devuelve error, no una propuesta ({salida.get('error')})")
+revisar("3 facturas pendientes" in salida["instruccion_interna"],
+        "y le pasa el MOTIVO al modelo, para que se lo diga a quien pregunto",
+        "'No se pudo' no le sirve a nadie; 'tiene 3 facturas pendientes' si.")
+revisar("no vuelvas a intentarlo" in salida["instruccion_interna"].lower(),
+        "con la instruccion de no reintentar",
+        "Sin eso el modelo lo propone otra vez y el colaborador ve el mismo "
+        "rechazo tres veces seguidas.")
+
+salida = motor._no_se_propone(HERR, promesas.Veredicto(
+    promesas.NO_SE_PUDO, "sin_historial", "No se pudo consultar."))
+revisar(salida.get("error") == "POLITICA_NO_SE_PUDO_COMPROBAR",
+        f"y 'no se pudo' se distingue de 'no procede' ({salida.get('error')})",
+        "Son cosas distintas: una la arregla el cliente pagando, la otra la "
+        "arregla alguien mirando por que fallo la lectura.")
+
+fuente_motor = (RAIZ / "nucleo" / "modelo" / "motor.py").read_text(encoding="utf-8")
+cuerpo = fuente_motor[fuente_motor.index("def _ejecutar_propuesta_de_accion("):]
+cuerpo = cuerpo[:cuerpo.index("\ndef ")]
+revisar(cuerpo.index("_politica_de") < cuerpo.index("guardar_accion_propuesta"),
+        "la politica corre ANTES de guardar la propuesta",
+        "Al reves, quedaria una propuesta en la pantalla que nadie deberia "
+        "aprobar -- y quien la vea no tiene como saberlo.")
+
+
+
+# =============================================================================
+titulo("10. el efecto, no la presencia: la propuesta NO se guarda")
+# =============================================================================
+# Las aserciones de arriba comprueban que las piezas existen y que el orden en
+# el archivo es el correcto. Ninguna comprobaba que la guarda CORTE. Se noto
+# con una mutacion: quitar el 'if' y el test seguia verde.
+#
+# Esto llama a la funcion real y espia la escritura.
+from nucleo.persistencia import db as persistencia_real           # noqa: E402
+
+guardadas = []
+
+
+def _espia_guardar(*a, **k):
+    guardadas.append(a)
+    return ("accion-espia", False)
+
+
+original = persistencia_real.guardar_accion_propuesta
+politica_original = motor._politica_de
+try:
+    persistencia_real.guardar_accion_propuesta = _espia_guardar
+
+    # --- la politica dice que NO -> no se guarda nada --------------------
+    motor._politica_de = lambda *a, **k: promesas.Veredicto(
+        promesas.NO_ELEGIBLE, "varias_pendientes", "Tiene 3 pendientes.")
+    guardadas.clear()
+    salida = motor._ejecutar_propuesta_de_accion(
+        HERR, None, {"id_factura": 147121, "fecha_limite": "2026-10-01"},
+        "rapilink", "facturacion", "quien", config=config)
+    revisar(guardadas == [],
+            f"con la politica en contra NO se guarda la propuesta ({len(guardadas)})",
+            "Es la unica asercion que mide el EFECTO. Sin ella, quitar el 'if' "
+            "del motor deja el test verde -- medido con una mutacion.")
+    revisar(salida.get("error") == "POLITICA_NO_ELEGIBLE",
+            f"y el modelo recibe el rechazo ({salida.get('error')})")
+    revisar("accion_id" not in salida,
+            "sin accion_id: no hay nada que aprobar")
+
+    # --- no se pudo comprobar -> tampoco se guarda -----------------------
+    motor._politica_de = lambda *a, **k: promesas.Veredicto(
+        promesas.NO_SE_PUDO, "sin_historial", "No se pudo consultar.")
+    guardadas.clear()
+    salida = motor._ejecutar_propuesta_de_accion(
+        HERR, None, {"id_factura": 147121, "fecha_limite": "2026-10-01"},
+        "rapilink", "facturacion", "quien", config=config)
+    revisar(guardadas == [],
+            "y con 'no se pudo comprobar' tampoco",
+            "Una propuesta en la pantalla ya viene con forma de algo aprobable. "
+            "Quien la ve no tiene como saber que las comprobaciones no corrieron.")
+
+    # --- la politica dice que SI -> se guarda ----------------------------
+    # Control positivo. Sin esto, las dos de arriba pasarian igual si
+    # '_ejecutar_propuesta_de_accion' estuviera rota y no guardara nunca.
+    motor._politica_de = lambda *a, **k: promesas.Veredicto(promesas.ELEGIBLE)
+    guardadas.clear()
+    salida = motor._ejecutar_propuesta_de_accion(
+        HERR, None, {"id_factura": 147121, "fecha_limite": "2026-10-01"},
+        "rapilink", "facturacion", "quien", config=config)
+    revisar(len(guardadas) == 1 and salida.get("accion_id") == "accion-espia",
+            f"control positivo: con la politica a favor SI se guarda ({len(guardadas)})",
+            "Si esto no guardara, las dos aserciones de arriba no medirian nada.")
+
+    # --- y una herramienta SIN politica sigue funcionando igual ----------
+    motor._politica_de = politica_original
+    guardadas.clear()
+    motor._ejecutar_propuesta_de_accion(
+        simple_h, None, {"id_factura": 147121, "fecha_limite": "2026-10-01"},
+        "rapilink", "facturacion", "quien", config=config)
+    revisar(len(guardadas) == 1,
+            "una herramienta sin politica se propone como siempre",
+            "El enganche es ADITIVO: lo que no declara politica no cambia.")
+finally:
+    persistencia_real.guardar_accion_propuesta = original
+    motor._politica_de = politica_original
+
 print()
 if fallos:
     print(f"  {len(fallos)} FALLA(S):")

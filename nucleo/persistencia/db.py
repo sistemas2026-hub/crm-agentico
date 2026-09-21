@@ -2913,6 +2913,36 @@ def registrar_evento_de_accion(cur, org, accion_id: str, tipo: str, *,
          actor_nombre, json.dumps(datos or {}, ensure_ascii=False)))
 
 
+def ultima_promesa_registrada(tenant: str, id_factura: str):
+    """
+    Cuando fue la ultima promesa que DEXTER dejo registrada sobre esta factura,
+    o None si no hay ninguna.
+
+    Devuelve None cuando consulto y no hay. LEVANTA si no pudo consultar -- y
+    esa diferencia es el punto: quien llama distingue "no hay promesa" de "no
+    pude averiguarlo", y lo segundo impide proponer. Tragarse el error aqui
+    haria que una base caida pareciera un cliente sin historial.
+
+    SOLO VE LO DE DEXTER. Una promesa que un agente cargo a mano en el panel
+    de facturacion es invisible: esa API no permite consultarlas. Es una
+    cobertura parcial, dicha y no disimulada.
+
+    'aprobada' entra ademas de 'ejecutada_ok': entre que alguien aprueba y que
+    el efecto se resuelve hay una ventana, y en esa ventana la promesa ya se
+    decidio. Contarla como inexistente dejaria proponer una segunda.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select max(coalesce(revisado_en, creado_en)) as cuando
+                 from asistente.acciones_propuestas
+                where organization_id = %s
+                  and estado in ('aprobada', 'ejecutando', 'ejecutada_ok', 'desconocida')
+                  and argumentos ->> 'id_factura' = %s""",
+            (org, str(id_factura)))
+        fila = cur.fetchone()
+        return fila["cuando"] if fila else None
+
+
 def cancelar_accion_propuesta(tenant: str, accion_id: str, motivo: str,
                               cancelada_por: str) -> tuple[str | None, bool]:
     """

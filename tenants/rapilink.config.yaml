@@ -4281,6 +4281,20 @@ herramientas:
     # modelo no vea un interruptor entre 0 y 1 en ninguna de las dos.
     argumentos_fijos:
       accion: 1
+    # La politica que decide si esto se puede siquiera PROPONER. La regla vive
+    # en nucleo/facturacion/promesas.py --es de plataforma--; aca se dice con
+    # que lecturas de ESTE catalogo alimentarla. Si alguna falta o no es de
+    # solo lectura, la accion no se propone.
+    #
+    # La cadena empieza por la factura porque es lo unico que trae la
+    # propuesta del modelo: de ahi sale el cliente, y del cliente su estado y
+    # sus facturas pendientes.
+    politica:
+      nombre: promesa_reactivacion
+      lecturas:
+        factura: consultar_factura_detalle
+        cliente: consultar_cliente
+        facturas: consultar_facturas
     requeridos: [id_factura, fecha_limite]
     filtros_verificados:
       id_factura:

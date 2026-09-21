@@ -1430,8 +1430,51 @@ def _resumen_de_accion(herramienta, argumentos: dict) -> str:
     return f"{herramienta.nombre}({pares})"
 
 
+def _politica_de(config, tenant, herramienta, argumentos):
+    """El veredicto de la politica declarada, o None si no declara ninguna.
+
+    Vive aqui y no dentro de la propuesta para que se lea de un vistazo que
+    una herramienta SIN politica no paga ningun costo: sin config o sin
+    declaracion, no se importa nada y se sigue de largo.
+    """
+    if config is None or getattr(herramienta, "politica", None) is None:
+        return None
+    from nucleo.facturacion import politicas
+
+    from nucleo.persistencia import db as persistencia
+
+    return politicas.evaluar(config, tenant, herramienta, argumentos,
+                             historial=getattr(persistencia,
+                                               "ultima_promesa_registrada", None))
+
+
+def _no_se_propone(herramienta, veredicto) -> dict:
+    """Lo que recibe el modelo cuando la politica dice que no.
+
+    Lleva el MOTIVO y el detalle: el colaborador que pregunto merece saber por
+    que no procede --"tiene dos facturas pendientes"-- y no un "no se pudo".
+    Y lleva la instruccion de NO reintentar: sin eso el modelo vuelve a
+    proponer la misma accion en el turno siguiente y el colaborador ve el
+    mismo rechazo tres veces.
+    """
+    from nucleo.facturacion import promesas
+
+    codigo = ("POLITICA_NO_ELEGIBLE" if veredicto.resultado == promesas.NO_ELEGIBLE
+              else "POLITICA_NO_SE_PUDO_COMPROBAR")
+    return {
+        "error": codigo,
+        "motivo": veredicto.motivo,
+        "instruccion_interna": (
+            f"'{herramienta.nombre}' NO se propuso: {veredicto.detalle or veredicto.motivo}. "
+            f"Decile eso a quien te lo pidio, con esas palabras, y NO vuelvas a "
+            f"intentarlo en esta conversacion. Si insiste, que lo vea una "
+            f"persona del area."),
+    }
+
+
 def _ejecutar_propuesta_de_accion(herramienta, sesion, argumentos_modelo: dict,
-                                  tenant: str, rol: str, propuesto_por: str) -> dict:
+                                  tenant: str, rol: str, propuesto_por: str,
+                                  config=None) -> dict:
     """
     Para una Herramienta con aprobacion_humana=True (nucleo/config/
     schema.py): resuelve los argumentos reales -- igual que _ejecutar_tool,
@@ -1449,6 +1492,22 @@ def _ejecutar_propuesta_de_accion(herramienta, sesion, argumentos_modelo: dict,
     from nucleo.persistencia import db as persistencia
 
     argumentos = _resolver_argumentos(herramienta, sesion, argumentos_modelo)
+
+    # La politica, si la herramienta declara una. Corre ANTES de crear la
+    # propuesta: el comentario de mas arriba en este archivo ya lo dice --no
+    # tiene sentido proponer una accion que de entrada no se podria ejecutar--
+    # y aqui hay una razon extra. Una propuesta que llega a la pantalla ya
+    # viene con forma de algo aprobable, y quien la ve no tiene como saber que
+    # las comprobaciones no corrieron. Proponer sin verificar es trasladarle a
+    # una persona una decision que se le presenta como verificada.
+    #
+    # Aditivo e INERTE: sin 'politica' declarada devuelve None y todo sigue
+    # igual, que es el caso de todas las herramientas de hoy menos las que lo
+    # pidan explicitamente.
+    veredicto = _politica_de(config, tenant, herramienta, argumentos)
+    if veredicto is not None and not veredicto.elegible:
+        return _no_se_propone(herramienta, veredicto)
+
     resumen = _resumen_de_accion(herramienta, argumentos)
     accion_id, ya_existia = persistencia.guardar_accion_propuesta(
         tenant, herramienta.nombre, argumentos, resumen, rol, propuesto_por)
@@ -3061,7 +3120,8 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 else:
                     salida = _ejecutar_propuesta_de_accion(
                         herramienta, sesion, llamada.argumentos,
-                        config.identidad.slug, nombre_rol, quien)
+                        config.identidad.slug, nombre_rol, quien,
+                        config=config)
             else:
                 clave_cache = (herramienta.nombre,
                               json.dumps(llamada.argumentos or {}, sort_keys=True))

@@ -838,6 +838,25 @@ class Aprobacion(Base):
     revalidar: Revalidacion
 
 
+class PoliticaDeclarada(Base):
+    """
+    Una politica de plataforma, atada a las lecturas de ESTE tenant.
+
+    El motor no puede saber que 'consultar_cliente' se llama asi: eso es
+    catalogo del tenant. Y el tenant no deberia reimplementar la regla: eso es
+    plataforma. Asi que la regla vive en codigo, se elige por 'nombre', y aqui
+    se dice con que herramientas de LECTURA alimentarla.
+
+    Es la misma forma que 'aprobacion.revalidar' (§3.7): la herramienta declara
+    que leer, el nucleo lo busca en el catalogo, y si no esta, no ejecuta.
+    """
+    #: Que politica de nucleo/facturacion/politicas.py aplicar.
+    nombre: str
+    #: rol logico -> nombre de una herramienta de SOLO LECTURA del catalogo.
+    #: Cada politica declara que roles necesita; si falta uno, no se propone.
+    lecturas: dict[str, str] = Field(default_factory=dict)
+
+
 class Herramienta(Base):
     nombre: str
     # 'interno': no llama a ninguna API -- el motor la resuelve el mismo
@@ -906,6 +925,18 @@ class Herramienta(Base):
     # ON vs OFF (Q3). Hasta entonces esto es opcional y su ausencia se reporta
     # como advertencia -- ver advertencias_de_aprobacion().
     aprobacion: Aprobacion | None = None
+    # Politica de plataforma que decide si esta accion se puede siquiera
+    # PROPONER. Corre antes de crear la propuesta: no tiene sentido dejarle a
+    # una persona una accion que de entrada no procede, y menos una que
+    # aprobaria sin saber que no procedia.
+    #
+    # Es distinto de 'aprobacion.revalidar', y los dos hacen falta: la politica
+    # mira si corresponde AHORA, la revalidacion vuelve a mirar cuando alguien
+    # aprueba --porque entre las dos cosas pasa tiempo y el mundo se mueve.
+    #
+    # Ausente = sin politica, comportamiento de siempre. Ninguna herramienta la
+    # declara hoy salvo las que lo digan explicitamente.
+    politica: PoliticaDeclarada | None = None
     # Solo tiene efecto con aprobacion_humana=True. Texto con marcadores
     # '{clave}' que se rellenan con los argumentos YA resueltos (los mismos
     # que se le mandarian a la API) -- para que quien aprueba lea "Crear
