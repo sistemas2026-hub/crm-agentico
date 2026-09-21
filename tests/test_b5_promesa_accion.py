@@ -168,19 +168,45 @@ revisar("resumen" in fuente_panel and "argumentos" not in fuente_panel,
 # =============================================================================
 titulo("4. ninguna OTRA herramienta puede activar el servicio asi")
 # =============================================================================
+# Esta seccion se puso ROJA el 21/09/2026 al agregarse
+# 'registrar_promesa_y_reactivar', y era exactamente lo que tenia que pasar:
+# obligo a declarar a mano que esa herramienta existe y a ponerle condiciones,
+# en vez de dejar que una segunda accion con accion=1 entrara sin que nadie la
+# mirara. Se actualiza con la lista explicita de quien puede activar.
+#
+#: Las UNICAS que pueden mandar accion=1, por nombre. Agregar una a esta lista
+#: es una decision, no un descuido.
+PUEDEN_ACTIVAR = {"registrar_promesa_y_reactivar"}
+
 culpables = []
 for h in config.herramientas:
     if "promesa-pago" not in (h.endpoint or ""):
         continue
-    if h.argumentos_fijos.get("accion") == ACTIVA_SERVICIO:
-        culpables.append((h.nombre, "lo tiene fijo en 1"))
+    fija = h.argumentos_fijos.get("accion")
+    if fija == ACTIVA_SERVICIO and h.nombre not in PUEDEN_ACTIVAR:
+        culpables.append((h.nombre, "manda accion=1 sin estar declarada"))
+    if fija not in (SOLO_REGISTRA, ACTIVA_SERVICIO):
+        culpables.append((h.nombre, f"no fija 'accion' ({fija!r})"))
     if "accion" in h.filtros_verificados:
         culpables.append((h.nombre, "deja que el modelo elija 'accion'"))
 revisar(not culpables,
-        f"ninguna herramienta de promesa deja elegir 'accion' ({culpables})",
-        "Si mañana se agrega la de activar servicio, va con su propio resumen "
-        "y su propia aprobacion -- y esta prueba tiene que actualizarse a "
-        "mano, que es justamente el punto.")
+        f"toda herramienta de promesa fija 'accion', y solo las declaradas "
+        f"activan ({culpables})",
+        "Ninguna puede dejar la eleccion al modelo, y activar el servicio "
+        "exige figurar en PUEDEN_ACTIVAR -- o sea, que alguien lo escriba.")
+
+# Y la que puede activar tiene que decirlo en su resumen. Si no, estamos en el
+# mismo punto de partida: un efecto aprobado sin que nadie lo nombre.
+for nombre in PUEDEN_ACTIVAR:
+    h = next((x for x in config.herramientas if x.nombre == nombre), None)
+    if h is None:
+        revisar(False, f"'{nombre}' esta declarada como capaz de activar y no existe")
+        continue
+    bajo = (h.plantilla_resumen or "").lower()
+    revisar("reactiva" in bajo or "activar" in bajo,
+            f"'{nombre}' nombra la reactivacion en su resumen")
+    revisar(h.aprobacion_humana is True,
+            f"'{nombre}' exige aprobacion humana")
 
 print()
 if fallos:

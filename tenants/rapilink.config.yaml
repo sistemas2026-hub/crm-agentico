@@ -4232,6 +4232,67 @@ herramientas:
         param: comentarios
         tipo: texto
 
+  # ===========================================================================
+  #  PROMESA DE PAGO **Y REACTIVACION** -- accion separada a proposito
+  # ===========================================================================
+  # Es la misma API que 'agregar_promesa_pago' con accion=1, y AUN ASI va
+  # aparte. El motivo no es tecnico: quien aprueba tiene que estar aprobando
+  # "promesa + reactivar", no una promesa a secas con una opcion escondida.
+  # Una herramienta por efecto, y cada una con su resumen.
+  #
+  # LO QUE HACE WISPHUB, segun el equipo de cartera (21/09/2026): si el
+  # servicio estaba suspendido pasa a activo, y cuando vence la promesa sin
+  # pago el propio WispHub lo vuelve a suspender. Esa reversion automatica es
+  # lo que le pone TECHO al riesgo, y es la razon por la que esta accion puede
+  # existir.
+  #
+  # NO depende de 'auto_activar_servicio': esa bandera dice "Auto Activar
+  # Servicio Al Reportar Pago" y pertenece al flujo de PAGOS. Medida en 3000
+  # clientes: en False para todos, activos incluidos. Verificado 21/09/2026.
+  #
+  # NO SE OFRECE si el tenant no cargo su politica (promesas_pago). Sin dias
+  # maximos, tope de monto y espaciado, no hay con que evaluar -- y ofrecerla
+  # con numeros que nadie decidio es peor que no ofrecerla.
+  - nombre: registrar_promesa_y_reactivar
+    tipo: http
+    descripcion: >
+      Registra una promesa de pago Y REACTIVA el servicio de un cliente
+      suspendido. Usala SOLO si el colaborador pide las dos cosas. Si el
+      servicio esta activo o solo quieren dejar constancia de la promesa, usa
+      'agregar_promesa_pago'. Queda PENDIENTE de aprobacion humana -- decile
+      al colaborador que todavia no se aplico.
+    solo_lectura: false
+    requiere_confirmacion: true
+    aprobacion_humana: true
+    roles_permitidos: [facturacion]
+    base_url: https://api.wisphub.io
+    endpoint: /api/promesa-pago/
+    metodo: POST
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    # El resumen es lo UNICO que ve quien aprueba: nombra los DOS efectos y
+    # dice que el servicio esta hoy suspendido. Lo arma
+    # nucleo/facturacion/promesas.py::resumen_de_aprobacion cuando hay datos
+    # de la evaluacion; esta plantilla es el respaldo.
+    plantilla_resumen: "Registrar promesa de pago de la factura {id_factura} hasta el {fecha_limite} Y REACTIVAR el servicio (hoy suspendido)"
+    campos_texto_libre: [comentarios]
+    # accion=1 FIJA. Igual que en la hermana, va en 'argumentos_fijos' --que
+    # pisa lo del modelo-- y fuera de 'filtros_verificados', para que el
+    # modelo no vea un interruptor entre 0 y 1 en ninguna de las dos.
+    argumentos_fijos:
+      accion: 1
+    requeridos: [id_factura, fecha_limite]
+    filtros_verificados:
+      id_factura:
+        param: id_factura
+        tipo: id
+      fecha_limite:
+        param: fecha_limite
+        tipo: texto
+      comentarios:
+        param: comentarios
+        tipo: texto
+
   # --- reporte de comprobante de pago (Fase #7, 03/09/2026) ------------------
   # NO registra nada en WispHub, NO reconecta, NO confirma el pago. Junta lo
   # que el cliente escribio sobre su comprobante y fuerza que un colaborador

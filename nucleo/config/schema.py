@@ -2092,6 +2092,42 @@ class Limites(Base):
     retencion_multimedia_dias: int = Field(default=30, ge=1)
 
 
+class PromesasPago(Base):
+    """
+    La politica de promesas de pago de ESTA empresa.
+
+    Los valores son decisiones COMERCIALES y no tiene sentido que los fije la
+    plataforma: cuantos dias de gracia da un ISP, hasta que monto, y cada
+    cuanto le acepta una promesa al mismo cliente. Van vacios a proposito --
+    ver 'faltan_valores()': sin ellos la accion no se ofrece, en vez de
+    ofrecerse con numeros que nadie decidio.
+
+    Las REGLAS, en cambio, son de plataforma y viven en codigo
+    (nucleo/facturacion/promesas.py). Esto es solo donde se aprietan.
+    """
+    #: Cuantos dias hacia adelante puede pedir el cliente. Sin tope, "prometo
+    #: pagar en seis meses" es servicio gratis por seis meses.
+    dias_maximos_promesa: int | None = Field(default=None, ge=1)
+    #: Tope del monto de la factura. 0 = sin tope (y es distinto de None:
+    #: None es "nadie lo decidio", 0 es "se decidio que no hay tope").
+    monto_maximo_promesa: float | None = Field(default=None, ge=0)
+    #: Minimo entre dos promesas al mismo cliente. Es la unica defensa contra
+    #: el que promete todos los meses -- y es PARCIAL: solo ve las promesas
+    #: que registro Dexter, no las que un agente cargo en el panel de WispHub,
+    #: porque esa API no permite consultarlas.
+    dias_entre_promesas: int | None = Field(default=None, ge=0)
+    #: Se deja en true y no se toca hasta que exista una lectura independiente
+    #: de promesas vigentes. Mientras no exista, la persona que aprueba es lo
+    #: unico que cubre el punto ciego de arriba.
+    requiere_aprobacion_humana: bool = True
+
+    def faltan_valores(self) -> list[str]:
+        """Lo que la empresa todavia no decidio. Vacio = politica completa."""
+        return [c for c in ("dias_maximos_promesa", "monto_maximo_promesa",
+                            "dias_entre_promesas")
+                if getattr(self, c) is None]
+
+
 class DesenlacePropio(Base):
     """
     Un codigo de desenlace de ESTA empresa (contrato §3.5, B6).
@@ -2679,6 +2715,10 @@ class TenantConfig(Base):
     # cerrar, asi que activar B6 no obliga a escribir 'tenant_config' -- y
     # escribirla hoy partiria la medicion ON vs OFF (Q3).
     desenlaces: Desenlaces = Field(default_factory=Desenlaces)
+    # La politica de promesas de pago. Vacia por defecto: sin valores, la
+    # accion de reactivar no se ofrece. Es deliberado -- los numeros son
+    # decisiones comerciales de cada empresa, no de la plataforma.
+    promesas_pago: PromesasPago = Field(default_factory=PromesasPago)
     limites: Limites = Field(default_factory=Limites)
     evaluacion: Evaluacion = Field(default_factory=Evaluacion)
     manual: Manual = Field(default_factory=Manual)
