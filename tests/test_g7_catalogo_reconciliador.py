@@ -76,7 +76,11 @@ except Exception as e:
     raise SystemExit(1)
 
 por_bandera = {}
-for bandera in ("busca_caso", "asigna_caso", "lee_asignados", "lee_perfiles"):
+# CINCO desde B6. 'lee_caso' es la quinta, y sin ella la cola no cierra casos:
+# cerrar exige leer antes, porque un PATCH sobre un caso ya cerrado le reescribe
+# la fecha de cierre (medido, cases/tests/test_cierre_idempotente.py).
+for bandera in ("busca_caso", "asigna_caso", "lee_asignados", "lee_perfiles",
+                "lee_caso"):
     encontradas = [h for h in config.herramientas if getattr(h, bandera, False)]
     por_bandera[bandera] = encontradas
     revisar(len(encontradas) == 1,
@@ -111,9 +115,9 @@ else:
             "es una escritura y exige confirmacion, como toda escritura")
 
 # =============================================================================
-titulo("3. las dos lecturas son de solo lectura de verdad")
+titulo("3. las TRES lecturas son de solo lectura de verdad")
 # =============================================================================
-for bandera in ("lee_asignados", "lee_perfiles"):
+for bandera in ("lee_asignados", "lee_perfiles", "lee_caso"):
     herr = por_bandera[bandera][0] if por_bandera[bandera] else None
     if herr is None:
         revisar(False, f"hay una herramienta con '{bandera}'")
@@ -129,6 +133,45 @@ perfiles = por_bandera["lee_perfiles"][0] if por_bandera["lee_perfiles"] else No
 if perfiles is not None:
     revisar("users" in (perfiles.endpoint or "").lower(),
             f"la de perfiles apunta al listado de usuarios ({perfiles.endpoint})")
+
+# =============================================================================
+titulo("3b. lee_caso apunta al GET del detalle, y a nada destructivo")
+# =============================================================================
+leer_caso = por_bandera["lee_caso"][0] if por_bandera["lee_caso"] else None
+cerrar = next((h for h in config.herramientas
+               if getattr(h, "cierra_caso", False)), None)
+if leer_caso is None:
+    revisar(False, "hay una herramienta con 'lee_caso'")
+else:
+    ruta = (leer_caso.endpoint or "").lower()
+    revisar("/cases/" in ruta and "{id_caso}" in ruta,
+            f"apunta al detalle de UN caso ({leer_caso.endpoint})",
+            "Tiene que ser el caso concreto: una lista no dice el estado de "
+            "este, y cerrar a partir de una lista seria adivinar.")
+    revisar(ruta.rstrip("/").endswith("{id_caso}"),
+            "y al recurso, no a un sub-recurso suyo",
+            "'/assignees/' u otro sub-recurso no trae 'status'.")
+    for prohibido in ("bulk", "delete", "merge", "unmerge"):
+        revisar(prohibido not in ruta, f"NO usa '{prohibido}'")
+
+# EL PUNTO DE TODO ESTO: cerrar es PATCH y leer es GET. El PUT del detalle
+# responde 200 y vacia contacts, teams y tags -- usarlo para cerrar un caso
+# borraria datos que nadie pidio borrar, sin un solo error.
+if cerrar is not None:
+    revisar((cerrar.metodo or "").upper() == "PATCH",
+            f"la de cerrar el caso usa PATCH ({cerrar.metodo})",
+            "El PUT del detalle vacia contacts, teams y tags.")
+
+for herr in config.herramientas:
+    ruta = (herr.endpoint or "").lower()
+    if "/cases/" in ruta and (herr.metodo or "").upper() in ("PUT", "DELETE"):
+        revisar(False,
+                f"'{herr.nombre}' usa {herr.metodo} sobre un caso ({ruta})",
+                "Ninguna herramienta del catalogo debe hacerlo: el PUT vacia "
+                "relaciones y el DELETE borra el caso entero.")
+        break
+else:
+    revisar(True, "NINGUNA herramienta usa PUT ni DELETE sobre un caso")
 
 # =============================================================================
 titulo("4. el reconciliador encuentra sus ejecutores")
@@ -160,18 +203,36 @@ def _espia(*a, **k):
     raise AssertionError("no se puede llamar a un sistema externo en esta prueba")
 
 
+puede_cerrar = bool(por_bandera["lee_caso"]) and cerrar is not None
+revisar(puede_cerrar,
+        "estan LAS DOS capacidades que B6 exige para cerrar (lee_caso + cierra_caso)",
+        "Falla cerrado: con la de escribir sola se podria escribir sin mirar "
+        "antes, que es justo lo que le corre la fecha de cierre a un caso.")
+
 ejecutar = efectos_externos.ejecutor(
     config, TENANT, crear=_espia, buscar_por_nombre=_espia,
-    agregar_asignado=_espia, leer_asignados=_espia, leer_perfiles=_espia)
+    agregar_asignado=_espia, leer_asignados=_espia, leer_perfiles=_espia,
+    leer_caso=_espia, cerrar_caso_crm=_espia)
 
 # Un tipo sin datos NO llega a llamar a nadie: se rechaza antes, y eso es lo
 # que permite comprobar el cableado sin tocar nada de afuera.
 for tipo, codigo_esperado in (("crear_caso", "sin_nombre_de_caso"),
-                              ("asignar_caso", "sin_caso_o_perfil")):
+                              ("asignar_caso", "sin_caso_o_perfil"),
+                              ("cerrar_caso", "sin_caso")):
     r = ejecutar(tipo, {}, None)
     revisar(r.clase == "permanente" and r.codigo == codigo_esperado,
             f"'{tipo}' tiene ejecutor y valida antes de llamar "
             f"({r.clase}/{r.codigo})")
+
+# Y sin la capacidad de LEER no se intenta siquiera: 'permanente' y visible,
+# nunca 'incierto'. Que falte una capacidad del tenant no es una duda sobre si
+# el efecto ocurrio.
+sin_lectura = efectos_externos.ejecutor(
+    config, TENANT, crear=_espia, buscar_por_nombre=_espia,
+    leer_caso=None, cerrar_caso_crm=_espia)
+r = sin_lectura("cerrar_caso", {"caso_id": "x"}, None)
+revisar(r.clase == "permanente" and "sin_ejecutor" in (r.codigo or ""),
+        f"sin 'lee_caso' no se cierra NADA, ni se llama a nadie ({r.codigo})")
 
 r = ejecutar("crear_ticket", {}, None)
 revisar(r.clase == "permanente" and "sin_ejecutor" in (r.codigo or ""),
@@ -210,6 +271,38 @@ finally:
     os.environ.pop("RECONCILIADOR_HABILITADO", None)
     if anterior is not None:
         os.environ["RECONCILIADOR_HABILITADO"] = anterior
+
+# --- el dry-run no habla con nadie ----------------------------------------
+# Se mide el EFECTO, no se lee el codigo: se espia el punto por el que pasa
+# cualquier llamada externa (_ejecutor_de arma los ejecutores) y el barrido de
+# acciones, y se comprueba que una pasada seca no toca ninguno.
+espiados: list[str] = []
+orig_ejecutor = worker._ejecutor_de
+orig_barrer = reconciliador.barrer_acciones
+orig_elegibles = reconciliador.db.sincronizaciones_elegibles
+try:
+    worker._ejecutor_de = lambda t: espiados.append(f"ejecutor:{t}")
+    reconciliador.barrer_acciones = lambda t, n: espiados.append(f"barrer:{t}") or {}
+    reconciliador.db.sincronizaciones_elegibles = lambda t, n: []
+    resumen = worker.una_vuelta(seco=True)
+    revisar(espiados == [],
+            f"--dry-run NO arma ningun ejecutor ni barre nada ({espiados})",
+            "Una pasada seca existe para poder mirar la cola antes de encender "
+            "el worker. Si de paso llamara al CRM, no serviria para eso.")
+    revisar("elegibles" in resumen,
+            f"y lo unico que hace es CONTAR lo elegible ({resumen})")
+
+    # Control positivo: sin --dry-run, el mismo camino SI arma el ejecutor. Sin
+    # esto, la prueba de arriba pasaria igual si 'una_vuelta' estuviera rota.
+    espiados.clear()
+    worker.una_vuelta(seco=False)
+    revisar(espiados != [],
+            f"control positivo: sin --dry-run si se arma ({espiados[:2]})",
+            "Si esto no llama a nadie, la comprobacion de arriba no mide nada.")
+finally:
+    worker._ejecutor_de = orig_ejecutor
+    reconciliador.barrer_acciones = orig_barrer
+    reconciliador.db.sincronizaciones_elegibles = orig_elegibles
 
 revisar(worker.INTERVALO_SEGUNDOS == 300,
         f"la cadencia es de 300 s ({worker.INTERVALO_SEGUNDOS})",

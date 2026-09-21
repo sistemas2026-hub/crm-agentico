@@ -4603,6 +4603,24 @@ herramientas:
     auth_ref: BOTTLECRM_API_TOKEN
     auth_esquema: Bearer
 
+  - nombre: consultar_caso_crm
+    tipo: http
+    lee_caso: true
+    descripcion: >
+      UN caso del CRM con su estado. La usa el reconciliador ANTES de cerrarlo:
+      medido contra el CRM real, un PATCH sobre un caso ya cerrado responde 200
+      y le reescribe la fecha de cierre con la del reintento. Leer primero es lo
+      que impide que un reintento reescriba el pasado. NO la llames tu.
+    solo_lectura: true
+    roles_permitidos: [administracion]
+    base_url: http://backend:8000
+    # El GET del detalle. NUNCA el PUT del mismo recurso: ese vacia contacts,
+    # teams y tags -- ver django-crm/backend/cases/views.py::CaseDetailView.
+    endpoint: /api/cases/{id_caso}/
+    metodo: GET
+    auth_ref: BOTTLECRM_API_TOKEN
+    auth_esquema: Bearer
+
   - nombre: consultar_perfiles_crm
     tipo: http
     lee_perfiles: true
