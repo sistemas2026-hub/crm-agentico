@@ -4165,7 +4165,8 @@ herramientas:
       fecha limite. Necesitas el id_factura (de consultar_facturas o
       consultar_factura_detalle). Queda PENDIENTE de aprobacion humana
       -- decile al colaborador que todavia no se registro, alguien tiene
-      que aprobarla.
+      que aprobarla. NO reconecta ni reactiva el servicio: si te lo
+      piden, decilo asi y derivalo, no lo prometas.
     solo_lectura: false
     requiere_confirmacion: true
     aprobacion_humana: true
@@ -4175,8 +4176,42 @@ herramientas:
     metodo: POST
     auth_ref: WISPHUB_API_KEY
     auth_esquema: Api-Key
-    plantilla_resumen: "Promesa de pago de la factura {id_factura} para el {fecha_limite}"
+    # El resumen es lo UNICO que ve quien aprueba (acciones.js): tiene que
+    # nombrar el efecto completo. Antes decia solo "Promesa de pago de la
+    # factura N" mientras el modelo podia elegir 'accion', y una de las dos
+    # opciones reactivaba el servicio -- se aprobaba a ciegas algo que no
+    # estaba escrito en ningun lado. Ahora 'accion' esta fija en 0 y el
+    # resumen dice exactamente lo que va a pasar.
+    plantilla_resumen: "Registrar promesa de pago de la factura {id_factura} para el {fecha_limite} (no reactiva el servicio)"
     campos_texto_libre: [comentarios]
+    # ================== accion: FIJA EN 0, Y NO ES UN DETALLE ==================
+    # La API acepta dos:
+    #   0  Registrar Promesa de Pago
+    #   1  Registrar Promesa de Pago Y ACTIVAR SERVICIO
+    #
+    # Hasta hoy 'accion' estaba en 'requeridos' y en 'filtros_verificados', o
+    # sea que la ELEGIA EL MODELO. Reactivarle el internet a un cliente
+    # suspendido no es una decision de redaccion: es una decision comercial,
+    # y ademas el resumen que lee quien aprueba no la nombraba.
+    #
+    # Va en 'argumentos_fijos' porque los fijos PISAN lo que manda el modelo
+    # (motor.py, argumentos.update(herramienta.argumentos_fijos)), y NO en
+    # 'argumentos_sobrescribibles' para que tampoco pueda cambiarla un
+    # llamador interno. Es la regla que schema.py ya declara: un campo con
+    # valor fijo conocido va en 'argumentos_fijos', y 'requeridos' es solo
+    # para lo que el modelo tiene que decidir.
+    #
+    # Y se saca del catalogo que ve el modelo, no solo del valor enviado: si
+    # siguiera viendo 'registrar_promesa_y_activar_servicio' entre las
+    # opciones, podria PROMETERLE al cliente que le reconectan aunque la
+    # llamada saliera con 0. Mentirle al cliente es peor que mandar el valor
+    # equivocado.
+    #
+    # Si alguna vez hace falta activar el servicio, va como herramienta
+    # SEPARADA, con su propio resumen y su propia aprobacion. No como una
+    # opcion escondida de esta.
+    argumentos_fijos:
+      accion: 0
     # Hallazgo 19/08/2026: la doc marca 'id_factura' como requerido, pero
     # el serializer NO lo valida -- un valor imposible (999999999) no
     # genero error junto a los demas campos vacios. Se fuerza igual via
@@ -4185,7 +4220,7 @@ herramientas:
     # (ejemplo '2022/08/26' con barras); la API real exige guiones
     # (YYYY-MM-DD), confirmado con un 400 real antes de acertar el
     # formato.
-    requeridos: [id_factura, fecha_limite, accion]
+    requeridos: [id_factura, fecha_limite]
     filtros_verificados:
       id_factura:
         param: id_factura
@@ -4196,10 +4231,6 @@ herramientas:
       comentarios:
         param: comentarios
         tipo: texto
-      accion:
-        param: accion
-        tipo: enum
-        valores: {registrar_promesa: 0, registrar_promesa_y_activar_servicio: 1}
 
   # --- reporte de comprobante de pago (Fase #7, 03/09/2026) ------------------
   # NO registra nada en WispHub, NO reconecta, NO confirma el pago. Junta lo
