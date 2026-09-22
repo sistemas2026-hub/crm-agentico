@@ -903,7 +903,8 @@ class _CierreCancelado(Exception):
 def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                   mensaje: str, canal: str, profile_id: str | None = None,
                   nombre_colaborador: str = "",
-                  evento_id: str | None = None) -> dict:
+                  evento_id: str | None = None,
+                  conversacion_ya_guardada: str | None = None) -> dict:
     """
     Un turno completo de conversacion: pausa por escalamiento, modelo,
     persistencia y evaluacion de escalamiento.
@@ -932,11 +933,40 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     400 (HTTP) o una linea de registro (webhook, donde no hay a quien
     devolverle un error).
 
+    'conversacion_ya_guardada': el id de la conversacion cuando el mensaje
+    entrante YA ESTA en la base y este turno no tiene que volver a escribirlo.
+    Existe por un solo caso: devolverle la conversacion a la IA cuando el
+    cliente escribio mientras la tenia una persona. Ese mensaje se guardo
+    cuando llego; atenderlo ahora sin esto lo dibujaria DOS VECES en el hilo.
+
+    Apagado por defecto, y eso es lo que importa: el webhook y /chat no pasan
+    nada, asi que su camino no cambia en un solo byte. Los seis lugares donde
+    el turno guarda el mensaje del cliente --uno por rama-- pasan por el mismo
+    ayudante de abajo, que sin la bandera hace exactamente lo de siempre.
+
     'canal' se normaliza ANTES de cualquier lectura o escritura: un canal
     desconocido levanta canales.CanalInvalido sin haber tocado la base ni la
     memoria. /chat ya lo valida antes de llamar; esto cubre a cualquier otro
     llamador.
     """
+
+    def _guardar_del_cliente(*extra, **opciones):
+        """El mensaje entrante, guardado UNA SOLA VEZ.
+
+        Devuelve (conversation_id, message_id), igual que registrar_mensaje:
+        dos ramas usan el primero para cerrar el caso y el camino normal usa
+        el segundo para colgarle el adjunto a la burbuja correcta.
+
+        Con 'conversacion_ya_guardada' no escribe nada y devuelve ese id con
+        message_id en None -- no hay burbuja nueva a la que colgarle nada,
+        porque el mensaje ya estaba.
+        """
+        if conversacion_ya_guardada:
+            return conversacion_ya_guardada, None
+        return persistencia.registrar_mensaje(
+            tenant, canal, id_sesion, rol, "user", mensaje, *extra,
+            origen="cliente", **opciones)
+
     clave = canales.clave_sesion(tenant, canal, id_sesion)
     canal = clave[1]
     # Antes de nada: si la conversacion anterior de esta persona quedo abierta
@@ -1102,8 +1132,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             # intervino esta ahi; el mensaje queda guardado para que lo lea.
             estado["historial"].append({"role": "user", "content": mensaje})
             try:
-                persistencia.registrar_mensaje(tenant, canal, id_sesion, rol, "user", mensaje,
-                                               origen="cliente")
+                _guardar_del_cliente()
             except Exception as e:
                 registrar("persistencia", "no se pudo guardar el mensaje durante la intervencion",
                           error=e)
@@ -1208,8 +1237,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 respuesta = _pregunta_de_cierre(config)
                 estado["historial"].append({"role": "assistant", "content": respuesta})
                 try:
-                    persistencia.registrar_mensaje(tenant, canal, id_sesion, rol, "user", mensaje,
-                                                   origen="cliente")
+                    _guardar_del_cliente()
                     persistencia.registrar_mensaje(tenant, canal, id_sesion, rol, "assistant", respuesta,
                                                    origen="sistema")
                 except Exception as e:
@@ -1233,8 +1261,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             if cerrado:
                 respuesta = _mensaje_de_cierre(config)
                 try:
-                    conv, _ = persistencia.registrar_mensaje(
-                        tenant, canal, id_sesion, rol, "user", mensaje, origen="cliente")
+                    conv, _ = _guardar_del_cliente()
                     persistencia.registrar_mensaje(
                         tenant, canal, id_sesion, rol, "assistant", respuesta, origen="sistema")
                     hecho = operativo.cerrar_todo(
@@ -1266,8 +1293,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             # la persona lo ve en la bandeja, que es donde esta mirando.
             if hubo_humano:
                 try:
-                    persistencia.registrar_mensaje(
-                        tenant, canal, id_sesion, rol, "user", mensaje, origen="cliente")
+                    _guardar_del_cliente()
                 except Exception as e:
                     registrar("persistencia", "no se pudo guardar el mensaje del cliente", error=e)
                 return {"respuesta": "", "verificado": estado["sesion"].verificado,
@@ -1290,8 +1316,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 "revisar y te escribe por aca."
             estado["historial"].append({"role": "assistant", "content": respuesta})
             try:
-                persistencia.registrar_mensaje(tenant, canal, id_sesion, rol, "user", mensaje,
-                                               origen="cliente")
+                _guardar_del_cliente()
                 persistencia.registrar_mensaje(tenant, canal, id_sesion, rol, "assistant", respuesta,
                                                origen="sistema")
             except Exception as e:
@@ -1346,8 +1371,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
         estado["historial"].append({"role": "user", "content": mensaje})
         estado["historial"].append({"role": "assistant", "content": respuesta})
         try:
-            conv_id, _ = persistencia.registrar_mensaje(
-                tenant, canal, id_sesion, rol, "user", mensaje, origen="cliente")
+            conv_id, _ = _guardar_del_cliente()
             persistencia.registrar_mensaje(
                 tenant, canal, id_sesion, rol, "assistant", respuesta, origen="sistema")
             if conv_id:
@@ -1408,8 +1432,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                        version=estado["autorizacion_turno"].get("relevo_version"),
                        punto="al_volver_del_modelo")
         try:
-            persistencia.registrar_mensaje(tenant, canal, id_sesion, rol, "user", mensaje,
-                                           horas, creado_en=llego_en, origen="cliente")
+            _guardar_del_cliente(horas, creado_en=llego_en)
         except Exception as e:
             registrar("persistencia", "no se pudo guardar el mensaje del turno descartado",
                       error=e)
@@ -1435,9 +1458,7 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
         # El id del turno del CLIENTE se conserva: es a esa burbuja a la que
         # hay que colgarle la foto que mando, para que aparezca en el hilo
         # donde la mando y no en una lista aparte al final.
-        _, mensaje_usuario_id = persistencia.registrar_mensaje(
-            tenant, canal, id_sesion, rol, "user", mensaje, horas,
-            creado_en=llego_en, origen="cliente")
+        _, mensaje_usuario_id = _guardar_del_cliente(horas, creado_en=llego_en)
         # 'latencia_ms' es lo que el cliente ESPERO: desde que su mensaje
         # llego hasta que la respuesta estuvo lista. La columna existia y
         # nadie la llenaba -- por eso no habia con que responder "¿cuanto
@@ -7609,6 +7630,32 @@ def conversaciones_intervenir(id_conversacion):
                              "o esta escalada.", "codigo": "no_es_de_la_ia"}), 409
 
 
+def _atender_pendiente_tras_devolver(tenant: str, pendiente: dict) -> None:
+    """
+    El mensaje que el cliente mando mientras la conversacion la tenia una
+    persona, atendido por la IA justo despues de que se la devuelvan.
+
+    NO VUELVE A GUARDAR EL MENSAJE: ya esta en la base desde que llego, y por
+    eso el turno recibe 'conversacion_ya_guardada'. Sin eso el hilo mostraria
+    la misma frase del cliente dos veces.
+
+    Corre en su propio hilo y no puede devolverle un error a nadie: lo que
+    falle se registra y se corta ahi, igual que el webhook.
+    """
+    try:
+        config = _config_de(tenant)
+        salida = atender_turno(
+            config, tenant, pendiente["rol"], pendiente["usuario_externo"],
+            pendiente["texto"], pendiente["canal"],
+            conversacion_ya_guardada=pendiente["conversacion_id"])
+        respuesta = (salida.get("respuesta") or "").strip()
+        if respuesta and pendiente["canal"] == "whatsapp":
+            whatsapp.enviar_texto(config, tenant, pendiente["usuario_externo"], respuesta)
+    except Exception as e:
+        registrar("relevo", "no se pudo atender el mensaje pendiente tras la devolucion",
+                  conversation_id=id_interno(pendiente.get("conversacion_id")), error=e)
+
+
 @app.post("/conversaciones/<id_conversacion>/devolver")
 def conversaciones_devolver(id_conversacion):
     """
@@ -7669,22 +7716,62 @@ def conversaciones_devolver(id_conversacion):
     # sigue en pausa aunque la base ya diga 'ia'. Es el mismo gesto que hace el
     # envio-con-devolucion; sin el, devolver "funciona" en la pantalla y no en
     # el comportamiento, que es la peor forma de funcionar.
+    #
+    # SE LEE CON mensajes_de Y NO CON identidad_de_conversacion, y no es un
+    # detalle: identidad_de_conversacion NO devuelve 'canal' --su docstring lo
+    # dice, "solo identificadores"-- asi que la clave de sesion salia armada
+    # con None y no coincidia con ninguna. La bandera quedaba puesta. Ademas
+    # hace falta el hilo entero para lo de abajo, asi que es una lectura y no
+    # dos.
+    pendiente = None
     try:
-        identidad = persistencia.identidad_de_conversacion(tenant, id_conversacion)
-        if identidad:
+        hilo = persistencia.mensajes_de(tenant, id_conversacion)
+        conv = hilo.get("conversacion") or {}
+        if conv:
             clave_viva = canales.clave_sesion_de_fila(
-                tenant, identidad.get("canal"), identidad.get("usuario_externo"))
+                tenant, conv.get("canal"), conv.get("usuario_externo"))
             if clave_viva in _sesiones:
                 _sesiones[clave_viva]["escalada"] = False
+
+        # EL MENSAJE QUE QUEDO SIN CONTESTAR.
+        #
+        # Si el cliente escribio mientras la conversacion la tenia una persona,
+        # ese mensaje no lo contesto nadie: la IA estaba en pausa. Al devolver,
+        # sin esto se quedaba sin respuesta PARA SIEMPRE -- la IA solo actua
+        # cuando entra un mensaje nuevo, asi que el cliente tenia que insistir
+        # para que alguien le hablara. Visto en produccion el 22/09/2026.
+        #
+        # La condicion es estrecha a proposito: solo si el ULTIMO mensaje del
+        # hilo es del cliente. Si despues de el hubo una respuesta --de la
+        # persona o del asistente-- ya se le contesto, y volver a hacerlo seria
+        # repetirle algo que quiza ya se resolvio por telefono.
+        mensajes = hilo.get("mensajes") or []
+        ultimo = mensajes[-1] if mensajes else None
+        if ultimo and ultimo.get("rol") == "user" and (ultimo.get("contenido") or "").strip():
+            pendiente = {"texto": ultimo["contenido"],
+                         "canal": conv.get("canal"),
+                         "usuario_externo": conv.get("usuario_externo"),
+                         "rol": conv.get("rol_efectivo") or "cliente_final",
+                         "conversacion_id": id_conversacion}
     except Exception as e:
         # La transicion ya se aplico y es la fuente de verdad. Que no se haya
-        # podido limpiar la sesion en memoria se registra y no se oculta, pero
-        # no convierte un exito en un error.
-        registrar("relevo", "devuelta pero no se pudo limpiar la sesion viva",
+        # podido limpiar la sesion en memoria --o mirar si quedaba algo sin
+        # contestar-- se registra y no se oculta, pero no convierte un exito en
+        # un error.
+        registrar("relevo", "devuelta pero no se pudo leer el hilo",
                   conversation_id=id_interno(id_conversacion), error=e)
 
+    # FUERA DEL CICLO DE RESPUESTA, como el webhook. Atender un turno llama al
+    # modelo y puede tardar segundos: dejar esperando a quien apreto el boton
+    # convertiria "devolver" en una operacion lenta, y peor, un timeout del
+    # navegador haria parecer que fallo algo que ya se aplico.
+    if pendiente:
+        threading.Thread(target=_atender_pendiente_tras_devolver,
+                         args=(tenant, pendiente), daemon=True).start()
+
     return jsonify({"devuelta": True, "relevo_version": r.version,
-                    "reintento": r.motivo == "reintento"}), 200
+                    "reintento": r.motivo == "reintento",
+                    "atiende_pendiente": bool(pendiente)}), 200
 
 
 @app.post("/conversaciones/<id_conversacion>/atender")

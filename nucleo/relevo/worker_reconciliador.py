@@ -253,8 +253,13 @@ def _ejecutor_de(tenant: str):
     for etiqueta, puede in (("crear tickets", puede_crear_ticket),
                             ("cerrar tickets", puede_cerrar_ticket)):
         if not puede:
-            registrar("reconciliador", f"el tenant no puede {etiqueta} desde la cola",
-                      tenant=tenant)
+            # EL EVENTO ES FIJO Y LA VARIABLE ES UN CAMPO. Con la f-string en el
+            # texto, `registrar()` recibe un evento distinto por cada valor: no
+            # se puede agrupar en el log, y --lo que la guarda protege de
+            # verdad-- cualquier variable que alguien interpole ahi manana sale
+            # entera, sin pasar por la redaccion de campos.
+            registrar("reconciliador", "el tenant no puede operar tickets desde la cola",
+                      tenant=tenant, operacion=etiqueta)
 
     # Fail-closed: sin LAS TRES, el ejecutor devuelve 'permanente' para
     # asignar_caso -- visible, y nunca 'desconocida'. Escribir sin poder
