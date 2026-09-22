@@ -111,7 +111,7 @@ def test_no_module_defines_its_own_admin_check():
         if path.name == Path(__file__).name or path == canonical:
             continue
         try:
-            tree = ast.parse(path.read_text())
+            tree = ast.parse(path.read_text(encoding="utf-8"))
         except SyntaxError:  # pragma: no cover - nothing in the tree should hit this
             continue
         for node in ast.walk(tree):

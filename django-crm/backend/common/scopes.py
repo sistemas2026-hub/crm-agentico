@@ -96,7 +96,17 @@ CREDENTIAL_PATHS = (
     "/api/profile/tokens/",
     "/api/org/tokens/",
     "/api/org/api-key/",
+    "/api/auth/password/",
 )
+
+# Una contraseña es una credencial aunque el id de la persona quede en el medio
+# de la ruta: ``/api/user/<uuid>/password/`` no empieza por ningún prefijo fijo,
+# así que el deny-list de arriba no la alcanza y hace falta mirar el final.
+#
+# Sin esto, un token de integración con alcance de escritura sobre usuarios
+# podría definirle la contraseña a cualquiera de la organización y entrar como
+# esa persona: exactamente la escalada que este módulo existe para cerrar.
+CREDENTIAL_SUFFIXES = ("/password/",)
 
 # What the organization API key is worth once this module is enforcing. It reads,
 # it does not write, and the deny-list above still applies to it. Expressed as a
@@ -176,7 +186,9 @@ def scopes_allow(scopes, method, path):
 
 def credential_path_denial(path):
     """Return a denial reason when ``path`` manages credentials, else ``None``."""
-    if any(path.startswith(prefix) for prefix in CREDENTIAL_PATHS):
+    if any(path.startswith(prefix) for prefix in CREDENTIAL_PATHS) or any(
+        path.endswith(suffix) for suffix in CREDENTIAL_SUFFIXES
+    ):
         return (
             "API tokens and organization API keys cannot read or manage other "
             "credentials. Sign in to manage them."

@@ -24,7 +24,7 @@ def get_registry() -> dict[str, dict]:
     if not PACKS_DIR.is_dir():
         return registry
     for path in sorted(PACKS_DIR.glob("*.json")):
-        raw = json.loads(path.read_text())
+        raw = json.loads(path.read_text(encoding="utf-8"))
         manifest = validate_manifest(raw)
         if manifest["id"] != path.stem:
             raise PackValidationError(

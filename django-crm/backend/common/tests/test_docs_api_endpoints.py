@@ -61,7 +61,7 @@ def _load_allowlist() -> set[str]:
     if not ALLOWLIST_PATH.exists():
         return set()
     entries = set()
-    for line in ALLOWLIST_PATH.read_text().splitlines():
+    for line in ALLOWLIST_PATH.read_text(encoding="utf-8").splitlines():
         entry = line.split("#", 1)[0].strip()
         if entry:
             entries.add(entry)
@@ -161,7 +161,7 @@ def test_every_documented_api_endpoint_exists():
     documented = [
         (path.name, method, endpoint)
         for path in sorted(DOCS_API_DIR.glob("*.md"))
-        for method, endpoint in _extract_endpoints(path.read_text())
+        for method, endpoint in _extract_endpoints(path.read_text(encoding="utf-8"))
     ]
     missing = _find_missing(documented, operations, allowlist)
     assert not missing, (

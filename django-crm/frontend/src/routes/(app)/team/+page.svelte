@@ -24,6 +24,7 @@
   import Pill from '$lib/v2/components/Pill.svelte';
   import Avatar from '$lib/v2/components/Avatar.svelte';
   import NextAction from '$lib/v2/components/NextAction.svelte';
+  import ConfirmAction from '$lib/v2/components/ConfirmAction.svelte';
   import { count, relativeDays } from '$lib/v2/format.js';
   import { ROLE_LABEL, ROLE_TONE } from '$lib/v2/enums.js';
   import { enhance } from '$app/forms';
@@ -397,6 +398,45 @@
         </div>
       {/if}
 
+      <!-- La contraseña que se le acaba de definir a alguien. Mismo trato que
+           la del alta: se muestra una vez y no queda legible en ningun lado.
+           Va aca arriba y no en la fila porque la fila es angosta y esto hay
+           que poder leerlo para dictarlo. -->
+      {#if form?.claveNueva}
+        <div
+          style="border:1px solid var(--v2-rust);border-radius:7px;padding:12px 14px;margin:0 0 16px;background:color-mix(in srgb, var(--v2-rust) 7%, transparent)"
+        >
+          <p
+            style="font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--v2-rust);font-weight:700;margin:0 0 4px"
+          >
+            Se muestra una sola vez
+          </p>
+          <p style="margin:0 0 8px;font-size:13px">
+            Contraseña nueva de {form.claveDe}. Sus sesiones abiertas se cerraron: va a tener que
+            entrar de nuevo con esta clave.
+          </p>
+          <code
+            style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:15px;letter-spacing:.04em;border:1px solid var(--v2-line,#ddd);border-radius:5px;padding:5px 9px;display:inline-block"
+            >{form.claveNueva}</code
+          >
+        </div>
+      {/if}
+
+      {#if form?.claveError}
+        <div style="margin-bottom:16px">
+          <NextAction label="No se cambió esa contraseña" text={form.claveError} tone="rust" />
+        </div>
+      {/if}
+
+      {#if form?.eliminado}
+        <p
+          class="v2-sub"
+          style="color:var(--v2-moss);font-size:12.5px;margin:0 0 16px;font-weight:550"
+        >
+          {form.eliminado} ya no existe en esta organización.
+        </p>
+      {/if}
+
       {#if form?.invited}
         <p
           class="v2-sub"
@@ -698,6 +738,31 @@
                           {m.is_active ? 'Desactivar' : 'Reactivar'}
                         </button>
                       </form>
+                      <!-- Contraseña nueva. Dos clics, porque no es
+                           reversible y porque le cierra las sesiones
+                           abiertas: si esa persona esta trabajando, se cae.
+                           La clave la genera el servidor y se muestra una
+                           sola vez, arriba. -->
+                      <ConfirmAction
+                        action="?/clave"
+                        label="Contraseña"
+                        confirmLabel="Generar una nueva"
+                        explain="Se le cierran las sesiones abiertas."
+                        hidden={{ userId: m.user_id, persona: m.name }}
+                      />
+                      <!-- Eliminar NO es desactivar, y casi nunca es lo que
+                           se quiere: el boton de al lado deja a la persona
+                           fuera conservando quien hizo cada trabajo. Por eso
+                           el texto nombra la alternativa en vez de limitarse
+                           a advertir. El servidor ademas se niega si tiene
+                           ordenes en su historial. -->
+                      <ConfirmAction
+                        action="?/eliminar"
+                        label="Eliminar"
+                        confirmLabel="Eliminar definitivamente"
+                        explain="Se borra la cuenta. Desactivar conserva su historial."
+                        hidden={{ userId: m.user_id, persona: m.name }}
+                      />
                     </span>
                   {/if}
                 </td>

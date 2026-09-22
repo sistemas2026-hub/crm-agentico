@@ -45,6 +45,8 @@ class SecurityAuditLog(BaseModel):
         ("API_KEY_USED", "API Key Used"),
         ("API_KEY_INVALID", "Invalid API Key"),
         ("MEMBERSHIP_REVOKED", "Membership Revoked"),
+        ("PASSWORD_CHANGED", "Password Changed By Owner"),
+        ("PASSWORD_RESET", "Password Reset By Admin"),
         ("SUSPICIOUS_ACTIVITY", "Suspicious Activity"),
         ("SAMPLE_DATA_CLEARED", "Vertical Pack Sample Data Cleared"),
     )
@@ -280,6 +282,34 @@ class AuditLogger:
             description=f"Invalid API key attempted: {api_key_prefix}...",
             metadata={"api_key_prefix": api_key_prefix},
             success=False,
+            request=request,
+        )
+
+    def password_changed(self, user, org, request=None):
+        """La persona cambió su propia contraseña, conociendo la anterior."""
+        self._log(
+            "PASSWORD_CHANGED",
+            user=user,
+            org=org,
+            description="User changed their own password",
+            request=request,
+        )
+
+    def password_reset(self, user, org, reset_by=None, request=None):
+        """Un administrador le definió una contraseña nueva a otra persona.
+
+        Se registra el `user` afectado y quién lo hizo, porque este evento le da
+        a alguien la llave de una cuenta ajena: si más tarde hay que reconstruir
+        qué pasó, la pregunta no es solo "a quién", es "quién".
+        """
+        self._log(
+            "PASSWORD_RESET",
+            user=user,
+            org=org,
+            description=(
+                f"Password reset by {reset_by}" if reset_by else "Password reset by an admin"
+            ),
+            metadata={"reset_by": reset_by} if reset_by else {},
             request=request,
         )
 

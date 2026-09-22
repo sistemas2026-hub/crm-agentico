@@ -45,7 +45,7 @@ def _variables_in_env_files() -> set[str]:
     found: set[str] = set()
     for path in (ENV_DOCKER_PATH, COMPOSE_PATH):
         if path.exists():
-            found |= set(ENV_FILE_RE.findall(path.read_text()))
+            found |= set(ENV_FILE_RE.findall(path.read_text(encoding="utf-8")))
     return found
 
 
@@ -68,9 +68,9 @@ def test_variables_read_by_settings_handles_a_wrapped_call():
     not REFERENCE_PATH.exists(), reason="reference page not written yet"
 )
 def test_no_documented_variable_is_read_nowhere():
-    documented = _documented_variables(REFERENCE_PATH.read_text())
+    documented = _documented_variables(REFERENCE_PATH.read_text(encoding="utf-8"))
     known = (
-        _variables_read_by_settings(SETTINGS_PATH.read_text())
+        _variables_read_by_settings(SETTINGS_PATH.read_text(encoding="utf-8"))
         | _variables_in_env_files()
     )
     invented = sorted(documented - known)
@@ -86,8 +86,8 @@ def test_no_documented_variable_is_read_nowhere():
     not REFERENCE_PATH.exists(), reason="reference page not written yet"
 )
 def test_every_variable_settings_reads_is_documented():
-    documented = _documented_variables(REFERENCE_PATH.read_text())
-    read = _variables_read_by_settings(SETTINGS_PATH.read_text())
+    documented = _documented_variables(REFERENCE_PATH.read_text(encoding="utf-8"))
+    read = _variables_read_by_settings(SETTINGS_PATH.read_text(encoding="utf-8"))
     missing = sorted(read - documented - UNDOCUMENTED_BY_DESIGN)
     assert not missing, (
         "crm/settings.py reads these variables but the reference does not list them:\n  "

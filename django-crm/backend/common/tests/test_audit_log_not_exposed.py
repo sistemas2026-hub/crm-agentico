@@ -51,7 +51,7 @@ def test_the_model_is_not_referenced_by_any_serving_module():
     for rel, path in _python_files():
         if any(rel.startswith(prefix) for prefix in ALLOWED):
             continue
-        if re.search(r"\bSecurityAuditLog\b", path.read_text()):
+        if re.search(r"\bSecurityAuditLog\b", path.read_text(encoding="utf-8")):
             offenders.append(rel)
 
     assert not offenders, (

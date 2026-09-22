@@ -56,7 +56,7 @@
     {/if}
     <button class="v2-btn v2-btn-sm" type="submit" disabled={busy}>{confirmLabel}</button>
     <button class="v2-btn v2-btn-sm" type="button" disabled={busy} onclick={() => (armed = false)}>
-      Cancel
+      Cancelar
     </button>
   </form>
 {:else}

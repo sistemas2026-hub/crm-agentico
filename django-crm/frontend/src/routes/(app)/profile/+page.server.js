@@ -39,6 +39,52 @@ export const actions = {
   },
 
   /**
+   * Cambiar la propia contraseña.
+   *
+   * Pide la actual, y no por desconfiar de quien pregunta -- el token ya dijo
+   * quien es -- sino porque una sesion abierta en un equipo prestado no
+   * deberia alcanzar para quedarse con la cuenta.
+   *
+   * El refresco de ESTA sesion viaja en el cuerpo para que el servidor la
+   * conserve: cambiar la clave cierra las demas, que es el punto, pero
+   * echarte del navegador donde la acabas de cambiar seria castigarte por
+   * hacer lo correcto.
+   */
+  clave: async ({ cookies, request }) => {
+    const form = await request.formData();
+    const actual = form.get('actual')?.toString() ?? '';
+    const nueva = form.get('nueva')?.toString() ?? '';
+    const repetida = form.get('repetida')?.toString() ?? '';
+
+    if (!actual || !nueva) {
+      return fail(400, { scope: 'clave', message: 'Escribí la actual y la nueva.' });
+    }
+    if (nueva !== repetida) {
+      // Se compara aca y no en el servidor porque es un error de tipeo, no
+      // una regla: el servidor no tiene por que saber que la escribiste dos
+      // veces.
+      return fail(400, { scope: 'clave', message: 'Las dos contraseñas nuevas no coinciden.' });
+    }
+
+    /** @type {any} */
+    let resultado;
+    try {
+      resultado = await apiRequest(
+        '/auth/password/',
+        { method: 'POST', body: { actual, nueva, refresh: cookies.get('jwt_refresh') ?? '' } },
+        { cookies }
+      );
+    } catch (/** @type {any} */ err) {
+      return fail(err?.status === 400 ? 400 : 500, {
+        scope: 'clave',
+        message: readableError(err, 'No se pudo cambiar tu contraseña.')
+      });
+    }
+
+    return { claveCambiada: true, sesionesCerradas: resultado?.sesiones_cerradas ?? 0 };
+  },
+
+  /**
    * Switch to another organisation you belong to. This is not a field edit: the
    * backend re-issues the JWT with the new org claim (and only if you have an
    * active profile there, else 403), and we swap the httpOnly cookies the shell

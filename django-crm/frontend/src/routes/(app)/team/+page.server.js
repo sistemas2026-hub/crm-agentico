@@ -1,6 +1,6 @@
 import { fail } from '@sveltejs/kit';
 import { listTeam, inviteUser, setRole, setStatus, updateUser, ROLES, perfilPorCorreo,
-  casosDe, reasignarCaso }
+  casosDe, reasignarCaso, definirClave, eliminarPersona }
   from '$lib/server/v2/team.js';
 import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
@@ -149,6 +149,29 @@ async function traspasarTrabajo({ cookies, fetch }, userId) {
 }
 
 /** @type {import('./$types').Actions} */
+/**
+ * Una contraseña que nadie eligio.
+ *
+ * La genera el SERVIDOR, no el navegador ni el administrador. Si la escribe
+ * el admin, la conoce -- y despues de definirsela a alguien, sigue
+ * conociendola. Ademas la gente reusa claves, y una clave reusada en el CRM
+ * es una clave que ya se filtro en otro lado.
+ *
+ * `crypto.getRandomValues` y no `Math.random`, que no sirve para esto: es
+ * predecible y nunca fue pensado para generar secretos.
+ *
+ * Los guiones son para poder dictarla por telefono sin equivocarse, y el
+ * alfabeto no tiene l, I, 1, O ni 0 por la misma razon.
+ */
+function generarClave() {
+  const abc = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const bytes = new Uint32Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => abc[b % abc.length])
+    .join('')
+    .replace(/^(.{5})(.{5})(.{6})$/, '$1-$2-$3');
+}
+
 export const actions = {
   /**
    * Invite a new member: email + role. The server is the boundary. It gates
@@ -260,16 +283,7 @@ export const actions = {
     const area = form.get('area')?.toString().trim() || '';
     const activo = form.get('activo')?.toString() !== 'no';
 
-    // La clave la genera el SERVIDOR, no el navegador ni el administrador. Si
-    // la escribe el admin, la conoce; y la gente reusa claves. Con
-    // crypto.getRandomValues no depende de Math.random, que no sirve para
-    // esto.
-    const abc = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    const bytes = new Uint32Array(16);
-    crypto.getRandomValues(bytes);
-    const clave = Array.from(bytes, (b) => abc[b % abc.length])
-      .join('')
-      .replace(/^(.{5})(.{5})(.{6})$/, '$1-$2-$3');
+    const clave = generarClave();
     const externo = form.get('externo')?.toString().trim() || '';
     const externoNombre = form.get('externo_nombre')?.toString().trim() || '';
     if (!email) return fail(400, { invite: { error: 'Ingresá un correo electrónico.' } });
@@ -411,5 +425,68 @@ export const actions = {
       avisoTraspaso = await traspasarTrabajo({ cookies, fetch }, userId);
     }
     return { statusChanged: userId, avisoTraspaso };
+  },
+
+  /**
+   * Definirle una contraseña nueva a alguien que perdio la suya.
+   *
+   * Hasta ahora esto se resolvia entrando al servidor con
+   * `manage.py changepassword`: una persona con acceso a produccion por cada
+   * olvido. La clave la genera el servidor y se muestra UNA vez, igual que al
+   * dar de alta -- por eso la pantalla la devuelve en `form` y no la guarda en
+   * ningun lado.
+   *
+   * Cambiarla cierra las sesiones abiertas de esa cuenta: cambiar la cerradura
+   * sin recoger las llaves no sirve de nada.
+   */
+  clave: async ({ cookies, request }) => {
+    const form = await request.formData();
+    const userId = form.get('userId')?.toString() || '';
+    const persona = form.get('persona')?.toString() || '';
+    if (!userId) return fail(400, { clave: { error: '¿A quién?' } });
+
+    const nueva = generarClave();
+    try {
+      await definirClave({ cookies }, userId, nueva);
+    } catch (/** @type {any} */ err) {
+      return fail(err?.status === 403 ? 403 : 400, {
+        // 'clave' a secas ya significa otra cosa en esta pantalla: la que
+        // devuelve el alta. Mezclarlas imprimiria [object Object] donde va
+        // una contraseña.
+        claveError:
+          err?.status === 403
+            ? 'Solo un administrador puede definir la contraseña de otra persona.'
+            : readableError(err, 'No se pudo cambiar esa contraseña.')
+      });
+    }
+    return { claveDe: persona || userId, claveNueva: nueva };
+  },
+
+  /**
+   * Borrar a alguien. No es lo mismo que desactivar, y casi nunca es lo que
+   * se quiere.
+   *
+   * Desactivar deja a la persona, su historial y quien hizo cada trabajo.
+   * Esto borra el perfil. El servidor se niega si tiene ordenes de trabajo
+   * encima -- borrarlo se llevaria por delante ese registro por CASCADE -- y
+   * devuelve el motivo, que es lo que se muestra: la regla vive alla, no
+   * duplicada aca.
+   */
+  eliminar: async ({ cookies, request }) => {
+    const form = await request.formData();
+    const userId = form.get('userId')?.toString() || '';
+    const persona = form.get('persona')?.toString() || '';
+    if (!userId) return fail(400, { error: '¿A quién?' });
+    try {
+      await eliminarPersona({ cookies }, userId);
+    } catch (/** @type {any} */ err) {
+      return fail(err?.status === 403 ? 403 : 400, {
+        error:
+          err?.status === 403
+            ? 'Solo un administrador puede eliminar a alguien.'
+            : readableError(err, 'No se pudo eliminar a esa persona.')
+      });
+    }
+    return { eliminado: persona || userId };
   }
 };

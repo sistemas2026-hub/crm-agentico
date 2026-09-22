@@ -291,3 +291,51 @@ export function setRole({ cookies }, userId, role) {
 export function setStatus({ cookies }, userId, status) {
   return apiRequest(`/user/${userId}/status/`, { method: 'POST', body: { status } }, { cookies });
 }
+
+/**
+ * Definirle una contraseña nueva a alguien: `POST /api/user/<userId>/password/`.
+ *
+ * El servidor pone las tres guardas que importan y que la pantalla no puede
+ * garantizar: solo un administrador, nunca sobre uno mismo (para eso está la
+ * de tu propio perfil, que pide la actual) y nunca sobre una cuenta que
+ * también pertenece a otra organización -- la contraseña cuelga de la cuenta,
+ * no del perfil, y cambiarla abriría la puerta de la otra empresa.
+ *
+ * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
+ * @param {string} userId  el id del USUARIO, no el del perfil
+ * @param {string} nueva
+ */
+export function definirClave({ cookies }, userId, nueva) {
+  return apiRequest(
+    `/user/${userId}/password/`,
+    { method: 'POST', body: { nueva } },
+    { cookies }
+  );
+}
+
+/**
+ * Borrar a alguien de verdad: `DELETE /api/user/<userId>/`.
+ *
+ * Esto NO es desactivar. Desactivar deja la persona y su historial; esto borra
+ * el perfil. El servidor se niega (409) si tiene órdenes de trabajo en su
+ * historial, porque borrarlo se llevaría por delante quién hizo qué.
+ *
+ * La pantalla no decide eso: manda, y muestra el motivo si el servidor dice
+ * que no. Una regla escrita dos veces es una regla que va a diverger.
+ *
+ * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
+ * @param {string} userId
+ */
+export function eliminarPersona({ cookies }, userId) {
+  return apiRequest(`/user/${userId}/`, { method: 'DELETE' }, { cookies });
+}
+
+/**
+ * Cambiar la contraseña propia: `POST /api/auth/password/`. Exige la actual.
+ *
+ * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
+ * @param {{ actual: string, nueva: string }} body
+ */
+export function cambiarMiClave({ cookies }, body) {
+  return apiRequest('/auth/password/', { method: 'POST', body }, { cookies });
+}

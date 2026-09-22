@@ -33,6 +33,7 @@ from common.views.organization_views import (
     ProfileView,
 )
 from common.views.pack_views import PackApplyView, PackListView, PackSampleDataView
+from common.views.password_views import ClaveDeUsuarioView, MiClaveView
 from common.views.pat_views import (
     OrgAccessTokenDetailView,
     OrgAccessTokenListView,
@@ -72,6 +73,7 @@ urlpatterns = [
     path("auth/switch-org/", OrgSwitchView.as_view(), name="switch_org"),
     path("auth/logout/", LogoutView.as_view(), name="logout"),
     path("auth/login/", PasswordLoginView.as_view(), name="password_login"),
+    path("auth/password/", MiClaveView.as_view(), name="mi_clave"),
     # Google OAuth callback with PKCE (secure implementation)
     path("auth/google/callback/", GoogleOAuthCallbackView.as_view()),
     # Google ID token auth for mobile apps
@@ -135,6 +137,11 @@ urlpatterns = [
     path("users/", UsersListView.as_view()),
     path("user/<uid:pk>/", UserDetailView.as_view()),
     path("user/<uid:pk>/status/", UserStatusView.as_view()),
+    path(
+        "user/<uid:pk>/password/",
+        ClaveDeUsuarioView.as_view(),
+        name="clave_de_usuario",
+    ),
     # Documents
     path("documents/", DocumentListView.as_view()),
     path("documents/<uid:pk>/", DocumentDetailView.as_view()),

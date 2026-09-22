@@ -513,6 +513,20 @@ class UserDetailView(APIView):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
+    @staticmethod
+    def _historial_de_campo(profile):
+        """Cuantas ordenes de trabajo se perderian al borrar este perfil.
+
+        Import perezoso a proposito: ``common`` es la app base y no deberia
+        depender en tiempo de carga de una app que la usa a ella. Si ``campo``
+        no esta instalada, no hay historial que cuidar.
+        """
+        try:
+            from campo.models import AsignacionTrabajo
+        except (ImportError, RuntimeError):  # pragma: no cover
+            return 0
+        return AsignacionTrabajo.objects.filter(profile=profile).count()
+
     @extend_schema(
         tags=["users"],
         parameters=swagger_params.organization_params,
@@ -534,6 +548,29 @@ class UserDetailView(APIView):
                 {"error": True, "errors": "Permission Denied"},
                 status=status.HTTP_403_FORBIDDEN,
             )
+        historial = self._historial_de_campo(self.object)
+        if historial:
+            # Borrar el perfil arrastra sus asignaciones de trabajo por CASCADE:
+            # una orden cerrada el mes pasado dejaria de saber quien la hizo, y
+            # eso no se recupera. La bitacora (EventoTrabajo) sobrevive porque
+            # es SET_NULL, asi que quedaria una historia sin autor.
+            #
+            # Desactivar hace lo que casi siempre se queria -- la persona deja
+            # de entrar -- sin romper lo que ya paso. El borrado queda para una
+            # cuenta que nunca trabajo: un alta equivocada, una prueba.
+            return Response(
+                {
+                    "error": True,
+                    "errors": (
+                        f"Esta persona tiene {historial} "
+                        f"{'orden' if historial == 1 else 'ordenes'} de trabajo "
+                        f"en su historial. Borrarla eliminaria ese registro. "
+                        f"Desactivala: deja de entrar y el historial se conserva."
+                    ),
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
         deleted_by = self.request.profile.user.email
         send_email_user_delete.delay(
             self.object.user.email,

@@ -39,6 +39,19 @@
     editing = true;
   }
 
+  // El formulario de contraseña. Se abre cerrado: no es algo que se haga
+  // seguido, y tres campos abiertos permanentemente convierten la pantalla en
+  // un formulario cuando en realidad es una ficha.
+  let cambiandoClave = $state(false);
+  const onClave = () => {
+    return async (/** @type {any} */ { result, update }) => {
+      await update({ reset: result?.type === 'success' });
+      // Se cierra solo si salio bien. Si fallo, lo escrito sigue ahi y el
+      // motivo se lee debajo.
+      if (result?.type === 'success') cambiandoClave = false;
+    };
+  };
+
   const onEdit = (/** @type {any} */ { formData }) => {
     // Only send the field the person actually changed. The PATCH treats an
     // absent field as "leave it alone", so an untouched phone is not
@@ -200,14 +213,89 @@
               {count(p.active_token_count)}
             </span>
           </a>
+          <!-- Acá decía "Google, con tu correo. No hay contraseña para
+               cambiar". Dejó de ser cierto cuando la API aprendió a entrar
+               con contraseña (es como entra la aplicación de campo), y hasta
+               hoy la única forma de cambiarla era entrar al servidor. -->
           <div class="v2-setting">
             <div class="v2-setting-body">
-              <b>Método de inicio de sesión</b>
+              <b>Contraseña</b>
               <span class="v2-sub" style="font-size:11.5px">
-                Google, con {p.user_details.email}. No hay contraseña para cambiar.
+                {#if form?.claveCambiada}
+                  Cambiada. {form.sesionesCerradas > 0
+                    ? `Se cerraron ${form.sesionesCerradas} ${form.sesionesCerradas === 1 ? 'sesión abierta' : 'sesiones abiertas'} en otros dispositivos.`
+                    : 'No había otras sesiones abiertas.'}
+                {:else}
+                  Entrás con {p.user_details.email}. Si usás Google o un enlace de acceso, pedile
+                  una a un administrador.
+                {/if}
               </span>
             </div>
+            <Lock size={14} style="color:var(--v2-slate);flex:none" />
+            {#if !cambiandoClave}
+              <button class="v2-btn v2-btn-sm" type="button" onclick={() => (cambiandoClave = true)}>
+                Cambiar
+              </button>
+            {/if}
           </div>
+
+          {#if cambiandoClave}
+            <div class="v2-setting" style="display:block">
+              <form method="POST" action="?/clave" use:enhance={onClave}>
+                <div class="v2-field">
+                  <label class="v2-label" for="clave-actual">Contraseña actual</label>
+                  <input
+                    class="v2-input"
+                    id="clave-actual"
+                    name="actual"
+                    type="password"
+                    autocomplete="current-password"
+                    required
+                  />
+                </div>
+                <div class="v2-field">
+                  <label class="v2-label" for="clave-nueva">Contraseña nueva</label>
+                  <input
+                    class="v2-input"
+                    id="clave-nueva"
+                    name="nueva"
+                    type="password"
+                    autocomplete="new-password"
+                    required
+                  />
+                </div>
+                <div class="v2-field">
+                  <label class="v2-label" for="clave-repetida">Repetila</label>
+                  <input
+                    class="v2-input"
+                    id="clave-repetida"
+                    name="repetida"
+                    type="password"
+                    autocomplete="new-password"
+                    required
+                  />
+                </div>
+                <p class="v2-hint" style="font-size:11.5px">
+                  Al cambiarla se cierran tus sesiones abiertas en otros dispositivos. Esta no.
+                </p>
+                {#if form?.scope === 'clave' && form?.message}
+                  <p class="v2-sub" style="color:var(--v2-rust);font-size:12.5px;margin:6px 0 0">
+                    {form.message}
+                  </p>
+                {/if}
+                <div style="display:flex;gap:8px;margin-top:10px">
+                  <button class="v2-btn v2-btn-sm v2-btn-primary" type="submit">Guardar</button>
+                  <button
+                    class="v2-btn v2-btn-sm"
+                    type="button"
+                    onclick={() => (cambiandoClave = false)}
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </form>
+            </div>
+          {/if}
         </div>
 
         <div class="v2-label" style="margin-bottom:10px">Dónde aparece tu trabajo</div>
