@@ -26,6 +26,15 @@ import 'pasos_orden.dart';
 /// No carga órdenes por su cuenta: lee la que le toca de [OrdenesJornada], la
 /// misma lista que muestran Inicio y Trabajo, y la refresca después de cada
 /// transición para que las tres queden iguales.
+/// Los valores de ejemplo de un trabajo.
+///
+/// Se piden acá y no dentro de `TrabajoVista`: un modelo que trae adentro un
+/// dato inventado se lo entrega a cualquiera que lo lea —`trabajo.futuro.zona`
+/// devolvía siempre algo, hubiera zona o no— y arrastraba al núcleo a depender
+/// de la demostración a través de `ordenes_jornada.dart`.
+TrabajoFuturoMock _ejemploDe(TrabajoVista trabajo) =>
+    FieldMockData.trabajoFuturo(trabajo.id);
+
 class DetalleOrdenScreen extends StatefulWidget {
   const DetalleOrdenScreen({
     super.key,
@@ -349,7 +358,7 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                     borderRadius: AppRadius.brChico,
                   ),
                   child: Text(
-                    'SLA ${trabajo.futuro.slaRestante}h',
+                    'SLA ${_ejemploDe(trabajo).slaRestante}h',
                     style: AppTypography.etiquetaChica.copyWith(
                       color: AppColors.onErrorContainer,
                       fontWeight: FontWeight.w700,
@@ -657,7 +666,7 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                   borderRadius: AppRadius.brChico,
                 ),
                 child: Text(
-                  trabajo.origen?.etiqueta ?? trabajo.futuro.ticketOrigen,
+                  trabajo.origen?.etiqueta ?? _ejemploDe(trabajo).ticketOrigen,
                   style: AppTypography.datoChico,
                 ),
               ),
@@ -1026,7 +1035,7 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                   ),
                   // CAMPO-DATA-003 · La zona, que la orden todavía no trae.
                   child: Text(
-                    'Zona ${trabajo.zona.isEmpty ? trabajo.futuro.zona : trabajo.zona}',
+                    'Zona ${trabajo.zona.isEmpty ? _ejemploDe(trabajo).zona : trabajo.zona}',
                     style: AppTypography.etiquetaChica,
                   ),
                 ),

@@ -391,6 +391,11 @@ class _AppShellState extends State<AppShell> {
                     !_resumen!.hasConnectionError)
                 ? _resumen!.totalPendientes
                 : null,
+            // CAMPO-DATA-022 · El rótulo del modo de trabajo, que el diseño
+            // pone en esa esquina. Se decide acá, no dentro del widget: el
+            // núcleo no tiene por qué saber que existe una demostración.
+            etiquetaDeModo:
+                FieldMockData.modoDemo ? FieldMockData.modoDatos : null,
             onSincronizar: SyncPresentacion.puedeSincronizarAhora(_resumen)
                 ? widget.dependencias.sincronizarAhora
                 : null,

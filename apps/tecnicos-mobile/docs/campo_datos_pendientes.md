@@ -28,6 +28,27 @@ flutter run --dart-define=DEXTER_DEMO=true    # producto completo, para mostrarl
 flutter run                                    # producción: solo datos reales
 ```
 
+## El núcleo no conoce la demostración (22/09/2026)
+
+`lib/core/` no puede importar `lib/demo/`, ni directamente ni a través de otro
+archivo. Lo cuida `test/arquitectura_demo_test.dart`, que sigue la cadena
+completa de imports.
+
+Dos cosas lo violaban:
+
+- `DexterSyncStrip` leía la bandera y el rótulo del modo de trabajo
+  (CAMPO-DATA-022) por su cuenta. Ahora recibe `etiquetaDeModo` por parámetro:
+  nula, no dibuja nada, y quien la pasa es `app_shell`.
+- `TrabajoVista` traía un campo `futuro` con zona, prioridad, SLA y distancia
+  derivados de un hash del identificador (CAMPO-DATA-015). Por ahí
+  `core/estado/ordenes_jornada.dart` alcanzaba la demostración a dos saltos,
+  sin que ningún import de `core/` lo dijera. El campo se fue: una pantalla que
+  quiera un valor de ejemplo lo pide donde lo dibuja.
+
+Que el modelo los trajera adentro tenía además un costo propio:
+`trabajo.futuro.zona` devolvía siempre algo, hubiera zona o no, así que para
+quien leyera el objeto eran indistinguibles de los reales.
+
 ## Inicio no tiene modo demostración (22/09/2026)
 
 La pantalla de inicio **no muestra un solo valor de ejemplo**, ni siquiera con

@@ -213,10 +213,10 @@ class TarjetaTrabajo extends StatelessWidget {
         _aviso(
           icono: Icons.alt_route,
           texto: trabajo.origen == null
-              ? 'Derivado de ${trabajo.futuro.ticketOrigen} '
-                  '(${trabajo.futuro.motivoTicket})'
+              ? 'Derivado de ${_ejemplo.ticketOrigen} '
+                  '(${_ejemplo.motivoTicket})'
               : 'Derivado de ${trabajo.origen!.etiqueta}'
-                  '${mostrarDatosFuturos ? ' (${trabajo.futuro.motivoTicket})' : ''}',
+                  '${mostrarDatosFuturos ? ' (${_ejemplo.motivoTicket})' : ''}',
           color: AppColors.onSurfaceVariant,
           fondo: AppColors.surfaceContainer,
         ),
@@ -306,14 +306,14 @@ class TarjetaTrabajo extends StatelessWidget {
             const Icon(Icons.navigation, size: 14, color: AppColors.secondary),
             const SizedBox(width: 6),
             Text(
-              '${trabajo.futuro.distanciaKm.toStringAsFixed(1)} km de tu posición',
+              '${_ejemplo.distanciaKm.toStringAsFixed(1)} km de tu posición',
               style: AppTypography.etiquetaChica.copyWith(color: AppColors.secondary),
             ),
             const SizedBox(width: 6),
             Text('•', style: AppTypography.etiquetaChica),
             const SizedBox(width: 6),
             Text(
-              'Est. arribo: ${trabajo.futuro.minutosDeViaje} min',
+              'Est. arribo: ${_ejemplo.minutosDeViaje} min',
               style: AppTypography.etiquetaChica,
             ),
           ],
@@ -535,6 +535,14 @@ class TarjetaTrabajo extends StatelessWidget {
     );
   }
 
+  /// Los valores de ejemplo de este trabajo.
+  ///
+  /// Se piden acá, no dentro de `TrabajoVista`: un modelo que trae adentro un
+  /// dato inventado se lo entrega a cualquiera que lo lea, y encima arrastra
+  /// al núcleo a depender de la demostración. Cada uso de esto vive dentro de
+  /// un bloque con la bandera; la guarda de `guarda_demo_test.dart` lo mide.
+  TrabajoFuturoMock get _ejemplo => FieldMockData.trabajoFuturo(trabajo.id);
+
   Widget _aviso({
     required IconData icono,
     required String texto,
@@ -609,7 +617,7 @@ class TarjetaTrabajo extends StatelessWidget {
   /// acciones (CAMPO-DATA-045). Marcarlos todos sería ruido, y el ruido en un
   /// aviso de seguridad se deja de mirar.
   bool get _pideAlturas =>
-      !_enCurso && !_terminado && mostrarDatosFuturos && trabajo.futuro.requiereAlturas;
+      !_enCurso && !_terminado && mostrarDatosFuturos && _ejemplo.requiereAlturas;
 
   /// Las dos acciones del aviso de seguridad. Todavía no hay módulo de EPP ni
   /// preparación de OT, así que abren la ficha del trabajo, que es lo que la
@@ -712,7 +720,7 @@ class TarjetaTrabajo extends StatelessWidget {
 
   /// La prioridad que decidió la oficina; si no la dijo, la de ejemplo.
   String _prioridad(TrabajoVista trabajo) {
-    if (trabajo.prioridad.isEmpty) return trabajo.futuro.prioridad;
+    if (trabajo.prioridad.isEmpty) return _ejemplo.prioridad;
     return trabajo.prioridad[0].toUpperCase() + trabajo.prioridad.substring(1);
   }
 

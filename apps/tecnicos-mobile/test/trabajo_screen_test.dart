@@ -8,6 +8,7 @@ import 'package:campo/core/theme/app_theme.dart';
 import 'package:campo/features/trabajo/estado_trabajo.dart';
 import 'package:campo/features/trabajo/seleccion_jornada.dart';
 import 'package:campo/features/trabajo/trabajo_screen.dart';
+import 'package:campo/demo/field_mock_data.dart';
 import 'package:campo/features/trabajo/trabajo_vista.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -199,13 +200,19 @@ void main() {
         _orden(id: 'a1', numero: 10, estado: 'asignada'),
       );
 
-      // La zona y la prioridad existen solo en la vista, y son estables para
-      // la misma orden: si cambiaran en cada refresco pareceria dato en vivo.
-      final otraLectura = TrabajoVista.desdeOrden(
-        _orden(id: 'a1', numero: 10, estado: 'asignada'),
+      // La vista ya no trae valores de ejemplo adentro: si la orden no dice
+      // zona ni prioridad, el modelo tampoco. Rellenarlos ahí los volvia
+      // indistinguibles de los reales para cualquiera que leyera el objeto.
+      expect(vista.zona, isEmpty);
+      expect(vista.prioridad, isEmpty);
+
+      // Los de ejemplo siguen existiendo, pero se piden aparte y son estables
+      // para la misma orden: si cambiaran en cada refresco parecerian dato en
+      // vivo.
+      expect(
+        FieldMockData.trabajoFuturo('a1').zona,
+        FieldMockData.trabajoFuturo('a1').zona,
       );
-      expect(vista.futuro.zona, otraLectura.futuro.zona);
-      expect(vista.futuro.prioridad, otraLectura.futuro.prioridad);
     });
   });
 

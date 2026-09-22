@@ -1,18 +1,27 @@
 import 'dart:convert';
 
-import '../../demo/field_mock_data.dart';
 import 'estado_trabajo.dart';
 import 'estado_validacion.dart';
 
 /// Un trabajo, tal como lo muestra la lista.
 ///
-/// Junta dos cosas que no se mezclan en ningún otro lado: lo que la orden trae
-/// de verdad y lo que el diseño muestra pero el backend todavía no entrega.
-/// Cada campo dice de dónde viene, y los futuros están agrupados en [futuro],
-/// así que no hay forma de leer un dato de ejemplo creyendo que es real.
+/// Todo lo que hay acá **llega de la orden**. Nada se rellena.
 ///
-/// Esto **no** se guarda. La fila de `local_ordenes` no cambia: el día que la
-/// API mande zona o prioridad, se cambia de dónde sale [futuro] y nada más.
+/// Hasta el 22/09/2026 este modelo traía además un campo `futuro` con zona,
+/// prioridad, SLA y distancia derivados de un hash del identificador. Eran
+/// valores de ejemplo, pero vivían dentro del mismo objeto que los reales, y
+/// eso los volvía indistinguibles para quien los leyera: `trabajo.futuro.zona`
+/// devolvía siempre algo, hubiera o no zona.
+///
+/// Peor: ponía al modelo —y por él a `core/estado/ordenes_jornada.dart`, que
+/// lo importa— a depender de `lib/demo/`. El núcleo terminaba alcanzando la
+/// demostración a dos saltos, sin que ningún import de `core/` lo dijera.
+///
+/// Ahora una pantalla que quiera dibujar un dato de ejemplo lo pide donde lo
+/// dibuja, dentro de su bloque con la bandera. Cuesta una línea más y se ve
+/// en el diff, que es exactamente la idea.
+///
+/// Esto **no** se guarda. La fila de `local_ordenes` no cambia.
 class TrabajoVista {
   const TrabajoVista({
     required this.id,
@@ -49,7 +58,6 @@ class TrabajoVista {
     this.detalleAcceso = '',
     this.idAbonado = '',
     this.requisitosSeguridad = const <String>[],
-    required this.futuro,
   });
 
   // --- Datos reales, de la orden -------------------------------------------
@@ -151,10 +159,6 @@ class TrabajoVista {
   /// Qué hace falta para ejecutar el trabajo. Se informan; no habilitan nada.
   final List<String> requisitosSeguridad;
 
-  /// CAMPO-DATA-015
-  /// Zona, prioridad, SLA y distancia. Se muestran; no filtran ni deciden.
-  final TrabajoFuturoMock futuro;
-
   factory TrabajoVista.desdeOrden(Map<String, dynamic> orden) {
     final id = orden['id']?.toString() ?? '';
     final tipoCodigo = orden['tipo_codigo']?.toString() ?? '';
@@ -202,7 +206,6 @@ class TrabajoVista {
           r.toString(),
       ],
       requiereActualizacion: _bloqueaPorEsquema(orden['schema_version'] as int?),
-      futuro: FieldMockData.trabajoFuturo(id),
     );
   }
 

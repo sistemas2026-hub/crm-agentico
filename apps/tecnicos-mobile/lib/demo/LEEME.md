@@ -30,6 +30,27 @@ flutter test test/guarda_demo_test.dart --dart-define=DEXTER_DEMO=true
 Una guarda que sólo corre apagada no prueba nada: si el bloque no se dibujaba
 por otro motivo, la prueba pasa sin haber mirado. Ya pasó dos veces.
 
+## Quién puede importar esto
+
+`lib/core/` **no**, nunca, ni a través de otro archivo. El núcleo es lo que
+toda pantalla reutiliza sin leerlo: un dato de ejemplo ahí adentro viaja a
+todas sin que nadie lo haya pasado. Si un widget compartido necesita mostrar
+algo de ejemplo, lo recibe por parámetro y lo decide quien lo arma — como hace
+`DexterSyncStrip` con `etiquetaDeModo`.
+
+`lib/features/` sí, pero cada pantalla está declarada a mano en
+`test/arquitectura_demo_test.dart`. Que esa lista se acorte es progreso; que
+crezca cuesta editar una línea, y así se ve en el diff.
+
+La guarda sigue la **cadena completa** de imports, no sólo la primera línea:
+un archivo del núcleo importando otro del núcleo que importe la demostración
+también falla. Así se encontró que `core/estado/ordenes_jornada.dart` alcanzaba
+los datos de ejemplo a través de `TrabajoVista`, que los traía adentro.
+
+```
+flutter test test/arquitectura_demo_test.dart
+```
+
 ## No borrar
 
 Cada constante lleva un identificador `CAMPO-DATA-XXX` y es la especificación
