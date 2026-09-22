@@ -1072,6 +1072,106 @@ def marcar_caso(tenant: str, conversation_id: str, caso: str | None,
                   conversation_id=id_interno(conversation_id), error=e)
 
 
+def conversaciones_ia_inactivas(tenant: str, horas: int) -> list[dict]:
+    """
+    Las que atendio SOLO el asistente y quedaron en silencio.
+
+    POR QUE HACIA FALTA OTRA CONSULTA
+    ---------------------------------
+    'conversaciones_sin_respuesta' (mas abajo) exige 'escalada_a_humano'. Las
+    que nunca se escalaron no entran ahi, y NINGUN otro camino las cierra:
+    quedan abiertas para siempre. Medido contra produccion el 22/09/2026 --
+    151 conversaciones en ese estado, 145 de ellas sin un solo mensaje en mas
+    de una semana. Y sigue pasando: de las 4 creadas en las ultimas 24 h, las
+    4 estaban ahi.
+
+    EL ULTIMO MENSAJE TIENE QUE SER DEL ASISTENTE
+    ---------------------------------------------
+    Es la guarda que importa. Si el ultimo lo escribio el CLIENTE, lo que hay
+    es una pregunta sin contestar -- cerrarla seria enterrar trabajo sin hacer
+    con cara de trabajo terminado, el mismo error que la consulta de al lado
+    evita con su condicion de "ya atendida".
+
+    NO SE LE ESCRIBE AL CLIENTE AL CERRAR
+    -------------------------------------
+    'cerrar_todo' usa su 'texto' solo para comentar el ticket del ISP, y estas
+    no tienen ticket ni caso: nunca se escalaron. Se cierra la fila y nada mas.
+    Avisarle a alguien que dejo de escribir hace una semana que "su caso se
+    cerro" es un mensaje que nadie pidio.
+
+    QUE BLOQUEA EL CIERRE
+    ---------------------
+    Trabajo durable todavia ligado a esta conversacion: una accion propuesta
+    sin resolver, una sincronizacion externa que no se sabe si ocurrio, un
+    pendiente interno, un proximo paso anotado, o una marca de conservar.
+    Medido el mismo dia: hoy ninguna de las 151 tiene nada de eso, asi que
+    estas guardas no filtran nada todavia -- estan por lo que puede pasar
+    cuando el volumen suba, no por lo que hay.
+
+    Un caso del CRM o un ticket abierto NO bloquean por si solos: son
+    expedientes aparte y cerrar la conversacion no los cierra (ver la
+    docstring de transiciones.cerrar).
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select c.id, c.caso_id, c.ticket_operativo, c.usuario_externo,
+                      c.nombre_cliente
+               from asistente.conversations c
+               where c.organization_id = %s
+                 and c.estado <> 'cerrada'
+                 -- Nunca pidio una persona.
+                 and not coalesce(c.escalada_a_humano, false)
+                 and not coalesce(c.necesita_atencion_humana, false)
+                 -- Nadie se hizo cargo.
+                 and coalesce(c.tomada_por, '') = ''
+                 and not coalesce(c.atendida_manual, false)
+                 -- El asistente sigue teniendo el control.
+                 and coalesce(c.control, 'ia') = 'ia'
+                 -- SIN RASTRO EN SISTEMAS EXTERNOS, y esto no es cosmetico:
+                 -- es lo que hace que este barrido SI se pueda programar.
+                 -- 'cerrar_vencidas' esta fuera del reloj a proposito porque
+                 -- no es idempotente bajo concurrencia -- dos pasadas
+                 -- simultaneas publican el texto de cierre DOS VECES en el
+                 -- ticket del proveedor (ver nucleo/reloj.py). Sin ticket ni
+                 -- caso, 'cerrar_todo' no hace ninguna llamada externa y lo
+                 -- unico que queda es 'transiciones.cerrar', que ya es
+                 -- idempotente (una cerrada devuelve 'ya_cerrada').
+                 --
+                 -- Medido el 22/09/2026: de las 147 elegibles, 0 tenian
+                 -- ticket y 0 tenian caso. Se exige igual en vez de confiar
+                 -- en ese cero: una que aparezca con ticket pertenece a las
+                 -- reglas del OTRO barrido, no a estas.
+                 and c.ticket_operativo is null
+                 and c.caso_id is null
+                 -- Trabajo durable pendiente: cualquiera de estos la salva.
+                 and c.pendiente_interno_desde is null
+                 and coalesce(c.escalada_siguiente_paso, '') = ''
+                 and not coalesce(c.conservar, false)
+                 and not exists (
+                       select 1 from asistente.acciones_propuestas a
+                        where a.conversation_id = c.id
+                          and a.estado in ('propuesta', 'pendiente'))
+                 and not exists (
+                       select 1 from asistente.sincronizaciones_externas s
+                        where s.conversation_id = c.id
+                          and s.estado in ('pendiente', 'desconocida'))
+                 -- El ultimo mensaje VISIBLE es del asistente. Las notas
+                 -- internas ('humano' sin salida al cliente) no cuentan: no
+                 -- son turno de nadie en la conversacion.
+                 and (select m.rol from asistente.messages m
+                       where m.conversation_id = c.id
+                         and m.rol in ('user', 'assistant')
+                       order by m.creado_en desc limit 1) = 'assistant'
+                 -- Y hace mas del plazo que nadie escribe.
+                 and coalesce(
+                       (select max(m.creado_en) from asistente.messages m
+                         where m.conversation_id = c.id),
+                       c.creado_en) < now() - make_interval(hours => %s)
+               order by c.actualizado_en""",
+            (org, int(horas)))
+        return [dict(f) for f in cur.fetchall()]
+
+
 def conversaciones_sin_respuesta(tenant: str, horas: int) -> list[dict]:
     """
     Las conversaciones escaladas donde el cliente lleva 'horas' sin escribir.

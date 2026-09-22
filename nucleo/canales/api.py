@@ -4613,6 +4613,32 @@ def mantenimiento_cerrar_sin_respuesta():
     return jsonify(operativo.cerrar_vencidas(config, tenant))
 
 
+@app.post("/mantenimiento/cerrar-inactivas-ia")
+def mantenimiento_cerrar_inactivas_ia():
+    """
+    Cierra las conversaciones que atendio SOLO el asistente y quedaron mudas.
+
+    Hermano de '/mantenimiento/cerrar-sin-respuesta', que solo alcanza a las
+    ESCALADAS: sin este, una conversacion que la IA resolvio sola no la cierra
+    nadie nunca. Medido contra produccion el 22/09/2026: 151 asi, 145 de ellas
+    sin un mensaje en mas de una semana.
+
+    'simular=1' lista las que se cerrarian sin tocarlas. Se usa primero,
+    siempre: la primera corrida sobre un backlog acumulado es la unica que no
+    se puede deshacer mirando despues.
+    """
+    tenant = request.args.get("tenant") or (
+        request.get_json(force=True, silent=True) or {}).get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    simular = request.args.get("simular") in ("1", "true", "si")
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+    return jsonify(operativo.cerrar_inactivas_de_ia(config, tenant, simular=simular))
+
+
 @app.post("/casos/<caso_id>/mensajes")
 def caso_responder_humano(caso_id):
     """

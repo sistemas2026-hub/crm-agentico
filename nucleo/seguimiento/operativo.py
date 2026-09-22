@@ -177,6 +177,73 @@ def cerrar_todo(config, tenant: str, conversacion: dict, texto: str,
 INTERVALO_BARRIDO_SEGUNDOS = 3600
 
 
+def cerrar_inactivas_de_ia(config, tenant: str, simular: bool = False) -> dict:
+    """
+    Cierra las conversaciones que atendio SOLO el asistente y quedaron mudas.
+
+    POR QUE EL PLAZO ES 'limites.horas_inactividad_cierra' Y NO UN NUMERO NUEVO
+    ---------------------------------------------------------------------------
+    Ese valor ya existe y ya significa exactamente esto: pasado ese tiempo, un
+    mensaje del cliente NO reutiliza la conversacion, abre una nueva (ver el
+    'horas_inactividad' de persistencia.conversacion_abierta). O sea que a
+    partir de esa marca la fila ya es inalcanzable -- cerrarla no le quita
+    nada a nadie.
+
+    Antes de esa marca si costaria: el cliente que vuelve perderia la
+    identidad verificada y los identificadores del equipo guardados en
+    'datos_sesion', y tendria que verificarse de nuevo para que el asistente
+    pueda mirarle la ONU. Por eso el plazo no es una constante nueva ni un
+    parametro aparte: es EL MISMO, y moverlo sin mover aquel volveria a abrir
+    esa ventana de perdida.
+
+    Sin valor declarado no hace nada, igual que 'cerrar_vencidas': una empresa
+    que no lo pidio no deberia encontrarse conversaciones cerradas solas.
+
+    EL DESENLACE ES 'sin_respuesta_cliente', Y NO ES 'resuelto'
+    -----------------------------------------------------------
+    Lo fija la transicion (por='plazo', ver transiciones.cerrar). Es lo unico
+    que se sabe: el asistente contesto y el cliente no volvio. Que la averia
+    se haya solucionado no lo dice nadie -- y escribirlo seria inventar un
+    dato en la tabla que existe justamente para aprender de los cierres.
+
+    'simular' devuelve las que se cerrarian, SIN cerrarlas. Es lo que hace
+    falta para mirar una vez antes de soltarlo sobre un backlog de 145.
+    """
+    from nucleo.persistencia import db as persistencia
+
+    horas = getattr(config.limites, "horas_inactividad_cierra", None)
+    resumen = {"revisadas": 0, "cerradas": 0, "horas": horas, "simulado": simular}
+    if not horas or horas <= 0:
+        return resumen
+
+    try:
+        mudas = persistencia.conversaciones_ia_inactivas(tenant, horas)
+    except Exception as e:
+        registrar("operativo", "no se pudieron listar las inactivas de la IA",
+                  tenant=tenant, error=e)
+        return resumen
+
+    resumen["revisadas"] = len(mudas)
+    if simular:
+        # Solo los identificadores internos: el nombre del cliente no tiene
+        # por que salir en un informe de mantenimiento.
+        resumen["serian"] = [id_interno(c["id"]) for c in mudas]
+        return resumen
+
+    for conv in mudas:
+        # Mismo camino que el barrido de escaladas, a proposito: un segundo
+        # cierre "parecido" es como dos caminos terminan divergiendo. Estas no
+        # tienen ticket ni caso --nunca se escalaron-- asi que 'cerrar_todo'
+        # solo cierra la conversacion y el texto no se usa.
+        hecho = cerrar_todo(config, tenant, conv, "", por="plazo")
+        if hecho["conversacion"]:
+            resumen["cerradas"] += 1
+        registrar("operativo", "inactiva de la IA",
+                  conversation_id=id_interno(conv["id"]),
+                  conversacion=hecho["conversacion"])
+    return resumen
+
+
 def cerrar_vencidas(config, tenant: str) -> dict:
     """
     Cierra las conversaciones escaladas donde el cliente dejo de contestar.
