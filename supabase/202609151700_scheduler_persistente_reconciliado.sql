@@ -49,8 +49,8 @@ declare
   faltan text[] := array[]::text[];
   f      text;
 begin
-  foreach f in array array['ext.digest(text,text)',
-                           'ext.gen_random_bytes(integer)']
+  foreach f in array array['extensions.digest(text,text)',
+                           'extensions.gen_random_bytes(integer)']
   loop
     if to_regprocedure(f) is null then
       faltan := faltan || f;
@@ -59,9 +59,9 @@ begin
   if array_length(faltan, 1) is not null then
     raise exception using
       message = 'Falta ' || array_to_string(faltan, ' y ')
-                || ': pgcrypto no esta (completo) en el schema ext.',
+                || ': pgcrypto no esta (completo) en el schema extensions.',
       hint    = 'Ejecutar como superusuario: CREATE SCHEMA IF NOT EXISTS ext; '
-                'CREATE EXTENSION pgcrypto WITH SCHEMA ext;';
+                'CREATE EXTENSION pgcrypto WITH SCHEMA extensions;';
   end if;
 end $$;
 

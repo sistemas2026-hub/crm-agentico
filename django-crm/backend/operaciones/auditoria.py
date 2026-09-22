@@ -45,6 +45,7 @@ from common.models import Activity
 # 'tecnico_lider' que su propio modelo no documenta.
 ENTIDAD_ACTIVIDAD = "ActividadOperativa"
 ENTIDAD_PROPUESTA = "PropuestaSupervisor"
+ENTIDAD_NOVEDAD = "NovedadOperativa"
 
 
 def registrar(*, org, actor, accion: str, entidad: str, entidad_id,

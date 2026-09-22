@@ -390,6 +390,11 @@ class TransicionActividadSerializer(serializers.Serializer):
     #  Sólo los usa la acción que corresponde; el servicio valida lo demás.
     responsable_id = serializers.UUIDField(required=False, allow_null=True)
     depende_de_id = serializers.UUIDField(required=False, allow_null=True)
+    #  M05-B. Escalar los exige; la vista devuelve 400 si faltan. No hay valor
+    #  por defecto: no existe politica que permita elegir destinatario.
+    escalado_a_id = serializers.UUIDField(required=False, allow_null=True)
+    nivel_escalamiento = serializers.ChoiceField(
+        choices=ActividadOperativa.NIVELES_ESCALAMIENTO, required=False)
     vence_en = serializers.DateTimeField(required=False, allow_null=True)
     destino = serializers.ChoiceField(
         choices=[(x, x) for x in ("pendiente", "en_gestion", "en_espera")],

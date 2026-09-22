@@ -232,10 +232,25 @@ def main():
     titulo = f"DRY RUN{' -- PILOTO ' + args.piloto if args.piloto else ''}"
     imprimir(titulo, imp.resumen(veredictos), veredictos, args.detalle)
 
+    #  QUIEN CORRE ESTO  --  paso 10.14A
+    #  --------------------------------
+    #  Las escrituras de importacion pasan por la frontera de acciones
+    #  externas. Con un actor entran por la puerta humana, que es lo que
+    #  corresponde: este CLI lo corre una persona, no el agente.
+    #
+    #    LIMITE, dicho aca y en el informe: el usuario del sistema operativo
+    #    dice QUIEN corrio el comando, no PRUEBA que haya sido una persona --
+    #    un cron que invoque este CLI entraria igual. Lo que queda garantizado
+    #    es la atribucion: si despues resulta que era un cron, el registro lo
+    #    delata con su nombre.
+    import getpass
+    _ACTOR_CLI = f"cli:{getpass.getuser()}"
+
     _resultado = {"creados": 0, "ya_estaban": 0, "fallidos": 0}
     if args.aplicar:
         print(f"\n{'=' * 74}\n  APLICANDO  --  esto ESCRIBE casos\n{'=' * 74}")
-        _resultado = aplicar(config, args.tenant, veredictos)
+        _resultado = aplicar(config, args.tenant, veredictos,
+                             actor=_ACTOR_CLI)
         print(f"  creados ......... {_resultado['creados']}")
         print(f"  ya estaban ...... {_resultado['ya_estaban']}")
         print(f"  fallidos ........ {_resultado['fallidos']}")
@@ -253,7 +268,8 @@ def main():
         print(f"  con error de lectura .................. "
               f"{sum(1 for c in cambios if c.error)}")
         if args.aplicar:
-            r = aplicar_reconciliacion(config, args.tenant, cambios)
+            r = aplicar_reconciliacion(config, args.tenant, cambios,
+                                       actor=_ACTOR_CLI)
             print(f"  actualizados .......................... {r['actualizados']}")
             print(f"  sin cambios ........................... {r['sin_cambios']}")
             print(f"  fallidos .............................. {r['fallidos']}")

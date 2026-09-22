@@ -160,6 +160,32 @@ class ActividadOperativa(BaseModel):
     # para no proponer sobre algo que nadie va a mover.
     ESTADOS_FINALES = (COMPLETADA, CANCELADA)
 
+    # =========================================================================
+    #  ESCALAMIENTO  --  paso M05-B
+    # =========================================================================
+    #  'escalada' ya era un estado. Lo que faltaba es a QUIEN, CUANDO y CON QUE
+    #  NIVEL: sin eso, "escalada" dice que alguien pidio ayuda y no dice a
+    #  quien, asi que nadie sabe si la pidio bien.
+    #
+    #  EL NIVEL NO ES GRAVEDAD. Describe la RUTA de gestion -- a que instancia
+    #  se llevo. La gravedad operacional vive en 'NovedadOperativa.impacto', y
+    #  son cosas distintas a proposito: una incidencia de impacto bajo puede
+    #  necesitar nivel 3 porque solo esa instancia puede autorizarla, y una
+    #  critica puede resolverse en nivel 1 si quien esta ahi puede hacerlo.
+    #  Tampoco es culpa, ni sancion, ni desempeño de nadie.
+    #
+    #  Tres niveles y no mas: es la escala minima que distingue "mi supervisor
+    #  directo" de "la instancia que decide" de "fuera de operaciones". Agregar
+    #  un cuarto sin una ruta real detras seria inventar organigrama.
+    NIVEL_1 = "nivel_1"
+    NIVEL_2 = "nivel_2"
+    NIVEL_3 = "nivel_3"
+    NIVELES_ESCALAMIENTO = (
+        (NIVEL_1, "Nivel 1"),
+        (NIVEL_2, "Nivel 2"),
+        (NIVEL_3, "Nivel 3"),
+    )
+
     org = models.ForeignKey(
         Org, on_delete=models.CASCADE, related_name="actividades_operativas"
     )
@@ -216,6 +242,30 @@ class ActividadOperativa(BaseModel):
         blank=True,
         default="",
         help_text="Obligatorio cuando el estado es 'bloqueada'. Un bloqueo sin causa no sirve.",
+    )
+
+    #  --- M05-B: a quien, cuando y con que nivel se escalo ---
+    #  Los tres son NULL/vacio mientras no haya escalamiento, y las actividades
+    #  que ya existan se quedan asi: no se inventa un destinatario, una fecha
+    #  ni un nivel retroactivos para una actividad que se escalo cuando el
+    #  sistema todavia no los registraba.
+    escalado_a = models.ForeignKey(
+        Profile,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="escalamientos_recibidos",
+        help_text="A quién se escaló. Obligatorio al escalar: un escalamiento "
+                  "sin destinatario no llega a nadie.",
+    )
+    escalado_en = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Cuándo se escaló. Null si nunca se escaló.",
+    )
+    nivel_escalamiento = models.CharField(
+        max_length=16, choices=NIVELES_ESCALAMIENTO, blank=True, default="",
+        help_text="Ruta de gestión a la que se llevó. NO es gravedad ni culpa: "
+                  "la gravedad operacional vive en NovedadOperativa.impacto.",
     )
 
     #  LAS DOS FECHAS QUE SON HECHOS, NO DERIVACIONES  --  M02
@@ -560,6 +610,89 @@ class NovedadOperativa(BaseModel):
         related_name="novedades_registradas",
     )
 
+    # =========================================================================
+    #  CICLO DE VIDA  --  paso M05-A
+    # =========================================================================
+    #  Una novedad registra QUE obligo a cambiar el plan. El ciclo de vida
+    #  contesta otra cosa: si esa causa ya se atendio.
+    #
+    #  SON DOS PREGUNTAS DISTINTAS, Y ESA ES LA RAZON DE QUE ESTO SE PERSISTA.
+    #  Desbloquear una actividad significa "ya no esta bloqueada"; NO significa
+    #  "la causa se resolvio". Un tecnico puede desbloquear para seguir
+    #  trabajando mientras el material sigue sin llegar. Si el estado se
+    #  dedujera del estado de la actividad, el sistema daria por cerrada una
+    #  causa que nadie atendio -- y despues mediria, escalaria y reportaria
+    #  sobre esa mentira.
+    #
+    #  Por eso una incidencia solo se resuelve con la operacion explicita de
+    #  'novedades.resolver()', que exige decir COMO se resolvio.
+    ABIERTA = "abierta"
+    EN_GESTION = "en_gestion"
+    RESUELTA = "resuelta"
+    ESTADOS = (
+        (ABIERTA, "Abierta"),
+        (EN_GESTION, "En gestión"),
+        (RESUELTA, "Resuelta"),
+    )
+    #  Transiciones permitidas. No hay reapertura: no existe hoy en el
+    #  proyecto y no se inventa aca.
+    TRANSICIONES = {
+        ABIERTA: (EN_GESTION, RESUELTA),
+        EN_GESTION: (RESUELTA,),
+        RESUELTA: (),
+    }
+
+    #  Afectacion OPERACIONAL. No es culpa, ni incumplimiento, ni desempeño de
+    #  nadie: describe cuanto estorba esto para operar.
+    #
+    #  Escala propia y no la de PropuestaSupervisor porque alli 'impacto' es
+    #  texto libre ("que se ve afectado si no se atiende"), no una escala.
+    #  Reutilizarlo obligaria a convertir un CharField de 255 en un catalogo y
+    #  cambiaria el significado de un campo que M09 ya usa.
+    BAJO = "bajo"
+    MEDIO = "medio"
+    ALTO = "alto"
+    CRITICO = "critico"
+    IMPACTOS = (
+        (BAJO, "Bajo"),
+        (MEDIO, "Medio"),
+        (ALTO, "Alto"),
+        (CRITICO, "Crítico"),
+    )
+
+    estado = models.CharField(
+        max_length=16, choices=ESTADOS, default=ABIERTA,
+        help_text="Ciclo de vida de la incidencia. Solo cambia con una "
+                  "operación explícita de operaciones/novedades.py.",
+    )
+    #  Vacio = nadie lo declaro. NO es 'bajo': no se inventa una afectacion
+    #  que nadie midio, ni para las filas que ya existan.
+    impacto = models.CharField(
+        max_length=16, choices=IMPACTOS, blank=True, default="",
+        help_text="Afectación operacional declarada. Vacío = sin declarar.",
+    )
+    resuelta_en = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Cuándo se resolvió. Null mientras no lo esté.",
+    )
+    resolucion = models.TextField(
+        blank=True, default="",
+        help_text="Cómo se resolvió. Obligatoria al resolver: sin explicación "
+                  "no se puede distinguir una causa atendida de una olvidada.",
+    )
+    #  Quien la resolvio. Se reutiliza Profile, que es la relacion que el
+    #  modelo ya usa para 'registrada_por' -- no se inventa una entidad de
+    #  responsable.
+    resuelta_por = models.ForeignKey(
+        Profile,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="novedades_resueltas",
+        help_text="Quién la resolvió. Null si se resolvió sin actor "
+                  "identificado (una tarea de sistema, por ejemplo).",
+    )
+
     class Meta:
         db_table = "operaciones_novedad"
         ordering = ["-created_at"]
@@ -630,6 +763,24 @@ class PropuestaSupervisor(BaseModel):
     #      falta y se puede nombrar. Ver supervisor._ordenes_desincronizadas.
     PROGRAMACION_SIN_PUBLICAR = "programacion_sin_publicar"
     DATO_INCOMPLETO = "dato_incompleto"
+    #  Paso M04-A. Riesgo TEMPORAL de una orden de trabajo, derivado del plazo
+    #  que declara su tipo de trabajo (ver operaciones/sla.py).
+    #
+    #  El prefijo 'orden_' no es cosmetico: el SLA de 'cases.Case' es otro
+    #  sistema, con sus propios campos, su pausa y su politica de escalamiento.
+    #  Estas dos senales NO hablan de casos y no deben confundirse con
+    #  'is_sla_resolution_breached'. Nombrarlas 'sla_vencido' a secas habria
+    #  dejado dos cosas distintas con el mismo nombre.
+    ORDEN_SLA_VENCIDO = "orden_sla_vencido"
+    ORDEN_SLA_POR_VENCER = "orden_sla_por_vencer"
+    #  Paso M05-A. Una incidencia que sigue ABIERTA o EN_GESTION. El estado
+    #  sale de la columna, no de observar la actividad: desbloquear no
+    #  resuelve nada.
+    INCIDENCIA_SIN_RESOLVER = "incidencia_sin_resolver"
+    #  Paso M05-B. Una actividad quedo en 'escalada' sin destinatario: es un
+    #  dato FALTANTE, no una recomendacion de a quien escalarla. El Supervisor
+    #  no elige destinatario -- no existe politica que se lo permita.
+    ESCALAMIENTO_SIN_DESTINATARIO = "escalamiento_sin_destinatario"
     TIPOS_SENAL = (
         (CASO_ANTIGUO, "Caso abierto antiguo"),
         (ACTIVIDAD_VENCIDA, "Actividad vencida"),
@@ -641,6 +792,10 @@ class PropuestaSupervisor(BaseModel):
         (ORDEN_EN_RIESGO, "Orden con riesgo operacional"),
         (PROGRAMACION_SIN_PUBLICAR, "Programación semanal sin publicar"),
         (DATO_INCOMPLETO, "Dato incompleto"),
+        (ORDEN_SLA_VENCIDO, "Orden con plazo operativo vencido"),
+        (ORDEN_SLA_POR_VENCER, "Orden con plazo operativo por vencer"),
+        (INCIDENCIA_SIN_RESOLVER, "Incidencia operativa sin resolver"),
+        (ESCALAMIENTO_SIN_DESTINATARIO, "Escalamiento sin destinatario registrado"),
     )
 
     PROPUESTA = "propuesta"

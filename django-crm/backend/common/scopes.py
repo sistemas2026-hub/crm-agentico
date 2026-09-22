@@ -67,6 +67,13 @@ API_RESOURCES = frozenset(
         "leads",
         "macros",
         "notifications",
+        # M02 actividades, M03 programacion y las propuestas del Supervisor NOC
+        # IA. Entra aca porque 'test_api_resources_covers_the_live_urlconf'
+        # camina el URLconf real y exige que toda raiz nueva declare su alcance:
+        # una ruta que ningun scope nombra queda fuera del control de los
+        # tokens, que es justo lo contrario de lo que este registro existe para
+        # garantizar. Lo caza la propia guarda, no una revision.
+        "operaciones",
         "opportunities",
         "org",
         "packs",

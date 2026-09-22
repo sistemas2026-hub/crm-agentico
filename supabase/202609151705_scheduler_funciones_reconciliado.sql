@@ -29,10 +29,10 @@
 -- ejecucion a las 3 de la mañana.
 do $$
 begin
-  if to_regprocedure('ext.digest(text,text)') is null
-     or to_regprocedure('ext.gen_random_bytes(integer)') is null then
+  if to_regprocedure('extensions.digest(text,text)') is null
+     or to_regprocedure('extensions.gen_random_bytes(integer)') is null then
     raise exception 'falta pgcrypto en el esquema ext'
-      using hint = 'CREATE EXTENSION pgcrypto WITH SCHEMA ext;';
+      using hint = 'CREATE EXTENSION pgcrypto WITH SCHEMA extensions;';
   end if;
 end $$;
 
@@ -45,7 +45,7 @@ end $$;
 --  conociera el secreto -- circular. Genera PostgreSQL. Queda escrito aca
 --  porque es un apartamiento del diseño, no un detalle de implementacion.
 --
---  QUIEN LA GENERA   'asistente.job_claim', con ext.gen_random_bytes(32).
+--  QUIEN LA GENERA   'asistente.job_claim', con extensions.gen_random_bytes(32).
 --                    CSPRNG del sistema, 256 bits.
 --  TIPO INTERNO      bytea de 32 bytes, nunca persistido en claro.
 --  CODIFICACION      encode(..., 'hex') -> 64 caracteres [0-9a-f].
@@ -57,7 +57,7 @@ end $$;
 --  QUE PRESENTA EL EJECUTOR
 --                    la misma cadena hex, textual, como segundo argumento de
 --                    job_contexto / job_heartbeat / job_finalize.
---  QUE SE ALMACENA   ext.digest(<hex>, 'sha256') -> bytea de 32 bytes en
+--  QUE SE ALMACENA   extensions.digest(<hex>, 'sha256') -> bytea de 32 bytes en
 --                    'job_attempt.capability_hash'. 'ja_cap_len' obliga los 32
 --                    bytes y 'ja_cap_unica' obliga que no se repita.
 --  VIGENCIA          la del INTENTO, no la de un reloj. Deja de valer cuando
@@ -154,7 +154,7 @@ grant usage on schema asistente to asistente_owner;
 -- Y sobre 'ext', donde vive pgcrypto: 'job_claim' calcula ahi el sha256 de la
 -- config y genera los 32 bytes de la capability. Solo el dueño lo necesita --
 -- ningun rol de runtime llama a pgcrypto.
-grant usage on schema ext to asistente_owner;
+grant usage on schema extensions to asistente_owner;
 grant usage on schema asistente to scheduler_coordinator, job_executor, monitor_ro;
 
 -- -----------------------------------------------------------------------------
@@ -396,8 +396,8 @@ begin
         using hint = 'el turno no puede congelar contra que version corre';
     end if;
 
-    v_cfg_hash := encode(ext.digest(v_cfg::text, 'sha256'), 'hex');
-    v_in_hash  := encode(ext.digest(v_inputs::text, 'sha256'), 'hex');
+    v_cfg_hash := encode(extensions.digest(v_cfg::text, 'sha256'), 'hex');
+    v_in_hash  := encode(extensions.digest(v_inputs::text, 'sha256'), 'hex');
     -- La clave de idempotencia NO lleva el numero de intento. Si lo llevara,
     -- cada reintento seria un turno distinto y la unicidad no protegeria nada.
     v_idem := p_job_code || '|' || p_organization_id::text || '|'
@@ -464,14 +464,14 @@ begin
   -- en la tabla solo queda el sha256. No se afirma comparacion en tiempo
   -- constante en ningun punto -- con 256 bits de entropia el ataque que eso
   -- mitigaria no es el que importa.
-  v_cap := encode(ext.gen_random_bytes(32), 'hex');
+  v_cap := encode(extensions.gen_random_bytes(32), 'hex');
 
   insert into asistente.job_attempt
     (run_id, organization_id, attempt_number, lease_token, fencing_version,
      capability_hash, worker_id)
   values
     (v_run.id, v_run.organization_id, v_intento, v_lease_tok, v_fencing,
-     ext.digest(v_cap, 'sha256'), p_worker_id)
+     extensions.digest(v_cap, 'sha256'), p_worker_id)
   returning id into v_att;
 
   update asistente.job_run
@@ -581,7 +581,7 @@ begin
   end if;
   select * into v_a from asistente.job_attempt
    where id = p_attempt_id
-     and capability_hash = ext.digest(p_capability, 'sha256')
+     and capability_hash = extensions.digest(p_capability, 'sha256')
      and not capability_revocada
      and outcome is null;
   if not found then
@@ -816,7 +816,7 @@ begin
       using detail = format('falta la version %s del historial', v_r.config_version),
             hint   = 'el turno congelo una version que ya no esta';
   end if;
-  v_hash := encode(ext.digest(v_cfg::text, 'sha256'), 'hex');
+  v_hash := encode(extensions.digest(v_cfg::text, 'sha256'), 'hex');
   if v_hash is distinct from v_r.config_hash then
     raise exception 'HISTORIAL_CONFIG_CORRUPTO'
       using detail = format('la version %s cambio bajo el turno',
@@ -824,7 +824,7 @@ begin
             hint   = 'el historial de configuracion es append-only por contrato';
   end if;
 
-  if encode(ext.digest(v_r.inputs::text, 'sha256'), 'hex')
+  if encode(extensions.digest(v_r.inputs::text, 'sha256'), 'hex')
      is distinct from v_r.inputs_hash then
     raise exception 'INPUTS_CORRUPTOS'
       using detail = 'las entradas del turno ya no coinciden con su hash';
@@ -855,7 +855,7 @@ begin
     return null;
   end if;
   select id into v_id from asistente.job_attempt
-   where capability_hash = ext.digest(p_capability, 'sha256');
+   where capability_hash = extensions.digest(p_capability, 'sha256');
   if not found then
     return null;
   end if;

@@ -688,6 +688,9 @@ class Activity(BaseModel):
         # modelo no documenta.
         ("ActividadOperativa", "Actividad operativa"),
         ("PropuestaSupervisor", "Propuesta del Supervisor NOC IA"),
+        #  M05-A. La incidencia tiene ciclo de vida propio, y sus transiciones
+        #  se auditan aqui como las de cualquier otra entidad del CRM.
+        ("NovedadOperativa", "Novedad / incidencia operativa"),
     )
 
     user = models.ForeignKey(

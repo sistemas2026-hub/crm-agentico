@@ -57,11 +57,11 @@ from __future__ import annotations
 from django.db import transaction
 
 from common.models import Org
-from operaciones import habilidades, supervisor
+from operaciones import habilidades, incidencias, sla, supervisor
 from operaciones.models import (ActividadOperativa, APROBADO,
-                                ESTADOS_VALIDACION, NovedadOperativa,
-                                ProgramacionOrden, ProgramacionSemanal,
-                                PropuestaSupervisor, VALIDACION_PENDIENTE)
+                                ESTADOS_VALIDACION, ProgramacionOrden,
+                                ProgramacionSemanal, PropuestaSupervisor,
+                                VALIDACION_PENDIENTE)
 
 P = PropuestaSupervisor
 
@@ -77,6 +77,14 @@ SENALES = {
         P.PROGRAMACION_SIN_PUBLICAR,
         P.ORDEN_EN_RIESGO,
         P.DATO_INCOMPLETO,
+        #  M04-A. Riesgo TEMPORAL de la orden. El calculo no vive aqui: lo
+        #  hace 'operaciones/sla.py', la misma fuente que alimenta el campo
+        #  'sla' de cada recomendacion. Una segunda copia de la formula seria
+        #  el modo de que el detector y el asistente dijeran cosas distintas.
+        P.ORDEN_SLA_VENCIDO,
+        P.ORDEN_SLA_POR_VENCER,
+        #  M05-A. Incidencia con lifecycle persistente.
+        P.INCIDENCIA_SIN_RESOLVER,
     ),
     COMPROMISOS: (
         P.ACTIVIDAD_VENCIDA,
@@ -84,6 +92,8 @@ SENALES = {
         P.ACTIVIDAD_BLOQUEADA,
         P.COMPROMISO_POR_VENCER,
         P.DEPENDENCIA_PENDIENTE,
+        #  M05-B. Es del dominio de la actividad, no del plan.
+        P.ESCALAMIENTO_SIN_DESTINATARIO,
     ),
 }
 
@@ -117,6 +127,15 @@ def _faltantes_de_actividad(actividad) -> list[dict]:
     if actividad.estado_validacion == VALIDACION_PENDIENTE:
         faltan.append({"entidad": "actividad", "campo": "estado_validacion",
                        "por_que": "completada pero nadie resolvio su validacion"})
+    #  M05-B. Escalada y sin constar a quien: el dato falta, y se nombra. NO se
+    #  propone un destinatario -- no hay politica que permita elegirlo.
+    if actividad.estado_operativo == ActividadOperativa.ESCALADA:
+        if actividad.escalado_a_id is None:
+            faltan.append({"entidad": "actividad", "campo": "escalado_a",
+                           "por_que": "escalada sin constar a quien"})
+        if not actividad.nivel_escalamiento:
+            faltan.append({"entidad": "actividad", "campo": "nivel_escalamiento",
+                           "por_que": "escalada sin constar con que nivel"})
     return faltan
 
 
@@ -162,6 +181,15 @@ def _datos_faltantes(senal) -> list[dict]:
             return [{"entidad": "orden_trabajo", "campo": "*",
                      "por_que": "la orden ya no existe"}]
         return _faltantes_de_orden(o)
+    if senal.origen_tipo == "novedad":
+        #  La ficha de la incidencia ya los midio sobre la fila; no se
+        #  recalculan aqui para que no puedan divergir.
+        from operaciones.models import NovedadOperativa
+        n = NovedadOperativa.objects.filter(pk=senal.origen_id).first()
+        if n is None:
+            return [{"entidad": "novedad", "campo": "*",
+                     "por_que": "la incidencia ya no existe"}]
+        return incidencias.ficha(n)["datos_faltantes"]
     if senal.origen_tipo == "programacion_semanal":
         return []
     return []
@@ -218,7 +246,8 @@ def _estado_de(senal) -> dict | None:
         return None
     a = (ActividadOperativa.objects
          .filter(pk=senal.origen_id)
-         .only("estado_operativo", "estado_validacion", "motivo_bloqueo")
+         .only("estado_operativo", "estado_validacion", "motivo_bloqueo",
+               "escalado_a", "escalado_en", "nivel_escalamiento")
          .first())
     if a is None:
         #  La fila ya no esta. Se dice, en vez de devolver None, que se leeria
@@ -226,7 +255,7 @@ def _estado_de(senal) -> dict | None:
         return {"operativo": None, "operativo_etiqueta": "",
                 "validacion": None, "validacion_etiqueta": "",
                 "es_final": None, "ejecutada": None, "validada": None,
-                "validacion_pendiente": None,
+                "validacion_pendiente": None, "escalamiento": None,
                 "nota": "la actividad ya no existe"}
     return {
         "operativo": a.estado_operativo,
@@ -236,6 +265,13 @@ def _estado_de(senal) -> dict | None:
         #  'final' es del eje operativo y NO significa validada.
         "es_final": a.estado_operativo in ActividadOperativa.ESTADOS_FINALES,
         "ejecutada": a.estado_operativo == ActividadOperativa.COMPLETADA,
+        #  M05-B. Quien recibio el escalamiento, cuando y con que nivel. None
+        #  cuando no se escalo -- no se rellena con un destinatario inventado.
+        "escalamiento": ({"escalado_a": str(a.escalado_a_id),
+                          "escalado_en": a.escalado_en.isoformat() if a.escalado_en else None,
+                          "nivel": a.nivel_escalamiento or None}
+                         if a.estado_operativo == ActividadOperativa.ESCALADA
+                         or a.escalado_a_id else None),
         "validada": a.estado_validacion == APROBADO,
         "validacion_pendiente": a.estado_validacion == VALIDACION_PENDIENTE,
         #  Una bloqueada sin causa no es lo mismo que una no realizada: la
@@ -244,7 +280,7 @@ def _estado_de(senal) -> dict | None:
     }
 
 
-def _contexto_operativo(senal) -> dict:
+def _contexto_operativo(senal, ahora=None) -> dict:
     """
     El plan vigente de una orden: jornada, secuencia y novedades registradas.
 
@@ -277,14 +313,65 @@ def _contexto_operativo(senal) -> dict:
     #  planeado. Sin ellas, "la orden sigue sin ejecutarse" se lee como
     #  desidia cuando puede ser una ausencia o una falta de material ya
     #  reportada por alguien.
-    novedades = list(NovedadOperativa.objects
-                     .filter(orden_id=senal.origen_id)
-                     .order_by("-created_at")[:5])
+    #
+    #  M05-A: cada una viaja con su estado DERIVADO -- si la causa sigue
+    #  vigente o no. Una novedad de hace tres semanas cuya actividad ya se
+    #  desbloqueo no es lo mismo que una que sigue pasando, y la lista plana
+    #  las mostraba igual.
+    #  M05-A: cada una con su LIFECYCLE PERSISTENTE (abierta / en gestion /
+    #  resuelta), no con un estado deducido de la actividad.
+    novedades = incidencias.de_orden(senal.origen_id, ahora)
     if novedades:
-        salida["novedades"] = [
-            {"tipo": n.tipo, "descripcion": (n.descripcion or "")[:160]}
-            for n in novedades]
+        salida["novedades"] = novedades
+        salida["incidencias"] = incidencias.resumen(novedades)
     return salida
+
+
+def _incidencias_de(senal, ahora) -> list[dict]:
+    """Las novedades de la actividad de esta senal, con su estado derivado."""
+    if senal.origen_tipo != "actividad":
+        return []
+    return incidencias.de_actividad(senal.origen_id, ahora)
+
+
+def _sla_de_senal(senal, ahora) -> dict | None:
+    """
+    El plazo de la orden a la que pertenece esta senal, si pertenece a alguna.
+
+    A-1 lo resuelve directo: sus senales SON de ordenes.
+
+    A-2 llega por el vinculo que ya existe en M02 -- 'origen_tipo' /
+    'origen_id' de la actividad. Es un vinculo por CONVENCION y no una clave
+    foranea (una actividad puede nacer de un caso, de una conversacion o a
+    mano), asi que puede apuntar a una orden que ya no esta: por eso se
+    resuelve leyendo, y si no hay orden se devuelve None en vez de inventar un
+    plazo.
+    """
+    if senal.origen_tipo == "orden_trabajo":
+        return _sla_de_orden(senal.origen_id, ahora)
+    if senal.origen_tipo == "actividad":
+        a = (ActividadOperativa.objects.filter(pk=senal.origen_id)
+             .only("origen_tipo", "origen_id").first())
+        if a is not None and a.origen_tipo == "orden_trabajo":
+            return _sla_de_orden(a.origen_id, ahora)
+    return None
+
+
+def _sla_de_orden(orden_id, ahora) -> dict | None:
+    """
+    El plazo operativo de una orden (M04-A). Derivado en el momento, nunca
+    leido de una columna: no existe tal columna, y esa es la decision.
+    """
+    if not orden_id:
+        return None
+    from campo.models import OrdenTrabajo
+    o = (OrdenTrabajo.objects.filter(pk=orden_id)
+         .select_related("tipo_trabajo_version").first())
+    if o is None:
+        return None
+    plazo = sla.plazo_de(o, ahora)
+    plazo["explicacion"] = sla.resumen(plazo)
+    return plazo
 
 
 def _ficha_de(tipo_senal) -> dict:
@@ -326,7 +413,7 @@ def _riesgos(senal, analisis, ficha) -> list[str]:
 #  EL ASISTENTE
 # ==============================================================================
 
-def _recomendacion(senal, analisis, ficha, resultado, propuesta=None):
+def _recomendacion(senal, analisis, ficha, resultado, propuesta=None, ahora=None):
     """
     La forma estructurada. Separa las cuatro cosas que hasta ahora viajaban
     mezcladas en un parrafo.
@@ -352,7 +439,14 @@ def _recomendacion(senal, analisis, ficha, resultado, propuesta=None):
         #  devolver un estado vacio ahi seria inventar una forma comun.
         "estado": _estado_de(senal),
         #  CONTEXTO: el plan vigente de la orden, leido tal cual.
-        "contexto": _contexto_operativo(senal),
+        "contexto": _contexto_operativo(senal, ahora),
+        #  INCIDENCIAS (M05-A): las novedades de ESTA actividad con su estado
+        #  derivado. Es lo que separa "bloqueada" de "bloqueada por esto, y
+        #  eso sigue pasando".
+        "incidencias": _incidencias_de(senal, ahora),
+        #  SLA OPERATIVO (M04-A): derivado en el momento, nunca leido de
+        #  una columna. None cuando la senal no cuelga de ninguna orden.
+        "sla": _sla_de_senal(senal, ahora),
         "riesgos": _riesgos(senal, analisis or {}, ficha),
         "dependencias": _dependencias_de(senal),
         "habilidad": ficha,
@@ -419,14 +513,14 @@ def _asistir(org, dominio, ahora, registrar) -> dict:
             #  recomendacion ni se crea propuesta: se declara lo que falta.
             conteo[DATOS_INSUFICIENTES] += 1
             recomendaciones.append(
-                _recomendacion(senal, None, ficha, DATOS_INSUFICIENTES))
+                _recomendacion(senal, None, ficha, DATOS_INSUFICIENTES, ahora=ahora))
             continue
 
         if supervisor._ya_propuesta(org, senal):
             #  El hecho sigue ocurriendo; lo que no se repite es la pregunta.
             conteo[REPETIDA] += 1
             recomendaciones.append(
-                _recomendacion(senal, analisis, ficha, REPETIDA))
+                _recomendacion(senal, analisis, ficha, REPETIDA, ahora=ahora))
             continue
 
         propuesta = None
@@ -436,7 +530,7 @@ def _asistir(org, dominio, ahora, registrar) -> dict:
             propuesta = supervisor.registrar_propuesta(org, senal, analisis, ahora)
         conteo[PROPUESTA] += 1
         recomendaciones.append(
-            _recomendacion(senal, analisis, ficha, PROPUESTA, propuesta))
+            _recomendacion(senal, analisis, ficha, PROPUESTA, propuesta, ahora=ahora))
 
     for r in recomendaciones:
         r["tipo"] = dominio
@@ -475,6 +569,22 @@ def _asistir(org, dominio, ahora, registrar) -> dict:
             "dependencias_ejecutadas_sin_validar": sum(
                 1 for r in recomendaciones
                 for d in r["dependencias"] if d.get("ejecutada_sin_validar")),
+            #  SLA operativo (M04-A). Se cuenta lo VENCIDO y lo que VENCE
+            #  PRONTO por separado de lo que no tiene plazo: "sin plazo" no es
+            #  "a tiempo", y sumarlos daria una foto tranquilizadora falsa.
+            "sla_vencidas": sum(1 for r in recomendaciones
+                                if (r["sla"] or {}).get("estado") == sla.VENCIDA),
+            "sla_por_vencer": sum(1 for r in recomendaciones
+                                  if (r["sla"] or {}).get("estado") == sla.VENCE_PRONTO),
+            "sla_sin_plazo": sum(1 for r in recomendaciones
+                                 if (r["sla"] or {}).get("estado") == sla.SIN_PLAZO),
+            #  M05-A. 'no determinables' se cuenta APARTE de 'resueltas': no
+            #  saber si algo sigue pasando no es lo mismo que saber que ya no.
+            #  M05-A. El reparto del LIFECYCLE, no de una observacion.
+            #  'sin_resolver' es la pregunta que se hace de verdad.
+            "incidencias": incidencias.resumen([
+                f for r in recomendaciones
+                for f in (r["incidencias"] + r["contexto"].get("novedades", []))]),
         },
         "recomendaciones": recomendaciones,
     }
