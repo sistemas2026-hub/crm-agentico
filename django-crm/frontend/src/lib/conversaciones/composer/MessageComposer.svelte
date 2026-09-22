@@ -85,14 +85,24 @@
             : 'ia'
   );
 
-  /* La marca de la derecha: de qué canal es esta salida. En versalita y en
+  /* EL MISMO ORDEN QUE EL TEXTO, y no es una formalidad: el 22/09/2026 el
+     texto decía «ventana cerrada» mientras el sello decía «responde el
+     asistente», porque una lista se reordenó y la otra no. Las tres --texto,
+     sello y tono-- describen el MISMO estado; si se separan, la banda se
+     contradice a sí misma en el mismo renglón.
+
+     El orden es de traba más dura a más blanda: sin el control no se escribe;
+     con el control pero sin ventana, tampoco; recién entonces importa si está
+     escalada.
+
+     La marca de la derecha: de qué canal es esta salida. En versalita y en
      mono porque es un sello de procedencia, no un dato que se lea. */
   const canalBanda = $derived(
     modo === 'nota' ? 'Interno'
       : modo === 'responder_y_devolver' ? 'Sale y devuelve'
         : bloqueadoPorIA ? 'Responde el asistente'
-          : escalada ? 'Canal directo del operador'
-            : bloqueadoPorVentana ? 'WhatsApp · 24 h'
+          : bloqueadoPorVentana ? 'WhatsApp · 24 h'
+            : escalada ? 'Canal directo del operador'
               : 'Responde el asistente'
   );
 
@@ -305,12 +315,6 @@
                  obvia: si el mensaje no sale, la conversación se queda. -->
             <strong class="nota-directo">Se envía y la conversación vuelve a la IA</strong>
             <span class="v2-muted">· solo si el mensaje sale</span>
-          {:else if escalada}
-            <!-- Más visible que antes (§11): cuando está escalada, esto sale
-                 DIRECTO al cliente. "Le llega tal cual" no decía quién
-                 habla ni que el asistente no interviene. -->
-            <strong class="nota-directo">Se envía directo al cliente</strong>
-            <span class="v2-muted">· no pasa por el asistente</span>
           {:else if bloqueadoPorIA}
             La atiende la IA · para escribirle al cliente hace falta tomar el control
             <button
@@ -341,6 +345,12 @@
               >· el cliente no escribe hace más de 24 h; hay que usar una
               plantilla aprobada</span
             >
+          {:else if escalada}
+            <!-- Más visible que antes (§11): cuando está escalada, esto sale
+                 DIRECTO al cliente. "Le llega tal cual" no decía quién
+                 habla ni que el asistente no interviene. -->
+            <strong class="nota-directo">Se envía directo al cliente</strong>
+            <span class="v2-muted">· no pasa por el asistente</span>
           {:else}
             Responde el asistente
           {/if}
