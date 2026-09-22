@@ -254,6 +254,23 @@ def series_sin_devolver(profile, org):
     return sorted(entregadas - resueltas - justificadas - transferidas)
 
 
+def transferencias_abiertas(profile, org):
+    """Material que esta persona le pasó a otra y el otro todavía no aceptó.
+
+    Se lista aparte de la conciliación porque no es un faltante: el material
+    sigue siendo de quien lo entregó, y contarlo como devuelto sería hacerlo
+    desaparecer antes de que nadie se haga cargo. Lo que hace falta es que se
+    vea, para que quien cierra la jornada sepa por qué su saldo no baja.
+    """
+    return (
+        TransferenciaDeMaterial.objects.filter(
+            org=org, entrega=profile, estado=TransferenciaDeMaterial.PENDIENTE
+        )
+        .select_related("material", "recibe", "recibe__user")
+        .order_by("-created_at")
+    )
+
+
 def motivos_para_no_cerrar(profile, org) -> list[str]:
     """Por qué no se puede afirmar todavía que esta jornada cerró.
 

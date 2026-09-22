@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -50,8 +52,15 @@ class MaterialesScreen extends StatefulWidget {
 class _MaterialesScreenState extends State<MaterialesScreen> {
   _Categoria _categoria = _Categoria.todos;
 
+  StreamSubscription<LocalDatabaseChangeEvent>? _suscripcion;
   KitDeJornada? _kit;
   bool _cargando = true;
+
+  @override
+  void dispose() {
+    _suscripcion?.cancel();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -59,7 +68,12 @@ class _MaterialesScreenState extends State<MaterialesScreen> {
     _cargar();
     // La pantalla se refresca sola cuando la cola cambia: registrar un
     // consumo desde una orden tiene que verse aca sin volver a entrar.
-    LocalDatabase.onDataChanged.listen((evento) {
+    // La suscripcion se guarda para poder cancelarla en dispose.
+    //
+    // Sin eso queda viva despues de que la pantalla se fue: es una fuga en el
+    // telefono, y en una prueba deja al arbol con un oyente pendiente que
+    // impide que el test termine.
+    _suscripcion = LocalDatabase.onDataChanged.listen((evento) {
       if (!mounted) return;
       if (evento.tabla == 'local_kit' ||
           evento.tabla == 'cola_movimientos_material') {

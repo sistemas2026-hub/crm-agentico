@@ -180,6 +180,7 @@ class SyncQueueService {
       // instante antes de volver a bajar.
       await _procesarMovimientosMaterial(orgId, profileId);
       await _descargarKit(orgId, profileId);
+      await _descargarJornada(orgId, profileId);
 
       // 6. Refresco final de estado
       await _descargarOrdenesAsignadas(orgId, profileId);
@@ -376,6 +377,31 @@ class SyncQueueService {
           );
         }
       }
+    }
+  }
+
+  /// Trae el estado de la jornada tal como lo calcula el servidor.
+  ///
+  /// Se guarda entero y no se recalcula nada en el telefono: los numeros de la
+  /// jornada los hace el dominio, que es el mismo que firma el acta. Si la
+  /// pantalla hiciera su propia cuenta, el dia que las dos difieran nadie
+  /// sabria cual creer.
+  ///
+  /// Corre al final, despues de subir los movimientos: asi lo que baja ya
+  /// incluye lo que se acaba de enviar.
+  Future<void> _descargarJornada(String orgId, String profileId) async {
+    try {
+      final respuesta = await _apiClient.get(ApiEndpoints.jornada);
+      final datos = respuesta.data;
+      if (datos is! Map) return;
+      await _localDb.guardarJornada(
+        orgId: orgId,
+        profileId: profileId,
+        datos: Map<String, dynamic>.from(datos),
+      );
+    } catch (_) {
+      // Sin senal se conserva el ultimo estado conocido. Un resumen de ayer
+      // con su fecha es mas util que una pantalla en blanco.
     }
   }
 

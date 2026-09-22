@@ -53,6 +53,7 @@ from campo.services.cierre_jornada import (
     registrar_incidencia,
     resumen_de_jornada,
     series_sin_devolver,
+    transferencias_abiertas,
 )
 from campo.services.idempotencia import manejar_idempotencia
 from campo.services.materiales import (
@@ -430,6 +431,22 @@ class JornadaView(APIView):
             "estado": ActaDeDevolucion.PENDIENTE,
             "resumen": resumen_de_jornada(profile, org),
             "series_sin_devolver": series_sin_devolver(profile, org),
+            # Se listan porque explican un saldo que no baja: el material
+            # sigue siendo de quien lo entrego hasta que el otro acepte.
+            "transferencias_pendientes": [
+                {
+                    "id": str(t.id),
+                    "material": t.material.codigo,
+                    "material_nombre": t.material.nombre,
+                    "cantidad": _numero(t.cantidad),
+                    "serie": t.serie,
+                    "recibe": (
+                        t.recibe.user.name or t.recibe.user.email
+                        if t.recibe.user else ""
+                    ),
+                }
+                for t in transferencias_abiertas(profile, org)
+            ],
             "puede_cerrar": not motivos,
             "motivos": motivos,
         })

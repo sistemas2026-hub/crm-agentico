@@ -103,7 +103,7 @@ class LocalDatabase {
 
     final db = await openDatabase(
       path,
-      version: 10,
+      version: 11,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -133,6 +133,13 @@ class LocalDatabase {
     // con media jornada sin subir no puede perderla por actualizar la app.
     if (oldVersion < 9) {
       await _crearTablasDeMateriales(db);
+    }
+
+    // v11: el ultimo estado de jornada que dijo el servidor, para poder
+    // mostrarlo sin senal. Es un espejo: se reemplaza entero en cada
+    // sincronizacion y nunca se edita desde el telefono.
+    if (oldVersion < 11) {
+      await _crearTablaDeJornada(db);
     }
 
     // v10: el motivo que escribe el tecnico cuando usa mas de lo habitual, y
@@ -351,6 +358,30 @@ class LocalDatabase {
     );
   }
 
+  /// El espejo de la jornada, tal como lo calculo el servidor.
+  ///
+  /// Una sola fila por identidad. No se calcula nada aca: la regla del modulo
+  /// es que los numeros de la jornada los hace el dominio, y el telefono los
+  /// muestra. Guardar un calculo propio abriria la puerta a que la pantalla
+  /// diga un numero y el acta diga otro.
+  static Future<void> _crearTablaDeJornada(DatabaseExecutor db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS local_jornada (
+        org_id TEXT NOT NULL,
+        profile_id TEXT NOT NULL,
+        estado TEXT NOT NULL,
+        resumen_json TEXT NOT NULL,
+        detalle_json TEXT,
+        series_sin_devolver_json TEXT,
+        transferencias_json TEXT,
+        motivos_json TEXT,
+        puede_cerrar INTEGER NOT NULL DEFAULT 0,
+        actualizado_en INTEGER NOT NULL,
+        PRIMARY KEY (org_id, profile_id)
+      )
+    ''');
+  }
+
   Future<void> _onCreate(Database db, int version) async {
     // 1. Tabla de órdenes cacheadas / activas
     await db.execute('''
@@ -457,6 +488,7 @@ class LocalDatabase {
     ''');
 
     await _crearTablasDeMateriales(db);
+    await _crearTablaDeJornada(db);
 
     // Índices para optimizar consultas por tenant/usuario
     await db.execute('CREATE INDEX idx_ordenes_org_user ON local_ordenes (org_id, profile_id)');
@@ -1448,6 +1480,57 @@ class LocalDatabase {
   }
 
   // ---------------------------------------------------------------------------
+  // La jornada: lo que dijo el servidor, guardado para verlo sin senal
+  // ---------------------------------------------------------------------------
+
+  /// Reemplaza el espejo de la jornada con lo que acaba de contestar el
+  /// servidor. Es un reemplazo y no una fusion: un dato viejo mezclado con uno
+  /// nuevo daria un resumen que nunca existio.
+  Future<void> guardarJornada({
+    required String orgId,
+    required String profileId,
+    required Map<String, dynamic> datos,
+  }) async {
+    final db = await database;
+    final resumen = datos['resumen'];
+    await db.insert(
+      'local_jornada',
+      <String, Object?>{
+        'org_id': orgId,
+        'profile_id': profileId,
+        'estado': (datos['estado'] ?? 'pendiente').toString(),
+        'resumen_json': jsonEncode(resumen ?? <String, dynamic>{}),
+        'detalle_json': jsonEncode(
+          (resumen is Map ? resumen['detalle'] : null) ?? <dynamic>[],
+        ),
+        'series_sin_devolver_json':
+            jsonEncode(datos['series_sin_devolver'] ?? <dynamic>[]),
+        'transferencias_json':
+            jsonEncode(datos['transferencias_pendientes'] ?? <dynamic>[]),
+        'motivos_json': jsonEncode(datos['motivos'] ?? <dynamic>[]),
+        'puede_cerrar': (datos['puede_cerrar'] == true) ? 1 : 0,
+        'actualizado_en': DateTime.now().millisecondsSinceEpoch,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+    _notifyChange(orgId: orgId, profileId: profileId, tabla: 'local_jornada');
+  }
+
+  Future<Map<String, dynamic>?> getJornada({
+    required String orgId,
+    required String profileId,
+  }) async {
+    final db = await database;
+    final filas = await db.query(
+      'local_jornada',
+      where: 'org_id = ? AND profile_id = ?',
+      whereArgs: [orgId, profileId],
+      limit: 1,
+    );
+    return filas.isEmpty ? null : filas.first;
+  }
+
+  // ---------------------------------------------------------------------------
   // Ciclo de vida de los datos locales
   //
   // Lo que sigue existe porque cerrar sesión no borraba nada: las órdenes
@@ -1475,6 +1558,7 @@ class LocalDatabase {
       UNION SELECT DISTINCT org_id, profile_id FROM cola_evidencias
       UNION SELECT DISTINCT org_id, profile_id FROM local_kit
       UNION SELECT DISTINCT org_id, profile_id FROM cola_movimientos_material
+      UNION SELECT DISTINCT org_id, profile_id FROM local_jornada
     ''');
     return filas
         .map((f) => <String, String>{
@@ -1582,6 +1666,7 @@ class LocalDatabase {
         'cola_evidencias',
         'local_kit',
         'cola_movimientos_material',
+        'local_jornada',
       ]) {
         await txn.delete(
           tabla,
