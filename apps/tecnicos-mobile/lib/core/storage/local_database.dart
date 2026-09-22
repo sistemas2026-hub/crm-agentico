@@ -103,7 +103,7 @@ class LocalDatabase {
 
     final db = await openDatabase(
       path,
-      version: 11,
+      version: 12,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -140,6 +140,23 @@ class LocalDatabase {
     // sincronizacion y nunca se edita desde el telefono.
     if (oldVersion < 11) {
       await _crearTablaDeJornada(db);
+    }
+
+    // v12: las diferencias que el tecnico explica, y el cierre que afirma.
+    // Las dos cosas pueden ocurrir sin senal: la jornada termina en la calle,
+    // no cuando el telefono encuentra red.
+    if (oldVersion < 12) {
+      await _crearTablaDeIncidencias(db);
+      final info = await db.rawQuery('PRAGMA table_info(local_jornada);');
+      final cols = info.map((c) => c['name'] as String).toSet();
+      if (!cols.contains('cierre_local_en')) {
+        await db.execute(
+          'ALTER TABLE local_jornada ADD COLUMN cierre_local_en INTEGER;',
+        );
+      }
+      if (!cols.contains('cierre_clave')) {
+        await db.execute('ALTER TABLE local_jornada ADD COLUMN cierre_clave TEXT;');
+      }
     }
 
     // v10: el motivo que escribe el tecnico cuando usa mas de lo habitual, y
@@ -358,6 +375,42 @@ class LocalDatabase {
     );
   }
 
+  /// Las diferencias que el tecnico explico, esperando subir.
+  ///
+  /// Va en su propia tabla y no en la cola de movimientos porque no es un
+  /// movimiento: no mueve material de un lado a otro, explica por que algo no
+  /// esta. Mezclarlas obligaria a que cada consulta de la cola supiera
+  /// distinguir dos cosas distintas dentro de la misma tabla.
+  ///
+  /// Comparte, eso si, toda la disciplina: identidad, clave de idempotencia,
+  /// estado de envio e intentos.
+  static Future<void> _crearTablaDeIncidencias(DatabaseExecutor db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS cola_incidencias (
+        id TEXT PRIMARY KEY,
+        org_id TEXT NOT NULL,
+        profile_id TEXT NOT NULL,
+        material_codigo TEXT NOT NULL,
+        material_nombre TEXT,
+        tipo TEXT NOT NULL,
+        cantidad TEXT NOT NULL,
+        serie TEXT,
+        motivo TEXT NOT NULL,
+        estado TEXT NOT NULL DEFAULT 'pendiente',
+        resultado TEXT,
+        error_mensaje TEXT,
+        intentos INTEGER NOT NULL DEFAULT 0,
+        next_attempt_at INTEGER NOT NULL DEFAULT 0,
+        ocurrido_en TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_incidencias_pendientes '
+      'ON cola_incidencias (org_id, profile_id, estado)',
+    );
+  }
+
   /// El espejo de la jornada, tal como lo calculo el servidor.
   ///
   /// Una sola fila por identidad. No se calcula nada aca: la regla del modulo
@@ -376,6 +429,11 @@ class LocalDatabase {
         transferencias_json TEXT,
         motivos_json TEXT,
         puede_cerrar INTEGER NOT NULL DEFAULT 0,
+        -- Cuando el tecnico afirmo que termino, aunque no hubiera senal. Es
+        -- distinto de `estado`: eso lo dice el servidor cuando valido y
+        -- congelo el acta.
+        cierre_local_en INTEGER,
+        cierre_clave TEXT,
         actualizado_en INTEGER NOT NULL,
         PRIMARY KEY (org_id, profile_id)
       )
@@ -489,6 +547,7 @@ class LocalDatabase {
 
     await _crearTablasDeMateriales(db);
     await _crearTablaDeJornada(db);
+    await _crearTablaDeIncidencias(db);
 
     // Índices para optimizar consultas por tenant/usuario
     await db.execute('CREATE INDEX idx_ordenes_org_user ON local_ordenes (org_id, profile_id)');
@@ -1530,6 +1589,158 @@ class LocalDatabase {
     return filas.isEmpty ? null : filas.first;
   }
 
+  /// Guarda una diferencia explicada, para que suba cuando haya senal.
+  ///
+  /// El motivo no puede ir vacio: una diferencia sin explicacion es
+  /// exactamente lo que despues nadie puede reconstruir. Se valida aca ademas
+  /// de en el servidor porque aca es donde la persona todavia esta parada
+  /// frente al material.
+  Future<void> encolarIncidencia({
+    required String id,
+    required String orgId,
+    required String profileId,
+    required String materialCodigo,
+    required String tipo,
+    required String cantidad,
+    required String motivo,
+    String materialNombre = '',
+    String serie = '',
+    DateTime? ocurridoEn,
+  }) async {
+    if (motivo.trim().isEmpty) {
+      throw ArgumentError('Una diferencia sin motivo no se puede registrar.');
+    }
+    final db = await database;
+    await db.insert(
+      'cola_incidencias',
+      <String, Object?>{
+        'id': id,
+        'org_id': orgId,
+        'profile_id': profileId,
+        'material_codigo': materialCodigo,
+        'material_nombre': materialNombre,
+        'tipo': tipo,
+        'cantidad': cantidad,
+        'serie': serie,
+        'motivo': motivo.trim(),
+        'estado': 'pendiente',
+        'intentos': 0,
+        'next_attempt_at': 0,
+        'ocurrido_en': (ocurridoEn ?? DateTime.now()).toIso8601String(),
+        'created_at': DateTime.now().millisecondsSinceEpoch,
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    _notifyChange(orgId: orgId, profileId: profileId, tabla: 'cola_incidencias');
+  }
+
+  Future<List<Map<String, dynamic>>> getIncidenciasPendientes({
+    required String orgId,
+    required String profileId,
+    int? soloListasHasta,
+  }) async {
+    final db = await database;
+    final ahora = soloListasHasta ?? DateTime.now().millisecondsSinceEpoch;
+    return db.query(
+      'cola_incidencias',
+      where: 'org_id = ? AND profile_id = ? AND estado IN (?, ?) '
+          'AND next_attempt_at <= ?',
+      whereArgs: [orgId, profileId, 'pendiente', 'error', ahora],
+      orderBy: 'created_at ASC',
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> getIncidenciasSinConfirmar({
+    required String orgId,
+    required String profileId,
+  }) async {
+    final db = await database;
+    return db.query(
+      'cola_incidencias',
+      where: 'org_id = ? AND profile_id = ? AND estado != ?',
+      whereArgs: [orgId, profileId, 'confirmada'],
+      orderBy: 'created_at ASC',
+    );
+  }
+
+  /// Las diferencias explicadas de un material, hayan subido o no.
+  ///
+  /// La pantalla las necesita para no volver a pedir un motivo que la persona
+  /// ya escribio hace cinco minutos y todavia no salio del telefono.
+  Future<List<Map<String, dynamic>>> getIncidenciasDeMaterial({
+    required String orgId,
+    required String profileId,
+    required String materialCodigo,
+  }) async {
+    final db = await database;
+    return db.query(
+      'cola_incidencias',
+      where: 'org_id = ? AND profile_id = ? AND material_codigo = ?',
+      whereArgs: [orgId, profileId, materialCodigo],
+    );
+  }
+
+  Future<void> confirmarIncidencia({
+    required String id,
+    required String orgId,
+    required String profileId,
+    required String resultado,
+    String? errorMensaje,
+  }) async {
+    final db = await database;
+    await db.update(
+      'cola_incidencias',
+      <String, Object?>{
+        'estado': 'confirmada',
+        'resultado': resultado,
+        'error_mensaje': errorMensaje,
+      },
+      where: 'id = ? AND org_id = ? AND profile_id = ?',
+      whereArgs: [id, orgId, profileId],
+    );
+    _notifyChange(orgId: orgId, profileId: profileId, tabla: 'cola_incidencias');
+  }
+
+  Future<void> registrarFalloIncidencia({
+    required String id,
+    required String orgId,
+    required String profileId,
+    required int nextAttemptAt,
+    String? errorMensaje,
+  }) async {
+    final db = await database;
+    await db.rawUpdate(
+      'UPDATE cola_incidencias SET intentos = intentos + 1, '
+      "next_attempt_at = ?, error_mensaje = ?, estado = 'error' "
+      'WHERE id = ? AND org_id = ? AND profile_id = ?',
+      <Object?>[nextAttemptAt, errorMensaje, id, orgId, profileId],
+    );
+    _notifyChange(orgId: orgId, profileId: profileId, tabla: 'cola_incidencias');
+  }
+
+  /// El tecnico afirmo que su jornada termino, aunque no haya senal.
+  ///
+  /// Se guarda la hora y una clave: la jornada termina en la calle, no cuando
+  /// el telefono encuentra red. Lo que NO se hace es marcarla como confirmada
+  /// -- eso solo lo dice el servidor, que es quien valida que todo cuadre.
+  Future<void> marcarCierreLocal({
+    required String orgId,
+    required String profileId,
+    required String clave,
+  }) async {
+    final db = await database;
+    await db.update(
+      'local_jornada',
+      <String, Object?>{
+        'cierre_local_en': DateTime.now().millisecondsSinceEpoch,
+        'cierre_clave': clave,
+      },
+      where: 'org_id = ? AND profile_id = ?',
+      whereArgs: [orgId, profileId],
+    );
+    _notifyChange(orgId: orgId, profileId: profileId, tabla: 'local_jornada');
+  }
+
   // ---------------------------------------------------------------------------
   // Ciclo de vida de los datos locales
   //
@@ -1559,6 +1770,7 @@ class LocalDatabase {
       UNION SELECT DISTINCT org_id, profile_id FROM local_kit
       UNION SELECT DISTINCT org_id, profile_id FROM cola_movimientos_material
       UNION SELECT DISTINCT org_id, profile_id FROM local_jornada
+      UNION SELECT DISTINCT org_id, profile_id FROM cola_incidencias
     ''');
     return filas
         .map((f) => <String, String>{
@@ -1667,6 +1879,7 @@ class LocalDatabase {
         'local_kit',
         'cola_movimientos_material',
         'local_jornada',
+        'cola_incidencias',
       ]) {
         await txn.delete(
           tabla,

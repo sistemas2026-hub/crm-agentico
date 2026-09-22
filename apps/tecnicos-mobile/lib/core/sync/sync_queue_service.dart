@@ -179,7 +179,11 @@ class SyncQueueService {
       // consumos recién subidos; al revés, el saldo saltaría hacia arriba un
       // instante antes de volver a bajar.
       await _procesarMovimientosMaterial(orgId, profileId);
+      await _procesarIncidencias(orgId, profileId);
+      await _procesarCierreDeJornada(orgId, profileId);
       await _descargarKit(orgId, profileId);
+      // La jornada se baja al final: asi lo que llega ya refleja los
+      // movimientos, las diferencias y el cierre que se acaban de enviar.
       await _descargarJornada(orgId, profileId);
 
       // 6. Refresco final de estado
@@ -377,6 +381,117 @@ class SyncQueueService {
           );
         }
       }
+    }
+  }
+
+  /// Sube las diferencias que el tecnico explico.
+  ///
+  /// Van antes del cierre a proposito: una diferencia explicada es justo lo
+  /// que destraba la jornada, y mandar el cierre primero recibiria un 409 por
+  /// algo que ya estaba resuelto en el telefono.
+  Future<void> _procesarIncidencias(String orgId, String profileId) async {
+    final pendientes = await _localDb.getIncidenciasPendientes(
+      orgId: orgId,
+      profileId: profileId,
+    );
+    if (pendientes.isEmpty) return;
+
+    try {
+      final respuesta = await _apiClient.post(
+        ApiEndpoints.incidenciasMaterial,
+        data: <String, dynamic>{
+          'incidencias': <Map<String, dynamic>>[
+            for (final i in pendientes)
+              <String, dynamic>{
+                'clave': i['id'],
+                'material': i['material_codigo'],
+                'tipo': i['tipo'],
+                'cantidad': i['cantidad'],
+                if ((i['serie'] as String?)?.isNotEmpty ?? false)
+                  'serie': i['serie'],
+                'motivo': i['motivo'],
+                'ocurrido_en': i['ocurrido_en'],
+              },
+          ],
+        },
+        options: Options(headers: <String, dynamic>{
+          'Idempotency-Key': 'inc-${pendientes.first['id']}-${pendientes.length}',
+        }),
+      );
+
+      final datos = respuesta.data;
+      final resultados = datos is Map ? datos['resultados'] : null;
+      if (resultados is! List) return;
+
+      final porClave = <String, Map<String, dynamic>>{
+        for (final r in resultados)
+          if (r is Map && r['clave'] != null)
+            r['clave'].toString(): Map<String, dynamic>.from(r),
+      };
+
+      for (final i in pendientes) {
+        final id = i['id'] as String;
+        final resultado = porClave[id];
+        if (resultado == null) continue;
+        await _localDb.confirmarIncidencia(
+          id: id,
+          orgId: orgId,
+          profileId: profileId,
+          resultado: resultado['estado']?.toString() ?? 'registrada',
+          errorMensaje: resultado['estado'] == 'rechazada'
+              ? resultado['motivo']?.toString()
+              : null,
+        );
+      }
+    } catch (e) {
+      final retryAfter = e is DioException
+          ? _leerRetryAfter(e.response?.headers.value('retry-after'))
+          : null;
+      for (final i in pendientes) {
+        await _localDb.registrarFalloIncidencia(
+          id: i['id'] as String,
+          orgId: orgId,
+          profileId: profileId,
+          nextAttemptAt: DateTime.now().millisecondsSinceEpoch +
+              calcularBackoffMs(
+                i['intentos'] as int? ?? 0,
+                mutationId: i['id'] as String?,
+                retryAfterSeconds: retryAfter,
+              ),
+          errorMensaje: sanearError(e),
+        );
+      }
+    }
+  }
+
+  /// Lleva al servidor el cierre que el tecnico ya afirmo en la calle.
+  ///
+  /// El telefono NO decide si la jornada cuadra: eso lo valida el dominio, que
+  /// es quien congela el acta. Si contesta 409, el cierre local se queda como
+  /// esta y la proxima bajada trae los motivos actualizados -- no se borra la
+  /// intencion de cerrar, porque el tecnico ya la tomo y perderla lo obligaria
+  /// a repetir el gesto sin entender por que.
+  Future<void> _procesarCierreDeJornada(String orgId, String profileId) async {
+    final jornada = await _localDb.getJornada(orgId: orgId, profileId: profileId);
+    if (jornada == null) return;
+    if ((jornada['estado'] ?? '') == 'confirmada') return;
+
+    final clave = (jornada['cierre_clave'] ?? '').toString();
+    if (clave.isEmpty) return;
+
+    try {
+      await _apiClient.post(
+        ApiEndpoints.cerrarJornada,
+        data: <String, dynamic>{},
+        options: Options(headers: <String, dynamic>{
+          // La misma clave para el mismo cierre: dos toques del boton, o un
+          // reintento, no pueden producir dos actas.
+          'Idempotency-Key': clave,
+        }),
+      );
+    } catch (_) {
+      // Un 409 es informacion, no un fallo del telefono: la jornada todavia
+      // no cuadra. La bajada siguiente trae los motivos.
     }
   }
 

@@ -30,6 +30,7 @@ class EstadoDeJornada {
     required this.sinSubir,
     required this.cerrada,
     required this.hayJornada,
+    this.cierreTomado = false,
   });
 
   const EstadoDeJornada.vacio()
@@ -45,7 +46,8 @@ class EstadoDeJornada {
         motivos = const <String>[],
         sinSubir = 0,
         cerrada = false,
-        hayJornada = false;
+        hayJornada = false,
+        cierreTomado = false;
 
   final String recibido;
   final String consumido;
@@ -66,6 +68,13 @@ class EstadoDeJornada {
   final bool cerrada;
   final bool hayJornada;
 
+  /// El técnico ya dijo que terminó, pero el servidor todavía no lo confirmó.
+  ///
+  /// Se distingue de `cerrada` a propósito: una jornada cerrada tiene un acta
+  /// con números congelados; una tomada es una intención que viaja en la cola.
+  /// Decirle "cerrada" a la segunda sería afirmar algo que no pasó.
+  final bool cierreTomado;
+
   int get ordenesPendientes => ordenesAsignadas - ordenesCompletadas;
 
   /// Si se puede afirmar que la jornada terminó.
@@ -74,7 +83,8 @@ class EstadoDeJornada {
   /// contradiga —una diferencia sin explicar, un equipo sin ubicar—, no que el
   /// teléfono esté sin red: eso se resuelve solo, y esperar a que se resuelva
   /// dejaría a alguien sin poder irse a su casa.
-  bool get puedeCerrar => hayJornada && !cerrada && motivos.isEmpty;
+  bool get puedeCerrar =>
+      hayJornada && !cerrada && !cierreTomado && motivos.isEmpty;
 
   static Future<EstadoDeJornada> leer({
     LocalDatabase? baseLocal,
@@ -156,6 +166,7 @@ class EstadoDeJornada {
       sinSubir: pendientes.length,
       cerrada: (fila['estado'] ?? '') == 'confirmada',
       hayJornada: true,
+      cierreTomado: fila['cierre_local_en'] != null,
     );
   }
 

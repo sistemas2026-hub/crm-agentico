@@ -9,6 +9,8 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_radius.dart';
 import '../../core/theme/app_typography.dart';
 import 'estado_de_jornada.dart';
+import 'widgets/confirmar_cierre.dart';
+import 'widgets/motivo_de_diferencia.dart';
 
 /// Devolver lo que sobró y cerrar la jornada.
 ///
@@ -28,12 +30,24 @@ import 'estado_de_jornada.dart';
 /// anula lo anterior. Por eso acá no hay ningún botón que modifique un
 /// registro viejo: lo que pasó, pasó.
 class DevolucionScreen extends StatefulWidget {
-  const DevolucionScreen({super.key, this.baseLocal, this.estado});
+  const DevolucionScreen({
+    super.key,
+    this.baseLocal,
+    this.estado,
+    this.almacenamiento,
+    this.sincronizar,
+  });
 
   final LocalDatabase? baseLocal;
 
   /// Se inyecta en pruebas; en la aplicación se lee de la base.
   final EstadoDeJornada? estado;
+
+  /// Quién es el dueño de estos datos. Se inyecta en pruebas.
+  final SecureStorageLectura? almacenamiento;
+
+  /// Cómo se empuja la cola al cerrar. Nulo en pruebas de dibujo.
+  final Future<void> Function()? sincronizar;
 
   @override
   State<DevolucionScreen> createState() => _DevolucionScreenState();
@@ -44,6 +58,9 @@ class _DevolucionScreenState extends State<DevolucionScreen> {
   StreamSubscription<LocalDatabaseChangeEvent>? _suscripcion;
   EstadoDeJornada? _estado;
   bool _cargando = true;
+  bool _cerrando = false;
+  late final SecureStorageLectura _almacenamiento =
+      widget.almacenamiento ?? SecureStorageService();
 
   @override
   void dispose() {
@@ -86,9 +103,8 @@ class _DevolucionScreenState extends State<DevolucionScreen> {
   }
 
   Future<void> _devolver(MaterialDeJornada material) async {
-    final almacenamiento = SecureStorageService();
-    final orgId = await almacenamiento.getOrgId();
-    final profileId = await almacenamiento.getProfileId();
+    final orgId = await _almacenamiento.getOrgId();
+    final profileId = await _almacenamiento.getProfileId();
     if (orgId == null || profileId == null) return;
 
     await _db.encolarMovimientoMaterial(
@@ -101,6 +117,63 @@ class _DevolucionScreenState extends State<DevolucionScreen> {
       cantidad: material.porDevolver.toString(),
       serie: material.serie ?? '',
     );
+    await _cargar();
+  }
+
+  Future<void> _explicar(MaterialDeJornada material) async {
+    final orgId = await _almacenamiento.getOrgId();
+    final profileId = await _almacenamiento.getProfileId();
+    if (orgId == null || profileId == null || !mounted) return;
+
+    final explicado = await MotivoDeDiferencia.abrir(
+      context,
+      orgId: orgId,
+      profileId: profileId,
+      material: material,
+      baseLocal: _db,
+    );
+    if (explicado == true) await _cargar();
+  }
+
+  /// Toma el cierre de la jornada.
+  ///
+  /// Lo que se guarda es la INTENCION: el tecnico afirma que termino, y eso
+  /// ocurre en la calle, no cuando el telefono encuentra red. El servidor es
+  /// quien despues valida y congela el acta; hasta entonces la pantalla dice
+  /// "pendiente de sincronizacion" y no "cerrada", porque no seria cierto.
+  Future<void> _cerrarJornada() async {
+    final estado = _estado;
+    if (estado == null || !estado.puedeCerrar || _cerrando) return;
+
+    final confirmado = await ConfirmarCierre.abrir(context, estado);
+    if (confirmado != true || !mounted) return;
+
+    setState(() => _cerrando = true);
+
+    final orgId = await _almacenamiento.getOrgId();
+    final profileId = await _almacenamiento.getProfileId();
+    if (orgId == null || profileId == null) {
+      if (mounted) setState(() => _cerrando = false);
+      return;
+    }
+
+    // Una sola clave por cierre: dos toques del boton, o un reintento de la
+    // cola, no pueden producir dos actas.
+    await _db.marcarCierreLocal(
+      orgId: orgId,
+      profileId: profileId,
+      clave: 'cierre-$orgId-$profileId-${DateTime.now().toIso8601String()}',
+    );
+
+    // Se intenta subir ya; si no hay senal, la cola lo lleva despues.
+    try {
+      await widget.sincronizar?.call();
+    } catch (_) {
+      // Sin red el cierre queda tomado igual: eso es lo que se le prometio.
+    }
+
+    if (!mounted) return;
+    setState(() => _cerrando = false);
     await _cargar();
   }
 
@@ -268,6 +341,18 @@ class _DevolucionScreenState extends State<DevolucionScreen> {
                 child: Text('Devolver ${material.porDevolver} ${material.unidad}'),
               ),
             ),
+            const SizedBox(height: 6),
+            // Lo que no vuelve tiene que poder explicarse. Sin este camino, la
+            // unica salida de una diferencia seria devolver material que no se
+            // tiene, y eso es justamente lo que hace que un inventario mienta.
+            SizedBox(
+              width: double.infinity,
+              height: 40,
+              child: TextButton(
+                onPressed: () => _explicar(material),
+                child: const Text('No lo tengo: explicar por qué'),
+              ),
+            ),
           ],
         ],
       ),
@@ -303,6 +388,29 @@ class _DevolucionScreenState extends State<DevolucionScreen> {
       );
 
   Widget _cierre(EstadoDeJornada estado) {
+    // Tomado en el telefono pero todavia sin confirmar del servidor. Se dice
+    // exactamente eso: afirmar "cerrada" seria afirmar algo que no paso.
+    if (estado.cierreTomado && !estado.cerrada) {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppColors.surfaceContainer,
+          borderRadius: AppRadius.brTarjeta,
+        ),
+        child: Row(children: <Widget>[
+          const Icon(Icons.schedule, color: AppColors.onSurfaceVariant),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Cierre pendiente de sincronización. Tu jornada quedó cerrada '
+              'en el teléfono; termina de registrarse cuando haya señal.',
+              style: AppTypography.cuerpo,
+            ),
+          ),
+        ]),
+      );
+    }
+
     if (estado.cerrada) {
       return Container(
         padding: const EdgeInsets.all(16),
@@ -371,8 +479,14 @@ class _DevolucionScreenState extends State<DevolucionScreen> {
             child: FilledButton(
               // La señal NO entra en esta decisión: lo que bloquea es que la
               // jornada se contradiga, no que el teléfono no tenga red.
-              onPressed: estado.puedeCerrar ? () {} : null,
-              child: const Text('Cerrar jornada'),
+              onPressed:
+                  estado.puedeCerrar && !_cerrando ? _cerrarJornada : null,
+              child: _cerrando
+                  ? const SizedBox(
+                      width: 18, height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('Cerrar jornada'),
             ),
           ),
           if (estado.sinSubir > 0)
