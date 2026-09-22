@@ -2727,6 +2727,28 @@ class TenantConfig(Base):
     # una sola, y esa es la diferencia entre un dato de PLATAFORMA (nucleo/,
     # igual para todas) y uno de EMPRESA (aca, distinto por tenant).
     variables_tenant: dict[str, str] = Field(default_factory=dict)
+    # Cuantos minutos puede esperar una conversacion ESCALADA Y SIN DUEÑO
+    # antes de que se considere vencida. Es el unico plazo que hay, y es a
+    # proposito: mide lo que de verdad duele --que alguien escribio, el
+    # asistente lo paso a una persona, y ninguna persona lo tomo todavia--.
+    # No mide cuanto tarda en resolverse: eso depende del caso y convertirlo
+    # en un numero obliga a inventar categorias que nadie midio.
+    #
+    # VA ACA Y NO EN CODIGO porque cada empresa lo decide: un ISP con guardia
+    # 24h y uno que atiende de 8 a 18 no toleran lo mismo. 0 = sin objetivo
+    # definido, y entonces la pantalla NO muestra cuenta regresiva -- no se
+    # inventa un plazo por defecto para tener algo que dibujar.
+    sla_toma_minutos: int = Field(default=0, ge=0)
+    # Desde que potencia optica de recepcion (dBm) se considera que el enlace
+    # esta atenuado. Es un numero NEGATIVO y cuanto mas negativo, peor: -20
+    # es una señal sana y -30 es un enlace al borde de caerse.
+    #
+    # VA EN LA CONFIG DEL TENANT porque depende de la planta de cada empresa
+    # --el largo de los tramos, los splitters, el tipo de ONU-- y no de este
+    # software. Sin umbral definido (None) la pantalla muestra la potencia
+    # pero NO dice si esta bien o mal: preferible un dato sin veredicto que
+    # un veredicto con un umbral inventado.
+    umbral_rx_dbm: float | None = Field(default=None)
     # Lista curada de planes para OFRECER a un prospecto nuevo -- ver
     # PlanVenta arriba sobre por que es distinta del catalogo tecnico del
     # proveedor. Vacio = ningun plan configurado todavia: el rol de ventas

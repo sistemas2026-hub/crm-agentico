@@ -1925,6 +1925,84 @@ def conversacion_de_caso(tenant: str, caso_id: str) -> dict | None:
         return dict(fila) if fila else None
 
 
+def identidad_de_conversacion(tenant: str, conversation_id: str) -> dict | None:
+    """
+    A QUE cliente del sistema externo apunta esta conversacion. Nada mas.
+
+    Existe para no leer el hilo entero cuando lo unico que hace falta es el
+    identificador: 'mensajes_de()' trae todos los mensajes y sus adjuntos, y
+    quien necesita saber a que cliente consultarle la ficha no necesita nada
+    de eso.
+
+    Devuelve solo identificadores -- ninguno de los datos personales que la
+    ficha traera despues. Esos se leen en vivo del sistema del ISP y no se
+    guardan aca (PRD: las respuestas crudas de la API externa no se
+    persisten), asi que esta fila no puede tenerlos aunque se quisiera.
+
+    None si la conversacion no existe o es de otra empresa -- el filtro por
+    organizacion lo hace la politica de aislamiento, no un if.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select id, id_cliente, nombre_cliente, usuario_externo,
+                      datos_sesion, escalada_a_humano, control, estado,
+                      asignada_a_usuario_id
+               from asistente.conversations
+               where organization_id = %s and id = %s
+               limit 1""",
+            (org, conversation_id))
+        fila = cur.fetchone()
+        return dict(fila) if fila else None
+
+
+def salud_canal_whatsapp(tenant: str, minutos: int = 60) -> dict:
+    """
+    Si el canal de WhatsApp esta funcionando, medido sobre lo que YA paso.
+
+    QUE MIDE, Y POR QUE ESTO Y NO OTRA COSA
+    ---------------------------------------
+    Cuenta los envios de la ultima ventana y CUANTOS DE ELLOS TIENEN ACUSE de
+    Meta. Un envio que falla se ve solo: la burbuja queda marcada en el hilo y
+    con su boton de reintento, asi que quien atiende se entera. Lo que NO se
+    ve es que los envios salgan bien y los acuses dejen de volver -- el
+    servicio parece sano y nadie sabe si al cliente le llego nada.
+
+    Esa falla exacta ocurrio: el seguimiento de entregas estuvo roto DIEZ DIAS
+    (D17) sin que ninguna pantalla lo dijera. Este contador existe por eso.
+
+    No hace ninguna llamada a Meta: no hay endpoint de salud que preguntarle,
+    y un "99.99%" inventado seria peor que no decir nada. Se mide lo que pasó.
+
+    Devuelve los tres numeros crudos y NINGUN veredicto: que significa cada
+    combinacion lo decide quien los muestra, en un solo lugar y con pruebas
+    (ver lib/conversaciones/canal.js).
+    """
+    try:
+        with sesion(tenant) as (cur, org):
+            cur.execute(
+                """select
+                     count(*) as enviados,
+                     count(*) filter (where estado_entrega is not null) as con_acuse,
+                     count(*) filter (where error is not null
+                                         or estado in ('rechazado', 'incierto')) as fallidos
+                   from asistente.whatsapp_salidas
+                   where organization_id = %s
+                     and adquirido_en > now() - make_interval(mins => %s)""",
+                (org, int(minutos)))
+            fila = cur.fetchone() or {}
+            return {"ventana_minutos": int(minutos),
+                    "enviados": int(fila.get("enviados") or 0),
+                    "con_acuse": int(fila.get("con_acuse") or 0),
+                    "fallidos": int(fila.get("fallidos") or 0)}
+    except Exception as e:
+        # No poder medir la salud del canal no puede tumbar la cola. Se
+        # devuelve None en 'enviados' para que la pantalla diga "no se pudo
+        # medir" en vez de "todo bien", que es lo que diria un cero.
+        registrar("canal", "no se pudo medir la salud de whatsapp", error=e)
+        return {"ventana_minutos": int(minutos), "enviados": None,
+                "con_acuse": None, "fallidos": None}
+
+
 def media_bytes(tenant: str, media_uuid: str) -> tuple[bytes, str] | None:
     """(contenido, mime) de un adjunto, para servirlo. None si no existe o no
     es de este tenant -- el filtro por organizacion lo hace la politica de

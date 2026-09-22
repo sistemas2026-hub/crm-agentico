@@ -979,6 +979,47 @@ def guardar_plazo_visita_tecnica(tenant: str, dias: int) -> TenantConfig:
     return _editar(tenant, lambda doc: _mutar_plazo_visita_tecnica(doc, dias))
 
 
+def guardar_ajustes_bandeja(tenant: str, sla_toma_minutos: int,
+                            umbral_rx_dbm: float | None) -> TenantConfig:
+    """
+    Los dos numeros que la Bandeja usa para emitir un VEREDICTO, y que cada
+    empresa tiene que poder poner desde la pantalla.
+
+    POR QUE SE EDITAN Y NO SE FIJAN EN CODIGO
+    -----------------------------------------
+    'sla_toma_minutos'  cuanto puede esperar una escalada sin dueño. Un ISP
+                        con guardia 24 h y uno que atiende de 8 a 18 no
+                        toleran lo mismo.
+    'umbral_rx_dbm'     desde que potencia optica se considera atenuado el
+                        enlace. Depende de la planta de cada empresa --largo
+                        de los tramos, splitters, tipo de ONU-- y no de este
+                        software.
+
+    LOS DOS ADMITEN "SIN DEFINIR", y eso es parte del diseño: 0 y None hacen
+    que la pantalla muestre el dato SIN veredicto. Un valor por defecto
+    inventado seria peor, porque se veria igual que uno decidido.
+    """
+    if sla_toma_minutos < 0 or sla_toma_minutos > 1440:
+        raise ErrorEdicion("el plazo de toma tiene que estar entre 0 y 1440 minutos.")
+    if umbral_rx_dbm is not None and not (-40.0 <= umbral_rx_dbm <= 0.0):
+        # La potencia optica de recepcion es negativa y cuanto mas negativa,
+        # peor. Fuera de ese rango el numero no es un umbral: es un error de
+        # tipeo, y guardarlo haria que la pantalla marcara sano un enlace
+        # caido -- o al reves.
+        raise ErrorEdicion("el umbral óptico tiene que estar entre -40 y 0 dBm.")
+    return _editar(tenant, lambda doc: _mutar_ajustes_bandeja(
+        doc, sla_toma_minutos, umbral_rx_dbm))
+
+
+def _mutar_ajustes_bandeja(doc, sla_toma_minutos: int,
+                           umbral_rx_dbm: float | None) -> None:
+    doc["sla_toma_minutos"] = int(sla_toma_minutos)
+    if umbral_rx_dbm is None:
+        doc.pop("umbral_rx_dbm", None)
+    else:
+        doc["umbral_rx_dbm"] = float(umbral_rx_dbm)
+
+
 def guardar_canal_whatsapp(tenant: str, activo: bool,
                            numero_visible: str | None) -> TenantConfig:
     return _editar(tenant, lambda doc: _mutar_canal_whatsapp(doc, activo, numero_visible))

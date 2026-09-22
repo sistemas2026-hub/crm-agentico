@@ -268,33 +268,92 @@ describe('el panel de red no ejecuta ni inventa', () => {
     .replace(/<!--[\s\S]*?-->/g, '');
   const campos = visible.replace(/<p class="panel-nota">[\s\S]*?<\/p>/, '');
 
-  it('no hay botones de Ping ni de Reiniciar', () => {
-    // Reiniciar corta el servicio de alguien y pasa por la cola de acciones
-    // con confirmación (PRD §7.4). Un botón acá sería una segunda puerta a la
-    // misma acción, sin esa confirmación.
-    expect(visible).not.toMatch(/<button/);
-    expect(campos).not.toMatch(/\bping\b|reiniciar|reboot/i);
+  /* ESTAS CUATRO GUARDAS CAMBIARON EL 21/09/2026, Y HAY QUE DECIR POR QUÉ.
+     Decían: el panel no tiene botones, no consulta nada, no muestra `dBm` y
+     explica que la telemetría no se ve acá. Protegían una decisión real --no
+     convertir la Bandeja en una segunda fuente de verdad, ni abrir una segunda
+     puerta a una acción que corta el servicio.
+     La decisión de producto se invirtió: el estado del enlace SÍ se lee en
+     vivo desde la pantalla. Lo que no cambió es el motivo por el que la guarda
+     existía, así que no se borran: se reescriben sobre lo que ahora hay que
+     sostener. Una guarda que se elimina porque se puso roja deja de proteger
+     sin que nadie lo decida. */
+
+  it('reiniciar no se dispara de un solo clic', () => {
+    /* El reinicio entró el 21/09/2026 y esta guarda cambió con él -- saltó
+       justo cuando apareció, que es para lo que estaba puesta.
+       Lo que ahora protege: que el botón NO llame al endpoint. Tiene que
+       abrir la confirmación, y la confirmación exige un motivo. Un botón que
+       ejecutara directo dejaría a un cliente sin servicio por un clic mal
+       puesto en una columna de 304px. */
+    const [, trasElBoton = ''] = red.split(/onclick=\{\(\) => \{ pidiendoReinicio = true/);
+    expect(red).toMatch(/pidiendoReinicio = true/);
+    expect(trasElBoton.slice(0, 200)).not.toMatch(/fetch\(/);
+    // Y sin motivo el botón de confirmar está deshabilitado.
+    expect(red).toMatch(/disabled=\{reiniciando \|\| !motivoReinicio\.trim\(\)\}/);
+    // La función tampoco sale sin motivo, aunque alguien altere el `disabled`.
+    expect(red).toMatch(/if \(reiniciando \|\| !motivo/);
   });
 
-  it('el panel no dispara ninguna consulta: es presentación', () => {
-    expect(red).not.toMatch(/fetch\(|onMount|\$effect|setInterval/);
+  it('no afirma que el equipo reinició: sólo que se pidió', () => {
+    /* 'ACCION_CONFIRMADA' significa que el equipo reinició y volvió, y eso
+       lo dice la comprobación posterior, no la respuesta del ISP. Decir
+       "reiniciado" cuando sólo se aceptó la orden es afirmar un efecto que
+       todavía no se midió. */
+    const prosa = visible.replace(/\s+/g, ' ');
+    expect(prosa).toMatch(/Reinicio pedido/i);
+    expect(prosa).not.toMatch(/equipo reiniciado con éxito|se reinició correctamente/i);
   });
 
-  it('no muestra los campos que la referencia marca como MOCK', () => {
-    for (const campo of [/dBm/i, /\bOLT\b/, /\bPON\b/, /\bCTO\b/, /\bMAC\b/,
-                         /firmware/i, /temperatura/i, /splitter/i,
-                         /dispositivos conectados/i]) {
+  it('no consulta en bucle: el proveedor lo pide expresamente', () => {
+    // ~10 s por consulta y la skill `smartolt-api` pide no usarla en polling.
+    // Un `setInterval` acá sería exactamente eso.
+    expect(red).not.toMatch(/setInterval/);
+  });
+
+  it('ninguna medición se muestra sin la hora en que se leyó', () => {
+    // Un valor óptico sin su hora es una afirmación sobre el presente que
+    // puede tener cinco minutos, y con eso se decide si mandar un técnico.
+    expect(visible).toMatch(/leido_en|leído|Leído/);
+  });
+
+  it('no muestra campos sin fuente conocida', () => {
+    /* LA LISTA SE ACORTÓ EL 22/09/2026, Y NO POR CAPRICHO.
+       `PON` y `CTO` estaban acá porque se había concluido que ningún sistema
+       conectado los exponía. Era falso: `get_onu_details/{sn}` de SmartOLT
+       devuelve `olt_id`, `olt_name`, `board`, `port`, `onu`, `zone_name` y
+       `odb_name` --la caja, o sea el CTO-- y está verificado en vivo
+       (14/08/2026, skill `smartolt-api`). Se conectó, y salieron de la lista.
+
+       Los que quedan siguen sin fuente: ningún endpoint de los sistemas
+       conectados los devuelve. El día que alguno lo haga, esta prueba se
+       pone roja y ahí se decide -- que es para lo que está. */
+    for (const campo of [/\bMAC\b/, /firmware/i, /temperatura/i,
+                         /voltaje/i, /bias/i, /dispositivos conectados/i]) {
       expect(campos).not.toMatch(campo);
     }
+  });
+
+  it('la topología no arrastra el nombre del cliente', () => {
+    /* `get_onu_details` devuelve `name`: el nombre completo del cliente en el
+       registro de la ONU (marcado 🔴 en la skill). El endpoint lo descarta
+       con una lista blanca; acá se comprueba que la pantalla tampoco lo pida
+       por su cuenta. */
+    expect(red).not.toMatch(/topologia\??\.name\b|detalle\??\.name\b/);
   });
 
   it('distingue «no se hizo nada» de «no se pudo consultar»', () => {
     expect(visible).toMatch(/No se ejecutó ninguna acción sobre el equipo/i);
   });
 
-  it('dice por qué no hay telemetría ni botón de reinicio', () => {
-    expect(visible).toMatch(/no se guardan acá/i);
-    expect(visible).toMatch(/cola de acciones con confirmación/i);
+  it('dice que la medición no se guarda y cuándo se consulta sola', () => {
+    /* Sobre el texto con los espacios normalizados, no sobre el archivo: la
+       frase está repartida en dos renglones del marcado y buscarla tal cual
+       la ponía roja por dónde cae el salto de línea, que no es lo que esta
+       prueba quiere proteger. */
+    const prosa = visible.replace(/\s+/g, ' ');
+    expect(prosa).toMatch(/no se guardan acá/i);
+    expect(prosa).toMatch(/en manos de una persona/i);
   });
 });
 

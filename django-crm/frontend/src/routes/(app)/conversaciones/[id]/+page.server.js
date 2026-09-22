@@ -35,7 +35,7 @@ export async function load({ fetch, cookies, params, locals, depends }) {
   // idas y vueltas al motor en vez del maximo de las tres, y esa espera es
   // la que se sentia como si la pagina entera se recargara.
   const [respMensajes, respHerr, respCasos, respRelevo, respEquipo, respSync,
-         respAcciones] = await Promise.all([
+         respAcciones, respCliente] = await Promise.all([
     fetch(
       `${baseUrl}/conversaciones/${encodeURIComponent(params.id)}/mensajes?tenant=${encodeURIComponent(tenant)}`,
       { headers: headersMotor() }
@@ -59,6 +59,16 @@ export async function load({ fetch, cookies, params, locals, depends }) {
     ).catch(() => null),
     fetch(
       `${baseUrl}/conversaciones/${encodeURIComponent(params.id)}/acciones?tenant=${encodeURIComponent(tenant)}`,
+      { headers: headersMotor() }
+    ).catch(() => null),
+    /* La ficha del cliente, leida EN VIVO del sistema del ISP por el motor.
+       Va en la misma ola que las otras siete y no despues: es la llamada mas
+       lenta de las ocho --sale a una API externa-- y encadenarla haria que
+       cada salto de conversacion la esperara entera.
+       `.catch(() => null)` como las demas: que el ISP no conteste no puede
+       impedir que se lea la conversacion. La pantalla lo dice y sigue. */
+    fetch(
+      `${baseUrl}/conversaciones/${encodeURIComponent(params.id)}/cliente?tenant=${encodeURIComponent(tenant)}`,
       { headers: headersMotor() }
     ).catch(() => null)
   ]);
@@ -108,6 +118,49 @@ export async function load({ fetch, cookies, params, locals, depends }) {
     if (respEquipo?.ok) equipo = (await respEquipo.json()).acciones ?? [];
   } catch {
     // idem
+  }
+
+  /* La ficha del cliente en el sistema del ISP: documento, plan, estado del
+     servicio y cobranza. NO se guarda: el motor la lee en vivo en cada carga
+     y no persiste la respuesta.
+
+     El objeto trae siempre `disponible` y `motivo`, así que la pantalla puede
+     decir POR QUÉ no hay ficha --el asistente todavía no identificó al
+     cliente, la empresa no tiene conectado su sistema, o el sistema no
+     contestó-- en vez de dejar un hueco que se lee como un error. */
+  let fichaCliente = { disponible: false, motivo: 'sin_respuesta', cliente: null };
+  try {
+    if (respCliente?.ok) fichaCliente = await respCliente.json();
+  } catch {
+    // Se queda con 'sin_respuesta': no poder leer la ficha no rompe la
+    // conversación, que es de lo que trata esta pantalla.
+  }
+
+  /* CÓMO ESTÁ EL EQUIPO — SÓLO SI ESCALÓ.
+     La lectura óptica sale a un sistema externo que pide no consultarlo en
+     bucle, así que no se hace en cada apertura: se hace cuando una persona
+     tiene el caso en la mano, que es cuando el diagnóstico se usa para
+     decidir. Mientras la lleva el asistente, la pestaña Equipo abre con el
+     botón "Consultar ahora" y nadie paga la espera.
+
+     Va DESPUÉS de las otras ocho y no en la misma ola a propósito: depende
+     de `conversacion.escalada_a_humano`, que recién se conoce al abrir la
+     respuesta de mensajes. Es una ida y vuelta más, y sólo en las escaladas.
+
+     El motor cachea cinco minutos, así que recargar la pantalla no vuelve a
+     salir al proveedor. */
+  let optica = { disponible: false, motivo: 'no_consultada', optica: null };
+  if (datos.conversacion?.escalada_a_humano) {
+    try {
+      const respOptica = await fetch(
+        `${baseUrl}/conversaciones/${encodeURIComponent(params.id)}/optica?tenant=${encodeURIComponent(tenant)}`,
+        { headers: headersMotor() }
+      );
+      if (respOptica.ok) optica = await respOptica.json();
+    } catch {
+      // Que el sistema del ISP no conteste no puede impedir atender la
+      // conversación. El panel lo dice y ofrece reintentar.
+    }
   }
 
   // Que efectos externos quedaron sin hacer (B4). Es estado actual, no
@@ -175,7 +228,7 @@ export async function load({ fetch, cookies, params, locals, depends }) {
   const yo = { id: locals.user?.id ?? '', nombre: (locals.user?.name || locals.user?.email || '').trim() };
 
   return { conversacion: datos.conversacion, mensajes: datos.mensajes, caso, owners, herramientas, diagnostico, casos,
-    relevo, equipo, sincronizaciones, acciones, yo, rol, operadores };
+    relevo, equipo, sincronizaciones, acciones, yo, rol, operadores, fichaCliente, optica };
 }
 
 /** @type {import('./$types').Actions} */

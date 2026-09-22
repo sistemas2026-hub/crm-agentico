@@ -13,6 +13,7 @@
   import MessageComposer from '$lib/conversaciones/composer/MessageComposer.svelte';
   import CasePanel from '$lib/conversaciones/context/CasePanel.svelte';
   import ActivityPanel from '$lib/conversaciones/context/ActivityPanel.svelte';
+  import ContextTabs from '$lib/conversaciones/context/ContextTabs.svelte';
   import CustomerPanel from '$lib/conversaciones/context/CustomerPanel.svelte';
   import NetworkPanel from '$lib/conversaciones/context/NetworkPanel.svelte';
   import SyncPanel from '$lib/conversaciones/context/SyncPanel.svelte';
@@ -282,17 +283,39 @@
 
   // El bloque se dibuja siempre que la conversación haya escalado: es
   // entonces cuando alguien tiene que entender el caso rápido.
-  /** Si la columna derecha tiene algo que valga su ancho. Lo accionable es:
-      el ticket del CRM, el diagnostico de la IA, la etiqueta y la resolucion.
-      Sin nada de eso son dos controles sueltos ocupando 292px que el chat
-      necesita -- y no se llena con tarjetas inventadas: se cierra. */
-  let hayContexto = $derived(
-    !!caso ||
-      herramientas.length > 0 ||
-      !!conversacion?.etiqueta ||
-      !!conversacion?.caso_id ||
-      conversacion?.conservar
+  /* `hayContexto` se retiró el 21/09/2026. Decidía si la columna derecha valía
+     su ancho --"sin caso, herramientas, etiqueta ni retención son dos controles
+     sueltos ocupando 292px que el chat necesita"-- y la encogía a 0.
+     El razonamiento era defendible y el efecto no: en la mayoría de las
+     conversaciones la columna simplemente no estaba, la única puerta era el
+     botón del encabezado, y lo que se veía no era una tercera zona sino una
+     pantalla secundaria escondida. La decisión ahora es la contraria y está
+     escrita en el `<aside>`. */
+
+  /* LAS CINCO PESTAÑAS DE LA COLUMNA DE CONTEXTO.
+     Los nombres son los de la referencia; los rótulos van en español, como el
+     resto de la aplicación. El orden también es el de la referencia.
+
+     La cuenta de "Herramientas" es lo que espera aprobación: meter algo detrás
+     de una pestaña lo esconde, y una propuesta sin aprobar es justo lo que no
+     se puede esconder. Sólo se dibuja si hay alguna. */
+  let pestanaContexto = $state('cliente');
+
+  let accionesPendientes = $derived(
+    (acciones ?? []).filter((/** @type {any} */ a) => a?.estado === 'pendiente').length
   );
+
+  /* Los rótulos son cortos porque tienen que entrar cinco en 304px: medido,
+     "Herramientas" a 12px pide 76px y la pestaña da 60. "Proceso" es el
+     nombre honesto de lo que hay adentro -- qué hizo el asistente (la traza),
+     qué propone (las acciones) y con qué guías trabajó. */
+  let pestanasContexto = $derived([
+    { id: 'cliente', etiqueta: 'Cliente' },
+    { id: 'equipo', etiqueta: 'Equipo' },
+    { id: 'caso', etiqueta: 'Caso' },
+    { id: 'actividad', etiqueta: 'Actividad' },
+    { id: 'herramientas', etiqueta: 'Proceso', cuenta: accionesPendientes }
+  ]);
 
   let hayResumenDelCaso = $derived(
     !!conversacion?.escalada_a_humano || resumenEscalada.some((f) => f.texto) || hizoLaIA.length > 0
@@ -1513,6 +1536,7 @@
     {escalada}
     {asignadaA}
     {contextoAbierto}
+    ficha={data.fichaCliente?.cliente ?? null}
     onAlternarContexto={() => (contextoAbierto = !contextoAbierto)}
   />
 
@@ -1609,10 +1633,20 @@
   ></button>
 {/if}
 
+<!-- La columna de contexto es una de las TRES ZONAS, siempre. Hasta el
+     21/09/2026 se encogía a 0px cuando no había caso, herramientas, etiqueta
+     ni retención -- la mayoría de las conversaciones--, y entonces la única
+     puerta era el botón "Contexto" del encabezado. El resultado medido era
+     una columna de ancho 0 con cuatro controles enfocables fuera de la
+     pantalla, y la sensación de una pantalla secundaria escondida en vez de
+     una tercera zona.
+     Lo que hay siempre --quién es el cliente, qué se le hizo al equipo, la
+     retención, qué consultó el asistente-- alcanza para que la columna diga
+     algo. Cuando una sección no tiene dato, lo dice con su propio texto, que
+     para eso existe. -->
 <aside
   class="info"
   class:abierto={contextoAbierto}
-  class:vacia={!hayContexto && !contextoAbierto}
   aria-label="Contexto de la conversación"
 >
   <button
@@ -1623,49 +1657,68 @@
     <X size={14} /> Cerrar
   </button>
 
-  <!-- Quién es el cliente va PRIMERO: antes de mirar el caso o cómo llegó la
-       conversación, quien la abre necesita saber con quién está hablando. -->
-  <CustomerPanel {conversacion} />
-
-  <CasePanel
-    {caso} {conversacion} {owners} {ownerActual}
-    asignadaDexter={asignadaA}
-    bind:asignadoA bind:listaAbierta bind:formularioAsignar
+  <ContextTabs
+    pestanas={pestanasContexto}
+    activa={pestanaContexto}
+    onIr={(/** @type {string} */ id) => (pestanaContexto = id)}
   />
 
-  <!-- Después del caso y antes del proceso de la IA: primero qué es esta
-       conversación, después cómo llegó acá, y recién entonces qué hizo el
-       asistente dentro de ella. -->
-  <!-- Arriba del todo cuando hay algo que revisar: un caso que no se creó es
-       más urgente que cualquier otro contexto de la conversación. -->
-  <AssigneesPanel asignados={data.asignados_crm ?? null}
-                  aCargoEnDexter={conversacion.asignada_a_nombre ?? ''} />
-  <ActionsPanel {acciones} aprobando={aprobandoAccion} onAprobar={aprobarAccion} />
-  <SyncPanel {sincronizaciones} />
+  <!-- EL REPARTO. Los diez paneles son los mismos de siempre y ninguno se
+       fue; lo único que cambió es en cuál de las cinco pestañas vive cada
+       uno. Va escrito acá, al lado de los paneles, para que se pueda
+       verificar de un vistazo contra el manifiesto. -->
+  <div class="info-cuerpo">
+    {#if pestanaContexto === 'cliente'}
+      <CustomerPanel {conversacion} />
 
-  <!-- Después de quién es el cliente y antes del relevo: qué se intentó
-       arreglar es contexto del caso, no del traspaso. -->
-  <NetworkPanel acciones={accionesEquipo} serial={conversacion?.equipo?.sn_onu ?? null} />
+    {:else if pestanaContexto === 'equipo'}
+      <NetworkPanel
+        acciones={accionesEquipo}
+        serial={conversacion?.equipo?.sn_onu ?? null}
+        optica={data.optica ?? null}
+        conversacionId={conversacion.id}
+      />
 
-  <ActivityPanel eventos={relevo} />
+    {:else if pestanaContexto === 'caso'}
+      <!-- Todo lo que es EL CASO, no la conversación: el caso del CRM, quién
+           lo tiene allá (que puede no ser el dueño de Dexter -- D28), lo que
+           se creó o cerró en sistemas externos, y la retención. La referencia
+           pone RETENTION en esta misma pestaña. -->
+      <CasePanel
+        {caso} {conversacion} {owners} {ownerActual}
+        asignadaDexter={asignadaA}
+        bind:asignadoA bind:listaAbierta bind:formularioAsignar
+      />
+      <AssigneesPanel asignados={data.asignados_crm ?? null}
+                      aCargoEnDexter={conversacion.asignada_a_nombre ?? ''} />
+      <SyncPanel {sincronizaciones} />
+      <RetentionToggle
+        {conservada} {guardandoConservar} {errorConservar}
+        bind:motivoConservar bind:pidiendoMotivo
+        onGuardar={guardarConservar}
+      />
 
-  <RetentionToggle
-    {conservada} {guardandoConservar} {errorConservar}
-    bind:motivoConservar bind:pidiendoMotivo
-    onGuardar={guardarConservar}
-  />
+    {:else if pestanaContexto === 'actividad'}
+      <ActivityPanel eventos={relevo} />
 
-  <TracePanel
-    {herramientas} {diagnostico} {contrasteUtil} {pasoMarcado}
-    motivoBloqueo={MOTIVO_BLOQUEO}
-    onIrAlPaso={irAlPaso}
-  />
-
-  <DocumentationPanel
-    {sugerencias} {buscandoDocs} {errorDocs} {mejorSimilitud} {copiado}
-    bind:consultaDocs bind:expandido
-    onAbrir={alAbrirDocs} onBuscar={alBuscarDocs} onCopiar={copiarFragmento}
-  />
+    {:else if pestanaContexto === 'herramientas'}
+      <!-- Lo que HIZO y lo que PROPONE el asistente. Las acciones propuestas
+           entran acá y no en otra parte porque son la salida de ese proceso,
+           esperando que una persona las apruebe -- y como quedan detrás de una
+           pestaña, la pestaña lleva su número (ver `pestanasContexto`). -->
+      <ActionsPanel {acciones} aprobando={aprobandoAccion} onAprobar={aprobarAccion} />
+      <TracePanel
+        {herramientas} {diagnostico} {contrasteUtil} {pasoMarcado}
+        motivoBloqueo={MOTIVO_BLOQUEO}
+        onIrAlPaso={irAlPaso}
+      />
+      <DocumentationPanel
+        {sugerencias} {buscandoDocs} {errorDocs} {mejorSimilitud} {copiado}
+        bind:consultaDocs bind:expandido
+        onAbrir={alAbrirDocs} onBuscar={alBuscarDocs} onCopiar={copiarFragmento}
+      />
+    {/if}
+  </div>
 </aside>
 
 <style>
@@ -1679,27 +1732,33 @@
   }
 
   /* ── columna de la derecha: el contexto ─────────────────────────────── */
-  /* Sin nada accionable la columna se encoge a una tira: el boton para
-     abrirla sigue estando, pero el ancho se lo lleva el chat. */
-  .info.vacia {
-    width: 0;
-    padding: 0;
-    overflow: hidden;
-    border-left: 0;
-  }
   .info {
+    /* Superficie propia, como las otras dos zonas. Sin esto hereda el lienzo y
+       la columna se lee como el hueco que queda al costado en vez de como un
+       panel. */
+    background: var(--bandeja-superficie);
     /* Ningun contenido de esta columna puede desbordarla. Es la red por si
        algo nuevo se agrega sin acordarse de truncarlo. */
     overflow-x: hidden;
-    /* 310 -> 292. Lo critico de esta columna es el ticket, el diagnostico, la
-       etiqueta y la resolucion; lo demas se abre bajo demanda. Los 18px van
-       al centro, que es donde se lee y se escribe. */
-    width: 292px;
+    /* 350px, el número EXACTO de la referencia. Se pudo usar recién cuando
+       la Bandeja pasó a ocupar la pantalla entera: mientras convivía con la
+       barra lateral del CRM había que repartir en proporción sobre los 1218
+       que quedaban. Ahora 360/730/350 sobre 1440 cierra igual que el diseño.
+       Y las cinco pestañas respiran: 350/5 = 70 por pestaña, que es
+       justamente el ancho que tienen en la referencia. */
+    width: 350px;
     flex: none;
     min-height: 0;
     overflow-y: auto;
-    padding: 14px 16px 20px;
+    /* El padding se fue a `.info-cuerpo`: la tira de pestañas va pegada arriba
+       y de borde a borde, como en la referencia. Con el padding acá quedaba
+       hundida 16px de cada lado y con el filete inferior cortado. */
+    padding: 0;
     border-left: 1px solid var(--v2-line);
+  }
+
+  .info-cuerpo {
+    padding: 12px 14px 20px;
   }
   /* Por encima de 1240px la columna está siempre a la vista: ni botón para
      cerrarla, ni fondo que interceptar. El del encabezado que la abre vive

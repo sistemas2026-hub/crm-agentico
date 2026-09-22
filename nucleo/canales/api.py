@@ -30,6 +30,7 @@ y se verifica DURANTE la conversacion, con una herramienta como
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 import threading
@@ -3145,6 +3146,63 @@ def configuracion_plazo_visita_tecnica():
     return jsonify({"dias": herramienta.fechas_automaticas.get("fecha_final")})
 
 
+@app.get("/configuracion/bandeja")
+def configuracion_bandeja():
+    """Los dos ajustes de la Bandeja, para la pantalla de configuracion."""
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+    return jsonify({
+        "sla_toma_minutos": getattr(config, "sla_toma_minutos", 0) or 0,
+        "umbral_rx_dbm": getattr(config, "umbral_rx_dbm", None),
+    })
+
+
+@app.put("/configuracion/bandeja")
+def configuracion_bandeja_guardar():
+    """
+    Cambia los dos numeros con los que la Bandeja emite un veredicto.
+
+    Los DOS admiten "sin definir" -- 0 y null-- y eso no es un hueco: es la
+    manera de decir que la empresa todavia no lo decidio, y entonces la
+    pantalla muestra el dato crudo sin afirmar si esta bien o mal.
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+
+    try:
+        sla = int(cuerpo.get("sla_toma_minutos") or 0)
+    except (TypeError, ValueError):
+        return jsonify({"error": "'sla_toma_minutos' tiene que ser un numero entero."}), 400
+
+    crudo = cuerpo.get("umbral_rx_dbm")
+    umbral = None
+    if crudo not in (None, ""):
+        try:
+            umbral = float(crudo)
+        except (TypeError, ValueError):
+            return jsonify({"error": "'umbral_rx_dbm' tiene que ser un numero."}), 400
+
+    try:
+        config = editor.guardar_ajustes_bandeja(tenant, sla, umbral)
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
+
+    olvidar_config(tenant)
+    return jsonify({
+        "sla_toma_minutos": getattr(config, "sla_toma_minutos", 0) or 0,
+        "umbral_rx_dbm": getattr(config, "umbral_rx_dbm", None),
+    })
+
+
 @app.get("/configuracion/canales")
 def configuracion_canales():
     """
@@ -3818,7 +3876,26 @@ def conversaciones():
         fila.update(proyeccion.proyectar(fila))
         fila["canal_operativo"] = fila.get("canal") in canales.REALES
     salida.sort(key=proyeccion.orden_de_cola)
-    return jsonify({"tenant": tenant, "conversaciones": salida})
+
+    # El plazo de toma viaja con la cola y no por conversacion: es uno solo
+    # para toda la empresa, y mandarlo repetido en cada fila seria el mismo
+    # numero N veces. 0 = la empresa no definio objetivo, y entonces la
+    # pantalla no dibuja cuenta regresiva -- ver TenantConfig.sla_toma_minutos.
+    try:
+        sla = int(getattr(_config_de(tenant), "sla_toma_minutos", 0) or 0)
+    except Exception:
+        # No poder leer la config no puede tumbar la cola entera: sin plazo,
+        # la Bandeja funciona igual, sólo que sin el reloj.
+        sla = 0
+
+    # La salud del canal viaja con la cola por lo mismo que el plazo: es una
+    # sola para la empresa. Son los tres numeros crudos -- el veredicto lo
+    # arma la pantalla, en un solo lugar y con pruebas.
+    canal_whatsapp = persistencia.salud_canal_whatsapp(tenant)
+
+    return jsonify({"tenant": tenant, "conversaciones": salida,
+                    "sla_toma_minutos": sla,
+                    "canal_whatsapp": canal_whatsapp})
 
 
 @app.get("/conversaciones/por-caso/<caso_id>")
@@ -4861,6 +4938,385 @@ def conversaciones_acciones(id_conversacion):
         return jsonify({"error": "No se pudieron leer las acciones."}), 500
 
     return jsonify({"acciones": acciones})
+
+
+"""
+Los campos de la ficha del cliente que la Bandeja puede mostrar.
+
+Es una lista blanca EXPLICITA y no la del rol: 'campos_permitidos' del rol
+decide que ve el MODELO, y esto decide que ve una PERSONA autenticada en la
+pantalla. Son dos preguntas distintas y mezclarlas haria que ampliar una
+ampliara la otra sin que nadie lo decida.
+
+Lo que NO esta, y por que: contrasenas de cualquier tipo, coordenadas y
+cualquier campo de red del equipo. La ficha responde "quien es este cliente y
+como esta su servicio", no "como entro a su router".
+"""
+CAMPOS_FICHA_CLIENTE = (
+    "id_servicio", "nombre", "cedula", "estado", "telefono", "email",
+    "direccion", "localidad", "ciudad", "plan_internet", "zona",
+    "fecha_instalacion", "estado_facturas", "saldo", "fecha_corte",
+)
+
+
+@app.get("/conversaciones/<id_conversacion>/cliente")
+def conversaciones_cliente(id_conversacion):
+    """
+    La ficha del cliente, LEIDA EN VIVO del sistema del ISP.
+
+    POR QUE EN VIVO Y NO GUARDADA
+    -----------------------------
+    El plan, el estado del servicio, el saldo y la fecha de corte cambian sin
+    que esta conversacion se entere. Una copia guardada envejece en silencio,
+    y en esta pantalla se usa para decidir: decirle a alguien que el cliente
+    esta al dia cuando lleva dos meses cortado es peor que no decirle nada.
+    Ademas, el PRD prohibe persistir las respuestas crudas de la API externa
+    -- traen contrasenas, GPS y documento.
+
+    Por eso esta ruta lee y devuelve, sin escribir una sola fila.
+
+    REUSA LA HERRAMIENTA DEL TENANT, NO UNA URL PROPIA
+    --------------------------------------------------
+    Llama a 'consultar_cliente' tal como esta declarada en la config de la
+    empresa. Eso no es comodidad: es lo que hace que el subdominio, la
+    credencial (auth_ref) y el filtro verificado salgan de la configuracion
+    del tenant y no de una constante en este archivo. Una empresa nueva se
+    conecta editando su config, sin tocar codigo -- que es la regla de
+    arquitectura del repo.
+
+    Si la empresa no declara la herramienta, o no tiene cargada la credencial,
+    NO es un error del servidor: es que este tenant todavia no tiene conectado
+    su sistema. Se contesta 200 con 'disponible: false' y el motivo, y la
+    pantalla dibuja un estado vacio honesto en vez de un error rojo.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+
+    try:
+        identidad = persistencia.identidad_de_conversacion(tenant, id_conversacion)
+    except RuntimeError as e:
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 404
+    except Exception as e:
+        registrar("cliente", "fallo al leer la identidad de la conversacion",
+                  conversation_id=id_interno(id_conversacion), error=e)
+        return jsonify({"error": "No se pudo leer la conversacion."}), 500
+
+    if not identidad:
+        return jsonify({"error": "No existe esa conversacion."}), 404
+
+    id_servicio = (identidad.get("id_cliente") or "").strip()
+    if not id_servicio:
+        # El asistente todavia no identifico al cliente. No es una falla: una
+        # conversacion recien abierta por un numero desconocido esta asi.
+        return jsonify({"disponible": False, "motivo": "sin_identificar", "cliente": None})
+
+    config = _config_de(tenant)
+    herramienta = next((h for h in config.herramientas if h.nombre == "consultar_cliente"), None)
+    if herramienta is None:
+        return jsonify({"disponible": False, "motivo": "sin_herramienta", "cliente": None})
+
+    try:
+        crudo = ejecutor_http.ejecutar(
+            herramienta, {"id_servicio": id_servicio}, tenant=tenant,
+            variables_tenant=getattr(config, "variables_tenant", None))
+    except Exception as e:
+        # Ni el mensaje ni el error llevan datos del cliente: el fallo es de
+        # conexion o de credencial, y lo que se pidio fue un identificador.
+        registrar("cliente", "no se pudo leer la ficha del cliente",
+                  conversation_id=id_interno(id_conversacion), error=e)
+        return jsonify({"disponible": False, "motivo": "sin_conexion", "cliente": None})
+
+    # Una coleccion paginada contesta {"results": [...]} aun filtrando por un
+    # id que es unico, asi que la ficha viene adentro de una lista de uno. Se
+    # acepta tambien una lista desnuda: que forma tiene la respuesta depende
+    # del sistema que cada empresa tenga conectado, y este archivo no conoce
+    # ninguno en particular.
+    # Si no vino ninguna fila, el cliente no existe alla -- que TAMBIEN es una
+    # respuesta util y no un error.
+    filas = crudo.get("results") if isinstance(crudo, dict) else crudo
+    fila = (filas or [None])[0] if isinstance(filas, list) else None
+    if not isinstance(fila, dict):
+        return jsonify({"disponible": False, "motivo": "no_encontrado", "cliente": None})
+
+    ficha = {}
+    for campo in CAMPOS_FICHA_CLIENTE:
+        valor = fila.get(campo)
+        # Los catalogos del sistema externo suelen venir anidados
+        # y lo que se muestra es el nombre; el id no le dice nada a nadie.
+        if isinstance(valor, dict):
+            valor = valor.get("nombre") or valor.get("id")
+        if valor not in (None, ""):
+            ficha[campo] = valor
+
+    # Sin 'registrar' de los valores: esta respuesta es la ficha personal de
+    # alguien y no entra a ningun log ni a ninguna traza.
+    return jsonify({"disponible": True, "motivo": None, "cliente": ficha})
+
+
+"""
+Cuanto vale una lectura optica antes de volver a pedirla.
+
+CINCO MINUTOS, Y EL NUMERO NO ES ARBITRARIO: la consulta profunda tarda ~10
+segundos y el proveedor pide expresamente no usarla en polling ni en bulk
+(skill 'smartolt-api', verificado el 14/08/2026). Sin cache, cambiar de
+pestaña dos veces serian dos consultas; con cinco minutos, una conversacion
+que se atiende en una sentada hace UNA.
+
+Es el mismo TTL que ya usa la verificacion de sesion del frontend, por la
+misma razon: es el tiempo que alguien tolera ver un dato de hace un rato sin
+que deje de ser util.
+"""
+SEGUNDOS_CACHE_OPTICA = 300
+
+# (tenant, serial) -> (momento, payload). En memoria del proceso y a
+# proposito: es una lectura de un sistema externo y el PRD prohibe
+# persistirla. Si el motor se reinicia, se vuelve a consultar, que es
+# exactamente lo correcto.
+_optica: dict[tuple[str, str], tuple[float, dict]] = {}
+_optica_lock = threading.Lock()
+
+
+def _serial_de(identidad: dict) -> str:
+    """El serial del equipo, de la sesion de la conversacion."""
+    datos = identidad.get("datos_sesion") or {}
+    if isinstance(datos, str):
+        try:
+            datos = json.loads(datos)
+        except Exception:
+            datos = {}
+    return str((datos or {}).get("sn_onu") or "").strip()
+
+
+@app.get("/conversaciones/<id_conversacion>/optica")
+def conversaciones_optica(id_conversacion):
+    """
+    Como esta el equipo del cliente AHORA: enlace y potencia optica.
+
+    LAS DOS LIVIANAS, NO LA PROFUNDA. Usa 'consultar_estado_ont' y
+    'consultar_senal_ont', que contestan rapido. El diagnostico profundo
+    ('diagnosticar_falla_ont') tarda ~10 segundos y el proveedor pide no
+    automatizarlo: ese se pide aparte y a proposito, nunca al abrir una
+    pantalla.
+
+    NO SE GUARDA. Se cachea en memoria del proceso por
+    SEGUNDOS_CACHE_OPTICA y nada mas: el PRD prohibe persistir las
+    respuestas crudas del sistema externo. 'forzar=1' salta el cache -- es
+    lo que hace el boton "Consultar ahora" cuando alguien quiere el dato
+    del segundo, no el de hace cuatro minutos.
+
+    Devuelve SIEMPRE 'leido_en' junto al dato. Una medicion sin su hora es
+    una afirmacion sobre el presente que puede tener cinco minutos, y en
+    esta pantalla se usa para decidir si mandar un tecnico.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    forzar = request.args.get("forzar") in ("1", "true", "si")
+
+    try:
+        identidad = persistencia.identidad_de_conversacion(tenant, id_conversacion)
+    except Exception as e:
+        registrar("optica", "fallo al leer la conversacion",
+                  conversation_id=id_interno(id_conversacion), error=e)
+        return jsonify({"error": "No se pudo leer la conversacion."}), 500
+    if not identidad:
+        return jsonify({"error": "No existe esa conversacion."}), 404
+
+    serial = _serial_de(identidad)
+    if not serial:
+        # El asistente todavia no identifico el equipo. No es una falla.
+        return jsonify({"disponible": False, "motivo": "sin_equipo", "optica": None})
+
+    clave = (tenant, serial)
+    if not forzar:
+        with _optica_lock:
+            guardado = _optica.get(clave)
+        if guardado and (time.monotonic() - guardado[0]) < SEGUNDOS_CACHE_OPTICA:
+            return jsonify(guardado[1])
+
+    config = _config_de(tenant)
+    por_nombre = {h.nombre: h for h in config.herramientas}
+    estado_h = por_nombre.get("consultar_estado_ont")
+    senal_h = por_nombre.get("consultar_senal_ont")
+    if estado_h is None and senal_h is None:
+        return jsonify({"disponible": False, "motivo": "sin_herramienta", "optica": None})
+
+    variables = getattr(config, "variables_tenant", None)
+
+    def _leer(herramienta):
+        if herramienta is None:
+            return None
+        try:
+            return ejecutor_http.ejecutar(herramienta, {"sn_onu": serial},
+                                          tenant=tenant, variables_tenant=variables)
+        except Exception as e:
+            # Que una de las dos falle no invalida la otra: una ONU offline
+            # no tiene lectura de senal util, y eso no es un error.
+            registrar("optica", "no se pudo leer una medicion del equipo",
+                      conversation_id=id_interno(id_conversacion),
+                      herramienta=herramienta.nombre, error=e)
+            return None
+
+    estado = _leer(estado_h)
+    senal = _leer(senal_h)
+    if estado is None and senal is None:
+        return jsonify({"disponible": False, "motivo": "sin_conexion", "optica": None})
+
+    # DONDE esta conectado el equipo. Es una tercera lectura y es opcional a
+    # proposito: si la empresa no declara la herramienta, o el sistema no la
+    # contesta, la potencia y el estado se muestran igual. La topologia
+    # explica una falla; no es lo que hace falta para verla.
+    topologia = None
+    detalle = _leer(por_nombre.get("consultar_topologia_ont"))
+    if isinstance(detalle, dict):
+        # LISTA BLANCA, y acá importa especialmente: la respuesta de detalle
+        # trae 'name' -- el NOMBRE COMPLETO del cliente en el registro de la
+        # ONU. Es el mismo dato personal que ya se cuida en todo lo demas, y
+        # por esta puerta no sale: la pantalla ya sabe con quien habla.
+        topologia = {}
+        for campo in ("olt_name", "olt_id", "board", "port", "onu",
+                      "zone_name", "odb_name"):
+            valor = detalle.get(campo)
+            if isinstance(valor, dict):
+                valor = valor.get("nombre") or valor.get("name") or valor.get("id")
+            if valor not in (None, ""):
+                topologia[campo] = valor
+        topologia = topologia or None
+
+    # El umbral viaja con la medicion: sin el, la pantalla puede mostrar la
+    # potencia pero no decir si esta bien o mal. Y decirlo con un numero
+    # inventado seria peor que no decirlo -- ver TenantConfig.umbral_rx_dbm.
+    umbral = getattr(config, "umbral_rx_dbm", None)
+
+    payload = {
+        "disponible": True,
+        "motivo": None,
+        "leido_en": datetime.now(timezone.utc).isoformat(),
+        "umbral_rx_dbm": umbral,
+        "optica": {"serial": serial, "estado": estado, "senal": senal,
+                   "topologia": topologia},
+    }
+    with _optica_lock:
+        _optica[clave] = (time.monotonic(), payload)
+    return jsonify(payload)
+
+
+@app.post("/conversaciones/<id_conversacion>/equipo/reiniciar")
+def conversaciones_reiniciar_equipo(id_conversacion):
+    """
+    Una PERSONA reinicia el equipo del cliente desde la Bandeja.
+
+    POR QUE ESTO NO CONTRADICE LA COLA DE ACCIONES
+    ----------------------------------------------
+    La cola de acciones propuestas existe para lo que decide el MODELO: el
+    asistente no puede cortarle el servicio a nadie por su cuenta, y por eso
+    lo que propone espera una aprobacion. Acá el actor es otro -- una persona
+    autenticada, con el caso en la mano, que es quien en cualquier NOC aprieta
+    ese boton. No se salta la confirmacion del modelo: es una puerta distinta,
+    para un actor distinto, y con sus propias condiciones.
+
+    Y ESAS CONDICIONES VIVEN ACA, NO EN EL NAVEGADOR. El dialogo de
+    confirmacion de la pantalla es cortesia; si alguien llama a esta ruta
+    directo, el dialogo no existe. Lo que de verdad protege es esto:
+
+      400  sin motivo (obligatorio: queda en el expediente)
+      403  quien pide no es el dueño de la conversacion ni ADMIN
+      404  no existe, o no se sabe cual es el equipo
+      409  la lleva la IA, o esta cerrada -- reiniciar no es un gesto que
+           corresponda hacer por encima del asistente sin tomarla primero
+
+    El actor y su rol los arma el proxy DESDE LA SESION (el JWT ya verificado
+    contra el backend), nunca el navegador -- mismo mecanismo que /reasignar.
+
+    Cuerpo: {tenant, autor, autor_usuario_id, autor_rol, motivo}
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+
+    motivo = (cuerpo.get("motivo") or "").strip()
+    if not motivo:
+        return jsonify({"error": "Hace falta un motivo: queda en el expediente."}), 400
+
+    autor_id = (cuerpo.get("autor_usuario_id") or "").strip()
+    autor_nombre = (cuerpo.get("autor") or "").strip()
+    es_admin = (cuerpo.get("autor_rol") or "").upper() == "ADMIN"
+    if not autor_id:
+        return jsonify({"error": "No se sabe quien pide el reinicio."}), 400
+
+    try:
+        identidad = persistencia.identidad_de_conversacion(tenant, id_conversacion)
+    except Exception as e:
+        registrar("equipo", "fallo al leer la conversacion",
+                  conversation_id=id_interno(id_conversacion), error=e)
+        return jsonify({"error": "No se pudo leer la conversacion."}), 500
+    if not identidad:
+        return jsonify({"error": "No existe esa conversacion."}), 404
+
+    # La lleva la IA: reiniciar por encima del asistente, sin tomarla, deja al
+    # cliente con el servicio cortado y una conversacion que sigue automatica.
+    if (identidad.get("control") or "ia") != "humano":
+        return jsonify({"error": "Tomá la conversación antes de tocar el equipo."}), 409
+
+    if (identidad.get("estado") or "") == "cerrada":
+        return jsonify({"error": "La conversación está cerrada."}), 409
+
+    # Dueño o ADMIN. El mismo criterio que ya usan soltar y reasignar: quien
+    # solo esta mirando no actua sobre el equipo de un caso ajeno.
+    #
+    # EL DUEÑO LO DICE LA BASE, NO EL PEDIDO. La primera version leia
+    # 'duenio_usuario_id' del cuerpo, que es exactamente el agujero que este
+    # bloque existe para tapar: quien llama la ruta decidiria contra quien se
+    # compara. Sale de la fila.
+    duenio = str(identidad.get("asignada_a_usuario_id") or "").strip()
+    if not es_admin and duenio and duenio != autor_id:
+        return jsonify({"error": "La conversación la tiene otra persona."}), 403
+
+    serial = _serial_de(identidad)
+    if not serial:
+        return jsonify({"error": "No se sabe cuál es el equipo de este cliente."}), 404
+
+    config = _config_de(tenant)
+    herramienta = next((h for h in config.herramientas if h.nombre == "reiniciar_ont"), None)
+    if herramienta is None:
+        return jsonify({"error": "Esta empresa no tiene conectado el reinicio de equipos."}), 409
+
+    # La medicion de ANTES, para que la comprobacion posterior tenga contra
+    # que comparar. Se lee del cache si es reciente -- no hace falta molestar
+    # al proveedor dos veces en el mismo minuto.
+    previa = None
+    with _optica_lock:
+        guardado = _optica.get((tenant, serial))
+    if guardado:
+        previa = guardado[1].get("optica")
+
+    try:
+        ejecutor_http.ejecutar(herramienta, {"sn_onu": serial}, tenant=tenant,
+                               variables_tenant=getattr(config, "variables_tenant", None))
+    except Exception as e:
+        registrar("equipo", "no se pudo reiniciar el equipo",
+                  conversation_id=id_interno(id_conversacion), error=e)
+        return jsonify({"error": "El sistema del ISP no aceptó el reinicio."}), 502
+
+    # Queda anotado para COMPROBARLO. 'ACCION_CONFIRMADA' no significa que el
+    # cliente tenga internet: significa que el equipo reinicio y volvio, que
+    # es lo unico que el sistema puede medir. Lo otro lo sabe el cliente.
+    persistencia.guardar_verificacion_pendiente(
+        tenant, id_conversacion, "reiniciar_ont",
+        {"espera_segundos": 120, "max_intentos": 3, "medicion_previa": previa})
+
+    # El rastro de quien lo hizo y por que. El motivo es obligatorio justamente
+    # para que este renglon exista: dentro de un mes, saber por que alguien
+    # corto el servicio vale mas que los segundos que costo escribirlo.
+    # 'autor_nombre' NO va al log -- solo al expediente.
+    registrar("equipo", "reinicio pedido por una persona",
+              conversation_id=id_interno(id_conversacion),
+              autor_usuario_id=autor_id, con_motivo=bool(motivo))
+
+    return jsonify({"ok": True, "reiniciado": True, "verificando": True,
+                    "autor": autor_nombre, "motivo": motivo})
 
 
 @app.get("/conversaciones/<id_conversacion>/equipo")

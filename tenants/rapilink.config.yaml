@@ -5106,6 +5106,35 @@ herramientas:
     reintentar_identificador_como:
       sn_onu: gpon_hex
 
+  - nombre: consultar_topologia_ont
+    tipo: http
+    descripcion: >
+      Donde esta conectado fisicamente el equipo del cliente: OLT, tarjeta,
+      puerto PON, indice de ONU, zona y caja (ODB/CTO). Sirve para saber si
+      una falla es de UN cliente o del tramo entero -- dos clientes en el
+      mismo puerto PON con la misma caida no son dos casos, son uno.
+      NO trae señal ni estado: para eso estan consultar_estado_ont y
+      consultar_senal_ont.
+    solo_lectura: true
+    # Sin 'cliente_final': a quien llama por su internet no le sirve saber
+    # en que tarjeta de la OLT esta, y es topologia de la red de la empresa.
+    roles_permitidos: [soporte]
+    base_url_ref: SMARTOLT_SUBDOMINIO
+    endpoint: /api/onu/get_onu_details/{sn_onu}
+    metodo: GET
+    auth_ref: SMARTOLT_API_KEY
+    auth_esquema: ""
+    auth_header: X-Token
+    extraer_de: onu_details
+    inyectar_sesion:
+      sn_onu: sn_onu
+    inyectados_obligatorios: [sn_onu]
+    # Mismo reintento que las otras de SmartOLT: 68 de las 4.966 ONUs solo
+    # responden con el serial en su forma hexadecimal (verificado en vivo,
+    # agosto 2026) y entre ellas hay clientes ACTIVOS.
+    reintentar_identificador_como:
+      sn_onu: gpon_hex
+
   - nombre: consultar_senal_ont
     tipo: http
     descripcion: >
