@@ -366,6 +366,32 @@ Se cargan **por empresa y cifradas** en `asistente.tenant_secrets` (ver `nucleo/
 | `WHATSAPP_APP_SECRET` | App → Settings → Basic. Firma los webhooks |
 | `WHATSAPP_VERIFY_TOKEN` | **Lo inventa la empresa.** Solo se usa en el handshake de alta |
 
+### `RAMA_DESPLIEGUE` — hace falta en la máquina desde la que se carga config
+
+```
+RAMA_DESPLIEGUE=fix/integracion-wisphub
+```
+
+Es la rama cuyo push **despliega**. La usan las guardas de `cli/cargar_config.py`
+y del editor de agentes para contestar una sola pregunta: *¿el código que
+entiende esta configuración ya está corriendo?* Si la configuración estrena un
+campo del esquema y el código todavía no está desplegado, el motor no puede
+leer su propia configuración —los modelos usan `extra="forbid"`— y **deja de
+atender**. Pasó el 03/09/2026.
+
+Sin esta variable la comprobación cae al remoto de la rama actual, que se
+satisface empujando a una rama de trabajo sin desplegar nada. Las guardas lo
+avisan en vez de degradarse en silencio, pero avisar no es comprobar:
+**ponerla**.
+
+No tiene valor por defecto a propósito. El nombre de la rama es de esta
+instalación, y escribirlo en `nucleo/` metía el nombre de un proveedor en el
+motor genérico — lo rechazó `tests/test_nucleo_sin_tenants.py`.
+
+En el contenedor productivo no hace falta: no hay repositorio git, y sin copia
+local el desfase que estas guardas persiguen no puede existir.
+
+
 La única que sigue en el `.env` (y en las variables de Dokploy) es `SECRETOS_CLAVE_MAESTRA`, que es la que descifra las demás. **Si se pierde hay que volver a cargar todos los secretos a mano** — no hay forma de recuperarlos, y esa es la propiedad buscada. Generarla con:
 
 ```
