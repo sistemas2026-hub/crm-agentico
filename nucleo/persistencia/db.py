@@ -1072,7 +1072,9 @@ def marcar_caso(tenant: str, conversation_id: str, caso: str | None,
                   conversation_id=id_interno(conversation_id), error=e)
 
 
-def conversaciones_ia_inactivas(tenant: str, horas: int) -> list[dict]:
+def conversaciones_ia_inactivas(tenant: str, horas: int, *, corte=None,
+                                cohorte: str = "normal",
+                                limite: int | None = None) -> list[dict]:
     """
     Las que atendio SOLO el asistente y quedaron en silencio.
 
@@ -1111,7 +1113,33 @@ def conversaciones_ia_inactivas(tenant: str, horas: int) -> list[dict]:
     Un caso del CRM o un ticket abierto NO bloquean por si solos: son
     expedientes aparte y cerrar la conversacion no los cierra (ver la
     docstring de transiciones.cerrar).
+
+    LAS DOS COHORTES
+    ----------------
+    'corte' es la frontera temporal (rollout_cutoff). Se compara contra la
+    ULTIMA ACTIVIDAD, no contra la fecha de creacion:
+
+      cohorte='normal'   ultima actividad >= corte. Lo que entro a la regla
+                         despues de activarla. Se cierra solo.
+      cohorte='backlog'  ultima actividad < corte. Lo que ya estaba. NO se
+                         toca salvo que alguien habilite el backfill, y
+                         entonces de a lotes, mas antiguas primero.
+
+    Sin 'corte' devuelve vacio, en las dos cohortes. Fail-closed: desplegar
+    este codigo no puede empezar a cerrar conversaciones sin que alguien haya
+    elegido desde cuando.
+
+    Una conversacion vieja que VOLVIO A HABLAR despues del corte es flujo
+    normal, no backlog: entro a la regla por la puerta de adelante.
+
+    'limite' solo tiene sentido en el backlog -- el flujo normal no se acota,
+    porque son las pocas del dia y acotarlas dejaria trabajo sin hacer sin
+    que nadie se entere.
     """
+    if corte is None:
+        return []
+    if cohorte not in ("normal", "backlog"):
+        raise ValueError(f"cohorte desconocida: {cohorte!r}")
     with sesion(tenant) as (cur, org):
         cur.execute(
             """select c.id, c.caso_id, c.ticket_operativo, c.usuario_externo,
@@ -1167,8 +1195,19 @@ def conversaciones_ia_inactivas(tenant: str, horas: int) -> list[dict]:
                        (select max(m.creado_en) from asistente.messages m
                          where m.conversation_id = c.id),
                        c.creado_en) < now() - make_interval(hours => %s)
-               order by c.actualizado_en""",
-            (org, int(horas)))
+                 -- LA FRONTERA. Misma expresion de "ultima actividad" que
+                 -- arriba, con el signo que corresponde a cada cohorte.
+                 and coalesce(
+                       (select max(m.creado_en) from asistente.messages m
+                         where m.conversation_id = c.id),
+                       c.creado_en) {comparacion} %s
+               order by c.actualizado_en
+               {limite}""".format(
+                comparacion=">=" if cohorte == "normal" else "<",
+                # Mas antiguas primero ya lo da el 'order by'; el limite solo
+                # se aplica al backlog (ver la docstring).
+                limite="limit %s" if (limite and cohorte == "backlog") else ""),
+            (org, int(horas), corte) + ((int(limite),) if (limite and cohorte == "backlog") else ()))
         return [dict(f) for f in cur.fetchall()]
 
 

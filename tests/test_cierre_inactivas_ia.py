@@ -9,24 +9,39 @@ resolvio sola nunca entran ahi, y ningun otro camino las cierra: quedan
 abiertas para siempre. Medido contra produccion el 22/09/2026 -- 151 asi, 145
 sin un mensaje en mas de una semana, y de las 4 creadas ese dia, las 4.
 
+POR QUE DOS COHORTES Y NO UN TOPE POR PASADA
+--------------------------------------------
+La primera version de la guarda era un tope, ordenando por mas antigua
+primero. Estaba mal de dos formas, las dos medidas:
+
+  - Ordenar por antiguedad cierra EL BACKLOG PRIMERO, que es exactamente lo
+    que el tope pretendia evitar.
+  - El reloj corre cada 60 minutos. Con tope 10 son 240 cierres por dia: las
+    147 historicas se iban en 0,6 dias, no en dos semanas.
+
+Ir mas despacio no era la respuesta. La frontera temporal si.
+
 LO QUE SE AFIRMA ACA ES EL EFECTO
 ---------------------------------
-Que NO se cierre lo que no corresponde, sobre todo el caso peligroso: si el
-ultimo mensaje lo escribio el CLIENTE, lo que hay es una pregunta sin
-contestar, y cerrarla seria enterrar trabajo sin hacer con cara de trabajo
-terminado.
+Que NO se cierre lo que no corresponde. Sobre todo dos cosas: el backlog
+mientras el backfill este apagado, y cualquier conversacion donde el ULTIMO
+que hablo fue el cliente -- ahi hay una pregunta sin contestar, y cerrarla
+seria enterrar trabajo sin hacer con cara de trabajo terminado.
 
-Sin base y sin red: se prueba la funcion de barrido con una persistencia
-falsa, y aparte se comprueba que la consulta SQL nombre cada guarda.
+Sin base y sin red: persistencia falsa para el barrido, y lectura del SQL
+para comprobar que cada guarda este declarada.
 """
-import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 RAIZ = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RAIZ))
 
-from nucleo.seguimiento import operativo  # noqa: E402
+import nucleo.persistencia.db as persistencia  # noqa: E402
+import nucleo.seguimiento.operativo as operativo  # noqa: E402
+from nucleo.config.schema import CierreInactivasIA  # noqa: E402
 
 fallos = []
 
@@ -37,76 +52,140 @@ def afirmar(cond, que):
         fallos.append(que)
 
 
-class ConfigFalsa:
-    class limites:
-        horas_inactividad_cierra = 24
+CORTE = datetime(2026, 9, 22, 15, 0, tzinfo=timezone.utc)
 
 
-class SinPlazo:
-    class limites:
-        horas_inactividad_cierra = None
+def cfg(habilitado=True, corte=CORTE, backfill=False, lote=10, horas=24):
+    return SimpleNamespace(
+        limites=SimpleNamespace(horas_inactividad_cierra=horas),
+        cierre_inactivas_ia=CierreInactivasIA(
+            habilitado=habilitado, rollout_cutoff=corte,
+            backfill_habilitado=backfill, backfill_lote=lote))
 
 
-# ── el plazo sale de donde debe ─────────────────────────────────────────────
-print("\n--- el plazo ---")
-visto = {}
+def conv(n):
+    return {"id": f"{n:08d}-0000-0000-0000-000000000000", "caso_id": None,
+            "ticket_operativo": None, "usuario_externo": "57300000000",
+            "nombre_cliente": "CLIENTE DE PRUEBA"}
 
 
-def falsa_lista(tenant, horas):
-    visto["horas"] = horas
-    return []
+class Falsa:
+    """Devuelve filas segun la cohorte que le pidan, y anota que le pidieron."""
+
+    def __init__(self, nuevas=0, backlog=0):
+        self.nuevas, self.backlog = nuevas, backlog
+        self.pedidos = []
+
+    def __call__(self, tenant, horas, *, corte=None, cohorte="normal", limite=None):
+        self.pedidos.append((cohorte, limite, corte))
+        if corte is None:
+            return []
+        n = self.nuevas if cohorte == "normal" else self.backlog
+        filas = [conv(i) for i in range(n)]
+        return filas[:limite] if (limite and cohorte == "backlog") else filas
 
 
-import nucleo.persistencia.db as persistencia  # noqa: E402
-original = persistencia.conversaciones_ia_inactivas
-persistencia.conversaciones_ia_inactivas = falsa_lista
-try:
-    operativo.cerrar_inactivas_de_ia(ConfigFalsa, "t")
-    afirmar(visto.get("horas") == 24,
-            "usa 'limites.horas_inactividad_cierra', que es el momento exacto en "
-            "que la conversacion deja de reutilizarse")
+_lista = persistencia.conversaciones_ia_inactivas
+_cerrar = operativo.cerrar_todo
 
-    r = operativo.cerrar_inactivas_de_ia(SinPlazo, "t")
-    afirmar(r["revisadas"] == 0 and r["cerradas"] == 0,
-            "sin plazo declarado NO cierra nada: una empresa que no lo pidio no "
-            "deberia encontrarse conversaciones cerradas solas")
 
-    # ── simular no toca nada ────────────────────────────────────────────────
-    print("\n--- simular ---")
-    cerradas = []
-    persistencia.conversaciones_ia_inactivas = lambda t, h: [
-        {"id": "11111111-1111-1111-1111-111111111111", "caso_id": None,
-         "ticket_operativo": None, "usuario_externo": "57300", "nombre_cliente": "X"}]
-    original_cerrar = operativo.cerrar_todo
-    operativo.cerrar_todo = lambda *a, **k: (cerradas.append(a) or
-                                             {"conversacion": True, "ticket": False, "caso": False})
+def correr(config, nuevas=0, backlog=0, simular=False, espia=None):
+    cerrados = []
+    persistencia.conversaciones_ia_inactivas = espia or Falsa(nuevas, backlog)
+    operativo.cerrar_todo = lambda *a, **k: (
+        cerrados.append(a[2]["id"]) or
+        {"conversacion": True, "ticket": False, "caso": False})
     try:
-        r = operativo.cerrar_inactivas_de_ia(ConfigFalsa, "t", simular=True)
-        afirmar(r["revisadas"] == 1 and r["cerradas"] == 0 and not cerradas,
-                "con simular=True cuenta pero NO cierra")
-        afirmar(len(r.get("serian", [])) == 1,
-                "y devuelve cuales serian, para poder mirarlas antes")
-        afirmar("57300" not in str(r) and "X" not in str(r.get("serian")),
-                "sin el identificador del cliente ni su nombre en el informe")
-
-        r = operativo.cerrar_inactivas_de_ia(ConfigFalsa, "t")
-        afirmar(r["cerradas"] == 1 and len(cerradas) == 1,
-                "sin simular, cierra")
-        afirmar(cerradas[0][3] == "" and cerradas[0][4] if len(cerradas[0]) > 4 else True,
-                "y no manda texto al cliente: estas no tienen ticket que comentar")
+        r = operativo.cerrar_inactivas_de_ia(config, "t", simular=simular)
+        r["_cerrados"] = cerrados
+        return r
     finally:
-        operativo.cerrar_todo = original_cerrar
-finally:
-    persistencia.conversaciones_ia_inactivas = original
+        persistencia.conversaciones_ia_inactivas = _lista
+        operativo.cerrar_todo = _cerrar
 
-# ── la consulta nombra cada guarda ──────────────────────────────────────────
+
+# ── los dos interruptores ────────────────────────────────────────────────────
+print("\n--- fail-closed: dos interruptores, y los dos apagan ---")
+
+r = correr(cfg(habilitado=False), nuevas=5, backlog=100)
+afirmar(r["cerradas"] == 0 and "apagado" in r.get("motivo", ""),
+        "con 'habilitado' en false no cierra nada, aunque haya 105 candidatas")
+
+r = correr(cfg(corte=None), nuevas=5, backlog=100)
+afirmar(r["cerradas"] == 0 and "rollout_cutoff" in r.get("motivo", ""),
+        "SIN corte no cierra nada: desplegar el codigo no puede empezar a "
+        "cerrar conversaciones sin que alguien elija desde cuando")
+
+r = correr(cfg(horas=0), nuevas=5)
+afirmar(r["cerradas"] == 0,
+        "y sin plazo de inactividad declarado, tampoco")
+
+afirmar(CierreInactivasIA().habilitado is False
+        and CierreInactivasIA().rollout_cutoff is None
+        and CierreInactivasIA().backfill_habilitado is False,
+        "los tres vienen apagados por defecto: un tenant que no lo pidio no se "
+        "encuentra conversaciones cerradas solas")
+
+# ── las dos cohortes ─────────────────────────────────────────────────────────
+print("\n--- las dos cohortes ---")
+
+r = correr(cfg(), nuevas=3, backlog=147)
+afirmar(r["cerradas"] == 3,
+        "cierra el flujo normal (3) y NO toca el backlog, aunque sean 147")
+afirmar(r["backlog_elegible"] == 147,
+        "pero informa cuantas hay en el backlog: sin ese numero no se sabe si avanza")
+afirmar(r["backfill_que_cerraria"] == 0,
+        "con el backfill apagado no cerraria ninguna vieja")
+
+r = correr(cfg(backfill=True, lote=10), nuevas=3, backlog=147)
+afirmar(r["cerradas"] == 13,
+        "con backfill encendido: las 3 nuevas MAS el lote de 10")
+afirmar(r["backfill_que_cerraria"] == 10,
+        "el lote se respeta -- 10, no 147")
+
+r = correr(cfg(backfill=True, lote=10), nuevas=50, backlog=147)
+afirmar(r["cerradas"] == 60,
+        "el flujo normal NO consume el cupo del backfill: 50 + 10, no 10")
+
+r = correr(cfg(backfill=True, lote=10), nuevas=0, backlog=4)
+afirmar(r["cerradas"] == 4,
+        "si el backlog es menor que el lote, cierra lo que hay y no falla")
+
+# ── simular ──────────────────────────────────────────────────────────────────
+print("\n--- simular ---")
+
+r = correr(cfg(backfill=True), nuevas=3, backlog=147, simular=True)
+afirmar(r["cerradas"] == 0 and not r["_cerrados"],
+        "simular cuenta pero NO cierra")
+afirmar(r["nuevas_elegibles"] == 3 and r["backlog_elegible"] == 147
+        and r["backfill_que_cerraria"] == 10,
+        "e informa las dos cohortes por separado, con lo que haria el backfill")
+afirmar("57300000000" not in str(r) and "CLIENTE DE PRUEBA" not in str(r),
+        "sin el telefono del cliente ni su nombre en el informe")
+
+# ── que le pide a la base ────────────────────────────────────────────────────
+print("\n--- lo que le pide a la base ---")
+
+espia = Falsa(1, 1)
+correr(cfg(backfill=True, lote=7), espia=espia, simular=True)
+cohortes = [p[0] for p in espia.pedidos]
+afirmar("normal" in cohortes and "backlog" in cohortes,
+        "pide las dos cohortes por separado, no una lista que filtra despues")
+afirmar(any(p[0] == "backlog" and p[1] == 7 for p in espia.pedidos),
+        "y el lote viaja a la consulta -- no se recorta en memoria despues de "
+        "traer 147 filas")
+afirmar(all(p[2] == CORTE for p in espia.pedidos),
+        "las dos reciben el MISMO corte: una frontera, no dos")
+
+# ── la consulta declara cada guarda ──────────────────────────────────────────
 print("\n--- la consulta de elegibilidad ---")
-sql = (RAIZ / "nucleo" / "persistencia" / "db.py").read_text(encoding="utf-8")
-i = sql.index("def conversaciones_ia_inactivas")
-j = sql.index("def conversaciones_sin_respuesta", i)
-consulta = sql[i:j]
 
-guardas = [
+fuente = (RAIZ / "nucleo" / "persistencia" / "db.py").read_text(encoding="utf-8")
+i = fuente.index("def conversaciones_ia_inactivas")
+j = fuente.index("def conversaciones_sin_respuesta", i)
+consulta = fuente[i:j]
+
+for fragmento, que in [
     ("not coalesce(c.escalada_a_humano, false)", "no cierra una escalada"),
     ("not coalesce(c.necesita_atencion_humana, false)", "ni una marcada para revision"),
     ("coalesce(c.tomada_por, '') = ''", "ni una que alguien tomo"),
@@ -116,19 +195,18 @@ guardas = [
     ("not coalesce(c.conservar, false)", "ni una marcada para conservar"),
     ("acciones_propuestas", "ni con una accion propuesta sin resolver"),
     ("sincronizaciones_externas", "ni con una sincronizacion sin confirmar"),
-    ("c.ticket_operativo is null", "ni una con ticket del ISP: eso haria un POST externo"),
+    ("c.ticket_operativo is null", "ni una con ticket del ISP: seria un POST externo"),
     ("c.caso_id is null",
-     "ni una con caso del CRM -- sin llamadas externas el barrido es idempotente "
-     "y por eso SI se puede programar, al reves que 'cerrar_vencidas'"),
+     "ni una con caso del CRM -- sin llamadas externas el barrido es idempotente, "
+     "que es lo que le falta a 'cerrar_vencidas' y por eso aquel no esta en el reloj"),
     ("order by m.creado_en desc limit 1) = 'assistant'",
-     "EL ULTIMO MENSAJE TIENE QUE SER DEL ASISTENTE -- si hablo el cliente, "
-     "hay una pregunta sin contestar"),
-]
-for fragmento, que in guardas:
+     "EL ULTIMO MENSAJE TIENE QUE SER DEL ASISTENTE -- si hablo el cliente hay "
+     "una pregunta sin contestar"),
+]:
     afirmar(fragmento in consulta, que)
 
-afirmar("'humano'" not in consulta.split("order by m.creado_en desc")[0].split("m.rol in")[-1],
-        "las notas internas no cuentan como turno de nadie")
+afirmar("if corte is None:" in consulta and "return []" in consulta,
+        "y sin corte devuelve vacio antes de tocar la base")
 
 print("\n" + "=" * 62)
 if fallos:

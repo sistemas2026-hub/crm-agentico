@@ -48,7 +48,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Annotated, Any, ClassVar, Literal
 
@@ -2178,6 +2178,50 @@ class Escalamiento(Base):
     intentar_resolver_antes: list[str] = Field(default_factory=list)
 
 
+class CierreInactivasIA(Base):
+    """
+    El cierre automatico de lo que atendio SOLO el asistente.
+
+    POR QUE DOS COHORTES Y NO UN TOPE
+    ---------------------------------
+    La primera version de esta guarda era un tope por pasada, ordenando por
+    mas antigua primero. Estaba mal de dos formas, las dos medidas:
+
+      - Ordenar por antiguedad cierra EL BACKLOG PRIMERO, que es exactamente
+        lo que el tope pretendia evitar.
+      - El reloj corre cada 60 minutos. Con tope 10 eso son 240 cierres por
+        dia: las 147 historicas se iban en 0,6 dias, no en dos semanas.
+
+    Lo que hace falta no es ir mas despacio: es una FRONTERA TEMPORAL. Las
+    conversaciones que entran a la regla despues del corte son flujo normal y
+    se cierran solas; las anteriores son backlog y no se tocan hasta que
+    alguien lo habilite a proposito.
+
+    'rollout_cutoff' es la marca. Sin ella no se cierra NADA -- ni flujo ni
+    backlog. Es fail-closed a proposito: desplegar este codigo no puede
+    empezar a cerrar conversaciones sin que alguien haya elegido desde cuando.
+
+    UNA CONVERSACION VIEJA QUE VUELVE A HABLAR ES FLUJO NORMAL
+    ----------------------------------------------------------
+    El corte se compara contra la ULTIMA ACTIVIDAD, no contra la fecha de
+    creacion. Una de 2026-08 que recibio un mensaje despues del corte ya no es
+    backlog: entro a la regla nueva por la puerta de adelante.
+    """
+    # Apagado por defecto. El interruptor propio de ESTE trabajo: apagar el
+    # reloj entero para frenarlo se llevaria puestos los otros dos, que son
+    # legitimos.
+    habilitado: bool = False
+
+    # Desde cuando cuenta la regla. Sin esto no se cierra nada.
+    rollout_cutoff: datetime | None = None
+
+    # El backlog anterior al corte. Aparte, y apagado hasta que se mire.
+    backfill_habilitado: bool = False
+    # Cuantas del backlog por pasada. Con el reloj cada hora, 10 son 240 al
+    # dia -- el numero importa y por eso se configura, no se fija en codigo.
+    backfill_lote: int = Field(default=10, ge=1, le=500)
+
+
 class Limites(Base):
     max_conversaciones_dia: int | None = None
     max_costo_usd_mes: float | None = None
@@ -2866,6 +2910,11 @@ class TenantConfig(Base):
     # decisiones comerciales de cada empresa, no de la plataforma.
     promesas_pago: PromesasPago = Field(default_factory=PromesasPago)
     limites: Limites = Field(default_factory=Limites)
+    # El cierre de lo que atendio solo el asistente. Seccion propia y no un
+    # campo mas de 'limites' porque tiene cuatro perillas que se mueven
+    # juntas, y porque su interruptor tiene que poder apagarse sin tocar nada
+    # mas. Ver CierreInactivasIA.
+    cierre_inactivas_ia: CierreInactivasIA = Field(default_factory=CierreInactivasIA)
     evaluacion: Evaluacion = Field(default_factory=Evaluacion)
     manual: Manual = Field(default_factory=Manual)
     importacion_tickets: ImportacionTickets = Field(

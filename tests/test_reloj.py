@@ -330,16 +330,21 @@ try:
     # ------------------------------------------------------------------
     print("\n" + "cerrar las inactivas de la IA")
 
+    # El reloj SIEMPRE delega; quien decide si corresponde cerrar es el
+    # barrido, que tiene los dos interruptores y la frontera temporal. La
+    # regla vive en UN solo lugar a proposito: '_vencimientos' arma su seco a
+    # mano porque su barrido no tiene modo simulacion, y eso ya son dos
+    # motores -- uno que decide y otro que explica. Aca no se repite.
     with Escenario(["a"], {"a": config_falsa(horas=0, horas_inactividad=24)}) as e:
         reloj.main(["--once"])
     revisar(len(e.inactivas.llamadas) == 1,
-            "con plazo declarado, el reloj lo corre")
+            "el reloj delega en el barrido, que es quien decide")
 
-    with Escenario(["a"], {"a": config_falsa(horas=0, horas_inactividad=0)}) as e:
-        reloj.main(["--once"])
-    revisar(not e.inactivas.llamadas,
-            "sin plazo NO lo corre: un tenant que no lo pidio no deberia "
-            "encontrarse conversaciones cerradas solas")
+    with Escenario(["a"], {"a": config_falsa(horas=0, horas_inactividad=24)}) as e:
+        reloj.main(["--once", "--dry-run"])
+    revisar(e.inactivas.llamadas
+            and e.inactivas.llamadas[-1][1].get("simular") is True,
+            "y en seco le pasa 'simular=True' en vez de reimplementar la regla")
 
     # EL AISLAMIENTO, que es a lo que existe este archivo. Sin esto, el tercer
     # trabajo entro al reloj sin estar en la lista que la docstring promete.

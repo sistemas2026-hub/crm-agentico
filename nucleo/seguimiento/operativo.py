@@ -179,62 +179,101 @@ INTERVALO_BARRIDO_SEGUNDOS = 3600
 
 def cerrar_inactivas_de_ia(config, tenant: str, simular: bool = False) -> dict:
     """
-    Cierra las conversaciones que atendio SOLO el asistente y quedaron mudas.
+    Cierra las que atendio SOLO el asistente y quedaron mudas.
 
-    POR QUE EL PLAZO ES 'limites.horas_inactividad_cierra' Y NO UN NUMERO NUEVO
-    ---------------------------------------------------------------------------
-    Ese valor ya existe y ya significa exactamente esto: pasado ese tiempo, un
-    mensaje del cliente NO reutiliza la conversacion, abre una nueva (ver el
-    'horas_inactividad' de persistencia.conversacion_abierta). O sea que a
-    partir de esa marca la fila ya es inalcanzable -- cerrarla no le quita
-    nada a nadie.
+    DOS COHORTES, Y ESA ES LA GUARDA
+    --------------------------------
+    'cierre_inactivas_ia.rollout_cutoff' parte el mundo en dos:
 
-    Antes de esa marca si costaria: el cliente que vuelve perderia la
-    identidad verificada y los identificadores del equipo guardados en
-    'datos_sesion', y tendria que verificarse de nuevo para que el asistente
-    pueda mirarle la ONU. Por eso el plazo no es una constante nueva ni un
-    parametro aparte: es EL MISMO, y moverlo sin mover aquel volveria a abrir
-    esa ventana de perdida.
+      flujo normal  ultima actividad >= corte. Se cierra solo.
+      backlog       ultima actividad <  corte. NO se toca hasta que alguien
+                    encienda 'backfill_habilitado', y entonces de a
+                    'backfill_lote' por pasada.
 
-    Sin valor declarado no hace nada, igual que 'cerrar_vencidas': una empresa
-    que no lo pidio no deberia encontrarse conversaciones cerradas solas.
+    La primera version de esta guarda era un tope por pasada, sin frontera.
+    Estaba mal de dos formas medidas: ordenaba por mas antigua primero --o
+    sea, cerraba el backlog PRIMERO, justo lo que el tope queria evitar-- y
+    con el reloj corriendo cada 60 minutos un tope de 10 son 240 cierres por
+    dia: las 147 historicas se iban en 0,6 dias. Ir mas despacio no era la
+    respuesta; la frontera si.
 
-    EL DESENLACE ES 'sin_respuesta_cliente', Y NO ES 'resuelto'
-    -----------------------------------------------------------
-    Lo fija la transicion (por='plazo', ver transiciones.cerrar). Es lo unico
-    que se sabe: el asistente contesto y el cliente no volvio. Que la averia
-    se haya solucionado no lo dice nadie -- y escribirlo seria inventar un
-    dato en la tabla que existe justamente para aprender de los cierres.
+    SIN CORTE NO CIERRA NADA
+    ------------------------
+    Ni flujo ni backlog. Desplegar este codigo no puede empezar a cerrar
+    conversaciones sin que alguien haya elegido desde cuando.
 
-    'simular' devuelve las que se cerrarian, SIN cerrarlas. Es lo que hace
-    falta para mirar una vez antes de soltarlo sobre un backlog de 145.
+    EL INTERRUPTOR ES PROPIO
+    ------------------------
+    'cierre_inactivas_ia.habilitado' apaga ESTE trabajo. Frenarlo apagando el
+    reloj entero se llevaria puestos los otros dos, que son legitimos.
+
+    EL PLAZO SIGUE SIENDO 'limites.horas_inactividad_cierra'
+    --------------------------------------------------------
+    Es el momento exacto en que la conversacion deja de reutilizarse: a
+    partir de ahi cerrarla no le quita nada a nadie, y antes le costaria al
+    cliente reverificar identidad y perder el serial de la ONU.
+
+    EL DESENLACE ES 'sin_respuesta_cliente', NO 'resuelto'
+    ------------------------------------------------------
+    Lo fija la transicion (por='plazo'). Es lo unico que se sabe: el
+    asistente contesto y el cliente no volvio.
+
+    'simular' informa las DOS cohortes por separado y no cierra nada.
     """
     from nucleo.persistencia import db as persistencia
 
+    ajustes = getattr(config, "cierre_inactivas_ia", None)
     horas = getattr(config.limites, "horas_inactividad_cierra", None)
-    resumen = {"revisadas": 0, "cerradas": 0, "horas": horas, "simulado": simular}
+    corte = getattr(ajustes, "rollout_cutoff", None) if ajustes else None
+
+    resumen = {"revisadas": 0, "cerradas": 0, "horas": horas,
+               "simulado": simular, "nuevas_elegibles": 0,
+               "backlog_elegible": 0, "backfill_que_cerraria": 0,
+               "backfill_habilitado": bool(getattr(ajustes, "backfill_habilitado", False))}
+
+    if not ajustes or not ajustes.habilitado:
+        resumen["motivo"] = "apagado: cierre_inactivas_ia.habilitado esta en false"
+        return resumen
     if not horas or horas <= 0:
+        resumen["motivo"] = "el tenant no declara limites.horas_inactividad_cierra"
+        return resumen
+    if corte is None:
+        resumen["motivo"] = ("sin cierre_inactivas_ia.rollout_cutoff no se cierra "
+                             "nada: hay que elegir desde cuando cuenta la regla")
         return resumen
 
+    lote = getattr(ajustes, "backfill_lote", 10)
     try:
-        mudas = persistencia.conversaciones_ia_inactivas(tenant, horas)
+        nuevas = persistencia.conversaciones_ia_inactivas(
+            tenant, horas, corte=corte, cohorte="normal")
+        backlog = persistencia.conversaciones_ia_inactivas(
+            tenant, horas, corte=corte, cohorte="backlog", limite=lote)
+        # Cuantas hay en total en el backlog, no solo el lote: es el numero
+        # que dice cuanto falta, y sin el no se sabe si esto avanza.
+        backlog_total = persistencia.conversaciones_ia_inactivas(
+            tenant, horas, corte=corte, cohorte="backlog")
     except Exception as e:
         registrar("operativo", "no se pudieron listar las inactivas de la IA",
                   tenant=tenant, error=e)
         return resumen
 
-    resumen["revisadas"] = len(mudas)
+    resumen["nuevas_elegibles"] = len(nuevas)
+    resumen["backlog_elegible"] = len(backlog_total)
+    a_cerrar = list(nuevas)
+    if resumen["backfill_habilitado"]:
+        resumen["backfill_que_cerraria"] = len(backlog)
+        # El flujo normal NO consume el cupo del backfill: son dos listas.
+        a_cerrar += backlog
+    resumen["revisadas"] = len(a_cerrar)
+
     if simular:
-        # Solo los identificadores internos: el nombre del cliente no tiene
-        # por que salir en un informe de mantenimiento.
-        resumen["serian"] = [id_interno(c["id"]) for c in mudas]
+        resumen["serian"] = [id_interno(c["id"]) for c in a_cerrar]
         return resumen
 
-    for conv in mudas:
-        # Mismo camino que el barrido de escaladas, a proposito: un segundo
-        # cierre "parecido" es como dos caminos terminan divergiendo. Estas no
-        # tienen ticket ni caso --nunca se escalaron-- asi que 'cerrar_todo'
-        # solo cierra la conversacion y el texto no se usa.
+    for conv in a_cerrar:
+        # Mismo camino que el barrido de escaladas. Estas no tienen ticket ni
+        # caso --lo exige la consulta-- asi que 'cerrar_todo' solo cierra la
+        # conversacion y el texto no se usa.
         hecho = cerrar_todo(config, tenant, conv, "", por="plazo")
         if hecho["conversacion"]:
             resumen["cerradas"] += 1

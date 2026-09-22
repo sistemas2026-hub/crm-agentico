@@ -259,31 +259,19 @@ def _inactivas_de_ia(config, tenant: str, seco: bool) -> dict:
     La cabecera de este archivo explica que 'cerrar_vencidas' NO esta aca
     porque dos pasadas simultaneas publican el texto de cierre dos veces en el
     ticket del proveedor. Esta exige 'ticket_operativo is null' y 'caso_id is
-    null' en su propia consulta de elegibilidad, asi que no hace NINGUNA
-    llamada externa: lo unico que ejecuta es 'transiciones.cerrar', que en la
-    segunda pasada devuelve 'ya_cerrada' y no escribe. Idempotente por
-    construccion, no por suerte.
+    null' en su propia consulta, asi que no hace NINGUNA llamada externa: lo
+    unico que ejecuta es 'transiciones.cerrar', que en la segunda pasada
+    devuelve 'ya_cerrada' y no escribe.
 
-    En seco se llama a la MISMA consulta que decide, por el mismo motivo que
-    en '_vencimientos': dos motores de reglas terminan discrepando justo
-    cuando hace falta confiar en el segundo.
+    EL SECO NO REIMPLEMENTA NADA
+    ----------------------------
+    Llama al MISMO barrido con 'simular=True', que ya informa las dos cohortes
+    por separado. '_vencimientos' arma su seco a mano porque su barrido no
+    tiene modo simulacion; este si, y duplicar la regla aca seria tener dos
+    motores -- uno que decide y otro que explica-- que terminan discrepando
+    justo cuando hace falta confiar en el segundo.
     """
-    horas = getattr(config.limites, "horas_inactividad_cierra", None)
-    if not horas or horas <= 0:
-        return {"plazo_horas": 0, "revisadas": 0, "cerradas": 0,
-                "haria": "nada: el tenant no declara plazo de inactividad"}
-    if seco:
-        from nucleo.persistencia import db
-
-        candidatas = db.conversaciones_ia_inactivas(tenant, horas)
-        return {"plazo_horas": horas, "revisadas": len(candidatas),
-                "cerradas": 0, "seco": True,
-                "haria": (f"cerrar {len(candidatas)} conversacion(es) que "
-                          f"atendio solo el asistente -- sin ticket ni caso, "
-                          f"desenlace 'sin_respuesta_cliente'")
-                         if candidatas else "nada: no hay inactivas de la IA"}
-    return {"plazo_horas": horas,
-            **operativo.cerrar_inactivas_de_ia(config, tenant)}
+    return operativo.cerrar_inactivas_de_ia(config, tenant, simular=seco)
 
 
 def _importacion(config, tenant: str, seco: bool, ahora: datetime) -> dict:
