@@ -4,9 +4,7 @@ import '../../core/estado/ordenes_jornada.dart';
 import '../../core/mock/field_mock_data.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/dexter_empty_state.dart';
-import '../../core/widgets/dexter_metric_tile.dart';
 import 'estado_trabajo.dart';
-import 'seleccion_jornada.dart';
 import 'trabajo_vista.dart';
 import 'widgets/tarjeta_trabajo.dart';
 
@@ -35,8 +33,12 @@ class TrabajoScreen extends StatefulWidget {
 }
 
 class _TrabajoScreenState extends State<TrabajoScreen> {
-  PestanaTrabajo _pestana = PestanaTrabajo.hoy;
-  FamiliaTrabajo? _familia;
+  PestanaTrabajo _pestana = PestanaTrabajo.todos;
+  SegmentoEntidad _segmento = SegmentoEntidad.ordenes;
+
+  /// Lo que el técnico escribió en el buscador. Filtra de verdad, y sobre lo
+  /// que ya está en el teléfono: sin señal también busca.
+  final TextEditingController _busqueda = TextEditingController();
 
   @override
   void initState() {
@@ -50,6 +52,7 @@ class _TrabajoScreenState extends State<TrabajoScreen> {
   @override
   void dispose() {
     widget.ordenes.removeListener(_alCambiar);
+    _busqueda.dispose();
     super.dispose();
   }
 
@@ -57,13 +60,30 @@ class _TrabajoScreenState extends State<TrabajoScreen> {
     if (mounted) setState(() {});
   }
 
-  List<TrabajoVista> _deLaPestana(PestanaTrabajo pestana) {
+  /// Lo que se ve: el segmento, el filtro de estado y la búsqueda, en ese
+  /// orden. Ninguno de los tres toca la base: filtran la lista que ya está.
+  List<TrabajoVista> _visibles() {
     final ahora = DateTime.now();
+    final texto = _busqueda.text.trim().toLowerCase();
+
     return widget.ordenes.trabajos
+        .where(_segmento.incluye)
         .where((TrabajoVista t) =>
-            perteneceA(pestana, t.estado, t.compromiso, ahora: ahora))
-        .where((TrabajoVista t) => _familia == null || t.familia == _familia)
+            perteneceA(_pestana, t.estado, t.compromiso, ahora: ahora))
+        .where((TrabajoVista t) => texto.isEmpty || _coincide(t, texto))
         .toList();
+  }
+
+  /// Busca por lo que el técnico tiene a mano para reconocer un trabajo: el
+  /// número, el cliente, la dirección y el tipo.
+  static bool _coincide(TrabajoVista t, String texto) {
+    final campos = <String>[
+      t.numero?.toString() ?? '',
+      t.clienteNombre,
+      t.direccion,
+      t.tipoNombre,
+    ];
+    return campos.any((String c) => c.toLowerCase().contains(texto));
   }
 
   @override
@@ -75,15 +95,17 @@ class _TrabajoScreenState extends State<TrabajoScreen> {
       );
     }
 
-    final visibles = _deLaPestana(_pestana);
+    final visibles = _visibles();
 
     return ColoredBox(
       color: AppColors.fondo,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          _resumen(),
-          _pestanas(),
+          _franjaLocal(),
+          _encabezado(),
+          _segmentos(),
+          _buscador(),
           _filtros(),
           Expanded(
             child: RefreshIndicator(
@@ -119,8 +141,13 @@ class _TrabajoScreenState extends State<TrabajoScreen> {
                             AppSpacing.margen,
                             AppSpacing.xl,
                           ),
-                          itemCount: visibles.length,
+                          itemCount: visibles.length + 1,
                           itemBuilder: (BuildContext contexto, int i) {
+                            // CAMPO-DATA-036 · El pie del diseño. La marca del
+                            // último envío bueno todavía no la guarda la cola.
+                            if (i == visibles.length) {
+                              return _pieDeSincronizacion();
+                            }
                             final trabajo = visibles[i];
                             return TarjetaTrabajo(
                               trabajo: trabajo,
@@ -141,42 +168,275 @@ class _TrabajoScreenState extends State<TrabajoScreen> {
     );
   }
 
-  Widget _resumen() {
-    final trabajos = widget.ordenes.trabajos;
-    final activos = SeleccionJornada.activos(trabajos).length;
-    final enMarcha = SeleccionJornada.enCurso(trabajos).length;
-    final terminados = SeleccionJornada.terminados(trabajos).length;
+  /// El pie de la lista: cuándo se habló con el servidor por última vez.
+  Widget _pieDeSincronizacion() {
+    return Padding(
+      padding: const EdgeInsets.only(top: AppSpacing.lg),
+      child: Column(
+        children: <Widget>[
+          const Icon(Icons.check_circle, size: 20, color: AppColors.exito),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            'No hay más órdenes asignadas en este ciclo de despacho',
+            textAlign: TextAlign.center,
+            style: AppTypography.etiquetaChica,
+          ),
+          if (widget.mostrarDatosFuturos) ...<Widget>[
+            const SizedBox(height: AppSpacing.xs),
+            // CAMPO-DATA-036 · Cuándo se refrescó la cuadrilla.
+            Text(
+              'Último refresco de cuadrilla: '
+              '${FieldMockData.ultimaSincronizacion.toLowerCase()}',
+              textAlign: TextAlign.center,
+              style: AppTypography.etiquetaChica.copyWith(
+                color: AppColors.outline,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// La franja del diseño: cuántas órdenes hay en el teléfono y si lo que se
+  /// registró ya viajó. Las dos cosas son reales.
+  Widget _franjaLocal() {
+    final int guardadas = widget.ordenes.trabajos.length;
 
     return Container(
-      color: AppColors.superficie,
-      padding: const EdgeInsets.all(AppSpacing.margen),
+      color: AppColors.surfaceContainerLow,
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.margen,
+        vertical: 6,
+      ),
+      child: Row(
+        children: <Widget>[
+          const Icon(Icons.offline_pin, size: 14, color: AppColors.exitoTexto),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              '$guardadas ${guardadas == 1 ? 'OT sincronizada' : 'OTs sincronizadas'} '
+              'localmente',
+              style: AppTypography.etiquetaChica,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          if (widget.mostrarDatosFuturos)
+            // CAMPO-DATA-036 · Cuándo fue el último envío bueno.
+            Text(
+              'Sync ${FieldMockData.ultimaSincronizacion.toLowerCase()}',
+              style: AppTypography.etiquetaChica.copyWith(
+                color: AppColors.exitoTexto,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// "Mi Trabajo" y cuántas órdenes tiene la jornada. Dato real.
+  Widget _encabezado() {
+    final int total = widget.ordenes.trabajos.length;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.margen,
+        AppSpacing.md,
+        AppSpacing.margen,
+        AppSpacing.sm,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text('Mi Trabajo', style: AppTypography.tituloGrande),
+          Text(
+            total == 1
+                ? '1 orden asignada para la jornada de hoy'
+                : '$total órdenes asignadas para la jornada de hoy',
+            style: AppTypography.cuerpoChico,
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// El buscador del diseño. El lector de código de barras todavía no existe:
+  /// se ve en la demostración y avisa que falta, en vez de fingir que escanea.
+  Widget _buscador() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.margen,
+        0,
+        AppSpacing.margen,
+        AppSpacing.sm,
+      ),
       child: Row(
         children: <Widget>[
           Expanded(
-            child: DexterMetricTile(
-              etiqueta: 'Te quedan',
-              valor: '$activos',
-              icono: Icons.assignment_outlined,
-              compacto: true,
-              tono: activos == 0 ? DexterMetricTone.exito : DexterMetricTone.neutro,
+            child: Container(
+              height: AppSpacing.objetivoTactil,
+              decoration: const BoxDecoration(
+                color: AppColors.surfaceContainerLowest,
+                borderRadius: AppRadius.brTarjeta,
+              ),
+              child: TextField(
+                controller: _busqueda,
+                onChanged: (_) => setState(() {}),
+                style: AppTypography.cuerpo,
+                decoration: InputDecoration(
+                  border: InputBorder.none,
+                  isDense: true,
+                  hintText: 'Buscar por cliente, dirección u OT',
+                  hintStyle: AppTypography.cuerpoChico,
+                  prefixIcon: const Icon(Icons.search, size: 18, color: AppColors.outline),
+                  suffixIcon: _busqueda.text.isEmpty
+                      ? null
+                      : IconButton(
+                          icon: const Icon(Icons.close, size: 18),
+                          onPressed: () => setState(_busqueda.clear),
+                        ),
+                ),
+              ),
             ),
           ),
-          Expanded(
-            child: DexterMetricTile(
-              etiqueta: 'En proceso',
-              valor: '$enMarcha',
-              icono: Icons.play_arrow,
-              compacto: true,
-              tono: DexterMetricTone.info,
+          if (widget.mostrarDatosFuturos) ...<Widget>[
+            const SizedBox(width: AppSpacing.sm),
+            // CAMPO-DATA-044 · Lector de código en el equipo del cliente.
+            _BotonCuadrado(
+              icono: Icons.qr_code_scanner,
+              etiquetaSemantica: 'Escanear equipo',
+              alTocar: () => ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text(FieldMockData.escanerPendiente)),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// El control segmentado del diseño: de qué se está hablando. No es lo
+  /// mismo una OT que un ticket que una instalación, y la aplicación no los
+  /// mezcla en un mismo contador.
+  Widget _segmentos() {
+    int cuantos(SegmentoEntidad segmento) =>
+        widget.ordenes.trabajos.where(segmento.incluye).length;
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(
+        AppSpacing.margen,
+        0,
+        AppSpacing.margen,
+        AppSpacing.sm,
+      ),
+      padding: const EdgeInsets.all(AppSpacing.xs),
+      decoration: const BoxDecoration(
+        color: AppColors.surfaceContainer,
+        borderRadius: AppRadius.brTarjeta,
+      ),
+      child: Row(
+        children: <Widget>[
+          for (final SegmentoEntidad segmento in SegmentoEntidad.values)
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 2),
+                child: _Pestana(
+                  texto: segmento.etiqueta,
+                  cantidad: cuantos(segmento),
+                  activa: segmento == _segmento,
+                  colorContador: segmento == _segmento
+                      ? AppColors.primary
+                      : AppColors.surfaceContainerHighest,
+                  onTap: () => setState(() => _segmento = segmento),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// Los filtros de estado, en fila, y debajo la cinta que explica de qué
+  /// entidad se habla. El diseño la pone ahí a propósito: confundir una OT con
+  /// un ticket es la confusión que más cuesta en campo.
+  Widget _filtros() {
+    int cuantos(PestanaTrabajo filtro) {
+      final ahora = DateTime.now();
+      return widget.ordenes.trabajos
+          .where(_segmento.incluye)
+          .where((TrabajoVista t) =>
+              perteneceA(filtro, t.estado, t.compromiso, ahora: ahora))
+          .length;
+    }
+
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppColors.surface,
+        border: Border(bottom: BorderSide(color: AppColors.surfaceContainerHigh)),
+      ),
+      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.margen),
+            child: Row(
+              children: <Widget>[
+                for (final PestanaTrabajo filtro in PestanaTrabajo.values) ...<Widget>[
+                  if (filtro != PestanaTrabajo.values.first)
+                    const SizedBox(width: AppSpacing.sm),
+                  _ChipFiltro(
+                    texto: filtro == PestanaTrabajo.todos
+                        ? filtro.etiqueta
+                        : '${filtro.etiqueta} (${cuantos(filtro)})',
+                    activo: _pestana == filtro,
+                    onTap: () => setState(() => _pestana = filtro),
+                  ),
+                ],
+              ],
             ),
           ),
+          const SizedBox(height: AppSpacing.sm),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.margen),
+            child: _cintaDeArquitectura(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Qué significa lo que se está mirando. Texto fijo, no un dato.
+  Widget _cintaDeArquitectura() {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.sm),
+      decoration: const BoxDecoration(
+        color: AppColors.surfaceContainerLow,
+        borderRadius: AppRadius.brCampo,
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          const Icon(Icons.account_tree, size: 14, color: AppColors.secondary),
+          const SizedBox(width: 6),
           Expanded(
-            child: DexterMetricTile(
-              etiqueta: 'Terminados',
-              valor: '$terminados de ${trabajos.length}',
-              icono: Icons.check_circle_outline,
-              compacto: true,
-              tono: DexterMetricTone.exito,
+            child: Text.rich(
+              TextSpan(
+                children: <InlineSpan>[
+                  TextSpan(
+                    text: 'Arquitectura de Campo · ',
+                    style: AppTypography.etiquetaChica.copyWith(
+                      color: AppColors.onSurface,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  TextSpan(text: _segmento.explicacion),
+                ],
+              ),
+              style: AppTypography.etiquetaChica,
             ),
           ),
         ],
@@ -184,110 +444,43 @@ class _TrabajoScreenState extends State<TrabajoScreen> {
     );
   }
 
-  Widget _pestanas() {
-    final ahora = DateTime.now();
-    return Container(
-      color: AppColors.superficie,
-      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.margen),
-        child: Row(
-          children: <Widget>[
-            for (final PestanaTrabajo pestana in PestanaTrabajo.values)
-              Padding(
-                padding: const EdgeInsets.only(right: AppSpacing.sm),
-                child: _Pestana(
-                  texto: pestana.etiqueta,
-                  cantidad: widget.ordenes.trabajos
-                      .where((TrabajoVista t) =>
-                          perteneceA(pestana, t.estado, t.compromiso, ahora: ahora))
-                      .length,
-                  activa: pestana == _pestana,
-                  onTap: () => setState(() => _pestana = pestana),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _filtros() {
-    // Familias que de verdad hay entre los trabajos descargados. Si el técnico
-    // solo tiene instalaciones, no aparece un filtro de incidencias vacío.
-    final presentes = <FamiliaTrabajo>{
-      for (final TrabajoVista t in widget.ordenes.trabajos) t.familia,
-    }.toList();
-
-    return Container(
-      decoration: const BoxDecoration(
-        color: AppColors.superficie,
-        border: Border(bottom: BorderSide(color: AppColors.borde)),
-      ),
-      padding: const EdgeInsets.fromLTRB(
-        AppSpacing.margen,
-        0,
-        AppSpacing.margen,
-        AppSpacing.sm,
-      ),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: <Widget>[
-            _ChipFiltro(
-              texto: 'Todos',
-              activo: _familia == null,
-              onTap: () => setState(() => _familia = null),
-            ),
-            for (final FamiliaTrabajo familia in presentes) ...<Widget>[
-              const SizedBox(width: AppSpacing.sm),
-              _ChipFiltro(
-                texto: familia.etiqueta,
-                activo: _familia == familia,
-                onTap: () => setState(() => _familia = familia),
-              ),
-            ],
-            const SizedBox(width: AppSpacing.md),
-            // CAMPO-DATA-003 y CAMPO-DATA-004: los dos filtros que el diseño
-            // muestra y todavía no se pueden aplicar, porque la orden no trae
-            // zona ni prioridad. Se ven apagados y no se pueden tocar — un
-            // filtro que parece andar y no filtra es peor que no tenerlo.
-            const _ChipPendiente(texto: 'Zona'),
-            const SizedBox(width: AppSpacing.sm),
-            const _ChipPendiente(texto: 'Prioridad'),
-          ],
-        ),
-      ),
-    );
-  }
 
   IconData get _iconoVacio => switch (_pestana) {
-        PestanaTrabajo.hoy => Icons.event_available,
+        PestanaTrabajo.todos => Icons.inbox_outlined,
         PestanaTrabajo.pendientes => Icons.inbox_outlined,
         PestanaTrabajo.enProceso => Icons.play_circle_outline,
         PestanaTrabajo.finalizadas => Icons.done_all,
+        PestanaTrabajo.conNovedad => Icons.report_outlined,
       };
 
-  String get _tituloVacio => switch (_pestana) {
-        PestanaTrabajo.hoy => 'No tenés trabajos para hoy',
-        PestanaTrabajo.pendientes => 'No tenés trabajos pendientes',
-        PestanaTrabajo.enProceso => 'No tenés ningún trabajo empezado',
-        PestanaTrabajo.finalizadas => 'Todavía no terminaste ninguno',
-      };
-
-  String? get _mensajeVacio {
-    if (_familia != null) {
-      return 'Con el filtro "${_familia!.etiqueta}" no hay nada acá. '
-          'Probá con Todos.';
+  String get _tituloVacio {
+    if (_busqueda.text.trim().isNotEmpty) {
+      return 'Sin resultados para "${_busqueda.text.trim()}"';
     }
     return switch (_pestana) {
-      PestanaTrabajo.hoy =>
-        'Acá aparecen los que tienen fecha para hoy. Deslizá para actualizar.',
+      PestanaTrabajo.todos => _segmento == SegmentoEntidad.ordenes
+          ? 'No tenés trabajos asignados'
+          : 'No hay ${_segmento.etiqueta.toLowerCase()} en tu jornada',
+      PestanaTrabajo.pendientes => 'No tenés trabajos pendientes',
+      PestanaTrabajo.enProceso => 'No tenés ningún trabajo empezado',
+      PestanaTrabajo.finalizadas => 'Todavía no terminaste ninguno',
+      PestanaTrabajo.conNovedad => 'Ninguno con novedad',
+    };
+  }
+
+  String? get _mensajeVacio {
+    if (_busqueda.text.trim().isNotEmpty) {
+      return 'Se busca por cliente, dirección, tipo y número de OT, sobre lo '
+          'que ya está en el teléfono.';
+    }
+    return switch (_pestana) {
+      PestanaTrabajo.todos => 'Deslizá hacia abajo para actualizar.',
       PestanaTrabajo.pendientes => 'Deslizá hacia abajo para actualizar.',
       PestanaTrabajo.enProceso =>
         'Cuando marques que vas en camino, el trabajo aparece acá.',
       PestanaTrabajo.finalizadas => null,
+      PestanaTrabajo.conNovedad =>
+        'Acá aparece lo devuelto para corregir o cancelado.',
     };
   }
 }
@@ -297,17 +490,19 @@ class _Pestana extends StatelessWidget {
     required this.texto,
     required this.cantidad,
     required this.activa,
+    required this.colorContador,
     required this.onTap,
   });
 
   final String texto;
   final int cantidad;
   final bool activa;
+  final Color colorContador;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final color = activa ? AppColors.azulMarino : AppColors.textoSecundario;
+    final color = activa ? AppColors.primary : AppColors.onSurfaceVariant;
 
     return Semantics(
       button: true,
@@ -320,26 +515,43 @@ class _Pestana extends StatelessWidget {
         child: Container(
           constraints: const BoxConstraints(minHeight: AppSpacing.objetivoTactil),
           alignment: Alignment.center,
-          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
           decoration: BoxDecoration(
-            color: activa ? AppColors.fondoHundido : AppColors.superficie,
+            color: activa ? AppColors.surfaceContainerLowest : Colors.transparent,
             borderRadius: AppRadius.brCampo,
-            border: Border.all(color: activa ? AppColors.azulMarino : AppColors.borde),
+            boxShadow: activa ? AppTheme.sombraNivel1 : null,
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              Text(
-                texto,
-                style: AppTypography.cuerpoGrande.copyWith(
-                  color: color,
-                  fontWeight: activa ? FontWeight.w600 : FontWeight.w500,
+              Flexible(
+                child: Text(
+                  texto,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTypography.etiqueta.copyWith(
+                    color: color,
+                    fontWeight: activa ? FontWeight.w700 : FontWeight.w500,
+                  ),
                 ),
               ),
-              const SizedBox(width: AppSpacing.xs),
-              Text(
-                '$cantidad',
-                style: AppTypography.etiqueta.copyWith(color: color),
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                decoration: BoxDecoration(
+                  color: colorContador,
+                  borderRadius: BorderRadius.circular(AppRadius.circulo),
+                ),
+                child: Text(
+                  '$cantidad',
+                  style: AppTypography.etiquetaChica.copyWith(
+                    fontSize: 11,
+                    color: colorContador == AppColors.surfaceContainerHighest
+                        ? AppColors.onSurfaceVariant
+                        : AppColors.onPrimary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
               ),
             ],
           ),
@@ -349,6 +561,7 @@ class _Pestana extends StatelessWidget {
   }
 }
 
+/// Pastilla de filtro por clase de trabajo.
 class _ChipFiltro extends StatelessWidget {
   const _ChipFiltro({
     required this.texto,
@@ -369,21 +582,38 @@ class _ChipFiltro extends StatelessWidget {
       excludeSemantics: true,
       child: InkWell(
         onTap: onTap,
-        borderRadius: AppRadius.brChico,
+        borderRadius: BorderRadius.circular(AppRadius.circulo),
         child: Container(
-          constraints: const BoxConstraints(minHeight: AppSpacing.objetivoTactil),
+          height: 40,
           alignment: Alignment.center,
           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
           decoration: BoxDecoration(
-            color: activo ? AppColors.azulMarino : AppColors.superficie,
-            borderRadius: AppRadius.brChico,
-            border: Border.all(color: activo ? AppColors.azulMarino : AppColors.borde),
+            color: activo ? AppColors.primary : AppColors.surfaceContainerHigh,
+            borderRadius: BorderRadius.circular(AppRadius.circulo),
+            boxShadow: activo ? AppTheme.sombraNivel1 : null,
           ),
-          child: Text(
-            texto,
-            style: AppTypography.etiqueta.copyWith(
-              color: activo ? AppColors.textoSobreOscuro : AppColors.texto,
-            ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Text(
+                texto,
+                style: AppTypography.etiquetaChica.copyWith(
+                  color: activo ? AppColors.onPrimary : AppColors.onSurface,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              if (activo) ...<Widget>[
+                const SizedBox(width: 6),
+                Container(
+                  width: 6,
+                  height: 6,
+                  decoration: const BoxDecoration(
+                    color: AppColors.onPrimary,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ],
+            ],
           ),
         ),
       ),
@@ -391,44 +621,60 @@ class _ChipFiltro extends StatelessWidget {
   }
 }
 
-/// Filtro del diseño que todavía no se puede aplicar.
-class _ChipPendiente extends StatelessWidget {
-  const _ChipPendiente({required this.texto});
+enum SegmentoEntidad {
+  ordenes('Órdenes'),
+  instalaciones('Instalaciones'),
+  tickets('Tickets');
 
-  final String texto;
+  const SegmentoEntidad(this.etiqueta);
+
+  final String etiqueta;
+
+  bool incluye(TrabajoVista trabajo) => switch (this) {
+        SegmentoEntidad.ordenes => true,
+        SegmentoEntidad.instalaciones =>
+          trabajo.familia == FamiliaTrabajo.instalacion,
+        SegmentoEntidad.tickets => trabajo.familia == FamiliaTrabajo.incidencia,
+      };
+
+  String get explicacion => switch (this) {
+        SegmentoEntidad.ordenes =>
+          'OT = Orden de Trabajo asignada para ejecución física en terreno.',
+        SegmentoEntidad.instalaciones =>
+          'Instalación = alta nueva de servicio; genera la OT que se ejecuta.',
+        SegmentoEntidad.tickets =>
+          'Ticket = reporte del cliente o del NOC; puede derivar en una OT.',
+      };
+}
+
+/// Un botón cuadrado de acción, del alto de un campo.
+class _BotonCuadrado extends StatelessWidget {
+  const _BotonCuadrado({
+    required this.icono,
+    required this.etiquetaSemantica,
+    required this.alTocar,
+  });
+
+  final IconData icono;
+  final String etiquetaSemantica;
+  final VoidCallback alTocar;
 
   @override
   Widget build(BuildContext context) {
     return Semantics(
-      label: '$texto: filtro todavía no disponible',
-      excludeSemantics: true,
-      child: Container(
-        constraints: const BoxConstraints(minHeight: AppSpacing.objetivoTactil),
-        alignment: Alignment.center,
-        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-        decoration: BoxDecoration(
-          color: AppColors.fondoHundido,
-          borderRadius: AppRadius.brChico,
-          border: Border.all(color: AppColors.borde),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            const Icon(Icons.lock_outline, size: 13, color: AppColors.inactivo),
-            const SizedBox(width: AppSpacing.xs),
-            Text(
-              texto,
-              style: AppTypography.etiqueta.copyWith(color: AppColors.inactivo),
-            ),
-            const SizedBox(width: AppSpacing.xs),
-            Text(
-              'PRONTO',
-              style: AppTypography.etiquetaChica.copyWith(
-                color: AppColors.inactivo,
-                fontSize: 9,
-              ),
-            ),
-          ],
+      button: true,
+      label: etiquetaSemantica,
+      child: Material(
+        color: AppColors.surfaceContainerLowest,
+        borderRadius: AppRadius.brTarjeta,
+        child: InkWell(
+          borderRadius: AppRadius.brTarjeta,
+          onTap: alTocar,
+          child: const SizedBox(
+            width: AppSpacing.objetivoTactil,
+            height: AppSpacing.objetivoTactil,
+            child: Icon(Icons.qr_code_scanner, size: 20, color: AppColors.primary),
+          ),
         ),
       ),
     );

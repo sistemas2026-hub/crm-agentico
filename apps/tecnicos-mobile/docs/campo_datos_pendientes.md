@@ -34,9 +34,22 @@ flutter run                                    # producción: solo datos reales
 |---|---|---|
 | Tarjeta de un trabajo | Número, cliente, dirección, tipo, estado y hora de compromiso | Se suman SLA, zona, prioridad y distancia |
 | Inicio, encabezado | La fecha de hoy | Turno y cuadrilla |
+| Inicio, modo de jornada | No aparece | Selector de estado (sin guardar) y turno |
+| Inicio, recursos del turno | Solo la cola de sincronización, que es real | Se suman kit, vehículo y academia |
 | Inicio, señal del cliente | No aparece | Potencia RX, CTO, puerto PON y serial de la ONT |
 | Inicio, Mi kit | No aparece | Recibidos, consumidos y disponibles |
 | Campana del encabezado | Sin número | Con número |
+| Trabajo, resumen | Completadas y en curso | Se suman Alertas RX y SLA del día |
+| Trabajo, tarjetas | Cliente, dirección, tipo, estado, ventana real | Se suman distancia, telemetría, plan, requisito de seguridad y acta |
+| Trabajo, buscador | Búsqueda real por cliente, dirección y OT | Se suma el botón de escanear, que avisa que falta |
+| Detalle, secciones | Cliente, ubicación real, pasos reales y acciones | Se suman origen NOC, matriz de telemetría, materiales, protocolo y la guía de procedimiento |
+| Detalle, ubicación | Coordenadas reales de la orden, o aviso de que faltan | Se suma la zona |
+| Detalle | Cabecera con pasos, cliente y diagnóstico | Se suman telemetría de red, histórico y triage |
+| Materiales | Dice que falta construir el módulo | Kit completo: custodia, trazabilidad y cierre de jornada |
+| Ejecución | Formulario del backend y evidencia real | Se suman el equipo sugerido, el medidor por Bluetooth, la longitud de onda, el umbral de referencia y Academia |
+| Trabajo, pie | No aparece | Última sincronización con el servidor |
+| Detalle, franja | No aparece | Enlace Dexter y hora del último envío |
+| Barra inferior | Contador real de trabajos | Se suman los puntos de aviso de Academia y Más |
 | Todo lo demás | Igual | Igual |
 
 ## Datos reales, y de dónde salen
@@ -74,9 +87,89 @@ flutter run                                    # producción: solo datos reales
 | CAMPO-DATA-012 | Inicio (futuro) | Señal del cliente | Histórico de señal 48 h | — | serie temporal | SmartOLT | `telemetria.historico` | Sí | Media | NO SE MUESTRA |
 | CAMPO-DATA-013 | Trabajo | Resumen | Contador de alertas de red | — | entero | SmartOLT | `jornada.alertas_rx` | Sí | Media | NO SE MUESTRA: un contador de alertas de ejemplo se lee como una alarma real |
 | CAMPO-DATA-014 | Franja de sincronización | — | Marca de la última sincronización | — | fecha y hora | **App móvil**: `SyncQueueService` guarda la fecha de cada envío exitoso | `sync.ultima_exitosa_en` (local) | **No** | Baja | NO SE MUESTRA. No es deuda de API: se resuelve entero en el teléfono |
+| CAMPO-DATA-018 | Inicio | Chip de academia | Cursos pendientes | 1 | entero | Módulo de Academia | `academia.cursos_pendientes` | Sí | Baja | MOCK |
+| CAMPO-DATA-019 | Inicio, encabezado | Avatar | Foto del técnico | — | url | Perfil del CRM | `profile.foto_url` | Sí | Baja | NO SE MUESTRA: se usan sus iniciales, que son reales |
+| CAMPO-DATA-020 | Inicio, Trabajo | Tarjeta | Ventana horaria comprometida | 10:00 - 12:00 | rango | Backend de Campo | `trabajo.ventana_inicio`, `.ventana_fin` | Sí | Alta | MOCK |
+| CAMPO-DATA-021 | Inicio, Materiales | Kit | Hora de confirmación del kit | 08:02 AM | hora | Inventario de Dexter | `kit.confirmado_en` | Sí | Media | MOCK |
+| CAMPO-DATA-022 | Franja | — | Modo de trabajo de datos | Modo Dinámico | texto | Sin definir | — | Sí | Baja | MOCK. El número de cambios sin enviar, al lado, es real |
+| CAMPO-DATA-023 | Trabajo | Tarjeta de instalación | Plan contratado y materiales previstos | Fibra 500 Mbps + TV · ONT + 80m Drop | texto | WispHub vía backend | `trabajo.plan`, `.materiales_previstos` | Sí | Media | MOCK |
+| CAMPO-DATA-024 | Detalle | Triage | Lista de comprobaciones y causa sugerida | Facturación AL DÍA · Atenuación DEGRADADO | estructura | Dexter + SmartOLT | `triage.checks[]`, `triage.causa_sugerida` | Sí | Media | MOCK. La cita del cliente **sí** es real: es `diagnostico_previo_ia` |
+| CAMPO-DATA-025 | Materiales | Custodia | El kit completo: consumibles, bobinas, serializados, terminales | 5 ítems | estructura | Inventario de Dexter | `kit.items[]` | Sí | Alta | MOCK. Ver `lib/core/mock/kit_mock_data.dart` |
+| CAMPO-DATA-026 | Ejecución | Formulario | Equipo sugerido para reemplazo y su stock a bordo | ONT Huawei GPON HG8145V5 · 2 en camioneta | estructura | Inventario de Dexter cruzado con el tipo de falla | `kit.sugerencia_reemplazo` | Sí | Media | MOCK. Se muestra al responder que sí; **no se guarda** con la respuesta |
+| CAMPO-DATA-027 | Ejecución | Medición óptica | Lectura tomada por el power meter por Bluetooth | — | decimal | Medidor del técnico (integración pendiente) | `medicion.bluetooth` | Sí | Alta | MOCK **que no escribe**: el botón se ve en demostración y no completa el campo. Una medición inventada quedaría firmada por el técnico |
+| CAMPO-DATA-028 | Ejecución | Academia | Cápsulas de consulta del procedimiento en curso | 2 cápsulas | estructura | Módulo de Academia | `academia.capsulas[]` | Sí | Baja | MOCK. Ver `lib/features/ejecucion/widgets/bloque_academia.dart` |
+| CAMPO-DATA-013 | Trabajo | Resumen | Trabajos del día con la señal fuera de rango | 1 | entero | SmartOLT cruzado con la jornada | `jornada.alertas_rx` | Sí | Media | MOCK. Estaba escrito a mano dentro de la pantalla; ahora vive en el catálogo |
+| CAMPO-DATA-014 | Trabajo | Resumen | Cumplimiento del SLA del día | 94 % | entero | Backend de Campo | `jornada.cumplimiento_sla` | Sí | Media | MOCK. Misma historia que el anterior |
+| CAMPO-DATA-029 | Trabajo | Tarjeta en curso | De qué ticket nació la orden y por qué | Ticket #1234 (Sin internet nocturno) | estructura | Backend de Campo | `trabajo.ticket_origen` | Sí | Media | MOCK |
+| CAMPO-DATA-030 | Detalle | Telemetría | Serie de potencia de las últimas 48 h | 10 lecturas | serie | SmartOLT | `telemetria.rx_48h[]` | Sí | Media | MOCK. Sin la serie no se puede dibujar la curva del diseño |
+| CAMPO-DATA-031 | Detalle | Telemetría | Rango óptico esperado | -18.0 a -25.0 dBm | rango | Parámetro de la empresa | `red.rango_optico` | Sí | Alta | MOCK. Cada ISP define el suyo: no puede quedar fijo en el código |
+| CAMPO-DATA-032 | Ejecución | Medición | Longitud de onda de la medición | 1490nm Óptico | texto | Catálogo de red | `red.longitud_onda_medicion` | Sí | Baja | MOCK |
+| CAMPO-DATA-033 | Ejecución | Medición | Umbral de aceptación de la lectura | -15 a -25 dBm | rango | Parámetro de la empresa | `red.umbral_aceptacion_campo` | Sí | Alta | MOCK **que no valida**: se muestra como referencia, no bloquea el cierre ni marca la respuesta como incorrecta |
+| CAMPO-DATA-035 | Detalle | Franja superior | Nombre y versión del enlace de sincronización | Dexter Link v4.2 | texto | Backend de Dexter | `enlace.nombre`, `.version` | Sí | Baja | MOCK |
+| CAMPO-DATA-036 | Trabajo, Detalle | Pie y franja | Cuándo fue la última sincronización con éxito | Hace 1 min | marca de tiempo | **La propia aplicación** | — | Sí | Alta | MOCK. No es deuda del backend: la cola sabe cuántos cambios faltan, pero no guarda la hora del último envío bueno |
+| CAMPO-DATA-037 | Detalle | Cabecera | Qué hay que hacer, en una línea | Diagnóstico en domicilio y verificación de potencia | texto | Backend de Campo | `trabajo.resumen` | Sí | Baja | MOCK |
+| CAMPO-DATA-038 | Inicio | Modo de jornada | En qué está el técnico: en sitio, en ruta, disponible, pausa | 4 estados | enum | Backend de Campo + cola propia | `jornada.estado` | Sí | Alta | MOCK. El selector cambia lo que se ve y **no guarda nada**: marcar "Pausa" no llega a ningún supervisor |
+| CAMPO-DATA-039 | Inicio | Tarjeta en curso | Hora estimada de llegada | 10:15 AM | hora | Cálculo con la posición del técnico | — | Sí | Media | MOCK |
+| CAMPO-DATA-040 | Inicio | Cliente | Identificador del abonado en el ISP | ID 10984214 | texto | WispHub vía backend | `cliente.id_abonado` | Sí | Media | MOCK |
+| CAMPO-DATA-041 | Inicio | Dirección | Cómo se entra: torre, piso, apartamento | Interior 3 - Apto 402 | texto | Backend de Campo | `cliente.detalle_acceso` | Sí | Alta | MOCK. Sin esto el técnico llega al edificio y no al apartamento |
+| CAMPO-DATA-042 | Inicio | Vehículo | Modelo, odómetro y combustible | Kangoo · 82.451 km · 75 % | estructura | Módulo de vehículos | `vehiculo.modelo`, `.odometro`, `.combustible` | Sí | Baja | MOCK |
+| CAMPO-DATA-043 | Inicio | Academia | Curso obligatorio y cuándo vence | Alturas (SST) · Vence hoy 18:00 | estructura | Módulo de Academia | `academia.obligatorio`, `.vence_en` | Sí | Media | MOCK |
+| CAMPO-DATA-044 | Trabajo | Buscador | Lector de código del equipo del cliente | — | acción | Cámara + inventario | `equipo.serial` | Sí | Media | MOCK **que no lee**: el botón avisa que falta. La búsqueda por texto, al lado, sí es real |
+| CAMPO-DATA-045 | Trabajo | Tarjeta | Requisito de seguridad del trabajo y aptitud del técnico | Certificación de alturas | estructura | `trabajo.requisitos[]` + `perfil.certificaciones` | — | Sí | Alta | MOCK. **No habilita ni bloquea**: hoy el técnico se entera del riesgo en el sitio |
+| CAMPO-DATA-046 | Trabajo | Tarjeta terminada | Acta de cierre: estado y medición final | Aprobado · -19.4 dBm | estructura | Backend de Campo | `trabajo.acta` | Sí | Media | MOCK |
+| CAMPO-DATA-047 | Detalle | Origen | Quién abrió la orden y cuándo | 08:15 AM · NOC Central | texto | Backend de Campo | `trabajo.origen` | Sí | Media | MOCK |
+| CAMPO-DATA-048 | Detalle | Telemetría | OLT y puerto, distancia al splitter, potencia TX | 4 filas | estructura | SmartOLT vía Dexter API | `telemetria.olt`, `.distancia_splitter`, `.tx_dbm` | Sí | Media | MOCK |
+| CAMPO-DATA-049 | Detalle | Protocolo | Los pasos del procedimiento del tipo de trabajo | 8 pasos | lista | `tipo_trabajo.protocolo[]` | — | Sí | Alta | MOCK. **No es la máquina de estados**: se muestra aparte de la barra de pasos, que sí es real |
+| CAMPO-DATA-050 | Detalle | Guía FTTH | Procedimiento recomendado para la falla | 4 pasos | lista | Base de conocimiento de Dexter | `procedimiento.pasos[]` | Sí | Media | MOCK. Material de consulta: no valida ni completa nada |
+| CAMPO-DATA-051 | Materiales | Recepción | Acta del kit, quién lo despachó y a qué hora | Acta #K-2024-094 · M. Morales | estructura | Inventario de Dexter | `kit.acta`, `kit.despachado_por` | Sí | Media | MOCK |
+| CAMPO-DATA-052 | Materiales | Serializado | MAC del equipo, cómo llegó y en qué estado | 48:57:54:A9:B0:C1 · Validado OLT | estructura | Inventario de Dexter | `equipo.mac`, `.estado_previo` | Sí | Media | MOCK |
 | CAMPO-DATA-015 | Detalle | Estado de validación | Si el supervisor lo aprobó o lo devolvió | — | enum | **Ya existe en el backend** | `estado_validacion` | No (falta guardarlo en el teléfono) | Alta | REAL DISPONIBLE, sin consumir |
 | CAMPO-DATA-016 | Trabajo, Detalle | Ubicación del cliente | Coordenadas para navegar | — | decimal | **Ya existe en el backend** | `cliente.lat`, `cliente.lng` | No (falta guardarlo en el teléfono) | Media | REAL DISPONIBLE, sin consumir |
 | CAMPO-DATA-017 | Detalle | Cabecera | Cuándo se inició y cuándo se completó | — | fecha y hora | **Ya existe en el backend** | `iniciada_en`, `completada_campo_en` | No (falta guardarlo en el teléfono) | Baja | REAL DISPONIBLE, sin consumir |
+
+
+## Una corrección de la paleta (22/09/2026)
+
+Hasta esta fecha los colores salían del texto del sistema visual "Field Ops
+Precision", que describe la intención: azul marino, azul de acción, blanco,
+borde fino. **Las pantallas de Stitch usan otra cosa**: una paleta tonal de
+Material, con `primary #00236f`, `secondary #0051d5`, `surface #faf8ff` y una
+escala de contenedores (`surface-container-low/high/highest`). Y su
+configuración redefine los radios: 2, 4, 8 y 12 px, donde `rounded-full` no es
+un círculo sino 12 px.
+
+Cuando el texto y la pantalla discrepan, gana la pantalla: es lo que el usuario
+mira. `lib/core/theme/app_colors.dart` y `app_radius.dart` ahora llevan los
+valores exactos de la maqueta, con los nombres anteriores conservados como
+alias para no tener que tocar cada widget de una vez.
+
+
+## Cambio de diseño de referencia (22/09/2026)
+
+Hasta esta fecha se replicaba el proyecto de Stitch **"Dexter Campo Mobile
+App"**. El proyecto que manda es **"Dexter Campo  App"**, que es otro diseño
+del mismo producto: Inter en vez de Geist, otra paleta tonal (el terciario es
+azul oscuro, así que lo correcto se pinta con un verde propio), `rounded-full`
+vuelve a ser un círculo, y la pantalla de Inicio es un *Home Operacional* con
+modo de jornada, avance del día y una rejilla de recursos del turno.
+
+Lo que **no** cambió: qué datos son reales y cuáles de ejemplo, la guarda del
+modo demostración y la regla de que nada de este catálogo decide nada.
+
+
+## Las dos pantallas que faltaban en el diseño (22/09/2026)
+
+El proyecto "Dexter Campo  App" no tenía pantalla de Materiales ni de
+Ejecución. Con autorización del usuario se generaron las dos en Stitch, con el
+mismo sistema visual del proyecto, y de ahí salieron los datos 051 y 052, más
+la forma de la cadena de custodia.
+
+De la de Ejecución, lo que se incorporó es **real**, no de ejemplo: la versión
+del formulario que manda el backend (`schema_version`), cuántas fotos de las
+pedidas ya están tomadas, y qué requisito sigue pendiente. El diseño proponía
+además un hash de respaldo local del formulario; no se puso porque la
+aplicación no lo calcula, y un identificador inventado en una pantalla de
+trazabilidad es exactamente lo que no se debe hacer.
 
 ## Conversiones descubiertas en la Fase 6
 

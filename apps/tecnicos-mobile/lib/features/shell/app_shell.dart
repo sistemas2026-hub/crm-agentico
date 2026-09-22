@@ -16,6 +16,7 @@ import '../auth/login_screen.dart';
 import '../detalle_orden/acciones_orden.dart';
 import '../detalle_orden/detalle_orden_screen.dart';
 import '../inicio/inicio_screen.dart';
+import '../materiales/materiales_screen.dart';
 import '../trabajo/seleccion_jornada.dart';
 import '../trabajo/trabajo_screen.dart';
 import '../trabajo/trabajo_vista.dart';
@@ -282,12 +283,7 @@ class _AppShellState extends State<AppShell> {
             ordenes: widget.dependencias.ordenes,
             abrirTrabajo: widget.dependencias.abrirTrabajo,
           ),
-        SeccionCampo.materiales => const SeccionEnConstruccion(
-            titulo: 'Mi kit y custodia',
-            descripcion: 'Acá vas a ver el material que tenés a cargo, lo que '
-                'consumiste y el cierre de la jornada.',
-            icono: Icons.inventory_2_outlined,
-          ),
+        SeccionCampo.materiales => MaterialesScreen(tecnico: _identidad?.nombre),
         SeccionCampo.academia => const SeccionEnConstruccion(
             titulo: 'Academia',
             descripcion: 'Acá van a estar las guías y los videos cortos para '
@@ -311,6 +307,7 @@ class _AppShellState extends State<AppShell> {
         children: <Widget>[
           DexterAppHeader(
             empresa: _identidad?.empresa ?? FieldMockData.empresaPorDefecto,
+            seccion: etiquetaDe(_seccion),
             iniciales: _identidad?.iniciales,
             conexion: _estadoConexion,
             // Dato de ejemplo: todavía no hay notificaciones de verdad.
@@ -320,6 +317,15 @@ class _AppShellState extends State<AppShell> {
           DexterSyncStrip(
             estado: estadoSync,
             frase: SyncPresentacion.fraseFranja(_resumen),
+            // El texto corto del diseño ("Cola de datos: N cambios locales")
+            // solo cuando hay algo sin enviar y nada en conflicto. Si hay un
+            // conflicto o no hay conexión, se dice eso, que importa más.
+            cambiosLocales: (_resumen != null &&
+                    _resumen!.totalPendientes > 0 &&
+                    _resumen!.mutacionesConflicto == 0 &&
+                    !_resumen!.hasConnectionError)
+                ? _resumen!.totalPendientes
+                : null,
             onSincronizar: SyncPresentacion.puedeSincronizarAhora(_resumen)
                 ? widget.dependencias.sincronizarAhora
                 : null,
@@ -344,6 +350,12 @@ class _AppShellState extends State<AppShell> {
         seleccionada: _seccion,
         indicadores: <SeccionCampo, int>{
           if (_trabajosActivos > 0) SeccionCampo.trabajo: _trabajosActivos,
+        },
+        // Los puntos de aviso del diseño. Academia y Más todavía no tienen de
+        // dónde sacar un pendiente real, así que solo se ven en demostración.
+        avisos: <SeccionCampo>{
+          if (FieldMockData.modoDemo) SeccionCampo.academia,
+          if (FieldMockData.modoDemo) SeccionCampo.mas,
         },
         onSeleccion: (SeccionCampo seccion) => setState(() {
           _seccion = seccion;

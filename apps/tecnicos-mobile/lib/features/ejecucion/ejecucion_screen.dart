@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
+import '../../core/mock/field_mock_data.dart';
 import '../../core/storage/evidencia_storage_service.dart';
 import '../../core/storage/local_database.dart';
 import '../../core/storage/secure_storage_service.dart';
@@ -11,11 +12,27 @@ import '../../core/sync/sync_queue_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/offline_saved_banner.dart';
 import '../../core/widgets/sync_badge.dart';
+import 'progreso_evidencias.dart';
+import 'widgets/bloque_academia.dart';
+import 'widgets/formulario_de_campo.dart';
 
+/// El trabajo, ejecutándose: el formulario de campo y la evidencia.
+///
+/// El aspecto es el del diseño de Stitch; las preguntas siguen siendo las que
+/// manda el backend con la orden (`formulario_campos_json`), y cada respuesta
+/// se guarda en SQLite en el momento, sin esperar a tener señal.
 class EjecucionScreen extends StatefulWidget {
   final String ordenId;
 
-  const EjecucionScreen({super.key, required this.ordenId});
+  /// Enciende lo que el diseño muestra y todavía no existe: la sugerencia de
+  /// reemplazo, el medidor por Bluetooth y las cápsulas de Academia.
+  final bool mostrarDatosFuturos;
+
+  const EjecucionScreen({
+    super.key,
+    required this.ordenId,
+    this.mostrarDatosFuturos = FieldMockData.modoDemo,
+  });
 
   @override
   State<EjecucionScreen> createState() => _EjecucionScreenState();
@@ -34,6 +51,11 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
   bool _showSavedIndicator = false;
   Timer? _savedIndicatorTimer;
 
+  /// El botón "Borrador" no guarda nada nuevo —cada respuesta ya se escribió
+  /// en SQLite al tocarla—: confirma que lo escrito está a salvo.
+  bool _borradorConfirmado = false;
+  Timer? _borradorTimer;
+
   List<dynamic> _campos = [];
   List<dynamic> _evidenciasRequisitos = [];
   Map<String, dynamic> _valoresFormulario = {};
@@ -50,6 +72,7 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
   @override
   void dispose() {
     _savedIndicatorTimer?.cancel();
+    _borradorTimer?.cancel();
     for (final controller in _controllers.values) {
       controller.dispose();
     }
@@ -274,6 +297,16 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
     }
   }
 
+  void _confirmarBorrador() {
+    // No escribe: solo confirma. Cada respuesta ya se guardó al tocarla.
+    _triggerSavedBanner();
+    setState(() => _borradorConfirmado = true);
+    _borradorTimer?.cancel();
+    _borradorTimer = Timer(const Duration(milliseconds: 1500), () {
+      if (mounted) setState(() => _borradorConfirmado = false);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -285,11 +318,12 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
     final numero = _orden?['numero'] ?? '---';
 
     return Scaffold(
+      backgroundColor: AppColors.surface,
       appBar: AppBar(
-        title: Text('Ejecución #$numero'),
+        title: Text('Ejecución OT #$numero'),
         actions: [
           Padding(
-            padding: const EdgeInsets.only(right: 8),
+            padding: const EdgeInsets.only(right: AppSpacing.sm),
             child: SyncBadge(),
           ),
         ],
@@ -297,53 +331,78 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
       body: Column(
         children: [
           OfflineSavedBanner(visible: _showSavedIndicator),
+          _franjaDelFormulario(),
           Expanded(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.margen,
+                AppSpacing.lg,
+                AppSpacing.margen,
+                AppSpacing.lg,
+              ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // Sección 1: Formulario dinámico
-                  const Text(
-                    'PARÁMETROS TÉCNICOS',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.bold,
-                      color: AppTheme.primaryDark,
-                      letterSpacing: 0.8,
-                    ),
+                  FormularioDeCampo(
+                    campos: _campos,
+                    valores: _valoresFormulario,
+                    controladores: _controllers,
+                    alCambiar: _onFieldChanged,
+                    mostrarDatosFuturos: widget.mostrarDatosFuturos,
                   ),
-                  const SizedBox(height: 12),
-                  ..._campos.map((c) => _buildCampoDinamico(c)),
-                  const SizedBox(height: 24),
-
-                  // Sección 2: Evidencias fotográficas requeridas
-                  const Text(
-                    'EVIDENCIAS FOTOGRÁFICAS',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.bold,
-                      color: AppTheme.primaryDark,
-                      letterSpacing: 0.8,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  ..._evidenciasRequisitos.map((req) => _buildEvidenciaRequisito(req)),
-                  const SizedBox(height: 32),
-
-                  // Botón Finalizar
-                  ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppTheme.successGreen,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
-                    icon: const Icon(Icons.check_circle_outline, size: 22),
-                    label: const Text('FINALIZAR ORDEN DE TRABAJO'),
-                    onPressed: _completarOrden,
-                  ),
-                  const SizedBox(height: 20),
+                  const SizedBox(height: AppSpacing.lg),
+                  _evidencias(),
+                  if (widget.mostrarDatosFuturos) ...[
+                    const SizedBox(height: AppSpacing.lg),
+                    const BloqueAcademia(),
+                  ],
                 ],
               ),
+            ),
+          ),
+          _barraDeAcciones(),
+        ],
+      ),
+    );
+  }
+
+  /// Cuántos requisitos de foto ya tienen su captura.
+  int get _fotosCapturadas => fotosCapturadas(
+        requisitos: _evidenciasRequisitos,
+        capturadas: _evidenciasCapturadas,
+      );
+
+  /// Qué formulario se está respondiendo. La versión del esquema viene con la
+  /// orden: si el backend cambia las preguntas, esto cambia con ellas.
+  Widget _franjaDelFormulario() {
+    final int version = _orden?['schema_version'] as int? ?? 0;
+    final int campos = _campos.length;
+
+    return Container(
+      width: double.infinity,
+      color: AppColors.surfaceContainerLow,
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.margen,
+        vertical: 6,
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.save, size: 13, color: AppColors.exitoTexto),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              'Se guarda en este equipo mientras trabajás',
+              style: AppTypography.etiquetaChica,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          Text(
+            version == 0
+                ? '$campos campos'
+                : 'Formulario v$version · $campos campos',
+            style: AppTypography.datoChico.copyWith(
+              color: AppColors.onSurfaceVariant,
             ),
           ),
         ],
@@ -351,73 +410,147 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
     );
   }
 
-  Widget _buildCampoDinamico(Map<String, dynamic> campo) {
-    final clave = (campo['clave'] ?? campo['id']) as String;
-    final etiqueta = (campo['etiqueta'] ?? campo['titulo'] ?? clave) as String;
-    final tipo = campo['tipo'] as String;
-    final obligatorio = campo['obligatorio'] == true || campo['reglas']?['required'] == true;
-    final unidad = campo['unidad'] as String?;
-    final ayuda = campo['ayuda'] as String?;
-
-    if (tipo == 'seleccion') {
-      final opciones = (campo['opciones'] as List<dynamic>?) ?? [];
-      final valorActual = _valoresFormulario[clave]?.toString();
-
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 16),
-        child: DropdownButtonFormField<String>(
-          initialValue: opciones.contains(valorActual) ? valorActual : null,
-          decoration: InputDecoration(
-            labelText: '$etiqueta${obligatorio ? ' *' : ''}',
-            helperText: ayuda,
+  /// La evidencia fotográfica que pide el tipo de trabajo. Igual que el
+  /// formulario, la lista viene del backend: acá solo se dibuja y se captura.
+  Widget _evidencias() {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceContainerLowest,
+        borderRadius: AppRadius.brTarjeta,
+        boxShadow: AppTheme.sombraNivel1,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Evidencia Fotográfica', style: AppTypography.tituloChico),
+                    Text(
+                      'Queda guardada en el equipo y se envía sola al recuperar señal',
+                      style: AppTypography.cuerpoChico,
+                    ),
+                  ],
+                ),
+              ),
+              Text(
+                '$_fotosCapturadas/${_evidenciasRequisitos.length}',
+                style: AppTypography.dato.copyWith(
+                  color: _fotosCapturadas == _evidenciasRequisitos.length
+                      ? AppColors.exitoTexto
+                      : AppColors.primary,
+                ),
+              ),
+              const SizedBox(width: 6),
+              const Icon(Icons.photo_camera, size: 20, color: AppColors.outline),
+            ],
           ),
-          items: opciones.map((opt) {
-            return DropdownMenuItem<String>(
-              value: opt.toString(),
-              child: Text(opt.toString()),
-            );
-          }).toList(),
-          onChanged: (val) => _onFieldChanged(clave, val),
-        ),
-      );
-    } else if (tipo == 'booleano') {
-      final valorActual = _valoresFormulario[clave] == true;
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 16),
-        child: SwitchListTile(
-          title: Text('$etiqueta${obligatorio ? ' *' : ''}'),
-          subtitle: ayuda != null ? Text(ayuda) : null,
-          value: valorActual,
-          onChanged: (val) => _onFieldChanged(clave, val),
-        ),
-      );
-    } else {
-      // Texto o Número (o decimal)
-      final isNumber = tipo == 'numero' || tipo == 'decimal' || tipo == 'integer';
-      final controller = _controllers[clave];
+          const SizedBox(height: AppSpacing.lg),
+          if (_evidenciasRequisitos.isEmpty)
+            Text(
+              'Este tipo de trabajo no exige fotografías.',
+              style: AppTypography.cuerpoChico,
+            )
+          else
+            for (var i = 0; i < _evidenciasRequisitos.length; i++) ...[
+              if (i > 0) const SizedBox(height: AppSpacing.md),
+              _buildEvidenciaRequisito(
+                Map<String, dynamic>.from(_evidenciasRequisitos[i] as Map),
+              ),
+            ],
+        ],
+      ),
+    );
+  }
 
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 16),
-        child: TextField(
-          controller: controller,
-          keyboardType: isNumber
-              ? const TextInputType.numberWithOptions(decimal: true, signed: true)
-              : TextInputType.text,
-          decoration: InputDecoration(
-            labelText: '$etiqueta${obligatorio ? ' *' : ''}',
-            suffixText: unidad,
-            helperText: ayuda,
+  /// La barra fija del diseño: el borrador a la izquierda, el cierre a la
+  /// derecha. El diseño dice "Registrar Materiales"; ese módulo todavía no
+  /// existe, así que el botón hace lo que la aplicación sí sabe hacer: cerrar
+  /// la orden con lo registrado.
+  Widget _barraDeAcciones() {
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppColors.surfaceContainerLowest,
+        boxShadow: AppTheme.sombraNivel2,
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.margen,
+            vertical: AppSpacing.md,
           ),
-          onChanged: (val) {
-            dynamic parsedVal = val;
-            if (isNumber && val.isNotEmpty) {
-              parsedVal = num.tryParse(val) ?? val;
-            }
-            _onFieldChanged(clave, parsedVal);
-          },
+          child: Row(
+            children: [
+              Material(
+                color: AppColors.surfaceContainer,
+                borderRadius: AppRadius.brTarjeta,
+                child: InkWell(
+                  borderRadius: AppRadius.brTarjeta,
+                  onTap: _confirmarBorrador,
+                  child: Container(
+                    height: AppSpacing.objetivoTactilAmplio,
+                    padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+                    alignment: Alignment.center,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          _borradorConfirmado ? Icons.check : Icons.save,
+                          size: 18,
+                          color: AppColors.onSurface,
+                        ),
+                        const SizedBox(width: AppSpacing.xs),
+                        Text(
+                          _borradorConfirmado ? 'Guardado' : 'Borrador',
+                          style: AppTypography.etiqueta
+                              .copyWith(color: AppColors.onSurface),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Material(
+                  color: AppColors.primary,
+                  borderRadius: AppRadius.brTarjeta,
+                  child: InkWell(
+                    borderRadius: AppRadius.brTarjeta,
+                    onTap: _completarOrden,
+                    child: Container(
+                      height: AppSpacing.objetivoTactilAmplio,
+                      alignment: Alignment.center,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'Finalizar orden',
+                            style: AppTypography.etiquetaGrande
+                                .copyWith(color: AppColors.onPrimary),
+                          ),
+                          const SizedBox(width: AppSpacing.sm),
+                          const Icon(
+                            Icons.arrow_forward,
+                            size: 20,
+                            color: AppColors.onPrimary,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
-      );
-    }
+      ),
+    );
   }
 
   Widget _buildEvidenciaRequisito(Map<String, dynamic> req) {
@@ -433,68 +566,101 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
     final hasFoto = evidencia.isNotEmpty && evidencia['archivo_path'] != null;
     final filePath = hasFoto ? evidencia['archivo_path'] as String : null;
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceContainerLow,
+        borderRadius: AppRadius.brTarjeta,
+        border: !hasFoto && obligatorio
+            ? Border.all(color: AppColors.onErrorContainer.withValues(alpha: 0.4))
+            : null,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: hasFoto
+                      ? AppColors.exitoFondo
+                      : AppColors.surfaceContainer,
+                  borderRadius: AppRadius.brCampo,
+                ),
+                child: Icon(
                   hasFoto ? Icons.check_circle : Icons.camera_alt_outlined,
-                  color: hasFoto ? AppTheme.successGreen : AppTheme.primaryBlue,
+                  size: 18,
+                  color: hasFoto ? AppColors.exito : AppColors.secondary,
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    '$descripcion${obligatorio ? ' *' : ''}',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
+                  '$descripcion${obligatorio ? ' *' : ''}',
+                  style: AppTypography.etiqueta.copyWith(color: AppColors.onSurface),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: hasFoto
+                      ? AppColors.exitoFondo
+                      : (obligatorio
+                          ? AppColors.errorContainer
+                          : AppColors.surfaceContainer),
+                  borderRadius: AppRadius.brChico,
+                ),
+                child: Text(
+                  hasFoto ? 'CAPTURADA' : 'PENDIENTE',
+                  style: AppTypography.etiquetaChica.copyWith(
+                    color: hasFoto
+                        ? AppColors.exitoTexto
+                        : (obligatorio
+                            ? AppColors.onErrorContainer
+                            : AppColors.onSurfaceVariant),
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
-                if (hasFoto)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: AppTheme.successGreen.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: const Text(
-                      'CAPTURADA',
-                      style: TextStyle(fontSize: 10, color: AppTheme.successGreen, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-              ],
+              ),
+            ],
+          ),
+          if (instrucciones != null && instrucciones.isNotEmpty) ...[
+            const SizedBox(height: AppSpacing.xs),
+            Text(instrucciones, style: AppTypography.etiquetaChica),
+          ],
+          const SizedBox(height: AppSpacing.sm),
+          if (hasFoto && filePath != null) ...[
+            ClipRRect(
+              borderRadius: AppRadius.brTarjeta,
+              child: Image.file(
+                File(filePath),
+                height: 140,
+                width: double.infinity,
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) =>
+                    const Text('No se puede cargar la vista previa'),
+              ),
             ),
-            if (instrucciones != null && instrucciones.isNotEmpty) ...[
-              const SizedBox(height: 4),
-              Text(
-                instrucciones,
-                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-              ),
-            ],
-            const SizedBox(height: 8),
-            if (hasFoto && filePath != null) ...[
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: Image.file(
-                  File(filePath),
-                  height: 140,
-                  width: double.infinity,
-                  errorBuilder: (context, error, stackTrace) =>
-                      const Text('No se puede cargar la vista previa'),
+            const SizedBox(height: AppSpacing.sm),
+          ],
+          SizedBox(
+            height: AppSpacing.objetivoTactil,
+            child: OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.primary,
+                side: const BorderSide(color: AppColors.outlineVariant),
+                shape: const RoundedRectangleBorder(
+                  borderRadius: AppRadius.brTarjeta,
                 ),
               ),
-              const SizedBox(height: 8),
-            ],
-            OutlinedButton.icon(
-              icon: Icon(hasFoto ? Icons.replay : Icons.camera_alt),
+              icon: Icon(hasFoto ? Icons.replay : Icons.camera_alt, size: 18),
               label: Text(hasFoto ? 'VOLVER A TOMAR' : 'TOMAR FOTOGRAFÍA'),
               onPressed: () => _tomarFoto(reqId),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

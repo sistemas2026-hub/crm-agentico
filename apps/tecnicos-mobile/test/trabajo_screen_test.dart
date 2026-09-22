@@ -132,24 +132,25 @@ void main() {
       expect(EstadoTrabajo.desconocido.leTocaAlTecnico, isFalse);
     });
 
-    test('3. Hoy exige fecha de hoy; sin fecha no se supone', () {
-      bool enHoy(EstadoTrabajo e, DateTime? f) =>
-          perteneceA(PestanaTrabajo.hoy, e, f, ahora: hoy);
+    test('3. Todos no filtra por estado ni exige fecha', () {
+      bool enTodos(EstadoTrabajo e, DateTime? f) =>
+          perteneceA(PestanaTrabajo.todos, e, f, ahora: hoy);
 
-      expect(enHoy(EstadoTrabajo.asignada, hoy), isTrue);
-      expect(enHoy(EstadoTrabajo.asignada, ayer), isFalse);
-      expect(enHoy(EstadoTrabajo.asignada, null), isFalse);
-      // Terminada no aparece en Hoy aunque su fecha sea hoy.
-      expect(enHoy(EstadoTrabajo.completadaCampo, hoy), isFalse);
+      expect(enTodos(EstadoTrabajo.asignada, hoy), isTrue);
+      expect(enTodos(EstadoTrabajo.asignada, ayer), isTrue);
+      expect(enTodos(EstadoTrabajo.asignada, null), isTrue);
+      expect(enTodos(EstadoTrabajo.completadaCampo, hoy), isTrue);
     });
 
-    test('4. Pendientes, En proceso y Finalizadas se reparten sin solaparse', () {
+    test('4. Los cuatro filtros de estado se reparten sin solaparse', () {
       bool en(PestanaTrabajo p, EstadoTrabajo e) =>
           perteneceA(p, e, null, ahora: hoy);
 
       expect(en(PestanaTrabajo.pendientes, EstadoTrabajo.asignada), isTrue);
-      expect(en(PestanaTrabajo.pendientes, EstadoTrabajo.correccionRequerida), isTrue);
       expect(en(PestanaTrabajo.pendientes, EstadoTrabajo.enCamino), isFalse);
+      // Devuelta para corregir ya no se esconde entre las pendientes: el
+      // diseño la separa en "Con Novedad", que es donde hay que mirarla.
+      expect(en(PestanaTrabajo.pendientes, EstadoTrabajo.correccionRequerida), isFalse);
 
       expect(en(PestanaTrabajo.enProceso, EstadoTrabajo.enCamino), isTrue);
       expect(en(PestanaTrabajo.enProceso, EstadoTrabajo.enSitio), isTrue);
@@ -157,8 +158,25 @@ void main() {
 
       expect(en(PestanaTrabajo.finalizadas, EstadoTrabajo.completadaSinEnviar), isTrue);
       expect(en(PestanaTrabajo.finalizadas, EstadoTrabajo.cerrada), isTrue);
-      expect(en(PestanaTrabajo.finalizadas, EstadoTrabajo.cancelada), isTrue);
       expect(en(PestanaTrabajo.finalizadas, EstadoTrabajo.enSitio), isFalse);
+      // Cancelada no es un trabajo terminado: es una novedad.
+      expect(en(PestanaTrabajo.finalizadas, EstadoTrabajo.cancelada), isFalse);
+
+      expect(en(PestanaTrabajo.conNovedad, EstadoTrabajo.correccionRequerida), isTrue);
+      expect(en(PestanaTrabajo.conNovedad, EstadoTrabajo.cancelada), isTrue);
+      expect(en(PestanaTrabajo.conNovedad, EstadoTrabajo.desconocido), isTrue);
+      expect(en(PestanaTrabajo.conNovedad, EstadoTrabajo.enSitio), isFalse);
+
+      // Ninguno de los cuatro se pisa con otro.
+      for (final EstadoTrabajo e in EstadoTrabajo.values) {
+        final int cuantos = <PestanaTrabajo>[
+          PestanaTrabajo.pendientes,
+          PestanaTrabajo.enProceso,
+          PestanaTrabajo.finalizadas,
+          PestanaTrabajo.conNovedad,
+        ].where((PestanaTrabajo p) => en(p, e)).length;
+        expect(cuantos, lessThanOrEqualTo(1), reason: e.name);
+      }
     });
   });
 
@@ -201,14 +219,19 @@ void main() {
       await tester.pumpWidget(banco.app());
       await tester.pumpAndSettle();
 
-      // Pestaña Hoy: solo el que tiene fecha de hoy.
+      // El Hub abre en "Todos": están los dos, sin esconder ninguno.
       expect(find.text('Carlos Gomez'), findsOneWidget);
-      expect(find.text('Marta Rodriguez'), findsNothing);
+      expect(find.text('Marta Rodriguez'), findsOneWidget);
 
-      await tester.tap(find.text('En proceso'));
+      await tester.tap(find.textContaining('En Proceso'));
       await tester.pumpAndSettle();
       expect(find.text('Marta Rodriguez'), findsOneWidget);
       expect(find.text('Carlos Gomez'), findsNothing);
+
+      await tester.tap(find.textContaining('Pendientes'));
+      await tester.pumpAndSettle();
+      expect(find.text('Carlos Gomez'), findsOneWidget);
+      expect(find.text('Marta Rodriguez'), findsNothing);
       await banco.cerrar();
     });
 
@@ -228,8 +251,8 @@ void main() {
       await tester.pumpWidget(banco.app());
       await tester.pumpAndSettle();
 
-      expect(find.text('INSTALACIÓN'), findsOneWidget);
-      expect(find.text('INCIDENCIA'), findsOneWidget);
+      expect(find.textContaining('INSTALACIÓN'), findsOneWidget);
+      expect(find.textContaining('INCIDENCIA'), findsOneWidget);
       await banco.cerrar();
     });
 
@@ -250,35 +273,45 @@ void main() {
       await tester.pumpWidget(banco.app());
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Incidencia').last);
+      // El segmento de arriba dice de qué entidad se habla.
+      await tester.tap(find.textContaining('Tickets'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Incidencia Dos'), findsOneWidget);
+      // La tarjeta de una incidencia titula el problema, no al cliente.
+      expect(find.text('Ticket de soporte'), findsOneWidget);
       expect(find.text('Instalacion Uno'), findsNothing);
+
+      await tester.tap(find.textContaining('Instalaciones'));
+      await tester.pumpAndSettle();
+      expect(find.text('Instalacion Uno'), findsOneWidget);
+      expect(find.text('Ticket de soporte'), findsNothing);
       await banco.cerrar();
     });
 
-    testWidgets('10. Zona y Prioridad se ven, no se tocan y no filtran nada',
+    testWidgets('10. El buscador filtra de verdad, y sobre lo que ya está local',
         (WidgetTester tester) async {
       final banco = _Banco(filas: <Map<String, dynamic>>[
-        _orden(id: '1', numero: 1, estado: 'asignada', cliente: 'Carlos Gomez', compromiso: hoy),
+        _orden(id: '1', numero: 4832, estado: 'asignada', cliente: 'Carlos Gomez', compromiso: hoy),
+        _orden(id: '2', numero: 4901, estado: 'asignada', cliente: 'Marta Rodriguez', compromiso: hoy),
       ]);
       await tester.pumpWidget(banco.app());
       await tester.pumpAndSettle();
 
-      expect(find.text('Zona'), findsOneWidget);
-      expect(find.text('Prioridad'), findsOneWidget);
+      final int lecturasAntes = banco.cargas;
 
-      await tester.tap(find.text('Zona'));
-      await tester.tap(find.text('Prioridad'));
+      await tester.enterText(find.byType(TextField), 'marta');
       await tester.pumpAndSettle();
+      expect(find.text('Marta Rodriguez'), findsOneWidget);
+      expect(find.text('Carlos Gomez'), findsNothing);
 
-      // La lista quedo igual: no filtran con datos inventados.
+      // También por número de orden.
+      await tester.enterText(find.byType(TextField), '4832');
+      await tester.pumpAndSettle();
       expect(find.text('Carlos Gomez'), findsOneWidget);
-      expect(
-        tester.getSemantics(find.text('Zona')).label,
-        'Zona: filtro todavía no disponible',
-      );
+      expect(find.text('Marta Rodriguez'), findsNothing);
+
+      // Y sin volver a la base: busca sobre lo que ya está en el teléfono.
+      expect(banco.cargas, lecturasAntes);
       await banco.cerrar();
     });
 
@@ -303,13 +336,49 @@ void main() {
       await banco.cerrar();
     });
 
+    testWidgets('17. El Hub dice de qué entidad habla y cuántas hay en el equipo',
+        (WidgetTester tester) async {
+      final banco = _Banco(filas: <Map<String, dynamic>>[
+        _orden(id: '1', numero: 4832, estado: 'asignada', cliente: 'Carlos Gomez', compromiso: hoy),
+        _orden(
+          id: '2',
+          numero: 4833,
+          estado: 'asignada',
+          cliente: 'Marta Rodriguez',
+          tipoNombre: 'Ticket de soporte',
+          tipoCodigo: 'soporte_correctivo',
+          compromiso: hoy,
+        ),
+      ]);
+      await tester.pumpWidget(banco.app());
+      await tester.pumpAndSettle();
+
+      expect(find.text('Mi Trabajo'), findsOneWidget);
+      expect(find.text('2 órdenes asignadas para la jornada de hoy'), findsOneWidget);
+      // Lo que está en el teléfono, que es lo que se puede abrir sin señal.
+      expect(find.textContaining('2 OTs sincronizadas localmente'), findsOneWidget);
+
+      // La cinta explica la entidad del segmento elegido, y cambia con él.
+      expect(find.textContaining('OT = Orden de Trabajo'), findsOneWidget);
+      await tester.tap(find.textContaining('Tickets'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Ticket = reporte del cliente'), findsOneWidget);
+
+      // Y el pie cierra la lista sin prometer que hay más.
+      expect(
+        find.text('No hay más órdenes asignadas en este ciclo de despacho'),
+        findsOneWidget,
+      );
+      await banco.cerrar();
+    });
+
     testWidgets('12. Sin trabajos muestra el vacio real, sin inventar ninguno',
         (WidgetTester tester) async {
       final banco = _Banco();
       await tester.pumpWidget(banco.app());
       await tester.pumpAndSettle();
 
-      expect(find.text('No tenés trabajos para hoy'), findsOneWidget);
+      expect(find.text('No tenés trabajos asignados'), findsOneWidget);
       expect(SeleccionJornada.activos(banco.ordenes.trabajos), isEmpty);
       await banco.cerrar();
     });
@@ -333,11 +402,11 @@ void main() {
       await tester.pumpWidget(banco.app());
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('En proceso'));
+      await tester.tap(find.textContaining('En Proceso'));
       await tester.pumpAndSettle();
       final cargasAntes = banco.cargas;
 
-      await tester.tap(find.text('Carlos Gomez'));
+      await tester.tap(find.text('Continuar ejecución'));
       await tester.pumpAndSettle();
       expect(banco.abiertos, <String>['abc']);
 
@@ -347,9 +416,9 @@ void main() {
       expect(banco.cargas, greaterThan(cargasAntes), reason: 'al volver se recarga');
       expect(find.text('Carlos Gomez'), findsOneWidget);
       expect(
-        tester.getSemantics(find.text('En proceso')).flagsCollection.isSelected,
+        tester.getSemantics(find.textContaining('En Proceso')).flagsCollection.isSelected,
         ui.Tristate.isTrue,
-        reason: 'la pestaña elegida no se pierde al volver del detalle',
+        reason: 'el filtro elegido no se pierde al volver del detalle',
       );
       await banco.cerrar();
     });

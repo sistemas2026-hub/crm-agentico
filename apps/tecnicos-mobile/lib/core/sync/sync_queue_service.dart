@@ -196,11 +196,16 @@ class SyncQueueService {
         for (final item in results) {
           final id = item['id'] as String;
           Map<String, dynamic> fullData = item as Map<String, dynamic>;
+          // Si el detalle no llega, lo que se guarda es el retrato pobre del
+          // listado. Decirlo importa: sin esto, un fallo de red pasajero
+          // borraba el formulario y las evidencias ya descargadas (CAMPO-D2).
+          var fuente = FuenteOrden.listado;
 
           try {
             final detailRes = await _apiClient.get(ApiEndpoints.trabajoDetalle(id));
             if (detailRes.statusCode == 200 && detailRes.data is Map) {
               fullData = Map<String, dynamic>.from(detailRes.data);
+              fuente = FuenteOrden.detalle;
             }
           } catch (_) {}
 
@@ -208,6 +213,7 @@ class SyncQueueService {
             orgId: orgId,
             profileId: profileId,
             ordenData: fullData,
+            fuente: fuente,
           );
         }
       }

@@ -16,7 +16,40 @@ class LocalDatabaseChangeEvent {
   });
 }
 
+/// De dónde salió el retrato de una orden.
+///
+/// No es lo mismo un detalle que un listado: el listado no trae formulario, ni
+/// evidencias, ni diagnóstico, ni datos técnicos, ni la versión del esquema.
+/// Si se guarda un listado como si fuera un detalle, esos campos se vacían —y
+/// el teléfono pierde información que ya tenía, por un fallo de red pasajero.
+///
+/// La diferencia se decide por **procedencia**, nunca por el valor: un detalle
+/// puede decir legítimamente que el formulario está vacío, y eso hay que
+/// obedecerlo. Un listado no puede afirmar nada sobre ese campo, ni siquiera
+/// que está vacío.
+enum FuenteOrden {
+  /// `GET /trabajos/{id}/`: puede afirmar todo, incluso que algo quedó vacío.
+  detalle,
+
+  /// `GET /trabajos/`: solo puede afirmar lo que trae.
+  listado,
+}
+
 class LocalDatabase {
+  /// Todavía no se sabe qué versión de esquema exige la orden.
+  ///
+  /// Pasa con una orden que se vio por primera vez en el listado mientras el
+  /// detalle no llegaba: el listado no trae `tipo.schema_version`. Antes se
+  /// guardaba un 1, que es la versión que esta aplicación sabe ejecutar — o
+  /// sea, se afirmaba compatibilidad sin tener con qué. Un cero no afirma
+  /// nada, y quien decide si la orden se puede trabajar lo trata como
+  /// incompatible hasta que llegue el detalle.
+  ///
+  /// Es un centinela y no un `null` porque la columna es `NOT NULL DEFAULT 1`
+  /// desde la v1: hacerla anulable obligaría a reconstruir la tabla, que es
+  /// justo lo que ninguna migración de esta base hace.
+  static const int versionEsquemaDesconocida = 0;
+
   static final LocalDatabase _instance = LocalDatabase._internal();
   factory LocalDatabase() => _instance;
   LocalDatabase._internal();
@@ -238,6 +271,7 @@ class LocalDatabase {
     required String orgId,
     required String profileId,
     required Map<String, dynamic> ordenData,
+    FuenteOrden fuente = FuenteOrden.detalle,
   }) async {
     final db = await database;
     final id = ordenData['id'] as String;
@@ -254,7 +288,10 @@ class LocalDatabase {
     final tipoObj = ordenData['tipo'] ?? ordenData['tipo_trabajo'] ?? {};
     final tipoNombre = tipoObj['nombre'] ?? ordenData['tipo_trabajo_nombre'] ?? 'Instalación FTTH';
     final tipoCodigo = tipoObj['codigo'] ?? ordenData['tipo_trabajo_codigo'] ?? 'ftth';
-    final schemaVersion = tipoObj['schema_version'] ?? ordenData['schema_version'] ?? 1;
+    // Sin valor no se inventa una versión compatible: se marca desconocida.
+    final schemaVersion = tipoObj['schema_version'] ??
+        ordenData['schema_version'] ??
+        versionEsquemaDesconocida;
 
     final estado = ordenData['estado_operativo'] ?? ordenData['estado'] ?? 'asignada';
 
@@ -274,6 +311,41 @@ class LocalDatabase {
     }
 
     final clienteObj = ordenData['cliente'] ?? {};
+
+    // Lo que solo el detalle puede afirmar (CAMPO-D2).
+    //
+    // El listado no trae formulario, evidencias, diagnóstico, datos técnicos ni
+    // la versión del esquema. Guardar un listado como si fuera un detalle
+    // dejaba el formulario en `[]`, las fotos requeridas en `[]` y el
+    // diagnóstico vacío: un fallo de red de un segundo le borraba al técnico lo
+    // que necesitaba para trabajar.
+    //
+    // La decisión es por **procedencia, no por valor**: un detalle que dice que
+    // el formulario está vacío se obedece; un listado no puede decir nada sobre
+    // eso, ni siquiera que está vacío. Con una orden nueva que solo llegó por
+    // listado, se guarda con lo disponible y sin inventar nada.
+    final ricosPrevios = fuente == FuenteOrden.detalle
+        ? const <String, Object?>{}
+        : (await db.query(
+            'local_ordenes',
+            columns: <String>[
+              'formulario_campos_json',
+              'formulario_evidencias_json',
+              'diagnostico_previo_ia',
+              'datos_json',
+              'schema_version',
+            ],
+            where: 'id = ? AND org_id = ? AND profile_id = ?',
+            whereArgs: <Object?>[id, orgId, profileId],
+            limit: 1,
+          ))
+            .firstOrNull ??
+            const <String, Object?>{};
+
+    Object? soloDetalle(String columna, Object? valorSiEsDetalle) {
+      if (fuente == FuenteOrden.detalle) return valorSiEsDetalle;
+      return ricosPrevios[columna] ?? valorSiEsDetalle;
+    }
 
     // Los cinco campos que el backend entrega y antes se descartaban.
     //
@@ -318,12 +390,19 @@ class LocalDatabase {
         'tipo_nombre': tipoNombre,
         'tipo_codigo': tipoCodigo,
         'work_type_version_id': ordenData['work_type_version_id']?.toString(),
-        'schema_version': schemaVersion,
-        'formulario_campos_json': jsonEncode(fields),
-        'formulario_evidencias_json': jsonEncode(evidences),
+        // La version del esquema decide si la orden se puede trabajar con esta
+        // version de la aplicacion. El listado no la trae, y caer al 1 por
+        // defecto desbloquearia una orden que tiene que quedar bloqueada.
+        'schema_version': soloDetalle('schema_version', schemaVersion),
+        'formulario_campos_json':
+            soloDetalle('formulario_campos_json', jsonEncode(fields)),
+        'formulario_evidencias_json':
+            soloDetalle('formulario_evidencias_json', jsonEncode(evidences)),
         'revision': ordenData['revision'] ?? 1,
-        'diagnostico_previo_ia': diagnosticoTexto,
-        'datos_json': jsonEncode(ordenData['datos'] ?? {}),
+        'diagnostico_previo_ia':
+            soloDetalle('diagnostico_previo_ia', diagnosticoTexto),
+        'datos_json':
+            soloDetalle('datos_json', jsonEncode(ordenData['datos'] ?? {})),
         'fecha_compromiso': ordenData['programada_para']?.toString() ?? ordenData['fecha_compromiso']?.toString(),
         // Estado de la máquina de validación. Se guarda tal cual llega y no
         // toca `estado`: son dos máquinas distintas, y una orden puede estar

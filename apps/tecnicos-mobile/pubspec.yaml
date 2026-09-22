@@ -75,15 +75,15 @@ flutter:
   # app, no se descargan: el tecnico trabaja sin conexion. Solo los pesos que
   # el diseño usa de verdad. Origen y licencia: assets/fonts/LEEME.md
   fonts:
-    - family: Geist
+    - family: Inter
       fonts:
-        - asset: assets/fonts/Geist-Regular.ttf
+        - asset: assets/fonts/Inter-Regular.ttf
           weight: 400
-        - asset: assets/fonts/Geist-Medium.ttf
+        - asset: assets/fonts/Inter-Medium.ttf
           weight: 500
-        - asset: assets/fonts/Geist-SemiBold.ttf
+        - asset: assets/fonts/Inter-SemiBold.ttf
           weight: 600
-        - asset: assets/fonts/Geist-Bold.ttf
+        - asset: assets/fonts/Inter-Bold.ttf
           weight: 700
     - family: JetBrainsMono
       fonts:

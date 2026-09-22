@@ -15,6 +15,7 @@ class DexterBottomNav extends StatelessWidget {
     required this.seleccionada,
     required this.onSeleccion,
     this.indicadores = const <SeccionCampo, int>{},
+    this.avisos = const <SeccionCampo>{},
   });
 
   final SeccionCampo seleccionada;
@@ -25,13 +26,17 @@ class DexterBottomNav extends StatelessWidget {
   /// primero que el técnico mira al abrir la aplicación.
   final Map<SeccionCampo, int> indicadores;
 
+  /// Secciones con un aviso sin número: el punto de color del diseño.
+  final Set<SeccionCampo> avisos;
+
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: AppColors.superficie,
+      color: AppColors.surfaceContainerLowest,
       child: DecoratedBox(
         decoration: const BoxDecoration(
-          border: Border(top: BorderSide(color: AppColors.bordeFuerte)),
+          color: AppColors.surfaceContainerLowest,
+          border: Border(top: BorderSide(color: AppColors.surfaceContainerHigh)),
         ),
         child: SafeArea(
           top: false,
@@ -45,6 +50,7 @@ class DexterBottomNav extends StatelessWidget {
                       seccion: seccion,
                       activa: seccion == seleccionada,
                       indicador: indicadores[seccion],
+                      aviso: avisos.contains(seccion),
                       onTap: () => onSeleccion(seccion),
                     ),
                   ),
@@ -62,17 +68,19 @@ class _Ranura extends StatelessWidget {
     required this.seccion,
     required this.activa,
     required this.indicador,
+    required this.aviso,
     required this.onTap,
   });
 
   final SeccionCampo seccion;
   final bool activa;
   final int? indicador;
+  final bool aviso;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final color = activa ? AppColors.azulAccion : AppColors.inactivo;
+    final color = activa ? AppColors.primary : AppColors.onSurfaceVariant;
 
     return Semantics(
       button: true,
@@ -91,7 +99,7 @@ class _Ranura extends StatelessWidget {
                 child: SizedBox(
                   height: 3,
                   width: double.infinity,
-                  child: ColoredBox(color: AppColors.azulAccion),
+                  child: ColoredBox(color: AppColors.primary),
                 ),
               ),
             Center(
@@ -107,20 +115,36 @@ class _Ranura extends StatelessWidget {
                           top: -4,
                           right: -8,
                           child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 4,
-                              vertical: 1,
-                            ),
-                            decoration: BoxDecoration(
-                              color: AppColors.azulMarino,
-                              borderRadius: BorderRadius.circular(AppRadius.completo),
+                            height: 16,
+                            constraints: const BoxConstraints(minWidth: 16),
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            alignment: Alignment.center,
+                            decoration: const BoxDecoration(
+                              color: AppColors.primary,
+                              shape: BoxShape.circle,
                             ),
                             child: Text(
                               '${indicador!}',
                               style: AppTypography.etiquetaChica.copyWith(
-                                color: AppColors.textoSobreOscuro,
-                                fontSize: 10,
+                                color: AppColors.onPrimary,
+                                fontSize: 9,
+                                fontWeight: FontWeight.w700,
                               ),
+                            ),
+                          ),
+                        )
+                      else if (aviso)
+                        Positioned(
+                          top: -2,
+                          right: -6,
+                          child: Container(
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              color: seccion == SeccionCampo.mas
+                                  ? AppColors.error
+                                  : AppColors.secondary,
+                              shape: BoxShape.circle,
                             ),
                           ),
                         ),

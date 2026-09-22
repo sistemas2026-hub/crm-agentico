@@ -30,6 +30,7 @@ class TrabajoVista {
     required this.iniciadaEn,
     required this.completadaEn,
     required this.diagnosticoPrevio,
+    required this.versionEsquema,
     required this.requiereActualizacion,
     required this.futuro,
   });
@@ -66,7 +67,16 @@ class TrabajoVista {
 
   final String diagnosticoPrevio;
 
-  /// La orden pide una versión más nueva de la aplicación.
+  /// Qué versión de esquema exige la orden. Cero significa que todavía no se
+  /// sabe: llegó por el listado y el detalle no bajó.
+  final int versionEsquema;
+
+  /// Si la orden se sabe compatible con esta versión de la aplicación.
+  bool get versionEsquemaConocida => versionEsquema > 0;
+
+  /// No se puede trabajar: o exige una versión más nueva, o todavía no se sabe
+  /// cuál exige. Las dos cosas bloquean, porque compatibilidad no demostrada
+  /// no es compatibilidad.
   final bool requiereActualizacion;
 
   // --- Datos que todavía no existen ----------------------------------------
@@ -100,9 +110,17 @@ class TrabajoVista {
       iniciadaEn: _fecha(orden['iniciada_en']),
       completadaEn: _fecha(orden['completada_campo_en']),
       diagnosticoPrevio: orden['diagnostico_previo_ia']?.toString() ?? '',
-      requiereActualizacion: (orden['schema_version'] as int? ?? 1) > 1,
+      versionEsquema: orden['schema_version'] as int? ?? 0,
+      requiereActualizacion: _bloqueaPorEsquema(orden['schema_version'] as int?),
       futuro: FieldMockData.trabajoFuturo(id),
     );
+  }
+
+  /// Esta versión sabe ejecutar el esquema 1. Una orden que exige más, o una
+  /// de la que todavía no se sabe qué exige, no se puede trabajar.
+  static bool _bloqueaPorEsquema(int? version) {
+    if (version == null || version <= 0) return true;
+    return version > 1;
   }
 
   static double? _decimal(Object? valor) {

@@ -6,6 +6,7 @@ import 'package:campo/core/estado/ordenes_jornada.dart';
 import 'package:campo/core/sync/sync_queue_service.dart';
 import 'package:campo/core/theme/app_theme.dart';
 import 'package:campo/core/widgets/dexter_bottom_nav.dart';
+import 'package:campo/features/materiales/materiales_screen.dart';
 import 'package:campo/features/shell/app_shell.dart';
 import 'package:campo/features/trabajo/trabajo_vista.dart';
 import 'package:flutter/material.dart';
@@ -166,7 +167,8 @@ void main() {
       await tester.tap(find.text('MATERIALES'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Mi kit y custodia'), findsOneWidget);
+      // El encabezado dice en que seccion esta parado el tecnico.
+      expect(find.text('Materiales'), findsOneWidget);
       await banco.cerrar();
     });
 
@@ -176,7 +178,7 @@ void main() {
       await tester.pumpWidget(banco.app());
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Pendientes'));
+      await tester.tap(find.textContaining('Pendientes'));
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('INICIO'));
@@ -185,9 +187,9 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        tester.getSemantics(find.text('Pendientes')).flagsCollection.isSelected,
+        tester.getSemantics(find.textContaining('Pendientes')).flagsCollection.isSelected,
         ui.Tristate.isTrue,
-        reason: 'si la pestaña se reconstruyera se perderia lo elegido',
+        reason: 'si el filtro se reconstruyera se perderia lo elegido',
       );
       await banco.cerrar();
     });
@@ -198,7 +200,8 @@ void main() {
       await tester.pumpWidget(banco.app());
       await tester.pumpAndSettle();
 
-      expect(find.text('Rapilink ISP'), findsOneWidget);
+      // El diseño escribe la empresa en mayúsculas dentro de su pastilla.
+      expect(find.text('RAPILINK ISP'), findsOneWidget);
       expect(find.text('CG'), findsOneWidget);
       await banco.cerrar();
     });
@@ -244,10 +247,9 @@ void main() {
 
       banco.resumenes.add(_resumen(pendientes: 3));
       await tester.pumpAndSettle();
-      expect(
-        find.text('3 cambios guardados acá · esperando turno para enviarse'),
-        findsOneWidget,
-      );
+      // Con cola pendiente, la franja usa el texto corto del diseño.
+      expect(find.textContaining('Cola de datos'), findsOneWidget);
+      expect(find.textContaining('3 cambios locales'), findsOneWidget);
       await banco.cerrar();
     });
 
@@ -301,7 +303,10 @@ void main() {
       await tester.pumpWidget(banco.app());
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Carlos Gomez'));
+      // Una orden sin empezar se abre desde su boton Detalles.
+      await tester.ensureVisible(find.text('Detalles'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Detalles'));
       await tester.pumpAndSettle();
       expect(find.text('Detalle de la orden'), findsOneWidget);
       expect(find.text('MATERIALES'), findsNothing);
@@ -310,7 +315,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(banco.abiertos, <String>['abc']);
-      expect(find.text('Rapilink ISP'), findsOneWidget);
+      expect(find.text('RAPILINK ISP'), findsOneWidget);
       expect(find.byType(DexterBottomNav), findsOneWidget);
       await banco.cerrar();
     });
@@ -322,14 +327,14 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.text('Mi kit y custodia', skipOffstage: false),
+        find.byType(MaterialesScreen, skipOffstage: false),
         findsNothing,
         reason: 'abrir la aplicacion no debe construir las cinco secciones',
       );
 
       await tester.tap(find.text('MATERIALES'));
       await tester.pumpAndSettle();
-      expect(find.text('Mi kit y custodia'), findsOneWidget);
+      expect(find.byType(MaterialesScreen), findsOneWidget);
       await banco.cerrar();
     });
 

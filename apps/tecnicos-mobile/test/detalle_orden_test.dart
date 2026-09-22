@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:campo/core/estado/ordenes_jornada.dart';
+import 'package:campo/core/mock/field_mock_data.dart';
 import 'package:campo/core/sync/sync_queue_service.dart';
 import 'package:campo/core/theme/app_theme.dart';
 import 'package:campo/features/detalle_orden/acciones_orden.dart';
@@ -11,6 +12,7 @@ import 'package:campo/features/trabajo/estado_trabajo.dart';
 import 'package:campo/features/trabajo/trabajo_screen.dart';
 import 'package:campo/features/trabajo/trabajo_vista.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 Map<String, dynamic> _orden({
@@ -115,6 +117,24 @@ void _pantallaAlta(WidgetTester tester) {
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
+}
+
+/// ¿Algún nodo del árbol de semántica dice esto? Es la pregunta que importa:
+/// un `Semantics` declarado pero absorbido por su padre no se oye.
+bool _anunciaAlgunNodo(WidgetTester tester, String texto) {
+  final SemanticsNode raiz = tester.getSemantics(find.byType(MaterialApp));
+
+  var encontrado = false;
+  void recorrer(SemanticsNode nodo) {
+    if (nodo.label.contains(texto)) encontrado = true;
+    nodo.visitChildren((SemanticsNode hijo) {
+      recorrer(hijo);
+      return true;
+    });
+  }
+
+  recorrer(raiz);
+  return encontrado;
 }
 
 void main() {
@@ -226,12 +246,16 @@ void main() {
       await tester.pumpWidget(_app(base));
       await tester.pumpAndSettle();
 
-      expect(find.text('Orden #4832'), findsOneWidget);
+      expect(find.text('Detalle Orden #4832'), findsOneWidget);
+      expect(find.text('#OT-4832'), findsOneWidget);
       expect(find.text('Carlos Gomez'), findsOneWidget);
       expect(find.text('Cra 45 #12-88'), findsOneWidget);
       expect(find.text('3001234567'), findsOneWidget);
-      expect(find.text('EN CAMINO'), findsOneWidget);
-      expect(find.text('Comprometido para 18/09 a las 10:30'), findsOneWidget);
+      // El estado vive en la barra de pasos, con su numero de paso.
+      expect(find.text('Paso 2 de 5'), findsOneWidget);
+      // El recorrido completo se ve: el paso actual y los que faltan.
+      expect(find.text('En camino'), findsWidgets);
+      expect(find.text('Cerrada'), findsWidgets);
       await base.cerrar();
     });
 
@@ -245,7 +269,7 @@ void main() {
       await tester.pumpWidget(_app(base));
       await tester.pumpAndSettle();
 
-      expect(find.text('DIAGNÓSTICO PREVIO'), findsOneWidget);
+      expect(find.text('Triage Inteligente Dexter'), findsOneWidget);
       expect(find.text(texto), findsOneWidget);
       await base.cerrar();
     });
@@ -257,7 +281,7 @@ void main() {
       await tester.pumpWidget(_app(base));
       await tester.pumpAndSettle();
 
-      expect(find.text('DIAGNÓSTICO PREVIO'), findsNothing);
+      expect(find.text('Triage Inteligente Dexter'), findsNothing);
       await base.cerrar();
     });
 
@@ -325,7 +349,8 @@ void main() {
       await tester.pumpWidget(_app(base));
       await tester.pumpAndSettle();
 
-      expect(find.text('SEÑAL DEL CLIENTE'), findsNothing);
+      expect(find.text('Telemetría SmartOLT'), findsNothing);
+      expect(find.textContaining('POTENCIA RX'), findsNothing);
       await base.cerrar();
     });
 
@@ -336,19 +361,129 @@ void main() {
       await tester.pumpWidget(_app(base, mostrarDatosFuturos: true));
       await tester.pumpAndSettle();
 
-      expect(find.text('SEÑAL DEL CLIENTE'), findsOneWidget);
-      expect(find.text('POTENCIA RX'), findsOneWidget);
+      expect(find.text('Telemetría SmartOLT'), findsOneWidget);
+      expect(find.text('Potencia RX ONT Actual'), findsOneWidget);
+      expect(find.text('ATENUACIÓN ALTA'), findsOneWidget);
+      expect(find.text('ONT SERIAL'), findsOneWidget);
       await base.cerrar();
     });
 
-    testWidgets('18. La barra de pasos se anuncia para lectores de pantalla',
+    testWidgets('25. Sin coordenadas, el recuadro lo dice en vez de dibujar un mapa',
         (WidgetTester tester) async {
       _pantallaAlta(tester);
       final base = _BaseFalsa(<Map<String, dynamic>>[_orden(estado: 'en_sitio')]);
       await tester.pumpWidget(_app(base));
       await tester.pumpAndSettle();
 
-      expect(find.text('Paso 3 de 5: En sitio'), findsOneWidget);
+      expect(find.text('Sin coordenadas en la orden'), findsOneWidget);
+      await base.cerrar();
+    });
+
+    testWidgets('26. Con coordenadas del backend, muestra las reales',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      final base = _BaseFalsa(<Map<String, dynamic>>[
+        <String, dynamic>{
+          ..._orden(estado: 'en_sitio'),
+          'cliente_lat': 4.65123,
+          'cliente_lng': -74.05678,
+        },
+      ]);
+      await tester.pumpWidget(_app(base));
+      await tester.pumpAndSettle();
+
+      expect(find.text('4.65123, -74.05678'), findsOneWidget);
+      expect(find.text('Sin coordenadas en la orden'), findsNothing);
+      await base.cerrar();
+    });
+
+    testWidgets('27. La guía de procedimiento se abre y no toca la orden',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      final base = _BaseFalsa(<Map<String, dynamic>>[_orden(estado: 'en_sitio')]);
+      await tester.pumpWidget(_app(base, mostrarDatosFuturos: true));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Guía FTTH'));
+      await tester.pumpAndSettle();
+
+      expect(find.text(FieldMockData.procedimientoTitulo), findsOneWidget);
+      expect(
+        find.textContaining(FieldMockData.procedimientoPasos.first),
+        findsOneWidget,
+      );
+      // Consultar no transiciona nada: la orden queda como estaba.
+      expect(base.mutacionesEncoladas, isEmpty);
+
+      await tester.tap(find.text('Entendido'));
+      await tester.pumpAndSettle();
+      expect(find.text(FieldMockData.procedimientoTitulo), findsNothing);
+      await base.cerrar();
+    });
+
+    testWidgets('23. El protocolo se ve aparte de la barra de estados',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      final base = _BaseFalsa(<Map<String, dynamic>>[_orden(estado: 'en_sitio')]);
+      await tester.pumpWidget(_app(base, mostrarDatosFuturos: true));
+      await tester.pumpAndSettle();
+
+      // El protocolo es del procedimiento, con su propio contador…
+      expect(find.text('Protocolo de Atención'), findsOneWidget);
+      expect(
+        find.text('Paso ${FieldMockData.protocoloPasoActual} de '
+            '${FieldMockData.protocoloAtencion.length}'),
+        findsOneWidget,
+      );
+      // …y la barra de estados sigue diciendo dónde está la orden de verdad.
+      expect(find.text('Paso 3 de 5'), findsOneWidget);
+
+      // La matriz de telemetría y el origen del ticket, del diseño nuevo.
+      expect(find.text(FieldMockData.oltYPuerto), findsOneWidget);
+      expect(find.text('Distancia Splitter'), findsOneWidget);
+      expect(find.text('Origen NOC'), findsOneWidget);
+      await base.cerrar();
+    });
+
+    testWidgets('24. Fuera de la demostración no hay protocolo ni matriz',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      final base = _BaseFalsa(<Map<String, dynamic>>[_orden(estado: 'en_sitio')]);
+      await tester.pumpWidget(_app(base));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Protocolo de Atención'),
+        findsNothing,
+        reason: 'un protocolo de ejemplo se leería como el procedimiento oficial',
+      );
+      expect(find.text(FieldMockData.oltYPuerto), findsNothing);
+      expect(find.text('Origen NOC'), findsNothing);
+      // Lo real sigue: la barra de estados y la acción.
+      expect(find.text('Paso 3 de 5'), findsOneWidget);
+      await base.cerrar();
+    });
+
+    testWidgets('18. La barra de pasos se anuncia para lectores de pantalla',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      final SemanticsHandle semantica = tester.ensureSemantics();
+      final base = _BaseFalsa(<Map<String, dynamic>>[_orden(estado: 'en_sitio')]);
+      await tester.pumpWidget(_app(base));
+      await tester.pumpAndSettle();
+
+      // Vale la semántica, no el texto: es lo que oye quien no ve la barra.
+      // Se recorre el árbol de semántica, que es lo que lee el lector de
+      // pantalla: no alcanza con que el widget declare la etiqueta.
+      expect(
+        _anunciaAlgunNodo(tester, 'Paso 3 de 5: En sitio'),
+        isTrue,
+        reason: 'quien no ve la barra tiene que oír en qué paso va',
+      );
+
+      // El handle se libera dentro de la prueba: si queda vivo, el framework
+      // falla el caso aunque la afirmación haya pasado.
+      semantica.dispose();
       await base.cerrar();
     });
 
@@ -373,7 +508,7 @@ void main() {
       await tester.pumpWidget(_app(base));
       await tester.pumpAndSettle();
 
-      expect(find.text('ASIGNADA'), findsOneWidget);
+      expect(find.text('Paso 1 de 5'), findsOneWidget);
 
       await tester.tap(find.text('Voy en camino'));
       await tester.pumpAndSettle();
@@ -383,7 +518,7 @@ void main() {
         'accion': 'marcar_en_camino',
         'revision_base': 7,
       });
-      expect(find.text('EN CAMINO'), findsOneWidget);
+      expect(find.text('Paso 2 de 5'), findsOneWidget);
       expect(find.text('Llegué al sitio'), findsOneWidget);
       await base.cerrar();
     });

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 
 import 'package:campo/core/estado/ordenes_jornada.dart';
 import 'package:campo/core/mock/field_mock_data.dart';
@@ -198,10 +199,12 @@ void main() {
       await tester.pumpWidget(banco.app());
       await tester.pumpAndSettle();
 
-      expect(find.text('Hola, Carlos'), findsOneWidget);
-      expect(find.text('ASIGNADOS'), findsOneWidget);
-      expect(find.text('3'), findsOneWidget); // asignados en total
-      expect(find.text('SIN EMPEZAR'), findsOneWidget);
+      expect(find.textContaining('Carlos'), findsWidgets); // saludo con su nombre
+      // El avance del día sale de las órdenes: una terminada de tres.
+      expect(find.text('Avance Diario'), findsOneWidget);
+      expect(find.text('1 / 3 OT'), findsOneWidget);
+      expect(find.text('33%'), findsOneWidget);
+      expect(find.textContaining('2 pendientes'), findsOneWidget);
       await banco.cerrar();
     });
 
@@ -215,7 +218,8 @@ void main() {
 
       expect(find.text('No tenés ningún trabajo empezado'), findsOneWidget);
       // El unico trabajo aparece en proximos, no como si estuviera empezado.
-      expect(find.text('Carlos Gomez'), findsOneWidget);
+      expect(find.text('Próximos Trabajos'), findsOneWidget);
+      expect(find.text('Instalación FTTH'), findsOneWidget);
       await banco.cerrar();
     });
 
@@ -232,7 +236,7 @@ void main() {
         find.text('Tenés 2 trabajos empezados a la vez. Se muestra el más próximo.'),
         findsOneWidget,
       );
-      expect(find.text('Uno'), findsOneWidget);
+      expect(find.text('Uno'), findsOneWidget); // el cliente del trabajo destacado
       await banco.cerrar();
     });
 
@@ -293,8 +297,9 @@ void main() {
       await tester.pumpWidget(banco.app());
       await tester.pumpAndSettle();
 
-      expect(find.text('Mi kit'), findsNothing);
-      expect(find.text('SEÑAL DEL CLIENTE'), findsNothing);
+      expect(find.text('Mi Kit de Materiales'), findsNothing);
+      expect(find.text('Diagnóstico Central OLT'), findsNothing);
+      expect(find.textContaining('Vehículo'), findsNothing);
       expect(find.textContaining(FieldMockData.turno), findsNothing);
       expect(find.textContaining('SLA'), findsNothing);
       await banco.cerrar();
@@ -309,10 +314,47 @@ void main() {
       await tester.pumpWidget(banco.app(mostrarDatosFuturos: true));
       await tester.pumpAndSettle();
 
-      expect(find.text('Mi kit'), findsOneWidget);
-      expect(find.text('SEÑAL DEL CLIENTE'), findsOneWidget);
+      expect(find.text('Telemetría & Recursos de Turno'), findsOneWidget);
+      expect(find.text('KIT DROP'), findsOneWidget);
+      expect(find.text('VEHÍCULO'), findsOneWidget);
+      expect(find.text('ACADEMIA'), findsOneWidget);
+      expect(find.text('Diagnóstico Central OLT'), findsOneWidget);
       expect(find.textContaining(FieldMockData.turno), findsOneWidget);
-      expect(find.text('${FieldMockData.kitDisponibles}'), findsWidgets);
+      expect(
+        find.text('${FieldMockData.kitDisponibles} disp.'),
+        findsOneWidget,
+      );
+      // El modo de jornada, que el diseño nuevo pone arriba.
+      expect(find.text('JORNADA EN CURSO'), findsOneWidget);
+      expect(find.text('En ruta'), findsOneWidget);
+      await banco.cerrar();
+    });
+
+    testWidgets('17. El modo de jornada cambia lo que se ve y no toca ninguna orden',
+        (WidgetTester tester) async {
+      final banco = _Banco(filas: <Map<String, dynamic>>[
+        _orden(id: '1', numero: 1, estado: 'asignada'),
+      ]);
+      _pantallaAlta(tester);
+      await tester.pumpWidget(banco.app(mostrarDatosFuturos: true));
+      await tester.pumpAndSettle();
+
+      final int cargasAntes = banco.cargas;
+      await tester.tap(find.text('Pausa'));
+      await tester.pumpAndSettle();
+
+      // Cambia la selección…
+      final SemanticsHandle semantica = tester.ensureSemantics();
+      expect(
+        tester.getSemantics(find.text('Pausa')).flagsCollection.isSelected,
+        ui.Tristate.isTrue,
+      );
+      semantica.dispose();
+
+      // …y no vuelve a leer la base ni abre ningún trabajo: no hay nada que
+      // guardar, y decir lo contrario sería inventar una jornada.
+      expect(banco.cargas, cargasAntes);
+      expect(banco.abiertos, isEmpty);
       await banco.cerrar();
     });
 
@@ -325,7 +367,7 @@ void main() {
       await tester.pumpAndSettle();
       final cargasAntes = banco.cargas;
 
-      await tester.tap(find.text('Carlos Gomez'));
+      await tester.tap(find.textContaining('CONTINUAR OT #'));
       await tester.pumpAndSettle();
       expect(banco.abiertos, <String>['abc']);
 
@@ -333,7 +375,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(banco.cargas, greaterThan(cargasAntes));
-      expect(find.text('Hola, Carlos'), findsOneWidget);
+      expect(find.textContaining('Carlos'), findsWidgets);
       await banco.cerrar();
     });
 
@@ -346,7 +388,7 @@ void main() {
       await tester.pumpWidget(banco.app(onVerTodos: () => vecesQueLlamo++));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Ver todos'));
+      await tester.tap(find.text('Ver Agenda'));
       await tester.pumpAndSettle();
       expect(vecesQueLlamo, 1);
       await banco.cerrar();

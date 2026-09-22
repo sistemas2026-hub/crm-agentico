@@ -95,25 +95,32 @@ enum EstadoTrabajo {
 }
 
 /// Las cuatro pestañas de la pantalla Trabajo.
-enum PestanaTrabajo { hoy, pendientes, enProceso, finalizadas }
+/// Los filtros de estado del Hub de Trabajo, en el orden del diseño.
+enum PestanaTrabajo { todos, pendientes, enProceso, finalizadas, conNovedad }
 
 extension EtiquetaPestana on PestanaTrabajo {
   String get etiqueta => switch (this) {
-        PestanaTrabajo.hoy => 'Hoy',
+        PestanaTrabajo.todos => 'Todos',
         PestanaTrabajo.pendientes => 'Pendientes',
-        PestanaTrabajo.enProceso => 'En proceso',
+        PestanaTrabajo.enProceso => 'En Proceso',
         PestanaTrabajo.finalizadas => 'Finalizadas',
+        PestanaTrabajo.conNovedad => 'Con Novedad',
       };
 }
 
-/// Si un trabajo entra en una pestaña.
+/// Si un trabajo entra en un filtro de estado.
 ///
-/// - **Hoy**: su fecha de compromiso cae hoy y todavía no está terminado. Una
-///   orden sin fecha no entra: no se puede afirmar que sea de hoy.
-/// - **Pendientes**: no arrancó. Incluye las devueltas para corregir, que
-///   vuelven a estar sin empezar.
+/// - **Todos**: el universo del segmento elegido, sin filtrar por estado.
+/// - **Pendientes**: asignada y todavía sin arrancar.
 /// - **En proceso**: en camino o en sitio.
-/// - **Finalizadas**: terminadas, enviadas o no, más las canceladas.
+/// - **Finalizadas**: terminada, enviada o no, y cerrada.
+/// - **Con novedad**: lo que se salió del camino —devuelta para corregir,
+///   cancelada o con un estado que esta versión no conoce—. El diseño lo separa
+///   a propósito: son las que hay que mirar, no las que están en curso.
+///
+/// `compromiso` y `ahora` ya no deciden nada acá: el diseño filtra por estado y
+/// la fecha se muestra en la tarjeta. Se conservan en la firma porque la
+/// pantalla los pasa y un filtro por día vuelve a ser probable.
 bool perteneceA(
   PestanaTrabajo pestana,
   EstadoTrabajo estado,
@@ -121,12 +128,13 @@ bool perteneceA(
   required DateTime ahora,
 }) {
   return switch (pestana) {
-    PestanaTrabajo.hoy =>
-      !estado.terminada && compromiso != null && esMismoDia(compromiso, ahora),
-    PestanaTrabajo.pendientes => estado == EstadoTrabajo.asignada ||
-        estado == EstadoTrabajo.correccionRequerida,
+    PestanaTrabajo.todos => true,
+    PestanaTrabajo.pendientes => estado == EstadoTrabajo.asignada,
     PestanaTrabajo.enProceso => estado.enMarcha,
-    PestanaTrabajo.finalizadas => estado.terminada,
+    PestanaTrabajo.finalizadas => estado.terminada && estado != EstadoTrabajo.cancelada,
+    PestanaTrabajo.conNovedad => estado == EstadoTrabajo.correccionRequerida ||
+        estado == EstadoTrabajo.cancelada ||
+        estado == EstadoTrabajo.desconocido,
   };
 }
 
