@@ -8,62 +8,18 @@
 /// Como todo lo de ejemplo, se ve solo con el modo demostración encendido, no
 /// descuenta inventario, no persiste movimientos y no genera actas.
 ///
-/// Futuro: inventario de Dexter — `kit.items[]` con su categoría, su unidad,
-/// lo recibido, lo consumido y, para los serializados, su número de serie.
+/// DESDE LA FASE DE MATERIALES esto es SOLO el ejemplo. La custodia real
+/// existe: `MaterialEnCustodia` se mudó a
+/// `features/materiales/material_en_custodia.dart`, y la pantalla lee la
+/// base local. Lo de acá se ve únicamente con el modo demostración
+/// encendido, para poder enseñar la aplicación sin una jornada cargada.
 library;
 
-/// De qué clase es un material. Cambia cómo se cuenta y cómo se muestra.
-enum ClaseMaterial {
-  /// Se consume por unidades: conectores, precintos.
-  consumible,
-
-  /// Se mide en metros y queda un remanente en la camioneta.
-  bobina,
-
-  /// Tiene número de serie y hay que poder rastrearlo.
-  serializado,
-
-  /// Caja terminal, roseta: se recibe y se instala.
-  terminal,
-}
-
-class MaterialEnCustodia {
-  const MaterialEnCustodia({
-    required this.categoria,
-    required this.nombre,
-    required this.detalle,
-    required this.clase,
-    required this.recibidos,
-    required this.usados,
-    required this.unidad,
-    this.serie,
-    this.ordenesRelacionadas = const <String>[],
-    this.razon,
-    this.ultimoMovimiento,
-  });
-
-  final String categoria;
-  final String nombre;
-  final String detalle;
-  final ClaseMaterial clase;
-  final int recibidos;
-  final int usados;
-
-  /// "unidades", "m"…
-  final String unidad;
-
-  /// Solo para los serializados.
-  final String? serie;
-
-  final List<String> ordenesRelacionadas;
-  final String? razon;
-  final String? ultimoMovimiento;
-
-  int get disponibles => recibidos - usados;
-
-  /// Qué porcentaje del material recibido ya se usó.
-  double get consumo => recibidos == 0 ? 0 : usados / recibidos;
-}
+// Se importa el tipo del dominio, pero NO se re-exporta: el ejemplo es un
+// usuario de esa forma, no su via de acceso. Reexportarlo haria que una
+// pantalla terminara dependiendo del archivo de mock para conocer un tipo de
+// la operacion real, que es exactamente al reves de como debe ser.
+import '../../features/materiales/material_en_custodia.dart';
 
 class KitMockData {
   const KitMockData._();

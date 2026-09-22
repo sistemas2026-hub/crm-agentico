@@ -1,6 +1,17 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
-class SecureStorageService {
+/// Lo minimo que hace falta para saber de quien son los datos.
+///
+/// Existe para que quien solo necesita leer la identidad no dependa del
+/// almacenamiento seguro entero -- que habla por un canal de plataforma y no
+/// existe en una prueba. Con esto, una prueba pasa una sesion de mentira y
+/// mide lo que le importa.
+abstract interface class SecureStorageLectura {
+  Future<String?> getOrgId();
+  Future<String?> getProfileId();
+}
+
+class SecureStorageService implements SecureStorageLectura {
   static const _storage = FlutterSecureStorage(
     aOptions: AndroidOptions(),
   );
@@ -41,8 +52,10 @@ class SecureStorageService {
 
   Future<String?> getAccessToken() async => await _storage.read(key: _keyAccessToken);
   Future<String?> getRefreshToken() async => await _storage.read(key: _keyRefreshToken);
+  @override
   Future<String?> getOrgId() async => await _storage.read(key: _keyOrgId);
   Future<String?> getOrgName() async => await _storage.read(key: _keyOrgName);
+  @override
   Future<String?> getProfileId() async => await _storage.read(key: _keyProfileId);
   Future<String?> getUserEmail() async => await _storage.read(key: _keyUserEmail);
   Future<String?> getUserName() async => await _storage.read(key: _keyUserName);

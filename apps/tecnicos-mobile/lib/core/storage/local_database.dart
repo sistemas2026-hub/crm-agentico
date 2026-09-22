@@ -1279,6 +1279,25 @@ class LocalDatabase {
     );
   }
 
+  /// Lo que se registro como usado en una orden concreta.
+  ///
+  /// Incluye lo confirmado y lo que todavia espera: para quien esta en la
+  /// casa del cliente, un conector que ya puso es un conector que ya puso,
+  /// haya subido o no.
+  Future<List<Map<String, dynamic>>> getMovimientosMaterialDeOrden({
+    required String orgId,
+    required String profileId,
+    required String ordenId,
+  }) async {
+    final db = await database;
+    return db.query(
+      'cola_movimientos_material',
+      where: 'org_id = ? AND profile_id = ? AND orden_id = ?',
+      whereArgs: [orgId, profileId, ordenId],
+      orderBy: 'created_at ASC',
+    );
+  }
+
   /// Los que el servidor acepto pero con novedad: descuadre o conflicto.
   ///
   /// Estan confirmados --ya subieron-- y aun asi hay que mostrarlos: un

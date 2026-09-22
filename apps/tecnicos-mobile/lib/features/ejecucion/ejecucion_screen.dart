@@ -7,6 +7,7 @@ import 'package:uuid/uuid.dart';
 import '../../core/mock/field_mock_data.dart';
 import '../../core/storage/evidencia_storage_service.dart';
 import '../../core/storage/local_database.dart';
+import 'widgets/consumo_de_material.dart';
 import '../../core/storage/secure_storage_service.dart';
 import '../../core/sync/sync_queue_service.dart';
 import '../../core/theme/app_theme.dart';
@@ -47,6 +48,12 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
   Map<String, dynamic>? _orden;
   String? _orgId;
   String? _profileId;
+
+  /// Lo que se registro como usado en ESTA orden.
+  ///
+  /// Se lee de la cola y no de un contador propio: la cola es la que sube, y
+  /// un numero aparte se desincronizaria en cuanto algo se reintente.
+  List<Map<String, dynamic>> _materialesUsados = <Map<String, dynamic>>[];
   bool _isLoading = true;
   bool _showSavedIndicator = false;
   Timer? _savedIndicatorTimer;
@@ -119,6 +126,7 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
         );
 
         // Cargar evidencias ya capturadas localmente
+        _materialesUsados = await _materialesDeEstaOrden();
         _evidenciasCapturadas = await _localDb.getEvidenciasOrden(
           orgId: _orgId!,
           profileId: _profileId!,
@@ -314,6 +322,130 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
     });
   }
 
+  /// Lo registrado en esta orden, de la cola local.
+  Future<List<Map<String, dynamic>>> _materialesDeEstaOrden() async {
+    if (_orgId == null || _profileId == null) return <Map<String, dynamic>>[];
+    final todos = await _localDb.getMovimientosMaterialDeOrden(
+      orgId: _orgId!,
+      profileId: _profileId!,
+      ordenId: widget.ordenId,
+    );
+    return todos;
+  }
+
+  Future<void> _abrirConsumoDeMaterial() async {
+    if (_orgId == null || _profileId == null) return;
+    final registrado = await ConsumoDeMaterial.abrir(
+      context,
+      orgId: _orgId!,
+      profileId: _profileId!,
+      ordenId: widget.ordenId,
+      ordenNumero: _numeroDeLaOrden,
+      baseLocal: _localDb,
+    );
+    if (registrado != true || !mounted) return;
+    final usados = await _materialesDeEstaOrden();
+    if (!mounted) return;
+    setState(() => _materialesUsados = usados);
+  }
+
+  /// El numero de la orden, si se pudo leer. Nunca se inventa uno.
+  int? get _numeroDeLaOrden {
+    final valor = _orden?['numero'];
+    if (valor is int) return valor;
+    return int.tryParse(valor?.toString() ?? '');
+  }
+
+  /// El paso de materiales.
+  ///
+  /// Va junto al formulario y las evidencias porque es parte del mismo gesto:
+  /// lo que se hizo, con que se hizo y como quedo. Sacarlo a otra pantalla
+  /// convertiria "anotar dos conectores" en un viaje de ida y vuelta que nadie
+  /// hace con las manos en la caja terminal.
+  Widget _bloqueDeMateriales() {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceContainerLow,
+        borderRadius: AppRadius.brTarjeta,
+        border: Border.all(color: AppColors.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text('Materiales utilizados',
+                        style: AppTypography.tituloChico),
+                    Text(
+                      'Se descuenta de tu kit y sube cuando haya señal',
+                      style: AppTypography.cuerpoChico,
+                    ),
+                  ],
+                ),
+              ),
+              Text(
+                '${_materialesUsados.length}',
+                style: AppTypography.dato.copyWith(
+                  color: AppColors.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (_materialesUsados.isEmpty)
+            Text(
+              'Todavía no registraste material en este trabajo.',
+              style: AppTypography.cuerpoChico.copyWith(
+                color: AppColors.onSurfaceVariant,
+              ),
+            )
+          else
+            for (final m in _materialesUsados)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  children: <Widget>[
+                    Icon(
+                      (m['estado'] ?? '') == 'confirmado'
+                          ? Icons.cloud_done_outlined
+                          : Icons.schedule,
+                      size: 16,
+                      color: AppColors.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '${m['material_nombre'] ?? m['material_codigo']} '
+                        'x${m['cantidad']}'
+                        '${(m['serie'] as String?)?.isNotEmpty == true ? ' · ${m['serie']}' : ''}',
+                        style: AppTypography.cuerpo,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            height: 44,
+            child: OutlinedButton.icon(
+              onPressed: _abrirConsumoDeMaterial,
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('Agregar material'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -358,6 +490,7 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
                     mostrarDatosFuturos: widget.mostrarDatosFuturos,
                   ),
                   const SizedBox(height: AppSpacing.lg),
+                  _bloqueDeMateriales(),
                   _evidencias(),
                   if (widget.mostrarDatosFuturos) ...[
                     const SizedBox(height: AppSpacing.lg),

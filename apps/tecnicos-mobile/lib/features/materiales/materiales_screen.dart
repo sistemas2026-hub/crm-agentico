@@ -3,6 +3,9 @@ import 'package:flutter/services.dart';
 
 import '../../core/mock/field_mock_data.dart';
 import '../../core/mock/kit_mock_data.dart';
+import '../../core/storage/local_database.dart';
+import 'kit_de_jornada.dart';
+import 'material_en_custodia.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/dexter_empty_state.dart';
 
@@ -12,19 +15,29 @@ import '../../core/widgets/dexter_empty_state.dart';
 /// las cifras del día, la barra de acciones, los filtros por categoría, la
 /// lista de materiales en custodia y el cierre de jornada.
 ///
-/// **Nada de esto existe todavía en el backend** (CAMPO-DATA-009 y
-/// CAMPO-DATA-025): no hay modelo de kit, ni API de consumo, ni cola offline
-/// de movimientos. Por eso la pantalla completa vive detrás del modo
-/// demostración, y fuera de él dice la verdad: el módulo está por construirse.
-/// Ningún botón descuenta inventario ni registra un movimiento.
+/// DE DONDE SALEN ESTOS DATOS
+/// --------------------------
+/// De la base del telefono: `local_kit` es lo que dijo el servidor la ultima
+/// vez que hubo senal, y la cola de movimientos es lo que paso despues. El
+/// saldo que se ve son las dos cosas sumadas al leer, nunca un numero
+/// guardado -- asi el tecnico ve el descuento apenas registra el consumo,
+/// este o no conectado.
+///
+/// El catalogo de ejemplo sigue existiendo, pero solo se dibuja con el modo
+/// demostracion encendido Y sin una jornada cargada: sirve para ensenar la
+/// aplicacion, no para tapar un kit vacio. Si hay kit real, gana el real.
 class MaterialesScreen extends StatefulWidget {
   const MaterialesScreen({
     super.key,
     this.mostrarDatosFuturos = FieldMockData.modoDemo,
     this.tecnico,
+    this.kit,
   });
 
   final bool mostrarDatosFuturos;
+
+  /// El kit ya leido. Se inyecta en las pruebas; en la aplicacion se lee solo.
+  final KitDeJornada? kit;
 
   /// Quién tiene el kit a cargo. Es la sesión real: el kit es de ejemplo, pero
   /// el nombre de quien firmaría la recepción no se inventa.
@@ -37,28 +50,79 @@ class MaterialesScreen extends StatefulWidget {
 class _MaterialesScreenState extends State<MaterialesScreen> {
   _Categoria _categoria = _Categoria.todos;
 
+  KitDeJornada? _kit;
+  bool _cargando = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _cargar();
+    // La pantalla se refresca sola cuando la cola cambia: registrar un
+    // consumo desde una orden tiene que verse aca sin volver a entrar.
+    LocalDatabase.onDataChanged.listen((evento) {
+      if (!mounted) return;
+      if (evento.tabla == 'local_kit' ||
+          evento.tabla == 'cola_movimientos_material') {
+        _cargar();
+      }
+    });
+  }
+
+  Future<void> _cargar() async {
+    if (widget.kit != null) {
+      setState(() {
+        _kit = widget.kit;
+        _cargando = false;
+      });
+      return;
+    }
+    final kit = await KitDeJornada.leer();
+    if (!mounted) return;
+    setState(() {
+      _kit = kit;
+      _cargando = false;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    if (!widget.mostrarDatosFuturos) {
+    if (_cargando) {
+      // Un fondo quieto, no un indicador que gira.
+      //
+      // Esto lee SQLite: son milisegundos, y un spinner para eso solo hace
+      // parpadear la pantalla. Ademas una animacion perpetua deja a la
+      // pantalla sin "reposo", que es lo que rompe cualquier prueba que
+      // espere a que las animaciones terminen.
+      return const ColoredBox(color: AppColors.surface);
+    }
+
+    final kit = _kit ?? const KitDeJornada.vacio();
+
+    // Lo real le gana al ejemplo: el catalogo de demostracion solo aparece
+    // cuando NO hay kit cargado, para poder ensenar la pantalla.
+    final List<MaterialEnCustodia> todos =
+        kit.hayAlgo ? kit.materiales : (widget.mostrarDatosFuturos
+            ? KitMockData.items
+            : const <MaterialEnCustodia>[]);
+
+    if (todos.isEmpty) {
       return const ColoredBox(
         color: AppColors.surface,
         child: Center(
           child: DexterEmptyState(
             icono: Icons.inventory_2_outlined,
             titulo: 'Mi kit y custodia',
-            mensaje: 'Acá vas a ver el material que tenés a cargo, lo que '
-                'consumiste en cada trabajo y el cierre de la jornada. '
-                'Todavía falta construir el módulo de inventario.',
+            mensaje: 'Todavía no hay material entregado a tu nombre. Aparece '
+                'cuando la bodega registre la entrega y haya señal para '
+                'sincronizar.',
           ),
         ),
       );
     }
 
     final visibles = _categoria == _Categoria.todos
-        ? KitMockData.items
-        : KitMockData.items
-            .where((MaterialEnCustodia m) => _categoria.incluye(m))
-            .toList();
+        ? todos
+        : todos.where((MaterialEnCustodia m) => _categoria.incluye(m)).toList();
 
     return ColoredBox(
       color: AppColors.surface,

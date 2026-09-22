@@ -1,12 +1,18 @@
 import 'package:campo/core/mock/kit_mock_data.dart';
+import 'package:campo/features/materiales/kit_de_jornada.dart';
+import 'package:campo/features/materiales/material_en_custodia.dart';
 import 'package:campo/core/theme/app_theme.dart';
 import 'package:campo/features/materiales/materiales_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// Materiales es la única pantalla que no tiene **nada** detrás: no hay modelo
-/// de kit, ni API, ni cola de movimientos. Existe para mostrar a dónde va el
-/// producto, así que vive entera detrás del modo demostración.
+/// Materiales ya tiene todo detrás: modelo, API y cola offline. Estas pruebas
+/// montan la pantalla con un kit inyectado --`kit:`-- porque lo que se mide acá
+/// es el DIBUJO, no la lectura: la lectura tiene sus propias pruebas contra la
+/// base en `materiales_offline_test.dart`.
+///
+/// El kit vacío ya no dice "falta construir el módulo": dice que todavía no
+/// hay material a tu nombre, que es la verdad desde que el módulo existe.
 void _pantallaAlta(WidgetTester tester) {
   tester.view.physicalSize = const Size(1000, 4200);
   tester.view.devicePixelRatio = 1.0;
@@ -24,12 +30,18 @@ void main() {
     testWidgets('1. Fuera de la demostración dice la verdad: falta el módulo',
         (WidgetTester tester) async {
       await tester.pumpWidget(
-        _enApp(const MaterialesScreen(mostrarDatosFuturos: false)),
+        _enApp(const MaterialesScreen(
+          mostrarDatosFuturos: false,
+          kit: KitDeJornada.vacio(),
+        )),
       );
       await tester.pumpAndSettle();
 
       expect(find.text('Mi kit y custodia'), findsOneWidget);
-      expect(find.textContaining('falta construir el módulo'), findsOneWidget);
+      expect(
+        find.textContaining('no hay material entregado a tu nombre'),
+        findsOneWidget,
+      );
       // Ni una cifra de inventario inventada.
       expect(find.text('Mi Kit Diario'), findsNothing);
       expect(find.textContaining('Disp.'), findsNothing);
@@ -39,7 +51,10 @@ void main() {
         (WidgetTester tester) async {
       _pantallaAlta(tester);
       await tester.pumpWidget(
-        _enApp(const MaterialesScreen(mostrarDatosFuturos: true)),
+        _enApp(const MaterialesScreen(
+          mostrarDatosFuturos: true,
+          kit: KitDeJornada.vacio(),
+        )),
       );
       await tester.pumpAndSettle();
 
@@ -61,7 +76,10 @@ void main() {
         (WidgetTester tester) async {
       _pantallaAlta(tester);
       await tester.pumpWidget(
-        _enApp(const MaterialesScreen(mostrarDatosFuturos: true)),
+        _enApp(const MaterialesScreen(
+          mostrarDatosFuturos: true,
+          kit: KitDeJornada.vacio(),
+        )),
       );
       await tester.pumpAndSettle();
 
@@ -81,7 +99,10 @@ void main() {
         (WidgetTester tester) async {
       _pantallaAlta(tester);
       await tester.pumpWidget(
-        _enApp(const MaterialesScreen(mostrarDatosFuturos: true)),
+        _enApp(const MaterialesScreen(
+          mostrarDatosFuturos: true,
+          kit: KitDeJornada.vacio(),
+        )),
       );
       await tester.pumpAndSettle();
 
@@ -96,7 +117,10 @@ void main() {
         (WidgetTester tester) async {
       _pantallaAlta(tester);
       await tester.pumpWidget(
-        _enApp(const MaterialesScreen(mostrarDatosFuturos: true)),
+        _enApp(const MaterialesScreen(
+          mostrarDatosFuturos: true,
+          kit: KitDeJornada.vacio(),
+        )),
       );
       await tester.pumpAndSettle();
 
@@ -116,6 +140,7 @@ void main() {
       await tester.pumpWidget(
         _enApp(const MaterialesScreen(
           mostrarDatosFuturos: true,
+          kit: KitDeJornada.vacio(),
           tecnico: 'Ana Restrepo',
         )),
       );
@@ -128,7 +153,10 @@ void main() {
         (WidgetTester tester) async {
       _pantallaAlta(tester);
       await tester.pumpWidget(
-        _enApp(const MaterialesScreen(mostrarDatosFuturos: true)),
+        _enApp(const MaterialesScreen(
+          mostrarDatosFuturos: true,
+          kit: KitDeJornada.vacio(),
+        )),
       );
       await tester.pumpAndSettle();
 
