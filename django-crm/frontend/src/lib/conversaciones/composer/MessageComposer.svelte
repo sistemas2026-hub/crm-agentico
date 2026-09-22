@@ -68,39 +68,50 @@
     onPonerEmoji, onAbrirPlantillas, onElegirPlantilla, onEnviarPlantilla,
     onIntervenir
   } = $props();
+
+  /* QUÉ DICE LA BANDA, y de qué color. Sale del estado real --quién controla,
+     qué modo está elegido, si la ventana está abierta-- y no de un texto
+     fijo: la referencia tiene una sola banda porque su pantalla tiene un solo
+     estado, y acá hay cinco.
+
+     El tono NO es la señal: adentro va la frase entera. El color sólo
+     refuerza, por lo mismo que en el hilo -- un punto de color sin palabra no
+     dice QUÉ pasa. */
+  const tonoBanda = $derived(
+    modo === 'nota' ? 'nota'
+      : bloqueadoPorIA ? 'ia'
+        : bloqueadoPorVentana ? 'aviso'
+          : escalada ? 'humano'
+            : 'ia'
+  );
+
+  /* La marca de la derecha: de qué canal es esta salida. En versalita y en
+     mono porque es un sello de procedencia, no un dato que se lea. */
+  const canalBanda = $derived(
+    modo === 'nota' ? 'Interno'
+      : modo === 'responder_y_devolver' ? 'Sale y devuelve'
+        : escalada ? 'Canal directo del operador'
+          : 'Responde el asistente'
+  );
+
+  /* Y por dónde sale, con el estado que de verdad tiene. La ventana de 24 h
+     es una regla de WhatsApp: decir «en línea» cuando está cerrada sería
+     exactamente lo contrario de lo que pasa. */
+  const estadoCanal = $derived(
+    conversacion.canal === 'whatsapp'
+      ? bloqueadoPorVentana
+        ? 'WhatsApp · ventana cerrada'
+        : ventanaAbierta
+          ? 'WhatsApp · ventana abierta'
+          : 'WhatsApp'
+      : conversacion.canal
+  );
 </script>
 
   <div class="pie">
     {#if error}<p class="v2-error" style="margin:0 0 6px">{error}</p>{/if}
     <!-- Los dos modos, arriba del cuadro. Van acá y no dentro del pie para
          que se lean ANTES de escribir, no después. -->
-    <div class="modos" role="group" aria-label="Qué estás escribiendo">
-      <button
-        type="button"
-        class="modo"
-        aria-pressed={modo === 'responder'}
-        onclick={() => (modo = 'responder')}>Responder al cliente</button
-      >
-      <button
-        type="button"
-        class="modo modo-nota"
-        aria-pressed={modo === 'nota'}
-        onclick={() => (modo = 'nota')}>Nota interna</button
-      >
-      <!-- Sólo con la conversación en manos de una persona: devolverla supone
-           tenerla. Con la IA atendiendo, el motor responde 409 y el botón no
-           tendría a qué. -->
-      {#if escalada}
-        <button
-          type="button"
-          class="modo modo-devolver"
-          aria-pressed={modo === 'responder_y_devolver'}
-          onclick={() => (modo = 'responder_y_devolver')}
-          disabled={enviando}
-          >Responder y devolver a IA</button
-        >
-      {/if}
-    </div>
 
     <!-- EL DESENLACE DE LA DEVOLUCIÓN, cuando la hubo. No se mezcla con
          `error` a propósito: "no salió" y "no sabemos si salió" son dos cosas
@@ -289,6 +300,166 @@
         <div class="soltar-aca">Soltá el archivo acá</div>
       {/if}
 
+      <!-- ── 1. LA BANDA DE ESTADO ─────────────────────────────────────────
+           Lo primero del compositor en la referencia: un punto, qué va a
+           pasar con lo que se escriba, y a la derecha por dónde sale.
+
+           Estaba abajo, entre los iconos y el botón de enviar, y ahí llegaba
+           tarde: se lee DESPUÉS de haber escrito. Arriba contesta la pregunta
+           que uno se hace antes de tipear -- «¿esto le llega al cliente o se
+           queda en el equipo?». -->
+      <div class="banda banda-{tonoBanda}">
+        <span class="banda-punto" aria-hidden="true"></span>
+        <span class="banda-texto">
+          {#if modo === 'nota'}
+            <strong class="nota-interna-aviso">Solo la ve el equipo</strong>
+            <span class="v2-muted">· no se le envía al cliente</span>
+          {:else if modo === 'responder_y_devolver'}
+            <!-- Lo que va a pasar, dicho antes de apretar: el mensaje sale Y la
+                 conversación deja de ser tuya. Y la condición, que no es
+                 obvia: si el mensaje no sale, la conversación se queda. -->
+            <strong class="nota-directo">Se envía y la conversación vuelve a la IA</strong>
+            <span class="v2-muted">· solo si el mensaje sale</span>
+          {:else if escalada}
+            <!-- Más visible que antes (§11): cuando está escalada, esto sale
+                 DIRECTO al cliente. "Le llega tal cual" no decía quién
+                 habla ni que el asistente no interviene. -->
+            <strong class="nota-directo">Se envía directo al cliente</strong>
+            <span class="v2-muted">· no pasa por el asistente</span>
+          {:else if bloqueadoPorIA}
+            La atiende la IA · para escribirle al cliente hace falta tomar el control
+            <button
+              type="button"
+              class="v2-btn v2-btn-sm v2-btn-strong"
+              onclick={() => onIntervenir?.()}
+              disabled={interviniendo}
+              aria-busy={interviniendo}
+            >
+              {interviniendo ? 'Tomando el control…' : 'Intervenir'}
+            </button>
+            {#if errorIntervenir}<span class="aviso-mal">{errorIntervenir}</span>{/if}
+          {:else}
+            Responde el asistente
+          {/if}
+        </span>
+        <span class="banda-canal">{canalBanda}</span>
+      </div>
+
+      <!-- ── 2. LA BARRA ───────────────────────────────────────────────────
+           Adjuntos y modos ARRIBA del cuadro, como la referencia. Los modos
+           eran tres pestañas sobre el compositor y ocupaban un renglón
+           entero; acá entran en la misma barra que los iconos.
+
+           Siguen siendo tres estados y no dos: «al cliente», «nota interna» y
+           --sólo con la conversación en manos de una persona-- «devolver a la
+           IA». La referencia sólo tiene dos porque su pantalla no tiene la
+           devolución; el contrato manda sobre el diseño. -->
+      <div class="barra">
+        <div class="herramientas" hidden={modo === 'nota' || bloqueadoPorIA}>
+          <div class="emoji-caja">
+            <button
+              type="button"
+              class="v2-btn v2-btn-quiet accion-icono"
+              aria-label="Emoji"
+              title="Emoji"
+              aria-expanded={emojisAbiertos}
+              onclick={() => (emojisAbiertos = !emojisAbiertos)}><Smile size={18} /></button
+            >
+            {#if emojisAbiertos}
+              <div class="emoji-panel" role="group" aria-label="Elegí un emoji">
+                {#each EMOJIS as e (e)}
+                  <button type="button" onclick={() => onPonerEmoji?.(e)}>{e}</button>
+                {/each}
+              </div>
+            {/if}
+          </div>
+
+          <!-- Menú de dos opciones. El tipo se sigue deduciendo del archivo
+               (tipoDe) -- esto no cambia qué se manda: cambia el DIÁLOGO que
+               abre el navegador. "Imagen" filtra a jpeg/png, que es justo lo
+               que WhatsApp acepta, y evita que alguien elija un HEIC del
+               celular para que se lo rechacen después. -->
+          <div class="emoji-caja">
+            <button
+              type="button"
+              class="v2-btn v2-btn-quiet accion-icono"
+              aria-label="Adjuntar"
+              title="Adjuntar"
+              aria-expanded={adjuntarAbierto}
+              onclick={() => (adjuntarAbierto = !adjuntarAbierto)}><Paperclip size={17} /></button
+            >
+            {#if adjuntarAbierto}
+              <div class="menu-adjuntar" role="group" aria-label="Qué querés adjuntar">
+                <label>
+                  <ImageIcon size={14} /> Imagen
+                  <input type="file" hidden accept="image/jpeg,image/png" onchange={(e) => onElegirArchivo?.(e)} />
+                </label>
+                <label>
+                  <FileText size={14} /> Documento
+                  <input type="file" hidden onchange={(e) => onElegirArchivo?.(e)} />
+                </label>
+              </div>
+            {/if}
+          </div>
+
+          {#if !grabando}
+            <button
+              type="button"
+              class="v2-btn v2-btn-quiet accion-icono"
+              aria-label="Grabar una nota de voz"
+              title="Grabar audio"
+              onclick={() => onGrabar?.()}><Mic size={18} /></button
+            >
+          {/if}
+        </div>
+        <span class="barra-sep" aria-hidden="true"></span>
+        <div class="modos" role="group" aria-label="Qué estás escribiendo">
+          <button
+            type="button"
+            class="modo"
+            aria-pressed={modo === 'responder'}
+            onclick={() => (modo = 'responder')}>Al cliente</button
+          >
+          <button
+            type="button"
+            class="modo modo-nota"
+            aria-pressed={modo === 'nota'}
+            onclick={() => (modo = 'nota')}>Nota interna</button
+          >
+          <!-- Sólo con la conversación en manos de una persona: devolverla supone
+               tenerla. Con la IA atendiendo, el motor responde 409 y el botón no
+               tendría a qué. -->
+          {#if escalada}
+            <button
+              type="button"
+              class="modo modo-devolver"
+              aria-pressed={modo === 'responder_y_devolver'}
+              onclick={() => (modo = 'responder_y_devolver')}
+              disabled={enviando}
+              >Devolver a la IA</button
+            >
+          {/if}
+        </div>
+        <!-- PLANTILLAS SIEMPRE A LA VISTA, no sólo con la ventana cerrada.
+             Una plantilla aprobada sirve igual con la ventana abierta, y
+             tenerla escondida detrás de un estado hacía que nadie supiera que
+             existía hasta que ya no se podía escribir. -->
+        <button
+          type="button"
+          class="barra-boton"
+          onclick={() => onAbrirPlantillas?.()}
+          disabled={cargandoPlantillas}
+        >
+          <FileText size={13} /> Plantillas
+        </button>
+
+        <!-- Por dónde sale y si el canal está disponible. La ventana de 24 h
+             es de WhatsApp, así que el estado se dice con ese dato real y no
+             con un «Online» fijo. -->
+        <span class="barra-canal">{estadoCanal}</span>
+      </div>
+
+
       <!-- Grabando: el cronómetro y los tres controles que el pedido exige,
            y NINGUNO que mande. Parar deja la nota como adjunto pendiente de
            confirmación -- se puede escuchar antes de mandarla. -->
@@ -366,104 +537,17 @@
           }
         }}
       ></textarea>
+      <!-- ── 4. EL PIE ─────────────────────────────────────────────────────
+           La pista del teclado a la izquierda y el envío a la derecha, como
+           la referencia. La pista no se dibuja cuando Enter no manda nada:
+           con la ventana cerrada o con la IA atendiendo, dejarla puesta
+           sería invitar al gesto que no funciona. -->
       <div class="compositor-pie">
-        <!-- Emoji, adjuntar y micrófono. Iconos de 34px y no de 20: esta
-             pantalla se usa con prisa, y un objetivo diminuto se falla. -->
-        <!-- Sin herramientas con la IA atendiendo un hilo real: imagen,
-             documento y nota de voz le llegan al cliente, igual que el texto. -->
-        <div class="herramientas" hidden={modo === 'nota' || bloqueadoPorIA}>
-          <div class="emoji-caja">
-            <button
-              type="button"
-              class="v2-btn v2-btn-quiet accion-icono"
-              aria-label="Emoji"
-              title="Emoji"
-              aria-expanded={emojisAbiertos}
-              onclick={() => (emojisAbiertos = !emojisAbiertos)}><Smile size={18} /></button
-            >
-            {#if emojisAbiertos}
-              <div class="emoji-panel" role="group" aria-label="Elegí un emoji">
-                {#each EMOJIS as e (e)}
-                  <button type="button" onclick={() => onPonerEmoji?.(e)}>{e}</button>
-                {/each}
-              </div>
-            {/if}
-          </div>
-
-          <!-- Menú de dos opciones. El tipo se sigue deduciendo del archivo
-               (tipoDe) -- esto no cambia qué se manda: cambia el DIÁLOGO que
-               abre el navegador. "Imagen" filtra a jpeg/png, que es justo lo
-               que WhatsApp acepta, y evita que alguien elija un HEIC del
-               celular para que se lo rechacen después. -->
-          <div class="emoji-caja">
-            <button
-              type="button"
-              class="v2-btn v2-btn-quiet accion-icono"
-              aria-label="Adjuntar"
-              title="Adjuntar"
-              aria-expanded={adjuntarAbierto}
-              onclick={() => (adjuntarAbierto = !adjuntarAbierto)}><Paperclip size={17} /></button
-            >
-            {#if adjuntarAbierto}
-              <div class="menu-adjuntar" role="group" aria-label="Qué querés adjuntar">
-                <label>
-                  <ImageIcon size={14} /> Imagen
-                  <input type="file" hidden accept="image/jpeg,image/png" onchange={(e) => onElegirArchivo?.(e)} />
-                </label>
-                <label>
-                  <FileText size={14} /> Documento
-                  <input type="file" hidden onchange={(e) => onElegirArchivo?.(e)} />
-                </label>
-              </div>
-            {/if}
-          </div>
-
-          {#if !grabando}
-            <button
-              type="button"
-              class="v2-btn v2-btn-quiet accion-icono"
-              aria-label="Grabar una nota de voz"
-              title="Grabar audio"
-              onclick={() => onGrabar?.()}><Mic size={18} /></button
-            >
-          {/if}
-        </div>
-
-        <span class="compositor-nota">
-          {#if modo === 'nota'}
-            <strong class="nota-interna-aviso">Solo la ve el equipo</strong>
-            <span class="v2-muted">· no se le envía al cliente</span>
-          {:else if modo === 'responder_y_devolver'}
-            <!-- Lo que va a pasar, dicho antes de apretar: el mensaje sale Y la
-                 conversación deja de ser tuya. Y la condición, que no es
-                 obvia: si el mensaje no sale, la conversación se queda. -->
-            <strong class="nota-directo">Se envía y la conversación vuelve a la IA</strong>
-            <span class="v2-muted">· solo si el mensaje sale</span>
-          {:else if escalada}
-            <!-- Más visible que antes (§11): cuando está escalada, esto sale
-                 DIRECTO al cliente. "Le llega tal cual" no decía quién
-                 habla ni que el asistente no interviene. -->
-            <strong class="nota-directo">Se envía directo al cliente</strong>
-            <span class="v2-muted">· no pasa por el asistente</span>
-          {:else if bloqueadoPorIA}
-            La atiende la IA · para escribirle al cliente hace falta tomar el control
-            <button
-              type="button"
-              class="v2-btn v2-btn-sm v2-btn-strong"
-              onclick={() => onIntervenir?.()}
-              disabled={interviniendo}
-              aria-busy={interviniendo}
-            >
-              {interviniendo ? 'Tomando el control…' : 'Intervenir'}
-            </button>
-            {#if errorIntervenir}<span class="aviso-mal">{errorIntervenir}</span>{/if}
-          {:else}
-            Responde el asistente
-          {/if}
-          <!-- Con la ventana cerrada, Enter no manda nada. Dejar la pista
-               puesta seria invitar al gesto que no funciona. -->
+        <span class="pista">
           {#if !bloqueadoPorVentana && !bloqueadoPorIA}
-            · <kbd class="v2-kbd">Enter</kbd> envía
+            <kbd class="v2-kbd">Enter</kbd> envía · <kbd class="v2-kbd">Shift</kbd>+<kbd
+              class="v2-kbd">Enter</kbd
+            > salto de línea
           {/if}
         </span>
 
@@ -710,22 +794,29 @@
   /* Con wrap desde que son tres: "Responder y devolver a IA" es mucho más
      largo que los dos de antes, y sin esto los tres se comprimen hasta que el
      texto se corta en pantallas angostas. */
+  /* LOS MODOS, DENTRO DE LA BARRA. Eran tres pestañas en un renglón propio
+     sobre el compositor: 30px de alto para tres palabras, en una pantalla
+     donde el hilo pelea por cada píxel. Acá comparten renglón con los
+     iconos, como en la referencia. */
   .modos {
     display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-    margin-bottom: 6px;
+    align-items: center;
+    gap: 3px;
+    min-width: 0;
   }
 
   .modo {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     border: 1px solid transparent;
     background: none;
     font: inherit;
-    font-size: 11.5px;
+    font-size: 11px;
     color: var(--bandeja-texto-2);
-    padding: 5px 10px;
-    min-height: 30px;
-    border-radius: 7px;
+    padding: 3px 7px;
+    border-radius: 3px;
+    white-space: nowrap;
     cursor: pointer;
   }
 
@@ -736,8 +827,8 @@
   .modo[aria-pressed='true'] {
     color: var(--bandeja-texto);
     font-weight: 650;
-    border-color: var(--bandeja-borde);
-    background: var(--bandeja-superficie);
+    border-color: var(--bandeja-borde-fuerte);
+    background: var(--bandeja-superficie-suave);
   }
 
   /* Devolver a la IA se pinta con el violeta de la IA, el mismo de la cola y
@@ -1085,9 +1176,13 @@
     gap: 10px;
   }
 
-  .compositor-nota {
-    font-size: 11.5px;
-    color: var(--bandeja-texto-2);
+  /* La pista del teclado. Vacía cuando Enter no manda nada, y entonces no
+     ocupa nada: es un `span` sin contenido, y el `justify-content` del pie
+     deja el botón solo a la derecha. */
+  .pista {
+    min-width: 0;
+    font-size: 10.5px;
+    color: var(--bandeja-texto-3);
   }
 
 
@@ -1137,4 +1232,135 @@
       flex-basis: 100%;
     }
   }
+
+  /* ── LA BANDA DE ESTADO ──────────────────────────────────────────────────
+     Un renglón sobre la barra: punto, qué pasa con lo que se escriba, y de
+     qué canal sale. Los cuatro tonos salen de los mismos tokens que usan el
+     hilo y la cola -- que la nota interna sea ámbar acá y ámbar allá no es
+     una coincidencia, es la misma pregunta contestada igual. */
+  .banda {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 9px;
+    margin-bottom: 7px;
+    border: 1px solid;
+    border-radius: var(--bandeja-radio-sm);
+    font-size: 11.5px;
+    line-height: 1.35;
+  }
+
+  .banda-punto {
+    flex: none;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+
+  .banda-texto {
+    flex: 1 1 auto;
+    min-width: 0;
+    color: var(--bandeja-texto-2);
+  }
+
+  /* El sello de la derecha: de dónde sale esto. Mono y versalita, como el
+     resto de lo que rotula en la Bandeja. */
+  .banda-canal {
+    flex: none;
+    font-family: var(--bandeja-mono);
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    opacity: 0.75;
+  }
+
+  .banda-humano {
+    color: var(--bandeja-humano);
+    background: var(--bandeja-humano-fondo);
+    border-color: var(--bandeja-humano-borde);
+  }
+  .banda-ia {
+    color: var(--bandeja-ia);
+    background: var(--bandeja-ia-fondo);
+    border-color: var(--bandeja-ia-borde);
+  }
+  .banda-nota {
+    color: var(--bandeja-nota);
+    background: var(--bandeja-aviso-fondo);
+    border-color: var(--bandeja-aviso-borde);
+  }
+  .banda-aviso {
+    color: var(--bandeja-aviso);
+    background: var(--bandeja-aviso-fondo);
+    border-color: var(--bandeja-aviso-borde);
+  }
+
+  /* ── LA BARRA ────────────────────────────────────────────────────────────
+     Iconos, modos y plantillas en un renglón, con filete abajo como la
+     referencia. Envuelve antes que recortar: en angosto los modos bajan
+     solos, y ninguno de los controles desaparece. */
+  .barra {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding-bottom: 6px;
+    margin-bottom: 7px;
+    border-bottom: 1px solid var(--bandeja-borde);
+  }
+
+  .barra-sep {
+    flex: none;
+    width: 1px;
+    height: 14px;
+    margin: 0 3px;
+    background: var(--bandeja-borde);
+  }
+
+  .barra-boton {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 7px;
+    border: 1px solid var(--bandeja-borde);
+    border-radius: 3px;
+    background: var(--bandeja-superficie);
+    font: inherit;
+    font-size: 11px;
+    color: var(--bandeja-texto-2);
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .barra-boton:hover:not(:disabled) {
+    color: var(--bandeja-texto);
+    border-color: var(--bandeja-borde-fuerte);
+  }
+  .barra-boton:disabled {
+    opacity: 0.55;
+    cursor: default;
+  }
+
+  /* Por dónde sale, al borde derecho. `margin-left:auto` y no un espaciador:
+     cuando la barra envuelve, esto se va con su renglón en vez de quedar
+     colgado en el medio. */
+  .barra-canal {
+    margin-left: auto;
+    flex: none;
+    font-family: var(--bandeja-mono);
+    font-size: 9.5px;
+    color: var(--bandeja-texto-3);
+    white-space: nowrap;
+  }
+
+  /* La barra vive DENTRO del cuadro del compositor, así que los iconos ya no
+     necesitan los 34px que tenían cuando estaban sueltos en el pie. */
+  .barra .herramientas {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin: 0;
+  }
+
 </style>
