@@ -260,3 +260,27 @@ html:not(.dark) .bandeja {
   margin-top: 14px;
   border-top: 1px solid var(--bandeja-borde);
 }
+
+/* ── EL BOTON DE ACCION, EN AZUL ──────────────────────────────────────────
+   `.v2-btn-primary` es del CRM y viene en ámbar (`--v2-ember`, medido:
+   rgb(234,88,12)). Dentro de la Bandeja tiene que ser azul, y no por gusto:
+   `--bandeja-humano` YA es `#2563eb`, el mismo valor que el sistema de la
+   referencia declara a la vez como «azul de acción» y como la firma de las
+   personas. Enviar una respuesta es exactamente las dos cosas -- una acción,
+   hecha por una persona.
+
+   Va acotado a `.bandeja` y no se toca la clase global: el resto del CRM
+   conserva su ámbar. Hoy son los cuatro botones del compositor.
+
+   El ámbar ademas ya tiene un trabajo acá: `--bandeja-aviso` marca lo que
+   necesita atención. Un botón permanentemente ámbar al lado de un aviso
+   ámbar le quita el sentido a los dos. */
+.bandeja .v2-btn-primary {
+  background: var(--bandeja-humano);
+  border-color: var(--bandeja-humano);
+}
+
+.bandeja .v2-btn-primary:hover:not(:disabled) {
+  background: var(--bandeja-navy);
+  border-color: var(--bandeja-navy);
+}
