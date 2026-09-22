@@ -2,35 +2,39 @@ import { fail } from '@sveltejs/kit';
 import {
   leerIndicadores,
   listarPropuestas,
-  leerPropuesta,
   leerAutonomia,
   correrCiclo,
   correrAsistente,
   revisarPropuesta,
-  resumenOperativo
+  cancelarPropuesta,
+  resumenOperativo,
+  traducirError
 } from '$lib/server/v2/supervisor-noc.js';
 
 /**
  * POR QUE ESTA RUTA VIVE EN (app)
  * -------------------------------
  * Primero se monto en (no-layout), para que la pantalla conservara la barra
- * lateral y la cabecera que traia su diseno. El efecto fue el que Sidebar.svelte
- * ya dejo escrito sobre /instalaciones: una pantalla sin entrada en el menu no
- * esta terminada, esta escondida. Se llegaba solo escribiendo la URL.
+ * lateral y la cabecera que traia su diseno. El efecto fue el que
+ * Sidebar.svelte ya dejo escrito sobre /instalaciones: una pantalla sin
+ * entrada en el menu no esta terminada, esta escondida.
  *
- * Asi que la pantalla entrega su chrome al CRM -- una sola barra lateral, una
- * sola cabecera, una sola forma de navegar -- y conserva lo suyo, que es el
- * contenido: la densidad, la tipografia de datos y los tres tonos del analisis.
+ * El gate de ROL va aca ademas del que aplica el backend: dos capas, igual
+ * que el resto del CRM. Ocultar un boton no es una barrera -- la barrera es
+ * 'EsJefeDeOperaciones' en cada vista de operaciones, y sigue estando.
  *
- * El gate de ROL sigue aca ademas del que aplica el backend: dos capas, igual
- * que el resto del CRM.
+ * LO QUE ESTA PANTALLA NO PUEDE HACER, POR DISENO
+ * Mover el interruptor de autonomia, cambiar el techo, ejecutar una
+ * herramienta o aplicar una propuesta. No hay accion para nada de eso: no es
+ * que esten ocultas, es que no existen en este archivo.
  */
+
 /** El mismo conjunto que campo/permissions.py::ROLES_GESTION. */
 const ROLES_GESTION = new Set(['ADMIN', 'SUPERVISOR', 'OPERACIONES']);
 
 /** @type {import('./$types').PageServerLoad} */
 export async function load({ cookies, locals, url }) {
-  const rol = locals.profile?.role ?? null;
+  const rol = /** @type {any} */ (locals).profile?.role ?? null;
   const puedeVer = ROLES_GESTION.has(rol);
 
   // Sin rol de gestion no se pide nada: el backend responderia 403 a cada
@@ -45,20 +49,17 @@ export async function load({ cookies, locals, url }) {
   }
 
   const dias = url.searchParams.get('dias');
-  const senal = url.searchParams.get('senal');
-  const seleccionada = url.searchParams.get('propuesta');
 
-  const [indicadores, todas, pendientes, autonomia] = await Promise.all([
+  // Las propuestas se traen ENTERAS y una sola vez. El filtro por tipo de
+  // señal se aplica despues, en el navegador: el backend ya devuelve el
+  // conjunto completo (corta en 200 y hoy hay 92), asi que pedirle una
+  // consulta por cada pildora seria una vuelta al servidor para reordenar
+  // datos que ya estan en pantalla.
+  const [indicadores, todas, autonomia] = await Promise.all([
     leerIndicadores({ cookies }, dias ?? undefined),
-    listarPropuestas({ cookies }, senal ? { tipo_senal: senal } : {}),
-    listarPropuestas({ cookies }, { estado: 'propuesta' }),
+    listarPropuestas({ cookies }),
     leerAutonomia()
   ]);
-
-  // El detalle se pide solo si hay una seleccionada. La maqueta mostraba un
-  // inspector siempre abierto sobre un hallazgo fijo; aca depende de la
-  // seleccion real, y sin seleccion la seccion dice que no hay ninguna.
-  const detalle = seleccionada ? await leerPropuesta({ cookies }, seleccionada) : { datos: null, error: null };
 
   return {
     puedeVer: true,
@@ -67,14 +68,9 @@ export async function load({ cookies, locals, url }) {
     usuario: locals.user?.email ?? null,
     indicadores: indicadores.datos,
     errorIndicadores: indicadores.error,
-    resumen: indicadores.datos ? resumenOperativo(indicadores.datos) : [],
+    resumen: resumenOperativo(indicadores.datos),
     hallazgos: todas,
-    pendientes,
-    autonomia,
-    detalle: detalle.datos,
-    errorDetalle: detalle.error,
-    filtroSenal: senal,
-    seleccionada
+    autonomia
   };
 }
 
@@ -82,28 +78,35 @@ export async function load({ cookies, locals, url }) {
  * NINGUNA DE ESTAS ACCIONES EJECUTA NADA CONTRA UN SISTEMA EXTERNO.
  *
  * 'ciclo' y 'asistente' escriben filas de PropuestaSupervisor y sus renglones
- * de auditoria. 'revisar' mueve el estado de una propuesta. Aceptar una
- * propuesta significa "el Jefe de Operaciones esta de acuerdo", nunca "se
- * hizo" -- el estado 'ejecutada' no existe en el modelo, y por eso la
- * ausencia es comprobable en vez de prometida.
+ * de auditoria. 'revisar' y 'cancelar' mueven el estado de una propuesta.
+ * Aceptar significa "el Jefe de Operaciones esta de acuerdo", nunca "se hizo":
+ * el contrato del backend devuelve `ejecutada: false` en las dos, y el estado
+ * 'ejecutada' no existe en el modelo.
  *
  * @type {import('./$types').Actions}
  */
 export const actions = {
   async ciclo({ cookies, locals }) {
-    if (!ROLES_GESTION.has(locals.profile?.role)) {
+    if (!ROLES_GESTION.has(/** @type {any} */ (locals).profile?.role)) {
       return fail(403, { error: 'Solo el Jefe de Operaciones puede correr el ciclo.' });
     }
     try {
       const r = await correrCiclo({ cookies });
-      return { ok: true, tipo: 'ciclo', resumen: r?.resumen ?? null, shadow_mode: r?.shadow_mode ?? null };
+      return {
+        ok: true,
+        tipo: 'ciclo',
+        resumen: r?.resumen ?? null,
+        shadow_mode: r?.shadow_mode ?? null,
+        acciones_ejecutadas: r?.acciones_ejecutadas ?? 0
+      };
     } catch (/** @type {any} */ err) {
-      return fail(err?.status ?? 500, { error: err?.message ?? 'No se pudo correr el ciclo.' });
+      const e = traducirError(err, 'el ciclo de análisis');
+      return fail(e.status ?? 502, { error: e.mensaje });
     }
   },
 
   async asistente({ cookies, locals, request }) {
-    if (!ROLES_GESTION.has(locals.profile?.role)) {
+    if (!ROLES_GESTION.has(/** @type {any} */ (locals).profile?.role)) {
       return fail(403, { error: 'Solo el Jefe de Operaciones puede correr un asistente.' });
     }
     const datos = await request.formData();
@@ -112,12 +115,13 @@ export const actions = {
       const r = await correrAsistente({ cookies }, dominio);
       return { ok: true, tipo: 'asistente', dominio, asistente: r };
     } catch (/** @type {any} */ err) {
-      return fail(err?.status ?? 500, { error: err?.message ?? 'No se pudo correr el asistente.' });
+      const e = traducirError(err, 'el asistente de ' + dominio);
+      return fail(e.status ?? 502, { error: e.mensaje });
     }
   },
 
   async revisar({ cookies, locals, request }) {
-    if (!ROLES_GESTION.has(locals.profile?.role)) {
+    if (!ROLES_GESTION.has(/** @type {any} */ (locals).profile?.role)) {
       return fail(403, { error: 'Solo el Jefe de Operaciones puede revisar una propuesta.' });
     }
     const datos = await request.formData();
@@ -134,9 +138,42 @@ export const actions = {
 
     try {
       const r = await revisarPropuesta({ cookies }, id, { decision, comentario });
-      return { ok: true, tipo: 'revision', id, decision, resultado: r };
+      return {
+        ok: true,
+        tipo: 'revision',
+        id,
+        decision,
+        // Viaja tal cual lo devuelve el backend. Es la prueba, en la propia
+        // respuesta, de que revisar no ejecuto nada.
+        ejecutada: r?.ejecutada ?? false,
+        aviso: r?.aviso ?? null
+      };
     } catch (/** @type {any} */ err) {
-      return fail(err?.status ?? 500, { error: err?.message ?? 'No se pudo registrar la revisión.', id });
+      const e = traducirError(err, 'la revisión');
+      return fail(e.status ?? 502, { error: e.mensaje, id });
+    }
+  },
+
+  async cancelar({ cookies, locals, request }) {
+    if (!ROLES_GESTION.has(/** @type {any} */ (locals).profile?.role)) {
+      return fail(403, { error: 'Solo el Jefe de Operaciones puede cancelar una propuesta.' });
+    }
+    const datos = await request.formData();
+    const id = String(datos.get('id') ?? '');
+    const motivo = String(datos.get('motivo') ?? '');
+
+    // Obligatorio en el backend (CancelacionSerializer) y con razon: cancelar
+    // sin decir por que deja una auditoria que no explica nada.
+    if (!motivo.trim()) {
+      return fail(400, { error: 'Cancelar exige decir por qué la condición ya no aplica.', id });
+    }
+
+    try {
+      const r = await cancelarPropuesta({ cookies }, id, motivo);
+      return { ok: true, tipo: 'cancelacion', id, ejecutada: r?.ejecutada ?? false };
+    } catch (/** @type {any} */ err) {
+      const e = traducirError(err, 'la cancelación');
+      return fail(e.status ?? 502, { error: e.mensaje, id });
     }
   }
 };

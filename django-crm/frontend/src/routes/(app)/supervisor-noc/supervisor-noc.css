@@ -261,3 +261,124 @@
 @media (prefers-reduced-motion: reduce) {
   .snoc-latido span:first-child { animation: none; }
 }
+
+/* ---------------------------------------------------------------------------
+   PANEL LATERAL DE DETALLE
+   Reemplaza la seccion que antes se abria navegando con ?propuesta=<id>: eso
+   recargaba la pagina entera -- las 92 propuestas, los indicadores y el estado
+   del motor -- para mostrar una ficha.
+   --------------------------------------------------------------------------- */
+.snoc-drawer {
+  margin-left: auto; height: 100%; width: min(560px, 100%);
+  background: var(--snoc-surface); box-shadow: -8px 0 32px rgba(0, 0, 0, 0.18);
+  display: flex; flex-direction: column;
+}
+.snoc-drawer-cabecera {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: var(--snoc-sm);
+  padding: var(--snoc-md) var(--snoc-lg);
+  background: var(--snoc-surface-container-low);
+  border-bottom: 1px solid var(--snoc-outline-variant);
+}
+.snoc-drawer-cuerpo {
+  flex: 1; overflow-y: auto; padding: var(--snoc-lg);
+  display: flex; flex-direction: column; gap: var(--snoc-lg);
+}
+.snoc-velo { align-items: stretch; padding: 0; }
+
+.snoc-cargando { display: flex; align-items: center; gap: var(--snoc-sm); padding: var(--snoc-xl) 0; }
+@keyframes snoc-girar { to { transform: rotate(360deg); } }
+.snoc-girando { animation: snoc-girar 1s linear infinite; color: var(--snoc-primary); }
+@media (prefers-reduced-motion: reduce) { .snoc-girando { animation: none; } }
+
+/* La evidencia: cada observacion con su fuente, su id y CUANDO se leyo. Las
+   cuatro claves que manda el backend, sin resumir -- 'observado_en' es lo que
+   permite saber, semanas despues, si la propuesta se tomo con informacion
+   fresca o vieja. */
+.snoc-evidencia { margin: 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: var(--snoc-sm); }
+.snoc-evidencia li { padding-left: 0.2rem; }
+
+.snoc-accion {
+  margin: 0; padding: var(--snoc-sm) var(--snoc-md);
+  background: var(--snoc-surface-container); border-radius: var(--snoc-r-lg);
+  border-left: 3px solid var(--snoc-primary); font-weight: 500;
+}
+.snoc-generado {
+  display: flex; align-items: flex-start; gap: var(--snoc-sm);
+  padding: var(--snoc-sm) var(--snoc-md);
+  background: color-mix(in srgb, var(--snoc-secondary-container) 50%, transparent);
+  border-radius: var(--snoc-r-lg);
+}
+.snoc-historial {
+  display: flex; flex-direction: column; gap: 2px;
+  background: var(--snoc-surface-container-low); padding: var(--snoc-xs) var(--snoc-sm);
+  border-radius: var(--snoc-r-lg);
+}
+.snoc-detalles { background: var(--snoc-surface-container-low); border-radius: var(--snoc-r-lg); padding: var(--snoc-sm); }
+.snoc-detalles summary { cursor: pointer; }
+.snoc-pre {
+  margin: var(--snoc-sm) 0 0; padding: var(--snoc-sm); overflow-x: auto;
+  background: var(--snoc-surface-container); border-radius: var(--snoc-r-lg);
+  font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; line-height: 15px;
+}
+
+/* ---------------------------------------------------------------------------
+   PIEZAS QUE ANTES IBAN CON style="" EN EL MARCADO
+   --------------------------------------------------------------------------- */
+.snoc-marca-grande {
+  width: 3rem; height: 3rem; border-radius: var(--snoc-r-xl);
+  background: var(--snoc-primary); color: var(--snoc-on-primary);
+  display: flex; align-items: center; justify-content: center; box-shadow: var(--snoc-sombra);
+}
+.snoc-chip-modo {
+  background: var(--snoc-surface-container-low); padding: var(--snoc-sm) var(--snoc-md);
+  border-radius: var(--snoc-r-xl); box-shadow: var(--snoc-sombra);
+}
+.snoc-chip-icono {
+  width: 2.25rem; height: 2.25rem; border-radius: var(--snoc-r-lg);
+  background: var(--snoc-surface-container-high); color: var(--snoc-primary);
+  display: flex; align-items: center; justify-content: center; flex: none;
+}
+.snoc-chip-icono-solido { width: 2rem; height: 2rem; background: var(--snoc-primary); color: var(--snoc-on-primary); }
+.snoc-caja-asistente { background: var(--snoc-surface-container-low); padding: var(--snoc-sm); border-radius: var(--snoc-r-lg); }
+.snoc-caja-datos { background: var(--snoc-surface-container-low); padding: var(--snoc-sm); border-radius: var(--snoc-r-lg); }
+.snoc-resultado {
+  display: flex; flex-direction: column; gap: var(--snoc-xs);
+  background: var(--snoc-surface-container); padding: var(--snoc-sm);
+  border-radius: var(--snoc-r-lg); max-height: 22rem; overflow-y: auto;
+}
+.snoc-resultado-fila {
+  display: flex; flex-direction: column; gap: 2px;
+  background: var(--snoc-surface-container-lowest); padding: var(--snoc-xs) var(--snoc-sm);
+  border-radius: var(--snoc-r-lg);
+}
+.snoc-nota {
+  display: flex; align-items: center; gap: var(--snoc-xs);
+  background: var(--snoc-surface-container-low); padding: var(--snoc-xs) var(--snoc-sm);
+  border-radius: var(--snoc-r-lg);
+}
+.snoc-kpi-cifra {
+  margin: var(--snoc-sm) 0; display: flex; align-items: baseline;
+  justify-content: space-between; gap: var(--snoc-sm);
+}
+/* "Sin datos" NO se ve como un numero: la diferencia entre 0 y "no se pudo
+   preguntar" tiene que notarse de un vistazo, no leyendo la letra chica. */
+.snoc-sin-dato {
+  font-family: Inter, sans-serif; font-size: 15px; line-height: 22px;
+  font-style: italic; color: var(--snoc-outline);
+}
+.snoc-campo {
+  width: 100%; padding: 5px var(--snoc-sm);
+  border: 1px solid var(--snoc-outline-variant); border-radius: var(--snoc-r-lg);
+  background: var(--snoc-surface-container-lowest); color: var(--snoc-on-surface);
+  font-family: Inter, sans-serif; font-size: 12px; line-height: 16px;
+}
+.snoc-campo:focus { outline: 2px solid var(--snoc-primary); outline-offset: -1px; }
+.snoc-enlace {
+  background: none; border: 0; padding: 0; cursor: pointer;
+  color: var(--snoc-primary); font: inherit; text-decoration: underline;
+}
+.snoc-insignia-primaria { background: var(--snoc-primary); color: var(--snoc-on-primary); }
+
+@media (max-width: 640px) {
+  .snoc-drawer { width: 100%; }
+}
