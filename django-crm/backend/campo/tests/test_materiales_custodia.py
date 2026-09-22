@@ -65,6 +65,26 @@ def ont(org_a):
 
 
 @pytest.fixture
+def orden(org_a):
+    """El trabajo en el que se gasta el material.
+
+    Desde esta fase un consumo no existe sin su orden: es la unica forma de
+    saber despues en que se fue el material. Sin eso el inventario cuadra pero
+    no explica nada.
+    """
+    wt = WorkType.objects.create(org=org_a, codigo="ftth", nombre="Instalacion")
+    version = WorkTypeVersion.objects.create(
+        work_type=wt, version=1, schema_version=1,
+        estado=WorkTypeVersion.PUBLICADA,
+        esquema={"pasos": [], "campos": [], "evidencias": []},
+    )
+    return OrdenTrabajo.objects.create(
+        org=org_a, numero=4832, tipo_trabajo_version=version,
+        estado_operativo=OrdenTrabajo.ASIGNADA,
+    )
+
+
+@pytest.fixture
 def kit(org_a, user_profile, conector, fibra, ont):
     """Lo que la bodega le entregó al técnico esta mañana."""
     entrega = EntregaDeKit.objects.create(
@@ -78,11 +98,31 @@ def kit(org_a, user_profile, conector, fibra, ont):
     return entrega
 
 
-def consumir(org, profile, material, cantidad, clave, **extra):
+#: La orden del test en curso, para no repetirla en cada llamada.
+#:
+#: Desde esta fase un consumo no existe sin su trabajo, asi que TODOS los
+#: consumos de este archivo ocurren dentro de uno. Pasarlo a mano veinte veces
+#: solo agregaria ruido; lo que importa de cada prueba es otra cosa. El test
+#: que necesite una orden distinta la pasa explicitamente.
+_orden_en_curso: dict = {}
+
+
+@pytest.fixture(autouse=True)
+def _orden_por_defecto(request):
+    if "orden" in request.fixturenames:
+        _orden_en_curso["actual"] = request.getfixturevalue("orden")
+    yield
+    _orden_en_curso.clear()
+
+
+def consumir(org, profile, material, cantidad, clave, orden=None, **extra):
+    """Un consumo, siempre atado a su trabajo."""
     return registrar_movimiento(
         org=org, profile=profile, material=material,
         tipo=MovimientoDeMaterial.CONSUMO, cantidad=cantidad,
-        idempotency_key=clave, **extra,
+        idempotency_key=clave,
+        orden=orden if orden is not None else _orden_en_curso.get("actual"),
+        **extra,
     )
 
 
@@ -92,8 +132,8 @@ class TestElSaldoSeCalcula:
     ):
         assert saldo_de(user_profile, conector) == Decimal("24")
 
-    def test_2_un_consumo_descuenta(self, org_a, user_profile, conector, kit):
-        consumir(org_a, user_profile, conector, 4, "mov-1")
+    def test_2_un_consumo_descuenta(self, org_a, user_profile, conector, kit, orden):
+        consumir(org_a, user_profile, conector, 4, "mov-1", orden=orden)
 
         assert saldo_de(user_profile, conector) == Decimal("20")
 
@@ -110,14 +150,14 @@ class TestElSaldoSeCalcula:
         assert saldo_de(user_profile, conector) == Decimal("14")
 
     def test_4_la_bobina_se_consume_con_decimales(
-        self, org_a, user_profile, fibra, kit
+        self, org_a, user_profile, fibra, kit, orden
     ):
         consumir(org_a, user_profile, fibra, "42.5", "mov-fibra")
 
         assert saldo_de(user_profile, fibra) == Decimal("257.5")
 
     def test_5_un_consumible_no_admite_fracciones(
-        self, org_a, user_profile, conector, kit
+        self, org_a, user_profile, conector, kit, orden
     ):
         """Un conector y medio no existe. Se trunca hacia abajo: inventar media
         unidad de más es peor que perderla."""
@@ -129,7 +169,7 @@ class TestElSaldoSeCalcula:
 
 class TestUnConsumoNuncaSeRechaza:
     def test_6_sin_saldo_el_consumo_ENTRA_y_queda_marcado(
-        self, org_a, user_profile, conector, kit
+        self, org_a, user_profile, conector, kit, orden
     ):
         """La prueba que define el diseño.
 
@@ -145,7 +185,7 @@ class TestUnConsumoNuncaSeRechaza:
         assert movimiento.cantidad == Decimal("30")
 
     def test_7_el_descuadre_se_explica_en_palabras(
-        self, org_a, user_profile, conector, kit
+        self, org_a, user_profile, conector, kit, orden
     ):
         """Alguien en la oficina lo va a leer para decidir qué hacer."""
         movimiento, _ = consumir(org_a, user_profile, conector, 30, "mov-más")
@@ -155,7 +195,7 @@ class TestUnConsumoNuncaSeRechaza:
         assert movimiento.motivo.strip()
 
     def test_8_y_el_saldo_queda_en_negativo_a_proposito(
-        self, org_a, user_profile, conector, kit
+        self, org_a, user_profile, conector, kit, orden
     ):
         """Taparlo con un max(0, ...) haría desaparecer el descuadre de la
         pantalla sin haberlo resuelto."""
@@ -164,7 +204,7 @@ class TestUnConsumoNuncaSeRechaza:
         assert saldo_de(user_profile, conector) == Decimal("-6")
 
     def test_9_un_material_sin_kit_tambien_entra_como_descuadre(
-        self, org_a, user_profile, conector
+        self, org_a, user_profile, conector, orden
     ):
         """Pasa de verdad: material que se entregó sin acta."""
         movimiento, _ = consumir(org_a, user_profile, conector, 3, "mov-sin-kit")
@@ -175,7 +215,7 @@ class TestUnConsumoNuncaSeRechaza:
 
 class TestElSerializadoSeInstalaUnaSolaVez:
     def test_10_la_primera_instalacion_entra_normal(
-        self, org_a, user_profile, ont, kit
+        self, org_a, user_profile, ont, kit, orden
     ):
         movimiento, _ = consumir(
             org_a, user_profile, ont, 1, "mov-ont", serie="48575448A9B0C1"
@@ -184,7 +224,7 @@ class TestElSerializadoSeInstalaUnaSolaVez:
         assert movimiento.estado == MovimientoDeMaterial.ACEPTADO
 
     def test_11_la_segunda_entra_como_conflicto_y_no_se_pierde(
-        self, org_a, user_profile, ont, kit
+        self, org_a, user_profile, ont, kit, orden
     ):
         """Dos técnicos no instalaron la misma ONT: alguien se equivocó de
         serie, y hay que poder ver las dos versiones para saber cuál es."""
@@ -200,7 +240,7 @@ class TestElSerializadoSeInstalaUnaSolaVez:
         assert "48575448A9B0C1" in segundo.motivo
 
     def test_12_un_conflicto_no_descuenta_del_saldo(
-        self, org_a, user_profile, ont, kit
+        self, org_a, user_profile, ont, kit, orden
     ):
         """No ocurrió: descontarlo castigaría a quien no hizo nada malo."""
         consumir(org_a, user_profile, ont, 1, "mov-ont", serie="48575448A9B0C1")
@@ -211,7 +251,7 @@ class TestElSerializadoSeInstalaUnaSolaVez:
 
 class TestLaColaOfflinePuedeReintentar:
     def test_13_la_misma_clave_no_descuenta_dos_veces(
-        self, org_a, user_profile, conector, kit
+        self, org_a, user_profile, conector, kit, orden
     ):
         """Un reintento de la cola no es un consumo nuevo."""
         primero, era_nuevo_1 = consumir(org_a, user_profile, conector, 4, "mov-1")
@@ -224,7 +264,7 @@ class TestLaColaOfflinePuedeReintentar:
         assert MovimientoDeMaterial.objects.count() == 1
 
     def test_14_dos_consumos_distintos_del_mismo_material_si_suman(
-        self, org_a, user_profile, conector, kit
+        self, org_a, user_profile, conector, kit, orden
     ):
         """Dos trabajos seguidos gastan conectores dos veces. Solo la clave
         distingue un reintento de un consumo nuevo, y la pone el teléfono."""
@@ -234,7 +274,7 @@ class TestLaColaOfflinePuedeReintentar:
         assert saldo_de(user_profile, conector) == Decimal("16")
 
     def test_15_un_movimiento_que_llega_tarde_se_guarda_con_su_hora_de_campo(
-        self, org_a, user_profile, conector, kit
+        self, org_a, user_profile, conector, kit, orden
     ):
         """Media jornada sin señal: lo que importa es cuándo pasó, no cuándo
         llegó."""
@@ -253,7 +293,7 @@ class TestLaColaOfflinePuedeReintentar:
 
 class TestLoQueVeLaPantalla:
     def test_16_el_kit_trae_una_fila_por_material_con_su_saldo(
-        self, org_a, user_profile, conector, fibra, ont, kit
+        self, org_a, user_profile, conector, fibra, ont, kit, orden
     ):
         consumir(org_a, user_profile, conector, 8, "mov-1")
 
@@ -274,7 +314,7 @@ class TestLoQueVeLaPantalla:
         assert filas[0]["acta"] == "K-2024-094"
 
     def test_18_lo_que_no_cuadra_se_puede_listar(
-        self, org_a, user_profile, conector, ont, kit
+        self, org_a, user_profile, conector, ont, kit, orden
     ):
         """Aceptar sin dejar rastro sería peor que rechazar."""
         consumir(org_a, user_profile, conector, 4, "mov-ok")
@@ -302,19 +342,8 @@ class TestLoQueVeLaPantalla:
 
 class TestElConsumoSeAtaAlTrabajo:
     def test_20_un_consumo_puede_decir_en_que_orden_se_uso(
-        self, org_a, user_profile, conector, kit
+        self, org_a, user_profile, conector, kit, orden
     ):
-        wt = WorkType.objects.create(org=org_a, codigo="ftth", nombre="Instalación")
-        version = WorkTypeVersion.objects.create(
-            work_type=wt, version=1, schema_version=1,
-            estado=WorkTypeVersion.PUBLICADA,
-            esquema={"pasos": [], "campos": [], "evidencias": []},
-        )
-        orden = OrdenTrabajo.objects.create(
-            org=org_a, numero=4832, tipo_trabajo_version=version,
-            estado_operativo=OrdenTrabajo.ASIGNADA,
-        )
-
         movimiento, _ = consumir(
             org_a, user_profile, conector, 4, "mov-ot", orden=orden
         )

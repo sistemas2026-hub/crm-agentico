@@ -103,7 +103,7 @@ class LocalDatabase {
 
     final db = await openDatabase(
       path,
-      version: 9,
+      version: 10,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -133,6 +133,25 @@ class LocalDatabase {
     // con media jornada sin subir no puede perderla por actualizar la app.
     if (oldVersion < 9) {
       await _crearTablasDeMateriales(db);
+    }
+
+    // v10: el motivo que escribe el tecnico cuando usa mas de lo habitual, y
+    // la regla que el servidor manda con cada material para poder avisarlo
+    // sin senal.
+    if (oldVersion < 10) {
+      final infoMovimientos =
+          await db.rawQuery('PRAGMA table_info(cola_movimientos_material);');
+      final cols = infoMovimientos.map((c) => c['name'] as String).toSet();
+      if (!cols.contains('motivo_tecnico')) {
+        await db.execute(
+          'ALTER TABLE cola_movimientos_material ADD COLUMN motivo_tecnico TEXT;',
+        );
+      }
+      final infoKit = await db.rawQuery('PRAGMA table_info(local_kit);');
+      final colsKit = infoKit.map((c) => c['name'] as String).toSet();
+      if (!colsKit.contains('regla_json')) {
+        await db.execute('ALTER TABLE local_kit ADD COLUMN regla_json TEXT;');
+      }
     }
 
     final infoEvidencias = await db.rawQuery('PRAGMA table_info(cola_evidencias);');
@@ -283,6 +302,7 @@ class LocalDatabase {
         series_json TEXT,
         acta TEXT,
         entregado_en TEXT,
+        regla_json TEXT,
         updated_at INTEGER NOT NULL,
         PRIMARY KEY (codigo, org_id, profile_id)
       )
@@ -306,6 +326,7 @@ class LocalDatabase {
         serie TEXT,
         orden_id TEXT,
         orden_numero INTEGER,
+        motivo_tecnico TEXT,
         estado TEXT NOT NULL DEFAULT 'pendiente',
         resultado TEXT,
         motivo TEXT,
@@ -1144,6 +1165,11 @@ class LocalDatabase {
           'series_json': jsonEncode(material['series'] ?? <String>[]),
           'acta': material['acta']?.toString() ?? '',
           'entregado_en': material['entregado_en']?.toString(),
+          // La regla de cantidad viaja con el material para poder avisar sin
+          // senal. Si llegara solo al sincronizar, el aviso apareceria horas
+          // despues de que el material ya se gasto.
+          'regla_json':
+              material['regla'] == null ? null : jsonEncode(material['regla']),
           'updated_at': ahora,
         }, conflictAlgorithm: ConflictAlgorithm.replace);
       }
@@ -1180,6 +1206,7 @@ class LocalDatabase {
     String serie = '',
     String? ordenId,
     int? ordenNumero,
+    String motivoTecnico = '',
     DateTime? ocurridoEn,
   }) async {
     final db = await database;
@@ -1196,6 +1223,7 @@ class LocalDatabase {
         'serie': serie,
         'orden_id': ordenId,
         'orden_numero': ordenNumero,
+        'motivo_tecnico': motivoTecnico,
         'estado': 'pendiente',
         'intentos': 0,
         'next_attempt_at': 0,

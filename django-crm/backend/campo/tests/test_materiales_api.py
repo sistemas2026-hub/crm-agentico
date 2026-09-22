@@ -73,9 +73,61 @@ def kit(org_a, user_profile, conector, fibra, ont):
     return entrega
 
 
+@pytest.fixture
+def orden(org_a):
+    """El trabajo en el que se gasta el material.
+
+    Desde esta fase un consumo no existe sin su orden: es la unica forma de
+    saber despues en que se fue el material.
+    """
+    wt = WorkType.objects.create(org=org_a, codigo="ftth", nombre="Instalacion")
+    version = WorkTypeVersion.objects.create(
+        work_type=wt, version=1, schema_version=1,
+        estado=WorkTypeVersion.PUBLICADA,
+        esquema={"pasos": [], "campos": [], "evidencias": []},
+    )
+    return OrdenTrabajo.objects.create(
+        org=org_a, numero=4832, tipo_trabajo_version=version,
+        estado_operativo=OrdenTrabajo.ASIGNADA,
+    )
+
+
+#: La orden del test en curso, para no repetirla en cada llamada.
+#:
+#: Todos los consumos de este archivo ocurren dentro de un trabajo, que es la
+#: regla desde esta fase. Escribirlo veinte veces solo agregaria ruido; lo que
+#: importa de cada prueba es otra cosa.
+_orden_en_curso: dict = {}
+
+
+@pytest.fixture(autouse=True)
+def _orden_por_defecto(request):
+    if "orden" in request.fixturenames:
+        _orden_en_curso["actual"] = request.getfixturevalue("orden")
+    yield
+    _orden_en_curso.clear()
+
+
 def mover(cliente, **campos):
     cuerpo = {"tipo": "consumo", **campos}
+    actual = _orden_en_curso.get("actual")
+    if cuerpo.get("tipo") == "consumo" and "orden_id" not in cuerpo and actual:
+        cuerpo["orden_id"] = str(actual.id)
     return cliente.post(MOVIMIENTOS, cuerpo, format="json")
+
+
+def lote(cliente, movimientos):
+    """Un lote de consumos, cada uno con su orden si no trae otra."""
+    actual = _orden_en_curso.get("actual")
+    completados = []
+    for m in movimientos:
+        copia = dict(m)
+        if copia.get("tipo") == "consumo" and "orden_id" not in copia and actual:
+            copia["orden_id"] = str(actual.id)
+        completados.append(copia)
+    return cliente.post(
+        MOVIMIENTOS, {"movimientos": completados}, format="json"
+    )
 
 
 class TestElKitQueSeLleva:
@@ -111,7 +163,7 @@ class TestElKitQueSeLleva:
 
 
 class TestRegistrarLoQueSeGasto:
-    def test_6_un_consumo_descuenta_del_kit(self, user_client, kit):
+    def test_6_un_consumo_descuenta_del_kit(self, user_client, kit, orden):
         r = mover(user_client, clave="mov-1", material="CON-SC-APC", cantidad="4")
 
         assert r.status_code == status.HTTP_201_CREATED
@@ -122,7 +174,7 @@ class TestRegistrarLoQueSeGasto:
         assert conector["disponible"] == "20"
         assert conector["consumido"] == "4"
 
-    def test_7_la_fibra_se_gasta_en_metros_con_decimales(self, user_client, kit):
+    def test_7_la_fibra_se_gasta_en_metros_con_decimales(self, user_client, kit, orden):
         r = mover(user_client, clave="mov-f", material="FIB-DROP", cantidad="42.5")
 
         assert r.status_code == status.HTTP_201_CREATED
@@ -130,20 +182,16 @@ class TestRegistrarLoQueSeGasto:
         fibra = next(m for m in kit_ahora if m["codigo"] == "FIB-DROP")
         assert fibra["disponible"] == "257.5"
 
-    def test_8_un_lote_entra_completo_en_una_sola_peticion(self, user_client, kit):
+    def test_8_un_lote_entra_completo_en_una_sola_peticion(self, user_client, kit, orden):
         """Lo que hace una cuadrilla al reconectar después de media jornada."""
-        r = user_client.post(
-            MOVIMIENTOS,
-            {"movimientos": [
+        r = lote(user_client, [
                 {"clave": "m1", "material": "CON-SC-APC", "tipo": "consumo",
                  "cantidad": "4"},
                 {"clave": "m2", "material": "FIB-DROP", "tipo": "consumo",
                  "cantidad": "30"},
                 {"clave": "m3", "material": "CON-SC-APC", "tipo": "consumo",
                  "cantidad": "2"},
-            ]},
-            format="json",
-        )
+            ])
 
         assert r.status_code == status.HTTP_201_CREATED
         assert len(r.data["resultados"]) == 3
@@ -151,19 +199,8 @@ class TestRegistrarLoQueSeGasto:
         assert MovimientoDeMaterial.objects.count() == 3
 
     def test_9_se_puede_decir_en_que_trabajo_se_uso(
-        self, user_client, kit, org_a, user_profile
+        self, user_client, kit, org_a, user_profile, orden
     ):
-        wt = WorkType.objects.create(org=org_a, codigo="ftth", nombre="Instalación")
-        version = WorkTypeVersion.objects.create(
-            work_type=wt, version=1, schema_version=1,
-            estado=WorkTypeVersion.PUBLICADA,
-            esquema={"pasos": [], "campos": [], "evidencias": []},
-        )
-        orden = OrdenTrabajo.objects.create(
-            org=org_a, numero=4832, tipo_trabajo_version=version,
-            estado_operativo=OrdenTrabajo.ASIGNADA,
-        )
-
         r = mover(
             user_client, clave="mov-ot", material="CON-SC-APC",
             cantidad="4", orden_id=str(orden.id),
@@ -173,7 +210,7 @@ class TestRegistrarLoQueSeGasto:
         assert MovimientoDeMaterial.objects.get().orden_id == orden.id
 
     def test_10_una_devolucion_de_jornada_no_necesita_trabajo(
-        self, user_client, kit
+        self, user_client, kit, orden
     ):
         r = mover(
             user_client, clave="dev-1", material="CON-SC-APC",
@@ -185,7 +222,7 @@ class TestRegistrarLoQueSeGasto:
 
 
 class TestElReintentoNoDuplica:
-    def test_11_la_misma_clave_dos_veces_descuenta_una(self, user_client, kit):
+    def test_11_la_misma_clave_dos_veces_descuenta_una(self, user_client, kit, orden):
         """El caso normal, no el raro: la respuesta se pierde y la app
         reintenta exactamente lo mismo."""
         primero = mover(user_client, clave="mov-1", material="CON-SC-APC",
@@ -203,42 +240,36 @@ class TestElReintentoNoDuplica:
         conector = next(m for m in kit_ahora if m["codigo"] == "CON-SC-APC")
         assert conector["disponible"] == "20"
 
-    def test_12_un_lote_reenviado_entero_tampoco_duplica(self, user_client, kit):
-        lote = {"movimientos": [
+    def test_12_un_lote_reenviado_entero_tampoco_duplica(
+        self, user_client, kit, orden
+    ):
+        movimientos = [
             {"clave": "m1", "material": "CON-SC-APC", "tipo": "consumo",
              "cantidad": "4"},
             {"clave": "m2", "material": "FIB-DROP", "tipo": "consumo",
              "cantidad": "30"},
-        ]}
+        ]
 
-        user_client.post(MOVIMIENTOS, lote, format="json")
-        user_client.post(MOVIMIENTOS, lote, format="json")
+        lote(user_client, movimientos)
+        lote(user_client, movimientos)
 
         assert MovimientoDeMaterial.objects.count() == 2
 
-    def test_13_un_lote_a_medias_completa_lo_que_falta(self, user_client, kit):
+    def test_13_un_lote_a_medias_completa_lo_que_falta(self, user_client, kit, orden):
         """El reintento trae lo viejo y lo nuevo junto: lo viejo se reconoce y
         lo nuevo entra. Si no, la app tendría que llevar la cuenta de qué llegó
         y qué no, que es justo lo que no puede saber."""
-        user_client.post(
-            MOVIMIENTOS,
-            {"movimientos": [
+        lote(user_client, [
                 {"clave": "m1", "material": "CON-SC-APC", "tipo": "consumo",
                  "cantidad": "4"},
-            ]},
-            format="json",
-        )
+            ])
 
-        r = user_client.post(
-            MOVIMIENTOS,
-            {"movimientos": [
+        r = lote(user_client, [
                 {"clave": "m1", "material": "CON-SC-APC", "tipo": "consumo",
                  "cantidad": "4"},
                 {"clave": "m2", "material": "CON-SC-APC", "tipo": "consumo",
                  "cantidad": "6"},
-            ]},
-            format="json",
-        )
+            ])
 
         por_clave = {x["clave"]: x for x in r.data["resultados"]}
         assert por_clave["m1"]["duplicado"] is True
@@ -251,7 +282,7 @@ class TestElReintentoNoDuplica:
 
 
 class TestLoQueNoCuadraEntraIgual:
-    def test_14_un_consumo_sin_saldo_responde_201_y_no_400(self, user_client, kit):
+    def test_14_un_consumo_sin_saldo_responde_201_y_no_400(self, user_client, kit, orden):
         """La prueba que define el contrato. El material ya se usó: negarse a
         guardarlo borraría el único registro que existe de eso."""
         r = mover(user_client, clave="mov-mas", material="CON-SC-APC",
@@ -262,7 +293,7 @@ class TestLoQueNoCuadraEntraIgual:
         assert r.data["resultados"][0]["motivo"].strip()
         assert MovimientoDeMaterial.objects.count() == 1
 
-    def test_15_el_descuadre_aparece_al_consultar_el_kit(self, user_client, kit):
+    def test_15_el_descuadre_aparece_al_consultar_el_kit(self, user_client, kit, orden):
         """Aceptar sin dejar rastro sería peor que rechazar."""
         mover(user_client, clave="mov-mas", material="CON-SC-APC", cantidad="30")
 
@@ -272,7 +303,7 @@ class TestLoQueNoCuadraEntraIgual:
         assert r.data["sin_cuadrar"][0]["estado"] == "descuadre"
         assert r.data["sin_cuadrar"][0]["material"] == "CON-SC-APC"
 
-    def test_16_una_serie_ya_instalada_entra_como_conflicto(self, user_client, kit):
+    def test_16_una_serie_ya_instalada_entra_como_conflicto(self, user_client, kit, orden):
         mover(user_client, clave="ont-1", material="ONT-HG8145", cantidad="1",
               serie="48575448A9B0C1")
 
@@ -283,20 +314,16 @@ class TestLoQueNoCuadraEntraIgual:
         assert r.data["resultados"][0]["estado"] == "conflicto"
         assert "48575448A9B0C1" in r.data["resultados"][0]["motivo"]
 
-    def test_17_un_lote_con_un_descuadre_guarda_los_demas(self, user_client, kit):
+    def test_17_un_lote_con_un_descuadre_guarda_los_demas(self, user_client, kit, orden):
         """Que uno no cuadre no puede tirar el trabajo de toda la jornada."""
-        r = user_client.post(
-            MOVIMIENTOS,
-            {"movimientos": [
+        r = lote(user_client, [
                 {"clave": "ok", "material": "CON-SC-APC", "tipo": "consumo",
                  "cantidad": "4"},
                 {"clave": "mal", "material": "CON-SC-APC", "tipo": "consumo",
                  "cantidad": "90"},
                 {"clave": "ok2", "material": "FIB-DROP", "tipo": "consumo",
                  "cantidad": "10"},
-            ]},
-            format="json",
-        )
+            ])
 
         estados = {x["clave"]: x["estado"] for x in r.data["resultados"]}
         assert estados["ok"] == "aceptado"
@@ -306,7 +333,7 @@ class TestLoQueNoCuadraEntraIgual:
 
 
 class TestLoQueSiSeRechaza:
-    def test_18_un_material_que_no_existe(self, user_client, kit):
+    def test_18_un_material_que_no_existe(self, user_client, kit, orden):
         """No hay hecho que preservar si no se sabe de qué material habla."""
         r = mover(user_client, clave="x", material="NO-EXISTE", cantidad="1")
 
@@ -316,21 +343,17 @@ class TestLoQueSiSeRechaza:
         assert MovimientoDeMaterial.objects.count() == 0
 
     def test_19_los_codigos_desconocidos_se_nombran_todos_de_una_vez(
-        self, user_client, kit
+        self, user_client, kit, orden
     ):
         """Para que la app no descubra el siguiente en el reintento."""
-        r = user_client.post(
-            MOVIMIENTOS,
-            {"movimientos": [
+        r = lote(user_client, [
                 {"clave": "a", "material": "NO-1", "tipo": "consumo", "cantidad": "1"},
                 {"clave": "b", "material": "NO-2", "tipo": "consumo", "cantidad": "1"},
-            ]},
-            format="json",
-        )
+            ])
 
         assert sorted(r.data["codigos"]) == ["NO-1", "NO-2"]
 
-    def test_20_una_cantidad_negativa(self, user_client, kit):
+    def test_20_una_cantidad_negativa(self, user_client, kit, orden):
         """Para devolver está el tipo 'devolucion': explícito y legible en un
         listado, en vez de un signo que hay que interpretar."""
         r = mover(user_client, clave="neg", material="CON-SC-APC", cantidad="-5")
@@ -338,7 +361,7 @@ class TestLoQueSiSeRechaza:
         assert r.status_code == status.HTTP_400_BAD_REQUEST
         assert MovimientoDeMaterial.objects.count() == 0
 
-    def test_21_un_tipo_de_movimiento_inventado(self, user_client, kit):
+    def test_21_un_tipo_de_movimiento_inventado(self, user_client, kit, orden):
         r = mover(user_client, clave="raro", material="CON-SC-APC",
                   cantidad="1", tipo="regalado")
 
@@ -347,7 +370,7 @@ class TestLoQueSiSeRechaza:
 
 class TestElKitEsDeCadaUno:
     def test_22_el_material_de_otra_empresa_no_se_puede_mover(
-        self, user_client, kit, org_b
+        self, user_client, kit, org_b, orden
     ):
         """Mismo código, otra organización: para este técnico no existe."""
         MaterialCatalogo.objects.create(
@@ -372,10 +395,16 @@ class TestElKitEsDeCadaUno:
 
         assert r.data["materiales"] == []
 
-    def test_24_una_orden_ajena_no_ata_el_movimiento_pero_tampoco_lo_pierde(
-        self, user_client, kit, org_b
+    def test_24_una_orden_de_otra_empresa_no_sirve_como_origen(
+        self, user_client, kit, org_b, orden
     ):
-        """El material se gastó igual: se guarda sin atar, en vez de fallar."""
+        """Antes se guardaba sin atar. Desde que un consumo debe decir en qué
+        trabajo se usó, una orden que esta organización no puede ver deja al
+        movimiento sin origen, y sin origen no se puede explicar después.
+
+        Se rechaza esa línea, no el lote: las demás son hechos que sí se
+        pueden guardar.
+        """
         wt = WorkType.objects.create(org=org_b, codigo="ftth", nombre="Instalación")
         version = WorkTypeVersion.objects.create(
             work_type=wt, version=1, schema_version=1,
@@ -387,10 +416,15 @@ class TestElKitEsDeCadaUno:
             estado_operativo=OrdenTrabajo.ASIGNADA,
         )
 
-        r = mover(user_client, clave="mov-ajeno", material="CON-SC-APC",
-                  cantidad="2", orden_id=str(ajena.id))
+        r = lote(user_client, [
+            {"clave": "mov-ajeno", "material": "CON-SC-APC", "tipo": "consumo",
+             "cantidad": "2", "orden_id": str(ajena.id)},
+            {"clave": "mov-propio", "material": "CON-SC-APC", "tipo": "consumo",
+             "cantidad": "1"},
+        ])
 
-        assert r.status_code == status.HTTP_201_CREATED
-        movimiento = MovimientoDeMaterial.objects.get()
-        assert movimiento.orden_id is None
-        assert movimiento.cantidad == 2
+        por_clave = {x["clave"]: x for x in r.data["resultados"]}
+        assert por_clave["mov-ajeno"]["estado"] == "rechazado"
+        assert por_clave["mov-ajeno"]["id"] is None
+        assert por_clave["mov-propio"]["estado"] == "aceptado"
+        assert MovimientoDeMaterial.objects.count() == 1

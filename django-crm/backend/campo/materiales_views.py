@@ -42,8 +42,10 @@ from campo.models import MaterialCatalogo, MovimientoDeMaterial, OrdenTrabajo
 from campo.permissions import IsCampoAuthenticated
 from campo.services.idempotencia import manejar_idempotencia
 from campo.services.materiales import (
+    ConsumoInvalido,
     kit_de,
     materiales_sin_cuadrar,
+    regla_para,
     registrar_movimiento,
 )
 
@@ -83,6 +85,16 @@ class MovimientoEntradaSerializer(serializers.Serializer):
             "es una mentira piadosa: mejor que el cliente la mande."
         ),
     )
+    motivo = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default="",
+        help_text=(
+            "Lo que escribe el tecnico cuando usa mas de lo habitual. Se "
+            "guarda aparte del motivo que escribe el servidor: cuando hay que "
+            "reconstruir que paso, importa quien dijo cada cosa."
+        ),
+    )
     datos = serializers.JSONField(required=False, default=dict)
 
     def validate_cantidad(self, valor):
@@ -109,12 +121,28 @@ class KitView(APIView):
         materiales = []
         for fila in kit_de(profile, org):
             material = fila["material"]
+            # La regla viaja con el material para que la app pueda avisar
+            # ANTES de registrar, sin señal y sin preguntarle al servidor.
+            # Sin esto el aviso solo llegaria al sincronizar, horas despues,
+            # cuando ya no sirve para nada.
+            regla = regla_para(org=org, material=material, orden=None)
             materiales.append({
                 "codigo": material.codigo,
                 "nombre": material.nombre,
                 "categoria": material.categoria,
                 "clase": material.clase,
                 "unidad": material.unidad,
+                "regla": None if regla is None else {
+                    "cantidad_habitual": (
+                        _numero(regla.cantidad_habitual)
+                        if regla.cantidad_habitual is not None else None
+                    ),
+                    "maximo": (
+                        _numero(regla.maximo) if regla.maximo is not None else None
+                    ),
+                    "exige_motivo": regla.exige_motivo_sobre_habitual,
+                    "bloquea": regla.bloquea_sobre_maximo,
+                },
                 "recibido": _numero(fila["recibido"]),
                 "consumido": _numero(fila["consumido"]),
                 "devuelto": _numero(fila["devuelto"]),
@@ -218,23 +246,44 @@ class MovimientosMaterialView(APIView):
                         id=orden_id, org=org
                     ).first()
 
-                movimiento, era_nuevo = registrar_movimiento(
-                    org=org,
-                    profile=profile,
-                    material=catalogo[datos["material"]],
-                    tipo=datos["tipo"],
-                    cantidad=datos["cantidad"],
-                    idempotency_key=datos["clave"],
-                    serie=datos.get("serie") or "",
-                    orden=orden,
-                    ocurrido_en=datos.get("ocurrido_en"),
-                    datos=datos.get("datos") or {},
-                )
+                try:
+                    movimiento, era_nuevo = registrar_movimiento(
+                        org=org,
+                        profile=profile,
+                        material=catalogo[datos["material"]],
+                        tipo=datos["tipo"],
+                        cantidad=datos["cantidad"],
+                        idempotency_key=datos["clave"],
+                        serie=datos.get("serie") or "",
+                        orden=orden,
+                        ocurrido_en=datos.get("ocurrido_en"),
+                        motivo_tecnico=datos.get("motivo") or "",
+                        datos=datos.get("datos") or {},
+                    )
+                except ConsumoInvalido as e:
+                    # No se puede interpretar como un hecho: un consumo que no
+                    # dice en que trabajo, un equipo sin su numero, o una
+                    # cantidad que la empresa decidio no aceptar.
+                    #
+                    # El lote NO se cae por esto: el resto son hechos que si
+                    # se pueden guardar, y tirarlos castigaria una jornada
+                    # entera por una linea mal armada.
+                    resultados.append({
+                        "clave": datos["clave"],
+                        "id": None,
+                        "estado": "rechazado",
+                        "motivo": str(e),
+                        "cantidad": _numero(datos["cantidad"]),
+                        "duplicado": False,
+                    })
+                    continue
+
                 resultados.append({
                     "clave": datos["clave"],
                     "id": str(movimiento.id),
                     "estado": movimiento.estado,
                     "motivo": movimiento.motivo,
+                    "avisos": movimiento.datos.get("avisos", []),
                     "cantidad": _numero(movimiento.cantidad),
                     "duplicado": not era_nuevo,
                 })

@@ -290,6 +290,8 @@ class SyncQueueService {
                   if ((m['serie'] as String?)?.isNotEmpty ?? false)
                     'serie': m['serie'],
                   if (m['orden_id'] != null) 'orden_id': m['orden_id'],
+                  if ((m['motivo_tecnico'] as String?)?.isNotEmpty ?? false)
+                    'motivo': m['motivo_tecnico'],
                   'ocurrido_en': m['ocurrido_en'],
                 },
             ],
@@ -336,6 +338,11 @@ class SyncQueueService {
             );
             continue;
           }
+          // `rechazado` tambien cierra el movimiento, aunque no se haya
+          // guardado en el servidor: es una linea que no se puede interpretar
+          // --un consumo sin trabajo, un equipo sin numero-- y reintentarla
+          // daria el mismo resultado para siempre. Queda con su motivo a la
+          // vista, que es lo unico que puede destrabarlo.
           await _localDb.confirmarMovimientoMaterial(
             id: id,
             orgId: orgId,

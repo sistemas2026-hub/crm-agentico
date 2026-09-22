@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:campo/core/storage/ciclo_de_vida_local.dart';
@@ -524,6 +525,118 @@ void main() {
         ),
         hasLength(1),
       );
+    });
+  });
+
+  group('8. El consumo nace dentro de una orden', () {
+    test('Guarda la orden, su número y el motivo del técnico', () async {
+      await localDb.encolarMovimientoMaterial(
+        id: 'mov-ot',
+        orgId: orgA,
+        profileId: perfilA,
+        materialCodigo: 'CON-SC-APC',
+        materialNombre: 'Conector SC/APC',
+        tipo: 'consumo',
+        cantidad: '3',
+        ordenId: 'ot-4832',
+        ordenNumero: 4832,
+        motivoTecnico: 'El poste estaba a 40 metros.',
+      );
+
+      final cola = await localDb.getMovimientosMaterialSinConfirmar(
+        orgId: orgA, profileId: perfilA,
+      );
+
+      expect(cola.first['orden_id'], 'ot-4832');
+      expect(cola.first['orden_numero'], 4832);
+      expect(cola.first['motivo_tecnico'], 'El poste estaba a 40 metros.');
+    });
+
+    test('La regla del material se guarda con el kit, para avisar sin señal',
+        () async {
+      // Si la regla solo llegara al sincronizar, el aviso aparecería horas
+      // después de que el material ya se gastó.
+      await localDb.reemplazarKit(
+        orgId: orgA,
+        profileId: perfilA,
+        materiales: <Map<String, dynamic>>[
+          {
+            'codigo': 'CON-SC-APC',
+            'nombre': 'Conector SC/APC',
+            'clase': 'consumible',
+            'unidad': 'unidades',
+            'recibido': '24',
+            'consumido': '0',
+            'devuelto': '0',
+            'disponible': '24',
+            'series': <String>[],
+            'acta': 'K-1',
+            'regla': <String, dynamic>{
+              'cantidad_habitual': '1',
+              'maximo': null,
+              'exige_motivo': true,
+              'bloquea': false,
+            },
+          },
+        ],
+      );
+
+      final kit = await localDb.getKit(orgId: orgA, profileId: perfilA);
+      final regla = jsonDecode(kit.first['regla_json'] as String);
+
+      expect(regla['cantidad_habitual'], '1');
+      expect(regla['exige_motivo'], isTrue);
+      expect(regla['bloquea'], isFalse);
+    });
+
+    test('Un material sin regla no inventa ninguna', () async {
+      await darKit();
+
+      final kit = await localDb.getKit(orgId: orgA, profileId: perfilA);
+
+      expect(kit.first['regla_json'], isNull);
+    });
+
+    test('Un rechazo del servidor cierra el movimiento y no se reintenta',
+        () async {
+      // Un consumo sin trabajo o un equipo sin número dan siempre el mismo
+      // resultado: reintentarlo para siempre solo gasta batería.
+      await gastar(id: 'mov-malo');
+
+      await localDb.confirmarMovimientoMaterial(
+        id: 'mov-malo', orgId: orgA, profileId: perfilA,
+        resultado: 'rechazado',
+        motivo: 'Un consumo tiene que decir en qué trabajo se usó.',
+      );
+
+      expect(
+        await localDb.getMovimientosMaterialPendientes(
+          orgId: orgA, profileId: perfilA,
+        ),
+        isEmpty,
+      );
+      // Pero queda a la vista con su motivo, que es lo único que lo destraba.
+      final novedades = await localDb.getMovimientosMaterialConNovedad(
+        orgId: orgA, profileId: perfilA,
+      );
+      expect(novedades, hasLength(1));
+      expect(novedades.first['motivo'], contains('trabajo'));
+    });
+
+    test('Y deja de contar como pendiente al cerrar sesión', () async {
+      await gastar(id: 'mov-malo');
+      await localDb.confirmarMovimientoMaterial(
+        id: 'mov-malo', orgId: orgA, profileId: perfilA,
+        resultado: 'rechazado', motivo: 'Sin trabajo.',
+      );
+
+      final pendientes = await ciclo.pendientesDe(
+        orgId: orgA, profileId: perfilA,
+      );
+
+      expect(pendientes.movimientosDeMaterial, 0,
+          reason: 'ya no va a subir nunca: retenerlo bloquearía el cierre '
+              'de sesión para siempre');
     });
   });
 }

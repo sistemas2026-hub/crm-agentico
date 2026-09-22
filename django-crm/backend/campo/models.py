@@ -708,6 +708,85 @@ class ItemDeKit(BaseModel):
         return f"{self.material.codigo} x{self.cantidad}"
 
 
+class ReglaDeConsumo(BaseModel):
+    """Cuanto material se suele usar, segun esta empresa.
+
+    POR QUE ES UNA TABLA Y NO UN NUMERO EN EL CODIGO
+    ------------------------------------------------
+    "Una instalacion usa dos conectores" es verdad en una empresa y falso en
+    la siguiente: depende del tipo de acometida, del proveedor del material y
+    de como cada ISP arma sus kits. Escribirlo en el codigo obligaria a una
+    sesion de programacion para cambiar un numero que un supervisor conoce
+    mejor que nadie, y es exactamente lo que la regla multi-tenant del
+    proyecto prohibe.
+
+    La regla puede ser general para un material, o especifica para un tipo de
+    trabajo: cambiar una ONT gasta distinto que instalar desde cero. Cuando
+    hay dos, gana la del tipo de trabajo, que es la mas concreta.
+
+    NINGUNA DE ESTAS REGLAS BLOQUEA POR SI SOLA
+    -------------------------------------------
+    Lo habitual es una referencia, no un limite: el material ya se gasto
+    cuando el telefono lo informa. Por eso `cantidad_habitual` solo produce un
+    aviso y, si la empresa lo pide, la obligacion de escribir por que. Bloquear
+    de verdad solo ocurre con `bloquea_sobre_maximo`, que viene apagado.
+    """
+
+    org = models.ForeignKey(
+        Org, on_delete=models.CASCADE, related_name="reglas_consumo"
+    )
+    material = models.ForeignKey(
+        MaterialCatalogo, on_delete=models.CASCADE, related_name="reglas"
+    )
+    work_type = models.ForeignKey(
+        WorkType,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="reglas_consumo",
+        help_text="Vacio: vale para cualquier trabajo. Con valor: solo para ese tipo.",
+    )
+    cantidad_habitual = models.DecimalField(
+        max_digits=12,
+        decimal_places=3,
+        null=True,
+        blank=True,
+        help_text="Lo que se suele usar. Es una referencia, no un limite.",
+    )
+    maximo = models.DecimalField(
+        max_digits=12,
+        decimal_places=3,
+        null=True,
+        blank=True,
+        help_text="Por encima de esto se avisa fuerte. Vacio: sin tope.",
+    )
+    exige_motivo_sobre_habitual = models.BooleanField(
+        default=False,
+        help_text="Si se pasa de lo habitual, hay que escribir por que.",
+    )
+    bloquea_sobre_maximo = models.BooleanField(
+        default=False,
+        help_text=(
+            "La unica opcion que RECHAZA un consumo. Apagada por defecto: el "
+            "material ya se gasto cuando el telefono lo informa, y rechazarlo "
+            "borra el registro en vez de devolver el material."
+        ),
+    )
+
+    class Meta:
+        db_table = "campo_regla_consumo"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["org", "material", "work_type"],
+                name="unique_regla_por_material_y_tipo",
+            )
+        ]
+
+    def __str__(self) -> str:
+        alcance = self.work_type.codigo if self.work_type else "cualquier trabajo"
+        return f"{self.material.codigo} en {alcance}"
+
+
 class MovimientoDeMaterial(BaseModel):
     """Append-only: lo que se consumio, se devolvio o se ajusto.
 
@@ -767,6 +846,15 @@ class MovimientoDeMaterial(BaseModel):
         blank=True,
         default="",
         help_text="Por que quedo en descuadre o conflicto, en palabras.",
+    )
+    motivo_tecnico = models.TextField(
+        blank=True,
+        default="",
+        help_text=(
+            "Lo que escribio el tecnico al usar mas de lo habitual. Es suyo y "
+            "no se mezcla con `motivo`, que lo escribe el servidor: cuando hay "
+            "que reconstruir que paso, importa quien dijo cada cosa."
+        ),
     )
     idempotency_key = models.CharField(max_length=128, db_index=True)
     ocurrido_en = models.DateTimeField(

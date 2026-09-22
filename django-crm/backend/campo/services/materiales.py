@@ -39,6 +39,7 @@ from campo.models import (
     ItemDeKit,
     MaterialCatalogo,
     MovimientoDeMaterial,
+    ReglaDeConsumo,
 )
 
 CERO = Decimal("0")
@@ -91,6 +92,112 @@ def saldo_de(profile, material) -> Decimal:
     devuelto = movido_por(profile, material, MovimientoDeMaterial.DEVOLUCION)
     ajustado = movido_por(profile, material, MovimientoDeMaterial.AJUSTE)
     return entregado - consumido - devuelto + ajustado
+
+
+class ConsumoInvalido(Exception):
+    """Lo que se rechaza ANTES de registrar nada.
+
+    Es una lista corta a proposito. Casi todo lo que llega ya paso en la calle
+    y se guarda aunque no cuadre; esto es para lo que no se puede interpretar
+    como un hecho: un consumo que no dice en que trabajo se uso, o un equipo
+    serializado sin su numero. Guardarlos seria guardar una fila que despues
+    nadie puede explicar.
+    """
+
+
+#: Los tipos que pueden existir sin una orden de trabajo.
+#:
+#: Un consumo SIEMPRE pertenece a un trabajo: es la unica forma de saber
+#: despues en que se fue el material, y sin eso el inventario cuadra pero no
+#: explica nada. Devolver a bodega y ajustar por conteo, en cambio, son actos
+#: de jornada y no de trabajo.
+#:
+#: Si alguna empresa necesita registrar consumo sin orden -- material gastado
+#: en el taller, por ejemplo -- la salida es agregar un tipo explicito a este
+#: conjunto, no aflojar la regla del consumo.
+TIPOS_SIN_ORDEN = frozenset({
+    MovimientoDeMaterial.DEVOLUCION,
+    MovimientoDeMaterial.AJUSTE,
+})
+
+
+def exigir_origen(*, tipo, orden, material, serie) -> None:
+    """Se niega a registrar lo que despues no se podria explicar."""
+    if tipo not in TIPOS_SIN_ORDEN and orden is None:
+        raise ConsumoInvalido(
+            "Un consumo tiene que decir en que trabajo se uso el material. "
+            "Para devolver a bodega o ajustar por conteo existen los tipos "
+            "'devolucion' y 'ajuste', que no necesitan orden."
+        )
+
+    if material.es_serializado and tipo == MovimientoDeMaterial.CONSUMO:
+        if not (serie or "").strip():
+            raise ConsumoInvalido(
+                f"{material.nombre} es un equipo con numero de serie: sin el "
+                f"numero no se puede saber cual se instalo, ni encontrarlo "
+                f"despues si el cliente reclama."
+            )
+
+
+def regla_para(*, org, material, orden):
+    """La regla que aplica, de la mas concreta a la mas general.
+
+    Gana la del tipo de trabajo sobre la general: cambiar una ONT gasta
+    distinto que instalar desde cero, y quien configuro la regla especifica lo
+    hizo para que mandara.
+    """
+    work_type_id = None
+    if orden is not None and orden.tipo_trabajo_version_id:
+        work_type_id = orden.tipo_trabajo_version.work_type_id
+
+    reglas = ReglaDeConsumo.objects.filter(org=org, material=material)
+    if work_type_id:
+        especifica = reglas.filter(work_type_id=work_type_id).first()
+        if especifica is not None:
+            return especifica
+    return reglas.filter(work_type__isnull=True).first()
+
+
+def evaluar_cantidad(*, org, material, orden, cantidad, motivo_tecnico=""):
+    """Que tiene que saber quien registra este consumo.
+
+    Devuelve ``(avisos, exige_motivo, bloquea)``. Nada de esto rechaza por su
+    cuenta: lo habitual es una referencia, no un limite, y el material ya se
+    gasto cuando el telefono lo informa. Bloquear de verdad solo ocurre si la
+    empresa lo pidio con `bloquea_sobre_maximo`.
+    """
+    regla = regla_para(org=org, material=material, orden=orden)
+    if regla is None:
+        return [], False, False
+
+    avisos = []
+    exige_motivo = False
+    bloquea = False
+
+    habitual = regla.cantidad_habitual
+    if habitual is not None and cantidad > habitual:
+        avisos.append(
+            f"Cantidad superior a lo habitual: se suelen usar {a_texto(habitual)} "
+            f"{material.unidad} y se registraron {a_texto(cantidad)}."
+        )
+        if regla.exige_motivo_sobre_habitual and not (motivo_tecnico or "").strip():
+            exige_motivo = True
+
+    if regla.maximo is not None and cantidad > regla.maximo:
+        avisos.append(
+            f"Por encima del maximo configurado ({a_texto(regla.maximo)} "
+            f"{material.unidad})."
+        )
+        bloquea = regla.bloquea_sobre_maximo
+
+    return avisos, exige_motivo, bloquea
+
+
+def a_texto(valor) -> str:
+    """Un decimal sin ceros de mas, para escribirlo en un aviso."""
+    if valor is None:
+        return "0"
+    return format(Decimal(str(valor)).normalize(), "f")
 
 
 def _serie_ya_consumida(org, material, serie) -> bool:
@@ -148,6 +255,7 @@ def registrar_movimiento(
     serie="",
     orden=None,
     ocurrido_en=None,
+    motivo_tecnico="",
     datos=None,
 ) -> tuple[MovimientoDeMaterial, bool]:
     """Guarda un movimiento. Devuelve ``(movimiento, era_nuevo)``.
@@ -169,6 +277,29 @@ def registrar_movimiento(
         # redondear: inventar media unidad de más es peor que perderla.
         cantidad = cantidad.to_integral_value(rounding="ROUND_DOWN")
 
+    # Lo que no se puede interpretar como un hecho no se guarda.
+    exigir_origen(tipo=tipo, orden=orden, material=material, serie=serie)
+
+    # Y lo que la empresa configuró sobre cantidades. Solo rechaza si alguien
+    # encendió `bloquea_sobre_maximo`; el resto son avisos que viajan de vuelta.
+    avisos, exige_motivo, bloquea = evaluar_cantidad(
+        org=org,
+        material=material,
+        orden=orden,
+        cantidad=cantidad,
+        motivo_tecnico=motivo_tecnico,
+    )
+    if bloquea:
+        raise ConsumoInvalido(
+            "Esta empresa no permite registrar esta cantidad: "
+            + " ".join(avisos)
+        )
+    if exige_motivo:
+        raise ConsumoInvalido(
+            "Hay que escribir por qué se usó más de lo habitual: "
+            + " ".join(avisos)
+        )
+
     estado, motivo = clasificar(
         org=org,
         profile=profile,
@@ -189,7 +320,8 @@ def registrar_movimiento(
         estado=estado,
         motivo=motivo,
         idempotency_key=idempotency_key,
-        datos=datos or {},
+        motivo_tecnico=motivo_tecnico or "",
+        datos={**(datos or {}), **({"avisos": avisos} if avisos else {})},
     )
     # Solo se manda si el telefono dijo cuando fue. Pasar None explicito
     # anularia el default del modelo y dejaria la columna en nulo.
