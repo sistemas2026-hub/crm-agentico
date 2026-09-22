@@ -257,15 +257,18 @@
     color: var(--bandeja-ok);
   }
 
-  /* `margin-left:auto` y no un espaciador: el nombre se pega a la derecha sin
-     que importe cuánto mida la insignia. */
+  /* PEGADO A LA INSIGNIA, no al borde derecho. Estaba con `margin-left:auto`
+     y el ojo tenía que cruzar la columna entera para juntar «TOMADA» con
+     quién la tomó -- que es una sola frase. La referencia los pone juntos:
+     hora · insignia · nombre, y el nombre en oscuro porque es lo que se
+     busca al recorrer la lista. */
   .actor {
-    margin-left: auto;
     font-size: 11.5px;
-    font-weight: 500;
-    color: var(--bandeja-texto-2);
-    white-space: nowrap;
+    font-weight: 600;
+    color: var(--bandeja-texto);
+    min-width: 0;
     overflow: hidden;
+    white-space: nowrap;
     text-overflow: ellipsis;
   }
 

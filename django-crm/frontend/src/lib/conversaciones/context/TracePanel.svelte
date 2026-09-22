@@ -6,300 +6,392 @@
    * que se muestra son las herramientas que efectivamente se llamaron, con su
    * resultado, y el diagnóstico que dejó el motor.
    */
-  import { TriangleAlert, ArrowRight, CircleCheck, CircleX, ShieldCheck } from '@lucide/svelte';
+  import { CircleCheck, CircleX, ShieldCheck, ChevronDown } from '@lucide/svelte';
 
   let {
     herramientas = [], diagnostico, contrasteUtil = false,
     pasoMarcado = null, motivoBloqueo = {}, onIrAlPaso
   } = $props();
+
+  /* LA DURACION EN SEGUNDOS, como la referencia («ok 0.4s»). En milisegundos
+     --como estaba-- un numero de cuatro cifras al lado de otro de dos no se
+     compara de un vistazo, y lo que se busca en esta lista es justamente cual
+     paso tardo. Por debajo de 100 ms se dice «<0.1s» en vez de «0.0s», que
+     parece un dato que no se midio. */
+  const duracion = (/** @type {number|null} */ ms) => {
+    if (ms === null || ms === undefined) return '—';
+    if (ms < 100) return '<0.1s';
+    return `${(ms / 1000).toFixed(1)}s`;
+  };
 </script>
 
-  {#if herramientas.length > 0}
-  <!-- Abierto de entrada SOLO si hubo un bloqueo o un error. Si todo corrio
-     normal el panel es secundario y no tiene por que ocupar la columna;
-     cuando algo se freno o se rompio, el hallazgo tiene que estar a la
-     vista sin que nadie sospeche primero -- que es justo lo que no pasa
-     con un panel plegado que casi nadie abre. -->
-  <details class="proceso" open={!!(diagnostico?.bloqueadas || diagnostico?.errores)}>
-  <summary class="proceso-resumen">
-    Ver proceso
-    <span class="v2-muted">
-      ({herramientas.length} paso{herramientas.length === 1 ? '' : 's'}{#if herramientas.some((h) => h.es_escritura)}, con escritura{/if})
-    </span>
-    <!-- Lo unico que se asoma con el panel cerrado. El resto de la traza se
-         mira cuando hay una sospecha; un bloqueo o un fallo hay que verlo
-         ANTES, porque cambia lo que quien atiende tiene que hacer. -->
-    {#if diagnostico?.errores}
-      <span class="diag-aviso diag-error">
-        {diagnostico.errores} error{diagnostico.errores === 1 ? '' : 'es'}
-      </span>
-    {/if}
-    {#if diagnostico?.bloqueadas}
-      <span class="diag-aviso diag-bloqueo">
-        {diagnostico.bloqueadas} bloqueada{diagnostico.bloqueadas === 1 ? '' : 's'}
-      </span>
-    {/if}
-  </summary>
-  <!-- Diagnostico de la IA. Va ARRIBA de la lista y no al final: quien abre
-       esto lo hace porque sospecha de una respuesta, y lo primero que
-       necesita saber es si algo se rompio o si el sistema hizo su trabajo.
-       Leer catorce pasos para deducirlo es justo lo que hay que evitar. -->
-  {#if diagnostico}
-    <ul class="diag">
-      <li>
-        <CircleCheck size={14} style="color:var(--bandeja-ok);flex:none" />
-        <b>{diagnostico.normales}</b>
-        {diagnostico.normales === 1 ? 'ejecución normal' : 'ejecuciones normales'}
-        <span class="v2-muted">corrió y devolvió datos</span>
-      </li>
-      <!-- Con cero, un renglon informativo. Con uno o mas, un BOTON que
-           lleva al paso: el numero contesta "paso algo", y lo siguiente que
-           se quiere es ver QUE, sin buscarlo entre catorce lineas.
-           Los dos en cero no se dibujan: ver 'contrasteUtil'. -->
-      {#if contrasteUtil}
-      <li class:diag-hay={diagnostico.bloqueadas > 0}>
-        <ShieldCheck size={14} style="color:var(--bandeja-aviso);flex:none" />
-        {#if diagnostico.bloqueadas > 0}
-          <button type="button" class="diag-ir" onclick={() => onIrAlPaso?.('bloqueo')}>
-            <b>{diagnostico.bloqueadas}</b>
-            {diagnostico.bloqueadas === 1 ? 'acción bloqueada' : 'acciones bloqueadas'}
-          </button>
-          <span class="v2-muted">el sistema la frenó — no es una falla</span>
-        {:else}
-          <b>0</b> acciones bloqueadas
-          <span class="v2-muted">el sistema la frenó — no es una falla</span>
-        {/if}
-      </li>
-      <li class:diag-hay={diagnostico.errores > 0}>
-        <CircleX size={14} style="color:var(--bandeja-error);flex:none" />
-        {#if diagnostico.errores > 0}
-          <button type="button" class="diag-ir" onclick={() => onIrAlPaso?.('error')}>
-            <b>{diagnostico.errores}</b>
-            {diagnostico.errores === 1 ? 'error' : 'errores'} en herramienta
-          </button>
-          <span class="v2-muted">falló un sistema externo</span>
-        {:else}
-          <b>0</b> errores en herramienta
-          <span class="v2-muted">falló un sistema externo</span>
-        {/if}
-      </li>
-      {/if}
-    </ul>
-  {/if}
+<!-- ══════════════════════════════════════════════════════════════════════════
+     «AI PROCESS», con los datos de la traza real
 
-  <ol class="proceso-lista">
-    {#each herramientas as h, i}
-      <li
-        class="proceso-item"
-        class:bloqueada={h.es_bloqueo}
-        class:paso-marcado={pasoMarcado === i}
-        data-paso={i}
-      >
-        {#if h.es_bloqueo}
-          <ShieldCheck size={15} style="color:var(--bandeja-aviso);flex:none" />
-        {:else if h.exito}
-          <CircleCheck size={15} style="color:var(--bandeja-ok);flex:none" />
-        {:else}
-          <CircleX size={15} style="color:var(--bandeja-error);flex:none" />
-        {/if}
-        <span class="proceso-nombre">{h.herramienta}</span>
-        {#if h.n_registros !== null}
-          <span class="v2-muted">{h.n_registros} resultado{h.n_registros === 1 ? '' : 's'}</span>
-        {/if}
-        {#if h.es_bloqueo}
-          <!-- El motivo en palabras, no el codigo: el codigo queda en el
-               title para quien depure, pero lo que se lee dice que hacer. -->
-          <span class="v2-muted" title={h.codigo_error}>
-            {motivoBloqueo[h.codigo_error] ?? 'el sistema frenó esta acción'}
+     Referencia: la pestaña Tools de las pantallas de contexto. La forma es la
+     suya -- tarjeta con cabecera, tira de contadores y pasos numerados con su
+     duración a la derecha.
+
+     LO QUE NO SE COPIA es el párrafo de prosa que la referencia pone arriba
+     («Automated loop detected physical layer disruption at Belgrano node...»).
+     Ese texto es un resumen narrado del diagnóstico, y Dexter no lo produce:
+     la traza tiene qué herramienta corrió, con qué resultado y en cuánto
+     tiempo, no una redacción. Escribirlo acá sería inventarlo; los tres
+     contadores dicen lo mismo con lo que sí se midió.
+     ══════════════════════════════════════════════════════════════════════════ -->
+
+{#if herramientas.length > 0}
+  <!-- Abierto de entrada SOLO si hubo un bloqueo o un error. Si todo corrió
+       normal el panel es secundario y no tiene por qué ocupar la columna;
+       cuando algo se frenó o se rompió, el hallazgo tiene que estar a la
+       vista sin que nadie sospeche primero -- que es justo lo que no pasa con
+       un panel plegado que casi nadie abre. -->
+  <details
+    class="panel-tarjeta proceso"
+    open={!!(diagnostico?.bloqueadas || diagnostico?.errores)}
+  >
+    <summary class="panel-tarjeta-cabeza proceso-cabeza">
+      <span class="panel-titulo">Proceso de la IA</span>
+      <span class="proceso-cabeza-fin">
+        <!-- Lo único que se asoma con el panel cerrado. El resto de la traza
+             se mira cuando hay una sospecha; un bloqueo o un fallo hay que
+             verlo ANTES, porque cambia lo que quien atiende tiene que hacer. -->
+        {#if diagnostico?.errores}
+          <span class="diag-aviso diag-error">
+            {diagnostico.errores} error{diagnostico.errores === 1 ? '' : 'es'}
           </span>
-        {:else if h.codigo_error}
-          <span class="v2-muted" title={h.codigo_error}>{h.codigo_error.split(':')[0]}</span>
         {/if}
-        <span class="v2-muted proceso-duracion">{h.duracion_ms} ms</span>
-      </li>
-    {/each}
-  </ol>
+        {#if diagnostico?.bloqueadas}
+          <span class="diag-aviso diag-bloqueo">
+            {diagnostico.bloqueadas} bloqueada{diagnostico.bloqueadas === 1 ? '' : 's'}
+          </span>
+        {/if}
+        <ChevronDown size={14} class="proceso-flecha" />
+      </span>
+    </summary>
+
+    <!-- ── LA TIRA DE CONTADORES ──────────────────────────────────────────
+         Tres números en una línea, en mono y dentro de un recuadro, como la
+         referencia. Antes eran tres renglones con icono y una frase cada uno:
+         nueve palabras para decir «5 · 1 · 0», en una columna de 350px.
+
+         La frase no se pierde del todo -- vive en el `title` de cada
+         contador--, porque «bloqueada» no significa lo mismo que «error» y esa
+         distinción es la razón de que sean dos contadores y no uno. -->
+    {#if diagnostico}
+      <div class="tira">
+        <span class="tira-par" title="Herramientas que corrieron y devolvieron datos">
+          <span class="tira-rotulo">pasos</span>
+          <b>{diagnostico.normales + (diagnostico.bloqueadas ?? 0) + (diagnostico.errores ?? 0)}</b>
+        </span>
+        <span class="tira-sep" aria-hidden="true">·</span>
+        <!-- Con cero, sólo el número. Con uno o más, un BOTÓN que lleva al
+             paso: el número contesta «pasó algo», y lo siguiente que se
+             quiere es ver QUÉ, sin buscarlo entre catorce líneas. -->
+        <span
+          class="tira-par"
+          class:tira-hay={diagnostico.bloqueadas > 0}
+          title="El sistema la frenó — no es una falla"
+        >
+          <span class="tira-rotulo">bloqueadas</span>
+          {#if diagnostico.bloqueadas > 0}
+            <button type="button" class="tira-ir" onclick={() => onIrAlPaso?.('bloqueo')}>
+              {diagnostico.bloqueadas}
+            </button>
+          {:else}
+            <b>0</b>
+          {/if}
+        </span>
+        <span class="tira-sep" aria-hidden="true">·</span>
+        <span
+          class="tira-par"
+          class:tira-mal={diagnostico.errores > 0}
+          title="Falló un sistema externo"
+        >
+          <span class="tira-rotulo">errores</span>
+          {#if diagnostico.errores > 0}
+            <button type="button" class="tira-ir" onclick={() => onIrAlPaso?.('error')}>
+              {diagnostico.errores}
+            </button>
+          {:else}
+            <b>0</b>
+          {/if}
+        </span>
+      </div>
+    {/if}
+
+    <!-- ── LOS PASOS ──────────────────────────────────────────────────────
+         Numerados, con el estado a la izquierda y la duración a la derecha.
+         El número importa: la referencia dice «Jump to step 4» y sin un
+         número visible ese salto no se puede seguir con el ojo. -->
+    <ol class="proceso-lista">
+      {#each herramientas as h, i}
+        <li
+          class="proceso-item"
+          class:bloqueada={h.es_bloqueo}
+          class:fallada={!h.es_bloqueo && !h.exito}
+          class:paso-marcado={pasoMarcado === i}
+          data-paso={i}
+        >
+          <span class="proceso-n v2-num">{i + 1}</span>
+          {#if h.es_bloqueo}
+            <ShieldCheck size={14} style="color:var(--bandeja-aviso);flex:none" />
+          {:else if h.exito}
+            <CircleCheck size={14} style="color:var(--bandeja-ok);flex:none" />
+          {:else}
+            <CircleX size={14} style="color:var(--bandeja-error);flex:none" />
+          {/if}
+          <span class="proceso-nombre">{h.herramienta}</span>
+          <span class="proceso-duracion v2-num">{duracion(h.duracion_ms)}</span>
+
+          {#if h.es_bloqueo}
+            <!-- El motivo en palabras, no el código: el código queda en el
+                 title para quien depure, pero lo que se lee dice qué hacer. -->
+            <span class="proceso-sub" title={h.codigo_error}>
+              {motivoBloqueo[h.codigo_error] ?? 'el sistema frenó esta acción'}
+            </span>
+          {:else if h.codigo_error}
+            <span class="proceso-sub" title={h.codigo_error}>
+              {h.codigo_error.split(':')[0]}
+            </span>
+          {:else if h.n_registros !== null}
+            <span class="proceso-sub">
+              {h.n_registros} resultado{h.n_registros === 1 ? '' : 's'}
+            </span>
+          {/if}
+        </li>
+      {/each}
+    </ol>
   </details>
-  {:else}
-  <!-- Sin traza el panel entero desaparecia, y la columna quedaba con dos
+{:else}
+  <!-- Sin traza el panel entero desaparecía, y la columna quedaba con dos
        controles sueltos y un hueco: se lee como una pantalla rota, no como
-       "no hay nada que mostrar". Es el caso normal de una conversacion que
-       el asistente resolvio hablando, sin consultar ningun sistema. -->
-  <p class="proceso-vacio">
-    El asistente no consultó ningún sistema en esta conversación.
-  </p>
-  {/if}
+       «no hay nada que mostrar». Es el caso normal de una conversación que el
+       asistente resolvió hablando, sin consultar ningún sistema. -->
+  <div class="panel-tarjeta">
+    <div class="panel-tarjeta-cabeza">
+      <span class="panel-titulo">Proceso de la IA</span>
+      <span class="panel-marca">sin pasos</span>
+    </div>
+    <p class="proceso-vacio">
+      El asistente no consultó ningún sistema en esta conversación.
+    </p>
+  </div>
+{/if}
 
 <style>
+  /* La tarjeta y su cabecera salen de `bandeja.css`: son las mismas que usan
+     Equipo y Caso. Acá sólo lo propio del proceso. */
   .proceso {
-    padding: 14px 0 0;
+    margin-bottom: 10px;
   }
 
-  /* El resaltado del paso al que se salto. Se apaga solo. */
-  .paso-marcado {
-    background: var(--bandeja-aviso-fondo);
-    border-radius: 6px;
-    padding-left: 6px;
-    padding-right: 6px;
-  }
-
-  .proceso-resumen {
+  .proceso-cabeza {
     cursor: pointer;
-    font-size: 13px;
-    font-weight: 600;
-    display: flex;
-    align-items: center;
-    gap: 6px;
+    list-style: none;
     user-select: none;
   }
-
-  .proceso-resumen .v2-muted {
-    font-weight: 400;
+  .proceso-cabeza::-webkit-details-marker {
+    display: none;
   }
 
+  .proceso-cabeza-fin {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: none;
+    color: var(--bandeja-texto-3);
+  }
+
+  /* La flecha gira al abrir. Es el único indicio de que la tarjeta se
+     despliega, así que no puede faltar cuando está cerrada. */
+  .proceso :global(.proceso-flecha) {
+    transition: transform 0.15s ease;
+  }
+  .proceso[open] :global(.proceso-flecha) {
+    transform: rotate(180deg);
+  }
+
+  /* ── la tira de contadores ─────────────────────────────────────────────
+     Un recuadro con los tres números en mono, como la referencia. El rótulo
+     va en minúscula y apagado: lo que se lee es la cifra. */
+  .tira {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 5px 8px;
+    border: 1px solid var(--bandeja-borde);
+    border-radius: 3px;
+    background: var(--bandeja-superficie-suave);
+    font-family: var(--bandeja-mono);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .tira-par {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 5px;
+    color: var(--bandeja-texto);
+  }
+
+  .tira-rotulo {
+    color: var(--bandeja-texto-2);
+  }
+
+  .tira-sep {
+    color: var(--bandeja-borde-fuerte);
+  }
+
+  /* Un contador en cero no se pinta: el color tiene que significar «pasó
+     algo», y si «0 errores» sale en rojo deja de decir nada. */
+  .tira-hay {
+    color: var(--bandeja-aviso);
+  }
+  .tira-mal {
+    color: var(--bandeja-error);
+  }
+
+  /* El número es el control: se salta al paso desde la cifra, que es lo que
+     se está mirando. Un botón aparte al lado repetiría el dato. */
+  .tira-ir {
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    font-weight: 700;
+    color: inherit;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    cursor: pointer;
+  }
+  .tira-ir:hover {
+    text-decoration-thickness: 2px;
+  }
+  .tira-ir:focus-visible {
+    outline: 2px solid var(--bandeja-humano);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  /* ── los pasos ─────────────────────────────────────────────────────────
+     Rejilla de tres columnas --número, icono, nombre-- más la duración a la
+     derecha. El subtexto ocupa una segunda fila alineada con el nombre, no
+     con el número: se lee como una aclaración del paso, no como otro paso. */
   .proceso-lista {
     list-style: none;
-    margin: 10px 0 0;
+    margin: 0;
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 2px;
   }
 
-  /* NADA de esta columna puede provocar scroll horizontal. Un nombre de
-     herramienta largo mas un mensaje de error entero (ErrorHerramientaHttp:
-     400 Client Error for url...) empujaban la fila fuera de su columna, y
-     aparecia una barra horizontal abajo.
-
-     'min-width: 0' en el item Y en el nombre: sin lo primero, un hijo flex
-     se niega a encogerse por debajo de su contenido y el ellipsis del hijo
-     nunca llega a aplicarse. Es la causa mas comun de esto y no se ve
-     leyendo el CSS del hijo. */
   .proceso-item {
-    display: flex;
+    display: grid;
+    grid-template-columns: 14px 14px 1fr auto;
     align-items: center;
-    gap: 8px;
-    font-size: 12.5px;
-    padding: 4px 0;
-    min-width: 0;
+    gap: 2px 7px;
+    padding: 4px 5px;
+    border-radius: 3px;
+    border-left: 2px solid transparent;
+    font-size: 12px;
+  }
+
+  .proceso-n {
+    font-family: var(--bandeja-mono);
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+    color: var(--bandeja-texto-3);
+    text-align: right;
   }
 
   .proceso-nombre {
     min-width: 0;
+    color: var(--bandeja-texto);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-family: var(--v2-mono, monospace);
   }
 
-  /* El tiempo conserva su columna a la derecha pase lo que pase: es lo que
-     se compara de un vistazo entre pasos. */
   .proceso-duracion {
-    margin-left: auto;
-    flex: none;
-  }
-
-  /* El resto encoge antes que el nombre y el tiempo. El texto completo del
-     error sigue en el 'title'. */
-  .proceso-item > .v2-muted:not(.proceso-duracion) {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    font-family: var(--bandeja-mono);
+    font-size: 10.5px;
+    font-variant-numeric: tabular-nums;
+    color: var(--bandeja-texto-3);
     white-space: nowrap;
   }
 
-  .proceso-lista {
-    min-width: 0;
+  /* Segunda fila, bajo el nombre: empieza en la tercera columna. */
+  .proceso-sub {
+    grid-column: 3 / -1;
+    font-size: 10.5px;
+    line-height: 1.35;
+    color: var(--bandeja-texto-2);
+  }
+
+  /* UN PASO FRENADO NO ES UN PASO FALLADO, y por eso son dos tratamientos.
+     El bloqueo es el sistema haciendo su trabajo --ámbar, que en esta paleta
+     es «pide atención»-- y el error es algo roto del otro lado. Pintarlos
+     igual haría que quien mira concluya que el asistente se rompió cuando en
+     realidad se contuvo. */
+  .proceso-item.bloqueada {
+    background: var(--bandeja-aviso-fondo);
+    border-left-color: var(--bandeja-aviso-borde);
+  }
+  .proceso-item.bloqueada .proceso-nombre {
+    font-weight: 600;
+    color: var(--bandeja-aviso);
+  }
+  .proceso-item.bloqueada .proceso-sub {
+    color: var(--bandeja-aviso);
+  }
+
+  .proceso-item.fallada {
+    background: var(--bandeja-error-fondo);
+    border-left-color: var(--bandeja-error-borde);
+  }
+  .proceso-item.fallada .proceso-nombre {
+    font-weight: 600;
+    color: var(--bandeja-error);
+  }
+
+  /* Al saltar desde un contador, el paso se marca un momento: sin eso el
+     salto deja el ojo en el lugar correcto sin decir cuál de los renglones
+     era. */
+  .paso-marcado {
+    outline: 2px solid var(--bandeja-humano);
+    outline-offset: 1px;
   }
 
   .proceso-vacio {
     margin: 0;
     font-size: 12px;
-    color: var(--v2-slate);
+    line-height: 1.45;
+    color: var(--bandeja-texto-2);
   }
 
-
-  /* Diagnostico: tres lineas, no tres tarjetas. Es una lectura de dos
-     segundos dentro de un panel plegable, no un tablero. */
-  .diag {
-    list-style: none;
-    margin: 10px 0 0;
-    padding: 8px 10px;
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-    font-size: 12.5px;
-    border: 1px solid var(--v2-line);
-    border-radius: 6px;
-  }
-
-  .diag li {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-  }
-
-  .diag b {
-    font-variant-numeric: tabular-nums;
-    min-width: 1.2em;
-    text-align: right;
-  }
-
-  /* Un renglon con algo pesa mas que uno en cero. Cero bloqueadas y cero
-     errores es la noticia buena y no tiene por que competir. */
-  .diag-hay {
-    font-weight: 600;
-  }
-
-  .diag-ir {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    border: 0;
-    background: none;
-    font: inherit;
-    color: inherit;
-    padding: 2px 4px;
-    margin: -2px -4px;
-    border-radius: 5px;
-    cursor: pointer;
-    text-decoration: underline;
-    text-underline-offset: 2px;
-  }
-
-  .diag-ir:hover {
-    background: var(--v2-line-soft);
-  }
-
-  .diag-ir:focus-visible {
-    outline: 2px solid var(--bandeja-aviso);
-    outline-offset: 1px;
-  }
-
-
-  /* Los dos avisos del titulo cerrado. Sin borde de color al costado: se
-     distinguen por el texto y el tono del fondo, que es lo que se lee. */
+  /* Lo que se asoma con la tarjeta cerrada. */
   .diag-aviso {
-    font-size: 11px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    border: 1px solid;
+    font-family: var(--bandeja-mono);
+    font-size: 9.5px;
     font-weight: 600;
-    padding: 1px 7px;
-    border-radius: 999px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
     white-space: nowrap;
   }
-
   .diag-error {
-    color: var(--bandeja-error);
     background: var(--bandeja-error-fondo);
+    border-color: var(--bandeja-error-borde);
+    color: var(--bandeja-error);
   }
-
   .diag-bloqueo {
-    color: var(--bandeja-aviso);
     background: var(--bandeja-aviso-fondo);
-  }
-
-  /* Un bloqueo no es un fallo: se distingue del resto de la lista, pero sin
-     la carga visual de un error. */
-  .proceso-item.bloqueada .proceso-nombre {
+    border-color: var(--bandeja-aviso-borde);
     color: var(--bandeja-aviso);
   }
 </style>

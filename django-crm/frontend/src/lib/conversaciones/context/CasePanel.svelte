@@ -69,9 +69,11 @@
        Primero y separado de lo del CRM. Antes los campos de las dos cosas
        iban mezclados en una lista y "Asignado a" se leía como si dijera quién
        atiende la conversación. -->
-  <p class="panel-titulo">Conversación en Dexter</p>
-
-  <div class="bloque">
+  <div class="panel-tarjeta">
+    <div class="panel-tarjeta-cabeza">
+      <span class="panel-titulo">Conversación en Dexter</span>
+    </div>
+    <div class="bloque">
     <div class="panel-fila">
       <span class="panel-etiqueta">Identificador</span>
       <span class="panel-valor id-con-copia">
@@ -114,14 +116,15 @@
         <span class="panel-valor sin-dato">Sin asignar</span>
       {/if}
     </div>
+    </div>
   </div>
 
   <!-- ── EL CASO DEL CRM ─────────────────────────────────────────────────
        Sólo si lo hay. La mayoría de las conversaciones no abren caso, y un
        bloque con tres guiones se lee como "el CRM está caído". -->
   {#if caso}
-    <div class="seccion">
-      <div class="seccion-cabecera">
+    <div class="panel-tarjeta">
+      <div class="panel-tarjeta-cabeza">
         <span class="panel-titulo">Caso en el CRM</span>
         <a class="abrir" href="/tickets/{caso.id}">
           Abrir ticket <ArrowUpRight size={12} />
@@ -241,8 +244,8 @@
        Sólo si la conversación tiene uno. No se muestra un campo vacío para
        completar la composición. -->
   {#if conversacion.ticket_operativo}
-    <div class="seccion">
-      <p class="panel-titulo">Ticket operativo</p>
+    <div class="panel-tarjeta">
+      <div class="panel-tarjeta-cabeza"><span class="panel-titulo">Ticket operativo</span></div>
       <div class="bloque">
         <div class="panel-fila">
           <span class="panel-etiqueta">Identificador</span>
@@ -261,25 +264,17 @@
 
   /* Las filas de una sección van juntas y apretadas: son una tabla, no una
      lista de párrafos. */
+  /* Las filas de una tarjeta van juntas y apretadas: son una tabla, no una
+     lista de párrafos. La separación ENTRE tarjetas la pone `.panel-tarjeta`
+     en bandeja.css, así que acá no va margen -- con los dos, las secciones
+     quedaban a 24px una de otra y entraban dos por pantalla. */
   .bloque {
     display: flex;
     flex-direction: column;
     gap: 7px;
-    margin-top: 10px;
   }
 
-  .seccion {
-    padding-top: 14px;
-    margin-top: 14px;
-    border-top: 1px solid var(--bandeja-borde);
-  }
 
-  .seccion-cabecera {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-  }
 
   /* El enlace al ticket va en la cabecera de SU sección y no al pie del
      panel: ahí queda claro a qué caso abre. Al final, con tres bloques

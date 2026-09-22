@@ -364,7 +364,7 @@ describe('el panel de red no ejecuta ni inventa', () => {
     const iFw = campos.indexOf('Firmware');
     expect(iFw, 'falta la fila «Firmware»').toBeGreaterThan(-1);
     const filaFw = campos.slice(iFw, iFw + 220);
-    expect(filaFw).toMatch(/eq-sin/);
+    expect(filaFw).toMatch(/panel-sin/);
     expect(filaFw).toMatch(/—/);
 
     // 3. Lo que si existe se lee de la medicion, nunca de una constante.

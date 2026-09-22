@@ -330,10 +330,10 @@
 
   {#if medicion}
     <!-- ── 1. LA UNIDAD ─────────────────────────────────────────────────── -->
-    <div class="eq-seccion">
-      <div class="eq-cabeza">
+    <div class="panel-tarjeta">
+      <div class="panel-tarjeta-cabeza">
         <span class="panel-titulo">Unidad ONT / ONU</span>
-        <span class="eq-marca">GPON</span>
+        <span class="panel-marca">GPON</span>
       </div>
 
       <div class="panel-fila">
@@ -350,7 +350,7 @@
         {#if topologia?.onu_type_name}
           <span class="panel-valor">{topologia.onu_type_name}</span>
         {:else}
-          <span class="panel-valor eq-sin">—</span>
+          <span class="panel-valor panel-sin">—</span>
         {/if}
       </div>
 
@@ -376,7 +376,7 @@
         {#if profundo?.mac}
           <span class="panel-valor panel-mono">{profundo.mac}</span>
         {:else}
-          <span class="panel-valor eq-sin">—</span>
+          <span class="panel-valor panel-sin">—</span>
         {/if}
       </div>
 
@@ -386,7 +386,7 @@
            a encontrar aca en vez de seguir buscando. -->
       <div class="panel-fila">
         <span class="panel-etiqueta">Firmware</span>
-        <span class="panel-valor eq-sin">—</span>
+        <span class="panel-valor panel-sin">—</span>
       </div>
 
       {#if profundo?.perfil}
@@ -422,11 +422,11 @@
     </div>
 
     <!-- ── 2. LA TELEMETRÍA ÓPTICA ──────────────────────────────────────── -->
-    <div class="eq-seccion">
-      <div class="eq-cabeza">
+    <div class="panel-tarjeta">
+      <div class="panel-tarjeta-cabeza">
         <span class="panel-titulo">Telemetría óptica</span>
         {#if lectura?.leido_en}
-          <span class="eq-marca">Leído {haceCuanto(lectura.leido_en)}</span>
+          <span class="panel-marca">Leído {haceCuanto(lectura.leido_en)}</span>
         {/if}
       </div>
 
@@ -488,13 +488,13 @@
       <div class="eq-celdas">
         <div class="eq-celda">
           <span class="eq-celda-rotulo">Subida (1310 nm)</span>
-          <b class="eq-celda-valor" class:eq-sin={medicion.rxSubida === null}>
+          <b class="eq-celda-valor" class:panel-sin={medicion.rxSubida === null}>
             {medicion.rxSubida !== null ? `${medicion.rxSubida} dBm` : '—'}
           </b>
         </div>
         <div class="eq-celda">
           <span class="eq-celda-rotulo">Temperatura</span>
-          <b class="eq-celda-valor" class:eq-sin={!profundo?.temperatura}>
+          <b class="eq-celda-valor" class:panel-sin={!profundo?.temperatura}>
             {conUnidad(profundo?.temperatura, '°C') ?? '—'}
           </b>
         </div>
@@ -505,13 +505,13 @@
              si el problema es de bajada o de subida. -->
         <div class="eq-celda">
           <span class="eq-celda-rotulo">Tx del equipo</span>
-          <b class="eq-celda-valor" class:eq-sin={!profundo?.tx}>
+          <b class="eq-celda-valor" class:panel-sin={!profundo?.tx}>
             {conUnidad(profundo?.tx, 'dBm') ?? '—'}
           </b>
         </div>
         <div class="eq-celda">
           <span class="eq-celda-rotulo">RX en la OLT</span>
-          <b class="eq-celda-valor" class:eq-sin={!profundo?.olt_rx}>
+          <b class="eq-celda-valor" class:panel-sin={!profundo?.olt_rx}>
             {conUnidad(profundo?.olt_rx, 'dBm') ?? '—'}
           </b>
         </div>
@@ -524,10 +524,10 @@
          sección donde la referencia y nosotros nos cruzamos al revés: ellos
          la dibujan sin datos, nosotros tenemos los datos. -->
     {#if topologia}
-      <div class="eq-seccion">
-        <div class="eq-cabeza">
+      <div class="panel-tarjeta">
+        <div class="panel-tarjeta-cabeza">
           <span class="panel-titulo">Planta física</span>
-          {#if topologia.zone_name}<span class="eq-marca">{topologia.zone_name}</span>{/if}
+          {#if topologia.zone_name}<span class="panel-marca">{topologia.zone_name}</span>{/if}
         </div>
 
         {#if topologia.olt_name}
@@ -1168,48 +1168,9 @@
   }
 
 
-  /* ── LA FORMA DE LA IMAGEN ─────────────────────────────────────────────
-     Secciones con filete, encabezado en versalita y una marca a la derecha;
-     dentro, filas etiqueta/valor. Es la misma estructura de la tarjeta de la
-     NOC Console, con los tokens congelados de la Bandeja. */
-  .eq-seccion {
-    border: 1px solid var(--bandeja-borde);
-    border-radius: var(--bandeja-radio-sm);
-    background: var(--bandeja-superficie);
-    padding: 10px 12px;
-    margin-bottom: 10px;
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-  }
 
-  .eq-cabeza {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    padding-bottom: 6px;
-    margin-bottom: 2px;
-    border-bottom: 1px solid var(--bandeja-borde);
-  }
 
-  /* La marca de la derecha del encabezado: GPON, la zona, la hora de lectura.
-     Es contexto de la sección, no un dato de una fila. */
-  .eq-marca {
-    flex: none;
-    font-family: var(--bandeja-mono);
-    font-size: 9.5px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--bandeja-texto-3);
-  }
 
-  /* EL GUION DE LO QUE NO HAY. Apagado a propósito y sin fondo: tiene que
-     verse que la fila existe y que está vacía, sin competir con un valor. */
-  .eq-sin {
-    color: var(--bandeja-texto-3);
-  }
 
   .eq-serial {
     display: inline-flex;

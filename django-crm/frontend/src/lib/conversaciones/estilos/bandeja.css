@@ -284,3 +284,54 @@ html:not(.dark) .bandeja {
   background: var(--bandeja-navy);
   border-color: var(--bandeja-navy);
 }
+
+/* ── LA TARJETA DE UNA SECCIÓN DE CONTEXTO ────────────────────────────────
+   Añadida el 22/09/2026 al llevar Equipo, Caso y Herramientas a la forma de
+   las pantallas de referencia. Las tres las dibujan igual: filete, rótulo en
+   versalita a la izquierda y una marca discreta a la derecha.
+
+   Vive acá y no en cada panel por el mismo motivo que `.panel-fila`: nació
+   como `.eq-seccion` dentro de NetworkPanel, y en cuanto la segunda pestaña
+   necesitó lo mismo habría empezado la divergencia que este archivo ya
+   documenta -- cinco paneles de la misma columna dibujando la misma caja de
+   cinco maneras, sin que ninguna herramienta lo detecte porque el CSS de
+   Svelte está acotado a su componente. */
+.bandeja .panel-tarjeta {
+  border: 1px solid var(--bandeja-borde);
+  border-radius: var(--bandeja-radio-sm);
+  background: var(--bandeja-superficie);
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.bandeja .panel-tarjeta-cabeza {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 6px;
+  margin-bottom: 2px;
+  border-bottom: 1px solid var(--bandeja-borde);
+}
+
+/* La marca de la derecha del encabezado: GPON, la zona, la hora de lectura,
+   el conteo de pasos. Es contexto de la sección, no un dato de una fila --
+   por eso va apagada y en mono, como un sello. */
+.bandeja .panel-marca {
+  flex: none;
+  font-family: var(--bandeja-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--bandeja-texto-3);
+}
+
+/* Lo que no se sabe: el guion apagado. Se ve que la fila existe y que está
+   vacía, sin competir con un valor. */
+.bandeja .panel-sin {
+  color: var(--bandeja-texto-3);
+}
