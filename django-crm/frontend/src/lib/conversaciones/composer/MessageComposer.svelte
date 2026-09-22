@@ -442,6 +442,16 @@
           <!-- Sólo con la conversación en manos de una persona: devolverla supone
                tenerla. Con la IA atendiendo, el motor responde 409 y el botón no
                tendría a qué. -->
+          <!-- «RESPONDER Y DEVOLVER», no «Devolver a la IA». Se acorto el
+               22/09/2026 al pasar los modos a la barra, y en produccion
+               alguien lo apreto esperando que devolviera la conversacion: es
+               un MODO, no una accion -- vuelve a la IA cuando el mensaje
+               SALE, y sin mensaje no vuelve nada. Medido en la base: quedo
+               registrado un evento 'intervencion' y ningun 'devuelta_a_ia',
+               el control siguio en 'humano' y por eso la IA no contesto los
+               dos mensajes que mando el cliente despues.
+               El verbo «Responder» adelante es lo que avisa que hay que
+               escribir algo. -->
           {#if escalada}
             <button
               type="button"
@@ -449,7 +459,7 @@
               aria-pressed={modo === 'responder_y_devolver'}
               onclick={() => (modo = 'responder_y_devolver')}
               disabled={enviando}
-              >Devolver a la IA</button
+              >Responder y devolver</button
             >
           {/if}
         </div>

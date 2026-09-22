@@ -1545,8 +1545,15 @@
   }
 
   /** @param {SubmitEvent} evento */
+  /* EL EVENTO ES OPCIONAL, Y ESA ES LA CORRECCION (22/09/2026).
+     Esta funcion llega por dos caminos: el `onsubmit` del formulario, que
+     trae evento y hay que frenarlo para que el navegador no recargue; y la
+     tecla Enter del cuadro de texto, que llama `onEnviar?.()` SIN argumento.
+     Por el segundo camino esto tiraba TypeError antes de llegar a `enviar()`:
+     Enter no mandaba nada y en la pantalla no pasaba absolutamente nada --
+     ni un error, ni un intento. Reportado desde produccion. */
   function alEnviar(evento) {
-    evento.preventDefault();
+    evento?.preventDefault();
     enviar();
   }
 </script>

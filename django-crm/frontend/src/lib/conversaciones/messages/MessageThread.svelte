@@ -12,7 +12,7 @@
    * exporta `alFinal()` y el padre lo llama con `bind:this` — es la misma
    * llamada que antes era local, no una señal nueva.
    */
-  import { TriangleAlert, RotateCcw, Paperclip, Lock } from '@lucide/svelte';
+  import { TriangleAlert, RotateCcw, Paperclip, Lock, Check, CheckCheck, Clock } from '@lucide/svelte';
   import MarcarEjemplo from '$lib/components/manual/MarcarEjemplo.svelte';
   import { autorDe, burbujaClase, extension, hora, ENTREGA_TEXTO } from '../formato.js';
 
@@ -283,13 +283,36 @@
                   {reintentando === item.m.id ? 'Reintentando…' : 'Reintentar'}
                 </button>
               {:else if item.m.rol === 'assistant' && item.m.estado_entrega}
-                <!-- NULL no dibuja nada: significa "no se sabe" (otro canal, o
-                     anterior al registro), y un tilde inventado sobre un
-                     mensaje del que no sabemos nada es peor que no decir
-                     nada. -->
-                <span class="entrega entrega-{item.m.estado_entrega}">
-                  {ENTREGA_TEXTO[item.m.estado_entrega] ?? item.m.estado_entrega}
-                </span>
+                <!-- LAS PALOMITAS, como WhatsApp. NULL no dibuja nada:
+                     significa "no se sabe" (otro canal, o anterior al
+                     registro), y un tilde inventado sobre un mensaje del que
+                     no sabemos nada es peor que no decir nada.
+
+                     EL COLOR NO ES LA UNICA SEÑAL, y acá hacía falta pensarlo:
+                     entregado y leído son las MISMAS dos palomitas y sólo las
+                     separa el azul. Un 8% de la gente no distingue estos dos
+                     tonos. Por eso la palabra sigue estando --en `title` y en
+                     `aria-label`-- y «descartado», que no es un grado de
+                     entrega sino otra cosa, se sigue diciendo con texto. -->
+                {@const entrega = ENTREGA_TEXTO[item.m.estado_entrega] ?? item.m.estado_entrega}
+                {#if item.m.estado_entrega === 'descartado'}
+                  <span class="entrega">{entrega}</span>
+                {:else}
+                  <span
+                    class="palomita palomita-{item.m.estado_entrega}"
+                    title={entrega}
+                    aria-label={entrega}
+                    role="img"
+                  >
+                    {#if item.m.estado_entrega === 'pendiente'}
+                      <Clock size={13} />
+                    {:else if item.m.estado_entrega === 'enviado'}
+                      <Check size={14} />
+                    {:else}
+                      <CheckCheck size={14} />
+                    {/if}
+                  </span>
+                {/if}
               {/if}
               {#if item.m.rol === 'assistant' && casos.length > 0}
                 <MarcarEjemplo
@@ -575,9 +598,22 @@
     color: var(--bandeja-texto-3);
   }
 
-  .entrega-leido {
-    color: var(--bandeja-ok);
-    font-weight: 600;
+  /* ── las palomitas ─────────────────────────────────────────────────────
+     Un tilde = salió. Dos = le llegó al teléfono. Dos azules = lo abrió.
+     Es la convención que la mano ya conoce de WhatsApp, y en una lista de
+     veinte mensajes se recorre sin leer: la palabra «Entregado» repetida
+     veinte veces es ruido, un tilde no. */
+  .palomita {
+    display: inline-flex;
+    align-items: center;
+    color: var(--bandeja-texto-3);
+  }
+
+  /* Enviado y entregado comparten el gris: la diferencia está en la FORMA
+     --uno o dos tildes-- y no en el color, que es lo que hace que se
+     distingan sin mirar dos veces. */
+  .palomita-leido {
+    color: var(--bandeja-humano);
   }
 
   .pie-fallo {
