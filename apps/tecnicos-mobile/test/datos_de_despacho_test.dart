@@ -1,4 +1,4 @@
-import 'package:campo/core/mock/field_mock_data.dart';
+import 'package:campo/demo/field_mock_data.dart';
 import 'package:campo/features/trabajo/trabajo_vista.dart';
 import 'package:flutter_test/flutter_test.dart';
 

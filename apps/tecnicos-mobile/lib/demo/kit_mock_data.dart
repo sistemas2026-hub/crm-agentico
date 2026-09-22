@@ -1,3 +1,4 @@
+/// ESTO NO ES PRODUCTO. Son valores de ejemplo. Ver `lib/demo/LEEME.md`.
 /// CAMPO-DATA-025 · El material que el técnico tiene a cargo.
 ///
 /// El diseño de Stitch muestra la custodia completa: consumibles, bobinas

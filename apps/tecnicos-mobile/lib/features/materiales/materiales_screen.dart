@@ -3,8 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../core/mock/field_mock_data.dart';
-import '../../core/mock/kit_mock_data.dart';
+import '../../demo/field_mock_data.dart';
+import '../../demo/kit_mock_data.dart';
 import '../../core/storage/local_database.dart';
 import 'kit_de_jornada.dart';
 import 'material_en_custodia.dart';
@@ -154,17 +154,22 @@ class _MaterialesScreenState extends State<MaterialesScreen> {
             style: AppTypography.cuerpoChico,
           ),
           const SizedBox(height: AppSpacing.md),
-          _recepcionDelKit(),
+          _recepcionDelKit(todos),
           const SizedBox(height: AppSpacing.md),
           _barraDeAcciones(),
           const SizedBox(height: AppSpacing.md),
-          _filtros(),
+          _filtros(todos),
           const SizedBox(height: AppSpacing.md),
           Row(
             children: <Widget>[
               Text('Materiales en Custodia', style: AppTypography.tituloChico),
               const Spacer(),
-              Text(KitMockData.jornada, style: AppTypography.etiquetaChica),
+              // Cuántos renglones hay, que es lo que sí se sabe. La fecha de
+              // la jornada no viaja en el kit.
+              Text(
+                todos.length == 1 ? '1 material' : '${todos.length} materiales',
+                style: AppTypography.etiquetaChica,
+              ),
             ],
           ),
           const SizedBox(height: AppSpacing.sm),
@@ -181,7 +186,30 @@ class _MaterialesScreenState extends State<MaterialesScreen> {
 
   // --- Recepción del kit ---------------------------------------------------
 
-  Widget _recepcionDelKit() {
+  /// Con qué acta llegó este kit y cómo va.
+  ///
+  /// LO QUE SE FUE DE ACÁ
+  /// --------------------
+  /// El depósito de origen, quién despachó, la hora del despacho y la del
+  /// acuse. Nada de eso viaja en el kit: eran constantes de ejemplo, y con un
+  /// kit real quedaban alrededor de la lista verdadera, indistinguibles. El
+  /// acta inventada era la peor: **tapaba la real**, así que el técnico veía
+  /// un número de acta que no era el suyo.
+  ///
+  /// Las cuatro cifras se suman sobre los renglones que esta misma pantalla
+  /// está mostrando. No es una segunda cuenta del saldo —ese ya lo hizo
+  /// `KitDeJornada` mezclando lo del servidor con la cola—: es el total de lo
+  /// que se ve abajo, y por eso no puede contradecirlo.
+  Widget _recepcionDelKit(List<MaterialEnCustodia> materiales) {
+    var recibidos = 0;
+    var usados = 0;
+    for (final MaterialEnCustodia m in materiales) {
+      recibidos += m.recibidos;
+      usados += m.usados;
+    }
+    final int novedades = _kit?.conNovedad.length ?? 0;
+    final String acta = _kit?.acta ?? '';
+
     return Container(
       padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
@@ -199,83 +227,31 @@ class _MaterialesScreenState extends State<MaterialesScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
-                    Wrap(
-                      spacing: AppSpacing.sm,
-                      runSpacing: AppSpacing.xs,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: <Widget>[
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          decoration: const BoxDecoration(
-                            color: AppColors.primaryFixed,
-                            borderRadius: AppRadius.brChico,
-                          ),
-                          child: Text(
-                            'TURNO ACTIVO',
-                            style: AppTypography.etiquetaChica.copyWith(
-                              color: AppColors.primary,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: <Widget>[
-                            const Icon(Icons.check_circle,
-                                size: 14, color: AppColors.exito),
-                            const SizedBox(width: 4),
-                            Text(
-                              KitMockData.deposito,
-                              style: AppTypography.etiquetaChica,
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 2),
                     Text(
                       'Mi Kit Diario',
                       style: AppTypography.tituloMedio.copyWith(
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-                    Text(
-                      widget.tecnico == null
-                          ? 'Hoy ${FieldMockData.kitConfirmadoHora} · Confirmado'
-                          : 'Hoy ${FieldMockData.kitConfirmadoHora} · '
-                              'Confirmado por ${widget.tecnico}',
-                      style: AppTypography.cuerpoChico,
-                    ),
-                    const SizedBox(height: 2),
-                    // CAMPO-DATA-051 · Con qué acta se entregó y quién la firmó.
-                    Row(
-                      children: <Widget>[
-                        Text(
-                          KitMockData.acta,
-                          style: AppTypography.datoChico.copyWith(
-                            color: AppColors.onSurfaceVariant,
-                          ),
+                    if (widget.tecnico != null)
+                      Text(
+                        'A cargo de ${widget.tecnico}',
+                        style: AppTypography.cuerpoChico,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    // El acta sólo si el servidor la mandó: sin ella no se
+                    // escribe un número, porque es el que alguien va a citar
+                    // cuando falte material.
+                    if (acta.isNotEmpty) ...<Widget>[
+                      const SizedBox(height: 2),
+                      Text(
+                        acta,
+                        style: AppTypography.datoChico.copyWith(
+                          color: AppColors.onSurfaceVariant,
                         ),
-                        const SizedBox(width: 6),
-                        const Icon(Icons.draw, size: 12, color: AppColors.exito),
-                        const SizedBox(width: 2),
-                        Text(
-                          'Firmado',
-                          style: AppTypography.etiquetaChica.copyWith(
-                            color: AppColors.exitoTexto,
-                          ),
-                        ),
-                      ],
-                    ),
-                    Text(
-                      'Despachado por: ${KitMockData.despachadoPor}',
-                      style: AppTypography.etiquetaChica,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -291,35 +267,33 @@ class _MaterialesScreenState extends State<MaterialesScreen> {
             ],
           ),
           const SizedBox(height: AppSpacing.md),
-          _trazabilidad(),
-          const SizedBox(height: AppSpacing.md),
           Row(
             children: <Widget>[
-              const Expanded(
-                child: _Cifra(valor: '${FieldMockData.kitRecibidos}', etiqueta: 'Recibidos'),
+              Expanded(
+                child: _Cifra(valor: '$recibidos', etiqueta: 'Recibidos'),
               ),
               const SizedBox(width: AppSpacing.sm),
-              const Expanded(
+              Expanded(
                 child: _Cifra(
-                  valor: '${FieldMockData.kitConsumidos}',
+                  valor: '$usados',
                   etiqueta: 'Consumo',
                   color: AppColors.secondary,
                 ),
               ),
               const SizedBox(width: AppSpacing.sm),
-              const Expanded(
+              Expanded(
                 child: _Cifra(
-                  valor: '${FieldMockData.kitDisponibles}',
+                  valor: '${recibidos - usados}',
                   etiqueta: 'Disponibles',
                   destacada: true,
                 ),
               ),
               const SizedBox(width: AppSpacing.sm),
-              const Expanded(
+              Expanded(
                 child: _Cifra(
-                  valor: '${KitMockData.incidencias}',
-                  etiqueta: 'Incidencias',
-                  color: AppColors.exito,
+                  valor: '$novedades',
+                  etiqueta: 'Novedades',
+                  color: novedades == 0 ? AppColors.exito : AppColors.error,
                 ),
               ),
             ],
@@ -329,91 +303,26 @@ class _MaterialesScreenState extends State<MaterialesScreen> {
     );
   }
 
-  Widget _trazabilidad() {
-    const iconos = <IconData>[
-      Icons.warehouse,
-      Icons.engineering,
-      Icons.task_alt,
-      Icons.keyboard_return,
-    ];
-    final pasos = <(IconData, String)>[
-      for (int i = 0; i < KitMockData.custodia.length; i++)
-        (iconos[i], KitMockData.custodia[i].$1),
-    ];
-
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppSpacing.sm,
-        vertical: 6,
-      ),
-      decoration: const BoxDecoration(
-        color: AppColors.surfaceContainerLow,
-        borderRadius: AppRadius.brCampo,
-      ),
-      child: Row(
-        children: <Widget>[
-          for (final (IconData icono, String texto) in pasos) ...<Widget>[
-            if (texto != pasos.first.$2)
-              const Icon(Icons.arrow_forward, size: 12, color: AppColors.outline),
-            Flexible(
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  Icon(icono, size: 13, color: _colorDelPaso(texto)),
-                  const SizedBox(width: 3),
-                  Flexible(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Text(
-                          texto,
-                          style: AppTypography.etiquetaChica.copyWith(
-                            color: _colorDelPaso(texto),
-                            fontWeight: _recorrido(texto) ? FontWeight.w700 : null,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        Text(
-                          _detalleDelPaso(texto),
-                          style: AppTypography.etiquetaChica.copyWith(
-                            fontSize: 9,
-                            color: AppColors.outline,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
+  /// Cuánto queda por devolver, contado sobre el kit que se está mostrando.
+  ///
+  /// Antes decía un número fijo. Alguien con tres conectores encima leía que
+  /// tenía dieciséis listos para conciliar, y ese es justo el momento en que
+  /// la cuenta importa.
+  String _fraseDeCierre() {
+    final List<MaterialEnCustodia> materiales =
+        _kit?.materiales ?? const <MaterialEnCustodia>[];
+    var disponibles = 0;
+    for (final MaterialEnCustodia m in materiales) {
+      disponibles += m.disponibles;
+    }
+    if (disponibles == 0) {
+      return 'No te queda material por devolver a la bodega.';
+    }
+    return disponibles == 1
+        ? 'Te queda 1 material disponible para conciliar y devolver a bodega.'
+        : 'Te quedan $disponibles materiales disponibles para conciliar y '
+            'devolver a bodega.';
   }
-
-  /// Hasta dónde llegó el material: salió de bodega y está con el técnico. Lo
-  /// que sigue —las OTs y el cierre— todavía no pasó.
-  bool _recorrido(String paso) => paso == 'Bodega' || paso == 'Técnico (Tú)';
-
-  /// Qué se sabe de cada paso: la hora del despacho, en qué estado está.
-  String _detalleDelPaso(String paso) => KitMockData.custodia
-      .firstWhere(
-        ((String, String) c) => c.$1 == paso,
-        orElse: () => (paso, ''),
-      )
-      .$2;
-
-  Color _colorDelPaso(String paso) => switch (paso) {
-        'Bodega' => AppColors.primary,
-        'Técnico (Tú)' => AppColors.secondary,
-        _ => AppColors.onSurfaceVariant,
-      };
-
-  // --- Acciones y filtros --------------------------------------------------
 
   Widget _barraDeAcciones() {
     return Row(
@@ -448,10 +357,11 @@ class _MaterialesScreenState extends State<MaterialesScreen> {
   /// El diseño separa en dos lo que el técnico tiene a cargo: lo que hay que
   /// rastrear uno por uno (serializados) y lo que se gasta. Las bobinas y las
   /// terminales entran en lo segundo.
-  Widget _filtros() {
-    int cuantos(_Categoria categoria) => KitMockData.items
-        .where((MaterialEnCustodia m) => categoria.incluye(m))
-        .length;
+  Widget _filtros(List<MaterialEnCustodia> todos) {
+    // Se cuenta lo que hay, no el catálogo de ejemplo: con un kit real de un
+    // renglón, los filtros anunciaban "Todos (5)".
+    int cuantos(_Categoria categoria) =>
+        todos.where((MaterialEnCustodia m) => categoria.incluye(m)).length;
 
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
@@ -537,8 +447,7 @@ class _MaterialesScreenState extends State<MaterialesScreen> {
                       ),
                     ),
                     Text(
-                      'Tenés ${FieldMockData.kitDisponibles} materiales disponibles '
-                      'listos para conciliar y retornar a la bodega central.',
+                      _fraseDeCierre(),
                       style: AppTypography.cuerpoChico.copyWith(
                         color: AppColors.primaryFixed,
                       ),
@@ -548,42 +457,7 @@ class _MaterialesScreenState extends State<MaterialesScreen> {
               ),
             ],
           ),
-          const SizedBox(height: AppSpacing.md),
-          Row(
-            children: <Widget>[
-              for (final String texto in KitMockData.conciliacion) ...<Widget>[
-                Expanded(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: AppSpacing.sm,
-                      vertical: 6,
-                    ),
-                    margin: const EdgeInsets.only(right: AppSpacing.sm),
-                    decoration: BoxDecoration(
-                      color: AppColors.onSurface.withValues(alpha: 0.22),
-                      borderRadius: AppRadius.brCampo,
-                    ),
-                    child: Row(
-                      children: <Widget>[
-                        const Icon(Icons.check_box, size: 13, color: AppColors.onPrimary),
-                        const SizedBox(width: 4),
-                        Flexible(
-                          child: Text(
-                            texto,
-                            style: AppTypography.etiquetaChica.copyWith(
-                              color: AppColors.onPrimary,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ],
-          ),
+
           const SizedBox(height: AppSpacing.md),
           Container(
             height: 54,
@@ -1125,13 +999,6 @@ class _TarjetaMaterial extends StatelessWidget {
                     ),
                   ),
                 ],
-              ),
-              // CAMPO-DATA-052 · La MAC, que es lo otro que identifica al equipo.
-              Text(
-                'MAC: ${KitMockData.macEquipo}',
-                style: AppTypography.datoChico.copyWith(
-                  color: AppColors.surfaceDim,
-                ),
               ),
               if (material.ultimoMovimiento != null) ...<Widget>[
                 const SizedBox(height: AppSpacing.sm),

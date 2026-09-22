@@ -2,7 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-import '../../../core/mock/field_mock_data.dart';
+import '../../../demo/field_mock_data.dart';
 import '../../../core/theme/app_theme.dart';
 
 /// El formulario de campo: el aspecto del diseño, el contenido del backend.

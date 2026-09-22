@@ -1,3 +1,5 @@
+/// ESTO NO ES PRODUCTO. Son valores de ejemplo. Ver `lib/demo/LEEME.md`.
+///
 /// Catálogo de los datos que Dexter Campo **va a tener** y todavía no tiene.
 ///
 /// El diseño de Stitch muestra información que ningún sistema entrega hoy. En

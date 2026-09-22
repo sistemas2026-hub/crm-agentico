@@ -1,4 +1,4 @@
-import 'package:campo/core/mock/kit_mock_data.dart';
+import 'package:campo/demo/kit_mock_data.dart';
 import 'package:campo/features/materiales/kit_de_jornada.dart';
 import 'package:campo/features/materiales/material_en_custodia.dart';
 import 'package:campo/core/theme/app_theme.dart';
@@ -60,10 +60,11 @@ void main() {
 
       expect(find.text('Mi Kit'), findsOneWidget);
       expect(find.text('Mi Kit Diario'), findsOneWidget);
-      // El acta con la que se entregó, y quién la firmó.
-      expect(find.text(KitMockData.acta), findsOneWidget);
-      expect(find.textContaining(KitMockData.despachadoPor), findsOneWidget);
-      expect(find.text('TURNO ACTIVO'), findsOneWidget);
+      // El acta, el depósito de origen y quién despachó ya no se dibujan: no
+      // viajan en el kit, y con un kit real quedaban indistinguibles de él.
+      expect(find.text(KitMockData.acta), findsNothing);
+      expect(find.textContaining(KitMockData.despachadoPor), findsNothing);
+      expect(find.textContaining(KitMockData.deposito), findsNothing);
       expect(find.text('Recibidos'), findsOneWidget);
       expect(find.text('Consumo'), findsOneWidget);
       expect(find.text('Disponibles'), findsOneWidget);
@@ -91,8 +92,9 @@ void main() {
       // Serializado: su número de serie, que es lo que hay que poder rastrear.
       expect(find.textContaining('48575443-A190C'), findsOneWidget);
       expect(find.text('SERIAL NUMBER (SN) · CÓDIGO BARRAS'), findsOneWidget);
-      // La MAC, que es el otro identificador del equipo.
-      expect(find.textContaining(KitMockData.macEquipo), findsOneWidget);
+      // La MAC no viene con el material: una MAC de ejemplo junto a una serie
+      // real es lo que alguien copia para dar de alta un equipo.
+      expect(find.textContaining(KitMockData.macEquipo), findsNothing);
     });
 
     testWidgets('4. El filtro por categoría muestra solo esa clase',
@@ -146,10 +148,12 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('Confirmado por Ana Restrepo'), findsOneWidget);
+      // Sin hora de acuse inventada al lado: el kit no dice cuándo se confirmó.
+      expect(find.textContaining('A cargo de Ana Restrepo'), findsOneWidget);
+      expect(find.textContaining('Confirmado'), findsNothing);
     });
 
-    testWidgets('8. Sin sesión leída no se firma la recepción con nadie',
+    testWidgets('8. Sin sesión leída no se le atribuye el kit a nadie',
         (WidgetTester tester) async {
       _pantallaAlta(tester);
       await tester.pumpWidget(
@@ -160,8 +164,9 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('Confirmado por'), findsNothing);
-      expect(find.textContaining('· Confirmado'), findsOneWidget);
+      expect(find.textContaining('A cargo de'), findsNothing);
+      expect(find.text('Mi Kit Diario'), findsOneWidget,
+          reason: 'la pantalla se ve igual; lo que falta es la atribución');
     });
 
     test('5. Las cuentas del kit cierran: recibido menos usado es disponible', () {

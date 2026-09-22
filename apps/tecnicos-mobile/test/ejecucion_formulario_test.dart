@@ -1,4 +1,4 @@
-import 'package:campo/core/mock/field_mock_data.dart';
+import 'package:campo/demo/field_mock_data.dart';
 import 'package:campo/core/theme/app_theme.dart';
 import 'package:campo/features/ejecucion/widgets/bloque_academia.dart';
 import 'package:campo/features/ejecucion/widgets/formulario_de_campo.dart';

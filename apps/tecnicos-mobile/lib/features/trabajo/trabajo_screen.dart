@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/estado/ordenes_jornada.dart';
-import '../../core/mock/field_mock_data.dart';
+import '../../demo/field_mock_data.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/dexter_empty_state.dart';
 import 'estado_trabajo.dart';

@@ -13,7 +13,7 @@ lleva al fixture y a cada lugar donde se usa.
 
 - **REAL** — llega de la API de campo, de la base local o de la sesión. Se usa tal cual.
 - **MOCK** — el diseño lo muestra, ningún sistema lo entrega. Se ve **solo con el
-  modo demostración encendido**, vive en `lib/core/mock/field_mock_data.dart` y
+  modo demostración encendido**, vive en `lib/demo/field_mock_data.dart` y
   nunca decide nada: no habilita, no filtra, no ordena, no descuenta ni alerta.
 - **NO SE MUESTRA** — está en el diseño y ni siquiera como ejemplo se dibuja,
   porque se leería como una afirmación operativa (una alerta, un contador de
@@ -28,16 +28,49 @@ flutter run --dart-define=DEXTER_DEMO=true    # producto completo, para mostrarl
 flutter run                                    # producción: solo datos reales
 ```
 
+## Inicio no tiene modo demostración (22/09/2026)
+
+La pantalla de inicio **no muestra un solo valor de ejemplo**, ni siquiera con
+la bandera encendida. Se sacaron de ahí vehículo, academia, potencia RX previa,
+ETA, identificador de abonado, terminal, turno, cuadrilla y el selector de modo
+de jornada.
+
+El motivo no es purismo: una pantalla de decisión con tarjetas que sólo existen
+en la demostración enseña que no hay que mirarla, y ese aprendizaje se lleva
+puesto después al aviso que sí importaba.
+
+Lo que falta vuelve cuando tenga fuente, con la fuente y la hora del dato al
+lado. Los identificadores siguen vivos en este documento y en
+`lib/demo/field_mock_data.dart`, que es el registro de la deuda; lo que ya no
+existe es el dibujo.
+
+**Deuda todavía abierta en Inicio:** vehículo (CAMPO-DATA-008, -042), academia
+(CAMPO-DATA-018, -043), potencia RX previa (CAMPO-DATA-001), turno y cuadrilla
+(CAMPO-DATA-006, -007), estado de jornada marcable sin señal (CAMPO-DATA-038),
+hora del último envío bueno (CAMPO-DATA-036).
+
+## Materiales: la cabecera dejó de ser de ejemplo (22/09/2026)
+
+Con un kit **real** cargado, la cabecera seguía mostrando el depósito de
+origen, quién despachó, la hora del despacho, la hora del acuse, una MAC y las
+cifras 24/8/16. Nada de eso dependía de la bandera: se dibujaba siempre, y el
+acta de ejemplo **tapaba la real**.
+
+Hoy la cabecera muestra el acta que mandó el servidor (o ninguna), a cargo de
+quién está el kit según la sesión, y cuatro cifras sumadas sobre los mismos
+renglones que la pantalla lista debajo. Los filtros cuentan el kit real: antes
+anunciaban "Todos (5)" con un kit de un solo material.
+
+**Deuda todavía abierta en Materiales:** depósito de origen, quién despachó y
+cuándo (CAMPO-DATA-051), MAC del equipo (CAMPO-DATA-052), la cadena de custodia
+paso a paso y el estado de la conciliación previa al cierre.
+
 ## Qué cambia con el modo demostración
 
 | | Demostración apagado (producción) | Demostración encendido |
 |---|---|---|
 | Tarjeta de un trabajo | Número, cliente, dirección, tipo, estado y hora de compromiso | Se suman SLA, zona, prioridad y distancia |
-| Inicio, encabezado | La fecha de hoy | Turno y cuadrilla |
-| Inicio, modo de jornada | No aparece | Selector de estado (sin guardar) y turno |
-| Inicio, recursos del turno | Solo la cola de sincronización, que es real | Se suman kit, vehículo y academia |
-| Inicio, señal del cliente | No aparece | Potencia RX, CTO, puerto PON y serial de la ONT |
-| Inicio, Mi kit | No aparece | Recibidos, consumidos y disponibles |
+| Inicio | **Igual en las dos.** Ver abajo. | **Igual en las dos.** |
 | Campana del encabezado | Sin número | Con número |
 | Trabajo, resumen | Completadas y en curso | Se suman Alertas RX y SLA del día |
 | Trabajo, tarjetas | Cliente, dirección, tipo, estado, ventana real | Se suman distancia, telemetría, plan, requisito de seguridad y acta |

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../mock/field_mock_data.dart';
+import '../../demo/field_mock_data.dart';
 import '../theme/app_theme.dart';
 import 'dexter_sync_badge.dart';
 

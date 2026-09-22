@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import '../../core/mock/field_mock_data.dart';
+import '../../demo/field_mock_data.dart';
 import 'estado_trabajo.dart';
 import 'estado_validacion.dart';
 

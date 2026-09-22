@@ -4,7 +4,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/estado/ordenes_jornada.dart';
-import '../../core/mock/field_mock_data.dart';
+import '../../demo/field_mock_data.dart';
 import '../../core/storage/ciclo_de_vida_local.dart';
 import '../../core/storage/local_database.dart';
 import '../../core/storage/secure_storage_service.dart';

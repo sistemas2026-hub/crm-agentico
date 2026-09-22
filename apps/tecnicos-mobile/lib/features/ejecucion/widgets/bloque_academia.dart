@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../../core/mock/field_mock_data.dart';
+import '../../../demo/field_mock_data.dart';
 import '../../../core/theme/app_theme.dart';
 
 /// CAMPO-DATA-028 · Academia dentro de la orden.

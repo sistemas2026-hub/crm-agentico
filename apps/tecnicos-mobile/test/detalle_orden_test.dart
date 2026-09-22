@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:campo/core/estado/ordenes_jornada.dart';
-import 'package:campo/core/mock/field_mock_data.dart';
+import 'package:campo/demo/field_mock_data.dart';
 import 'package:campo/core/sync/sync_queue_service.dart';
 import 'package:campo/core/theme/app_theme.dart';
 import 'package:campo/features/detalle_orden/acciones_orden.dart';
