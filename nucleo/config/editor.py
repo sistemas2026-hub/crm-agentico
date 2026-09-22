@@ -135,6 +135,25 @@ SECCIONES_EDITABLES = (
     # ahi hay algo que solo la interfaz escribe.
     "llm",                # _mutar_tarifa / _mutar_saldo_proveedor
     "limites",            # _mutar_tope_gasto
+    # 'importacion_tickets' NO la escribe ningun mutador de este archivo: la
+    # escribe 'cli/activar_importacion.py' directo contra la base. Igual va
+    # aca, por el mismo motivo que 'llm' y 'limites' -- el criterio de esta
+    # lista no es "quien la edita" sino "existe solo en la base, y el YAML no
+    # tiene con que reponerla".
+    #
+    # Medido el 22/09/2026 contra produccion, ANTES de que pasara: la base
+    # tenia 6 filtros de asunto, 6 destinos de enrutamiento, el departamento,
+    # los estados de descubrimiento y reconciliacion, las ventanas y la
+    # cuenta de API; el YAML no declara la seccion, asi que una carga la
+    # habria reemplazado por el default del esquema -- 'cada_horas: 0', que
+    # es APAGADO. La importacion de tickets se habria detenido sin un solo
+    # mensaje, que es la misma forma de fallar que el seguimiento de entregas
+    # de WhatsApp (D17): nada se rompe, simplemente deja de pasar.
+    #
+    # Era la UNICA seccion de la config de produccion que no cubria ninguna
+    # de las dos listas. Comprobado enumerando las claves de la base contra
+    # SECCIONES_EDITABLES + TenantConfig.SINCRONIZADOS.
+    "importacion_tickets",
 )
 
 

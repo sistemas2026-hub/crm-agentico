@@ -6474,3 +6474,67 @@ evaluacion:
   # factura: un sistema con 92% de acierto que inventa el 3% es peligroso.
   maximo_invenciones: 0
   minimo_casos: 50
+
+# ==========================================================================
+#  IMPORTACION DE TICKETS  --  bajada de produccion el 22/09/2026
+# ==========================================================================
+# Esta seccion NO estaba en el archivo y SI en la base, que es la combinacion
+# peligrosa: la configuracion existe solo en un lado y el YAML no tiene con
+# que reponerla. Una carga la habria reemplazado por el default del esquema
+# ('cada_horas: 0', que es APAGADO) y la importacion se habria detenido sin un
+# solo mensaje -- la misma forma de fallar que el seguimiento de entregas de
+# WhatsApp (D17): nada se rompe, simplemente deja de pasar.
+#
+# La escribe 'cli/activar_importacion.py' directo contra la base, no el editor
+# de la interfaz. Por eso ademas se agrego a SECCIONES_EDITABLES
+# (nucleo/config/editor.py): sin estar en esa lista el cargador ni siquiera
+# avisaba.
+#
+# Los valores son los que estaban vivos en produccion (config v146). Si se
+# cambian desde 'activar_importacion.py', hay que volver a bajarlos aca.
+#
+# 'cuenta_api' es el NOMBRE de la cuenta en WispHub, no una credencial: la
+# clave va por 'auth_ref', como todo secreto en este archivo.
+importacion_tickets:
+  asuntos:
+  - soporte tecnico|no tiene internet
+  - soporte tecnico|problemas de tv
+  - soporte tecnico|internet intermitente/niveles altos
+  - soporte tecnico|vista reiterativa post soporte
+  - soporte tecnico|internet intermitente
+  - soporte tecnico|configuracion dns
+  cada_horas: 1
+  cuenta_api: Rapilink SAS - admin@rapilink-sas
+  departamentos:
+  - Soporte Técnico
+  destinos:
+    soporte tecnico|configuracion dns:
+      area: soporte_tecnico
+      prioridad: Normal
+    soporte tecnico|internet intermitente:
+      area: soporte_tecnico
+      prioridad: Normal
+    soporte tecnico|internet intermitente/niveles altos:
+      area: soporte_tecnico
+      prioridad: Normal
+    soporte tecnico|no tiene internet:
+      area: soporte_tecnico
+      prioridad: Normal
+    soporte tecnico|problemas de tv:
+      area: soporte_tecnico
+      prioridad: Normal
+    soporte tecnico|vista reiterativa post soporte:
+      area: soporte_tecnico
+      prioridad: Normal
+  estados_descubrimiento:
+  - Nuevo
+  - En Progreso
+  gracia_cierre_dias: 7
+  proveedor: wisphub
+  reconciliar_estados:
+  - New
+  - Assigned
+  - Pending
+  solapamiento_horas: 6
+  tipos_de_creador: []
+  ventana_dias: 30
