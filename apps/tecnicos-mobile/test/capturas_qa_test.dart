@@ -14,6 +14,7 @@ import 'package:campo/features/inicio/inicio_screen.dart';
 import 'package:campo/features/materiales/estado_de_jornada.dart';
 import 'package:campo/features/materiales/kit_de_jornada.dart';
 import 'package:campo/features/materiales/material_en_custodia.dart';
+import 'package:campo/features/materiales/devolucion_screen.dart';
 import 'package:campo/features/materiales/materiales_screen.dart';
 import 'package:campo/core/widgets/dexter_bottom_nav.dart';
 import 'package:campo/features/shell/app_shell.dart';
@@ -345,6 +346,69 @@ void main() {
     for (final Medida m in <Medida>[telefono, telefonoLargo, tablet, escritorio]) {
       testWidgets('Inicio ${m.$1}', (WidgetTester t) async {
         await capturar(t, inicio(), 'inicio', m);
+      });
+    }
+
+
+    /// Jornada: la conciliación y el cierre.
+    ///
+    /// Se inyecta el estado ya leído: lo que se compara acá es el dibujo, y
+    /// la lectura contra la base tiene sus propias pruebas.
+    for (final Medida m in <Medida>[telefono, telefonoLargo]) {
+      testWidgets('Jornada ${m.$1}', (WidgetTester t) async {
+        await capturar(
+          t,
+          DevolucionScreen(
+            estado: const EstadoDeJornada(
+              recibido: '24',
+              consumido: '14',
+              aDevolver: '10',
+              devuelto: '8',
+              diferencias: 1,
+              ordenesAsignadas: 4,
+              ordenesCompletadas: 3,
+              materiales: <MaterialDeJornada>[
+                MaterialDeJornada(
+                  codigo: 'CON-SC-APC',
+                  nombre: 'Conector SC/APC',
+                  unidad: 'unidades',
+                  esperado: '7',
+                  devuelto: '7',
+                  diferencia: 0,
+                  porDevolver: 0,
+                ),
+                MaterialDeJornada(
+                  codigo: 'DROP-1H',
+                  nombre: 'Bobina Drop Fibra 1 Hilo',
+                  unidad: 'm',
+                  esperado: '65',
+                  devuelto: '63',
+                  diferencia: -2,
+                  porDevolver: 2,
+                ),
+                MaterialDeJornada(
+                  codigo: 'ONT-HG8145',
+                  nombre: 'ONT Huawei HG8145V5',
+                  unidad: 'unidades',
+                  esperado: '1',
+                  devuelto: '0',
+                  diferencia: -1,
+                  porDevolver: 1,
+                  serie: '48575443-A190C',
+                ),
+              ],
+              transferencias: <TransferenciaPendiente>[],
+              motivos: <String>[
+                'Bobina Drop Fibra 1 Hilo: faltan 2 m sin explicar.',
+              ],
+              sinSubir: 0,
+              cerrada: false,
+              hayJornada: true,
+            ),
+          ),
+          'jornada',
+          m,
+        );
       });
     }
 

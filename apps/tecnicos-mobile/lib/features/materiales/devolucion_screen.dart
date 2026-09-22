@@ -8,6 +8,7 @@ import '../../core/storage/secure_storage_service.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_radius.dart';
 import '../../core/theme/app_typography.dart';
+import '../../core/widgets/contenido_centrado.dart';
 import 'estado_de_jornada.dart';
 import 'widgets/confirmar_cierre.dart';
 import 'widgets/motivo_de_diferencia.dart';
@@ -179,6 +180,20 @@ class _DevolucionScreenState extends State<DevolucionScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // La pantalla trae su propio Scaffold.
+    //
+    // Sin un Material arriba, cada Text se dibuja con el subrayado amarillo
+    // de Flutter y la pantalla entera se ve rota. No se habia notado porque
+    // nadie podia llegar hasta aca: el boton que debia abrirla era un
+    // Container sin accion.
+    return Scaffold(
+      backgroundColor: AppColors.surfaceDim,
+      appBar: AppBar(title: const Text('Cierre de jornada')),
+      body: ContenidoCentrado(child: _contenido(context)),
+    );
+  }
+
+  Widget _contenido(BuildContext context) {
     if (_cargando) return const ColoredBox(color: AppColors.surface);
 
     final estado = _estado ?? const EstadoDeJornada.vacio();

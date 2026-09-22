@@ -173,6 +173,45 @@ void main() {
           reason: 'la pantalla se ve igual; lo que falta es la atribución');
     });
 
+
+    testWidgets('9. El cierre de jornada se puede alcanzar desde el kit',
+        (WidgetTester tester) async {
+      // El boton "Preparar Devolucion al Deposito" era un Container sin
+      // accion, y era el unico camino a una pantalla que existia, estaba
+      // probada y nadie podia abrir. Un boton que no hace nada es peor que
+      // no tenerlo: la persona cree que ya dio el paso.
+      _pantallaAlta(tester);
+      await tester.pumpWidget(
+        _enApp(const MaterialesScreen(
+          tecnico: 'Carlos Gomez',
+          kit: KitDeJornada(
+            materiales: <MaterialEnCustodia>[
+              MaterialEnCustodia(
+                categoria: 'Consumibles',
+                nombre: 'Conector SC/APC',
+                detalle: 'Reconectorizacion',
+                clase: ClaseMaterial.consumible,
+                recibidos: 10,
+                usados: 3,
+                unidad: 'unidades',
+              ),
+            ],
+            acta: 'Acta #K-2026-311',
+            sinSubir: 0,
+            conNovedad: <MovimientoConNovedad>[],
+          ),
+        )),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Preparar Devolución al Depósito'));
+      await tester.pumpAndSettle();
+
+      // Llega a la pantalla de cierre. Sin jornada cargada dice eso, que es
+      // la verdad: lo que se prueba aca es que el camino existe.
+      expect(find.text('Cierre de jornada'), findsOneWidget);
+    });
+
     test('5. Las cuentas del kit cierran: recibido menos usado es disponible', () {
       for (final MaterialEnCustodia m in KitMockData.items) {
         expect(

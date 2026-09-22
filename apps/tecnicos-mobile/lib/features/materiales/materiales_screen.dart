@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../../demo/field_mock_data.dart';
 import '../../demo/kit_mock_data.dart';
 import '../../core/storage/local_database.dart';
+import 'devolucion_screen.dart';
 import 'kit_de_jornada.dart';
 import 'material_en_custodia.dart';
 import '../../core/theme/app_theme.dart';
@@ -462,7 +463,22 @@ class _MaterialesScreenState extends State<MaterialesScreen> {
           ),
 
           const SizedBox(height: AppSpacing.md),
-          Container(
+          // Este botón era un Container sin acción: se veía como un botón,
+          // se tocaba y no pasaba nada. Y era el ÚNICO camino hacia el cierre
+          // de jornada, que estaba construido y probado desde hacía días sin
+          // que nadie pudiera llegar. Un botón que no hace nada es peor que
+          // no tenerlo: la persona cree que ya dio el paso.
+          InkWell(
+            borderRadius: AppRadius.brTarjeta,
+            onTap: () async {
+              await Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const DevolucionScreen(),
+                ),
+              );
+              if (mounted) await _cargar();
+            },
+            child: Container(
             height: 54,
             alignment: Alignment.center,
             decoration: const BoxDecoration(
@@ -484,6 +500,7 @@ class _MaterialesScreenState extends State<MaterialesScreen> {
                 const SizedBox(width: AppSpacing.sm),
                 const Icon(Icons.arrow_forward, size: 18, color: AppColors.primary),
               ],
+            ),
             ),
           ),
           const SizedBox(height: AppSpacing.sm),

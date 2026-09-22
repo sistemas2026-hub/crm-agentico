@@ -427,7 +427,7 @@ void main() {
       await tester.pumpWidget(banco.app());
       await tester.pumpAndSettle();
 
-      expect(find.text('VERIFICANDO'), findsOneWidget);
+      expect(find.text('BUSCANDO'), findsOneWidget);
       expect(find.text('CON RED'), findsNothing);
       expect(banco.escuchasConexion, 0);
       await banco.cerrar();

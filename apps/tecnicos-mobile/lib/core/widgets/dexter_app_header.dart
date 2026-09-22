@@ -82,7 +82,12 @@ class DexterAppHeader extends StatelessWidget {
                     const SizedBox(height: 2),
                     Row(
                       children: <Widget>[
+                        // La empresa cede espacio despues que la seccion: es
+                        // la identidad del tenant, y recortada a "RAPIL..." no
+                        // dice de quien es la aplicacion. En que seccion esta
+                        // parado, en cambio, ya lo marca la barra de abajo.
                         Flexible(
+                          flex: 3,
                           child: Container(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 6,
@@ -106,6 +111,7 @@ class DexterAppHeader extends StatelessWidget {
                         if (seccion != null) ...<Widget>[
                           const SizedBox(width: 6),
                           Flexible(
+                            flex: 2,
                             child: Text(
                               seccion!,
                               style: AppTypography.cuerpoChico.copyWith(
@@ -162,7 +168,7 @@ class _ChipConexion extends StatelessWidget {
           AppColors.errorContainer
         ),
       EstadoConexion.desconocido => (
-          'VERIFICANDO',
+          'BUSCANDO',
           AppColors.onSurfaceVariant,
           AppColors.surfaceContainerHigh
         ),

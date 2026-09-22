@@ -169,18 +169,21 @@ class _InicioScreenState extends State<InicioScreen> {
               ),
             ] else ...<Widget>[
               _saludo(sync),
+              // Un solo ritmo entre bloques. Antes los tres primeros iban a
+              // `md` y los de abajo a `lg`: la mitad superior se veia
+              // apretada contra la inferior sin que nada lo justificara.
               if (jornada != null && jornada.hayJornada) ...<Widget>[
-                const SizedBox(height: AppSpacing.md),
+                const SizedBox(height: AppSpacing.lg),
                 _estadoDeJornada(jornada),
               ],
-              const SizedBox(height: AppSpacing.md),
+              const SizedBox(height: AppSpacing.lg),
               _avanceDiario(resumen),
               // Los avisos van arriba, pero **solo cuando existen**: cuando no
               // hay ninguno el bloque no se dibuja, así el día no empieza en
               // rojo por costumbre. Cuando aparece uno, aparece donde se ve,
               // no al final de un scroll largo.
               if (resumen.hayProblemas) ...<Widget>[
-                const SizedBox(height: AppSpacing.md),
+                const SizedBox(height: AppSpacing.lg),
                 _alertas(resumen.avisos),
               ],
               const SizedBox(height: AppSpacing.lg),
@@ -202,6 +205,13 @@ class _InicioScreenState extends State<InicioScreen> {
 
   // --- 1. Saludo -----------------------------------------------------------
 
+  /// El saludo.
+  ///
+  /// Sin tarjeta ni avatar, y en tipografía grande, como en el diseño. La
+  /// versión anterior lo metía en una caja azul con un círculo de iniciales:
+  /// gastaba ochenta píxeles de alto para decir el nombre de quien ya sabe
+  /// cómo se llama, y empujaba hacia abajo lo único que importa a esa hora,
+  /// que es el trabajo que sigue. El avatar ya está arriba, en el encabezado.
   Widget _saludo(SyncSummary? sync) {
     final hora = (widget.ahora ?? DateTime.now()).hour;
     final momento = hora < 12
@@ -210,50 +220,23 @@ class _InicioScreenState extends State<InicioScreen> {
         ? 'Buenas tardes'
         : 'Buenas noches';
 
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.md),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceContainer,
-        borderRadius: AppRadius.brTarjeta,
-        boxShadow: AppTheme.sombraNivel1,
-      ),
-      child: Row(
-        children: <Widget>[
-          Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              color: AppColors.surfaceContainerHigh,
-              borderRadius: BorderRadius.circular(AppRadius.circulo),
-            ),
-            alignment: Alignment.center,
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: <Widget>[
+        Expanded(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
             child: Text(
-              _iniciales(widget.nombreTecnico),
-              style: AppTypography.etiquetaGrande.copyWith(
-                color: AppColors.primary,
-              ),
+              '$momento, ${_primerNombre(widget.nombreTecnico)}',
+              style: AppTypography.tituloGrande,
+              maxLines: 1,
             ),
           ),
-          const SizedBox(width: AppSpacing.md),
-          // El saludo se achica antes de cortarse. A 390 px "Buenos días,
-          // Carlos" junto a la chapa de la cola no entra, y cortarlo deja
-          // "Buenos días, C…": el nombre de la persona es justo lo que no
-          // puede desaparecer.
-          Expanded(
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: Alignment.centerLeft,
-              child: Text(
-                '$momento, ${_primerNombre(widget.nombreTecnico)}',
-                style: AppTypography.tituloMedio,
-                maxLines: 1,
-              ),
-            ),
-          ),
-          const SizedBox(width: AppSpacing.sm),
-          _estadoDeEnvio(sync),
-        ],
-      ),
+        ),
+        const SizedBox(width: AppSpacing.sm),
+        _estadoDeEnvio(sync),
+      ],
     );
   }
 
@@ -728,17 +711,7 @@ class _InicioScreenState extends State<InicioScreen> {
 
   static String _primerNombre(String nombre) => nombre.trim().split(' ').first;
 
-  static String _iniciales(String nombre) {
-    final partes = nombre
-        .trim()
-        .split(RegExp(r'\s+'))
-        .where((String p) => p.isNotEmpty)
-        .toList();
-    if (partes.isEmpty) return '';
-    if (partes.length == 1) return partes.first.substring(0, 1).toUpperCase();
-    return (partes.first.substring(0, 1) + partes[1].substring(0, 1))
-        .toUpperCase();
-  }
+
 }
 
 /// Un aviso, pintado según su gravedad.
@@ -954,14 +927,30 @@ class _TarjetaDeTrabajo extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: AppSpacing.xs),
+                // Qué hay que hacer, si la orden lo dice; si no, para quién.
+                //
+                // `resumen` es un campo real del backend que hasta ahora no
+                // se dibujaba en ninguna pantalla. Es la línea que el diseño
+                // pone como título, y tiene sentido: a las siete de la mañana
+                // lo primero que decide el día es el problema, no el apellido
+                // de quien lo tiene.
                 Text(
-                  trabajo.clienteNombre,
-                  maxLines: 1,
+                  trabajo.resumen.isEmpty
+                      ? trabajo.clienteNombre
+                      : trabajo.resumen,
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: AppTypography.tituloChico.copyWith(
                     fontWeight: FontWeight.w700,
                   ),
                 ),
+                if (trabajo.resumen.isNotEmpty)
+                  Text(
+                    trabajo.clienteNombre,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTypography.cuerpo,
+                  ),
                 const SizedBox(height: AppSpacing.xs),
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
