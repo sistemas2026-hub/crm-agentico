@@ -3,8 +3,14 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
+import uuid
+from datetime import datetime
+
 from django.conf import settings
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.http import Http404
 from django.utils import timezone
 from rest_framework import status
@@ -84,6 +90,49 @@ class BootstrapView(APIView):
         })
 
 
+#: Cuantas ordenes se entregan por pagina si el cliente no pide otra cosa.
+LIMITE_POR_DEFECTO = 100
+
+#: Techo duro. Una cuadrilla con mil ordenes no puede pedirlas todas de una:
+#: la respuesta no entra en memoria del telefono y el tiempo de espera hace
+#: que la sincronizacion se reintente encima de si misma.
+LIMITE_MAXIMO = 200
+
+
+def _limite_pedido(request) -> int:
+    """Cuantas filas pidio el cliente, acotado."""
+    crudo = request.query_params.get("limite")
+    if not crudo:
+        return LIMITE_POR_DEFECTO
+    try:
+        pedido = int(crudo)
+    except (TypeError, ValueError):
+        return LIMITE_POR_DEFECTO
+    return max(1, min(pedido, LIMITE_MAXIMO))
+
+
+def _escribir_cursor(orden) -> str:
+    """
+    Donde quedo la pagina: fecha de creacion e identificador.
+
+    Van los dos porque el orden es por fecha y la fecha se repite. Con solo la
+    fecha, dos ordenes del mismo milisegundo se pisan entre paginas.
+    """
+    crudo = f"{orden.created_at.isoformat()}|{orden.id}"
+    return base64.urlsafe_b64encode(crudo.encode("utf-8")).decode("ascii")
+
+
+def _leer_cursor(cursor: str):
+    """El corte que representa el cursor, o None si viene roto."""
+    try:
+        crudo = base64.urlsafe_b64decode(cursor.encode("ascii")).decode("utf-8")
+        fecha_texto, ident = crudo.split("|", 1)
+        fecha = datetime.fromisoformat(fecha_texto)
+        return fecha, uuid.UUID(ident)
+    except (ValueError, TypeError, binascii.Error, UnicodeDecodeError):
+        return None
+
+
 class TrabajosListView(APIView):
     """Listado de órdenes de trabajo disponibles para el técnico o supervisor."""
 
@@ -110,8 +159,38 @@ class TrabajosListView(APIView):
             estados = [e.strip() for e in estado.split(",") if e.strip()]
             qs = qs.filter(estado_operativo__in=estados)
 
-        serializer = OrdenTrabajoListSerializer(qs.distinct()[:100], many=True)
-        return Response({"results": serializer.data, "next_cursor": None})
+        # Orden estable: sin un desempate, dos ordenes creadas en el mismo
+        # milisegundo pueden intercambiarse entre paginas y una se pierde.
+        qs = qs.distinct().order_by("-created_at", "-id")
+
+        limite = _limite_pedido(request)
+        cursor = request.query_params.get("cursor")
+        if cursor:
+            corte = _leer_cursor(cursor)
+            if corte is None:
+                return Response(
+                    {"detail": "El cursor no es valido."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            creada_en, ident = corte
+            qs = qs.filter(
+                Q(created_at__lt=creada_en)
+                | Q(created_at=creada_en, id__lt=ident)
+            )
+
+        # Se pide una fila de mas: es como se sabe si hay pagina siguiente sin
+        # contar la tabla entera.
+        filas = list(qs[: limite + 1])
+        hay_mas = len(filas) > limite
+        filas = filas[:limite]
+
+        serializer = OrdenTrabajoListSerializer(filas, many=True)
+        return Response(
+            {
+                "results": serializer.data,
+                "next_cursor": _escribir_cursor(filas[-1]) if hay_mas and filas else None,
+            }
+        )
 
 
 class TrabajoDetailView(APIView):

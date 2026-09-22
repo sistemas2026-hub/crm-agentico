@@ -188,11 +188,31 @@ class SyncQueueService {
     }
   }
 
+  /// Cuántas páginas del listado se recorren como máximo en una corrida.
+  ///
+  /// Es un tope de seguridad, no un límite de negocio: si el servidor
+  /// devolviera cursores en círculo, la sincronización no puede quedarse
+  /// girando para siempre con la pantalla bloqueada.
+  static const int _maximoDePaginas = 50;
+
   Future<void> _descargarOrdenesAsignadas(String orgId, String profileId) async {
     try {
-      final response = await _apiClient.get(ApiEndpoints.trabajos);
-      if (response.statusCode == 200 && response.data != null) {
-        final List results = response.data['results'] ?? response.data;
+      String? cursor;
+      var paginas = 0;
+
+      // El listado pagina con cursor. Quedarse en la primera página dejaba
+      // fuera del teléfono todo lo que pasara de cien órdenes: para el técnico
+      // esas órdenes no existían.
+      do {
+        final response = await _apiClient.get(
+          ApiEndpoints.trabajos,
+          queryParameters: cursor == null ? null : <String, dynamic>{'cursor': cursor},
+        );
+        if (response.statusCode != 200 || response.data == null) return;
+
+        final datos = response.data;
+        final List results = datos is Map ? (datos['results'] ?? const []) : datos;
+
         for (final item in results) {
           final id = item['id'] as String;
           Map<String, dynamic> fullData = item as Map<String, dynamic>;
@@ -216,7 +236,10 @@ class SyncQueueService {
             fuente: fuente,
           );
         }
-      }
+
+        cursor = datos is Map ? datos['next_cursor'] as String? : null;
+        paginas++;
+      } while (cursor != null && paginas < _maximoDePaginas);
     } catch (_) {
       // Offline o error de red: se ignora silenciosamente para mantener datos locales
     }

@@ -112,6 +112,20 @@ class WorkTypeVersion(BaseModel):
 
     def clean(self):
         super().clean()
+
+        # Una plantilla se vuelve inmutable al publicarse, y a partir de ahi
+        # viaja a los telefonos. Si su vocabulario no es el que la aplicacion
+        # sabe ejecutar, el error no aparece aca: aparece en la calle, cuando
+        # el tecnico abre la orden y el formulario no se puede responder.
+        #
+        # `validar_esquema_plantilla` existia desde el principio y no la
+        # llamaba nadie (hallazgo del inventario del 22/09/2026). Se llama al
+        # publicar, no en borrador: un borrador puede estar a medias.
+        if self.estado == self.PUBLICADA and self.schema_version == 1:
+            from campo.services.validador import validar_esquema_plantilla
+
+            validar_esquema_plantilla(self.esquema or {})
+
         if self.pk:
             original = WorkTypeVersion.objects.filter(pk=self.pk).first()
             if original and original.estado == self.PUBLICADA:
