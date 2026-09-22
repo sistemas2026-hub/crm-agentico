@@ -66,10 +66,32 @@ function desenvolver(crudo, claves) {
   return crudo;
 }
 
-/** Un número, o null. '-' y '' no son números: SmartOLT los usa para "no reporta". */
+/**
+ * Un número en dBm, o null.
+ *
+ * VIENE CON LA UNIDAD PEGADA, y eso costó la tarjeta entera. Medido contra
+ * SmartOLT el 22/09/2026, por el mismo camino que usa la Bandeja:
+ *
+ *   onu_signal_1490: '-21.02 dBm'      <- string, no numero
+ *
+ * `Number('-21.02 dBm')` es NaN, asi que la potencia quedaba en null y la
+ * tarjeta no se dibujaba nunca -- con el estado de la ONU ya funcionando al
+ * lado, que es lo que hacia parecer que el panel andaba.
+ *
+ * La skill de SmartOLT documenta `signal_1490: -23.98` como numero, y es
+ * cierto: para 'get_onu_details'. 'get_onu_signal' --la ruta liviana que usa
+ * esta pantalla-- devuelve la version con unidad. Dos endpoints del mismo
+ * proveedor, dos formas para el mismo dato.
+ *
+ * '-' y '' siguen siendo "no reporta", no cero.
+ */
 export function numeroODinero(v) {
   if (v === null || v === undefined || v === '' || v === '-') return null;
-  const n = Number(v);
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  // El primer numero del texto: tolera '-21.02 dBm', '-21.02dBm' y '-21.02'.
+  const m = String(v).trim().match(/^-?\d+(?:[.,]\d+)?/);
+  if (!m) return null;
+  const n = Number(m[0].replace(',', '.'));
   return Number.isFinite(n) ? n : null;
 }
 
@@ -113,7 +135,18 @@ export function medicionDe(lectura) {
     /* La de SUBIDA. Se guarda aparte y no se mezcla con `rx`: son dos
        medidas distintas y confundirlas es justo el error que este archivo
        documenta. */
-    rxSubida: numeroODinero(primero(sen, ['onu_signal_1310', 'signal_1310'])),
+    rxSubida: numeroODinero(
+      primero(sen, ['onu_signal_1310', 'signal_1310']) ??
+      primero(o.senal, ['onu_signal_1310', 'signal_1310'])
+    ),
+    /* El veredicto que YA calculo el motor con los rangos que declara la
+       empresa en su catalogo (`Herramienta.veredictos`). No es lo mismo que
+       comparar contra `umbral_rx_dbm`: aquel es un unico numero de la
+       Bandeja, este son los rangos del tenant, y el de abajo puede decir
+       'fuera de rango -- senal muy fuerte', que un umbral solo no distingue.
+       Se muestran los dos cuando estan; ninguno se inventa. */
+    veredicto: primero(sen, ['onu_signal_1490_veredicto']) ??
+               primero(o.senal, ['onu_signal_1490_veredicto']),
     desde: primero(est, ['last_status_change']) ?? primero(o.estado, ['last_status_change']),
     // Estos dos sólo existen en 'get_onu_full_status_info', que esta pantalla
     // no llama (tarda ~10s y el proveedor pide no usarlo en bucle). Se buscan

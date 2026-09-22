@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { medicionDe, enlaceCaido, potenciaAtenuada } from './optica.js';
+import { medicionDe, enlaceCaido, potenciaAtenuada, numeroODinero } from './optica.js';
 
 /**
  * El bug que estas pruebas existen para que no vuelva (visto en PRODUCCION el
@@ -21,12 +21,20 @@ const ESTADO_REAL = {
   last_status_change: '2026-09-22 06:14:02'
 };
 
+/* MEDIDO contra SmartOLT el 22/09/2026, por el mismo camino que usa la
+   Bandeja. Los valores opticos vienen como STRING CON LA UNIDAD PEGADA -- no
+   como numero. La skill documenta numeros, y es cierto para
+   'get_onu_details'; 'get_onu_signal' --la ruta liviana de esta pantalla--
+   devuelve esto. Copiar la forma documentada en vez de la medida fue lo que
+   dejo la tarjeta de potencia en blanco. */
 const SENAL_REAL = {
-  response_code: 'success',
-  status: true,
   onu_signal: 'Very good',
-  onu_signal_1310: -23.98,
-  onu_signal_1490: -21.74
+  onu_signal_value: '-21.02 dBm / -26.78 dBm',
+  onu_signal_1310: '-26.78 dBm',
+  onu_signal_1490: '-21.02 dBm',
+  status: true,
+  response_code: 'success',
+  onu_signal_1490_veredicto: 'aceptable'
 };
 
 const lectura = (extra = {}) => ({
@@ -51,12 +59,12 @@ describe('medicionDe', () => {
 
   it('la potencia sale de onu_signal_1490, la de BAJADA', () => {
     const m = medicionDe(lectura());
-    expect(m.rx).toBe(-21.74);
+    expect(m.rx).toBe(-21.02);
   });
 
   it('no confunde la de subida con la de bajada', () => {
     const m = medicionDe(lectura());
-    expect(m.rxSubida).toBe(-23.98);
+    expect(m.rxSubida).toBe(-26.78);
     expect(m.rx).not.toBe(m.rxSubida);
   });
 
@@ -73,6 +81,23 @@ describe('medicionDe', () => {
     });
     expect(m.enlace).toBe('Offline');
     expect(m.rx).toBe(-30.2);
+  });
+
+  it('la unidad pegada al numero no lo convierte en NaN', () => {
+    // El bug exacto: Number('-21.02 dBm') es NaN y la tarjeta no se dibujaba.
+    expect(numeroODinero('-21.02 dBm')).toBe(-21.02);
+    expect(numeroODinero('-21.02dBm')).toBe(-21.02);
+    expect(numeroODinero('-21,02 dBm')).toBe(-21.02);
+    expect(numeroODinero(-21.02)).toBe(-21.02);
+  });
+
+  it('trae el veredicto que ya calculo el motor con los rangos del tenant', () => {
+    expect(medicionDe(lectura()).veredicto).toBe('aceptable');
+  });
+
+  it('0 dBm se lee como 0, no como ausente: es la senal mas fuerte posible', () => {
+    const m = medicionDe(lectura({ senal: { ...SENAL_REAL, onu_signal_1490: '0 dBm' } }));
+    expect(m.rx).toBe(0);
   });
 
   it("'-' no es un numero: SmartOLT lo usa para 'no reporta'", () => {

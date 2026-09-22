@@ -130,17 +130,29 @@
     letter-spacing: 0;
   }
 
-  /* `display:none` y no altura cero: con altura cero los cuatro renglones
-     siguen en el arbol de accesibilidad y un lector de pantalla los lee
-     igual, que es justo lo contrario de recoger. */
-  .brief-recogido {
-    display: none;
-  }
 
   /* ── qué pasó acá ───────────────────────────────────────────────────────
      Rótulo a la izquierda, texto a la derecha: se leen los cuatro rótulos en
      vertical de un vistazo y se entra al que interesa. Con el texto debajo
      del rótulo habría que recorrer ocho renglones para lo mismo. */
+  /* RECOGIDO. La regla va DESPUES de '.brief' y repite la clase
+     ('.brief.brief-recogido') por dos motivos, y el segundo es el que
+     importa: en un <style> de Svelte el orden ES especificidad entre
+     selectores de la misma fuerza. La primera version puso
+     '.brief-recogido { display: none }' ANTES de '.brief { display: flex }'
+     y perdia siempre -- el panel nunca se recogia, aunque la flecha cambiara.
+     Visto en produccion el 22/09/2026.
+
+     Repetir la clase lo vuelve inmune a que alguien reordene el archivo
+     despues; depender del orden es dejar una trampa para el proximo.
+
+     'display:none' y no altura cero: con altura cero los cuatro renglones
+     siguen en el arbol de accesibilidad y un lector de pantalla los lee
+     igual, que es justo lo contrario de recoger. */
+  .brief.brief-recogido {
+    display: none;
+  }
+
   .brief {
     margin: 0 0 4px;
     padding: 10px 14px;
