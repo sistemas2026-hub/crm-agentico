@@ -401,6 +401,34 @@ describe('el panel de red no ejecuta ni inventa', () => {
     expect(sinComentarios.slice(Math.max(0, i - 700), i)).toMatch(/consultarAhora/);
   });
 
+  it('el proxy reenvia TODOS los parametros que la pantalla manda', () => {
+    /* NACE DE UN FALLO EN PRODUCCION (22/09/2026). 'profundo=1' se agrego en
+       el motor y en el panel, pero el proxy de SvelteKit reenvia una LISTA de
+       parametros --a proposito, para que nadie cuele uno por la barra del
+       navegador-- y nadie agrego el renglon. Resultado: el motor nunca vio el
+       parametro, la consulta profunda no corrio, y las cuatro celdas salieron
+       vacias sin un solo error en ningun lado.
+
+       Es el peor tipo de fallo: los dos extremos correctos y el cable
+       cortado en el medio. Esta prueba mira el cable -- saca los parametros
+       de la URL que arma el panel y exige que el proxy los nombre. */
+    const proxy = readFileSync(
+      fileURLToPath(new URL('../../routes/api/conversaciones/[id]/optica/+server.js',
+                            import.meta.url)),
+      'utf-8'
+    );
+    const url = red.match(/`\/api\/conversaciones\/\$\{conversacionId\}\/optica\?([^`]*)`/);
+    expect(url, 'no se encontro la URL que arma el panel').not.toBeNull();
+    const parametros = url[1].split('&').map((p) => p.split('=')[0]);
+    expect(parametros.length).toBeGreaterThan(0);
+    for (const nombre of parametros) {
+      expect(
+        proxy.includes(`searchParams.get('${nombre}')`),
+        `el proxy no reenvia «${nombre}»`
+      ).toBe(true);
+    }
+  });
+
   it('la medicion sobrevive al cambio de pestaña', () => {
     /* El panel vive dentro de las pestañas de contexto y cambiar de pestaña lo
        DESMONTA. Con la lectura en estado local, volver la borraba y habia que
