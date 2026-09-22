@@ -201,12 +201,17 @@ class _MaterialesScreenState extends State<MaterialesScreen> {
   /// `KitDeJornada` mezclando lo del servidor con la cola—: es el total de lo
   /// que se ve abajo, y por eso no puede contradecirlo.
   Widget _recepcionDelKit(List<MaterialEnCustodia> materiales) {
-    var recibidos = 0;
-    var usados = 0;
-    for (final MaterialEnCustodia m in materiales) {
-      recibidos += m.recibidos;
-      usados += m.usados;
-    }
+    // Se cuentan RENGLONES, no cantidades.
+    //
+    // Sumar las cantidades daba un numero sin sentido fisico: una ONT, diez
+    // conectores y ciento cincuenta metros de fibra se sumaban en "161
+    // recibidos". Es peor que la constante falsa que habia antes, porque este
+    // numero sale de datos reales y por eso se cree.
+    //
+    // Cuanto hay de cada cosa vive en su renglon, con su unidad al lado, que
+    // es el unico lugar donde esa cifra significa algo.
+    final int conConsumo = materiales.where((m) => m.usados > 0).length;
+    final int sinTocar = materiales.where((m) => m.usados == 0).length;
     final int novedades = _kit?.conNovedad.length ?? 0;
     final String acta = _kit?.acta ?? '';
 
@@ -270,23 +275,23 @@ class _MaterialesScreenState extends State<MaterialesScreen> {
           Row(
             children: <Widget>[
               Expanded(
-                child: _Cifra(valor: '$recibidos', etiqueta: 'Recibidos'),
+                child: _Cifra(
+                  valor: '${materiales.length}',
+                  etiqueta: 'Materiales',
+                  destacada: true,
+                ),
               ),
               const SizedBox(width: AppSpacing.sm),
               Expanded(
                 child: _Cifra(
-                  valor: '$usados',
-                  etiqueta: 'Consumo',
+                  valor: '$conConsumo',
+                  etiqueta: 'Con consumo',
                   color: AppColors.secondary,
                 ),
               ),
               const SizedBox(width: AppSpacing.sm),
               Expanded(
-                child: _Cifra(
-                  valor: '${recibidos - usados}',
-                  etiqueta: 'Disponibles',
-                  destacada: true,
-                ),
+                child: _Cifra(valor: '$sinTocar', etiqueta: 'Sin tocar'),
               ),
               const SizedBox(width: AppSpacing.sm),
               Expanded(
@@ -303,25 +308,23 @@ class _MaterialesScreenState extends State<MaterialesScreen> {
     );
   }
 
-  /// Cuánto queda por devolver, contado sobre el kit que se está mostrando.
+  /// Cuantos renglones quedan por devolver.
   ///
-  /// Antes decía un número fijo. Alguien con tres conectores encima leía que
-  /// tenía dieciséis listos para conciliar, y ese es justo el momento en que
-  /// la cuenta importa.
+  /// Cuenta renglones y no cantidades por la misma razon que la cabecera:
+  /// sumar unidades con metros da un total que no significa nada. Cuanto hay
+  /// de cada uno se ve en su tarjeta, con su unidad.
   String _fraseDeCierre() {
     final List<MaterialEnCustodia> materiales =
         _kit?.materiales ?? const <MaterialEnCustodia>[];
-    var disponibles = 0;
-    for (final MaterialEnCustodia m in materiales) {
-      disponibles += m.disponibles;
-    }
-    if (disponibles == 0) {
+    final int pendientes =
+        materiales.where((MaterialEnCustodia m) => m.disponibles > 0).length;
+
+    if (pendientes == 0) {
       return 'No te queda material por devolver a la bodega.';
     }
-    return disponibles == 1
-        ? 'Te queda 1 material disponible para conciliar y devolver a bodega.'
-        : 'Te quedan $disponibles materiales disponibles para conciliar y '
-            'devolver a bodega.';
+    return pendientes == 1
+        ? 'Te queda 1 material por conciliar y devolver a bodega.'
+        : 'Te quedan $pendientes materiales por conciliar y devolver a bodega.';
   }
 
   Widget _barraDeAcciones() {

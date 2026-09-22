@@ -3,8 +3,19 @@
 Qué muestra la aplicación hoy, qué de eso es real, y qué hay que construir para
 que lo que todavía no lo es deje de ser un valor de ejemplo.
 
-El diseño de Google Stitch ("Dexter Campo Mobile App", sistema visual "Field Ops
-Precision") muestra información que ningún sistema entrega todavía. Esa
+El diseño de Google Stitch muestra información que ningún sistema entrega
+todavía.
+
+**Cuál es el proyecto vigente** (verificado el 22/09/2026): `Dexter Campo App`
+(`projects/1600097754179356553`), sistema visual **Field Operations Precision
+Engine**, tipografía Inter. Sus tokens coinciden uno a uno con
+`lib/core/theme/app_colors.dart`.
+
+Hay otro proyecto con nombre parecido —`Dexter Campo Mobile App`, sistema
+"Field Ops Precision", tipografía Geist— que este documento citaba como
+referencia y **no es el implementado**: es anterior y su paleta no coincide con
+el código. Comparar contra él llevaría a "corregir" la aplicación hacia un
+diseño que se descartó. Esa
 información se pinta con valores de ejemplo, y cada uno tiene un identificador
 `CAMPO-DATA-XXX` que se busca en el repositorio: `grep -rn CAMPO-DATA-001 lib/`
 lleva al fixture y a cada lugar donde se usa.

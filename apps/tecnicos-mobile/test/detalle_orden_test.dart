@@ -246,7 +246,7 @@ void main() {
       await tester.pumpWidget(_app(base));
       await tester.pumpAndSettle();
 
-      expect(find.text('Detalle Orden #4832'), findsOneWidget);
+      expect(find.text('OT #4832'), findsOneWidget);
       expect(find.text('#OT-4832'), findsOneWidget);
       expect(find.text('Carlos Gomez'), findsOneWidget);
       expect(find.text('Cra 45 #12-88'), findsOneWidget);

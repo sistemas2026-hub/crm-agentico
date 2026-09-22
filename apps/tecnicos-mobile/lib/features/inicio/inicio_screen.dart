@@ -235,12 +235,19 @@ class _InicioScreenState extends State<InicioScreen> {
             ),
           ),
           const SizedBox(width: AppSpacing.md),
+          // El saludo se achica antes de cortarse. A 390 px "Buenos días,
+          // Carlos" junto a la chapa de la cola no entra, y cortarlo deja
+          // "Buenos días, C…": el nombre de la persona es justo lo que no
+          // puede desaparecer.
           Expanded(
-            child: Text(
-              '$momento, ${_primerNombre(widget.nombreTecnico)}',
-              style: AppTypography.tituloMedio,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                '$momento, ${_primerNombre(widget.nombreTecnico)}',
+                style: AppTypography.tituloMedio,
+                maxLines: 1,
+              ),
             ),
           ),
           const SizedBox(width: AppSpacing.sm),
@@ -365,8 +372,11 @@ class _InicioScreenState extends State<InicioScreen> {
                 ),
               ),
               const Spacer(),
+              // "1 / 4 OT" en monoespaciada se lee "1 / 4 0T": la O y el
+              // cero se confunden, y el tracking amplio separa el rotulo del
+              // numero. "de" no tiene ese problema y se entiende igual.
               Text(
-                '${resumen.completados} / $total OT',
+                '${resumen.completados} de $total',
                 style: AppTypography.dato.copyWith(
                   color: AppColors.primary,
                   fontWeight: FontWeight.w700,
@@ -419,7 +429,7 @@ class _InicioScreenState extends State<InicioScreen> {
       children: <Widget>[
         Text(
           'Alertas operativas',
-          style: AppTypography.etiqueta.copyWith(color: AppColors.onSurface),
+          style: AppTypography.tituloChico,
         ),
         const SizedBox(height: AppSpacing.sm),
         for (final AvisoDeInicio aviso in avisos)
@@ -465,7 +475,7 @@ class _InicioScreenState extends State<InicioScreen> {
       children: <Widget>[
         Text(
           'Próximo trabajo',
-          style: AppTypography.etiqueta.copyWith(color: AppColors.onSurface),
+          style: AppTypography.tituloChico,
         ),
         const SizedBox(height: AppSpacing.sm),
         if (SeleccionJornada.hayVariosEnCurso(trabajos))
@@ -615,7 +625,7 @@ class _InicioScreenState extends State<InicioScreen> {
       children: <Widget>[
         Text(
           'Materiales',
-          style: AppTypography.etiqueta.copyWith(color: AppColors.onSurface),
+          style: AppTypography.tituloChico,
         ),
         const SizedBox(height: AppSpacing.sm),
         Container(
@@ -1020,7 +1030,7 @@ class _TarjetaDeTrabajo extends StatelessWidget {
                     Expanded(
                       child: _AccionRapida(
                         icono: Icons.near_me,
-                        texto: 'Navegar Waze/Maps',
+                        texto: 'Navegar',
                         disponible:
                             trabajo.latitud != null && trabajo.longitud != null,
                       ),

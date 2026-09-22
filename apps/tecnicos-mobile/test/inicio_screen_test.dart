@@ -263,7 +263,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.textContaining('Carlos'), findsWidgets);
-      expect(find.text('1 / 3 OT'), findsOneWidget);
+      expect(find.text('1 de 3'), findsOneWidget);
       expect(find.text('33%'), findsOneWidget);
       expect(find.textContaining('2 pendientes'), findsOneWidget);
       await banco.cerrar();
@@ -279,7 +279,7 @@ void main() {
       await tester.pumpWidget(banco.app());
       await tester.pumpAndSettle();
 
-      expect(find.text('1 / 2 OT'), findsOneWidget);
+      expect(find.text('1 de 2'), findsOneWidget);
       await banco.cerrar();
     });
 

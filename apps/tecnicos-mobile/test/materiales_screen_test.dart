@@ -65,9 +65,13 @@ void main() {
       expect(find.text(KitMockData.acta), findsNothing);
       expect(find.textContaining(KitMockData.despachadoPor), findsNothing);
       expect(find.textContaining(KitMockData.deposito), findsNothing);
-      expect(find.text('Recibidos'), findsOneWidget);
-      expect(find.text('Consumo'), findsOneWidget);
-      expect(find.text('Disponibles'), findsOneWidget);
+      // Las cifras cuentan RENGLONES, no cantidades: sumar unidades con
+      // metros daba un total sin sentido fisico ("161 recibidos" entre una
+      // ONT, diez conectores y ciento cincuenta metros de fibra).
+      expect(find.text('Materiales'), findsOneWidget);
+      expect(find.text('Con consumo'), findsOneWidget);
+      expect(find.text('Sin tocar'), findsOneWidget);
+      expect(find.text('Recibidos'), findsNothing);
       expect(find.text('Escanear QR'), findsOneWidget);
       expect(find.text('Materiales en Custodia'), findsOneWidget);
       expect(find.text('¿Finalizaste tu turno?'), findsOneWidget);

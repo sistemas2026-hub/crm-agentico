@@ -171,7 +171,10 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          trabajo.numero == null ? 'Detalle Orden' : 'Detalle Orden #${trabajo.numero}',
+          // Sin "Detalle": a 390 px, con la chapa de la cola al lado, el
+          // titulo largo se cortaba en "Detalle Orden #…" y se perdia
+          // justamente el numero, que es lo que identifica el trabajo.
+          trabajo.numero == null ? 'Detalle Orden' : 'OT #${trabajo.numero}',
         ),
         actions: <Widget>[
           Padding(
