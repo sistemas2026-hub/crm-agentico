@@ -2,16 +2,20 @@
   /**
    * Quién es el cliente, con lo que Dexter efectivamente sabe.
    *
-   * LO QUE NO ESTÁ, Y POR QUÉ. La referencia de diseño muestra también
-   * dirección, plan, velocidades, saldo y últimas facturas — y marca casi
-   * todos esos campos como MOCK. No están acá porque Dexter **no los guarda**:
-   * las respuestas de la API del ISP no se persisten (PRD RNF-01; traen
-   * contraseñas, GPS y cédula). Traerlos en vivo al abrir la pantalla
-   * convertiría a este panel en una segunda fuente de verdad y metería PII del
-   * cliente donde hoy no la hay. Es una decisión, no una omisión: se dice en
-   * pantalla en vez de dejar cuatro secciones vacías.
+   * DOS ORIGENES, Y SE DISTINGUEN A PROPOSITO
+   * -----------------------------------------
+   * Lo que Dexter GUARDÓ de esta conversación --la identidad verificada y los
+   * identificadores del equipo-- y lo que se LEE EN VIVO del sistema del ISP
+   * --ubicación, servicio y facturación--. Lo segundo no se persiste: el PRD
+   * lo prohíbe, y por eso el pie dice cuándo se leyó.
    *
-   * Lo que sí consta viene de la verificación de identidad, dentro de esta
+   * Este comentario decía que esos campos NO estaban y que traerlos
+   * convertiría al panel en una segunda fuente de verdad. Dejó de ser cierto
+   * el 22/09/2026: el motor los lee sin guardarlos, así que no hay copia que
+   * pueda contradecir al original. Y la referencia los marca `MOCK` --no los
+   * tenía-- mientras que acá son reales.
+   *
+   * Lo que consta de la verificación de identidad, dentro de esta
    * conversación:
    *
    *   nombre_cliente · id_cliente   la persona, si se verificó
@@ -24,7 +28,13 @@
    */
   import { ShieldCheck, ShieldQuestion } from '@lucide/svelte';
 
-  let { conversacion } = $props();
+  let {
+    conversacion,
+    /** La ficha leída en vivo del sistema del ISP, o null. Cada campo se
+        dibuja SÓLO si vino: la lista blanca del motor deja fuera lo que no
+        corresponde, y un renglón con un guion no informa nada. */
+    ficha = null
+  } = $props();
 
   const ROTULO_EQUIPO = {
     sn_onu: 'Serial de la ONU',
@@ -43,6 +53,23 @@
     }
     return crudo;
   }
+  /* Una seccion se dibuja si tiene AL MENOS un dato. Se calcula acá y no en
+     el marcado para que el titulo y el contenido no puedan desincronizarse --
+     un rotulo "Ubicacion" sin nada debajo es peor que no tenerlo. */
+  const hayUbicacion = $derived(!!(ficha?.direccion || ficha?.localidad || ficha?.ciudad || ficha?.zona));
+  const hayServicio = $derived(!!(ficha?.plan_internet || ficha?.estado || ficha?.fecha_instalacion));
+  const hayFacturacion = $derived(
+    !!(ficha?.estado_facturas || ficha?.fecha_corte) ||
+      (ficha?.saldo !== undefined && ficha?.saldo !== null)
+  );
+
+  /* Cortado o suspendido se marca: es lo que explica la mitad de las
+     consultas. Con palabra ademas del color -- 'estado' viene del ISP y no
+     hay una lista cerrada de valores. */
+  const servicioCortado = $derived(
+    !!ficha?.estado && !/activo|active/i.test(String(ficha.estado))
+  );
+
   // Un BSUID de WhatsApp no es un teléfono y no hay que mostrarlo como tal.
   const esIdOpaco = $derived(
     !!conversacion?.usuario_externo && !/^\+?\d[\d\s-]{5,}$/.test(conversacion.usuario_externo)
@@ -87,6 +114,67 @@
     </div>
   {/if}
 
+  {#if ficha?.cedula}
+    <div class="campo">
+      <span class="v2-sub">Documento</span>
+      <span class="panel-dato panel-mono">{ficha.cedula}</span>
+    </div>
+  {/if}
+
+  <!-- ── LO QUE SE LEE EN VIVO DEL SISTEMA DEL ISP ──────────────────────
+       Tres secciones, las mismas de la referencia. Allá LOCATION y BILLING
+       están marcadas `MOCK` porque el diseño no tenía de dónde sacarlas;
+       acá son reales. Ninguna se dibuja si no vino su dato: una sección con
+       tres guiones se lee como "el sistema está roto", y lo que pasa es que
+       ese cliente no tiene ese campo cargado. -->
+  {#if hayUbicacion}
+    <p class="panel-titulo separado">Ubicación</p>
+    {#if ficha.direccion}
+      <div class="campo"><span class="v2-sub">Dirección</span>
+        <span class="panel-dato">{ficha.direccion}</span></div>
+    {/if}
+    {#if ficha.localidad || ficha.ciudad}
+      <div class="campo"><span class="v2-sub">Localidad</span>
+        <span class="panel-dato">{[ficha.localidad, ficha.ciudad].filter(Boolean).join(' · ')}</span></div>
+    {/if}
+    {#if ficha.zona}
+      <div class="campo"><span class="v2-sub">Zona</span>
+        <span class="panel-dato">{ficha.zona}</span></div>
+    {/if}
+  {/if}
+
+  {#if hayServicio}
+    <p class="panel-titulo separado">Servicio</p>
+    {#if ficha.plan_internet}
+      <div class="campo"><span class="v2-sub">Plan</span>
+        <span class="panel-dato">{ficha.plan_internet}</span></div>
+    {/if}
+    {#if ficha.estado}
+      <div class="campo"><span class="v2-sub">Estado del servicio</span>
+        <span class="panel-dato estado-servicio" class:estado-mal={servicioCortado}>{ficha.estado}</span></div>
+    {/if}
+    {#if ficha.fecha_instalacion}
+      <div class="campo"><span class="v2-sub">Instalado</span>
+        <span class="panel-dato panel-mono">{ficha.fecha_instalacion}</span></div>
+    {/if}
+  {/if}
+
+  {#if hayFacturacion}
+    <p class="panel-titulo separado">Facturación</p>
+    {#if ficha.estado_facturas}
+      <div class="campo"><span class="v2-sub">Cobranza</span>
+        <span class="panel-dato">{ficha.estado_facturas}</span></div>
+    {/if}
+    {#if ficha.saldo !== undefined && ficha.saldo !== null}
+      <div class="campo"><span class="v2-sub">Saldo</span>
+        <span class="panel-dato panel-mono">{ficha.saldo}</span></div>
+    {/if}
+    {#if ficha.fecha_corte}
+      <div class="campo"><span class="v2-sub">Fecha de corte</span>
+        <span class="panel-dato panel-mono">{ficha.fecha_corte}</span></div>
+    {/if}
+  {/if}
+
   {#if equipo.length > 0}
     <p class="panel-titulo separado">Equipo</p>
     {#each equipo as [clave, valor] (clave)}
@@ -101,9 +189,17 @@
   {/if}
 
   <p class="panel-nota">
-    Dexter guarda de cada cliente lo que hizo falta para atenderlo: su identidad
-    y los identificadores de su equipo. El plan, la dirección, el saldo y las
-    facturas viven en el sistema del ISP y no se traen acá.
+    {#if ficha}
+      La ubicación, el servicio y la facturación se leen del sistema del ISP al
+      abrir la conversación y <b>no se guardan acá</b>. Lo que Dexter sí guarda
+      de esta conversación es la identidad verificada y los identificadores del
+      equipo.
+    {:else}
+      Dexter guarda de cada cliente lo que hizo falta para atenderlo: su
+      identidad y los identificadores de su equipo. El plan, la dirección, el
+      saldo y las facturas viven en el sistema del ISP — <b>hoy no se pudieron
+      leer</b>.
+    {/if}
   </p>
 </section>
 
@@ -157,6 +253,16 @@
   }
   .campo > .v2-sub {
     font-size: 11.5px;
+  }
+
+  /* El estado del servicio es el unico dato de la ficha que es un veredicto. */
+  .estado-servicio {
+    font-weight: 600;
+    color: var(--bandeja-ok);
+  }
+
+  .estado-mal {
+    color: var(--bandeja-error);
   }
 
 

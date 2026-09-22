@@ -224,18 +224,37 @@ describe('el panel del cliente no inventa la ficha', () => {
   // haría fallar la prueba por decir bien la verdad.
   const campos = visible.replace(/<p class="panel-nota">[\s\S]*?<\/p>/, '');
 
-  it('no muestra los campos que la referencia marca como MOCK', () => {
-    // Dirección, plan, velocidades, saldo y facturas viven en el ISP y Dexter
-    // no los guarda (PRD RNF-01). Un campo inventado en un panel de contexto
-    // se lee como un dato del cliente.
-    for (const campo of [/direcci[oó]n/i, /localidad/i, /\bplan\b/i, /saldo/i,
-                         /factura/i, /\bpago\b/i, /Mbps/i]) {
-      expect(campos).not.toMatch(campo);
+  /* ESTAS DOS GUARDAS CAMBIARON EL 22/09/2026.
+     Decían que dirección, plan, saldo y facturas NO podían aparecer, porque
+     Dexter no los guarda. Seguían protegiendo algo cierto --no se guardan--
+     pero concluían de más: ahora el motor los LEE EN VIVO y no persiste
+     nada, así que no hay copia que pueda contradecir al original.
+     Lo que hay que sostener cambió; no desapareció. */
+
+  it('ningún campo de la ficha se dibuja si no vino', () => {
+    /* El riesgo ya no es inventar un campo: es dibujar la sección igual y
+       dejarla con renglones vacíos, que se lee como "el sistema está roto"
+       cuando lo que pasa es que ese cliente no tiene ese dato cargado.
+       Cada sección cuelga de un `hay*` y cada renglón de su propio `#if`. */
+    for (const bandera of ['hayUbicacion', 'hayServicio', 'hayFacturacion']) {
+      expect(cli).toContain(`{#if ${bandera}}`);
     }
+    expect(visible).toContain('{#if ficha.direccion}');
+    expect(visible).toContain('{#if ficha.plan_internet}');
   });
 
-  it('dice por qué no están, en vez de dejar secciones vacías', () => {
-    expect(visible).toMatch(/viven en el sistema del ISP y no se traen/i);
+  it('dice de dónde salió cada mitad: lo guardado y lo leído en vivo', () => {
+    // Sin eso, el documento y el saldo se leen como datos de Dexter, y no lo
+    // son: son del sistema del ISP, de hace un momento.
+    const prosa = visible.replace(/\s+/g, ' ');
+    expect(prosa).toMatch(/no se guardan acá/i);
+    expect(prosa).toMatch(/identidad verificada y los identificadores/i);
+  });
+
+  it('y si no se pudo leer, lo dice en vez de callar', () => {
+    // Un panel sin las tres secciones y sin explicación se lee igual que un
+    // cliente sin datos cargados. No es lo mismo.
+    expect(visible.replace(/\s+/g, ' ')).toMatch(/hoy no se pudieron leer/i);
   });
 
   it('no consulta nada en vivo: es presentación', () => {

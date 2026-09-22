@@ -1669,7 +1669,7 @@
        verificar de un vistazo contra el manifiesto. -->
   <div class="info-cuerpo">
     {#if pestanaContexto === 'cliente'}
-      <CustomerPanel {conversacion} />
+      <CustomerPanel {conversacion} ficha={data.fichaCliente?.cliente ?? null} />
 
     {:else if pestanaContexto === 'equipo'}
       <NetworkPanel
@@ -1684,14 +1684,27 @@
            lo tiene allá (que puede no ser el dueño de Dexter -- D28), lo que
            se creó o cerró en sistemas externos, y la retención. La referencia
            pone RETENTION en esta misma pestaña. -->
+      <!-- TRES BLOQUES SEPARADOS, como la referencia (DEXTER CONVERSATION /
+           CRM CASE / OPERATIONAL TICKET) mas RETENTION. No es maquetacion:
+           separarlos es lo que hace VISIBLE que el dueño del ticket del CRM
+           puede no ser el dueño de la conversacion en Dexter -- D28, y Dexter
+           es la fuente de verdad. Mezclados bajo un solo titulo, esa
+           diferencia hay que deducirla. -->
+      <p class="seccion-ctx">Esta conversación en Dexter</p>
       <CasePanel
         {caso} {conversacion} {owners} {ownerActual}
         asignadaDexter={asignadaA}
         bind:asignadoA bind:listaAbierta bind:formularioAsignar
       />
+
+      <p class="seccion-ctx seccion-ctx-sep">Caso en el CRM</p>
       <AssigneesPanel asignados={data.asignados_crm ?? null}
                       aCargoEnDexter={conversacion.asignada_a_nombre ?? ''} />
+
+      <p class="seccion-ctx seccion-ctx-sep">Efectos en sistemas externos</p>
       <SyncPanel {sincronizaciones} />
+
+      <p class="seccion-ctx seccion-ctx-sep">Retención</p>
       <RetentionToggle
         {conservada} {guardandoConservar} {errorConservar}
         bind:motivoConservar bind:pidiendoMotivo
@@ -1706,12 +1719,21 @@
            entran acá y no en otra parte porque son la salida de ese proceso,
            esperando que una persona las apruebe -- y como quedan detrás de una
            pestaña, la pestaña lleva su número (ver `pestanasContexto`). -->
+      <!-- DOS BLOQUES CON ROTULO, como la referencia (AI PROCESS /
+           DOCUMENTATION). Antes los tres paneles se apilaban sin encabezado y
+           no se veia donde terminaba lo que hizo el asistente y donde
+           empezaban las guias. Los rotulos viven acá y no dentro de cada
+           panel porque son de la PESTAÑA: el mismo TracePanel, montado en
+           otro lado, no tendria por que traerlos. -->
+      <p class="seccion-ctx">Lo que hizo el asistente</p>
       <ActionsPanel {acciones} aprobando={aprobandoAccion} onAprobar={aprobarAccion} />
       <TracePanel
         {herramientas} {diagnostico} {contrasteUtil} {pasoMarcado}
         motivoBloqueo={MOTIVO_BLOQUEO}
         onIrAlPaso={irAlPaso}
       />
+
+      <p class="seccion-ctx seccion-ctx-sep">Documentación</p>
       <DocumentationPanel
         {sugerencias} {buscandoDocs} {errorDocs} {mejorSimilitud} {copiado}
         bind:consultaDocs bind:expandido
@@ -1759,6 +1781,26 @@
 
   .info-cuerpo {
     padding: 12px 14px 20px;
+  }
+
+  /* El rótulo de una sección DENTRO de una pestaña. Misma forma que
+     `.panel-titulo` --mono, versalita, apagado-- porque es lo mismo: un
+     rótulo. Va acá y no en bandeja.css porque sólo esta columna agrupa
+     paneles bajo un encabezado propio. */
+  .seccion-ctx {
+    margin: 0 0 6px;
+    font-family: var(--bandeja-mono);
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--bandeja-texto-2);
+  }
+
+  .seccion-ctx-sep {
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid var(--bandeja-borde);
   }
   /* Por encima de 1240px la columna está siempre a la vista: ni botón para
      cerrarla, ni fondo que interceptar. El del encabezado que la abre vive
