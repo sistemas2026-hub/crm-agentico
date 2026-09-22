@@ -7,6 +7,7 @@
   let { data, form } = $props();
 
   let trabajando = $state(false);
+  let modalSecuenciar = $state(false);
   let seleccionada = $state(/** @type {any} */ (null));
 
   // Los filtros son de CLIENTE: la jornada ya vino entera para ese dia.
@@ -73,10 +74,17 @@
     return Math.round((c / j) * 100);
   };
 
+  /**
+   * Un solo envio por clic: `trabajando` ya deshabilita los dos botones del
+   * modal, asi que un doble clic no llega a producir un segundo POST. Al
+   * terminar se vuelve a consultar el backend -- nunca se corrige la vista
+   * suponiendo que la operacion salio bien.
+   */
   const alTrabajar = () => {
     trabajando = true;
     return async (/** @type {any} */ { update }) => {
       trabajando = false;
+      modalSecuenciar = false;
       await update({ reset: false });
       await invalidateAll();
     };
@@ -260,18 +268,22 @@
                   <span class="snoc-insignia snoc-insignia-neutra">{data.jornada.count} líneas</span>
                 {/if}
               </div>
-              <form method="POST" action="?/secuenciar" use:enhance={alTrabajar}>
-                <input type="hidden" name="dia" value={data.dia} />
-                <button
-                  class="snoc-btn snoc-btn-primario"
-                  type="submit"
-                  disabled={trabajando || !!data.jornada.error || lineas.length === 0}
-                  title="Reordena el orden propuesto. No reprograma ninguna orden ni cambia asignaciones."
-                >
-                  <span class="snoc-icono" style="font-size:14px;">low_priority</span>
-                  {trabajando ? 'Secuenciando…' : 'Secuenciar jornada'}
-                </button>
-              </form>
+              <!--
+                Abre la confirmacion; el POST vive en el modal. Es la unica
+                escritura de esta pantalla con efecto visible en la operacion:
+                no reprograma ni reasigna, pero el orden nuevo queda registrado
+                y alguien lo va a leer para trabajar.
+              -->
+              <button
+                class="snoc-btn snoc-btn-primario"
+                type="button"
+                onclick={() => (modalSecuenciar = true)}
+                disabled={trabajando || !!data.jornada.error || lineas.length === 0}
+                title="Reordena el orden propuesto. No reprograma ninguna orden ni cambia asignaciones."
+              >
+                <span class="snoc-icono" style="font-size:14px;">low_priority</span>
+                {trabajando ? 'Secuenciando…' : 'Secuenciar jornada'}
+              </button>
             </div>
 
             {#if data.jornada.error}
@@ -494,4 +506,47 @@
       </div>
     {/if}
   </div>
+
+  <!-- ============ CONFIRMACIÓN DE SECUENCIACIÓN ============ -->
+  {#if modalSecuenciar}
+    <div
+      class="snoc-velo"
+      role="presentation"
+      onclick={(e) => {
+        if (e.target === e.currentTarget && !trabajando) modalSecuenciar = false;
+      }}
+    >
+      <div class="snoc-modal" role="dialog" aria-modal="true" aria-labelledby="snoc-sec-titulo">
+        <div class="snoc-fila snoc-primario">
+          <span class="snoc-icono" style="font-size:28px;">low_priority</span>
+          <h4 class="snoc-h3" id="snoc-sec-titulo">¿Confirmar secuenciación de jornada?</h4>
+        </div>
+        <p class="snoc-body snoc-secundario" style="margin:0;">
+          Esta acción modificará el orden propuesto de las órdenes para la jornada seleccionada. No reprograma ni
+          reasigna técnicos, pero el nuevo orden quedará registrado y podrá ser utilizado por la operación.
+        </p>
+        <div class="snoc-mono-sm snoc-caja-datos">
+          <div>• Jornada: {data.dia}</div>
+          <div>• Líneas afectadas: {lineas.length}</div>
+          <div>• Se aplica en una sola transacción</div>
+        </div>
+        <form method="POST" action="?/secuenciar" use:enhance={alTrabajar}>
+          <input type="hidden" name="dia" value={data.dia} />
+          <div class="snoc-fila" style="justify-content:flex-end; padding-top:var(--snoc-xs);">
+            <button
+              class="snoc-btn"
+              type="button"
+              onclick={() => (modalSecuenciar = false)}
+              disabled={trabajando}
+            >
+              Cancelar
+            </button>
+            <button class="snoc-btn snoc-btn-primario" type="submit" disabled={trabajando}>
+              {trabajando ? 'Secuenciando jornada…' : 'Confirmar secuenciación'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  {/if}
 </div>
