@@ -33,6 +33,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import contextlib
 import threading
 import uuid
 import time
@@ -90,6 +91,98 @@ app = Flask(__name__)
 _configs: dict = {}    # tenant -> TenantConfig, cacheado por proceso
 _servidas: dict = {}   # tenant -> (config_version servida, monotonic de la ultima comprobacion)
 _sesiones: dict = {}   # canales.clave_sesion(tenant, canal, id_sesion) -> {"sesion": Sesion, "historial": [...]}
+
+# ════════════════════════════════════════════════════════════════════════════
+#  CONTROL DE CONCURRENCIA
+#
+#  El webhook contesta a Meta al instante y lanza UN HILO POR MENSAJE. Es
+#  simple y tiene baja latencia, y con poco volumen alcanza. Lo que no tiene
+#  es freno: cincuenta mensajes seguidos son cincuenta hilos, cada uno
+#  llamando al modelo, abriendo su conexion y pegandole a los sistemas del
+#  ISP. Nada limita eso hoy.
+#
+#  Dos problemas distintos, y por eso dos mecanismos:
+#
+#  1. ORDEN. Dos mensajes del MISMO cliente con medio segundo de diferencia
+#     se atienden en paralelo, y el segundo puede contestarse antes que el
+#     primero -- el cliente escribe "no tengo internet" y despues "ya volvio",
+#     y recibe el diagnostico despues de la confirmacion. Eso no es un
+#     problema de escala: la escala solo lo vuelve frecuente. El lock por
+#     conversacion lo cierra, y va SIEMPRE PUESTO porque es correccion, no
+#     capacidad.
+#
+#  2. AISLAMIENTO. Los datos de cada empresa ya estan aislados
+#     (organization_id en cada consulta), pero la CAPACIDAD no: una empresa
+#     con un corte masivo llena los hilos y las demas esperan detras. El
+#     semaforo por tenant convierte la avalancha de una en una fila de esa
+#     una. Nace APAGADO (max_turnos_simultaneos = None): encenderlo introduce
+#     espera, y eso se decide por empresa y midiendo, no por defecto.
+# ════════════════════════════════════════════════════════════════════════════
+
+# clave de sesion -> [Lock, cuantos lo estan usando]. El contador es para
+# poder BORRAR la entrada: sin eso el diccionario crece un lock por cada
+# conversacion que existio, para siempre.
+_locks_conversacion: dict = {}
+_locks_maestro = threading.Lock()
+
+# tenant -> (semaforo, tope con el que se creo). El tope se relee de la config
+# en cada turno; si cambia, el semaforo se rehace. Lo que estaba en vuelo con
+# el semaforo viejo no se pierde -- lo suelta en el suyo, que deja de usarse.
+_semaforos_tenant: dict = {}
+_semaforos_maestro = threading.Lock()
+
+# Cuanto espera un turno por su lugar antes de rendirse. Generoso a proposito:
+# rendirse deja al cliente sin respuesta, y eso es peor que tardar. El tope
+# esta atado al timeout de gunicorn (180 s) -- pasarse de ahi solo cambia
+# quien corta la llamada.
+SEGUNDOS_ESPERA_TURNO = 150
+
+
+@contextlib.contextmanager
+def _turno_en_orden(tenant: str, clave, maximo):
+    """
+    El turno corre solo, y dentro del cupo de su empresa.
+
+    ORDEN DE ADQUISICION: primero el lock de la conversacion, despues el
+    semaforo del tenant. Al reves, los mensajes apilados de UN cliente
+    ocuparian los cupos de toda la empresa mientras esperan su turno entre
+    ellos. Siempre en este orden -- dos ordenes distintos es como se arma un
+    abrazo mortal.
+
+    Si no consigue lugar a tiempo levanta TimeoutError: quien llama decide.
+    No se atiende igual "por si acaso": atender fuera de orden es justo lo que
+    esto viene a impedir.
+    """
+    with _locks_maestro:
+        par = _locks_conversacion.setdefault(clave, [threading.Lock(), 0])
+        par[1] += 1
+    lock = par[0]
+    tomado = lock.acquire(timeout=SEGUNDOS_ESPERA_TURNO)
+    try:
+        if not tomado:
+            raise TimeoutError("no se consiguio el turno de la conversacion")
+        semaforo = None
+        if maximo:
+            with _semaforos_maestro:
+                actual = _semaforos_tenant.get(tenant)
+                if actual is None or actual[1] != maximo:
+                    actual = (threading.BoundedSemaphore(maximo), maximo)
+                    _semaforos_tenant[tenant] = actual
+                semaforo = actual[0]
+            if not semaforo.acquire(timeout=SEGUNDOS_ESPERA_TURNO):
+                raise TimeoutError("la empresa esta en su tope de turnos simultaneos")
+        try:
+            yield
+        finally:
+            if semaforo is not None:
+                semaforo.release()
+    finally:
+        if tomado:
+            lock.release()
+        with _locks_maestro:
+            par[1] -= 1
+            if par[1] <= 0:
+                _locks_conversacion.pop(clave, None)
 
 # Cuantos mensajes se vuelven a poner en contexto cuando este proceso no tiene
 # la conversacion en memoria (un reinicio, un despliegue). Ver
@@ -905,6 +998,43 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                   nombre_colaborador: str = "",
                   evento_id: str | None = None,
                   conversacion_ya_guardada: str | None = None) -> dict:
+    """
+    Un turno, atendido EN ORDEN y dentro del cupo de su empresa.
+
+    Es un envoltorio fino sobre el turno de verdad (`_atender_turno`), y esta
+    separado para no reindentar quinientas lineas -- no para esconder nada.
+    Todo lo que decide el turno sigue abajo; lo unico que pasa aca es esperar
+    el lugar.
+
+    POR QUE ACA Y NO EN EL WEBHOOK: por esta funcion entran los TRES caminos
+    --el webhook de WhatsApp, /chat y la devolucion a la IA-- y el orden hay
+    que sostenerlo en los tres. Ponerlo en el webhook dejaria a los otros dos
+    sin proteccion y con la sensacion de que la tienen.
+
+    Si no consigue lugar en `SEGUNDOS_ESPERA_TURNO` devuelve 'sin_turno' y NO
+    atiende: contestar fuera de orden es lo que esto viene a impedir, y
+    contestar tarde de mas es peor que no contestar -- el cliente ya escribio
+    otra cosa. Queda en el log, que es donde se ve si el tope quedo corto.
+    """
+    clave = canales.clave_sesion(tenant, canal, id_sesion)
+    maximo = getattr(config.limites, "max_turnos_simultaneos", None)
+    try:
+        with _turno_en_orden(tenant, clave, maximo):
+            return _atender_turno(config, tenant, rol, id_sesion, mensaje, canal,
+                                  profile_id, nombre_colaborador, evento_id,
+                                  conversacion_ya_guardada)
+    except TimeoutError as e:
+        registrar("turno", "no se consiguio lugar para atender el turno",
+                  tenant=tenant, canal=canal, tope=maximo, error=e)
+        return {"respuesta": "", "verificado": False, "pausada": True,
+                "sin_turno": True}
+
+
+def _atender_turno(config, tenant: str, rol: str, id_sesion: str,
+                   mensaje: str, canal: str, profile_id: str | None = None,
+                   nombre_colaborador: str = "",
+                   evento_id: str | None = None,
+                   conversacion_ya_guardada: str | None = None) -> dict:
     """
     Un turno completo de conversacion: pausa por escalamiento, modelo,
     persistencia y evaluacion de escalamiento.

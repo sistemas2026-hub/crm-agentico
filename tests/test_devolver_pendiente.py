@@ -46,14 +46,20 @@ def afirmar(condicion, que):
 
 print("\n--- el turno puede atender algo que ya esta guardado ---")
 firma = inspect.signature(api.atender_turno)
+firma_cuerpo = inspect.signature(api._atender_turno)
 afirmar("conversacion_ya_guardada" in firma.parameters,
         "atender_turno acepta un mensaje ya guardado")
+afirmar("conversacion_ya_guardada" in firma_cuerpo.parameters,
+        "y el envoltorio se lo pasa al cuerpo -- si se queda en el camino, el "
+        "turno lo guardaria igual y el hilo mostraria el mensaje dos veces")
 afirmar(firma.parameters["conversacion_ya_guardada"].default is None,
         "y NACE APAGADO: el webhook y /chat no pasan nada, asi que su camino "
         "no cambia")
 
 print("\n--- el mensaje del cliente se guarda en UN solo lugar ---")
-fuente = inspect.getsource(api.atender_turno)
+# El cuerpo del turno vive en '_atender_turno' desde que
+# 'atender_turno' paso a ser el envoltorio del control de concurrencia.
+fuente = inspect.getsource(api._atender_turno)
 guardados = fuente.count('"user", mensaje')
 afirmar(guardados == 1,
         f"un solo sitio escribe el mensaje del cliente (hay {guardados}); con "

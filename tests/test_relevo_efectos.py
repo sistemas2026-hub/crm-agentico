@@ -183,7 +183,12 @@ print("\n== 2. inventario de los efectos de atender_turno ==")
 from nucleo.canales import api                                      # noqa: E402
 
 arbol = ast.parse((RAIZ / "nucleo" / "canales" / "api.py").read_text(encoding="utf-8"))
-turno = next(n for n in arbol.body if isinstance(n, ast.FunctionDef) and n.name == "atender_turno")
+# EL CUERPO DEL TURNO VIVE EN '_atender_turno' DESDE EL 22/09/2026.
+# 'atender_turno' quedo como un envoltorio fino que espera el lugar --lock por
+# conversacion y cupo por empresa-- y delega. El inventario mira donde estan
+# los efectos, no donde esta el nombre publico.
+turno = next(n for n in arbol.body
+             if isinstance(n, ast.FunctionDef) and n.name == "_atender_turno")
 
 # Lo que escribe afuera (o cierra la conversacion) despues de la respuesta.
 EFECTOS = {("agendamiento", "agendar"), ("escalamiento", "escalar"),

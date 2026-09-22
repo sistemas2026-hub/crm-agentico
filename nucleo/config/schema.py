@@ -2271,6 +2271,20 @@ class CierreInactivasIA(Base):
 
 
 class Limites(Base):
+    # CUANTOS TURNOS DE ESTA EMPRESA PUEDEN CORRER A LA VEZ.
+    #
+    # Los datos de cada empresa ya estan aislados; la CAPACIDAD no lo estaba.
+    # Una con un corte masivo --quinientos clientes escribiendo a la vez--
+    # llena los hilos del motor y las demas esperan detras, aunque no compartan
+    # una sola fila. Este tope convierte la avalancha de una en una fila de esa
+    # una.
+    #
+    # None = sin tope, que es como funciono siempre. Nace apagado porque
+    # encenderlo INTRODUCE ESPERA: con el tope puesto, el turno 11 aguarda a
+    # que termine alguno de los 10 en curso. Cual es el numero bueno depende
+    # del volumen real de cada empresa y del tiempo que tarde su modelo, y eso
+    # se mide antes de elegirlo -- no se adivina desde el esquema.
+    max_turnos_simultaneos: int | None = Field(default=None, ge=1)
     max_conversaciones_dia: int | None = None
     max_costo_usd_mes: float | None = None
     # Que se le dice al cliente cuando la empresa alcanzo su tope de gasto.
