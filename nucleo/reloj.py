@@ -411,15 +411,84 @@ def _solo_contadores(datos) -> dict | None:
     return salida
 
 
+def _backfill(argv: list[str], seco: bool) -> int:
+    """
+    El backlog historico, a mano y de a lotes.
+
+    POR QUE NO CORRE CON EL RELOJ
+    -----------------------------
+    Porque el reloj corre cada 60 minutos. Un lote de 10 por ciclo son 240
+    cierres por dia: las 147 historicas se irian en menos de un dia, que es
+    exactamente lo que las cohortes existen para evitar. Ir mas despacio no
+    arregla nada si igual va solo -- lo que hace falta es que alguien decida
+    cada tanda.
+
+    No se programa una cadencia. Se teclea, se mira el resultado, y se vuelve
+    a teclear si corresponde.
+
+    Pide el interruptor IGUAL: 'cierre_inactivas_ia.backfill_habilitado'
+    autoriza y el comando ejecuta. Hacen falta los dos, porque un comando se
+    puede teclear por costumbre y la autorizacion es una decision que quedo
+    escrita en la config y se puede revisar en git.
+    """
+    lote = None
+    if "--limit" in argv:
+        i = argv.index("--limit")
+        if i + 1 >= len(argv):
+            registrar("reloj", "--limit necesita un numero")
+            return 2
+        try:
+            lote = int(argv[i + 1])
+        except ValueError:
+            registrar("reloj", "--limit necesita un numero")
+            return 2
+        if lote < 1:
+            registrar("reloj", "--limit tiene que ser mayor que cero")
+            return 2
+
+    salida = []
+    for tenant in tenants_conocidos():
+        try:
+            config = fuente.cargar(tenant, RAIZ)
+        except (Exception, SystemExit) as e:                     # noqa: BLE001
+            registrar("reloj", "no se pudo leer la config", tenant=tenant, error=e)
+            continue
+        try:
+            r = operativo.cerrar_inactivas_de_ia(
+                config, tenant, simular=seco, backlog=True, lote=lote)
+        except (Exception, SystemExit) as e:                     # noqa: BLE001
+            registrar("reloj", "el backfill fallo", tenant=tenant, error=e)
+            continue
+        registrar("reloj", "backfill", tenant=tenant, **(_solo_contadores(r) or {}))
+        salida.append(r)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
-    desconocidos = [a for a in argv if a not in ("--once", "--dry-run")]
+    conocidos = ("--once", "--dry-run", "--backfill-inactivas-ia", "--limit")
+    desconocidos = [a for i, a in enumerate(argv)
+                    if a not in conocidos
+                    # el valor de --limit no es un argumento suelto
+                    and not (i > 0 and argv[i - 1] == "--limit")]
     if desconocidos:
-        registrar("reloj", "argumentos desconocidos: solo --once y --dry-run",
+        registrar("reloj", "argumentos desconocidos: solo --once, --dry-run, "
+                           "--backfill-inactivas-ia y --limit N",
                   cuantos=len(desconocidos))
         return 2
     una_vez = "--once" in argv
     seco = "--dry-run" in argv
+
+    # EL BACKFILL ES OTRO PROGRAMA, no una variante del ciclo. Sale por aca
+    # antes de mirar 'RELOJ_HABILITADO': ese interruptor gobierna la cadencia
+    # automatica, y esto es justamente lo que NO tiene cadencia. Frenar el
+    # reloj no deberia impedir drenar el backlog a mano, ni al reves.
+    if "--backfill-inactivas-ia" in argv:
+        if una_vez:
+            registrar("reloj", "--backfill-inactivas-ia no se combina con --once: "
+                               "no es una pasada del reloj, es otra cosa")
+            return 2
+        return _backfill(argv, seco)
 
     if seco and not una_vez:
         # Un bucle "en seco" para siempre no le sirve a nadie y es una trampa:

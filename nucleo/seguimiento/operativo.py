@@ -177,7 +177,9 @@ def cerrar_todo(config, tenant: str, conversacion: dict, texto: str,
 INTERVALO_BARRIDO_SEGUNDOS = 3600
 
 
-def cerrar_inactivas_de_ia(config, tenant: str, simular: bool = False) -> dict:
+def cerrar_inactivas_de_ia(config, tenant: str, simular: bool = False, *,
+                           backlog: bool = False,
+                           lote: int | None = None) -> dict:
     """
     Cierra las que atendio SOLO el asistente y quedaron mudas.
 
@@ -218,6 +220,26 @@ def cerrar_inactivas_de_ia(config, tenant: str, simular: bool = False) -> dict:
     Lo fija la transicion (por='plazo'). Es lo unico que se sabe: el
     asistente contesto y el cliente no volvio.
 
+    EL BACKLOG NO CORRE CON EL RELOJ, NUNCA
+    ---------------------------------------
+    'backlog=False' es el default y es lo que llama el reloj: solo flujo
+    normal. Aunque 'backfill_habilitado' este en true, una pasada automatica
+    NO consume lote -- si lo hiciera, con el reloj cada 60 minutos y lote 10
+    serian 240 cierres por dia y el backlog se iria en menos de un dia, que es
+    justo lo que las cohortes existen para evitar.
+
+    'backlog=True' es la ejecucion explicita, a mano:
+
+        python -m nucleo.reloj --backfill-inactivas-ia --limit 10
+
+    Toma como maximo el lote, mas antiguas primero, con las MISMAS guardas que
+    el flujo normal y la misma transicion. No toca ninguna conversacion nueva.
+
+    Los dos interruptores siguen valiendo: sin 'backfill_habilitado' el
+    comando tampoco hace nada. Uno autoriza, el otro ejecuta -- y hacen falta
+    los dos, porque el comando se puede teclear por costumbre y la
+    autorizacion es una decision que quedo escrita en la config.
+
     'simular' informa las DOS cohortes por separado y no cierra nada.
     """
     from nucleo.persistencia import db as persistencia
@@ -242,12 +264,15 @@ def cerrar_inactivas_de_ia(config, tenant: str, simular: bool = False) -> dict:
                              "nada: hay que elegir desde cuando cuenta la regla")
         return resumen
 
-    lote = getattr(ajustes, "backfill_lote", 10)
+    lote_config = getattr(ajustes, "backfill_lote", 10)
     try:
         nuevas = persistencia.conversaciones_ia_inactivas(
             tenant, horas, corte=corte, cohorte="normal")
-        backlog = persistencia.conversaciones_ia_inactivas(
-            tenant, horas, corte=corte, cohorte="backlog", limite=lote)
+        # El lote del comando manda sobre el de la config: quien lo teclea
+        # esta mirando, y puede querer cinco en vez de diez esta vez.
+        tope = int(lote) if lote else lote_config
+        candidatas_backlog = persistencia.conversaciones_ia_inactivas(
+            tenant, horas, corte=corte, cohorte="backlog", limite=tope)
         # Cuantas hay en total en el backlog, no solo el lote: es el numero
         # que dice cuanto falta, y sin el no se sabe si esto avanza.
         backlog_total = persistencia.conversaciones_ia_inactivas(
@@ -259,11 +284,27 @@ def cerrar_inactivas_de_ia(config, tenant: str, simular: bool = False) -> dict:
 
     resumen["nuevas_elegibles"] = len(nuevas)
     resumen["backlog_elegible"] = len(backlog_total)
-    a_cerrar = list(nuevas)
-    if resumen["backfill_habilitado"]:
-        resumen["backfill_que_cerraria"] = len(backlog)
-        # El flujo normal NO consume el cupo del backfill: son dos listas.
-        a_cerrar += backlog
+    resumen["modo"] = "backlog" if backlog else "normal"
+
+    # Cuantas tomaria la PROXIMA tanda manual. Es informativo y se calcula
+    # siempre, tambien en la pasada del reloj: el seco tiene que poder decir
+    # cuanto falta y cuanto se llevaria el proximo comando, sin que eso
+    # signifique que la pasada las va a cerrar.
+    resumen["backfill_que_cerraria"] = (
+        len(candidatas_backlog) if resumen["backfill_habilitado"] else 0)
+
+    if backlog:
+        # Ejecucion explicita: SOLO el backlog. No se mezclan las cohortes ni
+        # aca -- una corrida a mano que ademas cierre las nuevas hace que el
+        # informe no diga lo que hizo.
+        if not resumen["backfill_habilitado"]:
+            resumen["motivo"] = ("el backfill esta apagado: poner "
+                                 "cierre_inactivas_ia.backfill_habilitado en true")
+            return resumen
+        a_cerrar = list(candidatas_backlog)
+    else:
+        # El reloj. Nunca consume lote del backlog, aunque este autorizado.
+        a_cerrar = list(nuevas)
     resumen["revisadas"] = len(a_cerrar)
 
     if simular:

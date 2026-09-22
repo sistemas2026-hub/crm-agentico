@@ -89,14 +89,16 @@ _lista = persistencia.conversaciones_ia_inactivas
 _cerrar = operativo.cerrar_todo
 
 
-def correr(config, nuevas=0, backlog=0, simular=False, espia=None):
+def correr(config, nuevas=0, backlog=0, simular=False, espia=None,
+           modo_backlog=False, lote=None):
     cerrados = []
     persistencia.conversaciones_ia_inactivas = espia or Falsa(nuevas, backlog)
     operativo.cerrar_todo = lambda *a, **k: (
         cerrados.append(a[2]["id"]) or
         {"conversacion": True, "ticket": False, "caso": False})
     try:
-        r = operativo.cerrar_inactivas_de_ia(config, "t", simular=simular)
+        r = operativo.cerrar_inactivas_de_ia(
+            config, "t", simular=simular, backlog=modo_backlog, lote=lote)
         r["_cerrados"] = cerrados
         return r
     finally:
@@ -127,31 +129,82 @@ afirmar(CierreInactivasIA().habilitado is False
         "encuentra conversaciones cerradas solas")
 
 # ── las dos cohortes ─────────────────────────────────────────────────────────
-print("\n--- las dos cohortes ---")
+print("\n--- el reloj NUNCA consume backlog ---")
 
 r = correr(cfg(), nuevas=3, backlog=147)
 afirmar(r["cerradas"] == 3,
-        "cierra el flujo normal (3) y NO toca el backlog, aunque sean 147")
+        "cierra el flujo normal (3) y no toca el backlog")
 afirmar(r["backlog_elegible"] == 147,
-        "pero informa cuantas hay en el backlog: sin ese numero no se sabe si avanza")
-afirmar(r["backfill_que_cerraria"] == 0,
-        "con el backfill apagado no cerraria ninguna vieja")
+        "pero informa cuantas hay, para saber cuanto falta")
 
 r = correr(cfg(backfill=True, lote=10), nuevas=3, backlog=147)
-afirmar(r["cerradas"] == 13,
-        "con backfill encendido: las 3 nuevas MAS el lote de 10")
-afirmar(r["backfill_que_cerraria"] == 10,
-        "el lote se respeta -- 10, no 147")
+afirmar(r["cerradas"] == 3,
+        "AUNQUE el backfill este autorizado, la pasada del reloj cierra solo "
+        "las 3 nuevas: no consume lote. Con el reloj cada 60 min, 10 por ciclo "
+        "serian 240 al dia y el backlog se iria en menos de un dia")
+afirmar(r["modo"] == "normal",
+        "y la pasada se declara como normal")
 
-r = correr(cfg(backfill=True, lote=10), nuevas=50, backlog=147)
-afirmar(r["cerradas"] == 60,
-        "el flujo normal NO consume el cupo del backfill: 50 + 10, no 10")
+r = correr(cfg(backfill=True, lote=10), nuevas=0, backlog=147)
+afirmar(r["cerradas"] == 0,
+        "sin nuevas, el reloj no cierra nada aunque haya 147 esperando")
 
-r = correr(cfg(backfill=True, lote=10), nuevas=0, backlog=4)
-afirmar(r["cerradas"] == 4,
-        "si el backlog es menor que el lote, cierra lo que hay y no falla")
+print("\n--- el comando explicito ---")
 
-# ── simular ──────────────────────────────────────────────────────────────────
+r = correr(cfg(backfill=False), nuevas=3, backlog=147, modo_backlog=True)
+afirmar(r["cerradas"] == 0 and "apagado" in r.get("motivo", ""),
+        "con el backfill apagado, el comando tampoco toca el backlog: uno "
+        "autoriza y el otro ejecuta, y hacen falta los dos")
+
+r = correr(cfg(backfill=True, lote=10), nuevas=3, backlog=147, modo_backlog=True)
+afirmar(r["cerradas"] == 10,
+        "con lote 10 cierra 10, no 147")
+afirmar(r["modo"] == "backlog",
+        "y se declara como corrida de backlog")
+
+r = correr(cfg(backfill=True, lote=10), nuevas=50, backlog=147, modo_backlog=True)
+afirmar(r["cerradas"] == 10,
+        "el comando NO toca las nuevas: 10, no 60")
+
+r = correr(cfg(backfill=True, lote=10), nuevas=0, backlog=147,
+           modo_backlog=True, lote=5)
+afirmar(r["cerradas"] == 5,
+        "el --limit del comando manda sobre el lote de la config: quien lo "
+        "teclea esta mirando")
+
+
+class Drenando:
+    """Persistencia que va sacando lo ya cerrado, como hace la de verdad.
+
+    La consulta real filtra por "estado <> 'cerrada'", asi que una cerrada no
+    vuelve a salir. Sin esto, la prueba de "la segunda tanda procesa las
+    siguientes" pasaria devolviendo siempre las mismas diez.
+    """
+
+    def __init__(self, total):
+        self.quedan = list(range(total))
+
+    def __call__(self, tenant, horas, *, corte=None, cohorte="normal", limite=None):
+        if cohorte == "normal":
+            return []
+        filas = [conv(i) for i in self.quedan]
+        return filas[:limite] if limite else filas
+
+    def cerrar(self, ids):
+        vistos = {int(i[:8]) for i in ids}
+        self.quedan = [q for q in self.quedan if q not in vistos]
+
+
+d = Drenando(25)
+tandas = []
+for _ in range(3):
+    r = correr(cfg(backfill=True, lote=10), espia=d, modo_backlog=True)
+    d.cerrar(r["_cerrados"])
+    tandas.append(r["cerradas"])
+afirmar(tandas == [10, 10, 5] and not d.quedan,
+        "tres tandas de 10 drenan las 25, y cada una procesa las SIGUIENTES")
+
+
 print("\n--- simular ---")
 
 r = correr(cfg(backfill=True), nuevas=3, backlog=147, simular=True)
