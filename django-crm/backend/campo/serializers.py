@@ -6,6 +6,7 @@ from __future__ import annotations
 from rest_framework import serializers
 
 from campo.models import AsignacionTrabajo, EvidenciaTrabajo, OrdenTrabajo, WorkType, WorkTypeVersion
+from campo.services.validador import devolucion_vigente
 
 
 class WorkTypeVersionEsquemaSerializer(serializers.ModelSerializer):
@@ -24,6 +25,36 @@ class WorkTypeVersionEsquemaSerializer(serializers.ModelSerializer):
             "schema_hash",
             "publicada_en",
         ]
+
+
+def _origen(obj: OrdenTrabajo) -> dict:
+    """De donde salio la orden: que sistema la pidio y con que referencia."""
+    return {
+        "sistema": obj.origen_sistema,
+        "tipo": obj.origen_tipo,
+        "ref": obj.origen_ref,
+    }
+
+
+def _cuadrilla(obj: OrdenTrabajo) -> list[dict]:
+    """
+    Quienes van al trabajo, con su rol.
+
+    El tecnico principal ya viaja aparte por compatibilidad; esto agrega al
+    resto, que hasta ahora no salia de la base: un ayudante asignado era
+    invisible para la aplicacion.
+    """
+    return [
+        {
+            "profile_id": str(a.profile_id),
+            "nombre": a.profile.user.name or a.profile.user.email,
+            "rol": a.rol,
+            "es_principal": a.es_principal,
+        }
+        for a in obj.asignaciones.select_related("profile__user").order_by(
+            "-es_principal", "asignado_en"
+        )
+    ]
 
 
 class EvidenciaTrabajoSerializer(serializers.ModelSerializer):
@@ -48,6 +79,7 @@ class OrdenTrabajoListSerializer(serializers.ModelSerializer):
     tipo = serializers.SerializerMethodField()
     cliente = serializers.SerializerMethodField()
     tecnico_principal = serializers.SerializerMethodField()
+    origen = serializers.SerializerMethodField()
 
     class Meta:
         model = OrdenTrabajo
@@ -55,15 +87,20 @@ class OrdenTrabajoListSerializer(serializers.ModelSerializer):
             "id",
             "numero",
             "revision",
+            "vuelta",
             "tipo",
             "cliente",
             "tecnico_principal",
+            "origen",
             "estado_operativo",
             "estado_validacion",
             "programada_para",
             "iniciada_en",
             "created_at",
         ]
+
+    def get_origen(self, obj: OrdenTrabajo) -> dict:
+        return _origen(obj)
 
     def get_tipo(self, obj: OrdenTrabajo) -> dict:
         v = obj.tipo_trabajo_version
@@ -98,6 +135,9 @@ class OrdenTrabajoDetailSerializer(serializers.ModelSerializer):
     schema = serializers.SerializerMethodField()
     evidencias = EvidenciaTrabajoSerializer(many=True, read_only=True)
     tecnico_principal = serializers.SerializerMethodField()
+    origen = serializers.SerializerMethodField()
+    cuadrilla = serializers.SerializerMethodField()
+    correccion = serializers.SerializerMethodField()
 
     class Meta:
         model = OrdenTrabajo
@@ -105,9 +145,14 @@ class OrdenTrabajoDetailSerializer(serializers.ModelSerializer):
             "id",
             "numero",
             "revision",
+            "vuelta",
             "tipo",
             "cliente",
             "tecnico_principal",
+            "cuadrilla",
+            "origen",
+            "contexto",
+            "correccion",
             "diagnostico_previo",
             "schema",
             "datos",
@@ -117,9 +162,35 @@ class OrdenTrabajoDetailSerializer(serializers.ModelSerializer):
             "programada_para",
             "iniciada_en",
             "completada_campo_en",
+            "cerrada_en",
             "created_at",
             "updated_at",
         ]
+
+    def get_origen(self, obj: OrdenTrabajo) -> dict:
+        return _origen(obj)
+
+    def get_cuadrilla(self, obj: OrdenTrabajo) -> list[dict]:
+        return _cuadrilla(obj)
+
+    def get_correccion(self, obj: OrdenTrabajo) -> dict | None:
+        """
+        Que hay que rehacer, cuando la orden viene devuelta.
+
+        Es 'null' mientras nadie la haya devuelto. Cuando el supervisor la
+        devuelve, el tecnico recibe la lista de requisitos y la observacion en
+        la misma respuesta que la orden: antes esto vivia solo en la bitacora
+        del servidor y se averiguaba por telefono.
+        """
+        devolucion = devolucion_vigente(obj)
+        if devolucion is None:
+            return None
+        return {
+            "vuelta": devolucion["vuelta"],
+            "requisitos": devolucion["requisitos"],
+            "observacion": devolucion["observacion"],
+            "devuelta_en": devolucion["devuelta_en"],
+        }
 
     def get_tipo(self, obj: OrdenTrabajo) -> dict:
         v = obj.tipo_trabajo_version
@@ -129,6 +200,9 @@ class OrdenTrabajoDetailSerializer(serializers.ModelSerializer):
             "version": v.version,
             "schema_version": v.schema_version,
             "schema_hash": v.schema_hash,
+            # Los pasos del procedimiento ya venian con la plantilla y nadie
+            # los entregaba: la aplicacion los dibujaba de ejemplo.
+            "pasos": v.esquema.get("pasos", []),
         }
 
     def get_cliente(self, obj: OrdenTrabajo) -> dict:

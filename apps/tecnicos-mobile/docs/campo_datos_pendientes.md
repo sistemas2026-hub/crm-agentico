@@ -85,14 +85,12 @@ flutter run                                    # producción: solo datos reales
 | CAMPO-DATA-010 | Encabezado | Campana | Notificaciones sin leer | 2 | entero | Backend de Campo | `notificaciones.sin_leer` | Sí | Baja | MOCK |
 | CAMPO-DATA-011 | Inicio | Señal del cliente | CTO, puerto PON, serial ONT | CTO-04-A, PON 0/1/4 | texto | SmartOLT / WispHub | `telemetria.cto`, `.pon`, `.serial_ont` | Sí | Alta | MOCK |
 | CAMPO-DATA-012 | Inicio (futuro) | Señal del cliente | Histórico de señal 48 h | — | serie temporal | SmartOLT | `telemetria.historico` | Sí | Media | NO SE MUESTRA |
-| CAMPO-DATA-013 | Trabajo | Resumen | Contador de alertas de red | — | entero | SmartOLT | `jornada.alertas_rx` | Sí | Media | NO SE MUESTRA: un contador de alertas de ejemplo se lee como una alarma real |
-| CAMPO-DATA-014 | Franja de sincronización | — | Marca de la última sincronización | — | fecha y hora | **App móvil**: `SyncQueueService` guarda la fecha de cada envío exitoso | `sync.ultima_exitosa_en` (local) | **No** | Baja | NO SE MUESTRA. No es deuda de API: se resuelve entero en el teléfono |
 | CAMPO-DATA-018 | Inicio | Chip de academia | Cursos pendientes | 1 | entero | Módulo de Academia | `academia.cursos_pendientes` | Sí | Baja | MOCK |
 | CAMPO-DATA-019 | Inicio, encabezado | Avatar | Foto del técnico | — | url | Perfil del CRM | `profile.foto_url` | Sí | Baja | NO SE MUESTRA: se usan sus iniciales, que son reales |
 | CAMPO-DATA-020 | Inicio, Trabajo | Tarjeta | Ventana horaria comprometida | 10:00 - 12:00 | rango | Backend de Campo | `trabajo.ventana_inicio`, `.ventana_fin` | Sí | Alta | MOCK |
 | CAMPO-DATA-021 | Inicio, Materiales | Kit | Hora de confirmación del kit | 08:02 AM | hora | Inventario de Dexter | `kit.confirmado_en` | Sí | Media | MOCK |
 | CAMPO-DATA-022 | Franja | — | Modo de trabajo de datos | Modo Dinámico | texto | Sin definir | — | Sí | Baja | MOCK. El número de cambios sin enviar, al lado, es real |
-| CAMPO-DATA-023 | Trabajo | Tarjeta de instalación | Plan contratado y materiales previstos | Fibra 500 Mbps + TV · ONT + 80m Drop | texto | WispHub vía backend | `trabajo.plan`, `.materiales_previstos` | Sí | Media | MOCK |
+| CAMPO-DATA-023 | Trabajo | Tarjeta de instalación | Plan contratado | Fibra 500 Mbps | texto | **Ya existe en el backend** | `contexto.cliente.plan` | **No, desde el 22/09/2026** | Media | REAL DISPONIBLE (el plan). Los **materiales previstos** siguen sin existir |
 | CAMPO-DATA-024 | Detalle | Triage | Lista de comprobaciones y causa sugerida | Facturación AL DÍA · Atenuación DEGRADADO | estructura | Dexter + SmartOLT | `triage.checks[]`, `triage.causa_sugerida` | Sí | Media | MOCK. La cita del cliente **sí** es real: es `diagnostico_previo_ia` |
 | CAMPO-DATA-025 | Materiales | Custodia | El kit completo: consumibles, bobinas, serializados, terminales | 5 ítems | estructura | Inventario de Dexter | `kit.items[]` | Sí | Alta | MOCK. Ver `lib/core/mock/kit_mock_data.dart` |
 | CAMPO-DATA-026 | Ejecución | Formulario | Equipo sugerido para reemplazo y su stock a bordo | ONT Huawei GPON HG8145V5 · 2 en camioneta | estructura | Inventario de Dexter cruzado con el tipo de falla | `kit.sugerencia_reemplazo` | Sí | Media | MOCK. Se muestra al responder que sí; **no se guarda** con la respuesta |
@@ -100,7 +98,7 @@ flutter run                                    # producción: solo datos reales
 | CAMPO-DATA-028 | Ejecución | Academia | Cápsulas de consulta del procedimiento en curso | 2 cápsulas | estructura | Módulo de Academia | `academia.capsulas[]` | Sí | Baja | MOCK. Ver `lib/features/ejecucion/widgets/bloque_academia.dart` |
 | CAMPO-DATA-013 | Trabajo | Resumen | Trabajos del día con la señal fuera de rango | 1 | entero | SmartOLT cruzado con la jornada | `jornada.alertas_rx` | Sí | Media | MOCK. Estaba escrito a mano dentro de la pantalla; ahora vive en el catálogo |
 | CAMPO-DATA-014 | Trabajo | Resumen | Cumplimiento del SLA del día | 94 % | entero | Backend de Campo | `jornada.cumplimiento_sla` | Sí | Media | MOCK. Misma historia que el anterior |
-| CAMPO-DATA-029 | Trabajo | Tarjeta en curso | De qué ticket nació la orden y por qué | Ticket #1234 (Sin internet nocturno) | estructura | Backend de Campo | `trabajo.ticket_origen` | Sí | Media | MOCK |
+| CAMPO-DATA-029 | Trabajo | Tarjeta en curso | De qué ticket nació la orden | Ticket #1234 | estructura | **Ya existe en el backend** | `origen.{sistema,tipo,ref}` | **No, desde el 22/09/2026** | Media | REAL DISPONIBLE: el servidor ya lo entrega; falta que la aplicación lo guarde y lo muestre |
 | CAMPO-DATA-030 | Detalle | Telemetría | Serie de potencia de las últimas 48 h | 10 lecturas | serie | SmartOLT | `telemetria.rx_48h[]` | Sí | Media | MOCK. Sin la serie no se puede dibujar la curva del diseño |
 | CAMPO-DATA-031 | Detalle | Telemetría | Rango óptico esperado | -18.0 a -25.0 dBm | rango | Parámetro de la empresa | `red.rango_optico` | Sí | Alta | MOCK. Cada ISP define el suyo: no puede quedar fijo en el código |
 | CAMPO-DATA-032 | Ejecución | Medición | Longitud de onda de la medición | 1490nm Óptico | texto | Catálogo de red | `red.longitud_onda_medicion` | Sí | Baja | MOCK |
@@ -117,9 +115,9 @@ flutter run                                    # producción: solo datos reales
 | CAMPO-DATA-044 | Trabajo | Buscador | Lector de código del equipo del cliente | — | acción | Cámara + inventario | `equipo.serial` | Sí | Media | MOCK **que no lee**: el botón avisa que falta. La búsqueda por texto, al lado, sí es real |
 | CAMPO-DATA-045 | Trabajo | Tarjeta | Requisito de seguridad del trabajo y aptitud del técnico | Certificación de alturas | estructura | `trabajo.requisitos[]` + `perfil.certificaciones` | — | Sí | Alta | MOCK. **No habilita ni bloquea**: hoy el técnico se entera del riesgo en el sitio |
 | CAMPO-DATA-046 | Trabajo | Tarjeta terminada | Acta de cierre: estado y medición final | Aprobado · -19.4 dBm | estructura | Backend de Campo | `trabajo.acta` | Sí | Media | MOCK |
-| CAMPO-DATA-047 | Detalle | Origen | Quién abrió la orden y cuándo | 08:15 AM · NOC Central | texto | Backend de Campo | `trabajo.origen` | Sí | Media | MOCK |
+| CAMPO-DATA-047 | Detalle | Origen | De qué sistema y con qué referencia se abrió | wisphub · ticket · WH-91288 | estructura | **Ya existe en el backend** | `origen` | **No, desde el 22/09/2026** | Media | REAL DISPONIBLE. La **hora** de apertura sigue sin existir |
 | CAMPO-DATA-048 | Detalle | Telemetría | OLT y puerto, distancia al splitter, potencia TX | 4 filas | estructura | SmartOLT vía Dexter API | `telemetria.olt`, `.distancia_splitter`, `.tx_dbm` | Sí | Media | MOCK |
-| CAMPO-DATA-049 | Detalle | Protocolo | Los pasos del procedimiento del tipo de trabajo | 8 pasos | lista | `tipo_trabajo.protocolo[]` | — | Sí | Alta | MOCK. **No es la máquina de estados**: se muestra aparte de la barra de pasos, que sí es real |
+| CAMPO-DATA-049 | Detalle | Protocolo | Los pasos del procedimiento del tipo de trabajo | 3-8 pasos | lista | **Ya existe en el backend** | `tipo.pasos[]` (de `WorkTypeVersion.esquema`) | **No, desde el 22/09/2026** | Alta | REAL DISPONIBLE: venían con la plantilla y nadie los entregaba. **No es la máquina de estados**: van aparte de la barra de pasos |
 | CAMPO-DATA-050 | Detalle | Guía FTTH | Procedimiento recomendado para la falla | 4 pasos | lista | Base de conocimiento de Dexter | `procedimiento.pasos[]` | Sí | Media | MOCK. Material de consulta: no valida ni completa nada |
 | CAMPO-DATA-051 | Materiales | Recepción | Acta del kit, quién lo despachó y a qué hora | Acta #K-2024-094 · M. Morales | estructura | Inventario de Dexter | `kit.acta`, `kit.despachado_por` | Sí | Media | MOCK |
 | CAMPO-DATA-052 | Materiales | Serializado | MAC del equipo, cómo llegó y en qué estado | 48:57:54:A9:B0:C1 · Validado OLT | estructura | Inventario de Dexter | `equipo.mac`, `.estado_previo` | Sí | Media | MOCK |
@@ -156,6 +154,28 @@ modo de jornada, avance del día y una rejilla de recursos del turno.
 Lo que **no** cambió: qué datos son reales y cuáles de ejemplo, la guarda del
 modo demostración y la regla de que nada de este catálogo decide nada.
 
+
+
+## Lo que el servidor ya sabía (22/09/2026)
+
+Al revisar el backend de Campo aparecieron **siete datos guardados en la base
+que ningún serializador entregaba**. No eran deuda: eran datos disponibles sin
+consumir, como pasó antes con `estado_validacion` y las coordenadas.
+
+Ya se exponen (tanda 1 de `SPEC/BACKEND_CAMPO_DATOS.md`): el origen de la orden,
+el contexto técnico congelado al despachar, los pasos del procedimiento, la
+vuelta de validación, `cerrada_en`, la cuadrilla completa con sus roles, y —lo
+más importante— **qué pidió rehacer el supervisor**: hasta ahora esa lista vivía
+solo en la bitácora del servidor, así que una orden devuelta llegaba al teléfono
+sin decir qué corregir.
+
+Lo que falta ahora es del lado de la aplicación: guardarlos y mostrarlos.
+
+## Números de identificador
+
+Los identificadores no se reutilizan: si un dato se retira, su número queda
+quemado. **CAMPO-DATA-034 nunca se asignó** —se saltó al numerar—, así que no
+falta una fila: falta el número, a propósito.
 
 ## Las dos pantallas que faltaban en el diseño (22/09/2026)
 
@@ -233,7 +253,7 @@ descuadre de material se resuelve en papel.
   distancia se calcula en el teléfono o en el servidor.
 - **Vehículo y preoperacional** (CAMPO-DATA-008): módulo propio, hoy inexistente.
 - **Academia**: sin diseño completo en Stitch y sin contenido definido.
-- **Marca de última sincronización** (CAMPO-DATA-014): lo único de esta lista que
+- **Marca de última sincronización** (CAMPO-DATA-036): lo único de esta lista que
   no necesita backend — alcanza con que la cola guarde la fecha del último envío
   exitoso.
 

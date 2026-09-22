@@ -188,9 +188,9 @@ def verificar_checklist_completo(orden) -> list[dict]:
     return errores
 
 
-def requisitos_a_corregir(orden) -> set[str]:
+def devolucion_vigente(orden) -> dict | None:
     """
-    Que requisitos pidio rehacer el supervisor para la vuelta que corre.
+    Que devolvio el supervisor en la vuelta que corre, entero.
 
     Sale de la bitacora, no de una columna. 'EventoTrabajo' es append-only y
     esta ordenado por fecha, asi que el ultimo evento de devolucion es una
@@ -198,11 +198,15 @@ def requisitos_a_corregir(orden) -> set[str]:
     que una columna habria ido sobrescribiendo. Con el historial completo se
     puede responder despues cual requisito se devuelve mas seguido.
 
-    En la vuelta 1 no hay devolucion todavia: devuelve vacio y el checklist se
-    comporta como siempre.
+    Devuelve None en la vuelta 1: todavia no hubo devolucion.
+
+    Esto es lo que el tecnico necesita ver en el telefono. Hasta el 22/09/2026
+    la lista vivia solo aca dentro y la aplicacion no la recibia: una orden
+    devuelta llegaba sin decir que habia que rehacer, y se averiguaba por
+    telefono.
     """
     if orden.vuelta <= 1:
-        return set()
+        return None
     evento = (
         orden.eventos.filter(tipo="correccion_requerida",
                              datos__vuelta_nueva=orden.vuelta)
@@ -210,8 +214,27 @@ def requisitos_a_corregir(orden) -> set[str]:
         .first()
     )
     if evento is None:
+        return None
+    datos = evento.datos or {}
+    return {
+        "vuelta": orden.vuelta,
+        "requisitos": [str(r) for r in datos.get("requisitos_a_corregir", [])],
+        "observacion": datos.get("observacion", ""),
+        "devuelta_en": evento.created_at,
+    }
+
+
+def requisitos_a_corregir(orden) -> set[str]:
+    """
+    Que requisitos pidio rehacer el supervisor para la vuelta que corre.
+
+    En la vuelta 1 no hay devolucion todavia: devuelve vacio y el checklist se
+    comporta como siempre.
+    """
+    devolucion = devolucion_vigente(orden)
+    if devolucion is None:
         return set()
-    return {str(r) for r in (evento.datos or {}).get("requisitos_a_corregir", [])}
+    return set(devolucion["requisitos"])
 
 
 def _castear_tipo(valor: Any, tipo: str) -> Any:
