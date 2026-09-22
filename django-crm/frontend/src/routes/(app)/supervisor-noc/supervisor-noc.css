@@ -382,3 +382,31 @@
 @media (max-width: 640px) {
   .snoc-drawer { width: 100%; }
 }
+
+/* ---------------------------------------------------------------------------
+   PROGRAMACION
+   --------------------------------------------------------------------------- */
+.snoc-guardarrailes { padding: var(--snoc-xs); background: var(--snoc-surface-container-low); border-radius: var(--snoc-r-xl); }
+.snoc-guardarrail {
+  display: inline-flex; align-items: center; gap: var(--snoc-xs);
+  padding: 4px var(--snoc-sm); border-radius: var(--snoc-r-lg);
+  background: var(--snoc-surface-container-lowest); box-shadow: var(--snoc-sombra);
+}
+.snoc-pestanas { border-top: 1px solid var(--snoc-outline-variant); padding-top: var(--snoc-sm); }
+.snoc-pestanas .snoc-pildora { text-decoration: none; }
+
+.snoc-filtros { display: grid; gap: var(--snoc-sm); grid-template-columns: repeat(1, minmax(0, 1fr)); }
+@media (min-width: 640px) { .snoc-filtros { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1024px) { .snoc-filtros { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+.snoc-campo-grupo { display: flex; flex-direction: column; gap: 4px; justify-content: flex-end; }
+
+/* La barra de ocupacion. Pasa a 'exceso' por encima del 100%: una barra que
+   se corta en 100 esconde justo el caso que importa. */
+.snoc-barra {
+  height: 6px; border-radius: 9999px; overflow: hidden;
+  background: var(--snoc-surface-container-high);
+}
+.snoc-barra-relleno { height: 100%; background: var(--snoc-primary); border-radius: 9999px; }
+.snoc-barra-exceso { background: var(--snoc-error); }
+
+.snoc-tabla tbody tr { cursor: default; }

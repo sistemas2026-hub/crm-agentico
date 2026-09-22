@@ -224,6 +224,11 @@
           </div>
         </div>
 
+        <div class="snoc-envuelve snoc-pestanas" style="width:100%; order:3;">
+          <a class="snoc-pildora snoc-pildora-activa" href="/supervisor-noc">Hallazgos y propuestas</a>
+          <a class="snoc-pildora" href="/supervisor-noc/programacion">Programación</a>
+        </div>
+
         <div class="snoc-fila snoc-chip-modo">
           <div class="snoc-chip-icono"><span class="snoc-icono" style="font-size:22px;">visibility</span></div>
           <div class="snoc-pila-xs">
