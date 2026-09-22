@@ -117,6 +117,24 @@ _sesiones: dict = {}   # canales.clave_sesion(tenant, canal, id_sesion) -> {"ses
 #     semaforo por tenant convierte la avalancha de una en una fila de esa
 #     una. Nace APAGADO (max_turnos_simultaneos = None): encenderlo introduce
 #     espera, y eso se decide por empresa y midiendo, no por defecto.
+#
+#  LIMITACION EXPLICITA DE ESTA FASE, Y NO ES UN DETALLE
+#  -----------------------------------------------------
+#  El lock y el semaforo son estructuras EN MEMORIA DE ESTE PROCESO. Hoy
+#  alcanzan porque el motor corre con UN worker (gunicorn --workers 1). El dia
+#  que haya dos workers, dos contenedores o escalado horizontal dejan de ser
+#  globales:
+#
+#      worker A  ->  lock de la conversacion 123
+#      worker B  ->  OTRO lock de la conversacion 123
+#      los dos procesan a la vez
+#
+#  O sea que esto protege lo que hay, no lo que venga. Antes de subir a mas de
+#  un worker hay que mover la exclusion a algo compartido -- un lock consultivo
+#  de Postgres (pg_advisory_lock) sobre el id de la conversacion es lo mas
+#  barato, porque la base ya esta y ya es el punto de serializacion de todo lo
+#  demas. Queda dicho aca y no en un documento aparte: quien suba los workers
+#  va a leer este archivo, no ese documento.
 # ════════════════════════════════════════════════════════════════════════════
 
 # clave de sesion -> [Lock, cuantos lo estan usando]. El contador es para
@@ -6987,9 +7005,27 @@ def corpus_ingerir():
             # los que todavia no la tienen.
             roles_doc = ingesta.roles_validos(config, getattr(doc, "roles", None))
 
+            # VECTORIZAR SIN UNA CONEXION TOMADA (22/09/2026, auditoria previa
+            # al pool). `ingerir` recibia el cursor y llamaba a OpenAI UNA VEZ
+            # POR FRAGMENTO dentro del `with`: un documento largo retenia la
+            # conexion minutos. Con un pool eso no agota conexiones nuevas --
+            # agota las del pool, y de paso hace esperar a todos los demas.
+            #
+            # Ahora son tres pasos: una consulta corta para saber si hace
+            # falta, los embeddings SIN conexion, y otra consulta corta para
+            # escribir. La decision sigue siendo de `ingerir`; esto solo evita
+            # gastar embeddings cuando el archivo no cambio.
+            with persistencia.sesion(tenant) as (cur, org):
+                hace_falta = ingesta.hay_que_vectorizar(
+                    cur, org, doc, hash_, forzar=forzar)
+
+            vectores = ([ingesta.vectorizar(f.contextualizar(doc))
+                         for f in doc.fragmentos] if hace_falta else [])
+
             with persistencia.sesion(tenant) as (cur, org):
                 resultado = ingesta.ingerir(
                     cur, org, doc, hash_,
+                    vectores=vectores,
                     modelo_embeddings=config.rag.modelo_embeddings,
                     roles_permitidos=roles_doc or roles,
                     storage_path=request.form.get("storage_path"),

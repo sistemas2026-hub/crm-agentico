@@ -71,6 +71,13 @@ from nucleo.ingesta import corpus as ingesta       # noqa: E402
 from nucleo.persistencia.db import sesion          # noqa: E402
 from nucleo.recuperacion.busqueda import recuperar_candidatos  # noqa: E402
 
+# VECTORES FALSOS: desde el 22/09/2026 `ingerir` no vectoriza --
+# recibe los vectores ya calculados. Que la prueba los invente la hace
+# HERMETICA: deja de llamar a OpenAI, deja de costar y deja de fallar
+# cuando esa API tiene un mal dia. Lo que esta prueba mide es la
+# aprobacion de documentos, no el vectorizado.
+_VECTORES_FALSOS = [[0.0] * 1536 for _ in range(50)]
+
 TENANT = "rapilink"
 CODIGO = "ZZ-TEST-APROBACION"
 # Texto muy especifico, para que la consigna de prueba lo traiga primero si
@@ -92,6 +99,7 @@ def comprobar(condicion: bool, que: str) -> None:
 
 class _FragmentoFalso:
     """Lo minimo que ingerir() necesita, sin pasar por un .docx real."""
+
     def __init__(self, orden, contenido):
         self.orden = orden
         self.contenido = contenido
@@ -138,6 +146,7 @@ try:
         _limpiar(cur, org)
         r = ingesta.ingerir(
             cur, org, _DocFalso(), "hash-de-prueba-1",
+            vectores=_VECTORES_FALSOS,
             modelo_embeddings=config.rag.modelo_embeddings,
             roles_permitidos=[rol], estado="pendiente",
             original=b"bytes-falsos-del-docx", nombre_archivo="prueba.docx",
@@ -197,6 +206,7 @@ try:
     with sesion(TENANT) as (cur, org):
         r2 = ingesta.ingerir(
             cur, org, _DocFalso(), "hash-de-prueba-1",   # mismo hash
+            vectores=_VECTORES_FALSOS,
             modelo_embeddings=config.rag.modelo_embeddings,
             roles_permitidos=[rol], estado="pendiente", forzar=True,
             original=b"bytes-falsos-del-docx")
@@ -216,6 +226,7 @@ try:
         with sesion(TENANT) as (cur, org):
             ingesta.ingerir(
                 cur, org, _DocFalso(), "hash-DISTINTO",
+            vectores=_VECTORES_FALSOS,
                 modelo_embeddings=config.rag.modelo_embeddings,
                 roles_permitidos=[rol], estado="pendiente",
                 original=b"otros-bytes")

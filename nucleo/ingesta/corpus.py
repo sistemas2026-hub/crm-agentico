@@ -156,8 +156,29 @@ def _fila(cur, org_id: str, codigo: str, version: str):
     return f[0], f[1], f[2], f[3]
 
 
+def hay_que_vectorizar(cur, org_id: str, doc, hash_: str, *, forzar: bool = False) -> bool:
+    """
+    Va a hacer falta vectorizar este documento, o ya esta guardado igual?
+
+    Existe para poder LLAMAR A OPENAI SIN UNA CONEXION TOMADA. Vectorizar es
+    una llamada HTTP por fragmento --segundos, a veces minutos para un
+    documento largo-- y hasta el 22/09/2026 corria dentro del `with sesion()`
+    que despues escribe: la conexion quedaba retenida todo ese rato. Con un
+    pool eso no agota conexiones nuevas, agota las del pool, que es peor
+    porque ademas hace esperar a todos los demas.
+
+    Es la MISMA consulta que hace `ingerir` para decidir; no se duplica la
+    decision, se adelanta. Si entre esta pregunta y la escritura alguien sube
+    el mismo documento, `ingerir` lo vuelve a comprobar y gana su respuesta --
+    esta funcion solo evita gastar embeddings de gusto, no decide nada.
+    """
+    doc_id, hash_guardado, _, _ = _fila(cur, org_id, doc.codigo, doc.version)
+    return not (doc_id and hash_guardado == hash_ and not forzar)
+
+
 def ingerir(cur, org_id: str, doc, hash_: str, *,
             modelo_embeddings: str,
+            vectores: list | None = None,
             roles_permitidos: list[str] | None = None,
             tipo: str = "guia_tecnica",
             storage_path: str | None = None,
@@ -272,10 +293,26 @@ def ingerir(cur, org_id: str, doc, hash_: str, *,
     # el que declare la config del tenant -- ver modelo_real() arriba.
     modelo = modelo_real()
 
+    # LOS VECTORES VIENEN CALCULADOS DESDE AFUERA, SIEMPRE. Esta funcion
+    # recibe un cursor: todo lo que haga corre con una conexion tomada, y
+    # vectorizar es una llamada HTTP por fragmento. Hasta el 22/09/2026 se
+    # hacia aca, y un documento largo retenia la conexion minutos.
+    #
+    # LEVANTA en vez de calcular por su cuenta, y eso es deliberado: con un
+    # respaldo que vectoriza, el camino lento sigue EXISTIENDO -- basta que
+    # alguien llame sin vectores para que vuelva el problema, sin que nada
+    # avise. Que falle deja el error donde se puede arreglar, que es quien
+    # llama. Ver hay_que_vectorizar() para el orden correcto.
+    if vectores is None or len(vectores) < len(doc.fragmentos):
+        raise ValueError(
+            f"faltan vectores: {len(vectores or [])} para {len(doc.fragmentos)} "
+            f"fragmentos. Hay que vectorizar ANTES de abrir la conexion "
+            f"(ver nucleo/ingesta/corpus.py::hay_que_vectorizar)")
+
     n = 0
     for frag in doc.fragmentos:
         contextualizado = frag.contextualizar(doc)
-        vector = vectorizar(contextualizado)
+        vector = vectores[n]
         cur.execute(
             """insert into asistente.document_chunks
                  (organization_id, document_id, orden, contenido,
