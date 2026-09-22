@@ -3,13 +3,20 @@
 
 from django.urls import path
 
-from campo import despacho_views, views
+from campo import despacho_views, materiales_views, views
 
 app_name = "campo"
 
 urlpatterns = [
     path("bootstrap/", views.BootstrapView.as_view(), name="bootstrap"),
     path("trabajos/", views.TrabajosListView.as_view(), name="trabajos_list"),
+    # Materiales: la custodia del tecnico y lo que gasta en la calle.
+    path("kit/", materiales_views.KitView.as_view(), name="kit"),
+    path(
+        "materiales/movimientos/",
+        materiales_views.MovimientosMaterialView.as_view(),
+        name="materiales_movimientos",
+    ),
     # Despacho: lo que hace la oficina, no el tecnico.
     path("trabajos/crear/", despacho_views.CrearOrdenView.as_view(), name="trabajo_crear"),
     path("trabajos/<uid:pk>/asignar/", despacho_views.AsignarTrabajoView.as_view(), name="trabajo_asignar"),
