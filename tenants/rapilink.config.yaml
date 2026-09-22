@@ -5323,10 +5323,18 @@ herramientas:
     descripcion: >
       LLAMA A ESTA HERRAMIENTA (no sugieras el reinicio manual del router, no escales) apenas
       consultar_senal_ont haya dado 'aceptable' Y ping_cliente haya
-      respondido bien, en un cliente que dice no tener internet -- ese es
-      exactamente el caso para el que existe esta herramienta, y usar el
+      respondido bien, en un cliente que dice NO TENER SERVICIO -- sin internet,
+      nada carga, ningun aparato anda. Ese es exactamente el caso para el que existe esta herramienta, y usar el
       reinicio manual en su lugar le hace perder tiempo al cliente para
-      lograr lo mismo que esto hace en un paso. Reinicia la ONT del cliente.
+      lograr lo mismo que esto hace en un paso. NUNCA la llames por una queja de LENTITUD o de
+      velocidad: 'esta lento', 'me anda mal', 'no me da los megas que pago'
+      NO son falta de servicio -- son servicio degradado, y reiniciar no los
+      arregla. En esos casos el camino es consultar_velocidad_aprovisionada y
+      derivar. La diferencia es si el cliente PUEDE usar internet o no puede en
+      absoluto; si dice que anda pero mal, NO es esta herramienta. Y ojo: que el
+      diagnostico de senal y ping salga bien NO alcanza por si solo, porque en
+      una queja de lentitud tambien sale bien -- el equipo sano es una
+      CONDICION, no el motivo. Reinicia la ONT del cliente.
       Contrato del proveedor (documentado,
       agosto 2026): comando fire-and-forget -- confirma que SE MANDO, no que
       la ONT ya reinicio ni que el problema se resolvio. Dile al cliente
@@ -5349,6 +5357,36 @@ herramientas:
       sigue el caso.
     solo_lectura: false
     requiere_confirmacion: true
+    # ── LO QUE EL CLIENTE DIJO, VALIDADO EN CODIGO ────────────────────────
+    # 'exige_previas' (mas abajo) exige senal aceptable y ping respondiendo.
+    # Eso NO distingue "no tengo internet" de "esta lento": en una queja de
+    # lentitud las dos condiciones se cumplen, porque el equipo ESTA sano --
+    # es exactamente lo que significa "lento".
+    #
+    # La regla vivia en la descripcion de arriba, o sea en el prompt. Medido
+    # el 22/09/2026 contra el motor real, cuatro corridas del mismo caso
+    # dorado: tres la respetaron y UNA reinicio el equipo de un cliente real
+    # por una queja de lentitud. El PRD (§7.4) ya lo decia -- el prompt es
+    # guia, nunca la garantia -- y ese 1 de 4 es el numero.
+    #
+    # A 'lento' se lo ofrece a proposito: si solo se le dieran las respuestas
+    # que habilitan la accion, el modelo elige la mas cercana y la guarda no
+    # mide nada. Dandole la opcion honesta, el rechazo significa algo y queda
+    # en la traza que se pidio el reinicio para un sintoma que no le toca.
+    exige_declaracion:
+      param: sintoma
+      valores: [sin_servicio, intermitente, lento]
+      aceptados: [sin_servicio, intermitente]
+      pregunta: >-
+        Que reporto el cliente EN SUS PALABRAS, sin interpretarlo:
+        'sin_servicio' = no puede usar internet en absoluto, nada carga;
+        'intermitente' = anda y se corta, de a ratos;
+        'lento' = anda pero mal, tarda, no llega a la velocidad del plan.
+        Si dijo que anda aunque sea mal, es 'lento'.
+      si_no_alcanza: >-
+        Reiniciar no arregla un servicio degradado. Para 'lento' el camino es
+        consultar_velocidad_aprovisionada y derivar a soporte tecnico. No
+        vuelvas a llamar esta herramienta con otro valor.
     # Reiniciar deja al cliente sin internet uno o dos minutos, asi que no
     # puede salir del mensaje con que la puerta derivo el caso: ese mensaje
     # suele ser ambiguo ("me quede sin servicio") y bien puede estar

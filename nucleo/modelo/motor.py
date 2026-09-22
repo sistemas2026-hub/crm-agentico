@@ -302,6 +302,27 @@ def _esquema_openai(herramienta):
                 },
             },
         }
+    def _con_declaracion(propiedades: dict, requeridos: list) -> tuple[dict, list]:
+        """
+        Agrega el argumento de 'exige_declaracion' al esquema que ve el modelo.
+
+        Va en LAS DOS ramas de esta funcion --la de filtros y la de
+        herramientas sin argumentos-- porque una accion que necesita esta
+        guarda no tiene por que tener filtros: 'reiniciar_ont' no tiene
+        ninguno, y era justamente la que la necesitaba.
+
+        La lista que se le ofrece al modelo es 'valores', NO 'aceptados': si
+        solo se le ofrecen las respuestas que habilitan la accion, elige la
+        mas cercana y la guarda no mide nada. Ver la docstring de Declaracion.
+        """
+        d = herramienta.exige_declaracion
+        if d is None:
+            return propiedades, requeridos
+        propiedades = {**propiedades, d.param: {
+            "type": "string", "enum": list(d.valores),
+            "description": d.pregunta or f"Declara {d.param}."}}
+        return propiedades, [*requeridos, d.param]
+
     es_agregado = herramienta.tipo == "agregado"
     if herramienta.filtros_verificados or (es_agregado and (
             herramienta.agrupar_por or herramienta.periodo or herramienta.exportable)):
@@ -338,22 +359,28 @@ def _esquema_openai(herramienta):
                                "pdf'). Si no especifico el tipo de archivo, "
                                "usa 'excel' por defecto. Si solo pregunto un "
                                "numero, usa 'texto' (o no lo indiques)."}
+        propiedades, requeridos = _con_declaracion(
+            propiedades, list(herramienta.requeridos))
         return {
             "type": "function",
             "function": {
                 "name": herramienta.nombre,
                 "description": herramienta.descripcion,
                 "parameters": {"type": "object", "properties": propiedades,
-                               "required": herramienta.requeridos},
+                               "required": requeridos},
             },
         }
-    # Ver "Alcance" arriba: el resto, sin argumentos libres por ahora.
+    # Ver "Alcance" arriba: el resto, sin argumentos libres por ahora -- salvo
+    # el de 'exige_declaracion', que no es un argumento libre: es una lista
+    # cerrada que el codigo valida despues.
+    props_vacias, req_vacios = _con_declaracion({}, [])
     return {
         "type": "function",
         "function": {
             "name": herramienta.nombre,
             "description": herramienta.descripcion,
-            "parameters": {"type": "object", "properties": {}, "required": []},
+            "parameters": {"type": "object", "properties": props_vacias,
+                           "required": req_vacios},
         },
     }
 
@@ -1631,6 +1658,29 @@ def ejecutar_para_servicio(config, herramienta, argumentos_modelo: dict) -> dict
                                        config.identidad.slug, config.variables_tenant))
     raise ValueError(f"Tipo '{herramienta.tipo}' no se puede ejecutar desde un "
                      f"servicio -- solo 'http'.")
+
+
+def _declaracion_no_alcanza(herramienta, argumentos: dict) -> str | None:
+    """
+    El valor que el modelo declaro, si NO alcanza para ejecutar. None = pasa.
+
+    Fail-closed en los dos sentidos que importan:
+      - ausente  -> no ejecuta. Un argumento requerido que no vino no se
+                    asume; asumirlo seria el prompt otra vez.
+      - fuera de la lista aceptada -> no ejecuta, y el motivo dice cual fue.
+
+    Devuelve el VALOR declarado (o '' si no vino) para que quien arma el error
+    pueda nombrarlo. Se nombra a proposito: sin eso, el modelo recibe un "no"
+    sin saber que parte de lo que dijo lo produjo, y reintenta igual.
+    """
+    d = herramienta.exige_declaracion
+    if d is None:
+        return None
+    valor = (argumentos or {}).get(d.param)
+    valor = "" if valor is None else str(valor).strip()
+    if valor in d.aceptados:
+        return None
+    return valor
 
 
 def _previas_no_cumplidas(herramienta, historial: list[dict]) -> list[str]:
@@ -3083,6 +3133,25 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                     codigo_error = "CAMBIO_DE_CONTROL"
                 else:
                     salida = _ejecutar_propuesta(llamada.argumentos, config.identidad.slug, quien)
+            elif (herramienta.exige_declaracion is not None
+                  and (declarado := _declaracion_no_alcanza(herramienta, llamada.argumentos)) is not None):
+                # Fail-closed en codigo -- ver Declaracion en schema.py. Va
+                # ANTES de 'exige_previas' a proposito: si el sintoma que el
+                # cliente reporto no corresponde a esta accion, mandarlo a
+                # correr diagnosticos primero lo empuja justo a lo contrario
+                # de lo que se quiere (los diagnosticos VAN a salir bien, y
+                # eso lo convence de insistir).
+                d = herramienta.exige_declaracion
+                salida = {"error": "DECLARACION_NO_ALCANZA",
+                          "instruccion_interna":
+                              (f"Declaraste {d.param}="
+                               f"{declarado or '(nada)'} y '{herramienta.nombre}' "
+                               f"solo corresponde para {', '.join(d.aceptados)}. "
+                               + (d.si_no_alcanza or
+                                  "No la reintentes con otro valor: segui el "
+                                  "camino que corresponde a lo que el cliente "
+                                  "dijo de verdad."))}
+                codigo_error = "DECLARACION_NO_ALCANZA"
             elif (faltantes := _previas_no_cumplidas(herramienta, historial)):
                 # Fail-closed en codigo, no aprobacion humana -- ver
                 # Precondicion en schema.py. Ninguna herramienta actual la

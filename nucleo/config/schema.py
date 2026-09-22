@@ -673,6 +673,77 @@ class RangoVeredicto(Base):
         return self
 
 
+class Declaracion(Base):
+    """
+    Un dato que SOLO existe en lo que dijo el cliente, que el modelo tiene que
+    declarar explicitamente, y que el codigo valida contra una lista cerrada
+    antes de dejar ejecutar la herramienta.
+
+    POR QUE HIZO FALTA ALGO DISTINTO DE 'Precondicion'
+    --------------------------------------------------
+    'Precondicion' mira RESULTADOS de herramientas anteriores, y eso alcanza
+    mientras lo que decide la accion sea medible. El 22/09/2026 se midio un
+    caso donde no lo es: 'reiniciar_ont' exige senal aceptable y ping
+    respondiendo, y una queja de LENTITUD cumple las dos -- el equipo esta
+    sano, que es justamente lo que significa "lento". Lo unico que separa
+    "no tengo internet" de "esta lento" es lo que dijo el cliente, y eso no
+    sale de ninguna medicion de la red.
+
+    Estaba resuelto en la DESCRIPCION de la herramienta, o sea en el prompt.
+    Medido cuatro veces contra el motor real: tres respetaron la regla y una
+    reinicio igual el equipo de un cliente real. El PRD (§7.4) ya lo dice --
+    el prompt es guia, nunca la garantia-- y aca esta el numero.
+
+    POR QUE LA LISTA QUE VE EL MODELO ES MAS LARGA QUE LA ACEPTADA
+    --------------------------------------------------------------
+    'valores' es todo lo que el modelo PUEDE contestar; 'aceptados' es el
+    subconjunto que deja pasar la herramienta. La diferencia no es un
+    descuido: si al modelo solo se le ofrecen las respuestas que habilitan la
+    accion, elige la mas cercana y se vuelve al problema anterior. Dandole la
+    opcion honesta --'lento'-- el rechazo significa algo, y queda escrito en
+    la traza que la herramienta se pidio para un sintoma que no le
+    corresponde.
+
+    Esto NO garantiza que el modelo diga la verdad. Garantiza que tenga que
+    decir ALGO, que ese algo este en una lista cerrada, y que el codigo --no
+    el prompt-- decida si alcanza. Un valor ausente o fuera de lista no
+    ejecuta.
+    """
+    # El nombre del argumento, tal como lo ve el modelo y como viaja al ISP.
+    param: str
+    # Todo lo que el modelo puede contestar. Incluye a proposito las opciones
+    # que NO habilitan la accion.
+    valores: list[str]
+    # El subconjunto que deja ejecutar. Tiene que estar contenido en 'valores'.
+    aceptados: list[str]
+    # Que se le pregunta al modelo. Va en la descripcion del argumento, asi
+    # que se lee como una instruccion, no como el nombre de un campo.
+    pregunta: str = ""
+    # Que hacer cuando el valor no alcanza. Es lo que el modelo recibe en vez
+    # de la ejecucion, asi que tiene que decirle el camino, no solo que no.
+    si_no_alcanza: str = ""
+
+    @model_validator(mode="after")
+    def _coherente(self):
+        if not self.valores:
+            raise ValueError("Declaracion.valores no puede estar vacia.")
+        if not self.aceptados:
+            raise ValueError("Declaracion.aceptados no puede estar vacia: una "
+                             "declaracion que no acepta nada bloquea la "
+                             "herramienta siempre.")
+        fuera = [v for v in self.aceptados if v not in self.valores]
+        if fuera:
+            raise ValueError(f"Declaracion.aceptados tiene valores que no estan "
+                             f"en 'valores': {fuera}. El modelo no podria "
+                             f"contestarlos nunca.")
+        if set(self.aceptados) == set(self.valores):
+            raise ValueError("Declaracion.aceptados es igual a 'valores': "
+                             "entonces no rechaza nada y la guarda es un "
+                             "adorno. Si de verdad todo vale, no declares una "
+                             "Declaracion.")
+        return self
+
+
 class Precondicion(Base):
     """
     Una condicion que otra herramienta ya tiene que haber cumplido, EN ESTA
@@ -1312,6 +1383,13 @@ class Herramienta(Base):
     # RECIENTE de cada herramienta requerida -- una que cumplio hace varios
     # mensajes pero ya no representa el estado actual no cuenta.
     exige_previas: list[Precondicion] = Field(default_factory=list)
+    # Un dato que el modelo tiene que DECLARAR y el codigo valida contra una
+    # lista cerrada. Complementa 'exige_previas', no la reemplaza: aquella
+    # mira mediciones, esta mira lo que dijo el cliente, que es lo unico que
+    # existe cuando la accion no se puede decidir desde la red. Ver la
+    # docstring de Declaracion -- nace de un reinicio real disparado por una
+    # queja de lentitud, medido el 22/09/2026.
+    exige_declaracion: Declaracion | None = None
     # Texto que el motor inyecta como mensaje 'system' apenas 'exige_previas'
     # queda satisfecha (y esta herramienta todavia no se llamo en la
     # conversacion) -- SOLO si 'exige_previas' esta declarado, no tiene
