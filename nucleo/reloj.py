@@ -41,6 +41,20 @@ Los dos trabajos se comportan distinto ante una ejecucion doble simultanea:
                    a la vez converjan al mismo Case; la segunda choca contra la
                    restriccion en vez de duplicar.
 
+  cerrar_inactivas_de_ia
+                   SI, y por construccion. Su consulta de elegibilidad exige
+                   'ticket_operativo is null' y 'caso_id is null', asi que
+                   'cerrar_todo' no hace ninguna llamada externa: lo unico que
+                   ejecuta es 'transiciones.cerrar', que en la segunda pasada
+                   devuelve 'ya_cerrada' y no escribe. Es justo la propiedad
+                   que le falta a 'cerrar_vencidas', y por eso aquella se
+                   quedo afuera y esta no.
+
+                   La guarda es estructural, no incidental: el dia que se
+                   escribio, las 147 elegibles tenian 0 tickets y 0 casos. Se
+                   exige igual -- una que aparezca con ticket pertenece a las
+                   reglas del otro barrido.
+
   cerrar_vencidas  NO. Auditado el 10/09/2026 leyendo el camino completo:
                    'conversaciones_sin_respuesta' filtra por
                    "estado <> 'cerrada'", asi que en pasadas SUCESIVAS si es
@@ -99,11 +113,17 @@ verdad ("¿este proceso puede resolverla?") sin exponer ningun valor, y
 
 QUE HACE Y QUE NO
 -----------------
-Solo los dos trabajos que ya existian y estaban aprobados: cerrar vencidas e
-importar tickets. Esta version no agrega ninguna politica nueva de ciclo de
-vida. Un proceso que "corre cosas periodicas" es un cajon comodo, y lo que
-entre aca sin discutirse va a correr solo en produccion sin que nadie lo haya
-mirado.
+Tres trabajos: cerrar vencidas, importar tickets, y cerrar las inactivas que
+atendio solo el asistente. Un proceso que "corre cosas periodicas" es un cajon
+comodo, y lo que entre aca sin discutirse va a correr solo en produccion sin
+que nadie lo haya mirado -- asi que cada uno se anota con por que entro.
+
+El tercero se agrego el 22/09/2026, aprobado explicitamente. Es una politica
+nueva de ciclo de vida y por eso no entro solo: 'conversaciones_sin_respuesta'
+exige 'escalada_a_humano', asi que las conversaciones que la IA resolvia sola
+NO las cerraba nadie nunca. Medido contra produccion ese dia: 151 abiertas en
+ese estado, 145 sin un mensaje en mas de una semana, y de las 4 creadas ese
+dia, las 4.
 ================================================================================
 """
 
@@ -224,6 +244,48 @@ def _vencimientos(config, tenant: str, seco: bool) -> dict:
     return {"plazo_horas": horas, **operativo.cerrar_vencidas(config, tenant)}
 
 
+def _inactivas_de_ia(config, tenant: str, seco: bool) -> dict:
+    """
+    Cierra las que atendio SOLO el asistente y quedaron mudas.
+
+    HERMANA DE '_vencimientos', Y LA DIFERENCIA IMPORTA
+    ---------------------------------------------------
+    Aquella solo alcanza a las ESCALADAS. Las que la IA resolvio sola no las
+    cerraba nadie: medido contra produccion el 22/09/2026, 151 asi, 145 sin un
+    mensaje en mas de una semana, y de las 4 creadas ese dia, las 4.
+
+    POR QUE ESTA SI PUEDE VIVIR EN EL RELOJ
+    ---------------------------------------
+    La cabecera de este archivo explica que 'cerrar_vencidas' NO esta aca
+    porque dos pasadas simultaneas publican el texto de cierre dos veces en el
+    ticket del proveedor. Esta exige 'ticket_operativo is null' y 'caso_id is
+    null' en su propia consulta de elegibilidad, asi que no hace NINGUNA
+    llamada externa: lo unico que ejecuta es 'transiciones.cerrar', que en la
+    segunda pasada devuelve 'ya_cerrada' y no escribe. Idempotente por
+    construccion, no por suerte.
+
+    En seco se llama a la MISMA consulta que decide, por el mismo motivo que
+    en '_vencimientos': dos motores de reglas terminan discrepando justo
+    cuando hace falta confiar en el segundo.
+    """
+    horas = getattr(config.limites, "horas_inactividad_cierra", None)
+    if not horas or horas <= 0:
+        return {"plazo_horas": 0, "revisadas": 0, "cerradas": 0,
+                "haria": "nada: el tenant no declara plazo de inactividad"}
+    if seco:
+        from nucleo.persistencia import db
+
+        candidatas = db.conversaciones_ia_inactivas(tenant, horas)
+        return {"plazo_horas": horas, "revisadas": len(candidatas),
+                "cerradas": 0, "seco": True,
+                "haria": (f"cerrar {len(candidatas)} conversacion(es) que "
+                          f"atendio solo el asistente -- sin ticket ni caso, "
+                          f"desenlace 'sin_respuesta_cliente'")
+                         if candidatas else "nada: no hay inactivas de la IA"}
+    return {"plazo_horas": horas,
+            **operativo.cerrar_inactivas_de_ia(config, tenant)}
+
+
 def _importacion(config, tenant: str, seco: bool, ahora: datetime) -> dict:
     """
     El subsistema de importacion entero: descubrir e importar (B), y despues
@@ -312,6 +374,16 @@ def una_pasada(seco: bool = False) -> list[dict]:
             r["vencimientos"] = {"error": f"{type(e).__name__}: {e}"}
             registrar("reloj", "los vencimientos fallaron", tenant=tenant, error=e)
 
+        # Su propio try/except, como las otras dos: que el cierre de las
+        # inactivas falle no puede dejar sin correr la importacion, ni al
+        # reves. Ver la lista de aislamientos en la docstring de arriba.
+        try:
+            r["inactivas_ia"] = _inactivas_de_ia(config, tenant, seco)
+        except (Exception, SystemExit) as e:                     # noqa: BLE001
+            r["inactivas_ia"] = {"error": f"{type(e).__name__}: {e}"}
+            registrar("reloj", "el cierre de inactivas de la IA fallo",
+                      tenant=tenant, error=e)
+
         try:
             r["importacion"] = _importacion(config, tenant, seco, ahora)
         except (Exception, SystemExit) as e:                     # noqa: BLE001
@@ -324,6 +396,7 @@ def una_pasada(seco: bool = False) -> list[dict]:
         registrar("reloj", "tenant", tenant=tenant,
                   credenciales=r.get("credenciales"),
                   vencimientos=_solo_contadores(r.get("vencimientos")),
+                  inactivas_ia=_solo_contadores(r.get("inactivas_ia")),
                   importacion=_solo_contadores(r.get("importacion")))
         salida.append(r)
     duro = (datetime.now(timezone.utc) - ahora).total_seconds()
