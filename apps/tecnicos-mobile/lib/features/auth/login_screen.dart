@@ -22,8 +22,15 @@ class _LoginScreenState extends State<LoginScreen> {
     text: kDebugMode ? 'carlos.tecnico@rapilink.com' : '',
   );
   final _passwordController = TextEditingController();
+  // El servidor que se fijó al compilar (`--dart-define=BACKEND_URL=...`).
+  //
+  // Antes, en depuración, este campo forzaba `127.0.0.1:8000` e ignoraba lo
+  // que se hubiera pasado al compilar: apuntar la aplicación a otro backend
+  // parecía funcionar y no tenía ningún efecto, había que corregirlo a mano en
+  // cada arranque. Ahora el valor de compilación manda, y en depuración sigue
+  // siendo editable para poder cambiarlo sin recompilar.
   final _serverUrlController = TextEditingController(
-    text: kDebugMode ? 'http://127.0.0.1:8000' : ApiEndpoints.defaultEnvironmentUrl,
+    text: ApiEndpoints.defaultEnvironmentUrl,
   );
 
   final _storage = SecureStorageService();
