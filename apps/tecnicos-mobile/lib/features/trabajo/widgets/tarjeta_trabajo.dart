@@ -205,14 +205,18 @@ class TarjetaTrabajo extends StatelessWidget {
 
   List<Widget> _cuerpoTrabajo() {
     return <Widget>[
-      // CAMPO-DATA-029 · De qué ticket nació esta orden. El backend todavía no
-      // manda ese rastro, así que solo se ve en la demostración.
-      if (_enCurso && mostrarDatosFuturos) ...<Widget>[
+      // De qué ticket nació esta orden. El backend lo entrega desde el
+      // 22/09/2026 (`origen`); el motivo todavía no existe, así que solo se
+      // agrega en la demostración (CAMPO-DATA-029).
+      if (_enCurso && (trabajo.origen != null || mostrarDatosFuturos)) ...<Widget>[
         const SizedBox(height: AppSpacing.sm),
         _aviso(
           icono: Icons.alt_route,
-          texto: 'Derivado de ${trabajo.futuro.ticketOrigen} '
-              '(${trabajo.futuro.motivoTicket})',
+          texto: trabajo.origen == null
+              ? 'Derivado de ${trabajo.futuro.ticketOrigen} '
+                  '(${trabajo.futuro.motivoTicket})'
+              : 'Derivado de ${trabajo.origen!.etiqueta}'
+                  '${mostrarDatosFuturos ? ' (${trabajo.futuro.motivoTicket})' : ''}',
           color: AppColors.onSurfaceVariant,
           fondo: AppColors.surfaceContainer,
         ),

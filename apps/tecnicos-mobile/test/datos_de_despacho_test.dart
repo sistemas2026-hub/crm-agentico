@@ -119,6 +119,20 @@ void main() {
       expect(t.requisitosSeguridad, isNot(contains(FieldMockData.requisitoSeguridad)));
     });
 
+    test('10. El ticket de origen real gana sobre el de ejemplo', () {
+      final real = _trabajo(<String, dynamic>{
+        'origen_json': '{"sistema":"wisphub","tipo":"ticket","ref":"WH-91288"}',
+      });
+      expect(real.origen!.etiqueta, 'Ticket WH-91288');
+
+      // Una orden creada a mano no viene de ningún lado: no se le inventa un
+      // origen.
+      final manual = _trabajo(<String, dynamic>{
+        'origen_json': '{"sistema":"manual","tipo":"","ref":""}',
+      });
+      expect(manual.origen, isNull);
+    });
+
     test('9. Un JSON roto no rompe la pantalla: se lee como vacío', () {
       final t = _trabajo(<String, dynamic>{
         'requisitos_seguridad_json': '{esto no es json',
