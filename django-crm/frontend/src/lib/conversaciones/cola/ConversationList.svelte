@@ -33,7 +33,10 @@
     ahora = 0,
     // Helpers que se quedan en el layout porque los usa alguien más.
     tramoEspera,
-    motivoLabel
+    motivoLabel,
+    /** El plazo de toma del tenant, en minutos. Se propaga tal cual: la
+        lista no lo interpreta. */
+    slaToma = 0
   } = $props();
 </script>
 
@@ -46,7 +49,7 @@
     <QueueEmptyState variante="sin-coincidencias" {busqueda} />
   {:else}
     {#each visibles as c (c.id)}
-      <ConversationRow {c} {abierta} {ahora} {tramoEspera} {motivoLabel} />
+      <ConversationRow {c} {abierta} {ahora} {tramoEspera} {motivoLabel} {slaToma} />
     {/each}
   {/if}
 </div>

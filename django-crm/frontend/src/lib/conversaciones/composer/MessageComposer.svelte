@@ -1045,6 +1045,11 @@
     margin-top: 14px;
     padding-top: 12px;
     border-top: 1px solid var(--bandeja-borde);
+    /* El compositor se mide a SÍ MISMO, no a la ventana. Con la columna de
+       contexto abierta mide 564px en una pantalla de 1440, así que una regla
+       colgada de `@media` no se enteraba de que estaba angosto. Ver el
+       `@container` de abajo. */
+    container-type: inline-size;
   }
 
   .compositor-texto {
@@ -1092,10 +1097,20 @@
 
   /* El orden de sacrificio, angosto: lo ultimo que se pierde es poder
      escribir. La fila del compositor tiene tres cosas --herramientas, aviso,
-     boton-- y a 420px no entran; el AVISO es lo que se va a un renglon
+     boton-- y angosta no entran; el AVISO es lo que se va a un renglon
      propio, nunca el boton ni los iconos, que son con lo que se trabaja.
-     Encogerlo todo para que entre en una linea los deja ilegibles a los tres. */
-  @media (max-width: 560px) {
+     Encogerlo todo para que entre en una linea los deja ilegibles a los tres.
+
+     MIDE EL COMPOSITOR, NO LA VENTANA. Era `@media (max-width: 560px)`, y por
+     eso no se aplicaba en el caso que más importa: con la columna de contexto
+     abierta el compositor mide 564px aunque la ventana tenga 1440. Ahí el aviso
+     NO se iba a su renglón, envolvía el BOTÓN, y `justify-content:
+     space-between` lo dejaba solo en la segunda línea contra el borde
+     IZQUIERDO -- la acción principal de la pantalla cambiaba de esquina según
+     el ancho. Medido el 21/09/2026: "Enviar" en x=568 a 1440px y a 1024px.
+
+     600 y no 560: los 564px medidos caían justo del lado de afuera. */
+  @container (max-width: 600px) {
     .compositor-pie {
       flex-wrap: wrap;
       row-gap: 6px;

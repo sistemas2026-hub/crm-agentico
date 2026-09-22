@@ -48,25 +48,29 @@
        Alerta sólo cuando falta alguien; cuando ya hay dueño, la señal es que
        está en manos de una persona. -->
   <p class="aviso" class:aviso-sin-dueno={escalada && !atendida && !esMia && !asignadaA}>
-    {#if escalada && !atendida && !esMia && !asignadaA}
-      <TriangleAlert size={14} />
-    {:else}
-      <UserCheck size={14} />
-    {/if}
-    <!-- "IA pausada" seria falso y no es un matiz de redaccion: el asistente
-         SIGUE leyendo y procesando cada mensaje mientras espera -- de eso
-         depende que un "listo, gracias" del cliente cierre el caso solo.
-         Lo que dejo de hacer es contestar. -->
-    <strong>
-      {#if iaEnPausa}
-        Escalada · IA no responde
+    <!-- El icono va DENTRO del chip: fuera de él heredaba el rojo de la franja
+         entera, y ese rojo se fue. -->
+    <span class="aviso-estado">
+      {#if escalada && !atendida && !esMia && !asignadaA}
+        <TriangleAlert size={12} />
       {:else}
-        <!-- Escalo, pero no hay a quien esperar (quedo agendada, o el CRM no
-             tomo el caso): el asistente SIGUE contestando. Decir "IA no
-             responde" aca seria falso. -->
-        Escalada · el asistente sigue respondiendo
+        <UserCheck size={12} />
       {/if}
-    </strong>
+      <!-- "IA pausada" seria falso y no es un matiz de redaccion: el asistente
+           SIGUE leyendo y procesando cada mensaje mientras espera -- de eso
+           depende que un "listo, gracias" del cliente cierre el caso solo.
+           Lo que dejo de hacer es contestar. -->
+      <strong>
+        {#if iaEnPausa}
+          Escalada · IA no responde
+        {:else}
+          <!-- Escalo, pero no hay a quien esperar (quedo agendada, o el CRM no
+               tomo el caso): el asistente SIGUE contestando. Decir "IA no
+               responde" aca seria falso. -->
+          Escalada · el asistente sigue respondiendo
+        {/if}
+      </strong>
+    </span>
     {#if conversacion.motivo_escalamiento}
       <!-- El separador no es adorno: sin el, "IA no responde El cliente
            reporto una falla..." se lee como una sola frase rota. -->
@@ -216,19 +220,54 @@
      de prueba eliminó su único consumidor -- así que la duplicación quedó
      cerrada y ésta es ahora la única. */
 
+  /* LA ALARMA ES EL CHIP, NO LA FRANJA.
+     Era un lavado rosa de borde a borde con TODO el texto en rojo --el estado,
+     el motivo, el caso del CRM-- y 56px de alto. En la referencia (medida en
+     el HTML de Stitch) la franja no tiene fondo, mide 38px, y lo único que
+     lleva color es una etiqueta mono de 10px: #B91C1C sobre #FEF2F2, radio 4,
+     padding 2px 8px. El resto de la línea se lee en tinta normal.
+
+     No es sólo estética: cuando todo el renglón grita, el motivo --que es el
+     dato que hace falta para decidir-- grita igual que el estado, y la franja
+     compite con el hilo por la atención de una pantalla entera. */
   .aviso {
     flex-wrap: wrap;
     row-gap: 6px;
     flex: none;
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     margin: 0;
-    padding: 8px 16px;
-    font-size: 12.5px;
-    color: var(--bandeja-error);
-    background: color-mix(in srgb, var(--bandeja-error) 6%, transparent);
+    padding: 6px 16px;
+    font-size: 12px;
+    color: var(--bandeja-texto);
+    background: var(--bandeja-superficie);
     border-bottom: 1px solid var(--bandeja-borde);
+  }
+
+  /* El chip. Misma forma que `.control` en el encabezado y que `.marca-banda`
+     en la cola: mono, versalita, filete y radio chico. Que las tres se lean
+     igual es deliberado -- las tres contestan "en qué estado está esto". */
+  .aviso-estado {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    flex: none;
+    padding: 2px 8px;
+    border: 1px solid var(--bandeja-error-borde);
+    border-radius: var(--bandeja-radio-sm);
+    background: var(--bandeja-error-fondo);
+    color: var(--bandeja-error);
+    font-family: var(--bandeja-mono);
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .aviso-estado strong {
+    font-weight: inherit;
   }
 
   .aviso-atender {

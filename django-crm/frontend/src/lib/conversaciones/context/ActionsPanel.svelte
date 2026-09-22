@@ -67,13 +67,13 @@
 <style>
   .panel {
     padding: 0.75rem 0;
-    border-bottom: 1px solid var(--v2-borde, #e2e2e2);
+    border-bottom: 1px solid var(--bandeja-borde);
   }
   .accion {
     padding: 0.5rem 0;
   }
   .accion + .accion {
-    border-top: 1px dashed var(--v2-borde, #e2e2e2);
+    border-top: 1px dashed var(--bandeja-borde);
   }
   .cabecera {
     display: flex;
@@ -90,12 +90,12 @@
     margin-top: 0.5rem;
   }
   .tono-ok .cabecera {
-    color: var(--v2-ok, #17803d);
+    color: var(--bandeja-ok);
   }
   .tono-error .cabecera {
-    color: var(--v2-error, #b42318);
+    color: var(--bandeja-error);
   }
   .tono-aviso .cabecera {
-    color: var(--v2-aviso, #b54708);
+    color: var(--bandeja-aviso);
   }
 </style>

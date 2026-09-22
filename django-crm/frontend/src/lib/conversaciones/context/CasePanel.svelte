@@ -288,8 +288,8 @@
     position: absolute;
     top: calc(100% + 4px);
     left: 0;
-    background: var(--v2-surface, #fff);
-    border: 1px solid var(--v2-border, #e5e5e5);
+    background: var(--bandeja-superficie);
+    border: 1px solid var(--bandeja-borde);
     border-radius: 10px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
     padding: 6px;
@@ -317,7 +317,7 @@
 
   .asignado-item:hover,
   .asignado-item:focus-visible {
-    background: var(--v2-surface-2, #f1f1f1);
+    background: var(--bandeja-superficie-suave);
     outline: none;
   }
 </style>

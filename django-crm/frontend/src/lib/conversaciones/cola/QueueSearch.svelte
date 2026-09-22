@@ -16,7 +16,7 @@
     <input
       type="text"
       bind:value={busqueda}
-      placeholder="Buscar cliente o mensaje…"
+      placeholder="Buscar conversación, cliente o mensaje…"
       aria-label="Buscar conversaciones"
     />
     {#if busqueda}
@@ -33,15 +33,24 @@
 
 <style>
 
+  /* VIVE EN LA BARRA DE CONSOLA, NO EN LA COLUMNA.
+     Estaba dentro de la cola, con 30px de alto más 12 de márgenes, empujando
+     las conversaciones hacia abajo. En la referencia el buscador está en la
+     barra superior y centrado --"Search conversations, phones, DNI or
+     tickets…"-- y la columna de la cola arranca directamente con las
+     pestañas de estado.
+     Sin márgenes verticales y con `flex: 1` acotado: lo posiciona la barra,
+     no él. Radio 6 como el resto de la Bandeja (era 8). */
   .buscar {
     display: flex;
     align-items: center;
     gap: 6px;
-    flex: none;
-    margin: 9px 10px 3px;
-    padding: 5px 9px;
+    flex: 1 1 auto;
+    max-width: 420px;
+    min-width: 0;
+    padding: 4px 9px;
     border: 1px solid var(--bandeja-borde);
-    border-radius: 8px;
+    border-radius: var(--bandeja-radio);
     background: var(--bandeja-superficie);
     color: var(--bandeja-texto-2);
   }

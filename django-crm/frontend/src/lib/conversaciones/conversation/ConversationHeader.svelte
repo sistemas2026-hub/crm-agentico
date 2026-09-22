@@ -24,6 +24,10 @@
     /** Si la columna de contexto está abierta. La abre y la cierra la página:
         el mismo valor lo lee el `<aside>`, que no es hijo de este componente. */
     contextoAbierto = false,
+    /** La ficha del cliente en el sistema del ISP, o null. La lee el motor en
+        vivo y NO se guarda, así que puede venir vacía o no venir -- cada
+        campo se dibuja sólo si llegó. */
+    ficha = null,
     onAlternarContexto
   } = $props();
 
@@ -61,7 +65,46 @@
   {/if}
 
   <div class="centro-quien">
-    <h2>{conversacion.nombre_cliente || quien(conversacion.usuario_externo)}</h2>
+    <!-- IDENTIDAD Y METADATOS EN EL MISMO RENGLÓN, como en la referencia:
+         nombre, y al lado los identificadores en mono separados por puntos.
+         Antes el nombre se llevaba un renglón entero y debajo iban tres
+         píldoras; así entra más dato en menos alto y se lee como una ficha
+         de consola en vez de como el título de una página.
+
+         Sólo se dibuja lo que la conversación TRAE. El teléfono y el id del
+         ISP están siempre; el resto de la ficha del cliente --documento,
+         plan, dirección-- vive en el sistema del ISP y esta pantalla no lo
+         carga: está en la pestaña Cliente, que es la que sí lo consulta. -->
+    <div class="centro-identidad">
+      <h2>{conversacion.nombre_cliente || quien(conversacion.usuario_externo)}</h2>
+      <span class="centro-ids">
+        {#if conversacion.nombre_cliente && conversacion.usuario_externo}
+          <span class="centro-id">{quien(conversacion.usuario_externo)}</span>
+        {/if}
+        {#if conversacion.id_cliente}
+          <span class="centro-id">ISP <b>{conversacion.id_cliente}</b></span>
+        {/if}
+        <!-- LA FICHA DEL ISP, leída en vivo. Documento, plan y estado del
+             servicio son lo que alguien mira antes de contestarle a un
+             cliente, y hasta ahora había que abrir otra pantalla para verlos.
+             Cada uno se dibuja sólo si vino: la ficha llega incompleta a
+             propósito --el motor filtra por una lista blanca-- y un renglón
+             con "—" no informa nada. -->
+        {#if ficha?.cedula}
+          <span class="centro-id">CC <b>{ficha.cedula}</b></span>
+        {/if}
+        {#if ficha?.plan_internet}
+          <span class="centro-id centro-id-plan">{ficha.plan_internet}</span>
+        {/if}
+        {#if ficha?.estado}
+          <span class="centro-id">{ficha.estado}</span>
+        {/if}
+        {#if conversacion.ticket_operativo}
+          <span class="centro-id">Ticket <b>{conversacion.ticket_operativo}</b></span>
+        {/if}
+      </span>
+    </div>
+
     <div class="centro-meta">
       <!-- QUIÉN LA LLEVA, arriba de todo y con palabra. Antes esto solo se
            deducía del compositor bloqueado, así que alguien que miraba el
@@ -144,7 +187,68 @@
   }
   .centro-quien {
     min-width: 0;
+    /* Crece para empujar el botón de contexto al borde derecho, como la
+       referencia empuja sus acciones. */
+    flex: 1 1 auto;
   }
+
+  /* Nombre e identificadores en la misma línea. Envuelve antes que recortar:
+     en angosto los ids bajan solos. */
+  .centro-identidad {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    min-width: 0;
+  }
+
+  /* Los identificadores: mono, apagados y separados por un filete vertical,
+     igual que la línea `DNI · Account · Plan` de la referencia. Son datos que
+     se COMPARAN contra otro sistema, así que van en mono y con cifras
+     tabulares. */
+  .centro-ids {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 8px;
+    min-width: 0;
+    font-family: var(--bandeja-mono);
+    font-size: 10.5px;
+    font-variant-numeric: tabular-nums;
+    color: var(--bandeja-texto-3);
+  }
+
+  .centro-id + .centro-id {
+    padding-left: 8px;
+    border-left: 1px solid var(--bandeja-borde);
+  }
+
+  .centro-id b {
+    font-weight: 600;
+    color: var(--bandeja-texto-2);
+  }
+
+  /* En un teléfono la línea de identificadores envuelve en cuatro renglones y
+     la cabecera se come el hilo: medido a 390px, 153px sólo de encabezado.
+     Se queda el teléfono --que es con lo que se responde-- y el resto se lee
+     en la pestaña Cliente, que los tiene todos y a un toque. */
+  @media (max-width: 760px) {
+    .centro-ids .centro-id:not(:first-child) {
+      display: none;
+    }
+    .centro-id + .centro-id {
+      padding-left: 0;
+      border-left: 0;
+    }
+  }
+
+  /* El plan es lo único de la fila que no es un identificador: es lo que el
+     cliente contrató, y se lee más que se compara. */
+  .centro-id-plan {
+    color: var(--bandeja-texto-2);
+    font-weight: 600;
+  }
+
   .centro-top h2 {
     margin: 0;
     font-size: 14.5px;
@@ -154,10 +258,18 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  /* Envuelve. Las píldoras --quién la lleva, el canal, el estado-- miden 285px
+     y a 390px de ancho el bloque del nombre son 189: sin `wrap` se salían 96px
+     y, como acá nada recorta en X, "WhatsApp" y "abierta" se pintaban debajo
+     del botón "Contexto" (medido el 21/09/2026 a 390x844). Envolver y no
+     recortar: cada píldora dice algo distinto, y la que se perdía --el estado--
+     no es la menos importante. */
   .centro-meta {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 6px;
+    row-gap: 4px;
     margin-top: 3px;
   }
   .ident {

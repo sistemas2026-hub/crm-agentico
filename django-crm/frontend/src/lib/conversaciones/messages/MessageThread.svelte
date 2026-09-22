@@ -54,6 +54,32 @@
   const estabaAlFinal = () =>
     !hiloEl || hiloEl.scrollHeight - hiloEl.clientHeight - hiloEl.scrollTop < 120;
 
+  /** Si el que mira está pegado abajo. Se recuerda EN EL SCROLL y no se
+      pregunta en el momento de reajustar: cuando el contenedor cambia de alto,
+      `scrollTop` ya quedó viejo y preguntarlo entonces contesta "no estaba al
+      final" aunque lo estuviera. */
+  let pegadoAbajo = $state(true);
+  const alScrollear = () => (pegadoAbajo = estabaAlFinal());
+
+  /* EL HILO CAMBIA DE ALTO DESPUÉS DE HABER BAJADO AL FINAL, y sin esto se
+     queda donde estaba -- o sea, dejando el último mensaje abajo del borde.
+     Pasa en los dos casos normales: cuando el resumen de escalada termina de
+     armarse y empuja al hilo hacia abajo, y cuando cambia el tamaño de la
+     ventana. Medido el 21/09/2026 a 390x844 después de acotar el resumen: el
+     hilo quedaba en scrollTop 163 de 197, con el último mensaje cortado por el
+     compositor.
+     Sólo se re-ancla a quien estaba pegado abajo: al que subió a leer algo de
+     hace dos semanas, cambiar de tamaño la ventana no tiene por qué
+     arrancárselo de la vista. Misma regla que el efecto de arriba. */
+  $effect(() => {
+    if (!hiloEl) return;
+    const observador = new ResizeObserver(() => {
+      if (pegadoAbajo) alFinal();
+    });
+    observador.observe(hiloEl);
+    return () => observador.disconnect();
+  });
+
   // Al abrir la conversacion, y en cada cambio del hilo.
   //
   // La condicion NO es "siempre": si alguien subio a leer lo que paso hace
@@ -76,7 +102,7 @@
   });
 </script>
 
-<div class="hilo" bind:this={hiloEl}>
+<div class="hilo" bind:this={hiloEl} onscroll={alScrollear}>
   <div class="chat-mensajes">
     {#each hilo as item (item.clave)}
       {#if item.tipo === 'dia'}
@@ -106,7 +132,13 @@
                no representa. Decirlo es mejor que un hueco, que se lee como
                un error de la aplicación. -->
           {#if item.m.contenido}
-            <div>{item.m.contenido}</div>
+            <!-- Los saltos de línea que respeta `pre-wrap` son los DEL MENSAJE,
+                 así que la regla va acá y no en la burbuja. Estando en la
+                 burbuja, el salto y la sangría del propio marcado contaban
+                 como texto: medido el 21/09/2026, un mensaje de un renglón
+                 ocupaba 128px de los cuales 60 eran líneas en blanco de la
+                 plantilla. Se notó al subir la interlínea a 1,6. -->
+            <div class="chat-texto">{item.m.contenido}</div>
           {:else if !(item.m.adjuntos ?? []).length}
             <div class="no-representable">
               <TriangleAlert size={12} />
@@ -249,30 +281,17 @@
      quedan fijos, para no tener que bajar hasta el fondo para escribir. */
   .hilo {
     flex: 1;
-    min-height: 0;
+    /* El piso del hilo. Era `min-height: 0`, que en una columna flex significa
+       "puedo desaparecer": medido el 21/09/2026 a 390x844 quedaba en 28px
+       porque el resumen de escalada, que no encogía, se llevaba 224. Los
+       mensajes son de lo que trata esta pantalla; son lo último que cede, no
+       lo primero. Quien cede ahora es el resumen (`.brief { min-height: 0 }`,
+       con scroll propio). 140px son dos burbujas cortas: suficiente para que
+       el hilo siga siendo un hilo. */
+    min-height: 140px;
     overflow-y: auto;
     padding: 14px 16px;
   }
-  /* En el hilo tampoco se parece a un mensaje. */
-  .chat-nota {
-    align-self: stretch;
-    max-width: 100%;
-    background: color-mix(in srgb, var(--v2-clay) 8%, transparent);
-    border: 1px dashed color-mix(in srgb, var(--v2-clay) 40%, transparent);
-    color: var(--v2-ink);
-    font-size: 12.5px;
-  }
-  .chat-nota::before {
-    content: 'Nota interna · no la ve el cliente';
-    display: block;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--v2-clay);
-    margin-bottom: 3px;
-  }
-
   /* ── entrega y multimedia recibida ──────────────────────────────────── */
   .entrega {
     font-size: 10.5px;
@@ -332,7 +351,7 @@
   .chat-mensajes {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 14px;
     max-width: 720px;
   }
   .dia {
@@ -340,46 +359,124 @@
     align-items: center;
     gap: 10px;
     margin: 6px 0;
-    color: var(--v2-slate);
-    font-size: 11.5px;
+    font-family: var(--bandeja-mono);
+    font-size: 9.5px;
+    font-weight: 600;
+    color: var(--bandeja-texto-2);
     text-transform: uppercase;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.06em;
   }
   .dia::before,
   .dia::after {
     content: '';
     flex: 1;
     height: 1px;
-    background: var(--v2-line);
+    background: var(--bandeja-borde);
   }
+
+  /* ── las burbujas ──────────────────────────────────────────────────────
+     SUPERFICIE Y FILETE, NUNCA RELLENO SÓLIDO.
+
+     Hasta el 21/09/2026 esto era un chat genérico: el cliente iba en un
+     rectángulo azul saturado con texto blanco y radio 12, y la respuesta en
+     un gris. Los tres valores salían de `var(--v2-accent, #2563eb)`,
+     `var(--v2-surface-2, #f1f1f1)` y `var(--v2-border, #e5e5e5)` -- y
+     NINGUNA de esas tres variables existe (medido: 0 definiciones en
+     v2.css). O sea que el hilo se pintaba enteramente con los colores de
+     respaldo, por fuera del sistema congelado.
+
+     La referencia (Human Control State, medida en el HTML de Stitch) usa
+     radio 4, padding 12, 12,5px sobre interlínea 1,6, y distingue por
+     SUPERFICIE + FILETE de 1px:
+
+        cliente   #FFFFFF sobre #E2E8F0
+        Dexter IA #F5F3FF sobre #DDD6FE
+        operador  #EFF6FF sobre #BFDBFE
+
+     Los seis valores ya estaban en `bandeja.css` desde la Fase 1 --salen
+     del tailwind.config del diseño canónico-- y el hilo era el único lugar
+     que no los usaba.
+
+     El color NO es la señal: el rótulo de autor (D30) sigue arriba de cada
+     burbuja, con palabra y punto. La superficie sólo refuerza. */
   .chat-burbuja {
-    padding: 10px 14px;
-    border-radius: 12px;
+    padding: 12px;
+    border-radius: var(--bandeja-radio-sm);
+    border: 1px solid var(--bandeja-borde);
+    background: var(--bandeja-superficie);
+    color: var(--bandeja-texto);
     max-width: 80%;
-    white-space: pre-wrap;
-    font-size: 14px;
-    line-height: 1.4;
+    font-size: 12.5px;
+    line-height: 1.6;
   }
+
+  .chat-texto {
+    white-space: pre-wrap;
+  }
+
+  /* EL CLIENTE VA A LA IZQUIERDA. Estaba al revés: el cliente a la derecha
+     y quien atiende a la izquierda, que es la convención de la app de
+     mensajería del CLIENTE, no la de una consola de quien atiende. En la
+     referencia, y en cualquier consola de agente, uno lee la columna
+     izquierda como "lo que entra" y la derecha como "lo que sale". */
   .chat-usuario {
-    align-self: flex-end;
-    background: var(--v2-accent, #2563eb);
-    color: white;
+    align-self: flex-start;
   }
   .chat-asistente {
-    align-self: flex-start;
-    background: var(--v2-surface-2, #f1f1f1);
+    align-self: flex-end;
   }
   .chat-otro {
     align-self: center;
     background: transparent;
-    border: 1px dashed var(--v2-border, #e5e5e5);
+    border: 1px dashed var(--bandeja-borde-fuerte);
     font-style: italic;
-    opacity: 0.75;
+    color: var(--bandeja-texto-2);
   }
+
+  /* Quién habla, por superficie. Va por AUTOR (`a-*`, D30) y no por rol:
+     `rol = assistant` cubre por igual a la IA y a una persona, y ésa es
+     justo la distinción que el hilo tiene que hacer visible. */
+  .a-ia {
+    background: var(--bandeja-ia-fondo);
+    border-color: var(--bandeja-ia-borde);
+  }
+  .a-humano {
+    background: var(--bandeja-humano-fondo);
+    border-color: var(--bandeja-humano-borde);
+  }
+
+  /* LA NOTA INTERNA NO SE PARECE A UN MENSAJE, y por eso su regla vive DESPUÉS
+     de `.chat-burbuja` y no antes: las dos son selectores de una clase, así
+     que gana la última del archivo. Estaba arriba, y cuando `.chat-burbuja`
+     pasó a fijar superficie y filete propios le habría borrado el ámbar y el
+     borde punteado -- una nota interna con la misma cara que un mensaje
+     enviado es exactamente lo que este bloque existe para impedir. Mismo
+     mecanismo que la colisión de `.activa` en la cola: en un `<style>` de
+     Svelte, el orden ES la especificidad. */
+  .chat-nota {
+    align-self: stretch;
+    max-width: 100%;
+    background: var(--bandeja-nota-fondo);
+    border: 1px dashed var(--bandeja-aviso-borde);
+    color: var(--bandeja-texto);
+  }
+  .chat-nota::before {
+    content: 'Nota interna · no la ve el cliente';
+    display: block;
+    font-family: var(--bandeja-mono);
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--bandeja-nota);
+    margin-bottom: 4px;
+  }
+
   .chat-hora {
-    margin-top: 4px;
-    font-size: 11px;
-    opacity: 0.65;
+    margin-top: 6px;
+    font-family: var(--bandeja-mono);
+    font-size: 10px;
+    color: var(--bandeja-texto-3);
   }
   /* Una respuesta guardada que nunca salio tiene que verse distinta de una
      entregada. El aviso de arriba desaparece al rato; la burbuja se queda. */

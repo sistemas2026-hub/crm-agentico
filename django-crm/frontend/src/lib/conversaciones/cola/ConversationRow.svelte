@@ -27,18 +27,27 @@
    * `fetch`: eso es lo que hace que abrir una conversación en pestaña nueva
    * funcione, y que la fila no tenga estado propio.
    *
-   * OJO CON `.activa`, QUE SIGNIFICA DOS COSAS a un metro de distancia:
+   * `.activa` SIGNIFICABA DOS COSAS y el scope NO las separaba — las dos viven
+   * en este archivo, o sea en el MISMO scope:
    *
    *   .fila.activa   la conversación abierta ahora mismo
    *   .activa        el punto de "se movió hace un rato"
    *
-   * Las cinco reglas de las dos viven acá y el scope las mantiene separadas
-   * del resto, pero la colisión de nombres es real. No se renombra en Fase 0.
+   * Con la misma especificidad (0,2,0) ganaba la última del archivo, que era la
+   * del punto. Medido el 21/09/2026 sobre la fila abierta: `display: inline-flex`
+   * (en vez de block), `font-size: 10.5px`, `color: moss` y un `::before` de 6px
+   * inyectado adentro del `<a>`. Efecto visible: la fila abierta se pintaba
+   * verde, encogía, dejaba de llenar la columna y la desbordaba 147px — con
+   * barra de scroll horizontal en la cola.
+   *
+   * El punto pasó a llamarse `.latido`. No es cosmética: mientras compartan
+   * nombre, cualquier regla que se agregue a uno se le aplica al otro.
    */
   import Pill from '$lib/v2/components/Pill.svelte';
   import { Phone, User } from '@lucide/svelte';
   import { shortAge } from '$lib/v2/format.js';
   import { pendiente, resuelta } from '$lib/conversaciones/estado.js';
+  import { plazoDeToma, textoDePlazo } from '$lib/conversaciones/sla.js';
 
   let {
     // La conversación, entera y tal como la manda el motor.
@@ -51,7 +60,10 @@
     // tramoEspera lo consume el contador de críticas del encabezado, y
     // motivoLabel también lo usa QueueFilters.
     tramoEspera,
-    motivoLabel
+    motivoLabel,
+    /** El plazo de toma del tenant, en minutos. 0 = la empresa no definió
+        objetivo y no se dibuja cuenta regresiva. */
+    slaToma = 0
   } = $props();
 
   const CANAL_LABEL = { whatsapp: 'WhatsApp', 'whatsapp-simulado': 'Simulador' };
@@ -116,6 +128,11 @@
   /** Se movio en los ultimos minutos. Cinco y no uno: con uno el punto
       parpadea y se pierde; con quince deja de significar "ahora". */
   const MINUTOS_ACTIVA = 5;
+  /* El plazo de toma de ESTA fila. Se recalcula con el mismo reloj de 20 s
+     que usa el punto "Activa": uno solo para toda la lista, así el número no
+     depende de cuándo se montó cada fila. */
+  const plazo = $derived(plazoDeToma(c, slaToma, ahora || Date.now()));
+
   const estaActiva = (/** @type {any} */ c) =>
     !!c.ultimo_mensaje_en &&
     ahora - new Date(c.ultimo_mensaje_en).getTime() < MINUTOS_ACTIVA * 60 * 1000;
@@ -142,6 +159,24 @@
            es desde ese mensaje y no desde la escalada. Es el mismo
            dato con el que el motor ordena, asi que la lista no dice
            un numero y ordena por otro. -->
+      <!-- EL PLAZO VA ANTES QUE LA ESPERA. La espera dice cuánto lleva; el
+           plazo dice si eso está bien o mal, que es lo que decide si esta
+           fila es la próxima. Sólo aparece si la empresa definió objetivo y
+           si la conversación es de las que el plazo mide (escalada y sin
+           dueño) -- ver lib/conversaciones/sla.js. -->
+      {#if plazo}
+        <span
+          class="plazo"
+          class:plazo-vencido={plazo.vencido}
+          class:plazo-cerca={plazo.porVencer}
+          title={plazo.vencido
+            ? `Venció hace ${textoDePlazo(plazo).replace('+', '')} (objetivo: ${plazo.objetivoMinutos} min para tomarla)`
+            : `Quedan ${textoDePlazo(plazo)} del objetivo de ${plazo.objetivoMinutos} min para tomarla`}
+        >
+          {plazo.vencido ? 'Vencido' : 'Quedan'}
+          <b class="v2-num">{textoDePlazo(plazo)}</b>
+        </span>
+      {/if}
       {#if c.esperando_desde}
         <span
           class="cuando v2-num espera-{tramoEspera(c)}"
@@ -248,9 +283,16 @@
           {#if c.motivo_escalamiento}
             <span class="motivo-fila">{motivoLabel(c.motivo_escalamiento)}</span>
           {/if}
-        {:else if c.escalada_a_humano && !resuelta(c)}
+          <!-- SOLO SI LA BANDA NO LO DIJO YA. `distintivo(c)` dibuja arriba
+               "En atención", "Sin asignar", "Cliente respondió"… y abajo
+               aparecía además una píldora "En curso" diciendo lo mismo con
+               otras palabras: dos rótulos de estado en una fila que ya tiene
+               banda, espera, nombre, motivo y dueño. La referencia pone UN
+               distintivo por fila. No se pierde nada -- cuando no hay banda
+               (una resuelta, por ejemplo) la píldora sigue estando. -->
+        {:else if c.escalada_a_humano && !resuelta(c) && !distintivo(c)}
           <Pill tone="clay" dot>En curso</Pill>
-        {:else if resuelta(c)}
+        {:else if resuelta(c) && !distintivo(c)}
           <Pill tone="moss">Resuelta</Pill>
         {/if}
 
@@ -274,7 +316,7 @@
          conversacion CONSERVA su posicion segun la hora de esa
          actividad; el punto solo dice "esto se movio recien". -->
     {#if estaActiva(c)}
-      <span class="activa">Activa</span>
+      <span class="latido">Activa</span>
     {/if}
 
     <!-- La excepcion va sola, en su propio renglon y al final: el
@@ -326,7 +368,9 @@
      La separación la dibuja ConversationList entre hermanas. */
   .fila {
     display: block;
-    padding: 10px 12px;
+    /* 10 -> 8: densidad. La referencia mete la misma fila en 112px y ésta
+       pedía 132. Se saca aire, no renglones. */
+    padding: 8px 12px;
     color: inherit;
     text-decoration: none;
     border-left: 3px solid transparent;
@@ -426,13 +470,52 @@
     border-color: var(--bandeja-ia-borde);
   }
 
+  /* ── el plazo de toma ──────────────────────────────────────────────────
+     Tres estados y tres pesos. En reposo es apenas un dato más; cerca del
+     vencimiento se enciende; vencido es lo único de la fila que grita.
+     Nunca sólo color: siempre lleva la palabra ("Quedan" / "Vencido"). */
+  .plazo {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 4px;
+    flex: none;
+    padding: 1px 5px;
+    border: 1px solid var(--bandeja-borde);
+    border-radius: var(--bandeja-radio-sm);
+    font-family: var(--bandeja-mono);
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--bandeja-texto-2);
+    white-space: nowrap;
+  }
+
+  .plazo b {
+    font-size: 10.5px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .plazo-cerca {
+    color: var(--bandeja-aviso);
+    background: var(--bandeja-aviso-fondo);
+    border-color: var(--bandeja-aviso-borde);
+  }
+
+  .plazo-vencido {
+    color: var(--bandeja-error);
+    background: var(--bandeja-error-fondo);
+    border-color: var(--bandeja-error-borde);
+  }
+
   .tope {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    margin-bottom: 3px;
-    min-height: 15px;
+    margin-bottom: 2px;
+    min-height: 14px;
   }
 
   /* ── el pie: quién la tiene ──────────────────────────────────────────── */
@@ -441,8 +524,8 @@
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    margin-top: 5px;
-    padding-top: 4px;
+    margin-top: 4px;
+    padding-top: 3px;
     border-top: 1px solid var(--bandeja-borde);
   }
 
@@ -559,7 +642,7 @@
   /* Actividad viva: verde y discreto. No pide nada -- dice que algo se movio
      recien, que es informacion, no trabajo. Por eso no compite con el rojo de
      "volvio a escribir" ni con el tiempo de espera. */
-  .activa {
+  .latido {
     display: inline-flex;
     align-items: center;
     gap: 5px;
@@ -568,7 +651,7 @@
     color: var(--v2-moss);
   }
 
-  .activa::before {
+  .latido::before {
     content: '';
     width: 6px;
     height: 6px;
@@ -600,33 +683,38 @@
     flex: none;
   }
 
-  /* Una sola línea: el preview orienta, no se lee. Dos líneas hacen que la
-     altura de cada fila dependa de lo largo que fue el último mensaje. */
+  /* POR QUÉ ESTÁ ACÁ: texto, no píldora.
+     Era una píldora gris redondeada (radio 999) con `var(--v2-hueso, #f1efe9)`
+     y `var(--v2-tinta-suave, #5c5850)` -- dos variables que NO existen, así
+     que se pintaba con los colores de respaldo, fuera del sistema congelado,
+     igual que pasaba con las burbujas del hilo.
+     Además competía: en la referencia la fila tiene UN distintivo arriba
+     --la banda-- y todo lo demás es texto de distinto peso. Una segunda forma
+     redondeada al lado del badge hace que el ojo no sepa cuál de las dos
+     contesta "¿es esta la próxima?".
+     Una sola línea: el motivo orienta, no se lee entero. */
   .por-que {
-    display: inline-flex;
-    align-self: flex-start;
-    margin: 1px 0 2px;
-    padding: 1px 6px;
-    border-radius: 999px;
-    background: var(--v2-hueso, #f1efe9);
-    color: var(--v2-tinta-suave, #5c5850);
+    display: block;
+    margin: 1px 0 0;
+    color: var(--bandeja-texto-2);
     font-size: 11px;
-    font-weight: 600;
+    font-weight: 500;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     max-width: 100%;
   }
 
-
+  /* Legado: apagado y en cursiva, sin caja. El borde punteado lo marcaba como
+     algo accionable, y una legada sin adoptar es justo lo contrario (G8). */
   .por-que-legado {
-    background: transparent;
-    border: 1px dashed var(--v2-line, #ddd);
+    font-style: italic;
+    color: var(--bandeja-texto-3);
   }
 
 
   .avance {
-    margin: 2px 0 0;
+    margin: 1px 0 0;
     font-size: 12px;
     color: var(--v2-slate);
     line-height: 1.4;
@@ -646,7 +734,7 @@
     align-items: center;
     gap: 6px;
     flex-wrap: wrap;
-    margin-top: 6px;
+    margin-top: 4px;
   }
 
   .canal {

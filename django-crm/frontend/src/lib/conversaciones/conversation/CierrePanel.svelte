@@ -96,11 +96,11 @@
 
 <style>
   .cierre {
-    border: 1px solid var(--v2-borde, #e2e5ea);
+    border: 1px solid var(--bandeja-borde);
     border-radius: 8px;
     padding: 0.75rem 0.9rem;
     margin-top: 0.6rem;
-    background: var(--v2-fondo-suave, #fafbfc);
+    background: var(--bandeja-superficie-suave);
   }
   .titulo {
     margin: 0 0 0.15rem;
@@ -110,7 +110,7 @@
   .nota-guia {
     margin: 0 0 0.6rem;
     font-size: 0.78rem;
-    color: var(--v2-texto-suave, #6b7280);
+    color: var(--bandeja-texto-2);
   }
   .opciones {
     list-style: none;
@@ -131,16 +131,16 @@
   }
   .opciones label:hover,
   .opciones label.elegida {
-    background: var(--v2-fondo-acento, #eef2ff);
+    background: var(--bandeja-humano-fondo);
   }
   .categoria {
     font-size: 0.72rem;
-    color: var(--v2-texto-suave, #6b7280);
+    color: var(--bandeja-texto-2);
   }
   .campo-nota {
     display: block;
     font-size: 0.78rem;
-    color: var(--v2-texto-suave, #6b7280);
+    color: var(--bandeja-texto-2);
   }
   .campo-nota textarea {
     width: 100%;
@@ -148,7 +148,7 @@
     font: inherit;
     font-size: 0.82rem;
     padding: 0.35rem 0.45rem;
-    border: 1px solid var(--v2-borde, #e2e5ea);
+    border: 1px solid var(--bandeja-borde);
     border-radius: 5px;
     resize: vertical;
   }
@@ -161,11 +161,11 @@
   }
   .impedimento {
     font-size: 0.78rem;
-    color: var(--v2-texto-suave, #6b7280);
+    color: var(--bandeja-texto-2);
   }
   .aviso-mal {
     margin: 0.5rem 0 0;
     font-size: 0.8rem;
-    color: var(--v2-mal, #b42318);
+    color: var(--bandeja-error);
   }
 </style>

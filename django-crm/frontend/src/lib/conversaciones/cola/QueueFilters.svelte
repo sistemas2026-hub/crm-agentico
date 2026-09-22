@@ -65,7 +65,7 @@
     <!-- Que canales se miran. Operativo (los reales) es el default: una
          prueba del simulador no puede competir con un cliente. -->
     <label class="orden">
-      <span class="orden-rotulo">Canales</span>
+      <span class="orden-rotulo">Canal</span>
       <select bind:value={vista} aria-label="Qué canales se ven">
         {#each VISTAS as v (v.id)}
           <option value={v.id}>{v.label}</option>
@@ -74,7 +74,7 @@
     </label>
 
     <label class="orden">
-      <span class="orden-rotulo">Ordenar por</span>
+      <span class="orden-rotulo">Orden</span>
       <select
         bind:value={orden}
         onchange={() => (ordenElegido = true)}
@@ -86,6 +86,11 @@
       </select>
     </label>
 
+    <!-- Los dos selectores juntos y el interruptor después: son QUÉ se ve y
+         EN QUÉ ORDEN, contra una excepción que se cruza con la pestaña.
+         Con los rótulos acortados ("Canal", "Orden") y las opciones más
+         cortas, los dos entran en un renglón (116 + 140 de 304) y el
+         interruptor se lleva el segundo. Antes eran tres renglones. -->
     <button
       type="button"
       class="motivo"
@@ -132,36 +137,55 @@
 
 
   /* ── orden y filtro de escalada ──────────────────────────────────────── */
+  /* Envuelve. Los tres controles miden 459px y la columna de la cola son 329px:
+     sin `wrap` la fila se salía 130px y, como `.columna` no recorta en X, el
+     chip "Solo escaladas" se dibujaba ENCIMA del panel de la conversación
+     (medido el 21/09/2026: borde derecho del chip en 681px, borde de la columna
+     en 552px). Envolver es lo correcto acá y no achicar los controles: los
+     rótulos ya van en `nowrap` porque "Ordenar por" partido en dos no se lee. */
   .controles {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 8px;
-    padding: 0 12px 8px;
+    gap: 6px;
+    row-gap: 4px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--bandeja-borde);
   }
 
   .orden {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    font-size: 11px;
+    gap: 5px;
     color: var(--bandeja-texto-2);
   }
 
+  /* El rótulo es un rótulo: mono en versalita, como `.panel-titulo` en la
+     columna de contexto, `.autor` en el hilo y `.marca-banda` en la fila. Era
+     lo único de la cola que rotulaba con texto normal de 11px, y además es lo
+     que hacía que los tres controles midieran 459px en una columna de 329 --
+     o sea tres renglones donde la referencia usa uno. Angosto sigue
+     envolviendo; lo que cambia es que ahora entra. */
   .orden-rotulo {
     white-space: nowrap;
+    font-family: var(--bandeja-mono);
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
   }
 
   .orden select {
-    font: inherit;
+    font-family: var(--bandeja-sans);
     font-size: 11.5px;
     color: var(--bandeja-texto);
     background: none;
     border: 1px solid var(--bandeja-borde);
-    border-radius: var(--bandeja-radio);
-    /* 28px de alto: por debajo de eso un select deja de ser comodo de
-       apuntar, y esta pantalla se usa con prisa. */
-    min-height: 28px;
-    padding: 2px 6px;
+    border-radius: var(--bandeja-radio-sm);
+    /* 26px de alto: el mínimo que sigue siendo cómodo de apuntar. Esta
+       pantalla se usa con prisa, así que por debajo de esto no se baja. */
+    min-height: 26px;
+    padding: 1px 4px;
     cursor: pointer;
   }
 

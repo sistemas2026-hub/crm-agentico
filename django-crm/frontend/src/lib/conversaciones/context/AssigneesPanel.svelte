@@ -46,7 +46,7 @@
 <style>
   .panel {
     padding: 0.75rem 0;
-    border-bottom: 1px solid var(--v2-borde, #e2e2e2);
+    border-bottom: 1px solid var(--bandeja-borde);
   }
   .panel-titulo {
     display: flex;

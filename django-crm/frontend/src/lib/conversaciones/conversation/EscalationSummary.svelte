@@ -89,12 +89,20 @@
     gap: 10px;
     align-items: baseline;
   }
+  /* LOS RÓTULOS SON RÓTULOS, NO TEXTO.
+     Estaban a 11px con peso 650 en la misma familia que la respuesta, así que
+     las cuatro preguntas pesaban casi tanto como sus cuatro respuestas y el
+     bloque se leía como ocho cosas en vez de cuatro. La referencia usa mono
+     de 9,5-10px en versalita para todo lo que rotula, y es la misma forma que
+     ya tienen `.panel-titulo` en la columna de contexto y `.autor` en el hilo.
+     Acá era el único rótulo de la Bandeja que no la usaba. */
   .brief dt {
-    color: var(--v2-slate);
-    font-size: 11px;
-    font-weight: 650;
+    color: var(--bandeja-texto-2);
+    font-family: var(--bandeja-mono);
+    font-size: 9.5px;
+    font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.06em;
   }
   .brief dd {
     margin: 0;
@@ -124,9 +132,43 @@
   .brief {
     gap: 7px;
   }
+
+  /* EL RESUMEN CEDE ALTURA ANTES QUE EL HILO.
+     'Qué quiere' imprime el mensaje del cliente entero y sin resumir (es el
+     punto: "lo que escribió, sin resumir"), así que este bloque crece sin
+     techo. Medido el 21/09/2026 a 390x844: el resumen se llevaba 224px y al
+     hilo le quedaban 28 -- ni un mensaje completo en pantalla. A 1024x768,
+     175px contra 121.
+     La causa es de flex, no de contenido: el resumen no podía encogerse
+     (`min-height: auto` = min-content) y el hilo tiene `flex-basis: 0`, así que
+     toda la falta de espacio caía del lado del hilo. Con `min-height: 0` el
+     resumen sí encoge, y con su propio scroll no se pierde nada: sigue entero,
+     se lee bajando. El piso del hilo lo pone `.hilo { min-height }`. */
+  .brief {
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  /* DENSIDAD.
+     Medido el 21/09/2026: 157px a 1440 y 224 a 390, contra los 38px que ocupa
+     la franja equivalente en la referencia. No se saca información --las
+     cuatro preguntas siguen enteras-- se saca AIRE: el separador por fila deja
+     de ser una línea con 7px de padding y pasa a ser 5px de espacio, el
+     interlineado baja de 1,45 a 1,35 y el texto a 11,5px, que es el tamaño con
+     el que la referencia escribe el motivo de la escalada.
+
+     La grilla de 8,5rem se queda: es lo que alinea las cuatro respuestas en
+     una columna y deja leer los cuatro rótulos en vertical de un vistazo, que
+     era el motivo de usar grilla. */
+  .brief {
+    gap: 5px;
+    padding: 8px 14px;
+    font-size: 11.5px;
+    line-height: 1.35;
+  }
+
   .brief-fila:not(.brief-primero) {
-    border-top: 1px solid var(--v2-line-soft);
-    padding-top: 7px;
+    padding-top: 5px;
   }
   /* Un renglon sin dato no puede pesar lo mismo que uno con dato: se ve, para
      que las cuatro preguntas esten siempre, pero no compite. */
