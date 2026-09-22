@@ -35,7 +35,25 @@
   }
 </script>
 
-{#if lineas.length > 0}
+<!-- SIN MOVIMIENTOS TAMBIÉN SE DIBUJA, y eso cambió el 21/09/2026.
+     Antes este panel vivía apilado con otros nueve: no tener nada que decir
+     equivalía a no ocupar espacio, y estaba bien. Desde que la columna se
+     organiza en cinco pestañas, callar significa que quien abre "Actividad"
+     encuentra una pestaña en blanco -- que se lee como una pantalla rota, no
+     como una conversación sin movimientos.
+     Y no es lo mismo "no sabemos" que "no pasó nada": el relevo escribe un
+     evento por transición desde B3.3, así que una lista vacía es un hecho
+     comprobado -- la conversación no cambió de manos nunca. Decirlo es
+     información. -->
+{#if lineas.length === 0}
+  <section class="actividad">
+    <p class="panel-titulo">Relevo</p>
+    <p class="panel-nota">
+      Todavía no cambió de manos: no hay ninguna toma, devolución, reasignación
+      ni cierre registrado en esta conversación.
+    </p>
+  </section>
+{:else}
   <section class="actividad">
     <p class="panel-titulo">Relevo · {lineas.length} movimiento{lineas.length === 1 ? '' : 's'}</p>
 

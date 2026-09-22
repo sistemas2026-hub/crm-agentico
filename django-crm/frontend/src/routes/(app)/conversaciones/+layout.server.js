@@ -22,14 +22,26 @@ import { headersMotor } from '$lib/server/v2/motor-headers.js';
  *
  * @type {import('./$types').LayoutServerLoad}
  */
-export async function load({ fetch, depends }) {
+export async function load({ fetch, depends, locals }) {
   depends('app:conversaciones');
+
+  /* Quién está mirando. Sale del JWT ya verificado (`locals.user`), igual que
+     en `[id]/+page.server.js` -- no es un dato nuevo ni una llamada nueva, es
+     el mismo que la conversación ya usaba para decidir `esMia`. Acá lo
+     necesita la barra de consola, que nombra al operador autenticado.
+     `sondeadoEn` es la marca de tiempo de ESTA carga: como el layout se
+     invalida cada 8s, es literalmente "cuándo se leyó la cola por última
+     vez", y la barra lo muestra. */
+  const yo = { id: locals.user?.id ?? '', nombre: (locals.user?.name || locals.user?.email || '').trim() };
+  const sondeadoEn = new Date().toISOString();
 
   const baseUrl = env.PRIVATE_ASISTENTE_URL;
   const tenant = env.PRIVATE_ASISTENTE_TENANT;
   if (!baseUrl || !tenant) {
     return {
       conversaciones: [],
+      yo,
+      sondeadoEn,
       error: 'Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT)'
     };
   }
@@ -39,10 +51,18 @@ export async function load({ fetch, depends }) {
       { headers: headersMotor() });
     const datos = await resp.json();
     if (!resp.ok) {
-      return { conversaciones: [], error: datos.error || 'No se pudo cargar las conversaciones' };
+      return { conversaciones: [], yo, sondeadoEn, error: datos.error || 'No se pudo cargar las conversaciones' };
     }
-    return { conversaciones: datos.conversaciones };
+    /* `sla_toma_minutos` viaja con la cola: es uno solo para la empresa y el
+       motor lo saca de su config (TenantConfig.sla_toma_minutos). 0 -- o
+       ausente -- significa que no hay objetivo definido, y entonces la
+       pantalla no dibuja ninguna cuenta regresiva. */
+    return { conversaciones: datos.conversaciones, yo, sondeadoEn,
+             sla_toma_minutos: datos.sla_toma_minutos ?? 0,
+             /* Los tres numeros crudos de la salud del canal. El veredicto
+                lo arma `lib/conversaciones/canal.js`, en un solo lugar. */
+             canal_whatsapp: datos.canal_whatsapp ?? null };
   } catch (/** @type {any} */ err) {
-    return { conversaciones: [], error: err?.message || 'No se pudo contactar al asistente' };
+    return { conversaciones: [], yo, sondeadoEn, error: err?.message || 'No se pudo contactar al asistente' };
   }
 }

@@ -31,13 +31,15 @@
    */
   import { page } from '$app/state';
   import { invalidate } from '$app/navigation';
-  import PageHeader from '$lib/v2/components/PageHeader.svelte';
   // El sistema visual de la Bandeja. Todo cuelga de `.bandeja`, que es la
   // clase de la mesa de abajo: cubre las tres columnas y la conversación
   // abierta, y no puede alcanzar ninguna otra ruta del CRM.
   import '$lib/conversaciones/estilos/bandeja.css';
   import { pendiente, resuelta, enAtencion } from '$lib/conversaciones/estado.js';
   import { ordenar, horasEsperando } from '$lib/conversaciones/cola/ordenamiento.js';
+  import { saludDelCanal } from '$lib/conversaciones/canal.js';
+  import { barra, alternar } from '$lib/conversaciones/barra-lateral.svelte.js';
+  import { PanelLeftClose, PanelLeftOpen } from '@lucide/svelte';
   import QueueTabs from '$lib/conversaciones/cola/QueueTabs.svelte';
   import QueueSearch from '$lib/conversaciones/cola/QueueSearch.svelte';
   import QueueFilters from '$lib/conversaciones/cola/QueueFilters.svelte';
@@ -46,7 +48,27 @@
   /** @type {{ data: any, children: import('svelte').Snippet }} */
   let { data, children } = $props();
 
+  /* Los módulos de la barra de consola. Rutas REALES del CRM, las cuatro con
+     las que se trabaja un turno de atención. No es la barra lateral entera:
+     poner los veinte destinos acá arriba sería mudarla, no reemplazarla. */
+  const MODULOS = [
+    { href: '/conversaciones', label: 'Conversaciones' },
+    { href: '/tickets', label: 'Tickets' },
+    { href: '/asistente', label: 'Asistente' },
+    { href: '/agentes', label: 'Agentes' }
+  ];
+
   let conversaciones = $derived(data.conversaciones ?? []);
+  /* El plazo de toma que definió la empresa, en minutos. Viene con la cola
+     --es uno solo para todas-- y 0 significa que no hay objetivo definido:
+     entonces no se dibuja ninguna cuenta regresiva. Ver
+     TenantConfig.sla_toma_minutos y lib/conversaciones/sla.js. */
+  let slaToma = $derived(Number(data.sla_toma_minutos) || 0);
+
+  /* Si el canal de WhatsApp está funcionando, medido sobre los acuses que
+     volvieron. El veredicto vive en `canal.js` con sus pruebas: acá sólo se
+     dibuja. Ver ahí por qué se miden los acuses y no la tasa de error. */
+  let canal = $derived(saludDelCanal(data.canal_whatsapp));
   let abierta = $derived(page.params.id ?? null);
 
   // Sondeo: mientras esta pestaña esta abierta, revisa cada pocos segundos
@@ -112,6 +134,51 @@
   let orden = $state('recomendado');
 
   let pendientes = $derived(conversaciones.filter(pendiente).length);
+
+  /* INDICADORES DE LA BARRA DE CONSOLA.
+     La referencia pone arriba el estado del sistema: SLA de entrada, espera
+     máxima, poller, latencia. Acá se calculan los que salen de datos que ya
+     están cargados -- no hay ninguna llamada nueva ni ningún número fabricado.
+
+     `esperaMaxima`  el mayor `horasEsperando()` entre las que de verdad
+                     esperan. Es el mismo cálculo con el que la cola ordena,
+                     así que la barra y la lista no pueden decir cosas
+                     distintas.
+     `sondeadoEn`    cuándo se leyó la cola por última vez. El layout se
+                     invalida cada 8s, así que este número dice si lo que se
+                     está mirando es de hace un momento o de hace un rato --
+                     que es lo que un operador necesita saber de una consola. */
+  let esperaMaxima = $derived.by(() => {
+    const esperando = conversaciones.filter(pendiente);
+    if (esperando.length === 0) return null;
+    return Math.max(...esperando.map((/** @type {any} */ c) => horasEsperando(c)));
+  });
+
+  const enHoras = (/** @type {number|null} */ h) => {
+    if (h === null) return '—';
+    if (h < 1) return `${Math.max(1, Math.round(h * 60))}m`;
+    if (h < 48) return `${Math.round(h)}h`;
+    return `${Math.round(h / 24)}d`;
+  };
+
+  /* EL REPARTO DEL TRABAJO, para la barra de estado de abajo.
+     Quién está llevando cada conversación ahora mismo. `control` lo decide el
+     motor (control_efectivo, B3.3b) y acá sólo se cuenta -- esta pantalla no
+     vuelve a deducir quién la lleva. "Sin dueño" son las que están en manos
+     de una persona pero que todavía no tomó nadie: es el número que dice si
+     la cola se está quedando sin atender. */
+  let llevaIA = $derived(
+    conversaciones.filter((/** @type {any} */ c) => c.control === 'ia' && !resuelta(c)).length
+  );
+  let llevaHumano = $derived(
+    conversaciones.filter((/** @type {any} */ c) => c.control === 'humano' && !resuelta(c)).length
+  );
+  let sinDueno = $derived(
+    conversaciones.filter(
+      (/** @type {any} */ c) => c.control === 'humano' && !resuelta(c) && !c.asignada_a_usuario_id
+    ).length
+  );
+
   // El numero que de verdad duele. Va en la cabecera al lado del total
   // porque "44 por atender" no dice nada si 20 llevan mas de una semana.
   let criticas = $derived(
@@ -135,6 +202,17 @@
     return () => clearInterval(i);
   });
 
+  /* Hace cuánto se leyó la cola, para la barra de consola y la de estado.
+     Va DESPUÉS de `ahora` y no antes: `$derived` se evalúa perezoso, así que
+     en ejecución funcionaba igual, pero leer una variable declarada más abajo
+     es una zona muerta esperando a que alguien mueva una línea. svelte-check
+     lo marcó como error y tenía razón. */
+  let sondeoHaceSegundos = $derived(
+    data.sondeadoEn
+      ? Math.max(0, Math.round((ahora - new Date(data.sondeadoEn).getTime()) / 1000))
+      : null
+  );
+
 
   // Tres tramos, no un gradiente: el ojo no distingue 61h de 58h, y si
   // distingue "hoy" de "hace mas de una semana". Los cortes son a un dia y a
@@ -151,11 +229,16 @@
   // ORDEN_POR_PESTANA: ese mapa apunta a estos mismos ids, y separarlos
   // dejaría la correspondencia repartida en dos archivos sin nada que la
   // mantenga junta.
+  /* Rótulos cortos: el selector se dibuja al ancho de su opción MÁS LARGA, y
+     "Más reciente creación" lo estiraba a 216px en una columna de 304 -- o sea
+     que una sola palabra de más obligaba a los filtros a ocupar dos renglones.
+     Los ids no cambian: `ORDEN_POR_PESTANA` y `ordenamiento.js` siguen
+     apuntando a los mismos cuatro. */
   const ORDENES = [
-    { id: 'actividad', label: 'Actividad reciente' },
+    { id: 'actividad', label: 'Actividad' },
     { id: 'recomendado', label: 'Recomendado' },
     { id: 'espera', label: 'Mayor espera' },
-    { id: 'creacion', label: 'Más reciente creación' }
+    { id: 'creacion', label: 'Más recientes' }
   ];
 
   // Cada pestaña arranca con el orden que le corresponde POR LO QUE ES.
@@ -264,21 +347,110 @@
   });
 </script>
 
-<PageHeader title="Conversaciones">
-  {#snippet sub()}
+<!-- LA BARRA DE CONSOLA.
+     Era un `<PageHeader>` del CRM: título "Conversaciones" a 26px con su
+     subtítulo debajo, 76px de alto. Medido contra la referencia, esos primeros
+     píxeles son los que hacían que las dos pantallas se leyeran como dos
+     productos distintos -- la referencia arranca con una barra fina de consola
+     y enseguida las tres columnas; acá arrancaba con una portada de página
+     administrativa.
+
+     Lo que va adentro es TODO dato real y ya calculado acá: no hay ningún
+     indicador inventado. La referencia muestra además "Telemetry", "Incidents"
+     y el estado de Radius; Dexter no tiene ninguna de esas tres medidas, así
+     que no se dibujan -- una barra de consola con indicadores falsos es peor
+     que una sin ellos.
+
+     El nombre de la organización NO se repite acá: ya está arriba a la
+     izquierda, en la barra lateral, y sale de la config del tenant. -->
+<header class="consola bandeja">
+  <!-- RECOGER LA BARRA LATERAL. Recogida, la Bandeja ocupa la pantalla
+       entera y las tres columnas llegan a 360/730/350 -- los números de la
+       referencia. Desplegada, la navegación del CRM está donde la gente la
+       conoce. Lo decide quien trabaja, y se recuerda entre visitas. -->
+  <button
+    type="button"
+    class="consola-recoger"
+    onclick={alternar}
+    aria-pressed={barra.recogida}
+    title={barra.recogida ? 'Mostrar el menú lateral' : 'Recoger el menú lateral'}
+    aria-label={barra.recogida ? 'Mostrar el menú lateral' : 'Recoger el menú lateral'}
+  >
+    {#if barra.recogida}<PanelLeftOpen size={15} />{:else}<PanelLeftClose size={15} />{/if}
+  </button>
+
+  <!-- LA SALIDA. Con la barra lateral recogida, ésta es la única puerta de
+       vuelta al resto del CRM: por eso la marca es un enlace y no un rótulo.
+       Una consola a pantalla completa sin salida visible es una trampa. -->
+  <a class="consola-marca" href="/" title="Volver al inicio">Dexter</a>
+
+  <!-- Los módulos operativos. Son rutas que YA existen -- no hay ninguna
+       inventada -- y son las cuatro con las que se trabaja un turno: la
+       cola, los tickets del CRM, el asistente y su configuración.
+       El resto del CRM (facturación, negociaciones, ajustes) sigue a un clic
+       por la marca: no se duplica acá la barra lateral entera, que era el
+       motivo por el que esta navegación no existía. -->
+  <nav class="consola-nav" aria-label="Módulos">
+    {#each MODULOS as m (m.href)}
+      <a
+        href={m.href}
+        class="consola-modulo"
+        aria-current={page.url.pathname.startsWith(m.href) ? 'page' : undefined}
+      >{m.label}</a>
+    {/each}
+  </nav>
+
+  <!-- El buscador vive acá, como en la referencia, y no dentro de la columna
+       de la cola. Sigue escribiendo en el mismo `busqueda` del layout y el
+       filtrado se deriva igual en `visibles`: no cambió qué busca ni cómo,
+       cambió dónde está. Sólo tiene sentido si hay algo que buscar. -->
+  {#if !data.error && conversaciones.length > 0}
+    <QueueSearch bind:busqueda />
+  {/if}
+
+  <span class="consola-datos">
     {#if pendientes > 0}
       <!-- Solo las que de verdad esperan: ni cerradas ni las que traian
            puesta la marca por el default viejo. Decia 155 y eran 31. -->
-      <span class="v2-num">{pendientes}</span>
-      por atender{#if criticas > 0},
-        <span class="v2-num critico">{criticas}</span> hace más de una semana{/if} ·
-      <span class="v2-num">{conversaciones.length}</span> en total
+      <span class="consola-dato">
+        Por atender <b class="v2-num">{pendientes}</b>
+      </span>
+      <span class="consola-dato" class:consola-critico={criticas > 0}>
+        Espera máx. <b class="v2-num">{enHoras(esperaMaxima)}</b>
+      </span>
     {:else}
-      <span class="v2-num">{conversaciones.length}</span>
-      {conversaciones.length === 1 ? 'conversación' : 'conversaciones'}, ninguna esperando
+      <span class="consola-dato">Ninguna esperando</span>
     {/if}
-  {/snippet}
-</PageHeader>
+    <span class="consola-dato consola-total">
+      Total <b class="v2-num">{conversaciones.length}</b>
+    </span>
+
+    <!-- El estado del enlace con el motor. No es un "99.99% uptime"
+         inventado: es cuándo se leyó esta cola. Si el sondeo se cae, el
+         número crece a la vista en vez de quedarse todo igual y mentir. -->
+    {#if sondeoHaceSegundos !== null}
+      <span class="consola-dato consola-sondeo" class:consola-frio={sondeoHaceSegundos > 60}>
+        <span class="consola-punto"></span>
+        {#if sondeoHaceSegundos < 60}En vivo{:else}Hace {enHoras(sondeoHaceSegundos / 3600)}{/if}
+      </span>
+    {/if}
+
+    <!-- El estado del canal. No es un "uptime" del proveedor: es cuántos de
+         los mensajes que salieron tienen acuse de vuelta. -->
+    <span
+      class="consola-dato consola-canal"
+      class:consola-canal-mal={canal.alerta}
+      class:consola-canal-mudo={canal.estado === 'sin_trafico' || canal.estado === 'no_medido'}
+      title={canal.detalle}
+    >
+      <span class="consola-punto"></span>{canal.etiqueta}
+    </span>
+
+    {#if data.yo?.nombre}
+      <span class="consola-operador" title="Sesión de {data.yo.nombre}">{data.yo.nombre}</span>
+    {/if}
+  </span>
+</header>
 
 <div class="mesa bandeja">
   <aside class="columna" class:hay-abierta={abierta} aria-label="Conversaciones">
@@ -287,8 +459,6 @@
            accion. El contador de "Sin atender" si lo lleva, porque ese numero
            es trabajo sin tomar. -->
       <QueueTabs {pestanas} {filtro} onIr={irA} />
-
-      <QueueSearch bind:busqueda />
 
       <QueueFilters
         bind:vista bind:orden bind:ordenElegido
@@ -299,7 +469,7 @@
 
     <ConversationList
       {visibles} {conversaciones} error={data.error} {busqueda}
-      {abierta} {ahora} {tramoEspera} {motivoLabel}
+      {abierta} {ahora} {tramoEspera} {motivoLabel} {slaToma}
     />
   </aside>
 
@@ -321,7 +491,306 @@
   {/key}
 </div>
 
+<!-- LA BARRA DE ESTADO.
+     La referencia cierra con una franja de estado del sistema. Acá lleva lo
+     mismo que la de arriba pero del lado del proceso, y todo sale de datos ya
+     cargados: cuántas lleva cada quién, y de cuándo es lo que se está
+     mirando. Nada de SLA, cluster ni latencia inventados -- si alguna de esas
+     se mide algún día, éste es el lugar donde va. -->
+<footer class="pie-consola bandeja">
+  <span class="pie-dato">
+    <span class="pie-marca pie-ia"></span>
+    Las lleva la IA <b class="v2-num">{llevaIA}</b>
+  </span>
+  <span class="pie-dato">
+    <span class="pie-marca pie-humano"></span>
+    En manos de una persona <b class="v2-num">{llevaHumano}</b>
+  </span>
+  {#if sinDueno > 0}
+    <span class="pie-dato pie-alerta">Sin dueño <b class="v2-num">{sinDueno}</b></span>
+  {/if}
+  <span class="pie-derecha">
+    {#if data.error}
+      <span class="pie-dato pie-alerta">Sin conexión con el motor</span>
+    {:else if sondeoHaceSegundos !== null}
+      <span class="pie-dato">Cola leída hace <b class="v2-num">{sondeoHaceSegundos}s</b></span>
+    {/if}
+  </span>
+</footer>
+
 <style>
+  /* ── la barra de consola ────────────────────────────────────────────────
+     Fina, de borde a borde y con una sola línea de contenido. 40px contra los
+     76 del encabezado de página que reemplaza: 36px que se van enteros a las
+     tres columnas. */
+  .consola {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 16px;
+    height: 40px;
+    background: var(--bandeja-superficie);
+    border-bottom: 1px solid var(--bandeja-borde);
+  }
+
+  /* El botón de recoger. Icono solo: es un control de cromo, no una acción
+     sobre una conversación, y en una barra de 40px un rótulo al lado le
+     quitaría lugar a lo que sí se lee. Lleva `aria-label` y `title`. */
+  .consola-recoger {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: var(--bandeja-radio-sm);
+    background: none;
+    color: var(--bandeja-texto-2);
+    cursor: pointer;
+  }
+
+  .consola-recoger:hover {
+    color: var(--bandeja-texto);
+    background: var(--bandeja-superficie-suave);
+    border-color: var(--bandeja-borde);
+  }
+
+  /* La marca, y la salida. Con la barra lateral oculta es la única puerta de
+     vuelta al resto del CRM, así que se ve como lo que es: un enlace. */
+  .consola-marca {
+    flex: none;
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: -0.01em;
+    color: var(--bandeja-texto);
+    text-decoration: none;
+  }
+
+  .consola-marca:hover {
+    color: var(--bandeja-humano);
+  }
+
+  /* Los módulos. En angosto la tira se desplaza en horizontal en vez de
+     envolver: una barra de consola que crece a dos renglones deja de ser una
+     barra. Sin barra de desplazamiento a la vista, como las pestañas del
+     CRM. */
+  .consola-nav {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    /* `1 1 auto` y no `none`: con `none` la tira no podía encogerse y era la
+       BARRA la que se desbordaba -- medido a 390px, se salía de la pantalla.
+       Encogiendo, el desplazamiento ocurre adentro de la tira, que es donde
+       tiene que ocurrir. */
+    flex: 1 1 auto;
+    min-width: 0;
+    padding-left: 10px;
+    border-left: 1px solid var(--bandeja-borde);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .consola-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* El módulo, en mono y versalita: es un rótulo, igual que los de la cola,
+     el hilo y la columna de contexto. El activo lleva el azul de "acá
+     estás", el mismo que las pestañas de la cola y las del contexto. */
+  .consola-modulo {
+    padding: 4px 8px;
+    border-radius: var(--bandeja-radio-sm);
+    font-family: var(--bandeja-mono);
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--bandeja-texto-2);
+    text-decoration: none;
+    white-space: nowrap;
+  }
+
+  .consola-modulo:hover {
+    color: var(--bandeja-texto);
+    background: var(--bandeja-superficie-suave);
+  }
+
+  .consola-modulo[aria-current='page'] {
+    color: var(--bandeja-humano);
+    background: var(--bandeja-humano-fondo);
+  }
+
+  /* Los indicadores van a la derecha, como en la referencia. Sin `margin-left:
+     auto`: ahora el buscador crece en el medio y ya los empuja. */
+  .consola-datos {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-width: 0;
+  }
+
+  .consola-dato {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 5px;
+    font-family: var(--bandeja-mono);
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--bandeja-texto-2);
+    white-space: nowrap;
+  }
+
+  .consola-dato b {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--bandeja-texto);
+  }
+
+  /* El único número de la barra que pide una reacción. */
+  .consola-critico,
+  .consola-critico b {
+    color: var(--v2-rust);
+  }
+
+  .consola-total,
+  .consola-total b {
+    color: var(--bandeja-texto-3);
+  }
+
+  /* El latido del sondeo. Verde mientras la cola es reciente; apagado cuando
+     pasó más de un minuto sin releerla, que con un intervalo de 8s significa
+     que algo no está andando. */
+  .consola-sondeo {
+    color: var(--v2-moss);
+  }
+
+  .consola-punto {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    flex: none;
+    align-self: center;
+  }
+
+  .consola-frio {
+    color: var(--bandeja-aviso);
+  }
+
+  /* El canal. Verde cuando los acuses vuelven, ámbar cuando no vuelve
+     ninguno, apagado cuando no hay con qué afirmar nada -- que NO es lo
+     mismo que estar bien. */
+  .consola-canal {
+    color: var(--v2-moss);
+  }
+
+  .consola-canal-mal {
+    color: var(--bandeja-aviso);
+  }
+
+  .consola-canal-mudo {
+    color: var(--bandeja-texto-3);
+  }
+
+  /* Quién está operando. Sale del JWT ya verificado, igual que `esMia`. */
+  .consola-operador {
+    padding-left: 12px;
+    border-left: 1px solid var(--bandeja-borde);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--bandeja-texto);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 170px;
+  }
+
+  /* Angosto: la marca y el módulo alcanzan. Los contadores de la cola siguen
+     estando en sus pestañas, que es donde se usan. */
+  @media (max-width: 760px) {
+    .consola-datos {
+      display: none;
+    }
+    /* El buscador tampoco: en un teléfono la barra tiene que ser una línea
+       con la marca y los módulos, y nada más. Buscar se hace desde la cola. */
+    .consola :global(.buscar) {
+      display: none;
+    }
+  }
+
+  /* ── la barra de estado ─────────────────────────────────────────────────
+     Mismo lenguaje que la de arriba --mono, versalita, filete-- y la mitad de
+     alto: es cromo de fondo, no algo que se lea todo el tiempo. */
+  .pie-consola {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    height: 26px;
+    padding: 0 16px;
+    background: var(--bandeja-superficie);
+    border-top: 1px solid var(--bandeja-borde);
+  }
+
+  .pie-dato {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-family: var(--bandeja-mono);
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--bandeja-texto-3);
+    white-space: nowrap;
+  }
+
+  .pie-dato b {
+    font-size: 10.5px;
+    font-weight: 700;
+    color: var(--bandeja-texto-2);
+  }
+
+  /* Los dos puntos de color son los mismos dos de toda la Bandeja: violeta la
+     IA, azul la persona. Nunca van solos -- la palabra está al lado. */
+  .pie-marca {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex: none;
+  }
+
+  .pie-ia {
+    background: var(--bandeja-ia);
+  }
+
+  .pie-humano {
+    background: var(--bandeja-humano);
+  }
+
+  .pie-alerta,
+  .pie-alerta b {
+    color: var(--bandeja-aviso);
+  }
+
+  .pie-derecha {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 16px;
+    min-width: 0;
+  }
+
+  @media (max-width: 760px) {
+    .pie-consola {
+      display: none;
+    }
+  }
+
   /* La mesa ocupa lo que queda bajo el encabezado y no scrollea: cada columna
      maneja su propio desborde, para que leer un hilo largo no arrastre la
      lista fuera de la vista. */
@@ -333,7 +802,12 @@
     border-top: 1px solid var(--v2-line);
   }
   .columna {
-    width: 330px;
+    /* 360px: el número EXACTO de la referencia, que ahora sí se puede usar
+       porque la Bandeja ocupa la pantalla entera. Mientras convivía con la
+       barra lateral del CRM había que trabajar en proporción (304 sobre los
+       1218 que quedaban); sin ella, 360/730/350 sobre 1440 cierra igual que
+       en el diseño. */
+    width: 360px;
     flex: none;
     display: flex;
     flex-direction: column;
@@ -342,11 +816,9 @@
   }
 
   /* ── filas ──────────────────────────────────────────────────────────── */
-  /* El unico numero de la cabecera que pide una reaccion. */
-  .critico {
-    color: var(--v2-rust);
-    font-weight: 750;
-  }
+  /* `.critico` se fue con el `<PageHeader>`: su único consumidor era el
+     subtítulo de esa portada. El mismo número lo marca ahora
+     `.consola-critico`, arriba. */
   /* No es un Pill: Pill.svelte excluye ember a propósito porque ember no es
      "un estado en el que un registro está". Acá no describe un estado, marca
      trabajo sin tomar -- el mismo sentido que la tira .v2-next. */
