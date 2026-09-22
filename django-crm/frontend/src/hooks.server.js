@@ -47,9 +47,16 @@ function tokenHasOrgContext(token, orgId) {
 }
 
 /**
- * Verify JWT token locally by checking expiration
+ * Pregunta si el token es autentico. NO lo verifica acá: delega.
+ *
+ * La firma decía `@returns {JWTPayload|null}` de cuando esto decodificaba y
+ * miraba `exp`. Desde que es `async` devuelve una promesa, y svelte-check lo
+ * marcaba como error -- la anotación mentía justo sobre lo que hay que
+ * esperar: sin `await`, el resultado es una promesa, que es SIEMPRE verdadera,
+ * y la guarda de ruta dejaría pasar cualquier cookie.
+ *
  * @param {string} accessToken - JWT access token
- * @returns {JWTPayload|null} JWT payload or null if expired/invalid
+ * @returns {Promise<JWTPayload|null>} los claims verificados, o null
  */
 async function verifyTokenLocally(accessToken) {
   // El nombre se conserva para no tocar los cinco puntos que lo llaman, pero
