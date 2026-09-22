@@ -171,6 +171,27 @@ sin decir qué corregir.
 
 Lo que falta ahora es del lado de la aplicación: guardarlos y mostrarlos.
 
+## La aplicación ya consume lo que el servidor entrega (22/09/2026)
+
+La base local pasó a la versión 7 con siete columnas nuevas y anulables, con el
+mismo patrón aditivo de siempre: nada se recrea y una orden que ya estaba sigue
+estando.
+
+Lo que cambió en pantalla:
+
+- **El Detalle dice qué hay que rehacer.** Una orden devuelta muestra la vuelta,
+  la observación del supervisor y las evidencias a repetir, con el título que
+  usa la plantilla y no el identificador interno.
+- **El protocolo de atención es real** cuando la plantilla lo trae: se ve aunque
+  no haya modo demostración, porque es un dato del tipo de trabajo. Solo cae al
+  ejemplo si la orden todavía no lo trajo.
+- **El ticket de origen y el plan del cliente** salen del backend cuando vienen;
+  si no, siguen los valores de ejemplo.
+
+Lo que **no** se guarda de un listado: la devolución, el contexto, los pasos y la
+cuadrilla solo los puede afirmar el detalle. Un listado que llega después de un
+fallo de red no los borra (CAMPO-D2).
+
 ## Números de identificador
 
 Los identificadores no se reutilizan: si un dato se retira, su número queda

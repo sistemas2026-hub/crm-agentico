@@ -199,6 +199,10 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                   const SizedBox(height: AppSpacing.md),
                   _avisoSinEnviar(),
                 ],
+                if (trabajo.correccion != null) ...<Widget>[
+                  const SizedBox(height: AppSpacing.md),
+                  _loQueHayQueRehacer(trabajo, trabajo.correccion!),
+                ],
                 const SizedBox(height: AppSpacing.md),
                 _accionesRapidas(trabajo),
                 const SizedBox(height: AppSpacing.md),
@@ -216,11 +220,16 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                   const SizedBox(height: AppSpacing.md),
                   _triage(trabajo),
                 ],
+                // El protocolo se ve cuando la plantilla lo trae, aunque no
+                // haya modo demostración: es un dato real del tipo de trabajo.
+                if (trabajo.pasosDelProcedimiento.isNotEmpty ||
+                    widget.mostrarDatosFuturos) ...<Widget>[
+                  const SizedBox(height: AppSpacing.md),
+                  _protocoloDeAtencion(trabajo),
+                ],
                 if (widget.mostrarDatosFuturos) ...<Widget>[
                   const SizedBox(height: AppSpacing.md),
                   _materialesAsociados(),
-                  const SizedBox(height: AppSpacing.md),
-                  _protocoloDeAtencion(),
                 ],
               ],
             ),
@@ -432,6 +441,116 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
     );
   }
 
+  /// Qué pidió rehacer el supervisor.
+  ///
+  /// No es un dato de ejemplo: lo manda el backend en `correccion`. Hasta el
+  /// 22/09/2026 esa lista vivía solo en la bitácora del servidor, así que una
+  /// orden devuelta llegaba sin decir qué corregir y se averiguaba por
+  /// teléfono.
+  Widget _loQueHayQueRehacer(TrabajoVista trabajo, DevolucionDeValidacion c) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: AppColors.errorContainer,
+        borderRadius: AppRadius.brTarjeta,
+        border: Border.all(
+          color: AppColors.onErrorContainer.withValues(alpha: 0.35),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              const Icon(Icons.assignment_return,
+                  size: 18, color: AppColors.onErrorContainer),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
+                  'Te devolvieron este trabajo',
+                  style: AppTypography.etiquetaGrande.copyWith(
+                    color: AppColors.onErrorContainer,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              Text(
+                'Vuelta ${c.vuelta}',
+                style: AppTypography.datoChico.copyWith(
+                  color: AppColors.onErrorContainer,
+                ),
+              ),
+            ],
+          ),
+          if (c.observacion.isNotEmpty) ...<Widget>[
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              '“${c.observacion}”',
+              style: AppTypography.cuerpoChico.copyWith(
+                color: AppColors.onErrorContainer,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ],
+          if (c.requisitos.isNotEmpty) ...<Widget>[
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              c.requisitos.length == 1
+                  ? 'Hay que volver a tomar esta evidencia:'
+                  : 'Hay que volver a tomar estas evidencias:',
+              style: AppTypography.etiquetaChica.copyWith(
+                color: AppColors.onErrorContainer,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            for (final String requisito in c.requisitos)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 2),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    const Icon(Icons.photo_camera,
+                        size: 13, color: AppColors.onErrorContainer),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        // El título de la plantilla, que es como el técnico
+                        // conoce esa foto. Si el requisito ya no existe en la
+                        // plantilla se muestra su identificador: es feo, pero
+                        // es cierto, y callarlo dejaría la lista incompleta.
+                        trabajo.titulosDeEvidencia[requisito] ?? requisito,
+                        style: AppTypography.cuerpoChico.copyWith(
+                          color: AppColors.onErrorContainer,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+          if (c.devueltaEn != null) ...<Widget>[
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              'Devuelta el ${_fechaCorta(c.devueltaEn!)}',
+              style: AppTypography.etiquetaChica.copyWith(
+                color: AppColors.onErrorContainer,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  static String _fechaCorta(DateTime fecha) {
+    final String dia = fecha.day.toString().padLeft(2, '0');
+    final String mes = fecha.month.toString().padLeft(2, '0');
+    final String hora = fecha.hour.toString().padLeft(2, '0');
+    final String minuto = fecha.minute.toString().padLeft(2, '0');
+    return '$dia/$mes a las $hora:$minuto';
+  }
+
   /// CAMPO-DATA-050 · El procedimiento para la falla, como hoja de consulta.
   Future<void> _abrirProcedimiento() {
     return showModalBottomSheet<void>(
@@ -537,7 +656,7 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                   borderRadius: AppRadius.brChico,
                 ),
                 child: Text(
-                  trabajo.futuro.ticketOrigen,
+                  trabajo.origen?.etiqueta ?? trabajo.futuro.ticketOrigen,
                   style: AppTypography.datoChico,
                 ),
               ),
@@ -659,7 +778,15 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
   /// Va aparte de la barra de estados a propósito: la barra dice dónde está la
   /// orden de verdad —lo que el técnico marcó y el backend aceptó—, y esto es
   /// el procedimiento que todavía nadie guarda.
-  Widget _protocoloDeAtencion() {
+  Widget _protocoloDeAtencion(TrabajoVista trabajo) {
+    // Los pasos reales vienen con la plantilla del tipo de trabajo (el backend
+    // los entrega en `tipo.pasos` desde el 22/09/2026). Solo se cae al ejemplo
+    // cuando la orden todavía no los trajo.
+    final bool reales = trabajo.pasosDelProcedimiento.isNotEmpty;
+    final List<String> pasos =
+        reales ? trabajo.pasosDelProcedimiento : FieldMockData.protocoloAtencion;
+    final int pasoActual = reales ? 0 : FieldMockData.protocoloPasoActual;
+
     return Container(
       padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
@@ -688,8 +815,9 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                   borderRadius: BorderRadius.circular(AppRadius.circulo),
                 ),
                 child: Text(
-                  'Paso ${FieldMockData.protocoloPasoActual} de '
-                  '${FieldMockData.protocoloAtencion.length}',
+                  reales
+                      ? '${pasos.length} pasos'
+                      : 'Paso $pasoActual de ${pasos.length}',
                   style: AppTypography.etiquetaChica.copyWith(
                     color: AppColors.onSurface,
                     fontWeight: FontWeight.w600,
@@ -699,34 +827,34 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
             ],
           ),
           const SizedBox(height: AppSpacing.sm),
-          for (int i = 0; i < FieldMockData.protocoloAtencion.length; i++)
+          for (int i = 0; i < pasos.length; i++)
             Padding(
               padding: const EdgeInsets.only(bottom: 2),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
                   Icon(
-                    i < FieldMockData.protocoloPasoActual - 1
+                    i < pasoActual - 1
                         ? Icons.check_circle
-                        : (i == FieldMockData.protocoloPasoActual - 1
+                        : (i == pasoActual - 1
                               ? Icons.radio_button_checked
                               : Icons.radio_button_unchecked),
                     size: 14,
-                    color: i < FieldMockData.protocoloPasoActual - 1
+                    color: i < pasoActual - 1
                         ? AppColors.exito
-                        : (i == FieldMockData.protocoloPasoActual - 1
+                        : (i == pasoActual - 1
                               ? AppColors.primary
                               : AppColors.outlineVariant),
                   ),
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
-                      '${i + 1}. ${FieldMockData.protocoloAtencion[i]}',
+                      '${i + 1}. ${pasos[i]}',
                       style: AppTypography.etiquetaChica.copyWith(
-                        color: i == FieldMockData.protocoloPasoActual - 1
+                        color: i == pasoActual - 1
                             ? AppColors.onSurface
                             : AppColors.onSurfaceVariant,
-                        fontWeight: i == FieldMockData.protocoloPasoActual - 1
+                        fontWeight: i == pasoActual - 1
                             ? FontWeight.w700
                             : FontWeight.w400,
                       ),
@@ -908,6 +1036,13 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
     );
   }
 
+  /// El plan del cliente. Viene en `contexto`, que el despacho congela al
+  /// crear la orden; si no vino, se cae al ejemplo (CAMPO-DATA-023).
+  String get _plan {
+    final String real = _trabajo?.planContratado ?? '';
+    return real.isEmpty ? 'Fibra 500 Mbps Simétrica' : real;
+  }
+
   /// CAMPO-DATA-023 · Qué tiene contratado el cliente.
   Widget _planContratado() {
     return Container(
@@ -926,7 +1061,7 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
               children: <Widget>[
                 Text('Plan Activo', style: AppTypography.etiquetaChica),
                 Text(
-                  'Fibra 500 Mbps Simétrica',
+                  _plan,
                   style: AppTypography.cuerpoChico.copyWith(
                     color: AppColors.onSurface,
                     fontWeight: FontWeight.w600,

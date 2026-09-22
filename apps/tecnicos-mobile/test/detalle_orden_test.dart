@@ -368,6 +368,72 @@ void main() {
       await base.cerrar();
     });
 
+    testWidgets('28. Una orden devuelta dice qué hay que rehacer',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      final base = _BaseFalsa(<Map<String, dynamic>>[
+        <String, dynamic>{
+          ..._orden(estado: 'correccion_requerida'),
+          'vuelta': 2,
+          'formulario_evidencias_json':
+              '[{"id":"foto_potencia","descripcion":"Foto de la potencia"}]',
+          'correccion_json': '{"vuelta":2,'
+              '"requisitos":["foto_potencia"],'
+              '"observacion":"La medición no coincide con la OLT",'
+              '"devuelta_en":"2026-09-22T12:00:00Z"}',
+        },
+      ]);
+      await tester.pumpWidget(_app(base));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Te devolvieron este trabajo'), findsOneWidget);
+      expect(find.text('Vuelta 2'), findsOneWidget);
+      // El título de la plantilla, no el identificador interno.
+      expect(find.text('Foto de la potencia'), findsOneWidget);
+      expect(find.text('foto_potencia'), findsNothing);
+      expect(
+        find.textContaining('La medición no coincide con la OLT'),
+        findsOneWidget,
+      );
+      await base.cerrar();
+    });
+
+    testWidgets('29. Una orden que nadie devolvió no muestra ese aviso',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      final base = _BaseFalsa(<Map<String, dynamic>>[_orden(estado: 'en_sitio')]);
+      await tester.pumpWidget(_app(base));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Te devolvieron este trabajo'), findsNothing);
+      await base.cerrar();
+    });
+
+    testWidgets('30. El protocolo real de la plantilla reemplaza al de ejemplo',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      final base = _BaseFalsa(<Map<String, dynamic>>[
+        <String, dynamic>{
+          ..._orden(estado: 'en_sitio'),
+          'pasos_json': '[{"id":"p1","titulo":"Llegada al inmueble"},'
+              '{"id":"p2","titulo":"Medición óptica"}]',
+        },
+      ]);
+      // Sin modo demostración: los pasos son un dato real del tipo de trabajo.
+      await tester.pumpWidget(_app(base));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Protocolo de Atención'), findsOneWidget);
+      expect(find.text('2 pasos'), findsOneWidget);
+      expect(find.text('1. Llegada al inmueble'), findsOneWidget);
+      // Y no se cuela ninguno del catálogo de ejemplo.
+      expect(
+        find.textContaining(FieldMockData.protocoloAtencion.first),
+        findsNothing,
+      );
+      await base.cerrar();
+    });
+
     testWidgets('25. Sin coordenadas, el recuadro lo dice en vez de dibujar un mapa',
         (WidgetTester tester) async {
       _pantallaAlta(tester);

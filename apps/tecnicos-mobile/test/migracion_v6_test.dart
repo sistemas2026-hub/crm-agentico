@@ -181,7 +181,9 @@ void main() {
       ]) {
         expect(columnas, contains(col), reason: col);
       }
-      expect(await db.getVersion(), 6);
+      // La base sigue subiendo de versión; lo que importa acá es que la
+      // migración v5 → v6 no perdió nada.
+      expect(await db.getVersion(), greaterThanOrEqualTo(6));
     });
 
     test('2. Actualizar no le cuesta al técnico la orden que ya tenía', () async {
@@ -230,7 +232,9 @@ void main() {
       LocalDatabase.resetForTesting();
 
       final db = await LocalDatabase().database;
-      expect(await db.getVersion(), 6);
+      // La base sigue subiendo de versión; lo que importa acá es que la
+      // migración v5 → v6 no perdió nada.
+      expect(await db.getVersion(), greaterThanOrEqualTo(6));
       expect(await db.query('local_ordenes'), hasLength(1));
       expect(await db.query('cola_mutaciones'), hasLength(1));
     });

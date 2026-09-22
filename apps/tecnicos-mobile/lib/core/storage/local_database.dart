@@ -88,7 +88,7 @@ class LocalDatabase {
 
     final db = await openDatabase(
       path,
-      version: 6,
+      version: 7,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -169,6 +169,35 @@ class LocalDatabase {
         }
       }
     }
+
+    if (oldVersion < 7) {
+      // Siete datos que el servidor ya tenia guardados y ningun serializador
+      // devolvia (tanda 1 de SPEC/BACKEND_CAMPO_DATOS.md). El mas importante
+      // es `correccion_json`: que pidio rehacer el supervisor. Hasta ahora una
+      // orden devuelta llegaba sin decir que corregir.
+      //
+      // Mismo patron aditivo: columnas nuevas y anulables, nada se recrea.
+      final infoOrdenes = await db.rawQuery('PRAGMA table_info(local_ordenes);');
+      final colsOrdenes = infoOrdenes.map((c) => c['name'] as String).toSet();
+
+      const nuevas = <String, String>{
+        'cerrada_en': 'TEXT',
+        'vuelta': 'INTEGER',
+        'origen_json': 'TEXT',
+        'contexto_json': 'TEXT',
+        'correccion_json': 'TEXT',
+        'pasos_json': 'TEXT',
+        'cuadrilla_json': 'TEXT',
+      };
+
+      for (final entrada in nuevas.entries) {
+        if (!colsOrdenes.contains(entrada.key)) {
+          await db.execute(
+            'ALTER TABLE local_ordenes ADD COLUMN ${entrada.key} ${entrada.value};',
+          );
+        }
+      }
+    }
   }
 
   Future<void> _onCreate(Database db, int version) async {
@@ -198,6 +227,13 @@ class LocalDatabase {
         cliente_lng REAL,
         iniciada_en TEXT,
         completada_campo_en TEXT,
+        cerrada_en TEXT,
+        vuelta INTEGER,
+        origen_json TEXT,
+        contexto_json TEXT,
+        correccion_json TEXT,
+        pasos_json TEXT,
+        cuadrilla_json TEXT,
         updated_at INTEGER NOT NULL,
         PRIMARY KEY (id, org_id, profile_id)
       )
@@ -334,6 +370,11 @@ class LocalDatabase {
               'diagnostico_previo_ia',
               'datos_json',
               'schema_version',
+              // El listado tampoco trae nada de esto: son del detalle.
+              'contexto_json',
+              'correccion_json',
+              'pasos_json',
+              'cuadrilla_json',
             ],
             where: 'id = ? AND org_id = ? AND profile_id = ?',
             whereArgs: <Object?>[id, orgId, profileId],
@@ -364,6 +405,9 @@ class LocalDatabase {
         'cliente_lng',
         'iniciada_en',
         'completada_campo_en',
+        'cerrada_en',
+        'vuelta',
+        'origen_json',
       ],
       where: 'id = ? AND org_id = ? AND profile_id = ?',
       whereArgs: <Object?>[id, orgId, profileId],
@@ -418,10 +462,44 @@ class LocalDatabase {
         'iniciada_en': conservando(ordenData, 'iniciada_en', 'iniciada_en')?.toString(),
         'completada_campo_en':
             conservando(ordenData, 'completada_campo_en', 'completada_campo_en')?.toString(),
+        'cerrada_en': conservando(ordenData, 'cerrada_en', 'cerrada_en')?.toString(),
+        // En que vuelta de validacion va la orden. Viene en las dos respuestas.
+        'vuelta': _comoEntero(conservando(ordenData, 'vuelta', 'vuelta')),
+        // De que ticket nacio la orden. Tambien viene en las dos.
+        'origen_json': ordenData.containsKey('origen')
+            ? jsonEncode(ordenData['origen'])
+            : anterior['origen_json'],
+        // Lo que solo dice el detalle: el snapshot tecnico congelado al
+        // despachar, que pidio rehacer el supervisor, el procedimiento del
+        // tipo de trabajo y quienes van al trabajo.
+        'contexto_json': soloDetalle(
+          'contexto_json',
+          ordenData['contexto'] == null ? null : jsonEncode(ordenData['contexto']),
+        ),
+        'correccion_json': soloDetalle(
+          'correccion_json',
+          ordenData['correccion'] == null ? null : jsonEncode(ordenData['correccion']),
+        ),
+        'pasos_json': soloDetalle(
+          'pasos_json',
+          tipoObj['pasos'] == null ? null : jsonEncode(tipoObj['pasos']),
+        ),
+        'cuadrilla_json': soloDetalle(
+          'cuadrilla_json',
+          ordenData['cuadrilla'] == null ? null : jsonEncode(ordenData['cuadrilla']),
+        ),
         'updated_at': DateTime.now().millisecondsSinceEpoch,
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
+  }
+
+  /// La vuelta puede llegar como número o como texto según el serializador.
+  static int? _comoEntero(Object? valor) {
+    if (valor == null) return null;
+    if (valor is int) return valor;
+    if (valor is num) return valor.toInt();
+    return int.tryParse(valor.toString());
   }
 
   /// Una coordenada puede llegar como número o como texto según el serializador.
