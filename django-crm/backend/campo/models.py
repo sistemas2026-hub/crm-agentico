@@ -554,6 +554,254 @@ class EvidenciaTrabajo(BaseModel):
         return f"Evidencia {self.requisito_id} en OT #{self.orden_trabajo.numero}"
 
 
+# =============================================================================
+# Materiales: la custodia del tecnico
+#
+# POR QUE ESTO VIVE EN DEXTER Y NO ES UN ESPEJO DEL ISP
+# -----------------------------------------------------
+# La pregunta quedo abierta en SPEC/BACKEND_CAMPO_DATOS.md (tanda 4) y se
+# resolvio mirando que expone el ISP: WispHub y SmartOLT hablan de equipos ya
+# instalados en un cliente (consultar_estado_ont, cambiar_tipo_onu), no de
+# bodega ni de custodia. No hay de que ser espejo. Y hacerlo depender del
+# sistema de cada empresa obligaria a una integracion distinta por tenant, que
+# es justo lo que la regla multi-tenant del proyecto prohibe.
+#
+# Lo que si viaja hacia el ISP es el serial instalado, que ya va hoy en el
+# `datos_json` de la orden.
+#
+# LA DECISION QUE ORDENA TODO EL DISENO
+# -------------------------------------
+# Un movimiento de material **es un hecho que ya ocurrio en la calle**, no una
+# solicitud que el servidor pueda aprobar. Cuando el telefono lo envia, el
+# conector ya esta ponchado y los metros de fibra ya no estan en la bobina.
+#
+# De ahi sale todo lo demas: la tabla es append-only como la bitacora, el saldo
+# se calcula y no se guarda, y un consumo que deja el saldo en negativo **se
+# acepta igual** y se marca como descuadre. Rechazarlo no devolveria el
+# material a la camioneta: solo borraria el unico registro de que se uso, y
+# dejaria al tecnico explicando de memoria a fin de mes.
+# =============================================================================
+
+
+class MaterialCatalogo(BaseModel):
+    """Que materiales maneja esta empresa. Uno por codigo y por organizacion."""
+
+    CONSUMIBLE = "consumible"
+    BOBINA = "bobina"
+    SERIALIZADO = "serializado"
+    TERMINAL = "terminal"
+    CLASES = (
+        (CONSUMIBLE, "Consumible"),
+        (BOBINA, "Bobina"),
+        (SERIALIZADO, "Serializado"),
+        (TERMINAL, "Terminal"),
+    )
+
+    org = models.ForeignKey(
+        Org, on_delete=models.CASCADE, related_name="materiales_campo"
+    )
+    codigo = models.CharField(max_length=64)
+    nombre = models.CharField(max_length=200)
+    categoria = models.CharField(max_length=100, blank=True, default="")
+    clase = models.CharField(max_length=20, choices=CLASES, default=CONSUMIBLE)
+    unidad = models.CharField(
+        max_length=20,
+        default="unidades",
+        help_text="Como se cuenta: unidades, m, kg.",
+    )
+    activo = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = "campo_material_catalogo"
+        ordering = ["categoria", "nombre"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["org", "codigo"], name="unique_material_codigo_por_org"
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.codigo} - {self.nombre}"
+
+    @property
+    def es_serializado(self) -> bool:
+        return self.clase == self.SERIALIZADO
+
+    @property
+    def admite_fraccion(self) -> bool:
+        """Una bobina se consume en metros con decimales; un conector, no."""
+        return self.clase == self.BOBINA
+
+
+class EntregaDeKit(BaseModel):
+    """El acta de lo que la bodega le entrego a un tecnico.
+
+    Es el punto de partida de la custodia: sin una entrega, un consumo no
+    tiene contra que descontarse.
+    """
+
+    org = models.ForeignKey(Org, on_delete=models.CASCADE, related_name="kits_campo")
+    profile = models.ForeignKey(
+        Profile, on_delete=models.CASCADE, related_name="kits_recibidos"
+    )
+    acta = models.CharField(max_length=64, blank=True, default="")
+    despachado_por = models.ForeignKey(
+        Profile,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="kits_despachados",
+    )
+    entregado_en = models.DateTimeField(default=timezone.now)
+    confirmado_en = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Cuando el tecnico confirmo que recibio lo que dice el acta.",
+    )
+    notas = models.TextField(blank=True, default="")
+
+    class Meta:
+        db_table = "campo_entrega_kit"
+        ordering = ["-entregado_en"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["org", "acta"],
+                condition=models.Q(acta__gt=""),
+                name="unique_acta_por_org",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"Kit {self.acta or self.pk}"
+
+
+class ItemDeKit(BaseModel):
+    """Una linea del acta: cuanto de un material se entrego."""
+
+    entrega = models.ForeignKey(
+        EntregaDeKit, on_delete=models.CASCADE, related_name="items"
+    )
+    material = models.ForeignKey(
+        MaterialCatalogo, on_delete=models.PROTECT, related_name="entregas"
+    )
+    cantidad = models.DecimalField(max_digits=12, decimal_places=3, default=0)
+    serie = models.CharField(
+        max_length=128,
+        blank=True,
+        default="",
+        help_text="Solo para material serializado. Una serie, una unidad.",
+    )
+
+    class Meta:
+        db_table = "campo_item_kit"
+        constraints = [
+            # Una serie no se entrega dos veces sin haber vuelto: es el mismo
+            # aparato fisico.
+            models.UniqueConstraint(
+                fields=["material", "serie"],
+                condition=models.Q(serie__gt=""),
+                name="unique_serie_entregada_por_material",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.material.codigo} x{self.cantidad}"
+
+
+class MovimientoDeMaterial(BaseModel):
+    """Append-only: lo que se consumio, se devolvio o se ajusto.
+
+    Nunca se edita ni se borra. Corregir un movimiento es registrar otro en
+    sentido contrario, igual que en cualquier libro contable, porque lo que
+    paso en la calle paso y el registro tiene que poder explicarlo despues.
+    """
+
+    CONSUMO = "consumo"
+    DEVOLUCION = "devolucion"
+    AJUSTE = "ajuste"
+    TIPOS = (
+        (CONSUMO, "Consumo"),
+        (DEVOLUCION, "Devolucion"),
+        (AJUSTE, "Ajuste"),
+    )
+
+    #: El movimiento entro y cuadra con lo que el tecnico tenia.
+    ACEPTADO = "aceptado"
+    #: Entro, pero deja el saldo en negativo. El hecho se respeta; la oficina
+    #: tiene que mirarlo.
+    DESCUADRE = "descuadre"
+    #: Una serie que otro ya consumio. Dos tecnicos no instalaron la misma ONT.
+    CONFLICTO = "conflicto"
+    ESTADOS = (
+        (ACEPTADO, "Aceptado"),
+        (DESCUADRE, "Descuadre"),
+        (CONFLICTO, "Conflicto"),
+    )
+
+    org = models.ForeignKey(
+        Org, on_delete=models.CASCADE, related_name="movimientos_material"
+    )
+    profile = models.ForeignKey(
+        Profile,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="movimientos_material",
+    )
+    material = models.ForeignKey(
+        MaterialCatalogo, on_delete=models.PROTECT, related_name="movimientos"
+    )
+    orden = models.ForeignKey(
+        OrdenTrabajo,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="movimientos_material",
+        help_text="En que trabajo se uso. Vacio para una devolucion de jornada.",
+    )
+    tipo = models.CharField(max_length=20, choices=TIPOS, default=CONSUMO)
+    cantidad = models.DecimalField(max_digits=12, decimal_places=3, default=0)
+    serie = models.CharField(max_length=128, blank=True, default="")
+    estado = models.CharField(max_length=20, choices=ESTADOS, default=ACEPTADO)
+    motivo = models.TextField(
+        blank=True,
+        default="",
+        help_text="Por que quedo en descuadre o conflicto, en palabras.",
+    )
+    idempotency_key = models.CharField(max_length=128, db_index=True)
+    ocurrido_en = models.DateTimeField(
+        default=timezone.now,
+        help_text=(
+            "Cuando paso en la calle, segun el telefono. No es created_at: un "
+            "movimiento sin senal puede llegar horas despues, y el orden del "
+            "consumo importa para explicar un saldo."
+        ),
+    )
+    datos = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        db_table = "campo_movimiento_material"
+        ordering = ["ocurrido_en", "created_at"]
+        constraints = [
+            # El reenvio de una cola offline no puede duplicar un consumo.
+            models.UniqueConstraint(
+                fields=["org", "idempotency_key"],
+                name="unique_movimiento_idempotente_por_org",
+            ),
+            # Un serializado se consume una sola vez. El segundo intento entra
+            # como conflicto, no como consumo, y por eso la condicion mira el
+            # estado: los conflictos pueden repetirse, los consumos buenos no.
+            models.UniqueConstraint(
+                fields=["org", "material", "serie"],
+                condition=models.Q(serie__gt="", tipo="consumo", estado="aceptado"),
+                name="unique_serie_consumida_por_org",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.get_tipo_display()} {self.material.codigo} x{self.cantidad}"
+
+
 class MutacionIdempotente(BaseModel):
     """Registro de control de idempotencia para mutaciones offline y reintentos móviles."""
 
