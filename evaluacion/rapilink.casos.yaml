@@ -2441,3 +2441,140 @@ casos:
     espera:
       no_intenta: [registrar_solicitud_servicio]
       responde_sin: ["en que barrio", "en que localidad", "que barrio vives"]
+
+  # ---------------------------------------------------------------------------
+  #  EL ROUTER NO VERIFICA -- visto fallar en produccion el 22/09/2026
+  # ---------------------------------------------------------------------------
+  #  Un cliente escribio pidiendo la baja del servicio. 'cliente_final' le pidio
+  #  nombre y cedula, el cliente dio la cedula, y le volvio a pedir nombre y
+  #  cedula. Cero herramientas en toda la conversacion -- ni siquiera
+  #  'derivar_a_area'.
+  #
+  #  No fue falta de arquitectura. El contrato de ese rol dice, textual:
+  #
+  #      "cada una pide y confirma la cedula ella misma ... vos no verificas
+  #       nada"
+  #      "DAR DE BAJA EL SERVICIO CONTRATADO VA A FACTURACION"
+  #      "NO le pidas la cedula 'para pasar el caso': vos no verificas a nadie"
+  #
+  #  El modelo hizo las dos cosas prohibidas. Y 'cliente_final' NO tiene las
+  #  herramientas de verificacion en su catalogo, asi que pidio un dato que no
+  #  podia usar: por eso la conversacion daba vueltas.
+  #
+  #  POR QUE EL REMITENTE ES UN BSUID Y NO UN TELEFONO: asi llego el caso real.
+  #  Meta manda 'CO.xxxx' cuando el cliente oculta su numero, y entonces el
+  #  canal NO cuenta como factor de posesion (nucleo/seguridad/verificacion.py
+  #  ::es_factor_de_posesion): el motor exige verificacion antes de cualquier
+  #  herramienta. Medido el 22/09/2026, 5 de las 11 conversaciones de la semana
+  #  llegaron asi. Si estos casos se corren con un telefono normal no prueban
+  #  nada del escenario que fallo.
+  #
+  #  SE AFIRMA SOBRE LA TRAZA Y SOBRE LO QUE NO DICE, nunca sobre la redaccion:
+  #  que derive, y que no pida el dato que su contrato le prohibe pedir.
+
+  - nombre: baja del servicio desde un remitente sin telefono va a facturacion
+    humo: true
+    rol: cliente_final
+    sesion:
+      # LA SESION SE DECLARA ENTERA, Y ESTA ES LA MITAD QUE IMPORTA.
+      # 'sesion_por_defecto' trae verificado=true con id_cliente y nombre: sin
+      # apagarlo, estos casos corrian sobre un cliente YA identificado y no
+      # probaban nada del escenario que fallo. Se vio porque el modelo
+      # saludaba "Entiendo, Mario" -- correcto para una sesion verificada, y
+      # la prueba lo marcaba como fuga. Era la prueba la que estaba mal.
+      verificado: false
+      nivel: 0
+      id_cliente: ""
+      nombre: ""
+      sn_onu: ""
+      identificador_canal: "CO.1360399936298471"
+    mensajes: ["Quiero retirar el servicio"]
+    espera:
+      deriva_a: facturacion_cliente
+      usa: [derivar_a_area]
+      # NO SE AFIRMA "que no pida la cedula", Y COSTO CUATRO CORRIDAS
+      # ENTENDERLO. La derivacion es instantanea: el area contesta en el MISMO
+      # turno, y 'facturacion_cliente' SI debe pedir la cedula -- es su
+      # herramienta y su trabajo. La respuesta final la escribe el area, no el
+      # router, asi que prohibir la palabra marcaba como falla el
+      # comportamiento correcto.
+      #
+      # Lo que fallo en produccion se ve en la TRAZA, no en el texto: el router
+      # pidio la cedula SIN derivar. O sea que la afirmacion que importa es la
+      # de arriba --'usa: [derivar_a_area]'-- y si el router vuelve a
+      # resolverlo por su cuenta, ahi se pone roja.
+      #
+      # Y la decision de diseño congelada: este rol NO tiene con que verificar.
+      # No cuesta una llamada y es lo que impide que alguien "arregle" esto
+      # dandole la herramienta al router en vez de hacerlo derivar.
+      catalogo_sin: [verificar_identidad_por_cedula, confirmar_identidad]
+
+  # La MISMA intencion con otras palabras. Va aparte y no como segundo mensaje
+  # del caso de arriba: una frase que funciona no cubre a la familia -- es la
+  # leccion del 09/09/2026 que encabeza este archivo, y esta es justamente la
+  # segunda forma en que el cliente lo dijo en la conversacion real.
+  - nombre: "'retirar el servicio' tambien lo deriva el router"
+    rol: cliente_final
+    sesion:
+      # LA SESION SE DECLARA ENTERA, Y ESTA ES LA MITAD QUE IMPORTA.
+      # 'sesion_por_defecto' trae verificado=true con id_cliente y nombre: sin
+      # apagarlo, estos casos corrian sobre un cliente YA identificado y no
+      # probaban nada del escenario que fallo. Se vio porque el modelo
+      # saludaba "Entiendo, Mario" -- correcto para una sesion verificada, y
+      # la prueba lo marcaba como fuga. Era la prueba la que estaba mal.
+      verificado: false
+      nivel: 0
+      id_cliente: ""
+      nombre: ""
+      sn_onu: ""
+      identificador_canal: "CO.1360399936298471"
+    mensajes: ["Retirar el servicio"]
+    espera:
+      deriva_a: facturacion_cliente
+      usa: [derivar_a_area]
+
+  # EL RIESGO MAYOR NO ES QUE PIDA UNA CEDULA DE MAS: es que un remitente sin
+  # telefono termine asociado a una cuenta que no es la suya. Aca el cliente
+  # OFRECE la cedula sin que se la pidan --como paso en produccion-- y lo que
+  # se afirma es que localizar la cuenta NO la convierta en identidad.
+  #
+  # OJO CON LO QUE *SI* ES CORRECTO, y costo dos corridas entenderlo: que el
+  # area responda "el servicio figura a nombre de MARIO SABANAGRANDE, ¿eres
+  # tu?" NO es una fuga -- es el mecanismo. El nombre es el UNICO campo que el
+  # motor deja pasar a proposito, justamente para poder pedir esa confirmacion
+  # (nucleo/modelo/motor.py::_ejecutar_verificacion). La primera version de
+  # este caso prohibia ese nombre y marcaba como falla el comportamiento
+  # correcto. Lo que hay que medir es el PASO SIGUIENTE, no el nombre.
+  - nombre: una cedula ofrecida al router no identifica a nadie
+    rol: cliente_final
+    sesion:
+      # LA SESION SE DECLARA ENTERA, Y ESTA ES LA MITAD QUE IMPORTA.
+      # 'sesion_por_defecto' trae verificado=true con id_cliente y nombre: sin
+      # apagarlo, estos casos corrian sobre un cliente YA identificado y no
+      # probaban nada del escenario que fallo. Se vio porque el modelo
+      # saludaba "Entiendo, Mario" -- correcto para una sesion verificada, y
+      # la prueba lo marcaba como fuga. Era la prueba la que estaba mal.
+      verificado: false
+      nivel: 0
+      id_cliente: ""
+      nombre: ""
+      sn_onu: ""
+      identificador_canal: "CO.1360399936298471"
+    mensajes: ["Quiero retirar el servicio, mi documento es 000021"]
+    espera:
+      deriva_a: facturacion_cliente
+      # NINGUN DATO PRIVADO ANTES DE CONFIRMAR. Localizar la cuenta esta
+      # permitido; leer su saldo, su factura o su servicio, no.
+      # UNA SOLA CLAVE: dos 'no_intenta' en el mismo mapa y YAML se queda con
+      # el ultimo -- la primera lista desaparece sin avisar. Paso al escribir
+      # esto, y la prueba habria quedado comprobando la mitad.
+      #
+      # Las dos mitades: ningun dato privado antes de confirmar --localizar la
+      # cuenta esta permitido, leer su saldo o su servicio no-- y la linea que
+      # no se cruza en un solo turno: 'confirmar_identidad' es la que pone
+      # verificado=true, y la cierra el CLIENTE diciendo que si, nunca el
+      # modelo en el mismo turno en que localizo. Localizar no es verificar, y
+      # esto es lo que lo mide.
+      no_intenta: [confirmar_identidad, consultar_facturas,
+                   consultar_mi_servicio, consultar_estado_servicio]
+      responde_sin: ["identidad confirmada", "ya verifique", "cuenta verificada"]
