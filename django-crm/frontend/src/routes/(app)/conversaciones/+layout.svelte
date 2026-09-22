@@ -117,6 +117,12 @@
   // de hace un mes ya resuelto.
   let filtro = $state('por-atender');
   let busqueda = $state('');
+
+  /* El logo de la empresa se cargó pero el archivo no se pudo mostrar. No es
+     lo mismo que no tener logo: acá SÍ hay una URL y falló. Se separa para
+     que el respaldo de texto cubra los dos casos sin dibujar una imagen rota
+     donde está la única salida de la consola. */
+  let logoRoto = $state(false);
   /* Que canales se ven. Por defecto SOLO los reales: el simulador, el
      asistente interno y las baterias escriben en las mismas tablas, y mezclar
      una prueba de hace dos horas con un cliente esperando hace que la cola
@@ -381,8 +387,29 @@
 
   <!-- LA SALIDA. Con la barra lateral recogida, ésta es la única puerta de
        vuelta al resto del CRM: por eso la marca es un enlace y no un rótulo.
-       Una consola a pantalla completa sin salida visible es una trampa. -->
-  <a class="consola-marca" href="/" title="Volver al inicio">Dexter</a>
+       Una consola a pantalla completa sin salida visible es una trampa.
+
+       EL LOGO ES UN SLOT, NO UN DIBUJO FIJO. La empresa que cargó el suyo en
+       Ajustes → Organización lo ve acá; la que no, ve la marca Dexter. Es la
+       misma regla multi-tenant del resto del proyecto: un dato que varía por
+       empresa no se escribe en el código.
+
+       El respaldo cubre DOS casos, no uno: que no haya logo cargado (lo
+       corriente) y que el archivo esté cargado pero no se pueda mostrar
+       (borrado del almacenamiento, URL vencida). Lo segundo dibujaría el
+       ícono de imagen rota justo donde está la única salida de la consola. -->
+  <a class="consola-marca" href="/" title="Volver al inicio">
+    {#if data.org?.logo_url && !logoRoto}
+      <img
+        class="consola-logo"
+        src={data.org.logo_url}
+        alt={data.org.name || 'Inicio'}
+        onerror={() => (logoRoto = true)}
+      />
+    {:else}
+      Dexter
+    {/if}
+  </a>
 
   <!-- Los módulos operativos. Son rutas que YA existen -- no hay ninguna
        inventada -- y son las cuatro con las que se trabaja un turno: la
@@ -561,11 +588,23 @@
      vuelta al resto del CRM, así que se ve como lo que es: un enlace. */
   .consola-marca {
     flex: none;
+    display: flex;
+    align-items: center;
     font-weight: 700;
     font-size: 13px;
     letter-spacing: -0.01em;
     color: var(--bandeja-texto);
     text-decoration: none;
+  }
+  /* Alto fijo y ancho libre: un logo es de la proporción que la empresa
+     haya subido, y recortarlo a una caja cuadrada deforma marcas anchas.
+     El tope de ancho evita que un logo apaisado empuje la navegación. */
+  .consola-logo {
+    height: 22px;
+    max-width: 132px;
+    width: auto;
+    object-fit: contain;
+    display: block;
   }
 
   .consola-marca:hover {
@@ -819,26 +858,11 @@
   /* `.critico` se fue con el `<PageHeader>`: su único consumidor era el
      subtítulo de esa portada. El mismo número lo marca ahora
      `.consola-critico`, arriba. */
-  /* No es un Pill: Pill.svelte excluye ember a propósito porque ember no es
-     "un estado en el que un registro está". Acá no describe un estado, marca
-     trabajo sin tomar -- el mismo sentido que la tira .v2-next. */
-  .marca {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    font-size: 11.2px;
-    font-weight: 650;
-    color: var(--v2-ember);
-    white-space: nowrap;
-  }
-  .marca::before {
-    content: '';
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--v2-ember);
-    flex: none;
-  }
+  /* `.marca` se fue el 22/09/2026, por el mismo motivo que `.critico` de
+     arriba: no le quedaba ningún consumidor en el marcado. Marcaba «trabajo
+     sin tomar» en ámbar, y ese sentido lo lleva hoy el chip de plazo de la
+     fila de la cola (`.plazo` en ConversationRow). svelte-check lo venía
+     reportando como selector sin usar. */
 
   /* En pantallas angostas no caben tres columnas al lado. La lista pasa a ser
      la pantalla, y abrir una conversación la reemplaza -- el comportamiento

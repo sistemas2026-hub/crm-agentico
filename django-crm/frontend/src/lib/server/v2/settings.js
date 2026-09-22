@@ -18,6 +18,7 @@
  * throw from one of those is a real failure and is left to propagate.
  */
 import { leerConfiguracionAsistente } from './asistente-config.js';
+import { leerAjustesBandeja } from './bandeja-config.js';
 import { leerCanalWhatsapp } from './canal-whatsapp.js';
 import { leerCredenciales } from './credenciales.js';
 import { leerSmartOlt } from './smartolt.js';
@@ -120,7 +121,8 @@ export async function getSettingsHub(event) {
     planesVenta,
     oferta,
     guiasTv,
-    credenciales
+    credenciales,
+    ajustesBandeja
   ] = await Promise.all([
     getOrgSettings(event),
     getBusinessHours(event),
@@ -152,7 +154,11 @@ export async function getSettingsHub(event) {
     // Tampoco sale a ningun tercero: la lista de credenciales que hacen falta
     // la arma el motor con su propio catalogo, y de las cargadas solo trae
     // nombre y pista. Nunca un valor.
-    leerCredenciales()
+    leerCredenciales(),
+    // Dos enteros de la config del tenant. Mismo contrato que los de arriba:
+    // devuelve null si el motor no contesta, y el hub muestra el destino sin
+    // valor en vez de caerse entero.
+    leerAjustesBandeja()
   ]);
 
   const now = Date.now();
@@ -180,6 +186,9 @@ export async function getSettingsHub(event) {
     asistente,
     canalWhatsapp,
     smartolt,
+    // Los dos numeros con los que la Bandeja emite un veredicto. Que esten
+    // sin definir NO lleva warn: es el default deliberado, no una falta.
+    ajustesBandeja,
     // Cuantas pide el catalogo y cuantas estan cargadas. La fila del hub avisa
     // cuando falta alguna: eso es una herramienta que va a fallar al usarse.
     credencialesTotales: credenciales.disponible
