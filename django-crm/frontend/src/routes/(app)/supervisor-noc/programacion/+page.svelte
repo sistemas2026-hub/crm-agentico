@@ -10,6 +10,22 @@
   let modalSecuenciar = $state(false);
   let seleccionada = $state(/** @type {any} */ (null));
 
+  // Paneles laterales. Cada uno pide SU dato y muestra su propio cargando: la
+  // pantalla entera no se recarga para abrir una ficha.
+  let drawer = $state(/** @type {'orden'|'persona'|null} */ (null));
+  let ficha = $state(/** @type {any} */ (null));
+  let cargandoFicha = $state(false);
+  let errorFicha = $state(/** @type {string|null} */ (null));
+
+  // Formularios de escritura, cada uno detras de su confirmacion.
+  let modalReprogramar = $state(/** @type {any} */ (null));
+  let modalSecuencia = $state(/** @type {any} */ (null));
+  let modalAnalizar = $state(false);
+  let fCuando = $state('');
+  let fCausa = $state('reprogramacion');
+  let fMotivo = $state('');
+  let fSecuencia = $state('');
+
   // Los filtros son de CLIENTE: la jornada ya vino entera para ese dia.
   let fEstado = $state('');
   let fZona = $state('');
@@ -75,6 +91,69 @@
   };
 
   /**
+   * La ficha de una orden. El recorte de datos del cliente --sin telefono ni
+   * GPS-- lo hace el servidor: aca llega ya recortada.
+   *
+   * @param {string} ordenId
+   */
+  async function abrirOrden(ordenId) {
+    drawer = 'orden';
+    ficha = null;
+    errorFicha = null;
+    cargandoFicha = true;
+    try {
+      const r = await fetch(`/api/supervisor-noc/ordenes/${ordenId}`);
+      const cuerpo = await r.json().catch(() => ({}));
+      if (!r.ok) errorFicha = cuerpo?.error ?? 'No fue posible consultar la orden.';
+      else ficha = cuerpo;
+    } catch {
+      errorFicha = 'No fue posible consultar la orden: el servicio no respondió.';
+    } finally {
+      cargandoFicha = false;
+    }
+  }
+
+  /** @param {string} profileId */
+  async function abrirPersona(profileId) {
+    drawer = 'persona';
+    ficha = null;
+    errorFicha = null;
+    cargandoFicha = true;
+    try {
+      const r = await fetch(`/api/supervisor-noc/carga/${profileId}?dia=${data.dia}`);
+      const cuerpo = await r.json().catch(() => ({}));
+      if (!r.ok) errorFicha = cuerpo?.error ?? 'No fue posible consultar la carga.';
+      else ficha = cuerpo;
+    } catch {
+      errorFicha = 'No fue posible consultar la carga: el servicio no respondió.';
+    } finally {
+      cargandoFicha = false;
+    }
+  }
+
+  function cerrarDrawer() {
+    drawer = null;
+    ficha = null;
+    errorFicha = null;
+  }
+
+  /** Abre la confirmacion de reprogramar, con la fecha actual de la linea. */
+  function pedirReprogramar(/** @type {any} */ linea) {
+    fCuando = linea.programada_para ? String(linea.programada_para).slice(0, 16) : '';
+    fCausa = 'reprogramacion';
+    fMotivo = '';
+    modalReprogramar = linea;
+  }
+
+  /** Abre la confirmacion de cambiar secuencia. */
+  function pedirSecuencia(/** @type {any} */ linea) {
+    fSecuencia = String(linea.secuencia ?? 0);
+    fCausa = 'cambio_de_prioridad';
+    fMotivo = '';
+    modalSecuencia = linea;
+  }
+
+  /**
    * Un solo envio por clic: `trabajando` ya deshabilita los dos botones del
    * modal, asi que un doble clic no llega a producir un segundo POST. Al
    * terminar se vuelve a consultar el backend -- nunca se corrige la vista
@@ -85,8 +164,13 @@
     return async (/** @type {any} */ { update }) => {
       trabajando = false;
       modalSecuenciar = false;
+      modalReprogramar = null;
+      modalSecuencia = null;
+      modalAnalizar = false;
       await update({ reset: false });
       await invalidateAll();
+      // La ficha abierta quedo vieja: lo que muestra acaba de cambiar.
+      if (drawer === 'orden' && ficha?.id) await abrirOrden(ficha.id);
     };
   };
 
@@ -274,6 +358,17 @@
                 no reprograma ni reasigna, pero el orden nuevo queda registrado
                 y alguien lo va a leer para trabajar.
               -->
+              <div class="snoc-envuelve" style="justify-content:flex-end;">
+              <button
+                class="snoc-btn"
+                type="button"
+                onclick={() => (modalAnalizar = true)}
+                disabled={trabajando}
+                title="Corre el asistente de programación: lee sus señales y escribe propuestas. No programa ni asigna."
+              >
+                <span class="snoc-icono" style="font-size:14px;">neurology</span>
+                Analizar programación
+              </button>
               <button
                 class="snoc-btn snoc-btn-primario"
                 type="button"
@@ -284,6 +379,7 @@
                 <span class="snoc-icono" style="font-size:14px;">low_priority</span>
                 {trabajando ? 'Secuenciando…' : 'Secuenciar jornada'}
               </button>
+              </div>
             </div>
 
             {#if data.jornada.error}
@@ -304,7 +400,7 @@
                     <tr>
                       <th>Sec.</th><th>OT</th><th>Cliente</th><th>Horario</th>
                       <th>Zona</th><th>Prioridad</th><th>Estado línea</th><th>Estado OT</th>
-                      <th class="snoc-derecha">Plan</th>
+                      <th class="snoc-derecha">Acciones</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -330,7 +426,33 @@
                         <td><span class="snoc-insignia">{l.estado ?? '—'}</span></td>
                         <td class="snoc-body-sm">{l.estado_orden ?? '—'}</td>
                         <td class="snoc-derecha">
-                          <span class="snoc-mono-sm snoc-tenue">{l.plan_estado ?? '—'}</span>
+                          <div class="snoc-envuelve" style="justify-content:flex-end;">
+                            <button class="snoc-pildora" type="button" onclick={() => abrirOrden(l.orden)}>
+                              Ver OT
+                            </button>
+                            <button class="snoc-pildora" type="button" onclick={() => pedirSecuencia(l)}>
+                              Secuencia
+                            </button>
+                            {#if l.programacion}
+                              <button class="snoc-pildora" type="button" onclick={() => pedirReprogramar(l)}>
+                                Reprogramar
+                              </button>
+                            {:else}
+                              <!--
+                                Sin plan no se puede reprogramar y no se
+                                disimula: elegir plan exige listarlos, y no
+                                hay ninguna ruta que lo haga.
+                              -->
+                              <button
+                                class="snoc-pildora"
+                                type="button"
+                                disabled
+                                title="Esta orden no está en ningún plan. Reprogramar exige elegir plan, y el backend todavía no expone un listado de planes semanales."
+                              >
+                                Reprogramar
+                              </button>
+                            {/if}
+                          </div>
                         </td>
                       </tr>
                     {/each}
@@ -474,6 +596,11 @@
                     </span>
                     <span class="snoc-insignia {riesgoDe(p.riesgo).clase}">{riesgoDe(p.riesgo).texto}</span>
                   </div>
+                  {#if p.profile?.id}
+                    <button class="snoc-pildora" type="button" onclick={() => abrirPersona(p.profile.id)}>
+                      Ver carga del día
+                    </button>
+                  {/if}
 
                   {#if pct != null}
                     <div class="snoc-barra" title="{pct}% de la jornada comprometida">
@@ -543,6 +670,282 @@
             </button>
             <button class="snoc-btn snoc-btn-primario" type="submit" disabled={trabajando}>
               {trabajando ? 'Secuenciando jornada…' : 'Confirmar secuenciación'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  {/if}
+
+  <!-- ============ PANEL LATERAL: ORDEN O PERSONA ============ -->
+  {#if drawer}
+    <div
+      class="snoc-velo"
+      role="presentation"
+      onclick={(e) => {
+        if (e.target === e.currentTarget) cerrarDrawer();
+      }}
+    >
+      <aside class="snoc-drawer" aria-label="Detalle">
+        <div class="snoc-drawer-cabecera">
+          <div class="snoc-pila-xs">
+            <span class="snoc-label-sm snoc-tenue" style="text-transform:uppercase;">
+              {drawer === 'orden' ? 'Orden de trabajo' : 'Carga del día'}
+            </span>
+            <h3 class="snoc-h4">
+              {#if cargandoFicha}
+                Cargando…
+              {:else if drawer === 'orden'}
+                Orden #{ficha?.numero ?? '—'}
+              {:else}
+                {ficha?.profile?.nombre ?? ficha?.profile?.email ?? 'Persona'}
+              {/if}
+            </h3>
+          </div>
+          <button class="snoc-btn" type="button" onclick={cerrarDrawer} aria-label="Cerrar">
+            <span class="snoc-icono" style="font-size:18px;">close</span>
+          </button>
+        </div>
+
+        <div class="snoc-drawer-cuerpo">
+          {#if cargandoFicha}
+            <div class="snoc-cargando">
+              <span class="snoc-icono snoc-girando" style="font-size:22px;">progress_activity</span>
+              <span class="snoc-body snoc-secundario">Consultando…</span>
+            </div>
+          {:else if errorFicha}
+            <div class="snoc-aviso">
+              <span class="snoc-icono snoc-error-txt" style="font-size:18px;">error</span>
+              <span class="snoc-body">{errorFicha}</span>
+            </div>
+          {:else if ficha && drawer === 'orden'}
+            <div class="snoc-pila-xs">
+              <span class="snoc-label-sm snoc-tenue" style="text-transform:uppercase;">Cliente</span>
+              <div class="snoc-meta">
+                <div><span>Nombre:</span><span class="snoc-body-sm">{ficha.cliente?.nombre ?? '—'}</span></div>
+                <div><span>Dirección:</span><span class="snoc-body-sm">{ficha.cliente?.direccion ?? '—'}</span></div>
+              </div>
+              <span class="snoc-mono-sm snoc-tenue">
+                El teléfono y las coordenadas del cliente no se traen a esta pantalla: para programar una visita no
+                hacen falta.
+              </span>
+            </div>
+
+            <div class="snoc-pila-xs">
+              <span class="snoc-label-sm snoc-tenue" style="text-transform:uppercase;">Orden</span>
+              <div class="snoc-meta">
+                <div><span>Número:</span><span class="snoc-mono-sm">#{ficha.numero ?? '—'}</span></div>
+                <div><span>Revisión:</span><span class="snoc-mono-sm">{ficha.revision ?? '—'}</span></div>
+                <div>
+                  <span>Tipo:</span>
+                  <span class="snoc-body-sm">{ficha.tipo?.nombre ?? ficha.tipo?.codigo ?? '—'}</span>
+                </div>
+                <div>
+                  <span>Estado operativo:</span>
+                  <span class="snoc-insignia">{ficha.estado_operativo ?? '—'}</span>
+                </div>
+                <div>
+                  <span>Estado de validación:</span>
+                  <span class="snoc-body-sm">{ficha.estado_validacion ?? '—'}</span>
+                </div>
+                <div><span>Programada para:</span><span class="snoc-mono-sm">{fecha(ficha.programada_para)}</span></div>
+                <div><span>Iniciada:</span><span class="snoc-mono-sm">{fecha(ficha.iniciada_en)}</span></div>
+                <div>
+                  <span>Completada en campo:</span>
+                  <span class="snoc-mono-sm">{fecha(ficha.completada_campo_en)}</span>
+                </div>
+                <div><span>Evidencias:</span><span class="snoc-mono-sm">{ficha.n_evidencias ?? '—'}</span></div>
+              </div>
+            </div>
+
+            <div class="snoc-pila-xs">
+              <span class="snoc-label-sm snoc-tenue" style="text-transform:uppercase;">Quién la trabaja</span>
+              <div class="snoc-meta">
+                <div>
+                  <span>Técnico principal:</span>
+                  <span class="snoc-body-sm">
+                    {ficha.tecnico_principal?.nombre ?? ficha.tecnico_principal?.email ?? 'Sin asignar'}
+                  </span>
+                </div>
+                <div><span>Integrantes:</span><span class="snoc-body-sm">{(ficha.cuadrilla ?? []).length}</span></div>
+              </div>
+            </div>
+
+            {#if ficha.diagnostico_previo}
+              <div class="snoc-analisis snoc-observado">
+                <span class="snoc-insignia snoc-insignia-variante">Diagnóstico previo</span>
+                <p class="snoc-body" style="margin:0;">{ficha.diagnostico_previo}</p>
+              </div>
+            {/if}
+          {:else if ficha && drawer === 'persona'}
+            <div class="snoc-pila-xs">
+              <span class="snoc-label-sm snoc-tenue" style="text-transform:uppercase;">Capacidad del {data.dia}</span>
+              <div class="snoc-meta">
+                <div><span>Jornada:</span><span class="snoc-mono-sm">{dur(ficha.jornada?.minutos)}</span></div>
+                <div>
+                  <span>Carga conocida:</span>
+                  <span class="snoc-mono-sm">{dur(ficha.carga?.minutos_conocidos)}</span>
+                </div>
+                <div>
+                  <span>Riesgo:</span>
+                  <span class="snoc-insignia {riesgoDe(ficha.riesgo).clase}">{riesgoDe(ficha.riesgo).texto}</span>
+                </div>
+              </div>
+            </div>
+
+            {#if (ficha.faltantes ?? []).length}
+              <div class="snoc-analisis snoc-faltante">
+                <span class="snoc-insignia snoc-insignia-error">Datos faltantes</span>
+                <p class="snoc-body" style="margin:0;">
+                  {ficha.faltantes.length} orden(es) no declaran duración. El riesgo responde
+                  <strong>INDETERMINADO</strong> en vez de «sin sobrecarga»: un dato que falta no vale cero.
+                </p>
+              </div>
+            {/if}
+
+            <details class="snoc-detalles">
+              <summary class="snoc-label-sm">Respuesta completa del backend</summary>
+              <pre class="snoc-pre">{JSON.stringify(ficha, null, 2)}</pre>
+            </details>
+          {/if}
+        </div>
+      </aside>
+    </div>
+  {/if}
+
+  <!-- ============ CONFIRMAR REPROGRAMACIÓN ============ -->
+  {#if modalReprogramar}
+    <div
+      class="snoc-velo"
+      role="presentation"
+      onclick={(e) => {
+        if (e.target === e.currentTarget && !trabajando) modalReprogramar = null;
+      }}
+    >
+      <div class="snoc-modal" role="dialog" aria-modal="true" aria-labelledby="snoc-repro-titulo">
+        <div class="snoc-fila snoc-primario">
+          <span class="snoc-icono" style="font-size:28px;">edit_calendar</span>
+          <h4 class="snoc-h3" id="snoc-repro-titulo">¿Reprogramar esta orden?</h4>
+        </div>
+        <p class="snoc-body snoc-secundario" style="margin:0;">
+          Cambia la fecha y hora de la orden <strong>#{modalReprogramar.numero}</strong> dentro de su plan. Queda
+          registrada como novedad operativa con la causa que declares.
+        </p>
+        <form method="POST" action="?/reprogramar" use:enhance={alTrabajar}>
+          <input type="hidden" name="orden" value={modalReprogramar.orden} />
+          <input type="hidden" name="plan" value={modalReprogramar.programacion} />
+          <div class="snoc-pila-xs">
+            <label class="snoc-label-sm snoc-secundario" for="r-cuando">Nueva fecha y hora</label>
+            <input
+              id="r-cuando"
+              class="snoc-campo"
+              type="datetime-local"
+              name="programada_para"
+              bind:value={fCuando}
+              required
+            />
+
+            <label class="snoc-label-sm snoc-secundario" for="r-causa">Causa</label>
+            <select id="r-causa" class="snoc-campo" name="causa" bind:value={fCausa}>
+              {#each data.causas as c (c.valor)}<option value={c.valor}>{c.texto}</option>{/each}
+            </select>
+
+            <label class="snoc-label-sm snoc-secundario" for="r-motivo">Motivo (opcional)</label>
+            <input id="r-motivo" class="snoc-campo" name="motivo" bind:value={fMotivo} maxlength="255" />
+          </div>
+          <div class="snoc-fila" style="justify-content:flex-end; padding-top:var(--snoc-md);">
+            <button class="snoc-btn" type="button" onclick={() => (modalReprogramar = null)} disabled={trabajando}>
+              Cancelar
+            </button>
+            <button class="snoc-btn snoc-btn-primario" type="submit" disabled={trabajando}>
+              {trabajando ? 'Reprogramando…' : 'Confirmar reprogramación'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  {/if}
+
+  <!-- ============ CONFIRMAR CAMBIO DE SECUENCIA ============ -->
+  {#if modalSecuencia}
+    <div
+      class="snoc-velo"
+      role="presentation"
+      onclick={(e) => {
+        if (e.target === e.currentTarget && !trabajando) modalSecuencia = null;
+      }}
+    >
+      <div class="snoc-modal" role="dialog" aria-modal="true" aria-labelledby="snoc-sec1-titulo">
+        <div class="snoc-fila snoc-primario">
+          <span class="snoc-icono" style="font-size:28px;">swap_vert</span>
+          <h4 class="snoc-h3" id="snoc-sec1-titulo">¿Cambiar la secuencia de esta línea?</h4>
+        </div>
+        <p class="snoc-body snoc-secundario" style="margin:0;">
+          Cambia el orden propuesto de la orden <strong>#{modalSecuencia.numero}</strong>.
+          <strong style="color:var(--snoc-on-surface);">Cambiar la secuencia no es reprogramar</strong>: no toca la
+          fecha, ni el plan, ni la asignación, ni ninguna otra línea.
+        </p>
+        <form method="POST" action="?/secuencia" use:enhance={alTrabajar}>
+          <input type="hidden" name="linea" value={modalSecuencia.id} />
+          <div class="snoc-pila-xs">
+            <label class="snoc-label-sm snoc-secundario" for="s-num">Secuencia (0 significa sin secuenciar)</label>
+            <input
+              id="s-num"
+              class="snoc-campo"
+              type="number"
+              name="secuencia"
+              min="0"
+              bind:value={fSecuencia}
+              required
+            />
+
+            <label class="snoc-label-sm snoc-secundario" for="s-causa">Causa</label>
+            <select id="s-causa" class="snoc-campo" name="causa" bind:value={fCausa}>
+              {#each data.causas as c (c.valor)}<option value={c.valor}>{c.texto}</option>{/each}
+            </select>
+
+            <label class="snoc-label-sm snoc-secundario" for="s-motivo">Motivo (opcional)</label>
+            <input id="s-motivo" class="snoc-campo" name="motivo" bind:value={fMotivo} maxlength="255" />
+          </div>
+          <div class="snoc-fila" style="justify-content:flex-end; padding-top:var(--snoc-md);">
+            <button class="snoc-btn" type="button" onclick={() => (modalSecuencia = null)} disabled={trabajando}>
+              Cancelar
+            </button>
+            <button class="snoc-btn snoc-btn-primario" type="submit" disabled={trabajando}>
+              {trabajando ? 'Guardando…' : 'Confirmar secuencia'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  {/if}
+
+  <!-- ============ CONFIRMAR ANÁLISIS ============ -->
+  {#if modalAnalizar}
+    <div
+      class="snoc-velo"
+      role="presentation"
+      onclick={(e) => {
+        if (e.target === e.currentTarget && !trabajando) modalAnalizar = false;
+      }}
+    >
+      <div class="snoc-modal" role="dialog" aria-modal="true" aria-labelledby="snoc-ana-titulo">
+        <div class="snoc-fila snoc-primario">
+          <span class="snoc-icono" style="font-size:28px;">neurology</span>
+          <h4 class="snoc-h3" id="snoc-ana-titulo">¿Analizar la programación?</h4>
+        </div>
+        <p class="snoc-body snoc-secundario" style="margin:0;">
+          El asistente lee las señales de programación y podrá registrar propuestas nuevas en la cola de revisión.
+          <strong style="color:var(--snoc-on-surface);">No programa, no asigna y no ejecuta ninguna acción</strong>:
+          cada recomendación la decide una persona.
+        </p>
+        <form method="POST" action="?/analizar" use:enhance={alTrabajar}>
+          <div class="snoc-fila" style="justify-content:flex-end; padding-top:var(--snoc-xs);">
+            <button class="snoc-btn" type="button" onclick={() => (modalAnalizar = false)} disabled={trabajando}>
+              Cancelar
+            </button>
+            <button class="snoc-btn snoc-btn-primario" type="submit" disabled={trabajando}>
+              {trabajando ? 'Analizando…' : 'Confirmar análisis'}
             </button>
           </div>
         </form>

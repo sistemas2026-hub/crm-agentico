@@ -1,12 +1,20 @@
 import { fail } from '@sveltejs/kit';
-import { leerAutonomia, listarPropuestas } from '$lib/server/v2/supervisor-noc.js';
+import {
+  leerAutonomia,
+  listarPropuestas,
+  correrAsistente,
+  traducirError
+} from '$lib/server/v2/supervisor-noc.js';
 import {
   leerJornada,
   leerCapacidad,
   secuenciarJornada,
   publicarProgramacion,
+  reprogramarOrden,
+  cambiarSecuencia,
   resumenProgramacion,
-  SENALES_PROGRAMACION
+  SENALES_PROGRAMACION,
+  CAUSAS
 } from '$lib/server/v2/programacion-noc.js';
 
 /**
@@ -21,12 +29,22 @@ import {
  * que conviene respetar en vez de esquivar: "sin filtro, 'la jornada' no
  * significa nada". La pantalla abre en HOY y deja cambiarlo.
  *
- * LO QUE NO EXISTE ACA
- * Ninguna accion para reprogramar una orden, reasignar a alguien, despachar o
- * mover la autonomia. Las dos escrituras que hay --secuenciar y publicar--
- * tocan el ORDEN PROPUESTO y el ESTADO DE UN PLAN, y el propio backend lo
- * deja escrito: no reprograman, no reasignan y no llaman a ningun sistema
- * externo.
+ * LAS CINCO ESCRITURAS, Y LO QUE CADA UNA PUEDE TOCAR
+ *   secuenciar   -> el orden propuesto de la jornada entera
+ *   secuencia    -> el orden propuesto de UNA linea
+ *   publicar     -> el estado de un plan (borrador -> publicada)
+ *   reprogramar  -> la fecha de una orden QUE YA ESTA EN UN PLAN
+ *   analizar     -> corre el asistente, que escribe propuestas en la cola
+ *
+ * Ninguna reasigna a nadie, ninguna despacha y ninguna llama a un sistema
+ * externo. Todas piden confirmacion en la pantalla antes de salir.
+ *
+ * LO QUE SIGUE SIN EXISTIR
+ * Programar una orden que NO esta en ningun plan. El endpoint del backend
+ * existe, pero exige 'programacion_semanal_id' y no hay ninguna ruta que
+ * liste los planes semanales -- elegirlo seria pedirle un UUID a una persona.
+ * Falta 'GET /api/operaciones/programacion/'. No se resuelve desde el
+ * frontend.
  */
 
 /** El mismo conjunto que campo/permissions.py::ROLES_GESTION. */
@@ -77,6 +95,7 @@ export async function load({ cookies, locals, url }) {
     recomendaciones,
     errorPropuestas: propuestas.error,
     autonomia,
+    causas: CAUSAS,
     resumen: resumenProgramacion(jornada, capacidad)
   };
 }
@@ -121,6 +140,98 @@ export const actions = {
       return { ok: true, tipo: 'publicar', resultado: r };
     } catch (/** @type {any} */ err) {
       return fail(err?.status ?? 502, { error: 'No fue posible publicar el plan.' });
+    }
+  },
+
+  /**
+   * Reprograma una orden que YA esta en un plan.
+   *
+   * El id del plan lo manda la pantalla desde la linea de la jornada, que ya
+   * lo trae. NO se busca ni se deduce: una orden sin plan no se puede
+   * reprogramar desde aca, porque elegir plan exige listarlos y no existe
+   * ningun endpoint que lo haga.
+   */
+  async reprogramar({ cookies, locals, request }) {
+    if (!ROLES_GESTION.has(/** @type {any} */ (locals).profile?.role)) {
+      return fail(403, { error: 'Solo el Jefe de Operaciones puede reprogramar una orden.' });
+    }
+    const datos = await request.formData();
+    const orden = String(datos.get('orden') ?? '');
+    const plan = String(datos.get('plan') ?? '');
+    const cuando = String(datos.get('programada_para') ?? '');
+    const causa = String(datos.get('causa') ?? '');
+    const motivo = String(datos.get('motivo') ?? '');
+
+    if (!orden || !plan) {
+      return fail(400, {
+        error: 'Esa orden no tiene plan asociado: no se puede reprogramar desde esta pantalla.'
+      });
+    }
+    if (!cuando) return fail(400, { error: 'Falta la fecha y hora nuevas.' });
+    if (!causa) return fail(400, { error: 'Reprogramar exige declarar la causa.' });
+
+    try {
+      const r = await reprogramarOrden({ cookies }, orden, {
+        programacion_semanal_id: plan,
+        // El <input type="datetime-local"> entrega "YYYY-MM-DDTHH:mm", que
+        // DRF acepta como DateTimeField.
+        programada_para: cuando,
+        causa,
+        motivo
+      });
+      return { ok: true, tipo: 'reprogramar', orden, resultado: r };
+    } catch (/** @type {any} */ err) {
+      const e = traducirError(err, 'la reprogramación');
+      return fail(e.status ?? 502, { error: e.mensaje });
+    }
+  },
+
+  /**
+   * Cambia el orden propuesto de UNA linea. No reprograma: el backend lo dice
+   * y su serializer solo declara 'secuencia'.
+   */
+  async secuencia({ cookies, locals, request }) {
+    if (!ROLES_GESTION.has(/** @type {any} */ (locals).profile?.role)) {
+      return fail(403, { error: 'Solo el Jefe de Operaciones puede cambiar la secuencia.' });
+    }
+    const datos = await request.formData();
+    const linea = String(datos.get('linea') ?? '');
+    const bruto = String(datos.get('secuencia') ?? '');
+    const causa = String(datos.get('causa') ?? '');
+    const motivo = String(datos.get('motivo') ?? '');
+
+    const secuencia = Number(bruto);
+    if (!linea) return fail(400, { error: 'Falta la línea.' });
+    if (!Number.isInteger(secuencia) || secuencia < 0) {
+      // Mismo limite que el CHECK de la base, dicho a tiempo: la base
+      // contesta IntegrityError, que nadie puede leer en pantalla.
+      return fail(400, { error: 'La secuencia tiene que ser un entero de 0 o más.' });
+    }
+
+    try {
+      const r = await cambiarSecuencia({ cookies }, linea, { secuencia, causa, motivo });
+      return { ok: true, tipo: 'secuencia', linea, secuencia, resultado: r };
+    } catch (/** @type {any} */ err) {
+      const e = traducirError(err, 'el cambio de secuencia');
+      return fail(e.status ?? 502, { error: e.mensaje });
+    }
+  },
+
+  /**
+   * Una pasada del asistente de programacion. Lee sus señales y escribe
+   * propuestas en la cola que ya existe: no programa, no asigna y no llama a
+   * ningun sistema externo.
+   */
+  async analizar({ cookies, locals }) {
+    if (!ROLES_GESTION.has(/** @type {any} */ (locals).profile?.role)) {
+      return fail(403, { error: 'Solo el Jefe de Operaciones puede correr el asistente.' });
+    }
+    try {
+      const r = await correrAsistente({ cookies }, 'programacion');
+      return { ok: true, tipo: 'analizar', asistente: r };
+    } catch (/** @type {any} */ err) {
+      const e = traducirError(err, 'el asistente de programación');
+      return fail(e.status ?? 502, { error: e.mensaje });
     }
   }
 };

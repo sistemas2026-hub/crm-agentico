@@ -216,3 +216,124 @@ export function resumenProgramacion(jornada, capacidad) {
     }
   ];
 }
+
+/**
+ * Las causas del catalogo CERRADO de NovedadOperativa que tienen sentido al
+ * reprogramar o reordenar. No es una lista nueva: son las mismas claves que
+ * 'operaciones/models.py' declara, y el servicio las valida del otro lado.
+ * Se repiten aca solo para poder ofrecerlas en un selector -- si divergen,
+ * gana el backend, que rechaza la que no conozca.
+ */
+export const CAUSAS = [
+  { valor: 'reprogramacion', texto: 'Reprogramación' },
+  { valor: 'cambio_de_prioridad', texto: 'Cambio de prioridad' },
+  { valor: 'ausencia', texto: 'Ausencia' },
+  { valor: 'bloqueo', texto: 'Bloqueo' },
+  { valor: 'falta_material', texto: 'Falta de material' },
+  { valor: 'dependencia', texto: 'Dependencia pendiente' },
+  { valor: 'dato_incompleto', texto: 'Dato incompleto' }
+];
+
+/**
+ * El detalle de una orden de trabajo, RECORTADO.
+ *
+ * 'OrdenTrabajoDetailSerializer' esta pensado para que un tecnico descargue la
+ * orden y trabaje sin señal: devuelve el cliente completo, con telefono y
+ * coordenadas GPS. Esta es una consola de PROGRAMACION -- para decidir cuando
+ * y con quien va una visita hacen falta el nombre y la direccion, no el
+ * telefono del cliente ni su punto exacto en el mapa.
+ *
+ * Asi que el recorte se hace del lado del servidor, no ocultando campos en la
+ * pantalla: lo que no se necesita no viaja al navegador. Mismo criterio que
+ * las listas blancas del motor.
+ *
+ * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
+ * @param {string} ordenId
+ */
+export async function leerOrden({ cookies }, ordenId) {
+  try {
+    const d = await apiRequest(`/campo/trabajos/${ordenId}/`, {}, { cookies });
+    return {
+      datos: {
+        id: d?.id,
+        numero: d?.numero,
+        revision: d?.revision,
+        tipo: d?.tipo ?? null,
+        // Solo nombre y direccion. 'telefono', 'lat' y 'lng' se descartan aca.
+        cliente: { nombre: d?.cliente?.nombre ?? null, direccion: d?.cliente?.direccion ?? null },
+        tecnico_principal: d?.tecnico_principal ?? null,
+        cuadrilla: d?.cuadrilla ?? [],
+        diagnostico_previo: d?.diagnostico_previo ?? null,
+        estado_operativo: d?.estado_operativo ?? null,
+        estado_validacion: d?.estado_validacion ?? null,
+        programada_para: d?.programada_para ?? null,
+        iniciada_en: d?.iniciada_en ?? null,
+        completada_campo_en: d?.completada_campo_en ?? null,
+        created_at: d?.created_at ?? null,
+        updated_at: d?.updated_at ?? null,
+        n_evidencias: Array.isArray(d?.evidencias) ? d.evidencias.length : null
+      },
+      error: null
+    };
+  } catch (/** @type {any} */ err) {
+    return { datos: null, error: traducirError(err, 'esta orden de trabajo') };
+  }
+}
+
+/**
+ * La carga de UNA persona en un dia.
+ *
+ * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
+ * @param {string} dia
+ * @param {string} profileId
+ */
+export async function leerCargaPersona({ cookies }, dia, profileId) {
+  try {
+    const d = await apiRequest(
+      `/operaciones/capacidad/jornada/?dia=${encodeURIComponent(dia)}&profile_id=${encodeURIComponent(profileId)}`,
+      {},
+      { cookies }
+    );
+    return { datos: d, error: null };
+  } catch (/** @type {any} */ err) {
+    return { datos: null, error: traducirError(err, 'la carga de esta persona') };
+  }
+}
+
+/**
+ * Reprograma una orden que YA esta en un plan.
+ *
+ * El 'programacion_semanal_id' NO se inventa ni se busca: sale de la linea de
+ * la jornada, que ya lo trae. Una orden sin plan no se puede reprogramar desde
+ * aca -- haria falta elegir plan, y no existe ningun endpoint que los liste.
+ *
+ * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
+ * @param {string} ordenId
+ * @param {{ programacion_semanal_id: string, programada_para: string, causa?: string, motivo?: string }} cuerpo
+ */
+export async function reprogramarOrden({ cookies }, ordenId, cuerpo) {
+  return apiRequest(
+    `/campo/trabajos/${ordenId}/reprogramar/`,
+    { method: 'POST', body: cuerpo },
+    { cookies }
+  );
+}
+
+/**
+ * Cambia el orden propuesto de UNA linea.
+ *
+ * NO REPROGRAMA: el propio backend lo dice ("cambiar la secuencia no es
+ * reprogramar"). No toca 'programada_para', ni el dia, ni el plan, ni ninguna
+ * otra linea -- por eso su serializer declara 'secuencia' y nada mas.
+ *
+ * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
+ * @param {string} lineaId
+ * @param {{ secuencia: number, causa?: string, motivo?: string }} cuerpo
+ */
+export async function cambiarSecuencia({ cookies }, lineaId, cuerpo) {
+  return apiRequest(
+    `/operaciones/programacion/linea/${lineaId}/secuencia/`,
+    { method: 'POST', body: cuerpo },
+    { cookies }
+  );
+}
