@@ -81,22 +81,6 @@
     };
   };
 
-  const NAV = [
-    { rotulo: 'Inicio', icono: 'home', href: '/' },
-    { rotulo: 'Dashboard', icono: 'dashboard', href: '/pipeline' },
-    { rotulo: 'Clientes', icono: 'group', href: '/accounts' },
-    { rotulo: 'Casos / Solicitudes', icono: 'inbox', href: '/tickets' },
-    { rotulo: 'Operaciones', icono: 'pulse_alert', href: '/tasks' },
-    { rotulo: 'Trabajos de campo', icono: 'build', href: '/instalaciones' },
-    { rotulo: 'SLA', icono: 'timelapse', href: '/goals' },
-    { rotulo: 'Incidencias', icono: 'warning', href: '/conversaciones' },
-    { rotulo: 'Reportes', icono: 'monitoring', href: '/consumo' }
-  ];
-  const NAV_FINAL = [
-    { rotulo: 'Agentes', icono: 'how_to_reg', href: '/agentes' },
-    { rotulo: 'Asistente', icono: 'smart_toy', href: '/asistente' },
-    { rotulo: 'Configuración', icono: 'settings', href: '/settings' }
-  ];
 </script>
 
 <svelte:head>
@@ -110,57 +94,6 @@
 </svelte:head>
 
 <div class="snoc">
-  <aside class="snoc-aside">
-    <div style="display:flex; flex-direction:column; flex:1; overflow-y:auto;">
-      <div class="snoc-marca">
-        <div class="snoc-marca-icono"><span class="snoc-icono" style="font-size:20px;">hub</span></div>
-        <div class="snoc-pila-xs">
-          <span class="snoc-h4" style="text-transform:uppercase; color:var(--snoc-on-primary);">{data.org ?? 'Organización'}</span>
-          <span class="snoc-tag" style="color:var(--snoc-surface-variant);">ISP Core Platform</span>
-        </div>
-      </div>
-      <nav class="snoc-nav">
-        {#each NAV as item}
-          <a href={item.href}><span class="snoc-icono" style="font-size:18px;">{item.icono}</span><span>{item.rotulo}</span></a>
-        {/each}
-        <a href="/supervisor-noc" aria-current="page">
-          <span class="snoc-nav-activo-izq">
-            <span class="snoc-icono" style="font-size:18px;">psychology</span>
-            <span>SUPERVISOR NOC IA</span>
-          </span>
-          <span class="snoc-latido"><span></span><span></span></span>
-        </a>
-        {#each NAV_FINAL as item}
-          <a href={item.href}><span class="snoc-icono" style="font-size:18px;">{item.icono}</span><span>{item.rotulo}</span></a>
-        {/each}
-      </nav>
-    </div>
-    <div class="snoc-pie">
-      <div class="snoc-fila" style="padding-top:var(--snoc-xs);">
-        <div style="width:1.75rem; height:1.75rem; border-radius:9999px; background:var(--snoc-secondary); color:var(--snoc-on-secondary); display:flex; align-items:center; justify-content:center;">
-          <span class="snoc-icono" style="font-size:14px;">admin_panel_settings</span>
-        </div>
-        <div class="snoc-pila-xs">
-          <span class="snoc-label-sm" style="color:var(--snoc-inverse-on-surface);">{data.usuario ?? 'Sin sesión'}</span>
-          <span class="snoc-mono-sm" style="color:var(--snoc-outline-variant);">{data.rol ?? '—'}</span>
-        </div>
-      </div>
-    </div>
-  </aside>
-
-  <div class="snoc-cuerpo">
-    <header class="snoc-header">
-      <div class="snoc-miga snoc-label-sm">
-        <span>Operaciones</span><span class="snoc-tenue">/</span>
-        <span>Inteligencia Artificial</span><span class="snoc-tenue">/</span>
-        <span class="snoc-label snoc-primario">Supervisor NOC IA</span>
-      </div>
-      <div class="snoc-fila">
-        <a class="snoc-btn" href="/">Volver al CRM</a>
-      </div>
-    </header>
-
-    <main class="snoc-main">
       <div class="snoc-lienzo">
         {#if !data.puedeVer}
           <!-- El 403 se explica en vez de mostrarse como una pantalla rota. -->
@@ -686,8 +619,6 @@
           </div>
         {/if}
       </div>
-    </main>
-  </div>
 
   <!-- ============ MODAL DEL CICLO ============ -->
   {#if modalAbierto}

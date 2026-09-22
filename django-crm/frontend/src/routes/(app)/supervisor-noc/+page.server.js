@@ -11,18 +11,20 @@ import {
 } from '$lib/server/v2/supervisor-noc.js';
 
 /**
- * POR QUE ESTA RUTA VIVE EN (no-layout)
- * -------------------------------------
- * La pantalla trae su PROPIA navegacion lateral y su propia barra superior,
- * que es lo que la hace ser esta pantalla y no otra. Montada bajo (app)
- * quedaria con dos barras laterales, una encima de la otra.
+ * POR QUE ESTA RUTA VIVE EN (app)
+ * -------------------------------
+ * Primero se monto en (no-layout), para que la pantalla conservara la barra
+ * lateral y la cabecera que traia su diseno. El efecto fue el que Sidebar.svelte
+ * ya dejo escrito sobre /instalaciones: una pantalla sin entrada en el menu no
+ * esta terminada, esta escondida. Se llegaba solo escribiendo la URL.
  *
- * (no-layout) NO significa publica: 'hooks.server.js' gatea por lista blanca
- * (PUBLIC_ROUTES) y esta ruta no esta en ella, asi que sigue exigiendo sesion
- * como cualquier otra. El gate de ROL se agrega aca abajo, ademas del que el
- * backend ya aplica: dos capas, igual que el resto del CRM.
+ * Asi que la pantalla entrega su chrome al CRM -- una sola barra lateral, una
+ * sola cabecera, una sola forma de navegar -- y conserva lo suyo, que es el
+ * contenido: la densidad, la tipografia de datos y los tres tonos del analisis.
+ *
+ * El gate de ROL sigue aca ademas del que aplica el backend: dos capas, igual
+ * que el resto del CRM.
  */
-
 /** El mismo conjunto que campo/permissions.py::ROLES_GESTION. */
 const ROLES_GESTION = new Set(['ADMIN', 'SUPERVISOR', 'OPERACIONES']);
 

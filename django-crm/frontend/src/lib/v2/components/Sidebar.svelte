@@ -28,7 +28,8 @@
     PlugZap,
     GraduationCap,
     Gauge,
-    ClipboardCheck
+    ClipboardCheck,
+    Radar
   } from '@lucide/svelte';
   import { t } from '$lib/terminology.js';
 
@@ -99,6 +100,7 @@
         { href: '/conversaciones', label: 'Conversaciones', icon: MessageCircle },
         { href: '/simulador-whatsapp', label: 'Simulador WhatsApp', icon: Smartphone },
         { href: '/agentes', label: 'Agentes', icon: Network },
+        { href: '/supervisor-noc', label: 'Supervisor NOC IA', icon: Radar },
         { href: '/manual', label: 'Manual', icon: ListChecks },
         // La bandeja donde se decide la factibilidad de cada solicitud.
         // Existia desde el 02/09 y NO estaba enlazada en ningun lado: solo

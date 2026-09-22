@@ -80,7 +80,9 @@
   font-size: 13px;
   line-height: 18px;
   -webkit-font-smoothing: antialiased;
-  min-height: 100vh;
+  /* Sin min-height ni fondo de documento: el layout de (app) ya los define y
+     esta pantalla es una seccion dentro de el, no una app aparte. */
+  padding: var(--snoc-lg) 0;
 }
 
 /* ---------------------------------------------------------------------------
@@ -102,43 +104,9 @@
 .snoc-mono-lg { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 14px; line-height: 18px; letter-spacing: -0.01em; font-weight: 500; }
 .snoc-tag { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; line-height: 12px; letter-spacing: 0.05em; font-weight: 700; text-transform: uppercase; }
 
-/* ---------------------------------------------------------------------------
-   ESTRUCTURA -- barra lateral fija de 256px, cabecera fija de 56px.
-   --------------------------------------------------------------------------- */
-.snoc-aside {
-  position: fixed; left: 0; top: 0; height: 100%; width: 16rem; z-index: 50;
-  background: var(--snoc-inverse-surface); color: var(--snoc-inverse-on-surface);
-  display: flex; flex-direction: column; justify-content: space-between;
-  box-shadow: var(--snoc-sombra);
-}
-.snoc-marca { height: 3.5rem; padding: 0 var(--snoc-lg); display: flex; align-items: center; gap: var(--snoc-sm); }
-.snoc-marca-icono { width: 2rem; height: 2rem; border-radius: var(--snoc-r-lg); background: var(--snoc-primary-container); color: var(--snoc-on-primary-container); display: flex; align-items: center; justify-content: center; }
-.snoc-nav { flex: 1; padding: var(--snoc-md) var(--snoc-sm); display: flex; flex-direction: column; gap: var(--snoc-xs); overflow-y: auto; }
-.snoc-nav a {
-  display: flex; align-items: center; gap: var(--snoc-sm);
-  padding: var(--snoc-sm) var(--snoc-md); border-radius: var(--snoc-r-lg);
-  color: var(--snoc-secondary-fixed-dim); text-decoration: none;
-  font-size: 12px; line-height: 16px; letter-spacing: 0.02em; font-weight: 600;
-  transition: background 0.15s, color 0.15s;
-}
-.snoc-nav a:hover { background: rgba(255, 255, 255, 0.06); color: var(--snoc-inverse-on-surface); }
-.snoc-nav a[aria-current='page'] {
-  background: var(--snoc-primary-container); color: var(--snoc-on-primary);
-  box-shadow: var(--snoc-sombra); justify-content: space-between;
-}
-.snoc-nav-activo-izq { display: flex; align-items: center; gap: var(--snoc-sm); }
-.snoc-pie { padding: var(--snoc-md); display: flex; flex-direction: column; gap: var(--snoc-xs); }
-
-.snoc-cuerpo { padding-left: 16rem; }
-.snoc-header {
-  position: fixed; top: 0; left: 16rem; right: 0; height: 3.5rem; z-index: 40;
-  background: color-mix(in srgb, var(--snoc-surface) 80%, transparent);
-  backdrop-filter: blur(16px); box-shadow: var(--snoc-sombra);
-  display: flex; align-items: center; justify-content: space-between; padding: 0 var(--snoc-lg);
-}
-.snoc-miga { display: flex; align-items: center; gap: var(--snoc-sm); color: var(--snoc-on-surface-variant); }
-.snoc-main { width: 100%; padding-top: 3.5rem; }
-.snoc-lienzo { display: flex; flex-direction: column; gap: var(--snoc-lg); padding: var(--snoc-md) var(--snoc-lg); }
+/* El lienzo. La barra lateral y la cabecera las pone el layout de (app):
+   esta pantalla es contenido, no una aplicacion aparte. */
+.snoc-lienzo { display: flex; flex-direction: column; gap: var(--snoc-lg); }
 
 /* ---------------------------------------------------------------------------
    PIEZAS
@@ -292,15 +260,4 @@
 .snoc-latido span:last-child { position: relative; display: inline-flex; width: 8px; height: 8px; border-radius: 9999px; background: var(--snoc-primary-fixed); }
 @media (prefers-reduced-motion: reduce) {
   .snoc-latido span:first-child { animation: none; }
-}
-
-/* En pantallas angostas la barra lateral deja de ser fija: esta pantalla se
-   diseno a 2560px y sin esto queda 256px de contenido tapado en un portatil
-   chico. */
-@media (max-width: 1023px) {
-  .snoc-aside { position: static; width: 100%; height: auto; }
-  .snoc-cuerpo { padding-left: 0; }
-  .snoc-header { position: static; left: 0; }
-  .snoc-main { padding-top: 0; }
-  .snoc-nav { flex-direction: row; flex-wrap: wrap; }
 }
