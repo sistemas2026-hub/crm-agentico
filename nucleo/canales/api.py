@@ -7609,6 +7609,84 @@ def conversaciones_intervenir(id_conversacion):
                              "o esta escalada.", "codigo": "no_es_de_la_ia"}), 409
 
 
+@app.post("/conversaciones/<id_conversacion>/devolver")
+def conversaciones_devolver(id_conversacion):
+    """
+    Una persona le devuelve la conversacion a la IA. La inversa de /intervenir.
+
+    POR QUE HACIA FALTA ESTA RUTA, Y NO ESTABA
+    ------------------------------------------
+    Hasta el 22/09/2026 devolver SOLO existia pegado a un envio: el modo
+    "responder y devolver" de la Bandeja manda un mensaje y, si sale, devuelve.
+    Quien queria devolver sin decir nada no tenia como -- y en produccion
+    alguien apreto el boton esperando exactamente eso, el cliente escribio dos
+    veces mas y la IA no contesto porque el control seguia en 'humano'. No
+    fallo nada: no habia nada que fallara.
+
+    Devolver sin responder es una intencion legitima y distinta: "ya esta, que
+    siga el asistente". Atarla a tener algo que decir obliga a escribir un
+    mensaje de relleno, que es peor que no decir nada.
+
+    NO ENVIA NADA AL CLIENTE, por el mismo motivo que /intervenir no envia:
+    mezclar el envio a Meta --y su incertidumbre, D17-- dentro de un cambio de
+    control hace que un fallo de red deje el control a medias. Son dos cosas y
+    se piden por separado.
+
+    Cuerpo: {tenant, autor, autor_usuario_id, clave_operacion?}
+      200  devuelta (o reintento de la misma operacion)
+      409  no la lleva una persona: ya es de la IA, o esta cerrada
+      404  no existe
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    try:
+        autor, autor_id, _ = _autor_y_clave(cuerpo)
+    except persistencia.AutorInvalido as e:
+        return jsonify({"error": f"Autor invalido: {mensaje_publico(e, 'datos de autor incompletos')}"}), 400
+
+    try:
+        r = transiciones.devolver_a_ia(
+            tenant, id_conversacion, operador_id=autor_id, operador_nombre=autor,
+            clave=(cuerpo.get("clave_operacion") or "").strip() or None)
+    except Exception as e:
+        registrar("relevo", "fallo al devolver a la IA",
+                  conversation_id=id_interno(id_conversacion), error=e)
+        return jsonify({"error": "No se pudo devolver la conversacion."}), 500
+
+    if r.motivo == "no_existe":
+        return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+    if r.motivo == "clave_ajena":
+        return jsonify({"error": "Esa clave de operacion ya pertenece a otra operacion.",
+                        "codigo": "clave_de_otra_operacion"}), 409
+    if not (r.aplicada or r.motivo == "reintento"):
+        return jsonify({"error": "Esta conversacion no la lleva una persona: ya es de la IA "
+                                 "o esta cerrada.", "codigo": "no_es_humana"}), 409
+
+    # LA SESION VIVA TAMBIEN TIENE QUE ENTERARSE. El motor guarda en memoria si
+    # la conversacion estaba escalada, y con esa bandera puesta el asistente
+    # sigue en pausa aunque la base ya diga 'ia'. Es el mismo gesto que hace el
+    # envio-con-devolucion; sin el, devolver "funciona" en la pantalla y no en
+    # el comportamiento, que es la peor forma de funcionar.
+    try:
+        identidad = persistencia.identidad_de_conversacion(tenant, id_conversacion)
+        if identidad:
+            clave_viva = canales.clave_sesion_de_fila(
+                tenant, identidad.get("canal"), identidad.get("usuario_externo"))
+            if clave_viva in _sesiones:
+                _sesiones[clave_viva]["escalada"] = False
+    except Exception as e:
+        # La transicion ya se aplico y es la fuente de verdad. Que no se haya
+        # podido limpiar la sesion en memoria se registra y no se oculta, pero
+        # no convierte un exito en un error.
+        registrar("relevo", "devuelta pero no se pudo limpiar la sesion viva",
+                  conversation_id=id_interno(id_conversacion), error=e)
+
+    return jsonify({"devuelta": True, "relevo_version": r.version,
+                    "reintento": r.motivo == "reintento"}), 200
+
+
 @app.post("/conversaciones/<id_conversacion>/atender")
 def conversaciones_atender(id_conversacion):
     """

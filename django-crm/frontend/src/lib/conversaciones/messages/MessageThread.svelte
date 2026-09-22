@@ -253,6 +253,39 @@
               </div>
             {/if}
             {@render adjuntos(item.m)}
+
+            <!-- LA PALOMITA VA DENTRO, ABAJO A LA DERECHA -- como en WhatsApp
+                 y por el mismo motivo: pertenece a ESE mensaje, y colgada
+                 debajo de la burbuja se leía como un renglón aparte que hay
+                 que asociar. Adentro se ve sin buscarla.
+
+                 NULL no dibuja nada: significa «no se sabe» (otro canal, o
+                 anterior al registro), y un tilde inventado sobre un mensaje
+                 del que no sabemos nada es peor que no decir nada. Lo fallado
+                 y lo descartado tampoco llevan: los dos dicen que el mensaje
+                 NO salió, y un tilde diría lo contrario.
+
+                 EL COLOR NO ES LA ÚNICA SEÑAL: entregado y leído son las
+                 MISMAS dos palomitas y sólo las separa el azul, y un 8% de la
+                 gente no distingue esos tonos. Por eso la palabra sigue
+                 estando, en `title` y en `aria-label`. -->
+            {#if item.m.rol === 'assistant' && item.m.estado_entrega && !item.m.sinEntregar && !['descartado', 'fallido'].includes(item.m.estado_entrega)}
+              {@const entrega = ENTREGA_TEXTO[item.m.estado_entrega] ?? item.m.estado_entrega}
+              <span
+                class="palomita palomita-{item.m.estado_entrega}"
+                title={entrega}
+                aria-label={entrega}
+                role="img"
+              >
+                {#if item.m.estado_entrega === 'pendiente'}
+                  <Clock size={13} />
+                {:else if item.m.estado_entrega === 'enviado'}
+                  <Check size={14} />
+                {:else}
+                  <CheckCheck size={14} />
+                {/if}
+              </span>
+            {/if}
           </div>
 
           {#if conPie(item.m)}
@@ -282,37 +315,12 @@
                   <RotateCcw size={11} />
                   {reintentando === item.m.id ? 'Reintentando…' : 'Reintentar'}
                 </button>
-              {:else if item.m.rol === 'assistant' && item.m.estado_entrega}
-                <!-- LAS PALOMITAS, como WhatsApp. NULL no dibuja nada:
-                     significa "no se sabe" (otro canal, o anterior al
-                     registro), y un tilde inventado sobre un mensaje del que
-                     no sabemos nada es peor que no decir nada.
-
-                     EL COLOR NO ES LA UNICA SEÑAL, y acá hacía falta pensarlo:
-                     entregado y leído son las MISMAS dos palomitas y sólo las
-                     separa el azul. Un 8% de la gente no distingue estos dos
-                     tonos. Por eso la palabra sigue estando --en `title` y en
-                     `aria-label`-- y «descartado», que no es un grado de
-                     entrega sino otra cosa, se sigue diciendo con texto. -->
-                {@const entrega = ENTREGA_TEXTO[item.m.estado_entrega] ?? item.m.estado_entrega}
-                {#if item.m.estado_entrega === 'descartado'}
-                  <span class="entrega">{entrega}</span>
-                {:else}
-                  <span
-                    class="palomita palomita-{item.m.estado_entrega}"
-                    title={entrega}
-                    aria-label={entrega}
-                    role="img"
-                  >
-                    {#if item.m.estado_entrega === 'pendiente'}
-                      <Clock size={13} />
-                    {:else if item.m.estado_entrega === 'enviado'}
-                      <Check size={14} />
-                    {:else}
-                      <CheckCheck size={14} />
-                    {/if}
-                  </span>
-                {/if}
+              {:else if item.m.estado_entrega === 'descartado'}
+                <!-- D24: la IA la calculó y una persona tomó el control antes
+                     de que saliera. Va con PALABRA y no con palomita: un tilde
+                     diría que algo se mandó, y no se mandó nada. El resto de
+                     los estados son palomitas y viven DENTRO de la burbuja. -->
+                <span class="entrega">{ENTREGA_TEXTO.descartado}</span>
               {/if}
               {#if item.m.rol === 'assistant' && casos.length > 0}
                 <MarcarEjemplo
@@ -603,9 +611,15 @@
      Es la convención que la mano ya conoce de WhatsApp, y en una lista de
      veinte mensajes se recorre sin leer: la palabra «Entregado» repetida
      veinte veces es ruido, un tilde no. */
+  /* Abajo a la derecha, DENTRO de la burbuja. Flotada y no absoluta: con
+     `float` el último renglón del texto le deja el hueco y la palomita queda
+     al lado de la última palabra, como en WhatsApp. Absoluta se montaría
+     encima del texto en un mensaje que llena el ancho. */
   .palomita {
+    float: right;
     display: inline-flex;
     align-items: center;
+    margin: 3px 0 -1px 8px;
     color: var(--bandeja-texto-3);
   }
 

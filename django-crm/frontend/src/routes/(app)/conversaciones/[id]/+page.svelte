@@ -1259,6 +1259,53 @@
       control: no le manda nada al cliente. El compositor se habilita cuando el
       motor CONFIRMA (se relee la conversacion), nunca antes: si otra persona
       intervino primero, el 409 lo dice y no se habilita nada. */
+  /* DEVOLVER LA CONVERSACION A LA IA. La inversa de intervenir().
+     Hasta el 22/09/2026 esto solo existia pegado a un envio: el modo
+     "responder y devolver" manda un mensaje y, si sale, devuelve. Quien
+     queria devolver sin decir nada no tenia como, y en produccion alguien
+     apreto el boton esperando eso -- el cliente escribio dos veces mas y la
+     IA no contesto, porque el control seguia en 'humano'.
+
+     UN SOLO BOTON QUE HACE LO QUE SU NOMBRE DICE, y con algo escrito hace las
+     dos cosas: si hay texto lo manda Y devuelve (que es el camino de siempre,
+     con su garantia -- la conversacion vuelve SOLO si el mensaje sale); si no
+     hay texto, devuelve y punto. Obligar a escribir un mensaje de relleno
+     para poder devolver es peor que no decir nada. */
+  let devolviendoAIA = $state(false);
+  let errorDevolver = $state('');
+
+  async function devolverAIA() {
+    if (devolviendoAIA || enviando) return;
+    errorDevolver = '';
+    if (entrada.trim()) {
+      // Con texto: el camino de siempre. `enviar()` lee `modo` para decidir,
+      // asi que la intencion se fija ANTES de llamarlo.
+      modo = 'responder_y_devolver';
+      await enviar();
+      return;
+    }
+    devolviendoAIA = true;
+    try {
+      const resp = await fetch(`/api/conversaciones/${conversacion.id}/devolver`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clave_operacion: crypto.randomUUID() })
+      });
+      const datos = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        errorDevolver = datos.error || 'No se pudo devolver la conversacion.';
+      } else {
+        modo = 'responder';
+        invalidate('app:conversaciones');
+        await refrescarRelevo();
+      }
+    } catch (/** @type {any} */ err) {
+      errorDevolver = err?.message || 'No se pudo devolver la conversacion.';
+    } finally {
+      devolviendoAIA = false;
+    }
+  }
+
   async function intervenir() {
     if (interviniendo) return;
     interviniendo = true;
@@ -1644,6 +1691,7 @@
       onPonerEmoji={ponerEmoji} onAbrirPlantillas={abrirPlantillas}
       onElegirPlantilla={elegirPlantilla} onEnviarPlantilla={enviarPlantilla}
       onIntervenir={intervenir}
+      onDevolver={devolverAIA} {devolviendoAIA} {errorDevolver}
     />
   {/if}
 </section>

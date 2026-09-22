@@ -18,7 +18,7 @@
    * Por eso son muchas props. Es a proposito: mecanico y equivalente antes que
    * elegante y distinto.
    */
-  import { Send, X, Paperclip, Smile, Mic, Image as ImageIcon, FileText } from '@lucide/svelte';
+  import { Send, X, Paperclip, Smile, Mic, Image as ImageIcon, FileText, Bot } from '@lucide/svelte';
 
   let {
     // --- lo que se ve
@@ -66,6 +66,7 @@
     onQuitarAdjunto, onEnviarAdjunto,
     onGrabar, onPausar, onParar, onCancelarGrabacion,
     onPonerEmoji, onAbrirPlantillas, onElegirPlantilla, onEnviarPlantilla,
+    onDevolver, devolviendoAIA = false, errorDevolver = '',
     onIntervenir
   } = $props();
 
@@ -442,25 +443,31 @@
           <!-- Sólo con la conversación en manos de una persona: devolverla supone
                tenerla. Con la IA atendiendo, el motor responde 409 y el botón no
                tendría a qué. -->
-          <!-- «RESPONDER Y DEVOLVER», no «Devolver a la IA». Se acorto el
-               22/09/2026 al pasar los modos a la barra, y en produccion
-               alguien lo apreto esperando que devolviera la conversacion: es
-               un MODO, no una accion -- vuelve a la IA cuando el mensaje
-               SALE, y sin mensaje no vuelve nada. Medido en la base: quedo
-               registrado un evento 'intervencion' y ningun 'devuelta_a_ia',
-               el control siguio en 'humano' y por eso la IA no contesto los
-               dos mensajes que mando el cliente despues.
-               El verbo «Responder» adelante es lo que avisa que hay que
-               escribir algo. -->
+          <!-- DEVOLVER A LA IA ES UNA ACCION, NO UN MODO (22/09/2026).
+               Estaba como tercer modo: elegirlo no devolvia nada, habia que
+               ademas escribir y enviar. En produccion se apreto esperando que
+               devolviera; el cliente escribio dos veces mas y la IA no
+               contesto, porque el control seguia en 'humano'. Medido en la
+               base: quedo un evento 'intervencion' y ningun 'devuelta_a_ia'.
+
+               Ahora hace lo que su nombre dice, y con algo escrito hace las
+               dos cosas -- lo manda Y devuelve. La garantia de siempre se
+               conserva: con mensaje, la conversacion vuelve SOLO si el
+               mensaje sale. Sin mensaje, vuelve y punto. -->
           {#if escalada}
             <button
               type="button"
-              class="modo modo-devolver"
-              aria-pressed={modo === 'responder_y_devolver'}
-              onclick={() => (modo = 'responder_y_devolver')}
-              disabled={enviando}
-              >Responder y devolver</button
+              class="barra-boton barra-devolver"
+              onclick={() => onDevolver?.()}
+              disabled={enviando || devolviendoAIA}
+              aria-busy={devolviendoAIA}
+              title={entrada.trim()
+                ? 'Envía lo que escribiste y devuelve la conversación al asistente'
+                : 'Devuelve la conversación al asistente sin enviar nada'}
             >
+              <Bot size={13} />
+              {devolviendoAIA ? 'Devolviendo…' : 'Devolver a la IA'}
+            </button>
           {/if}
         </div>
         <!-- PLANTILLAS SIEMPRE A LA VISTA, no sólo con la ventana cerrada.
@@ -475,6 +482,10 @@
         >
           <FileText size={13} /> Plantillas
         </button>
+
+        {#if errorDevolver}
+          <span class="barra-mal">{errorDevolver}</span>
+        {/if}
 
         <!-- Por dónde sale y si el canal está disponible. La ventana de 24 h
              es de WhatsApp, así que el estado se dice con ese dato real y no
@@ -842,12 +853,16 @@
     min-width: 0;
   }
 
+  /* SE VEN SIEMPRE, no solo el elegido. Con el filete transparente parecian
+     texto suelto: no habia forma de saber que «Nota interna» era algo que se
+     podia apretar hasta que estaba apretado. Un control que solo se ve cuando
+     ya lo usaste no sirve para descubrirlo. */
   .modo {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    border: 1px solid transparent;
-    background: none;
+    border: 1px solid var(--bandeja-borde);
+    background: var(--bandeja-superficie);
     font: inherit;
     font-size: 11px;
     color: var(--bandeja-texto-2);
@@ -868,14 +883,6 @@
     background: var(--bandeja-superficie-suave);
   }
 
-  /* Devolver a la IA se pinta con el violeta de la IA, el mismo de la cola y
-     del encabezado: es la misma pregunta -- quién la lleva -- y conviene que
-     se responda con el mismo color en las tres pantallas. */
-  .modo-devolver[aria-pressed='true'] {
-    color: var(--bandeja-ia);
-    border-color: var(--bandeja-ia-borde);
-    background: var(--bandeja-ia-fondo);
-  }
 
   .modo:disabled {
     opacity: 0.55;
@@ -1193,10 +1200,15 @@
     line-height: 1.4;
   }
 
+  /* EL FOCO SE NOTA SIN GRITAR. Eran 2px de azul rodeando todo el cuadro, y
+     como el cuadro ocupa el ancho del compositor quedaba un marco azul
+     permanente mientras se escribe -- que es TODO el tiempo que dura la
+     tarea. Un filete del color de la accion y un halo suave dicen lo mismo:
+     el cursor esta acá. */
   .compositor-texto:focus {
-    outline: 2px solid var(--bandeja-humano);
-    outline-offset: -1px;
-    border-color: transparent;
+    outline: none;
+    border-color: var(--bandeja-humano);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--bandeja-humano) 14%, transparent);
   }
 
   .compositor-texto:disabled {
@@ -1385,6 +1397,26 @@
   /* Por dónde sale, al borde derecho. `margin-left:auto` y no un espaciador:
      cuando la barra envuelve, esto se va con su renglón en vez de quedar
      colgado en el medio. */
+  /* DEVOLVER SE PINTA CON EL VIOLETA DE LA IA, el mismo de la cola, del
+     encabezado y de las burbujas: es la misma pregunta --quien la lleva-- y
+     conviene que se responda con el mismo color en todas las pantallas.
+     Y resalta siempre, porque es una accion disponible, no un estado. */
+  .barra-devolver {
+    color: var(--bandeja-ia);
+    border-color: var(--bandeja-ia-borde);
+    background: var(--bandeja-ia-fondo);
+    font-weight: 600;
+  }
+  .barra-devolver:hover:not(:disabled) {
+    color: var(--bandeja-ia);
+    border-color: var(--bandeja-ia);
+  }
+
+  .barra-mal {
+    font-size: 10.5px;
+    color: var(--bandeja-error);
+  }
+
   .barra-canal {
     margin-left: auto;
     flex: none;

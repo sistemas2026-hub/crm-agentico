@@ -58,9 +58,15 @@ describe('el doble envío', () => {
     expect(composer).toMatch(/type="submit"[\s\S]{0,120}disabled=\{enviando/);
   });
 
-  it('el selector de modo no se puede cambiar en el medio de un envío', () => {
-    const boton = composer.slice(composer.indexOf('modo-devolver'));
-    expect(boton.slice(0, 400)).toMatch(/disabled=\{enviando\}/);
+  it('devolver no se puede apretar dos veces ni en medio de un envío', () => {
+    /* CAMBIO EL 22/09/2026: «devolver» dejo de ser un MODO y paso a ser una
+       ACCION -- antes elegirlo no devolvia nada, habia que ademas escribir y
+       enviar, y en produccion se apreto esperando que devolviera. Lo que la
+       guarda protege no cambio: que no se dispare dos veces. Ahora son dos
+       banderas, porque son dos caminos: con texto manda (`enviando`), sin
+       texto devuelve solo (`devolviendoAIA`). */
+    const boton = composer.slice(composer.indexOf('barra-devolver'));
+    expect(boton.slice(0, 500)).toMatch(/disabled=\{enviando \|\| devolviendoAIA\}/);
   });
 });
 
@@ -74,9 +80,14 @@ describe('el control no cambia antes de tiempo', () => {
   });
 
   it('el botón de devolver solo existe con la conversación en manos de personas', () => {
-    const modos = composer.slice(composer.indexOf('<div class="modos"'));
-    const hasta = modos.slice(0, modos.indexOf('</div>'));
-    expect(hasta).toMatch(/\{#if escalada\}[\s\S]*modo-devolver/);
+    /* Devolver supone tener. Con la IA atendiendo, el motor responde 409 y el
+       boton no tendria a que. Se mide sobre el marcado --el `{#if escalada}`
+       que lo envuelve-- y no sobre un `disabled`: un boton deshabilitado
+       igual invita a apretarlo y a preguntarse por que no anda. */
+    const i = composer.indexOf('barra-devolver');
+    expect(i, 'no se encontro el boton de devolver').toBeGreaterThan(-1);
+    const antes = composer.slice(Math.max(0, i - 700), i);
+    expect(antes).toMatch(/\{#if escalada\}/);
   });
 });
 
