@@ -5,11 +5,14 @@ from __future__ import annotations
 
 from rest_framework import serializers
 
+from datetime import timedelta
+
 from operaciones import asistentes, indicadores
 from operaciones.models import (APROBADO, REQUIERE_CORRECCION,
                                 REQUIERE_REVISION, ActividadOperativa,
                                 DisponibilidadTecnico, ProgramacionOrden,
-                                PropuestaSupervisor)
+                                ProgramacionSemanal, PropuestaSupervisor)
+from operaciones.programacion import ESTADOS_DE_PLAN_QUE_ADMITEN_LINEAS
 
 
 class PropuestaListaSerializer(serializers.ModelSerializer):
@@ -140,6 +143,45 @@ class DisponibilidadSerializer(serializers.ModelSerializer):
     def get_es_ausencia(self, obj) -> bool:
         """El mismo hecho que 'disponible', dicho como lo dice la operación."""
         return not obj.disponible
+
+
+class ProgramacionSemanalSerializer(serializers.ModelSerializer):
+    """
+    Un plan semanal, tal como la pantalla lo necesita para poder elegirlo.
+
+    LOS DOS CAMPOS DERIVADOS, Y POR QUE NO SON INVENTADOS
+    -----------------------------------------------------
+    'admite_lineas' y 'semana_fin' no son columnas: son las DOS reglas que el
+    backend ya aplica al programar una orden, dichas antes de intentarlo.
+
+      admite_lineas -> operaciones/programacion.py::ESTADOS_DE_PLAN_QUE_ADMITEN_LINEAS
+                       ('cerrada' no admite: un plan cerrado es historia).
+      semana_fin    -> la regla derivada de 'programar_orden': una linea tiene
+                       que caer entre 'semana_inicio' y ese lunes + 6 dias.
+
+    Se exponen para que la pantalla no ofrezca una opcion que el servicio va a
+    rechazar despues. Si alguna de las dos reglas cambia, cambia en su modulo y
+    aca se refleja sola -- no se copia el criterio, se lee de donde vive.
+    """
+
+    estado_display = serializers.CharField(source="get_estado_display",
+                                           read_only=True)
+    admite_lineas = serializers.SerializerMethodField()
+    semana_fin = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProgramacionSemanal
+        fields = [
+            "id", "semana_inicio", "semana_fin", "estado", "estado_display",
+            "admite_lineas", "publicada_en", "created_at",
+        ]
+        read_only_fields = fields
+
+    def get_admite_lineas(self, obj) -> bool:
+        return obj.estado in ESTADOS_DE_PLAN_QUE_ADMITEN_LINEAS
+
+    def get_semana_fin(self, obj):
+        return obj.semana_inicio + timedelta(days=6)
 
 
 class LineaJornadaSerializer(serializers.ModelSerializer):

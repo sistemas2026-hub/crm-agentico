@@ -785,6 +785,17 @@ def test_no_existe_ninguna_ruta_de_ejecucion():
     habilidades ni eleva autonomía: toda propuesta sale con
     'nivel_autonomia_requerido <= 1' y estado 'propuesta'.
 
+    'programaciones' (GET /programacion/) entró con la pantalla de programación.
+    Es la más fácil de todas: lista los planes semanales de la organización y
+    nada más. No crea planes, no los publica, no los cierra, no agrega líneas y
+    no toca ninguna orden -- 'ProgramacionesView' no llama a un solo servicio de
+    escritura, y su propia suite lo afirma sobre el EFECTO
+    (tests/test_m03h_listar_planes.py): tras el GET no aparece ninguna fila
+    nueva, ningún 'updated_at' se movió y no salió ninguna llamada HTTP. El
+    único criterio que expone --qué plan admite órdenes-- lo lee de
+    'ESTADOS_DE_PLAN_QUE_ADMITEN_LINEAS', la misma constante que aplica
+    'programar_orden', así que no hay una segunda regla que se desincronice.
+
     'indicadores' y 'reportes' entraron en el paso M11, y son las dos más
     fáciles de declarar: son **GET**. Derivan cifras de filas que ya existen y
     no escriben ninguna -- no hay tabla de KPI, no hay caché persistente, no
@@ -803,7 +814,8 @@ def test_no_existe_ninguna_ruta_de_ejecucion():
                        "linea-secuencia", "jornada-secuenciar",
                        "capacidad-jornada", "actividades",
                        "actividad-detalle", "actividad-transicion",
-                       "asistente", "indicadores", "reportes"}
+                       "asistente", "indicadores", "reportes",
+                       "programaciones"}
     for prohibida in ("ejecutar", "aplicar", "despachar", "propuesta-ejecutar"):
         assert prohibida not in nombres
 
