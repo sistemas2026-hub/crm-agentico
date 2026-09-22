@@ -88,7 +88,7 @@ class LocalDatabase {
 
     final db = await openDatabase(
       path,
-      version: 7,
+      version: 8,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -198,6 +198,38 @@ class LocalDatabase {
         }
       }
     }
+
+    if (oldVersion < 8) {
+      // Lo que decide la oficina y el tecnico no puede deducir: con que
+      // urgencia, en que zona, que franja se le prometio al cliente, cuando
+      // vence el compromiso, como se entra al inmueble y que requisitos de
+      // seguridad tiene el trabajo (tanda 2).
+      //
+      // La prioridad y la ventana dejan de ser datos de ejemplo: ahora se
+      // pueden usar para ordenar y para avisar, porque vienen del servidor.
+      final infoOrdenes = await db.rawQuery('PRAGMA table_info(local_ordenes);');
+      final colsOrdenes = infoOrdenes.map((c) => c['name'] as String).toSet();
+
+      const nuevas = <String, String>{
+        'prioridad': 'TEXT',
+        'zona': 'TEXT',
+        'resumen': 'TEXT',
+        'ventana_inicio': 'TEXT',
+        'ventana_fin': 'TEXT',
+        'sla_vence_en': 'TEXT',
+        'detalle_acceso': 'TEXT',
+        'id_abonado': 'TEXT',
+        'requisitos_seguridad_json': 'TEXT',
+      };
+
+      for (final entrada in nuevas.entries) {
+        if (!colsOrdenes.contains(entrada.key)) {
+          await db.execute(
+            'ALTER TABLE local_ordenes ADD COLUMN ${entrada.key} ${entrada.value};',
+          );
+        }
+      }
+    }
   }
 
   Future<void> _onCreate(Database db, int version) async {
@@ -229,6 +261,15 @@ class LocalDatabase {
         completada_campo_en TEXT,
         cerrada_en TEXT,
         vuelta INTEGER,
+        prioridad TEXT,
+        zona TEXT,
+        resumen TEXT,
+        ventana_inicio TEXT,
+        ventana_fin TEXT,
+        sla_vence_en TEXT,
+        detalle_acceso TEXT,
+        id_abonado TEXT,
+        requisitos_seguridad_json TEXT,
         origen_json TEXT,
         contexto_json TEXT,
         correccion_json TEXT,
@@ -347,6 +388,10 @@ class LocalDatabase {
     }
 
     final clienteObj = ordenData['cliente'] ?? {};
+    // Cuando hay que estar: la hora agendada, la franja prometida al cliente y
+    // el vencimiento del compromiso. Son tres cosas distintas.
+    final Map<dynamic, dynamic> compromiso =
+        (ordenData['compromiso'] as Map?) ?? const <dynamic, dynamic>{};
 
     // Lo que solo el detalle puede afirmar (CAMPO-D2).
     //
@@ -375,6 +420,7 @@ class LocalDatabase {
               'correccion_json',
               'pasos_json',
               'cuadrilla_json',
+              'requisitos_seguridad_json',
             ],
             where: 'id = ? AND org_id = ? AND profile_id = ?',
             whereArgs: <Object?>[id, orgId, profileId],
@@ -408,6 +454,15 @@ class LocalDatabase {
         'cerrada_en',
         'vuelta',
         'origen_json',
+        'prioridad',
+        'zona',
+        'resumen',
+        'ventana_inicio',
+        'ventana_fin',
+        'sla_vence_en',
+        'detalle_acceso',
+        'id_abonado',
+        'requisitos_seguridad_json',
       ],
       where: 'id = ? AND org_id = ? AND profile_id = ?',
       whereArgs: <Object?>[id, orgId, profileId],
@@ -447,7 +502,9 @@ class LocalDatabase {
             soloDetalle('diagnostico_previo_ia', diagnosticoTexto),
         'datos_json':
             soloDetalle('datos_json', jsonEncode(ordenData['datos'] ?? {})),
-        'fecha_compromiso': ordenData['programada_para']?.toString() ?? ordenData['fecha_compromiso']?.toString(),
+        'fecha_compromiso': ordenData['programada_para']?.toString() ??
+            compromiso['programada_para']?.toString() ??
+            ordenData['fecha_compromiso']?.toString(),
         // Estado de la máquina de validación. Se guarda tal cual llega y no
         // toca `estado`: son dos máquinas distintas, y una orden puede estar
         // completada en campo y devuelta al mismo tiempo.
@@ -463,6 +520,27 @@ class LocalDatabase {
         'completada_campo_en':
             conservando(ordenData, 'completada_campo_en', 'completada_campo_en')?.toString(),
         'cerrada_en': conservando(ordenData, 'cerrada_en', 'cerrada_en')?.toString(),
+        // Lo que decide la oficina. Viene en las dos respuestas.
+        'prioridad': conservando(ordenData, 'prioridad', 'prioridad')?.toString(),
+        'zona': conservando(ordenData, 'zona', 'zona')?.toString(),
+        'resumen': conservando(ordenData, 'resumen', 'resumen')?.toString(),
+        'ventana_inicio':
+            conservando(compromiso, 'ventana_inicio', 'ventana_inicio')?.toString(),
+        'ventana_fin':
+            conservando(compromiso, 'ventana_fin', 'ventana_fin')?.toString(),
+        'sla_vence_en':
+            conservando(compromiso, 'sla_vence_en', 'sla_vence_en')?.toString(),
+        'detalle_acceso':
+            conservando(clienteObj, 'detalle_acceso', 'detalle_acceso')?.toString(),
+        'id_abonado':
+            conservando(clienteObj, 'id_abonado', 'id_abonado')?.toString(),
+        // Los requisitos de seguridad solo los dice el detalle.
+        'requisitos_seguridad_json': soloDetalle(
+          'requisitos_seguridad_json',
+          ordenData['requisitos_seguridad'] == null
+              ? null
+              : jsonEncode(ordenData['requisitos_seguridad']),
+        ),
         // En que vuelta de validacion va la orden. Viene en las dos respuestas.
         'vuelta': _comoEntero(conservando(ordenData, 'vuelta', 'vuelta')),
         // De que ticket nacio la orden. Tambien viene en las dos.

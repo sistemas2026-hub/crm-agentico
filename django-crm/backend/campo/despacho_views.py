@@ -119,8 +119,23 @@ class CrearOrdenView(APIView):
             "nombre": d.get("cliente_nombre") or (contexto.get("cliente") or {}).get("nombre") or "",
             "telefono": d.get("cliente_telefono") or "",
             "direccion": d.get("cliente_direccion") or "",
+            # Como se entra al inmueble: con la direccion sola el tecnico llega
+            # al edificio y no al apartamento.
+            "detalle_acceso": d.get("cliente_detalle_acceso") or "",
+            "id_abonado": d.get("cliente_id_abonado") or "",
             "gps_lat": d.get("gps_lat"),
             "gps_lng": d.get("gps_lng"),
+        }
+
+        # Lo que decide la oficina y el tecnico no puede deducir.
+        despacho = {
+            "prioridad": d.get("prioridad"),
+            "zona": d.get("zona"),
+            "resumen": d.get("resumen"),
+            "ventana_inicio": d.get("ventana_inicio"),
+            "ventana_fin": d.get("ventana_fin"),
+            "sla_vence_en": d.get("sla_vence_en"),
+            "requisitos_seguridad": d.get("requisitos_seguridad"),
         }
 
         try:
@@ -134,6 +149,7 @@ class CrearOrdenView(APIView):
                 origen_ref=case_id,
                 programada_para=d.get("programada_para"),
                 contexto=contexto,
+                despacho=despacho,
             )
         except ErrorDespacho as e:
             return Response({"error": "NO_SE_PUDO_CREAR", "detalle": str(e)},

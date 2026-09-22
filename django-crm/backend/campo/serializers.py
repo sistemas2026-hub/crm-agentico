@@ -36,6 +36,40 @@ def _origen(obj: OrdenTrabajo) -> dict:
     }
 
 
+def _cliente(obj: OrdenTrabajo) -> dict:
+    """
+    El cliente y como llegar hasta el.
+
+    `detalle_acceso` no es un adorno: con la direccion sola el tecnico llega al
+    edificio y no al apartamento.
+    """
+    return {
+        "nombre": obj.cliente_nombre,
+        "telefono": obj.cliente_telefono,
+        "direccion": obj.cliente_direccion,
+        "detalle_acceso": obj.cliente_detalle_acceso,
+        "id_abonado": obj.cliente_id_abonado,
+        "lat": obj.gps_lat,
+        "lng": obj.gps_lng,
+    }
+
+
+def _compromiso(obj: OrdenTrabajo) -> dict:
+    """
+    Cuando hay que estar y hasta cuando hay tiempo.
+
+    `programada_para` es un instante; la ventana es lo que se le prometio al
+    cliente ("entre 9 y 11"), y `sla_vence_en` es el compromiso de la empresa.
+    Son tres cosas distintas y la aplicacion las muestra distinto.
+    """
+    return {
+        "programada_para": obj.programada_para,
+        "ventana_inicio": obj.ventana_inicio,
+        "ventana_fin": obj.ventana_fin,
+        "sla_vence_en": obj.sla_vence_en,
+    }
+
+
 def _cuadrilla(obj: OrdenTrabajo) -> list[dict]:
     """
     Quienes van al trabajo, con su rol.
@@ -80,6 +114,7 @@ class OrdenTrabajoListSerializer(serializers.ModelSerializer):
     cliente = serializers.SerializerMethodField()
     tecnico_principal = serializers.SerializerMethodField()
     origen = serializers.SerializerMethodField()
+    compromiso = serializers.SerializerMethodField()
 
     class Meta:
         model = OrdenTrabajo
@@ -92,6 +127,10 @@ class OrdenTrabajoListSerializer(serializers.ModelSerializer):
             "cliente",
             "tecnico_principal",
             "origen",
+            "prioridad",
+            "zona",
+            "resumen",
+            "compromiso",
             "estado_operativo",
             "estado_validacion",
             "programada_para",
@@ -102,6 +141,9 @@ class OrdenTrabajoListSerializer(serializers.ModelSerializer):
     def get_origen(self, obj: OrdenTrabajo) -> dict:
         return _origen(obj)
 
+    def get_compromiso(self, obj: OrdenTrabajo) -> dict:
+        return _compromiso(obj)
+
     def get_tipo(self, obj: OrdenTrabajo) -> dict:
         v = obj.tipo_trabajo_version
         return {
@@ -111,13 +153,7 @@ class OrdenTrabajoListSerializer(serializers.ModelSerializer):
         }
 
     def get_cliente(self, obj: OrdenTrabajo) -> dict:
-        return {
-            "nombre": obj.cliente_nombre,
-            "telefono": obj.cliente_telefono,
-            "direccion": obj.cliente_direccion,
-            "lat": obj.gps_lat,
-            "lng": obj.gps_lng,
-        }
+        return _cliente(obj)
 
     def get_tecnico_principal(self, obj: OrdenTrabajo) -> dict | None:
         tec = obj.tecnico_principal
@@ -138,6 +174,7 @@ class OrdenTrabajoDetailSerializer(serializers.ModelSerializer):
     origen = serializers.SerializerMethodField()
     cuadrilla = serializers.SerializerMethodField()
     correccion = serializers.SerializerMethodField()
+    compromiso = serializers.SerializerMethodField()
 
     class Meta:
         model = OrdenTrabajo
@@ -151,6 +188,11 @@ class OrdenTrabajoDetailSerializer(serializers.ModelSerializer):
             "tecnico_principal",
             "cuadrilla",
             "origen",
+            "prioridad",
+            "zona",
+            "resumen",
+            "compromiso",
+            "requisitos_seguridad",
             "contexto",
             "correccion",
             "diagnostico_previo",
@@ -172,6 +214,9 @@ class OrdenTrabajoDetailSerializer(serializers.ModelSerializer):
 
     def get_cuadrilla(self, obj: OrdenTrabajo) -> list[dict]:
         return _cuadrilla(obj)
+
+    def get_compromiso(self, obj: OrdenTrabajo) -> dict:
+        return _compromiso(obj)
 
     def get_correccion(self, obj: OrdenTrabajo) -> dict | None:
         """
@@ -206,13 +251,7 @@ class OrdenTrabajoDetailSerializer(serializers.ModelSerializer):
         }
 
     def get_cliente(self, obj: OrdenTrabajo) -> dict:
-        return {
-            "nombre": obj.cliente_nombre,
-            "telefono": obj.cliente_telefono,
-            "direccion": obj.cliente_direccion,
-            "lat": obj.gps_lat,
-            "lng": obj.gps_lng,
-        }
+        return _cliente(obj)
 
     def get_schema(self, obj: OrdenTrabajo) -> dict:
         return obj.tipo_trabajo_version.esquema
@@ -272,6 +311,26 @@ class CrearOrdenSerializer(serializers.Serializer):
     gps_lat = serializers.FloatField(required=False, allow_null=True)
     gps_lng = serializers.FloatField(required=False, allow_null=True)
     programada_para = serializers.DateTimeField(required=False, allow_null=True)
+    # La franja que se le promete al cliente y el compromiso de la empresa.
+    ventana_inicio = serializers.DateTimeField(required=False, allow_null=True)
+    ventana_fin = serializers.DateTimeField(required=False, allow_null=True)
+    sla_vence_en = serializers.DateTimeField(required=False, allow_null=True)
+    prioridad = serializers.ChoiceField(
+        choices=[p[0] for p in OrdenTrabajo.PRIORIDADES],
+        required=False,
+        default=OrdenTrabajo.PRIORIDAD_MEDIA,
+    )
+    zona = serializers.CharField(required=False, allow_blank=True, default="")
+    resumen = serializers.CharField(required=False, allow_blank=True, default="")
+    cliente_detalle_acceso = serializers.CharField(
+        required=False, allow_blank=True, default=""
+    )
+    cliente_id_abonado = serializers.CharField(
+        required=False, allow_blank=True, default=""
+    )
+    requisitos_seguridad = serializers.ListField(
+        child=serializers.CharField(), required=False, default=list
+    )
     # A quien se le asigna de entrada. Opcional: una orden puede quedar sin
     # asignar esperando que alguien la tome, y esa es una columna util en la
     # bandeja del supervisor.

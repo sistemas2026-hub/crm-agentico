@@ -230,6 +230,26 @@ class OrdenTrabajo(BaseModel):
     gps_lat = models.FloatField(null=True, blank=True)
     gps_lng = models.FloatField(null=True, blank=True)
 
+    # Como se entra al inmueble: torre, piso, apartamento, a quien preguntar.
+    #
+    # Sin esto el tecnico llega al edificio y no al apartamento. La direccion
+    # sola alcanza para el GPS y no para tocar la puerta correcta.
+    cliente_detalle_acceso = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Torre, piso, apartamento, portería: cómo se entra.",
+    )
+
+    # El identificador del abonado en el sistema del ISP. Sirve para que el
+    # tecnico lo dicte por telefono al NOC sin tener que buscarlo.
+    cliente_id_abonado = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text="Identificador del abonado en el sistema del ISP (ej. WispHub).",
+    )
+
     # Contexto técnico y datos recolectados
     diagnostico_previo = models.JSONField(
         default=dict,
@@ -244,6 +264,80 @@ class OrdenTrabajo(BaseModel):
     revision = models.PositiveIntegerField(
         default=1,
         help_text="Control de concurrencia optimista para sincronización offline",
+    )
+
+    # --- Lo que la orden promete -------------------------------------------
+
+    #: Prioridades. Se ordena por ellas, asi que el valor guardado importa.
+    PRIORIDAD_ALTA = "alta"
+    PRIORIDAD_MEDIA = "media"
+    PRIORIDAD_BAJA = "baja"
+    PRIORIDADES = [
+        (PRIORIDAD_ALTA, "Alta"),
+        (PRIORIDAD_MEDIA, "Media"),
+        (PRIORIDAD_BAJA, "Baja"),
+    ]
+
+    prioridad = models.CharField(
+        max_length=10,
+        choices=PRIORIDADES,
+        default=PRIORIDAD_MEDIA,
+        db_index=True,
+        help_text="Con qué urgencia se despacha. Ordena la lista del técnico.",
+    )
+
+    zona = models.CharField(
+        max_length=128,
+        blank=True,
+        default="",
+        db_index=True,
+        help_text="Zona operativa del trabajo. Agrupa la jornada por cercanía.",
+    )
+
+    resumen = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Qué hay que hacer, en una línea. El tipo de trabajo dice la "
+                  "categoría; esto dice el caso.",
+    )
+
+    # La franja que se le prometio al cliente.
+    #
+    # No alcanza con 'programada_para', que es un instante: al abonado se le
+    # dice "entre 9 y 11", y el SLA de la visita se mide contra esa franja.
+    ventana_inicio = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Comienzo de la franja comprometida con el cliente.",
+    )
+    ventana_fin = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Fin de la franja comprometida con el cliente.",
+    )
+
+    # Cuando vence el compromiso de atencion.
+    #
+    # El telefono no puede calcularlo: no sabe las reglas de SLA de la empresa
+    # ni su calendario laboral. Si lo calculara, cada version de la aplicacion
+    # tendria su propia idea de cuando una orden esta vencida.
+    sla_vence_en = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Cuándo vence el compromiso. Lo calcula el backend, no la app.",
+    )
+
+    # Que hace falta para poder ejecutar este trabajo.
+    #
+    # Lista de identificadores de requisito (trabajo en altura, espacios
+    # confinados, certificacion electrica). Se MUESTRA; no habilita ni bloquea:
+    # decidir si alguien puede subir a un poste exige saber si su certificacion
+    # esta vigente, y eso todavia no vive en ningun lado.
+    requisitos_seguridad = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Requisitos de seguridad del trabajo. Se informan; no habilitan.",
     )
 
     # Estados

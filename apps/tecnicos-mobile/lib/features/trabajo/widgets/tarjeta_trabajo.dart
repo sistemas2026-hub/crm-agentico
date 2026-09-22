@@ -237,8 +237,7 @@ class TarjetaTrabajo extends StatelessWidget {
                 borderRadius: AppRadius.brChico,
               ),
               child: Text(
-                'Ventana: '
-                '${trabajo.compromiso != null ? _ventanaReal(trabajo.compromiso!) : FieldMockData.ventanaHoraria}',
+                'Ventana: ${_ventana(trabajo)}',
                 style: AppTypography.etiquetaChica,
               ),
             ),
@@ -260,10 +259,12 @@ class TarjetaTrabajo extends StatelessWidget {
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
-                // CAMPO-DATA-041 · Cómo se entra al inmueble.
-                if (mostrarDatosFuturos)
+                // Cómo se entra al inmueble. Real cuando el despacho lo
+                // cargó; de ejemplo solo en la demostración (CAMPO-DATA-041).
+                if (trabajo.detalleAcceso.isNotEmpty || mostrarDatosFuturos)
                   Text(
-                    'Detalle acceso: ${FieldMockData.detalleAcceso}',
+                    'Detalle acceso: '
+                    '${trabajo.detalleAcceso.isEmpty ? FieldMockData.detalleAcceso : trabajo.detalleAcceso}',
                     style: AppTypography.etiquetaChica,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -522,7 +523,7 @@ class TarjetaTrabajo extends StatelessWidget {
         // CAMPO-DATA-004: la prioridad, que el diseño usa como "cliente esperando".
         _Etiqueta(
           icono: Icons.person_outline,
-          texto: 'Prioridad ${trabajo.futuro.prioridad}',
+          texto: 'Prioridad ${_prioridad(trabajo)}',
           fondo: AppColors.exito,
           color: AppColors.exito,
         ),
@@ -703,6 +704,20 @@ class TarjetaTrabajo extends StatelessWidget {
         ),
       ],
     );
+  }
+
+  /// La prioridad que decidió la oficina; si no la dijo, la de ejemplo.
+  String _prioridad(TrabajoVista trabajo) {
+    if (trabajo.prioridad.isEmpty) return trabajo.futuro.prioridad;
+    return trabajo.prioridad[0].toUpperCase() + trabajo.prioridad.substring(1);
+  }
+
+  /// Qué franja se muestra, en orden de certeza: la que el servidor prometió
+  /// al cliente, la hora agendada, y recién al final el ejemplo.
+  String _ventana(TrabajoVista trabajo) {
+    if (trabajo.ventanaTexto.isNotEmpty) return trabajo.ventanaTexto;
+    if (trabajo.compromiso != null) return _ventanaReal(trabajo.compromiso!);
+    return FieldMockData.ventanaHoraria;
   }
 
   static String _ventanaReal(DateTime fecha) {

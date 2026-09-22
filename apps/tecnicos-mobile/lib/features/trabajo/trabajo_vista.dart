@@ -40,6 +40,15 @@ class TrabajoVista {
     this.contexto = const <String, dynamic>{},
     this.titulosDeEvidencia = const <String, String>{},
     this.vuelta = 1,
+    this.prioridad = '',
+    this.zona = '',
+    this.resumen = '',
+    this.ventanaInicio,
+    this.ventanaFin,
+    this.slaVenceEn,
+    this.detalleAcceso = '',
+    this.idAbonado = '',
+    this.requisitosSeguridad = const <String>[],
     required this.futuro,
   });
 
@@ -112,6 +121,36 @@ class TrabajoVista {
   /// En qué vuelta de validación va. 1 es la primera presentación.
   final int vuelta;
 
+  // --- Lo que decide la oficina (tanda 2) ----------------------------------
+  // Todos pueden venir vacíos: hay órdenes creadas antes de que existieran.
+
+  /// Con qué urgencia se despachó: `alta`, `media` o `baja`.
+  final String prioridad;
+
+  /// Zona operativa del trabajo.
+  final String zona;
+
+  /// Qué hay que hacer, en una línea.
+  final String resumen;
+
+  /// La franja que se le prometió al cliente. No es lo mismo que [compromiso],
+  /// que es la hora agendada.
+  final DateTime? ventanaInicio;
+  final DateTime? ventanaFin;
+
+  /// Cuándo vence el compromiso de atención. Lo calcula el backend con las
+  /// reglas de la empresa; el teléfono no las conoce.
+  final DateTime? slaVenceEn;
+
+  /// Cómo se entra al inmueble: torre, piso, apartamento.
+  final String detalleAcceso;
+
+  /// El identificador del abonado en el sistema del ISP.
+  final String idAbonado;
+
+  /// Qué hace falta para ejecutar el trabajo. Se informan; no habilitan nada.
+  final List<String> requisitosSeguridad;
+
   /// CAMPO-DATA-015
   /// Zona, prioridad, SLA y distancia. Se muestran; no filtran ni deciden.
   final TrabajoFuturoMock futuro;
@@ -150,6 +189,18 @@ class TrabajoVista {
       contexto: _mapa(orden['contexto_json']),
       titulosDeEvidencia: _titulos(orden['formulario_evidencias_json']),
       vuelta: orden['vuelta'] as int? ?? 1,
+      prioridad: orden['prioridad']?.toString() ?? '',
+      zona: orden['zona']?.toString() ?? '',
+      resumen: orden['resumen']?.toString() ?? '',
+      ventanaInicio: _fecha(orden['ventana_inicio']),
+      ventanaFin: _fecha(orden['ventana_fin']),
+      slaVenceEn: _fecha(orden['sla_vence_en']),
+      detalleAcceso: orden['detalle_acceso']?.toString() ?? '',
+      idAbonado: orden['id_abonado']?.toString() ?? '',
+      requisitosSeguridad: <String>[
+        for (final dynamic r in _lista(orden['requisitos_seguridad_json']))
+          r.toString(),
+      ],
       requiereActualizacion: _bloqueaPorEsquema(orden['schema_version'] as int?),
       futuro: FieldMockData.trabajoFuturo(id),
     );
@@ -208,6 +259,29 @@ class TrabajoVista {
       return const <String, dynamic>{};
     }
   }
+
+  /// La franja prometida, ya escrita: "09:30 - 11:00". Vacía si no hay.
+  String get ventanaTexto {
+    if (ventanaInicio == null || ventanaFin == null) return '';
+    return '${_hora(ventanaInicio!)} - ${_hora(ventanaFin!)}';
+  }
+
+  /// Cuántos minutos quedan de compromiso. Negativo si ya venció; `null` si el
+  /// servidor no dijo cuándo vence —y entonces no se inventa una cuenta—.
+  int? minutosParaVencer({DateTime? ahora}) {
+    if (slaVenceEn == null) return null;
+    return slaVenceEn!.difference(ahora ?? DateTime.now()).inMinutes;
+  }
+
+  /// Si el compromiso ya venció. `false` cuando no se sabe: afirmar que algo
+  /// está vencido sin saberlo es peor que callar.
+  bool vencido({DateTime? ahora}) {
+    final int? minutos = minutosParaVencer(ahora: ahora);
+    return minutos != null && minutos < 0;
+  }
+
+  static String _hora(DateTime f) =>
+      '${f.hour.toString().padLeft(2, '0')}:${f.minute.toString().padLeft(2, '0')}';
 
   /// El plan que tiene contratado el cliente, si el despacho lo capturó.
   String get planContratado {

@@ -1025,7 +1025,7 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                   ),
                   // CAMPO-DATA-003 · La zona, que la orden todavía no trae.
                   child: Text(
-                    'Zona ${trabajo.futuro.zona}',
+                    'Zona ${trabajo.zona.isEmpty ? trabajo.futuro.zona : trabajo.zona}',
                     style: AppTypography.etiquetaChica,
                   ),
                 ),

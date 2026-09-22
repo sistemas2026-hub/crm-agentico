@@ -65,6 +65,7 @@ def crear_orden(
     programada_para=None,
     diagnostico_previo: dict | None = None,
     contexto: dict | None = None,
+    despacho: dict | None = None,
 ) -> OrdenTrabajo:
     """
     Crea la orden y deja su nacimiento escrito en la bitacora.
@@ -76,7 +77,14 @@ def crear_orden(
     orden -- si manana alguien publica la v2, esta orden sigue exigiendo lo que
     exigia el dia que salio, que es lo que hace que una evidencia vieja se
     pueda auditar contra la regla que estaba vigente.
+
+    'despacho' trae lo que decide la oficina y el tecnico no puede deducir:
+    prioridad, zona, resumen, la franja prometida al cliente, cuando vence el
+    compromiso, como se entra al inmueble y que requisitos de seguridad tiene
+    el trabajo. Todo opcional: una orden sin nada de esto sigue siendo valida
+    y se ve como se veia antes.
     """
+    despacho = despacho or {}
     # La organizacion cuelga del WorkType, no de la version: la version es la
     # plantilla congelada, el tipo de trabajo es de quien la definio.
     if version.work_type.org_id != org.id:
@@ -106,6 +114,15 @@ def crear_orden(
                     gps_lat=cliente.get("gps_lat"),
                     gps_lng=cliente.get("gps_lng"),
                     programada_para=programada_para,
+                    ventana_inicio=despacho.get("ventana_inicio"),
+                    ventana_fin=despacho.get("ventana_fin"),
+                    sla_vence_en=despacho.get("sla_vence_en"),
+                    prioridad=despacho.get("prioridad") or OrdenTrabajo.PRIORIDAD_MEDIA,
+                    zona=despacho.get("zona") or "",
+                    resumen=despacho.get("resumen") or "",
+                    cliente_detalle_acceso=cliente.get("detalle_acceso") or "",
+                    cliente_id_abonado=cliente.get("id_abonado") or "",
+                    requisitos_seguridad=despacho.get("requisitos_seguridad") or [],
                     diagnostico_previo=diagnostico_previo or {},
                     contexto=contexto or {},
                 )

@@ -724,6 +724,17 @@ class _InicioScreenState extends State<InicioScreen> {
   }
 }
 
+/// Cuánto queda de compromiso, con lo que el servidor dijo.
+///
+/// Si no hay `sla_vence_en`, no se inventa una cuenta: se muestra el valor de
+/// ejemplo, que solo aparece en la demostración.
+String _sla(TrabajoVista trabajo) {
+  final int? minutos = trabajo.minutosParaVencer();
+  if (minutos == null) return 'SLA: ${trabajo.futuro.slaRestanteMinutos} min';
+  if (minutos < 0) return 'SLA vencido';
+  return 'SLA: $minutos min';
+}
+
 /// La tarjeta dominante del Home Operacional: el trabajo que está en curso.
 class _TarjetaEnCurso extends StatelessWidget {
   const _TarjetaEnCurso({
@@ -814,7 +825,7 @@ class _TarjetaEnCurso extends StatelessWidget {
                         ),
                         const SizedBox(width: 4),
                         Text(
-                          'SLA: ${trabajo.futuro.slaRestanteMinutos} min',
+                          _sla(trabajo),
                           style: AppTypography.etiquetaChica.copyWith(
                             color: AppColors.onError,
                             fontWeight: FontWeight.w700,
@@ -887,10 +898,13 @@ class _TarjetaEnCurso extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: <Widget>[
                           Text(trabajo.direccion, style: AppTypography.cuerpo),
-                          // CAMPO-DATA-041 · Cómo se entra al inmueble.
-                          if (mostrarDatosFuturos)
+                          // Cómo se entra al inmueble: real si el despacho lo cargó.
+                          if (trabajo.detalleAcceso.isNotEmpty ||
+                              mostrarDatosFuturos)
                             Text(
-                              FieldMockData.detalleAcceso,
+                              trabajo.detalleAcceso.isEmpty
+                                  ? FieldMockData.detalleAcceso
+                                  : trabajo.detalleAcceso,
                               style: AppTypography.etiquetaChica,
                             ),
                         ],
@@ -914,7 +928,9 @@ class _TarjetaEnCurso extends StatelessWidget {
                           etiqueta: 'Ventana',
                           // CAMPO-DATA-020, y la hora real si no hay demostración.
                           valor: mostrarDatosFuturos
-                              ? FieldMockData.ventanaHoraria
+                              ? (trabajo.ventanaTexto.isEmpty
+                                  ? FieldMockData.ventanaHoraria
+                                  : trabajo.ventanaTexto)
                               : _hora(trabajo.compromiso),
                         ),
                       ),

@@ -74,9 +74,9 @@ flutter run                                    # producción: solo datos reales
 | ID | Pantalla | Componente | Dato futuro | Valor de ejemplo | Tipo | Fuente futura | Campo esperado | ¿Backend? | Prioridad | Estado |
 |---|---|---|---|---|---|---|---|---|---|---|
 | CAMPO-DATA-001 | Inicio | Señal del cliente | Potencia óptica RX | -18.7 dBm | decimal | SmartOLT vía backend | `telemetria.rx_dbm` | Sí | Alta | MOCK |
-| CAMPO-DATA-002 | Inicio, Trabajo | Tarjeta | SLA restante | 01:42 | duración | Backend de Campo | `trabajo.sla_restante` | Sí | Alta | MOCK |
-| CAMPO-DATA-003 | Trabajo | Tarjeta y filtro | Zona | Norte Urbano | texto/id | Backend de Campo | `trabajo.zona` | Sí | Media | MOCK |
-| CAMPO-DATA-004 | Trabajo | Tarjeta y filtro | Prioridad | Alta | enum | Backend de Campo | `trabajo.prioridad` | Sí | Media | MOCK |
+| CAMPO-DATA-002 | Inicio, Trabajo | Tarjeta | SLA restante | 01:42 | duración | Backend de Campo | `trabajo.sla_restante` | Sí | Alta | REAL DISPONIBLE desde el 22/09/2026: `compromiso.sla_vence_en`. El teléfono cuenta los minutos contra esa fecha; no la calcula |
+| CAMPO-DATA-003 | Trabajo | Tarjeta y filtro | Zona | Norte Urbano | texto/id | Backend de Campo | `trabajo.zona` | Sí | Media | REAL DISPONIBLE desde el 22/09/2026: `zona` en la orden |
+| CAMPO-DATA-004 | Trabajo | Tarjeta y filtro | Prioridad | Alta | enum | Backend de Campo | `trabajo.prioridad` | Sí | Media | REAL DISPONIBLE desde el 22/09/2026: `prioridad` en la orden |
 | CAMPO-DATA-005 | Inicio, Trabajo | Tarjeta | Distancia y tiempo de viaje | 4.2 km | decimal + entero | Ubicación del técnico + dirección | `trabajo.distancia_km`, `.eta_min` | Sí (y permiso de ubicación) | Media | MOCK |
 | CAMPO-DATA-006 | Inicio | Encabezado | Turno de la jornada | 07:30 - 17:00 | rango horario | Backend de Campo | `jornada.turno` | Sí | Media | MOCK |
 | CAMPO-DATA-007 | Inicio | Encabezado | Cuadrilla y móvil | Cuadrilla 04 · Móvil 12 | texto | Backend de Campo | `jornada.cuadrilla` | Sí | Baja | MOCK |
@@ -87,7 +87,7 @@ flutter run                                    # producción: solo datos reales
 | CAMPO-DATA-012 | Inicio (futuro) | Señal del cliente | Histórico de señal 48 h | — | serie temporal | SmartOLT | `telemetria.historico` | Sí | Media | NO SE MUESTRA |
 | CAMPO-DATA-018 | Inicio | Chip de academia | Cursos pendientes | 1 | entero | Módulo de Academia | `academia.cursos_pendientes` | Sí | Baja | MOCK |
 | CAMPO-DATA-019 | Inicio, encabezado | Avatar | Foto del técnico | — | url | Perfil del CRM | `profile.foto_url` | Sí | Baja | NO SE MUESTRA: se usan sus iniciales, que son reales |
-| CAMPO-DATA-020 | Inicio, Trabajo | Tarjeta | Ventana horaria comprometida | 10:00 - 12:00 | rango | Backend de Campo | `trabajo.ventana_inicio`, `.ventana_fin` | Sí | Alta | MOCK |
+| CAMPO-DATA-020 | Inicio, Trabajo | Tarjeta | Ventana horaria comprometida | 10:00 - 12:00 | rango | Backend de Campo | `trabajo.ventana_inicio`, `.ventana_fin` | Sí | Alta | REAL DISPONIBLE desde el 22/09/2026: `compromiso.ventana_inicio/_fin` |
 | CAMPO-DATA-021 | Inicio, Materiales | Kit | Hora de confirmación del kit | 08:02 AM | hora | Inventario de Dexter | `kit.confirmado_en` | Sí | Media | MOCK |
 | CAMPO-DATA-022 | Franja | — | Modo de trabajo de datos | Modo Dinámico | texto | Sin definir | — | Sí | Baja | MOCK. El número de cambios sin enviar, al lado, es real |
 | CAMPO-DATA-023 | Trabajo | Tarjeta de instalación | Plan contratado | Fibra 500 Mbps | texto | **Ya existe en el backend** | `contexto.cliente.plan` | **No, desde el 22/09/2026** | Media | REAL DISPONIBLE (el plan). Los **materiales previstos** siguen sin existir |
@@ -105,15 +105,15 @@ flutter run                                    # producción: solo datos reales
 | CAMPO-DATA-033 | Ejecución | Medición | Umbral de aceptación de la lectura | -15 a -25 dBm | rango | Parámetro de la empresa | `red.umbral_aceptacion_campo` | Sí | Alta | MOCK **que no valida**: se muestra como referencia, no bloquea el cierre ni marca la respuesta como incorrecta |
 | CAMPO-DATA-035 | Detalle | Franja superior | Nombre y versión del enlace de sincronización | Dexter Link v4.2 | texto | Backend de Dexter | `enlace.nombre`, `.version` | Sí | Baja | MOCK |
 | CAMPO-DATA-036 | Trabajo, Detalle | Pie y franja | Cuándo fue la última sincronización con éxito | Hace 1 min | marca de tiempo | **La propia aplicación** | — | Sí | Alta | MOCK. No es deuda del backend: la cola sabe cuántos cambios faltan, pero no guarda la hora del último envío bueno |
-| CAMPO-DATA-037 | Detalle | Cabecera | Qué hay que hacer, en una línea | Diagnóstico en domicilio y verificación de potencia | texto | Backend de Campo | `trabajo.resumen` | Sí | Baja | MOCK |
+| CAMPO-DATA-037 | Detalle | Cabecera | Qué hay que hacer, en una línea | Diagnóstico en domicilio y verificación de potencia | texto | Backend de Campo | `trabajo.resumen` | Sí | Baja | REAL DISPONIBLE desde el 22/09/2026: `resumen` en la orden |
 | CAMPO-DATA-038 | Inicio | Modo de jornada | En qué está el técnico: en sitio, en ruta, disponible, pausa | 4 estados | enum | Backend de Campo + cola propia | `jornada.estado` | Sí | Alta | MOCK. El selector cambia lo que se ve y **no guarda nada**: marcar "Pausa" no llega a ningún supervisor |
 | CAMPO-DATA-039 | Inicio | Tarjeta en curso | Hora estimada de llegada | 10:15 AM | hora | Cálculo con la posición del técnico | — | Sí | Media | MOCK |
-| CAMPO-DATA-040 | Inicio | Cliente | Identificador del abonado en el ISP | ID 10984214 | texto | WispHub vía backend | `cliente.id_abonado` | Sí | Media | MOCK |
-| CAMPO-DATA-041 | Inicio | Dirección | Cómo se entra: torre, piso, apartamento | Interior 3 - Apto 402 | texto | Backend de Campo | `cliente.detalle_acceso` | Sí | Alta | MOCK. Sin esto el técnico llega al edificio y no al apartamento |
+| CAMPO-DATA-040 | Inicio | Cliente | Identificador del abonado en el ISP | ID 10984214 | texto | WispHub vía backend | `cliente.id_abonado` | Sí | Media | REAL DISPONIBLE desde el 22/09/2026: `cliente.id_abonado` |
+| CAMPO-DATA-041 | Inicio | Dirección | Cómo se entra: torre, piso, apartamento | Interior 3 - Apto 402 | texto | Backend de Campo | `cliente.detalle_acceso` | Sí | Alta | REAL DISPONIBLE desde el 22/09/2026: `cliente.detalle_acceso` |
 | CAMPO-DATA-042 | Inicio | Vehículo | Modelo, odómetro y combustible | Kangoo · 82.451 km · 75 % | estructura | Módulo de vehículos | `vehiculo.modelo`, `.odometro`, `.combustible` | Sí | Baja | MOCK |
 | CAMPO-DATA-043 | Inicio | Academia | Curso obligatorio y cuándo vence | Alturas (SST) · Vence hoy 18:00 | estructura | Módulo de Academia | `academia.obligatorio`, `.vence_en` | Sí | Media | MOCK |
 | CAMPO-DATA-044 | Trabajo | Buscador | Lector de código del equipo del cliente | — | acción | Cámara + inventario | `equipo.serial` | Sí | Media | MOCK **que no lee**: el botón avisa que falta. La búsqueda por texto, al lado, sí es real |
-| CAMPO-DATA-045 | Trabajo | Tarjeta | Requisito de seguridad del trabajo y aptitud del técnico | Certificación de alturas | estructura | `trabajo.requisitos[]` + `perfil.certificaciones` | — | Sí | Alta | MOCK. **No habilita ni bloquea**: hoy el técnico se entera del riesgo en el sitio |
+| CAMPO-DATA-045 | Trabajo | Tarjeta | Requisito de seguridad del trabajo y aptitud del técnico | Certificación de alturas | estructura | `trabajo.requisitos[]` + `perfil.certificaciones` | — | Sí | Alta | REAL DISPONIBLE desde el 22/09/2026: `requisitos_seguridad`. **Se informan; no habilitan ni bloquean** |
 | CAMPO-DATA-046 | Trabajo | Tarjeta terminada | Acta de cierre: estado y medición final | Aprobado · -19.4 dBm | estructura | Backend de Campo | `trabajo.acta` | Sí | Media | MOCK |
 | CAMPO-DATA-047 | Detalle | Origen | De qué sistema y con qué referencia se abrió | wisphub · ticket · WH-91288 | estructura | **Ya existe en el backend** | `origen` | **No, desde el 22/09/2026** | Media | REAL DISPONIBLE. La **hora** de apertura sigue sin existir |
 | CAMPO-DATA-048 | Detalle | Telemetría | OLT y puerto, distancia al splitter, potencia TX | 4 filas | estructura | SmartOLT vía Dexter API | `telemetria.olt`, `.distancia_splitter`, `.tx_dbm` | Sí | Media | MOCK |
@@ -191,6 +191,27 @@ Lo que cambió en pantalla:
 Lo que **no** se guarda de un listado: la devolución, el contexto, los pasos y la
 cuadrilla solo los puede afirmar el detalle. Un listado que llega después de un
 fallo de red no los borra (CAMPO-D2).
+
+## La tanda 2, construida (22/09/2026)
+
+Ocho campos nuevos en la orden, con migración aditiva y todos opcionales: una
+orden creada antes sigue siendo válida y se ve como se veía.
+
+| Dato | Ahora sale de |
+|---|---|
+| Prioridad (004) | `prioridad`, con valores cerrados: alta, media, baja |
+| Zona (003) | `zona` |
+| Resumen del trabajo (037) | `resumen` |
+| Ventana comprometida (020) | `compromiso.ventana_inicio` y `.ventana_fin` |
+| Vencimiento del SLA (002) | `compromiso.sla_vence_en` |
+| Detalle de acceso (041) | `cliente.detalle_acceso` |
+| Identificador del abonado (040) | `cliente.id_abonado` |
+| Requisitos de seguridad (045) | `requisitos_seguridad` |
+
+La regla en la aplicación: **lo real le gana al ejemplo, y lo que no se sabe no
+se inventa**. El SLA se cuenta contra la fecha del servidor; sin esa fecha no se
+calcula nada y no se afirma que algo venció. La franja a medias —con una sola
+punta— no se muestra: media franja no es una franja.
 
 ## Números de identificador
 
