@@ -74,7 +74,19 @@ export const resumenRecogido = $state({
   recordar() {
     if (this.leida) return;
     try {
-      this.valor = localStorage.getItem(CLAVE_RESUMEN) === '1';
+      /* RECOGIDO POR DEFECTO desde el 22/09/2026. Medido sobre la columna
+         real: desplegado ocupa 143px de 702, y al hilo le quedaban 124 --
+         el 18% de la pantalla para lo que la pantalla ES.
+
+         Lo que cambió y habilita el cambio: la línea del título ahora
+         muestra el MOTIVO de la escalada. Antes recoger escondía la
+         respuesta y por eso arrancaba abierto; ahora recogido sigue
+         contestando "por qué llegó acá" en 28px en vez de 143.
+
+         La preferencia de cada uno manda igual: sólo cambia qué pasa
+         cuando todavía no eligió. */
+      const guardado = localStorage.getItem(CLAVE_RESUMEN);
+      this.valor = guardado === null ? true : guardado === '1';
     } catch {
       this.valor = false;
     }

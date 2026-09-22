@@ -90,8 +90,10 @@
   const canalBanda = $derived(
     modo === 'nota' ? 'Interno'
       : modo === 'responder_y_devolver' ? 'Sale y devuelve'
-        : escalada ? 'Canal directo del operador'
-          : 'Responde el asistente'
+        : bloqueadoPorIA ? 'Responde el asistente'
+          : escalada ? 'Canal directo del operador'
+            : bloqueadoPorVentana ? 'WhatsApp · 24 h'
+              : 'Responde el asistente'
   );
 
   /* Y por dónde sale, con el estado que de verdad tiene. La ventana de 24 h
@@ -131,47 +133,30 @@
          Sólo aparece en WhatsApp: los otros canales no tienen esta regla y
          heredarla dejaría a alguien sin poder escribir donde nadie se lo
          impide. -->
-    {#if ventanaAbierta !== null}
-      <div
-        class="ventana"
-        class:ventana-cerrada={ventanaAbierta === false}
-        class:ventana-avisa={ventanaPorCerrarse}
-        role="status"
-      >
-        {#if ventanaAbierta === false}
-          <span class="ventana-marca">WhatsApp · ventana inactiva</span>
-          <strong>Ventana de WhatsApp cerrada</strong>
-          <span class="v2-muted"
-            >· el cliente no escribe hace más de 24 h. Para volver a
-            contactarlo hay que usar una plantilla aprobada.</span
-          >
-          <!-- ACA HABIA UN SEGUNDO «Elegir plantilla», y se fue el 22/09/2026.
-               El argumento era bueno --"la salida, al lado del problema"-- pero
-               se vio en produccion lo que producia: el boton del pie tambien
-               aparece cuando la ventana esta cerrada, asi que quedaban DOS
-               botones identicos a menos de cien pixeles, mas el texto del
-               campo que ya dice "usa una plantilla". Tres veces la misma
-               instruccion.
+    <!-- SÓLO CUANDO AVISA ALGO. Medido el 22/09/2026 sobre la columna real:
+         esta banda son 48px de 702, y aparecía SIEMPRE -- también para decir
+         «ventana abierta», que es el estado normal y no necesita un renglón.
 
-               Se conserva el del PIE y no este, aunque este quede mas cerca
-               del aviso: el del pie ocupa el lugar de «Enviar», que es donde
-               la mano ya esta y donde se busca la accion. Este aviso vuelve a
-               ser lo que debe ser -- la explicacion de por que no se puede
-               escribir, no una segunda puerta. -->
-        {:else if ventanaPorCerrarse}
-          <!-- El rótulo del canal aparece acá y en cerrada, pero NO en abierta:
-               dice de qué sistema viene el límite, y mientras la ventana está
-               abierta no hay ningún límite operando. Un distintivo permanente
-               en el estado normal es ruido que compite con el que sí importa. -->
-          <span class="ventana-marca">WhatsApp · 24 h</span>
-          <strong>La ventana cierra en {comoDuracion(ventanaRestante ?? 0)}</strong>
-          <span class="v2-muted">· después sólo se le puede escribir por plantilla</span>
-        {:else}
-          <!-- Estado normal: una línea discreta. Se puede escribir como
-               siempre, así que no hay nada que advertir -- sólo cuánto queda,
-               por si alguien está calculando si conviene esperar. -->
-          <span>Ventana abierta · quedan {comoDuracion(ventanaRestante ?? 0)}</span>
-        {/if}
+         Los otros dos estados ya tienen dónde vivir, y ahí se leen mejor:
+
+           abierta  -> el sello del canal, a la derecha de la barra, dice
+                       «WhatsApp · ventana abierta». Es el mismo dato en un
+                       lugar que ya existía.
+           cerrada  -> la banda de estado, que es la que contesta «¿le puedo
+                       escribir?». Tenerlo en dos bandas apiladas repetía la
+                       misma respuesta y se comía 92px juntas.
+
+         Queda sólo el aviso de que ESTÁ POR CERRARSE, que es el único de los
+         tres que pide una decisión: escribir ahora o quedarse sin poder. -->
+    {#if ventanaPorCerrarse && ventanaAbierta !== false}
+      <div class="ventana ventana-avisa" role="status">
+        <!-- El rótulo del canal dice de qué sistema viene el límite. No
+             aparecía con la ventana abierta y sigue sin aparecer: un
+             distintivo permanente en el estado normal es ruido que compite
+             con el que sí importa. -->
+        <span class="ventana-marca">WhatsApp · 24 h</span>
+        <strong>La ventana cierra en {comoDuracion(ventanaRestante ?? 0)}</strong>
+        <span class="v2-muted">· después sólo se le puede escribir por plantilla</span>
       </div>
     {/if}
 
@@ -338,6 +323,24 @@
               {interviniendo ? 'Tomando el control…' : 'Intervenir'}
             </button>
             {#if errorIntervenir}<span class="aviso-mal">{errorIntervenir}</span>{/if}
+            <!-- Si ADEMAS la ventana está cerrada, se dice acá y no en una
+                 banda aparte. Pero va DESPUES y en segundo plano: lo primero
+                 es tomar el control, y la plantilla es el problema del paso
+                 siguiente. Poner la ventana antes dejaba esta rama --y con
+                 ella el botón «Intervenir»-- sin dibujar. -->
+            {#if bloqueadoPorVentana}
+              <span class="v2-muted">· y la ventana de WhatsApp está cerrada</span>
+            {/if}
+          {:else if bloqueadoPorVentana}
+            <!-- LO QUE ANTES DECIA LA BANDA DE LA VENTANA. Vive acá porque es
+                 la respuesta a la misma pregunta que contesta esta banda --
+                 «¿le puedo escribir?»-- y tenerlo en dos renglones apilados
+                 repetía el mismo «no» dos veces, en 92px. -->
+            <strong class="nota-aviso">Ventana de WhatsApp cerrada</strong>
+            <span class="v2-muted"
+              >· el cliente no escribe hace más de 24 h; hay que usar una
+              plantilla aprobada</span
+            >
           {:else}
             Responde el asistente
           {/if}
@@ -510,13 +513,17 @@
         </div>
       {/if}
 
+      <!-- UNA FILA CUANDO NO SE PUEDE ESCRIBIR. Son 64px de caja donde
+           nadie puede tipear, en una pantalla donde el hilo se queda con el
+           18%. El texto de adentro explica por qué está bloqueado, así que la
+           caja sigue diciendo algo -- pero en la mitad de alto. -->
       <textarea
         class="compositor-texto"
         class:texto-inerte={bloqueadoPorVentana || bloqueadoPorIA}
         bind:this={campoTexto}
         bind:value={entrada}
         onpaste={(e) => onPegar?.(e)}
-        rows="2"
+        rows={bloqueadoPorVentana || bloqueadoPorIA ? 1 : 2}
         placeholder={bloqueadoPorIA
           ? 'La IA está atendiendo — dejá una nota interna para el equipo'
           : bloqueadoPorVentana
@@ -602,9 +609,14 @@
     color: var(--bandeja-error);
   }
 
+  /* EL AIRE DEL COMPOSITOR, apretado el 22/09/2026. Medido sobre la
+     columna real: el compositor se llevaba 322px de 702 y 79 de esos eran
+     margen y padding entre cinco bandas de 40-48px. Bajarlos no saca ni una
+     palabra de la pantalla -- saca el espacio vacío entre ellas, que es de
+     donde tiene que salir el alto que le falta al hilo. */
   .pie {
     flex: none;
-    padding: 0 16px 14px;
+    padding: 0 16px 10px;
   }
 
   /* ── nota interna ───────────────────────────────────────────────────── */
@@ -619,7 +631,7 @@
     font-size: 11.5px;
     color: var(--bandeja-texto-2);
     padding: 5px 8px;
-    margin-bottom: 6px;
+    margin-bottom: 5px;
     border-radius: 8px;
     background: var(--bandeja-canvas);
   }
@@ -676,9 +688,14 @@
 
   /* Un cuadro deshabilitado que se ve igual que uno normal invita a
      escribir y no avisa hasta que alguien ya escribio. */
+  /* Bloqueado no hace falta el piso: no se va a escribir dentro. */
   .texto-inerte {
     background: var(--bandeja-canvas);
     cursor: not-allowed;
+    /* Sin piso: bloqueado no se va a escribir adentro, y los 44px de
+       `.compositor-texto` dejaban el cuadro igual de alto que con dos filas
+       -- o sea que `rows=1` no ahorraba nada. */
+    min-height: 0;
   }
 
 
@@ -1142,6 +1159,9 @@
   .compositor-texto {
     width: 100%;
     resize: vertical;
+    /* El piso vale para el cuadro EN USO. Bloqueado, `rows=1` no alcanzaba:
+       los 44px lo dejaban igual de alto que con dos filas, y la mitad del
+       ahorro se perdia en el piso. */
     min-height: 44px;
     border: 1px solid var(--bandeja-borde);
     border-radius: 8px;
@@ -1243,7 +1263,7 @@
     align-items: center;
     gap: 8px;
     padding: 5px 9px;
-    margin-bottom: 7px;
+    margin-bottom: 5px;
     border: 1px solid;
     border-radius: var(--bandeja-radio-sm);
     font-size: 11.5px;
@@ -1306,8 +1326,8 @@
     align-items: center;
     flex-wrap: wrap;
     gap: 4px;
-    padding-bottom: 6px;
-    margin-bottom: 7px;
+    padding-bottom: 5px;
+    margin-bottom: 5px;
     border-bottom: 1px solid var(--bandeja-borde);
   }
 
