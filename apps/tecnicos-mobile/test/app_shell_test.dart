@@ -385,7 +385,9 @@ void main() {
       expect(activa.label, 'Trabajo');
       expect(activa.flagsCollection.isSelected, ui.Tristate.isTrue);
 
-      final otra = tester.getSemantics(find.text('ACADEMIA'));
+      // Academia y Mas ya no se ofrecen: llevaban a "en construccion".
+      expect(find.text('ACADEMIA'), findsNothing);
+      final otra = tester.getSemantics(find.text('MATERIALES'));
       expect(otra.flagsCollection.isSelected, isNot(ui.Tristate.isTrue));
       await banco.cerrar();
     });

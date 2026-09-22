@@ -175,7 +175,7 @@ void main() {
         'origen_json': jsonEncode(<String, dynamic>{
           'sistema': 'wisphub',
           'tipo': 'ticket',
-          'referencia': 'WH-91288',
+          'ref': 'WH-91288',
         }),
         'requisitos_seguridad_json': jsonEncode(<String>[
           'Trabajo en altura sobre escalera',
@@ -314,7 +314,8 @@ void main() {
     /// Sin esto la comparación con el diseño no es justa: Stitch dibuja la
     /// pantalla entera, y juzgar la densidad de Inicio sin su encabezado ni su
     /// navegación es medir otra cosa.
-    testWidgets('Armazón completo, Inicio 390x844', (WidgetTester t) async {
+    for (final Medida m in <Medida>[telefono, tablet, escritorio]) {
+    testWidgets('Armazón completo, Inicio ${m.$1}', (WidgetTester t) async {
       final StreamController<SyncSummary> resumenes =
           StreamController<SyncSummary>.broadcast();
       addTearDown(resumenes.close);
@@ -336,9 +337,10 @@ void main() {
           ),
         ),
         'armazon_inicio',
-        telefono,
+        m,
       );
     });
+    }
 
     for (final Medida m in <Medida>[telefono, telefonoLargo, tablet, escritorio]) {
       testWidgets('Inicio ${m.$1}', (WidgetTester t) async {

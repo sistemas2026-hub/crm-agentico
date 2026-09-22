@@ -12,6 +12,7 @@ import 'widgets/consumo_de_material.dart';
 import 'widgets/firma_del_cliente.dart';
 import '../../core/storage/secure_storage_service.dart';
 import '../../core/sync/sync_queue_service.dart';
+import '../../core/widgets/contenido_centrado.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/offline_saved_banner.dart';
 import '../../core/widgets/sync_badge.dart';
@@ -644,7 +645,7 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
     final numero = _orden?['numero'] ?? '---';
 
     return Scaffold(
-      backgroundColor: AppColors.surface,
+      backgroundColor: AppColors.surfaceDim,
       appBar: AppBar(
         title: Text('Ejecución OT #$numero'),
         actions: [
@@ -654,7 +655,8 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
           ),
         ],
       ),
-      body: Column(
+      body: ContenidoCentrado(
+        child: Column(
         children: [
           OfflineSavedBanner(visible: _showSavedIndicator),
           _franjaDelFormulario(),
@@ -690,6 +692,7 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
           ),
           _barraDeAcciones(),
         ],
+        ),
       ),
     );
   }

@@ -11,6 +11,7 @@ import '../../core/sync/sync_queue_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/dexter_card.dart';
 import '../../core/widgets/dexter_empty_state.dart';
+import '../../core/widgets/contenido_centrado.dart';
 import '../../core/widgets/dexter_sync_badge.dart';
 import '../ejecucion/ejecucion_screen.dart';
 import '../trabajo/estado_trabajo.dart';
@@ -189,7 +190,9 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
           ),
         ],
       ),
-      body: Column(
+      backgroundColor: AppColors.surfaceDim,
+      body: ContenidoCentrado(
+        child: Column(
         children: <Widget>[
           if (widget.mostrarDatosFuturos) _franjaDeEnlace(),
           Expanded(
@@ -220,10 +223,15 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                 _accionesRapidas(trabajo),
                 const SizedBox(height: AppSpacing.md),
                 _datosDelCliente(trabajo),
-                if (widget.mostrarDatosFuturos) ...<Widget>[
-                  const SizedBox(height: AppSpacing.md),
-                  _trazabilidadYOrigen(trabajo),
-                ],
+                // Lo que la orden SÍ trae. Antes vivía detrás de la bandera
+                // de demostración junto a los datos de ejemplo, así que en
+                // producción se ocultaba también lo verdadero: el ticket de
+                // origen, la franja prometida y los requisitos de seguridad
+                // llegan del backend y nadie los veía.
+                const SizedBox(height: AppSpacing.md),
+                _datosDeLaOrden(trabajo),
+                const SizedBox(height: AppSpacing.md),
+                _datosTecnicos(trabajo),
                 if (widget.mostrarDatosFuturos) ...<Widget>[
                   const SizedBox(height: AppSpacing.md),
                   _telemetria(trabajo),
@@ -268,6 +276,7 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
             ),
           ),
         ],
+        ),
       ),
     );
   }
@@ -297,29 +306,45 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
             ),
           ),
           const SizedBox(width: AppSpacing.sm),
-          Text(
-            FieldMockData.enlaceDexter,
-            style: AppTypography.etiquetaChica.copyWith(
-              color: AppColors.inverseOnSurface,
-              fontWeight: FontWeight.w600,
+          // Flexibles: a 390 px los cuatro textos no entran en una fila, y un
+          // Row rigido no se acomoda, desborda. El techo de ancho de la
+          // aplicacion destapo esto, que antes se escondia porque las pruebas
+          // renderizaban a mil pixeles.
+          Flexible(
+            child: Text(
+              FieldMockData.enlaceDexter,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppTypography.etiquetaChica.copyWith(
+                color: AppColors.inverseOnSurface,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
           const SizedBox(width: AppSpacing.sm),
           const Icon(Icons.check, size: 12, color: AppColors.exitoFuerte),
           const SizedBox(width: 2),
-          Text(
-            'En dispositivo',
-            style: AppTypography.etiquetaChica.copyWith(
-              color: AppColors.exitoFuerte,
+          Flexible(
+            child: Text(
+              'En dispositivo',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppTypography.etiquetaChica.copyWith(
+                color: AppColors.exitoFuerte,
+              ),
             ),
           ),
           const Spacer(),
           const Icon(Icons.cloud_done, size: 14, color: AppColors.surfaceDim),
           const SizedBox(width: 4),
-          Text(
-            'Sync: ${FieldMockData.ultimaSincronizacion}',
-            style: AppTypography.etiquetaChica.copyWith(
-              color: AppColors.surfaceDim,
+          Flexible(
+            child: Text(
+              'Sync: ${FieldMockData.ultimaSincronizacion}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppTypography.etiquetaChica.copyWith(
+                color: AppColors.surfaceDim,
+              ),
             ),
           ),
         ],
@@ -636,72 +661,6 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
     );
   }
 
-  /// CAMPO-DATA-029 y CAMPO-DATA-047 · De dónde vino la orden.
-  ///
-  /// La cita del abonado —si la hay— es real: es `diagnostico_previo_ia`. Lo
-  /// que todavía no existe es el rastro del ticket y de quién lo abrió.
-  Widget _trazabilidadYOrigen(TrabajoVista trabajo) {
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.md),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceContainerLowest,
-        borderRadius: AppRadius.brTarjeta,
-        boxShadow: AppTheme.sombraNivel1,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Row(
-            children: <Widget>[
-              const Icon(Icons.alt_route, size: 16, color: AppColors.secondary),
-              const SizedBox(width: 6),
-              Text(
-                'Origen NOC',
-                style: AppTypography.etiqueta.copyWith(
-                  color: AppColors.onSurface,
-                ),
-              ),
-              const Spacer(),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: const BoxDecoration(
-                  color: AppColors.surfaceContainer,
-                  borderRadius: AppRadius.brChico,
-                ),
-                child: Text(
-                  trabajo.origen?.etiqueta ?? _ejemploDe(trabajo).ticketOrigen,
-                  style: AppTypography.datoChico,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: AppSpacing.xs),
-          Text(
-            FieldMockData.origenApertura,
-            style: AppTypography.etiquetaChica,
-          ),
-          if (trabajo.diagnosticoPrevio.isNotEmpty) ...<Widget>[
-            const SizedBox(height: AppSpacing.sm),
-            Text(
-              'Reporte del Abonado',
-              style: AppTypography.etiquetaChica.copyWith(
-                color: AppColors.onSurface,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            Text(
-              '“${trabajo.diagnosticoPrevio}”',
-              style: AppTypography.cuerpoChico.copyWith(
-                fontStyle: FontStyle.italic,
-                color: AppColors.onSurface,
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
   /// CAMPO-DATA-025 · Qué material tiene asignado este trabajo.
   Widget _materialesAsociados() {
     return Container(
@@ -906,6 +865,202 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
     );
   }
 
+  /// Lo que hay que saber antes de tocar la puerta.
+  ///
+  /// QUÉ ENTRA Y QUÉ NO
+  /// ------------------
+  /// El criterio no es "mostrar todo lo que el backend manda", sino: ¿esto
+  /// cambia algo de lo que la persona va a hacer en los próximos minutos?
+  ///
+  /// Entra:
+  ///
+  /// - **De qué ticket salió.** El cliente abre la puerta diciendo "ya llamé
+  ///   tres veces". Saber el ticket evita volver a preguntar lo que ya está
+  ///   contestado, y es lo que permite buscar el historial.
+  /// - **La franja prometida.** Es el compromiso que alguien le dio a una
+  ///   persona que está esperando; llegar fuera de ella no es lo mismo que
+  ///   llegar tarde a una hora estimada.
+  /// - **Los requisitos de seguridad.** "Trabajo en altura" decide si el
+  ///   trabajo se puede hacer hoy, con lo que hay en la camioneta. Va primero
+  ///   y en rojo por eso, no por énfasis.
+  ///
+  /// No entra:
+  ///
+  /// - **La prioridad.** Sirve para decidir a cuál ir, y eso ya pasó: quien
+  ///   está leyendo esta pantalla ya llegó. Vive en Inicio, que es donde
+  ///   ordena.
+  /// - **La zona.** Ya está dicha en la dirección; repetirla ocupa una línea
+  ///   y no cambia ninguna decisión.
+  ///
+  /// Cada línea aparece sólo si el servidor la mandó. Una orden vieja, creada
+  /// antes de que existieran estos campos, muestra menos y no inventa nada.
+  Widget _datosDeLaOrden(TrabajoVista trabajo) {
+    final String ventana = trabajo.ventanaTexto;
+    final String origen = trabajo.origen?.etiqueta ?? '';
+    final List<String> seguridad = trabajo.requisitosSeguridad;
+
+    if (ventana.isEmpty && origen.isEmpty && seguridad.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return DexterCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              const Icon(Icons.assignment_outlined,
+                  size: 16, color: AppColors.secondary),
+              const SizedBox(width: 6),
+              Text(
+                'El trabajo',
+                style:
+                    AppTypography.etiqueta.copyWith(color: AppColors.onSurface),
+              ),
+            ],
+          ),
+          if (seguridad.isNotEmpty) ...<Widget>[
+            const SizedBox(height: AppSpacing.sm),
+            for (final String requisito in seguridad)
+              Container(
+                width: double.infinity,
+                margin: const EdgeInsets.only(bottom: AppSpacing.xs),
+                padding: const EdgeInsets.all(AppSpacing.sm),
+                decoration: const BoxDecoration(
+                  color: AppColors.errorContainer,
+                  borderRadius: AppRadius.brCampo,
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    const Icon(Icons.health_and_safety_outlined,
+                        size: 16, color: AppColors.onErrorContainer),
+                    const SizedBox(width: AppSpacing.sm),
+                    Expanded(
+                      child: Text(
+                        requisito,
+                        style: AppTypography.cuerpoChico.copyWith(
+                          color: AppColors.onErrorContainer,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+          if (ventana.isNotEmpty) ...<Widget>[
+            const SizedBox(height: AppSpacing.sm),
+            _lineaDeDato(
+              icono: Icons.schedule,
+              etiqueta: 'Franja prometida al cliente',
+              valor: ventana,
+            ),
+          ],
+          if (origen.isNotEmpty) ...<Widget>[
+            const SizedBox(height: AppSpacing.sm),
+            _lineaDeDato(
+              icono: Icons.alt_route,
+              etiqueta: 'Viene de',
+              valor: origen,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// Lo que el técnico necesita del equipo y de la red.
+  ///
+  /// Sale del contexto que el despacho congeló al crear la orden: la caja
+  /// donde va a conectar y el serial del equipo del cliente. Sin esos dos
+  /// datos, la primera media hora en el sitio se va en buscarlos.
+  ///
+  /// La potencia óptica todavía no está: la mide SmartOLT y ese puente no
+  /// existe. Cuando exista va acá, con su hora al lado, porque una lectura
+  /// vieja es peor que ninguna.
+  Widget _datosTecnicos(TrabajoVista trabajo) {
+    final String cto = trabajo.contexto['cto']?.toString() ?? '';
+    final String serial = trabajo.serialOnu;
+    if (cto.isEmpty && serial.isEmpty) return const SizedBox.shrink();
+
+    return DexterCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              const Icon(Icons.hub_outlined,
+                  size: 16, color: AppColors.secondary),
+              const SizedBox(width: 6),
+              Text(
+                'Datos técnicos',
+                style:
+                    AppTypography.etiqueta.copyWith(color: AppColors.onSurface),
+              ),
+            ],
+          ),
+          if (cto.isNotEmpty) ...<Widget>[
+            const SizedBox(height: AppSpacing.sm),
+            _lineaDeDato(
+              icono: Icons.settings_input_component,
+              etiqueta: 'Caja de distribución',
+              valor: cto,
+              monoespaciada: true,
+            ),
+          ],
+          if (serial.isNotEmpty) ...<Widget>[
+            const SizedBox(height: AppSpacing.sm),
+            _lineaDeDato(
+              icono: Icons.qr_code_2,
+              etiqueta: 'Serial del equipo del cliente',
+              valor: serial,
+              monoespaciada: true,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// Una línea de dato: qué es, y el valor.
+  ///
+  /// Los identificadores van en monoespaciada porque se leen carácter por
+  /// carácter y se comparan contra una etiqueta pegada en un equipo: ahí la
+  /// diferencia entre O y 0 importa.
+  Widget _lineaDeDato({
+    required IconData icono,
+    required String etiqueta,
+    required String valor,
+    bool monoespaciada = false,
+  }) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Icon(icono, size: 16, color: AppColors.onSurfaceVariant),
+        const SizedBox(width: AppSpacing.sm),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(etiqueta, style: AppTypography.etiquetaChica),
+              Text(
+                valor,
+                style: monoespaciada
+                    ? AppTypography.datoChico
+                        .copyWith(color: AppColors.onSurface)
+                    : AppTypography.cuerpo.copyWith(
+                        color: AppColors.onSurface,
+                        fontWeight: FontWeight.w600,
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _datosDelCliente(TrabajoVista trabajo) {
     return DexterCard(
       child: Column(
@@ -950,11 +1105,38 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
               ],
             ),
           ],
+          // Cómo se entra al inmueble: torre, piso, apartamento. Lo carga el
+          // despacho y evita la vuelta al portero.
+          if (trabajo.detalleAcceso.isNotEmpty) ...<Widget>[
+            const SizedBox(height: AppSpacing.xs),
+            Padding(
+              padding: const EdgeInsets.only(left: 24),
+              child: Text(
+                trabajo.detalleAcceso,
+                style: AppTypography.etiquetaChica,
+              ),
+            ),
+          ],
+          // El número con el que el cliente se identifica cuando llama a
+          // soporte: es el que va a citar si algo queda pendiente.
+          if (trabajo.idAbonado.isNotEmpty) ...<Widget>[
+            const SizedBox(height: AppSpacing.sm),
+            Row(
+              children: <Widget>[
+                const Icon(Icons.badge_outlined,
+                    size: 16, color: AppColors.onSurfaceVariant),
+                const SizedBox(width: AppSpacing.sm),
+                Text(trabajo.idAbonado, style: AppTypography.datoChico),
+              ],
+            ),
+          ],
           const SizedBox(height: AppSpacing.sm),
           _ubicacion(trabajo),
-          if (widget.mostrarDatosFuturos) ...<Widget>[
+          // El plan se muestra cuando la orden lo trae, no cuando hay
+          // demostración: define contra qué velocidad se prueba el servicio
+          // antes de dar el trabajo por bueno.
+          if (trabajo.planContratado.isNotEmpty) ...<Widget>[
             const SizedBox(height: AppSpacing.sm),
-            // CAMPO-DATA-023 · El plan que tiene contratado el cliente.
             _planContratado(),
           ],
           if (trabajo.familia != FamiliaTrabajo.otro) ...<Widget>[
@@ -1051,12 +1233,18 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
 
   /// El plan del cliente. Viene en `contexto`, que el despacho congela al
   /// crear la orden; si no vino, se cae al ejemplo (CAMPO-DATA-023).
-  String get _plan {
-    final String real = _trabajo?.planContratado ?? '';
-    return real.isEmpty ? 'Fibra 500 Mbps Simétrica' : real;
-  }
+  /// El plan, tal como vino. Vacío si la orden no lo trae: el bloque
+  /// entonces no se dibuja, en vez de anunciar una velocidad de ejemplo que
+  /// alguien usaría para decidir si el servicio quedó bien.
+  String get _plan => _trabajo?.planContratado ?? '';
 
   /// CAMPO-DATA-023 · Qué tiene contratado el cliente.
+  /// Qué tiene contratado el cliente, tal como vino en la orden.
+  ///
+  /// Sin el chip "+ Dexter TV" que estaba escrito a mano: nada dice que este
+  /// cliente tenga televisión. Se veía sólo en demostración y pasó a verse
+  /// siempre al mostrar el plan real, que es como los datos de ejemplo se
+  /// escapan a producción.
   Widget _planContratado() {
     return Container(
       padding: const EdgeInsets.all(AppSpacing.sm),
@@ -1081,20 +1269,6 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                   ),
                 ),
               ],
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: const BoxDecoration(
-              color: AppColors.secondaryFixed,
-              borderRadius: AppRadius.brChico,
-            ),
-            child: Text(
-              '+ Dexter TV',
-              style: AppTypography.etiquetaChica.copyWith(
-                color: AppColors.onSecondaryContainer,
-                fontWeight: FontWeight.w700,
-              ),
             ),
           ),
         ],

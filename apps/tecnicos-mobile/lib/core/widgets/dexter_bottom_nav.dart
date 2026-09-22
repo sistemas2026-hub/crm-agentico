@@ -2,10 +2,11 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
 
-/// Las cinco secciones de la aplicación.
+/// Las secciones de la aplicación.
 ///
-/// Están las cinco desde ahora, aunque algunas todavía no tengan contenido:
-/// son el producto que se está construyendo, no una lista provisoria.
+/// El enum las lista todas, incluidas las que todavía no existen: es el
+/// producto que se está construyendo. Cuáles se **ofrecen** es otra cosa, y la
+/// decide [DexterBottomNav.visibles].
 enum SeccionCampo { inicio, trabajo, materiales, academia, mas }
 
 /// Barra inferior fija, de ranuras iguales.
@@ -17,6 +18,22 @@ class DexterBottomNav extends StatelessWidget {
     this.indicadores = const <SeccionCampo, int>{},
     this.avisos = const <SeccionCampo>{},
   });
+
+  /// Las secciones que se ofrecen hoy.
+  ///
+  /// POR QUÉ NO ESTÁN LAS CINCO
+  /// --------------------------
+  /// Academia y Más llevaban a una pantalla que dice "en construcción". Un
+  /// destino en la barra principal es una promesa: quien lo toca espera que
+  /// haga algo, y al tocarlo dos veces aprende que la barra miente.
+  ///
+  /// Vuelven cuando tengan contenido. El enum las conserva para que ese día
+  /// sea agregar una línea acá y nada más.
+  static const List<SeccionCampo> visibles = <SeccionCampo>[
+    SeccionCampo.inicio,
+    SeccionCampo.trabajo,
+    SeccionCampo.materiales,
+  ];
 
   final SeccionCampo seleccionada;
   final ValueChanged<SeccionCampo> onSeleccion;
@@ -44,7 +61,7 @@ class DexterBottomNav extends StatelessWidget {
             height: AppSpacing.barraInferior,
             child: Row(
               children: <Widget>[
-                for (final SeccionCampo seccion in SeccionCampo.values)
+                for (final SeccionCampo seccion in visibles)
                   Expanded(
                     child: _Ranura(
                       seccion: seccion,

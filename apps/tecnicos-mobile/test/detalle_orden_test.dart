@@ -113,7 +113,7 @@ Widget _app(
 /// El detalle es largo: con una pantalla alta entra todo y las pruebas hablan
 /// del contenido, no del scroll.
 void _pantallaAlta(WidgetTester tester) {
-  tester.view.physicalSize = const Size(1000, 3200);
+  tester.view.physicalSize = const Size(1000, 4400);
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
@@ -504,10 +504,12 @@ void main() {
       // …y la barra de estados sigue diciendo dónde está la orden de verdad.
       expect(find.text('Paso 3 de 5'), findsOneWidget);
 
-      // La matriz de telemetría y el origen del ticket, del diseño nuevo.
+      // La matriz de telemetría, que sigue siendo de ejemplo.
       expect(find.text(FieldMockData.oltYPuerto), findsOneWidget);
       expect(find.text('Distancia Splitter'), findsOneWidget);
-      expect(find.text('Origen NOC'), findsOneWidget);
+      // El origen del ticket ya no vive acá: es un dato REAL del backend y
+      // se muestra siempre, en el bloque "El trabajo".
+      expect(find.text('Origen NOC'), findsNothing);
       await base.cerrar();
     });
 
@@ -524,7 +526,6 @@ void main() {
         reason: 'un protocolo de ejemplo se leería como el procedimiento oficial',
       );
       expect(find.text(FieldMockData.oltYPuerto), findsNothing);
-      expect(find.text('Origen NOC'), findsNothing);
       // Lo real sigue: la barra de estados y la acción.
       expect(find.text('Paso 3 de 5'), findsOneWidget);
       await base.cerrar();

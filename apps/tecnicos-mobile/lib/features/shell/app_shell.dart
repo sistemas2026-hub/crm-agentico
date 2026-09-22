@@ -12,6 +12,7 @@ import '../../core/sync/sync_presentacion.dart';
 import '../../core/sync/sync_queue_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/dexter_app_header.dart';
+import '../../core/widgets/contenido_centrado.dart';
 import '../../core/widgets/dexter_bottom_nav.dart';
 import '../../core/widgets/dexter_sync_strip.dart';
 import '../auth/login_screen.dart';
@@ -368,7 +369,12 @@ class _AppShellState extends State<AppShell> {
     final estadoSync = SyncPresentacion.estado(_resumen);
 
     return Scaffold(
-      body: Column(
+      backgroundColor: AppColors.surfaceDim,
+      // El techo de ancho envuelve TODO: encabezado, franja y contenido. Si
+      // sólo lo llevara el contenido, en una tablet el encabezado quedaría
+      // alineado con una cosa y las tarjetas con otra.
+      body: ContenidoCentrado(
+        child: Column(
         children: <Widget>[
           DexterAppHeader(
             empresa: _identidad?.empresa ?? FieldMockData.empresaPorDefecto,
@@ -415,8 +421,12 @@ class _AppShellState extends State<AppShell> {
             ),
           ),
         ],
+        ),
       ),
-      bottomNavigationBar: DexterBottomNav(
+      bottomNavigationBar: ContenidoCentrado(
+        ajustadoAlContenido: true,
+        color: AppColors.surfaceContainerLowest,
+        child: DexterBottomNav(
         seleccionada: _seccion,
         indicadores: <SeccionCampo, int>{
           if (_trabajosActivos > 0) SeccionCampo.trabajo: _trabajosActivos,
@@ -431,6 +441,7 @@ class _AppShellState extends State<AppShell> {
           _seccion = seccion;
           _visitadas.add(seccion);
         }),
+        ),
       ),
     );
   }

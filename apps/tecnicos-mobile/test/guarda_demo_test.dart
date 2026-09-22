@@ -245,8 +245,9 @@ void main() {
       expect(find.text('Carlos Gomez'), findsWidgets, reason: 'lo real se ve');
 
       if (FieldMockData.modoDemo) {
-        // La rama que prueba que la prueba sirve.
-        expect(find.textContaining('Ticket #'), findsWidgets);
+        // La rama que prueba que la prueba sirve. Ya no incluye el ticket de
+        // origen: ese dato es REAL y se muestra siempre, asi que salio del
+        // bloque de demostracion.
         expect(find.textContaining(FieldMockData.ultimaSincronizacion),
             findsWidgets);
       } else {
