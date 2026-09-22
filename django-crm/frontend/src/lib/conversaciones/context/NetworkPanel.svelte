@@ -138,6 +138,33 @@
   /** Dónde está conectado el equipo, o null si no vino. */
   const topologia = $derived(lectura?.optica?.topologia ?? null);
 
+  /* LA ESCALA DE LA BARRA, construida sólo con números reales.
+     La referencia dibuja un medidor con un rango de industria (-14 a -24 dBm)
+     que ningún sistema nuestro declara. Acá el eje se arma con los dos
+     únicos valores ciertos --la lectura y el umbral que declara la empresa--
+     más dos dB de aire a cada lado para que ninguna de las dos marcas quede
+     pegada al borde. Los extremos se rotulan con su valor, así que la
+     posición de la marca se puede comprobar leyendo el eje.
+
+     En dBm, menos negativo es mejor: el lado izquierdo es el bueno.
+     Sin umbral no hay eje y no se dibuja nada. */
+  const escala = $derived.by(() => {
+    if (!medicion || medicion.rx === null || umbral === null) return null;
+    const mejor = Math.max(medicion.rx, umbral) + 2;
+    const peor = Math.min(medicion.rx, umbral) - 2;
+    const largo = mejor - peor;
+    if (!(largo > 0)) return null;
+    const pct = (/** @type {number} */ v) =>
+      Math.min(100, Math.max(0, ((mejor - v) / largo) * 100));
+    return {
+      mejor: Number(mejor.toFixed(1)),
+      peor: Number(peor.toFixed(1)),
+      pctValor: pct(medicion.rx),
+      pctUmbral: pct(umbral)
+    };
+  });
+
+
   let copiado = $state('');
   async function copiar(/** @type {string} */ valor) {
     try {
@@ -189,139 +216,253 @@
        NO lo está: `consultar_topologia_ont` la trae de verdad desde
        `get_onu_details`. La referencia se hizo antes de que existiera esa
        herramienta. Va en esta sección, la de lo confirmado. -->
+  <!-- ══════════════════════════════════════════════════════════════════════
+       LA FORMA DE LA IMAGEN, CON LOS DATOS QUE SÍ EXISTEN
+
+       Pedido explícito: que Equipo se vea como la tarjeta de la NOC Console
+       --banda de alarma, unidad ONT, telemetría óptica con barra, las cuatro
+       celdas, planta física y controles--. Eso es lo que hay abajo, sección
+       por sección y en el mismo orden.
+
+       LO ÚNICO QUE NO SE COPIA SON LOS NÚMEROS INVENTADOS. Cada fila que el
+       sistema del ISP no devuelve hoy se dibuja igual, en su lugar, pero con
+       un guion y en gris: la pantalla mantiene la forma y no afirma nada.
+       Cuáles son y por qué, medido contra la API real (skill `smartolt-api`,
+       verificada el 14/08/2026):
+
+         modelo, firmware, voltaje, corriente de bias
+             no están en ninguna de las respuestas verificadas de SmartOLT.
+             No es que falte conectarlos: no existen del otro lado.
+
+         temperatura, potencia Tx, Tx de la OLT, MAC
+             SÍ existen, en 'Optical status' y 'ONU WAN Interfaces' de
+             `get_onu_full_status_info`. Esta pantalla todavía no llama esa
+             ruta --tarda ~10 s y el proveedor pide no usarla en bucle--, así
+             que hoy salen vacías y se llenan cuando el motor las traiga.
+
+       La diferencia entre las dos listas importa: la primera no se va a
+       llenar nunca, la segunda es trabajo pendiente. Por eso el pie las
+       nombra distinto.
+       ══════════════════════════════════════════════════════════════════════ -->
+
+  <!-- ── LA BANDA DE ALARMA ────────────────────────────────────────────────
+       En la imagen es lo primero: fondo rojo, punto, «LOS ALARM ACTIVE» y el
+       distintivo OFFLINE a la derecha. Acá dice lo mismo y sale de lo medido
+       -- enlace caído o potencia por debajo del umbral de la empresa. Cuando
+       no hay alarma, la banda es la de procedencia: qué sistema contestó. -->
+  {#if medicion && (caido || atenuado === true)}
+    <div class="alarma">
+      <span class="alarma-punto" aria-hidden="true"></span>
+      <span class="alarma-textos">
+        <b>{caido ? 'Enlace óptico caído' : 'Potencia fuera de rango'}</b>
+        <span class="alarma-sub">
+          {#if caido}
+            El equipo no responde en la OLT{medicion.desde ? ` desde ${medicion.desde}` : ''}
+          {:else}
+            {medicion.rx} dBm, por debajo del umbral de la empresa
+          {/if}
+        </span>
+      </span>
+      <span class="alarma-chip">{caido ? 'OFFLINE' : 'DEGRADADO'}</span>
+    </div>
+  {/if}
+
   <div class="procedencia">
     <span class="procedencia-punto" class:procedencia-punto-mal={!medicion} aria-hidden="true"></span>
     <span class="procedencia-rotulo">Confirmado — en vivo desde SmartOLT</span>
     {#if medicion}<span class="procedencia-vivo">LIVE</span>{/if}
   </div>
 
-  <!-- LA MEDICIÓN, CON SU HORA. La hora no es un adorno: decide si el dato
-       sirve para mandar un técnico o hay que volver a consultar. -->
   {#if medicion}
-    <!-- ── UNA SOLA TARJETA, EN FILAS ──────────────────────────────────────
-         La referencia canónica pone TODO lo confirmado en una tarjeta, y cada
-         dato como una fila: rótulo a la izquierda, valor a la derecha.
+    <!-- ── 1. LA UNIDAD ─────────────────────────────────────────────────── -->
+    <div class="eq-seccion">
+      <div class="eq-cabeza">
+        <span class="panel-titulo">Unidad ONT / ONU</span>
+        <span class="eq-marca">GPON</span>
+      </div>
 
-         Esto estaba en cuatro tarjetas apiladas --estado, potencia,
-         identificadores, topología-- y en una columna de 350px eso son cuatro
-         encabezados, cuatro bordes y cuatro márgenes para ocho datos: la
-         potencia quedaba abajo del pliegue y había que desplazar para verla.
-         En filas entra todo junto y se escanea en vertical, que es como se
-         busca un valor. -->
-    <div class="tarjeta" class:tarjeta-mal={caido || atenuado === true}>
-      <div class="bloque">
-        <!-- El estado primero: es lo que se mira antes que nada. -->
+      <div class="panel-fila">
+        <span class="panel-etiqueta">Estado</span>
+        <span class="panel-valor con-punto">
+          <span class="punto-enlace" class:punto-mal={caido} aria-hidden="true"></span>
+          <b>{medicion.enlace ?? '—'}</b>
+          {#if medicion.desde}<span class="desde">desde {medicion.desde}</span>{/if}
+        </span>
+      </div>
+
+      <div class="panel-fila">
+        <span class="panel-etiqueta">Modelo</span>
+        <span class="panel-valor eq-sin">—</span>
+      </div>
+
+      {#if medicion.serial}
         <div class="panel-fila">
-          <span class="panel-etiqueta">Estado de la ONU</span>
-          <span class="panel-valor con-punto">
-            <span class="punto-enlace" class:punto-mal={caido} aria-hidden="true"></span>
-            <b>{medicion.enlace ?? '—'}</b>
-            {#if medicion.desde}<span class="desde">desde {medicion.desde}</span>{/if}
+          <span class="panel-etiqueta">Serial GPON</span>
+          <span class="panel-valor eq-serial">
+            <span class="panel-chip">{medicion.serial}</span>
+            <button
+              type="button"
+              class="copiar"
+              title="Copiar el serial"
+              onclick={() => copiar(medicion.serial)}
+            >
+              {#if copiado === medicion.serial}<Check size={12} />{:else}<Copy size={12} />{/if}
+            </button>
           </span>
         </div>
+      {/if}
 
-        <!-- LA POTENCIA, como fila y no como número gigante. Tres piezas a la
-             derecha, igual que la referencia: el valor medido, el veredicto, y
-             contra qué se lo comparó. La tercera es la que evita la pregunta
-             "¿y eso está bien?". -->
-        {#if medicion.rx !== null}
-          <div class="panel-fila">
-            <span class="panel-etiqueta">Potencia óptica (RX)</span>
-            <span class="panel-valor rx-fila">
-              <b class="rx-valor" class:rx-mal={atenuado === true}>{medicion.rx} dBm</b>
-              <!-- El veredicto del TENANT, que ya calculó el motor con los
-                   rangos de su catálogo. No se recalcula acá. -->
-              {#if medicion.veredicto}
-                <span class="rx-chip" class:rx-chip-mal={atenuado === true}>{medicion.veredicto}</span>
-              {/if}
-              {#if umbral !== null}
-                <span class="rx-rango">(umbral {umbral} dBm)</span>
-              {/if}
-            </span>
-          </div>
-          {#if umbral === null && !medicion.veredicto}
-            <!-- Sin umbral Y sin veredicto no se dice si está bien o mal: un
-                 veredicto con un número inventado es peor que ninguno. -->
-            <p class="panel-nota">
-              Esta empresa no definió un umbral óptico, así que la lectura se
-              muestra sin veredicto.
-            </p>
-          {/if}
-        {/if}
+      <div class="panel-fila">
+        <span class="panel-etiqueta">MAC</span>
+        <span class="panel-valor eq-sin">—</span>
+      </div>
 
-        {#if medicion.rxSubida !== null}
-          <div class="panel-fila">
-            <span class="panel-etiqueta">Subida (1310 nm)</span>
-            <span class="panel-valor panel-mono">{medicion.rxSubida} dBm</span>
-          </div>
-        {/if}
+      <div class="panel-fila">
+        <span class="panel-etiqueta">Firmware</span>
+        <span class="panel-valor eq-sin">—</span>
+      </div>
 
-        {#if medicion.serial}
-          <div class="panel-fila">
-            <span class="panel-etiqueta">Serial GPON</span>
-            <span class="panel-valor id-con-copia">
-              <span class="panel-chip">{medicion.serial}</span>
-              <button
-                type="button"
-                class="ident-copiar"
-                onclick={() => copiar(medicion.serial)}
-                title="Copiar el serial"
-                aria-label="Copiar el serial de la ONU"
-              >
-                {#if copiado === medicion.serial}<Check size={12} />{:else}<Copy size={12} />{/if}
-              </button>
-            </span>
-          </div>
-        {/if}
+      {#if medicion.causaCaida}
+        <div class="panel-fila">
+          <span class="panel-etiqueta">Última caída</span>
+          <span class="panel-valor">{medicion.causaCaida}</span>
+        </div>
+      {/if}
+    </div>
 
-        {#if medicion.causaCaida}
-          <div class="panel-fila">
-            <span class="panel-etiqueta">Última caída</span>
-            <span class="panel-valor">{medicion.causaCaida}</span>
-          </div>
-        {/if}
-
-        <!-- LA TOPOLOGÍA, en las mismas filas y no en su propia tarjeta. En la
-             referencia estos campos figuran marcados MOCK; acá NO lo están,
-             porque 'consultar_topologia_ont' los trae de verdad. -->
-        {#if topologia}
-          {#if topologia.olt_name}
-            <div class="panel-fila">
-              <span class="panel-etiqueta">OLT</span>
-              <span class="panel-valor panel-mono">{topologia.olt_name}</span>
-            </div>
-          {/if}
-          {#if topologia.board !== undefined || topologia.port !== undefined}
-            <div class="panel-fila">
-              <span class="panel-etiqueta">Tarjeta / puerto</span>
-              <span class="panel-valor panel-mono">{topologia.board ?? '—'} / {topologia.port ?? '—'}</span>
-            </div>
-          {/if}
-          {#if topologia.onu !== undefined}
-            <div class="panel-fila">
-              <span class="panel-etiqueta">Índice ONU</span>
-              <span class="panel-valor panel-mono">{topologia.onu}</span>
-            </div>
-          {/if}
-          {#if topologia.odb_name}
-            <div class="panel-fila">
-              <span class="panel-etiqueta">Caja (CTO)</span>
-              <span class="panel-valor panel-mono">{topologia.odb_name}</span>
-            </div>
-          {/if}
-          {#if topologia.zone_name}
-            <div class="panel-fila">
-              <span class="panel-etiqueta">Zona</span>
-              <span class="panel-valor">{topologia.zone_name}</span>
-            </div>
-          {/if}
+    <!-- ── 2. LA TELEMETRÍA ÓPTICA ──────────────────────────────────────── -->
+    <div class="eq-seccion">
+      <div class="eq-cabeza">
+        <span class="panel-titulo">Telemetría óptica</span>
+        {#if lectura?.leido_en}
+          <span class="eq-marca">Leído {haceCuanto(lectura.leido_en)}</span>
         {/if}
       </div>
 
-      {#if lectura?.leido_en}
-        <p class="tarjeta-pie">Leído {haceCuanto(lectura.leido_en)}</p>
+      {#if medicion.rx !== null}
+        <!-- EL VALOR GRANDE, como en la imagen: el número es el protagonista
+             de la sección y no una fila más. -->
+        <div class="rx-cabeza">
+          <span class="panel-etiqueta">Potencia óptica (RX)</span>
+          <b class="rx-grande" class:rx-mal={atenuado === true}>{medicion.rx} dBm</b>
+        </div>
+
+        <!-- ── LA BARRA ───────────────────────────────────────────────────
+             La imagen dibuja una escala con el valor sobre ella. Acá la
+             escala NO es un rango de industria inventado: se construye con
+             los dos únicos números reales que hay --la medición y el umbral
+             que declara la empresa-- más dos dB de aire a cada lado, y los
+             dos extremos van rotulados con su valor. La marca gruesa es la
+             lectura; la fina, el umbral.
+
+             Sin umbral no hay barra. Una escala sin números propios es una
+             regla dibujada a ojo, y sobre ella cualquier posición miente. -->
+        {#if escala}
+          <div class="rx-barra" role="img"
+               aria-label="Potencia {medicion.rx} dBm; el umbral de la empresa es {umbral} dBm">
+            <span class="rx-pista"></span>
+            <span class="rx-umbral" style="left:{escala.pctUmbral}%"></span>
+            <span class="rx-marca" class:rx-marca-mal={atenuado === true}
+                  style="left:{escala.pctValor}%"></span>
+          </div>
+          <div class="rx-escala">
+            <span>{escala.mejor} dBm</span>
+            <span class="rx-escala-umbral">umbral {umbral}</span>
+            <span>{escala.peor} dBm</span>
+          </div>
+        {/if}
+
+        <div class="rx-pie">
+          {#if medicion.veredicto}
+            <span class="rx-chip" class:rx-chip-mal={atenuado === true}>{medicion.veredicto}</span>
+          {/if}
+          {#if medicion.clasificacion}
+            <span class="rx-clasif">{medicion.clasificacion}</span>
+          {/if}
+        </div>
+
+        {#if umbral === null && !medicion.veredicto}
+          <!-- Sin umbral Y sin veredicto no se dice si está bien o mal: un
+               veredicto con un número inventado es peor que ninguno. -->
+          <p class="panel-nota">
+            Esta empresa no definió un umbral óptico, así que la lectura se
+            muestra sin veredicto y sin escala.
+          </p>
+        {/if}
       {/if}
+
+      <!-- LAS CUATRO CELDAS de la imagen. Dos tienen dato hoy; las otras dos
+           esperan la lectura profunda. Se dibujan las cuatro para que la
+           rejilla no cambie de forma según lo que haya venido. -->
+      <div class="eq-celdas">
+        <div class="eq-celda">
+          <span class="eq-celda-rotulo">Subida (1310 nm)</span>
+          <b class="eq-celda-valor" class:eq-sin={medicion.rxSubida === null}>
+            {medicion.rxSubida !== null ? `${medicion.rxSubida} dBm` : '—'}
+          </b>
+        </div>
+        <div class="eq-celda">
+          <span class="eq-celda-rotulo">Temperatura</span>
+          <b class="eq-celda-valor eq-sin">—</b>
+        </div>
+        <div class="eq-celda">
+          <span class="eq-celda-rotulo">Voltaje</span>
+          <b class="eq-celda-valor eq-sin">—</b>
+        </div>
+        <div class="eq-celda">
+          <span class="eq-celda-rotulo">Corriente de bias</span>
+          <b class="eq-celda-valor eq-sin">—</b>
+        </div>
+      </div>
     </div>
+
+    <!-- ── 3. LA PLANTA FÍSICA ──────────────────────────────────────────
+         En la imagen estos campos son inventados; acá son reales --
+         `consultar_topologia_ont` los trae de `get_onu_details`. Es la
+         sección donde la referencia y nosotros nos cruzamos al revés: ellos
+         la dibujan sin datos, nosotros tenemos los datos. -->
+    {#if topologia}
+      <div class="eq-seccion">
+        <div class="eq-cabeza">
+          <span class="panel-titulo">Planta física</span>
+          {#if topologia.zone_name}<span class="eq-marca">{topologia.zone_name}</span>{/if}
+        </div>
+
+        {#if topologia.olt_name}
+          <div class="panel-fila">
+            <span class="panel-etiqueta">OLT</span>
+            <span class="panel-valor panel-mono">{topologia.olt_name}</span>
+          </div>
+        {/if}
+        {#if topologia.board !== undefined || topologia.port !== undefined}
+          <div class="panel-fila">
+            <span class="panel-etiqueta">Tarjeta / puerto</span>
+            <span class="panel-valor panel-mono">{topologia.board ?? '—'} / {topologia.port ?? '—'}</span>
+          </div>
+        {/if}
+        {#if topologia.onu !== undefined}
+          <div class="panel-fila">
+            <span class="panel-etiqueta">Índice ONU</span>
+            <span class="panel-valor panel-mono">{topologia.onu}</span>
+          </div>
+        {/if}
+        {#if topologia.odb_name}
+          <div class="panel-fila">
+            <span class="panel-etiqueta">Caja (CTO)</span>
+            <span class="panel-valor panel-mono">{topologia.odb_name}</span>
+          </div>
+        {/if}
+      </div>
+    {/if}
+
+    <!-- EL PIE, que separa las dos ausencias. No es lo mismo «esto no existe»
+         que «esto todavía no lo pedimos», y una pantalla con seis guiones sin
+         explicación se lee como rota. -->
+    <p class="eq-pie">
+      Sin dato: modelo, firmware, voltaje y corriente de bias no los devuelve
+      el sistema de red. Temperatura y MAC sí existen, pero salen de una
+      consulta profunda que esta pantalla todavía no hace.
+    </p>
   {:else}
     <p class="vacio">{MOTIVO[lectura?.motivo] ?? 'Sin consultar.'}</p>
   {/if}
@@ -581,47 +722,10 @@
     border-top: 1px solid var(--bandeja-borde);
   }
 
-  /* ── tarjetas ──────────────────────────────────────────────────────────
-     La referencia agrupa la telemetría en tarjetas con su título arriba y
-     una insignia de estado a la derecha. Filete y superficie, sin sombra:
-     el mismo lenguaje que el resto de la Bandeja. */
-  .tarjeta {
-    margin-top: 8px;
-    padding: 8px 10px;
-    border: 1px solid var(--bandeja-borde);
-    border-radius: var(--bandeja-radio);
-    background: var(--bandeja-superficie);
-  }
 
-  .tarjeta-mal {
-    border-color: var(--bandeja-error-borde);
-    background: var(--bandeja-error-fondo);
-  }
 
-  .tarjeta-tope {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 8px;
-    margin-bottom: 4px;
-  }
 
-  .tarjeta-titulo {
-    font-family: var(--bandeja-mono);
-    font-size: 9px;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--bandeja-texto-2);
-  }
 
-  .tarjeta-hora {
-    font-family: var(--bandeja-mono);
-    font-size: 9px;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--bandeja-texto-3);
-  }
 
   /* El veredicto del enlace, con palabra. Nunca sólo color. */
   .insignia {
@@ -893,15 +997,6 @@
   }
 
 
-  /* ── LAS FILAS DE LA TARJETA ────────────────────────────────────────────
-     Reemplazan a las cuatro tarjetas apiladas. La fila en si la define
-     `bandeja.css` (`.panel-fila`), compartida con las otras pestañas; acá van
-     solo las piezas propias de esta. */
-  .bloque {
-    display: flex;
-    flex-direction: column;
-    gap: 7px;
-  }
 
   .con-punto {
     display: inline-flex;
@@ -928,24 +1023,7 @@
     color: var(--bandeja-texto-3);
   }
 
-  /* Las tres piezas de la potencia, en una linea: valor, veredicto y contra
-     que se comparo. La tercera es la que evita "¿y eso esta bien?". */
-  .rx-fila {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-  }
 
-  .rx-valor {
-    font-family: var(--bandeja-mono);
-    font-size: 12.5px;
-    font-weight: 600;
-    font-variant-numeric: tabular-nums;
-    color: var(--bandeja-texto);
-    white-space: nowrap;
-  }
 
   .rx-chip {
     padding: 1px 5px;
@@ -964,12 +1042,6 @@
     color: var(--bandeja-error);
   }
 
-  .rx-rango {
-    font-family: var(--bandeja-mono);
-    font-size: 9.5px;
-    color: var(--bandeja-texto-3);
-    white-space: nowrap;
-  }
 
   .id-con-copia {
     display: inline-flex;
@@ -978,14 +1050,253 @@
     justify-content: flex-end;
   }
 
-  /* La hora de la lectura, al pie de la tarjeta y no al lado de cada dato:
-     todas se leyeron en la misma llamada. */
-  .tarjeta-pie {
-    margin: 10px 0 0;
-    padding-top: 8px;
-    border-top: 1px solid var(--bandeja-borde);
+
+  /* ── LA FORMA DE LA IMAGEN ─────────────────────────────────────────────
+     Secciones con filete, encabezado en versalita y una marca a la derecha;
+     dentro, filas etiqueta/valor. Es la misma estructura de la tarjeta de la
+     NOC Console, con los tokens congelados de la Bandeja. */
+  .eq-seccion {
+    border: 1px solid var(--bandeja-borde);
+    border-radius: var(--bandeja-radio-sm);
+    background: var(--bandeja-superficie);
+    padding: 10px 12px;
+    margin-bottom: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .eq-cabeza {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding-bottom: 6px;
+    margin-bottom: 2px;
+    border-bottom: 1px solid var(--bandeja-borde);
+  }
+
+  /* La marca de la derecha del encabezado: GPON, la zona, la hora de lectura.
+     Es contexto de la sección, no un dato de una fila. */
+  .eq-marca {
+    flex: none;
     font-family: var(--bandeja-mono);
-    font-size: 10px;
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
     color: var(--bandeja-texto-3);
   }
+
+  /* EL GUION DE LO QUE NO HAY. Apagado a propósito y sin fondo: tiene que
+     verse que la fila existe y que está vacía, sin competir con un valor. */
+  .eq-sin {
+    color: var(--bandeja-texto-3);
+  }
+
+  .eq-serial {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+
+  /* ── la telemetría ─────────────────────────────────────────────────────
+     El número grande, como en la imagen: en una columna de 350px es lo único
+     que se lee de un vistazo sin enfocar. */
+  .rx-cabeza {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .rx-grande {
+    font-family: var(--bandeja-mono);
+    font-size: 20px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+    color: var(--bandeja-ok);
+  }
+
+  .rx-grande.rx-mal {
+    color: var(--bandeja-error);
+  }
+
+  .rx-barra {
+    position: relative;
+    height: 12px;
+    margin-top: 2px;
+  }
+
+  .rx-pista {
+    position: absolute;
+    inset: 4px 0;
+    border-radius: 2px;
+    /* De bueno a malo, de izquierda a derecha. El degradado NO afirma dónde
+       está el corte -- eso lo dice la marca del umbral, que es un número. */
+    background: linear-gradient(
+      to right,
+      var(--bandeja-ok),
+      var(--bandeja-aviso-borde) 55%,
+      var(--bandeja-error)
+    );
+    opacity: 0.55;
+  }
+
+  /* El umbral: una raya fina y oscura. Es un límite, no una medición. */
+  .rx-umbral {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: var(--bandeja-texto);
+    opacity: 0.55;
+  }
+
+  /* La lectura: una marca gruesa con halo, para que se distinga del umbral
+     aunque queden pegadas. */
+  .rx-marca {
+    position: absolute;
+    top: -1px;
+    bottom: -1px;
+    width: 3px;
+    margin-left: -1.5px;
+    border-radius: 2px;
+    background: var(--bandeja-ok);
+    box-shadow: 0 0 0 1.5px var(--bandeja-superficie);
+  }
+
+  .rx-marca-mal {
+    background: var(--bandeja-error);
+  }
+
+  .rx-escala {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 6px;
+    font-family: var(--bandeja-mono);
+    font-size: 9.5px;
+    font-variant-numeric: tabular-nums;
+    color: var(--bandeja-texto-3);
+  }
+
+  .rx-escala-umbral {
+    color: var(--bandeja-texto-2);
+    font-weight: 600;
+  }
+
+  .rx-pie {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .rx-clasif {
+    font-size: 11px;
+    color: var(--bandeja-texto-2);
+  }
+
+  /* ── las cuatro celdas ────────────────────────────────────────────────
+     Rejilla de dos columnas, como la imagen. Se dibujan las cuatro siempre:
+     si aparecieran y desaparecieran según lo que vino, la sección cambiaría
+     de alto en cada consulta y no se podría comparar dos lecturas. */
+  .eq-celdas {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    margin-top: 4px;
+  }
+
+  .eq-celda {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px 8px;
+    border: 1px solid var(--bandeja-borde);
+    border-radius: 3px;
+    background: var(--bandeja-superficie-suave);
+    min-width: 0;
+  }
+
+  .eq-celda-rotulo {
+    font-size: 10px;
+    color: var(--bandeja-texto-2);
+  }
+
+  .eq-celda-valor {
+    font-family: var(--bandeja-mono);
+    font-size: 12px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--bandeja-texto);
+  }
+
+  /* ── la banda de alarma ───────────────────────────────────────────────
+     Lo primero de la imagen cuando algo anda mal. Sale de lo medido: enlace
+     caído, o potencia por debajo del umbral que declara la empresa. Si no
+     hay ninguna de las dos, no se dibuja -- una alarma permanente no es una
+     alarma. */
+  .alarma {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    margin-bottom: 8px;
+    border: 1px solid var(--bandeja-error-borde);
+    border-radius: var(--bandeja-radio-sm);
+    background: var(--bandeja-error-fondo);
+  }
+
+  .alarma-punto {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--bandeja-error);
+  }
+
+  .alarma-textos {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .alarma-textos b {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--bandeja-error);
+  }
+
+  .alarma-sub {
+    font-size: 11px;
+    line-height: 1.35;
+    color: var(--bandeja-texto-2);
+  }
+
+  .alarma-chip {
+    flex: none;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: var(--bandeja-error);
+    color: #fff;
+    font-family: var(--bandeja-mono);
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+  }
+
+  /* El pie que separa las dos ausencias. Sin él, seis guiones seguidos se
+     leen como una pantalla rota en vez de como un límite conocido. */
+  .eq-pie {
+    margin: 0 0 10px;
+    font-size: 10.5px;
+    line-height: 1.45;
+    color: var(--bandeja-texto-3);
+  }
+
 </style>

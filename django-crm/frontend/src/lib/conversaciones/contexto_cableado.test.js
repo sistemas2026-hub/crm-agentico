@@ -336,21 +336,42 @@ describe('el panel de red no ejecuta ni inventa', () => {
     expect(visible).toMatch(/leido_en|leído|Leído/);
   });
 
-  it('no muestra campos sin fuente conocida', () => {
-    /* LA LISTA SE ACORTÓ EL 22/09/2026, Y NO POR CAPRICHO.
-       `PON` y `CTO` estaban acá porque se había concluido que ningún sistema
-       conectado los exponía. Era falso: `get_onu_details/{sn}` de SmartOLT
-       devuelve `olt_id`, `olt_name`, `board`, `port`, `onu`, `zone_name` y
-       `odb_name` --la caja, o sea el CTO-- y está verificado en vivo
-       (14/08/2026, skill `smartolt-api`). Se conectó, y salieron de la lista.
+  it('los campos sin dato se dibujan vacios: la fila existe, el valor nunca', () => {
+    /* ESTA GUARDA CAMBIO EL 22/09/2026, Y ES EL TERCER CAMBIO DE SU LISTA.
+       Antes prohibia que estos rotulos APARECIERAN. Su propio comentario
+       decia para que estaba: "el dia que alguno tenga fuente, esta prueba se
+       pone roja y ahi se decide". Se puso roja y se decidio.
 
-       Los que quedan siguen sin fuente: ningún endpoint de los sistemas
-       conectados los devuelve. El día que alguno lo haga, esta prueba se
-       pone roja y ahí se decide -- que es para lo que está. */
-    for (const campo of [/\bMAC\b/, /firmware/i, /temperatura/i,
-                         /voltaje/i, /bias/i, /dispositivos conectados/i]) {
-      expect(campos).not.toMatch(campo);
+       Lo que se decidio: la pestaña mantiene la FORMA de la referencia --la
+       fila de modelo, MAC, firmware, temperatura, voltaje y bias esta-- y lo
+       que no se sabe se dibuja con un guion apagado. Prohibir el rotulo
+       protegia el dato pero escondia el limite: quien miraba no sabia si el
+       equipo no tiene temperatura o si la pantalla no la pide.
+
+       Lo que hay que sostener no cambio, y es lo que mide esto ahora: que al
+       lado de esos rotulos NUNCA haya un valor escrito en la pantalla. Un
+       numero inventado es lo unico que estaba de verdad prohibido.
+
+       Sigue siendo un punto de decision: el dia que el motor traiga la
+       temperatura de verdad, la celda va a tener que leerla de la medicion y
+       esta prueba se pone roja otra vez. */
+
+    // 1. Ninguna de esas filas lleva un valor: todas salen con el guion.
+    for (const rotulo of ['Modelo', 'MAC', 'Firmware',
+                          'Temperatura', 'Voltaje', 'Corriente de bias']) {
+      const i = campos.indexOf(rotulo);
+      expect(i, `falta la fila «${rotulo}»`).toBeGreaterThan(-1);
+      // Los ~220 caracteres siguientes son la celda o la fila entera.
+      const celda = campos.slice(i, i + 220);
+      expect(celda, `«${rotulo}» tiene que salir vacia`).toMatch(/eq-sin/);
+      expect(celda, `«${rotulo}» no puede traer un valor`).toMatch(/—/);
     }
+
+    // 2. Y no hay literales de medicion en ninguna parte del marcado: ni
+    //    grados, ni voltios, ni miliamperios, ni un modelo de equipo. Lo
+    //    unico numerico que la pantalla escribe viene de `medicion`.
+    expect(campos).not.toMatch(/\d+(?:[.,]\d+)?\s*(?:°C|\bV\b|\bmA\b)/);
+    expect(campos).not.toMatch(/HG\d{4}|EchoLife|V\d+R\d+C\d+/i);
   });
 
   it('la topología no arrastra el nombre del cliente', () => {
