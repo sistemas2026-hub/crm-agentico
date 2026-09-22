@@ -1011,6 +1011,41 @@ class _CierreCancelado(Exception):
     """El cierre por confirmacion no empieza: cambio el control (D25)."""
 
 
+def decision_del_router(rol_evaluado: str, rol_final: str, sesion,
+                        cfg_rol, llamadas) -> dict:
+    """
+    Los campos con los que queda registrado POR QUE este turno derivo, o por
+    que no.
+
+    ESTA SEPARADA PARA PODER PROBARLA, y no es un detalle de estilo: el
+    corredor de casos dorados (cli/evaluar.py) llama a motor.responder()
+    DIRECTO y no pasa por atender_turno, asi que nada de lo que se agregue
+    alrededor del modelo lo ven los casos dorados. Una funcion pura si se
+    puede probar sin base, sin modelo y sin red.
+
+    SIN PII: numeros y nombres de rol. 'identidad' dice en que estado quedo el
+    turno, nunca con que dato se llego a el -- la cedula que el cliente ofrece
+    no aparece por ningun lado.
+    """
+    if sesion is not None and getattr(sesion, "verificado", False):
+        identidad = "verificada"
+    elif sesion is not None and getattr(sesion, "id_cliente_pendiente", None):
+        # Localizada pero SIN confirmar: es el estado intermedio que existe
+        # justo para que esta distincion se pueda auditar despues.
+        identidad = "candidata"
+    else:
+        identidad = "sin_verificar"
+    return {
+        "rol": rol_evaluado,
+        "identidad": identidad,
+        "herramientas_disponibles": len(getattr(cfg_rol, "puede_consultar", None) or []),
+        "herramientas_usadas": len(llamadas or []),
+        # Vacio cuando no derivo. Se compara contra el rol EVALUADO, no contra
+        # una bandera: si el turno termino en otra area, eso es la derivacion.
+        "derivo_a": rol_final if rol_final != rol_evaluado else "",
+    }
+
+
 def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                   mensaje: str, canal: str, profile_id: str | None = None,
                   nombre_colaborador: str = "",
@@ -1556,6 +1591,11 @@ def _atender_turno(config, tenant: str, rol: str, id_sesion: str,
     # este autorizador justo antes de empezar.
     with consumo.abrir(config) as ficha_consumo, autorizacion_relevo.autorizando(
             lambda que: _efecto_del_turno(tenant, canal, id_sesion, estado, que)):
+        # Con que rol se EVALUO este turno. Se guarda antes de la derivacion,
+        # que mas abajo pisa 'rol' con el area nueva: sin esto, el registro de
+        # la decision diria que fue facturacion quien decidio derivar a
+        # facturacion.
+        rol_evaluado = rol
         respuesta, registro_herramientas, medios_pendientes = motor.responder(
             config, rol, mensaje, estado["historial"], estado["sesion"],
             nota_continuidad=nota_continuidad,
@@ -1598,6 +1638,31 @@ def _atender_turno(config, tenant: str, rol: str, id_sesion: str,
         rol = estado["sesion"].rol_siguiente
         estado["rol_activo"] = rol
         estado["sesion"].rol_siguiente = None
+
+    # ── POR QUE ESTE TURNO DERIVO, O POR QUE NO ──────────────────────────────
+    #
+    # Nace de un caso del 22/09/2026 que costo dos horas reconstruir: el router
+    # le pidio la cedula a un cliente en vez de derivar, y con lo que quedaba
+    # guardado no habia forma de saber POR QUE. La traza tenia lo que se
+    # ejecuto --nada-- y el hilo tenia lo que respondio. Faltaba el medio: con
+    # que rol se evaluo, si habia identidad, cuantas herramientas tenia a mano
+    # y que eligio.
+    #
+    # Doce corridas contra el motor real no lo reprodujeron. Cuando algo pasa
+    # una vez y no se repite, lo unico que queda es que la PROXIMA vez haya
+    # dejado rastro.
+    #
+    # SIN PII, y por eso son numeros y nombres de rol, nunca texto del cliente
+    # ni el dato de identidad que ofrecio. 'identidad' dice en que estado
+    # quedo, no con que se llego a el.
+    try:
+        registrar("router", "decision del turno",
+                  **decision_del_router(rol_evaluado, rol, estado["sesion"],
+                                        config.roles.get(rol_evaluado),
+                                        registro_herramientas))
+    except Exception:
+        # Observabilidad, no funcionalidad: si esto falla, el turno sigue.
+        pass
 
     conversation_id = None
     mensaje_id = None
