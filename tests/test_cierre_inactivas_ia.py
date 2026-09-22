@@ -166,11 +166,23 @@ r = correr(cfg(backfill=True, lote=10), nuevas=50, backlog=147, modo_backlog=Tru
 afirmar(r["cerradas"] == 10,
         "el comando NO toca las nuevas: 10, no 60")
 
+# 'backfill_lote' es un TECHO DURO: el --limit puede bajarlo, nunca subirlo.
+# Un limite que el comando puede pisar no es un limite -- un '--limit 500'
+# tecleado de apuro se llevaria el backlog entero.
 r = correr(cfg(backfill=True, lote=10), nuevas=0, backlog=147,
-           modo_backlog=True, lote=5)
-afirmar(r["cerradas"] == 5,
-        "el --limit del comando manda sobre el lote de la config: quien lo "
-        "teclea esta mirando")
+           modo_backlog=True, lote=3)
+afirmar(r["cerradas"] == 3,
+        "--limit 3 con config 10 toma 3: el comando puede BAJAR el lote")
+
+r = correr(cfg(backfill=True, lote=10), nuevas=0, backlog=147,
+           modo_backlog=True, lote=50)
+afirmar(r["cerradas"] == 10,
+        "--limit 50 con config 10 toma 10: el comando NO puede subirlo")
+
+r = correr(cfg(backfill=True, lote=10), nuevas=0, backlog=147,
+           modo_backlog=True, lote=None)
+afirmar(r["cerradas"] == 10,
+        "sin --limit toma el lote de la config")
 
 
 class Drenando:

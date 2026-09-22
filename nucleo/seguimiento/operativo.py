@@ -235,6 +235,10 @@ def cerrar_inactivas_de_ia(config, tenant: str, simular: bool = False, *,
     Toma como maximo el lote, mas antiguas primero, con las MISMAS guardas que
     el flujo normal y la misma transicion. No toca ninguna conversacion nueva.
 
+    'backfill_lote' es un TECHO DURO: el '--limit' del comando puede bajarlo,
+    nunca subirlo. Con la config en 10, '--limit 3' toma 3 y '--limit 50' toma
+    10. Un limite que el comando puede pisar no es un limite.
+
     Los dos interruptores siguen valiendo: sin 'backfill_habilitado' el
     comando tampoco hace nada. Uno autoriza, el otro ejecuta -- y hacen falta
     los dos, porque el comando se puede teclear por costumbre y la
@@ -268,9 +272,17 @@ def cerrar_inactivas_de_ia(config, tenant: str, simular: bool = False, *,
     try:
         nuevas = persistencia.conversaciones_ia_inactivas(
             tenant, horas, corte=corte, cohorte="normal")
-        # El lote del comando manda sobre el de la config: quien lo teclea
-        # esta mirando, y puede querer cinco en vez de diez esta vez.
-        tope = int(lote) if lote else lote_config
+        # 'backfill_lote' ES UN TECHO DURO, no un valor por defecto.
+        #
+        # El '--limit' del comando solo puede BAJARLO. La primera version
+        # dejaba que lo pisara --"quien lo teclea esta mirando"-- y eso
+        # convierte el limite de la config en una sugerencia: un '--limit 500'
+        # tecleado de apuro se lleva el backlog entero, y la unica barrera
+        # seria la persona que acaba de escribir el numero.
+        #
+        # La config se decide una vez, queda en git y se revisa; el comando se
+        # teclea. El techo va del lado que se revisa.
+        tope = min(int(lote), lote_config) if lote else lote_config
         candidatas_backlog = persistencia.conversaciones_ia_inactivas(
             tenant, horas, corte=corte, cohorte="backlog", limite=tope)
         # Cuantas hay en total en el backlog, no solo el lote: es el numero
