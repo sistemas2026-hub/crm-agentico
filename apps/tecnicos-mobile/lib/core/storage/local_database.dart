@@ -82,9 +82,24 @@ class LocalDatabase {
     return _db!;
   }
 
+  /// El archivo de la base. Solo las pruebas lo cambian.
+  ///
+  /// `flutter test` corre cada archivo de prueba en paralelo, y todos abrían
+  /// la MISMA base: una suite que vacía tablas en su preparación le borraba
+  /// las filas a la que corría al lado. Los fallos aparecían y desaparecían
+  /// según el orden, que es la peor forma de fallar -- se culpa al último
+  /// cambio y no al que comparte el archivo.
+  static String _nombreDeArchivo = 'dexter_campo.db';
+
+  /// Le da a este archivo de pruebas una base propia. Llamarlo antes de abrir.
+  static void usarBaseDePruebas(String nombre) {
+    _nombreDeArchivo = nombre;
+    resetForTesting();
+  }
+
   Future<Database> _initDatabase() async {
     final dbPath = await getDatabasesPath();
-    final path = join(dbPath, 'dexter_campo.db');
+    final path = join(dbPath, _nombreDeArchivo);
 
     final db = await openDatabase(
       path,
@@ -841,6 +856,8 @@ class LocalDatabase {
 
   Future<void> registrarFalloMutacion({
     required String id,
+    required String orgId,
+    required String profileId,
     required int nextAttemptAt,
     String? errorMensaje,
   }) async {
@@ -851,9 +868,9 @@ class LocalDatabase {
           next_attempt_at = ?,
           error_mensaje = ?,
           estado = 'pendiente'
-      WHERE id = ?
-    ''', [nextAttemptAt, errorMensaje, id]);
-    _notifyChange(tabla: 'cola_mutaciones');
+      WHERE id = ? AND org_id = ? AND profile_id = ?
+    ''', [nextAttemptAt, errorMensaje, id, orgId, profileId]);
+    _notifyChange(orgId: orgId, profileId: profileId, tabla: 'cola_mutaciones');
   }
 
   Future<Map<String, int>> getSyncCounts({
@@ -908,8 +925,17 @@ class LocalDatabase {
     );
   }
 
+  /// La identidad es obligatoria aunque el `id` ya sea único.
+  ///
+  /// El id de una mutación es un UUID y basta para encontrar la fila, así que
+  /// pedir org y perfil parece de más. Lo que compra es que una escritura no
+  /// PUEDA tocar la fila de otra cuenta ni por error de programación: si el
+  /// filtro no coincide, la actualización no escribe nada en vez de escribir
+  /// donde no debía. Cerrado por defecto, no abierto por descuido.
   Future<void> updateMutacionEstado({
     required String id,
+    required String orgId,
+    required String profileId,
     required String estado,
     String? errorMensaje,
   }) async {
@@ -920,14 +946,17 @@ class LocalDatabase {
         'estado': estado,
         'error_mensaje': errorMensaje,
       },
-      where: 'id = ?',
-      whereArgs: [id],
+      where: 'id = ? AND org_id = ? AND profile_id = ?',
+      whereArgs: [id, orgId, profileId],
     );
-    _notifyChange(tabla: 'cola_mutaciones');
+    _notifyChange(orgId: orgId, profileId: profileId, tabla: 'cola_mutaciones');
   }
 
+  /// Misma regla que `updateMutacionEstado`: la identidad va en el WHERE.
   Future<void> updateEvidenciaEstado({
     required String id,
+    required String orgId,
+    required String profileId,
     required String subidaEstado,
     String? signedUploadUrl,
     String? uploadMethod,
@@ -952,10 +981,10 @@ class LocalDatabase {
     await db.update(
       'cola_evidencias',
       data,
-      where: 'id = ?',
-      whereArgs: [id],
+      where: 'id = ? AND org_id = ? AND profile_id = ?',
+      whereArgs: [id, orgId, profileId],
     );
-    _notifyChange(tabla: 'cola_evidencias');
+    _notifyChange(orgId: orgId, profileId: profileId, tabla: 'cola_evidencias');
   }
 
   Future<void> updateOrdenRevisionYEstado({
@@ -976,5 +1005,168 @@ class LocalDatabase {
       where: 'id = ? AND org_id = ? AND profile_id = ?',
       whereArgs: [ordenId, orgId, profileId],
     );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Ciclo de vida de los datos locales
+  //
+  // Lo que sigue existe porque cerrar sesión no borraba nada: las órdenes
+  // descargadas -- con el nombre del cliente, su dirección, su teléfono y las
+  // coordenadas de su casa -- se quedaban en el teléfono. El filtro por
+  // (org_id, profile_id) impide *verlas* con otra cuenta, pero el archivo
+  // seguía ahí, y un teléfono de cuadrilla cambia de manos.
+  //
+  // Borrar sin más tampoco sirve: el trabajo que todavía no subió vive en
+  // estas mismas tablas, y borrarlo es destruir la jornada de alguien. Por eso
+  // el borrado se pide por identidad y siempre después de contar lo pendiente.
+  // ---------------------------------------------------------------------------
+
+  /// Cada (org_id, profile_id) que dejó algo guardado en este dispositivo.
+  ///
+  /// Se recorren las cuatro tablas y no solo `local_ordenes`: una cuenta puede
+  /// no tener órdenes cacheadas y sí una evidencia a medio subir, y esa es
+  /// justamente la que no hay que perder de vista.
+  Future<List<Map<String, String>>> getIdentidadesLocales() async {
+    final db = await database;
+    final filas = await db.rawQuery('''
+      SELECT DISTINCT org_id, profile_id FROM local_ordenes
+      UNION SELECT DISTINCT org_id, profile_id FROM local_datos_dirty
+      UNION SELECT DISTINCT org_id, profile_id FROM cola_mutaciones
+      UNION SELECT DISTINCT org_id, profile_id FROM cola_evidencias
+    ''');
+    return filas
+        .map((f) => <String, String>{
+              'org_id': (f['org_id'] ?? '').toString(),
+              'profile_id': (f['profile_id'] ?? '').toString(),
+            })
+        .where((f) => f['org_id']!.isNotEmpty && f['profile_id']!.isNotEmpty)
+        .toList();
+  }
+
+  /// Lo pendiente de una identidad, con el detalle que hace falta para
+  /// nombrarlo en pantalla: qué orden, qué acción.
+  ///
+  /// `getSyncCounts` devuelve números; esto devuelve las filas. A alguien que
+  /// está por cerrar sesión, "4 cambios" no le dice si puede irse tranquilo:
+  /// "OT #4832 · cierre" sí.
+  Future<List<Map<String, dynamic>>> getMutacionesPendientesDetalle({
+    required String orgId,
+    required String profileId,
+  }) async {
+    final db = await database;
+    return await db.rawQuery('''
+      SELECT m.id, m.tipo, m.orden_id, m.estado, o.numero
+      FROM cola_mutaciones m
+      LEFT JOIN local_ordenes o
+        ON o.id = m.orden_id AND o.org_id = m.org_id AND o.profile_id = m.profile_id
+      WHERE m.org_id = ? AND m.profile_id = ?
+        AND m.estado IN ('pendiente', 'conflicto', 'error_validacion')
+      ORDER BY m.created_at ASC
+    ''', [orgId, profileId]);
+  }
+
+  /// Las órdenes que tienen datos escritos y todavía sin subir.
+  Future<List<Map<String, dynamic>>> getDatosDirtyDetalle({
+    required String orgId,
+    required String profileId,
+  }) async {
+    final db = await database;
+    return await db.rawQuery('''
+      SELECT d.orden_id, o.numero, COUNT(*) AS campos
+      FROM local_datos_dirty d
+      LEFT JOIN local_ordenes o
+        ON o.id = d.orden_id AND o.org_id = d.org_id AND o.profile_id = d.profile_id
+      WHERE d.org_id = ? AND d.profile_id = ?
+      GROUP BY d.orden_id, o.numero
+    ''', [orgId, profileId]);
+  }
+
+  /// Las rutas de archivo que esta identidad tiene registradas.
+  ///
+  /// `confirmadas: true` devuelve solo las que ya viajaron al servidor -- las
+  /// únicas que se pueden borrar sin perder nada.
+  Future<List<String>> getRutasDeEvidencia({
+    required String orgId,
+    required String profileId,
+    bool? confirmadas,
+  }) async {
+    final db = await database;
+    final filas = await db.query(
+      'cola_evidencias',
+      columns: ['archivo_path'],
+      where: confirmadas == null
+          ? 'org_id = ? AND profile_id = ?'
+          : 'org_id = ? AND profile_id = ? AND subida_estado '
+              '${confirmadas ? '=' : '!='} ?',
+      whereArgs: <Object?>[
+        orgId,
+        profileId,
+        if (confirmadas != null) 'confirmada',
+      ],
+    );
+    return filas
+        .map((f) => (f['archivo_path'] ?? '').toString())
+        .where((r) => r.isNotEmpty)
+        .toList();
+  }
+
+  /// Toda ruta de archivo registrada, de cualquier identidad.
+  ///
+  /// Sirve para reconocer un archivo huérfano: uno que está en el disco y que
+  /// ninguna fila reclama. Un huérfano no se puede atribuir a nadie, así que
+  /// tampoco se puede aislar por identidad; solo borrar.
+  Future<Set<String>> getTodasLasRutasDeEvidencia() async {
+    final db = await database;
+    final filas = await db.query('cola_evidencias', columns: ['archivo_path']);
+    return filas
+        .map((f) => (f['archivo_path'] ?? '').toString())
+        .where((r) => r.isNotEmpty)
+        .toSet();
+  }
+
+  /// Borra de las cuatro tablas todo lo de una identidad. No toca archivos:
+  /// de eso se ocupa quien sí sabe de disco, y en este orden -- primero los
+  /// archivos, después las filas que los nombran -- para no dejar huérfanos.
+  Future<void> borrarDatosDeIdentidad({
+    required String orgId,
+    required String profileId,
+  }) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      for (final tabla in const [
+        'local_ordenes',
+        'local_datos_dirty',
+        'cola_mutaciones',
+        'cola_evidencias',
+      ]) {
+        await txn.delete(
+          tabla,
+          where: 'org_id = ? AND profile_id = ?',
+          whereArgs: [orgId, profileId],
+        );
+      }
+    });
+    _notifyChange(orgId: orgId, profileId: profileId, tabla: 'local_ordenes');
+  }
+
+  /// Borra solo las evidencias ya confirmadas de una identidad.
+  ///
+  /// Se usa al cerrar sesión con todo sincronizado: la foto ya está en el
+  /// servidor, la copia del teléfono no agrega nada y sí es la foto de la
+  /// casa de un cliente.
+  Future<int> borrarEvidenciasConfirmadas({
+    required String orgId,
+    required String profileId,
+  }) async {
+    final db = await database;
+    final borradas = await db.delete(
+      'cola_evidencias',
+      where: 'org_id = ? AND profile_id = ? AND subida_estado = ?',
+      whereArgs: [orgId, profileId, 'confirmada'],
+    );
+    if (borradas > 0) {
+      _notifyChange(orgId: orgId, profileId: profileId, tabla: 'cola_evidencias');
+    }
+    return borradas;
   }
 }

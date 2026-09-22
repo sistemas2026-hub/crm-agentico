@@ -19,6 +19,11 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 void main() {
   sqfliteFfiInit();
   databaseFactory = databaseFactoryFfi;
+  // Base propia para esta suite. `flutter test` corre los archivos en
+  // paralelo y todos abrian el MISMO dexter_campo.db: la preparacion de
+  // una le vaciaba las tablas a la de al lado, y el fallo aparecia o no
+  // segun el orden -- se culpaba al ultimo cambio, nunca al vecino.
+  LocalDatabase.usarBaseDePruebas('pruebas_preservacion.db');
 
   const orgId = 'org_rapilink';
   const profileId = 'prof_carlos';
@@ -28,7 +33,7 @@ void main() {
   late LocalDatabase baseLocal;
 
   setUp(() async {
-    rutaBase = join(await databaseFactory.getDatabasesPath(), 'dexter_campo.db');
+    rutaBase = join(await databaseFactory.getDatabasesPath(), 'pruebas_preservacion.db');
     LocalDatabase.resetForTesting();
     await databaseFactory.deleteDatabase(rutaBase);
     baseLocal = LocalDatabase();

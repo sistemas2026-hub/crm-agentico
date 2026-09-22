@@ -6,6 +6,11 @@ void main() {
   // Inicializar FFI para pruebas de base de datos SQLite en máquina local
   sqfliteFfiInit();
   databaseFactory = databaseFactoryFfi;
+  // Base propia para esta suite. `flutter test` corre los archivos en
+  // paralelo y todos abrian el MISMO dexter_campo.db: la preparacion de
+  // una le vaciaba las tablas a la de al lado, y el fallo aparecia o no
+  // segun el orden -- se culpaba al ultimo cambio, nunca al vecino.
+  LocalDatabase.usarBaseDePruebas('pruebas_cola_offline.db');
 
   const testOrgId = 'org_test_123';
   const testProfileId = 'prof_carlos_456';
@@ -203,6 +208,8 @@ void main() {
       // Avance a url_obtenida con descriptor oficial
       await localDb.updateEvidenciaEstado(
         id: evId,
+        orgId: testOrgId,
+        profileId: testProfileId,
         subidaEstado: 'url_obtenida',
         signedUploadUrl: 'https://s3.amazonaws.com/test-bucket/signed-url',
         uploadMethod: 'PUT',
@@ -224,6 +231,8 @@ void main() {
       // Avance a confirmada
       await localDb.updateEvidenciaEstado(
         id: evId,
+        orgId: testOrgId,
+        profileId: testProfileId,
         subidaEstado: 'confirmada',
       );
 

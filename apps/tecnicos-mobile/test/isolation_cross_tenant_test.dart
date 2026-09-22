@@ -6,6 +6,11 @@ void main() {
   // Inicializar FFI para SQLite en entorno de prueba
   sqfliteFfiInit();
   databaseFactory = databaseFactoryFfi;
+  // Base propia para esta suite. `flutter test` corre los archivos en
+  // paralelo y todos abrian el MISMO dexter_campo.db: la preparacion de
+  // una le vaciaba las tablas a la de al lado, y el fallo aparecia o no
+  // segun el orden -- se culpaba al ultimo cambio, nunca al vecino.
+  LocalDatabase.usarBaseDePruebas('pruebas_aislamiento.db');
 
   const orgA = 'org_rapilink_alpha';
   const profileA = 'prof_carlos_tecnico';

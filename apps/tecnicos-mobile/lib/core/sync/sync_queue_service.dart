@@ -302,7 +302,12 @@ class SyncQueueService {
 
         if (response.statusCode == 200) {
           final data = response.data;
-          await _localDb.updateMutacionEstado(id: m['id'], estado: 'sincronizada');
+          await _localDb.updateMutacionEstado(
+            id: m['id'],
+            orgId: orgId,
+            profileId: profileId,
+            estado: 'sincronizada',
+          );
           final estadoBackend = data?['estado_operativo']?.toString();
           if (data != null && data['revision'] != null && estadoBackend != null) {
             await _localDb.updateOrdenRevisionYEstado(
@@ -320,6 +325,8 @@ class SyncQueueService {
           // Error de validación: no reintentable automáticamente para evitar bucles
           await _localDb.updateMutacionEstado(
             id: m['id'],
+            orgId: orgId,
+            profileId: profileId,
             estado: 'error_validacion',
             errorMensaje: dioErr.response?.data?['error']?.toString() ?? dioErr.message,
           );
@@ -327,6 +334,8 @@ class SyncQueueService {
           // Error de autenticación persistente tras intento de refresh
           await _localDb.updateMutacionEstado(
             id: m['id'],
+            orgId: orgId,
+            profileId: profileId,
             estado: 'error_auth',
             errorMensaje: 'Sesión expirada o no autorizada.',
           );
@@ -334,6 +343,8 @@ class SyncQueueService {
           // Terminal: orden inexistente o reasignada
           await _localDb.updateMutacionEstado(
             id: m['id'],
+            orgId: orgId,
+            profileId: profileId,
             estado: 'terminal_404',
             errorMensaje: 'La orden no existe o fue reasignada.',
           );
@@ -342,6 +353,8 @@ class SyncQueueService {
           final code = dioErr.response?.data?['code'] ?? '';
           await _localDb.updateMutacionEstado(
             id: m['id'],
+            orgId: orgId,
+            profileId: profileId,
             estado: 'conflicto',
             errorMensaje: code.isNotEmpty ? code : 'STALE_WORK_ORDER',
           );
@@ -374,6 +387,8 @@ class SyncQueueService {
 
           await _localDb.registrarFalloMutacion(
             id: m['id'],
+            orgId: orgId,
+            profileId: profileId,
             nextAttemptAt: nextAttemptAt,
             errorMensaje: dioErr.message,
           );
@@ -463,6 +478,8 @@ class SyncQueueService {
         confirmacionKey = const Uuid().v4();
         await _localDb.updateEvidenciaEstado(
           id: id,
+          orgId: orgId,
+          profileId: profileId,
           subidaEstado: subidaEstado,
           confirmacionIdempotencyKey: confirmacionKey,
         );
@@ -472,6 +489,8 @@ class SyncQueueService {
       if (!await file.exists()) {
         await _localDb.updateEvidenciaEstado(
           id: id,
+          orgId: orgId,
+          profileId: profileId,
           subidaEstado: 'error_archivo_inexistente',
           errorMensaje: 'El archivo local de la foto no fue encontrado.',
         );
@@ -513,6 +532,8 @@ class SyncQueueService {
               subidaEstado = 'confirmada';
               await _localDb.updateEvidenciaEstado(
                 id: id,
+                orgId: orgId,
+                profileId: profileId,
                 subidaEstado: 'confirmada',
                 backendEvidenciaId: backendEvidenciaId,
               );
@@ -538,6 +559,8 @@ class SyncQueueService {
 
               await _localDb.updateEvidenciaEstado(
                 id: id,
+                orgId: orgId,
+                profileId: profileId,
                 subidaEstado: subidaEstado,
                 signedUploadUrl: signedUploadUrl,
                 uploadMethod: uploadMethod,
@@ -617,6 +640,8 @@ class SyncQueueService {
             subidaEstado = 'subido_binario';
             await _localDb.updateEvidenciaEstado(
               id: id,
+              orgId: orgId,
+              profileId: profileId,
               subidaEstado: subidaEstado,
             );
           }
@@ -625,6 +650,8 @@ class SyncQueueService {
           // para reintentar oportunamente sin duplicar la evidencia
           await _localDb.updateEvidenciaEstado(
             id: id,
+            orgId: orgId,
+            profileId: profileId,
             subidaEstado: 'url_obtenida',
             errorMensaje: 'Timeout o error en subida binaria: $e',
           );
@@ -648,6 +675,8 @@ class SyncQueueService {
             subidaEstado = 'confirmada';
             await _localDb.updateEvidenciaEstado(
               id: id,
+              orgId: orgId,
+              profileId: profileId,
               subidaEstado: subidaEstado,
             );
           }

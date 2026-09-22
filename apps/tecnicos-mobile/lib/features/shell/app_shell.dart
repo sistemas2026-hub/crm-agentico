@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 
 import '../../core/estado/ordenes_jornada.dart';
 import '../../core/mock/field_mock_data.dart';
+import '../../core/storage/ciclo_de_vida_local.dart';
+import '../../core/storage/local_database.dart';
 import '../../core/storage/secure_storage_service.dart';
 import '../../core/sync/sync_presentacion.dart';
 import '../../core/sync/sync_queue_service.dart';
@@ -17,6 +19,8 @@ import '../detalle_orden/acciones_orden.dart';
 import '../detalle_orden/detalle_orden_screen.dart';
 import '../inicio/inicio_screen.dart';
 import '../materiales/materiales_screen.dart';
+import '../sesion/cierre_de_sesion.dart';
+import '../sesion/hoja_de_pendientes.dart';
 import '../trabajo/seleccion_jornada.dart';
 import '../trabajo/trabajo_screen.dart';
 import '../trabajo/trabajo_vista.dart';
@@ -56,6 +60,7 @@ class ShellDependencias {
     required this.abrirTrabajo,
     this.conectividad,
     this.cerrarSesion,
+    this.cicloDeVida,
   });
 
   /// El estado de la cola, ya calculado por el servicio real.
@@ -74,7 +79,16 @@ class ShellDependencias {
   /// `true` si el teléfono tiene alguna red. Nulo si no se puede saber.
   final Stream<bool>? conectividad;
 
+  /// Cerrar sesión borrando solo las llaves. Queda para las pruebas que no
+  /// arman una base: el camino real pasa por [cicloDeVida], que además decide
+  /// qué datos se pueden borrar.
   final Future<void> Function()? cerrarSesion;
+
+  /// Quién sabe qué hay guardado en este teléfono y qué se puede borrar.
+  ///
+  /// Nulo en pruebas que no montan base: sin él, cerrar sesión se comporta
+  /// como antes -- borra las llaves y sale -- en vez de romperse.
+  final CierreDeSesion? cicloDeVida;
 
   /// Cableado real: la cola, la sesión y la radio del teléfono.
   factory ShellDependencias.reales() {
@@ -107,6 +121,10 @@ class ShellDependencias {
         );
       },
       cerrarSesion: almacenamiento.clearSession,
+      cicloDeVida: CierreDeSesion(
+        almacenamiento: almacenamiento,
+        ciclo: CicloDeVidaLocal(LocalDatabase()),
+      ),
     );
   }
 
@@ -260,8 +278,55 @@ class _AppShellState extends State<AppShell> {
 
     if (salir != true || !mounted) return;
 
-    await widget.dependencias.cerrarSesion?.call();
+    final ciclo = widget.dependencias.cicloDeVida;
+    if (ciclo == null) {
+      // Sin ciclo de vida cableado (pruebas de interfaz): el comportamiento
+      // viejo, que no toca datos locales.
+      await widget.dependencias.cerrarSesion?.call();
+      if (!mounted) return;
+      _irALogin();
+      return;
+    }
+
+    final evaluacion = await ciclo.evaluar();
     if (!mounted) return;
+
+    if (!evaluacion.hayQuePreguntar) {
+      // Nada sin subir: se sale y el teléfono queda sin datos de clientes.
+      await ciclo.limpiarYSalir();
+      if (!mounted) return;
+      _irALogin();
+      return;
+    }
+
+    // Hay trabajo sin sincronizar. Acá no se decide: se muestra qué es y se
+    // pregunta. Que se pierda en silencio no es una opción.
+    final eleccion = await HojaDePendientes.mostrar(
+      context,
+      pendientes: evaluacion.pendientes,
+      sincronizar: () async {
+        await widget.dependencias.sincronizarAhora();
+        final despues = await ciclo.evaluar();
+        return despues.pendientes;
+      },
+    );
+    if (!mounted || eleccion == null || eleccion == SalidaDePendientes.cancelar) {
+      return;
+    }
+
+    if (eleccion == SalidaDePendientes.sincronizar) {
+      // La cola quedó vacía: recién ahora se puede limpiar.
+      await ciclo.limpiarYSalir();
+    } else {
+      // Se va con trabajo sin subir. NO se borra nada: queda aislado por
+      // identidad y vuelve cuando esa misma cuenta entre de nuevo.
+      await ciclo.salirConservando();
+    }
+    if (!mounted) return;
+    _irALogin();
+  }
+
+  void _irALogin() {
     Navigator.of(context).pushReplacement(
       MaterialPageRoute<void>(builder: (_) => const LoginScreen()),
     );

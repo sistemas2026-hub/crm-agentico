@@ -56,6 +56,10 @@ Map<String, dynamic> _detalle({
 void main() {
   sqfliteFfiInit();
   databaseFactory = databaseFactoryFfi;
+  // Base propia. Esta suite BORRA el archivo de base para simular una
+  // version anterior; contra el dexter_campo.db compartido, se llevaba
+  // puesta a cualquier otra suite que estuviera corriendo en paralelo.
+  LocalDatabase.usarBaseDePruebas('pruebas_migracion_v7.db');
 
   late LocalDatabase base;
 
@@ -67,7 +71,7 @@ void main() {
   tearDown(() async {
     LocalDatabase.resetForTesting();
     await databaseFactory.deleteDatabase(
-      join(await databaseFactory.getDatabasesPath(), 'dexter_campo.db'),
+      join(await databaseFactory.getDatabasesPath(), 'pruebas_migracion_v7.db'),
     );
   });
 
@@ -182,7 +186,7 @@ void main() {
         () async {
       // Una base en disco como la que tendría un técnico que no actualizó.
       final String ruta =
-          join(await databaseFactory.getDatabasesPath(), 'dexter_campo.db');
+          join(await databaseFactory.getDatabasesPath(), 'pruebas_migracion_v7.db');
       LocalDatabase.resetForTesting();
       await databaseFactory.deleteDatabase(ruta);
 

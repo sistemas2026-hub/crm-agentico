@@ -173,14 +173,21 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
       if (foto == null) return;
 
       final tempFile = File(foto.path);
+      // El id se genera ANTES de copiar el archivo porque el archivo se llama
+      // como él: si la fila se perdiera, la foto sigue diciendo cual es su
+      // evidencia, de quien es y de que orden.
+      final evId = const Uuid().v4();
       // Persistir inmediatamente en almacenamiento seguro y durable privado
       final persistentFile = await EvidenciaStorageService.persistirArchivoCaptura(
         tempFile,
         nombreOriginal: foto.name,
+        orgId: _orgId!,
+        profileId: _profileId!,
+        ordenId: widget.ordenId,
+        evidenciaId: evId,
       );
       final sha = await SyncQueueService.calcularSha256(persistentFile);
       final size = await persistentFile.length();
-      final evId = const Uuid().v4();
       final registroKey = const Uuid().v4();
       final confirmacionKey = const Uuid().v4();
 

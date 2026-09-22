@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import '../../core/api/api_client.dart';
 import '../../core/api/api_endpoints.dart';
+import '../../core/storage/ciclo_de_vida_local.dart';
+import '../../core/storage/local_database.dart';
 import '../../core/storage/secure_storage_service.dart';
 import '../../core/sync/sync_queue_service.dart';
 import '../../core/theme/app_theme.dart';
@@ -92,10 +94,20 @@ class _LoginScreenState extends State<LoginScreen> {
         final currentOrg = data['current_org'] is Map ? data['current_org'] : {};
         final user = data['user'] is Map ? data['user'] : {};
 
-        final orgId = currentOrg['id']?.toString() ?? 'org_default';
+        // La identidad sale SIEMPRE de la respuesta del servidor, nunca de
+        // algo que el teléfono pueda elegir: es la que particiona todo lo que
+        // se guarda localmente.
+        //
+        // Y sin valores de relleno. Antes, una respuesta sin organización
+        // caía en una organización inventada y una sin perfil en un perfil
+        // inventado: dos personas distintas en esa situación compartían una
+        // misma partición ficticia, y una veía las órdenes de la otra. Justo
+        // el agujero que el resto de este trabajo cierra. Más abajo se
+        // rechaza el ingreso si falta alguno de los dos.
+        final orgId = currentOrg['id']?.toString() ?? '';
         final orgName = currentOrg['name']?.toString() ?? 'Organización';
         final email = user['email']?.toString() ?? _emailController.text.trim();
-        String profileId = user['profile_id']?.toString() ?? user['id']?.toString() ?? 'profile_default';
+        String profileId = user['profile_id']?.toString() ?? user['id']?.toString() ?? '';
         String name = user['name']?.toString() ?? 'Carlos Técnico';
 
         // 1. Guardar tokens de autenticación
@@ -120,6 +132,25 @@ class _LoginScreenState extends State<LoginScreen> {
           }
         } catch (_) {}
 
+        // Fail-closed: sin identidad completa no se entra.
+        //
+        // Sin organización no hay órdenes que ver -- todo el backend filtra
+        // por ella -- así que entrar igual solo serviría para dejar datos
+        // bajo una identidad que no identifica a nadie. Se cierra la sesión
+        // que se acababa de abrir para no dejar tokens sueltos.
+        if (orgId.isEmpty || profileId.isEmpty) {
+          await _storage.clearSession();
+          if (mounted) {
+            setState(() {
+              _isLoading = false;
+              _errorMessage = 'Tu cuenta entró, pero no tiene una organización '
+                  'ni un perfil activos. Pedile a un administrador que te '
+                  'asigne uno antes de volver a intentar.';
+            });
+          }
+          return;
+        }
+
         await _storage.saveSessionData(
           orgId: orgId,
           orgName: orgName,
@@ -128,7 +159,35 @@ class _LoginScreenState extends State<LoginScreen> {
           name: name,
         );
 
-        // 3. Descargar órdenes iniciales
+        // 3. Dejar el teléfono limpio de lo que no es de quien acaba de entrar.
+        //
+        // Un teléfono de cuadrilla pasa de mano en mano. Lo que dejó la cuenta
+        // anterior no se puede mostrar acá -- el filtro por identidad ya lo
+        // impide -- pero tampoco tiene por qué seguir en el disco: son nombres,
+        // direcciones y fotos de casas de clientes.
+        //
+        // Lo único que sobrevive es el trabajo ajeno SIN SUBIR. Ese no se
+        // borra: no es de quien entra, así que no lo ve, pero destruirlo
+        // tampoco le corresponde a esta pantalla. Vuelve cuando esa cuenta
+        // entre de nuevo.
+        try {
+          final limpieza = await CicloDeVidaLocal(LocalDatabase()).prepararPara(
+            orgId: orgId,
+            profileId: profileId,
+          );
+          if (limpieza.hayTrabajoAjenoRetenido) {
+            debugPrint(
+              '[sesion] se conservaron datos sin sincronizar de '
+              '${limpieza.aisladas.length} cuenta(s) anterior(es) en este equipo.',
+            );
+          }
+        } catch (e) {
+          // Que la limpieza falle no puede impedir entrar a trabajar: se
+          // reintenta en el próximo inicio de sesión.
+          debugPrint('[sesion] no se pudo preparar el almacenamiento local: $e');
+        }
+
+        // 4. Descargar órdenes iniciales
         await _syncService.procesarCola();
 
         if (mounted) {

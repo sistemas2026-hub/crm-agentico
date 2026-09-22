@@ -33,10 +33,22 @@ class ApiClient {
               options.headers['Authorization'] = 'Bearer $token';
             }
 
-            final orgId = await _storage.getOrgId();
-            if (orgId != null && orgId.isNotEmpty) {
-              options.headers['X-Org-Id'] = orgId;
-            }
+            // NO se manda la organización en una cabecera, y no es un olvido.
+            //
+            // El tenant se obtiene exclusivamente del JWT firmado que valida
+            // el backend: viaja como claim `org_id` dentro del token, que el
+            // servidor firma y verifica (`common/middleware/get_company.py`).
+            // Una cabecera la elige el cliente, y un cliente es un teléfono
+            // en la calle: si el servidor le creyera, cambiar un valor
+            // bastaría para leer las órdenes de otra empresa.
+            //
+            // Hasta acá se enviaba `X-Org-Id`. Ninguna ruta del backend la
+            // leía nunca -- se verificó buscándola en todo el servidor -- así
+            // que no abría ninguna puerta; pero dejaba escrito que el cliente
+            // opina sobre su tenant, y la próxima persona que leyera esto
+            // podía creerle. Si algún día hace falta cambiar de empresa, se
+            // hace pidiendo un token nuevo (`/api/auth/switch-org/`), no
+            // mandando otro valor acá.
           }
 
           // Asegurar base URL dinámica

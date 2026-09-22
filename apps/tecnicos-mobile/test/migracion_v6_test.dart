@@ -93,6 +93,10 @@ const String _tablaEvidenciasV5 = '''
 void main() {
   sqfliteFfiInit();
   databaseFactory = databaseFactoryFfi;
+  // Base propia. Esta suite BORRA el archivo de base para simular una
+  // version anterior; contra el dexter_campo.db compartido, se llevaba
+  // puesta a cualquier otra suite que estuviera corriendo en paralelo.
+  LocalDatabase.usarBaseDePruebas('pruebas_migracion_v6.db');
 
   const orgId = 'org_rapilink';
   const profileId = 'prof_carlos';
@@ -101,7 +105,7 @@ void main() {
   late String rutaBase;
 
   setUp(() async {
-    rutaBase = join(await databaseFactory.getDatabasesPath(), 'dexter_campo.db');
+    rutaBase = join(await databaseFactory.getDatabasesPath(), 'pruebas_migracion_v6.db');
     LocalDatabase.resetForTesting();
     await databaseFactory.deleteDatabase(rutaBase);
   });
