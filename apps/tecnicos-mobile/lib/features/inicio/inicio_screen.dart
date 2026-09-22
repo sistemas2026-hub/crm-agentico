@@ -1,25 +1,43 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/estado/ordenes_jornada.dart';
-import '../../core/mock/field_mock_data.dart';
+import '../../core/storage/local_database.dart';
 import '../../core/sync/sync_presentacion.dart';
 import '../../core/sync/sync_queue_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/dexter_empty_state.dart';
+import '../materiales/estado_de_jornada.dart';
+import '../trabajo/estado_trabajo.dart';
 import '../trabajo/seleccion_jornada.dart';
 import '../trabajo/trabajo_vista.dart';
+import 'resumen_de_inicio.dart';
 
-/// Inicio — Dashboard de jornada.
+/// Inicio — la pantalla de decisión de la jornada.
 ///
-/// Réplica de la pantalla del proyecto de Stitch, bloque por bloque: saludo y
-/// turno, las tres métricas, los chips de verificación, la tarjeta del trabajo
-/// en curso con su cinta de estado, los próximos trabajos, el kit y la
-/// sincronización.
+/// QUÉ RESPONDE, Y EN QUÉ ORDEN
+/// ----------------------------
+/// 1. ¿Qué tengo hoy?   → el avance del día y el kit que lleva encima.
+/// 2. ¿Qué hago ahora?   → un trabajo, el siguiente, con el botón para entrar.
+/// 3. ¿Tengo problemas?  → lo que se rompió y alguien tiene que mirar.
 ///
-/// Lo que el backend entrega se muestra tal cual. Lo que todavía no existe
-/// —turno, cuadrilla, SLA, ventana, terminal, señal previa, kit, vehículo,
-/// academia— está en `FieldMockData` con su identificador `CAMPO-DATA-XXX` y
-/// solo aparece con el modo demostración encendido.
+/// QUIÉN DECIDE QUÉ
+/// ----------------
+/// La pantalla **no decide nada**. Cuál es el próximo trabajo, qué cuenta como
+/// hecho y qué merece un aviso lo resuelve [ResumenDeInicio], que se prueba
+/// sin emulador. Acá solo se dibuja lo que esa lógica ya decidió: una segunda
+/// cuenta en el widget es la forma más rápida de que dos pantallas de la misma
+/// aplicación digan cosas distintas del mismo día.
+///
+/// LO QUE SE FUE DE ACÁ, Y POR QUÉ
+/// -------------------------------
+/// Academia, vehículo y la potencia previa de la OLT ya no se dibujan. No
+/// tienen fuente: eran constantes de demostración con aire de dato. Una
+/// tarjeta que dice "ABC123 · 75% de combustible" la primera semana y nunca
+/// más enseña que la pantalla no se mira, y ese aprendizaje después se lleva
+/// puesto al aviso que sí importaba. Cuando exista el endpoint, vuelven con la
+/// fuente y la hora del dato al lado.
 class InicioScreen extends StatefulWidget {
   const InicioScreen({
     super.key,
@@ -28,7 +46,8 @@ class InicioScreen extends StatefulWidget {
     required this.nombreTecnico,
     this.resumenSincronizacion,
     this.onVerTodos,
-    this.mostrarDatosFuturos = FieldMockData.modoDemo,
+    this.jornada,
+    this.ahora,
   });
 
   final OrdenesJornada ordenes;
@@ -37,26 +56,45 @@ class InicioScreen extends StatefulWidget {
   final String nombreTecnico;
   final SyncSummary? resumenSincronizacion;
   final VoidCallback? onVerTodos;
-  final bool mostrarDatosFuturos;
+
+  /// La jornada ya leída. Se inyecta en las pruebas; en la aplicación se lee
+  /// sola de la base y se vuelve a leer cuando el kit o la cola cambian.
+  final EstadoDeJornada? jornada;
+
+  /// El reloj, para que una prueba no dependa de la hora en que se corre.
+  final DateTime? ahora;
 
   @override
   State<InicioScreen> createState() => _InicioScreenState();
 }
 
 class _InicioScreenState extends State<InicioScreen> {
-  /// CAMPO-DATA-038 · Qué modo de jornada se ve marcado. Vive solo acá: no se
-  /// guarda ni viaja a ningún lado.
-  int _estadoDeJornada = 0;
+  StreamSubscription<LocalDatabaseChangeEvent>? _suscripcion;
+  EstadoDeJornada? _jornada;
 
   @override
   void initState() {
     super.initState();
     widget.ordenes.addListener(_alCambiar);
     widget.ordenes.asegurarCargado();
+    _cargarJornada();
+    // Registrar un consumo dentro de una orden tiene que verse en el kit del
+    // inicio sin volver a entrar a la pantalla. La suscripción se guarda para
+    // cancelarla: dejarla viva es una fuga en el teléfono y, en una prueba,
+    // un oyente pendiente que impide que el test termine.
+    _suscripcion = LocalDatabase.onDataChanged.listen((evento) {
+      if (!mounted) return;
+      if (evento.tabla == 'local_kit' ||
+          evento.tabla == 'local_jornada' ||
+          evento.tabla == 'cola_movimientos_material') {
+        _cargarJornada();
+      }
+    });
   }
 
   @override
   void dispose() {
+    _suscripcion?.cancel();
     widget.ordenes.removeListener(_alCambiar);
     super.dispose();
   }
@@ -65,19 +103,50 @@ class _InicioScreenState extends State<InicioScreen> {
     if (mounted) setState(() {});
   }
 
+  Future<void> _cargarJornada() async {
+    if (widget.jornada != null) {
+      if (mounted) setState(() => _jornada = widget.jornada);
+      return;
+    }
+    final leida = await EstadoDeJornada.leer();
+    if (!mounted) return;
+    setState(() => _jornada = leida);
+  }
+
   @override
   Widget build(BuildContext context) {
     if (widget.ordenes.cargando) {
-      return const ColoredBox(
-        color: AppColors.surface,
-        child: Center(child: CircularProgressIndicator()),
-      );
+      // Un fondo quieto, no un indicador que gira: esto lee SQLite y son
+      // milisegundos. Una animación perpetua además deja la pantalla sin
+      // reposo, que es lo que cuelga cualquier prueba que espere a que las
+      // animaciones terminen.
+      return const ColoredBox(color: AppColors.surface);
     }
 
     final trabajos = widget.ordenes.trabajos;
-    final enCurso = SeleccionJornada.enCursoDestacado(trabajos);
-    final proximos = SeleccionJornada.proximos(trabajos, desde: DateTime.now());
-    final sinFecha = SeleccionJornada.activosSinFecha(trabajos);
+    final sync = widget.resumenSincronizacion;
+    final jornada = _jornada;
+
+    // Los movimientos de material viven en su propia cola, aparte de la de
+    // mutaciones: sin sumarlos, "todo enviado" sería falso justo el día que
+    // el técnico registró consumo sin señal.
+    final resumen = ResumenDeInicio.armar(
+      trabajos: trabajos,
+      jornada: jornada,
+      movimientosSinSubir:
+          (sync?.mutacionesPendientes ?? 0) + (jornada?.sinSubir ?? 0),
+      evidenciasSinSubir: sync?.evidenciasPendientes ?? 0,
+      mutacionesEnConflicto: sync?.mutacionesConflicto ?? 0,
+      ahora: widget.ahora,
+    );
+
+    final proximos = SeleccionJornada.proximos(
+      trabajos,
+      desde: widget.ahora ?? DateTime.now(),
+    ).where((TrabajoVista t) => t.id != resumen.siguiente?.id).toList();
+    final sinFecha = SeleccionJornada.activosSinFecha(trabajos)
+        .where((TrabajoVista t) => t.id != resumen.siguiente?.id)
+        .toList();
 
     return ColoredBox(
       color: AppColors.surface,
@@ -99,19 +168,31 @@ class _InicioScreenState extends State<InicioScreen> {
                 esAdvertencia: true,
               ),
             ] else ...<Widget>[
-              _saludo(),
-              if (widget.mostrarDatosFuturos) ...<Widget>[
+              _saludo(sync),
+              if (jornada != null && jornada.hayJornada) ...<Widget>[
                 const SizedBox(height: AppSpacing.md),
-                _modoDeJornada(),
+                _estadoDeJornada(jornada),
               ],
               const SizedBox(height: AppSpacing.md),
-              _avanceDiario(trabajos),
+              _avanceDiario(resumen),
+              // Los avisos van arriba, pero **solo cuando existen**: cuando no
+              // hay ninguno el bloque no se dibuja, así el día no empieza en
+              // rojo por costumbre. Cuando aparece uno, aparece donde se ve,
+              // no al final de un scroll largo.
+              if (resumen.hayProblemas) ...<Widget>[
+                const SizedBox(height: AppSpacing.md),
+                _alertas(resumen.avisos),
+              ],
               const SizedBox(height: AppSpacing.lg),
-              _trabajoEnCurso(enCurso, trabajos),
+              _proximoTrabajo(resumen, trabajos),
               const SizedBox(height: AppSpacing.lg),
               _proximos(proximos, sinFecha),
+              if (resumen.hayKit) ...<Widget>[
+                const SizedBox(height: AppSpacing.lg),
+                _materiales(resumen),
+              ],
               const SizedBox(height: AppSpacing.lg),
-              _widgetsDelTurno(),
+              _sincronizacion(sync),
             ],
           ],
         ),
@@ -119,10 +200,10 @@ class _InicioScreenState extends State<InicioScreen> {
     );
   }
 
-  // --- 1. Saludo y turno ---------------------------------------------------
+  // --- 1. Saludo -----------------------------------------------------------
 
-  Widget _saludo() {
-    final hora = DateTime.now().hour;
+  Widget _saludo(SyncSummary? sync) {
+    final hora = (widget.ahora ?? DateTime.now()).hour;
     final momento = hora < 12
         ? 'Buenos días'
         : hora < 19
@@ -146,77 +227,38 @@ class _InicioScreenState extends State<InicioScreen> {
               borderRadius: BorderRadius.circular(AppRadius.circulo),
             ),
             alignment: Alignment.center,
-            child: Stack(
-              clipBehavior: Clip.none,
-              alignment: Alignment.center,
-              children: <Widget>[
-                Text(
-                  _iniciales(widget.nombreTecnico),
-                  style: AppTypography.etiquetaGrande.copyWith(
-                    color: AppColors.primary,
-                  ),
-                ),
-                if (widget.mostrarDatosFuturos)
-                  Positioned(
-                    right: -2,
-                    bottom: -2,
-                    child: Container(
-                      width: 14,
-                      height: 14,
-                      decoration: BoxDecoration(
-                        color: AppColors.exitoFuerte,
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: AppColors.surfaceContainer,
-                          width: 2,
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
+            child: Text(
+              _iniciales(widget.nombreTecnico),
+              style: AppTypography.etiquetaGrande.copyWith(
+                color: AppColors.primary,
+              ),
             ),
           ),
           const SizedBox(width: AppSpacing.md),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  '$momento, ${_primerNombre(widget.nombreTecnico)}',
-                  style: AppTypography.tituloMedio,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                // CAMPO-DATA-007
-                if (widget.mostrarDatosFuturos)
-                  Text(
-                    FieldMockData.cuadrilla,
-                    style: AppTypography.etiqueta,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-              ],
+            child: Text(
+              '$momento, ${_primerNombre(widget.nombreTecnico)}',
+              style: AppTypography.tituloMedio,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ),
           const SizedBox(width: AppSpacing.sm),
-          _estadoDeEnvio(),
+          _estadoDeEnvio(sync),
         ],
       ),
     );
   }
 
-  /// Lo que el diseño pone al lado del saludo: si lo registrado ya viajó.
+  /// Si lo registrado ya viajó. El número sale de la cola, que es real.
   ///
-  /// El número sale de la cola, que es real. La antigüedad ("2m") es
-  /// CAMPO-DATA-036: la cola todavía no guarda cuándo fue el último envío
-  /// bueno, así que ese dato no se muestra como si lo supiéramos.
-  Widget _estadoDeEnvio() {
-    final SyncSummary? resumen = widget.resumenSincronizacion;
-    final int pendientes = resumen == null
+  /// No se muestra hace cuánto fue el último envío bueno: la cola todavía no
+  /// lo guarda, y una antigüedad inventada es justo el dato que alguien usa
+  /// para decidir si puede irse.
+  Widget _estadoDeEnvio(SyncSummary? sync) {
+    final int pendientes = sync == null
         ? 0
-        : resumen.mutacionesPendientes +
-            resumen.evidenciasPendientes +
-            resumen.datosDirty;
+        : sync.mutacionesPendientes + sync.evidenciasPendientes + sync.datosDirty;
     final bool alDia = pendientes == 0;
 
     return Container(
@@ -235,7 +277,7 @@ class _InicioScreenState extends State<InicioScreen> {
           ),
           const SizedBox(width: 4),
           Text(
-            alDia ? 'Sync OK' : '$pendientes sin enviar',
+            alDia ? 'Todo enviado' : '$pendientes sin enviar',
             style: AppTypography.etiquetaChica.copyWith(
               color: alDia ? AppColors.exitoTexto : AppColors.onSurfaceVariant,
               fontWeight: FontWeight.w700,
@@ -246,72 +288,63 @@ class _InicioScreenState extends State<InicioScreen> {
     );
   }
 
-  // --- 2. El modo de trabajo y el avance del día ---------------------------
+  // --- 2. En qué estado está la jornada ------------------------------------
 
-  /// CAMPO-DATA-038 · En qué está el técnico ahora.
+  /// En qué está la jornada, según el servidor.
   ///
-  /// El selector se ve y responde, pero **no guarda nada**: no hay jornada en
-  /// el backend ni cola para marcarla sin señal. Por eso vive en la
-  /// demostración: un "Pausa" que el supervisor nunca recibe es peor que no
-  /// poder marcarlo.
-  Widget _modoDeJornada() {
+  /// Sustituye al selector de modos —"En ruta", "Pausa"— que se veía y no
+  /// guardaba nada. Un "Pausa" que el supervisor nunca recibe es peor que no
+  /// poder marcarlo: el técnico cree haber avisado.
+  ///
+  /// Las tres frases son distintas a propósito. Una jornada **tomada** es una
+  /// intención que viaja en la cola; una **cerrada** tiene un acta con números
+  /// congelados. Decirle cerrada a la primera haría que alguien se fuera a su
+  /// casa creyendo que entregó.
+  Widget _estadoDeJornada(EstadoDeJornada jornada) {
+    final (String texto, Color color, IconData icono) = jornada.cerrada
+        ? ('Jornada cerrada', AppColors.exitoTexto, Icons.check_circle)
+        : jornada.cierreTomado
+        ? (
+            'Cierre enviado · esperando confirmación',
+            AppColors.onSurfaceVariant,
+            Icons.hourglass_bottom,
+          )
+        : ('Jornada en curso', AppColors.exito, Icons.play_circle_fill);
+
     return Container(
-      padding: const EdgeInsets.all(AppSpacing.md),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.sm,
+      ),
       decoration: BoxDecoration(
         color: AppColors.surfaceContainerLowest,
         borderRadius: AppRadius.brTarjeta,
         boxShadow: AppTheme.sombraNivel1,
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      child: Row(
         children: <Widget>[
-          Row(
-            children: <Widget>[
-              Text(
-                'JORNADA EN CURSO',
-                style: AppTypography.etiquetaChica.copyWith(
-                  color: AppColors.exito,
-                  fontWeight: FontWeight.w700,
-                ),
+          Icon(icono, size: 16, color: color),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Text(
+              texto,
+              style: AppTypography.etiqueta.copyWith(
+                color: color,
+                fontWeight: FontWeight.w700,
               ),
-              const Spacer(),
-              // CAMPO-DATA-006
-              Text(
-                'Turno: ${FieldMockData.turno}',
-                style: AppTypography.etiquetaChica,
-              ),
-            ],
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          Row(
-            children: <Widget>[
-              for (
-                int i = 0;
-                i < FieldMockData.estadosDeJornada.length;
-                i++
-              ) ...<Widget>[
-                if (i > 0) const SizedBox(width: AppSpacing.xs),
-                Expanded(
-                  child: _ChipDeEstado(
-                    estado: FieldMockData.estadosDeJornada[i],
-                    activo: i == _estadoDeJornada,
-                    alTocar: () => setState(() => _estadoDeJornada = i),
-                  ),
-                ),
-              ],
-            ],
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
         ],
       ),
     );
   }
 
-  /// El avance del día. Esto **sí** es real: sale de las órdenes de la jornada.
-  Widget _avanceDiario(List<TrabajoVista> trabajos) {
-    final int total = trabajos.length;
-    final int terminados = SeleccionJornada.terminados(trabajos).length;
-    final int pendientes = SeleccionJornada.pendientes(trabajos).length;
-    final double avance = total == 0 ? 0 : terminados / total;
+  /// El avance del día, con los números que decidió [ResumenDeInicio].
+  Widget _avanceDiario(ResumenDeInicio resumen) {
+    final int total = resumen.totalDeTrabajos;
+    final double avance = total == 0 ? 0 : resumen.completados / total;
 
     return Container(
       padding: const EdgeInsets.all(AppSpacing.md),
@@ -333,7 +366,7 @@ class _InicioScreenState extends State<InicioScreen> {
               ),
               const Spacer(),
               Text(
-                '$terminados / $total OT',
+                '${resumen.completados} / $total OT',
                 style: AppTypography.dato.copyWith(
                   color: AppColors.primary,
                   fontWeight: FontWeight.w700,
@@ -363,7 +396,7 @@ class _InicioScreenState extends State<InicioScreen> {
               ),
               const SizedBox(width: AppSpacing.xs),
               Text(
-                '· $pendientes pendientes',
+                '· ${resumen.pendientes} pendientes',
                 style: AppTypography.etiquetaChica,
               ),
             ],
@@ -373,25 +406,68 @@ class _InicioScreenState extends State<InicioScreen> {
     );
   }
 
-  Widget _trabajoEnCurso(TrabajoVista? enCurso, List<TrabajoVista> trabajos) {
-    if (enCurso == null) {
+  // --- 3. Lo que alguien tiene que mirar -----------------------------------
+
+  /// Los avisos, en el orden y con la gravedad que decidió la lógica.
+  ///
+  /// El rojo se reserva para lo que no se arregla solo. Una cola esperando
+  /// señal sube sola: pintarla de rojo enseña a ignorar los rojos, y el día
+  /// que aparezca uno de verdad nadie lo va a mirar.
+  Widget _alertas(List<AvisoDeInicio> avisos) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Text(
+          'Alertas operativas',
+          style: AppTypography.etiqueta.copyWith(color: AppColors.onSurface),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        for (final AvisoDeInicio aviso in avisos)
+          Padding(
+            padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+            child: _FilaDeAviso(aviso: aviso),
+          ),
+      ],
+    );
+  }
+
+  // --- 4. Qué hago ahora ---------------------------------------------------
+
+  Widget _proximoTrabajo(ResumenDeInicio resumen, List<TrabajoVista> trabajos) {
+    final TrabajoVista? siguiente = resumen.siguiente;
+
+    if (siguiente == null) {
+      // Dos vacíos distintos, y la diferencia importa: terminar lo que había
+      // es una jornada cumplida; no tener nada asignado es un problema de
+      // despacho que alguien debería mirar.
       return Container(
         decoration: BoxDecoration(
           color: AppColors.surfaceContainerLowest,
           borderRadius: AppRadius.brTarjeta,
           boxShadow: AppTheme.sombraNivel1,
         ),
-        child: const DexterEmptyState(
-          icono: Icons.play_circle_outline,
-          titulo: 'No tenés ningún trabajo empezado',
-          mensaje: 'Abrí uno de los próximos y marcá que vas en camino.',
-        ),
+        child: resumen.terminoLaJornada
+            ? const DexterEmptyState(
+                icono: Icons.task_alt,
+                titulo: 'Terminaste todos tus trabajos',
+                mensaje: 'No te queda ninguno pendiente por hacer hoy.',
+              )
+            : const DexterEmptyState(
+                icono: Icons.event_available,
+                titulo: 'No tenés trabajos asignados',
+                mensaje: 'Cuando el despacho te asigne uno, aparece acá.',
+              ),
       );
     }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
+        Text(
+          'Próximo trabajo',
+          style: AppTypography.etiqueta.copyWith(color: AppColors.onSurface),
+        ),
+        const SizedBox(height: AppSpacing.sm),
         if (SeleccionJornada.hayVariosEnCurso(trabajos))
           Padding(
             padding: const EdgeInsets.only(bottom: AppSpacing.sm),
@@ -415,11 +491,11 @@ class _InicioScreenState extends State<InicioScreen> {
               ],
             ),
           ),
-        _TarjetaEnCurso(
-          trabajo: enCurso,
-          mostrarDatosFuturos: widget.mostrarDatosFuturos,
+        _TarjetaDeTrabajo(
+          trabajo: siguiente,
+          ahora: widget.ahora,
           onAbrir: () async {
-            await widget.abrirTrabajo(context, enCurso);
+            await widget.abrirTrabajo(context, siguiente);
             await widget.ordenes.recargar();
           },
         ),
@@ -427,15 +503,17 @@ class _InicioScreenState extends State<InicioScreen> {
     );
   }
 
-  // --- 5. Próximos trabajos ------------------------------------------------
+  // --- 5. Los que vienen después -------------------------------------------
 
   Widget _proximos(List<TrabajoVista> proximos, List<TrabajoVista> sinFecha) {
+    if (proximos.isEmpty && sinFecha.isEmpty) return const SizedBox.shrink();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
         Row(
           children: <Widget>[
-            Text('Próximos Trabajos', style: AppTypography.tituloChico),
+            Text('Después', style: AppTypography.tituloChico),
             const SizedBox(width: AppSpacing.sm),
             if (proximos.isNotEmpty)
               Container(
@@ -470,19 +548,6 @@ class _InicioScreenState extends State<InicioScreen> {
           ],
         ),
         const SizedBox(height: AppSpacing.sm),
-        if (proximos.isEmpty && sinFecha.isEmpty)
-          Container(
-            decoration: BoxDecoration(
-              color: AppColors.surfaceContainerLowest,
-              borderRadius: AppRadius.brTarjeta,
-              boxShadow: AppTheme.sombraNivel1,
-            ),
-            child: const DexterEmptyState(
-              icono: Icons.event_available,
-              titulo: 'No te queda nada agendado',
-              mensaje: 'Cuando te asignen un trabajo nuevo, aparece acá.',
-            ),
-          ),
         for (final TrabajoVista trabajo in proximos)
           Padding(
             padding: const EdgeInsets.only(bottom: AppSpacing.sm),
@@ -533,86 +598,54 @@ class _InicioScreenState extends State<InicioScreen> {
     );
   }
 
-  // --- 6. Mi kit (solo demostración) ---------------------------------------
+  // --- 6. El kit que lleva encima ------------------------------------------
 
-  // --- 5. Telemetría y recursos del turno ----------------------------------
-
-  /// La rejilla 2x2 del diseño. Tres de sus cuatro casillas son de lo que
-  /// todavía no existe (kit, vehículo, academia); la cuarta —la cola— es real
-  /// y se ve siempre, porque es la que dice si lo registrado ya viajó.
-  Widget _widgetsDelTurno() {
-    if (!widget.mostrarDatosFuturos) return _sincronizacion();
-
+  /// Lo que salió de bodega, lo que se usó y lo que queda.
+  ///
+  /// Los tres números los calculó el dominio y los guardó el espejo de la
+  /// jornada. Acá no se resta nada: la misma cuenta hecha dos veces es la
+  /// forma segura de que algún día difieran y nadie sepa cuál creer.
+  ///
+  /// Sin jornada cargada este bloque no existe. No se dibuja un kit en cero:
+  /// "0 disponible" y "todavía no sincronizó" se ven igual y significan lo
+  /// contrario.
+  Widget _materiales(ResumenDeInicio resumen) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
         Text(
-          'Telemetría & Recursos de Turno',
+          'Materiales',
           style: AppTypography.etiqueta.copyWith(color: AppColors.onSurface),
         ),
         const SizedBox(height: AppSpacing.sm),
-        // Las dos casillas de cada fila miden lo mismo, como en el diseño: la
-        // altura la marca la más alta, no un número fijo que se quede corto.
-        IntrinsicHeight(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              // CAMPO-DATA-009 y CAMPO-DATA-025
-              Expanded(
-                child: _WidgetTurno(
-                  icono: Icons.inventory_2,
-                  titulo: 'KIT DROP',
-                  destacado: '${FieldMockData.kitDisponibles} disp.',
-                  colorDestacado: AppColors.primary,
-                  lineas: <String>[
-                    'Usados: ${FieldMockData.kitConsumidos}',
-                    'Carga: ${FieldMockData.kitRecibidos}',
-                    'Drop 85m disp.',
-                  ],
-                ),
-              ),
-              const SizedBox(width: AppSpacing.sm),
-              // CAMPO-DATA-008 y CAMPO-DATA-042
-              Expanded(
-                child: _WidgetTurno(
-                  icono: Icons.local_shipping,
-                  titulo: 'VEHÍCULO',
-                  insignia: 'OK',
-                  destacado:
-                      '${FieldMockData.vehiculoModelo} '
-                      '${FieldMockData.vehiculoPlaca}',
-                  lineas: <String>[
-                    FieldMockData.vehiculoOdometro,
-                    if (FieldMockData.vehiculoPreoperacionalHecho)
-                      'Preoperacional ✓',
-                  ],
-                  medidor: FieldMockData.vehiculoCombustible / 100,
-                ),
-              ),
-            ],
+        Container(
+          padding: const EdgeInsets.all(AppSpacing.md),
+          decoration: BoxDecoration(
+            color: AppColors.surfaceContainerLowest,
+            borderRadius: AppRadius.brTarjeta,
+            boxShadow: AppTheme.sombraNivel1,
           ),
-        ),
-        const SizedBox(height: AppSpacing.sm),
-        IntrinsicHeight(
           child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              // CAMPO-DATA-018 y CAMPO-DATA-043
               Expanded(
-                child: _WidgetTurno(
-                  icono: Icons.school,
-                  titulo: 'ACADEMIA',
-                  destacado:
-                      '${FieldMockData.cursosPendientes} Curso Obligatorio',
-                  colorDestacado: AppColors.error,
-                  lineas: <String>[
-                    FieldMockData.cursoObligatorio,
-                    FieldMockData.cursoVence,
-                  ],
+                child: _Cifra(
+                  etiqueta: 'Recibido',
+                  valor: resumen.kitRecibido,
                 ),
               ),
-              const SizedBox(width: AppSpacing.sm),
-              Expanded(child: _motorDeSincronizacion()),
+              Expanded(
+                child: _Cifra(
+                  etiqueta: 'Consumido',
+                  valor: resumen.kitConsumido,
+                ),
+              ),
+              Expanded(
+                child: _Cifra(
+                  etiqueta: 'En mano',
+                  valor: resumen.kitDisponible,
+                  color: AppColors.primary,
+                ),
+              ),
             ],
           ),
         ),
@@ -620,36 +653,10 @@ class _InicioScreenState extends State<InicioScreen> {
     );
   }
 
-  /// La casilla de la cola dentro de la rejilla. Todo lo que dice es real: lo
-  /// que falta por enviar, si hubo error de red y si la base local está al día.
-  Widget _motorDeSincronizacion() {
-    final SyncSummary? resumen = widget.resumenSincronizacion;
-    final int pendientes = resumen == null
-        ? 0
-        : resumen.mutacionesPendientes +
-            resumen.evidenciasPendientes +
-            resumen.datosDirty;
-    final bool errorDeRed = resumen?.hasConnectionError ?? false;
+  // --- 7. La cola ----------------------------------------------------------
 
-    return _WidgetTurno(
-      icono: Icons.dns,
-      titulo: 'ENGINE SYNC',
-      destacado: '$pendientes ${pendientes == 1 ? 'Pendiente' : 'Pendientes'}',
-      colorDestacado: pendientes == 0 ? AppColors.exitoTexto : AppColors.primary,
-      lineas: <String>[
-        errorDeRed ? 'Sin conexión con el servidor' : '0 fallas de red',
-        pendientes == 0 ? 'Base local al día' : 'Falta enviar lo registrado',
-        // CAMPO-DATA-036 · La hora del último envío bueno todavía no se guarda.
-        if (widget.mostrarDatosFuturos)
-          'Sync ${FieldMockData.ultimaSincronizacion.toLowerCase()}',
-      ],
-    );
-  }
-
-  Widget _sincronizacion() {
-    final resumen = widget.resumenSincronizacion;
-    final limpio =
-        resumen != null && resumen.isClean && !resumen.hasConnectionError;
+  Widget _sincronizacion(SyncSummary? sync) {
+    final limpio = sync != null && sync.isClean && !sync.hasConnectionError;
 
     return Container(
       padding: const EdgeInsets.all(AppSpacing.md),
@@ -689,7 +696,7 @@ class _InicioScreenState extends State<InicioScreen> {
                       ),
                     ),
                     Text(
-                      SyncPresentacion.fraseFranja(resumen),
+                      SyncPresentacion.fraseFranja(sync),
                       style: AppTypography.cuerpoChico,
                     ),
                   ],
@@ -724,31 +731,113 @@ class _InicioScreenState extends State<InicioScreen> {
   }
 }
 
-/// Cuánto queda de compromiso, con lo que el servidor dijo.
-///
-/// Si no hay `sla_vence_en`, no se inventa una cuenta: se muestra el valor de
-/// ejemplo, que solo aparece en la demostración.
-String _sla(TrabajoVista trabajo) {
-  final int? minutos = trabajo.minutosParaVencer();
-  if (minutos == null) return 'SLA: ${trabajo.futuro.slaRestanteMinutos} min';
-  if (minutos < 0) return 'SLA vencido';
-  return 'SLA: $minutos min';
-}
+/// Un aviso, pintado según su gravedad.
+class _FilaDeAviso extends StatelessWidget {
+  const _FilaDeAviso({required this.aviso});
 
-/// La tarjeta dominante del Home Operacional: el trabajo que está en curso.
-class _TarjetaEnCurso extends StatelessWidget {
-  const _TarjetaEnCurso({
-    required this.trabajo,
-    required this.mostrarDatosFuturos,
-    required this.onAbrir,
-  });
-
-  final TrabajoVista trabajo;
-  final bool mostrarDatosFuturos;
-  final VoidCallback onAbrir;
+  final AvisoDeInicio aviso;
 
   @override
   Widget build(BuildContext context) {
+    final bool grave = aviso.gravedad == GravedadDeAviso.alta;
+    final Color color = grave ? AppColors.error : AppColors.onSurfaceVariant;
+
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: grave
+            ? AppColors.errorContainer
+            : AppColors.surfaceContainerLowest,
+        borderRadius: AppRadius.brTarjeta,
+        boxShadow: AppTheme.sombraNivel1,
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Icon(
+            grave ? Icons.warning_amber_rounded : Icons.cloud_upload_outlined,
+            size: 18,
+            color: grave ? AppColors.onErrorContainer : color,
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  aviso.titulo,
+                  style: AppTypography.etiquetaGrande.copyWith(
+                    color: grave ? AppColors.onErrorContainer : AppColors.onSurface,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  aviso.detalle,
+                  style: AppTypography.cuerpoChico.copyWith(
+                    color: grave ? AppColors.onErrorContainer : color,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Uno de los tres números del kit.
+class _Cifra extends StatelessWidget {
+  const _Cifra({required this.etiqueta, required this.valor, this.color});
+
+  final String etiqueta;
+  final String valor;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(etiqueta, style: AppTypography.etiquetaChica),
+        const SizedBox(height: 2),
+        Text(
+          valor,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: AppTypography.dato.copyWith(
+            color: color ?? AppColors.onSurface,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// La tarjeta dominante: el trabajo que toca ahora.
+class _TarjetaDeTrabajo extends StatelessWidget {
+  const _TarjetaDeTrabajo({
+    required this.trabajo,
+    required this.onAbrir,
+    this.ahora,
+  });
+
+  final TrabajoVista trabajo;
+  final VoidCallback onAbrir;
+  final DateTime? ahora;
+
+  /// Si ya se empezó, el botón continúa; si no, empieza. Prometer "continuar"
+  /// sobre algo que ni se abrió confunde a quien mira la pantalla de reojo.
+  bool get _empezado =>
+      trabajo.estado == EstadoTrabajo.enSitio ||
+      trabajo.estado == EstadoTrabajo.enCamino;
+
+  @override
+  Widget build(BuildContext context) {
+    final int? minutos = trabajo.minutosParaVencer(ahora: ahora);
+
     return Container(
       decoration: BoxDecoration(
         color: AppColors.surfaceContainerLowest,
@@ -759,7 +848,9 @@ class _TarjetaEnCurso extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          // Cinta superior: estado y SLA.
+          // Cinta superior: estado y, si el servidor dijo cuándo vence, cuánto
+          // queda. Sin `sla_vence_en` no se dibuja el reloj: una cuenta
+          // inventada es justo lo que hace correr a alguien sin motivo.
           Container(
             color: AppColors.primary,
             padding: const EdgeInsets.symmetric(
@@ -777,11 +868,15 @@ class _TarjetaEnCurso extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: AppSpacing.sm),
-                Text(
-                  trabajo.estado.etiqueta.toUpperCase(),
-                  style: AppTypography.etiqueta.copyWith(
-                    color: AppColors.onPrimary,
-                    fontWeight: FontWeight.w700,
+                Flexible(
+                  child: Text(
+                    trabajo.estado.etiqueta.toUpperCase(),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTypography.etiqueta.copyWith(
+                      color: AppColors.onPrimary,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
                 if (trabajo.numero != null) ...<Widget>[
@@ -793,19 +888,8 @@ class _TarjetaEnCurso extends StatelessWidget {
                     ),
                   ),
                 ],
-                // CAMPO-DATA-039 · Hora estimada de llegada.
-                if (mostrarDatosFuturos) ...<Widget>[
-                  const SizedBox(width: 6),
-                  Text(
-                    '· ETA ${FieldMockData.etaTrabajoActual}',
-                    style: AppTypography.etiquetaChica.copyWith(
-                      color: AppColors.onPrimaryContainer,
-                    ),
-                  ),
-                ],
                 const Spacer(),
-                // CAMPO-DATA-002
-                if (mostrarDatosFuturos)
+                if (minutos != null)
                   Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 6,
@@ -825,7 +909,7 @@ class _TarjetaEnCurso extends StatelessWidget {
                         ),
                         const SizedBox(width: 4),
                         Text(
-                          _sla(trabajo),
+                          minutos < 0 ? 'SLA vencido' : 'SLA: $minutos min',
                           style: AppTypography.etiquetaChica.copyWith(
                             color: AppColors.onError,
                             fontWeight: FontWeight.w700,
@@ -860,28 +944,13 @@ class _TarjetaEnCurso extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: AppSpacing.xs),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: <Widget>[
-                    Flexible(
-                      child: Text(
-                        trabajo.clienteNombre,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: AppTypography.tituloChico.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                    // CAMPO-DATA-040 · El identificador del abonado en el ISP.
-                    if (mostrarDatosFuturos) ...<Widget>[
-                      const SizedBox(width: 6),
-                      Text(
-                        '· ${FieldMockData.idAbonado}',
-                        style: AppTypography.etiquetaChica,
-                      ),
-                    ],
-                  ],
+                Text(
+                  trabajo.clienteNombre,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTypography.tituloChico.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
                 const SizedBox(height: AppSpacing.xs),
                 Row(
@@ -898,13 +967,10 @@ class _TarjetaEnCurso extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: <Widget>[
                           Text(trabajo.direccion, style: AppTypography.cuerpo),
-                          // Cómo se entra al inmueble: real si el despacho lo cargó.
-                          if (trabajo.detalleAcceso.isNotEmpty ||
-                              mostrarDatosFuturos)
+                          // Cómo se entra al inmueble, si el despacho lo cargó.
+                          if (trabajo.detalleAcceso.isNotEmpty)
                             Text(
-                              trabajo.detalleAcceso.isEmpty
-                                  ? FieldMockData.detalleAcceso
-                                  : trabajo.detalleAcceso,
+                              trabajo.detalleAcceso,
                               style: AppTypography.etiquetaChica,
                             ),
                         ],
@@ -912,109 +978,18 @@ class _TarjetaEnCurso extends StatelessWidget {
                     ),
                   ],
                 ),
-                const SizedBox(height: AppSpacing.md),
-                // Ventana y terminal.
-                Container(
-                  padding: const EdgeInsets.all(AppSpacing.sm),
-                  decoration: BoxDecoration(
-                    color: AppColors.surfaceContainerLow,
-                    borderRadius: AppRadius.brCampo,
-                  ),
-                  child: Row(
-                    children: <Widget>[
-                      Expanded(
-                        child: _DatoConIcono(
-                          icono: Icons.schedule,
-                          etiqueta: 'Ventana',
-                          // CAMPO-DATA-020, y la hora real si no hay demostración.
-                          valor: mostrarDatosFuturos
-                              ? (trabajo.ventanaTexto.isEmpty
-                                  ? FieldMockData.ventanaHoraria
-                                  : trabajo.ventanaTexto)
-                              : _hora(trabajo.compromiso),
-                        ),
-                      ),
-                      if (mostrarDatosFuturos)
-                        // CAMPO-DATA-011
-                        Expanded(
-                          child: _DatoConIcono(
-                            icono: Icons.hub,
-                            etiqueta: 'Terminal',
-                            valor: FieldMockData.terminal,
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-                // CAMPO-DATA-001
-                if (mostrarDatosFuturos) ...<Widget>[
-                  const SizedBox(height: AppSpacing.sm),
+                if (_ventana(trabajo).isNotEmpty) ...<Widget>[
+                  const SizedBox(height: AppSpacing.md),
                   Container(
                     padding: const EdgeInsets.all(AppSpacing.sm),
                     decoration: BoxDecoration(
-                      color: AppColors.errorContainer,
+                      color: AppColors.surfaceContainerLow,
                       borderRadius: AppRadius.brCampo,
                     ),
-                    child: Row(
-                      children: <Widget>[
-                        Container(
-                          width: 36,
-                          height: 36,
-                          decoration: BoxDecoration(
-                            color: AppColors.onErrorContainer.withValues(
-                              alpha: 0.12,
-                            ),
-                            borderRadius: AppRadius.brCampo,
-                          ),
-                          child: const Icon(
-                            Icons.sensors,
-                            size: 20,
-                            color: AppColors.onErrorContainer,
-                          ),
-                        ),
-                        const SizedBox(width: AppSpacing.sm),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: <Widget>[
-                              Text(
-                                'Diagnóstico Central OLT',
-                                style: AppTypography.etiquetaChica.copyWith(
-                                  color: AppColors.onErrorContainer,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                              Text(
-                                '${FieldMockData.terminal} · Fuera de norma',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: AppTypography.etiquetaChica.copyWith(
-                                  color: AppColors.onErrorContainer,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.baseline,
-                          textBaseline: TextBaseline.alphabetic,
-                          children: <Widget>[
-                            Text(
-                              FieldMockData.potenciaRxPrevia.toStringAsFixed(1),
-                              style: AppTypography.medicion.copyWith(
-                                color: AppColors.error,
-                              ),
-                            ),
-                            const SizedBox(width: 2),
-                            Text(
-                              'dBm',
-                              style: AppTypography.etiquetaChica.copyWith(
-                                color: AppColors.onErrorContainer,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
+                    child: _DatoConIcono(
+                      icono: Icons.schedule,
+                      etiqueta: 'Ventana',
+                      valor: _ventana(trabajo),
                     ),
                   ),
                 ],
@@ -1025,9 +1000,9 @@ class _TarjetaEnCurso extends StatelessWidget {
                     onPressed: onAbrir,
                     icon: const Icon(Icons.flag, size: 20),
                     label: Text(
-                      trabajo.numero == null
-                          ? 'CONTINUAR ORDEN'
-                          : 'CONTINUAR OT #${trabajo.numero}',
+                      _textoDelBoton(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.secondary,
@@ -1068,10 +1043,19 @@ class _TarjetaEnCurso extends StatelessWidget {
     );
   }
 
-  static String _hora(DateTime? fecha) {
-    if (fecha == null) return 'Sin fecha';
-    return '${fecha.hour.toString().padLeft(2, '0')}:'
-        '${fecha.minute.toString().padLeft(2, '0')}';
+  String _textoDelBoton() {
+    final String verbo = _empezado ? 'CONTINUAR' : 'EMPEZAR';
+    return trabajo.numero == null ? '$verbo ORDEN' : '$verbo OT #${trabajo.numero}';
+  }
+
+  /// La franja prometida, si existe; si no, la hora del compromiso. Vacía
+  /// cuando el servidor no dijo ninguna de las dos.
+  static String _ventana(TrabajoVista trabajo) {
+    if (trabajo.ventanaTexto.isNotEmpty) return trabajo.ventanaTexto;
+    final DateTime? f = trabajo.compromiso;
+    if (f == null) return '';
+    return '${f.hour.toString().padLeft(2, '0')}:'
+        '${f.minute.toString().padLeft(2, '0')}';
   }
 }
 
@@ -1143,9 +1127,13 @@ class _AccionRapida extends StatelessWidget {
         children: <Widget>[
           Icon(icono, size: 18, color: color),
           const SizedBox(width: 6),
-          Text(
-            texto,
-            style: AppTypography.etiquetaGrande.copyWith(color: color),
+          Flexible(
+            child: Text(
+              texto,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppTypography.etiquetaGrande.copyWith(color: color),
+            ),
           ),
         ],
       ),
@@ -1153,7 +1141,7 @@ class _AccionRapida extends StatelessWidget {
   }
 }
 
-/// Una fila de "Próximos trabajos".
+/// Una fila de los trabajos que vienen después.
 class _ItemProximo extends StatelessWidget {
   const _ItemProximo({required this.trabajo, required this.onVer});
 
@@ -1323,179 +1311,6 @@ class _BotonSecundario extends StatelessWidget {
             ],
           ],
         ),
-      ),
-    );
-  }
-}
-
-/// CAMPO-DATA-038 · Un modo de jornada, como botón.
-class _ChipDeEstado extends StatelessWidget {
-  const _ChipDeEstado({
-    required this.estado,
-    required this.activo,
-    required this.alTocar,
-  });
-
-  final EstadoJornada estado;
-  final bool activo;
-  final VoidCallback alTocar;
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      button: true,
-      selected: activo,
-      label: '${estado.nombre}, ${estado.detalle}',
-      excludeSemantics: true,
-      child: Material(
-        color: activo ? AppColors.primary : AppColors.surfaceContainerLow,
-        borderRadius: AppRadius.brTarjeta,
-        child: InkWell(
-          borderRadius: AppRadius.brTarjeta,
-          onTap: alTocar,
-          child: Container(
-            constraints: const BoxConstraints(
-              minHeight: AppSpacing.objetivoTactil,
-            ),
-            padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
-            alignment: Alignment.center,
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: <Widget>[
-                Text(
-                  estado.nombre,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppTypography.etiqueta.copyWith(
-                    color: activo ? AppColors.onPrimary : AppColors.onSurface,
-                    fontWeight: activo ? FontWeight.w700 : FontWeight.w500,
-                  ),
-                ),
-                Text(
-                  estado.detalle.toUpperCase(),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppTypography.etiquetaChica.copyWith(
-                    fontSize: 9,
-                    color: activo
-                        ? AppColors.primaryFixedDim
-                        : AppColors.onSurfaceVariant,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Una casilla de la rejilla de recursos del turno.
-class _WidgetTurno extends StatelessWidget {
-  const _WidgetTurno({
-    required this.icono,
-    required this.titulo,
-    required this.destacado,
-    required this.lineas,
-    this.colorDestacado,
-    this.insignia,
-    this.medidor,
-  });
-
-  final IconData icono;
-  final String titulo;
-  final String destacado;
-  final List<String> lineas;
-  final Color? colorDestacado;
-
-  /// Una marca corta arriba a la derecha, como el "OK" del vehículo.
-  final String? insignia;
-
-  /// Una barra de 0 a 1 debajo del destacado: el combustible del vehículo.
-  final double? medidor;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.md),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceContainerLowest,
-        borderRadius: AppRadius.brTarjeta,
-        boxShadow: AppTheme.sombraNivel1,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Row(
-            children: <Widget>[
-              Icon(icono, size: 16, color: AppColors.secondary),
-              const SizedBox(width: 4),
-              Expanded(
-                child: Text(
-                  titulo,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppTypography.etiquetaChica.copyWith(
-                    color: AppColors.onSurfaceVariant,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              if (insignia != null)
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 4,
-                    vertical: 1,
-                  ),
-                  decoration: const BoxDecoration(
-                    color: AppColors.exitoFondo,
-                    borderRadius: AppRadius.brChico,
-                  ),
-                  child: Text(
-                    '✓ ${insignia!}',
-                    style: AppTypography.etiquetaChica.copyWith(
-                      fontSize: 9,
-                      color: AppColors.exitoTexto,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          Text(
-            destacado,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: AppTypography.etiquetaGrande.copyWith(
-              color: colorDestacado ?? AppColors.onSurface,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          if (medidor != null) ...<Widget>[
-            const SizedBox(height: AppSpacing.xs),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(AppRadius.circulo),
-              child: LinearProgressIndicator(
-                value: medidor,
-                minHeight: 4,
-                backgroundColor: AppColors.surfaceContainerHigh,
-                valueColor: const AlwaysStoppedAnimation<Color>(
-                  AppColors.exito,
-                ),
-              ),
-            ),
-          ],
-          const SizedBox(height: AppSpacing.xs),
-          for (final String linea in lineas)
-            Text(
-              linea,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: AppTypography.etiquetaChica,
-            ),
-        ],
       ),
     );
   }

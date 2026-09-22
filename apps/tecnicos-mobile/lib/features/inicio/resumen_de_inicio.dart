@@ -58,6 +58,7 @@ class ResumenDeInicio {
     required this.completados,
     required this.siguiente,
     required this.avisos,
+    required this.kitRecibido,
     required this.kitDisponible,
     required this.kitConsumido,
     required this.hayKit,
@@ -76,6 +77,7 @@ class ResumenDeInicio {
   final List<AvisoDeInicio> avisos;
 
   /// Lo que lleva encima, si hay kit cargado.
+  final String kitRecibido;
   final String kitDisponible;
   final String kitConsumido;
   final bool hayKit;
@@ -166,6 +168,7 @@ class ResumenDeInicio {
         ...avisos.where((a) => a.gravedad == GravedadDeAviso.alta),
         ...avisos.where((a) => a.gravedad == GravedadDeAviso.media),
       ],
+      kitRecibido: jornada?.recibido ?? '0',
       kitDisponible: jornada?.aDevolver ?? '0',
       kitConsumido: jornada?.consumido ?? '0',
       hayKit: jornada?.hayJornada ?? false,

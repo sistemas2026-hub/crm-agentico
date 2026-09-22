@@ -622,8 +622,9 @@ void main() {
       ));
       await tester.pumpAndSettle();
 
-      // Antes: Inicio dice que no hay nada empezado.
-      expect(find.text('No tenés ningún trabajo empezado'), findsOneWidget);
+      // Antes: Inicio lo ofrece como proximo, todavia sin empezar.
+      expect(find.text('ASIGNADA'), findsWidgets);
+      expect(find.text('EN CAMINO'), findsNothing);
 
       // La transicion ocurre como la haria el detalle.
       await base.acciones.transicionar(
@@ -636,7 +637,6 @@ void main() {
       await tester.pumpAndSettle();
 
       // Despues: Inicio lo muestra en curso y Trabajo lo cuenta en proceso.
-      expect(find.text('No tenés ningún trabajo empezado'), findsNothing);
       expect(find.text('EN CAMINO'), findsWidgets);
       await base.cerrar();
     });
