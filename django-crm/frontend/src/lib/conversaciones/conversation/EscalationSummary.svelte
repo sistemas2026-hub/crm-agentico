@@ -7,12 +7,43 @@
    * escalada y llegan ya armados en `resumenEscalada`; `hizoLaIA` sale de la
    * traza. Acá no se resume nada ni se vuelve a derivar: solo se dibuja.
    */
-  import { TriangleAlert, CircleCheck, CircleX, ShieldCheck } from '@lucide/svelte';
+  import { TriangleAlert, CircleCheck, CircleX, ShieldCheck,
+           ChevronDown, ChevronRight } from '@lucide/svelte';
+  import { resumenRecogido } from '$lib/conversaciones/barra-lateral.svelte.js';
 
   let { resumenEscalada, hizoLaIA } = $props();
+
+  /* SE PUEDE RECOGER, y el estado dura entre conversaciones.
+     Estos cuatro renglones ocupan un tercio de la altura util del hilo, y no
+     hacen falta las dos veces: al abrir una conversacion se leen una vez para
+     entender por que llego, y despues estorban a lo que se esta haciendo, que
+     es la conversacion.
+
+     Por que la preferencia se guarda y no arranca abierta siempre: quien
+     trabaja un turno entero abre decenas de conversaciones, y volver a
+     cerrarlo en cada una es la clase de friccion que hace que la pantalla se
+     sienta en contra. Mismo criterio que la barra lateral, y por eso comparte
+     su modulo.
+
+     La linea de arriba sigue visible con el resumen recogido: dice CUANTOS
+     datos hay debajo, asi que recoger no esconde que exista algo. */
+  const recogido = $derived(resumenRecogido.valor);
+  const conDato = $derived(resumenEscalada.filter((f) => f.texto).length);
 </script>
 
-  <dl class="brief">
+  <button
+    type="button"
+    class="brief-toggle"
+    onclick={() => resumenRecogido.alternar()}
+    aria-expanded={!recogido}
+    title={recogido ? 'Mostrar el resumen de la escalada' : 'Recoger el resumen'}
+  >
+    {#if recogido}<ChevronRight size={13} />{:else}<ChevronDown size={13} />{/if}
+    <span>Por qué llegó acá</span>
+    <span class="brief-cuenta">{conDato} de {resumenEscalada.length}</span>
+  </button>
+
+  <dl class="brief" class:brief-recogido={recogido}>
     {#each resumenEscalada as fila (fila.rotulo)}
       <div
         class="brief-fila"
@@ -68,6 +99,44 @@
   </dl>
 
 <style>
+  .brief-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 5px 14px;
+    border: 0;
+    background: none;
+    font-family: var(--bandeja-mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--bandeja-texto-2);
+    cursor: pointer;
+    text-align: left;
+  }
+  .brief-toggle:hover {
+    color: var(--bandeja-texto);
+  }
+  .brief-toggle :global(svg) {
+    flex: none;
+  }
+  /* A la derecha y en cifras: es el dato que dice si vale la pena abrirlo. */
+  .brief-cuenta {
+    margin-left: auto;
+    font-variant-numeric: tabular-nums;
+    color: var(--bandeja-texto-3);
+    letter-spacing: 0;
+  }
+
+  /* `display:none` y no altura cero: con altura cero los cuatro renglones
+     siguen en el arbol de accesibilidad y un lector de pantalla los lee
+     igual, que es justo lo contrario de recoger. */
+  .brief-recogido {
+    display: none;
+  }
+
   /* ── qué pasó acá ───────────────────────────────────────────────────────
      Rótulo a la izquierda, texto a la derecha: se leen los cuatro rótulos en
      vertical de un vistazo y se entra al que interesa. Con el texto debajo

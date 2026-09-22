@@ -6,7 +6,7 @@
   import Sidebar from '$lib/v2/components/Sidebar.svelte';
   import CommandPalette from '$lib/v2/components/CommandPalette.svelte';
   import { Search, Sun, Columns3, LifeBuoy, Receipt, Plus, Menu } from '@lucide/svelte';
-  import { barra, recordarPreferencia } from '$lib/conversaciones/barra-lateral.svelte.js';
+  import { barra, recordarPreferencia, resumenRecogido } from '$lib/conversaciones/barra-lateral.svelte.js';
 
   /** @type {{ data: { counts: Record<string, number>, org: { name: string, terminology?: Record<string, string> | null }, role: string }, children: import('svelte').Snippet }} */
   let { data, children } = $props();
@@ -47,7 +47,13 @@
 
   /* La preferencia de barra recogida se lee del navegador, así que recién
      cuando hay navegador. En el servidor no existe `localStorage`. */
-  $effect(() => recordarPreferencia());
+  /* Las dos preferencias de la Bandeja se leen en el mismo sitio y por el
+     mismo motivo: `localStorage` no existe en el servidor, asi que leerlo
+     durante el renderizado lo rompe. Un `$effect` corre solo en el navegador. */
+  $effect(() => {
+    recordarPreferencia();
+    resumenRecogido.recordar();
+  });
 
   /* La barra se oculta SÓLO en la Bandeja y SÓLO si esta persona la recogió.
      En el resto del CRM está siempre: es su única navegación. */

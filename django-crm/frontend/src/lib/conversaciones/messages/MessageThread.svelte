@@ -445,6 +445,38 @@
     border-color: var(--bandeja-humano-borde);
   }
 
+  /* ── EL CLIENTE, Y LO QUE NO SE SABE ────────────────────────────────────
+     Agregado el 22/09/2026 despues de mirar una conversacion real de
+     produccion: habia dos burbujas seguidas, una del cliente y una del
+     asistente, las dos blancas, las dos rotuladas «ORIGEN NO REGISTRADO». No
+     habia forma de saber quien escribio cada una.
+
+     La IA y la persona YA se distinguian (violeta y azul). Lo que faltaba era
+     lo de abajo:
+
+     1. El cliente tenia el fondo por DEFECTO, o sea el mismo que cualquier
+        burbuja sin clase. Ahora lo declara: que se vea igual no puede ser una
+        coincidencia de la cascada, tiene que ser una decision.
+
+     2. «Origen no registrado» se veia exactamente igual que el cliente. Son
+        cosas opuestas -- una es "sabemos que lo escribio el cliente" y la otra
+        "no sabemos quien lo escribio"-- y compartian presentacion.
+
+     El borde punteado dice eso sin texto: ESTA burbuja no tiene autor
+     confirmado. No es un error ni algo que haya que arreglar; son las filas
+     anteriores a la migracion 202609161600_origen_de_mensajes, y su origen no
+     se puede reconstruir. Inventarlo seria peor que dibujarlo distinto. */
+  .a-cliente {
+    background: var(--bandeja-superficie);
+    border-color: var(--bandeja-borde);
+  }
+
+  .a-sin-registro {
+    background: var(--bandeja-superficie);
+    border-style: dashed;
+    border-color: var(--bandeja-borde-fuerte);
+  }
+
   /* LA NOTA INTERNA NO SE PARECE A UN MENSAJE, y por eso su regla vive DESPUÉS
      de `.chat-burbuja` y no antes: las dos son selectores de una clase, así
      que gana la última del archivo. Estaba arriba, y cuando `.chat-burbuja`

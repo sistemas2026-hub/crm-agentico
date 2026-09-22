@@ -134,23 +134,19 @@
             >· el cliente no escribe hace más de 24 h. Para volver a
             contactarlo hay que usar una plantilla aprobada.</span
           >
-          <!-- La salida, al lado del problema y no en la barra de abajo: si el
-               aviso dice "hay que usar una plantilla", el botón para elegirla
-               tiene que estar ahí mismo. Es lo que esperaba la regla
-               `.ventana-cerrada button`, que estuvo sin consumidor desde 0A.1.
+          <!-- ACA HABIA UN SEGUNDO «Elegir plantilla», y se fue el 22/09/2026.
+               El argumento era bueno --"la salida, al lado del problema"-- pero
+               se vio en produccion lo que producia: el boton del pie tambien
+               aparece cuando la ventana esta cerrada, asi que quedaban DOS
+               botones identicos a menos de cien pixeles, mas el texto del
+               campo que ya dice "usa una plantilla". Tres veces la misma
+               instruccion.
 
-               No se repite si el selector ya está abierto: dos puertas a lo
-               mismo en la misma pantalla es una elección que nadie pidió. -->
-          {#if !eligiendoPlantilla}
-            <button
-              type="button"
-              class="v2-btn v2-btn-sm v2-btn-ink"
-              onclick={() => onAbrirPlantillas?.()}
-              disabled={interviniendo}
-            >
-              Elegir plantilla
-            </button>
-          {/if}
+               Se conserva el del PIE y no este, aunque este quede mas cerca
+               del aviso: el del pie ocupa el lugar de «Enviar», que es donde
+               la mano ya esta y donde se busca la accion. Este aviso vuelve a
+               ser lo que debe ser -- la explicacion de por que no se puede
+               escribir, no una segunda puerta. -->
         {:else if ventanaPorCerrarse}
           <!-- El rótulo del canal aparece acá y en cerrada, pero NO en abierta:
                dice de qué sistema viene el límite, y mientras la ventana está
@@ -566,9 +562,9 @@
 
   /* Empuja el botón al extremo: el aviso se lee de izquierda a derecha y la
      acción queda al final, no metida entre el texto. */
-  .ventana-cerrada button {
-    margin-left: auto;
-  }
+  /* `.ventana-cerrada button` se fue con el boton duplicado (22/09/2026).
+     Su unico consumidor era ese segundo «Elegir plantilla»; svelte-check lo
+     reportaba como selector sin usar. */
 
   /* El rótulo del canal, con la misma forma que los distintivos de la cola:
      mono, versalita y un filete. Dice DE QUÉ sistema viene el límite -- no es

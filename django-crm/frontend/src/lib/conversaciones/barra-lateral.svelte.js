@@ -50,3 +50,43 @@ export function alternar() {
     // Si no se puede guardar, el cambio vale para esta sesión igual.
   }
 }
+
+/* ── EL RESUMEN DE LA ESCALADA ────────────────────────────────────────────
+   Misma mecánica y mismo motivo que la barra, así que vive acá en vez de
+   duplicar el patrón: es una preferencia de esta persona en esta máquina, se
+   recuerda entre conversaciones, y se lee del navegador sin romper el
+   renderizado del servidor.
+
+   Arranca ABIERTO, al revés que un panel opcional cualquiera: la primera vez
+   que se abre una conversación escalada, por qué llegó ahí es exactamente lo
+   que hay que leer. Se recoge cuando alguien ya no lo necesita -- y ahí sí se
+   recuerda, porque quien trabaja un turno entero abre decenas y volver a
+   cerrarlo en cada una es la fricción que se quiere evitar.
+
+   `valor` y no una propiedad suelta: leerlo desde un `$derived` de un
+   componente exige que el acceso pase por el objeto reactivo. */
+const CLAVE_RESUMEN = 'dexter:bandeja:resumen-recogido';
+
+export const resumenRecogido = $state({
+  valor: false,
+  leida: false,
+
+  recordar() {
+    if (this.leida) return;
+    try {
+      this.valor = localStorage.getItem(CLAVE_RESUMEN) === '1';
+    } catch {
+      this.valor = false;
+    }
+    this.leida = true;
+  },
+
+  alternar() {
+    this.valor = !this.valor;
+    try {
+      localStorage.setItem(CLAVE_RESUMEN, this.valor ? '1' : '0');
+    } catch {
+      // Sin almacenamiento el cambio vale para esta sesión igual.
+    }
+  }
+});
