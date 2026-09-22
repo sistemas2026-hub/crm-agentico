@@ -113,6 +113,23 @@
     background: none;
   }
 
+  /* ── EL DEDO ────────────────────────────────────────────────────────────
+     Debajo de 1000px la Bandeja ya pasó a master-detail (una vista por vez,
+     ver el layout), que es el punto donde se la usa con el dedo y no con un
+     puntero. Con `padding: 9px` y texto de 12px la pestaña mide unos 34px de
+     alto: entra dentro del rango en que un toque cae en la pestaña de al
+     lado. La referencia móvil pide 44px como mínimo y es el mismo número que
+     recomiendan las guías de las dos plataformas.
+
+     Se fija con `min-height` y no con más padding para que el alto sea el que
+     se declara, sin depender de cuánto mida la línea de texto. */
+  @media (max-width: 1000px) {
+    .ctx-tab {
+      min-height: 44px;
+      font-size: 12.5px;
+    }
+  }
+
   /* El número de lo que espera adentro. Mono, como todo lo que es dato. */
   .ctx-cuenta {
     font-family: var(--bandeja-mono);

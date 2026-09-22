@@ -1792,20 +1792,31 @@
      `.panel-titulo` --mono, versalita, apagado-- porque es lo mismo: un
      rótulo. Va acá y no en bandeja.css porque sólo esta columna agrupa
      paneles bajo un encabezado propio. */
+  /* LA BARRA DE SECCION, como la referencia dibuja AI PROCESS y
+     DOCUMENTATION: versalita en mono sobre una franja con su propio fondo y
+     un filete abajo, no un texto suelto flotando sobre el panel.
+
+     El cambio (22/09/2026) es de legibilidad, no de gusto: estos rótulos
+     encabezan paneles que a su vez traen rótulos propios --`.panel-titulo`
+     usa exactamente la misma tipografía-- así que un rótulo de PESTAÑA y uno
+     de PANEL se veían idénticos y no se distinguía cuál abarcaba a cuál. El
+     fondo y el filete son lo que marca la jerarquía. */
   .seccion-ctx {
-    margin: 0 0 6px;
+    margin: 0 0 10px;
+    padding: 5px 9px;
+    border: 1px solid var(--bandeja-borde);
+    border-radius: var(--bandeja-radio-sm);
+    background: var(--bandeja-superficie-suave);
     font-family: var(--bandeja-mono);
-    font-size: 9.5px;
-    font-weight: 600;
-    letter-spacing: 0.06em;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.07em;
     text-transform: uppercase;
-    color: var(--bandeja-texto-2);
+    color: var(--bandeja-texto);
   }
 
   .seccion-ctx-sep {
-    margin-top: 16px;
-    padding-top: 12px;
-    border-top: 1px solid var(--bandeja-borde);
+    margin-top: 18px;
   }
   /* Por encima de 1240px la columna está siempre a la vista: ni botón para
      cerrarla, ni fondo que interceptar. El del encabezado que la abre vive
@@ -1857,7 +1868,11 @@
       top: 0;
       right: 0;
       bottom: 0;
-      width: min(340px, 88vw);
+      /* 360px: el ancho del cajón en la pantalla de tablet de la referencia.
+         Estaba en 340 --el de la columna fija de entonces-- y la columna ya
+         creció a 350, así que el cajón mostraba menos que el panel que
+         reemplaza. El `88vw` sigue acotándolo en teléfonos. */
+      width: min(360px, 88vw);
       z-index: 60;
       background: var(--v2-paper);
       box-shadow: -8px 0 24px rgba(0, 0, 0, 0.12);
