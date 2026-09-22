@@ -6576,3 +6576,40 @@ importacion_tickets:
   solapamiento_horas: 6
   tipos_de_creador: []
   ventana_dias: 30
+
+# ==========================================================================
+#  CIERRE DE LO QUE ATENDIO SOLO EL ASISTENTE
+# ==========================================================================
+# 'conversaciones_sin_respuesta' --el barrido que cierra por inactividad--
+# exige 'escalada_a_humano'. Las que la IA resolvio sola nunca entraban ahi y
+# ningun otro camino las cerraba: quedaban abiertas para siempre. Medido
+# contra produccion el 22/09/2026: 151 asi, 145 sin un mensaje en mas de una
+# semana, y de las 4 creadas ese dia, las 4.
+#
+# EL CORTE ES LA FRONTERA, y por eso lleva la hora exacta de la activacion:
+# lo que quede del lado viejo (las 147 historicas) es BACKLOG y no se toca.
+# Solo se cierra lo que entre a la regla de aca en adelante.
+#
+# El corte se compara contra la ULTIMA ACTIVIDAD, no contra la creacion: una
+# conversacion vieja que vuelve a hablar despues de esta hora es flujo normal.
+#
+# EL BACKLOG QUEDA APAGADO. No se drena con el reloj --serian 240 cierres por
+# dia y las 147 se irian en menos de uno-- sino a mano y de a lotes:
+#
+#     python -m nucleo.reloj --backfill-inactivas-ia --limit 10
+#
+# Y ese comando exige ADEMAS que 'backfill_habilitado' este en true. Uno
+# autoriza, el otro ejecuta.
+#
+# 'backfill_lote' es un techo duro: el --limit del comando puede bajarlo,
+# nunca subirlo.
+#
+# El plazo NO esta aca: sale de 'limites.horas_inactividad_cierra', que ya
+# significa exactamente esto -- pasado ese tiempo un mensaje del cliente abre
+# una conversacion nueva en vez de reutilizar esta, asi que cerrarla no le
+# quita nada a nadie.
+cierre_inactivas_ia:
+  habilitado: true
+  rollout_cutoff: '2026-09-22T15:58:07Z'
+  backfill_habilitado: false
+  backfill_lote: 10
