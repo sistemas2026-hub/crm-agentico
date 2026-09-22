@@ -890,6 +890,228 @@ class MovimientoDeMaterial(BaseModel):
         return f"{self.get_tipo_display()} {self.material.codigo} x{self.cantidad}"
 
 
+# =============================================================================
+# El cierre del ciclo: devolucion, diferencias y acta
+#
+# UNA DEVOLUCION NO CORRIGE NADA: ES UN HECHO NUEVO
+# -------------------------------------------------
+# Devolver diez conectores no edita el consumo de ayer ni lo anula. Son dos
+# cosas que pasaron, en ese orden, y las dos tienen que poder explicarse
+# despues. Por eso la devolucion entra como un MovimientoDeMaterial mas --tipo
+# `devolucion`-- y ningun movimiento anterior se toca jamas.
+#
+# Es la misma razon por la que un libro contable no se corrige con goma.
+#
+# LO QUE FALTA NO SE ESCONDE: SE NOMBRA
+# -------------------------------------
+# Cuando lo que vuelve no coincide con lo que deberia volver, la diferencia no
+# se absorbe en un ajuste silencioso. Se abre una incidencia con su motivo,
+# porque "faltan 3 conectores" y "se dañaron 3 conectores al retirarlos" son
+# hechos distintos y la empresa necesita saber cual de los dos tiene.
+# =============================================================================
+
+
+class IncidenciaDeMaterial(BaseModel):
+    """Por que lo que volvio no es lo que deberia haber vuelto.
+
+    No bloquea el cierre por existir --las cosas se pierden y se rompen-- pero
+    sin motivo escrito no se puede cerrar la jornada: una diferencia sin
+    explicacion es exactamente lo que despues nadie puede reconstruir.
+    """
+
+    PERDIDO = "perdido"
+    DANADO = "danado"
+    USADO_SIN_REGISTRAR = "usado_sin_registrar"
+    ENTREGADO_A_OTRO = "entregado_a_otro"
+    OTRO = "otro"
+    TIPOS = (
+        (PERDIDO, "Perdido"),
+        (DANADO, "Dañado"),
+        (USADO_SIN_REGISTRAR, "Utilizado y no registrado"),
+        (ENTREGADO_A_OTRO, "Entregado a otro tecnico"),
+        (OTRO, "Otro"),
+    )
+
+    org = models.ForeignKey(
+        Org, on_delete=models.CASCADE, related_name="incidencias_material"
+    )
+    profile = models.ForeignKey(
+        Profile,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="incidencias_material",
+    )
+    material = models.ForeignKey(
+        MaterialCatalogo, on_delete=models.PROTECT, related_name="incidencias"
+    )
+    acta = models.ForeignKey(
+        "campo.ActaDeDevolucion",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="incidencias",
+    )
+    tipo = models.CharField(max_length=32, choices=TIPOS, default=OTRO)
+    cantidad = models.DecimalField(max_digits=12, decimal_places=3, default=0)
+    serie = models.CharField(max_length=128, blank=True, default="")
+    motivo = models.TextField(
+        help_text="En palabras. Es lo que alguien va a leer para decidir."
+    )
+    evidencia = models.ForeignKey(
+        "campo.EvidenciaTrabajo",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="incidencias_material",
+        help_text=(
+            "Preparado para cuando las evidencias se integren con materiales. "
+            "Hoy no se exige: pedir una foto de algo que se perdio hace seis "
+            "horas no la hace aparecer."
+        ),
+    )
+    idempotency_key = models.CharField(max_length=128, db_index=True)
+    ocurrido_en = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = "campo_incidencia_material"
+        ordering = ["-ocurrido_en"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["org", "idempotency_key"],
+                name="unique_incidencia_idempotente_por_org",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.get_tipo_display()}: {self.material.codigo} x{self.cantidad}"
+
+
+class TransferenciaDeMaterial(BaseModel):
+    """Material que pasa de un tecnico a otro.
+
+    EL MATERIAL NO DESAPARECE MIENTRAS NADIE LO ACEPTA
+    --------------------------------------------------
+    Entre que uno entrega y el otro acepta hay un rato --a veces una jornada--
+    y en ese rato el material tiene que seguir siendo de alguien. Si se
+    descontara al enviarla, una transferencia que el otro nunca acepta haria
+    desaparecer inventario sin que nadie responda por el.
+
+    Asi que solo la transferencia ACEPTADA mueve el saldo: descuenta de quien
+    entrega y suma a quien recibe, en el mismo instante. Pendiente y rechazada
+    no mueven nada, y la rechazada deja el material donde estaba.
+
+    Se modela ahora aunque el flujo completo venga despues: el calculo del
+    esperado a devolver ya tiene que contarla, o el primer traspaso real
+    aparecera como un faltante.
+    """
+
+    PENDIENTE = "pendiente"
+    ACEPTADA = "aceptada"
+    RECHAZADA = "rechazada"
+    ESTADOS = (
+        (PENDIENTE, "Pendiente"),
+        (ACEPTADA, "Aceptada"),
+        (RECHAZADA, "Rechazada"),
+    )
+
+    org = models.ForeignKey(
+        Org, on_delete=models.CASCADE, related_name="transferencias_material"
+    )
+    material = models.ForeignKey(
+        MaterialCatalogo, on_delete=models.PROTECT, related_name="transferencias"
+    )
+    entrega = models.ForeignKey(
+        Profile, on_delete=models.CASCADE, related_name="transferencias_enviadas"
+    )
+    recibe = models.ForeignKey(
+        Profile, on_delete=models.CASCADE, related_name="transferencias_recibidas"
+    )
+    cantidad = models.DecimalField(max_digits=12, decimal_places=3, default=0)
+    serie = models.CharField(max_length=128, blank=True, default="")
+    estado = models.CharField(max_length=20, choices=ESTADOS, default=PENDIENTE)
+    motivo = models.TextField(blank=True, default="")
+    idempotency_key = models.CharField(max_length=128, db_index=True)
+    resuelta_en = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "campo_transferencia_material"
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["org", "idempotency_key"],
+                name="unique_transferencia_idempotente_por_org",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.material.codigo} x{self.cantidad} ({self.estado})"
+
+
+class ActaDeDevolucion(BaseModel):
+    """Lo que un tecnico devolvio al terminar su jornada, y que falto.
+
+    NO ES UN RESUMEN QUE SE PUEDA RECALCULAR DESPUES
+    ------------------------------------------------
+    Mientras esta `pendiente` todo se calcula al vuelo desde los movimientos,
+    que es la regla de esta fase entera. Pero al CONFIRMARLA se congelan los
+    numeros: un acta es lo que dos personas acordaron ese dia, y si el mes que
+    viene alguien corrige un movimiento viejo, el acta no puede cambiar sola y
+    contar otra historia.
+
+    Es la unica tabla de este modulo que guarda totales, y por esa razon.
+    """
+
+    PENDIENTE = "pendiente"
+    CONFIRMADA = "confirmada"
+    ESTADOS = (
+        (PENDIENTE, "Pendiente"),
+        (CONFIRMADA, "Confirmada"),
+    )
+
+    org = models.ForeignKey(
+        Org, on_delete=models.CASCADE, related_name="actas_devolucion"
+    )
+    profile = models.ForeignKey(
+        Profile, on_delete=models.CASCADE, related_name="actas_devolucion"
+    )
+    jornada = models.DateField(
+        default=timezone.localdate,
+        help_text="El dia de trabajo que cierra esta acta.",
+    )
+    estado = models.CharField(max_length=20, choices=ESTADOS, default=PENDIENTE)
+    recibida_por = models.ForeignKey(
+        Profile,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="actas_recibidas",
+    )
+    confirmada_en = models.DateTimeField(null=True, blank=True)
+    resumen = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text=(
+            "Los numeros congelados al confirmar. Vacio mientras esta "
+            "pendiente: hasta entonces se calculan desde los movimientos."
+        ),
+    )
+    notas = models.TextField(blank=True, default="")
+
+    class Meta:
+        db_table = "campo_acta_devolucion"
+        ordering = ["-jornada"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["org", "profile", "jornada"],
+                name="unique_acta_por_jornada",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"Acta {self.jornada} de {self.profile_id} ({self.estado})"
+
+
 class MutacionIdempotente(BaseModel):
     """Registro de control de idempotencia para mutaciones offline y reintentos móviles."""
 

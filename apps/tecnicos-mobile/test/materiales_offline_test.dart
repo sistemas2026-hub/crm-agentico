@@ -639,4 +639,80 @@ void main() {
               'de sesión para siempre');
     });
   });
+
+  group('9. La devolución viaja por la misma cola que el consumo', () {
+    test('Una devolución pendiente cuenta igual que un consumo', () async {
+      // No hay una cola aparte para devoluciones, y es a propósito: una
+      // devolución ES un movimiento de material. Dos colas serían dos caminos
+      // de sincronización para el mismo tipo de hecho, y dos lugares donde
+      // contar pendientes al cerrar sesión.
+      await gastar(id: 'dev-1', tipo: 'devolucion', cantidad: '7');
+
+      final pendientes = await ciclo.pendientesDe(
+        orgId: orgA, profileId: perfilA,
+      );
+
+      expect(pendientes.movimientosDeMaterial, 1);
+      expect(pendientes.hayPendientes, isTrue);
+    });
+
+    test('Y se nombra como devolución al cerrar sesión', () async {
+      await gastar(
+        id: 'dev-1', tipo: 'devolucion', cantidad: '7',
+        nombre: 'Conector SC/APC',
+      );
+
+      final pendientes = await ciclo.pendientesDe(
+        orgId: orgA, profileId: perfilA,
+      );
+
+      expect(
+        pendientes.detalle.any((l) => l.contains('devolución')),
+        isTrue,
+        reason: 'devolver y consumir se leen distinto en la lista',
+      );
+    });
+
+    test('Con una devolución sin subir NO se borra nada', () async {
+      await darKit();
+      await gastar(id: 'dev-1', tipo: 'devolucion', cantidad: '7');
+
+      final resultado = await ciclo.prepararPara(
+        orgId: orgB, profileId: perfilB,
+      );
+
+      expect(resultado.hayTrabajoAjenoRetenido, isTrue);
+      expect(
+        await localDb.getMovimientosMaterialSinConfirmar(
+          orgId: orgA, profileId: perfilA,
+        ),
+        hasLength(1),
+      );
+    });
+
+    test('Una devolución descuenta del saldo local igual que un consumo',
+        () async {
+      // Las dos cosas sacan material de la camioneta.
+      await darKit();
+      await gastar(id: 'dev-1', tipo: 'devolucion', cantidad: '7');
+
+      final saldo = await localDb.saldoLocalDe(
+        orgId: orgA, profileId: perfilA, codigo: 'CON-SC-APC',
+      );
+
+      expect(saldo, 17);
+    });
+
+    test('Reenviar la devolución no la duplica', () async {
+      await gastar(id: 'dev-1', tipo: 'devolucion', cantidad: '7');
+      await gastar(id: 'dev-1', tipo: 'devolucion', cantidad: '7');
+
+      expect(
+        await localDb.getMovimientosMaterialSinConfirmar(
+          orgId: orgA, profileId: perfilA,
+        ),
+        hasLength(1),
+      );
+    });
+  });
 }

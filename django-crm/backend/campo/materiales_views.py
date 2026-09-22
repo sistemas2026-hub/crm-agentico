@@ -38,8 +38,22 @@ from rest_framework import serializers, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from campo.models import MaterialCatalogo, MovimientoDeMaterial, OrdenTrabajo
+from campo.models import (
+    ActaDeDevolucion,
+    IncidenciaDeMaterial,
+    MaterialCatalogo,
+    MovimientoDeMaterial,
+    OrdenTrabajo,
+)
 from campo.permissions import IsCampoAuthenticated
+from campo.services.cierre_jornada import (
+    CierreBloqueado,
+    confirmar_acta,
+    motivos_para_no_cerrar,
+    registrar_incidencia,
+    resumen_de_jornada,
+    series_sin_devolver,
+)
 from campo.services.idempotencia import manejar_idempotencia
 from campo.services.materiales import (
     ConsumoInvalido,
@@ -292,6 +306,171 @@ class MovimientosMaterialView(APIView):
             {
                 "resultados": resultados,
                 "server_time": timezone.now().isoformat(),
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class IncidenciaEntradaSerializer(serializers.Serializer):
+    """Una diferencia de inventario, con su explicación."""
+
+    clave = serializers.CharField(max_length=128)
+    material = serializers.CharField(max_length=64)
+    tipo = serializers.ChoiceField(
+        choices=[t[0] for t in IncidenciaDeMaterial.TIPOS]
+    )
+    cantidad = serializers.DecimalField(max_digits=12, decimal_places=3)
+    serie = serializers.CharField(
+        max_length=128, required=False, allow_blank=True, default=""
+    )
+    # Se acepta vacio aca y lo rechaza el servicio, por linea. Si lo
+    # rechazara el serializador, una incidencia sin motivo tiraria el lote
+    # entero y con el las demas, que si estaban bien explicadas.
+    motivo = serializers.CharField(allow_blank=True, default="")
+    ocurrido_en = serializers.DateTimeField(required=False, allow_null=True)
+
+
+class IncidenciasMaterialView(APIView):
+    """``POST /api/campo/materiales/incidencias/`` — por qué falta material.
+
+    Va por su propio endpoint y no por el de movimientos porque no es un
+    movimiento: no mueve material de un lado a otro, explica por qué algo no
+    está. Mezclarlos obligaría a que cada consumidor del listado supiera
+    distinguir dos cosas distintas dentro de la misma tabla.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    @manejar_idempotencia
+    def post(self, request):
+        profile = request.profile
+        org = profile.org
+
+        crudas = request.data.get("incidencias")
+        if crudas is None:
+            crudas = [request.data]
+        serializer = IncidenciaEntradaSerializer(data=crudas, many=True)
+        serializer.is_valid(raise_exception=True)
+
+        codigos = {d["material"] for d in serializer.validated_data}
+        catalogo = {
+            m.codigo: m
+            for m in MaterialCatalogo.objects.filter(org=org, codigo__in=codigos)
+        }
+        desconocidos = sorted(codigos - set(catalogo))
+        if desconocidos:
+            return Response(
+                {"error": "MATERIAL_DESCONOCIDO", "codigos": desconocidos},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        resultados = []
+        for datos in serializer.validated_data:
+            try:
+                incidencia, era_nueva = registrar_incidencia(
+                    org=org,
+                    profile=profile,
+                    material=catalogo[datos["material"]],
+                    tipo=datos["tipo"],
+                    cantidad=datos["cantidad"],
+                    motivo=datos["motivo"],
+                    serie=datos.get("serie") or "",
+                    idempotency_key=datos["clave"],
+                    ocurrido_en=datos.get("ocurrido_en"),
+                )
+            except CierreBloqueado as e:
+                resultados.append({
+                    "clave": datos["clave"],
+                    "id": None,
+                    "estado": "rechazada",
+                    "motivo": str(e),
+                })
+                continue
+
+            resultados.append({
+                "clave": datos["clave"],
+                "id": str(incidencia.id),
+                "estado": "registrada",
+                "duplicada": not era_nueva,
+            })
+
+        return Response(
+            {"resultados": resultados, "server_time": timezone.now().isoformat()},
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class JornadaView(APIView):
+    """``GET /api/campo/jornada/`` — cómo va el día y qué falta para cerrarlo."""
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def get(self, request):
+        profile = request.profile
+        org = profile.org
+
+        acta = ActaDeDevolucion.objects.filter(
+            org=org, profile=profile, jornada=timezone.localdate()
+        ).first()
+
+        # Si el acta ya está confirmada se devuelve lo que se congeló, no un
+        # cálculo nuevo: el acta es lo que se acordó ese día, y recalcularla
+        # la haría contar otra historia si algo cambió después.
+        if acta is not None and acta.estado == ActaDeDevolucion.CONFIRMADA:
+            return Response({
+                "estado": acta.estado,
+                "resumen": acta.resumen,
+                "puede_cerrar": False,
+                "motivos": [],
+                "confirmada_en": acta.confirmada_en.isoformat(),
+            })
+
+        motivos = motivos_para_no_cerrar(profile, org)
+        return Response({
+            "estado": ActaDeDevolucion.PENDIENTE,
+            "resumen": resumen_de_jornada(profile, org),
+            "series_sin_devolver": series_sin_devolver(profile, org),
+            "puede_cerrar": not motivos,
+            "motivos": motivos,
+        })
+
+
+class CerrarJornadaView(APIView):
+    """``POST /api/campo/jornada/cerrar/`` — afirmar que la jornada terminó.
+
+    Es lo único de este módulo que puede negarse por el estado de las cosas.
+    Registrar hechos nunca se bloquea; afirmar que todo cuadra, sí: es una
+    declaración sobre el mundo, y no se puede hacer mientras la jornada se
+    contradiga a sí misma.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    @manejar_idempotencia
+    def post(self, request):
+        profile = request.profile
+        org = profile.org
+
+        try:
+            acta, era_nueva = confirmar_acta(
+                org=org, profile=profile, notas=request.data.get("notas", "") or ""
+            )
+        except CierreBloqueado as e:
+            return Response(
+                {
+                    "error": "JORNADA_INCOMPLETA",
+                    "detalle": str(e),
+                    "motivos": motivos_para_no_cerrar(profile, org),
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        return Response(
+            {
+                "acta_id": str(acta.id),
+                "estado": acta.estado,
+                "resumen": acta.resumen,
+                "duplicada": not era_nueva,
             },
             status=status.HTTP_201_CREATED,
         )
