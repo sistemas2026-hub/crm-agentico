@@ -141,6 +141,7 @@ if str(RAIZ) not in sys.path:
 
 from nucleo.config import fuente
 from nucleo.observabilidad.registro import registrar
+from nucleo.seguridad import interruptor
 from nucleo.seguimiento import importacion, importacion_io, operativo
 
 # Cuando se intento importar por ultima vez en cada tenant. Vive en memoria a
@@ -344,6 +345,48 @@ def una_pasada(seco: bool = False) -> list[dict]:
             # nucleo/observabilidad/registro.py (D20).
             r["error_config"] = f"{type(e).__name__}: {e}"
             registrar("reloj", "no se pudo leer la config", tenant=tenant, error=e)
+            salida.append(r)
+            continue
+
+        # EL INTERRUPTOR DE AUTONOMIA, ANTES DE CUALQUIER TRABAJO.
+        #
+        # Los dos trabajos de este proceso son autonomos por definicion: nadie
+        # los pidio, corren porque llego la hora. Cierran conversaciones,
+        # contestan tickets del proveedor y crean casos en el CRM sin que haya
+        # una persona mirando -- es exactamente lo que el interruptor existe
+        # para poder detener.
+        #
+        # El corte es POR TENANT y no por proceso: una empresa detenida no
+        # puede dejar sin atender a las demas. El interruptor del PROCESO
+        # entero ya existe aparte y es otra cosa ('RELOJ_HABILITADO', una
+        # decision de despliegue, ver el encabezado de este archivo).
+        #
+        # En seco se informa el estado pero NO se corta: la gracia de --dry-run
+        # es ver que HARIA, y ocultarlo cuando el interruptor esta tirado seria
+        # esconder justo lo que hay que revisar antes de reactivar.
+        try:
+            veredicto = interruptor.veredicto(tenant)
+        except (Exception, SystemExit) as e:                     # noqa: BLE001
+            # Fail-closed: si ni siquiera se pudo preguntar, no se trabaja.
+            veredicto = None
+            r["autonomia"] = {"estado": "desconocido",
+                              "error": f"{type(e).__name__}: {e}"}
+        if veredicto is not None:
+            r["autonomia"] = {"estado": veredicto.estado,
+                              "motivo": veredicto.motivo}
+        if not (veredicto and veredicto.permitido) and not seco:
+            porque = (r["autonomia"].get("motivo")
+                      or r["autonomia"].get("error") or "sin motivo")
+            registrar("reloj", "autonomia detenida: no se ejecuta ningun trabajo",
+                      tenant=tenant, motivo=porque)
+            # Las dos claves se informan igual, diciendo que NO se hicieron.
+            # Omitirlas cambiaria la forma del informe del ciclo segun el
+            # estado del interruptor, y quien lo lee (o lo prueba) tendria que
+            # adivinar si falta la clave porque no se hizo o porque se rompio.
+            saltado = {"omitido": "autonomia detenida", "motivo": porque}
+            r["vencimientos"] = dict(saltado)
+            r["importacion"] = dict(saltado)
+            registrar("reloj", "trabajo omitido por el interruptor", tenant=tenant)
             salida.append(r)
             continue
 

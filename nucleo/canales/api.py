@@ -34,6 +34,7 @@ import json
 import os
 from pathlib import Path
 import threading
+import uuid
 import time
 from datetime import datetime, timezone
 
@@ -59,6 +60,8 @@ from nucleo.herramientas import http as ejecutor_http
 from nucleo.herramientas import localidades as sincronizador_localidades
 from nucleo.ingesta import corpus as ingesta
 from nucleo.ingesta.docx import procesar
+from nucleo.seguridad import interruptor
+from nucleo.seguridad import idempotencia
 from nucleo.modelo import motor
 from nucleo.observabilidad import consumo
 from nucleo.persistencia import db as persistencia
@@ -899,7 +902,8 @@ class _CierreCancelado(Exception):
 
 def atender_turno(config, tenant: str, rol: str, id_sesion: str,
                   mensaje: str, canal: str, profile_id: str | None = None,
-                  nombre_colaborador: str = "") -> dict:
+                  nombre_colaborador: str = "",
+                  evento_id: str | None = None) -> dict:
     """
     Un turno completo de conversacion: pausa por escalamiento, modelo,
     persistencia y evaluacion de escalamiento.
@@ -913,6 +917,15 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
     el webhook de WhatsApp -- ahi no hay un colaborador del CRM de por medio,
     solo se propaga a asistente.tool_calls.profile_id para la auditoria por
     persona (ver supabase/202608180800_tool_calls_profile_id.sql).
+
+    'evento_id': el identificador ESTABLE del mensaje entrante, cuando el canal
+    tiene uno. En WhatsApp es el wamid, y es estable porque Meta reentrega el
+    mismo mensaje con el mismo id -- por eso sirve como identidad de la
+    solicitud para el control de repeticion de operaciones externas (ver
+    nucleo/seguridad/idempotencia.py). En /chat no existe: ahi el turno recibe
+    un identificador propio y el control protege el reintento DENTRO del turno,
+    no la reentrega del turno entero. Eso esta dicho tambien en la migracion,
+    y no se disimula: la garantia vale lo que valga este dato.
 
     Devuelve {'respuesta', 'verificado', 'pausada'}. Levanta motor.ErrorMotor
     si el rol o el mensaje no son atendibles -- quien llama decide si eso es un
@@ -1373,7 +1386,9 @@ def atender_turno(config, tenant: str, rol: str, id_sesion: str,
             lambda que: _efecto_del_turno(tenant, canal, id_sesion, estado, que)):
         respuesta, registro_herramientas, medios_pendientes = motor.responder(
             config, rol, mensaje, estado["historial"], estado["sesion"],
-            nota_continuidad=nota_continuidad)
+            nota_continuidad=nota_continuidad,
+            origen=(f"evento:{evento_id}" if evento_id
+                    else f"turno:{uuid.uuid4()}"))
 
     # --- D24, punto 1: el control no cambio mientras el modelo pensaba ------
     # Si cambio (una persona intervino, se cerro, otra version), la respuesta
@@ -3406,13 +3421,118 @@ def interno_ejecutar_herramienta(nombre: str):
     if not isinstance(argumentos, dict):
         return jsonify({"error": "El cuerpo tiene que ser un objeto JSON."}), 400
 
+    # La cabecera es el unico identificador ESTABLE que puede aportar quien
+    # llama: si reenvia la misma peticion con la misma clave, la mutacion no
+    # sale dos veces (ver nucleo/seguridad/idempotencia.py). Se aceptan los dos
+    # nombres por la misma razon que campo/services/idempotencia.py los acepta.
+    # Sin cabecera se ejecuta igual, como siempre -- no se rompe a ningun
+    # llamador existente -- pero un reenvio no se reconoce.
+    clave_idem = (request.headers.get("Idempotency-Key")
+                  or request.headers.get("X-Idempotency-Key") or "").strip()
     try:
-        salida = motor.ejecutar_para_servicio(config, herramienta, argumentos)
+        salida = motor.ejecutar_para_servicio(
+            config, herramienta, argumentos,
+            origen=f"idem:{clave_idem}" if clave_idem else None)
+    except motor.AutonomiaDetenida as e:
+        # 409 y no 500: la peticion estaba bien, el sistema decidio no
+        # ejecutarla. Quien llama tiene que poder distinguir "fallo" de "no se
+        # hizo a proposito", porque la reaccion correcta no es la misma.
+        #  M06-F: el motivo va al log, no a la respuesta (regla de origin,
+        #  tests/test_errores_http.py): la respuesta lleva un codigo fijo.
+        registrar("interno", "accion bloqueada por el interruptor",
+                  herramienta=nombre, error=e)
+        return jsonify({"error": "AUTONOMIA_DETENIDA",
+                        "detalle": "Las acciones automaticas de esta empresa "
+                                   "estan detenidas."}), 409
+    except motor.OperacionNoEjecutada as e:
+        registrar("interno", "operacion externa no ejecutada",
+                  herramienta=nombre, error=e)
+        codigo = e.resultado.codigo           # una constante de idempotencia.py
+        return jsonify({"error": codigo,
+                        "detalle": "La operacion no se ejecuto: el registro de "
+                                   "operaciones externas lo impidio."}), 409
     except Exception as e:
         return fallo(502, "herramienta_fallo", "La herramienta no pudo completarse.",
                      componente="interno", e=e, estado_proveedor=estado_http_de(e))
 
     return jsonify({"resultado": salida})
+
+
+@app.get("/autonomia")
+def autonomia_estado():
+    """
+    El estado del interruptor de autonomia de una empresa, y su historial.
+
+    Solo lectura, y a proposito NO carga la configuracion del tenant: el
+    interruptor tiene que poder consultarse aunque la config este rota, que es
+    justo uno de los momentos en que alguien querria tirarlo.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        veredicto = interruptor.veredicto(tenant)
+        historial = interruptor.historial(tenant, limite=20)
+    except Exception as e:
+        return fallo(500, "autonomia_no_legible",
+                     "No se pudo leer el interruptor de autonomia.",
+                     componente="autonomia", e=e)
+    return jsonify({
+        "estado": veredicto.estado,
+        "permitido": veredicto.permitido,
+        "motivo": veredicto.motivo,
+        "actor": veredicto.actor,
+        "historial": [
+            {"estado": h["estado"], "estado_anterior": h["estado_anterior"],
+             "actor": h["actor"], "motivo": h["motivo"],
+             "creado_en": h["creado_en"].isoformat() if h["creado_en"] else None}
+            for h in historial],
+    })
+
+
+@app.post("/autonomia/detener")
+def autonomia_detener():
+    """
+    Tira el interruptor: esta empresa deja de ejecutar acciones autonomas.
+
+    Cuerpo: {"actor": "...", "motivo": "..."}. Los dos obligatorios -- una
+    parada de emergencia sin nombre ni razon es la que despues nadie se anima a
+    levantar porque no sabe que estaba pasando.
+
+    Quien puede llamarla: esta ruta esta detras de _exigir_token_de_servicio()
+    como todas las internas, y del lado de la app web el gate de ADMIN es el
+    mismo que ya usan /agentes y /configuracion-guiada. NO es una ruta publica.
+    """
+    return _mover_autonomia(interruptor.detener)
+
+
+@app.post("/autonomia/reactivar")
+def autonomia_reactivar():
+    """Levanta el interruptor. Mismo cuerpo y mismos requisitos que detener."""
+    return _mover_autonomia(interruptor.reactivar)
+
+
+def _mover_autonomia(accion):
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    cuerpo = request.get_json(silent=True) or {}
+    try:
+        fila = accion(tenant, (cuerpo.get("actor") or "").strip(),
+                      (cuerpo.get("motivo") or "").strip())
+    except ValueError as e:
+        # Falta el actor o el motivo: es un pedido incompleto, no una falla.
+        return jsonify({"error": mensaje_publico(
+            e, "Hacen falta el actor y el motivo.")}), 400
+    except Exception as e:
+        return fallo(500, "autonomia_no_movida",
+                     "No se pudo cambiar el interruptor de autonomia.",
+                     componente="autonomia", e=e)
+    return jsonify({
+        "estado": fila["estado"], "estado_anterior": fila["estado_anterior"],
+        "actor": fila["actor"], "motivo": fila["motivo"],
+        "creado_en": fila["creado_en"].isoformat() if fila["creado_en"] else None,
+    })
 
 
 @app.get("/configuracion/planes-venta")
@@ -5309,29 +5429,44 @@ def conversaciones_reiniciar_equipo(id_conversacion):
     if herramienta is None:
         return jsonify({"error": "Esta empresa no tiene conectado el reinicio de equipos."}), 409
 
-    # La medicion de ANTES, para que la comprobacion posterior tenga contra
-    # que comparar. Se lee del cache si es reciente -- no hace falta molestar
-    # al proveedor dos veces en el mismo minuto.
-    previa = None
-    with _optica_lock:
-        guardado = _optica.get((tenant, serial))
-    if guardado:
-        previa = guardado[1].get("optica")
-
+    # M06-F: EL EFECTO VA POR LA MISMA CADENA QUE CUALQUIER R3.
+    #
+    # Hasta aca esta ruta llamaba al ejecutor directo. Es una persona la que
+    # decide, y eso no cambia: pero un reinicio es irreversible (M06-A) y la
+    # frontera solo lo deja salir con una aprobacion atada a la accion exacta.
+    # En vez de abrir una segunda puerta, el boton hace lo que haria la cola:
+    #
+    #   1. deja la propuesta en asistente.acciones_propuestas, ya ligada a esta
+    #      conversacion, con la huella de sus argumentos y un origen propio;
+    #   2. la aprueba QUIEN APRIETA EL BOTON (su nombre queda en el sello);
+    #   3. y sigue los mismos pasos que /acciones/propuestas/<id>/aprobar:
+    #      kill switch, techo, etapa, autorizacion, sello, previas frescas,
+    #      idempotencia, frontera, efecto, desenlace con su evento.
+    #
+    # Las cuatro condiciones de arriba -- motivo, control humano, dueño o
+    # ADMIN, conversacion abierta -- siguen siendo las de esta ruta; la cadena
+    # se suma, no las reemplaza.
+    quien = autor_nombre or autor_id
+    argumentos = {"sn_onu": serial}
+    sesion_min = Sesion(identificador_canal=quien)
+    sesion_min.sn_onu = serial
+    if identidad.get("id_cliente"):
+        sesion_min.id_cliente = identidad.get("id_cliente")
     try:
-        ejecutor_http.ejecutar(herramienta, {"sn_onu": serial}, tenant=tenant,
-                               variables_tenant=getattr(config, "variables_tenant", None))
+        accion_id, _ = persistencia.guardar_accion_propuesta(
+            tenant, herramienta.nombre, argumentos,
+            _resumen_de_reinicio(herramienta, argumentos), "bandeja", quien,
+            str(id_conversacion),
+            herramienta.aprobacion.vigencia_minutos if herramienta.aprobacion else None,
+            hash_argumentos=idempotencia.hash_de(argumentos),
+            origen=f"bandeja:{id_conversacion}:{uuid.uuid4()}",
+            contexto=motor._contexto_de_revalidacion(config, herramienta,
+                                                     sesion_min, None))
     except Exception as e:
-        registrar("equipo", "no se pudo reiniciar el equipo",
+        registrar("equipo", "no se pudo dejar el reinicio en la cola",
                   conversation_id=id_interno(id_conversacion), error=e)
-        return jsonify({"error": "El sistema del ISP no aceptó el reinicio."}), 502
-
-    # Queda anotado para COMPROBARLO. 'ACCION_CONFIRMADA' no significa que el
-    # cliente tenga internet: significa que el equipo reinicio y volvio, que
-    # es lo unico que el sistema puede medir. Lo otro lo sabe el cliente.
-    persistencia.guardar_verificacion_pendiente(
-        tenant, id_conversacion, "reiniciar_ont",
-        {"espera_segundos": 120, "max_intentos": 3, "medicion_previa": previa})
+        return jsonify({"error": "No se pudo registrar el pedido de reinicio. "
+                                 "No se reinicio nada."}), 500
 
     # El rastro de quien lo hizo y por que. El motivo es obligatorio justamente
     # para que este renglon exista: dentro de un mes, saber por que alguien
@@ -5339,10 +5474,30 @@ def conversaciones_reiniciar_equipo(id_conversacion):
     # 'autor_nombre' NO va al log -- solo al expediente.
     registrar("equipo", "reinicio pedido por una persona",
               conversation_id=id_interno(id_conversacion),
-              autor_usuario_id=autor_id, con_motivo=bool(motivo))
+              autor_usuario_id=autor_id, con_motivo=bool(motivo),
+              accion_id=accion_id)
 
-    return jsonify({"ok": True, "reiniciado": True, "verificando": True,
-                    "autor": autor_nombre, "motivo": motivo})
+    salida = _aprobar_y_ejecutar(config, tenant, accion_id, quien)
+    respuesta, codigo_http = salida if isinstance(salida, tuple) else (salida, 200)
+    cuerpo_respuesta = respuesta.get_json() or {}
+    if codigo_http == 200 and cuerpo_respuesta.get("ok"):
+        return jsonify({"ok": True, "reiniciado": True, "verificando": True,
+                        "autor": autor_nombre, "motivo": motivo,
+                        "accion_id": accion_id})
+    cuerpo_respuesta.setdefault("error", "No se reinicio el equipo.")
+    cuerpo_respuesta["accion_id"] = accion_id
+    return jsonify(cuerpo_respuesta), codigo_http
+
+
+def _resumen_de_reinicio(herramienta, argumentos: dict) -> str:
+    """El resumen de la propuesta que deja el boton: el de la plantilla del
+    tenant, igual que una propuesta del modelo."""
+    if herramienta.plantilla_resumen:
+        try:
+            return herramienta.plantilla_resumen.format(**argumentos)
+        except (KeyError, IndexError):
+            pass
+    return f"{herramienta.nombre}(sn_onu={argumentos.get('sn_onu')})"
 
 
 @app.get("/conversaciones/<id_conversacion>/equipo")
@@ -6191,6 +6346,20 @@ def acciones_propuesta_aprobar(id_accion):
         return jsonify({"error": "Falta 'revisado_por': una ejecucion aprobada "
                                  "sin responsable no se puede auditar."}), 400
 
+    return _aprobar_y_ejecutar(config, tenant, id_accion, quien)
+
+
+def _aprobar_y_ejecutar(config, tenant: str, id_accion: str, quien: str):
+    """
+    Los cuatro pasos de §9.3 sobre una accion ya propuesta: reservar (que es
+    aprobar, y para una irreversible escribe el sello), revalidar, ejecutar,
+    resolver. Devuelve la respuesta Flask.
+
+    M06-F: vive aparte del endpoint porque hay DOS entradas humanas a la misma
+    cadena -- aprobar una propuesta de la cola, y el boton de reinicio de la
+    Bandeja -- y las dos tienen que ser exactamente el mismo camino. Una
+    segunda copia de estos pasos seria una segunda maquina de aprobacion.
+    """
     # ---- PASO 1: reservar. Transaccion corta y condicionada (§9.3) ----------
     try:
         reserva = persistencia.reservar_accion(tenant, id_accion, quien)
@@ -6237,7 +6406,43 @@ def acciones_propuesta_aprobar(id_accion):
                         "detalle": veredicto.codigo, "estado": "vencida"}), 409
 
     # ---- PASO 3: ejecutar. FUERA de transaccion -----------------------------
-    resultado, codigo_error = motor.ejecutar_accion_aprobada(config, reservada)
+    # M06-F: UNA sola cadena. Una irreversible (R3/R4 y las excepciones de
+    # M06-E) sigue el mismo ciclo B5 -- reservar, revalidar, ejecutar,
+    # resolver -- y lo unico que cambia es QUIEN ejecuta: la puerta critica de
+    # la frontera, que exige la aprobacion atada a la accion exacta. Esa
+    # aprobacion es la reserva de arriba: 'reservar_accion' escribio el sello
+    # en la misma escritura que paso la fila a 'ejecutando'.
+    #
+    # Se ejecuta la fila RELEIDA de la base, nunca el cuerpo de este request ni
+    # el 'returning' de la reserva: lo que sale es lo que quedo escrito.
+    verificacion_pendiente = None
+    if getattr(herramienta, "irreversible", False):
+        try:
+            fila = persistencia.accion_propuesta_de(tenant, id_accion)
+        except Exception as e:
+            registrar("acciones", "fallo al releer la accion reservada", error=e)
+            fila = None
+        if not fila or fila.get("estado") != "ejecutando":
+            # No se ejecuto nada: vuelve a estar disponible.
+            persistencia.liberar_accion(tenant, id_accion, "relectura_fallida")
+            return jsonify({"error": "No se pudo releer la accion aprobada. No "
+                                     "se ejecuto nada: se puede reintentar.",
+                            "codigo": "relectura_fallida", "estado": "pendiente"}), 503
+        resultado, codigo_error, verificacion_pendiente =             motor.ejecutar_accion_irreversible(config, fila, tenant)
+    else:
+        resultado, codigo_error = motor.ejecutar_accion_aprobada(config, reservada)
+
+    # Una guarda del CODIGO freno la accion antes del efecto (kill switch,
+    # techo, aprobacion alterada, previas que ya no se cumplen, idempotencia):
+    # no salio nada hacia el tercero. No es un fallo del sistema externo y no
+    # queda como 'ejecutada_fallo'. Queda 'vencida' con el codigo del bloqueo:
+    # la aprobacion era para ESE momento y no se reutiliza sola.
+    if codigo_error in motor.CODIGOS_DE_BLOQUEO:
+        persistencia.vencer_accion(tenant, id_accion, codigo_error, conv)
+        return jsonify({"ok": False, "estado": "vencida", "codigo": codigo_error,
+                        "error": (resultado or {}).get("error")
+                                 or "Una guarda del sistema freno esta accion.",
+                        "resultado": resultado}), 409
     incierto = bool(codigo_error) and _es_incierto(codigo_error)
 
     # ---- PASO 3b: confirmar el efecto, releyendo ----------------------------
@@ -6262,6 +6467,16 @@ def acciones_propuesta_aprobar(id_accion):
         # la reejecuta sola (§9.3 paso 5).
         registrar("acciones", "la accion se ejecuto y no se pudo guardar el desenlace",
                   error=e)
+
+    if verificacion_pendiente and conv and not codigo_error:
+        # El efecto salio EN ESTA pasada (reiniciar_ont): se comprueba despues,
+        # contra la conversacion de la que salio la propuesta.
+        try:
+            persistencia.guardar_verificacion_pendiente(
+                tenant, conv, herramienta.nombre, verificacion_pendiente)
+        except Exception as e:
+            registrar("acciones", "no se pudo anotar la verificacion de la accion",
+                      error=e)
 
     if incierto:
         return jsonify({"ok": False, "estado": "desconocida",
@@ -6376,6 +6591,19 @@ def acciones_propuesta_rechazar(id_accion):
         return jsonify({"error": "No se pudo guardar."}), 500
 
     if not existe:
+        # M06-F: rechazar es un compare-and-set sobre 'pendiente'. Antes pisaba
+        # cualquier estado -- una accion ya 'ejecutando' (aprobada, con su sello
+        # y quiza con el efecto en viaje) podia quedar como 'rechazada' y
+        # borrar el rastro de que salio. Si la fila existe, se dice en que
+        # estado esta; si no, 404.
+        try:
+            actual = persistencia.accion_propuesta_de(tenant, id_accion)
+        except Exception:
+            actual = None
+        if actual:
+            return jsonify({"error": f"Esta accion ya esta '{actual['estado']}', "
+                                     f"no se puede rechazar.",
+                            "estado": actual["estado"]}), 409
         return jsonify({"error": f"La accion '{id_accion}' no existe."}), 404
     return jsonify({"ok": True, "estado": "rechazada"})
 
@@ -6826,7 +7054,8 @@ def _procesar_mensaje_whatsapp(config, tenant: str, rol: str, entrante: dict) ->
                 "Cuéntame en palabras qué necesitas y te ayudo.")
             return
 
-        salida = atender_turno(config, tenant, rol, de, texto, "whatsapp")
+        salida = atender_turno(config, tenant, rol, de, texto, "whatsapp",
+                               evento_id=wamid)
 
         # El adjunto se guarda DESPUES del turno, con la conversacion ya
         # creada: es lo que le da el conversation_id al que colgarlo. Va

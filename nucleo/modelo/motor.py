@@ -65,9 +65,14 @@ from nucleo.observabilidad import consumo
 from nucleo.recuperacion.prompt import construir_system
 from nucleo.recuperacion.busqueda import (recuperar, bloque_de_contexto,
                                           registrar_sin_resultados)
+from nucleo.seguridad import aprobacion as aprobaciones
+from nucleo.seguridad import frontera
+from nucleo.seguridad import idempotencia
+from nucleo.seguridad import interruptor
 from nucleo.seguridad import listas_blancas
 from nucleo.seguridad import redaccion
 from nucleo.seguridad import salida as guardia_salida
+from nucleo.seguridad import techo as techos
 from nucleo.seguridad.verificacion import Sesion, nivel_requerido, es_factor_de_posesion
 from nucleo.observabilidad.registro import registrar
 
@@ -102,6 +107,48 @@ CODIGOS_DE_BLOQUEO = frozenset({
     "HERRAMIENTA_DESCONOCIDA",
     "LIMITE_DE_CONVERSACION",
     "CAMBIO_DE_CONTROL",
+    # F1.1 y F1.2 (15/09/2026). Los cinco son el codigo frenando una
+    # ESCRITURA, no un tercero fallando: el interruptor de autonomia
+    # tirado, o el registro de operaciones externas negandose a repetir
+    # una mutacion. Ver nucleo/seguridad/interruptor.py e idempotencia.py.
+    interruptor.CODIGO_BLOQUEO,
+    idempotencia.EN_CURSO,
+    idempotencia.CLAVE_REUTILIZADA,
+    idempotencia.FALLIDA_PREVIA,
+    idempotencia.SIN_REGISTRO,
+    # Agregado el 19/09/2026. El registro contesto una decision que
+    # idempotencia.py no conoce: ahora la rechaza en vez de ejecutar, y sin
+    # este renglon el modelo lo leeria como un error de un tercero en vez de
+    # como una guarda del codigo.
+    idempotencia.DECISION_DESCONOCIDA,
+    # Agregado el 17/09/2026 (paso 10.10). Antes ese caso --la tabla del
+    # registro no existe-- ejecutaba la llamada externa, asi que no tenia codigo
+    # de bloqueo que declarar. Ahora la rechaza, y sin este renglon el modelo lo
+    # leeria como un error de un tercero en vez de como una guarda del codigo.
+    idempotencia.CONTROL_AUSENTE,
+    # Paso 10.14A: la frontera de acciones externas. Los tres son el codigo
+    # frenando una escritura -- sin tenant valido, sin permiso, o con un
+    # permiso de OTRA empresa. Ver nucleo/seguridad/frontera.py.
+    frontera.SIN_TENANT,
+    frontera.SIN_AUTORIZAR,
+    frontera.TENANT_DISTINTO,
+    # M06-A (21/09/2026): la puerta de las irreversibles. Una irreversible sin
+    # la aprobacion atada a la accion, un permiso critico usado para otra
+    # cosa, y las previas que ya no se cumplen al momento de aprobar.
+    frontera.IRREVERSIBLE_SIN_APROBACION,
+    frontera.PERMISO_DE_OTRA_ACCION,
+    "PREVIAS_NO_VIGENTES_AL_APROBAR",
+    "CONTEXTO_DE_APROBACION_INCOHERENTE",
+    # M06-B (21/09/2026): el techo de autonomia. Todos fallan cerrado y
+    # ninguno es un tercero fallando: el codigo no sabe, o sabe que no alcanza.
+    "TECHO_AUTONOMIA_AUSENTE",
+    "TECHO_AUTONOMIA_INVALIDO",
+    "TECHO_AUTONOMIA_NO_LEGIBLE",
+    "TECHO_AUTONOMIA_NO_INSTALADO",
+    "TECHO_AUTONOMIA_DE_OTRO_TENANT",
+    "TECHO_AUTONOMIA_INSUFICIENTE",
+    "NIVEL_REQUERIDO_INVALIDO",
+    frontera.APROBACION_REQUERIDA,
 })
 
 
@@ -122,6 +169,48 @@ def _cancelada_por_cambio_de_control(nombre: str) -> dict | None:
             "instruccion_interna": "Una persona del equipo tomo esta conversacion. "
                 "No ejecutes ninguna accion ni la reintentes, y no le prometas "
                 "nada al cliente: la persona sigue desde aca."}
+
+
+class AutonomiaDetenida(Exception):
+    """
+    El interruptor de autonomia de esta empresa esta tirado (o no se pudo
+    leer), asi que esta accion no se ejecuta.
+
+    Es una EXCEPCION y no un valor de retorno por el mismo motivo que
+    FaltaIdentidadEnSesion: ningun camino puede ignorarla por descuido. Y
+    NO hereda de ErrorMotor a proposito -- ErrorMotor se traduce a un 400 en
+    nucleo/canales/api.py, y esto no es una peticion mal hecha: es una
+    proteccion que se activo con una peticion perfectamente valida.
+
+    Los cuatro llamadores de _ejecutar_tool() que no son responder()
+    (nucleo/seguimiento/agendamiento.py, nucleo/canales/api.py) la atrapan con
+    su 'except Exception' de siempre y caen a su camino de fallo, que en los
+    dos casos es el correcto: no se agenda la visita sola, y se sigue sin el
+    dato externo.
+    """
+
+    def __init__(self, herramienta: str, veredicto):
+        self.herramienta = herramienta
+        self.veredicto = veredicto
+        super().__init__(f"autonomia detenida ({veredicto.estado}): "
+                         f"{veredicto.motivo}")
+
+
+class OperacionNoEjecutada(Exception):
+    """
+    El registro de operaciones externas se nego a ejecutar esta mutacion: ya
+    esta en curso en otro proceso, la clave se reuso con otros argumentos, o
+    fallo antes y el reintento no esta autorizado.
+
+    Que NO incluye: la repeticion de una operacion ya exitosa. Esa no es un
+    bloqueo -- se devuelve lo que contesto el tercero la primera vez, que es
+    exactamente el punto de la idempotencia.
+    """
+
+    def __init__(self, herramienta: str, resultado):
+        self.herramienta = herramienta
+        self.resultado = resultado
+        super().__init__(f"{resultado.decision}: {resultado.motivo}")
 
 
 class FaltaIdentidadEnSesion(ErrorMotor):
@@ -1497,11 +1586,70 @@ def _no_se_propone(herramienta, veredicto) -> dict:
             f"intentarlo en esta conversacion. Si insiste, que lo vea una "
             f"persona del area."),
     }
+def _argumentos_de_ultima_llamada(historial: list[dict] | None,
+                                  nombre: str) -> dict | None:
+    """Con que argumentos pidio el modelo 'nombre' la ULTIMA vez en esta
+    conversacion -- los mismos que decidieron la precondicion. None si nunca
+    la pidio."""
+    for msg in reversed(historial or []):
+        if msg.get("role") != "assistant":
+            continue
+        for llamada in reversed(msg.get("tool_calls") or []):
+            funcion = llamada.get("function") or {}
+            if funcion.get("name") == nombre:
+                args = funcion.get("arguments")
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args or "{}")
+                    except ValueError:
+                        args = {}
+                return dict(args or {})
+    return None
+
+
+def _contexto_de_revalidacion(config, herramienta, sesion,
+                              historial: list[dict] | None) -> dict:
+    """
+    Lo MINIMO para volver a medir, al aprobar, lo que decidio la propuesta.
+
+    Una accion irreversible se aprueba minutos u horas despues de proponerse,
+    y sus precondiciones ('exige_previas') se cumplieron sobre el estado de
+    ENTONCES. Para no ejecutar sobre una medicion vieja, la aprobacion las
+    vuelve a correr -- y para eso hacen falta dos cosas que ya no estan:
+
+      'sesion'  los identificadores tecnicos que inyectan la accion, sus
+                previas y su verificacion (hoy sn_onu, id_cliente). No se
+                nombran: se sacan de 'inyectar_sesion' de cada herramienta,
+                asi que un tenant con otro vocabulario funciona igual.
+      'previas' con que argumentos pidio el modelo cada previa la ultima vez.
+
+    No guarda la ficha del cliente ni las respuestas: solo lo que hace falta
+    para repetir la pregunta.
+    """
+    por_nombre = {h.nombre: h for h in (config.herramientas if config else [])}
+    involucradas = [herramienta]
+    for previa in herramienta.exige_previas:
+        if previa.herramienta in por_nombre:
+            involucradas.append(por_nombre[previa.herramienta])
+    if herramienta.verificacion:
+        for comprobacion in herramienta.verificacion.comprobaciones:
+            if comprobacion.herramienta in por_nombre:
+                involucradas.append(por_nombre[comprobacion.herramienta])
+    atributos = sorted({attr for h in involucradas
+                        for attr in (h.inyectar_sesion or {}).values()})
+    datos_sesion = {a: getattr(sesion, a, None) for a in atributos}
+    previas = {}
+    for previa in herramienta.exige_previas:
+        args = _argumentos_de_ultima_llamada(historial, previa.herramienta)
+        if args is not None:
+            previas[previa.herramienta] = args
+    return {"sesion": datos_sesion, "previas": previas}
 
 
 def _ejecutar_propuesta_de_accion(herramienta, sesion, argumentos_modelo: dict,
                                   tenant: str, rol: str, propuesto_por: str,
-                                  config=None) -> dict:
+                                  *, config=None, historial: list[dict] | None = None,
+                                  origen: str | None = None) -> dict:
     """
     Para una Herramienta con aprobacion_humana=True (nucleo/config/
     schema.py): resuelve los argumentos reales -- igual que _ejecutar_tool,
@@ -1536,8 +1684,27 @@ def _ejecutar_propuesta_de_accion(herramienta, sesion, argumentos_modelo: dict,
         return _no_se_propone(herramienta, veredicto)
 
     resumen = _resumen_de_accion(herramienta, argumentos)
+    extra = {}
+    if herramienta.irreversible:
+        #  M06-A: la aprobacion de una irreversible se ata a la accion EXACTA.
+        #  La huella se calcula aca, sobre los argumentos resueltos -- los
+        #  mismos que se guardan y los mismos que saldran --, y el origen es
+        #  la solicitud que la pidio. Sin origen no se propone: una
+        #  aprobacion que no dice de donde salio no se puede auditar.
+        #
+        #  M06-F: va DENTRO de la propuesta de B5 (misma fila, misma
+        #  deduplicacion T12, mismo vinculo con la conversacion), no en una
+        #  cola aparte. Lo unico que agrega son las tres columnas que el sello
+        #  necesita al aprobar.
+        extra = {
+            "hash_argumentos": idempotencia.hash_de(argumentos),
+            "origen": (origen or "").strip() or f"propuesta:{uuid.uuid4()}",
+            "contexto": _contexto_de_revalidacion(config, herramienta, sesion,
+                                                  historial),
+        }
     accion_id, ya_existia = persistencia.guardar_accion_propuesta(
-        tenant, herramienta.nombre, argumentos, resumen, rol, propuesto_por)
+        tenant, herramienta.nombre, argumentos, resumen, rol, propuesto_por,
+        **extra)
     if sesion is not None and not ya_existia:
         # Queda anotada para que api.py le ponga su conversation_id en cuanto
         # exista -- mismo patron que 'medios_pendientes' y las marcas de TV.
@@ -1577,21 +1744,222 @@ def ejecutar_accion_aprobada(config, accion: dict) -> tuple[dict, str | None]:
     if herramienta is None:
         return {"error": f"La herramienta '{accion['herramienta']}' ya no "
                          f"existe en el catalogo."}, "HERRAMIENTA_DESCONOCIDA"
+    # El interruptor de autonomia NO frena esto: un humano ya aprobo esta
+    # accion concreta, asi que no es autonoma (ver interruptor.es_accion_autonoma).
+    # La idempotencia SI aplica -- aprobar dos veces la misma propuesta, o
+    # reintentar tras un timeout, no puede cobrar dos veces. El origen es el id
+    # de la propuesta, que es estable por construccion: es la fila que el humano
+    # aprobo.
     try:
         if herramienta.tipo == "http":
-            resultado = (ejecutor_http.ejecutar_asincrono(herramienta, accion["argumentos"],
-                                                          tenant=config.identidad.slug)
+            def _llamar():
+                return (ejecutor_http.ejecutar_asincrono(
+                            herramienta, accion["argumentos"],
+                            tenant=config.identidad.slug)
                         if herramienta.asincrona else
                         ejecutor_http.ejecutar(herramienta, accion["argumentos"],
-                                               config.identidad.slug, config.variables_tenant))
-            return resultado, None
+                                               config.identidad.slug,
+                                               config.variables_tenant))
+
+            # LA PUERTA HUMANA de la frontera (paso 10.14A). No consulta el
+            # interruptor --una persona decidio esta accion concreta-- pero
+            # exige las dos cosas que la vuelven auditable: quien aprobo y
+            # contra que fila se comprueba. El id de la propuesta es evidencia
+            # estable por construccion: es la fila que el humano aprobo.
+            propuesta = str(accion.get("id") or accion.get("accion_id") or "")
+            with frontera.humana(
+                    config.identidad.slug, herramienta.nombre,
+                    actor=str(accion.get("aprobada_por")
+                              or accion.get("revisado_por")
+                              or accion.get("actor") or "").strip()
+                          or "aprobacion_humana",
+                    evidencia=propuesta or "(propuesta sin id)",
+                    origen=f"accion_aprobada:{propuesta}"):
+                r = idempotencia.ejecutar(
+                    config.identidad.slug, herramienta.nombre,
+                    accion["argumentos"],
+                    f"accion_aprobada:{propuesta}", _llamar)
+            if r.hubo_respuesta:
+                return r.respuesta, None
+            return ({"error": "Esta accion no se ejecuto: " + r.motivo},
+                    r.codigo)
         return {"error": f"Tipo '{herramienta.tipo}' no soportado para "
                          f"ejecucion aprobada."}, "TIPO_NO_SOPORTADO"
+    except frontera.AccionExternaNoAutorizada as e:
+        #  La frontera freno la escritura (M06-A: por ejemplo, una
+        #  irreversible que llego por este camino en vez de por
+        #  ejecutar_accion_irreversible). Es un BLOQUEO del codigo, no un
+        #  error de la API: se devuelve su codigo, que esta en
+        #  CODIGOS_DE_BLOQUEO, y no el texto de la excepcion.
+        return {"error": f"Esta accion no se ejecuto: {e.motivo}"}, e.codigo
     except Exception as e:
         return {"error": "La API no acepto la accion."}, f"{type(e).__name__}: {e}"[:200]
 
 
-def ejecutar_para_servicio(config, herramienta, argumentos_modelo: dict) -> dict:
+PREVIAS_NO_VIGENTES = "PREVIAS_NO_VIGENTES_AL_APROBAR"
+CONTEXTO_INCOHERENTE = "CONTEXTO_DE_APROBACION_INCOHERENTE"
+
+
+def _sesion_de_contexto(contexto: dict | None) -> Sesion:
+    """
+    La sesion MINIMA para repetir, al aprobar, las lecturas que decidieron la
+    propuesta. Solo trae los identificadores tecnicos que se guardaron en
+    '_contexto_de_revalidacion' -- nada de la ficha del cliente.
+
+    'verificado=True' porque esos identificadores salieron de una sesion que
+    YA estaba verificada al proponer; sin eso, _resolver_argumentos los
+    descartaria y las previas preguntarian por nadie.
+    """
+    sesion = Sesion(identificador_canal="aprobacion")
+    sesion.verificado = True
+    for atributo, valor in ((contexto or {}).get("sesion") or {}).items():
+        if hasattr(sesion, atributo):
+            setattr(sesion, atributo, valor)
+    return sesion
+
+
+def _previas_frescas_no_cumplidas(config, herramienta, sesion,
+                                  contexto: dict | None,
+                                  tenant: str) -> list[str]:
+    """
+    Vuelve a MEDIR cada precondicion de 'herramienta' ahora, no la lee del
+    historial. Vacio = todas se cumplen hoy.
+
+    Falla cerrado: una previa que no se pudo medir (la API no contesta, falta
+    el identificador, la herramienta ya no existe) cuenta como NO cumplida. El
+    criterio es el de siempre -- Precondicion.acepta sobre el campo declarado
+    --, solo cambia de donde sale el dato: de una lectura fresca en vez de lo
+    que el modelo vio hace un rato.
+    """
+    por_nombre = {h.nombre: h for h in config.herramientas}
+    argumentos_previas = (contexto or {}).get("previas") or {}
+    faltantes = []
+    for previa in herramienta.exige_previas:
+        herr = por_nombre.get(previa.herramienta)
+        if herr is None:
+            faltantes.append(previa.herramienta)
+            continue
+        try:
+            dato = _ejecutar_tool(herr, sesion,
+                                  dict(argumentos_previas.get(previa.herramienta) or {}),
+                                  tenant, config.variables_tenant)
+        except Exception as e:                                   # noqa: BLE001
+            registrar("aprobacion", "no se pudo volver a medir una previa",
+                      previa=previa.herramienta, herramienta=herramienta.nombre, error=e)
+            faltantes.append(previa.herramienta)
+            continue
+        if not previa.acepta(_buscar_campo(dato, previa.campo)):
+            faltantes.append(previa.herramienta)
+    return faltantes
+
+
+def ejecutar_accion_irreversible(config, accion: dict, tenant: str
+                                 ) -> tuple[dict, str | None, dict | None]:
+    """
+    La UNICA funcion que ejecuta una herramienta IRREVERSIBLE (R3/R4) aprobada.
+
+    'accion' es la fila de asistente.acciones_propuestas RELEIDA de la base
+    despues de persistir la aprobacion -- nunca el cuerpo del request.
+
+    El orden, y por que cada paso esta donde esta:
+
+      1. frontera.critica: tenant -> kill switch -> etapa -> autorizacion
+         granular -> aprobacion vinculante -> bitacora -> permiso. Si algo
+         dice no, no se lee ni se mide nada mas.
+      2. coherencia: los identificadores que la accion inyecto de la sesion
+         son los mismos con los que se van a repetir las previas. Si no, las
+         previas medirian un equipo y la accion actuaria sobre otro.
+      3. previas FRESCAS: el estado que justifico la accion se vuelve a medir
+         ahora. Una senal que era 'aceptable' cuando se propuso puede no serlo
+         cuando alguien aprueba.
+      4. medicion previa de la verificacion, pegada al efecto.
+      5. idempotencia + ejecutor HTTP, que vuelve a pedir el permiso en el
+         ultimo metro y compara la huella contra lo que sale.
+
+    Devuelve (resultado, codigo_error, verificacion_pendiente). La tercera la
+    anota el llamador contra la conversacion de origen: sin ella, un reinicio
+    aprobado quedaria sin la comprobacion que el mismo reinicio tiene cuando
+    corre en la conversacion.
+    """
+    herramienta = next((h for h in config.herramientas
+                        if h.nombre == accion.get("herramienta")), None)
+    if herramienta is None:
+        return ({"error": f"La herramienta '{accion.get('herramienta')}' ya no "
+                          f"existe en el catalogo."}, "HERRAMIENTA_DESCONOCIDA", None)
+    if not herramienta.irreversible:
+        return ({"error": f"'{herramienta.nombre}' no es irreversible: se "
+                          f"ejecuta por ejecutar_accion_aprobada."},
+                "TIPO_NO_SOPORTADO", None)
+    if herramienta.tipo != "http":
+        return ({"error": f"Tipo '{herramienta.tipo}' no soportado para "
+                          f"ejecucion aprobada."}, "TIPO_NO_SOPORTADO", None)
+
+    aprobacion = aprobaciones.desde_fila(accion, tenant)
+    argumentos = accion.get("argumentos") if isinstance(accion.get("argumentos"), dict) else {}
+    propuesta = str(accion.get("id") or "")
+    origen = f"accion_aprobada:{propuesta}"
+    contexto = accion.get("contexto") if isinstance(accion.get("contexto"), dict) else {}
+
+    def _llamar():
+        return (ejecutor_http.ejecutar_asincrono(herramienta, argumentos,
+                                                 tenant=tenant,
+                                                 variables_tenant=config.variables_tenant)
+                if herramienta.asincrona else
+                ejecutor_http.ejecutar(herramienta, argumentos, tenant,
+                                       config.variables_tenant))
+
+    try:
+        with frontera.critica(tenant, herramienta.nombre, argumentos=argumentos,
+                              aprobacion=aprobacion, origen=origen,
+                              nivel_requerido=techos.nivel_requerido_de(herramienta)):
+            sesion = _sesion_de_contexto(contexto)
+            for arg, atributo in (herramienta.inyectar_sesion or {}).items():
+                if str(argumentos.get(arg) or "") != str(getattr(sesion, atributo, None) or ""):
+                    return ({"error": "Lo aprobado no corresponde al equipo o "
+                                      "cliente con que se validaron las "
+                                      "condiciones. No se ejecuto."},
+                            CONTEXTO_INCOHERENTE, None)
+
+            if herramienta.exige_previas:
+                faltan = _previas_frescas_no_cumplidas(config, herramienta,
+                                                       sesion, contexto, tenant)
+                if faltan:
+                    return ({"error": "Las condiciones que justificaban esta "
+                                      "accion ya no se cumplen al momento de "
+                                      "aprobarla. No se ejecuto.",
+                             "faltantes": faltan},
+                            PREVIAS_NO_VIGENTES, None)
+
+            medicion_previa = None
+            if herramienta.verificacion:
+                medicion_previa = medir_para_verificar(
+                    config, herramienta.verificacion, sesion, tenant,
+                    config.variables_tenant)
+
+            r = idempotencia.ejecutar(tenant, herramienta.nombre, argumentos,
+                                      origen, _llamar)
+    except frontera.AccionExternaNoAutorizada as e:
+        return ({"error": f"Esta accion no se ejecuto: {e.motivo}"}, e.codigo, None)
+    except Exception as e:                                       # noqa: BLE001
+        return ({"error": "La API no acepto la accion."},
+                f"{type(e).__name__}: {e}"[:200], None)
+
+    if not r.hubo_respuesta:
+        return ({"error": "Esta accion no se ejecuto: " + r.motivo}, r.codigo, None)
+
+    #  Solo si el efecto salio EN ESTA PASADA hay algo que comprobar. Una
+    #  repeticion devuelve la respuesta de la primera vez y no reinicia nada:
+    #  anotarle una verificacion mediria un efecto que no causo.
+    pendiente = None
+    if herramienta.verificacion and r.ejecutada:
+        pendiente = {"espera_segundos": herramienta.verificacion.espera_segundos,
+                     "max_intentos": herramienta.verificacion.max_intentos,
+                     "medicion_previa": medicion_previa}
+    return r.respuesta, None, pendiente
+
+
+def ejecutar_para_servicio(config, herramienta, argumentos_modelo: dict,
+                           origen: str | None = None) -> dict:
     """
     Ejecuta una herramienta a pedido de OTRO servicio del despliegue, no de un
     modelo ni de una persona. La llama POST /interno/herramienta/<nombre>.
@@ -1599,7 +1967,21 @@ def ejecutar_para_servicio(config, herramienta, argumentos_modelo: dict) -> dict
     Existe porque la credencial de WispHub vive solo en el motor y el backend
     del CRM tambien necesita crear un ticket ahi. Ver el docstring de esa ruta
     en nucleo/canales/api.py, y 'invocable_por_servicio' en schema.py -- ESE
-    es el permiso; aca ya se da por concedido.
+    es el permiso, y AQUI SE COMPRUEBA.
+
+    Hasta el 19/09/2026 este docstring decia "aca ya se da por concedido", y
+    era literal: la comprobacion vivia solo en la ruta. Medido en el precierre
+    -- llamar a esta funcion directamente con una herramienta NO invocable la
+    ejecutaba (1 llamada externa real contada). No era un bypass de la
+    autorizacion granular (la frontera la seguia gobernando: sin autorizacion,
+    0 llamadas; una R3 con techo 4, 0 llamadas), pero era una propiedad de la
+    herramienta comprobada en el llamador y no donde ocurre el efecto -- el
+    mismo error que nucleo/seguridad/frontera.py existe para corregir.
+
+    La comprobacion de la ruta NO se quita: sigue ahi para contestar un 400 con
+    un mensaje util antes de llegar hasta aca. Lo que cambia es quien la HACE
+    CUMPLIR. No es logica duplicada: es un mensaje en el borde y una guarda en
+    el efecto, que es el patron que este modulo ya usa para todo lo demas.
 
     Se pasa sesion=None a proposito, y no es un descuido: del otro lado no hay
     ninguna persona a la que verificar. Una herramienta que dependa de
@@ -1611,6 +1993,18 @@ def ejecutar_para_servicio(config, herramienta, argumentos_modelo: dict) -> dict
     un servicio interno no tiene mas permisos para inventar parametros que el
     modelo, y los filtros no verificados se descartan igual.
     """
+    #  EL PERMISO DE SERVICIO, COMPROBADO DONDE OCURRE EL EFECTO
+    #  ---------------------------------------------------------
+    #  Va PRIMERO, antes de resolver argumentos y antes de cualquier gate: si
+    #  esta herramienta no esta declarada invocable por un servicio, no hay
+    #  nada que resolver. Misma forma que el ValueError del final de esta
+    #  funcion -- no se agrega una excepcion nueva al contrato por esto.
+    if not getattr(herramienta, "invocable_por_servicio", False):
+        raise ValueError(
+            f"'{herramienta.nombre}' no esta declarada 'invocable_por_servicio' "
+            f"y no se ejecuta desde un servicio. Se declara en el catalogo del "
+            f"tenant (nucleo/config/schema.py), no se concede aqui.")
+
     # LO QUE MANDA OTRO SERVICIO VA POR 'sobrescribir', NO POR LOS FILTROS.
     #
     # 'filtros_verificados' es el camino de lo que el MODELO propone, y esta
@@ -1635,6 +2029,26 @@ def ejecutar_para_servicio(config, herramienta, argumentos_modelo: dict) -> dict
                                       sobrescribir=del_codigo or None,
                                       variables_tenant=config.variables_tenant)
 
+    # EL INTERRUPTOR TAMBIEN APLICA ACA, y no es obvio: del otro lado hay un
+    # servicio, no un modelo, asi que se podria argumentar que no es "autonomo".
+    # Pero el requisito de la fase 1 no habla del autor de la intencion sino del
+    # efecto: detenida la autonomia, el motor NO inicia operaciones externas. Un
+    # servicio que crea un ticket en WispHub es una operacion externa iniciada
+    # por el motor.
+    #
+    # Lo que NO se frena: las herramientas de lectura por esta misma ruta -- el
+    # formulario de contratacion sigue pudiendo listar planes con el
+    # interruptor tirado.
+    tenant_slug = config.identidad.slug
+    if interruptor.es_accion_autonoma(herramienta):
+        veredicto = interruptor.veredicto(tenant_slug)
+        if not veredicto.permitido:
+            interruptor.anotar_bloqueo(
+                tenant_slug, actor=(origen or "servicio"),
+                recurso=f"herramienta:{herramienta.nombre}",
+                motivo=f"{veredicto.estado}: {veredicto.motivo}")
+            raise AutonomiaDetenida(herramienta.nombre, veredicto)
+
     # Consultas internas que NO dependen de una sesion ni tocan datos de un
     # cliente puntual. La que trajo esto: el formulario de contratacion
     # necesita mostrarle al prospecto los planes de SU zona, y esa lista sale
@@ -1651,11 +2065,30 @@ def ejecutar_para_servicio(config, herramienta, argumentos_modelo: dict) -> dict
         return _ejecutar_consulta_guia_tv(config, argumentos)
 
     if herramienta.tipo == "http":
-        return (ejecutor_http.ejecutar_asincrono(herramienta, argumentos,
-                                                 tenant=config.identidad.slug)
-                if herramienta.asincrona else
-                ejecutor_http.ejecutar(herramienta, argumentos,
-                                       config.identidad.slug, config.variables_tenant))
+        def _llamar():
+            return (ejecutor_http.ejecutar_asincrono(herramienta, argumentos,
+                                                     tenant=tenant_slug)
+                    if herramienta.asincrona else
+                    ejecutor_http.ejecutar(herramienta, argumentos,
+                                           tenant_slug, config.variables_tenant))
+
+        if not interruptor.es_accion_autonoma(herramienta):
+            return _llamar()
+        # 'origen' es la cabecera Idempotency-Key que haya mandado el servicio
+        # (ver la ruta /interno/herramienta/<nombre> en nucleo/canales/api.py).
+        # Sin ella, cada peticion es una operacion distinta: queda registrada,
+        # pero un reenvio no se reconoce. Es una limitacion del llamador, no de
+        # este mecanismo, y por eso se dice aca en vez de fingir cobertura.
+        with frontera.autonoma(tenant_slug, herramienta.nombre,
+                               origen=origen or "",
+                               actor=origen or "servicio",
+                               nivel_requerido=techos.nivel_requerido_de(herramienta)):
+            resultado = idempotencia.ejecutar(
+                tenant_slug, herramienta.nombre, argumentos,
+                origen or f"servicio:{uuid.uuid4()}", _llamar)
+        if resultado.hubo_respuesta:
+            return resultado.respuesta
+        raise OperacionNoEjecutada(herramienta.nombre, resultado)
     raise ValueError(f"Tipo '{herramienta.tipo}' no se puede ejecutar desde un "
                      f"servicio -- solo 'http'.")
 
@@ -2000,8 +2433,40 @@ def medir_para_verificar(config, verificacion, sesion, tenant: str | None,
 def _ejecutar_tool(herramienta, sesion, argumentos_modelo: dict,
                    tenant: str | None = None,
                    variables_tenant: dict | None = None,
-                   sobrescribir: dict | None = None) -> dict | list:
+                   sobrescribir: dict | None = None,
+                   origen: str | None = None,
+                   aprobada_por_humano: bool = False) -> dict | list:
+    """
+    El unico camino por el que una herramienta del catalogo se ejecuta de
+    verdad. Por eso los dos controles de la fase 1 viven aca y no en cada
+    llamador: el gate de autonomia y el registro de operaciones externas.
+
+    'origen' identifica la SOLICITUD, no la herramienta -- es lo que permite
+    distinguir "la misma peticion otra vez" de "otra peticion parecida". Ver el
+    encabezado de nucleo/seguridad/idempotencia.py, que explica por que sin un
+    origen estable la garantia vale menos. None = quien llama no tenia uno; se
+    arma uno propio de esta invocacion y se dice en el registro.
+
+    'aprobada_por_humano' lo pasa el camino de aprobacion_humana: ahi la
+    decision la tomo una persona y el interruptor no la revoca.
+    """
     argumentos_modelo = argumentos_modelo or {}
+
+    # -------------------------------------------------- F1.1: el interruptor
+    # ANTES de cualquier despacho, y antes de resolver argumentos: si la
+    # autonomia de esta empresa esta detenida, no se prepara ni se manda nada.
+    # Solo aplica a escrituras sin humano detras (ver es_accion_autonoma): una
+    # consulta de lectura sigue andando, que es lo que hace usable al
+    # interruptor.
+    autonoma = interruptor.es_accion_autonoma(herramienta, aprobada_por_humano)
+    if autonoma and tenant:
+        veredicto = interruptor.veredicto(tenant)
+        if not veredicto.permitido:
+            interruptor.anotar_bloqueo(
+                tenant, actor=(origen or "motor"),
+                recurso=f"herramienta:{herramienta.nombre}",
+                motivo=f"{veredicto.estado}: {veredicto.motivo}")
+            raise AutonomiaDetenida(herramienta.nombre, veredicto)
 
     if herramienta.tipo == "agregado":
         # No pasa por la traduccion de mas abajo: agregado necesita los
@@ -2013,6 +2478,58 @@ def _ejecutar_tool(herramienta, sesion, argumentos_modelo: dict,
     argumentos = _resolver_argumentos(herramienta, sesion, argumentos_modelo,
                                       sobrescribir, variables_tenant)
 
+    # -------------------------------------------------- F1.2: la idempotencia
+    # El despacho de siempre, sin un cambio, envuelto para poder ejecutarlo una
+    # sola vez. Se arma DESPUES de _resolver_argumentos a proposito: la huella
+    # de la operacion tiene que salir de lo que de verdad va a viajar al
+    # tercero (filtros verificados + argumentos fijos + inyectar_sesion), no de
+    # lo que el modelo propuso. Dos clientes distintos pueden producir los
+    # mismos argumentos de modelo y terminar en llamadas distintas.
+    def _despachar():
+        return _despacho_de_herramienta(herramienta, argumentos, tenant,
+                                        variables_tenant)
+
+    #  LECTURA: pasa sin preguntar nada. Detener la autonomia no puede dejar
+    #  ciego al que atiende.
+    if not frontera.escribe(herramienta):
+        return _despachar()
+
+    #  ESCRITURA SIN TENANT VALIDO: BLOQUEA  --  corregido el 17/09/2026 (10.14A)
+    #  ------------------------------------------------------------------------
+    #  Antes decia 'if not (autonoma and tenant): return _despachar()', y ese
+    #  'and tenant' era un fail-open: con tenant=None o '' la escritura salia
+    #  sin consultar el interruptor y sin registro de repeticion. Medido en el
+    #  paso 10.14 -- 1 llamada externa en cada caso. Ningun llamador de hoy lo
+    #  alcanzaba, pero la garantia la daba la convencion, no el codigo.
+    if autonoma:
+        #  El nivel sale de la HERRAMIENTA (catalogo), nunca de
+        #  'argumentos_modelo': el modelo no puede bajarse la exigencia (M06-B).
+        with frontera.autonoma(tenant, herramienta.nombre,
+                               origen=origen or "", actor=origen or "motor",
+                               nivel_requerido=techos.nivel_requerido_de(herramienta)):
+            resultado = idempotencia.ejecutar(
+                tenant, herramienta.nombre, argumentos,
+                origen or f"invocacion:{uuid.uuid4()}", _despachar)
+    else:
+        #  Escritura NO autonoma: la aprobo una persona, y quien aprobo ya
+        #  abrio el permiso con frontera.humana(). Si no lo abrio, el ejecutor
+        #  la frena igual -- por eso esto no necesita confiar en el llamador.
+        resultado = idempotencia.ejecutar(
+            tenant, herramienta.nombre, argumentos,
+            origen or f"invocacion:{uuid.uuid4()}", _despachar)
+    if resultado.hubo_respuesta:
+        return resultado.respuesta
+    raise OperacionNoEjecutada(herramienta.nombre, resultado)
+
+
+def _despacho_de_herramienta(herramienta, argumentos: dict,
+                             tenant: str | None,
+                             variables_tenant: dict | None) -> dict | list:
+    """
+    A que ejecutor le toca. Se separo de _ejecutar_tool el 15/09/2026 sin
+    cambiarle una linea: era el cuerpo de esa funcion y ahora es lo que se
+    envuelve con el control de repeticion.
+    """
     if herramienta.tipo == "interno" and herramienta.detecta_incidente:
         return ejecutor_incidentes.detectar(herramienta, argumentos, tenant, variables_tenant)
 
@@ -2497,7 +3014,8 @@ def _redactar(referencia_modelo: str, historial: list[dict], temperatura: float,
 
 
 def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
-              sesion, nota_continuidad: str | None = None
+              sesion, nota_continuidad: str | None = None,
+              origen: str | None = None
               ) -> tuple[str, list[dict], list[dict]]:
     """
     'sesion' es una nucleo.seguridad.verificacion.Sesion (o None si el rol no
@@ -3014,6 +3532,9 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
             # despacho, y una accion que salio por otra rama tiene que llegar
             # ahi con la medicion en None, no sin definir.
             medicion_previa = None
+            # True solo si esta llamada quedo PROPUESTA (aprobacion_humana):
+            # no hubo efecto, asi que no hay nada que verificar despues.
+            quedo_propuesta = False
 
             if herramienta is None:
                 # El catalogo que vio el modelo ya estaba acotado al rol, pero
@@ -3190,7 +3711,8 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                     salida = _ejecutar_propuesta_de_accion(
                         herramienta, sesion, llamada.argumentos,
                         config.identidad.slug, nombre_rol, quien,
-                        config=config)
+                        config=config, historial=historial, origen=origen)
+                    quedo_propuesta = True
             else:
                 clave_cache = (herramienta.nombre,
                               json.dumps(llamada.argumentos or {}, sort_keys=True))
@@ -3213,7 +3735,8 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                             if cancelada is not None:
                                 raise _AccionCancelada(cancelada)
                         crudo = _ejecutar_tool(herramienta, sesion, llamada.argumentos,
-                                              config.identidad.slug, config.variables_tenant)
+                                              config.identidad.slug, config.variables_tenant,
+                                              origen=origen)
                         _recuperar_campos_de_sesion(sesion, herramienta, crudo)
                         formato_pedido = (llamada.argumentos or {}).get("formato")
                         if (herramienta.tipo == "agregado" and herramienta.exportable
@@ -3288,6 +3811,36 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                         # un dato que no arregla nada.
                         salida, codigo_error = falta_un_dato_de_la_sesion(
                             e.herramienta, e.faltantes, sesion)
+                    except AutonomiaDetenida as e:
+                        # El interruptor de esta empresa esta tirado. Al modelo
+                        # se le dice que NO lo intente de nuevo y que no invente
+                        # una averia: lo que pasa es que alguien apago la
+                        # autonomia a proposito, y el camino que queda es una
+                        # persona.
+                        salida = {"error": interruptor.CODIGO_BLOQUEO,
+                                  "instruccion_interna":
+                                      "Las acciones automaticas de esta empresa "
+                                      "estan detenidas por una decision de "
+                                      "operacion. NO reintentes esta herramienta "
+                                      "ni ninguna otra que ejecute algo. No le "
+                                      "digas al cliente que hay una falla del "
+                                      "sistema: deci que esto lo va a seguir un "
+                                      "colaborador y segui atendiendo lo que si "
+                                      "puedas consultar."}
+                        codigo_error = interruptor.CODIGO_BLOQUEO
+                    except OperacionNoEjecutada as e:
+                        # La operacion no salio porque el registro de
+                        # operaciones externas se nego: ya esta en curso, la
+                        # clave se reuso, o fallo antes. Es lo contrario de un
+                        # fallo del tercero -- que se repita es lo que habria
+                        # que evitar.
+                        salida = {"error": e.resultado.codigo,
+                                  "instruccion_interna":
+                                      f"Esta accion no se ejecuto: "
+                                      f"{e.resultado.motivo}. NO la repitas. Si "
+                                      f"ya estaba en curso, esperala; si no, "
+                                      f"deci que un colaborador lo va a revisar."}
+                        codigo_error = e.resultado.codigo
                     except Exception as e:
                         # No tumba el turno: el modelo recibe un error legible y
                         # puede decirle al cliente que hubo un problema, en vez de
@@ -3366,8 +3919,17 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
             # todavia no existe conversation_id -- lo resuelve api.py al
             # persistir el turno, igual que con los archivos generados.
             pendiente = None
+            #
+            # Una accion que quedo PROPUESTA no produjo ningun efecto: anotar
+            # una verificacion aca haria medir, en el turno siguiente, un
+            # reinicio que nunca ocurrio -- y concluir NO_CONFIRMADA y escalar
+            # por una accion "sin efecto". Visto al activar el gate de R3
+            # (M06-A, 21/09/2026): 'codigo_error is None' era cierto tambien
+            # para una propuesta. La verificacion de una accion aprobada la
+            # anota quien la ejecuta (api.py, al aprobar).
             if (herramienta and herramienta.verificacion
-                    and not herramienta.solo_lectura and codigo_error is None):
+                    and not herramienta.solo_lectura and codigo_error is None
+                    and not quedo_propuesta):
                 pendiente = {
                     "espera_segundos": herramienta.verificacion.espera_segundos,
                     "max_intentos": herramienta.verificacion.max_intentos,
@@ -3378,6 +3940,12 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 "parametros": _enmascarar(llamada.argumentos),
                 "resumen": resumen_pedido,
                 "verificacion_pendiente": pendiente,
+                # La propuesta que dejo esta llamada, si quedo en la cola:
+                # api.py la ata a la conversacion (ahi todavia no existe el
+                # id), que es donde se anota la verificacion al aprobarla.
+                "accion_id": (salida.get("accion_id")
+                              if quedo_propuesta and isinstance(salida, dict)
+                              else None),
                 "exito": codigo_error is None,
                 "n_registros": len(salida) if isinstance(salida, list) else None,
                 "codigo_error": codigo_error,

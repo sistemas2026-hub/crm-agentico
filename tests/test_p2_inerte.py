@@ -225,7 +225,11 @@ for ext in extensiones:
         if partes & {"node_modules", "__pycache__", ".git", ".svelte-kit", "htmlcov"}:
             continue
         rel = f.relative_to(RAIZ).as_posix()
+        #  M06-F: la version reconciliada de P2 (202609151705) esta APLICADA en
+        #  produccion y define las mismas funciones que 202609141300: es una
+        #  definicion, no un llamador.
         if rel.startswith(("nucleo/programador/", "tests/", "supabase/202609141300_scheduler_funciones.sql",
+                           "supabase/202609151705_scheduler_funciones_reconciliado.sql",
                            "supabase/ledger/")):
             continue
         try:

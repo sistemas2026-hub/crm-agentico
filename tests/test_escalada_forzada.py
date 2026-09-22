@@ -183,7 +183,7 @@ motivo, _ = escalada_forzada(CFG, [{"herramienta": "consultar_algo",
 afirmar(motivo == "sin_datos_para_diagnosticar",
         "un codigo_error que NO es guardia del motor sigue forzando la escalada")
 
-print("\n[2-7] las seis guardias del motor -- ninguna escala")
+print("\n[2-7] las guardias del motor -- ninguna escala")
 FRAGIL_NOMBRE = "consultar_algo"
 for codigo in sorted(CODIGOS_MOTOR_GUARD):
     motivo, _ = escalada_forzada(CFG, [{"herramienta": FRAGIL_NOMBRE,
@@ -196,12 +196,58 @@ for codigo in sorted(CODIGOS_MOTOR_GUARD):
 # falta_un_dato_de_la_sesion). Tiene que estar aca por lo mismo que los otros
 # seis -- el motor IMPIDIO la llamada, la herramienta no fallo-- y el bucle de
 # arriba ya comprobo que no escala.
-afirmar(CODIGOS_MOTOR_GUARD == {"PRECONDICION_NO_CUMPLIDA", "LIMITE_DE_CONVERSACION",
-                                "FALTA_HABLAR_CON_EL_CLIENTE", "IDENTIDAD_NO_RESUELTA",
-                                "DATO_DEL_EQUIPO_NO_CARGADO",
-                                "IDENTIDAD_NO_VERIFICADA", "HERRAMIENTA_DESCONOCIDA",
-                                "CAMBIO_DE_CONTROL"},
-        "la clasificacion tiene exactamente los 8 codigos de gate -- "
+GATES = {"PRECONDICION_NO_CUMPLIDA", "LIMITE_DE_CONVERSACION",
+         "FALTA_HABLAR_CON_EL_CLIENTE", "IDENTIDAD_NO_RESUELTA",
+         "DATO_DEL_EQUIPO_NO_CARGADO",
+         "IDENTIDAD_NO_VERIFICADA", "HERRAMIENTA_DESCONOCIDA",
+         # D25 (origin): una persona tomo la conversacion y el motor no inicio
+         # la accion.
+         "CAMBIO_DE_CONTROL",
+         # Los cinco de la fase 1 de seguridad (15/09/2026). Entran por el
+         # mismo criterio que los siete de arriba: el motor IMPIDIO la llamada,
+         # ninguna herramienta fallo, y por eso no pueden disparar
+         # 'escalar_si_falla' con un mensaje de averia que no ocurrio.
+         #
+         # Que no escalen por esta via no significa que se pierdan: van a la
+         # traza marcados como bloqueo y, cuando no hay conversacion detras
+         # (el scheduler), a asistente.audit_log.
+         "AUTONOMIA_DETENIDA", "OPERACION_EN_CURSO", "CLAVE_REUTILIZADA",
+         "OPERACION_FALLIDA_PREVIA", "OPERACION_SIN_REGISTRO",
+         # Faltaba desde el paso 10.10, y faltaba en LOS DOS lados -- en
+         # forzado.py y en esta lista-- asi que las dos coincidian y nadie lo
+         # vio. Lo destapo test_bloqueos_en_traza.py al comparar la lista de
+         # motor.py con la de forzado.py, que es exactamente para lo que
+         # existe: dos listas que se copian a mano se desincronizan, y la
+         # unica forma de notarlo es que algo las compare.
+         "REGISTRO_NO_INSTALADO",
+         # La frontera de acciones externas (paso 10.14A). Mismo criterio:
+         # es el codigo impidiendo la llamada -- sin tenant valido, sin
+         # permiso, o con un permiso de otra empresa-- no un tercero fallando.
+         "ACCION_EXTERNA_SIN_TENANT", "ACCION_EXTERNA_SIN_AUTORIZAR",
+         "ACCION_EXTERNA_TENANT_DISTINTO",
+         # 19/09/2026: el registro de operaciones contesto una decision que
+         # idempotencia.py no sabe interpretar. Hasta ese dia ese caso
+         # EJECUTABA la mutacion; ahora la rechaza, y por eso necesita estar
+         # aca -- es el codigo negandose ante una respuesta que no entiende,
+         # no un tercero fallando.
+         "DECISION_DE_RECLAMO_DESCONOCIDA",
+         # M06-A (21/09/2026): la puerta de las irreversibles. Una
+         # irreversible sin su aprobacion atada, un permiso critico usado
+         # para otra accion, las previas que ya no se cumplen al aprobar y un
+         # contexto que no coincide con lo aprobado. El codigo negandose, no
+         # un tercero fallando.
+         "IRREVERSIBLE_SIN_APROBACION_VINCULANTE",
+         "PERMISO_CRITICO_DE_OTRA_ACCION",
+         "PREVIAS_NO_VIGENTES_AL_APROBAR",
+         "CONTEXTO_DE_APROBACION_INCOHERENTE",
+         # M06-B (21/09/2026): el techo de autonomia, que falla cerrado.
+         "TECHO_AUTONOMIA_AUSENTE", "TECHO_AUTONOMIA_INVALIDO",
+         "TECHO_AUTONOMIA_NO_LEGIBLE", "TECHO_AUTONOMIA_NO_INSTALADO",
+         "TECHO_AUTONOMIA_DE_OTRO_TENANT", "TECHO_AUTONOMIA_INSUFICIENTE",
+         "NIVEL_REQUERIDO_INVALIDO", "APROBACION_HUMANA_REQUERIDA"}
+
+afirmar(CODIGOS_MOTOR_GUARD == GATES,
+        f"la clasificacion tiene exactamente los {len(GATES)} codigos de gate -- "
         "ni uno de mas, ni uno de menos")
 
 print("\n[7] EL CASO CRITICO -- bloqueo prematuro y despues exito, en la MISMA traza")
@@ -490,12 +536,8 @@ print("\n[CASO 7] idempotencia -- nada de esto se toco")
 # deduplicar porque no se crea nada. Se confirma aca que el mecanismo
 # CODIGOS_MOTOR_GUARD -- que SI es la base de la que la idempotencia entre
 # turnos ya dependia (Fase #2/#5) -- sigue exactamente igual:
-afirmar(CODIGOS_MOTOR_GUARD == {"PRECONDICION_NO_CUMPLIDA", "LIMITE_DE_CONVERSACION",
-                                "FALTA_HABLAR_CON_EL_CLIENTE", "IDENTIDAD_NO_RESUELTA",
-                                "DATO_DEL_EQUIPO_NO_CARGADO",
-                                "IDENTIDAD_NO_VERIFICADA", "HERRAMIENTA_DESCONOCIDA",
-                                "CAMBIO_DE_CONTROL"},
-        "CODIGOS_MOTOR_GUARD tiene los siete codigos de gate -- PEDIDO_INVALIDO "
+afirmar(CODIGOS_MOTOR_GUARD == GATES,
+        f"CODIGOS_MOTOR_GUARD tiene los {len(GATES)} codigos de gate -- PEDIDO_INVALIDO "
         "NO se mezclo ahi adentro")
 afirmar(CODIGOS_MOTOR_GUARD.isdisjoint(CODIGOS_CONDICION_DE_NEGOCIO),
         "y ningun codigo de negocio (PEDIDO_INVALIDO, COMPROBANTE_NO_LISTO) se "
@@ -571,9 +613,13 @@ for otro_rol in ("cliente_final", "soporte_tecnico_cliente", "ventas", "soporte"
 print("\n[5] no se modifico ninguna otra herramienta de pagos/reconexion")
 registrar_pago = next(h for h in CFG_REAL.herramientas if h.nombre == "registrar_pago")
 promesa = next(h for h in CFG_REAL.herramientas if h.nombre == "agregar_promesa_pago")
+#  M06-A (21/09/2026) le puso aprobacion_humana a registrar_pago por decision
+#  del negocio: el dinero del cliente exige aprobacion por operacion. Lo que
+#  esta fase protege sigue igual: el rol. Y el gate solo pudo ENDURECERSE --
+#  si alguien lo quita, esto falla.
 afirmar(registrar_pago.roles_permitidos == ["facturacion"]
-        and registrar_pago.aprobacion_humana is False,
-        "registrar_pago sigue exactamente igual: solo 'facturacion', sin aprobacion_humana")
+        and registrar_pago.aprobacion_humana is True,
+        "registrar_pago: solo 'facturacion', y CON aprobacion_humana desde M06-A")
 afirmar(promesa.roles_permitidos == ["facturacion"] and promesa.aprobacion_humana is True,
         "agregar_promesa_pago sigue exactamente igual: solo 'facturacion', CON aprobacion_humana")
 

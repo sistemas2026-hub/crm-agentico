@@ -141,15 +141,22 @@ def _auditar(actividad, actor, accion, *, anterior="", nuevo="",
 
 
 def _cambiar_estado(actividad, actor, nuevo, *, motivo="", accion="STATUS_CHANGED",
-                    campos=None, descripcion=""):
-    """El unico sitio donde cambia 'estado_operativo'. Todo pasa por aca."""
+                    campos=None, descripcion="", extra=None):
+    """
+    El unico sitio donde cambia 'estado_operativo'. Todo pasa por aca.
+
+    'extra' viaja a la metadata de la auditoria: lo usa el escalamiento para
+    dejar escrito destinatario y nivel en la MISMA fila que registra el cambio
+    de estado. Guardarlos en dos filas distintas permitiria que una existiera
+    sin la otra.
+    """
     anterior = actividad.estado_operativo
     _exigir_transicion(anterior, nuevo)
     actividad.estado_operativo = nuevo
     a_guardar = ["estado_operativo", "updated_at"] + list(campos or [])
     actividad.save(update_fields=a_guardar)
     _auditar(actividad, actor, accion, anterior=anterior, nuevo=nuevo,
-             motivo=motivo, descripcion=descripcion)
+             motivo=motivo, descripcion=descripcion, extra=extra)
     return actividad
 
 
@@ -305,16 +312,67 @@ def desbloquear(actividad, *, actor, motivo: str = "", destino=A.EN_GESTION):
 
 
 @transaction.atomic
-def escalar(actividad, *, actor, motivo: str):
+def escalar(actividad, *, actor, motivo: str, escalado_a, nivel: str):
     """
     Pasa a otro nivel. Es un ESTADO, no un objeto nuevo -- lo declara el propio
-    modelo. Exige motivo: escalar sin decir por que no le sirve a quien recibe.
+    modelo.
+
+    LOS TRES DATOS SON OBLIGATORIOS  (paso M05-B)
+    ---------------------------------------------
+    Antes bastaba el motivo, y eso dejaba un escalamiento que no llegaba a
+    nadie: el estado decia "alguien pidio ayuda" sin decir a quien, asi que no
+    habia forma de saber si la habia pedido bien. Ahora exige ademas
+    destinatario y nivel.
+
+    NO HAY DESTINATARIO POR DEFECTO, Y ES DELIBERADO
+    ------------------------------------------------
+    'cases.EscalationPolicy' resuelve destinatario a partir de 'Case.priority'.
+    Una actividad no tiene esa prioridad, y construir el puente
+    actividad -> caso -> prioridad -> politica seria inventar una semantica que
+    nadie definio. Hasta que exista una politica operacional propia, el
+    destinatario lo pone quien escala. Si no lo hay, esto se rechaza y el
+    Supervisor lo dice en vez de elegir por su cuenta.
+
+    REESCALAR NO SE PUEDE, Y NO ES UNA REGLA NUEVA
+    ----------------------------------------------
+    'TRANSICIONES[ESCALADA]' no se incluye a si misma: el proyecto ya decidia
+    que una actividad escalada no vuelve a escalarse de golpe. Se respeta tal
+    cual -- '_exigir_transicion' lo rechaza-- en vez de abrir esa puerta aqui.
+    Para llevarla a otra instancia hay que devolverla a gestion primero, y ese
+    camino queda escrito en la auditoria paso a paso.
     """
     if not (motivo or "").strip():
         raise ErrorActividad("Un escalamiento necesita su motivo.")
+    if escalado_a is None:
+        raise ErrorActividad(
+            "Un escalamiento necesita destinatario: sin alguien que lo reciba, "
+            "el estado 'escalada' no le llega a nadie.")
+    if nivel not in dict(A.NIVELES_ESCALAMIENTO):
+        raise ErrorActividad(
+            f"'{nivel}' no es un nivel de escalamiento. Los niveles son: "
+            f"{', '.join(dict(A.NIVELES_ESCALAMIENTO))}.")
+
     fresca = _bloquear(actividad)
-    return _cambiar_estado(fresca, actor, A.ESCALADA, motivo=motivo,
-                           accion="ESCALATED", descripcion="Escalada.")
+
+    #  AISLAMIENTO POR ORGANIZACION. Se compara contra 'Profile.org', que es la
+    #  misma convencion que usa el resto del modulo -- no una segunda logica de
+    #  tenancy. Escalar a alguien de otra empresa filtraria el trabajo de un
+    #  cliente al personal de otro.
+    if escalado_a.org_id != fresca.org_id:
+        raise ErrorActividad(
+            "El destinatario pertenece a otra organización. Una actividad solo "
+            "se escala dentro de su propia empresa.")
+
+    fresca.escalado_a = escalado_a
+    fresca.escalado_en = timezone.now()
+    fresca.nivel_escalamiento = nivel
+    return _cambiar_estado(
+        fresca, actor, A.ESCALADA, motivo=motivo, accion="ESCALATED",
+        campos=["escalado_a", "escalado_en", "nivel_escalamiento"],
+        descripcion=f"Escalada a nivel {dict(A.NIVELES_ESCALAMIENTO)[nivel]}.",
+        extra={"escalado_a": str(escalado_a.id),
+               "nivel_escalamiento": nivel,
+               "escalado_en": fresca.escalado_en.isoformat()})
 
 
 @transaction.atomic

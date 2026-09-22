@@ -41,8 +41,29 @@ TYPECHOICES = (
     ("RESELLER", "RESELLER"),
 )
 
+#  LOS CUATRO ROLES DE PLATAFORMA  --  paso M09-D
+#  ---------------------------------------------
+#  'SUPERVISOR' y 'OPERACIONES' no son nuevos para el sistema: campo/
+#  permissions.py ya declara ROLES_GESTION = {ADMIN, SUPERVISOR, OPERACIONES}
+#  desde el modulo de campo, y operaciones/permissions.py lo IMPORTA para
+#  decidir quien revisa las propuestas del Supervisor NOC IA.
+#
+#  Lo que faltaba era esto: el catalogo de choices solo ofrecia ADMIN y USER,
+#  asi que el guardia sabia reconocer tres credenciales y la imprenta emitia
+#  dos. Ningun formulario ni serializador podia asignar 'OPERACIONES', y en
+#  produccion eso dejaba la revision en manos del unico ADMIN (medido el
+#  17/09/2026: 1 ADMIN, 4 USER).
+#
+#  NO es un cuarto mecanismo de autorizacion: es el mismo, con su catalogo
+#  completo. Quien decide sigue siendo EsJefeDeOperaciones sobre ROLES_GESTION.
+#
+#  OJO con Profile.save(): deriva 'is_organization_admin = (role == "ADMIN")'.
+#  Un perfil OPERACIONES queda NO-admin y aun asi pasa EsJefeDeOperaciones --
+#  que es exactamente lo buscado: revisar sin administrar.
 ROLES = (
     ("ADMIN", "ADMIN"),
+    ("SUPERVISOR", "SUPERVISOR"),
+    ("OPERACIONES", "OPERACIONES"),
     ("USER", "USER"),
 )
 

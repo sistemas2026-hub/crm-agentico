@@ -301,6 +301,15 @@ class _CursorFalso:
     def execute(self, sql, params=None):
         self.llamadas.append(sql)
 
+    # Desde el 15/09/2026 el alta de un tenant siembra tambien su interruptor
+    # de autonomia, en la MISMA transaccion (ver interruptor.sembrar y el
+    # comentario en cli/cargar_config.py). Esa funcion lee 'rowcount' para
+    # saber si escribio o si ya habia fila. Este doble no ejecuta SQL de
+    # verdad, asi que declara el atributo y nada mas: lo que este archivo
+    # prueba es el guardia de alineacion con git, no el alta del interruptor
+    # -- de eso se ocupa tests/test_alta_tenant_autonomia.py.
+    rowcount = 1
+
     def fetchone(self):
         return self._respuestas.pop(0) if self._respuestas else None
 

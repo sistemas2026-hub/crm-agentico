@@ -73,6 +73,25 @@ def cerrar(config, tenant: str, ticket: str, texto: str, autor: str = "") -> boo
                      ticket, texto, autor)
 
 
+def _permiso(tenant: str, herramienta: str, actor: str, evidencia: str):
+    """
+    Que puerta de la frontera le corresponde a esta escritura  --  paso 10.14A.
+
+    Delega en frontera.puerta(), que aplica la misma regla en todo el nucleo:
+    con actor identificado entra por la puerta humana (el interruptor no frena
+    el trabajo de un operador); sin actor, por la autonoma (consulta el
+    interruptor).
+
+    Esta es la separacion que pedia el punto 7: no se declara "humana" porque
+    la funcion reciba texto, sino porque llega con un responsable. Sin
+    responsable no hay autoria humana que demostrar -- y entonces no se asume.
+    """
+    from nucleo.seguridad import frontera
+
+    return frontera.puerta(tenant, herramienta, actor=actor,
+                           evidencia=evidencia, origen="operativo")
+
+
 def _ejecutar(config, tenant: str, atributo: str, ticket: str,
               texto: str, autor: str) -> bool:
     herr = _herramienta(config, atributo)
@@ -86,7 +105,8 @@ def _ejecutar(config, tenant: str, atributo: str, ticket: str,
     argumentos.update({"id_ticket": str(ticket),
                        "respuesta": _firmado(texto, autor)})
     try:
-        ejecutor_http.ejecutar(herr, argumentos, tenant)
+        with _permiso(tenant, herr.nombre, autor, f"ticket:{ticket}"):
+            ejecutor_http.ejecutar(herr, argumentos, tenant)
         return True
     except Exception as e:
         registrar("operativo", "fallo la herramienta sobre el ticket",
@@ -116,7 +136,11 @@ def cerrar_caso_crm(config, tenant: str, caso_id: str) -> bool:
         argumentos[campo] = fecha.strftime(herr.formato_fechas_automaticas)
     argumentos["id_caso"] = str(caso_id)
     try:
-        ejecutor_http.ejecutar(herr, argumentos, tenant)
+        # Cerrar el caso del CRM NUNCA lo pide una persona por esta via: lo
+        # decide 'cerrar_todo' cuando el cliente confirma, o el barrido de
+        # vencidas. Es autonoma, y pasa por el interruptor.
+        with _permiso(tenant, herr.nombre, "", f"caso:{caso_id}"):
+            ejecutor_http.ejecutar(herr, argumentos, tenant)
         return True
     except Exception as e:
         registrar("operativo", "no se pudo cerrar el caso", caso_id=id_interno(caso_id), error=e)

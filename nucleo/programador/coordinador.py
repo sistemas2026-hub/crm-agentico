@@ -50,6 +50,7 @@ from datetime import datetime, timezone
 
 from nucleo.observabilidad.registro import registrar
 from nucleo.programador import ejecutor, embudo, metricas, puerta, registro
+from nucleo.seguridad import interruptor
 
 # El tick del coordinador NO es el intervalo de los jobs. Es cada cuanto mira
 # si algo vencio. Un job horario con un tick de 60 s arranca, como mucho, 60 s
@@ -138,6 +139,30 @@ def un_tick(reg: metricas.Registro | None = None,
             # registro y este 'continue' es lo que lo frena.
             emb.omitir("job_deshabilitado")
             reg.contar("omitidos", motivo="sin_implementacion",
+                       job_code=c["job_code"])
+            continue
+
+        # EL INTERRUPTOR DE AUTONOMIA, ANTES DEL CLAIM.
+        #
+        # Antes del claim y no despues: reclamar abre un intento y consume un
+        # reintento del turno. Un tenant detenido no tiene por que gastar los
+        # reintentos de sus trabajos mientras espera que alguien lo reactive.
+        #
+        # Se cuenta como omitido con motivo, igual que 'sin_implementacion': el
+        # embudo tiene que seguir cuadrando, y "no se hizo porque la autonomia
+        # esta detenida" es una salida legitima, no un turno perdido.
+        #
+        # Fail-closed: si no se pudo leer el interruptor, no se reclama.
+        try:
+            permitido = interruptor.veredicto_de_organizacion(
+                c["organization_id"]).permitido
+        except Exception as e:                                   # noqa: BLE001
+            registrar("coord", "no se pudo leer el interruptor",
+                      organizacion=c["organization_id"], error=e)
+            permitido = False
+        if not permitido:
+            emb.omitir("autonomia_detenida")
+            reg.contar("omitidos", motivo="autonomia_detenida",
                        job_code=c["job_code"])
             continue
 

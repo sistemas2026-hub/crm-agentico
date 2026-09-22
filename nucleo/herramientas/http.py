@@ -155,6 +155,33 @@ def _alternativas(herramienta, argumentos: dict) -> dict:
     return cambiados if hubo_cambio else {}
 
 
+def _exigir_frontera(herramienta, tenant, argumentos=None) -> None:
+    """
+    EL ULTIMO METRO ANTES DEL EFECTO  --  paso 10.14A.
+
+    Una herramienta de LECTURA pasa sin preguntar nada: detener la autonomia no
+    puede dejar ciego al que atiende. Una de ESCRITURA tiene que traer un
+    permiso vigente de nucleo/seguridad/frontera.py, y si no lo trae no sale.
+
+    El control esta aca --y no en cada llamador-- porque el paso 10.14 midio
+    cinco caminos distintos que llegaban a escribir sin pasar por el gate del
+    motor. Ponerlo en el ejecutor lo vuelve inevitable: un modulo nuevo que
+    escriba afuera pasa por aqui aunque no sepa que esto existe.
+
+    El import va ADENTRO de la funcion a proposito: 'frontera' importa
+    'interruptor', que importa 'persistencia.db'; hacerlo arriba ataria este
+    ejecutor --que hoy corre en pruebas sin base-- a la cadena entera.
+    """
+    from nucleo.seguridad import frontera
+
+    #  Los argumentos viajan a la frontera tal como llegan, ANTES de que
+    #  url_de() saque los de la ruta: son los mismos que el llamador aprobo, y
+    #  para una herramienta irreversible se comparan contra la huella de la
+    #  aprobacion (ver frontera.exigir).
+    if frontera.escribe(herramienta):
+        frontera.exigir(herramienta, tenant, argumentos=argumentos)
+
+
 def ejecutar(herramienta, argumentos: dict, tenant: str | None = None,
              variables_tenant: dict | None = None) -> dict | list:
     """
@@ -169,6 +196,8 @@ def ejecutar(herramienta, argumentos: dict, tenant: str | None = None,
     if herramienta.tipo != "http":
         raise ErrorHerramientaHttp(
             f"'{herramienta.nombre}' no es tipo 'http' (es '{herramienta.tipo}').")
+
+    _exigir_frontera(herramienta, tenant, dict(argumentos or {}))
 
     argumentos = dict(argumentos or {})
     headers = headers_de(herramienta, tenant)

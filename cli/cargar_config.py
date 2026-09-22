@@ -71,6 +71,7 @@ os.environ.setdefault("DB_APPLICATION_NAME", "dexter-cli-cargar-config")
 from nucleo.config import TenantConfig, cargar_config   # noqa: E402
 from nucleo.config import editor                        # noqa: E402
 from nucleo.persistencia.conexion import dsn            # noqa: E402
+from nucleo.seguridad import interruptor                # noqa: E402
 
 # override=False, y NO es un detalle: con True, el .env PISABA las variables
 # que ya trae el entorno. Dentro de un contenedor eso significa que un .env
@@ -395,7 +396,31 @@ def cargar(ruta: Path, org_id: str | None = None, forzar: bool = False) -> None:
                            values (%s, %s, %s, 1)""",
                         (org, slug, json.dumps(datos)))
             editor.anotar_version(cur, org, 1, datos)
-            print(f"[+] {slug}: cargada v1")
+
+            # EL INTERRUPTOR DE AUTONOMIA NACE CON EL TENANT, Y NACE DETENIDO.
+            #
+            # Va aca porque esta rama es la UNICA puerta por la que nace un
+            # tenant en todo el sistema: nucleo/config/editor.py solo escribe
+            # en tenant_config_historial y nunca crea la fila, y
+            # cli/base_desde_cero.py delega en este mismo camino.
+            #
+            # Y va DENTRO de esta transaccion, antes del commit de abajo, para
+            # que las dos escrituras sean una sola cosa. Si sembrar() falla,
+            # falla el alta entera -- no queda un tenant configurado y sin
+            # registro de autonomia, que es el estado que el gate leeria como
+            # 'sin_registro' y bloquearia en silencio.
+            #
+            # Detenido, no activo: crear un tenant no equivale a autorizar que
+            # su agente actue solo. Levantarlo es un acto explicito y con
+            # nombre (cli/autonomia.py --reactivar). El motivo esta largo en
+            # el docstring de interruptor.sembrar.
+            interruptor.sembrar(
+                cur, org, actor="alta_de_tenant",
+                motivo=(f"Alta de '{slug}' (config v1). Nace detenido: crear "
+                        f"un tenant no autoriza su autonomia. Para habilitarla: "
+                        f"cli/autonomia.py {slug} --reactivar"))
+            print(f"[+] {slug}: cargada v1  (autonomia DETENIDA hasta que "
+                  f"alguien la habilite)")
         con.commit()
 
     print(f"    roles: {', '.join(cfg.roles)}")

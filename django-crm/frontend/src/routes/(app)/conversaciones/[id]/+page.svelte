@@ -138,7 +138,29 @@
     FALTA_HABLAR_CON_EL_CLIENTE: 'la acción interrumpe el servicio y el cliente todavía no dijo qué le pasa',
     HERRAMIENTA_DESCONOCIDA: 'intentó usar algo que este rol no tiene permitido',
     LIMITE_DE_CONVERSACION: 'se alcanzó el tope de pasos de la conversación',
-    CAMBIO_DE_CONTROL: 'una persona tomó la conversación antes de que la acción empezara'
+    CAMBIO_DE_CONTROL: 'una persona tomó la conversación antes de que la acción empezara',
+    AUTONOMIA_DETENIDA: 'las acciones automáticas de la empresa están detenidas',
+    OPERACION_EN_CURSO: 'esa misma acción ya se está ejecutando en otro proceso',
+    CLAVE_REUTILIZADA: 'llegó con la misma identificación que otra acción distinta',
+    OPERACION_FALLIDA_PREVIA: 'ya falló antes y repetirla no está autorizado',
+    OPERACION_SIN_REGISTRO: 'no se pudo registrar la acción, y sin registro no se ejecuta',
+    REGISTRO_NO_INSTALADO: 'falta instalar el registro de acciones externas, y sin él no se ejecuta',
+    ACCION_EXTERNA_SIN_TENANT: 'la acción llegó sin empresa válida, así que no hay interruptor que consultar',
+    ACCION_EXTERNA_SIN_AUTORIZAR: 'la acción llegó al sistema externo sin pasar por la autorización',
+    ACCION_EXTERNA_TENANT_DISTINTO: 'el permiso era de otra empresa',
+    DECISION_DE_RECLAMO_DESCONOCIDA: 'el registro de acciones contestó algo que el sistema no supo interpretar, y ante la duda no se ejecuta',
+    IRREVERSIBLE_SIN_APROBACION_VINCULANTE: 'es una acción que no se puede deshacer y solo se ejecuta con la aprobación de una persona para esa acción exacta',
+    PERMISO_CRITICO_DE_OTRA_ACCION: 'la aprobación que había era para otra acción u otros datos',
+    PREVIAS_NO_VIGENTES_AL_APROBAR: 'al aprobarla, las condiciones que la justificaban ya no se cumplían',
+    CONTEXTO_DE_APROBACION_INCOHERENTE: 'lo aprobado no correspondía al equipo o cliente que se había revisado',
+    TECHO_AUTONOMIA_AUSENTE: 'la empresa no tiene fijado hasta dónde puede actuar sola, y sin eso no actúa',
+    TECHO_AUTONOMIA_INVALIDO: 'el nivel de autonomía guardado no es válido, así que no se actúa',
+    TECHO_AUTONOMIA_NO_LEGIBLE: 'no se pudo leer hasta dónde puede actuar sola la empresa, y ante la duda no actúa',
+    TECHO_AUTONOMIA_NO_INSTALADO: 'falta instalar el registro del nivel de autonomía, y sin él no se actúa',
+    TECHO_AUTONOMIA_DE_OTRO_TENANT: 'el nivel de autonomía leído no era de esta empresa',
+    TECHO_AUTONOMIA_INSUFICIENTE: 'la acción pide más autonomía de la que la empresa tiene permitida',
+    NIVEL_REQUERIDO_INVALIDO: 'la acción declara un nivel de autonomía que no existe',
+    APROBACION_HUMANA_REQUERIDA: 'la acción requiere que una persona la apruebe, y el sistema no la ejecuta solo'
   };
 
   /** Si los renglones de bloqueos y errores valen su lugar aunque uno esté en
