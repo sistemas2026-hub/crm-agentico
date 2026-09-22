@@ -41,6 +41,21 @@ export async function GET({ params, locals, fetch }) {
         // saber cuál es cuál para no responder dos veces lo mismo.
         quien: m.rol === 'user' ? 'cliente' : m.rol === 'humano' ? 'humano' : 'asistente',
         texto: m.contenido,
+        // QUIEN LO PRODUJO, TAL CUAL (D30). Faltaba, y el efecto se veia en
+        // produccion: un mensaje que entra mientras alguien mira la pantalla
+        // llega por esta ruta --no por el `load`-- y se dibujaba como «ORIGEN
+        // NO REGISTRADO», que es la etiqueta reservada a las filas anteriores
+        // al registro de origen. O sea que la pantalla afirmaba no saber algo
+        // que la base sabia perfectamente, y sobre un mensaje de hace un
+        // segundo. Recargar lo arreglaba, que es la peor forma de arreglarse:
+        // parece intermitente.
+        //
+        // 'quien' NO sirve para deducirlo: sale de `rol`, y `rol = assistant`
+        // cubre por igual a la IA y a una persona. Es justo la distincion que
+        // D30 existe para sostener, asi que la columna viaja entera. NULL se
+        // devuelve NULL -- no se rellena.
+        origen: m.origen ?? null,
+        autor_nombre: m.autor_nombre ?? null,
         creado_en: m.creado_en,
         // Los adjuntos SIN los bytes -- la interfaz los pide por su id. Sin
         // esto, una foto que entra mientras alguien mira la conversación se
