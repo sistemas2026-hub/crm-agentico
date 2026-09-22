@@ -20,6 +20,11 @@ class ApiEndpoints {
   // Módulo Campo v1 (campo/views.py)
   static String get bootstrap => '$baseUrl/api/campo/bootstrap/';
   static String get trabajos => '$baseUrl/api/campo/trabajos/';
+
+  // Materiales: la custodia del tecnico y lo que gasta.
+  static String get kit => '$baseUrl/api/campo/kit/';
+  static String get movimientosMaterial =>
+      '$baseUrl/api/campo/materiales/movimientos/';
   static String trabajoDetalle(String id) => '$baseUrl/api/campo/trabajos/$id/';
   static String trabajoAcciones(String id) => '$baseUrl/api/campo/trabajos/$id/acciones/';
   static String trabajoDatos(String id) => '$baseUrl/api/campo/trabajos/$id/datos/';

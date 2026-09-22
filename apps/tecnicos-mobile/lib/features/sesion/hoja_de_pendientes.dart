@@ -161,6 +161,21 @@ class _HojaDePendientesState extends State<HojaDePendientes> {
                 color: AppColors.onSurfaceVariant,
               ),
             ),
+            // El material se nombra aparte porque no se recupera igual que lo
+            // demás: una foto se puede volver a tomar y una transición se
+            // puede repetir, pero lo que se gastó en la calle solo consta acá.
+            // Si se pierde, el inventario de la empresa sigue diciendo que el
+            // material está en la camioneta.
+            if (_pendientes.movimientosDeMaterial > 0) ...<Widget>[
+              const SizedBox(height: 6),
+              Text(
+                'Hay movimientos de materiales pendientes de sincronizar.',
+                style: AppTypography.cuerpoChico.copyWith(
+                  color: AppColors.onSurface,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
             const SizedBox(height: 14),
             Container(
               width: double.infinity,

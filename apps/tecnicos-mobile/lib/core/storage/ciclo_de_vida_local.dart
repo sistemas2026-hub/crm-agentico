@@ -75,6 +75,13 @@ class ResumenPendientes {
   /// Órdenes con datos del formulario escritos y todavía sin viajar.
   final int ordenesConDatos;
 
+  /// Consumos y devoluciones de material que no subieron.
+  ///
+  /// Cuentan como pendientes igual que una fotografía: lo que se gastó en la
+  /// calle solo existe en este teléfono hasta que suba, y borrarlo deja el
+  /// inventario de la empresa diciendo que el material sigue en la camioneta.
+  final int movimientosDeMaterial;
+
   /// Una línea por cosa pendiente, tal como va en pantalla.
   final List<String> detalle;
 
@@ -82,6 +89,7 @@ class ResumenPendientes {
     required this.mutaciones,
     required this.evidencias,
     required this.ordenesConDatos,
+    required this.movimientosDeMaterial,
     required this.detalle,
   });
 
@@ -89,9 +97,11 @@ class ResumenPendientes {
       : mutaciones = 0,
         evidencias = 0,
         ordenesConDatos = 0,
+        movimientosDeMaterial = 0,
         detalle = const <String>[];
 
-  int get total => mutaciones + evidencias + ordenesConDatos;
+  int get total =>
+      mutaciones + evidencias + ordenesConDatos + movimientosDeMaterial;
 
   bool get hayPendientes => total > 0;
 
@@ -154,6 +164,10 @@ class CicloDeVidaLocal {
       profileId: profileId,
     );
     final evidencias = conteos['evidencias_pendientes'] ?? 0;
+    final movimientos = await _db.getMovimientosMaterialSinConfirmar(
+      orgId: orgId,
+      profileId: profileId,
+    );
 
     final detalle = <String>[];
     for (final m in mutaciones) {
@@ -175,11 +189,29 @@ class CicloDeVidaLocal {
         numero == null ? '$cuantos sin subir' : 'OT #$numero · $cuantos sin subir',
       );
     }
+    // El material se nombra con su nombre y su cantidad, no como "3
+    // movimientos": quien lo lee reconoce el conector que puso hace una hora,
+    // no un número de filas.
+    for (final m in movimientos) {
+      final nombre = (m['material_nombre'] ?? '').toString().trim();
+      final etiqueta = nombre.isNotEmpty
+          ? nombre
+          : (m['material_codigo'] ?? 'Material').toString();
+      final cantidad = (m['cantidad'] ?? '').toString();
+      final numero = m['orden_numero'];
+      final tipo = (m['tipo'] ?? '').toString();
+      final verbo = tipo == 'devolucion' ? 'devolución' : '';
+      final cuerpo = verbo.isEmpty
+          ? '$etiqueta x$cantidad'
+          : '$etiqueta x$cantidad · $verbo';
+      detalle.add(numero == null ? cuerpo : 'OT #$numero · $cuerpo');
+    }
 
     return ResumenPendientes(
       mutaciones: mutaciones.length,
       evidencias: evidencias,
       ordenesConDatos: datos.length,
+      movimientosDeMaterial: movimientos.length,
       detalle: detalle,
     );
   }
@@ -284,7 +316,15 @@ class CicloDeVidaLocal {
 
     // Los archivos que ninguna fila reclama se van acá: existían antes de que
     // la ruta llevara la identidad, y no hay forma de saber de quién son.
-    archivos += await borrarArchivosHuerfanos();
+    //
+    // Si el disco no responde no se interrumpe la limpieza: las filas ya se
+    // borraron, y dejar eso a medias por un archivo sería peor. Se reintenta
+    // en el próximo inicio de sesión.
+    try {
+      archivos += await borrarArchivosHuerfanos();
+    } catch (_) {
+      // Sin acceso al almacenamiento: se sigue.
+    }
 
     return ResultadoDeLimpieza(
       purgadas: purgadas,

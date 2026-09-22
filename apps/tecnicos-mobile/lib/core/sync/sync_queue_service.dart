@@ -174,6 +174,13 @@ class SyncQueueService {
       // 5. Procesar mutación 'completar' (DAG: solo si no quedan dirty ni evidencias pendientes)
       await _procesarMutacionCompletar(orgId, profileId);
 
+      // 5b. Materiales: primero sube lo que se gastó, después baja el kit.
+      // En ese orden, porque el kit que devuelve el servidor ya incluye los
+      // consumos recién subidos; al revés, el saldo saltaría hacia arriba un
+      // instante antes de volver a bajar.
+      await _procesarMovimientosMaterial(orgId, profileId);
+      await _descargarKit(orgId, profileId);
+
       // 6. Refresco final de estado
       await _descargarOrdenesAsignadas(orgId, profileId);
 
@@ -185,6 +192,209 @@ class SyncQueueService {
     } finally {
       _isSyncing = false;
       await refreshSyncSummary();
+    }
+  }
+
+  /// Los segundos que el servidor pidio esperar, si los pidio.
+  ///
+  /// `Retry-After` llega de dos formas y hay que entender las dos: un numero
+  /// de segundos, o una fecha HTTP. Ante cualquier duda devuelve null y manda
+  /// el backoff propio, que es el lado seguro: esperar de mas molesta, no
+  /// esperar nada cuando el servidor pidio calma empeora justo lo que estaba
+  /// mal.
+  static int? _leerRetryAfter(String? crudo) {
+    if (crudo == null) return null;
+    final texto = crudo.trim();
+    if (texto.isEmpty) return null;
+
+    final segundos = int.tryParse(texto);
+    if (segundos != null) return segundos > 0 ? segundos : null;
+
+    try {
+      final fecha = HttpDate.parse(texto);
+      final diferencia = fecha.difference(DateTime.now()).inSeconds;
+      return diferencia > 0 ? diferencia : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Cuantos movimientos van en cada envio.
+  ///
+  /// El lote existe porque una cuadrilla sin senal acumula media jornada y la
+  /// manda toda junta al reconectar: de a uno multiplica los viajes justo
+  /// cuando la conexion es peor. Y tiene tope porque una peticion enorme en
+  /// una red mala falla entera, y entonces no sube nada.
+  static const int _movimientosPorLote = 25;
+
+  /// Un mensaje de error que se puede guardar en el telefono.
+  ///
+  /// La columna `error_mensaje` sobrevive al cierre de sesion mientras haya
+  /// pendientes, asi que no puede terminar ahi una URL firmada, una cabecera
+  /// de autorizacion ni el cuerpo de una respuesta. Se guarda el codigo y una
+  /// frase corta: alcanza para saber si reintentar y no deja un secreto en el
+  /// disco de un telefono que cambia de manos.
+  static String sanearError(Object error) {
+    if (error is DioException) {
+      final codigo = error.response?.statusCode;
+      if (codigo != null) return 'El servidor respondio $codigo.';
+      return switch (error.type) {
+        DioExceptionType.connectionTimeout ||
+        DioExceptionType.sendTimeout ||
+        DioExceptionType.receiveTimeout =>
+          'Se agoto el tiempo de espera.',
+        DioExceptionType.connectionError => 'No se pudo conectar.',
+        _ => 'Fallo el envio.',
+      };
+    }
+    return 'Fallo el envio.';
+  }
+
+  /// Sube lo que el tecnico gasto en la calle.
+  ///
+  /// Se manda en lote y cada movimiento vuelve con su propio resultado, asi
+  /// que uno en descuadre no invalida a los demas. Lo que el servidor conteste
+  /// --aceptado, descuadre, conflicto-- se guarda tal cual: los tres
+  /// confirman que subio, y ninguno se reintenta. Reintentar un descuadre
+  /// seria pedirle al servidor que cambie de opinion.
+  Future<void> _procesarMovimientosMaterial(String orgId, String profileId) async {
+    final pendientes = await _localDb.getMovimientosMaterialPendientes(
+      orgId: orgId,
+      profileId: profileId,
+    );
+    if (pendientes.isEmpty) return;
+
+    for (var i = 0; i < pendientes.length; i += _movimientosPorLote) {
+      final lote = pendientes.skip(i).take(_movimientosPorLote).toList();
+      final ids = lote.map((m) => m['id'] as String).toList();
+
+      await _localDb.marcarMovimientosEnviando(
+        orgId: orgId,
+        profileId: profileId,
+        ids: ids,
+      );
+
+      try {
+        final respuesta = await _apiClient.post(
+          ApiEndpoints.movimientosMaterial,
+          data: <String, dynamic>{
+            'movimientos': <Map<String, dynamic>>[
+              for (final m in lote)
+                <String, dynamic>{
+                  // El id de la fila ES la clave de idempotencia: el servidor
+                  // la usa para reconocer el reintento.
+                  'clave': m['id'],
+                  'material': m['material_codigo'],
+                  'tipo': m['tipo'],
+                  'cantidad': m['cantidad'],
+                  if ((m['serie'] as String?)?.isNotEmpty ?? false)
+                    'serie': m['serie'],
+                  if (m['orden_id'] != null) 'orden_id': m['orden_id'],
+                  'ocurrido_en': m['ocurrido_en'],
+                },
+            ],
+          },
+          options: Options(
+            headers: <String, dynamic>{
+              // La misma peticion reintentada no se reprocesa en el servidor.
+              'Idempotency-Key': 'lote-${ids.first}-${ids.length}',
+            },
+          ),
+        );
+
+        final datos = respuesta.data;
+        final resultados = datos is Map ? datos['resultados'] : null;
+        if (resultados is! List) {
+          throw DioException(
+            requestOptions: RequestOptions(path: ApiEndpoints.movimientosMaterial),
+            message: 'respuesta sin resultados',
+          );
+        }
+
+        // Se confirma por clave y no por posicion: si el servidor devolviera
+        // los resultados en otro orden, confiar en el indice marcaria un
+        // movimiento con el resultado de otro.
+        final porClave = <String, Map<String, dynamic>>{
+          for (final r in resultados)
+            if (r is Map && r['clave'] != null)
+              r['clave'].toString(): Map<String, dynamic>.from(r),
+        };
+
+        for (final m in lote) {
+          final id = m['id'] as String;
+          final resultado = porClave[id];
+          if (resultado == null) {
+            // El servidor no dijo nada de este: se deja pendiente para el
+            // proximo ciclo en vez de darlo por subido.
+            await _localDb.registrarFalloMovimientoMaterial(
+              id: id,
+              orgId: orgId,
+              profileId: profileId,
+              nextAttemptAt: DateTime.now().millisecondsSinceEpoch +
+                  calcularBackoffMs(m['intentos'] as int? ?? 0, mutationId: id),
+              errorMensaje: 'El servidor no respondio por este movimiento.',
+            );
+            continue;
+          }
+          await _localDb.confirmarMovimientoMaterial(
+            id: id,
+            orgId: orgId,
+            profileId: profileId,
+            resultado: resultado['estado']?.toString() ?? 'aceptado',
+            motivo: resultado['motivo']?.toString() ?? '',
+          );
+        }
+      } catch (e) {
+        // Un 400 del lote entero --un material que el catalogo no conoce--
+        // tampoco se descarta: se reintenta con espera. Descartar un
+        // movimiento es perder el unico registro de que el material se uso, y
+        // eso no lo decide el telefono.
+        final retryAfter = e is DioException
+            ? _leerRetryAfter(e.response?.headers.value('retry-after'))
+            : null;
+        for (final m in lote) {
+          final id = m['id'] as String;
+          final intentos = m['intentos'] as int? ?? 0;
+          await _localDb.registrarFalloMovimientoMaterial(
+            id: id,
+            orgId: orgId,
+            profileId: profileId,
+            nextAttemptAt: DateTime.now().millisecondsSinceEpoch +
+                calcularBackoffMs(
+                  intentos,
+                  mutationId: id,
+                  retryAfterSeconds: retryAfter,
+                ),
+            errorMensaje: sanearError(e),
+          );
+        }
+      }
+    }
+  }
+
+  /// Trae el kit del servidor y reemplaza el espejo local.
+  ///
+  /// Corre DESPUES de subir los movimientos: si corriera antes, el espejo
+  /// llegaria sin los consumos que estan por subir y el saldo mostrado
+  /// saltaria hacia arriba un instante antes de volver a bajar.
+  Future<void> _descargarKit(String orgId, String profileId) async {
+    try {
+      final respuesta = await _apiClient.get(ApiEndpoints.kit);
+      final datos = respuesta.data;
+      final materiales = datos is Map ? datos['materiales'] : null;
+      if (materiales is! List) return;
+
+      await _localDb.reemplazarKit(
+        orgId: orgId,
+        profileId: profileId,
+        materiales: <Map<String, dynamic>>[
+          for (final m in materiales)
+            if (m is Map) Map<String, dynamic>.from(m),
+        ],
+      );
+    } catch (_) {
+      // Sin senal el kit se queda como estaba. Es un espejo: quedarse con el
+      // de ayer es mejor que quedarse sin ninguno.
     }
   }
 
@@ -360,22 +570,9 @@ class SyncQueueService {
           );
         } else {
           // Errores reintentables: 408 (Timeout), 429 (Rate limit), 5xx, timeouts de red, caídas de socket
-          int? retryAfterSeconds;
-          if (status == 429) {
-            final rawRetryAfter = dioErr.response?.headers.value('retry-after');
-            if (rawRetryAfter != null) {
-              final parsed = int.tryParse(rawRetryAfter.trim());
-              if (parsed != null && parsed > 0) {
-                retryAfterSeconds = parsed;
-              } else {
-                try {
-                  final httpDate = HttpDate.parse(rawRetryAfter.trim());
-                  final diff = httpDate.difference(DateTime.now()).inSeconds;
-                  if (diff > 0) retryAfterSeconds = diff;
-                } catch (_) {}
-              }
-            }
-          }
+          final retryAfterSeconds = status == 429
+              ? _leerRetryAfter(dioErr.response?.headers.value('retry-after'))
+              : null;
 
           final reintentosActuales = (m['reintentos'] as int? ?? 0);
           final delayMs = calcularBackoffMs(

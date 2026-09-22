@@ -103,7 +103,7 @@ class LocalDatabase {
 
     final db = await openDatabase(
       path,
-      version: 8,
+      version: 9,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -129,6 +129,12 @@ class LocalDatabase {
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    // v9: materiales. Aditiva y sin tocar nada de lo anterior -- un telefono
+    // con media jornada sin subir no puede perderla por actualizar la app.
+    if (oldVersion < 9) {
+      await _crearTablasDeMateriales(db);
+    }
+
     final infoEvidencias = await db.rawQuery('PRAGMA table_info(cola_evidencias);');
     final colsEvidencias = infoEvidencias.map((c) => c['name'] as String).toSet();
 
@@ -247,6 +253,83 @@ class LocalDatabase {
     }
   }
 
+  /// Las dos tablas de materiales, creadas igual desde cero que al migrar.
+  ///
+  /// Escritas una sola vez porque ya paso: un `CREATE` en `_onCreate` y otro
+  /// distinto en `_onUpgrade` dejan dos esquemas parecidos segun por donde
+  /// haya entrado cada telefono, y la diferencia solo aparece meses despues
+  /// en un aparato que nadie puede reproducir.
+  static Future<void> _crearTablasDeMateriales(DatabaseExecutor db) async {
+    // Lo que el tecnico tiene a cargo, como se lo entrego el servidor.
+    //
+    // Es un espejo de lectura: se reescribe con cada sincronizacion y no se
+    // edita a mano. Lo que el tecnico hace --gastar, devolver-- vive en la
+    // cola, y el saldo que se muestra es este espejo ajustado con lo que la
+    // cola todavia no subio. Guardar un saldo ya ajustado haria que un
+    // reintento lo descontara dos veces.
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS local_kit (
+        org_id TEXT NOT NULL,
+        profile_id TEXT NOT NULL,
+        codigo TEXT NOT NULL,
+        nombre TEXT NOT NULL,
+        categoria TEXT,
+        clase TEXT NOT NULL,
+        unidad TEXT NOT NULL,
+        recibido TEXT NOT NULL,
+        consumido TEXT NOT NULL,
+        devuelto TEXT NOT NULL,
+        disponible TEXT NOT NULL,
+        series_json TEXT,
+        acta TEXT,
+        entregado_en TEXT,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (codigo, org_id, profile_id)
+      )
+    ''');
+
+    // Lo que paso en la calle y todavia no subio.
+    //
+    // `id` ES la clave de idempotencia: el servidor la usa para reconocer un
+    // reintento, asi que no puede haber dos ids para el mismo hecho ni un
+    // hecho sin id. Tenerlos separados invitaba a regenerar uno al reintentar,
+    // que es justo lo que duplica un consumo.
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS cola_movimientos_material (
+        id TEXT PRIMARY KEY,
+        org_id TEXT NOT NULL,
+        profile_id TEXT NOT NULL,
+        material_codigo TEXT NOT NULL,
+        material_nombre TEXT,
+        tipo TEXT NOT NULL,
+        cantidad TEXT NOT NULL,
+        serie TEXT,
+        orden_id TEXT,
+        orden_numero INTEGER,
+        estado TEXT NOT NULL DEFAULT 'pendiente',
+        resultado TEXT,
+        motivo TEXT,
+        intentos INTEGER NOT NULL DEFAULT 0,
+        error_mensaje TEXT,
+        next_attempt_at INTEGER NOT NULL DEFAULT 0,
+        ocurrido_en TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        confirmado_en INTEGER
+      )
+    ''');
+
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_kit_org_user ON local_kit (org_id, profile_id)',
+    );
+    // El indice lleva la identidad adelante porque toda consulta de la cola
+    // empieza por "lo mio": sin eso, un telefono que acumulo la jornada de
+    // dos personas recorre filas ajenas para descartarlas.
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_movimientos_pendientes '
+      'ON cola_movimientos_material (org_id, profile_id, estado)',
+    );
+  }
+
   Future<void> _onCreate(Database db, int version) async {
     // 1. Tabla de órdenes cacheadas / activas
     await db.execute('''
@@ -351,6 +434,8 @@ class LocalDatabase {
         created_at INTEGER NOT NULL
       )
     ''');
+
+    await _crearTablasDeMateriales(db);
 
     // Índices para optimizar consultas por tenant/usuario
     await db.execute('CREATE INDEX idx_ordenes_org_user ON local_ordenes (org_id, profile_id)');
@@ -1008,6 +1093,314 @@ class LocalDatabase {
   }
 
   // ---------------------------------------------------------------------------
+  // Materiales: el kit que se lleva y lo que se gasta
+  //
+  // El espejo del kit y la cola de movimientos viven separados a proposito. El
+  // kit es lo que dijo el servidor la ultima vez que hubo senal; la cola es lo
+  // que paso despues. Mezclarlos --guardar un saldo ya descontado-- haria que
+  // un reintento descontara dos veces, porque la cola volveria a aplicarse
+  // sobre un numero que ya la incluia.
+  //
+  // Por eso `saldoLocalDe` suma las dos cosas en el momento de leer, y nunca
+  // escribe el resultado.
+  // ---------------------------------------------------------------------------
+
+  /// Reemplaza el espejo del kit con lo que acaba de decir el servidor.
+  ///
+  /// Se borra y se reescribe en una transaccion en vez de ir fila por fila: un
+  /// material que dejo de estar en el kit tiene que desaparecer, y un upsert
+  /// sin borrado lo dejaria para siempre mostrando un saldo que ya no existe.
+  Future<void> reemplazarKit({
+    required String orgId,
+    required String profileId,
+    required List<Map<String, dynamic>> materiales,
+  }) async {
+    final db = await database;
+    final ahora = DateTime.now().millisecondsSinceEpoch;
+
+    await db.transaction((txn) async {
+      await txn.delete(
+        'local_kit',
+        where: 'org_id = ? AND profile_id = ?',
+        whereArgs: [orgId, profileId],
+      );
+      for (final material in materiales) {
+        await txn.insert('local_kit', <String, Object?>{
+          'org_id': orgId,
+          'profile_id': profileId,
+          'codigo': material['codigo']?.toString() ?? '',
+          'nombre': material['nombre']?.toString() ?? '',
+          'categoria': material['categoria']?.toString() ?? '',
+          'clase': material['clase']?.toString() ?? 'consumible',
+          'unidad': material['unidad']?.toString() ?? 'unidades',
+          // Las cantidades se guardan como TEXTO, igual que viajan. 42.5
+          // metros en coma flotante dejan de ser 42.5 en cuanto alguien suma,
+          // y un saldo que falla por milesimas no se distingue de un
+          // descuadre real.
+          'recibido': material['recibido']?.toString() ?? '0',
+          'consumido': material['consumido']?.toString() ?? '0',
+          'devuelto': material['devuelto']?.toString() ?? '0',
+          'disponible': material['disponible']?.toString() ?? '0',
+          'series_json': jsonEncode(material['series'] ?? <String>[]),
+          'acta': material['acta']?.toString() ?? '',
+          'entregado_en': material['entregado_en']?.toString(),
+          'updated_at': ahora,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+    });
+    _notifyChange(orgId: orgId, profileId: profileId, tabla: 'local_kit');
+  }
+
+  Future<List<Map<String, dynamic>>> getKit({
+    required String orgId,
+    required String profileId,
+  }) async {
+    final db = await database;
+    return db.query(
+      'local_kit',
+      where: 'org_id = ? AND profile_id = ?',
+      whereArgs: [orgId, profileId],
+      orderBy: 'categoria ASC, nombre ASC',
+    );
+  }
+
+  /// Encola un movimiento que acaba de ocurrir.
+  ///
+  /// `id` es la clave de idempotencia y la pone quien llama, una sola vez: el
+  /// servidor la usa para reconocer un reintento. Regenerarla al reintentar es
+  /// exactamente lo que duplica un consumo, asi que no se genera aca.
+  Future<void> encolarMovimientoMaterial({
+    required String id,
+    required String orgId,
+    required String profileId,
+    required String materialCodigo,
+    required String tipo,
+    required String cantidad,
+    String materialNombre = '',
+    String serie = '',
+    String? ordenId,
+    int? ordenNumero,
+    DateTime? ocurridoEn,
+  }) async {
+    final db = await database;
+    await db.insert(
+      'cola_movimientos_material',
+      <String, Object?>{
+        'id': id,
+        'org_id': orgId,
+        'profile_id': profileId,
+        'material_codigo': materialCodigo,
+        'material_nombre': materialNombre,
+        'tipo': tipo,
+        'cantidad': cantidad,
+        'serie': serie,
+        'orden_id': ordenId,
+        'orden_numero': ordenNumero,
+        'estado': 'pendiente',
+        'intentos': 0,
+        'next_attempt_at': 0,
+        'ocurrido_en': (ocurridoEn ?? DateTime.now()).toIso8601String(),
+        'created_at': DateTime.now().millisecondsSinceEpoch,
+      },
+      // Encolar dos veces el mismo id es un reintento de la pantalla, no un
+      // consumo nuevo: se ignora en vez de romper.
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    _notifyChange(
+      orgId: orgId,
+      profileId: profileId,
+      tabla: 'cola_movimientos_material',
+    );
+  }
+
+  /// Los movimientos que toca intentar ahora.
+  ///
+  /// `soloListosHasta` deja afuera los que estan esperando su turno despues de
+  /// un fallo: sin eso, un error permanente se reintentaria en cada ciclo y
+  /// gastaria la bateria de alguien que esta trabajando.
+  Future<List<Map<String, dynamic>>> getMovimientosMaterialPendientes({
+    required String orgId,
+    required String profileId,
+    int? soloListosHasta,
+  }) async {
+    final db = await database;
+    final ahora = soloListosHasta ?? DateTime.now().millisecondsSinceEpoch;
+    return db.query(
+      'cola_movimientos_material',
+      where: 'org_id = ? AND profile_id = ? AND estado IN (?, ?) '
+          'AND next_attempt_at <= ?',
+      whereArgs: [orgId, profileId, 'pendiente', 'error', ahora],
+      orderBy: 'created_at ASC',
+    );
+  }
+
+  /// Todo lo que esta persona tiene sin confirmar, sin importar su turno.
+  ///
+  /// Es lo que mira el cierre de sesion: ahi la pregunta no es "que se puede
+  /// reintentar ahora" sino "que se perderia si borro".
+  Future<List<Map<String, dynamic>>> getMovimientosMaterialSinConfirmar({
+    required String orgId,
+    required String profileId,
+  }) async {
+    final db = await database;
+    return db.query(
+      'cola_movimientos_material',
+      where: 'org_id = ? AND profile_id = ? AND estado != ?',
+      whereArgs: [orgId, profileId, 'confirmado'],
+      orderBy: 'created_at ASC',
+    );
+  }
+
+  /// Los que el servidor acepto pero con novedad: descuadre o conflicto.
+  ///
+  /// Estan confirmados --ya subieron-- y aun asi hay que mostrarlos: un
+  /// conflicto que se resuelve solo, en silencio, es un equipo que figura
+  /// instalado dos veces y nadie se entera.
+  Future<List<Map<String, dynamic>>> getMovimientosMaterialConNovedad({
+    required String orgId,
+    required String profileId,
+  }) async {
+    final db = await database;
+    return db.query(
+      'cola_movimientos_material',
+      where: 'org_id = ? AND profile_id = ? AND resultado IS NOT NULL '
+          'AND resultado != ?',
+      whereArgs: [orgId, profileId, 'aceptado'],
+      orderBy: 'created_at DESC',
+    );
+  }
+
+  /// Marca un grupo como "enviando", antes de salir a la red.
+  ///
+  /// Sirve para que la pantalla pueda distinguir lo que esta en vuelo de lo
+  /// que todavia no salio, y para que un segundo ciclo de sincronizacion no
+  /// vuelva a tomar lo que ya va en camino.
+  Future<void> marcarMovimientosEnviando({
+    required String orgId,
+    required String profileId,
+    required List<String> ids,
+  }) async {
+    if (ids.isEmpty) return;
+    final db = await database;
+    final marcas = List.filled(ids.length, '?').join(',');
+    await db.rawUpdate(
+      'UPDATE cola_movimientos_material SET estado = ? '
+      'WHERE org_id = ? AND profile_id = ? AND id IN ($marcas)',
+      <Object?>['enviando', orgId, profileId, ...ids],
+    );
+    _notifyChange(
+      orgId: orgId,
+      profileId: profileId,
+      tabla: 'cola_movimientos_material',
+    );
+  }
+
+  /// El servidor contesto por este movimiento.
+  ///
+  /// `resultado` es lo que dijo --aceptado, descuadre, conflicto-- y es
+  /// distinto del estado de sincronizacion: los tres CONFIRMAN que el
+  /// movimiento subio. Mezclarlos haria que un descuadre pareciera un fallo de
+  /// red y se reintentara para siempre.
+  Future<void> confirmarMovimientoMaterial({
+    required String id,
+    required String orgId,
+    required String profileId,
+    required String resultado,
+    String motivo = '',
+  }) async {
+    final db = await database;
+    await db.update(
+      'cola_movimientos_material',
+      <String, Object?>{
+        'estado': 'confirmado',
+        'resultado': resultado,
+        'motivo': motivo,
+        'error_mensaje': null,
+        'confirmado_en': DateTime.now().millisecondsSinceEpoch,
+      },
+      where: 'id = ? AND org_id = ? AND profile_id = ?',
+      whereArgs: [id, orgId, profileId],
+    );
+    _notifyChange(
+      orgId: orgId,
+      profileId: profileId,
+      tabla: 'cola_movimientos_material',
+    );
+  }
+
+  /// El envio fallo: se cuenta el intento y se agenda el proximo.
+  ///
+  /// El mensaje llega ya saneado por quien llama: en esta columna no puede
+  /// terminar una URL firmada ni una cabecera de autorizacion, porque la base
+  /// del telefono sobrevive al cierre de sesion mientras haya pendientes.
+  Future<void> registrarFalloMovimientoMaterial({
+    required String id,
+    required String orgId,
+    required String profileId,
+    required int nextAttemptAt,
+    String? errorMensaje,
+  }) async {
+    final db = await database;
+    await db.rawUpdate(
+      'UPDATE cola_movimientos_material '
+      'SET intentos = intentos + 1, next_attempt_at = ?, error_mensaje = ?, '
+      "estado = 'error' "
+      'WHERE id = ? AND org_id = ? AND profile_id = ?',
+      <Object?>[nextAttemptAt, errorMensaje, id, orgId, profileId],
+    );
+    _notifyChange(
+      orgId: orgId,
+      profileId: profileId,
+      tabla: 'cola_movimientos_material',
+    );
+  }
+
+  /// El saldo que se puede mostrar sin señal.
+  ///
+  /// Es el espejo del servidor ajustado con lo que la cola todavia no subio.
+  /// Se calcula al leer y no se guarda: un saldo persistido y una cola que se
+  /// reintenta se desincronizan en cuanto algo se reenvia, y despues nadie
+  /// sabe cual de los dos numeros es el bueno.
+  Future<double> saldoLocalDe({
+    required String orgId,
+    required String profileId,
+    required String codigo,
+  }) async {
+    final db = await database;
+    final filas = await db.query(
+      'local_kit',
+      columns: ['disponible'],
+      where: 'org_id = ? AND profile_id = ? AND codigo = ?',
+      whereArgs: [orgId, profileId, codigo],
+      limit: 1,
+    );
+    var saldo = filas.isEmpty
+        ? 0.0
+        : double.tryParse(filas.first['disponible']?.toString() ?? '0') ?? 0.0;
+
+    // Solo lo que el servidor todavia no confirmo: lo confirmado ya esta
+    // descontado dentro de `disponible`.
+    final pendientes = await db.query(
+      'cola_movimientos_material',
+      columns: ['tipo', 'cantidad'],
+      where: 'org_id = ? AND profile_id = ? AND material_codigo = ? '
+          'AND estado != ?',
+      whereArgs: [orgId, profileId, codigo, 'confirmado'],
+    );
+    for (final fila in pendientes) {
+      final cantidad =
+          double.tryParse(fila['cantidad']?.toString() ?? '0') ?? 0.0;
+      final tipo = fila['tipo']?.toString() ?? '';
+      if (tipo == 'consumo' || tipo == 'devolucion') {
+        saldo -= cantidad;
+      } else if (tipo == 'ajuste') {
+        saldo += cantidad;
+      }
+    }
+    return saldo;
+  }
+
+  // ---------------------------------------------------------------------------
   // Ciclo de vida de los datos locales
   //
   // Lo que sigue existe porque cerrar sesión no borraba nada: las órdenes
@@ -1033,6 +1426,8 @@ class LocalDatabase {
       UNION SELECT DISTINCT org_id, profile_id FROM local_datos_dirty
       UNION SELECT DISTINCT org_id, profile_id FROM cola_mutaciones
       UNION SELECT DISTINCT org_id, profile_id FROM cola_evidencias
+      UNION SELECT DISTINCT org_id, profile_id FROM local_kit
+      UNION SELECT DISTINCT org_id, profile_id FROM cola_movimientos_material
     ''');
     return filas
         .map((f) => <String, String>{
@@ -1138,6 +1533,8 @@ class LocalDatabase {
         'local_datos_dirty',
         'cola_mutaciones',
         'cola_evidencias',
+        'local_kit',
+        'cola_movimientos_material',
       ]) {
         await txn.delete(
           tabla,
