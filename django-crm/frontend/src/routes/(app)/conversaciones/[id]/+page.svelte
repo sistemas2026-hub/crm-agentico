@@ -1607,6 +1607,7 @@
     {hilo}
     cantidadMensajes={mensajes.length}
     conversacionId={conversacion.id}
+    nombreCliente={conversacion.nombre_cliente ?? ''}
     {casos}
     escribiendo={enviando && !escalada}
     {reintentando}

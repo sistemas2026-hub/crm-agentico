@@ -6,10 +6,12 @@
    * Es presentación. No decide nada: la navegación, el estado de la columna de
    * contexto y el reinicio siguen viviendo en la página, que es la que tiene
    * que saber de fetches y de rutas. Acá sólo llegan props y salen avisos.
+   *
+   * REFERENCIA: «Human Control State (Assigned to Me)»
+   * (`c427b43a84534a489891f111217439a4`). De ahí salen la ficha cuadrada de
+   * iniciales, el filete vertical y el bloque de control de dos renglones.
    */
   import { ArrowLeft, Phone, User, PanelRight } from '@lucide/svelte';
-  import Pill from '$lib/v2/components/Pill.svelte';
-  import Avatar from '$lib/v2/components/Avatar.svelte';
 
   let {
     conversacion,
@@ -32,9 +34,7 @@
   } = $props();
 
   const CANAL_LABEL = { whatsapp: 'WhatsApp', 'whatsapp-simulado': 'Simulador' };
-  const canalLabel = (c) => CANAL_LABEL[c] ?? c;
-  const canalTone = (c) => (c === 'whatsapp' ? 'moss' : 'slate');
-  const estadoTone = (e) => (e === 'abierta' ? 'clay' : 'slate');
+  const canalLabel = (/** @type {string} */ c) => CANAL_LABEL[c] ?? c;
 
   // Mismo criterio que la lista del layout: un telefono o un uuid no dan
   // iniciales, y diez digitos seguidos no se leen.
@@ -47,6 +47,24 @@
     if (esTelefono(v) && d.length === 10) return `${d.slice(0, 3)} ${d.slice(3, 6)} ${d.slice(6)}`;
     return v;
   }
+
+  /** Las dos primeras iniciales del nombre. La referencia usa una ficha
+      CUADRADA de 36px con las iniciales en negrita, no un avatar redondo: en
+      una consola el círculo se lee como "persona del equipo" --así se dibujan
+      los operadores-- y quien está del otro lado del hilo no lo es. */
+  const iniciales = (/** @type {string} */ v) =>
+    (v || '')
+      .trim()
+      .split(/\s+/)
+      .slice(0, 2)
+      .map((p) => p[0])
+      .join('')
+      .toUpperCase();
+
+  const nombre = $derived(conversacion.nombre_cliente || '');
+  const telefono = $derived(
+    esTelefono(conversacion.usuario_externo) ? quien(conversacion.usuario_externo) : ''
+  );
 </script>
 
 <header class="centro-top">
@@ -54,74 +72,76 @@
     <ArrowLeft size={16} />
   </a>
 
-  {#if conversacion.nombre_cliente}
-    <Avatar name={conversacion.nombre_cliente} size={32} />
+  {#if nombre}
+    <span class="ident" aria-hidden="true">{iniciales(nombre)}</span>
   {:else if esTelefono(conversacion.usuario_externo)}
     <span class="ident" aria-hidden="true"><Phone size={15} /></span>
   {:else if !conversacion.usuario_externo || esUuid(conversacion.usuario_externo)}
     <span class="ident" aria-hidden="true"><User size={15} /></span>
   {:else}
-    <Avatar name={conversacion.usuario_externo} size={32} />
+    <span class="ident" aria-hidden="true">{iniciales(conversacion.usuario_externo)}</span>
   {/if}
 
   <div class="centro-quien">
-    <!-- IDENTIDAD Y METADATOS EN EL MISMO RENGLÓN, como en la referencia:
-         nombre, y al lado los identificadores en mono separados por puntos.
-         Antes el nombre se llevaba un renglón entero y debajo iban tres
-         píldoras; así entra más dato en menos alto y se lee como una ficha
-         de consola en vez de como el título de una página.
-
-         Sólo se dibuja lo que la conversación TRAE. El teléfono y el id del
-         ISP están siempre; el resto de la ficha del cliente --documento,
-         plan, dirección-- vive en el sistema del ISP y esta pantalla no lo
-         carga: está en la pestaña Cliente, que es la que sí lo consulta. -->
+    <!-- PRIMER RENGLÓN: nombre, teléfono y las dos fichas de estado. La
+         referencia pone el teléfono en mono al lado del nombre --es un dato
+         que se marca, no un título-- y el canal como ficha gris. -->
     <div class="centro-identidad">
-      <h2>{conversacion.nombre_cliente || quien(conversacion.usuario_externo)}</h2>
-      <span class="centro-ids">
-        {#if conversacion.nombre_cliente && conversacion.usuario_externo}
-          <span class="centro-id">{quien(conversacion.usuario_externo)}</span>
-        {/if}
-        {#if conversacion.id_cliente}
-          <span class="centro-id">ISP <b>{conversacion.id_cliente}</b></span>
-        {/if}
-        <!-- LA FICHA DEL ISP, leída en vivo. Documento, plan y estado del
-             servicio son lo que alguien mira antes de contestarle a un
-             cliente, y hasta ahora había que abrir otra pantalla para verlos.
-             Cada uno se dibuja sólo si vino: la ficha llega incompleta a
-             propósito --el motor filtra por una lista blanca-- y un renglón
-             con "—" no informa nada. -->
-        {#if ficha?.cedula}
-          <span class="centro-id">CC <b>{ficha.cedula}</b></span>
-        {/if}
-        {#if ficha?.plan_internet}
-          <span class="centro-id centro-id-plan">{ficha.plan_internet}</span>
-        {/if}
-        {#if ficha?.estado}
-          <span class="centro-id">{ficha.estado}</span>
-        {/if}
-        {#if conversacion.ticket_operativo}
-          <span class="centro-id">Ticket <b>{conversacion.ticket_operativo}</b></span>
-        {/if}
-      </span>
+      <h2>{nombre || quien(conversacion.usuario_externo)}</h2>
+      {#if telefono}
+        <span class="centro-tel v2-num">{telefono}</span>
+      {/if}
+      <span class="cab-chip">{canalLabel(conversacion.canal)}</span>
+      <span class="cab-chip">{conversacion.estado}</span>
     </div>
 
-    <div class="centro-meta">
-      <!-- QUIÉN LA LLEVA, arriba de todo y con palabra. Antes esto solo se
-           deducía del compositor bloqueado, así que alguien que miraba el
-           encabezado no sabía si estaba leyendo una conversación de la IA o
-           una suya. Es la misma pregunta que responde la cola, y conviene que
-           la respondan igual. -->
-      <span class="control {escalada ? 'control-humano' : 'control-ia'}">
-        <span class="control-punto"></span>
+    <!-- SEGUNDO RENGLÓN: los identificadores, en mono y separados por puntos,
+         igual que la línea `DNI · Account · Plan` de la referencia. Son datos
+         que se COMPARAN contra otro sistema, así que van en mono y con cifras
+         tabulares.
+
+         Sólo se dibuja lo que la conversación TRAE. La ficha del ISP llega
+         incompleta a propósito --el motor filtra por una lista blanca-- y un
+         renglón con "—" no informa nada. -->
+    <div class="centro-ids">
+      {#if conversacion.id_cliente}
+        <span class="centro-id">ISP <b>{conversacion.id_cliente}</b></span>
+      {/if}
+      {#if ficha?.cedula}
+        <span class="centro-id">CC <b>{ficha.cedula}</b></span>
+      {/if}
+      {#if ficha?.plan_internet}
+        <span class="centro-id centro-id-plan">{ficha.plan_internet}</span>
+      {/if}
+      {#if ficha?.estado}
+        <span class="centro-id">{ficha.estado}</span>
+      {/if}
+      {#if conversacion.ticket_operativo}
+        <span class="centro-id">Ticket <b>{conversacion.ticket_operativo}</b></span>
+      {/if}
+    </div>
+  </div>
+
+  <span class="centro-sep" aria-hidden="true"></span>
+
+  <!-- QUIÉN LA LLEVA, con palabra y en un bloque propio. Antes era una píldora
+       de 9,5px apretada entre el canal y el estado, o sea el dato más
+       importante del encabezado con el mismo peso que "abierta". La referencia
+       le da una caja con filete, punto y dos renglones: qué control es, y de
+       quién. Es la misma pregunta que responde la cola, y conviene que la
+       respondan igual. -->
+  <div class="control {escalada ? 'control-humano' : 'control-ia'}">
+    <span class="control-punto" aria-hidden="true"></span>
+    <span class="control-textos">
+      <span class="control-rotulo">{escalada ? 'Control humano' : 'La atiende la IA'}</span>
+      <span class="control-detalle">
         {#if escalada}
-          {asignadaA ? `Humano · ${asignadaA}` : 'Humano · sin asignar'}
+          {asignadaA ? `Asignada a ${asignadaA}` : 'Sin asignar'}
         {:else}
-          La atiende la IA
+          Dexter responde solo
         {/if}
       </span>
-      <Pill tone={canalTone(conversacion.canal)}>{canalLabel(conversacion.canal)}</Pill>
-      <Pill tone={estadoTone(conversacion.estado)}>{conversacion.estado}</Pill>
-    </div>
+    </span>
   </div>
 
   <!-- Solo aparece cuando la columna de contexto no cabe al lado. Ahí se
@@ -135,83 +155,92 @@
   >
     <PanelRight size={14} /> Contexto
   </button>
-
 </header>
 
 <style>
-  /* El distintivo de control, con la misma forma que los de la cola: mono,
-     versalita, punto y filete. Que se lean igual en las dos pantallas es
-     deliberado -- es la misma pregunta. */
-  .control {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 1px 6px;
-    border: 1px solid;
-    border-radius: var(--bandeja-radio-sm);
-    font-family: var(--bandeja-mono);
-    font-size: 9.5px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    text-transform: uppercase;
-    white-space: nowrap;
-  }
-
-  .control-punto {
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: currentColor;
-    flex: none;
-  }
-
-  .control-ia {
-    color: var(--bandeja-ia);
-    background: var(--bandeja-ia-fondo);
-    border-color: var(--bandeja-ia-borde);
-  }
-
-  .control-humano {
-    color: var(--bandeja-humano);
-    background: var(--bandeja-humano-fondo);
-    border-color: var(--bandeja-humano-borde);
-  }
-
   .centro-top {
     flex: none;
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 10px 16px;
+    gap: 12px;
+    /* px-5 py-3 en la referencia. */
+    padding: 12px 20px;
+    background: var(--bandeja-superficie);
     border-bottom: 1px solid var(--bandeja-borde);
   }
+
+  /* La ficha cuadrada de iniciales: 36px, radio 4, superficie y filete azules
+     --el azul de las personas, que es de quien es este lado del hilo. */
+  .ident {
+    flex: none;
+    width: 36px;
+    height: 36px;
+    border-radius: var(--bandeja-radio-sm);
+    display: grid;
+    place-items: center;
+    background: var(--bandeja-humano-fondo);
+    border: 1px solid var(--bandeja-humano-borde);
+    color: var(--bandeja-humano);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+
   .centro-quien {
     min-width: 0;
-    /* Crece para empujar el botón de contexto al borde derecho, como la
-       referencia empuja sus acciones. */
+    /* Crece para empujar el bloque de control y el botón de contexto al borde
+       derecho, como la referencia empuja sus acciones. */
     flex: 1 1 auto;
   }
 
-  /* Nombre e identificadores en la misma línea. Envuelve antes que recortar:
-     en angosto los ids bajan solos. */
+  /* Nombre, teléfono y fichas en la misma línea. Envuelve antes que recortar:
+     en angosto las fichas bajan solas. */
   .centro-identidad {
     display: flex;
     align-items: baseline;
     flex-wrap: wrap;
-    gap: 4px 10px;
+    gap: 3px 8px;
     min-width: 0;
   }
 
-  /* Los identificadores: mono, apagados y separados por un filete vertical,
-     igual que la línea `DNI · Account · Plan` de la referencia. Son datos que
-     se COMPARAN contra otro sistema, así que van en mono y con cifras
-     tabulares. */
+  .centro-top h2 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 640;
+    letter-spacing: -0.01em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .centro-tel {
+    font-family: var(--bandeja-mono);
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
+    color: var(--bandeja-texto-2);
+  }
+
+  /* La ficha gris de la referencia: `bg-slate-100`, filete, 10px. */
+  .cab-chip {
+    flex: none;
+    padding: 1px 6px;
+    border: 1px solid var(--bandeja-borde);
+    border-radius: 3px;
+    background: var(--bandeja-superficie-suave);
+    color: var(--bandeja-texto-2);
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1.5;
+    white-space: nowrap;
+  }
+
   .centro-ids {
     display: flex;
     align-items: baseline;
     flex-wrap: wrap;
     gap: 8px;
     min-width: 0;
+    margin-top: 2px;
     font-family: var(--bandeja-mono);
     font-size: 10.5px;
     font-variant-numeric: tabular-nums;
@@ -228,20 +257,6 @@
     color: var(--bandeja-texto-2);
   }
 
-  /* En un teléfono la línea de identificadores envuelve en cuatro renglones y
-     la cabecera se come el hilo: medido a 390px, 153px sólo de encabezado.
-     Se queda el teléfono --que es con lo que se responde-- y el resto se lee
-     en la pestaña Cliente, que los tiene todos y a un toque. */
-  @media (max-width: 760px) {
-    .centro-ids .centro-id:not(:first-child) {
-      display: none;
-    }
-    .centro-id + .centro-id {
-      padding-left: 0;
-      border-left: 0;
-    }
-  }
-
   /* El plan es lo único de la fila que no es un identificador: es lo que el
      cliente contrató, y se lee más que se compara. */
   .centro-id-plan {
@@ -249,49 +264,80 @@
     font-weight: 600;
   }
 
-  .centro-top h2 {
-    margin: 0;
-    font-size: 14.5px;
-    font-weight: 640;
-    letter-spacing: -0.01em;
-    overflow: hidden;
-    text-overflow: ellipsis;
+  /* El filete vertical que la referencia pone entre la identidad y el estado
+     de control. Separa dos cosas distintas sin gastar un renglón. */
+  .centro-sep {
+    flex: none;
+    width: 1px;
+    height: 32px;
+    background: var(--bandeja-borde);
+  }
+
+  /* ── el bloque de control ───────────────────────────────────────────── */
+  .control {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 10px;
+    border: 1px solid;
+    border-radius: var(--bandeja-radio-sm);
+  }
+
+  .control-punto {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: currentColor;
+    flex: none;
+  }
+
+  .control-textos {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+  }
+
+  .control-rotulo {
+    font-family: var(--bandeja-mono);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    line-height: 1;
     white-space: nowrap;
   }
-  /* Envuelve. Las píldoras --quién la lleva, el canal, el estado-- miden 285px
-     y a 390px de ancho el bloque del nombre son 189: sin `wrap` se salían 96px
-     y, como acá nada recorta en X, "WhatsApp" y "abierta" se pintaban debajo
-     del botón "Contexto" (medido el 21/09/2026 a 390x844). Envolver y no
-     recortar: cada píldora dice algo distinto, y la que se perdía --el estado--
-     no es la menos importante. */
-  .centro-meta {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 6px;
-    row-gap: 4px;
-    margin-top: 3px;
+
+  .control-detalle {
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
-  .ident {
-    flex: none;
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    display: grid;
-    place-items: center;
-    background: var(--bandeja-superficie-suave);
-    color: var(--bandeja-texto-2);
+
+  .control-ia {
+    color: var(--bandeja-ia);
+    background: var(--bandeja-ia-fondo);
+    border-color: var(--bandeja-ia-borde);
   }
+
+  .control-humano {
+    color: var(--bandeja-humano);
+    background: var(--bandeja-humano-fondo);
+    border-color: var(--bandeja-humano-borde);
+  }
+
   /* Volver sólo tiene sentido cuando la lista no está al lado. */
   .volver {
     display: none;
     color: var(--bandeja-texto-2);
   }
+
   /* Por encima de 1240px la columna está siempre a la vista: ni botón para
-     abrirla, ni botón para cerrarla, ni fondo que interceptar.
-     La regla original agrupaba .contexto-toggle con .info-cerrar y .info-fondo,
-     que son del `<aside>` y siguen en la pagina. Separarlas no cambia lo
-     calculado: es la misma declaracion para los mismos elementos. */
+     abrirla, ni botón para cerrarla, ni fondo que interceptar. */
   .contexto-toggle {
     display: none;
   }
@@ -302,10 +348,33 @@
   @media (max-width: 1240px) {
     .contexto-toggle {
       display: inline-flex;
-      margin-left: auto;
       flex: none;
     }
   }
+
+  /* En un teléfono la línea de identificadores envuelve en cuatro renglones y
+     la cabecera se come el hilo: medido a 390px, 153px sólo de encabezado.
+     Se queda el primero y el resto se lee en la pestaña Cliente, que los
+     tiene todos y a un toque. El filete vertical y el segundo renglón del
+     bloque de control tampoco entran: el rótulo solo ya dice quién la lleva. */
+  @media (max-width: 760px) {
+    .centro-top {
+      gap: 8px;
+      padding: 10px 14px;
+    }
+    .centro-ids .centro-id:not(:first-child) {
+      display: none;
+    }
+    .centro-id + .centro-id {
+      padding-left: 0;
+      border-left: 0;
+    }
+    .centro-sep,
+    .control-detalle {
+      display: none;
+    }
+  }
+
   /* Y debajo de 1000px la lista deja de estar al lado (ver el layout), así que
      hace falta una forma de volver. */
   @media (max-width: 1000px) {

@@ -29,6 +29,21 @@
      datos hay debajo, asi que recoger no esconde que exista algo. */
   const recogido = $derived(resumenRecogido.valor);
   const conDato = $derived(resumenEscalada.filter((f) => f.texto).length);
+
+  /* EL MOTIVO, EN EL RENGLON DE ARRIBA.
+     La referencia (franja «WHY DEXTER ESCALATED») no esconde el motivo detras
+     de un desplegable: lo dice en la misma linea que el rotulo, y deja el
+     detalle para quien lo abra. Recoger tiene que ahorrar ALTURA, no ahorrar
+     la respuesta.
+
+     Se toma el renglon de menor `orden` que tenga texto --que es «que quiere»
+     cuando el modelo lo escribio-- y NO se inventa nada si esta vacio: ahi el
+     renglon queda con el rotulo solo, igual que antes. */
+  const motivo = $derived(
+    resumenEscalada
+      .filter((f) => f.texto)
+      .sort((a, b) => (a.orden ?? 99) - (b.orden ?? 99))[0]?.texto ?? ''
+  );
 </script>
 
   <button
@@ -39,7 +54,13 @@
     title={recogido ? 'Mostrar el resumen de la escalada' : 'Recoger el resumen'}
   >
     {#if recogido}<ChevronRight size={13} />{:else}<ChevronDown size={13} />{/if}
-    <span>Por qué llegó acá</span>
+    <span class="brief-rotulo">Por qué llegó acá</span>
+    <!-- Solo con el panel RECOGIDO. Abierto, el mismo texto esta tres
+         renglones mas abajo con su rotulo: repetirlo no agrega nada y hace
+         que la franja compita con la primera fila del detalle. -->
+    {#if recogido && motivo}
+      <span class="brief-motivo">{motivo}</span>
+    {/if}
     <span class="brief-cuenta">{conDato} de {resumenEscalada.length}</span>
   </button>
 
@@ -99,35 +120,66 @@
   </dl>
 
 <style>
+  /* LA FRANJA. En la referencia es una fila de 34px sobre blanco, con filete
+     abajo: un rotulo rojo en ficha, el motivo en texto llano al lado, y los
+     datos tecnicos a la derecha en mono. No es una tarjeta ni un aviso -- el
+     aviso de escalada es otro, y dos fondos de alerta seguidos se anulan. */
   .brief-toggle {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     width: 100%;
-    padding: 5px 14px;
+    padding: 6px 20px;
     border: 0;
-    background: none;
-    font-family: var(--bandeja-mono);
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
+    border-bottom: 1px solid var(--bandeja-borde);
+    background: var(--bandeja-superficie);
+    font-family: var(--bandeja-sans);
+    font-size: 11.5px;
     color: var(--bandeja-texto-2);
     cursor: pointer;
     text-align: left;
   }
   .brief-toggle:hover {
-    color: var(--bandeja-texto);
+    background: var(--bandeja-superficie-suave);
   }
   .brief-toggle :global(svg) {
     flex: none;
+    color: var(--bandeja-texto-3);
+  }
+  /* El rotulo va en ficha roja: es lo que dice DE QUE trata la franja, y en
+     la referencia es lo unico coloreado de la fila. */
+  .brief-rotulo {
+    flex: none;
+    padding: 1px 7px;
+    border: 1px solid var(--bandeja-error-borde);
+    border-radius: 3px;
+    background: var(--bandeja-error-fondo);
+    color: var(--bandeja-error);
+    font-family: var(--bandeja-mono);
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  /* El motivo en un renglon. Se recorta y no envuelve: la franja tiene que
+     medir lo mismo con un motivo de seis palabras que con uno de sesenta --
+     ese es el punto de recoger. Entero se lee al abrir. */
+  .brief-motivo {
+    min-width: 0;
+    flex: 1 1 auto;
+    color: var(--bandeja-texto);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   /* A la derecha y en cifras: es el dato que dice si vale la pena abrirlo. */
   .brief-cuenta {
     margin-left: auto;
+    flex: none;
+    font-family: var(--bandeja-mono);
+    font-size: 10px;
     font-variant-numeric: tabular-nums;
     color: var(--bandeja-texto-3);
-    letter-spacing: 0;
   }
 
 
@@ -155,7 +207,7 @@
 
   .brief {
     margin: 0 0 4px;
-    padding: 10px 14px;
+    padding: 10px 20px;
     display: flex;
     flex-direction: column;
     gap: 6px;
@@ -243,7 +295,7 @@
      era el motivo de usar grilla. */
   .brief {
     gap: 5px;
-    padding: 8px 14px;
+    padding: 8px 20px;
     font-size: 11.5px;
     line-height: 1.35;
   }
