@@ -7,6 +7,9 @@ import re
 from typing import Any
 from django.core.exceptions import ValidationError
 
+#: Qué se puede pedir como evidencia de un trabajo.
+TIPOS_DE_EVIDENCIA = {"foto", "documento", "firma"}
+
 TIPOS_PERMITIDOS = {
     "texto",
     "entero",
@@ -73,10 +76,19 @@ def validar_esquema_plantilla(esquema: dict) -> None:
             raise ValidationError(f"La evidencia con id '{eid}' está duplicada.")
         ids_evidencias.add(eid)
 
+        # `firma` se suma en la fase de cierre de orden: la conformidad del
+        # cliente ES una evidencia --se captura, se guarda como imagen, se sube
+        # por la misma cola y se protege igual al cerrar sesion-- y declararla
+        # aparte habria significado repetir ese camino entero para el documento
+        # que prueba que el cliente acepto el trabajo.
+        #
+        # Una empresa que no pida firma simplemente no la declara: la
+        # aplicacion no inventa un requisito que nadie puso.
         tipo = ev.get("tipo", "foto")
-        if tipo not in ("foto", "documento"):
+        if tipo not in TIPOS_DE_EVIDENCIA:
             raise ValidationError(
-                f"Evidencia '{eid}' tiene tipo no permitido '{tipo}'. Permitidos: ['foto', 'documento']"
+                f"Evidencia '{eid}' tiene tipo no permitido '{tipo}'. "
+                f"Permitidos: {sorted(TIPOS_DE_EVIDENCIA)}"
             )
 
 

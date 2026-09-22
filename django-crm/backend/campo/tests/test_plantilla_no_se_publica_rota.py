@@ -135,3 +135,48 @@ def test_6_una_plantilla_correcta_se_publica_y_queda_sellada(work_type):
 
     assert version.publicada_en is not None
     assert version.schema_hash != ""
+
+
+@pytest.mark.django_db
+class TestLaFirmaEsUnaEvidencia:
+    """La conformidad del cliente se declara como evidencia, no aparte.
+
+    Se captura, se guarda como imagen, sube por la misma cola y se protege
+    igual al cerrar sesion. Declararla por otro camino habria significado
+    repetir todo eso para el documento que prueba que el cliente acepto el
+    trabajo.
+    """
+
+    def test_una_plantilla_puede_pedir_firma(self, org_a):
+        wt = WorkType.objects.create(org=org_a, codigo="ftth-f", nombre="Con firma")
+        version = WorkTypeVersion(
+            work_type=wt, version=1, schema_version=1,
+            estado=WorkTypeVersion.PUBLICADA,
+            esquema={
+                "pasos": [],
+                "campos": [],
+                "evidencias": [
+                    {"id": "foto_final", "tipo": "foto", "descripcion": "Instalación"},
+                    {"id": "conformidad", "tipo": "firma", "descripcion": "Firma"},
+                ],
+            },
+        )
+
+        version.full_clean()
+        version.save()
+
+        assert version.pk is not None
+
+    def test_un_tipo_inventado_sigue_rechazandose(self, org_a):
+        wt = WorkType.objects.create(org=org_a, codigo="ftth-x", nombre="Raro")
+        version = WorkTypeVersion(
+            work_type=wt, version=1, schema_version=1,
+            estado=WorkTypeVersion.PUBLICADA,
+            esquema={
+                "pasos": [], "campos": [],
+                "evidencias": [{"id": "x", "tipo": "huella", "descripcion": "X"}],
+            },
+        )
+
+        with pytest.raises(ValidationError):
+            version.full_clean()

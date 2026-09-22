@@ -7,7 +7,9 @@ import 'package:uuid/uuid.dart';
 import '../../core/mock/field_mock_data.dart';
 import '../../core/storage/evidencia_storage_service.dart';
 import '../../core/storage/local_database.dart';
+import 'cierre_de_orden.dart';
 import 'widgets/consumo_de_material.dart';
+import 'widgets/firma_del_cliente.dart';
 import '../../core/storage/secure_storage_service.dart';
 import '../../core/sync/sync_queue_service.dart';
 import '../../core/theme/app_theme.dart';
@@ -446,6 +448,191 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
     );
   }
 
+  /// El requisito de firma que declara este tipo de trabajo, si lo declara.
+  ///
+  /// Se reconoce por su tipo en el esquema, no por su texto: buscar la palabra
+  /// "firma" en la descripcion funcionaria hasta que una empresa escriba
+  /// "conformidad del abonado" y dejaria de andar sin que nadie lo note.
+  Map<String, dynamic>? get _requisitoDeFirma {
+    for (final dynamic req in _evidenciasRequisitos) {
+      if (req is Map && (req['tipo'] ?? '').toString() == 'firma') {
+        return Map<String, dynamic>.from(req);
+      }
+    }
+    return null;
+  }
+
+  bool get _exigeFirma => _requisitoDeFirma != null;
+
+  bool get _hayFirma {
+    final requisito = _requisitoDeFirma;
+    if (requisito == null) return false;
+    return _evidenciasCapturadas
+        .any((e) => e['requisito_id'] == requisito['id']);
+  }
+
+  bool get _firmaSinSubir {
+    final requisito = _requisitoDeFirma;
+    if (requisito == null) return false;
+    return _evidenciasCapturadas.any((e) =>
+        e['requisito_id'] == requisito['id'] &&
+        (e['subida_estado'] ?? '') != 'confirmada');
+  }
+
+  /// Los campos obligatorios que el esquema pide y todavia estan vacios.
+  List<String> get _camposObligatoriosSinLlenar {
+    final faltan = <String>[];
+    for (final dynamic campo in _campos) {
+      if (campo is! Map) continue;
+      if (campo['obligatorio'] != true) continue;
+      final clave = (campo['clave'] ?? '').toString();
+      final valor = _valoresFormulario[clave];
+      if (valor == null || valor.toString().trim().isEmpty) {
+        faltan.add((campo['etiqueta'] ?? clave).toString());
+      }
+    }
+    return faltan;
+  }
+
+  CierreDeOrden get _cierre => CierreDeOrden.evaluar(
+        camposObligatoriosSinLlenar: _camposObligatoriosSinLlenar,
+        requisitosDeFoto: <dynamic>[
+          for (final dynamic r in _evidenciasRequisitos)
+            if (!(r is Map && (r['tipo'] ?? '').toString() == 'firma')) r,
+        ],
+        fotosCapturadas: _evidenciasCapturadas,
+        materialesRegistrados: _materialesUsados,
+        exigeFirma: _exigeFirma,
+        hayFirma: _hayFirma,
+        firmaSinSubir: _firmaSinSubir,
+      );
+
+  Future<void> _abrirFirma() async {
+    final requisito = _requisitoDeFirma;
+    if (requisito == null || _orgId == null || _profileId == null) return;
+
+    final firmado = await FirmaDelCliente.abrir(
+      context,
+      orgId: _orgId!,
+      profileId: _profileId!,
+      ordenId: widget.ordenId,
+      requisitoId: (requisito['id'] ?? '').toString(),
+      resumenDelTrabajo: _resumenParaElCliente,
+      materialesInstalados: <String>[
+        for (final m in _materialesUsados)
+          '${m['material_nombre'] ?? m['material_codigo']} x${m['cantidad']}'
+          '${(m['serie'] as String?)?.isNotEmpty == true ? ' · serie ${m['serie']}' : ''}',
+      ],
+      baseLocal: _localDb,
+    );
+    if (firmado != true || !mounted) return;
+
+    final evidencias = await _localDb.getEvidenciasOrden(
+      orgId: _orgId!,
+      profileId: _profileId!,
+      ordenId: widget.ordenId,
+    );
+    if (!mounted) return;
+    setState(() => _evidenciasCapturadas = evidencias);
+  }
+
+  /// Lo que el cliente esta aceptando, en una linea.
+  String get _resumenParaElCliente {
+    final tipo = (_orden?['tipo_nombre'] ?? 'Trabajo').toString();
+    final numero = _numeroDeLaOrden;
+    return numero == null ? tipo : '$tipo · OT #$numero';
+  }
+
+  /// El checklist de cierre.
+  ///
+  /// Siempre las mismas lineas, en el mismo orden: uno que cambia obliga a
+  /// leerlo entero cada vez, y esto se mira parado en una vereda.
+  Widget _checklistDeCierre() {
+    final cierre = _cierre;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceContainerLow,
+        borderRadius: AppRadius.brTarjeta,
+        border: Border.all(color: AppColors.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text('Antes de cerrar', style: AppTypography.tituloChico),
+          const SizedBox(height: 10),
+          for (final requisito in cierre.requisitos)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 5),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Icon(_iconoDe(requisito.estado),
+                      size: 18, color: _colorDe(requisito.estado)),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(requisito.titulo, style: AppTypography.cuerpo),
+                        if (requisito.detalle.isNotEmpty)
+                          Text(
+                            requisito.detalle,
+                            style: AppTypography.cuerpoChico.copyWith(
+                              color: _colorDe(requisito.estado),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          if (_exigeFirma && !_hayFirma) ...<Widget>[
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              height: 44,
+              child: OutlinedButton.icon(
+                onPressed: _abrirFirma,
+                icon: const Icon(Icons.draw_outlined, size: 18),
+                label: const Text('Tomar la firma del cliente'),
+              ),
+            ),
+          ],
+          if (cierre.hayPendienteDeSubir) ...<Widget>[
+            const SizedBox(height: 10),
+            Text(
+              'Hay trabajo hecho que todavía no llegó al servidor. Sube solo '
+              'cuando haya señal; no hace falta esperar acá.',
+              style: AppTypography.cuerpoChico.copyWith(
+                color: AppColors.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  IconData _iconoDe(EstadoDeRequisito estado) => switch (estado) {
+        EstadoDeRequisito.completo => Icons.check_circle,
+        EstadoDeRequisito.pendiente => Icons.radio_button_unchecked,
+        EstadoDeRequisito.opcional => Icons.remove_circle_outline,
+        EstadoDeRequisito.sinSubir => Icons.schedule,
+        EstadoDeRequisito.conConflicto => Icons.error_outline,
+      };
+
+  Color _colorDe(EstadoDeRequisito estado) => switch (estado) {
+        EstadoDeRequisito.completo => AppColors.exito,
+        EstadoDeRequisito.pendiente => AppColors.error,
+        EstadoDeRequisito.opcional => AppColors.onSurfaceVariant,
+        EstadoDeRequisito.sinSubir => AppColors.onSurfaceVariant,
+        EstadoDeRequisito.conConflicto => AppColors.error,
+      };
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -492,6 +679,7 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
                   const SizedBox(height: AppSpacing.lg),
                   _bloqueDeMateriales(),
                   _evidencias(),
+                  _checklistDeCierre(),
                   if (widget.mostrarDatosFuturos) ...[
                     const SizedBox(height: AppSpacing.lg),
                     const BloqueAcademia(),
