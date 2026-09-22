@@ -607,6 +607,30 @@ Redesplegar, y esta vez **verificar el motor específicamente** (no alcanza con 
 
 Sigue en pie el pendiente de fondo del lado de Django: el día que una migración de BottleCRM necesite activar RLS en una tabla nueva, va a fallar bajo `crm_user` porque no es dueño de las tablas (`postgres` sí). No es una tarea de hoy — se resuelve separando la credencial de migración de la de tráfico normal cuando haga falta.
 
+### Credencial de migraciones — el mecanismo ya está, los roles no (16/09/2026)
+
+Ese pendiente dejó de ser hipotético: la migración que lo dispara ya está escrita (`operaciones/0002_rls_operaciones`, y la que falta para las 11 tablas sin RLS). Medido contra PostgreSQL 17 en una base desechable: con las tablas en manos de `postgres` y `migrate` corriendo como `crm_user`, falla con `must be owner of table` **a mitad de la migración**, no al arrancar.
+
+**Lo que ya está en el repositorio** (no toca producción, no crea ningún rol):
+
+`docker/backend/entrypoint.sh` corre `migrate` con `MIGRATOR_DBUSER`/`MIGRATOR_DBPASSWORD` si están definidas, y con `DBUSER` si no. El override es **por proceso**, no un `export`: gunicorn sigue levantando con la credencial de tráfico. Esa distinción importa — servir peticiones como `crm_migrator` sería servirlas como dueño de las tablas, y un dueño se saltea su propia política de RLS salvo que esté `FORCE`.
+
+Antes de cada paso corre `manage.py verificar_credenciales` (`common/credenciales.py`), que falla cerrado ante siete configuraciones incorrectas. Dos merecen mención:
+
+- **El rol se compara sin el sufijo del pooler.** En producción `DBUSER` es `postgres.05b5a4b4-…`, no `postgres`; una guarda que comparara la cadena completa nunca coincidiría y quedaría en verde sin comprobar nada.
+- **Que una credencial sirva para migrar no se decide por su nombre.** Se cuenta cuántas tablas de `public` tienen un dueño que el rol efectivo no puede ejercer. Da igual cómo se llame: vale para `crm_user` dueño en desarrollo, para `postgres` en producción y para `crm_migrator` actuando como `crm_owner`. Decidirlo por el nombre habría roto el compose de desarrollo, donde `crm_user` **sí** es dueño de todo el esquema (`docker/postgres/init-rls-user.sql`).
+
+**Qué falta, y es una decisión, no una tarea:** crear `crm_owner` (sin LOGIN) y `crm_migrator` en la base, transferir la propiedad de las 129 tablas, y cargar `MIGRATOR_DBUSER`/`MIGRATOR_DBPASSWORD` en Dokploy. Sin eso, el entrypoint se comporta exactamente como antes — por eso estas variables son opcionales y desplegarlas no cambia nada.
+
+**Verificar el rol efectivo** (no la variable, que es otra cosa):
+
+```
+docker compose exec backend python manage.py verificar_credenciales --proposito trafico --con-base
+docker compose exec backend sh -c 'echo $DBUSER'
+```
+
+**Rollback:** vaciar `MIGRATOR_DBUSER` y redesplegar. El entrypoint vuelve a migrar con `DBUSER`.
+
 **Lección de esto, para cualquier corte de credencial futuro: verificar CADA servicio que lea la variable que se está cambiando, no el primero que responda bien.** Un `grep` de la variable en el compose antes de cortar hubiera mostrado los cuatro servicios que la usaban, no solo los tres que se pensaban cambiar.
 
 **El webhook de WhatsApp — falta el dominio, no el código.** Las rutas ya existen (`GET`/`POST /canales/whatsapp/<tenant>`, ver §4.c) y sus guardas pasan (`py -3.13 tests/test_canal_whatsapp.py`). Lo que falta para el piloto: el DNS de `motor.rapilinksas.co`, crear el dominio en Dokploy con el `PathPrefix`, cargar las variables del §4.c, y cargar los secretos de Meta desde **Ajustes → WhatsApp**. Lo único de producto que sigue dependiendo de terceros son las plantillas para avisos proactivos, que las aprueba Meta.

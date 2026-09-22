@@ -2808,13 +2808,24 @@ herramientas:
       haya dicho su nombre completo. El motivo va TAL CUAL lo escribio
       el: no lo resumas, no lo reformules, no lo interpretes -- se guarda
       literal porque leido en conjunto es lo que dice por que se caen las
-      ventas.
+      ventas. Llamarla NO cancela en ese momento: queda PENDIENTE de
+      aprobacion de un colaborador. Dile al cliente que la cancelacion quedo
+      solicitada y que un colaborador la confirma -- nunca que ya se cancelo.
     base_url: http://backend:8000/api
     auth_ref: BOTTLECRM_API_TOKEN
     endpoint: /solicitudes/cancelar/
     metodo: POST
     solo_lectura: false
     requiere_confirmacion: true
+    # M06-E (22/09/2026), EXCEPCION CONSERVADORA documentada en
+    # M04-M06_CIERRE_FASE_GOBIERNO.md: la evidencia de M06-D muestra que es
+    # IRREVERSIBLE (CANCELADA es un estado final, solicitudes/gestion.py) y
+    # que cierra en cascada el ticket de WispHub (solicitudes/entrega.py).
+    # Por eso exige aprobacion humana atada a la operacion exacta (puerta
+    # critica), como las R3/R4. Su clase historica (R2 en M10-A) no cambia.
+    aprobacion_humana: true
+    irreversible: true
+    plantilla_resumen: "Cancelar la solicitud de instalacion del documento {numero_documento}"
     roles_permitidos: [ventas]
     requeridos: [numero_documento, nombre_confirmado, motivo]
     filtros_verificados:
@@ -3431,6 +3442,13 @@ herramientas:
       codigo cuando alguien responde desde la pantalla del ticket.
     solo_lectura: false
     requiere_confirmacion: true
+    # M06-E (22/09/2026), EXCEPCION CONSERVADORA: M06-D la dejo INDETERMINADA
+    # (no hay evidencia de si WispHub notifica al cliente ni de si lo que
+    # escribe se puede retirar). Hasta tener esa evidencia NO puede salir
+    # por la puerta autonoma: 'aprobacion_humana' hace que la frontera la
+    # frene (APROBACION_HUMANA_REQUERIDA). Por la puerta humana -- una
+    # persona que responde desde la pantalla -- sigue funcionando igual.
+    aprobacion_humana: true
     roles_permitidos: [soporte]
     base_url: https://api.wisphub.io
     endpoint: /api/tickets/{id_ticket}/respuesta/
@@ -3455,6 +3473,13 @@ herramientas:
       llames tu: la ejecuta el codigo cuando el caso termina.
     solo_lectura: false
     requiere_confirmacion: true
+    # M06-E (22/09/2026), EXCEPCION CONSERVADORA: M06-D la dejo INDETERMINADA
+    # (no hay evidencia de si WispHub notifica al cliente ni de si lo que
+    # escribe se puede retirar). Hasta tener esa evidencia NO puede salir
+    # por la puerta autonoma: 'aprobacion_humana' hace que la frontera la
+    # frene (APROBACION_HUMANA_REQUERIDA). Por la puerta humana -- una
+    # persona que responde desde la pantalla -- sigue funcionando igual.
+    aprobacion_humana: true
     roles_permitidos: [soporte]
     base_url: https://api.wisphub.io
     endpoint: /api/tickets/{id_ticket}/respuesta/
@@ -4117,9 +4142,22 @@ herramientas:
       (necesitas su id_factura). Si el colaborador menciona la forma de
       pago por nombre, resolvela primero con consultar_formas_pago -- no
       inventes el ID. 'accion' decide si ademas de registrar el pago se
-      reactiva el servicio del cliente.
+      reactiva el servicio del cliente. Queda PENDIENTE de aprobacion
+      humana -- decile al colaborador que el pago todavia NO se registro
+      y que alguien tiene que aprobarlo.
     solo_lectura: false
     requiere_confirmacion: true
+    # M06-A (21/09/2026): el dinero del cliente exige aprobacion por
+    # operacion. Hasta aca era autonoma a proposito (PRD 8.6); se decidio
+    # cerrar la brecha R4 que dejo abierta M10-A. 'fecha_pago' se resuelve
+    # al PROPONER, no al aprobar: queda la hora en que el colaborador lo
+    # registro, que es la mas cercana al pago real. Con 'accion' = 1 la
+    # reactivacion del servicio tambien espera a la aprobacion.
+    aprobacion_humana: true
+    # R4: la aprobacion se ata a ESTA factura y ESTOS argumentos, y pasa por
+    # la cadena entera (frontera.critica). Ver nucleo/seguridad/aprobacion.py.
+    irreversible: true
+    plantilla_resumen: "Registrar pago de la factura {id} (accion {accion}: 0 = solo registrar, 1 = registrar y reactivar el servicio)"
     roles_permitidos: [facturacion]
     base_url: https://api.wisphub.io
     endpoint: /api/facturas/{id}/registrar-pago/
@@ -4178,6 +4216,12 @@ herramientas:
     solo_lectura: false
     requiere_confirmacion: true
     aprobacion_humana: true
+    # M06-C (21/09/2026): R4, la aprobacion se ATA a esta promesa exacta --
+    # factura, fecha, accion, origen, tenant y aprobador, con su sello -- y
+    # pasa por la puerta critica (kill switch, techo, etapa, autorizacion
+    # granular). Hasta aca tenia aprobacion humana pero no atada: una
+    # aprobacion valia para la herramienta, no para la operacion.
+    irreversible: true
     roles_permitidos: [facturacion]
     base_url: https://api.wisphub.io
     endpoint: /api/promesa-pago/
@@ -4272,6 +4316,13 @@ herramientas:
     solo_lectura: false
     requiere_confirmacion: true
     aprobacion_humana: true
+    # M06-F (22/09/2026): R4 por la regla mas restrictiva. Registra una
+    # promesa de pago -- el mismo efecto que agregar_promesa_pago, que es R4 --
+    # y ademas reactiva el servicio. Llego en origin despues de la matriz de
+    # M06-D (69 herramientas), asi que no estaba clasificada. Irreversible:
+    # sale solo por la puerta critica, con la aprobacion sellada a esta accion
+    # exacta. La politica y la revalidacion de origin siguen corriendo igual.
+    irreversible: true
     roles_permitidos: [facturacion]
     base_url: https://api.wisphub.io
     endpoint: /api/promesa-pago/
@@ -4745,6 +4796,12 @@ herramientas:
       ejecuta el reconciliador cuando una conversacion se cierra.
     solo_lectura: false
     requiere_confirmacion: true
+    # M06-F (22/09/2026): la misma familia que cerrar_ticket_operativo, que
+    # M06-D dejo INDETERMINADA y M06-E saco de la autonomia. Llego en origin
+    # despues de la matriz, y por la regla mas restrictiva recibe el mismo
+    # trato: con aprobacion humana no sale por la puerta autonoma. La usa el
+    # reconciliador (T20), que hoy no corre en produccion.
+    aprobacion_humana: true
     roles_permitidos: [soporte]
     base_url: https://api.wisphub.io
     endpoint: /api/tickets/{id_ticket}/
@@ -4840,6 +4897,13 @@ herramientas:
       NO la llama el modelo: la llama el backend.
     solo_lectura: false
     requiere_confirmacion: true
+    # M06-E (22/09/2026), EXCEPCION CONSERVADORA: M06-D la dejo INDETERMINADA
+    # (no hay evidencia de si WispHub notifica al cliente ni de si lo que
+    # escribe se puede retirar). Hasta tener esa evidencia NO puede salir
+    # por la puerta autonoma: 'aprobacion_humana' hace que la frontera la
+    # frene (APROBACION_HUMANA_REQUERIDA). Por la puerta humana -- una
+    # persona que responde desde la pantalla -- sigue funcionando igual.
+    aprobacion_humana: true
     invocable_por_servicio: true
     roles_permitidos: [administracion]
     base_url: https://api.wisphub.io
@@ -5335,22 +5399,22 @@ herramientas:
       diagnostico de senal y ping salga bien NO alcanza por si solo, porque en
       una queja de lentitud tambien sale bien -- el equipo sano es una
       CONDICION, no el motivo. Reinicia la ONT del cliente.
-      Contrato del proveedor (documentado,
-      agosto 2026): comando fire-and-forget -- confirma que SE MANDO, no que
-      la ONT ya reinicio ni que el problema se resolvio. Dile al cliente
-      que el equipo va a estar sin conexion **uno o dos minutos** (medido en
-      vivo, 14/08/2026: volvio a responder en ~73 segundos) y que revise si
-      volvio la señal despues de ese tiempo.
+      Llamarla NO reinicia el equipo en ese momento: deja el reinicio
+      PENDIENTE de aprobacion de un colaborador. Dile al cliente que el
+      reinicio remoto de su equipo quedo solicitado y que un colaborador lo
+      tiene que aprobar -- NUNCA le digas que ya se reinicio. Cuando se
+      apruebe, el equipo va a estar sin conexion **uno o dos minutos**
+      (medido en vivo, 14/08/2026: volvio a responder en ~73 segundos).
 
-      SIN paso de aprobacion humana -- el codigo exige en su lugar que ya
-      hayas corrido consultar_senal_ont y ping_cliente EN ESTA conversacion
-      y que los dos hayan dado resultado favorable (senal aceptable, ping
-      exitoso). Si no se cumple, la herramienta se rechaza sola con el
-      motivo -- no lo intentes "igual", sigue el protocolo alternativo. Es
-      exactamente la logica del equipo electronico que a veces necesita
-      reinicio PERO solo tiene sentido si ya se descarto que el problema es
-      de red: si la senal esta mal, reiniciar no arregla nada y solo
-      retrasa mandar un tecnico.
+      Ademas de la aprobacion, el codigo exige que ya hayas corrido
+      consultar_senal_ont y ping_cliente EN ESTA conversacion y que los dos
+      hayan dado resultado favorable (senal aceptable, ping exitoso) -- y los
+      vuelve a medir al aprobar. Si no se cumple, la herramienta se rechaza
+      sola con el motivo -- no lo intentes "igual", sigue el protocolo
+      alternativo. Es exactamente la logica del equipo electronico que a
+      veces necesita reinicio PERO solo tiene sentido si ya se descarto que
+      el problema es de red: si la senal esta mal, reiniciar no arregla nada
+      y solo retrasa mandar un tecnico.
 
       Maximo UNA vez por conversacion -- si el cliente insiste en que lo
       reinicies de nuevo, no lo repitas: dile que un colaborador humano
@@ -5395,6 +5459,14 @@ herramientas:
     # Medir sigue permitido en ese turno; actuar no. Ver
     # 'exige_turno_propio' en nucleo/config/schema.py.
     exige_turno_propio: true
+    # M06-A (21/09/2026), decision de negocio: el equipo en casa del cliente
+    # (R3) exige aprobacion humana por operacion. 'irreversible' la manda por
+    # frontera.critica: kill switch, etapa, autorizacion granular y la
+    # aprobacion atada a ESTA ONU. Al aprobar se vuelven a medir las previas
+    # y se anota la verificacion contra la conversacion de origen.
+    aprobacion_humana: true
+    irreversible: true
+    plantilla_resumen: "Reiniciar la ONT {sn_onu}"
     roles_permitidos: [cliente_final, soporte]
     base_url_ref: SMARTOLT_SUBDOMINIO
     endpoint: /api/onu/reboot/{sn_onu}
@@ -5482,10 +5554,10 @@ herramientas:
       un humano.
 
       LLAMA LA HERRAMIENTA reiniciar_ont AHORA, en este mismo paso. No
-      anuncies que la vas a usar ni le prometas al cliente que vas a
-      reiniciar: si no la llamas, el reinicio NO ocurre y le habrias
-      mentido. Primero ejecutala, y recien despues cuentale al cliente que
-      ya la reiniciaste y que espere uno o dos minutos.
+      anuncies que la vas a usar sin llamarla: si no la llamas, el reinicio
+      ni siquiera queda solicitado. Primero llamala, y recien despues
+      cuentale al cliente que el reinicio remoto quedo SOLICITADO y que un
+      colaborador lo tiene que aprobar -- no le digas que ya se reinicio.
 
       Unica excepcion: si el cliente ya te dijo en este intercambio que no
       quiere que la reinicies.
@@ -5570,10 +5642,18 @@ herramientas:
       su television va por un decodificador aparte y el puerto de la ONU no
       interviene -- cambiar el tipo ahi no arregla nada.
 
-      Despues de llamarla, vuelve a leer consultar_estado_catv: tiene que
-      dejar de decir 'Not supported'. Recien entonces activar_catv.
+      Llamarla NO cambia el tipo en ese momento: queda PENDIENTE de
+      aprobacion de un colaborador. Dile al cliente que el ajuste quedo
+      solicitado y que un colaborador lo tiene que aprobar -- no le digas que
+      ya se hizo, y no sigas con activar_catv en esta conversacion: hasta que
+      se apruebe, consultar_estado_catv va a seguir diciendo 'Not supported'.
     solo_lectura: false
     requiere_confirmacion: true
+    # M06-A (21/09/2026): R3, aprobacion humana por operacion atada a esta
+    # ONU. Ver el comentario en reiniciar_ont.
+    aprobacion_humana: true
+    irreversible: true
+    plantilla_resumen: "Cambiar el tipo de la ONU {sn_onu} a {onu_type}"
     # No en el turno en que la conversacion llega al area: hace falta que el
     # cliente haya contestado cuantos equipos tiene, y eso es un turno suyo.
     exige_turno_propio: true
@@ -5619,15 +5699,23 @@ herramientas:
       alguna de las dos condiciones, asi que no lo intentes "por si acaso":
       sigue el protocolo normal.
 
-      Despues de encenderla, dile al cliente que ya quedo activada y
-      preguntale si le volvio la señal. Si todavia no la ve, el equipo
-      necesita volver a buscar los canales: pedile los pasos a
+      Llamarla NO enciende la television en ese momento: queda PENDIENTE de
+      aprobacion de un colaborador. Dile al cliente que la activacion quedo
+      solicitada y que un colaborador la tiene que aprobar -- NUNCA le digas
+      que ya quedo activada. Cuando se active, si todavia no ve los canales,
+      el equipo necesita volver a buscarlos: los pasos salen de
       consultar_guia_sintonizacion -- son distintos segun la marca del
       televisor y segun use TDT, y por eso no van escritos aca.
 
       Maximo UNA vez por conversacion.
     solo_lectura: false
     requiere_confirmacion: true
+    # M06-A (21/09/2026): R3, aprobacion humana por operacion atada a esta
+    # ONU. Al aprobar se vuelven a medir las dos previas (plan con TV y CATV
+    # 'Disabled'): si entretanto cambio algo, no se enciende.
+    aprobacion_humana: true
+    irreversible: true
+    plantilla_resumen: "Activar la television (CATV) en la ONU {sn_onu}"
     roles_permitidos: [soporte_tecnico_cliente, soporte]
     base_url_ref: SMARTOLT_SUBDOMINIO
     endpoint: /api/onu/enable_catv/{sn_onu}

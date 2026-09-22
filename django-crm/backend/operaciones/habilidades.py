@@ -795,6 +795,225 @@ _FICHAS: tuple[Habilidad, ...] = (
         detector="",
         senal="",
     ),
+
+    # -------------------------------------------------------------- M04-A ---
+    #  Las dos hablan de TIEMPO OPERATIVO de una orden, no del SLA de un caso:
+    #  'cases.Case' tiene su propio SLA, su pausa y su politica. Estas dos no
+    #  lo tocan ni lo leen.
+    Habilidad(
+        id="H-11",
+        nombre="Detectar orden con plazo operativo vencido",
+        tipo=DOMINIO, version=1, vigente_desde="2026-09-20", estado=VIGENTE,
+        proposito="Señalar órdenes cuyo plazo derivado del tipo de trabajo ya pasó.",
+        responsabilidad=(
+            "Decir que el plazo pasó. NO decir que alguien incumplió ni que la "
+            "orden esté desatendida: el plazo mide tiempo, no conducta."),
+        alcance="OrdenTrabajo no terminada, con duración declarada por su tipo.",
+        fuera_de_alcance=(
+            "No reprograma ni cierra la orden.",
+            "No atribuye el atraso a una persona.",
+            "No opina sobre el SLA de un caso: es otro sistema.",
+        ),
+        activacion=("operaciones.sla.plazo_de devuelve VENCIDA.",),
+        entradas=("org", "ahora"),
+        datos=("campo.OrdenTrabajo.created_at", "campo.OrdenTrabajo.estado_operativo",
+               "WorkTypeVersion.esquema.duracion_estimada_minutos",
+               "business_hours.BusinessCalendar"),
+        reglas=(
+            "El plazo se ancla en 'created_at': reprogramar NO lo extiende y "
+            "cambiar el plan NO lo reinicia.",
+            "Huella 'sla_vencido': los minutos de atraso crecen solos y no "
+            "entran en la huella, o cada ciclo sería otra condición.",
+            "Sin duración válida no hay señal: SIN_PLAZO no es cero.",
+        ),
+        procedimiento=(
+            "1. Tomar órdenes no terminadas de la organización.",
+            "2. Pedir el plazo a operaciones.sla (única fuente del cálculo).",
+            "3. Emitir solo si el estado es VENCIDA.",
+        ),
+        conocimiento=(),
+        herramientas_lectura=("ORM: campo.OrdenTrabajo", "operaciones.sla"),
+        herramientas_escritura=(),
+        salida="list[Senal] con tipo 'orden_sla_vencido'.",
+        evidencia=("observado: número y estado de la orden",
+                   "observado: plazo declarado por el tipo de trabajo",
+                   "observado: ancla, límite y calendario usado",
+                   "observado: minutos de atraso"),
+        incertidumbre=(
+            "El plazo se cuenta desde la creación, no desde el inicio real del "
+            "trabajo: mide espera, no esfuerzo.",
+            "Vencida no implica desatendida: la causa, si existe, está en las "
+            "novedades de la orden.",
+        ),
+        escalamiento=("Al Supervisor: siempre.",),
+        nivel=1,
+        metricas=("Ausencia de atribución de culpa en el texto de la propuesta.",),
+        detector="_ordenes_con_sla_vencido",
+        senal="orden_sla_vencido",
+        huella_condicion="sla_vencido",
+    ),
+
+    Habilidad(
+        id="H-12",
+        nombre="Detectar orden con plazo operativo por vencer",
+        tipo=DOMINIO, version=1, vigente_desde="2026-09-20", estado=VIGENTE,
+        proposito="Avisar antes del límite, con antelación proporcional al plazo.",
+        responsabilidad=(
+            "Decir cuánto falta y con qué ventana se avisó. NO afirmar que la "
+            "orden vaya a incumplirse."),
+        alcance="OrdenTrabajo no terminada, con duración declarada, dentro de la ventana.",
+        fuera_de_alcance=("No reprograma.", "No predice el desenlace."),
+        activacion=("operaciones.sla.plazo_de devuelve VENCE_PRONTO.",),
+        entradas=("org", "ahora"),
+        datos=("campo.OrdenTrabajo.created_at",
+               "WorkTypeVersion.esquema.duracion_estimada_minutos",
+               "business_hours.BusinessCalendar"),
+        reglas=(
+            "Ventana = min(24 h, 20% del plazo). Un umbral fijo no sirve: con "
+            "24 h, un trabajo de 2 h nacería ya avisado.",
+            "Huella 'sla_por_vencer': los minutos restantes bajan solos.",
+        ),
+        procedimiento=(
+            "1. Tomar órdenes no terminadas de la organización.",
+            "2. Pedir el plazo a operaciones.sla.",
+            "3. Emitir solo si el estado es VENCE_PRONTO.",
+        ),
+        conocimiento=(),
+        herramientas_lectura=("ORM: campo.OrdenTrabajo", "operaciones.sla"),
+        herramientas_escritura=(),
+        salida="list[Senal] con tipo 'orden_sla_por_vencer'.",
+        evidencia=("observado: número y estado de la orden",
+                   "observado: plazo, ancla, límite y calendario",
+                   "observado: minutos restantes y ventana aplicada"),
+        incertidumbre=(
+            "Que falte poco no implica que vaya a vencerse.",
+            "La ventana es de tiempo de reloj; el plazo respeta el calendario.",
+        ),
+        escalamiento=("Al Supervisor: siempre.",),
+        nivel=1,
+        metricas=("La ventana citada en la evidencia coincide con la calculada.",),
+        detector="_ordenes_con_sla_por_vencer",
+        senal="orden_sla_por_vencer",
+        huella_condicion="sla_por_vencer",
+    ),
+
+
+    # -------------------------------------------------------------- M05-A ---
+    Habilidad(
+        id="H-13",
+        nombre="Detectar incidencia operativa sin resolver",
+        tipo=DOMINIO, version=1, vigente_desde="2026-09-20", estado=VIGENTE,
+        proposito="Señalar causas operativas que siguen abiertas o en gestión.",
+        responsabilidad=(
+            "Decir que la incidencia sigue sin resolverse. NO decir que alguien "
+            "la desatendió, ni deducir que se resolvió porque la actividad "
+            "dejó de estar bloqueada."),
+        alcance="NovedadOperativa con estado ABIERTA o EN_GESTION.",
+        fuera_de_alcance=(
+            "No resuelve la incidencia.",
+            "No cambia su estado.",
+            "No desbloquea, no reasigna, no escala.",
+        ),
+        activacion=("La columna 'estado' vale 'abierta' o 'en_gestion'.",),
+        entradas=("org", "ahora"),
+        datos=("operaciones.NovedadOperativa.estado",
+               "operaciones.NovedadOperativa.impacto",
+               "operaciones.NovedadOperativa.created_at"),
+        reglas=(
+            "El estado se LEE de la columna. Desbloquear una actividad no "
+            "resuelve la incidencia: son dos hechos distintos.",
+            "Huella 'estado:<estado>': la antigüedad crece sola y no entra, o "
+            "cada ciclo sería otra condición. Pasar de abierta a en gestión sí "
+            "es otra situación.",
+            "Las RESUELTA se ignoran.",
+        ),
+        procedimiento=(
+            "1. Tomar las novedades con estado abierta o en gestión.",
+            "2. Armar su ficha con operaciones.incidencias.",
+            "3. Emitir señal citando estado, impacto, antigüedad y vínculos.",
+        ),
+        conocimiento=(),
+        herramientas_lectura=("ORM: operaciones.NovedadOperativa",
+                              "operaciones.incidencias", "operaciones.novedades"),
+        herramientas_escritura=(),
+        salida="list[Senal] con tipo 'incidencia_sin_resolver'.",
+        evidencia=("observado: tipo y estado de la incidencia",
+                   "observado: fecha de registro y antigüedad",
+                   "observado: impacto declarado, o su ausencia",
+                   "observado: orden y actividad relacionadas",
+                   "observado: quién la registró",
+                   "observado: contexto observable alrededor",
+                   "observado: qué datos no se declararon"),
+        incertidumbre=(
+            "El contexto observable no dice si la causa se atendió: solo la "
+            "resolución explícita lo dice.",
+            "Una incidencia sin impacto declarado no es una incidencia leve.",
+        ),
+        escalamiento=("Al Supervisor: siempre.",),
+        nivel=1,
+        metricas=("El texto no atribuye la demora a ninguna persona.",),
+        detector="_incidencias_sin_resolver",
+        senal="incidencia_sin_resolver",
+        huella_condicion="estado:<estado>",
+    ),
+
+
+    # -------------------------------------------------------------- M05-B ---
+    Habilidad(
+        id="H-14",
+        nombre="Detectar escalamiento sin destinatario registrado",
+        tipo=DOMINIO, version=1, vigente_desde="2026-09-21", estado=VIGENTE,
+        proposito="Señalar actividades escaladas a las que les falta destinatario o nivel.",
+        responsabilidad=(
+            "Decir que el dato falta. NO decir a quién escalarla: no existe una "
+            "política operativa que lo determine, y elegir sin ella sería "
+            "inventar la decisión."),
+        alcance="ActividadOperativa en estado 'escalada' sin 'escalado_a' o sin nivel.",
+        fuera_de_alcance=(
+            "No escala.",
+            "No elige destinatario.",
+            "No decide que una actividad 'necesita escalamiento': eso no es "
+            "observable con los datos de hoy.",
+        ),
+        activacion=("estado_operativo='escalada' y falta escalado_a o nivel.",),
+        entradas=("org", "ahora"),
+        datos=("operaciones.ActividadOperativa.estado_operativo",
+               "operaciones.ActividadOperativa.escalado_a",
+               "operaciones.ActividadOperativa.nivel_escalamiento"),
+        reglas=(
+            "Antigüedad, atraso e impacto NO son criterio de escalamiento: un "
+            "compromiso viejo puede estar atendido y uno crítico puede no "
+            "necesitar a nadie más.",
+            "Huella 'faltan:<campos>': lo que identifica la situación es QUÉ "
+            "falta, no cuánto lleva así.",
+            "El nivel describe ruta de gestión; el impacto de la incidencia es "
+            "otro eje y vive en NovedadOperativa.",
+        ),
+        procedimiento=(
+            "1. Tomar actividades en estado escalada.",
+            "2. Filtrar las que no tienen destinatario o no tienen nivel.",
+            "3. Emitir señal nombrando exactamente qué campo falta.",
+        ),
+        conocimiento=(),
+        herramientas_lectura=("ORM: operaciones.ActividadOperativa",),
+        herramientas_escritura=(),
+        salida="list[Senal] con tipo 'escalamiento_sin_destinatario'.",
+        evidencia=("observado: título y estado de la actividad",
+                   "observado: destinatario, o su ausencia",
+                   "observado: nivel, o su ausencia",
+                   "observado: fecha de escalamiento, o su ausencia"),
+        incertidumbre=(
+            "Puede tratarse de una actividad escalada antes de que el sistema "
+            "registrara destinatario, no de un descuido de nadie.",
+        ),
+        escalamiento=("Al Supervisor: siempre.",),
+        nivel=1,
+        metricas=("La propuesta NO nombra a ninguna persona como destinatario.",),
+        detector="_escalamientos_sin_destinatario",
+        senal="escalamiento_sin_destinatario",
+        huella_condicion="faltan:<campos>",
+    ),
+
 )
 
 

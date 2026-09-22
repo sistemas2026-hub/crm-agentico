@@ -49,6 +49,51 @@ from nucleo.config.schema import Herramienta                         # noqa: E40
 from nucleo.herramientas import http as ejecutor_http                # noqa: E402
 from nucleo.modelo import motor                                      # noqa: E402
 
+# EL INTERRUPTOR DE AUTONOMIA, DECLARADO (15/09/2026)
+# ---------------------------------------------------
+# Desde la fase 1 de seguridad, toda escritura pasa por
+# nucleo/seguridad/interruptor.py, que lee una fila de la base. Esta prueba
+# corre SIN base, asi que esa lectura falla y el gate --haciendo exactamente lo
+# que debe-- bloquea la accion; sin esta declaracion, lo que se probaria aca es
+# el fail-closed y no lo que el archivo dice probar.
+#
+# Se declara 'activo' y no se desactiva el gate: lo que se sustituye es la
+# RESPUESTA de la base, igual que se sustituye la respuesta de WispHub mas
+# abajo. El camino del codigo es el real.
+from nucleo.persistencia import db as _persistencia_de_prueba      # noqa: E402
+
+_persistencia_de_prueba.estado_autonomia = lambda tenant: {
+    "estado": "activo", "estado_anterior": None, "actor": "prueba",
+    "motivo": "", "creado_en": None}
+_persistencia_de_prueba.registrar_auditoria = lambda *a, **k: None
+_persistencia_de_prueba.reclamar_operacion_externa = (
+    lambda *a, **k: {"decision": "ejecutar", "fila": {"intentos": 1}})
+_persistencia_de_prueba.finalizar_operacion_externa = lambda *a, **k: None
+
+# --- AUTONOMIA 2 (19/09/2026) ---------------------------------------------
+# Desde este bloque, una escritura autonoma necesita ADEMAS del interruptor:
+# la etapa encendida, el prerequisito de B-7 y una autorizacion granular de ESA
+# herramienta (nucleo/seguridad/autonomia2.py y autorizacion.py). Esta prueba
+# no trata de eso, asi que declara las respuestas igual que declara el
+# interruptor arriba -- se sustituye la RESPUESTA de la base, nunca el gate.
+# El camino del codigo sigue siendo el real: frontera.autonoma() consulta las
+# tres, y quien las prueba de verdad es tests/test_autonomia2.py.
+import os                                                           # noqa: E402
+
+os.environ["AUTONOMIA_2_ACTIVA"] = "1"
+_persistencia_de_prueba.secreto_jwt_en_base = lambda: ""
+_persistencia_de_prueba.nivel_autonomia = lambda tenant: {
+    "nivel": 2, "nivel_anterior": None, "organization_id": "org-prueba", "org_consultada": "org-prueba", "actor": "prueba", "motivo": "",
+    "creado_en": None}
+_persistencia_de_prueba.autorizacion_herramienta = lambda tenant, herramienta: {
+    "id": "00000000-0000-0000-0000-000000000001", "herramienta": herramienta,
+    "estado": "autorizada", "estado_anterior": None, "nivel_maximo": 2,
+    "vigente_desde": None, "vigente_hasta": None, "autorizado_por": "prueba",
+    "motivo": "", "limites": {}, "creado_en": None}
+_persistencia_de_prueba.registrar_ejecucion_autonoma = lambda *a, **k: None
+
+
+
 fallos: list[str] = []
 
 

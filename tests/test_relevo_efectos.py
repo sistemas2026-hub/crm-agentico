@@ -113,9 +113,14 @@ print("\n== 1. el despacho real del motor ==")
 guion = [("", [("consultar_solicitud_por_cedula", {"numero_documento": "1000000000"}),
                ("cancelar_solicitud_servicio", ARGS_CANCELAR)]),
          ("Listo.", [])]
-registro, http, _, preguntas = correr("ventas", guion, None)
-comprobar(http.count("cancelar_solicitud_servicio") == 1,
-          f"sin autorizador (fuera de un turno) la escritura sale como siempre ({http})")
+registro, http, propuestas_sin, preguntas = correr("ventas", guion, None)
+#  M06-F: desde M06-E (regla 3.C) cancelar_solicitud_servicio exige aprobacion
+#  humana atada: sin autorizador ya no "sale como siempre", se PROPONE. Lo que
+#  D25 protege sigue medido abajo -- con el control cambiado no queda ni la
+#  propuesta.
+comprobar("cancelar_solicitud_servicio" not in http and len(propuestas_sin) == 1,
+          f"sin autorizador (fuera de un turno) la cancelacion queda PROPUESTA, sin salir "
+          f"al proveedor ({http}, {len(propuestas_sin)} propuesta)")
 
 registro, http, _, preguntas = correr("ventas", guion, lambda que: False)
 cancelar = [r for r in registro if r["herramienta"] == "cancelar_solicitud_servicio"]

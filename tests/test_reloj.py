@@ -36,6 +36,23 @@ sys.path.insert(0, str(RAIZ))
 import yaml  # noqa: E402
 
 from nucleo import reloj  # noqa: E402
+
+# EL INTERRUPTOR DE AUTONOMIA, DECLARADO (15/09/2026)
+# ---------------------------------------------------
+# Desde la fase 1 de seguridad, el reloj le pregunta al interruptor de cada
+# tenant antes de trabajar (nucleo/seguridad/interruptor.py). Esta prueba corre
+# SIN base, asi que esa lectura falla y el reloj --haciendo exactamente lo que
+# debe-- no ejecuta nada. Sin esta declaracion, todo lo que este archivo afirma
+# sobre los dos trabajos quedaria probando el fail-closed y nada mas.
+#
+# Se sustituye la RESPUESTA de la base, no el gate: el camino del codigo sigue
+# siendo el real. Que el reloj SI corta cuando el interruptor esta tirado lo
+# prueba tests/test_interruptor_autonomia.py, seccion 8.
+from nucleo.persistencia import db as _persistencia_de_prueba  # noqa: E402
+
+_persistencia_de_prueba.estado_autonomia = lambda tenant: {
+    "estado": "activo", "estado_anterior": None, "actor": "prueba",
+    "motivo": "", "creado_en": None}
 from nucleo.config.schema import ImportacionTickets  # noqa: E402
 
 fallos: list[str] = []

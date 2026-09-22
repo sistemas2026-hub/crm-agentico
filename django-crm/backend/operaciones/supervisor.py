@@ -154,6 +154,14 @@ def detectar(org, ahora=None) -> list[Senal]:
         _ordenes_en_riesgo,
         #  M09-L. Consume M03-G; no recalcula capacidad por su cuenta.
         _capacidad_de_jornada,
+        #  M04-A. Consume operaciones/sla.py; no recalcula el plazo.
+        _ordenes_con_sla_vencido,
+        _ordenes_con_sla_por_vencer,
+        #  M05-A. Lee el lifecycle PERSISTENTE; no deduce nada del estado de
+        #  la actividad.
+        _incidencias_sin_resolver,
+        #  M05-B. Solo lo OBSERVABLE: que falte el destinatario.
+        _escalamientos_sin_destinatario,
     ):
         señales.extend(detector(org, ahora))
     return señales
@@ -652,6 +660,225 @@ def _ordenes_en_riesgo(org, ahora) -> list[Senal]:
 #  Cada señal tiene UNA recomendacion y una forma de priorizar. Nada de esto lo
 #  decide un modelo: es codigo, y por eso se puede explicar.
 
+# ==============================================================================
+#  M04-A  --  RIESGO TEMPORAL DE UNA ORDEN
+# ==============================================================================
+#  Los dos detectores de abajo NO calculan nada: preguntan a 'operaciones.sla',
+#  que es la unica fuente del plazo. Si el calculo cambiara, cambia alli y aqui
+#  no hay que tocar una linea -- y, sobre todo, no puede empezar a decir algo
+#  distinto de lo que ven los asistentes.
+#
+#  Solo emiten sobre plazos CALCULABLES. SIN_PLAZO, NO_APLICA y
+#  DATOS_INSUFICIENTES no producen propuesta: una recomendacion apoyada en un
+#  plazo que nadie declaro seria inventar el compromiso y despues reclamarlo.
+
+def _ordenes_con_plazo(org, ahora):
+    """Las ordenes vivas de la organizacion, con su plazo ya resuelto."""
+    from campo.models import OrdenTrabajo
+    from operaciones import sla
+
+    ordenes = (OrdenTrabajo.objects
+               .filter(org=org)
+               .exclude(estado_operativo__in=sla.ESTADOS_TERMINADOS)
+               .select_related("tipo_trabajo_version"))
+    for o in ordenes:
+        yield o, sla.plazo_de(o, ahora)
+
+
+def _evidencia_de_plazo(orden, plazo, ahora) -> list[dict]:
+    """
+    Lo que hace explicable la senal. Son hechos leidos, no conclusiones: el
+    numero de orden, el plazo que declara su tipo de trabajo, desde cuando se
+    cuenta, hasta cuando y con que calendario.
+    """
+    return [
+        _observacion("orden_trabajo", orden.id,
+                     f"orden #{orden.numero}, estado '{orden.estado_operativo}'", ahora),
+        _observacion("tipo_trabajo", orden.tipo_trabajo_version_id,
+                     f"plazo declarado: {plazo['minutos_objetivo']} minuto(s)", ahora),
+        _observacion("orden_trabajo", orden.id,
+                     f"se cuenta desde {plazo['ancla']} (creacion de la orden)", ahora),
+        _observacion("orden_trabajo", orden.id,
+                     f"limite: {plazo['limite']}", ahora),
+        _observacion("calendario", plazo.get("calendario") or "24/7",
+                     f"calendario laboral usado: {plazo.get('calendario') or '24/7'}", ahora),
+    ]
+
+
+def _ordenes_con_sla_vencido(org, ahora) -> list[Senal]:
+    from operaciones import sla
+
+    salida = []
+    for o, plazo in _ordenes_con_plazo(org, ahora):
+        if plazo["estado"] != sla.VENCIDA:
+            continue
+        evidencia = _evidencia_de_plazo(o, plazo, ahora)
+        evidencia.append(_observacion(
+            "orden_trabajo", o.id,
+            f"atraso: {plazo['minutos_atraso']} minuto(s)", ahora))
+        salida.append(Senal(
+            tipo=PropuestaSupervisor.ORDEN_SLA_VENCIDO,
+            origen_tipo="orden_trabajo",
+            origen_id=str(o.id),
+            evidencia=evidencia,
+            datos={"minutos_objetivo": plazo["minutos_objetivo"],
+                   "minutos_atraso": plazo["minutos_atraso"],
+                   "limite": plazo["limite"], "ancla": plazo["ancla"],
+                   "calendario": plazo.get("calendario"),
+                   "numero": o.numero},
+            #  La huella NO lleva los minutos de atraso: crecen solos, y una
+            #  propuesta rechazada volveria en el ciclo siguiente como si fuera
+            #  otra condicion. Lo que identifica la situacion es que ESTA orden
+            #  paso su plazo, no cuanto lleva pasado.
+            huella="sla_vencido",
+        ))
+    return salida
+
+
+def _ordenes_con_sla_por_vencer(org, ahora) -> list[Senal]:
+    from operaciones import sla
+
+    salida = []
+    for o, plazo in _ordenes_con_plazo(org, ahora):
+        if plazo["estado"] != sla.VENCE_PRONTO:
+            continue
+        evidencia = _evidencia_de_plazo(o, plazo, ahora)
+        evidencia.append(_observacion(
+            "orden_trabajo", o.id,
+            f"quedan {plazo['minutos_restantes']} minuto(s); "
+            f"la ventana de aviso es de {plazo['ventana_horas']:.2f} h "
+            f"({int(sla.FRACCION_VENTANA * 100)}% del plazo, tope "
+            f"{sla.TOPE_VENTANA_HORAS} h)", ahora))
+        salida.append(Senal(
+            tipo=PropuestaSupervisor.ORDEN_SLA_POR_VENCER,
+            origen_tipo="orden_trabajo",
+            origen_id=str(o.id),
+            evidencia=evidencia,
+            datos={"minutos_objetivo": plazo["minutos_objetivo"],
+                   "minutos_restantes": plazo["minutos_restantes"],
+                   "limite": plazo["limite"], "ancla": plazo["ancla"],
+                   "ventana_horas": plazo["ventana_horas"],
+                   "ventana_fraccion": plazo["ventana_fraccion"],
+                   "calendario": plazo.get("calendario"),
+                   "numero": o.numero},
+            #  Mismo criterio: los minutos restantes bajan solos.
+            huella="sla_por_vencer",
+        ))
+    return salida
+
+
+def _escalamientos_sin_destinatario(org, ahora) -> list[Senal]:
+    """
+    Actividades en estado ESCALADA a las que les falta el destinatario.
+
+    LO QUE ESTE DETECTOR NO HACE, Y ES EL PUNTO
+    -------------------------------------------
+    No decide que una actividad "necesita escalamiento". No existe una politica
+    objetiva que lo determine: antiguedad, atraso o impacto NO son esa politica
+    --un compromiso viejo puede estar perfectamente atendido, y uno critico
+    puede no necesitar a nadie mas--. Inventarla seria convertir una medida de
+    tiempo en una decision de organigrama.
+
+    Lo que SI es observable es una contradiccion en el dato: algo figura como
+    escalado y no consta a quien. Eso es un dato faltante, y se dice como tal.
+    Puede ocurrir con actividades escaladas antes de M05-B, cuando el sistema
+    todavia no registraba destinatario.
+    """
+    escaladas = (ActividadOperativa.objects
+                 .filter(org=org, estado_operativo=ActividadOperativa.ESCALADA)
+                 .filter(Q(escalado_a__isnull=True) | Q(nivel_escalamiento=""))
+                 .select_related("escalado_a"))
+    salida = []
+    for a in escaladas:
+        faltan = []
+        if a.escalado_a_id is None:
+            faltan.append("destinatario")
+        if not a.nivel_escalamiento:
+            faltan.append("nivel")
+        salida.append(Senal(
+            tipo=PropuestaSupervisor.ESCALAMIENTO_SIN_DESTINATARIO,
+            origen_tipo="actividad",
+            origen_id=str(a.id),
+            evidencia=[
+                _observacion("actividad", a.id,
+                             f"'{a.titulo}' figura en estado 'escalada'", ahora),
+                _observacion("actividad", a.id,
+                             f"destinatario: "
+                             f"{a.escalado_a_id or 'NO CONSTA'}", ahora),
+                _observacion("actividad", a.id,
+                             f"nivel: {a.nivel_escalamiento or 'NO CONSTA'}", ahora),
+                _observacion("actividad", a.id,
+                             f"escalada el: {a.escalado_en or 'NO CONSTA'}", ahora),
+            ],
+            datos={"titulo": a.titulo, "faltan": faltan,
+                   "escalado_a": str(a.escalado_a_id) if a.escalado_a_id else None,
+                   "nivel": a.nivel_escalamiento or None},
+            #  La huella lleva QUE falta, no cuanto lleva asi.
+            huella=f"faltan:{','.join(faltan)}",
+        ))
+    return salida
+
+
+def _incidencias_sin_resolver(org, ahora) -> list[Senal]:
+    """
+    Incidencias ABIERTA o EN_GESTION. Las RESUELTA se ignoran.
+
+    El filtro es sobre la COLUMNA 'estado'. No se mira si la actividad sigue
+    bloqueada: desbloquear no resuelve una incidencia, y un detector que lo
+    dedujera dejaria de ver causas que nadie atendio.
+    """
+    from operaciones import incidencias, novedades
+
+    salida = []
+    for n in novedades.sin_resolver(org, ahora):
+        f = incidencias.ficha(n, ahora)
+        evidencia = [
+            _observacion("novedad", n.id,
+                         f"incidencia {n.get_tipo_display()} en estado "
+                         f"'{n.get_estado_display()}'", ahora),
+            _observacion("novedad", n.id,
+                         f"registrada el {n.created_at:%Y-%m-%d %H:%M} "
+                         f"(hace {f['antiguedad_horas']} h)", ahora),
+            _observacion("novedad", n.id,
+                         f"impacto declarado: {f['impacto_etiqueta'] or 'ninguno'}",
+                         ahora),
+            _observacion("novedad", n.id,
+                         f"descripcion: {f['descripcion'] or '(vacia)'}", ahora),
+            _observacion("novedad", n.id,
+                         f"registrada por: {f['registrada_por'] or 'sin registrar'}",
+                         ahora),
+            _observacion("novedad", n.id,
+                         f"contexto observable: {f['contexto']['por_que']}", ahora),
+        ]
+        if n.orden_id:
+            evidencia.append(_observacion(
+                "orden_trabajo", n.orden_id,
+                f"orden relacionada #{n.orden.numero}", ahora))
+        if n.actividad_id:
+            evidencia.append(_observacion(
+                "actividad", n.actividad_id,
+                f"actividad relacionada: {n.actividad.titulo}", ahora))
+        for falta in f["datos_faltantes"]:
+            evidencia.append(_observacion(
+                "novedad", n.id, f"falta {falta['campo']}: {falta['por_que']}", ahora))
+
+        salida.append(Senal(
+            tipo=PropuestaSupervisor.INCIDENCIA_SIN_RESOLVER,
+            origen_tipo="novedad",
+            origen_id=str(n.id),
+            evidencia=evidencia,
+            datos={"tipo": n.tipo, "estado": n.estado, "impacto": n.impacto,
+                   "antiguedad_horas": f["antiguedad_horas"],
+                   "orden": f["orden"], "actividad": f["actividad"],
+                   "datos_faltantes": [x["campo"] for x in f["datos_faltantes"]]},
+            #  La huella lleva el ESTADO, no la antiguedad: las horas crecen
+            #  solas y harian volver cada ciclo una propuesta ya rechazada.
+            #  Pasar de ABIERTA a EN_GESTION si es otra situacion.
+            huella=f"estado:{n.estado}",
+        ))
+    return salida
+
+
 def _prioridad(base: int, componentes: dict[str, int]) -> tuple[int, list[str]]:
     """
     Prioridad = base menos lo que la hace más urgente. Devuelve el número y la
@@ -684,6 +911,86 @@ def analizar(senal: Senal) -> dict:
                        f"fecha de resolución."),
             "prioridad": prioridad,
             "impacto": "Un caso abierto sin movimiento no aparece en ninguna cola de trabajo",
+            "nivel": PropuestaSupervisor.NIVEL_RECOMENDAR,
+            "componentes_prioridad": comp,
+        }
+
+    if senal.tipo == PropuestaSupervisor.ESCALAMIENTO_SIN_DESTINATARIO:
+        faltan = d.get("faltan") or []
+        prioridad, comp = _prioridad(50, {})
+        return {
+            "accion_propuesta": "Completar el registro del escalamiento: "
+                                "declarar a quién se escaló y con qué nivel",
+            #  NO se propone UN destinatario. El Supervisor no tiene politica
+            #  que le permita elegirlo, y elegirlo igual seria inventar la
+            #  decision que este bloque decidio no automatizar.
+            "motivo": (
+                f"La actividad figura como escalada pero no consta "
+                f"{' ni '.join(faltan)}. Un escalamiento sin destinatario no "
+                f"llega a nadie. No se sugiere a quién escalarla: no existe "
+                f"todavía una política operativa que lo determine, y elegirlo "
+                f"sin ella sería inventar la decisión."),
+            "prioridad": prioridad,
+            "impacto": "Un escalamiento que no consta a quién fue no se puede seguir",
+            "nivel": PropuestaSupervisor.NIVEL_RECOMENDAR,
+            "componentes_prioridad": comp,
+        }
+
+    if senal.tipo == PropuestaSupervisor.INCIDENCIA_SIN_RESOLVER:
+        horas = d.get("antiguedad_horas") or 0
+        #  El impacto declarado pesa; su AUSENCIA no se castiga ni se premia.
+        peso = {"critico": 25, "alto": 15, "medio": 8, "bajo": 3}.get(d.get("impacto"), 0)
+        prioridad, comp = _prioridad(
+            45, {"antiguedad": min(horas // 24, 15), "impacto": peso})
+        falta = d.get("datos_faltantes") or []
+        return {
+            "accion_propuesta": "Atender esta incidencia, o registrar cómo se resolvió",
+            "motivo": (
+                f"Sigue en '{d.get('estado')}' desde hace {horas} h. Una "
+                f"incidencia solo se resuelve declarándolo: que la actividad "
+                f"se haya desbloqueado no significa que la causa se haya "
+                f"atendido."
+                + (f" No se declaró: {', '.join(falta)}." if falta else "")),
+            "prioridad": prioridad,
+            "impacto": "Una causa operativa sin resolver se repite en la siguiente orden",
+            "nivel": PropuestaSupervisor.NIVEL_RECOMENDAR,
+            "componentes_prioridad": comp,
+        }
+
+    if senal.tipo == PropuestaSupervisor.ORDEN_SLA_VENCIDO:
+        atraso = d.get("minutos_atraso", 0)
+        prioridad, comp = _prioridad(40, {"atraso": min(atraso // 30, 30)})
+        return {
+            "accion_propuesta": "Revisar esta orden: su plazo operativo ya pasó",
+            #  El texto describe TIEMPO, no conducta. No dice "nadie la
+            #  atendió" ni "se incumplió": dice cuánto plazo había, desde
+            #  cuándo se cuenta y cuánto lleva pasado. Si hay una causa --una
+            #  ausencia, una falta de material-- vive en las novedades, y este
+            #  detector no la conoce.
+            "motivo": (f"El tipo de trabajo declara {d.get('minutos_objetivo')} "
+                       f"minuto(s) de plazo. Contado desde que se creó la orden y "
+                       f"sobre el calendario laboral, el límite era "
+                       f"{d.get('limite')}; lleva {atraso} minuto(s) pasado. "
+                       f"Esto mide tiempo transcurrido, no responsabilidad: la "
+                       f"causa, si la hay, está en las novedades de la orden."),
+            "prioridad": prioridad,
+            "impacto": "Una orden fuera de su plazo no aparece como tal en ninguna cola",
+            "nivel": PropuestaSupervisor.NIVEL_RECOMENDAR,
+            "componentes_prioridad": comp,
+        }
+
+    if senal.tipo == PropuestaSupervisor.ORDEN_SLA_POR_VENCER:
+        restantes = d.get("minutos_restantes", 0)
+        prioridad, comp = _prioridad(55, {"cercania": min(30 - restantes // 30, 20)})
+        return {
+            "accion_propuesta": "Confirmar que esta orden alcanza su plazo, o reprogramarla",
+            "motivo": (f"Quedan {restantes} minuto(s) para el límite "
+                       f"({d.get('limite')}), dentro de la ventana de aviso de "
+                       f"{d.get('ventana_horas'):.2f} h. La ventana es "
+                       f"proporcional al plazo, no fija: un trabajo de dos horas "
+                       f"no se avisa con la misma antelación que uno de tres días."),
+            "prioridad": prioridad,
+            "impacto": "Avisar antes del límite es lo único que permite reprogramar a tiempo",
             "nivel": PropuestaSupervisor.NIVEL_RECOMENDAR,
             "componentes_prioridad": comp,
         }

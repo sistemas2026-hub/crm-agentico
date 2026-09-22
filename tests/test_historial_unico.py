@@ -138,7 +138,8 @@ def _agregar_humano(tenant, conv, contenido, autor, *, autor_usuario_id, clave_i
 respuestas_modelo: list[str] = []
 
 
-def _responder(config, rol, mensaje, historial, sesion, nota_continuidad=None):
+def _responder(config, rol, mensaje, historial, sesion, nota_continuidad=None, **_kw):
+    #  M06-F: el turno real pasa ademas 'origen' (la solicitud, para la idempotencia).
     # Como el motor real: agrega mensajes de sistema y la respuesta al historial.
     historial.append({"role": "system", "content": "instrucciones del turno"})
     historial.append({"role": "user", "content": mensaje})

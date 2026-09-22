@@ -1019,6 +1019,32 @@ class Herramienta(Base):
     # Ausente = sin politica, comportamiento de siempre. Ninguna herramienta la
     # declara hoy salvo las que lo digan explicitamente.
     politica: PoliticaDeclarada | None = None
+    # 'irreversible' (M06-A, 21/09/2026): el efecto de esta herramienta no lo
+    # puede deshacer el mismo sistema que lo produjo -- un reinicio no se
+    # des-reinicia, un pago no se des-registra con otra llamada. Es el criterio
+    # R3/R4 de tests/test_m10a_gobierno_frontera.py, y vive aca porque ahora
+    # hay CODIGO que lo aplica: la frontera (nucleo/seguridad/frontera.py) no
+    # deja salir una herramienta irreversible con otro permiso que el de la
+    # puerta 'critica', que exige la cadena entera MAS una aprobacion humana
+    # atada a la accion exacta (herramienta + argumentos + origen). Ver
+    # nucleo/seguridad/aprobacion.py.
+    #
+    # Es un dato del tenant y no del nucleo porque que herramienta es
+    # irreversible depende del catalogo de cada empresa -- el nucleo no conoce
+    # 'reiniciar_ont'. El validador de abajo impide declararla sin
+    # aprobacion_humana, o invocable por un servicio.
+    irreversible: bool = False
+    # 'nivel_autonomia' (M06-B, 21/09/2026): el nivel de autonomia que exige
+    # esta herramienta para correr sin una persona. El techo de la empresa
+    # (nucleo/seguridad/techo.py) tiene que alcanzarlo. Vacio = el de siempre:
+    # 0 para una lectura, 2 para una escritura -- asi ninguna herramienta del
+    # catalogo cambio de nivel al construirse el mecanismo.
+    #
+    # Es del CATALOGO, no de la llamada: el modelo no puede bajarlo pasando un
+    # argumento, y ninguna herramienta puede cambiar el suyo (la config solo la
+    # edita un administrador). 0..3 porque 3 es el tope de politica global; una
+    # escritura no puede exigir 0, que es "observar".
+    nivel_autonomia: int | None = Field(default=None, ge=0, le=3)
     # Solo tiene efecto con aprobacion_humana=True. Texto con marcadores
     # '{clave}' que se rellenan con los argumentos YA resueltos (los mismos
     # que se le mandarian a la API) -- para que quien aprueba lea "Crear
@@ -1746,6 +1772,28 @@ class Herramienta(Base):
                 f"revalidacion) sin 'aprobacion_humana: true'. Esos campos solo "
                 f"corren al aprobar, asi que declararlos sin la cola promete "
                 f"una comprobacion que nunca se hace.")
+        #  Una irreversible sin aprobacion no seria ejecutable nunca (la
+        #  frontera exige la aprobacion atada a la accion), y un catalogo que
+        #  lo declare igual esta diciendo otra cosa de la que cree: se rechaza
+        #  al cargar, no se descubre en produccion.
+        if self.irreversible and self.solo_lectura:
+            raise ValueError(
+                f"'{self.nombre}': 'irreversible' solo tiene sentido en una "
+                f"escritura.")
+        if self.irreversible and not self.aprobacion_humana:
+            raise ValueError(
+                f"'{self.nombre}' es irreversible y no declara "
+                f"aprobacion_humana: su efecto no se deshace, asi que exige "
+                f"que una persona apruebe cada operacion.")
+        if (self.nivel_autonomia is not None and not self.solo_lectura
+                and self.nivel_autonomia < 1):
+            raise ValueError(
+                f"'{self.nombre}' escribe y declara nivel_autonomia 0: el nivel 0 "
+                f"es observar, y una escritura siempre tiene efecto.")
+        if self.irreversible and self.invocable_por_servicio:
+            raise ValueError(
+                f"'{self.nombre}' es irreversible y no puede ser invocable por "
+                f"un servicio: esa ruta no tiene a quien pedirle la aprobacion.")
 
         sobrantes_inyectados = set(self.inyectados_obligatorios) - set(self.inyectar_sesion)
         if sobrantes_inyectados:

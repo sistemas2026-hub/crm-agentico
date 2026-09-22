@@ -417,7 +417,8 @@ CONFIG = types.SimpleNamespace(canales=types.SimpleNamespace(whatsapp=cfg_wa),
 atendidos: list[tuple] = []
 
 
-def atender_ok(config, tenant, rol, de, texto, canal):
+def atender_ok(config, tenant, rol, de, texto, canal, **_kw):
+    #  M06-F: el canal real pasa ademas evento_id (el wamid, origen de la idempotencia).
     atendidos.append((de, texto))
     return {"respuesta": f"respuesta a {MSG}", "conversacion_id": str(uuid.uuid4())}
 

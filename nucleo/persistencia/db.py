@@ -44,7 +44,13 @@ las conversaciones de otro ISP.
 Por eso cada operacion abre transaccion, hace 'set local role app_backend'
 -que si esta sujeto a RLS- y fija app.current_tenant. El 'local' de ambos es
 lo que impide que una peticion herede el tenant de otra si se reutiliza la
-conexion.
+conexion, y tambien que quede algun privilegio elevado cuando la transaccion
+termina.
+
+La UNICA excepcion al rol es 'registrar_transicion_autonomia', que baja a
+'autonomia_operador': mover el interruptor de autonomia es administracion y no
+runtime, y con un solo rol para las dos cosas el motor podia reactivarse solo.
+Ver ROLES_PERMITIDOS mas abajo y PASO10.12.
 
 El orden importa: el slug se resuelve ANTES de bajar de rol, porque leer
 tenant_config ya requiere el tenant fijado y seria circular.
@@ -110,18 +116,110 @@ def _organizacion(cur, tenant: str) -> str:
     return _ORGS[tenant]
 
 
+# El timeout de conexion de casi todo: una consulta de conversacion, una
+# escritura de traza, un barrido del reloj. No se toca.
+SEGUNDOS_CONEXION = 30
+
+# EL TIMEOUT DEL CAMINO DEL INTERRUPTOR  --  corto, y aparte a proposito.
+#
+# Lo usan SOLO estas tres: estado_autonomia, estado_autonomia_de_organizacion y
+# registrar_auditoria. Son las tres que corren ANTES de dejar pasar una accion,
+# con alguien esperando del otro lado.
+#
+# Medido el 15/09/2026 con la base caida y los 30 s de siempre: UNA lectura del
+# interruptor tardaba 30,1 s contra un host que no responde y 60,2 s contra un
+# puerto cerrado en 'localhost' -- porque el nombre resuelve a ::1 y a
+# 127.0.0.1, y libpq gasta el timeout COMPLETO en cada direccion antes de
+# rendirse. Y una accion bloqueada toca la base mas de una vez (la lectura, y
+# despues la fila de auditoria del bloqueo).
+#
+# El efecto en produccion no es teorico: DESPLIEGUE.md ya documenta que cuando
+# el motor tarda de mas, el proxy corta la conexion y el cliente ve un error
+# por una respuesta que si existia. Aca el retraso ocurre ANTES de la
+# respuesta, asi que el turno entero se cuelga en vez de fallar rapido.
+#
+# POR QUE 3 Y NO 1: el gate tiene que distinguir "la base no esta" de "la base
+# tardo un poco". Contra el pooler sano la conexion se resuelve en
+# milisegundos; 3 s deja margen para un pico de carga sin volver el bloqueo un
+# falso positivo -- y un falso bloqueo es seguro pero interrumpe trabajo real.
+#
+# Y NO PROMETE UN TOPE GLOBAL: son 3 s POR DIRECCION que libpq intente. Con un
+# nombre de doble pila el peor caso sigue siendo el doble. Se dice aca en vez
+# de fingir que el numero es un tope total.
+SEGUNDOS_CONEXION_GATE = 3
+
+
+# -----------------------------------------------------------------------------
+#  LOS DOS ROLES A LOS QUE ESTE MODULO PUEDE BAJAR  (paso 10.12)
+# -----------------------------------------------------------------------------
+#  'app_backend' es el RUNTIME: todo lo que hace el motor en caliente.
+#  'autonomia_operador' es el flujo ADMINISTRATIVO del interruptor, y nada mas.
+#
+#  Estan separados porque hasta el 17/09/2026 eran el mismo rol, y eso permitia
+#  que el proceso del motor insertara 'activo' en el interruptor -- reactivar la
+#  autonomia sin pasar por cli/autonomia.py ni dejar actor y motivo. Medido en
+#  el paso 10.10; la segregacion se diseño y se probo en el 10.11.
+#
+#  La lista blanca no es decoracion: 'SET ROLE' es una sentencia de utilidad y
+#  NO acepta parametros (el mismo motivo que 'statement_timeout' unas lineas mas
+#  abajo), asi que el nombre del rol se interpola en el SQL. Interpolar algo que
+#  no este en esta tupla seria una inyeccion.
+ROL_RUNTIME = "app_backend"
+ROL_OPERADOR_AUTONOMIA = "autonomia_operador"
+ROLES_PERMITIDOS = (ROL_RUNTIME, ROL_OPERADOR_AUTONOMIA)
+
+
 @contextmanager
-def sesion(tenant: str):
+def sesion(tenant: str, connect_timeout: int = SEGUNDOS_CONEXION,
+           rol: str = ROL_RUNTIME):
     """
-    Conexion con el tenant fijado y el rol degradado a app_backend.
+    Conexion con el tenant fijado y el rol degradado.
 
     Entrega (cursor, organization_id). Commit al salir sin excepcion.
+
+    'rol' es 'app_backend' por omision -- el runtime, o sea todo el modulo menos
+    una funcion. El unico que pide otro es 'registrar_transicion_autonomia', que
+    baja a 'autonomia_operador' porque mover el interruptor es administracion y
+    no runtime (paso 10.12). Solo se admiten los de ROLES_PERMITIDOS.
+
+    El 'set local role' muere con la transaccion: al cerrarla no queda ningun
+    privilegio elevado en la conexion, y la conexion ademas se cierra aca.
+
+    'connect_timeout' existe solo para el camino del interruptor (ver
+    SEGUNDOS_CONEXION_GATE). Quien no lo pasa -- o sea todo el resto del
+    modulo -- sigue con los 30 s de siempre, sin un cambio.
+
+    Cuando se pide el timeout corto se acota tambien 'statement_timeout' al
+    mismo valor: el 'connect_timeout' solo cubre el apreton de manos, y una
+    base que ACEPTA la conexion y despues no contesta dejaria el gate colgado
+    igual. Va como 'set local', asi que vive y muere con esta transaccion y no
+    toca a nadie mas.
     """
-    con = psycopg.connect(dsn(), connect_timeout=30, row_factory=dict_row)
+    con = psycopg.connect(dsn(), connect_timeout=connect_timeout,
+                          row_factory=dict_row)
     try:
         with con.cursor() as cur:
+            if connect_timeout != SEGUNDOS_CONEXION:
+                # set_config() y NO 'set local statement_timeout = %s': SET es
+                # una sentencia de utilidad y NO acepta parametros -- Postgres
+                # responde 'syntax error at or near "$1"'. Costo real: la
+                # primera version de esto hacia fallar TODA lectura del
+                # interruptor contra una base de verdad, y como el gate falla
+                # cerrado, el sintoma habria sido "ninguna accion autonoma
+                # funciona en ningun tenant". No lo vio ninguna prueba sin
+                # base; lo vio la verificacion contra PostgreSQL real.
+                #
+                # Es la misma forma que ya se usa dos lineas mas abajo para
+                # app.current_tenant, que estaba ahi todo el tiempo.
+                cur.execute("select set_config('statement_timeout', %s, true)",
+                            (str(connect_timeout * 1000),))
             org = _organizacion(cur, tenant)         # antes de bajar de rol
-            cur.execute("set local role app_backend")
+            # Lista blanca ANTES de interpolar: SET ROLE no acepta parametros.
+            # Ver el comentario de ROLES_PERMITIDOS.
+            if rol not in ROLES_PERMITIDOS:
+                raise ValueError(
+                    f"rol no permitido: {rol!r}. Solo {ROLES_PERMITIDOS}")
+            cur.execute(f"set local role {rol}")
             cur.execute("select set_config('app.current_tenant', %s, true)", (org,))
             yield cur, org
         con.commit()
@@ -1802,6 +1900,344 @@ def guardar_cache(tenant: str, herramienta: str, clave: str, respuesta) -> None:
         registrar("persistencia", "no se pudo guardar la cache", herramienta=herramienta, error=e)
 
 
+# =============================================================================
+#  INTERRUPTOR DE AUTONOMIA  --  ver nucleo/seguridad/interruptor.py
+# =============================================================================
+#  Estas funciones son lo unico que toca asistente.interruptor_autonomia. La
+#  tabla SOLO SE AGREGA (a app_backend se le dieron 'select, insert' y nada
+#  mas, ver supabase/202609151710_interruptor_autonomia.sql), asi que aca no
+#  hay --ni puede haber-- un UPDATE.
+
+
+def estado_autonomia(tenant: str) -> dict | None:
+    """
+    La transicion mas reciente del interruptor de esta empresa, o None si no
+    hay ninguna fila.
+
+    NO atrapa excepciones a proposito, al reves que casi todo lo demas de este
+    modulo. Perder una fila de auditoria no puede tumbar un turno; no poder
+    leer el interruptor SI tiene que frenar la accion. Quien llama
+    (nucleo/seguridad/interruptor.py) convierte el fallo en bloqueo -- si el
+    error se tragara aca, el bloqueo se volveria un permiso.
+
+    Va con el timeout corto (SEGUNDOS_CONEXION_GATE): alguien esta esperando
+    del otro lado de esta decision.
+    """
+    with sesion(tenant, connect_timeout=SEGUNDOS_CONEXION_GATE) as (cur, org):
+        cur.execute(
+            """select estado, estado_anterior, actor, motivo, creado_en
+                 from asistente.interruptor_autonomia
+                where organization_id = %s
+                order by creado_en desc, id desc
+                limit 1""", (org,))
+        return cur.fetchone()
+
+
+def estado_autonomia_de_organizacion(organization_id: str) -> dict | None:
+    """
+    Lo mismo, pero por organizacion en vez de por slug.
+
+    Existe por el scheduler persistente: 'puerta.vencidos' devuelve
+    'organization_id', no el slug, y traducirlo primero costaria una consulta
+    de mas por cada candidato de cada tick.
+
+    Se conecta SIN bajar de rol, igual que _organizacion(): la consulta nombra
+    una sola organizacion explicitamente en el WHERE, y el proceso del
+    coordinador no tiene un tenant fijado al que pertenecer.
+
+    Mismo timeout corto que la lectura por slug: el coordinador la consulta por
+    cada candidato de cada tick, y un tick que se cuelga en la primera empresa
+    deja sin atender a todas las demas.
+    """
+    con = psycopg.connect(dsn(), connect_timeout=SEGUNDOS_CONEXION_GATE,
+                          row_factory=dict_row)
+    try:
+        with con.cursor() as cur:
+            # Ver la nota en sesion(): SET no acepta parametros, set_config si.
+            # 'false' porque esta conexion no abre transaccion propia.
+            cur.execute("select set_config('statement_timeout', %s, false)",
+                        (str(SEGUNDOS_CONEXION_GATE * 1000),))
+            cur.execute(
+                """select estado, estado_anterior, actor, motivo, creado_en
+                     from asistente.interruptor_autonomia
+                    where organization_id = %s
+                    order by creado_en desc, id desc
+                    limit 1""", (organization_id,))
+            return cur.fetchone()
+    finally:
+        con.close()
+
+
+def registrar_transicion_autonomia(tenant: str, estado: str,
+                                   estado_anterior: str | None,
+                                   actor: str, motivo: str | None) -> dict:
+    """
+    Agrega una fila al interruptor. Devuelve la fila escrita.
+
+    'estado_anterior' lo calcula quien llama, leyendo el estado vigente antes.
+    Se guarda aunque sea deducible del historial: una consulta de auditoria no
+    tiene por que reconstruir la transicion ordenando filas para saber que
+    cambio.
+
+    Tampoco atrapa: si esto falla, el operador tiene que enterarse de que su
+    orden NO quedo registrada, en vez de creer que el interruptor esta tirado.
+
+    BAJA A 'autonomia_operador', NO A 'app_backend'  (paso 10.12)
+    -------------------------------------------------------------
+    Es la UNICA funcion de este modulo que pide otro rol, y en eso consiste la
+    segregacion: mover el interruptor es administracion, no runtime. Con
+    'app_backend' el proceso del motor podia insertar 'activo' y reactivar la
+    autonomia por su cuenta, sin pasar por cli/autonomia.py ni dejar actor y
+    motivo. Medido en el paso 10.10, diseñado y probado en el 10.11.
+
+    Al runtime le quedan DOS cosas y ninguna mas: LEER el estado, y la parada de
+    emergencia 'asistente.autonomia_detener()', cuyo cuerpo tiene el estado
+    escrito y no admite 'activo' por ninguna via.
+    """
+    with sesion(tenant, rol=ROL_OPERADOR_AUTONOMIA) as (cur, org):
+        cur.execute(
+            """insert into asistente.interruptor_autonomia
+                 (organization_id, estado, estado_anterior, actor, motivo)
+               values (%s, %s, %s, %s, %s)
+               returning estado, estado_anterior, actor, motivo, creado_en""",
+            (org, estado, estado_anterior, actor, motivo))
+        return cur.fetchone()
+
+
+def historial_autonomia(tenant: str, limite: int = 50) -> list[dict]:
+    """El historial del interruptor, lo mas reciente primero."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select estado, estado_anterior, actor, motivo, creado_en
+                 from asistente.interruptor_autonomia
+                where organization_id = %s
+                order by creado_en desc, id desc
+                limit %s""", (org, limite))
+        return cur.fetchall()
+
+
+# =============================================================================
+#  AUDITORIA DE AUTORIZACION  --  asistente.audit_log
+# =============================================================================
+
+
+def registrar_auditoria(tenant: str, actor: str, accion: str,
+                        recurso: str | None, resultado: str,
+                        motivo_denegacion: str | None = None) -> None:
+    """
+    Una fila en asistente.audit_log: quien pidio que, y si se le permitio.
+
+    POR QUE ACA Y NO EN asistente.tool_calls
+    ----------------------------------------
+    'tool_calls' es la traza de UNA CONVERSACION -- es lo que muestra "ver
+    proceso" en la bandeja, y se lee por conversation_id. Una accion autonoma
+    del scheduler no tiene conversacion, asi que esa traza no puede ser su
+    registro. 'audit_log' existe para esto exacto desde el esquema inicial del
+    04/08/2026 (actor / accion / recurso / resultado permitido|denegado /
+    motivo_denegacion) y estaba SIN USAR: cero filas, medidas el 15/09/2026.
+    Este es su primer escritor -- no hay un tercer sistema de auditoria, hay
+    uno que por fin se usa.
+
+    Nunca rompe el turno, mismo criterio que registrar_llamada_herramienta:
+    perder la fila no puede impedir que el bloqueo se aplique, porque el
+    bloqueo ya se decidio antes de llegar aca.
+
+    Y va con el timeout corto (SEGUNDOS_CONEXION_GATE) por la misma razon que
+    la lectura: esta escritura ocurre mientras alguien espera el resultado del
+    gate. Perder la fila ya se acepta como mal menor -- lo que no se puede
+    aceptar es que ANOTAR el bloqueo cueste mas que decidirlo.
+    """
+    try:
+        with sesion(tenant, connect_timeout=SEGUNDOS_CONEXION_GATE) as (cur, org):
+            cur.execute(
+                """insert into asistente.audit_log
+                     (organization_id, actor, accion, recurso, resultado,
+                      motivo_denegacion)
+                   values (%s, %s, %s, %s, %s, %s)""",
+                (org, actor, accion, recurso, resultado,
+                 motivo_denegacion or None))
+    except (Exception, SystemExit) as e:
+        # SystemExit se atrapa a proposito, y NO es paranoia: dsn() lo levanta
+        # cuando faltan los datos de conexion (ver nucleo/persistencia/
+        # conexion.py, y la misma nota en nucleo/reloj.py). Sin esto, un motor
+        # sin base configurada no se quedaba sin auditoria: se le moria el
+        # turno entero al cliente por no poder ESCRIBIR una fila de registro.
+        # Lo encontro la bateria existente, no una revision.
+        registrar("auditoria", "no se pudo anotar la decision", accion=accion, error=e)
+
+
+def auditoria_reciente(tenant: str, limite: int = 50) -> list[dict]:
+    """Las ultimas decisiones de autorizacion -- para inspeccion y pruebas."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select actor, accion, recurso, resultado, motivo_denegacion,
+                      creado_en
+                 from asistente.audit_log
+                where organization_id = %s
+                order by creado_en desc
+                limit %s""", (org, limite))
+        return cur.fetchall()
+
+
+# =============================================================================
+#  OPERACIONES EXTERNAS  --  ver nucleo/seguridad/idempotencia.py
+# =============================================================================
+
+
+def reclamar_operacion_externa(tenant: str, clave: str, herramienta: str,
+                               argumentos_hash: str, origen: str,
+                               segundos_vencida: int,
+                               reintentar_fallida: bool = False) -> dict:
+    """
+    Intenta quedarse con el derecho a ejecutar esta operacion. Devuelve
+    {'decision': ..., 'fila': ...} y NO ejecuta nada.
+
+    'decision' es una de:
+      ejecutar    la operacion es tuya. Nadie mas la va a correr.
+      repetida    ya se ejecuto con exito; en 'fila.respuesta' esta lo que
+                  contesto el tercero la primera vez.
+      en_curso    otro proceso la tiene tomada y todavia no vencio.
+      rechazada   la misma clave llego con OTROS argumentos.
+      fallida     termino en error antes, y no se autorizo el reintento.
+
+    COMO SE GARANTIZA QUE SOLO UNO EJECUTE
+    --------------------------------------
+    Por la clave primaria (organization_id, clave), no por un lock en memoria
+    ni por un chequeo previo. El INSERT con 'on conflict do nothing' es
+    atomico: o devuelve fila --y entonces fue esta sesion la que la creo-- o no
+    devuelve nada. Dos procesos simultaneos con la misma clave: el segundo
+    espera en el indice unico hasta que el primero confirme, y despues ve la
+    fila que el primero dejo. No hay ventana entre 'mirar' y 'crear' porque no
+    se mira antes de crear.
+
+    La transaccion termina al salir de sesion(), ANTES de que quien llama haga
+    la llamada externa. Es a proposito: sostener la transaccion durante una
+    llamada HTTP de hasta 15 s dejaria a cualquier otro proceso esperando en el
+    indice todo ese rato.
+
+    EL RESCATE POR VENCIMIENTO
+    --------------------------
+    Si el proceso muere entre la llamada y el registro del resultado, la fila
+    queda en 'ejecutando' y la operacion no se podria reintentar nunca. Pasado
+    'segundos_vencida' sin novedades, otra pasada se la queda y suma un
+    intento. Lo que eso NO resuelve esta escrito en la migracion: si la llamada
+    original llego al tercero, el reintento la repite. Desde este lado nadie
+    puede saberlo.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """insert into asistente.operaciones_externas
+                 (organization_id, clave, herramienta, argumentos_hash,
+                  estado, origen, intentos)
+               values (%s, %s, %s, %s, 'ejecutando', %s, 1)
+               on conflict (organization_id, clave) do nothing
+               returning clave, herramienta, estado, origen, intentos,
+                         respuesta, error, creado_en""",
+            (org, clave, herramienta, argumentos_hash, origen))
+        fila = cur.fetchone()
+        if fila is not None:
+            return {"decision": "ejecutar", "fila": fila}
+
+        # No la creamos nosotros: ya existia. 'for update' la fija mientras se
+        # decide, para que dos rescates simultaneos no se la lleven los dos.
+        cur.execute(
+            """select clave, herramienta, argumentos_hash, estado, origen,
+                      intentos, respuesta, error, creado_en, actualizado_en
+                 from asistente.operaciones_externas
+                where organization_id = %s and clave = %s
+                for update""", (org, clave))
+        previa = cur.fetchone()
+        if previa is None:
+            # Solo si alguien la borro entre el insert y el select. No deberia
+            # poder pasar: app_backend no tiene DELETE sobre esta tabla.
+            return {"decision": "rechazada", "fila": None,
+                    "motivo": "la operacion desaparecio entre el alta y la lectura"}
+
+        if previa["argumentos_hash"] != argumentos_hash:
+            # NO se toca la fila existente. La legitima es la primera; la que
+            # llega despues con otros argumentos es la que se rechaza.
+            return {"decision": "rechazada", "fila": previa,
+                    "motivo": "la misma clave ya se uso con otros argumentos"}
+
+        if previa["estado"] == "exitosa":
+            return {"decision": "repetida", "fila": previa}
+
+        if previa["estado"] in ("ejecutando", "pendiente"):
+            vencida = previa["actualizado_en"] < (
+                datetime.now(timezone.utc) - timedelta(seconds=segundos_vencida))
+            if not vencida:
+                return {"decision": "en_curso", "fila": previa}
+            cur.execute(
+                """update asistente.operaciones_externas
+                      set estado = 'ejecutando', intentos = intentos + 1,
+                          actualizado_en = now()
+                    where organization_id = %s and clave = %s
+                    returning clave, herramienta, estado, origen, intentos,
+                              respuesta, error, creado_en""", (org, clave))
+            return {"decision": "ejecutar", "fila": cur.fetchone(),
+                    "rescatada": True}
+
+        # 'fallida': el reintento es una decision explicita de quien llama, no
+        # algo que pase solo. Un reintento automatico sobre una mutacion que no
+        # es idempotente es justo lo que esta tabla existe para evitar.
+        if not reintentar_fallida:
+            return {"decision": "fallida", "fila": previa}
+        cur.execute(
+            """update asistente.operaciones_externas
+                  set estado = 'ejecutando', intentos = intentos + 1,
+                      error = null, actualizado_en = now()
+                where organization_id = %s and clave = %s
+                returning clave, herramienta, estado, origen, intentos,
+                          respuesta, error, creado_en""", (org, clave))
+        return {"decision": "ejecutar", "fila": cur.fetchone(), "reintento": True}
+
+
+def finalizar_operacion_externa(tenant: str, clave: str, estado: str,
+                                respuesta=None, error: str | None = None) -> None:
+    """
+    Cierra la operacion con lo que contesto el tercero.
+
+    Solo mueve filas que estan en 'ejecutando': si otro proceso la rescato por
+    vencimiento, el dueño viejo ya no manda sobre ella y su resultado tardio no
+    puede pisar el del dueño nuevo.
+
+    Esta SI atrapa, y la asimetria con el reclamo es deliberada: fallar al
+    RECLAMAR tiene que impedir la ejecucion, pero fallar al ANOTAR ocurre
+    cuando la llamada externa ya salio -- ahi tumbar el turno no deshace nada,
+    solo le suma un error al cliente. La fila queda en 'ejecutando' y vence
+    sola.
+    """
+    try:
+        with sesion(tenant) as (cur, org):
+            cur.execute(
+                """update asistente.operaciones_externas
+                      set estado = %s, respuesta = %s, error = %s,
+                          ejecutado_en = now(), actualizado_en = now()
+                    where organization_id = %s and clave = %s
+                      and estado = 'ejecutando'""",
+                (estado,
+                 json.dumps(respuesta, ensure_ascii=False, default=str)
+                 if respuesta is not None else None,
+                 error[:2000] if error else None,
+                 org, clave))
+    except (Exception, SystemExit) as e:
+        # Igual que en registrar_auditoria: dsn() levanta SystemExit, que no es
+        # una Exception. Y aca importa todavia mas -- si esto revienta, la
+        # llamada externa YA SALIO, y tumbar el turno no la deshace.
+        registrar("idempotencia", "no se pudo cerrar la operacion", error=e)
+
+
+def operacion_externa(tenant: str, clave: str) -> dict | None:
+    """Una operacion por su clave -- para inspeccion y para las pruebas."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select clave, herramienta, argumentos_hash, estado, origen,
+                      intentos, respuesta, error, creado_en, ejecutado_en,
+                      actualizado_en
+                 from asistente.operaciones_externas
+                where organization_id = %s and clave = %s""", (org, clave))
+        return cur.fetchone()
+
 def registrar_marca_tv_desconocida(tenant: str, conversation_id: str,
                                    marca: str) -> None:
     """
@@ -2812,7 +3248,10 @@ def guardar_accion_propuesta(tenant: str, herramienta: str, argumentos: dict,
                              resumen: str, rol_solicitante: str,
                              propuesto_por: str,
                              conversation_id: str | None = None,
-                             vigencia_minutos: int | None = None
+                             vigencia_minutos: int | None = None, *,
+                             hash_argumentos: str | None = None,
+                             origen: str | None = None,
+                             contexto: dict | None = None
                              ) -> tuple[str, bool]:
     """
     Una escritura real (crear/editar algo en un sistema externo) que quedo
@@ -2835,25 +3274,39 @@ def guardar_accion_propuesta(tenant: str, herramienta: str, argumentos: dict,
     'vigencia_minutos' sale de la herramienta (§3.7). Si no la declara, la fila
     nace sin 'vence_en' -- fabricar un plazo seria inventar una decision que
     nadie tomo. Sin vence_en no vence; con el, aprobar despues es imposible.
+
+    'hash_argumentos', 'origen' y 'contexto' (M06-A) solo los manda una
+    herramienta IRREVERSIBLE: atan la aprobacion a la accion exacta, y el sello
+    que se escribe al reservarla (reservar_accion) se calcula sobre ellos. Se
+    escriben SOLO cuando vienen, asi una propuesta comun no depende de que la
+    migracion de aprobacion vinculante este aplicada -- y una irreversible SI:
+    sin esas columnas el insert falla y la accion no queda propuesta, que es
+    fallar cerrado.
     """
     clave = clave_de_equivalencia(conversation_id, herramienta, argumentos)
+    vinculante = hash_argumentos is not None
+    cols_extra = (", hash_argumentos, origen, contexto" if vinculante else "")
+    vals_extra = (", %s, %s, %s" if vinculante else "")
+    params_extra = ((hash_argumentos, origen,
+                     json.dumps(contexto or {}, ensure_ascii=False))
+                    if vinculante else ())
     with sesion(tenant) as (cur, org):
         cur.execute(
             """insert into asistente.acciones_propuestas
                  (organization_id, herramienta, argumentos, resumen,
                   rol_solicitante, propuesto_por, conversation_id, vence_en,
-                  clave_equivalencia)
+                  clave_equivalencia""" + cols_extra + """)
                values (%s, %s, %s, %s, %s, %s, %s,
                        case when %s::int is null then null
                             else now() + make_interval(mins => %s::int) end,
-                       %s)
+                       %s""" + vals_extra + """)
                on conflict (organization_id, clave_equivalencia)
                  where estado in ('pendiente', 'ejecutando')
                  do nothing
                returning id""",
             (org, herramienta, json.dumps(argumentos, ensure_ascii=False),
              resumen, rol_solicitante, propuesto_por, conversation_id,
-             vigencia_minutos, vigencia_minutos, clave))
+             vigencia_minutos, vigencia_minutos, clave) + params_extra)
         fila = cur.fetchone()
         if fila is not None:
             return str(fila["id"]), False
@@ -2907,13 +3360,15 @@ def acciones_propuestas_de(tenant: str, estado: str | None = None) -> list[dict]
 
 def accion_propuesta_de(tenant: str, accion_id: str) -> dict | None:
     """Una propuesta puntual -- para ejecutarla al aprobar, que necesita
-    'herramienta'+'argumentos' completos."""
+    'herramienta'+'argumentos' completos.
+
+    'select *' a proposito (M06-A): trae 'hash_argumentos', 'origen',
+    'contexto' y 'conversation_id' cuando la migracion ya esta aplicada, y
+    sigue funcionando cuando todavia no -- en ese caso una irreversible llega
+    sin huella y aprobacion.veredicto la bloquea (APROBACION_SIN_HUELLA)."""
     with sesion(tenant) as (cur, org):
         cur.execute(
-            """select id, herramienta, argumentos, resumen, rol_solicitante,
-                      propuesto_por, estado, motivo_rechazo, revisado_por,
-                      resultado_ejecucion, codigo_error, creado_en, revisado_en,
-                      conversation_id, vence_en, clave_equivalencia
+            """select *
                from asistente.acciones_propuestas
                where organization_id = %s and id = %s""",
             (org, accion_id))
@@ -2929,14 +3384,16 @@ def resolver_accion_propuesta(tenant: str, accion_id: str, estado: str,
     llamador pasa 'resultado_ejecucion' (lo que devolvio la API real) en la
     MISMA actualizacion -- para que 'aprobada' y 'ya se sabe que paso'
     queden juntos, nunca una fila 'aprobada' que en realidad todavia no se
-    intento ejecutar. Devuelve False si el id no existe o no es de este
-    tenant."""
+    intento ejecutar. M06-F: solo actua sobre una fila 'pendiente' (hoy la
+    usa unicamente /rechazar); una reservada o ya resuelta no se pisa.
+    Devuelve False si el id no existe, no es de este tenant o ya no estaba
+    pendiente -- el llamador distingue releyendo."""
     with sesion(tenant) as (cur, org):
         cur.execute(
             """update asistente.acciones_propuestas
                set estado = %s, revisado_por = %s, revisado_en = now(),
                    motivo_rechazo = %s, resultado_ejecucion = %s, codigo_error = %s
-               where organization_id = %s and id = %s""",
+               where organization_id = %s and id = %s and estado = 'pendiente'""",
             (estado, revisado_por, motivo_rechazo,
              json.dumps(resultado_ejecucion, ensure_ascii=False) if resultado_ejecucion is not None else None,
              codigo_error, org, accion_id))
@@ -3118,6 +3575,8 @@ def reservar_accion(tenant: str, accion_id: str, reservada_por: str) -> dict:
         cur.execute(
             """select id, estado, conversation_id, vence_en, herramienta,
                       argumentos,
+                      to_jsonb(a) ->> 'hash_argumentos' as hash_argumentos,
+                      to_jsonb(a) ->> 'origen' as origen,
                       (vence_en is not null and vence_en <= now()) as expirada,
                       (select estado from asistente.conversations c
                         where c.id = a.conversation_id) as estado_conversacion
@@ -3147,9 +3606,35 @@ def reservar_accion(tenant: str, accion_id: str, reservada_por: str) -> dict:
                     conversation_id=str(previa["conversation_id"]))
             return {"ok": False, "motivo": "vencida"}
 
+        # M06-F: RESERVAR ES APROBAR, y para una accion con aprobacion
+        # vinculante (la que guardo hash y origen al proponerse: las
+        # irreversibles) el SELLO se escribe en esta MISMA escritura. No hay una
+        # segunda maquina de aprobacion: es el compare-and-set de B5 con una
+        # columna mas. El sello ata empresa, organizacion, herramienta, origen,
+        # huella y aprobador; las tres primeras condiciones del WHERE aseguran
+        # que se calcula sobre lo mismo que la fila tiene al escribirlo, y el
+        # trigger de la tabla impide cambiarlo despues.
+        #
+        # 'to_jsonb(a)' arriba y no las columnas por nombre: asi, con la
+        # migracion todavia sin aplicar, una propuesta comun sigue reservandose
+        # igual que en B5 (hash NULL -> sin sello), y una vinculante no puede
+        # existir porque no pudo guardarse.
+        vinculante = bool(previa["hash_argumentos"])
+        extra_set, extra_where = "", ""
+        if vinculante:
+            from nucleo.seguridad.aprobacion import sello_de
+            sello = sello_de(tenant=tenant, organization_id=str(org),
+                             herramienta=previa["herramienta"],
+                             origen=previa["origen"] or "",
+                             huella=previa["hash_argumentos"],
+                             aprobador=reservada_por)
+            extra_set = ", sello_aprobacion = %s"
+            extra_where = (" and a.herramienta = %s and a.hash_argumentos = %s"
+                           " and a.origen is not distinct from %s")
         cur.execute(
             """update asistente.acciones_propuestas a
-               set estado = 'ejecutando', revisado_por = %s, revisado_en = now()
+               set estado = 'ejecutando', revisado_por = %s, revisado_en = now()"""
+            + extra_set + """
                where a.organization_id = %s and a.id = %s
                  and a.estado = 'pendiente'
                  and (a.vence_en is null or a.vence_en > now())
@@ -3157,9 +3642,11 @@ def reservar_accion(tenant: str, accion_id: str, reservada_por: str) -> dict:
                  and exists (select 1 from asistente.conversations c
                               where c.id = a.conversation_id
                                 and c.organization_id = a.organization_id
-                                and c.estado = 'abierta')
-               returning a.id, a.herramienta, a.argumentos, a.conversation_id""",
-            (reservada_por, org, accion_id))
+                                and c.estado = 'abierta')""" + extra_where + """
+               returning a.*""",
+            (reservada_por,) + ((sello,) if vinculante else ()) + (org, accion_id)
+            + ((previa["herramienta"], previa["hash_argumentos"], previa["origen"])
+               if vinculante else ()))
         fila = cur.fetchone()
         if fila is None:
             if (previa["estado_conversacion"] or "") != "abierta":
@@ -3598,3 +4085,201 @@ def resumen_anterior(tenant: str, canal: str,
     except Exception as e:
         registrar("resumen", "no se pudo leer el anterior", error=e)
         return None
+
+
+# ============================================================================
+#  AUTONOMIA 2  --  AUTORIZACION GRANULAR
+# ============================================================================
+#  Las tres van con el timeout corto (SEGUNDOS_CONEXION_GATE) y NO atrapan
+#  excepciones, por el mismo motivo que 'estado_autonomia': quien llama
+#  (nucleo/seguridad/autorizacion.py) convierte el fallo en bloqueo. Si el
+#  error se tragara aca, el bloqueo se volveria un permiso.
+
+
+def nivel_autonomia(tenant: str) -> dict | None:
+    """
+    El techo de autonomia vigente de la empresa, o None si nunca se fijo.
+
+    Devuelve tambien 'organization_id' (de la fila) y 'org_consultada' (la que
+    se resolvio para este tenant): nucleo/seguridad/techo.py exige que sean la
+    misma antes de creerle al nivel (M06-B). No selecciona 'origen' a
+    proposito: la lectura del gate no lo necesita, y asi funciona antes y
+    despues de la migracion 202609221010_techo_autonomia.sql.
+    """
+    with sesion(tenant, connect_timeout=SEGUNDOS_CONEXION_GATE) as (cur, org):
+        cur.execute(
+            """select organization_id::text as organization_id,
+                      %s::text as org_consultada,
+                      nivel, nivel_anterior, actor, motivo, creado_en
+                 from asistente.nivel_autonomia
+                where organization_id = %s
+                order by creado_en desc, id desc
+                limit 1""", (org, org))
+        return cur.fetchone()
+
+
+def registrar_cambio_techo(tenant: str, nivel_nuevo: int,
+                           anterior_esperado: int | None, actor: str,
+                           motivo: str, origen: str) -> dict:
+    """
+    Mueve el techo de autonomia (M06-B). Como 'autonomia_operador', igual que
+    el interruptor: el runtime no tiene INSERT sobre asistente.nivel_autonomia.
+
+    Todo en UNA transaccion, con un lock por empresa:
+      - si la ultima fila ya es este mismo pedido (mismo origen, mismo nivel)
+        -> 'repetido', no escribe otra: el mismo pedido reenviado no deja dos
+        transiciones;
+      - si el techo vigente no es el que el operador vio -> 'conflicto', no
+        escribe el techo;
+      - si no -> escribe el techo y 'aplicado'.
+    En los tres casos deja el intento en techo_autonomia_intentos.
+
+    No atrapa: si esto falla, el operador tiene que saber que su orden NO
+    quedo registrada.
+    """
+    with sesion(tenant, rol=ROL_OPERADOR_AUTONOMIA) as (cur, org):
+        cur.execute("select pg_advisory_xact_lock(hashtext(%s))",
+                    (f"techo_autonomia:{org}",))
+        cur.execute(
+            """select nivel, origen from asistente.nivel_autonomia
+                where organization_id = %s
+                order by creado_en desc, id desc limit 1""", (org,))
+        vigente = cur.fetchone()
+        actual = vigente["nivel"] if vigente else None
+
+        if vigente and vigente.get("origen") == origen and actual == nivel_nuevo:
+            resultado = "repetido"
+        elif actual != anterior_esperado:
+            resultado = "conflicto"
+        else:
+            resultado = "aplicado"
+            cur.execute(
+                """insert into asistente.nivel_autonomia
+                     (organization_id, nivel, nivel_anterior, actor, motivo, origen)
+                   values (%s, %s, %s, %s, %s, %s)""",
+                (org, nivel_nuevo, actual, actor, motivo, origen))
+
+        cur.execute(
+            """insert into asistente.techo_autonomia_intentos
+                 (organization_id, nivel_anterior, nivel_solicitado, actor,
+                  motivo, origen, resultado, codigo)
+               values (%s, %s, %s, %s, %s, %s, %s, %s)
+               returning organization_id::text as organization_id,
+                         nivel_anterior, nivel_solicitado, actor, motivo,
+                         origen, resultado, codigo, creado_en""",
+            (org, actual, nivel_nuevo, actor, motivo, origen, resultado,
+             None if resultado != "conflicto" else "CAMBIO_DE_TECHO_CONFLICTO"))
+        return dict(cur.fetchone())
+
+
+def registrar_intento_techo(tenant: str, *, nivel_solicitado: int | None,
+                            nivel_anterior: int | None, actor: str,
+                            motivo: str, origen: str, resultado: str,
+                            codigo: str) -> None:
+    """
+    Un intento de mover el techo que el CODIGO rechazo antes de llegar a la
+    base (M06-B). Va como 'app_backend': la politica de la tabla solo le deja
+    escribir filas 'rechazado', asi que el runtime puede dejar constancia de
+    que alguien lo intento pero no puede fabricar un 'aplicado'.
+    """
+    with sesion(tenant, connect_timeout=SEGUNDOS_CONEXION_GATE) as (cur, org):
+        cur.execute(
+            """insert into asistente.techo_autonomia_intentos
+                 (organization_id, nivel_anterior, nivel_solicitado, actor,
+                  motivo, origen, resultado, codigo)
+               values (%s, %s, %s, %s, %s, %s, %s, %s)""",
+            (org, nivel_anterior, nivel_solicitado, actor, motivo, origen,
+             resultado, codigo))
+
+
+def historial_techo(tenant: str, limite: int = 50) -> list[dict]:
+    """Los intentos de mover el techo, aplicados o no, lo mas reciente primero."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select nivel_anterior, nivel_solicitado, actor, motivo, origen,
+                      resultado, codigo, creado_en
+                 from asistente.techo_autonomia_intentos
+                where organization_id = %s
+                order by creado_en desc, id desc
+                limit %s""", (org, limite))
+        return cur.fetchall()
+
+
+def autorizacion_herramienta(tenant: str, herramienta: str) -> dict | None:
+    """
+    La autorizacion vigente de UNA herramienta, o None si nunca se autorizo.
+
+    'vigente' = la fila mas reciente de esa herramienta en esa empresa. Una
+    revocacion es una fila nueva con estado='revocada', asi que sale de aca y
+    quien llama la lee como bloqueo -- no hay borrado que auditar despues.
+    """
+    with sesion(tenant, connect_timeout=SEGUNDOS_CONEXION_GATE) as (cur, org):
+        cur.execute(
+            """select id, herramienta, estado, estado_anterior, nivel_maximo,
+                      vigente_desde, vigente_hasta, autorizado_por, motivo,
+                      limites, creado_en
+                 from asistente.autorizacion_herramienta
+                where organization_id = %s and herramienta = %s
+                order by creado_en desc, id desc
+                limit 1""", (org, herramienta))
+        return cur.fetchone()
+
+
+def secreto_jwt_en_base() -> str:
+    """
+    Si el GUC con el secreto de firma de JWT sigue puesto en esta base.
+
+    Devuelve la CADENA VACIA cuando no esta -- nunca el valor, que no hace
+    falta para decidir y que no debe viajar a ningun log. Lo unico que se mira
+    es si hay algo.
+
+    Va sin bajar de rol y con el timeout corto: es una pregunta de
+    configuracion del servidor, no de datos de una empresa.
+    """
+    con = psycopg.connect(dsn(), connect_timeout=SEGUNDOS_CONEXION_GATE,
+                          row_factory=dict_row)
+    try:
+        with con.cursor() as cur:
+            cur.execute(
+                "select current_setting('app.settings.jwt_secret', true) as v")
+            fila = cur.fetchone()
+        #  Se devuelve solo la presencia, no el contenido.
+        return "presente" if (fila and (fila.get("v") or "").strip()) else ""
+    finally:
+        con.close()
+
+
+def registrar_ejecucion_autonoma(tenant: str, *, herramienta: str,
+                                 decision: str, codigo: str = "",
+                                 motivo: str = "", propuesta_id: str = "",
+                                 clave_idempotencia: str = "",
+                                 autorizacion_id: str = "",
+                                 nivel_efectivo: int | None = None,
+                                 actor: str = "", evidencia: str = "",
+                                 resultado: str = "", error: str = "") -> None:
+    """
+    Deja la decision en la bitacora. NUNCA tumba la accion por no poder anotar.
+
+    Al reves que las lecturas de arriba, esta SI se traga la excepcion: perder
+    una fila de auditoria es malo, pero convertir eso en un bloqueo haria que
+    una base lenta apagara la autonomia entera. La lectura decide, la escritura
+    registra -- no son lo mismo y no fallan igual.
+    """
+    try:
+        with sesion(tenant, connect_timeout=SEGUNDOS_CONEXION_GATE) as (cur, org):
+            cur.execute(
+                """insert into asistente.ejecucion_autonoma
+                     (organization_id, propuesta_id, herramienta,
+                      clave_idempotencia, autorizacion_id, nivel_efectivo,
+                      decision, codigo, motivo, actor, evidencia, resultado,
+                      error)
+                   values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                (org, propuesta_id or None, herramienta,
+                 clave_idempotencia or None, autorizacion_id or None,
+                 nivel_efectivo, decision, codigo or None, motivo or None,
+                 actor or None, evidencia or None, resultado or None,
+                 error or None))
+    except BaseException as e:                                   # noqa: BLE001
+        # La decision NO cambia por esto.
+        registrar("autonomia2", "no se pudo registrar la decision en la bitacora",
+                  herramienta=herramienta, error=e)
