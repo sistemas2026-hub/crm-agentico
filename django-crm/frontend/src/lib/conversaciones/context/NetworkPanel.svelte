@@ -26,6 +26,7 @@
   import { CircleCheck, CircleX, CircleHelp, Clock, RefreshCw, Power,
            TriangleAlert, Copy, Check } from '@lucide/svelte';
   import { lineaDeAccion } from '$lib/conversaciones/red.js';
+  import { medicionDe, enlaceCaido, potenciaAtenuada } from '$lib/conversaciones/optica.js';
 
   let {
     acciones = [],
@@ -75,34 +76,14 @@
     sin_respuesta: 'Sin consultar.'
   };
 
-  /* Lo que se muestra del enlace. Se leen las dos rutas livianas y cada una
-     anida su resultado de forma distinta, así que se busca el valor en las
-     dos formas conocidas y, si no está, no se dibuja el renglón. Nunca se
-     rellena con un guion: un campo ausente y un campo en cero no son lo
-     mismo cuando se trata de potencia óptica. */
-  const hondo = (/** @type {any} */ o, /** @type {string[]} */ llaves) => {
-    for (const k of llaves) {
-      if (o && typeof o === 'object' && o[k] !== undefined && o[k] !== null && o[k] !== '') return o[k];
-    }
-    return null;
-  };
-
-  const medicion = $derived.by(() => {
-    const o = lectura?.optica;
-    if (!o) return null;
-    const est = hondo(o.estado, ['onu']) ?? o.estado ?? {};
-    const sen = hondo(o.senal, ['signal']) ?? o.senal ?? {};
-    return {
-      serial: o.serial,
-      enlace: hondo(est, ['status']),
-      equipo: hondo(est, ['onu_type_name']),
-      zona: hondo(est, ['zone_name']),
-      encendido: hondo(est, ['uptime']),
-      causaCaida: hondo(est, ['last_down_cause_interpretado', 'last_down_cause']),
-      rx: hondo(sen, ['signal_value', 'signal_1310']),
-      rxOlt: hondo(sen, ['olt_rx_power'])
-    };
-  });
+  /* LA LECTURA SE TRADUCE EN 'optica.js', NO ACA.
+     Estaba en este archivo y por eso nadie pudo probarla: el 22/09/2026 se vio
+     en produccion que el distintivo del estado decia «TRUE» --el `status` del
+     SOBRE de SmartOLT, que significa "la llamada salio bien"-- y que la
+     potencia no aparecia nunca, porque se buscaba `signal_1310` donde la API
+     devuelve `onu_signal_1490`. Las dos cosas tienen ahora una guarda que
+     falla si vuelven. */
+  const medicion = $derived(medicionDe(lectura));
 
   /* ── reiniciar el equipo ───────────────────────────────────────────────
      Tres estados y nada más: pidiendo (con el motivo), en curso, y pedido.
@@ -141,9 +122,7 @@
   /* El veredicto del enlace y el de la potencia son DOS cosas distintas: una
      ONU puede estar Online y aun así con la señal al borde, que es justamente
      el caso que conviene ver antes de que se caiga. */
-  const caido = $derived(
-    !!medicion?.enlace && String(medicion.enlace).toLowerCase() !== 'online'
-  );
+  const caido = $derived(enlaceCaido(medicion) === true);
 
   /** El umbral de la empresa, o null si no definió ninguno. */
   const umbral = $derived(
@@ -154,13 +133,7 @@
 
   /* ¿Está atenuado? null = no se puede afirmar (sin umbral, o sin lectura).
      Es la distinción de siempre: "no sabemos" no es "está bien". */
-  const atenuado = $derived.by(() => {
-    if (umbral === null || !medicion?.rx) return null;
-    const v = Number(medicion.rx);
-    if (Number.isNaN(v)) return null;
-    // Son negativos: más negativo es peor, así que atenuado es MENOR.
-    return v < umbral;
-  });
+  const atenuado = $derived(potenciaAtenuada(medicion, umbral));
 
   /** Dónde está conectado el equipo, o null si no vino. */
   const topologia = $derived(lectura?.optica?.topologia ?? null);
@@ -237,8 +210,12 @@
         {/if}
       </div>
       <dl class="optica">
-        {#if medicion.equipo}
-          <div class="opt-fila"><dt>Modelo</dt><dd>{medicion.equipo}</dd></div>
+        <!-- 'Modelo' se fue: lo trae 'get_onu_details', no las dos rutas
+             livianas que alimentan esta tarjeta, asi que el renglon no se
+             dibujaba nunca. Un campo que no puede tener dato no es una
+             ausencia honesta, es ruido. -->
+        {#if medicion.desde}
+          <div class="opt-fila"><dt>Desde</dt><dd class="panel-mono">{medicion.desde}</dd></div>
         {/if}
         {#if medicion.encendido}
           <div class="opt-fila"><dt>Encendido</dt><dd class="panel-mono">{medicion.encendido}</dd></div>
@@ -253,7 +230,10 @@
          El número grande, como en la referencia: es el dato por el que se
          abre esta pestaña. El veredicto contra el umbral SÓLO si la empresa
          definió uno -- sin umbral se muestra la potencia y nada más. -->
-    {#if medicion.rx || medicion.rxOlt}
+    <!-- `!== null` y NO `{#if medicion.rx}`: 0 dBm es una potencia valida y
+         `0` es falsy, asi que la comprobacion corta habria escondido la
+         tarjeta justo en el caso de senal mas fuerte posible. -->
+    {#if medicion.rx !== null}
       <div class="tarjeta" class:tarjeta-mal={atenuado === true}>
         <div class="tarjeta-tope">
           <span class="tarjeta-titulo">Potencia óptica</span>
@@ -261,9 +241,17 @@
             <span class="tarjeta-hora">{haceCuanto(lectura.leido_en)}</span>
           {/if}
         </div>
-        {#if medicion.rx}
+        {#if medicion.rx !== null}
           <p class="rx" class:rx-mal={atenuado === true}>
             {medicion.rx}<span class="rx-unidad">dBm</span>
+            <!-- SmartOLT ya clasifica la senal en texto ("Very good"). Se
+                 muestra al lado del numero y no en su lugar: quien no lee dBm
+                 entiende igual, y quien los lee no pierde el valor exacto.
+                 No es un veredicto nuestro -- viene del proveedor, y por eso
+                 no depende del umbral de la empresa. -->
+            {#if medicion.clasificacion}
+              <span class="rx-clase">{medicion.clasificacion}</span>
+            {/if}
           </p>
           {#if umbral !== null}
             <p class="rx-umbral" class:rx-umbral-mal={atenuado === true}>
@@ -277,8 +265,16 @@
           {/if}
         {/if}
         <dl class="optica">
-          {#if medicion.rxOlt}
-            <div class="opt-fila"><dt>Rx en la OLT</dt><dd class="panel-mono">{medicion.rxOlt} dBm</dd></div>
+          <!-- La de SUBIDA (1310 nm, ONU->OLT). Va rotulada como tal y
+               SEPARADA del numero grande: son dos medidas distintas, y
+               confundirlas es exactamente el error que llevo a que esta
+               tarjeta no mostrara nada durante semanas. El umbral de la
+               empresa aplica a la de bajada, no a esta. -->
+          {#if medicion.rxSubida !== null}
+            <div class="opt-fila">
+              <dt>Subida (1310 nm)</dt>
+              <dd class="panel-mono">{medicion.rxSubida} dBm</dd>
+            </div>
           {/if}
         </dl>
       </div>
@@ -687,6 +683,16 @@
 
   .rx-mal {
     color: var(--bandeja-error);
+  }
+
+  /* Gris y en peso normal: acompana al numero, no compite con el. */
+  .rx-clase {
+    margin-left: 8px;
+    font-family: var(--bandeja-sans);
+    font-size: 11.5px;
+    font-weight: 500;
+    color: var(--bandeja-texto-2);
+    letter-spacing: 0;
   }
 
   .rx-unidad {
