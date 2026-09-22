@@ -7,7 +7,7 @@
  * contrato marca como incierto.
  */
 import { describe, it, expect } from 'vitest';
-import { actorDe, loQuePaso, lineaDeActividad } from './actividad.js';
+import { actorDe, loQuePaso, lineaDeActividad, insigniaDe } from './actividad.js';
 
 const ev = (extra) => ({
   tipo: 'tomada', actor_tipo: 'operador', actor_nombre: 'Ana Pérez',
@@ -114,5 +114,63 @@ describe('la línea completa', () => {
     const l = lineaDeActividad(null);
     expect(l.quien).toBe('Sin registro');
     expect(l.cuando).toBeNull();
+  });
+});
+
+/**
+ * La insignia (fase de paridad Stitch, 21/09/2026).
+ *
+ * Es el rótulo que se escanea en vertical para ubicar un movimiento sin leer
+ * las frases. Lo que importa: que exista para los diecinueve tipos, que sea
+ * estable aunque la frase cambie con los datos, y que un tipo nuevo del motor
+ * no deje la insignia vacía.
+ */
+describe('insigniaDe', () => {
+  it('da un rótulo corto y estable para cada tipo conocido', () => {
+    expect(insigniaDe({ tipo: 'tomada' })).toBe('Tomada');
+    expect(insigniaDe({ tipo: 'reasignada' })).toBe('Reasignada');
+    expect(insigniaDe({ tipo: 'devuelta_a_ia' })).toBe('Devuelta');
+    expect(insigniaDe({ tipo: 'cerrada' })).toBe('Cerrada');
+  });
+
+  it('no cambia aunque la frase sí cambie con los datos', () => {
+    const conDestino = { tipo: 'reasignada', datos: { nuevo_nombre: 'Ana' } };
+    const sinDestino = { tipo: 'reasignada', datos: {} };
+    // La frase difiere...
+    expect(loQuePaso(conDestino).texto).not.toBe(loQuePaso(sinDestino).texto);
+    // ...la insignia no.
+    expect(insigniaDe(conDestino)).toBe(insigniaDe(sinDestino));
+  });
+
+  it('un tipo que esta pantalla no conoce cae al crudo, legible y nunca vacío', () => {
+    expect(insigniaDe({ tipo: 'algo_nuevo_del_motor' })).toBe('algo nuevo del motor');
+    expect(insigniaDe({})).toBe('Sin tipo');
+    expect(insigniaDe(null)).toBe('Sin tipo');
+  });
+
+  it('lineaDeActividad la incluye, para que el panel no la deduzca', () => {
+    const l = lineaDeActividad({ tipo: 'tomada', actor_tipo: 'operador', actor_nombre: 'Ana' });
+    expect(l.insignia).toBe('Tomada');
+    expect(l.quien).toBe('Ana');
+  });
+});
+
+/**
+ * El tono es QUIEN actuó, no si estuvo bien. `escalada` era 'aviso' y pasó a
+ * 'ia': escalar es el mecanismo funcionando, no una falla, y el ámbar decía lo
+ * contrario. Esta guarda existe para que no vuelva a ámbar sin una razón.
+ */
+describe('tono por quién actuó', () => {
+  it('escalar es de la IA, no una advertencia', () => {
+    expect(loQuePaso({ tipo: 'escalada' }).tono).toBe('ia');
+  });
+
+  it('el cierre tiene su propio tono, distinto de neutro', () => {
+    expect(loQuePaso({ tipo: 'cerrada' }).tono).toBe('ok');
+  });
+
+  it('lo que de verdad salió mal sigue siendo aviso', () => {
+    expect(loQuePaso({ tipo: 'devolucion_fallida', datos: {} }).tono).toBe('aviso');
+    expect(loQuePaso({ tipo: 'accion_vencida' }).tono).toBe('aviso');
   });
 });

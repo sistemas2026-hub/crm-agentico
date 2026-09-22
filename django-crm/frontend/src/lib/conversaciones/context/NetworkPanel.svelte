@@ -198,7 +198,29 @@
 </script>
 
 <section class="red">
-  <p class="panel-titulo">Estado del enlace</p>
+  <!-- ── LA BANDA DE PROCEDENCIA ──────────────────────────────────────────
+       «Confirmado — en vivo desde SmartOLT», con el punto y el distintivo
+       LIVE. Es el elemento central de la pantalla canónica de la referencia y
+       no es decoración: separa lo que un sistema conectado acaba de responder
+       de lo que sería una suposición.
+
+       La referencia pone debajo una SEGUNDA tarjeta, punteada y gris, con
+       modelo de ONT, firmware, temperatura, voltaje y corriente de bias, y
+       la rotula «STITCH MOCK / FUTURE DATA — NOT AVAILABLE TODAY · Design
+       placeholder. Do not implement as real data». No se implementa, por
+       orden expresa de la propia referencia: ninguno de esos cinco lo
+       devuelve hoy ningún sistema conectado, y dibujarlos --aunque fuera en
+       gris-- los convertiría en un dato que alguien va a leer.
+
+       La topología (OLT, slot, puerto, PON) aparece allá marcada MOCK, y acá
+       NO lo está: `consultar_topologia_ont` la trae de verdad desde
+       `get_onu_details`. La referencia se hizo antes de que existiera esa
+       herramienta. Va en esta sección, la de lo confirmado. -->
+  <div class="procedencia">
+    <span class="procedencia-punto" class:procedencia-punto-mal={!medicion} aria-hidden="true"></span>
+    <span class="procedencia-rotulo">Confirmado — en vivo desde SmartOLT</span>
+    {#if medicion}<span class="procedencia-vivo">LIVE</span>{/if}
+  </div>
 
   <!-- LA MEDICIÓN, CON SU HORA. La hora no es un adorno: decide si el dato
        sirve para mandar un técnico o hay que volver a consultar. -->
@@ -462,6 +484,56 @@
 </section>
 
 <style>
+  /* ── LA BANDA DE PROCEDENCIA ───────────────────────────────────────────
+     Reemplaza al rótulo «Estado del enlace», que nombraba la sección pero no
+     decía de dónde salía el dato -- que es la pregunta que decide si se manda
+     un técnico. El punto se apaga cuando no hay medición: sin lectura no se
+     afirma que haya nada en vivo. */
+  .procedencia {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding-bottom: 9px;
+    margin-bottom: 11px;
+    border-bottom: 1px solid var(--bandeja-borde);
+  }
+
+  .procedencia-punto {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--bandeja-ok);
+    flex: none;
+  }
+  .procedencia-punto-mal {
+    background: var(--bandeja-texto-3);
+  }
+
+  .procedencia-rotulo {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--bandeja-texto);
+    line-height: 1.3;
+  }
+
+  /* `margin-left:auto` y no un espaciador: el distintivo queda a la derecha
+     sin importar cuánto envuelva el rótulo en una columna angosta. */
+  .procedencia-vivo {
+    margin-left: auto;
+    flex: none;
+    padding: 1px 5px;
+    border: 1px solid color-mix(in srgb, var(--bandeja-ok) 30%, transparent);
+    border-radius: 3px;
+    background: color-mix(in srgb, var(--bandeja-ok) 10%, transparent);
+    font-family: var(--bandeja-mono);
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: var(--bandeja-ok);
+  }
+
   /* ── la medición óptica ────────────────────────────────────────────────
      Rótulo a la izquierda y valor a la derecha, en la misma retícula que el
      resto de los paneles de contexto. Denso: son siete renglones en una

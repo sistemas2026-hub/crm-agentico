@@ -37,10 +37,63 @@ export function actorDe(ev) {
 }
 
 /**
+ * El rótulo corto de cada tipo, el que va en la insignia de la línea de tiempo.
+ *
+ * Es una SEGUNDA lectura del mismo evento, no un resumen de la frase: la
+ * insignia se escanea en vertical para encontrar "¿cuándo la reasignaron?" sin
+ * leer ninguna oración. Por eso es una palabra y siempre la misma para el
+ * mismo tipo, aunque la frase varíe con los datos (una reasignación dice a
+ * quién; la insignia dice sólo «Reasignada»).
+ *
+ * Los diecinueve que declara el `check` de la base. Un tipo que no esté acá
+ * cae al crudo, igual que la frase: no se esconde un hecho que ocurrió.
+ */
+const INSIGNIAS = {
+  escalada: 'Escalada',
+  intervencion: 'Intervenida',
+  tomada: 'Tomada',
+  soltada: 'Soltada',
+  reasignada: 'Reasignada',
+  devolucion_solicitada: 'Devolución pedida',
+  devuelta_a_ia: 'Devuelta',
+  devolucion_fallida: 'Devolución fallida',
+  pendiente_interno_abierto: 'Pendiente',
+  pendiente_interno_cerrado: 'Resuelto',
+  evaluacion_revisada: 'Revisada',
+  caso_externo_cerrado: 'Caso cerrado',
+  cerrada: 'Cerrada',
+  accion_aprobada: 'Acción aprobada',
+  accion_rechazada: 'Acción rechazada',
+  accion_vencida: 'Acción vencida',
+  accion_cancelada: 'Acción cancelada',
+  accion_propuesta_duplicada: 'Acción duplicada',
+  accion_desconocida: 'Acción desconocida'
+};
+
+/** El rótulo corto del evento. Nunca vacío. */
+export function insigniaDe(ev) {
+  const tipo = ev?.tipo;
+  return INSIGNIAS[tipo] ?? (tipo ?? 'Sin tipo').toString().replaceAll('_', ' ');
+}
+
+/**
  * Qué pasó. Devuelve `{ texto, detalle, tono }`:
  *   texto    la frase principal
  *   detalle  lo que agregan los datos del evento, o null
- *   tono     'ia' | 'humano' | 'aviso' | 'neutro'
+ *   tono     'ia' | 'humano' | 'aviso' | 'ok' | 'neutro'
+ *
+ * EL TONO ES QUIEN ACTUO, NO SI ESTUVO BIEN
+ * -----------------------------------------
+ * 'ia' (violeta) y 'humano' (azul) son la firma de quién movió la
+ * conversación, y es la misma regla que el hilo: la IA y una persona nunca
+ * comparten presentación. 'aviso' queda para lo que de verdad salió mal --una
+ * devolución que no se pudo confirmar, una acción vencida-- y 'ok' para el
+ * cierre.
+ *
+ * `escalada` era 'aviso' y pasó a 'ia' el 21/09/2026. No es un cambio
+ * estético: quien escala es la IA, y pintarlo de ámbar decía "algo salió
+ * mal" sobre el mecanismo que funciona exactamente como se diseñó. Escalar es
+ * el éxito del sistema, no su falla.
  */
 export function loQuePaso(ev) {
   const d = ev?.datos ?? {};
@@ -49,7 +102,7 @@ export function loQuePaso(ev) {
 
   switch (ev?.tipo) {
     case 'escalada':
-      return { texto: 'Pasó a manos del equipo', detalle: motivo || null, tono: 'aviso' };
+      return { texto: 'Pasó a manos del equipo', detalle: motivo || null, tono: 'ia' };
     case 'intervencion':
       return { texto: `${quien} intervino la conversación`, detalle: motivo || null, tono: 'humano' };
     case 'tomada':
@@ -91,7 +144,7 @@ export function loQuePaso(ev) {
     case 'caso_externo_cerrado':
       return { texto: 'El caso se cerró en el sistema externo', detalle: null, tono: 'aviso' };
     case 'cerrada':
-      return { texto: 'Conversación cerrada', detalle: null, tono: 'neutro' };
+      return { texto: 'Conversación cerrada', detalle: null, tono: 'ok' };
     case 'accion_aprobada':
       return { texto: `${quien} aprobó una acción`, detalle: null, tono: 'humano' };
     case 'accion_rechazada':
@@ -117,5 +170,10 @@ export function loQuePaso(ev) {
 
 /** La línea completa de un evento, lista para dibujar. */
 export function lineaDeActividad(ev) {
-  return { ...loQuePaso(ev), quien: actorDe(ev), cuando: ev?.creado_en ?? null };
+  return {
+    ...loQuePaso(ev),
+    quien: actorDe(ev),
+    insignia: insigniaDe(ev),
+    cuando: ev?.creado_en ?? null
+  };
 }

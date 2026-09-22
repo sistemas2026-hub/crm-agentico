@@ -181,3 +181,82 @@ html:not(.dark) .bandeja {
   line-height: 1.45;
   color: var(--bandeja-texto-2);
 }
+
+/* ── LA FILA ETIQUETA/VALOR ───────────────────────────────────────────────
+   Añadido el 21/09/2026 para la paridad con la referencia.
+
+   Los paneles de contexto apilaban cada campo en dos renglones --rótulo
+   arriba, valor abajo-- y la referencia los pone en UNO: rótulo a la
+   izquierda, valor pegado a la derecha. No es una preferencia estética. En
+   una columna de 350px, dos renglones por campo hacen que una sección de seis
+   datos mida el doble y deje de entrar sin desplazar; y con el valor alineado
+   a la derecha, la columna de valores se escanea en vertical --que es como se
+   busca un identificador-- en vez de leerse como prosa.
+
+   Vive acá y no en cada panel por lo mismo que `.panel-dato`: el CSS scopeado
+   de Svelte no deja ver que cinco paneles de la misma columna dibujaron la
+   misma fila de cinco maneras.
+
+   El valor puede envolver; el rótulo no (`white-space: nowrap`), porque un
+   rótulo partido en dos líneas rompe la alineación de toda la sección. */
+.bandeja .panel-fila {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 19px;
+}
+
+.bandeja .panel-fila > .panel-etiqueta {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--bandeja-texto-2);
+  white-space: nowrap;
+}
+
+/* El valor manda a la derecha y se le permite romper: un serial GPON o una
+   dirección no tienen largo garantizado. */
+.bandeja .panel-fila > .panel-valor {
+  min-width: 0;
+  text-align: right;
+  font-size: 12px;
+  color: var(--bandeja-texto);
+  overflow-wrap: anywhere;
+}
+
+/* Separador dentro de una sección, para el campo que cierra un bloque (el
+   dueño, en la referencia). Más liviano que el borde entre secciones. */
+.bandeja .panel-fila-sep {
+  margin-top: 3px;
+  padding-top: 7px;
+  border-top: 1px solid var(--bandeja-borde);
+}
+
+/* ── EL CHIP DE IDENTIFICADOR ─────────────────────────────────────────────
+   Un id que se compara contra otro sistema va en mono, con fondo y borde: el
+   recuadro marca dónde empieza y dónde termina el valor exacto, que es justo
+   lo que hace falta cuando alguien lo está copiando a mano o leyéndoselo a
+   otra persona por teléfono. */
+.bandeja .panel-chip {
+  display: inline-block;
+  padding: 1px 5px;
+  border: 1px solid var(--bandeja-borde);
+  border-radius: 3px;
+  background: var(--bandeja-superficie-suave);
+  font-family: var(--bandeja-mono);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--bandeja-texto);
+  overflow-wrap: anywhere;
+}
+
+/* ── EL ROTULO DE SECCION DENTRO DE UNA PESTAÑA ───────────────────────────
+   La referencia separa las secciones con un borde y un rótulo en versalita.
+   `.panel-titulo` ya da la tipografía; esto agrega la separación, para no
+   repetir el mismo par de reglas en cinco paneles. */
+.bandeja .panel-seccion {
+  padding-top: 14px;
+  margin-top: 14px;
+  border-top: 1px solid var(--bandeja-borde);
+}

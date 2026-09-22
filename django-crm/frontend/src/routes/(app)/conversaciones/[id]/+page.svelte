@@ -1690,14 +1690,19 @@
            puede no ser el dueño de la conversacion en Dexter -- D28, y Dexter
            es la fuente de verdad. Mezclados bajo un solo titulo, esa
            diferencia hay que deducirla. -->
-      <p class="seccion-ctx">Esta conversación en Dexter</p>
+      <!-- LOS ROTULOS DE SECCION AHORA SON DEL PANEL, no de la pestaña.
+           `CasePanel` dibuja sus tres bloques (Dexter / CRM / operativo) con
+           sus propios encabezados, porque cuáles existen depende de sus
+           datos: una conversación sin caso en el CRM no tiene ese bloque, y
+           un rótulo puesto desde acá quedaba encabezando el vacío. Los que
+           siguen sí son de la pestaña: encabezan paneles que no saben en qué
+           pantalla los montaron. -->
       <CasePanel
         {caso} {conversacion} {owners} {ownerActual}
         asignadaDexter={asignadaA}
         bind:asignadoA bind:listaAbierta bind:formularioAsignar
       />
 
-      <p class="seccion-ctx seccion-ctx-sep">Caso en el CRM</p>
       <AssigneesPanel asignados={data.asignados_crm ?? null}
                       aCargoEnDexter={conversacion.asignada_a_nombre ?? ''} />
 

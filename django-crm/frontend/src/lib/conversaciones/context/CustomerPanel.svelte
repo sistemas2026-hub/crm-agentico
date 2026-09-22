@@ -77,49 +77,57 @@
 </script>
 
 <section class="cliente">
-  <p class="panel-titulo">Cliente</p>
+  <!-- ── IDENTIDAD ──────────────────────────────────────────────────────
+       Rótulo de sección arriba y la píldora de verificación al PIE del
+       bloque, como la referencia. Va al pie y no al tope a propósito: es el
+       veredicto sobre los tres datos de arriba, y leerlo después de verlos
+       es el orden en que se usa. -->
+  <p class="panel-titulo">Identidad</p>
 
-  <p class="verificacion" class:v-si={verificado} class:v-no={!verificado}>
-    {#if verificado}
-      <ShieldCheck size={13} />
-      <span>Identidad verificada en esta conversación</span>
-    {:else}
-      <ShieldQuestion size={13} />
-      <!-- No es una falta: la mayoría de las consultas no necesitan
-           verificar. Lo que no se puede es tratar los datos como confirmados. -->
-      <span>Sin verificar — nada de lo de abajo está confirmado</span>
+  <div class="bloque">
+    {#if conversacion?.nombre_cliente}
+      <div class="panel-fila">
+        <span class="panel-etiqueta">Nombre</span>
+        <span class="panel-valor nombre">{conversacion.nombre_cliente}</span>
+      </div>
     {/if}
-  </p>
 
-  {#if conversacion?.nombre_cliente}
-    <div class="campo">
-      <span class="v2-sub">Nombre</span>
-      <span class="panel-dato">{conversacion.nombre_cliente}</span>
+    <div class="panel-fila">
+      <span class="panel-etiqueta">{esIdOpaco ? 'Identificador del canal' : 'Teléfono'}</span>
+      {#if conversacion?.usuario_externo}
+        <span class="panel-valor panel-mono">{telefono(conversacion.usuario_externo)}</span>
+      {:else}
+        <span class="panel-valor sin-dato">Sin identificar</span>
+      {/if}
     </div>
-  {/if}
 
-  <div class="campo">
-    <span class="v2-sub">{esIdOpaco ? 'Identificador del canal' : 'Teléfono'}</span>
-    {#if conversacion?.usuario_externo}
-      <span class="panel-dato panel-mono">{telefono(conversacion.usuario_externo)}</span>
-    {:else}
-      <span class="v2-muted">Sin identificar</span>
+    {#if conversacion?.id_cliente}
+      <div class="panel-fila">
+        <span class="panel-etiqueta">Cliente en el ISP</span>
+        <span class="panel-valor"><span class="panel-chip">{conversacion.id_cliente}</span></span>
+      </div>
     {/if}
+
+    {#if ficha?.cedula}
+      <div class="panel-fila">
+        <span class="panel-etiqueta">Documento</span>
+        <span class="panel-valor panel-mono">{ficha.cedula}</span>
+      </div>
+    {/if}
+
+    <p class="verificacion" class:v-si={verificado} class:v-no={!verificado}>
+      {#if verificado}
+        <ShieldCheck size={13} />
+        <span>Identidad verificada en esta conversación</span>
+      {:else}
+        <ShieldQuestion size={13} />
+        <!-- No es una falta: la mayoría de las consultas no necesitan
+             verificar. Lo que no se puede es tratar los datos como
+             confirmados. -->
+        <span>Sin verificar — nada de lo de abajo está confirmado</span>
+      {/if}
+    </p>
   </div>
-
-  {#if conversacion?.id_cliente}
-    <div class="campo">
-      <span class="v2-sub">Cliente en el ISP</span>
-      <span class="panel-dato panel-mono">{conversacion.id_cliente}</span>
-    </div>
-  {/if}
-
-  {#if ficha?.cedula}
-    <div class="campo">
-      <span class="v2-sub">Documento</span>
-      <span class="panel-dato panel-mono">{ficha.cedula}</span>
-    </div>
-  {/if}
 
   <!-- ── LO QUE SE LEE EN VIVO DEL SISTEMA DEL ISP ──────────────────────
        Tres secciones, las mismas de la referencia. Allá LOCATION y BILLING
@@ -129,63 +137,79 @@
        ese cliente no tiene ese campo cargado. -->
   {#if hayUbicacion}
     <p class="panel-titulo separado">Ubicación</p>
-    {#if ficha.direccion}
-      <div class="campo"><span class="v2-sub">Dirección</span>
-        <span class="panel-dato">{ficha.direccion}</span></div>
-    {/if}
-    {#if ficha.localidad || ficha.ciudad}
-      <div class="campo"><span class="v2-sub">Localidad</span>
-        <span class="panel-dato">{[ficha.localidad, ficha.ciudad].filter(Boolean).join(' · ')}</span></div>
-    {/if}
-    {#if ficha.zona}
-      <div class="campo"><span class="v2-sub">Zona</span>
-        <span class="panel-dato">{ficha.zona}</span></div>
-    {/if}
+    <div class="bloque">
+      {#if ficha.direccion}
+        <div class="panel-fila"><span class="panel-etiqueta">Dirección</span>
+          <span class="panel-valor">{ficha.direccion}</span></div>
+      {/if}
+      {#if ficha.localidad || ficha.ciudad}
+        <div class="panel-fila"><span class="panel-etiqueta">Localidad</span>
+          <span class="panel-valor">{[ficha.localidad, ficha.ciudad].filter(Boolean).join(' · ')}</span></div>
+      {/if}
+      {#if ficha.zona}
+        <div class="panel-fila"><span class="panel-etiqueta">Zona</span>
+          <span class="panel-valor">{ficha.zona}</span></div>
+      {/if}
+    </div>
   {/if}
 
   {#if hayServicio}
     <p class="panel-titulo separado">Servicio</p>
-    {#if ficha.plan_internet}
-      <div class="campo"><span class="v2-sub">Plan</span>
-        <span class="panel-dato">{ficha.plan_internet}</span></div>
-    {/if}
-    {#if ficha.estado}
-      <div class="campo"><span class="v2-sub">Estado del servicio</span>
-        <span class="panel-dato estado-servicio" class:estado-mal={servicioCortado}>{ficha.estado}</span></div>
-    {/if}
-    {#if ficha.fecha_instalacion}
-      <div class="campo"><span class="v2-sub">Instalado</span>
-        <span class="panel-dato panel-mono">{ficha.fecha_instalacion}</span></div>
-    {/if}
+    <div class="bloque">
+      {#if ficha.plan_internet}
+        <div class="panel-fila"><span class="panel-etiqueta">Plan</span>
+          <span class="panel-valor">{ficha.plan_internet}</span></div>
+      {/if}
+      {#if ficha.estado}
+        <!-- El único dato de la ficha que es un veredicto, y por eso es el
+             único que va en una insignia con punto: la referencia lo dibuja
+             así porque «Activo» y «Suspendido» cambian lo que se le puede
+             prometer al cliente en la frase siguiente. -->
+        <div class="panel-fila"><span class="panel-etiqueta">Estado del servicio</span>
+          <span class="panel-valor">
+            <span class="estado-servicio" class:estado-mal={servicioCortado}>
+              <span class="estado-punto" aria-hidden="true"></span>{ficha.estado}
+            </span>
+          </span></div>
+      {/if}
+      {#if ficha.fecha_instalacion}
+        <div class="panel-fila"><span class="panel-etiqueta">Instalado</span>
+          <span class="panel-valor panel-mono">{ficha.fecha_instalacion}</span></div>
+      {/if}
+    </div>
   {/if}
 
   {#if hayFacturacion}
     <p class="panel-titulo separado">Facturación</p>
-    {#if ficha.estado_facturas}
-      <div class="campo"><span class="v2-sub">Cobranza</span>
-        <span class="panel-dato">{ficha.estado_facturas}</span></div>
-    {/if}
-    {#if ficha.saldo !== undefined && ficha.saldo !== null}
-      <div class="campo"><span class="v2-sub">Saldo</span>
-        <span class="panel-dato panel-mono">{ficha.saldo}</span></div>
-    {/if}
-    {#if ficha.fecha_corte}
-      <div class="campo"><span class="v2-sub">Fecha de corte</span>
-        <span class="panel-dato panel-mono">{ficha.fecha_corte}</span></div>
-    {/if}
+    <div class="bloque">
+      {#if ficha.estado_facturas}
+        <div class="panel-fila"><span class="panel-etiqueta">Cobranza</span>
+          <span class="panel-valor">{ficha.estado_facturas}</span></div>
+      {/if}
+      {#if ficha.saldo !== undefined && ficha.saldo !== null}
+        <div class="panel-fila"><span class="panel-etiqueta">Saldo</span>
+          <span class="panel-valor panel-mono">{ficha.saldo}</span></div>
+      {/if}
+      {#if ficha.fecha_corte}
+        <div class="panel-fila"><span class="panel-etiqueta">Fecha de corte</span>
+          <span class="panel-valor panel-mono">{ficha.fecha_corte}</span></div>
+      {/if}
+    </div>
   {/if}
 
   {#if equipo.length > 0}
     <p class="panel-titulo separado">Equipo</p>
-    {#each equipo as [clave, valor] (clave)}
-      <div class="campo">
-        <!-- Si el tenant captura un campo nuevo, aparece con su clave cruda en
-             vez de no aparecer: el motor ya lo manda, y esconderlo sería
-             perder un dato que alguien fue a buscar. -->
-        <span class="v2-sub">{ROTULO_EQUIPO[clave] ?? clave.replaceAll('_', ' ')}</span>
-        <span class="panel-dato panel-mono">{valor}</span>
-      </div>
-    {/each}
+    <div class="bloque">
+      {#each equipo as [clave, valor] (clave)}
+        <div class="panel-fila">
+          <!-- Si el tenant captura un campo nuevo, aparece con su clave cruda
+               en vez de no aparecer: el motor ya lo manda, y esconderlo sería
+               perder un dato que alguien fue a buscar. -->
+          <span class="panel-etiqueta">{ROTULO_EQUIPO[clave] ?? clave.replaceAll('_', ' ')}</span>
+          <span class="panel-valor panel-mono">{valor}</span>
+        </div>
+      {/each}
+    </div>
   {/if}
 
   <p class="panel-nota">
@@ -207,22 +231,38 @@
   .cliente {
     display: flex;
     flex-direction: column;
-    gap: 10px;
     padding-bottom: 16px;
     border-bottom: 1px solid var(--v2-line-soft);
   }
 
+  /* Las filas de una sección van juntas y apretadas: son una tabla, no una
+     lista de párrafos. */
+  .bloque {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    margin-top: 10px;
+  }
+
   .separado {
-    margin-top: 4px;
-    padding-top: 12px;
+    margin-top: 14px;
+    padding-top: 14px;
     border-top: 1px solid var(--bandeja-borde);
+  }
+
+  .nombre {
+    font-weight: 600;
+  }
+
+  .sin-dato {
+    color: var(--bandeja-texto-3);
   }
 
   .verificacion {
     display: flex;
     align-items: center;
     gap: 6px;
-    margin: 0;
+    margin: 3px 0 0;
     padding: 5px 8px;
     border: 1px solid;
     border-radius: var(--bandeja-radio-sm);
@@ -245,24 +285,35 @@
     border-color: var(--bandeja-aviso-borde);
   }
 
-  .campo {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 3px;
-  }
-  .campo > .v2-sub {
-    font-size: 11.5px;
-  }
-
-  /* El estado del servicio es el unico dato de la ficha que es un veredicto. */
+  /* El estado del servicio es el único dato de la ficha que es un veredicto,
+     así que es el único que va en insignia. Con palabra además del color:
+     'estado' viene del ISP y no hay una lista cerrada de valores, así que el
+     color acompaña al texto pero no lo reemplaza. */
   .estado-servicio {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    border: 1px solid color-mix(in srgb, var(--bandeja-ok) 30%, transparent);
+    background: color-mix(in srgb, var(--bandeja-ok) 10%, transparent);
+    font-size: 11px;
     font-weight: 600;
     color: var(--bandeja-ok);
+    white-space: nowrap;
+  }
+  .estado-punto {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    flex: none;
   }
 
   .estado-mal {
     color: var(--bandeja-error);
+    border-color: var(--bandeja-error-borde);
+    background: var(--bandeja-error-fondo);
   }
 
 
