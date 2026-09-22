@@ -167,23 +167,123 @@ def detectar(org, ahora=None) -> list[Senal]:
     return señales
 
 
+#  M09-N (22/09/2026). LO QUE EL ESTADO EXTERNO CAMBIA, Y POR QUE.
+#
+#  Hasta hoy, "abierto en el CRM hace mas de 7 dias" alcanzaba para proponer
+#  revisar el caso. Medido en produccion (diagnostico del 22/09/2026, 100%
+#  lectura): de 96 casos antiguos, 78 figuraban CERRADOS en WispHub, 5 estaban
+#  en curso con respuestas registradas y 13 no tenian ninguna respuesta. O sea
+#  que 78 de 96 propuestas habrian mandado a revisar clientes ya atendidos, y
+#  el Supervisor habria nacido desacreditado.
+#
+#  El estado externo no se consulta al proveedor: se lee de la columna que la
+#  importacion ya dejo en el caso ('external_status', con 'external_fetched_at'
+#  diciendo cuando se leyo). Este detector NO llama a ningun sistema externo.
+#
+#  Los cuatro caminos, y lo que cada uno permite concluir:
+#
+#    cerrado afuera        -> INCONSISTENCIA DE SINCRONIZACION, tipo propio.
+#                             Ni abandono, ni desatencion, ni incumplimiento.
+#    en curso + respuestas -> NO se emite señal: la antiguedad sola no prueba
+#                             estancamiento, y hay actividad registrada.
+#    en curso sin respuestas -> señal de caso antiguo. La evidencia es
+#                             exactamente esa: no hay respuesta registrada.
+#    sin estado externo    -> señal de caso antiguo marcada DATOS_FALTANTES.
+#                             No se asume cerrado, ni en curso, ni atendido:
+#                             la ausencia de dato no se convierte en un dato.
+#
+#  Lo que NINGUN camino afirma: que el problema del cliente este resuelto. Eso
+#  no lo dice ninguna columna -- lo sabe el cliente.
+CERRADO_EN_PROVEEDOR = ("cerrado",)
+EN_CURSO_EN_PROVEEDOR = ("nuevo", "en progreso")
+
+#  Como se clasifica cada señal, para que quien la lee sepa que peso tiene.
+OBSERVADO = "OBSERVADO"
+DATOS_FALTANTES = "DATOS_FALTANTES"
+
+
+def _estado_externo(caso) -> str:
+    """El estado que el proveedor reporto, normalizado. '' si no se sabe."""
+    return (getattr(caso, "external_status", "") or "").strip().lower()
+
+
 def _casos_abiertos_antiguos(org, ahora) -> list[Senal]:
     corte = ahora - timedelta(days=DIAS_CASO_ANTIGUO)
     casos = Case.objects.filter(
         org=org, resolved_at__isnull=True, created_at__lt=corte
-    ).only("id", "name", "created_at", "status", "priority")
+    ).only("id", "name", "created_at", "status", "priority",
+           "external_status", "external_fetched_at", "provider")
     salida = []
     for c in casos:
         dias = (ahora - c.created_at).days
+        externo = _estado_externo(c)
+        respuestas = c.respuestas_externas.count()
+        base = [
+            _observacion("caso", c.id, f"abierto desde {c.created_at:%Y-%m-%d} ({dias} dias)", ahora),
+            _observacion("caso", c.id, f"estado actual: {c.status}", ahora),
+        ]
+        datos = {"dias": dias, "prioridad_caso": c.priority, "nombre": c.name,
+                 "estado_externo": getattr(c, "external_status", "") or "",
+                 "respuestas_externas": respuestas}
+
+        if externo in CERRADO_EN_PROVEEDOR:
+            leido = getattr(c, "external_fetched_at", None)
+            salida.append(Senal(
+                tipo=PropuestaSupervisor.CASO_DESINCRONIZADO,
+                origen_tipo="case",
+                origen_id=str(c.id),
+                evidencia=base + [
+                    _observacion("caso", c.id,
+                                 f"estado en el proveedor: {c.external_status}", ahora),
+                    _observacion("caso", c.id,
+                                 f"estado externo leido el "
+                                 f"{leido:%Y-%m-%d %H:%M} UTC" if leido else
+                                 "el estado externo no dice cuando se leyo", ahora),
+                ],
+                datos={**datos, "clasificacion": OBSERVADO},
+                #  La condicion es "los dos sistemas no coinciden". No lleva la
+                #  magnitud (los dias) por el mismo motivo que la de abajo.
+                huella="cerrado_en_proveedor_abierto_en_crm",
+            ))
+            continue
+
+        if externo in EN_CURSO_EN_PROVEEDOR:
+            if respuestas:
+                #  En curso afuera y con actividad registrada: la antiguedad
+                #  sola no prueba estancamiento, y no hay otra evidencia. No se
+                #  inventa una causa: no se emite señal.
+                continue
+            salida.append(Senal(
+                tipo=PropuestaSupervisor.CASO_ANTIGUO,
+                origen_tipo="case",
+                origen_id=str(c.id),
+                evidencia=base + [
+                    _observacion("caso", c.id,
+                                 f"estado en el proveedor: {c.external_status}", ahora),
+                    _observacion("caso", c.id,
+                                 "sin ninguna respuesta registrada en el hilo", ahora),
+                ],
+                datos={**datos, "clasificacion": OBSERVADO},
+                huella="abierto_sin_respuesta_registrada",
+            ))
+            continue
+
+        #  Sin estado externo, o con uno que este detector no reconoce. Se
+        #  emite la señal --el caso sigue abierto hace mas de 7 dias, que es un
+        #  hecho-- y se dice que falta el dato, en vez de suponerlo.
         salida.append(Senal(
             tipo=PropuestaSupervisor.CASO_ANTIGUO,
             origen_tipo="case",
             origen_id=str(c.id),
-            evidencia=[
-                _observacion("caso", c.id, f"abierto desde {c.created_at:%Y-%m-%d} ({dias} dias)", ahora),
-                _observacion("caso", c.id, f"estado actual: {c.status}", ahora),
+            evidencia=base + [
+                _observacion("caso", c.id,
+                             f"estado en el proveedor: desconocido"
+                             f"{f' (valor no reconocido: {c.external_status})' if externo else ''}",
+                             ahora),
+                _observacion("caso", c.id,
+                             f"respuestas registradas en el hilo: {respuestas}", ahora),
             ],
-            datos={"dias": dias, "prioridad_caso": c.priority, "nombre": c.name},
+            datos={**datos, "clasificacion": DATOS_FALTANTES},
             #  "sigue abierto" es el hecho; los dias son la magnitud. Si la
             #  huella llevara los dias, mañana seria otra condicion.
             huella="abierto_sin_resolucion",
@@ -904,14 +1004,46 @@ def analizar(senal: Senal) -> dict:
     d = senal.datos
     if senal.tipo == PropuestaSupervisor.CASO_ANTIGUO:
         prioridad, comp = _prioridad(50, {"antiguedad": min(d.get("dias", 0), 30)})
+        #  M09-N: el motivo dice QUE evidencia hay, y cual falta. Antes decia
+        #  siempre lo mismo -- "no hay fecha de resolucion" -- aunque el caso
+        #  estuviera cerrado del otro lado.
+        if d.get("clasificacion") == DATOS_FALTANTES:
+            motivo = (f"Lleva {d.get('dias')} días abierto sin resolución registrada, "
+                      f"y no consta el estado del caso en el sistema del proveedor. "
+                      f"No se afirma que nadie lo haya atendido ni que siga pendiente: "
+                      f"falta el dato para saberlo.")
+        else:
+            motivo = (f"Lleva {d.get('dias')} días abierto sin resolución registrada y "
+                      f"sin ninguna respuesta en el hilo, mientras el proveedor lo "
+                      f"reporta como '{d.get('estado_externo')}'. No se afirma quién "
+                      f"debía atenderlo.")
         return {
             "accion_propuesta": "Revisar y priorizar este caso, o cerrarlo si ya está resuelto",
-            "motivo": (f"Lleva {d.get('dias')} días abierto sin resolución registrada. "
-                       f"No se afirma que nadie lo haya atendido: solo que no hay "
-                       f"fecha de resolución."),
+            "motivo": motivo,
             "prioridad": prioridad,
             "impacto": "Un caso abierto sin movimiento no aparece en ninguna cola de trabajo",
             "nivel": PropuestaSupervisor.NIVEL_RECOMENDAR,
+            "componentes_prioridad": comp,
+        }
+
+    if senal.tipo == PropuestaSupervisor.CASO_DESINCRONIZADO:
+        #  Base mas baja que la de un caso antiguo: el cliente ya fue atendido
+        #  del lado del proveedor, asi que esto es deuda de registro, no riesgo
+        #  operativo. Y NIVEL_OBSERVAR, no recomendar una accion sobre el caso:
+        #  lo que hay que revisar es la sincronizacion, que es otro asunto.
+        prioridad, comp = _prioridad(30, {})
+        return {
+            "accion_propuesta": ("Revisar la sincronización con el proveedor: el caso "
+                                 "figura cerrado allá y abierto en el CRM"),
+            "motivo": (f"El proveedor lo reporta como '{d.get('estado_externo')}' y en el "
+                       f"CRM sigue sin fecha de resolución, {d.get('dias')} días después "
+                       f"de creado. Es una inconsistencia entre los dos sistemas: no se "
+                       f"afirma incumplimiento de nadie, ni atraso, ni que el problema "
+                       f"del cliente esté resuelto."),
+            "prioridad": prioridad,
+            "impacto": ("Un caso cerrado afuera y abierto acá infla la cola del CRM y "
+                        "hace que los conteos de casos abiertos no describan la operación"),
+            "nivel": PropuestaSupervisor.NIVEL_OBSERVAR,
             "componentes_prioridad": comp,
         }
 

@@ -162,9 +162,10 @@ class Habilidad:
 
 
 # =============================================================================
-#  LAS 14 FICHAS
+#  LAS 15 FICHAS
 # =============================================================================
-#  Diez de dominio (una por detector de supervisor.py) y cuatro transversales
+#  Once de dominio (dos las produce el mismo detector de casos: M09-N) y
+#  cuatro transversales
 #  (una por funcion compartida). No hay ninguna mas y no hay ninguna menos: son
 #  exactamente las capacidades que M09 ya tiene.
 
@@ -231,6 +232,79 @@ _FICHAS: tuple[Habilidad, ...] = (
         detector="_casos_abiertos_antiguos",
         senal="caso_abierto_antiguo",
         huella_condicion="abierto_sin_resolucion",
+    ),
+
+    # ------------------------------------------------------------- M01-b ---
+    Habilidad(
+        id="H-15",
+        nombre="Detectar caso cerrado en el proveedor y abierto en el CRM",
+        tipo=DOMINIO, version=1, vigente_desde="2026-09-22", estado=VIGENTE,
+        proposito=(
+            "Separar la inconsistencia de SINCRONIZACION del caso realmente "
+            "sin atender, para que una no se lea como la otra."),
+        responsabilidad=(
+            "Afirmar que los dos sistemas no dicen lo mismo. Nunca que alguien "
+            "incumplió, ni que el problema del cliente esté resuelto."),
+        alcance=(
+            "Casos del CRM con 'resolved_at' nulo, más viejos que la ventana, "
+            "cuyo 'external_status' dice que el proveedor los cerró."),
+        fuera_de_alcance=(
+            "No cierra el caso ni reconcilia nada.",
+            "No consulta al proveedor: lee la columna que dejó la importación.",
+            "No mide el SLA del caso.",
+            "No nombra responsables.",
+        ),
+        activacion=(
+            "El caso sigue abierto, supera la ventana y 'external_status' es "
+            "'Cerrado'.",),
+        entradas=("org", "ahora"),
+        datos=("case.id", "case.created_at", "case.status", "case.resolved_at",
+               "case.external_status", "case.external_fetched_at",
+               "case.provider"),
+        reglas=(
+            "Ventana: DIAS_CASO_ANTIGUO = 7, la misma del caso antiguo.",
+            "La huella es 'cerrado_en_proveedor_abierto_en_crm': la condición "
+            "es el desacuerdo entre los dos sistemas, no los días.",
+            "Nivel 0 (observar): lo que hay que revisar es la sincronización, "
+            "no el caso.",
+        ),
+        procedimiento=(
+            "1. Tomar los casos abiertos anteriores al corte.",
+            "2. Leer 'external_status' tal como lo dejó la importación.",
+            "3. Si el proveedor lo reporta cerrado, emitir la señal citando ese "
+            "estado y cuándo se leyó.",
+        ),
+        conocimiento=(),
+        herramientas_lectura=("ORM: cases.Case",),
+        herramientas_escritura=(),
+        salida="list[Senal] con tipo 'caso_desincronizado'.",
+        evidencia=(
+            "observado: fecha de apertura y días transcurridos",
+            "observado: estado del caso en el CRM",
+            "observado: estado reportado por el proveedor y cuándo se leyó",
+        ),
+        incertidumbre=(
+            "'Cerrado' en el proveedor NO prueba que el problema del cliente "
+            "esté resuelto: eso no lo dice ninguna columna.",
+            "'external_status' es una copia con fecha: puede haber cambiado "
+            "después de la última lectura.",
+            "Que el CRM no lo haya cerrado no dice POR QUÉ; la reconciliación "
+            "automática está apagada, y eso es una condición, no una causa "
+            "demostrada de este caso puntual.",
+        ),
+        escalamiento=(
+            "Al Supervisor: siempre; la habilidad no emite propuestas.",
+            "A humano: la revisión humana es el único camino (M09-F).",
+        ),
+        nivel=0,
+        metricas=(
+            "Reparto medido contra producción el 22/09/2026, sin ejecutar el "
+            "ciclo: de 96 casos antiguos, 78 caen en esta señal, 13 siguen "
+            "siendo 'caso_abierto_antiguo' y 5 no producen ninguna.",
+        ),
+        detector="_casos_abiertos_antiguos",
+        senal="caso_desincronizado",
+        huella_condicion="cerrado_en_proveedor_abierto_en_crm",
     ),
 
     # ---------------------------------------------------------------- M10 ---

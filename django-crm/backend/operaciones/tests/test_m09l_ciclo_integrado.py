@@ -581,7 +581,9 @@ def test_21_22_habilidades_y_conocimiento(org_a, actor):
     #  tocaron: lo verifica 'test_las_catorce_originales_no_cambiaron'.
     #  M04-A agrego H-11/H-12 y M05-A agrega H-13, las tres con autorizacion explicita.
     #  M09-M dejo 14. Despues se agregaron, con autorizacion explicita: H-11/H-12 (M04-A), H-13 (M05-A) y H-14 (M05-B).
-    assert len(habilidades.HABILIDADES) == 18, "se creó una habilidad no prevista"
+    #  M09-N (22/09/2026) agrega H-15 (caso cerrado en el proveedor y abierto
+    #  en el CRM), tambien con autorizacion explicita.
+    assert len(habilidades.HABILIDADES) == 19, "se creó una habilidad no prevista"
 
     #  Toda señal emitida tiene ficha: es el guarda de M09-K, comprobado
     #  también sobre lo que este ciclo produjo de verdad.

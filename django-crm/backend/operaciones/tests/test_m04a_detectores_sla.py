@@ -421,7 +421,7 @@ def test_las_catorce_originales_no_cambiaron():
     #  Las agregadas DESPUES de M09-M. Cada bloque que sume una la declara
     #  aqui y esta guarda sigue valiendo sin tocar numeros sueltos: lo que
     #  afirma es que las 14 ORIGINALES no cambiaron, no cuantas hay en total.
-    AGREGADAS = ("H-11", "H-12", "H-13", "H-14")
+    AGREGADAS = ("H-11", "H-12", "H-13", "H-14", "H-15")
     originales = [i for i in H.IDS if i not in AGREGADAS]
     assert len(originales) == 14, originales
     assert len(H.HABILIDADES) == 14 + len(AGREGADAS)

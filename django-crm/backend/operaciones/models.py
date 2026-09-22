@@ -781,6 +781,14 @@ class PropuestaSupervisor(BaseModel):
     #  dato FALTANTE, no una recomendacion de a quien escalarla. El Supervisor
     #  no elige destinatario -- no existe politica que se lo permita.
     ESCALAMIENTO_SIN_DESTINATARIO = "escalamiento_sin_destinatario"
+    #  M09-N (22/09/2026). El caso figura CERRADO en el sistema del proveedor y
+    #  sigue abierto en el CRM. Es una inconsistencia de SINCRONIZACION, y por
+    #  eso es un tipo propio y no un 'caso_abierto_antiguo': medido en
+    #  produccion, 78 de los 96 casos antiguos estaban asi, y tratarlos como
+    #  casos desatendidos habria mandado a revisar clientes ya atendidos. No
+    #  afirma incumplimiento de nadie, ni que el problema del cliente este
+    #  resuelto: solo que los dos sistemas no dicen lo mismo.
+    CASO_DESINCRONIZADO = "caso_desincronizado"
     TIPOS_SENAL = (
         (CASO_ANTIGUO, "Caso abierto antiguo"),
         (ACTIVIDAD_VENCIDA, "Actividad vencida"),
@@ -796,6 +804,7 @@ class PropuestaSupervisor(BaseModel):
         (ORDEN_SLA_POR_VENCER, "Orden con plazo operativo por vencer"),
         (INCIDENCIA_SIN_RESOLVER, "Incidencia operativa sin resolver"),
         (ESCALAMIENTO_SIN_DESTINATARIO, "Escalamiento sin destinatario registrado"),
+        (CASO_DESINCRONIZADO, "Caso cerrado en el proveedor y abierto en el CRM"),
     )
 
     PROPUESTA = "propuesta"
