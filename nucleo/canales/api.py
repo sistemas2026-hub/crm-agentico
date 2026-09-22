@@ -5234,6 +5234,65 @@ def _serial_de(identidad: dict) -> str:
     return str((datos or {}).get("sn_onu") or "").strip()
 
 
+# Las rutas EXACTAS de lo que puede salir de la lectura profunda.
+#
+# POR QUE UNA LISTA BLANCA Y NO UN FILTRO DE LO MALO: la misma respuesta trae
+# 'ONU details.Description', que es el NOMBRE COMPLETO del cliente en el
+# registro de la ONU. Una lista negra deja pasar lo que el proveedor agregue
+# manana; esta nombra lo que sale, campo por campo, y todo lo demas se queda.
+#
+# Los cinco primeros son (destino, seccion, campo). La MAC y el conteo de
+# equipos tienen forma propia --viven bajo indices numericos-- y se resuelven
+# aparte, abajo.
+CAMPOS_PROFUNDOS = (
+    ("temperatura", "Optical status", "Temperature(C)"),
+    ("tx", "Optical status", "Tx optical power(dBm)"),
+    ("olt_rx", "Optical status", "OLT Rx ONT optical power(dBm)"),
+    ("encendido", "ONU details", "ONT online duration"),
+    ("perfil", "ONU details", "Line profile name"),
+)
+
+
+def _profundidad_de(completo: dict) -> dict | None:
+    """Lo que la pantalla puede mostrar de la lectura profunda, y nada mas.
+
+    Vive aparte del endpoint para poder probarse: las rutas son cadenas, y un
+    espacio de mas en "Tx optical power(dBm)" no falla -- devuelve None en
+    silencio, que es la clase de error que nadie ve hasta que un operador
+    pregunta por que la temperatura siempre esta vacia.
+    """
+    salida: dict = {}
+    for destino, seccion, campo in CAMPOS_PROFUNDOS:
+        bloque = completo.get(seccion)
+        if not isinstance(bloque, dict):
+            continue
+        valor = bloque.get(campo)
+        if valor not in (None, ""):
+            salida[destino] = valor
+
+    # La MAC vive bajo un indice numerico ('1', '2', ...): se toma la de la
+    # PRIMERA interfaz WAN y no se concatenan todas -- un equipo con dos WAN
+    # tiene dos MAC y elegir una a ojo seria inventar.
+    wan = completo.get("ONU WAN Interfaces")
+    if isinstance(wan, dict):
+        for clave in sorted(k for k in wan if isinstance(wan[k], dict)):
+            mac = (wan[clave] or {}).get("MAC address")
+            if mac:
+                salida["mac"] = mac
+                break
+
+    # CUANTOS EQUIPOS SE VEN detras de la ONU. Es un conteo, no una lista: las
+    # MAC de los aparatos de una casa son dato personal, y el numero contesta
+    # la unica pregunta que la pantalla hace -- si hay algo del otro lado.
+    macs = completo.get("MACs on OLT from this ONU")
+    if isinstance(macs, dict):
+        cuantos = sum(1 for v in macs.values() if isinstance(v, dict))
+        if cuantos:
+            salida["dispositivos"] = cuantos
+
+    return salida or None
+
+
 @app.get("/conversaciones/<id_conversacion>/optica")
 def conversaciones_optica(id_conversacion):
     """
@@ -5259,6 +5318,13 @@ def conversaciones_optica(id_conversacion):
     if not tenant:
         return jsonify({"error": "Falta el parametro 'tenant'."}), 400
     forzar = request.args.get("forzar") in ("1", "true", "si")
+    # LA LECTURA PROFUNDA VA APARTE, Y SOLO CUANDO ALGUIEN LA PIDE.
+    # 'get_onu_full_status_info' tarda ~10 s y el proveedor pide no usarla en
+    # bucle (skill 'smartolt-api', 14/08/2026). Las dos lecturas livianas
+    # --estado y senal-- siguen respondiendo en el acto y son las que se hacen
+    # solas; esta la dispara el boton. Mezclarlas haria que abrir una
+    # conversacion costara diez segundos.
+    profundo = request.args.get("profundo") in ("1", "true", "si")
 
     try:
         identidad = persistencia.identidad_de_conversacion(tenant, id_conversacion)
@@ -5321,14 +5387,35 @@ def conversaciones_optica(id_conversacion):
         # ONU. Es el mismo dato personal que ya se cuida en todo lo demas, y
         # por esta puerta no sale: la pantalla ya sabe con quien habla.
         topologia = {}
+        # 'onu_type_name' es el MODELO del equipo, y ya venia en esta misma
+        # respuesta: medido el 22/09/2026 contra la instancia de Rapilink, 82
+        # campos, y ahi estaba. Se habia dado por inexistente leyendo la lista
+        # parcial de la skill -- que aclara "60+ campos totales, no todos
+        # abajo". Concluir desde una lista parcial es el error que la regla
+        # "la documentacion es una hipotesis" existe para evitar.
         for campo in ("olt_name", "olt_id", "board", "port", "onu",
-                      "zone_name", "odb_name"):
+                      "zone_name", "odb_name", "onu_type_name"):
             valor = detalle.get(campo)
             if isinstance(valor, dict):
                 valor = valor.get("nombre") or valor.get("name") or valor.get("id")
             if valor not in (None, ""):
                 topologia[campo] = valor
         topologia = topologia or None
+
+    # LO QUE SOLO SABE LA LECTURA PROFUNDA: temperatura del modulo optico,
+    # potencia de subida medida en la OLT, MAC de la interfaz WAN y el perfil
+    # de linea. Medido el 22/09/2026 contra la instancia de Rapilink: los
+    # cuatro estan en la respuesta, y ninguno estaba llegando a la pantalla.
+    #
+    # LISTA BLANCA POR RUTA EXACTA, y aca no es una formalidad: la misma
+    # respuesta trae 'ONU details.Description', que es el NOMBRE COMPLETO del
+    # cliente. Se nombran los campos que salen, uno por uno; lo que no este en
+    # esta tupla no puede salir aunque el proveedor lo agregue manana.
+    profundidad = None
+    if profundo:
+        completo = _leer(por_nombre.get("diagnosticar_falla_ont"))
+        if isinstance(completo, dict):
+            profundidad = _profundidad_de(completo)
 
     # El umbral viaja con la medicion: sin el, la pantalla puede mostrar la
     # potencia pero no decir si esta bien o mal. Y decirlo con un numero
@@ -5341,8 +5428,23 @@ def conversaciones_optica(id_conversacion):
         "leido_en": datetime.now(timezone.utc).isoformat(),
         "umbral_rx_dbm": umbral,
         "optica": {"serial": serial, "estado": estado, "senal": senal,
-                   "topologia": topologia},
+                   "topologia": topologia, "profundidad": profundidad},
     }
+
+    # UNA LECTURA LIVIANA NO BORRA LA PROFUNDA. Si alguien ya pago los diez
+    # segundos y despues se refresca lo barato, la temperatura y la MAC tienen
+    # que seguir ahi: se arrastra lo que habia, marcado con SU hora, que es lo
+    # que deja ver que es mas vieja que el resto.
+    if profundidad is None:
+        with _optica_lock:
+            previo = _optica.get(clave)
+        anterior = ((previo[1].get("optica") or {}) if previo else {}).get("profundidad")
+        if anterior:
+            payload["optica"]["profundidad"] = anterior
+            payload["profundidad_leida_en"] = (previo[1] or {}).get(
+                "profundidad_leida_en") or (previo[1] or {}).get("leido_en")
+    else:
+        payload["profundidad_leida_en"] = payload["leido_en"]
     with _optica_lock:
         _optica[clave] = (time.monotonic(), payload)
     return jsonify(payload)

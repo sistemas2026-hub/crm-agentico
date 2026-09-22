@@ -336,42 +336,83 @@ describe('el panel de red no ejecuta ni inventa', () => {
     expect(visible).toMatch(/leido_en|leído|Leído/);
   });
 
-  it('los campos sin dato se dibujan vacios: la fila existe, el valor nunca', () => {
-    /* ESTA GUARDA CAMBIO EL 22/09/2026, Y ES EL TERCER CAMBIO DE SU LISTA.
-       Antes prohibia que estos rotulos APARECIERAN. Su propio comentario
-       decia para que estaba: "el dia que alguno tenga fuente, esta prueba se
-       pone roja y ahi se decide". Se puso roja y se decidio.
+  it('lo que no existe no se dibuja, y lo que si existe sale de la medicion', () => {
+    /* CUARTO CAMBIO DE ESTA LISTA, Y EL MAS INFORMADO: el 22/09/2026 se
+       midieron los campos CONTRA LA INSTANCIA REAL en vez de leer la lista
+       parcial de la skill -- 82 campos de `get_onu_details` y 86 de
+       `get_onu_full_status_info`. El resultado corrige dos afirmaciones que
+       esta prueba venia sosteniendo:
 
-       Lo que se decidio: la pestaña mantiene la FORMA de la referencia --la
-       fila de modelo, MAC, firmware, temperatura, voltaje y bias esta-- y lo
-       que no se sabe se dibuja con un guion apagado. Prohibir el rotulo
-       protegia el dato pero escondia el limite: quien miraba no sabia si el
-       equipo no tiene temperatura o si la pantalla no la pide.
+         modelo       SI existe  -> `onu_type_name`, y en la llamada liviana
+                                    que la pantalla YA hacia
+         temperatura  SI existe  -> `Optical status.Temperature(C)`
+         MAC          SI existe  -> `ONU WAN Interfaces.1.MAC address`
+         voltaje      NO existe  -> no aparece en ninguna de las dos
+         bias         NO existe  -> idem
+         firmware     NO existe  -> idem
 
-       Lo que hay que sostener no cambio, y es lo que mide esto ahora: que al
-       lado de esos rotulos NUNCA haya un valor escrito en la pantalla. Un
-       numero inventado es lo unico que estaba de verdad prohibido.
+       Lo que esta prueba sostiene ahora es lo unico que nunca cambio: que la
+       pantalla no escriba un valor que no midio. */
 
-       Sigue siendo un punto de decision: el dia que el motor traiga la
-       temperatura de verdad, la celda va a tener que leerla de la medicion y
-       esta prueba se pone roja otra vez. */
+    // 1. Lo que no existe no tiene fila: dibujarla seria prometer un dato que
+    //    nadie puede llenar nunca.
+    expect(campos).not.toMatch(/voltaje/i);
+    expect(campos).not.toMatch(/bias/i);
 
-    // 1. Ninguna de esas filas lleva un valor: todas salen con el guion.
-    for (const rotulo of ['Modelo', 'MAC', 'Firmware',
-                          'Temperatura', 'Voltaje', 'Corriente de bias']) {
+    // 2. Firmware si tiene fila --la ausencia informa: quien busca la version
+    //    sabe que no esta acá-- y sale SIEMPRE vacia.
+    const iFw = campos.indexOf('Firmware');
+    expect(iFw, 'falta la fila «Firmware»').toBeGreaterThan(-1);
+    const filaFw = campos.slice(iFw, iFw + 220);
+    expect(filaFw).toMatch(/eq-sin/);
+    expect(filaFw).toMatch(/—/);
+
+    // 3. Lo que si existe se lee de la medicion, nunca de una constante.
+    for (const [rotulo, origen] of [
+      ['Modelo', /topologia\??\.onu_type_name/],
+      ['MAC', /profundo\??\.mac/],
+      ['Temperatura', /profundo\??\.temperatura/]
+    ]) {
       const i = campos.indexOf(rotulo);
       expect(i, `falta la fila «${rotulo}»`).toBeGreaterThan(-1);
-      // Los ~220 caracteres siguientes son la celda o la fila entera.
-      const celda = campos.slice(i, i + 220);
-      expect(celda, `«${rotulo}» tiene que salir vacia`).toMatch(/eq-sin/);
-      expect(celda, `«${rotulo}» no puede traer un valor`).toMatch(/—/);
+      expect(campos.slice(i, i + 320), `«${rotulo}» tiene que salir de la medicion`)
+        .toMatch(origen);
     }
 
-    // 2. Y no hay literales de medicion en ninguna parte del marcado: ni
-    //    grados, ni voltios, ni miliamperios, ni un modelo de equipo. Lo
-    //    unico numerico que la pantalla escribe viene de `medicion`.
-    expect(campos).not.toMatch(/\d+(?:[.,]\d+)?\s*(?:°C|\bV\b|\bmA\b)/);
+    // 4. Y no hay literales de medicion en ninguna parte: ni grados, ni un
+    //    modelo de equipo, ni una version de firmware.
+    expect(campos).not.toMatch(/\d+(?:[.,]\d+)?\s*°C/);
     expect(campos).not.toMatch(/HG\d{4}|EchoLife|V\d+R\d+C\d+/i);
+  });
+
+  it('la consulta profunda va solo en el boton, nunca sola', () => {
+    /* `get_onu_full_status_info` tarda ~10 s y el proveedor pide no usarla en
+       bucle. Si 'profundo=1' se colara en la lectura automatica, abrir una
+       conversacion costaria diez segundos y ademas seria polling. */
+    /* Se cuentan las URL, no las apariciones del texto: el comentario que
+       explica la decision tambien dice 'profundo=1', y una prueba que se
+       rompe al documentar algo esta midiendo lo que no debe. */
+    const sinComentarios = red.replace(/\/\/[^\n]*/g, '');
+    const urls = sinComentarios.match(/optica\?forzar=1&profundo=1/g) ?? [];
+    expect(urls.length, 'una sola llamada puede pedir la lectura profunda')
+      .toBe(1);
+    // Y esa llamada es la del boton: la funcion que dispara el click.
+    const i = sinComentarios.indexOf('optica?forzar=1&profundo=1');
+    expect(sinComentarios.slice(Math.max(0, i - 700), i)).toMatch(/consultarAhora/);
+  });
+
+  it('la medicion sobrevive al cambio de pestaña', () => {
+    /* El panel vive dentro de las pestañas de contexto y cambiar de pestaña lo
+       DESMONTA. Con la lectura en estado local, volver la borraba y habia que
+       apretar «Consultar ahora» otra vez -- visto en produccion el
+       22/09/2026. La memoria vive fuera del componente. */
+    expect(red).toMatch(/lecturaOptica/);
+    expect(red).toMatch(/lecturaOptica\.de\(conversacionId\)/);
+    expect(red).toMatch(/lecturaOptica\.guardar\(/);
+    /* Y gana la mas nueva por `leido_en`: pisar una lectura manual con la del
+       `load` mostraria un valor viejo con cara de recien leido. */
+    expect(red).toMatch(/masNueva/);
+    expect(red).toMatch(/new Date\(b\.leido_en/);
   });
 
   it('la topología no arrastra el nombre del cliente', () => {

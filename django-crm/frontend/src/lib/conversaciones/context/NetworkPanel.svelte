@@ -26,7 +26,8 @@
   import { CircleCheck, CircleX, CircleHelp, Clock, RefreshCw, Power,
            TriangleAlert, Copy, Check } from '@lucide/svelte';
   import { lineaDeAccion } from '$lib/conversaciones/red.js';
-  import { medicionDe, enlaceCaido, potenciaAtenuada } from '$lib/conversaciones/optica.js';
+  import { medicionDe, enlaceCaido, potenciaAtenuada, numeroODinero } from '$lib/conversaciones/optica.js';
+  import { lecturaOptica } from '$lib/conversaciones/lectura-optica.svelte.js';
 
   let {
     acciones = [],
@@ -41,8 +42,38 @@
   /* La lectura que se está mostrando. Arranca con la del server load y la
      reemplaza la del botón: una sola fuente para el panel, así no puede
      quedar la hora vieja al lado del valor nuevo. */
-  let lectura = $state(optica);
-  $effect(() => { lectura = optica; });
+  /* CAMBIAR DE PESTAÑA DESMONTA ESTE PANEL, así que su estado local no
+     sobrevive. Antes eso borraba la medición y había que volver a apretar
+     «Consultar ahora» aunque se hubiera consultado hace diez segundos.
+     Ahora arranca de lo que la pantalla ya había mostrado.
+
+     Cuál gana cuando hay dos: la MÁS NUEVA por `leido_en`, no la del
+     `load` ni la recordada por ser quien es. Si alguien consultó a mano y
+     después el `load` trae una anterior, pisarla mostraría un valor viejo
+     con cara de recién leído. */
+  const masNueva = (/** @type {any} */ a, /** @type {any} */ b) => {
+    if (!a) return b;
+    if (!b) return a;
+    return new Date(b.leido_en ?? 0) > new Date(a.leido_en ?? 0) ? b : a;
+  };
+
+  /** Lo que trajo el botón en esta visita, si se apretó. */
+  let manual = $state(/** @type {any} */ (null));
+
+  /* Tres candidatas --la del `load`, la recordada de antes de cambiar de
+     pestaña, y la del botón-- y gana la de `leido_en` más reciente. Derivado
+     y no estado: así no hay un momento en que el panel esté vacío mientras
+     un efecto decide, que es lo que producía el parpadeo al volver. */
+  const lectura = $derived(
+    masNueva(masNueva(optica, lecturaOptica.de(conversacionId)), manual)
+  );
+
+  /* Y se recuerda lo que se está mostrando, venga de donde venga. Guardar lo
+     mismo que ya está guardado no vuelve a disparar nada: es el mismo objeto,
+     y la comparación es por referencia. */
+  $effect(() => {
+    if (lectura?.disponible) lecturaOptica.guardar(conversacionId, lectura);
+  });
 
   let consultando = $state(false);
   let errorConsulta = $state('');
@@ -52,10 +83,14 @@
     consultando = true;
     errorConsulta = '';
     try {
-      const r = await fetch(`/api/conversaciones/${conversacionId}/optica?forzar=1`);
+      // 'profundo=1' suma la consulta de ~10 s que trae temperatura, MAC y
+      // perfil. Va SOLO acá, en el botón: quien lo aprieta está esperando.
+      const r = await fetch(
+        `/api/conversaciones/${conversacionId}/optica?forzar=1&profundo=1`
+      );
       const cuerpo = await r.json();
       if (!r.ok) throw new Error(cuerpo?.error || 'No se pudo consultar el equipo.');
-      lectura = cuerpo;
+      manual = cuerpo;
       if (!cuerpo.disponible) errorConsulta = MOTIVO[cuerpo.motivo] ?? 'No se pudo leer el equipo.';
     } catch (/** @type {any} */ e) {
       errorConsulta = e?.message || 'No se pudo consultar el equipo.';
@@ -137,6 +172,26 @@
 
   /** Dónde está conectado el equipo, o null si no vino. */
   const topologia = $derived(lectura?.optica?.topologia ?? null);
+  /* Lo que solo trae la consulta profunda, y la hora en que se trajo. Se
+     muestra con SU hora y no con la del resto: cuando alguien refresca lo
+     barato, esto queda y sigue siendo de antes. Un valor arrastrado con la
+     hora nueva seria una afirmacion falsa sobre el presente. */
+  const profundo = $derived(lectura?.optica?.profundidad ?? null);
+  const profundoLeidoEn = $derived(lectura?.profundidad_leida_en ?? null);
+
+  /* LA UNIDAD LA PONE LA PANTALLA, no el proveedor. Medido el 22/09/2026,
+     'Tx optical power(dBm)' vuelve como `1.31` y 'Temperature(C)' como `44`:
+     el nombre del campo lleva la unidad y el valor no. Pero eso es de UNA
+     lectura, y la misma API devuelve '-21.02 dBm' --con unidad pegada-- en
+     otros campos. Asi que se normaliza en vez de concatenar a ciegas:
+     `numeroODinero` ya sabe leer las dos formas, y es la misma funcion que
+     usa la potencia de bajada. Concatenar sin mirar daria '1.31 dBm dBm' el
+     dia que el proveedor agregue la unidad. */
+  const conUnidad = (/** @type {any} */ v, /** @type {string} */ unidad) => {
+    if (v === null || v === undefined || v === '') return null;
+    const n = numeroODinero(v);
+    return n === null ? String(v) : `${n} ${unidad}`;
+  };
 
   /* LA ESCALA DE LA BARRA, construida sólo con números reales.
      La referencia dibuja un medidor con un rango de industria (-14 a -24 dBm)
@@ -292,7 +347,11 @@
 
       <div class="panel-fila">
         <span class="panel-etiqueta">Modelo</span>
-        <span class="panel-valor eq-sin">—</span>
+        {#if topologia?.onu_type_name}
+          <span class="panel-valor">{topologia.onu_type_name}</span>
+        {:else}
+          <span class="panel-valor eq-sin">—</span>
+        {/if}
       </div>
 
       {#if medicion.serial}
@@ -314,13 +373,45 @@
 
       <div class="panel-fila">
         <span class="panel-etiqueta">MAC</span>
-        <span class="panel-valor eq-sin">—</span>
+        {#if profundo?.mac}
+          <span class="panel-valor panel-mono">{profundo.mac}</span>
+        {:else}
+          <span class="panel-valor eq-sin">—</span>
+        {/if}
       </div>
 
+      <!-- Firmware se queda con el guion y no se va a llenar: no esta en
+           ninguna de las dos respuestas. Se deja la fila porque la ausencia
+           tambien es informacion -- quien busca la version sabe que no la va
+           a encontrar aca en vez de seguir buscando. -->
       <div class="panel-fila">
         <span class="panel-etiqueta">Firmware</span>
         <span class="panel-valor eq-sin">—</span>
       </div>
+
+      {#if profundo?.perfil}
+        <div class="panel-fila">
+          <span class="panel-etiqueta">Perfil de línea</span>
+          <span class="panel-valor">{profundo.perfil}</span>
+        </div>
+      {/if}
+
+      {#if profundo?.dispositivos}
+        <!-- CUANTOS, nunca cuales: las MAC de los aparatos de una casa son
+             dato personal, y el numero contesta la unica pregunta que se
+             hace acá -- si hay algo conectado del otro lado. -->
+        <div class="panel-fila">
+          <span class="panel-etiqueta">Equipos detrás de la ONU</span>
+          <span class="panel-valor v2-num">{profundo.dispositivos}</span>
+        </div>
+      {/if}
+
+      {#if profundo?.encendido}
+        <div class="panel-fila">
+          <span class="panel-etiqueta">Encendida hace</span>
+          <span class="panel-valor">{profundo.encendido}</span>
+        </div>
+      {/if}
 
       {#if medicion.causaCaida}
         <div class="panel-fila">
@@ -403,15 +494,26 @@
         </div>
         <div class="eq-celda">
           <span class="eq-celda-rotulo">Temperatura</span>
-          <b class="eq-celda-valor eq-sin">—</b>
+          <b class="eq-celda-valor" class:eq-sin={!profundo?.temperatura}>
+            {conUnidad(profundo?.temperatura, '°C') ?? '—'}
+          </b>
+        </div>
+        <!-- LA CUARTA CELDA NO ES «voltaje»: ese campo no existe en ningun
+             endpoint (medido, 82 + 86 campos). En su lugar va lo que la OLT
+             SI mide del equipo -- cuanta luz le llega a ella desde la casa --
+             que es el otro extremo del mismo enlace y la unica forma de saber
+             si el problema es de bajada o de subida. -->
+        <div class="eq-celda">
+          <span class="eq-celda-rotulo">Tx del equipo</span>
+          <b class="eq-celda-valor" class:eq-sin={!profundo?.tx}>
+            {conUnidad(profundo?.tx, 'dBm') ?? '—'}
+          </b>
         </div>
         <div class="eq-celda">
-          <span class="eq-celda-rotulo">Voltaje</span>
-          <b class="eq-celda-valor eq-sin">—</b>
-        </div>
-        <div class="eq-celda">
-          <span class="eq-celda-rotulo">Corriente de bias</span>
-          <b class="eq-celda-valor eq-sin">—</b>
+          <span class="eq-celda-rotulo">RX en la OLT</span>
+          <b class="eq-celda-valor" class:eq-sin={!profundo?.olt_rx}>
+            {conUnidad(profundo?.olt_rx, 'dBm') ?? '—'}
+          </b>
         </div>
       </div>
     </div>
@@ -458,10 +560,25 @@
     <!-- EL PIE, que separa las dos ausencias. No es lo mismo «esto no existe»
          que «esto todavía no lo pedimos», y una pantalla con seis guiones sin
          explicación se lee como rota. -->
+    <!-- EL PIE DICE DOS COSAS DISTINTAS, y por eso son dos frases.
+         La primera: lo que falta porque todavía no se pidió, y cómo pedirlo.
+         La segunda: lo que no va a aparecer nunca, y que eso está medido --
+         82 campos de `get_onu_details` más 86 de `get_onu_full_status_info`,
+         contra la instancia real el 22/09/2026. Sin eso, un guion se lee
+         como algo roto. -->
+    {#if !profundo}
+      <p class="eq-pie">
+        MAC, temperatura y perfil salen de una consulta más lenta:
+        <b>Consultar ahora</b> las trae.
+      </p>
+    {:else if profundoLeidoEn}
+      <p class="eq-pie">
+        MAC, temperatura y perfil son de la consulta profunda, leída
+        {haceCuanto(profundoLeidoEn)}.
+      </p>
+    {/if}
     <p class="eq-pie">
-      Sin dato: modelo, firmware, voltaje y corriente de bias no los devuelve
-      el sistema de red. Temperatura y MAC sí existen, pero salen de una
-      consulta profunda que esta pantalla todavía no hace.
+      Firmware no lo devuelve ningún endpoint del sistema de red.
     </p>
   {:else}
     <p class="vacio">{MOTIVO[lectura?.motivo] ?? 'Sin consultar.'}</p>
