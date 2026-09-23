@@ -13,7 +13,7 @@
    * "quien esta haciendo que ahora", y eso se lee de un vistazo por posicion
    * y color mucho antes que leyendo filas.
    *
-   * La escena se dibuja sobre un lienzo fijo de 1400x900 y se escala al
+   * La escena se dibuja sobre un lienzo fijo de 1600x1020 y se escala al
    * espacio disponible: asi las posiciones son aritmetica simple y no
    * dependen del tamano de la ventana.
    */
@@ -32,8 +32,8 @@
   let seleccionado = $state(/** @type {any} */ (null));
   let escala = $state(1);
 
-  const ANCHO = 1400, ALTO = 900;
-  const CX = ANCHO / 2, CY = 470, RX = 470, RY = 250;
+  const ANCHO = 1600, ALTO = 1020;
+  const CX = ANCHO / 2, CY = 530, RX = 570, RY = 315;
 
   /* ---------------------------------------------------------------------
    * Imagenes. El motor no sabe (ni debe saber) con que dibujo se representa
@@ -93,6 +93,13 @@
   const agentes = $derived(panorama?.agentes || []);
   const totales = $derived(panorama?.totales || {});
   const eventos = $derived(panorama?.eventos || []);
+
+  /* El pod se encoge cuando hay muchos agentes: lo que manda es el arco que
+     le toca a cada uno sobre el anillo. Con seis caben holgados; un tenant
+     con diez los tendria encimados si el ancho fuera fijo. */
+  const anchoEstacion = $derived(Math.max(
+    170, Math.min(330, (Math.PI * (RX + RY) / Math.max(agentes.length, 1)) * 0.82)));
+
 
   /** Reparte los agentes en un anillo: dos, seis u once caben igual. */
   function posicion(/** @type {number} */ i, /** @type {number} */ n) {
@@ -224,7 +231,7 @@
           <!-- estaciones -->
           {#each agentes as a, i}
             {@const p = posicion(i, agentes.length)}
-            <div class="estacion" style="--c:{colorDe(a)}; left:{p.x}px; top:{p.y}px">
+            <div class="estacion" style="--c:{colorDe(a)}; left:{p.x}px; top:{p.y}px; width:{anchoEstacion}px">
               <img class="pod" src={estacionDe(a)} alt="" />
               <div class="tinte" style="-webkit-mask-image:url({estacionDe(a)}); mask-image:url({estacionDe(a)})"></div>
             </div>
@@ -239,7 +246,7 @@
               <img src={avatarDe(a)} alt="" class:trabaja={a.estado === 'procesando'} />
             </button>
 
-            <div class="placa" style="--c:{colorDe(a)}; left:{p.x}px; top:{p.y + 96}px">
+            <div class="placa" style="--c:{colorDe(a)}; left:{p.x}px; top:{p.y + anchoEstacion * 0.30}px">
               <div class="fila1">
                 <span class="nombre">{a.nombre.replaceAll('_', ' ')}</span>
                 <span class="chip"><i class:vivo={a.estado === 'procesando'}></i>{ROTULO[a.estado] || a.estado}</span>
@@ -347,7 +354,7 @@
   .lienzo { position: absolute; left: 50%; top: 50%; transform-origin: center; }
   .piso { position: absolute; inset: 0; width: 100%; height: 100%; }
 
-  .estacion { position: absolute; width: 330px; transform: translate(-50%, -42%); pointer-events: none; }
+  .estacion { position: absolute; transform: translate(-50%, -42%); pointer-events: none; }
   .estacion .pod { width: 100%; display: block; }
   .estacion .tinte {
     position: absolute; inset: 0; background: var(--c); opacity: .3; mix-blend-mode: color;
