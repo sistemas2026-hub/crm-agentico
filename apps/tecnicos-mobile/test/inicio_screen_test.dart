@@ -612,14 +612,32 @@ void main() {
       await banco.cerrar();
     });
 
-    testWidgets('Un material que no cuadra se avisa antes de cerrar',
+    testWidgets('Un material que no cuadra se avisa cuando el servidor objeta',
         (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      final banco = _Banco();
+      await tester.pumpWidget(banco.app(
+        jornada: _jornada(
+          diferencias: 2,
+          motivos: <String>['Faltan 2 unidades sin explicar.'],
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.text('2 materiales no cuadran'), findsOneWidget);
+      await banco.cerrar();
+    });
+
+    testWidgets('Pero no por faltar material que todavía no toca devolver',
+        (WidgetTester tester) async {
+      // El contador de diferencias es mayor que cero desde la mañana: falta
+      // devolver el kit entero. Un rojo diario deja de leerse.
       _pantallaAlta(tester);
       final banco = _Banco();
       await tester.pumpWidget(banco.app(jornada: _jornada(diferencias: 2)));
       await tester.pumpAndSettle();
 
-      expect(find.text('2 materiales no cuadran'), findsOneWidget);
+      expect(find.text('Alertas operativas'), findsNothing);
       await banco.cerrar();
     });
 
@@ -645,7 +663,10 @@ void main() {
       final banco = _Banco();
       await tester.pumpWidget(banco.app(
         resumen: _sync(pendientes: 5),
-        jornada: _jornada(diferencias: 1),
+        jornada: _jornada(
+          diferencias: 1,
+          motivos: <String>['Faltan 2 unidades sin explicar.'],
+        ),
       ));
       await tester.pumpAndSettle();
 

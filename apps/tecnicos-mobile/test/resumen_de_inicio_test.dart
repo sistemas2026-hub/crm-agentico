@@ -260,15 +260,33 @@ void main() {
       expect(resumen.avisos.single.gravedad, GravedadDeAviso.alta);
     });
 
-    test('Un material que no cuadra se avisa antes de cerrar', () {
+    test('Un material que no cuadra se avisa cuando el servidor lo objeta', () {
+      final resumen = ResumenDeInicio.armar(
+        trabajos: const <TrabajoVista>[],
+        jornada: jornada(
+          diferencias: 2,
+          motivos: <String>['Faltan 2 unidades sin explicar.'],
+        ),
+        ahora: ahora,
+      );
+
+      expect(resumen.avisos.first.titulo, contains('2 materiales'));
+      expect(resumen.avisos.first.gravedad, GravedadDeAviso.alta);
+    });
+
+    test('Pero NO por el solo hecho de faltar material por devolver', () {
+      // A las siete de la mañana falta devolver el kit entero: el contador de
+      // diferencias es mayor que cero todos los días. Un rojo que aparece
+      // todas las mañanas deja de leerse, y el día que signifique algo nadie
+      // lo va a mirar.
       final resumen = ResumenDeInicio.armar(
         trabajos: const <TrabajoVista>[],
         jornada: jornada(diferencias: 2),
         ahora: ahora,
       );
 
-      expect(resumen.avisos.single.titulo, contains('2 materiales'));
-      expect(resumen.avisos.single.gravedad, GravedadDeAviso.alta);
+      expect(resumen.avisos, isEmpty);
+      expect(resumen.hayProblemas, isFalse);
     });
 
     test('Un equipo sin ubicar se muestra con el motivo del servidor', () {
@@ -288,7 +306,10 @@ void main() {
     test('Lo grave se muestra antes que lo que puede esperar', () {
       final resumen = ResumenDeInicio.armar(
         trabajos: const <TrabajoVista>[],
-        jornada: jornada(diferencias: 1),
+        jornada: jornada(
+          diferencias: 1,
+          motivos: <String>['Faltan 2 unidades sin explicar.'],
+        ),
         movimientosSinSubir: 5,
         ahora: ahora,
       );

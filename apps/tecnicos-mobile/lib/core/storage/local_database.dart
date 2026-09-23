@@ -1439,6 +1439,28 @@ class LocalDatabase {
   /// distinto del estado de sincronizacion: los tres CONFIRMAN que el
   /// movimiento subio. Mezclarlos haria que un descuadre pareciera un fallo de
   /// red y se reintentara para siempre.
+  /// El servidor aceptó —o rechazó— un movimiento.
+  ///
+  /// CUANDO SE ACEPTA, EL CONSUMO PASA AL KIT
+  /// ----------------------------------------
+  /// El saldo que ve el técnico es lo que dijo el servidor en `local_kit` más
+  /// lo que todavía está en la cola sin confirmar. Al confirmar, el movimiento
+  /// sale de esa cuenta — y si `local_kit` no se actualizara, el saldo
+  /// **rebotaría**: dos conectores consumidos harían bajar el disponible de
+  /// diez a ocho, y al volver la señal subiría solo a diez otra vez, hasta que
+  /// el servidor mandara el kit recalculado.
+  ///
+  /// Eso es peor que un número desactualizado: es un número que se mueve sin
+  /// que nadie lo haya tocado, justo en la pantalla donde alguien decide si le
+  /// alcanza el material para el próximo trabajo. Y si la bajada del kit falla
+  /// —sincronizar son dos peticiones, no una—, la mentira se queda.
+  ///
+  /// Por eso el consumo aceptado se suma acá. Cuando después baje el kit del
+  /// servidor, `reemplazarKit` pisa la fila entera, así que no hay doble
+  /// conteo.
+  ///
+  /// Lo encontró la prueba del día completo: cada pieza estaba bien y el
+  /// conjunto mentía.
   Future<void> confirmarMovimientoMaterial({
     required String id,
     required String orgId,
@@ -1447,6 +1469,16 @@ class LocalDatabase {
     String motivo = '',
   }) async {
     final db = await database;
+
+    // Qué movimiento es, antes de marcarlo: después ya no está pendiente.
+    final List<Map<String, dynamic>> filas = await db.query(
+      'cola_movimientos_material',
+      columns: <String>['material_codigo', 'tipo', 'cantidad', 'estado'],
+      where: 'id = ? AND org_id = ? AND profile_id = ?',
+      whereArgs: <Object?>[id, orgId, profileId],
+      limit: 1,
+    );
+
     await db.update(
       'cola_movimientos_material',
       <String, Object?>{
@@ -1459,12 +1491,85 @@ class LocalDatabase {
       where: 'id = ? AND org_id = ? AND profile_id = ?',
       whereArgs: [id, orgId, profileId],
     );
+
+    // Sólo lo aceptado entra al kit. Un descuadre o un conflicto no: el
+    // servidor no los contabilizó, y sumarlos acá haría que el teléfono y la
+    // oficina discutan por un material que nadie sabe dónde está.
+    if (resultado == 'aceptado' && filas.isNotEmpty) {
+      final Map<String, dynamic> m = filas.first;
+      // Si ya estaba confirmado, no se suma de nuevo: confirmar dos veces el
+      // mismo movimiento es algo que un reintento puede hacer.
+      if ((m['estado'] ?? '').toString() != 'confirmado') {
+        await _sumarAlKit(
+          db,
+          orgId: orgId,
+          profileId: profileId,
+          codigo: (m['material_codigo'] ?? '').toString(),
+          tipo: (m['tipo'] ?? '').toString(),
+          cantidad: (m['cantidad'] ?? '0').toString(),
+        );
+      }
+    }
+
     _notifyChange(
       orgId: orgId,
       profileId: profileId,
       tabla: 'cola_movimientos_material',
     );
+    _notifyChange(orgId: orgId, profileId: profileId, tabla: 'local_kit');
   }
+
+  /// Traslada un movimiento ya aceptado a las cifras del kit.
+  ///
+  /// Las cantidades se guardan como texto, igual que viajan: convertir a coma
+  /// flotante y volver hace que 42.5 metros deje de ser 42.5 en cuanto alguien
+  /// suma, y un saldo que falla por milésimas no se distingue de un faltante.
+  Future<void> _sumarAlKit(
+    Database db, {
+    required String orgId,
+    required String profileId,
+    required String codigo,
+    required String tipo,
+    required String cantidad,
+  }) async {
+    if (codigo.isEmpty) return;
+
+    final List<Map<String, dynamic>> kit = await db.query(
+      'local_kit',
+      where: 'org_id = ? AND profile_id = ? AND codigo = ?',
+      whereArgs: <Object?>[orgId, profileId, codigo],
+      limit: 1,
+    );
+    if (kit.isEmpty) return;
+
+    final double cuanto = double.tryParse(cantidad.trim()) ?? 0;
+    if (cuanto == 0) return;
+
+    final Map<String, Object?> cambios = <String, Object?>{};
+    if (tipo == 'consumo') {
+      final double antes =
+          double.tryParse((kit.first['consumido'] ?? '0').toString()) ?? 0;
+      cambios['consumido'] = _comoTexto(antes + cuanto);
+    } else if (tipo == 'devolucion') {
+      final double antes =
+          double.tryParse((kit.first['devuelto'] ?? '0').toString()) ?? 0;
+      cambios['devuelto'] = _comoTexto(antes + cuanto);
+    } else {
+      // Un ajuste lo decide el servidor con el kit completo: no se adivina.
+      return;
+    }
+
+    await db.update(
+      'local_kit',
+      cambios,
+      where: 'org_id = ? AND profile_id = ? AND codigo = ?',
+      whereArgs: <Object?>[orgId, profileId, codigo],
+    );
+  }
+
+  /// Un número sin cola de decimales cuando no hace falta: 8 y no 8.0.
+  static String _comoTexto(double valor) =>
+      valor == valor.roundToDouble() ? valor.round().toString() : '$valor';
 
   /// El envio fallo: se cuenta el intento y se agenda el proximo.
   ///

@@ -136,7 +136,18 @@ class ResumenDeInicio {
 
     // 3. Lo que impide cerrar la jornada, dicho por el servidor.
     if (jornada != null && jornada.hayJornada && !jornada.cerrada) {
-      if (jornada.diferencias > 0) {
+      // El disparador son los MOTIVOS, no el contador de diferencias.
+      //
+      // `diferencias` cuenta materiales cuyo devuelto todavía no llega a lo
+      // esperado, y eso es cierto desde que arranca el día: a las siete de la
+      // mañana falta devolver el kit entero. Avisarlo como "no cuadra" pone
+      // un rojo permanente en la pantalla de inicio, y un rojo que está todos
+      // los días deja de leerse — que es exactamente lo que esta clase trata
+      // de evitar en todos los demás avisos.
+      //
+      // Lo que sí es un problema es que el servidor lo declare al evaluar el
+      // cierre. Eso llega en `motivos`, escrito por quien hizo la cuenta.
+      if (jornada.motivos.isNotEmpty && jornada.diferencias > 0) {
         avisos.add(AvisoDeInicio(
           titulo: jornada.diferencias == 1
               ? '1 material no cuadra'
