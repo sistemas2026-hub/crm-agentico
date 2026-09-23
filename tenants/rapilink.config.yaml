@@ -3047,15 +3047,16 @@ herramientas:
       Pasa esta conversacion al agente especializado del area, que la
       atiende EN EL MISMO MENSAJE con sus propias herramientas (no es
       escalar a un humano, y el cliente no tiene que volver a escribir ni
-      esperar). Llamala apenas quede claro de que area es el tema, y no
-      para preguntas generales que tu mismo resuelves.
-      SOBRE LA IDENTIDAD, segun lo que TU puedas hacer: si tienes una
-      herramienta para verificarla, verificala antes de derivar (salvo que
-      el area de destino este marcada como que no la requiere: es alguien
-      que todavia no es cliente). Si NO tienes con que verificarla, deriva
-      igual y NO le pidas documentos: el area de destino es la que
-      verifica, y pedirselos tu solo hace que el cliente los escriba dos
-      veces sin que nadie pueda usarlos.
+      esperar). Llama a esta herramienta apenas quede claro de que area es el
+      tema -- no antes de verificar identidad, SALVO que el area de destino
+      este marcada como que no la requiere (es alguien que todavia no es
+      cliente), y no para preguntas generales que tu mismo resuelves.
+      SOBRE ESA CONDICION DE VERIFICAR ANTES, UNA SOLA EXCEPCION: si NO
+      tienes ninguna herramienta de verificacion, no te aplica -- deriva sin
+      pedirle documentos, que el area de destino es la que verifica. Si SI
+      tienes una herramienta de verificacion, esto no te exime de nada:
+      verificas como siempre, y si el cliente ya dio su cedula la usas con
+      tu herramienta en vez de volver a pedirsela.
       No sirve para lo que ninguna area puede resolver sola (reclamos
       formales, traslados): eso se sigue escalando a un humano, como
       siempre.
