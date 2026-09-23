@@ -1,6 +1,6 @@
 # Objetivo · Dexter Campo — versión candidata
 
-> Abierto el 23/09/2026. Estado: **abierto**.
+> Abierto el 23/09/2026. Estado: **abierto** — Parte A ✅ cerrada y medida, Parte B pendiente (necesita un teléfono).
 > Primera ficha del sistema. Lo que encontró al estrenarse está en "Qué reveló
 > esta ficha", al final — no se borra: es lo que hay que arreglar del sistema.
 
@@ -111,7 +111,8 @@ quién y cuándo antes de dar la candidata por lista.
 
 | Fecha | Qué avanzó | Qué falta | Commit |
 |---|---|---|---|
-| 23/09/2026 | Ficha abierta. Medido dónde vive Campo (B1) y qué falta del contrato §5 | Resolver B1 para poder arrancar | — |
+| 23/09/2026 | Ficha abierta. Medido dónde vive Campo (B1) y qué falta del contrato §5 | Resolver B1 | — |
+| 23/09/2026 | **Parte A cerrada entera** en el worktree `C:/wisphub/_wt_campo`. A1–A6 verdes, medidos. B2 resuelto: los sueltos son copias | Solo la Parte B, que necesita un teléfono | ffa1761 |
 
 ---
 
@@ -131,3 +132,39 @@ pendiente del sistema de trabajo, no de Campo:
 3. **Un objetivo puede tener una mitad que ninguna IA cierra.** La plantilla no
    preveía eso y empujaba a escribir todo como comando + salida. La partición
    A/B de arriba es la respuesta; conviene subirla a `PLANTILLA.md`.
+
+---
+
+## Resultado de la Parte A — medido el 23/09/2026
+
+Ejecutado en el worktree `C:/wisphub/_wt_campo` (`feat/campo-diseno-stitch`),
+sin tocar `integrar-centro-mando` ni integrar nada.
+
+| # | Criterio | Resultado |
+|---|---|---|
+| A1 | La rama tiene Campo | ✅ **101** archivos bajo `test/`, app `1.0.0+1` |
+| A2 | La suite pasa | ✅ `flutter test` → **536 +, 1 omitida, All tests passed!** |
+| A3 | Pasa en las dos compilaciones | ✅ `flutter test -j 1 --dart-define=DEXTER_DEMO=true` → **536 +, All tests passed!** |
+| A4 | El APK de release existe | ✅ `flutter build apk --release` → `build\app\outputs\flutter-apk\app-release.apk`, **53.2 MB**, Gradle 47,5 s |
+| A5 | El contrato está al día | ✅ Ya lo estaba **en su rama**: declara 536 pruebas y 43 archivos, exacto contra lo medido |
+| A6 | Nada se coló | ✅ El worktree de Campo quedó limpio; el commit de esta ficha solo tocó `SPEC/` |
+
+**B2 queda resuelto, y no como se esperaba.** Los archivos sueltos en el árbol
+de `integrar-centro-mando` no son trabajo nuevo: `e2e_002`, `e2e_003` y
+`e2e_004` son **idénticos** byte a byte a los ya versionados en
+`feat/campo-diseno-stitch`, y `test/apoyo/` también está allá. El único que
+difiere es `CAMPO_RELEASE_CONTRACT.md`, y **la copia suelta es la vieja**
+(decía 529 pruebas y 42 archivos; la versionada dice 536 y 43).
+
+Son arrastre de la otra rama. Borrarlos no pierde nada — pero es una decisión
+del usuario, no de una sesión.
+
+**B1 sigue abierto y no lo cierra la Parte A.** Se ejecutó en un worktree, que
+era el camino sin riesgo; si Campo se entrega desde `integrar-centro-mando`
+hay que integrarlo, y eso sigue siendo una decisión de entrega.
+
+**Lo que esta corrida NO prueba:** nada de la Parte B. El APK se construyó, no
+se instaló. Nadie entró con una cuenta real, nadie recorrió un día sin red,
+nadie reinstaló sobre una versión anterior, nadie midió el arranque con veinte
+órdenes. *Que compile no es que ande* — y en este proyecto eso ya pasó dos
+veces con este mismo artefacto.
