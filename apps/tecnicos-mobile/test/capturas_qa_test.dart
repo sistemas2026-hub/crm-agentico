@@ -441,6 +441,106 @@ void main() {
       });
     }
 
+
+    /// Los estados que no son "todo bien": un valor que no sirve, la cola
+    /// enviando, y un cambio que el servidor rechazó.
+    ///
+    /// Cada uno con su propio estado de cola, porque eso es lo que cambia.
+    final Map<String, (FuenteDeEjecucionFalsa, SyncSummary)> conCola =
+        <String, (FuenteDeEjecucionFalsa, SyncSummary)>{
+      // Un número fuera del rango del esquema y una selección que llegó sin
+      // opciones: dos errores distintos, uno del técnico y otro de la
+      // plantilla.
+      'ejecucion_error': (
+        FuenteDeEjecucionFalsa(
+          campos: <Map<String, dynamic>>[
+            <String, dynamic>{
+              'id': 'tipo_intervencion',
+              'titulo': 'Tipo de intervención física',
+              'tipo': 'seleccion',
+              'reglas': <String, dynamic>{'required': true},
+            },
+            <String, dynamic>{
+              'id': 'potencia_rx',
+              'titulo': 'Potencia óptica en roseta del cliente',
+              'tipo': 'decimal',
+              'unidad': 'dBm',
+              'ayuda': 'Umbral de aceptación: -15 a -25 dBm',
+              'reglas': <String, dynamic>{
+                'required': true,
+                'min': -30.0,
+                'max': -5.0,
+              },
+            },
+          ],
+          valores: <String, dynamic>{'potencia_rx': '-45'},
+        ),
+        resumen(),
+      ),
+
+      // La cola enviando en este momento.
+      'ejecucion_sincronizando': (
+        FuenteDeEjecucionFalsa(
+          valores: <String, dynamic>{
+            'potencia_rx': '-18.4',
+            'tipo_intervencion': 'Roseta / Conector',
+          },
+          evidencias: <Map<String, dynamic>>[
+            FuenteDeEjecucionFalsa.evidencia(
+              requisitoId: 'foto_roseta',
+              estado: 'pendiente',
+            ),
+          ],
+          materiales: <Map<String, dynamic>>[FuenteDeEjecucionFalsa.material()],
+        ),
+        const SyncSummary(
+          status: SyncStatus.syncing,
+          isSyncing: true,
+          hasConnectionError: false,
+          mutacionesPendientes: 2,
+          mutacionesConflicto: 0,
+          evidenciasPendientes: 1,
+          datosDirty: 0,
+        ),
+      ),
+
+      // El servidor rechazó un cambio: alguien tiene que mirarlo.
+      'ejecucion_conflicto': (
+        FuenteDeEjecucionFalsa(
+          valores: <String, dynamic>{
+            'potencia_rx': '-18.4',
+            'tipo_intervencion': 'Roseta / Conector',
+          },
+          materiales: <Map<String, dynamic>>[FuenteDeEjecucionFalsa.material()],
+        ),
+        const SyncSummary(
+          status: SyncStatus.error,
+          isSyncing: false,
+          hasConnectionError: false,
+          mutacionesPendientes: 0,
+          mutacionesConflicto: 1,
+          evidenciasPendientes: 0,
+          datosDirty: 0,
+        ),
+      ),
+    };
+
+    for (final MapEntry<String, (FuenteDeEjecucionFalsa, SyncSummary)> estado
+        in conCola.entries) {
+      testWidgets('Ejecución ${estado.key}', (WidgetTester t) async {
+        await capturar(
+          t,
+          EjecucionScreen(
+            ordenId: 'ot-1',
+            fuente: estado.value.$1,
+            resumenDeSync: estado.value.$2,
+          ),
+          estado.key,
+          telefonoLargo,
+        );
+      });
+    }
+
     /// Jornada: la conciliación y el cierre.
     ///
     /// Se inyecta el estado ya leído: lo que se compara acá es el dibujo, y
