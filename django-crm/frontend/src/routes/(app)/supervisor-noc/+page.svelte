@@ -95,6 +95,20 @@
   const actividad = $derived(actividadReciente(data.actividad?.eventos));
   const SIN_DATO = BLOQUES_SIN_DATO;
 
+  /**
+   * Cuantas filas se ven antes de tener que desplazar, en las dos tablas.
+   *
+   * Con las 93 propuestas de hoy las dos tablas median ~9.900px juntas: unas
+   * once pantallas solo de tablas, y todo lo de abajo --los tecnicos, las
+   * ordenes, la actividad-- quedaba a un viaje de distancia. El numero no
+   * esconde nada: la insignia dice cuantas se ven y el pie cuantas quedan.
+   *
+   * Vive aca y no en el CSS porque los dos textos lo necesitan: un alto fijo
+   * en la hoja y un "se ven 5" escrito a mano se desincronizan en cuanto
+   * alguien toca uno de los dos.
+   */
+  const FILAS_A_LA_VISTA = 5;
+
   /** El icono de cada KPI. Decora; el numero y su rotulo dicen todo lo demas. */
   const ICONO_KPI = {
     hallazgos: 'radar',
@@ -574,6 +588,11 @@
                 <span class="snoc-insignia snoc-insignia-error">sin datos</span>
               {:else}
                 <span class="snoc-insignia snoc-insignia-neutra">{data.hallazgos.count} registrados</span>
+                {#if visibles.length > FILAS_A_LA_VISTA}
+                  <span class="snoc-insignia" title="Las demás están abajo, desplazando dentro de la tabla">
+                    se ven {FILAS_A_LA_VISTA}
+                  </span>
+                {/if}
               {/if}
             </div>
             <span class="snoc-mono-sm snoc-tenue">Cada fila es una propuesta con su evidencia</span>
@@ -616,7 +635,7 @@
               <button class="snoc-enlace" type="button" onclick={() => (filtro = null)}>Ver todas</button>
             </p>
           {:else}
-            <div class="snoc-tabla-caja">
+            <div class="snoc-tabla-caja snoc-tabla-alta">
               <table class="snoc-tabla">
                 <thead>
                   <tr>
@@ -706,9 +725,16 @@
                 </tbody>
               </table>
             </div>
-            <span class="snoc-mono-sm snoc-tenue">
-              «Sin asignar» significa que la orden no tiene responsable principal marcado, no que falte el dato.
-            </span>
+            <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-xs);">
+              <span class="snoc-mono-sm snoc-tenue">
+                «Sin asignar» significa que la orden no tiene responsable principal marcado, no que falte el dato.
+              </span>
+              {#if visibles.length > FILAS_A_LA_VISTA}
+                <span class="snoc-mono-sm snoc-tenue">
+                  Se desplaza dentro de la tabla · quedan {visibles.length - FILAS_A_LA_VISTA} más abajo
+                </span>
+              {/if}
+            </div>
           {/if}
         </section>
 
@@ -846,6 +872,11 @@
                     <h3 class="snoc-h3">Pendientes de revisión</h3>
                   </div>
                   <span class="snoc-insignia snoc-insignia-neutra">{pendientes.length} pendientes</span>
+                  {#if pendientes.length > FILAS_A_LA_VISTA}
+                    <span class="snoc-insignia" title="Las demás están abajo, desplazando dentro de la tabla">
+                      se ven {FILAS_A_LA_VISTA}
+                    </span>
+                  {/if}
                 </div>
                 <div class="snoc-nota">
                   <span class="snoc-icono snoc-tenue" style="font-size:16px;">verified</span>
@@ -879,7 +910,7 @@
               {#if pendientes.length === 0}
                 <p class="snoc-body snoc-secundario">No hay propuestas esperando revisión.</p>
               {:else}
-                <div class="snoc-tabla-caja">
+                <div class="snoc-tabla-caja snoc-tabla-baja">
                   <table class="snoc-tabla">
                     <thead>
                       <tr>
@@ -951,6 +982,11 @@
                     </tbody>
                   </table>
                 </div>
+                {#if pendientes.length > FILAS_A_LA_VISTA}
+                  <span class="snoc-mono-sm snoc-tenue">
+                    Se desplaza dentro de la tabla · quedan {pendientes.length - FILAS_A_LA_VISTA} más abajo
+                  </span>
+                {/if}
               {/if}
             </section>
           </div>

@@ -819,3 +819,44 @@
 .snoc-sla-alerta { background: #ffe0b2; color: #6b4000; border-color: transparent; }
 .snoc-sla-ok { background: #c8e6c9; color: #1b5e20; border-color: transparent; }
 .snoc-sla-neutro { color: var(--snoc-on-surface-variant); }
+
+/* --- Las dos tablas largas se desplazan por dentro ---
+   Con las 93 propuestas de hoy median ~9.900px juntas: unas once pantallas
+   solo de tablas, y los tecnicos, las ordenes y la actividad quedaban a un
+   viaje de distancia. Ahora se ven cinco filas y el resto desplaza dentro.
+
+   Los dos altos son distintos porque las filas lo son: la de hallazgos lleva
+   el ticket, el proveedor y la accion recortada --tres lineas-- y la de
+   pendientes una sola. Un alto comun dejaria media fila asomando en una de
+   las dos, que es la manera de que nadie sepa si hay mas.
+
+   El numero de filas vive en FILAS_A_LA_VISTA, en el componente: los textos
+   que lo dicen lo necesitan, y un alto aqui con un "se ven 5" escrito alla se
+   desincronizan en cuanto alguien toca uno de los dos. Si cambia, cambian los
+   dos. */
+.snoc-tabla-alta { max-height: 296px; }
+.snoc-tabla-baja { max-height: 246px; }
+.snoc-tabla-alta,
+.snoc-tabla-baja {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.snoc-tabla-alta::-webkit-scrollbar,
+.snoc-tabla-baja::-webkit-scrollbar { width: 9px; }
+.snoc-tabla-alta::-webkit-scrollbar-thumb,
+.snoc-tabla-baja::-webkit-scrollbar-thumb {
+  background: var(--snoc-outline-variant);
+  border-radius: 5px;
+}
+.snoc-tabla-alta::-webkit-scrollbar-track,
+.snoc-tabla-baja::-webkit-scrollbar-track { background: transparent; }
+
+/* La cabecera no se va con el scroll: sin ella, diez columnas desplazadas son
+   diez celdas sin nombre. */
+.snoc-tabla-alta thead th,
+.snoc-tabla-baja thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--snoc-surface-container-low);
+}
