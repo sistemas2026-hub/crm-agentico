@@ -10,6 +10,7 @@ import 'package:campo/core/sync/sync_queue_service.dart';
 import 'package:campo/core/theme/app_theme.dart';
 import 'package:campo/features/detalle_orden/acciones_orden.dart';
 import 'package:campo/features/detalle_orden/detalle_orden_screen.dart';
+import 'package:campo/features/ejecucion/ejecucion_screen.dart';
 import 'package:campo/features/inicio/inicio_screen.dart';
 import 'package:campo/features/materiales/estado_de_jornada.dart';
 import 'package:campo/features/materiales/kit_de_jornada.dart';
@@ -22,6 +23,8 @@ import 'package:campo/features/trabajo/trabajo_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'apoyo/fuente_de_ejecucion_falsa.dart';
 
 /// Capturas de las pantallas reales, para compararlas con el diseño.
 ///
@@ -349,6 +352,94 @@ void main() {
       });
     }
 
+
+
+    /// Ejecución, en los estados que importan.
+    ///
+    /// Estas capturas no existían: la pantalla leía la base por su cuenta y no
+    /// se podía montar. Ahora recibe su fuente, y cada estado se arma con los
+    /// mismos datos siempre.
+    final Map<String, FuenteDeEjecucionFalsa> estados =
+        <String, FuenteDeEjecucionFalsa>{
+      // Recién abierta: nada respondido, nada capturado.
+      'ejecucion_inicio': FuenteDeEjecucionFalsa(),
+
+      // A medias: un campo lleno, una foto tomada. Es el estado en el que la
+      // pantalla pasa la mayor parte del tiempo.
+      'ejecucion_a_medias': FuenteDeEjecucionFalsa(
+        valores: <String, dynamic>{'potencia_rx': '-18.4'},
+        evidencias: <Map<String, dynamic>>[
+          FuenteDeEjecucionFalsa.evidencia(requisitoId: 'foto_roseta'),
+        ],
+        materiales: <Map<String, dynamic>>[FuenteDeEjecucionFalsa.material()],
+      ),
+
+      // Todo hecho y esperando señal: el trabajo se puede cerrar igual, pero
+      // hay que ver que lo registrado todavía no salió del teléfono.
+      'ejecucion_sin_senal': FuenteDeEjecucionFalsa(
+        valores: <String, dynamic>{
+          'potencia_rx': '-18.4',
+          'tipo_intervencion': 'Reconectorización',
+          'observaciones': 'Se reemplazó el conector de la roseta.',
+        },
+        evidencias: <Map<String, dynamic>>[
+          FuenteDeEjecucionFalsa.evidencia(
+            requisitoId: 'foto_roseta',
+            estado: 'pendiente',
+          ),
+          FuenteDeEjecucionFalsa.evidencia(
+            requisitoId: 'foto_medicion',
+            estado: 'pendiente',
+          ),
+          FuenteDeEjecucionFalsa.evidencia(
+            requisitoId: 'firma_cliente',
+            estado: 'pendiente',
+          ),
+        ],
+        materiales: <Map<String, dynamic>>[FuenteDeEjecucionFalsa.material()],
+      ),
+
+      // Listo para cerrar: todo confirmado por el servidor.
+      'ejecucion_completa': FuenteDeEjecucionFalsa(
+        valores: <String, dynamic>{
+          'potencia_rx': '-18.4',
+          'tipo_intervencion': 'Reconectorización',
+          'observaciones': 'Se reemplazó el conector de la roseta.',
+        },
+        evidencias: <Map<String, dynamic>>[
+          FuenteDeEjecucionFalsa.evidencia(requisitoId: 'foto_roseta'),
+          FuenteDeEjecucionFalsa.evidencia(requisitoId: 'foto_medicion'),
+          FuenteDeEjecucionFalsa.evidencia(requisitoId: 'firma_cliente'),
+        ],
+        materiales: <Map<String, dynamic>>[
+          FuenteDeEjecucionFalsa.material(),
+          FuenteDeEjecucionFalsa.material(
+            codigo: 'DROP-1H',
+            nombre: 'Bobina Drop Fibra 1 Hilo',
+            cantidad: '35',
+          ),
+        ],
+      ),
+
+      // Sin sesión: no se puede dibujar una orden, y no se inventa una.
+      'ejecucion_sin_sesion': FuenteDeEjecucionFalsa(sinIdentidad: true),
+    };
+
+    for (final MapEntry<String, FuenteDeEjecucionFalsa> estado
+        in estados.entries) {
+      testWidgets('Ejecución ${estado.key}', (WidgetTester t) async {
+        await capturar(
+          t,
+          EjecucionScreen(
+            ordenId: 'ot-1',
+            fuente: estado.value,
+            resumenDeSync: resumen(),
+          ),
+          estado.key,
+          telefonoLargo,
+        );
+      });
+    }
 
     /// Jornada: la conciliación y el cierre.
     ///

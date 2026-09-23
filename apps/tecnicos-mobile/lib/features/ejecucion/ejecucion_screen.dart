@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -8,9 +7,9 @@ import '../../demo/field_mock_data.dart';
 import '../../core/storage/evidencia_storage_service.dart';
 import '../../core/storage/local_database.dart';
 import 'cierre_de_orden.dart';
+import 'datos_de_ejecucion.dart';
 import 'widgets/consumo_de_material.dart';
 import 'widgets/firma_del_cliente.dart';
-import '../../core/storage/secure_storage_service.dart';
 import '../../core/sync/sync_queue_service.dart';
 import '../../core/widgets/contenido_centrado.dart';
 import '../../core/theme/app_theme.dart';
@@ -32,10 +31,20 @@ class EjecucionScreen extends StatefulWidget {
   /// reemplazo, el medidor por Bluetooth y las cápsulas de Academia.
   final bool mostrarDatosFuturos;
 
+  /// De dónde salen los datos. Nula en la aplicación: se usa la base del
+  /// teléfono. En una prueba o una captura se pasa otra, y el dibujo es el
+  /// mismo — que es justamente lo que se quiere comparar.
+  final FuenteDeEjecucion? fuente;
+
+  /// El estado de la cola, si ya se conoce. Nulo: el chip lo consulta solo.
+  final SyncSummary? resumenDeSync;
+
   const EjecucionScreen({
     super.key,
     required this.ordenId,
     this.mostrarDatosFuturos = FieldMockData.modoDemo,
+    this.fuente,
+    this.resumenDeSync,
   });
 
   @override
@@ -43,9 +52,13 @@ class EjecucionScreen extends StatefulWidget {
 }
 
 class _EjecucionScreenState extends State<EjecucionScreen> {
-  final LocalDatabase _localDb = LocalDatabase();
-  final SecureStorageService _storage = SecureStorageService();
-  final SyncQueueService _syncService = SyncQueueService();
+  late final FuenteDeEjecucion _fuente = widget.fuente ?? FuenteLocalDeEjecucion();
+
+  /// Las hojas modales —consumo de material, firma— hablan con la base por su
+  /// cuenta. No pasan por la fuente porque sólo existen cuando alguien toca un
+  /// botón: nunca se abren solas al dibujar, así que no impiden montar la
+  /// pantalla en una prueba.
+  late final LocalDatabase _baseParaHojas = LocalDatabase();
   final ImagePicker _picker = ImagePicker();
 
   Map<String, dynamic>? _orden;
@@ -104,52 +117,29 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
   }
 
   Future<void> _loadOrdenData() async {
-    _orgId = await _storage.getOrgId();
-    _profileId = await _storage.getProfileId();
+    final DatosDeEjecucion? datos = await _fuente.cargar(widget.ordenId);
+    if (datos == null) return;
 
-    if (_orgId != null && _profileId != null) {
-      final orden = await _localDb.getOrden(
-        orgId: _orgId!,
-        profileId: _profileId!,
-        id: widget.ordenId,
-      );
+    _orgId = datos.orgId;
+    _profileId = datos.profileId;
+    _campos = datos.campos;
+    _evidenciasRequisitos = datos.requisitosDeEvidencia;
+    _valoresFormulario = Map<String, dynamic>.from(datos.valores);
+    _materialesUsados = datos.materialesUsados;
+    _evidenciasCapturadas = datos.evidenciasCapturadas;
 
-      if (orden != null) {
-        final camposStr = orden['formulario_campos_json'] as String? ?? '[]';
-        final evidenciasStr = orden['formulario_evidencias_json'] as String? ?? '[]';
+    // Un controlador por campo, con lo que ya estaba respondido.
+    for (final dynamic c in _campos) {
+      final String clave = (c['clave'] ?? c['id']) as String;
+      _controllers[clave] =
+          TextEditingController(text: _valoresFormulario[clave]?.toString() ?? '');
+    }
 
-        _campos = jsonDecode(camposStr);
-        _evidenciasRequisitos = jsonDecode(evidenciasStr);
-
-        // Obtener valores mezclados (base + dirty local persistido)
-        _valoresFormulario = await _localDb.getMergedDatosOrden(
-          orgId: _orgId!,
-          profileId: _profileId!,
-          ordenId: widget.ordenId,
-        );
-
-        // Cargar evidencias ya capturadas localmente
-        _materialesUsados = await _materialesDeEstaOrden();
-        _evidenciasCapturadas = await _localDb.getEvidenciasOrden(
-          orgId: _orgId!,
-          profileId: _profileId!,
-          ordenId: widget.ordenId,
-        );
-
-        // Inicializar controladores de texto
-        for (final c in _campos) {
-          final clave = (c['clave'] ?? c['id']) as String;
-          final valor = _valoresFormulario[clave]?.toString() ?? '';
-          _controllers[clave] = TextEditingController(text: valor);
-        }
-
-        if (mounted) {
-          setState(() {
-            _orden = orden;
-            _isLoading = false;
-          });
-        }
-      }
+    if (mounted) {
+      setState(() {
+        _orden = datos.orden;
+        _isLoading = false;
+      });
     }
   }
 
@@ -159,15 +149,15 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
     _valoresFormulario[clave] = valor;
 
     // Persistencia atómica inmediata en SQLite
-    await _localDb.saveDatoCampo(
+    await _fuente.guardarCampo(
       orgId: _orgId!,
       profileId: _profileId!,
       ordenId: widget.ordenId,
-      campoClave: clave,
+      clave: clave,
       valor: valor,
     );
 
-    _syncService.refreshSyncSummary();
+    _fuente.refrescarResumen();
     _triggerSavedBanner();
   }
 
@@ -202,7 +192,7 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
       final registroKey = const Uuid().v4();
       final confirmacionKey = const Uuid().v4();
 
-      await _localDb.encolarEvidencia(
+      await _fuente.encolarEvidencia(
         id: evId,
         orgId: _orgId!,
         profileId: _profileId!,
@@ -216,7 +206,7 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
         confirmacionIdempotencyKey: confirmacionKey,
       );
 
-      _evidenciasCapturadas = await _localDb.getEvidenciasOrden(
+      _evidenciasCapturadas = await _fuente.evidenciasDe(
         orgId: _orgId!,
         profileId: _profileId!,
         ordenId: widget.ordenId,
@@ -225,7 +215,7 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
       _triggerSavedBanner();
 
       // Disparar sincronización oportunista de fondo
-      _syncService.procesarCola();
+      _fuente.procesarCola();
 
       if (mounted) setState(() {});
     } catch (e) {
@@ -278,7 +268,7 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
     final revisionBase = _orden!['revision'] as int? ?? 0;
     final idempotencyKey = const Uuid().v4();
 
-    await _localDb.transicionarEstadoLocal(
+    await _fuente.transicionar(
       orgId: _orgId!,
       profileId: _profileId!,
       ordenId: widget.ordenId,
@@ -289,7 +279,7 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
     );
 
     // 4. Intentar sincronización en segundo plano
-    _syncService.procesarCola();
+    _fuente.procesarCola();
 
     if (mounted) {
       await showDialog(
@@ -328,7 +318,7 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
   /// Lo registrado en esta orden, de la cola local.
   Future<List<Map<String, dynamic>>> _materialesDeEstaOrden() async {
     if (_orgId == null || _profileId == null) return <Map<String, dynamic>>[];
-    final todos = await _localDb.getMovimientosMaterialDeOrden(
+    final todos = await _fuente.materialesDe(
       orgId: _orgId!,
       profileId: _profileId!,
       ordenId: widget.ordenId,
@@ -344,7 +334,7 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
       profileId: _profileId!,
       ordenId: widget.ordenId,
       ordenNumero: _numeroDeLaOrden,
-      baseLocal: _localDb,
+      baseLocal: _baseParaHojas,
     );
     if (registrado != true || !mounted) return;
     final usados = await _materialesDeEstaOrden();
@@ -524,11 +514,11 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
           '${m['material_nombre'] ?? m['material_codigo']} x${m['cantidad']}'
           '${(m['serie'] as String?)?.isNotEmpty == true ? ' · serie ${m['serie']}' : ''}',
       ],
-      baseLocal: _localDb,
+      baseLocal: _baseParaHojas,
     );
     if (firmado != true || !mounted) return;
 
-    final evidencias = await _localDb.getEvidenciasOrden(
+    final evidencias = await _fuente.evidenciasDe(
       orgId: _orgId!,
       profileId: _profileId!,
       ordenId: widget.ordenId,
@@ -637,8 +627,15 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
+      // Un fondo quieto, no un indicador que gira. Es la misma decision que
+      // ya tomaron Inicio y Materiales: esto lee SQLite y son milisegundos,
+      // asi que el spinner solo hace parpadear la pantalla. Ademas una
+      // animacion perpetua deja el arbol sin reposo y cuelga cualquier
+      // prueba que espere a que las animaciones terminen -- que es
+      // exactamente lo que pasaba al intentar probar esta pantalla.
       return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
+        backgroundColor: AppColors.surface,
+        body: SizedBox.expand(),
       );
     }
 
@@ -647,11 +644,15 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
     return Scaffold(
       backgroundColor: AppColors.surfaceDim,
       appBar: AppBar(
-        title: Text('Ejecución OT #$numero'),
+        // Sin "Ejecución": a 390 px, con el chip de la cola al lado, el
+        // titulo se cortaba en "Ejecución OT #48..." y se perdia el numero,
+        // que es lo unico que identifica el trabajo. La pantalla ya dice que
+        // es la ejecucion en su primer bloque.
+        title: Text('OT #$numero'),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: AppSpacing.sm),
-            child: SyncBadge(),
+            child: SyncBadge(resumenFijo: widget.resumenDeSync),
           ),
         ],
       ),
@@ -722,16 +723,20 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
           const SizedBox(width: 6),
           Expanded(
             child: Text(
-              'Se guarda en este equipo mientras trabajás',
+              'Se guarda en este equipo',
               style: AppTypography.etiquetaChica,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
           ),
+          const SizedBox(width: AppSpacing.sm),
+          // La version del formulario no se recorta: si se corta por la mitad
+          // deja de servir para lo unico que sirve, que es saber contra que
+          // esquema se esta trabajando.
           Text(
             version == 0
                 ? '$campos campos'
-                : 'Formulario v$version · $campos campos',
+                : 'v$version · $campos campos',
             style: AppTypography.datoChico.copyWith(
               color: AppColors.onSurfaceVariant,
             ),
