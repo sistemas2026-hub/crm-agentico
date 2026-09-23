@@ -27,7 +27,19 @@
   import { count, relativeDays } from '$lib/v2/format.js';
   import { ROLE_LABEL, ROLE_TONE } from '$lib/v2/enums.js';
   import { enhance } from '$app/forms';
-  import { UserPlus, KeyRound } from '@lucide/svelte';
+  import {
+    UserPlus,
+    KeyRound,
+    Pencil,
+    Check,
+    X,
+    ShieldCheck,
+    ShieldMinus,
+    UserX,
+    UserCheck,
+    Eye,
+    EyeOff
+  } from '@lucide/svelte';
 
   /** @type {{ data: any, form: any }} */
   import { toast } from 'svelte-sonner';
@@ -37,6 +49,13 @@
   let inviting = $state(false);
   let externoElegido = $state('');
   let areaElegida = $state('');
+
+  // Mostrar u ocultar lo que se escribe en los dos campos de clave. Arrancan
+  // ocultos: el alta se hace con la persona al lado y a veces con alguien mas
+  // mirando la pantalla. El ojito esta porque una clave escrita a ciegas y mal
+  // se descubre recien cuando la persona no puede entrar.
+  let verClaveAlta = $state(false);
+  let verClaveFila = $state(false);
 
   // 'busy' bloquea los botones mientras hay un envio en curso, y 'working' es
   // el callback que use:enhance necesita para levantar y bajar esa bandera.
@@ -105,7 +124,13 @@
     activo: true,
     area: '',
     agentes: /** @type {string[]} */ ([]),
-    externo: ''
+    externo: '',
+    // Vacia SIEMPRE al abrir la edicion, y vacia significa "no la toques".
+    // Nunca se precarga con nada: no hay forma de leer la clave de alguien, y
+    // un campo que muestre algo (aunque sean puntitos de relleno) invita a
+    // guardarlo tal cual y pisarle la clave a quien solo venia a que le
+    // corrigieran el area.
+    password: ''
   });
   let guardandoFila = $state(false);
 
@@ -121,8 +146,10 @@
       activo: !!m.is_active,
       area: fila[m.id]?.area ?? '',
       agentes: [...(fila[m.id]?.agentes ?? [])],
-      externo: fila[m.id]?.externo ?? ''
+      externo: fila[m.id]?.externo ?? '',
+      password: ''
     };
+    verClaveFila = false;
   }
 
   const nombreExternoDe = (/** @type {string} */ id) =>
@@ -164,6 +191,8 @@
       if (result?.type === 'success' && result?.data?.editado) {
         editando = null;
         if (result.data.avisoEdicion) toast.error(result.data.avisoEdicion);
+        else if (result.data.claveCambiada)
+          toast.success(`${result.data.editado}: guardado, con contraseña nueva.`);
         else toast.success(`${result.data.editado}: guardado.`);
       } else if (result?.data?.edicion?.error) {
         toast.error(result.data.edicion.error);
@@ -257,6 +286,44 @@
               <option value="USER">Miembro</option>
               <option value="ADMIN">Administrador</option>
             </select>
+          </div>
+          <!--
+            La clave, opcional. Vacia se comporta como siempre: el servidor
+            genera una al azar y la muestra UNA vez en el cartel de abajo.
+
+            Se ofrece escribirla porque el alta casi siempre se hace con la
+            persona al lado o al telefono, y dictar "K7mQ2-xR4vT-9wLpZa" termina
+            en un intento fallido y una llamada mas. Lo que se escriba pasa por
+            los mismos validadores de Django que cualquier otra clave, del lado
+            del servidor: aca no se repite ninguna regla de largo ni de forma,
+            porque dos lugares con la misma regla es un lugar donde la regla va
+            a quedar vieja.
+          -->
+          <div>
+            <label class="v2-label" for="invite-password" style="display:block;margin-bottom:4px">
+              Contraseña <span style="font-weight:400;text-transform:none">(opcional)</span>
+            </label>
+            <span style="display:inline-flex;gap:5px">
+              <input
+                id="invite-password"
+                name="password"
+                type={verClaveAlta ? 'text' : 'password'}
+                class="v2-input"
+                style="width:165px"
+                autocomplete="new-password"
+                placeholder="Se genera sola"
+              />
+              <button
+                type="button"
+                class="v2-btn ico"
+                style="width:36px;min-width:36px"
+                onclick={() => (verClaveAlta = !verClaveAlta)}
+                title={verClaveAlta ? 'Ocultar la contraseña' : 'Mostrar la contraseña'}
+                aria-label={verClaveAlta ? 'Ocultar la contraseña' : 'Mostrar la contraseña'}
+              >
+                {#if verClaveAlta}<EyeOff />{:else}<Eye />{/if}
+              </button>
+            </span>
           </div>
           <!--
             El area va en el MISMO formulario a proposito. Antes eran dos
@@ -475,6 +542,44 @@
                           bind:value={borrador.email}
                           aria-label="Correo"
                         />
+                        <!--
+                          Vacia = no se toca. Es la unica forma de que un campo
+                          de clave dentro de un formulario que guarda OTRAS
+                          cosas no le resetee la clave a alguien cada vez que
+                          se le corrige el correo o el area.
+
+                          Sin bind:value a proposito: Svelte no deja combinar
+                          two-way binding con un 'type' que cambia, y el type
+                          cambia porque el ojito es lo que evita escribir una
+                          clave mal a ciegas y enterarse cuando la persona no
+                          puede entrar.
+                        -->
+                        <span style="display:flex;gap:4px;margin-top:3px">
+                          <input
+                            class="v2-input"
+                            style="width:150px;font-size:12px;padding:2px 5px"
+                            type={verClaveFila ? 'text' : 'password'}
+                            value={borrador.password}
+                            oninput={(e) =>
+                              (borrador.password = /** @type {HTMLInputElement} */ (
+                                e.currentTarget
+                              ).value)}
+                            autocomplete="new-password"
+                            placeholder="Contraseña nueva"
+                            aria-label="Contraseña nueva de {m.name}; vacía deja la que ya tiene"
+                          />
+                          <button
+                            type="button"
+                            class="v2-btn v2-btn-sm ico"
+                            onclick={() => (verClaveFila = !verClaveFila)}
+                            title={verClaveFila ? 'Ocultar la contraseña' : 'Mostrar la contraseña'}
+                            aria-label={verClaveFila
+                              ? 'Ocultar la contraseña'
+                              : 'Mostrar la contraseña'}
+                          >
+                            {#if verClaveFila}<EyeOff />{:else}<Eye />{/if}
+                          </button>
+                        </span>
                       {:else}
                         <span class="v2-table-primary">
                           {m.name}{#if m.is_you}<span class="v2-sub" style="font-weight:400">,
@@ -626,20 +731,26 @@
                       <input type="hidden" name="eraActivo" value={m.is_active ? 'si' : 'no'} />
                       <input type="hidden" name="area" value={borrador.area} />
                       <input type="hidden" name="externo" value={borrador.externo} />
+                      <input type="hidden" name="password" value={borrador.password} />
                       <input type="hidden" name="externo_nombre" value={nombreExternoDe(borrador.externo)} />
                       {#each borrador.agentes as a (a)}
                         <input type="hidden" name="agentes" value={a} />
                       {/each}
                       <button class="v2-btn v2-btn-sm v2-btn-primary" disabled={guardandoFila}>
-                        Guardar
+                        <Check />Guardar
                       </button>
+                      <!-- Cancelar sigue siendo TEXTO, no un icono como los de
+                           reposo: es la salida de un estado en el que hay
+                           cambios sin guardar, y una X chiquita al lado de un
+                           tilde chiquito se aprieta mal. Lo compacto sirve para
+                           la fila en reposo; para deshacer no. -->
                       <button
                         type="button"
                         class="v2-btn v2-btn-sm"
                         disabled={guardandoFila}
                         onclick={cancelar}
                       >
-                        Cancelar
+                        <X />Cancelar
                       </button>
                     </form>
                   {:else if m.is_you}
@@ -652,11 +763,13 @@
                       style="display:inline-flex;gap:6px;justify-content:flex-end;flex-wrap:wrap"
                     >
                       <button
-                        class="v2-btn v2-btn-sm"
+                        class="v2-btn v2-btn-sm ico"
                         disabled={busy || editando !== null}
                         onclick={() => editar(m)}
+                        title="Editar a {m.name}"
+                        aria-label="Editar a {m.name}"
                       >
-                        Editar
+                        <Pencil />
                       </button>
                       <!-- Role toggle. Two roles, so one button naming the
                            destination is clearer than a picker. The last admin
@@ -669,13 +782,18 @@
                           value={m.role === 'ADMIN' ? 'USER' : 'ADMIN'}
                         />
                         <button
-                          class="v2-btn v2-btn-sm"
+                          class="v2-btn v2-btn-sm ico"
                           disabled={busy || (m.role === 'ADMIN' && isLastAdmin)}
                           title={m.role === 'ADMIN' && isLastAdmin
                             ? 'La organización debe mantener al menos un administrador'
-                            : ''}
+                            : m.role === 'ADMIN'
+                              ? `Quitarle el rol de administrador a ${m.name}`
+                              : `Hacer administrador a ${m.name}`}
+                          aria-label={m.role === 'ADMIN'
+                            ? `Hacer miembro a ${m.name}`
+                            : `Hacer administrador a ${m.name}`}
                         >
-                          {m.role === 'ADMIN' ? 'Hacer miembro' : 'Hacer administrador'}
+                          {#if m.role === 'ADMIN'}<ShieldMinus />{:else}<ShieldCheck />{/if}
                         </button>
                       </form>
                       <!-- Activate / deactivate. The last active admin cannot
@@ -688,14 +806,17 @@
                           value={m.is_active ? 'Inactive' : 'Active'}
                         />
                         <button
-                          class="v2-btn v2-btn-sm"
+                          class="v2-btn v2-btn-sm ico"
                           disabled={busy || (m.is_active && isLastAdmin)}
                           title={m.is_active && isLastAdmin
                             ? 'La organización debe mantener al menos un administrador activo'
-                            : ''}
+                            : m.is_active
+                              ? `Desactivar a ${m.name}: deja de entrar y su trabajo pasa a su área`
+                              : `Reactivar a ${m.name}`}
+                          aria-label={m.is_active ? `Desactivar a ${m.name}` : `Reactivar a ${m.name}`}
                           style={m.is_active ? 'color:var(--v2-rust)' : ''}
                         >
-                          {m.is_active ? 'Desactivar' : 'Reactivar'}
+                          {#if m.is_active}<UserX />{:else}<UserCheck />{/if}
                         </button>
                       </form>
                     </span>
@@ -731,8 +852,38 @@
         Los roles son Administrador y Miembro, los únicos dos que reconoce la API. Los
         administradores pueden invitar personas, cambiar roles y editar la configuración de la
         organización; el servidor no permite que nadie cambie su propio rol ni desactive al último
-        administrador. Editar la membresía de los equipos todavía no está disponible acá.
+        administrador. La contraseña se puede definir al agregar a alguien y cambiar después desde
+        Editar: dejarla vacía deja la que ya tenía, y el servidor rechaza las demasiado cortas o
+        demasiado comunes. Cambiarla no cierra las sesiones que esa persona ya tenga abiertas ni
+        revoca sus tokens de API: si la razón es que se filtró, desactivá la cuenta o revocá sus
+        tokens además. Editar la membresía de los equipos todavía no está disponible acá.
       </p>
     </div>
   </div>
 {/if}
+
+<style>
+  /*
+    Boton de SOLO icono, para la columna "Gestionar".
+
+    La columna tenia tres botones de texto por fila ("Editar", "Hacer
+    administrador", "Desactivar") y ya en 1440px se partia en dos lineas: la
+    fila quedaba del doble de alto y la accion destructiva caia debajo,
+    desalineada respecto de la de al lado. Con iconos entran los tres en una
+    linea y la tabla vuelve a leerse como una tabla.
+
+    Lo que el icono no dice va en `title` y en `aria-label`, los dos, siempre:
+    para el puntero y para un lector de pantalla. Un icono sin ninguna de las
+    dos es una adivinanza, y estos tres cambian el acceso de una persona.
+
+    El ancho es el mismo que el alto minimo de .v2-btn-sm (32px), asi que
+    queda cuadrado sin fijar una altura propia que despues pelee con la regla
+    de puntero grueso que los agranda para tocar.
+  */
+  .ico {
+    width: 32px;
+    min-width: 32px;
+    padding: 0;
+    justify-content: center;
+  }
+</style>

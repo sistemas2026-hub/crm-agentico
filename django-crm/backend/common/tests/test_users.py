@@ -146,6 +146,41 @@ class TestUsersListView:
             user__email="new-member@test.com", org=org_a
         ).exists()
 
+    def test_create_user_with_chosen_password(self, admin_client, org_a):
+        """La clave que escribe el administrador en el alta queda aplicada."""
+        from common.models import User
+
+        response = admin_client.post(
+            self.url,
+            {
+                "email": "con-clave@test.com",
+                "role": "USER",
+                "password": "Rapilink-2026-xK9",
+            },
+            format="json",
+        )
+        assert response.status_code == status.HTTP_201_CREATED
+        creado = User.objects.get(email="con-clave@test.com")
+        assert creado.check_password("Rapilink-2026-xK9")
+        assert creado.password != "Rapilink-2026-xK9"
+
+    def test_create_user_weak_password_rejected_and_creates_nobody(
+        self, admin_client, org_a
+    ):
+        """Una clave debil en el alta se rechaza ANTES de crear la cuenta.
+
+        Que no se cree nadie es la mitad que importa: validar despues de crear
+        dejaria a la persona dada de alta con una clave que nadie eligio, y el
+        reintento se choca con "ya existe".
+        """
+        response = admin_client.post(
+            self.url,
+            {"email": "debil@test.com", "role": "USER", "password": "123456"},
+            format="json",
+        )
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert not Profile.objects.filter(user__email="debil@test.com").exists()
+
     def test_create_user_minimal_payload_creates_no_address(self, admin_client, org_a):
         """No address fields sent -> no empty Address row is created."""
         response = admin_client.post(
@@ -534,6 +569,111 @@ class TestUserStatusView:
         response = admin_client.post(
             self._url("00000000-0000-0000-0000-000000000000"),
             {"status": "Active"},
+            format="json",
+        )
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+@pytest.mark.django_db
+class TestUserPasswordView:
+    """POST /api/user/<pk>/password/
+
+    Las pruebas afirman sobre el EFECTO -- que la clave nueva autentica y la
+    vieja deja de hacerlo -- y no sobre que la vista conteste 200. Un 200 lo
+    devuelve igual una vista que guarde la clave en texto plano en la columna,
+    que es exactamente el error que este endpoint existe para no cometer.
+    """
+
+    def _url(self, user_id):
+        return f"/api/user/{user_id}/password/"
+
+    def test_admin_sets_password(self, admin_client, org_a, regular_user, user_profile):
+        response = admin_client.post(
+            self._url(regular_user.id),
+            {"password": "Rapilink-2026-xK9"},
+            format="json",
+        )
+        assert response.status_code == status.HTTP_200_OK
+        regular_user.refresh_from_db()
+        # Autentica con la nueva y no con la vieja: eso es haberla cambiado.
+        assert regular_user.check_password("Rapilink-2026-xK9")
+        # Y no quedo el texto plano en la columna.
+        assert regular_user.password != "Rapilink-2026-xK9"
+
+    def test_weak_password_rejected(
+        self, admin_client, org_a, regular_user, user_profile
+    ):
+        """Los validadores de Django corren: '123456' no entra."""
+        antes = regular_user.password
+        response = admin_client.post(
+            self._url(regular_user.id),
+            {"password": "123456"},
+            format="json",
+        )
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        regular_user.refresh_from_db()
+        assert regular_user.password == antes
+
+    def test_empty_password_rejected(
+        self, admin_client, org_a, regular_user, user_profile
+    ):
+        """Vacia no es "dejala como esta" aca: la pantalla ni siquiera llama."""
+        antes = regular_user.password
+        response = admin_client.post(
+            self._url(regular_user.id), {"password": "   "}, format="json"
+        )
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        regular_user.refresh_from_db()
+        assert regular_user.password == antes
+
+    def test_non_admin_forbidden(
+        self, user_client, org_a, admin_user, admin_profile, user_profile
+    ):
+        """Un miembro no le cambia la clave a nadie."""
+        antes = admin_user.password
+        response = user_client.post(
+            self._url(admin_user.id),
+            {"password": "Rapilink-2026-xK9"},
+            format="json",
+        )
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        admin_user.refresh_from_db()
+        assert admin_user.password == antes
+
+    def test_non_admin_cannot_set_own_password(
+        self, user_client, org_a, regular_user, user_profile
+    ):
+        """Ni la propia: sin pedir la clave actual, una sesion robada seria
+        una cuenta robada."""
+        antes = regular_user.password
+        response = user_client.post(
+            self._url(regular_user.id),
+            {"password": "Rapilink-2026-xK9"},
+            format="json",
+        )
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        regular_user.refresh_from_db()
+        assert regular_user.password == antes
+
+    def test_admin_of_another_org_cannot(
+        self, org_b_client, admin_user, admin_profile
+    ):
+        """El filtro por organizacion no es decoracion: sin el, ser
+        administrador de cualquier empresa seria poder entrar a las demas."""
+        antes = admin_user.password
+        response = org_b_client.post(
+            self._url(admin_user.id),
+            {"password": "Rapilink-2026-xK9"},
+            format="json",
+        )
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+        admin_user.refresh_from_db()
+        assert admin_user.password == antes
+
+    def test_unknown_user_is_404(self, admin_client, org_a):
+        response = admin_client.post(
+            self._url("00000000-0000-0000-0000-000000000000"),
+            {"password": "Rapilink-2026-xK9"},
             format="json",
         )
         assert response.status_code == status.HTTP_404_NOT_FOUND

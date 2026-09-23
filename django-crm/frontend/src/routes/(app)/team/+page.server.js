@@ -1,6 +1,6 @@
 import { fail } from '@sveltejs/kit';
-import { listTeam, inviteUser, setRole, setStatus, updateUser, ROLES, perfilPorCorreo,
-  casosDe, reasignarCaso }
+import { listTeam, inviteUser, setRole, setStatus, setPassword, updateUser, ROLES,
+  perfilPorCorreo, casosDe, reasignarCaso }
   from '$lib/server/v2/team.js';
 import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
@@ -177,6 +177,10 @@ export const actions = {
     const externo = form.get('externo')?.toString() || '';
     const externoNombre = form.get('externo_nombre')?.toString() || '';
     const agentes = form.getAll('agentes').map((v) => v.toString());
+    // Vacia = no se toca. Es la unica forma de que un campo de clave dentro de
+    // un formulario que guarda OTRAS cosas no le resetee la clave a alguien
+    // cada vez que se le corrige el correo.
+    const clave = form.get('password')?.toString() || '';
 
     if (!userId || !profileId) {
       return fail(400, { edicion: { error: 'Falta identificar a la persona.' } });
@@ -213,6 +217,28 @@ export const actions = {
       }
     }
 
+    // La clave, si se escribio una. Endpoint aparte (ver setPassword): el
+    // PATCH de arriba no puede tocarla sin guardarla en texto plano.
+    //
+    // Su fallo SI corta: el resto ya quedo guardado, pero decir "guardado" a
+    // secas cuando la clave que se acaba de escribir fue rechazada es peor que
+    // no guardar nada -- el administrador se va creyendo que se la dio, y la
+    // persona no puede entrar.
+    if (clave) {
+      try {
+        await setPassword({ cookies }, userId, clave);
+      } catch (/** @type {any} */ err) {
+        return fail(err?.status === 403 ? 403 : 400, {
+          edicion: {
+            error: readableError(
+              err,
+              'Se guardaron los datos, pero no la contraseña.'
+            )
+          }
+        });
+      }
+    }
+
     // Y lo del asistente. Su fallo NO invalida lo anterior, que ya quedo
     // guardado: se avisa y se dice donde corregirlo.
     let aviso = null;
@@ -234,7 +260,7 @@ export const actions = {
       aviso = err?.message || 'Se guardaron los datos, pero no el área ni los agentes.';
     }
 
-    return { editado: name || email, avisoEdicion: aviso };
+    return { editado: name || email, avisoEdicion: aviso, claveCambiada: !!clave };
   },
 
   invite: async ({ cookies, request, fetch }) => {
@@ -267,9 +293,16 @@ export const actions = {
     const abc = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     const bytes = new Uint32Array(16);
     crypto.getRandomValues(bytes);
-    const clave = Array.from(bytes, (b) => abc[b % abc.length])
+    const generada = Array.from(bytes, (b) => abc[b % abc.length])
       .join('')
       .replace(/^(.{5})(.{5})(.{6})$/, '$1-$2-$3');
+    // Si el administrador escribio una, gana la suya; si no, la generada. El
+    // campo es opcional a proposito: lo normal es no escribir nada y dejar que
+    // salga una al azar. Lo escrito NO se muestra despues en el cartel de
+    // "se muestra una sola vez" -- quien la escribio ya la sabe, y repetirla
+    // en pantalla solo la deja a la vista de quien pase por atras.
+    const claveElegida = form.get('password')?.toString().trim() || '';
+    const clave = claveElegida || generada;
     const externo = form.get('externo')?.toString().trim() || '';
     const externoNombre = form.get('externo_nombre')?.toString().trim() || '';
     if (!email) return fail(400, { invite: { error: 'Ingresá un correo electrónico.' } });
@@ -340,7 +373,7 @@ export const actions = {
       }
     }
 
-    return { invited: email, area: area || null, avisoArea, clave };
+    return { invited: email, area: area || null, avisoArea, clave: claveElegida ? null : clave };
   },
 
   /**

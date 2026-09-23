@@ -291,3 +291,27 @@ export function setRole({ cookies }, userId, role) {
 export function setStatus({ cookies }, userId, status) {
   return apiRequest(`/user/${userId}/status/`, { method: 'POST', body: { status } }, { cookies });
 }
+
+/**
+ * Le define la clave a una persona: `POST /api/user/<userId>/password/`.
+ *
+ * Endpoint aparte del PATCH a proposito. `CreateUserSerializer` es un
+ * ModelSerializer sobre User: si aceptara `password` guardaria el texto plano
+ * en la columna. Alla la clave se aplica con `set_password`, que la hashea.
+ *
+ * El servidor es el que valida: pide administrador, exige que la persona sea
+ * de la misma organizacion y corre los validadores de Django (largo minimo,
+ * claves comunes, solo numeros). Esta pantalla no repite esas reglas: muestra
+ * lo que el servidor conteste.
+ *
+ * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
+ * @param {string} userId  el id del USUARIO, no el del perfil
+ * @param {string} password
+ */
+export function setPassword({ cookies }, userId, password) {
+  return apiRequest(
+    `/user/${userId}/password/`,
+    { method: 'POST', body: { password } },
+    { cookies }
+  );
+}

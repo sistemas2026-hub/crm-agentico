@@ -1,4 +1,6 @@
 from django.conf import settings
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404
@@ -126,6 +128,24 @@ class UsersListView(APIView, LimitOffsetPagination):
                     {"error": True, "errors": data},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+            # Si el administrador ESCRIBIO una clave, pasa por los mismos
+            # validadores que cualquier otra (AUTH_PASSWORD_VALIDATORS). Se
+            # valida ANTES de la transaccion: rechazarla despues de crear la
+            # cuenta dejaria a alguien dado de alta con una clave que nadie
+            # eligio, y el reintento se choca con "ya existe". La clave que
+            # genera el frontend los pasa de sobra -- son 16 caracteres al azar.
+            clave_pedida = (params.get("password") or "").strip()
+            if clave_pedida:
+                try:
+                    validate_password(clave_pedida)
+                except DjangoValidationError as err:
+                    return Response(
+                        {
+                            "error": True,
+                            "errors": {"password": _motivos_en_castellano(err)},
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
             # A concurrent invite for the same email can commit between the
             # checks above and the writes below. Keep the account, address and
             # membership in one transaction so a lost race rolls back cleanly
@@ -154,7 +174,7 @@ class UsersListView(APIView, LimitOffsetPagination):
                         # una cuenta que ya existia (la rama de abajo) NO se
                         # toca: el admin que suma a alguien a su organizacion
                         # no manda sobre la clave de esa cuenta.
-                        clave = (params.get("password") or "").strip()
+                        clave = clave_pedida
                         if clave:
                             user.set_password(clave)
                             user.save(update_fields=["password"])
@@ -619,3 +639,125 @@ class UserStatusView(APIView):
             inactive_profiles, many=True
         ).data
         return Response(context)
+
+
+# Los mensajes que devuelven los validadores de Django, en castellano.
+#
+# LANGUAGE_CODE no esta declarado, asi que vale "en-us" y validate_password
+# contesta en ingles. Cambiarlo globalmente para arreglar un cartel toca TODA
+# la aplicacion -- fechas, numeros, el admin -- por un motivo que no tiene que
+# ver con ninguna de esas cosas. Se traduce aca, por codigo y no por texto: el
+# codigo es parte del contrato del validador, el texto cambia entre versiones
+# de Django.
+_MOTIVOS_CLAVE = {
+    "password_too_short": "La contraseña es muy corta: al menos {min_length} caracteres.",
+    "password_too_common": "Esa contraseña es demasiado común.",
+    "password_entirely_numeric": "La contraseña no puede ser solo números.",
+    "password_too_similar": "La contraseña se parece demasiado a los datos de la persona.",
+}
+
+
+def _motivos_en_castellano(err):
+    """Los motivos de un ValidationError de clave, uno por linea, en castellano.
+
+    Un codigo que no este en el mapa cae a su mensaje original: es preferible
+    un cartel en ingles a uno generico que no dice que arreglar.
+    """
+    salida = []
+    for sub in err.error_list:
+        plantilla = _MOTIVOS_CLAVE.get(sub.code)
+        if plantilla:
+            salida.append(plantilla.format(**(sub.params or {})))
+        else:
+            salida.append(str(sub.message) % (sub.params or {}) if sub.params else str(sub.message))
+    return salida
+
+
+class UserPasswordView(APIView):
+    """Le define la contrasena a una persona de la organizacion.
+
+    POR QUE EXISTE
+    El alta ya permitia definir una clave (`UsersListView.post`), pero solo al
+    crear la cuenta y una sola vez. Despues no habia forma: ni self-service (no
+    hay pantalla de "cambiar mi clave") ni administrativa. Quien perdia la
+    clave que se le mostro una vez quedaba sin entrada, y la unica salida era
+    borrarlo y volver a crearlo -- que le cambia el id y le desprende los casos.
+
+    POR QUE NO VA EN EL PATCH DE UserDetailView
+    Porque `CreateUserSerializer` es un ModelSerializer sobre `User`: si
+    `password` fuera un campo suyo, guardaria el TEXTO PLANO en la columna. La
+    clave se aplica con `set_password`, que la hashea, y por eso vive en su
+    propio endpoint -- igual que el alta la aplica aparte del serializador, y
+    por el mismo motivo.
+
+    QUIEN PUEDE
+    Solo un administrador de la organizacion (o un superusuario), y solo sobre
+    alguien de SU organizacion. Un miembro no puede, ni siquiera sobre si
+    mismo: hoy no hay flujo de "clave actual + clave nueva", y aceptar una
+    clave nueva sin pedir la vieja convierte una sesion robada en una cuenta
+    robada.
+
+    LO QUE ESTO NO HACE
+    No cierra las sesiones abiertas de esa persona ni revoca sus tokens de API:
+    los JWT ya emitidos siguen valiendo hasta que expiren, y un
+    PersonalAccessToken no depende de la clave. Si la clave se cambia porque se
+    filtro, hay que desactivar la cuenta o revocar sus tokens ademas -- que es
+    justo lo que la pantalla de equipo ya ofrece al lado.
+    """
+
+    permission_classes = (IsAuthenticated, HasOrgContext)
+
+    @extend_schema(
+        tags=["users"],
+        parameters=swagger_params.organization_params,
+        request=inline_serializer(
+            name="UserPasswordRequest",
+            fields={"password": serializers.CharField()},
+        ),
+        responses={
+            200: inline_serializer(
+                name="UserPasswordResponse",
+                fields={
+                    "error": serializers.BooleanField(),
+                    "message": serializers.CharField(),
+                },
+            )
+        },
+    )
+    def post(self, request, pk, format=None):
+        if (
+            not is_org_admin(self.request.profile)
+            and not self.request.user.is_superuser
+        ):
+            return Response(
+                {"error": True, "errors": "Permission Denied"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        # Por `user__id` y filtrando por org: el frontend manda el id del
+        # USUARIO, y sin el filtro de organizacion esto seria un cambio de
+        # clave sobre una cuenta ajena a la empresa.
+        profile = get_object_or_404(
+            Profile, user__id=pk, org=self.request.profile.org
+        )
+        clave = (request.data.get("password") or "").strip()
+        if not clave:
+            return Response(
+                {"error": True, "errors": "Ingrese una contraseña."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            # Los mismos validadores que AUTH_PASSWORD_VALIDATORS: sin esto un
+            # administrador apurado deja "123456" y la cuenta con permisos de
+            # la empresa queda abierta.
+            validate_password(clave, user=profile.user)
+        except DjangoValidationError as err:
+            return Response(
+                {"error": True, "errors": _motivos_en_castellano(err)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        profile.user.set_password(clave)
+        profile.user.save(update_fields=["password"])
+        return Response(
+            {"error": False, "message": "Password updated"},
+            status=status.HTTP_200_OK,
+        )
