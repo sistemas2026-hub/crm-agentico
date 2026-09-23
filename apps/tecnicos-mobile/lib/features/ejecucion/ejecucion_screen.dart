@@ -6,6 +6,8 @@ import 'package:uuid/uuid.dart';
 import '../../demo/field_mock_data.dart';
 import '../../core/storage/evidencia_storage_service.dart';
 import '../../core/storage/local_database.dart';
+import '../detalle_orden/pasos_orden.dart';
+import '../trabajo/estado_trabajo.dart';
 import 'campo_del_formulario.dart';
 import 'cierre_de_orden.dart';
 import 'datos_de_ejecucion.dart';
@@ -245,41 +247,33 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
   Future<void> _completarOrden() async {
     if (_orden == null || _orgId == null || _profileId == null) return;
 
-    // 1. Validar campos obligatorios
-    for (final c in _campos) {
-      final obligatorio = c['obligatorio'] == true || c['reglas']?['required'] == true;
-      final clave = (c['clave'] ?? c['id']) as String;
-      final etiqueta = (c['etiqueta'] ?? c['titulo'] ?? clave) as String;
-      final valor = _valoresFormulario[clave];
-      if (obligatorio && (valor == null || valor.toString().trim().isEmpty)) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: AppTheme.errorRed,
-            content: Text('El campo "$etiqueta" es obligatorio.'),
+    // El botón le pregunta AL MISMO veredicto que dibuja el checklist.
+    //
+    // Antes tenía su propia validación: recorría el esquema por su cuenta y
+    // sólo miraba si el campo estaba vacío. Con una medición fuera del rango
+    // que el esquema declara —un -45 dBm donde se piden entre -30 y -5— el
+    // checklist objetaba y el botón dejaba cerrar igual. La orden se firmaba
+    // con un número imposible, y eso nadie lo vuelve a mirar.
+    //
+    // Era la cuarta lectura independiente del mismo esquema. Esta es la que
+    // decidía de verdad.
+    final CierreDeOrden veredicto = _cierre;
+    if (!veredicto.puedeCerrar) {
+      final RequisitoDeCierre primero = veredicto.bloqueantes.first;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: AppTheme.errorRed,
+          content: Text(
+            primero.detalle.isEmpty
+                ? '${primero.titulo}: falta completarlo.'
+                : '${primero.titulo}: ${primero.detalle}',
           ),
-        );
-        return;
-      }
+        ),
+      );
+      return;
     }
 
-    // 2. Validar evidencias obligatorias
-    for (final req in _evidenciasRequisitos) {
-      final obligatorio = req['obligatorio'] == true;
-      final reqId = req['id'] as String;
-      final capturada = _evidenciasCapturadas.any((e) => e['requisito_id'] == reqId);
-
-      if (obligatorio && !capturada) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: AppTheme.errorRed,
-            content: Text('La fotografía "${req['descripcion']}" es obligatoria.'),
-          ),
-        );
-        return;
-      }
-    }
-
-    // 3. Todo satisfecho: transicionar localmente a completada_pendiente_sync
+    // Todo satisfecho: transicionar localmente a completada_pendiente_sync.
     final revisionBase = _orden!['revision'] as int? ?? 0;
     final idempotencyKey = const Uuid().v4();
 
@@ -716,6 +710,7 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
         child: Column(
         children: [
           OfflineSavedBanner(visible: _showSavedIndicator),
+          _paraQuienYEnQuePaso(),
           _franjaDelFormulario(),
           Expanded(
             child: SingleChildScrollView(
@@ -764,6 +759,61 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
 
   /// Qué formulario se está respondiendo. La versión del esquema viene con la
   /// orden: si el backend cambia las preguntas, esto cambia con ellas.
+  /// Para quién es el trabajo y en qué paso va.
+  ///
+  /// Esta pantalla es larga y se abre desde una lista: sin esta línea, a los
+  /// tres bloques de scroll ya no se sabe de qué orden se trata. El número
+  /// solo no alcanza — nadie recuerda a qué cliente corresponde el 4832.
+  ///
+  /// Los dos datos ya existen: el cliente viene en la orden y el paso lo
+  /// calcula `LecturaDePasos`, la misma que dibuja la barra del detalle. No
+  /// se agrega ninguna fuente nueva.
+  Widget _paraQuienYEnQuePaso() {
+    final String cliente = (_orden?['cliente_nombre'] ?? '').toString();
+    final LecturaDePasos pasos =
+        LecturaDePasos.de(EstadoTrabajo.desde(_orden?['estado']?.toString()));
+    if (cliente.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      width: double.infinity,
+      color: AppColors.surfaceContainerLowest,
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.margen,
+        AppSpacing.sm,
+        AppSpacing.margen,
+        AppSpacing.sm,
+      ),
+      child: Row(
+        children: <Widget>[
+          const Icon(Icons.person_outline,
+              size: 16, color: AppColors.onSurfaceVariant),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              cliente,
+              style: AppTypography.etiquetaGrande
+                  .copyWith(color: AppColors.onSurface),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: const BoxDecoration(
+              color: AppColors.surfaceContainer,
+              borderRadius: AppRadius.brChico,
+            ),
+            child: Text(
+              'Paso ${pasos.pasoActual + 1} de 5',
+              style: AppTypography.etiquetaChica,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _franjaDelFormulario() {
     final int version = _orden?['schema_version'] as int? ?? 0;
     final int campos = _campos.length;

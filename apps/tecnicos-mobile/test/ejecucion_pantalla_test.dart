@@ -268,4 +268,162 @@ void main() {
     });
   });
 
+
+  group('5. Finalizar y el checklist dicen lo mismo', () {
+    /// Un kit de datos donde lo único que cambia es la respuesta.
+    FuenteDeEjecucionFalsa conValores(Map<String, dynamic> valores) =>
+        FuenteDeEjecucionFalsa(
+          valores: valores,
+          evidencias: <Map<String, dynamic>>[
+            FuenteDeEjecucionFalsa.evidencia(requisitoId: 'foto_power_meter'),
+            FuenteDeEjecucionFalsa.evidencia(requisitoId: 'foto_roseta'),
+            FuenteDeEjecucionFalsa.evidencia(requisitoId: 'firma_cliente'),
+          ],
+          materiales: <Map<String, dynamic>>[FuenteDeEjecucionFalsa.material()],
+        );
+
+    testWidgets('Con un obligatorio vacío, ninguno de los dos deja cerrar',
+        (WidgetTester t) async {
+      pantallaAlta(t);
+      final FuenteDeEjecucionFalsa fuente = conValores(<String, dynamic>{
+        'tipo_intervencion': 'Roseta / Conector',
+      });
+      await t.pumpWidget(app(fuente));
+      await t.pumpAndSettle();
+
+      // El checklist objeta, y nombra el campo cuando es uno solo.
+      expect(
+        find.text('Falta: Potencia óptica en roseta del cliente'),
+        findsOneWidget,
+      );
+
+      // …y el botón también, nombrando qué falta.
+      await t.tap(find.text('Finalizar orden'));
+      await t.pumpAndSettle();
+
+      expect(fuente.transiciones, isEmpty, reason: 'no se cerró la orden');
+      expect(find.byType(SnackBar), findsOneWidget);
+    });
+
+    testWidgets('Con un número fuera de rango, tampoco',
+        (WidgetTester t) async {
+      // Este es el caso que antes se colaba: el checklist objetaba y el botón
+      // cerraba igual, porque sólo miraba si el campo estaba vacío. La orden
+      // se firmaba con una medición imposible.
+      pantallaAlta(t);
+      final FuenteDeEjecucionFalsa fuente = conValores(<String, dynamic>{
+        'tipo_intervencion': 'Roseta / Conector',
+        'potencia_rx': '-45',
+      });
+      await t.pumpWidget(app(fuente));
+      await t.pumpAndSettle();
+
+      expect(
+        find.text('Falta: Potencia óptica en roseta del cliente'),
+        findsOneWidget,
+        reason: 'un valor que no sirve cuenta como faltante, no como hecho',
+      );
+
+      await t.tap(find.text('Finalizar orden'));
+      await t.pumpAndSettle();
+
+      expect(
+        fuente.transiciones,
+        isEmpty,
+        reason: 'un -45 dBm donde el esquema pide entre -30 y -5 no se firma',
+      );
+    });
+
+    testWidgets('Con todo válido, los dos permiten', (WidgetTester t) async {
+      pantallaAlta(t);
+      final FuenteDeEjecucionFalsa fuente = conValores(<String, dynamic>{
+        'tipo_intervencion': 'Roseta / Conector',
+        'potencia_rx': '-18.4',
+      });
+      await t.pumpWidget(app(fuente));
+      await t.pumpAndSettle();
+
+      expect(find.textContaining('Falta'), findsNothing,
+          reason: 'el checklist no tiene nada que objetar');
+
+      await t.tap(find.text('Finalizar orden'));
+      await t.pumpAndSettle();
+
+      expect(fuente.transiciones, hasLength(1));
+      expect(fuente.transiciones.first['estado'], 'completada_pendiente_sync');
+      expect(fuente.transiciones.first['revision_base'], 7,
+          reason: 'la revisión viaja para que el servidor detecte cambios');
+    });
+
+    testWidgets('Un error de plantilla no deja cerrar, y no culpa al técnico',
+        (WidgetTester t) async {
+      pantallaAlta(t);
+      final FuenteDeEjecucionFalsa fuente = FuenteDeEjecucionFalsa(
+        campos: <Map<String, dynamic>>[
+          <String, dynamic>{
+            'id': 'roto',
+            'titulo': 'Campo sin opciones',
+            'tipo': 'seleccion',
+            'reglas': <String, dynamic>{'required': true},
+          },
+        ],
+        evidencias: <Map<String, dynamic>>[
+          FuenteDeEjecucionFalsa.evidencia(requisitoId: 'foto_power_meter'),
+          FuenteDeEjecucionFalsa.evidencia(requisitoId: 'foto_roseta'),
+          FuenteDeEjecucionFalsa.evidencia(requisitoId: 'firma_cliente'),
+        ],
+        materiales: <Map<String, dynamic>>[FuenteDeEjecucionFalsa.material()],
+      );
+      await t.pumpWidget(app(fuente));
+      await t.pumpAndSettle();
+
+      await t.tap(find.text('Finalizar orden'));
+      await t.pumpAndSettle();
+
+      expect(fuente.transiciones, isEmpty);
+      // El mensaje habla de la plantilla, no de lo que el técnico dejó sin
+      // hacer: no puede responder ese campo por más que quiera.
+      expect(find.textContaining('Avisá a la oficina'), findsWidgets);
+    });
+  });
+
+  group('6. El error se ve en el campo, no sólo en el resumen', () {
+    testWidgets('Un valor fuera de rango muestra su motivo al lado',
+        (WidgetTester t) async {
+      pantallaAlta(t);
+      await t.pumpWidget(app(FuenteDeEjecucionFalsa(
+        valores: <String, dynamic>{'potencia_rx': '-45'},
+      )));
+      await t.pumpAndSettle();
+
+      expect(find.textContaining('Tiene que ser -30.0 o más'), findsOneWidget);
+    });
+
+    testWidgets('Un valor bueno no muestra ningún motivo',
+        (WidgetTester t) async {
+      pantallaAlta(t);
+      await t.pumpWidget(app(FuenteDeEjecucionFalsa(
+        valores: <String, dynamic>{'potencia_rx': '-18.4'},
+      )));
+      await t.pumpAndSettle();
+
+      expect(find.textContaining('Tiene que ser'), findsNothing);
+    });
+  });
+
+  group('7. La cabecera dice de quién es el trabajo y en qué paso va', () {
+    testWidgets('Cliente y paso, con datos que ya existen',
+        (WidgetTester t) async {
+      // La pantalla es larga y se abre desde una lista: a tres bloques de
+      // scroll ya no se sabe de qué orden se trata.
+      pantallaAlta(t);
+      await t.pumpWidget(app(FuenteDeEjecucionFalsa()));
+      await t.pumpAndSettle();
+
+      expect(find.text('Carlos Gómez Rincón'), findsOneWidget);
+      expect(find.text('Paso 3 de 5'), findsOneWidget,
+          reason: 'la orden está en sitio, que es el tercer paso');
+    });
+  });
+
 }

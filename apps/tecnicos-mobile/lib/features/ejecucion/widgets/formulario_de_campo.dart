@@ -146,13 +146,19 @@ class FormularioDeCampo extends StatelessWidget {
           ayuda: ayuda,
           // CAMPO-DATA-032 · Con qué longitud de onda se mide. Todavía no hay
           // catálogo de red que lo diga.
+          motivoDelError: campo.motivoDelError,
           alDerecha: esMedicionOptica && mostrarDatosFuturos
               ? FieldMockData.longitudOndaMedicion
               : null,
           contenido: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              _entrada(clave, tipo, unidad),
+              _entrada(
+                clave,
+                tipo,
+                unidad,
+                conError: campo.estado == EstadoDeCampo.error,
+              ),
               if (esMedicionOptica && mostrarDatosFuturos) ...<Widget>[
                 const SizedBox(height: AppSpacing.xs),
                 _referenciaDeUmbral(valores[clave]),
@@ -171,6 +177,7 @@ class FormularioDeCampo extends StatelessWidget {
     required Widget contenido,
     String? ayuda,
     String? alDerecha,
+    String motivoDelError = '',
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -207,6 +214,28 @@ class FormularioDeCampo extends StatelessWidget {
         ),
         const SizedBox(height: AppSpacing.sm),
         contenido,
+        // El motivo va pegado al campo, no en un resumen al final.
+        //
+        // Antes el error se detectaba y no se dibujaba: un -45 dBm fuera del
+        // rango se veia igual que un valor bueno, y el tecnico se enteraba
+        // abajo, en un contador que ni siquiera nombraba el campo.
+        if (motivoDelError.isNotEmpty) ...<Widget>[
+          const SizedBox(height: AppSpacing.xs),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              const Icon(Icons.error_outline, size: 14, color: AppColors.error),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  motivoDelError,
+                  style: AppTypography.etiquetaChica
+                      .copyWith(color: AppColors.error),
+                ),
+              ),
+            ],
+          ),
+        ],
         if (ayuda != null && ayuda.isNotEmpty) ...<Widget>[
           const SizedBox(height: AppSpacing.xs),
           Text(ayuda, style: AppTypography.etiquetaChica),
@@ -421,15 +450,21 @@ class FormularioDeCampo extends StatelessWidget {
 
   /// Texto y números. La lectura óptica se escribe grande y centrada porque es
   /// el dato que el técnico compara contra el umbral mientras lo mide.
-  Widget _entrada(String clave, String tipo, String? unidad) {
+  Widget _entrada(String clave, String tipo, String? unidad,
+      {bool conError = false}) {
     final bool esNumero = tipo == 'numero' || tipo == 'decimal' || tipo == 'integer';
     final bool esMedicionOptica = (unidad ?? '').toLowerCase().contains('dbm');
 
     final Widget caja = Container(
       height: esNumero ? AppSpacing.objetivoTactilAmplio : AppSpacing.objetivoTactil,
-      decoration: const BoxDecoration(
-        color: AppColors.surfaceContainer,
+      decoration: BoxDecoration(
+        color: conError ? AppColors.errorContainer : AppColors.surfaceContainer,
         borderRadius: AppRadius.brTarjeta,
+        // El borde sólo aparece cuando hay error: un recuadro permanente
+        // alrededor de cada campo hace que el del campo malo no se distinga.
+        border: conError
+            ? Border.all(color: AppColors.error, width: 1.5)
+            : null,
       ),
       child: Stack(
         alignment: Alignment.center,
