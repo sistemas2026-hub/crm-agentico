@@ -2422,3 +2422,142 @@ def resumen_anterior(tenant: str, canal: str,
     except Exception as e:
         registrar("resumen", "no se pudo leer el anterior", error=e)
         return None
+
+
+def panorama_centro_mando(tenant: str, ventana_min: int = 10) -> dict:
+    """
+    Lo que esta pasando AHORA, agregado en SQL: cuantas conversaciones tiene
+    cada agente, que herramientas viene usando, cuanto tardan y que fallo.
+
+    Es el insumo de la pantalla /centro-mando. Devuelve HECHOS MEDIDOS, no
+    veredictos: aqui no se decide si un agente "esta trabajando" ni si algo
+    es una alerta. Esa lectura la hace quien conoce la configuracion del
+    tenant (nucleo/canales/api.py), porque depende de que roles existen y de
+    cuales atienden a un cliente final -- este modulo no tiene por que
+    saberlo, igual que tasa_escalamiento() no sabe que motivo es de quien.
+
+    Tampoco viaja nada del cliente. El ticker de eventos se arma con
+    metadatos de tool_calls (herramienta, rol, exito, duracion) y con el
+    motivo de escalamiento, nunca con el contenido de un mensaje ni con el
+    numero de quien escribe: la pantalla necesita ver ACTIVIDAD, y el
+    contenido ya tiene su lugar en la bandeja, que exige entrar a la
+    conversacion (mismo criterio que PRD RNF-01 sobre tool_calls, que guarda
+    un resumen y nunca el payload).
+
+    'ventana_min' es lo que se considera actividad reciente para decir que un
+    agente esta en algo ahora mismo. 10 minutos por defecto: mas corto deja
+    en blanco a un agente que espera la respuesta de una herramienta lenta;
+    mas largo muestra como activo a quien ya termino.
+
+    El dia se corta en America/Bogota, no en UTC: la base guarda timestamptz
+    y a las 19:00 de Bogota ya es el dia siguiente en UTC, asi que un corte
+    ingenuo le sumaria a "hoy" la tarde de ayer -- y quien mira la pantalla
+    cuenta los dias como los cuenta su reloj.
+    """
+    dia_bogota = ("(date_trunc('day', now() at time zone 'America/Bogota')"
+                  " at time zone 'America/Bogota')")
+
+    with sesion(tenant) as (cur, org):
+        # 1) Carga por agente. 'rol_efectivo' es con que permisos se atendio
+        #    la conversacion, que es justamente el agente que la tiene.
+        cur.execute(
+            f"""select coalesce(c.rol_efectivo, '(sin rol)') as agente,
+                       count(*) filter (where c.estado = 'abierta')
+                           as conversaciones,
+                       count(*) filter (where c.estado = 'abierta'
+                                          and c.necesita_atencion_humana)
+                           as esperando_humano,
+                       count(*) filter (where c.creado_en >= {dia_bogota})
+                           as recibidas_hoy,
+                       max(c.actualizado_en) as ultima_actividad
+                  from asistente.conversations c
+                 where c.organization_id = %s
+                   and (c.estado = 'abierta' or c.actualizado_en >= {dia_bogota})
+                 group by 1""",
+            (org,))
+        carga = {f["agente"]: dict(f) for f in cur.fetchall()}
+
+        # 2) Herramientas por agente dentro de la ventana. 'ultima_herramienta'
+        #    sale con array_agg ordenado y no con un subquery por fila: son
+        #    pocas filas, pero el patron de subquery correlacionado por agente
+        #    escala mal cuando el tenant tiene muchos roles.
+        cur.execute(
+            """select coalesce(rol_solicitante, '(sin rol)') as agente,
+                      count(*) as llamadas,
+                      count(*) filter (where not exito) as fallos,
+                      avg(duracion_ms)::int as duracion_media_ms,
+                      max(creado_en) as ultima_llamada,
+                      (array_agg(herramienta order by creado_en desc))[1]
+                          as ultima_herramienta
+                 from asistente.tool_calls
+                where organization_id = %s
+                  and creado_en >= now() - (%s || ' minutes')::interval
+                group by 1""",
+            (org, ventana_min))
+        actividad = {f["agente"]: dict(f) for f in cur.fetchall()}
+
+        # 3) Cifras del dia, de una sola vuelta.
+        cur.execute(
+            f"""select
+                  (select count(*) from asistente.conversations
+                    where organization_id = %s and estado = 'abierta')
+                    as conversaciones_activas,
+                  (select count(*) from asistente.conversations
+                    where organization_id = %s and estado = 'abierta'
+                      and necesita_atencion_humana) as esperando_humano,
+                  (select count(distinct c.id)
+                     from asistente.conversations c
+                     join asistente.messages m on m.conversation_id = c.id
+                    where c.organization_id = %s
+                      and m.creado_en >= {dia_bogota}) as atendidas_hoy,
+                  (select count(*) from asistente.tool_calls
+                    where organization_id = %s and creado_en >= {dia_bogota})
+                    as herramientas_hoy,
+                  (select avg(duracion_ms)::int from asistente.tool_calls
+                    where organization_id = %s and creado_en >= {dia_bogota}
+                      and exito) as duracion_media_ms,
+                  (select count(*) from asistente.tool_calls
+                    where organization_id = %s and not exito
+                      and creado_en >= {dia_bogota}) as fallos_hoy""",
+            (org, org, org, org, org, org))
+        totales = dict(cur.fetchone())
+
+        # 4) Ticker: ultimas herramientas ejecutadas. Sin parametros -- ahi
+        #    viaja el identificador de lo consultado (enmascarado, pero
+        #    identificador al fin) y esta pantalla no lo necesita para nada.
+        cur.execute(
+            """select creado_en,
+                      coalesce(rol_solicitante, '(sin rol)') as agente,
+                      herramienta, exito, duracion_ms, es_escritura
+                 from asistente.tool_calls
+                where organization_id = %s
+                  and creado_en >= now() - interval '6 hours'
+                order by creado_en desc
+                limit 15""",
+            (org,))
+        eventos_herramienta = [dict(f) for f in cur.fetchall()]
+
+        # 5) Ticker: escalamientos recientes. El motivo es de catalogo
+        #    (lo elige el evaluador entre opciones de la config), no texto
+        #    libre del cliente, asi que no arrastra PII.
+        cur.execute(
+            """select escalada_en as creado_en,
+                      coalesce(rol_efectivo, '(sin rol)') as agente,
+                      motivo_escalamiento
+                 from asistente.conversations
+                where organization_id = %s
+                  and escalada_en is not null
+                  and escalada_en >= now() - interval '6 hours'
+                order by escalada_en desc
+                limit 10""",
+            (org,))
+        eventos_escalada = [dict(f) for f in cur.fetchall()]
+
+    return {
+        "ventana_min": ventana_min,
+        "carga": carga,
+        "actividad": actividad,
+        "totales": totales,
+        "eventos_herramienta": eventos_herramienta,
+        "eventos_escalada": eventos_escalada,
+    }

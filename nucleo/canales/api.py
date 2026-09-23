@@ -2636,6 +2636,126 @@ def reporte_escalamiento():
     return jsonify({"dias": dias, **r})
 
 
+@app.get("/centro-mando")
+def centro_mando():
+    """
+    Que esta haciendo cada agente ahora mismo, para la pantalla /centro-mando.
+
+    La persistencia entrega hechos (cuantas conversaciones, que herramientas,
+    cuanto tardaron, cuales fallaron); el ESTADO se decide aqui, que es donde
+    se conocen los roles del tenant. La regla, en este orden:
+
+      error       alguna herramienta suya fallo dentro de la ventana
+      procesando  llamo alguna herramienta dentro de la ventana
+      atendiendo  tiene conversaciones abiertas, sin actividad en la ventana
+      disponible  no tiene conversaciones abiertas
+
+    'esperando humano' NO es un estado: es una cifra aparte que viaja siempre
+    ('esperando_humano'). Se probo como estado y tapaba lo otro -- un agente
+    con una escalada de hace dos horas y tres conversaciones en curso se veia
+    detenido, que es justo lo contrario de lo que pasaba. El estado dice que
+    hace el agente; la cifra dice que necesita una persona, y la pantalla
+    muestra las dos cosas.
+
+    Ninguna de estas cifras es una estimacion del modelo: todas salen de
+    contar filas (PRD 12.5, el codigo calcula). Y no viaja contenido de
+    conversaciones -- ver panorama_centro_mando() en persistencia.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+
+    try:
+        ventana = int(request.args.get("ventana", 10))
+    except ValueError:
+        return jsonify({"error": "'ventana' debe ser un numero."}), 400
+    # Tope de 120: mas alla deja de ser "ahora mismo" y la pantalla miente.
+    ventana = max(1, min(ventana, 120))
+
+    try:
+        datos = persistencia.panorama_centro_mando(tenant, ventana)
+    except Exception as e:
+        registrar("centro_mando", "fallo al calcular el panorama", error=e)
+        return jsonify({"error": "No se pudo calcular el panorama."}), 500
+
+    def _estado(carga: dict, act: dict) -> str:
+        if (act.get("fallos") or 0) > 0:
+            return "error"
+        if (act.get("llamadas") or 0) > 0:
+            return "procesando"
+        if (carga.get("conversaciones") or 0) > 0:
+            return "atendiendo"
+        return "disponible"
+
+    agentes = []
+    for nombre, rol in config.roles.items():
+        carga = datos["carga"].get(nombre, {})
+        act = datos["actividad"].get(nombre, {})
+        ultima = carga.get("ultima_actividad") or act.get("ultima_llamada")
+        agentes.append({
+            "nombre": nombre,
+            "descripcion": rol.descripcion.strip(),
+            "area": rol.area,
+            "cargo": rol.cargo,
+            "orientado_a": rol.orientado_a,
+            "estado": _estado(carga, act),
+            "conversaciones": carga.get("conversaciones") or 0,
+            "esperando_humano": carga.get("esperando_humano") or 0,
+            "recibidas_hoy": carga.get("recibidas_hoy") or 0,
+            "llamadas_ventana": act.get("llamadas") or 0,
+            "fallos_ventana": act.get("fallos") or 0,
+            "duracion_media_ms": act.get("duracion_media_ms"),
+            "ultima_herramienta": act.get("ultima_herramienta"),
+            "ultima_actividad": ultima.isoformat() if ultima else None,
+        })
+    agentes.sort(key=lambda a: a["nombre"])
+
+    # Un solo ticker ordenado: la pantalla no tiene por que saber que estos
+    # eventos vienen de dos tablas distintas.
+    eventos = []
+    for e in datos["eventos_herramienta"]:
+        ms = e.get("duracion_ms")
+        eventos.append({
+            "en": e["creado_en"].isoformat(),
+            "agente": e["agente"],
+            "tipo": "herramienta_fallida" if not e["exito"] else (
+                "accion" if e["es_escritura"] else "consulta"),
+            "herramienta": e["herramienta"],
+            "duracion_ms": ms,
+        })
+    for e in datos["eventos_escalada"]:
+        eventos.append({
+            "en": e["creado_en"].isoformat(),
+            "agente": e["agente"],
+            "tipo": "escalada",
+            "motivo": e.get("motivo_escalamiento"),
+        })
+    eventos.sort(key=lambda x: x["en"], reverse=True)
+
+    t = datos["totales"]
+    return jsonify({
+        "tenant": tenant,
+        "generado_en": datetime.now(timezone.utc).isoformat(),
+        "ventana_min": datos["ventana_min"],
+        "totales": {
+            "conversaciones_activas": t.get("conversaciones_activas") or 0,
+            "esperando_humano": t.get("esperando_humano") or 0,
+            "atendidas_hoy": t.get("atendidas_hoy") or 0,
+            "herramientas_hoy": t.get("herramientas_hoy") or 0,
+            "duracion_media_ms": t.get("duracion_media_ms"),
+            "fallos_hoy": t.get("fallos_hoy") or 0,
+            "agentes_activos": sum(
+                1 for a in agentes if a["estado"] in ("procesando", "atendiendo")),
+        },
+        "agentes": agentes,
+        "eventos": eventos[:20],
+    })
+
+
 @app.get("/configuracion")
 def configuracion():
     tenant = request.args.get("tenant")
