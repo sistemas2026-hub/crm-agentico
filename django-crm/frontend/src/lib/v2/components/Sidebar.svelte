@@ -99,6 +99,10 @@
         { href: '/asistente', label: 'Asistente', icon: Sparkles },
         { href: '/conversaciones', label: 'Conversaciones', icon: MessageCircle },
         { href: '/simulador-whatsapp', label: 'Simulador WhatsApp', icon: Smartphone },
+        // Que hace cada agente AHORA. /agentes dice como esta configurado
+        // cada uno; esto, en que anda en este momento -- son dos preguntas
+        // distintas y por eso son dos entradas.
+        { href: '/centro-mando', label: 'Centro de mando', icon: Radar },
         { href: '/agentes', label: 'Agentes', icon: Network },
         { href: '/supervisor-noc', label: 'Supervisor NOC IA', icon: Radar },
         { href: '/manual', label: 'Manual', icon: ListChecks },
