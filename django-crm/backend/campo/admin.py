@@ -50,6 +50,40 @@ class EventoTrabajoInline(admin.TabularInline):
 
 @admin.register(OrdenTrabajo)
 class OrdenTrabajoAdmin(admin.ModelAdmin):
+    """
+    Consulta y correccion puntual. El ALTA no vive aca.
+
+    POR QUE NO SE PUEDE CREAR UNA ORDEN DESDE EL ADMIN
+    --------------------------------------------------
+    Crear una orden es 'campo/services/despacho.py::crear_orden', y ese camino
+    hace cinco cosas que el formulario del admin no hace ninguna:
+
+      * exige rol de gestion del modulo (un tecnico no despacha);
+      * comprueba que la plantilla sea de la MISMA organizacion y este PUBLICADA;
+      * saca el consecutivo por organizacion, con reintentos y savepoint;
+      * respeta la 'Idempotency-Key' de la vista;
+      * escribe 'EventoTrabajo(tipo="orden_creada")' con su actor.
+
+    Y hay una sexta, que es la que convierte esto en un agujero y no en un
+    atajo: '/admin/' esta en EXEMPT_PATHS de RequireOrgContext, asi que ahi NO
+    hay 'request.org'. El desplegable de organizacion las lista TODAS, y como
+    hoy Django conecta con un rol que atraviesa la RLS, guardar escribe en la
+    empresa que se haya elegido. Un alta desde aqui podia cruzar tenants sin
+    una sola comprobacion -- justo lo que 'crear_orden' documenta como los dos
+    campos con los que se cruza un tenant si se aceptan de afuera.
+
+    MEDIDO: en produccion hay 3 ordenes y CERO eventos 'orden_creada'. Las tres
+    nacieron fuera del flujo de la aplicacion. Cerrar el alta aqui deja un solo
+    camino de creacion, que es el que tiene las cinco comprobaciones.
+
+    Lo que si se puede: consultar, filtrar, buscar y corregir los campos que ya
+    eran editables. Cambiar de organizacion no, por el mismo motivo: mover una
+    orden entre empresas no es una correccion, es una migracion de datos.
+    """
+
+    def has_add_permission(self, request):
+        return False
+
     list_display = (
         "numero",
         "cliente_nombre",
@@ -95,6 +129,12 @@ class OrdenTrabajoAdmin(admin.ModelAdmin):
         "estado_operativo",
         "iniciada_en", "completada_campo_en", "cerrada_en",
         "datos",
+        #  La organizacion se VE pero no se cambia. Editarla moveria la orden
+        #  --con sus evidencias, sus eventos y su consecutivo-- a otra empresa
+        #  desde un desplegable, y el consecutivo es unico POR organizacion:
+        #  el destino podria ya tener ese numero. Mover datos entre tenants no
+        #  es una correccion de formulario.
+        "org",
     )
     inlines = [AsignacionTrabajoInline, EvidenciaTrabajoInline, EventoTrabajoInline]
     fieldsets = (
@@ -162,7 +202,12 @@ class OrdenTrabajoAdmin(admin.ModelAdmin):
         tec = obj.tecnico_principal
         if tec and tec.user:
             return tec.user.name or tec.user.email
-        return format_html('<span style="color: #999;">Sin asignar</span>')
+        #  El texto va como ARGUMENTO y no dentro de la plantilla: desde
+        #  Django 5, 'format_html' sin args ni kwargs levanta TypeError. Con
+        #  esta linea tal como estaba, el listado del admin reventaba con un
+        #  500 en cuanto una orden no tenia tecnico -- que es el estado normal
+        #  de una orden recien creada.
+        return format_html('<span style="color: #999;">{}</span>', "Sin asignar")
 
     @admin.display(description="Estado Operativo")
     def estado_badge(self, obj: OrdenTrabajo):
