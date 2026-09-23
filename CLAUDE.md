@@ -204,7 +204,20 @@ git config core.hooksPath .githooks
 git config alias.novedades '!git fetch origin && echo "--- commits nuevos ---" && git log HEAD..origin/fix/integracion-wisphub --oneline && echo "--- archivos que cambiaron ---" && git diff --stat HEAD origin/fix/integracion-wisphub'
 ```
 
-Los hooks avisan cuando un `pull` trae cambios en los documentos de contexto, en la config de un tenant o migraciones nuevas — las tres cosas que **no se aplican solas** y cuyo síntoma, cuando faltan, no señala la causa.
+**Sin esa primera línea no hay puerta.** Los hooks de este repo no corren hasta que `core.hooksPath` apunte a `.githooks`, y un hook que no corre es exactamente la falla que §6 llama *código construido no es código que corre*. Comprobalo:
+
+```
+git config core.hooksPath      # tiene que devolver: .githooks
+```
+
+Qué hace cada uno:
+
+| Hook | Qué hace |
+|---|---|
+| `post-merge` / `post-checkout` | Avisan cuando llega un cambio en los documentos de contexto, en la config de un tenant o una migración nueva — las tres cosas que **no se aplican solas** y cuyo síntoma, cuando faltan, no señala la causa |
+| `pre-commit` | **Bloquea** un secreto o un artefacto de sesión en el stage, y la guarda de arquitectura en rojo cuando el cambio toca `nucleo/`. **Avisa** —sin trabar— qué exige el cambio según §6 y qué agente debería mirarlo |
+
+El `pre-commit` no verifica que un auditor haya corrido, y es a propósito: no hay artefacto que lo pruebe, y bloquear por algo que no se puede medir solo enseña a fabricar la marca que destraba. Bloquea lo medible; el resto lo recuerda. Para saltearlo a propósito: `git commit --no-verify`, **y decirlo al entregar**.
 
 ---
 
@@ -250,6 +263,7 @@ Viven en [.claude/agents/](.claude/agents/). **No están partidos por cargo** (a
 
 | Agente | Cuándo se invoca | Escribe |
 |---|---|---|
+| `orquestador` | **Al arrancar, o antes de commitear**: clasifica el cambio y devuelve qué agentes corren y cuáles se saltean, con su motivo. No ejecuta a los demás — devuelve el plan | No |
 | `arquitecto-dexter` | **Antes de construir algo nuevo**: ¿ya existe? ¿dónde vive? ¿código o configuración? | No |
 | `verificador-de-api` | Antes de que un filtro, endpoint o parámetro nuevo entre al catálogo | Solo la skill de esa API |
 | `revisor-de-pii` | Al tocar listas blancas, campos de texto libre, logs o cualquier dato que llegue al modelo | No |
@@ -259,7 +273,11 @@ Viven en [.claude/agents/](.claude/agents/). **No están partidos por cargo** (a
 | `guardia-de-release` | Checklist completo de salida: ledger, variables, guardas, git. Delega config en el anterior | No |
 | `auditor-independiente` | Al cerrar un bloque, antes de integrarlo: busca el hueco que quien construyó no puede ver | No |
 
-Siete de los ocho son **de solo lectura a propósito**: su valor es una pasada independiente, y un auditor que además edita empieza a defender lo que escribió. Ninguno hace `push`, despliega ni toca producción.
+Ocho de los nueve son **de solo lectura a propósito**: su valor es una pasada independiente, y un auditor que además edita empieza a defender lo que escribió. Ninguno hace `push`, despliega ni toca producción.
+
+**Un subagente no lanza subagentes.** El `orquestador` devuelve el plan; la sesión principal es la que ejecuta a los demás. No le pidas que "corra el flujo": pedile el plan, y seguilo.
+
+*Nota de historia: los agentes nacieron en `d97ea22`, un commit que además arrastró artefactos operativos de sesión (`.playwright-mcp/`, lanzadores) que no forman parte del sistema. El `pre-commit` de §9 existe en parte para que no vuelva a pasar.*
 
 **Dos capas que no se mezclan.** Estos ocho son agentes **para construir Dexter**, y viven en `.claude/agents/`. Los *agentes del producto* —el router, `soporte_tecnico_cliente`, `facturacion_cliente`, `ventas`— son roles del tenant, viven en `asistente.tenant_config`, se editan desde `/agentes` y no son código. Que la palabra sea la misma no los vuelve lo mismo: uno se toca con un commit, el otro con `cli/cargar_config.py`.
 
@@ -330,7 +348,7 @@ Escritos para que no se redescubran cada sesión. Ninguno es un descuido: son de
 | # | Qué | Por qué importa |
 |---|---|---|
 | D1 | **No hay CI automática en este repositorio.** [.github/](.github/) solo tiene `CODEOWNERS`; los workflows de [django-crm/.github/workflows/](django-crm/.github/workflows/) no los lee GitHub Actions (solo mira la raíz). Los 145 archivos de `tests/` son scripts sueltos, sin runner agregado | Las guardas de §6 dependen de que alguien se acuerde de correrlas |
-| D2 | **El deploy no tiene puerta.** Un push a la rama de despliegue publica sin que nada haya corrido antes | Junto con D1: nada mecánico impide desplegar con una guarda en rojo |
+| D2 | **El deploy no tiene puerta** — *parcialmente cerrado (23/09/2026)*. El `pre-commit` de §9 ya bloquea un secreto o artefacto en el stage y la guarda de arquitectura en rojo, y recuerda el resto. Lo que **sigue abierto**: corre solo en la máquina que hizo el `git config` de §9, y un push a la rama de despliegue publica sin que nada haya corrido antes | Junto con D1: nada del lado del servidor impide desplegar con una guarda en rojo |
 | D3 | **Monolitos de archivo** (§2) | Superficie de conflicto alta entre sesiones y revisiones difíciles |
 | D4 | **El motor corre con `--workers 1`** y el historial caliente vive en RAM del proceso | Techo real de escala; se levanta el día que ese historial viva en `asistente.conversations` |
 | D5 | **El segundo ISP no entra todavía.** El motor ya es multi-empresa; `PRIVATE_ASISTENTE_TENANT` está en 23 lugares del frontend y nunca se deriva de la organización del usuario | Es una decisión de producto (¿una instalación por ISP, o una plataforma?) y conviene tomarla **antes** de escribir el código |

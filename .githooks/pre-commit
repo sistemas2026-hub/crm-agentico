@@ -1,0 +1,120 @@
+#!/bin/sh
+# Puerta antes de cada commit. Dos cosas distintas, y conviene no confundirlas:
+#
+#   BLOQUEA  lo que se puede medir en segundos y no admite opinion:
+#            un secreto o un artefacto de sesion en el stage, y la guarda de
+#            arquitectura cuando el cambio toca nucleo/.
+#
+#   AVISA    lo que NINGUN hook puede verificar: si los casos dorados corrieron,
+#            si tal auditor miro el cambio. No hay artefacto que lo pruebe, y
+#            bloquear por algo que no se puede medir solo ensena a fabricar la
+#            marca que destraba. Ver CLAUDE.md §6 y §11.2.
+#
+# Para saltearlo a proposito: git commit --no-verify (y decirlo al entregar).
+
+ARCHIVOS=$(git diff --cached --name-only --diff-filter=ACMR)
+[ -n "$ARCHIVOS" ] || exit 0
+
+RAYA="================================================================"
+
+# --- BLOQUEO 1: lo que nunca va al repositorio -----------------------------
+# .env es el caso grave. El resto son artefactos de sesion: no rompen nada,
+# pero ensucian la historia. Paso de verdad en d97ea22, donde las definiciones
+# de los agentes entraron mezcladas con ~200 archivos de Playwright.
+COLADOS=$(echo "$ARCHIVOS" | grep -E '^\.env$|^\.env\.|^\.playwright-mcp/|^\.tmp/|__pycache__/|\.pyc$|^\.claude/settings\.local\.json$|\.lock$')
+
+if [ -n "$COLADOS" ]; then
+    echo ""
+    echo "$RAYA"
+    echo "  COMMIT DETENIDO: hay archivos que no van al repositorio."
+    echo ""
+    echo "$COLADOS" | sed 's/^/    - /'
+    echo ""
+    echo "  Si es .env: son credenciales. No se commitean nunca."
+    echo "  Si es un artefacto de sesion: sacalo del stage."
+    echo ""
+    echo "    git restore --staged <archivo>"
+    echo ""
+    echo "  Y stagea por rutas explicitas: 'git add .' es como entraron."
+    echo "$RAYA"
+    echo ""
+    exit 1
+fi
+
+# --- BLOQUEO 2: la guarda de arquitectura ----------------------------------
+# Corre en segundos y es determinista: si el nucleo aprendio a distinguir un
+# cliente, eso no se discute en una revision, se frena aca.
+TOCA_NUCLEO=$(echo "$ARCHIVOS" | grep -E '^nucleo/')
+
+if [ -n "$TOCA_NUCLEO" ]; then
+    if command -v py >/dev/null 2>&1; then
+        echo ""
+        echo "[pre-commit] El cambio toca nucleo/. Corriendo la guarda de arquitectura..."
+        if ! py -3.13 tests/test_nucleo_sin_tenants.py; then
+            echo ""
+            echo "$RAYA"
+            echo "  COMMIT DETENIDO: el nucleo conoce a un cliente."
+            echo ""
+            echo "  Esto NO se arregla con una excepcion. El comportamiento va a"
+            echo "  tenants/<slug>.config.yaml y el nucleo lo lee de ahi."
+            echo "$RAYA"
+            echo ""
+            exit 1
+        fi
+    else
+        echo "[pre-commit] AVISO: 'py' no esta disponible; la guarda de"
+        echo "             arquitectura NO se corrio. Correla a mano:"
+        echo "             py -3.13 tests/test_nucleo_sin_tenants.py"
+    fi
+fi
+
+# --- AVISO: que exige este cambio, segun lo que toca -----------------------
+PENDIENTES=""
+agregar() { PENDIENTES="$PENDIENTES$1\n"; }
+
+echo "$ARCHIVOS" | grep -qE '^tenants/.*\.config\.yaml$' && \
+    agregar "  CATALOGO / ROLES tocados  -> el motor lee la BASE, no este archivo.
+      py -3.13 cli/diferencias_config.py rapilink     (segundos)
+      py -3.13 cli/evaluar.py rapilink --humo --base  (~3 min, --base NO es opcional)
+      agentes: guardia-de-config, corredor-de-evaluacion"
+
+echo "$ARCHIVOS" | grep -qE '^nucleo/seguridad/' && \
+    agregar "  SEGURIDAD tocada -> quien mira esto:
+      agente auditor-de-frontera (que accion tiene efecto, y por que caminos)
+      agente revisor-de-pii      (que dato sale, y hacia donde)"
+
+echo "$ARCHIVOS" | grep -qE '^nucleo/observabilidad/|^nucleo/canales/' && \
+    agregar "  LOGS / CANALES tocados -> ningun dato de cliente en el log.
+      py -3.13 tests/test_registro_sin_pii.py
+      agente: revisor-de-pii"
+
+echo "$ARCHIVOS" | grep -qE '^supabase/.*\.sql$' && \
+    agregar "  MIGRACION nueva -> no se aplica sola, y su sintoma llega despues,
+    en medio de una conversacion. Siempre por el ledger, nunca con psql.
+      py -3.13 cli/migrar_asistente.py --estado
+      agente: guardia-de-release"
+
+echo "$ARCHIVOS" | grep -qE '^nucleo/herramientas/|^conectores/' && \
+    agregar "  HERRAMIENTAS / CONECTORES tocados -> la doc de una API externa es
+    una hipotesis. Verificar con el metodo del valor imposible.
+      agente: verificador-de-api"
+
+echo "$ARCHIVOS" | grep -qE '^nucleo/modelo/|^nucleo/recuperacion/prompt\.py$' && \
+    agregar "  MODELO / PROMPT tocados -> se afirma sobre la TRAZA, no la redaccion.
+      py -3.13 cli/evaluar.py rapilink --humo         (~3 min)
+      agente: corredor-de-evaluacion"
+
+if [ -n "$PENDIENTES" ]; then
+    echo ""
+    echo "$RAYA"
+    echo "  Este cambio es RELEVANTE (CLAUDE.md §11.2). El commit sigue:"
+    echo "  esto es un recordatorio, no una traba."
+    echo ""
+    printf "%b" "$PENDIENTES"
+    echo "  Un paso se saltea DICIENDOLO. Lo peligroso no es saltarselo:"
+    echo "  es saltarselo y que nadie lo sepa."
+    echo "$RAYA"
+    echo ""
+fi
+
+exit 0
