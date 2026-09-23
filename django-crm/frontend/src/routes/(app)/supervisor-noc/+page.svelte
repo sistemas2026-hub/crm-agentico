@@ -471,10 +471,10 @@
         </div>
 
         <!--
-          3 · Tickets por origen · NO EXISTE EN EL BACKEND
-          El diseño pide separar WispHub de Dexter + WispHub. Ninguna respuesta
-          de hoy trae ese campo, así que el bloque dice qué falta en vez de
-          repartir un total inventado entre dos mitades.
+          3 · Tickets por origen · EL CAMPO EXISTE, EL INDICADOR NO
+          `OrdenTrabajo.origen_sistema` ya distingue wisphub de crm, solicitudes
+          y manual. Lo que no existe es un indicador que los agrupe, así que el
+          bloque dice dónde está el dato en vez de repartir un total inventado.
         -->
         <div class="snoc-grafico">
           <h2 class="snoc-grafico-titulo">
@@ -487,7 +487,7 @@
           </div>
         </div>
 
-        <!-- 4 · Mapa de operación · NO EXISTE EN EL BACKEND -->
+        <!-- 4 · Mapa de operación · LAS COORDENADAS ESTAN EN LA ORDEN, NO EN LA PROPUESTA -->
         <div class="snoc-grafico">
           <h2 class="snoc-grafico-titulo">
             <span class="snoc-icono snoc-tenue" style="font-size:15px;">map</span>
@@ -564,9 +564,13 @@
                     Las dos columnas que el diseño pide y la propuesta no trae.
                     Marcadas, no rellenadas: una columna de rayas sin explicar
                     se lee como un fallo de la pantalla.
+
+                    Ojo con la de técnico: el detalle trae `responsable_sugerido`,
+                    que es a quien la IA propone, NO a quien está asignado. Ponerlo
+                    en esta columna diría que alguien ya lo tiene, y no lo tiene.
                   -->
                   <th class="snoc-col-ausente" title="La propuesta no trae técnico asignado">Técnico *</th>
-                  <th class="snoc-col-ausente" title="La propuesta no trae zona">Zona *</th>
+                  <th class="snoc-col-ausente" title="La zona vive en la línea de programación, no en la propuesta">Zona *</th>
                   <th>Estado</th>
                   <th>Detectado</th>
                   <th class="snoc-derecha">Acción</th>
@@ -615,7 +619,8 @@
             </table>
           </div>
           <span class="snoc-mono-sm snoc-tenue">
-            * Técnico y zona no vienen en la propuesta: el backend no los expone todavía.
+            * Técnico y zona no vienen en la propuesta. La zona vive en la línea de programación; el
+            técnico asignado, en la orden.
           </span>
         {/if}
       </section>
@@ -693,7 +698,7 @@
           {/if}
         </div>
 
-        <!-- Actividad reciente · NO EXISTE EN EL BACKEND -->
+        <!-- Actividad reciente · NO HAY FEED; la auditoría es por propuesta -->
         <div class="snoc-grafico">
           <h2 class="snoc-grafico-titulo">
             <span class="snoc-icono snoc-tenue" style="font-size:15px;">history</span>

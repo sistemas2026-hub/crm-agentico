@@ -285,11 +285,15 @@ export function cargaPorTecnico(personas) {
 export const BLOQUES_SIN_DATO = {
   origen: {
     titulo: 'Tickets por origen',
-    motivo: 'Ninguna respuesta distingue hoy un caso de WispHub de uno de Dexter + WispHub.'
+    motivo:
+      'El campo existe (OrdenTrabajo.origen_sistema: wisphub, solicitudes, crm, manual). ' +
+      'Lo que falta es agruparlo en los indicadores.'
   },
   mapa: {
     titulo: 'Mapa de operación',
-    motivo: 'Las propuestas no traen zona ni coordenadas: no hay dónde ubicarlas.'
+    motivo:
+      'Las coordenadas existen en la orden (gps_lat/gps_lng), pero la propuesta solo ' +
+      'apunta con origen_tipo + origen_id y no las trae.'
   },
   actividad: {
     titulo: 'Actividad reciente del Supervisor',
