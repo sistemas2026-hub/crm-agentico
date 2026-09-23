@@ -15,8 +15,8 @@ Medido el 23/09/2026 contra `feat/campo-diseno-stitch`.
 | Versión de la base local | 12 |
 | Esquema de formulario soportado | 1 (una orden que pida más se bloquea) |
 | Migraciones de `campo` en el backend | 6 |
-| Pruebas | 529, verdes con la bandera de demostración apagada y encendida |
-| Archivos de prueba | 42 |
+| Pruebas | 536, verdes con la bandera de demostración apagada y encendida |
+| Archivos de prueba | 43 |
 
 ---
 
@@ -149,6 +149,27 @@ Confundirlos hace que alguien se vaya a su casa creyendo que entregó.
 
 → `test/cierre_jornada_app_test.dart`, `test/e2e_jornada_completa_test.dart`
 
+### El servidor se elige desde el teléfono, y lo elegido manda
+
+El campo existía desde el principio, pero sólo en depuración y —lo que
+importa— **sin efecto**: `ApiEndpoints` arma rutas absolutas sobre una
+variable que arrancaba con el valor de compilación y no la tocaba nadie, así
+que una ruta absoluta le ganaba al `baseUrl` del pedido. La URL se guardaba
+prolijamente y los pedidos seguían saliendo al servidor de siempre.
+
+Eso se veía como un "error de conexión" sin causa visible: un APK compilado
+sin `--dart-define=BACKEND_URL` apunta a `127.0.0.1`, que dentro del teléfono
+es el teléfono mismo, y no había forma de corregirlo desde el aparato.
+
+La guarda no afirma que el campo exista: afirma que cambiarlo cambia a dónde
+sale el pedido. Y con esto vienen dos obligaciones que la prueba también
+sostiene: el destino se ve **siempre**, aunque el campo esté plegado —nadie
+escribe una contraseña sin saber a dónde va— y una dirección a medias se
+rechaza en vez de recortarse, porque recortarla en silencio produce un
+dominio que parece bueno y no resuelve.
+
+→ `test/servidor_configurable_test.dart`
+
 ### Nada cruza entre personas ni entre empresas
 
 Toda escritura lleva la identidad en el `WHERE`. Una consulta sin ella no es
@@ -198,10 +219,15 @@ haga las tres cosas y se cuelgue la mitad de las veces.
 
 No son funciones. Son verificaciones que no se pueden hacer con pruebas.
 
-- [ ] **Compilar el APK de release e instalarlo limpio.** Ya hubo dos errores
-      que sólo aparecen en el artefacto final: un comentario XML con `--` que
-      rompía `mergeReleaseResources`, y configuración declarada en el repo que
-      producción no tenía.
+- [x] **Compilar el APK de release e instalarlo limpio.** Hecho el
+      23/09/2026 sobre el emulador (`x86_64`, instalación limpia tras
+      `uninstall`): la pantalla de ingreso dibuja bien, el servidor elegido
+      sobrevive a reinstalar, y el servidor real contesta *"Correo o
+      contraseña incorrectos"* a credenciales falsas — o sea que el camino
+      llega. Falta hacerlo en un teléfono de verdad (`arm64`, 19.2 MB).
+      Ya hubo dos errores que sólo aparecen en el artefacto final: un
+      comentario XML con `--` que rompía `mergeReleaseResources`, y
+      configuración declarada en el repo que producción no tenía.
 - [ ] **Entrar con una cuenta real** y bajar una jornada de verdad.
 - [ ] **Recorrer el día completo en un teléfono**, sin red parte del tiempo.
 - [ ] **Reinstalar sobre una versión anterior** para ejercitar las migraciones

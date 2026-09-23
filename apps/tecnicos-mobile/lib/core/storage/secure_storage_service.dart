@@ -1,3 +1,4 @@
+import '../api/api_endpoints.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 /// Lo minimo que hace falta para saber de quien son los datos.
@@ -25,8 +26,15 @@ class SecureStorageService implements SecureStorageLectura {
   static const _keyUserName = 'dexter_user_name';
   static const _keyBaseUrl = 'dexter_api_base_url';
 
-  // Servidor local con adb reverse
-  static const String defaultBaseUrl = 'http://127.0.0.1:8000';
+  /// El servidor con el que se compiló la aplicación.
+  ///
+  /// NO una constante propia. Antes acá vivía un `http://127.0.0.1:8000`
+  /// fijo, y quedaban dos valores por defecto distintos: el de compilación
+  /// —que llega por `--dart-define=BACKEND_URL=...`— y éste. Cualquier
+  /// petición anterior al primer inicio de sesión salía contra el segundo, o
+  /// sea contra el propio teléfono, y el error que se ve es "conexión
+  /// rechazada" sin ninguna pista de por qué.
+  static String get defaultBaseUrl => ApiEndpoints.defaultEnvironmentUrl;
 
   Future<void> saveTokens({
     required String accessToken,
@@ -65,7 +73,16 @@ class SecureStorageService implements SecureStorageLectura {
     return url ?? defaultBaseUrl;
   }
 
+  /// Cambia el servidor y lo aplica en el acto.
+  ///
+  /// Las dos mitades tienen que moverse juntas. `ApiEndpoints` arma rutas
+  /// ABSOLUTAS (`'$baseUrl/api/...'`), y una ruta absoluta le gana al
+  /// `baseUrl` que el interceptor de Dio pone en cada pedido. Guardar la URL
+  /// sin actualizar esa variable dejaba la pantalla de servidor sin ningún
+  /// efecto: se escribía otro dominio, se guardaba, y los pedidos seguían
+  /// yendo al que se fijó al compilar.
   Future<void> setBaseUrl(String url) async {
+    ApiEndpoints.baseUrl = url;
     await _storage.write(key: _keyBaseUrl, value: url);
   }
 

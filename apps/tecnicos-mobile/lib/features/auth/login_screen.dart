@@ -14,6 +14,34 @@ import '../shell/app_shell.dart';
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
+  /// Lo escrito, si es una dirección a la que se le puede pedir algo.
+  ///
+  /// Devuelve `null` cuando no lo es. Vale la pena ser estricto: el campo se
+  /// tipea con el pulgar, a veces al sol, y una dirección a medias no falla
+  /// al escribirla sino un rato después, como un "error de conexión" que no
+  /// se parece en nada a su causa. Mejor decirlo acá.
+  static String? normalizarServidor(String crudo) {
+    final texto = crudo.trim();
+    if (texto.isEmpty) return null;
+    final Uri? url = Uri.tryParse(texto);
+    if (url == null) return null;
+    if (url.scheme != 'http' && url.scheme != 'https') return null;
+    if (url.host.isEmpty || !url.host.contains('.')) return null;
+    // Una ruta, ahi, no es un servidor.
+    //
+    // `ApiEndpoints` arma `'$baseUrl/api/...'`, asi que lo unico que se
+    // espera es esquema, dominio y puerto. Si viene algo mas, se rechaza en
+    // vez de recortarlo: recortar en silencio convierte texto pegado encima
+    // de otro -- `https://uno.cohttps://dos.co`, que parsea como el dominio
+    // `uno.cohttps` con una ruta -- en una direccion que parece buena y no
+    // resuelve. Eso mismo paso en el emulador. Una barra final sola si se
+    // acepta, porque escribirla es normal y no cambia a donde se va.
+    if (url.path.isNotEmpty && url.path != '/') return null;
+    if (url.hasQuery || url.hasFragment) return null;
+    return Uri(scheme: url.scheme, host: url.host, port: url.hasPort ? url.port : null)
+        .toString();
+  }
+
   @override
   State<LoginScreen> createState() => _LoginScreenState();
 }
@@ -24,13 +52,12 @@ class _LoginScreenState extends State<LoginScreen> {
     text: kDebugMode ? 'carlos.tecnico@rapilink.com' : '',
   );
   final _passwordController = TextEditingController();
-  // El servidor que se fijó al compilar (`--dart-define=BACKEND_URL=...`).
+  // El servidor al que se va a entrar.
   //
-  // Antes, en depuración, este campo forzaba `127.0.0.1:8000` e ignoraba lo
-  // que se hubiera pasado al compilar: apuntar la aplicación a otro backend
-  // parecía funcionar y no tenía ningún efecto, había que corregirlo a mano en
-  // cada arranque. Ahora el valor de compilación manda, y en depuración sigue
-  // siendo editable para poder cambiarlo sin recompilar.
+  // Arranca con el valor de compilación (`--dart-define=BACKEND_URL=...`) y
+  // en `initState` se reemplaza por el que haya elegido esta persona, si
+  // eligió alguno. Lo elegido sobrevive a cerrar la aplicación y a cerrar
+  // sesión: se cambia acá, o con el botón de restablecer.
   final _serverUrlController = TextEditingController(
     text: ApiEndpoints.defaultEnvironmentUrl,
   );
@@ -41,12 +68,59 @@ class _LoginScreenState extends State<LoginScreen> {
 
   bool _isLoading = false;
   bool _showPassword = false;
+  bool _mostrarServidor = false;
   String? _errorMessage;
 
   @override
   void initState() {
     super.initState();
+    // La línea de arriba y el campo son el MISMO dato, así que se mueven
+    // juntos. Sin esto quedaban diciendo servidores distintos al mismo
+    // tiempo: el campo ya decía el nuevo y el encabezado seguía mostrando el
+    // anterior, que es la peor versión posible de una pantalla cuya única
+    // razón de ser es no dejar dudas sobre a dónde va la contraseña.
+    _serverUrlController.addListener(_alEscribirElServidor);
+    _cargarServidorGuardado();
     _checkExistingSession();
+  }
+
+  @override
+  void dispose() {
+    _serverUrlController.removeListener(_alEscribirElServidor);
+    super.dispose();
+  }
+
+  void _alEscribirElServidor() {
+    if (mounted) setState(() {});
+  }
+
+  /// Muestra a dónde apunta hoy la aplicación, no a dónde apuntaba de fábrica.
+  Future<void> _cargarServidorGuardado() async {
+    final guardado = await _storage.getBaseUrl();
+    if (!mounted) return;
+    setState(() => _serverUrlController.text = guardado);
+  }
+
+  /// El servidor, en la forma corta que sirve para reconocerlo de un vistazo.
+  String _servidorActual() {
+    final texto = _serverUrlController.text.trim();
+    if (texto.isEmpty) return 'Servidor sin definir';
+    final String? valido = LoginScreen.normalizarServidor(texto);
+    if (valido == null) return 'Dirección no válida';
+    return Uri.parse(valido).host;
+  }
+
+  /// Vuelve al servidor con el que se compiló esta copia.
+  ///
+  /// Es la salida cuando alguien escribió cualquier cosa y ya no sabe cuál
+  /// era el bueno: un técnico en la calle no tiene a quién preguntarle.
+  Future<void> _restablecerServidor() async {
+    await _storage.setBaseUrl(ApiEndpoints.defaultEnvironmentUrl);
+    if (!mounted) return;
+    setState(() {
+      _serverUrlController.text = ApiEndpoints.defaultEnvironmentUrl;
+      _errorMessage = null;
+    });
   }
 
   Future<void> _checkExistingSession() async {
@@ -67,9 +141,24 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
-      final baseUrl = kDebugMode
-          ? _serverUrlController.text.trim()
-          : ApiEndpoints.defaultEnvironmentUrl;
+      // Se entra al servidor que dice la pantalla, siempre. Antes esto era
+      // así sólo en depuración y en release se ignoraba el campo: un APK
+      // compilado apuntando al servidor equivocado no se podía corregir sin
+      // volver a compilar e instalar en cada teléfono.
+      final String escrito = _serverUrlController.text.trim();
+      final String? baseUrl = escrito.isEmpty
+          ? ApiEndpoints.defaultEnvironmentUrl
+          : LoginScreen.normalizarServidor(escrito);
+      if (baseUrl == null) {
+        setState(() {
+          _isLoading = false;
+          _mostrarServidor = true;
+          _errorMessage = 'La dirección del servidor no es válida. Tiene que '
+              'empezar con https:// y terminar en un dominio, como '
+              'https://ejemplo.com';
+        });
+        return;
+      }
       await _storage.setBaseUrl(baseUrl);
 
       final response = await _apiClient.post(
@@ -292,13 +381,62 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     const SizedBox(height: 16),
                   ],
-                  if (kDebugMode) ...[
+                  // A qué servidor se está por entrar.
+                  //
+                  // POR QUÉ SE VE SIEMPRE, Y NO SÓLO EN DEPURACIÓN
+                  // ----------------------------------------------
+                  // Antes esto existía únicamente en las compilaciones de
+                  // desarrollo. En un APK de release el servidor quedaba fijo
+                  // al compilar y no había forma de corregirlo desde el
+                  // teléfono: si se equivocaban al armar el artefacto, o si
+                  // el dominio cambiaba, la única salida era recompilar e
+                  // reinstalar en cada teléfono.
+                  //
+                  // Ahora se puede cambiar. Va plegado y en letra chica a
+                  // propósito: quien entra todos los días no tiene que verlo
+                  // ni tocarlo, pero quien lo necesita lo encuentra.
+                  //
+                  // Y va **siempre visible** aunque esté plegado, porque
+                  // dejar que alguien escriba su contraseña sin saber a qué
+                  // servidor la manda es el riesgo real de tener esto acá.
+                  // La línea dice a dónde apunta, sin abrir nada.
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: _isLoading
+                          ? null
+                          : () => setState(
+                              () => _mostrarServidor = !_mostrarServidor),
+                      icon: Icon(
+                        _mostrarServidor
+                            ? Icons.expand_less
+                            : Icons.dns_outlined,
+                        size: 16,
+                      ),
+                      label: Text(
+                        _servidorActual(),
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ),
+                  ),
+                  if (_mostrarServidor) ...[
+                    const SizedBox(height: 8),
                     TextFormField(
                       controller: _serverUrlController,
-                      decoration: const InputDecoration(
-                        labelText: 'Servidor Backend (Debug Dev)',
-                        prefixIcon: Icon(Icons.dns_outlined),
-                        helperText: 'Herramienta de desarrollo. En producción viene fijada por build.',
+                      enabled: !_isLoading,
+                      keyboardType: TextInputType.url,
+                      autocorrect: false,
+                      decoration: InputDecoration(
+                        labelText: 'Servidor',
+                        prefixIcon: const Icon(Icons.dns_outlined),
+                        helperText: 'Se recuerda en este teléfono hasta que '
+                            'lo cambies o lo restablezcas.',
+                        helperMaxLines: 2,
+                        suffixIcon: IconButton(
+                          tooltip: 'Volver al servidor de fábrica',
+                          icon: const Icon(Icons.restart_alt, size: 20),
+                          onPressed: _isLoading ? null : _restablecerServidor,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 16),
