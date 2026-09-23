@@ -214,6 +214,7 @@ class _MaterialesScreenState extends State<MaterialesScreen> {
     final int conConsumo = materiales.where((m) => m.usados > 0).length;
     final int sinTocar = materiales.where((m) => m.usados == 0).length;
     final int novedades = _kit?.conNovedad.length ?? 0;
+    final int pendientes = _kit?.sinSubir ?? 0;
     final String acta = _kit?.acta ?? '';
 
     return Container(
@@ -256,6 +257,33 @@ class _MaterialesScreenState extends State<MaterialesScreen> {
                         style: AppTypography.datoChico.copyWith(
                           color: AppColors.onSurfaceVariant,
                         ),
+                      ),
+                    ],
+                    // Lo registrado que todavía no salió del teléfono.
+                    //
+                    // El dato estaba en el kit y no se dibujaba en ninguna
+                    // parte: alguien podía registrar consumo sin señal toda la
+                    // mañana y esta pantalla se veía idéntica a tenerlo todo
+                    // enviado. Lo encontró la prueba que compara estados: las
+                    // dos capturas salían iguales byte a byte.
+                    if (pendientes > 0) ...<Widget>[
+                      const SizedBox(height: 4),
+                      Row(
+                        children: <Widget>[
+                          const Icon(Icons.cloud_upload_outlined,
+                              size: 13, color: AppColors.onSurfaceVariant),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              pendientes == 1
+                                  ? '1 movimiento esperando señal'
+                                  : '$pendientes movimientos esperando señal',
+                              style: AppTypography.etiquetaChica,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ],

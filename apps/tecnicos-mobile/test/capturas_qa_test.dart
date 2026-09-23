@@ -256,6 +256,49 @@ void main() {
         datosDirty: 0,
       );
 
+
+  /// Un conector cualquiera, para las capturas de la matriz.
+  const MaterialEnCustodia matrizConector = MaterialEnCustodia(
+    categoria: 'Consumibles',
+    nombre: 'Conector SC/APC',
+    detalle: 'Reconectorización',
+    clase: ClaseMaterial.consumible,
+    recibidos: 10,
+    usados: 3,
+    unidad: 'unidades',
+  );
+
+  EstadoDeJornada jornadaDe({
+    bool cerrada = false,
+    bool cierreTomado = false,
+  }) =>
+      EstadoDeJornada(
+        recibido: '24',
+        consumido: '14',
+        aDevolver: '10',
+        devuelto: '10',
+        diferencias: 0,
+        ordenesAsignadas: 4,
+        ordenesCompletadas: 3,
+        materiales: const <MaterialDeJornada>[
+          MaterialDeJornada(
+            codigo: 'CON-SC-APC',
+            nombre: 'Conector SC/APC',
+            unidad: 'unidades',
+            esperado: '7',
+            devuelto: '7',
+            diferencia: 0,
+            porDevolver: 0,
+          ),
+        ],
+        transferencias: const <TransferenciaPendiente>[],
+        motivos: const <String>[],
+        sinSubir: 0,
+        cerrada: cerrada,
+        hayJornada: true,
+        cierreTomado: cierreTomado,
+      );
+
   /// Monta el widget al tamaño pedido y guarda el PNG.
   Future<void> capturar(
     WidgetTester tester,
@@ -271,7 +314,10 @@ void main() {
 
     await tester.pumpWidget(MaterialApp(
       theme: AppTheme.lightTheme,
-      home: pantalla,
+      // Las pantallas que no traen Scaffold propio viven dentro del armazon,
+      // que si lo tiene. Sin el, un InkWell explota con "No Material widget
+      // found" y la captura sale vacia.
+      home: pantalla is Scaffold ? pantalla : Scaffold(body: pantalla),
       debugShowCheckedModeBanner: false,
     ));
     await tester.pumpAndSettle();
@@ -442,6 +488,22 @@ void main() {
     }
 
 
+    DetalleOrdenScreen detalleCon({required SyncSummary resumen}) =>
+        DetalleOrdenScreen(
+          ordenId: 'ot-1',
+          ordenes: ordenes,
+          acciones: AccionesOrden(
+            transicionar: ({
+              required String ordenId,
+              required String nuevoEstadoLocal,
+              required String tipoAccion,
+              required int revisionBase,
+            }) async {},
+            sincronizar: () async {},
+          ),
+          resumenInicial: resumen,
+        );
+
     /// Los estados que no son "todo bien": un valor que no sirve, la cola
     /// enviando, y un cambio que el servidor rechazó.
     ///
@@ -538,6 +600,98 @@ void main() {
           estado.key,
           telefonoLargo,
         );
+      });
+    }
+
+
+    /// Las capturas de la matriz de estados.
+    ///
+    /// Se nombran `matriz_<pantalla>_<estado>` porque hay una prueba que las
+    /// compara entre sí: dos estados distintos de la misma pantalla no pueden
+    /// producir la misma imagen. Ver `matriz_de_estados_test.dart`.
+    // Constructores, no widgets: el mapa se evalua al declarar el grupo y
+    // `ordenes` recien existe dentro de cada test.
+    final Map<String, Widget Function()> deLaMatriz =
+        <String, Widget Function()>{
+      'matriz_detalle_normal': () => detalleCon(resumen: resumen()),
+      'matriz_detalle_offline': () => detalleCon(
+        resumen: const SyncSummary(
+          status: SyncStatus.idle,
+          isSyncing: false,
+          hasConnectionError: true,
+          mutacionesPendientes: 1,
+          mutacionesConflicto: 0,
+          evidenciasPendientes: 0,
+          datosDirty: 0,
+        ),
+      ),
+      'matriz_detalle_sincronizando': () => detalleCon(
+        resumen: const SyncSummary(
+          status: SyncStatus.syncing,
+          isSyncing: true,
+          hasConnectionError: false,
+          mutacionesPendientes: 1,
+          mutacionesConflicto: 0,
+          evidenciasPendientes: 0,
+          datosDirty: 0,
+        ),
+      ),
+      'matriz_detalle_conflicto': () => detalleCon(
+        resumen: const SyncSummary(
+          status: SyncStatus.error,
+          isSyncing: false,
+          hasConnectionError: false,
+          mutacionesPendientes: 0,
+          mutacionesConflicto: 1,
+          evidenciasPendientes: 0,
+          datosDirty: 0,
+        ),
+      ),
+      'matriz_jornada_normal': () => DevolucionScreen(estado: jornadaDe()),
+      'matriz_jornada_cierre_tomado': () =>
+          DevolucionScreen(estado: jornadaDe(cierreTomado: true)),
+      'matriz_jornada_cerrada': () =>
+          DevolucionScreen(estado: jornadaDe(cerrada: true)),
+      'matriz_materiales_normal': () => const MaterialesScreen(
+        tecnico: 'Carlos Gómez',
+        kit: KitDeJornada(
+          materiales: <MaterialEnCustodia>[matrizConector],
+          acta: 'Acta #K-2026-311',
+          sinSubir: 0,
+          conNovedad: <MovimientoConNovedad>[],
+        ),
+      ),
+      'matriz_materiales_pendientes': () => const MaterialesScreen(
+        tecnico: 'Carlos Gómez',
+        kit: KitDeJornada(
+          materiales: <MaterialEnCustodia>[matrizConector],
+          acta: 'Acta #K-2026-311',
+          sinSubir: 3,
+          conNovedad: <MovimientoConNovedad>[],
+        ),
+      ),
+      'matriz_materiales_novedad': () => const MaterialesScreen(
+        tecnico: 'Carlos Gómez',
+        kit: KitDeJornada(
+          materiales: <MaterialEnCustodia>[matrizConector],
+          acta: 'Acta #K-2026-311',
+          sinSubir: 0,
+          conNovedad: <MovimientoConNovedad>[
+            MovimientoConNovedad(
+              material: 'Conector SC/APC',
+              cantidad: '2',
+              resultado: 'descuadre',
+              motivo: 'El saldo no coincide con lo que registró bodega.',
+            ),
+          ],
+        ),
+      ),
+    };
+
+    for (final MapEntry<String, Widget Function()> caso
+        in deLaMatriz.entries) {
+      testWidgets('Matriz ${caso.key}', (WidgetTester t) async {
+        await capturar(t, caso.value(), caso.key, telefonoLargo);
       });
     }
 
