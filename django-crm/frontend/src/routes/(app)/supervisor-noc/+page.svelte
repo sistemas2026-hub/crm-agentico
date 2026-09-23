@@ -102,13 +102,31 @@
 
   //  El SLA de cada hallazgo lo calcula 'operaciones/sla.py' y llega resuelto
   //  en 'contexto': aquí solo se le pone color y palabra.
+  //  LOS SEIS ESTADOS DE SLA SON LOS DE 'operaciones/sla.py'
+  //  ---------------------------------------------------------
+  //  No se traducen a otros ni se agrupan: el mismo modulo que dispara los
+  //  detectores 'orden_sla_vencido' y 'orden_sla_por_vencer' es el que decide
+  //  este rotulo, asi que la columna nunca puede contradecir al hallazgo que
+  //  tiene al lado.
+  //
+  //  Los tres ultimos NO son errores, y por eso tienen texto propio en vez de
+  //  un guion: «sin plazo» es que nadie se comprometio a un tiempo, «no
+  //  aplica» es que el trabajo ya termino, y «datos insuficientes» es que no
+  //  se pudo leer el plazo. Las tres se arreglan en lugares distintos.
   const SLA = {
-    vencido: { texto: 'Vencido', clase: 'snoc-insignia-error-solida' },
-    por_vencer: { texto: 'Por vencer', clase: 'snoc-insignia-error' },
-    en_plazo: { texto: 'En plazo', clase: 'snoc-insignia-secundaria-suave' }
+    VENCIDA: { texto: 'Vencido', clase: 'snoc-insignia-error-solida' },
+    VENCE_PRONTO: { texto: 'En riesgo', clase: 'snoc-insignia-error' },
+    A_TIEMPO: { texto: 'A tiempo', clase: 'snoc-insignia-secundaria-suave' },
+    SIN_PLAZO: { texto: 'Sin plazo', clase: 'snoc-insignia-neutra' },
+    NO_APLICA: { texto: 'No aplica', clase: 'snoc-insignia-neutra' },
+    DATOS_INSUFICIENTES: { texto: 'Datos insuficientes', clase: 'snoc-insignia-variante' }
   };
   const tonoSla = (/** @type {string} */ e) => SLA[e]?.clase ?? 'snoc-insignia-neutra';
   const textoSla = (/** @type {string} */ e) => SLA[e]?.texto ?? e;
+
+  /** Que le falta al plazo para poder calcularse, para el 'title' de la celda. */
+  const faltanDatosSla = (/** @type {any} */ s) =>
+    (s?.datos_faltantes ?? []).map((/** @type {any} */ d) => d.por_que ?? d.campo).join(' · ');
 
   /** El icono de cada KPI. Decora; el numero y su rotulo dicen todo lo demas. */
   const ICONO_KPI = {
@@ -659,8 +677,15 @@
                     <td class="snoc-label">{p.tipo_senal_display}</td>
                     <td class="snoc-body-sm snoc-recorte" title={p.accion_propuesta}>{p.accion_propuesta}</td>
                     <td>
+                      <!-- EL SALTO AL CASO REAL.
+                           La tabla decia de que caso hablaba pero no llevaba a el:
+                           habia que copiar el id y buscarlo a mano. El detalle del
+                           caso ya existe en /tickets/<id>; esto solo lo enlaza. -->
                       {#if p.contexto?.caso}
-                        <span class="snoc-id">CS-{p.contexto.caso.id_corto}</span>
+                        <a class="snoc-id snoc-enlace" href="/tickets/{p.contexto.caso.id}"
+                           title="Abrir el caso {p.contexto.caso.nombre ?? ''}">
+                          CS-{p.contexto.caso.id_corto}
+                        </a>
                         <div class="snoc-mono-sm snoc-tenue">
                           {p.contexto.caso.ticket_externo ?? '—'}
                         </div>
@@ -681,12 +706,18 @@
                     <td>{p.contexto?.tecnico?.nombre ?? '—'}</td>
                     <td>{p.contexto?.zona ?? '—'}</td>
                     <td>
-                      {#if p.contexto?.sla && p.contexto.sla.estado !== 'sin_plazo'}
-                        <span class="snoc-insignia {tonoSla(p.contexto.sla.estado)}">
+                      {#if p.contexto?.sla}
+                        <span
+                          class="snoc-insignia {tonoSla(p.contexto.sla.estado)}"
+                          title={faltanDatosSla(p.contexto.sla) ||
+                            (p.contexto.sla.vence_en ? `Vence el ${fechaCorta(p.contexto.sla.vence_en)}` : '')}
+                        >
                           {textoSla(p.contexto.sla.estado)}
                         </span>
                       {:else}
-                        <span class="snoc-tenue">—</span>
+                        <!-- El hallazgo no se emitió sobre una entidad con plazo
+                             (una programación, por ejemplo): no hay SLA que medir. -->
+                        <span class="snoc-tenue" title="Este hallazgo no se emitió sobre un caso ni una orden">—</span>
                       {/if}
                     </td>
                     <td>

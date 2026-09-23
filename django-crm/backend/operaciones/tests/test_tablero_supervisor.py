@@ -34,7 +34,7 @@ from cases.models import Case
 from common.models import Activity, Profile, User
 from common.serializer import OrgAwareRefreshToken
 from conftest import rls_org
-from operaciones import auditoria, indicadores
+from operaciones import auditoria, indicadores, sla
 from operaciones.contexto_operativo import (DEXTER, DEXTER_Y_WISPHUB, WISPHUB,
                                             contexto_de)
 from operaciones.models import (ProgramacionOrden, ProgramacionSemanal,
@@ -458,3 +458,96 @@ def test_ninguna_de_las_dos_rutas_escribe(org_a, cliente, ruta):
 @pytest.mark.parametrize("ruta", [RUTA_ACTIVIDAD, RUTA_UBICACIONES])
 def test_ninguna_de_las_dos_acepta_escritura(org_a, cliente, ruta):
     assert cliente.post(ruta, {}, format="json").status_code == 405
+
+
+# =============================================================================
+#  §7  El SLA de la tabla es el del Supervisor, no uno propio
+# =============================================================================
+
+def test_los_estados_de_sla_son_los_del_modulo_que_usan_los_detectores(org_a):
+    """
+    Si la columna inventara sus propios estados, la tabla podría decir "a
+    tiempo" de una orden que el detector acaba de marcar vencida.
+    """
+    orden = _orden(org_a, numero=8400)
+    c = contexto_de(_propuesta(org_a, origen_tipo="orden_trabajo",
+                               origen_id=str(orden.id)))
+
+    assert c["sla"]["estado"] in (sla.VENCIDA, sla.VENCE_PRONTO, sla.A_TIEMPO,
+                                  sla.SIN_PLAZO, sla.NO_APLICA,
+                                  sla.DATOS_INSUFICIENTES)
+    assert c["sla"]["fuente"] == "operaciones.sla"
+
+
+def test_el_plazo_de_la_orden_coincide_con_el_que_calcula_el_detector(org_a):
+    """El mismo veredicto, medido dos veces por los dos caminos."""
+    orden = _orden(org_a, numero=8401)
+    ahora = timezone.now()
+
+    del_contexto = contexto_de(
+        _propuesta(org_a, origen_tipo="orden_trabajo", origen_id=str(orden.id)),
+        ahora=ahora)["sla"]["estado"]
+    del_modulo = sla.plazo_de(orden, ahora=ahora)["estado"]
+
+    assert del_contexto == del_modulo
+
+
+def test_un_caso_vencido_se_dice_vencido_con_la_misma_palabra(org_a):
+    caso = _caso(org_a)
+    Case.objects.filter(id=caso.id).update(
+        sla_resolution_hours=1, created_at=timezone.now() - timedelta(hours=10))
+    caso.refresh_from_db()
+
+    c = contexto_de(_propuesta(org_a, origen_id=str(caso.id)))
+
+    assert c["sla"]["estado"] == sla.VENCIDA
+    assert c["sla"]["minutos_atraso"] > 0
+
+
+def test_un_caso_dentro_del_plazo_esta_a_tiempo(org_a):
+    caso = _caso(org_a)
+    Case.objects.filter(id=caso.id).update(sla_resolution_hours=72)
+    caso.refresh_from_db()
+
+    assert contexto_de(_propuesta(org_a, origen_id=str(caso.id)))["sla"]["estado"] == sla.A_TIEMPO
+
+
+def test_el_umbral_de_riesgo_es_la_ventana_del_modulo_no_un_numero_propio(org_a):
+    """
+    'En riesgo' entra cuando falta menos del 20% del plazo (tope 24 h), que es
+    la ventana que 'sla.ventana_de_aviso' aplica a las órdenes. Con un plazo de
+    10 h, eso son 2 h: a 1 h del límite tiene que estar en riesgo.
+    """
+    caso = _caso(org_a)
+    Case.objects.filter(id=caso.id).update(
+        sla_resolution_hours=10, created_at=timezone.now() - timedelta(hours=9))
+    caso.refresh_from_db()
+
+    assert contexto_de(_propuesta(org_a, origen_id=str(caso.id)))["sla"]["estado"] == sla.VENCE_PRONTO
+
+
+def test_un_caso_resuelto_no_dice_vencido_sino_que_no_aplica(org_a):
+    """Decir "vencido" de algo cerrado describe el pasado como un pendiente."""
+    caso = _caso(org_a)
+    Case.objects.filter(id=caso.id).update(
+        sla_resolution_hours=1, created_at=timezone.now() - timedelta(hours=10),
+        resolved_at=timezone.now())
+    caso.refresh_from_db()
+
+    assert contexto_de(_propuesta(org_a, origen_id=str(caso.id)))["sla"]["estado"] == sla.NO_APLICA
+
+
+def test_una_orden_sin_duracion_declarada_dice_sin_plazo(org_a):
+    """
+    SIN_PLAZO no es un error: el tipo de trabajo existe y no declara duración,
+    así que nadie se comprometió a un tiempo y no hay plazo que medir. Es
+    distinto de DATOS_INSUFICIENTES, que es "no se pudo leer".
+    """
+    orden = _orden(org_a, numero=8402)
+    c = contexto_de(_propuesta(org_a, origen_tipo="orden_trabajo",
+                               origen_id=str(orden.id)))
+
+    assert c["sla"]["estado"] in (sla.SIN_PLAZO, sla.DATOS_INSUFICIENTES)
+    #  Y cuando falta algo para poder calcularlo, se dice QUÉ falta.
+    if c["sla"]["estado"] == sla.DATOS_INSUFICIENTES:
+        assert c["sla"]["datos_faltantes"]

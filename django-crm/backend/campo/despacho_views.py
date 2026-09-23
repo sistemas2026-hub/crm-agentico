@@ -47,7 +47,7 @@ from campo.services.despacho import (
 )
 from campo.services.idempotencia import manejar_idempotencia
 from campo.services.transiciones import (
-    TransicionInvalidaError, aprobar, requerir_correccion,
+    TransicionInvalidaError, aprobar, cerrar_orden, requerir_correccion,
 )
 from operaciones.models import ProgramacionSemanal
 from operaciones.programacion import (
@@ -317,6 +317,71 @@ class ValidarTrabajoView(APIView):
 
         orden.refresh_from_db()
         return Response({"orden": OrdenTrabajoDetailSerializer(orden).data,
+                         "server_time": timezone.now().isoformat()})
+
+
+class CerrarTrabajoView(APIView):
+    """
+    El ultimo paso del recorrido: la orden se da por terminada.
+
+        POST /api/campo/trabajos/<pk>/cerrar/
+
+    POR QUE ESTA VISTA EXISTE
+    -------------------------
+    'transiciones.cerrar_orden' estaba escrita desde el primer dia, la maquina
+    de estados declara 'completada_campo -> cerrada', y NADIE la llamaba: no
+    habia ruta, ni servicio, ni pantalla. El efecto es que una orden aprobada
+    se quedaba en 'completada_campo' para siempre y el recorrido
+    --caso, programacion, ejecucion, evidencia, validacion, CIERRE-- no
+    terminaba nunca. Lo encontro la validacion de punta a punta del Supervisor.
+
+    NO ES UN SEGUNDO CAMINO DE VALIDACION
+    -------------------------------------
+    Aprobar y cerrar son cosas distintas y siguen separadas: 'aprobar' mueve
+    'estado_validacion' y dice "el trabajo esta bien hecho"; esto mueve
+    'estado_operativo' y dice "este trabajo ya no esta en curso". Por eso
+    'ValidarTrabajoView' no gana una tercera decision: la validacion la firma
+    quien revisa la evidencia, el cierre lo firma quien cierra la operacion.
+
+    SOLO SE CIERRA LO APROBADO
+    --------------------------
+    Cerrar una orden con la evidencia sin validar la sacaria de la bandeja del
+    supervisor sin que nadie la haya mirado, que es justo lo que el flujo de
+    validacion existe para impedir. La comprobacion va aqui --y no dentro de
+    'cerrar_orden'-- porque el servicio tambien lo usa la conciliacion
+    posterior, que cierra ordenes viejas por otro motivo.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    @manejar_idempotencia
+    def post(self, request, pk):
+        negado = _exigir_gestion(request)
+        if negado:
+            return negado
+
+        orden = _orden_o_404(request, pk)
+        if orden.estado_validacion != OrdenTrabajo.APROBADO:
+            return Response(
+                {"error": "SIN_VALIDAR",
+                 "detalle": (f"La orden esta en validacion "
+                             f"'{orden.get_estado_validacion_display()}'. Se cierra "
+                             f"lo que ya fue aprobado."),
+                 "pendiente": "VALIDACION"},
+                status=status.HTTP_409_CONFLICT)
+
+        try:
+            orden = cerrar_orden(
+                orden, profile=request.profile,
+                metadatos={"observacion": (request.data or {}).get("observacion", "")})
+        except TransicionInvalidaError as e:
+            return Response({"error": "CIERRE_INVALIDO", "detalle": str(e)},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        orden.refresh_from_db()
+        return Response({"orden": OrdenTrabajoDetailSerializer(orden).data,
+                         "aviso": ("Cerrada. Esto no notifica al cliente ni toca "
+                                   "ningun sistema externo."),
                          "server_time": timezone.now().isoformat()})
 
 

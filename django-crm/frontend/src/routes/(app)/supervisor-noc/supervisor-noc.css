@@ -769,3 +769,12 @@
    dice; la celda queda con una raya, no con un valor inventado. */
 .snoc-col-ausente { color: var(--snoc-outline); font-weight: 400; }
 .snoc-celda-ausente { color: var(--snoc-outline); }
+
+/*  El salto del hallazgo a su entidad. Antes habia que copiar el id y buscarlo
+    a mano: el detalle del caso ya existia en /tickets/<id> y nadie lo enlazaba. */
+.snoc-enlace {
+  color: var(--snoc-primary);
+  text-decoration: none;
+  border-bottom: 1px dotted currentColor;
+}
+.snoc-enlace:hover { text-decoration: none; border-bottom-style: solid; }

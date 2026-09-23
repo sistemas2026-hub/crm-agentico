@@ -51,25 +51,82 @@ def _tecnico_de_orden(orden) -> dict | None:
             "nombre": perfil.user.name or perfil.user.email}
 
 
-def _sla_de_orden(orden, ahora) -> dict | None:
+def _sla_de_orden(orden, ahora) -> dict:
     """
     El plazo de la orden. NO se calcula aqui: lo calcula 'operaciones/sla.py'.
 
     Es el mismo modulo que alimenta los detectores 'orden_sla_vencido' y
     'orden_sla_por_vencer', asi que la columna de la tabla y el hallazgo que la
-    origino no pueden contradecirse. Cuando el plazo no se puede determinar,
-    'plazo_de' ya devuelve sus 'datos_faltantes' y eso viaja tal cual.
+    origino no pueden contradecirse. Si mañana cambia la ventana de aviso,
+    cambia para los dos a la vez.
     """
     from operaciones import sla
 
     plazo = sla.plazo_de(orden, ahora=ahora)
     return {
-        "estado": plazo.get("estado") or "sin_plazo",
+        "estado": plazo.get("estado") or sla.DATOS_INSUFICIENTES,
         "vence_en": plazo.get("limite"),
         "minutos_restantes": plazo.get("minutos_restantes"),
         "minutos_atraso": plazo.get("minutos_atraso"),
         "datos_faltantes": plazo.get("datos_faltantes") or [],
+        "fuente": "operaciones.sla",
     }
+
+
+def _sla_de_caso(caso, ahora) -> dict:
+    """
+    El plazo del caso, dicho con LOS MISMOS SEIS ESTADOS que 'operaciones/sla.py'.
+
+    POR QUE AQUI NO SE LLAMA A 'plazo_de'
+    -------------------------------------
+    'plazo_de' mide ORDENES DE TRABAJO: saca la duracion objetivo del tipo de
+    trabajo congelado en la orden. Un caso no tiene tipo de trabajo -- tiene
+    'sla_resolution_hours' y 'resolution_sla_deadline', que 'cases' ya calcula.
+
+    Lo que NO se hace es inventar un segundo criterio: el veredicto sale de
+    'is_sla_resolution_breached', que es del propio modelo, y el umbral de
+    "esta por vencer" es 'sla.ventana_de_aviso' -- la MISMA funcion que usan
+    los detectores de ordenes, con el mismo 20% con tope de 24 h. Un 48 fijo
+    escrito aqui habria sido exactamente la logica paralela que este modulo
+    existe para no crear.
+
+    Los estados son los de 'operaciones/sla.py' y no unos propios, para que la
+    columna signifique lo mismo venga de donde venga el hallazgo.
+    """
+    from operaciones import sla
+
+    #  Un caso resuelto ya no tiene plazo corriendo: decir "vencido" de algo
+    #  cerrado hace tres semanas describe el pasado como si fuera un pendiente.
+    if getattr(caso, "resolved_at", None) is not None:
+        return {"estado": sla.NO_APLICA, "vence_en": None,
+                "minutos_restantes": None, "minutos_atraso": None,
+                "datos_faltantes": [], "fuente": "cases.Case"}
+
+    horas_objetivo = getattr(caso, "sla_resolution_hours", None)
+    limite = getattr(caso, "resolution_sla_deadline", None)
+
+    if limite is None:
+        #  Sin fecha objetivo no hay plazo que medir. Se distingue de "no se
+        #  pudo leer": aqui el dato se leyo y dice que no hay compromiso.
+        return {"estado": sla.SIN_PLAZO, "vence_en": None,
+                "minutos_restantes": None, "minutos_atraso": None,
+                "datos_faltantes": ([] if horas_objetivo is not None else
+                                    [{"campo": "sla_resolution_hours",
+                                      "por_que": "el caso no declara plazo de resolución"}]),
+                "fuente": "cases.Case"}
+
+    minutos = (limite - ahora).total_seconds() / 60
+    if getattr(caso, "is_sla_resolution_breached", False) or minutos < 0:
+        return {"estado": sla.VENCIDA, "vence_en": limite.isoformat(),
+                "minutos_restantes": None, "minutos_atraso": round(-minutos),
+                "datos_faltantes": [], "fuente": "cases.Case"}
+
+    #  La MISMA ventana que las ordenes: 20% del plazo, con tope de 24 h.
+    ventana = sla.ventana_de_aviso(int((horas_objetivo or 0) * 60)) if horas_objetivo else 0
+    estado = sla.VENCE_PRONTO if minutos <= ventana * 60 else sla.A_TIEMPO
+    return {"estado": estado, "vence_en": limite.isoformat(),
+            "minutos_restantes": round(minutos), "minutos_atraso": None,
+            "datos_faltantes": [], "fuente": "cases.Case"}
 
 
 def _zona_de_orden(orden, org):
@@ -88,31 +145,6 @@ def _zona_de_orden(orden, org):
                                  ProgramacionOrden.CONFIRMADA))
              .only("zona").first())
     return (linea.zona or None) if linea else None
-
-
-def _sla_de_caso(caso, ahora) -> dict | None:
-    """
-    El plazo del caso sale de lo que 'cases' YA calcula.
-
-    'is_sla_resolution_breached' es una columna del propio modelo: no se
-    recalcula aqui, se lee. Recalcularla crearia dos veredictos sobre el mismo
-    incumplimiento.
-    """
-    vence = getattr(caso, "resolution_sla_deadline", None)
-    incumplido = getattr(caso, "is_sla_resolution_breached", None)
-    if vence is None and incumplido is None:
-        return {"estado": "sin_plazo", "vence_en": None, "horas_restantes": None}
-    if incumplido:
-        return {"estado": "vencido", "vence_en": vence.isoformat() if vence else None,
-                "horas_restantes": None}
-    if vence is None:
-        return {"estado": "sin_plazo", "vence_en": None, "horas_restantes": None}
-    horas = (vence - ahora).total_seconds() / 3600
-    return {
-        "estado": "vencido" if horas < 0 else "por_vencer" if horas <= 48 else "en_plazo",
-        "vence_en": vence.isoformat(),
-        "horas_restantes": round(horas, 1),
-    }
 
 
 def _origen_de_caso(caso) -> str:
