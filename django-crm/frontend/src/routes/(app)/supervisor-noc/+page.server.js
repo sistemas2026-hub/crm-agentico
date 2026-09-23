@@ -3,6 +3,7 @@ import {
   leerIndicadores,
   listarPropuestas,
   leerAutonomia,
+  leerActividad,
   correrCiclo,
   correrAsistente,
   revisarPropuesta,
@@ -61,11 +62,12 @@ export async function load({ cookies, locals, url }) {
   // bloque de tecnicos necesita quien trabaja hoy y cuanto tiene encima.
   const hoy = new Date().toISOString().slice(0, 10);
 
-  const [indicadores, todas, autonomia, capacidad] = await Promise.all([
+  const [indicadores, todas, autonomia, capacidad, actividad] = await Promise.all([
     leerIndicadores({ cookies }, dias ?? undefined),
     listarPropuestas({ cookies }),
     leerAutonomia(),
-    leerCapacidad({ cookies }, hoy)
+    leerCapacidad({ cookies }, hoy),
+    leerActividad({ cookies })
   ]);
 
   return {
@@ -79,7 +81,8 @@ export async function load({ cookies, locals, url }) {
     hallazgos: todas,
     autonomia,
     dia: hoy,
-    capacidad
+    capacidad,
+    actividad
   };
 }
 

@@ -805,6 +805,18 @@ def test_no_existe_ninguna_ruta_de_ejecucion():
     (tests/test_m11_indicadores.py): tras generar los cinco reportes, ni una
     actividad, ni una orden, ni una propuesta cambiaron, y no apareció ninguna
     fila nueva.
+
+    'actividad-supervisor' entro con el tablero, y se declara por el mismo
+    criterio: es un **GET** que lee 'common.Activity' --la auditoria que ya
+    esta escrita-- y la devuelve ordenada. No escribe una fila, no corre el
+    ciclo y no toca ninguna propuesta. Su propia vista no importa un solo
+    servicio de escritura.
+
+    Que esta lista haya que tocarla para agregar una ruta es el punto: esta
+    guarda no comprueba que las rutas de ejecucion esten ausentes por su
+    nombre --eso lo hace el bucle de abajo, y un 'aplicar_propuesta' llamado
+    'sincronizar' lo pasaria-- sino que NINGUNA ruta entre sin que alguien la
+    declare aqui a mano.
     """
     from operaciones import urls as rutas_operaciones
     nombres = {p.name for p in rutas_operaciones.urlpatterns}
@@ -815,7 +827,7 @@ def test_no_existe_ninguna_ruta_de_ejecucion():
                        "capacidad-jornada", "actividades",
                        "actividad-detalle", "actividad-transicion",
                        "asistente", "indicadores", "reportes",
-                       "programaciones"}
+                       "programaciones", "actividad-supervisor"}
     for prohibida in ("ejecutar", "aplicar", "despachar", "propuesta-ejecutar"):
         assert prohibida not in nombres
 

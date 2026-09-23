@@ -202,6 +202,33 @@ export async function cancelarPropuesta({ cookies }, id, motivo) {
 }
 
 /**
+ * Los ultimos hechos del modulo, para el feed del tablero.
+ *
+ * Es el unico bloque de esa pantalla que no existia en ninguna forma: el
+ * historial responde "que le paso a ESTA propuesta" y no habia manera de
+ * preguntar "que paso, en general". El backend ya acota a las entidades del
+ * modulo, asi que aca no se vuelve a filtrar.
+ *
+ * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
+ * @param {number} [limite]
+ */
+export async function leerActividad({ cookies }, limite = 12) {
+  try {
+    const d = await apiRequest(
+      `/operaciones/actividad-supervisor/?limite=${limite}`,
+      {},
+      { cookies }
+    );
+    return { eventos: d?.resultados ?? [], error: null };
+  } catch (/** @type {any} */ err) {
+    // 'eventos' vacio con 'error' puesto NO es lo mismo que un feed vacio: la
+    // pantalla mira el error primero, y solo dice "sin actividad" cuando la
+    // lectura salio bien y no habia nada.
+    return { eventos: [], error: traducirError(err, 'la actividad reciente') };
+  }
+}
+
+/**
  * El interruptor de autonomia del motor.
  *
  * FALLA DECLARANDO, NO ASUMIENDO. Si el motor no responde, la pantalla no

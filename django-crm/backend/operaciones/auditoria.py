@@ -85,3 +85,22 @@ def historial(org, entidad: str, entidad_id):
     return Activity.objects.filter(
         org=org, entity_type=entidad, entity_id=entidad_id
     ).order_by("-created_at")
+
+
+def recientes(org, limite: int = 20):
+    """
+    Los últimos hechos registrados por este módulo, lo más reciente primero.
+
+    Es el feed del tablero, y es lo único de esa pantalla que no existía en
+    ninguna forma: 'historial' responde "qué le pasó a ESTA propuesta", y no
+    hay manera de preguntar "qué pasó, en general, en la última hora".
+
+    Se acota a las tres entidades de este módulo a propósito. 'common.Activity'
+    es la auditoría del CRM entero -- sin el filtro, el feed del Supervisor se
+    llenaría de contactos editados y correos enviados, que es cierto pero no es
+    lo que esta pantalla pregunta.
+    """
+    return Activity.objects.filter(
+        org=org,
+        entity_type__in=[ENTIDAD_PROPUESTA, ENTIDAD_ACTIVIDAD, ENTIDAD_NOVEDAD],
+    ).select_related("user", "user__user").order_by("-created_at")[:limite]

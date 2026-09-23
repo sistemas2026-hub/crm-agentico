@@ -19,6 +19,8 @@
     estadoDeCasos,
     ordenesDeTrabajo,
     cargaPorTecnico,
+    ticketsPorOrigen,
+    actividadReciente,
     BLOQUES_SIN_DATO
   } from '$lib/v2/supervisor-noc-tablero.js';
   import './supervisor-noc.css';
@@ -88,6 +90,8 @@
   const barras = $derived(estadoDeCasos(data.indicadores));
   const ordenes = $derived(ordenesDeTrabajo(data.indicadores));
   const tecnicos = $derived(cargaPorTecnico(data.capacidad?.personas));
+  const origen = $derived(ticketsPorOrigen(data.indicadores));
+  const actividad = $derived(actividadReciente(data.actividad?.eventos));
   const SIN_DATO = BLOQUES_SIN_DATO;
 
   /** El icono de cada KPI. Decora; el numero y su rotulo dicen todo lo demas. */
@@ -144,6 +148,8 @@
           minute: '2-digit'
         })
       : '—';
+  const hora = (/** @type {string|null} */ iso) =>
+    iso ? new Date(iso).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' }) : '—';
   const fechaCorta = (/** @type {string|null} */ iso) =>
     iso
       ? new Date(iso).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })
@@ -471,20 +477,62 @@
         </div>
 
         <!--
-          3 · Tickets por origen · EL CAMPO EXISTE, EL INDICADOR NO
-          `OrdenTrabajo.origen_sistema` ya distingue wisphub de crm, solicitudes
-          y manual. Lo que no existe es un indicador que los agrupe, así que el
-          bloque dice dónde está el dato en vez de repartir un total inventado.
+          3 · Tickets por origen
+          Sale de `casos.por_origen`, que agrupa por `Case.external_provider`:
+          'wisphub' cuando el caso espeja un ticket del proveedor, 'dexter'
+          cuando nació en el CRM. Son las dos categorías que el campo
+          distingue; no se derivan otras.
         -->
         <div class="snoc-grafico">
           <h2 class="snoc-grafico-titulo">
-            <span class="snoc-icono snoc-tenue" style="font-size:15px;">hub</span>
-            {SIN_DATO.origen.titulo}
+            <span class="snoc-icono snoc-primario" style="font-size:15px;">hub</span>
+            Tickets por origen
           </h2>
-          <div class="snoc-hueco">
-            <span class="snoc-hueco-rotulo">Falta en el backend</span>
-            <p class="snoc-hueco-motivo">{SIN_DATO.origen.motivo}</p>
-          </div>
+          {#if origen.disponible}
+            <div class="snoc-grafico-cuerpo">
+              <div class="snoc-donut-centro">
+                <svg
+                  class="snoc-donut"
+                  viewBox="0 0 40 40"
+                  width="110"
+                  height="110"
+                  role="img"
+                  aria-label="Reparto de los {origen.total} casos por sistema de origen"
+                >
+                  {#each origen.tramos as t (t.clave)}
+                    <circle
+                      cx="20"
+                      cy="20"
+                      r="15.9155"
+                      fill="none"
+                      stroke={t.color}
+                      stroke-width="5"
+                      stroke-dasharray={t.dash}
+                      stroke-dashoffset={t.offset}
+                    ></circle>
+                  {/each}
+                </svg>
+                <span class="snoc-donut-cifra">{origen.total}</span>
+              </div>
+              <div class="snoc-leyenda">
+                {#each origen.tramos as t (t.clave)}
+                  <div class="snoc-leyenda-fila" title="{t.etiqueta}: {t.n}">
+                    <span class="snoc-leyenda-punto" style="background:{t.color};"></span>
+                    <span class="snoc-leyenda-txt">{t.etiqueta}</span>
+                    <span class="snoc-leyenda-n">{t.n}</span>
+                    <span class="snoc-tenue">{t.pct}%</span>
+                  </div>
+                {/each}
+              </div>
+            </div>
+          {:else}
+            <div class="snoc-hueco">
+              <span class="snoc-hueco-rotulo">Sin dato</span>
+              <p class="snoc-hueco-motivo">
+                Ningún caso trae sistema de origen en esta consulta.
+              </p>
+            </div>
+          {/if}
         </div>
 
         <!-- 4 · Mapa de operación · LAS COORDENADAS ESTAN EN LA ORDEN, NO EN LA PROPUESTA -->
@@ -561,16 +609,16 @@
                   <th>Caso / Ticket</th>
                   <th>Origen</th>
                   <!--
-                    Las dos columnas que el diseño pide y la propuesta no trae.
-                    Marcadas, no rellenadas: una columna de rayas sin explicar
-                    se lee como un fallo de la pantalla.
+                    Técnico y zona llegan resueltos por el backend desde
+                    `campo.AsignacionTrabajo` y `ProgramacionOrden`.
 
-                    Ojo con la de técnico: el detalle trae `responsable_sugerido`,
-                    que es a quien la IA propone, NO a quien está asignado. Ponerlo
-                    en esta columna diría que alguien ya lo tiene, y no lo tiene.
+                    EL TECNICO ES LA ASIGNACION PRINCIPAL, no
+                    `responsable_sugerido`. Ese campo es a quien la IA propone;
+                    ponerlo en esta columna diría que alguien ya tiene la orden
+                    cuando puede no tenerla.
                   -->
-                  <th class="snoc-col-ausente" title="La propuesta no trae técnico asignado">Técnico *</th>
-                  <th class="snoc-col-ausente" title="La zona vive en la línea de programación, no en la propuesta">Zona *</th>
+                  <th>Técnico</th>
+                  <th>Zona</th>
                   <th>Estado</th>
                   <th>Detectado</th>
                   <th class="snoc-derecha">Acción</th>
@@ -581,15 +629,34 @@
                   <tr class={abierta === p.id ? 'snoc-fila-activa' : ''}>
                     <td><span class="snoc-insignia {tonoPrioridad(p.prioridad)}">{p.prioridad}</span></td>
                     <td class="snoc-label">{p.tipo_senal_display}</td>
-                    <td class="snoc-body-sm snoc-recorte" title={p.accion_propuesta}>{p.accion_propuesta}</td>
                     <td>
-                      <span class="snoc-id">{p.origen_tipo}</span>
-                      <div class="snoc-mono-sm snoc-tenue" title={p.origen_id}>
-                        {String(p.origen_id).slice(0, 12)}
+                      <!--
+                        El número que sirve para buscar en el otro sistema. La
+                        orden trae consecutivo interno; el caso, el ticket del
+                        proveedor. Sin ninguno de los dos queda el id corto, que
+                        es lo que hay -- no un número fabricado.
+                      -->
+                      {#if p.orden_numero != null}
+                        <span class="snoc-id">OT-{p.orden_numero}</span>
+                      {:else if p.ticket_externo}
+                        <span class="snoc-id">{p.ticket_externo}</span>
+                        {#if p.proveedor_externo}
+                          <div class="snoc-mono-sm snoc-tenue">{p.proveedor_externo}</div>
+                        {/if}
+                      {:else}
+                        <span class="snoc-mono-sm snoc-tenue" title={p.origen_id}>
+                          {String(p.origen_id).slice(0, 8)}
+                        </span>
+                      {/if}
+                      <div class="snoc-body-sm snoc-recorte" title={p.accion_propuesta}>
+                        {p.accion_propuesta}
                       </div>
                     </td>
-                    <td class="snoc-celda-ausente">—</td>
-                    <td class="snoc-celda-ausente">—</td>
+                    <td><span class="snoc-id">{p.origen_tipo}</span></td>
+                    <td class={p.tecnico ? 'snoc-body-sm' : 'snoc-celda-ausente'}>
+                      {p.tecnico || 'Sin asignar'}
+                    </td>
+                    <td class={p.zona ? 'snoc-body-sm' : 'snoc-celda-ausente'}>{p.zona || '—'}</td>
                     <td>
                       <span class="snoc-insignia {estadoDe(p.estado).clase}">{estadoDe(p.estado).texto}</span>
                       {#if p.dentro_del_alcance === false}
@@ -619,8 +686,7 @@
             </table>
           </div>
           <span class="snoc-mono-sm snoc-tenue">
-            * Técnico y zona no vienen en la propuesta. La zona vive en la línea de programación; el
-            técnico asignado, en la orden.
+            «Sin asignar» significa que la orden no tiene responsable principal marcado, no que falte el dato.
           </span>
         {/if}
       </section>
@@ -698,19 +764,52 @@
           {/if}
         </div>
 
-        <!-- Actividad reciente · NO HAY FEED; la auditoría es por propuesta -->
+        <!--
+          Actividad reciente del Supervisor
+          De `common.Activity`, acotada a las entidades de este módulo. Un
+          renglón sin usuario lo escribió la IA, y el backend lo marca con
+          `es_ia`: no se deduce del texto.
+        -->
         <div class="snoc-grafico">
           <h2 class="snoc-grafico-titulo">
-            <span class="snoc-icono snoc-tenue" style="font-size:15px;">history</span>
-            {SIN_DATO.actividad.titulo}
+            <span class="snoc-icono snoc-primario" style="font-size:15px;">history</span>
+            Actividad reciente del Supervisor
           </h2>
-          <div class="snoc-hueco">
-            <span class="snoc-hueco-rotulo">Falta en el backend</span>
-            <p class="snoc-hueco-motivo">{SIN_DATO.actividad.motivo}</p>
-            <span class="snoc-mono-sm snoc-tenue">
-              La auditoría sí está, por propuesta, dentro de «Ver detalle».
-            </span>
-          </div>
+          {#if data.actividad.error}
+            <div class="snoc-hueco">
+              <span class="snoc-hueco-rotulo">Sin dato</span>
+              <p class="snoc-hueco-motivo">{data.actividad.error.mensaje}</p>
+            </div>
+          {:else if !actividad.disponible}
+            <div class="snoc-hueco">
+              <span class="snoc-hueco-rotulo">Sin actividad</span>
+              <p class="snoc-hueco-motivo">
+                Todavía no hay hechos registrados en este módulo.
+              </p>
+            </div>
+          {:else}
+            <div class="snoc-tabla-caja" style="max-height:230px; overflow-y:auto;">
+              <table class="snoc-tabla">
+                <thead>
+                  <tr><th>Hora</th><th>Evento</th><th>Detalle</th></tr>
+                </thead>
+                <tbody>
+                  {#each actividad.filas as f (f.id)}
+                    <tr>
+                      <td class="snoc-mono-sm snoc-tenue" title={fecha(f.cuando)}>{hora(f.cuando)}</td>
+                      <td class="snoc-body-sm">
+                        {f.evento}
+                        {#if f.esIa}
+                          <span class="snoc-insignia snoc-insignia-neutra" title="Lo escribió el Supervisor, no una persona">IA</span>
+                        {/if}
+                      </td>
+                      <td class="snoc-body-sm snoc-recorte" title="{f.detalle} · {f.quien}">{f.detalle}</td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+          {/if}
         </div>
       </section>
 

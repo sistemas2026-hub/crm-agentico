@@ -20,6 +20,21 @@ class PropuestaListaSerializer(serializers.ModelSerializer):
         source="get_tipo_senal_display", read_only=True)
     dentro_del_alcance = serializers.BooleanField(read_only=True)
 
+    # Contexto resuelto desde los modelos que SI lo tienen: la zona en
+    # 'ProgramacionOrden', el tecnico en 'campo.AsignacionTrabajo', el ticket
+    # del proveedor en 'cases.Case'. No sale del modelo de la propuesta, que no
+    # los guarda -- lo resuelve 'contexto_propuesta.contexto_de' para el lote
+    # entero y llega por el context del serializer.
+    #
+    # Vacio cuando no hay: una propuesta que nace de un caso no tiene orden, y
+    # una orden sin asignacion principal no tiene tecnico. Eso es un dato
+    # ausente de verdad, no un fallo que haya que rellenar.
+    zona = serializers.SerializerMethodField()
+    tecnico = serializers.SerializerMethodField()
+    ticket_externo = serializers.SerializerMethodField()
+    proveedor_externo = serializers.SerializerMethodField()
+    orden_numero = serializers.SerializerMethodField()
+
     class Meta:
         model = PropuestaSupervisor
         fields = [
@@ -27,7 +42,27 @@ class PropuestaListaSerializer(serializers.ModelSerializer):
             "accion_propuesta", "prioridad", "estado",
             "nivel_autonomia_requerido", "dentro_del_alcance",
             "created_at", "expira_en",
+            "zona", "tecnico", "ticket_externo", "proveedor_externo",
+            "orden_numero",
         ]
+
+    def _contexto(self, obj):
+        return (self.context.get("contexto") or {}).get(str(obj.id)) or {}
+
+    def get_zona(self, obj):
+        return self._contexto(obj).get("zona", "")
+
+    def get_tecnico(self, obj):
+        return self._contexto(obj).get("tecnico", "")
+
+    def get_ticket_externo(self, obj):
+        return self._contexto(obj).get("ticket_externo", "")
+
+    def get_proveedor_externo(self, obj):
+        return self._contexto(obj).get("proveedor_externo", "")
+
+    def get_orden_numero(self, obj):
+        return self._contexto(obj).get("orden_numero")
 
 
 class PropuestaDetalleSerializer(serializers.ModelSerializer):

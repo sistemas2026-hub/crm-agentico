@@ -159,6 +159,55 @@ export function hallazgosPorTipo(propuestas) {
 }
 
 /**
+ * El donut «Tickets por origen», de `indicadores_casos.por_origen`.
+ *
+ * El backend agrupa por `external_provider`: 'wisphub' cuando el caso espeja
+ * un ticket del proveedor, y la clave 'dexter' cuando nació en el CRM. Los
+ * rótulos de aquí traducen esas claves y NADA MÁS -- no se derivan categorías
+ * que el campo no distinga.
+ *
+ * @param {any} indicadores
+ */
+export function ticketsPorOrigen(indicadores) {
+  const porOrigen = en(indicadores, ['casos', 'por_origen']);
+  if (!porOrigen || typeof porOrigen !== 'object') {
+    return { disponible: false, total: 0, tramos: [] };
+  }
+
+  const filas = Object.entries(porOrigen)
+    .map(([clave, v]) => ({
+      clave,
+      n: typeof v === 'object' && v && 'valor' in v ? v.valor : v
+    }))
+    .filter((f) => typeof f.n === 'number' && f.n > 0);
+
+  const total = filas.reduce((t, f) => t + f.n, 0);
+  if (total === 0) return { disponible: false, total: 0, tramos: [] };
+
+  const COLOR = { wisphub: '#2563eb', dexter: '#93ccff' };
+  const ROTULO = { wisphub: 'WispHub', dexter: 'Dexter' };
+
+  let acumulado = 0;
+  const tramos = filas
+    .sort((a, b) => b.n - a.n)
+    .map((f, i) => {
+      const pct = (f.n / total) * 100;
+      const tramo = {
+        ...f,
+        etiqueta: ROTULO[f.clave] ?? f.clave,
+        color: COLOR[f.clave] ?? COLORES[i % COLORES.length],
+        pct: Math.round(pct),
+        dash: `${pct.toFixed(2)} ${(100 - pct).toFixed(2)}`,
+        offset: `${(-acumulado).toFixed(2)}`
+      };
+      acumulado += pct;
+      return tramo;
+    });
+
+  return { disponible: true, total, tramos };
+}
+
+/**
  * Las barras «Estado de casos técnicos», de `indicadores_casos.por_estado`.
  *
  * La altura se calcula contra el mayor: sin eso, seis barras de alturas
@@ -277,28 +326,55 @@ export function cargaPorTecnico(personas) {
 }
 
 /**
+ * El feed «Actividad reciente del Supervisor».
+ *
+ * Traduce el verbo crudo de `common.Activity` a algo legible y marca quién lo
+ * hizo. `es_ia` viene del backend y significa que la fila no tiene usuario:
+ * la escribió el Supervisor. No se deduce del texto.
+ *
+ * @param {any[]} eventos
+ */
+export function actividadReciente(eventos) {
+  if (!Array.isArray(eventos) || eventos.length === 0) {
+    return { disponible: false, filas: [] };
+  }
+
+  /** Los verbos que este módulo escribe. Uno que no esté viaja tal cual. */
+  const VERBO = {
+    CREATED: 'Propuesta generada',
+    APPROVED: 'Propuesta aceptada',
+    REJECTED: 'Propuesta rechazada',
+    STATUS_CHANGED: 'Estado actualizado',
+    UPDATED: 'Actualizada',
+    DELETED: 'Cancelada'
+  };
+
+  return {
+    disponible: true,
+    filas: eventos.map((e) => ({
+      id: e?.id ?? '',
+      evento: VERBO[e?.accion] ?? e?.accion ?? '',
+      detalle: e?.nombre || e?.descripcion || '',
+      cuando: e?.cuando ?? null,
+      quien: e?.quien ?? '',
+      esIa: e?.es_ia === true
+    }))
+  };
+}
+
+/**
  * Lo que la pantalla NO puede mostrar todavía, con el motivo.
  *
  * Está en un solo lugar para que los bloques digan qué falta en vez de
  * quedar vacíos, y para que se borren de aquí el día que el dato exista.
  */
 export const BLOQUES_SIN_DATO = {
-  origen: {
-    titulo: 'Tickets por origen',
-    motivo:
-      'El campo existe (OrdenTrabajo.origen_sistema: wisphub, solicitudes, crm, manual). ' +
-      'Lo que falta es agruparlo en los indicadores.'
-  },
   mapa: {
     titulo: 'Mapa de operación',
     motivo:
       'Las coordenadas existen en la orden (gps_lat/gps_lng), pero la propuesta solo ' +
       'apunta con origen_tipo + origen_id y no las trae.'
   },
-  actividad: {
-    titulo: 'Actividad reciente del Supervisor',
-    motivo: 'La auditoría existe por propuesta, pero no hay un feed de los últimos eventos.'
-  }
 };
 
 /**
@@ -306,4 +382,4 @@ export const BLOQUES_SIN_DATO = {
  * Se declaran juntas para que la cabecera pueda marcarlas en vez de mostrar
  * una columna de rayas sin explicación.
  */
-export const COLUMNAS_SIN_DATO = ['Zona', 'Técnico', 'SLA'];
+export const COLUMNAS_SIN_DATO = ['SLA'];

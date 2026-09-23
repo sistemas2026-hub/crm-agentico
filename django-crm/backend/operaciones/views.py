@@ -47,7 +47,8 @@ from common.models import Profile
 from django.http import Http404
 from django.utils import timezone
 
-from operaciones import (actividades, asistentes, auditoria, indicadores,
+from operaciones import (actividades, asistentes, auditoria, contexto_propuesta,
+                         indicadores,
                          supervisor)
 from operaciones.capacidad import capacidad_de_jornada
 from campo.services.idempotencia import manejar_idempotencia
@@ -96,9 +97,58 @@ class PropuestasView(APIView):
         tipo = request.query_params.get("tipo_senal")
         if tipo:
             qs = qs.filter(tipo_senal=tipo)
+        # El lote se materializa UNA vez: el contexto se resuelve sobre las
+        # mismas filas que se serializan, no sobre una segunda consulta que
+        # podria devolver otras si algo se inserto en el medio.
+        lote = list(qs[:200])
+        contexto = contexto_propuesta.contexto_de(request.org, lote)
         return Response({
             "count": qs.count(),
-            "resultados": PropuestaListaSerializer(qs[:200], many=True).data,
+            "resultados": PropuestaListaSerializer(
+                lote, many=True, context={"contexto": contexto}
+            ).data,
+        })
+
+
+class ActividadSupervisorView(APIView):
+    """
+    Los últimos hechos del módulo, para el feed del tablero.
+
+    SOLO LEE. No corre el ciclo, no crea propuestas y no cambia ningún estado:
+    abrir un tablero no debe producir trabajo, la misma regla que ya sigue
+    IndicadoresView.
+    """
+
+    permission_classes = [EsJefeDeOperaciones]
+
+    def get(self, request):
+        try:
+            limite = int(request.query_params.get("limite", 20))
+        except (TypeError, ValueError):
+            limite = 20
+        limite = max(1, min(limite, 100))
+
+        filas = auditoria.recientes(request.org, limite)
+        return Response({
+            "count": len(filas),
+            "resultados": [
+                {
+                    "id": str(f.id),
+                    "accion": f.action,
+                    "entidad": f.entity_type,
+                    "entidad_id": str(f.entity_id) if f.entity_id else "",
+                    "nombre": f.entity_name or "",
+                    # 'user=None' significa que el autor fue la IA, y se
+                    # reconoce por eso -- no por un usuario de sistema
+                    # inventado que despues se confunda con una persona.
+                    "quien": (f.user.user.email
+                              if f.user and f.user.user else "Supervisor NOC IA"),
+                    "es_ia": f.user is None,
+                    "cuando": f.created_at.isoformat(),
+                    "descripcion": f.description or "",
+                }
+                for f in filas
+            ],
         })
 
 

@@ -406,6 +406,8 @@ def indicadores_casos(org, desde=None, hasta=None, ahora=None) -> dict:
                          .values_list("priority", "n"))
     por_tipo = dict(qs.values_list("case_type").annotate(n=Count("id"))
                     .values_list("case_type", "n"))
+    por_origen = dict(qs.values_list("provider").annotate(n=Count("id"))
+                      .values_list("provider", "n"))
 
     salida = {
         "total": conteo(qs.count(), fuente),
@@ -413,6 +415,14 @@ def indicadores_casos(org, desde=None, hasta=None, ahora=None) -> dict:
         "cerrados": conteo(qs.filter(resolved_at__isnull=False).count(), fuente),
         "abiertos": conteo(qs.filter(resolved_at__isnull=True).count(), fuente),
         "por_estado": {k: conteo(v, fuente) for k, v in sorted(por_estado.items())},
+        # De donde viene cada caso. 'cases.Case.provider' ya lo distingue: trae
+        # 'wisphub' cuando el caso espeja un ticket del proveedor, y queda
+        # vacio cuando nacio en el CRM. No hace falta un campo nuevo -- hacia
+        # falta agruparlo. La clave vacia se rotula 'dexter' para que el
+        # frontend no tenga que interpretar una cadena en blanco.
+        "por_origen": {(k or "dexter"): conteo(v, fuente)
+                       for k, v in sorted(por_origen.items(),
+                                          key=lambda kv: (kv[0] or ""))},
         "por_prioridad": {k: conteo(v, fuente)
                           for k, v in sorted(por_prioridad.items())},
         "por_tipo": {str(k): conteo(v, fuente) for k, v in sorted(

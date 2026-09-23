@@ -57,6 +57,8 @@ urlpatterns = [
     #  M11. Indicadores y reportes. Son GET y solo GET: no guardan ningun KPI,
     #  no crean actividad de negocio y no corren el ciclo del Supervisor.
     path("indicadores/", views.IndicadoresView.as_view(), name="indicadores"),
+    path("actividad-supervisor/", views.ActividadSupervisorView.as_view(),
+         name="actividad-supervisor"),
     path("reportes/", views.ReportesView.as_view(), name="reportes"),
     path("capacidad/jornada/", views.CapacidadJornadaView.as_view(),
          name="capacidad-jornada"),

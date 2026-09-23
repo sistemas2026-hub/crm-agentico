@@ -4,7 +4,9 @@ import {
   hallazgosPorTipo,
   estadoDeCasos,
   ordenesDeTrabajo,
-  cargaPorTecnico
+  cargaPorTecnico,
+  ticketsPorOrigen,
+  actividadReciente
 } from './supervisor-noc-tablero.js';
 
 /**
@@ -28,7 +30,8 @@ const ARBOL = {
     }
   },
   casos: {
-    por_estado: { abierto: conteo(40), en_proceso: conteo(20), cerrado: conteo(10) }
+    por_estado: { abierto: conteo(40), en_proceso: conteo(20), cerrado: conteo(10) },
+    por_origen: { wisphub: conteo(36), dexter: conteo(28) }
   },
   programacion: {
     ordenes_total: conteo(50),
@@ -249,5 +252,84 @@ describe('cargaPorTecnico', () => {
   it('sin personas el bloque se declara ausente', () => {
     expect(cargaPorTecnico([]).disponible).toBe(false);
     expect(cargaPorTecnico(null).disponible).toBe(false);
+  });
+});
+
+describe('ticketsPorOrigen', () => {
+  it('reparte el total entre los origenes que el campo distingue', () => {
+    const d = ticketsPorOrigen(ARBOL);
+    expect(d.disponible).toBe(true);
+    expect(d.total).toBe(64);
+    expect(d.tramos.map((t) => t.etiqueta)).toEqual(['WispHub', 'Dexter']);
+    expect(d.tramos.map((t) => t.pct)).toEqual([56, 44]);
+  });
+
+  it('los tramos se encadenan', () => {
+    const d = ticketsPorOrigen(ARBOL);
+    expect(d.tramos[0].offset).toBe('0.00');
+    expect(d.tramos[1].offset).toBe('-56.25');
+  });
+
+  it('un origen en cero no dibuja un tramo invisible', () => {
+    const d = ticketsPorOrigen({ casos: { por_origen: { wisphub: conteo(5), dexter: conteo(0) } } });
+    expect(d.tramos).toHaveLength(1);
+    expect(d.total).toBe(5);
+  });
+
+  it('todo en cero es un bloque sin dato, no un donut vacio', () => {
+    const d = ticketsPorOrigen({ casos: { por_origen: { wisphub: conteo(0) } } });
+    expect(d.disponible).toBe(false);
+  });
+
+  it('sin el bloque de casos se declara ausente', () => {
+    expect(ticketsPorOrigen(null).disponible).toBe(false);
+    expect(ticketsPorOrigen({ casos: {} }).disponible).toBe(false);
+  });
+
+  it('una clave que no conoce viaja tal cual en vez de perderse', () => {
+    const d = ticketsPorOrigen({ casos: { por_origen: { otro_isp: conteo(3) } } });
+    expect(d.tramos[0].etiqueta).toBe('otro_isp');
+  });
+});
+
+describe('actividadReciente', () => {
+  const evento = (extra) => ({
+    id: '1',
+    accion: 'CREATED',
+    nombre: 'Caso desincronizado CS-1842',
+    cuando: '2026-09-23T10:45:00Z',
+    quien: 'Supervisor NOC IA',
+    es_ia: true,
+    ...extra
+  });
+
+  it('traduce el verbo crudo de la auditoria', () => {
+    const d = actividadReciente([evento(), evento({ id: '2', accion: 'APPROVED' })]);
+    expect(d.filas.map((f) => f.evento)).toEqual(['Propuesta generada', 'Propuesta aceptada']);
+  });
+
+  it('un verbo que no conoce viaja tal cual y no se pierde la fila', () => {
+    const d = actividadReciente([evento({ accion: 'REOPENED' })]);
+    expect(d.filas[0].evento).toBe('REOPENED');
+  });
+
+  it('marca como IA solo lo que el backend marco, sin deducirlo del texto', () => {
+    // `es_ia` sale de que la fila no tenga usuario. Un evento de una persona
+    // cuyo texto mencione al Supervisor NO es un evento de la IA.
+    const d = actividadReciente([
+      evento({ id: '1', es_ia: true }),
+      evento({ id: '2', es_ia: false, quien: 'ana@rapilink.co', nombre: 'Revisó una propuesta del Supervisor' })
+    ]);
+    expect(d.filas.map((f) => f.esIa)).toEqual([true, false]);
+  });
+
+  it('cae a la descripcion cuando el evento no tiene nombre', () => {
+    const d = actividadReciente([evento({ nombre: '', descripcion: 'Sin nombre de entidad' })]);
+    expect(d.filas[0].detalle).toBe('Sin nombre de entidad');
+  });
+
+  it('un feed vacio se declara ausente', () => {
+    expect(actividadReciente([]).disponible).toBe(false);
+    expect(actividadReciente(null).disponible).toBe(false);
   });
 });
