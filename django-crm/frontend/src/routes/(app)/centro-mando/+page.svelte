@@ -93,12 +93,13 @@
   const agentes = $derived(panorama?.agentes || []);
   const totales = $derived(panorama?.totales || {});
   const eventos = $derived(panorama?.eventos || []);
+  const servicios = $derived(panorama?.servicios || []);
 
   /* El pod se encoge cuando hay muchos agentes: lo que manda es el arco que
      le toca a cada uno sobre el anillo. Con seis caben holgados; un tenant
      con diez los tendria encimados si el ancho fuera fijo. */
   const anchoEstacion = $derived(Math.max(
-    150, Math.min(300, (Math.PI * (RX + RY) / Math.max(agentes.length, 1)) * 0.66)));
+    170, Math.min(320, (Math.PI * (RX + RY) / Math.max(agentes.length, 1)) * 0.74)));
 
 
   /** Reparte los agentes en un anillo: dos, seis u once caben igual. */
@@ -185,17 +186,30 @@
 
 {#if panorama}
   <div class="sala">
+    <!-- barra de identidad: de quien es esta operacion y de cuando es el dato -->
+    <div class="identidad">
+      <span class="marca"><i></i>DEXTER <b>· CENTRO DE MANDO</b></span>
+      <span class="tenant">{panorama.tenant}</span>
+      <span class="sep"></span>
+      <span class="dato">{agentes.length} agentes configurados</span>
+      {#if totales.abiertas_total}
+        <span class="dato">{totales.abiertas_total} abiertas sin cerrar</span>
+      {/if}
+      {#if totales.fallos_hoy}
+        <span class="dato rojo">{totales.fallos_hoy} fallos hoy</span>
+      {/if}
+      <span class="reloj">{hora(ultimoRefresco || panorama.generado_en)} <em>(Bogotá)</em></span>
+    </div>
+
     <!-- franja de cifras -->
     <div class="cifras">
       {#each [
         ['Activas (24 h)', totales.conversaciones_activas, ''],
         ['Agentes con trabajo', totales.agentes_activos, ''],
         ['Conversaciones hoy', totales.atendidas_hoy, ''],
-        ['Abiertas sin cerrar', totales.abiertas_total, ''],
-        ['Herramienta promedio', ms(totales.duracion_media_ms), ''],
         ['Herramientas hoy', totales.herramientas_hoy, ''],
-        ['Esperan a una persona', totales.esperando_humano, 'ambar'],
-        ['Fallos hoy', totales.fallos_hoy, totales.fallos_hoy ? 'rojo' : '']
+        ['Herramienta promedio', ms(totales.duracion_media_ms), ''],
+        ['Esperan a una persona', totales.esperando_humano, 'ambar']
       ] as [rotulo, valor, tono]}
         <div class="cifra {tono}">
           <div class="v">{valor ?? '—'}</div>
@@ -229,6 +243,15 @@
             {/if}
           </div>
 
+          <!-- servicios externos usados hoy, anclados al borde -->
+          {#each servicios as s, i}
+            <div class="servicio" class:fallando={s.fallos > 0}
+                 style="left:{i < 3 ? 24 : ANCHO - 236}px; top:{120 + (i % 3) * 84}px">
+              <div class="t">{s.herramienta}</div>
+              <div class="d">{s.usos} usos · {ms(s.duracion_media_ms)}{s.fallos ? ` · ${s.fallos} fallos` : ''}</div>
+            </div>
+          {/each}
+
           <!-- estaciones -->
           {#each agentes as a, i}
             {@const p = posicion(i, agentes.length)}
@@ -253,6 +276,7 @@
                 <span class="chip"><i class:vivo={a.estado === 'procesando'}></i>{ROTULO[a.estado] || a.estado}</span>
               </div>
               <div class="area">{a.cargo || a.area || ''}</div>
+              {#if a.haciendo}<div class="haciendo">{a.haciendo}</div>{/if}
               <div class="datos">
                 <span>Conv <b>{a.conversaciones}</b></span>
                 {#if a.esperando_humano}<span class="ambar">Humano <b>{a.esperando_humano}</b></span>{/if}
@@ -388,7 +412,7 @@
     padding: 8px 10px; backdrop-filter: blur(6px);
   }
   .placa .fila1 { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-  .placa .nombre { font-size: 11.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .placa .nombre { font-size: 11.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; line-height: 1.25; }
   .placa .area { font-size: 9.5px; color: var(--texto2); margin-top: 2px; }
   .placa .datos { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; font-family: ui-monospace, monospace; font-size: 9.5px; color: var(--texto2); }
   .placa .datos b { color: var(--texto); }
@@ -452,6 +476,38 @@
   .detalle .bloque code { font-family: ui-monospace, monospace; font-size: 11.5px; color: var(--c); }
   .detalle .tz { color: #47607f; }
   .detalle footer { margin-top: auto; padding: 14px 16px; display: flex; gap: 10px; }
+
+
+  .identidad {
+    display: flex; align-items: center; gap: 14px; padding: 9px 16px;
+    border-bottom: 1px solid var(--borde); font-size: 11px; color: var(--texto2);
+  }
+  .identidad .marca { font-weight: 700; letter-spacing: .16em; color: var(--texto); display: flex; align-items: center; gap: 8px; }
+  .identidad .marca b { font-weight: 500; letter-spacing: .18em; color: var(--texto2); }
+  .identidad .marca i { width: 7px; height: 7px; border-radius: 50%; background: #00e5ff; box-shadow: 0 0 9px #00e5ff; }
+  .identidad .tenant { font-family: ui-monospace, monospace; letter-spacing: .08em; padding: 3px 9px; border: 1px solid var(--borde); border-radius: 6px; text-transform: uppercase; }
+  .identidad .sep { flex: 1; }
+  .identidad .dato { font-family: ui-monospace, monospace; font-size: 10.5px; }
+  .identidad .dato.rojo { color: #ef4444; }
+  .identidad .reloj { font-family: ui-monospace, monospace; font-size: 11px; color: var(--texto); }
+  .identidad .reloj em { color: var(--texto3); font-style: normal; }
+
+  .placa .haciendo {
+    font-size: 10px; color: var(--c); margin-top: 4px; line-height: 1.35;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+
+  /* Un servicio externo con lo que se le pidio hoy. Anclado al borde y nunca
+     sobre una estacion: es contexto, no protagonista. */
+  .servicio {
+    position: absolute; z-index: 2; width: 212px; padding: 7px 10px; border-radius: 9px;
+    background: rgba(4,21,37,.92); border: 1px solid rgba(0,229,255,.3);
+    font-family: ui-monospace, monospace; line-height: 1.45;
+  }
+  .servicio .t { font-size: 10px; color: #00e5ff; font-weight: 700; letter-spacing: .06em; }
+  .servicio .d { font-size: 9px; color: var(--texto2); }
+  .servicio.fallando { border-color: rgba(239,68,68,.55); }
+  .servicio.fallando .t { color: #ef4444; }
 
   @keyframes latir { 0%, 100% { opacity: 1 } 50% { opacity: .55 } }
   @keyframes girar { to { transform: rotate(360deg) } }

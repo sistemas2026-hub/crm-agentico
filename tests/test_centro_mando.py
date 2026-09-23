@@ -100,6 +100,7 @@ PANORAMA = {
     },
     "totales": {"conversaciones_activas": 9, "esperando_humano": 2, "atendidas_hoy": 12,
                 "herramientas_hoy": 40, "duracion_media_ms": 320, "fallos_hoy": 1},
+    "servicios": [],
     "eventos_herramienta": [],
     "eventos_escalada": [],
 }
@@ -155,6 +156,20 @@ estados = {a["estado"] for a in por_nombre.values()}
 revisar("esperando" not in estados,
         "'esperando' no aparece como estado de ningun agente", f"estados: {sorted(estados)}")
 
+
+print("\n5. la frase de tarea se compone de lo medido, no del contenido")
+frases = {n: a.get("haciendo") for n, a in por_nombre.items()}
+revisar(all(frases.values()), "todos los agentes traen frase", f"{frases}")
+revisar("consultar_olt" in (frases.get("con_error") or ""),
+        "el agente con error nombra la herramienta que fallo", frases.get("con_error"))
+revisar("consultar_cliente" in (frases.get("ocupado") or ""),
+        "el que procesa nombra la herramienta en curso", frases.get("ocupado"))
+revisar("Sin conversaciones" in (frases.get("libre") or ""),
+        "el disponible lo dice sin inventar actividad", frases.get("libre"))
+# la frase se arma con conteos y nombres de herramienta; si alguien la compone
+# alguna vez con el ultimo mensaje del cliente, esto lo caza
+revisar(all("@" not in f and "+57" not in f for f in frases.values()),
+        "ninguna frase trae algo con forma de dato de cliente")
 
 print("\n4. el ticker no lleva contenido de conversaciones")
 panorama_con_eventos = dict(PANORAMA)

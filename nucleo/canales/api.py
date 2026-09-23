@@ -3304,8 +3304,10 @@ def _flujo_de(config) -> dict:
     for nombre, rol in config.roles.items():
         if rol.orientado_a != "cliente_final":
             continue          # el flujo de derivacion es del lado del cliente
+        estado = _estado(carga, act)
         agentes.append({
             "nombre": nombre,
+            "haciendo": _haciendo(estado, carga, act),
             "area": rol.area,
             "cargo": rol.cargo,
             "atiende": rol.atiende,
@@ -3510,6 +3512,30 @@ def centro_mando():
         registrar("centro_mando", "fallo al calcular el panorama", error=e)
         return jsonify({"error": "No se pudo calcular el panorama."}), 500
 
+    def _haciendo(estado: str, carga: dict, act: dict) -> str:
+        """
+        Una frase de que trae entre manos el agente, compuesta con lo medido.
+
+        No sale del contenido de la conversacion a proposito: ahi vive lo que
+        escribio el cliente, y esta pantalla se mira de lejos y en grupo. Se
+        arma con la herramienta en curso y los conteos, que es lo que se
+        puede decir en voz alta sin exponer a nadie.
+        """
+        n = carga.get("conversaciones") or 0
+        esperan = carga.get("esperando_humano") or 0
+        herr = act.get("ultima_herramienta")
+        if estado == "error":
+            fallos = act.get("fallos") or 0
+            return f"{fallos} llamada{'s' if fallos != 1 else ''} a {herr} fallaron" if herr \
+                else f"{fallos} herramienta{'s' if fallos != 1 else ''} fallaron"
+        if estado == "procesando":
+            return f"Ejecutando {herr}" if herr else f"Atendiendo {n} conversacion(es)"
+        if estado == "atendiendo":
+            if esperan:
+                return f"{esperan} esperando a una persona, {n} en curso"
+            return f"{n} conversacion{'es' if n != 1 else ''} en curso"
+        return "Sin conversaciones en curso"
+
     def _estado(carga: dict, act: dict) -> str:
         if (act.get("fallos") or 0) > 0:
             return "error"
@@ -3524,13 +3550,15 @@ def centro_mando():
         carga = datos["carga"].get(nombre, {})
         act = datos["actividad"].get(nombre, {})
         ultima = carga.get("ultima_actividad") or act.get("ultima_llamada")
+        estado = _estado(carga, act)
         agentes.append({
             "nombre": nombre,
+            "haciendo": _haciendo(estado, carga, act),
             "descripcion": rol.descripcion.strip(),
             "area": rol.area,
             "cargo": rol.cargo,
             "orientado_a": rol.orientado_a,
-            "estado": _estado(carga, act),
+            "estado": estado,
             "conversaciones": carga.get("conversaciones") or 0,
             "abiertas_total": carga.get("abiertas_total") or 0,
             "esperando_humano": carga.get("esperando_humano") or 0,
@@ -3582,6 +3610,13 @@ def centro_mando():
                 1 for a in agentes if a["estado"] in ("procesando", "atendiendo")),
         },
         "agentes": agentes,
+        "servicios": [
+            {"herramienta": s["herramienta"], "usos": s["usos"],
+             "fallos": s["fallos"], "duracion_media_ms": s["duracion_media_ms"],
+             "ultimo_agente": s["ultimo_agente"],
+             "ultimo_uso": s["ultimo_uso"].isoformat() if s["ultimo_uso"] else None}
+            for s in datos["servicios"]
+        ],
         "eventos": eventos[:20],
     })
 

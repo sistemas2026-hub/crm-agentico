@@ -4563,6 +4563,26 @@ def panorama_centro_mando(tenant: str, ventana_min: int = 10) -> dict:
             (org, org, org, org, org, org, org))
         totales = dict(cur.fetchone())
 
+        # 3b) Que servicios externos se usaron hoy y cuanto. Es lo que la
+        #     pantalla dibuja como capsulas en el borde de la sala: sin esto,
+        #     un agente "consultando" no dice contra QUE sistema.
+        cur.execute(
+            f"""select herramienta,
+                       count(*) as usos,
+                       count(*) filter (where not exito) as fallos,
+                       avg(duracion_ms)::int as duracion_media_ms,
+                       max(creado_en) as ultimo_uso,
+                       (array_agg(coalesce(rol_solicitante, '(sin rol)')
+                                  order by creado_en desc))[1] as ultimo_agente
+                  from asistente.tool_calls
+                 where organization_id = %s
+                   and creado_en >= {dia_bogota}
+                 group by herramienta
+                 order by count(*) desc
+                 limit 6""",
+            (org,))
+        servicios = [dict(f) for f in cur.fetchall()]
+
         # 4) Ticker: ultimas herramientas ejecutadas. Sin parametros -- ahi
         #    viaja el identificador de lo consultado (enmascarado, pero
         #    identificador al fin) y esta pantalla no lo necesita para nada.
@@ -4599,6 +4619,7 @@ def panorama_centro_mando(tenant: str, ventana_min: int = 10) -> dict:
         "carga": carga,
         "actividad": actividad,
         "totales": totales,
+        "servicios": servicios,
         "eventos_herramienta": eventos_herramienta,
         "eventos_escalada": eventos_escalada,
     }
