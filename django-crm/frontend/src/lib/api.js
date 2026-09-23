@@ -8,6 +8,7 @@
  */
 
 import { env } from '$env/dynamic/public';
+import { describirError } from '$lib/observabilidad/privacidad.js';
 import { goto } from '$app/navigation';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -180,7 +181,7 @@ async function performTokenRefresh() {
     }
     return null;
   } catch (error) {
-    console.error('Token refresh failed:', error);
+    console.error({ tipo: 'token_refresh_failed', ...describirError(error) });
     clearAuthData();
     return null;
   }
@@ -251,7 +252,7 @@ export async function apiRequest(endpoint, options = {}) {
     // Return JSON response
     return await response.json();
   } catch (error) {
-    console.error(`API request failed: ${method} ${endpoint}`, error);
+    console.error({ tipo: 'api_request_failed', method, endpoint: endpoint.split('?')[0], ...describirError(error) });
     throw error;
   }
 }

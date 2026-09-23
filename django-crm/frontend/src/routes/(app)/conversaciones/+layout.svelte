@@ -479,7 +479,7 @@
   </span>
 </header>
 
-<div class="mesa bandeja">
+<div class="mesa bandeja" data-privado>
   <aside class="columna" class:hay-abierta={abierta} aria-label="Conversaciones">
     {#if !data.error && conversaciones.length > 0}
       <!-- Pestanas de estado. Nunca ember en la activa: "donde estoy" no es una

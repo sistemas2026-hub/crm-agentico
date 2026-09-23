@@ -95,7 +95,7 @@
       onsearch={() => (paletteOpen = true)}
     />
   {/if}
-  <div class="v2-main">
+  <div class="v2-main" data-privado>
     <!-- Phone top bar. The sidebar is hidden below 768px; this replaces the
          org mark and the search affordance it carried.
          No en la Bandeja: ahí la barra de consola ya lleva marca, módulos y

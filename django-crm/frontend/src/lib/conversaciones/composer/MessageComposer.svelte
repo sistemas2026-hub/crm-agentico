@@ -549,6 +549,7 @@
            18%. El texto de adentro explica por qué está bloqueado, así que la
            caja sigue diciendo algo -- pero en la mitad de alto. -->
       <textarea
+        data-privado
         class="compositor-texto"
         class:texto-inerte={bloqueadoPorVentana || bloqueadoPorIA}
         bind:this={campoTexto}
