@@ -4,7 +4,8 @@ import {
   hallazgosPorTipo,
   estadoDeCasos,
   ordenesDeTrabajo,
-  cargaPorTecnico
+  cargaPorTecnico,
+  ticketsPorOrigen
 } from './supervisor-noc-tablero.js';
 
 /**
@@ -249,5 +250,49 @@ describe('cargaPorTecnico', () => {
   it('sin personas el bloque se declara ausente', () => {
     expect(cargaPorTecnico([]).disponible).toBe(false);
     expect(cargaPorTecnico(null).disponible).toBe(false);
+  });
+});
+
+
+describe('ticketsPorOrigen', () => {
+  //  El backend agrupa por `Case.provider`, que ya existia: un caso con
+  //  proveedor llego de WispHub, uno sin proveedor nacio en el CRM.
+  const conOrigen = {
+    casos: { por_origen: { wisphub: conteo(36), dexter: conteo(28) } }
+  };
+
+  it('reparte los casos y traduce el nombre de cada sistema', () => {
+    const d = ticketsPorOrigen(conOrigen);
+
+    expect(d.disponible).toBe(true);
+    expect(d.total).toBe(64);
+    expect(d.tramos.map((t) => t.texto)).toEqual(['WispHub', 'Dexter']);
+    expect(d.tramos[0].porcentaje).toBe(56);
+  });
+
+  it('los tramos cubren el circulo entero', () => {
+    const d = ticketsPorOrigen(conOrigen);
+    expect(d.tramos.at(-1).hasta).toBe(100);
+  });
+
+  it('sin el indicador NO dibuja un donut vacio', () => {
+    expect(ticketsPorOrigen({}).disponible).toBe(false);
+    expect(ticketsPorOrigen(null).disponible).toBe(false);
+  });
+
+  it('un origen en cero no ocupa una porcion', () => {
+    const d = ticketsPorOrigen({ casos: { por_origen: { wisphub: conteo(5), dexter: conteo(0) } } });
+    expect(d.tramos).toHaveLength(1);
+    expect(d.total).toBe(5);
+  });
+
+  it('una organizacion sin casos no tiene donut, y eso no es un error', () => {
+    const d = ticketsPorOrigen({ casos: { por_origen: {} } });
+    expect(d).toEqual({ disponible: false, total: 0, tramos: [] });
+  });
+
+  it('un sistema de origen nuevo aparece con su clave, sin tocar la pantalla', () => {
+    const d = ticketsPorOrigen({ casos: { por_origen: { telegram: conteo(3) } } });
+    expect(d.tramos[0].texto).toBe('telegram');
   });
 });

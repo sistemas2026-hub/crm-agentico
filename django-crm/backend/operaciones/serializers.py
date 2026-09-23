@@ -16,18 +16,33 @@ from operaciones.programacion import ESTADOS_DE_PLAN_QUE_ADMITEN_LINEAS
 
 
 class PropuestaListaSerializer(serializers.ModelSerializer):
+    """
+    Una fila de la tabla de hallazgos, con las diez columnas que la pantalla
+    muestra -- no solo las cuatro que la propuesta guarda.
+
+    'contexto' lo resuelve 'operaciones/contexto_operativo.py' leyendo la
+    entidad de origen en el momento de responder. Lo que no aplica viaja en
+    None y la pantalla pinta "—": nunca un valor por defecto que parezca dato.
+    """
+
     tipo_senal_display = serializers.CharField(
         source="get_tipo_senal_display", read_only=True)
     dentro_del_alcance = serializers.BooleanField(read_only=True)
+    contexto = serializers.SerializerMethodField()
 
     class Meta:
         model = PropuestaSupervisor
         fields = [
             "id", "tipo_senal", "tipo_senal_display", "origen_tipo", "origen_id",
-            "accion_propuesta", "prioridad", "estado",
+            "accion_propuesta", "motivo", "prioridad", "estado",
             "nivel_autonomia_requerido", "dentro_del_alcance",
+            "huella_condicion", "contexto",
             "created_at", "expira_en",
         ]
+
+    def get_contexto(self, obj) -> dict:
+        from operaciones.contexto_operativo import contexto_de
+        return contexto_de(obj, ahora=self.context.get("ahora"))
 
 
 class PropuestaDetalleSerializer(serializers.ModelSerializer):
@@ -50,8 +65,19 @@ class PropuestaDetalleSerializer(serializers.ModelSerializer):
             # el humano decidio, que es lo que el Shadow Mode existe para medir.
             "responsable_sugerido", "responsable_sugerido_email",
             "observaciones", "propuesta_original",
+            #  'huella_condicion' estaba en el modelo desde M09-D y no salia por
+            #  la API: es la identidad de la condicion, lo que explica por que
+            #  una propuesta rechazada no vuelve mañana. Sin ella, la pantalla
+            #  no puede explicar una repetida.
+            "huella_condicion", "contexto",
             "accion_propuesta_ref", "created_at", "updated_at",
         ]
+
+    contexto = serializers.SerializerMethodField()
+
+    def get_contexto(self, obj) -> dict:
+        from operaciones.contexto_operativo import contexto_de
+        return contexto_de(obj, ahora=self.context.get("ahora"))
 
     def get_revisado_por_email(self, obj):
         if obj.revisado_por and obj.revisado_por.user:

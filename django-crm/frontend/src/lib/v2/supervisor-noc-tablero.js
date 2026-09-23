@@ -159,6 +159,81 @@ export function hallazgosPorTipo(propuestas) {
 }
 
 /**
+ * El donut «Tickets por origen», de `indicadores_casos.por_origen`.
+ *
+ * Devuelve la misma forma que `hallazgosPorTipo` para que el componente del
+ * donut sea uno solo: `{ disponible, total, tramos }` con su color, su `dash`
+ * y su `offset` ya calculados.
+ *
+ * El backend agrupa por `Case.provider`, que ya existía: un caso con proveedor
+ * llegó de WispHub, uno sin proveedor nació en el CRM. Un origen que todavía
+ * no tenga ningún caso NO aparece — una porción de 0% no dice nada.
+ *
+ * @param {any} indicadores
+ */
+export function ticketsPorOrigen(indicadores) {
+  const porOrigen = en(indicadores, ['casos', 'por_origen']);
+  if (!porOrigen || typeof porOrigen !== 'object') {
+    return { disponible: false, total: 0, tramos: [] };
+  }
+
+  const filas = Object.entries(porOrigen)
+    .map(([clave, v]) => ({
+      clave,
+      texto: ORIGENES[clave] ?? clave,
+      n: typeof v === 'object' && v && 'valor' in v ? v.valor : v
+    }))
+    .filter((f) => typeof f.n === 'number' && f.n > 0)
+    .sort((a, b) => b.n - a.n);
+
+  const total = filas.reduce((s, f) => s + f.n, 0);
+  if (total === 0) return { disponible: false, total: 0, tramos: [] };
+
+  let acumulado = 0;
+  const tramos = filas.map((f, i) => {
+    const pct = (f.n / total) * 100;
+    const tramo = {
+      ...f,
+      etiqueta: f.texto,
+      color: COLORES[i % COLORES.length],
+      porcentaje: Math.round(pct),
+      desde: Math.round(acumulado),
+      hasta: Math.round(acumulado + pct),
+      dash: `${pct.toFixed(2)} ${(100 - pct).toFixed(2)}`,
+      offset: `${(-acumulado).toFixed(2)}`
+    };
+    acumulado += pct;
+    return tramo;
+  });
+
+  return { disponible: true, total, tramos };
+}
+
+/** Como se nombra cada sistema de origen en la pantalla. */
+const ORIGENES = {
+  wisphub: 'WispHub',
+  dexter: 'Dexter',
+  'dexter+wisphub': 'Dexter + WispHub'
+};
+
+/** La leyenda del mapa: los cuatro estados que cuenta el backend. */
+export const LEYENDA_MAPA = [
+  { clave: 'criticos', texto: 'Críticos', color: '#c62828' },
+  { clave: 'en_ejecucion', texto: 'En ejecución', color: '#1565c0' },
+  { clave: 'programados', texto: 'Programados', color: '#2e7d32' },
+  { clave: 'sin_programar', texto: 'Sin programar', color: '#ef6c00' }
+];
+
+/** Los eventos del feed, en palabras. */
+export const ACCION = {
+  CREATE: 'Hallazgo registrado',
+  APPROVED: 'Propuesta aceptada',
+  REJECTED: 'Propuesta rechazada',
+  UPDATE: 'Propuesta modificada',
+  STATUS_CHANGED: 'Estado actualizado'
+};
+
+/**
  * Las barras «Estado de casos técnicos», de `indicadores_casos.por_estado`.
  *
  * La altura se calcula contra el mayor: sin eso, seis barras de alturas
@@ -282,28 +357,14 @@ export function cargaPorTecnico(personas) {
  * Está en un solo lugar para que los bloques digan qué falta en vez de
  * quedar vacíos, y para que se borren de aquí el día que el dato exista.
  */
-export const BLOQUES_SIN_DATO = {
-  origen: {
-    titulo: 'Tickets por origen',
-    motivo:
-      'El campo existe (OrdenTrabajo.origen_sistema: wisphub, solicitudes, crm, manual). ' +
-      'Lo que falta es agruparlo en los indicadores.'
-  },
-  mapa: {
-    titulo: 'Mapa de operación',
-    motivo:
-      'Las coordenadas existen en la orden (gps_lat/gps_lng), pero la propuesta solo ' +
-      'apunta con origen_tipo + origen_id y no las trae.'
-  },
-  actividad: {
-    titulo: 'Actividad reciente del Supervisor',
-    motivo: 'La auditoría existe por propuesta, pero no hay un feed de los últimos eventos.'
-  }
-};
+export const BLOQUES_SIN_DATO = {};
 
 /**
- * Las columnas de la tabla que el diseño pide y el backend no entrega.
- * Se declaran juntas para que la cabecera pueda marcarlas en vez de mostrar
- * una columna de rayas sin explicación.
+ * Las columnas que el diseño pide y el backend no entrega: ninguna.
+ *
+ * Técnico, zona y SLA se resolvieron con `contexto`, que la propuesta trae
+ * resuelto desde su entidad de origen. Se deja la constante vacía --y no se
+ * borra-- porque la pantalla la consulta para marcar columnas, y el día que
+ * aparezca una nueva basta con nombrarla aquí.
  */
-export const COLUMNAS_SIN_DATO = ['Zona', 'Técnico', 'SLA'];
+export const COLUMNAS_SIN_DATO = [];

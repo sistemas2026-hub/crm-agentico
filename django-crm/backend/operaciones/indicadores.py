@@ -356,6 +356,24 @@ def indicadores_supervisor(org, desde=None, hasta=None, ahora=None) -> dict:
         "propuestas_en_periodo": conteo(en_ventana.count(), fuente, per),
         "propuestas_por_tipo_senal": {
             t: conteo(por_senal.get(t, 0), fuente, per) for t, _e in P.TIPOS_SENAL},
+        #  LAS TENDENCIAS DE LA PANTALLA, Y LA QUE NO EXISTE
+        #  -------------------------------------------------
+        #  Las propuestas SE GUARDAN con su fecha, asi que su variacion contra
+        #  el periodo anterior es historia real y se calcula.
+        #
+        #  Los hallazgos vigentes NO: 'detectar()' los calcula en vivo y no
+        #  escribe ninguna fila, a proposito (no hay tabla de KPI). No se puede
+        #  saber cuantos habia la semana pasada sin fabricar el dato, asi que
+        #  viaja 'disponible: false' con el motivo, y la pantalla lo dice.
+        "variaciones": {
+            "propuestas": _variacion(qs, "created_at", desde, hasta, fuente),
+            "senales_vigentes": {
+                "disponible": False,
+                "motivo": ("la deteccion es en vivo y no se persiste: no hay "
+                           "historico contra el que comparar"),
+                "actual": len(senales),
+            },
+        },
     }
     for estado, _etiqueta in P.ESTADOS:
         salida[f"propuestas_{estado}"] = conteo(por_estado.get(estado, 0), fuente)
@@ -378,6 +396,66 @@ def indicadores_supervisor(org, desde=None, hasta=None, ahora=None) -> dict:
 # ==============================================================================
 #  B.1  --  CASOS  (se ENVUELVE cases/analytics, no se reescribe)
 # ==============================================================================
+
+#  Como se nombra cada origen en la pantalla. WispHub solo es el caso que
+#  llego del proveedor y nadie del asistente toco; 'Dexter + WispHub' es el que
+#  ademas tiene conversacion o ticket propio en el CRM.
+ORIGEN_DEXTER = "dexter"
+
+
+def _por_origen(qs, fuente: str) -> dict:
+    """Casos por sistema de origen. Sale de 'Case.provider', que ya existe."""
+    crudo = dict(qs.values_list("provider").annotate(n=Count("id"))
+                 .values_list("provider", "n"))
+    salida = {}
+    for clave, n in crudo.items():
+        salida[(clave or ORIGEN_DEXTER)] = conteo(n, fuente)
+    return dict(sorted(salida.items()))
+
+
+def _variacion(qs, campo_fecha: str, desde, hasta, fuente: str) -> dict:
+    """
+    Cuanto cambio entre esta ventana y la anterior del mismo tamaño.
+
+    POR QUE ESTO NO ES "INVENTAR UNA TENDENCIA"
+    -------------------------------------------
+    No hay tabla de KPI y no se agrega ninguna: la comparacion se calcula sobre
+    'created_at', que ya esta en las filas. Es historia real, no un snapshot
+    fabricado. Donde el indicador NO se puede fechar --los hallazgos vigentes,
+    que se detectan en vivo y no se guardan-- esta funcion no se llama y el
+    indicador viaja con 'disponible: false' y su motivo, que es lo que la
+    pantalla muestra como "Sin historico disponible".
+
+    La ventana anterior se calcula con la MISMA duracion, hacia atras. Con la
+    ventana por defecto (30 dias) eso son los 30 dias previos.
+    """
+    if desde is None or hasta is None:
+        return {"disponible": False, "motivo": "sin ventana de comparacion"}
+    duracion = hasta - desde
+    previa_desde, previa_hasta = desde - duracion, desde
+
+    actual = qs.filter(**{f"{campo_fecha}__gte": desde,
+                          f"{campo_fecha}__lt": hasta}).count()
+    previa = qs.filter(**{f"{campo_fecha}__gte": previa_desde,
+                          f"{campo_fecha}__lt": previa_hasta}).count()
+
+    if previa == 0:
+        #  Sin base de comparacion no hay porcentaje: 0 -> 5 no es "+500%", es
+        #  "antes no habia nada". Se dice, en vez de dibujar una flecha.
+        return {"disponible": False,
+                "motivo": "sin registros en el periodo anterior",
+                "actual": actual, "anterior": 0, "fuente": fuente}
+    return {
+        "disponible": True,
+        "actual": actual,
+        "anterior": previa,
+        "variacion": round((actual - previa) / previa, 4),
+        "fuente": fuente,
+        "desde": desde.isoformat(),
+        "hasta": hasta.isoformat(),
+        "anterior_desde": previa_desde.isoformat(),
+    }
+
 
 def indicadores_casos(org, desde=None, hasta=None, ahora=None) -> dict:
     """
@@ -417,6 +495,22 @@ def indicadores_casos(org, desde=None, hasta=None, ahora=None) -> dict:
                           for k, v in sorted(por_prioridad.items())},
         "por_tipo": {str(k): conteo(v, fuente) for k, v in sorted(
             por_tipo.items(), key=lambda x: str(x[0]))},
+        #  DE DONDE VIENE CADA CASO  --  el donut "Tickets por origen"
+        #  ----------------------------------------------------------
+        #  Sale de 'Case.provider', que YA existe y ya esta poblado: la
+        #  constraint del modelo obliga a que 'provider' y 'external_ticket_id'
+        #  viajen juntos, asi que un caso con proveedor tiene ticket y uno sin
+        #  proveedor nacio aca dentro. No hace falta ninguna columna nueva.
+        #
+        #  El caso sin proveedor se etiqueta 'dexter' y no "" o "ninguno": no es
+        #  la ausencia de un dato, es un caso creado en el CRM. Que la clave
+        #  vacia se leyera como "sin dato" fue justo lo que llevo a pensar que
+        #  el origen no se podia distinguir.
+        "por_origen": _por_origen(qs, fuente),
+        #  Los casos tambien se fechan, asi que su variacion es real.
+        "variaciones": {
+            "casos": _variacion(qs, "created_at", desde, hasta, fuente),
+        },
     }
 
     #  --- FRT, envuelto ---

@@ -54,6 +54,14 @@ urlpatterns = [
     #  El dominio va en el cuerpo, no en la ruta: un '<str:>' en el path
     #  habria necesitado una excepcion en el guarda de rutas malformadas.
     path("asistentes/", views.AsistenteView.as_view(), name="asistente"),
+    #  El feed de la pantalla: lo que el Supervisor y los revisores acaban de
+    #  hacer. Lee 'common.Activity', la bitacora que ya existe. GET y solo GET.
+    path("actividad-supervisor/", views.ActividadSupervisorView.as_view(),
+         name="actividad-supervisor"),
+    #  Los puntos del mapa de operacion. Hoy la lista viaja vacia con su motivo
+    #  --no hay coordenadas autorizadas-- y la leyenda si trae conteos reales.
+    path("ubicaciones/", views.UbicacionesOperacionView.as_view(),
+         name="ubicaciones"),
     #  M11. Indicadores y reportes. Son GET y solo GET: no guardan ningun KPI,
     #  no crean actividad de negocio y no corren el ciclo del Supervisor.
     path("indicadores/", views.IndicadoresView.as_view(), name="indicadores"),

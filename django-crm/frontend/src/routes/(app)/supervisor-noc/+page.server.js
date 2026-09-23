@@ -11,6 +11,7 @@ import {
   traducirError
 } from '$lib/server/v2/supervisor-noc.js';
 import { leerCapacidad } from '$lib/server/v2/programacion-noc.js';
+import { leerActividad, leerUbicaciones } from '$lib/server/v2/supervisor-noc-tablero-datos.js';
 
 /**
  * POR QUE ESTA RUTA VIVE EN (app)
@@ -61,11 +62,16 @@ export async function load({ cookies, locals, url }) {
   // bloque de tecnicos necesita quien trabaja hoy y cuanto tiene encima.
   const hoy = new Date().toISOString().slice(0, 10);
 
-  const [indicadores, todas, autonomia, capacidad] = await Promise.all([
+  //  El feed y el mapa se piden en la misma tanda: cada uno trae su propio
+  //  error y su propio vacío, así que uno que falle no deja la pantalla sin
+  //  los demás bloques.
+  const [indicadores, todas, autonomia, capacidad, actividad, ubicaciones] = await Promise.all([
     leerIndicadores({ cookies }, dias ?? undefined),
     listarPropuestas({ cookies }),
     leerAutonomia(),
-    leerCapacidad({ cookies }, hoy)
+    leerCapacidad({ cookies }, hoy),
+    leerActividad({ cookies }, 20),
+    leerUbicaciones({ cookies })
   ]);
 
   return {
@@ -79,7 +85,9 @@ export async function load({ cookies, locals, url }) {
     hallazgos: todas,
     autonomia,
     dia: hoy,
-    capacidad
+    capacidad,
+    actividad,
+    ubicaciones
   };
 }
 

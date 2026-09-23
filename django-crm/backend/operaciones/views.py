@@ -43,7 +43,8 @@ from rest_framework import serializers, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from common.models import Profile
+from campo.models import OrdenTrabajo
+from common.models import Activity, Profile
 from django.http import Http404
 from django.utils import timezone
 
@@ -448,6 +449,160 @@ class ProgramacionesView(APIView):
         return Response({
             "count": qs.count(),
             "resultados": ProgramacionSemanalSerializer(qs[:500], many=True).data,
+        })
+
+
+class ActividadSupervisorView(APIView):
+    """
+    ================================================================================
+     LO QUE ACABA DE PASAR  --  el feed de la pantalla. Solo lectura
+    ================================================================================
+
+        GET /api/operaciones/actividad-supervisor/?limite=20
+
+    De donde sale: de 'common.Activity', la MISMA bitacora que ya escribe
+    'operaciones/auditoria.py' cada vez que el Supervisor crea una propuesta o
+    un humano la revisa. No hay tabla nueva ni evento duplicado.
+
+    QUE SE MUESTRA Y QUE NO
+    -----------------------
+    Solo las tres entidades de operaciones. 'Activity' recoge la actividad de
+    todo el CRM --cuentas, contactos, facturas--, y un feed del Supervisor que
+    mezclara eso diria menos, no mas.
+
+    QUIEN LO HIZO
+    -------------
+    'user' viene en None cuando el autor es la IA, y esa distincion es
+    deliberada (ver auditoria.registrar): aqui se traduce a 'Supervisor NOC IA'
+    en vez de inventarle un usuario de sistema.
+    ================================================================================
+    """
+
+    permission_classes = [EsJefeDeOperaciones]
+
+    ENTIDADES = (auditoria.ENTIDAD_PROPUESTA,
+                 auditoria.ENTIDAD_ACTIVIDAD,
+                 auditoria.ENTIDAD_NOVEDAD)
+
+    def get(self, request):
+        try:
+            limite = min(int(request.query_params.get("limite", 20)), 100)
+        except (TypeError, ValueError):
+            limite = 20
+
+        qs = (Activity.objects
+              .filter(org=request.org, entity_type__in=self.ENTIDADES)
+              .select_related("user__user")
+              .order_by("-created_at"))
+
+        filas = [{
+            "id": str(a.id),
+            "cuando": a.created_at.isoformat(),
+            "accion": a.action,
+            "entidad": a.entity_type,
+            "entidad_id": str(a.entity_id) if a.entity_id else None,
+            "titulo": a.entity_name or "",
+            "detalle": a.description or "",
+            #  Sin usuario = lo hizo la IA. Se dice con todas las letras.
+            "quien": (a.user.user.email if a.user and a.user.user
+                      else "Supervisor NOC IA"),
+            "es_ia": a.user_id is None,
+            "metadata": a.metadata or {},
+        } for a in qs[:limite]]
+
+        return Response({"count": qs.count(), "resultados": filas})
+
+
+class UbicacionesOperacionView(APIView):
+    """
+    ================================================================================
+     EL MAPA DE OPERACION  --  solo lectura, y hoy deliberadamente vacio
+    ================================================================================
+
+        GET /api/operaciones/ubicaciones/
+
+    DE DONDE SALEN LOS PUNTOS
+    -------------------------
+    De 'OrdenTrabajo.gps_lat' / 'gps_lng', que YA existen y las escribe el alta
+    de la orden. No hace falta ninguna columna nueva ni traer coordenadas del
+    proveedor: la orden de trabajo es el objeto que tiene sitio.
+
+    LO QUE NO SALE, Y NO VA A SALIR POR AQUI
+    ----------------------------------------
+    Nada del cliente. Ni nombre, ni telefono, ni direccion. El punto lleva el
+    numero de orden, su estado y sus coordenadas, y eso es todo: las
+    coordenadas del DOMICILIO que guarda el sistema del proveedor estan
+    marcadas como dato personal junto a la cedula y las contraseñas, y el PRD
+    (RNF-01) decide a proposito no persistirlas. Aqui se pinta donde hay
+    TRABAJO, no donde vive una persona.
+
+    (El proveedor no se nombra en este modulo a proposito: 'operaciones/' no
+    conoce sistemas concretos, y hay una guarda que lo comprueba leyendo este
+    fuente -- test_m03e5c_cierre::test_17.)
+
+    UNA ORDEN SIN COORDENADAS NO ES UN ERROR
+    ----------------------------------------
+    El campo es opcional y hoy casi ninguna lo trae. La ruta contesta 200 con
+    la lista vacia y dice cuantas ordenes quedaron fuera por eso, en vez de un
+    404 que la pantalla leeria como "falta la ruta". El mapa se enciende solo
+    en cuanto una orden traiga su posicion: el frontend no cambia.
+
+    LA LEYENDA SIEMPRE SE PUEDE DAR
+    -------------------------------
+    El recuento por estado --criticos, en ejecucion, programados, sin
+    programar-- no necesita coordenadas y sale de las ordenes reales.
+    ================================================================================
+    """
+
+    permission_classes = [EsJefeDeOperaciones]
+
+    def get(self, request):
+        ordenes = OrdenTrabajo.objects.filter(org=request.org)
+        abiertas = ordenes.exclude(
+            estado_operativo__in=(OrdenTrabajo.CERRADA, OrdenTrabajo.CANCELADA))
+
+        programadas = set(ProgramacionOrden.objects.filter(
+            org=request.org,
+            estado__in=(ProgramacionOrden.PLANIFICADA,
+                        ProgramacionOrden.CONFIRMADA)).values_list(
+                            "orden_id", flat=True))
+
+        con_posicion = abiertas.exclude(gps_lat__isnull=True).exclude(
+            gps_lng__isnull=True)
+        puntos = [{
+            "id": str(o.id),
+            "etiqueta": f"OT-{o.numero}",
+            "lat": o.gps_lat,
+            "lng": o.gps_lng,
+            "estado": o.estado_operativo,
+            "programada": o.id in programadas,
+        } for o in con_posicion.only(
+            "id", "numero", "gps_lat", "gps_lng", "estado_operativo")[:500]]
+
+        sin_posicion = abiertas.count() - con_posicion.count()
+
+        return Response({
+            "puntos": puntos,
+            "disponible": bool(puntos),
+            #  El motivo viaja para que la pantalla diga POR QUE esta vacio. Un
+            #  mapa en blanco sin explicacion se reporta como fallo.
+            "motivo": ("" if puntos else
+                       (f"Ninguna de las {abiertas.count()} órdenes abiertas tiene "
+                        f"coordenadas cargadas."
+                        if abiertas.exists() else
+                        "No hay órdenes de trabajo abiertas en esta organización.")),
+            "ordenes_sin_posicion": sin_posicion,
+            "leyenda": {
+                "criticos": abiertas.filter(
+                    estado_validacion=OrdenTrabajo.REQUIERE_CORRECCION).count(),
+                "en_ejecucion": abiertas.filter(
+                    estado_operativo__in=(OrdenTrabajo.EN_CAMINO,
+                                          OrdenTrabajo.EN_SITIO)).count(),
+                "programados": abiertas.filter(id__in=programadas).count(),
+                "sin_programar": abiertas.exclude(id__in=programadas).count(),
+                "total_abiertas": abiertas.count(),
+            },
+            "fuente": "campo.OrdenTrabajo",
         })
 
 

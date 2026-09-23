@@ -785,6 +785,13 @@ def test_no_existe_ninguna_ruta_de_ejecucion():
     habilidades ni eleva autonomía: toda propuesta sale con
     'nivel_autonomia_requerido <= 1' y estado 'propuesta'.
 
+    'actividad-supervisor' y 'ubicaciones' entraron con el tablero. Las dos son
+    **GET**: la primera lee 'common.Activity' --la bitácora que ya escribe
+    'auditoria.registrar'-- y la segunda cuenta órdenes por estado y devuelve la
+    lista de puntos del mapa, hoy vacía porque no hay coordenadas autorizadas.
+    Ninguna escribe una fila ni llama a un sistema externo, y su suite lo afirma
+    sobre el EFECTO (tests/test_tablero_supervisor.py).
+
     'programaciones' (GET /programacion/) entró con la pantalla de programación.
     Es la más fácil de todas: lista los planes semanales de la organización y
     nada más. No crea planes, no los publica, no los cierra, no agrega líneas y
@@ -815,7 +822,7 @@ def test_no_existe_ninguna_ruta_de_ejecucion():
                        "capacidad-jornada", "actividades",
                        "actividad-detalle", "actividad-transicion",
                        "asistente", "indicadores", "reportes",
-                       "programaciones"}
+                       "programaciones", "actividad-supervisor", "ubicaciones"}
     for prohibida in ("ejecutar", "aplicar", "despachar", "propuesta-ejecutar"):
         assert prohibida not in nombres
 

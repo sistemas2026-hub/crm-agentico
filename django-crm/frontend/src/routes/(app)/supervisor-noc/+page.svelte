@@ -18,6 +18,9 @@
     hallazgosPorTipo,
     estadoDeCasos,
     ordenesDeTrabajo,
+    ticketsPorOrigen,
+    LEYENDA_MAPA,
+    ACCION,
     cargaPorTecnico,
     BLOQUES_SIN_DATO
   } from '$lib/v2/supervisor-noc-tablero.js';
@@ -89,6 +92,23 @@
   const ordenes = $derived(ordenesDeTrabajo(data.indicadores));
   const tecnicos = $derived(cargaPorTecnico(data.capacidad?.personas));
   const SIN_DATO = BLOQUES_SIN_DATO;
+
+  //  Los tres bloques que antes declaraban su hueco. Ahora tienen backend:
+  //  'casos.por_origen', '/ubicaciones/' y '/actividad-supervisor/'.
+  const origen = $derived(ticketsPorOrigen(data.indicadores));
+
+  const horaCorta = (/** @type {string|null} */ iso) =>
+    iso ? new Date(iso).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' }) : '—';
+
+  //  El SLA de cada hallazgo lo calcula 'operaciones/sla.py' y llega resuelto
+  //  en 'contexto': aquí solo se le pone color y palabra.
+  const SLA = {
+    vencido: { texto: 'Vencido', clase: 'snoc-insignia-error-solida' },
+    por_vencer: { texto: 'Por vencer', clase: 'snoc-insignia-error' },
+    en_plazo: { texto: 'En plazo', clase: 'snoc-insignia-secundaria-suave' }
+  };
+  const tonoSla = (/** @type {string} */ e) => SLA[e]?.clase ?? 'snoc-insignia-neutra';
+  const textoSla = (/** @type {string} */ e) => SLA[e]?.texto ?? e;
 
   /** El icono de cada KPI. Decora; el numero y su rotulo dicen todo lo demas. */
   const ICONO_KPI = {
@@ -479,24 +499,79 @@
         <div class="snoc-grafico">
           <h2 class="snoc-grafico-titulo">
             <span class="snoc-icono snoc-tenue" style="font-size:15px;">hub</span>
-            {SIN_DATO.origen.titulo}
+            Tickets por origen
           </h2>
-          <div class="snoc-hueco">
-            <span class="snoc-hueco-rotulo">Falta en el backend</span>
-            <p class="snoc-hueco-motivo">{SIN_DATO.origen.motivo}</p>
-          </div>
+          {#if origen.disponible}
+            <div class="snoc-donut-centro">
+              <div
+                class="snoc-donut"
+                style="background: conic-gradient({origen.tramos
+                  .map((t) => `${t.color} ${t.desde}% ${t.hasta}%`)
+                  .join(', ')})"
+                role="img"
+                aria-label="Reparto de los {origen.total} casos por sistema de origen"
+              ></div>
+              <span class="snoc-donut-cifra">{origen.total}</span>
+            </div>
+            <ul class="snoc-leyenda">
+              {#each origen.tramos as t (t.clave)}
+                <li>
+                  <span class="snoc-punto-color" style="background:{t.color}"></span>
+                  <span class="snoc-body-sm">{t.texto}</span>
+                  <span class="snoc-mono-sm">{t.n}</span>
+                  <span class="snoc-mono-sm snoc-tenue">{t.porcentaje}%</span>
+                </li>
+              {/each}
+            </ul>
+          {:else}
+            <div class="snoc-hueco">
+              <span class="snoc-hueco-rotulo">Sin tickets registrados</span>
+              <p class="snoc-hueco-motivo">
+                Esta organización todavía no tiene casos con origen declarado.
+              </p>
+            </div>
+          {/if}
         </div>
 
         <!-- 4 · Mapa de operación · LAS COORDENADAS ESTAN EN LA ORDEN, NO EN LA PROPUESTA -->
         <div class="snoc-grafico">
           <h2 class="snoc-grafico-titulo">
             <span class="snoc-icono snoc-tenue" style="font-size:15px;">map</span>
-            {SIN_DATO.mapa.titulo}
+            Mapa de operación
           </h2>
-          <div class="snoc-hueco">
-            <span class="snoc-hueco-rotulo">Falta en el backend</span>
-            <p class="snoc-hueco-motivo">{SIN_DATO.mapa.motivo}</p>
-          </div>
+          {#if data.ubicaciones?.puntos?.length}
+            <!-- Las coordenadas salen de la ORDEN (gps_lat/gps_lng). Del cliente
+                 no viaja nada: en el mapa se ve dónde hay trabajo, no dónde vive
+                 una persona. -->
+            <ul class="snoc-mapa-lista">
+              {#each data.ubicaciones.puntos as punto (punto.id)}
+                <li>
+                  <span class="snoc-punto-color" style="background:{punto.programada ? '#2e7d32' : '#ef6c00'}"></span>
+                  <span class="snoc-id">{punto.etiqueta}</span>
+                  <span class="snoc-mono-sm snoc-tenue">{punto.lat}, {punto.lng}</span>
+                  <span class="snoc-mono-sm">{punto.estado}</span>
+                </li>
+              {/each}
+            </ul>
+          {:else}
+            <div class="snoc-hueco">
+              <span class="snoc-hueco-rotulo">Sin ubicaciones disponibles</span>
+              <p class="snoc-hueco-motivo">
+                {data.ubicaciones?.motivo || 'No hay órdenes con coordenadas cargadas.'}
+              </p>
+            </div>
+          {/if}
+          {#if data.ubicaciones?.leyenda}
+            <ul class="snoc-leyenda">
+              {#each LEYENDA_MAPA as l (l.clave)}
+                <li>
+                  <span class="snoc-punto-color" style="background:{l.color}"></span>
+                  <span class="snoc-body-sm">{l.texto}</span>
+                  <span class="snoc-mono-sm">{data.ubicaciones.leyenda[l.clave] ?? 0}</span>
+                </li>
+              {/each}
+            </ul>
+          {/if}
         </div>
       </section>
 
@@ -569,8 +644,9 @@
                     que es a quien la IA propone, NO a quien está asignado. Ponerlo
                     en esta columna diría que alguien ya lo tiene, y no lo tiene.
                   -->
-                  <th class="snoc-col-ausente" title="La propuesta no trae técnico asignado">Técnico *</th>
-                  <th class="snoc-col-ausente" title="La zona vive en la línea de programación, no en la propuesta">Zona *</th>
+                  <th title="De la asignación vigente de la orden">Técnico</th>
+                  <th title="De la línea de programación de la orden">Zona</th>
+                  <th title="Del plazo que calcula operaciones/sla.py">SLA</th>
                   <th>Estado</th>
                   <th>Detectado</th>
                   <th class="snoc-derecha">Acción</th>
@@ -583,13 +659,36 @@
                     <td class="snoc-label">{p.tipo_senal_display}</td>
                     <td class="snoc-body-sm snoc-recorte" title={p.accion_propuesta}>{p.accion_propuesta}</td>
                     <td>
-                      <span class="snoc-id">{p.origen_tipo}</span>
-                      <div class="snoc-mono-sm snoc-tenue" title={p.origen_id}>
-                        {String(p.origen_id).slice(0, 12)}
-                      </div>
+                      {#if p.contexto?.caso}
+                        <span class="snoc-id">CS-{p.contexto.caso.id_corto}</span>
+                        <div class="snoc-mono-sm snoc-tenue">
+                          {p.contexto.caso.ticket_externo ?? '—'}
+                        </div>
+                      {:else if p.contexto?.orden}
+                        <span class="snoc-id">OT-{p.contexto.orden.numero}</span>
+                        <div class="snoc-mono-sm snoc-tenue">{p.contexto.orden.origen_ref ?? '—'}</div>
+                      {:else}
+                        <span class="snoc-id">{p.origen_tipo}</span>
+                        <div class="snoc-mono-sm snoc-tenue" title={p.origen_id}>
+                          {String(p.origen_id).slice(0, 12)}
+                        </div>
+                      {/if}
                     </td>
-                    <td class="snoc-celda-ausente">—</td>
-                    <td class="snoc-celda-ausente">—</td>
+                    <!-- Las tres salen de 'contexto', que el backend resuelve leyendo
+                         la entidad de origen. Un guion aquí ya no significa "el
+                         backend no lo trae": significa que ese hallazgo no tiene
+                         técnico, zona o plazo -- un caso no los tiene. -->
+                    <td>{p.contexto?.tecnico?.nombre ?? '—'}</td>
+                    <td>{p.contexto?.zona ?? '—'}</td>
+                    <td>
+                      {#if p.contexto?.sla && p.contexto.sla.estado !== 'sin_plazo'}
+                        <span class="snoc-insignia {tonoSla(p.contexto.sla.estado)}">
+                          {textoSla(p.contexto.sla.estado)}
+                        </span>
+                      {:else}
+                        <span class="snoc-tenue">—</span>
+                      {/if}
+                    </td>
                     <td>
                       <span class="snoc-insignia {estadoDe(p.estado).clase}">{estadoDe(p.estado).texto}</span>
                       {#if p.dentro_del_alcance === false}
@@ -619,8 +718,8 @@
             </table>
           </div>
           <span class="snoc-mono-sm snoc-tenue">
-            * Técnico y zona no vienen en la propuesta. La zona vive en la línea de programación; el
-            técnico asignado, en la orden.
+            Técnico, zona y SLA se leen de la entidad de origen de cada hallazgo. Un guion significa
+            que ese hallazgo no tiene ese dato — un caso no lleva técnico de campo ni zona.
           </span>
         {/if}
       </section>
@@ -702,15 +801,36 @@
         <div class="snoc-grafico">
           <h2 class="snoc-grafico-titulo">
             <span class="snoc-icono snoc-tenue" style="font-size:15px;">history</span>
-            {SIN_DATO.actividad.titulo}
+            Actividad reciente del Supervisor
           </h2>
-          <div class="snoc-hueco">
-            <span class="snoc-hueco-rotulo">Falta en el backend</span>
-            <p class="snoc-hueco-motivo">{SIN_DATO.actividad.motivo}</p>
-            <span class="snoc-mono-sm snoc-tenue">
-              La auditoría sí está, por propuesta, dentro de «Ver detalle».
-            </span>
-          </div>
+          {#if data.actividad?.error}
+            <div class="snoc-hueco">
+              <span class="snoc-hueco-rotulo">No se pudo leer</span>
+              <p class="snoc-hueco-motivo">{data.actividad.error.mensaje}</p>
+            </div>
+          {:else if data.actividad?.eventos?.length}
+            <ul class="snoc-feed">
+              {#each data.actividad.eventos as e (e.id)}
+                <li>
+                  <span class="snoc-mono-sm snoc-tenue">{horaCorta(e.cuando)}</span>
+                  <span class="snoc-body-sm">
+                    {ACCION[e.accion] ?? e.accion}
+                    {#if e.es_ia}<span class="snoc-insignia snoc-insignia-neutra">IA</span>{/if}
+                  </span>
+                  <span class="snoc-mono-sm snoc-tenue snoc-recorte" title={e.titulo || e.detalle}>
+                    {e.titulo || e.detalle || '—'}
+                  </span>
+                </li>
+              {/each}
+            </ul>
+          {:else}
+            <div class="snoc-hueco">
+              <span class="snoc-hueco-rotulo">Sin registros de actividad</span>
+              <p class="snoc-hueco-motivo">
+                Todavía no hay eventos del Supervisor en esta organización.
+              </p>
+            </div>
+          {/if}
         </div>
       </section>
 
