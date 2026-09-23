@@ -324,6 +324,26 @@ Idea nueva
 una persona decide el deploy
 ```
 
+### §11.3 Comandos, objetivos y `/goal`
+
+Cuatro comandos en [.claude/commands/](.claude/commands/), y una regla que los ordena.
+
+| Comando | Cuándo |
+|---|---|
+| `/inicio-sesion` | Al abrir la sesión. Lee la jerarquía de §1, mide git con `fetch`, lista los objetivos abiertos y comprueba que las puertas estén puestas |
+| `/objetivo <qué lograr>` | Antes de construir algo grande. Escribe la ficha y **emite la condición `/goal` lista para pegar** |
+| `/verificar` | Todos los días. Aplica la tabla de §6 sobre el diff actual |
+| `/cerrar-bloque` | Al terminar: guardas + `auditor-independiente` + actualizar la autoridad del estado |
+
+**`/goal` no es dueño del objetivo; el dueño es el archivo.** `/goal` fija una condición de término y un modelo evaluador decide, después de cada turno, si seguir — es el **motor**, y vive una sesión. El **contrato** vive en `SPEC/objetivos/<slug>.md`, versionado, y su cierre se refleja en `SPEC/DEXTER_ESTADO_ACTUAL.md`, que sigue siendo la autoridad. Si la condición y la ficha difieren, manda la ficha.
+
+Dos cosas que hay que saber antes de lanzar un `/goal` acá:
+
+- **El evaluador no corre comandos ni lee archivos**: juzga solo lo que aparezca en la conversación. Por eso los criterios de aceptación se escriben como *comando + salida pegada*, nunca en prosa — es la misma regla del método de §6, aplicada al evaluador.
+- **`/goal` no cambia el modo de permisos.** Para que los turnos corran solos hace falta auto mode, y eso son turnos autónomos sobre un árbol donde **push es deploy**. Las restricciones van escritas **dentro** de la condición (no push, no `tenant_config`, no los 56 casos), y el `pre-commit` de §9 es la red que sí mide — pero solo si `core.hooksPath` está puesto.
+
+**Para lo recurrente, `/goal` no sirve**: una auditoría no tiene estado final. `/loop` corre por intervalo y **muere con la sesión** (sirve para vigilar una corrida larga o un despliegue); lo que tiene que pasar cuando no estás es `/schedule`, y **solo sobre el repositorio** — nada que necesite la base de producción, sus credenciales, ni que escriba `tenant_config`.
+
 **Los pasos se saltean diciéndolo, nunca en silencio.** Si un cambio no toca una API externa, el paso 2 no corre y se dice. Si un paso se omite por tiempo, eso se declara al entregar — omitir sin decirlo es lo que convierte un proceso en un adorno.
 
 ---
