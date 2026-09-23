@@ -32,8 +32,8 @@
   let seleccionado = $state(/** @type {any} */ (null));
   let escala = $state(1);
 
-  const ANCHO = 1340, ALTO = 830;
-  const CX = ANCHO / 2, CY = 430, RX = 452, RY = 185;
+  const ANCHO = 1340, ALTO = 930;
+  const CX = ANCHO / 2, CY = 478, RX = 452, RY = 230;
 
   /* ---------------------------------------------------------------------
    * Imagenes. El motor no sabe (ni debe saber) con que dibujo se representa
@@ -99,7 +99,7 @@
      le toca a cada uno sobre el anillo. Con seis caben holgados; un tenant
      con diez los tendria encimados si el ancho fuera fijo. */
   const anchoEstacion = $derived(Math.max(
-    180, Math.min(330, (Math.PI * (RX + RY) / Math.max(agentes.length, 1)) * 0.80)));
+    175, Math.min(320, (Math.PI * (RX + RY) / Math.max(agentes.length, 1)) * 0.76)));
 
 
   /** Reparte los agentes en un anillo: dos, seis u once caben igual. */
@@ -147,6 +147,14 @@
   }
 
   function ajustar() {
+    const sala = document.querySelector('.sala');
+    if (sala) {
+      // Lo que queda de ventana por debajo de donde empieza la sala, menos un
+      // respiro. Medido y no calculado con una constante: el encabezado de la
+      // pagina cambia de alto segun el ancho.
+      const arriba = sala.getBoundingClientRect().top;
+      sala.style.height = Math.max(600, window.innerHeight - arriba - 12) + 'px';
+    }
     const caja = document.getElementById('escena');
     if (!caja) return;
     escala = Math.min(caja.clientWidth / ANCHO, caja.clientHeight / ALTO);
@@ -372,7 +380,7 @@
     background-image: radial-gradient(ellipse at 50% 0%, rgba(0,229,255,.16), transparent 62%);
     color: var(--texto);
     border: 1px solid var(--borde); border-radius: 14px; overflow: hidden;
-    display: flex; flex-direction: column; height: calc(100vh - 132px); min-height: 600px;
+    display: flex; flex-direction: column; min-height: 600px;
   }
   /* auto-fit y no un numero fijo de columnas: son ocho cifras y el ancho
      disponible depende del menu lateral. Con un numero fijo, la ultima se
