@@ -2578,3 +2578,144 @@ casos:
       no_intenta: [confirmar_identidad, consultar_facturas,
                    consultar_mi_servicio, consultar_estado_servicio]
       responde_sin: ["identidad confirmada", "ya verifique", "cuenta verificada"]
+
+  # ---------------------------------------------------------------------------
+  #  LA DESCRIPCION DE derivar_a_area LA COMPARTEN CUATRO ROLES (23/09/2026)
+  # ---------------------------------------------------------------------------
+  #  El caso de arriba se arreglo cambiando esa descripcion, que decia, para
+  #  todos por igual: "no antes de verificar identidad".
+  #
+  #  Para 'cliente_final' era una precondicion IMPOSIBLE -- no tiene ninguna
+  #  herramienta que verifique-- y por eso pedia el documento el mismo. Pero la
+  #  misma frase la leen 'facturacion_cliente', 'soporte_tecnico_cliente' y
+  #  'ventas', donde SI era correcta. Al volverla condicional, el riesgo se da
+  #  vuelta: que alguno de esos tres deje de verificar, o empiece a derivar en
+  #  vez de resolver.
+  #
+  #  NINGUNO DE LOS 87 CASOS ANTERIORES PODIA VER ESO: 'sesion_por_defecto'
+  #  trae verificado=true, asi que la verificacion nunca se ejercitaba. Cero
+  #  casos afirmaban que estos roles verifican. Por eso estos tres van con la
+  #  sesion sin verificar y declarada entera.
+  #
+  #  LA POLITICA DE CADA ROL NO ES LA MISMA, Y ESTA EN LA CONFIG, NO EN LO QUE
+  #  UNO SUPONE (nucleo/config/schema.py, Rol.exige_verificacion):
+  #
+  #    facturacion_cliente       exige_verificacion: true   -> verifica el
+  #    soporte_tecnico_cliente   exige_verificacion: true   -> verifica el
+  #    ventas                    exige_verificacion: FALSE  -> NO verifica:
+  #                              quien pregunta por planes todavia no es
+  #                              cliente. Afirmar que verifica marcaria como
+  #                              falla el comportamiento correcto -- el mismo
+  #                              error que ya costo tres correcciones en los
+  #                              casos del router.
+
+  - nombre: facturacion sigue verificando antes de hablar de la deuda
+    rol: facturacion_cliente
+    sesion:
+      verificado: false
+      nivel: 0
+      id_cliente: ""
+      nombre: ""
+      sn_onu: ""
+      identificador_canal: "CO.1360399936298471"
+    mensajes:
+      - "cuanto debo?"
+      - "mi cedula es 1002003004"
+    espera:
+      # Verifica EL, no deriva. Si la descripcion nueva lo empujo a derivar,
+      # aca se pone rojo: este rol es el destino, no tiene a quien pasarle
+      # una verificacion que es suya.
+      usa: [verificar_identidad_por_cedula]
+      no_usa: [derivar_a_area]
+      sin_errores: true
+
+  - nombre: soporte sigue verificando antes de tocar la linea del cliente
+    rol: soporte_tecnico_cliente
+    sesion:
+      verificado: false
+      nivel: 0
+      id_cliente: ""
+      nombre: ""
+      sn_onu: ""
+      identificador_canal: "CO.1360399936298471"
+    mensajes:
+      - "no tengo internet hace dos dias"
+      - "mi cedula es 1002003004"
+    espera:
+      usa: [verificar_identidad_por_cedula]
+      no_usa: [derivar_a_area]
+      # NO TOCA EL EQUIPO. La sesion va sin verificar y sin sn_onu, asi que
+      # no hay con que, pero se afirma igual: este caso no puede reiniciar
+      # una ONU real. Por lo mismo NO lleva 'humo: true'.
+      no_intenta: [reiniciar_ont]
+
+  - nombre: ventas NO empieza a pedir cedula a quien todavia no es cliente
+    rol: ventas
+    sesion:
+      verificado: false
+      nivel: 0
+      id_cliente: ""
+      nombre: ""
+      sn_onu: ""
+      identificador_canal: "CO.1360399936298471"
+    mensajes: ["que planes de internet tienen?"]
+    espera:
+      # 'ventas' tiene la herramienta de verificacion para cuando hace falta
+      # (una solicitud ya registrada), pero su politica es exige_verificacion:
+      # false. Preguntar por planes no es un dato de nadie. Si el cambio de
+      # descripcion lo volvio verificador, se pone rojo aca.
+      no_usa: [verificar_identidad_por_cedula, derivar_a_area]
+      sin_errores: true
+
+  # EL CASO DE ARRIBA PASA CON LA DESCRIPCION VIEJA Y CON LA NUEVA: medido 3 de
+  # 3 cada una el 23/09/2026. O sea que NO reproduce lo que fallo, y por si
+  # solo no es guarda de nada.
+  #
+  # Lo que fallo en produccion no fue el primer mensaje. Fue la INSISTENCIA:
+  # el cliente pidio la baja, el router le pidio nombre y documento, el cliente
+  # se los dio, y el router se los volvio a pedir. Ocho horas. Un caso de un
+  # solo mensaje no puede ver eso -- el modelo se engancha recien cuando ya
+  # pidio el dato y lo tiene en su propio historial.
+  #
+  # Por eso este caso manda los tres mensajes de la conversacion real, en el
+  # mismo orden. La cedula es inventada a proposito: lo que se afirma es que
+  # DERIVE, no que encuentre a nadie.
+  #
+  # ADVERTENCIA, Y ES LO MAS IMPORTANTE DE ESTE COMENTARIO: ESTE CASO TAMPOCO
+  # REPRODUCE LA FALLA. Medido 3 de 3 en verde con la descripcion vieja Y con
+  # la nueva (23/09/2026). Queda como cobertura de la forma insistente, no
+  # como la guarda de este bug: si alguien lo lee como prueba de que el
+  # arreglo funciona, se equivoca.
+  #
+  # Por que no se puede reproducir desde aca: 'cli/evaluar.py' llama a
+  # motor.responder() directo y NO pasa por atender_turno (ver su linea 183),
+  # y ademas arranca con historial vacio. La conversacion real traia 17
+  # mensajes cargados de la base y el rol ya enganchado. Reproducirlo pide un
+  # arnes que arranque desde un historial persistido -- es la deuda
+  # 'smoke_turno_real', no un caso mas en este archivo.
+  #
+  # La evidencia de que el cambio sirve esta en otro lado, y conviene dejarla
+  # escrita: el caso 'pedido de servicio nuevo deriva a ventas sin pedir
+  # cedula' fallo 1 de 3 con la descripcion vieja --con el sintoma exacto,
+  # 'deriva_a: esperaba ventas, quedo en None'-- y 3 de 3 en verde con la
+  # nueva.
+  - nombre: el router que ya pidio el documento igual termina derivando
+    rol: cliente_final
+    sesion:
+      verificado: false
+      nivel: 0
+      id_cliente: ""
+      nombre: ""
+      sn_onu: ""
+      identificador_canal: "CO.1360399936298471"
+    mensajes:
+      - "Buenas noches, quiero dar de baja el servicio"
+      - "Mario Perez"
+      - "1002003004"
+    espera:
+      # La afirmacion es sobre la TRAZA. No se prohibe la palabra 'cedula' en
+      # la respuesta: si derivo, quien contesta es facturacion, y facturacion
+      # SI debe pedirla -- prohibirlo marcaria como falla lo correcto.
+      usa: [derivar_a_area]
+      deriva_a: facturacion_cliente
+      catalogo_sin: [verificar_identidad_por_cedula, confirmar_identidad]
