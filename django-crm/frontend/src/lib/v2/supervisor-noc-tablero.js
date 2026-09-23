@@ -363,6 +363,53 @@ export function actividadReciente(eventos) {
 }
 
 /**
+ * La celda de SLA de un hallazgo, a partir de lo que devuelve
+ * `operaciones/sla.py`.
+ *
+ * LOS SEIS ESTADOS NO SE COLAPSAN EN DOS. «No hay plazo declarado» y «no se
+ * pudo calcular» se verían igual como una celda vacía, y son cosas distintas:
+ * la primera es una decisión del tipo de trabajo, la segunda es un dato que
+ * falta. Y `NO_APLICA` quiere decir que la orden ya terminó -- llamarlo «a
+ * tiempo» sería afirmar algo sobre un plazo que ya no corre.
+ *
+ * @param {string} estado
+ * @param {number|null} minutos
+ */
+export function celdaDeSla(estado, minutos) {
+  const dias = (m) => {
+    if (m == null) return '';
+    if (m < 60) return `${m} min`;
+    if (m < 1440) return `${Math.round(m / 60)} h`;
+    return `${Math.round(m / 1440)} d`;
+  };
+
+  switch (estado) {
+    case 'VENCIDA':
+      return {
+        texto: 'Vencido',
+        detalle: minutos != null ? `hace ${dias(minutos)}` : '',
+        tono: 'critico'
+      };
+    case 'VENCE_PRONTO':
+      return { texto: dias(minutos) || 'Por vencer', detalle: 'por vencer', tono: 'alerta' };
+    case 'A_TIEMPO':
+      return { texto: dias(minutos) || 'A tiempo', detalle: 'a tiempo', tono: 'ok' };
+    case 'NO_APLICA':
+      // La orden terminó. El plazo no corre; no es un incumplimiento ni un
+      // cumplimiento.
+      return { texto: 'N/A', detalle: 'la orden ya terminó', tono: 'neutro' };
+    case 'SIN_PLAZO':
+      return { texto: 'N/A', detalle: 'el tipo de trabajo no declara plazo', tono: 'neutro' };
+    case 'DATOS_INSUFICIENTES':
+      return { texto: '—', detalle: 'no se pudo determinar el plazo', tono: 'neutro' };
+    default:
+      // Sin estado: la propuesta no cuelga de una orden, que es donde vive el
+      // plazo. Un caso o una actividad no tienen uno.
+      return { texto: 'N/A', detalle: 'no cuelga de una orden de trabajo', tono: 'neutro' };
+  }
+}
+
+/**
  * Lo que la pantalla NO puede mostrar todavía, con el motivo.
  *
  * Está en un solo lugar para que los bloques digan qué falta en vez de
@@ -382,4 +429,4 @@ export const BLOQUES_SIN_DATO = {
  * Se declaran juntas para que la cabecera pueda marcarlas en vez de mostrar
  * una columna de rayas sin explicación.
  */
-export const COLUMNAS_SIN_DATO = ['SLA'];
+export const COLUMNAS_SIN_DATO = [];

@@ -146,12 +146,25 @@ def _faltantes(orden, version, minutos) -> list[dict]:
     return faltan
 
 
-def plazo_de(orden, ahora=None, ventana_horas: int | None = None) -> dict:
+#  Centinela para distinguir "no me pasaron calendario" de "me pasaron None",
+#  que significa 24/7 y es una respuesta legitima.
+_SIN_CALENDARIO = object()
+
+
+def plazo_de(orden, ahora=None, ventana_horas: int | None = None,
+             calendario=_SIN_CALENDARIO) -> dict:
     """
     El plazo operativo de una orden. LEE y CALCULA; no escribe nada.
 
     'ahora' es inyectable a proposito: el resultado tiene que ser reproducible.
     Dos llamadas con el mismo 'ahora' y la misma fila devuelven lo mismo.
+
+    'calendario' es inyectable por una razon distinta: 'get_default_calendar'
+    no cachea, asi que calcular el plazo de un LOTE de ordenes de la misma
+    organizacion lo consultaba una vez por orden. Quien tiene el lote lo busca
+    una vez y lo pasa. Sin el argumento el comportamiento es identico al de
+    antes -- se busca aqui dentro-- y pasar None significa 24/7, que es una
+    respuesta valida y por eso el centinela no es None.
 
     Devuelve siempre las mismas claves, tambien cuando no hay plazo -- un dict
     con forma variable obliga a quien lo consume a adivinar cual recibio.
@@ -191,7 +204,8 @@ def plazo_de(orden, ahora=None, ventana_horas: int | None = None) -> dict:
     #  --sirve para mirar hacia atras-- pero el estado lo dice.
     terminada = getattr(orden, "estado_operativo", None) in ESTADOS_TERMINADOS
 
-    calendario = _calendario_de(orden)
+    if calendario is _SIN_CALENDARIO:
+        calendario = _calendario_de(orden)
     base["calendario"] = getattr(calendario, "name", None) if calendario else None
 
     from business_hours.calendar import add_business_hours

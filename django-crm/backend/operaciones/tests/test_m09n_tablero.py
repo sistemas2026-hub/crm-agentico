@@ -46,6 +46,9 @@ from operaciones.models import PropuestaSupervisor
 
 RUTA_FEED = "/api/operaciones/actividad-supervisor/"
 
+#  'OrdenTrabajo.numero' es unico por organizacion y aqui se crean varias.
+_n = [1800]
+
 
 # =============================================================================
 #  utilidades
@@ -87,13 +90,18 @@ def _orden(org, **extra):
     sufijo = uuid.uuid4().hex[:8]
     tipo = WorkType.objects.create(
         org=org, nombre=f"Instalacion {sufijo}", codigo=f"ins_{sufijo}")
+    esquema = {"campos": [], "evidencias": []}
+    duracion = extra.pop("duracion", None)
+    if duracion is not None:
+        from operaciones.sla import CLAVE_DURACION
+        esquema[CLAVE_DURACION] = duracion
     version = WorkTypeVersion.objects.create(
         work_type=tipo, version=1, schema_version=1,
-        estado=WorkTypeVersion.PUBLICADA,
-        esquema={"campos": [], "evidencias": []})
+        estado=WorkTypeVersion.PUBLICADA, esquema=esquema)
+    _n[0] += 1
     datos = dict(
         org=org,
-        numero=1842,
+        numero=_n[0],
         tipo_trabajo_version=version,
         cliente_nombre="Cliente de prueba",
         cliente_direccion="Calle 1 #2-3",
@@ -136,7 +144,7 @@ def test_una_propuesta_con_responsable_sugerido_y_sin_asignacion_no_tiene_tecnic
     assert propuesta.responsable_sugerido_id == ana.id, "el montaje debe tener sugerido"
     assert contexto[str(propuesta.id)]["tecnico"] == ""
     # Y el numero de la orden SI sale: lo que falta es el tecnico, no el enlace.
-    assert contexto[str(propuesta.id)]["orden_numero"] == 1842
+    assert contexto[str(propuesta.id)]["orden_numero"] == orden.numero
 
 
 def test_el_tecnico_sale_cuando_hay_asignacion_principal(org_a):
@@ -203,7 +211,8 @@ def test_el_contexto_no_devuelve_coordenadas_aunque_la_orden_las_tenga(org_a):
     for prohibido in ("10.98", "-74.78", "lat", "lng", "gps"):
         assert prohibido not in plano, f"se filtro {prohibido}"
     assert set(fila) == {
-        "zona", "tecnico", "ticket_externo", "proveedor_externo", "orden_numero"}
+        "zona", "tecnico", "ticket_externo", "proveedor_externo", "orden_numero",
+        "sla_estado", "sla_minutos"}
 
 
 # =============================================================================
@@ -242,7 +251,7 @@ def test_un_origen_que_no_es_un_uuid_no_tumba_el_lote(org_a):
         contexto = contexto_propuesta.contexto_de(org_a, [rota, sana])
 
     assert contexto[str(rota.id)]["orden_numero"] is None
-    assert contexto[str(sana.id)]["orden_numero"] == 1842
+    assert contexto[str(sana.id)]["orden_numero"] == orden.numero
 
 
 def test_toda_propuesta_del_lote_tiene_entrada(org_a):
@@ -261,6 +270,103 @@ def test_toda_propuesta_del_lote_tiene_entrada(org_a):
 
 def test_un_lote_vacio_devuelve_un_dict_vacio_sin_consultar(org_a):
     assert contexto_propuesta.contexto_de(org_a, []) == {}
+
+
+# =============================================================================
+#  §4b  EL PLAZO OPERATIVO
+# =============================================================================
+
+def test_el_sla_sale_de_la_orden_y_no_de_expira_en(org_a):
+    """
+    La columna SLA es el PLAZO OPERATIVO de la orden, no 'expira_en' de la
+    propuesta. Son dos relojes distintos: 'expira_en' dice cuando la
+    recomendacion deja de estar vigente; el plazo dice cuando el trabajo
+    llega tarde. Confundirlos daria una columna que cambia sola cada vez que
+    el Supervisor recicla sus propuestas.
+    """
+    from operaciones import sla
+
+    with rls_org(org_a):
+        orden = _orden(org_a, duracion=60)
+        propuesta = _propuesta(org_a, origen_id=str(orden.id))
+        contexto = contexto_propuesta.contexto_de(org_a, [propuesta])
+
+    fila = contexto[str(propuesta.id)]
+    # Recien creada, con 60 minutos de plazo: no puede estar vencida.
+    assert fila["sla_estado"] in (sla.A_TIEMPO, sla.VENCE_PRONTO)
+    assert fila["sla_minutos"] is not None
+
+
+def test_un_tipo_de_trabajo_sin_duracion_dice_SIN_PLAZO_y_no_a_tiempo(org_a):
+    """
+    'SIN_PLAZO' y 'A_TIEMPO' se verian igual como una celda en blanco, y son
+    cosas distintas: la primera es una decision del tipo de trabajo, no una
+    medicion.
+    """
+    from operaciones import sla
+
+    with rls_org(org_a):
+        orden = _orden(org_a)  # sin duracion en el esquema
+        propuesta = _propuesta(org_a, origen_id=str(orden.id))
+        contexto = contexto_propuesta.contexto_de(org_a, [propuesta])
+
+    assert contexto[str(propuesta.id)]["sla_estado"] == sla.SIN_PLAZO
+
+
+def test_una_propuesta_que_no_cuelga_de_una_orden_no_tiene_plazo(org_a):
+    """Un caso o una actividad no tienen plazo operativo: ahi no vive."""
+    with rls_org(org_a):
+        propuesta = _propuesta(org_a, origen_tipo="case")
+        contexto = contexto_propuesta.contexto_de(org_a, [propuesta])
+
+    assert contexto[str(propuesta.id)]["sla_estado"] == ""
+    assert contexto[str(propuesta.id)]["sla_minutos"] is None
+
+
+def test_el_calendario_se_busca_una_vez_para_todo_el_lote(org_a,
+                                                          django_assert_num_queries):
+    """
+    'get_default_calendar' no cachea. Sin el calendario inyectado, veinte
+    ordenes eran veinte consultas identicas.
+
+    Se afirma contando CONSULTAS, no leyendo el codigo: una refactorizacion
+    que vuelva a buscarlo por orden pasaria cualquier prueba que solo mire el
+    resultado.
+    """
+    from business_hours.models import BusinessCalendar
+
+    with rls_org(org_a):
+        BusinessCalendar.objects.create(
+            org=org_a, name="Default", timezone="UTC", is_default=True)
+        propuestas = []
+        for _ in range(5):
+            orden = _orden(org_a, duracion=60)
+            propuestas.append(_propuesta(org_a, origen_id=str(orden.id)))
+
+        # 4 del contexto (ordenes, asignaciones, zonas, casos) + 1 calendario.
+        # Sin la inyeccion serian 5 calendarios en vez de 1.
+        with django_assert_num_queries(5):
+            contexto_propuesta.contexto_de(org_a, propuestas)
+
+
+def test_plazo_de_sin_calendario_explicito_se_comporta_igual_que_antes(org_a):
+    """
+    El parametro nuevo es opcional y su ausencia no cambia nada: todos los
+    llamadores que ya existian siguen recibiendo lo mismo.
+    """
+    from business_hours.models import BusinessCalendar
+    from operaciones import sla
+
+    with rls_org(org_a):
+        cal = BusinessCalendar.objects.create(
+            org=org_a, name="Default", timezone="UTC", is_default=True)
+        orden = _orden(org_a, duracion=60)
+
+        sin_pasarlo = sla.plazo_de(orden)
+        pasandolo = sla.plazo_de(orden, calendario=cal)
+
+    assert sin_pasarlo["calendario"] == pasandolo["calendario"] == "Default"
+    assert sin_pasarlo["estado"] == pasandolo["estado"]
 
 
 # =============================================================================
@@ -399,7 +505,7 @@ def test_la_lista_trae_el_contexto_resuelto(org_a, admin_client, admin_profile):
 
     assert fila["tecnico"] == luis.user.name
     assert fila["tecnico"] != ""
-    assert fila["orden_numero"] == 1842
+    assert fila["orden_numero"] == orden.numero
     # Y lo que no hay sale vacio, no ausente: el frontend lee la clave siempre.
     assert fila["zona"] == ""
     assert fila["ticket_externo"] == ""

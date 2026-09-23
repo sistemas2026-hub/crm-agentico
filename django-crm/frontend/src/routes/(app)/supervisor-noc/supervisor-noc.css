@@ -769,3 +769,40 @@
    dice; la celda queda con una raya, no con un valor inventado. */
 .snoc-col-ausente { color: var(--snoc-outline); font-weight: 400; }
 .snoc-celda-ausente { color: var(--snoc-outline); }
+
+/* --- Lo que no cabe se desplaza ---
+   Los tres paneles de abajo crecen con la operación: seis técnicos hoy,
+   veinte el mes que viene. Antes la lista de técnicos se cortaba en seis sin
+   decirlo, que es peor que no mostrarla -- el que falta no se sabe que falta.
+   Ahora entran todos y la caja se desplaza. */
+.snoc-desplazable {
+  max-height: 232px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.snoc-desplazable::-webkit-scrollbar { width: 8px; }
+.snoc-desplazable::-webkit-scrollbar-thumb {
+  background: var(--snoc-outline-variant);
+  border-radius: 4px;
+}
+.snoc-desplazable::-webkit-scrollbar-track { background: transparent; }
+/* La cabecera de la tabla del feed no se va con el scroll. */
+.snoc-desplazable thead th {
+  position: sticky;
+  top: 0;
+  background: var(--snoc-surface-container-lowest);
+  z-index: 1;
+}
+
+/* --- La celda de SLA ---
+   Seis estados, cuatro tonos: 'sin plazo', 'no aplica' y 'no se pudo
+   calcular' comparten el gris porque ninguno de los tres afirma nada sobre
+   el cumplimiento. Lo que los distingue es el title, no el color. */
+.snoc-sla-critico {
+  background: var(--snoc-error-container);
+  color: var(--snoc-on-error-container);
+  border-color: transparent;
+}
+.snoc-sla-alerta { background: #ffe0b2; color: #6b4000; border-color: transparent; }
+.snoc-sla-ok { background: #c8e6c9; color: #1b5e20; border-color: transparent; }
+.snoc-sla-neutro { color: var(--snoc-on-surface-variant); }

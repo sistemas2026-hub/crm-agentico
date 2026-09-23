@@ -6,7 +6,8 @@ import {
   ordenesDeTrabajo,
   cargaPorTecnico,
   ticketsPorOrigen,
-  actividadReciente
+  actividadReciente,
+  celdaDeSla
 } from './supervisor-noc-tablero.js';
 
 /**
@@ -331,5 +332,48 @@ describe('actividadReciente', () => {
   it('un feed vacio se declara ausente', () => {
     expect(actividadReciente([]).disponible).toBe(false);
     expect(actividadReciente(null).disponible).toBe(false);
+  });
+});
+
+describe('celdaDeSla', () => {
+  it('una orden vencida se ve como vencida y dice cuanto hace', () => {
+    const c = celdaDeSla('VENCIDA', 2880);
+    expect(c).toMatchObject({ texto: 'Vencido', tono: 'critico' });
+    expect(c.detalle).toBe('hace 2 d');
+  });
+
+  it('escala la unidad segun el tamaño', () => {
+    expect(celdaDeSla('A_TIEMPO', 45).texto).toBe('45 min');
+    expect(celdaDeSla('A_TIEMPO', 180).texto).toBe('3 h');
+    expect(celdaDeSla('A_TIEMPO', 4320).texto).toBe('3 d');
+  });
+
+  it('NO colapsa los tres estados que no afirman nada sobre el cumplimiento', () => {
+    // Comparten el gris, y ahi acaba el parecido: el motivo de cada uno es
+    // distinto y es lo unico que deja distinguirlos.
+    const motivos = ['NO_APLICA', 'SIN_PLAZO', 'DATOS_INSUFICIENTES'].map(
+      (e) => celdaDeSla(e, null).detalle
+    );
+    expect(new Set(motivos).size).toBe(3);
+    expect(motivos.every((m) => m.length > 0)).toBe(true);
+  });
+
+  it('una orden terminada no se llama "a tiempo"', () => {
+    // El plazo ya no corre. Decir "a tiempo" afirmaria algo sobre el.
+    const c = celdaDeSla('NO_APLICA', null);
+    expect(c.texto).toBe('N/A');
+    expect(c.tono).toBe('neutro');
+  });
+
+  it('sin estado no se inventa un plazo', () => {
+    // Un caso o una actividad no cuelgan de una orden, que es donde vive.
+    const c = celdaDeSla('', null);
+    expect(c.texto).toBe('N/A');
+    expect(c.detalle).toContain('orden de trabajo');
+  });
+
+  it('un estado con los minutos perdidos sigue siendo legible', () => {
+    expect(celdaDeSla('VENCE_PRONTO', null).texto).toBe('Por vencer');
+    expect(celdaDeSla('VENCIDA', null).texto).toBe('Vencido');
   });
 });

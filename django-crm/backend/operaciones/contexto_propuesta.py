@@ -53,6 +53,14 @@ VACIO = {
     "ticket_externo": "",
     "proveedor_externo": "",
     "orden_numero": None,
+    # El plazo operativo. 'sla_estado' es el de 'operaciones/sla.py' tal cual
+    # -- VENCIDA, VENCE_PRONTO, A_TIEMPO, SIN_PLAZO, NO_APLICA,
+    # DATOS_INSUFICIENTES-- y cadena vacia cuando la propuesta no cuelga de una
+    # orden, que es donde vive el plazo. Los seis estados NO se colapsan: "no
+    # hay plazo declarado" y "no se pudo calcular" son cosas distintas y la
+    # pantalla las dice distinto.
+    "sla_estado": "",
+    "sla_minutos": None,
 }
 
 
@@ -107,10 +115,13 @@ def contexto_de(org, propuestas) -> dict:
     # orden de otra. Dos capas, como en el resto del CRM.
     ordenes = {}
     if ids_orden:
+        # Sin '.only': 'sla.plazo_de' necesita created_at, estado_operativo y
+        # el tipo de trabajo vigente. Recortar campos aqui costaria una
+        # consulta extra por orden al tocarlos.
         ordenes = {
             str(o.id): o
             for o in OrdenTrabajo.objects.filter(org=org, id__in=ids_orden)
-            .only("id", "numero")
+            .select_related("tipo_trabajo_version")
         }
 
     # --- El tecnico: la asignacion PRINCIPAL, no la sugerencia -------------
@@ -162,6 +173,26 @@ def contexto_de(org, propuestas) -> dict:
             .only("id", "provider", "external_ticket_id")
         }
 
+    # --- El plazo operativo ------------------------------------------------
+    # El calendario se busca UNA vez para el lote: 'get_default_calendar' no
+    # cachea, y sin esto serian 200 consultas identicas.
+    plazos = {}
+    if ordenes:
+        from business_hours.calendar import get_default_calendar
+
+        from operaciones import sla
+
+        calendario = get_default_calendar(org.id)
+        for orden_id, orden in ordenes.items():
+            p = sla.plazo_de(orden, calendario=calendario)
+            plazos[orden_id] = {
+                "sla_estado": p["estado"] or "",
+                # Lo que falta cuando vence, lo que sobra cuando no. La
+                # pantalla ya sabe cual es por el estado.
+                "sla_minutos": (p["minutos_atraso"] if p["estado"] == sla.VENCIDA
+                                else p["minutos_restantes"]),
+            }
+
     for p in propuestas:
         clave = str(p.id)
         origen = str(p.origen_id)
@@ -170,6 +201,7 @@ def contexto_de(org, propuestas) -> dict:
                 "orden_numero": ordenes[origen].numero,
                 "tecnico": tecnicos.get(origen, ""),
                 "zona": zonas.get(origen, ""),
+                **plazos.get(origen, {}),
             })
         elif p.origen_tipo == ORIGEN_CASO and origen in casos:
             caso = casos[origen]

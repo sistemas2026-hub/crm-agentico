@@ -34,6 +34,8 @@ class PropuestaListaSerializer(serializers.ModelSerializer):
     ticket_externo = serializers.SerializerMethodField()
     proveedor_externo = serializers.SerializerMethodField()
     orden_numero = serializers.SerializerMethodField()
+    sla_estado = serializers.SerializerMethodField()
+    sla_minutos = serializers.SerializerMethodField()
 
     class Meta:
         model = PropuestaSupervisor
@@ -43,7 +45,7 @@ class PropuestaListaSerializer(serializers.ModelSerializer):
             "nivel_autonomia_requerido", "dentro_del_alcance",
             "created_at", "expira_en",
             "zona", "tecnico", "ticket_externo", "proveedor_externo",
-            "orden_numero",
+            "orden_numero", "sla_estado", "sla_minutos",
         ]
 
     def _contexto(self, obj):
@@ -63,6 +65,12 @@ class PropuestaListaSerializer(serializers.ModelSerializer):
 
     def get_orden_numero(self, obj):
         return self._contexto(obj).get("orden_numero")
+
+    def get_sla_estado(self, obj):
+        return self._contexto(obj).get("sla_estado", "")
+
+    def get_sla_minutos(self, obj):
+        return self._contexto(obj).get("sla_minutos")
 
 
 class PropuestaDetalleSerializer(serializers.ModelSerializer):

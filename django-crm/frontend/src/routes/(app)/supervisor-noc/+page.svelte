@@ -21,6 +21,7 @@
     cargaPorTecnico,
     ticketsPorOrigen,
     actividadReciente,
+    celdaDeSla,
     BLOQUES_SIN_DATO
   } from '$lib/v2/supervisor-noc-tablero.js';
   import './supervisor-noc.css';
@@ -620,12 +621,14 @@
                   <th>Técnico</th>
                   <th>Zona</th>
                   <th>Estado</th>
+                  <th>SLA</th>
                   <th>Detectado</th>
                   <th class="snoc-derecha">Acción</th>
                 </tr>
               </thead>
               <tbody>
                 {#each visibles as p (p.id)}
+                  {@const sla = celdaDeSla(p.sla_estado, p.sla_minutos)}
                   <tr class={abierta === p.id ? 'snoc-fila-activa' : ''}>
                     <td><span class="snoc-insignia {tonoPrioridad(p.prioridad)}">{p.prioridad}</span></td>
                     <td class="snoc-label">{p.tipo_senal_display}</td>
@@ -667,6 +670,9 @@
                           fuera
                         </span>
                       {/if}
+                    </td>
+                    <td>
+                      <span class="snoc-insignia snoc-sla-{sla.tono}" title={sla.detalle}>{sla.texto}</span>
                     </td>
                     <td class="snoc-mono-sm snoc-tenue" title="Expira el {fechaCorta(p.expira_en)}">
                       {fechaCorta(p.created_at)}
@@ -715,8 +721,8 @@
               </p>
             </div>
           {:else}
-            <div>
-              {#each tecnicos.filas.slice(0, 6) as t (t.id)}
+            <div class="snoc-desplazable">
+              {#each tecnicos.filas as t (t.id)}
                 <div class="snoc-tecnico">
                   <div class="snoc-tecnico-cabeza">
                     <span class="snoc-tecnico-nombre">{t.nombre}</span>
@@ -748,7 +754,7 @@
             <a class="snoc-pildora" href="/supervisor-noc/programacion">Ver programación</a>
           </div>
           {#if ordenes.disponible}
-            <div>
+            <div class="snoc-desplazable">
               {#each ordenes.filas as f (f.clave)}
                 <div class="snoc-fila-orden">
                   <span>{f.texto}</span>
@@ -788,7 +794,7 @@
               </p>
             </div>
           {:else}
-            <div class="snoc-tabla-caja" style="max-height:230px; overflow-y:auto;">
+            <div class="snoc-tabla-caja snoc-desplazable">
               <table class="snoc-tabla">
                 <thead>
                   <tr><th>Hora</th><th>Evento</th><th>Detalle</th></tr>
