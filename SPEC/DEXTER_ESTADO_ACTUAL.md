@@ -7,38 +7,51 @@ Si contradice a una conversación, gana este archivo.
 se actualiza: una sección que quedó vieja no es inocua — la siguiente sesión la
 lee como verdad. La historia detallada vive en `auditorias/`, no acá.
 
-Última actualización: 19/09/2026, al cerrar la Fase 1.
+Última actualización: 23/09/2026. La anterior era del 19/09, al cerrar la Fase 1,
+y había quedado describiendo otra rama: decía que la base canónica era
+`feature/bandeja-relevo` y que lo siguiente era Branding, mientras el trabajo
+vivo estaba en el Centro de Mando. Lo encontró `/inicio-sesion` al estrenarse.
+**No se borró nada de lo cerrado**: se corrigió dónde vive cada cosa y se agregó
+lo que faltaba.
 
 ---
 
-## BASE CANÓNICA
+## DÓNDE VIVE CADA COSA
+
+Tres trabajos en paralelo, en tres ramas. **Ninguna está pusheada a la rama de
+despliegue**, y ninguna contiene a las otras — medirlo antes de prometer algo
+sobre un trabajo que no está bajo tus pies.
+
+| Rama | Qué tiene | Estado |
+|---|---|---|
+| `integrar-centro-mando` | **Activa hoy.** Centro de Mando, el sistema de trabajo con IA (CLAUDE.md, agentes, comandos, puerta `pre-commit`), plan semanal | 🟡 desarrollo |
+| `feat/campo-diseno-stitch` | **Dexter Campo.** 101 archivos bajo `test/`, 529 pruebas, y el contrato de versión candidata | 🟡 candidata, sin integrar |
+| `feature/bandeja-relevo` | Bandeja, Fase 1 completa | 🔒 **congelada** el 21/09/2026. No se toca hasta que vuelva Q3, G8 o WispHub |
+
+⚠️ **Campo no está en `integrar-centro-mando`.** Medido el 23/09/2026:
+6 archivos de prueba acá contra 101 allá. Los E2E 002/003/004, `test/apoyo/` y
+`docs/CAMPO_RELEASE_CONTRACT.md` que aparecen sueltos en el árbol de trabajo son
+fragmentos de esa otra rama, **no** la suite. Cualquier objetivo sobre Campo
+empieza decidiendo dónde se ejecuta.
+
+## TRABAJO ACTIVO
 
 ```
-rama       feature/bandeja-relevo
-worktree   C:\tmp\dexter-bandeja
+Centro de Mando        🟡 desplegado (ee4563f). Quedan dos entradas de menú que
+                          se pisan, y E2E-001 fuera por el choque en el
+                          serializer de campo
+Dexter Campo RC        🟡 el contrato está escrito (apps/tecnicos-mobile/docs/
+                          CAMPO_RELEASE_CONTRACT.md, sin commitear). Faltan sus
+                          cinco verificaciones, ninguna de ellas código
+Sistema de trabajo IA  ✅ CLAUDE.md como enrutador, 9 agentes, 4 comandos,
+                          pre-commit activo. Falta CI del lado del servidor (D1)
 ```
 
-Nada pusheado. Sobre `d0d6be9`:
+## WORKTREE DE LA RAMA CONGELADA
 
-```
-04d835e  backend T6, medido contra PostgreSQL 16.14
-df7eb7c  checkpoint + esta memoria operativa
-d033e58  UI de T6
-fa6b91a  cierre de 1.4C + corrección de la lista de warnings
-5f30f74  1.5 Case + Tools
-178d749  cierre de 1.5
-4d73ea8  1.6 Activity
-139f8ca  cierre de 1.6
-f61fd4d  1.7 Customer
-929b86e  cierre de 1.7
-4541423  1.8 Network
-d5cc765  cierre de 1.8
-b7bc9ea  1.9 cierre visual
-```
+*(histórico de `feature/bandeja-relevo`, se conserva para cuando se retome)*
 
-## WORKTREE
-
-Queda **un solo** archivo modificado sin commitear:
+Quedaba **un solo** archivo modificado sin commitear:
 
 ```
 SPEC/CONTRATO_RELEVO_IA_HUMANO.md   arrastre ajeno sobre G9, sin destino propio
@@ -218,7 +231,7 @@ T20 cierra lo que queda a medias: `ejecutando` vieja -> `desconocida` a los
 Migracion `202609201800_acciones_b5.sql` **sin aplicar en produccion**.
 Verificado sobre base limpia (`b5_limpia`): 51 archivos, 0 checksum distinto.
 
-## SIGUIENTE GATE
+## SIGUIENTE GATE DE LA BANDEJA *(en pausa con su rama)*
 
 ```
 Branding   pantalla de ajustes, FUERA de la Fase 1
@@ -230,6 +243,10 @@ en el esquema del tenant **sin ningún consumidor**, y nada más. Necesita su
 propio scope.
 
 Entrada: `SPEC/FASE_1_CHECKPOINT.md`.
+
+**No es lo que sigue hoy.** Este gate se retoma cuando se descongele
+`feature/bandeja-relevo`. Lo que sigue hoy está en TRABAJO ACTIVO, arriba, y en
+las fichas abiertas de [objetivos/](objetivos/).
 
 ## CONTRATOS CONGELADOS DE ESTA RAMA
 
