@@ -60,6 +60,49 @@ describe('hooks.client.js', () => {
   });
 });
 
+describe('hooks.client.js: handleError y los chunks viejos', () => {
+  it('un chunk viejo recarga y NO se reporta como error de la app', async () => {
+    const { handleError } = await import('../../hooks.client.js');
+    const recargas = [];
+    const datos = {};
+    const previo = { storage: globalThis.sessionStorage, location: globalThis.location };
+    globalThis.sessionStorage = {
+      getItem: (k) => datos[k] ?? null,
+      setItem: (k, v) => { datos[k] = String(v); }
+    };
+    globalThis.location = { reload: () => recargas.push(1) };
+    try {
+      const salida = handleError({
+        error: new Error('Failed to fetch dynamically imported module: /_app/immutable/nodes/61.js'),
+        event: {}
+      });
+      expect(recargas).toHaveLength(1);
+      expect(salida.message).toMatch(/Actualizando/);
+      // Y la segunda seguida no recarga: seria un bucle.
+      handleError({ error: new Error('Failed to fetch dynamically imported module: /x.js'), event: {} });
+      expect(recargas).toHaveLength(1);
+    } finally {
+      globalThis.sessionStorage = previo.storage;
+      globalThis.location = previo.location;
+    }
+  });
+
+  it('cualquier otro error sigue el camino de siempre', async () => {
+    const { handleError } = await import('../../hooks.client.js');
+    const recargas = [];
+    const previo = { storage: globalThis.sessionStorage, location: globalThis.location };
+    globalThis.sessionStorage = { getItem: () => null, setItem: () => {} };
+    globalThis.location = { reload: () => recargas.push(1) };
+    try {
+      handleError({ error: new Error('HTTP 500: Internal Server Error'), event: {} });
+      expect(recargas).toHaveLength(0);
+    } finally {
+      globalThis.sessionStorage = previo.storage;
+      globalThis.location = previo.location;
+    }
+  });
+});
+
 describe('instrumentation.server.js', () => {
   it('mismo contrato que el cliente', async () => {
     const p = await import('./privacidad.js');

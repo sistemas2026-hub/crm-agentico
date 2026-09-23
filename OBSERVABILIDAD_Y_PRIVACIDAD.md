@@ -107,6 +107,24 @@ Un solo módulo, `src/lib/observabilidad/privacidad.js`, usado por
    invalidated", "message channel closed before a response was received" —
    extensiones del navegador.
 
+## Aparte: una pestaña vieja no se queda rota
+
+No es privacidad, pero vive en el mismo archivo y conviene que esté escrito.
+SvelteKit nombra cada archivo con un hash de su contenido: un deploy cambia los
+nombres y borra los viejos, así que una pestaña abierta antes sigue pidiendo
+los de su build y recibe 404 (`Failed to fetch dynamically imported module`).
+Medido el 23/09/2026 en la consola de un operador, después de cinco deploys en
+26 minutos. `version.pollInterval` (60 s, en `svelte.config.js`) cubre el caso
+normal; entre el deploy y esa consulta hay una ventana.
+
+`src/lib/observabilidad/recarga.js` la cierra: reconoce el error por los
+mensajes reales de Chrome, Firefox, Safari y Vite, y recarga **una vez**. La
+marca vive en `sessionStorage` y una segunda recarga dentro de 10 s no ocurre —
+si el chunk falta por otro motivo (servidor sirviendo mal, red cortada),
+recargar en bucle dejaría la página parpadeando y al operador sin poder leer el
+error. Tres caminos enganchados: `vite:preloadError`, `unhandledrejection` y el
+`handleError` de SvelteKit.
+
 ## Cómo se garantiza (motor)
 
 El motor ya tenía su propia regla, anterior a este documento:
@@ -134,10 +152,11 @@ sin cédula ni nombre).
 ## Pruebas
 
 ```
-cd django-crm/frontend && pnpm test          # incluye las tres de abajo
+cd django-crm/frontend && pnpm test          # incluye las cuatro de abajo
   src/lib/observabilidad/privacidad.test.js    canarios por cada gancho
   src/lib/observabilidad/init_sentry.test.js   opciones reales de los dos init + marcas data-privado
   src/lib/observabilidad/consola.test.js       barrido de console.* en src/
+  src/lib/observabilidad/recarga.test.js       recarga una vez ante un chunk viejo, y no en bucle
 py -3.13 tests/test_registro_sin_pii.py        # motor
 ```
 

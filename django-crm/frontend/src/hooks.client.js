@@ -8,6 +8,7 @@ import {
   limpiarMiga,
   limpiarTransaccion
 } from '$lib/observabilidad/privacidad.js';
+import { esChunkViejo, recargarUnaVez, vigilarChunksViejos } from '$lib/observabilidad/recarga.js';
 
 // Sin DSN no hay proveedor: hoy produccion corre asi. Cuando se configure uno,
 // TODO lo que salga pasa por $lib/observabilidad/privacidad.js -- ver
@@ -36,4 +37,22 @@ Sentry.init({
   beforeSendLog: limpiarLog
 });
 
-export const handleError = Sentry.handleErrorWithSentry();
+// Una pestaña abierta antes de un deploy pide chunks que ya no existen. Ver
+// $lib/observabilidad/recarga.js: se recarga UNA vez, no en bucle.
+vigilarChunksViejos();
+
+const reportarASentry = Sentry.handleErrorWithSentry();
+
+/**
+ * El tercer camino por donde llega un chunk viejo: el error de una navegacion
+ * de SvelteKit. Se recarga y se le devuelve al operador un aviso en vez de la
+ * pantalla de error -- si la recarga sale, el mensaje no llega a verse.
+ *
+ * Todo lo demas sigue yendo a Sentry como antes.
+ */
+export function handleError(entrada) {
+  if (esChunkViejo(entrada?.error) && recargarUnaVez()) {
+    return { message: 'Actualizando a la versión nueva…' };
+  }
+  return reportarASentry(entrada);
+}
