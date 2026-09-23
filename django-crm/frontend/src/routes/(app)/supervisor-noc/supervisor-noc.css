@@ -527,3 +527,107 @@
   padding: 1px 5px; border-radius: var(--snoc-r);
   background: var(--snoc-surface-container-high); color: var(--snoc-on-surface-variant);
 }
+
+/* ---------------------------------------------------------------------------
+   MODAL CENTRADO DEL HALLAZGO
+   Reemplaza el panel lateral: con dos columnas de datos, un modal ancho
+   aprovecha mejor la pantalla que una banda pegada al borde.
+   --------------------------------------------------------------------------- */
+.snoc-velo-centrado { align-items: center; justify-content: center; padding: var(--snoc-md); }
+.snoc-modal-hallazgo {
+  display: flex; flex-direction: column; overflow: hidden;
+  width: 85vw; max-width: 1280px; min-width: 320px; height: 88vh;
+  background: var(--snoc-surface); border-radius: var(--snoc-r-full);
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.24);
+}
+.snoc-modal-cabecera {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--snoc-sm);
+  padding: var(--snoc-sm) var(--snoc-lg); flex: none;
+  background: var(--snoc-surface-container-low);
+  border-bottom: 1px solid var(--snoc-outline-variant);
+}
+.snoc-modal-cuerpo {
+  flex: 1; overflow-y: auto; padding: var(--snoc-lg);
+  display: flex; flex-direction: column; gap: var(--snoc-lg);
+}
+/* El pie no scrollea: la decision tiene que estar siempre a mano. */
+.snoc-modal-pie {
+  flex: none; display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: var(--snoc-sm); padding: var(--snoc-md) var(--snoc-lg);
+  background: var(--snoc-surface-container-low);
+  border-top: 1px solid var(--snoc-outline-variant);
+}
+.snoc-pie-acciones { display: flex; align-items: center; gap: var(--snoc-xs); flex-wrap: wrap; }
+.snoc-pie-acciones .snoc-campo { width: 260px; }
+.snoc-contador { padding: 0 var(--snoc-sm); white-space: nowrap; }
+
+/* La discrepancia: dos lados y el signo en el medio. */
+.snoc-mismatch {
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: var(--snoc-sm);
+  padding: var(--snoc-sm); border-radius: var(--snoc-r-lg);
+  background: var(--snoc-surface-container-lowest);
+}
+.snoc-mismatch-lado { display: flex; flex-direction: column; gap: 2px; min-width: 0; color: var(--snoc-on-surface); }
+.snoc-mismatch-vs {
+  font-family: 'Hanken Grotesk', sans-serif; font-size: 22px; font-weight: 700;
+  color: var(--snoc-error); text-align: center;
+}
+
+.snoc-dos-columnas { display: grid; grid-template-columns: 1fr; gap: var(--snoc-md); }
+@media (min-width: 860px) { .snoc-dos-columnas { grid-template-columns: 1fr 1fr; } }
+.snoc-columna {
+  display: flex; flex-direction: column; gap: var(--snoc-sm);
+  padding: var(--snoc-md); border-radius: var(--snoc-r-xl);
+  background: var(--snoc-surface-container-lowest); box-shadow: var(--snoc-sombra);
+}
+.snoc-columna-titulo { display: flex; align-items: center; gap: var(--snoc-xs); }
+
+/* Etiqueta y valor en dos columnas: se escanea vertical. */
+.snoc-lista-datos { margin: 0; display: flex; flex-direction: column; gap: var(--snoc-xs); }
+.snoc-lista-datos > div {
+  display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  gap: var(--snoc-sm); align-items: baseline;
+  padding-bottom: var(--snoc-xs); border-bottom: 1px solid var(--snoc-surface-container);
+}
+.snoc-lista-datos > div:last-child { border-bottom: 0; padding-bottom: 0; }
+.snoc-lista-datos dt {
+  color: var(--snoc-outline); font-size: 11px; letter-spacing: 0.03em; font-weight: 600;
+  text-transform: uppercase;
+}
+.snoc-lista-datos dd { margin: 0; font-size: 13px; line-height: 18px; min-width: 0; }
+.snoc-enlace-externo {
+  display: inline-flex; align-items: center; gap: 2px; margin-left: var(--snoc-xs);
+  color: var(--snoc-primary); text-decoration: none; font-size: 12px; font-weight: 600;
+}
+.snoc-enlace-externo:hover { text-decoration: underline; }
+
+/* El ciclo. Las etapas inalcanzables van apagadas, no ocultas: mostrar donde
+   TERMINA lo que esta etapa puede hacer es la mitad del mensaje. */
+.snoc-ciclo {
+  display: flex; flex-direction: column; gap: var(--snoc-sm);
+  padding: var(--snoc-md); border-radius: var(--snoc-r-xl);
+  background: var(--snoc-surface-container-lowest); box-shadow: var(--snoc-sombra);
+}
+.snoc-pasos {
+  margin: 0; padding: 0; list-style: none;
+  display: flex; flex-wrap: wrap; gap: var(--snoc-sm) var(--snoc-lg);
+}
+.snoc-paso { display: flex; align-items: center; gap: var(--snoc-xs); }
+.snoc-paso-punto {
+  width: 10px; height: 10px; border-radius: 9999px; flex: none;
+  background: var(--snoc-outline-variant);
+}
+.snoc-paso-texto { font-size: 12px; font-weight: 600; color: var(--snoc-outline); }
+.snoc-paso.hecho .snoc-paso-punto { background: var(--snoc-primary); }
+.snoc-paso.hecho .snoc-paso-texto { color: var(--snoc-on-surface); }
+.snoc-paso.actual .snoc-paso-punto { background: var(--snoc-primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--snoc-primary) 25%, transparent); }
+.snoc-paso.actual .snoc-paso-texto { color: var(--snoc-primary); }
+.snoc-paso.inactivo .snoc-paso-texto { font-style: italic; }
+
+@media (max-width: 700px) {
+  .snoc-modal-hallazgo { width: 100%; height: 94vh; }
+  .snoc-mismatch { grid-template-columns: 1fr; }
+  .snoc-mismatch-vs { text-align: left; }
+  .snoc-lista-datos > div { grid-template-columns: 1fr; }
+  .snoc-pie-acciones .snoc-campo { width: 100%; }
+}

@@ -8,7 +8,8 @@ import {
   expiraEn,
   antiguedadDelCaso,
   lecturaExterna,
-  CONTEXTO_AUSENTE
+  CONTEXTO_AUSENTE,
+  pasosDelCiclo
 } from '$lib/v2/supervisor-noc-detalle.js';
 
 /** La evidencia real de un 'caso_desincronizado', tal como la manda el backend. */
@@ -195,5 +196,52 @@ describe('CONTEXTO_AUSENTE', () => {
     expect(CONTEXTO_AUSENTE).toContain('Último compromiso pendiente');
     expect(CONTEXTO_AUSENTE).toContain('Responsable actual');
     expect(CONTEXTO_AUSENTE).toHaveLength(4);
+  });
+});
+
+describe('pasosDelCiclo', () => {
+  const estados = (/** @type {string} */ e) =>
+    Object.fromEntries(pasosDelCiclo(e).map((p) => [p.clave, p.estado]));
+
+  it('una propuesta sin revisar esta en la primera etapa', () => {
+    const r = estados('propuesta');
+
+    expect(r.propuesta).toBe('actual');
+    expect(r.revisada).toBe('inactivo');
+  });
+
+  it('una rechazada quedo revisada, pero nunca aprobada', () => {
+    const r = estados('rechazada');
+
+    expect(r.propuesta).toBe('hecho');
+    expect(r.revisada).toBe('actual');
+    expect(r.aprobada).toBe('inactivo');
+  });
+
+  it('una aceptada llega a aprobada y ni un paso mas', () => {
+    const r = estados('aceptada');
+
+    expect(r.aprobada).toBe('actual');
+    // Aceptar significa "el Jefe esta de acuerdo", no "se hizo".
+    expect(r.encolada).toBe('inactivo');
+    expect(r.ejecutada).toBe('inactivo');
+    expect(r.validada).toBe('inactivo');
+  });
+
+  it('las tres etapas de ejecucion NUNCA se activan, con ningun estado', () => {
+    // No hay camino de ejecucion en esta etapa: si alguna se encendiera, la
+    // pantalla estaria afirmando algo que el modelo no puede representar.
+    for (const e of ['propuesta', 'aceptada', 'modificada', 'rechazada', 'cancelada', 'expirada']) {
+      const r = estados(e);
+      expect(r.encolada).toBe('inactivo');
+      expect(r.ejecutada).toBe('inactivo');
+      expect(r.validada).toBe('inactivo');
+    }
+  });
+
+  it('siempre son seis pasos, en orden', () => {
+    const claves = pasosDelCiclo('propuesta').map((p) => p.clave);
+
+    expect(claves).toEqual(['propuesta', 'revisada', 'aprobada', 'encolada', 'ejecutada', 'validada']);
   });
 });

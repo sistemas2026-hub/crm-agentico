@@ -169,3 +169,45 @@ export const CONTEXTO_AUSENTE = [
   'Último compromiso pendiente',
   'Responsable actual'
 ];
+
+/**
+ * Las etapas del ciclo, y en cuál está la propuesta.
+ *
+ * LAS TRES ÚLTIMAS NO EXISTEN TODAVÍA, y se muestran a propósito: el diseño
+ * las pedía, y dibujarlas apagadas es la forma más clara de decir dónde
+ * termina lo que esta etapa del producto puede hacer. El estado «ejecutada»
+ * no está en el modelo (operaciones/models.py lo dice con todas las letras:
+ * aceptar significa «el Jefe de Operaciones está de acuerdo», no «se hizo»).
+ *
+ * Devuelve cada paso con su estado visual: 'hecho', 'actual' o 'inactivo'.
+ *
+ * @param {string | null | undefined} estado  el estado real de la propuesta
+ */
+export function pasosDelCiclo(estado) {
+  const revisada = ['aceptada', 'modificada', 'rechazada', 'cancelada', 'expirada'].includes(
+    String(estado)
+  );
+  const aprobada = ['aceptada', 'modificada'].includes(String(estado));
+
+  return [
+    {
+      clave: 'propuesta',
+      texto: 'Propuesta',
+      estado: estado === 'propuesta' ? 'actual' : 'hecho'
+    },
+    {
+      clave: 'revisada',
+      texto: 'Revisada',
+      estado: revisada ? (aprobada ? 'hecho' : 'actual') : 'inactivo'
+    },
+    {
+      clave: 'aprobada',
+      texto: 'Aprobada',
+      estado: aprobada ? 'actual' : 'inactivo'
+    },
+    // De aquí en adelante no hay nada: ninguna de las tres es alcanzable.
+    { clave: 'encolada', texto: 'Encolada', estado: 'inactivo' },
+    { clave: 'ejecutada', texto: 'En ejecución', estado: 'inactivo' },
+    { clave: 'validada', texto: 'Validada', estado: 'inactivo' }
+  ];
+}
