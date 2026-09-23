@@ -146,10 +146,13 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
     _evidenciasCapturadas = datos.evidenciasCapturadas;
 
     // Un controlador por campo, con lo que ya estaba respondido.
-    for (final dynamic c in _campos) {
-      final String clave = (c['clave'] ?? c['id']) as String;
-      _controllers[clave] =
-          TextEditingController(text: _valoresFormulario[clave]?.toString() ?? '');
+    //
+    // El id sale del modelo normalizado, no de leer el JSON a mano: era la
+    // quinta interpretacion del mismo esquema y la unica que quedaba.
+    for (final CampoDelFormulario campo
+        in CampoDelFormulario.normalizar(_campos, _valoresFormulario)) {
+      _controllers[campo.id] =
+          TextEditingController(text: campo.valor?.toString() ?? '');
     }
 
     if (mounted) {

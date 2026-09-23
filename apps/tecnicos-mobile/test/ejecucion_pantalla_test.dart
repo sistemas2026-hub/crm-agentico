@@ -426,4 +426,81 @@ void main() {
     });
   });
 
+
+  group('8. La interfaz no depende del formato del JSON', () {
+    /// La misma plantilla escrita en los dos vocabularios.
+    List<Map<String, dynamic>> comoElServidor() => <Map<String, dynamic>>[
+          <String, dynamic>{
+            'id': 'tipo_intervencion',
+            'titulo': 'Tipo de intervención física',
+            'tipo': 'seleccion',
+            'reglas': <String, dynamic>{
+              'required': true,
+              'options': <String>['Acometida / Drop', 'Roseta / Conector'],
+            },
+          },
+        ];
+
+    List<Map<String, dynamic>> comoElFormatoViejo() => <Map<String, dynamic>>[
+          <String, dynamic>{
+            'clave': 'tipo_intervencion',
+            'etiqueta': 'Tipo de intervención física',
+            'tipo': 'seleccion',
+            'obligatorio': true,
+            'opciones': <String>['Acometida / Drop', 'Roseta / Conector'],
+          },
+        ];
+
+    Future<void> montar(
+      WidgetTester t,
+      List<Map<String, dynamic>> campos,
+    ) async {
+      pantallaAlta(t);
+      await t.pumpWidget(app(FuenteDeEjecucionFalsa(campos: campos)));
+      await t.pumpAndSettle();
+    }
+
+    testWidgets('Con el formato del servidor se dibuja igual',
+        (WidgetTester t) async {
+      await montar(t, comoElServidor());
+
+      // textContaining: el bloque antepone el numero de campo ("1. ...").
+      expect(
+        find.textContaining('Tipo de intervención física'),
+        findsWidgets,
+      );
+      expect(find.text('Acometida / Drop'), findsOneWidget);
+      expect(find.text('Roseta / Conector'), findsOneWidget);
+    });
+
+    testWidgets('Y con una orden vieja guardada, tambien',
+        (WidgetTester t) async {
+      // Una orden que ya esta en el telefono tiene que seguir abriendose: al
+      // tecnico no se le puede pedir que resincronice para poder trabajar.
+      await montar(t, comoElFormatoViejo());
+
+      expect(
+        find.textContaining('Tipo de intervención física'),
+        findsWidgets,
+      );
+      expect(find.text('Acometida / Drop'), findsOneWidget);
+      expect(find.text('Roseta / Conector'), findsOneWidget);
+    });
+
+    testWidgets('Los dos formatos bloquean el cierre por lo mismo',
+        (WidgetTester t) async {
+      for (final List<Map<String, dynamic>> campos in <List<Map<String, dynamic>>>[
+        comoElServidor(),
+        comoElFormatoViejo(),
+      ]) {
+        await montar(t, campos);
+        expect(
+          find.text('Falta: Tipo de intervención física'),
+          findsOneWidget,
+          reason: 'el checklist dice lo mismo con los dos vocabularios',
+        );
+      }
+    });
+  });
+
 }
