@@ -7,7 +7,10 @@
     baseDePrioridad,
     contrasteDeEstados,
     haceCuanto,
-    expiraEn
+    expiraEn,
+    antiguedadDelCaso,
+    lecturaExterna,
+    CONTEXTO_AUSENTE
   } from '$lib/v2/supervisor-noc-detalle.js';
   import './supervisor-noc.css';
 
@@ -147,6 +150,11 @@
     }
   }
 
+  /** Escape cierra el panel. Con media pantalla, llegar a la X es un viaje. */
+  function alTeclado(/** @type {KeyboardEvent} */ e) {
+    if (e.key === 'Escape' && abierta) cerrarDetalle();
+  }
+
   function cerrarDetalle() {
     abierta = null;
     detalle = null;
@@ -199,6 +207,8 @@
   const fuentes = $derived(fuentesDeEvidencia(detalle?.evidencia));
   const basePrioridad = $derived(baseDePrioridad(detalle?.evidencia));
   const contraste = $derived(contrasteDeEstados(detalle?.evidencia));
+  const antiguedad = $derived(antiguedadDelCaso(detalle?.evidencia));
+  const lectura = $derived(lecturaExterna(detalle?.evidencia));
 
   const alDecidir = () => async (/** @type {any} */ { update }) => {
     revisando = null;
@@ -209,6 +219,8 @@
     if (abierta) await abrirDetalle(abierta);
   };
 </script>
+
+<svelte:window onkeydown={alTeclado} />
 
 <svelte:head>
   <title>Supervisor NOC IA · {data.org ?? 'Operaciones'}</title>
@@ -803,79 +815,147 @@
               <span class="snoc-tag">Observación · Sin ejecución · Revisión humana</span>
             </div>
 
-            <!-- El contraste que ES el hallazgo. Solo si la evidencia lo trae. -->
-            {#if contraste}
-              <div class="snoc-contraste">
-                <div class="snoc-contraste-lado">
-                  <span class="snoc-label-sm snoc-tenue" style="text-transform:uppercase;">En el CRM</span>
-                  <span class="snoc-h4">{contraste.crm}</span>
-                </div>
-                <span class="snoc-contraste-vs">≠</span>
-                <div class="snoc-contraste-lado">
-                  <span class="snoc-label-sm snoc-tenue" style="text-transform:uppercase;">En el proveedor</span>
-                  <span class="snoc-h4">{contraste.proveedor}</span>
-                </div>
+            <!-- EL HALLAZGO: qué pasó, en una línea -->
+            <div class="snoc-hallazgo">
+              <div class="snoc-fila" style="gap:var(--snoc-xs);">
+                <span class="snoc-icono" style="font-size:20px;">sync_problem</span>
+                <h4 class="snoc-hallazgo-titulo">{detalle.tipo_senal_display}</h4>
               </div>
-            {/if}
-
-            <!-- Los cinco datos de cabecera, en una tira compacta -->
-            <div class="snoc-tira">
-              <span class="snoc-tira-item">
-                <span class="snoc-label-sm snoc-tenue">Estado</span>
-                <span class="snoc-insignia {estadoDe(detalle.estado).clase}">{estadoDe(detalle.estado).texto}</span>
-              </span>
-              <span class="snoc-tira-item">
-                <span class="snoc-label-sm snoc-tenue">Prioridad</span>
-                <span class="snoc-mono">
-                  {detalle.prioridad}{#if basePrioridad}<span class="snoc-tenue"> · {basePrioridad}</span>{/if}
-                </span>
-              </span>
-              <span class="snoc-tira-item">
-                <span class="snoc-label-sm snoc-tenue">Autonomía</span>
-                <span class="snoc-mono">{detalle.nivel_autonomia_requerido} · {NIVELES[detalle.nivel_autonomia_requerido] ?? '—'}</span>
-              </span>
-              <span class="snoc-tira-item">
-                <span class="snoc-label-sm snoc-tenue">Detectado</span>
-                <span class="snoc-mono">{haceCuanto(detalle.created_at)}</span>
-              </span>
-              <span class="snoc-tira-item">
-                <span class="snoc-label-sm snoc-tenue">Expira</span>
-                <span class="snoc-mono">{expiraEn(detalle.expira_en)}</span>
-              </span>
+              <p class="snoc-body" style="margin:0;">{detalle.motivo || 'Sin motivo registrado.'}</p>
             </div>
 
-            <!-- 2. CONTEXTO OPERATIVO -->
+            <!-- El contraste y los datos clave, uno al lado del otro -->
+            <div class="snoc-cabeza">
+              {#if contraste}
+                <div class="snoc-contraste">
+                  <div class="snoc-contraste-lado">
+                    <span class="snoc-label-sm snoc-tenue" style="text-transform:uppercase;">En el CRM</span>
+                    <span class="snoc-h4">{contraste.crm}</span>
+                  </div>
+                  <span class="snoc-contraste-vs">≠</span>
+                  <div class="snoc-contraste-lado">
+                    <span class="snoc-label-sm snoc-tenue" style="text-transform:uppercase;">En el proveedor</span>
+                    <span class="snoc-h4">{contraste.proveedor}</span>
+                  </div>
+                </div>
+              {:else}
+                <div class="snoc-contexto-celda">
+                  <span>Acción propuesta</span>
+                  <span class="snoc-body">{detalle.accion_propuesta}</span>
+                </div>
+              {/if}
+
+              <div class="snoc-datos-clave">
+                <span class="snoc-dato-clave">
+                  <span class="snoc-label-sm snoc-tenue">Detectado</span>
+                  <span class="snoc-mono">{haceCuanto(detalle.created_at)}</span>
+                </span>
+                <span class="snoc-dato-clave">
+                  <span class="snoc-label-sm snoc-tenue">Prioridad</span>
+                  <span class="snoc-mono">
+                    {detalle.prioridad}{#if basePrioridad}<span class="snoc-tenue"> · {basePrioridad}</span>{/if}
+                  </span>
+                </span>
+                <span class="snoc-dato-clave">
+                  <span class="snoc-label-sm snoc-tenue">Autonomía</span>
+                  <span class="snoc-mono">
+                    {detalle.nivel_autonomia_requerido} · {NIVELES[detalle.nivel_autonomia_requerido] ?? '—'}
+                  </span>
+                </span>
+                <span class="snoc-dato-clave">
+                  <span class="snoc-label-sm snoc-tenue">Expira</span>
+                  <span class="snoc-mono">{expiraEn(detalle.expira_en)}</span>
+                </span>
+                <span class="snoc-dato-clave">
+                  <span class="snoc-label-sm snoc-tenue">Estado</span>
+                  <span class="snoc-insignia {estadoDe(detalle.estado).clase}">{estadoDe(detalle.estado).texto}</span>
+                </span>
+              </div>
+            </div>
+
+            <!-- CONTEXTO OPERATIVO -->
             <section class="snoc-pila-xs">
-              <span class="snoc-label-sm snoc-tenue" style="text-transform:uppercase;">Contexto operativo</span>
-              <div class="snoc-meta">
-                <div>
-                  <span>Origen:</span>
-                  <span class="snoc-body-sm">{detalle.origen_tipo} · {String(detalle.origen_id).slice(0, 8)}</span>
-                </div>
-                <div><span>Organización:</span><span class="snoc-body-sm">{data.org ?? '—'}</span></div>
-                <div>
-                  <span>Responsable sugerido:</span>
-                  <span class="snoc-body-sm">{detalle.responsable_sugerido_email ?? 'Ninguno'}</span>
-                </div>
-                {#if detalle.impacto}
-                  <div style="grid-column:1 / -1;">
-                    <span>Impacto operativo:</span><span class="snoc-body-sm">{detalle.impacto}</span>
+              <div class="snoc-fila" style="gap:var(--snoc-xs);">
+                <span class="snoc-icono snoc-primario" style="font-size:18px;">dvr</span>
+                <span class="snoc-label" style="text-transform:uppercase; letter-spacing:0.06em;">
+                  Contexto operativo
+                </span>
+                <span class="snoc-mono-sm snoc-tenue">· lo que hace falta para decidir</span>
+              </div>
+
+              <div class="snoc-contexto">
+                {#if antiguedad}
+                  <div class="snoc-contexto-celda">
+                    <span>Antigüedad del caso</span>
+                    <span class="snoc-h4">{antiguedad.dias != null ? `${antiguedad.dias} días` : '—'}</span>
+                    <span class="snoc-mono-sm snoc-tenue">abierto desde {antiguedad.desde}</span>
                   </div>
                 {/if}
+
+                {#if contraste}
+                  <div class="snoc-contexto-celda">
+                    <span>Estado en el CRM</span>
+                    <span class="snoc-body-sm" style="font-weight:600;">{contraste.crm}</span>
+                  </div>
+                  <div class="snoc-contexto-celda">
+                    <span>Estado en el proveedor</span>
+                    <span class="snoc-body-sm" style="font-weight:600;">{contraste.proveedor}</span>
+                  </div>
+                {/if}
+
+                {#if lectura}
+                  <div class="snoc-contexto-celda">
+                    <span>Última lectura externa</span>
+                    <span class="snoc-body-sm">{lectura}</span>
+                    <span class="snoc-mono-sm snoc-tenue">cuándo se consultó al proveedor</span>
+                  </div>
+                {/if}
+
+                <div class="snoc-contexto-celda">
+                  <span>Caso / orden relacionada</span>
+                  <span class="snoc-body-sm">{detalle.origen_tipo} · {String(detalle.origen_id).slice(0, 8)}</span>
+                  {#if detalle.origen_tipo === 'case'}
+                    <a class="snoc-pildora" href="/tickets/{detalle.origen_id}" style="align-self:flex-start; margin-top:4px;">
+                      Ver caso en el CRM
+                    </a>
+                  {/if}
+                </div>
+
+                {#if detalle.impacto}
+                  <div class="snoc-contexto-celda">
+                    <span>Impacto operativo</span>
+                    <span class="snoc-body-sm">{detalle.impacto}</span>
+                  </div>
+                {/if}
+
+                {#if detalle.responsable_sugerido_email}
+                  <div class="snoc-contexto-celda">
+                    <span>Responsable sugerido</span>
+                    <span class="snoc-body-sm">{detalle.responsable_sugerido_email}</span>
+                    <span class="snoc-mono-sm snoc-tenue">sugerido por la IA, no asignado</span>
+                  </div>
+                {/if}
+
+                <div class="snoc-contexto-celda snoc-ancho-total">
+                  <span>Siguiente verificación recomendada</span>
+                  <span class="snoc-body">{detalle.accion_propuesta}</span>
+                  <span class="snoc-mono-sm snoc-tenue">
+                    Es una recomendación, no una decisión ni una acción hecha.
+                  </span>
+                </div>
               </div>
-              {#if detalle.origen_tipo === 'case'}
-                <a class="snoc-btn" href="/tickets/{detalle.origen_id}" style="align-self:flex-start;">
-                  <span class="snoc-icono" style="font-size:14px;">open_in_new</span>
-                  Ver caso en el CRM
-                </a>
-              {/if}
-              <span class="snoc-mono-sm snoc-tenue">
-                El SLA, la última actividad, el último compromiso y la siguiente verificación no llegan en esta
-                respuesta: el detalle de la propuesta no los incluye.
-              </span>
+
+              <!-- Lo que el backend no manda, dicho una vez y sin casillas vacías -->
+              <div class="snoc-ausente">
+                <span class="snoc-icono snoc-tenue" style="font-size:15px;">info</span>
+                <span class="snoc-mono-sm snoc-tenue">
+                  No llegan en esta respuesta: {CONTEXTO_AUSENTE.join(' · ')}. El detalle de la propuesta no los
+                  incluye, y no se estiman.
+                </span>
+              </div>
             </section>
 
-            <!-- 3. ANÁLISIS DEL SUPERVISOR -->
+            <!-- ANÁLISIS DEL SUPERVISOR -->
             <section class="snoc-analisis-caja">
               <div class="snoc-fila" style="gap:var(--snoc-xs);">
                 <span class="snoc-icono snoc-primario" style="font-size:18px;">psychology</span>
@@ -899,9 +979,6 @@
                   Sugerencia del Supervisor
                 </span>
                 <p class="snoc-body-lg snoc-accion" style="margin:0;">{detalle.accion_propuesta}</p>
-                <span class="snoc-mono-sm snoc-tenue">
-                  Es una recomendación, no una decisión ni una acción hecha. La decide una persona.
-                </span>
               </div>
 
               {#if fuentes.length}
@@ -914,13 +991,6 @@
                   </div>
                 </div>
               {/if}
-
-              <div class="snoc-fila" style="gap:var(--snoc-xs);">
-                <span class="snoc-icono snoc-primario" style="font-size:15px;">balance</span>
-                <span class="snoc-mono-sm snoc-secundario">
-                  <strong>Nota de integridad:</strong> nunca se presenta una inferencia como hecho consumado.
-                </span>
-              </div>
             </section>
 
             <!-- 9. ACCIONES -->
@@ -952,10 +1022,14 @@
                   </form>
                   <button class="snoc-btn" type="button" onclick={cerrarDetalle}>Cerrar</button>
                 </div>
-                <span class="snoc-mono-sm snoc-tenue">
-                  Aceptar registra que estás de acuerdo. <strong>No ejecuta la acción</strong>: en esta etapa no hay
-                  camino de ejecución.
-                </span>
+                <div class="snoc-pie-decision">
+                  <span class="snoc-icono snoc-primario" style="font-size:16px;">info</span>
+                  <span class="snoc-body-sm snoc-secundario">
+                    <strong>La IA observa y propone. Vos decidís.</strong> Aceptar registra que estás de acuerdo;
+                    <strong>no ejecuta la acción</strong>, porque en esta etapa no hay camino de ejecución.
+                  </span>
+                  <span class="snoc-tecla" style="margin-left:auto;">ESC</span>
+                </div>
               {:else}
                 <div class="snoc-fila-sep">
                   <span class="snoc-body-sm snoc-secundario">

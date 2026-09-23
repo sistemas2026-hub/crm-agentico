@@ -5,7 +5,10 @@ import {
   baseDePrioridad,
   contrasteDeEstados,
   haceCuanto,
-  expiraEn
+  expiraEn,
+  antiguedadDelCaso,
+  lecturaExterna,
+  CONTEXTO_AUSENTE
 } from '$lib/v2/supervisor-noc-detalle.js';
 
 /** La evidencia real de un 'caso_desincronizado', tal como la manda el backend. */
@@ -148,5 +151,49 @@ describe('expiraEn', () => {
 
   it('sin fecha, una raya', () => {
     expect(expiraEn(null)).toBe('—');
+  });
+});
+
+describe('antiguedadDelCaso', () => {
+  it('lee la fecha y los dias de la observacion real', () => {
+    expect(antiguedadDelCaso(EVIDENCIA)).toEqual({ desde: '2026-09-15', dias: 7 });
+  });
+
+  it('si el texto no trae fecha, no inventa una', () => {
+    expect(antiguedadDelCaso([{ fuente: 'caso', dato: 'abierto desde hace mucho' }])).toBeNull();
+  });
+
+  it('acepta la fecha sin el conteo de dias', () => {
+    const r = antiguedadDelCaso([{ fuente: 'caso', dato: 'abierto desde 2026-09-01' }]);
+
+    expect(r).toEqual({ desde: '2026-09-01', dias: null });
+  });
+
+  it('otra señal no produce una antiguedad inventada', () => {
+    expect(antiguedadDelCaso([{ fuente: 'orden', dato: 'sin programacion' }])).toBeNull();
+    expect(antiguedadDelCaso(null)).toBeNull();
+  });
+});
+
+describe('lecturaExterna', () => {
+  it('extrae cuando se consulto al proveedor', () => {
+    expect(lecturaExterna(EVIDENCIA)).toBe('2026-09-22 14:53 UTC');
+  });
+
+  it('sin esa observacion, devuelve null y el bloque no se dibuja', () => {
+    expect(lecturaExterna([EVIDENCIA[0]])).toBeNull();
+    expect(lecturaExterna(undefined)).toBeNull();
+  });
+});
+
+describe('CONTEXTO_AUSENTE', () => {
+  it('nombra los cuatro datos que el serializer no entrega', () => {
+    // Si alguno empieza a llegar, se saca de aqui y la pantalla lo muestra:
+    // la lista es el unico lugar donde vive esa decision.
+    expect(CONTEXTO_AUSENTE).toContain('SLA del caso');
+    expect(CONTEXTO_AUSENTE).toContain('Última actividad registrada');
+    expect(CONTEXTO_AUSENTE).toContain('Último compromiso pendiente');
+    expect(CONTEXTO_AUSENTE).toContain('Responsable actual');
+    expect(CONTEXTO_AUSENTE).toHaveLength(4);
   });
 });

@@ -269,7 +269,11 @@
    del motor -- para mostrar una ficha.
    --------------------------------------------------------------------------- */
 .snoc-drawer {
-  margin-left: auto; height: 100%; width: min(560px, 100%);
+  margin-left: auto; height: 100%;
+  /* Media pantalla, con tope: por debajo de 460px el contexto operativo no
+     entra en dos columnas, y por encima de 900px las lineas se vuelven
+     demasiado largas para leerlas de un vistazo. */
+  width: clamp(460px, 50vw, 900px); max-width: 100%;
   background: var(--snoc-surface); box-shadow: -8px 0 32px rgba(0, 0, 0, 0.18);
   display: flex; flex-direction: column;
 }
@@ -462,4 +466,64 @@
   .snoc-contraste { grid-template-columns: 1fr; text-align: left; }
   .snoc-contraste-vs { text-align: left; }
   .snoc-meta { grid-template-columns: 1fr; }
+}
+
+
+/* ---------------------------------------------------------------------------
+   DRAWER A MEDIA PANTALLA -- el contexto operativo en dos columnas
+   --------------------------------------------------------------------------- */
+/* El hallazgo, en rojo y arriba: es lo que el supervisor tiene que entender
+   antes que nada. */
+.snoc-hallazgo {
+  display: flex; flex-direction: column; gap: var(--snoc-xs);
+  padding: var(--snoc-md); border-radius: var(--snoc-r-xl);
+  background: var(--snoc-error-container); color: var(--snoc-on-error-container);
+}
+.snoc-hallazgo-titulo {
+  font-family: 'Hanken Grotesk', sans-serif; font-size: 18px; line-height: 24px;
+  font-weight: 700; letter-spacing: -0.01em; text-transform: uppercase; margin: 0;
+}
+
+/* El contraste y los cuatro datos, uno al lado del otro: con el panel ancho
+   caben, y antes obligaban a bajar. */
+.snoc-cabeza { display: grid; grid-template-columns: 1fr; gap: var(--snoc-md); }
+@media (min-width: 820px) { .snoc-cabeza { grid-template-columns: 1.4fr 1fr; } }
+
+.snoc-datos-clave { display: flex; flex-direction: column; gap: var(--snoc-xs); }
+.snoc-dato-clave {
+  display: flex; align-items: baseline; justify-content: space-between; gap: var(--snoc-sm);
+  padding: var(--snoc-xs) var(--snoc-sm); border-radius: var(--snoc-r-lg);
+  background: var(--snoc-surface-container-low);
+}
+
+/* La grilla del contexto: dos columnas con el panel ancho, una si se angosta. */
+.snoc-contexto { display: grid; grid-template-columns: 1fr; gap: var(--snoc-sm); }
+@media (min-width: 700px) { .snoc-contexto { grid-template-columns: 1fr 1fr; } }
+.snoc-contexto-celda {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: var(--snoc-sm); border-radius: var(--snoc-r-lg);
+  background: var(--snoc-surface-container-low);
+}
+.snoc-contexto-celda > span:first-child {
+  color: var(--snoc-outline); font-size: 11px; letter-spacing: 0.03em; font-weight: 600;
+  text-transform: uppercase;
+}
+.snoc-ancho-total { grid-column: 1 / -1; }
+
+/* Lo que el backend todavia no manda, dicho una vez y sin casillas vacias. */
+.snoc-ausente {
+  display: flex; align-items: flex-start; gap: var(--snoc-xs);
+  padding: var(--snoc-xs) var(--snoc-sm); border-radius: var(--snoc-r-lg);
+  background: var(--snoc-surface-container-high);
+}
+
+.snoc-pie-decision {
+  display: flex; align-items: center; gap: var(--snoc-xs);
+  padding: var(--snoc-sm) var(--snoc-md); border-radius: var(--snoc-r-lg);
+  background: var(--snoc-surface-container-low);
+}
+.snoc-tecla {
+  font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; font-weight: 700;
+  padding: 1px 5px; border-radius: var(--snoc-r);
+  background: var(--snoc-surface-container-high); color: var(--snoc-on-surface-variant);
 }

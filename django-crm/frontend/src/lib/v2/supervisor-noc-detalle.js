@@ -117,3 +117,55 @@ export function expiraEn(iso, ahora = Date.now()) {
   const h = Math.round(ms / 3600000);
   return h < 48 ? `en ${h} h` : `en ${Math.round(h / 24)} días`;
 }
+
+/**
+ * La antigüedad del caso, si la evidencia la trae.
+ *
+ * El detector escribe una observación con la forma
+ * `abierto desde 2026-09-15 (7 dias)`. Se leen las dos partes; si el texto no
+ * coincide, devuelve null y el bloque no se dibuja.
+ *
+ * @param {any[] | null | undefined} evidencia
+ * @returns {{desde: string, dias: number|null} | null}
+ */
+export function antiguedadDelCaso(evidencia) {
+  if (!Array.isArray(evidencia)) return null;
+  const hit = evidencia.find((e) => /^abierto desde\s/i.test(String(e?.dato ?? '')));
+  if (!hit) return null;
+  const texto = String(hit.dato);
+  const fecha = texto.match(/(\d{4}-\d{2}-\d{2})/)?.[1];
+  if (!fecha) return null;
+  const dias = texto.match(/\((\d+)\s*d/i)?.[1];
+  return { desde: fecha, dias: dias ? Number(dias) : null };
+}
+
+/**
+ * Cuándo se leyó por última vez el estado del lado del proveedor.
+ *
+ * Es distinto de `observado_en`: ese dice cuándo el detector miró su propia
+ * base; este, cuándo se consultó al tercero. La diferencia importa cuando hay
+ * que decidir si el dato externo todavía sirve.
+ *
+ * @param {any[] | null | undefined} evidencia
+ */
+export function lecturaExterna(evidencia) {
+  if (!Array.isArray(evidencia)) return null;
+  const hit = evidencia.find((e) => /estado externo le[ií]do/i.test(String(e?.dato ?? '')));
+  if (!hit) return null;
+  const m = String(hit.dato).match(/le[ií]do el\s+(.+)$/i);
+  return m ? m[1].trim() : null;
+}
+
+/**
+ * Los datos del contexto operativo que el backend NO entrega hoy.
+ *
+ * Se declaran en un solo lugar para que la pantalla pueda decir cuáles faltan
+ * en vez de dibujar cuatro casillas vacías o, peor, inventarlas. Cuando el
+ * serializer los exponga, se sacan de esta lista y el bloque los muestra.
+ */
+export const CONTEXTO_AUSENTE = [
+  'SLA del caso',
+  'Última actividad registrada',
+  'Último compromiso pendiente',
+  'Responsable actual'
+];
