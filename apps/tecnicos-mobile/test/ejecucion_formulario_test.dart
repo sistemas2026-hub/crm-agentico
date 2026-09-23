@@ -3,6 +3,7 @@ import 'package:campo/core/theme/app_theme.dart';
 import 'package:campo/features/ejecucion/widgets/bloque_academia.dart';
 import 'package:campo/features/ejecucion/widgets/formulario_de_campo.dart';
 import 'package:flutter/material.dart';
+import 'package:campo/features/ejecucion/campo_del_formulario.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// El formulario de campo con el aspecto del diseño.
@@ -72,7 +73,9 @@ void main() {
     return StatefulBuilder(
       builder: (BuildContext context, void Function(void Function()) setState) {
         return FormularioDeCampo(
-          campos: campos ?? _campos(),
+          // El widget recibe los campos ya interpretados: la lectura del
+          // esquema vive en un solo lugar para toda la aplicacion.
+          campos: CampoDelFormulario.normalizar(campos ?? _campos(), valores),
           valores: valores,
           controladores: controladores,
           mostrarDatosFuturos: datosFuturos,

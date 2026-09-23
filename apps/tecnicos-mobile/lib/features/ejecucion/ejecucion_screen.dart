@@ -6,6 +6,7 @@ import 'package:uuid/uuid.dart';
 import '../../demo/field_mock_data.dart';
 import '../../core/storage/evidencia_storage_service.dart';
 import '../../core/storage/local_database.dart';
+import 'campo_del_formulario.dart';
 import 'cierre_de_orden.dart';
 import 'datos_de_ejecucion.dart';
 import 'widgets/consumo_de_material.dart';
@@ -71,6 +72,9 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
   /// un numero aparte se desincronizaria en cuanto algo se reintente.
   List<Map<String, dynamic>> _materialesUsados = <Map<String, dynamic>>[];
   bool _isLoading = true;
+
+  /// La carga terminó y no había nada que mostrar.
+  bool _noSePudoCargar = false;
   bool _showSavedIndicator = false;
   Timer? _savedIndicatorTimer;
 
@@ -118,7 +122,18 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
 
   Future<void> _loadOrdenData() async {
     final DatosDeEjecucion? datos = await _fuente.cargar(widget.ordenId);
-    if (datos == null) return;
+    if (datos == null) {
+      // No hay sesión, o la orden todavía no bajó al teléfono. Antes esto
+      // devolvía en silencio y la pantalla quedaba en blanco para siempre:
+      // sin decir qué pasó y sin forma de salir.
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _noSePudoCargar = true;
+        });
+      }
+      return;
+    }
 
     _orgId = datos.orgId;
     _profileId = datos.profileId;
@@ -470,20 +485,21 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
         (e['subida_estado'] ?? '') != 'confirmada');
   }
 
-  /// Los campos obligatorios que el esquema pide y todavia estan vacios.
-  List<String> get _camposObligatoriosSinLlenar {
-    final faltan = <String>[];
-    for (final dynamic campo in _campos) {
-      if (campo is! Map) continue;
-      if (campo['obligatorio'] != true) continue;
-      final clave = (campo['clave'] ?? '').toString();
-      final valor = _valoresFormulario[clave];
-      if (valor == null || valor.toString().trim().isEmpty) {
-        faltan.add((campo['etiqueta'] ?? clave).toString());
-      }
-    }
-    return faltan;
-  }
+  /// Los campos del formulario, interpretados una sola vez.
+  ///
+  /// La misma lista que se le pasa al widget del formulario: si el checklist
+  /// de cierre leyera el esquema por su cuenta volveriamos a tener dos
+  /// lecturas que se desincronizan. Ya paso: el formulario pintaba el
+  /// asterisco rojo y el cierre no exigia el campo.
+  List<CampoDelFormulario> get _camposNormalizados =>
+      CampoDelFormulario.normalizar(_campos, _valoresFormulario);
+
+  /// Lo que impide cerrar por el lado de los datos: obligatorios sin
+  /// responder, y tambien valores que no sirven.
+  List<String> get _camposObligatoriosSinLlenar => <String>[
+        for (final CampoDelFormulario campo in _camposNormalizados)
+          if (campo.bloqueaCierre) campo.titulo,
+      ];
 
   CierreDeOrden get _cierre => CierreDeOrden.evaluar(
         camposObligatoriosSinLlenar: _camposObligatoriosSinLlenar,
@@ -626,6 +642,46 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_noSePudoCargar) {
+      return Scaffold(
+        backgroundColor: AppColors.surface,
+        appBar: AppBar(title: const Text('Ejecución')),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(AppSpacing.xl),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                const Icon(Icons.cloud_off,
+                    size: 40, color: AppColors.onSurfaceVariant),
+                const SizedBox(height: AppSpacing.md),
+                Text(
+                  'No pudimos abrir este trabajo',
+                  style: AppTypography.tituloChico,
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                Text(
+                  'La orden todavía no está en este teléfono. Volvé a la '
+                  'lista y sincronizá cuando tengas señal.',
+                  style: AppTypography.cuerpo,
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: AppSpacing.lg),
+                // Una salida. Sin esto la unica forma de irse es el gesto de
+                // volver del sistema, y en una pantalla en blanco nadie sabe
+                // si la aplicacion se colgo.
+                FilledButton(
+                  onPressed: () => Navigator.of(context).maybePop(),
+                  child: const Text('Volver'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     if (_isLoading) {
       // Un fondo quieto, no un indicador que gira. Es la misma decision que
       // ya tomaron Inicio y Materiales: esto lee SQLite y son milisegundos,
@@ -673,7 +729,9 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   FormularioDeCampo(
-                    campos: _campos,
+                    // Una sola lectura del esquema para toda la pantalla: la
+                    // misma que usa el checklist de cierre.
+                    campos: _camposNormalizados,
                     valores: _valoresFormulario,
                     controladores: _controllers,
                     alCambiar: _onFieldChanged,

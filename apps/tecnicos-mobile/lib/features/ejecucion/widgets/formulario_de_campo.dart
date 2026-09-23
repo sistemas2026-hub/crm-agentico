@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../../demo/field_mock_data.dart';
 import '../../../core/theme/app_theme.dart';
+import '../campo_del_formulario.dart';
 
 /// El formulario de campo: el aspecto del diseño, el contenido del backend.
 ///
@@ -25,8 +26,14 @@ class FormularioDeCampo extends StatelessWidget {
     this.mostrarDatosFuturos = FieldMockData.modoDemo,
   });
 
-  /// Los campos tal como vienen del backend, ya decodificados.
-  final List<dynamic> campos;
+  /// Los campos **ya interpretados**.
+  ///
+  /// No se reciben crudos a propósito. Leer el esquema acá adentro fue lo que
+  /// produjo dos lecturas distintas del mismo campo: este widget buscaba las
+  /// opciones en `opciones` mientras el servidor las manda en
+  /// `reglas.options`, y un campo de selección obligatorio salía con "Sin
+  /// opciones definidas". Quien arma esta lista es `CampoDelFormulario`.
+  final List<CampoDelFormulario> campos;
 
   /// Lo respondido hasta ahora (base del servidor + lo escrito sin enviar).
   final Map<String, dynamic> valores;
@@ -92,11 +99,9 @@ class FormularioDeCampo extends StatelessWidget {
     var numero = 0;
 
     for (var i = 0; i < campos.length; i++) {
-      final Map<String, dynamic> campo = Map<String, dynamic>.from(campos[i] as Map);
-      final String tipo = (campo['tipo'] ?? 'texto').toString();
-      final String unidad = (campo['unidad'] ?? '').toString();
+      final CampoDelFormulario campo = campos[i];
       final bool llevaNumero =
-          tipo != 'booleano' && !unidad.toLowerCase().contains('dbm');
+          !campo.esBooleano && !campo.unidad.toLowerCase().contains('dbm');
       if (llevaNumero) numero++;
 
       if (i > 0) salida.add(const SizedBox(height: AppSpacing.lg));
@@ -106,15 +111,13 @@ class FormularioDeCampo extends StatelessWidget {
     return salida;
   }
 
-  Widget _campo(BuildContext context, Map<String, dynamic> campo, int? numero) {
-    final String clave = (campo['clave'] ?? campo['id']).toString();
-    final String etiqueta = (campo['etiqueta'] ?? campo['titulo'] ?? clave).toString();
-    final String tipo = (campo['tipo'] ?? 'texto').toString();
-    final Object? reglas = campo['reglas'];
-    final bool obligatorio = campo['obligatorio'] == true ||
-        (reglas is Map && reglas['required'] == true);
-    final String? unidad = campo['unidad'] as String?;
-    final String? ayuda = campo['ayuda'] as String?;
+  Widget _campo(BuildContext context, CampoDelFormulario campo, int? numero) {
+    final String clave = campo.id;
+    final String etiqueta = campo.titulo;
+    final String tipo = campo.tipo;
+    final bool obligatorio = campo.obligatorio;
+    final String? unidad = campo.unidad.isEmpty ? null : campo.unidad;
+    final String? ayuda = campo.ayuda.isEmpty ? null : campo.ayuda;
 
     switch (tipo) {
       case 'seleccion':
@@ -124,9 +127,10 @@ class FormularioDeCampo extends StatelessWidget {
           obligatorio: obligatorio,
           ayuda: ayuda,
           contenido: _opciones(
-            (campo['opciones'] as List<dynamic>?) ?? const <dynamic>[],
+            campo.opciones,
             clave,
-            valores[clave]?.toString(),
+            campo.valor?.toString(),
+            campo.motivoDelError,
           ),
         );
 
@@ -256,9 +260,41 @@ class FormularioDeCampo extends StatelessWidget {
 
   /// Las opciones, como botones grandes: con guantes y al sol, una lista
   /// desplegable obliga a apuntar dos veces a un texto chico.
-  Widget _opciones(List<dynamic> opciones, String clave, String? valorActual) {
+  Widget _opciones(
+    List<String> opciones,
+    String clave,
+    String? valorActual,
+    String motivoDelError,
+  ) {
     if (opciones.isEmpty) {
-      return Text('Sin opciones definidas', style: AppTypography.etiquetaChica);
+      // Antes decía "Sin opciones definidas", que le habla al programador.
+      // Quien lee esto está en la calle y necesita saber dos cosas: que no es
+      // culpa suya y a quién avisar.
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(AppSpacing.sm),
+        decoration: const BoxDecoration(
+          color: AppColors.errorContainer,
+          borderRadius: AppRadius.brCampo,
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            const Icon(Icons.error_outline,
+                size: 16, color: AppColors.onErrorContainer),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: Text(
+                motivoDelError.isEmpty
+                    ? 'Este campo llegó sin opciones para elegir.'
+                    : motivoDelError,
+                style: AppTypography.cuerpoChico
+                    .copyWith(color: AppColors.onErrorContainer),
+              ),
+            ),
+          ],
+        ),
+      );
     }
 
     final int columnas = opciones.length <= 3 ? opciones.length : 2;

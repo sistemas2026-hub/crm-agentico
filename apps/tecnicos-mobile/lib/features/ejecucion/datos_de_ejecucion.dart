@@ -3,6 +3,7 @@ import 'dart:convert';
 import '../../core/storage/local_database.dart';
 import '../../core/storage/secure_storage_service.dart';
 import '../../core/sync/sync_queue_service.dart';
+import 'campo_del_formulario.dart';
 import 'cierre_de_orden.dart';
 
 /// Lo que la pantalla de ejecución necesita para dibujarse, ya leído.
@@ -96,20 +97,23 @@ class DatosDeEjecucion {
         (e['subida_estado'] ?? '') != 'confirmada');
   }
 
-  /// Los campos obligatorios que el esquema pide y todavía están vacíos.
-  List<String> get camposObligatoriosSinLlenar {
-    final List<String> faltan = <String>[];
-    for (final dynamic campo in campos) {
-      if (campo is! Map) continue;
-      if (campo['obligatorio'] != true) continue;
-      final String clave = (campo['clave'] ?? '').toString();
-      final dynamic valor = valores[clave];
-      if (valor == null || valor.toString().trim().isEmpty) {
-        faltan.add((campo['etiqueta'] ?? clave).toString());
-      }
-    }
-    return faltan;
-  }
+  /// Los campos del formulario, ya interpretados.
+  ///
+  /// Una sola lectura del esquema para todos: el formulario que se dibuja, el
+  /// checklist de cierre y la validación. Antes cada uno lo leía a su manera y
+  /// no coincidían — ver `campo_del_formulario.dart`.
+  List<CampoDelFormulario> get camposNormalizados =>
+      CampoDelFormulario.normalizar(campos, valores);
+
+  /// Lo que impide cerrar, por el lado de los datos.
+  ///
+  /// Incluye los obligatorios sin responder y también los que tienen un valor
+  /// que no sirve: un número fuera del rango que pide el esquema se firma como
+  /// si fuera una medición buena, así que no puede pasar por completo.
+  List<String> get camposObligatoriosSinLlenar => <String>[
+        for (final CampoDelFormulario campo in camposNormalizados)
+          if (campo.bloqueaCierre) campo.titulo,
+      ];
 
   /// Si el trabajo se puede dar por terminado, y qué falta si no.
   ///

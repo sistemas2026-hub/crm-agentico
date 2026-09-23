@@ -121,26 +121,10 @@ void main() {
           materialesUsados: materiales ?? <Map<String, dynamic>>[],
         );
 
-    // ---------------------------------------------------------------------
-    // DEFECTO ABIERTO · la validación de cierre lee el campo de otra forma
-    // que el formulario que lo dibuja.
-    //
-    //   formulario_de_campo.dart  →  campo['clave'] ?? campo['id']
-    //                                campo['obligatorio'] == true
-    //                                  || campo['reglas']['required'] == true
-    //
-    //   DatosDeEjecucion          →  campo['clave']
-    //                                campo['obligatorio'] == true
-    //
-    // El servidor manda `id` y `reglas.required` (ver TIPOS_PERMITIDOS y el
-    // seed en campo/services/validador.py). Con una orden real, entonces, el
-    // formulario PINTA el asterisco rojo y la validación de cierre NO cuenta
-    // el campo: se puede terminar un trabajo con los obligatorios vacíos.
-    //
-    // Estas dos pruebas afirman lo correcto y quedan sin correr a propósito,
-    // para no dejar escrita como especificación una conducta que está mal.
-    // Se activan sacando el `skip` cuando se unifique la lectura.
-    // ---------------------------------------------------------------------
+    // Estas reglas leen el esquema por `CampoDelFormulario`, que entiende el
+    // vocabulario del servidor (`id`, `reglas.required`) y el viejo
+    // (`clave`, `obligatorio`). Antes cada componente lo leia a su manera: el
+    // formulario pintaba el asterisco rojo y el cierre no exigia el campo.
     test('Faltan los obligatorios vacíos, con su etiqueta', () {
       final List<String> faltan = datos().camposObligatoriosSinLlenar;
 
@@ -151,7 +135,7 @@ void main() {
         isNot(contains('Observaciones técnicas del empalme')),
         reason: 'ese campo no es obligatorio',
       );
-    }, skip: 'DEFECTO ABIERTO: no lee reglas.required ni id (ver arriba)');
+    });
 
     test('Un obligatorio con espacios sigue estando vacío', () {
       final List<String> faltan = datos(
@@ -159,19 +143,6 @@ void main() {
       ).camposObligatoriosSinLlenar;
 
       expect(faltan, contains('Potencia óptica en roseta del cliente'));
-    }, skip: 'DEFECTO ABIERTO: no lee reglas.required ni id (ver arriba)');
-
-    test('Hoy, con una orden del servidor, no detecta ningún obligatorio', () {
-      // Esto documenta el defecto midiéndolo, para que quede claro que no es
-      // una sospecha: con los campos tal como los manda el backend, la lista
-      // de faltantes sale vacía aunque los tres obligatorios estén sin
-      // responder.
-      expect(
-        datos().camposObligatoriosSinLlenar,
-        isEmpty,
-        reason: 'cuando se corrija, esta prueba debe fallar y hay que '
-            'borrarla junto con el skip de las dos de arriba',
-      );
     });
 
     test('La plantilla pide firma, y se nota si no está', () {
@@ -229,4 +200,72 @@ void main() {
       expect(datos().revision, 7);
     });
   });
+
+  group('4. El esquema del servidor llega hasta la pantalla', () {
+    testWidgets('Un campo de seleccion muestra sus opciones',
+        (WidgetTester t) async {
+      // El defecto original: el widget buscaba las opciones en `opciones` y el
+      // servidor las manda en `reglas.options`, asi que un campo obligatorio
+      // salia con "Sin opciones definidas" y no se podia responder.
+      pantallaAlta(t);
+      await t.pumpWidget(app(FuenteDeEjecucionFalsa()));
+      await t.pumpAndSettle();
+
+      expect(find.text('Acometida / Drop'), findsOneWidget);
+      expect(find.text('Roseta / Conector'), findsOneWidget);
+      expect(find.textContaining('Sin opciones definidas'), findsNothing);
+    });
+
+    testWidgets('Una seleccion sin opciones dice que avisen a la oficina',
+        (WidgetTester t) async {
+      pantallaAlta(t);
+      await t.pumpWidget(app(FuenteDeEjecucionFalsa(
+        campos: <Map<String, dynamic>>[
+          <String, dynamic>{
+            'id': 'roto',
+            'titulo': 'Campo sin opciones',
+            'tipo': 'seleccion',
+            'reglas': <String, dynamic>{'required': true},
+          },
+        ],
+      )));
+      await t.pumpAndSettle();
+
+      expect(find.textContaining('llegó sin opciones'), findsOneWidget);
+      expect(find.textContaining('Avisá a la oficina'), findsOneWidget);
+    });
+
+    testWidgets('Un obligatorio vacio impide cerrar, y se dice cual',
+        (WidgetTester t) async {
+      pantallaAlta(t);
+      await t.pumpWidget(app(FuenteDeEjecucionFalsa()));
+      await t.pumpAndSettle();
+
+      // Se afirma sobre el texto DEL CHECKLIST, no sobre la etiqueta del
+      // campo. Esta prueba ya paso dos veces por la razon equivocada: una
+      // encontrando "Falta la conformidad" (que es de la firma) y otra
+      // encontrando el titulo del campo en el formulario de arriba, mientras
+      // el checklist de datos seguia en verde con los obligatorios vacios.
+      //
+      // Dos y no tres: el booleano no lleva `required`, y el campo de
+      // observaciones tampoco.
+      expect(
+        find.text('Faltan 2 campos'),
+        findsOneWidget,
+        reason: 'el checklist de datos tiene que objetar, y decir cuantos',
+      );
+    });
+
+    testWidgets('Sin sesion dice que paso y ofrece salir',
+        (WidgetTester t) async {
+      // Antes quedaba en blanco para siempre: ni un mensaje ni una salida.
+      pantallaAlta(t);
+      await t.pumpWidget(app(FuenteDeEjecucionFalsa(sinIdentidad: true)));
+      await t.pumpAndSettle();
+
+      expect(find.text('No pudimos abrir este trabajo'), findsOneWidget);
+      expect(find.text('Volver'), findsOneWidget);
+    });
+  });
+
 }
