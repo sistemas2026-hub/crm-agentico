@@ -654,6 +654,7 @@ void main() {
           DevolucionScreen(estado: jornadaDe(cerrada: true)),
       'matriz_materiales_normal': () => const MaterialesScreen(
         tecnico: 'Carlos Gómez',
+        mostrarDatosFuturos: false,
         kit: KitDeJornada(
           materiales: <MaterialEnCustodia>[matrizConector],
           acta: 'Acta #K-2026-311',
@@ -663,6 +664,7 @@ void main() {
       ),
       'matriz_materiales_pendientes': () => const MaterialesScreen(
         tecnico: 'Carlos Gómez',
+        mostrarDatosFuturos: false,
         kit: KitDeJornada(
           materiales: <MaterialEnCustodia>[matrizConector],
           acta: 'Acta #K-2026-311',
@@ -670,8 +672,27 @@ void main() {
           conNovedad: <MovimientoConNovedad>[],
         ),
       ),
+      'matriz_materiales_conflicto_serial': () => const MaterialesScreen(
+        tecnico: 'Carlos Gómez',
+        mostrarDatosFuturos: false,
+        kit: KitDeJornada(
+          materiales: <MaterialEnCustodia>[matrizConector],
+          acta: 'Acta #K-2026-311',
+          sinSubir: 0,
+          conNovedad: <MovimientoConNovedad>[
+            MovimientoConNovedad(
+              material: 'ONT Huawei HG8145V5',
+              cantidad: '1',
+              resultado: 'conflicto',
+              motivo: 'Ya figura instalada en la OT #4720.',
+              serie: '48575443-A190C',
+            ),
+          ],
+        ),
+      ),
       'matriz_materiales_novedad': () => const MaterialesScreen(
         tecnico: 'Carlos Gómez',
+        mostrarDatosFuturos: false,
         kit: KitDeJornada(
           materiales: <MaterialEnCustodia>[matrizConector],
           acta: 'Acta #K-2026-311',

@@ -560,6 +560,10 @@ void main() {
         'matriz_materiales_normal',
         'matriz_materiales_pendientes',
         'matriz_materiales_novedad',
+        // Una diferencia de cantidad y un conflicto de identidad se
+        // resuelven distinto: uno lo explica el tecnico, el otro lo
+        // destraba el supervisor. Antes los dos eran "Novedades: 1".
+        'matriz_materiales_conflicto_serial',
       ],
     };
 

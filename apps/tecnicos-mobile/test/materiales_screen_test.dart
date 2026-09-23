@@ -25,6 +25,16 @@ Widget _enApp(Widget hijo) => MaterialApp(
       home: Scaffold(body: hijo),
     );
 
+const MaterialEnCustodia _conectorSuelto = MaterialEnCustodia(
+  categoria: 'Consumibles',
+  nombre: 'Conector SC/APC',
+  detalle: 'Reconectorización',
+  clase: ClaseMaterial.consumible,
+  recibidos: 10,
+  usados: 3,
+  unidad: 'unidades',
+);
+
 void main() {
   group('Materiales', () {
     testWidgets('1. Fuera de la demostración dice la verdad: falta el módulo',
@@ -69,7 +79,7 @@ void main() {
       // metros daba un total sin sentido fisico ("161 recibidos" entre una
       // ONT, diez conectores y ciento cincuenta metros de fibra).
       expect(find.text('Materiales'), findsOneWidget);
-      expect(find.text('Con consumo'), findsOneWidget);
+      expect(find.text('Usados'), findsOneWidget);
       expect(find.text('Sin tocar'), findsOneWidget);
       expect(find.text('Recibidos'), findsNothing);
       expect(find.text('Escanear QR'), findsOneWidget);
@@ -210,6 +220,109 @@ void main() {
       // Llega a la pantalla de cierre. Sin jornada cargada dice eso, que es
       // la verdad: lo que se prueba aca es que el camino existe.
       expect(find.text('Cierre de jornada'), findsOneWidget);
+    });
+
+
+    testWidgets('10. Una diferencia de cantidad dice cuánto y qué hacer',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      await tester.pumpWidget(_enApp(MaterialesScreen(
+        tecnico: 'Carlos Gomez',
+        mostrarDatosFuturos: false,
+        kit: KitDeJornada(
+          materiales: const <MaterialEnCustodia>[_conectorSuelto],
+          acta: 'Acta #K-2026-311',
+          sinSubir: 0,
+          conNovedad: const <MovimientoConNovedad>[
+            MovimientoConNovedad(
+              material: 'Conector SC/APC',
+              cantidad: '2',
+              resultado: 'descuadre',
+              motivo: 'El saldo no coincide con lo que registró bodega.',
+              ordenNumero: 4832,
+            ),
+          ],
+        ),
+      )));
+      await tester.pumpAndSettle();
+
+      expect(find.text('No cuadra con el kit'), findsOneWidget);
+      expect(find.textContaining('Cantidad registrada: 2'), findsOneWidget);
+      expect(find.textContaining('OT #4832'), findsOneWidget);
+      // Lo resuelve el tecnico: explica y cierra.
+      expect(find.textContaining('Explicá qué pasó'), findsOneWidget);
+      expect(find.textContaining('supervisor'), findsNothing);
+    });
+
+    testWidgets('11. Un conflicto de serial dice cuál equipo y a quién acudir',
+        (WidgetTester tester) async {
+      // No es un faltante: el equipo figura instalado en otra orden. Eso no
+      // se resuelve desde la vereda, y confundirlo con un descuadre hace que
+      // el tecnico dude del serial que tiene en la mano.
+      _pantallaAlta(tester);
+      await tester.pumpWidget(_enApp(MaterialesScreen(
+        tecnico: 'Carlos Gomez',
+        mostrarDatosFuturos: false,
+        kit: KitDeJornada(
+          materiales: const <MaterialEnCustodia>[_conectorSuelto],
+          acta: 'Acta #K-2026-311',
+          sinSubir: 0,
+          conNovedad: const <MovimientoConNovedad>[
+            MovimientoConNovedad(
+              material: 'ONT Huawei HG8145V5',
+              cantidad: '1',
+              resultado: 'conflicto',
+              motivo: 'Ya figura instalada en la OT #4720.',
+              serie: '48575443-A190C',
+            ),
+          ],
+        ),
+      )));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Ese equipo ya figura instalado'), findsOneWidget);
+      expect(find.textContaining('48575443-A190C'), findsOneWidget);
+      expect(find.textContaining('Revisalo con tu supervisor'), findsOneWidget);
+      // No se mezclan los mensajes: este no se arregla explicando.
+      expect(find.textContaining('Explicá qué pasó'), findsNothing);
+      expect(find.textContaining('No cuadra con el kit'), findsNothing);
+    });
+
+    testWidgets('12. Los dos tipos conviven sin mezclarse',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      await tester.pumpWidget(_enApp(MaterialesScreen(
+        tecnico: 'Carlos Gomez',
+        mostrarDatosFuturos: false,
+        kit: KitDeJornada(
+          materiales: const <MaterialEnCustodia>[_conectorSuelto],
+          acta: 'Acta #K-2026-311',
+          sinSubir: 2,
+          conNovedad: const <MovimientoConNovedad>[
+            MovimientoConNovedad(
+              material: 'Conector SC/APC',
+              cantidad: '2',
+              resultado: 'descuadre',
+              motivo: 'El saldo no coincide.',
+            ),
+            MovimientoConNovedad(
+              material: 'ONT Huawei HG8145V5',
+              cantidad: '1',
+              resultado: 'conflicto',
+              motivo: 'Ya figura instalada en la OT #4720.',
+              serie: '48575443-A190C',
+            ),
+          ],
+        ),
+      )));
+      await tester.pumpAndSettle();
+
+      expect(find.text('2 novedades'), findsOneWidget);
+      expect(find.text('No cuadra con el kit'), findsOneWidget);
+      expect(find.text('Ese equipo ya figura instalado'), findsOneWidget);
+      // Y lo que espera senal se sigue diciendo aparte: es otro problema.
+      expect(find.textContaining('2 movimientos esperando señal'),
+          findsOneWidget);
     });
 
     test('5. Las cuentas del kit cierran: recibido menos usado es disponible', () {

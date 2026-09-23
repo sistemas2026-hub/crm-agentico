@@ -156,6 +156,10 @@ class _MaterialesScreenState extends State<MaterialesScreen> {
           ),
           const SizedBox(height: AppSpacing.md),
           _recepcionDelKit(todos),
+          if (_kit != null && _kit!.conNovedad.isNotEmpty) ...<Widget>[
+            const SizedBox(height: AppSpacing.md),
+            _novedades(_kit!.conNovedad),
+          ],
           const SizedBox(height: AppSpacing.md),
           _barraDeAcciones(),
           const SizedBox(height: AppSpacing.md),
@@ -201,6 +205,127 @@ class _MaterialesScreenState extends State<MaterialesScreen> {
   /// está mostrando. No es una segunda cuenta del saldo —ese ya lo hizo
   /// `KitDeJornada` mezclando lo del servidor con la cola—: es el total de lo
   /// que se ve abajo, y por eso no puede contradecirlo.
+  /// Las novedades, una por una y con su camino.
+  ///
+  /// POR QUÉ NO ALCANZA UN CONTADOR
+  /// ------------------------------
+  /// Antes esto era "Novedades: 1". Dos situaciones que se resuelven de forma
+  /// completamente distinta se veían idénticas:
+  ///
+  /// - Un **descuadre** lo arregla el técnico: explica qué pasó con el
+  ///   material y la jornada cierra.
+  /// - Un **conflicto de identidad** no: el equipo figura instalado en otra
+  ///   orden, y eso lo resuelve alguien con acceso al inventario. Insistir
+  ///   desde la vereda no lo destraba, y peor, el técnico puede creer que el
+  ///   serial que tiene en la mano es el equivocado.
+  ///
+  /// El dominio ya los distinguía —`resultado` es `descuadre`, `conflicto` o
+  /// `rechazado`, cada uno con su título—. Lo que faltaba era dibujarlo.
+  Widget _novedades(List<MovimientoConNovedad> novedades) {
+    if (novedades.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Text(
+          novedades.length == 1 ? 'Una novedad' : '${novedades.length} novedades',
+          style: AppTypography.tituloChico,
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        for (final MovimientoConNovedad n in novedades)
+          Container(
+            margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+            padding: const EdgeInsets.all(AppSpacing.md),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceContainerLowest,
+              borderRadius: AppRadius.brTarjeta,
+              border: Border.all(
+                color: n.esDeIdentidad ? AppColors.error : AppColors.outlineVariant,
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Row(
+                  children: <Widget>[
+                    Icon(
+                      n.esDeIdentidad
+                          ? Icons.fingerprint
+                          : Icons.difference_outlined,
+                      size: 16,
+                      color: n.esDeIdentidad
+                          ? AppColors.error
+                          : AppColors.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        n.titulo,
+                        style: AppTypography.etiquetaGrande.copyWith(
+                          color: n.esDeIdentidad
+                              ? AppColors.error
+                              : AppColors.onSurface,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                Text(n.material, style: AppTypography.cuerpo),
+                // El serial en monoespaciada: se compara carácter por carácter
+                // contra la etiqueta pegada al equipo.
+                if (n.serie.isNotEmpty) ...<Widget>[
+                  const SizedBox(height: 2),
+                  Text(
+                    'Serie ${n.serie}',
+                    style: AppTypography.datoChico
+                        .copyWith(color: AppColors.onSurfaceVariant),
+                  ),
+                ],
+                if (!n.esDeIdentidad && n.cantidad.isNotEmpty) ...<Widget>[
+                  const SizedBox(height: 2),
+                  Text(
+                    'Cantidad registrada: ${n.cantidad}',
+                    style: AppTypography.etiquetaChica,
+                  ),
+                ],
+                if (n.ordenNumero != null) ...<Widget>[
+                  const SizedBox(height: 2),
+                  Text('OT #${n.ordenNumero}',
+                      style: AppTypography.etiquetaChica),
+                ],
+                if (n.motivo.isNotEmpty) ...<Widget>[
+                  const SizedBox(height: AppSpacing.xs),
+                  Text(n.motivo, style: AppTypography.cuerpoChico),
+                ],
+                const SizedBox(height: AppSpacing.sm),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(AppSpacing.sm),
+                  decoration: BoxDecoration(
+                    color: n.esDeIdentidad
+                        ? AppColors.errorContainer
+                        : AppColors.surfaceContainerLow,
+                    borderRadius: AppRadius.brCampo,
+                  ),
+                  child: Text(
+                    n.queHacer,
+                    style: AppTypography.cuerpoChico.copyWith(
+                      color: n.esDeIdentidad
+                          ? AppColors.onErrorContainer
+                          : AppColors.onSurface,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
   Widget _recepcionDelKit(List<MaterialEnCustodia> materiales) {
     // Se cuentan RENGLONES, no cantidades.
     //
@@ -314,7 +439,9 @@ class _MaterialesScreenState extends State<MaterialesScreen> {
               Expanded(
                 child: _Cifra(
                   valor: '$conConsumo',
-                  etiqueta: 'Con consumo',
+                  // "Con consumo" no entra con cuatro cifras a 390 px: se
+                  // cortaba en "Con consu...".
+                  etiqueta: 'Usados',
                   color: AppColors.secondary,
                 ),
               ),

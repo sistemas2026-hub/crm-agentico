@@ -148,6 +148,7 @@ class KitDeJornada {
             cantidad: (m['cantidad'] ?? '').toString(),
             resultado: (m['resultado'] ?? '').toString(),
             motivo: (m['motivo'] ?? '').toString(),
+            serie: (m['serie'] ?? '').toString(),
             ordenNumero: m['orden_numero'] as int?,
           ),
       ],
@@ -176,11 +177,19 @@ class MovimientoConNovedad {
     required this.cantidad,
     required this.resultado,
     required this.motivo,
+    this.serie = '',
     this.ordenNumero,
   });
 
   final String material;
   final String cantidad;
+
+  /// El serial del equipo, cuando el movimiento es de uno serializado.
+  ///
+  /// Estaba en la base y no llegaba hasta acá. Es lo que distingue un
+  /// conflicto de identidad —ese equipo ya figura instalado en otro lado— de
+  /// un descuadre de cantidad, que es otro problema y se resuelve distinto.
+  final String serie;
 
   /// `descuadre`, `conflicto` o `rechazado`.
   final String resultado;
@@ -193,4 +202,19 @@ class MovimientoConNovedad {
         'rechazado' => 'No se pudo registrar',
         _ => 'Revisar',
       };
+
+  /// Qué hacer con esto. Son caminos distintos y por eso se dicen distinto.
+  ///
+  /// Un descuadre lo resuelve el técnico: explica qué pasó con el material y
+  /// la jornada puede cerrar. Un conflicto de identidad no: el equipo figura
+  /// instalado en otra orden, y eso lo arregla alguien con acceso al
+  /// inventario, no quien está parado en la vereda.
+  String get queHacer => switch (resultado) {
+        'descuadre' => 'Explicá qué pasó con el material antes de cerrar.',
+        'conflicto' => 'Revisalo con tu supervisor: no lo podés resolver acá.',
+        'rechazado' => 'Volvé a registrarlo.',
+        _ => '',
+      };
+
+  bool get esDeIdentidad => resultado == 'conflicto';
 }
