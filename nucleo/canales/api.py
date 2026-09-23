@@ -1025,7 +1025,10 @@ INSTRUCCION_REENCAUZAR = (
     "herramienta para hacerlo. El dato que te de no lo vas a poder usar. "
     "Llama a derivar_a_area con el area que corresponda: alli SI se verifica "
     "y alli se le va a pedir lo que haga falta. No le anuncies el pase ni le "
-    "pidas que espere."
+    "pidas que espere. "
+    "Y si la descripcion de derivar_a_area te pide verificar identidad antes "
+    "de derivar: esa condicion es para los roles que SI pueden verificarla. "
+    "No es tu caso. Si esperas a verificar, esta conversacion no avanza nunca."
 )
 
 
