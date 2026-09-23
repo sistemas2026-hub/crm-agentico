@@ -201,6 +201,24 @@
   };
 </script>
 
+<!--
+  Escape cancela la edicion.
+
+  No es un adorno de teclado: la fila en edicion es ancha y, segun el ancho de
+  la ventana, hubo un momento en que ni Guardar ni Cancelar se alcanzaban. La
+  barra de abajo lo resuelve, pero una salida que no depende de encontrar un
+  boton vale igual -- es la tecla que cualquiera prueba cuando quiere salir de
+  algo, y aca la alternativa era recargar la pagina.
+
+  No dispara mientras se esta guardando: ahi la peticion ya salio y cerrar el
+  formulario solo escondería lo que el servidor todavia va a contestar.
+-->
+<svelte:window
+  onkeydown={(e) => {
+    if (e.key === 'Escape' && editando !== null && !guardandoFila) cancelar();
+  }}
+/>
+
 {#if data.forbidden}
   <PageHeader title="Equipo y acceso" />
   <div class="v2-pad" style="padding-top:40px">
@@ -709,50 +727,14 @@
                 </td>
                 <td class="v2-r">
                   {#if editando === m.id}
-                    <!-- En edicion, la fila ofrece SOLO guardar o cancelar.
-                         Dejar los otros botones activos invita a cambiarle el
-                         rol a alguien con un borrador a medio hacer.
-
-                         El <form> vive DENTRO de la celda porque un form no
-                         puede envolver un <tr> sin romper el HTML; lo editado
-                         viaja como campos ocultos. -->
-                    <form
-                      method="POST"
-                      action="?/actualizar"
-                      use:enhance={edicionSubmit}
-                      style="display:inline-flex;gap:6px;justify-content:flex-end"
-                    >
-                      <input type="hidden" name="userId" value={m.user_id} />
-                      <input type="hidden" name="profileId" value={m.id} />
-                      <input type="hidden" name="name" value={borrador.name} />
-                      <input type="hidden" name="email" value={borrador.email} />
-                      <input type="hidden" name="role" value={borrador.role} />
-                      <input type="hidden" name="activo" value={borrador.activo ? 'si' : 'no'} />
-                      <input type="hidden" name="eraActivo" value={m.is_active ? 'si' : 'no'} />
-                      <input type="hidden" name="area" value={borrador.area} />
-                      <input type="hidden" name="externo" value={borrador.externo} />
-                      <input type="hidden" name="password" value={borrador.password} />
-                      <input type="hidden" name="externo_nombre" value={nombreExternoDe(borrador.externo)} />
-                      {#each borrador.agentes as a (a)}
-                        <input type="hidden" name="agentes" value={a} />
-                      {/each}
-                      <button class="v2-btn v2-btn-sm v2-btn-primary" disabled={guardandoFila}>
-                        <Check />Guardar
-                      </button>
-                      <!-- Cancelar sigue siendo TEXTO, no un icono como los de
-                           reposo: es la salida de un estado en el que hay
-                           cambios sin guardar, y una X chiquita al lado de un
-                           tilde chiquito se aprieta mal. Lo compacto sirve para
-                           la fila en reposo; para deshacer no. -->
-                      <button
-                        type="button"
-                        class="v2-btn v2-btn-sm"
-                        disabled={guardandoFila}
-                        onclick={cancelar}
-                      >
-                        <X />Cancelar
-                      </button>
-                    </form>
+                    <!-- Guardar y Cancelar NO estan aca: viven en la barra de
+                         abajo. Estaban en esta celda y quedaban fuera de la
+                         pantalla apenas la fila entraba en edicion -- los
+                         campos la ensanchan, y .v2-table-wrap recorta con
+                         overflow:hidden, asi que no habia siquiera scroll para
+                         alcanzarlos. Se podia escribir una contraseña y no
+                         tener como aplicarla ni como salir. -->
+                    <span class="v2-muted" style="font-size:11.5px">editando</span>
                   {:else if m.is_you}
                     <!-- Sobre uno mismo tampoco se edita area ni agentes: es
                          el mismo criterio con el que el servidor no deja
@@ -823,6 +805,81 @@
                   {/if}
                 </td>
               </tr>
+              <!--
+                LA BARRA DE ACCIONES, EN SU PROPIA FILA.
+
+                Guardar y Cancelar vivian en la ultima celda. Con la fila en
+                reposo entraban; en edicion no: los campos ensanchan la tabla y
+                .v2-table-wrap recorta con overflow:hidden, asi que la columna
+                "Gestionar" se iba de pantalla y no quedaba ni scroll para
+                llegar. Alguien podia escribir una contraseña nueva y no tener
+                donde aplicarla, ni como salir sin recargar la pagina.
+
+                Una fila aparte con colspan empieza en el borde IZQUIERDO, que
+                es el que nunca se recorta, y por eso se ve a cualquier ancho.
+                El colspan sigue a la columna opcional del sistema externo: si
+                se desfasa, el navegador desalinea la tabla entera.
+              -->
+              {#if editando === m.id}
+                <tr>
+                  <td
+                    colspan={data.externos?.length ? 8 : 7}
+                    style="padding-top:2px;background:var(--v2-line-soft)"
+                  >
+                    <form
+                      method="POST"
+                      action="?/actualizar"
+                      use:enhance={edicionSubmit}
+                      style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"
+                    >
+                      <input type="hidden" name="userId" value={m.user_id} />
+                      <input type="hidden" name="profileId" value={m.id} />
+                      <input type="hidden" name="name" value={borrador.name} />
+                      <input type="hidden" name="email" value={borrador.email} />
+                      <input type="hidden" name="role" value={borrador.role} />
+                      <input type="hidden" name="activo" value={borrador.activo ? 'si' : 'no'} />
+                      <input type="hidden" name="eraActivo" value={m.is_active ? 'si' : 'no'} />
+                      <input type="hidden" name="area" value={borrador.area} />
+                      <input type="hidden" name="externo" value={borrador.externo} />
+                      <input type="hidden" name="password" value={borrador.password} />
+                      <input
+                        type="hidden"
+                        name="externo_nombre"
+                        value={nombreExternoDe(borrador.externo)}
+                      />
+                      {#each borrador.agentes as a (a)}
+                        <input type="hidden" name="agentes" value={a} />
+                      {/each}
+                      <button class="v2-btn v2-btn-sm v2-btn-primary" disabled={guardandoFila}>
+                        <Check />{guardandoFila ? 'Guardando…' : `Guardar a ${m.name}`}
+                      </button>
+                      <!-- Cancelar es TEXTO, no un icono como los de reposo: es
+                           la salida de un estado con cambios sin guardar, y una
+                           X chiquita pegada a un tilde chiquito se aprieta mal.
+                           Lo compacto sirve para la fila en reposo; para
+                           deshacer no. -->
+                      <button
+                        type="button"
+                        class="v2-btn v2-btn-sm"
+                        disabled={guardandoFila}
+                        onclick={cancelar}
+                      >
+                        <X />Cancelar
+                      </button>
+                      <!-- Dicho donde se decide, no en la nota al pie. La
+                           regla no es adivinable: un campo de clave en blanco
+                           dentro de un formulario que guarda otras cosas puede
+                           significar "borrala" tanto como "no la toques". -->
+                      <span class="v2-sub" style="font-size:11.5px">
+                        {borrador.password
+                          ? 'Al guardar se le aplica la contraseña nueva.'
+                          : 'Contraseña vacía: se le deja la que ya tiene.'}
+                        Escape cancela.
+                      </span>
+                    </form>
+                  </td>
+                </tr>
+              {/if}
             {/each}
           </tbody>
         </table>
