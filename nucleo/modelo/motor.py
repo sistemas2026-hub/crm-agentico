@@ -2699,6 +2699,65 @@ _RE_DA_UN_PASO = re.compile(
     r"busqueda\s+automatica|sintonizacion\s+automatica|escane\w+)\b")
 
 
+# Los codigos de bloqueo que hablan de identidad, y no de otra cosa. Son un
+# subconjunto de CODIGOS_DE_BLOQUEO: PRECONDICION_NO_CUMPLIDA o
+# LIMITE_DE_CONVERSACION frenan igual, pero no por quien es el cliente.
+CODIGOS_DE_IDENTIDAD = frozenset({
+    "IDENTIDAD_NO_VERIFICADA", "IDENTIDAD_NO_RESUELTA", "DATO_DEL_EQUIPO_NO_CARGADO"})
+
+
+def evento_identidad(herramienta, salida, codigo_error: str | None, sesion) -> dict | None:
+    """
+    Que paso con la identidad en esta llamada, clasificado para el embudo
+    (asistente.identidad_eventos). None si la llamada no tiene que ver.
+
+    FASE 1 DE "COMPLETAR EL CICLO DE IDENTIDAD" (23/09/2026). El motor ya frena
+    en codigo lo que necesita saber quien es el cliente; lo que pasa despues lo
+    decide el modelo, y ahi se pierde un tercio de las conversaciones (16 de
+    49 en 45 dias). Para arreglarlo primero hay que verlo, y la traza no
+    alcanza: la fila de la herramienta que verifica dice exito=true tanto si
+    encontro al cliente como si no --el resultado negativo es un dato, no un
+    error-- y ningun lado dice que esperaba el sistema tras un bloqueo.
+
+    Funcion pura y sin PII a proposito: entra el resultado ya calculado y la
+    sesion, sale vocabulario fijo. Ni la cedula ni el nombre pasan por aqui.
+    Por eso se puede afirmar sin base ni modelo (tests/test_embudo_identidad.py).
+    """
+    intentos = getattr(sesion, "intentos_verificacion_fallidos", None) if sesion else None
+    candidato = bool(sesion is not None and getattr(sesion, "id_cliente_pendiente", None))
+
+    if codigo_error in CODIGOS_DE_IDENTIDAD:
+        if codigo_error == "DATO_DEL_EQUIPO_NO_CARGADO":
+            # Ya sabemos quien es; lo que falta no lo tiene el cliente.
+            paso = "ninguno"
+        else:
+            paso = "espera_nombre" if candidato else "espera_cedula"
+        return {"etapa": "bloqueo", "motivo": codigo_error,
+                "siguiente_paso": paso, "intentos": intentos}
+
+    if herramienta is None or not isinstance(salida, dict):
+        return None
+
+    if getattr(herramienta, "verifica_identidad", False):
+        if salida.get("nombre_a_confirmar") or (candidato and not salida.get("motivo")):
+            return {"etapa": "verificacion_ok", "motivo": None,
+                    "siguiente_paso": "espera_nombre", "intentos": intentos}
+        motivo = salida.get("motivo") or salida.get("error") or "sin resultado"
+        etapa = "verificacion_ambigua" if motivo == "ambiguo" else "verificacion_fallo"
+        return {"etapa": etapa, "motivo": str(motivo)[:80],
+                "siguiente_paso": "espera_cedula", "intentos": intentos}
+
+    if getattr(herramienta, "confirma_identidad", False):
+        if salida.get("verificado"):
+            return {"etapa": "confirmacion_ok", "motivo": None,
+                    "siguiente_paso": "ninguno", "intentos": intentos}
+        motivo = salida.get("motivo") or salida.get("error") or "sin resultado"
+        return {"etapa": "confirmacion_fallo", "motivo": str(motivo)[:80],
+                "siguiente_paso": "espera_cedula", "intentos": intentos}
+
+    return None
+
+
 def falta_un_dato_de_la_sesion(herramienta: str, faltantes: list[str],
                                sesion) -> tuple[dict, str]:
     """
@@ -3953,6 +4012,9 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 "es_escritura": bool(herramienta and not herramienta.solo_lectura),
                 # Lo que separa "el codigo lo freno" de "el tercero fallo".
                 "es_bloqueo": codigo_error in CODIGOS_DE_BLOQUEO,
+                # Solo tiene valor en las llamadas que hablan de identidad; el
+                # resto va None y la persistencia lo ignora.
+                "identidad": evento_identidad(herramienta, salida, codigo_error, sesion),
             })
 
             historial.append({"role": "tool", "name": llamada.nombre,

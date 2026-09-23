@@ -994,6 +994,14 @@ def _efecto_del_turno(tenant: str, canal: str, id_sesion: str, estado: dict, que
     return permitido
 
 
+def eventos_identidad_de(llamadas) -> list[dict]:
+    """Los eventos del embudo de identidad que dejo el turno, listos para la
+    base: lo que motor.evento_identidad clasifico, mas la herramienta. Funcion
+    aparte para poder afirmarla sin hilo ni base."""
+    return [dict(l["identidad"], herramienta=l.get("herramienta"))
+            for l in (llamadas or []) if l and l.get("identidad")]
+
+
 def _quitar_respuesta_de_memoria(historial: list, desde: int | None = None) -> None:
     """Saca de la memoria lo que produjo el modelo en este turno y deja el
     mensaje del cliente. 'desde' es el largo antes del modelo; sin el, se corta
@@ -1881,6 +1889,12 @@ def _atender_turno(config, tenant: str, rol: str, id_sesion: str,
             try:
                 persistencia.registrar_llamadas_herramienta(
                     tenant, cid, rol, llamadas, profile_id=profile_id)
+                # Fase 1 del ciclo de identidad (23/09/2026): el embudo del
+                # turno va en la misma ida de auditoria, despues de responder,
+                # y con la misma regla -- perderlo no tumba la atencion.
+                eventos = eventos_identidad_de(llamadas)
+                if eventos:
+                    persistencia.registrar_eventos_identidad(tenant, cid, rol, eventos)
                 for llamada in llamadas:
                     # La accion quedo hecha pero sin comprobar: se anota para
                     # medirla en un turno siguiente, cuando pase el plazo.

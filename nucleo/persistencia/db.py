@@ -2985,6 +2985,35 @@ def registrar_llamadas_herramienta(tenant: str, conversation_id: str, rol: str,
         registrar("persistencia", "no se pudo guardar la traza", error=e)
 
 
+def registrar_eventos_identidad(tenant: str, conversation_id: str | None,
+                                rol: str, eventos: list[dict]) -> None:
+    """
+    El embudo de identidad del turno, en UNA ida a la base (Fase 1, 23/09/2026).
+
+    Cada evento viene ya clasificado por nucleo/modelo/motor.py::evento_identidad
+    (etapa, motivo de vocabulario fijo, siguiente_paso, intentos) mas la
+    herramienta que lo produjo. Aqui no se mira nada del cliente: no llega.
+
+    Misma regla que la traza: perder auditoria no puede tumbar la atencion.
+    Corre en el mismo hilo que registrar_llamadas_herramienta, despues de
+    responder.
+    """
+    if not eventos:
+        return
+    try:
+        with sesion(tenant) as (cur, org):
+            cur.executemany(
+                """insert into asistente.identidad_eventos
+                     (organization_id, conversation_id, rol, herramienta,
+                      etapa, motivo, siguiente_paso, intentos)
+                   values (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                [(org, conversation_id, rol, e.get("herramienta"),
+                  e["etapa"], e.get("motivo"), e.get("siguiente_paso"),
+                  e.get("intentos")) for e in eventos])
+    except Exception as e:
+        registrar("persistencia", "no se pudo guardar el embudo de identidad", error=e)
+
+
 def herramientas_de(tenant: str, conversation_id: str) -> list[dict]:
     """
     El registro de herramientas que uso el agente en una conversacion, en
