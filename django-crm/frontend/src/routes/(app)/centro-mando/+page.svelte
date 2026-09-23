@@ -32,8 +32,8 @@
   let seleccionado = $state(/** @type {any} */ (null));
   let escala = $state(1);
 
-  const ANCHO = 1600, ALTO = 1020;
-  const CX = ANCHO / 2, CY = 530, RX = 570, RY = 315;
+  const ANCHO = 1340, ALTO = 930;
+  const CX = ANCHO / 2, CY = 478, RX = 452, RY = 230;
 
   /* ---------------------------------------------------------------------
    * Imagenes. El motor no sabe (ni debe saber) con que dibujo se representa
@@ -99,7 +99,7 @@
      le toca a cada uno sobre el anillo. Con seis caben holgados; un tenant
      con diez los tendria encimados si el ancho fuera fijo. */
   const anchoEstacion = $derived(Math.max(
-    170, Math.min(320, (Math.PI * (RX + RY) / Math.max(agentes.length, 1)) * 0.74)));
+    175, Math.min(320, (Math.PI * (RX + RY) / Math.max(agentes.length, 1)) * 0.76)));
 
 
   /** Reparte los agentes en un anillo: dos, seis u once caben igual. */
@@ -147,6 +147,14 @@
   }
 
   function ajustar() {
+    const sala = document.querySelector('.sala');
+    if (sala) {
+      // Lo que queda de ventana por debajo de donde empieza la sala, menos un
+      // respiro. Medido y no calculado con una constante: el encabezado de la
+      // pagina cambia de alto segun el ancho.
+      const arriba = sala.getBoundingClientRect().top;
+      sala.style.height = Math.max(600, window.innerHeight - arriba - 12) + 'px';
+    }
     const caja = document.getElementById('escena');
     if (!caja) return;
     escala = Math.min(caja.clientWidth / ANCHO, caja.clientHeight / ALTO);
@@ -246,7 +254,7 @@
           <!-- servicios externos usados hoy, anclados al borde -->
           {#each servicios as s, i}
             <div class="servicio" class:fallando={s.fallos > 0}
-                 style="left:{i < 3 ? 24 : ANCHO - 236}px; top:{120 + (i % 3) * 84}px">
+                 style="left:{i < 3 ? 16 : ANCHO - 234}px; top:{96 + (i % 3) * 80}px">
               <div class="t">{s.herramienta}</div>
               <div class="d">{s.usos} usos · {ms(s.duracion_media_ms)}{s.fallos ? ` · ${s.fallos} fallos` : ''}</div>
             </div>
@@ -261,7 +269,10 @@
             </div>
           {/each}
 
-          <!-- agentes y placas -->
+          <!-- agentes y placas. La placa de un agente de la mitad de arriba
+               cuelga por ENCIMA de su pod: si cuelga por debajo invade el
+               nucleo, que esta justo ahi. Medido: 30 px de solape con el
+               agente de soporte, que es el de placa mas alta. -->
           {#each agentes as a, i}
             {@const p = posicion(i, agentes.length)}
             <button class="agente" style="--c:{colorDe(a)}; left:{p.x}px; top:{p.y}px"
@@ -270,7 +281,7 @@
               <img src={avatarDe(a)} alt="" class:trabaja={a.estado === 'procesando'} />
             </button>
 
-            <div class="placa" style="--c:{colorDe(a)}; width:{Math.max(168, anchoEstacion * 0.78)}px; left:{p.x}px; top:{p.y + anchoEstacion * 0.26}px">
+            <div class="placa" style="--c:{colorDe(a)}; width:{Math.max(168, anchoEstacion * 0.78)}px; left:{p.x}px; top:{p.y + anchoEstacion * (p.y < CY ? -0.30 : 0.26)}px; {p.y < CY ? 'transform: translate(-50%, -100%)' : ''}">
               <div class="fila1">
                 <span class="nombre">{a.nombre.replaceAll('_', ' ')}</span>
                 <span class="chip"><i class:vivo={a.estado === 'procesando'}></i>{ROTULO[a.estado] || a.estado}</span>
@@ -369,7 +380,7 @@
     background-image: radial-gradient(ellipse at 50% 0%, rgba(0,229,255,.16), transparent 62%);
     color: var(--texto);
     border: 1px solid var(--borde); border-radius: 14px; overflow: hidden;
-    display: flex; flex-direction: column; height: calc(100vh - 190px); min-height: 560px;
+    display: flex; flex-direction: column; min-height: 600px;
   }
   /* auto-fit y no un numero fijo de columnas: son ocho cifras y el ancho
      disponible depende del menu lateral. Con un numero fijo, la ultima se
@@ -399,7 +410,7 @@
     cursor: pointer; z-index: 2;
   }
   .agente img {
-    width: 92px; height: 92px; border-radius: 50%; object-fit: cover; display: block;
+    width: 104px; height: 104px; border-radius: 50%; object-fit: cover; display: block;
     border: 2px solid var(--c); box-shadow: 0 0 20px var(--c), 0 10px 18px rgba(0,0,0,.6);
     transition: box-shadow .3s;
   }
@@ -412,9 +423,9 @@
     padding: 8px 10px; backdrop-filter: blur(6px);
   }
   .placa .fila1 { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-  .placa .nombre { font-size: 11.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; line-height: 1.25; }
-  .placa .area { font-size: 9.5px; color: var(--texto2); margin-top: 2px; }
-  .placa .datos { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; font-family: ui-monospace, monospace; font-size: 9.5px; color: var(--texto2); }
+  .placa .nombre { font-size: 12.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; line-height: 1.25; }
+  .placa .area { font-size: 10.5px; color: var(--texto2); margin-top: 2px; }
+  .placa .datos { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; font-family: ui-monospace, monospace; font-size: 10.5px; color: var(--texto2); }
   .placa .datos b { color: var(--texto); }
   .placa .datos .ambar { color: #f59e0b; }
   .placa .datos .tool { color: var(--c); }
@@ -429,7 +440,7 @@
   .chip i.vivo { animation: latir 1.6s infinite; }
 
   .nucleo {
-    position: absolute; transform: translate(-50%, -50%); width: 190px; height: 190px; border-radius: 50%;
+    position: absolute; transform: translate(-50%, -50%); width: 172px; height: 172px; border-radius: 50%;
     background: rgba(3,10,23,.9); border: 1px solid rgba(0,229,255,.4);
     box-shadow: 0 0 40px rgba(0,229,255,.28), inset 0 0 26px rgba(0,229,255,.12);
     display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;
@@ -493,19 +504,19 @@
   .identidad .reloj em { color: var(--texto3); font-style: normal; }
 
   .placa .haciendo {
-    font-size: 10px; color: var(--c); margin-top: 4px; line-height: 1.35;
+    font-size: 11px; color: var(--c); margin-top: 4px; line-height: 1.35;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
   }
 
   /* Un servicio externo con lo que se le pidio hoy. Anclado al borde y nunca
      sobre una estacion: es contexto, no protagonista. */
   .servicio {
-    position: absolute; z-index: 2; width: 212px; padding: 7px 10px; border-radius: 9px;
+    position: absolute; z-index: 2; width: 196px; padding: 7px 10px; border-radius: 9px;
     background: rgba(4,21,37,.92); border: 1px solid rgba(0,229,255,.3);
     font-family: ui-monospace, monospace; line-height: 1.45;
   }
-  .servicio .t { font-size: 10px; color: #00e5ff; font-weight: 700; letter-spacing: .06em; }
-  .servicio .d { font-size: 9px; color: var(--texto2); }
+  .servicio .t { font-size: 11px; color: #00e5ff; font-weight: 700; letter-spacing: .06em; }
+  .servicio .d { font-size: 10px; color: var(--texto2); }
   .servicio.fallando { border-color: rgba(239,68,68,.55); }
   .servicio.fallando .t { color: #ef4444; }
 
