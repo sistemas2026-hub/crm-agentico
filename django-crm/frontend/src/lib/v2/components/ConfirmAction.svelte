@@ -18,15 +18,26 @@
    *   label?: string,
    *   confirmLabel?: string,
    *   explain?: string,
-   *   hidden?: Record<string, string>
+   *   hidden?: Record<string, string>,
+   *   icono?: import('svelte').Snippet,
+   *   destructiva?: boolean,
+   *   disabled?: boolean,
+   *   titulo?: string
    * }} */
   let {
     action,
     label = 'Delete',
     confirmLabel = 'Confirm',
     explain = '',
-    hidden = {}
+    hidden = {},
+    icono = undefined,
+    destructiva = false,
+    disabled = false,
+    titulo = ''
   } = $props();
+
+  // El icono reemplaza al texto SOLO en reposo. Una vez armado vuelve el
+  // texto: ahi es donde se explica que va a pasar, y eso no se dibuja.
 
   let armed = $state(false);
   let busy = $state(false);
@@ -59,8 +70,21 @@
       Cancelar
     </button>
   </form>
+{:else if icono}
+  <button
+    class="v2-btn v2-btn-sm v2-btn-icono {destructiva ? 'es-destructiva' : ''}"
+    type="button"
+    {disabled}
+    onclick={() => (armed = true)}
+    aria-label={titulo || label}
+    title={titulo || label}
+  >
+    {@render icono()}
+  </button>
 {:else}
-  <button class="v2-btn v2-btn-sm" type="button" onclick={() => (armed = true)}>{label}</button>
+  <button class="v2-btn v2-btn-sm" type="button" {disabled} onclick={() => (armed = true)}>
+    {label}
+  </button>
 {/if}
 
 <style>

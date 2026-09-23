@@ -1,7 +1,17 @@
 import { fail } from '@sveltejs/kit';
-import { listTeam, inviteUser, setRole, setStatus, updateUser, ROLES, perfilPorCorreo,
-  casosDe, reasignarCaso, definirClave, eliminarPersona }
-  from '$lib/server/v2/team.js';
+import {
+  listTeam,
+  inviteUser,
+  setRole,
+  setStatus,
+  updateUser,
+  ROLES,
+  perfilPorCorreo,
+  casosDe,
+  reasignarCaso,
+  definirClave,
+  eliminarPersona
+} from '$lib/server/v2/team.js';
 import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
 import { readableError } from '$lib/server/v2/form-errors.js';
@@ -50,8 +60,7 @@ export async function load({ cookies, fetch }) {
         identidades = datos.identidades ?? {};
         externos = datos.candidatos_externos ?? [];
         etiquetaExterna = datos.sistema_externo ?? '';
-      }
-      else console.warn('[equipo] el asistente respondio', resp.status, datos?.error ?? '');
+      } else console.warn('[equipo] el asistente respondio', resp.status, datos?.error ?? '');
     } catch (/** @type {any} */ err) {
       // Visible a proposito: un catch mudo aca deja la pantalla sin selector
       // de area y sin ninguna pista de por que. Ya paso una vez.
@@ -61,8 +70,16 @@ export async function load({ cookies, fetch }) {
   } else {
     console.warn('[equipo] falta PRIVATE_ASISTENTE_URL o PRIVATE_ASISTENTE_TENANT');
   }
-  return { ...equipo, areas, areasTrabajo, externos, etiquetaExterna,
-           asignaciones, areasPorPersona, identidades };
+  return {
+    ...equipo,
+    areas,
+    areasTrabajo,
+    externos,
+    etiquetaExterna,
+    asignaciones,
+    areasPorPersona,
+    identidades
+  };
 }
 
 /**
@@ -318,7 +335,8 @@ export const actions = {
         // 'POST /users/' no devuelve el perfil que creo -- hay que buscarlo.
         const profileId = await perfilPorCorreo({ cookies }, email);
         if (!profileId) {
-          avisoArea = 'Se creó la persona, pero no se pudo ubicar su perfil para asignarle el área.';
+          avisoArea =
+            'Se creó la persona, pero no se pudo ubicar su perfil para asignarle el área.';
         } else {
           const resp = await fetch(`/api/agentes/asignaciones/${encodeURIComponent(profileId)}`, {
             method: 'PUT',
@@ -349,7 +367,8 @@ export const actions = {
         );
         if (fila?.user_id) await setStatus({ cookies }, fila.user_id, 'Inactive');
       } catch (/** @type {any} */ err) {
-        avisoArea = (avisoArea ? avisoArea + ' ' : '') +
+        avisoArea =
+          (avisoArea ? avisoArea + ' ' : '') +
           'La persona quedó activa: no se pudo dejarla inactiva.';
       }
     }
@@ -445,7 +464,18 @@ export const actions = {
     const persona = form.get('persona')?.toString() || '';
     if (!userId) return fail(400, { clave: { error: '¿A quién?' } });
 
-    const nueva = generarClave();
+    // La escribe quien la va a dictar, o la genera el servidor.
+    //
+    // Escribirla sirve cuando hay que dársela por teléfono a alguien que está
+    // en la calle: una clave generada de dieciséis caracteres con guiones se
+    // dicta mal y se anota peor. Generarla sigue siendo la opción por defecto
+    // porque nadie elige una contraseña mejor que el azar.
+    //
+    // Lo que se acepta como válida NO se decide acá: el servidor tiene la
+    // regla y devuelve el motivo cuando dice que no. Escribirla dos veces es
+    // garantizar que algún día no coincidan.
+    const elegida = form.get('nueva')?.toString().trim() || '';
+    const nueva = elegida || generarClave();
     try {
       await definirClave({ cookies }, userId, nueva);
     } catch (/** @type {any} */ err) {
@@ -459,7 +489,12 @@ export const actions = {
             : readableError(err, 'No se pudo cambiar esa contraseña.')
       });
     }
-    return { claveDe: persona || userId, claveNueva: nueva };
+    // Si la eligió el administrador no se la repetimos en pantalla: ya la
+    // sabe, y mostrarla la deja a la vista de quien pase por detrás. La
+    // generada sí, porque es la única vez que alguien puede leerla.
+    return elegida
+      ? { claveDe: persona || userId, clavePuesta: true }
+      : { claveDe: persona || userId, claveNueva: nueva };
   },
 
   /**

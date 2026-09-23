@@ -330,6 +330,43 @@
   font-size: calc(var(--v2-fs) - 2.6px); /* 11.8px */
   border-radius: 7px;
 }
+/* Un botón que es solo un icono.
+   
+   Cuadrado y sin texto. Cada uno tiene que llevar `aria-label` con la acción
+   completa y `title` con lo mismo: sin eso la fila queda muda para quien la
+   navega con lector de pantalla, y ambigua para quien no reconoce el dibujo.
+   Un icono nunca es evidente por sí solo -- la papelera lo parece y la llave
+   no, y las dos necesitan su nombre. */
+.v2-btn-icono {
+  padding: 0;
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.v2-btn-icono svg {
+  display: block;
+}
+/* La destructiva se distingue por color, no solo por el dibujo: a 15 píxeles
+   una papelera y una llave se parecen más de lo que uno cree. */
+.v2-btn-icono.es-destructiva {
+  color: var(--v2-rust);
+}
+.v2-btn-icono.es-destructiva:hover:not(:disabled) {
+  border-color: var(--v2-rust);
+  background: color-mix(in srgb, var(--v2-rust) 8%, transparent);
+}
+
+/* Un campo dentro de una fila de tabla, donde no hay alto para el normal. */
+.v2-input-sm {
+  width: auto;
+  padding: 5px 9px;
+  font-size: calc(var(--v2-fs) - 2px);
+  border-radius: 7px;
+}
+
 /* Secondary with actual contrast. Plain .v2-btn borrows --v2-line, which is a
    hairline meant for table rules: on a card it reads as a disabled control, so
    the real action of a screen disappeared into the background. This is still

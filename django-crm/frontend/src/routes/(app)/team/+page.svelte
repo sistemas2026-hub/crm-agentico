@@ -24,6 +24,7 @@
   import Pill from '$lib/v2/components/Pill.svelte';
   import Avatar from '$lib/v2/components/Avatar.svelte';
   import NextAction from '$lib/v2/components/NextAction.svelte';
+  import ClaveDePersona from '$lib/v2/components/ClaveDePersona.svelte';
   import ConfirmAction from '$lib/v2/components/ConfirmAction.svelte';
   import { count, relativeDays } from '$lib/v2/format.js';
   import { ROLE_LABEL, ROLE_TONE } from '$lib/v2/enums.js';
@@ -207,7 +208,9 @@
         label="Nunca inició sesión"
         value={count(data.totals.never_signed_in)}
         tone={data.totals.never_signed_in ? 'clay' : 'slate'}
-        detail={data.totals.never_signed_in ? 'Creado, todavía sin entrar' : 'Todos iniciaron sesión'}
+        detail={data.totals.never_signed_in
+          ? 'Creado, todavía sin entrar'
+          : 'Todos iniciaron sesión'}
       />
       <StatCard label="Desactivados" value={count(data.totals.deactivated)} tone="slate" />
     </div>
@@ -368,10 +371,7 @@
       <!-- El area fallo pero la persona SI se creo: se avisa sin teñir de
            error toda la invitacion, y se dice donde arreglarlo. -->
       {#if form?.avisoArea}
-        <p
-          class="v2-sub"
-          style="color:var(--v2-rust);font-size:12.5px;margin:0 0 10px"
-        >
+        <p class="v2-sub" style="color:var(--v2-rust);font-size:12.5px;margin:0 0 10px">
           {form.avisoArea} Podés asignársela desde Agentes → Asignaciones.
         </p>
       {/if}
@@ -388,8 +388,8 @@
             Se muestra una sola vez
           </p>
           <p style="margin:0 0 8px;font-size:13px">
-            {form.invited} ya puede entrar con ese correo. Pasale esta clave y pedile que la cambie
-            al entrar.
+            {form.invited} ya puede entrar con ese correo. Pasale esta clave y pedile que la cambie al
+            entrar.
           </p>
           <code
             style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:15px;letter-spacing:.04em;border:1px solid var(--v2-line,#ddd);border-radius:5px;padding:5px 9px;display:inline-block"
@@ -422,6 +422,19 @@
         </div>
       {/if}
 
+      <!-- La puso el administrador: no se repite en pantalla. Ya la sabe, y
+           dejarla a la vista la expone a quien pase por detrás. Lo que sí hay
+           que decir es que las sesiones se cerraron, porque eso no se ve. -->
+      {#if form?.clavePuesta}
+        <p
+          class="v2-sub"
+          style="color:var(--v2-moss);font-size:12.5px;margin:0 0 16px;font-weight:550"
+        >
+          Contraseña cambiada para {form.claveDe}. Sus sesiones abiertas se cerraron: va a tener que
+          entrar de nuevo con la clave que le diste.
+        </p>
+      {/if}
+
       {#if form?.claveError}
         <div style="margin-bottom:16px">
           <NextAction label="No se cambió esa contraseña" text={form.claveError} tone="rust" />
@@ -442,8 +455,8 @@
           class="v2-sub"
           style="color:var(--v2-moss);font-size:12.5px;margin:0 0 16px;font-weight:550"
         >
-          {form.invited} ya es miembro. Aparece abajo como “nunca” inició sesión hasta que entre con
-          ese correo.
+          {form.invited} ya es miembro. Aparece abajo como “nunca” inició sesión hasta que entre con ese
+          correo.
         </p>
       {:else if form?.error}
         <div style="margin-bottom:16px">
@@ -517,8 +530,8 @@
                         />
                       {:else}
                         <span class="v2-table-primary">
-                          {m.name}{#if m.is_you}<span class="v2-sub" style="font-weight:400">,
-                              vos</span
+                          {m.name}{#if m.is_you}<span class="v2-sub" style="font-weight:400"
+                              >, vos</span
                             >{/if}
                         </span>
                         <span class="v2-table-secondary" style="display:block">{m.email}</span>
@@ -666,7 +679,11 @@
                       <input type="hidden" name="eraActivo" value={m.is_active ? 'si' : 'no'} />
                       <input type="hidden" name="area" value={borrador.area} />
                       <input type="hidden" name="externo" value={borrador.externo} />
-                      <input type="hidden" name="externo_nombre" value={nombreExternoDe(borrador.externo)} />
+                      <input
+                        type="hidden"
+                        name="externo_nombre"
+                        value={nombreExternoDe(borrador.externo)}
+                      />
                       {#each borrador.agentes as a (a)}
                         <input type="hidden" name="agentes" value={a} />
                       {/each}
@@ -691,12 +708,32 @@
                     <span
                       style="display:inline-flex;gap:6px;justify-content:flex-end;flex-wrap:wrap"
                     >
+                      <!-- Iconos y no texto.
+
+                           Cinco acciones con su nombre completo ocupaban dos
+                           renglones por fila y empujaban la tabla a lo ancho.
+                           Cada uno lleva `aria-label` y `title` con la acción
+                           entera: un icono no se explica solo, y menos el de
+                           una llave o el de un escudo. El texto vuelve en
+                           cuanto la acción se arma, que es donde hay que
+                           leer la consecuencia. -->
                       <button
-                        class="v2-btn v2-btn-sm"
+                        class="v2-btn v2-btn-sm v2-btn-icono"
                         disabled={busy || editando !== null}
                         onclick={() => editar(m)}
+                        aria-label={`Editar a ${m.name}`}
+                        title="Editar"
                       >
-                        Editar
+                        <!-- Un lápiz. -->
+                        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+                          <path
+                            d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17v3Z"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="1.7"
+                            stroke-linejoin="round"
+                          />
+                        </svg>
                       </button>
                       <!-- Role toggle. Two roles, so one button naming the
                            destination is clearer than a picker. The last admin
@@ -709,13 +746,29 @@
                           value={m.role === 'ADMIN' ? 'USER' : 'ADMIN'}
                         />
                         <button
-                          class="v2-btn v2-btn-sm"
+                          class="v2-btn v2-btn-sm v2-btn-icono"
                           disabled={busy || (m.role === 'ADMIN' && isLastAdmin)}
+                          aria-label={m.role === 'ADMIN'
+                            ? `Hacer miembro a ${m.name}`
+                            : `Hacer administrador a ${m.name}`}
                           title={m.role === 'ADMIN' && isLastAdmin
                             ? 'La organización debe mantener al menos un administrador'
-                            : ''}
+                            : m.role === 'ADMIN'
+                              ? 'Hacer miembro'
+                              : 'Hacer administrador'}
                         >
-                          {m.role === 'ADMIN' ? 'Hacer miembro' : 'Hacer administrador'}
+                          <!-- Un escudo. Lleno cuando ya es administrador, para
+                               que se vea de un vistazo quién lo es sin leer la
+                               columna de rol. -->
+                          <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+                            <path
+                              d="M12 3l7 3v5.5c0 4.2-2.9 7.7-7 9-4.1-1.3-7-4.8-7-9V6l7-3Z"
+                              fill={m.role === 'ADMIN' ? 'currentColor' : 'none'}
+                              stroke="currentColor"
+                              stroke-width="1.7"
+                              stroke-linejoin="round"
+                            />
+                          </svg>
                         </button>
                       </form>
                       <!-- Activate / deactivate. The last active admin cannot
@@ -728,27 +781,46 @@
                           value={m.is_active ? 'Inactive' : 'Active'}
                         />
                         <button
-                          class="v2-btn v2-btn-sm"
+                          class="v2-btn v2-btn-sm v2-btn-icono {m.is_active
+                            ? 'es-destructiva'
+                            : ''}"
                           disabled={busy || (m.is_active && isLastAdmin)}
+                          aria-label={m.is_active
+                            ? `Desactivar a ${m.name}`
+                            : `Reactivar a ${m.name}`}
                           title={m.is_active && isLastAdmin
                             ? 'La organización debe mantener al menos un administrador activo'
-                            : ''}
-                          style={m.is_active ? 'color:var(--v2-rust)' : ''}
+                            : m.is_active
+                              ? 'Desactivar'
+                              : 'Reactivar'}
                         >
-                          {m.is_active ? 'Desactivar' : 'Reactivar'}
+                          <!-- Un interruptor. -->
+                          <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+                            <path
+                              d="M12 3v8"
+                              fill="none"
+                              stroke="currentColor"
+                              stroke-width="1.8"
+                              stroke-linecap="round"
+                            />
+                            <path
+                              d="M7.1 6.6a8 8 0 1 0 9.8 0"
+                              fill="none"
+                              stroke="currentColor"
+                              stroke-width="1.7"
+                              stroke-linecap="round"
+                            />
+                          </svg>
                         </button>
                       </form>
-                      <!-- Contraseña nueva. Dos clics, porque no es
-                           reversible y porque le cierra las sesiones
-                           abiertas: si esa persona esta trabajando, se cae.
-                           La clave la genera el servidor y se muestra una
-                           sola vez, arriba. -->
-                      <ConfirmAction
-                        action="?/clave"
-                        label="Contraseña"
-                        confirmLabel="Generar una nueva"
-                        explain="Se le cierran las sesiones abiertas."
-                        hidden={{ userId: m.user_id, persona: m.name }}
+                      <!-- Contraseña. Se puede escribir una o dejar que la
+                           genere el servidor; el componente lo explica. Dos
+                           pasos, porque le cierra las sesiones abiertas: si
+                           esa persona está trabajando, se cae. -->
+                      <ClaveDePersona
+                        userId={m.user_id}
+                        persona={m.name}
+                        disabled={busy || editando !== null}
                       />
                       <!-- Eliminar NO es desactivar, y casi nunca es lo que
                            se quiere: el boton de al lado deja a la persona
@@ -759,10 +831,27 @@
                       <ConfirmAction
                         action="?/eliminar"
                         label="Eliminar"
+                        titulo={`Eliminar a ${m.name}`}
                         confirmLabel="Eliminar definitivamente"
                         explain="Se borra la cuenta. Desactivar conserva su historial."
                         hidden={{ userId: m.user_id, persona: m.name }}
-                      />
+                        destructiva
+                        disabled={busy || editando !== null}
+                      >
+                        {#snippet icono()}
+                          <!-- Una papelera. -->
+                          <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+                            <path
+                              d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"
+                              fill="none"
+                              stroke="currentColor"
+                              stroke-width="1.7"
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                            />
+                          </svg>
+                        {/snippet}
+                      </ConfirmAction>
                     </span>
                   {/if}
                 </td>
