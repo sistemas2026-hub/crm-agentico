@@ -1,6 +1,14 @@
 <script>
   import { enhance } from '$app/forms';
   import { invalidateAll } from '$app/navigation';
+  import {
+    comunDeEvidencia,
+    fuentesDeEvidencia,
+    baseDePrioridad,
+    contrasteDeEstados,
+    haceCuanto,
+    expiraEn
+  } from '$lib/v2/supervisor-noc-detalle.js';
   import './supervisor-noc.css';
 
   /** @type {{ data: any, form: any }} */
@@ -170,6 +178,27 @@
       await invalidateAll();
     };
   };
+
+
+  /** Donde esta la propuesta abierta dentro de la lista visible. */
+  const posicion = $derived.by(() => {
+    const indice = visibles.findIndex((/** @type {any} */ p) => p.id === abierta);
+    return { indice, total: visibles.length };
+  });
+
+  /** Salta a la anterior o la siguiente sin cerrar el panel. */
+  function irA(/** @type {number} */ paso) {
+    const destino = visibles[posicion.indice + paso];
+    if (destino) abrirDetalle(destino.id);
+  }
+
+  // Las derivaciones de la ficha viven en $lib/v2/supervisor-noc-detalle.js:
+  // son reglas de presentacion con casos borde, y probarlas exige poder
+  // llamarlas sin montar el componente.
+  const comun = $derived(comunDeEvidencia(detalle?.evidencia));
+  const fuentes = $derived(fuentesDeEvidencia(detalle?.evidencia));
+  const basePrioridad = $derived(baseDePrioridad(detalle?.evidencia));
+  const contraste = $derived(contrasteDeEstados(detalle?.evidencia));
 
   const alDecidir = () => async (/** @type {any} */ { update }) => {
     revisando = null;
@@ -719,15 +748,41 @@
         if (e.target === e.currentTarget) cerrarDetalle();
       }}
     >
-      <aside class="snoc-drawer" aria-label="Detalle de la propuesta">
+      <aside class="snoc-drawer" aria-label="Detalle del hallazgo">
+        <!-- 1. ENCABEZADO -->
         <div class="snoc-drawer-cabecera">
-          <div class="snoc-pila-xs">
+          <div class="snoc-pila-xs" style="min-width:0;">
             <span class="snoc-label-sm snoc-tenue" style="text-transform:uppercase;">Detalle del hallazgo</span>
             <h3 class="snoc-h4">{detalle?.tipo_senal_display ?? 'Cargando…'}</h3>
           </div>
-          <button class="snoc-btn" type="button" onclick={cerrarDetalle} aria-label="Cerrar">
-            <span class="snoc-icono" style="font-size:18px;">close</span>
-          </button>
+          <div class="snoc-fila" style="gap:var(--snoc-xs);">
+            {#if posicion.total > 1}
+              <button
+                class="snoc-btn"
+                type="button"
+                onclick={() => irA(-1)}
+                disabled={posicion.indice <= 0 || cargandoDetalle}
+                aria-label="Hallazgo anterior"
+              >
+                <span class="snoc-icono" style="font-size:16px;">chevron_left</span>
+              </button>
+              <span class="snoc-mono-sm snoc-tenue" style="white-space:nowrap;">
+                {posicion.indice + 1} / {posicion.total}
+              </span>
+              <button
+                class="snoc-btn"
+                type="button"
+                onclick={() => irA(1)}
+                disabled={posicion.indice >= posicion.total - 1 || cargandoDetalle}
+                aria-label="Hallazgo siguiente"
+              >
+                <span class="snoc-icono" style="font-size:16px;">chevron_right</span>
+              </button>
+            {/if}
+            <button class="snoc-btn" type="button" onclick={cerrarDetalle} aria-label="Cerrar">
+              <span class="snoc-icono" style="font-size:18px;">close</span>
+            </button>
+          </div>
         </div>
 
         <div class="snoc-drawer-cuerpo">
@@ -742,119 +797,121 @@
               <span class="snoc-body">{errorDetalle}</span>
             </div>
           {:else if detalle}
-            <div class="snoc-pila-xs">
-              <span class="snoc-label-sm snoc-tenue" style="text-transform:uppercase;">Identificación</span>
-              <div class="snoc-meta">
-                <div><span>ID de propuesta:</span><span class="snoc-mono-sm">{detalle.id}</span></div>
-                <div><span>Tipo de señal:</span><span class="snoc-body-sm">{detalle.tipo_senal_display}</span></div>
-                <div><span>Clave técnica:</span><span class="snoc-mono-sm">{detalle.tipo_senal}</span></div>
-                <div>
-                  <span>Estado:</span>
-                  <span class="snoc-insignia {estadoDe(detalle.estado).clase}">{estadoDe(detalle.estado).texto}</span>
-                </div>
-                <div><span>Prioridad:</span><span class="snoc-body-sm" style="font-weight:600;">{detalle.prioridad}</span></div>
-                <div>
-                  <span>Nivel de autonomía:</span>
-                  <span class="snoc-mono-sm">
-                    {detalle.nivel_autonomia_requerido} · {NIVELES[detalle.nivel_autonomia_requerido] ?? '—'}
-                  </span>
-                </div>
-                <div><span>Creada:</span><span class="snoc-mono-sm">{fecha(detalle.created_at)}</span></div>
-                <div><span>Expira:</span><span class="snoc-mono-sm">{fecha(detalle.expira_en)}</span></div>
-                <div>
-                  <span>Alcance de la etapa:</span>
-                  <span class="snoc-body-sm">
-                    {detalle.dentro_del_alcance === false ? 'Fuera del alcance vigente' : 'Dentro del alcance'}
-                  </span>
-                </div>
-              </div>
+            <!-- Modo: visible siempre, no en un desplegable -->
+            <div class="snoc-modo">
+              <span class="snoc-icono snoc-primario" style="font-size:15px;">visibility</span>
+              <span class="snoc-tag">Observación · Sin ejecución · Revisión humana</span>
             </div>
 
-            <div class="snoc-pila-xs">
-              <span class="snoc-label-sm snoc-tenue" style="text-transform:uppercase;">Origen</span>
-              <div class="snoc-meta">
-                <div><span>Tipo de origen:</span><span class="snoc-body-sm">{detalle.origen_tipo}</span></div>
-                <div><span>ID de origen:</span><span class="snoc-mono-sm">{detalle.origen_id}</span></div>
-                <div><span>Organización:</span><span class="snoc-body-sm">{data.org ?? '—'}</span></div>
+            <!-- El contraste que ES el hallazgo. Solo si la evidencia lo trae. -->
+            {#if contraste}
+              <div class="snoc-contraste">
+                <div class="snoc-contraste-lado">
+                  <span class="snoc-label-sm snoc-tenue" style="text-transform:uppercase;">En el CRM</span>
+                  <span class="snoc-h4">{contraste.crm}</span>
+                </div>
+                <span class="snoc-contraste-vs">≠</span>
+                <div class="snoc-contraste-lado">
+                  <span class="snoc-label-sm snoc-tenue" style="text-transform:uppercase;">En el proveedor</span>
+                  <span class="snoc-h4">{contraste.proveedor}</span>
+                </div>
               </div>
-            </div>
+            {/if}
 
-            <div class="snoc-generado">
-              <span class="snoc-icono snoc-primario" style="font-size:18px;">psychology</span>
-              <div class="snoc-pila-xs">
-                <span class="snoc-label-sm" style="text-transform:uppercase;">Generado por</span>
-                <span class="snoc-body-sm"><strong>Supervisor NOC IA</strong> · detección automática</span>
-                <span class="snoc-mono-sm snoc-tenue">
-                  Ninguna persona propuso esto. La auditoría del registro no lleva usuario, y así se reconoce el origen
-                  IA.
+            <!-- Los cinco datos de cabecera, en una tira compacta -->
+            <div class="snoc-tira">
+              <span class="snoc-tira-item">
+                <span class="snoc-label-sm snoc-tenue">Estado</span>
+                <span class="snoc-insignia {estadoDe(detalle.estado).clase}">{estadoDe(detalle.estado).texto}</span>
+              </span>
+              <span class="snoc-tira-item">
+                <span class="snoc-label-sm snoc-tenue">Prioridad</span>
+                <span class="snoc-mono">
+                  {detalle.prioridad}{#if basePrioridad}<span class="snoc-tenue"> · {basePrioridad}</span>{/if}
                 </span>
-              </div>
+              </span>
+              <span class="snoc-tira-item">
+                <span class="snoc-label-sm snoc-tenue">Autonomía</span>
+                <span class="snoc-mono">{detalle.nivel_autonomia_requerido} · {NIVELES[detalle.nivel_autonomia_requerido] ?? '—'}</span>
+              </span>
+              <span class="snoc-tira-item">
+                <span class="snoc-label-sm snoc-tenue">Detectado</span>
+                <span class="snoc-mono">{haceCuanto(detalle.created_at)}</span>
+              </span>
+              <span class="snoc-tira-item">
+                <span class="snoc-label-sm snoc-tenue">Expira</span>
+                <span class="snoc-mono">{expiraEn(detalle.expira_en)}</span>
+              </span>
             </div>
 
-            <div class="snoc-pila-xs">
-              <span class="snoc-label-sm snoc-tenue" style="text-transform:uppercase;">Acción propuesta</span>
-              <p class="snoc-body-lg snoc-accion">{detalle.accion_propuesta}</p>
-            </div>
-
-            <div class="snoc-pila-xs">
-              <span class="snoc-label-sm snoc-tenue" style="text-transform:uppercase;">Análisis del Supervisor</span>
-
-              <div class="snoc-analisis snoc-observado">
-                <div class="snoc-fila" style="gap:var(--snoc-xs);">
-                  <span class="snoc-insignia snoc-insignia-variante">Observado</span>
-                  <span class="snoc-mono-sm snoc-secundario">
-                    {(detalle.evidencia ?? []).length} observación{(detalle.evidencia ?? []).length === 1 ? '' : 'es'}
-                  </span>
+            <!-- 2. CONTEXTO OPERATIVO -->
+            <section class="snoc-pila-xs">
+              <span class="snoc-label-sm snoc-tenue" style="text-transform:uppercase;">Contexto operativo</span>
+              <div class="snoc-meta">
+                <div>
+                  <span>Origen:</span>
+                  <span class="snoc-body-sm">{detalle.origen_tipo} · {String(detalle.origen_id).slice(0, 8)}</span>
                 </div>
-                {#if Array.isArray(detalle.evidencia) && detalle.evidencia.length}
-                  <ul class="snoc-evidencia">
-                    {#each detalle.evidencia as e, i (i)}
-                      <li>
-                        <span class="snoc-body">{e.dato}</span>
-                        <div class="snoc-mono-sm snoc-tenue">
-                          <span title="De dónde salió el dato">{e.fuente ?? 'sin fuente'}</span>
-                          {#if e.id}<span> · id {e.id}</span>{/if}
-                          {#if e.observado_en}
-                            <span title="Cuándo se LEYÓ el dato, no cuándo ocurrió el hecho">
-                              · leído {fecha(e.observado_en)}
-                            </span>
-                          {/if}
-                        </div>
-                      </li>
-                    {/each}
-                  </ul>
-                {:else}
-                  <p class="snoc-body snoc-secundario" style="margin:0;">Sin observaciones registradas.</p>
+                <div><span>Organización:</span><span class="snoc-body-sm">{data.org ?? '—'}</span></div>
+                <div>
+                  <span>Responsable sugerido:</span>
+                  <span class="snoc-body-sm">{detalle.responsable_sugerido_email ?? 'Ninguno'}</span>
+                </div>
+                {#if detalle.impacto}
+                  <div style="grid-column:1 / -1;">
+                    <span>Impacto operativo:</span><span class="snoc-body-sm">{detalle.impacto}</span>
+                  </div>
                 {/if}
               </div>
+              {#if detalle.origen_tipo === 'case'}
+                <a class="snoc-btn" href="/tickets/{detalle.origen_id}" style="align-self:flex-start;">
+                  <span class="snoc-icono" style="font-size:14px;">open_in_new</span>
+                  Ver caso en el CRM
+                </a>
+              {/if}
+              <span class="snoc-mono-sm snoc-tenue">
+                El SLA, la última actividad, el último compromiso y la siguiente verificación no llegan en esta
+                respuesta: el detalle de la propuesta no los incluye.
+              </span>
+            </section>
 
-              <div class="snoc-analisis snoc-inferido">
-                <div class="snoc-fila" style="gap:var(--snoc-xs);">
-                  <span class="snoc-insignia snoc-insignia-primaria">Motivo</span>
-                  <span class="snoc-mono-sm snoc-secundario">Regla de análisis, calculada en código</span>
-                </div>
+            <!-- 3. ANÁLISIS DEL SUPERVISOR -->
+            <section class="snoc-analisis-caja">
+              <div class="snoc-fila" style="gap:var(--snoc-xs);">
+                <span class="snoc-icono snoc-primario" style="font-size:18px;">psychology</span>
+                <span class="snoc-label" style="text-transform:uppercase; letter-spacing:0.06em;">
+                  Análisis del Supervisor NOC IA
+                </span>
+              </div>
+
+              <div class="snoc-pila-xs">
+                <span class="snoc-label-sm snoc-tenue" style="text-transform:uppercase;">Situación identificada</span>
+                <p class="snoc-body" style="margin:0;">{detalle.tipo_senal_display}</p>
+              </div>
+
+              <div class="snoc-pila-xs">
+                <span class="snoc-label-sm snoc-tenue" style="text-transform:uppercase;">Evaluación</span>
                 <p class="snoc-body" style="margin:0;">{detalle.motivo || 'Sin motivo registrado.'}</p>
               </div>
 
-              {#if detalle.impacto}
-                <div class="snoc-analisis snoc-faltante">
-                  <div class="snoc-fila" style="gap:var(--snoc-xs);">
-                    <span class="snoc-insignia">Impacto</span>
-                  </div>
-                  <p class="snoc-body" style="margin:0;">{detalle.impacto}</p>
-                </div>
-              {/if}
+              <div class="snoc-pila-xs">
+                <span class="snoc-label-sm snoc-tenue" style="text-transform:uppercase;">
+                  Sugerencia del Supervisor
+                </span>
+                <p class="snoc-body-lg snoc-accion" style="margin:0;">{detalle.accion_propuesta}</p>
+                <span class="snoc-mono-sm snoc-tenue">
+                  Es una recomendación, no una decisión ni una acción hecha. La decide una persona.
+                </span>
+              </div>
 
-              {#if detalle.tipo_senal === 'dato_incompleto'}
-                <div class="snoc-analisis snoc-faltante">
-                  <div class="snoc-fila" style="gap:var(--snoc-xs);">
-                    <span class="snoc-insignia snoc-insignia-error">Datos faltantes</span>
-                    <span class="snoc-mono-sm snoc-error-txt">Brecha de información operacional</span>
+              {#if fuentes.length}
+                <div class="snoc-pila-xs">
+                  <span class="snoc-label-sm snoc-tenue" style="text-transform:uppercase;">Información analizada</span>
+                  <div class="snoc-envuelve">
+                    {#each fuentes as f (f)}
+                      <span class="snoc-insignia snoc-insignia-neutra">{f}</span>
+                    {/each}
                   </div>
-                  <p class="snoc-body" style="margin:0;">
-                    Esta señal nombra objetos concretos a los que les falta un campo concreto. No es un comodín: se
-                    emite solo cuando el dato ausente se puede nombrar.
-                  </p>
                 </div>
               {/if}
 
@@ -864,43 +921,185 @@
                   <strong>Nota de integridad:</strong> nunca se presenta una inferencia como hecho consumado.
                 </span>
               </div>
-            </div>
+            </section>
 
-            <div class="snoc-pila-xs">
-              <span class="snoc-label-sm snoc-tenue" style="text-transform:uppercase;">Trazabilidad</span>
-              <div class="snoc-meta">
-                <div>
-                  <span>Revisada por:</span>
-                  <span class="snoc-body-sm">{detalle.revisado_por_email ?? 'Todavía nadie'}</span>
+            <!-- 9. ACCIONES -->
+            <section class="snoc-acciones">
+              {#if detalle.estado === 'propuesta'}
+                <span class="snoc-label-sm snoc-tenue" style="text-transform:uppercase;">Decisión</span>
+                <input
+                  class="snoc-campo"
+                  bind:value={comentario}
+                  placeholder="Motivo (obligatorio para rechazar o cancelar)"
+                />
+                <div class="snoc-envuelve">
+                  <form method="POST" action="?/revisar" use:enhance={alDecidir} style="display:contents;">
+                    <input type="hidden" name="id" value={detalle.id} />
+                    <input type="hidden" name="comentario" value={comentario} />
+                    <button class="snoc-btn snoc-btn-primario" name="decision" value="aceptada" type="submit">
+                      Aceptar propuesta
+                    </button>
+                    <button class="snoc-btn snoc-btn-error" name="decision" value="rechazada" type="submit">
+                      Rechazar
+                    </button>
+                  </form>
+                  <form method="POST" action="?/cancelar" use:enhance={alDecidir} style="display:contents;">
+                    <input type="hidden" name="id" value={detalle.id} />
+                    <input type="hidden" name="motivo" value={comentario} />
+                    <button class="snoc-btn" type="submit" title="La condición ya no aplica: nadie opinó sobre el fondo">
+                      Cancelar propuesta
+                    </button>
+                  </form>
+                  <button class="snoc-btn" type="button" onclick={cerrarDetalle}>Cerrar</button>
                 </div>
-                <div><span>Fecha de revisión:</span><span class="snoc-mono-sm">{fecha(detalle.revisado_en)}</span></div>
-                <div>
-                  <span>Responsable sugerido:</span>
-                  <span class="snoc-body-sm">{detalle.responsable_sugerido_email ?? '—'}</span>
+                <span class="snoc-mono-sm snoc-tenue">
+                  Aceptar registra que estás de acuerdo. <strong>No ejecuta la acción</strong>: en esta etapa no hay
+                  camino de ejecución.
+                </span>
+              {:else}
+                <div class="snoc-fila-sep">
+                  <span class="snoc-body-sm snoc-secundario">
+                    Esta propuesta ya fue revisada: <strong>{estadoDe(detalle.estado).texto}</strong>.
+                  </span>
+                  <button class="snoc-btn" type="button" onclick={cerrarDetalle}>Cerrar</button>
                 </div>
-                <div><span>Resultado:</span><span class="snoc-body-sm">{detalle.resultado || '—'}</span></div>
+              {/if}
+            </section>
+
+            <!-- 4. ANÁLISIS TÉCNICO (desplegable) -->
+            <details class="snoc-detalles">
+              <summary class="snoc-label-sm">
+                Ver análisis técnico completo ({(detalle.evidencia ?? []).length} observaciones)
+              </summary>
+              <div class="snoc-pila-xs" style="padding-top:var(--snoc-sm);">
+                {#if Array.isArray(detalle.evidencia) && detalle.evidencia.length}
+                  <!--
+                    La fuente, el id y la hora de lectura se muestran UNA vez
+                    cuando son iguales en todas las observaciones: repetirlos
+                    cinco veces era el 60% del texto de esta seccion.
+                  -->
+                  {#if comun}
+                    <span class="snoc-mono-sm snoc-tenue">
+                      {comun.fuente ? `fuente ${comun.fuente}` : ''}{comun.id ? ` · id ${comun.id}` : ''}{comun.leido
+                        ? ` · leído ${fecha(comun.leido)}`
+                        : ''}
+                    </span>
+                  {/if}
+                  <ul class="snoc-evidencia">
+                    {#each detalle.evidencia as e, i (i)}
+                      <li>
+                        <span class="snoc-body">{e.dato}</span>
+                        {#if !comun}
+                          <div class="snoc-mono-sm snoc-tenue">
+                            <span>{e.fuente ?? 'sin fuente'}</span>
+                            {#if e.id}<span> · id {e.id}</span>{/if}
+                            {#if e.observado_en}<span> · leído {fecha(e.observado_en)}</span>{/if}
+                          </div>
+                        {:else if e.fuente !== comun.fuente}
+                          <div class="snoc-mono-sm snoc-tenue">{e.fuente}</div>
+                        {/if}
+                      </li>
+                    {/each}
+                  </ul>
+                {:else}
+                  <span class="snoc-body snoc-secundario">Sin observaciones registradas.</span>
+                {/if}
+
+                {#if detalle.tipo_senal === 'dato_incompleto'}
+                  <div class="snoc-analisis snoc-faltante">
+                    <span class="snoc-insignia snoc-insignia-error">Datos faltantes</span>
+                    <p class="snoc-body" style="margin:0;">
+                      Esta señal nombra objetos concretos a los que les falta un campo concreto. No es un comodín.
+                    </p>
+                  </div>
+                {/if}
+              </div>
+            </details>
+
+            <!-- 5. INFORMACIÓN TÉCNICA (desplegable) -->
+            <details class="snoc-detalles">
+              <summary class="snoc-label-sm">Información técnica</summary>
+              <div class="snoc-meta" style="margin-top:var(--snoc-sm);">
+                <div style="grid-column:1 / -1;">
+                  <span>ID de propuesta:</span>
+                  <span class="snoc-mono-sm snoc-copiable">{detalle.id}</span>
+                </div>
+                <div style="grid-column:1 / -1;">
+                  <span>ID de origen:</span>
+                  <span class="snoc-mono-sm snoc-copiable">{detalle.origen_id}</span>
+                </div>
+                <div><span>Clave técnica:</span><span class="snoc-mono-sm">{detalle.tipo_senal}</span></div>
+                <div>
+                  <span>Alcance de la etapa:</span>
+                  <span class="snoc-body-sm">
+                    {detalle.dentro_del_alcance === false ? 'Fuera del alcance vigente' : 'Dentro del alcance'}
+                  </span>
+                </div>
                 <div>
                   <span>Versión de conocimiento:</span>
                   <span class="snoc-mono-sm">{detalle.conocimiento_version || '—'}</span>
                 </div>
+                <div><span>Creada:</span><span class="snoc-mono-sm">{fecha(detalle.created_at)}</span></div>
+                <div><span>Actualizada:</span><span class="snoc-mono-sm">{fecha(detalle.updated_at)}</span></div>
+                <div><span>Expira:</span><span class="snoc-mono-sm">{fecha(detalle.expira_en)}</span></div>
               </div>
-
-              {#if detalle.observaciones}
-                <div class="snoc-nota">
-                  <span class="snoc-body-sm"><strong>Observaciones del revisor:</strong> {detalle.observaciones}</span>
-                </div>
-              {/if}
-
               {#if detalle.propuesta_original}
-                <details class="snoc-detalles">
-                  <summary class="snoc-label-sm">Propuesta original (antes de modificarla)</summary>
-                  <pre class="snoc-pre">{JSON.stringify(detalle.propuesta_original, null, 2)}</pre>
-                </details>
+                <pre class="snoc-pre">{JSON.stringify(detalle.propuesta_original, null, 2)}</pre>
               {/if}
+            </details>
 
-              {#if Array.isArray(detalle.historial) && detalle.historial.length}
-                <div class="snoc-pila-xs">
-                  <span class="snoc-label-sm snoc-tenue" style="text-transform:uppercase;">Historial de auditoría</span>
+            <!-- 6. ESTADO DE EJECUCIÓN (desplegable) -->
+            <details class="snoc-detalles">
+              <summary class="snoc-label-sm">Estado de ejecución</summary>
+              <div class="snoc-pila-xs" style="padding-top:var(--snoc-sm);">
+                <div class="snoc-meta">
+                  <div>
+                    <span>¿Ejecutada?</span>
+                    <span class="snoc-insignia snoc-insignia-variante">No</span>
+                  </div>
+                  <div><span>Acciones ejecutadas:</span><span class="snoc-mono">0</span></div>
+                  <div><span>Efecto externo:</span><span class="snoc-body-sm">Ninguno</span></div>
+                </div>
+                <span class="snoc-mono-sm snoc-tenue">
+                  <strong>PROPUESTA ≠ EJECUCIÓN.</strong> El estado «ejecutada» no existe en el modelo de esta etapa,
+                  y no hay ningún camino que lleve de una propuesta a una acción sin una persona.
+                </span>
+              </div>
+            </details>
+
+            <!-- 7. TRAZABILIDAD (desplegable) -->
+            <details class="snoc-detalles">
+              <summary class="snoc-label-sm">
+                Trazabilidad{#if Array.isArray(detalle.historial)} ({detalle.historial.length}){/if}
+              </summary>
+              <div class="snoc-pila-xs" style="padding-top:var(--snoc-sm);">
+                <div class="snoc-generado">
+                  <span class="snoc-icono snoc-primario" style="font-size:18px;">psychology</span>
+                  <div class="snoc-pila-xs">
+                    <span class="snoc-label-sm" style="text-transform:uppercase;">Generado por</span>
+                    <span class="snoc-body-sm"><strong>Supervisor NOC IA</strong> · detección automática</span>
+                    <span class="snoc-mono-sm snoc-tenue">
+                      Ninguna persona propuso esto: la auditoría del registro no lleva usuario.
+                    </span>
+                  </div>
+                </div>
+
+                <div class="snoc-meta">
+                  <div>
+                    <span>Revisada por:</span>
+                    <span class="snoc-body-sm">{detalle.revisado_por_email ?? 'Todavía nadie'}</span>
+                  </div>
+                  <div><span>Fecha de revisión:</span><span class="snoc-mono-sm">{fecha(detalle.revisado_en)}</span></div>
+                  <div><span>Resultado:</span><span class="snoc-body-sm">{detalle.resultado || '—'}</span></div>
+                </div>
+
+                {#if detalle.observaciones}
+                  <div class="snoc-nota">
+                    <span class="snoc-body-sm"><strong>Observaciones del revisor:</strong> {detalle.observaciones}</span>
+                  </div>
+                {/if}
+
+                {#if Array.isArray(detalle.historial) && detalle.historial.length}
                   {#each detalle.historial as h, i (i)}
                     <div class="snoc-historial">
                       <span class="snoc-body-sm"><strong>{h.accion}</strong> · {h.descripcion}</span>
@@ -912,14 +1111,15 @@
                       </span>
                     </div>
                   {/each}
-                </div>
-              {/if}
-            </div>
+                {/if}
+              </div>
+            </details>
           {/if}
         </div>
       </aside>
     </div>
   {/if}
+
 
   <!-- ============ MODAL DEL CICLO ============ -->
   {#if modalCiclo}
