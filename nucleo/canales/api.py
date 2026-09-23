@@ -1011,6 +1011,81 @@ class _CierreCancelado(Exception):
     """El cierre por confirmacion no empieza: cambio el control (D25)."""
 
 
+# Lo que un rol que NO puede verificar no tiene por que estar pidiendo. Sin
+# tildes y en minuscula, porque asi se compara.
+_PIDE_IDENTIDAD = ("cedula", "documento de identidad", "numero de documento",
+                   "dni", "numero de identificacion", "tu documento")
+
+# Lo que se le dice al modelo al reencauzarlo. No es un regaño ni una regla
+# nueva: es la que YA tiene, repetida en el unico momento en que se puede
+# comprobar que no la siguio.
+INSTRUCCION_REENCAUZAR = (
+    "AVISO INTERNO (no se lo menciones al cliente): en tu respuesta anterior "
+    "le pediste un dato de identidad, y vos no verificas identidad ni tenes "
+    "herramienta para hacerlo. El dato que te de no lo vas a poder usar. "
+    "Llama a derivar_a_area con el area que corresponda: alli SI se verifica "
+    "y alli se le va a pedir lo que haga falta. No le anuncies el pase ni le "
+    "pidas que espere."
+)
+
+
+def _sin_tildes(texto: str) -> str:
+    reemplazos = {"a": "áà", "e": "éè", "i": "íì", "o": "óò", "u": "úùü"}
+    salida = texto.lower()
+    for llano, acentuadas in reemplazos.items():
+        for x in acentuadas:
+            salida = salida.replace(x, llano)
+    return salida
+
+
+def debe_reencauzar_a_derivacion(config, rol: str, respuesta: str, llamadas) -> bool:
+    """
+    Este turno pidio un dato de identidad SIN poder verificarlo ni haber
+    derivado?
+
+    DE DONDE SALE. El 22/09/2026, en produccion, 'cliente_final' le pidio a un
+    cliente el nombre y el "DNI" para darse de baja, el cliente los mando, y
+    el asistente volvio a pedirlos. Ocho horas dando vueltas, cero
+    herramientas. Su instruccion dice tres veces que no verifica y que derive
+    a facturacion; ademas 'DNI' no aparece en ninguna parte de esa
+    instruccion. El modelo se invento un flujo.
+
+    POR QUE NO ALCANZA EL PROMPT, dicho por el propio PRD (7.4): el prompt es
+    guia, nunca la garantia. Ya hay tres frases ahi y no bastaron. Lo que
+    puede garantizar algo es el codigo, y este es el unico momento en que se
+    puede COMPROBAR que no la siguio: cuando la respuesta ya esta escrita.
+
+    TRES CONDICIONES, Y LAS TRES HACEN FALTA:
+
+      no puede verificar   ninguna herramienta suya declara verifica_identidad.
+                           Si puede, pedir la cedula es su trabajo y no hay
+                           nada que corregir.
+      no derivo            si derivo, quien contesta es el area -- y el area SI
+                           debe pedirla. Prohibirselo marcaria como falla el
+                           comportamiento correcto (se probo, y fallaba).
+      pide identidad       la frase pide el dato. Nombrar la cedula para decir
+                           "en facturacion te la van a pedir" no alcanza: eso
+                           queda cubierto por la condicion de arriba, porque
+                           para decirlo tuvo que derivar.
+    """
+    cfg_rol = (getattr(config, "roles", None) or {}).get(rol)
+    if cfg_rol is None:
+        return False
+    catalogo = {h.nombre: h for h in getattr(config, "herramientas", []) or []}
+    suyas = [catalogo[n] for n in (getattr(cfg_rol, "puede_consultar", None) or [])
+             if n in catalogo]
+    if any(getattr(h, "verifica_identidad", False) for h in suyas):
+        return False
+    if not any(getattr(h, "deriva_rol", None) for h in suyas):
+        # Sin a donde derivar, reencauzar solo produciria otra vuelta igual.
+        return False
+    derivadoras = {h.nombre for h in suyas if getattr(h, "deriva_rol", None)}
+    if any((l or {}).get("herramienta") in derivadoras for l in (llamadas or [])):
+        return False
+    texto = _sin_tildes(respuesta or "")
+    return any(p in texto for p in _PIDE_IDENTIDAD)
+
+
 def decision_del_router(rol_evaluado: str, rol_final: str, sesion,
                         cfg_rol, llamadas) -> dict:
     """
@@ -1601,6 +1676,40 @@ def _atender_turno(config, tenant: str, rol: str, id_sesion: str,
             nota_continuidad=nota_continuidad,
             origen=(f"evento:{evento_id}" if evento_id
                     else f"turno:{uuid.uuid4()}"))
+
+        # ── REENCAUZAR: PIDIO IDENTIDAD SIN PODER VERIFICARLA ───────────────
+        #
+        # Una sola vez, y en la capa donde sirve. La leccion del 09/09/2026 es
+        # que un reintento solo sirve donde puede entrar informacion nueva: la
+        # redaccion final corre sin catalogo, asi que pedirle tres veces que
+        # reescriba devuelve tres veces la misma frase. Aca se vuelve a entrar
+        # al BUCLE DEL AGENTE, que es donde todavia puede llamar
+        # derivar_a_area -- y llamarla es justamente lo que le falto.
+        #
+        # UNA, nunca en bucle: si la segunda tampoco deriva, se manda lo que
+        # haya. Una guarda que puede dar vueltas es peor que el problema que
+        # arregla, y el cliente esperando no tiene la culpa.
+        if debe_reencauzar_a_derivacion(config, rol, respuesta, registro_herramientas):
+            registrar("router", "pidio identidad sin poder verificar: se reencauza",
+                      rol=rol, herramientas_usadas=len(registro_herramientas or []))
+            # La respuesta descartada sale de la memoria: si se queda, el
+            # modelo la ve como algo que ya dijo y la sostiene -- que es
+            # exactamente como esta conversacion se quedo ocho horas pidiendo
+            # lo mismo.
+            _quitar_respuesta_de_memoria(estado["historial"], antes_del_modelo)
+            respuesta, registro_herramientas, medios_pendientes = motor.responder(
+                config, rol, mensaje, estado["historial"], estado["sesion"],
+                nota_continuidad=INSTRUCCION_REENCAUZAR,
+                origen=(f"evento:{evento_id}:reencauzado" if evento_id
+                        else f"turno:{uuid.uuid4()}"))
+            # 'derivo' se mide por lo que corrio EN ESTE TURNO, no por
+            # 'sesion.rol_siguiente': el motor lo deja puesto a proposito
+            # entre turnos (motor.py, "NO se limpia aca"), asi que una
+            # derivacion vieja diria que si.
+            registrar("router", "resultado del reencauzamiento",
+                      rol=rol, herramientas_usadas=len(registro_herramientas or []),
+                      derivo=not debe_reencauzar_a_derivacion(
+                          config, rol, respuesta, registro_herramientas))
 
     # --- D24, punto 1: el control no cambio mientras el modelo pensaba ------
     # Si cambio (una persona intervino, se cerro, otra version), la respuesta
