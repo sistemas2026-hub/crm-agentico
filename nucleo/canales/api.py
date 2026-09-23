@@ -1671,11 +1671,16 @@ def _atender_turno(config, tenant: str, rol: str, id_sesion: str,
         # la decision diria que fue facturacion quien decidio derivar a
         # facturacion.
         rol_evaluado = rol
+        # El origen se calcula UNA vez y se guarda: si se reencauza, la
+        # segunda vuelta lo reusa con un sufijo. Generarlo de nuevo daria un
+        # uuid distinto, y las dos vueltas del mismo turno quedarian sin
+        # forma de juntarse al revisar la traza.
+        origen_del_turno = (f"evento:{evento_id}" if evento_id
+                            else f"turno:{uuid.uuid4()}")
         respuesta, registro_herramientas, medios_pendientes = motor.responder(
             config, rol, mensaje, estado["historial"], estado["sesion"],
             nota_continuidad=nota_continuidad,
-            origen=(f"evento:{evento_id}" if evento_id
-                    else f"turno:{uuid.uuid4()}"))
+            origen=origen_del_turno)
 
         # ── REENCAUZAR: PIDIO IDENTIDAD SIN PODER VERIFICARLA ───────────────
         #
@@ -1700,8 +1705,7 @@ def _atender_turno(config, tenant: str, rol: str, id_sesion: str,
             respuesta, registro_herramientas, medios_pendientes = motor.responder(
                 config, rol, mensaje, estado["historial"], estado["sesion"],
                 nota_continuidad=INSTRUCCION_REENCAUZAR,
-                origen=(f"evento:{evento_id}:reencauzado" if evento_id
-                        else f"turno:{uuid.uuid4()}"))
+                origen=f"{origen_del_turno}:reencauzado")
             # 'derivo' se mide por lo que corrio EN ESTE TURNO, no por
             # 'sesion.rol_siguiente': el motor lo deja puesto a proposito
             # entre turnos (motor.py, "NO se limpia aca"), asi que una
