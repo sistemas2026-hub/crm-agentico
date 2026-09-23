@@ -90,7 +90,7 @@ void main() {
       expect(datos.profileId, perfil);
       expect(datos.numeroDeOrden, 4832);
       expect(datos.revision, 7);
-      expect(datos.campos, hasLength(3));
+      expect(datos.campos, hasLength(4));
       expect(datos.requisitosDeEvidencia, hasLength(3));
     });
 

@@ -388,7 +388,7 @@ void main() {
             estado: 'pendiente',
           ),
           FuenteDeEjecucionFalsa.evidencia(
-            requisitoId: 'foto_medicion',
+            requisitoId: 'foto_power_meter',
             estado: 'pendiente',
           ),
           FuenteDeEjecucionFalsa.evidencia(
@@ -408,7 +408,7 @@ void main() {
         },
         evidencias: <Map<String, dynamic>>[
           FuenteDeEjecucionFalsa.evidencia(requisitoId: 'foto_roseta'),
-          FuenteDeEjecucionFalsa.evidencia(requisitoId: 'foto_medicion'),
+          FuenteDeEjecucionFalsa.evidencia(requisitoId: 'foto_power_meter'),
           FuenteDeEjecucionFalsa.evidencia(requisitoId: 'firma_cliente'),
         ],
         materiales: <Map<String, dynamic>>[

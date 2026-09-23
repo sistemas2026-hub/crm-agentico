@@ -57,48 +57,70 @@ class FuenteDeEjecucionFalsa implements FuenteDeEjecucion {
   int colasProcesadas = 0;
   int resumenesRefrescados = 0;
 
+  /// Campos con el vocabulario que manda el servidor.
+  ///
+  /// `id`, `titulo` y `reglas.required`, NO `clave`/`etiqueta`/`obligatorio`.
+  /// El cliente acepta las dos formas, pero el backend sólo produce ésta
+  /// (`campo/services/validador.py`), y un fixture con la otra hace que las
+  /// capturas muestren una pantalla que en el teléfono nunca se ve: la
+  /// primera tanda dibujó un campo de selección como texto libre por esto.
   static const List<Map<String, dynamic>> camposTipicos =
       <Map<String, dynamic>>[
     <String, dynamic>{
-      'clave': 'potencia_rx',
-      'etiqueta': 'Potencia óptica en roseta (dBm)',
-      'tipo': 'numero',
-      'obligatorio': true,
+      'id': 'tipo_intervencion',
+      'titulo': 'Tipo de intervención física',
+      'tipo': 'seleccion',
+      'ayuda': 'Seleccioná el tramo de fibra intervenido durante la visita.',
+      'reglas': <String, dynamic>{
+        'required': true,
+        'options': <String>[
+          'Acometida / Drop',
+          'Roseta / Conector',
+          'Empalme Fusión CTO',
+          'Configuración CPE',
+        ],
+      },
     },
     <String, dynamic>{
-      'clave': 'tipo_intervencion',
-      'etiqueta': 'Tipo de intervención',
-      'tipo': 'opciones',
-      'obligatorio': true,
-      'opciones': <String>[
-        'Reconectorización',
-        'Cambio de drop',
-        'Cambio de ONT',
-      ],
+      'id': 'reemplazo_ont',
+      'titulo': '¿Se reemplazó la ONT o el equipo del cliente?',
+      'tipo': 'booleano',
+      'ayuda': 'Activar únicamente si retiraste el equipo por daño.',
     },
     <String, dynamic>{
-      'clave': 'observaciones',
-      'etiqueta': 'Observaciones técnicas',
-      'tipo': 'texto_largo',
-      'obligatorio': false,
+      'id': 'potencia_rx',
+      'titulo': 'Potencia óptica en roseta del cliente',
+      'tipo': 'decimal',
+      'unidad': 'dBm',
+      'ayuda': 'Umbral de aceptación: -15 a -25 dBm',
+      'reglas': <String, dynamic>{'required': true, 'min': -30.0, 'max': -5.0},
+    },
+    <String, dynamic>{
+      'id': 'observaciones',
+      'titulo': 'Observaciones técnicas del empalme',
+      'tipo': 'texto',
+      'reglas': <String, dynamic>{'required': false},
     },
   ];
 
   static const List<Map<String, dynamic>> requisitosTipicos =
       <Map<String, dynamic>>[
     <String, dynamic>{
-      'id': 'foto_roseta',
-      'descripcion': 'Foto de la roseta terminada',
+      'id': 'foto_power_meter',
+      'titulo': 'Foto de la pantalla del power meter',
+      'descripcion': 'Lectura clara mostrando el valor en dBm.',
       'tipo': 'foto',
     },
     <String, dynamic>{
-      'id': 'foto_medicion',
-      'descripcion': 'Foto de la medición en el power meter',
+      'id': 'foto_roseta',
+      'titulo': 'Foto de la roseta y el cableado final',
+      'descripcion': 'Evidencia de fijación mecánica y curvatura adecuada.',
       'tipo': 'foto',
     },
     <String, dynamic>{
       'id': 'firma_cliente',
-      'descripcion': 'Firma del abonado',
+      'titulo': 'Firma del abonado',
+      'descripcion': 'Conformidad del cliente con el trabajo realizado.',
       'tipo': 'firma',
     },
   ];
