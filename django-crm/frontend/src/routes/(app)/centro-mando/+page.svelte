@@ -1,21 +1,22 @@
 <script>
   /**
-   * Centro de mando: la operacion de los agentes, vista como una sala.
+   * Centro de mando: que esta haciendo ahora cada agente del tenant.
    *
-   * Cada agente configurado en el tenant tiene una estacion; su color dice en
-   * que anda (procesando / atendiendo / disponible / error) y su placa, que
-   * trae entre manos. Todo sale de /centro-mando en el motor, que cuenta
-   * filas -- no hay ni un dato simulado en esta pantalla. Si el motor no
-   * responde, se dice; no se rellena con nada.
+   * Todo sale de /centro-mando en el motor, que cuenta filas -- no hay ni un
+   * dato simulado. Si el motor no responde, se dice; no se rellena con nada.
    *
-   * Por que una sala y no una tabla: la pregunta que responde esto no es
-   * "cuantas conversaciones hubo" (para eso esta /consumo y la bandeja) sino
-   * "quien esta haciendo que ahora", y eso se lee de un vistazo por posicion
-   * y color mucho antes que leyendo filas.
+   * POR QUE UNA REJILLA Y NO UNA SALA EN ANILLO
+   * Hasta el 23/09/2026 los agentes se dibujaban en un anillo sobre un lienzo
+   * escalado, con cada tarjeta colocada por coordenadas. Se veia mejor con
+   * cuatro o cinco agentes y se rompia con ocho: las placas invadian el pod
+   * del vecino y el texto largo se cortaba (una herramienta se llama
+   * 'verificar_identidad_por_cedula'). Cada arreglo de radio movia el
+   * problema a otro punto, porque cuantos agentes hay lo decide cada empresa
+   * y no hay radio que sirva para todas.
    *
-   * La escena se dibuja sobre un lienzo fijo de 1600x1020 y se escala al
-   * espacio disponible: asi las posiciones son aritmetica simple y no
-   * dependen del tamano de la ventana.
+   * Con una rejilla, la clase entera de errores desaparece: no hay posiciones
+   * que calcular ni solapes posibles, y cuatro agentes o doce se ven igual de
+   * bien. Se pierde la metafora de la sala; se gana que siempre se lea.
    */
   import { onMount } from 'svelte';
   import PageHeader from '$lib/v2/components/PageHeader.svelte';
@@ -30,10 +31,6 @@
   let refrescando = $state(false);
   let ultimoRefresco = $state(/** @type {string|null} */ (null));
   let seleccionado = $state(/** @type {any} */ (null));
-  let escala = $state(1);
-
-  const ANCHO = 1340, ALTO = 930;
-  const CX = ANCHO / 2, CY = 478, RX = 452, RY = 230;
 
   /* ---------------------------------------------------------------------
    * Imagenes. El motor no sabe (ni debe saber) con que dibujo se representa
@@ -88,27 +85,21 @@
     disponible: 'DISPONIBLE',
     error: 'CON ERRORES'
   };
+  const ORDEN = { error: 0, procesando: 1, atendiendo: 2, disponible: 3 };
   const colorDe = (/** @type {any} */ a) => COLORES[/** @type {keyof typeof COLORES} */ (a.estado)] || '#8AA2C0';
 
-  const agentes = $derived(panorama?.agentes || []);
   const totales = $derived(panorama?.totales || {});
   const eventos = $derived(panorama?.eventos || []);
   const servicios = $derived(panorama?.servicios || []);
 
-  /* El pod se encoge cuando hay muchos agentes: lo que manda es el arco que
-     le toca a cada uno sobre el anillo. Con seis caben holgados; un tenant
-     con diez los tendria encimados si el ancho fuera fijo. */
-  const anchoEstacion = $derived(Math.max(
-    175, Math.min(320, (Math.PI * (RX + RY) / Math.max(agentes.length, 1)) * 0.76)));
-
-
-  /** Reparte los agentes en un anillo: dos, seis u once caben igual. */
-  function posicion(/** @type {number} */ i, /** @type {number} */ n) {
-    // Se arranca arriba (-90) para que el primero quede al fondo y no tapado
-    // por las placas de los de adelante.
-    const ang = (-90 + (360 / Math.max(n, 1)) * i) * Math.PI / 180;
-    return { x: CX + RX * Math.cos(ang), y: CY + RY * Math.sin(ang) };
-  }
+  /* Primero quien tiene problemas, despues quien trabaja, al final quien esta
+     libre: si hay algo que mirar, esta arriba a la izquierda. */
+  const agentes = $derived(
+    [...(panorama?.agentes || [])].sort((a, b) =>
+      (ORDEN[/** @type {keyof typeof ORDEN} */ (a.estado)] ?? 9) -
+      (ORDEN[/** @type {keyof typeof ORDEN} */ (b.estado)] ?? 9) ||
+      (b.conversaciones || 0) - (a.conversaciones || 0))
+  );
 
   const hora = (/** @type {string|null} */ iso) =>
     iso ? new Date(iso).toLocaleTimeString('es-CO',
@@ -146,29 +137,26 @@
     }
   }
 
-  function ajustar() {
+  /* Que el bloque llegue al fondo de la ventana sin recortar nada. Va como
+     alto MINIMO y medido: si se fija el alto, un dia el contenido no cabe y
+     se corta; y si se resta una constante a 100vh, el encabezado de la
+     pagina cambia de alto con el ancho y queda hueco o sobra scroll. */
+  function estirar() {
     const sala = document.querySelector('.sala');
-    if (sala) {
-      // Lo que queda de ventana por debajo de donde empieza la sala, menos un
-      // respiro. Medido y no calculado con una constante: el encabezado de la
-      // pagina cambia de alto segun el ancho.
-      const arriba = sala.getBoundingClientRect().top;
-      sala.style.height = Math.max(600, window.innerHeight - arriba - 12) + 'px';
-    }
-    const caja = document.getElementById('escena');
-    if (!caja) return;
-    escala = Math.min(caja.clientWidth / ANCHO, caja.clientHeight / ALTO);
+    if (!sala) return;
+    const arriba = sala.getBoundingClientRect().top + window.scrollY;
+    sala.style.minHeight = Math.max(560, window.innerHeight - arriba - 14) + 'px';
   }
 
   onMount(() => {
-    ajustar();
-    window.addEventListener('resize', ajustar);
+    estirar();
+    window.addEventListener('resize', estirar);
     // Cada 12 s, y solo con la pestana a la vista: refrescar en segundo plano
     // es pegarle a la base cada 12 s por cada pestana olvidada abierta.
     const t = setInterval(() => { if (!document.hidden) refrescar(); }, 12000);
     return () => {
       clearInterval(t);
-      window.removeEventListener('resize', ajustar);
+      window.removeEventListener('resize', estirar);
     };
   });
 </script>
@@ -194,7 +182,6 @@
 
 {#if panorama}
   <div class="sala">
-    <!-- barra de identidad: de quien es esta operacion y de cuando es el dato -->
     <div class="identidad">
       <span class="marca"><i></i>DEXTER <b>· CENTRO DE MANDO</b></span>
       <span class="tenant">{panorama.tenant}</span>
@@ -209,7 +196,6 @@
       <span class="reloj">{hora(ultimoRefresco || panorama.generado_en)} <em>(Bogotá)</em></span>
     </div>
 
-    <!-- franja de cifras -->
     <div class="cifras">
       {#each [
         ['Activas (24 h)', totales.conversaciones_activas, ''],
@@ -227,78 +213,45 @@
     </div>
 
     <div class="cuerpo">
-      <div class="escena" id="escena">
-        <div class="lienzo" style="width:{ANCHO}px; height:{ALTO}px; transform:translate(-50%,-50%) scale({escala})">
-          <!-- radios del nucleo a cada estacion -->
-          <svg class="piso" viewBox="0 0 {ANCHO} {ALTO}" preserveAspectRatio="none">
-            {#each agentes as a, i}
-              {@const p = posicion(i, agentes.length)}
-              <line x1={CX} y1={CY} x2={p.x} y2={p.y} stroke={colorDe(a)}
-                    stroke-width="1.5" stroke-dasharray="5 9" opacity="0.45" />
+      <div class="rejilla-envoltura">
+        {#if servicios.length}
+          <div class="servicios">
+            <span class="et">Servicios usados hoy</span>
+            {#each servicios as s}
+              <span class="chip-servicio" class:fallando={s.fallos > 0}>
+                <b>{s.herramienta}</b>
+                {s.usos} usos · {ms(s.duracion_media_ms)}{s.fallos ? ` · ${s.fallos} fallos` : ''}
+              </span>
             {/each}
-            <ellipse cx={CX} cy={CY} rx={RX} ry={RY} fill="none"
-                     stroke="rgba(0,229,255,.10)" stroke-width="1" />
-          </svg>
-
-          <!-- nucleo -->
-          <div class="nucleo" style="left:{CX}px; top:{CY}px">
-            <div class="anillo"></div>
-            <div class="rot">EN CURSO AHORA</div>
-            <div class="n">{totales.conversaciones_activas ?? 0}</div>
-            <div class="sub">activas (24 h)</div>
-            {#if totales.esperando_humano}
-              <div class="humano">{totales.esperando_humano} esperan a una persona</div>
-            {/if}
           </div>
+        {/if}
 
-          <!-- servicios externos usados hoy, anclados al borde -->
-          {#each servicios as s, i}
-            <div class="servicio" class:fallando={s.fallos > 0}
-                 style="left:{i < 3 ? 16 : ANCHO - 234}px; top:{96 + (i % 3) * 80}px">
-              <div class="t">{s.herramienta}</div>
-              <div class="d">{s.usos} usos · {ms(s.duracion_media_ms)}{s.fallos ? ` · ${s.fallos} fallos` : ''}</div>
-            </div>
-          {/each}
-
-          <!-- estaciones -->
-          {#each agentes as a, i}
-            {@const p = posicion(i, agentes.length)}
-            <div class="estacion" style="--c:{colorDe(a)}; left:{p.x}px; top:{p.y}px; width:{anchoEstacion}px">
-              <img class="pod" src={estacionDe(a)} alt="" />
-              <div class="tinte" style="-webkit-mask-image:url({estacionDe(a)}); mask-image:url({estacionDe(a)})"></div>
-            </div>
-          {/each}
-
-          <!-- agentes y placas. La placa de un agente de la mitad de arriba
-               cuelga por ENCIMA de su pod: si cuelga por debajo invade el
-               nucleo, que esta justo ahi. Medido: 30 px de solape con el
-               agente de soporte, que es el de placa mas alta. -->
-          {#each agentes as a, i}
-            {@const p = posicion(i, agentes.length)}
-            <button class="agente" style="--c:{colorDe(a)}; left:{p.x}px; top:{p.y}px"
-                    onclick={() => (seleccionado = a)}
-                    aria-label="Ver detalle de {a.nombre}">
-              <img src={avatarDe(a)} alt="" class:trabaja={a.estado === 'procesando'} />
+        <div class="rejilla">
+          {#each agentes as a (a.nombre)}
+            <button class="agente" style="--c:{colorDe(a)}" onclick={() => (seleccionado = a)}>
+              <div class="pod">
+                <img class="fondo" src={estacionDe(a)} alt="" />
+                <div class="tinte" style="-webkit-mask-image:url({estacionDe(a)}); mask-image:url({estacionDe(a)})"></div>
+                <img class="cara" src={avatarDe(a)} alt="" />
+              </div>
+              <div class="ficha">
+                <div class="fila1">
+                  <span class="nombre">{a.nombre.replaceAll('_', ' ')}</span>
+                  <span class="chip"><i class:vivo={a.estado === 'procesando'}></i>{ROTULO[a.estado] || a.estado}</span>
+                </div>
+                <div class="cargo">{a.cargo || a.area || ''}</div>
+                <div class="haciendo">{a.haciendo || ''}</div>
+                <div class="datos">
+                  <span>Conv <b>{a.conversaciones}</b></span>
+                  {#if a.esperando_humano}<span class="ambar">Humano <b>{a.esperando_humano}</b></span>{/if}
+                  {#if a.duracion_media_ms}<span>{ms(a.duracion_media_ms)}</span>{/if}
+                </div>
+              </div>
             </button>
-
-            <div class="placa" style="--c:{colorDe(a)}; width:{Math.max(168, anchoEstacion * 0.78)}px; left:{p.x}px; top:{p.y + anchoEstacion * (p.y < CY ? -0.30 : 0.26)}px; {p.y < CY ? 'transform: translate(-50%, -100%)' : ''}">
-              <div class="fila1">
-                <span class="nombre">{a.nombre.replaceAll('_', ' ')}</span>
-                <span class="chip"><i class:vivo={a.estado === 'procesando'}></i>{ROTULO[a.estado] || a.estado}</span>
-              </div>
-              <div class="area">{a.cargo || a.area || ''}</div>
-              {#if a.haciendo}<div class="haciendo">{a.haciendo}</div>{/if}
-              <div class="datos">
-                <span>Conv <b>{a.conversaciones}</b></span>
-                {#if a.esperando_humano}<span class="ambar">Humano <b>{a.esperando_humano}</b></span>{/if}
-                {#if a.ultima_herramienta}<span class="tool">{a.ultima_herramienta}</span>{/if}
-              </div>
-            </div>
           {/each}
         </div>
       </div>
 
-      <!-- eventos -->
       <aside class="eventos">
         <header>
           <span>Actividad reciente</span>
@@ -319,7 +272,6 @@
     </div>
   </div>
 
-  <!-- detalle -->
   {#if seleccionado}
     <button class="telon" onclick={() => (seleccionado = null)} aria-label="Cerrar detalle"></button>
     <aside class="detalle" style="--c:{colorDe(seleccionado)}">
@@ -333,14 +285,18 @@
         <button class="cerrar" onclick={() => (seleccionado = null)} aria-label="Cerrar">✕</button>
       </header>
 
-      <div class="rejilla">
+      <div class="rejilla-cifras">
         <div><b>{seleccionado.conversaciones}</b><span>Activas (24 h)</span></div>
         <div><b>{seleccionado.abiertas_total}</b><span>Abiertas sin cerrar</span></div>
-        <div><b>{seleccionado.esperando_humano}</b><span>Esperan a una persona</span></div>
+        <div><b>{seleccionado.esperando_humano}</b><span>Esperan persona</span></div>
         <div><b>{seleccionado.recibidas_hoy}</b><span>Recibidas hoy</span></div>
         <div><b>{seleccionado.llamadas_ventana}</b><span>Herramientas ({panorama.ventana_min} min)</span></div>
-        <div><b>{ms(seleccionado.duracion_media_ms)}</b><span>Duración media</span></div>
         <div class:rojo={seleccionado.fallos_ventana > 0}><b>{seleccionado.fallos_ventana}</b><span>Fallos recientes</span></div>
+      </div>
+
+      <div class="bloque">
+        <h3>Ahora mismo</h3>
+        <p>{seleccionado.haciendo || 'Sin actividad.'}</p>
       </div>
 
       <div class="bloque">
@@ -373,121 +329,12 @@
   .sala {
     --fondo: #050b18; --panel: #0f172a; --borde: rgba(0,229,255,.14);
     --texto: #e6f1ff; --texto2: #8aa2c0; --texto3: #47607f;
-    /* El color va aparte del degradado a proposito: el degradado arranca casi
-       transparente y, sin un fondo opaco debajo, en el CRM (que es claro) se
-       veia la pagina blanca a traves del centro de la sala. */
     background-color: var(--fondo);
-    background-image: radial-gradient(ellipse at 50% 0%, rgba(0,229,255,.16), transparent 62%);
+    background-image: radial-gradient(ellipse at 50% 0%, rgba(0,229,255,.16), transparent 60%);
     color: var(--texto);
     border: 1px solid var(--borde); border-radius: 14px; overflow: hidden;
-    display: flex; flex-direction: column; min-height: 600px;
+    display: flex; flex-direction: column;
   }
-  /* auto-fit y no un numero fijo de columnas: son ocho cifras y el ancho
-     disponible depende del menu lateral. Con un numero fijo, la ultima se
-     caia a una segunda fila y quedaba fuera del marco de la sala. */
-  .cifras { display: grid; grid-template-columns: repeat(auto-fit, minmax(146px, 1fr)); border-bottom: 1px solid var(--borde); }
-  .cifra { padding: 12px 16px; border-right: 1px solid var(--borde); }
-  .cifra:last-child { border-right: 0; }
-  .cifra .v { font-family: ui-monospace, monospace; font-size: 22px; font-weight: 700; line-height: 1; }
-  .cifra .k { font-size: 10px; letter-spacing: .1em; color: var(--texto2); text-transform: uppercase; margin-top: 6px; }
-  .cifra.ambar .v { color: #f59e0b; }
-  .cifra.rojo .v { color: #ef4444; }
-
-  .cuerpo { flex: 1; display: flex; min-height: 0; }
-  .escena { flex: 1; position: relative; overflow: hidden; }
-  .lienzo { position: absolute; left: 50%; top: 50%; transform-origin: center; }
-  .piso { position: absolute; inset: 0; width: 100%; height: 100%; }
-
-  .estacion { position: absolute; transform: translate(-50%, -42%); pointer-events: none; }
-  .estacion .pod { width: 100%; display: block; }
-  .estacion .tinte {
-    position: absolute; inset: 0; background: var(--c); opacity: .3; mix-blend-mode: color;
-    -webkit-mask-size: 100% 100%; mask-size: 100% 100%; transition: background .4s;
-  }
-
-  .agente {
-    position: absolute; transform: translate(-50%, -50%); background: none; border: 0; padding: 0;
-    cursor: pointer; z-index: 2;
-  }
-  .agente img {
-    width: 104px; height: 104px; border-radius: 50%; object-fit: cover; display: block;
-    border: 2px solid var(--c); box-shadow: 0 0 20px var(--c), 0 10px 18px rgba(0,0,0,.6);
-    transition: box-shadow .3s;
-  }
-  .agente img.trabaja { animation: latir 2.2s ease-in-out infinite; }
-  .agente:hover img { box-shadow: 0 0 30px var(--c); }
-
-  .placa {
-    position: absolute; transform: translateX(-50%); z-index: 3;
-    background: rgba(15,23,42,.95); border: 1px solid var(--c); border-radius: 10px;
-    padding: 8px 10px; backdrop-filter: blur(6px);
-  }
-  .placa .fila1 { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-  .placa .nombre { font-size: 12.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; line-height: 1.25; }
-  .placa .area { font-size: 10.5px; color: var(--texto2); margin-top: 2px; }
-  .placa .datos { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; font-family: ui-monospace, monospace; font-size: 10.5px; color: var(--texto2); }
-  .placa .datos b { color: var(--texto); }
-  .placa .datos .ambar { color: #f59e0b; }
-  .placa .datos .tool { color: var(--c); }
-
-  .chip {
-    font-family: ui-monospace, monospace; font-size: 8.5px; letter-spacing: .08em; font-weight: 700;
-    padding: 2px 6px; border-radius: 5px; white-space: nowrap; color: var(--c);
-    border: 1px solid var(--c); background: color-mix(in srgb, var(--c) 14%, transparent);
-    display: inline-flex; align-items: center; gap: 5px;
-  }
-  .chip i { width: 6px; height: 6px; border-radius: 50%; background: var(--c); display: inline-block; }
-  .chip i.vivo { animation: latir 1.6s infinite; }
-
-  .nucleo {
-    position: absolute; transform: translate(-50%, -50%); width: 172px; height: 172px; border-radius: 50%;
-    background: rgba(3,10,23,.9); border: 1px solid rgba(0,229,255,.4);
-    box-shadow: 0 0 40px rgba(0,229,255,.28), inset 0 0 26px rgba(0,229,255,.12);
-    display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;
-  }
-  .nucleo .anillo { position: absolute; inset: -8px; border-radius: 50%; border: 1px solid rgba(0,229,255,.2); border-top-color: #00e5ff; animation: girar 9s linear infinite; }
-  .nucleo .rot { font-family: ui-monospace, monospace; font-size: 8px; letter-spacing: .2em; color: #00e5ff; }
-  .nucleo .n { font-family: ui-monospace, monospace; font-size: 38px; font-weight: 700; line-height: 1.1; }
-  .nucleo .sub { font-size: 9px; letter-spacing: .12em; color: var(--texto2); text-transform: uppercase; }
-  .nucleo .humano { font-family: ui-monospace, monospace; font-size: 8.5px; color: #f59e0b; margin-top: 6px; }
-
-  .eventos { flex: 0 0 320px; background: var(--panel); border-left: 1px solid var(--borde); display: flex; flex-direction: column; min-height: 0; }
-  .eventos header { padding: 12px 16px; border-bottom: 1px solid var(--borde); display: flex; justify-content: space-between; align-items: center; font-size: 11.5px; letter-spacing: .12em; text-transform: uppercase; }
-  .eventos .sello { font-family: ui-monospace, monospace; font-size: 10px; color: var(--texto3); letter-spacing: 0; }
-  .eventos .lista { flex: 1; overflow-y: auto; padding: 10px 14px; }
-  .evento { padding: 8px 0 8px 14px; border-left: 1px solid var(--borde); position: relative; }
-  .evento::before { content: ''; position: absolute; left: -4px; top: 13px; width: 7px; height: 7px; border-radius: 50%; background: #06b6d4; }
-  .evento.escalada::before { background: #8b5cf6; }
-  .evento.accion::before { background: #f59e0b; }
-  .evento.herramienta_fallida::before { background: #ef4444; }
-  .evento .h { font-family: ui-monospace, monospace; font-size: 10px; color: var(--texto2); }
-  .evento .q { font-size: 10.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; margin-top: 1px; }
-  .evento .d { font-size: 11px; color: var(--texto2); margin-top: 2px; }
-  .eventos .vacio { font-size: 11.5px; color: var(--texto3); padding: 8px 0; }
-
-  .telon { position: fixed; inset: 0; background: rgba(2,6,18,.6); backdrop-filter: blur(3px); border: 0; z-index: 40; }
-  .detalle {
-    position: fixed; top: 0; right: 0; height: 100%; width: 440px; z-index: 41;
-    background: #0f172a; color: #e6f1ff; border-left: 1px solid var(--c);
-    box-shadow: -24px 0 56px rgba(0,0,0,.8); display: flex; flex-direction: column; overflow-y: auto;
-  }
-  .detalle header { display: flex; gap: 14px; align-items: center; padding: 18px 16px; border-bottom: 1px solid rgba(0,229,255,.14); position: relative; }
-  .detalle header img { width: 84px; height: 84px; border-radius: 12px; object-fit: cover; border: 2px solid var(--c); }
-  .detalle header h2 { font-size: 18px; margin: 0 0 3px; text-transform: capitalize; }
-  .detalle header p { font-size: 11.5px; color: #8aa2c0; margin: 0 0 8px; }
-  .detalle .cerrar { position: absolute; top: 12px; right: 12px; width: 28px; height: 28px; border-radius: 8px; border: 1px solid rgba(0,229,255,.14); background: #16233a; color: #8aa2c0; cursor: pointer; }
-  .detalle .rejilla { display: grid; grid-template-columns: repeat(3, 1fr); }
-  .detalle .rejilla div { padding: 12px 8px; text-align: center; border-right: 1px solid rgba(0,229,255,.1); border-bottom: 1px solid rgba(0,229,255,.1); }
-  .detalle .rejilla b { display: block; font-family: ui-monospace, monospace; font-size: 17px; }
-  .detalle .rejilla span { font-size: 8.5px; letter-spacing: .08em; color: #8aa2c0; text-transform: uppercase; }
-  .detalle .rejilla .rojo b { color: #ef4444; }
-  .detalle .bloque { padding: 14px 16px; border-bottom: 1px solid rgba(0,229,255,.1); }
-  .detalle .bloque h3 { font-family: ui-monospace, monospace; font-size: 10px; letter-spacing: .14em; color: #8aa2c0; text-transform: uppercase; margin: 0 0 8px; }
-  .detalle .bloque p { font-size: 12.5px; line-height: 1.55; margin: 0; color: #cfe0f5; }
-  .detalle .bloque code { font-family: ui-monospace, monospace; font-size: 11.5px; color: var(--c); }
-  .detalle .tz { color: #47607f; }
-  .detalle footer { margin-top: auto; padding: 14px 16px; display: flex; gap: 10px; }
-
 
   .identidad {
     display: flex; align-items: center; gap: 14px; padding: 9px 16px;
@@ -503,24 +350,107 @@
   .identidad .reloj { font-family: ui-monospace, monospace; font-size: 11px; color: var(--texto); }
   .identidad .reloj em { color: var(--texto3); font-style: normal; }
 
-  .placa .haciendo {
-    font-size: 11px; color: var(--c); margin-top: 4px; line-height: 1.35;
-    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  .cifras { display: grid; grid-template-columns: repeat(auto-fit, minmax(146px, 1fr)); border-bottom: 1px solid var(--borde); }
+  .cifra { padding: 12px 16px; border-right: 1px solid var(--borde); }
+  .cifra:last-child { border-right: 0; }
+  .cifra .v { font-family: ui-monospace, monospace; font-size: 22px; font-weight: 700; line-height: 1; }
+  .cifra .k { font-size: 10px; letter-spacing: .1em; color: var(--texto2); text-transform: uppercase; margin-top: 6px; }
+  .cifra.ambar .v { color: #f59e0b; }
+
+  .cuerpo { flex: 1; display: flex; min-height: 0; }
+  .rejilla-envoltura { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow-y: auto; padding: 14px; gap: 14px; }
+
+  .servicios { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .servicios .et { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--texto2); margin-right: 4px; }
+  .chip-servicio {
+    font-family: ui-monospace, monospace; font-size: 10px; color: var(--texto2);
+    border: 1px solid rgba(0,229,255,.28); border-radius: 8px; padding: 4px 9px;
+    background: rgba(4,21,37,.6); white-space: nowrap;
+  }
+  .chip-servicio b { color: #00e5ff; font-weight: 700; margin-right: 6px; }
+  .chip-servicio.fallando { border-color: rgba(239,68,68,.5); }
+  .chip-servicio.fallando b { color: #ef4444; }
+
+  /* auto-fill y no un numero fijo de columnas: cuantos agentes hay lo decide
+     cada empresa, y el ancho disponible cambia con el menu lateral. */
+  .rejilla { display: grid; grid-template-columns: repeat(auto-fill, minmax(236px, 1fr)); gap: 14px; align-content: start; }
+
+  .agente {
+    text-align: left; padding: 0; cursor: pointer; overflow: hidden;
+    background: var(--panel); border: 1px solid var(--c); border-radius: 12px;
+    transition: transform .15s, box-shadow .15s;
+    display: flex; flex-direction: column;
+  }
+  .agente:hover { transform: translateY(-2px); box-shadow: 0 0 22px color-mix(in srgb, var(--c) 40%, transparent); }
+
+  .pod { position: relative; height: 128px; overflow: hidden; background: #030a17; }
+  .pod .fondo { position: absolute; left: 50%; top: 52%; width: 235px; transform: translate(-50%, -50%); }
+  .pod .tinte {
+    position: absolute; left: 50%; top: 52%; width: 235px; height: 235px; transform: translate(-50%, -50%);
+    background: var(--c); opacity: .32; mix-blend-mode: color;
+    -webkit-mask-size: 100% 100%; mask-size: 100% 100%;
+  }
+  .pod .cara {
+    position: absolute; left: 50%; top: 46%; transform: translate(-50%, -50%);
+    width: 62px; height: 62px; border-radius: 50%; object-fit: cover;
+    border: 2px solid var(--c); box-shadow: 0 0 16px var(--c);
   }
 
-  /* Un servicio externo con lo que se le pidio hoy. Anclado al borde y nunca
-     sobre una estacion: es contexto, no protagonista. */
-  .servicio {
-    position: absolute; z-index: 2; width: 196px; padding: 7px 10px; border-radius: 9px;
-    background: rgba(4,21,37,.92); border: 1px solid rgba(0,229,255,.3);
-    font-family: ui-monospace, monospace; line-height: 1.45;
+  .ficha { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 3px; }
+  .fila1 { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+  .nombre { font-size: 12.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; line-height: 1.25; }
+  .cargo { font-size: 10.5px; color: var(--texto2); }
+  .haciendo { font-size: 11px; color: var(--c); line-height: 1.35; margin-top: 3px; min-height: 30px; overflow-wrap: anywhere; }
+  .datos { display: flex; gap: 10px; flex-wrap: wrap; font-family: ui-monospace, monospace; font-size: 10.5px; color: var(--texto2); margin-top: 2px; }
+  .datos b { color: var(--texto); }
+  .datos .ambar { color: #f59e0b; }
+
+  .chip {
+    font-family: ui-monospace, monospace; font-size: 8.5px; letter-spacing: .08em; font-weight: 700;
+    padding: 2px 6px; border-radius: 5px; white-space: nowrap; color: var(--c);
+    border: 1px solid var(--c); background: color-mix(in srgb, var(--c) 14%, transparent);
+    display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0;
   }
-  .servicio .t { font-size: 11px; color: #00e5ff; font-weight: 700; letter-spacing: .06em; }
-  .servicio .d { font-size: 10px; color: var(--texto2); }
-  .servicio.fallando { border-color: rgba(239,68,68,.55); }
-  .servicio.fallando .t { color: #ef4444; }
+  .chip i { width: 6px; height: 6px; border-radius: 50%; background: var(--c); display: inline-block; }
+  .chip i.vivo { animation: latir 1.6s infinite; }
+
+  .eventos { flex: 0 0 318px; background: var(--panel); border-left: 1px solid var(--borde); display: flex; flex-direction: column; min-height: 0; }
+  .eventos header { padding: 12px 16px; border-bottom: 1px solid var(--borde); display: flex; justify-content: space-between; align-items: center; font-size: 11.5px; letter-spacing: .12em; text-transform: uppercase; }
+  .eventos .sello { font-family: ui-monospace, monospace; font-size: 10px; color: var(--texto3); letter-spacing: 0; }
+  .eventos .lista { flex: 1; overflow-y: auto; padding: 10px 14px; }
+  .evento { padding: 8px 0 8px 14px; border-left: 1px solid var(--borde); position: relative; }
+  .evento::before { content: ''; position: absolute; left: -4px; top: 13px; width: 7px; height: 7px; border-radius: 50%; background: #06b6d4; }
+  .evento.escalada::before { background: #8b5cf6; }
+  .evento.accion::before { background: #f59e0b; }
+  .evento.herramienta_fallida::before { background: #ef4444; }
+  .evento .h { font-family: ui-monospace, monospace; font-size: 10px; color: var(--texto2); }
+  .evento .q { font-size: 10.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; margin-top: 1px; }
+  .evento .d { font-size: 11px; color: var(--texto2); margin-top: 2px; overflow-wrap: anywhere; }
+  .eventos .vacio { font-size: 11.5px; color: var(--texto3); padding: 8px 0; }
+
+  .telon { position: fixed; inset: 0; background: rgba(2,6,18,.6); backdrop-filter: blur(3px); border: 0; z-index: 40; }
+  .detalle {
+    position: fixed; top: 0; right: 0; height: 100%; width: 440px; z-index: 41;
+    background: #0f172a; color: #e6f1ff; border-left: 1px solid var(--c);
+    box-shadow: -24px 0 56px rgba(0,0,0,.8); display: flex; flex-direction: column; overflow-y: auto;
+  }
+  .detalle header { display: flex; gap: 14px; align-items: center; padding: 18px 16px; border-bottom: 1px solid rgba(0,229,255,.14); position: relative; }
+  .detalle header img { width: 84px; height: 84px; border-radius: 12px; object-fit: cover; border: 2px solid var(--c); }
+  .detalle header h2 { font-size: 18px; margin: 0 0 3px; text-transform: capitalize; }
+  .detalle header p { font-size: 11.5px; color: #8aa2c0; margin: 0 0 8px; }
+  .detalle .cerrar { position: absolute; top: 12px; right: 12px; width: 28px; height: 28px; border-radius: 8px; border: 1px solid rgba(0,229,255,.14); background: #16233a; color: #8aa2c0; cursor: pointer; }
+  .detalle .rejilla-cifras { display: grid; grid-template-columns: repeat(3, 1fr); }
+  .detalle .rejilla-cifras div { padding: 12px 8px; text-align: center; border-right: 1px solid rgba(0,229,255,.1); border-bottom: 1px solid rgba(0,229,255,.1); }
+  .detalle .rejilla-cifras b { display: block; font-family: ui-monospace, monospace; font-size: 17px; }
+  .detalle .rejilla-cifras span { font-size: 8.5px; letter-spacing: .08em; color: #8aa2c0; text-transform: uppercase; }
+  .detalle .rejilla-cifras .rojo b { color: #ef4444; }
+  .detalle .bloque { padding: 14px 16px; border-bottom: 1px solid rgba(0,229,255,.1); }
+  .detalle .bloque h3 { font-family: ui-monospace, monospace; font-size: 10px; letter-spacing: .14em; color: #8aa2c0; text-transform: uppercase; margin: 0 0 8px; }
+  .detalle .bloque p { font-size: 12.5px; line-height: 1.55; margin: 0; color: #cfe0f5; }
+  .detalle .bloque code { font-family: ui-monospace, monospace; font-size: 11.5px; color: var(--c); }
+  .detalle .tz { color: #47607f; }
+  .detalle footer { margin-top: auto; padding: 14px 16px; display: flex; gap: 10px; }
 
   @keyframes latir { 0%, 100% { opacity: 1 } 50% { opacity: .55 } }
-  @keyframes girar { to { transform: rotate(360deg) } }
   @media (prefers-reduced-motion: reduce) { * { animation: none !important } }
 </style>
