@@ -3532,6 +3532,7 @@ def centro_mando():
             "orientado_a": rol.orientado_a,
             "estado": _estado(carga, act),
             "conversaciones": carga.get("conversaciones") or 0,
+            "abiertas_total": carga.get("abiertas_total") or 0,
             "esperando_humano": carga.get("esperando_humano") or 0,
             "recibidas_hoy": carga.get("recibidas_hoy") or 0,
             "llamadas_ventana": act.get("llamadas") or 0,
@@ -3571,6 +3572,7 @@ def centro_mando():
         "ventana_min": datos["ventana_min"],
         "totales": {
             "conversaciones_activas": t.get("conversaciones_activas") or 0,
+            "abiertas_total": t.get("abiertas_total") or 0,
             "esperando_humano": t.get("esperando_humano") or 0,
             "atendidas_hoy": t.get("atendidas_hoy") or 0,
             "herramientas_hoy": t.get("herramientas_hoy") or 0,

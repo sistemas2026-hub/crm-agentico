@@ -4471,6 +4471,14 @@ def panorama_centro_mando(tenant: str, ventana_min: int = 10) -> dict:
     conversacion (mismo criterio que PRD RNF-01 sobre tool_calls, que guarda
     un resumen y nunca el payload).
 
+    'Activa' es abierta Y con movimiento en las ultimas 24 horas, no solo
+    abierta. Medido en produccion el 23/09/2026: 231 conversaciones en estado
+    'abierta' contra 1 sola con actividad ese dia -- una conversacion que
+    nadie cierra se queda abierta para siempre, asi que contar el estado a
+    secas convierte el tablero en un acumulado historico con nombre de
+    "ahora". El total sin acotar viaja igual, como 'abiertas_total', porque
+    sirve para otra pregunta: cuanta cola vieja hay sin cerrar.
+
     'ventana_min' es lo que se considera actividad reciente para decir que un
     agente esta en algo ahora mismo. 10 minutos por defecto: mas corto deja
     en blanco a un agente que espera la respuesta de una herramienta lenta;
@@ -4489,8 +4497,10 @@ def panorama_centro_mando(tenant: str, ventana_min: int = 10) -> dict:
         #    la conversacion, que es justamente el agente que la tiene.
         cur.execute(
             f"""select coalesce(c.rol_efectivo, '(sin rol)') as agente,
-                       count(*) filter (where c.estado = 'abierta')
+                       count(*) filter (where c.estado = 'abierta'
+                                          and c.actualizado_en >= now() - interval '24 hours')
                            as conversaciones,
+                       count(*) filter (where c.estado = 'abierta') as abiertas_total,
                        count(*) filter (where c.estado = 'abierta'
                                           and c.necesita_atencion_humana)
                            as esperando_humano,
@@ -4527,8 +4537,12 @@ def panorama_centro_mando(tenant: str, ventana_min: int = 10) -> dict:
         cur.execute(
             f"""select
                   (select count(*) from asistente.conversations
-                    where organization_id = %s and estado = 'abierta')
+                    where organization_id = %s and estado = 'abierta'
+                      and actualizado_en >= now() - interval '24 hours')
                     as conversaciones_activas,
+                  (select count(*) from asistente.conversations
+                    where organization_id = %s and estado = 'abierta')
+                    as abiertas_total,
                   (select count(*) from asistente.conversations
                     where organization_id = %s and estado = 'abierta'
                       and necesita_atencion_humana) as esperando_humano,
@@ -4546,7 +4560,7 @@ def panorama_centro_mando(tenant: str, ventana_min: int = 10) -> dict:
                   (select count(*) from asistente.tool_calls
                     where organization_id = %s and not exito
                       and creado_en >= {dia_bogota}) as fallos_hoy""",
-            (org, org, org, org, org, org))
+            (org, org, org, org, org, org, org))
         totales = dict(cur.fetchone())
 
         # 4) Ticker: ultimas herramientas ejecutadas. Sin parametros -- ahi

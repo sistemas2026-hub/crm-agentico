@@ -98,7 +98,7 @@
      le toca a cada uno sobre el anillo. Con seis caben holgados; un tenant
      con diez los tendria encimados si el ancho fuera fijo. */
   const anchoEstacion = $derived(Math.max(
-    170, Math.min(330, (Math.PI * (RX + RY) / Math.max(agentes.length, 1)) * 0.82)));
+    150, Math.min(300, (Math.PI * (RX + RY) / Math.max(agentes.length, 1)) * 0.66)));
 
 
   /** Reparte los agentes en un anillo: dos, seis u once caben igual. */
@@ -188,9 +188,10 @@
     <!-- franja de cifras -->
     <div class="cifras">
       {#each [
-        ['Conversaciones activas', totales.conversaciones_activas, ''],
+        ['Activas (24 h)', totales.conversaciones_activas, ''],
         ['Agentes con trabajo', totales.agentes_activos, ''],
         ['Conversaciones hoy', totales.atendidas_hoy, ''],
+        ['Abiertas sin cerrar', totales.abiertas_total, ''],
         ['Herramienta promedio', ms(totales.duracion_media_ms), ''],
         ['Herramientas hoy', totales.herramientas_hoy, ''],
         ['Esperan a una persona', totales.esperando_humano, 'ambar'],
@@ -222,7 +223,7 @@
             <div class="anillo"></div>
             <div class="rot">EN CURSO AHORA</div>
             <div class="n">{totales.conversaciones_activas ?? 0}</div>
-            <div class="sub">conversaciones</div>
+            <div class="sub">activas (24 h)</div>
             {#if totales.esperando_humano}
               <div class="humano">{totales.esperando_humano} esperan a una persona</div>
             {/if}
@@ -246,7 +247,7 @@
               <img src={avatarDe(a)} alt="" class:trabaja={a.estado === 'procesando'} />
             </button>
 
-            <div class="placa" style="--c:{colorDe(a)}; left:{p.x}px; top:{p.y + anchoEstacion * 0.30}px">
+            <div class="placa" style="--c:{colorDe(a)}; width:{Math.max(168, anchoEstacion * 0.78)}px; left:{p.x}px; top:{p.y + anchoEstacion * 0.26}px">
               <div class="fila1">
                 <span class="nombre">{a.nombre.replaceAll('_', ' ')}</span>
                 <span class="chip"><i class:vivo={a.estado === 'procesando'}></i>{ROTULO[a.estado] || a.estado}</span>
@@ -298,7 +299,8 @@
       </header>
 
       <div class="rejilla">
-        <div><b>{seleccionado.conversaciones}</b><span>Conversaciones abiertas</span></div>
+        <div><b>{seleccionado.conversaciones}</b><span>Activas (24 h)</span></div>
+        <div><b>{seleccionado.abiertas_total}</b><span>Abiertas sin cerrar</span></div>
         <div><b>{seleccionado.esperando_humano}</b><span>Esperan a una persona</span></div>
         <div><b>{seleccionado.recibidas_hoy}</b><span>Recibidas hoy</span></div>
         <div><b>{seleccionado.llamadas_ventana}</b><span>Herramientas ({panorama.ventana_min} min)</span></div>
@@ -336,12 +338,19 @@
   .sala {
     --fondo: #050b18; --panel: #0f172a; --borde: rgba(0,229,255,.14);
     --texto: #e6f1ff; --texto2: #8aa2c0; --texto3: #47607f;
-    background: radial-gradient(ellipse at 50% 0%, rgba(0,229,255,.10), var(--fondo) 62%);
+    /* El color va aparte del degradado a proposito: el degradado arranca casi
+       transparente y, sin un fondo opaco debajo, en el CRM (que es claro) se
+       veia la pagina blanca a traves del centro de la sala. */
+    background-color: var(--fondo);
+    background-image: radial-gradient(ellipse at 50% 0%, rgba(0,229,255,.16), transparent 62%);
     color: var(--texto);
     border: 1px solid var(--borde); border-radius: 14px; overflow: hidden;
     display: flex; flex-direction: column; height: calc(100vh - 190px); min-height: 560px;
   }
-  .cifras { display: grid; grid-template-columns: repeat(7, 1fr); border-bottom: 1px solid var(--borde); }
+  /* auto-fit y no un numero fijo de columnas: son ocho cifras y el ancho
+     disponible depende del menu lateral. Con un numero fijo, la ultima se
+     caia a una segunda fila y quedaba fuera del marco de la sala. */
+  .cifras { display: grid; grid-template-columns: repeat(auto-fit, minmax(146px, 1fr)); border-bottom: 1px solid var(--borde); }
   .cifra { padding: 12px 16px; border-right: 1px solid var(--borde); }
   .cifra:last-child { border-right: 0; }
   .cifra .v { font-family: ui-monospace, monospace; font-size: 22px; font-weight: 700; line-height: 1; }
@@ -374,7 +383,7 @@
   .agente:hover img { box-shadow: 0 0 30px var(--c); }
 
   .placa {
-    position: absolute; transform: translateX(-50%); width: 236px; z-index: 3;
+    position: absolute; transform: translateX(-50%); z-index: 3;
     background: rgba(15,23,42,.95); border: 1px solid var(--c); border-radius: 10px;
     padding: 8px 10px; backdrop-filter: blur(6px);
   }
