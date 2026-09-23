@@ -1041,6 +1041,22 @@ def _sin_tildes(texto: str) -> str:
     return salida
 
 
+def _derivo_en_este_turno(config, rol: str, llamadas) -> bool:
+    """Se llamo una herramienta que deriva, EN ESTE TURNO.
+
+    No es lo mismo que "ya no pide identidad": una respuesta que deja de
+    nombrar la cedula sin derivar tampoco resolvio nada, y contarla como
+    derivacion vuelve inutil la medicion que justifica esta guarda.
+    """
+    cfg_rol = (getattr(config, "roles", None) or {}).get(rol)
+    if cfg_rol is None:
+        return False
+    catalogo = {h.nombre: h for h in getattr(config, "herramientas", []) or []}
+    derivadoras = {n for n in (getattr(cfg_rol, "puede_consultar", None) or [])
+                   if n in catalogo and getattr(catalogo[n], "deriva_rol", None)}
+    return any((l or {}).get("herramienta") in derivadoras for l in (llamadas or []))
+
+
 def debe_reencauzar_a_derivacion(config, rol: str, respuesta: str, llamadas) -> bool:
     """
     Este turno pidio un dato de identidad SIN poder verificarlo ni haber
@@ -1705,18 +1721,40 @@ def _atender_turno(config, tenant: str, rol: str, id_sesion: str,
             # exactamente como esta conversacion se quedo ocho horas pidiendo
             # lo mismo.
             _quitar_respuesta_de_memoria(estado["historial"], antes_del_modelo)
+            # EL AVISO VA AL HISTORIAL, NO POR 'nota_continuidad'.
+            #
+            # Ese parametro se inyecta UNICAMENTE dentro de 'if not historial'
+            # (nucleo/modelo/motor.py): existe para la amnesia por reinicio, y
+            # el comentario de mas arriba en este mismo archivo ya lo decia.
+            # Con historial --o sea, siempre que haya un turno previo, que es
+            # el caso que motivo esta guarda-- la nota se descartaba en
+            # silencio y el reintento corria con el MISMO payload que la
+            # primera vuelta. Eso convertia la guarda en un turno de modelo
+            # regalado: la leccion del 09/09/2026 al reves.
+            posicion_aviso = len(estado["historial"])
+            estado["historial"].append({"role": "system",
+                                        "content": INSTRUCCION_REENCAUZAR})
             respuesta, registro_herramientas, medios_pendientes = motor.responder(
                 config, rol, mensaje, estado["historial"], estado["sesion"],
-                nota_continuidad=INSTRUCCION_REENCAUZAR,
                 origen=f"{origen_del_turno}:reencauzado")
-            # 'derivo' se mide por lo que corrio EN ESTE TURNO, no por
-            # 'sesion.rol_siguiente': el motor lo deja puesto a proposito
-            # entre turnos (motor.py, "NO se limpia aca"), asi que una
-            # derivacion vieja diria que si.
+            # Era para ESTA vuelta. Si se queda, los turnos siguientes leen
+            # "en tu respuesta anterior le pediste un dato de identidad"
+            # cuando ya no es cierto.
+            if (posicion_aviso < len(estado["historial"])
+                    and estado["historial"][posicion_aviso].get("content")
+                    == INSTRUCCION_REENCAUZAR):
+                estado["historial"].pop(posicion_aviso)
+            # 'derivo' se mide por la herramienta que corrio EN ESTE TURNO.
+            # Ni por 'sesion.rol_siguiente' --el motor lo deja puesto entre
+            # turnos a proposito (motor.py, "NO se limpia aca"), asi que una
+            # derivacion vieja diria que si-- ni por la ausencia del sintoma:
+            # una respuesta que deja de nombrar la cedula sin derivar tampoco
+            # resolvio nada, y contarla como exito arruina la unica medicion
+            # que puede decir si esta guarda sirve.
             registrar("router", "resultado del reencauzamiento",
                       rol=rol, herramientas_usadas=len(registro_herramientas or []),
-                      derivo=not debe_reencauzar_a_derivacion(
-                          config, rol, respuesta, registro_herramientas))
+                      derivo=_derivo_en_este_turno(config, rol,
+                                                   registro_herramientas))
 
     # --- D24, punto 1: el control no cambio mientras el modelo pensaba ------
     # Si cambio (una persona intervino, se cerro, otra version), la respuesta

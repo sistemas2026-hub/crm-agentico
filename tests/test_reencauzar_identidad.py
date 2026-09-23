@@ -167,10 +167,19 @@ YA_DERIVO = "Listo, un momento."
 vueltas = []
 
 
+def _aviso_en(historial):
+    """Como lo ve el modelo de verdad: el aviso es un mensaje del historial,
+    no un parametro. Antes esto se miraba en 'nota_continuidad' y por eso la
+    prueba no notaba que el aviso nunca llegaba."""
+    return any(api.INSTRUCCION_REENCAUZAR in (m.get("content") or "")
+               for m in (historial or []))
+
+
 def _modelo(config, rol, mensaje, historial, sesion,
             nota_continuidad=None, origen=None):
-    vueltas.append({"nota": nota_continuidad, "origen": origen})
-    if nota_continuidad is None:
+    visto = _aviso_en(historial)
+    vueltas.append({"nota": nota_continuidad, "origen": origen, "aviso": visto})
+    if not visto:
         return (PIDE_CEDULA, [], [])                              # 1a: el bug
     return (YA_DERIVO, [{"herramienta": "derivar_a_area"}], [])   # 2a: derivo
 
@@ -234,8 +243,13 @@ afirmar("DNI" not in dicho and "documento" not in dicho.lower(),
         "EL PEDIDO DE CEDULA NO LE LLEGA AL CLIENTE -- que es el efecto, y "
         "lo unico que el cliente nota")
 afirmar(dicho == YA_DERIVO, "le llega la respuesta de la vuelta que SI derivo")
-afirmar(vueltas and vueltas[-1]["nota"] == api.INSTRUCCION_REENCAUZAR,
-        "la segunda vuelta recibe el aviso interno, no otro mensaje del cliente")
+afirmar(vueltas and vueltas[-1]["aviso"] is True,
+        "LA SEGUNDA VUELTA VE EL AVISO EN SU HISTORIAL -- no que se lo pasen "
+        "por parametro, que es lo que esta prueba afirmaba mientras el aviso "
+        "no llegaba a ningun lado")
+afirmar(vueltas and vueltas[-1]["nota"] is None,
+        "y ya no se usa 'nota_continuidad', que solo se inyecta con el "
+        "historial vacio (ver la tercera parte)")
 afirmar(len(vueltas) == 2
         and vueltas[1]["origen"] == f"{vueltas[0]['origen']}:reencauzado",
         "las dos vueltas comparten el origen, con sufijo: sin esto quedan sin "
@@ -248,7 +262,8 @@ api._sesiones.clear()
 
 def _reincide(config, rol, mensaje, historial, sesion,
               nota_continuidad=None, origen=None):
-    vueltas.append({"nota": nota_continuidad, "origen": origen})
+    vueltas.append({"nota": nota_continuidad, "origen": origen,
+                    "aviso": _aviso_en(historial)})
     return (PIDE_CEDULA, [], [])
 
 
@@ -257,6 +272,110 @@ afirmar(len(vueltas) == 2, "UNA sola vez, aunque la segunda tampoco derive")
 afirmar(otra == PIDE_CEDULA,
         "y se manda lo que haya: el cliente esperando no tiene la culpa de "
         "que el modelo insista")
+
+
+
+# ===========================================================================
+# TERCERA PARTE: EL AVISO LLEGA AL MODELO, O SOLO SE PASA?
+# ===========================================================================
+#
+# La segunda parte sustituye motor.responder, asi que podia afirmar que el
+# aviso se PASABA -- y eso no es lo mismo que llegue. La diferencia no es
+# teorica: durante un dia entero NO llegaba.
+#
+# 'nota_continuidad' se inyecta UNICAMENTE dentro de 'if not historial'
+# (nucleo/modelo/motor.py). Ese parametro existe para la amnesia por reinicio,
+# y este mismo archivo de codigo ya lo decia en un comentario
+# (nucleo/canales/api.py, donde se consume 'nota_pendiente'). Con cualquier
+# turno previo en memoria --o sea, el caso real: 27 mensajes en 12 horas-- la
+# nota se descartaba en silencio y el reintento corria con el MISMO payload
+# que la primera vuelta. La guarda gastaba un turno de modelo y no aportaba
+# nada.
+#
+# Se mide donde se puede ver: capturando lo que recibe cliente.chat.
+from nucleo.modelo import motor as _motor, cliente as _cli  # noqa: E402
+
+_PIDE = "Necesito tu nombre y el DNI del titular."
+_sistemas = []
+
+
+class _Resp:
+    def __init__(self, c):
+        self.contenido, self.llamadas, self.uso, self.modelo = c, [], {}, "falso"
+
+
+def _chat_falso(modelo, mensajes, **kw):
+    _sistemas.append(" ".join(m.get("content") or "" for m in mensajes
+                              if m.get("role") == "system"))
+    return _Resp(_PIDE)
+
+
+def _llega(historial, **kw):
+    """Corre el bucle del agente y dice si el aviso aparecio en el payload."""
+    _sistemas.clear()
+    chat, rag = _cli.chat, _motor.recuperar
+    _cli.chat = _chat_falso
+    _motor.recuperar = lambda *a, **k: ([], None)      # sin red
+    try:
+        _motor.responder(REAL, "cliente_final", "quiero dar de baja",
+                         historial, None, **kw)
+    except Exception:
+        pass                                            # el corte no importa
+    finally:
+        _cli.chat, _motor.recuperar = chat, rag
+    return any(api.INSTRUCCION_REENCAUZAR[:60] in s for s in _sistemas)
+
+
+_PREVIOS = [{"role": "system", "content": "instruccion vieja"},
+            {"role": "user", "content": "hola"},
+            {"role": "assistant", "content": _PIDE}]
+
+print("\n--- el canal viejo: por que no servia ---")
+afirmar(_llega([], nota_continuidad=api.INSTRUCCION_REENCAUZAR),
+        "con el historial VACIO 'nota_continuidad' si llega (para eso existe: "
+        "la amnesia por reinicio)")
+afirmar(not _llega(list(_PREVIOS), nota_continuidad=api.INSTRUCCION_REENCAUZAR),
+        "pero con UN turno previo NO llega -- y ese es el caso que motivo la "
+        "guarda. Si esta afirmacion se pone roja, alguien arreglo motor.py y "
+        "este rodeo ya no hace falta")
+
+print("\n--- el canal que se usa ahora ---")
+afirmar(_llega(list(_PREVIOS) + [{"role": "system",
+                                  "content": api.INSTRUCCION_REENCAUZAR}]),
+        "puesto en el historial, el aviso SI llega al modelo con historial "
+        "no vacio")
+
+print("\n--- y no se queda para los turnos siguientes ---")
+_h = list(_PREVIOS)
+_pos = len(_h)
+_h.append({"role": "system", "content": api.INSTRUCCION_REENCAUZAR})
+_h.append({"role": "assistant", "content": "ya derivo"})
+if _h[_pos].get("content") == api.INSTRUCCION_REENCAUZAR:
+    _h.pop(_pos)
+afirmar(not any(api.INSTRUCCION_REENCAUZAR in (m.get("content") or "")
+                for m in _h),
+        "se saca despues de la vuelta: si se queda, el turno siguiente lee "
+        "'en tu respuesta anterior le pediste un dato de identidad' cuando ya "
+        "no es cierto")
+afirmar(any(m.get("content") == "ya derivo" for m in _h),
+        "y sacarlo no se lleva puesta la respuesta del turno")
+
+print("\n--- el log dice 'derivo' solo si derivo ---")
+# Antes se calculaba como "la guarda ya no dispararia", que es ausencia del
+# sintoma: una respuesta que deja de nombrar la cedula sin derivar contaba
+# como exito, y esa es justo la medicion que tiene que decir si la guarda
+# sirve. Sin esto, el log se felicita solo.
+afirmar(api._derivo_en_este_turno(REAL, "cliente_final",
+                                  [{"herramienta": "derivar_a_area"}]),
+        "derivo de verdad -> True")
+afirmar(not api._derivo_en_este_turno(REAL, "cliente_final", []),
+        "no llamo nada -> False, aunque la respuesta ya no pida la cedula")
+afirmar(not api._derivo_en_este_turno(REAL, "cliente_final",
+                                      [{"herramienta": "consultar_mi_servicio"}]),
+        "otra herramienta no es derivar")
+afirmar(not api._derivo_en_este_turno(REAL, "rol_que_no_existe",
+                                      [{"herramienta": "derivar_a_area"}]),
+        "rol desconocido no afirma nada")
 
 print()
 if FALLOS:
