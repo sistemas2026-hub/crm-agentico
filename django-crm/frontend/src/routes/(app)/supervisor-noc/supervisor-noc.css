@@ -631,3 +631,141 @@
   .snoc-lista-datos > div { grid-template-columns: 1fr; }
   .snoc-pie-acciones .snoc-campo { width: 100%; }
 }
+
+/* ==========================================================================
+   EL TABLERO
+   Los bloques que el diseño de Stitch pide: seis KPI, cuatro gráficos y tres
+   paneles abajo. Todo con el mismo sistema de color de arriba -- el diseño
+   trae azules propios, pero mezclar dos paletas en una pantalla se nota más
+   que respetar una al pie de la letra.
+   ========================================================================== */
+
+@media (min-width: 640px) { .snoc-rejilla-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 768px) { .snoc-rejilla-6 { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (min-width: 1024px) {
+  .snoc-rejilla-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .snoc-rejilla-6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+}
+
+/* --- La tarjeta de KPI --- */
+.snoc-kpi {
+  position: relative; overflow: hidden;
+  background: var(--snoc-surface-container-lowest);
+  border: 1px solid var(--snoc-outline-variant);
+  border-radius: var(--snoc-r-xl); padding: var(--snoc-md);
+  display: flex; flex-direction: column; gap: 2px;
+}
+.snoc-kpi-n { font-size: 1.75rem; line-height: 1.1; font-weight: 700; letter-spacing: -0.02em; }
+.snoc-kpi-titulo { font-size: 0.8125rem; font-weight: 600; }
+.snoc-kpi-sub { font-size: 0.6875rem; color: var(--snoc-on-surface-variant); }
+.snoc-kpi-icono {
+  position: absolute; top: var(--snoc-md); right: var(--snoc-md);
+  width: 26px; height: 26px; border-radius: var(--snoc-r-lg);
+  display: grid; place-items: center;
+}
+.snoc-tono-critico .snoc-kpi-n { color: var(--snoc-error); }
+.snoc-tono-critico .snoc-kpi-icono { background: var(--snoc-error-container); color: var(--snoc-on-error-container); }
+.snoc-tono-alerta .snoc-kpi-n { color: #8a5300; }
+.snoc-tono-alerta .snoc-kpi-icono { background: #ffe0b2; color: #6b4000; }
+.snoc-tono-info .snoc-kpi-n { color: var(--snoc-primary); }
+.snoc-tono-info .snoc-kpi-icono { background: var(--snoc-primary-fixed); color: var(--snoc-primary); }
+.snoc-tono-teal .snoc-kpi-n { color: #00696d; }
+.snoc-tono-teal .snoc-kpi-icono { background: #9cf1f0; color: #004f51; }
+.snoc-tono-ok .snoc-kpi-n { color: #1b6b2f; }
+.snoc-tono-neutro .snoc-kpi-n { color: var(--snoc-on-surface-variant); }
+.snoc-tono-neutro .snoc-kpi-icono { background: var(--snoc-surface-container-high); color: var(--snoc-on-surface-variant); }
+
+/* --- La tarjeta de un gráfico --- */
+.snoc-grafico {
+  background: var(--snoc-surface-container-lowest);
+  border: 1px solid var(--snoc-outline-variant);
+  border-radius: var(--snoc-r-xl); padding: var(--snoc-md);
+  display: flex; flex-direction: column; gap: var(--snoc-sm); min-width: 0;
+}
+.snoc-grafico-titulo {
+  display: flex; align-items: center; gap: var(--snoc-xs);
+  font-size: 0.8125rem; font-weight: 600; margin: 0;
+}
+.snoc-grafico-cuerpo { display: flex; align-items: center; gap: var(--snoc-md); min-height: 122px; }
+
+/* --- El donut --- */
+.snoc-donut { flex-shrink: 0; transform: rotate(-90deg); }
+.snoc-donut-centro { position: relative; width: 110px; height: 110px; flex-shrink: 0; }
+.snoc-donut-cifra {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  font-size: 1.25rem; font-weight: 700; line-height: 1;
+}
+.snoc-leyenda { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+.snoc-leyenda-fila {
+  display: flex; align-items: center; gap: var(--snoc-xs);
+  font-size: 0.6875rem; min-width: 0;
+}
+.snoc-leyenda-punto { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+.snoc-leyenda-txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.snoc-leyenda-n { font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* --- Las barras --- */
+.snoc-barras {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: var(--snoc-sm); height: 122px;
+}
+.snoc-barra-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 0; }
+.snoc-barra {
+  width: 100%; max-width: 34px; border-radius: 3px 3px 0 0;
+  background: var(--snoc-primary); min-height: 2px;
+}
+.snoc-barra-n { font-size: 0.6875rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.snoc-barra-txt {
+  font-size: 0.5625rem; color: var(--snoc-on-surface-variant);
+  text-align: center; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; max-width: 100%;
+}
+
+/* --- Una fila de órdenes de trabajo --- */
+.snoc-fila-orden {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: var(--snoc-sm) 0; border-bottom: 1px solid var(--snoc-outline-variant);
+  font-size: 0.75rem;
+}
+.snoc-fila-orden:last-child { border-bottom: 0; }
+.snoc-fila-orden-n { font-size: 1rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* --- La carga de un técnico --- */
+.snoc-tecnico { display: flex; flex-direction: column; gap: 3px; padding: var(--snoc-sm) 0; }
+.snoc-tecnico + .snoc-tecnico { border-top: 1px solid var(--snoc-outline-variant); }
+.snoc-tecnico-cabeza {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--snoc-xs); font-size: 0.75rem;
+}
+.snoc-tecnico-nombre { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.snoc-riel { height: 5px; border-radius: 3px; background: var(--snoc-surface-container-high); overflow: hidden; }
+.snoc-riel-relleno { height: 100%; border-radius: 3px; background: var(--snoc-primary); }
+.snoc-riel-critico { background: var(--snoc-error); }
+.snoc-riel-alerta { background: #c77800; }
+.snoc-riel-ok { background: #2e7d32; }
+.snoc-riel-neutro { background: var(--snoc-outline); }
+
+/* --- Un bloque que el backend no puede llenar ---
+   No es un estado vacío: es un hueco declarado, con su motivo a la vista.
+   Sin el motivo, un recuadro en blanco se lee como "no hay nada que mostrar",
+   que es justo lo que no sabemos. */
+.snoc-hueco {
+  flex: 1; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: var(--snoc-xs); text-align: center;
+  padding: var(--snoc-md); min-height: 122px;
+  border: 1px dashed var(--snoc-outline-variant); border-radius: var(--snoc-r-lg);
+  background: var(--snoc-surface-container-low);
+}
+.snoc-hueco-rotulo {
+  font-size: 0.625rem; font-weight: 700; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--snoc-on-surface-variant);
+}
+.snoc-hueco-motivo {
+  font-size: 0.6875rem; color: var(--snoc-on-surface-variant);
+  max-width: 34ch; line-height: 1.5; margin: 0;
+}
+
+/* Una columna que el diseño pide y el backend no entrega. La cabecera lo
+   dice; la celda queda con una raya, no con un valor inventado. */
+.snoc-col-ausente { color: var(--snoc-outline); font-weight: 400; }
+.snoc-celda-ausente { color: var(--snoc-outline); }

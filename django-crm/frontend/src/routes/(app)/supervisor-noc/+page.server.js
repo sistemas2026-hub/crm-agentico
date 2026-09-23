@@ -10,6 +10,7 @@ import {
   resumenOperativo,
   traducirError
 } from '$lib/server/v2/supervisor-noc.js';
+import { leerCapacidad } from '$lib/server/v2/programacion-noc.js';
 
 /**
  * POR QUE ESTA RUTA VIVE EN (app)
@@ -55,10 +56,16 @@ export async function load({ cookies, locals, url }) {
   // conjunto completo (corta en 200 y hoy hay 92), asi que pedirle una
   // consulta por cada pildora seria una vuelta al servidor para reordenar
   // datos que ya estan en pantalla.
-  const [indicadores, todas, autonomia] = await Promise.all([
+  // La capacidad EXIGE un dia (el backend responde 400 sin el), asi que el
+  // tablero abre con hoy. Es una lectura mas, no una pantalla nueva: el
+  // bloque de tecnicos necesita quien trabaja hoy y cuanto tiene encima.
+  const hoy = new Date().toISOString().slice(0, 10);
+
+  const [indicadores, todas, autonomia, capacidad] = await Promise.all([
     leerIndicadores({ cookies }, dias ?? undefined),
     listarPropuestas({ cookies }),
-    leerAutonomia()
+    leerAutonomia(),
+    leerCapacidad({ cookies }, hoy)
   ]);
 
   return {
@@ -70,7 +77,9 @@ export async function load({ cookies, locals, url }) {
     errorIndicadores: indicadores.error,
     resumen: resumenOperativo(indicadores.datos),
     hallazgos: todas,
-    autonomia
+    autonomia,
+    dia: hoy,
+    capacidad
   };
 }
 
