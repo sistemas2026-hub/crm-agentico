@@ -20,6 +20,11 @@ urlpatterns = [
     #  politica de correccion todavia no esta definida (ver DisponibilidadView).
     path("disponibilidad/", views.DisponibilidadView.as_view(),
          name="disponibilidad"),
+    #  Los planes semanales de la organizacion. GET y solo GET: existe porque
+    #  'campo/trabajos/<pk>/programar/' pide un 'programacion_semanal_id' que
+    #  hasta ahora no se podia averiguar por la API.
+    path("programacion/", views.ProgramacionesView.as_view(),
+         name="programaciones"),
     #  M03-C. Publicar un plan semanal: borrador -> publicada, y nada mas.
     #  No ejecuta la programacion ni toca ninguna orden.
     #  M03-E2. Lectura de la jornada, en orden reproducible. Es un GET: no

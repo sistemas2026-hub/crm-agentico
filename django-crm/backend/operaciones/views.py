@@ -73,10 +73,12 @@ from operaciones.serializers import (ActividadOperativaSerializer,
     LineaJornadaSerializer,
     SecuenciaSerializer,
     SecuenciarJornadaSerializer,
+    ProgramacionSemanalSerializer,
     PropuestaDetalleSerializer,
     PropuestaListaSerializer,
     RevisionSerializer,
 )
+from operaciones.programacion import ESTADOS_DE_PLAN_QUE_ADMITEN_LINEAS
 
 
 class PropuestasView(APIView):
@@ -379,6 +381,74 @@ class DisponibilidadView(APIView):
                          "definición."),
              "pendiente": "POLITICA DE CORRECCION"},
             status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+
+class ProgramacionesView(APIView):
+    """
+    ================================================================================
+     LOS PLANES SEMANALES DE LA ORGANIZACION  --  solo lectura
+    ================================================================================
+
+        GET /api/operaciones/programacion/
+
+    QUE BRECHA CIERRA
+    -----------------
+    'POST /api/campo/trabajos/<pk>/programar/' exige 'programacion_semanal_id',
+    y hasta hoy no habia forma de AVERIGUAR ese id por la API: la pantalla solo
+    podia pedirle al usuario que escribiera un UUID a mano. Esto lo lista.
+
+    NO PROGRAMA NADA
+    ----------------
+    Es un GET y solo un GET. No crea planes, no los publica, no los cierra, no
+    agrega lineas y no toca ninguna orden. La unica escritura del dominio sigue
+    viviendo en 'programar_orden' y en 'publicar_programacion'.
+
+    LAS DOS REGLAS SE LEEN DE DONDE VIVEN, NO SE COPIAN
+    ---------------------------------------------------
+    Un plan 'cerrado' no admite ordenes nuevas -- eso ya lo decide
+    'ESTADOS_DE_PLAN_QUE_ADMITEN_LINEAS' en operaciones/programacion.py, y es
+    la MISMA constante que usa el servicio al programar. Aca solo se expone
+    ('admite_lineas' del serializer) y se ofrece como filtro opcional. No hay
+    un segundo criterio que pueda quedar desincronizado con el primero.
+
+    LA ORGANIZACION NO SE ELIGE
+    ---------------------------
+    Sale de 'request.org', que el middleware saca del JWT firmado. No se lee
+    ningun 'organization_id' ni 'org' de la querystring: un parametro que no se
+    consulta no se puede usar para cruzar empresas. Mismo criterio que
+    DisponibilidadView y que ProgramarSerializer, que directamente no declara
+    el campo.
+    ================================================================================
+    """
+
+    permission_classes = [EsJefeDeOperaciones]
+
+    def get(self, request):
+        #  El filtro por organizacion va SIEMPRE y no depende de la RLS: hoy el
+        #  runtime conecta con un rol que la atraviesa (ver B-7), asi que esta
+        #  linea es la que de verdad aisla.
+        qs = ProgramacionSemanal.objects.filter(org=request.org)
+
+        #  Filtros OPCIONALES. Un 'estado' que no existe en el catalogo no se
+        #  traduce ni se corrige: devuelve vacio, que es la respuesta honesta a
+        #  "planes en un estado que ninguno tiene".
+        estado = request.query_params.get("estado")
+        if estado:
+            qs = qs.filter(estado=estado)
+        if request.query_params.get("admite_lineas") in ("1", "true", "si"):
+            qs = qs.filter(estado__in=ESTADOS_DE_PLAN_QUE_ADMITEN_LINEAS)
+
+        #  El mismo orden que ya declara el modelo ('ordering = [-semana_inicio]'),
+        #  con 'id' de desempate para que dos lecturas iguales devuelvan la misma
+        #  lista. La restriccion unique(org, semana_inicio) hace que dentro de una
+        #  organizacion no pueda haber empate real: el segundo criterio es una
+        #  garantia, no una conducta que se vea todos los dias.
+        qs = qs.order_by("-semana_inicio", "id")
+
+        return Response({
+            "count": qs.count(),
+            "resultados": ProgramacionSemanalSerializer(qs[:500], many=True).data,
+        })
 
 
 class PublicarProgramacionView(APIView):
