@@ -337,3 +337,85 @@ export async function cambiarSecuencia({ cookies }, lineaId, cuerpo) {
     { cookies }
   );
 }
+
+/**
+ * Los planes semanales de la organizacion.
+ *
+ * Cierra la brecha que el propio backend describe: 'programar/' exige un
+ * 'programacion_semanal_id' que hasta ahora no habia forma de averiguar por la
+ * API, y la pantalla solo podia pedirle a una persona que escribiera un UUID.
+ *
+ * `soloConLineas` usa el filtro del backend, no uno propio: quien decide que
+ * estado admite ordenes nuevas es
+ * 'programacion.py::ESTADOS_DE_PLAN_QUE_ADMITEN_LINEAS', la MISMA constante
+ * que aplica el servicio al programar. Filtrar aca por una lista copiada seria
+ * un segundo criterio que se desincroniza del primero.
+ *
+ * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
+ * @param {boolean} [soloConLineas]
+ */
+export async function listarPlanes({ cookies }, soloConLineas = true) {
+  const query = soloConLineas ? '?admite_lineas=1' : '';
+  try {
+    const d = await apiRequest(`/operaciones/programacion/${query}`, {}, { cookies });
+    return { count: d?.count ?? 0, planes: d?.resultados ?? [], error: null };
+  } catch (/** @type {any} */ err) {
+    // El 404 merece su propio texto: significa que ESTE entorno todavia no
+    // tiene la ruta, no que la empresa no tenga planes. Confundir las dos
+    // cosas manda a buscar el problema al lado equivocado.
+    if (err?.status === 404) {
+      return {
+        count: null,
+        planes: [],
+        error: {
+          codigo: 'RUTA_AUSENTE',
+          status: 404,
+          mensaje:
+            'El listado de planes semanales todavía no está disponible en este entorno. ' +
+            'No es que no haya planes: la ruta no responde.'
+        }
+      };
+    }
+    return { count: null, planes: [], error: traducirError(err, 'los planes semanales') };
+  }
+}
+
+/**
+ * Programa una orden dentro de un plan.
+ *
+ * El 'programacion_semanal_id' sale del plan que la persona eligio de la lista
+ * real; 'programada_para' de la fecha que escribio. Las reglas siguen siendo
+ * del backend: que el plan admita lineas, que la fecha caiga en su semana y
+ * que una adicion a un plan ya publicado exija causa las valida
+ * 'programar_orden', no esta capa.
+ *
+ * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
+ * @param {string} ordenId
+ * @param {{ programacion_semanal_id: string, programada_para: string, causa?: string, motivo?: string, zona?: string }} cuerpo
+ */
+export async function programarOrden({ cookies }, ordenId, cuerpo) {
+  return apiRequest(
+    `/campo/trabajos/${ordenId}/programar/`,
+    { method: 'POST', body: cuerpo },
+    { cookies }
+  );
+}
+
+/**
+ * Los planes en cuya semana cae `dia`.
+ *
+ * NO ES UNA REGLA NUEVA. 'programar_orden' exige que la linea caiga entre
+ * 'semana_inicio' y 'semana_fin', y el serializer expone 'semana_fin'
+ * justamente "para que la pantalla no ofrezca una opcion que el servicio va a
+ * rechazar despues". Esto es leer esos dos campos, no inventar un criterio.
+ *
+ * @param {any[]} planes
+ * @param {string} dia  YYYY-MM-DD
+ */
+export function planesQueCubren(planes, dia) {
+  if (!dia) return planes;
+  return planes.filter((p) => {
+    if (!p?.semana_inicio || !p?.semana_fin) return true; // sin dato, no se descarta
+    return p.semana_inicio <= dia && dia <= p.semana_fin;
+  });
+}

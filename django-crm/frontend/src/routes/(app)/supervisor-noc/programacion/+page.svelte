@@ -26,6 +26,14 @@
   let fMotivo = $state('');
   let fSecuencia = $state('');
 
+  // Programar una OT sin plan. Los planes se piden al abrir el dialogo, no en
+  // cada carga de la pagina: es una accion que casi nunca se usa.
+  let modalProgramar = $state(/** @type {any} */ (null));
+  let planes = $state(/** @type {any[]} */ ([]));
+  let cargandoPlanes = $state(false);
+  let errorPlanes = $state(/** @type {string|null} */ (null));
+  let fPlan = $state('');
+
   // Los filtros son de CLIENTE: la jornada ya vino entera para ese dia.
   let fEstado = $state('');
   let fZona = $state('');
@@ -137,6 +145,60 @@
     errorFicha = null;
   }
 
+  /**
+   * Abre el dialogo de programar y pide los planes que admiten lineas.
+   *
+   * `propuesta` es una recomendacion del Supervisor con señal
+   * 'orden_sin_programar': su 'origen_id' ES la orden. No se inventa otra
+   * fuente -- el Supervisor ya detecta cuales estan sin programar, y la
+   * jornada no puede traerlas porque solo devuelve las que YA estan en un
+   * plan.
+   *
+   * @param {any} propuesta
+   */
+  async function pedirProgramar(propuesta) {
+    modalProgramar = propuesta;
+    fCuando = `${data.dia}T08:00`;
+    fCausa = '';
+    fMotivo = '';
+    fPlan = '';
+    planes = [];
+    errorPlanes = null;
+    cargandoPlanes = true;
+    try {
+      const r = await fetch('/api/supervisor-noc/planes');
+      const cuerpo = await r.json().catch(() => ({}));
+      if (!r.ok) errorPlanes = cuerpo?.error ?? 'No fue posible consultar los planes.';
+      else planes = cuerpo?.planes ?? [];
+    } catch {
+      errorPlanes = 'No fue posible consultar los planes: el servicio no respondió.';
+    } finally {
+      cargandoPlanes = false;
+    }
+  }
+
+  /**
+   * Los planes cuya semana cubre el dia elegido.
+   *
+   * No es una regla nueva: 'programar_orden' exige que la linea caiga entre
+   * 'semana_inicio' y 'semana_fin', y el backend expone 'semana_fin' justo
+   * para que la pantalla no ofrezca lo que el servicio va a rechazar.
+   */
+  const planesCompatibles = $derived.by(() => {
+    const dia = (fCuando || '').slice(0, 10);
+    if (!dia) return planes;
+    return planes.filter(
+      (/** @type {any} */ p) =>
+        !p.semana_inicio || !p.semana_fin || (p.semana_inicio <= dia && dia <= p.semana_fin)
+    );
+  });
+
+  const semana = (/** @type {any} */ p) => {
+    const f = (/** @type {string} */ d) =>
+      new Date(`${d}T00:00`).toLocaleDateString('es-CO', { day: '2-digit', month: 'short' });
+    return `${f(p.semana_inicio)} – ${f(p.semana_fin)}`;
+  };
+
   /** Abre la confirmacion de reprogramar, con la fecha actual de la linea. */
   function pedirReprogramar(/** @type {any} */ linea) {
     fCuando = linea.programada_para ? String(linea.programada_para).slice(0, 16) : '';
@@ -167,6 +229,7 @@
       modalReprogramar = null;
       modalSecuencia = null;
       modalAnalizar = false;
+      modalProgramar = null;
       await update({ reset: false });
       await invalidateAll();
       // La ficha abierta quedo vieja: lo que muestra acaba de cambiar.
@@ -555,7 +618,15 @@
                     <p class="snoc-body-sm" style="margin:var(--snoc-xs) 0;">{p.accion_propuesta}</p>
                     <div class="snoc-fila-sep">
                       <span class="snoc-mono-sm snoc-tenue">{p.origen_tipo}</span>
-                      <a class="snoc-pildora" href="/supervisor-noc">Revisar</a>
+                      <div class="snoc-envuelve" style="justify-content:flex-end;">
+                        {#if p.tipo_senal === 'orden_sin_programar' && p.estado === 'propuesta'}
+                          <button class="snoc-btn snoc-btn-primario" type="button" onclick={() => pedirProgramar(p)}>
+                            <span class="snoc-icono" style="font-size:14px;">event_available</span>
+                            Programar
+                          </button>
+                        {/if}
+                        <a class="snoc-pildora" href="/supervisor-noc">Revisar</a>
+                      </div>
                     </div>
                   </div>
                 {/each}
@@ -949,6 +1020,116 @@
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  {/if}
+
+  <!-- ============ PROGRAMAR UNA OT SIN PLAN ============ -->
+  {#if modalProgramar}
+    <div
+      class="snoc-velo"
+      role="presentation"
+      onclick={(e) => {
+        if (e.target === e.currentTarget && !trabajando) modalProgramar = null;
+      }}
+    >
+      <div class="snoc-modal" role="dialog" aria-modal="true" aria-labelledby="snoc-prog-titulo">
+        <div class="snoc-fila snoc-primario">
+          <span class="snoc-icono" style="font-size:28px;">event_available</span>
+          <h4 class="snoc-h3" id="snoc-prog-titulo">¿Programar esta orden?</h4>
+        </div>
+        <p class="snoc-body snoc-secundario" style="margin:0;">
+          {modalProgramar.accion_propuesta}
+        </p>
+
+        {#if cargandoPlanes}
+          <div class="snoc-cargando">
+            <span class="snoc-icono snoc-girando" style="font-size:22px;">progress_activity</span>
+            <span class="snoc-body snoc-secundario">Consultando planes semanales…</span>
+          </div>
+        {:else if errorPlanes}
+          <div class="snoc-aviso">
+            <span class="snoc-icono snoc-error-txt" style="font-size:18px;">error</span>
+            <span class="snoc-body">{errorPlanes}</span>
+          </div>
+          <div class="snoc-fila" style="justify-content:flex-end;">
+            <button class="snoc-btn" type="button" onclick={() => (modalProgramar = null)}>Cerrar</button>
+          </div>
+        {:else if planes.length === 0}
+          <div class="snoc-aviso">
+            <span class="snoc-icono snoc-tenue" style="font-size:18px;">info</span>
+            <span class="snoc-body">No hay planes disponibles para programar esta orden.</span>
+          </div>
+          <span class="snoc-mono-sm snoc-tenue">
+            Un plan cerrado no admite órdenes nuevas. Hace falta un plan en borrador o publicado.
+          </span>
+          <div class="snoc-fila" style="justify-content:flex-end;">
+            <button class="snoc-btn" type="button" onclick={() => (modalProgramar = null)}>Cerrar</button>
+          </div>
+        {:else}
+          <form method="POST" action="?/programar" use:enhance={alTrabajar}>
+            <input type="hidden" name="orden" value={modalProgramar.origen_id} />
+            <div class="snoc-pila-xs">
+              <label class="snoc-label-sm snoc-secundario" for="p-cuando">Fecha y hora</label>
+              <input
+                id="p-cuando"
+                class="snoc-campo"
+                type="datetime-local"
+                name="programada_para"
+                bind:value={fCuando}
+                required
+              />
+
+              <label class="snoc-label-sm snoc-secundario" for="p-plan">Plan semanal</label>
+              {#if planesCompatibles.length === 0}
+                <div class="snoc-aviso">
+                  <span class="snoc-icono snoc-error-txt" style="font-size:18px;">warning</span>
+                  <span class="snoc-body">
+                    Ningún plan cubre esa fecha. Una orden tiene que caer dentro de la semana de su plan.
+                  </span>
+                </div>
+              {:else}
+                <select id="p-plan" class="snoc-campo" name="plan" bind:value={fPlan} required>
+                  <option value="" disabled>Elegí un plan…</option>
+                  {#each planesCompatibles as p (p.id)}
+                    <option value={p.id}>
+                      Semana {semana(p)} · {p.estado_display ?? p.estado}{p.admite_lineas ? ' · admite órdenes' : ''}
+                    </option>
+                  {/each}
+                </select>
+                <span class="snoc-mono-sm snoc-tenue">
+                  {planesCompatibles.length} de {planes.length} plan(es) cubren esa fecha.
+                </span>
+              {/if}
+
+              <label class="snoc-label-sm snoc-secundario" for="p-causa">Causa</label>
+              <select id="p-causa" class="snoc-campo" name="causa" bind:value={fCausa}>
+                <option value="">Sin causa (solo para planes en borrador)</option>
+                {#each data.causas as c (c.valor)}<option value={c.valor}>{c.texto}</option>{/each}
+              </select>
+              <span class="snoc-mono-sm snoc-tenue">
+                Agregar una orden a un plan <strong>ya publicado</strong> es una adición formal y el backend exige
+                causa. Sobre un borrador es opcional.
+              </span>
+
+              <label class="snoc-label-sm snoc-secundario" for="p-motivo">Motivo (opcional)</label>
+              <input id="p-motivo" class="snoc-campo" name="motivo" bind:value={fMotivo} maxlength="255" />
+            </div>
+
+            <div class="snoc-fila" style="justify-content:flex-end; padding-top:var(--snoc-md);">
+              <button class="snoc-btn" type="button" onclick={() => (modalProgramar = null)} disabled={trabajando}>
+                Cancelar
+              </button>
+              <button
+                class="snoc-btn snoc-btn-primario"
+                type="submit"
+                disabled={trabajando || !fPlan || planesCompatibles.length === 0}
+              >
+                {trabajando ? 'Programando…' : 'Confirmar programación'}
+              </button>
+            </div>
+          </form>
+        {/if}
       </div>
     </div>
   {/if}

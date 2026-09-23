@@ -12,6 +12,7 @@ import {
   publicarProgramacion,
   reprogramarOrden,
   cambiarSecuencia,
+  programarOrden,
   resumenProgramacion,
   SENALES_PROGRAMACION,
   CAUSAS
@@ -140,6 +141,48 @@ export const actions = {
       return { ok: true, tipo: 'publicar', resultado: r };
     } catch (/** @type {any} */ err) {
       return fail(err?.status ?? 502, { error: 'No fue posible publicar el plan.' });
+    }
+  },
+
+
+  /**
+   * Programa una orden dentro de un plan elegido de la lista real.
+   *
+   * Las reglas siguen siendo del backend: que el plan admita lineas, que la
+   * fecha caiga en su semana y que una adicion a un plan ya publicado exija
+   * causa las valida 'programar_orden'. Aca solo se comprueba que los dos
+   * campos obligatorios vengan, para no gastar un viaje.
+   */
+  async programar({ cookies, locals, request }) {
+    if (!ROLES_GESTION.has(/** @type {any} */ (locals).profile?.role)) {
+      return fail(403, { error: 'Solo el Jefe de Operaciones puede programar una orden.' });
+    }
+    const datos = await request.formData();
+    const orden = String(datos.get('orden') ?? '');
+    const plan = String(datos.get('plan') ?? '');
+    const cuando = String(datos.get('programada_para') ?? '');
+    const causa = String(datos.get('causa') ?? '');
+    const motivo = String(datos.get('motivo') ?? '');
+
+    if (!orden) return fail(400, { error: 'Falta la orden a programar.' });
+    if (!plan) return fail(400, { error: 'Elegí un plan semanal.' });
+    if (!cuando) return fail(400, { error: 'Falta la fecha y hora.' });
+
+    try {
+      const r = await programarOrden({ cookies }, orden, {
+        programacion_semanal_id: plan,
+        programada_para: cuando,
+        causa,
+        motivo
+      });
+      return { ok: true, tipo: 'programar', orden, resultado: r };
+    } catch (/** @type {any} */ err) {
+      // El backend es la autoridad: si rechaza por su propia regla -- plan
+      // cerrado, fecha fuera de la semana, causa faltante en un plan
+      // publicado -- ese texto es mas util que uno generico nuestro.
+      const detalle = err?.body?.detalle ?? err?.body?.error ?? null;
+      const e = traducirError(err, 'la programación');
+      return fail(e.status ?? 502, { error: detalle ? String(detalle) : e.mensaje });
     }
   },
 

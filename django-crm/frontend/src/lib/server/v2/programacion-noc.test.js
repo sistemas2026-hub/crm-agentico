@@ -15,7 +15,10 @@ const {
   leerCargaPersona,
   reprogramarOrden,
   cambiarSecuencia,
-  CAUSAS
+  CAUSAS,
+  listarPlanes,
+  programarOrden,
+  planesQueCubren
 } = await import('$lib/server/v2/programacion-noc.js');
 
 const event = /** @type {any} */ ({ cookies: { get: () => 'token' } });
@@ -272,5 +275,122 @@ describe('acciones nuevas sobre M03', () => {
     for (const prohibido of ['wisphub', 'smartolt', 'despach', 'ejecucion_autonoma']) {
       expect(rutas.some((r) => r.toLowerCase().includes(prohibido))).toBe(false);
     }
+  });
+});
+
+describe('planes semanales', () => {
+  const plan = (/** @type {any} */ x) => ({
+    id: 'p1',
+    semana_inicio: '2026-09-21',
+    semana_fin: '2026-09-27',
+    estado: 'borrador',
+    estado_display: 'Borrador',
+    admite_lineas: true,
+    ...x
+  });
+
+  it('1. carga los planes y usa el filtro del backend, no uno propio', async () => {
+    apiRequest.mockResolvedValue({ count: 2, resultados: [plan({}), plan({ id: 'p2' })] });
+
+    const r = await listarPlanes(event);
+
+    expect(apiRequest.mock.calls[0][0]).toBe('/operaciones/programacion/?admite_lineas=1');
+    expect(r.planes).toHaveLength(2);
+    expect(r.error).toBeNull();
+  });
+
+  it('puede pedirlos todos cuando se lo piden explicitamente', async () => {
+    apiRequest.mockResolvedValue({ count: 0, resultados: [] });
+
+    await listarPlanes(event, false);
+
+    expect(apiRequest.mock.calls[0][0]).toBe('/operaciones/programacion/');
+  });
+
+  it('2. filtra por la semana que cubre el dia, con los campos del backend', () => {
+    const dentro = plan({ id: 'dentro' });
+    const fuera = plan({ id: 'fuera', semana_inicio: '2026-09-28', semana_fin: '2026-10-04' });
+
+    const r = planesQueCubren([dentro, fuera], '2026-09-23');
+
+    expect(r.map((p) => p.id)).toEqual(['dentro']);
+  });
+
+  it('un plan sin semana declarada no se descarta en silencio', () => {
+    const raro = { id: 'raro', estado: 'borrador' };
+
+    expect(planesQueCubren([raro], '2026-09-23').map((p) => p.id)).toEqual(['raro']);
+  });
+
+  it('5. lista vacia: count 0 y sin error -- no hay planes es un dato, no una falla', async () => {
+    apiRequest.mockResolvedValue({ count: 0, resultados: [] });
+
+    const r = await listarPlanes(event);
+
+    expect(r.count).toBe(0);
+    expect(r.planes).toEqual([]);
+    expect(r.error).toBeNull();
+  });
+
+  it('6. un 404 dice que falta la RUTA, no que falten planes', async () => {
+    // La distincion importa: "no hay planes" manda a crear uno; "la ruta no
+    // responde" manda a mirar el despliegue.
+    apiRequest.mockImplementationOnce(() => Promise.reject(http(404)));
+
+    const r = await listarPlanes(event);
+
+    expect(r.error?.codigo).toBe('RUTA_AUSENTE');
+    expect(r.error?.mensaje).toContain('no está disponible en este entorno');
+    expect(r.count).toBeNull();
+  });
+
+  it('6b. otros errores se traducen sin exponer el crudo', async () => {
+    apiRequest.mockImplementationOnce(() => Promise.reject(http(500)));
+
+    const r = await listarPlanes(event);
+
+    expect(r.error?.codigo).toBe('ERROR_SERVIDOR');
+    expect(r.count).toBeNull();
+  });
+
+  it('4. programar manda el plan elegido como programacion_semanal_id', async () => {
+    apiRequest.mockResolvedValue({});
+
+    await programarOrden(event, 'orden-9', {
+      programacion_semanal_id: 'p1',
+      programada_para: '2026-09-23T08:00',
+      causa: 'reprogramacion',
+      motivo: ''
+    });
+
+    const [ruta, opciones] = apiRequest.mock.calls[0];
+    expect(ruta).toBe('/campo/trabajos/orden-9/programar/');
+    expect(opciones.method).toBe('POST');
+    expect(opciones.body.programacion_semanal_id).toBe('p1');
+    expect(opciones.body.programada_para).toBe('2026-09-23T08:00');
+  });
+
+  it('programar no manda campos que el serializer no declara', async () => {
+    apiRequest.mockResolvedValue({});
+
+    await programarOrden(event, 'orden-9', {
+      programacion_semanal_id: 'p1',
+      programada_para: '2026-09-23T08:00'
+    });
+
+    const cuerpo = apiRequest.mock.calls[0][1].body;
+    // 'org' sale de la sesion: un 'organization_id' en el cuerpo no tiene
+    // donde aterrizar, y el backend directamente no lo declara.
+    for (const prohibido of ['org', 'organization_id', 'estado']) {
+      expect(cuerpo).not.toHaveProperty(prohibido);
+    }
+  });
+
+  it('listar planes no ejecuta ninguna escritura', async () => {
+    apiRequest.mockResolvedValue({ count: 0, resultados: [] });
+
+    await listarPlanes(event);
+
+    expect(apiRequest.mock.calls[0][1]).toEqual({});
   });
 });
